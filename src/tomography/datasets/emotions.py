@@ -105,9 +105,9 @@ def parse_emotion_replies(replies: Sequence[str]) -> list[Example]:
         replies: The reply texts in file order.
 
     Returns:
-        One example per non-empty reply with the uid "emotion-reply-<position
-        in the source list>" and label -1, because a reply carries no emotion
-        of its own.
+        One example per distinct non-empty reply, keeping the first copy,
+        with the uid "emotion-reply-<position in the source list>" and label
+        -1, because a reply carries no emotion of its own.
     """
     rows = _distinct_texts(replies)
     uids = [f"emotion-reply-{position}" for position, _ in rows]
