@@ -6,6 +6,7 @@ concept is present.
 """
 
 from collections.abc import Sequence
+import math
 from typing import Any
 
 from matplotlib.axes import Axes
@@ -46,7 +47,7 @@ def _measure(ax: Axes, text: str) -> float:
 
 
 def _tick_rows(n_layers: int) -> list[int]:
-    step = -(-n_layers // MAX_LAYER_TICKS)
+    step = math.ceil(n_layers / MAX_LAYER_TICKS)
     rows = list(range(0, n_layers, step))
     if rows[-1] != n_layers - 1:
         if 2 * (n_layers - 1 - rows[-1]) >= step:
