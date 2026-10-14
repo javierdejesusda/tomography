@@ -578,14 +578,19 @@ class PromptDifference:
 
         Raises:
             ValueError: If `layers` is empty or outside 0..L, or the prompts
-                have identical token ids.
+                have identical token ids over the first `min(len_pos,
+                len_neg)` positions (equal, or one a token prefix of the
+                other), so the difference would be zero.
         """
         wanted = _check_layers(loaded, layers)
         batch = loaded.encode([positive, negative], bos=bos)
-        rows = batch.input_ids.tolist()
-        if batch.lengths[0] == batch.lengths[1] and rows[0] == rows[1]:
-            raise ValueError("the prompts have identical token ids")
         k = min(batch.lengths)
+        rows = batch.input_ids.tolist()
+        if rows[0][:k] == rows[1][:k]:
+            raise ValueError(
+                f"the prompts have identical token ids over their first {k}"
+                " positions, so the difference is zero"
+            )
         with torch.inference_mode(), capture_residuals(loaded, wanted) as seen:
             loaded.decoder(
                 input_ids=batch.input_ids.to(loaded.device),

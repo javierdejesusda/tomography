@@ -925,6 +925,22 @@ def test_from_prompts_keeps_the_position_zero_difference_without_bos(
     assert diff.vectors[2][0].abs().max() > 0
 
 
+def test_from_prompts_rejects_a_prompt_that_is_a_token_prefix_of_the_other(
+    tiny_arch: LoadedModel,
+) -> None:
+    longer = DIFF_NEGATIVE + " and more"
+    short_ids, long_ids = tiny_arch.tokenizer(
+        [DIFF_NEGATIVE, longer], add_special_tokens=False
+    )["input_ids"]
+    assert len(long_ids) > len(short_ids)
+    assert long_ids[: len(short_ids)] == short_ids
+
+    with pytest.raises(ValueError, match="identical"):
+        PromptDifference.from_prompts(
+            tiny_arch, DIFF_NEGATIVE, longer, [1], coeff=1.0
+        )
+
+
 @pytest.mark.parametrize(
     ("positive", "layers"),
     [
