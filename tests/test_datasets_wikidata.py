@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import re
 import urllib.request
 
 import pytest
@@ -236,6 +237,12 @@ def test_award_winners_query_names_each_award_and_the_year_qualifier() -> None:
     assert "pq:P585" in query
 
 
+def test_award_winners_query_falls_back_to_the_mul_label() -> None:
+    query = wikidata.award_winners_query(("Q38104",))
+
+    assert 'wikibase:language "[AUTO_LANGUAGE],mul,en"' in query
+
+
 def test_award_winners_query_rejects_anything_but_an_item_id() -> None:
     with pytest.raises(ValueError, match="DROP"):
         wikidata.award_winners_query(("Q1 } DROP",))
@@ -395,6 +402,12 @@ def test_famous_people_query_asks_for_the_top_dead_laureates() -> None:
     assert "wikibase:timePrecision 11" in query
     assert "ORDER BY DESC(?links)" in query
     assert query.rstrip().endswith("LIMIT 50")
+
+
+def test_famous_people_query_falls_back_to_the_mul_label() -> None:
+    query = wikidata.famous_people_query(("Q38104",), limit=5)
+
+    assert 'wikibase:language "[AUTO_LANGUAGE],mul,en"' in query
 
 
 def test_famous_people_query_rejects_anything_but_item_ids_and_counts() -> None:
@@ -613,3 +626,32 @@ def test_network_famous_people_appear_once_per_row(tmp_path: Path) -> None:
 
     people = {row["person"] for row in result.rows}
     assert len(people) == len(result.rows)
+
+
+@pytest.mark.network
+def test_network_famous_people_include_labelled_marie_curie(
+    tmp_path: Path,
+) -> None:
+    query = wikidata.famous_people_query(wikidata.AWARDS, limit=100)
+
+    result = wikidata.run_query(query, cache=tmp_path)
+
+    labels = [row["personLabel"] for row in result.rows]
+    assert not [label for label in labels if re.fullmatch(r"Q\d+", label)]
+    assert "Marie Curie" in labels
+
+
+@pytest.mark.network
+def test_network_physics_laureates_include_englert_in_2013(
+    tmp_path: Path,
+) -> None:
+    query = wikidata.award_winners_query(("Q38104",))
+
+    result = wikidata.run_query(query, cache=tmp_path)
+
+    labels = [row["personLabel"] for row in result.rows]
+    assert not [label for label in labels if re.fullmatch(r"Q\d+", label)]
+    winners_2013 = [
+        r["personLabel"] for r in result.rows if r["year"] == "2013"
+    ]
+    assert any("Englert" in label for label in winners_2013)

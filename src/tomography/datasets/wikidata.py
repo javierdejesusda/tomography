@@ -39,6 +39,10 @@ _TIMEOUT_SECONDS = 90
 _ITEM_ID = re.compile(r"Q\d+")
 _BODY = "result.json"
 _RECORD = "record.json"
+_LABEL_SERVICE = (
+    "  SERVICE wikibase:label { bd:serviceParam wikibase:language "
+    '"[AUTO_LANGUAGE],mul,en". }'
+)
 
 QueryFetch = Callable[[str], bytes]
 
@@ -120,6 +124,7 @@ def sparql_fetch(query: str) -> bytes:
     Raises:
         urllib.error.URLError: If the service cannot be reached, answers with
             an error, or times out.
+        TimeoutError: If reading the response times out.
     """
     url = ENDPOINT + "?" + urllib.parse.urlencode({"query": query})
     request = urllib.request.Request(
@@ -240,7 +245,7 @@ def award_winners_query(awards: Sequence[str]) -> str:
         "  ?person p:P166 ?statement .",
         "  ?statement ps:P166 ?prize ; pq:P585 ?date .",
         "  BIND(YEAR(?date) AS ?year)",
-        '  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }',
+        _LABEL_SERVICE,
         "}",
     ]
     return "\n".join(lines) + "\n"
@@ -361,9 +366,11 @@ def parse_award_winners(
 def famous_people_query(awards: Sequence[str], *, limit: int) -> str:
     """Builds the query for the most widely documented dead laureates.
 
-    Fame is the number of Wikipedia editions of a person's item; the pool is
-    the people who won one of `awards`, because a query over every human
-    with a sitelink count times out on the public service.
+    Fame is the sitelink count of a person's item (`wikibase:sitelinks`),
+    which covers every Wikimedia site (Wikipedia editions, Commons,
+    Wikisource and so on), not only Wikipedia. The pool is the people who
+    won one of `awards`, because a query over every human with a sitelink
+    count times out on the public service.
 
     Args:
         awards: Wikidata item ids of the awards, such as "Q38104".
@@ -395,7 +402,7 @@ def famous_people_query(awards: Sequence[str], *, limit: int) -> str:
         "  ?deathStatement psv:P570 ?deathValue .",
         "  ?deathValue wikibase:timeValue ?death ;",
         "              wikibase:timePrecision 11 .",
-        '  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }',
+        _LABEL_SERVICE,
         "}",
         "ORDER BY DESC(?links) ?person",
         f"LIMIT {limit}",
@@ -486,6 +493,8 @@ def parse_unknowable_detail(
 
     Returns:
         One "unknowable_detail" item per person, ordered by item id number.
+        Its `meta["popularity"]` is the item's sitelink count, not on the
+        scale of PopQA's `s_pop`.
     """
     first_row: dict[int, Mapping[str, str]] = {}
     for row in sorted(result.rows, key=lambda r: (r["birth"], r["death"])):
