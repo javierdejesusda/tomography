@@ -8,22 +8,68 @@ fitted reader and two baselines through this module, and writes them in the
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
 
 from tomography.activations import Activations
+from tomography.activations import PositionStrategy
+from tomography.activations import collect_activations
 from tomography.datasets.stimulus import StimulusSet
+from tomography.experiments.base import ExperimentConfig
+from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.model import BosMode
+from tomography.model import LoadedModel
 from tomography.reading.directions import Method
 from tomography.reading.directions import Preprocess
+from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.metrics import parse_groups
 from tomography.reading.reader import RepReader
+from tomography.templates import ChatFormat
+from tomography.viz.reading import curves_from_arrays
+from tomography.viz.reading import plot_curves
+from tomography.viz.style import save_figure
+from tomography.viz.style import style_context
 
 SERIES: tuple[str, str, str] = ("reader", "random", "shuffled")
 
 Prepared = tuple[StimulusSet, Activations]
+
+
+@dataclass(frozen=True, kw_only=True)
+class ReadingConfig(ExperimentConfig):
+    """Fields shared by the reading experiments R1 to R7.
+
+    Attributes:
+        n_seeds: Number of training sets (seeds).
+        n_pairs: Training pairs (groups) per seed.
+        n_eval_pairs: Evaluation groups; None means every group the
+            evaluation split allows.
+        method: Direction finder.
+        preprocess: Vector preparation.
+        position: Token positions read on the training sets.
+        eval_position: Token positions read on the evaluation sets; None
+            means `position`.
+        layers: Layer indices; None means 1..L.
+        bos: BOS policy; None uses the model's default.
+        batch_size: Texts per forward pass.
+    """
+
+    n_seeds: int = 10
+    n_pairs: int = 64
+    n_eval_pairs: int | None = None
+    method: Method = "pca_diff"
+    preprocess: Preprocess = "center"
+    position: PositionStrategy = "last"
+    eval_position: PositionStrategy | None = None
+    layers: tuple[int, ...] | None = None
+    bos: BosMode | None = None
+    batch_size: int = 8
 
 
 @dataclass(frozen=True, eq=False)
@@ -188,3 +234,227 @@ def _fit(
         preprocess=preprocess,
         seed=seed,
     )
+
+
+def chat_format_for(loaded: LoadedModel) -> ChatFormat:
+    """Returns the chat format a model's prompts are rendered with.
+
+    Args:
+        loaded: The wrapped model.
+
+    Returns:
+        The tokenizer's chat template iff the checkpoint is post-trained,
+        else the plain `USER:` and `ASSISTANT:` format.
+    """
+    if loaded.checkpoint is not None and loaded.checkpoint.chat_format == (
+        "template"
+    ):
+        return ChatFormat.from_tokenizer(loaded.tokenizer)
+    return ChatFormat("plain")
+
+
+def stimulus_activations(
+    loaded: LoadedModel,
+    stimuli: StimulusSet,
+    *,
+    layers: Sequence[int] | None,
+    position: PositionStrategy,
+    bos: BosMode | None = None,
+    batch_size: int = 8,
+) -> Activations:
+    """Collects the activations of a stimulus set.
+
+    Args:
+        loaded: The wrapped model.
+        stimuli: The stimuli, with the spans the position needs.
+        layers: Layer indices in 0..L; None means all of them.
+        position: Which token positions to read.
+        bos: BOS policy; None uses the model's default.
+        batch_size: Texts per forward pass.
+
+    Returns:
+        The activations, one row per read token position.
+    """
+    return collect_activations(
+        loaded,
+        stimuli.texts,
+        layers=layers,
+        position=position,
+        response_spans=stimuli.response_spans,
+        concept_spans=stimuli.concept_spans,
+        bos=bos,
+        batch_size=batch_size,
+    )
+
+
+def reading_sweep(
+    loaded: LoadedModel,
+    train_sets: Sequence[StimulusSet],
+    eval_sets: Mapping[str, StimulusSet],
+    *,
+    method: Method = "pca_diff",
+    preprocess: Preprocess = "center",
+    position: PositionStrategy = "last",
+    eval_position: PositionStrategy | None = None,
+    layers: Sequence[int] | None = None,
+    seed: int = 0,
+    bos: BosMode | None = None,
+    batch_size: int = 8,
+) -> SweepResult:
+    """Collects activations once per set and runs `sweep_from_activations`.
+
+    Args:
+        loaded: The wrapped model.
+        train_sets: One training stimulus set per seed.
+        eval_sets: Named evaluation stimulus sets.
+        method: Direction finder of the `reader` series.
+        preprocess: Vector preparation, see `fit_direction`.
+        position: Token positions read on the training sets.
+        eval_position: Token positions read on the evaluation sets; None
+            means `position`.
+        layers: Layer indices; None means 1..L, because layer 0 is the
+            embedding output, which can carry no signal under `last`.
+        seed: Base seed of the fits and the shuffles.
+        bos: BOS policy; None uses the model's default.
+        batch_size: Texts per forward pass.
+
+    Returns:
+        The accuracy of every evaluation set, series, seed and layer.
+
+    Raises:
+        ValueError: If a set list is empty or an input is invalid.
+    """
+    selected = (
+        tuple(range(1, loaded.n_layers + 1))
+        if layers is None
+        else tuple(layers)
+    )
+
+    def collect(stimuli: StimulusSet, where: PositionStrategy) -> Prepared:
+        act = stimulus_activations(
+            loaded,
+            stimuli,
+            layers=selected,
+            position=where,
+            bos=bos,
+            batch_size=batch_size,
+        )
+        return stimuli, act
+
+    where_eval = position if eval_position is None else eval_position
+    return sweep_from_activations(
+        [collect(stimuli, position) for stimuli in train_sets],
+        {name: collect(s, where_eval) for name, s in eval_sets.items()},
+        method=method,
+        preprocess=preprocess,
+        seed=seed,
+    )
+
+
+def write_curves(
+    run_dir: RunDir,
+    per_seed: NDArray[np.float64],
+    layers: Sequence[int],
+    *,
+    series: Sequence[str],
+    stem: str = "curves",
+    xlabel: str = "Layer",
+    ylabel: str = "Accuracy",
+    chance: float | None = None,
+    n_layers: int | None = None,
+    alpha: float = 0.05,
+    n_boot: int = 2000,
+    seed: int = 0,
+) -> None:
+    """Writes the `curves` arrays and sidecar of one model.
+
+    The arrays hold `x (K,)`, `mean (S, K)`, `lo (S, K)`, `hi (S, K)` and
+    `per_seed (S, N, K)`, with a percentile bootstrap band over the seeds.
+
+    Args:
+        run_dir: The run to write into.
+        per_seed: Values of shape (S, N, K): series, seed, layer.
+        layers: The x value of each of the K layers.
+        series: The name of each series.
+        stem: File stem of the pair (`<stem>.npz` and `<stem>.json`).
+        xlabel: Label of the x axis.
+        ylabel: Label of the y axis.
+        chance: Level of the chance line, or None for no line.
+        n_layers: Depth of the model, for a relative-depth axis.
+        alpha: One minus the coverage of the band.
+        n_boot: Number of bootstrap resamples.
+        seed: Seed of the resampling.
+
+    Raises:
+        ValueError: If `per_seed` is not 3D or `series` or `layers` do not
+            match its shape.
+    """
+    if per_seed.ndim != 3:
+        raise ValueError(
+            f"per_seed must have shape (S, N, K), got {per_seed.shape}"
+        )
+    if len(series) != per_seed.shape[0]:
+        raise ValueError(
+            f"got {len(series)} series names for {per_seed.shape[0]} series"
+        )
+    if len(layers) != per_seed.shape[2]:
+        raise ValueError(
+            f"got {len(layers)} layers for {per_seed.shape[2]} columns"
+        )
+    lo, hi = bootstrap_ci(
+        np.moveaxis(per_seed, 1, 0), alpha=alpha, n_boot=n_boot, seed=seed
+    )
+    run_dir.write_arrays(
+        stem,
+        x=np.asarray(layers, dtype=np.float64),
+        mean=per_seed.mean(axis=1),
+        lo=lo,
+        hi=hi,
+        per_seed=per_seed,
+    )
+    run_dir.write_json(
+        stem,
+        {
+            "series": list(series),
+            "xlabel": xlabel,
+            "ylabel": ylabel,
+            "chance": chance,
+            "n_layers": n_layers,
+        },
+    )
+
+
+def plot_curves_file(
+    run_dir: RunDir,
+    out_dir: Path,
+    *,
+    stem: str = "curves",
+    name: str | None = None,
+) -> list[Path]:
+    """Draws a `curves` file written by `write_curves` and saves it.
+
+    Args:
+        run_dir: The run holding the pair.
+        out_dir: Folder of the figures.
+        stem: File stem of the pair.
+        name: File name of the figures; None means `stem`.
+
+    Returns:
+        The PDF, PNG and SVG paths.
+    """
+    arrays = run_dir.read_arrays(stem)
+    sidecar = cast(dict[str, Any], run_dir.read_json(stem))
+    curves = curves_from_arrays(
+        arrays["x"], arrays["mean"], arrays["lo"], arrays["hi"]
+    )
+    with style_context():
+        fig = plot_curves(
+            curves,
+            series=sidecar["series"],
+            per_seed=list(arrays["per_seed"]),
+            xlabel=sidecar["xlabel"],
+            ylabel=sidecar["ylabel"],
+            chance=sidecar["chance"],
+            n_layers=sidecar["n_layers"],
+        )
+    return save_figure(fig, out_dir, name or stem)

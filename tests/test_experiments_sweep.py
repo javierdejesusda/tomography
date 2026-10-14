@@ -2,17 +2,34 @@
 
 from collections.abc import Mapping
 from collections.abc import Sequence
+import dataclasses
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
 import pytest
 
 from tomography.activations import Activations
+from tomography.activations import collect_activations
+from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
+from tomography.datasets.stimulus import build_stimulus_set
+from tomography.experiments.base import RunDir
 from tomography.experiments.sweep import SERIES
 from tomography.experiments.sweep import Prepared
+from tomography.experiments.sweep import ReadingConfig
+from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.sweep import plot_curves_file
+from tomography.experiments.sweep import reading_sweep
 from tomography.experiments.sweep import shuffle_within_groups
+from tomography.experiments.sweep import stimulus_activations
 from tomography.experiments.sweep import sweep_from_activations
+from tomography.experiments.sweep import write_curves
+from tomography.model import CheckpointSpec
+from tomography.model import LoadedModel
+from tomography.templates import PAPER_TEMPLATES
+from tomography.templates import ChatFormat
 
 DIM = 64
 LAYERS = (1, 2)
@@ -230,3 +247,297 @@ def test_sweep_rejects_mismatching_layers() -> None:
         sweep_from_activations(
             [train[0], _planted(20, seed=4, layers=(1, 3))], evals, seed=0
         )
+
+
+@dataclass(frozen=True, kw_only=True)
+class _Config(ReadingConfig):
+    experiment: str = "t1"
+    model: str = "tiny"
+
+
+def test_reading_config_defaults() -> None:
+    config = _Config()
+    assert config.n_seeds == 10
+    assert config.n_pairs == 64
+    assert config.n_eval_pairs is None
+    assert config.method == "pca_diff"
+    assert config.preprocess == "center"
+    assert config.position == "last"
+    assert config.eval_position is None
+    assert config.layers is None
+    assert config.bos is None
+    assert config.batch_size == 8
+
+
+def test_reading_config_round_trips_through_a_dict() -> None:
+    config = _Config(
+        method="mean_diff",
+        layers=(6, 7, 8),
+        position="concept",
+        bos="none",
+        eval_position="last",
+        n_eval_pairs=32,
+    )
+    assert _Config.from_dict(config.to_dict()) == config
+
+
+def test_reading_config_rejects_a_wrong_type() -> None:
+    data = _Config().to_dict()
+    data["n_seeds"] = "ten"
+    with pytest.raises(ValueError, match="n_seeds"):
+        _Config.from_dict(data)
+
+
+def _examples(split: str, per_class: int = 40) -> list[Example]:
+    positive = ("good", "fine", "great", "nice")
+    negative = ("bad", "poor", "dull", "grim")
+    examples = []
+    for i in range(per_class):
+        for label, words in ((1, positive), (0, negative)):
+            examples.append(
+                Example(
+                    uid=f"{split}-{label}-{i}",
+                    text=f"a {words[i % 4]} movie {words[(i + 1) % 4]} {i}",
+                    label=label,
+                    split="train" if split == "train" else "val",
+                )
+            )
+    return examples
+
+
+def _build(examples: Sequence[Example], n_pairs: int, seed: int) -> StimulusSet:
+    return build_stimulus_set(
+        examples,
+        PAPER_TEMPLATES["concept"],
+        ChatFormat("plain"),
+        pairing="label_contrastive",
+        concept="sentiment",
+        n_pairs=n_pairs,
+        seed=seed,
+    )
+
+
+def _sets(n_train: int = 2) -> tuple[list[StimulusSet], dict[str, StimulusSet]]:
+    train = [_build(_examples("train"), 8, seed=i) for i in range(n_train)]
+    return train, {"val": _build(_examples("val"), 12, seed=7)}
+
+
+def test_chat_format_for_is_plain_without_a_template_checkpoint(
+    tiny_arch: LoadedModel,
+) -> None:
+    assert chat_format_for(tiny_arch) == ChatFormat("plain")
+
+
+def test_chat_format_for_uses_the_tokenizer_template(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sentinel = ChatFormat("none")
+    monkeypatch.setattr(
+        ChatFormat, "from_tokenizer", classmethod(lambda cls, tok: sentinel)
+    )
+    checkpoint = CheckpointSpec(
+        key="tiny",
+        repo_id="x/tiny",
+        revision="0" * 40,
+        arch="gpt2",
+        post_trained=True,
+        license="mit",
+        dtype="float32",
+        chat_format="template",
+    )
+    templated = dataclasses.replace(tiny_arch, checkpoint=checkpoint)
+    assert chat_format_for(templated) is sentinel
+    plain = dataclasses.replace(
+        tiny_arch,
+        checkpoint=dataclasses.replace(checkpoint, chat_format="plain"),
+    )
+    assert chat_format_for(plain) == ChatFormat("plain")
+
+
+def test_stimulus_activations_matches_collect_activations(
+    tiny_arch: LoadedModel,
+) -> None:
+    stimuli = _sets(1)[0][0]
+    got = stimulus_activations(
+        tiny_arch, stimuli, layers=(1, 2), position="concept", batch_size=4
+    )
+    want = collect_activations(
+        tiny_arch,
+        stimuli.texts,
+        layers=(1, 2),
+        position="concept",
+        response_spans=stimuli.response_spans,
+        concept_spans=stimuli.concept_spans,
+        batch_size=4,
+    )
+    assert got.layers == want.layers
+    np.testing.assert_array_equal(got.data, want.data)
+    np.testing.assert_array_equal(got.row_stimulus, want.row_stimulus)
+
+
+def test_reading_sweep_defaults_to_layers_one_to_depth(
+    tiny_arch: LoadedModel,
+) -> None:
+    train, evals = _sets(2)
+    result = reading_sweep(tiny_arch, train, evals, seed=0)
+    assert result.layers == tuple(range(1, tiny_arch.n_layers + 1))
+    assert result.accuracy.shape == (1, 3, 2, tiny_arch.n_layers)
+    assert result.eval_names == ("val",)
+
+
+def test_reading_sweep_honors_explicit_layers(tiny_arch: LoadedModel) -> None:
+    train, evals = _sets(2)
+    result = reading_sweep(tiny_arch, train, evals, layers=(1, 3), seed=0)
+    assert result.layers == (1, 3)
+    assert result.accuracy.shape == (1, 3, 2, 2)
+
+
+def test_reading_sweep_equals_the_hand_prepared_sweep(
+    tiny_arch: LoadedModel,
+) -> None:
+    train, evals = _sets(2)
+    layers = (1, 2, 3)
+    got = reading_sweep(
+        tiny_arch,
+        train,
+        evals,
+        position="last",
+        eval_position="concept",
+        layers=layers,
+        seed=3,
+    )
+    prepared = [
+        (s, stimulus_activations(tiny_arch, s, layers=layers, position="last"))
+        for s in train
+    ]
+    prepared_evals = {
+        name: (
+            s,
+            stimulus_activations(
+                tiny_arch, s, layers=layers, position="concept"
+            ),
+        )
+        for name, s in evals.items()
+    }
+    want = sweep_from_activations(prepared, prepared_evals, seed=3)
+    np.testing.assert_array_equal(got.accuracy, want.accuracy)
+    for a, b in zip(got.readers, want.readers, strict=True):
+        np.testing.assert_array_equal(a.directions, b.directions)
+
+
+def test_reading_sweep_is_deterministic_per_seed(
+    tiny_arch: LoadedModel,
+) -> None:
+    train, evals = _sets(2)
+    first = reading_sweep(tiny_arch, train, evals, seed=1)
+    again = reading_sweep(tiny_arch, train, evals, seed=1)
+    other = reading_sweep(tiny_arch, train, evals, seed=2)
+    np.testing.assert_array_equal(first.accuracy, again.accuracy)
+    assert not np.array_equal(first.accuracy, other.accuracy)
+
+
+def _run_dir(tmp_path: Path) -> RunDir:
+    return RunDir.create(_Config(), out_root=tmp_path)
+
+
+def _per_seed() -> NDArray[np.float64]:
+    rng = np.random.default_rng(0)
+    return np.clip(rng.normal(0.7, 0.05, size=(3, 6, 4)), 0.0, 1.0)
+
+
+def test_write_curves_writes_arrays_and_sidecar(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    per_seed = _per_seed()
+    write_curves(
+        run_dir,
+        per_seed,
+        (1, 2, 3, 4),
+        series=SERIES,
+        chance=0.5,
+        n_layers=4,
+        n_boot=200,
+    )
+    arrays = run_dir.read_arrays("curves")
+    assert set(arrays) == {"x", "mean", "lo", "hi", "per_seed"}
+    np.testing.assert_array_equal(arrays["x"], np.array([1.0, 2.0, 3.0, 4.0]))
+    assert arrays["x"].dtype == np.float64
+    np.testing.assert_allclose(arrays["mean"], per_seed.mean(axis=1))
+    np.testing.assert_array_equal(arrays["per_seed"], per_seed)
+    assert (arrays["lo"] <= arrays["mean"]).all()
+    assert (arrays["mean"] <= arrays["hi"]).all()
+    assert (arrays["lo"] < arrays["hi"]).all()
+    assert run_dir.read_json("curves") == {
+        "series": list(SERIES),
+        "xlabel": "Layer",
+        "ylabel": "Accuracy",
+        "chance": 0.5,
+        "n_layers": 4,
+    }
+
+
+def test_write_curves_uses_the_stem_and_labels(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    write_curves(
+        run_dir,
+        _per_seed(),
+        (1, 2, 3, 4),
+        series=SERIES,
+        stem="other",
+        xlabel="Depth",
+        ylabel="Score",
+        n_boot=50,
+    )
+    sidecar = run_dir.read_json("other")
+    assert isinstance(sidecar, dict)
+    assert sidecar["xlabel"] == "Depth"
+    assert sidecar["ylabel"] == "Score"
+    assert sidecar["chance"] is None
+
+
+@pytest.mark.parametrize(
+    ("per_seed", "layers", "series"),
+    [
+        (np.zeros((6, 4)), (1, 2, 3, 4), SERIES),
+        (np.zeros((3, 6, 4)), (1, 2, 3, 4), SERIES[:2]),
+        (np.zeros((3, 6, 4)), (1, 2, 3), SERIES),
+    ],
+    ids=["not-3d", "series-count", "layer-count"],
+)
+def test_write_curves_validates_shapes(
+    tmp_path: Path,
+    per_seed: NDArray[np.float64],
+    layers: tuple[int, ...],
+    series: Sequence[str],
+) -> None:
+    with pytest.raises(ValueError, match=r"per_seed|series|layers"):
+        write_curves(_run_dir(tmp_path), per_seed, layers, series=series)
+
+
+def test_plot_curves_file_writes_three_formats(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    write_curves(
+        run_dir,
+        _per_seed(),
+        (1, 2, 3, 4),
+        series=SERIES,
+        chance=0.5,
+        n_layers=4,
+        n_boot=50,
+    )
+    out = tmp_path / "figs"
+    paths = plot_curves_file(run_dir, out)
+    assert sorted(p.name for p in paths) == [
+        "curves.pdf",
+        "curves.png",
+        "curves.svg",
+    ]
+    assert all(p.parent == out and p.stat().st_size > 0 for p in paths)
+
+
+def test_plot_curves_file_renames_the_figure(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    write_curves(
+        run_dir, _per_seed(), (1, 2, 3, 4), series=SERIES, stem="c2", n_boot=50
+    )
+    paths = plot_curves_file(run_dir, tmp_path / "figs", stem="c2", name="fig")
+    assert sorted(p.name for p in paths) == ["fig.pdf", "fig.png", "fig.svg"]
