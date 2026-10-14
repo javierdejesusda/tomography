@@ -1,5 +1,7 @@
 """Integration tests on real checkpoints; run with `pytest -m slow`."""
 
+from typing import Literal
+
 import pytest
 import torch
 
@@ -22,9 +24,9 @@ def gpt2() -> LoadedModel:
 
 
 def forward_with_capture(
-    lm: LoadedModel, texts: list[str], padding_side: str
+    lm: LoadedModel, texts: list[str], padding_side: Literal["left", "right"]
 ) -> tuple[dict[int, torch.Tensor], tuple[torch.Tensor, ...]]:
-    encoded = lm.encode(texts, padding_side=padding_side)  # type: ignore[arg-type]
+    encoded = lm.encode(texts, padding_side=padding_side)
     layers = list(range(lm.n_layers + 1))
     with capture_residuals(lm, layers) as captured, torch.inference_mode():
         output = lm.model(

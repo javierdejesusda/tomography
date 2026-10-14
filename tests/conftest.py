@@ -2,7 +2,7 @@
 
 Every model has 3 layers and d_model 32 with random weights from a fixed
 seed, and every tokenizer is a byte-level BPE trained on an inline corpus, so
-the default suite never touches the network. Wave-2 tests reuse these
+the default suite never touches the network. Other test modules reuse these
 fixtures, so their names and shapes are stable.
 """
 
