@@ -16,6 +16,7 @@ from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.datasets.stimulus import build_stimulus_set
 from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.sweep import SERIES
 from tomography.experiments.sweep import Prepared
 from tomography.experiments.sweep import ReadingConfig
@@ -28,6 +29,8 @@ from tomography.experiments.sweep import sweep_from_activations
 from tomography.experiments.sweep import write_curves
 from tomography.model import CheckpointSpec
 from tomography.model import LoadedModel
+from tomography.reading.metrics import group_accuracy
+from tomography.reading.reader import RepReader
 from tomography.templates import PAPER_TEMPLATES
 from tomography.templates import ChatFormat
 
@@ -248,6 +251,43 @@ def test_sweep_shuffled_series_moves_whole_stimuli_not_token_rows() -> None:
     np.testing.assert_allclose(
         shuffled * 25, np.round(shuffled * 25), atol=1e-9
     )
+
+
+def test_sweep_baselines_follow_the_documented_seed_scheme() -> None:
+    train, evals = _inputs(4)
+    seed = 11
+    result = sweep_from_activations(train, evals, seed=seed)
+    for i, (stimuli, act) in enumerate(train):
+        random = RepReader.fit(
+            "random",
+            act.data,
+            act.layers,
+            labels=act.row_values(stimuli.labels),
+            pairs=act.row_groups(stimuli.pairs),
+            groups=act.row_groups(stimuli.groups),
+            seed=derive_seed(seed, "random", i),
+        )
+        for e, name in enumerate(result.eval_names):
+            e_stimuli, e_act = evals[name]
+            groups = e_act.row_groups(e_stimuli.groups)
+            labels = e_act.row_values(e_stimuli.labels)
+            shuffled = e_act.row_values(
+                shuffle_within_groups(
+                    e_stimuli.labels,
+                    e_stimuli.groups,
+                    seed=derive_seed(seed, "shuffled", i, name),
+                )
+            )
+            np.testing.assert_array_equal(
+                result.accuracy[e, SERIES.index("random"), i],
+                group_accuracy(random.score(e_act.data), groups, labels),
+            )
+            np.testing.assert_array_equal(
+                result.accuracy[e, SERIES.index("shuffled"), i],
+                group_accuracy(
+                    result.readers[i].score(e_act.data), groups, shuffled
+                ),
+            )
 
 
 def test_sweep_random_series_is_below_the_reader() -> None:
