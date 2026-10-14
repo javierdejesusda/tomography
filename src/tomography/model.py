@@ -1,11 +1,23 @@
-"""Model registry: architecture specs and pinned checkpoints."""
+"""Model registry, loading and the tokenizer policy shared by all readers."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
+import torch
+from transformers import PreTrainedModel
+from transformers import PreTrainedTokenizerBase
+
 BosMode = Literal["prepend", "none"]
+
+
+class UnknownCheckpointError(ValueError):
+    """Raised when a checkpoint key is not in `MODELS`."""
+
+
+class UnsupportedArchitectureError(ValueError):
+    """Raised when a model's `config.model_type` is not in `ARCHS`."""
 
 
 @dataclass(frozen=True)
@@ -113,3 +125,137 @@ MODELS: Mapping[str, CheckpointSpec] = MappingProxyType(
         )
     }
 )
+
+
+@dataclass(frozen=True)
+class LoadedModel:
+    """A causal LM with its tokenizer and the modules hooks attach to.
+
+    Attributes:
+        model: The `*ForCausalLM` module, in eval mode.
+        tokenizer: A fast tokenizer (character offsets are required).
+        spec: The architecture spec of `model`.
+        checkpoint: The pinned checkpoint, or None for test models.
+        n_layers: Number of decoder blocks (L).
+        d_model: Residual stream width.
+        device: Device holding the weights.
+        dtype: Weight dtype.
+        bos_id: Id prepended by `encode(bos="prepend")`, if any.
+        pad_id: Id used to pad batches.
+        decoder: The base model without the LM head.
+        blocks: The decoder blocks.
+        final_norm: The norm applied after the last block.
+        default_bos: BOS policy used when `encode` gets `bos=None`.
+    """
+
+    model: PreTrainedModel
+    tokenizer: PreTrainedTokenizerBase
+    spec: ArchSpec
+    checkpoint: CheckpointSpec | None
+    n_layers: int
+    d_model: int
+    device: torch.device
+    dtype: torch.dtype
+    bos_id: int | None
+    pad_id: int
+    decoder: torch.nn.Module
+    blocks: torch.nn.ModuleList
+    final_norm: torch.nn.Module
+    default_bos: BosMode
+
+    def unembedding(self) -> torch.Tensor:
+        """Returns the output embedding matrix for the logit lens.
+
+        Returns:
+            A detached `(vocab, d_model)` tensor.
+
+        Raises:
+            ValueError: If the model has no output embedding.
+        """
+        head = self.model.get_output_embeddings()  # type: ignore[no-untyped-call]
+        if head is None:
+            raise ValueError("The model has no output embedding")
+        weight: torch.Tensor = head.weight
+        return weight.detach()
+
+
+def _module_at(root: torch.nn.Module, path: str) -> torch.nn.Module:
+    module = root
+    for name in path.split("."):
+        module = getattr(module, name)
+    return module
+
+
+def _pad_id(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    bos_id: int | None,
+) -> int:
+    candidates = (
+        tokenizer.pad_token_id,
+        model.config.pad_token_id,
+        tokenizer.eos_token_id,
+        bos_id,
+    )
+    for candidate in candidates:
+        if candidate is not None:
+            return int(candidate)
+    raise ValueError("The tokenizer and config define no pad, eos or bos id")
+
+
+def wrap_model(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    *,
+    checkpoint: CheckpointSpec | None = None,
+) -> LoadedModel:
+    """Wraps a causal LM and precomputes the modules hooks need.
+
+    Args:
+        model: A `*ForCausalLM` module of a registered architecture.
+        tokenizer: A fast tokenizer matching `model`.
+        checkpoint: The pinned checkpoint `model` was loaded from, if any.
+
+    Returns:
+        The wrapped model; `model` is put in eval mode.
+
+    Raises:
+        UnsupportedArchitectureError: If `config.model_type` is not in
+            `ARCHS`.
+        ValueError: If the tokenizer is not fast, the block path is not a
+            `ModuleList`, or no pad id can be derived.
+    """
+    model_type = model.config.model_type
+    spec = ARCHS.get(model_type)
+    if spec is None:
+        raise UnsupportedArchitectureError(
+            f"Unsupported architecture {model_type!r}; "
+            f"registered: {sorted(ARCHS)}"
+        )
+    if not tokenizer.is_fast:
+        raise ValueError(
+            "A fast tokenizer is required: encode needs character offsets"
+        )
+    model.eval()  # type: ignore[no-untyped-call]
+    blocks = _module_at(model, spec.blocks_path)
+    if not isinstance(blocks, torch.nn.ModuleList):
+        raise ValueError(f"{spec.blocks_path!r} is not a ModuleList")
+    bos_id = model.config.bos_token_id
+    if bos_id is None:
+        bos_id = tokenizer.bos_token_id
+    return LoadedModel(
+        model=model,
+        tokenizer=tokenizer,
+        spec=spec,
+        checkpoint=checkpoint,
+        n_layers=len(blocks),
+        d_model=model.config.hidden_size,
+        device=model.device,
+        dtype=model.dtype,
+        bos_id=bos_id,
+        pad_id=_pad_id(model, tokenizer, bos_id),
+        decoder=_module_at(model, spec.blocks_path.rpartition(".")[0]),
+        blocks=blocks,
+        final_norm=_module_at(model, spec.final_norm_path),
+        default_bos=spec.default_bos,
+    )

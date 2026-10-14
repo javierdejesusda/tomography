@@ -1,10 +1,17 @@
 import re
+from types import SimpleNamespace
 
 import pytest
+import torch
+from transformers import LlamaConfig
+from transformers import LlamaForCausalLM
 
 from tomography.model import ARCHS
 from tomography.model import MODELS
 from tomography.model import ArchSpec
+from tomography.model import LoadedModel
+from tomography.model import UnsupportedArchitectureError
+from tomography.model import wrap_model
 
 GPT2_PINS = {
     "gpt2": (
@@ -71,3 +78,58 @@ def test_every_checkpoint_is_consistent_with_the_registries() -> None:
             checkpoint.post_trained
         )
         assert checkpoint.license
+
+
+def test_wrap_model_precomputes_the_structural_fields(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    lm = tiny_gpt2
+
+    assert lm.spec is ARCHS["gpt2"]
+    assert lm.checkpoint is None
+    assert (lm.n_layers, lm.d_model) == (3, 32)
+    assert lm.decoder is lm.model.transformer
+    assert lm.blocks is lm.model.transformer.h
+    assert lm.final_norm is lm.model.transformer.ln_f
+    assert lm.device == torch.device("cpu")
+    assert lm.dtype == torch.float32
+    assert lm.default_bos == "prepend"
+    assert not lm.model.training
+
+
+def test_wrap_model_reads_special_token_ids(tiny_gpt2: LoadedModel) -> None:
+    eos_id = tiny_gpt2.tokenizer.eos_token_id
+
+    assert tiny_gpt2.bos_id == eos_id
+    assert tiny_gpt2.pad_id == eos_id
+
+
+def test_unembedding_is_the_vocab_by_d_model_head_matrix(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    unembedding = tiny_gpt2.unembedding()
+
+    assert unembedding.shape == (len(tiny_gpt2.tokenizer), 32)
+    assert torch.equal(unembedding, tiny_gpt2.model.lm_head.weight)
+
+
+def test_wrap_model_rejects_an_unregistered_architecture(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    config = LlamaConfig(
+        vocab_size=64,
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=1,
+        num_attention_heads=4,
+    )
+
+    with pytest.raises(UnsupportedArchitectureError, match="llama"):
+        wrap_model(LlamaForCausalLM(config), tiny_gpt2.tokenizer)
+
+
+def test_wrap_model_requires_a_fast_tokenizer(tiny_gpt2: LoadedModel) -> None:
+    slow = SimpleNamespace(is_fast=False)
+
+    with pytest.raises(ValueError, match="fast tokenizer"):
+        wrap_model(tiny_gpt2.model, slow)  # type: ignore[arg-type]
