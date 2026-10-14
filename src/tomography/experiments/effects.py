@@ -248,8 +248,9 @@ def write_trials(run_dir: RunDir, stem: str, trials: Sequence[Trial]) -> None:
             or trial.lengths.shape != first.lengths.shape
         ):
             raise ValueError(
-                f"trial {trial.name!r} has array shape {trial.scores.shape}, "
-                f"expected {first.scores.shape}"
+                f"trial {trial.name!r} has scores shape {trial.scores.shape} "
+                f"and lengths shape {trial.lengths.shape}, expected "
+                f"{first.scores.shape} and {first.lengths.shape}"
             )
     run_dir.write_arrays(
         stem,
@@ -277,10 +278,16 @@ def read_trials(run_dir: RunDir, stem: str) -> list[Trial]:
 
     Returns:
         The trials, with NaN scores preserved.
+
+    Raises:
+        ValueError: If `<stem>.json` does not hold an object.
     """
-    arrays = run_dir.read_arrays(stem)
     payload = run_dir.read_json(stem)
-    assert isinstance(payload, dict)
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"{stem}.json must hold an object, got {type(payload).__name__}"
+        )
+    arrays = run_dir.read_arrays(stem)
     return [
         Trial(
             name=name,

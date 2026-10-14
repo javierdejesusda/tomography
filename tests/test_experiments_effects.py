@@ -361,6 +361,23 @@ def test_write_trials_rejects_different_shapes(run_dir: RunDir) -> None:
         write_trials(run_dir, "trials", [first, wide])
 
 
+def test_write_trials_reports_both_array_shapes(run_dir: RunDir) -> None:
+    first = make_trial((("a",), ("b",)), [[1], [1]])
+    other = dataclasses.replace(first, lengths=np.ones((2, 2), np.int64))
+
+    with pytest.raises(ValueError, match=r"lengths shape \(2, 2\)"):
+        write_trials(run_dir, "trials", [first, other])
+
+
+def test_read_trials_rejects_a_payload_that_is_not_an_object(
+    run_dir: RunDir,
+) -> None:
+    run_dir.write_json("trials", [])
+
+    with pytest.raises(ValueError, match="must hold an object"):
+        read_trials(run_dir, "trials")
+
+
 def curves_input() -> NDArray[np.float64]:
     rng = np.random.default_rng(0)
     return rng.normal(size=(2, 4, 3))
