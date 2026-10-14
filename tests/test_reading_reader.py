@@ -311,6 +311,37 @@ def test_fit_rejects_groups_without_exactly_one_positive_member(
 
 
 @pytest.mark.parametrize(
+    ("orientation", "positives"),
+    [
+        ({"groups": [[0, 2]]}, [1, 3]),
+        ({"pairs": [[0, 99]]}, [1, 3]),
+        ({}, []),
+    ],
+    ids=["no-positive", "pairs-out-of-range", "one-class"],
+)
+def test_fit_validates_orientation_before_fitting_directions(
+    monkeypatch: pytest.MonkeyPatch,
+    orientation: dict[str, list[list[int]]],
+    positives: list[int],
+) -> None:
+    def forbidden(*args: object, **options: object) -> None:
+        raise AssertionError("fit_direction must not run")
+
+    monkeypatch.setattr("tomography.reading.reader.fit_direction", forbidden)
+    y = np.zeros(10, dtype=np.int64)
+    y[positives] = 1
+
+    with pytest.raises(ValueError, match=r"exactly one|pairs|classes"):
+        RepReader.fit(
+            "pca_raw",
+            x_rows(*X),
+            [0],
+            labels=y,
+            **{k: np.array(v, dtype=np.int64) for k, v in orientation.items()},
+        )
+
+
+@pytest.mark.parametrize(
     "pairs",
     [[[0, -1]], [[0, 99]], [[0, 1, 2], [3, 4, 5]]],
     ids=["negative-index", "out-of-range", "three-columns"],

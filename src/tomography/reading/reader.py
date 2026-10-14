@@ -13,6 +13,7 @@ from tomography.reading.directions import FloatArray
 from tomography.reading.directions import Method
 from tomography.reading.directions import Preprocess
 from tomography.reading.directions import fit_direction
+from tomography.reading.metrics import GroupIndex
 from tomography.reading.metrics import parse_groups
 
 _FIELDS = ("method", "layers", "directions", "means", "signs")
@@ -92,6 +93,7 @@ class RepReader:
             raise ValueError(
                 f"layers has {len(layers)} entries for {h.shape[0]} layers"
             )
+        index = _orientation_groups(pairs, groups, labels)
         fits = [
             fit_direction(
                 method,
@@ -110,7 +112,7 @@ class RepReader:
             means=np.stack([fit.mean for fit in fits]),
             signs=np.ones(len(fits), dtype=np.float32),
         )
-        signs = _orientation(unsigned._project(h), labels, pairs, groups)
+        signs = _orientation(unsigned._project(h), labels, index)
         return replace(unsigned, signs=signs)
 
     @classmethod
@@ -279,23 +281,39 @@ def _layer_seed(seed: int, layer_position: int) -> int:
     return int(sequence.generate_state(1)[0])
 
 
-def _orientation(
-    projections: NDArray[np.float64],
-    labels: NDArray[np.int64],
+def _orientation_groups(
     pairs: NDArray[np.int64] | None,
     groups: NDArray[np.int64] | None,
-) -> NDArray[np.float32]:
+    labels: NDArray[np.int64],
+) -> GroupIndex | None:
     if groups is None and pairs is not None:
         groups = _pairs_with_distinct_labels(pairs, labels)
     if groups is None:
-        return _class_mean_orientation(projections, labels)
-    index = parse_groups(groups, labels)
+        positive = labels == 1
+        if positive.all() or not positive.any():
+            raise ValueError("labels must contain both classes")
+        return None
+    return parse_groups(groups, labels)
+
+
+def _orientation(
+    projections: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    index: GroupIndex | None,
+) -> NDArray[np.float32]:
+    if index is None:
+        positive = labels == 1
+        return _sign_of(
+            projections[:, positive].mean(axis=1)
+            - projections[:, ~positive].mean(axis=1)
+        )
     members = projections[:, index.members]
     highest = np.where(index.valid, members, -np.inf).max(axis=-1)
     lowest = np.where(index.valid, members, np.inf).min(axis=-1)
-    own = members[:, np.arange(groups.shape[0]), index.positive]
-    gap = (own == highest).mean(axis=1) - (own == lowest).mean(axis=1)
-    return np.where(gap < 0, -1.0, 1.0).astype(np.float32)
+    own = members[:, np.arange(index.positive.shape[0]), index.positive]
+    return _sign_of(
+        (own == highest).mean(axis=1) - (own == lowest).mean(axis=1)
+    )
 
 
 def _pairs_with_distinct_labels(
@@ -309,13 +327,5 @@ def _pairs_with_distinct_labels(
     return pairs[distinct] if distinct.any() else None
 
 
-def _class_mean_orientation(
-    projections: NDArray[np.float64], labels: NDArray[np.int64]
-) -> NDArray[np.float32]:
-    positive = labels == 1
-    if positive.all() or not positive.any():
-        raise ValueError("labels must contain both classes")
-    gap = projections[:, positive].mean(axis=1) - projections[
-        :, ~positive
-    ].mean(axis=1)
+def _sign_of(gap: NDArray[np.float64]) -> NDArray[np.float32]:
     return np.where(gap < 0, -1.0, 1.0).astype(np.float32)
