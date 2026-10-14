@@ -46,15 +46,21 @@ class Config(ReadingConfig):
     """R5 settings: GPT-2 honesty on facts.
 
     The readers are trained on the response tokens of true statements shown
-    under an honest and an untruthful persona. Scoring held-out statements
-    under the same two personas is only a sanity check: the two renderings
+    under an honest and an untruthful persona, then score held-out statements
+    with no refit, in two ways.
+
+    The transfer evaluation is exploratory. The persona-trained direction
+    scores plain true and false statements, with no persona instruction,
+    paired one true with one false, on the mean of their response tokens.
+    The sign of each layer is set on the persona pairs, so it can disagree
+    with the sign that best separates the plain statements. On a small model
+    this evaluation can sit at chance. Its accuracy fills the top-level
+    fields of `summary.json`.
+
+    The in-template evaluation pairs the two persona renderings of a held-out
+    true statement. It is a sanity check, not a result: the two renderings
     differ in the persona instruction itself, so any direction separates
-    them. On GPT-2 the reader scores 1.0 in every layer with either finder,
-    a random direction reaches 0.928 at layer 1 (0.58 to 0.93 across
-    layers) and the shuffled null sits at 0.494. The headline accuracy is
-    therefore the transfer: the same readers, with no refit, score plain
-    true and false statements without any persona instruction, paired one
-    true with one false, on the mean of their response tokens.
+    them, a random one included. Its accuracy is under `in_template`.
 
     The paper reads functions with the first principal component of the pair
     differences (`pca_diff`), which stays selectable. R5 fits a supervised
@@ -200,12 +206,14 @@ def execute(
     an honest and an untruthful persona with the response tokens as rows.
     They are scored on held-out statements in two ways, with no refit. The
     transfer sets pair a true and a false plain statement and read the mean
-    of its tokens; this is the headline. The in-template sets pair the two
-    persona renderings of a true statement and are a sanity check. The layer
-    is chosen on val and reported on test. Writes `curves_transfer` and
-    `curves` (test), one `scan_<i>_<persona>` token by layer scan for each
-    of the first `n_scan_statements` true test statements, and
-    `summary.json`.
+    of its tokens; this evaluation is exploratory, because the direction
+    comes from persona instructions and its sign is set on the persona pairs.
+    The in-template sets pair the two persona renderings of a true statement
+    and are a sanity check. The layer is chosen on val and reported on test.
+    Writes `curves_transfer` and `curves` (test), one `scan_<i>_<persona>`
+    token by layer scan for each of the first `n_scan_statements` true test
+    statements, and `summary.json`: the transfer evaluation at the top level
+    and the in-template one under `in_template`.
 
     Args:
         config: The experiment settings.
