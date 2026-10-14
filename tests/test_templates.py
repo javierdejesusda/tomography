@@ -25,6 +25,11 @@ def fake_qwen3_format() -> ChatFormat:
     return ChatFormat("template", render_fn=fake_qwen3_render)
 
 
+def test_unknown_chat_kind_is_rejected() -> None:
+    with pytest.raises(ValueError, match="kind"):
+        ChatFormat("foo")  # type: ignore[arg-type]
+
+
 def test_plain_turn_is_the_reference_layout() -> None:
     text, user_start, assistant_start = ChatFormat("plain").render_turn(
         "Pretend you are honest.", "The sky is blue"
@@ -695,7 +700,60 @@ def test_ablate_framing_swap_maps_emotion_concept_to_function() -> None:
 def test_ablate_framing_swap_maps_emotion_function_to_concept() -> None:
     swapped = ablate(PAPER_TEMPLATES["emotion_function"], "framing_swap")
 
-    assert swapped is PAPER_TEMPLATES["emotion_concept"]
+    assert isinstance(swapped, ConceptTemplate)
+    assert swapped.user == PAPER_TEMPLATES["emotion_concept"].user
+    assert "framing_swap" in swapped.name
+
+
+def test_ablate_framing_swap_names_follow_the_chain_convention() -> None:
+    names = [
+        ablate(PAPER_TEMPLATES["emotion_concept"], "framing_swap", index=i).name
+        for i in range(len(EMOTIONS))
+    ]
+
+    assert len(set(names)) == len(EMOTIONS)
+    assert all("framing_swap" in name for name in names)
+    assert names[3] == "emotion_concept:framing_swap#3"
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["emotion_concept", "emotion_function"],
+)
+def test_ablate_framing_swap_keeps_the_untagged_flag(source: str) -> None:
+    untagged = ablate(PAPER_TEMPLATES[source], "no_chat_tags")
+
+    swapped = ablate(untagged, "framing_swap", index=3)
+
+    expected = (
+        FunctionTemplate if source == "emotion_concept" else ConceptTemplate
+    )
+    assert isinstance(swapped, expected)
+    assert not swapped.tagged
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "concept_swap",
+        "no_template",
+        "no_trailing_question",
+        "neutral_frame",
+        "scaffold",
+    ],
+)
+def test_paraphrase_after_a_wording_ablation_is_rejected(kind: str) -> None:
+    ablated = ablate(PAPER_TEMPLATES["concept"], kind)
+
+    with pytest.raises(ValueError, match="ablation"):
+        ablate(ablated, "paraphrase")
+
+
+def test_framing_swap_after_a_wording_ablation_is_rejected() -> None:
+    ablated = ablate(PAPER_TEMPLATES["emotion_concept"], "concept_swap")
+
+    with pytest.raises(ValueError, match="ablation"):
+        ablate(ablated, "framing_swap")
 
 
 def test_ablate_framing_swap_needs_a_counterpart() -> None:
@@ -727,3 +785,55 @@ def test_ablated_concept_templates_keep_exact_stimulus_spans(
     assert rendered.response_span is not None
     start, end = rendered.response_span
     assert rendered.text[start:end] == "a stimulus"
+
+
+QWEN3_REPO = "Qwen/Qwen3-0.6B"
+QWEN3_REVISION = "c1899de289a04d12100db370d81485cdf75e47ca"
+
+
+@pytest.mark.network
+def test_real_qwen3_tokenizer_gives_exact_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    constants = pytest.importorskip("huggingface_hub.constants")
+    monkeypatch.setattr(constants, "HF_HUB_DISABLE_SYMLINKS_WARNING", True)
+    transformers = pytest.importorskip("transformers")
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        QWEN3_REPO, revision=QWEN3_REVISION
+    )
+    chat = ChatFormat.from_tokenizer(tokenizer)
+    stimulus = " a gripping, beautiful film"
+
+    concept = GENERIC.render(stimulus, "sentiment", chat)
+    function = PERSONA.render("The sky is blue", "pos", chat)
+
+    prefix = "<|im_start|>user\n"
+    generation = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    assert concept.text.startswith(prefix + "Consider the amount of")
+    assert concept.text.endswith("The amount of sentiment is" + generation)
+    assert function.text.startswith(prefix + "Pretend you're an honest")
+    assert function.text.endswith(generation + "The sky is blue")
+    assert function.response_span is not None
+    func_start, func_end = function.response_span
+    assert function.text[func_start:func_end] == "The sky is blue"
+    assert concept.response_span is not None
+    start, end = concept.response_span
+    assert concept.text[start:end] == stimulus
+
+    encoded = tokenizer(
+        function.text, add_special_tokens=False, return_offsets_mapping=True
+    )
+    inside = [
+        token
+        for token, (token_start, token_end) in zip(
+            encoded["input_ids"], encoded["offset_mapping"], strict=True
+        )
+        if token_start < func_end
+        and token_end > func_start
+        and token_end > token_start
+    ]
+    assert tokenizer.decode(inside).strip() == "The sky is blue"
+    assert (
+        tokenizer.convert_tokens_to_ids("<|im_start|>")
+        in (encoded["input_ids"])
+    )

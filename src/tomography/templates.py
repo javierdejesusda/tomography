@@ -15,12 +15,14 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 from typing import Literal
 from typing import Self
+from typing import get_args
 
 if TYPE_CHECKING:
     from transformers import PreTrainedTokenizerBase
 
 Span = tuple[int, int]
 ChatRenderFn = Callable[[list[dict[str, str]]], str]
+ChatKind = Literal["plain", "none", "template"]
 
 _USER_SENTINEL = "TOMOGRAPHY_USER_TEXT"
 _SLOT = re.compile(r"\{(concept|stimulus|question|persona|instruction)\}")
@@ -44,14 +46,19 @@ class ChatFormat:
             generation prompt. Required for, and only for, the template kind.
     """
 
-    kind: Literal["plain", "none", "template"]
+    kind: ChatKind
     user_tag: str = "USER:"
     assistant_tag: str = "ASSISTANT:"
     turn_sep: str = " "
     render_fn: ChatRenderFn | None = None
 
     def __post_init__(self) -> None:
-        """Checks that ``render_fn`` is set exactly for the template kind."""
+        """Checks the kind and that ``render_fn`` fits the template kind."""
+        if self.kind not in get_args(ChatKind):
+            raise ValueError(
+                f"unknown chat kind {self.kind!r}, "
+                f"expected one of {get_args(ChatKind)}"
+            )
         if (self.kind == "template") != (self.render_fn is not None):
             raise ValueError(
                 "render_fn is required for, and only for, the template kind"
@@ -517,8 +524,11 @@ def ablate(template: Template, kind: str, *, index: int = 0) -> Template:
     concept template ``index`` picks the emotion in ``EMOTIONS``).
 
     Args:
-        template: The template to vary. Chained ablations resolve known
-            templates through the name before the first colon.
+        template: The template to vary. Variants are named
+            ``<source>:<kind>[#index]``. ``paraphrase`` and ``framing_swap``
+            resolve known templates through the name before the first colon,
+            so they accept only a template that went through ``no_chat_tags``
+            at most.
         kind: One of ``ABLATION_KINDS``.
         index: Selects among the options of the kinds that have several.
 
@@ -527,7 +537,8 @@ def ablate(template: Template, kind: str, *, index: int = 0) -> Template:
 
     Raises:
         ValueError: If the kind is unknown or does not apply to the template,
-            or ``index`` is out of range.
+            if ``paraphrase`` or ``framing_swap`` follows an ablation that
+            changed the wording, or if ``index`` is out of range.
     """
     if kind not in ABLATION_KINDS:
         raise ValueError(f"unknown ablation kind {kind!r}: {ABLATION_KINDS}")
@@ -581,11 +592,23 @@ def _pick(options: Sequence[str], index: int) -> str:
     return options[index]
 
 
+def _require_wording_ablations_only(template: Template) -> None:
+    """Rejects templates whose wording an earlier ablation already changed."""
+    kinds = [part.partition("#")[0] for part in template.name.split(":")[1:]]
+    changed = [kind for kind in kinds if kind != "no_chat_tags"]
+    if changed:
+        raise ValueError(
+            f"template {template.name!r} already has the ablation(s) "
+            f"{changed}, which this ablation would discard"
+        )
+
+
 def _paraphrase(template: Template, index: int) -> Template:
     """Swaps the wording of a known template for paraphrase ``index``."""
     options = _PARAPHRASES.get(template.name.partition(":")[0])
     if options is None:
         raise ValueError(f"no paraphrase for template {template.name!r}")
+    _require_wording_ablations_only(template)
     name = _name(template, "paraphrase", index)
     return replace(template, name=name, user=_pick(options, index))
 
@@ -595,8 +618,18 @@ def _swap_framing(template: Template, index: int) -> Template:
     base = template.name.partition(":")[0]
     if base not in _FRAMING_COUNTERPART:
         raise ValueError(f"template {template.name!r} has no counterpart")
+    _require_wording_ablations_only(template)
     if isinstance(template, FunctionTemplate):
-        return PAPER_TEMPLATES[_FRAMING_COUNTERPART[base]]
-    if not 0 <= index < len(EMOTIONS):
-        raise ValueError(f"index must be in [0, {len(EMOTIONS)}), got {index}")
-    return emotion_function_template(EMOTIONS[index])
+        counterpart = PAPER_TEMPLATES[_FRAMING_COUNTERPART[base]]
+    else:
+        if not 0 <= index < len(EMOTIONS):
+            raise ValueError(
+                f"index must be in [0, {len(EMOTIONS)}), got {index}"
+            )
+        counterpart = emotion_function_template(EMOTIONS[index])
+    name = _name(
+        template,
+        "framing_swap",
+        index if isinstance(template, ConceptTemplate) else None,
+    )
+    return replace(counterpart, name=name, tagged=template.tagged)
