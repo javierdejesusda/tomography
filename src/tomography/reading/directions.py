@@ -18,6 +18,8 @@ Method = Literal[
 ]
 Preprocess = Literal["center", "unit", "none"]
 
+_METHODS = ("pca_diff", "pca_raw", "mean_diff")
+
 
 @dataclass(frozen=True, eq=False)
 class FitResult:
@@ -53,15 +55,18 @@ def fit_direction(
     Args:
         method: The direction finder. `pca_diff` takes the first principal
             component of the within-pair differences and needs `pairs`.
+            `pca_raw` does the same on the rows themselves. `mean_diff` is
+            the difference of the two class means and needs `labels`.
         h: Activations of shape (n, d).
         labels: Binary labels of shape (n,), 1 for the positive pole.
         pairs: Row indices of shape (m, 2); difference i is
             `h[pairs[i, 0]] - h[pairs[i, 1]]`.
-        preprocess: How differences are prepared before the SVD. `center`
+        preprocess: How the vectors are prepared before fitting; they are
+            the differences for `pca_diff` and the rows otherwise. `center`
             subtracts their mean, as the reference implementation does.
-            `unit` first scales each difference to unit length, as the paper
+            `unit` first scales each vector to unit length, as the paper
             describes, then centers. `none` does neither. The returned mean
-            is the mean of the differences after any unit scaling.
+            is the mean of the vectors after any unit scaling.
         seed: Seed for the stochastic finders.
 
     Returns:
@@ -70,21 +75,40 @@ def fit_direction(
     Raises:
         ValueError: If the inputs do not fit the method.
     """
-    if method != "pca_diff":
+    if method not in _METHODS:
         raise ValueError(f"unsupported method {method!r}")
     if preprocess not in ("center", "unit", "none"):
         raise ValueError(f"unsupported preprocess {preprocess!r}")
-    if pairs is None:
-        raise ValueError("pca_diff needs pairs")
     rows = np.asarray(h, dtype=np.float64)
-    vectors = rows[pairs[:, 0]] - rows[pairs[:, 1]]
+    if method == "pca_diff":
+        if pairs is None:
+            raise ValueError("pca_diff needs pairs")
+        vectors = rows[pairs[:, 0]] - rows[pairs[:, 1]]
+    else:
+        vectors = rows
     if preprocess == "unit":
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         vectors = vectors / np.where(norms > 0, norms, 1.0)
     mean = vectors.mean(axis=0)
     fitted = vectors if preprocess == "none" else vectors - mean
-    direction = np.linalg.svd(fitted, full_matrices=False)[2][0]
+    if method == "mean_diff":
+        direction = _class_difference(fitted, labels)
+    else:
+        direction = np.linalg.svd(fitted, full_matrices=False)[2][0]
     return _result(direction, mean)
+
+
+def _class_difference(
+    rows: NDArray[np.float64], labels: NDArray[np.int64] | None
+) -> NDArray[np.float64]:
+    if labels is None:
+        raise ValueError("this method needs labels")
+    positive = labels == 1
+    if positive.all() or not positive.any():
+        raise ValueError("labels must contain both classes")
+    positive_mean = rows[positive].mean(axis=0)
+    negative_mean = rows[~positive].mean(axis=0)
+    return np.asarray(positive_mean - negative_mean, dtype=np.float64)
 
 
 def _result(

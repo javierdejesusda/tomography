@@ -176,3 +176,58 @@ def test_unknown_preprocess_is_rejected() -> None:
             pairs=data.pairs,
             preprocess="whiten",  # type: ignore[arg-type]
         )
+
+
+def make_blobs(
+    n: int, d: int = 32, *, seed: int = 0, signal: float = 3.0
+) -> tuple[NDArray[np.float32], NDArray[np.int64], NDArray[np.float64]]:
+    """Builds two unpaired classes separated along one planted direction."""
+    rng = np.random.default_rng(seed)
+    planted = rng.standard_normal(d)
+    planted /= np.linalg.norm(planted)
+    labels = (np.arange(n) % 2).astype(np.int64)
+    sign = np.where(labels == 1, 1.0, -1.0)[:, None]
+    h = signal * sign * planted + rng.standard_normal((n, d))
+    h += 10.0 * rng.standard_normal(d)
+    return h.astype(np.float32), labels, planted
+
+
+def test_pca_raw_is_the_top_singular_vector_of_centered_rows() -> None:
+    h, _, planted = make_blobs(200, seed=11)
+    h64 = h.astype(np.float64)
+    top = np.linalg.svd(h64 - h64.mean(axis=0), full_matrices=False)[2][0]
+
+    fit = fit_direction("pca_raw", h)
+
+    assert abs_cosine(fit.direction, top) == pytest.approx(1.0, abs=1e-6)
+    assert abs_cosine(fit.direction, planted) > 0.95
+    np.testing.assert_allclose(fit.mean, h64.mean(axis=0), atol=1e-4)
+
+
+def test_mean_diff_matches_a_hand_computed_class_difference() -> None:
+    h = np.array([[1.0, 0.0], [3.0, 0.0], [0.0, 2.0], [0.0, 4.0]])
+    labels = np.array([1, 1, 0, 0], dtype=np.int64)
+
+    fit = fit_direction("mean_diff", h, labels=labels)
+
+    expected = np.array([-2.0, 3.0]) / np.sqrt(13.0)
+    np.testing.assert_allclose(fit.direction, expected, atol=1e-6)
+    assert fit.raw_norm == pytest.approx(np.sqrt(13.0))
+    np.testing.assert_allclose(fit.mean, [1.0, 1.5])
+
+
+def test_mean_diff_recovers_planted_direction() -> None:
+    h, labels, planted = make_blobs(200, seed=12)
+
+    fit = fit_direction("mean_diff", h, labels=labels)
+
+    assert abs_cosine(fit.direction, planted) > 0.95
+
+
+def test_mean_diff_needs_labels_with_both_classes() -> None:
+    h, labels, _ = make_blobs(20, seed=13)
+
+    with pytest.raises(ValueError, match="labels"):
+        fit_direction("mean_diff", h)
+    with pytest.raises(ValueError, match="both classes"):
+        fit_direction("mean_diff", h, labels=np.ones_like(labels))
