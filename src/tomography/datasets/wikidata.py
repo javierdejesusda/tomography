@@ -186,9 +186,10 @@ def run_query(
             body arrived on every attempt.
         urllib.error.HTTPError: If the service answered 429, 502, 503 or 504
             on every attempt, or any other error status at once.
+        urllib.error.URLError: If the service cannot be reached; not retried.
+        TimeoutError: If the request times out; not retried.
         ValueError: If the response was cut off or is not JSON on every
             attempt; `json.JSONDecodeError` is the usual subclass.
-        json.JSONDecodeError: If the response is not JSON.
         TypeError: If the response is JSON but not an object.
         KeyError: If the response is not a SPARQL JSON result.
     """
