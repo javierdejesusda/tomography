@@ -95,8 +95,9 @@ ARCHS: Mapping[str, ArchSpec] = MappingProxyType(
             embed_paths=("model.embed_tokens",),
             lora_targets=("q_proj", "v_proj"),
             lora_fan_in_fan_out=False,
-            # Provisional: the BOS probe in tests/test_models_slow.py decides.
-            default_bos="none",
+            # The BOS probe in tests/test_models_slow.py: without BOS the first
+            # token is the sink; a prepended separator takes the role over.
+            default_bos="prepend",
         ),
     }
 )

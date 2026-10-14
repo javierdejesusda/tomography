@@ -446,7 +446,7 @@ def test_qwen3_arch_spec_declares_the_hf_layout() -> None:
         embed_paths=("model.embed_tokens",),
         lora_targets=("q_proj", "v_proj"),
         lora_fan_in_fan_out=False,
-        default_bos="none",
+        default_bos="prepend",
     )
 
 
@@ -478,8 +478,8 @@ def test_tiny_qwen3_follows_the_qwen3_layout_without_a_bos_token(
     assert lm.final_norm is lm.model.model.norm
     assert lm.tokenizer.bos_token is None
     assert lm.bos_id == lm.pad_id == end_id
-    assert lm.default_bos == "none"
-    assert not lm.encode(["The fox"]).has_bos
+    assert lm.default_bos == "prepend"
+    assert lm.encode(["The fox"]).has_bos
     assert lm.encode(["The fox"], bos="prepend").input_ids[0, 0] == end_id
 
 
