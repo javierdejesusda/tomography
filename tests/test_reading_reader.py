@@ -1,9 +1,12 @@
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
 import pytest
 
+from tomography.reading.directions import Method
+from tomography.reading.metrics import group_accuracy
 from tomography.reading.reader import RepReader
 
 
@@ -394,3 +397,92 @@ def test_load_rejects_inconsistent_arrays(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="layers"):
         RepReader.load(path)
+
+
+class PairedData(NamedTuple):
+    h: NDArray[np.float32]
+    pairs: NDArray[np.int64]
+    labels: NDArray[np.int64]
+
+
+def planted_direction(d: int, seed: int) -> NDArray[np.float64]:
+    direction = np.random.default_rng(seed).standard_normal(d)
+    return direction / np.linalg.norm(direction)
+
+
+def planted_pairs(
+    direction: NDArray[np.float64],
+    n_pairs: int,
+    *,
+    seed: int,
+    signal: float,
+) -> PairedData:
+    """Builds pairs that differ by 2 * signal along `direction`.
+
+    Rows 2i and 2i + 1 form pair i. The content shared by the two members
+    and the in-pair order are random, as in the reference datasets.
+    """
+    rng = np.random.default_rng(seed)
+    d = direction.shape[0]
+    base = 2.0 * rng.standard_normal((n_pairs, d))
+    pos = base + signal * direction + rng.standard_normal((n_pairs, d))
+    neg = base - signal * direction + rng.standard_normal((n_pairs, d))
+    pos_first = rng.random(n_pairs) < 0.5
+    h = np.empty((2 * n_pairs, d))
+    h[0::2] = np.where(pos_first[:, None], pos, neg)
+    h[1::2] = np.where(pos_first[:, None], neg, pos)
+    h += 10.0 * rng.standard_normal(d)
+    labels = np.empty(2 * n_pairs, dtype=np.int64)
+    labels[0::2] = pos_first
+    labels[1::2] = ~pos_first
+    pairs = np.arange(2 * n_pairs, dtype=np.int64).reshape(n_pairs, 2)
+    return PairedData(h.astype(np.float32), pairs, labels)
+
+
+@pytest.mark.parametrize("method", ["pca_diff", "mean_diff", "logistic"])
+@pytest.mark.parametrize("polarity", [1.0, -1.0], ids=["as-is", "reversed"])
+def test_planted_direction_is_recovered_and_read_with_the_right_sign(
+    method: Method, polarity: float
+) -> None:
+    direction = polarity * planted_direction(48, seed=1)
+    train = planted_pairs(direction, 256, seed=2, signal=3.0)
+    test = planted_pairs(direction, 250, seed=3, signal=3.0)
+
+    reader = RepReader.fit(
+        method,
+        train.h[None],
+        [0],
+        labels=train.labels,
+        pairs=train.pairs,
+    )
+
+    cosine = abs(float(reader.directions[0] @ direction))
+    accuracy = group_accuracy(
+        reader.score(test.h[None]), test.pairs, test.labels
+    )
+    assert cosine > 0.95
+    assert accuracy[0] > 0.95
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_random_direction_scores_near_chance_on_held_out_groups(
+    seed: int,
+) -> None:
+    direction = planted_direction(512, seed=10 + seed)
+    train = planted_pairs(direction, 64, seed=20 + seed, signal=2.0)
+    test = planted_pairs(direction, 250, seed=30 + seed, signal=2.0)
+
+    reader = RepReader.fit(
+        "random",
+        train.h[None],
+        [0],
+        labels=train.labels,
+        pairs=train.pairs,
+        seed=seed,
+    )
+
+    accuracy = group_accuracy(
+        reader.score(test.h[None]), test.pairs, test.labels
+    )
+    assert test.pairs.shape[0] >= 200
+    assert accuracy[0] == pytest.approx(0.5, abs=0.1)
