@@ -1,11 +1,16 @@
 """Model registry, loading and the tokenizer policy shared by all readers."""
 
 from collections.abc import Mapping
+from collections.abc import Sequence
 from dataclasses import dataclass
+import os
 from types import MappingProxyType
 from typing import Literal
 
+import huggingface_hub.constants
 import torch
+from transformers import AutoModelForCausalLM
+from transformers import AutoTokenizer
 from transformers import PreTrainedModel
 from transformers import PreTrainedTokenizerBase
 
@@ -127,6 +132,30 @@ MODELS: Mapping[str, CheckpointSpec] = MappingProxyType(
 )
 
 
+@dataclass(frozen=True, eq=False)
+class EncodedBatch:
+    """A tokenized batch with explicit positions and character offsets.
+
+    Attributes:
+        input_ids: `(batch, seq)` int64 CPU token ids.
+        attention_mask: `(batch, seq)` int64, 1 for every real token
+            including BOS.
+        position_ids: `(batch, seq)` int64, the mask cumulative sum minus
+            one, clamped at 0. HF derives no positions from padding.
+        offsets: Per row and token, the `(start, end)` character range;
+            `(0, 0)` for BOS and padding.
+        lengths: Real token count per row, BOS included.
+        has_bos: Whether BOS was prepended to every row.
+    """
+
+    input_ids: torch.Tensor
+    attention_mask: torch.Tensor
+    position_ids: torch.Tensor
+    offsets: tuple[tuple[tuple[int, int], ...], ...]
+    lengths: tuple[int, ...]
+    has_bos: bool
+
+
 @dataclass(frozen=True)
 class LoadedModel:
     """A causal LM with its tokenizer and the modules hooks attach to.
@@ -177,6 +206,81 @@ class LoadedModel:
             raise ValueError("The model has no output embedding")
         weight: torch.Tensor = head.weight
         return weight.detach()
+
+    def encode(
+        self,
+        texts: Sequence[str],
+        *,
+        bos: BosMode | None = None,
+        padding_side: Literal["left", "right"] = "right",
+    ) -> EncodedBatch:
+        """Tokenizes texts with the BOS, padding and offset policy.
+
+        Special-token strings in the text stay single tokens and nothing is
+        truncated. Collection, generation and LoRRA all encode here so they
+        share one policy.
+
+        Args:
+            texts: The texts to encode.
+            bos: `prepend` puts `bos_id` before every row, `none` adds
+                nothing, None uses `default_bos`.
+            padding_side: Side padded with `pad_id`.
+
+        Returns:
+            The encoded batch.
+
+        Raises:
+            ValueError: If `texts` is empty, a text has no tokens, the
+                padding side is unknown, or BOS is requested without an id.
+        """
+        if padding_side not in ("left", "right"):
+            raise ValueError(
+                f"padding_side must be 'left' or 'right', got {padding_side!r}"
+            )
+        if not texts:
+            raise ValueError("texts is empty")
+        mode = self.default_bos if bos is None else bos
+        if mode == "prepend" and self.bos_id is None:
+            raise ValueError(
+                "bos='prepend' needs a bos id and this model has none"
+            )
+        encoding = self.tokenizer(
+            list(texts),
+            add_special_tokens=False,
+            return_offsets_mapping=True,
+            truncation=False,
+            padding=False,
+        )
+        prefix_ids = [self.bos_id] if mode == "prepend" else []
+        prefix_offsets = [(0, 0)] if mode == "prepend" else []
+        rows_ids = [prefix_ids + ids for ids in encoding["input_ids"]]
+        rows_offsets = [
+            prefix_offsets + [(int(a), int(b)) for a, b in offsets]
+            for offsets in encoding["offset_mapping"]
+        ]
+        for index, ids in enumerate(rows_ids):
+            if not ids:
+                raise ValueError(f"text {index} has no tokens")
+        lengths = tuple(len(ids) for ids in rows_ids)
+        width = max(lengths)
+        ids_out, mask_out, offsets_out = [], [], []
+        for ids, offsets in zip(rows_ids, rows_offsets, strict=True):
+            pad = width - len(ids)
+            left, right = (pad, 0) if padding_side == "left" else (0, pad)
+            ids_out.append([self.pad_id] * left + ids + [self.pad_id] * right)
+            mask_out.append([0] * left + [1] * len(ids) + [0] * right)
+            offsets_out.append(
+                tuple([(0, 0)] * left + offsets + [(0, 0)] * right)
+            )
+        attention_mask = torch.tensor(mask_out, dtype=torch.int64)
+        return EncodedBatch(
+            input_ids=torch.tensor(ids_out, dtype=torch.int64),
+            attention_mask=attention_mask,
+            position_ids=(attention_mask.cumsum(dim=-1) - 1).clamp(min=0),
+            offsets=tuple(offsets_out),
+            lengths=lengths,
+            has_bos=mode == "prepend",
+        )
 
 
 def _module_at(root: torch.nn.Module, path: str) -> torch.nn.Module:
@@ -259,3 +363,50 @@ def wrap_model(
         final_norm=_module_at(model, spec.final_norm_path),
         default_bos=spec.default_bos,
     )
+
+
+def load_model(
+    key: str,
+    *,
+    device: str | torch.device | None = None,
+    dtype: torch.dtype | None = None,
+) -> LoadedModel:
+    """Loads a pinned checkpoint and wraps it.
+
+    The revision is always the pinned commit SHA. Loading silences the
+    Windows symlink warning and disables transformers' safetensors
+    auto-conversion, which could otherwise open pull requests on `.bin`
+    repositories.
+
+    Args:
+        key: A key of `MODELS`.
+        device: Target device; defaults to CUDA when available, else CPU.
+        dtype: Weight dtype; defaults to the checkpoint's `dtype`.
+
+    Returns:
+        The wrapped model in eval mode.
+
+    Raises:
+        UnknownCheckpointError: If `key` is not in `MODELS`.
+        UnsupportedArchitectureError: If the checkpoint's architecture is
+            not registered.
+    """
+    checkpoint = MODELS.get(key)
+    if checkpoint is None:
+        raise UnknownCheckpointError(
+            f"Unknown checkpoint {key!r}; known: {sorted(MODELS)}"
+        )
+    huggingface_hub.constants.HF_HUB_DISABLE_SYMLINKS_WARNING = True
+    os.environ.setdefault("DISABLE_SAFETENSORS_CONVERSION", "1")
+    if dtype is None:
+        dtype = getattr(torch, checkpoint.dtype)
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = AutoModelForCausalLM.from_pretrained(
+        checkpoint.repo_id, revision=checkpoint.revision, dtype=dtype
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        checkpoint.repo_id, revision=checkpoint.revision
+    )
+    model = model.to(device)  # type: ignore[arg-type]
+    return wrap_model(model, tokenizer, checkpoint=checkpoint)
