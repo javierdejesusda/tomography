@@ -7,11 +7,14 @@ from types import SimpleNamespace
 import huggingface_hub
 import pytest
 import torch
+from transformers import AutoConfig
 from transformers import AutoTokenizer
 from transformers import GPT2Config
 from transformers import GPT2LMHeadModel
 from transformers import LlamaConfig
 from transformers import LlamaForCausalLM
+from transformers import Qwen3Config
+from transformers import Qwen3ForCausalLM
 
 import tomography.model
 from tomography.model import ARCHS
@@ -579,3 +582,51 @@ def test_load_model_pins_every_checkpoint_of_the_architecture(
         )
         assert loaded.default_bos == expected_bos
     assert len(hub.model_calls) == len(keys) >= 1
+
+
+@pytest.mark.network
+@pytest.mark.parametrize("key", ["qwen3-0.6b-base", "qwen3-0.6b"])
+def test_real_qwen3_tokenizer_and_config_match_the_registry(key: str) -> None:
+    checkpoint = MODELS[key]
+    tokenizer = AutoTokenizer.from_pretrained(
+        checkpoint.repo_id, revision=checkpoint.revision
+    )
+    config = AutoConfig.from_pretrained(
+        checkpoint.repo_id, revision=checkpoint.revision
+    )
+    tiny = Qwen3ForCausalLM(
+        Qwen3Config(
+            vocab_size=len(tokenizer),
+            hidden_size=32,
+            intermediate_size=64,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            num_key_value_heads=2,
+            head_dim=8,
+            bos_token_id=config.bos_token_id,
+            eos_token_id=config.eos_token_id,
+        )
+    )
+    lm = wrap_model(tiny, tokenizer, checkpoint=checkpoint)
+    text = "Is it good? The movie is"
+
+    batch = lm.encode([text])
+
+    assert tokenizer.bos_token is None
+    assert lm.bos_id == lm.pad_id == 151643
+    assert lm.default_bos == "none"
+    assert not batch.has_bos
+    assert batch.input_ids[0, 0].item() != 151643
+    start = text.index(" The")
+    assert (start, start + len(" The")) in batch.offsets[0]
+    if checkpoint.chat_format == "template":
+        prompt = tokenizer.apply_chat_template(
+            [{"role": "user", "content": "hi"}],
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        assert prompt == (
+            "<|im_start|>user\nhi<|im_end|>\n"
+            "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+        )
