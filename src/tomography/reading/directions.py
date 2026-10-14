@@ -59,6 +59,9 @@ def fit_direction(
             `h[pairs[i, 0]] - h[pairs[i, 1]]`.
         preprocess: How differences are prepared before the SVD. `center`
             subtracts their mean, as the reference implementation does.
+            `unit` first scales each difference to unit length, as the paper
+            describes, then centers. `none` does neither. The returned mean
+            is the mean of the differences after any unit scaling.
         seed: Seed for the stochastic finders.
 
     Returns:
@@ -69,14 +72,18 @@ def fit_direction(
     """
     if method != "pca_diff":
         raise ValueError(f"unsupported method {method!r}")
-    if preprocess != "center":
+    if preprocess not in ("center", "unit", "none"):
         raise ValueError(f"unsupported preprocess {preprocess!r}")
     if pairs is None:
         raise ValueError("pca_diff needs pairs")
     rows = np.asarray(h, dtype=np.float64)
     vectors = rows[pairs[:, 0]] - rows[pairs[:, 1]]
+    if preprocess == "unit":
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        vectors = vectors / np.where(norms > 0, norms, 1.0)
     mean = vectors.mean(axis=0)
-    direction = np.linalg.svd(vectors - mean, full_matrices=False)[2][0]
+    fitted = vectors if preprocess == "none" else vectors - mean
+    direction = np.linalg.svd(fitted, full_matrices=False)[2][0]
     return _result(direction, mean)
 
 
