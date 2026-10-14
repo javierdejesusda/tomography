@@ -27,8 +27,8 @@ requires = ["uv_build>=0.12.17,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-cpu = ["torch>=2.14.1,<2.15"]
-cu130 = ["torch>=2.14.1,<2.15"]
+cpu = ["torch"]
+cu130 = ["torch"]
 dev = [
     "codespell>=2.4,<3",
     "mypy>=2.4.0,<3",
@@ -38,6 +38,7 @@ dev = [
 
 [tool.uv]
 default-groups = ["dev", "cu130"]
+constraint-dependencies = ["torch>=2.14.1,<2.15"]
 conflicts = [
     [
         { group = "cpu" },
@@ -76,10 +77,8 @@ convention = "google"
 [tool.ruff.lint.isort]
 force-single-line = true
 force-sort-within-sections = true
-known-first-party = ["tomography"]
 
 [tool.mypy]
-python_version = "3.12"
 strict = true
 
 [[tool.mypy.overrides]]
