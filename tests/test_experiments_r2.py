@@ -61,6 +61,7 @@ def test_config_defaults_and_round_trip() -> None:
     config = Config()
     assert config.experiment == "r2"
     assert config.model == "gpt2"
+    assert config.method == "logistic"
     assert config.n_components == 10
     assert config.n_eval_pairs is None
     assert config.n_seeds == 10
@@ -221,6 +222,21 @@ def test_execute_is_deterministic(
             np.testing.assert_array_equal(a[key], b[key])
 
 
+def test_the_default_direction_is_logistic_and_pca_diff_stays_selectable(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(n_seeds=2)
+    pca = dataclasses.replace(config, method="pca_diff")
+    default_dir = RunDir.create(config, out_root=tmp_path / "default")
+    pca_dir = RunDir.create(pca, out_root=tmp_path / "pca")
+    execute(config, default_dir, tiny_arch, _examples())
+    execute(pca, pca_dir, tiny_arch, _examples())
+    default = default_dir.read_arrays("readers")["directions"]
+    chosen = pca_dir.read_arrays("readers")["directions"]
+    assert default.shape == chosen.shape
+    assert not np.allclose(default, chosen)
+
+
 def test_plot_writes_three_figures_in_three_formats(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
@@ -259,7 +275,7 @@ def test_run_loads_the_model_and_the_data(
 
 @pytest.mark.slow
 def test_r2_on_gpt2_reads_utility_above_the_floor(tmp_path: Path) -> None:
-    config = Config(n_seeds=3, n_pairs=32, n_eval_pairs=128)
+    config = Config(n_seeds=3, n_pairs=128, n_eval_pairs=128)
     run_dir = RunDir.create(config, out_root=tmp_path)
     execute(
         config,

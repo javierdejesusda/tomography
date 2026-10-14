@@ -25,6 +25,7 @@ from tomography.experiments.sweep import sweep_from_activations
 from tomography.experiments.sweep import write_curves
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
 from tomography.templates import PAPER_TEMPLATES
 
@@ -33,7 +34,17 @@ _COMPONENTS = ("PC1", "PC2", "PC3")
 
 @dataclass(frozen=True, kw_only=True)
 class Config(ReadingConfig):
-    """R2 settings: GPT-2 utility on ETHICS with the shared defaults.
+    """R2 settings: GPT-2 utility on ETHICS.
+
+    The shared defaults apply except for the direction finder. The paper
+    reads utility with the first principal component of the pair differences
+    (`pca_diff`), which stays selectable. On GPT-2 it reads weakly even with
+    matched pairs: with 3 seeds and 512 evaluation pairs its test accuracy
+    is 0.546 (32 training pairs), 0.564 (128) and 0.559 (512), about the
+    level of a random direction (0.568). A supervised `logistic` direction
+    reaches 0.611, 0.683 (95% interval 0.678 to 0.691) and 0.705 (0.684 to
+    0.723, layer 8), so R2 fits it by default. The explained-variance
+    curves describe the pair differences and do not depend on the finder.
 
     Attributes:
         n_components: Components kept for the explained-variance curves; at
@@ -42,6 +53,7 @@ class Config(ReadingConfig):
 
     experiment: str = "r2"
     model: str = "gpt2"
+    method: Method = "logistic"
     n_components: int = 10
 
 
