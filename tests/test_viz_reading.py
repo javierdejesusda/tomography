@@ -1,13 +1,16 @@
 """Tests for the layer-curve primitive."""
 
 from pathlib import Path
+from typing import cast
 
 from matplotlib.axes import Axes
 from matplotlib.collections import PolyCollection
 from matplotlib.colors import to_hex
 from matplotlib.colors import to_rgb
 from matplotlib.lines import Line2D
+from matplotlib.typing import ColorType
 import numpy as np
+from numpy.typing import NDArray
 import pytest
 
 from tomography.viz import reading
@@ -16,7 +19,12 @@ from tomography.viz import style
 
 def make_arrays(
     n_series: int = 2, n_points: int = 6
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+]:
     x = np.arange(n_points, dtype=np.float64)
     mean = np.linspace(0.5, 0.9, n_points) + 0.02 * np.arange(n_series)[:, None]
     return x, mean, mean - 0.05, mean + 0.05
@@ -30,10 +38,11 @@ def make_curves(
 
 
 def curve_lines(ax: Axes) -> dict[str, Line2D]:
+    labeled = {str(line.get_label()): line for line in ax.get_lines()}
     return {
-        line.get_label(): line
-        for line in ax.get_lines()
-        if not line.get_label().startswith("_")
+        label: line
+        for label, line in labeled.items()
+        if not label.startswith("_")
     }
 
 
@@ -76,7 +85,7 @@ def test_plot_curves_draws_one_line_and_band_per_series() -> None:
         np.testing.assert_array_equal(lines[label].get_ydata(), mean[i])
     assert len(bands(ax)) == 2
     for i, band in enumerate(bands(ax)):
-        ys = band.get_paths()[0].vertices[:, 1]
+        ys = np.asarray(band.get_paths()[0].vertices)[:, 1]
         assert np.isin(lo[i], ys).all()
         assert np.isin(hi[i], ys).all()
 
@@ -88,9 +97,8 @@ def test_series_keep_the_categorical_order_and_a_faint_band() -> None:
     for i, line in enumerate(curve_lines(ax).values()):
         assert to_hex(line.get_color()) == style.CATEGORICAL[i]
     for i, band in enumerate(bands(ax)):
-        assert to_rgb(band.get_facecolor()[0]) == pytest.approx(
-            to_rgb(style.CATEGORICAL[i])
-        )
+        face = cast(ColorType, band.get_facecolor()[0])
+        assert to_rgb(face) == pytest.approx(to_rgb(style.CATEGORICAL[i]))
         assert band.get_alpha() == pytest.approx(0.1)
 
 
@@ -240,8 +248,9 @@ def test_seed_curves_are_faint_hairlines_outside_the_legend() -> None:
     for line, values in zip(faint, per_seed, strict=True):
         np.testing.assert_array_equal(line.get_ydata(), values)
         assert line.get_linewidth() < style.PX * 2
-        assert line.get_alpha() is not None
-        assert line.get_alpha() < 0.5
+        alpha = line.get_alpha()
+        assert alpha is not None
+        assert alpha < 0.5
     legend = ax.get_legend()
     assert legend is not None
     assert len(legend.get_texts()) == 2
@@ -257,8 +266,8 @@ def test_series_of_different_lengths_share_one_figure() -> None:
     )
 
     lines = curve_lines(fig.axes[0])
-    assert len(lines["small"].get_xdata()) == 4
-    assert len(lines["large"].get_xdata()) == 12
+    assert len(np.asarray(lines["small"].get_xdata())) == 4
+    assert len(np.asarray(lines["large"].get_xdata())) == 12
 
 
 def test_layer_ticks_are_whole_numbers() -> None:
