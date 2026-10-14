@@ -9,6 +9,7 @@ import math
 
 import torch
 
+from tomography.control.generate import Completion
 from tomography.hooks import ForwardInfo
 from tomography.hooks import ResidualEdit
 from tomography.hooks import edit_residuals
@@ -117,6 +118,20 @@ def _head(loaded: LoadedModel) -> torch.nn.Module:
     return head
 
 
+def _left_padded(
+    loaded: LoadedModel, rows: Sequence[Sequence[int]]
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Left pads id rows; positions follow the rule of `LoadedModel.encode`."""
+    width = max(len(row) for row in rows)
+    ids = torch.tensor(
+        [[loaded.pad_id] * (width - len(row)) + list(row) for row in rows]
+    )
+    mask = torch.tensor(
+        [[0] * (width - len(row)) + [1] * len(row) for row in rows]
+    )
+    return ids, mask, (mask.cumsum(dim=-1) - 1).clamp(min=0)
+
+
 def _forward(
     loaded: LoadedModel,
     inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -142,6 +157,15 @@ def _forward(
         )
     hidden: torch.Tensor = output.last_hidden_state
     return hidden
+
+
+def _eos_ids(loaded: LoadedModel) -> frozenset[int]:
+    eos = loaded.model.generation_config.eos_token_id
+    if eos is None:
+        return frozenset()
+    if isinstance(eos, int):
+        return frozenset((eos,))
+    return frozenset(eos)
 
 
 def contrast_logits(
@@ -194,3 +218,149 @@ def contrast_logits(
     with torch.inference_mode():
         logits: torch.Tensor = head(hidden[: len(prompts), -1])
     return logits.float().cpu().clone()
+
+
+def _chunk_completions(
+    loaded: LoadedModel,
+    head: torch.nn.Module,
+    streams: list[list[list[int]]],
+    *,
+    layers: Sequence[int],
+    alpha: float,
+    window: int,
+    max_new_tokens: int,
+) -> list[Completion]:
+    """Decodes one chunk greedily; `streams` holds main, positive, negative."""
+    eos = _eos_ids(loaded)
+    count = len(streams[0])
+    generated: list[list[int]] = [[] for _ in range(count)]
+    finished = [False] * count
+    active = list(range(count))
+    for _ in range(max_new_tokens):
+        if not active:
+            break
+        rows = [stream[i] for stream in streams for i in active]
+        windows = contrast_windows([len(row) for row in rows], window)
+        hidden = _forward(
+            loaded, _left_padded(loaded, rows), layers, alpha, windows
+        )
+        with torch.inference_mode():
+            chosen = head(hidden[: len(active), -1]).argmax(dim=-1).tolist()
+        for i, token in zip(active, chosen, strict=True):
+            if token in eos:
+                finished[i] = True
+                continue
+            generated[i].append(token)
+            for stream in streams:
+                stream[i].append(token)
+        active = [i for i in active if not finished[i]]
+    return [
+        Completion(
+            text=str(loaded.tokenizer.decode(ids, skip_special_tokens=True)),
+            token_ids=tuple(ids),
+            finished=done,
+        )
+        for ids, done in zip(generated, finished, strict=True)
+    ]
+
+
+def contrast_generate(
+    loaded: LoadedModel,
+    prompts: Sequence[str],
+    positive: Sequence[str],
+    negative: Sequence[str],
+    *,
+    layers: Sequence[int],
+    alpha: float,
+    max_new_tokens: int,
+    window: int = 8,
+    bos: BosMode | None = None,
+    batch_size: int = 8,
+) -> list[Completion]:
+    """Generates greedily under the contrast cascade.
+
+    The KV cache cannot be used: the shifted window slides with the sequence,
+    so every step re-runs the three streams in full. The chosen token is
+    appended to all three streams of a row, so the suffix alignment follows
+    the current lengths.
+
+    Args:
+        loaded: The wrapped model.
+        prompts: The main prompts, in the order of the result.
+        positive: One positive text per prompt.
+        negative: One negative text per prompt.
+        layers: Layers in 0..L that receive the shift.
+        alpha: Shift coefficient.
+        max_new_tokens: Maximum number of generated tokens per row.
+        window: Maximum number of shifted trailing columns.
+        bos: BOS policy passed to `loaded.encode`.
+        batch_size: Prompts per chunk, each chunk holding `3 * batch_size`
+            rows.
+
+    Returns:
+        One completion per prompt; a row stops at an end-of-sequence id of
+        the generation config and the id is excluded.
+
+    Raises:
+        ValueError: If the lists differ in length, a layer is outside 0..L
+            or `layers` is empty, `max_new_tokens`, `batch_size` or `window`
+            is below 1, `alpha` is not finite, or the longest of the three
+            streams plus `max_new_tokens` exceeds `max_position_embeddings`.
+    """
+    _check_triples(prompts, positive, negative)
+    wanted = _check_layers(loaded, layers)
+    _check_alpha(alpha)
+    for name, value in (
+        ("max_new_tokens", max_new_tokens),
+        ("batch_size", batch_size),
+        ("window", window),
+    ):
+        if value < 1:
+            raise ValueError(f"{name} must be >= 1, got {value}")
+    if not prompts:
+        return []
+    head = _head(loaded)
+    chunks = []
+    for start in range(0, len(prompts), batch_size):
+        stop = start + batch_size
+        chunks.append(
+            loaded.encode(
+                [
+                    *prompts[start:stop],
+                    *positive[start:stop],
+                    *negative[start:stop],
+                ],
+                bos=bos,
+                padding_side="left",
+            )
+        )
+    limit = getattr(loaded.model.config, "max_position_embeddings", None)
+    longest = max(max(batch.lengths) for batch in chunks)
+    if limit is not None and longest + max_new_tokens > limit:
+        raise ValueError(
+            f"The longest stream has {longest} tokens and max_new_tokens is "
+            f"{max_new_tokens}, which exceeds max_position_embeddings "
+            f"({limit})"
+        )
+    result: list[Completion] = []
+    for batch in chunks:
+        width = batch.input_ids.shape[1]
+        rows = [
+            ids[width - length :]
+            for ids, length in zip(
+                batch.input_ids.tolist(), batch.lengths, strict=True
+            )
+        ]
+        count = len(rows) // 3
+        result.extend(
+            _chunk_completions(
+                loaded,
+                head,
+                [rows[:count], rows[count : 2 * count], rows[2 * count :]],
+                layers=wanted,
+                alpha=alpha,
+                window=window,
+                max_new_tokens=max_new_tokens,
+            )
+        )
+    return result

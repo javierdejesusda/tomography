@@ -1,15 +1,18 @@
 from collections.abc import Sequence
+import time
 from typing import Any
 
 import pytest
 import torch
 
 from tomography.control.contrast import contrast_edits
+from tomography.control.contrast import contrast_generate
 from tomography.control.contrast import contrast_logits
 from tomography.control.contrast import contrast_windows
 from tomography.hooks import ForwardInfo
 from tomography.model import BosMode
 from tomography.model import LoadedModel
+from tomography.model import load_model
 
 
 def test_windows_take_the_minimum_over_the_triple() -> None:
@@ -389,3 +392,292 @@ def test_logits_reject_invalid_arguments(
 
     with pytest.raises(ValueError, match=MESSAGES):
         contrast_logits(tiny_arch, **options)
+
+
+def reference_generate(
+    lm: LoadedModel,
+    prompts: Sequence[str],
+    positive: Sequence[str],
+    negative: Sequence[str],
+    layers: Sequence[int],
+    alpha: float,
+    window: int,
+    steps: int,
+    *,
+    grow: bool = True,
+) -> list[list[int]]:
+    bos: BosMode = lm.default_bos
+    result = []
+    for main, pos, neg in zip(
+        reference_streams(lm, prompts, bos),
+        reference_streams(lm, positive, bos),
+        reference_streams(lm, negative, bos),
+        strict=True,
+    ):
+        new: list[int] = []
+        for _ in range(steps):
+            with torch.no_grad():
+                hidden = reference_hidden(
+                    lm, main, pos, neg, layers, alpha, window
+                )
+                logits = lm.model.get_output_embeddings()(hidden[0, -1])
+            token = int(logits.argmax())
+            new.append(token)
+            main.append(token)
+            if grow:
+                pos.append(token)
+                neg.append(token)
+        result.append(new)
+    return result
+
+
+GENERATE = {"layers": (1, 2, 3), "alpha": 2.0, "window": 4}
+
+
+def test_generate_equals_the_reference_greedy_loop(
+    tiny_arch: LoadedModel,
+) -> None:
+    tiny_arch.model.generation_config.eos_token_id = None
+
+    result = contrast_generate(
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, max_new_tokens=6, **GENERATE
+    )
+
+    expected = reference_generate(
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, steps=6, **GENERATE
+    )
+    assert [list(c.token_ids) for c in result] == expected
+    assert not any(c.finished for c in result)
+
+
+def test_generate_grows_the_positive_and_negative_streams(
+    tiny_arch: LoadedModel,
+) -> None:
+    tiny_arch.model.generation_config.eos_token_id = None
+
+    grown = reference_generate(
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, steps=6, **GENERATE
+    )
+    frozen = reference_generate(
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, steps=6, grow=False, **GENERATE
+    )
+
+    assert grown != frozen
+
+
+def test_generate_cuts_at_the_end_of_sequence_id(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tiny_arch.model.generation_config
+    monkeypatch.setattr(config, "eos_token_id", None)
+    full = contrast_generate(
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, max_new_tokens=6, **GENERATE
+    )
+    eos = full[0].token_ids[0]
+    monkeypatch.setattr(config, "eos_token_id", eos)
+
+    cut = contrast_generate(
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, max_new_tokens=6, **GENERATE
+    )
+
+    assert cut[0].token_ids == ()
+    assert cut[0].finished
+    for row, expected in zip(cut, full, strict=True):
+        ids = expected.token_ids
+        kept = ids[: ids.index(eos)] if eos in ids else ids
+        assert row.token_ids == kept
+        assert row.finished == (eos in ids)
+        assert row.text == tiny_arch.tokenizer.decode(
+            kept, skip_special_tokens=True
+        )
+
+
+def test_generate_accepts_a_list_of_end_of_sequence_ids(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tiny_arch.model.generation_config
+    monkeypatch.setattr(config, "eos_token_id", None)
+    full = contrast_generate(
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, max_new_tokens=6, **GENERATE
+    )
+    monkeypatch.setattr(config, "eos_token_id", [full[1].token_ids[2], 399])
+
+    cut = contrast_generate(
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, max_new_tokens=6, **GENERATE
+    )
+
+    assert cut[1].token_ids == full[1].token_ids[:2]
+    assert cut[1].finished
+
+
+def test_generate_text_is_the_decoded_ids(tiny_arch: LoadedModel) -> None:
+    tiny_arch.model.generation_config.eos_token_id = None
+
+    result = contrast_generate(
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, max_new_tokens=4, **GENERATE
+    )
+
+    for completion in result:
+        assert completion.text == tiny_arch.tokenizer.decode(
+            completion.token_ids, skip_special_tokens=True
+        )
+
+
+def test_generate_does_not_depend_on_batch_size(tiny_arch: LoadedModel) -> None:
+    tiny_arch.model.generation_config.eos_token_id = None
+
+    results = [
+        contrast_generate(
+            tiny_arch,
+            PROMPTS,
+            POSITIVE,
+            NEGATIVE,
+            max_new_tokens=5,
+            batch_size=size,
+            **GENERATE,
+        )
+        for size in (1, 2, 3)
+    ]
+
+    assert results[0] == results[1] == results[2]
+
+
+def test_generate_stops_rows_independently(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tiny_arch.model.generation_config
+    monkeypatch.setattr(config, "eos_token_id", None)
+    full = contrast_generate(
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, max_new_tokens=6, **GENERATE
+    )
+    monkeypatch.setattr(config, "eos_token_id", full[2].token_ids[1])
+
+    cut = contrast_generate(
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, max_new_tokens=6, **GENERATE
+    )
+    alone = [
+        contrast_generate(
+            tiny_arch, [p], [q], [n], max_new_tokens=6, **GENERATE
+        )[0]
+        for p, q, n in zip(PROMPTS, POSITIVE, NEGATIVE, strict=True)
+    ]
+
+    assert cut == alone
+
+
+def test_generate_position_limit_fires_before_any_forward(
+    tiny_arch: LoadedModel,
+) -> None:
+    calls: list[int] = []
+    handle = tiny_arch.decoder.register_forward_pre_hook(
+        lambda module, args, kwargs: calls.append(1), with_kwargs=True
+    )
+    limit = tiny_arch.model.config.max_position_embeddings
+    long = ["The lazy dog " * 20]
+    max_new_tokens = limit - 20
+    longest = max(tiny_arch.encode(long).lengths)
+    assert longest <= limit < longest + max_new_tokens
+
+    try:
+        with pytest.raises(ValueError, match="max_position_embeddings"):
+            contrast_generate(
+                tiny_arch,
+                PROMPTS[:1] + PROMPTS[:1],
+                [*POSITIVE[:1], *long],
+                [*NEGATIVE[:1], *NEGATIVE[:1]],
+                max_new_tokens=max_new_tokens,
+                batch_size=1,
+                **GENERATE,
+            )
+    finally:
+        handle.remove()
+
+    assert calls == []
+
+
+def test_generate_returns_an_empty_list_for_no_prompts(
+    tiny_arch: LoadedModel,
+) -> None:
+    assert (
+        contrast_generate(tiny_arch, [], [], [], max_new_tokens=3, **GENERATE)
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"positive": POSITIVE[:2]},
+        {"negative": NEGATIVE[:1]},
+        {"layers": ()},
+        {"layers": (4,)},
+        {"layers": (-1,)},
+        {"max_new_tokens": 0},
+        {"batch_size": 0},
+        {"window": 0},
+        {"alpha": float("nan")},
+        {"alpha": float("inf")},
+    ],
+    ids=[
+        "positive_shorter",
+        "negative_shorter",
+        "empty_layers",
+        "layer_above_range",
+        "layer_negative",
+        "max_new_tokens_zero",
+        "batch_size_zero",
+        "window_zero",
+        "alpha_nan",
+        "alpha_inf",
+    ],
+)
+def test_generate_rejects_invalid_arguments(
+    tiny_arch: LoadedModel, kwargs: dict[str, Any]
+) -> None:
+    options: dict[str, Any] = {
+        "prompts": PROMPTS,
+        "positive": POSITIVE,
+        "negative": NEGATIVE,
+        "max_new_tokens": 3,
+        **GENERATE,
+        **kwargs,
+    }
+
+    with pytest.raises(ValueError, match=MESSAGES):
+        contrast_generate(tiny_arch, **options)
+
+
+@pytest.mark.slow
+def test_gpt2_contrast_logits_and_generation_speed() -> None:
+    gpt2 = load_model("gpt2")
+    sentence = "The quick brown fox jumps over the lazy dog. " * 8
+    ids = gpt2.tokenizer(sentence, add_special_tokens=False)["input_ids"]
+    prompts = [
+        gpt2.tokenizer.decode(ids[start : start + 32])
+        for start in range(0, 8 * 3, 3)
+    ]
+    positive = [p + " Give a truthful answer." for p in prompts]
+    negative = [p + " Give an untruthful answer." for p in prompts]
+    options = {"layers": [6, 9], "alpha": 0.25}
+
+    batch = gpt2.encode(prompts[:3], padding_side="left")
+    assert set(batch.lengths) == {33}
+    with torch.no_grad():
+        plain = gpt2.model(
+            input_ids=batch.input_ids,
+            attention_mask=batch.attention_mask,
+            position_ids=batch.position_ids,
+        ).logits[:, -1]
+    steered = contrast_logits(
+        gpt2, prompts[:3], positive[:3], negative[:3], **options
+    )
+    start = time.perf_counter()
+    completions = contrast_generate(
+        gpt2, prompts, positive, negative, max_new_tokens=8, **options
+    )
+    seconds = time.perf_counter() - start
+
+    assert torch.isfinite(steered).all()
+    assert not torch.allclose(steered, plain)
+    assert len(completions) == 8
+    print(f"contrast_generate: {seconds / 8:.3f} s per generated token")
