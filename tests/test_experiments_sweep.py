@@ -29,6 +29,7 @@ from tomography.experiments.sweep import sweep_from_activations
 from tomography.experiments.sweep import write_curves
 from tomography.model import CheckpointSpec
 from tomography.model import LoadedModel
+from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.reader import RepReader
 from tomography.templates import PAPER_TEMPLATES
@@ -568,6 +569,28 @@ def test_write_curves_uses_the_stem_and_labels(tmp_path: Path) -> None:
     assert sidecar["xlabel"] == "Depth"
     assert sidecar["ylabel"] == "Score"
     assert sidecar["chance"] is None
+
+
+def test_write_curves_band_is_the_bootstrap_of_the_seeds(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    per_seed = _per_seed()
+    write_curves(
+        run_dir,
+        per_seed,
+        (1, 2, 3, 4),
+        series=SERIES,
+        alpha=0.2,
+        n_boot=300,
+        seed=9,
+    )
+    lo, hi = bootstrap_ci(
+        per_seed.transpose(1, 0, 2), alpha=0.2, n_boot=300, seed=9
+    )
+    arrays = run_dir.read_arrays("curves")
+    np.testing.assert_array_equal(arrays["lo"], lo)
+    np.testing.assert_array_equal(arrays["hi"], hi)
 
 
 @pytest.mark.parametrize(
