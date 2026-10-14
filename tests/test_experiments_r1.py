@@ -251,6 +251,15 @@ def test_default_method_reads_sentiment_from_unmatched_pairs() -> None:
     assert reader.mean(axis=0).min() > 0.85
 
 
+def test_pca_diff_follows_the_loud_content_axis_not_sentiment() -> None:
+    train = [_unmatched_pairs(32, seed=i) for i in range(3)]
+    evals = {"val": _unmatched_pairs(128, seed=99)}
+    reader = sweep_from_activations(
+        train, evals, method="pca_diff", seed=0
+    ).per_seed("val")[0]
+    assert reader.mean(axis=0).max() < 0.65
+
+
 @pytest.mark.slow
 def test_r1_on_gpt2_reads_sentiment_above_the_floor(tmp_path: Path) -> None:
     config = Config(n_seeds=3, n_pairs=32, n_eval_pairs=128)
