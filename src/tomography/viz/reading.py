@@ -20,6 +20,8 @@ CurveArrays = tuple[FloatArray, FloatArray, FloatArray, FloatArray]
 
 BAND_ALPHA = 0.1
 SEED_ALPHA = 0.3
+MAX_LEGEND_COLUMNS = 4
+LEGEND_MARGIN = 0.6
 
 
 def curves_from_arrays(
@@ -85,6 +87,22 @@ def _check_inputs(
             )
 
 
+def _legend_above(ax: Axes, n_series: int) -> None:
+    fig = style.figure_of(ax)
+    budget = fig.bbox.width - LEGEND_MARGIN * fig.dpi
+    for ncols in range(min(n_series, MAX_LEGEND_COLUMNS), 0, -1):
+        legend = ax.legend(
+            loc="lower left",
+            bbox_to_anchor=(0.0, 1.0),
+            borderaxespad=0.2,
+            ncols=ncols,
+            handlelength=1.5,
+            columnspacing=1.2,
+        )
+        if legend.get_window_extent().width <= budget:
+            return
+
+
 def plot_curves(
     curves: Sequence[CurveArrays],
     *,
@@ -101,9 +119,10 @@ def plot_curves(
     """Plots one line with a confidence band per series.
 
     Series take the categorical hues in order and a band at 10% opacity. A
-    legend above the plot names two or more series; it replaces end labels
-    because layer curves converge and would collide. The chance label sits
-    in the right margin for the same reason.
+    legend above the plot names two or more series, in as many columns as fit
+    the figure width; it replaces end labels because layer curves converge
+    and would collide. The chance label sits in the right margin for the
+    same reason.
 
     Args:
         curves: One `(x, mean, lo, hi)` tuple per series, each of shape (K,)
@@ -175,12 +194,5 @@ def plot_curves(
         if legend is None:
             legend = len(curves) > 1
         if legend:
-            ax.legend(
-                loc="lower left",
-                bbox_to_anchor=(0.0, 1.0),
-                borderaxespad=0.2,
-                ncols=min(len(curves), 4),
-                handlelength=1.5,
-                columnspacing=1.2,
-            )
+            _legend_above(ax, len(curves))
     return style.figure_of(ax)

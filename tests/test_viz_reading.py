@@ -172,6 +172,61 @@ def test_the_legend_sits_above_the_plot_area() -> None:
     assert legend.get_window_extent().y0 >= ax.get_window_extent().y1 - 1
 
 
+@pytest.mark.parametrize(
+    ("labels", "columns"),
+    [
+        (
+            ["GPT-2 small", "GPT-2 medium", "GPT-2 large", "GPT-2 XL"],
+            3,
+        ),
+        (
+            [
+                "Qwen3 0.6B base",
+                "Qwen3 0.6B post",
+                "Qwen3 1.7B base",
+                "Qwen3 1.7B post",
+            ],
+            2,
+        ),
+        (
+            [
+                "Honesty on TruthfulQA, validation",
+                "Honesty on TruthfulQA, test split",
+            ],
+            1,
+        ),
+        ([f"model-{i:04d}" for i in range(8)], 3),
+        (list("abcdefgh"), 4),
+    ],
+    ids=[
+        "gpt2-sizes",
+        "qwen3-pairs",
+        "two-long",
+        "eight-medium",
+        "eight-short",
+    ],
+)
+def test_the_legend_wraps_to_fit_the_default_figure(
+    labels: list[str], columns: int
+) -> None:
+    x, mean, lo, hi = make_arrays(n_series=len(labels))
+
+    fig = reading.plot_curves(
+        reading.curves_from_arrays(x, mean, lo, hi), series=labels
+    )
+
+    fig.canvas.draw()
+    ax = fig.axes[0]
+    legend = ax.get_legend()
+    assert legend is not None
+    box = legend.get_window_extent()
+    assert box.x0 >= 0
+    assert box.x1 <= fig.bbox.width
+    assert ax.get_window_extent().width >= 0.6 * fig.bbox.width
+    starts = {round(t.get_window_extent().x0) for t in legend.get_texts()}
+    assert len(starts) == columns
+
+
 def test_a_single_series_gets_no_legend() -> None:
     x, mean, lo, hi = make_arrays(n_series=1)
 
