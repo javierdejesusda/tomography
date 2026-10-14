@@ -215,6 +215,39 @@ def test_sampling_leaves_the_global_rng_state_unchanged(
     assert torch.equal(torch.get_rng_state(), before)
 
 
+@pytest.mark.parametrize("temperature", [None, 1.0], ids=["greedy", "sampling"])
+def test_generate_never_calls_the_global_seed_functions(
+    tiny_arch: LoadedModel,
+    monkeypatch: pytest.MonkeyPatch,
+    temperature: float | None,
+) -> None:
+    tiny_arch.model.generation_config.eos_token_id = None
+    calls: list[str] = []
+
+    def recorder(name: str) -> Any:
+        def record(*args: Any, **kwargs: Any) -> None:
+            calls.append(name)
+
+        return record
+
+    for owner, name in (
+        (torch, "manual_seed"),
+        (torch.cuda, "manual_seed_all"),
+        (torch.cuda, "manual_seed"),
+    ):
+        monkeypatch.setattr(owner, name, recorder(f"{owner.__name__}.{name}"))
+
+    generate(
+        tiny_arch,
+        PROMPTS,
+        max_new_tokens=2,
+        temperature=temperature,
+        seed=1,
+    )
+
+    assert calls == []
+
+
 def test_num_samples_returns_completions_in_prompt_major_order(
     tiny_arch: LoadedModel,
 ) -> None:
@@ -386,3 +419,27 @@ def test_gpt2_generation_plumbing() -> None:
         for completion in row:
             assert len(completion.token_ids) <= 8
             assert isinstance(completion.text, str)
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+@pytest.mark.parametrize(
+    "device", ["cpu", "cuda"], ids=["cpu_model", "cuda_model"]
+)
+def test_gpt2_sampling_seeds_and_restores_the_global_rng_on_cuda(
+    device: str,
+) -> None:
+    gpt2 = load_model("gpt2", device=device)
+    torch.manual_seed(123)
+    before = (torch.get_rng_state(), torch.cuda.get_rng_state())
+    options: dict[str, Any] = {"max_new_tokens": 8, "temperature": 1.0}
+
+    first = generate(gpt2, PROMPTS, seed=5, **options)
+    again = generate(gpt2, PROMPTS, seed=5, **options)
+    other = generate(gpt2, PROMPTS, seed=6, **options)
+    generate(gpt2, PROMPTS, max_new_tokens=8)
+
+    assert first == again
+    assert first != other
+    assert torch.equal(torch.get_rng_state(), before[0])
+    assert torch.equal(torch.cuda.get_rng_state(), before[1])

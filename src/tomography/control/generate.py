@@ -88,6 +88,14 @@ def _cut(
     )
 
 
+def _seed_generators(seed: int, devices: Sequence[torch.device]) -> None:
+    """Seeds the CPU generator and the CUDA generators of `devices`."""
+    torch.default_generator.manual_seed(seed)
+    for device in devices:
+        with torch.cuda.device(device):
+            torch.cuda.manual_seed(seed)
+
+
 def generate(
     loaded: LoadedModel,
     prompts: Sequence[str],
@@ -106,10 +114,11 @@ def generate(
 
     Each prompt is repeated `num_samples` times (prompt-major) and chunks of
     `batch_size` prompts run one Hugging Face call each. Sampling is seeded
-    per chunk inside `fork_rng`, so results depend on `(seed, batch_size,
-    prompt order)` and the global RNG state is left unchanged. Generation
-    uses the KV cache, so after the prefill an edit sees one token per row
-    and must be position local.
+    per chunk inside `fork_rng` (only the CPU and the CUDA device of the
+    model are seeded and restored), so results depend on `(seed,
+    batch_size, prompt order)` and the global RNG state is left unchanged.
+    Greedy decoding touches no RNG. Generation uses the KV cache, so after
+    the prefill an edit sees one token per row and must be position local.
 
     Args:
         loaded: The wrapped model.
@@ -177,13 +186,16 @@ def generate(
     for k, batch in enumerate(chunks):
         residual_edits = {} if edits is None else edits(batch)
         with contextlib.ExitStack() as stack:
-            stack.enter_context(torch.random.fork_rng(devices=devices))
+            if temperature is not None:
+                stack.enter_context(torch.random.fork_rng(devices=devices))
             stack.enter_context(torch.inference_mode())
             if residual_edits:
                 stack.enter_context(edit_residuals(loaded, residual_edits))
-            torch.manual_seed(
-                int(np.random.SeedSequence([seed, k]).generate_state(1)[0])
-            )
+            if temperature is not None:
+                _seed_generators(
+                    int(np.random.SeedSequence([seed, k]).generate_state(1)[0]),
+                    devices,
+                )
             output = loaded.model.generate(  # type: ignore[operator]
                 input_ids=batch.input_ids.to(loaded.device),
                 attention_mask=batch.attention_mask.to(loaded.device),
