@@ -425,6 +425,28 @@ def test_execute_writes_the_readers_of_the_sweep(
     )
 
 
+def test_summary_reports_the_best_layer_of_the_reader_series(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    accuracy = np.full((1, len(SERIES), 3, 2), 0.5)
+    accuracy[0, SERIES.index("reader")] = [
+        [0.55, 0.85],
+        [0.65, 0.95],
+        [0.60, 0.90],
+    ]
+    accuracy[0, SERIES.index("random")] = [0.80, 0.50]
+    result = _canned_result(layers=(4, 8), accuracy=accuracy)
+    run_dir, _ = _execute_with_spy(
+        _config(), tiny_arch, tmp_path, monkeypatch, result=result
+    )
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["best_layer"] == 8
+    assert summary["best_accuracy"] == pytest.approx(0.90)
+    lo, hi = summary["ci"]
+    assert lo <= 0.90 <= hi
+
+
 @pytest.mark.slow
 def test_r1_on_gpt2_reads_sentiment_above_the_floor(tmp_path: Path) -> None:
     config = Config(n_seeds=3, n_pairs=32, n_eval_pairs=128)
