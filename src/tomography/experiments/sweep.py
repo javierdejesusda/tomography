@@ -122,7 +122,8 @@ def sweep_from_activations(
     For training set i, `reader` is `RepReader.fit(method, ...)` on the real
     labels, `random` a random unit direction oriented by the same sign rule,
     and `shuffled` the `reader` scored against evaluation labels shuffled
-    within each group (a permutation null).
+    within each group (a permutation null). The shuffle moves the positive
+    stimulus of a group, so all token rows of a stimulus move together.
 
     Args:
         train: One `(stimuli, activations)` pair per seed.
@@ -161,10 +162,12 @@ def sweep_from_activations(
             e_stimuli, e_act = evals[name]
             e_groups = e_act.row_groups(e_stimuli.groups)
             e_labels = e_act.row_values(e_stimuli.labels)
-            shuffled = shuffle_within_groups(
-                e_labels,
-                e_groups,
-                seed=derive_seed(seed, "shuffled", i, name),
+            shuffled = e_act.row_values(
+                shuffle_within_groups(
+                    e_stimuli.labels,
+                    e_stimuli.groups,
+                    seed=derive_seed(seed, "shuffled", i, name),
+                )
             )
             scores = reader.score(e_act.data)
             accuracy[e, 0, i] = group_accuracy(scores, e_groups, e_labels)

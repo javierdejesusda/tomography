@@ -80,6 +80,29 @@ def _planted(
     return stimuli, act
 
 
+def _planted_rows(n_pairs: int, *, rows: int, seed: int) -> Prepared:
+    """Like `_planted`, but every stimulus holds `rows` token rows.
+
+    The rows of a stimulus are noisy copies of its `_planted` row, so a
+    reader fitted on `_planted` sets stays perfect on them.
+    """
+    stimuli, single = _planted(n_pairs, seed=seed)
+    n = single.n_stimuli
+    noise = np.random.default_rng(seed + 1).normal(
+        scale=0.1, size=(len(single.layers), n * rows, DIM)
+    )
+    act = dataclasses.replace(
+        single,
+        data=(np.repeat(single.data, rows, axis=1) + noise).astype(np.float32),
+        position="response",
+        row_stimulus=np.repeat(np.arange(n, dtype=np.int64), rows),
+        row_rank=np.tile(np.arange(rows, dtype=np.int64), n),
+        row_token=np.tile(np.arange(rows, dtype=np.int64), n),
+        row_token_id=np.zeros(n * rows, dtype=np.int64),
+    )
+    return stimuli, act
+
+
 def _inputs(
     n_train: int = 3,
 ) -> tuple[list[Prepared], Mapping[str, Prepared]]:
@@ -212,6 +235,19 @@ def test_sweep_shuffled_series_sits_at_chance() -> None:
     result = sweep_from_activations(train, evals, seed=0)
     shuffled = result.per_seed("val")[SERIES.index("shuffled")]
     assert np.abs(shuffled - 0.5).max() < 0.08
+
+
+def test_sweep_shuffled_series_moves_whole_stimuli_not_token_rows() -> None:
+    train = [_planted(40, seed=10 + i) for i in range(4)]
+    evals = {"val": _planted_rows(25, rows=4, seed=95)}
+    result = sweep_from_activations(train, evals, seed=0)
+    per_seed = result.per_seed("val")
+    reader = per_seed[SERIES.index("reader")]
+    shuffled = per_seed[SERIES.index("shuffled")]
+    np.testing.assert_array_equal(reader, np.ones_like(reader))
+    np.testing.assert_allclose(
+        shuffled * 25, np.round(shuffled * 25), atol=1e-9
+    )
 
 
 def test_sweep_random_series_is_below_the_reader() -> None:
