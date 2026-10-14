@@ -1,5 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+import math
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -8,6 +10,7 @@ import torch
 
 from tomography.control import controllers
 from tomography.control.controllers import ReadingVectorController
+from tomography.control.controllers import mean_residual_norms
 from tomography.control.operators import Operator
 from tomography.control.operators import apply_operator
 from tomography.hooks import ForwardInfo
@@ -16,6 +19,7 @@ from tomography.hooks import capture_residuals
 from tomography.hooks import edit_residuals
 from tomography.model import EncodedBatch
 from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.model import wrap_model
 
 NO_INFO = ForwardInfo(None, None)
@@ -281,6 +285,54 @@ def test_response_mask_accepts_one_prompt_length_for_all_rows(
     assert torch.equal(as_list.logits, as_int.logits)
 
 
+@pytest.mark.parametrize("side", ["right", "left"])
+def test_call_with_response_mask_edits_only_the_last_real_token(
+    tiny_arch: LoadedModel, side: Literal["right", "left"]
+) -> None:
+    encoded = tiny_arch.encode(TEXTS, padding_side=side)
+    assert len(set(encoded.lengths)) == len(TEXTS)
+    controller = ReadingVectorController.from_reader(
+        source_for(tiny_arch), coeff=1.5, mask="response"
+    )
+    layer = 2
+
+    seen = run(tiny_arch, encoded, controller(encoded), (layer,))
+
+    delta = seen.after[layer] - seen.before[layer]
+    expected = 1.5 * controller.vectors[layer]
+    seq = encoded.input_ids.shape[1]
+    for row, length in enumerate(encoded.lengths):
+        last = length - 1 if side == "right" else seq - 1
+        others = [column for column in range(seq) if column != last]
+        assert torch.equal(
+            delta[row, others], torch.zeros_like(delta[row, others])
+        )
+        assert torch.allclose(delta[row, last], expected, atol=1e-5)
+
+
+def test_preserve_norm_is_forwarded_to_the_operator(
+    tiny_arch: LoadedModel,
+) -> None:
+    encoded = tiny_arch.encode(TEXTS)
+    real = real_token_mask(encoded)
+    layer = 2
+
+    def norms(preserve_norm: bool) -> tuple[torch.Tensor, torch.Tensor]:
+        controller = ReadingVectorController.from_reader(
+            source_for(tiny_arch), coeff=1.5, preserve_norm=preserve_norm
+        )
+        seen = run(tiny_arch, encoded, controller(encoded), (layer,))
+        return (
+            seen.before[layer].norm(dim=-1)[real],
+            seen.after[layer].norm(dim=-1)[real],
+        )
+
+    before, after = norms(True)
+    torch.testing.assert_close(after, before, rtol=1e-6, atol=0)
+    before, after = norms(False)
+    assert not torch.allclose(after, before, rtol=1e-3)
+
+
 def test_edit_mask_is_built_once_per_forward_and_shared_by_layers(
     tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -455,6 +507,8 @@ def unit(d_model: int = 4) -> torch.Tensor:
         ({"vectors": {1: unit(4), 2: unit(5)}}, "different lengths"),
         ({"coeff": float("nan")}, "finite"),
         ({"coeff": float("inf")}, "finite"),
+        ({"mode": "relatve"}, "mode must be"),
+        ({"mask": "responce"}, "mask must be"),  # codespell:ignore responce
         ({"mode": "relative"}, "norm"),
         ({"mode": "relative", "norms": {2: 1.0}}, "layer 1"),
         ({"mode": "relative", "norms": {1: 0.0}}, "layer 1"),
@@ -474,6 +528,8 @@ def unit(d_model: int = 4) -> torch.Tensor:
         "different_lengths",
         "nan_coeff",
         "inf_coeff",
+        "bad_mode",
+        "bad_mask",
         "relative_without_norms",
         "relative_missing_layer_norm",
         "relative_zero_norm",
@@ -549,3 +605,135 @@ def test_prompt_lengths_that_do_not_match_the_rows_fail_at_the_forward(
 
     with pytest.raises(ValueError, match="prompt lengths"):
         run(tiny_arch, encoded, edits)
+
+
+LAYERS = [0, 2, 3]
+
+
+def manual_norms(
+    lm: LoadedModel, texts: list[str], layers: list[int], skip_first: bool
+) -> dict[int, float]:
+    """Pools the norms of every real token, one text per forward."""
+    pooled: dict[int, list[torch.Tensor]] = {layer: [] for layer in layers}
+    for text in texts:
+        encoded = lm.encode([text])
+        seen = run(lm, encoded, capture=tuple(layers)).before
+        for layer in layers:
+            norms = seen[layer][0].float().norm(dim=-1)
+            pooled[layer].append(norms[1:] if skip_first else norms)
+    return {
+        layer: float(torch.cat(parts).mean()) for layer, parts in pooled.items()
+    }
+
+
+@pytest.mark.parametrize("skip_first", [True, False], ids=["skip", "keep"])
+def test_mean_residual_norms_pools_all_real_tokens(
+    tiny_arch: LoadedModel, skip_first: bool
+) -> None:
+    result = mean_residual_norms(
+        tiny_arch, TEXTS, LAYERS, bos="prepend", skip_first=skip_first
+    )
+
+    expected = manual_norms(tiny_arch, TEXTS, LAYERS, skip_first)
+    assert sorted(result) == LAYERS
+    for layer in LAYERS:
+        assert result[layer] == pytest.approx(expected[layer], rel=1e-5)
+
+
+def test_skip_first_changes_the_mean(tiny_arch: LoadedModel) -> None:
+    kept = mean_residual_norms(tiny_arch, TEXTS, [2], skip_first=False)
+    skipped = mean_residual_norms(tiny_arch, TEXTS, [2], skip_first=True)
+
+    assert kept[2] != pytest.approx(skipped[2], rel=1e-3)
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 8], ids=str)
+def test_mean_residual_norms_ignores_the_batch_size(
+    tiny_arch: LoadedModel, batch_size: int
+) -> None:
+    reference = mean_residual_norms(tiny_arch, TEXTS, LAYERS, batch_size=3)
+
+    result = mean_residual_norms(
+        tiny_arch, TEXTS, LAYERS, batch_size=batch_size
+    )
+
+    for layer in LAYERS:
+        assert result[layer] == pytest.approx(reference[layer], rel=1e-5)
+
+
+def test_mean_residual_norms_on_a_bfloat16_model(
+    tiny_arch: LoadedModel,
+) -> None:
+    lm = wrap_model(
+        tiny_arch.model.to(torch.bfloat16),  # type: ignore[arg-type]
+        tiny_arch.tokenizer,
+    )
+
+    result = mean_residual_norms(lm, TEXTS, LAYERS)
+
+    expected = manual_norms(lm, TEXTS, LAYERS, skip_first=True)
+    for layer in LAYERS:
+        assert result[layer] == pytest.approx(expected[layer], rel=1e-4)
+
+
+def test_mean_residual_norms_returns_floats_and_collapses_duplicates(
+    tiny_arch: LoadedModel,
+) -> None:
+    result = mean_residual_norms(tiny_arch, TEXTS, [2, 2, 1])
+
+    assert list(result) == [2, 1]
+    assert all(type(value) is float for value in result.values())
+
+
+@pytest.mark.parametrize(
+    ("layers", "texts", "bos", "batch_size", "match"),
+    [
+        ([], TEXTS, None, 8, "layers is empty"),
+        ([2], [], None, 8, "texts is empty"),
+        ([4], TEXTS, None, 8, "layer 4"),
+        ([-1], TEXTS, None, 8, "layer -1"),
+        ([2], ["a"], "none", 8, "no token"),
+        ([2], TEXTS, None, 0, "batch_size"),
+        ([2], TEXTS, None, -1, "batch_size"),
+    ],
+    ids=[
+        "no_layers",
+        "no_texts",
+        "layer_above",
+        "layer_below",
+        "no_token",
+        "batch_size_zero",
+        "batch_size_negative",
+    ],
+)
+def test_mean_residual_norms_rejects_bad_arguments(
+    tiny_arch: LoadedModel,
+    layers: list[int],
+    texts: list[str],
+    bos: str | None,
+    batch_size: int,
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        mean_residual_norms(
+            tiny_arch,
+            texts,
+            layers,
+            bos=bos,  # type: ignore[arg-type]
+            batch_size=batch_size,
+        )
+
+
+@pytest.mark.slow
+def test_gpt2_mean_residual_norms_with_and_without_the_first_token() -> None:
+    gpt2 = load_model("gpt2")
+    layers = [gpt2.n_layers // 2, gpt2.n_layers]
+
+    kept = mean_residual_norms(gpt2, TEXTS, layers, skip_first=False)
+    skipped = mean_residual_norms(gpt2, TEXTS, layers, skip_first=True)
+
+    print(f"mean residual norms with token 0: {kept}")
+    print(f"mean residual norms without token 0: {skipped}")
+    for layer in layers:
+        assert 0 < kept[layer] < math.inf
+        assert 0 < skipped[layer] < math.inf

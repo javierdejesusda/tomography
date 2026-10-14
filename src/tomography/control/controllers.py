@@ -11,6 +11,7 @@ import math
 from typing import Literal
 from typing import Protocol
 from typing import Self
+from typing import get_args
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,10 +21,16 @@ from tomography.control.operators import Operator
 from tomography.control.operators import apply_operator
 from tomography.hooks import ForwardInfo
 from tomography.hooks import ResidualEdit
+from tomography.hooks import capture_residuals
+from tomography.model import BosMode
 from tomography.model import EncodedBatch
+from tomography.model import LoadedModel
 
 CoeffMode = Literal["absolute", "relative"]
 ResponseMask = Literal["all", "response"]
+
+_COEFF_MODES = get_args(CoeffMode)
+_RESPONSE_MASKS = get_args(ResponseMask)
 
 
 class VectorSource(Protocol):
@@ -43,6 +50,72 @@ class VectorSource(Protocol):
     def signs(self) -> NDArray[np.float32]:
         """Orientation of each direction, `(K,)` with values in {-1, +1}."""
         ...
+
+
+def mean_residual_norms(
+    loaded: LoadedModel,
+    texts: Sequence[str],
+    layers: Sequence[int],
+    *,
+    bos: BosMode | None = None,
+    batch_size: int = 8,
+    skip_first: bool = True,
+) -> dict[int, float]:
+    """Measures the mean norm of the residual stream per layer.
+
+    The mean is pooled over all real tokens of all texts, not a mean of
+    per-text means, and the norms are accumulated in float32 even for a
+    bfloat16 model. Batches are right padded, so the result does not depend
+    on `batch_size` beyond float rounding. Pass held-out text.
+
+    Args:
+        loaded: The wrapped model.
+        texts: The texts to run.
+        layers: Layer indices in 0..L; duplicates collapse.
+        bos: BOS policy of the encoding; None uses the model default.
+        batch_size: Texts per forward.
+        skip_first: Whether to drop token 0 of every row. GPT-2's first
+            token is an attention sink with a much larger norm that would
+            dominate the mean.
+
+    Returns:
+        Maps each layer to its mean Euclidean norm per real token.
+
+    Raises:
+        ValueError: If `texts` or `layers` is empty, a layer is outside
+            0..L, `batch_size` is below 1, or no token is left to average.
+    """
+    if not texts:
+        raise ValueError("texts is empty")
+    if not layers:
+        raise ValueError("layers is empty")
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be at least 1, got {batch_size}")
+    wanted = list(dict.fromkeys(layers))
+    totals = {layer: torch.zeros((), device=loaded.device) for layer in wanted}
+    count = 0
+    for start in range(0, len(texts), batch_size):
+        encoded = loaded.encode(texts[start : start + batch_size], bos=bos)
+        real = (encoded.attention_mask > 0).to(loaded.device)
+        if skip_first:
+            real[:, 0] = False
+        with (
+            torch.inference_mode(),
+            capture_residuals(loaded, wanted) as seen,
+        ):
+            loaded.decoder(
+                input_ids=encoded.input_ids.to(loaded.device),
+                attention_mask=encoded.attention_mask.to(loaded.device),
+                position_ids=encoded.position_ids.to(loaded.device),
+                use_cache=False,
+            )
+        for layer in wanted:
+            norms = seen[layer].float().norm(dim=-1)
+            totals[layer] += norms[real].sum()
+        count += int(real.sum())
+    if count == 0:
+        raise ValueError("no token left to average (skip_first drops token 0)")
+    return {layer: float(total) / count for layer, total in totals.items()}
 
 
 def _token_index(
@@ -109,7 +182,10 @@ class ReadingVectorController:
     Attributes:
         vectors: Maps a layer to its oriented `(d_model,)` float32 vector on
             the model device; the controller adds `coeff * vector`.
-        coeff: Finite coefficient. Negative values suppress the concept.
+        coeff: Finite coefficient. For the linear and piecewise operators a
+            negative value suppresses the concept; for the projection
+            operator it is the dimensionless share of the component along
+            the vector that is removed (1 removes it).
         op: The edit operator.
         mode: `absolute` uses `coeff`; `relative` uses `coeff * norms[l]`.
         norms: Mean residual norm per layer, required for `relative`; layers
@@ -136,9 +212,18 @@ class ReadingVectorController:
         Raises:
             ValueError: If `vectors` is empty, a vector is not 1-D, not
                 finite, zero, or of a different length than the others,
-                `coeff` is not finite, `mode` is `relative` with a missing
-                or non-positive norm or with `op="projection"`.
+                `coeff` is not finite, `mode` or `mask` is not a known
+                value, `mode` is `relative` with a missing or non-positive
+                norm or with `op="projection"`.
         """
+        if self.mode not in _COEFF_MODES:
+            raise ValueError(
+                f"mode must be 'absolute' or 'relative', got {self.mode!r}"
+            )
+        if self.mask not in _RESPONSE_MASKS:
+            raise ValueError(
+                f"mask must be 'all' or 'response', got {self.mask!r}"
+            )
         if not self.vectors:
             raise ValueError("vectors is empty")
         if not math.isfinite(self.coeff):
