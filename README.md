@@ -10,8 +10,8 @@ What is distinctive: six direction finders behind one `method` argument, so they
 every checkpoint pinned to a commit and every data file pinned to a commit or a SHA-256 digest; seeded runs
 that record their code state and library versions; and both architectures behind one model interface.
 
-Status: research code under active development. `main` ships the framework described below and reports no
-results.
+Status: research code under active development. `main` ships the framework described below and the first
+experiment (R1, sentiment reading); it reports no results.
 
 ## How it fits together
 
@@ -226,9 +226,13 @@ norm of each layer (not available for `projection`), the edit applies to `all` t
 
 An experiment is a module `src/tomography/experiments/<id>_<slug>.py` that defines `Config` (a subclass of
 `ExperimentConfig`), `run(config, run_dir)` and `plot(run_dir, out_dir)`. The id starts with a lowercase
-letter and continues with lowercase letters and digits. Experiment modules land as separate pull requests:
-`main` currently ships the framework in [`experiments/base.py`](src/tomography/experiments/base.py), and
-`tomography run` answers `available: none` until a module exists.
+letter and continues with lowercase letters and digits. Experiment modules land as separate pull requests. On
+`main`: the framework in [`experiments/base.py`](src/tomography/experiments/base.py), the shared layer sweep
+in [`experiments/sweep.py`](src/tomography/experiments/sweep.py), steering trials and their side effects in
+[`experiments/steering.py`](src/tomography/experiments/steering.py) and
+[`experiments/effects.py`](src/tomography/experiments/effects.py), and the first experiment, `r1`
+([`experiments/r1_sentiment.py`](src/tomography/experiments/r1_sentiment.py)). `tomography run` with an
+unknown id lists the available ids.
 
 The `tomography` command (`python -m tomography` is equivalent) has two subcommands:
 
@@ -290,11 +294,11 @@ src/tomography/
   templates.py     chat formats, concept and function templates, PAPER_TEMPLATES, ablate
   pairing.py       seeded strategies that turn stimuli into reading pairs
   reading/         directions.py (fit_direction), reader.py (RepReader), metrics.py
-  control/         operators.py, controllers.py (ReadingVectorController), generate.py
+  control/         operators.py, controllers.py (ReadingVectorController), contrast.py, generate.py
   datasets/        pinned sources, one loader per dataset, example records, build_stimulus_set
   judges.py        pinned sentiment and emotion classifiers, perplexity and log-probability scoring
   knowledge.py     known, unknown and uncertain labels for closed-book questions
-  experiments/     base.py: ExperimentConfig, RunDir, derive_seed, seed_everything
+  experiments/     base.py (configs, run dirs, seeding), sweep.py, steering.py, effects.py, r1_sentiment.py
   viz/             figure style, layer curves, token scans, matrices and embeddings
   cli.py           the tomography command (also python -m tomography)
 tests/             unit tests, roughly one file per module
