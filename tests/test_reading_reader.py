@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 from numpy.typing import NDArray
 import pytest
@@ -330,3 +332,65 @@ def test_fit_without_groups_needs_both_classes() -> None:
             [0],
             labels=np.ones(10, dtype=np.int64),
         )
+
+
+def fitted_reader() -> tuple[RepReader, NDArray[np.float32]]:
+    rng = np.random.default_rng(3)
+    h = rng.standard_normal((3, 30, 7)).astype(np.float32)
+    h[:, ::2] += 2.0
+    labels = (np.arange(30) % 2 == 0).astype(np.int64)
+    return RepReader.fit("logistic", h, [2, 5, 9], labels=labels), h
+
+
+def test_save_and_load_round_trip_exactly(tmp_path: Path) -> None:
+    reader, h = fitted_reader()
+    path = tmp_path / "reader.npz"
+
+    reader.save(path)
+    loaded = RepReader.load(path)
+
+    assert loaded.method == "logistic"
+    assert loaded.layers == (2, 5, 9)
+    assert all(isinstance(layer, int) for layer in loaded.layers)
+    for name in ("directions", "means", "signs"):
+        original = getattr(reader, name)
+        restored = getattr(loaded, name)
+        assert restored.dtype == original.dtype
+        np.testing.assert_array_equal(restored, original)
+    np.testing.assert_array_equal(loaded.score(h), reader.score(h))
+
+
+def test_save_writes_one_file_at_exactly_the_given_path(
+    tmp_path: Path,
+) -> None:
+    reader, _ = fitted_reader()
+    bare = tmp_path / "reader_without_suffix"
+
+    reader.save(str(bare))
+
+    assert [entry.name for entry in tmp_path.iterdir()] == [bare.name]
+    assert RepReader.load(bare).layers == reader.layers
+
+
+def test_load_rejects_a_file_with_missing_arrays(tmp_path: Path) -> None:
+    path = tmp_path / "partial.npz"
+    np.savez(path, method=np.array("x"), layers=np.array([0]))
+
+    with pytest.raises(ValueError, match="directions"):
+        RepReader.load(path)
+
+
+def test_load_rejects_inconsistent_arrays(tmp_path: Path) -> None:
+    reader, _ = fitted_reader()
+    path = tmp_path / "bad.npz"
+    np.savez(
+        path,
+        method=np.array(reader.method),
+        layers=np.array([2, 5]),
+        directions=reader.directions,
+        means=reader.means,
+        signs=reader.signs,
+    )
+
+    with pytest.raises(ValueError, match="layers"):
+        RepReader.load(path)

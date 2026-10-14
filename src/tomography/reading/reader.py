@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace
+from pathlib import Path
 from typing import Self
 
 import numpy as np
@@ -13,6 +14,8 @@ from tomography.reading.directions import Method
 from tomography.reading.directions import Preprocess
 from tomography.reading.directions import fit_direction
 from tomography.reading.metrics import parse_groups
+
+_FIELDS = ("method", "layers", "directions", "means", "signs")
 
 
 @dataclass(frozen=True, eq=False)
@@ -138,31 +141,9 @@ class RepReader:
             ValueError: If the shapes disagree, a direction is zero or a
                 sign is not -1 or +1.
         """
-        vectors = np.array(directions, dtype=np.float64)
-        if vectors.ndim != 2:
-            raise ValueError(
-                f"directions must have shape (K, d), got {vectors.shape}"
-            )
-        n_layers = vectors.shape[0]
-        centers = np.array(means, dtype=np.float64)
-        if centers.shape != vectors.shape:
-            raise ValueError(
-                f"means must have shape {vectors.shape}, got {centers.shape}"
-            )
-        if len(layers) != n_layers:
-            raise ValueError(
-                f"layers has {len(layers)} entries for {n_layers} directions"
-            )
-        orientation = (
-            np.ones(n_layers)
-            if signs is None
-            else np.array(signs, dtype=np.float64)
+        vectors, centers, orientation = _checked_arrays(
+            layers, directions, means, signs
         )
-        if (
-            orientation.shape != (n_layers,)
-            or not np.isin(orientation, (-1.0, 1.0)).all()
-        ):
-            raise ValueError("signs must have shape (K,) with values -1 or +1")
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         if (norms == 0.0).any():
             raise ValueError("directions must not contain a zero vector")
@@ -170,6 +151,51 @@ class RepReader:
             method=method,
             layers=tuple(int(layer) for layer in layers),
             directions=(vectors / norms).astype(np.float32),
+            means=centers.astype(np.float32),
+            signs=orientation.astype(np.float32),
+        )
+
+    def save(self, path: str | Path) -> None:
+        """Writes the reader to one `.npz` file at exactly `path`.
+
+        Args:
+            path: Destination file; no suffix is added.
+        """
+        with Path(path).open("wb") as file:
+            np.savez(
+                file,
+                method=np.array(self.method),
+                layers=np.array(self.layers, dtype=np.int64),
+                directions=self.directions,
+                means=self.means,
+                signs=self.signs,
+            )
+
+    @classmethod
+    def load(cls, path: str | Path) -> Self:
+        """Reads a reader written by `save`, with every array unchanged.
+
+        Args:
+            path: File written by `save`.
+
+        Returns:
+            The reader, equal to the one that was saved.
+
+        Raises:
+            ValueError: If the file lacks an array or the arrays disagree.
+        """
+        with np.load(Path(path), allow_pickle=False) as data:
+            missing = [name for name in _FIELDS if name not in data.files]
+            if missing:
+                raise ValueError(f"{path} has no array named {missing[0]!r}")
+            method = str(data["method"])
+            layers = [int(layer) for layer in data["layers"]]
+            arrays = [data[name] for name in _FIELDS[2:]]
+        vectors, centers, orientation = _checked_arrays(layers, *arrays)
+        return cls(
+            method=method,
+            layers=tuple(layers),
+            directions=vectors.astype(np.float32),
             means=centers.astype(np.float32),
             signs=orientation.astype(np.float32),
         )
@@ -213,6 +239,38 @@ class RepReader:
             centered = h[k].astype(np.float64) - self.means[k]
             scores[k] = centered @ self.directions[k].astype(np.float64)
         return scores
+
+
+def _checked_arrays(
+    layers: Sequence[int],
+    directions: FloatArray,
+    means: FloatArray,
+    signs: FloatArray | None,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    vectors = np.array(directions, dtype=np.float64)
+    if vectors.ndim != 2:
+        raise ValueError(
+            f"directions must have shape (K, d), got {vectors.shape}"
+        )
+    n_layers = vectors.shape[0]
+    centers = np.array(means, dtype=np.float64)
+    if centers.shape != vectors.shape:
+        raise ValueError(
+            f"means must have shape {vectors.shape}, got {centers.shape}"
+        )
+    if len(layers) != n_layers:
+        raise ValueError(
+            f"layers has {len(layers)} entries for {n_layers} directions"
+        )
+    orientation = (
+        np.ones(n_layers) if signs is None else np.array(signs, np.float64)
+    )
+    if (
+        orientation.shape != (n_layers,)
+        or not np.isin(orientation, (-1.0, 1.0)).all()
+    ):
+        raise ValueError("signs must have shape (K,) with values -1 or +1")
+    return vectors, centers, orientation
 
 
 def _layer_seed(seed: int, layer_position: int) -> int:
