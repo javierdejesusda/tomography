@@ -397,6 +397,62 @@ def test_position_check_fires_before_the_edits_factory(
     assert calls == []
 
 
+@pytest.mark.parametrize(
+    "option", [{"top_k": 1}, {"top_p": 1e-6}], ids=["top_k_one", "top_p_tiny"]
+)
+def test_top_k_and_top_p_restrict_sampling_to_the_greedy_token(
+    tiny_arch: LoadedModel, option: dict[str, Any]
+) -> None:
+    tiny_arch.model.generation_config.eos_token_id = None
+    greedy = generate(tiny_arch, PROMPTS, max_new_tokens=6)
+
+    sampled = generate(
+        tiny_arch,
+        PROMPTS,
+        max_new_tokens=6,
+        temperature=10.0,
+        num_samples=2,
+        **option,
+    )
+
+    for row, (expected,) in zip(sampled, greedy, strict=True):
+        assert row == [expected] * 2
+
+
+def test_the_chunk_index_is_part_of_the_seed(tiny_arch: LoadedModel) -> None:
+    tiny_arch.model.generation_config.eos_token_id = None
+
+    result = generate(
+        tiny_arch,
+        ["The lazy dog"] * 2,
+        max_new_tokens=6,
+        temperature=1.0,
+        batch_size=1,
+    )
+
+    assert result[0][0] != result[1][0]
+
+
+def test_an_empty_edit_mapping_registers_no_hooks(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tiny_arch.model.generation_config.eos_token_id = None
+    before = hook_count(tiny_arch)
+    seen: list[int] = []
+    original = tiny_arch.model.generate
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(hook_count(tiny_arch))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(tiny_arch.model, "generate", spy)
+
+    generate(tiny_arch, PROMPTS, max_new_tokens=2, edits=lambda batch: {})
+
+    assert seen == [before]
+    assert hook_count(tiny_arch) == before
+
+
 @pytest.mark.slow
 def test_gpt2_generation_plumbing() -> None:
     gpt2 = load_model("gpt2")
