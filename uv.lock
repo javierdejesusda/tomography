@@ -2,20 +2,20 @@ version = 1
 revision = 3
 requires-python = "==3.12.*"
 resolution-markers = [
-    "sys_platform == 'win32' and extra != 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130'",
-    "sys_platform == 'emscripten' and extra != 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130'",
-    "sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130'",
-    "sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130'",
-    "sys_platform == 'emscripten' and extra == 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130'",
-    "sys_platform == 'darwin' and extra == 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130'",
-    "sys_platform == 'win32' and extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130'",
-    "sys_platform == 'emscripten' and extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130'",
-    "sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130'",
+    "sys_platform == 'win32' and extra != 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130'",
+    "sys_platform == 'emscripten' and extra != 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130'",
+    "sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130'",
+    "sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130'",
+    "sys_platform == 'emscripten' and extra == 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130'",
+    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130'",
+    "sys_platform == 'darwin' and extra == 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130'",
+    "sys_platform == 'win32' and extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130'",
+    "sys_platform == 'emscripten' and extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130'",
+    "sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130'",
 ]
 conflicts = [[
-    { package = "tomography", extra = "cpu" },
-    { package = "tomography", extra = "cu130" },
+    { package = "tomography", group = "cpu" },
+    { package = "tomography", group = "cu130" },
 ]]
 
 [[package]]
@@ -29,10 +29,10 @@ dependencies = [
     { name = "psutil" },
     { name = "pyyaml" },
     { name = "safetensors" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "torch", version = "2.14.1+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "extra == 'extra-10-tomography-cu130'" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "torch", version = "2.14.1+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "extra == 'group-10-tomography-cu130'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f5/b5/1d3ed029ac71d3f2961346829a268da923698e9fd63f218f78841f216bfd/accelerate-1.15.0.tar.gz", hash = "sha256:5654f8c5eaa0d4fa68b33e287a97765da6849bf6d51dcac874e73fbbddfb6134", size = 422615, upload-time = "2026-09-09T13:04:49.078Z" }
 wheels = [
@@ -112,8 +112,8 @@ name = "anyio"
 version = "4.15.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "idna", marker = "sys_platform != 'emscripten' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "typing-extensions", marker = "sys_platform != 'emscripten' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "idna", marker = "sys_platform != 'emscripten' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "typing-extensions", marker = "sys_platform != 'emscripten' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a9/d2/f4d173e22df740bc37b1db102b386ba719b66e95b0f0d751f556b387e6d2/anyio-4.15.1.tar.gz", hash = "sha256:9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94", size = 276966, upload-time = "2026-09-05T10:42:39.44Z" }
 wheels = [
@@ -236,7 +236,7 @@ name = "cuda-bindings"
 version = "13.4.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cuda-pathfinder", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "cuda-pathfinder", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d7/38/87909f62598d02d9e5c536326aed1755f6bfa190285507b962bb601e0005/cuda_bindings-13.4.4-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b346bfe1dda49537537c06cc4727b2210d949d8aee883cb591bca46581629d00", size = 6488222, upload-time = "2026-10-14T12:35:20.703Z" },
@@ -263,43 +263,43 @@ wheels = [
 
 [package.optional-dependencies]
 cublas = [
-    { name = "nvidia-cublas", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-cuda-nvrtc", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-cublas", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-cuda-nvrtc", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 cudart = [
-    { name = "nvidia-cuda-runtime", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-cuda-runtime", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 cufft = [
-    { name = "nvidia-cufft", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-cufft", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 cufile = [
-    { name = "nvidia-cufile", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'aarch64' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (platform_machine == 'x86_64' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-cufile", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'aarch64' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (platform_machine == 'x86_64' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 cupti = [
-    { name = "nvidia-cuda-cupti", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-cuda-cupti", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 curand = [
-    { name = "nvidia-curand", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-curand", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 cusolver = [
-    { name = "nvidia-cublas", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-cusolver", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-cusparse", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-cublas", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-cusolver", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-cusparse", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 cusparse = [
-    { name = "nvidia-cusparse", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-cusparse", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 nvjitlink = [
-    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 nvrtc = [
-    { name = "nvidia-cuda-nvrtc", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-cuda-nvrtc", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 nvtx = [
-    { name = "nvidia-nvtx", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-nvtx", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-10-tomography-cpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'linux' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 
 [[package]]
@@ -438,8 +438,8 @@ name = "httpcore2"
 version = "2.13.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "sys_platform != 'emscripten' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "truststore", marker = "sys_platform != 'emscripten' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "h11", marker = "sys_platform != 'emscripten' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "truststore", marker = "sys_platform != 'emscripten' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/f3/1db7aa2bc2524062192bb0e0323969492d1883152a232fe36eea65f4e35c/httpcore2-2.13.1.tar.gz", hash = "sha256:e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103", size = 68071, upload-time = "2026-09-23T07:47:22.372Z" }
 wheels = [
@@ -451,11 +451,11 @@ name = "httpx2"
 version = "2.13.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", marker = "sys_platform != 'emscripten' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "httpcore2", marker = "sys_platform != 'emscripten' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "httpx2-jsfetch", marker = "sys_platform == 'emscripten' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "anyio", marker = "sys_platform != 'emscripten' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "httpcore2", marker = "sys_platform != 'emscripten' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "httpx2-jsfetch", marker = "sys_platform == 'emscripten' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
     { name = "idna" },
-    { name = "truststore", marker = "sys_platform != 'emscripten' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "truststore", marker = "sys_platform != 'emscripten' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d5/44/474bef2a0e9d90f1715d32cb98b0738695ca17ba324095fb2497ed7fbd59/httpx2-2.13.1.tar.gz", hash = "sha256:e48744a19e3af5ee48313d0ce5fe941d5422fae5705ea922a4aabf94d7800dfa", size = 100405, upload-time = "2026-09-23T07:47:23.052Z" }
@@ -480,7 +480,7 @@ dependencies = [
     { name = "click" },
     { name = "filelock" },
     { name = "fsspec" },
-    { name = "hf-xet", marker = "platform_machine == 'AMD64' or platform_machine == 'ARM64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "hf-xet", marker = "platform_machine == 'AMD64' or platform_machine == 'ARM64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
     { name = "httpx2" },
     { name = "packaging" },
     { name = "pyyaml" },
@@ -712,7 +712,7 @@ version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ast-serialize" },
-    { name = "librt", marker = "platform_python_implementation != 'PyPy' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "librt", marker = "platform_python_implementation != 'PyPy' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
     { name = "mypy-extensions" },
     { name = "pathspec" },
     { name = "typing-extensions" },
@@ -779,7 +779,7 @@ name = "nvidia-cublas"
 version = "13.1.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cuda-nvrtc", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-cuda-nvrtc", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/a1/0bd24ee8c8d03adac032fd2909426a00c88f8c57961b1277ded97f91119f/nvidia_cublas-13.1.1.3-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:b7a210458267ac818974c53038fbec2e969d5c99f305ab15c72522fa9f001dd5", size = 542848918, upload-time = "2026-04-08T18:46:22.985Z" },
@@ -822,7 +822,7 @@ name = "nvidia-cudnn-cu13"
 version = "9.24.0.43"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-cublas", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ca/30/7c257e3d5cb4fecb147b93895c66e29c93f8e76d74b45bb418ff0587c4ec/nvidia_cudnn_cu13-9.24.0.43-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:a6812a554a1ff0413e9c52b84c26c050380649ab9615f9c16bded368ce9f421f", size = 650976863, upload-time = "2026-07-02T16:23:39.248Z" },
@@ -835,7 +835,7 @@ name = "nvidia-cufft"
 version = "12.0.0.61"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8b/ae/f417a75c0259e85c1d2f83ca4e960289a5f814ed0cea74d18c353d3e989d/nvidia_cufft-12.0.0.61-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:2708c852ef8cd89d1d2068bdbece0aa188813a0c934db3779b9b1faa8442e5f5", size = 214053554, upload-time = "2025-09-04T08:31:38.196Z" },
@@ -867,9 +867,9 @@ name = "nvidia-cusolver"
 version = "12.0.4.66"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-cusparse", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-cublas", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-cusparse", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/c3/b30c9e935fc01e3da443ec0116ed1b2a009bb867f5324d3f2d7e533e776b/nvidia_cusolver-12.0.4.66-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:02c2457eaa9e39de20f880f4bd8820e6a1cfb9f9a34f820eb12a155aa5bc92d2", size = 223467760, upload-time = "2025-09-04T08:33:04.222Z" },
@@ -882,7 +882,7 @@ name = "nvidia-cusparse"
 version = "12.6.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'extra-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-10-tomography-cpu') or (sys_platform == 'emscripten' and extra == 'group-10-tomography-cu130') or (sys_platform == 'win32' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f8/94/5c26f33738ae35276672f12615a64bd008ed5be6d1ebcb23579285d960a9/nvidia_cusparse-12.6.3.3-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:80bcc4662f23f1054ee334a15c72b8940402975e0eab63178fc7e670aa59472c", size = 162155568, upload-time = "2025-09-04T08:33:42.864Z" },
@@ -955,7 +955,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "python-dateutil" },
-    { name = "tzdata", marker = "sys_platform == 'emscripten' or sys_platform == 'win32' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "tzdata", marker = "sys_platform == 'emscripten' or sys_platform == 'win32' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e2/17/d7b106e05bfa642e8694451e7d3d759c6a241c5386a5d962e4f66c047e06/pandas-3.0.6.tar.gz", hash = "sha256:66b07ef7315a31bfe1089cd3d71a7de781c9dca986762d0b4fe7c0ef17465d10", size = 4667686, upload-time = "2026-09-17T23:23:18.345Z" }
 wheels = [
@@ -991,10 +991,10 @@ dependencies = [
     { name = "psutil" },
     { name = "pyyaml" },
     { name = "safetensors" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "torch", version = "2.14.1+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "extra == 'extra-10-tomography-cu130'" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "torch", version = "2.14.1+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "extra == 'group-10-tomography-cu130'" },
     { name = "tqdm" },
     { name = "transformers" },
 ]
@@ -1122,7 +1122,7 @@ name = "pytest"
 version = "9.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
     { name = "iniconfig" },
     { name = "packaging" },
     { name = "pluggy" },
@@ -1380,16 +1380,14 @@ dependencies = [
     { name = "transformers" },
 ]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
 cpu = [
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 cu130 = [
     { name = "torch", version = "2.14.1+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" } },
 ]
-
-[package.dev-dependencies]
 dev = [
     { name = "codespell" },
     { name = "mypy" },
@@ -1405,13 +1403,12 @@ requires-dist = [
     { name = "peft", specifier = ">=0.21.2,<0.22" },
     { name = "plotly", specifier = ">=7.1,<8" },
     { name = "scikit-learn", specifier = ">=1.9,<2" },
-    { name = "torch", marker = "extra == 'cpu'", specifier = ">=2.14.1,<2.15", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "tomography", extra = "cpu" } },
-    { name = "torch", marker = "extra == 'cu130'", specifier = ">=2.14.1,<2.15", index = "https://download.pytorch.org/whl/cu130", conflict = { package = "tomography", extra = "cu130" } },
     { name = "transformers", specifier = ">=5.19,<6" },
 ]
-provides-extras = ["cpu", "cu130"]
 
 [package.metadata.requires-dev]
+cpu = [{ name = "torch", specifier = ">=2.14.1,<2.15", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "tomography", group = "cpu" } }]
+cu130 = [{ name = "torch", specifier = ">=2.14.1,<2.15", index = "https://download.pytorch.org/whl/cu130", conflict = { package = "tomography", group = "cu130" } }]
 dev = [
     { name = "codespell", specifier = ">=2.4,<3" },
     { name = "mypy", specifier = ">=2.4.0,<3" },
@@ -1427,13 +1424,13 @@ resolution-markers = [
     "sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "filelock", marker = "(sys_platform == 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "fsspec", marker = "(sys_platform == 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "jinja2", marker = "(sys_platform == 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "networkx", marker = "(sys_platform == 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "setuptools", marker = "(sys_platform == 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "sympy", marker = "(sys_platform == 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "typing-extensions", marker = "(sys_platform == 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "filelock", marker = "(sys_platform == 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "fsspec", marker = "(sys_platform == 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "jinja2", marker = "(sys_platform == 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "networkx", marker = "(sys_platform == 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "setuptools", marker = "(sys_platform == 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "sympy", marker = "(sys_platform == 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "typing-extensions", marker = "(sys_platform == 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.1-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:9cf3082d25560efb1eef921871595227c0cf305abb7761ca45b6b988ef6cdd45", upload-time = "2026-09-30T19:50:32Z" },
@@ -1449,20 +1446,20 @@ resolution-markers = [
     "sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "cuda-bindings", marker = "(sys_platform == 'linux' and extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "cuda-toolkit", extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "(sys_platform == 'linux' and extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "filelock", marker = "(extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130')" },
-    { name = "fsspec", marker = "(extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130')" },
-    { name = "jinja2", marker = "(extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130')" },
-    { name = "networkx", marker = "(extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130')" },
-    { name = "nvidia-cudnn-cu13", marker = "(sys_platform == 'linux' and extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-cusparselt-cu13", marker = "(sys_platform == 'linux' and extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-nccl-cu13", marker = "(sys_platform == 'linux' and extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-nvshmem-cu13", marker = "(sys_platform == 'linux' and extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "setuptools", marker = "(extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130')" },
-    { name = "sympy", marker = "(extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130')" },
-    { name = "triton", marker = "(sys_platform == 'linux' and extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "typing-extensions", marker = "(extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130') or (extra != 'extra-10-tomography-cpu' and extra != 'extra-10-tomography-cu130')" },
+    { name = "cuda-bindings", marker = "(sys_platform == 'linux' and extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "cuda-toolkit", extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "(sys_platform == 'linux' and extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "filelock", marker = "(extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130')" },
+    { name = "fsspec", marker = "(extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130')" },
+    { name = "jinja2", marker = "(extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130')" },
+    { name = "networkx", marker = "(extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130')" },
+    { name = "nvidia-cudnn-cu13", marker = "(sys_platform == 'linux' and extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-cusparselt-cu13", marker = "(sys_platform == 'linux' and extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-nccl-cu13", marker = "(sys_platform == 'linux' and extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-nvshmem-cu13", marker = "(sys_platform == 'linux' and extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "setuptools", marker = "(extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130')" },
+    { name = "sympy", marker = "(extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130')" },
+    { name = "triton", marker = "(sys_platform == 'linux' and extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "typing-extensions", marker = "(extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130') or (extra != 'group-10-tomography-cpu' and extra != 'group-10-tomography-cu130')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4b/3c/379349820e9a6e713826de3d0b88f07728541bdcabe2a3afd128871cdc4b/torch-2.14.1-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:420dbf314c180ee4b86e9bc00aee5746a7d6e5bacdd7df925af671ed393f0b2e", size = 127307099, upload-time = "2026-09-30T17:44:10.421Z" },
@@ -1481,13 +1478,13 @@ resolution-markers = [
     "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "filelock", marker = "(sys_platform != 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "fsspec", marker = "(sys_platform != 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "jinja2", marker = "(sys_platform != 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "networkx", marker = "(sys_platform != 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "setuptools", marker = "(sys_platform != 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "sympy", marker = "(sys_platform != 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "typing-extensions", marker = "(sys_platform != 'darwin' and extra == 'extra-10-tomography-cpu') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "filelock", marker = "(sys_platform != 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "fsspec", marker = "(sys_platform != 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "jinja2", marker = "(sys_platform != 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "networkx", marker = "(sys_platform != 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "setuptools", marker = "(sys_platform != 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "sympy", marker = "(sys_platform != 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "typing-extensions", marker = "(sys_platform != 'darwin' and extra == 'group-10-tomography-cpu') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.1%2Bcpu-cp312-cp312-linux_s390x.whl", hash = "sha256:6b06a7f6275c5fdecaf1dbf5546f0820b024a97785575bb99e3d9930d83cd86b", upload-time = "2026-09-30T19:47:30Z" },
@@ -1507,20 +1504,20 @@ resolution-markers = [
     "sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "cuda-bindings", marker = "(sys_platform == 'linux' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "cuda-toolkit", extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "(sys_platform == 'linux' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "filelock", marker = "extra == 'extra-10-tomography-cu130'" },
-    { name = "fsspec", marker = "extra == 'extra-10-tomography-cu130'" },
-    { name = "jinja2", marker = "extra == 'extra-10-tomography-cu130'" },
-    { name = "networkx", marker = "extra == 'extra-10-tomography-cu130'" },
-    { name = "nvidia-cudnn-cu13", marker = "(sys_platform == 'linux' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-cusparselt-cu13", marker = "(sys_platform == 'linux' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-nccl-cu13", marker = "(sys_platform == 'linux' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "nvidia-nvshmem-cu13", marker = "(sys_platform == 'linux' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "setuptools", marker = "extra == 'extra-10-tomography-cu130'" },
-    { name = "sympy", marker = "extra == 'extra-10-tomography-cu130'" },
-    { name = "triton", marker = "(sys_platform == 'linux' and extra == 'extra-10-tomography-cu130') or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
-    { name = "typing-extensions", marker = "extra == 'extra-10-tomography-cu130'" },
+    { name = "cuda-bindings", marker = "(sys_platform == 'linux' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "cuda-toolkit", extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "(sys_platform == 'linux' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "filelock", marker = "extra == 'group-10-tomography-cu130'" },
+    { name = "fsspec", marker = "extra == 'group-10-tomography-cu130'" },
+    { name = "jinja2", marker = "extra == 'group-10-tomography-cu130'" },
+    { name = "networkx", marker = "extra == 'group-10-tomography-cu130'" },
+    { name = "nvidia-cudnn-cu13", marker = "(sys_platform == 'linux' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-cusparselt-cu13", marker = "(sys_platform == 'linux' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-nccl-cu13", marker = "(sys_platform == 'linux' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "nvidia-nvshmem-cu13", marker = "(sys_platform == 'linux' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "setuptools", marker = "extra == 'group-10-tomography-cu130'" },
+    { name = "sympy", marker = "extra == 'group-10-tomography-cu130'" },
+    { name = "triton", marker = "(sys_platform == 'linux' and extra == 'group-10-tomography-cu130') or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
+    { name = "typing-extensions", marker = "extra == 'group-10-tomography-cu130'" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cu130/torch-2.14.1%2Bcu130-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:6afc5e5944fb0bd927e08d32a11f71d19154001f1c81fa00a6ed81a217451795", upload-time = "2026-09-30T20:23:37Z" },
@@ -1533,7 +1530,7 @@ name = "tqdm"
 version = "4.70.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0d/ea/b2a5bd54b28a324dae8211928b2d730b6547500342c7e6c6dea08bd0a485/tqdm-4.70.1.tar.gz", hash = "sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4", size = 171846, upload-time = "2026-09-11T07:25:16.601Z" }
 wheels = [
@@ -1584,7 +1581,7 @@ version = "0.27.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-10-tomography-cpu' and extra == 'extra-10-tomography-cu130')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-10-tomography-cpu' and extra == 'group-10-tomography-cu130')" },
     { name = "rich" },
     { name = "shellingham" },
 ]

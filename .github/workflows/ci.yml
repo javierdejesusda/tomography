@@ -29,7 +29,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked --extra cpu
+        run: uv sync --locked --no-group cu130 --group cpu
 
       - name: Lint
         run: uv run --no-sync ruff check .

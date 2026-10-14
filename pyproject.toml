@@ -22,15 +22,13 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/javierdejesusda/tomography"
 
-[project.optional-dependencies]
-cpu = ["torch>=2.14.1,<2.15"]
-cu130 = ["torch>=2.14.1,<2.15"]
-
 [build-system]
 requires = ["uv_build>=0.12.17,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+cpu = ["torch>=2.14.1,<2.15"]
+cu130 = ["torch>=2.14.1,<2.15"]
 dev = [
     "codespell>=2.4,<3",
     "mypy>=2.4.0,<3",
@@ -39,17 +37,18 @@ dev = [
 ]
 
 [tool.uv]
+default-groups = ["dev", "cu130"]
 conflicts = [
     [
-        { extra = "cpu" },
-        { extra = "cu130" },
+        { group = "cpu" },
+        { group = "cu130" },
     ],
 ]
 
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cpu", extra = "cpu" },
-    { index = "pytorch-cu130", extra = "cu130" },
+    { index = "pytorch-cpu", group = "cpu" },
+    { index = "pytorch-cu130", group = "cu130" },
 ]
 
 [[tool.uv.index]]
@@ -87,7 +86,7 @@ strict = true
 testpaths = ["tests"]
 addopts = ["--import-mode=importlib", "-m", "not slow and not network"]
 markers = [
-    "slow: loads real GPT-2 or Qwen3 weights and needs a local GPU",
+    "slow: needs a local GPU (CUDA torch, real GPT-2 or Qwen3 weights)",
     "network: downloads datasets",
 ]
 filterwarnings = ["error"]
