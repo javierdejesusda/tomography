@@ -469,7 +469,7 @@ class RunDir:
 
     def _file(self, name: str, extension: str) -> Path:
         _check_path_part("name", name, _SAFE_NAME)
-        if name in _RESERVED_NAMES:
+        if name.lower() in _RESERVED_NAMES:
             raise ValueError(f"name {name!r} is reserved")
         return self.path / f"{name}.{extension}"
 

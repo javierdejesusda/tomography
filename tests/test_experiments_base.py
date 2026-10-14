@@ -428,8 +428,18 @@ def test_failed_write_keeps_the_previous_file_and_leaves_no_temp(
 
 @pytest.mark.parametrize(
     "name",
-    ["", "../x", "a/b", "a\\b", ".hidden", "config", "meta"],
-    ids=["empty", "parent", "slash", "backslash", "dot", "config", "meta"],
+    ["", "../x", "a/b", "a\\b", ".hidden", "config", "meta", "Config", "META"],
+    ids=[
+        "empty",
+        "parent",
+        "slash",
+        "backslash",
+        "dot",
+        "config",
+        "meta",
+        "config-upper",
+        "meta-upper",
+    ],
 )
 def test_write_json_rejects_unsafe_or_reserved_names(
     tmp_path: Path, name: str
