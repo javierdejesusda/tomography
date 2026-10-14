@@ -442,6 +442,28 @@ def test_label_questions_without_gold_answers_makes_no_call(
     assert empty == []
 
 
+@pytest.mark.parametrize(
+    "examples",
+    [[_qa("a", ("y",))], [_qa("a", ()), _qa("b", ())], []],
+    ids=["with_gold_answers", "without_gold_answers", "no_examples"],
+)
+def test_label_questions_rejects_a_bad_recipe_before_generating(
+    monkeypatch: pytest.MonkeyPatch,
+    tiny_gpt2: LoadedModel,
+    examples: list[QAExample],
+) -> None:
+    calls: list[Any] = []
+    monkeypatch.setattr(
+        "tomography.knowledge.generate", _fake_generate({}, {}, calls)
+    )
+    recipe = LabelRecipe(n_samples=3, known_min_correct=4)
+
+    with pytest.raises(ValueError, match="known_min_correct"):
+        label_questions(tiny_gpt2, examples, recipe=recipe, shots=SHOTS)
+
+    assert calls == []
+
+
 def test_label_questions_uses_the_recipe(
     monkeypatch: pytest.MonkeyPatch, tiny_gpt2: LoadedModel
 ) -> None:

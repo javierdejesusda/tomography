@@ -156,6 +156,15 @@ def is_correct(answer: str, aliases: Sequence[str]) -> bool:
     return False
 
 
+def _check_known_min_correct(known_min_correct: int, n_samples: int) -> None:
+    """Raises ValueError unless `known_min_correct` is in 1..n_samples."""
+    if not 1 <= known_min_correct <= n_samples:
+        raise ValueError(
+            f"known_min_correct must be in 1..{n_samples}, "
+            f"got {known_min_correct}"
+        )
+
+
 def label_from_counts(
     greedy_correct: bool,
     n_correct: int,
@@ -184,11 +193,7 @@ def label_from_counts(
         raise ValueError(
             f"n_correct must be in 0..{n_samples}, got {n_correct}"
         )
-    if not 1 <= known_min_correct <= n_samples:
-        raise ValueError(
-            f"known_min_correct must be in 1..{n_samples}, "
-            f"got {known_min_correct}"
-        )
+    _check_known_min_correct(known_min_correct, n_samples)
     if greedy_correct and n_correct >= known_min_correct:
         return "known"
     if not greedy_correct and n_correct == 0:
@@ -225,9 +230,12 @@ def label_questions(
         One `ItemLabel` per example, in the order of `examples`.
 
     Raises:
-        ValueError: If the recipe or a generation argument is out of range,
-            or a prompt exceeds the position limit of the model.
+        ValueError: If `recipe.known_min_correct` is outside
+            1..`recipe.n_samples` (checked before any generation), a
+            generation argument is out of range, or a prompt exceeds the
+            position limit of the model.
     """
+    _check_known_min_correct(recipe.known_min_correct, recipe.n_samples)
     behavioral = [e for e in examples if e.answers]
     prompts = [few_shot_prompt(e.question, shots) for e in behavioral]
     greedy_rows: list[list[Completion]] = []
