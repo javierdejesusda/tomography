@@ -10,29 +10,32 @@ import unicodedata
 
 import numpy as np
 
+from tomography.control.generate import Completion
+from tomography.control.generate import generate
 from tomography.datasets.records import QAExample
+from tomography.model import LoadedModel
 
 Label = Literal["known", "unknown", "uncertain"]
 Basis = Literal["behavior", "construction"]
 
 _ARTICLES = frozenset(("a", "an", "the"))
-_NON_ALNUM = re.compile(r"[^0-9a-z]+")
+_NON_ALNUM = re.compile(r"[\W_]+")
 
 DEFAULT_SHOTS: tuple[tuple[str, str], ...] = (
     ("How many days are in a week?", "seven"),
-    ("What is the chemical symbol for gold?", "Au"),
+    ("What is the plural of the word mouse?", "mice"),
     ("Which planet is known as the Red Planet?", "Mars"),
-    ("What is the largest ocean on Earth?", "the Pacific Ocean"),
+    ("Which season comes after winter?", "spring"),
     ("In which country is the city of Kyoto?", "Japan"),
     ("What is the boiling point of water in degrees Celsius?", "100"),
     ("Which language is spoken in Brazil?", "Portuguese"),
     ("How many sides does a hexagon have?", "six"),
     ("What gas do plants absorb from the air?", "carbon dioxide"),
-    ("What is the square root of 81?", "nine"),
+    ("What do bees make?", "honey"),
     ("In which year did World War II end?", "1945"),
-    ("What is the capital of Canada?", "Ottawa"),
+    ("Which direction does the sun rise in?", "east"),
     ("How many centimeters are in a meter?", "100"),
-    ("What is the hardest natural substance?", "diamond"),
+    ("How many wheels does a bicycle have?", "two"),
     ("Which continent is Egypt in?", "Africa"),
 )
 
@@ -44,14 +47,15 @@ class LabelRecipe:
     Attributes:
         n_samples: Temperature samples drawn per question.
         temperature: Sampling temperature of those samples.
-        known_min_correct: Samples that must be correct for "known".
+        known_min_correct: Samples that must be correct for "known" (3 of
+            the 5 by default; 4 is the robustness setting).
         max_new_tokens: Generation budget per answer.
         stop: Marker that ends an answer.
     """
 
     n_samples: int = 5
     temperature: float = 1.0
-    known_min_correct: int = 4
+    known_min_correct: int = 3
     max_new_tokens: int = 16
     stop: str = "\n"
 
@@ -78,6 +82,9 @@ class ItemLabel:
     greedy_correct: bool
     samples: tuple[str, ...]
     n_correct: int
+
+
+_DEFAULT_RECIPE = LabelRecipe()
 
 
 def few_shot_prompt(
@@ -150,12 +157,21 @@ def is_correct(answer: str, aliases: Sequence[str]) -> bool:
     return False
 
 
+def _check_known_min_correct(known_min_correct: int, n_samples: int) -> None:
+    """Raises ValueError unless `known_min_correct` is in 1..n_samples."""
+    if not 1 <= known_min_correct <= n_samples:
+        raise ValueError(
+            f"known_min_correct must be in 1..{n_samples}, "
+            f"got {known_min_correct}"
+        )
+
+
 def label_from_counts(
     greedy_correct: bool,
     n_correct: int,
     *,
     n_samples: int,
-    known_min_correct: int = 4,
+    known_min_correct: int = 3,
 ) -> Label:
     """Applies the known/unknown/uncertain rule.
 
@@ -163,7 +179,8 @@ def label_from_counts(
         greedy_correct: Whether the greedy answer matched a gold alias.
         n_correct: How many sampled answers matched a gold alias.
         n_samples: Number of sampled answers.
-        known_min_correct: Samples that must be correct for "known".
+        known_min_correct: Samples that must be correct for "known"
+            (default 3).
 
     Returns:
         "known" if the greedy answer is correct and `n_correct` is at least
@@ -178,16 +195,103 @@ def label_from_counts(
         raise ValueError(
             f"n_correct must be in 0..{n_samples}, got {n_correct}"
         )
-    if not 1 <= known_min_correct <= n_samples:
-        raise ValueError(
-            f"known_min_correct must be in 1..{n_samples}, "
-            f"got {known_min_correct}"
-        )
+    _check_known_min_correct(known_min_correct, n_samples)
     if greedy_correct and n_correct >= known_min_correct:
         return "known"
     if not greedy_correct and n_correct == 0:
         return "unknown"
     return "uncertain"
+
+
+def label_questions(
+    loaded: LoadedModel,
+    examples: Sequence[QAExample],
+    *,
+    recipe: LabelRecipe = _DEFAULT_RECIPE,
+    shots: Sequence[tuple[str, str]] = DEFAULT_SHOTS,
+    seed: int = 0,
+    batch_size: int = 8,
+) -> list[ItemLabel]:
+    """Labels questions by what one model does on them, closed book.
+
+    Makes two `generate` calls over the prompts of all items with gold
+    answers: one greedy, then one sampling `recipe.n_samples` completions at
+    `recipe.temperature`. Items without gold answers are "unknown" by
+    construction and cost no generation. Labels are per model: call this
+    once per `LoadedModel`.
+
+    Args:
+        loaded: The wrapped model.
+        examples: The questions to label.
+        recipe: Sampling budget and label thresholds.
+        shots: Few-shot demonstrations placed before every question.
+        seed: Base seed of the sampling pass.
+        batch_size: Prompts per generation call chunk.
+
+    Returns:
+        One `ItemLabel` per example, in the order of `examples`.
+
+    Raises:
+        ValueError: If `recipe.known_min_correct` is outside
+            1..`recipe.n_samples` (checked before any generation), a
+            generation argument is out of range, or a prompt exceeds the
+            position limit of the model.
+    """
+    _check_known_min_correct(recipe.known_min_correct, recipe.n_samples)
+    behavioral = [e for e in examples if e.answers]
+    prompts = [few_shot_prompt(e.question, shots) for e in behavioral]
+    greedy_rows: list[list[Completion]] = []
+    sampled_rows: list[list[Completion]] = []
+    if prompts:
+        greedy_rows = generate(
+            loaded,
+            prompts,
+            max_new_tokens=recipe.max_new_tokens,
+            temperature=None,
+            batch_size=batch_size,
+        )
+        sampled_rows = generate(
+            loaded,
+            prompts,
+            max_new_tokens=recipe.max_new_tokens,
+            temperature=recipe.temperature,
+            num_samples=recipe.n_samples,
+            seed=seed,
+            batch_size=batch_size,
+        )
+    behavioral_labels: list[ItemLabel] = []
+    for example, greedy_row, sampled_row in zip(
+        behavioral, greedy_rows, sampled_rows, strict=True
+    ):
+        greedy = extract_answer(greedy_row[0].text, stop=recipe.stop)
+        samples = tuple(
+            extract_answer(c.text, stop=recipe.stop) for c in sampled_row
+        )
+        greedy_correct = is_correct(greedy, example.answers)
+        n_correct = sum(is_correct(a, example.answers) for a in samples)
+        behavioral_labels.append(
+            ItemLabel(
+                uid=example.uid,
+                label=label_from_counts(
+                    greedy_correct,
+                    n_correct,
+                    n_samples=recipe.n_samples,
+                    known_min_correct=recipe.known_min_correct,
+                ),
+                basis="behavior",
+                greedy=greedy,
+                greedy_correct=greedy_correct,
+                samples=samples,
+                n_correct=n_correct,
+            )
+        )
+    labeled = iter(behavioral_labels)
+    return [
+        next(labeled)
+        if e.answers
+        else ItemLabel(e.uid, "unknown", "construction", "", False, (), 0)
+        for e in examples
+    ]
 
 
 _LABEL_ORDER: tuple[Label, ...] = ("known", "unknown", "uncertain")
