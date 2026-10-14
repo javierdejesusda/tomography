@@ -1,0 +1,88 @@
+[project]
+name = "tomography"
+version = "0.1.0"
+description = "Representation Engineering (arXiv:2310.01405) reimplemented on GPT-2 and Qwen3: reading, control, and prompt and stimulus studies"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "javierdejesusda" }
+]
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/javierdejesusda/tomography"
+
+[project.optional-dependencies]
+cpu = ["torch>=2.14.1,<2.15"]
+cu130 = ["torch>=2.14.1,<2.15"]
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "codespell>=2.4,<3",
+    "mypy>=2.4.0,<3",
+    "pytest>=9.1.1,<10",
+    "ruff>=0.17.0,<0.18",
+]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "cu130" },
+    ],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu130", extra = "cu130" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.ruff]
+line-length = 80
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "D", "UP", "B", "SIM", "PT", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D1"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+force-single-line = true
+force-sort-within-sections = true
+known-first-party = ["tomography"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.pytest]
+testpaths = ["tests"]
+addopts = ["-m", "not slow and not network"]
+markers = [
+    "slow: loads real GPT-2 or Qwen3 weights and needs a local GPU",
+    "network: downloads datasets",
+]
+filterwarnings = ["error"]
+strict_config = true
+strict_markers = true
+strict_xfail = true
