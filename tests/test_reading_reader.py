@@ -1,7 +1,12 @@
+from pathlib import Path
+from typing import NamedTuple
+
 import numpy as np
 from numpy.typing import NDArray
 import pytest
 
+from tomography.reading.directions import Method
+from tomography.reading.metrics import group_accuracy
 from tomography.reading.reader import RepReader
 
 
@@ -256,6 +261,7 @@ def test_random_directions_differ_across_layers_but_follow_the_seed() -> None:
     np.testing.assert_array_equal(first.directions, again.directions)
     assert not np.allclose(first.directions[0], first.directions[1])
     assert not np.allclose(first.directions, other.directions)
+    assert not np.allclose(first.directions[1], other.directions[0])
 
 
 def test_fit_passes_pairs_and_preprocess_to_the_finder() -> None:
@@ -279,8 +285,15 @@ def test_fit_passes_pairs_and_preprocess_to_the_finder() -> None:
         ([[1, 3]], "exactly one"),
         ([[0, 99]], "groups"),
         ([0, 1], "groups"),
+        ([[1, -2]], "groups"),
     ],
-    ids=["no-positive", "two-positives", "out-of-range", "one-dimensional"],
+    ids=[
+        "no-positive",
+        "two-positives",
+        "out-of-range",
+        "one-dimensional",
+        "below-padding",
+    ],
 )
 def test_fit_rejects_groups_without_exactly_one_positive_member(
     groups: list[list[int]], message: str
@@ -295,6 +308,56 @@ def test_fit_rejects_groups_without_exactly_one_positive_member(
             [0],
             labels=labels,
             groups=np.array(groups, dtype=np.int64),
+        )
+
+
+@pytest.mark.parametrize(
+    ("orientation", "positives"),
+    [
+        ({"groups": [[0, 2]]}, [1, 3]),
+        ({"pairs": [[0, 99]]}, [1, 3]),
+        ({}, []),
+    ],
+    ids=["no-positive", "pairs-out-of-range", "one-class"],
+)
+def test_fit_validates_orientation_before_fitting_directions(
+    monkeypatch: pytest.MonkeyPatch,
+    orientation: dict[str, list[list[int]]],
+    positives: list[int],
+) -> None:
+    def forbidden(*args: object, **options: object) -> None:
+        raise AssertionError("fit_direction must not run")
+
+    monkeypatch.setattr("tomography.reading.reader.fit_direction", forbidden)
+    y = np.zeros(10, dtype=np.int64)
+    y[positives] = 1
+
+    with pytest.raises(ValueError, match=r"exactly one|pairs|classes"):
+        RepReader.fit(
+            "pca_raw",
+            x_rows(*X),
+            [0],
+            labels=y,
+            **{k: np.array(v, dtype=np.int64) for k, v in orientation.items()},
+        )
+
+
+@pytest.mark.parametrize(
+    "pairs",
+    [[[0, -1]], [[0, 99]], [[0, 1, 2], [3, 4, 5]]],
+    ids=["negative-index", "out-of-range", "three-columns"],
+)
+def test_fit_rejects_malformed_pairs(pairs: list[list[int]]) -> None:
+    labels = np.zeros(10, dtype=np.int64)
+    labels[[1, 3]] = 1
+
+    with pytest.raises(ValueError, match="pairs"):
+        RepReader.fit(
+            "pca_raw",
+            x_rows(*X),
+            [0],
+            labels=labels,
+            pairs=np.array(pairs, dtype=np.int64),
         )
 
 
@@ -330,3 +393,154 @@ def test_fit_without_groups_needs_both_classes() -> None:
             [0],
             labels=np.ones(10, dtype=np.int64),
         )
+
+
+def fitted_reader() -> tuple[RepReader, NDArray[np.float32]]:
+    rng = np.random.default_rng(3)
+    h = rng.standard_normal((3, 30, 7)).astype(np.float32)
+    h[:, ::2] += 2.0
+    labels = (np.arange(30) % 2 == 0).astype(np.int64)
+    return RepReader.fit("logistic", h, [2, 5, 9], labels=labels), h
+
+
+def test_save_and_load_round_trip_exactly(tmp_path: Path) -> None:
+    reader, h = fitted_reader()
+    path = tmp_path / "reader.npz"
+
+    reader.save(path)
+    loaded = RepReader.load(path)
+
+    assert loaded.method == "logistic"
+    assert loaded.layers == (2, 5, 9)
+    assert all(isinstance(layer, int) for layer in loaded.layers)
+    for name in ("directions", "means", "signs"):
+        original = getattr(reader, name)
+        restored = getattr(loaded, name)
+        assert restored.dtype == original.dtype
+        np.testing.assert_array_equal(restored, original)
+    np.testing.assert_array_equal(loaded.score(h), reader.score(h))
+
+
+def test_save_writes_one_file_at_exactly_the_given_path(
+    tmp_path: Path,
+) -> None:
+    reader, _ = fitted_reader()
+    bare = tmp_path / "reader_without_suffix"
+
+    reader.save(str(bare))
+
+    assert [entry.name for entry in tmp_path.iterdir()] == [bare.name]
+    assert RepReader.load(bare).layers == reader.layers
+
+
+def test_load_rejects_a_file_with_missing_arrays(tmp_path: Path) -> None:
+    path = tmp_path / "partial.npz"
+    np.savez(path, method=np.array("x"), layers=np.array([0]))
+
+    with pytest.raises(ValueError, match="directions"):
+        RepReader.load(path)
+
+
+def test_load_rejects_inconsistent_arrays(tmp_path: Path) -> None:
+    reader, _ = fitted_reader()
+    path = tmp_path / "bad.npz"
+    np.savez(
+        path,
+        method=np.array(reader.method),
+        layers=np.array([2, 5]),
+        directions=reader.directions,
+        means=reader.means,
+        signs=reader.signs,
+    )
+
+    with pytest.raises(ValueError, match="layers"):
+        RepReader.load(path)
+
+
+class PairedData(NamedTuple):
+    h: NDArray[np.float32]
+    pairs: NDArray[np.int64]
+    labels: NDArray[np.int64]
+
+
+def planted_direction(d: int, seed: int) -> NDArray[np.float64]:
+    direction = np.random.default_rng(seed).standard_normal(d)
+    return direction / np.linalg.norm(direction)
+
+
+def planted_pairs(
+    direction: NDArray[np.float64],
+    n_pairs: int,
+    *,
+    seed: int,
+    signal: float,
+) -> PairedData:
+    """Builds pairs that differ by 2 * signal along `direction`.
+
+    Rows 2i and 2i + 1 form pair i. The content shared by the two members
+    and the in-pair order are random, as in the reference datasets.
+    """
+    rng = np.random.default_rng(seed)
+    d = direction.shape[0]
+    base = 2.0 * rng.standard_normal((n_pairs, d))
+    pos = base + signal * direction + rng.standard_normal((n_pairs, d))
+    neg = base - signal * direction + rng.standard_normal((n_pairs, d))
+    pos_first = rng.random(n_pairs) < 0.5
+    h = np.empty((2 * n_pairs, d))
+    h[0::2] = np.where(pos_first[:, None], pos, neg)
+    h[1::2] = np.where(pos_first[:, None], neg, pos)
+    h += 10.0 * rng.standard_normal(d)
+    labels = np.empty(2 * n_pairs, dtype=np.int64)
+    labels[0::2] = pos_first
+    labels[1::2] = ~pos_first
+    pairs = np.arange(2 * n_pairs, dtype=np.int64).reshape(n_pairs, 2)
+    return PairedData(h.astype(np.float32), pairs, labels)
+
+
+@pytest.mark.parametrize("method", ["pca_diff", "mean_diff", "logistic"])
+@pytest.mark.parametrize("polarity", [1.0, -1.0], ids=["as-is", "reversed"])
+def test_planted_direction_is_recovered_and_read_with_the_right_sign(
+    method: Method, polarity: float
+) -> None:
+    direction = polarity * planted_direction(48, seed=1)
+    train = planted_pairs(direction, 256, seed=2, signal=3.0)
+    test = planted_pairs(direction, 250, seed=3, signal=3.0)
+
+    reader = RepReader.fit(
+        method,
+        train.h[None],
+        [0],
+        labels=train.labels,
+        pairs=train.pairs,
+    )
+
+    cosine = abs(float(reader.directions[0] @ direction))
+    accuracy = group_accuracy(
+        reader.score(test.h[None]), test.pairs, test.labels
+    )
+    assert cosine > 0.95
+    assert accuracy[0] > 0.95
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_random_direction_scores_near_chance_on_held_out_groups(
+    seed: int,
+) -> None:
+    direction = planted_direction(512, seed=10 + seed)
+    train = planted_pairs(direction, 64, seed=20 + seed, signal=2.0)
+    test = planted_pairs(direction, 250, seed=30 + seed, signal=2.0)
+
+    reader = RepReader.fit(
+        "random",
+        train.h[None],
+        [0],
+        labels=train.labels,
+        pairs=train.pairs,
+        seed=seed,
+    )
+
+    accuracy = group_accuracy(
+        reader.score(test.h[None]), test.pairs, test.labels
+    )
+    assert test.pairs.shape[0] >= 200
+    assert accuracy[0] == pytest.approx(0.5, abs=0.15)

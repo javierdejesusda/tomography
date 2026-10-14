@@ -91,6 +91,8 @@ def test_group_accuracy_keeps_leading_axes_of_the_scores() -> None:
         (i64([0, 1]), [1, 0], [1.0, np.nan], "finite"),
         (np.zeros((0, 2), dtype=np.int64), [1, 0], [1.0, 2.0], "groups"),
         (np.zeros((2, 0), dtype=np.int64), [1, 0], [1.0, 2.0], "groups"),
+        (np.array([[0.0, 1.0]]), [1, 0], [1.0, 2.0], "groups"),
+        (i64([0, -2, 2]), [1, 0, 0], [1.0, 5.0, 0.0], "groups"),
     ],
     ids=[
         "no-positive",
@@ -100,10 +102,12 @@ def test_group_accuracy_keeps_leading_axes_of_the_scores() -> None:
         "nan-score",
         "no-groups",
         "no-columns",
+        "float-dtype",
+        "index-below-padding",
     ],
 )
 def test_group_accuracy_rejects_malformed_input(
-    groups: NDArray[np.int64],
+    groups: NDArray[np.generic],
     labels: list[int],
     scores: list[float],
     message: str,
@@ -146,6 +150,7 @@ def test_auroc_agrees_with_scikit_learn_over_leading_axes() -> None:
     result = auroc(scores, labels)
 
     assert result.shape == (3, 5)
+    assert result.dtype == np.float64
     for i in range(3):
         for j in range(5):
             assert result[i, j] == pytest.approx(

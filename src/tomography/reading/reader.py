@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace
+from pathlib import Path
 from typing import Self
 
 import numpy as np
@@ -12,7 +13,10 @@ from tomography.reading.directions import FloatArray
 from tomography.reading.directions import Method
 from tomography.reading.directions import Preprocess
 from tomography.reading.directions import fit_direction
+from tomography.reading.metrics import GroupIndex
 from tomography.reading.metrics import parse_groups
+
+_FIELDS = ("method", "layers", "directions", "means", "signs")
 
 
 @dataclass(frozen=True, eq=False)
@@ -52,13 +56,14 @@ class RepReader:
     ) -> Self:
         """Fits and orients one direction per layer.
 
-        Labels only orient each layer and choose layers; the reference
-        rule decides the sign. Within each group, the sign is positive when
-        the label-1 member holds the highest score more often than the
-        lowest, negative in the opposite case, and positive on a tie. The
-        groups are `groups`, else the `pairs` whose members differ in
-        label. Without either, the sign makes the mean score of the label-1
-        rows exceed that of the label-0 rows.
+        The unpaired `mean_diff` and `logistic` finders fit on the labels;
+        for every method the labels also orient each layer with the
+        reference rule. Within each group, the sign is positive when the
+        label-1 member holds the highest score more often than the lowest,
+        negative in the opposite case, and positive on a tie. The groups are
+        `groups`, else the `pairs` whose members differ in label. Without
+        either, the sign makes the mean score of the label-1 rows exceed
+        that of the label-0 rows.
 
         Layer k draws its randomness from a seed derived from `seed` and k,
         so the layers of a random baseline are independent.
@@ -88,6 +93,7 @@ class RepReader:
             raise ValueError(
                 f"layers has {len(layers)} entries for {h.shape[0]} layers"
             )
+        index = _orientation_groups(pairs, groups, labels)
         fits = [
             fit_direction(
                 method,
@@ -106,7 +112,7 @@ class RepReader:
             means=np.stack([fit.mean for fit in fits]),
             signs=np.ones(len(fits), dtype=np.float32),
         )
-        signs = _orientation(unsigned._project(h), labels, pairs, groups)
+        signs = _orientation(unsigned._project(h), labels, index)
         return replace(unsigned, signs=signs)
 
     @classmethod
@@ -138,31 +144,9 @@ class RepReader:
             ValueError: If the shapes disagree, a direction is zero or a
                 sign is not -1 or +1.
         """
-        vectors = np.array(directions, dtype=np.float64)
-        if vectors.ndim != 2:
-            raise ValueError(
-                f"directions must have shape (K, d), got {vectors.shape}"
-            )
-        n_layers = vectors.shape[0]
-        centers = np.array(means, dtype=np.float64)
-        if centers.shape != vectors.shape:
-            raise ValueError(
-                f"means must have shape {vectors.shape}, got {centers.shape}"
-            )
-        if len(layers) != n_layers:
-            raise ValueError(
-                f"layers has {len(layers)} entries for {n_layers} directions"
-            )
-        orientation = (
-            np.ones(n_layers)
-            if signs is None
-            else np.array(signs, dtype=np.float64)
+        vectors, centers, orientation = _checked_arrays(
+            layers, directions, means, signs
         )
-        if (
-            orientation.shape != (n_layers,)
-            or not np.isin(orientation, (-1.0, 1.0)).all()
-        ):
-            raise ValueError("signs must have shape (K,) with values -1 or +1")
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         if (norms == 0.0).any():
             raise ValueError("directions must not contain a zero vector")
@@ -170,6 +154,51 @@ class RepReader:
             method=method,
             layers=tuple(int(layer) for layer in layers),
             directions=(vectors / norms).astype(np.float32),
+            means=centers.astype(np.float32),
+            signs=orientation.astype(np.float32),
+        )
+
+    def save(self, path: str | Path) -> None:
+        """Writes the reader to one `.npz` file at exactly `path`.
+
+        Args:
+            path: Destination file; no suffix is added.
+        """
+        with Path(path).open("wb") as file:
+            np.savez(
+                file,
+                method=np.array(self.method),
+                layers=np.array(self.layers, dtype=np.int64),
+                directions=self.directions,
+                means=self.means,
+                signs=self.signs,
+            )
+
+    @classmethod
+    def load(cls, path: str | Path) -> Self:
+        """Reads a reader written by `save`, with every array unchanged.
+
+        Args:
+            path: File written by `save`.
+
+        Returns:
+            The reader, equal to the one that was saved.
+
+        Raises:
+            ValueError: If the file lacks an array or the arrays disagree.
+        """
+        with np.load(Path(path), allow_pickle=False) as data:
+            missing = [name for name in _FIELDS if name not in data.files]
+            if missing:
+                raise ValueError(f"{path} has no array named {missing[0]!r}")
+            method = str(data["method"])
+            layers = [int(layer) for layer in data["layers"]]
+            arrays = [data[name] for name in _FIELDS[2:]]
+        vectors, centers, orientation = _checked_arrays(layers, *arrays)
+        return cls(
+            method=method,
+            layers=tuple(layers),
+            directions=vectors.astype(np.float32),
             means=centers.astype(np.float32),
             signs=orientation.astype(np.float32),
         )
@@ -215,28 +244,76 @@ class RepReader:
         return scores
 
 
+def _checked_arrays(
+    layers: Sequence[int],
+    directions: FloatArray,
+    means: FloatArray,
+    signs: FloatArray | None,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    vectors = np.array(directions, dtype=np.float64)
+    if vectors.ndim != 2:
+        raise ValueError(
+            f"directions must have shape (K, d), got {vectors.shape}"
+        )
+    n_layers = vectors.shape[0]
+    centers = np.array(means, dtype=np.float64)
+    if centers.shape != vectors.shape:
+        raise ValueError(
+            f"means must have shape {vectors.shape}, got {centers.shape}"
+        )
+    if len(layers) != n_layers:
+        raise ValueError(
+            f"layers has {len(layers)} entries for {n_layers} directions"
+        )
+    orientation = (
+        np.ones(n_layers) if signs is None else np.array(signs, np.float64)
+    )
+    if (
+        orientation.shape != (n_layers,)
+        or not np.isin(orientation, (-1.0, 1.0)).all()
+    ):
+        raise ValueError("signs must have shape (K,) with values -1 or +1")
+    return vectors, centers, orientation
+
+
 def _layer_seed(seed: int, layer_position: int) -> int:
     sequence = np.random.SeedSequence([seed, layer_position])
     return int(sequence.generate_state(1)[0])
 
 
-def _orientation(
-    projections: NDArray[np.float64],
-    labels: NDArray[np.int64],
+def _orientation_groups(
     pairs: NDArray[np.int64] | None,
     groups: NDArray[np.int64] | None,
-) -> NDArray[np.float32]:
+    labels: NDArray[np.int64],
+) -> GroupIndex | None:
     if groups is None and pairs is not None:
         groups = _pairs_with_distinct_labels(pairs, labels)
     if groups is None:
-        return _class_mean_orientation(projections, labels)
-    index = parse_groups(groups, labels)
+        positive = labels == 1
+        if positive.all() or not positive.any():
+            raise ValueError("labels must contain both classes")
+        return None
+    return parse_groups(groups, labels)
+
+
+def _orientation(
+    projections: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    index: GroupIndex | None,
+) -> NDArray[np.float32]:
+    if index is None:
+        positive = labels == 1
+        return _sign_of(
+            projections[:, positive].mean(axis=1)
+            - projections[:, ~positive].mean(axis=1)
+        )
     members = projections[:, index.members]
     highest = np.where(index.valid, members, -np.inf).max(axis=-1)
     lowest = np.where(index.valid, members, np.inf).min(axis=-1)
-    own = members[:, np.arange(groups.shape[0]), index.positive]
-    gap = (own == highest).mean(axis=1) - (own == lowest).mean(axis=1)
-    return np.where(gap < 0, -1.0, 1.0).astype(np.float32)
+    own = members[:, np.arange(index.positive.shape[0]), index.positive]
+    return _sign_of(
+        (own == highest).mean(axis=1) - (own == lowest).mean(axis=1)
+    )
 
 
 def _pairs_with_distinct_labels(
@@ -250,13 +327,5 @@ def _pairs_with_distinct_labels(
     return pairs[distinct] if distinct.any() else None
 
 
-def _class_mean_orientation(
-    projections: NDArray[np.float64], labels: NDArray[np.int64]
-) -> NDArray[np.float32]:
-    positive = labels == 1
-    if positive.all() or not positive.any():
-        raise ValueError("labels must contain both classes")
-    gap = projections[:, positive].mean(axis=1) - projections[
-        :, ~positive
-    ].mean(axis=1)
+def _sign_of(gap: NDArray[np.float64]) -> NDArray[np.float32]:
     return np.where(gap < 0, -1.0, 1.0).astype(np.float32)
