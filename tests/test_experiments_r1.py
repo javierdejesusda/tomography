@@ -1,10 +1,13 @@
 """Tests for the R1 sentiment reading experiment."""
 
+from collections.abc import Mapping
+from collections.abc import Sequence
 import dataclasses
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 import pytest
 
 from tomography.activations import Activations
@@ -21,6 +24,7 @@ from tomography.experiments.r1_sentiment import run
 from tomography.experiments.r1_sentiment import select_examples
 from tomography.experiments.sweep import SERIES
 from tomography.experiments.sweep import Prepared
+from tomography.experiments.sweep import SweepResult
 from tomography.experiments.sweep import sweep_from_activations
 from tomography.model import LoadedModel
 from tomography.model import load_model
@@ -29,22 +33,40 @@ DIM = 64
 LAYERS = (1, 2)
 
 
-def _examples(per_class: int = 40) -> list[Example]:
+def _examples(
+    per_class: int = 40, val_per_class: int | None = None
+) -> list[Example]:
+    """Train and val phrases with disjoint texts and uids."""
     positive = ("good", "fine", "great", "nice")
     negative = ("bad", "poor", "dull", "grim")
+    sizes = {
+        "train": per_class,
+        "val": per_class if val_per_class is None else val_per_class,
+    }
     examples = []
-    for split in ("train", "val"):
-        for i in range(per_class):
+    for split, size in sizes.items():
+        for i in range(size):
             for label, words in ((1, positive), (0, negative)):
                 examples.append(
                     Example(
                         uid=f"{split}-{label}-{i}",
-                        text=f"a {words[i % 4]} movie {words[(i + 1) % 4]} {i}",
+                        text=(
+                            f"{split} a {words[i % 4]} movie "
+                            f"{words[(i + 1) % 4]} {i}"
+                        ),
                         label=label,
                         split="train" if split == "train" else "val",
                     )
                 )
     return examples
+
+
+def _short_val_examples() -> list[Example]:
+    """Val phrases below the default `min_words`, one per class."""
+    return [
+        Example(uid="val-short-1", text="so good", label=1, split="val"),
+        Example(uid="val-short-0", text="so bad", label=0, split="val"),
+    ]
 
 
 def _config(**overrides: Any) -> Config:
@@ -258,6 +280,149 @@ def test_pca_diff_follows_the_loud_content_axis_not_sentiment() -> None:
         train, evals, method="pca_diff", seed=0
     ).per_seed("val")[0]
     assert reader.mean(axis=0).max() < 0.65
+
+
+def _canned_result(
+    layers: tuple[int, ...] = LAYERS,
+    accuracy: NDArray[np.float64] | None = None,
+) -> SweepResult:
+    """A real sweep result of three readers, optionally relabelled."""
+    train = [_unmatched_pairs(8, seed=i) for i in range(3)]
+    evals = {"val": _unmatched_pairs(16, seed=99)}
+    result = sweep_from_activations(train, evals, method="logistic", seed=0)
+    return dataclasses.replace(
+        result,
+        layers=layers,
+        accuracy=result.accuracy if accuracy is None else accuracy,
+    )
+
+
+@dataclasses.dataclass
+class _Call:
+    loaded: LoadedModel
+    train_sets: list[StimulusSet]
+    eval_sets: dict[str, StimulusSet]
+    kwargs: dict[str, Any]
+
+
+class _SweepSpy:
+    """Replaces `reading_sweep`: records each call, returns a fixed result."""
+
+    def __init__(self, result: SweepResult) -> None:
+        self.result = result
+        self.calls: list[_Call] = []
+
+    def __call__(
+        self,
+        loaded: LoadedModel,
+        train_sets: Sequence[StimulusSet],
+        eval_sets: Mapping[str, StimulusSet],
+        **kwargs: Any,
+    ) -> SweepResult:
+        self.calls.append(
+            _Call(loaded, list(train_sets), dict(eval_sets), kwargs)
+        )
+        return self.result
+
+
+def _execute_with_spy(
+    config: Config,
+    loaded: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    examples: Sequence[Example] | None = None,
+    result: SweepResult | None = None,
+) -> tuple[RunDir, _SweepSpy]:
+    spy = _SweepSpy(_canned_result() if result is None else result)
+    monkeypatch.setattr(r1_sentiment, "reading_sweep", spy)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(
+        config,
+        run_dir,
+        loaded,
+        _examples() if examples is None else examples,
+    )
+    return run_dir, spy
+
+
+def test_execute_forwards_every_sweep_setting(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(
+        method="mean_diff",
+        preprocess="unit",
+        position="concept",
+        eval_position="last",
+        layers=(1, 2),
+        seed=5,
+        bos="none",
+        batch_size=4,
+    )
+    _, spy = _execute_with_spy(config, tiny_arch, tmp_path, monkeypatch)
+    (call,) = spy.calls
+    assert call.loaded is tiny_arch
+    assert list(call.eval_sets) == ["val"]
+    assert call.kwargs == {
+        "method": "mean_diff",
+        "preprocess": "unit",
+        "position": "concept",
+        "eval_position": "last",
+        "layers": (1, 2),
+        "seed": 5,
+        "bos": "none",
+        "batch_size": 4,
+    }
+
+
+def test_execute_trains_every_seed_on_its_own_train_stimuli(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(n_seeds=4, n_pairs=8)
+    _, spy = _execute_with_spy(config, tiny_arch, tmp_path, monkeypatch)
+    train_sets = spy.calls[0].train_sets
+    assert len(train_sets) == 4
+    assert len({stimuli.texts for stimuli in train_sets}) == 4
+    for stimuli in train_sets:
+        assert stimuli.groups.shape[0] == 8
+        assert all(uid.startswith("train-") for uid in stimuli.uids)
+
+
+def test_execute_evaluates_on_val_phrases_with_enough_words(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    examples = _examples(per_class=30, val_per_class=17)
+    examples += _short_val_examples()
+    config = _config(n_eval_pairs=None)
+    run_dir, spy = _execute_with_spy(
+        config, tiny_arch, tmp_path, monkeypatch, examples=examples
+    )
+    val = spy.calls[0].eval_sets["val"]
+    assert all(uid.startswith("val-") for uid in val.uids)
+    assert not any("short" in uid for uid in val.uids)
+    assert val.groups.shape[0] == 17
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["n_eval_pairs"] == 17
+
+
+def test_execute_writes_the_readers_of_the_sweep(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = _canned_result(layers=(4, 8))
+    run_dir, spy = _execute_with_spy(
+        _config(), tiny_arch, tmp_path, monkeypatch, result=result
+    )
+    readers = run_dir.read_arrays("readers")
+    assert readers["layers"].tolist() == [4, 8]
+    np.testing.assert_array_equal(
+        readers["directions"],
+        np.stack([reader.directions for reader in spy.result.readers]),
+    )
+    np.testing.assert_array_equal(
+        readers["signs"],
+        np.stack([reader.signs for reader in spy.result.readers]),
+    )
 
 
 @pytest.mark.slow
