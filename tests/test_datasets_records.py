@@ -1,4 +1,6 @@
+from collections.abc import Callable
 import dataclasses
+from typing import Any
 from typing import Protocol
 from typing import runtime_checkable
 
@@ -16,12 +18,6 @@ class ExampleLike(Protocol):
     text: str
     label: int
     meta: object
-
-
-def test_example_defaults_to_empty_meta() -> None:
-    example = Example(uid="a", text="hello", label=1, split="train")
-
-    assert example.meta == {}
 
 
 def test_example_meta_is_not_shared_between_instances() -> None:
@@ -44,14 +40,20 @@ def test_example_satisfies_the_example_like_protocol() -> None:
     assert isinstance(example, ExampleLike)
 
 
+def _item(**overrides: Any) -> ChoiceExample:
+    fields: dict[str, Any] = {
+        "uid": "q7",
+        "question": "Which is hot?",
+        "choices": ("ice", "fire"),
+        "correct": 1,
+        "split": "train",
+    }
+    fields.update(overrides)
+    return ChoiceExample(**fields)
+
+
 def test_choice_example_flatten_gives_one_example_per_choice() -> None:
-    item = ChoiceExample(
-        uid="q7",
-        question="Which is hot?",
-        choices=("ice", "fire", "snow"),
-        correct=1,
-        split="test",
-    )
+    item = _item(choices=("ice", "fire", "snow"), split="test")
 
     flat = item.flatten()
 
@@ -61,66 +63,61 @@ def test_choice_example_flatten_gives_one_example_per_choice() -> None:
     assert {e.split for e in flat} == {"test"}
 
 
-def test_choice_example_flatten_sets_group_and_question_meta() -> None:
-    item = ChoiceExample(
-        uid="q7",
-        question="Which is hot?",
-        choices=("ice", "fire"),
-        correct=1,
-        split="train",
+def test_choice_example_flatten_merges_the_item_meta() -> None:
+    item = _item(correct=0, meta={"category": "Science"})
+
+    flat = item.flatten()
+
+    assert all(
+        e.meta
+        == {"category": "Science", "group": "q7", "question": "Which is hot?"}
+        for e in flat
     )
-
-    for example in item.flatten():
-        assert example.meta["group"] == "q7"
-        assert example.meta["question"] == "Which is hot?"
-
-
-def test_choice_example_flatten_keeps_the_item_meta() -> None:
-    item = ChoiceExample(
-        uid="q7",
-        question="Which is hot?",
-        choices=("ice", "fire"),
-        correct=0,
-        split="train",
-        meta={"category": "Science"},
-    )
-
-    for example in item.flatten():
-        assert example.meta["category"] == "Science"
-
-
-def test_choice_example_flatten_does_not_mutate_the_item_meta() -> None:
-    item = ChoiceExample(
-        uid="q7",
-        question="Which is hot?",
-        choices=("ice", "fire"),
-        correct=0,
-        split="train",
-        meta={"category": "Science"},
-    )
-
-    item.flatten()
-
     assert dict(item.meta) == {"category": "Science"}
 
 
 @pytest.mark.parametrize("correct", [-1, 2], ids=["negative", "past_the_end"])
-def test_choice_example_flatten_rejects_an_out_of_range_index(
-    correct: int,
-) -> None:
-    item = ChoiceExample(
-        uid="q7",
-        question="Which is hot?",
-        choices=("ice", "fire"),
-        correct=correct,
-        split="train",
-    )
-
+def test_choice_example_rejects_an_out_of_range_index(correct: int) -> None:
     with pytest.raises(ValueError, match="q7"):
-        item.flatten()
+        _item(correct=correct)
 
 
-def test_qa_example_defaults_to_empty_meta() -> None:
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: Example(uid="a", text="x", label=0, split="dev"),  # type: ignore[arg-type]
+        lambda: _item(split="dev"),
+        lambda: QAExample(
+            uid="a",
+            question="q",
+            answers=(),
+            kind="real",
+            split="dev",  # type: ignore[arg-type]
+        ),
+    ],
+    ids=["example", "choice_example", "qa_example"],
+)
+def test_records_reject_an_unknown_split(build: Callable[[], object]) -> None:
+    with pytest.raises(ValueError, match="split"):
+        build()
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: Example(uid="a", text="x", label=0, split="train"),
+        lambda: _item(),
+        lambda: QAExample(
+            uid="a", question="q", answers=(), kind="real", split="train"
+        ),
+    ],
+    ids=["example", "choice_example", "qa_example"],
+)
+def test_records_default_to_empty_meta(build: Callable[[], Any]) -> None:
+    assert build().meta == {}
+
+
+def test_qa_example_keeps_its_answers() -> None:
     item = QAExample(
         uid="p1",
         question="Who wrote it?",
@@ -129,7 +126,6 @@ def test_qa_example_defaults_to_empty_meta() -> None:
         split="train",
     )
 
-    assert item.meta == {}
     assert item.answers == ("Ada",)
 
 
@@ -153,17 +149,11 @@ def test_assign_splits_is_deterministic() -> None:
 
 def test_assign_splits_ignores_row_order() -> None:
     uids = [f"u{i}" for i in range(200)]
-    forward = dict(zip(uids, assign_splits(uids, dataset="demo"), strict=True))
-    reversed_uids = uids[::-1]
-    backward = dict(
-        zip(
-            reversed_uids,
-            assign_splits(reversed_uids, dataset="demo"),
-            strict=True,
-        )
-    )
 
-    assert forward == backward
+    assert (
+        assign_splits(uids[::-1], dataset="demo")
+        == assign_splits(uids, dataset="demo")[::-1]
+    )
 
 
 def test_assign_splits_gives_the_same_split_to_a_repeated_uid() -> None:
@@ -199,18 +189,23 @@ def test_assign_splits_follows_the_fractions() -> None:
         assert splits.count(name) / len(uids) == pytest.approx(share, abs=0.02)
 
 
-def test_assign_splits_with_all_mass_on_one_split() -> None:
+@pytest.mark.parametrize(
+    ("fractions", "expected"),
+    [
+        ((1.0, 0.0, 0.0), "train"),
+        ((0.0, 1.0, 0.0), "val"),
+        ((0.0, 0.0, 1.0), "test"),
+    ],
+    ids=["train", "val", "test"],
+)
+def test_assign_splits_with_all_mass_on_one_split(
+    fractions: tuple[float, float, float], expected: str
+) -> None:
     uids = [f"u{i}" for i in range(100)]
 
-    assert set(
-        assign_splits(uids, dataset="demo", fractions=(1.0, 0.0, 0.0))
-    ) == {"train"}
-    assert set(
-        assign_splits(uids, dataset="demo", fractions=(0.0, 1.0, 0.0))
-    ) == {"val"}
-    assert set(
-        assign_splits(uids, dataset="demo", fractions=(0.0, 0.0, 1.0))
-    ) == {"test"}
+    assert set(assign_splits(uids, dataset="demo", fractions=fractions)) == {
+        expected
+    }
 
 
 def test_assign_splits_empty_input_gives_empty_output() -> None:
