@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 import contextlib
 from dataclasses import dataclass
+import math
 from typing import Any
 from typing import Protocol
 from typing import Self
@@ -88,8 +89,8 @@ class GenSettings:
         max_new_tokens: Generated tokens per completion.
         temperature: Sampling temperature; None means greedy decoding, which
             needs `num_samples == 1`.
-        top_p: Nucleus mass.
-        top_k: Candidates kept; 0 disables it.
+        top_p: Nucleus mass in (0, 1]; ignored by greedy decoding.
+        top_k: Candidates kept; 0 disables it; ignored by greedy decoding.
         num_samples: Completions per prompt.
         seed: Sampling seed, the same for every arm and coefficient.
         batch_size: Rows per forward pass.
@@ -108,12 +109,14 @@ class GenSettings:
     score_max_length: int = 128
 
     def __post_init__(self) -> None:
-        """Checks the counts.
+        """Checks the counts and the sampling arguments.
 
         Raises:
             ValueError: If `max_new_tokens`, `num_samples` or `batch_size` is
-                below 1, `score_max_length` is below 2, or `num_samples` is
-                above 1 without a temperature.
+                below 1, `score_max_length` is below 2, `num_samples` is
+                above 1 without a temperature, the temperature is not finite
+                and positive, `top_p` is outside (0, 1] or `top_k` is
+                negative.
         """
         for name in ("max_new_tokens", "num_samples", "batch_size"):
             if getattr(self, name) < 1:
@@ -126,6 +129,17 @@ class GenSettings:
             )
         if self.temperature is None and self.num_samples > 1:
             raise ValueError("num_samples > 1 needs a temperature")
+        if self.temperature is not None and not (
+            math.isfinite(self.temperature) and self.temperature > 0
+        ):
+            raise ValueError(
+                f"temperature must be finite and positive, got "
+                f"{self.temperature}"
+            )
+        if not 0 < self.top_p <= 1:
+            raise ValueError(f"top_p must be in (0, 1], got {self.top_p}")
+        if self.top_k < 0:
+            raise ValueError(f"top_k must be >= 0, got {self.top_k}")
 
     @classmethod
     def from_config(cls, config: SteeringConfig) -> Self:
@@ -385,7 +399,7 @@ def dose_response(
     Raises:
         ValueError: If `coeffs` is empty, or from `run_trial`.
     """
-    if not coeffs:
+    if len(coeffs) == 0:
         raise ValueError("coeffs is empty")
     trials = tuple(
         run_trial(
@@ -465,6 +479,7 @@ def _build_arm(
     prefix: str,
 ) -> Arm:
     bos_id = scoring_bos(loaded)
+    greedy = settings.temperature is None
 
     def scoring_context() -> contextlib.AbstractContextManager[None]:
         if controller is None:
@@ -477,8 +492,8 @@ def _build_arm(
             [prefix + prompt for prompt in prompts],
             max_new_tokens=settings.max_new_tokens,
             temperature=settings.temperature,
-            top_p=settings.top_p,
-            top_k=settings.top_k,
+            top_p=1.0 if greedy else settings.top_p,
+            top_k=0 if greedy else settings.top_k,
             num_samples=settings.num_samples,
             seed=settings.seed,
             edits=controller,

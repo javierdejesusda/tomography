@@ -78,6 +78,13 @@ def test_gen_settings_defaults_match_the_contract() -> None:
         {"batch_size": 0},
         {"score_max_length": 1},
         {"temperature": None, "num_samples": 2},
+        {"top_p": 0.0},
+        {"top_p": 1.5},
+        {"top_k": -1},
+        {"temperature": 0.0},
+        {"temperature": -0.5},
+        {"temperature": float("nan")},
+        {"temperature": float("inf")},
     ],
     ids=[
         "max_new_tokens_zero",
@@ -85,6 +92,13 @@ def test_gen_settings_defaults_match_the_contract() -> None:
         "batch_size_zero",
         "score_max_length_one",
         "samples_without_temperature",
+        "top_p_zero",
+        "top_p_above_one",
+        "top_k_negative",
+        "temperature_zero",
+        "temperature_negative",
+        "temperature_nan",
+        "temperature_infinite",
     ],
 )
 def test_gen_settings_rejects_invalid_values(kwargs: dict[str, Any]) -> None:
@@ -93,7 +107,7 @@ def test_gen_settings_rejects_invalid_values(kwargs: dict[str, Any]) -> None:
 
 
 def test_gen_settings_accepts_greedy_with_one_sample() -> None:
-    settings = GenSettings(temperature=None, num_samples=1, top_p=1.0)
+    settings = GenSettings(temperature=None, num_samples=1)
 
     assert settings.temperature is None
 
@@ -387,9 +401,26 @@ def test_dose_slope_rejects_a_length_mismatch() -> None:
         dose_slope([0.0, 1.0], np.array([1.0, 2.0, 3.0]))
 
 
-def test_dose_response_rejects_empty_coefficients() -> None:
+@pytest.mark.parametrize(
+    "coeffs", [[], np.array([])], ids=["list", "numpy_array"]
+)
+def test_dose_response_rejects_empty_coefficients(
+    coeffs: Sequence[float],
+) -> None:
     with pytest.raises(ValueError, match="coeffs"):
-        dose_response(linear_arm_factory(), [], ["a"], parse_scorer)
+        dose_response(linear_arm_factory(), coeffs, ["a"], parse_scorer)
+
+
+def test_dose_response_accepts_a_numpy_grid() -> None:
+    coeffs = np.linspace(-1.0, 1.0, 5)
+
+    dose = dose_response(
+        linear_arm_factory(), coeffs, ["a", "b", "c"], parse_scorer
+    )
+
+    assert dose.coeffs == (-1.0, -0.5, 0.0, 0.5, 1.0)
+    assert [t.name for t in dose.trials] == ["-1", "-0.5", "0", "0.5", "1"]
+    np.testing.assert_allclose(dose.curve(), [-1.0, 0.0, 1.0, 2.0, 3.0])
 
 
 def test_dose_curve_selects_a_column() -> None:
@@ -425,6 +456,8 @@ def test_dose_curve_validates_the_column() -> None:
         wide.curve()
     with pytest.raises(ValueError, match="column"):
         wide.curve(2)
+    with pytest.raises(ValueError, match="column"):
+        wide.curve(-1)
 
 
 PROMPTS = ["The quick brown fox", "The lazy dog", "Honest answers are"]
@@ -438,10 +471,12 @@ SETTINGS = GenSettings(
     max_new_tokens=5,
     temperature=0.8,
     top_p=0.95,
+    top_k=5,
     num_samples=2,
     seed=3,
+    bos="none",
     batch_size=2,
-    score_max_length=32,
+    score_max_length=8,
 )
 
 
@@ -516,16 +551,46 @@ def test_plain_arm_equals_a_direct_generate_call(
         max_new_tokens=5,
         temperature=0.8,
         top_p=0.95,
-        top_k=0,
+        top_k=5,
         num_samples=2,
         seed=3,
-        bos=None,
+        bos="none",
         batch_size=2,
     )
 
     assert arm.name == "none"
     assert arm.generate(PROMPTS) == expected
     assert plain_arm(full_length, SETTINGS, name="base").name == "base"
+
+
+def test_a_greedy_config_generates_with_its_defaults(
+    full_length: LoadedModel,
+) -> None:
+    config = SteeringConfig(
+        experiment="x",
+        model="gpt2",
+        temperature=None,
+        num_samples=1,
+        max_new_tokens=4,
+        batch_size=2,
+    )
+    settings = GenSettings.from_config(config)
+    plain = plain_arm(full_length, settings)
+    steered = edit_arm(
+        full_length, settings, make_controller(full_length, 0.0), name="z"
+    )
+
+    expected = generate(
+        full_length,
+        PROMPTS,
+        max_new_tokens=4,
+        temperature=None,
+        num_samples=1,
+        batch_size=2,
+    )
+
+    assert plain.generate(PROMPTS) == expected
+    assert steered.generate(PROMPTS) == expected
 
 
 def test_plain_arm_scores_like_the_judges(tiny_arch: LoadedModel) -> None:
@@ -546,7 +611,7 @@ def test_plain_arm_scores_like_the_judges(tiny_arch: LoadedModel) -> None:
         tiny_arch.model,
         tiny_arch.tokenizer,
         NEUTRAL,
-        max_length=32,
+        max_length=8,
         batch_size=2,
         bos_id=bos,
     )
@@ -642,8 +707,10 @@ def test_prefix_is_prepended_to_prompts_and_not_to_the_completion(
         max_new_tokens=5,
         temperature=0.8,
         top_p=0.95,
+        top_k=5,
         num_samples=2,
         seed=3,
+        bos="none",
         batch_size=2,
     )
 
@@ -723,7 +790,8 @@ def test_reader_arm_passes_its_options_to_the_controller(
         SETTINGS,
         stub_source(tiny_arch),
         layers=LAYERS,
-        coeff=2.0,
+        coeff=1.0,
+        op="projection",
         mode="absolute",
         mask="all",
         preserve_norm=True,
@@ -735,7 +803,8 @@ def test_reader_arm_passes_its_options_to_the_controller(
         ReadingVectorController.from_reader(
             stub_source(tiny_arch),
             LAYERS,
-            coeff=2.0,
+            coeff=1.0,
+            op="projection",
             mode="absolute",
             mask="all",
             preserve_norm=True,
