@@ -7,10 +7,12 @@ when the caller passes one. The helpers take plain Hugging Face objects and run
 under whatever hooks are active when they are called.
 """
 
+from collections.abc import Iterable
 from collections.abc import Sequence
 import math
 
 import numpy as np
+from numpy.typing import ArrayLike
 from numpy.typing import NDArray
 import torch
 from transformers import PreTrainedModel
@@ -183,3 +185,84 @@ def sequence_logprob(
         ],
         dtype=np.float32,
     )
+
+
+def mc1_accuracy(
+    scores: Iterable[ArrayLike], correct: ArrayLike, *, seed: int
+) -> float:
+    """Computes multiple-choice accuracy with random tie-breaking.
+
+    A question counts as correct when its highest-scoring choice is the correct
+    one. Ties among the highest scores are broken uniformly at random from
+    `seed`, so a scorer that ignores its input sits at chance even when the
+    correct choice has a fixed position.
+
+    Args:
+        scores: One 1-D array of choice scores per question. Questions may have
+            different numbers of choices.
+        correct: The index of the correct choice for each question.
+        seed: Seed of the tie-breaking generator.
+
+    Returns:
+        The share of questions answered correctly.
+
+    Raises:
+        ValueError: If there are no questions, `scores` and `correct` differ in
+            length, a question has no choices or a NaN score, or a correct
+            index is out of range.
+    """
+    rows = [np.asarray(row, dtype=np.float64) for row in scores]
+    answers = np.asarray(correct, dtype=np.int64)
+    if not rows:
+        raise ValueError("mc1_accuracy needs at least one question")
+    if answers.shape != (len(rows),):
+        raise ValueError("scores and correct must have the same length")
+    rng = np.random.default_rng(seed)
+    hits = 0
+    for index, (row, answer) in enumerate(zip(rows, answers, strict=True)):
+        if row.ndim != 1 or row.size == 0:
+            raise ValueError(f"question {index} has no choice scores")
+        if np.isnan(row).any():
+            raise ValueError(f"question {index} has a NaN score")
+        if not 0 <= answer < row.size:
+            raise ValueError(
+                f"correct index {answer} of question {index} is out of range"
+            )
+        best = np.flatnonzero(row == row.max())
+        winner = best[0] if best.size == 1 else rng.choice(best)
+        hits += int(winner == answer)
+    return hits / len(rows)
+
+
+HEURISTIC_LEVELS = 7
+
+
+def heuristic_score(level_logprobs: ArrayLike) -> NDArray[np.float64]:
+    """Turns verbalized-level log-probabilities into a score in [-1, 1].
+
+    The seven levels run from the most negative verbalization to the most
+    positive one and map to evenly spaced values from -1 to 1. The score is the
+    expectation of that value under the softmax of the log-probabilities, so
+    log-probabilities that are not normalized over the seven levels are fine.
+
+    Args:
+        level_logprobs: Array of shape `(..., 7)`.
+
+    Returns:
+        A float64 array of shape `level_logprobs.shape[:-1]`.
+
+    Raises:
+        ValueError: If the last axis does not hold 7 levels.
+    """
+    values = np.asarray(level_logprobs, dtype=np.float64)
+    if values.ndim < 1 or values.shape[-1] != HEURISTIC_LEVELS:
+        raise ValueError(
+            f"expected {HEURISTIC_LEVELS} levels on the last axis, "
+            f"got shape {values.shape}"
+        )
+    weights = np.exp(values - values.max(axis=-1, keepdims=True))
+    weights /= weights.sum(axis=-1, keepdims=True)
+    result: NDArray[np.float64] = weights @ np.linspace(
+        -1.0, 1.0, HEURISTIC_LEVELS
+    )
+    return result

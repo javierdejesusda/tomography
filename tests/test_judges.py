@@ -423,3 +423,117 @@ def test_sequence_logprob_rejects_a_non_positive_batch_size(
 ) -> None:
     with pytest.raises(ValueError, match="batch_size"):
         judges.sequence_logprob(gpt2, tokenizer, ["a b"], [" c"], batch_size=0)
+
+
+def test_mc1_accuracy_counts_questions_whose_best_choice_is_correct() -> None:
+    scores = [[0.1, 0.9], [0.8, 0.2], [0.3, 0.7]]
+
+    assert judges.mc1_accuracy(scores, [1, 0, 0], seed=0) == pytest.approx(
+        2 / 3
+    )
+
+
+def test_mc1_accuracy_accepts_ragged_rows_and_arrays() -> None:
+    ragged = [np.array([0.1, 0.5, 0.2]), np.array([0.9, 0.1])]
+
+    assert judges.mc1_accuracy(ragged, np.array([1, 1]), seed=0) == 0.5
+    assert judges.mc1_accuracy(np.eye(3), [0, 1, 2], seed=0) == 1.0
+
+
+def test_mc1_accuracy_only_breaks_ties_among_the_best_choices() -> None:
+    scores = [[1.0, 1.0, 0.0]] * 50
+
+    assert judges.mc1_accuracy(scores, [2] * 50, seed=3) == 0.0
+
+
+def test_a_constant_scorer_is_at_chance_with_the_correct_index_at_zero() -> (
+    None
+):
+    n_questions = 4000
+    scores = np.zeros((n_questions, 4))
+
+    accuracy = judges.mc1_accuracy(scores, [0] * n_questions, seed=0)
+
+    assert accuracy == pytest.approx(0.25, abs=0.03)
+
+
+def test_a_constant_scorer_is_at_chance_on_ragged_questions() -> None:
+    sizes = [2, 4, 5] * 1000
+    scores = [np.zeros(size) for size in sizes]
+    chance = sum(1 / size for size in sizes) / len(sizes)
+
+    accuracy = judges.mc1_accuracy(scores, [0] * len(sizes), seed=1)
+
+    assert accuracy == pytest.approx(chance, abs=0.03)
+
+
+def test_mc1_tie_breaks_are_reproducible_from_the_seed() -> None:
+    scores = np.zeros((200, 4))
+    correct = [0] * 200
+
+    first = judges.mc1_accuracy(scores, correct, seed=5)
+    again = judges.mc1_accuracy(scores, correct, seed=5)
+    others = {judges.mc1_accuracy(scores, correct, seed=s) for s in range(6)}
+
+    assert first == again
+    assert len(others) > 1
+
+
+@pytest.mark.parametrize(
+    ("scores", "correct", "message"),
+    [
+        ([], [], "at least one question"),
+        ([[0.1, 0.2]], [0, 1], "same length"),
+        ([[0.1, 0.2]], [2], "correct"),
+        ([[0.1, 0.2]], [-1], "correct"),
+        ([[]], [0], "question 0"),
+        ([[0.1, 0.2], [0.1, float("nan")]], [0, 0], "question 1"),
+    ],
+    ids=[
+        "no-questions",
+        "length-mismatch",
+        "index-too-large",
+        "negative-index",
+        "empty-row",
+        "nan-score",
+    ],
+)
+def test_mc1_accuracy_rejects_invalid_inputs(
+    scores: list[list[float]], correct: list[int], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        judges.mc1_accuracy(scores, correct, seed=0)
+
+
+def test_heuristic_score_maps_the_seven_levels_onto_minus_one_to_one() -> None:
+    levels = np.linspace(-1.0, 1.0, 7)
+    log_probs = np.array(
+        [
+            [-30.0, -30.0, -30.0, -30.0, -30.0, -30.0, 0.0],
+            [0.0, -30.0, -30.0, -30.0, -30.0, -30.0, -30.0],
+            [-2.0] * 7,
+            [-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0],
+        ]
+    )
+    softmax = np.exp(log_probs[3]) / np.exp(log_probs[3]).sum()
+
+    got = judges.heuristic_score(log_probs)
+
+    assert got.shape == (4,)
+    assert got[0] == pytest.approx(1.0, abs=1e-6)
+    assert got[1] == pytest.approx(-1.0, abs=1e-6)
+    assert got[2] == pytest.approx(0.0, abs=1e-9)
+    assert got[3] == pytest.approx(float(softmax @ levels))
+
+
+def test_heuristic_score_ignores_a_constant_shift_of_the_log_probs() -> None:
+    log_probs = np.array([[-1.0, -2.0, -0.5, -4.0, -3.0, -2.5, -1.5]])
+
+    assert judges.heuristic_score(log_probs - 7.0) == pytest.approx(
+        judges.heuristic_score(log_probs)
+    )
+
+
+def test_heuristic_score_requires_seven_levels() -> None:
+    with pytest.raises(ValueError, match="7 levels"):
+        judges.heuristic_score(np.zeros((3, 6)))
