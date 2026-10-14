@@ -39,6 +39,9 @@ _TIMEOUT_SECONDS = 90
 _ITEM_ID = re.compile(r"Q\d+")
 _BODY = "result.json"
 _RECORD = "record.json"
+_LABEL_SERVICE = (
+    '  SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul". }'
+)
 
 QueryFetch = Callable[[str], bytes]
 
@@ -120,6 +123,7 @@ def sparql_fetch(query: str) -> bytes:
     Raises:
         urllib.error.URLError: If the service cannot be reached, answers with
             an error, or times out.
+        TimeoutError: If reading the response times out.
     """
     url = ENDPOINT + "?" + urllib.parse.urlencode({"query": query})
     request = urllib.request.Request(
@@ -163,6 +167,8 @@ def run_query(
         ChecksumError: If a cached body does not match its recorded digest.
         OfflineCacheMissError: If `offline` is True and the query is not
             cached.
+        json.JSONDecodeError: If the response is not JSON.
+        TypeError: If the response is JSON but not an object.
         KeyError: If the response is not a SPARQL JSON result.
     """
     root = cache_dir() if cache is None else cache
@@ -226,19 +232,20 @@ def award_winners_query(awards: Sequence[str]) -> str:
     Returns:
         A SPARQL query with the variables prize, prizeLabel, year and
         personLabel: one row per laureate whose award statement carries a
-        point in time.
+        point in time. Labels are English, falling back to the
+        language-neutral `mul` label.
 
     Raises:
-        ValueError: If an award is not an item id.
+        ValueError: If an award is not an item id or no award is given.
     """
-    values = " ".join(f"wd:{_item_id(award)}" for award in awards)
+    values = _award_values(awards)
     lines = [
         "SELECT ?prize ?prizeLabel ?year ?personLabel WHERE {",
         f"  VALUES ?prize {{ {values} }}",
         "  ?person p:P166 ?statement .",
         "  ?statement ps:P166 ?prize ; pq:P585 ?date .",
         "  BIND(YEAR(?date) AS ?year)",
-        '  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }',
+        _LABEL_SERVICE,
         "}",
     ]
     return "\n".join(lines) + "\n"
@@ -272,7 +279,7 @@ def load_post_cutoff(
         The items `parse_award_winners` builds from the query result.
 
     Raises:
-        ValueError: If an award is not an item id.
+        ValueError: If an award is not an item id or no award is given.
         ChecksumError: If a cached result does not match its digest.
         OfflineCacheMissError: If `offline` is True and the query is not
             cached.
@@ -359,9 +366,11 @@ def parse_award_winners(
 def famous_people_query(awards: Sequence[str], *, limit: int) -> str:
     """Builds the query for the most widely documented dead laureates.
 
-    Fame is the number of Wikipedia editions of a person's item; the pool is
-    the people who won one of `awards`, because a query over every human
-    with a sitelink count times out on the public service.
+    Fame is the sitelink count of a person's item (`wikibase:sitelinks`),
+    which covers every Wikimedia site (Wikipedia editions, Commons,
+    Wikisource and so on), not only Wikipedia. The pool is the people who
+    won one of `awards`, because a query over every human with a sitelink
+    count times out on the public service.
 
     Args:
         awards: Wikidata item ids of the awards, such as "Q38104".
@@ -370,13 +379,17 @@ def famous_people_query(awards: Sequence[str], *, limit: int) -> str:
     Returns:
         A SPARQL query with the variables person, personLabel, birth, death
         and links: people with a birth and a death date given to the day.
+        Labels are English, falling back to the language-neutral `mul`
+        label, which some people (Marie Curie) have instead of an English
+        one.
 
     Raises:
-        ValueError: If an award is not an item id or `limit` is below 1.
+        ValueError: If an award is not an item id, no award is given or
+            `limit` is below 1.
     """
     if limit < 1:
         raise ValueError(f"limit must be at least 1, got {limit}")
-    values = " ".join(f"wd:{_item_id(award)}" for award in awards)
+    values = _award_values(awards)
     lines = [
         "SELECT DISTINCT ?person ?personLabel ?birth ?death ?links WHERE {",
         f"  VALUES ?award {{ {values} }}",
@@ -384,13 +397,15 @@ def famous_people_query(awards: Sequence[str], *, limit: int) -> str:
         "          wikibase:sitelinks ?links ;",
         "          p:P569 ?birthStatement ;",
         "          p:P570 ?deathStatement .",
+        "  ?birthStatement a wikibase:BestRank .",
         "  ?birthStatement psv:P569 ?birthValue .",
         "  ?birthValue wikibase:timeValue ?birth ;",
         "              wikibase:timePrecision 11 .",
+        "  ?deathStatement a wikibase:BestRank .",
         "  ?deathStatement psv:P570 ?deathValue .",
         "  ?deathValue wikibase:timeValue ?death ;",
         "              wikibase:timePrecision 11 .",
-        '  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }',
+        _LABEL_SERVICE,
         "}",
         "ORDER BY DESC(?links) ?person",
         f"LIMIT {limit}",
@@ -430,7 +445,8 @@ def load_unknowable_detail(
         The items `parse_unknowable_detail` builds from the query result.
 
     Raises:
-        ValueError: If an award is not an item id or `limit` is below 1.
+        ValueError: If an award is not an item id, no award is given or
+            `limit` is below 1.
         ChecksumError: If a cached result does not match its digest.
         OfflineCacheMissError: If `offline` is True and the query is not
             cached.
@@ -480,6 +496,8 @@ def parse_unknowable_detail(
 
     Returns:
         One "unknowable_detail" item per person, ordered by item id number.
+        Its `meta["popularity"]` is the item's sitelink count, not on the
+        scale of PopQA's `s_pop`.
     """
     first_row: dict[int, Mapping[str, str]] = {}
     for row in sorted(result.rows, key=lambda r: (r["birth"], r["death"])):
@@ -519,6 +537,12 @@ def parse_unknowable_detail(
             )
         )
     return items
+
+
+def _award_values(awards: Sequence[str]) -> str:
+    if not awards:
+        raise ValueError("awards must name at least one item id")
+    return " ".join(f"wd:{_item_id(award)}" for award in awards)
 
 
 def _item_id(value: str) -> str:

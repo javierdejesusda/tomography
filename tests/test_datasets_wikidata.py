@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import re
 import urllib.request
 
 import pytest
@@ -148,6 +149,26 @@ def test_run_query_does_not_cache_a_response_it_cannot_parse(
     assert not (tmp_path / "wikidata").exists()
 
 
+def test_run_query_does_not_cache_a_body_that_is_not_json(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(json.JSONDecodeError):
+        wikidata.run_query(
+            "SELECT 1", fetch=_Endpoint(b"<html>"), cache=tmp_path
+        )
+
+    assert not (tmp_path / "wikidata").exists()
+
+
+def test_run_query_does_not_cache_a_body_that_is_not_an_object(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(TypeError):
+        wikidata.run_query("SELECT 1", fetch=_Endpoint(b"[]"), cache=tmp_path)
+
+    assert not (tmp_path / "wikidata").exists()
+
+
 def test_sparql_fetch_asks_the_endpoint_and_names_the_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -216,9 +237,20 @@ def test_award_winners_query_names_each_award_and_the_year_qualifier() -> None:
     assert "pq:P585" in query
 
 
+def test_award_winners_query_falls_back_to_the_mul_label() -> None:
+    query = wikidata.award_winners_query(("Q38104",))
+
+    assert 'wikibase:language "en,mul"' in query
+
+
 def test_award_winners_query_rejects_anything_but_an_item_id() -> None:
     with pytest.raises(ValueError, match="DROP"):
         wikidata.award_winners_query(("Q1 } DROP",))
+
+
+def test_award_winners_query_needs_at_least_one_award() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        wikidata.award_winners_query(())
 
 
 def test_default_awards_are_eight_distinct_item_ids() -> None:
@@ -307,6 +339,20 @@ def test_parse_award_winners_template_is_a_keyword() -> None:
     assert item.question == "In 2000, who won Nobel Prize in Physics?"
 
 
+def test_load_post_cutoff_without_awards_asks_nothing_and_caches_nothing(
+    tmp_path: Path,
+) -> None:
+    endpoint = _Endpoint(_body([]))
+
+    with pytest.raises(ValueError, match="at least one"):
+        wikidata.load_post_cutoff(
+            cutoff_year=2017, awards=(), cache=tmp_path, fetch=endpoint
+        )
+
+    assert endpoint.queries == []
+    assert not (tmp_path / "wikidata").exists()
+
+
 def test_load_post_cutoff_runs_the_award_query_through_the_cache(
     tmp_path: Path,
 ) -> None:
@@ -358,11 +404,29 @@ def test_famous_people_query_asks_for_the_top_dead_laureates() -> None:
     assert query.rstrip().endswith("LIMIT 50")
 
 
+def test_famous_people_query_falls_back_to_the_mul_label() -> None:
+    query = wikidata.famous_people_query(("Q38104",), limit=5)
+
+    assert 'wikibase:language "en,mul"' in query
+
+
 def test_famous_people_query_rejects_anything_but_item_ids_and_counts() -> None:
     with pytest.raises(ValueError, match="DROP"):
         wikidata.famous_people_query(("Q1 } DROP",), limit=5)
     with pytest.raises(ValueError, match="limit"):
         wikidata.famous_people_query(("Q1",), limit=0)
+
+
+def test_famous_people_query_keeps_only_the_best_ranked_dates() -> None:
+    query = wikidata.famous_people_query(("Q38104",), limit=5)
+
+    assert "  ?birthStatement a wikibase:BestRank ." in query
+    assert "  ?deathStatement a wikibase:BestRank ." in query
+
+
+def test_famous_people_query_needs_at_least_one_award() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        wikidata.famous_people_query((), limit=5)
 
 
 def test_parse_unknowable_detail_builds_an_unanswerable_item() -> None:
@@ -453,6 +517,47 @@ def test_parse_unknowable_detail_keeps_one_item_per_person() -> None:
     assert [i.uid for i in items] == ["wikidata:detail:Q7241"]
 
 
+def test_parse_unknowable_detail_does_not_depend_on_the_row_order() -> None:
+    rows = [
+        _person("Q7241", "Rabindranath Tagore", birth="1861-05-07T00:00:00Z"),
+        _person("Q7241", "Rabindranath Tagore", birth="1861-05-06T00:00:00Z"),
+    ]
+
+    forward = wikidata.parse_unknowable_detail(_result(rows), seed=0)
+    backward = wikidata.parse_unknowable_detail(_result(rows[::-1]), seed=0)
+
+    assert forward == backward
+
+
+def test_parse_unknowable_detail_moves_a_leap_day_birth_to_the_28th() -> None:
+    row = _person(birth="1896-02-29T00:00:00Z", death="1906-03-01T00:00:00Z")
+
+    (item,) = wikidata.parse_unknowable_detail(
+        _result([row]), seed=0, min_age_years=10
+    )
+
+    assert _day(item) == date(1906, 2, 28)
+
+
+def test_parse_unknowable_detail_needs_a_day_before_the_death() -> None:
+    too_short = _person(
+        birth="1950-01-01T00:00:00Z", death="1960-01-01T00:00:00Z"
+    )
+    one_day = _person(
+        birth="1950-01-01T00:00:00Z", death="1960-01-02T00:00:00Z"
+    )
+
+    skipped = wikidata.parse_unknowable_detail(
+        _result([too_short]), seed=0, min_age_years=10
+    )
+    (item,) = wikidata.parse_unknowable_detail(
+        _result([one_day]), seed=0, min_age_years=10
+    )
+
+    assert skipped == []
+    assert _day(item) == date(1960, 1, 1)
+
+
 def test_parse_unknowable_detail_templates_and_age_are_keywords() -> None:
     (item,) = wikidata.parse_unknowable_detail(
         _result([_person()]),
@@ -511,3 +616,42 @@ def test_network_famous_people_give_unanswerable_items(tmp_path: Path) -> None:
     subjects = {str(i.meta["subject"]) for i in items}
     assert "Albert Einstein" in subjects
     assert all(not i.answers for i in items)
+
+
+@pytest.mark.network
+def test_network_famous_people_appear_once_per_row(tmp_path: Path) -> None:
+    query = wikidata.famous_people_query(wikidata.AWARDS, limit=100)
+
+    result = wikidata.run_query(query, cache=tmp_path)
+
+    people = {row["person"] for row in result.rows}
+    assert len(people) == len(result.rows)
+
+
+@pytest.mark.network
+def test_network_famous_people_include_labelled_marie_curie(
+    tmp_path: Path,
+) -> None:
+    query = wikidata.famous_people_query(wikidata.AWARDS, limit=100)
+
+    result = wikidata.run_query(query, cache=tmp_path)
+
+    labels = [row["personLabel"] for row in result.rows]
+    assert not [label for label in labels if re.fullmatch(r"Q\d+", label)]
+    assert "Marie Curie" in labels
+
+
+@pytest.mark.network
+def test_network_physics_laureates_include_englert_in_2013(
+    tmp_path: Path,
+) -> None:
+    query = wikidata.award_winners_query(("Q38104",))
+
+    result = wikidata.run_query(query, cache=tmp_path)
+
+    labels = [row["personLabel"] for row in result.rows]
+    assert not [label for label in labels if re.fullmatch(r"Q\d+", label)]
+    winners_2013 = [
+        r["personLabel"] for r in result.rows if r["year"] == "2013"
+    ]
+    assert any("Englert" in label for label in winners_2013)
