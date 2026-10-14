@@ -161,7 +161,7 @@ MESSAGES = r"same length|empty|outside|must be"
 
 def reference_streams(
     lm: LoadedModel, texts: Sequence[str], bos: BosMode
-) -> list[int]:
+) -> list[list[int]]:
     prefix = [lm.bos_id] if bos == "prepend" else []
     ids = lm.tokenizer(list(texts), add_special_tokens=False)["input_ids"]
     return [prefix + row for row in ids]
@@ -243,7 +243,7 @@ def reference_logits(
 
 def close(actual: torch.Tensor, expected: torch.Tensor) -> None:
     tol = 1e-4 * max(1.0, expected.abs().max().item())
-    torch.testing.assert_close(actual, expected, atol=tol, rtol=tol)
+    torch.testing.assert_close(actual, expected, atol=tol, rtol=0)
 
 
 def hook_count(loaded: LoadedModel) -> int:
@@ -440,17 +440,19 @@ def reference_generate(
 GENERATE = {"layers": (1, 2, 3), "alpha": 2.0, "window": 4}
 
 
+@pytest.mark.parametrize("window", [2, 4, 100], ids=["w2", "w4", "w100"])
 def test_generate_equals_the_reference_greedy_loop(
-    tiny_arch: LoadedModel,
+    tiny_arch: LoadedModel, window: int
 ) -> None:
     tiny_arch.model.generation_config.eos_token_id = None
+    options = {**GENERATE, "window": window}
 
     result = contrast_generate(
-        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, max_new_tokens=6, **GENERATE
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, max_new_tokens=6, **options
     )
 
     expected = reference_generate(
-        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, steps=6, **GENERATE
+        tiny_arch, PROMPTS, POSITIVE, NEGATIVE, steps=6, **options
     )
     assert [list(c.token_ids) for c in result] == expected
     assert not any(c.finished for c in result)
@@ -1190,11 +1192,16 @@ def test_gpt2_contrast_logits_and_generation_speed() -> None:
     batch = gpt2.encode(prompts[:3], padding_side="left")
     assert set(batch.lengths) == {33}
     with torch.no_grad():
-        plain = gpt2.model(
-            input_ids=batch.input_ids,
-            attention_mask=batch.attention_mask,
-            position_ids=batch.position_ids,
-        ).logits[:, -1]
+        plain = (
+            gpt2.model(
+                input_ids=batch.input_ids.to(gpt2.device),
+                attention_mask=batch.attention_mask.to(gpt2.device),
+                position_ids=batch.position_ids.to(gpt2.device),
+            )
+            .logits[:, -1]
+            .float()
+            .cpu()
+        )
     steered = contrast_logits(
         gpt2, prompts[:3], positive[:3], negative[:3], **options
     )
@@ -1208,3 +1215,82 @@ def test_gpt2_contrast_logits_and_generation_speed() -> None:
     assert not torch.allclose(steered, plain)
     assert len(completions) == 8
     print(f"contrast_generate: {seconds / 8:.3f} s per generated token")
+
+
+def decoder_row_counts(loaded: LoadedModel) -> tuple[list[int], Any]:
+    rows: list[int] = []
+
+    def record(module: Any, args: Any, kwargs: dict[str, Any]) -> None:
+        rows.append(kwargs["input_ids"].shape[0])
+
+    handle = loaded.decoder.register_forward_pre_hook(record, with_kwargs=True)
+    return rows, handle
+
+
+def test_generate_runs_chunks_of_three_times_batch_size_rows(
+    tiny_arch: LoadedModel,
+) -> None:
+    tiny_arch.model.generation_config.eos_token_id = None
+    rows, handle = decoder_row_counts(tiny_arch)
+
+    try:
+        contrast_generate(
+            tiny_arch,
+            PROMPTS,
+            POSITIVE,
+            NEGATIVE,
+            max_new_tokens=2,
+            batch_size=2,
+            **GENERATE,
+        )
+    finally:
+        handle.remove()
+
+    assert set(rows) == {6, 3}
+
+
+def test_logprobs_run_chunks_of_three_times_batch_size_rows(
+    tiny_arch: LoadedModel,
+) -> None:
+    rows, handle = decoder_row_counts(tiny_arch)
+
+    try:
+        contrast_logprobs(
+            tiny_arch,
+            PROMPTS,
+            CONTINUATIONS,
+            POSITIVE,
+            NEGATIVE,
+            layers=(1, 3),
+            alpha=0.5,
+            batch_size=2,
+        )
+    finally:
+        handle.remove()
+
+    assert rows == [6, 3]
+
+
+def test_logits_apply_the_lm_head_to_the_last_column_of_the_main_rows_only(
+    tiny_arch: LoadedModel,
+) -> None:
+    shapes: list[tuple[int, ...]] = []
+
+    def record(module: Any, args: Any) -> None:
+        shapes.append(tuple(args[0].shape))
+
+    head = tiny_arch.model.get_output_embeddings()
+    handle = head.register_forward_pre_hook(record)
+    try:
+        contrast_logits(
+            tiny_arch,
+            PROMPTS,
+            POSITIVE,
+            NEGATIVE,
+            layers=(1, 2),
+            alpha=0.5,
+        )
+    finally:
+        handle.remove()
+
+    assert shapes == [(len(PROMPTS), tiny_arch.d_model)]
