@@ -1,7 +1,8 @@
-"""SyntHal: prompts about synthetic subjects that no model has seen.
+"""SyntHal: prompts about synthetic subjects invented for the benchmark.
 
-P9 uses them as the fictional items. The four relations PopQA shares are
-asked with one template per relation, the same one PopQA's real subjects get.
+The knowledge-boundary study uses them as the fictional items. The four
+relations PopQA shares are asked with one template per relation, the same one
+PopQA's real subjects get.
 """
 
 from collections.abc import Iterable
@@ -60,6 +61,7 @@ def load_synthal(
         ChecksumError: If the downloaded file does not match its digest.
         OfflineCacheMissError: If `offline` is True and the file is not
             cached.
+        ValueError: If the template used for a row has no '{}' slot.
     """
     path = fetch(SOURCE, cache=cache, offline=offline)
     with path.open(encoding="utf-8") as handle:
@@ -89,7 +91,7 @@ def parse_synthal(
         One "fictional" item per row of a kept relation, in row order.
 
     Raises:
-        ValueError: If the template a row falls back to has no "{}" slot.
+        ValueError: If the template used for a row has no '{}' slot.
     """
     kept = [row for row in rows if row["relation_key"] in relations]
     uids = [f"synthal:{row['example_id']}" for row in kept]
