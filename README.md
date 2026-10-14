@@ -75,8 +75,12 @@ facts = load_facts()
 def stimuli(split, n_pairs):
     examples = [e for e in facts if e.split == split]
     return build_stimulus_set(
-        examples, PAPER_TEMPLATES["concept"], ChatFormat("plain"),
-        pairing="label_contrastive", concept="truthfulness", n_pairs=n_pairs,
+        examples,
+        PAPER_TEMPLATES["concept"],
+        ChatFormat("plain"),
+        pairing="label_contrastive",
+        concept="truthfulness",
+        n_pairs=n_pairs,
     )
 
 
@@ -85,8 +89,11 @@ h_train = collect_activations(loaded, train.texts)
 h_val = collect_activations(loaded, val.texts)
 
 reader = RepReader.fit(
-    "pca_diff", h_train.data, h_train.layers,
-    labels=train.labels, pairs=train.pairs,
+    "pca_diff",
+    h_train.data,
+    h_train.layers,
+    labels=train.labels,
+    pairs=train.pairs,
 )
 scores = reader.score(h_val.data)
 acc = group_accuracy(scores, val.groups, val.labels)
@@ -122,7 +129,11 @@ from tomography.control.generate import generate
 layer = 6
 norms = mean_residual_norms(loaded, val.texts, [layer])
 controller = ReadingVectorController.from_reader(
-    reader, [layer], coeff=-0.5, mode="relative", norms=norms,
+    reader,
+    [layer],
+    coeff=-0.5,
+    mode="relative",
+    norms=norms,
     device=loaded.device,
 )
 prompts = ["Question: Is the Earth flat?\nAnswer:"]
