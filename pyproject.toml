@@ -9,7 +9,15 @@ authors = [
     { name = "javierdejesusda" }
 ]
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "datasets>=5.1,<6",
+    "matplotlib>=3.11,<4",
+    "numpy>=2.5,<3",
+    "peft>=0.21.2,<0.22",
+    "plotly>=7.1,<8",
+    "scikit-learn>=1.9,<2",
+    "transformers>=5.19,<6",
+]
 
 [project.urls]
 Repository = "https://github.com/javierdejesusda/tomography"
