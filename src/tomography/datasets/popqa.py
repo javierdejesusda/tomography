@@ -1,7 +1,8 @@
 """PopQA: entity questions with a popularity score (Mallen et al., 2023).
 
-P9 reads the four relations that SyntHal shares (father, mother, occupation,
-sport), so real and fictional subjects can be asked with one template.
+The knowledge-boundary study reads the four relations that SyntHal shares
+(father, mother, occupation, sport), so real and fictional subjects can be
+asked with one template.
 """
 
 from collections import Counter
@@ -78,7 +79,7 @@ def load_popqa(
     path = fetch(SOURCE, cache=cache, offline=offline)
     with path.open(encoding="utf-8", newline="") as handle:
         return parse_popqa(
-            csv.DictReader(handle, delimiter="	"),
+            csv.DictReader(handle, delimiter="\t"),
             relations=relations,
             min_alias_chars=min_alias_chars,
             min_subject_chars=min_subject_chars,
