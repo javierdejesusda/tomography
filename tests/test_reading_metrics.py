@@ -4,7 +4,9 @@ import pytest
 from sklearn.metrics import roc_auc_score
 
 from tomography.reading.metrics import auroc
+from tomography.reading.metrics import best_layer
 from tomography.reading.metrics import bootstrap_ci
+from tomography.reading.metrics import cosine_matrix
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.metrics import wilson_ci
 
@@ -290,3 +292,80 @@ def test_wilson_ci_rejects_bad_arguments(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         wilson_ci(successes, trials, alpha=alpha)
+
+
+def test_best_layer_returns_the_first_maximum_as_a_layer_index() -> None:
+    acc = np.array([0.5, 0.9, 0.9, 0.7])
+
+    layer = best_layer(acc, [0, 2, 4, 6])
+
+    assert layer == 2
+    assert isinstance(layer, int)
+
+
+def test_best_layer_accepts_a_single_layer() -> None:
+    assert best_layer(np.array([0.3]), (12,)) == 12
+
+
+@pytest.mark.parametrize(
+    ("acc", "layers", "message"),
+    [
+        (np.array([0.1, 0.2]), [0], "layers"),
+        (np.zeros((2, 2)), [0, 1], "acc"),
+        (np.zeros(0), [], "acc"),
+        (np.array([0.1, np.nan]), [0, 1], "NaN"),
+    ],
+    ids=["length", "two-dimensional", "empty", "nan"],
+)
+def test_best_layer_rejects_malformed_input(
+    acc: NDArray[np.float64], layers: list[int], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        best_layer(acc, layers)
+
+
+def test_cosine_matrix_of_known_vectors() -> None:
+    vectors = np.array([[1.0, 0.0], [0.0, 2.0], [-3.0, 0.0], [1.0, 1.0]])
+
+    cosines = cosine_matrix(vectors)
+
+    assert cosines.shape == (4, 4)
+    assert cosines.dtype == np.float64
+    np.testing.assert_allclose(np.diag(cosines), 1.0)
+    assert cosines[0, 1] == pytest.approx(0.0)
+    assert cosines[0, 2] == pytest.approx(-1.0)
+    assert cosines[0, 3] == pytest.approx(1 / np.sqrt(2))
+    np.testing.assert_allclose(cosines, cosines.T)
+
+
+def test_cosine_matrix_ignores_vector_scale() -> None:
+    vectors = np.random.default_rng(6).standard_normal((5, 16))
+    scales = np.array([1.0, 10.0, 0.1, 100.0, 3.0])[:, None]
+
+    np.testing.assert_allclose(
+        cosine_matrix(vectors * scales), cosine_matrix(vectors), atol=1e-12
+    )
+
+
+def test_cosine_matrix_stays_inside_the_unit_interval() -> None:
+    vectors = np.tile(np.random.default_rng(3).standard_normal(64), (3, 1))
+
+    cosines = cosine_matrix(vectors.astype(np.float32))
+
+    assert cosines.max() <= 1.0
+    assert cosines.min() >= -1.0
+
+
+@pytest.mark.parametrize(
+    ("vectors", "message"),
+    [
+        (np.ones(3), "shape"),
+        (np.array([[1.0, 0.0], [0.0, 0.0]]), "zero"),
+    ],
+    ids=["one-dimensional", "zero-vector"],
+)
+def test_cosine_matrix_rejects_malformed_input(
+    vectors: NDArray[np.float64], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        cosine_matrix(vectors)
