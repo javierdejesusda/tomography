@@ -28,16 +28,31 @@ PERSONAS = ("honest", "untruthful")
 def _statements(
     count: int = 12, splits: tuple[Split, ...] = ("train", "val", "test")
 ) -> list[Example]:
-    return [
-        Example(
-            uid=f"fact-{split}-{r}",
-            text=f"The fact number {r} is " + "plain and long " * (r % 4 + 1),
-            label=1,
-            split=split,
-        )
-        for split in splits
-        for r in range(count)
-    ]
+    examples = []
+    for split in splits:
+        for r in range(count):
+            body = "plain and long " * (r % 4 + 1)
+            examples.append(
+                Example(
+                    uid=f"fact-{split}-{r}",
+                    text=f"The fact number {r} is {body}",
+                    label=1,
+                    split=split,
+                )
+            )
+            examples.append(
+                Example(
+                    uid=f"fact-{split}-{r}-false",
+                    text=f"The claim number {r} is odd and {body}",
+                    label=0,
+                    split=split,
+                )
+            )
+    return examples
+
+
+def _true(statements: list[Example]) -> list[Example]:
+    return [e for e in statements if e.label == 1]
 
 
 def _config(**overrides: Any) -> Config:
@@ -55,6 +70,7 @@ def test_config_defaults_and_round_trip() -> None:
     config = Config()
     assert config.experiment == "r5"
     assert config.model == "gpt2"
+    assert config.method == "logistic"
     assert config.position == "response"
     assert config.n_scan_statements == 4
     assert Config.from_dict(config.to_dict()) == config
@@ -76,6 +92,18 @@ def _scan(run_dir: RunDir, i: int, persona: str) -> tuple[Any, list[str], Any]:
     return arrays, sidecar["tokens"], sidecar
 
 
+def _curves(run_dir: RunDir, stem: str, n_layers: int) -> dict[str, Any]:
+    curves = run_dir.read_arrays(stem)
+    assert curves["x"].tolist() == list(range(1, n_layers + 1))
+    assert curves["mean"].shape == (3, n_layers)
+    assert curves["per_seed"].shape == (3, 2, n_layers)
+    sidecar = run_dir.read_json(stem)
+    assert isinstance(sidecar, dict)
+    assert sidecar["series"] == list(SERIES)
+    assert sidecar["chance"] == 0.5
+    return curves
+
+
 def test_execute_writes_curves_scans_and_summary(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
@@ -85,14 +113,8 @@ def test_execute_writes_curves_scans_and_summary(
     n_layers = tiny_arch.n_layers
     layers = list(range(1, n_layers + 1))
 
-    curves = run_dir.read_arrays("curves")
-    assert curves["x"].tolist() == layers
-    assert curves["mean"].shape == (3, n_layers)
-    assert curves["per_seed"].shape == (3, 2, n_layers)
-    sidecar = run_dir.read_json("curves")
-    assert isinstance(sidecar, dict)
-    assert sidecar["series"] == list(SERIES)
-    assert sidecar["chance"] == 0.5
+    sanity = _curves(run_dir, "curves", n_layers)
+    transfer = _curves(run_dir, "curves_transfer", n_layers)
 
     for i in range(2):
         tokens = {}
@@ -114,6 +136,7 @@ def test_execute_writes_curves_scans_and_summary(
         "val_accuracy",
         "test_accuracy",
         "ci",
+        "in_template",
         "n_seeds",
         "n_pairs",
         "n_eval_pairs",
@@ -121,14 +144,40 @@ def test_execute_writes_curves_scans_and_summary(
     }
     assert summary["best_layer"] in layers
     at = layers.index(summary["best_layer"])
-    assert summary["test_accuracy"] == pytest.approx(curves["mean"][0, at])
+    assert summary["test_accuracy"] == pytest.approx(transfer["mean"][0, at])
     assert summary["ci"] == pytest.approx(
-        [curves["lo"][0, at], curves["hi"][0, at]]
+        [transfer["lo"][0, at], transfer["hi"][0, at]]
+    )
+    check = summary["in_template"]
+    assert set(check) == {"best_layer", "val_accuracy", "test_accuracy", "ci"}
+    assert check["best_layer"] in layers
+    at = layers.index(check["best_layer"])
+    assert check["test_accuracy"] == pytest.approx(sanity["mean"][0, at])
+    assert check["ci"] == pytest.approx(
+        [sanity["lo"][0, at], sanity["hi"][0, at]]
     )
     assert summary["n_seeds"] == 2
     assert summary["n_pairs"] == 6
-    assert summary["n_eval_pairs"] == {"val": 4, "test": 4}
+    assert summary["n_eval_pairs"] == {
+        "transfer": {"val": 4, "test": 4},
+        "in_template": {"val": 4, "test": 4},
+    }
     assert summary["n_scan"] == 2
+
+
+def test_the_default_direction_is_logistic_and_pca_diff_stays_selectable(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config()
+    pca = dataclasses.replace(config, method="pca_diff")
+    default_dir = RunDir.create(config, out_root=tmp_path / "default")
+    pca_dir = RunDir.create(pca, out_root=tmp_path / "pca")
+    execute(config, default_dir, tiny_arch, _statements())
+    execute(pca, pca_dir, tiny_arch, _statements())
+    default = default_dir.read_arrays("scan_0_honest")["scores"]
+    chosen = pca_dir.read_arrays("scan_0_honest")["scores"]
+    assert default.shape == chosen.shape
+    assert not np.allclose(default, chosen)
 
 
 def test_persona_pairing_and_splits_before_pairing(
@@ -161,29 +210,90 @@ def test_persona_pairing_and_splits_before_pairing(
         statements,
     )
     n = config.n_seeds
-    assert len(calls) == n + 3
-    for _, kwargs in calls:
+    persona = calls[: n + 2] + calls[-1:]
+    assert len(calls) == n + 5
+    for _, kwargs in persona:
         assert kwargs["pairing"] == "persona"
         assert kwargs["template"] is PAPER_TEMPLATES["honesty"]
-    splits = [{e.split for e in examples} for examples, _ in calls]
+    splits = [{e.split for e in examples} for examples, _ in persona]
     assert splits == [{"train"}] * n + [{"val"}, {"test"}, {"test"}]
-    uids = [{e.uid for e in examples} for examples, _ in calls]
-    assert uids[0] | uids[n] | uids[n + 1] == {e.uid for e in statements}
+    for examples, _ in persona:
+        assert {e.label for e in examples} == {1}
+    uids = [{e.uid for e in examples} for examples, _ in persona]
+    assert uids[0] | uids[n] | uids[n + 1] == {e.uid for e in _true(statements)}
     assert not uids[0] & uids[n]
     assert not uids[n] & uids[n + 1]
     assert not uids[0] & uids[n + 1]
-    test = [e for e in statements if e.split == "test"]
-    assert [e.uid for e in calls[n + 2][0]] == [e.uid for e in test[:2]]
-    assert calls[n + 2][1]["n_pairs"] is None
+    test = [e for e in _true(statements) if e.split == "test"]
+    assert [e.uid for e in calls[-1][0]] == [e.uid for e in test[:2]]
+    assert calls[-1][1]["n_pairs"] is None
     assert positions[-1] == "response"
+
+
+def test_the_transfer_sets_are_plain_statements_scored_by_the_same_readers(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built: list[tuple[list[Example], dict[str, Any]]] = []
+    real_build = r5_honesty.build_stimulus_set
+
+    def spy_build(
+        examples: Any, template: Any, chat: Any, **kwargs: Any
+    ) -> Any:
+        built.append((list(examples), {"template": template, **kwargs}))
+        return real_build(examples, template, chat, **kwargs)
+
+    collected: list[tuple[str, tuple[str, ...]]] = []
+    real_activations = r5_honesty.stimulus_activations
+
+    def spy_activations(loaded: Any, stimuli: Any, **kwargs: Any) -> Any:
+        collected.append((kwargs["position"], stimuli.texts))
+        return real_activations(loaded, stimuli, **kwargs)
+
+    sweeps: list[tuple[int, list[str]]] = []
+    real_sweep = r5_honesty.sweep_from_activations
+
+    def spy_sweep(train: Any, evals: Any, **kwargs: Any) -> Any:
+        sweeps.append((len(train), list(evals)))
+        return real_sweep(train, evals, **kwargs)
+
+    monkeypatch.setattr(r5_honesty, "build_stimulus_set", spy_build)
+    monkeypatch.setattr(r5_honesty, "stimulus_activations", spy_activations)
+    monkeypatch.setattr(r5_honesty, "sweep_from_activations", spy_sweep)
+    config = _config()
+    execute(
+        config,
+        RunDir.create(config, out_root=tmp_path),
+        tiny_arch,
+        _statements(),
+    )
+    n = config.n_seeds
+    for (examples, kwargs), split in zip(
+        built[n + 2 : n + 4], ("val", "test"), strict=True
+    ):
+        assert kwargs["pairing"] == "label_contrastive"
+        assert kwargs["n_pairs"] == config.n_eval_pairs
+        assert kwargs["template"].user == "{stimulus}"
+        assert kwargs["template"].tagged is False
+        assert {e.split for e in examples} == {split}
+        assert {e.label for e in examples} == {0, 1}
+    assert sweeps == [(n, ["val", "test", "transfer_val", "transfer_test"])]
+    mean_texts = [texts for position, texts in collected if position == "mean"]
+    assert len(mean_texts) == 2
+    assert all("Pretend" not in t for texts in mean_texts for t in texts)
+    assert all("USER" not in t for texts in mean_texts for t in texts)
+    assert [position for position, _ in collected].count("response") == n + 3
 
 
 def test_scans_follow_the_input_order_of_the_test_statements(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
     statements = _statements()
-    test = [e for e in statements if e.split == "test"]
-    shuffled = [e for e in statements if e.split != "test"] + test[::-1]
+    test = [e for e in _true(statements) if e.split == "test"]
+    rest = [e for e in statements if e.split != "test"]
+    falses = [e for e in statements if e.split == "test" and e.label == 0]
+    shuffled = rest + test[::-1] + falses
     config = _config()
     run_dir = RunDir.create(config, out_root=tmp_path)
     execute(config, run_dir, tiny_arch, shuffled)
@@ -201,12 +311,27 @@ def test_too_many_scan_statements_fail_before_the_model_runs(
     def forbidden(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("the model must not run")
 
-    monkeypatch.setattr(r5_honesty, "reading_sweep", forbidden)
+    monkeypatch.setattr(r5_honesty, "sweep_from_activations", forbidden)
     monkeypatch.setattr(r5_honesty, "stimulus_activations", forbidden)
     config = _config(n_scan_statements=13)
     run_dir = RunDir.create(config, out_root=tmp_path)
     with pytest.raises(ValueError, match="n_scan_statements"):
         execute(config, run_dir, tiny_arch, _statements())
+
+
+def test_statements_without_both_labels_fail_before_the_model_runs(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("the model must not run")
+
+    monkeypatch.setattr(r5_honesty, "stimulus_activations", forbidden)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(ValueError, match="pair"):
+        execute(config, run_dir, tiny_arch, _true(_statements()))
 
 
 def test_execute_is_deterministic(
@@ -217,7 +342,11 @@ def test_execute_is_deterministic(
     second = RunDir.create(config, out_root=tmp_path / "b")
     execute(config, first, tiny_arch, _statements())
     execute(config, second, tiny_arch, _statements())
-    stems = ["curves", *(f"scan_{i}_{p}" for i in range(2) for p in PERSONAS)]
+    stems = [
+        "curves",
+        "curves_transfer",
+        *(f"scan_{i}_{p}" for i in range(2) for p in PERSONAS),
+    ]
     for stem in stems:
         a, b = first.read_arrays(stem), second.read_arrays(stem)
         assert a.keys() == b.keys()
@@ -232,7 +361,12 @@ def test_plot_writes_the_curves_and_scan_figures(
     run_dir = RunDir.create(config, out_root=tmp_path)
     execute(config, run_dir, tiny_arch, _statements())
     paths = plot(run_dir, tmp_path / "figs")
-    stems = ["curves", *(f"scan_{i}_{p}" for i in range(2) for p in PERSONAS)]
+    stems = [
+        "curves_transfer",
+        "curves",
+        *(f"scan_{i}_{p}" for i in range(2) for p in PERSONAS),
+    ]
+    assert [p.stem for p in paths if p.suffix == ".pdf"] == stems
     assert sorted(p.name for p in paths) == sorted(
         f"{stem}.{ext}" for stem in stems for ext in ("pdf", "png", "svg")
     )
@@ -242,15 +376,12 @@ def test_plot_writes_the_curves_and_scan_figures(
     )
 
 
-def test_run_keeps_only_the_true_statements(
+def test_run_passes_the_true_and_the_false_statements(
     tiny_arch: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mixed = [
-        dataclasses.replace(e, label=r % 2)
-        for r, e in enumerate(_statements(count=4))
-    ]
+    facts = _statements(count=4)
     seen: list[list[Example]] = []
 
     def record(
@@ -261,28 +392,32 @@ def test_run_keeps_only_the_true_statements(
     ) -> None:
         seen.append(list(statements))
 
-    monkeypatch.setattr(r5_honesty, "load_facts", lambda: mixed)
+    monkeypatch.setattr(r5_honesty, "load_facts", lambda: facts)
     monkeypatch.setattr(r5_honesty, "load_model", lambda key: tiny_arch)
     monkeypatch.setattr(r5_honesty, "execute", record)
     config = _config()
     run(config, RunDir.create(config, out_root=tmp_path))
-    assert len(seen) == 1
-    assert seen[0]
-    assert {e.label for e in seen[0]} == {1}
-    assert [e.uid for e in seen[0]] == [e.uid for e in mixed if e.label == 1]
+    assert seen == [facts]
+    assert {e.label for e in seen[0]} == {0, 1}
 
 
 @pytest.mark.slow
-def test_r5_on_gpt2_reads_honesty_above_the_floor(tmp_path: Path) -> None:
-    config = Config(n_seeds=3, n_pairs=64, n_eval_pairs=64)
+def test_r5_on_gpt2_transfers_to_plain_statements(tmp_path: Path) -> None:
+    config = Config(n_seeds=3, n_pairs=32)
     run_dir = RunDir.create(config, out_root=tmp_path)
-    statements = [e for e in load_facts(offline=True) if e.label == 1]
-    execute(config, run_dir, load_model("gpt2"), statements)
-    curves = run_dir.read_arrays("curves")
+    execute(
+        config,
+        run_dir,
+        load_model("gpt2"),
+        load_facts(offline=True),
+    )
     summary = run_dir.read_json("summary")
     assert isinstance(summary, dict)
-    for name, row in zip(SERIES, curves["mean"], strict=True):
-        print(name, np.round(row, 3).tolist())
+    for stem in ("curves", "curves_transfer"):
+        curves = run_dir.read_arrays(stem)
+        for name, row in zip(SERIES, curves["mean"], strict=True):
+            print(stem, name, np.round(row, 3).tolist())
     print(summary)
-    assert summary["test_accuracy"] > 0.6
+    assert summary["test_accuracy"] > 0.55
+    assert summary["in_template"]["test_accuracy"] > 0.9
     assert (run_dir.path / "scan_0_honest.npz").is_file()
