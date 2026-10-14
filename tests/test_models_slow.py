@@ -167,6 +167,20 @@ def test_probe_finds_a_planted_sink_on_whatever_sits_at_position_zero(
     assert decide_bos(ratios) == "prepend"
 
 
+def test_probe_tells_the_separator_from_the_first_content_token(
+    tiny_arch: LoadedModel,
+) -> None:
+    embed = tiny_arch.model.get_input_embeddings()
+    bos = tiny_arch.bos_id
+    with torch.no_grad():
+        embed.weight[bos] = 100 * embed.weight[bos + 1]
+
+    ratios = measure_sink(tiny_arch, PROBE_TEXTS, layers=[0])
+
+    assert ratios.first_without_bos < SINK_RATIO < ratios.separator_with_bos
+    assert decide_bos(ratios) == "none"
+
+
 @pytest.fixture(scope="module", params=["gpt2", "qwen3-0.6b-base"])
 def real(request: pytest.FixtureRequest) -> LoadedModel:
     return load_model(request.param, dtype=torch.float32)
