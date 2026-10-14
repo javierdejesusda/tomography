@@ -240,7 +240,7 @@ def test_award_winners_query_names_each_award_and_the_year_qualifier() -> None:
 def test_award_winners_query_falls_back_to_the_mul_label() -> None:
     query = wikidata.award_winners_query(("Q38104",))
 
-    assert 'wikibase:language "[AUTO_LANGUAGE],mul,en"' in query
+    assert 'wikibase:language "en,mul"' in query
 
 
 def test_award_winners_query_rejects_anything_but_an_item_id() -> None:
@@ -407,7 +407,7 @@ def test_famous_people_query_asks_for_the_top_dead_laureates() -> None:
 def test_famous_people_query_falls_back_to_the_mul_label() -> None:
     query = wikidata.famous_people_query(("Q38104",), limit=5)
 
-    assert 'wikibase:language "[AUTO_LANGUAGE],mul,en"' in query
+    assert 'wikibase:language "en,mul"' in query
 
 
 def test_famous_people_query_rejects_anything_but_item_ids_and_counts() -> None:

@@ -40,8 +40,7 @@ _ITEM_ID = re.compile(r"Q\d+")
 _BODY = "result.json"
 _RECORD = "record.json"
 _LABEL_SERVICE = (
-    "  SERVICE wikibase:label { bd:serviceParam wikibase:language "
-    '"[AUTO_LANGUAGE],mul,en". }'
+    '  SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul". }'
 )
 
 QueryFetch = Callable[[str], bytes]
@@ -233,7 +232,8 @@ def award_winners_query(awards: Sequence[str]) -> str:
     Returns:
         A SPARQL query with the variables prize, prizeLabel, year and
         personLabel: one row per laureate whose award statement carries a
-        point in time.
+        point in time. Labels are English, falling back to the
+        language-neutral `mul` label.
 
     Raises:
         ValueError: If an award is not an item id or no award is given.
@@ -379,6 +379,9 @@ def famous_people_query(awards: Sequence[str], *, limit: int) -> str:
     Returns:
         A SPARQL query with the variables person, personLabel, birth, death
         and links: people with a birth and a death date given to the day.
+        Labels are English, falling back to the language-neutral `mul`
+        label, which some people (Marie Curie) have instead of an English
+        one.
 
     Raises:
         ValueError: If an award is not an item id, no award is given or
