@@ -1,5 +1,7 @@
 """Tests for the R7 truthfulness reading experiment."""
 
+from collections.abc import Mapping
+from collections.abc import Sequence
 import dataclasses
 from pathlib import Path
 from types import SimpleNamespace
@@ -92,6 +94,57 @@ def _planted_sweep(
         signs=np.ones(len(layers), dtype=np.float32),
     )
     return SweepResult(layers, tuple(peaks), accuracy, (reader, reader))
+
+
+@dataclasses.dataclass
+class _Call:
+    loaded: LoadedModel
+    train_sets: list[StimulusSet]
+    eval_sets: dict[str, StimulusSet]
+    kwargs: dict[str, Any]
+
+
+class _SweepSpy:
+    """Replaces `reading_sweep`: records each call, returns a fixed result."""
+
+    def __init__(self, result: SweepResult) -> None:
+        self.result = result
+        self.calls: list[_Call] = []
+
+    def __call__(
+        self,
+        loaded: LoadedModel,
+        train_sets: Sequence[StimulusSet],
+        eval_sets: Mapping[str, StimulusSet],
+        **kwargs: Any,
+    ) -> SweepResult:
+        self.calls.append(
+            _Call(loaded, list(train_sets), dict(eval_sets), kwargs)
+        )
+        return self.result
+
+
+def _execute_with_spy(
+    config: Config,
+    loaded: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _SweepSpy:
+    peaks = {
+        "val": (0, 0.9),
+        "test": (2, 0.8),
+        **{name: (1, 0.7) for name in config.ood_subsets},
+    }
+    spy = _SweepSpy(_planted_sweep(loaded, peaks))
+    monkeypatch.setattr(r7_truth, "reading_sweep", spy)
+    execute(
+        config,
+        RunDir.create(config, out_root=tmp_path),
+        loaded,
+        _facts(),
+        _truth_sets(),
+    )
+    return spy
 
 
 def test_config_defaults_and_round_trip() -> None:
@@ -308,6 +361,48 @@ def test_a_subset_without_examples_is_an_error(
     run_dir = RunDir.create(config, out_root=tmp_path)
     with pytest.raises(ValueError, match="larger_than"):
         execute(config, run_dir, tiny_arch, _facts(), _truth_sets())
+
+
+def test_execute_forwards_every_sweep_setting(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(
+        method="mean_diff",
+        preprocess="unit",
+        position="concept",
+        eval_position="last",
+        layers=(1, 2),
+        seed=5,
+        bos="none",
+        batch_size=4,
+    )
+    spy = _execute_with_spy(config, tiny_arch, tmp_path, monkeypatch)
+    (call,) = spy.calls
+    assert call.loaded is tiny_arch
+    assert list(call.eval_sets) == ["val", "test", *config.ood_subsets]
+    assert call.kwargs == {
+        "method": "mean_diff",
+        "preprocess": "unit",
+        "position": "concept",
+        "eval_position": "last",
+        "layers": (1, 2),
+        "seed": 5,
+        "bos": "none",
+        "batch_size": 4,
+    }
+
+
+def test_execute_trains_every_seed_on_its_own_train_stimuli(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(n_seeds=4, n_pairs=8)
+    spy = _execute_with_spy(config, tiny_arch, tmp_path, monkeypatch)
+    train_sets = spy.calls[0].train_sets
+    assert len(train_sets) == 4
+    assert len({stimuli.texts for stimuli in train_sets}) == 4
+    for stimuli in train_sets:
+        assert stimuli.groups.shape[0] == 8
+        assert all(uid.startswith("facts-train-") for uid in stimuli.uids)
 
 
 def test_execute_is_deterministic(
