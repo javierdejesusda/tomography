@@ -1,8 +1,10 @@
 """Pinned data sources: Hub files at a commit SHA and checksummed URL files.
 
 Every loader module declares one `PinnedSource` row and reads its files through
-`fetch`, so a download is tied to an exact revision or digest and nothing is
-written outside the cache directory.
+`fetch`, so a download is tied to an exact revision or digest. The tomography
+cache holds every fetched file (Hub files under `<cache>/hub`, URL files under
+`<cache>/url`). `huggingface_hub` may keep its own Xet chunk cache under
+`HF_HOME`, which this library does not manage.
 """
 
 from collections.abc import Mapping
@@ -10,7 +12,6 @@ from dataclasses import dataclass
 import hashlib
 import os
 from pathlib import Path
-from pathlib import PurePosixPath
 import re
 import shutil
 import tempfile
@@ -26,6 +27,7 @@ hub_constants.HF_HUB_DISABLE_SYMLINKS_WARNING = True
 _COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+_PATH_SEGMENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
 _TIMEOUT_SECONDS = 60
 
 
@@ -39,18 +41,21 @@ class OfflineCacheMissError(FileNotFoundError):
 
 @dataclass(frozen=True)
 class PinnedSource:
-    """One row of the data-source license table.
+    """One pinned data source.
 
     Attributes:
-        name: Short identifier, also a folder name inside the cache.
+        name: Short identifier. A "url" row caches its files under
+            `<cache>/url/<name>/<digest prefix>/`; a "hub" row never uses it
+            as a path (Hub files live under `<cache>/hub`).
         kind: "hub" for a dataset repository on the Hugging Face Hub, "url"
             for plain files under an https base URL.
         location: The repository id for "hub", the base URL for "url".
         revision: Full 40-character commit SHA for "hub", None for "url".
         files: Relative paths `fetch` serves. A hub source loaded through
             `datasets.load_dataset` may leave this empty.
-        license: License of the data, as shown in the README table.
-        sha256: Hex digest per file; required for every "url" file.
+        license: License of the data.
+        sha256: Hex digest per file; required for every "url" file and
+            enforced for any "hub" file that has an entry.
 
     Raises:
         ValueError: If the row is not fully pinned or names an unsafe path.
@@ -81,26 +86,35 @@ class PinnedSource:
                     "64-character hex digest of a declared file"
                 )
         if self.kind == "hub":
-            if self.revision is None or not _COMMIT_SHA.fullmatch(
-                self.revision
-            ):
-                raise ValueError(
-                    f"{self.name}: hub revision must be a full 40-character "
-                    f"lowercase commit SHA, got {self.revision!r}"
-                )
+            self._check_hub()
         elif self.kind == "url":
-            if not self.location.startswith("https://"):
-                raise ValueError(
-                    f"{self.name}: url location must use https, got "
-                    f"{self.location!r}"
-                )
-            if not self.files:
-                raise ValueError(f"{self.name}: a url source needs files")
-            missing = [f for f in self.files if f not in self.sha256]
-            if missing:
-                raise ValueError(f"{self.name}: no sha256 for {missing}")
+            self._check_url()
         else:
             raise ValueError(f"{self.name}: unknown kind {self.kind!r}")
+
+    def _check_hub(self) -> None:
+        if not _COMMIT_SHA.fullmatch(self.revision or ""):
+            raise ValueError(
+                f"{self.name}: hub revision must be a full 40-character "
+                f"lowercase commit SHA, got {self.revision!r}"
+            )
+
+    def _check_url(self) -> None:
+        if self.revision is not None:
+            raise ValueError(
+                f"{self.name}: a url source has no revision, got "
+                f"{self.revision!r}"
+            )
+        if not self.location.startswith("https://"):
+            raise ValueError(
+                f"{self.name}: url location must use https, got "
+                f"{self.location!r}"
+            )
+        if not self.files:
+            raise ValueError(f"{self.name}: a url source needs files")
+        missing = [f for f in self.files if f not in self.sha256]
+        if missing:
+            raise ValueError(f"{self.name}: no sha256 for {missing}")
 
 
 def cache_dir() -> Path:
@@ -125,9 +139,10 @@ def fetch(
 ) -> Path:
     """Returns the local path of one pinned file, downloading it if needed.
 
-    Hub files come from `hf_hub_download` at the pinned commit SHA. URL files
-    are checked against their SHA-256 digest on every call, cache hits
-    included.
+    Hub files come from `hf_hub_download` at the pinned commit SHA and are
+    stored under `<cache>/hub`. URL files are stored under
+    `<cache>/url/<name>/<digest prefix>/`. Any file with a pinned SHA-256
+    digest is checked against it on every call, cache hits included.
 
     Args:
         source: The pinned source to read from.
@@ -141,7 +156,7 @@ def fetch(
     Raises:
         ValueError: If `file` is missing or not declared by the source.
         OfflineCacheMissError: If `offline` is True and the file is not cached.
-        ChecksumError: If a URL file does not match its pinned digest.
+        ChecksumError: If a file does not match its pinned digest.
     """
     name = _resolve_file(source, file)
     root = cache_dir() if cache is None else cache
@@ -151,10 +166,7 @@ def fetch(
 
 
 def _is_safe_relative_path(file: str) -> bool:
-    if not file or "\\" in file or ":" in file:
-        return False
-    path = PurePosixPath(file)
-    return not path.is_absolute() and ".." not in path.parts
+    return all(_PATH_SEGMENT.fullmatch(part) for part in file.split("/"))
 
 
 def _resolve_file(source: PinnedSource, file: str | None) -> str:
@@ -174,72 +186,68 @@ def _fetch_hub(
     source: PinnedSource, file: str, root: Path, offline: bool
 ) -> Path:
     try:
-        local = hf_hub_download(
-            repo_id=source.location,
-            filename=file,
-            repo_type="dataset",
-            revision=source.revision,
-            cache_dir=root / "hub",
-            local_files_only=offline,
+        local = Path(
+            hf_hub_download(
+                repo_id=source.location,
+                filename=file,
+                repo_type="dataset",
+                revision=source.revision,
+                cache_dir=root / "hub",
+                local_files_only=offline,
+            )
         )
     except LocalEntryNotFoundError as error:
         if not offline:
             raise
-        raise OfflineCacheMissError(
-            f"{source.name}/{file} is not cached and offline=True"
-        ) from error
-    return Path(local)
+        raise _offline_miss(source, file) from error
+    expected = source.sha256.get(file)
+    if expected is not None:
+        _verify(local, expected, f"{source.name}/{file}")
+    return local
 
 
 def _fetch_url(
     source: PinnedSource, file: str, root: Path, offline: bool
 ) -> Path:
     expected = source.sha256[file]
+    label = f"{source.name}/{file}"
     target = root / "url" / source.name / expected[:16] / file
     if target.is_file():
-        actual = _sha256_of(target)
-        if actual != expected:
-            raise ChecksumError(
-                f"{source.name}/{file}: cached sha256 {actual} does not match "
-                f"the pinned {expected}; delete {target} to download it again"
-            )
+        _verify(target, expected, label)
         return target
     if offline:
-        raise OfflineCacheMissError(
-            f"{source.name}/{file} is not cached and offline=True"
-        )
+        raise _offline_miss(source, file)
     url = source.location.rstrip("/") + "/" + file
-    _download(url, target, expected, label=f"{source.name}/{file}")
+    _download(url, target, expected, label)
     return target
 
 
-def _download(url: str, target: Path, expected: str, *, label: str) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temp_name = tempfile.mkstemp(
-        dir=target.parent, prefix=target.name + ".", suffix=".part"
+def _offline_miss(source: PinnedSource, file: str) -> OfflineCacheMissError:
+    return OfflineCacheMissError(
+        f"{source.name}/{file} is not cached and offline=True"
     )
-    temp = Path(temp_name)
-    try:
-        request = urllib.request.Request(
-            url, headers={"User-Agent": "tomography"}
-        )
-        with (
-            os.fdopen(descriptor, "wb") as out,
-            urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as reply,
-        ):
+
+
+def _download(url: str, target: Path, expected: str, label: str) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    request = urllib.request.Request(url, headers={"User-Agent": "tomography"})
+    with tempfile.NamedTemporaryFile(
+        dir=target.parent,
+        prefix=target.name + ".",
+        suffix=".part",
+        delete_on_close=False,
+    ) as out:
+        with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as reply:
             shutil.copyfileobj(reply, out)
-        actual = _sha256_of(temp)
-        if actual != expected:
-            raise ChecksumError(
-                f"{label}: downloaded sha256 {actual} does not match the "
-                f"pinned {expected}"
-            )
-        os.replace(temp, target)
-    except BaseException:
-        temp.unlink(missing_ok=True)
-        raise
+        out.close()
+        _verify(Path(out.name), expected, label)
+        os.replace(out.name, target)
 
 
-def _sha256_of(path: Path) -> str:
+def _verify(path: Path, expected: str, label: str) -> None:
     with path.open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
+        actual = hashlib.file_digest(handle, "sha256").hexdigest()
+    if actual != expected:
+        raise ChecksumError(
+            f"{label}: sha256 {actual} does not match the pinned {expected}"
+        )
