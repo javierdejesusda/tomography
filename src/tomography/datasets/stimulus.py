@@ -143,9 +143,10 @@ def build_stimulus_set(
         The stimulus set.
 
     Raises:
-        ValueError: If the arguments do not fit the template or the mode, a
-            required argument or template slot value is missing, labels are
-            not binary where they must be, or ``n_pairs`` is out of range.
+        ValueError: If ``pairing`` is not a known mode, the arguments do not
+            fit the template or the mode, a required argument or template slot
+            value is missing, labels are not binary where they must be, or
+            ``n_pairs`` is out of range.
     """
     if not examples:
         raise ValueError("at least one example is required")
@@ -267,6 +268,21 @@ def _label_contrastive_plan(
     n_pairs: int | None,
     rng: np.random.Generator,
 ) -> _Plan:
+    """Plans one label-1 and one label-0 stimulus per pair, per stratum.
+
+    Args:
+        examples: Source examples with binary labels.
+        strata: Optional stratum name per example; pairs never cross strata.
+        n_pairs: Number of pairs, or ``None`` for every match available.
+        rng: Generator that supplies the seed of the pairing function.
+
+    Returns:
+        A plan whose groups equal its pairs.
+
+    Raises:
+        ValueError: If a label is not binary or ``strata`` has the wrong
+            length.
+    """
     labels = _binary_labels(examples)
     codes = None
     if strata is not None:
@@ -287,6 +303,21 @@ def _one_vs_rest_plan(
     n_pairs: int | None,
     rng: np.random.Generator,
 ) -> _Plan:
+    """Plans pairs of one target-class stimulus and one from another class.
+
+    Args:
+        examples: Source examples whose label is a class id.
+        target_class: The class that becomes label 1.
+        n_pairs: Number of pairs, or ``None`` for ``min(#target, #others)``.
+        rng: Generator that supplies the seed of the pairing function.
+
+    Returns:
+        A plan with binary labels (1 for the target class) whose groups equal
+        its pairs.
+
+    Raises:
+        ValueError: If ``target_class`` is None.
+    """
     if target_class is None:
         raise ValueError("one_vs_rest pairing needs a target_class")
     classes = np.array([example.label for example in examples], dtype=np.int64)
@@ -303,6 +334,21 @@ def _random_plan(
     n_pairs: int | None,
     rng: np.random.Generator,
 ) -> _Plan:
+    """Plans a random perfect matching over a random subset of examples.
+
+    Args:
+        examples: Source examples with binary labels.
+        n_pairs: Number of pairs, or ``None`` for ``len(examples) // 2``.
+        rng: Generator for the subset and the matching.
+
+    Returns:
+        A plan whose groups hold the label-contrastive matches among the
+        chosen stimuli (empty when only one label is present).
+
+    Raises:
+        ValueError: If a label is not binary, ``n_pairs`` exceeds the pairs
+            available, or fewer than two examples are given.
+    """
     labels = _binary_labels(examples)
     size = _count(n_pairs, len(examples) // 2, "pairs")
     if size == 0:
@@ -323,6 +369,21 @@ def _persona_plan(
     n_pairs: int | None,
     rng: np.random.Generator,
 ) -> _Plan:
+    """Plans two stimuli per example, one for each persona pole.
+
+    Args:
+        examples: Source examples; their labels are ignored.
+        template: A function template that supplies the persona lists.
+        n_pairs: Number of statements, or ``None`` for every example.
+        rng: Generator for the example subset and the persona choices.
+
+    Returns:
+        A plan in the ``persona_pairs`` layout with labels 1 and 0 and the
+        persona index of each stimulus; groups equal pairs.
+
+    Raises:
+        ValueError: If ``n_pairs`` exceeds the number of examples.
+    """
     assert not isinstance(template, ConceptTemplate)
     size = _count(n_pairs, len(examples), "examples")
     chosen = rng.permutation(len(examples))[:size].astype(np.int64)
@@ -346,6 +407,24 @@ def _group_plan(
     n_pairs: int | None,
     rng: np.random.Generator,
 ) -> _Plan:
+    """Plans k-way groups and one label-1 versus label-0 pair per group.
+
+    Args:
+        examples: Source examples with binary labels.
+        group_ids: One group id per example; the members of a group stay
+            contiguous in the plan and keep their input order.
+        n_pairs: Number of groups, or ``None`` for every group.
+        rng: Generator for the group subset and the label-0 member choice.
+
+    Returns:
+        A plan whose groups are padded with -1 and whose pairs hold the
+        label-1 member and one label-0 member of the same group.
+
+    Raises:
+        ValueError: If ``group_ids`` is missing or has the wrong length, a
+            label is not binary, a group lacks exactly one label-1 member or
+            any label-0 member, or ``n_pairs`` exceeds the groups available.
+    """
     if group_ids is None or len(group_ids) != len(examples):
         raise ValueError(
             "by_group pairing needs one group_ids entry per example"

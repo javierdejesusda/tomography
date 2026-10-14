@@ -524,8 +524,11 @@ def ablate(template: Template, kind: str, *, index: int = 0) -> Template:
     concept template ``index`` picks the emotion in ``EMOTIONS``).
 
     Args:
-        template: The template to vary. Chained ablations resolve known
-            templates through the name before the first colon.
+        template: The template to vary. Variants are named
+            ``<source>:<kind>[#index]``. ``paraphrase`` and ``framing_swap``
+            resolve known templates through the name before the first colon,
+            so they accept only a template that went through ``no_chat_tags``
+            at most.
         kind: One of ``ABLATION_KINDS``.
         index: Selects among the options of the kinds that have several.
 
@@ -534,7 +537,8 @@ def ablate(template: Template, kind: str, *, index: int = 0) -> Template:
 
     Raises:
         ValueError: If the kind is unknown or does not apply to the template,
-            or ``index`` is out of range.
+            if ``paraphrase`` or ``framing_swap`` follows an ablation that
+            changed the wording, or if ``index`` is out of range.
     """
     if kind not in ABLATION_KINDS:
         raise ValueError(f"unknown ablation kind {kind!r}: {ABLATION_KINDS}")
