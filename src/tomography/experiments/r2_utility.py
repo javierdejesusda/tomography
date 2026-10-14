@@ -176,7 +176,7 @@ def execute(
         [
             pca_explained_variance(
                 act.data,
-                pairs=stimuli.pairs,
+                pairs=act.row_groups(stimuli.pairs),
                 n_components=config.n_components,
                 preprocess=config.preprocess,
             )[:, : len(_COMPONENTS)]

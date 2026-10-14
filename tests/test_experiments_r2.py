@@ -1,5 +1,6 @@
 """Tests for the R2 utility reading experiment."""
 
+from collections.abc import Sequence
 import dataclasses
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from tomography.analysis import pca_explained_variance
 from tomography.cli import load_experiment
 from tomography.datasets.ethics import load_ethics_utility
 from tomography.datasets.records import Example
@@ -18,21 +20,28 @@ from tomography.experiments.r2_utility import execute
 from tomography.experiments.r2_utility import plot
 from tomography.experiments.r2_utility import run
 from tomography.experiments.sweep import SERIES
+from tomography.experiments.sweep import Prepared
 from tomography.model import LoadedModel
 from tomography.model import load_model
 from tomography.templates import PAPER_TEMPLATES
 
 PLEASANT = ("joy", "party", "gift", "sun")
 UNPLEASANT = ("loss", "storm", "fine", "debt")
+SAME_LENGTH = (("A",), ("B",))
 
 
-def _examples(rows: dict[Split, int] | None = None) -> list[Example]:
+def _examples(
+    rows: dict[Split, int] | None = None,
+    words: tuple[tuple[str, ...], tuple[str, ...]] = (PLEASANT, UNPLEASANT),
+) -> list[Example]:
     rows = rows or {"train": 12, "val": 12, "test": 12}
+    pleasant, unpleasant = words
     examples = []
     for split, count in rows.items():
         for r in range(count):
             row = f"{split}-{r}"
-            good, bad = PLEASANT[r % 4], UNPLEASANT[(r + 1) % 4]
+            good = pleasant[r % len(pleasant)]
+            bad = unpleasant[(r + 1) % len(unpleasant)]
             for suffix, label, word in (("a", 1, good), ("b", 0, bad)):
                 examples.append(
                     Example(
@@ -174,6 +183,34 @@ def test_stimuli_are_grouped_by_row_and_split_before_pairing(
         for i in (0, config.n_seeds, config.n_seeds + 1)
     ]
     assert len(ids[0] | ids[1] | ids[2]) == sum(len(i) for i in ids)
+
+
+def test_variance_reads_the_token_rows_of_the_response_pairs(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trained: list[Prepared] = []
+    real = r2_utility.sweep_from_activations
+
+    def spy(train: Sequence[Prepared], evals: Any, **kwargs: Any) -> Any:
+        trained.extend(train)
+        return real(train, evals, **kwargs)
+
+    monkeypatch.setattr(r2_utility, "sweep_from_activations", spy)
+    config = _config(n_seeds=2, position="response", preprocess="unit")
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _examples(words=SAME_LENGTH))
+    per_seed = run_dir.read_arrays("variance")["per_seed"]
+    assert len(trained) == config.n_seeds
+    for i, (stimuli, act) in enumerate(trained):
+        expected = pca_explained_variance(
+            act.data,
+            pairs=act.row_groups(stimuli.pairs),
+            n_components=3,
+            preprocess="unit",
+        )[:, :3]
+        np.testing.assert_allclose(per_seed[:, i], expected.T)
 
 
 def test_execute_reports_the_rows_of_each_eval_split(
