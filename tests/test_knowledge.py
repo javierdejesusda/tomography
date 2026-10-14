@@ -45,6 +45,27 @@ def test_default_shots_are_fifteen_distinct_single_line_pairs() -> None:
 
 
 @pytest.mark.parametrize(
+    "question",
+    [
+        "What is the capital of Canada?",
+        "What is the chemical symbol for gold?",
+        "What is the square root of 81?",
+        "What is the largest ocean on Earth?",
+        "What is the hardest natural substance?",
+    ],
+    ids=[
+        "capital_of_canada",
+        "symbol_for_gold",
+        "square_root_of_81",
+        "largest_ocean",
+        "hardest_substance",
+    ],
+)
+def test_default_shots_exclude_benchmark_items(question: str) -> None:
+    assert question not in {q for q, _ in DEFAULT_SHOTS}
+
+
+@pytest.mark.parametrize(
     ("completion", "stop", "expected"),
     [
         (" Paris\nQ: next", "\n", "Paris"),

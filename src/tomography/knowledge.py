@@ -23,19 +23,19 @@ _NON_ALNUM = re.compile(r"[\W_]+")
 
 DEFAULT_SHOTS: tuple[tuple[str, str], ...] = (
     ("How many days are in a week?", "seven"),
-    ("What is the chemical symbol for gold?", "Au"),
+    ("What is the plural of the word mouse?", "mice"),
     ("Which planet is known as the Red Planet?", "Mars"),
-    ("What is the largest ocean on Earth?", "the Pacific Ocean"),
+    ("Which season comes after winter?", "spring"),
     ("In which country is the city of Kyoto?", "Japan"),
     ("What is the boiling point of water in degrees Celsius?", "100"),
     ("Which language is spoken in Brazil?", "Portuguese"),
     ("How many sides does a hexagon have?", "six"),
     ("What gas do plants absorb from the air?", "carbon dioxide"),
-    ("What is the square root of 81?", "nine"),
+    ("What do bees make?", "honey"),
     ("In which year did World War II end?", "1945"),
-    ("What is the capital of Canada?", "Ottawa"),
+    ("Which direction does the sun rise in?", "east"),
     ("How many centimeters are in a meter?", "100"),
-    ("What is the hardest natural substance?", "diamond"),
+    ("How many wheels does a bicycle have?", "two"),
     ("Which continent is Egypt in?", "Africa"),
 )
 
