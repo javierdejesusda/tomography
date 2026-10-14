@@ -7,6 +7,7 @@ models, so the probe logic is exercised by the default suite.
 
 import dataclasses
 import statistics
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -187,9 +188,9 @@ def real(request: pytest.FixtureRequest) -> LoadedModel:
 
 
 def forward_with_capture(
-    lm: LoadedModel, texts: list[str], padding_side: str
+    lm: LoadedModel, texts: list[str], padding_side: Literal["left", "right"]
 ) -> tuple[dict[int, torch.Tensor], tuple[torch.Tensor, ...]]:
-    encoded = lm.encode(texts, padding_side=padding_side)  # type: ignore[arg-type]
+    encoded = lm.encode(texts, padding_side=padding_side)
     layers = list(range(lm.n_layers + 1))
     with capture_residuals(lm, layers) as captured, torch.inference_mode():
         output = lm.model(

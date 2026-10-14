@@ -30,8 +30,8 @@ class ForwardInfo:
             positions, or None when the caller passed none (HF drops an
             all-ones mask).
         position_ids: The positions the caller passed. None in a plain
-            forward, where HF derives positions from the sequence length, so
-            controllers derive them from the mask; explicit in `generate`.
+            forward, where HF derives positions from the sequence length;
+            explicit in `generate`.
     """
 
     attention_mask: torch.Tensor | None

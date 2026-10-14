@@ -333,13 +333,6 @@ class LoadedModel:
         )
 
 
-def _module_at(root: torch.nn.Module, path: str) -> torch.nn.Module:
-    module = root
-    for name in path.split("."):
-        module = getattr(module, name)
-    return module
-
-
 def _pad_id(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizerBase,
@@ -399,7 +392,7 @@ def wrap_model(
             "A fast tokenizer is required: encode needs character offsets"
         )
     model.eval()  # type: ignore[no-untyped-call]
-    blocks = _module_at(model, spec.blocks_path)
+    blocks = model.get_submodule(spec.blocks_path)
     if not isinstance(blocks, torch.nn.ModuleList):
         raise ValueError(f"{spec.blocks_path!r} is not a ModuleList")
     bos_id = model.config.bos_token_id
@@ -417,9 +410,9 @@ def wrap_model(
         dtype=model.dtype,
         bos_id=bos_id,
         pad_id=_pad_id(model, tokenizer, bos_id),
-        decoder=_module_at(model, spec.blocks_path.rpartition(".")[0]),
+        decoder=model.get_submodule(spec.blocks_path.rpartition(".")[0]),
         blocks=blocks,
-        final_norm=_module_at(model, spec.final_norm_path),
+        final_norm=model.get_submodule(spec.final_norm_path),
         default_bos="none" if templated else spec.default_bos,
     )
 
