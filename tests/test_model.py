@@ -1,18 +1,23 @@
 import dataclasses
 import itertools
+import os
 import re
 from types import SimpleNamespace
 
+import huggingface_hub
 import pytest
 import torch
 from transformers import LlamaConfig
 from transformers import LlamaForCausalLM
 
+import tomography.model
 from tomography.model import ARCHS
 from tomography.model import MODELS
 from tomography.model import ArchSpec
 from tomography.model import LoadedModel
+from tomography.model import UnknownCheckpointError
 from tomography.model import UnsupportedArchitectureError
+from tomography.model import load_model
 from tomography.model import wrap_model
 
 GPT2_PINS = {
@@ -262,3 +267,104 @@ def test_encode_rejects_an_unknown_padding_side(
 ) -> None:
     with pytest.raises(ValueError, match="padding_side"):
         tiny_gpt2.encode(["The fox"], padding_side="middle")  # type: ignore[arg-type]
+
+
+class FakeHub:
+    """Stands in for `from_pretrained` and records how it was called."""
+
+    def __init__(self, loaded: LoadedModel) -> None:
+        self.loaded = loaded
+        self.model_calls: list[tuple[str, dict[str, object]]] = []
+        self.tokenizer_calls: list[tuple[str, dict[str, object]]] = []
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        hub = self
+
+        class FakeModel:
+            @staticmethod
+            def from_pretrained(repo_id: str, **kwargs: object) -> object:
+                hub.model_calls.append((repo_id, kwargs))
+                return hub.loaded.model
+
+        class FakeTokenizer:
+            @staticmethod
+            def from_pretrained(repo_id: str, **kwargs: object) -> object:
+                hub.tokenizer_calls.append((repo_id, kwargs))
+                return hub.loaded.tokenizer
+
+        monkeypatch.setattr(tomography.model, "AutoModelForCausalLM", FakeModel)
+        monkeypatch.setattr(tomography.model, "AutoTokenizer", FakeTokenizer)
+
+
+def test_load_model_rejects_an_unknown_key() -> None:
+    with pytest.raises(UnknownCheckpointError, match="nope"):
+        load_model("nope")
+
+
+def test_load_model_pins_the_revision_and_default_dtype(
+    tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hub = FakeHub(tiny_gpt2)
+    hub.install(monkeypatch)
+
+    loaded = load_model("gpt2", device="cpu")
+
+    checkpoint = MODELS["gpt2"]
+    assert hub.model_calls == [
+        (
+            checkpoint.repo_id,
+            {"revision": checkpoint.revision, "dtype": torch.float32},
+        )
+    ]
+    assert hub.tokenizer_calls == [
+        (checkpoint.repo_id, {"revision": checkpoint.revision})
+    ]
+    assert loaded.checkpoint is checkpoint
+    assert loaded.device == torch.device("cpu")
+
+
+def test_load_model_honors_a_dtype_override(
+    tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hub = FakeHub(tiny_gpt2)
+    hub.install(monkeypatch)
+
+    load_model("gpt2-xl", device="cpu", dtype=torch.bfloat16)
+
+    assert hub.model_calls[0][1]["dtype"] is torch.bfloat16
+
+
+def test_load_model_defaults_to_cpu_without_cuda(
+    tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeHub(tiny_gpt2).install(monkeypatch)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    assert load_model("gpt2").device == torch.device("cpu")
+
+
+def test_load_model_silences_the_symlink_warning_and_conversion(
+    tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeHub(tiny_gpt2).install(monkeypatch)
+    monkeypatch.setattr(
+        huggingface_hub.constants, "HF_HUB_DISABLE_SYMLINKS_WARNING", False
+    )
+    monkeypatch.setenv("DISABLE_SAFETENSORS_CONVERSION", "placeholder")
+    monkeypatch.delenv("DISABLE_SAFETENSORS_CONVERSION")
+
+    load_model("gpt2", device="cpu")
+
+    assert huggingface_hub.constants.HF_HUB_DISABLE_SYMLINKS_WARNING is True
+    assert os.environ["DISABLE_SAFETENSORS_CONVERSION"] == "1"
+
+
+def test_load_model_keeps_an_explicit_conversion_setting(
+    tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeHub(tiny_gpt2).install(monkeypatch)
+    monkeypatch.setenv("DISABLE_SAFETENSORS_CONVERSION", "0")
+
+    load_model("gpt2", device="cpu")
+
+    assert os.environ["DISABLE_SAFETENSORS_CONVERSION"] == "0"

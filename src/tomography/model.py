@@ -3,10 +3,14 @@
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
+import os
 from types import MappingProxyType
 from typing import Literal
 
+import huggingface_hub.constants
 import torch
+from transformers import AutoModelForCausalLM
+from transformers import AutoTokenizer
 from transformers import PreTrainedModel
 from transformers import PreTrainedTokenizerBase
 
@@ -359,3 +363,50 @@ def wrap_model(
         final_norm=_module_at(model, spec.final_norm_path),
         default_bos=spec.default_bos,
     )
+
+
+def load_model(
+    key: str,
+    *,
+    device: str | torch.device | None = None,
+    dtype: torch.dtype | None = None,
+) -> LoadedModel:
+    """Loads a pinned checkpoint and wraps it.
+
+    The revision is always the pinned commit SHA. Loading silences the
+    Windows symlink warning and disables transformers' safetensors
+    auto-conversion, which could otherwise open pull requests on `.bin`
+    repositories.
+
+    Args:
+        key: A key of `MODELS`.
+        device: Target device; defaults to CUDA when available, else CPU.
+        dtype: Weight dtype; defaults to the checkpoint's `dtype`.
+
+    Returns:
+        The wrapped model in eval mode.
+
+    Raises:
+        UnknownCheckpointError: If `key` is not in `MODELS`.
+        UnsupportedArchitectureError: If the checkpoint's architecture is
+            not registered.
+    """
+    checkpoint = MODELS.get(key)
+    if checkpoint is None:
+        raise UnknownCheckpointError(
+            f"Unknown checkpoint {key!r}; known: {sorted(MODELS)}"
+        )
+    huggingface_hub.constants.HF_HUB_DISABLE_SYMLINKS_WARNING = True
+    os.environ.setdefault("DISABLE_SAFETENSORS_CONVERSION", "1")
+    if dtype is None:
+        dtype = getattr(torch, checkpoint.dtype)
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = AutoModelForCausalLM.from_pretrained(
+        checkpoint.repo_id, revision=checkpoint.revision, dtype=dtype
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        checkpoint.repo_id, revision=checkpoint.revision
+    )
+    model = model.to(device)  # type: ignore[arg-type]
+    return wrap_model(model, tokenizer, checkpoint=checkpoint)
