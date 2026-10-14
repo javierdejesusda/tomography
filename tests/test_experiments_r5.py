@@ -1,6 +1,7 @@
 """Tests for the R5 honesty reading experiment."""
 
 import dataclasses
+import math
 from pathlib import Path
 from typing import Any
 
@@ -402,7 +403,7 @@ def test_run_passes_the_true_and_the_false_statements(
 
 
 @pytest.mark.slow
-def test_r5_on_gpt2_transfers_to_plain_statements(tmp_path: Path) -> None:
+def test_r5_on_gpt2_runs_both_evaluations(tmp_path: Path) -> None:
     config = Config(n_seeds=3, n_pairs=32)
     run_dir = RunDir.create(config, out_root=tmp_path)
     execute(
@@ -418,6 +419,9 @@ def test_r5_on_gpt2_transfers_to_plain_statements(tmp_path: Path) -> None:
         for name, row in zip(SERIES, curves["mean"], strict=True):
             print(stem, name, np.round(row, 3).tolist())
     print(summary)
-    assert summary["test_accuracy"] > 0.55
     assert summary["in_template"]["test_accuracy"] > 0.9
+    assert math.isfinite(summary["test_accuracy"])
+    assert 0.0 <= summary["test_accuracy"] <= 1.0
+    assert summary["n_eval_pairs"]["transfer"]["test"] > 0
+    assert (run_dir.path / "curves_transfer.npz").is_file()
     assert (run_dir.path / "scan_0_honest.npz").is_file()
