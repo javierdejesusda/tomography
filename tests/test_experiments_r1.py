@@ -25,9 +25,11 @@ from tomography.experiments.r1_sentiment import select_examples
 from tomography.experiments.sweep import SERIES
 from tomography.experiments.sweep import Prepared
 from tomography.experiments.sweep import SweepResult
+from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.sweep import sweep_from_activations
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.templates import ChatFormat
 
 DIM = 64
 LAYERS = (1, 2)
@@ -404,6 +406,20 @@ def test_execute_evaluates_on_val_phrases_with_enough_words(
     summary = run_dir.read_json("summary")
     assert isinstance(summary, dict)
     assert summary["n_eval_pairs"] == 17
+
+
+def test_execute_resolves_the_chat_format_once(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resolved: list[LoadedModel] = []
+
+    def counting(loaded: LoadedModel) -> ChatFormat:
+        resolved.append(loaded)
+        return chat_format_for(loaded)
+
+    monkeypatch.setattr(r1_sentiment, "chat_format_for", counting)
+    _execute_with_spy(_config(n_seeds=3), tiny_arch, tmp_path, monkeypatch)
+    assert len(resolved) == 1
 
 
 def test_execute_writes_the_readers_of_the_sweep(

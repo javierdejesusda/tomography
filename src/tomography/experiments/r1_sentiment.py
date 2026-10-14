@@ -24,17 +24,20 @@ from tomography.model import load_model
 from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
 from tomography.templates import PAPER_TEMPLATES
+from tomography.templates import ChatFormat
 
 
 @dataclass(frozen=True, kw_only=True)
 class Config(ReadingConfig):
     """R1 settings: GPT-2 sentiment on SST-2.
 
-    The shared defaults apply except for the direction finder. SST-2 pairs a
-    positive and a negative sentence that are otherwise unrelated, so their
-    differences are dominated by content variance and the first principal
-    component of the differences (`pca_diff`) does not follow sentiment. The
-    labels are available, so R1 fits a supervised `logistic` direction.
+    The shared defaults apply except for the experiment id, the model, the
+    number of evaluation pairs (256, not every pair the val split allows),
+    `min_words` and the direction finder. SST-2 pairs a positive and a
+    negative sentence that are otherwise unrelated, so their differences are
+    dominated by content variance and the first principal component of the
+    differences (`pca_diff`) does not follow sentiment. The labels are
+    available, so R1 fits a supervised `logistic` direction.
 
     Attributes:
         min_words: SST-2 phrases with fewer words are dropped.
@@ -69,14 +72,14 @@ def select_examples(
 
 def _stimuli(
     examples: Sequence[Example],
-    loaded: LoadedModel,
+    chat_format: ChatFormat,
     n_pairs: int | None,
     seed: int,
 ) -> StimulusSet:
     return build_stimulus_set(
         examples,
         PAPER_TEMPLATES["concept"],
-        chat_format_for(loaded),
+        chat_format,
         pairing="label_contrastive",
         concept="sentiment",
         n_pairs=n_pairs,
@@ -104,14 +107,18 @@ def execute(
     """
     train = select_examples(examples, split="train", min_words=config.min_words)
     val = select_examples(examples, split="val", min_words=config.min_words)
+    chat_format = chat_format_for(loaded)
     train_sets = [
         _stimuli(
-            train, loaded, config.n_pairs, derive_seed(config.seed, "train", i)
+            train,
+            chat_format,
+            config.n_pairs,
+            derive_seed(config.seed, "train", i),
         )
         for i in range(config.n_seeds)
     ]
     val_stimuli = _stimuli(
-        val, loaded, config.n_eval_pairs, derive_seed(config.seed, "eval")
+        val, chat_format, config.n_eval_pairs, derive_seed(config.seed, "eval")
     )
     result = reading_sweep(
         loaded,
