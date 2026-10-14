@@ -144,7 +144,9 @@ def side_effects(
 
     A trial holds texts and lengths only, so the distinct-n values are
     computed over the token ids that the model tokenizer gives each
-    non-empty completion text.
+    non-empty completion text. They count re-encoded tokens (decode, then
+    encode, of the completion), which can differ from the generated ids,
+    while `mean_length` counts the generated tokens of `Trial.lengths`.
 
     Args:
         loaded: The wrapped model.
