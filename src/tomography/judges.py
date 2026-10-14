@@ -1,5 +1,10 @@
 """Judges and language-model scoring helpers.
 
+The module holds the text judges (pinned sentiment and emotion classifiers
+with validation and agreement helpers) and the language-model helpers used for
+side-effect and multiple-choice scoring: perplexity, sequence log-probability,
+MC1 accuracy and the verbalized heuristic baseline.
+
 Tokenization for the language-model helpers follows the policy of
 `LoadedModel.encode`: no special tokens are added by the tokenizer, sequences
 are right padded, position ids are explicit, and a BOS id is prepended only
@@ -8,15 +13,24 @@ under whatever hooks are active when they are called.
 """
 
 from collections.abc import Iterable
+from collections.abc import Mapping
 from collections.abc import Sequence
+from dataclasses import dataclass
 import math
+import os
+from typing import Literal
 
+from huggingface_hub import constants as hub_constants
 import numpy as np
 from numpy.typing import ArrayLike
 from numpy.typing import NDArray
 import torch
+from transformers import AutoModelForSequenceClassification
+from transformers import AutoTokenizer
 from transformers import PreTrainedModel
 from transformers import PreTrainedTokenizerBase
+
+EMOTIONS = ("happiness", "sadness", "anger", "fear", "disgust", "surprise")
 
 
 def _tokenize(
@@ -266,3 +280,207 @@ def heuristic_score(level_logprobs: ArrayLike) -> NDArray[np.float64]:
         -1.0, 1.0, HEURISTIC_LEVELS
     )
     return result
+
+
+Attribute = Literal["sentiment", "emotion"]
+Role = Literal["primary", "secondary"]
+Head = Literal["softmax", "sigmoid"]
+
+
+@dataclass(frozen=True)
+class JudgeSpec:
+    """One pinned classifier used to judge generated text.
+
+    Attributes:
+        attribute: What the judge measures.
+        role: Headline judge (primary) or robustness check (secondary).
+        repo_id: Hugging Face repository of the checkpoint.
+        revision: Full commit SHA of the checkpoint.
+        license: License declared by the checkpoint repository.
+        head: How logits become probabilities: a softmax over all classes or
+            an independent sigmoid per class.
+        labels: Model labels to read, in output order. For sentiment the single
+            positive label; for emotion one label per entry of `EMOTIONS`
+            (happiness is read from the model label "joy").
+    """
+
+    attribute: Attribute
+    role: Role
+    repo_id: str
+    revision: str
+    license: str
+    head: Head
+    labels: tuple[str, ...]
+
+    @property
+    def key(self) -> str:
+        """The registry key, `<attribute>-<role>`."""
+        return f"{self.attribute}-{self.role}"
+
+
+_EMOTION_LABELS = ("joy", *EMOTIONS[1:])
+
+JUDGES: Mapping[str, JudgeSpec] = {
+    spec.key: spec
+    for spec in (
+        JudgeSpec(
+            attribute="sentiment",
+            role="primary",
+            repo_id="siebert/sentiment-roberta-large-english",
+            revision="74cea614e245b0832c770ec9aa51bd58df965b9c",
+            license="none declared",
+            head="softmax",
+            labels=("POSITIVE",),
+        ),
+        JudgeSpec(
+            attribute="sentiment",
+            role="secondary",
+            repo_id="distilbert/distilbert-base-uncased-finetuned-sst-2-english",
+            revision="714eb0fa89d2f80546fda750413ed43d93601a13",
+            license="apache-2.0",
+            head="softmax",
+            labels=("POSITIVE",),
+        ),
+        JudgeSpec(
+            attribute="emotion",
+            role="primary",
+            repo_id="j-hartmann/emotion-english-distilroberta-base",
+            revision="0e1cd914e3d46199ed785853e12b57304e04178b",
+            license="none declared",
+            head="softmax",
+            labels=_EMOTION_LABELS,
+        ),
+        JudgeSpec(
+            attribute="emotion",
+            role="secondary",
+            repo_id="cardiffnlp/twitter-roberta-base-emotion-latest",
+            revision="415620c4fbc8bd82b82b9fd46642fcec6519d537",
+            license="mit",
+            head="sigmoid",
+            labels=_EMOTION_LABELS,
+        ),
+    )
+}
+
+
+def _label_columns(model: PreTrainedModel, labels: Sequence[str]) -> list[int]:
+    id2label = model.config.id2label or {}
+    by_name = {name.lower(): int(index) for index, name in id2label.items()}
+    missing = [label for label in labels if label.lower() not in by_name]
+    if missing:
+        raise ValueError(
+            f"model has no label {missing}; its labels are {sorted(by_name)}"
+        )
+    return [by_name[label.lower()] for label in labels]
+
+
+@dataclass(frozen=True, eq=False)
+class Judge:
+    """A sequence classifier that scores texts for one attribute.
+
+    Attributes:
+        spec: The pinned checkpoint description.
+        model: A sequence classification model in eval mode.
+        tokenizer: The tokenizer that matches the model.
+    """
+
+    spec: JudgeSpec
+    model: PreTrainedModel
+    tokenizer: PreTrainedTokenizerBase
+
+    def __post_init__(self) -> None:
+        """Checks that the model exposes every label the spec reads.
+
+        Raises:
+            ValueError: If a label of the spec is missing from the model.
+        """
+        _label_columns(self.model, self.spec.labels)
+
+    def score(
+        self,
+        texts: Sequence[str],
+        *,
+        batch_size: int = 32,
+        max_length: int = 512,
+    ) -> NDArray[np.float32]:
+        """Scores texts with the classifier.
+
+        Texts are tokenized with the classifier's own special tokens, padded
+        per batch and truncated to `max_length`. For emotion the probabilities
+        of the six emotions are read as the model reports them: a neutral class
+        keeps its mass out of the six columns, so rows can sum to less than one.
+
+        Args:
+            texts: The texts to score.
+            batch_size: Texts per forward pass.
+            max_length: Longest tokenized text, special tokens included.
+
+        Returns:
+            For sentiment, the probability of the positive class with shape
+            `(n,)`. For emotion, probabilities in `EMOTIONS` order with shape
+            `(n, 6)`. Always float32.
+
+        Raises:
+            ValueError: If `batch_size` is below 1.
+        """
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be at least 1, got {batch_size}")
+        columns = _label_columns(self.model, self.spec.labels)
+        chunks: list[NDArray[np.float32]] = []
+        with torch.no_grad():
+            for start in range(0, len(texts), batch_size):
+                batch = self.tokenizer(
+                    list(texts[start : start + batch_size]),
+                    padding=True,
+                    truncation=True,
+                    max_length=max_length,
+                    return_tensors="pt",
+                ).to(self.model.device)
+                logits = self.model(**batch).logits.float()
+                if self.spec.head == "softmax":
+                    probabilities = logits.softmax(dim=-1)
+                else:
+                    probabilities = logits.sigmoid()
+                chunks.append(probabilities[:, columns].cpu().numpy())
+        scores = (
+            np.concatenate(chunks)
+            if chunks
+            else np.zeros((0, len(columns)), dtype=np.float32)
+        )
+        if self.spec.attribute == "sentiment":
+            return np.ascontiguousarray(scores[:, 0])
+        return scores
+
+
+def load_judge(key: str, *, device: str | torch.device | None = None) -> Judge:
+    """Loads a pinned judge from the Hugging Face Hub.
+
+    The revision is the pinned commit SHA. Automatic safetensors conversion is
+    disabled before loading because two judges ship only `.bin` weights and
+    transformers would otherwise try to open conversion pull requests on them.
+
+    Args:
+        key: A key of `JUDGES`, such as `sentiment-primary`.
+        device: Where to place the model. None picks CUDA when available,
+            else the CPU.
+
+    Returns:
+        The judge, with its model in eval mode.
+
+    Raises:
+        ValueError: If `key` is not a registered judge.
+    """
+    spec = JUDGES.get(key)
+    if spec is None:
+        raise ValueError(f"unknown judge {key!r}; choose from {sorted(JUDGES)}")
+    hub_constants.HF_HUB_DISABLE_SYMLINKS_WARNING = True
+    os.environ.setdefault("DISABLE_SAFETENSORS_CONVERSION", "1")
+    tokenizer = AutoTokenizer.from_pretrained(
+        spec.repo_id, revision=spec.revision
+    )
+    model = AutoModelForSequenceClassification.from_pretrained(
+        spec.repo_id, revision=spec.revision
+    )
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    return Judge(spec, model.to(device).eval(), tokenizer)
