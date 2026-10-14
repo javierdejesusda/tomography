@@ -85,7 +85,7 @@ strict = true
 
 [tool.pytest]
 testpaths = ["tests"]
-addopts = ["-m", "not slow and not network"]
+addopts = ["--import-mode=importlib", "-m", "not slow and not network"]
 markers = [
     "slow: loads real GPT-2 or Qwen3 weights and needs a local GPU",
     "network: downloads datasets",
@@ -93,4 +93,5 @@ markers = [
 filterwarnings = ["error"]
 strict_config = true
 strict_markers = true
+strict_parametrization_ids = true
 strict_xfail = true
