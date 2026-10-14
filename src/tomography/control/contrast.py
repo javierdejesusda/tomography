@@ -7,6 +7,8 @@ residual edit adds the shift between the positive and negative streams.
 from collections.abc import Sequence
 import math
 
+import numpy as np
+from numpy.typing import NDArray
 import torch
 
 from tomography.control.generate import Completion
@@ -364,3 +366,111 @@ def contrast_generate(
             )
         )
     return result
+
+
+def _token_ids(loaded: LoadedModel, texts: Sequence[str]) -> list[list[int]]:
+    ids: list[list[int]] = loaded.tokenizer(
+        list(texts), add_special_tokens=False
+    )["input_ids"]
+    return ids
+
+
+def contrast_logprobs(
+    loaded: LoadedModel,
+    prompts: Sequence[str],
+    continuations: Sequence[str],
+    positive: Sequence[str],
+    negative: Sequence[str],
+    *,
+    layers: Sequence[int],
+    alpha: float,
+    bos: BosMode | None = None,
+    batch_size: int = 8,
+) -> NDArray[np.float32]:
+    """Scores continuations of the main prompts under the contrast cascade.
+
+    The rows of a triple are `bos + prompt + continuation`, `bos + positive
+    + continuation` and `bos + negative + continuation`, each part
+    tokenized separately. The shifted window is `len(continuation) + 1`
+    columns: the continuation plus the last prompt column, whose output
+    predicts the first continuation token.
+
+    Args:
+        loaded: The wrapped model.
+        prompts: The main prompts.
+        continuations: One continuation to score per prompt.
+        positive: One positive text per prompt.
+        negative: One negative text per prompt.
+        layers: Layers in 0..L that receive the shift.
+        alpha: Shift coefficient.
+        bos: BOS policy; the prefix is `loaded.bos_id` iff it is `prepend`.
+        batch_size: Triples per forward.
+
+    Returns:
+        An `(n,)` float32 array with the sum of the continuation token
+        log-probabilities of the main rows.
+
+    Raises:
+        ValueError: If the lists differ in length, a continuation has no
+            tokens, `batch_size` is below 1, a layer is outside 0..L or
+            `layers` is empty, `alpha` is not finite, a stream has no token
+            before its continuation, or BOS is requested without an id.
+    """
+    _check_triples(prompts, positive, negative)
+    if len(continuations) != len(prompts):
+        raise ValueError(
+            "continuations and prompts must have the same length, got "
+            f"{len(continuations)} and {len(prompts)}"
+        )
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+    wanted = _check_layers(loaded, layers)
+    _check_alpha(alpha)
+    mode = loaded.default_bos if bos is None else bos
+    prefix: list[int] = []
+    if mode == "prepend":
+        if loaded.bos_id is None:
+            raise ValueError(
+                "bos='prepend' needs a bos id and this model has none"
+            )
+        prefix = [loaded.bos_id]
+    if not prompts:
+        return np.zeros(0, np.float32)
+    tails = _token_ids(loaded, continuations)
+    if not all(tails):
+        raise ValueError("a continuation has no tokens")
+    streams = [
+        _token_ids(loaded, texts) for texts in (prompts, positive, negative)
+    ]
+    if not all(prefix or ids for texts in streams for ids in texts):
+        raise ValueError(
+            "a stream has no context token before the continuation"
+        )
+    head = _head(loaded)
+    scores: list[float] = []
+    for start in range(0, len(prompts), batch_size):
+        part = slice(start, start + batch_size)
+        chunk_tails = tails[part]
+        rows = [
+            [*prefix, *ids, *tail]
+            for texts in streams
+            for ids, tail in zip(texts[part], chunk_tails, strict=True)
+        ]
+        own = torch.tensor([len(tail) + 1 for tail in chunk_tails])
+        windows = torch.minimum(
+            contrast_windows([len(row) for row in rows], int(own.max())), own
+        )
+        inputs = _left_padded(loaded, rows)
+        hidden = _forward(loaded, inputs, wanted, alpha, windows)
+        width = hidden.shape[1]
+        with torch.inference_mode():
+            for i, tail in enumerate(chunk_tails):
+                logits: torch.Tensor = head(
+                    hidden[i, width - len(tail) - 1 : width - 1]
+                )
+                logp = torch.log_softmax(logits.float(), dim=-1)
+                targets = torch.tensor(tail, device=logp.device)
+                scores.append(
+                    float(logp[torch.arange(len(tail)), targets].sum())
+                )
+    return np.asarray(scores, dtype=np.float32)
