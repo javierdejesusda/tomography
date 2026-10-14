@@ -31,6 +31,10 @@ def _many_utility_rows(n: int) -> str:
     return "".join(f"Nice thing {i}.,Bad thing {i}.\n" for i in range(n))
 
 
+def _chain_rows(n: int) -> str:
+    return "".join(f"Scenario {i}.,Scenario {i + 1}.\n" for i in range(n))
+
+
 def _many_morality_rows(n: int) -> str:
     return MORALITY_HEADER + "".join(
         f"{i % 2},Scenario {i}.,True,False\n" for i in range(n)
@@ -80,7 +84,7 @@ def test_utility_test_rows_go_to_the_test_split() -> None:
     assert {e.split for e in examples} == {"test"}
 
 
-def test_utility_train_rows_are_split_into_train_and_val_by_row() -> None:
+def test_utility_train_rows_with_distinct_scenarios_split_by_row_uid() -> None:
     examples = parse_ethics_utility(
         _many_utility_rows(400), source_split="train"
     )
@@ -92,6 +96,20 @@ def test_utility_train_rows_are_split_into_train_and_val_by_row() -> None:
     assert [e.split for e in examples[::2]] == expected
     assert [e.split for e in examples[1::2]] == expected
     assert set(expected) == {"train", "val"}
+
+
+def test_utility_keeps_scenarios_that_repeat_across_rows_in_one_split() -> None:
+    text = _chain_rows(200) + "Scenario 5.,Scenario 6.\n"
+
+    examples = parse_ethics_utility(text, source_split="train")
+
+    first_row_split = assign_splits(
+        ["ethics-util-train-0"],
+        dataset="ethics_utility",
+        fractions=(0.75, 0.25, 0.0),
+    )[0]
+    assert len(examples) == 402
+    assert {e.split for e in examples} == {first_row_split}
 
 
 def test_utility_rejects_a_row_without_two_columns() -> None:
@@ -274,6 +292,17 @@ def test_load_utility_reads_the_pinned_tar() -> None:
         e.meta["pair"] for e in examples if e.uid.startswith("ethics-util-test")
     }
     assert len(train) == 13_738
+    train_texts = {
+        e.text
+        for e in examples
+        if e.uid.startswith("ethics-util-train") and e.split == "train"
+    }
+    val_texts = {
+        e.text
+        for e in examples
+        if e.uid.startswith("ethics-util-train") and e.split == "val"
+    }
+    assert not train_texts & val_texts
     assert len(test) == 4_808
     assert sum(e.label for e in examples) == len(examples) // 2
     assert {

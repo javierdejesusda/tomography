@@ -4,8 +4,10 @@ Both tasks are read from the canonical tar in memory: members are looked up
 by name and nothing is extracted. The `test_hard` files and the other tasks
 are not used.
 
-The source train file is split by row into the `train` and `val` splits (75%
-and 25%); the source test file is the `test` split.
+The source train file is split into `train` (75%) and `val` (25%) by group of
+linked scenarios: rows that share a scenario text, directly or through a chain
+of rows, always land in the same split. The source test file is the `test`
+split.
 """
 
 from collections.abc import Mapping
@@ -63,7 +65,9 @@ def parse_ethics_utility(
         Two examples per row: "<row uid>:a" with label 1 (the more pleasant)
         and "<row uid>:b" with label 0, where the row uid is
         "ethics-util-<source_split>-<row>". Both carry the row uid in
-        `meta["pair"]` and share a split. Texts are stripped.
+        `meta["pair"]` and share a split, and rows that share a scenario text,
+        directly or through a chain of rows, always share a split. Texts are
+        stripped.
 
     Raises:
         ValueError: If a row does not have exactly two columns.
@@ -74,9 +78,7 @@ def parse_ethics_utility(
         if len(row) != 2:
             raise ValueError(f"{row_uid}: expected 2 columns, got {len(row)}")
         rows.append((row_uid, row[0].strip(), row[1].strip()))
-    splits = _assign_row_splits(
-        [row_uid for row_uid, _, _ in rows], source_split, "ethics_utility"
-    )
+    splits = _assign_group_splits(rows, source_split)
     examples = []
     for (row_uid, more_pleasant, less_pleasant), split in zip(
         rows, splits, strict=True
@@ -209,6 +211,41 @@ def _assign_row_splits(
     if source_split == "test":
         return ["test"] * len(uids)
     return assign_splits(uids, dataset=dataset, fractions=_TRAIN_VAL_FRACTIONS)
+
+
+def _assign_group_splits(
+    rows: list[tuple[str, str, str]], source_split: SourceSplit
+) -> list[Split]:
+    if source_split == "test":
+        return ["test"] * len(rows)
+    parent: dict[str, str] = {}
+
+    def find(text: str) -> str:
+        root = parent.setdefault(text, text)
+        while parent[root] != root:
+            root = parent[root]
+        while parent[text] != root:
+            parent[text], text = root, parent[text]
+        return root
+
+    for _, more_pleasant, less_pleasant in rows:
+        parent[find(more_pleasant)] = find(less_pleasant)
+    first_uid: dict[str, str] = {}
+    for row_uid, more_pleasant, _ in rows:
+        first_uid.setdefault(find(more_pleasant), row_uid)
+    group_uids = list(first_uid.values())
+    group_splits = dict(
+        zip(
+            first_uid,
+            assign_splits(
+                group_uids,
+                dataset="ethics_utility",
+                fractions=_TRAIN_VAL_FRACTIONS,
+            ),
+            strict=True,
+        )
+    )
+    return [group_splits[find(more_pleasant)] for _, more_pleasant, _ in rows]
 
 
 def _read_members(
