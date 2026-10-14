@@ -55,13 +55,14 @@ class RepReader:
     ) -> Self:
         """Fits and orients one direction per layer.
 
-        Labels only orient each layer and choose layers; the reference
-        rule decides the sign. Within each group, the sign is positive when
-        the label-1 member holds the highest score more often than the
-        lowest, negative in the opposite case, and positive on a tie. The
-        groups are `groups`, else the `pairs` whose members differ in
-        label. Without either, the sign makes the mean score of the label-1
-        rows exceed that of the label-0 rows.
+        The unpaired `mean_diff` and `logistic` finders fit on the labels;
+        for every method the labels also orient each layer with the
+        reference rule. Within each group, the sign is positive when the
+        label-1 member holds the highest score more often than the lowest,
+        negative in the opposite case, and positive on a tie. The groups are
+        `groups`, else the `pairs` whose members differ in label. Without
+        either, the sign makes the mean score of the label-1 rows exceed
+        that of the label-0 rows.
 
         Layer k draws its randomness from a seed derived from `seed` and k,
         so the layers of a random baseline are independent.
