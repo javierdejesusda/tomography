@@ -4,11 +4,21 @@ from typing import get_args
 
 import numpy as np
 from numpy.typing import NDArray
+from sklearn.manifold import TSNE
 
 from tomography.reading.directions import FloatArray
 from tomography.reading.directions import Preprocess
 
 _PREPROCESSES = get_args(Preprocess)
+
+
+def _layers(h: FloatArray) -> NDArray[np.float64]:
+    layers = np.asarray(h, dtype=np.float64)
+    if layers.ndim != 3:
+        raise ValueError(f"h must have shape (K, n, d), got {layers.shape}")
+    if not np.isfinite(layers).all():
+        raise ValueError("h must be finite")
+    return layers
 
 
 def pca_explained_variance(
@@ -43,11 +53,7 @@ def pca_explained_variance(
     """
     if preprocess not in _PREPROCESSES:
         raise ValueError(f"unsupported preprocess {preprocess!r}")
-    layers = np.asarray(h, dtype=np.float64)
-    if layers.ndim != 3:
-        raise ValueError(f"h must have shape (K, n, d), got {layers.shape}")
-    if not np.isfinite(layers).all():
-        raise ValueError("h must be finite")
+    layers = _layers(h)
     if pairs is not None:
         if pairs.ndim != 2 or pairs.shape[1] != 2:
             raise ValueError(f"pairs must have shape (m, 2), got {pairs.shape}")
@@ -72,3 +78,39 @@ def pca_explained_variance(
             raise ValueError(f"layer {k} has no variance")
         ratios[k] = squared[:n_components] / total
     return ratios
+
+
+def tsne_embed(
+    h: FloatArray, *, perplexity: float = 30.0, seed: int = 0
+) -> NDArray[np.float32]:
+    """Embeds the rows of every layer in 2-D with t-SNE.
+
+    Layers are embedded independently. With the PCA initialization the
+    embedding is deterministic for a given input, and probes on clustered
+    data gave the same embedding for different seeds, so do not rely on
+    `seed` to produce a different layout.
+
+    Args:
+        h: Activations of shape (K, n, d): layer, row, feature.
+        perplexity: The t-SNE perplexity; it must be below n.
+        seed: The `random_state` passed to scikit-learn.
+
+    Returns:
+        Array of shape (K, n, 2).
+
+    Raises:
+        ValueError: If `h` is not 3-D or not finite, or `perplexity` is not
+            below the number of rows.
+    """
+    layers = _layers(h)
+    if perplexity >= layers.shape[1]:
+        raise ValueError(
+            f"perplexity must be below the {layers.shape[1]} rows, "
+            f"got {perplexity}"
+        )
+    tsne = TSNE(
+        n_components=2, init="pca", perplexity=perplexity, random_state=seed
+    )
+    return np.stack([tsne.fit_transform(rows) for rows in layers]).astype(
+        np.float32
+    )

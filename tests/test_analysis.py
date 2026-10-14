@@ -7,6 +7,7 @@ from numpy.typing import NDArray
 import pytest
 
 from tomography.analysis import pca_explained_variance
+from tomography.analysis import tsne_embed
 
 
 def _planted(
@@ -128,3 +129,59 @@ def _bad(name: str) -> dict[str, Any]:
 def test_invalid_inputs_raise(name: str, match: str) -> None:
     with pytest.raises(ValueError, match=match):
         pca_explained_variance(**_bad(name))
+
+
+def _clusters(
+    n_per: int = 20, d: int = 16, seed: int = 0
+) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
+    rng = np.random.default_rng(seed)
+    centers = np.zeros((2, d))
+    centers[1, 0] = 8.0
+    points = np.concatenate(
+        [rng.standard_normal((n_per, d)) + c for c in centers]
+    )
+    return points, np.repeat([0, 1], n_per).astype(np.int64)
+
+
+def test_tsne_shape_dtype_and_determinism() -> None:
+    points, _ = _clusters()
+    h = np.stack([points, points[::-1]])
+    first = tsne_embed(h, perplexity=5.0, seed=0)
+    assert first.shape == (2, 40, 2)
+    assert first.dtype == np.float32
+    again = tsne_embed(h, perplexity=5.0, seed=0)
+    np.testing.assert_array_equal(first, again)
+
+
+def test_tsne_keeps_separated_clusters_apart() -> None:
+    points, cluster = _clusters()
+    embedded = tsne_embed(points[None], perplexity=10.0)[0]
+    gaps = np.linalg.norm(embedded[:, None] - embedded[None], axis=2)
+    np.fill_diagonal(gaps, np.inf)
+    nearest = gaps.argmin(axis=1)
+    assert (cluster[nearest] == cluster).all()
+
+
+def test_tsne_embeds_layers_independently() -> None:
+    points, _ = _clusters()
+    other = np.random.default_rng(9).standard_normal(points.shape)
+    alone = tsne_embed(points[None], perplexity=5.0)
+    stacked = tsne_embed(np.stack([points, other]), perplexity=5.0)
+    np.testing.assert_array_equal(alone[0], stacked[0])
+
+
+@pytest.mark.parametrize("perplexity", [20.0, 25.0], ids=["equal", "above"])
+def test_tsne_rejects_perplexity_not_below_n(perplexity: float) -> None:
+    h = np.random.default_rng(0).standard_normal((1, 20, 4))
+    with pytest.raises(ValueError, match="below the 20 rows"):
+        tsne_embed(h, perplexity=perplexity)
+
+
+def test_tsne_rejects_bad_h() -> None:
+    flat = np.random.default_rng(0).standard_normal((20, 4))
+    with pytest.raises(ValueError, match="shape"):
+        tsne_embed(flat, perplexity=5.0)
+    bad = np.random.default_rng(0).standard_normal((1, 20, 4))
+    bad[0, 0, 0] = np.nan
+    with pytest.raises(ValueError, match="finite"):
+        tsne_embed(bad, perplexity=5.0)
