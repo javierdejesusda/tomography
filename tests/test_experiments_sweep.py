@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,7 +16,9 @@ from tomography.activations import collect_activations
 from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.datasets.stimulus import build_stimulus_set
+from tomography.experiments import sweep
 from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.sweep import SERIES
 from tomography.experiments.sweep import Prepared
 from tomography.experiments.sweep import ReadingConfig
@@ -28,6 +31,9 @@ from tomography.experiments.sweep import sweep_from_activations
 from tomography.experiments.sweep import write_curves
 from tomography.model import CheckpointSpec
 from tomography.model import LoadedModel
+from tomography.reading.metrics import bootstrap_ci
+from tomography.reading.metrics import group_accuracy
+from tomography.reading.reader import RepReader
 from tomography.templates import PAPER_TEMPLATES
 from tomography.templates import ChatFormat
 
@@ -76,6 +82,29 @@ def _planted(
         row_token=np.zeros(n, dtype=np.int64),
         row_token_id=np.zeros(n, dtype=np.int64),
         n_stimuli=n,
+    )
+    return stimuli, act
+
+
+def _planted_rows(n_pairs: int, *, rows: int, seed: int) -> Prepared:
+    """Like `_planted`, but every stimulus holds `rows` token rows.
+
+    The rows of a stimulus are noisy copies of its `_planted` row, so a
+    reader fitted on `_planted` sets stays perfect on them.
+    """
+    stimuli, single = _planted(n_pairs, seed=seed)
+    n = single.n_stimuli
+    noise = np.random.default_rng(seed + 1).normal(
+        scale=0.1, size=(len(single.layers), n * rows, DIM)
+    )
+    act = dataclasses.replace(
+        single,
+        data=(np.repeat(single.data, rows, axis=1) + noise).astype(np.float32),
+        position="response",
+        row_stimulus=np.repeat(np.arange(n, dtype=np.int64), rows),
+        row_rank=np.tile(np.arange(rows, dtype=np.int64), n),
+        row_token=np.tile(np.arange(rows, dtype=np.int64), n),
+        row_token_id=np.zeros(n * rows, dtype=np.int64),
     )
     return stimuli, act
 
@@ -212,6 +241,56 @@ def test_sweep_shuffled_series_sits_at_chance() -> None:
     result = sweep_from_activations(train, evals, seed=0)
     shuffled = result.per_seed("val")[SERIES.index("shuffled")]
     assert np.abs(shuffled - 0.5).max() < 0.08
+
+
+def test_sweep_shuffled_series_moves_whole_stimuli_not_token_rows() -> None:
+    train = [_planted(40, seed=10 + i) for i in range(4)]
+    evals = {"val": _planted_rows(25, rows=4, seed=95)}
+    result = sweep_from_activations(train, evals, seed=0)
+    per_seed = result.per_seed("val")
+    reader = per_seed[SERIES.index("reader")]
+    shuffled = per_seed[SERIES.index("shuffled")]
+    np.testing.assert_array_equal(reader, np.ones_like(reader))
+    np.testing.assert_allclose(
+        shuffled * 25, np.round(shuffled * 25), atol=1e-9
+    )
+
+
+def test_sweep_baselines_follow_the_documented_seed_scheme() -> None:
+    train, evals = _inputs(4)
+    seed = 11
+    result = sweep_from_activations(train, evals, seed=seed)
+    for i, (stimuli, act) in enumerate(train):
+        random = RepReader.fit(
+            "random",
+            act.data,
+            act.layers,
+            labels=act.row_values(stimuli.labels),
+            pairs=act.row_groups(stimuli.pairs),
+            groups=act.row_groups(stimuli.groups),
+            seed=derive_seed(seed, "random", i),
+        )
+        for e, name in enumerate(result.eval_names):
+            e_stimuli, e_act = evals[name]
+            groups = e_act.row_groups(e_stimuli.groups)
+            labels = e_act.row_values(e_stimuli.labels)
+            shuffled = e_act.row_values(
+                shuffle_within_groups(
+                    e_stimuli.labels,
+                    e_stimuli.groups,
+                    seed=derive_seed(seed, "shuffled", i, name),
+                )
+            )
+            np.testing.assert_array_equal(
+                result.accuracy[e, SERIES.index("random"), i],
+                group_accuracy(random.score(e_act.data), groups, labels),
+            )
+            np.testing.assert_array_equal(
+                result.accuracy[e, SERIES.index("shuffled"), i],
+                group_accuracy(
+                    result.readers[i].score(e_act.data), groups, shuffled
+                ),
+            )
 
 
 def test_sweep_random_series_is_below_the_reader() -> None:
@@ -436,6 +515,35 @@ def test_reading_sweep_is_deterministic_per_seed(
     assert not np.array_equal(first.accuracy, other.accuracy)
 
 
+@pytest.mark.parametrize(
+    ("empty", "match"),
+    [("train", "train_sets"), ("eval", "eval_sets")],
+    ids=["no_train_sets", "no_eval_sets"],
+)
+def test_reading_sweep_rejects_an_empty_list_before_any_forward_pass(
+    tiny_arch: LoadedModel,
+    monkeypatch: pytest.MonkeyPatch,
+    empty: str,
+    match: str,
+) -> None:
+    forwards: list[StimulusSet] = []
+    collect = sweep.stimulus_activations
+
+    def spy(loaded: LoadedModel, stimuli: StimulusSet, **kwargs: Any) -> Any:
+        forwards.append(stimuli)
+        return collect(loaded, stimuli, **kwargs)
+
+    monkeypatch.setattr(sweep, "stimulus_activations", spy)
+    train, evals = _sets(2)
+    with pytest.raises(ValueError, match=match):
+        reading_sweep(
+            tiny_arch,
+            [] if empty == "train" else train,
+            {} if empty == "eval" else evals,
+        )
+    assert forwards == []
+
+
 def _run_dir(tmp_path: Path) -> RunDir:
     return RunDir.create(_Config(), out_root=tmp_path)
 
@@ -492,6 +600,28 @@ def test_write_curves_uses_the_stem_and_labels(tmp_path: Path) -> None:
     assert sidecar["xlabel"] == "Depth"
     assert sidecar["ylabel"] == "Score"
     assert sidecar["chance"] is None
+
+
+def test_write_curves_band_is_the_bootstrap_of_the_seeds(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    per_seed = _per_seed()
+    write_curves(
+        run_dir,
+        per_seed,
+        (1, 2, 3, 4),
+        series=SERIES,
+        alpha=0.2,
+        n_boot=300,
+        seed=9,
+    )
+    lo, hi = bootstrap_ci(
+        per_seed.transpose(1, 0, 2), alpha=0.2, n_boot=300, seed=9
+    )
+    arrays = run_dir.read_arrays("curves")
+    np.testing.assert_array_equal(arrays["lo"], lo)
+    np.testing.assert_array_equal(arrays["hi"], hi)
 
 
 @pytest.mark.parametrize(
