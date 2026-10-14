@@ -1017,14 +1017,27 @@ def test_agreement_is_negative_for_opposite_judges() -> None:
     assert got.kappa == -1.0
 
 
-def test_agreement_matches_cohens_kappa_by_hand() -> None:
-    first = [1, 1, 1, 1, 0, 0, 0, 0, 1, 0]
-    second = [1, 1, 1, 0, 0, 0, 0, 1, 1, 0]
-    observed = 8 / 10
-    expected_by_chance = (6 / 10) * (5 / 10) + (4 / 10) * (5 / 10)
+def test_agreement_matches_cohens_kappa_for_unequal_binary_marginals() -> None:
+    first = [1, 1, 1, 1, 1, 1, 1, 0, 0, 0]
+    second = [1, 1, 1, 1, 0, 0, 0, 0, 0, 0]
+    observed = 7 / 10
+    expected_by_chance = (7 / 10) * (4 / 10) + (3 / 10) * (6 / 10)
     kappa = (observed - expected_by_chance) / (1 - expected_by_chance)
 
     got = judges.judge_agreement(first, second, threshold=0.5)
+
+    assert got.rate == pytest.approx(observed)
+    assert got.kappa == pytest.approx(kappa)
+
+
+def test_agreement_matches_cohens_kappa_for_three_unequal_classes() -> None:
+    first = np.eye(3)[[0, 0, 0, 0, 0, 1, 1, 1, 2, 2]]
+    second = np.eye(3)[[0, 0, 0, 1, 2, 1, 1, 1, 2, 2]]
+    observed = 8 / 10
+    expected_by_chance = 0.5 * 0.3 + 0.3 * 0.4 + 0.2 * 0.3
+    kappa = (observed - expected_by_chance) / (1 - expected_by_chance)
+
+    got = judges.judge_agreement(first, second)
 
     assert got.rate == pytest.approx(observed)
     assert got.kappa == pytest.approx(kappa)
