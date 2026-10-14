@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,6 +16,7 @@ from tomography.activations import collect_activations
 from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.datasets.stimulus import build_stimulus_set
+from tomography.experiments import sweep
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.sweep import SERIES
@@ -511,6 +513,35 @@ def test_reading_sweep_is_deterministic_per_seed(
     other = reading_sweep(tiny_arch, train, evals, seed=2)
     np.testing.assert_array_equal(first.accuracy, again.accuracy)
     assert not np.array_equal(first.accuracy, other.accuracy)
+
+
+@pytest.mark.parametrize(
+    ("empty", "match"),
+    [("train", "train_sets"), ("eval", "eval_sets")],
+    ids=["no_train_sets", "no_eval_sets"],
+)
+def test_reading_sweep_rejects_an_empty_list_before_any_forward_pass(
+    tiny_arch: LoadedModel,
+    monkeypatch: pytest.MonkeyPatch,
+    empty: str,
+    match: str,
+) -> None:
+    forwards: list[StimulusSet] = []
+    collect = sweep.stimulus_activations
+
+    def spy(loaded: LoadedModel, stimuli: StimulusSet, **kwargs: Any) -> Any:
+        forwards.append(stimuli)
+        return collect(loaded, stimuli, **kwargs)
+
+    monkeypatch.setattr(sweep, "stimulus_activations", spy)
+    train, evals = _sets(2)
+    with pytest.raises(ValueError, match=match):
+        reading_sweep(
+            tiny_arch,
+            [] if empty == "train" else train,
+            {} if empty == "eval" else evals,
+        )
+    assert forwards == []
 
 
 def _run_dir(tmp_path: Path) -> RunDir:
