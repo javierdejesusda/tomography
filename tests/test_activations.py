@@ -9,13 +9,12 @@ from tomography.activations import Activations
 from tomography.activations import collect_activations
 from tomography.hooks import capture_residuals
 from tomography.model import MODELS
-from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.model import wrap_model
 
 TEXT = "USER: Is the movie good? ASSISTANT: Yes, the movie is very good."
 RESPONSE = (TEXT.index("Yes"), len(TEXT))
-CONCEPT = (TEXT.index("movie"), TEXT.index("movie") + len("movie"))
+CONCEPT = (TEXT.index("the movie"), TEXT.index("the movie") + len("the movie"))
 TEXTS = [
     TEXT,
     "The quick brown fox jumps over the lazy dog.",
@@ -42,16 +41,13 @@ def overlapping(lm: LoadedModel, text: str, span: tuple[int, int]) -> list[int]:
     ]
 
 
-def bos_shift(lm: LoadedModel, bos: BosMode | None) -> int:
-    mode = lm.default_bos if bos is None else bos
-    return 1 if mode == "prepend" else 0
+def bos_shift(lm: LoadedModel) -> int:
+    return 1 if lm.default_bos == "prepend" else 0
 
 
-def stream(
-    lm: LoadedModel, text: str, bos: BosMode | None = None
-) -> np.ndarray:
+def stream(lm: LoadedModel, text: str) -> np.ndarray:
     """Residual stream of one text at layers 0..L, shape (L + 1, T, d)."""
-    encoded = lm.encode([text], bos=bos)
+    encoded = lm.encode([text])
     layers = list(range(lm.n_layers + 1))
     with capture_residuals(lm, layers) as captured, torch.no_grad():
         lm.model(
@@ -85,7 +81,7 @@ def test_last_position_reads_the_last_real_token_at_every_layer(
     assert act.row_rank.tolist() == [0, 0, 0, 0]
     for i, text in enumerate(TEXTS):
         last = len(overlapping(lm, text, (0, len(text)))) - 1
-        token = last + bos_shift(lm, None)
+        token = last + bos_shift(lm)
         assert act.row_token[i] == token
         np.testing.assert_allclose(
             act.data[:, i], stream(lm, text)[:, token], **TOLERANCE
@@ -137,7 +133,7 @@ def test_response_position_has_one_row_per_overlapping_token(
     tiny_arch: LoadedModel,
 ) -> None:
     lm = tiny_arch
-    shift = bos_shift(lm, None)
+    shift = bos_shift(lm)
 
     act = collect_activations(
         lm, TEXTS, position="response", response_spans=SPANS, batch_size=2
@@ -155,6 +151,11 @@ def test_response_position_has_one_row_per_overlapping_token(
     ]
     assert act.row_rank.tolist() == [
         r for tokens in expected_tokens for r in range(len(tokens))
+    ]
+    assert act.row_token_id.tolist() == [
+        lm.encode([text]).input_ids[0, t].item()
+        for text, tokens in zip(TEXTS, expected_tokens, strict=True)
+        for t in tokens
     ]
     assert act.data.shape[1] == sum(len(t) for t in expected_tokens)
     row = 0
@@ -207,13 +208,18 @@ def test_concept_position_is_one_row_at_the_last_concept_token(
         lm, [TEXT, TEXT], position="concept", concept_spans=[CONCEPT, CONCEPT]
     )
 
-    assert len(tokens) >= 1
+    last = tokens[-1] + bos_shift(lm)
+    assert len(tokens) >= 2
     assert act.row_stimulus.tolist() == [0, 1]
     assert act.row_rank.tolist() == [0, 0]
-    assert act.row_token.tolist() == [tokens[-1] + bos_shift(lm, None)] * 2
+    assert act.row_token.tolist() == [last] * 2
+    assert (
+        act.row_token_id.tolist()
+        == [lm.encode([TEXT]).input_ids[0][last].item()] * 2
+    )
     np.testing.assert_allclose(
         act.data[:, 0],
-        stream(lm, TEXT)[:, tokens[-1] + bos_shift(lm, None)],
+        stream(lm, TEXT)[:, last],
         **TOLERANCE,
     )
 
@@ -250,6 +256,24 @@ def test_bos_none_shifts_every_token_index_by_one(
     without = collect_activations(tiny_gpt2, TEXTS, bos="none")
 
     np.testing.assert_array_equal(with_bos.row_token, without.row_token + 1)
+
+
+@pytest.mark.parametrize("position", ["last", "response", "mean"])
+def test_a_bfloat16_model_still_yields_float32_rows(
+    tiny_gpt2: LoadedModel, position: str
+) -> None:
+    half = wrap_model(tiny_gpt2.model.to(torch.bfloat16), tiny_gpt2.tokenizer)
+
+    act = collect_activations(
+        half,
+        TEXTS,
+        position=position,  # type: ignore[arg-type]
+        response_spans=SPANS,
+    )
+
+    assert half.dtype == torch.bfloat16
+    assert act.data.dtype == np.float32
+    assert np.isfinite(act.data).all()
 
 
 @pytest.mark.parametrize(
