@@ -7,6 +7,9 @@ from types import SimpleNamespace
 import huggingface_hub
 import pytest
 import torch
+from transformers import AutoTokenizer
+from transformers import GPT2Config
+from transformers import GPT2LMHeadModel
 from transformers import LlamaConfig
 from transformers import LlamaForCausalLM
 
@@ -368,3 +371,41 @@ def test_load_model_keeps_an_explicit_conversion_setting(
     load_model("gpt2", device="cpu")
 
     assert os.environ["DISABLE_SAFETENSORS_CONVERSION"] == "0"
+
+
+@pytest.mark.network
+def test_real_gpt2_tokenizer_offsets_keep_the_leading_space() -> None:
+    checkpoint = MODELS["gpt2"]
+    tokenizer = AutoTokenizer.from_pretrained(
+        checkpoint.repo_id, revision=checkpoint.revision
+    )
+    config = GPT2Config(
+        vocab_size=len(tokenizer),
+        n_layer=3,
+        n_embd=32,
+        n_head=4,
+        n_positions=64,
+        bos_token_id=tokenizer.eos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+    )
+    lm = wrap_model(GPT2LMHeadModel(config), tokenizer)
+    text = "Is it good? The movie is"
+
+    batch = lm.encode([text])
+
+    assert lm.bos_id == 50256
+    assert batch.input_ids[0, 0].item() == 50256
+    start = text.index(" The")
+    assert (start, start + len(" The")) in batch.offsets[0]
+
+
+@pytest.mark.network
+def test_load_model_loads_the_pinned_gpt2_on_cpu() -> None:
+    loaded = load_model("gpt2", device="cpu")
+
+    assert loaded.checkpoint is MODELS["gpt2"]
+    assert (loaded.n_layers, loaded.d_model) == (12, 768)
+    assert loaded.dtype == torch.float32
+    assert loaded.bos_id == loaded.pad_id == 50256
+    assert loaded.default_bos == "prepend"
+    assert loaded.unembedding().shape == (50257, 768)
