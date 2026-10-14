@@ -75,12 +75,12 @@ def _next_token_logprobs(
                 position_ids=position_ids.to(model.device),
                 use_cache=False,
             ).logits
-            log_probs = logits[:, :-1].float().log_softmax(dim=-1)
-            targets = input_ids[:, 1:].to(model.device)
-            picked = log_probs.gather(-1, targets[..., None]).squeeze(-1)
-            picked_np = picked.cpu().numpy()
             for row, sequence in enumerate(chunk):
-                results.append(picked_np[row, : len(sequence) - 1])
+                length = len(sequence)
+                log_probs = logits[row, : length - 1].float().log_softmax(-1)
+                targets = input_ids[row, 1:length].to(model.device)
+                picked = log_probs.gather(-1, targets[:, None]).squeeze(-1)
+                results.append(picked.cpu().numpy())
     return results
 
 
