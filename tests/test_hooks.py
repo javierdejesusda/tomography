@@ -3,7 +3,10 @@ import dataclasses
 import pytest
 import torch
 
+from tomography.hooks import ForwardInfo
+from tomography.hooks import ResidualEdit
 from tomography.hooks import capture_residuals
+from tomography.hooks import edit_residuals
 from tomography.model import LoadedModel
 
 TEXTS = ["The quick brown fox jumps", "The lazy dog"]
@@ -179,3 +182,222 @@ def test_capture_accepts_tuple_block_outputs_and_keyword_inputs(
     assert torch.equal(captured[0], x)
     assert torch.equal(captured[1], x * 2)
     assert torch.equal(captured[2], x * 4)
+
+
+def test_identity_edit_leaves_the_logits_unchanged(
+    tiny_arch: LoadedModel,
+) -> None:
+    lm = tiny_arch
+    inputs = batch(lm)
+    edits = {layer: lambda h, info: h for layer in range(lm.n_layers + 1)}
+    with torch.no_grad():
+        expected = lm.model(**inputs).logits
+
+        with edit_residuals(lm, edits):
+            actual = lm.model(**inputs).logits
+
+    assert torch.equal(actual, expected)
+
+
+@pytest.mark.parametrize("layer", [0, 1, 3], ids=["embedding", "mid", "top"])
+def test_additive_edit_shifts_the_stream_at_that_layer(
+    tiny_arch: LoadedModel, layer: int
+) -> None:
+    lm = tiny_arch
+    inputs = batch(lm)
+    vector = torch.randn(lm.d_model)
+    with capture_residuals(lm, [layer]) as clean, torch.no_grad():
+        lm.model(**inputs)
+
+    with (
+        torch.no_grad(),
+        edit_residuals(lm, {layer: lambda h, info: h + vector}),
+        capture_residuals(lm, [layer]) as edited,
+    ):
+        lm.model(**inputs)
+
+    assert torch.allclose(edited[layer], clean[layer] + vector)
+
+
+def test_edit_at_the_top_steers_the_logits_through_the_final_norm(
+    tiny_arch: LoadedModel,
+) -> None:
+    lm = tiny_arch
+    inputs = batch(lm)
+    vector = torch.randn(lm.d_model)
+    top = lm.n_layers
+    with capture_residuals(lm, [top]) as clean, torch.no_grad():
+        lm.model(**inputs)
+    expected = lm.model.get_output_embeddings()(
+        lm.final_norm(clean[top] + vector)
+    )
+
+    with torch.no_grad(), edit_residuals(lm, {top: lambda h, info: h + vector}):
+        logits = lm.model(**inputs).logits
+
+    assert torch.allclose(logits, expected, atol=1e-5)
+
+
+def test_a_capture_inside_an_edit_sees_the_edited_stream(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    lm = tiny_gpt2
+    inputs = batch(lm)
+
+    def shift(h: torch.Tensor, info: ForwardInfo) -> torch.Tensor:
+        return h + 1
+
+    with capture_residuals(lm, [2, 3]) as clean, torch.no_grad():
+        lm.model(**inputs)
+
+    with (
+        torch.no_grad(),
+        edit_residuals(lm, {2: shift}),
+        capture_residuals(lm, [2, 3]) as inside,
+    ):
+        lm.model(**inputs)
+    with (
+        torch.no_grad(),
+        capture_residuals(lm, [2]) as outside,
+        edit_residuals(lm, {2: shift}),
+    ):
+        lm.model(**inputs)
+
+    assert torch.allclose(inside[2], clean[2] + 1)
+    assert not torch.allclose(inside[3], clean[3])
+    assert torch.equal(outside[2], clean[2])
+
+
+def test_nested_edits_apply_in_registration_order(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    lm = toy_model(tiny_gpt2)
+    x = torch.ones(1, 3, 4)
+
+    with (
+        edit_residuals(lm, {1: lambda h, info: h * 3}),
+        edit_residuals(lm, {1: lambda h, info: h + 1}),
+    ):
+        out = lm.decoder(x)
+
+    assert torch.equal(out, ((x * 2) * 3 + 1) * 2)
+
+
+def test_edit_works_on_tuple_block_outputs_and_keyword_inputs(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    lm = toy_model(tiny_gpt2)
+    x = torch.ones(1, 3, 4)
+
+    with edit_residuals(
+        lm, {0: lambda h, info: h + 1, 2: lambda h, info: h - 1}
+    ):
+        out = lm.decoder(x)
+
+    assert torch.equal(out, (((x + 1) * 2) * 2) - 1)
+
+
+def test_edit_receives_the_mask_and_no_positions_in_a_plain_forward(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    lm = tiny_gpt2
+    inputs = batch(lm)
+    seen: list[ForwardInfo] = []
+
+    def edit(h: torch.Tensor, info: ForwardInfo) -> torch.Tensor:
+        seen.append(info)
+        return h
+
+    with torch.no_grad(), edit_residuals(lm, {1: edit}):
+        lm.model(**inputs)
+
+    assert torch.equal(seen[0].attention_mask, inputs["attention_mask"])
+    assert seen[0].position_ids is None
+
+
+def test_edit_receives_explicit_positions_when_the_caller_passes_them(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    lm = tiny_gpt2
+    encoded = lm.encode(TEXTS, padding_side="left")
+    seen: list[ForwardInfo] = []
+
+    def edit(h: torch.Tensor, info: ForwardInfo) -> torch.Tensor:
+        seen.append(info)
+        return h
+
+    with torch.no_grad(), edit_residuals(lm, {1: edit}):
+        lm.model(
+            input_ids=encoded.input_ids,
+            attention_mask=encoded.attention_mask,
+            position_ids=encoded.position_ids,
+        )
+
+    assert torch.equal(seen[0].position_ids, encoded.position_ids)
+
+
+def test_generate_gives_the_edit_a_growing_mask_and_explicit_positions(
+    tiny_arch: LoadedModel,
+) -> None:
+    lm = tiny_arch
+    encoded = lm.encode(TEXTS, padding_side="left")
+    seen: list[ForwardInfo] = []
+
+    def edit(h: torch.Tensor, info: ForwardInfo) -> torch.Tensor:
+        seen.append(info)
+        return h
+
+    with torch.no_grad(), edit_residuals(lm, {1: edit}):
+        lm.model.generate(
+            input_ids=encoded.input_ids,
+            attention_mask=encoded.attention_mask,
+            max_new_tokens=2,
+            do_sample=False,
+            pad_token_id=lm.pad_id,
+        )
+
+    width = encoded.input_ids.shape[1]
+    assert [i.attention_mask.shape[1] for i in seen] == [width, width + 1]
+    assert [i.position_ids.shape[1] for i in seen] == [width, 1]
+
+
+def test_edit_must_keep_shape_dtype_and_device(tiny_gpt2: LoadedModel) -> None:
+    lm = tiny_gpt2
+    inputs = batch(lm)
+
+    def run(edit: ResidualEdit) -> None:
+        with edit_residuals(lm, {1: edit}):
+            lm.model(**inputs)
+
+    with pytest.raises(ValueError, match="shape"):
+        run(lambda h, info: h[:, :-1])
+    with pytest.raises(ValueError, match="dtype"):
+        run(lambda h, info: h.to(torch.float64))
+
+    assert hook_counts(lm) == 0
+
+
+def test_edit_removes_its_hooks_even_when_the_body_raises(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    keep = {0: lambda h, info: h, 2: lambda h, info: h}
+
+    def body() -> None:
+        with edit_residuals(tiny_gpt2, keep):
+            assert hook_counts(tiny_gpt2) == 3
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        body()
+
+    assert hook_counts(tiny_gpt2) == 0
+
+
+def test_edit_rejects_layers_outside_zero_to_l(tiny_gpt2: LoadedModel) -> None:
+    with (
+        pytest.raises(ValueError, match="layer"),
+        edit_residuals(tiny_gpt2, {4: lambda h, info: h}),
+    ):
+        pass
+
+    assert hook_counts(tiny_gpt2) == 0
