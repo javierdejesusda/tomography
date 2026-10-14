@@ -142,13 +142,16 @@ def test_new_figure_draws_recessive_axes() -> None:
     assert not ax.spines["right"].get_visible()
 
 
-def test_lines_take_the_first_categorical_hue_at_two_pixels() -> None:
-    _, axes = style.new_figure()
-
-    (line,) = axes[0, 0].plot([0, 1], [0, 1])
+def test_lines_keep_the_style_whatever_the_ambient_rc() -> None:
+    ambient = {"lines.linewidth": 4.0, "lines.markersize": 12.0}
+    with mpl.rc_context(ambient), style.style_context():
+        _, axes = style.new_figure()
+        (line,) = axes[0, 0].plot([0, 1], [0, 1], marker="o")
 
     assert to_hex(line.get_color()) == style.CATEGORICAL[0]
     assert line.get_linewidth() == pytest.approx(2 * style.PX)
+    assert line.get_markersize() == pytest.approx(8 * style.PX)
+    assert line.get_solid_capstyle() == "round"
 
 
 def sample_figure() -> Figure:
