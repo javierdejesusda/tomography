@@ -4,8 +4,11 @@ The three streams of a triple run as rows of one batch, and a batch-aware
 residual edit adds the shift between the positive and negative streams.
 """
 
+from collections.abc import Mapping
 from collections.abc import Sequence
+from dataclasses import dataclass
 import math
+from typing import Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -14,8 +17,10 @@ import torch
 from tomography.control.generate import Completion
 from tomography.hooks import ForwardInfo
 from tomography.hooks import ResidualEdit
+from tomography.hooks import capture_residuals
 from tomography.hooks import edit_residuals
 from tomography.model import BosMode
+from tomography.model import EncodedBatch
 from tomography.model import LoadedModel
 
 
@@ -306,8 +311,9 @@ def contrast_generate(
     Raises:
         ValueError: If the lists differ in length, a layer is outside 0..L
             or `layers` is empty, `max_new_tokens`, `batch_size` or `window`
-            is below 1, `alpha` is not finite, or the longest of the three
-            streams plus `max_new_tokens` exceeds `max_position_embeddings`.
+            is below 1, `alpha` is not finite, the longest of the three
+            streams plus `max_new_tokens` exceeds `max_position_embeddings`,
+            or the model has no output embedding.
     """
     _check_triples(prompts, positive, negative)
     wanted = _check_layers(loaded, layers)
@@ -414,7 +420,8 @@ def contrast_logprobs(
         ValueError: If the lists differ in length, a continuation has no
             tokens, `batch_size` is below 1, a layer is outside 0..L or
             `layers` is empty, `alpha` is not finite, a stream has no token
-            before its continuation, or BOS is requested without an id.
+            before its continuation, BOS is requested without an id, or the
+            model has no output embedding.
     """
     _check_triples(prompts, positive, negative)
     if len(continuations) != len(prompts):
@@ -474,3 +481,182 @@ def contrast_logprobs(
                     float(logp[torch.arange(len(tail)), targets].sum())
                 )
     return np.asarray(scores, dtype=np.float32)
+
+
+def _token_index(info: ForwardInfo, h: torch.Tensor) -> torch.Tensor:
+    """Returns the `(batch, seq)` token index of every column of `h`."""
+    rows, columns = h.shape[:2]
+    if info.position_ids is not None:
+        index = info.position_ids[:, -columns:]
+    elif info.attention_mask is not None:
+        positions = info.attention_mask.cumsum(dim=-1) - 1
+        index = positions[:, -columns:].clamp(min=0)
+    else:
+        index = torch.arange(columns).expand(rows, columns)
+    return index.to(h.device)
+
+
+def _prompt_limit(
+    prompt_lengths: int | Sequence[int], h: torch.Tensor
+) -> torch.Tensor:
+    rows = h.shape[0]
+    if isinstance(prompt_lengths, int):
+        return torch.full((rows,), prompt_lengths, device=h.device)
+    if len(prompt_lengths) != rows:
+        raise ValueError(
+            f"prompt_lengths has {len(prompt_lengths)} entries for {rows} rows"
+        )
+    return torch.tensor(prompt_lengths, device=h.device)
+
+
+@dataclass(frozen=True, eq=False)
+class PromptDifference:
+    """ActAdd-style controller built from the difference of two prompts.
+
+    The difference of the residual streams of a positive and a negative
+    prompt keeps its raw magnitude, and `coeff` multiplies it. The edit adds
+    `coeff * vectors[layer][j]` at the tokens of token index `j < k`, so it is
+    position local and works under the KV cache.
+
+    Attributes:
+        vectors: Maps a layer to a `(k, d_model)` float32 per-position
+            difference.
+        coeff: Multiplier of the raw difference.
+    """
+
+    vectors: Mapping[int, torch.Tensor]
+    coeff: float
+
+    def __post_init__(self) -> None:
+        """Validates the vectors and the coefficient.
+
+        Raises:
+            ValueError: If `vectors` is empty, a vector is not 2-D, not
+                finite or all zero, the widths differ, or `coeff` is not
+                finite.
+        """
+        if not self.vectors:
+            raise ValueError("vectors is empty")
+        if not math.isfinite(self.coeff):
+            raise ValueError(f"coeff must be finite, got {self.coeff}")
+        for layer, vector in self.vectors.items():
+            if vector.ndim != 2:
+                raise ValueError(
+                    f"vectors[{layer}] must be 2-D, got {vector.ndim}-D"
+                )
+            if not bool(torch.isfinite(vector).all()):
+                raise ValueError(f"vectors[{layer}] is not finite")
+            if not bool(vector.any()):
+                raise ValueError(f"vectors[{layer}] is all zero")
+        widths = {vector.shape[1] for vector in self.vectors.values()}
+        if len(widths) > 1:
+            raise ValueError(f"vectors have different widths: {sorted(widths)}")
+
+    @classmethod
+    def from_prompts(
+        cls,
+        loaded: LoadedModel,
+        positive: str,
+        negative: str,
+        layers: Sequence[int],
+        *,
+        coeff: float,
+        bos: BosMode | None = None,
+    ) -> Self:
+        """Builds the controller from a positive and a negative prompt.
+
+        Args:
+            loaded: The wrapped model.
+            positive: The positive prompt.
+            negative: The negative prompt.
+            layers: Layers in 0..L that get a vector.
+            coeff: Multiplier of the raw difference.
+            bos: BOS policy passed to `loaded.encode`.
+
+        Returns:
+            The controller; each vector holds the float32 differences of the
+            first `min(len_pos, len_neg)` positions. Under a BOS the
+            position-0 difference is set to exactly zero.
+
+        Raises:
+            ValueError: If `layers` is empty or outside 0..L, or the prompts
+                have identical token ids over the first `min(len_pos,
+                len_neg)` positions (equal, or one a token prefix of the
+                other), so the difference would be zero.
+        """
+        wanted = _check_layers(loaded, layers)
+        batch = loaded.encode([positive, negative], bos=bos)
+        k = min(batch.lengths)
+        rows = batch.input_ids.tolist()
+        if rows[0][:k] == rows[1][:k]:
+            raise ValueError(
+                f"the prompts have identical token ids over their first {k}"
+                " positions, so the difference is zero"
+            )
+        with torch.inference_mode(), capture_residuals(loaded, wanted) as seen:
+            loaded.decoder(
+                input_ids=batch.input_ids.to(loaded.device),
+                attention_mask=batch.attention_mask.to(loaded.device),
+                position_ids=batch.position_ids.to(loaded.device),
+                use_cache=False,
+            )
+        vectors: dict[int, torch.Tensor] = {}
+        for layer in wanted:
+            stream = seen[layer].float()
+            vector = (stream[0, :k] - stream[1, :k]).cpu().clone()
+            if batch.has_bos:
+                vector[0] = 0
+            vectors[layer] = vector
+        return cls(vectors, coeff)
+
+    def edits(
+        self, prompt_lengths: int | Sequence[int] | None = None
+    ) -> dict[int, ResidualEdit]:
+        """Builds the residual edits.
+
+        Args:
+            prompt_lengths: Token count of each row's prompt, or one int for
+                all rows; edited indices stay below it. None applies only
+                the `j < k` rule.
+
+        Returns:
+            A mapping from layer to a residual edit.
+
+        Raises:
+            ValueError: If a prompt length is below 1. A sequence whose size
+                differs from the row count raises when the edit runs.
+        """
+        values = (
+            [prompt_lengths]
+            if isinstance(prompt_lengths, int)
+            else list(prompt_lengths or [])
+        )
+        if any(value < 1 for value in values):
+            raise ValueError(
+                f"prompt_lengths must be >= 1, got {prompt_lengths}"
+            )
+
+        def edit_for(vector: torch.Tensor) -> ResidualEdit:
+            def edit(h: torch.Tensor, info: ForwardInfo) -> torch.Tensor:
+                if self.coeff == 0:
+                    return h
+                index = _token_index(info, h)
+                edited = index < vector.shape[0]
+                mask = info.attention_mask
+                if mask is not None:
+                    edited = edited & (mask[:, -h.shape[1] :] > 0).to(h.device)
+                if prompt_lengths is not None:
+                    limit = _prompt_limit(prompt_lengths, h)
+                    edited = edited & (index < limit[:, None])
+                rows = vector.to(h.device)[index.clamp(max=vector.shape[0] - 1)]
+                return (h.float() + self.coeff * rows * edited[..., None]).to(
+                    h.dtype
+                )
+
+            return edit
+
+        return {layer: edit_for(vec) for layer, vec in self.vectors.items()}
+
+    def __call__(self, batch: EncodedBatch) -> dict[int, ResidualEdit]:
+        """Returns `edits(batch.lengths)`, the `generate` edit factory."""
+        return self.edits(batch.lengths)
