@@ -1,12 +1,17 @@
 import numpy as np
 import pytest
 import torch
+from transformers import AutoTokenizer
+from transformers import GPT2Config
+from transformers import GPT2LMHeadModel
 
 from tomography.activations import Activations
 from tomography.activations import collect_activations
 from tomography.hooks import capture_residuals
+from tomography.model import MODELS
 from tomography.model import BosMode
 from tomography.model import LoadedModel
+from tomography.model import wrap_model
 
 TEXT = "USER: Is the movie good? ASSISTANT: Yes, the movie is very good."
 RESPONSE = (TEXT.index("Yes"), len(TEXT))
@@ -385,3 +390,31 @@ def test_row_groups_rejects_malformed_groups() -> None:
         act.row_groups(np.array([[0, 2]], dtype=np.int64))
     with pytest.raises(ValueError, match="ragged"):
         act.row_groups(np.array([[0, 1]], dtype=np.int64), ragged="pad")  # type: ignore[arg-type]
+
+
+@pytest.mark.network
+def test_real_gpt2_tokenizer_response_span_keeps_the_leading_space() -> None:
+    checkpoint = MODELS["gpt2"]
+    tokenizer = AutoTokenizer.from_pretrained(
+        checkpoint.repo_id, revision=checkpoint.revision
+    )
+    config = GPT2Config(
+        vocab_size=len(tokenizer),
+        n_layer=3,
+        n_embd=32,
+        n_head=4,
+        n_positions=128,
+        bos_token_id=tokenizer.eos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+    )
+    lm = wrap_model(GPT2LMHeadModel(config), tokenizer)
+
+    act = collect_activations(
+        lm, [TEXT], position="response", response_spans=[RESPONSE]
+    )
+
+    offsets = lm.encode([TEXT]).offsets[0]
+    assert offsets[act.row_token[0]][0] == RESPONSE[0] - 1
+    assert offsets[act.row_token[-1]][1] == len(TEXT)
+    assert lm.encode([TEXT]).input_ids[0, 0].item() == 50256
+    assert act.row_token.min() >= 1

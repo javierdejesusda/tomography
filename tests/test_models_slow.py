@@ -1,8 +1,10 @@
 """Integration tests on real checkpoints; run with `pytest -m slow`."""
 
+import numpy as np
 import pytest
 import torch
 
+from tomography.activations import collect_activations
 from tomography.hooks import capture_residuals
 from tomography.model import LoadedModel
 from tomography.model import load_model
@@ -73,3 +75,16 @@ def test_gpt2_left_padding_with_explicit_positions_matches_unpadded(
                 rtol=1e-4,
                 atol=1e-3,
             )
+
+
+def test_gpt2_batched_collection_matches_per_example_collection(
+    gpt2: LoadedModel,
+) -> None:
+    spans = [(len(text) // 2, len(text)) for text in TEXTS]
+    kwargs = {"position": "response", "response_spans": spans}
+
+    batched = collect_activations(gpt2, TEXTS, batch_size=3, **kwargs)  # type: ignore[arg-type]
+    single = collect_activations(gpt2, TEXTS, batch_size=1, **kwargs)  # type: ignore[arg-type]
+
+    np.testing.assert_allclose(batched.data, single.data, rtol=1e-4, atol=1e-3)
+    assert batched.row_token.tolist() == single.row_token.tolist()
