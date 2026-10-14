@@ -311,8 +311,9 @@ def contrast_generate(
     Raises:
         ValueError: If the lists differ in length, a layer is outside 0..L
             or `layers` is empty, `max_new_tokens`, `batch_size` or `window`
-            is below 1, `alpha` is not finite, or the longest of the three
-            streams plus `max_new_tokens` exceeds `max_position_embeddings`.
+            is below 1, `alpha` is not finite, the longest of the three
+            streams plus `max_new_tokens` exceeds `max_position_embeddings`,
+            or the model has no output embedding.
     """
     _check_triples(prompts, positive, negative)
     wanted = _check_layers(loaded, layers)
@@ -419,7 +420,8 @@ def contrast_logprobs(
         ValueError: If the lists differ in length, a continuation has no
             tokens, `batch_size` is below 1, a layer is outside 0..L or
             `layers` is empty, `alpha` is not finite, a stream has no token
-            before its continuation, or BOS is requested without an id.
+            before its continuation, BOS is requested without an id, or the
+            model has no output embedding.
     """
     _check_triples(prompts, positive, negative)
     if len(continuations) != len(prompts):
