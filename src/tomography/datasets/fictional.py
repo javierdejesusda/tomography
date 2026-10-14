@@ -18,6 +18,7 @@ from tomography.datasets.records import QAExample
 _CONSONANTS = "bcdfghjklmnprstvz"
 _VOWELS = "aeiou"
 _MIN_SYLLABLE_CAP = 4
+_MIN_TOKENS = 2
 
 
 def generate_fictional(
@@ -48,8 +49,9 @@ def generate_fictional(
         uid in "matched_uid" and the shared token count in "name_tokens".
 
     Raises:
-        ValueError: If a relation has no template or a subject cannot be
-            matched within `max_attempts`.
+        ValueError: If a relation has no template, a subject has fewer than
+            2 tokens (drop single-token subjects first) or a subject cannot
+            be matched within `max_attempts`.
     """
     for item in real_items:
         if item.meta["relation"] not in templates:
@@ -97,7 +99,8 @@ def generate_names(
     target's token count, so long names can be matched. Each target draws
     from its own stream, so the result depends only on the seed, the target
     list and `count_tokens`. A name is never a target and never repeats an
-    earlier name.
+    earlier name. Callers must drop targets of a single token first: a
+    one-token name would be a stub such as "He".
 
     Args:
         targets: Real names to match, such as "George Rankin".
@@ -111,12 +114,18 @@ def generate_names(
         One invented name per target, in order.
 
     Raises:
-        ValueError: If no candidate matches a target within `max_attempts`.
+        ValueError: If a target has fewer than 2 tokens or no candidate
+            matches a target within `max_attempts`.
     """
     taken = {target.lower() for target in targets}
     names = []
     for index, target in enumerate(targets):
         goal = count_tokens(target)
+        if goal < _MIN_TOKENS:
+            raise ValueError(
+                f"{target!r} has {goal} token(s); at least {_MIN_TOKENS} "
+                "are needed"
+            )
         words = max(1, len(target.split()))
         cap = max(_MIN_SYLLABLE_CAP * words, 3 * goal)
         rng = np.random.default_rng([seed, index])

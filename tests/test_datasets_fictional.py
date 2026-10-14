@@ -84,6 +84,23 @@ def test_generate_names_never_returns_a_target(
         )
 
 
+def test_generate_names_never_reuses_a_name_for_a_later_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(fictional, "_CONSONANTS", "d")
+    monkeypatch.setattr(fictional, "_VOWELS", "a")
+
+    with pytest.raises(ValueError, match="Cece"):
+        fictional.generate_names(
+            ["Bobo", "Cece"], count_tokens=_syllables, seed=0, max_attempts=50
+        )
+
+
+def test_generate_names_rejects_a_target_of_one_token() -> None:
+    with pytest.raises(ValueError, match="Paris"):
+        fictional.generate_names(["Paris"], count_tokens=lambda name: 1, seed=0)
+
+
 def test_generate_names_names_the_target_it_cannot_match() -> None:
     def count(name: str) -> int:
         return 99 if name == "Ada Smith" else 1
@@ -152,6 +169,16 @@ def test_generate_fictional_rejects_a_relation_without_a_template() -> None:
         )
 
 
+def test_generate_fictional_rejects_a_subject_of_one_token() -> None:
+    real = [_real("popqa:1", "Ada Smith"), _real("popqa:2", "Prague")]
+
+    def count(name: str) -> int:
+        return 1 if name == "Prague" else _syllables(name)
+
+    with pytest.raises(ValueError, match="Prague"):
+        fictional.generate_fictional(real, count_tokens=count, seed=0)
+
+
 @pytest.mark.network
 def test_network_matches_every_popqa_subject_on_gpt2_tokens() -> None:
     from transformers import AutoTokenizer
@@ -166,7 +193,11 @@ def test_network_matches_every_popqa_subject_on_gpt2_tokens() -> None:
     def count(name: str) -> int:
         return len(tokenizer(" " + name, add_special_tokens=False)["input_ids"])
 
-    real = popqa.load_popqa()
+    real = [
+        item
+        for item in popqa.load_popqa()
+        if count(str(item.meta["subject"])) >= 2
+    ]
     invented = fictional.generate_fictional(real, count_tokens=count, seed=0)
 
     assert len(invented) == len(real)
