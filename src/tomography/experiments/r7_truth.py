@@ -22,13 +22,21 @@ from tomography.experiments.sweep import reading_sweep
 from tomography.experiments.sweep import write_curves
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
 from tomography.templates import PAPER_TEMPLATES
 
 
 @dataclass(frozen=True, kw_only=True)
 class Config(ReadingConfig):
-    """R7 settings: GPT-2 truthfulness with the shared defaults.
+    """R7 settings: GPT-2 truthfulness on facts and Geometry of Truth.
+
+    The shared defaults apply except for `method`, which is `logistic` as in
+    R1. Facts and Geometry of Truth statements are unrelated sentences paired
+    only by label, so the principal component of the pair differences follows
+    content: `pca_diff` chose layer 1 on val and scored 0.475 (32 pairs) and
+    0.458 (128 pairs) on test at that layer, while `logistic` with 128 pairs
+    chose val layer 9 and scored 0.695 on test.
 
     Attributes:
         concept: The concept word the `concept` template puts in the prompt.
@@ -40,6 +48,7 @@ class Config(ReadingConfig):
     model: str = "gpt2"
     concept: str = "truthfulness"
     ood_subsets: tuple[str, ...] = SUBSETS
+    method: Method = "logistic"
 
 
 def _stimuli(

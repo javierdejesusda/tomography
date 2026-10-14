@@ -99,6 +99,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.experiment == "r7"
     assert config.model == "gpt2"
     assert config.concept == "truthfulness"
+    assert config.method == "logistic"
     assert config.ood_subsets == SUBSETS
     assert len(config.ood_subsets) == 9
     assert config.n_eval_pairs is None
@@ -370,8 +371,7 @@ def test_run_loads_the_model_and_the_data(
 def test_r7_on_gpt2_reads_truthfulness_above_the_floor(tmp_path: Path) -> None:
     config = Config(
         n_seeds=3,
-        n_pairs=32,
-        n_eval_pairs=128,
+        n_pairs=128,
         ood_subsets=("cities", "neg_cities", "sp_en_trans"),
     )
     run_dir = RunDir.create(config, out_root=tmp_path)
@@ -391,4 +391,4 @@ def test_r7_on_gpt2_reads_truthfulness_above_the_floor(tmp_path: Path) -> None:
             round(entry["best_accuracy"], 3),
             round(entry["accuracy_at_val_layer"], 3),
         )
-    assert summary["sets"]["test"]["best_accuracy"] > 0.55
+    assert summary["sets"]["test"]["accuracy_at_val_layer"] > 0.55
