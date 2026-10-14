@@ -95,6 +95,7 @@ def fit_direction(
     if preprocess == "unit":
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         vectors = vectors / np.where(norms > 0, norms, 1.0)
+    max_abs = float(np.abs(vectors).max())
     mean = vectors.mean(axis=0)
     fitted = vectors if preprocess == "none" else vectors - mean
     if method == "mean_diff":
@@ -107,12 +108,17 @@ def fit_direction(
         rng = np.random.default_rng(seed)
         direction = rng.standard_normal(size=(rows.shape[1],))
     else:
-        direction = _first_component(fitted)
+        direction = _first_component(fitted, max_abs)
     return _result(direction, mean)
 
 
-def _first_component(rows: NDArray[np.float64]) -> NDArray[np.float64]:
-    components = np.linalg.svd(rows, full_matrices=False)[2]
+def _first_component(
+    rows: NDArray[np.float64], max_abs: float
+) -> NDArray[np.float64]:
+    _, singular_values, components = np.linalg.svd(rows, full_matrices=False)
+    bound = np.finfo(np.float64).eps * max(rows.shape) * max_abs
+    if singular_values[0] <= bound:
+        raise ValueError("the fitted direction has zero norm")
     return np.asarray(components[0], dtype=np.float64)
 
 

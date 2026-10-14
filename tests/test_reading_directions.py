@@ -104,13 +104,6 @@ def test_pca_diff_ignores_seed_and_in_pair_order() -> None:
     np.testing.assert_allclose(first.direction, flipped.direction, atol=1e-6)
 
 
-def test_pca_diff_requires_pairs() -> None:
-    data = make_planted(10, seed=5)
-
-    with pytest.raises(ValueError, match="pairs"):
-        fit_direction("pca_diff", data.h)
-
-
 def pair_differences(data: Planted) -> NDArray[np.float64]:
     h64 = data.h.astype(np.float64)
     return h64[data.pairs[:, 0]] - h64[data.pairs[:, 1]]
@@ -337,27 +330,23 @@ def test_activations_must_be_finite() -> None:
 
 
 @pytest.mark.parametrize(
-    "pairs",
+    ("pairs", "message"),
     [
-        np.array([0, 1], dtype=np.int64),
-        np.array([[0, 1, 2]], dtype=np.int64),
-        np.array([[0, 20]], dtype=np.int64),
-        np.array([[-1, 2], [3, 4]], dtype=np.int64),
+        (None, "needs pairs"),
+        (np.array([[0, 1, 2]], dtype=np.int64), r"shape \(m, 2\)"),
+        (np.array([[0, 1]], dtype=np.int64), "at least 2 pairs"),
+        (np.array([[0, 20], [2, 3]], dtype=np.int64), "index the rows"),
+        (np.array([[-1, 2], [3, 4]], dtype=np.int64), "index the rows"),
     ],
-    ids=["one-dimensional", "three-columns", "out-of-range", "negative"],
+    ids=["missing", "wrong-shape", "single-pair", "out-of-range", "negative"],
 )
-def test_pairs_must_be_valid_row_indices(pairs: NDArray[np.int64]) -> None:
+def test_pairs_must_be_valid_row_indices(
+    pairs: NDArray[np.int64] | None, message: str
+) -> None:
     h, _, _ = make_blobs(10, seed=21)
 
-    with pytest.raises(ValueError, match="pairs"):
+    with pytest.raises(ValueError, match=message):
         fit_direction("pca_diff", h, pairs=pairs)
-
-
-def test_pca_diff_needs_two_pairs() -> None:
-    h, _, _ = make_blobs(10, seed=22)
-
-    with pytest.raises(ValueError, match="at least 2"):
-        fit_direction("pca_diff", h, pairs=np.array([[0, 1]], dtype=np.int64))
 
 
 @pytest.mark.parametrize(
@@ -384,3 +373,29 @@ def test_a_zero_length_direction_is_an_error(method: Method) -> None:
 
     with pytest.raises(ValueError, match="zero norm"):
         fit_direction(method, h, labels=labels)
+
+
+def test_pca_raw_rejects_identical_rows() -> None:
+    h = np.tile(np.array([1.0, 2.0, 3.0]), (3, 1))
+
+    with pytest.raises(ValueError, match="zero norm"):
+        fit_direction("pca_raw", h)
+
+
+def test_pca_diff_rejects_identical_differences_after_centering() -> None:
+    rng = np.random.default_rng(24)
+    h = np.empty((8, 5))
+    h[1::2] = rng.standard_normal((4, 5))
+    h[0::2] = h[1::2] + np.array([1.0, -2.0, 0.5, 3.0, 0.1])
+    pairs = np.array([[0, 1], [2, 3], [4, 5], [6, 7]], dtype=np.int64)
+
+    with pytest.raises(ValueError, match="zero norm"):
+        fit_direction("pca_diff", h, pairs=pairs)
+
+
+def test_pca_diff_rejects_all_zero_differences_without_centering() -> None:
+    h = np.repeat(np.arange(8.0).reshape(4, 2), 2, axis=0)
+    pairs = np.array([[0, 1], [2, 3], [4, 5], [6, 7]], dtype=np.int64)
+
+    with pytest.raises(ValueError, match="zero norm"):
+        fit_direction("pca_diff", h, pairs=pairs, preprocess="none")
