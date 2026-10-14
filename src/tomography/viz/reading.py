@@ -89,7 +89,11 @@ def _check_inputs(
 
 def _legend_above(ax: Axes, n_series: int) -> None:
     fig = style.figure_of(ax)
-    budget = fig.bbox.width - LEGEND_MARGIN * fig.dpi
+    spec = ax.get_subplotspec()
+    share = (
+        1.0 if spec is None else len(spec.colspan) / spec.get_gridspec().ncols
+    )
+    budget = share * fig.bbox.width - LEGEND_MARGIN * fig.dpi
     for ncols in range(min(n_series, MAX_LEGEND_COLUMNS), 0, -1):
         legend = ax.legend(
             loc="lower left",
@@ -120,7 +124,7 @@ def plot_curves(
 
     Series take the categorical hues in order and a band at 10% opacity. A
     legend above the plot names two or more series, in as many columns as fit
-    the figure width; it replaces end labels because layer curves converge
+    the panel width; it replaces end labels because layer curves converge
     and would collide. The chance label sits in the right margin for the
     same reason.
 

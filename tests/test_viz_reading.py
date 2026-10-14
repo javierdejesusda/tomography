@@ -216,6 +216,23 @@ def test_the_legend_wraps_to_fit_the_default_figure(
     assert len(starts) == columns
 
 
+def test_the_legend_fits_its_panel_in_a_shared_figure() -> None:
+    fig, axes = style.new_figure(1, 2, width=style.TEXT_WIDTH)
+    labels = ["GPT-2 small", "GPT-2 medium", "GPT-2 large", "GPT-2 XL"]
+
+    for ax in (axes[0, 0], axes[0, 1]):
+        reading.plot_curves(make_curves(n_series=4), series=labels, ax=ax)
+
+    fig.canvas.draw()
+    for ax in (axes[0, 0], axes[0, 1]):
+        legend = ax.get_legend()
+        assert legend is not None
+        box = legend.get_window_extent()
+        assert box.x0 >= 0
+        assert box.x1 <= fig.bbox.width
+        assert ax.get_window_extent().width >= 0.3 * fig.bbox.width
+
+
 def test_a_single_series_gets_no_legend() -> None:
     fig = reading.plot_curves(make_curves(n_series=1), series=["a"])
 
