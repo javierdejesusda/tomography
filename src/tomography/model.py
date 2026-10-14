@@ -88,6 +88,17 @@ ARCHS: Mapping[str, ArchSpec] = MappingProxyType(
             lora_fan_in_fan_out=True,
             default_bos="prepend",
         ),
+        "qwen3": ArchSpec(
+            model_type="qwen3",
+            blocks_path="model.layers",
+            final_norm_path="model.norm",
+            embed_paths=("model.embed_tokens",),
+            lora_targets=("q_proj", "v_proj"),
+            lora_fan_in_fan_out=False,
+            # The BOS probe in tests/test_models_slow.py: without BOS the first
+            # token is the sink; a prepended separator takes the role over.
+            default_bos="prepend",
+        ),
     }
 )
 
@@ -102,6 +113,21 @@ def _gpt2(key: str, revision: str, dtype: str) -> CheckpointSpec:
         license="Modified MIT",
         dtype=dtype,
         chat_format="plain",
+    )
+
+
+def _qwen3(
+    key: str, repo_id: str, revision: str, post_trained: bool
+) -> CheckpointSpec:
+    return CheckpointSpec(
+        key=key,
+        repo_id=repo_id,
+        revision=revision,
+        arch="qwen3",
+        post_trained=post_trained,
+        license="Apache-2.0",
+        dtype="bfloat16",
+        chat_format="template" if post_trained else "plain",
     )
 
 
@@ -126,6 +152,30 @@ MODELS: Mapping[str, CheckpointSpec] = MappingProxyType(
                 "gpt2-xl",
                 "15ea56dee5df4983c59b2538573817e1667135e2",
                 "float16",
+            ),
+            _qwen3(
+                "qwen3-1.7b-base",
+                "Qwen/Qwen3-1.7B-Base",
+                "ea980cb0a6c2ae4b936e82123acc929f1cec04c1",
+                post_trained=False,
+            ),
+            _qwen3(
+                "qwen3-1.7b",
+                "Qwen/Qwen3-1.7B",
+                "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+                post_trained=True,
+            ),
+            _qwen3(
+                "qwen3-0.6b-base",
+                "Qwen/Qwen3-0.6B-Base",
+                "da87bfb608c14b7cf20ba1ce41287e8de496c0cd",
+                post_trained=False,
+            ),
+            _qwen3(
+                "qwen3-0.6b",
+                "Qwen/Qwen3-0.6B",
+                "c1899de289a04d12100db370d81485cdf75e47ca",
+                post_trained=True,
             ),
         )
     }
@@ -314,13 +364,16 @@ def wrap_model(
         checkpoint: The pinned checkpoint `model` was loaded from, if any.
 
     Returns:
-        The wrapped model; `model` is put in eval mode.
+        The wrapped model; `model` is put in eval mode. Its `default_bos`
+        is `none` for template-chat checkpoints (the chat template carries
+        its own special tokens) and the architecture's policy otherwise.
 
     Raises:
         UnsupportedArchitectureError: If `config.model_type` is not in
             `ARCHS`.
-        ValueError: If the tokenizer is not fast, the block path is not a
-            `ModuleList`, or no pad id can be derived.
+        ValueError: If the checkpoint belongs to another architecture, the
+            tokenizer is not fast, the block path is not a `ModuleList`, or
+            no pad id can be derived.
     """
     model_type = model.config.model_type
     spec = ARCHS.get(model_type)
@@ -328,6 +381,11 @@ def wrap_model(
         raise UnsupportedArchitectureError(
             f"Unsupported architecture {model_type!r}; "
             f"registered: {sorted(ARCHS)}"
+        )
+    if checkpoint is not None and checkpoint.arch != spec.model_type:
+        raise ValueError(
+            f"Checkpoint {checkpoint.key!r} has arch {checkpoint.arch!r} "
+            f"but the model is {spec.model_type!r}"
         )
     if not tokenizer.is_fast:
         raise ValueError(
@@ -340,6 +398,7 @@ def wrap_model(
     bos_id = model.config.bos_token_id
     if bos_id is None:
         bos_id = tokenizer.bos_token_id
+    templated = checkpoint is not None and checkpoint.chat_format == "template"
     return LoadedModel(
         model=model,
         tokenizer=tokenizer,
@@ -354,7 +413,7 @@ def wrap_model(
         decoder=model.get_submodule(spec.blocks_path.rpartition(".")[0]),
         blocks=blocks,
         final_norm=model.get_submodule(spec.final_norm_path),
-        default_bos=spec.default_bos,
+        default_bos="none" if templated else spec.default_bos,
     )
 
 
