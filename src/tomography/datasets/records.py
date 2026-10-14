@@ -8,9 +8,15 @@ import hashlib
 import json
 import math
 from typing import Literal
+from typing import get_args
 
 Split = Literal["train", "val", "test"]
 MetaValue = str | int | float | None
+
+
+def _check_split(uid: str, split: str) -> None:
+    if split not in get_args(Split):
+        raise ValueError(f"{uid}: unknown split {split!r}")
 
 
 @dataclass(frozen=True)
@@ -25,6 +31,9 @@ class Example:
             pleasant, acceptable, positive sentiment), else 0 or a class id.
         split: Held-out split this example belongs to.
         meta: Extra per-example fields (for example "question").
+
+    Raises:
+        ValueError: If `split` is not "train", "val" or "test".
     """
 
     uid: str
@@ -32,6 +41,10 @@ class Example:
     label: int
     split: Split
     meta: Mapping[str, MetaValue] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Validates the split."""
+        _check_split(self.uid, self.split)
 
 
 @dataclass(frozen=True)
@@ -45,6 +58,10 @@ class ChoiceExample:
         correct: Index into `choices` of the correct choice.
         split: Held-out split this item belongs to.
         meta: Extra per-item fields.
+
+    Raises:
+        ValueError: If `correct` is not an index into `choices` or `split` is
+            not "train", "val" or "test".
     """
 
     uid: str
@@ -54,6 +71,15 @@ class ChoiceExample:
     split: Split
     meta: Mapping[str, MetaValue] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Validates the split and the correct index."""
+        _check_split(self.uid, self.split)
+        if not 0 <= self.correct < len(self.choices):
+            raise ValueError(
+                f"{self.uid}: correct index {self.correct} is outside "
+                f"{len(self.choices)} choices"
+            )
+
     def flatten(self) -> list[Example]:
         """Turns the item into one `Example` per choice.
 
@@ -61,15 +87,7 @@ class ChoiceExample:
             One example per choice with uid "<uid>:<i>", the choice as text,
             label 1 only for the correct choice, and `meta` holding the item
             meta plus "group" (the item uid) and "question".
-
-        Raises:
-            ValueError: If `correct` is not an index into `choices`.
         """
-        if not 0 <= self.correct < len(self.choices):
-            raise ValueError(
-                f"{self.uid}: correct index {self.correct} is outside "
-                f"{len(self.choices)} choices"
-            )
         meta = {**self.meta, "group": self.uid, "question": self.question}
         return [
             Example(
@@ -98,6 +116,9 @@ class QAExample:
             "unknowable_detail", "false_premise", "kuq:<category>" or "open".
         split: Held-out split this item belongs to.
         meta: Extra per-item fields (relation, subject, popularity, source).
+
+    Raises:
+        ValueError: If `split` is not "train", "val" or "test".
     """
 
     uid: str
@@ -106,6 +127,10 @@ class QAExample:
     kind: str
     split: Split
     meta: Mapping[str, MetaValue] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Validates the split."""
+        _check_split(self.uid, self.split)
 
 
 def assign_splits(
