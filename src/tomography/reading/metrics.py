@@ -1,5 +1,6 @@
 """Metrics for scoring readers: accuracy, AUROC and interval estimates."""
 
+from collections.abc import Sequence
 import statistics
 from typing import Any
 
@@ -154,6 +155,52 @@ def wilson_ci(
     lower = 0.0 if successes == 0 else float(center - half_width)
     upper = 1.0 if successes == trials else float(center + half_width)
     return lower, upper
+
+
+def best_layer(acc: FloatArray, layers: Sequence[int]) -> int:
+    """Picks the layer with the highest accuracy, the first one on ties.
+
+    Args:
+        acc: Accuracy per layer, shape (K,).
+        layers: The layer index of each entry of `acc`.
+
+    Returns:
+        The layer index (an element of `layers`, not a position).
+
+    Raises:
+        ValueError: If `acc` is not a non-empty vector without NaN, or its
+            length differs from `layers`.
+    """
+    values = np.asarray(acc, dtype=np.float64)
+    if values.ndim != 1 or values.shape[0] == 0:
+        raise ValueError(f"acc must be a non-empty vector, got {values.shape}")
+    if values.shape[0] != len(layers):
+        raise ValueError("acc and layers must have the same length")
+    if np.isnan(values).any():
+        raise ValueError("acc must not contain NaN")
+    return int(layers[int(np.argmax(values))])
+
+
+def cosine_matrix(vectors: FloatArray) -> NDArray[np.float64]:
+    """Computes all pairwise cosine similarities between row vectors.
+
+    Args:
+        vectors: Array of shape (m, d) without zero rows.
+
+    Returns:
+        Symmetric matrix of shape (m, m) with entries in [-1, 1].
+
+    Raises:
+        ValueError: If `vectors` is not a matrix or has a zero row.
+    """
+    rows = np.asarray(vectors, dtype=np.float64)
+    if rows.ndim != 2:
+        raise ValueError(f"vectors must have shape (m, d), got {rows.shape}")
+    norms = np.linalg.norm(rows, axis=1, keepdims=True)
+    if (norms == 0.0).any():
+        raise ValueError("vectors must not contain a zero vector")
+    unit = rows / norms
+    return np.clip(unit @ unit.T, -1.0, 1.0)
 
 
 def _check_alpha(alpha: float) -> None:
