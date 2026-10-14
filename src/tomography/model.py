@@ -88,6 +88,16 @@ ARCHS: Mapping[str, ArchSpec] = MappingProxyType(
             lora_fan_in_fan_out=True,
             default_bos="prepend",
         ),
+        "qwen3": ArchSpec(
+            model_type="qwen3",
+            blocks_path="model.layers",
+            final_norm_path="model.norm",
+            embed_paths=("model.embed_tokens",),
+            lora_targets=("q_proj", "v_proj"),
+            lora_fan_in_fan_out=False,
+            # Provisional: the BOS probe in tests/test_models_slow.py decides.
+            default_bos="none",
+        ),
     }
 )
 
@@ -102,6 +112,21 @@ def _gpt2(key: str, revision: str, dtype: str) -> CheckpointSpec:
         license="Modified MIT",
         dtype=dtype,
         chat_format="plain",
+    )
+
+
+def _qwen3(
+    key: str, repo_id: str, revision: str, post_trained: bool
+) -> CheckpointSpec:
+    return CheckpointSpec(
+        key=key,
+        repo_id=repo_id,
+        revision=revision,
+        arch="qwen3",
+        post_trained=post_trained,
+        license="Apache-2.0",
+        dtype="bfloat16",
+        chat_format="template" if post_trained else "plain",
     )
 
 
@@ -126,6 +151,30 @@ MODELS: Mapping[str, CheckpointSpec] = MappingProxyType(
                 "gpt2-xl",
                 "15ea56dee5df4983c59b2538573817e1667135e2",
                 "float16",
+            ),
+            _qwen3(
+                "qwen3-1.7b-base",
+                "Qwen/Qwen3-1.7B-Base",
+                "ea980cb0a6c2ae4b936e82123acc929f1cec04c1",
+                post_trained=False,
+            ),
+            _qwen3(
+                "qwen3-1.7b",
+                "Qwen/Qwen3-1.7B",
+                "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+                post_trained=True,
+            ),
+            _qwen3(
+                "qwen3-0.6b-base",
+                "Qwen/Qwen3-0.6B-Base",
+                "da87bfb608c14b7cf20ba1ce41287e8de496c0cd",
+                post_trained=False,
+            ),
+            _qwen3(
+                "qwen3-0.6b",
+                "Qwen/Qwen3-0.6B",
+                "c1899de289a04d12100db370d81485cdf75e47ca",
+                post_trained=True,
             ),
         )
     }

@@ -409,3 +409,101 @@ def test_load_model_loads_the_pinned_gpt2_on_cpu() -> None:
     assert loaded.bos_id == loaded.pad_id == 50256
     assert loaded.default_bos == "prepend"
     assert loaded.unembedding().shape == (50257, 768)
+
+
+QWEN3_PINS = {
+    "qwen3-1.7b-base": (
+        "Qwen/Qwen3-1.7B-Base",
+        "ea980cb0a6c2ae4b936e82123acc929f1cec04c1",
+        False,
+    ),
+    "qwen3-1.7b": (
+        "Qwen/Qwen3-1.7B",
+        "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+        True,
+    ),
+    "qwen3-0.6b-base": (
+        "Qwen/Qwen3-0.6B-Base",
+        "da87bfb608c14b7cf20ba1ce41287e8de496c0cd",
+        False,
+    ),
+    "qwen3-0.6b": (
+        "Qwen/Qwen3-0.6B",
+        "c1899de289a04d12100db370d81485cdf75e47ca",
+        True,
+    ),
+}
+
+
+def test_qwen3_arch_spec_declares_the_hf_layout() -> None:
+    assert ARCHS["qwen3"] == ArchSpec(
+        model_type="qwen3",
+        blocks_path="model.layers",
+        final_norm_path="model.norm",
+        embed_paths=("model.embed_tokens",),
+        lora_targets=("q_proj", "v_proj"),
+        lora_fan_in_fan_out=False,
+        default_bos="none",
+    )
+
+
+@pytest.mark.parametrize("key", sorted(QWEN3_PINS))
+def test_qwen3_checkpoints_are_pinned_to_full_commit_shas(key: str) -> None:
+    repo_id, revision, post_trained = QWEN3_PINS[key]
+
+    checkpoint = MODELS[key]
+
+    assert (checkpoint.repo_id, checkpoint.revision) == (repo_id, revision)
+    assert checkpoint.arch == "qwen3"
+    assert checkpoint.dtype == "bfloat16"
+    assert checkpoint.license == "Apache-2.0"
+    assert checkpoint.post_trained is post_trained
+    assert checkpoint.chat_format == ("template" if post_trained else "plain")
+
+
+def test_tiny_qwen3_follows_the_qwen3_layout_without_a_bos_token(
+    tiny_qwen3: LoadedModel,
+) -> None:
+    lm = tiny_qwen3
+    end_id = lm.tokenizer.convert_tokens_to_ids("<|endoftext|>")
+
+    assert lm.spec is ARCHS["qwen3"]
+    assert lm.checkpoint is None
+    assert (lm.n_layers, lm.d_model) == (3, 32)
+    assert lm.decoder is lm.model.model
+    assert lm.blocks is lm.model.model.layers
+    assert lm.final_norm is lm.model.model.norm
+    assert lm.tokenizer.bos_token is None
+    assert lm.bos_id == lm.pad_id == end_id
+    assert lm.default_bos == "none"
+    assert not lm.encode(["The fox"]).has_bos
+    assert lm.encode(["The fox"], bos="prepend").input_ids[0, 0] == end_id
+
+
+def test_tiny_qwen3_chat_template_renders_the_non_thinking_prompt(
+    tiny_qwen3: LoadedModel,
+) -> None:
+    prompt = tiny_qwen3.tokenizer.apply_chat_template(
+        [{"role": "user", "content": "hi"}],
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    )
+
+    assert prompt == (
+        "<|im_start|>user\nhi<|im_end|>\n"
+        "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    )
+
+
+def test_tiny_qwen3_keeps_chat_special_tokens_whole(
+    tiny_qwen3: LoadedModel,
+) -> None:
+    lm = tiny_qwen3
+    start = lm.tokenizer.convert_tokens_to_ids("<|im_start|>")
+    end = lm.tokenizer.convert_tokens_to_ids("<|im_end|>")
+
+    ids = lm.encode(["<|im_start|>user\nhi<|im_end|>"]).input_ids[0].tolist()
+
+    assert ids.count(start) == 1
+    assert ids.count(end) == 1
