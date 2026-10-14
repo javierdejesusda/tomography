@@ -65,6 +65,7 @@ def test_config_defaults_and_round_trip() -> None:
     config = Config()
     assert config.experiment == "r4"
     assert config.model == "gpt2"
+    assert config.method == "logistic"
     assert config.emotions == EMOTIONS
     assert config.embed_layers is None
     assert config.embed_points == 600
@@ -237,6 +238,21 @@ def test_execute_is_deterministic(
             np.testing.assert_array_equal(a[key], b[key])
 
 
+def test_the_default_direction_is_logistic_and_pca_diff_stays_selectable(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(emotions=("anger", "fear"))
+    pca = dataclasses.replace(config, method="pca_diff")
+    default_dir = RunDir.create(config, out_root=tmp_path / "default")
+    pca_dir = RunDir.create(pca, out_root=tmp_path / "pca")
+    execute(config, default_dir, tiny_arch, _scenarios())
+    execute(pca, pca_dir, tiny_arch, _scenarios())
+    default = default_dir.read_arrays("matrix")["values"]
+    chosen = pca_dir.read_arrays("matrix")["values"]
+    assert default.shape == chosen.shape
+    assert not np.allclose(default, chosen)
+
+
 def test_plot_writes_every_figure_in_three_formats(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
@@ -278,7 +294,7 @@ def test_run_loads_the_model_and_the_scenarios(
 
 @pytest.mark.slow
 def test_r4_on_gpt2_reads_emotions_above_the_floor(tmp_path: Path) -> None:
-    config = Config(n_seeds=3, n_pairs=32, n_eval_pairs=64, embed_points=300)
+    config = Config(n_seeds=3, n_pairs=32, embed_points=300)
     run_dir = RunDir.create(config, out_root=tmp_path)
     execute(
         config,
