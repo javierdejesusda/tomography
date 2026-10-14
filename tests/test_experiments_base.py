@@ -565,6 +565,15 @@ def test_figure_path_points_into_the_figures_folder(tmp_path: Path) -> None:
     assert path.parent.is_dir()
 
 
+def test_figure_path_accepts_the_ext_keyword(tmp_path: Path) -> None:
+    run = _new_run(tmp_path)
+
+    path = run.figure_path("curves", ext="pdf")
+
+    assert path == run.path / "figures" / "curves.pdf"
+    assert path.parent.is_dir()
+
+
 @pytest.mark.parametrize(
     ("name", "extension", "label"),
     [

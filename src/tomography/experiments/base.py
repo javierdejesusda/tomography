@@ -565,24 +565,24 @@ class RunDir:
                 key: archive[key] for key in archive.files if key != "_meta"
             }
 
-    def figure_path(self, name: str, extension: str) -> Path:
-        """Returns `<run>/figures/<name>.<extension>`, creating the folder.
+    def figure_path(self, name: str, ext: str) -> Path:
+        """Returns `<run>/figures/<name>.<ext>`, creating the folder.
 
         Args:
             name: File stem of the figure.
-            extension: File extension without the dot, such as "pdf".
+            ext: File extension without the dot, such as "pdf".
 
         Returns:
             The path, not yet written.
 
         Raises:
-            ValueError: If `name` or `extension` is not usable.
+            ValueError: If `name` or `ext` is not usable.
         """
         _check_path_part("name", name, _SAFE_NAME)
-        _check_path_part("extension", extension, _EXTENSION)
+        _check_path_part("extension", ext, _EXTENSION)
         folder = self.path / "figures"
         folder.mkdir(exist_ok=True)
-        return folder / f"{name}.{extension}"
+        return folder / f"{name}.{ext}"
 
     def finalize(self) -> None:
         """Stamps `finished_at` in `meta.json` after a successful run."""
