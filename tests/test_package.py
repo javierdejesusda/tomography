@@ -25,5 +25,7 @@ def test_package_has_py_typed_marker() -> None:
     "subpackage",
     ["datasets", "reading", "control", "experiments", "viz"],
 )
-def test_subpackage_imports(subpackage: str) -> None:
-    importlib.import_module(f"tomography.{subpackage}")
+def test_subpackage_is_a_regular_package(subpackage: str) -> None:
+    module = importlib.import_module(f"tomography.{subpackage}")
+
+    assert module.__file__ is not None
