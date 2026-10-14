@@ -827,10 +827,12 @@ def test_load_judge_rejects_an_unknown_key_before_any_download(
         judges.load_judge("nonsense")
 
 
-def test_load_judge_pins_the_revision_and_disables_safetensors_conversion(
+@pytest.fixture
+def fake_hub(
     monkeypatch: pytest.MonkeyPatch,
     judge_tokenizer: PreTrainedTokenizerFast,
-) -> None:
+) -> dict[str, object]:
+    """Replaces the Hub loaders with tiny stand-ins that record their calls."""
     monkeypatch.setenv("DISABLE_SAFETENSORS_CONVERSION", "0")
     monkeypatch.delenv("DISABLE_SAFETENSORS_CONVERSION")
     monkeypatch.setattr(hub_constants, "HF_HUB_DISABLE_SYMLINKS_WARNING", False)
@@ -855,18 +857,34 @@ def test_load_judge_pins_the_revision_and_disables_safetensors_conversion(
         "AutoModelForSequenceClassification",
         SimpleNamespace(from_pretrained=fake_model),
     )
+    return seen
 
+
+def test_load_judge_pins_the_revision_and_disables_safetensors_conversion(
+    fake_hub: dict[str, object],
+) -> None:
     judge = judges.load_judge("sentiment-primary", device="cpu")
 
     spec = judges.JUDGES["sentiment-primary"]
     expected = (spec.repo_id, {"revision": spec.revision})
-    assert seen["tokenizer"] == expected
-    assert seen["model"] == expected
-    assert seen["conversion"] == "1"
-    assert seen["symlinks"] is True
+    assert fake_hub["tokenizer"] == expected
+    assert fake_hub["model"] == expected
+    assert fake_hub["conversion"] == "1"
+    assert fake_hub["symlinks"] is True
     assert judge.spec is spec
     assert judge.model.device == torch.device("cpu")
     assert not judge.model.training
+
+
+def test_load_judge_falls_back_to_the_cpu_without_cuda(
+    fake_hub: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    judge = judges.load_judge("sentiment-secondary")
+
+    assert judge.model.device.type == "cpu"
+    assert fake_hub["model"] is not None
 
 
 def test_sentiment_accuracy_thresholds_the_positive_probability() -> None:
@@ -986,3 +1004,84 @@ def test_agreement_rejects_invalid_inputs(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         judges.judge_agreement(first, second)
+
+
+POSITIVE_TEXTS = [
+    "A wonderful, moving film with a brilliant cast.",
+    "I loved every minute of it, a true delight from start to finish.",
+    "The food was delicious and the staff were warm and attentive.",
+    "What a charming and heartwarming story.",
+]
+NEGATIVE_TEXTS = [
+    "A dull, lifeless film with a wooden cast.",
+    "I hated every minute of it, a tedious mess from start to finish.",
+    "The food was cold and the staff were rude and slow.",
+    "What a bleak and joyless story.",
+]
+EMOTION_TEXTS = {
+    "happiness": (
+        "I am so happy and delighted, this is the best day of my life!"
+    ),
+    "sadness": "I feel heartbroken and alone, I cannot stop crying.",
+    "anger": (
+        "I am furious, this is an outrage and I am sick of being lied to!"
+    ),
+    "fear": "I am terrified, something is creeping up behind me in the dark.",
+    "disgust": (
+        "That is revolting, the smell of rotten food makes me want to retch."
+    ),
+    "surprise": "Wow, I never saw that coming, what a shocking twist!",
+}
+SENTIMENT_KEYS = ["sentiment-primary", "sentiment-secondary"]
+EMOTION_KEYS = ["emotion-primary", "emotion-secondary"]
+
+
+@pytest.fixture(scope="module", params=SENTIMENT_KEYS, ids=SENTIMENT_KEYS)
+def pinned_sentiment_judge(request: pytest.FixtureRequest) -> judges.Judge:
+    return judges.load_judge(request.param, device="cpu")
+
+
+@pytest.fixture(scope="module", params=EMOTION_KEYS, ids=EMOTION_KEYS)
+def pinned_emotion_judge(request: pytest.FixtureRequest) -> judges.Judge:
+    return judges.load_judge(request.param, device="cpu")
+
+
+@pytest.mark.network
+def test_pinned_sentiment_judges_separate_clear_examples(
+    pinned_sentiment_judge: judges.Judge,
+) -> None:
+    texts = POSITIVE_TEXTS + NEGATIVE_TEXTS
+    labels = [1] * len(POSITIVE_TEXTS) + [0] * len(NEGATIVE_TEXTS)
+
+    accuracy = judges.validate_sentiment_judge(
+        pinned_sentiment_judge, texts, labels, batch_size=4
+    )
+
+    assert accuracy == 1.0
+
+
+@pytest.mark.network
+def test_pinned_sentiment_judges_agree_on_clear_examples() -> None:
+    texts = POSITIVE_TEXTS + NEGATIVE_TEXTS
+    scores = [
+        judges.load_judge(key, device="cpu").score(texts)
+        for key in SENTIMENT_KEYS
+    ]
+
+    agreement = judges.judge_agreement(scores[0], scores[1])
+
+    assert agreement.rate == 1.0
+    assert agreement.kappa == 1.0
+
+
+@pytest.mark.network
+def test_pinned_emotion_judges_name_the_clear_emotion(
+    pinned_emotion_judge: judges.Judge,
+) -> None:
+    texts = [EMOTION_TEXTS[name] for name in judges.EMOTIONS]
+
+    scores = pinned_emotion_judge.score(texts, batch_size=3)
+
+    assert scores.shape == (len(judges.EMOTIONS), len(judges.EMOTIONS))
+    assert ((scores >= 0.0) & (scores <= 1.0)).all()
+    assert scores.argmax(axis=1).tolist() == list(range(len(judges.EMOTIONS)))
