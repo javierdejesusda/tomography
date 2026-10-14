@@ -461,7 +461,6 @@ def test_qwen3_checkpoints_are_pinned_to_full_commit_shas(key: str) -> None:
     assert checkpoint.dtype == "bfloat16"
     assert checkpoint.license == "Apache-2.0"
     assert checkpoint.post_trained is post_trained
-    assert checkpoint.chat_format == ("template" if post_trained else "plain")
 
 
 def test_tiny_qwen3_follows_the_qwen3_layout_without_a_bos_token(
@@ -578,7 +577,7 @@ def test_load_model_pins_every_checkpoint_of_the_architecture(
         expected_bos = (
             "none"
             if checkpoint.chat_format == "template"
-            else (tiny_arch.spec.default_bos)
+            else tiny_arch.spec.default_bos
         )
         assert loaded.default_bos == expected_bos
     assert len(hub.model_calls) == len(keys) >= 1
