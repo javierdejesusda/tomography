@@ -2,17 +2,47 @@
 
 from collections.abc import Callable
 from collections.abc import Mapping
+import copy
 import dataclasses
+import datetime
 import hashlib
+import importlib.metadata
 import json
+import math
+import os
+from pathlib import Path
+import platform
 import random
+import re
+import subprocess
+import tempfile
 import types
 import typing
 from typing import Any
+from typing import BinaryIO
 from typing import Literal
 from typing import Self
 
 import numpy as np
+from numpy.typing import NDArray
+
+_EXPERIMENT_ID = re.compile(r"[a-z][a-z0-9]*")
+_SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+_EXTENSION = re.compile(r"[a-z0-9]+")
+# Folder whose git state is recorded in the metadata of every run.
+_SOURCE_DIR = Path(__file__).resolve().parent
+_LIBRARIES = (
+    "torch",
+    "transformers",
+    "numpy",
+    "scikit-learn",
+    "datasets",
+    "peft",
+    "matplotlib",
+    "plotly",
+)
+_RESERVED_NAMES = frozenset({"config", "meta"})
+_RESERVED_ARRAY_NAMES = frozenset({"_meta", "file", "allow_pickle"})
 
 
 class _TypeMismatchError(Exception):
@@ -203,3 +233,335 @@ def seed_everything(seed: int) -> np.random.Generator:
     np.random.seed(seed)
     torch.manual_seed(seed)
     return np.random.default_rng(seed)
+
+
+def _check_path_part(label: str, value: str, pattern: re.Pattern[str]) -> None:
+    if not pattern.fullmatch(value):
+        raise ValueError(
+            f"{label} {value!r} is not usable in a path "
+            f"(expected {pattern.pattern})"
+        )
+
+
+def _now() -> str:
+    return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+
+
+def _git(args: list[str], cwd: Path) -> str | None:
+    """Returns the stdout of a git command, or None if it cannot run."""
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return completed.stdout.strip() if completed.returncode == 0 else None
+
+
+def _git_state(cwd: Path) -> tuple[str | None, bool | None]:
+    """Returns the HEAD commit and whether tracked files differ from it.
+
+    Untracked files are ignored, so result folders that are not committed yet
+    do not mark the code as dirty. Both values are None outside a repository.
+    """
+    sha = _git(["rev-parse", "HEAD"], cwd)
+    if sha is None:
+        return None, None
+    status = _git(["status", "--porcelain", "--untracked-files=no"], cwd)
+    return sha, None if status is None else bool(status)
+
+
+def _device_name() -> str:
+    # Imported here so that reading results never pays for importing torch.
+    import torch
+
+    if torch.cuda.is_available():
+        return f"cuda:0 ({torch.cuda.get_device_name(0)})"
+    return "cpu"
+
+
+def _library_versions() -> dict[str, str]:
+    versions = {"python": platform.python_version()}
+    for name in ("tomography", *_LIBRARIES):
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    return versions
+
+
+def _atomic_write(path: Path, write: Callable[[BinaryIO], object]) -> None:
+    """Writes a file so that readers see the old or the new content only.
+
+    Args:
+        path: Destination file.
+        write: Called with a binary handle of a temporary file that sits next
+            to `path`; the file replaces `path` only if `write` succeeds.
+    """
+    descriptor, temp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            write(handle)
+        os.replace(temp_path, path)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def _to_jsonable(value: object) -> object:
+    """Converts NumPy values and tuples, mapping non-finite floats to None."""
+    if isinstance(value, np.ndarray):
+        return _to_jsonable(value.tolist())
+    if isinstance(value, np.generic):
+        return _to_jsonable(value.item())
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, Mapping):
+        return {key: _to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_to_jsonable(item) for item in value]
+    return value
+
+
+def _atomic_write_json(path: Path, value: object) -> None:
+    text = json.dumps(value, indent=2, allow_nan=False)
+    data = f"{text}\n".encode()
+    _atomic_write(path, lambda handle: handle.write(data))
+
+
+class RunDir:
+    """One run's directory: `<out_root>/<experiment>/<model>/<config_hash>/`.
+
+    Use `create` to start a run and `open` to read a finished one.
+
+    Attributes:
+        path: The run directory.
+    """
+
+    def __init__(
+        self, path: Path, config: dict[str, Any], meta: dict[str, Any]
+    ) -> None:
+        """Wraps an existing directory; prefer `create` and `open`.
+
+        Args:
+            path: The run directory.
+            config: The run's config as JSON values.
+            meta: The run's metadata.
+        """
+        self.path = path
+        self._config = config
+        self._meta = meta
+
+    @property
+    def config(self) -> dict[str, Any]:
+        """The run's config as JSON values (a copy)."""
+        return copy.deepcopy(self._config)
+
+    @property
+    def meta(self) -> dict[str, Any]:
+        """The run's metadata, as stored in `meta.json` (a copy)."""
+        return copy.deepcopy(self._meta)
+
+    @classmethod
+    def create(
+        cls,
+        config: ExperimentConfig,
+        *,
+        out_root: str | Path = "results",
+        exist_ok: bool = False,
+    ) -> Self:
+        """Creates the run directory with its config and metadata files.
+
+        Args:
+            config: The experiment configuration.
+            out_root: Root folder of all runs.
+            exist_ok: Whether an existing directory of the same config may be
+                reused. Its metadata is then rewritten for the new run.
+
+        Returns:
+            The new run directory.
+
+        Raises:
+            ValueError: If the experiment id or the model key cannot be used
+                as a path part.
+            FileExistsError: If the directory exists and `exist_ok` is false.
+        """
+        _check_path_part("experiment", config.experiment, _EXPERIMENT_ID)
+        _check_path_part("model", config.model, _SAFE_NAME)
+        config_hash = config.config_hash()
+        path = Path(out_root) / config.experiment / config.model / config_hash
+        path.mkdir(parents=True, exist_ok=exist_ok)
+        config_data = config.to_dict()
+        git_sha, git_dirty = _git_state(_SOURCE_DIR)
+        meta: dict[str, Any] = {
+            "experiment": config.experiment,
+            "config_hash": config_hash,
+            "seed": config.seed,
+            "git_sha": git_sha,
+            "git_dirty": git_dirty,
+            "device": _device_name(),
+            "platform": platform.platform(),
+            "versions": _library_versions(),
+            "started_at": _now(),
+            "finished_at": None,
+        }
+        _atomic_write_json(path / "config.json", config_data)
+        _atomic_write_json(path / "meta.json", meta)
+        return cls(path, config_data, meta)
+
+    @classmethod
+    def open(cls, path: str | Path) -> Self:
+        """Opens an existing run directory.
+
+        Args:
+            path: A directory written by `create`.
+
+        Returns:
+            The run directory.
+
+        Raises:
+            ValueError: If `path` has no `config.json` and `meta.json`.
+        """
+        directory = Path(path)
+        config_file = directory / "config.json"
+        meta_file = directory / "meta.json"
+        if not (config_file.is_file() and meta_file.is_file()):
+            raise ValueError(f"not a run directory: {directory}")
+        return cls(
+            directory,
+            json.loads(config_file.read_text("utf-8")),
+            json.loads(meta_file.read_text("utf-8")),
+        )
+
+    def _file(self, name: str, extension: str) -> Path:
+        _check_path_part("name", name, _SAFE_NAME)
+        if name in _RESERVED_NAMES:
+            raise ValueError(f"name {name!r} is reserved")
+        return self.path / f"{name}.{extension}"
+
+    def write_json(self, name: str, payload: object) -> Path:
+        """Writes `<name>.json` atomically with the run metadata embedded.
+
+        The file holds `{"_meta": <meta and config>, "data": <payload>}`.
+        NumPy scalars and arrays become JSON numbers and lists, and
+        non-finite floats become null.
+
+        Args:
+            name: File stem. It must be a plain name, not `config` or `meta`.
+            payload: The JSON-serializable result.
+
+        Returns:
+            The path of the file.
+
+        Raises:
+            ValueError: If `name` is not usable.
+            TypeError: If `payload` holds a value JSON cannot represent.
+        """
+        path = self._file(name, "json")
+        document = {
+            "_meta": {**self._meta, "config": self._config},
+            "data": _to_jsonable(payload),
+        }
+        _atomic_write_json(path, document)
+        return path
+
+    def read_json(self, name: str) -> object:
+        """Reads the payload of `<name>.json`, without the metadata.
+
+        Args:
+            name: File stem given to `write_json`.
+
+        Returns:
+            The payload.
+
+        Raises:
+            ValueError: If the file has no embedded metadata.
+        """
+        document = json.loads(self._file(name, "json").read_text("utf-8"))
+        if not (
+            isinstance(document, dict)
+            and "_meta" in document
+            and "data" in document
+        ):
+            raise ValueError(f"{name}.json has no embedded metadata")
+        return document["data"]
+
+    def write_arrays(self, name: str, **arrays: NDArray[Any]) -> Path:
+        """Writes `<name>.npz` atomically with the run metadata embedded.
+
+        The metadata is stored as the 0-d unicode array `_meta` holding JSON.
+
+        Args:
+            name: File stem. It must be a plain name, not `config` or `meta`.
+            **arrays: The arrays to store, by key.
+
+        Returns:
+            The path of the file.
+
+        Raises:
+            ValueError: If `name` or a key is not usable, or an array needs
+                pickling (object dtype).
+        """
+        path = self._file(name, "npz")
+        reserved = sorted(_RESERVED_ARRAY_NAMES.intersection(arrays))
+        if reserved:
+            raise ValueError(f"reserved array names: {reserved}")
+        marker = np.array(json.dumps({**self._meta, "config": self._config}))
+        _atomic_write(
+            path,
+            lambda handle: np.savez(
+                handle, allow_pickle=False, _meta=marker, **arrays
+            ),
+        )
+        return path
+
+    def read_arrays(self, name: str) -> dict[str, NDArray[Any]]:
+        """Reads the arrays of `<name>.npz`, without the metadata.
+
+        Args:
+            name: File stem given to `write_arrays`.
+
+        Returns:
+            The arrays by key.
+
+        Raises:
+            ValueError: If the file has no embedded metadata.
+        """
+        with np.load(self._file(name, "npz"), allow_pickle=False) as archive:
+            if "_meta" not in archive.files:
+                raise ValueError(f"{name}.npz has no embedded metadata")
+            return {
+                key: archive[key] for key in archive.files if key != "_meta"
+            }
+
+    def figure_path(self, name: str, extension: str) -> Path:
+        """Returns `<run>/figures/<name>.<extension>`, creating the folder.
+
+        Args:
+            name: File stem of the figure.
+            extension: File extension without the dot, such as "pdf".
+
+        Returns:
+            The path, not yet written.
+
+        Raises:
+            ValueError: If `name` or `extension` is not usable.
+        """
+        _check_path_part("name", name, _SAFE_NAME)
+        _check_path_part("extension", extension, _EXTENSION)
+        folder = self.path / "figures"
+        folder.mkdir(exist_ok=True)
+        return folder / f"{name}.{extension}"
+
+    def finalize(self) -> None:
+        """Stamps `finished_at` in `meta.json` after a successful run."""
+        self._meta["finished_at"] = _now()
+        _atomic_write_json(self.path / "meta.json", self._meta)

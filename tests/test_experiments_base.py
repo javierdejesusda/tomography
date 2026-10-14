@@ -1,14 +1,23 @@
 import dataclasses
+import datetime
 import hashlib
+import importlib.metadata
 import json
+import os
+from pathlib import Path
+import platform
 import random
+import subprocess
 from typing import Literal
 
 import numpy as np
 import pytest
 import torch
 
+import tomography
+import tomography.experiments.base as experiments_base
 from tomography.experiments.base import ExperimentConfig
+from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.base import seed_everything
 
@@ -211,3 +220,495 @@ def test_seed_everything_seeds_every_global_source() -> None:
 def test_seed_everything_rejects_seeds_outside_uint32(seed: int) -> None:
     with pytest.raises(ValueError, match="seed"):
         seed_everything(seed)
+
+
+META_KEYS = {
+    "experiment",
+    "config_hash",
+    "seed",
+    "git_sha",
+    "git_dirty",
+    "device",
+    "platform",
+    "versions",
+    "started_at",
+    "finished_at",
+}
+
+
+def test_create_makes_the_directory_named_by_the_config(
+    tmp_path: Path,
+) -> None:
+    config = _Config(seed=3)
+
+    run = RunDir.create(config, out_root=tmp_path)
+
+    assert run.path == tmp_path / "t1" / "gpt2" / config.config_hash()
+    assert run.path.is_dir()
+
+
+def test_create_writes_the_config_and_meta_files(tmp_path: Path) -> None:
+    config = _Config(seed=3)
+
+    run = RunDir.create(config, out_root=tmp_path)
+
+    stored = json.loads((run.path / "config.json").read_text("utf-8"))
+    meta = json.loads((run.path / "meta.json").read_text("utf-8"))
+    assert stored == config.to_dict()
+    assert set(meta) == META_KEYS
+    assert meta["experiment"] == "t1"
+    assert meta["config_hash"] == config.config_hash()
+    assert meta["seed"] == 3
+    assert meta["finished_at"] is None
+
+
+def test_create_refuses_an_existing_directory_unless_exist_ok(
+    tmp_path: Path,
+) -> None:
+    config = _Config()
+    RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(FileExistsError):
+        RunDir.create(config, out_root=tmp_path)
+
+    again = RunDir.create(config, out_root=tmp_path, exist_ok=True)
+    assert again.path.is_dir()
+
+
+@pytest.mark.parametrize(
+    ("experiment", "model"),
+    [
+        ("../x", "gpt2"),
+        ("a/b", "gpt2"),
+        ("R1", "gpt2"),
+        ("", "gpt2"),
+        ("t1", "../../x"),
+        ("t1", "a\\b"),
+        ("t1", ""),
+        ("t1", ".hidden"),
+    ],
+    ids=[
+        "experiment-parent",
+        "experiment-slash",
+        "experiment-uppercase",
+        "experiment-empty",
+        "model-parent",
+        "model-backslash",
+        "model-empty",
+        "model-dot",
+    ],
+)
+def test_create_rejects_ids_that_are_not_safe_path_parts(
+    tmp_path: Path, experiment: str, model: str
+) -> None:
+    config = _Config(experiment=experiment, model=model)
+
+    with pytest.raises(ValueError, match=r"experiment|model"):
+        RunDir.create(config, out_root=tmp_path / "out")
+
+    assert not (tmp_path / "out").exists()
+
+
+def test_create_defaults_to_results_under_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    run = RunDir.create(_Config())
+
+    assert run.path.resolve().is_relative_to(tmp_path.resolve() / "results")
+
+
+def test_open_returns_the_run_with_its_config_and_meta(
+    tmp_path: Path,
+) -> None:
+    config = _Config(layers=(1, 2))
+    created = RunDir.create(config, out_root=tmp_path)
+
+    opened = RunDir.open(created.path)
+
+    assert opened.path == created.path
+    assert opened.config == config.to_dict()
+    assert opened.meta == created.meta
+
+
+def test_open_rejects_a_directory_that_is_not_a_run(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="run directory"):
+        RunDir.open(tmp_path)
+
+
+def _new_run(tmp_path: Path, *, seed: int = 0) -> RunDir:
+    return RunDir.create(_Config(seed=seed), out_root=tmp_path)
+
+
+def test_write_json_embeds_the_meta_and_config(tmp_path: Path) -> None:
+    run = _new_run(tmp_path, seed=2)
+
+    path = run.write_json("curves", {"series": ["a"], "chance": 0.5})
+
+    document = json.loads(path.read_text("utf-8"))
+    assert path == run.path / "curves.json"
+    assert document["data"] == {"series": ["a"], "chance": 0.5}
+    assert document["_meta"] == {**run.meta, "config": run.config}
+
+
+def test_read_json_returns_the_payload_without_metadata(
+    tmp_path: Path,
+) -> None:
+    run = _new_run(tmp_path)
+    run.write_json("table", {"columns": ["x"], "rows": [[1], [2]]})
+
+    assert run.read_json("table") == {"columns": ["x"], "rows": [[1], [2]]}
+
+
+def test_write_json_turns_non_finite_floats_into_null(
+    tmp_path: Path,
+) -> None:
+    run = _new_run(tmp_path)
+
+    run.write_json("v", {"a": [1.0, float("nan")], "b": {"c": float("inf")}})
+
+    assert run.read_json("v") == {"a": [1.0, None], "b": {"c": None}}
+
+
+def test_write_json_converts_numpy_values(tmp_path: Path) -> None:
+    run = _new_run(tmp_path)
+    payload = {
+        "scalar": np.float32(0.25),
+        "count": np.int64(3),
+        "flag": np.bool_(True),
+        "vector": np.array([1.0, np.nan]),
+        "pair": (1, 2),
+    }
+
+    run.write_json("n", payload)
+
+    assert run.read_json("n") == {
+        "scalar": 0.25,
+        "count": 3,
+        "flag": True,
+        "vector": [1.0, None],
+        "pair": [1, 2],
+    }
+
+
+def test_write_json_rejects_values_json_cannot_hold(tmp_path: Path) -> None:
+    run = _new_run(tmp_path)
+
+    with pytest.raises(TypeError):
+        run.write_json("bad", {"x": {1, 2}})
+
+    assert not (run.path / "bad.json").exists()
+
+
+def test_failed_write_keeps_the_previous_file_and_leaves_no_temp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _new_run(tmp_path)
+    run.write_json("v", {"x": 1})
+
+    def refuse(src: object, dst: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    with pytest.raises(OSError, match="disk full"):
+        run.write_json("v", {"x": 2})
+    monkeypatch.undo()
+
+    assert run.read_json("v") == {"x": 1}
+    assert sorted(path.name for path in run.path.iterdir()) == [
+        "config.json",
+        "meta.json",
+        "v.json",
+    ]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["", "../x", "a/b", "a\\b", ".hidden", "config", "meta"],
+    ids=["empty", "parent", "slash", "backslash", "dot", "config", "meta"],
+)
+def test_write_json_rejects_unsafe_or_reserved_names(
+    tmp_path: Path, name: str
+) -> None:
+    run = _new_run(tmp_path)
+
+    with pytest.raises(ValueError, match="name"):
+        run.write_json(name, {"x": 1})
+
+
+def test_read_json_rejects_a_file_without_embedded_metadata(
+    tmp_path: Path,
+) -> None:
+    run = _new_run(tmp_path)
+    (run.path / "plain.json").write_text('{"x": 1}', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="metadata"):
+        run.read_json("plain")
+
+
+def test_write_arrays_round_trips_dtype_shape_and_values(
+    tmp_path: Path,
+) -> None:
+    run = _new_run(tmp_path)
+    scores = np.arange(12, dtype=np.float32).reshape(3, 4)
+    layers = np.array([0, 4, 8], dtype=np.int64)
+
+    path = run.write_arrays("scan", scores=scores, layers=layers)
+    loaded = run.read_arrays("scan")
+
+    assert path == run.path / "scan.npz"
+    assert sorted(loaded) == ["layers", "scores"]
+    assert loaded["scores"].dtype == np.float32
+    assert loaded["layers"].dtype == np.int64
+    np.testing.assert_array_equal(loaded["scores"], scores)
+    np.testing.assert_array_equal(loaded["layers"], layers)
+
+
+def test_write_arrays_embeds_the_meta_and_config(tmp_path: Path) -> None:
+    run = _new_run(tmp_path, seed=4)
+
+    path = run.write_arrays("scan", x=np.zeros(2))
+
+    with np.load(path, allow_pickle=False) as archive:
+        marker = archive["_meta"]
+    assert marker.shape == ()
+    assert marker.dtype.kind == "U"
+    assert json.loads(str(marker)) == {**run.meta, "config": run.config}
+
+
+def test_write_arrays_rejects_object_arrays_and_leaves_no_file(
+    tmp_path: Path,
+) -> None:
+    run = _new_run(tmp_path)
+    objects = np.array([object()], dtype=object)
+
+    with pytest.raises(ValueError, match="allow_pickle"):
+        run.write_arrays("bad", x=objects)
+
+    assert sorted(path.name for path in run.path.iterdir()) == [
+        "config.json",
+        "meta.json",
+    ]
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["_meta", "file", "allow_pickle"],
+    ids=["meta", "file", "allow-pickle"],
+)
+def test_write_arrays_rejects_reserved_array_names(
+    tmp_path: Path, key: str
+) -> None:
+    run = _new_run(tmp_path)
+
+    with pytest.raises(ValueError, match=key):
+        run.write_arrays("scan", **{key: np.zeros(1)})
+
+
+def test_write_arrays_rejects_unsafe_names(tmp_path: Path) -> None:
+    run = _new_run(tmp_path)
+
+    with pytest.raises(ValueError, match="name"):
+        run.write_arrays("../scan", x=np.zeros(1))
+
+
+def test_failed_array_write_keeps_the_previous_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _new_run(tmp_path)
+    run.write_arrays("scan", x=np.ones(2))
+
+    def refuse(src: object, dst: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    with pytest.raises(OSError, match="disk full"):
+        run.write_arrays("scan", x=np.zeros(2))
+    monkeypatch.undo()
+
+    np.testing.assert_array_equal(run.read_arrays("scan")["x"], np.ones(2))
+    assert not [p for p in run.path.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_read_arrays_rejects_a_file_without_embedded_metadata(
+    tmp_path: Path,
+) -> None:
+    run = _new_run(tmp_path)
+    np.savez(run.path / "plain.npz", x=np.zeros(1))
+
+    with pytest.raises(ValueError, match="metadata"):
+        run.read_arrays("plain")
+
+
+def test_figure_path_points_into_the_figures_folder(tmp_path: Path) -> None:
+    run = _new_run(tmp_path)
+
+    path = run.figure_path("curves", "pdf")
+
+    assert path == run.path / "figures" / "curves.pdf"
+    assert path.parent.is_dir()
+
+
+@pytest.mark.parametrize(
+    ("name", "extension", "label"),
+    [
+        ("../curves", "pdf", "name"),
+        ("", "pdf", "name"),
+        ("curves", "", "extension"),
+        ("curves", ".pdf", "extension"),
+        ("curves", "p/df", "extension"),
+    ],
+    ids=["name-parent", "name-empty", "ext-empty", "ext-dot", "ext-slash"],
+)
+def test_figure_path_rejects_unsafe_names_and_extensions(
+    tmp_path: Path, name: str, extension: str, label: str
+) -> None:
+    run = _new_run(tmp_path)
+
+    with pytest.raises(ValueError, match=label):
+        run.figure_path(name, extension)
+
+
+def test_finalize_stamps_the_finish_time(tmp_path: Path) -> None:
+    run = _new_run(tmp_path)
+    assert run.meta["finished_at"] is None
+
+    run.finalize()
+
+    reopened = RunDir.open(run.path)
+    started = datetime.datetime.fromisoformat(reopened.meta["started_at"])
+    finished = datetime.datetime.fromisoformat(reopened.meta["finished_at"])
+    assert started.tzinfo is not None
+    assert finished >= started
+    assert run.meta == reopened.meta
+
+
+def test_meta_records_the_platform_and_library_versions(
+    tmp_path: Path,
+) -> None:
+    meta = _new_run(tmp_path).meta
+
+    versions = meta["versions"]
+    assert meta["platform"] == platform.platform()
+    assert versions["python"] == platform.python_version()
+    assert versions["tomography"] == tomography.__version__
+    assert versions["numpy"] == np.__version__
+    assert versions["torch"] == torch.__version__
+    assert set(versions) == {
+        "python",
+        "tomography",
+        "torch",
+        "transformers",
+        "numpy",
+        "scikit-learn",
+        "datasets",
+        "peft",
+        "matplotlib",
+        "plotly",
+    }
+
+
+def test_meta_skips_libraries_that_are_not_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_version = importlib.metadata.version
+
+    def version(name: str) -> str:
+        if name == "peft":
+            raise importlib.metadata.PackageNotFoundError(name)
+        return real_version(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", version)
+
+    versions = _new_run(tmp_path).meta["versions"]
+
+    assert "peft" not in versions
+    assert versions["numpy"] == np.__version__
+
+
+def test_meta_device_is_cpu_without_cuda(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    assert _new_run(tmp_path).meta["device"] == "cpu"
+
+
+def test_meta_device_names_the_cuda_gpu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda index: "Test GPU")
+
+    assert _new_run(tmp_path).meta["device"] == "cuda:0 (Test GPU)"
+
+
+def _git(repo: Path, *args: str) -> str:
+    completed = subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return completed.stdout.strip()
+
+
+@pytest.fixture
+def source_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    for variable in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(variable, raising=False)
+    repo = tmp_path / "source"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "module.py").write_text("x = 1", encoding="utf-8")
+    _git(repo, "add", "module.py")
+    _git(repo, "commit", "-q", "-m", "init")
+    monkeypatch.setattr(experiments_base, "_SOURCE_DIR", repo)
+    return repo
+
+
+def test_meta_records_the_commit_of_a_clean_source_tree(
+    tmp_path: Path, source_repo: Path
+) -> None:
+    meta = _new_run(tmp_path / "out").meta
+
+    assert meta["git_sha"] == _git(source_repo, "rev-parse", "HEAD")
+    assert meta["git_dirty"] is False
+
+
+def test_meta_marks_a_modified_tracked_file_as_dirty(
+    tmp_path: Path, source_repo: Path
+) -> None:
+    (source_repo / "module.py").write_text("x = 2", encoding="utf-8")
+
+    assert _new_run(tmp_path / "out").meta["git_dirty"] is True
+
+
+def test_meta_ignores_untracked_files_when_judging_dirtiness(
+    tmp_path: Path, source_repo: Path
+) -> None:
+    (source_repo / "results.json").write_text("{}", encoding="utf-8")
+
+    assert _new_run(tmp_path / "out").meta["git_dirty"] is False
+
+
+def test_meta_git_values_are_null_outside_a_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "missing"))
+
+    meta = _new_run(tmp_path / "out").meta
+
+    assert meta["git_sha"] is None
+    assert meta["git_dirty"] is None
