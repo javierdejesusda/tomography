@@ -6,12 +6,14 @@ a controller can wrap them in a residual edit at any layer.
 
 import math
 from typing import Literal
+from typing import assert_never
+from typing import get_args
 
 import torch
 
 Operator = Literal["linear", "piecewise", "projection"]
 
-_OPERATORS = ("linear", "piecewise", "projection")
+_OPERATORS = get_args(Operator)
 
 
 def apply_operator(
@@ -34,7 +36,8 @@ def apply_operator(
       along `v` at `c = 1` and is independent of the norm of `v`.
 
     A zero direction leaves `h` unchanged for every operator. No operator
-    branches on tensor values, so a call never forces a host sync.
+    branches on tensor values, so a call forces no host sync as long as `v`
+    and `mask` already live on the device of `h`.
 
     The math runs in float32 (float64 for float64 input) and the result is
     cast back to the dtype of `h`; shape and device are preserved. A zero
@@ -53,7 +56,7 @@ def apply_operator(
             zero.
 
     Returns:
-        The edited residual vectors, or `h` itself when `coeff == 0`.
+        The edited residual vectors.
 
     Raises:
         ValueError: If `op` is unknown, `h` is not a floating point tensor
@@ -61,6 +64,31 @@ def apply_operator(
             `coeff` is not finite, `mask` is not a bool tensor broadcastable
             to `h.shape[:-1]`.
     """
+    _validate(h, v, coeff, op, mask)
+    if coeff == 0:
+        return h
+    compute_dtype = torch.promote_types(h.dtype, torch.float32)
+    h_c = h.to(compute_dtype)
+    v_c = v.to(device=h.device, dtype=compute_dtype)
+    edited = h_c + _shift(h_c, v_c, coeff, op)
+    if preserve_norm:
+        prior = h_c.norm(dim=-1, keepdim=True)
+        current = edited.norm(dim=-1, keepdim=True)
+        positive = current > 0
+        safe_current = torch.where(positive, current, 1.0)
+        edited = edited * torch.where(positive, prior / safe_current, 1.0)
+    if mask is not None:
+        edited = torch.where(mask.to(h.device).unsqueeze(-1), edited, h_c)
+    return edited.to(h.dtype)
+
+
+def _validate(
+    h: torch.Tensor,
+    v: torch.Tensor,
+    coeff: float,
+    op: Operator,
+    mask: torch.Tensor | None,
+) -> None:
     if op not in _OPERATORS:
         raise ValueError(
             f"unknown operator {op!r}; expected one of {_OPERATORS}"
@@ -78,20 +106,6 @@ def apply_operator(
         raise ValueError(f"coefficient must be finite, got {coeff}")
     if mask is not None:
         _check_mask(mask, h.shape[:-1])
-    if coeff == 0:
-        return h
-    compute_dtype = torch.promote_types(h.dtype, torch.float32)
-    h_c = h.to(compute_dtype)
-    v_c = v.to(device=h.device, dtype=compute_dtype)
-    edited = h_c + _shift(h_c, v_c, coeff, op)
-    if preserve_norm:
-        prior = h_c.norm(dim=-1, keepdim=True)
-        current = edited.norm(dim=-1, keepdim=True)
-        safe_current = torch.where(current > 0, current, 1.0)
-        edited = edited * torch.where(current > 0, prior / safe_current, 1.0)
-    if mask is not None:
-        edited = torch.where(mask.to(h.device).unsqueeze(-1), edited, h_c)
-    return edited.to(h.dtype)
 
 
 def _shift(
@@ -102,11 +116,14 @@ def _shift(
         return coeff * v
     dots = h @ v
     if op == "piecewise":
+        # Same dtype as h, so `coeff * sign` keeps float64 precision.
         sign = torch.where(dots >= 0, 1.0, -1.0).to(h.dtype)
         return coeff * sign.unsqueeze(-1) * v
-    norm_sq = v @ v
-    safe_norm_sq = torch.where(norm_sq > 0, norm_sq, 1.0)
-    return -coeff * (dots / safe_norm_sq).unsqueeze(-1) * v
+    if op == "projection":
+        norm_sq = v @ v
+        safe_norm_sq = torch.where(norm_sq > 0, norm_sq, 1.0)
+        return -coeff * (dots / safe_norm_sq).unsqueeze(-1) * v
+    assert_never(op)
 
 
 def _check_mask(mask: torch.Tensor, lead_shape: torch.Size) -> None:
