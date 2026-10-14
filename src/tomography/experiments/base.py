@@ -254,7 +254,7 @@ def _git(args: list[str], cwd: Path) -> str | None:
     """Returns the stdout of a git command, or None if it cannot run."""
     try:
         completed = subprocess.run(
-            ["git", *args],
+            ["git", "--no-optional-locks", *args],
             cwd=cwd,
             capture_output=True,
             text=True,
