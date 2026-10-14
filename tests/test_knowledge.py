@@ -1,9 +1,11 @@
 import csv
 import dataclasses
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from tomography.control.generate import Completion
 from tomography.datasets.records import QAExample
 from tomography.knowledge import DEFAULT_SHOTS
 from tomography.knowledge import ItemLabel
@@ -13,8 +15,11 @@ from tomography.knowledge import extract_answer
 from tomography.knowledge import few_shot_prompt
 from tomography.knowledge import is_correct
 from tomography.knowledge import label_from_counts
+from tomography.knowledge import label_questions
 from tomography.knowledge import normalize_answer
 from tomography.knowledge import write_hand_check
+from tomography.model import LoadedModel
+from tomography.model import load_model
 
 SHOTS = (("What is 2 plus 2?", "four"), ("Capital of France?", "Paris"))
 
@@ -309,3 +314,251 @@ def test_write_hand_check_rejects_unpaired_labels(tmp_path: Path) -> None:
         write_hand_check(tmp_path / "a.csv", examples, labels[:1])
     with pytest.raises(ValueError, match="pair up"):
         write_hand_check(tmp_path / "b.csv", examples, labels[::-1])
+
+
+def _fake_generate(
+    greedy: dict[str, str], sampled: dict[str, list[str]], calls: list[Any]
+) -> Any:
+    def question_of(prompt: str) -> str:
+        return prompt.rsplit("Q: ", 1)[1].split("\n")[0]
+
+    def fake(
+        loaded: Any,
+        prompts: list[str],
+        *,
+        temperature: float | None = None,
+        num_samples: int = 1,
+        **kwargs: Any,
+    ) -> list[list[Completion]]:
+        calls.append(
+            {
+                "prompts": list(prompts),
+                "temperature": temperature,
+                "num_samples": num_samples,
+                **kwargs,
+            }
+        )
+        if temperature is None:
+            texts = [[greedy[question_of(p)]] for p in prompts]
+        else:
+            texts = [sampled[question_of(p)] for p in prompts]
+        return [[Completion(t, (), True) for t in row] for row in texts]
+
+    return fake
+
+
+def _qa(uid: str, answers: tuple[str, ...]) -> QAExample:
+    return QAExample(uid, f"Question {uid}?", answers, "real", "test")
+
+
+def test_label_questions_known_unknown_uncertain_and_order(
+    monkeypatch: pytest.MonkeyPatch, tiny_gpt2: LoadedModel
+) -> None:
+    calls: list[Any] = []
+    greedy = {
+        "Question k?": " Paris\nQ: more",
+        "Question n?": " Rome",
+        "Question u?": " Paris",
+    }
+    sampled = {
+        "Question k?": [" Paris"] * 4 + [" Rome"],
+        "Question n?": [" Rome", " Oslo", " Bern", " Rome", " Rome"],
+        "Question u?": [" Paris", " Rome", " Oslo", " Rome", " Paris"],
+    }
+    monkeypatch.setattr(
+        "tomography.knowledge.generate", _fake_generate(greedy, sampled, calls)
+    )
+    examples = [
+        _qa("u", ("Paris",)),
+        _qa("none", ()),
+        _qa("k", ("Paris",)),
+        _qa("n", ("Paris",)),
+    ]
+
+    labels = label_questions(tiny_gpt2, examples, shots=SHOTS, seed=7)
+
+    assert [(x.uid, x.label, x.basis) for x in labels] == [
+        ("u", "uncertain", "behavior"),
+        ("none", "unknown", "construction"),
+        ("k", "known", "behavior"),
+        ("n", "unknown", "behavior"),
+    ]
+    assert labels[2].greedy == "Paris"
+    assert labels[2].greedy_correct is True
+    assert labels[2].samples == ("Paris",) * 4 + ("Rome",)
+    assert labels[2].n_correct == 4
+    assert labels[1] == ItemLabel(
+        "none", "unknown", "construction", "", False, (), 0
+    )
+    assert labels[0].n_correct == 2
+
+
+def test_label_questions_makes_two_calls_greedy_first(
+    monkeypatch: pytest.MonkeyPatch, tiny_gpt2: LoadedModel
+) -> None:
+    calls: list[Any] = []
+    table = {"Question a?": " x", "Question b?": " x"}
+    samples = {k: [" x"] * 5 for k in table}
+    monkeypatch.setattr(
+        "tomography.knowledge.generate", _fake_generate(table, samples, calls)
+    )
+    examples = [_qa("a", ("y",)), _qa("none", ()), _qa("b", ("y",))]
+
+    label_questions(tiny_gpt2, examples, shots=SHOTS, seed=3, batch_size=2)
+
+    prompts = [few_shot_prompt("Question a?", SHOTS)]
+    prompts.append(few_shot_prompt("Question b?", SHOTS))
+    assert len(calls) == 2
+    assert calls[0] == {
+        "prompts": prompts,
+        "temperature": None,
+        "num_samples": 1,
+        "max_new_tokens": 16,
+        "batch_size": 2,
+    }
+    assert calls[1] == {
+        "prompts": prompts,
+        "temperature": 1.0,
+        "num_samples": 5,
+        "seed": 3,
+        "max_new_tokens": 16,
+        "batch_size": 2,
+    }
+
+
+def test_label_questions_without_gold_answers_makes_no_call(
+    monkeypatch: pytest.MonkeyPatch, tiny_gpt2: LoadedModel
+) -> None:
+    calls: list[Any] = []
+    monkeypatch.setattr(
+        "tomography.knowledge.generate", _fake_generate({}, {}, calls)
+    )
+
+    labels = label_questions(tiny_gpt2, [_qa("a", ()), _qa("b", ())])
+    empty = label_questions(tiny_gpt2, [])
+
+    assert calls == []
+    assert [x.basis for x in labels] == ["construction", "construction"]
+    assert empty == []
+
+
+def test_label_questions_uses_the_recipe(
+    monkeypatch: pytest.MonkeyPatch, tiny_gpt2: LoadedModel
+) -> None:
+    calls: list[Any] = []
+    table = {"Question a?": " y."}
+    monkeypatch.setattr(
+        "tomography.knowledge.generate",
+        _fake_generate(table, {"Question a?": [" y. z", " y. z"]}, calls),
+    )
+    recipe = LabelRecipe(
+        n_samples=2,
+        temperature=0.7,
+        known_min_correct=2,
+        max_new_tokens=4,
+        stop=".",
+    )
+
+    (item,) = label_questions(
+        tiny_gpt2, [_qa("a", ("y",))], recipe=recipe, shots=SHOTS
+    )
+
+    assert item.label == "known"
+    assert item.greedy == "y"
+    assert item.samples == ("y", "y")
+    assert calls[1]["temperature"] == 0.7
+    assert calls[1]["num_samples"] == 2
+    assert calls[1]["max_new_tokens"] == 4
+
+
+def test_label_questions_keeps_items_with_a_repeated_uid_apart(
+    monkeypatch: pytest.MonkeyPatch, tiny_gpt2: LoadedModel
+) -> None:
+    calls: list[Any] = []
+    greedy = {"Question a?": " x", "Question b?": " x"}
+    sampled = {"Question a?": [" x"] * 5, "Question b?": [" y"] * 5}
+    monkeypatch.setattr(
+        "tomography.knowledge.generate", _fake_generate(greedy, sampled, calls)
+    )
+    first = QAExample("same", "Question a?", ("x",), "real", "test")
+    second = QAExample("same", "Question b?", ("x",), "real", "test")
+
+    labels = label_questions(tiny_gpt2, [first, second], shots=SHOTS)
+
+    assert [x.label for x in labels] == ["known", "uncertain"]
+
+
+def test_label_questions_plumbing_on_a_tiny_model(
+    tiny_arch: LoadedModel,
+) -> None:
+    tiny_arch.model.generation_config.eos_token_id = None
+    examples = [_qa("a", ("the",)), _qa("none", ()), _qa("b", ("fox", "dog"))]
+    recipe = LabelRecipe(n_samples=3, known_min_correct=2, max_new_tokens=4)
+
+    def run(seed: int) -> list[ItemLabel]:
+        return label_questions(
+            tiny_arch,
+            examples,
+            recipe=recipe,
+            shots=SHOTS[:1],
+            seed=seed,
+            batch_size=1,
+        )
+
+    first = run(0)
+
+    assert [x.uid for x in first] == ["a", "none", "b"]
+    for item in (first[0], first[2]):
+        assert item.basis == "behavior"
+        assert len(item.samples) == 3
+        assert 0 <= item.n_correct <= 3
+    assert first[1].basis == "construction"
+    assert first == run(0)
+
+
+def test_label_questions_default_shots_exceed_a_tiny_model(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    with pytest.raises(ValueError, match="max_position_embeddings"):
+        label_questions(tiny_gpt2, [_qa("a", ("x",))])
+
+
+@pytest.mark.slow
+def test_gpt2_labels_popqa_style_items() -> None:
+    gpt2 = load_model("gpt2")
+    facts = [
+        ("What is the capital of France?", ("Paris",)),
+        ("What is the capital of Italy?", ("Rome",)),
+        ("What is the capital of Spain?", ("Madrid",)),
+        ("What is the capital of Germany?", ("Berlin",)),
+        ("What is the capital of Japan?", ("Tokyo",)),
+        ("What is the capital of Egypt?", ("Cairo",)),
+        ("What is the capital of Russia?", ("Moscow",)),
+        ("What is the capital of Greece?", ("Athens",)),
+        ("What is the capital of Norway?", ("Oslo",)),
+        ("What is the capital of Peru?", ("Lima",)),
+        ("Who wrote Hamlet?", ("Shakespeare", "William Shakespeare")),
+        ("Who painted the Mona Lisa?", ("Leonardo da Vinci",)),
+        ("What is the capital of Malta?", ("Valletta",)),
+        ("What is the capital of Laos?", ("Vientiane",)),
+        ("What is the capital of Bhutan?", ("Thimphu",)),
+        ("What is the capital of Nauru?", ("Yaren",)),
+        ("What is the capital of Tuvalu?", ("Funafuti",)),
+        ("What is the capital of Palau?", ("Ngerulmud",)),
+        ("What is the capital of Brunei?", ("Bandar Seri Begawan",)),
+        ("What is the capital of Eswatini?", ("Mbabane",)),
+    ]
+    examples = [
+        QAExample(f"p{i}", question, answers, "real", "test")
+        for i, (question, answers) in enumerate(facts)
+    ]
+
+    labels = label_questions(gpt2, examples, seed=0)
+
+    counts = {
+        name: sum(x.label == name for x in labels)
+        for name in ("known", "unknown", "uncertain")
+    }
+    print(counts)
+    assert len(labels) == 20
+    assert sum(counts.values()) == 20

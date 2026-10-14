@@ -10,7 +10,10 @@ import unicodedata
 
 import numpy as np
 
+from tomography.control.generate import Completion
+from tomography.control.generate import generate
 from tomography.datasets.records import QAExample
+from tomography.model import LoadedModel
 
 Label = Literal["known", "unknown", "uncertain"]
 Basis = Literal["behavior", "construction"]
@@ -78,6 +81,9 @@ class ItemLabel:
     greedy_correct: bool
     samples: tuple[str, ...]
     n_correct: int
+
+
+_DEFAULT_RECIPE = LabelRecipe()
 
 
 def few_shot_prompt(
@@ -188,6 +194,94 @@ def label_from_counts(
     if not greedy_correct and n_correct == 0:
         return "unknown"
     return "uncertain"
+
+
+def label_questions(
+    loaded: LoadedModel,
+    examples: Sequence[QAExample],
+    *,
+    recipe: LabelRecipe = _DEFAULT_RECIPE,
+    shots: Sequence[tuple[str, str]] = DEFAULT_SHOTS,
+    seed: int = 0,
+    batch_size: int = 8,
+) -> list[ItemLabel]:
+    """Labels questions by what one model does on them, closed book.
+
+    Makes two `generate` calls over the prompts of all items with gold
+    answers: one greedy, then one sampling `recipe.n_samples` completions at
+    `recipe.temperature`. Items without gold answers are "unknown" by
+    construction and cost no generation. Labels are per model: call this
+    once per `LoadedModel`.
+
+    Args:
+        loaded: The wrapped model.
+        examples: The questions to label.
+        recipe: Sampling budget and label thresholds.
+        shots: Few-shot demonstrations placed before every question.
+        seed: Base seed of the sampling pass.
+        batch_size: Prompts per generation call chunk.
+
+    Returns:
+        One `ItemLabel` per example, in the order of `examples`.
+
+    Raises:
+        ValueError: If the recipe or a generation argument is out of range,
+            or a prompt exceeds the position limit of the model.
+    """
+    behavioral = [e for e in examples if e.answers]
+    prompts = [few_shot_prompt(e.question, shots) for e in behavioral]
+    greedy_rows: list[list[Completion]] = []
+    sampled_rows: list[list[Completion]] = []
+    if prompts:
+        greedy_rows = generate(
+            loaded,
+            prompts,
+            max_new_tokens=recipe.max_new_tokens,
+            temperature=None,
+            batch_size=batch_size,
+        )
+        sampled_rows = generate(
+            loaded,
+            prompts,
+            max_new_tokens=recipe.max_new_tokens,
+            temperature=recipe.temperature,
+            num_samples=recipe.n_samples,
+            seed=seed,
+            batch_size=batch_size,
+        )
+    behavioral_labels: list[ItemLabel] = []
+    for example, greedy_row, sampled_row in zip(
+        behavioral, greedy_rows, sampled_rows, strict=True
+    ):
+        greedy = extract_answer(greedy_row[0].text, stop=recipe.stop)
+        samples = tuple(
+            extract_answer(c.text, stop=recipe.stop) for c in sampled_row
+        )
+        greedy_correct = is_correct(greedy, example.answers)
+        n_correct = sum(is_correct(a, example.answers) for a in samples)
+        behavioral_labels.append(
+            ItemLabel(
+                uid=example.uid,
+                label=label_from_counts(
+                    greedy_correct,
+                    n_correct,
+                    n_samples=recipe.n_samples,
+                    known_min_correct=recipe.known_min_correct,
+                ),
+                basis="behavior",
+                greedy=greedy,
+                greedy_correct=greedy_correct,
+                samples=samples,
+                n_correct=n_correct,
+            )
+        )
+    labeled = iter(behavioral_labels)
+    return [
+        next(labeled)
+        if e.answers
+        else ItemLabel(e.uid, "unknown", "construction", "", False, (), 0)
+        for e in examples
+    ]
 
 
 _LABEL_ORDER: tuple[Label, ...] = ("known", "unknown", "uncertain")
