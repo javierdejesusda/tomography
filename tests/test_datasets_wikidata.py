@@ -504,6 +504,47 @@ def test_parse_unknowable_detail_keeps_one_item_per_person() -> None:
     assert [i.uid for i in items] == ["wikidata:detail:Q7241"]
 
 
+def test_parse_unknowable_detail_does_not_depend_on_the_row_order() -> None:
+    rows = [
+        _person("Q7241", "Rabindranath Tagore", birth="1861-05-07T00:00:00Z"),
+        _person("Q7241", "Rabindranath Tagore", birth="1861-05-06T00:00:00Z"),
+    ]
+
+    forward = wikidata.parse_unknowable_detail(_result(rows), seed=0)
+    backward = wikidata.parse_unknowable_detail(_result(rows[::-1]), seed=0)
+
+    assert forward == backward
+
+
+def test_parse_unknowable_detail_moves_a_leap_day_birth_to_the_28th() -> None:
+    row = _person(birth="1896-02-29T00:00:00Z", death="1906-03-01T00:00:00Z")
+
+    (item,) = wikidata.parse_unknowable_detail(
+        _result([row]), seed=0, min_age_years=10
+    )
+
+    assert _day(item) == date(1906, 2, 28)
+
+
+def test_parse_unknowable_detail_needs_a_day_before_the_death() -> None:
+    too_short = _person(
+        birth="1950-01-01T00:00:00Z", death="1960-01-01T00:00:00Z"
+    )
+    one_day = _person(
+        birth="1950-01-01T00:00:00Z", death="1960-01-02T00:00:00Z"
+    )
+
+    skipped = wikidata.parse_unknowable_detail(
+        _result([too_short]), seed=0, min_age_years=10
+    )
+    (item,) = wikidata.parse_unknowable_detail(
+        _result([one_day]), seed=0, min_age_years=10
+    )
+
+    assert skipped == []
+    assert _day(item) == date(1960, 1, 1)
+
+
 def test_parse_unknowable_detail_templates_and_age_are_keywords() -> None:
     (item,) = wikidata.parse_unknowable_detail(
         _result([_person()]),
