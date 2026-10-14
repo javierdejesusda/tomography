@@ -484,3 +484,135 @@ def load_judge(key: str, *, device: str | torch.device | None = None) -> Judge:
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     return Judge(spec, model.to(device).eval(), tokenizer)
+
+
+def hard_labels(
+    probabilities: ArrayLike, *, threshold: float = 0.5
+) -> NDArray[np.int64]:
+    """Turns judge probabilities into class labels.
+
+    Args:
+        probabilities: Positive-class probabilities of shape `(n,)`, or class
+            probabilities of shape `(n, classes)`.
+        threshold: Probability at or above which a positive-class probability
+            counts as the positive class. Ignored for 2-D input.
+
+    Returns:
+        Labels of shape `(n,)`: a thresholded 0 or 1 for 1-D input, the
+        first-maximum class index for 2-D input.
+
+    Raises:
+        ValueError: If the input is neither 1-D nor 2-D.
+    """
+    values = np.asarray(probabilities, dtype=np.float64)
+    if values.ndim == 1:
+        return (values >= threshold).astype(np.int64)
+    if values.ndim == 2:
+        return values.argmax(axis=-1).astype(np.int64)
+    raise ValueError(f"expected 1-D or 2-D probabilities, got {values.ndim}-D")
+
+
+def sentiment_accuracy(
+    p_positive: ArrayLike, labels: ArrayLike, *, threshold: float = 0.5
+) -> float:
+    """Computes the accuracy of positive-class probabilities.
+
+    Args:
+        p_positive: Probability of the positive class per example.
+        labels: Gold labels, 1 for positive and 0 for negative.
+        threshold: Probability at or above which a text is called positive.
+
+    Returns:
+        The share of examples whose thresholded prediction equals the label.
+
+    Raises:
+        ValueError: If the inputs differ in length, are empty, or the labels
+            are not 0 or 1.
+    """
+    scores = np.asarray(p_positive, dtype=np.float64)
+    gold = np.asarray(labels, dtype=np.int64)
+    if scores.ndim != 1 or scores.shape != gold.shape:
+        raise ValueError("p_positive and labels must have the same length")
+    if scores.size == 0:
+        raise ValueError("need at least one example")
+    if not np.isin(gold, (0, 1)).all():
+        raise ValueError("labels must be 0 or 1")
+    return float((hard_labels(scores, threshold=threshold) == gold).mean())
+
+
+def validate_sentiment_judge(
+    judge: Judge,
+    texts: Sequence[str],
+    labels: ArrayLike,
+    *,
+    batch_size: int = 32,
+) -> float:
+    """Measures a sentiment judge against labeled texts.
+
+    Args:
+        judge: A sentiment judge.
+        texts: Labeled texts, for example the SST-2 validation split.
+        labels: Gold labels, 1 for positive and 0 for negative.
+        batch_size: Texts per forward pass.
+
+    Returns:
+        The accuracy of the judge at the 0.5 threshold.
+
+    Raises:
+        ValueError: If `judge` is not a sentiment judge, or the inputs are
+            invalid (see `sentiment_accuracy`).
+    """
+    if judge.spec.attribute != "sentiment":
+        raise ValueError(
+            "validate_sentiment_judge needs a sentiment judge, "
+            f"got {judge.spec.key}"
+        )
+    return sentiment_accuracy(judge.score(texts, batch_size=batch_size), labels)
+
+
+@dataclass(frozen=True)
+class Agreement:
+    """Agreement between two judges on the same texts.
+
+    Attributes:
+        rate: Share of texts given the same label by both judges.
+        kappa: Cohen's kappa of the two label sequences. It is 1.0 when both
+            judges use a single identical class, where chance agreement is 1.
+    """
+
+    rate: float
+    kappa: float
+
+
+def judge_agreement(
+    first: ArrayLike, second: ArrayLike, *, threshold: float = 0.5
+) -> Agreement:
+    """Measures how often two judges give the same label.
+
+    Args:
+        first: Probabilities of the first judge, `(n,)` or `(n, classes)`.
+        second: Probabilities of the second judge, same shape as `first`.
+        threshold: Positive-class threshold for 1-D probabilities.
+
+    Returns:
+        The agreement rate and Cohen's kappa of the hard labels (see
+        `hard_labels`).
+
+    Raises:
+        ValueError: If the inputs differ in shape or are empty.
+    """
+    first_values = np.asarray(first, dtype=np.float64)
+    second_values = np.asarray(second, dtype=np.float64)
+    if first_values.shape != second_values.shape:
+        raise ValueError("first and second must have the same shape")
+    if first_values.size == 0:
+        raise ValueError("need at least one example")
+    a = hard_labels(first_values, threshold=threshold)
+    b = hard_labels(second_values, threshold=threshold)
+    n_classes = max(int(a.max()), int(b.max()), 1) + 1
+    counts = np.bincount(a * n_classes + b, minlength=n_classes**2)
+    confusion = counts.reshape(n_classes, n_classes).astype(np.float64)
+    observed = float(np.trace(confusion)) / a.size
+    chance = float(confusion.sum(axis=1) @ confusion.sum(axis=0)) / a.size**2
+    kappa = 1.0 if chance >= 1.0 else (observed - chance) / (1.0 - chance)
+    return Agreement(rate=observed, kappa=kappa)

@@ -867,3 +867,122 @@ def test_load_judge_pins_the_revision_and_disables_safetensors_conversion(
     assert judge.spec is spec
     assert judge.model.device == torch.device("cpu")
     assert not judge.model.training
+
+
+def test_sentiment_accuracy_thresholds_the_positive_probability() -> None:
+    p_positive = [0.9, 0.2, 0.6, 0.4]
+
+    assert judges.sentiment_accuracy(p_positive, [1, 0, 0, 0]) == 0.75
+    assert (
+        judges.sentiment_accuracy(p_positive, [1, 0, 0, 0], threshold=0.7)
+        == 1.0
+    )
+
+
+@pytest.mark.parametrize(
+    ("p_positive", "labels", "message"),
+    [
+        ([0.5], [1, 0], "same length"),
+        ([], [], "at least one"),
+        ([0.5, 0.5], [1, 2], "labels"),
+    ],
+    ids=["length-mismatch", "empty", "non-binary-labels"],
+)
+def test_sentiment_accuracy_rejects_invalid_inputs(
+    p_positive: list[float], labels: list[int], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        judges.sentiment_accuracy(p_positive, labels)
+
+
+def test_validate_sentiment_judge_scores_texts_against_labels(
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    judge = make_judge("sentiment-primary", SENTIMENT_LABELS, judge_tokenizer)
+    labels = [1, 0, 1, 0, 1]
+    expected = judges.sentiment_accuracy(judge.score(JUDGE_TEXTS), labels)
+
+    got = judges.validate_sentiment_judge(
+        judge, JUDGE_TEXTS, labels, batch_size=2
+    )
+
+    assert got == expected
+
+
+def test_validate_sentiment_judge_rejects_an_emotion_judge(
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    judge = make_judge("emotion-primary", HARTMANN_LABELS, judge_tokenizer)
+
+    with pytest.raises(ValueError, match="sentiment"):
+        judges.validate_sentiment_judge(judge, JUDGE_TEXTS, [1, 0, 1, 0, 1])
+
+
+def test_hard_labels_threshold_vectors_and_take_the_argmax_of_matrices() -> (
+    None
+):
+    assert judges.hard_labels([0.2, 0.5, 0.9]).tolist() == [0, 1, 1]
+    assert judges.hard_labels([[0.1, 0.7, 0.2], [0.5, 0.1, 0.4]]).tolist() == [
+        1,
+        0,
+    ]
+
+
+def test_agreement_is_perfect_for_identical_judges() -> None:
+    p = [0.9, 0.1, 0.8, 0.2]
+
+    got = judges.judge_agreement(p, p)
+
+    assert got.rate == 1.0
+    assert got.kappa == 1.0
+
+
+def test_agreement_is_negative_for_opposite_judges() -> None:
+    got = judges.judge_agreement([0.9, 0.1, 0.8, 0.2], [0.1, 0.9, 0.2, 0.8])
+
+    assert got.rate == 0.0
+    assert got.kappa == -1.0
+
+
+def test_agreement_matches_cohens_kappa_by_hand() -> None:
+    first = [1, 1, 1, 1, 0, 0, 0, 0, 1, 0]
+    second = [1, 1, 1, 0, 0, 0, 0, 1, 1, 0]
+    observed = 8 / 10
+    expected_by_chance = (6 / 10) * (5 / 10) + (4 / 10) * (5 / 10)
+    kappa = (observed - expected_by_chance) / (1 - expected_by_chance)
+
+    got = judges.judge_agreement(first, second, threshold=0.5)
+
+    assert got.rate == pytest.approx(observed)
+    assert got.kappa == pytest.approx(kappa)
+
+
+def test_agreement_on_emotion_probabilities_compares_the_argmax() -> None:
+    first = [[0.7, 0.1, 0.2], [0.1, 0.8, 0.1], [0.2, 0.2, 0.6]]
+    second = [[0.5, 0.3, 0.2], [0.4, 0.5, 0.1], [0.6, 0.3, 0.1]]
+
+    got = judges.judge_agreement(first, second)
+
+    assert got.rate == pytest.approx(2 / 3)
+
+
+def test_agreement_is_defined_when_both_judges_use_a_single_class() -> None:
+    got = judges.judge_agreement([0.9, 0.8], [0.7, 0.6])
+
+    assert got.rate == 1.0
+    assert got.kappa == 1.0
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "message"),
+    [
+        ([0.5, 0.5], [0.5], "same shape"),
+        ([], [], "at least one"),
+    ],
+    ids=["shape-mismatch", "empty"],
+)
+def test_agreement_rejects_invalid_inputs(
+    first: list[float], second: list[float], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        judges.judge_agreement(first, second)
