@@ -4,7 +4,9 @@ import pytest
 from sklearn.metrics import roc_auc_score
 
 from tomography.reading.metrics import auroc
+from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import group_accuracy
+from tomography.reading.metrics import wilson_ci
 
 
 def i64(*rows: list[int]) -> NDArray[np.int64]:
@@ -164,3 +166,127 @@ def test_auroc_rejects_malformed_input(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         auroc(np.array(scores), np.array(labels, dtype=np.int64))
+
+
+def test_bootstrap_ci_is_exact_for_two_values() -> None:
+    values = np.array([0.0, 1.0])
+
+    lo, hi = bootstrap_ci(values, seed=0)
+
+    assert float(lo) == 0.0
+    assert float(hi) == 1.0
+
+
+def test_bootstrap_ci_of_constant_values_collapses_to_the_value() -> None:
+    values = np.full((6, 3), 0.7)
+
+    lo, hi = bootstrap_ci(values, seed=0)
+
+    np.testing.assert_allclose(lo, 0.7)
+    np.testing.assert_allclose(hi, 0.7)
+
+
+def test_bootstrap_ci_has_the_width_of_the_normal_interval() -> None:
+    rng = np.random.default_rng(2)
+    values = rng.standard_normal(200)
+
+    lo, hi = bootstrap_ci(values, seed=1)
+
+    expected_half_width = 1.96 * values.std(ddof=1) / np.sqrt(200)
+    assert float(lo) < values.mean() < float(hi)
+    assert float(hi - lo) / 2 == pytest.approx(expected_half_width, rel=0.15)
+
+
+def test_bootstrap_ci_reduces_the_seed_axis_only() -> None:
+    values = np.random.default_rng(3).random((10, 4, 5))
+
+    lo, hi = bootstrap_ci(values, seed=0)
+
+    assert lo.shape == hi.shape == (4, 5)
+    assert (lo <= values.mean(axis=0)).all()
+    assert (values.mean(axis=0) <= hi).all()
+
+
+def test_bootstrap_ci_is_reproducible_and_depends_on_the_seed() -> None:
+    values = np.random.default_rng(4).random((10, 3))
+
+    first = bootstrap_ci(values, seed=5)
+    second = bootstrap_ci(values, seed=5)
+    other = bootstrap_ci(values, seed=6)
+
+    np.testing.assert_array_equal(first[0], second[0])
+    np.testing.assert_array_equal(first[1], second[1])
+    assert not np.array_equal(first[0], other[0])
+
+
+def test_bootstrap_ci_narrows_as_alpha_grows() -> None:
+    values = np.random.default_rng(5).random(30)
+
+    narrow = bootstrap_ci(values, alpha=0.5, seed=0)
+    wide = bootstrap_ci(values, alpha=0.05, seed=0)
+
+    assert float(narrow[1] - narrow[0]) < float(wide[1] - wide[0])
+
+
+@pytest.mark.parametrize(
+    ("values", "kwargs", "message"),
+    [
+        (np.zeros(0), {}, "values"),
+        (np.zeros(3), {"alpha": 0.0}, "alpha"),
+        (np.zeros(3), {"alpha": 1.0}, "alpha"),
+        (np.zeros(3), {"n_boot": 0}, "n_boot"),
+    ],
+    ids=["empty", "alpha-zero", "alpha-one", "no-resamples"],
+)
+def test_bootstrap_ci_rejects_bad_arguments(
+    values: NDArray[np.float64], kwargs: dict[str, float], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        bootstrap_ci(values, **kwargs)  # type: ignore[arg-type]
+
+
+def test_wilson_ci_matches_the_textbook_interval() -> None:
+    lo, hi = wilson_ci(8, 10)
+
+    assert lo == pytest.approx(0.4902, abs=1e-3)
+    assert hi == pytest.approx(0.9433, abs=1e-3)
+
+
+def test_wilson_ci_stays_inside_the_unit_interval_at_the_extremes() -> None:
+    assert wilson_ci(0, 20)[0] == 0.0
+    assert wilson_ci(20, 20)[1] == 1.0
+    assert 0.0 < wilson_ci(0, 20)[1] < 0.2
+
+
+def test_wilson_ci_is_symmetric_and_shrinks_with_more_trials() -> None:
+    lo, hi = wilson_ci(3, 10)
+    mirrored_lo, mirrored_hi = wilson_ci(7, 10)
+    big_lo, big_hi = wilson_ci(30, 100)
+
+    assert (1 - hi, 1 - lo) == pytest.approx((mirrored_lo, mirrored_hi))
+    assert big_hi - big_lo < hi - lo
+
+
+def test_wilson_ci_widens_with_a_smaller_alpha() -> None:
+    narrow = wilson_ci(8, 10, alpha=0.2)
+    wide = wilson_ci(8, 10, alpha=0.01)
+
+    assert wide[0] < narrow[0] < narrow[1] < wide[1]
+
+
+@pytest.mark.parametrize(
+    ("successes", "trials", "alpha", "message"),
+    [
+        (1, 0, 0.05, "trials"),
+        (-1, 5, 0.05, "successes"),
+        (6, 5, 0.05, "successes"),
+        (2, 5, 0.0, "alpha"),
+        (2, 5, 1.0, "alpha"),
+    ],
+    ids=["no-trials", "negative", "too-many", "alpha-zero", "alpha-one"],
+)
+def test_wilson_ci_rejects_bad_arguments(
+    successes: int, trials: int, alpha: float, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        wilson_ci(successes, trials, alpha=alpha)
