@@ -21,13 +21,20 @@ from tomography.experiments.sweep import reading_sweep
 from tomography.experiments.sweep import write_curves
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
 from tomography.templates import PAPER_TEMPLATES
 
 
 @dataclass(frozen=True, kw_only=True)
 class Config(ReadingConfig):
-    """R1 settings: GPT-2 sentiment on SST-2 with the shared defaults.
+    """R1 settings: GPT-2 sentiment on SST-2.
+
+    The shared defaults apply except for the direction finder. SST-2 pairs a
+    positive and a negative sentence that are otherwise unrelated, so their
+    differences are dominated by content variance and the first principal
+    component of the differences (`pca_diff`) does not follow sentiment. The
+    labels are available, so R1 fits a supervised `logistic` direction.
 
     Attributes:
         min_words: SST-2 phrases with fewer words are dropped.
@@ -37,6 +44,7 @@ class Config(ReadingConfig):
     model: str = "gpt2"
     n_eval_pairs: int | None = 256
     min_words: int = 3
+    method: Method = "logistic"
 
 
 def select_examples(

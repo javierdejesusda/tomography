@@ -7,9 +7,11 @@ from typing import Any
 import numpy as np
 import pytest
 
+from tomography.activations import Activations
 from tomography.cli import load_experiment
 from tomography.datasets.records import Example
 from tomography.datasets.sst2 import load_sst2
+from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import r1_sentiment
 from tomography.experiments.base import RunDir
 from tomography.experiments.r1_sentiment import Config
@@ -18,8 +20,13 @@ from tomography.experiments.r1_sentiment import plot
 from tomography.experiments.r1_sentiment import run
 from tomography.experiments.r1_sentiment import select_examples
 from tomography.experiments.sweep import SERIES
+from tomography.experiments.sweep import Prepared
+from tomography.experiments.sweep import sweep_from_activations
 from tomography.model import LoadedModel
 from tomography.model import load_model
+
+DIM = 64
+LAYERS = (1, 2)
 
 
 def _examples(per_class: int = 40) -> list[Example]:
@@ -68,6 +75,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.model == "gpt2"
     assert config.n_eval_pairs == 256
     assert config.min_words == 3
+    assert config.method == "logistic"
     assert config.n_seeds == 10
     assert config.n_pairs == 64
     assert Config.from_dict(config.to_dict()) == config
@@ -190,6 +198,57 @@ def test_run_loads_the_model_and_the_data(
     assert (run_dir.path / "summary.json").is_file()
     assert "finished_at" in run_dir.meta
     assert run_dir.meta["finished_at"] is None
+
+
+def _unmatched_pairs(n_pairs: int, *, seed: int) -> Prepared:
+    """Pairs of unrelated texts: loud content, quiet sentiment.
+
+    Every row is independent content noise, large along one nuisance axis,
+    plus a small offset along the sentiment axis signed by its label. As in
+    the label-contrastive pairing, the two members of a pair share nothing
+    but their opposite labels.
+    """
+    rng = np.random.default_rng(seed)
+    n = 2 * n_pairs
+    first_is_positive = rng.integers(0, 2, size=n_pairs)
+    labels = np.zeros(n, dtype=np.int64)
+    labels[2 * np.arange(n_pairs)] = first_is_positive
+    labels[2 * np.arange(n_pairs) + 1] = 1 - first_is_positive
+    axes = np.linalg.qr(np.random.default_rng(7).normal(size=(DIM, 2)))[0]
+    sentiment, nuisance = axes[:, 0], axes[:, 1]
+    data = rng.normal(size=(len(LAYERS), n, DIM))
+    data += 10.0 * rng.normal(size=(len(LAYERS), n, 1)) * nuisance
+    data += (2 * labels - 1)[None, :, None] * 2.0 * sentiment
+    pairs = np.arange(n, dtype=np.int64).reshape(n_pairs, 2)
+    stimuli = StimulusSet(
+        texts=tuple(f"text {i}" for i in range(n)),
+        response_spans=(None,) * n,
+        concept_spans=(None,) * n,
+        labels=labels,
+        pairs=pairs,
+        groups=pairs.copy(),
+        uids=tuple(f"u{i // 2}" for i in range(n)),
+    )
+    act = Activations(
+        data=data.astype(np.float32),
+        layers=LAYERS,
+        position="last",
+        row_stimulus=np.arange(n, dtype=np.int64),
+        row_rank=np.zeros(n, dtype=np.int64),
+        row_token=np.zeros(n, dtype=np.int64),
+        row_token_id=np.zeros(n, dtype=np.int64),
+        n_stimuli=n,
+    )
+    return stimuli, act
+
+
+def test_default_method_reads_sentiment_from_unmatched_pairs() -> None:
+    train = [_unmatched_pairs(32, seed=i) for i in range(3)]
+    evals = {"val": _unmatched_pairs(128, seed=99)}
+    reader = sweep_from_activations(
+        train, evals, method=Config().method, seed=0
+    ).per_seed("val")[0]
+    assert reader.mean(axis=0).min() > 0.85
 
 
 @pytest.mark.slow
