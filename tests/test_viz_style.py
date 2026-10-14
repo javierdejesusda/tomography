@@ -257,3 +257,19 @@ def test_figure_of_returns_the_figure_that_holds_the_axes() -> None:
     fig, axes = style.new_figure(1, 2)
 
     assert style.figure_of(axes[0, 1]) is fig
+
+
+@pytest.mark.parametrize(
+    ("fill", "expected"),
+    [
+        ("#0d366b", style.SURFACE),
+        ("#762221", style.SURFACE),
+        ("#cde2fb", style.INK),
+        ("#f0efec", style.INK),
+    ],
+    ids=["dark-blue", "dark-red", "light-blue", "neutral"],
+)
+def test_ink_on_picks_the_text_color_with_more_contrast(
+    fill: str, expected: str
+) -> None:
+    assert style.ink_on(fill) == expected

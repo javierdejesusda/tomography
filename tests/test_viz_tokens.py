@@ -5,6 +5,7 @@ from pathlib import Path
 from matplotlib.axes import Axes
 from matplotlib.colors import to_rgb
 from matplotlib.image import AxesImage
+from matplotlib.text import Text
 import numpy as np
 import pytest
 
@@ -186,6 +187,131 @@ def test_scan_figure_saves_in_all_formats(tmp_path: Path) -> None:
     fig = tokens.plot_scan(make_scores(), np.arange(4), tokens=TOKENS)
 
     paths = style.save_figure(fig, tmp_path, "scan")
+
+    assert [path.suffix for path in paths] == [".pdf", ".png", ".svg"]
+    assert all(path.stat().st_size > 0 for path in paths)
+
+
+def strip_texts(ax: Axes) -> list[Text]:
+    return list(ax.texts)
+
+
+def fill_of(text: Text) -> tuple[float, ...]:
+    patch = text.get_bbox_patch()
+    assert patch is not None
+    return tuple(patch.get_facecolor())
+
+
+def test_token_strip_writes_one_text_per_token() -> None:
+    fig = tokens.plot_token_strip(np.zeros(5), TOKENS)
+
+    shown = [text.get_text() for text in strip_texts(fig.axes[0])]
+
+    assert shown == ["The", "cat", "sat", "on", "it"]
+
+
+def test_token_strip_fills_each_token_by_its_score() -> None:
+    cmap = style.diverging_cmap()
+
+    fig = tokens.plot_token_strip(
+        np.array([-1.0, 0.0, 1.0]), ["a", "b", "c"], vmax=1.0
+    )
+
+    fills = [fill_of(text) for text in strip_texts(fig.axes[0])]
+    for fill, position in zip(fills, (0.0, 0.5, 1.0), strict=True):
+        assert fill == pytest.approx(cmap(position), abs=2 / 255)
+
+
+def test_token_strip_text_stays_readable_on_every_fill() -> None:
+    fig = tokens.plot_token_strip(
+        np.array([-1.0, 0.0, 1.0]), ["a", "b", "c"], vmax=1.0
+    )
+
+    inks = [text.get_color() for text in strip_texts(fig.axes[0])]
+
+    assert inks == [style.SURFACE, style.INK, style.SURFACE]
+
+
+def test_token_strip_leaves_the_masked_first_token_unfilled() -> None:
+    scores = np.array([9.0, 0.5, -0.5])
+
+    fig = tokens.plot_token_strip(scores, ["<bos>", "a", "b"], mask_first=True)
+
+    first, second, _ = strip_texts(fig.axes[0])
+    assert fill_of(first)[3] == 0.0
+    assert fill_of(second)[3] == 1.0
+    assert first.get_color() == style.INK_SECONDARY
+
+
+def test_token_strip_color_range_ignores_the_masked_token() -> None:
+    cmap = style.diverging_cmap()
+    scores = np.array([100.0, 1.0, -1.0])
+
+    fig = tokens.plot_token_strip(scores, ["<bos>", "a", "b"], mask_first=True)
+
+    _, second, third = strip_texts(fig.axes[0])
+    assert fill_of(second) == pytest.approx(cmap(1.0), abs=2 / 255)
+    assert fill_of(third) == pytest.approx(cmap(0.0), abs=2 / 255)
+
+
+def test_token_strip_wraps_inside_the_axes_in_reading_order() -> None:
+    words = [f" word{i}" for i in range(40)]
+
+    fig = tokens.plot_token_strip(np.zeros(40), words, width=3.5)
+
+    fig.canvas.draw()
+    ax = fig.axes[0]
+    boxes = [text.get_window_extent() for text in strip_texts(ax)]
+    limit = ax.get_window_extent().x1 + 1
+    assert all(box.x1 <= limit for box in boxes)
+    rows = sorted({round(box.y0) for box in boxes}, reverse=True)
+    assert len(rows) > 1
+    previous = None
+    for box in boxes:
+        if previous is not None and round(box.y0) == round(previous.y0):
+            assert box.x0 >= previous.x1 - 1
+        else:
+            assert previous is None or box.y0 < previous.y0
+        previous = box
+
+
+def test_token_strip_figure_grows_with_the_number_of_lines() -> None:
+    short = tokens.plot_token_strip(np.zeros(3), ["a", " b", " c"])
+    long = tokens.plot_token_strip(
+        np.zeros(120), [f" word{i}" for i in range(120)]
+    )
+
+    assert long.get_size_inches()[1] > short.get_size_inches()[1]
+
+
+def test_token_strip_draws_on_a_given_axes() -> None:
+    fig, axes = style.new_figure(2, 1)
+
+    returned = tokens.plot_token_strip(
+        np.zeros(3), ["a", "b", "c"], ax=axes[1, 0]
+    )
+
+    assert returned is fig
+    assert len(axes[1, 0].texts) == 3
+    assert not axes[0, 0].texts
+    assert not axes[1, 0].axison
+
+
+def test_token_strip_rejects_mismatched_or_unusable_inputs() -> None:
+    with pytest.raises(ValueError, match="tokens"):
+        tokens.plot_token_strip(np.zeros(3), ["a", "b"])
+    with pytest.raises(ValueError, match="1-D"):
+        tokens.plot_token_strip(np.zeros((2, 2)), ["a", "b"])
+    with pytest.raises(ValueError, match="vmax"):
+        tokens.plot_token_strip(np.zeros(2), ["a", "b"], vmax=-1.0)
+    with pytest.raises(ValueError, match="mask_first"):
+        tokens.plot_token_strip(np.zeros(1), ["a"], mask_first=True)
+
+
+def test_token_strip_saves_in_all_formats(tmp_path: Path) -> None:
+    fig = tokens.plot_token_strip(np.linspace(-1, 1, 5), TOKENS)
+
+    paths = style.save_figure(fig, tmp_path, "strip")
 
     assert [path.suffix for path in paths] == [".pdf", ".png", ".svg"]
     assert all(path.stat().st_size > 0 for path in paths)

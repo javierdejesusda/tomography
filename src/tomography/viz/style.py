@@ -19,8 +19,10 @@ from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import Colormap
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import to_rgb
 from matplotlib.figure import Figure
 from matplotlib.rcsetup import cycler
+from matplotlib.typing import ColorType
 import numpy as np
 from numpy.typing import NDArray
 
@@ -269,3 +271,29 @@ def figure_of(ax: Axes) -> Figure:
         The figure to save or return from a primitive.
     """
     return cast(Figure, ax.get_figure(root=True))
+
+
+def _luminance(color: ColorType) -> float:
+    linear = [
+        c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+        for c in to_rgb(color)
+    ]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def ink_on(fill: ColorType) -> str:
+    """Returns the text color that reads best on a filled mark.
+
+    Text set inside a colored fill is the one case where text does not wear
+    a fixed ink: it takes white or primary ink by the fill's contrast.
+
+    Args:
+        fill: Any matplotlib color of the fill.
+
+    Returns:
+        `SURFACE` (white) or `INK`, whichever has the higher WCAG contrast.
+    """
+    lum = _luminance(fill)
+    against_white = (1.0 + 0.05) / (lum + 0.05)
+    against_ink = (lum + 0.05) / (_luminance(INK) + 0.05)
+    return SURFACE if against_white >= against_ink else INK
