@@ -1,9 +1,12 @@
 from datetime import date
+from email.message import Message
 import hashlib
+import http.client
 import io
 import json
 from pathlib import Path
 import re
+import urllib.error
 import urllib.request
 
 import pytest
@@ -35,6 +38,40 @@ class _Endpoint:
     def __call__(self, query: str) -> bytes:
         self.queries.append(query)
         return self.body
+
+
+class _Scripted:
+    """A fetch that plays back outcomes: bytes are returned, errors raised."""
+
+    def __init__(self, *outcomes: bytes | BaseException) -> None:
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    def __call__(self, query: str) -> bytes:
+        self.calls += 1
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+class _Sleeper:
+    """Records the pauses a retry asks for instead of waiting."""
+
+    def __init__(self) -> None:
+        self.delays: list[float] = []
+
+    def __call__(self, seconds: float) -> None:
+        self.delays.append(seconds)
+
+
+def _http_error(code: int, retry_after: str | None = None) -> Exception:
+    headers = Message()
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return urllib.error.HTTPError(
+        "https://query.wikidata.org/sparql", code, "error", headers, None
+    )
 
 
 def test_parse_results_flattens_each_binding_to_variable_and_value() -> None:
@@ -154,7 +191,10 @@ def test_run_query_does_not_cache_a_body_that_is_not_json(
 ) -> None:
     with pytest.raises(json.JSONDecodeError):
         wikidata.run_query(
-            "SELECT 1", fetch=_Endpoint(b"<html>"), cache=tmp_path
+            "SELECT 1",
+            fetch=_Endpoint(b"<html>"),
+            cache=tmp_path,
+            sleep=_Sleeper(),
         )
 
     assert not (tmp_path / "wikidata").exists()
@@ -167,6 +207,278 @@ def test_run_query_does_not_cache_a_body_that_is_not_an_object(
         wikidata.run_query("SELECT 1", fetch=_Endpoint(b"[]"), cache=tmp_path)
 
     assert not (tmp_path / "wikidata").exists()
+
+
+_GOOD = _body([{"a": "1"}])
+_CUT = _GOOD[:-9]
+_KEY = hashlib.sha256(b"SELECT 1").hexdigest()[:16]
+
+
+def test_run_query_does_not_sleep_after_a_first_try_success(
+    tmp_path: Path,
+) -> None:
+    fetch = _Scripted(_GOOD)
+    sleeper = _Sleeper()
+
+    result = wikidata.run_query(
+        "SELECT 1", fetch=fetch, cache=tmp_path, sleep=sleeper
+    )
+
+    assert result.rows == ({"a": "1"},)
+    assert fetch.calls == 1
+    assert sleeper.delays == []
+
+
+def test_run_query_retries_a_cut_off_body_and_caches_only_the_good_one(
+    tmp_path: Path,
+) -> None:
+    fetch = _Scripted(_CUT, _GOOD)
+    sleeper = _Sleeper()
+
+    result = wikidata.run_query(
+        "SELECT 1", fetch=fetch, cache=tmp_path, sleep=sleeper
+    )
+
+    assert result.rows == ({"a": "1"},)
+    assert result.sha256 == hashlib.sha256(_GOOD).hexdigest()
+    assert fetch.calls == 2
+    assert sleeper.delays == [2.0]
+    (folder,) = (tmp_path / "wikidata").iterdir()
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "record.json",
+        "result.json",
+    ]
+    assert (folder / "result.json").read_bytes() == _GOOD
+
+
+def test_run_query_retries_an_incomplete_read_with_doubling_pauses(
+    tmp_path: Path,
+) -> None:
+    fetch = _Scripted(
+        http.client.IncompleteRead(b"par"),
+        http.client.IncompleteRead(b"par"),
+        _GOOD,
+    )
+    sleeper = _Sleeper()
+
+    result = wikidata.run_query(
+        "SELECT 1", fetch=fetch, cache=tmp_path, sleep=sleeper
+    )
+
+    assert result.rows == ({"a": "1"},)
+    assert fetch.calls == 3
+    assert sleeper.delays == [2.0, 4.0]
+
+
+def test_run_query_retries_the_value_error_of_a_cut_chunked_stream(
+    tmp_path: Path,
+) -> None:
+    fetch = _Scripted(
+        ValueError("invalid literal for int() with base 16: b''"), _GOOD
+    )
+    sleeper = _Sleeper()
+
+    result = wikidata.run_query(
+        "SELECT 1", fetch=fetch, cache=tmp_path, sleep=sleeper
+    )
+
+    assert result.rows == ({"a": "1"},)
+    assert sleeper.delays == [2.0]
+
+
+def test_run_query_retries_a_body_cut_inside_a_multibyte_character(
+    tmp_path: Path,
+) -> None:
+    cut = "\u00e9".encode()[:1]
+    fetch = _Scripted(cut, _GOOD)
+    sleeper = _Sleeper()
+
+    wikidata.run_query("SELECT 1", fetch=fetch, cache=tmp_path, sleep=sleeper)
+
+    assert fetch.calls == 2
+
+
+def test_run_query_gives_up_on_a_body_that_stays_cut_off(
+    tmp_path: Path,
+) -> None:
+    fetch = _Scripted(_CUT, _CUT, _CUT)
+    sleeper = _Sleeper()
+
+    with pytest.raises(json.JSONDecodeError) as caught:
+        wikidata.run_query(
+            "SELECT 1", fetch=fetch, cache=tmp_path, sleep=sleeper
+        )
+
+    assert fetch.calls == 3
+    assert sleeper.delays == [2.0, 4.0]
+    (note,) = caught.value.__notes__
+    assert _KEY in note
+    assert "no usable response after 3 attempts" in note
+    assert not (tmp_path / "wikidata").exists()
+
+
+def test_run_query_gives_up_on_a_connection_that_keeps_closing(
+    tmp_path: Path,
+) -> None:
+    fetch = _Scripted(*(http.client.IncompleteRead(b"x") for _ in range(3)))
+    sleeper = _Sleeper()
+
+    with pytest.raises(http.client.IncompleteRead) as caught:
+        wikidata.run_query(
+            "SELECT 1", fetch=fetch, cache=tmp_path, sleep=sleeper
+        )
+
+    assert fetch.calls == 3
+    assert sleeper.delays == [2.0, 4.0]
+    (note,) = caught.value.__notes__
+    assert _KEY in note
+    assert "no usable response after 3 attempts" in note
+    assert not (tmp_path / "wikidata").exists()
+
+
+def _delays_after(
+    tmp_path: Path, first: Exception, *more: bytes | Exception
+) -> list[float]:
+    sleeper = _Sleeper()
+    outcomes = (first, *more) if more else (first, _GOOD)
+    wikidata.run_query(
+        "SELECT 1",
+        fetch=_Scripted(*outcomes),
+        cache=tmp_path,
+        sleep=sleeper,
+    )
+    return sleeper.delays
+
+
+def test_run_query_retries_a_bad_gateway(tmp_path: Path) -> None:
+    assert _delays_after(tmp_path, _http_error(502)) == [2.0]
+
+
+def test_run_query_waits_for_the_retry_after_the_server_names(
+    tmp_path: Path,
+) -> None:
+    assert _delays_after(tmp_path, _http_error(429, "7")) == [7.0]
+
+
+def test_run_query_accepts_a_decimal_retry_after(tmp_path: Path) -> None:
+    assert _delays_after(tmp_path, _http_error(503, "0.5")) == [0.5]
+
+
+def test_run_query_caps_the_retry_after(tmp_path: Path) -> None:
+    assert _delays_after(tmp_path, _http_error(429, "120")) == [30.0]
+
+
+def test_run_query_ignores_a_retry_after_date(tmp_path: Path) -> None:
+    error = _http_error(503, "Wed, 21 Oct 2026 07:28:00 GMT")
+
+    assert _delays_after(tmp_path, error) == [2.0]
+
+
+def test_run_query_ignores_a_garbled_or_negative_retry_after(
+    tmp_path: Path,
+) -> None:
+    assert _delays_after(tmp_path, _http_error(503, "soon")) == [2.0]
+    assert _delays_after(tmp_path / "b", _http_error(503, "-5")) == [2.0]
+
+
+def test_run_query_keeps_counting_backoff_by_attempt(tmp_path: Path) -> None:
+    delays = _delays_after(
+        tmp_path, _http_error(429, "7"), _http_error(503), _GOOD
+    )
+
+    assert delays == [7.0, 4.0]
+
+
+def test_run_query_gives_up_on_a_gateway_that_keeps_timing_out(
+    tmp_path: Path,
+) -> None:
+    fetch = _Scripted(*(_http_error(504) for _ in range(3)))
+    sleeper = _Sleeper()
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        wikidata.run_query(
+            "SELECT 1", fetch=fetch, cache=tmp_path, sleep=sleeper
+        )
+
+    assert caught.value.code == 504
+    assert fetch.calls == 3
+    assert sleeper.delays == [2.0, 4.0]
+    (note,) = caught.value.__notes__
+    assert _KEY in note
+    assert "no usable response after 3 attempts" in note
+    assert not (tmp_path / "wikidata").exists()
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        _http_error(404),
+        _http_error(500),
+        _http_error(400, "5"),
+        urllib.error.URLError("no route"),
+        TimeoutError("timed out"),
+        b'{"error": 1}',
+        b"[]",
+    ],
+    ids=["404", "500", "400", "urlerror", "timeout", "keyerror", "typeerror"],
+)
+def test_run_query_does_not_retry_a_deterministic_failure(
+    tmp_path: Path, outcome: bytes | Exception
+) -> None:
+    fetch = _Scripted(outcome, _GOOD)
+    sleeper = _Sleeper()
+
+    with pytest.raises(
+        (urllib.error.URLError, TimeoutError, KeyError, TypeError)
+    ):
+        wikidata.run_query(
+            "SELECT 1", fetch=fetch, cache=tmp_path, sleep=sleeper
+        )
+
+    assert fetch.calls == 1
+    assert sleeper.delays == []
+    assert not (tmp_path / "wikidata").exists()
+
+
+def test_run_query_does_not_retry_a_checksum_failure(tmp_path: Path) -> None:
+    wikidata.run_query(
+        "SELECT 1", fetch=_Scripted(_GOOD), cache=tmp_path, sleep=_Sleeper()
+    )
+    (folder,) = (tmp_path / "wikidata").iterdir()
+    (folder / "result.json").write_bytes(b"changed")
+    fetch = _Scripted()
+    sleeper = _Sleeper()
+
+    with pytest.raises(ChecksumError):
+        wikidata.run_query(
+            "SELECT 1", fetch=fetch, cache=tmp_path, sleep=sleeper
+        )
+
+    assert fetch.calls == 0
+    assert sleeper.delays == []
+
+
+def test_run_query_never_fetches_or_sleeps_for_a_hit_or_offline_miss(
+    tmp_path: Path,
+) -> None:
+    wikidata.run_query(
+        "SELECT 1", fetch=_Scripted(_GOOD), cache=tmp_path, sleep=_Sleeper()
+    )
+    fetch = _Scripted()
+    sleeper = _Sleeper()
+
+    wikidata.run_query("SELECT 1", fetch=fetch, cache=tmp_path, sleep=sleeper)
+    with pytest.raises(OfflineCacheMissError):
+        wikidata.run_query(
+            "SELECT 2",
+            fetch=fetch,
+            cache=tmp_path,
+            offline=True,
+            sleep=sleeper,
+        )
+
+    assert fetch.calls == 0
+    assert sleeper.delays == []
 
 
 def test_sparql_fetch_asks_the_endpoint_and_names_the_client(

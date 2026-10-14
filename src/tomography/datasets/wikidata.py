@@ -17,11 +17,14 @@ from datetime import date
 from datetime import datetime
 from datetime import timedelta
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -37,6 +40,10 @@ ENDPOINT = "https://query.wikidata.org/sparql"
 _USER_AGENT = "tomography/0.1 (https://github.com/javierdejesusda/tomography)"
 _TIMEOUT_SECONDS = 90
 _ITEM_ID = re.compile(r"Q\d+")
+_ATTEMPTS = 3
+_BACKOFF_SECONDS = 2.0
+_MAX_RETRY_AFTER_SECONDS = 30.0
+_TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
 _BODY = "result.json"
 _RECORD = "record.json"
 _LABEL_SERVICE = (
@@ -124,6 +131,8 @@ def sparql_fetch(query: str) -> bytes:
         urllib.error.URLError: If the service cannot be reached, answers with
             an error, or times out.
         TimeoutError: If reading the response times out.
+        http.client.IncompleteRead: If the connection closes before the whole
+            body arrives.
     """
     url = ENDPOINT + "?" + urllib.parse.urlencode({"query": query})
     request = urllib.request.Request(
@@ -145,12 +154,16 @@ def run_query(
     cache: Path | None = None,
     offline: bool = False,
     today: Callable[[], date] | None = None,
+    sleep: Callable[[float], None] | None = None,
 ) -> QueryResult:
     """Runs a SPARQL query and records where the answer came from.
 
     The response is cached under the query's digest together with the query
     text and the retrieval date. A later call returns that snapshot, after
     checking the body against its recorded SHA-256, and does not call `fetch`.
+    A response that is cut off, or a transient 429, 502, 503 or 504 answer, is
+    retried up to 3 times with pauses of 2 s then 4 s (or the server's
+    Retry-After, at most 30 s). Only a complete, parsed response is cached.
 
     Args:
         query: The SPARQL query text.
@@ -159,6 +172,8 @@ def run_query(
         cache: Cache directory; defaults to the shared tomography cache.
         offline: If True, never call `fetch`.
         today: Gives the retrieval date; defaults to today in UTC.
+        sleep: Waits the given number of seconds between attempts; defaults
+            to `time.sleep`.
 
     Returns:
         The rows with the query, retrieval date and response digest.
@@ -167,6 +182,12 @@ def run_query(
         ChecksumError: If a cached body does not match its recorded digest.
         OfflineCacheMissError: If `offline` is True and the query is not
             cached.
+        http.client.IncompleteRead: If the connection closed before the whole
+            body arrived on every attempt.
+        urllib.error.HTTPError: If the service answered 429, 502, 503 or 504
+            on every attempt, or any other error status at once.
+        ValueError: If the response was cut off or is not JSON on every
+            attempt; `json.JSONDecodeError` is the usual subclass.
         json.JSONDecodeError: If the response is not JSON.
         TypeError: If the response is JSON but not an object.
         KeyError: If the response is not a SPARQL JSON result.
@@ -180,8 +201,9 @@ def run_query(
         raise OfflineCacheMissError(
             f"query {key} is not cached and offline=True"
         )
-    body = (fetch or sparql_fetch)(query)
-    rows = parse_results(body)
+    body, rows = _fetch_parsed(
+        query, key, fetch or sparql_fetch, sleep or time.sleep
+    )
     stamp = (today or _utc_today)().isoformat()
     digest = hashlib.sha256(body).hexdigest()
     folder.mkdir(parents=True, exist_ok=True)
@@ -189,6 +211,50 @@ def run_query(
     record = {"query": query, "retrieved_on": stamp, "sha256": digest}
     _write_atomic(folder / _RECORD, json.dumps(record).encode("utf-8"))
     return QueryResult(query, stamp, digest, rows)
+
+
+def _fetch_parsed(
+    query: str,
+    key: str,
+    fetch: QueryFetch,
+    sleep: Callable[[float], None],
+) -> tuple[bytes, tuple[Mapping[str, str], ...]]:
+    for attempt in range(1, _ATTEMPTS + 1):
+        try:
+            body = fetch(query)
+            return body, parse_results(body)
+        except (
+            http.client.IncompleteRead,
+            ValueError,
+            urllib.error.HTTPError,
+        ) as error:
+            if _is_permanent(error):
+                raise
+            if attempt == _ATTEMPTS:
+                error.add_note(
+                    f"query {key}: no usable response after "
+                    f"{_ATTEMPTS} attempts"
+                )
+                raise
+            sleep(_pause(error, attempt))
+    raise AssertionError("unreachable")
+
+
+def _is_permanent(error: Exception) -> bool:
+    return (
+        isinstance(error, urllib.error.HTTPError)
+        and error.code not in _TRANSIENT_STATUSES
+    )
+
+
+def _pause(error: Exception, attempt: int) -> float:
+    if isinstance(error, urllib.error.HTTPError):
+        header: str | None = (
+            error.headers.get("Retry-After") if error.headers else None
+        )
+        if header is not None and re.fullmatch(r"\d+(\.\d+)?", header.strip()):
+            return min(float(header), _MAX_RETRY_AFTER_SECONDS)
+    return _BACKOFF_SECONDS * 2.0 ** (attempt - 1)
 
 
 def _read_snapshot(query: str, folder: Path) -> QueryResult:
@@ -283,6 +349,8 @@ def load_post_cutoff(
         ChecksumError: If a cached result does not match its digest.
         OfflineCacheMissError: If `offline` is True and the query is not
             cached.
+        http.client.IncompleteRead: If the connection closed before the whole
+            response arrived on every attempt.
     """
     result = run_query(
         award_winners_query(awards),
@@ -450,6 +518,8 @@ def load_unknowable_detail(
         ChecksumError: If a cached result does not match its digest.
         OfflineCacheMissError: If `offline` is True and the query is not
             cached.
+        http.client.IncompleteRead: If the connection closed before the whole
+            response arrived on every attempt.
     """
     result = run_query(
         famous_people_query(awards, limit=limit),
