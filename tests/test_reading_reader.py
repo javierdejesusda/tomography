@@ -108,3 +108,225 @@ def test_score_rejects_activations_of_the_wrong_shape(
         reader.score(np.zeros(shape, dtype=np.float32))
     with pytest.raises(ValueError, match="shape"):
         reader.raw_score(np.zeros(shape, dtype=np.float32))
+
+
+def x_rows(*x_values: float) -> NDArray[np.float32]:
+    """Builds one layer of 2-d rows that vary along the x axis only."""
+    h = np.zeros((1, len(x_values), 2), dtype=np.float32)
+    h[0, :, 0] = x_values
+    return h
+
+
+def fitted_sign(
+    x_values: list[float],
+    positives: list[int],
+    *,
+    groups: list[list[int]] | None = None,
+    pairs: list[list[int]] | None = None,
+) -> float:
+    """Fits pca_raw on x-only rows, so the score is the centered x value."""
+    labels = np.zeros(len(x_values), dtype=np.int64)
+    labels[positives] = 1
+    reader = RepReader.fit(
+        "pca_raw",
+        x_rows(*x_values),
+        [0],
+        labels=labels,
+        pairs=None if pairs is None else np.array(pairs, dtype=np.int64),
+        groups=None if groups is None else np.array(groups, dtype=np.int64),
+    )
+    np.testing.assert_allclose(np.abs(reader.directions), [[1.0, 0.0]])
+    return float(reader.signs[0])
+
+
+X = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+
+
+def test_sign_is_positive_when_the_positive_member_is_usually_highest() -> None:
+    groups = [[0, 1], [2, 3], [4, 5]]
+
+    assert fitted_sign(X, [1, 3, 4], groups=groups) == 1.0
+
+
+def test_sign_is_negative_when_the_positive_member_is_usually_lowest() -> None:
+    groups = [[0, 1], [2, 3], [4, 5]]
+
+    assert fitted_sign(X, [0, 2, 5], groups=groups) == -1.0
+
+
+def test_a_tie_between_highest_and_lowest_counts_as_positive() -> None:
+    groups = [[0, 1], [2, 3]]
+
+    assert fitted_sign(X, [1, 2], groups=groups) == 1.0
+
+
+def test_sign_rule_handles_groups_of_more_than_two() -> None:
+    groups = [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
+
+    assert fitted_sign(X, [0, 3, 7], groups=groups) == -1.0
+    assert fitted_sign(X, [2, 5, 7], groups=groups) == 1.0
+    assert fitted_sign(X, [2, 3, 7], groups=groups) == 1.0
+
+
+def test_sign_rule_ignores_padding_members() -> None:
+    groups = [[0, 1, -1], [2, 3, -1]]
+
+    assert fitted_sign(X, [0, 2], groups=groups) == -1.0
+
+
+def test_members_tied_for_the_maximum_all_count_as_highest() -> None:
+    x_values = [3.0, 3.0, 1.0, 5.0, 2.0, 0.0]
+    groups = [[0, 1, 2], [3, 4, 5]]
+
+    assert fitted_sign(x_values, [1, 5], groups=groups) == 1.0
+
+
+def test_pairs_with_different_labels_are_the_default_groups() -> None:
+    pairs = [[0, 1], [2, 3], [4, 5]]
+
+    assert fitted_sign(X, [0, 2, 5], pairs=pairs) == -1.0
+    assert fitted_sign(X, [1, 3, 4], pairs=pairs) == 1.0
+
+
+def test_pairs_with_equal_labels_are_not_used_for_the_sign() -> None:
+    pairs = [[0, 1], [2, 3], [4, 5], [6, 7]]
+
+    assert fitted_sign(X, [0, 2, 4, 5, 6, 7], pairs=pairs) == -1.0
+
+
+def test_explicit_groups_take_precedence_over_pairs() -> None:
+    pairs = [[0, 1], [2, 3]]
+    groups = [[4, 5], [6, 7]]
+
+    assert fitted_sign(X, [0, 2, 4, 6], pairs=pairs, groups=groups) == -1.0
+    assert fitted_sign(X, [0, 2, 5, 7], pairs=pairs, groups=groups) == 1.0
+
+
+def test_without_groups_the_sign_orders_the_class_mean_scores() -> None:
+    assert fitted_sign(X, [6, 7, 8, 9]) == 1.0
+    assert fitted_sign(X, [0, 1, 2, 3]) == -1.0
+    assert fitted_sign([0.0, 1.0, 2.0, 3.0], [0, 3]) == 1.0
+
+
+def test_pairs_that_all_share_a_label_fall_back_to_class_means() -> None:
+    assert fitted_sign(X, [0, 1, 2, 3], pairs=[[0, 1], [2, 3]]) == -1.0
+
+
+def test_each_layer_gets_its_own_sign() -> None:
+    h = x_rows(*X)
+    h = np.concatenate([h, -h])
+    labels = np.zeros(10, dtype=np.int64)
+    labels[[6, 7, 8, 9]] = 1
+
+    reader = RepReader.fit("pca_raw", h, [3, 8], labels=labels)
+
+    assert reader.layers == (3, 8)
+    np.testing.assert_array_equal(reader.signs, [1.0, -1.0])
+    scores = reader.score(h)
+    assert (scores[:, labels == 1].mean(axis=1) > 0).all()
+    assert (scores[:, labels == 0].mean(axis=1) < 0).all()
+
+
+def test_fit_stores_the_arrays_of_each_layer() -> None:
+    rng = np.random.default_rng(0)
+    h = rng.standard_normal((3, 20, 6)).astype(np.float32)
+    labels = (np.arange(20) % 2).astype(np.int64)
+
+    reader = RepReader.fit("mean_diff", h, [1, 2, 3], labels=labels)
+
+    assert reader.method == "mean_diff"
+    assert reader.directions.shape == (3, 6)
+    assert reader.means.shape == (3, 6)
+    assert reader.signs.shape == (3,)
+    np.testing.assert_allclose(
+        reader.means, h.astype(np.float64).mean(axis=1), atol=1e-5
+    )
+    np.testing.assert_allclose(np.linalg.norm(reader.directions, axis=1), 1.0)
+
+
+def test_random_directions_differ_across_layers_but_follow_the_seed() -> None:
+    rng = np.random.default_rng(1)
+    h = np.tile(rng.standard_normal((1, 12, 8)), (3, 1, 1)).astype(np.float32)
+    labels = (np.arange(12) % 2).astype(np.int64)
+
+    first = RepReader.fit("random", h, [0, 1, 2], labels=labels, seed=4)
+    again = RepReader.fit("random", h, [0, 1, 2], labels=labels, seed=4)
+    other = RepReader.fit("random", h, [0, 1, 2], labels=labels, seed=5)
+
+    np.testing.assert_array_equal(first.directions, again.directions)
+    assert not np.allclose(first.directions[0], first.directions[1])
+    assert not np.allclose(first.directions, other.directions)
+
+
+def test_fit_passes_pairs_and_preprocess_to_the_finder() -> None:
+    rng = np.random.default_rng(2)
+    h = rng.standard_normal((1, 16, 5)).astype(np.float32)
+    labels = np.tile([1, 0], 8).astype(np.int64)
+    pairs = np.arange(16, dtype=np.int64).reshape(8, 2)
+
+    centered = RepReader.fit("pca_diff", h, [0], labels=labels, pairs=pairs)
+    raw = RepReader.fit(
+        "pca_diff", h, [0], labels=labels, pairs=pairs, preprocess="none"
+    )
+
+    assert not np.allclose(centered.directions, raw.directions)
+
+
+@pytest.mark.parametrize(
+    ("groups", "message"),
+    [
+        ([[0, 2]], "exactly one"),
+        ([[1, 3]], "exactly one"),
+        ([[0, 99]], "groups"),
+        ([0, 1], "groups"),
+    ],
+    ids=["no-positive", "two-positives", "out-of-range", "one-dimensional"],
+)
+def test_fit_rejects_groups_without_exactly_one_positive_member(
+    groups: list[list[int]], message: str
+) -> None:
+    labels = np.zeros(10, dtype=np.int64)
+    labels[[1, 3]] = 1
+
+    with pytest.raises(ValueError, match=message):
+        RepReader.fit(
+            "pca_raw",
+            x_rows(*X),
+            [0],
+            labels=labels,
+            groups=np.array(groups, dtype=np.int64),
+        )
+
+
+@pytest.mark.parametrize(
+    ("h", "layers", "labels", "message"),
+    [
+        (np.zeros((10, 2)), [0], np.zeros(10), "shape"),
+        (np.zeros((2, 10, 2)), [0], np.zeros(10), "layers"),
+        (np.zeros((1, 10, 2)), [0], np.zeros(9), "labels"),
+    ],
+    ids=["two-dimensional", "layer-count", "label-length"],
+)
+def test_fit_rejects_inconsistent_shapes(
+    h: NDArray[np.float64],
+    layers: list[int],
+    labels: NDArray[np.float64],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        RepReader.fit(
+            "pca_raw",
+            h.astype(np.float32),
+            layers,
+            labels=labels.astype(np.int64),
+        )
+
+
+def test_fit_without_groups_needs_both_classes() -> None:
+    with pytest.raises(ValueError, match="both classes"):
+        RepReader.fit(
+            "random",
+            x_rows(*X),
+            [0],
+            labels=np.ones(10, dtype=np.int64),
+        )
