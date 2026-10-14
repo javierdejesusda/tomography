@@ -6,7 +6,9 @@ through tokenizer offsets.
 """
 
 from collections.abc import Callable
+from collections.abc import Mapping
 from dataclasses import dataclass
+import re
 from typing import TYPE_CHECKING
 from typing import Literal
 from typing import Self
@@ -18,6 +20,9 @@ Span = tuple[int, int]
 ChatRenderFn = Callable[[list[dict[str, str]]], str]
 
 _USER_SENTINEL = "TOMOGRAPHY_USER_TEXT"
+_SLOT = re.compile(r"\{(concept|stimulus|question|persona|instruction)\}")
+_CONCEPT_SLOTS = frozenset({"concept", "stimulus", "question"})
+_FUNCTION_SLOTS = frozenset({"persona", "instruction"})
 
 
 @dataclass(frozen=True)
@@ -124,3 +129,205 @@ class ChatFormat:
         if prompt != marked[:user_start] + user + suffix:
             raise ValueError("the chat template altered the user text")
         return prompt, user_start
+
+
+@dataclass(frozen=True)
+class Rendered:
+    """A rendered stimulus and its marked character spans.
+
+    Attributes:
+        text: The full prompt text.
+        response_span: The marked span: the assistant response for function
+            templates and the stimulus text for concept templates.
+        concept_span: The concept word in the user turn, if the template has
+            a concept slot.
+    """
+
+    text: str
+    response_span: Span | None
+    concept_span: Span | None
+
+
+@dataclass(frozen=True)
+class ConceptTemplate:
+    """A template that asks about a concept in a given stimulus text.
+
+    The user text may hold the slots ``{concept}``, ``{question}`` and
+    exactly one ``{stimulus}``. Slots are filled in a single pass, so filled
+    values are never expanded again.
+
+    Attributes:
+        name: Identifier of the template.
+        user: The user text with its slots.
+        assistant: Literal text that follows the assistant tag.
+        tagged: If false, the chat format is ignored and the text is rendered
+            without tags (the "no chat tags" ablation).
+    """
+
+    name: str
+    user: str
+    assistant: str = ""
+    tagged: bool = True
+
+    def __post_init__(self) -> None:
+        """Validates the slots of the user text."""
+        _check_slots(self.name, self.user, _CONCEPT_SLOTS)
+        if _SLOT.findall(self.user).count("stimulus") != 1:
+            raise ValueError(
+                f"template {self.name!r} needs exactly one {{stimulus}} slot"
+            )
+
+    @property
+    def slots(self) -> frozenset[str]:
+        """The slot names that occur in the user text."""
+        return frozenset(_SLOT.findall(self.user))
+
+    def render(
+        self,
+        stimulus: str,
+        concept: str,
+        chat: ChatFormat,
+        *,
+        question: str | None = None,
+    ) -> Rendered:
+        """Renders one stimulus.
+
+        Args:
+            stimulus: The stimulus text, inserted verbatim.
+            concept: The concept word, inserted verbatim. Ignored when the
+                template has no ``{concept}`` slot.
+            chat: The chat format that wraps the user text.
+            question: The question for a ``{question}`` slot.
+
+        Returns:
+            The text, the stimulus span as ``response_span`` and the last
+            concept occurrence of the user turn as ``concept_span``.
+
+        Raises:
+            ValueError: If the template has a ``{question}`` slot and
+                ``question`` is None.
+        """
+        if "question" in self.slots and question is None:
+            raise ValueError(f"template {self.name!r} needs a question")
+        values = {
+            "concept": concept,
+            "stimulus": stimulus,
+            "question": question or "",
+        }
+        user, spans = _fill(self.user, values)
+        chat = chat if self.tagged else ChatFormat("none")
+        text, user_start, _ = chat.render_turn(user, self.assistant)
+        concept_span = None
+        if "concept" in spans:
+            start, end = spans["concept"][-1]
+            concept_span = (user_start + start, user_start + end)
+        start, end = spans["stimulus"][0]
+        response_span = (user_start + start, user_start + end)
+        return Rendered(text, response_span, concept_span)
+
+
+@dataclass(frozen=True)
+class FunctionTemplate:
+    """A template that makes the model act out a function through a persona.
+
+    The user text holds a ``{persona}`` slot and optionally an
+    ``{instruction}`` slot. The response follows the assistant tag and is the
+    marked span.
+
+    Attributes:
+        name: Identifier of the template.
+        user: The user text with its slots.
+        pos_personas: Persona wordings of the positive pole (honest, happy).
+        neg_personas: Persona wordings of the negative pole.
+        tagged: If false, the chat format is ignored and the text is rendered
+            without tags (the "no chat tags" ablation).
+    """
+
+    name: str
+    user: str
+    pos_personas: tuple[str, ...]
+    neg_personas: tuple[str, ...]
+    tagged: bool = True
+
+    def __post_init__(self) -> None:
+        """Validates the slots and the personas."""
+        _check_slots(self.name, self.user, _FUNCTION_SLOTS)
+        if "persona" not in self.slots:
+            raise ValueError(f"template {self.name!r} needs a {{persona}} slot")
+        if not self.pos_personas or not self.neg_personas:
+            raise ValueError(f"template {self.name!r} needs personas per pole")
+
+    @property
+    def slots(self) -> frozenset[str]:
+        """The slot names that occur in the user text."""
+        return frozenset(_SLOT.findall(self.user))
+
+    def render(
+        self,
+        response: str,
+        pole: Literal["pos", "neg"],
+        chat: ChatFormat,
+        *,
+        index: int = 0,
+        instruction: str | None = None,
+    ) -> Rendered:
+        """Renders one response under the persona of a pole.
+
+        Args:
+            response: The response text, inserted verbatim.
+            pole: Which persona list to use.
+            chat: The chat format that wraps the turns.
+            index: Position in the persona list of the pole.
+            instruction: The text for an ``{instruction}`` slot.
+
+        Returns:
+            The text and the response span as ``response_span``.
+
+        Raises:
+            ValueError: If ``pole`` is unknown, ``index`` is out of range, or
+                an ``{instruction}`` slot has no ``instruction``.
+        """
+        if pole not in ("pos", "neg"):
+            raise ValueError(f"pole must be 'pos' or 'neg', got {pole!r}")
+        personas = self.pos_personas if pole == "pos" else self.neg_personas
+        if not 0 <= index < len(personas):
+            raise ValueError(
+                f"index must be in [0, {len(personas)}), got {index}"
+            )
+        if "instruction" in self.slots and instruction is None:
+            raise ValueError(f"template {self.name!r} needs an instruction")
+        values = {"persona": personas[index], "instruction": instruction or ""}
+        user, _ = _fill(self.user, values)
+        chat = chat if self.tagged else ChatFormat("none")
+        text, _, start = chat.render_turn(user, response)
+        return Rendered(text, (start, start + len(response)), None)
+
+
+def _check_slots(name: str, user: str, allowed: frozenset[str]) -> None:
+    """Raises if the user text has a slot outside ``allowed``."""
+    unknown = set(_SLOT.findall(user)) - allowed
+    if unknown:
+        raise ValueError(
+            f"template {name!r} has unsupported slots {sorted(unknown)}"
+        )
+
+
+def _fill(
+    text: str, values: Mapping[str, str]
+) -> tuple[str, dict[str, list[Span]]]:
+    """Fills slots in one pass and records the span of every filled slot."""
+    parts: list[str] = []
+    spans: dict[str, list[Span]] = {}
+    written = 0
+    last = 0
+    for match in _SLOT.finditer(text):
+        literal = text[last : match.start()]
+        slot = match.group(1)
+        value = values[slot]
+        parts.extend((literal, value))
+        written += len(literal)
+        spans.setdefault(slot, []).append((written, written + len(value)))
+        written += len(value)
+        last = match.end()
+    parts.append(text[last:])
+    return "".join(parts), spans
