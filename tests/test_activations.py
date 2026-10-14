@@ -1,7 +1,316 @@
 import numpy as np
 import pytest
+import torch
 
 from tomography.activations import Activations
+from tomography.activations import collect_activations
+from tomography.hooks import capture_residuals
+from tomography.model import BosMode
+from tomography.model import LoadedModel
+
+TEXT = "USER: Is the movie good? ASSISTANT: Yes, the movie is very good."
+RESPONSE = (TEXT.index("Yes"), len(TEXT))
+CONCEPT = (TEXT.index("movie"), TEXT.index("movie") + len("movie"))
+TEXTS = [
+    TEXT,
+    "The quick brown fox jumps over the lazy dog.",
+    "USER: A short one? ASSISTANT: Yes.",
+    "She felt happy, then sad.",
+]
+SPANS = [
+    RESPONSE,
+    (TEXTS[1].index("jumps"), len(TEXTS[1])),
+    (TEXTS[2].index("Yes"), len(TEXTS[2])),
+    (TEXTS[3].index("happy"), len(TEXTS[3])),
+]
+TOLERANCE = {"rtol": 1e-4, "atol": 1e-3}
+
+
+def overlapping(lm: LoadedModel, text: str, span: tuple[int, int]) -> list[int]:
+    """Token indices of `text` (no BOS) overlapping `span`, by offsets."""
+    offsets = lm.tokenizer(
+        text, add_special_tokens=False, return_offsets_mapping=True
+    )["offset_mapping"]
+    start, end = span
+    return [
+        t for t, (a, b) in enumerate(offsets) if a < end and b > start and b > a
+    ]
+
+
+def bos_shift(lm: LoadedModel, bos: BosMode | None) -> int:
+    mode = lm.default_bos if bos is None else bos
+    return 1 if mode == "prepend" else 0
+
+
+def stream(
+    lm: LoadedModel, text: str, bos: BosMode | None = None
+) -> np.ndarray:
+    """Residual stream of one text at layers 0..L, shape (L + 1, T, d)."""
+    encoded = lm.encode([text], bos=bos)
+    layers = list(range(lm.n_layers + 1))
+    with capture_residuals(lm, layers) as captured, torch.no_grad():
+        lm.model(
+            input_ids=encoded.input_ids,
+            attention_mask=encoded.attention_mask,
+            position_ids=encoded.position_ids,
+        )
+    return np.stack([captured[layer][0].float().numpy() for layer in layers])
+
+
+def hook_count(lm: LoadedModel) -> int:
+    modules = [lm.decoder, *lm.blocks]
+    return sum(
+        len(m._forward_hooks) + len(m._forward_pre_hooks) for m in modules
+    )
+
+
+def test_last_position_reads_the_last_real_token_at_every_layer(
+    tiny_arch: LoadedModel,
+) -> None:
+    lm = tiny_arch
+
+    act = collect_activations(lm, TEXTS, position="last", batch_size=3)
+
+    assert act.data.dtype == np.float32
+    assert act.data.shape == (lm.n_layers + 1, len(TEXTS), lm.d_model)
+    assert act.layers == tuple(range(lm.n_layers + 1))
+    assert act.position == "last"
+    assert act.n_stimuli == len(TEXTS)
+    assert act.row_stimulus.tolist() == [0, 1, 2, 3]
+    assert act.row_rank.tolist() == [0, 0, 0, 0]
+    for i, text in enumerate(TEXTS):
+        last = len(overlapping(lm, text, (0, len(text)))) - 1
+        token = last + bos_shift(lm, None)
+        assert act.row_token[i] == token
+        np.testing.assert_allclose(
+            act.data[:, i], stream(lm, text)[:, token], **TOLERANCE
+        )
+        ids = lm.encode([text]).input_ids[0]
+        assert act.row_token_id[i] == ids[token].item()
+
+
+def test_layers_subset_keeps_the_requested_order(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    full = collect_activations(tiny_gpt2, TEXTS)
+
+    subset = collect_activations(tiny_gpt2, TEXTS, layers=[3, 0])
+
+    assert subset.layers == (3, 0)
+    np.testing.assert_array_equal(subset.data[0], full.data[3])
+    np.testing.assert_array_equal(subset.data[1], full.data[0])
+
+
+@pytest.mark.parametrize("bad", [[-1], [4], []], ids=["neg", "top+1", "empty"])
+def test_layers_outside_zero_to_l_or_empty_raise(
+    tiny_gpt2: LoadedModel, bad: list[int]
+) -> None:
+    with pytest.raises(ValueError, match="layer"):
+        collect_activations(tiny_gpt2, TEXTS, layers=bad)
+
+
+@pytest.mark.parametrize("position", ["last", "response", "concept", "mean"])
+def test_batched_collection_matches_per_example_collection(
+    tiny_arch: LoadedModel, position: str
+) -> None:
+    lm = tiny_arch
+    kwargs = {
+        "position": position,
+        "response_spans": SPANS,
+        "concept_spans": SPANS,
+    }
+
+    batched = collect_activations(lm, TEXTS, batch_size=4, **kwargs)  # type: ignore[arg-type]
+    single = collect_activations(lm, TEXTS, batch_size=1, **kwargs)  # type: ignore[arg-type]
+
+    np.testing.assert_allclose(batched.data, single.data, **TOLERANCE)
+    np.testing.assert_array_equal(batched.row_stimulus, single.row_stimulus)
+    np.testing.assert_array_equal(batched.row_token, single.row_token)
+
+
+def test_response_position_has_one_row_per_overlapping_token(
+    tiny_arch: LoadedModel,
+) -> None:
+    lm = tiny_arch
+    shift = bos_shift(lm, None)
+
+    act = collect_activations(
+        lm, TEXTS, position="response", response_spans=SPANS, batch_size=2
+    )
+
+    expected_tokens = [
+        [t + shift for t in overlapping(lm, text, span)]
+        for text, span in zip(TEXTS, SPANS, strict=True)
+    ]
+    assert act.row_token.tolist() == [
+        t for tokens in expected_tokens for t in tokens
+    ]
+    assert act.row_stimulus.tolist() == [
+        i for i, tokens in enumerate(expected_tokens) for _ in tokens
+    ]
+    assert act.row_rank.tolist() == [
+        r for tokens in expected_tokens for r in range(len(tokens))
+    ]
+    assert act.data.shape[1] == sum(len(t) for t in expected_tokens)
+    row = 0
+    for text, tokens in zip(TEXTS, expected_tokens, strict=True):
+        reference = stream(lm, text)
+        for token in tokens:
+            np.testing.assert_allclose(
+                act.data[:, row], reference[:, token], **TOLERANCE
+            )
+            row += 1
+
+
+def test_response_span_keeps_the_token_carrying_the_leading_space(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    lm = tiny_gpt2
+    offsets = lm.encode([TEXT]).offsets[0]
+
+    act = collect_activations(
+        lm, [TEXT], position="response", response_spans=[RESPONSE]
+    )
+
+    assert offsets[act.row_token[0]][0] == RESPONSE[0] - 1
+    assert offsets[act.row_token[-1]][1] == len(TEXT)
+
+
+def test_bos_is_never_part_of_a_span(tiny_gpt2: LoadedModel) -> None:
+    lm = tiny_gpt2
+
+    act = collect_activations(
+        lm,
+        [TEXT],
+        position="response",
+        response_spans=[(0, len(TEXT))],
+        bos="prepend",
+    )
+
+    assert act.row_token.min() == 1
+    assert lm.encode([TEXT]).input_ids[0, 0].item() == lm.bos_id
+    assert act.row_token_id[0] != lm.bos_id
+
+
+def test_concept_position_is_one_row_at_the_last_concept_token(
+    tiny_arch: LoadedModel,
+) -> None:
+    lm = tiny_arch
+    tokens = overlapping(lm, TEXT, CONCEPT)
+
+    act = collect_activations(
+        lm, [TEXT, TEXT], position="concept", concept_spans=[CONCEPT, CONCEPT]
+    )
+
+    assert len(tokens) >= 1
+    assert act.row_stimulus.tolist() == [0, 1]
+    assert act.row_rank.tolist() == [0, 0]
+    assert act.row_token.tolist() == [tokens[-1] + bos_shift(lm, None)] * 2
+    np.testing.assert_allclose(
+        act.data[:, 0],
+        stream(lm, TEXT)[:, tokens[-1] + bos_shift(lm, None)],
+        **TOLERANCE,
+    )
+
+
+def test_mean_position_averages_the_response_tokens(
+    tiny_arch: LoadedModel,
+) -> None:
+    lm = tiny_arch
+    rows = collect_activations(
+        lm, TEXTS, position="response", response_spans=SPANS
+    )
+
+    mean = collect_activations(lm, TEXTS, position="mean", response_spans=SPANS)
+
+    assert mean.data.shape == (lm.n_layers + 1, len(TEXTS), lm.d_model)
+    assert mean.row_stimulus.tolist() == [0, 1, 2, 3]
+    assert mean.row_rank.tolist() == [0, 0, 0, 0]
+    assert mean.row_token.tolist() == [-1] * 4
+    assert mean.row_token_id.tolist() == [-1] * 4
+    for i in range(len(TEXTS)):
+        selected = rows.row_stimulus == i
+        np.testing.assert_allclose(
+            mean.data[:, i],
+            rows.data[:, selected].mean(axis=1),
+            rtol=1e-5,
+            atol=1e-6,
+        )
+
+
+def test_bos_none_shifts_every_token_index_by_one(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    with_bos = collect_activations(tiny_gpt2, TEXTS, bos="prepend")
+    without = collect_activations(tiny_gpt2, TEXTS, bos="none")
+
+    np.testing.assert_array_equal(with_bos.row_token, without.row_token + 1)
+
+
+@pytest.mark.parametrize(
+    ("position", "message"),
+    [
+        ("response", "response_spans"),
+        ("mean", "response_spans"),
+        ("concept", "concept_spans"),
+    ],
+)
+def test_a_position_that_needs_spans_rejects_a_missing_argument(
+    tiny_gpt2: LoadedModel, position: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        collect_activations(tiny_gpt2, TEXTS, position=position)  # type: ignore[arg-type]
+
+
+def test_a_missing_span_names_the_stimulus(tiny_gpt2: LoadedModel) -> None:
+    spans = [RESPONSE, None, *SPANS[2:]]
+
+    with pytest.raises(ValueError, match="stimulus 1"):
+        collect_activations(
+            tiny_gpt2, TEXTS, position="response", response_spans=spans
+        )
+
+
+@pytest.mark.parametrize("span", [(0, 0), (500, 600)], ids=["empty", "outside"])
+def test_a_span_without_tokens_names_the_stimulus(
+    tiny_gpt2: LoadedModel, span: tuple[int, int]
+) -> None:
+    spans = [*SPANS[:2], span, SPANS[3]]
+
+    with pytest.raises(ValueError, match="stimulus 2"):
+        collect_activations(
+            tiny_gpt2, TEXTS, position="concept", concept_spans=spans
+        )
+
+
+def test_invalid_arguments_raise(tiny_gpt2: LoadedModel) -> None:
+    with pytest.raises(ValueError, match="empty"):
+        collect_activations(tiny_gpt2, [])
+    with pytest.raises(ValueError, match="batch_size"):
+        collect_activations(tiny_gpt2, TEXTS, batch_size=0)
+    with pytest.raises(ValueError, match="position"):
+        collect_activations(tiny_gpt2, TEXTS, position="first")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="response_spans"):
+        collect_activations(
+            tiny_gpt2, TEXTS, position="response", response_spans=SPANS[:2]
+        )
+
+
+def test_collection_skips_the_lm_head_and_leaves_no_hooks(
+    tiny_arch: LoadedModel,
+) -> None:
+    lm = tiny_arch
+
+    def refuse(*args: object) -> None:
+        raise AssertionError("the LM head must not run")
+
+    handle = lm.model.get_output_embeddings().register_forward_hook(refuse)
+    try:
+        collect_activations(lm, TEXTS)
+    finally:
+        handle.remove()
+
+    assert hook_count(lm) == 0
 
 
 def make_activations(counts: list[int]) -> Activations:
