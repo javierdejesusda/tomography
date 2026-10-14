@@ -53,14 +53,19 @@ def _next_token_logprobs(
         batch_size: Sequences per forward pass.
 
     Returns:
-        One float32 array per sequence, of length `len(sequence) - 1`: entry j
-        is the log-probability of token j + 1 given tokens 0..j.
+        One float32 array per sequence, in the input order, of length
+        `len(sequence) - 1`: entry j is the log-probability of token j + 1
+        given tokens 0..j. Batches are formed longest first to limit padding.
     """
-    results: list[NDArray[np.float32]] = []
+    results: list[NDArray[np.float32]] = [np.empty(0, dtype=np.float32)] * len(
+        sequences
+    )
+    order = sorted(range(len(sequences)), key=lambda i: -len(sequences[i]))
     with torch.no_grad():
-        for start in range(0, len(sequences), batch_size):
-            chunk = sequences[start : start + batch_size]
-            width = max(len(sequence) for sequence in chunk)
+        for start in range(0, len(order), batch_size):
+            indices = order[start : start + batch_size]
+            chunk = [sequences[i] for i in indices]
+            width = len(chunk[0])
             input_ids = torch.zeros((len(chunk), width), dtype=torch.long)
             mask = torch.zeros((len(chunk), width), dtype=torch.long)
             for row, sequence in enumerate(chunk):
@@ -77,10 +82,16 @@ def _next_token_logprobs(
             ).logits
             for row, sequence in enumerate(chunk):
                 length = len(sequence)
-                log_probs = logits[row, : length - 1].float().log_softmax(-1)
                 targets = input_ids[row, 1:length].to(model.device)
-                picked = log_probs.gather(-1, targets[:, None]).squeeze(-1)
-                results.append(picked.cpu().numpy())
+                picked = (
+                    logits[row, : length - 1]
+                    .float()
+                    .log_softmax(-1)
+                    .gather(-1, targets[:, None])
+                    .squeeze(-1)
+                )
+                results[indices[row]] = picked.cpu().numpy()
+            del logits
     return results
 
 

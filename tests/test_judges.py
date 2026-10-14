@@ -2,6 +2,7 @@ import math
 import os
 import re
 from types import SimpleNamespace
+import weakref
 
 from huggingface_hub import constants as hub_constants
 import numpy as np
@@ -226,6 +227,60 @@ def test_perplexity_passes_explicit_position_ids_for_padded_batches(
 
     assert len(seen) == 1
     assert seen[0].shape[0] == len(TEXTS)
+
+
+def test_perplexity_frees_each_batch_logits_before_the_next_forward(
+    gpt2: GPT2LMHeadModel, tokenizer: PreTrainedTokenizerFast
+) -> None:
+    refs: list[weakref.ref[torch.Tensor]] = []
+    alive_before_forward: list[bool] = []
+
+    def before(
+        _module: torch.nn.Module,
+        _args: tuple[object, ...],
+        _kwargs: dict[str, torch.Tensor],
+    ) -> None:
+        alive_before_forward.append(any(ref() is not None for ref in refs))
+
+    def after(
+        _module: torch.nn.Module,
+        _args: tuple[object, ...],
+        _kwargs: dict[str, torch.Tensor],
+        output: object,
+    ) -> None:
+        refs.append(weakref.ref(output.logits))  # type: ignore[attr-defined]
+
+    pre_handle = gpt2.register_forward_pre_hook(before, with_kwargs=True)
+    post_handle = gpt2.register_forward_hook(after, with_kwargs=True)
+    try:
+        judges.perplexity(gpt2, tokenizer, TEXTS, max_length=64, batch_size=1)
+    finally:
+        pre_handle.remove()
+        post_handle.remove()
+
+    assert alive_before_forward == [False, False, False, False]
+
+
+def test_perplexity_batches_sequences_from_longest_to_shortest(
+    gpt2: GPT2LMHeadModel, tokenizer: PreTrainedTokenizerFast
+) -> None:
+    widths: list[int] = []
+
+    def record(
+        _module: torch.nn.Module,
+        _args: tuple[object, ...],
+        kwargs: dict[str, torch.Tensor],
+    ) -> None:
+        widths.append(kwargs["input_ids"].shape[1])
+
+    handle = gpt2.register_forward_pre_hook(record, with_kwargs=True)
+    try:
+        judges.perplexity(gpt2, tokenizer, TEXTS, max_length=64, batch_size=2)
+    finally:
+        handle.remove()
+
+    assert len(widths) == 2
+    assert widths == sorted(widths, reverse=True)
 
 
 def test_perplexity_runs_under_the_hooks_the_caller_has_active(
