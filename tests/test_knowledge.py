@@ -567,6 +567,7 @@ def test_label_questions_uses_the_recipe(
     assert item.label == "known"
     assert item.greedy == "y"
     assert item.samples == ("y", "y")
+    assert calls[0]["max_new_tokens"] == 4
     assert calls[1]["temperature"] == 0.7
     assert calls[1]["num_samples"] == 2
     assert calls[1]["max_new_tokens"] == 4
