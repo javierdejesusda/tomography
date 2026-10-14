@@ -31,7 +31,7 @@ LMS_TO_LAB = np.array(
 
 
 def oklab(color: str) -> np.ndarray:
-    rgb = np.array([int(color[i : i + 2], 16) for i in (1, 3, 5)]) / 255
+    rgb = np.array(to_rgb(color))
     linear = np.where(
         rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4
     )
@@ -180,7 +180,7 @@ def test_save_figure_writes_pdf_png_and_svg(tmp_path: Path) -> None:
 def test_saved_files_have_the_format_signature(
     tmp_path: Path, extension: str, signature: bytes
 ) -> None:
-    style.save_figure(sample_figure(), tmp_path, "curve")
+    style.save_figure(sample_figure(), tmp_path, "curve", formats=(extension,))
 
     data = (tmp_path / f"curve.{extension}").read_bytes()
 
@@ -190,7 +190,7 @@ def test_saved_files_have_the_format_signature(
 def test_png_is_saved_at_the_requested_resolution(tmp_path: Path) -> None:
     fig = sample_figure()
 
-    style.save_figure(fig, tmp_path, "curve", dpi=200)
+    style.save_figure(fig, tmp_path, "curve", dpi=200, formats=("png",))
 
     header = (tmp_path / "curve.png").read_bytes()[16:24]
     width, height = struct.unpack(">II", header)
@@ -219,8 +219,9 @@ def test_saving_twice_gives_identical_bytes(
     first = tmp_path / "first"
     second = tmp_path / "second"
 
-    style.save_figure(sample_figure(), first, "curve")
-    style.save_figure(sample_figure(), second, "curve")
+    formats = (extension,)
+    style.save_figure(sample_figure(), first, "curve", formats=formats)
+    style.save_figure(sample_figure(), second, "curve", formats=formats)
 
     assert (first / f"curve.{extension}").read_bytes() == (
         second / f"curve.{extension}"
@@ -239,7 +240,7 @@ def test_saving_twice_gives_identical_bytes(
 def test_saved_files_carry_no_timestamp_or_tool_stamp(
     tmp_path: Path, extension: str, marker: bytes
 ) -> None:
-    style.save_figure(sample_figure(), tmp_path, "curve")
+    style.save_figure(sample_figure(), tmp_path, "curve", formats=(extension,))
 
     data = (tmp_path / f"curve.{extension}").read_bytes()
 

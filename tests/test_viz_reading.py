@@ -22,6 +22,13 @@ def make_arrays(
     return x, mean, mean - 0.05, mean + 0.05
 
 
+def make_curves(
+    n_series: int = 2, n_points: int = 6
+) -> list[reading.CurveArrays]:
+    x, mean, lo, hi = make_arrays(n_series, n_points)
+    return reading.curves_from_arrays(x, mean, lo, hi)
+
+
 def curve_lines(ax: Axes) -> dict[str, Line2D]:
     return {
         line.get_label(): line
@@ -75,11 +82,7 @@ def test_plot_curves_draws_one_line_and_band_per_series() -> None:
 
 
 def test_series_keep_the_categorical_order_and_a_faint_band() -> None:
-    x, mean, lo, hi = make_arrays(n_series=3)
-
-    fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi), series=["a", "b", "c"]
-    )
+    fig = reading.plot_curves(make_curves(n_series=3), series=["a", "b", "c"])
 
     ax = fig.axes[0]
     for i, line in enumerate(curve_lines(ax).values()):
@@ -92,10 +95,8 @@ def test_series_keep_the_categorical_order_and_a_faint_band() -> None:
 
 
 def test_plot_curves_labels_the_axes() -> None:
-    x, mean, lo, hi = make_arrays(n_series=1)
-
     fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi),
+        make_curves(n_series=1),
         series=["a"],
         xlabel="Relative depth",
         ylabel="Paired accuracy",
@@ -107,11 +108,7 @@ def test_plot_curves_labels_the_axes() -> None:
 
 
 def test_a_chance_level_is_drawn_and_named() -> None:
-    x, mean, lo, hi = make_arrays(n_series=1)
-
-    fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi), series=["a"], chance=0.5
-    )
+    fig = reading.plot_curves(make_curves(n_series=1), series=["a"], chance=0.5)
 
     ax = fig.axes[0]
     (level,) = [
@@ -124,22 +121,14 @@ def test_a_chance_level_is_drawn_and_named() -> None:
 
 
 def test_the_chance_label_sits_in_the_right_margin() -> None:
-    x, mean, lo, hi = make_arrays(n_series=1)
-
-    fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi), series=["a"], chance=0.5
-    )
+    fig = reading.plot_curves(make_curves(n_series=1), series=["a"], chance=0.5)
 
     (label,) = fig.axes[0].texts
     assert label.get_position()[0] > 1.0
 
 
 def test_no_chance_line_is_drawn_by_default() -> None:
-    x, mean, lo, hi = make_arrays(n_series=1)
-
-    fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi), series=["a"]
-    )
+    fig = reading.plot_curves(make_curves(n_series=1), series=["a"])
 
     ax = fig.axes[0]
     assert len(ax.get_lines()) == 1
@@ -147,11 +136,7 @@ def test_no_chance_line_is_drawn_by_default() -> None:
 
 
 def test_a_legend_names_two_or_more_series() -> None:
-    x, mean, lo, hi = make_arrays()
-
-    fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi), series=["a", "b"]
-    )
+    fig = reading.plot_curves(make_curves(), series=["a", "b"])
 
     legend = fig.axes[0].get_legend()
     assert legend is not None
@@ -159,11 +144,7 @@ def test_a_legend_names_two_or_more_series() -> None:
 
 
 def test_the_legend_sits_above_the_plot_area() -> None:
-    x, mean, lo, hi = make_arrays()
-
-    fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi), series=["a", "b"]
-    )
+    fig = reading.plot_curves(make_curves(), series=["a", "b"])
 
     fig.canvas.draw()
     ax = fig.axes[0]
@@ -228,20 +209,14 @@ def test_the_legend_wraps_to_fit_the_default_figure(
 
 
 def test_a_single_series_gets_no_legend() -> None:
-    x, mean, lo, hi = make_arrays(n_series=1)
-
-    fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi), series=["a"]
-    )
+    fig = reading.plot_curves(make_curves(n_series=1), series=["a"])
 
     assert fig.axes[0].get_legend() is None
 
 
 def test_the_legend_can_be_switched_off() -> None:
-    x, mean, lo, hi = make_arrays()
-
     fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi),
+        make_curves(),
         series=["a", "b"],
         legend=False,
     )
@@ -300,10 +275,8 @@ def test_layer_ticks_are_whole_numbers() -> None:
 
 
 def test_the_full_depth_can_set_the_x_range() -> None:
-    x, mean, lo, hi = make_arrays(n_series=1, n_points=4)
-
     fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi),
+        make_curves(n_series=1, n_points=4),
         series=["a"],
         n_layers=12,
     )
@@ -312,10 +285,8 @@ def test_the_full_depth_can_set_the_x_range() -> None:
 
 
 def test_the_y_range_can_be_fixed() -> None:
-    x, mean, lo, hi = make_arrays(n_series=1)
-
     fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi),
+        make_curves(n_series=1),
         series=["a"],
         ylim=(0.0, 1.0),
     )
@@ -324,11 +295,10 @@ def test_the_y_range_can_be_fixed() -> None:
 
 
 def test_plot_curves_draws_on_a_given_axes() -> None:
-    x, mean, lo, hi = make_arrays(n_series=1)
     fig, axes = style.new_figure(1, 2)
 
     returned = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi),
+        make_curves(n_series=1),
         series=["a"],
         ax=axes[0, 1],
     )
@@ -339,20 +309,14 @@ def test_plot_curves_draws_on_a_given_axes() -> None:
 
 
 def test_plot_curves_rejects_a_label_count_mismatch() -> None:
-    x, mean, lo, hi = make_arrays()
-
     with pytest.raises(ValueError, match="series"):
-        reading.plot_curves(
-            reading.curves_from_arrays(x, mean, lo, hi), series=["a"]
-        )
+        reading.plot_curves(make_curves(), series=["a"])
 
 
 def test_plot_curves_rejects_more_than_eight_series() -> None:
-    x, mean, lo, hi = make_arrays(n_series=9)
-
     with pytest.raises(ValueError, match="eight"):
         reading.plot_curves(
-            reading.curves_from_arrays(x, mean, lo, hi),
+            make_curves(n_series=9),
             series=[str(i) for i in range(9)],
         )
 
@@ -383,9 +347,8 @@ def test_plot_curves_rejects_seed_curves_of_the_wrong_length() -> None:
 
 
 def test_curve_figure_saves_in_all_formats(tmp_path: Path) -> None:
-    x, mean, lo, hi = make_arrays()
     fig = reading.plot_curves(
-        reading.curves_from_arrays(x, mean, lo, hi),
+        make_curves(),
         series=["a", "b"],
         chance=0.5,
     )
