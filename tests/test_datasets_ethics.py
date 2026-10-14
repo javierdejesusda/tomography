@@ -231,8 +231,16 @@ def test_load_morality_reads_train_then_test_from_the_tar(
 
 
 def test_load_never_extracts_the_archive(
-    served: list[dict[str, object]], tmp_path: Path
+    served: list[dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the archive must not be extracted")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tarfile.TarFile, "extractall", refuse)
+    monkeypatch.setattr(tarfile.TarFile, "extract", refuse)
     before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
 
     load_ethics_utility()
