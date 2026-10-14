@@ -614,9 +614,10 @@ def test_real_qwen3_tokenizer_and_config_match_the_registry(key: str) -> None:
 
     assert tokenizer.bos_token is None
     assert lm.bos_id == lm.pad_id == 151643
-    assert lm.default_bos == "none"
-    assert not batch.has_bos
-    assert batch.input_ids[0, 0].item() != 151643
+    expected = "none" if checkpoint.chat_format == "template" else "prepend"
+    assert lm.default_bos == expected
+    assert batch.has_bos == (expected == "prepend")
+    assert (batch.input_ids[0, 0].item() == 151643) == (expected == "prepend")
     start = text.index(" The")
     assert (start, start + len(" The")) in batch.offsets[0]
     if checkpoint.chat_format == "template":
