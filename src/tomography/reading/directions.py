@@ -8,6 +8,7 @@ and `RepReader` orients each layer with the labels afterwards.
 from dataclasses import dataclass
 from typing import Any
 from typing import Literal
+from typing import get_args
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,14 +21,8 @@ Method = Literal[
 ]
 Preprocess = Literal["center", "unit", "none"]
 
-_METHODS = (
-    "pca_diff",
-    "pca_raw",
-    "mean_diff",
-    "logistic",
-    "kmeans",
-    "random",
-)
+_METHODS = get_args(Method)
+_PREPROCESSES = get_args(Preprocess)
 
 
 @dataclass(frozen=True, eq=False)
@@ -91,15 +86,12 @@ def fit_direction(
     """
     if method not in _METHODS:
         raise ValueError(f"unsupported method {method!r}")
-    if preprocess not in ("center", "unit", "none"):
+    if preprocess not in _PREPROCESSES:
         raise ValueError(f"unsupported preprocess {preprocess!r}")
-    rows = np.asarray(h, dtype=np.float64)
-    if method == "pca_diff":
-        if pairs is None:
-            raise ValueError("pca_diff needs pairs")
-        vectors = rows[pairs[:, 0]] - rows[pairs[:, 1]]
-    else:
-        vectors = rows
+    rows = _as_matrix(h)
+    if labels is not None:
+        _check_labels(labels, rows.shape[0])
+    vectors = _pair_differences(rows, pairs) if method == "pca_diff" else rows
     if preprocess == "unit":
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         vectors = vectors / np.where(norms > 0, norms, 1.0)
@@ -122,6 +114,40 @@ def fit_direction(
 def _first_component(rows: NDArray[np.float64]) -> NDArray[np.float64]:
     components = np.linalg.svd(rows, full_matrices=False)[2]
     return np.asarray(components[0], dtype=np.float64)
+
+
+def _as_matrix(h: FloatArray) -> NDArray[np.float64]:
+    rows = np.asarray(h, dtype=np.float64)
+    if rows.ndim != 2:
+        raise ValueError(f"h must have shape (n, d), got {rows.shape}")
+    if rows.shape[0] < 2:
+        raise ValueError("h needs at least 2 rows")
+    if not np.isfinite(rows).all():
+        raise ValueError("h must be finite")
+    return rows
+
+
+def _check_labels(labels: NDArray[np.int64], n_rows: int) -> None:
+    if labels.shape != (n_rows,):
+        raise ValueError(
+            f"labels must have shape ({n_rows},), got {labels.shape}"
+        )
+    if not np.isin(labels, (0, 1)).all():
+        raise ValueError("labels must be 0 or 1")
+
+
+def _pair_differences(
+    rows: NDArray[np.float64], pairs: NDArray[np.int64] | None
+) -> NDArray[np.float64]:
+    if pairs is None:
+        raise ValueError("pca_diff needs pairs")
+    if pairs.ndim != 2 or pairs.shape[1] != 2:
+        raise ValueError(f"pairs must have shape (m, 2), got {pairs.shape}")
+    if pairs.shape[0] < 2:
+        raise ValueError("pca_diff needs at least 2 pairs")
+    if pairs.min() < 0 or pairs.max() >= rows.shape[0]:
+        raise ValueError("pairs must index the rows of h")
+    return np.asarray(rows[pairs[:, 0]] - rows[pairs[:, 1]], dtype=np.float64)
 
 
 def _positive_mask(labels: NDArray[np.int64] | None) -> NDArray[np.bool_]:
@@ -147,6 +173,8 @@ def _logistic_coefficients(
 ) -> NDArray[np.float64]:
     positive = _positive_mask(labels)
     scale = float(np.sqrt((rows**2).sum(axis=1).mean()))
+    if scale == 0.0:
+        raise ValueError("the fitted direction has zero norm")
     model = LogisticRegression(max_iter=1000).fit(rows / scale, positive)
     return np.asarray(model.coef_[0], dtype=np.float64) / scale
 
@@ -163,6 +191,8 @@ def _result(
     vector: NDArray[np.float64], mean: NDArray[np.float64]
 ) -> FitResult:
     raw_norm = float(np.linalg.norm(vector))
+    if raw_norm == 0.0:
+        raise ValueError("the fitted direction has zero norm")
     unit = vector / raw_norm
     if unit[np.argmax(np.abs(unit))] < 0:
         unit = -unit

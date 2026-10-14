@@ -4,6 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 import pytest
 
+from tomography.reading.directions import Method
 from tomography.reading.directions import fit_direction
 
 
@@ -304,3 +305,82 @@ def test_logistic_needs_labels_with_both_classes() -> None:
         fit_direction("logistic", h)
     with pytest.raises(ValueError, match="both classes"):
         fit_direction("logistic", h, labels=np.zeros_like(labels))
+
+
+def test_unknown_method_is_rejected() -> None:
+    h, _, _ = make_blobs(10, seed=19)
+
+    with pytest.raises(ValueError, match="method"):
+        fit_direction("lda", h)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("h_shape", "message"),
+    [((8,), "shape"), ((1, 4), "at least 2"), ((8, 4, 1), "shape")],
+    ids=["one-dimensional", "single-row", "three-dimensional"],
+)
+def test_activations_must_be_a_matrix_with_two_rows(
+    h_shape: tuple[int, ...], message: str
+) -> None:
+    h = np.zeros(h_shape)
+
+    with pytest.raises(ValueError, match=message):
+        fit_direction("random", h)
+
+
+def test_activations_must_be_finite() -> None:
+    h, _, _ = make_blobs(10, seed=20)
+    h[3, 4] = np.nan
+
+    with pytest.raises(ValueError, match="finite"):
+        fit_direction("pca_raw", h)
+
+
+@pytest.mark.parametrize(
+    "pairs",
+    [
+        np.array([0, 1], dtype=np.int64),
+        np.array([[0, 1, 2]], dtype=np.int64),
+        np.array([[0, 20]], dtype=np.int64),
+        np.array([[-1, 2], [3, 4]], dtype=np.int64),
+    ],
+    ids=["one-dimensional", "three-columns", "out-of-range", "negative"],
+)
+def test_pairs_must_be_valid_row_indices(pairs: NDArray[np.int64]) -> None:
+    h, _, _ = make_blobs(10, seed=21)
+
+    with pytest.raises(ValueError, match="pairs"):
+        fit_direction("pca_diff", h, pairs=pairs)
+
+
+def test_pca_diff_needs_two_pairs() -> None:
+    h, _, _ = make_blobs(10, seed=22)
+
+    with pytest.raises(ValueError, match="at least 2"):
+        fit_direction("pca_diff", h, pairs=np.array([[0, 1]], dtype=np.int64))
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        np.array([0, 1, 0], dtype=np.int64),
+        np.array([0, 1, 2, 0, 1, 0, 1, 0, 1, 0], dtype=np.int64),
+    ],
+    ids=["wrong-length", "not-binary"],
+)
+def test_labels_must_be_binary_and_match_the_rows(
+    labels: NDArray[np.int64],
+) -> None:
+    h, _, _ = make_blobs(10, seed=23)
+
+    with pytest.raises(ValueError, match="labels"):
+        fit_direction("mean_diff", h, labels=labels)
+
+
+@pytest.mark.parametrize("method", ["mean_diff", "logistic"])
+def test_a_zero_length_direction_is_an_error(method: Method) -> None:
+    h = np.array([[1.0, 2.0], [1.0, 2.0], [1.0, 2.0], [1.0, 2.0]])
+    labels = np.array([1, 0, 1, 0], dtype=np.int64)
+
+    with pytest.raises(ValueError, match="zero norm"):
+        fit_direction(method, h, labels=labels)
