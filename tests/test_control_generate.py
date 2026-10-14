@@ -131,7 +131,7 @@ def test_position_check_counts_the_longest_row_of_a_later_chunk(
         tiny_arch.model, "generate", lambda *a, **k: calls.append("generate")
     )
     limit = tiny_arch.model.config.max_position_embeddings
-    prompts = ["The lazy dog", "The lazy dog " * 40]
+    prompts = ["The lazy dog", "The lazy dog " * 10]
 
     with pytest.raises(ValueError, match="max_position_embeddings"):
         generate(tiny_arch, prompts, max_new_tokens=limit - 20, batch_size=1)
