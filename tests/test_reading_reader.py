@@ -284,8 +284,15 @@ def test_fit_passes_pairs_and_preprocess_to_the_finder() -> None:
         ([[1, 3]], "exactly one"),
         ([[0, 99]], "groups"),
         ([0, 1], "groups"),
+        ([[1, -2]], "groups"),
     ],
-    ids=["no-positive", "two-positives", "out-of-range", "one-dimensional"],
+    ids=[
+        "no-positive",
+        "two-positives",
+        "out-of-range",
+        "one-dimensional",
+        "below-padding",
+    ],
 )
 def test_fit_rejects_groups_without_exactly_one_positive_member(
     groups: list[list[int]], message: str
@@ -300,6 +307,25 @@ def test_fit_rejects_groups_without_exactly_one_positive_member(
             [0],
             labels=labels,
             groups=np.array(groups, dtype=np.int64),
+        )
+
+
+@pytest.mark.parametrize(
+    "pairs",
+    [[[0, -1]], [[0, 99]], [[0, 1, 2], [3, 4, 5]]],
+    ids=["negative-index", "out-of-range", "three-columns"],
+)
+def test_fit_rejects_malformed_pairs(pairs: list[list[int]]) -> None:
+    labels = np.zeros(10, dtype=np.int64)
+    labels[[1, 3]] = 1
+
+    with pytest.raises(ValueError, match="pairs"):
+        RepReader.fit(
+            "pca_raw",
+            x_rows(*X),
+            [0],
+            labels=labels,
+            pairs=np.array(pairs, dtype=np.int64),
         )
 
 

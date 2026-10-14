@@ -38,12 +38,17 @@ def parse_groups(
         The groups ready for gathering scores.
 
     Raises:
-        ValueError: If `groups` is empty, malformed or out of range, or a
-            group does not have exactly one label-1 member.
+        ValueError: If `groups` is empty, not an integer array, malformed or
+            out of range, or a group does not have exactly one label-1
+            member.
     """
     groups = np.asarray(groups)
     if groups.ndim != 2 or 0 in groups.shape:
         raise ValueError(f"groups must have shape (g, k), got {groups.shape}")
+    if not np.issubdtype(groups.dtype, np.integer):
+        raise ValueError(f"groups must be integers, got {groups.dtype}")
+    if groups.min() < -1:
+        raise ValueError("groups must not contain an index below -1")
     if groups.max() >= labels.shape[0]:
         raise ValueError("groups must index the rows of labels")
     valid = groups >= 0
@@ -68,16 +73,18 @@ def group_accuracy(
     Args:
         scores: Scores of shape (..., n); leading axes are kept, for
             example (seeds, layers, n).
-        groups: Row indices of shape (g, k) with exactly one label-1 member
-            per group. Ragged groups are padded with -1, which is ignored.
+        groups: Integer row indices of shape (g, k) with exactly one label-1
+            member per group. Ragged groups are padded with -1, which is
+            ignored; no other negative value is allowed.
         labels: Binary labels of shape (n,).
 
     Returns:
         Accuracy of shape `scores.shape[:-1]`.
 
     Raises:
-        ValueError: If the shapes disagree, a group does not have exactly
-            one label-1 member, or a score is not finite.
+        ValueError: If the shapes disagree, `groups` is malformed, a group
+            does not have exactly one label-1 member, or a score is not
+            finite.
     """
     values = _checked_scores(scores, labels)
     index = parse_groups(groups, labels)
