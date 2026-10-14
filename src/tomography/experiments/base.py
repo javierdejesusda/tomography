@@ -5,11 +5,14 @@ from collections.abc import Mapping
 import dataclasses
 import hashlib
 import json
+import random
 import types
 import typing
 from typing import Any
 from typing import Literal
 from typing import Self
+
+import numpy as np
 
 
 class _TypeMismatchError(Exception):
@@ -158,3 +161,45 @@ class ExperimentConfig:
                     f"got {value!r}"
                 ) from None
         return cls(**values)
+
+
+def derive_seed(base: int, *keys: str | int) -> int:
+    """Derives a reproducible seed from a base seed and identifying keys.
+
+    Args:
+        base: The base seed.
+        *keys: Strings or integers that identify the consumer, such as a
+            layer index or a trial name.
+
+    Returns:
+        An integer in [0, 2**32) taken from the SHA-256 of `repr((base, keys))`,
+        so it is stable across processes and Python versions.
+    """
+    digest = hashlib.sha256(repr((base, keys)).encode()).digest()
+    return int.from_bytes(digest[:4], "big")
+
+
+def seed_everything(seed: int) -> np.random.Generator:
+    """Seeds the global random number generators of a run.
+
+    Seeds `random`, the legacy NumPy global state and torch on the CPU and on
+    every CUDA device.
+
+    Args:
+        seed: An integer in [0, 2**32).
+
+    Returns:
+        A new NumPy generator seeded with `seed`.
+
+    Raises:
+        ValueError: If `seed` is outside [0, 2**32).
+    """
+    if not 0 <= seed < 2**32:
+        raise ValueError(f"seed must be in [0, 2**32), got {seed}")
+    # Imported here so that reading results never pays for importing torch.
+    import torch
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    return np.random.default_rng(seed)

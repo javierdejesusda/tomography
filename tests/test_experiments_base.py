@@ -1,11 +1,16 @@
 import dataclasses
 import hashlib
 import json
+import random
 from typing import Literal
 
+import numpy as np
 import pytest
+import torch
 
 from tomography.experiments.base import ExperimentConfig
+from tomography.experiments.base import derive_seed
+from tomography.experiments.base import seed_everything
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -149,3 +154,60 @@ def test_from_dict_accepts_an_int_for_a_float_field() -> None:
 
 def test_from_dict_accepts_null_for_an_optional_field() -> None:
     assert _Config.from_dict({"note": None}).note is None
+
+
+def test_derive_seed_is_a_stable_function_of_base_and_keys() -> None:
+    assert derive_seed(7, "a", 1) == 3428137257
+    assert derive_seed(7, "a", 1) == derive_seed(7, "a", 1)
+
+
+def test_derive_seed_fits_in_an_unsigned_32_bit_integer() -> None:
+    seeds = [derive_seed(base, "k") for base in range(200)]
+
+    assert all(0 <= seed < 2**32 for seed in seeds)
+    assert len(set(seeds)) == len(seeds)
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ((1, ("a",)), (2, ("a",))),
+        ((1, ("a",)), (1, ("b",))),
+        ((1, ("a", "b")), (1, ("b", "a"))),
+        ((1, (1,)), (1, ("1",))),
+        ((1, ()), (1, ("a",))),
+    ],
+    ids=["base", "key", "order", "type", "length"],
+)
+def test_derive_seed_separates_distinct_inputs(
+    first: tuple[int, tuple[str | int, ...]],
+    second: tuple[int, tuple[str | int, ...]],
+) -> None:
+    assert derive_seed(first[0], *first[1]) != derive_seed(
+        second[0], *second[1]
+    )
+
+
+def test_seed_everything_returns_the_generator_of_the_seed() -> None:
+    generator = seed_everything(11)
+
+    expected = np.random.default_rng(11)
+    assert generator.integers(0, 10**9, 5).tolist() == (
+        expected.integers(0, 10**9, 5).tolist()
+    )
+
+
+def test_seed_everything_seeds_every_global_source() -> None:
+    seed_everything(5)
+    first = (random.random(), np.random.rand(), torch.rand(1).item())
+    seed_everything(5)
+    second = (random.random(), np.random.rand(), torch.rand(1).item())
+
+    assert first == second
+    assert torch.initial_seed() == 5
+
+
+@pytest.mark.parametrize("seed", [-1, 2**32], ids=["negative", "too-large"])
+def test_seed_everything_rejects_seeds_outside_uint32(seed: int) -> None:
+    with pytest.raises(ValueError, match="seed"):
+        seed_everything(seed)
