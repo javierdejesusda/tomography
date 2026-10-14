@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 from typing import Protocol
+from typing import get_args
 
 import numpy as np
 from numpy.typing import NDArray
@@ -173,8 +174,13 @@ def build_stimulus_set(
         plan = _one_vs_rest_plan(examples, target_class, n_pairs, rng)
     elif pairing == "random":
         plan = _random_plan(examples, n_pairs, rng)
-    else:
+    elif pairing == "label_contrastive":
         plan = _label_contrastive_plan(examples, strata, n_pairs, rng)
+    else:
+        raise ValueError(
+            f"unknown pairing {pairing!r}, "
+            f"expected one of {get_args(PairingMode)}"
+        )
     rendered = [
         _render(examples[example], k, plan, template, chat, concept)
         for k, example in enumerate(plan.order)
@@ -299,6 +305,8 @@ def _random_plan(
 ) -> _Plan:
     labels = _binary_labels(examples)
     size = _count(n_pairs, len(examples) // 2, "pairs")
+    if size == 0:
+        raise ValueError("random pairing needs at least two examples")
     chosen = rng.permutation(len(examples))[: 2 * size].astype(np.int64)
     matched = chosen[random_pairs(2 * size, seed=_child_seed(rng))]
     order, pairs = _contiguous(matched)

@@ -272,6 +272,33 @@ def test_random_pairing_rejects_too_many_pairs() -> None:
         )
 
 
+def test_random_pairing_rejects_a_single_example() -> None:
+    with pytest.raises(ValueError, match="at least two"):
+        build_stimulus_set(
+            labeled(1, 1),
+            CONCEPT,
+            ChatFormat("none"),
+            pairing="random",
+            concept="mood",
+        )
+
+
+@pytest.mark.parametrize(
+    "pairing",
+    ["by-group", "onevsrest", "", "Persona"],
+    ids=["hyphen", "no-underscore", "empty", "capital"],
+)
+def test_unknown_pairing_is_rejected(pairing: str) -> None:
+    with pytest.raises(ValueError, match="pairing"):
+        build_stimulus_set(
+            labeled(6, 3),
+            CONCEPT,
+            ChatFormat("none"),
+            pairing=pairing,  # type: ignore[arg-type]
+            concept="mood",
+        )
+
+
 def test_one_vs_rest_labels_mark_the_target_class() -> None:
     examples = [Ex(f"u{i}", f"scenario {i}", i % 3) for i in range(30)]
 
