@@ -79,6 +79,10 @@ def test_extract_answer(completion: str, stop: str, expected: str) -> None:
         ("the", ""),
         ("", ""),
         ("?!", ""),
+        ("Москва", "москва"),
+        ("Straße", "straße"),
+        ("Søren", "søren"),
+        ("Zoë Ж", "zoe ж"),
     ],
     ids=[
         "accents",
@@ -90,6 +94,10 @@ def test_extract_answer(completion: str, stop: str, expected: str) -> None:
         "only_article",
         "empty",
         "only_punctuation",
+        "cyrillic_kept",
+        "sharp_s_kept",
+        "slashed_o_kept",
+        "accent_stripped_next_to_cyrillic",
     ],
 )
 def test_normalize_answer(text: str, expected: str) -> None:
@@ -110,6 +118,12 @@ def test_normalize_answer(text: str, expected: str) -> None:
         ("anything", (), False),
         ("", ("Paris",), False),
         ("Lyon", ("", "Lyon"), True),
+        ("Москва", ("Москва",), True),
+        ("Zoe Smith", ("Zoë Ж",), False),
+        ("Constanța's port", ("Буцуреști",), False),  # noqa: RUF001
+        ("Straße", ("Straße",), True),
+        ("Søren Kierkegaard", ("Søren",), True),
+        ("", ("!!", "Москва"), False),
     ],
     ids=[
         "exact",
@@ -123,6 +137,12 @@ def test_normalize_answer(text: str, expected: str) -> None:
         "no_aliases",
         "empty_answer",
         "empty_alias_does_not_block_others",
+        "cyrillic_alias_matches",
+        "cyrillic_alias_is_not_degraded",
+        "mixed_script_alias_is_not_degraded",
+        "sharp_s_round_trip",
+        "slashed_o_round_trip",
+        "empty_answer_ignores_empty_aliases",
     ],
 )
 def test_is_correct(

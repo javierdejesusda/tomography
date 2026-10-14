@@ -19,7 +19,7 @@ Label = Literal["known", "unknown", "uncertain"]
 Basis = Literal["behavior", "construction"]
 
 _ARTICLES = frozenset(("a", "an", "the"))
-_NON_ALNUM = re.compile(r"[^0-9a-z]+")
+_NON_ALNUM = re.compile(r"[\W_]+")
 
 DEFAULT_SHOTS: tuple[tuple[str, str], ...] = (
     ("How many days are in a week?", "seven"),
