@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from tomography.datasets import popqa
 from tomography.datasets import synthal
 from tomography.datasets.records import QAExample
 from tomography.datasets.records import assign_splits
@@ -153,6 +154,51 @@ def test_load_reads_the_jsonl_through_fetch(
 
     assert calls == [(synthal.SOURCE, tmp_path, True)]
     assert [i.meta["subject"] for i in items] == ["Sedi Surudu", "Solo Keleri"]
+
+
+def test_load_forwards_the_recipe_keywords(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "prompts.jsonl"
+    rows = [
+        _row(
+            index=0,
+            relation_key="company_ceo",
+            template="Who is the CEO of {}?",
+            subject="Belaki Corp",
+        ),
+        _row(index=1),
+    ]
+    path.write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+
+    def fake_fetch(
+        source: object,
+        *,
+        file: str | None = None,
+        cache: Path | None = None,
+        offline: bool = False,
+    ) -> Path:
+        return path
+
+    monkeypatch.setattr(synthal, "fetch", fake_fetch)
+
+    items = synthal.load_synthal(
+        relations={"company_ceo": "ceo"}, templates={"ceo": "CEO of {}?"}
+    )
+
+    assert [i.question for i in items] == ["CEO of Belaki Corp?"]
+
+
+def test_parse_rejects_a_template_override_without_a_slot() -> None:
+    with pytest.raises(ValueError, match="person_father__0000"):
+        synthal.parse_synthal([_row()], templates={"father": "Who fathered?"})
+
+
+def test_relations_are_the_shared_popqa_relations_with_templates() -> None:
+    assert set(synthal.RELATIONS.values()) == set(popqa.SHARED_RELATIONS)
+    assert set(synthal.RELATIONS.values()) <= set(popqa.TEMPLATES)
 
 
 @pytest.mark.network

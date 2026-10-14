@@ -115,6 +115,37 @@ def test_load_reads_the_jsonl_through_fetch(
     assert [i.question for i in items] == ["q1"]
 
 
+def test_load_forwards_the_recipe_keywords(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "knowns_unknowns.jsonl"
+    rows = [
+        _unknown("q1", "ambiguous"),
+        _unknown("q1", "ambiguous"),
+        _unknown("q2", "controversial"),
+        _known(),
+    ]
+    path.write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+
+    def fake_fetch(
+        source: object,
+        *,
+        file: str | None = None,
+        cache: Path | None = None,
+        offline: bool = False,
+    ) -> Path:
+        return path
+
+    monkeypatch.setattr(kuq, "fetch", fake_fetch)
+
+    items = kuq.load_kuq(categories=("ambiguous",), drop_duplicates=False)
+
+    assert [i.uid for i in items] == ["kuq:0", "kuq:1"]
+    assert [i.question for i in items] == ["q1", "q1"]
+
+
 @pytest.mark.network
 def test_network_loads_the_six_unknown_categories_without_repeats() -> None:
     items = kuq.load_kuq()

@@ -1,7 +1,7 @@
 """KUQ: questions that cannot be answered, in six categories.
 
-P9 uses the unknown rows as natural transfer sets for the knowledge-boundary
-reading. They are unanswerable by nature, not merely beyond one model.
+The knowledge-boundary study uses the unknown rows as natural transfer sets
+for its reading. They are unanswerable by nature, not merely beyond one model.
 """
 
 from collections.abc import Collection

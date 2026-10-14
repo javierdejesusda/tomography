@@ -163,7 +163,7 @@ def test_parse_rejects_aliases_that_are_not_a_json_list_of_strings() -> None:
 
 def _write_tsv(path: Path, rows: list[dict[str, str]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, list(rows[0]), delimiter="	")
+        writer = csv.DictWriter(handle, list(rows[0]), delimiter="\t")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -207,11 +207,38 @@ def test_load_reads_the_quoted_tsv_through_fetch(
 
 
 def test_load_forwards_the_recipe_keywords(
-    fetched: list[tuple[object, Path | None, bool]],
+    fetched: list[tuple[object, Path | None, bool]], tmp_path: Path
 ) -> None:
-    items = popqa.load_popqa(relations=None)
+    _write_tsv(
+        tmp_path / "test.tsv",
+        [
+            _row(uid="1", subject="Ada Smith", relation="capital"),
+            _row(
+                uid="2",
+                subject="Ben Jones",
+                answers='["Rob"]',
+                relation="capital",
+            ),
+            _row(
+                uid="3",
+                subject="Al",
+                question="Capital of Al?",
+                relation="capital",
+            ),
+            _row(uid="4", subject="John Mayne", relation="capital"),
+            _row(uid="5", subject="John Mayne", relation="capital"),
+            _row(uid="6", subject="Cy Dee", relation="father"),
+        ],
+    )
 
-    assert [i.uid for i in items] == ["popqa:1", "popqa:2"]
+    items = popqa.load_popqa(
+        min_alias_chars=3,
+        min_subject_chars=2,
+        drop_ambiguous=False,
+        relations=("capital",),
+    )
+
+    assert [i.uid for i in items] == [f"popqa:{n}" for n in range(1, 6)]
 
 
 @pytest.mark.network
