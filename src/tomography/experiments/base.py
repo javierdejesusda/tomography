@@ -79,7 +79,7 @@ def _coerce(annotation: Any, value: Any) -> Any:
     """
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
-    if annotation is None or annotation is type(None):
+    if annotation is type(None):
         if value is not None:
             raise _TypeMismatchError
         return None
@@ -468,6 +468,9 @@ class RunDir:
             json.loads(meta_file.read_text("utf-8")),
         )
 
+    def _embedded_meta(self) -> dict[str, Any]:
+        return {**self._meta, "config": self._config}
+
     def _file(self, name: str, extension: str) -> Path:
         _check_path_part("name", name, _SAFE_NAME)
         if name.lower() in _RESERVED_NAMES:
@@ -494,7 +497,7 @@ class RunDir:
         """
         path = self._file(name, "json")
         document = {
-            "_meta": {**self._meta, "config": self._config},
+            "_meta": self._embedded_meta(),
             "data": _to_jsonable(payload),
         }
         _atomic_write_json(path, document)
@@ -541,7 +544,7 @@ class RunDir:
         reserved = sorted(_RESERVED_ARRAY_NAMES.intersection(arrays))
         if reserved:
             raise ValueError(f"reserved array names: {reserved}")
-        marker = np.array(json.dumps({**self._meta, "config": self._config}))
+        marker = np.array(json.dumps(self._embedded_meta()))
         _atomic_write(
             path,
             lambda handle: np.savez(
