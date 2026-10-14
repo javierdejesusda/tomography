@@ -1,8 +1,10 @@
 import pytest
 import torch
 
+from tomography.control.operators import Operator
 from tomography.control.operators import apply_operator
 
+OPS: list[Operator] = ["linear", "piecewise", "projection"]
 DTYPES = [torch.float32, torch.bfloat16, torch.float16, torch.float64]
 DTYPE_IDS = ["fp32", "bf16", "fp16", "fp64"]
 
@@ -32,12 +34,12 @@ def test_linear_is_the_default_operator() -> None:
     torch.testing.assert_close(out, h - 2.0 * v)
 
 
-@pytest.mark.parametrize("op", ["linear", "piecewise", "projection"])
-def test_zero_coefficient_returns_the_input_object(op: str) -> None:
+@pytest.mark.parametrize("op", OPS)
+def test_zero_coefficient_returns_the_input_object(op: Operator) -> None:
     h = _randn(2, 3, 8, seed=1)
     v = _randn(8, seed=2)
 
-    out = apply_operator(h, v, 0.0, op)  # type: ignore[arg-type]
+    out = apply_operator(h, v, 0.0, op)
 
     assert out is h
 
@@ -65,7 +67,7 @@ def test_bf16_math_runs_in_float32_then_casts_back() -> None:
 
 
 def _reference(
-    h: torch.Tensor, v: torch.Tensor, coeff: float, op: str
+    h: torch.Tensor, v: torch.Tensor, coeff: float, op: Operator
 ) -> torch.Tensor:
     """Per-vector float64 loop implementation of the three operators."""
     flat = h.reshape(-1, h.shape[-1]).double()
@@ -83,18 +85,18 @@ def _reference(
     return torch.stack(rows).reshape(h.shape)
 
 
-@pytest.mark.parametrize("op", ["linear", "piecewise", "projection"])
+@pytest.mark.parametrize("op", OPS)
 @pytest.mark.parametrize("coeff", [-1.5, 0.4, 1.0, 3.0])
 @pytest.mark.parametrize(
     "dtype", [torch.float32, torch.bfloat16], ids=["fp32", "bf16"]
 )
 def test_matches_the_per_vector_reference(
-    op: str, coeff: float, dtype: torch.dtype
+    op: Operator, coeff: float, dtype: torch.dtype
 ) -> None:
     h = _randn(2, 5, 16, dtype=dtype, seed=1)
     v = _randn(16, dtype=dtype, seed=2) * 3
 
-    out = apply_operator(h, v, coeff, op)  # type: ignore[arg-type]
+    out = apply_operator(h, v, coeff, op)
 
     expected = _reference(h, v, coeff, op).to(dtype)
     torch.testing.assert_close(out, expected)
@@ -138,7 +140,7 @@ def test_piecewise_grows_the_component_along_v_for_both_signs() -> None:
 
 
 def _unit(vector: torch.Tensor) -> torch.Tensor:
-    return vector / vector.norm()
+    return torch.nn.functional.normalize(vector, dim=0)
 
 
 @pytest.mark.parametrize("scale", [1.0, 12.5], ids=["unit", "norm-100"])
@@ -239,20 +241,17 @@ def test_non_finite_coefficient_is_rejected() -> None:
         apply_operator(h, v, float("nan"))
 
 
-OPS = ["linear", "piecewise", "projection"]
-
-
 @pytest.mark.parametrize("op", OPS)
-def test_mask_edits_only_the_selected_positions(op: str) -> None:
+def test_mask_edits_only_the_selected_positions(op: Operator) -> None:
     h = _randn(2, 4, 8, seed=1)
     v = _randn(8, seed=2)
     mask = torch.tensor(
         [[True, False, True, False], [False, False, True, True]]
     )
 
-    out = apply_operator(h, v, 1.3, op, mask=mask)  # type: ignore[arg-type]
+    out = apply_operator(h, v, 1.3, op, mask=mask)
 
-    full = apply_operator(h, v, 1.3, op)  # type: ignore[arg-type]
+    full = apply_operator(h, v, 1.3, op)
     assert torch.equal(out[mask], full[mask])
     assert torch.equal(out[~mask], h[~mask])
 
@@ -336,24 +335,24 @@ def test_mask_must_broadcast_to_the_leading_shape(
 @pytest.mark.parametrize("op", OPS)
 @pytest.mark.parametrize("coeff", [-2.0, 0.5, 3.0])
 def test_preserve_norm_restores_the_norm_of_every_vector(
-    op: str, coeff: float
+    op: Operator, coeff: float
 ) -> None:
     h = _randn(2, 5, 16, seed=1) * 4
     v = _randn(16, seed=2)
 
-    out = apply_operator(h, v, coeff, op, preserve_norm=True)  # type: ignore[arg-type]
+    out = apply_operator(h, v, coeff, op, preserve_norm=True)
 
     torch.testing.assert_close(out.norm(dim=-1), h.norm(dim=-1))
 
 
 @pytest.mark.parametrize("op", OPS)
-def test_preserve_norm_only_rescales_the_edited_vector(op: str) -> None:
+def test_preserve_norm_only_rescales_the_edited_vector(op: Operator) -> None:
     h = _randn(2, 5, 16, seed=1) * 4
     v = _randn(16, seed=2)
 
-    out = apply_operator(h, v, 1.5, op, preserve_norm=True)  # type: ignore[arg-type]
+    out = apply_operator(h, v, 1.5, op, preserve_norm=True)
 
-    edited = apply_operator(h, v, 1.5, op)  # type: ignore[arg-type]
+    edited = apply_operator(h, v, 1.5, op)
     rescaled = edited * (h.norm(dim=-1) / edited.norm(dim=-1)).unsqueeze(-1)
     torch.testing.assert_close(out, rescaled)
 
