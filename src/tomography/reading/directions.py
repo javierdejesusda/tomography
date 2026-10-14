@@ -8,6 +8,7 @@ and `RepReader` orients each layer with the labels afterwards.
 from dataclasses import dataclass
 from typing import Any
 from typing import Literal
+from typing import assert_never
 from typing import get_args
 
 import numpy as np
@@ -98,17 +99,24 @@ def fit_direction(
     max_abs = float(np.abs(vectors).max())
     mean = vectors.mean(axis=0)
     fitted = vectors if preprocess == "none" else vectors - mean
-    if method == "mean_diff":
-        direction = _class_difference(fitted, labels)
-    elif method == "logistic":
-        direction = _logistic_coefficients(fitted, labels)
+    if method == "mean_diff" or method == "logistic":
+        if labels is None:
+            raise ValueError(f"{method} needs labels")
+        positive = labels == 1
+        if positive.all() or not positive.any():
+            raise ValueError("labels must contain both classes")
+        if method == "mean_diff":
+            direction = _class_difference(fitted, positive)
+        else:
+            direction = _logistic_coefficients(fitted, positive)
     elif method == "kmeans":
         direction = _centroid_difference(fitted, seed)
     elif method == "random":
-        rng = np.random.default_rng(seed)
-        direction = rng.standard_normal(size=(rows.shape[1],))
-    else:
+        direction = _random_direction(rows.shape[1], seed)
+    elif method == "pca_diff" or method == "pca_raw":
         direction = _first_component(fitted, max_abs)
+    else:
+        assert_never(method)
     return _result(direction, mean)
 
 
@@ -153,32 +161,19 @@ def _pair_differences(
         raise ValueError("pca_diff needs at least 2 pairs")
     if pairs.min() < 0 or pairs.max() >= rows.shape[0]:
         raise ValueError("pairs must index the rows of h")
-    return np.asarray(rows[pairs[:, 0]] - rows[pairs[:, 1]], dtype=np.float64)
-
-
-def _positive_mask(labels: NDArray[np.int64] | None) -> NDArray[np.bool_]:
-    if labels is None:
-        raise ValueError("this method needs labels")
-    positive = np.asarray(labels == 1)
-    if positive.all() or not positive.any():
-        raise ValueError("labels must contain both classes")
-    return positive
+    return rows[pairs[:, 0]] - rows[pairs[:, 1]]
 
 
 def _class_difference(
-    rows: NDArray[np.float64], labels: NDArray[np.int64] | None
+    rows: NDArray[np.float64], positive: NDArray[np.bool_]
 ) -> NDArray[np.float64]:
-    positive = _positive_mask(labels)
-    positive_mean = rows[positive].mean(axis=0)
-    negative_mean = rows[~positive].mean(axis=0)
-    return np.asarray(positive_mean - negative_mean, dtype=np.float64)
+    return rows[positive].mean(axis=0) - rows[~positive].mean(axis=0)
 
 
 def _logistic_coefficients(
-    rows: NDArray[np.float64], labels: NDArray[np.int64] | None
+    rows: NDArray[np.float64], positive: NDArray[np.bool_]
 ) -> NDArray[np.float64]:
-    positive = _positive_mask(labels)
-    scale = float(np.sqrt((rows**2).sum(axis=1).mean()))
+    scale = float(np.linalg.norm(rows) / np.sqrt(rows.shape[0]))
     if scale == 0.0:
         raise ValueError("the fitted direction has zero norm")
     model = LogisticRegression(max_iter=1000).fit(rows / scale, positive)
@@ -191,6 +186,10 @@ def _centroid_difference(
     kmeans = KMeans(n_clusters=2, n_init=10, random_state=seed).fit(rows)
     first, second = kmeans.cluster_centers_
     return np.asarray(second - first, dtype=np.float64)
+
+
+def _random_direction(d: int, seed: int) -> NDArray[np.float64]:
+    return np.random.default_rng(seed).standard_normal(size=(d,))
 
 
 def _result(

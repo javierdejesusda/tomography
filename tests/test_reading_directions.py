@@ -57,6 +57,15 @@ def abs_cosine(a: NDArray[np.floating], b: NDArray[np.floating]) -> float:
     return float(abs(a64 @ b64) / (np.linalg.norm(a64) * np.linalg.norm(b64)))
 
 
+def pair_differences(data: Planted) -> NDArray[np.float64]:
+    h64 = data.h.astype(np.float64)
+    return h64[data.pairs[:, 0]] - h64[data.pairs[:, 1]]
+
+
+def top_right_singular_vector(x: NDArray[np.float64]) -> NDArray[np.float64]:
+    return np.linalg.svd(x, full_matrices=False)[2][0]
+
+
 def test_pca_diff_recovers_planted_direction() -> None:
     data = make_planted(128, seed=1)
 
@@ -67,10 +76,8 @@ def test_pca_diff_recovers_planted_direction() -> None:
 
 def test_pca_diff_is_the_top_singular_vector_of_centered_differences() -> None:
     data = make_planted(40, seed=2)
-    h64 = data.h.astype(np.float64)
-    diffs = h64[data.pairs[:, 0]] - h64[data.pairs[:, 1]]
-    centered = diffs - diffs.mean(axis=0)
-    top = np.linalg.svd(centered, full_matrices=False)[2][0]
+    diffs = pair_differences(data)
+    top = top_right_singular_vector(diffs - diffs.mean(axis=0))
 
     fit = fit_direction("pca_diff", data.h, pairs=data.pairs)
 
@@ -79,10 +86,18 @@ def test_pca_diff_is_the_top_singular_vector_of_centered_differences() -> None:
     assert fit.raw_norm == pytest.approx(1.0)
 
 
-def test_direction_is_unit_float32_with_largest_coordinate_positive() -> None:
+@pytest.mark.parametrize(
+    "method",
+    ["pca_diff", "pca_raw", "mean_diff", "logistic", "kmeans", "random"],
+)
+def test_direction_is_unit_float32_with_largest_coordinate_positive(
+    method: Method,
+) -> None:
     data = make_planted(40, seed=3)
 
-    fit = fit_direction("pca_diff", data.h, pairs=data.pairs)
+    fit = fit_direction(
+        method, data.h, labels=data.labels, pairs=data.pairs, seed=1
+    )
 
     assert fit.direction.dtype == np.float32
     assert fit.direction.shape == (32,)
@@ -104,15 +119,10 @@ def test_pca_diff_ignores_seed_and_in_pair_order() -> None:
     np.testing.assert_allclose(first.direction, flipped.direction, atol=1e-6)
 
 
-def pair_differences(data: Planted) -> NDArray[np.float64]:
-    h64 = data.h.astype(np.float64)
-    return h64[data.pairs[:, 0]] - h64[data.pairs[:, 1]]
-
-
 def test_preprocess_none_keeps_the_mean_difference_in_the_fit() -> None:
     data = make_planted(60, seed=6, random_order=False)
     diffs = pair_differences(data)
-    top = np.linalg.svd(diffs, full_matrices=False)[2][0]
+    top = top_right_singular_vector(diffs)
 
     centered = fit_direction("pca_diff", data.h, pairs=data.pairs)
     raw = fit_direction("pca_diff", data.h, pairs=data.pairs, preprocess="none")
@@ -127,8 +137,7 @@ def test_preprocess_unit_scales_each_difference_before_centering() -> None:
     data = make_planted(40, seed=7)
     diffs = pair_differences(data)
     unit_diffs = diffs / np.linalg.norm(diffs, axis=1, keepdims=True)
-    centered = unit_diffs - unit_diffs.mean(axis=0)
-    top = np.linalg.svd(centered, full_matrices=False)[2][0]
+    top = top_right_singular_vector(unit_diffs - unit_diffs.mean(axis=0))
 
     fit = fit_direction("pca_diff", data.h, pairs=data.pairs, preprocess="unit")
 
@@ -189,7 +198,7 @@ def make_blobs(
 def test_pca_raw_is_the_top_singular_vector_of_centered_rows() -> None:
     h, _, planted = make_blobs(200, seed=11)
     h64 = h.astype(np.float64)
-    top = np.linalg.svd(h64 - h64.mean(axis=0), full_matrices=False)[2][0]
+    top = top_right_singular_vector(h64 - h64.mean(axis=0))
 
     fit = fit_direction("pca_raw", h)
 
@@ -216,15 +225,6 @@ def test_mean_diff_recovers_planted_direction() -> None:
     fit = fit_direction("mean_diff", h, labels=labels)
 
     assert abs_cosine(fit.direction, planted) > 0.95
-
-
-def test_mean_diff_needs_labels_with_both_classes() -> None:
-    h, labels, _ = make_blobs(20, seed=13)
-
-    with pytest.raises(ValueError, match="labels"):
-        fit_direction("mean_diff", h)
-    with pytest.raises(ValueError, match="both classes"):
-        fit_direction("mean_diff", h, labels=np.ones_like(labels))
 
 
 def test_kmeans_is_the_centroid_difference_of_two_clusters() -> None:
@@ -291,13 +291,16 @@ def test_logistic_direction_does_not_depend_on_activation_scale() -> None:
     assert scaled.raw_norm == pytest.approx(base.raw_norm / 1000.0, rel=1e-3)
 
 
-def test_logistic_needs_labels_with_both_classes() -> None:
-    h, labels, _ = make_blobs(20, seed=18)
+@pytest.mark.parametrize(
+    "method", ["mean_diff", "logistic"], ids=["mean_diff", "logistic"]
+)
+def test_label_methods_need_labels_with_both_classes(method: Method) -> None:
+    h, labels, _ = make_blobs(20, seed=13)
 
-    with pytest.raises(ValueError, match="labels"):
-        fit_direction("logistic", h)
+    with pytest.raises(ValueError, match="needs labels"):
+        fit_direction(method, h)
     with pytest.raises(ValueError, match="both classes"):
-        fit_direction("logistic", h, labels=np.zeros_like(labels))
+        fit_direction(method, h, labels=np.ones_like(labels))
 
 
 def test_unknown_method_is_rejected() -> None:
