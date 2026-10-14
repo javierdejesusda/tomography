@@ -387,3 +387,11 @@ def test_embedding_figure_saves_in_all_formats(tmp_path: Path) -> None:
 
     assert [path.suffix for path in paths] == [".pdf", ".png", ".svg"]
     assert all(path.stat().st_size > 0 for path in paths)
+
+
+def test_plot_embedding_rejects_negative_labels() -> None:
+    xy, labels, layers = make_embedding()
+    labels[0] = -1
+
+    with pytest.raises(ValueError, match="labels"):
+        geometry.plot_embedding(xy, labels, layers, classes=["a", "b", "c"])

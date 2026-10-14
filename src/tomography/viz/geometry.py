@@ -229,8 +229,8 @@ def plot_embedding(
 
     Raises:
         ValueError: If the shapes of `xy`, `labels` and `layers` disagree,
-            a label has no class name, or `ncols` is given for more than
-            three classes.
+            a label is negative or has no class name, or `ncols` is given
+            for more than three classes.
     """
     if xy.ndim != 3 or xy.shape[2] != 2:
         raise ValueError(f"xy must have shape (K, N, 2), got {xy.shape}")
@@ -241,10 +241,10 @@ def plot_embedding(
         raise ValueError(f"got {len(layers)} layers for {n_layers} panels")
     if not classes:
         raise ValueError("classes must name at least one class")
-    if labels.size and labels.max() >= len(classes):
+    if labels.size and (labels.min() < 0 or labels.max() >= len(classes)):
         raise ValueError(
-            f"labels reach class {labels.max()} but only {len(classes)} "
-            "classes were named"
+            f"labels must index the {len(classes)} classes (0.."
+            f"{len(classes) - 1}), got {labels.min()}..{labels.max()}"
         )
     facet = len(classes) > HUE_CLASSES
     if facet and ncols is not None:
