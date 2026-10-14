@@ -175,9 +175,9 @@ def diverging_cmap() -> Colormap:
 def style_context() -> Iterator[None]:
     """Applies the figure style to everything created or saved inside.
 
-    Returns:
-        A context manager that restores the previous rc parameters on exit,
-        including on exceptions.
+    Yields:
+        None. The rc parameters set here are restored on exit, including on
+        exceptions.
     """
     with mpl.rc_context(RC_PARAMS):
         yield
