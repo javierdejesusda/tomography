@@ -229,16 +229,23 @@ def test_execute_reports_the_rows_of_each_eval_split(
     assert summary["n_eval_pairs"] == {"val": 5, "test": 7}
 
 
-def test_too_few_components_fail_before_the_model_runs(
+@pytest.mark.parametrize(
+    ("n_pairs", "n_components"),
+    [(8, 2), (2, 3), (64, 33)],
+    ids=["below-three", "above-pairs", "above-width"],
+)
+def test_invalid_component_counts_fail_before_the_model_runs(
     tiny_arch: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    n_pairs: int,
+    n_components: int,
 ) -> None:
     def forbidden(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("the model must not run")
 
     monkeypatch.setattr(r2_utility, "stimulus_activations", forbidden)
-    config = _config(n_components=2)
+    config = _config(n_pairs=n_pairs, n_components=n_components)
     run_dir = RunDir.create(config, out_root=tmp_path)
     with pytest.raises(ValueError, match="n_components"):
         execute(config, run_dir, tiny_arch, _examples())

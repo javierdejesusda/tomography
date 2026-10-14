@@ -48,7 +48,8 @@ class Config(ReadingConfig):
 
     Attributes:
         n_components: Components kept for the explained-variance curves; at
-            least 3, and at most the number of training pairs.
+            least 3, and at most the smaller of the number of training pairs
+            and the model width.
     """
 
     experiment: str = "r2"
@@ -96,12 +97,14 @@ def execute(
             splits and the row id in `meta["pair"]`.
 
     Raises:
-        ValueError: If `config.n_components` is below 3.
+        ValueError: If `config.n_components` is below 3 or above the smaller
+            of `config.n_pairs` and the model width.
     """
-    if config.n_components < len(_COMPONENTS):
+    limit = min(config.n_pairs, loaded.d_model)
+    if not len(_COMPONENTS) <= config.n_components <= limit:
         raise ValueError(
-            f"n_components must be at least {len(_COMPONENTS)}, "
-            f"got {config.n_components}"
+            f"n_components must be in {len(_COMPONENTS)}..min(n_pairs, "
+            f"d_model)={limit}, got {config.n_components}"
         )
 
     def part(split: Split) -> list[Example]:
