@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 import math
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -282,6 +283,54 @@ def test_response_mask_accepts_one_prompt_length_for_all_rows(
     as_int = run(tiny_arch, encoded, controller.edits(3))
 
     assert torch.equal(as_list.logits, as_int.logits)
+
+
+@pytest.mark.parametrize("side", ["right", "left"])
+def test_call_with_response_mask_edits_only_the_last_real_token(
+    tiny_arch: LoadedModel, side: Literal["right", "left"]
+) -> None:
+    encoded = tiny_arch.encode(TEXTS, padding_side=side)
+    assert len(set(encoded.lengths)) == len(TEXTS)
+    controller = ReadingVectorController.from_reader(
+        source_for(tiny_arch), coeff=1.5, mask="response"
+    )
+    layer = 2
+
+    seen = run(tiny_arch, encoded, controller(encoded), (layer,))
+
+    delta = seen.after[layer] - seen.before[layer]
+    expected = 1.5 * controller.vectors[layer]
+    seq = encoded.input_ids.shape[1]
+    for row, length in enumerate(encoded.lengths):
+        last = length - 1 if side == "right" else seq - 1
+        others = [column for column in range(seq) if column != last]
+        assert torch.equal(
+            delta[row, others], torch.zeros_like(delta[row, others])
+        )
+        assert torch.allclose(delta[row, last], expected, atol=1e-5)
+
+
+def test_preserve_norm_is_forwarded_to_the_operator(
+    tiny_arch: LoadedModel,
+) -> None:
+    encoded = tiny_arch.encode(TEXTS)
+    real = real_token_mask(encoded)
+    layer = 2
+
+    def norms(preserve_norm: bool) -> tuple[torch.Tensor, torch.Tensor]:
+        controller = ReadingVectorController.from_reader(
+            source_for(tiny_arch), coeff=1.5, preserve_norm=preserve_norm
+        )
+        seen = run(tiny_arch, encoded, controller(encoded), (layer,))
+        return (
+            seen.before[layer].norm(dim=-1)[real],
+            seen.after[layer].norm(dim=-1)[real],
+        )
+
+    before, after = norms(True)
+    torch.testing.assert_close(after, before, rtol=1e-6, atol=0)
+    before, after = norms(False)
+    assert not torch.allclose(after, before, rtol=1e-3)
 
 
 def test_edit_mask_is_built_once_per_forward_and_shared_by_layers(
@@ -633,21 +682,32 @@ def test_mean_residual_norms_returns_floats_and_collapses_duplicates(
 
 
 @pytest.mark.parametrize(
-    ("layers", "texts", "bos", "match"),
+    ("layers", "texts", "bos", "batch_size", "match"),
     [
-        ([], TEXTS, None, "layers is empty"),
-        ([2], [], None, "texts is empty"),
-        ([4], TEXTS, None, "layer 4"),
-        ([-1], TEXTS, None, "layer -1"),
-        ([2], ["a"], "none", "no token"),
+        ([], TEXTS, None, 8, "layers is empty"),
+        ([2], [], None, 8, "texts is empty"),
+        ([4], TEXTS, None, 8, "layer 4"),
+        ([-1], TEXTS, None, 8, "layer -1"),
+        ([2], ["a"], "none", 8, "no token"),
+        ([2], TEXTS, None, 0, "batch_size"),
+        ([2], TEXTS, None, -1, "batch_size"),
     ],
-    ids=["no_layers", "no_texts", "layer_above", "layer_below", "no_token"],
+    ids=[
+        "no_layers",
+        "no_texts",
+        "layer_above",
+        "layer_below",
+        "no_token",
+        "batch_size_zero",
+        "batch_size_negative",
+    ],
 )
 def test_mean_residual_norms_rejects_bad_arguments(
     tiny_arch: LoadedModel,
     layers: list[int],
     texts: list[str],
     bos: str | None,
+    batch_size: int,
     match: str,
 ) -> None:
     with pytest.raises(ValueError, match=match):
@@ -656,6 +716,7 @@ def test_mean_residual_norms_rejects_bad_arguments(
             texts,
             layers,
             bos=bos,  # type: ignore[arg-type]
+            batch_size=batch_size,
         )
 
 
