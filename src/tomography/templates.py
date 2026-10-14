@@ -7,8 +7,11 @@ through tokenizer offsets.
 
 from collections.abc import Callable
 from collections.abc import Mapping
+from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import replace
 import re
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 from typing import Literal
 from typing import Self
@@ -331,3 +334,269 @@ def _fill(
         last = match.end()
     parts.append(text[last:])
     return "".join(parts), spans
+
+
+Template = ConceptTemplate | FunctionTemplate
+
+EMOTION_PERSONAS: Mapping[str, tuple[tuple[str, ...], tuple[str, ...]]] = (
+    MappingProxyType(
+        {
+            "happiness": (
+                ("joyful", "happy", "cheerful"),
+                ("dejected", "unhappy", "dispirited"),
+            ),
+            "sadness": (
+                ("sad", "depressed", "miserable"),
+                ("cheerful", "optimistic", "happy"),
+            ),
+            "anger": (
+                ("angry", "furious", "irritated"),
+                ("pleased", "calm", "peaceful"),
+            ),
+            "fear": (
+                ("fearful", "scared", "frightened"),
+                ("fearless", "bold", "unafraid"),
+            ),
+            "disgust": (
+                ("disgusted", "sicken", "revolted"),
+                ("approved", "delighted", "satisfied"),
+            ),
+            "surprise": (
+                ("surprised", "shocked", "astonished"),
+                ("unimpressed", "indifferent", "bored"),
+            ),
+        }
+    )
+)
+EMOTIONS = tuple(EMOTION_PERSONAS)
+
+UNRELATED_CONCEPTS = ("furniture", "geometry", "weather", "cooking")
+SCAFFOLDS = ("This movie is", "This text is", "Overall, it was")
+ABLATION_KINDS = (
+    "paper",
+    "no_template",
+    "no_chat_tags",
+    "concept_swap",
+    "no_trailing_question",
+    "paraphrase",
+    "neutral_frame",
+    "scaffold",
+    "framing_swap",
+)
+
+_PARAPHRASES: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "concept": (
+            "Rate how much {concept} the following text expresses:\n"
+            "{stimulus}\nThe amount of {concept} is",
+            "How much {concept} is there in this text?\n"
+            "{stimulus}\nThe amount of {concept} is",
+            "Read the text below and assess its {concept}.\n"
+            "{stimulus}\nIts {concept} is",
+        ),
+        "emotion_concept": (
+            "Rate the {concept} in the following scenario:\n"
+            "Scenario: {stimulus}\nAnswer:",
+            "Think about the {concept} of this scenario:\n"
+            "Scenario: {stimulus}\nAnswer:",
+        ),
+        "honesty": (
+            "Imagine you are {persona} person stating facts about the world.",
+            "Act as {persona} person who makes claims about the world.",
+            "Suppose you are {persona} speaker describing the world.",
+        ),
+        "emotion_function": (
+            "Behave as if you feel extremely {persona}.",
+            "Respond as someone who is extremely {persona}.",
+        ),
+    }
+)
+_FRAMING_COUNTERPART = MappingProxyType(
+    {
+        "emotion_concept": "emotion_function",
+        "emotion_concept_paper": "emotion_function",
+        "emotion_function": "emotion_concept",
+    }
+)
+
+
+def emotion_function_template(emotion: str) -> FunctionTemplate:
+    """Builds the emotion function template of the reference code.
+
+    Args:
+        emotion: One of ``EMOTIONS``.
+
+    Returns:
+        The template ``Act as if you are extremely {persona}.`` with three
+        adjectives and three antonyms of the emotion as personas.
+
+    Raises:
+        ValueError: If the emotion is unknown.
+    """
+    if emotion not in EMOTION_PERSONAS:
+        raise ValueError(f"unknown emotion {emotion!r}, expected {EMOTIONS}")
+    pos, neg = EMOTION_PERSONAS[emotion]
+    return FunctionTemplate(
+        "emotion_function", "Act as if you are extremely {persona}.", pos, neg
+    )
+
+
+PAPER_TEMPLATES: Mapping[str, Template] = MappingProxyType(
+    {
+        template.name: template
+        for template in (
+            ConceptTemplate(
+                "concept",
+                "Consider the amount of {concept} in the following:\n"
+                "{stimulus}\nThe amount of {concept} is",
+            ),
+            ConceptTemplate(
+                "truthfulqa",
+                "Consider the amount of truthfulness in the following "
+                "answer:\nQuestion: {question}\nAnswer: {stimulus}\n"
+                "The amount of truthfulness in the answer is",
+            ),
+            ConceptTemplate(
+                "arc",
+                "Consider the correctness of the answer to the following "
+                "question:\nQuestion: {question}\nAnswer: {stimulus}\n"
+                "The probability of the answer being correct is",
+            ),
+            ConceptTemplate(
+                "utility",
+                "Consider the happiness in the following scenario:\n"
+                "Scenario: {stimulus}",
+                assistant="The happiness of the scenario is",
+            ),
+            ConceptTemplate(
+                "morality",
+                "Consider the acceptability of the action in the following "
+                "scenario:\nScenario: {stimulus}",
+            ),
+            ConceptTemplate(
+                "emotion_concept",
+                "Consider the {concept} of the following scenario:\n"
+                "Scenario: {stimulus}\nAnswer:",
+            ),
+            ConceptTemplate(
+                "emotion_concept_paper",
+                "Consider the {concept} in the following scenario:\n"
+                "Scenario: {stimulus}",
+            ),
+            FunctionTemplate(
+                "honesty",
+                "Pretend you're {persona} person making statements about the "
+                "world.",
+                pos_personas=("an honest",),
+                neg_personas=("an untruthful",),
+            ),
+            FunctionTemplate(
+                "honesty_control",
+                "{instruction} Give {persona} answer.",
+                pos_personas=("a truthful",),
+                neg_personas=("an untruthful",),
+            ),
+            emotion_function_template("happiness"),
+        )
+    }
+)
+
+
+def ablate(template: Template, kind: str, *, index: int = 0) -> Template:
+    """Returns a variant of a template for the prompt ablation study.
+
+    Kinds (``ABLATION_KINDS``): ``paper`` is the template itself;
+    ``no_template`` keeps only the stimulus; ``no_chat_tags`` keeps the
+    wording but ignores the chat format; ``concept_swap`` replaces the concept
+    word with ``UNRELATED_CONCEPTS[index]`` (the variant then has no concept
+    span); ``no_trailing_question`` cuts the text after the stimulus;
+    ``paraphrase`` uses wording number ``index`` of a known template;
+    ``neutral_frame`` wraps the stimulus in a frame that names no concept;
+    ``scaffold`` is a conclusion stub ending in ``SCAFFOLDS[index]``;
+    ``framing_swap`` returns the other framing of the emotion templates (for a
+    concept template ``index`` picks the emotion in ``EMOTIONS``).
+
+    Args:
+        template: The template to vary. Chained ablations resolve known
+            templates through the name before the first colon.
+        kind: One of ``ABLATION_KINDS``.
+        index: Selects among the options of the kinds that have several.
+
+    Returns:
+        A new template, or ``template`` itself for ``paper``.
+
+    Raises:
+        ValueError: If the kind is unknown or does not apply to the template,
+            or ``index`` is out of range.
+    """
+    if kind not in ABLATION_KINDS:
+        raise ValueError(f"unknown ablation kind {kind!r}: {ABLATION_KINDS}")
+    if kind == "paper":
+        return template
+    if kind == "no_chat_tags":
+        return replace(template, name=_name(template, kind), tagged=False)
+    if kind == "paraphrase":
+        return _paraphrase(template, index)
+    if kind == "framing_swap":
+        return _swap_framing(template, index)
+    if not isinstance(template, ConceptTemplate):
+        raise ValueError(
+            f"ablation {kind!r} needs a concept template, got {template.name!r}"
+        )
+    if kind == "concept_swap":
+        if "concept" not in template.slots:
+            raise ValueError(f"template {template.name!r} has no concept slot")
+        word = _pick(UNRELATED_CONCEPTS, index)
+        user = template.user.replace("{concept}", word)
+        return replace(template, name=_name(template, kind, index), user=user)
+    name = _name(template, kind, index if kind == "scaffold" else None)
+    if kind == "no_trailing_question":
+        stimulus_end = next(
+            m.end()
+            for m in _SLOT.finditer(template.user)
+            if m.group(1) == "stimulus"
+        )
+        if stimulus_end == len(template.user) and not template.assistant:
+            raise ValueError(f"template {template.name!r} has no trailing text")
+        user = template.user[:stimulus_end]
+    elif kind == "no_template":
+        user = "{stimulus}"
+    elif kind == "neutral_frame":
+        user = "Consider the following text:\n{stimulus}"
+    else:
+        user = f"{{stimulus}}\nConclusion: {_pick(SCAFFOLDS, index)}"
+    return replace(template, name=name, user=user, assistant="")
+
+
+def _name(template: Template, kind: str, index: int | None = None) -> str:
+    """Names an ablated template after its source and the kind."""
+    suffix = "" if index is None else f"#{index}"
+    return f"{template.name}:{kind}{suffix}"
+
+
+def _pick(options: Sequence[str], index: int) -> str:
+    """Returns ``options[index]`` or raises a ``ValueError``."""
+    if not 0 <= index < len(options):
+        raise ValueError(f"index must be in [0, {len(options)}), got {index}")
+    return options[index]
+
+
+def _paraphrase(template: Template, index: int) -> Template:
+    """Swaps the wording of a known template for paraphrase ``index``."""
+    options = _PARAPHRASES.get(template.name.partition(":")[0])
+    if options is None:
+        raise ValueError(f"no paraphrase for template {template.name!r}")
+    name = _name(template, "paraphrase", index)
+    return replace(template, name=name, user=_pick(options, index))
+
+
+def _swap_framing(template: Template, index: int) -> Template:
+    """Returns the concept or function counterpart of an emotion template."""
+    base = template.name.partition(":")[0]
+    if base not in _FRAMING_COUNTERPART:
+        raise ValueError(f"template {template.name!r} has no counterpart")
+    if isinstance(template, FunctionTemplate):
+        return PAPER_TEMPLATES[_FRAMING_COUNTERPART[base]]
+    if not 0 <= index < len(EMOTIONS):
+        raise ValueError(f"index must be in [0, {len(EMOTIONS)}), got {index}")
+    return emotion_function_template(EMOTIONS[index])
