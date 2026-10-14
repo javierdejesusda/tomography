@@ -621,7 +621,7 @@ def test_label_questions_plumbing_on_a_tiny_model(
 def test_label_questions_default_shots_exceed_a_tiny_model(
     tiny_gpt2: LoadedModel,
 ) -> None:
-    with pytest.raises(ValueError, match="max_position_embeddings"):
+    with pytest.raises(ValueError, match="positions of this model"):
         label_questions(tiny_gpt2, [_qa("a", ("x",))])
 
 

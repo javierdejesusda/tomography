@@ -280,8 +280,9 @@ class LoadedModel:
             The encoded batch.
 
         Raises:
-            ValueError: If `texts` is empty, a text has no tokens, the
-                padding side is unknown, or BOS is requested without an id.
+            ValueError: If `texts` is empty, a text has no tokens or more
+                tokens than the model has positions, the padding side is
+                unknown, or BOS is requested without an id.
         """
         if padding_side not in ("left", "right"):
             raise ValueError(
@@ -308,9 +309,15 @@ class LoadedModel:
             prefix_offsets + [(int(a), int(b)) for a, b in offsets]
             for offsets in encoding["offset_mapping"]
         ]
+        limit = getattr(self.model.config, "max_position_embeddings", None)
         for index, ids in enumerate(rows_ids):
             if not ids:
                 raise ValueError(f"text {index} has no tokens")
+            if limit is not None and len(ids) > limit:
+                raise ValueError(
+                    f"text {index} has {len(ids)} tokens, more than the "
+                    f"{limit} positions of this model"
+                )
         lengths = tuple(len(ids) for ids in rows_ids)
         width = max(lengths)
         ids_out, mask_out, offsets_out = [], [], []

@@ -3,6 +3,7 @@ import itertools
 import os
 import re
 from types import SimpleNamespace
+from typing import Literal
 
 import huggingface_hub
 import pytest
@@ -273,6 +274,79 @@ def test_encode_rejects_an_unknown_padding_side(
 ) -> None:
     with pytest.raises(ValueError, match="padding_side"):
         tiny_gpt2.encode(["The fox"], padding_side="middle")  # type: ignore[arg-type]
+
+
+def _position_limit(lm: LoadedModel) -> int:
+    return int(lm.model.config.max_position_embeddings)
+
+
+def _text_of_tokens(lm: LoadedModel, count: int) -> str:
+    """Builds a text that tokenizes to exactly `count` tokens."""
+    for words in range(1, count + 1):
+        for suffix in ("", " fox"):
+            text = " ".join(["The"] * words) + suffix
+            ids = lm.tokenizer(text, add_special_tokens=False)["input_ids"]
+            if len(ids) == count:
+                return text
+    raise AssertionError(f"cannot build a text of {count} tokens")
+
+
+def test_encode_accepts_a_row_of_exactly_the_position_limit(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    limit = _position_limit(tiny_gpt2)
+
+    batch = tiny_gpt2.encode([_text_of_tokens(tiny_gpt2, limit)], bos="none")
+
+    assert batch.lengths == (limit,)
+
+
+@pytest.mark.parametrize(
+    "padding_side", ["right", "left"], ids=["right", "left"]
+)
+def test_encode_rejects_a_row_over_the_position_limit(
+    tiny_gpt2: LoadedModel, padding_side: Literal["left", "right"]
+) -> None:
+    limit = _position_limit(tiny_gpt2)
+    text = _text_of_tokens(tiny_gpt2, limit + 1)
+
+    with pytest.raises(
+        ValueError,
+        match=rf"text 0 has {limit + 1} tokens, more than the {limit} "
+        "positions of this model",
+    ):
+        tiny_gpt2.encode([text], bos="none", padding_side=padding_side)
+
+
+def test_encode_counts_the_bos_toward_the_position_limit(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    limit = _position_limit(tiny_gpt2)
+    text = _text_of_tokens(tiny_gpt2, limit)
+
+    with pytest.raises(ValueError, match=rf"text 0 has {limit + 1} tokens"):
+        tiny_gpt2.encode([text])
+    assert tiny_gpt2.encode([text], bos="none").lengths == (limit,)
+
+
+def test_encode_reports_the_first_offending_row_of_a_batch(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    too_long = _text_of_tokens(tiny_gpt2, _position_limit(tiny_gpt2) + 1)
+
+    with pytest.raises(ValueError, match=r"text 1 "):
+        tiny_gpt2.encode(["The fox", too_long, too_long], bos="none")
+
+
+def test_encode_skips_the_check_without_max_position_embeddings(
+    tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tiny_gpt2.model, "config", SimpleNamespace())
+    text = _text_of_tokens(tiny_gpt2, 200)
+
+    batch = tiny_gpt2.encode([text], bos="none")
+
+    assert batch.lengths == (200,)
 
 
 class FakeHub:
