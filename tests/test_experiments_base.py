@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from collections.abc import Iterator
+import contextlib
 import dataclasses
 import datetime
 import hashlib
@@ -37,6 +40,27 @@ class _Config(ExperimentConfig):
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class _RequiredConfig(ExperimentConfig):
     n_pairs: int
+
+
+ReplaceFails = Callable[[], contextlib.AbstractContextManager[None]]
+
+
+@pytest.fixture
+def replace_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> ReplaceFails:
+    """Returns a context manager in which `os.replace` raises OSError."""
+
+    @contextlib.contextmanager
+    def patched() -> Iterator[None]:
+        def refuse(src: object, dst: object) -> None:
+            raise OSError("disk full")
+
+        with monkeypatch.context() as scope:
+            scope.setattr(os, "replace", refuse)
+            yield
+
+    return patched
 
 
 def test_to_dict_lists_every_field_with_json_values() -> None:
@@ -412,18 +436,13 @@ def test_write_json_rejects_values_json_cannot_hold(tmp_path: Path) -> None:
 
 
 def test_failed_write_keeps_the_previous_file_and_leaves_no_temp(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, replace_fails: ReplaceFails
 ) -> None:
     run = _new_run(tmp_path)
     run.write_json("v", {"x": 1})
 
-    def refuse(src: object, dst: object) -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(os, "replace", refuse)
-    with pytest.raises(OSError, match="disk full"):
+    with replace_fails(), pytest.raises(OSError, match="disk full"):
         run.write_json("v", {"x": 2})
-    monkeypatch.undo()
 
     assert run.read_json("v") == {"x": 1}
     assert sorted(path.name for path in run.path.iterdir()) == [
@@ -534,18 +553,13 @@ def test_write_arrays_rejects_unsafe_names(tmp_path: Path) -> None:
 
 
 def test_failed_array_write_keeps_the_previous_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, replace_fails: ReplaceFails
 ) -> None:
     run = _new_run(tmp_path)
     run.write_arrays("scan", x=np.ones(2))
 
-    def refuse(src: object, dst: object) -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(os, "replace", refuse)
-    with pytest.raises(OSError, match="disk full"):
+    with replace_fails(), pytest.raises(OSError, match="disk full"):
         run.write_arrays("scan", x=np.zeros(2))
-    monkeypatch.undo()
 
     np.testing.assert_array_equal(run.read_arrays("scan")["x"], np.ones(2))
     assert not [p for p in run.path.iterdir() if p.name.endswith(".tmp")]

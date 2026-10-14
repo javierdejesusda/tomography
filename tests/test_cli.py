@@ -3,7 +3,6 @@ import importlib
 from pathlib import Path
 import subprocess
 import sys
-import textwrap
 
 import pytest
 
@@ -68,8 +67,16 @@ def _write_experiment(
 ) -> None:
     experiment_id = stem.partition("_")[0]
     text = DUMMY.format(id=experiment_id) if source is None else source
-    (folder / f"{stem}.py").write_text(textwrap.dedent(text), encoding="utf-8")
+    (folder / f"{stem}.py").write_text(text, encoding="utf-8")
     importlib.invalidate_caches()
+
+
+def _usage_error(capsys: pytest.CaptureFixture[str], *argv: str) -> str:
+    with pytest.raises(SystemExit) as exit_info:
+        main(list(argv))
+
+    assert exit_info.value.code == 2
+    return capsys.readouterr().err
 
 
 def test_run_finds_the_module_by_prefix_and_runs_it(
@@ -115,11 +122,7 @@ def test_run_rejects_an_unknown_experiment_and_lists_the_known_ones(
 ) -> None:
     _write_experiment(experiments_dir, "d1_dummy")
 
-    with pytest.raises(SystemExit) as exit_info:
-        main(["run", "nope"])
-
-    assert exit_info.value.code == 2
-    error = capsys.readouterr().err
+    error = _usage_error(capsys, "run", "nope")
     assert "unknown experiment 'nope'" in error
     assert "d1" in error
 
@@ -130,11 +133,7 @@ def test_run_rejects_two_modules_with_the_same_id(
     _write_experiment(experiments_dir, "d1_first")
     _write_experiment(experiments_dir, "d1_second")
 
-    with pytest.raises(SystemExit) as exit_info:
-        main(["run", "d1"])
-
-    assert exit_info.value.code == 2
-    error = capsys.readouterr().err
+    error = _usage_error(capsys, "run", "d1")
     assert "d1_first" in error
     assert "d1_second" in error
 
@@ -153,19 +152,13 @@ def test_run_rejects_a_module_that_breaks_the_contract(
 ) -> None:
     _write_experiment(experiments_dir, "d1_bad", source)
 
-    with pytest.raises(SystemExit) as exit_info:
-        main(["run", "d1"])
-
-    assert exit_info.value.code == 2
-    assert "d1_bad" in capsys.readouterr().err
+    error = _usage_error(capsys, "run", "d1")
+    assert "d1_bad" in error
 
 
 def test_a_command_is_required(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as exit_info:
-        main([])
-
-    assert exit_info.value.code == 2
-    assert "command" in capsys.readouterr().err
+    error = _usage_error(capsys)
+    assert "command" in error
 
 
 def test_run_applies_the_model_seed_and_overrides(
@@ -221,10 +214,8 @@ def test_run_needs_a_model_when_the_config_has_no_default(
     source = DUMMY.format(id="d1").replace('model: str = "gpt2"', "model: str")
     _write_experiment(experiments_dir, "d1_dummy", source)
 
-    with pytest.raises(SystemExit) as exit_info:
-        main(["run", "d1", "--out", str(tmp_path)])
-    assert exit_info.value.code == 2
-    assert "model" in capsys.readouterr().err
+    error = _usage_error(capsys, "run", "d1", "--out", str(tmp_path))
+    assert "model" in error
 
     assert main(["run", "d1", "--out", str(tmp_path), "--model", "gpt2"]) == 0
 
@@ -257,11 +248,10 @@ def test_run_rejects_bad_overrides(
 ) -> None:
     _write_experiment(experiments_dir, "d1_dummy")
 
-    with pytest.raises(SystemExit) as exit_info:
-        main(["run", "d1", "--out", str(tmp_path / "out"), "--set", override])
-
-    assert exit_info.value.code == 2
-    assert message in capsys.readouterr().err
+    error = _usage_error(
+        capsys, "run", "d1", "--out", str(tmp_path / "out"), "--set", override
+    )
+    assert message in error
     assert not (tmp_path / "out").exists()
 
 
@@ -287,11 +277,8 @@ def test_run_refuses_to_overwrite_a_finished_run(
     main(["run", "d1", "--out", str(tmp_path)])
     capsys.readouterr()
 
-    with pytest.raises(SystemExit) as exit_info:
-        main(["run", "d1", "--out", str(tmp_path)])
-
-    assert exit_info.value.code == 2
-    assert "already exists" in capsys.readouterr().err
+    error = _usage_error(capsys, "run", "d1", "--out", str(tmp_path))
+    assert "already exists" in error
 
 
 def test_run_leaves_a_crashed_run_unfinished_and_can_rerun_it(
@@ -404,11 +391,8 @@ def test_plot_needs_at_least_one_finished_run(
 ) -> None:
     _write_experiment(experiments_dir, "d1_dummy")
 
-    with pytest.raises(SystemExit) as exit_info:
-        main(["plot", target, "--out", str(tmp_path)])
-
-    assert exit_info.value.code == 2
-    assert "no finished runs" in capsys.readouterr().err
+    error = _usage_error(capsys, "plot", target, "--out", str(tmp_path))
+    assert "no finished runs" in error
 
 
 def test_plot_rejects_a_run_of_another_experiment(
@@ -418,11 +402,8 @@ def test_plot_rejects_a_run_of_another_experiment(
     _write_experiment(experiments_dir, "d2_dummy")
     other = _run_experiment(capsys, "d2", tmp_path)
 
-    with pytest.raises(SystemExit) as exit_info:
-        main(["plot", "d1", "--run", str(other)])
-
-    assert exit_info.value.code == 2
-    assert "d2" in capsys.readouterr().err
+    error = _usage_error(capsys, "plot", "d1", "--run", str(other))
+    assert "d2" in error
 
 
 def test_plot_rejects_a_folder_that_is_not_a_run(
@@ -430,11 +411,8 @@ def test_plot_rejects_a_folder_that_is_not_a_run(
 ) -> None:
     _write_experiment(experiments_dir, "d1_dummy")
 
-    with pytest.raises(SystemExit) as exit_info:
-        main(["plot", "d1", "--run", str(tmp_path)])
-
-    assert exit_info.value.code == 2
-    assert "not a run directory" in capsys.readouterr().err
+    error = _usage_error(capsys, "plot", "d1", "--run", str(tmp_path))
+    assert "not a run directory" in error
 
 
 def test_plot_all_reports_results_of_an_experiment_without_a_module(
@@ -449,11 +427,8 @@ def test_plot_all_reports_results_of_an_experiment_without_a_module(
     importlib.invalidate_caches()
     sys.modules.pop("tomography.experiments.d3_gone", None)
 
-    with pytest.raises(SystemExit) as exit_info:
-        main(["plot", "all", "--out", str(tmp_path)])
-
-    assert exit_info.value.code == 2
-    assert "unknown experiment 'd3'" in capsys.readouterr().err
+    error = _usage_error(capsys, "plot", "all", "--out", str(tmp_path))
+    assert "unknown experiment 'd3'" in error
 
 
 def test_python_dash_m_runs_the_command_line() -> None:
