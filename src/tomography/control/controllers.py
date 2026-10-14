@@ -11,6 +11,7 @@ import math
 from typing import Literal
 from typing import Protocol
 from typing import Self
+from typing import get_args
 
 import numpy as np
 from numpy.typing import NDArray
@@ -27,6 +28,9 @@ from tomography.model import LoadedModel
 
 CoeffMode = Literal["absolute", "relative"]
 ResponseMask = Literal["all", "response"]
+
+_COEFF_MODES = get_args(CoeffMode)
+_RESPONSE_MASKS = get_args(ResponseMask)
 
 
 class VectorSource(Protocol):
@@ -204,9 +208,18 @@ class ReadingVectorController:
         Raises:
             ValueError: If `vectors` is empty, a vector is not 1-D, not
                 finite, zero, or of a different length than the others,
-                `coeff` is not finite, `mode` is `relative` with a missing
-                or non-positive norm or with `op="projection"`.
+                `coeff` is not finite, `mode` or `mask` is not a known
+                value, `mode` is `relative` with a missing or non-positive
+                norm or with `op="projection"`.
         """
+        if self.mode not in _COEFF_MODES:
+            raise ValueError(
+                f"mode must be 'absolute' or 'relative', got {self.mode!r}"
+            )
+        if self.mask not in _RESPONSE_MASKS:
+            raise ValueError(
+                f"mask must be 'all' or 'response', got {self.mask!r}"
+            )
         if not self.vectors:
             raise ValueError("vectors is empty")
         if not math.isfinite(self.coeff):

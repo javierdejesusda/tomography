@@ -507,6 +507,8 @@ def unit(d_model: int = 4) -> torch.Tensor:
         ({"vectors": {1: unit(4), 2: unit(5)}}, "different lengths"),
         ({"coeff": float("nan")}, "finite"),
         ({"coeff": float("inf")}, "finite"),
+        ({"mode": "relatve"}, "mode must be"),
+        ({"mask": "responce"}, "mask must be"),  # codespell:ignore responce
         ({"mode": "relative"}, "norm"),
         ({"mode": "relative", "norms": {2: 1.0}}, "layer 1"),
         ({"mode": "relative", "norms": {1: 0.0}}, "layer 1"),
@@ -526,6 +528,8 @@ def unit(d_model: int = 4) -> torch.Tensor:
         "different_lengths",
         "nan_coeff",
         "inf_coeff",
+        "bad_mode",
+        "bad_mask",
         "relative_without_norms",
         "relative_missing_layer_norm",
         "relative_zero_norm",
