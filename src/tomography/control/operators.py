@@ -33,6 +33,9 @@ def apply_operator(
     * `"projection"`: `h - c (h.v / |v|^2) v`, which removes the component
       along `v` at `c = 1` and is independent of the norm of `v`.
 
+    A zero direction leaves `h` unchanged for every operator. No operator
+    branches on tensor values, so a call never forces a host sync.
+
     The math runs in float32 (float64 for float64 input) and the result is
     cast back to the dtype of `h`; shape and device are preserved. A zero
     coefficient is an exact no-op and returns `h` itself.
@@ -56,7 +59,7 @@ def apply_operator(
         ValueError: If `op` is unknown, `h` is not a floating point tensor
             with a trailing axis, `v` is not a vector of size `h.shape[-1]`,
             `coeff` is not finite, `mask` is not a bool tensor broadcastable
-            to `h.shape[:-1]`, or `op` is `"projection"` and `v` is zero.
+            to `h.shape[:-1]`.
     """
     if op not in _OPERATORS:
         raise ValueError(
@@ -84,7 +87,8 @@ def apply_operator(
     if preserve_norm:
         prior = h_c.norm(dim=-1, keepdim=True)
         current = edited.norm(dim=-1, keepdim=True)
-        edited = edited * torch.where(current > 0, prior / current, 1.0)
+        safe_current = torch.where(current > 0, current, 1.0)
+        edited = edited * torch.where(current > 0, prior / safe_current, 1.0)
     if mask is not None:
         edited = torch.where(mask.to(h.device).unsqueeze(-1), edited, h_c)
     return edited.to(h.dtype)
@@ -101,9 +105,8 @@ def _shift(
         sign = torch.where(dots >= 0, 1.0, -1.0).to(h.dtype)
         return coeff * sign.unsqueeze(-1) * v
     norm_sq = v @ v
-    if norm_sq == 0:
-        raise ValueError("projection needs a nonzero direction, got zero")
-    return -coeff * (dots / norm_sq).unsqueeze(-1) * v
+    safe_norm_sq = torch.where(norm_sq > 0, norm_sq, 1.0)
+    return -coeff * (dots / safe_norm_sq).unsqueeze(-1) * v
 
 
 def _check_mask(mask: torch.Tensor, lead_shape: torch.Size) -> None:

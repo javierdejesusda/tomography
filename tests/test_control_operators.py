@@ -143,12 +143,17 @@ def _unit(vector: torch.Tensor) -> torch.Tensor:
     return torch.nn.functional.normalize(vector, dim=0)
 
 
-@pytest.mark.parametrize("scale", [1.0, 12.5], ids=["unit", "norm-100"])
+@pytest.mark.parametrize(
+    ("d_model", "norm"),
+    [(64, 1.0), (64, 100.0), (768, 100.0)],
+    ids=["d64-norm1", "d64-norm100", "d768-norm100"],
+)
 def test_projection_with_unit_coefficient_leaves_no_component_in_fp32(
-    scale: float,
+    d_model: int, norm: float
 ) -> None:
-    h = _randn(4, 6, 64, seed=1) * scale
-    v = _unit(_randn(64, seed=2))
+    h = _randn(4, 6, d_model, seed=1)
+    h = h / h.norm(dim=-1, keepdim=True) * norm
+    v = _unit(_randn(d_model, seed=2))
 
     out = apply_operator(h, v, 1.0, "projection")
 
@@ -178,19 +183,13 @@ def test_projection_ignores_the_norm_of_the_direction() -> None:
     torch.testing.assert_close(out, scaled)
 
 
-def test_projection_rejects_a_zero_direction() -> None:
+@pytest.mark.parametrize("op", OPS)
+def test_zero_direction_leaves_the_vectors_unchanged(op: Operator) -> None:
     h = _randn(3, 16, seed=1)
 
-    with pytest.raises(ValueError, match="zero"):
-        apply_operator(h, torch.zeros(16), 1.0, "projection")
+    out = apply_operator(h, torch.zeros(16), 2.0, op)
 
-
-def test_zero_direction_is_a_valid_linear_and_piecewise_edit() -> None:
-    h = _randn(3, 16, seed=1)
-    zero = torch.zeros(16)
-
-    assert torch.equal(apply_operator(h, zero, 2.0, "linear"), h)
-    assert torch.equal(apply_operator(h, zero, 2.0, "piecewise"), h)
+    assert torch.equal(out, h)
 
 
 def test_float64_input_keeps_float64_precision() -> None:
@@ -403,3 +402,31 @@ def test_zero_coefficient_with_preserve_norm_returns_the_input_object() -> None:
     v = _randn(8, seed=2)
 
     assert apply_operator(h, v, 0.0, preserve_norm=True) is h
+
+
+@pytest.mark.parametrize("op", OPS)
+def test_edits_have_no_data_dependent_control_flow(op: Operator) -> None:
+    h = torch.empty(2, 3, 8, device="meta")
+    v = torch.empty(8, device="meta")
+    mask = torch.empty(2, 3, dtype=torch.bool, device="meta")
+
+    out = apply_operator(h, v, 1.0, op, mask=mask, preserve_norm=True)
+
+    assert out.device == h.device
+    assert out.shape == h.shape
+
+
+@pytest.mark.parametrize("op", OPS)
+def test_gradients_stay_finite_when_the_edit_zeroes_a_vector(
+    op: Operator,
+) -> None:
+    v = torch.tensor([1.0, 0.0, 0.0, 0.0])
+    h = torch.tensor(
+        [[2.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [1.0, 2.0, 0.0, 0.0]],
+        requires_grad=True,
+    )
+
+    out = apply_operator(h, v, 1.0, op, preserve_norm=True)
+    (grad,) = torch.autograd.grad(out.sum(), h)
+
+    assert bool(torch.isfinite(grad).all())
