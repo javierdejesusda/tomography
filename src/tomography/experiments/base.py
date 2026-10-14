@@ -74,7 +74,8 @@ def _coerce(annotation: Any, value: Any) -> Any:
         and ints widened where it asks for a float.
 
     Raises:
-        _TypeMismatchError: If the value does not fit the annotation.
+        _TypeMismatchError: If the value does not fit the annotation,
+            including an int too large to convert to a float.
     """
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
@@ -108,7 +109,10 @@ def _coerce(annotation: Any, value: Any) -> Any:
     if check is not None and not check(value):
         raise _TypeMismatchError
     if annotation is float:
-        return float(value)
+        try:
+            return float(value)
+        except OverflowError:
+            raise _TypeMismatchError from None
     return value
 
 

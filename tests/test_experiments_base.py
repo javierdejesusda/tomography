@@ -166,6 +166,11 @@ def test_from_dict_turns_an_int_for_a_float_field_into_a_float() -> None:
     assert config.config_hash() == _Config(alpha=1.0).config_hash()
 
 
+def test_from_dict_rejects_an_int_too_large_for_a_float_field() -> None:
+    with pytest.raises(ValueError, match="alpha"):
+        _Config.from_dict({"alpha": 10**400})
+
+
 def test_from_dict_accepts_null_for_an_optional_field() -> None:
     assert _Config.from_dict({"note": None}).note is None
 
