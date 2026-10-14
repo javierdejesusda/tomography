@@ -2,12 +2,14 @@ from collections.abc import Sequence
 import time
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
 
 from tomography.control.contrast import contrast_edits
 from tomography.control.contrast import contrast_generate
 from tomography.control.contrast import contrast_logits
+from tomography.control.contrast import contrast_logprobs
 from tomography.control.contrast import contrast_windows
 from tomography.hooks import ForwardInfo
 from tomography.model import BosMode
@@ -645,6 +647,205 @@ def test_generate_rejects_invalid_arguments(
 
     with pytest.raises(ValueError, match=MESSAGES):
         contrast_generate(tiny_arch, **options)
+
+
+CONTINUATIONS = [" jumps over", " is lazy and old", " true"]
+
+
+def reference_logprob(
+    lm: LoadedModel,
+    prompt: str,
+    continuation: str,
+    positive: str,
+    negative: str,
+    layers: Sequence[int],
+    alpha: float,
+) -> float:
+    prefix = [lm.bos_id] if lm.default_bos == "prepend" else []
+
+    def ids(text: str) -> list[int]:
+        return list(lm.tokenizer(text, add_special_tokens=False)["input_ids"])
+
+    tail = ids(continuation)
+    streams = [
+        prefix + ids(text) + tail for text in (prompt, positive, negative)
+    ]
+    with torch.no_grad():
+        hidden = reference_hidden(lm, *streams, layers, alpha, len(tail) + 1)
+        logits = lm.model.get_output_embeddings()(hidden[0]).float()
+    logp = torch.log_softmax(logits, dim=-1)
+    total = len(streams[0])
+    rows = torch.arange(total - len(tail) - 1, total - 1)
+    return float(logp[rows, torch.tensor(tail)].sum())
+
+
+def plain_logprob(lm: LoadedModel, prompt: str, continuation: str) -> float:
+    prefix = [lm.bos_id] if lm.default_bos == "prepend" else []
+    tail = lm.tokenizer(continuation, add_special_tokens=False)["input_ids"]
+    head = lm.tokenizer(prompt, add_special_tokens=False)["input_ids"]
+    ids = torch.tensor([prefix + head + tail])
+    with torch.no_grad():
+        logits = lm.model(input_ids=ids).logits[0].float()
+    logp = torch.log_softmax(logits, dim=-1)
+    rows = torch.arange(ids.shape[1] - len(tail) - 1, ids.shape[1] - 1)
+    return float(logp[rows, torch.tensor(tail)].sum())
+
+
+@pytest.mark.parametrize("alpha", [0.5, -0.7], ids=["a0.5", "a-0.7"])
+def test_logprobs_equal_the_reference_at_window_continuation_plus_one(
+    tiny_arch: LoadedModel, alpha: float
+) -> None:
+    layers = (1, 2, 3)
+
+    actual = contrast_logprobs(
+        tiny_arch,
+        PROMPTS,
+        CONTINUATIONS,
+        POSITIVE,
+        NEGATIVE,
+        layers=layers,
+        alpha=alpha,
+    )
+
+    expected = [
+        reference_logprob(tiny_arch, p, c, q, n, layers, alpha)
+        for p, c, q, n in zip(
+            PROMPTS, CONTINUATIONS, POSITIVE, NEGATIVE, strict=True
+        )
+    ]
+    np.testing.assert_allclose(actual, expected, atol=5e-3, rtol=0)
+
+
+def test_logprobs_with_alpha_zero_equal_the_plain_log_probability(
+    tiny_arch: LoadedModel,
+) -> None:
+    actual = contrast_logprobs(
+        tiny_arch,
+        PROMPTS,
+        CONTINUATIONS,
+        POSITIVE,
+        NEGATIVE,
+        layers=(1, 2),
+        alpha=0.0,
+    )
+
+    expected = [
+        plain_logprob(tiny_arch, p, c)
+        for p, c in zip(PROMPTS, CONTINUATIONS, strict=True)
+    ]
+    np.testing.assert_allclose(actual, expected, atol=1e-4, rtol=0)
+
+
+def test_the_first_continuation_token_score_changes_with_alpha(
+    tiny_arch: LoadedModel,
+) -> None:
+    tokenizer = tiny_arch.tokenizer
+    one = tokenizer.decode(tokenizer(" jumps")["input_ids"][:1])
+    assert len(tokenizer(one, add_special_tokens=False)["input_ids"]) == 1
+    options = {
+        "layers": (1, 2),
+        "continuations": [one] * 3,
+        "positive": POSITIVE,
+        "negative": NEGATIVE,
+    }
+
+    off = contrast_logprobs(tiny_arch, PROMPTS, alpha=0.0, **options)
+    on = contrast_logprobs(tiny_arch, PROMPTS, alpha=1.0, **options)
+
+    assert not np.allclose(on, off, atol=1e-4)
+
+
+def test_logprobs_do_not_depend_on_batch_size(tiny_arch: LoadedModel) -> None:
+    results = [
+        contrast_logprobs(
+            tiny_arch,
+            PROMPTS,
+            CONTINUATIONS,
+            POSITIVE,
+            NEGATIVE,
+            layers=(1, 3),
+            alpha=0.5,
+            batch_size=size,
+        )
+        for size in (1, 2, 3)
+    ]
+
+    np.testing.assert_allclose(results[1], results[0], atol=1e-4, rtol=0)
+    np.testing.assert_allclose(results[2], results[0], atol=1e-4, rtol=0)
+
+
+def test_logprobs_are_float32_with_one_score_per_prompt(
+    tiny_arch: LoadedModel,
+) -> None:
+    result = contrast_logprobs(
+        tiny_arch,
+        PROMPTS,
+        CONTINUATIONS,
+        POSITIVE,
+        NEGATIVE,
+        layers=(1,),
+        alpha=0.5,
+    )
+
+    assert result.dtype == np.float32
+    assert result.shape == (3,)
+
+
+def test_logprobs_of_no_prompts_are_an_empty_float32_array(
+    tiny_arch: LoadedModel,
+) -> None:
+    result = contrast_logprobs(
+        tiny_arch, [], [], [], [], layers=(1,), alpha=0.5
+    )
+
+    assert result.dtype == np.float32
+    assert result.shape == (0,)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"continuations": CONTINUATIONS[:2]},
+        {"positive": POSITIVE[:2]},
+        {"negative": NEGATIVE[:1]},
+        {"continuations": ["", " is", " true"]},
+        {"batch_size": 0},
+        {"layers": ()},
+        {"layers": (4,)},
+        {"alpha": float("nan")},
+        {"bos": "none", "positive": ["", *POSITIVE[1:]]},
+        {"bos": "none", "prompts": ["", *PROMPTS[1:]]},
+        {"bos": "none", "negative": [*NEGATIVE[:2], ""]},
+    ],
+    ids=[
+        "continuations_shorter",
+        "positive_shorter",
+        "negative_shorter",
+        "continuation_without_tokens",
+        "batch_size_zero",
+        "empty_layers",
+        "layer_above_range",
+        "alpha_nan",
+        "no_context_in_positive",
+        "no_context_in_prompt",
+        "no_context_in_negative",
+    ],
+)
+def test_logprobs_reject_invalid_arguments(
+    tiny_arch: LoadedModel, kwargs: dict[str, Any]
+) -> None:
+    options: dict[str, Any] = {
+        "prompts": PROMPTS,
+        "continuations": CONTINUATIONS,
+        "positive": POSITIVE,
+        "negative": NEGATIVE,
+        "layers": (1,),
+        "alpha": 0.5,
+        **kwargs,
+    }
+
+    with pytest.raises(ValueError, match=MESSAGES + r"|context|tokens"):
+        contrast_logprobs(tiny_arch, **options)
 
 
 @pytest.mark.slow
