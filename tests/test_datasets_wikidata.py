@@ -181,3 +181,164 @@ def test_run_query_asks_the_endpoint_unless_told_otherwise(
     result = wikidata.run_query("SELECT 1", cache=tmp_path)
 
     assert result.rows == ({"a": "1"},)
+
+
+PHYSICS = "http://www.wikidata.org/entity/Q38104"
+LITERATURE = "http://www.wikidata.org/entity/Q37922"
+DIGEST = "d" * 64
+
+
+def _winner(prize: str, label: str, year: int, person: str) -> dict[str, str]:
+    return {
+        "prize": prize,
+        "prizeLabel": label,
+        "year": str(year),
+        "personLabel": person,
+    }
+
+
+def _result(rows: list[dict[str, str]]) -> wikidata.QueryResult:
+    return wikidata.QueryResult(
+        query="SELECT 1",
+        retrieved_on="2026-10-14",
+        sha256=DIGEST,
+        rows=tuple(rows),
+    )
+
+
+def test_award_winners_query_names_each_award_and_the_year_qualifier() -> None:
+    query = wikidata.award_winners_query(("Q38104", "Q37922"))
+
+    assert "VALUES ?prize { wd:Q38104 wd:Q37922 }" in query
+    assert "p:P166" in query
+    assert "pq:P585" in query
+
+
+def test_award_winners_query_rejects_anything_but_an_item_id() -> None:
+    with pytest.raises(ValueError, match="DROP"):
+        wikidata.award_winners_query(("Q1 } DROP",))
+
+
+def test_default_awards_are_eight_distinct_item_ids() -> None:
+    assert len(set(wikidata.AWARDS)) == len(wikidata.AWARDS) == 8
+    wikidata.award_winners_query(wikidata.AWARDS)
+
+
+def test_parse_award_winners_builds_one_item_per_prize_and_year() -> None:
+    rows = [
+        _winner(PHYSICS, "Nobel Prize in Physics", 2016, "Duncan Haldane"),
+        _winner(PHYSICS, "Nobel Prize in Physics", 2016, "David J. Thouless"),
+        _winner(LITERATURE, "Nobel Prize in Literature", 2016, "Bob Dylan"),
+    ]
+
+    items = wikidata.parse_award_winners(_result(rows), cutoff_year=2017)
+
+    assert [i.uid for i in items] == [
+        "wikidata:award:Q37922:2016",
+        "wikidata:award:Q38104:2016",
+    ]
+    physics = items[1]
+    assert physics.question == "Who won the Nobel Prize in Physics in 2016?"
+    assert physics.answers == ("David J. Thouless", "Duncan Haldane")
+    assert physics.kind == "real"
+    assert physics.meta == {
+        "relation": "Nobel Prize in Physics",
+        "subject": "Nobel Prize in Physics",
+        "year": 2016,
+        "cutoff_year": 2017,
+        "popularity": None,
+        "source": "wikidata",
+        "retrieved_on": "2026-10-14",
+        "result_sha256": DIGEST,
+    }
+
+
+def test_parse_award_winners_marks_the_years_after_the_cutoff() -> None:
+    rows = [
+        _winner(PHYSICS, "Nobel Prize in Physics", year, "Someone Famous")
+        for year in (2016, 2017, 2018)
+    ]
+
+    items = wikidata.parse_award_winners(_result(rows), cutoff_year=2017)
+
+    assert [(i.meta["year"], i.kind) for i in items] == [
+        (2016, "real"),
+        (2017, "real"),
+        (2018, "post_cutoff"),
+    ]
+
+
+def test_parse_award_winners_skips_years_before_the_first_year() -> None:
+    rows = [
+        _winner(PHYSICS, "Nobel Prize in Physics", year, "Someone Famous")
+        for year in (1989, 1990, 1991)
+    ]
+
+    items = wikidata.parse_award_winners(
+        _result(rows), cutoff_year=2017, first_year=1990
+    )
+
+    assert [i.meta["year"] for i in items] == [1990, 1991]
+
+
+def test_parse_award_winners_drops_laureates_without_an_english_label() -> None:
+    rows = [
+        _winner(PHYSICS, "Nobel Prize in Physics", 2000, "Q7186"),
+        _winner(PHYSICS, "Nobel Prize in Physics", 2000, "Ada Smith"),
+        _winner(PHYSICS, "Nobel Prize in Physics", 2001, "Q123"),
+    ]
+
+    items = wikidata.parse_award_winners(_result(rows), cutoff_year=2017)
+
+    assert [(i.meta["year"], i.answers) for i in items] == [
+        (2000, ("Ada Smith",))
+    ]
+
+
+def test_parse_award_winners_template_is_a_keyword() -> None:
+    rows = [_winner(PHYSICS, "Nobel Prize in Physics", 2000, "Ada Smith")]
+
+    (item,) = wikidata.parse_award_winners(
+        _result(rows), cutoff_year=2017, template="In {year}, who won {award}?"
+    )
+
+    assert item.question == "In 2000, who won Nobel Prize in Physics?"
+
+
+def test_load_post_cutoff_runs_the_award_query_through_the_cache(
+    tmp_path: Path,
+) -> None:
+    rows = [_winner(PHYSICS, "Nobel Prize in Physics", 2019, "Jim Peebles")]
+    endpoint = _Endpoint(_body(rows))
+
+    items = wikidata.load_post_cutoff(
+        cutoff_year=2017,
+        awards=("Q38104",),
+        cache=tmp_path,
+        fetch=endpoint,
+        today=lambda: date(2026, 10, 14),
+    )
+
+    assert endpoint.queries == [wikidata.award_winners_query(("Q38104",))]
+    assert [(i.uid, i.kind, i.answers) for i in items] == [
+        ("wikidata:award:Q38104:2019", "post_cutoff", ("Jim Peebles",))
+    ]
+    assert items[0].meta["retrieved_on"] == "2026-10-14"
+
+
+@pytest.mark.network
+def test_network_award_winners_straddle_the_gpt2_cutoff(tmp_path: Path) -> None:
+    items = wikidata.load_post_cutoff(cutoff_year=2017, cache=tmp_path)
+
+    kinds = {kind: 0 for kind in ("real", "post_cutoff")}
+    for item in items:
+        kinds[item.kind] += 1
+    assert kinds["real"] > 100
+    assert kinds["post_cutoff"] >= 8
+    physics = next(i for i in items if i.uid == "wikidata:award:Q38104:2019")
+    assert any("Peebles" in name for name in physics.answers)
+    assert len(str(physics.meta["result_sha256"])) == 64
+    offline = wikidata.load_post_cutoff(
+        cutoff_year=2017, cache=tmp_path, offline=True
+    )
+    assert offline == items
