@@ -134,6 +134,13 @@ def test_parse_replies_are_unlabeled_and_skip_empty_ones() -> None:
     assert examples[0].meta == {}
 
 
+def test_parse_replies_keeps_the_first_copy_of_a_duplicate_reply() -> None:
+    examples = parse_emotion_replies(["Sure.", "Sure.", "Fine."])
+
+    assert [e.uid for e in examples] == ["emotion-reply-0", "emotion-reply-2"]
+    assert [e.text for e in examples] == ["Sure.", "Fine."]
+
+
 def test_parse_replies_assigns_splits_by_uid() -> None:
     replies = [f"Reply number {i}." for i in range(300)]
 
