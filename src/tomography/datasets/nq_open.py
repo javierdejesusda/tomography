@@ -1,6 +1,7 @@
 """NQ-open: Natural Questions as open-domain questions (Lee et al., 2019).
 
-P9 uses the validation split as a reference set for error prediction.
+The knowledge-boundary study uses the validation split as a reference set for
+error prediction.
 """
 
 from collections.abc import Iterable
