@@ -3,11 +3,55 @@
 from collections.abc import Sequence
 import statistics
 from typing import Any
+from typing import NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
 
 FloatArray = NDArray[np.floating[Any]]
+
+
+class GroupIndex(NamedTuple):
+    """Row groups prepared for gathering scores.
+
+    Attributes:
+        members: Row indices of shape (g, k), with padding replaced by 0.
+        valid: Boolean mask of shape (g, k), False on padding.
+        positive: Column of the label-1 member of each group, shape (g,).
+    """
+
+    members: NDArray[np.int64]
+    valid: NDArray[np.bool_]
+    positive: NDArray[np.int64]
+
+
+def parse_groups(
+    groups: NDArray[np.int64], labels: NDArray[np.int64]
+) -> GroupIndex:
+    """Validates row groups and locates the label-1 member of each.
+
+    Args:
+        groups: Row indices of shape (g, k), padded with -1.
+        labels: Binary labels of shape (n,).
+
+    Returns:
+        The groups ready for gathering scores.
+
+    Raises:
+        ValueError: If `groups` is empty, malformed or out of range, or a
+            group does not have exactly one label-1 member.
+    """
+    groups = np.asarray(groups)
+    if groups.ndim != 2 or 0 in groups.shape:
+        raise ValueError(f"groups must have shape (g, k), got {groups.shape}")
+    if groups.max() >= labels.shape[0]:
+        raise ValueError("groups must index the rows of labels")
+    valid = groups >= 0
+    members = np.where(valid, groups, 0)
+    is_positive = valid & (labels[members] == 1)
+    if not (is_positive.sum(axis=1) == 1).all():
+        raise ValueError("each group needs exactly one label-1 member")
+    return GroupIndex(members, valid, is_positive.argmax(axis=1))
 
 
 def group_accuracy(
@@ -36,20 +80,10 @@ def group_accuracy(
             one label-1 member, or a score is not finite.
     """
     values = _checked_scores(scores, labels)
-    groups = np.asarray(groups)
-    if groups.ndim != 2 or 0 in groups.shape:
-        raise ValueError(f"groups must have shape (g, k), got {groups.shape}")
-    if groups.max() >= values.shape[-1]:
-        raise ValueError("groups must index the scores")
-    valid = groups >= 0
-    safe = np.where(valid, groups, 0)
-    is_positive = valid & (labels[safe] == 1)
-    if not (is_positive.sum(axis=1) == 1).all():
-        raise ValueError("each group needs exactly one label-1 member")
-    members = np.where(valid, values[..., safe], -np.inf)
-    tied = valid & (members == members.max(axis=-1, keepdims=True))
-    positive_column = is_positive.argmax(axis=1)
-    wins = tied[..., np.arange(groups.shape[0]), positive_column]
+    index = parse_groups(groups, labels)
+    members = np.where(index.valid, values[..., index.members], -np.inf)
+    tied = index.valid & (members == members.max(axis=-1, keepdims=True))
+    wins = tied[..., np.arange(index.members.shape[0]), index.positive]
     credit = wins / tied.sum(axis=-1)
     return np.asarray(credit.mean(axis=-1), dtype=np.float64)
 
