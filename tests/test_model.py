@@ -507,3 +507,75 @@ def test_tiny_qwen3_keeps_chat_special_tokens_whole(
 
     assert ids.count(start) == 1
     assert ids.count(end) == 1
+
+
+def test_template_chat_checkpoints_never_prepend_bos_by_default(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    checkpoint = dataclasses.replace(
+        MODELS["gpt2"], post_trained=True, chat_format="template"
+    )
+
+    lm = wrap_model(tiny_gpt2.model, tiny_gpt2.tokenizer, checkpoint=checkpoint)
+
+    assert tiny_gpt2.spec.default_bos == "prepend"
+    assert lm.default_bos == "none"
+    assert not lm.encode(["The fox"]).has_bos
+    assert lm.encode(["The fox"], bos="prepend").has_bos
+
+
+def test_plain_checkpoints_keep_the_architecture_bos_policy(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    lm = wrap_model(
+        tiny_gpt2.model, tiny_gpt2.tokenizer, checkpoint=MODELS["gpt2"]
+    )
+
+    assert lm.default_bos == "prepend"
+
+
+def test_wrap_model_rejects_a_checkpoint_of_another_architecture(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    with pytest.raises(ValueError, match="arch"):
+        wrap_model(
+            tiny_gpt2.model,
+            tiny_gpt2.tokenizer,
+            checkpoint=MODELS["qwen3-0.6b-base"],
+        )
+
+
+def test_load_model_pins_every_checkpoint_of_the_architecture(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hub = FakeHub(tiny_arch)
+    hub.install(monkeypatch)
+    keys = [
+        key
+        for key, checkpoint in MODELS.items()
+        if checkpoint.arch == tiny_arch.spec.model_type
+    ]
+
+    for key in keys:
+        loaded = load_model(key, device="cpu")
+
+        checkpoint = MODELS[key]
+        assert hub.model_calls[-1] == (
+            checkpoint.repo_id,
+            {
+                "revision": checkpoint.revision,
+                "dtype": getattr(torch, checkpoint.dtype),
+            },
+        )
+        assert hub.tokenizer_calls[-1] == (
+            checkpoint.repo_id,
+            {"revision": checkpoint.revision},
+        )
+        assert loaded.checkpoint is checkpoint
+        expected_bos = (
+            "none"
+            if checkpoint.chat_format == "template"
+            else (tiny_arch.spec.default_bos)
+        )
+        assert loaded.default_bos == expected_bos
+    assert len(hub.model_calls) == len(keys) >= 1

@@ -370,13 +370,16 @@ def wrap_model(
         checkpoint: The pinned checkpoint `model` was loaded from, if any.
 
     Returns:
-        The wrapped model; `model` is put in eval mode.
+        The wrapped model; `model` is put in eval mode. Its `default_bos`
+        is `none` for template-chat checkpoints (the chat template carries
+        its own special tokens) and the architecture's policy otherwise.
 
     Raises:
         UnsupportedArchitectureError: If `config.model_type` is not in
             `ARCHS`.
-        ValueError: If the tokenizer is not fast, the block path is not a
-            `ModuleList`, or no pad id can be derived.
+        ValueError: If the checkpoint belongs to another architecture, the
+            tokenizer is not fast, the block path is not a `ModuleList`, or
+            no pad id can be derived.
     """
     model_type = model.config.model_type
     spec = ARCHS.get(model_type)
@@ -384,6 +387,11 @@ def wrap_model(
         raise UnsupportedArchitectureError(
             f"Unsupported architecture {model_type!r}; "
             f"registered: {sorted(ARCHS)}"
+        )
+    if checkpoint is not None and checkpoint.arch != spec.model_type:
+        raise ValueError(
+            f"Checkpoint {checkpoint.key!r} has arch {checkpoint.arch!r} "
+            f"but the model is {spec.model_type!r}"
         )
     if not tokenizer.is_fast:
         raise ValueError(
@@ -396,6 +404,7 @@ def wrap_model(
     bos_id = model.config.bos_token_id
     if bos_id is None:
         bos_id = tokenizer.bos_token_id
+    templated = checkpoint is not None and checkpoint.chat_format == "template"
     return LoadedModel(
         model=model,
         tokenizer=tokenizer,
@@ -410,7 +419,7 @@ def wrap_model(
         decoder=_module_at(model, spec.blocks_path.rpartition(".")[0]),
         blocks=blocks,
         final_norm=_module_at(model, spec.final_norm_path),
-        default_bos=spec.default_bos,
+        default_bos="none" if templated else spec.default_bos,
     )
 
 
