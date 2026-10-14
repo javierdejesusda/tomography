@@ -3,12 +3,16 @@
 from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
+import contextlib
 from dataclasses import dataclass
 import math
+from typing import Any
 
+import numpy as np
 import torch
 
 from tomography.hooks import ResidualEdit
+from tomography.hooks import edit_residuals
 from tomography.model import BosMode
 from tomography.model import EncodedBatch
 from tomography.model import LoadedModel
@@ -100,6 +104,13 @@ def generate(
 ) -> list[list[Completion]]:
     """Generates continuations of prompts in left-padded batches.
 
+    Each prompt is repeated `num_samples` times (prompt-major) and chunks of
+    `batch_size` prompts run one Hugging Face call each. Sampling is seeded
+    per chunk inside `fork_rng`, so results depend on `(seed, batch_size,
+    prompt order)` and the global RNG state is left unchanged. Generation
+    uses the KV cache, so after the prefill an edit sees one token per row
+    and must be position local.
+
     Args:
         loaded: The wrapped model.
         prompts: The prompts, in the order of the result.
@@ -131,10 +142,6 @@ def generate(
     )
     if not prompts:
         return []
-    if temperature is not None or num_samples > 1:
-        raise NotImplementedError("sampling is added in the next commit")
-    if edits is not None:
-        raise NotImplementedError("edits are added in the next commit")
     chunks = [
         loaded.encode(
             [
@@ -157,16 +164,37 @@ def generate(
                 f"max_position_embeddings ({limit})"
             )
     eos = _eos_ids(loaded)
-    completions: list[Completion] = []
-    for batch in chunks:
-        with torch.inference_mode():
+    sampling: dict[str, Any] = {"do_sample": False}
+    if temperature is not None:
+        sampling = {
+            "do_sample": True,
+            "temperature": temperature,
+            "top_p": top_p,
+            "top_k": top_k,
+        }
+    devices = [loaded.device] if loaded.device.type == "cuda" else []
+    result: list[list[Completion]] = []
+    for k, batch in enumerate(chunks):
+        residual_edits = {} if edits is None else edits(batch)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(torch.random.fork_rng(devices=devices))
+            stack.enter_context(torch.inference_mode())
+            if residual_edits:
+                stack.enter_context(edit_residuals(loaded, residual_edits))
+            torch.manual_seed(
+                int(np.random.SeedSequence([seed, k]).generate_state(1)[0])
+            )
             output = loaded.model.generate(  # type: ignore[operator]
                 input_ids=batch.input_ids.to(loaded.device),
                 attention_mask=batch.attention_mask.to(loaded.device),
                 max_new_tokens=max_new_tokens,
-                do_sample=False,
                 pad_token_id=loaded.pad_id,
+                **sampling,
             )
         generated = output[:, batch.input_ids.shape[1] :].tolist()
-        completions.extend(_cut(loaded, ids, eos) for ids in generated)
-    return [[completion] for completion in completions]
+        rows = [_cut(loaded, ids, eos) for ids in generated]
+        result.extend(
+            rows[start : start + num_samples]
+            for start in range(0, len(rows), num_samples)
+        )
+    return result
