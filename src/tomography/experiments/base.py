@@ -15,18 +15,18 @@ import platform
 import random
 import re
 import subprocess
-import tempfile
 import types
 import typing
 from typing import Any
 from typing import BinaryIO
 from typing import Literal
 from typing import Self
+import uuid
 
 import numpy as np
 from numpy.typing import NDArray
 
-_EXPERIMENT_ID = re.compile(r"[a-z][a-z0-9]*")
+EXPERIMENT_ID = re.compile(r"[a-z][a-z0-9]*")
 _SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _EXTENSION = re.compile(r"[a-z0-9]+")
 # Folder whose git state is recorded in the metadata of every run.
@@ -70,14 +70,16 @@ def _coerce(annotation: Any, value: Any) -> Any:
         value: A value decoded from JSON.
 
     Returns:
-        The value, with lists converted where the annotation asks for a tuple.
+        The value, with lists converted where the annotation asks for a tuple
+        and ints widened where it asks for a float.
 
     Raises:
-        _TypeMismatchError: If the value does not fit the annotation.
+        _TypeMismatchError: If the value does not fit the annotation,
+            including an int too large to convert to a float.
     """
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
-    if annotation is None or annotation is type(None):
+    if annotation is type(None):
         if value is not None:
             raise _TypeMismatchError
         return None
@@ -106,6 +108,11 @@ def _coerce(annotation: Any, value: Any) -> Any:
     check = _SCALAR_CHECKS.get(annotation)
     if check is not None and not check(value):
         raise _TypeMismatchError
+    if annotation is float:
+        try:
+            return float(value)
+        except OverflowError:
+            raise _TypeMismatchError from None
     return value
 
 
@@ -251,7 +258,7 @@ def _git(args: list[str], cwd: Path) -> str | None:
     """Returns the stdout of a git command, or None if it cannot run."""
     try:
         completed = subprocess.run(
-            ["git", *args],
+            ["git", "--no-optional-locks", *args],
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -303,12 +310,9 @@ def _atomic_write(path: Path, write: Callable[[BinaryIO], object]) -> None:
         write: Called with a binary handle of a temporary file that sits next
             to `path`; the file replaces `path` only if `write` succeeds.
     """
-    descriptor, temp_name = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
-    )
-    temp_path = Path(temp_name)
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        with os.fdopen(descriptor, "wb") as handle:
+        with temp_path.open("xb") as handle:
             write(handle)
         os.replace(temp_path, path)
     except BaseException:
@@ -371,6 +375,32 @@ class RunDir:
         return copy.deepcopy(self._meta)
 
     @classmethod
+    def path_for(
+        cls, config: ExperimentConfig, *, out_root: str | Path = "results"
+    ) -> Path:
+        """Returns the run directory of a config without creating it.
+
+        Args:
+            config: The experiment configuration.
+            out_root: Root folder of all runs.
+
+        Returns:
+            `<out_root>/<experiment>/<model>/<config_hash>`.
+
+        Raises:
+            ValueError: If the experiment id or the model key cannot be used
+                as a path part, or the config has a non-finite float.
+        """
+        _check_path_part("experiment", config.experiment, EXPERIMENT_ID)
+        _check_path_part("model", config.model, _SAFE_NAME)
+        return (
+            Path(out_root)
+            / config.experiment
+            / config.model
+            / config.config_hash()
+        )
+
+    @classmethod
     def create(
         cls,
         config: ExperimentConfig,
@@ -394,16 +424,12 @@ class RunDir:
                 as a path part.
             FileExistsError: If the directory exists and `exist_ok` is false.
         """
-        _check_path_part("experiment", config.experiment, _EXPERIMENT_ID)
-        _check_path_part("model", config.model, _SAFE_NAME)
-        config_hash = config.config_hash()
-        path = Path(out_root) / config.experiment / config.model / config_hash
-        path.mkdir(parents=True, exist_ok=exist_ok)
+        path = cls.path_for(config, out_root=out_root)
         config_data = config.to_dict()
         git_sha, git_dirty = _git_state(_SOURCE_DIR)
         meta: dict[str, Any] = {
             "experiment": config.experiment,
-            "config_hash": config_hash,
+            "config_hash": config.config_hash(),
             "seed": config.seed,
             "git_sha": git_sha,
             "git_dirty": git_dirty,
@@ -413,6 +439,7 @@ class RunDir:
             "started_at": _now(),
             "finished_at": None,
         }
+        path.mkdir(parents=True, exist_ok=exist_ok)
         _atomic_write_json(path / "config.json", config_data)
         _atomic_write_json(path / "meta.json", meta)
         return cls(path, config_data, meta)
@@ -441,9 +468,12 @@ class RunDir:
             json.loads(meta_file.read_text("utf-8")),
         )
 
+    def _embedded_meta(self) -> dict[str, Any]:
+        return {**self._meta, "config": self._config}
+
     def _file(self, name: str, extension: str) -> Path:
         _check_path_part("name", name, _SAFE_NAME)
-        if name in _RESERVED_NAMES:
+        if name.lower() in _RESERVED_NAMES:
             raise ValueError(f"name {name!r} is reserved")
         return self.path / f"{name}.{extension}"
 
@@ -467,7 +497,7 @@ class RunDir:
         """
         path = self._file(name, "json")
         document = {
-            "_meta": {**self._meta, "config": self._config},
+            "_meta": self._embedded_meta(),
             "data": _to_jsonable(payload),
         }
         _atomic_write_json(path, document)
@@ -514,7 +544,7 @@ class RunDir:
         reserved = sorted(_RESERVED_ARRAY_NAMES.intersection(arrays))
         if reserved:
             raise ValueError(f"reserved array names: {reserved}")
-        marker = np.array(json.dumps({**self._meta, "config": self._config}))
+        marker = np.array(json.dumps(self._embedded_meta()))
         _atomic_write(
             path,
             lambda handle: np.savez(
@@ -542,24 +572,24 @@ class RunDir:
                 key: archive[key] for key in archive.files if key != "_meta"
             }
 
-    def figure_path(self, name: str, extension: str) -> Path:
-        """Returns `<run>/figures/<name>.<extension>`, creating the folder.
+    def figure_path(self, name: str, ext: str) -> Path:
+        """Returns `<run>/figures/<name>.<ext>`, creating the folder.
 
         Args:
             name: File stem of the figure.
-            extension: File extension without the dot, such as "pdf".
+            ext: File extension without the dot, such as "pdf".
 
         Returns:
             The path, not yet written.
 
         Raises:
-            ValueError: If `name` or `extension` is not usable.
+            ValueError: If `name` or `ext` is not usable.
         """
         _check_path_part("name", name, _SAFE_NAME)
-        _check_path_part("extension", extension, _EXTENSION)
+        _check_path_part("extension", ext, _EXTENSION)
         folder = self.path / "figures"
         folder.mkdir(exist_ok=True)
-        return folder / f"{name}.{extension}"
+        return folder / f"{name}.{ext}"
 
     def finalize(self) -> None:
         """Stamps `finished_at` in `meta.json` after a successful run."""
