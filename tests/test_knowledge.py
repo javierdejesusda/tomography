@@ -175,9 +175,8 @@ def test_is_correct(
 @pytest.mark.parametrize(
     ("greedy", "n_correct", "expected"),
     [
-        *[(True, n, "uncertain") for n in range(4)],
-        (True, 4, "known"),
-        (True, 5, "known"),
+        *[(True, n, "uncertain") for n in range(3)],
+        *[(True, n, "known") for n in range(3, 6)],
         (False, 0, "unknown"),
         *[(False, n, "uncertain") for n in range(1, 6)],
     ],
@@ -202,6 +201,20 @@ def test_label_from_counts_threshold_is_a_keyword() -> None:
 
 
 @pytest.mark.parametrize(
+    ("n_correct", "expected"),
+    [(3, "uncertain"), (4, "known")],
+    ids=["three_of_five_is_uncertain", "four_of_five_is_known"],
+)
+def test_label_from_counts_robust_threshold_of_four(
+    n_correct: int, expected: str
+) -> None:
+    assert (
+        label_from_counts(True, n_correct, n_samples=5, known_min_correct=4)
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
     ("n_correct", "n_samples", "known_min_correct"),
     [(-1, 5, 4), (6, 5, 4), (0, 5, 0), (0, 5, 6)],
     ids=["negative_count", "count_above_samples", "min_zero", "min_above"],
@@ -222,7 +235,7 @@ def test_label_recipe_defaults_match_the_frozen_rule() -> None:
     recipe = LabelRecipe()
 
     assert (recipe.n_samples, recipe.temperature) == (5, 1.0)
-    assert (recipe.known_min_correct, recipe.max_new_tokens) == (4, 16)
+    assert (recipe.known_min_correct, recipe.max_new_tokens) == (3, 16)
     assert recipe.stop == "\n"
 
 
@@ -432,6 +445,31 @@ def test_label_questions_known_unknown_uncertain_and_order(
         "none", "unknown", "construction", "", False, (), 0
     )
     assert labels[0].n_correct == 2
+
+
+@pytest.mark.parametrize(
+    ("n_right", "expected"),
+    [(3, "known"), (2, "uncertain")],
+    ids=["three_of_five_is_known", "two_of_five_is_uncertain"],
+)
+def test_label_questions_default_recipe_needs_three_of_five(
+    monkeypatch: pytest.MonkeyPatch,
+    tiny_gpt2: LoadedModel,
+    n_right: int,
+    expected: str,
+) -> None:
+    calls: list[Any] = []
+    sampled = {"Question a?": [" Paris"] * n_right + [" Rome"] * (5 - n_right)}
+    monkeypatch.setattr(
+        "tomography.knowledge.generate",
+        _fake_generate({"Question a?": " Paris"}, sampled, calls),
+    )
+
+    (item,) = label_questions(tiny_gpt2, [_qa("a", ("Paris",))], shots=SHOTS)
+
+    assert item.greedy_correct is True
+    assert item.n_correct == n_right
+    assert item.label == expected
 
 
 def test_label_questions_makes_two_calls_greedy_first(

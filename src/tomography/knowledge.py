@@ -47,14 +47,15 @@ class LabelRecipe:
     Attributes:
         n_samples: Temperature samples drawn per question.
         temperature: Sampling temperature of those samples.
-        known_min_correct: Samples that must be correct for "known".
+        known_min_correct: Samples that must be correct for "known" (3 of
+            the 5 by default; 4 is the robustness setting).
         max_new_tokens: Generation budget per answer.
         stop: Marker that ends an answer.
     """
 
     n_samples: int = 5
     temperature: float = 1.0
-    known_min_correct: int = 4
+    known_min_correct: int = 3
     max_new_tokens: int = 16
     stop: str = "\n"
 
@@ -170,7 +171,7 @@ def label_from_counts(
     n_correct: int,
     *,
     n_samples: int,
-    known_min_correct: int = 4,
+    known_min_correct: int = 3,
 ) -> Label:
     """Applies the known/unknown/uncertain rule.
 
@@ -178,7 +179,8 @@ def label_from_counts(
         greedy_correct: Whether the greedy answer matched a gold alias.
         n_correct: How many sampled answers matched a gold alias.
         n_samples: Number of sampled answers.
-        known_min_correct: Samples that must be correct for "known".
+        known_min_correct: Samples that must be correct for "known"
+            (default 3).
 
     Returns:
         "known" if the greedy answer is correct and `n_correct` is at least
