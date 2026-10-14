@@ -744,3 +744,18 @@ def test_path_for_rejects_ids_that_are_not_safe_path_parts(
 ) -> None:
     with pytest.raises(ValueError, match="experiment"):
         RunDir.path_for(_Config(experiment="../x"), out_root=tmp_path)
+
+
+def test_create_leaves_no_directory_when_the_metadata_cannot_be_built(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken() -> str:
+        raise RuntimeError("no gpu driver")
+
+    monkeypatch.setattr(experiments_base, "_device_name", broken)
+    config = _Config()
+
+    with pytest.raises(RuntimeError, match="no gpu driver"):
+        RunDir.create(config, out_root=tmp_path)
+
+    assert not RunDir.path_for(config, out_root=tmp_path).exists()

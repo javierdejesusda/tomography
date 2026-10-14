@@ -424,7 +424,6 @@ class RunDir:
             FileExistsError: If the directory exists and `exist_ok` is false.
         """
         path = cls.path_for(config, out_root=out_root)
-        path.mkdir(parents=True, exist_ok=exist_ok)
         config_data = config.to_dict()
         git_sha, git_dirty = _git_state(_SOURCE_DIR)
         meta: dict[str, Any] = {
@@ -439,6 +438,7 @@ class RunDir:
             "started_at": _now(),
             "finished_at": None,
         }
+        path.mkdir(parents=True, exist_ok=exist_ok)
         _atomic_write_json(path / "config.json", config_data)
         _atomic_write_json(path / "meta.json", meta)
         return cls(path, config_data, meta)
