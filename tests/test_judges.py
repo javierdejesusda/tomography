@@ -1,5 +1,9 @@
 import math
+import os
+import re
+from types import SimpleNamespace
 
+from huggingface_hub import constants as hub_constants
 import numpy as np
 import pytest
 import tokenizers
@@ -8,6 +12,8 @@ from tokenizers import models
 from tokenizers import pre_tokenizers
 from tokenizers import trainers
 import torch
+from transformers import BertConfig
+from transformers import BertForSequenceClassification
 from transformers import GPT2Config
 from transformers import GPT2LMHeadModel
 from transformers import PreTrainedTokenizerFast
@@ -537,3 +543,327 @@ def test_heuristic_score_ignores_a_constant_shift_of_the_log_probs() -> None:
 def test_heuristic_score_requires_seven_levels() -> None:
     with pytest.raises(ValueError, match="7 levels"):
         judges.heuristic_score(np.zeros((3, 6)))
+
+
+SENTIMENT_LABELS = {0: "NEGATIVE", 1: "POSITIVE"}
+HARTMANN_LABELS = dict(
+    enumerate(
+        ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
+    )
+)
+CARDIFF_LABELS = dict(
+    enumerate(
+        [
+            "anger",
+            "anticipation",
+            "disgust",
+            "fear",
+            "joy",
+            "love",
+            "optimism",
+            "pessimism",
+            "sadness",
+            "surprise",
+            "trust",
+        ]
+    )
+)
+JUDGE_TEXTS = [
+    "the movie was wonderful and moving",
+    "the food was cold and the service was slow",
+    "a dog barked at the cat",
+    "paris is the capital of france",
+    "she sells sea shells by the sea shore",
+]
+
+
+@pytest.fixture(scope="module")
+def judge_tokenizer() -> PreTrainedTokenizerFast:
+    vocab = {"[PAD]": 0, "[UNK]": 1}
+    for text in CORPUS:
+        for word in text.split():
+            vocab.setdefault(word, len(vocab))
+    backend = tokenizers.Tokenizer(models.WordLevel(vocab, unk_token="[UNK]"))
+    backend.pre_tokenizer = pre_tokenizers.Whitespace()
+    return PreTrainedTokenizerFast(
+        tokenizer_object=backend, pad_token="[PAD]", unk_token="[UNK]"
+    )
+
+
+def tiny_classifier(
+    id2label: dict[int, str], vocab_size: int
+) -> BertForSequenceClassification:
+    torch.manual_seed(0)
+    config = BertConfig(
+        vocab_size=vocab_size,
+        hidden_size=16,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        intermediate_size=32,
+        max_position_embeddings=64,
+        initializer_range=1.0,
+        id2label=id2label,
+    )
+    return BertForSequenceClassification(config).eval()
+
+
+def reference_logits(
+    model: BertForSequenceClassification,
+    tokenizer: PreTrainedTokenizerFast,
+    texts: list[str],
+) -> torch.Tensor:
+    rows = []
+    for text in texts:
+        batch = tokenizer(text, return_tensors="pt")
+        with torch.no_grad():
+            rows.append(model(**batch).logits[0].double())
+    return torch.stack(rows)
+
+
+def make_judge(
+    key: str,
+    id2label: dict[int, str],
+    tokenizer: PreTrainedTokenizerFast,
+) -> judges.Judge:
+    model = tiny_classifier(id2label, len(tokenizer))
+    return judges.Judge(judges.JUDGES[key], model, tokenizer)
+
+
+def test_emotions_keep_the_contract_order() -> None:
+    assert judges.EMOTIONS == (
+        "happiness",
+        "sadness",
+        "anger",
+        "fear",
+        "disgust",
+        "surprise",
+    )
+
+
+def test_registry_has_a_primary_and_secondary_judge_per_attribute() -> None:
+    pairs = {(spec.attribute, spec.role) for spec in judges.JUDGES.values()}
+
+    assert pairs == {
+        ("sentiment", "primary"),
+        ("sentiment", "secondary"),
+        ("emotion", "primary"),
+        ("emotion", "secondary"),
+    }
+    for key, spec in judges.JUDGES.items():
+        assert key == f"{spec.attribute}-{spec.role}"
+
+
+def test_registry_pins_the_documented_checkpoints() -> None:
+    pins = {
+        key: (spec.repo_id, spec.revision, spec.head)
+        for key, spec in judges.JUDGES.items()
+    }
+
+    assert pins == {
+        "sentiment-primary": (
+            "siebert/sentiment-roberta-large-english",
+            "74cea614e245b0832c770ec9aa51bd58df965b9c",
+            "softmax",
+        ),
+        "sentiment-secondary": (
+            "distilbert/distilbert-base-uncased-finetuned-sst-2-english",
+            "714eb0fa89d2f80546fda750413ed43d93601a13",
+            "softmax",
+        ),
+        "emotion-primary": (
+            "j-hartmann/emotion-english-distilroberta-base",
+            "0e1cd914e3d46199ed785853e12b57304e04178b",
+            "softmax",
+        ),
+        "emotion-secondary": (
+            "cardiffnlp/twitter-roberta-base-emotion-latest",
+            "415620c4fbc8bd82b82b9fd46642fcec6519d537",
+            "sigmoid",
+        ),
+    }
+    assert all(
+        re.fullmatch(r"[0-9a-f]{40}", spec.revision)
+        for spec in judges.JUDGES.values()
+    )
+
+
+def test_emotion_specs_read_one_model_label_per_emotion() -> None:
+    for key in ("emotion-primary", "emotion-secondary"):
+        labels = judges.JUDGES[key].labels
+        assert len(labels) == len(judges.EMOTIONS)
+        assert labels[0] == "joy"
+        assert labels[1:] == judges.EMOTIONS[1:]
+
+
+def test_sentiment_judge_returns_the_positive_probability(
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    judge = make_judge("sentiment-primary", SENTIMENT_LABELS, judge_tokenizer)
+    logits = reference_logits(judge.model, judge_tokenizer, JUDGE_TEXTS)
+    expected = torch.softmax(logits, dim=-1)[:, 1]
+
+    got = judge.score(JUDGE_TEXTS, batch_size=2)
+
+    assert got.shape == (len(JUDGE_TEXTS),)
+    assert got.dtype == np.float32
+    assert got == pytest.approx(expected.numpy(), abs=1e-5)
+
+
+def test_sentiment_judge_finds_the_positive_label_by_name(
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    flipped = {0: "POSITIVE", 1: "NEGATIVE"}
+    judge = make_judge("sentiment-secondary", flipped, judge_tokenizer)
+    logits = reference_logits(judge.model, judge_tokenizer, JUDGE_TEXTS)
+    expected = torch.softmax(logits, dim=-1)[:, 0]
+
+    got = judge.score(JUDGE_TEXTS, batch_size=3)
+
+    assert got == pytest.approx(expected.numpy(), abs=1e-5)
+
+
+def test_softmax_emotion_judge_drops_neutral_and_follows_emotion_order(
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    judge = make_judge("emotion-primary", HARTMANN_LABELS, judge_tokenizer)
+    logits = reference_logits(judge.model, judge_tokenizer, JUDGE_TEXTS)
+    columns = [3, 5, 0, 2, 1, 6]
+    expected = torch.softmax(logits, dim=-1)[:, columns]
+
+    got = judge.score(JUDGE_TEXTS, batch_size=2)
+
+    assert got.shape == (len(JUDGE_TEXTS), 6)
+    assert got == pytest.approx(expected.numpy(), abs=1e-5)
+    assert (got.sum(axis=1) < 1.0).all()
+
+
+def test_sigmoid_emotion_judge_scores_each_emotion_independently(
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    judge = make_judge("emotion-secondary", CARDIFF_LABELS, judge_tokenizer)
+    logits = reference_logits(judge.model, judge_tokenizer, JUDGE_TEXTS)
+    columns = [4, 8, 0, 3, 2, 9]
+    expected = torch.sigmoid(logits)[:, columns]
+
+    got = judge.score(JUDGE_TEXTS, batch_size=4)
+
+    assert got == pytest.approx(expected.numpy(), abs=1e-5)
+
+
+def test_judge_scores_do_not_depend_on_the_batch_size(
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    judge = make_judge("emotion-primary", HARTMANN_LABELS, judge_tokenizer)
+
+    one = judge.score(JUDGE_TEXTS, batch_size=1)
+    many = judge.score(JUDGE_TEXTS, batch_size=5)
+
+    assert many == pytest.approx(one, abs=1e-5)
+
+
+def test_judge_truncates_to_max_length(
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    judge = make_judge("sentiment-primary", SENTIMENT_LABELS, judge_tokenizer)
+    words = CORPUS[2].split()
+
+    truncated = judge.score([" ".join(words)], max_length=4)
+    prefix = judge.score([" ".join(words[:4])])
+
+    assert truncated == pytest.approx(prefix, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("key", "id2label", "shape"),
+    [
+        ("sentiment-primary", SENTIMENT_LABELS, (0,)),
+        ("emotion-primary", HARTMANN_LABELS, (0, 6)),
+    ],
+    ids=["sentiment", "emotion"],
+)
+def test_judge_scores_no_texts_as_an_empty_array(
+    judge_tokenizer: PreTrainedTokenizerFast,
+    key: str,
+    id2label: dict[int, str],
+    shape: tuple[int, ...],
+) -> None:
+    judge = make_judge(key, id2label, judge_tokenizer)
+
+    got = judge.score([])
+
+    assert got.shape == shape
+    assert got.dtype == np.float32
+
+
+def test_judge_rejects_a_model_without_the_expected_labels(
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    no_joy = {**HARTMANN_LABELS, 3: "happy"}
+
+    with pytest.raises(ValueError, match="joy"):
+        make_judge("emotion-primary", no_joy, judge_tokenizer)
+
+
+def test_judge_rejects_a_non_positive_batch_size(
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    judge = make_judge("sentiment-primary", SENTIMENT_LABELS, judge_tokenizer)
+
+    with pytest.raises(ValueError, match="batch_size"):
+        judge.score(JUDGE_TEXTS, batch_size=0)
+
+
+def test_load_judge_rejects_an_unknown_key_before_any_download(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("must not reach the Hub")
+
+    monkeypatch.setattr(
+        judges, "AutoTokenizer", SimpleNamespace(from_pretrained=forbidden)
+    )
+
+    with pytest.raises(ValueError, match="sentiment-primary"):
+        judges.load_judge("nonsense")
+
+
+def test_load_judge_pins_the_revision_and_disables_safetensors_conversion(
+    monkeypatch: pytest.MonkeyPatch,
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    monkeypatch.setenv("DISABLE_SAFETENSORS_CONVERSION", "0")
+    monkeypatch.delenv("DISABLE_SAFETENSORS_CONVERSION")
+    monkeypatch.setattr(hub_constants, "HF_HUB_DISABLE_SYMLINKS_WARNING", False)
+    seen: dict[str, object] = {}
+    model = tiny_classifier(SENTIMENT_LABELS, len(judge_tokenizer))
+
+    def fake_tokenizer(repo_id: str, **kwargs: str) -> object:
+        seen["tokenizer"] = (repo_id, kwargs)
+        return judge_tokenizer
+
+    def fake_model(repo_id: str, **kwargs: str) -> object:
+        seen["model"] = (repo_id, kwargs)
+        seen["conversion"] = os.environ.get("DISABLE_SAFETENSORS_CONVERSION")
+        seen["symlinks"] = hub_constants.HF_HUB_DISABLE_SYMLINKS_WARNING
+        return model
+
+    monkeypatch.setattr(
+        judges, "AutoTokenizer", SimpleNamespace(from_pretrained=fake_tokenizer)
+    )
+    monkeypatch.setattr(
+        judges,
+        "AutoModelForSequenceClassification",
+        SimpleNamespace(from_pretrained=fake_model),
+    )
+
+    judge = judges.load_judge("sentiment-primary", device="cpu")
+
+    spec = judges.JUDGES["sentiment-primary"]
+    expected = (spec.repo_id, {"revision": spec.revision})
+    assert seen["tokenizer"] == expected
+    assert seen["model"] == expected
+    assert seen["conversion"] == "1"
+    assert seen["symlinks"] is True
+    assert judge.spec is spec
+    assert judge.model.device == torch.device("cpu")
+    assert not judge.model.training
