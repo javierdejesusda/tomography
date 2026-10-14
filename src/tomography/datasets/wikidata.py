@@ -163,6 +163,8 @@ def run_query(
         ChecksumError: If a cached body does not match its recorded digest.
         OfflineCacheMissError: If `offline` is True and the query is not
             cached.
+        json.JSONDecodeError: If the response is not JSON.
+        TypeError: If the response is JSON but not an object.
         KeyError: If the response is not a SPARQL JSON result.
     """
     root = cache_dir() if cache is None else cache
@@ -229,9 +231,9 @@ def award_winners_query(awards: Sequence[str]) -> str:
         point in time.
 
     Raises:
-        ValueError: If an award is not an item id.
+        ValueError: If an award is not an item id or no award is given.
     """
-    values = " ".join(f"wd:{_item_id(award)}" for award in awards)
+    values = _award_values(awards)
     lines = [
         "SELECT ?prize ?prizeLabel ?year ?personLabel WHERE {",
         f"  VALUES ?prize {{ {values} }}",
@@ -272,7 +274,7 @@ def load_post_cutoff(
         The items `parse_award_winners` builds from the query result.
 
     Raises:
-        ValueError: If an award is not an item id.
+        ValueError: If an award is not an item id or no award is given.
         ChecksumError: If a cached result does not match its digest.
         OfflineCacheMissError: If `offline` is True and the query is not
             cached.
@@ -372,11 +374,12 @@ def famous_people_query(awards: Sequence[str], *, limit: int) -> str:
         and links: people with a birth and a death date given to the day.
 
     Raises:
-        ValueError: If an award is not an item id or `limit` is below 1.
+        ValueError: If an award is not an item id, no award is given or
+            `limit` is below 1.
     """
     if limit < 1:
         raise ValueError(f"limit must be at least 1, got {limit}")
-    values = " ".join(f"wd:{_item_id(award)}" for award in awards)
+    values = _award_values(awards)
     lines = [
         "SELECT DISTINCT ?person ?personLabel ?birth ?death ?links WHERE {",
         f"  VALUES ?award {{ {values} }}",
@@ -384,9 +387,11 @@ def famous_people_query(awards: Sequence[str], *, limit: int) -> str:
         "          wikibase:sitelinks ?links ;",
         "          p:P569 ?birthStatement ;",
         "          p:P570 ?deathStatement .",
+        "  ?birthStatement a wikibase:BestRank .",
         "  ?birthStatement psv:P569 ?birthValue .",
         "  ?birthValue wikibase:timeValue ?birth ;",
         "              wikibase:timePrecision 11 .",
+        "  ?deathStatement a wikibase:BestRank .",
         "  ?deathStatement psv:P570 ?deathValue .",
         "  ?deathValue wikibase:timeValue ?death ;",
         "              wikibase:timePrecision 11 .",
@@ -430,7 +435,8 @@ def load_unknowable_detail(
         The items `parse_unknowable_detail` builds from the query result.
 
     Raises:
-        ValueError: If an award is not an item id or `limit` is below 1.
+        ValueError: If an award is not an item id, no award is given or
+            `limit` is below 1.
         ChecksumError: If a cached result does not match its digest.
         OfflineCacheMissError: If `offline` is True and the query is not
             cached.
@@ -519,6 +525,12 @@ def parse_unknowable_detail(
             )
         )
     return items
+
+
+def _award_values(awards: Sequence[str]) -> str:
+    if not awards:
+        raise ValueError("awards must name at least one item id")
+    return " ".join(f"wd:{_item_id(award)}" for award in awards)
 
 
 def _item_id(value: str) -> str:
