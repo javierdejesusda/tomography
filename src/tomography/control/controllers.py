@@ -107,6 +107,7 @@ def mean_residual_norms(
                 input_ids=encoded.input_ids.to(loaded.device),
                 attention_mask=encoded.attention_mask.to(loaded.device),
                 position_ids=encoded.position_ids.to(loaded.device),
+                use_cache=False,
             )
         for layer in wanted:
             norms = seen[layer].float().norm(dim=-1)
@@ -181,7 +182,10 @@ class ReadingVectorController:
     Attributes:
         vectors: Maps a layer to its oriented `(d_model,)` float32 vector on
             the model device; the controller adds `coeff * vector`.
-        coeff: Finite coefficient. Negative values suppress the concept.
+        coeff: Finite coefficient. For the linear and piecewise operators a
+            negative value suppresses the concept; for the projection
+            operator it is the dimensionless share of the component along
+            the vector that is removed (1 removes it).
         op: The edit operator.
         mode: `absolute` uses `coeff`; `relative` uses `coeff * norms[l]`.
         norms: Mean residual norm per layer, required for `relative`; layers
