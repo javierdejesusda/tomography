@@ -269,8 +269,19 @@ def test_figure_of_returns_the_figure_that_holds_the_axes() -> None:
         ("#762221", style.SURFACE),
         ("#cde2fb", style.INK),
         ("#f0efec", style.INK),
+        ("#5598e7", style.INK),
+        ("#dd716a", style.INK),
+        ("#256abf", style.SURFACE),
     ],
-    ids=["dark-blue", "dark-red", "light-blue", "neutral"],
+    ids=[
+        "dark-blue",
+        "dark-red",
+        "light-blue",
+        "neutral",
+        "mid-blue",
+        "mid-red",
+        "deep-blue",
+    ],
 )
 def test_ink_on_picks_the_text_color_with_more_contrast(
     fill: str, expected: str

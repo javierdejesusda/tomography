@@ -315,3 +315,18 @@ def test_token_strip_saves_in_all_formats(tmp_path: Path) -> None:
 
     assert [path.suffix for path in paths] == [".pdf", ".png", ".svg"]
     assert all(path.stat().st_size > 0 for path in paths)
+
+
+def test_token_strip_leaves_a_gap_before_a_token_with_a_leading_space() -> None:
+    fig = tokens.plot_token_strip(np.zeros(3), ["a", " b", "c"])
+    fig.canvas.draw()
+
+    texts = fig.axes[0].texts
+    first_gap = (
+        texts[1].get_window_extent().x0 - texts[0].get_window_extent().x1
+    )
+    second_gap = (
+        texts[2].get_window_extent().x0 - texts[1].get_window_extent().x1
+    )
+
+    assert first_gap > second_gap + 2
