@@ -12,6 +12,7 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 from sklearn.cluster import KMeans
+from sklearn.linear_model import LogisticRegression
 
 FloatArray = NDArray[np.floating[Any]]
 Method = Literal[
@@ -19,7 +20,14 @@ Method = Literal[
 ]
 Preprocess = Literal["center", "unit", "none"]
 
-_METHODS = ("pca_diff", "pca_raw", "mean_diff", "kmeans", "random")
+_METHODS = (
+    "pca_diff",
+    "pca_raw",
+    "mean_diff",
+    "logistic",
+    "kmeans",
+    "random",
+)
 
 
 @dataclass(frozen=True, eq=False)
@@ -57,7 +65,10 @@ def fit_direction(
         method: The direction finder. `pca_diff` takes the first principal
             component of the within-pair differences and needs `pairs`.
             `pca_raw` does the same on the rows themselves. `mean_diff` is
-            the difference of the two class means and needs `labels`.
+            the difference of the two class means and `logistic` the
+            coefficients of an L2-regularized logistic regression; both need
+            `labels`. The regression runs on rows divided by one global
+            scalar, so the penalty does not depend on the activation scale.
             `kmeans` is the centroid difference of a two-cluster K-means and
             `random` a Gaussian draw from `seed`; neither reads labels.
         h: Activations of shape (n, d).
@@ -96,6 +107,8 @@ def fit_direction(
     fitted = vectors if preprocess == "none" else vectors - mean
     if method == "mean_diff":
         direction = _class_difference(fitted, labels)
+    elif method == "logistic":
+        direction = _logistic_coefficients(fitted, labels)
     elif method == "kmeans":
         direction = _centroid_difference(fitted, seed)
     elif method == "random":
@@ -111,17 +124,31 @@ def _first_component(rows: NDArray[np.float64]) -> NDArray[np.float64]:
     return np.asarray(components[0], dtype=np.float64)
 
 
+def _positive_mask(labels: NDArray[np.int64] | None) -> NDArray[np.bool_]:
+    if labels is None:
+        raise ValueError("this method needs labels")
+    positive = np.asarray(labels == 1)
+    if positive.all() or not positive.any():
+        raise ValueError("labels must contain both classes")
+    return positive
+
+
 def _class_difference(
     rows: NDArray[np.float64], labels: NDArray[np.int64] | None
 ) -> NDArray[np.float64]:
-    if labels is None:
-        raise ValueError("this method needs labels")
-    positive = labels == 1
-    if positive.all() or not positive.any():
-        raise ValueError("labels must contain both classes")
+    positive = _positive_mask(labels)
     positive_mean = rows[positive].mean(axis=0)
     negative_mean = rows[~positive].mean(axis=0)
     return np.asarray(positive_mean - negative_mean, dtype=np.float64)
+
+
+def _logistic_coefficients(
+    rows: NDArray[np.float64], labels: NDArray[np.int64] | None
+) -> NDArray[np.float64]:
+    positive = _positive_mask(labels)
+    scale = float(np.sqrt((rows**2).sum(axis=1).mean()))
+    model = LogisticRegression(max_iter=1000).fit(rows / scale, positive)
+    return np.asarray(model.coef_[0], dtype=np.float64) / scale
 
 
 def _centroid_difference(

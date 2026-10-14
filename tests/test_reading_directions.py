@@ -266,3 +266,41 @@ def test_random_direction_is_a_seeded_gaussian_draw() -> None:
     np.testing.assert_allclose(
         fit.mean, h.astype(np.float64).mean(axis=0), atol=1e-4
     )
+
+
+def test_logistic_follows_the_axis_of_collinear_classes() -> None:
+    h = np.array([[1.0, 1.0], [2.0, 2.0], [-1.0, -1.0], [-2.0, -2.0]])
+    labels = np.array([1, 1, 0, 0], dtype=np.int64)
+
+    fit = fit_direction("logistic", h, labels=labels)
+    flipped = fit_direction("logistic", h, labels=1 - labels)
+
+    np.testing.assert_allclose(fit.direction, [0.70710678] * 2, atol=1e-5)
+    np.testing.assert_allclose(flipped.direction, fit.direction, atol=1e-5)
+
+
+def test_logistic_recovers_planted_direction_on_separable_data() -> None:
+    h, labels, planted = make_blobs(60, seed=16, signal=12.0)
+
+    fit = fit_direction("logistic", h, labels=labels)
+
+    assert abs_cosine(fit.direction, planted) > 0.95
+
+
+def test_logistic_direction_does_not_depend_on_activation_scale() -> None:
+    h, labels, _ = make_blobs(120, seed=17)
+
+    base = fit_direction("logistic", h, labels=labels)
+    scaled = fit_direction("logistic", 1000.0 * h, labels=labels)
+
+    np.testing.assert_allclose(scaled.direction, base.direction, atol=1e-4)
+    assert scaled.raw_norm == pytest.approx(base.raw_norm / 1000.0, rel=1e-3)
+
+
+def test_logistic_needs_labels_with_both_classes() -> None:
+    h, labels, _ = make_blobs(20, seed=18)
+
+    with pytest.raises(ValueError, match="labels"):
+        fit_direction("logistic", h)
+    with pytest.raises(ValueError, match="both classes"):
+        fit_direction("logistic", h, labels=np.zeros_like(labels))
