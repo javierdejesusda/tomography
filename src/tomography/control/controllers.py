@@ -20,7 +20,10 @@ from tomography.control.operators import Operator
 from tomography.control.operators import apply_operator
 from tomography.hooks import ForwardInfo
 from tomography.hooks import ResidualEdit
+from tomography.hooks import capture_residuals
+from tomography.model import BosMode
 from tomography.model import EncodedBatch
+from tomography.model import LoadedModel
 
 CoeffMode = Literal["absolute", "relative"]
 ResponseMask = Literal["all", "response"]
@@ -43,6 +46,71 @@ class VectorSource(Protocol):
     def signs(self) -> NDArray[np.float32]:
         """Orientation of each direction, `(K,)` with values in {-1, +1}."""
         ...
+
+
+def mean_residual_norms(
+    loaded: LoadedModel,
+    texts: Sequence[str],
+    layers: Sequence[int],
+    *,
+    bos: BosMode | None = None,
+    batch_size: int = 8,
+    skip_first: bool = True,
+) -> dict[int, float]:
+    """Measures the mean norm of the residual stream per layer.
+
+    The mean is pooled over all real tokens of all texts, not a mean of
+    per-text means, and the norms are accumulated in float32 even for a
+    bfloat16 model. Batches are right padded, so the result does not depend
+    on `batch_size` beyond float rounding. Pass held-out text.
+
+    Args:
+        loaded: The wrapped model.
+        texts: The texts to run.
+        layers: Layer indices in 0..L; duplicates collapse.
+        bos: BOS policy of the encoding; None uses the model default.
+        batch_size: Texts per forward.
+        skip_first: Whether to drop token 0 of every row. GPT-2's first
+            token is an attention sink with a much larger norm that would
+            dominate the mean.
+
+    Returns:
+        Maps each layer to its mean Euclidean norm per real token.
+
+    Raises:
+        ValueError: If `texts` or `layers` is empty, a layer is outside
+            0..L, `batch_size` is below 1, or no token is left to average.
+    """
+    if not texts:
+        raise ValueError("texts is empty")
+    if not layers:
+        raise ValueError("layers is empty")
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be at least 1, got {batch_size}")
+    wanted = list(dict.fromkeys(layers))
+    totals = {layer: torch.zeros((), device=loaded.device) for layer in wanted}
+    count = 0
+    for start in range(0, len(texts), batch_size):
+        encoded = loaded.encode(texts[start : start + batch_size], bos=bos)
+        real = (encoded.attention_mask > 0).to(loaded.device)
+        if skip_first:
+            real[:, 0] = False
+        with (
+            torch.inference_mode(),
+            capture_residuals(loaded, wanted) as seen,
+        ):
+            loaded.decoder(
+                input_ids=encoded.input_ids.to(loaded.device),
+                attention_mask=encoded.attention_mask.to(loaded.device),
+                position_ids=encoded.position_ids.to(loaded.device),
+            )
+        for layer in wanted:
+            norms = seen[layer].float().norm(dim=-1)
+            totals[layer] += norms[real].sum()
+        count += int(real.sum())
+    if count == 0:
+        raise ValueError("no token left to average (skip_first drops token 0)")
+    return {layer: float(total) / count for layer, total in totals.items()}
 
 
 def _token_index(
