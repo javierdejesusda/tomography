@@ -1,7 +1,8 @@
 """TriviaQA: trivia questions with answer aliases (Joshi et al., 2017).
 
-P9 uses the validation split of the reading-comprehension config, without
-the evidence documents, as a reference set for error prediction.
+The knowledge-boundary study uses the validation split of the
+reading-comprehension config, without the evidence documents, as a reference
+set for error prediction.
 """
 
 from collections.abc import Iterable

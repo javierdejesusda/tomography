@@ -57,11 +57,12 @@ def test_parse_puts_the_value_first_and_drops_repeated_aliases() -> None:
 
 
 def test_parse_keeps_one_item_per_question_id() -> None:
-    rows = [_row("a", "first?"), _row("b", "other?"), _row("a", "first?")]
+    rows = [_row("a", "first?"), _row("b", "other?"), _row("a", "second?")]
 
     items = triviaqa.parse_triviaqa(rows)
 
     assert [i.uid for i in items] == ["triviaqa:a", "triviaqa:b"]
+    assert items[0].question == "first?"
 
 
 def test_load_reads_the_parquet_through_fetch(
