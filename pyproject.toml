@@ -82,7 +82,14 @@ force-sort-within-sections = true
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["datasets.*", "plotly.*", "sklearn.*"]
+module = [
+    "datasets.*",
+    "pandas.*",
+    "plotly.*",
+    "pyarrow.*",
+    "scipy.*",
+    "sklearn.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest]

@@ -1,3 +1,4 @@
+import importlib
 import importlib.resources
 import tomllib
 
@@ -18,3 +19,13 @@ def test_package_has_py_typed_marker() -> None:
     marker = importlib.resources.files("tomography").joinpath("py.typed")
 
     assert marker.is_file()
+
+
+@pytest.mark.parametrize(
+    "subpackage",
+    ["datasets", "reading", "control", "experiments", "viz"],
+)
+def test_subpackage_is_a_regular_package(subpackage: str) -> None:
+    module = importlib.import_module(f"tomography.{subpackage}")
+
+    assert module.__file__ is not None

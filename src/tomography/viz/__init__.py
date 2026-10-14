@@ -1,0 +1,1 @@
+"""Figure primitives and style."""
