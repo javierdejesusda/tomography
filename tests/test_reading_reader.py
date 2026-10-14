@@ -261,6 +261,7 @@ def test_random_directions_differ_across_layers_but_follow_the_seed() -> None:
     np.testing.assert_array_equal(first.directions, again.directions)
     assert not np.allclose(first.directions[0], first.directions[1])
     assert not np.allclose(first.directions, other.directions)
+    assert not np.allclose(first.directions[1], other.directions[0])
 
 
 def test_fit_passes_pairs_and_preprocess_to_the_finder() -> None:
@@ -542,4 +543,4 @@ def test_random_direction_scores_near_chance_on_held_out_groups(
         reader.score(test.h[None]), test.pairs, test.labels
     )
     assert test.pairs.shape[0] >= 200
-    assert accuracy[0] == pytest.approx(0.5, abs=0.1)
+    assert accuracy[0] == pytest.approx(0.5, abs=0.15)

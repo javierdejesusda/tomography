@@ -150,6 +150,7 @@ def test_auroc_agrees_with_scikit_learn_over_leading_axes() -> None:
     result = auroc(scores, labels)
 
     assert result.shape == (3, 5)
+    assert result.dtype == np.float64
     for i in range(3):
         for j in range(5):
             assert result[i, j] == pytest.approx(
