@@ -712,3 +712,22 @@ def test_meta_git_values_are_null_outside_a_repository(
 
     assert meta["git_sha"] is None
     assert meta["git_dirty"] is None
+
+
+def test_path_for_names_the_directory_without_creating_it(
+    tmp_path: Path,
+) -> None:
+    config = _Config(seed=3)
+
+    path = RunDir.path_for(config, out_root=tmp_path)
+
+    assert path == tmp_path / "t1" / "gpt2" / config.config_hash()
+    assert not path.exists()
+    assert RunDir.create(config, out_root=tmp_path).path == path
+
+
+def test_path_for_rejects_ids_that_are_not_safe_path_parts(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="experiment"):
+        RunDir.path_for(_Config(experiment="../x"), out_root=tmp_path)

@@ -26,7 +26,7 @@ from typing import Self
 import numpy as np
 from numpy.typing import NDArray
 
-_EXPERIMENT_ID = re.compile(r"[a-z][a-z0-9]*")
+EXPERIMENT_ID = re.compile(r"[a-z][a-z0-9]*")
 _SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _EXTENSION = re.compile(r"[a-z0-9]+")
 # Folder whose git state is recorded in the metadata of every run.
@@ -371,6 +371,32 @@ class RunDir:
         return copy.deepcopy(self._meta)
 
     @classmethod
+    def path_for(
+        cls, config: ExperimentConfig, *, out_root: str | Path = "results"
+    ) -> Path:
+        """Returns the run directory of a config without creating it.
+
+        Args:
+            config: The experiment configuration.
+            out_root: Root folder of all runs.
+
+        Returns:
+            `<out_root>/<experiment>/<model>/<config_hash>`.
+
+        Raises:
+            ValueError: If the experiment id or the model key cannot be used
+                as a path part, or the config has a non-finite float.
+        """
+        _check_path_part("experiment", config.experiment, EXPERIMENT_ID)
+        _check_path_part("model", config.model, _SAFE_NAME)
+        return (
+            Path(out_root)
+            / config.experiment
+            / config.model
+            / config.config_hash()
+        )
+
+    @classmethod
     def create(
         cls,
         config: ExperimentConfig,
@@ -394,16 +420,13 @@ class RunDir:
                 as a path part.
             FileExistsError: If the directory exists and `exist_ok` is false.
         """
-        _check_path_part("experiment", config.experiment, _EXPERIMENT_ID)
-        _check_path_part("model", config.model, _SAFE_NAME)
-        config_hash = config.config_hash()
-        path = Path(out_root) / config.experiment / config.model / config_hash
+        path = cls.path_for(config, out_root=out_root)
         path.mkdir(parents=True, exist_ok=exist_ok)
         config_data = config.to_dict()
         git_sha, git_dirty = _git_state(_SOURCE_DIR)
         meta: dict[str, Any] = {
             "experiment": config.experiment,
-            "config_hash": config_hash,
+            "config_hash": config.config_hash(),
             "seed": config.seed,
             "git_sha": git_sha,
             "git_dirty": git_dirty,
