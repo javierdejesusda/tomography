@@ -82,12 +82,16 @@ known-first-party = ["tomography"]
 python_version = "3.12"
 strict = true
 
+[[tool.mypy.overrides]]
+module = ["datasets.*", "plotly.*", "sklearn.*"]
+ignore_missing_imports = true
+
 [tool.pytest]
 testpaths = ["tests"]
 addopts = ["--import-mode=importlib", "-m", "not slow and not network"]
 markers = [
     "slow: needs a local GPU (CUDA torch, real GPT-2 or Qwen3 weights)",
-    "network: downloads datasets",
+    "network: downloads datasets or model weights from the Hub",
 ]
 filterwarnings = ["error"]
 strict_config = true

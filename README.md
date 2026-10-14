@@ -31,5 +31,5 @@ uv run codespell src tests README.md pyproject.toml
 uv run pytest -q
 ```
 
-Tests that need a local GPU are marked `slow` and tests that download data are marked `network`. Both are
-skipped by default; run them with `uv run pytest -m slow` or `uv run pytest -m network`.
+Tests that need a local GPU are marked `slow` and tests that download datasets or model weights are marked
+`network`. Both are skipped by default; run them with `uv run pytest -m slow` or `uv run pytest -m network`.
