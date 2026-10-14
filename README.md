@@ -21,7 +21,7 @@ uv sync --locked --no-group cu130 --group cpu
 uv run --no-sync pytest -q
 ```
 
-CI runs these checks, adding `--no-sync` after its CPU install, and they should pass before every push:
+CI runs these checks, and they should pass before every push:
 
 ```bash
 uv run ruff check .
@@ -30,6 +30,9 @@ uv run mypy src
 uv run codespell src tests README.md pyproject.toml
 uv run pytest -q
 ```
+
+After the CPU install, add `--no-sync` to every `uv run` (CI does), or a plain `uv run` switches back to the
+CUDA build.
 
 Tests that need a local GPU are marked `slow` and tests that download datasets or model weights are marked
 `network`. Both are skipped by default; run them with `uv run pytest -m slow` or `uv run pytest -m network`.

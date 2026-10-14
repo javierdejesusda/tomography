@@ -14,7 +14,7 @@ def test_version_matches_pyproject() -> None:
     assert tomography.__version__ == declared_version
 
 
-def test_package_ships_py_typed_marker() -> None:
+def test_package_has_py_typed_marker() -> None:
     marker = importlib.resources.files("tomography").joinpath("py.typed")
 
     assert marker.is_file()

@@ -1,7 +1,6 @@
 import importlib
 
 import pytest
-import torch
 
 
 @pytest.mark.parametrize(
@@ -24,5 +23,8 @@ def test_runtime_dependency_imports_cleanly(module_name: str) -> None:
 
 
 @pytest.mark.slow
-def test_default_sync_installs_cuda_torch() -> None:
+def test_default_sync_gives_working_cuda_torch() -> None:
+    torch = importlib.import_module("torch")
+
+    assert torch.version.cuda is not None
     assert torch.cuda.is_available()
