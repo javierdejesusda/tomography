@@ -169,6 +169,18 @@ def test_generate_fictional_rejects_a_relation_without_a_template() -> None:
         )
 
 
+def test_generate_fictional_rejects_a_template_without_a_slot() -> None:
+    real = [_real("popqa:1", "Ada Smith")]
+
+    with pytest.raises(ValueError, match="father"):
+        fictional.generate_fictional(
+            real,
+            count_tokens=_syllables,
+            seed=0,
+            templates={"father": "Who fathered?"},
+        )
+
+
 def test_generate_fictional_rejects_a_subject_of_one_token() -> None:
     real = [_real("popqa:1", "Ada Smith"), _real("popqa:2", "Prague")]
 

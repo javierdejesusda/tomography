@@ -49,15 +49,21 @@ def generate_fictional(
         uid in "matched_uid" and the shared token count in "name_tokens".
 
     Raises:
-        ValueError: If a relation has no template, a subject has fewer than
-            2 tokens (drop single-token subjects first) or a subject cannot
-            be matched within `max_attempts`.
+        ValueError: If a relation has no template, a template has no "{}"
+            slot, a subject has fewer than 2 tokens (drop single-token
+            subjects first) or a subject cannot be matched within
+            `max_attempts`.
     """
     for item in real_items:
-        if item.meta["relation"] not in templates:
+        relation = str(item.meta["relation"])
+        if relation not in templates:
             raise ValueError(
-                f"{item.uid}: no template for relation "
-                f"{item.meta['relation']!r}"
+                f"{item.uid}: no template for relation {relation!r}"
+            )
+        if "{}" not in templates[relation]:
+            raise ValueError(
+                f"{item.uid}: template for relation {relation!r} "
+                "has no '{}' slot"
             )
     names = generate_names(
         [str(item.meta["subject"]) for item in real_items],
@@ -95,12 +101,13 @@ def generate_names(
     """Invents one name per target with the same token and word count.
 
     Names are built from consonant-vowel syllables, with each word
-    capitalized. The total syllable count is drawn up to three times the
-    target's token count, so long names can be matched. Each target draws
-    from its own stream, so the result depends only on the seed, the target
-    list and `count_tokens`. A name is never a target and never repeats an
-    earlier name. Callers must drop targets of a single token first: a
-    one-token name would be a stub such as "He".
+    capitalized. The total syllable count is at most the larger of four
+    syllables per word and three times the token count, so long names can
+    be matched. Each target draws from its own stream, so the result
+    depends only on the seed, the target list and `count_tokens`. A name is
+    never a target and never repeats an earlier name. Callers must drop
+    targets of a single token first: a one-token name would be a stub such
+    as "He".
 
     Args:
         targets: Real names to match, such as "George Rankin".
