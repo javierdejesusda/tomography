@@ -1,6 +1,8 @@
 from collections.abc import Iterator
 import importlib
+import importlib.metadata
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -462,3 +464,28 @@ def test_python_dash_m_exits_with_the_code_of_main(tmp_path: Path) -> None:
 
     assert completed.returncode == 2
     assert "no finished runs" in completed.stderr
+
+
+def test_console_script_entry_point_is_declared() -> None:
+    """The installed distribution declares the tomography console script."""
+    entry_points = importlib.metadata.entry_points(
+        group="console_scripts", name="tomography"
+    )
+
+    assert len(entry_points) == 1
+    (entry_point,) = entry_points
+    assert entry_point.value == "tomography.cli:main"
+    assert entry_point.load() is main
+
+
+def test_console_script_executable_runs() -> None:
+    """The tomography executable next to the interpreter prints help."""
+    script = shutil.which("tomography", path=str(Path(sys.executable).parent))
+
+    assert script is not None
+    completed = subprocess.run(
+        [script, "--help"], capture_output=True, text=True, check=False
+    )
+
+    assert completed.returncode == 0
+    assert "plot" in completed.stdout
