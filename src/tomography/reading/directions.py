@@ -11,6 +11,7 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from sklearn.cluster import KMeans
 
 FloatArray = NDArray[np.floating[Any]]
 Method = Literal[
@@ -18,7 +19,7 @@ Method = Literal[
 ]
 Preprocess = Literal["center", "unit", "none"]
 
-_METHODS = ("pca_diff", "pca_raw", "mean_diff")
+_METHODS = ("pca_diff", "pca_raw", "mean_diff", "kmeans", "random")
 
 
 @dataclass(frozen=True, eq=False)
@@ -57,6 +58,8 @@ def fit_direction(
             component of the within-pair differences and needs `pairs`.
             `pca_raw` does the same on the rows themselves. `mean_diff` is
             the difference of the two class means and needs `labels`.
+            `kmeans` is the centroid difference of a two-cluster K-means and
+            `random` a Gaussian draw from `seed`; neither reads labels.
         h: Activations of shape (n, d).
         labels: Binary labels of shape (n,), 1 for the positive pole.
         pairs: Row indices of shape (m, 2); difference i is
@@ -93,9 +96,19 @@ def fit_direction(
     fitted = vectors if preprocess == "none" else vectors - mean
     if method == "mean_diff":
         direction = _class_difference(fitted, labels)
+    elif method == "kmeans":
+        direction = _centroid_difference(fitted, seed)
+    elif method == "random":
+        rng = np.random.default_rng(seed)
+        direction = rng.standard_normal(size=(rows.shape[1],))
     else:
-        direction = np.linalg.svd(fitted, full_matrices=False)[2][0]
+        direction = _first_component(fitted)
     return _result(direction, mean)
+
+
+def _first_component(rows: NDArray[np.float64]) -> NDArray[np.float64]:
+    components = np.linalg.svd(rows, full_matrices=False)[2]
+    return np.asarray(components[0], dtype=np.float64)
 
 
 def _class_difference(
@@ -109,6 +122,14 @@ def _class_difference(
     positive_mean = rows[positive].mean(axis=0)
     negative_mean = rows[~positive].mean(axis=0)
     return np.asarray(positive_mean - negative_mean, dtype=np.float64)
+
+
+def _centroid_difference(
+    rows: NDArray[np.float64], seed: int
+) -> NDArray[np.float64]:
+    kmeans = KMeans(n_clusters=2, n_init=10, random_state=seed).fit(rows)
+    first, second = kmeans.cluster_centers_
+    return np.asarray(second - first, dtype=np.float64)
 
 
 def _result(

@@ -231,3 +231,38 @@ def test_mean_diff_needs_labels_with_both_classes() -> None:
         fit_direction("mean_diff", h)
     with pytest.raises(ValueError, match="both classes"):
         fit_direction("mean_diff", h, labels=np.ones_like(labels))
+
+
+def test_kmeans_is_the_centroid_difference_of_two_clusters() -> None:
+    h = np.array([[0.0, 0.0], [0.0, 1.0], [10.0, 0.0], [10.0, 1.0]])
+
+    fit = fit_direction("kmeans", h)
+
+    np.testing.assert_allclose(fit.direction, [1.0, 0.0], atol=1e-6)
+    assert fit.raw_norm == pytest.approx(10.0)
+
+
+def test_kmeans_recovers_planted_direction_without_labels() -> None:
+    h, _, planted = make_blobs(200, seed=14, signal=4.0)
+
+    first = fit_direction("kmeans", h, seed=3)
+    second = fit_direction("kmeans", h, seed=3)
+
+    assert abs_cosine(first.direction, planted) > 0.95
+    np.testing.assert_array_equal(first.direction, second.direction)
+
+
+def test_random_direction_is_a_seeded_gaussian_draw() -> None:
+    h, _, _ = make_blobs(20, seed=15)
+    draw = np.random.default_rng(5).standard_normal(32)
+
+    fit = fit_direction("random", h, seed=5)
+    other = fit_direction("random", h, seed=6)
+
+    assert abs_cosine(fit.direction, draw) == pytest.approx(1.0, abs=1e-6)
+    assert fit.raw_norm == pytest.approx(np.linalg.norm(draw))
+    assert fit.direction[np.argmax(np.abs(fit.direction))] > 0
+    assert abs_cosine(fit.direction, other.direction) < 0.9
+    np.testing.assert_allclose(
+        fit.mean, h.astype(np.float64).mean(axis=0), atol=1e-4
+    )
