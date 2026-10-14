@@ -1,7 +1,7 @@
 """FalseQA: natural questions built on a false premise (Hu et al., 2023).
 
-P9 uses the false-premise half of the test split as one more type of question
-that has no answer.
+The knowledge-boundary study uses the false-premise half of the test split as
+one more type of question that has no answer.
 """
 
 from collections.abc import Iterable
@@ -33,7 +33,9 @@ SOURCE = PinnedSource(
 def load_falseqa(
     *, cache: Path | None = None, offline: bool = False
 ) -> list[QAExample]:
-    """Loads the FalseQA test split from the pinned GitHub commit.
+    """Loads the false-premise questions of the FalseQA test split.
+
+    The file is fetched from the pinned GitHub commit.
 
     Args:
         cache: Cache directory; defaults to the shared tomography cache.
