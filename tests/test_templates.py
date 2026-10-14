@@ -25,6 +25,11 @@ def fake_qwen3_format() -> ChatFormat:
     return ChatFormat("template", render_fn=fake_qwen3_render)
 
 
+def test_unknown_chat_kind_is_rejected() -> None:
+    with pytest.raises(ValueError, match="kind"):
+        ChatFormat("foo")  # type: ignore[arg-type]
+
+
 def test_plain_turn_is_the_reference_layout() -> None:
     text, user_start, assistant_start = ChatFormat("plain").render_turn(
         "Pretend you are honest.", "The sky is blue"
@@ -695,7 +700,60 @@ def test_ablate_framing_swap_maps_emotion_concept_to_function() -> None:
 def test_ablate_framing_swap_maps_emotion_function_to_concept() -> None:
     swapped = ablate(PAPER_TEMPLATES["emotion_function"], "framing_swap")
 
-    assert swapped is PAPER_TEMPLATES["emotion_concept"]
+    assert isinstance(swapped, ConceptTemplate)
+    assert swapped.user == PAPER_TEMPLATES["emotion_concept"].user
+    assert "framing_swap" in swapped.name
+
+
+def test_ablate_framing_swap_names_follow_the_chain_convention() -> None:
+    names = [
+        ablate(PAPER_TEMPLATES["emotion_concept"], "framing_swap", index=i).name
+        for i in range(len(EMOTIONS))
+    ]
+
+    assert len(set(names)) == len(EMOTIONS)
+    assert all("framing_swap" in name for name in names)
+    assert names[3] == "emotion_concept:framing_swap#3"
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["emotion_concept", "emotion_function"],
+)
+def test_ablate_framing_swap_keeps_the_untagged_flag(source: str) -> None:
+    untagged = ablate(PAPER_TEMPLATES[source], "no_chat_tags")
+
+    swapped = ablate(untagged, "framing_swap", index=3)
+
+    expected = (
+        FunctionTemplate if source == "emotion_concept" else ConceptTemplate
+    )
+    assert isinstance(swapped, expected)
+    assert not swapped.tagged
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "concept_swap",
+        "no_template",
+        "no_trailing_question",
+        "neutral_frame",
+        "scaffold",
+    ],
+)
+def test_paraphrase_after_a_wording_ablation_is_rejected(kind: str) -> None:
+    ablated = ablate(PAPER_TEMPLATES["concept"], kind)
+
+    with pytest.raises(ValueError, match="ablation"):
+        ablate(ablated, "paraphrase")
+
+
+def test_framing_swap_after_a_wording_ablation_is_rejected() -> None:
+    ablated = ablate(PAPER_TEMPLATES["emotion_concept"], "concept_swap")
+
+    with pytest.raises(ValueError, match="ablation"):
+        ablate(ablated, "framing_swap")
 
 
 def test_ablate_framing_swap_needs_a_counterpart() -> None:
