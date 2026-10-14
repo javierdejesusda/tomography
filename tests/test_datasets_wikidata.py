@@ -8,6 +8,8 @@ import urllib.request
 import pytest
 
 from tomography.datasets import wikidata
+from tomography.datasets.records import QAExample
+from tomography.datasets.records import assign_splits
 from tomography.datasets.sources import ChecksumError
 from tomography.datasets.sources import OfflineCacheMissError
 
@@ -326,6 +328,163 @@ def test_load_post_cutoff_runs_the_award_query_through_the_cache(
     assert items[0].meta["retrieved_on"] == "2026-10-14"
 
 
+def _person(
+    qid: str = "Q937",
+    label: str = "Albert Einstein",
+    birth: str = "1879-03-14T00:00:00Z",
+    death: str = "1955-04-18T00:00:00Z",
+    links: int = 322,
+) -> dict[str, str]:
+    return {
+        "person": f"http://www.wikidata.org/entity/{qid}",
+        "personLabel": label,
+        "birth": birth,
+        "death": death,
+        "links": str(links),
+    }
+
+
+def _day(item: QAExample) -> date:
+    return date.fromisoformat(str(item.meta["date"]))
+
+
+def test_famous_people_query_asks_for_the_top_dead_laureates() -> None:
+    query = wikidata.famous_people_query(("Q38104", "Q37922"), limit=50)
+
+    assert "VALUES ?award { wd:Q38104 wd:Q37922 }" in query
+    assert "wdt:P166 ?award" in query
+    assert "wikibase:timePrecision 11" in query
+    assert "ORDER BY DESC(?links)" in query
+    assert query.rstrip().endswith("LIMIT 50")
+
+
+def test_famous_people_query_rejects_anything_but_item_ids_and_counts() -> None:
+    with pytest.raises(ValueError, match="DROP"):
+        wikidata.famous_people_query(("Q1 } DROP",), limit=5)
+    with pytest.raises(ValueError, match="limit"):
+        wikidata.famous_people_query(("Q1",), limit=0)
+
+
+def test_parse_unknowable_detail_builds_an_unanswerable_item() -> None:
+    (item,) = wikidata.parse_unknowable_detail(_result([_person()]), seed=0)
+
+    assert item.uid == "wikidata:detail:Q937"
+    assert item.answers == ()
+    assert item.kind == "unknowable_detail"
+    assert item.split == assign_splits([item.uid], dataset="wikidata")[0]
+    assert "Albert Einstein" in item.question
+    day = _day(item)
+    assert f"{day.day} " in item.question
+    assert str(day.year) in item.question
+    assert item.meta == {
+        "relation": "ordinary_date",
+        "subject": "Albert Einstein",
+        "popularity": 322,
+        "source": "wikidata",
+        "date": day.isoformat(),
+        "retrieved_on": "2026-10-14",
+        "result_sha256": DIGEST,
+    }
+
+
+def test_parse_unknowable_detail_picks_a_day_inside_the_adult_life() -> None:
+    rows = [_person(f"Q{n}", f"Person {n}") for n in range(1, 40)]
+
+    items = wikidata.parse_unknowable_detail(_result(rows), seed=3)
+
+    assert len(items) == 39
+    for item in items:
+        assert date(1889, 3, 14) <= _day(item) < date(1955, 4, 18)
+
+
+def test_parse_unknowable_detail_is_deterministic_in_the_seed() -> None:
+    rows = [_person(f"Q{n}", f"Person {n}") for n in range(1, 30)]
+
+    first = wikidata.parse_unknowable_detail(_result(rows), seed=1)
+    again = wikidata.parse_unknowable_detail(_result(rows), seed=1)
+    other = wikidata.parse_unknowable_detail(_result(rows), seed=2)
+
+    assert first == again
+    assert [i.question for i in first] != [i.question for i in other]
+
+
+def test_parse_unknowable_detail_draws_each_person_independently() -> None:
+    a = _person("Q1", "Ada Smith")
+    b = _person("Q2", "Ben Jones")
+
+    both = wikidata.parse_unknowable_detail(_result([a, b]), seed=5)
+    only_b = wikidata.parse_unknowable_detail(_result([b]), seed=5)
+
+    assert both[1] == only_b[0]
+
+
+def test_parse_unknowable_detail_skips_rows_it_cannot_use() -> None:
+    rows = [
+        _person("Q1", "Q1"),
+        _person("Q2", "Old Master", birth="1650-01-01T00:00:00Z"),
+        _person(
+            "Q3",
+            "Child Star",
+            birth="1950-01-01T00:00:00Z",
+            death="1955-01-01T00:00:00Z",
+        ),
+        _person(
+            "Q4",
+            "Ancient",
+            birth="-0400-01-01T00:00:00Z",
+            death="-0350-01-01T00:00:00Z",
+        ),
+        _person("Q5", "Good Person"),
+    ]
+
+    items = wikidata.parse_unknowable_detail(_result(rows), seed=0)
+
+    assert [i.meta["subject"] for i in items] == ["Good Person"]
+
+
+def test_parse_unknowable_detail_keeps_one_item_per_person() -> None:
+    rows = [
+        _person("Q7241", "Rabindranath Tagore", birth="1861-05-07T00:00:00Z"),
+        _person("Q7241", "Rabindranath Tagore", birth="1861-05-06T00:00:00Z"),
+    ]
+
+    items = wikidata.parse_unknowable_detail(_result(rows), seed=0)
+
+    assert [i.uid for i in items] == ["wikidata:detail:Q7241"]
+
+
+def test_parse_unknowable_detail_templates_and_age_are_keywords() -> None:
+    (item,) = wikidata.parse_unknowable_detail(
+        _result([_person()]),
+        seed=0,
+        templates=("Where was {name} on {date}?",),
+        min_age_years=40,
+    )
+
+    assert item.question.startswith("Where was Albert Einstein on ")
+    assert _day(item) >= date(1919, 3, 14)
+
+
+def test_load_unknowable_detail_runs_the_people_query_through_the_cache(
+    tmp_path: Path,
+) -> None:
+    endpoint = _Endpoint(_body([_person()]))
+
+    items = wikidata.load_unknowable_detail(
+        seed=0,
+        awards=("Q38104",),
+        limit=10,
+        cache=tmp_path,
+        fetch=endpoint,
+        today=lambda: date(2026, 10, 14),
+    )
+
+    expected = wikidata.famous_people_query(("Q38104",), limit=10)
+    assert endpoint.queries == [expected]
+    assert [i.uid for i in items] == ["wikidata:detail:Q937"]
+    assert items[0].meta["retrieved_on"] == "2026-10-14"
+
+
 @pytest.mark.network
 def test_network_award_winners_straddle_the_gpt2_cutoff(tmp_path: Path) -> None:
     items = wikidata.load_post_cutoff(cutoff_year=2017, cache=tmp_path)
@@ -342,3 +501,13 @@ def test_network_award_winners_straddle_the_gpt2_cutoff(tmp_path: Path) -> None:
         cutoff_year=2017, cache=tmp_path, offline=True
     )
     assert offline == items
+
+
+@pytest.mark.network
+def test_network_famous_people_give_unanswerable_items(tmp_path: Path) -> None:
+    items = wikidata.load_unknowable_detail(seed=0, limit=100, cache=tmp_path)
+
+    assert len(items) > 50
+    subjects = {str(i.meta["subject"]) for i in items}
+    assert "Albert Einstein" in subjects
+    assert all(not i.answers for i in items)

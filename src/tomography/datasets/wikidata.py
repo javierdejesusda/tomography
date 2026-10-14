@@ -1,11 +1,11 @@
 """Questions generated from Wikidata for the knowledge-boundary study.
 
-Award-winner questions whose year falls before or after a model's
-training cutoff come from SPARQL queries against the public Wikidata
-Query Service (CC0). Every query result is cached with the query text,
-the retrieval date and the SHA-256 of the response: a later run reuses
-the exact snapshot, and each item carries the date and digest that
-identify it.
+Two kinds of item come from SPARQL queries against the public Wikidata Query
+Service (CC0): award-winner questions whose year falls before or after a
+model's training cutoff, and questions about a famous person's ordinary day
+that no record can answer. Every query result is cached with the query text,
+the retrieval date and the SHA-256 of the response: a later run reuses the
+exact snapshot, and each item carries the date and digest that identify it.
 """
 
 from collections.abc import Callable
@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC
 from datetime import date
 from datetime import datetime
+from datetime import timedelta
 import hashlib
 import json
 import os
@@ -23,6 +24,8 @@ import re
 import tempfile
 import urllib.parse
 import urllib.request
+
+import numpy as np
 
 from tomography.datasets.records import QAExample
 from tomography.datasets.records import assign_splits
@@ -50,6 +53,25 @@ AWARDS: tuple[str, ...] = (
     "Q28835",
 )
 AWARD_TEMPLATE = "Who won the {award} in {year}?"
+UNKNOWABLE_TEMPLATES: tuple[str, ...] = (
+    "What did {name} have for breakfast on {date}?",
+    "Who was the first person {name} spoke to on {date}?",
+    "What was the first thing {name} did on {date}?",
+)
+_MONTHS = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
 
 
 @dataclass(frozen=True)
@@ -334,7 +356,194 @@ def parse_award_winners(
     return items
 
 
+def famous_people_query(awards: Sequence[str], *, limit: int) -> str:
+    """Builds the query for the most widely documented dead laureates.
+
+    Fame is the number of Wikipedia editions of a person's item; the pool is
+    the people who won one of `awards`, because a query over every human
+    with a sitelink count times out on the public service.
+
+    Args:
+        awards: Wikidata item ids of the awards, such as "Q38104".
+        limit: Number of rows to ask for, the most linked people first.
+
+    Returns:
+        A SPARQL query with the variables person, personLabel, birth, death
+        and links: people with a birth and a death date given to the day.
+
+    Raises:
+        ValueError: If an award is not an item id or `limit` is below 1.
+    """
+    if limit < 1:
+        raise ValueError(f"limit must be at least 1, got {limit}")
+    values = " ".join(f"wd:{_item_id(award)}" for award in awards)
+    lines = [
+        "SELECT DISTINCT ?person ?personLabel ?birth ?death ?links WHERE {",
+        f"  VALUES ?award {{ {values} }}",
+        "  ?person wdt:P166 ?award ;",
+        "          wikibase:sitelinks ?links ;",
+        "          p:P569 ?birthStatement ;",
+        "          p:P570 ?deathStatement .",
+        "  ?birthStatement psv:P569 ?birthValue .",
+        "  ?birthValue wikibase:timeValue ?birth ;",
+        "              wikibase:timePrecision 11 .",
+        "  ?deathStatement psv:P570 ?deathValue .",
+        "  ?deathValue wikibase:timeValue ?death ;",
+        "              wikibase:timePrecision 11 .",
+        '  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }',
+        "}",
+        "ORDER BY DESC(?links) ?person",
+        f"LIMIT {limit}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def load_unknowable_detail(
+    *,
+    seed: int,
+    awards: Sequence[str] = AWARDS,
+    limit: int = 300,
+    templates: Sequence[str] = UNKNOWABLE_TEMPLATES,
+    min_age_years: int = 10,
+    min_birth_year: int = 1700,
+    cache: Path | None = None,
+    offline: bool = False,
+    fetch: QueryFetch | None = None,
+    today: Callable[[], date] | None = None,
+) -> list[QAExample]:
+    """Builds questions about a famous person's day that no record answers.
+
+    Args:
+        seed: Chooses each person's template and day.
+        awards: Wikidata item ids of the awards that define the pool.
+        limit: Number of most linked people to ask for.
+        templates: Questions with "{name}" and "{date}" slots.
+        min_age_years: Earliest age whose days may be asked about.
+        min_birth_year: Earliest birth year kept.
+        cache: Cache directory; defaults to the shared tomography cache.
+        offline: If True, use only a cached query result.
+        fetch: Returns the raw response for a query; defaults to
+            `sparql_fetch`.
+        today: Gives the retrieval date; defaults to today in UTC.
+
+    Returns:
+        The items `parse_unknowable_detail` builds from the query result.
+
+    Raises:
+        ValueError: If an award is not an item id or `limit` is below 1.
+        ChecksumError: If a cached result does not match its digest.
+        OfflineCacheMissError: If `offline` is True and the query is not
+            cached.
+    """
+    result = run_query(
+        famous_people_query(awards, limit=limit),
+        fetch=fetch,
+        cache=cache,
+        offline=offline,
+        today=today,
+    )
+    return parse_unknowable_detail(
+        result,
+        seed=seed,
+        templates=templates,
+        min_age_years=min_age_years,
+        min_birth_year=min_birth_year,
+    )
+
+
+def parse_unknowable_detail(
+    result: QueryResult,
+    *,
+    seed: int,
+    templates: Sequence[str] = UNKNOWABLE_TEMPLATES,
+    min_age_years: int = 10,
+    min_birth_year: int = 1700,
+) -> list[QAExample]:
+    """Turns person rows into questions about an ordinary day.
+
+    Each person gets one seeded day between `min_age_years` after birth and
+    the day before death, and one seeded template. The draw depends only on
+    the seed and the person, so a person's item does not change when the
+    query returns other people. The items carry no answer: nobody recorded
+    what the person did that day. Rows are skipped for a label that is an
+    item id, a birth before `min_birth_year` (calendar changes make older
+    dates ambiguous), dates that do not parse, or a life shorter than
+    `min_age_years`. A person with several date statements counts once.
+
+    Args:
+        result: Rows with "person" (an entity URI), "personLabel", "birth",
+            "death" (ISO timestamps) and "links".
+        seed: Chooses each person's template and day.
+        templates: Questions with "{name}" and "{date}" slots.
+        min_age_years: Earliest age whose days may be asked about.
+        min_birth_year: Earliest birth year kept.
+
+    Returns:
+        One "unknowable_detail" item per person, ordered by item id number.
+    """
+    first_row: dict[int, Mapping[str, str]] = {}
+    for row in sorted(result.rows, key=lambda r: (r["birth"], r["death"])):
+        number = int(row["person"].rsplit("/Q", 1)[-1])
+        first_row.setdefault(number, row)
+    numbers = sorted(first_row)
+    uids = [f"wikidata:detail:Q{number}" for number in numbers]
+    splits = assign_splits(uids, dataset="wikidata")
+    items = []
+    for number, uid, split in zip(numbers, uids, splits, strict=True):
+        row = first_row[number]
+        name = row["personLabel"]
+        span = _adult_span(row, min_age_years, min_birth_year)
+        if _ITEM_ID.fullmatch(name) or span is None:
+            continue
+        start, days = span
+        rng = np.random.default_rng([seed, number])
+        day = start + timedelta(days=int(rng.integers(days)))
+        template = templates[int(rng.integers(len(templates)))]
+        text = f"{day.day} {_MONTHS[day.month - 1]} {day.year}"
+        items.append(
+            QAExample(
+                uid=uid,
+                question=template.format(name=name, date=text),
+                answers=(),
+                kind="unknowable_detail",
+                split=split,
+                meta={
+                    "relation": "ordinary_date",
+                    "subject": name,
+                    "popularity": int(row["links"]),
+                    "source": "wikidata",
+                    "date": day.isoformat(),
+                    "retrieved_on": result.retrieved_on,
+                    "result_sha256": result.sha256,
+                },
+            )
+        )
+    return items
+
+
 def _item_id(value: str) -> str:
     if not _ITEM_ID.fullmatch(value):
         raise ValueError(f"not a Wikidata item id: {value!r}")
     return value
+
+
+def _adult_span(
+    row: Mapping[str, str], min_age_years: int, min_birth_year: int
+) -> tuple[date, int] | None:
+    try:
+        birth = date.fromisoformat(row["birth"][:10])
+        death = date.fromisoformat(row["death"][:10])
+    except ValueError:
+        return None
+    if birth.year < min_birth_year:
+        return None
+    start = _add_years(birth, min_age_years)
+    days = (death - start).days
+    return (start, days) if days >= 1 else None
+
+
+def _add_years(day: date, years: int) -> date:
+    try:
+        return day.replace(year=day.year + years)
+    except ValueError:
+        return day.replace(year=day.year + years, day=28)
