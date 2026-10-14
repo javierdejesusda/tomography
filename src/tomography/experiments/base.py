@@ -15,13 +15,13 @@ import platform
 import random
 import re
 import subprocess
-import tempfile
 import types
 import typing
 from typing import Any
 from typing import BinaryIO
 from typing import Literal
 from typing import Self
+import uuid
 
 import numpy as np
 from numpy.typing import NDArray
@@ -306,12 +306,9 @@ def _atomic_write(path: Path, write: Callable[[BinaryIO], object]) -> None:
         write: Called with a binary handle of a temporary file that sits next
             to `path`; the file replaces `path` only if `write` succeeds.
     """
-    descriptor, temp_name = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
-    )
-    temp_path = Path(temp_name)
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        with os.fdopen(descriptor, "wb") as handle:
+        with temp_path.open("xb") as handle:
             write(handle)
         os.replace(temp_path, path)
     except BaseException:

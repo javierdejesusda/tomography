@@ -7,7 +7,9 @@ import os
 from pathlib import Path
 import platform
 import random
+import stat
 import subprocess
+import sys
 from typing import Literal
 
 import numpy as np
@@ -759,3 +761,19 @@ def test_create_leaves_no_directory_when_the_metadata_cannot_be_built(
         RunDir.create(config, out_root=tmp_path)
 
     assert not RunDir.path_for(config, out_root=tmp_path).exists()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows has no POSIX permission bits"
+)
+def test_written_files_follow_the_umask(tmp_path: Path) -> None:
+    previous = os.umask(0o022)
+    try:
+        run = _new_run(tmp_path)
+        json_path = run.write_json("v", {"x": 1})
+        npz_path = run.write_arrays("a", x=np.zeros(1))
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(json_path.stat().st_mode) == 0o644
+    assert stat.S_IMODE(npz_path.stat().st_mode) == 0o644
