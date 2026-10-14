@@ -157,8 +157,11 @@ def test_from_dict_rejects_values_of_the_wrong_type(
         _Config.from_dict(data)
 
 
-def test_from_dict_accepts_an_int_for_a_float_field() -> None:
-    assert _Config.from_dict({"alpha": 1}).alpha == 1
+def test_from_dict_turns_an_int_for_a_float_field_into_a_float() -> None:
+    config = _Config.from_dict({"alpha": 1})
+
+    assert isinstance(config.alpha, float)
+    assert config.config_hash() == _Config(alpha=1.0).config_hash()
 
 
 def test_from_dict_accepts_null_for_an_optional_field() -> None:

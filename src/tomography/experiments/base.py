@@ -70,7 +70,8 @@ def _coerce(annotation: Any, value: Any) -> Any:
         value: A value decoded from JSON.
 
     Returns:
-        The value, with lists converted where the annotation asks for a tuple.
+        The value, with lists converted where the annotation asks for a tuple
+        and ints widened where it asks for a float.
 
     Raises:
         _TypeMismatchError: If the value does not fit the annotation.
@@ -106,6 +107,8 @@ def _coerce(annotation: Any, value: Any) -> Any:
     check = _SCALAR_CHECKS.get(annotation)
     if check is not None and not check(value):
         raise _TypeMismatchError
+    if annotation is float:
+        return float(value)
     return value
 
 
