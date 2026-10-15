@@ -48,6 +48,7 @@ from tomography.experiments.sweep import SweepResult
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import ReadingTask
 from tomography.experiments.variants import Variant
+from tomography.experiments.variants import task_splits
 from tomography.judges import heuristic_score
 from tomography.judges import sequence_logprob
 from tomography.model import BosMode
@@ -892,28 +893,33 @@ def test_the_cube_reads_a_reader_of_one_position_at_another(
     tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     real = p2_positions.sweep_from_activations
-    calls: list[tuple[Sequence[Prepared], dict[str, Prepared], Any]] = []
+    calls: list[tuple[Sequence[Prepared], dict[str, Prepared]]] = []
 
     def spy(
         train: Sequence[Prepared],
         evals: Mapping[str, Prepared],
         **kwargs: Any,
     ) -> SweepResult:
-        calls.append((list(train), dict(evals), kwargs))
+        calls.append((list(train), dict(evals)))
         return real(train, evals, **kwargs)
 
     monkeypatch.setattr(p2_positions, "sweep_from_activations", spy)
-    config = _config(tasks=("sentiment",), zero_shot=False)
+    config = _config(tasks=("sentiment",), zero_shot=False, seed=3)
     run_dir = _execute(config, tiny_gpt2, tmp_path)
     accuracy = run_dir.read_arrays("sweep_sentiment")["accuracy"]
     assert len(calls) == len(POSITIONS)
-    for i, (train, evals, kwargs) in enumerate(calls):
+    for i, (train, evals) in enumerate(calls):
         for j, read in enumerate(POSITIONS):
+            name = f"report/original/{read}"
             direct = real(
-                train, {"x": evals[f"report/original/{read}"]}, **kwargs
+                train,
+                {name: evals[name]},
+                method=config.method,
+                preprocess=config.preprocess,
+                seed=config.seed,
             )
             np.testing.assert_array_equal(
-                accuracy[1, i, j, 0, READER], direct.per_seed("x")[READER]
+                accuracy[1, i, j, 0], direct.per_seed(name)
             )
 
 
@@ -1056,3 +1062,125 @@ def test_p2_on_gpt2_reads_sentiment_under_a_decoy_against_zero_shot(
     )
     assert last["accuracy"] > 0.5
     assert {row["position"] for row in rows} == {"last", "mean", "zero_shot"}
+
+
+@pytest.mark.usefixtures("short_prompts")
+def test_every_set_is_read_at_the_position_of_its_name(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = p2_positions.sweep_from_activations
+    calls: list[tuple[list[Prepared], dict[str, Prepared]]] = []
+
+    def spy(
+        train: Sequence[Prepared],
+        evals: Mapping[str, Prepared],
+        **kwargs: Any,
+    ) -> SweepResult:
+        calls.append((list(train), dict(evals)))
+        return real(train, evals, **kwargs)
+
+    monkeypatch.setattr(p2_positions, "sweep_from_activations", spy)
+    config = _config(tasks=("sentiment", "utility"), zero_shot=False)
+    _execute(config, tiny_gpt2, tmp_path)
+    assert len(calls) == 2 * len(POSITIONS)
+    for k, (train, evals) in enumerate(calls):
+        assert {act.position for _, act in train} == {POSITIONS[k % 3]}
+        assert len(evals) == 2 * len(CONDITIONS) * len(POSITIONS)
+        for name, (_, activations) in evals.items():
+            assert activations.position == name.rsplit("/", 1)[1]
+
+
+@pytest.mark.usefixtures("short_prompts")
+def test_each_positions_layer_is_chosen_on_the_select_split(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = p2_positions.sweep_from_activations
+
+    def skewed(
+        train: Sequence[Prepared],
+        evals: Mapping[str, Prepared],
+        **kwargs: Any,
+    ) -> SweepResult:
+        sweep = real(train, evals, **kwargs)
+        accuracy = sweep.accuracy.copy()
+        accuracy[:, READER] = 0.5
+        for i, name in enumerate(sweep.eval_names):
+            layer = 0 if name.startswith("select/") else -1
+            accuracy[i, READER, :, layer] = 0.9
+        return dataclasses.replace(sweep, accuracy=accuracy)
+
+    monkeypatch.setattr(p2_positions, "sweep_from_activations", skewed)
+    config = _config(tasks=("sentiment", "utility"), zero_shot=False)
+    run_dir = _execute(config, tiny_gpt2, tmp_path)
+    assert _json(run_dir, "summary")["layers"] == {
+        task: {position: 1 for position in POSITIONS}
+        for task in ("sentiment", "utility")
+    }
+    assert {row["layer"] for row in _json(run_dir, "table")} == {1}
+
+
+@pytest.mark.usefixtures("short_prompts")
+def test_the_random_decoys_are_drawn_with_the_run_seed(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = p2_positions.task_set
+    drawn: list[list[tuple[str, Any]]] = []
+
+    def spy(
+        task: ReadingTask,
+        variant: Variant,
+        examples: Sequence[Example],
+        *,
+        n_pairs: int | None,
+        seed: int,
+    ) -> StimulusSet:
+        if variant.name == "misleading":
+            drawn.append([(e.uid, e.meta["question"]) for e in examples])
+        return real(task, variant, examples, n_pairs=n_pairs, seed=seed)
+
+    monkeypatch.setattr(p2_positions, "task_set", spy)
+    config = _config(
+        tasks=("sentiment",),
+        positions=("last",),
+        decoys=("random",),
+        zero_shot=False,
+        seed=5,
+    )
+    _execute(config, tiny_gpt2, tmp_path)
+    splits = task_splits(READING_TASKS["sentiment"], _sources(), seed=5)
+    expected = [
+        [(e.uid, e.meta["question"]) for e in with_decoys(p, "random", seed=5)]
+        for p in (splits.select, splits.report)
+    ]
+    assert drawn == expected
+
+
+def test_no_task_is_refused_before_any_model_call(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="at least one task"):
+        _refused(_config(tasks=()), tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"tasks": ()}, "at least one task"),
+        ({"tasks": ("nope",)}, "unknown task 'nope'"),
+        ({"tasks": ("emotion_happiness",)}, "binary tasks only"),
+        ({"positions": ()}, "at least one position"),
+        ({"positions": ("response",)}, "unknown position 'response'"),
+    ],
+)
+def test_run_checks_the_config_before_loading_anything(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, Any],
+    message: str,
+) -> None:
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("nothing may load before the config is checked")
+
+    monkeypatch.setattr(p2_positions, "load_model", refuse)
+    monkeypatch.setattr(p2_positions, "load_sources", refuse)
+    config = _config(**overrides)
+    with pytest.raises(ValueError, match=message):
+        run(config, _run_dir(config, tmp_path))

@@ -46,6 +46,7 @@ from tomography.experiments.variants import prepare
 from tomography.experiments.variants import target_of
 from tomography.experiments.variants import task_examples
 from tomography.experiments.variants import task_set
+from tomography.experiments.variants import task_sources
 from tomography.experiments.variants import task_splits
 from tomography.experiments.variants import template_variants
 from tomography.judges import heuristic_score
@@ -664,6 +665,31 @@ def _write_task(
     )
 
 
+def _check(config: Config) -> tuple[str, ...]:
+    """Checks what the config alone settles and expands its tasks."""
+    tasks = expand_tasks(config.tasks)
+    if not tasks:
+        raise ValueError("p2 needs at least one task")
+    if not config.positions:
+        raise ValueError("p2 needs at least one position")
+    for position in config.positions:
+        if position not in POSITIONS:
+            raise ValueError(
+                f"unknown position {position!r}, expected one of "
+                f"{list(POSITIONS)}"
+            )
+    for name in tasks:
+        task = READING_TASKS[name]
+        if task.pairing == "one_vs_rest":
+            raise ValueError(f"p2 reads binary tasks only, not {name!r}")
+        if not _readable_positions(task, config.positions)[0]:
+            raise ValueError(
+                f"task {name!r} has no position left to read: its concept "
+                "position needs a concept slot or word"
+            )
+    return tasks
+
+
 def execute(
     config: Config,
     run_dir: RunDir,
@@ -690,31 +716,14 @@ def execute(
         examples: The examples of each source, by source name.
 
     Raises:
-        ValueError: If there is no position, a position is not in
-            `POSITIONS`, a task is unknown, a source is missing, a task is not
-            binary or a task has no position left to read (all checked before
-            any model call).
+        ValueError: If the config is refused (see `run`) or a source is
+            missing (both checked before any model call).
     """
-    tasks = expand_tasks(config.tasks)
-    if not config.positions:
-        raise ValueError("p2 needs at least one position")
-    for position in config.positions:
-        if position not in POSITIONS:
-            raise ValueError(
-                f"unknown position {position!r}, expected one of "
-                f"{list(POSITIONS)}"
-            )
+    tasks = _check(config)
     for name in tasks:
         task = READING_TASKS[name]
         task_examples(task, examples)
         task_examples(target_of(task), examples)
-        if task.pairing == "one_vs_rest":
-            raise ValueError(f"p2 reads binary tasks only, not {name!r}")
-        if not _readable_positions(task, config.positions)[0]:
-            raise ValueError(
-                f"task {name!r} has no position left to read: its concept "
-                "position needs a concept slot or word"
-            )
     chat = chat_format_for(loaded)
     rows: list[dict[str, Any]] = []
     summary: dict[str, Any] = {
@@ -744,18 +753,12 @@ def run(config: Config, run_dir: RunDir) -> None:
         run_dir: The run to write into.
 
     Raises:
-        ValueError: If a task is unknown (before the model is loaded).
+        ValueError: If there is no task or no position, a task is unknown, a
+            position is not in `POSITIONS`, a task is not binary or has no
+            position left to read (all checked before the model is loaded).
     """
-    sources = list(
-        dict.fromkeys(
-            source
-            for name in expand_tasks(config.tasks)
-            for source in (
-                READING_TASKS[name].source,
-                target_of(READING_TASKS[name]).source,
-            )
-        )
-    )
+    _check(config)
+    sources = task_sources(config.tasks)
     execute(config, run_dir, load_model(config.model), load_sources(sources))
 
 
