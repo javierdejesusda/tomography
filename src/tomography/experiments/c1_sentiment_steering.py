@@ -508,7 +508,7 @@ def _layer_sweep(
     return primary, check, trials
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class _Headline:
     """The report-prompt results of the chosen window."""
 
@@ -653,11 +653,18 @@ def execute(
     Raises:
         ValueError: If `coeffs` has no 0.0 or no other value, `n_steer_seeds`
             is outside `1..n_seeds`, the sweep layers, the operators or the
-            window do not fit the model, or the validation sentences give
+            window do not fit the model, the held-out texts are fewer than
+            `n_calibration + n_neutral`, or the validation sentences give
             fewer than `2 * n_prompts` distinct prompts.
     """
     n_layers = loaded.n_layers
     sweep = _check_config(config, n_layers)
+    held = split_held_out(
+        texts,
+        n_calibration=config.n_calibration,
+        n_neutral=config.n_neutral,
+        seed=config.seed,
+    )
     train = select_examples(sst2, split="train", min_words=config.min_words)
     val = select_examples(sst2, split="val", min_words=config.min_words)
     select_prompts, report_prompts = draw_prompts(
@@ -696,12 +703,6 @@ def execute(
         result.layers,
     )
     readers = result.readers[: config.n_steer_seeds]
-    held = split_held_out(
-        texts,
-        n_calibration=config.n_calibration,
-        n_neutral=config.n_neutral,
-        seed=config.seed,
-    )
     settings = GenSettings.from_config(config)
     steering = _Steering(
         config=config,
