@@ -991,6 +991,40 @@ def test_every_draw_is_a_fit_with_a_seed_derived_from_the_run_seed(
                     )
 
 
+def test_each_fitted_reader_scores_the_held_out_rows_once(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[Any] = []
+    real = RepReader.score
+
+    def spy(self: RepReader, h: Any) -> Any:
+        seen.append(h)
+        return real(self, h)
+
+    monkeypatch.setattr(RepReader, "score", spy)
+    names = ("obscure_real", "real_vs_synthal")
+    pools = {name: planted.pools[name] for name in names}
+
+    reading_cube(
+        planted.acts,
+        pools,
+        methods=("logistic", "pca_diff"),
+        n_seeds=2,
+        n_pairs=16,
+        seed=0,
+    )
+
+    held_out = {
+        i.example.uid
+        for pool in pools.values()
+        for i in (*pool.positive, *pool.negative)
+        if i.example.split != "train"
+    }
+    assert len(seen) == len(names) * 2 * 2
+    assert all(h is seen[0] for h in seen)
+    assert seen[0].shape[1] == len(held_out)
+
+
 def test_the_draws_differ_and_the_cube_is_reproducible(
     planted: Planted,
 ) -> None:

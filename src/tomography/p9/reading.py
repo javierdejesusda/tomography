@@ -419,7 +419,10 @@ def reading_cube(
     items of its own contrast. The first method is also scored on the test
     items of every other contrast, which crosses the two kinds of contrast: a
     knowledge direction scored on an unknown-type contrast asks whether
-    "known" is only "familiar entity".
+    "known" is only "familiar entity". The val and test rows of every
+    contrast are gathered once; each fitted reader scores them once and a
+    contrast takes its slice of the scores, so the activations are not
+    copied per reader and split.
 
     The cosines are split-half cross-fits. A fit on all train pairs would
     bias the cosine of two contrasts that share a side (about +0.5 on pure
@@ -467,12 +470,18 @@ def reading_cube(
         split: {name: _split_arrays(acts, pools[name], split) for name in names}
         for split in splits
     }
+    eval_rows = np.unique(
+        np.concatenate(
+            [rows for by_name in held.values() for rows, _ in by_name.values()]
+        )
+    )
+    eval_data = acts.data[:, eval_rows]
 
     def score(
-        reader: RepReader, split: Split, name: str
+        scores: NDArray[np.float32], split: Split, name: str
     ) -> NDArray[np.float64]:
         rows, labels = held[split][name]
-        return auroc(reader.score(acts.data[:, rows]), labels)
+        return auroc(scores[:, np.searchsorted(eval_rows, rows)], labels)
 
     for t, name in enumerate(names):
         for s in range(n_seeds):
@@ -485,14 +494,15 @@ def reading_cube(
                     n_pairs=n_pairs,
                     seed=_draw_seed(seed, s),
                 )
-                val[m, t, s] = score(reader, "val", name)
-                test[m, t, s] = score(reader, "test", name)
+                scores = reader.score(eval_data)
+                val[m, t, s] = score(scores, "val", name)
+                test[m, t, s] = score(scores, "test", name)
                 if m == 0:
                     for u, other in enumerate(names):
                         transfer[s, :, t, u] = (
                             test[m, t, s]
                             if u == t
-                            else score(reader, "test", other)
+                            else score(scores, "test", other)
                         )
     full = {
         name: fit_type_reader(
