@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 import contextlib
 from dataclasses import dataclass
+from dataclasses import field
 import functools
 import itertools
 import math
@@ -451,6 +452,7 @@ class LorraAdapter:
     peft_model: PeftModel
     settings: LorraSettings
     blocks: tuple[int, ...]
+    _training_depth: int = field(default=0, init=False, repr=False)
 
     @contextlib.contextmanager
     def disabled(self) -> Iterator[None]:
@@ -551,19 +553,28 @@ class LorraAdapter:
         distribution of the targets. With gradient checkpointing the whole
         model trains, since HF checkpoints only in train mode.
 
+        The block is re-entrant: the model returns to eval mode when the
+        outermost block exits. A step keeps it open through its backward,
+        because checkpointing recomputes the forward there and the dropout
+        must behave as it did in the original forward.
+
         Yields:
             None.
         """
+        self._training_depth += 1
         try:
-            if self.settings.gradient_checkpointing:
-                self.peft_model.train()
-            else:
-                for module in self.peft_model.modules():
-                    if isinstance(module, LoraLayer):
-                        module.lora_dropout.train()
+            if self._training_depth == 1:
+                if self.settings.gradient_checkpointing:
+                    self.peft_model.train()
+                else:
+                    for module in self.peft_model.modules():
+                        if isinstance(module, LoraLayer):
+                            module.lora_dropout.train()
             yield
         finally:
-            self.peft_model.eval()
+            self._training_depth -= 1
+            if self._training_depth == 0:
+                self.peft_model.eval()
 
 
 def attach_adapter(
@@ -686,7 +697,9 @@ def step_loss(
 
     The frozen pass runs over the `3B` rows under `no_grad` and
     `adapter.disabled()`; the adapted pass runs over the `B` original rows in
-    `adapter.training()` mode.
+    `adapter.training()` mode. With gradient checkpointing the backward must
+    run in that mode too, so wrap the call and the backward in one
+    `adapter.training()` block, as `train_lorra` does.
 
     Args:
         loaded: The wrapped model, with `adapter` attached.
@@ -768,8 +781,9 @@ def train_lorra(
                 loaded, [pairs[i] for i in chosen], chat, settings, bos=bos
             )
             optimizer.zero_grad(set_to_none=True)
-            loss = step_loss(loaded, adapter, batch)
-            loss.backward()  # type: ignore[no-untyped-call]
+            with adapter.training():
+                loss = step_loss(loaded, adapter, batch)
+                loss.backward()  # type: ignore[no-untyped-call]
             optimizer.step()
             losses.append(loss.item())
             if on_step is not None:

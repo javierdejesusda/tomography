@@ -653,6 +653,17 @@ def test_load_adapter_rejects_an_unfinished_run(
     assert _lora_layers(fresh) == []
 
 
+def test_load_adapter_reads_the_weights_before_attaching(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    fresh = copy.deepcopy(tiny_arch)
+    run_dir = _finished(tiny_arch, tmp_path)
+    (run_dir.path / "adapter.npz").unlink()
+    with pytest.raises(FileNotFoundError):
+        load_adapter(fresh, run_dir.path)
+    assert _lora_layers(fresh) == []
+
+
 def test_load_adapter_rejects_another_architecture(
     tiny_gpt2: LoadedModel, tiny_qwen3: LoadedModel, tmp_path: Path
 ) -> None:

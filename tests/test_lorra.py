@@ -953,6 +953,45 @@ def test_training_mode_returns_to_eval_after_an_exception(
     assert not any(module.training for module in tiny_arch.model.modules())
 
 
+def test_training_mode_stays_on_until_the_outermost_block_exits(
+    tiny_arch: LoadedModel,
+) -> None:
+    adapter = attach_adapter(tiny_arch, _settings(dropout=0.5))
+    with adapter.training():
+        with adapter.training():
+            pass
+        for name, module in tiny_arch.model.named_modules():
+            assert module.training == ("lora_dropout" in name), name
+    assert not any(module.training for module in tiny_arch.model.modules())
+
+
+def test_the_full_train_mode_with_checkpointing_is_reentrant(
+    tiny_qwen3: LoadedModel,
+) -> None:
+    adapter = attach_adapter(tiny_qwen3, _settings(gradient_checkpointing=True))
+    with adapter.training():
+        with adapter.training():
+            pass
+        assert tiny_qwen3.model.training
+    assert not any(module.training for module in tiny_qwen3.model.modules())
+
+
+def test_training_mode_returns_to_eval_after_an_exception_in_a_nested_block(
+    tiny_arch: LoadedModel,
+) -> None:
+    adapter = attach_adapter(tiny_arch, _settings(dropout=0.5))
+    with (
+        pytest.raises(RuntimeError, match="boom"),
+        adapter.training(),
+        adapter.training(),
+    ):
+        raise RuntimeError("boom")
+    assert not any(module.training for module in tiny_arch.model.modules())
+    with adapter.training():
+        assert any(module.training for module in tiny_arch.model.modules())
+    assert not any(module.training for module in tiny_arch.model.modules())
+
+
 EIGHT_PAIRS: list[Pair] = [
     *PAIRS,
     ("Is the model right?", "The model reads the stream of the residual."),
@@ -1292,6 +1331,26 @@ def test_checkpointing_gives_the_same_gradients_and_recomputes_two_blocks(
     for plain, checkpointed in zip(grads[0], grads[1], strict=True):
         assert torch.allclose(plain, checkpointed, atol=1e-5)
         assert plain.abs().sum().item() > 0.0
+
+
+def test_a_checkpointed_step_with_dropout_has_the_gradients_of_a_plain_one(
+    tiny_qwen3: LoadedModel,
+) -> None:
+    twin = _twin(tiny_qwen3)
+    grads: list[list[torch.Tensor]] = []
+    for loaded, checkpointing in ((tiny_qwen3, False), (twin, True)):
+        settings = _train_settings(
+            steps=1, dropout=0.05, gradient_checkpointing=checkpointing
+        )
+        adapter = attach_adapter(loaded, settings)
+        train_lorra(loaded, adapter, EIGHT_PAIRS, ChatFormat("plain"))
+        grads.append(
+            [p.grad.clone() for p in adapter.trainable() if p.grad is not None]
+        )
+    assert len(grads[0]) == len(grads[1]) > 0
+    for plain, checkpointed in zip(grads[0], grads[1], strict=True):
+        assert torch.allclose(plain, checkpointed, atol=1e-5)
+    assert any(grad.abs().sum().item() > 0.0 for grad in grads[0])
 
 
 def test_heldout_losses_has_one_float_per_target_layer(
