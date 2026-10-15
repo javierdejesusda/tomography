@@ -1185,7 +1185,7 @@ def _extra_run(out_root: Path, experiment: str, model: str) -> str:
     ],
     ids=["all-parts", "no-reference", "no-steering", "reading-only"],
 )
-def test_run_resolves_the_steering_runs_on_the_paired_models_only(
+def test_run_resolves_every_source_and_model_then_executes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     overrides: dict[str, Any],
