@@ -34,6 +34,7 @@ from tomography.experiments.c4_honesty_control import calibration_texts
 from tomography.experiments.c4_honesty_control import choice_offsets
 from tomography.experiments.c4_honesty_control import difference_reader
 from tomography.experiments.c4_honesty_control import execute
+from tomography.experiments.c4_honesty_control import fitting_rows
 from tomography.experiments.c4_honesty_control import honesty_layers
 from tomography.experiments.c4_honesty_control import honesty_readers
 from tomography.experiments.c4_honesty_control import honesty_stimuli
@@ -495,6 +496,86 @@ def test_the_first_reader_does_not_depend_on_the_number_of_seeds(
     np.testing.assert_array_equal(one.signs, two.signs)
 
 
+def _long_row(split: Split) -> Example:
+    return Example(
+        uid=f"alpaca-{split}-long",
+        text=" ".join(["word"] * 400),
+        label=-1,
+        split=split,
+        meta={"instruction": "Name a long item."},
+    )
+
+
+def test_honesty_readers_drop_the_train_rows_beyond_the_model_positions(
+    tiny_arch: LoadedModel,
+) -> None:
+    result = honesty_readers(
+        tiny_arch,
+        [*_alpaca(), _long_row("train")],
+        (1, 2),
+        n_seeds=2,
+        n_pairs=SPLIT_SIZES["train"],
+        n_eval_pairs=5,
+        method="logistic",
+        seed=0,
+    )
+    assert len(result.readers) == 2
+
+
+def test_honesty_readers_drop_the_val_rows_beyond_the_model_positions(
+    tiny_arch: LoadedModel,
+) -> None:
+    result = honesty_readers(
+        tiny_arch,
+        [*_alpaca(), _long_row("val")],
+        (1, 2),
+        n_seeds=1,
+        n_pairs=6,
+        n_eval_pairs=None,
+        method="logistic",
+        seed=0,
+    )
+    assert len(result.readers) == 1
+
+
+def test_the_readers_do_not_see_the_rows_that_do_not_fit(
+    tiny_arch: LoadedModel,
+) -> None:
+    def readers(rows: Sequence[Example]) -> SweepResult:
+        return honesty_readers(
+            tiny_arch,
+            rows,
+            (1, 2, 3),
+            n_seeds=2,
+            n_pairs=6,
+            n_eval_pairs=5,
+            method="logistic",
+            seed=4,
+        )
+
+    clean = readers(_alpaca())
+    long = readers([*_alpaca(), _long_row("train"), _long_row("val")])
+    np.testing.assert_array_equal(clean.accuracy, long.accuracy)
+    for a, b in zip(clean.readers, long.readers, strict=True):
+        np.testing.assert_array_equal(a.directions, b.directions)
+        np.testing.assert_array_equal(a.means, b.means)
+        np.testing.assert_array_equal(a.signs, b.signs)
+
+
+def test_a_row_that_fills_the_positions_is_kept_unless_a_bos_is_added(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    chat = chat_format_for(tiny_gpt2)
+    rows = [row for row in _alpaca() if row.split == "train"][:3]
+    pairs = honesty_stimuli(rows, chat, n_pairs=None, seed=0)
+    ids = tiny_gpt2.tokenizer(list(pairs.texts), add_special_tokens=False)
+    tiny_gpt2.model.config.max_position_embeddings = max(
+        len(row) for row in ids["input_ids"]
+    )
+    assert fitting_rows(tiny_gpt2, rows, chat, bos="none") == rows
+    assert len(fitting_rows(tiny_gpt2, rows, chat, bos="prepend")) < len(rows)
+
+
 @pytest.mark.parametrize("bos", [None, "none"], ids=["default-bos", "no-bos"])
 def test_difference_reader_points_from_the_untruthful_to_the_truthful_prompt(
     tiny_arch: LoadedModel, bos: BosMode | None
@@ -629,25 +710,37 @@ def _forbid_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
         ({"coeffs": (0.1, 0.2)}, "coeffs"),
         ({"coeffs": (0.0,)}, "coeffs"),
         ({"coeffs": (-0.1, 0.0, 0.1, 0.1)}, "coeffs"),
+        ({"coeffs": (-0.0, 0.0, 0.1)}, "coeffs"),
+        ({"coeffs": (0.0, -0.0)}, "coeffs"),
         ({"alphas": (0.25, 0.5)}, "alphas"),
         ({"alphas": (-0.25, 0.0, 0.25, 0.25)}, "alphas"),
+        ({"alphas": (0.25, 0.0, -0.0)}, "alphas"),
         ({"layers": (0, 1)}, "layers"),
         ({"layers": (1, 4)}, "layers"),
         ({"layers": ()}, "layers"),
         ({"n_seeds": 0}, "n_seeds"),
         ({"n_boot": 0}, "n_boot"),
+        ({"n_calibration": 0}, "n must be"),
+        ({"batch_size": 0}, "batch_size"),
+        ({"op": "projection"}, "projection"),
     ],
     ids=[
         "coeffs-without-zero",
         "coeffs-only-zero",
         "coeffs-repeated",
+        "coeffs-signed-zero-repeated",
+        "coeffs-only-signed-zeros",
         "alphas-without-zero",
         "alphas-repeated",
+        "alphas-signed-zero-repeated",
         "layer-zero",
         "layer-beyond-depth",
         "layers-empty",
         "no-seeds",
         "no-resamples",
+        "no-calibration-texts",
+        "no-batch",
+        "relative-projection",
     ],
 )
 def test_execute_rejects_a_bad_configuration_before_any_scoring(
@@ -756,10 +849,10 @@ def _plant(
             return hit("prompting+1")
         return hit("prompting-1" if UNTRUTHFUL in prompt else "none")
 
-    def dummy(layers: Sequence[int]) -> RepReader:
+    def dummy(layers: Sequence[int], name: str) -> RepReader:
         shape = (len(layers), 4)
         return RepReader.from_arrays(
-            "dummy", layers, np.ones(shape), np.zeros(shape)
+            name, layers, np.ones(shape), np.zeros(shape)
         )
 
     def readers(
@@ -776,14 +869,14 @@ def _plant(
             tuple(layers),
             ("val",),
             accuracy,
-            tuple(dummy(layers) for _ in range(n_seeds)),
+            tuple(dummy(layers, f"reader/{i}") for i in range(n_seeds)),
         )
 
     def difference(
         loaded: LoadedModel, layers: Sequence[int], **kwargs: Any
     ) -> RepReader:
         calls["difference"].append({"layers": tuple(layers), **kwargs})
-        return dummy(layers)
+        return dummy(layers, "difference")
 
     def norms(
         loaded: LoadedModel,
@@ -807,7 +900,9 @@ def _plant(
         reader: RepReader,
         **kwargs: Any,
     ) -> Arm:
-        calls["arms"].append({"settings": settings, **kwargs})
+        calls["arms"].append(
+            {"settings": settings, "reader": reader.method, **kwargs}
+        )
         name = kwargs["name"]
         return Arm(name, lambda prompts: [], _scorer(lambda _: hit(name)))
 
@@ -1106,6 +1201,20 @@ def test_execute_steers_every_vector_arm_the_same_way(
     ]
 
 
+def test_execute_steers_each_arm_with_its_own_vector(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, calls = _run_planted(tmp_path, monkeypatch, tiny_gpt2)
+    assert [(call["name"], call["reader"]) for call in calls["arms"]] == [
+        ("difference/-0.1", "difference"),
+        ("difference/0.1", "difference"),
+        ("reading/0/-0.1", "reader/0"),
+        ("reading/0/0.1", "reader/0"),
+        ("reading/1/-0.1", "reader/1"),
+        ("reading/1/0.1", "reader/1"),
+    ]
+
+
 def test_execute_contrasts_the_truthful_and_untruthful_prompts(
     tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1388,5 +1497,5 @@ def test_c4_on_gpt2_small_pilots_the_layers(tmp_path: Path) -> None:
     table = _read(run_dir, "table")
     for row in table["rows"]:
         print(row)
-    assert len(table["rows"]) == 8
+    assert len(table["rows"]) == 5 + config.n_seeds
     assert all(0.0 <= row[4] <= 1.0 for row in table["rows"])

@@ -326,6 +326,46 @@ def honesty_stimuli(
     )
 
 
+def fitting_rows(
+    loaded: LoadedModel,
+    rows: Sequence[Example],
+    chat: ChatFormat,
+    *,
+    bos: BosMode | None,
+) -> list[Example]:
+    """Keeps the Alpaca rows whose rendered pair fits the model.
+
+    A row renders as two stimuli, one under each pole, and the model cannot
+    read a text of more tokens than it has positions (the BOS counts). One
+    Alpaca row has 1,469 response tokens and would stop a GPT-2 run whenever
+    a draw picked it, so the rows are filtered before any draw: the set a
+    reader draws from depends on the model and never on the seed.
+
+    Args:
+        loaded: The wrapped model.
+        rows: Alpaca rows with the instruction in `meta["instruction"]`.
+        chat: The chat format of the model.
+        bos: BOS policy of the activation reads; None uses the model default.
+
+    Returns:
+        The rows that fit, in their order; all of them when the model does
+        not state its positions.
+    """
+    limit = getattr(loaded.model.config, "max_position_embeddings", None)
+    if limit is None or not rows:
+        return list(rows)
+    mode = loaded.default_bos if bos is None else bos
+    stimuli = honesty_stimuli(rows, chat, n_pairs=None, seed=0)
+    ids = loaded.tokenizer(list(stimuli.texts), add_special_tokens=False)
+    extra = 1 if mode == "prepend" else 0
+    too_long = {
+        uid
+        for uid, tokens in zip(stimuli.uids, ids["input_ids"], strict=True)
+        if len(tokens) + extra > limit
+    }
+    return [row for row in rows if row.uid not in too_long]
+
+
 def honesty_readers(
     loaded: LoadedModel,
     alpaca: Sequence[Example],
@@ -344,7 +384,8 @@ def honesty_readers(
     Reader `i` trains on a draw of the `train` split with seed
     `derive_seed(seed, "train", i)` and is validated on one draw of the `val`
     split, so it depends on its own seed only: a run with one seed returns
-    the reader 0 of a run with several.
+    the reader 0 of a run with several. Rows whose pair has more tokens than
+    the model has positions are dropped from both splits before any draw.
 
     Args:
         loaded: The wrapped model.
@@ -363,8 +404,12 @@ def honesty_readers(
         accuracy is the sanity number of the experiment.
     """
     chat = chat_format_for(loaded)
-    train = [row for row in alpaca if row.split == "train"]
-    val = [row for row in alpaca if row.split == "val"]
+    train = fitting_rows(
+        loaded, [row for row in alpaca if row.split == "train"], chat, bos=bos
+    )
+    val = fitting_rows(
+        loaded, [row for row in alpaca if row.split == "val"], chat, bos=bos
+    )
     train_sets = [
         honesty_stimuli(
             train,
@@ -481,11 +526,31 @@ class Config(SteeringConfig):
 
 def _check_grid(name: str, grid: Sequence[float]) -> None:
     labels = [f"{value:g}" for value in grid]
-    if len(set(labels)) != len(labels):
+    values = {float(value) for value in grid}
+    if len(set(labels)) != len(labels) or len(values) != len(grid):
         raise ValueError(f"{name} repeats a value, got {tuple(grid)}")
-    if 0.0 not in grid or len(grid) < 2:
+    if 0.0 not in values or all(value == 0.0 for value in values):
         raise ValueError(
             f"{name} needs 0.0 and another value, got {tuple(grid)}"
+        )
+
+
+def check_relative_op(config: SteeringConfig) -> None:
+    """Rejects the projection operator with relative coefficients.
+
+    The controller rejects the pair too, but only once the first arm is built,
+    after the readers and the norms.
+
+    Args:
+        config: The experiment settings.
+
+    Raises:
+        ValueError: If `op` is `projection` and `mode` is `relative`.
+    """
+    if config.op == "projection" and config.mode == "relative":
+        raise ValueError(
+            "relative coefficients are not supported for the projection "
+            "operator: its coefficient is dimensionless"
         )
 
 
@@ -504,6 +569,9 @@ def _check_config(
         raise ValueError(f"n_seeds must be >= 1, got {config.n_seeds}")
     if config.n_boot < 1:
         raise ValueError(f"n_boot must be >= 1, got {config.n_boot}")
+    if config.batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {config.batch_size}")
+    check_relative_op(config)
     layers = resolve_layers(config.layers, n_layers)
     select = np.array(
         [question.split in ("train", "val") for question in questions],
@@ -645,10 +713,15 @@ def execute(
 
     Raises:
         ValueError: If a grid lacks 0.0 or another value or repeats one, the
-            layers are outside 1..L, `n_seeds` or `n_boot` is below 1, or
-            there is no selection or no test question.
+            layers are outside 1..L, `n_seeds`, `n_boot`, `batch_size` or
+            `n_calibration` is below 1, the projection operator has relative
+            coefficients, the Alpaca `test` split is empty, or there is no
+            selection or no test question.
     """
     layers, select, test = _check_config(config, questions, loaded.n_layers)
+    texts = calibration_texts(
+        alpaca, config.n_calibration, seed=derive_seed(config.seed, "norms")
+    )
     sweep = honesty_readers(
         loaded,
         alpaca,
@@ -663,13 +736,7 @@ def execute(
     )
     difference = difference_reader(loaded, layers, bos=config.bos)
     norms = mean_residual_norms(
-        loaded,
-        calibration_texts(
-            alpaca, config.n_calibration, seed=derive_seed(config.seed, "norms")
-        ),
-        layers,
-        bos=config.bos,
-        batch_size=config.batch_size,
+        loaded, texts, layers, bos=config.bos, batch_size=config.batch_size
     )
     rows = _arm_scores(
         config, loaded, questions, layers, sweep.readers, difference, norms
