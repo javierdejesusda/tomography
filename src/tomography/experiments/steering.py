@@ -95,7 +95,8 @@ class GenSettings:
         num_samples: Completions per prompt.
         seed: Sampling seed, the same for every arm and coefficient.
         batch_size: Rows per forward pass.
-        bos: BOS policy of generation; None uses the model default.
+        bos: BOS policy of generation and of the arm scoring; None uses the
+            model default.
         score_max_length: Tokens per neutral text in the perplexity.
     """
 
@@ -460,16 +461,28 @@ class Controller(Protocol):
         ...
 
 
-def scoring_bos(loaded: LoadedModel) -> int | None:
+def scoring_bos(loaded: LoadedModel, bos: BosMode | None = None) -> int | None:
     """Returns the BOS id that scoring prepends, if any.
+
+    The policy resolves as in `LoadedModel.encode`, which generation uses, so
+    a steering vector meets the same prompt token in scoring and generation.
 
     Args:
         loaded: The wrapped model.
+        bos: BOS policy; None uses the model default.
 
     Returns:
-        `loaded.bos_id` iff the model default is to prepend a BOS.
+        `loaded.bos_id` iff the resolved policy is to prepend a BOS.
+
+    Raises:
+        ValueError: If the policy is to prepend and the model has no BOS id.
     """
-    return loaded.bos_id if loaded.default_bos == "prepend" else None
+    mode = loaded.default_bos if bos is None else bos
+    if mode != "prepend":
+        return None
+    if loaded.bos_id is None:
+        raise ValueError("bos='prepend' needs a bos id and this model has none")
+    return loaded.bos_id
 
 
 def _build_arm(
@@ -479,7 +492,7 @@ def _build_arm(
     name: str,
     prefix: str,
 ) -> Arm:
-    bos_id = scoring_bos(loaded)
+    bos_id = scoring_bos(loaded, settings.bos)
     greedy = settings.temperature is None
 
     def scoring_context(

@@ -1,6 +1,10 @@
+from collections.abc import Callable
+from collections.abc import Mapping
 from collections.abc import Sequence
+import contextlib
 import dataclasses
 import json
+import math
 from typing import Any
 
 import numpy as np
@@ -25,9 +29,11 @@ from tomography.experiments.steering import plain_arm
 from tomography.experiments.steering import reader_arm
 from tomography.experiments.steering import run_trial
 from tomography.experiments.steering import scoring_bos
+from tomography.hooks import ResidualEdit
 from tomography.hooks import edit_residuals
 from tomography.judges import perplexity
 from tomography.judges import sequence_logprob
+from tomography.model import BosMode
 from tomography.model import LoadedModel
 
 
@@ -535,12 +541,38 @@ def full_length(
     return tiny_arch
 
 
-def test_scoring_bos_follows_the_default_bos(tiny_arch: LoadedModel) -> None:
-    prepending = dataclasses.replace(tiny_arch, default_bos="prepend", bos_id=5)
-    plain = dataclasses.replace(tiny_arch, default_bos="none")
+@pytest.mark.parametrize(
+    ("default", "bos", "expected"),
+    [
+        ("prepend", None, 5),
+        ("none", None, None),
+        ("prepend", "prepend", 5),
+        ("prepend", "none", None),
+        ("none", "prepend", 5),
+        ("none", "none", None),
+    ],
+)
+def test_scoring_bos_resolves_the_policy_like_encode(
+    tiny_arch: LoadedModel,
+    default: BosMode,
+    bos: BosMode | None,
+    expected: int | None,
+) -> None:
+    loaded = dataclasses.replace(tiny_arch, default_bos=default, bos_id=5)
 
-    assert scoring_bos(prepending) == 5
-    assert scoring_bos(plain) is None
+    assert scoring_bos(loaded, bos) == expected
+
+
+@pytest.mark.parametrize(
+    ("default", "bos"), [("prepend", None), ("none", "prepend")]
+)
+def test_scoring_bos_rejects_prepend_without_an_id(
+    tiny_arch: LoadedModel, default: BosMode, bos: BosMode | None
+) -> None:
+    loaded = dataclasses.replace(tiny_arch, default_bos=default, bos_id=None)
+
+    with pytest.raises(ValueError, match="bos id"):
+        scoring_bos(loaded, bos)
 
 
 def test_plain_arm_equals_a_direct_generate_call(
@@ -600,7 +632,7 @@ def test_plain_arm_scores_like_the_judges(tiny_arch: LoadedModel) -> None:
     arm = plain_arm(tiny_arch, SETTINGS)
     assert arm.logprobs is not None
     assert arm.perplexity is not None
-    bos = scoring_bos(tiny_arch)
+    bos = scoring_bos(tiny_arch, SETTINGS.bos)
 
     expected_logprobs = sequence_logprob(
         tiny_arch.model,
@@ -717,31 +749,44 @@ DIFF_SETTINGS = GenSettings(
 )
 
 
-def make_prompt_difference(loaded: LoadedModel) -> PromptDifference:
+def make_prompt_difference(
+    loaded: LoadedModel, bos: BosMode | None = None
+) -> PromptDifference:
     return PromptDifference.from_prompts(
-        loaded, DIFF_POSITIVE, DIFF_NEGATIVE, [1, 2], coeff=5.0
+        loaded, DIFF_POSITIVE, DIFF_NEGATIVE, [1, 2], coeff=5.0, bos=bos
     )
 
 
-def prompt_difference_reference_logprobs(
+def edit_context(
+    loaded: LoadedModel, edits: Mapping[int, ResidualEdit] | None
+) -> contextlib.AbstractContextManager[None]:
+    if edits is None:
+        return contextlib.nullcontext()
+    return edit_residuals(loaded, edits)
+
+
+def reference_logprobs(
     loaded: LoadedModel,
-    diff: PromptDifference,
+    bos: BosMode | None,
     prompts: Sequence[str],
     continuations: Sequence[str],
+    edits: Callable[[int], Mapping[int, ResidualEdit]] | None = None,
 ) -> NDArray[np.float32]:
-    """Scores one row at a time with the edit of generation: j < prompt."""
-    bos = scoring_bos(loaded)
+    """Scores one row at a time; the prompt is encoded as generation does.
+
+    `edits` maps the prompt token count of a row to its residual edits.
+    """
     scores = []
     for prompt, continuation in zip(prompts, continuations, strict=True):
-        head = [] if bos is None else [bos]
-        head += loaded.tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        head = loaded.encode([prompt], bos=bos).input_ids[0].tolist()
         tail = loaded.tokenizer(continuation, add_special_tokens=False)[
             "input_ids"
         ]
         ids = torch.tensor([head + tail])
         mask = torch.ones_like(ids)
         positions = (mask.cumsum(dim=-1) - 1).clamp(min=0)
-        with torch.no_grad(), edit_residuals(loaded, diff.edits(len(head))):
+        row_edits = None if edits is None else edits(len(head))
+        with torch.no_grad(), edit_context(loaded, row_edits):
             logits = loaded.model(
                 input_ids=ids, attention_mask=mask, position_ids=positions
             ).logits
@@ -749,6 +794,32 @@ def prompt_difference_reference_logprobs(
         picked = logp[torch.arange(len(tail)), torch.tensor(tail)]
         scores.append(float(picked.sum()))
     return np.array(scores, dtype=np.float32)
+
+
+def reference_perplexity(
+    loaded: LoadedModel,
+    bos: BosMode | None,
+    texts: Sequence[str],
+    edits: Callable[[], Mapping[int, ResidualEdit]] | None = None,
+) -> float:
+    """Pools the next-token losses of texts encoded as generation does."""
+    total, count = 0.0, 0
+    for text in texts:
+        ids = loaded.encode([text], bos=bos).input_ids
+        mask = torch.ones_like(ids)
+        positions = (mask.cumsum(dim=-1) - 1).clamp(min=0)
+        with (
+            torch.no_grad(),
+            edit_context(loaded, None if edits is None else edits()),
+        ):
+            logits = loaded.model(
+                input_ids=ids, attention_mask=mask, position_ids=positions
+            ).logits
+        logp = logits[0, :-1].float().log_softmax(-1)
+        picked = logp[torch.arange(ids.shape[1] - 1), ids[0, 1:]]
+        total += float(picked.sum())
+        count += picked.numel()
+    return math.exp(-total / count)
 
 
 @pytest.mark.parametrize("prefix", ["", "Be kind. "], ids=["bare", "prefixed"])
@@ -764,11 +835,12 @@ def test_prompt_difference_arm_scores_with_the_edit_of_generation(
     short = tiny_arch.encode([prefix + "Hi"]).lengths[0]
     assert short < k
 
-    expected = prompt_difference_reference_logprobs(
+    expected = reference_logprobs(
         tiny_arch,
-        diff,
+        None,
         [prefix + p for p in DIFF_SCORED_PROMPTS],
         DIFF_SCORED_CONTINUATIONS,
+        diff.edits,
     )
     scored = arm.logprobs(DIFF_SCORED_PROMPTS, DIFF_SCORED_CONTINUATIONS)
 
@@ -779,22 +851,6 @@ def test_prompt_difference_arm_scores_with_the_edit_of_generation(
         atol=1e-3,
     )
     assert hooks_left(tiny_arch) == 0
-
-
-def test_prompt_difference_arm_logprobs_are_not_the_plain_arm_logprobs(
-    tiny_arch: LoadedModel,
-) -> None:
-    arm = edit_arm(
-        tiny_arch, DIFF_SETTINGS, make_prompt_difference(tiny_arch), name="d"
-    )
-    plain = plain_arm(tiny_arch, DIFF_SETTINGS)
-    assert arm.logprobs is not None
-    assert plain.logprobs is not None
-
-    assert not np.array_equal(
-        arm.logprobs(DIFF_SCORED_PROMPTS, DIFF_SCORED_CONTINUATIONS),
-        plain.logprobs(DIFF_SCORED_PROMPTS, DIFF_SCORED_CONTINUATIONS),
-    )
 
 
 def test_prompt_difference_arm_perplexity_edits_the_leading_positions(
@@ -835,6 +891,125 @@ def test_prompt_difference_arm_logprobs_check_their_inputs(
     assert empty.dtype == np.float32
     with pytest.raises(ValueError, match="same length"):
         arm.logprobs(["Hi", "Hi"], [" there"])
+
+
+ARM_KINDS = pytest.mark.parametrize(
+    "kind", ["plain", "reader", "prompt_difference"]
+)
+
+
+def scoring_case(
+    kind: str, loaded: LoadedModel, bos: BosMode | None
+) -> tuple[
+    Arm,
+    Callable[[int], Mapping[int, ResidualEdit]] | None,
+    Callable[[], Mapping[int, ResidualEdit]] | None,
+]:
+    """Builds an arm of a kind with the edits its scoring must run under."""
+    settings = dataclasses.replace(DIFF_SETTINGS, bos=bos)
+    if kind == "plain":
+        return plain_arm(loaded, settings), None, None
+    if kind == "reader":
+        reader = make_controller(loaded, 0.5)
+        return (
+            edit_arm(loaded, settings, reader, name=kind),
+            lambda length: reader.edits(1),
+            lambda: reader.edits(1),
+        )
+    diff = make_prompt_difference(loaded, bos)
+    return edit_arm(loaded, settings, diff, name=kind), diff.edits, diff.edits
+
+
+@ARM_KINDS
+@pytest.mark.parametrize(
+    ("bos", "default"),
+    [("none", "prepend"), ("prepend", "none")],
+    ids=["none_on_a_prepend_model", "prepend_on_a_none_model"],
+)
+def test_scoring_follows_the_bos_of_the_settings_like_generation(
+    tiny_arch: LoadedModel, kind: str, bos: BosMode, default: BosMode
+) -> None:
+    loaded = dataclasses.replace(tiny_arch, default_bos=default)
+    arm, logprob_edits, perplexity_edits = scoring_case(kind, loaded, bos)
+    assert arm.logprobs is not None
+    assert arm.perplexity is not None
+    other = "none" if bos == "prepend" else "prepend"
+
+    expected = reference_logprobs(
+        loaded,
+        bos,
+        DIFF_SCORED_PROMPTS,
+        DIFF_SCORED_CONTINUATIONS,
+        logprob_edits,
+    )
+    elsewhere = reference_logprobs(
+        loaded,
+        other,
+        DIFF_SCORED_PROMPTS,
+        DIFF_SCORED_CONTINUATIONS,
+        logprob_edits,
+    )
+    expected_perplexity = reference_perplexity(
+        loaded, bos, NEUTRAL, perplexity_edits
+    )
+    elsewhere_perplexity = reference_perplexity(
+        loaded, other, NEUTRAL, perplexity_edits
+    )
+
+    assert not np.allclose(expected, elsewhere, atol=1e-3)
+    assert elsewhere_perplexity != pytest.approx(expected_perplexity, rel=1e-3)
+    np.testing.assert_allclose(
+        arm.logprobs(DIFF_SCORED_PROMPTS, DIFF_SCORED_CONTINUATIONS),
+        expected,
+        rtol=1e-4,
+        atol=1e-4,
+    )
+    assert arm.perplexity(NEUTRAL) == pytest.approx(
+        expected_perplexity, rel=1e-4
+    )
+
+
+@pytest.mark.parametrize("kind", ["plain", "reader"])
+@pytest.mark.parametrize(
+    "bos", [None, "prepend"], ids=["model_default", "explicit_default"]
+)
+def test_scoring_at_the_default_bos_is_bit_identical_to_before(
+    tiny_arch: LoadedModel, kind: str, bos: BosMode | None
+) -> None:
+    assert tiny_arch.default_bos == "prepend"
+    settings = dataclasses.replace(DIFF_SETTINGS, bos=bos)
+    reader = make_controller(tiny_arch, 0.5)
+    arm = (
+        plain_arm(tiny_arch, settings)
+        if kind == "plain"
+        else edit_arm(tiny_arch, settings, reader, name=kind)
+    )
+    assert arm.logprobs is not None
+    assert arm.perplexity is not None
+
+    with edit_context(tiny_arch, None if kind == "plain" else reader.edits(1)):
+        expected_logprobs = sequence_logprob(
+            tiny_arch.model,
+            tiny_arch.tokenizer,
+            DIFF_SCORED_PROMPTS,
+            DIFF_SCORED_CONTINUATIONS,
+            batch_size=2,
+            bos_id=tiny_arch.bos_id,
+        )
+        expected_perplexity = perplexity(
+            tiny_arch.model,
+            tiny_arch.tokenizer,
+            NEUTRAL,
+            max_length=settings.score_max_length,
+            batch_size=2,
+            bos_id=tiny_arch.bos_id,
+        )
+
+    assert np.array_equal(
+        arm.logprobs(DIFF_SCORED_PROMPTS, DIFF_SCORED_CONTINUATIONS),
+        expected_logprobs,
+    )
+    assert arm.perplexity(NEUTRAL) == expected_perplexity
 
 
 def test_prefix_is_prepended_to_prompts_and_not_to_the_completion(
@@ -883,7 +1058,7 @@ def test_prefix_arm_scores_given_the_prefixed_prompt_and_has_no_perplexity(
         [prefix + p for p in PROMPTS],
         CONTINUATIONS,
         batch_size=2,
-        bos_id=scoring_bos(tiny_arch),
+        bos_id=scoring_bos(tiny_arch, SETTINGS.bos),
     )
 
     assert np.array_equal(arm.logprobs(PROMPTS, CONTINUATIONS), expected)
