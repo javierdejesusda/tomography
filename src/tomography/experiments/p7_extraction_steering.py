@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike
 from numpy.typing import NDArray
 
 from tomography.analysis import lens_logits
@@ -26,6 +27,7 @@ from tomography.experiments.variants import Variant
 from tomography.experiments.variants import VariantKind
 from tomography.experiments.variants import template_variants
 from tomography.model import LoadedModel
+from tomography.reading.metrics import wilson_ci
 from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
 
@@ -117,7 +119,7 @@ def shift_prompts(
     raise ValueError(f"unknown format {fmt!r}, expected one of {FORMATS}")
 
 
-def spearman(x: Sequence[float], y: Sequence[float]) -> float:
+def spearman(x: ArrayLike, y: ArrayLike) -> float:
     """Computes the Spearman correlation of the finite pairs.
 
     Args:
@@ -207,3 +209,86 @@ def lens_separation(
         for reader in readers
     ]
     return np.stack(rows) if rows else np.empty((0, 0), dtype=np.float64)
+
+
+def _finite_mean(values: NDArray[Any], axis: int) -> NDArray[np.float64]:
+    """Averages the finite entries along `axis`; NaN where none is left."""
+    finite = np.isfinite(values)
+    count = finite.sum(axis=axis)
+    total = np.where(finite, values, 0.0).sum(axis=axis)
+    return np.where(count > 0, total / np.maximum(count, 1), np.nan)
+
+
+def _inversion(
+    read: NDArray[np.float64], slope: NDArray[np.float64], threshold: float
+) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
+    """Marks the units that read well and the ones that steer the wrong way.
+
+    Args:
+        read: Reading accuracy of each unit.
+        slope: Primary-judge dose slope of each unit, of the same shape.
+        threshold: A unit is readable at or above this accuracy.
+
+    Returns:
+        The readable units, and the readable units with a negative slope. A
+        unit without a finite slope is never inverted.
+    """
+    readable = read >= threshold
+    finite = np.isfinite(slope)
+    negative = np.where(finite, slope, 0.0) < 0.0
+    return readable, readable & negative
+
+
+def _inversion_summary(
+    readable: NDArray[np.bool_], inverted: NDArray[np.bool_]
+) -> dict[str, Any]:
+    """Counts the units and gives the inversion rate with its interval."""
+    n_readable = int(readable.sum())
+    n_inverted = int(inverted.sum())
+    summary: dict[str, Any] = {
+        "readable": n_readable,
+        "inverted": n_inverted,
+        "rate": None,
+        "ci": None,
+    }
+    if n_readable:
+        summary["rate"] = n_inverted / n_readable
+        summary["ci"] = list(wilson_ci(n_inverted, n_readable))
+    return summary
+
+
+def _sign_agreement(
+    first: NDArray[np.float64], second: NDArray[np.float64]
+) -> float:
+    """Gives the share of units whose two slopes have the same sign.
+
+    Returns:
+        The share among the units with a finite slope under both judges; NaN
+        when there is none.
+    """
+    both = np.isfinite(first) & np.isfinite(second)
+    if not both.any():
+        return float("nan")
+    return float(np.mean(np.sign(first[both]) == np.sign(second[both])))
+
+
+def _lens_summary(
+    lens: NDArray[np.float64],
+    slope: NDArray[np.float64],
+    sweep: Sequence[int],
+) -> tuple[int, float]:
+    """Compares the lens separation with the dose slope over the sweep layers.
+
+    Args:
+        lens: Separation of shape (S, R): sweep layer, steering reader.
+        slope: Primary-judge dose slope of the same shape.
+        sweep: The S sweep layers.
+
+    Returns:
+        The sweep layer of the largest mean separation (the first on ties),
+        and the Spearman correlation over the layers of the reader means of
+        the separation and of the slope.
+    """
+    mean_lens = lens.mean(axis=1)
+    layer = int(sweep[int(np.argmax(mean_lens))])
+    return layer, spearman(mean_lens, _finite_mean(slope, axis=1))

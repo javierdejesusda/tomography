@@ -8,6 +8,7 @@ import pytest
 
 from tomography.analysis import lens_logits
 from tomography.analysis import pole_separation
+from tomography.experiments import p7_extraction_steering as p7
 from tomography.experiments.a2_logit_lens import lens_params
 from tomography.experiments.a2_logit_lens import pole_ids
 from tomography.experiments.p7_extraction_steering import CHAT_INSTRUCTION
@@ -23,6 +24,7 @@ from tomography.experiments.steering import dose_slope
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import template_variants
 from tomography.model import LoadedModel
+from tomography.reading.metrics import wilson_ci
 from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
 
@@ -288,3 +290,85 @@ def test_lens_separation_needs_a_single_token_word_per_pole(
 ) -> None:
     with pytest.raises(ValueError, match="no pole word is a single token"):
         lens_separation(tiny_arch, [_random_reader(tiny_arch, 0)], words)
+
+
+def test_a_unit_is_readable_from_the_threshold_and_inverted_below_zero() -> (
+    None
+):
+    read = np.array([[0.9, 0.6, 0.59, 0.9]])
+    slope = np.array([[-1.0, -0.1, -2.0, 0.3]])
+    readable, inverted = p7._inversion(read, slope, 0.6)
+    assert readable.tolist() == [[True, True, False, True]]
+    assert inverted.tolist() == [[True, True, False, False]]
+
+
+def test_a_flat_or_missing_slope_is_not_inverted() -> None:
+    read = np.full((1, 3), 0.9)
+    slope = np.array([[0.0, np.nan, 1e-9]])
+    readable, inverted = p7._inversion(read, slope, 0.6)
+    assert readable.all()
+    assert not inverted.any()
+
+
+def test_the_inversion_summary_counts_the_units_with_a_wilson_interval() -> (
+    None
+):
+    readable = np.array([[True] * 8, [False] * 8])
+    inverted = np.zeros_like(readable)
+    inverted[0, :2] = True
+    summary = p7._inversion_summary(readable, inverted)
+    assert summary == {
+        "readable": 8,
+        "inverted": 2,
+        "rate": 0.25,
+        "ci": list(wilson_ci(2, 8)),
+    }
+
+
+def test_the_inversion_summary_has_no_rate_when_nothing_is_readable() -> None:
+    none = np.zeros((2, 3), dtype=bool)
+    assert p7._inversion_summary(none, none) == {
+        "readable": 0,
+        "inverted": 0,
+        "rate": None,
+        "ci": None,
+    }
+
+
+def test_judge_agreement_is_the_share_of_units_with_one_sign_of_slope() -> None:
+    first = np.array([1.0, -1.0, 0.5, np.nan, 2.0])
+    second = np.array([2.0, 3.0, 0.1, 1.0, np.nan])
+    assert p7._sign_agreement(first, second) == pytest.approx(2 / 3)
+    assert p7._sign_agreement(first, first) == 1.0
+
+
+def test_judge_agreement_is_nan_without_a_unit_with_both_slopes() -> None:
+    blank = np.full(3, np.nan)
+    assert np.isnan(p7._sign_agreement(blank, np.ones(3)))
+
+
+def test_the_finite_mean_skips_non_finite_values_without_a_warning() -> None:
+    values = np.array([[1.0, 3.0, np.nan], [np.nan, np.inf, np.nan]])
+    result = p7._finite_mean(values, axis=1)
+    assert result[0] == 2.0
+    assert np.isnan(result[1])
+
+
+def test_the_lens_layer_is_the_sweep_layer_of_the_largest_mean_separation() -> (
+    None
+):
+    lens = np.array([[0.1, 0.3], [0.9, 0.7], [0.3, 0.3]])
+    slope = np.array([[0.0, 0.2], [2.0, 1.0], [1.0, 1.0]])
+    layer, rho = p7._lens_summary(lens, slope, (2, 5, 8))
+    assert layer == 5
+    assert rho == pytest.approx(1.0)
+
+
+def test_the_lens_layer_of_a_tie_is_the_first_and_rho_needs_three_layers() -> (
+    None
+):
+    lens = np.array([[0.5], [0.5]])
+    slope = np.array([[0.2], [0.4]])
+    layer, rho = p7._lens_summary(lens, slope, (2, 5))
+    assert layer == 2
+    assert np.isnan(rho)
