@@ -210,10 +210,11 @@ def execute(
     comes from persona instructions and its sign is set on the persona pairs.
     The in-template sets pair the two persona renderings of a true statement
     and are a sanity check. The layer is chosen on val and reported on test.
-    Writes `curves_transfer` and `curves` (test), one `scan_<i>_<persona>`
-    token by layer scan for each of the first `n_scan_statements` true test
-    statements, and `summary.json`: the transfer evaluation at the top level
-    and the in-template one under `in_template`.
+    Writes `curves_transfer` and `curves` (test), `readers` (the fitted
+    readers of each seed), one `scan_<i>_<persona>` token by layer scan for
+    each of the first `n_scan_statements` true test statements, and
+    `summary.json`: the transfer evaluation at the top level and the
+    in-template one under `in_template`.
 
     Args:
         config: The experiment settings.
@@ -310,6 +311,12 @@ def execute(
             chance=0.5,
             n_layers=loaded.n_layers,
         )
+    run_dir.write_arrays(
+        "readers",
+        layers=np.asarray(result.layers, dtype=np.int64),
+        directions=np.stack([r.directions for r in result.readers]),
+        signs=np.stack([r.signs for r in result.readers]),
+    )
     if config.n_scan_statements > 0:
         _write_scans(
             config, run_dir, loaded, result, test[: config.n_scan_statements]

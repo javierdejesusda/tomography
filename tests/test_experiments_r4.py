@@ -13,6 +13,7 @@ from tomography.datasets.emotions import EMOTIONS
 from tomography.datasets.emotions import load_emotions
 from tomography.datasets.records import Example
 from tomography.experiments import r4_emotions
+from tomography.experiments.aggregate import read_readers
 from tomography.experiments.base import RunDir
 from tomography.experiments.r4_emotions import Config
 from tomography.experiments.r4_emotions import execute
@@ -206,6 +207,30 @@ def test_each_layer_is_chosen_on_val_and_reported_on_test(
         assert entry["ci"] == pytest.approx(
             [curves["lo"][READER, peak], curves["hi"][READER, peak]]
         )
+
+
+def test_execute_writes_the_readers_of_every_emotion(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planted = _plant_sweeps(monkeypatch)
+    config = _config(emotions=SUBSET)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _scenarios())
+    n_layers = tiny_arch.n_layers
+    for emotion, result in zip(SUBSET, planted, strict=True):
+        readers = run_dir.read_arrays(f"readers_{emotion}")
+        assert readers["layers"].dtype == np.int64
+        assert readers["layers"].tolist() == list(range(1, n_layers + 1))
+        assert readers["directions"].shape == (2, n_layers, tiny_arch.d_model)
+        assert readers["signs"].shape == (2, n_layers)
+        np.testing.assert_array_equal(
+            readers["directions"],
+            np.stack([r.directions for r in result.readers]),
+        )
+        np.testing.assert_array_equal(
+            readers["signs"], np.stack([r.signs for r in result.readers])
+        )
+    assert list(read_readers(run_dir)) == [f"r4:{e}" for e in sorted(SUBSET)]
 
 
 def test_the_matrix_compares_the_signed_seed_means_at_the_best_val_layer(

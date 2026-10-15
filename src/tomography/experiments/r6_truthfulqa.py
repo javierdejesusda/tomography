@@ -374,7 +374,8 @@ def execute(
     """Scores TruthfulQA MC1 with the two baselines and the LAT readers.
 
     Writes `table.json` (one row per baseline and per source and layer
-    rule), `curves_<source>` (test accuracy per layer) and `summary.json`.
+    rule), `curves_<source>` (test accuracy per layer), `readers_<source>`
+    (the fitted readers of each seed) and `summary.json`.
     The baselines in the table are scored on the test questions that LAT is
     tested on (all of them unless `n_eval_pairs` keeps a subset), and the
     chance line is drawn for those same questions. The summary reports the
@@ -438,6 +439,12 @@ def execute(
             ylabel="MC1 accuracy",
             chance=chance,
             n_layers=loaded.n_layers,
+        )
+        run_dir.write_arrays(
+            f"readers_{source}",
+            layers=np.asarray(result.layers, dtype=np.int64),
+            directions=np.stack([r.directions for r in result.readers]),
+            signs=np.stack([r.signs for r in result.readers]),
         )
         val = result.per_seed("val")[reader]
         test = result.per_seed("test")[reader]

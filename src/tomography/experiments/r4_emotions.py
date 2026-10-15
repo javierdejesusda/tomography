@@ -161,9 +161,10 @@ def execute(
     """Reads each emotion one-vs-rest and compares the six directions.
 
     Scenarios are split before pairing. Per emotion, the layer is chosen on
-    val and reported on test. Writes `curves_<emotion>` (test), `matrix`
-    (cosine similarity of the directions at the best mean val layer),
-    `embedding` (t-SNE of test scenarios) and `summary.json`.
+    val and reported on test. Writes `curves_<emotion>` (test),
+    `readers_<emotion>` (the fitted readers of each seed), `matrix` (cosine
+    similarity of the directions at the best mean val layer), `embedding`
+    (t-SNE of test scenarios) and `summary.json`.
 
     Args:
         config: The experiment settings.
@@ -233,6 +234,12 @@ def execute(
             stem=f"curves_{emotion}",
             chance=0.5,
             n_layers=loaded.n_layers,
+        )
+        run_dir.write_arrays(
+            f"readers_{emotion}",
+            layers=np.asarray(result.layers, dtype=np.int64),
+            directions=np.stack([r.directions for r in result.readers]),
+            signs=np.stack([r.signs for r in result.readers]),
         )
         results[emotion] = result
         eval_sizes[emotion] = {
