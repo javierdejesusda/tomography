@@ -270,8 +270,16 @@ def test_the_summary_names_the_concepts_the_words_and_the_best_layers(
         "best_lens_layer",
         "center",
         "scaled",
+        "dropped_words",
+        "source_runs",
     }
     assert summary["concepts"] == list(readers)
+    assert summary["dropped_words"] == {
+        "r1": {"+": [], "-": [" bad"]},
+        "r7": {"+": [], "-": []},
+        "r6:arc": {"+": [], "-": []},
+    }
+    assert summary["source_runs"] == dict.fromkeys(readers)
     assert summary["lens_concepts"] == ["r1", "r7", "r6:arc"]
     assert summary["words"]["r1"] == {"+": list(GOOD), "-": list(BAD)}
     assert summary["words"]["r6:arc"] == summary["words"]["r7"]
@@ -397,6 +405,20 @@ def test_negated_directions_with_negative_signs_change_nothing(
         assert _json(runs["flipped"], name) == _json(runs["plain"], name)
 
 
+def test_the_summary_names_the_runs_the_readers_came_from(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    readers = _stored(tmp_path / "src", tiny_arch, None)
+    run_dir = _run_dir(tmp_path / "res")
+    execute(_config(), run_dir, tiny_arch, readers, WORDS)
+    expected = (
+        load_experiment("r1")
+        .config_cls.from_dict({"experiment": "r1", "model": "tiny"})
+        .config_hash()
+    )
+    assert _json(run_dir, "summary")["source_runs"] == {"r1": expected}
+
+
 def test_the_lens_centers_the_directions_of_a_layernorm_model(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
@@ -446,6 +468,7 @@ def test_a_concept_without_words_gets_the_token_table_only(
     assert summary["concepts"] == ["r4:anger"]
     assert summary["lens_concepts"] == []
     assert summary["words"] == {}
+    assert summary["dropped_words"] == {}
     assert summary["random_separation"] == {}
     assert summary["best_lens_layer"] == {}
 

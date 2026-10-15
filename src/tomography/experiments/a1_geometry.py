@@ -64,7 +64,8 @@ def execute(
     the jackknife pseudo-values of that mean, because the per-seed rows share
     pairs and are not independent. The summary holds `chance_abs_cosine`, the
     mean absolute cosine of two random directions, as the reference for
-    `matrix_concepts`.
+    `matrix_concepts`, and `source_runs`, the config hash of the run each
+    concept was read from (None for a set built by hand).
 
     Args:
         config: The experiment settings.
@@ -140,6 +141,9 @@ def execute(
             "agreement_at_layer": {
                 label: float(agreement[i, :, at].mean())
                 for i, label in enumerate(labels)
+            },
+            "source_runs": {
+                label: readers[label].config_hash for label in labels
             },
         },
     )

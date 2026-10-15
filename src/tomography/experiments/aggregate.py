@@ -36,11 +36,13 @@ class ReaderSet:
         vectors: Unit directions of shape (N, K, d): seed, layer, width,
             oriented so that label 1 projects higher.
         n_layers: Depth L of the model the run read.
+        config_hash: Config hash of the run, or None for a set built by hand.
     """
 
     layers: tuple[int, ...]
     vectors: NDArray[np.float64]
     n_layers: int
+    config_hash: str | None = None
 
 
 @dataclass(frozen=True, eq=False)
@@ -285,7 +287,9 @@ def read_readers(run: RunDir) -> dict[str, ReaderSet]:
             )
         suffix = stem.removeprefix("readers").removeprefix("_")
         label = f"{experiment}:{suffix}" if suffix else experiment
-        found[label] = ReaderSet(layers, vectors, n_layers)
+        found[label] = ReaderSet(
+            layers, vectors, n_layers, str(run.meta["config_hash"])
+        )
     return found
 
 

@@ -222,8 +222,10 @@ def test_the_summary_holds_the_reference_and_the_agreement(
         "n_seeds",
         "chance_abs_cosine",
         "agreement_at_layer",
+        "source_runs",
     }
     assert summary["concepts"] == list(readers)
+    assert summary["source_runs"] == dict.fromkeys(readers)
     assert summary["layer"] == 2
     assert summary["chance_abs_cosine"] == pytest.approx(
         math.sqrt(2.0 / (math.pi * D))
@@ -362,6 +364,20 @@ def test_run_reads_the_default_runs_under_its_own_out_root(
     assert summary["concepts"] == list(_sets())
     assert summary["n_seeds"] == 4
     assert (run_dir.path / "matrix_concepts.npz").is_file()
+    hashes = {
+        experiment: load_experiment(experiment)
+        .config_cls.from_dict({"experiment": experiment, "model": MODEL})
+        .config_hash()
+        for experiment in ("r1", "r2", "r3", "r7", "r6")
+    }
+    assert summary["source_runs"] == {
+        "r1": hashes["r1"],
+        "r2": hashes["r2"],
+        "r3": hashes["r3"],
+        "r7": hashes["r7"],
+        "r6:arc": hashes["r6"],
+        "r6:truthfulqa": hashes["r6"],
+    }
 
 
 def test_negated_directions_with_negative_signs_change_nothing(

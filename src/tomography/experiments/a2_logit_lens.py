@@ -108,6 +108,8 @@ class _Poles:
     negative: list[int]
     kept_positive: list[str]
     kept_negative: list[str]
+    dropped_positive: list[str]
+    dropped_negative: list[str]
 
 
 def lens_params(
@@ -168,7 +170,14 @@ def _poles(
             raise ValueError(
                 f"{label}: no pole word is a single token for this tokenizer"
             )
-        poles[label] = _Poles(positive, negative, kept_positive, kept_negative)
+        poles[label] = _Poles(
+            positive,
+            negative,
+            kept_positive,
+            kept_negative,
+            [w for w in source[0] if w not in kept_positive],
+            [w for w in source[1] if w not in kept_negative],
+        )
     return poles
 
 
@@ -187,7 +196,11 @@ def execute(
     compared with random directions in the summary; the lens of a random
     direction does not depend on the layer. Every concept, with or without
     words, gets the highest and lowest tokens of the lens of its mean
-    direction at every layer (`table.json`).
+    direction at every layer (`table.json`, which also holds `n_layers`, the
+    depth of the model). The summary lists, for each concept with words, the
+    pole words the single-token filter kept (`words`) and dropped
+    (`dropped_words`), and for every concept the config hash of the run it
+    was read from (`source_runs`).
 
     Args:
         config: The experiment settings.
@@ -285,6 +298,10 @@ def execute(
                 label: {"+": p.kept_positive, "-": p.kept_negative}
                 for label, p in poles.items()
             },
+            "dropped_words": {
+                label: {"+": p.dropped_positive, "-": p.dropped_negative}
+                for label, p in poles.items()
+            },
             "random_separation": baseline,
             "best_lens_layer": {
                 label: best_layer(values.mean(axis=0), layers)
@@ -292,6 +309,9 @@ def execute(
             },
             "center": center,
             "scaled": scale is not None,
+            "source_runs": {
+                label: readers[label].config_hash for label in labels
+            },
         },
     )
 
