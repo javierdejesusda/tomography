@@ -1540,15 +1540,14 @@ class AdapterPair:
 def adapter_pair(tiny_arch: LoadedModel, tmp_path: Path) -> AdapterPair:
     trained = copy.deepcopy(tiny_arch)
     adapter_run = _train_lorra(trained, tmp_path / "lr1", finish=True)
+    lorra = _real_run(
+        tmp_path / "lorra",
+        copy.deepcopy(tiny_arch),
+        lorra_run=str(adapter_run.path),
+    )
+    plain = _real_run(tmp_path / "plain", copy.deepcopy(tiny_arch))
     return AdapterPair(
-        plain=_real_run(tmp_path / "plain", copy.deepcopy(tiny_arch)),
-        lorra=_real_run(
-            tmp_path / "lorra",
-            copy.deepcopy(tiny_arch),
-            lorra_run=str(adapter_run.path),
-        ),
-        trained=trained,
-        adapter_run=adapter_run,
+        plain=plain, lorra=lorra, trained=trained, adapter_run=adapter_run
     )
 
 
