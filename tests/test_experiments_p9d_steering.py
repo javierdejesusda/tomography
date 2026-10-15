@@ -1075,6 +1075,7 @@ def test_the_hand_check_alternates_between_abstained_and_answered(
     with (run_dir.path / "hand_check.csv").open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     questions = {i.example.uid: i.example.question for i in _items()}
+    known = {i.example.uid: _is_known(i) for i in _items()}
     assert list(rows[0]) == list(CHECK_COLUMNS)
     assert len(rows) == 10 == _summary(run_dir)["hand_check_rows"]
     assert [r["abstained"] for r in rows] == ["1", "0"] * 5
@@ -1085,7 +1086,11 @@ def test_the_hand_check_alternates_between_abstained_and_answered(
         assert row["completion"] in {ABSTAIN, "gold", "other"}
         assert row["abstained"] == str(int(row["completion"] == ABSTAIN))
         assert row["correct"] == str(int(row["completion"] == "gold"))
-        assert row["coeff"] in {"-0.2", "0.2"} or row["completion"] != ABSTAIN
+        if row["completion"] == ABSTAIN:
+            assert (row["coeff"], known[row["uid"]]) in {
+                ("-0.2", True),
+                ("0.2", False),
+            }
 
 
 def test_the_arms_are_built_with_the_config_settings(
