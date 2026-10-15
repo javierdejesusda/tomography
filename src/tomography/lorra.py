@@ -502,7 +502,7 @@ class LorraAdapter:
             .to(device="cpu", dtype=torch.float32, copy=True)
             .numpy()
             for key, tensor in get_peft_model_state_dict(
-                self.peft_model
+                self.peft_model, save_embedding_layers=False
             ).items()
         }
 
@@ -518,7 +518,9 @@ class LorraAdapter:
             ValueError: If the keys differ from the keys of this adapter
                 (the message names a few) or an array has the wrong shape.
         """
-        current = get_peft_model_state_dict(self.peft_model)
+        current = get_peft_model_state_dict(
+            self.peft_model, save_embedding_layers=False
+        )
         missing = sorted(set(current) - set(state))
         unexpected = sorted(set(state) - set(current))
         if missing or unexpected:
@@ -754,7 +756,10 @@ def train_lorra(
     queue: list[int] = []
     losses: list[float] = []
     with torch.random.fork_rng(devices=devices):
-        torch.manual_seed(settings.seed)
+        torch.default_generator.manual_seed(settings.seed)
+        if on_cuda:
+            with torch.cuda.device(devices[0]):
+                torch.cuda.manual_seed(settings.seed)
         for step in range(settings.steps):
             while len(queue) < size:
                 queue.extend(rng.permutation(len(pairs)).tolist())

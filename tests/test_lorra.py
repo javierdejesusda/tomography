@@ -1124,6 +1124,17 @@ def test_train_lorra_leaves_the_callers_random_state_alone(
     assert torch.equal(torch.rand(3), expected)
 
 
+def test_train_lorra_seeds_no_cuda_generator_for_a_cpu_model(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seeded: list[int] = []
+    monkeypatch.setattr(torch.cuda, "manual_seed_all", seeded.append)
+    monkeypatch.setattr(torch.cuda, "manual_seed", seeded.append)
+    adapter = attach_adapter(tiny_arch, _train_settings(steps=2))
+    train_lorra(tiny_arch, adapter, EIGHT_PAIRS, ChatFormat("plain"))
+    assert seeded == []
+
+
 def test_train_lorra_never_touches_the_base_weights(
     tiny_arch: LoadedModel,
 ) -> None:
@@ -1457,6 +1468,15 @@ def test_load_state_does_not_partially_apply_a_bad_state(
         adapter.load_state(state)
     for key, array in adapter.state().items():
         np.testing.assert_array_equal(array, before[key])
+
+
+def test_state_round_trip_never_looks_up_the_base_model(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tiny_arch.model.name_or_path = "org/repo"
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    adapter = attach_adapter(tiny_arch, _settings())
+    adapter.load_state(adapter.state())
 
 
 def _alpaca_pairs(n: int) -> list[Pair]:
