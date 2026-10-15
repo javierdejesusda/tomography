@@ -425,7 +425,9 @@ def _spy_reading_sweep(
 
     def spy(loaded: LoadedModel, train: Any, evals: Any, **kwargs: Any) -> Any:
         result = real(loaded, train, evals, **kwargs)
-        calls.append({"train": train, "evals": evals, **kwargs})
+        calls.append(
+            {"train": train, "evals": evals, "result": result, **kwargs}
+        )
         if planted is None:
             return result
         accuracy = np.full(result.accuracy.shape, 0.5)
@@ -524,6 +526,81 @@ def test_the_window_is_centered_on_the_best_mean_validation_layer(
     assert {a["mode"] for a in arms} == {"relative"}
     assert {a["mask"] for a in arms} == {"response"}
     assert all(a["coeff"] != 0.0 for a in arms)
+
+
+def test_each_emotion_steers_with_its_own_first_readers(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _spy_reading_sweep(monkeypatch)
+    arms: list[dict[str, Any]] = []
+    real = c2_emotion_steering.reader_arm
+
+    def spy(
+        loaded: LoadedModel, settings: Any, reader: Any, **kwargs: Any
+    ) -> Any:
+        arms.append({"reader": reader, **kwargs})
+        return real(loaded, settings, reader, **kwargs)
+
+    monkeypatch.setattr(c2_emotion_steering, "reader_arm", spy)
+    config = _config(n_seeds=3)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _scenarios(), _texts(), _score)
+
+    assert len(calls) == len(STEERED)
+    expected = [
+        (id(call["result"].readers[i]), coeff)
+        for call in calls
+        for i in range(config.n_steer_seeds)
+        for coeff in NONZERO
+    ]
+    assert [(id(a["reader"]), a["coeff"]) for a in arms] == expected
+    assert (
+        len({ident for ident, _ in expected})
+        == len(STEERED) * config.n_steer_seeds
+    )
+
+
+SUBSET = ("surprise", "happiness", "fear")
+
+
+def test_a_subset_that_is_not_a_prefix_reads_its_own_columns(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(emotions=SUBSET)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _scenarios(), _texts(), _score)
+
+    columns = [EMOTIONS.index(emotion) for emotion in SUBSET]
+    assert columns == [5, 0, 3]
+    trials = {t.name: t for t in read_trials(run_dir, "trials")}
+    for stem, offset in (("curves", 0), ("curves_check", 6)):
+        curves = run_dir.read_arrays(stem)
+        for e, emotion in enumerate(SUBSET):
+            column = offset + columns[e]
+            for seed in READERS:
+                expected = [
+                    trials[f"{emotion}/{seed}/-0.2"].mean_score()[column],
+                    trials["none"].mean_score()[column],
+                    trials[f"{emotion}/{seed}/0.2"].mean_score()[column],
+                ]
+                np.testing.assert_allclose(
+                    curves["per_seed"][e, seed], expected, rtol=1e-6
+                )
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    for stem, offset in (("matrix", 0), ("matrix_check", 6)):
+        values = run_dir.read_arrays(stem)["values"]
+        np.testing.assert_allclose(
+            values, _expected_matrix(run_dir, SUBSET, 0.2, offset), atol=1e-6
+        )
+        hits, specificity = diagonal_stats(values[:, columns])
+        assert summary[f"{stem}_hit_rate"] == pytest.approx(hits)
+        assert summary[f"{stem}_specificity"] == pytest.approx(specificity)
+        assert specificity != pytest.approx(
+            diagonal_stats(values[:, :3])[1], abs=1e-9
+        )
 
 
 def test_the_strength_picks_the_coefficient_of_the_matrix(
