@@ -1,5 +1,7 @@
 """Tests for the P7 extraction template versus steering experiment."""
 
+from collections.abc import Iterator
+import contextlib
 import dataclasses
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +23,7 @@ from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.c1_sentiment_steering import draw_prompts
 from tomography.experiments.c1_sentiment_steering import prompt_fragments
+from tomography.experiments.c1_sentiment_steering import slope_layer
 from tomography.experiments.effects import read_trials
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.p7_extraction_steering import CHAT_INSTRUCTION
@@ -708,6 +711,24 @@ TEMPLATE_NAMES = ("paper", "no_template")
 FORMAT_NAMES = ("raw", "chat")
 READERS = (0, 1)
 DOSE_COEFFS = (-0.2, 0.0, 0.2)
+READ = {"paper": (0.9, 0.7, 0.4), "no_template": (0.5, 0.6, 0.8)}
+
+
+@contextlib.contextmanager
+def _planted_reading() -> Iterator[None]:
+    """Replaces the reader accuracy of each template by the `READ` values."""
+    real = p7.reading_sweep
+    planted = iter(READ.values())
+
+    def sweep(loaded: Any, train: Any, evals: Any, **kwargs: Any) -> Any:
+        result = real(loaded, train, evals, **kwargs)
+        accuracy = result.accuracy.copy()
+        accuracy[:, SERIES.index("reader")] = next(planted)
+        return dataclasses.replace(result, accuracy=accuracy)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(p7, "reading_sweep", sweep)
+        yield
 
 
 class Finished(NamedTuple):
@@ -723,12 +744,15 @@ _FINISHED: dict[str, Finished] = {}
 def finished(
     tiny_arch: LoadedModel, tmp_path_factory: pytest.TempPathFactory
 ) -> Finished:
-    """One default tiny run per architecture, shared by the read-only tests."""
+    """One tiny run per architecture, with planted reading accuracies."""
     key = type(tiny_arch.model).__name__
     if key not in _FINISHED:
         config = _config()
         run_dir = RunDir.create(config, out_root=tmp_path_factory.mktemp("p7"))
-        execute(config, run_dir, tiny_arch, _sst2(), _texts(), _score, WORDS)
+        with _planted_reading():
+            execute(
+                config, run_dir, tiny_arch, _sst2(), _texts(), _score, WORDS
+            )
         _FINISHED[key] = Finished(config, run_dir, tiny_arch)
     return _FINISHED[key]
 
@@ -986,3 +1010,220 @@ def test_the_transfer_matrix_is_the_mean_primary_slope_of_the_transfer_trials(
         assert arrays["values"][t, FORMAT_NAMES.index(fmt)] == pytest.approx(
             np.mean(slopes), abs=1e-6
         )
+
+
+def _table(run_dir: RunDir) -> list[dict[str, Any]]:
+    table = run_dir.read_json("table")
+    assert isinstance(table, dict)
+    return [
+        dict(zip(table["columns"], row, strict=True)) for row in table["rows"]
+    ]
+
+
+def _summary(run_dir: RunDir) -> dict[str, Any]:
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    return summary
+
+
+def _units(run_dir: RunDir) -> SimpleNamespace:
+    """The (template, sweep layer, reader) units, rebuilt from the files."""
+    slope = run_dir.read_arrays("curves_slope")["per_seed"]
+    check = run_dir.read_arrays("curves_slope_check")["per_seed"]
+    lens = run_dir.read_arrays("curves_lens")["per_seed"]
+    read = np.array(
+        [
+            [[READ[template][layer - 1]] * 2 for layer in SWEEP]
+            for template in TEMPLATE_NAMES
+        ]
+    )
+    return SimpleNamespace(
+        read=read,
+        slope=slope.transpose(0, 2, 1),
+        check=check.transpose(0, 2, 1),
+        lens=lens.transpose(0, 2, 1),
+    )
+
+
+def test_execute_writes_twenty_files(finished: Finished) -> None:
+    names = sorted(p.name for p in finished.run_dir.path.iterdir())
+    stems = (
+        "curves_read",
+        "curves_lens",
+        "curves_slope",
+        "curves_slope_check",
+        "matrix_transfer",
+        "trials_sweep",
+        "trials_transfer_raw",
+        "trials_transfer_chat",
+    )
+    assert names == sorted(
+        [
+            "config.json",
+            "meta.json",
+            "summary.json",
+            "table.json",
+            *(f"{stem}.{ext}" for stem in stems for ext in ("npz", "json")),
+        ]
+    )
+
+
+def test_the_table_has_one_row_per_template_and_the_documented_columns(
+    finished: Finished,
+) -> None:
+    table = finished.run_dir.read_json("table")
+    assert isinstance(table, dict)
+    assert table["columns"] == [
+        "template",
+        "read_layer",
+        "read_depth",
+        "read_accuracy",
+        "steer_layer",
+        "steer_depth",
+        "steer_slope",
+        "lens_layer",
+        "lens_rho",
+        "n_readable",
+        "n_inverted",
+    ]
+    assert [row["template"] for row in _table(finished.run_dir)] == list(
+        TEMPLATE_NAMES
+    )
+
+
+def test_the_table_reads_each_template_at_its_best_validation_layer(
+    finished: Finished,
+) -> None:
+    rows = _table(finished.run_dir)
+    assert [row["read_layer"] for row in rows] == [1, 3]
+    assert [row["read_depth"] for row in rows] == pytest.approx([1 / 3, 1.0])
+    assert [row["read_accuracy"] for row in rows] == pytest.approx([0.9, 0.8])
+
+
+def test_the_table_steers_each_template_at_its_steepest_sweep_layer(
+    finished: Finished,
+) -> None:
+    trials = _trials(finished.run_dir, "trials_sweep")
+    slopes = finished.run_dir.read_arrays("curves_slope")["per_seed"]
+    for t, (template, row) in enumerate(
+        zip(TEMPLATE_NAMES, _table(finished.run_dir), strict=True)
+    ):
+        primary = np.array(
+            [
+                [
+                    _dose(trials, f"{template}/layer{layer}/{r}", 0)
+                    for r in READERS
+                ]
+                for layer in SWEEP
+            ]
+        )
+        layer = slope_layer(primary, DOSE_COEFFS, SWEEP)
+        assert row["steer_layer"] == layer
+        assert row["steer_depth"] == pytest.approx(layer / 3)
+        assert row["steer_slope"] == pytest.approx(
+            slopes[t, :, SWEEP.index(layer)].mean()
+        )
+
+
+def test_the_table_places_the_lens_peak_and_its_rank_correlation(
+    finished: Finished,
+) -> None:
+    units = _units(finished.run_dir)
+    for t, row in enumerate(_table(finished.run_dir)):
+        lens = units.lens[t].mean(axis=1)
+        assert row["lens_layer"] == SWEEP[int(np.argmax(lens))]
+        assert row["lens_rho"] == pytest.approx(
+            spearman(lens, units.slope[t].mean(axis=1)), nan_ok=True
+        )
+
+
+def test_the_table_counts_the_readable_and_the_inverted_units(
+    finished: Finished,
+) -> None:
+    units = _units(finished.run_dir)
+    readable = units.read >= 0.6
+    inverted = readable & (units.slope < 0)
+    rows = _table(finished.run_dir)
+    assert [row["n_readable"] for row in rows] == [4, 4]
+    assert [row["n_inverted"] for row in rows] == inverted.sum(
+        axis=(1, 2)
+    ).tolist()
+
+
+def test_the_summary_lists_the_run(finished: Finished) -> None:
+    summary = _summary(finished.run_dir)
+    assert list(summary) == [
+        "templates",
+        "formats",
+        "sweep_layers",
+        "n_prompts",
+        "inversion",
+        "read_steer_rho",
+        "lens_steer_rho",
+        "lens_agreement",
+        "layer_gap",
+        "judge_sign_agreement",
+    ]
+    assert summary["templates"] == list(TEMPLATE_NAMES)
+    assert summary["formats"] == list(FORMAT_NAMES)
+    assert summary["sweep_layers"] == list(SWEEP)
+    assert summary["n_prompts"] == 3
+
+
+def test_the_inversion_is_the_readable_units_with_a_negative_slope(
+    finished: Finished,
+) -> None:
+    units = _units(finished.run_dir)
+    readable = units.read >= 0.6
+    inverted = int((readable & (units.slope < 0)).sum())
+    inversion = _summary(finished.run_dir)["inversion"]
+    assert inversion == {
+        "readable": 8,
+        "inverted": inverted,
+        "rate": inverted / 8,
+        "ci": list(wilson_ci(inverted, 8)),
+    }
+    rows = _table(finished.run_dir)
+    assert sum(row["n_readable"] for row in rows) == inversion["readable"]
+    assert sum(row["n_inverted"] for row in rows) == inversion["inverted"]
+
+
+def test_the_correlations_pool_every_unit(finished: Finished) -> None:
+    units = _units(finished.run_dir)
+    summary = _summary(finished.run_dir)
+    assert summary["read_steer_rho"] == pytest.approx(
+        spearman(units.read.ravel(), units.slope.ravel()), nan_ok=True
+    )
+    assert summary["lens_steer_rho"] == pytest.approx(
+        spearman(units.lens.ravel(), units.slope.ravel()), nan_ok=True
+    )
+
+
+def test_the_agreements_and_the_layer_gap_follow_the_table(
+    finished: Finished,
+) -> None:
+    rows = _table(finished.run_dir)
+    summary = _summary(finished.run_dir)
+    assert summary["lens_agreement"] == pytest.approx(
+        np.mean([row["lens_layer"] == row["steer_layer"] for row in rows])
+    )
+    assert summary["layer_gap"] == pytest.approx(
+        np.mean([abs(row["read_depth"] - row["steer_depth"]) for row in rows])
+    )
+    units = _units(finished.run_dir)
+    same = np.sign(units.slope) == np.sign(units.check)
+    assert summary["judge_sign_agreement"] == pytest.approx(same.mean())
+
+
+def test_nothing_readable_leaves_the_inversion_rate_empty(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    with _planted_reading():
+        run_dir = _execute(tiny_arch, tmp_path, read_threshold=0.99)
+    assert _summary(run_dir)["inversion"] == {
+        "readable": 0,
+        "inverted": 0,
+        "rate": None,
+        "ci": None,
+    }
+    assert [row["n_readable"] for row in _table(run_dir)] == [0, 0]
