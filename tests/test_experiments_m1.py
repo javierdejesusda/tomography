@@ -344,8 +344,14 @@ FILES = sorted(
 )
 
 
-def _utility(n_pairs: int = 60) -> list[Example]:
-    """ETHICS-like pairs: label 1 is the more pleasant scenario."""
+def _utility(
+    n_pairs: int = 60, *, shared_openings: bool = False
+) -> list[Example]:
+    """ETHICS-like pairs: label 1 is the more pleasant scenario.
+
+    With `shared_openings` the two scenarios of a test pair open with the
+    same six words, as the real pairs do, and differ only after them.
+    """
     rng = np.random.default_rng(1)
     examples = []
     for i in range(n_pairs):
@@ -353,10 +359,13 @@ def _utility(n_pairs: int = 60) -> list[Example]:
             "train" if i % 5 < 3 else ("val" if i % 5 == 3 else "test")
         )
         for suffix, label in (("a", 1), ("b", 0)):
+            text = " ".join(rng.choice(WORDS, 9))
+            if shared_openings and split == "test":
+                text = f"case {i} opens the same way {suffix} then differs"
             examples.append(
                 Example(
                     uid=f"u{i}:{suffix}",
-                    text=" ".join(rng.choice(WORDS, 9)),
+                    text=text,
                     label=label,
                     split=split,
                     meta={"pair": f"p{i}"},
@@ -878,7 +887,7 @@ def test_every_method_steers_at_the_same_layers_with_calibrated_norms(
     monkeypatch.setattr(m1_methods, "mean_residual_norms", norms_spy)
     monkeypatch.setattr(m1_methods, "sweep_from_activations", sweep_spy)
     config = _config(**SMALL)
-    _execute(tiny_arch, tmp_path, **SMALL)
+    run_dir = _execute(tiny_arch, tmp_path, **SMALL)
 
     held = split_held_out(
         _texts(), n_calibration=8, n_neutral=8, seed=config.seed
@@ -898,6 +907,86 @@ def test_every_method_steers_at_the_same_layers_with_calibrated_norms(
         assert all(
             (a["coeff"], a["mode"], a["mask"]) == (1.0, "absolute", "all")
             for a in projected
+        )
+    steered_arms = [a for a in arms if a["op"] == "linear"]
+    projection_arms = [a for a in arms if a["op"] == "projection"]
+    steered_names = [t.name for t in read_trials(run_dir, "trials")][1:]
+    projection_names = [
+        t.name for t in read_trials(run_dir, "trials_termination")
+    ][1:]
+    for arm, name in zip(steered_arms, steered_names, strict=True):
+        method, seed, coeff = name.split("/")
+        assert arm["reader"] is sweeps[method].readers[int(seed)]
+        assert arm["coeff"] == float(coeff)
+    for arm, name in zip(projection_arms, projection_names, strict=True):
+        method, seed, kind = name.split("/")
+        assert arm["reader"] is sweeps[method].readers[int(seed)]
+        assert kind == "projection"
+
+
+def test_the_readers_train_on_train_and_score_on_test_pairs_only(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    splits: list[set[str]] = []
+    probes: list[tuple[int, int]] = []
+    real_stimuli = m1_methods.build_stimulus_set
+    real_probe = m1_methods.erased_probe_accuracy
+
+    def stimuli_spy(examples: Any, *args: Any, **kwargs: Any) -> Any:
+        splits.append({e.split for e in examples})
+        return real_stimuli(examples, *args, **kwargs)
+
+    def probe_spy(
+        train_h: Any, train_labels: Any, test_h: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        probes.append((train_h.shape[0], test_h.shape[0]))
+        return real_probe(train_h, train_labels, test_h, *args, **kwargs)
+
+    monkeypatch.setattr(m1_methods, "build_stimulus_set", stimuli_spy)
+    monkeypatch.setattr(m1_methods, "erased_probe_accuracy", probe_spy)
+    config = _config(**SMALL)
+
+    _execute(tiny_arch, tmp_path, **SMALL)
+
+    assert splits == [{"train"}] * config.n_seeds + [{"val"}, {"test"}]
+    assert probes == [(2 * config.n_pairs, 2 * N_TEST_PAIRS)] * (
+        len(config.methods) * N_STEER * 2
+    )
+
+
+def test_the_prompts_are_distinct_even_when_pairs_open_alike(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    utility = _utility(shared_openings=True)
+
+    run_dir = _execute(
+        tiny_arch,
+        tmp_path,
+        utility=utility,
+        **{**SMALL, "n_prompts": N_PROMPTS},
+    )
+
+    payload = run_dir.read_json("trials")
+    assert isinstance(payload, dict)
+    assert len(set(payload["prompts"])) == len(payload["prompts"]) == N_PROMPTS
+
+
+def test_the_shortage_of_prompts_counts_the_distinct_openings(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("nothing may run before the checks")
+
+    monkeypatch.setattr(m1_methods, "stimulus_activations", forbidden)
+    utility = _utility(shared_openings=True)
+
+    with pytest.raises(ValueError, match="n_prompts"):
+        _execute(
+            tiny_arch, tmp_path, utility=utility, **{**SMALL, "n_prompts": 13}
         )
 
 
@@ -944,6 +1033,11 @@ def test_the_judge_agreement_counts_the_cells_on_the_same_side_of_half(
         ({"n_steer_seeds": 4}, "n_steer_seeds"),
         ({"layers": (0,)}, "layers"),
         ({"layers": (1, 4)}, "layers"),
+        ({"layers": (1, 1)}, "layers"),
+        ({"n_prompts": 30}, "n_prompts"),
+        ({"methods": ("logistic", "logistic")}, "methods"),
+        ({"coeffs": (-0.1, 0.0, 0.1, 0.1)}, "coeffs"),
+        ({"coeffs": (-0.1, -0.10000001, 0.0, 0.1, 0.10000001)}, "coeffs"),
     ],
     ids=[
         "no-zero",
@@ -953,6 +1047,11 @@ def test_the_judge_agreement_counts_the_cells_on_the_same_side_of_half(
         "too-many-steering-seeds",
         "layer-zero",
         "layer-above-depth",
+        "repeated-layer",
+        "more-prompts-than-scenarios",
+        "repeated-method",
+        "repeated-strength",
+        "strengths-with-one-label",
     ],
 )
 def test_bad_inputs_fail_before_any_forward(
@@ -975,6 +1074,22 @@ def test_bad_inputs_fail_before_any_forward(
 
     with pytest.raises(ValueError, match=message):
         _execute(tiny_arch, tmp_path, **overrides)
+
+
+def test_a_nan_coefficient_fails_before_any_forward(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("nothing may run before the checks")
+
+    monkeypatch.setattr(m1_methods, "stimulus_activations", forbidden)
+    run_dir = RunDir.create(_config(), out_root=tmp_path)
+    config = _config(coeffs=(-0.1, NAN, 0.0, 0.1))
+
+    with pytest.raises(ValueError, match="finite"):
+        execute(config, run_dir, tiny_arch, _utility(), _texts(), stub_score)
 
 
 def test_a_test_split_without_a_complete_pair_fails_before_any_forward(

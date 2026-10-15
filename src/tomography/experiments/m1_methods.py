@@ -431,11 +431,42 @@ def _gap_scenarios(
     return [p[1] for p in complete], [p[0] for p in complete]
 
 
+@dataclass(frozen=True)
+class _Checked:
+    """What `_check` settles before any forward."""
+
+    strengths: tuple[float, ...]
+    control: tuple[int, ...]
+    pleasant: list[str]
+    unpleasant: list[str]
+    scenarios: list[str]
+
+
+def _check_grid(config: Config) -> tuple[float, ...]:
+    """Checks the methods and the coefficients; returns the strengths.
+
+    Trial names and table keys are built from the method and the `:g` label
+    of a coefficient, so both must be distinct.
+    """
+    strengths = paired_strengths(config.coeffs)
+    if len(set(config.methods)) != len(config.methods):
+        raise ValueError(f"methods must not repeat, got {config.methods}")
+    if not all(math.isfinite(c) for c in config.coeffs):
+        raise ValueError(f"coeffs must be finite, got {config.coeffs}")
+    labels = [f"{c:g}" for c in config.coeffs if c != 0.0]
+    if len(set(labels)) != len(labels):
+        raise ValueError(
+            "nonzero coeffs must differ at the six digits of their labels, "
+            f"got {config.coeffs}"
+        )
+    return strengths
+
+
 def _check(
     config: Config, loaded: LoadedModel, utility: Sequence[Example]
-) -> tuple[tuple[float, ...], tuple[int, ...], list[str], list[str]]:
-    """Settles the grid, the layers and the pairs before any forward."""
-    strengths = paired_strengths(config.coeffs)
+) -> _Checked:
+    """Settles the grid, the layers, the prompts and the pairs."""
+    strengths = _check_grid(config)
     if not 1 <= config.n_steer_seeds <= config.n_seeds:
         raise ValueError(
             f"n_steer_seeds must be in 1..n_seeds={config.n_seeds}, got "
@@ -451,10 +482,21 @@ def _check(
         raise ValueError(
             f"control layers {outside} are outside 1..{loaded.n_layers}"
         )
-    pleasant, unpleasant = _gap_scenarios(
-        _part(utility, "test"), config.n_termination
+    if len(set(control)) != len(control):
+        raise ValueError(f"control layers must not repeat, got {control}")
+    test_rows = _part(utility, "test")
+    scenarios = list(
+        dict.fromkeys(
+            truncate_scenario(e.text, config.truncate_words) for e in test_rows
+        )
     )
-    return strengths, control, pleasant, unpleasant
+    if len(scenarios) < config.n_prompts:
+        raise ValueError(
+            f"n_prompts={config.n_prompts} exceeds the {len(scenarios)} "
+            "distinct truncated test scenarios"
+        )
+    pleasant, unpleasant = _gap_scenarios(test_rows, config.n_termination)
+    return _Checked(strengths, control, pleasant, unpleasant, scenarios)
 
 
 def _read(
@@ -545,15 +587,12 @@ def _read(
     return _Reading(train, evals["test"], sweeps, rows)
 
 
-def _prompts(config: Config, test_rows: Sequence[Example]) -> list[str]:
-    """Picks the test scenarios and cuts them to their first words."""
+def _prompts(config: Config, scenarios: Sequence[str]) -> list[str]:
+    """Picks `n_prompts` of the distinct truncated test scenarios."""
     order = np.random.default_rng(
         derive_seed(config.seed, "prompts")
-    ).permutation(len(test_rows))
-    return [
-        truncate_scenario(test_rows[int(k)].text, config.truncate_words)
-        for k in order[: config.n_prompts]
-    ]
+    ).permutation(len(scenarios))
+    return [scenarios[int(k)] for k in order[: config.n_prompts]]
 
 
 def _rate_interval(result: Tally) -> tuple[float, float]:
@@ -805,7 +844,8 @@ def execute(
 
     Manipulation: the first `config.n_steer_seeds` readers of each method
     steer the continuation of `config.n_prompts` test scenarios cut to
-    `config.truncate_words` words, at the same control layers for every
+    `config.truncate_words` words (pairs often open alike, so the cuts are
+    deduplicated before the draw), at the same control layers for every
     method (so depth is not a confound) and with coefficients relative to
     the mean residual norm of held-out text. A prompt is a success for a
     strength when its sentiment under `+s` is strictly above that under `-s`;
@@ -843,12 +883,17 @@ def execute(
             check judge.
 
     Raises:
-        ValueError: If `config.coeffs` is not a symmetric grid with 0.0,
-            `config.n_steer_seeds` is outside `1..config.n_seeds`, a control
-            layer is outside `1..L`, or no test pair has both scenarios
-            (all checked before any forward), or an input is invalid.
+        ValueError: If `config.coeffs` is not a symmetric grid with 0.0 of
+            finite values whose nonzero labels are distinct, `config.methods`
+            or the control layers repeat, `config.n_steer_seeds` is outside
+            `1..config.n_seeds`, a control layer is outside `1..L`, fewer
+            distinct truncated test scenarios than `config.n_prompts`
+            remain, or no test pair has both scenarios (all checked before
+            any forward), or an input is invalid.
     """
-    strengths, control, pleasant, unpleasant = _check(config, loaded, utility)
+    checked = _check(config, loaded, utility)
+    strengths, control = checked.strengths, checked.control
+    pleasant, unpleasant = checked.pleasant, checked.unpleasant
     held = split_held_out(
         texts,
         n_calibration=config.n_calibration,
@@ -866,7 +911,7 @@ def execute(
     ctx = _Steering(
         config, loaded, GenSettings.from_config(config), score, control, norms
     )
-    prompts = _prompts(config, _part(utility, "test"))
+    prompts = _prompts(config, checked.scenarios)
     none = run_trial(
         plain_arm(loaded, ctx.settings, name="none"),
         prompts,
