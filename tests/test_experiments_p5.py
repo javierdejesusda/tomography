@@ -185,6 +185,12 @@ def test_plain_stimuli_pair_true_against_false_statements() -> None:
     assert stimuli.labels.shape == (8,)
     for group in stimuli.groups:
         assert sorted(stimuli.labels[group]) == [0, 1]
+    source = {e.uid: e for e in statements}
+    for text, label, uid in zip(
+        stimuli.texts, stimuli.labels, stimuli.uids, strict=True
+    ):
+        assert label == source[uid].label
+        assert text == source[uid].text
 
 
 def test_plain_stimuli_cap_the_pairs_and_pass_none_through() -> None:
@@ -450,6 +456,30 @@ def test_the_readers_files_use_the_reading_layout(
         assert set(np.unique(readers["signs"])) <= {-1.0, 1.0}
 
 
+def test_the_readers_files_hold_the_fitted_readers(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    results: list[SweepResult] = []
+    real = p5_persona_wording.sweep_from_activations
+
+    def spy(*args: Any, **kwargs: Any) -> SweepResult:
+        result = real(*args, **kwargs)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(p5_persona_wording, "sweep_from_activations", spy)
+    conditions = ("paper", "synonym_0")
+    run_dir = _execute(tiny_arch, tmp_path, conditions=conditions)
+    assert len(results) == len(conditions)
+    for condition, result in zip(conditions, results, strict=True):
+        saved = run_dir.read_arrays(f"readers_{condition}")
+        directions = np.stack([r.directions for r in result.readers])
+        signs = np.stack([r.signs for r in result.readers])
+        assert saved["layers"].tolist() == list(result.layers)
+        np.testing.assert_array_equal(saved["directions"], directions)
+        np.testing.assert_array_equal(saved["signs"], signs)
+
+
 def test_the_cosine_curves_compare_each_reader_with_the_paper_reader(
     ran: RunDir, tiny_arch: LoadedModel
 ) -> None:
@@ -642,7 +672,7 @@ def test_the_conditions_draw_their_stimuli_per_seed_and_split(
     calls = _record_conditions(monkeypatch)
     config = _config()
     _execute(tiny_arch, tmp_path)
-    expected = []
+    expected: list[tuple[str, bool, int, int | None, set[str]]] = []
     for condition in config.conditions:
         expected += [
             (
@@ -700,6 +730,29 @@ def test_a_none_evaluation_size_takes_every_pair(
     calls = _record_conditions(monkeypatch)
     _execute(tiny_arch, tmp_path, n_eval_pairs=None)
     assert {c[3] for c in calls if not c[1]} == {None}
+
+
+def test_the_in_distribution_sets_are_capped_at_their_own_split(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts = (
+        _statements(count=12, splits=("train",))
+        + _statements(count=5, splits=("val",))
+        + _statements(count=7, splits=("test",))
+    )
+    calls = _record_conditions(monkeypatch)
+    _execute(
+        tiny_arch,
+        tmp_path,
+        facts=facts,
+        conditions=("paper",),
+        n_eval_pairs=256,
+    )
+    sizes = {next(iter(c[4])): c[3] for c in calls if not c[1]}
+    assert sizes == {"val": 5, "test": 7}
+    for c in calls:
+        if not c[1]:
+            assert c[5].groups.shape[0] == c[3]
 
 
 def _expected_positions(config: Config) -> list[str]:
