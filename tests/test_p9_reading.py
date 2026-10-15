@@ -941,7 +941,8 @@ def test_the_cosines_use_the_signed_directions(
 
     n_types = len(names)
     first, second = fitted[-2 * n_types : -n_types], fitted[-n_types:]
-    assert any((r.signs == -1).any() for r in (*first, *second))
+    for half in (first, second):
+        assert any((r.signs == -1).any() for r in half)
     for k in range(len(LAYERS)):
         a = np.stack([r.directions[k] * r.signs[k] for r in first])
         b = np.stack([r.directions[k] * r.signs[k] for r in second])
