@@ -981,6 +981,14 @@ def test_every_draw_is_a_fit_with_a_seed_derived_from_the_run_seed(
                         reader, planted.acts, planted.pools[name], split
                     ),  # type: ignore[arg-type]
                 )
+            if m == 0:
+                for u, other in enumerate(planted.cube.types):
+                    np.testing.assert_allclose(
+                        planted.cube.transfer[s, :, t, u],
+                        type_auroc(
+                            reader, planted.acts, planted.pools[other], "test"
+                        ),
+                    )
 
 
 def test_the_draws_differ_and_the_cube_is_reproducible(

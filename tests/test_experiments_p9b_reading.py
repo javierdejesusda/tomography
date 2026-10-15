@@ -29,10 +29,13 @@ from tomography.p9.pool import LabeledItem
 from tomography.p9.pool import pool_records
 from tomography.p9.reading import READING_METHODS
 from tomography.p9.reading import ItemActivations
+from tomography.p9.reading import ReadingCube
 from tomography.p9.reading import collect_item_activations
 from tomography.p9.reading import p9_template
+from tomography.p9.reading import reading_cube
 from tomography.p9.unknowns import UNKNOWN_TYPES
 from tomography.p9.unknowns import type_pools
+from tomography.reading.reader import RepReader
 
 SPLITS: tuple[Split, ...] = ("train", "train", "train", "val", "test")
 LABELS: tuple[Label, ...] = (
@@ -404,6 +407,39 @@ def test_the_arrays_have_the_documented_shapes(
     assert run_dir.read_json("readers") == {"types": USABLE}
 
 
+def test_the_saved_readers_score_like_the_fitted_ones(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cubes: list[ReadingCube] = []
+
+    def spy(*args: Any, **kw: Any) -> ReadingCube:
+        cubes.append(reading_cube(*args, **kw))
+        return cubes[-1]
+
+    monkeypatch.setattr(p9b_reading, "reading_cube", spy)
+
+    run_dir = _execute(tiny_arch, tmp_path)
+
+    saved = run_dir.read_arrays("readers")
+    (cube,) = cubes
+    h = np.random.default_rng(0).standard_normal(
+        (len(saved["layers"]), 6, saved["directions"].shape[-1])
+    )
+    for t, name in enumerate(cube.types):
+        rebuilt = RepReader.from_arrays(
+            "logistic",
+            saved["layers"].tolist(),
+            saved["directions"][t],
+            saved["means"][t],
+            saved["signs"][t],
+        )
+        np.testing.assert_allclose(
+            rebuilt.score(h), cube.readers[name].score(h), atol=1e-5
+        )
+
+
 def test_each_contrast_has_a_curve_file_of_the_methods(
     tiny_arch: LoadedModel, default_run: RunDir
 ) -> None:
@@ -604,6 +640,26 @@ def test_a_layer_that_is_not_read_is_an_error(
 ) -> None:
     with pytest.raises(ValueError, match="layer 3"):
         _execute(tiny_arch, tmp_path, layers=(1, 2), layer=3)
+
+
+def test_the_layer_is_chosen_on_the_validation_split(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def peaked(*args: Any, **kw: Any) -> ReadingCube:
+        cube = reading_cube(*args, **kw)
+        val = np.full_like(cube.val, 0.5)
+        val[..., 0] = 0.9
+        test = np.full_like(cube.test, 0.5)
+        test[..., -1] = 0.9
+        return dataclasses.replace(cube, val=val, test=test)
+
+    monkeypatch.setattr(p9b_reading, "reading_cube", peaked)
+
+    run_dir = _execute(tiny_arch, tmp_path)
+
+    assert _summary(run_dir)["layer"] == 1
 
 
 def test_types_restricts_the_contrasts(
