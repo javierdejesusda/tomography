@@ -12,8 +12,9 @@ that record their code state and library versions; and both architectures behind
 
 Status: research code under active development. `main` ships the framework described below and the
 experiments listed under [Running experiments](#running-experiments): the reading experiments (R1 to R7 and
-P1 to P5), the steering and control experiments (C1, C2, C4, C5, M1 and the LoRRA adapter LR1), two analyses of
-finished runs (A1 and A2) and P9a to P9d, a study of known versus unknown questions. It reports no results.
+P1 to P5), the steering and control experiments (C1, C2, C4, C5, M1 and the LoRRA adapter LR1), four analyses of
+finished runs (A1, A2, P6 and P8) and P9a to P9d, a study of known versus unknown questions. It reports no
+results.
 
 ## How it fits together
 
@@ -266,7 +267,7 @@ trials and their side effects in [`experiments/steering.py`](src/tomography/expe
 ### Experiments on main
 
 Each id is the argument of `tomography run`, for example `tomography run c1`. Every experiment defaults to
-`gpt2` except `lr1` and `p9d`, which default to the post-trained `qwen3-1.7b`; `--model` selects another
+`gpt2` except `lr1`, `p8` and `p9d`, which default to the post-trained `qwen3-1.7b`; `--model` selects another
 checkpoint key. Fields listed with a default can be changed with `--set KEY=VALUE`.
 
 - `r1` ([`r1_sentiment.py`](src/tomography/experiments/r1_sentiment.py)): sentiment. Positive versus negative
@@ -340,8 +341,8 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   against false statements at the token mean; accuracies are raw, so a reader whose first persona aligns with
   false statements scores below 0.5. `got_subsets` are scored on their Geometry of Truth test splits.
   `position` is `response`, `method` `logistic`, `n_eval_pairs` 256 and `n_boot` 2000. It writes `summary`,
-  `table` and `readers_<condition>`; the plot draws `curves_<set>` and a persona scatter of each condition's
-  in-distribution accuracy against its facts accuracy.
+  `table` and `readers_<condition>`; the plot draws `curves_<set>`, `curves_cosine` and a persona scatter of
+  each condition's in-distribution accuracy against its facts accuracy.
 - `c1` ([`c1_sentiment_steering.py`](src/tomography/experiments/c1_sentiment_steering.py)): steering the
   sentiment of GPT-2 text with a reading vector fitted on SST-2 as in `r1`. A layer sweep (`sweep_layers`, the
   model's default sweep when `None`) on one prompt list chooses where to steer; the operators in `ops`
@@ -358,8 +359,8 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   `emotion-secondary`; score columns 0 to 5 and 6 to 11). `emotions` defaults to the six of `EMOTIONS`,
   `strength` to the largest of `coeffs` (it must be positive and one of them), `window` to 3, `n_seeds` to 10,
   `n_steer_seeds` to 3, `n_pairs` to 64, `n_eval_pairs` to every pair and `truncate_words` to 4; the shared
-  steering fields are those of `c1`. It writes `summary`, `table` and per-stem files; the plot draws `curves`,
-  `curves_check`, `matrix` and `matrix_check`.
+  steering fields are those of `c1`. It writes `summary`, `table`, `trials`, `curves`, `curves_check`, `matrix`
+  and `matrix_check`; the plot draws the last four.
 - `m1` ([`m1_methods.py`](src/tomography/experiments/m1_methods.py)): the six direction finders (`methods`)
   compared on utility from ETHICS in three tasks: correlation (does the direction read held-out pairs),
   manipulation (does steering along it change the sentiment of the continuation of a truncated scenario) and
@@ -367,7 +368,8 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   are those of `c1`. Defaults: `n_seeds` 10, `n_steer_seeds` 3, `n_pairs` 64, `n_eval_pairs` every pair,
   `preprocess` `center`, `position` `last`, `truncate_words` 6, `n_termination` 100 test pairs, `n_prompts`
   250 and `num_samples` 1; `layers` is the model's default control layers when `None`. It writes `summary`,
-  `table` and `table_seeds`; the plot draws the correlation and success curves.
+  `table`, `table_seeds`, `trials` and `trials_termination`; the plot draws the correlation and success
+  curves.
 - `c4` ([`c4_honesty_control.py`](src/tomography/experiments/c4_honesty_control.py)): the honesty control of
   Table 2 on TruthfulQA MC1. The arms are scored, not generated: the plain model, a prompting baseline, the
   prompt difference, a reading vector from Alpaca stimuli and a contrast vector. Each vector arm picks its
@@ -375,16 +377,17 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   paired bootstrap (`n_boot`, 2000). Defaults: `method` `logistic`, `n_seeds` 10, `n_pairs` 128, `n_eval_pairs`
   128, `coeffs` -0.2 to 0.2 (reading and difference arms, relative to the mean residual norm) and `alphas`
   -0.5 to 0.5 (contrast arm). With `--set lorra_run=<LR1 run directory>` the adapter of a finished `lr1` run
-  (same model) is scored as one more arm: this is the LoRRA honesty control. It writes `scores`, `summary` and
-  `table`; the plot draws `curves_reading`, `curves_difference`, `curves_contrast` and `mc1_arms`.
+  is scored as one more arm: this is the LoRRA honesty control. `c4` must run on the model of the `lr1` run
+  (`--model qwen3-1.7b` unless `lr1` was given another). It writes `scores`, `summary` and `table`; the plot
+  draws `curves_reading`, `curves_difference`, `curves_contrast` and `mc1_arms`.
 - `c5` ([`c5_gallery.py`](src/tomography/experiments/c5_gallery.py)): the galleries of Figs. 10 and 17. The lie
   gallery asks `n_pool` (200) TriviaQA questions under the plain model and under the honesty reader of `c4`
   steered toward and away from honesty (`strength`, 0.1). The emotion galleries read the completions of a
   finished `c2` run (`--set c2_run=<C2 run directory>`; without it there are none). Each gallery shows the
   first `n_show` (4) rows next to rows chosen because they show the effect, so a reader can tell how much the
   choice flatters. Other defaults: `method` `logistic`, `n_pairs` 128, `n_eval_pairs` 128, `max_new_tokens` 24
-  and `num_samples` 1. It writes `summary` and `table`; the plot writes `gallery.md`, markdown tables rather
-  than a figure.
+  and `num_samples` 1. It writes `summary`, `table` and `trials`; the plot writes `gallery.md`, markdown
+  tables rather than a figure.
 - `lr1` ([`lr1_lorra.py`](src/tomography/experiments/lr1_lorra.py)): trains one LoRRA adapter (low-rank
   representation adaptation, Algorithm 1 of the paper) on Alpaca pairs for the post-trained `qwen3-1.7b`, and
   records its loss curve and its held-out loss. It evaluates nothing about honesty: `c4` scores the adapter
@@ -392,7 +395,8 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   `dropout` 0.05, `lr` 0.0003, `batch_size` 16, `steps` 70, `loss` `mean_norm` (the reference implementation;
   `sum_squared` is the paper's), `max_prompt_tokens` 256, `max_response_tokens` 64 and `n_heldout` 64. The
   control texts are "Give a truthful answer." and "Give an untruthful answer.". It writes `adapter`,
-  `summary` and `table`; the plot draws the training loss curve.
+  `curves` (the training loss by step), `summary` and `table` (the held-out loss before and after training,
+  per layer); the plot draws the training loss curve.
 - `a1` ([`a1_geometry.py`](src/tomography/experiments/a1_geometry.py)): the geometry of the reading directions
   across layers, seeds and concepts. It loads no model and reads no activations: it reads the `readers*.npz`
   files of finished runs under its own `--out` root, the default run on `model` of each experiment in
@@ -406,6 +410,39 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   tokenizer. Defaults: `top_k` 10 tokens per pole, layer and concept, `n_random` 100 random directions as the
   baseline and `n_boot` 2000. It writes `summary` and `table`; the plot draws `curves_lens` and the token
   tables `lens_tokens`.
+- `p6` ([`p6_scale.py`](src/tomography/experiments/p6_scale.py)): whether the reading changes with model size,
+  across the GPT-2 sizes. It loads no model and reads the finished default runs under its own `--out` root, as
+  in `a1`: the `reader` series of the reading experiments in `sources` (`r1`, `r2`, `r3`, `r5`, `r7`) and, for
+  the dose-response half, the `steering_source` (`c1`, or `None` for the reading half only), on every key of
+  `models` (the four GPT-2 sizes; 2 to 8 keys in size order, with `model` one of them). `extra_runs` names
+  finished runs that replace a default run. The parameter counts come from the pinned configs of the
+  checkpoints and no weights are read. Each reading run keeps its own layer rule, chosen on the validation
+  curves when the run writes them and reported on the test curves, so a larger model, with more layers to take
+  a maximum over, does not gain from choosing and reporting on one split. `n_boot` is 2000. It writes
+  `curves_<source>_<model>`, `table` (per source and model: the best layer, its relative depth, the split it
+  was chosen on and the mean accuracy of the seeds with a percentile bootstrap interval), `table_steering`
+  (the mean dose slope of the readers of each model and the range over them) and `summary`, whose
+  `accuracy_per_decade` is the least-squares slope of the best accuracy on log10 of the parameter count. The
+  plot draws `scale_depth`, the reader curves of every model on a relative depth axis with one panel per
+  source, and `scale_best`, the best accuracy, the best relative depth and the dose slope against the
+  parameter count on a log axis.
+- `p8` ([`p8_tuning.py`](src/tomography/experiments/p8_tuning.py)): whether instruction tuning changes the
+  reading, on the Qwen3 pairs. It loads no model and reads finished default runs, as in `p6`.
+  `base_models` (`qwen3-1.7b-base`, `qwen3-0.6b-base`) are paired by position with `tuned_models`
+  (`qwen3-1.7b`, `qwen3-0.6b`), `model` is one of the tuned models, and `reference` (`gpt2`, or `None`) is a
+  pure base model shown beside the pairs. The runs read are those of `concept_sources` (`r1`, `r2`, `r3`,
+  `r7`) and `function_sources` (`r5`, the persona templates) and the `template_source` (`p1`, read on
+  `template_task`, `sentiment`) on every model, and the `steering_source` (`c1`) on the paired models only,
+  since the reference is not steered (either source can be `None` to leave out its part); `extra_runs` and
+  `n_boot` (2000) are as in `p6`. The seed is the paired unit: seed `i` draws the same stimuli on a base
+  model and on its tuned pair, so the per-seed difference removes the variation of the stimuli. It writes
+  `curves_<source>_<model>`, `table` (per pair and source: the best accuracy of the base and the tuned model,
+  their mean per-seed difference with a percentile bootstrap interval, and the layers as depths),
+  `table_reference`, `matrix_templates` (accuracy by template variant), `curves_dose_<tuned>` and `summary`.
+  The summary holds the `function_gap` of each tuned model (the mean gain of the function sources minus that
+  of the concept sources, with an interval), the spread of the reading across the template variants of each
+  model and its change from base to tuned, and the dose slopes. The plot draws `tuning_depth`,
+  `tuning_pairs`, `matrix_templates` and the dose curves.
 - `p9a` ([`p9a_labels.py`](src/tomography/experiments/p9a_labels.py)): the labeling step of the known versus
   unknown study. It fits no reader. It builds a pool of closed-book questions (PopQA, SyntHal, KUQ, FalseQA,
   TriviaQA and NQ-open questions, fictional counterparts of real items, and award winners and unknowable
@@ -448,8 +485,8 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   relative to the mean residual norm), against `n_random` (3) random directions of the same norm. A
   post-trained checkpoint can abstain, so `behavior` `auto` measures abstention on unknown questions, false
   refusals on known ones, coverage and the wrong answers among the answered; a base model does not abstain,
-  so it measures the shift of the answer probability and of the entropy of the next token. It runs only for a
-  model the `p9a` gate admits and only on contrasts of known against unknown questions (`eval_types`:
+  so it measures the shift of the answer log-probability and of the entropy of the next token. It runs only
+  for a model the `p9a` gate admits and only on contrasts of known against unknown questions (`eval_types`:
   `obscure_real`, `fictional_generated`, `unknowable_detail` and `false_premise`; `post_cutoff` can be named).
   It needs `labels_run` and the `n_shots` of the labels, and defaults to `qwen3-1.7b`, with `n_pairs` 64,
   `n_prompts` 50, `max_new_tokens` 24, greedy decoding and `n_boot` 1000. It writes `table`, `summary`, the
@@ -463,13 +500,13 @@ only with at least `min_known` (100) guess-adjusted known items. The label runs 
 GPU with the CUDA caching allocator capped at 0.8 of the device memory
 (`torch.cuda.set_per_process_memory_fraction(0.8)` before the run), so that they do not spill into shared
 system memory; the cap changes memory use, not the outputs. Batch sizes are config fields
-(`--set batch_size=N`): 8 by default, and 3 for `gpt2-large` and 4 for `gpt2-xl` in these runs. As a
-reporting rule, a `p9b` reader AUROC is always shown next to the surface baselines named in
-`SURFACE_BASELINES` of `tomography.p9.reading`: `("text_word", "text_char", "popularity")`. `text_word` and
-`text_char` are classifiers on the word and the character n-grams of the question, fitted on all the train
-items of the contrast and scored on the exact test items of the reader. `popularity` is the AUROC of the
-popularity of the subject on those items, and is null unless every test item on both sides has an integer
-popularity.
+(`--set batch_size=N`) and, because sampling is seeded per chunk of prompts, they define the run: 8 by
+default, and 3 for `gpt2-large` and 4 for `gpt2-xl` in these runs. As a reporting rule, a `p9b` reader AUROC
+is always shown next to the surface baselines named in `SURFACE_BASELINES` of `tomography.p9.reading`:
+`("text_word", "text_char", "popularity")`. `text_word` and `text_char` are classifiers on the word and the
+character n-grams of the question, fitted on all the train items of the contrast and scored on the exact
+test items of the reader. `popularity` is the AUROC of the popularity of the subject on those items, and is
+null unless every test item on both sides has an integer popularity.
 
 The reading experiments (`r1` to `r7` and `p1` to `p5`) share `ReadingConfig`
 ([`experiments/sweep.py`](src/tomography/experiments/sweep.py)): `n_seeds` training sets (10; 15 for `r6`, 20
@@ -561,8 +598,8 @@ src/tomography/
                    risk.py (error predictors, risk-coverage), behavior.py (abstention and shift)
   experiments/     base.py (configs, run dirs, seeding), sweep.py, intervals.py, steering.py, effects.py,
                    matrices.py, variants.py, aggregate.py, and one module per experiment: r1 to r7, p1 to
-                   p5 (reading), c1, c2, c4, c5, m1 (steering and control), lr1 (LoRRA), a1, a2 (analyses)
-                   and p9a to p9d (known versus unknown)
+                   p5 (reading), c1, c2, c4, c5, m1 (steering and control), lr1 (LoRRA), a1, a2, p6, p8
+                   (analyses of finished runs) and p9a to p9d (known versus unknown)
   viz/             figure style, layer curves, token scans, matrices and embeddings
   cli.py           the tomography command (also python -m tomography)
 tests/             unit tests, roughly one file per module
