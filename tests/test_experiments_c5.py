@@ -953,6 +953,22 @@ def test_execute_is_deterministic(
     assert first.read_json("trials") == second.read_json("trials")
 
 
+def test_execute_survives_an_alpaca_row_beyond_the_model_positions(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    long = Example(
+        uid="alpaca-train-long",
+        text=" ".join(["word"] * 400),
+        label=-1,
+        split="train",
+        meta={"instruction": "Name a long item."},
+    )
+    config = _config(n_pairs=SPLIT_SIZES["train"])
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, [*_alpaca(), long], FACTS)
+    assert (run_dir.path / "summary.json").is_file()
+
+
 def _hand_made_run(tmp_path: Path) -> RunDir:
     run_dir = RunDir.create(_config(), out_root=tmp_path)
     prompt = few_shot_prompt("Who | what?\nNow", DEFAULT_SHOTS[:1])

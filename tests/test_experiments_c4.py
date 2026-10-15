@@ -34,6 +34,7 @@ from tomography.experiments.c4_honesty_control import calibration_texts
 from tomography.experiments.c4_honesty_control import choice_offsets
 from tomography.experiments.c4_honesty_control import difference_reader
 from tomography.experiments.c4_honesty_control import execute
+from tomography.experiments.c4_honesty_control import fitting_rows
 from tomography.experiments.c4_honesty_control import honesty_layers
 from tomography.experiments.c4_honesty_control import honesty_readers
 from tomography.experiments.c4_honesty_control import honesty_stimuli
@@ -493,6 +494,86 @@ def test_the_first_reader_does_not_depend_on_the_number_of_seeds(
     np.testing.assert_array_equal(one.directions, two.directions)
     np.testing.assert_array_equal(one.means, two.means)
     np.testing.assert_array_equal(one.signs, two.signs)
+
+
+def _long_row(split: Split) -> Example:
+    return Example(
+        uid=f"alpaca-{split}-long",
+        text=" ".join(["word"] * 400),
+        label=-1,
+        split=split,
+        meta={"instruction": "Name a long item."},
+    )
+
+
+def test_honesty_readers_drop_the_train_rows_beyond_the_model_positions(
+    tiny_arch: LoadedModel,
+) -> None:
+    result = honesty_readers(
+        tiny_arch,
+        [*_alpaca(), _long_row("train")],
+        (1, 2),
+        n_seeds=2,
+        n_pairs=SPLIT_SIZES["train"],
+        n_eval_pairs=5,
+        method="logistic",
+        seed=0,
+    )
+    assert len(result.readers) == 2
+
+
+def test_honesty_readers_drop_the_val_rows_beyond_the_model_positions(
+    tiny_arch: LoadedModel,
+) -> None:
+    result = honesty_readers(
+        tiny_arch,
+        [*_alpaca(), _long_row("val")],
+        (1, 2),
+        n_seeds=1,
+        n_pairs=6,
+        n_eval_pairs=None,
+        method="logistic",
+        seed=0,
+    )
+    assert len(result.readers) == 1
+
+
+def test_the_readers_do_not_see_the_rows_that_do_not_fit(
+    tiny_arch: LoadedModel,
+) -> None:
+    def readers(rows: Sequence[Example]) -> SweepResult:
+        return honesty_readers(
+            tiny_arch,
+            rows,
+            (1, 2, 3),
+            n_seeds=2,
+            n_pairs=6,
+            n_eval_pairs=5,
+            method="logistic",
+            seed=4,
+        )
+
+    clean = readers(_alpaca())
+    long = readers([*_alpaca(), _long_row("train"), _long_row("val")])
+    np.testing.assert_array_equal(clean.accuracy, long.accuracy)
+    for a, b in zip(clean.readers, long.readers, strict=True):
+        np.testing.assert_array_equal(a.directions, b.directions)
+        np.testing.assert_array_equal(a.means, b.means)
+        np.testing.assert_array_equal(a.signs, b.signs)
+
+
+def test_a_row_that_fills_the_positions_is_kept_unless_a_bos_is_added(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    chat = chat_format_for(tiny_gpt2)
+    rows = [row for row in _alpaca() if row.split == "train"][:3]
+    pairs = honesty_stimuli(rows, chat, n_pairs=None, seed=0)
+    ids = tiny_gpt2.tokenizer(list(pairs.texts), add_special_tokens=False)
+    tiny_gpt2.model.config.max_position_embeddings = max(
+        len(row) for row in ids["input_ids"]
+    )
+    assert fitting_rows(tiny_gpt2, rows, chat, bos="none") == rows
+    assert len(fitting_rows(tiny_gpt2, rows, chat, bos="prepend")) < len(rows)
 
 
 @pytest.mark.parametrize("bos", [None, "none"], ids=["default-bos", "no-bos"])
