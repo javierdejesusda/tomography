@@ -582,6 +582,10 @@ def test_load_adapter_rejects_another_architecture(
     run_dir = _finished(tiny_gpt2, tmp_path)
     with pytest.raises(ValueError, match="keys"):
         load_adapter(tiny_qwen3, run_dir.path)
+    assert _lora_layers(tiny_qwen3) == []
+    good = _finished(copy.deepcopy(tiny_qwen3), tmp_path / "again")
+    load_adapter(tiny_qwen3, good.path)
+    assert _lora_layers(tiny_qwen3)
 
 
 def test_gated_arm_off_is_the_model_that_never_had_an_adapter(

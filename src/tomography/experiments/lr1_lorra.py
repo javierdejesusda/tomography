@@ -287,14 +287,19 @@ def load_adapter(loaded: LoadedModel, run_path: str | Path) -> LorraAdapter:
     Raises:
         ValueError: If the run is not finished, or the weights do not fit
             the model (a different architecture gives different keys or
-            shapes).
+            shapes); `loaded` then runs no adapter.
     """
     run_dir = RunDir.open(run_path)
     if run_dir.meta["finished_at"] is None:
         raise ValueError(f"{run_dir.path} is not a finished run")
     config = Config.from_dict(run_dir.config)
+    state = run_dir.read_arrays("adapter")
     adapter = attach_adapter(loaded, config.settings(loaded.n_layers))
-    adapter.load_state(run_dir.read_arrays("adapter"))
+    try:
+        adapter.load_state(state)
+    except Exception:
+        adapter.peft_model.unload()
+        raise
     return adapter
 
 
