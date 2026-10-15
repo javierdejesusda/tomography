@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
+import copy
 import dataclasses
 import itertools
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
+from peft.tuners.lora import LoraLayer
 import pytest
 
 from tomography.activations import collect_activations
@@ -25,6 +27,7 @@ from tomography.datasets.sources import OfflineCacheMissError
 from tomography.datasets.stimulus import StimulusSet
 from tomography.datasets.truthfulqa import load_truthfulqa
 from tomography.experiments import c4_honesty_control
+from tomography.experiments import lr1_lorra
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.c4_honesty_control import TRUTHFUL
@@ -686,7 +689,10 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.coeffs == (-0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2)
     assert config.alphas == (-0.5, -0.25, 0.0, 0.25, 0.5)
     assert config.n_boot == 2000
+    assert config.lorra_run is None
     assert Config.from_dict(config.to_dict()) == config
+    with_adapter = dataclasses.replace(config, lorra_run="runs/lr1")
+    assert Config.from_dict(with_adapter.to_dict()) == with_adapter
 
 
 def _forbid_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -700,6 +706,7 @@ def _forbid_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
         "plain_arm",
         "reader_arm",
         "contrast_logprobs",
+        "load_adapter",
     ):
         monkeypatch.setattr(c4_honesty_control, name, forbidden)
 
@@ -1249,6 +1256,7 @@ def test_execute_summarizes_the_run(
         "reading_test_mean",
         "reading_test_min",
         "reading_test_max",
+        "lorra_run",
     }
     assert summary["layers"] == list(honesty_layers(tiny_gpt2.n_layers))
     assert (summary["n_select"], summary["n_test"]) == (20, 10)
@@ -1259,6 +1267,7 @@ def test_execute_summarizes_the_run(
     assert summary["reading_test_mean"] == pytest.approx(0.4)
     assert summary["reading_test_min"] == pytest.approx(0.3)
     assert summary["reading_test_max"] == pytest.approx(0.5)
+    assert summary["lorra_run"] is None
 
 
 def _real_run(tmp_path: Path, loaded: LoadedModel, **overrides: Any) -> RunDir:
@@ -1477,6 +1486,267 @@ def test_run_loads_the_model_and_the_data(
     assert asked == ["tiny"]
     assert shuffles == [5]
     assert (run_dir.path / "summary.json").is_file()
+
+
+ARM_ROWS = [
+    "none",
+    "prompting+1",
+    "prompting-1",
+    "difference/-0.1",
+    "difference/0.1",
+    "reading/0/-0.1",
+    "reading/0/0.1",
+    "reading/1/-0.1",
+    "reading/1/0.1",
+    "contrast/-0.25",
+    "contrast/0.25",
+]
+
+
+def _train_lorra(
+    loaded: LoadedModel, tmp_path: Path, *, finish: bool
+) -> RunDir:
+    config = lr1_lorra.Config(
+        model="tiny",
+        layers=(1, 2),
+        lr=3e-2,
+        batch_size=4,
+        steps=10,
+        n_train=20,
+        n_heldout=6,
+        max_prompt_tokens=64,
+        max_response_tokens=8,
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    lr1_lorra.execute(config, run_dir, loaded, _alpaca())
+    if finish:
+        run_dir.finalize()
+    return run_dir
+
+
+def _lora_layers(loaded: LoadedModel) -> list[LoraLayer]:
+    return [m for m in loaded.model.modules() if isinstance(m, LoraLayer)]
+
+
+@dataclasses.dataclass
+class AdapterPair:
+    plain: RunDir
+    lorra: RunDir
+    trained: LoadedModel
+    adapter_run: RunDir
+
+
+@pytest.fixture
+def adapter_pair(tiny_arch: LoadedModel, tmp_path: Path) -> AdapterPair:
+    trained = copy.deepcopy(tiny_arch)
+    adapter_run = _train_lorra(trained, tmp_path / "lr1", finish=True)
+    lorra = _real_run(
+        tmp_path / "lorra",
+        copy.deepcopy(tiny_arch),
+        lorra_run=str(adapter_run.path),
+    )
+    plain = _real_run(tmp_path / "plain", copy.deepcopy(tiny_arch))
+    return AdapterPair(
+        plain=plain, lorra=lorra, trained=trained, adapter_run=adapter_run
+    )
+
+
+def test_a_lorra_run_appends_the_lorra_row_to_every_file(
+    adapter_pair: AdapterPair, tmp_path: Path
+) -> None:
+    plain, lorra = adapter_pair.plain, adapter_pair.lorra
+    assert _read(lorra, "scores")["rows"] == [*ARM_ROWS, "lorra"]
+    assert lorra.read_arrays("scores")["values"].shape[0] == 12
+    table = _read(lorra, "table")["rows"]
+    assert len(table) == 8
+    assert table[-1][:3] == ["lorra", None, None]
+    assert table[:-1] == _read(plain, "table")["rows"]
+    summary = _read(lorra, "summary")
+    assert summary["lorra_run"] == str(adapter_pair.adapter_run.path)
+    assert summary == {
+        **_read(plain, "summary"),
+        "lorra_run": summary["lorra_run"],
+    }
+    assert len(plot(lorra, tmp_path / "figs")) == 12
+
+
+def test_the_other_rows_do_not_see_the_adapter(
+    adapter_pair: AdapterPair,
+) -> None:
+    plain, lorra = adapter_pair.plain, adapter_pair.lorra
+    np.testing.assert_array_equal(
+        lorra.read_arrays("scores")["values"][:-1],
+        plain.read_arrays("scores")["values"],
+    )
+    for stem in ("curves_reading", "curves_difference", "curves_contrast"):
+        np.testing.assert_array_equal(
+            lorra.read_arrays(stem)["per_seed"],
+            plain.read_arrays(stem)["per_seed"],
+        )
+
+
+def test_the_lorra_row_scores_the_trained_model(
+    adapter_pair: AdapterPair,
+) -> None:
+    lorra = adapter_pair.lorra
+    values = lorra.read_arrays("scores")["values"]
+    prompts, answers = mc1_inputs(
+        chat_format_for(adapter_pair.trained), QUESTIONS
+    )
+    arm = plain_arm(adapter_pair.trained, GenSettings(batch_size=8))
+    assert arm.logprobs is not None
+    np.testing.assert_array_equal(values[-1], arm.logprobs(prompts, answers))
+    assert not np.array_equal(values[-1], values[0])
+    arrays = lorra.read_arrays("scores")
+    test = np.array(_read(lorra, "scores")["test"])
+    hits = mc1_correct(
+        arrays["values"][-1],
+        arrays["offsets"],
+        arrays["correct"],
+        seed=derive_seed(0, "mc1"),
+    )
+    row = _read(lorra, "table")["rows"][-1]
+    assert row[3] == pytest.approx(hits[~test].mean())
+    assert row[4] == pytest.approx(hits[test].mean())
+    assert (row[5], row[6]) == wilson_ci(int(hits[test].sum()), 10)
+
+
+def test_the_adapter_loads_after_the_readers_the_vector_and_the_norms(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter_run = _train_lorra(
+        copy.deepcopy(tiny_gpt2), tmp_path / "lr1", finish=True
+    )
+    events: list[str] = []
+
+    def spy(name: str) -> None:
+        real = getattr(c4_honesty_control, name)
+
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            events.append(name)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(c4_honesty_control, name, wrapped)
+
+    for name in (
+        "honesty_readers",
+        "difference_reader",
+        "mean_residual_norms",
+        "load_adapter",
+    ):
+        spy(name)
+    _real_run(tmp_path / "run", tiny_gpt2, lorra_run=str(adapter_run.path))
+    assert events == [
+        "honesty_readers",
+        "difference_reader",
+        "mean_residual_norms",
+        "load_adapter",
+    ]
+
+
+def test_an_unfinished_lorra_run_raises_and_attaches_nothing(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    adapter_run = _train_lorra(
+        copy.deepcopy(tiny_gpt2), tmp_path / "lr1", finish=False
+    )
+    fresh = copy.deepcopy(tiny_gpt2)
+    with pytest.raises(ValueError, match="not a finished run"):
+        _real_run(tmp_path / "run", fresh, lorra_run=str(adapter_run.path))
+    assert _lora_layers(fresh) == []
+
+
+def test_execute_gives_the_model_back_without_the_adapter(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    adapter_run = _train_lorra(
+        copy.deepcopy(tiny_arch), tmp_path / "lr1", finish=True
+    )
+    never = _real_run(tmp_path / "never", copy.deepcopy(tiny_arch))
+    model = copy.deepcopy(tiny_arch)
+    _real_run(tmp_path / "lorra", model, lorra_run=str(adapter_run.path))
+    assert _lora_layers(model) == []
+    again = _real_run(tmp_path / "again", model)
+    np.testing.assert_array_equal(
+        again.read_arrays("scores")["values"],
+        never.read_arrays("scores")["values"],
+    )
+
+
+def test_execute_gives_the_model_back_when_scoring_fails(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter_run = _train_lorra(
+        copy.deepcopy(tiny_gpt2), tmp_path / "lr1", finish=True
+    )
+
+    def failing(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("scoring failed")
+
+    monkeypatch.setattr(c4_honesty_control, "contrast_logprobs", failing)
+    with pytest.raises(RuntimeError, match="scoring failed"):
+        _real_run(tmp_path / "run", tiny_gpt2, lorra_run=str(adapter_run.path))
+    assert _lora_layers(tiny_gpt2) == []
+
+
+def _stub_lorra_run(
+    root: Path,
+    *,
+    model: str = "tiny",
+    layers: tuple[int, ...] = (1, 2),
+    finish: bool = True,
+) -> Path:
+    config = lr1_lorra.Config(model=model, layers=layers)
+    run_dir = RunDir.create(config, out_root=root)
+    if finish:
+        run_dir.finalize()
+    return run_dir.path
+
+
+@pytest.mark.parametrize(
+    ("kind", "message"),
+    [
+        ("missing", "not a run directory"),
+        ("unfinished", "not a finished run"),
+        ("too-deep", "above the"),
+    ],
+    ids=["missing-path", "unfinished-run", "layer-beyond-depth"],
+)
+def test_execute_rejects_a_bad_lorra_run_before_any_work(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    message: str,
+) -> None:
+    _forbid_scoring(monkeypatch)
+    path = tmp_path / "absent"
+    if kind != "missing":
+        path = _stub_lorra_run(
+            tmp_path / "lr1",
+            layers=(1, 99) if kind == "too-deep" else (1, 2),
+            finish=kind != "unfinished",
+        )
+    config = _config(lorra_run=str(path))
+    run_dir = RunDir.create(config, out_root=tmp_path / "run")
+    with pytest.raises(ValueError, match=message):
+        execute(config, run_dir, tiny_gpt2, QUESTIONS, _alpaca())
+    assert _lora_layers(tiny_gpt2) == []
+    assert not list(run_dir.path.glob("*.npz"))
+
+
+def test_run_rejects_an_adapter_of_another_model_before_loading_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def forbidden(key: str) -> LoadedModel:
+        raise AssertionError("a model was loaded before the adapter passed")
+
+    monkeypatch.setattr(c4_honesty_control, "load_model", forbidden)
+    path = _stub_lorra_run(tmp_path / "lr1", model="other")
+    config = _config(lorra_run=str(path))
+    run_dir = RunDir.create(config, out_root=tmp_path / "run")
+    with pytest.raises(ValueError, match="trained on other, not on tiny"):
+        run(config, run_dir)
 
 
 @pytest.mark.slow

@@ -33,6 +33,9 @@ from tomography.datasets.truthfulqa import load_truthfulqa
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.effects import write_dose_curves
+from tomography.experiments.lr1_lorra import Config as Lr1Config
+from tomography.experiments.lr1_lorra import gated_arm
+from tomography.experiments.lr1_lorra import load_adapter
 from tomography.experiments.steering import Arm
 from tomography.experiments.steering import GenSettings
 from tomography.experiments.steering import LogprobFn
@@ -44,6 +47,7 @@ from tomography.experiments.sweep import SweepResult
 from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.sweep import plot_curves_file
 from tomography.experiments.sweep import reading_sweep
+from tomography.lorra import LorraAdapter
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.model import load_model
@@ -511,6 +515,8 @@ class Config(SteeringConfig):
         coeffs: Grid of the difference and reading arms.
         alphas: Grid of the contrast arm.
         n_boot: Resamples of the paired bootstrap.
+        lorra_run: Path of a finished LR1 run; its adapter is scored as one
+            more arm. None leaves the model as it is and adds no arm.
     """
 
     experiment: str = "c4"
@@ -522,6 +528,7 @@ class Config(SteeringConfig):
     coeffs: tuple[float, ...] = (-0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2)
     alphas: tuple[float, ...] = (-0.5, -0.25, 0.0, 0.25, 0.5)
     n_boot: int = 2000
+    lorra_run: str | None = None
 
 
 def _check_grid(name: str, grid: Sequence[float]) -> None:
@@ -554,6 +561,23 @@ def check_relative_op(config: SteeringConfig) -> None:
         )
 
 
+def _lorra_config(run_path: str) -> Lr1Config:
+    run_dir = RunDir.open(run_path)
+    if run_dir.meta["finished_at"] is None:
+        raise ValueError(f"{run_dir.path} is not a finished run")
+    return Lr1Config.from_dict(run_dir.config)
+
+
+def _check_lorra_run(run_path: str, n_layers: int) -> None:
+    """Checks that a run can supply an adapter, without attaching it."""
+    top = _lorra_config(run_path).settings(n_layers).layers[-1]
+    if top > n_layers:
+        raise ValueError(
+            f"layer {top} of the adapter is above the {n_layers} layers of "
+            "the model"
+        )
+
+
 def _check_config(
     config: Config, questions: Sequence[ChoiceExample], n_layers: int
 ) -> tuple[tuple[int, ...], NDArray[np.bool_], NDArray[np.bool_]]:
@@ -573,6 +597,8 @@ def _check_config(
         raise ValueError(f"batch_size must be >= 1, got {config.batch_size}")
     check_relative_op(config)
     layers = resolve_layers(config.layers, n_layers)
+    if config.lorra_run is not None:
+        _check_lorra_run(config.lorra_run, n_layers)
     select = np.array(
         [question.split in ("train", "val") for question in questions],
         dtype=np.bool_,
@@ -597,6 +623,10 @@ def _scorer(arm: Arm) -> LogprobFn:
     return arm.logprobs
 
 
+def _gate(adapter: LorraAdapter | None, score: LogprobFn) -> LogprobFn:
+    return score if adapter is None else adapter.gated(score, enabled=False)
+
+
 def _arm_scores(
     config: Config,
     loaded: LoadedModel,
@@ -605,13 +635,18 @@ def _arm_scores(
     readers: Sequence[RepReader],
     difference: RepReader,
     norms: dict[int, float],
+    adapter: LorraAdapter | None,
 ) -> dict[str, NDArray[np.float32]]:
-    """Scores every choice under every arm at the nonzero grid points."""
+    """Scores every choice under every arm at the nonzero grid points.
+
+    With an adapter, every arm but `lorra` runs with the adapter off, so
+    those rows are those of a model that never had one.
+    """
     chat = chat_format_for(loaded)
     settings = GenSettings(batch_size=config.batch_size)
     plain, answers = mc1_inputs(chat, questions)
     rows: dict[str, NDArray[np.float32]] = {}
-    unsteered = _scorer(plain_arm(loaded, settings))
+    unsteered = _gate(adapter, _scorer(plain_arm(loaded, settings)))
     rows["none"] = unsteered(plain, answers)
     for name, instruction in INSTRUCTIONS:
         prompts, texts = mc1_inputs(chat, questions, instruction)
@@ -633,20 +668,36 @@ def _arm_scores(
                 preserve_norm=config.preserve_norm,
                 name=f"{label}/{coeff:g}",
             )
-            rows[arm.name] = _scorer(arm)(plain, answers)
+            rows[arm.name] = _gate(adapter, _scorer(arm))(plain, answers)
     positive = mc1_inputs(chat, questions, TRUTHFUL)[0]
     negative = mc1_inputs(chat, questions, UNTRUTHFUL)[0]
+
+    def contrast(alpha: float) -> LogprobFn:
+        def score(
+            prompts: Sequence[str], texts: Sequence[str]
+        ) -> NDArray[np.float32]:
+            return contrast_logprobs(
+                loaded,
+                prompts,
+                texts,
+                positive,
+                negative,
+                layers=layers,
+                alpha=alpha,
+                batch_size=config.batch_size,
+            )
+
+        return score
+
     for alpha in _nonzero(config.alphas):
-        rows[f"contrast/{alpha:g}"] = contrast_logprobs(
-            loaded,
-            plain,
-            answers,
-            positive,
-            negative,
-            layers=layers,
-            alpha=alpha,
-            batch_size=config.batch_size,
+        rows[f"contrast/{alpha:g}"] = _gate(adapter, contrast(alpha))(
+            plain, answers
         )
+    if adapter is not None:
+        lorra = gated_arm(
+            adapter, plain_arm(loaded, settings, name="lorra"), enabled=True
+        )
+        rows["lorra"] = _scorer(lorra)(plain, answers)
     return rows
 
 
@@ -700,6 +751,13 @@ def execute(
     No arm is scored at coefficient 0: a reader arm there is bit-identical to
     the plain model, so its row stands in at 0 in every grid.
 
+    With `lorra_run`, the adapter of that finished LR1 run is loaded after
+    the readers, the difference vector and the norms are built, and scored
+    as the last arm, `lorra`, on the plain prompts. Every other arm then runs
+    with the adapter off, so its scores are those of a run without an adapter.
+    The adapter is unloaded when the scoring ends, even if it fails, so
+    `loaded` comes back as it was.
+
     Writes `curves_reading`, `curves_difference` and `curves_contrast`, the
     `scores` of every arm with its sidecar, `table.json` and `summary.json`.
 
@@ -716,7 +774,9 @@ def execute(
             layers are outside 1..L, `n_seeds`, `n_boot`, `batch_size` or
             `n_calibration` is below 1, the projection operator has relative
             coefficients, the Alpaca `test` split is empty, or there is no
-            selection or no test question.
+            selection or no test question, or `lorra_run` is not a finished
+            run or has a layer above the model; or, once the readers are
+            built, if the adapter weights do not fit the model.
     """
     layers, select, test = _check_config(config, questions, loaded.n_layers)
     texts = calibration_texts(
@@ -738,9 +798,25 @@ def execute(
     norms = mean_residual_norms(
         loaded, texts, layers, bos=config.bos, batch_size=config.batch_size
     )
-    rows = _arm_scores(
-        config, loaded, questions, layers, sweep.readers, difference, norms
+    adapter = (
+        None
+        if config.lorra_run is None
+        else load_adapter(loaded, config.lorra_run)
     )
+    try:
+        rows = _arm_scores(
+            config,
+            loaded,
+            questions,
+            layers,
+            sweep.readers,
+            difference,
+            norms,
+            adapter,
+        )
+    finally:
+        if adapter is not None:
+            adapter.peft_model.unload()
     offsets = choice_offsets(questions)
     correct = np.array([question.correct for question in questions])
     tie_seed = derive_seed(config.seed, "mc1")
@@ -834,6 +910,8 @@ def execute(
                     points[index],
                 )
             )
+    if adapter is not None:
+        table.append(row("lorra", None, None, hits["lorra"]))
     run_dir.write_arrays(
         "scores",
         values=np.stack(list(rows.values())),
@@ -864,6 +942,7 @@ def execute(
             "reading_test_mean": float(np.mean(reading_test)),
             "reading_test_min": float(np.min(reading_test)),
             "reading_test_max": float(np.max(reading_test)),
+            "lorra_run": config.lorra_run,
         },
     )
 
@@ -874,7 +953,18 @@ def run(config: Config, run_dir: RunDir) -> None:
     Args:
         config: The experiment settings.
         run_dir: The run to write into.
+
+    Raises:
+        ValueError: If `lorra_run` is not a finished run or was trained on
+            another model than `model`; nothing is loaded then.
     """
+    if config.lorra_run is not None:
+        trained_on = _lorra_config(config.lorra_run).model
+        if trained_on != config.model:
+            raise ValueError(
+                f"the adapter was trained on {trained_on}, not on "
+                f"{config.model}"
+            )
     execute(
         config,
         run_dir,
