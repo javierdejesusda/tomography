@@ -341,8 +341,11 @@ def surface_baselines(pool: TypePool) -> dict[str, float | None]:
     A text classifier is fitted on the questions of all train items of both
     sides and scored on the questions of the items `type_auroc` scores on the
     test split, so a reader AUROC can be read against what the wording alone
-    gives (see `tomography.p9.risk.text_auroc`). The popularity baseline is
-    the AUROC of the popularity of those test items.
+    gives (see `tomography.p9.risk.text_auroc`). The reader keeps at most
+    `n_pairs` pairs of the train items (see `fit_type_reader`) while the
+    classifier fits on all of them, so the baseline is the stronger control.
+    The popularity baseline is the AUROC of the popularity of those test
+    items.
 
     Args:
         pool: One contrast.

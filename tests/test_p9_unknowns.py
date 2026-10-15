@@ -25,6 +25,7 @@ KNOWLEDGE_NAMES = [
     "obscure_real",
     "obscure_real_pop",
     "post_cutoff",
+    "triviaqa_known",
     "unknowable_detail",
     "false_premise",
     "kuq_false_assumption",
@@ -219,12 +220,8 @@ def test_constants_name_the_types_in_table_order() -> None:
     )
 
 
-def test_type_pools_builds_nine_knowledge_and_three_unknown_contrasts() -> None:
-    pools = {
-        name: pool
-        for name, pool in type_pools(_items()).items()
-        if name != "triviaqa_known"
-    }
+def test_type_pools_builds_ten_knowledge_and_three_unknown_contrasts() -> None:
+    pools = type_pools(_items())
 
     assert list(pools) == [*KNOWLEDGE_NAMES, *UNKNOWN_TYPES]
     assert {name: pools[name].contrast for name in pools} == {
