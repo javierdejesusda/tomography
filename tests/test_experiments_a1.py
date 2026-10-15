@@ -10,7 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 import pytest
 
-from tomography.analysis import agreement_pseudo_values
+from tomography.analysis import agreement_band
 from tomography.analysis import layer_cosines
 from tomography.analysis import mean_direction
 from tomography.analysis import seed_agreement
@@ -23,7 +23,6 @@ from tomography.experiments.a1_geometry import run
 from tomography.experiments.aggregate import ReaderSet
 from tomography.experiments.base import RunDir
 from tomography.experiments.sweep import write_curves
-from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import cosine_matrix
 
 MODEL = "tiny"
@@ -172,12 +171,9 @@ def test_execute_writes_the_agreement_curves(tmp_path: Path) -> None:
     curves = run_dir.read_arrays("curves_agreement")
     assert curves["x"].tolist() == [1.0, 2.0, 3.0]
     np.testing.assert_allclose(curves["mean"], curves["per_seed"].mean(axis=1))
-    pseudo = np.stack(
-        [agreement_pseudo_values(r.vectors[:4]) for r in readers.values()]
-    )
-    lo, hi = bootstrap_ci(np.moveaxis(pseudo, 1, 0), n_boot=10, seed=3)
-    np.testing.assert_array_equal(curves["lo"], lo)
-    np.testing.assert_array_equal(curves["hi"], hi)
+    bands = [agreement_band(r.vectors[:4]) for r in readers.values()]
+    np.testing.assert_array_equal(curves["lo"], np.stack([b[0] for b in bands]))
+    np.testing.assert_array_equal(curves["hi"], np.stack([b[1] for b in bands]))
     assert run_dir.read_json("curves_agreement") == {
         "series": list(readers),
         "xlabel": "Layer",

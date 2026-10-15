@@ -5,11 +5,11 @@ from typing import get_args
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.stats import t as student_t
 from sklearn.manifold import TSNE
 
 from tomography.reading.directions import FloatArray
 from tomography.reading.directions import Preprocess
-from tomography.reading.metrics import bootstrap_ci
 
 _PREPROCESSES = get_args(Preprocess)
 
@@ -206,34 +206,41 @@ def agreement_pseudo_values(vectors: FloatArray) -> NDArray[np.float64]:
 
 
 def agreement_band(
-    vectors: FloatArray,
-    *,
-    alpha: float = 0.05,
-    n_boot: int = 2000,
-    seed: int = 0,
+    vectors: FloatArray, *, alpha: float = 0.05
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Computes a bootstrap band of the mean pairwise cosine at every layer.
+    """Computes a t-interval of the mean pairwise cosine at every layer.
 
-    The band is the percentile bootstrap interval of the mean of
-    `agreement_pseudo_values`, resampled over runs.
+    The interval is `U +- t * SE` over the jackknife pseudo-values: U is
+    their mean, SE their standard deviation over the square root of the
+    number of runs, and t the `1 - alpha / 2` quantile of Student's t with
+    `N - 1` degrees of freedom. A bootstrap of so few runs covers less than
+    its level. The bounds are clipped to [-1, 1], the range of a cosine.
 
     Args:
         vectors: Directions of shape (N, K, d): run, layer, width. Each one
             is normalized first.
         alpha: One minus the coverage; 0.05 gives a 95% band.
-        n_boot: Number of bootstrap resamples.
-        seed: Seed of the resampling.
 
     Returns:
         The lower and upper bounds, each of shape (K,).
 
     Raises:
         ValueError: If `vectors` is not 3-D, not finite or has a zero vector,
-            there are fewer than three runs, or `alpha` or `n_boot` is
-            invalid.
+            there are fewer than three runs, or `alpha` is not in (0, 1).
     """
-    return bootstrap_ci(
-        agreement_pseudo_values(vectors), alpha=alpha, n_boot=n_boot, seed=seed
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}")
+    pseudo = agreement_pseudo_values(vectors)
+    n_runs = pseudo.shape[0]
+    mean = pseudo.mean(axis=0)
+    half = (
+        student_t.ppf(1.0 - alpha / 2.0, n_runs - 1)
+        * pseudo.std(axis=0, ddof=1)
+        / np.sqrt(n_runs)
+    )
+    return (
+        np.asarray(np.clip(mean - half, -1.0, 1.0)),
+        np.asarray(np.clip(mean + half, -1.0, 1.0)),
     )
 
 
