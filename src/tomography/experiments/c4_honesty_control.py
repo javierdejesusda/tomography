@@ -111,6 +111,33 @@ def honesty_layers(n_layers: int) -> tuple[int, ...]:
     )
 
 
+def resolve_layers(
+    requested: Sequence[int] | None, n_layers: int
+) -> tuple[int, ...]:
+    """Picks the layers the vector arms steer.
+
+    Args:
+        requested: The configured layers; None takes `honesty_layers`.
+        n_layers: The number of decoder blocks.
+
+    Returns:
+        The sorted distinct layers.
+
+    Raises:
+        ValueError: If the requested layers are empty or outside
+            `1..n_layers`, or `n_layers` is below 1.
+    """
+    if requested is None:
+        return honesty_layers(n_layers)
+    layers = tuple(sorted(set(requested)))
+    if not layers or layers[0] < 1 or layers[-1] > n_layers:
+        raise ValueError(
+            f"layers must be a non-empty subset of 1..{n_layers}, got "
+            f"{tuple(requested)}"
+        )
+    return layers
+
+
 def render_prompt(chat: ChatFormat, user: str) -> tuple[str, str]:
     """Renders a user turn the way App. C.2 scores a TruthfulQA answer.
 
@@ -477,14 +504,7 @@ def _check_config(
         raise ValueError(f"n_seeds must be >= 1, got {config.n_seeds}")
     if config.n_boot < 1:
         raise ValueError(f"n_boot must be >= 1, got {config.n_boot}")
-    layers = honesty_layers(n_layers)
-    if config.layers is not None:
-        layers = tuple(sorted(set(config.layers)))
-        if not layers or layers[0] < 1 or layers[-1] > n_layers:
-            raise ValueError(
-                f"layers must be a non-empty subset of 1..{n_layers}, got "
-                f"{config.layers}"
-            )
+    layers = resolve_layers(config.layers, n_layers)
     select = np.array(
         [question.split in ("train", "val") for question in questions],
         dtype=np.bool_,

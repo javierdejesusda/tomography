@@ -41,6 +41,7 @@ from tomography.experiments.c4_honesty_control import mc1_correct
 from tomography.experiments.c4_honesty_control import mc1_inputs
 from tomography.experiments.c4_honesty_control import plot
 from tomography.experiments.c4_honesty_control import render_prompt
+from tomography.experiments.c4_honesty_control import resolve_layers
 from tomography.experiments.c4_honesty_control import run
 from tomography.experiments.c4_honesty_control import select_coeff
 from tomography.experiments.steering import Arm
@@ -93,6 +94,26 @@ def test_honesty_layers_stay_inside_the_decoder(n_layers: int) -> None:
 def test_honesty_layers_reject_a_model_without_blocks(n_layers: int) -> None:
     with pytest.raises(ValueError, match="n_layers"):
         honesty_layers(n_layers)
+
+
+def test_resolve_layers_default_to_the_honesty_layers() -> None:
+    assert resolve_layers(None, 12) == honesty_layers(12)
+
+
+def test_resolve_layers_sort_and_deduplicate_the_request() -> None:
+    assert resolve_layers((9, 3, 9), 12) == (3, 9)
+
+
+@pytest.mark.parametrize(
+    "requested",
+    [(), (0, 1), (1, 13)],
+    ids=["empty", "layer-zero", "beyond-depth"],
+)
+def test_resolve_layers_reject_layers_outside_the_decoder(
+    requested: tuple[int, ...],
+) -> None:
+    with pytest.raises(ValueError, match="layers"):
+        resolve_layers(requested, 12)
 
 
 def _items() -> list[ChoiceExample]:
