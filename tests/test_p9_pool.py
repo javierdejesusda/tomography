@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+from tomography.datasets.popqa import TEMPLATES
+from tomography.datasets.popqa import parse_popqa
 from tomography.datasets.records import QAExample
 from tomography.datasets.records import Split
 from tomography.datasets.records import assign_splits
@@ -538,6 +540,36 @@ def test_build_pool_generated_names_match_their_popqa_item() -> None:
         )
         assert str(real.meta["subject"]) not in example.question
         assert "Answer" not in example.question
+
+
+def test_build_pool_counterparts_carry_the_subject_level_split() -> None:
+    subject = "Ada Smith"
+    rows = [
+        {
+            "id": uid,
+            "subj": subject,
+            "prop": relation,
+            "s_pop": "100",
+            "question": TEMPLATES[relation].replace("{}", subject),
+            "possible_answers": '["Bob Smith"]',
+        }
+        for uid, relation in (("1", "father"), ("2", "mother"))
+    ]
+    by_uid = assign_splits(["popqa:1", "popqa:2"], dataset="popqa")
+    assert by_uid[0] != by_uid[1]
+    loaders = _loaders(parse_popqa(rows))
+
+    pool = build_pool(loaders, SIZES, count_tokens=_words, seed=3)
+
+    expected = assign_splits([subject], dataset="popqa")[0]
+    real = [e for e in pool if group_of(e) == "popqa"]
+    generated = [e for e in pool if group_of(e) == "fictional"]
+    assert len(real) == len(generated) == 2
+    assert {e.split for e in real} == {expected}
+    assert {e.split for e in generated} == {expected}
+    for example in generated:
+        matched = next(e for e in real if e.uid == example.meta["matched_uid"])
+        assert example.split == matched.split
 
 
 def test_build_pool_drops_one_token_subjects_from_the_generator_only() -> None:

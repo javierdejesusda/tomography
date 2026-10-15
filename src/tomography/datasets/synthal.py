@@ -79,7 +79,8 @@ def parse_synthal(
 
     The question is rebuilt from the relation's shared template so real and
     fictional subjects are asked the same way. A relation with no entry in
-    `templates` keeps the template of its own row.
+    `templates` keeps the template of its own row. The split is a function
+    of the subject, so every question about one subject lands in one split.
 
     Args:
         rows: Mappings with the columns "relation_key", "subject",
@@ -95,7 +96,7 @@ def parse_synthal(
     """
     kept = [row for row in rows if row["relation_key"] in relations]
     uids = [f"synthal:{row['example_id']}" for row in kept]
-    splits = assign_splits(uids, dataset="synthal")
+    splits = assign_splits([row["subject"] for row in kept], dataset="synthal")
     items = []
     for row, uid, split in zip(kept, uids, splits, strict=True):
         relation = relations[row["relation_key"]]

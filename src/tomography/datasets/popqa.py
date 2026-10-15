@@ -101,7 +101,8 @@ def parse_popqa(
     dropped. A row left without an alias, or with a subject shorter than
     `min_subject_chars`, is dropped. A question string that occurs in more
     than one row names several entities with different golds, so every copy
-    is dropped unless `drop_ambiguous` is False.
+    is dropped unless `drop_ambiguous` is False. The split is a function of
+    the subject, so every question about one subject lands in one split.
 
     Args:
         rows: Mappings with the PopQA columns "id", "subj", "prop", "s_pop",
@@ -132,7 +133,7 @@ def parse_popqa(
         answers = _clean_aliases(uid, row["possible_answers"], min_alias_chars)
         if answers:
             kept.append((uid, row, answers))
-    splits = assign_splits([uid for uid, _, _ in kept], dataset="popqa")
+    splits = assign_splits([row["subj"] for _, row, _ in kept], dataset="popqa")
     return [
         QAExample(
             uid=uid,

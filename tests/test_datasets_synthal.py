@@ -51,9 +51,7 @@ def test_parse_builds_a_fictional_item_with_the_shared_template() -> None:
             question="Who is the father of Sedi Surudu?",
             answers=(),
             kind="fictional",
-            split=assign_splits(
-                ["synthal:person_father__0000"], dataset="synthal"
-            )[0],
+            split=assign_splits(["Sedi Surudu"], dataset="synthal")[0],
             meta={
                 "relation": "father",
                 "subject": "Sedi Surudu",
@@ -62,6 +60,39 @@ def test_parse_builds_a_fictional_item_with_the_shared_template() -> None:
             },
         )
     ]
+
+
+def test_parse_gives_every_row_of_a_subject_one_split() -> None:
+    father = _row(index=0, relation_key="person_father")
+    mother = _row(
+        index=0,
+        relation_key="person_mother",
+        template="Who is {}'s mother?",
+    )
+    by_uid = assign_splits(
+        [
+            "synthal:person_father__0000",
+            "synthal:person_mother__0000",
+        ],
+        dataset="synthal",
+    )
+    assert by_uid[0] != by_uid[1]
+
+    items = synthal.parse_synthal([father, mother])
+
+    expected = assign_splits(["Sedi Surudu"], dataset="synthal")[0]
+    assert [item.split for item in items] == [expected, expected]
+
+
+def test_parse_splits_distinct_subjects_across_all_three_splits() -> None:
+    rows = [_row(index=i, subject=f"Zed Qux{i}") for i in range(300)]
+
+    items = synthal.parse_synthal(rows)
+
+    assert {item.split for item in items} == {"train", "val", "test"}
+    assert [item.split for item in items] == assign_splits(
+        [f"Zed Qux{i}" for i in range(300)], dataset="synthal"
+    )
 
 
 def test_parse_keeps_only_the_relations_popqa_shares() -> None:

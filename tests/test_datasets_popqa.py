@@ -53,7 +53,7 @@ def test_parse_turns_a_row_into_a_real_item() -> None:
             question="Who is the father of Ada Smith?",
             answers=("Bob Smith",),
             kind="real",
-            split=assign_splits(["popqa:1"], dataset="popqa")[0],
+            split=assign_splits(["Ada Smith"], dataset="popqa")[0],
             meta={
                 "relation": "father",
                 "subject": "Ada Smith",
@@ -62,6 +62,34 @@ def test_parse_turns_a_row_into_a_real_item() -> None:
             },
         )
     ]
+
+
+def test_parse_gives_every_row_of_a_subject_one_split() -> None:
+    father, mother = "1", "2"
+    by_uid = assign_splits(
+        [f"popqa:{father}", f"popqa:{mother}"], dataset="popqa"
+    )
+    assert by_uid[0] != by_uid[1]
+    rows = [
+        _row(uid=father, relation="father"),
+        _row(uid=mother, relation="mother"),
+    ]
+
+    items = popqa.parse_popqa(rows)
+
+    expected = assign_splits(["Ada Smith"], dataset="popqa")[0]
+    assert [item.split for item in items] == [expected, expected]
+
+
+def test_parse_splits_distinct_subjects_across_all_three_splits() -> None:
+    rows = [_row(uid=str(i), subject=f"Person Number{i}") for i in range(300)]
+
+    items = popqa.parse_popqa(rows)
+
+    assert {item.split for item in items} == {"train", "val", "test"}
+    assert [item.split for item in items] == assign_splits(
+        [f"Person Number{i}" for i in range(300)], dataset="popqa"
+    )
 
 
 def test_parse_keeps_only_the_shared_relations_by_default() -> None:
