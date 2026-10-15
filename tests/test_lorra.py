@@ -822,6 +822,22 @@ def test_checkpointing_is_refused_for_a_base_with_active_dropout(
     assert _lora_names(tiny_gpt2) == []
 
 
+def test_attach_adapter_refuses_checkpointing_with_attention_dropout(
+    tiny_qwen3: LoadedModel,
+) -> None:
+    attentions = [
+        module
+        for module in tiny_qwen3.model.modules()
+        if hasattr(module, "attention_dropout")
+    ]
+    assert attentions
+    for module in attentions:
+        module.attention_dropout = 0.1
+    with pytest.raises(ValueError, match="dropout"):
+        attach_adapter(tiny_qwen3, _settings(gradient_checkpointing=True))
+    assert _lora_names(tiny_qwen3) == []
+
+
 def test_checkpointing_is_enabled_for_qwen3(
     tiny_qwen3: LoadedModel,
 ) -> None:
