@@ -36,7 +36,6 @@ from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import stratum_name
 from tomography.p9.unknowns import type_pools
 from tomography.reading.metrics import auroc
-from tomography.reading.metrics import cosine_matrix
 from tomography.reading.reader import RepReader
 from tomography.templates import PAPER_TEMPLATES
 from tomography.templates import ChatFormat
@@ -426,7 +425,7 @@ def test_collect_item_activations_forwards_the_reading_settings(
 
 
 def _pool_of(
-    train: tuple[int, int] = (4, 4),
+    train: tuple[int, int] = (12, 12),
     val: tuple[int, int] = (3, 3),
     test: tuple[int, int] = (3, 3),
 ) -> TypePool:
@@ -477,6 +476,83 @@ def test_check_pool_checks_train_first() -> None:
 
     assert check_pool(pool, min_pairs=2, min_eval=2) == (
         "fewer than 2 train items on one side"
+    )
+
+
+def _stratified_pool(train: dict[str, tuple[int, int]]) -> TypePool:
+    positive: list[LabeledItem] = []
+    negative: list[LabeledItem] = []
+    for relation, (n_pos, n_neg) in train.items():
+        positive += [
+            _labeled(f"p-{relation}-{i}", "known", relation=relation)
+            for i in range(n_pos)
+        ]
+        negative += [
+            _labeled(f"n-{relation}-{i}", "unknown", relation=relation)
+            for i in range(n_neg)
+        ]
+    for split in ("val", "test"):
+        positive += [
+            _labeled(f"p-{split}-{i}", "known", split=split, relation="a")  # type: ignore[arg-type]
+            for i in range(3)
+        ]
+        negative += [
+            _labeled(f"n-{split}-{i}", "unknown", split=split, relation="a")  # type: ignore[arg-type]
+            for i in range(3)
+        ]
+    return TypePool(
+        "t", tuple(positive), tuple(negative), "relation", "knowledge"
+    )
+
+
+def test_check_pool_counts_the_pairs_the_strata_allow() -> None:
+    apart = _stratified_pool({"a": (6, 0), "b": (0, 6)})
+    mixed = _stratified_pool({"a": (6, 10), "b": (8, 4), "c": (2, 2)})
+
+    assert check_pool(apart, min_pairs=4, min_eval=3) == (
+        "fewer than 4 matched train pairs"
+    )
+    assert check_pool(mixed, min_pairs=12, min_eval=3) is None
+    assert check_pool(mixed, min_pairs=13, min_eval=3) == (
+        "fewer than 13 matched train pairs"
+    )
+
+
+def test_check_pool_names_the_short_side_before_the_matched_pairs() -> None:
+    pool = _stratified_pool({"a": (1, 9), "b": (0, 9)})
+
+    assert check_pool(pool, min_pairs=3, min_eval=3) == (
+        "fewer than 3 train items on one side"
+    )
+
+
+def _uids_in_half(prefix: str, half: int, n: int) -> list[str]:
+    uids: list[str] = []
+    i = 0
+    while len(uids) < n:
+        uid = f"{prefix}-{i}"
+        if reading_module._half_of(uid) == half:
+            uids.append(uid)
+        i += 1
+    return uids
+
+
+def test_check_pool_names_a_train_half_that_cannot_be_fitted() -> None:
+    base = _pool_of(train=(0, 0))
+    lopsided = dataclasses.replace(
+        base,
+        positive=(
+            *(_labeled(u, "known") for u in _uids_in_half("p", 0, 8)),
+            *base.positive,
+        ),
+        negative=(
+            *(_labeled(u, "unknown") for u in _uids_in_half("n", 0, 8)),
+            *base.negative,
+        ),
+    )
+
+    assert check_pool(lopsided, min_pairs=4, min_eval=3) == (
+        "fewer than 2 matched train pairs in one split half"
     )
 
 
@@ -755,29 +831,118 @@ def test_cosines_follow_the_planted_directions(planted: Planted) -> None:
     k = 2
     rows = {name: _row(cube, name) for name in cube.types}
 
-    for t in range(len(cube.types)):
-        assert cube.cosine[k, t, t] == pytest.approx(1.0)
     np.testing.assert_allclose(cube.cosine[k], cube.cosine[k].T)
     for group in (A_GROUP, B_GROUP):
         for first in group:
             for second in group:
-                assert cube.cosine[k, rows[first], rows[second]] > 0.5
+                assert cube.cosine[k, rows[first], rows[second]] > 0.75
     for first in A_GROUP:
         for second in B_GROUP:
             assert abs(cube.cosine[k, rows[first], rows[second]]) < 0.3
 
 
-def test_the_cosines_are_those_of_the_signed_readers(planted: Planted) -> None:
+def test_the_cosines_are_symmetric_and_bounded(planted: Planted) -> None:
+    cosine = planted.cube.cosine
+
+    np.testing.assert_allclose(cosine, cosine.transpose(0, 2, 1))
+    assert np.abs(cosine).max() <= 1.0
+
+
+def test_the_diagonal_is_the_split_half_stability(planted: Planted) -> None:
     cube = planted.cube
 
-    for k in range(len(LAYERS)):
-        signed = np.stack(
-            [
-                cube.readers[n].directions[k] * cube.readers[n].signs[k]
-                for n in cube.types
-            ]
+    for t in range(len(cube.types)):
+        for k in SIGNAL:
+            assert cube.cosine[k, t, t] > 0.7
+        assert abs(cube.cosine[0, t, t]) < 0.3
+
+
+def _noise_case(
+    seed: int, d: int = 1024, n_side: int = 60
+) -> tuple[ItemActivations, dict[str, TypePool]]:
+    """Pure noise, with the known side shared by contrasts A and B."""
+    splits: tuple[Split, ...] = ("train", "train", "train", "val", "test")
+
+    def side(prefix: str, label: Label) -> tuple[LabeledItem, ...]:
+        return tuple(
+            _labeled(f"{prefix}-{i}", label, split=splits[i % 5])
+            for i in range(n_side)
         )
-        np.testing.assert_allclose(cube.cosine[k], cosine_matrix(signed))
+
+    shared, a, b = (
+        side("x", "known"),
+        side("a", "unknown"),
+        side("b", "unknown"),
+    )
+    c, e = side("c", "known"), side("e", "unknown")
+    pools = {
+        "A": TypePool("A", shared, a, "none", "knowledge"),
+        "B": TypePool("B", shared, b, "none", "knowledge"),
+        "C": TypePool("C", c, e, "none", "knowledge"),
+    }
+    items = [*shared, *a, *b, *c, *e]
+    rng = np.random.default_rng(100 + seed)
+    data = rng.standard_normal((2, len(items), d)).astype(np.float32)
+    uids = tuple(i.example.uid for i in items)
+    return ItemActivations(uids, (1, 2), data), pools
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_contrasts_that_share_a_side_are_not_similar_on_noise(
+    seed: int,
+) -> None:
+    acts, pools = _noise_case(seed)
+
+    cube = reading_cube(
+        acts, pools, methods=("logistic",), n_seeds=1, n_pairs=16, seed=seed
+    )
+
+    assert np.abs(cube.cosine[:, 0, 1]).max() < 0.1
+    assert np.abs(cube.cosine[:, 0, 2]).max() < 0.1
+
+
+def test_identical_contrasts_have_identical_cosines() -> None:
+    acts, pools = _noise_case(0)
+    twin = {"A": pools["A"], "A2": dataclasses.replace(pools["A"], name="A2")}
+
+    cube = reading_cube(
+        acts, twin, methods=("logistic",), n_seeds=1, n_pairs=16, seed=0
+    )
+
+    np.testing.assert_array_equal(cube.cosine[:, 0, 0], cube.cosine[:, 0, 1])
+    np.testing.assert_array_equal(cube.cosine[:, 0, 0], cube.cosine[:, 1, 1])
+
+
+def test_the_cosines_are_deterministic_under_the_seed() -> None:
+    acts, pools = _noise_case(0, d=64)
+
+    def cosines(seed: int) -> NDArray[np.float64]:
+        cube = reading_cube(
+            acts, pools, methods=("logistic",), n_seeds=1, n_pairs=16, seed=seed
+        )
+        return cube.cosine
+
+    np.testing.assert_array_equal(cosines(3), cosines(3))
+
+
+def test_the_cosines_fit_on_train_items_only(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _spy_fit(monkeypatch)
+    pools = {
+        name: planted.pools[name]
+        for name in ("obscure_real", "real_vs_synthal")
+    }
+
+    reading_cube(
+        planted.acts, pools, methods=("logistic",), n_seeds=1, n_pairs=8, seed=0
+    )
+
+    by_uid = {i.example.uid: i for i in planted.items}
+    assert len(calls) == 8
+    for call in calls:
+        uids = _uid_of_column(planted.acts, call["h"])
+        assert {by_uid[u].example.split for u in uids} == {"train"}
 
 
 def test_the_readers_are_fitted_on_all_train_pairs_with_the_run_seed(
@@ -816,6 +981,48 @@ def test_every_draw_is_a_fit_with_a_seed_derived_from_the_run_seed(
                         reader, planted.acts, planted.pools[name], split
                     ),  # type: ignore[arg-type]
                 )
+            if m == 0:
+                for u, other in enumerate(planted.cube.types):
+                    np.testing.assert_allclose(
+                        planted.cube.transfer[s, :, t, u],
+                        type_auroc(
+                            reader, planted.acts, planted.pools[other], "test"
+                        ),
+                    )
+
+
+def test_each_fitted_reader_scores_the_held_out_rows_once(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[Any] = []
+    real = RepReader.score
+
+    def spy(self: RepReader, h: Any) -> Any:
+        seen.append(h)
+        return real(self, h)
+
+    monkeypatch.setattr(RepReader, "score", spy)
+    names = ("obscure_real", "real_vs_synthal")
+    pools = {name: planted.pools[name] for name in names}
+
+    reading_cube(
+        planted.acts,
+        pools,
+        methods=("logistic", "pca_diff"),
+        n_seeds=2,
+        n_pairs=16,
+        seed=0,
+    )
+
+    held_out = {
+        i.example.uid
+        for pool in pools.values()
+        for i in (*pool.positive, *pool.negative)
+        if i.example.split != "train"
+    }
+    assert len(seen) == len(names) * 2 * 2
+    assert all(h is seen[0] for h in seen)
+    assert seen[0].shape[1] == len(held_out)
 
 
 def test_the_draws_differ_and_the_cube_is_reproducible(

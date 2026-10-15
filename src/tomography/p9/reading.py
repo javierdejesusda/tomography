@@ -9,6 +9,8 @@ question shared by many contrasts and draws is run through the model once.
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import replace
+import hashlib
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,6 +22,7 @@ from tomography.knowledge import few_shot_prompt
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.p9.pool import LabeledItem
+from tomography.p9.unknowns import Strata
 from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import stratum_name
 from tomography.pairing import label_contrastive_pairs
@@ -41,6 +44,8 @@ READING_METHODS: tuple[Method, ...] = (
     "mean_diff",
     "random",
 )
+_HALF_SALT = "p9-split-half"
+_HALF_MIN_PAIRS = 2
 
 
 def p9_template(
@@ -182,26 +187,64 @@ def collect_item_activations(
     )
 
 
+def _half_of(uid: str) -> int:
+    digest = hashlib.sha256(f"{_HALF_SALT}|{uid}".encode()).digest()
+    return digest[0] & 1
+
+
+def _half_pool(pool: TypePool, half: int) -> TypePool:
+    def keep(items: tuple[LabeledItem, ...]) -> tuple[LabeledItem, ...]:
+        return tuple(i for i in items if _half_of(i.example.uid) == half)
+
+    return replace(
+        pool, positive=keep(pool.positive), negative=keep(pool.negative)
+    )
+
+
+def _matched_pairs(
+    positive: Sequence[LabeledItem],
+    negative: Sequence[LabeledItem],
+    strata: Strata,
+) -> int:
+    counts: dict[str, list[int]] = {}
+    for side, items in enumerate((positive, negative)):
+        for item in items:
+            counts.setdefault(stratum_name(item, strata), [0, 0])[side] += 1
+    return sum(min(pair) for pair in counts.values())
+
+
 def check_pool(pool: TypePool, *, min_pairs: int, min_eval: int) -> str | None:
     """Says why a contrast cannot be read, if it cannot.
 
     Args:
         pool: One contrast.
-        min_pairs: Fewest train items on each side.
+        min_pairs: Fewest train items on each side, and fewest train pairs
+            that never cross two strata.
         min_eval: Fewest val items, and fewest test items, on each side.
 
     Returns:
-        None for a usable pool, else the reason: the train split is checked
-        first, then val, then test.
+        None for a usable pool, else the reason: the train items on each
+        side are checked first, then the matched train pairs, then val,
+        then test, then the matched train pairs of each split half (see
+        `reading_cube`).
     """
     positive, negative = pool.split("train")
     if min(len(positive), len(negative)) < min_pairs:
         return f"fewer than {min_pairs} train items on one side"
+    if _matched_pairs(positive, negative, pool.strata) < min_pairs:
+        return f"fewer than {min_pairs} matched train pairs"
     splits: tuple[Split, ...] = ("val", "test")
     for split in splits:
         positive, negative = pool.split(split)
         if min(len(positive), len(negative)) < min_eval:
             return f"fewer than {min_eval} {split} items on one side"
+    for half in (0, 1):
+        positive, negative = _half_pool(pool, half).split("train")
+        if _matched_pairs(positive, negative, pool.strata) < _HALF_MIN_PAIRS:
+            return (
+                f"fewer than {_HALF_MIN_PAIRS} matched train pairs in one "
+                "split half"
+            )
     return None
 
 
@@ -302,10 +345,12 @@ class ReadingCube:
         test: Shape (M, T, S, K): the same on the test items.
         transfer: Shape (S, K, T, T): the first method fitted on contrast i
             (row) and scored on the test items of contrast j (column).
-        cosine: Shape (K, T, T): cosines of the signed directions fitted on
-            all train pairs of each contrast, so every contrast points
-            towards its positive side.
-        readers: Those all-pairs readers, by contrast.
+        cosine: Shape (K, T, T): split-half cross-fit cosines of the signed
+            directions of the contrasts, so every contrast points towards
+            its positive side. The diagonal is the stability of a contrast
+            across the two halves of its train items, not 1.
+        readers: The readers fitted on all train pairs of each contrast with
+            `seed`, by contrast; the cosines do not come from them.
     """
 
     types: tuple[str, ...]
@@ -321,6 +366,40 @@ class ReadingCube:
 def _draw_seed(seed: int, draw: int) -> int:
     sequence = np.random.SeedSequence([seed, draw])
     return int(sequence.generate_state(1)[0])
+
+
+def _cross_fit_cosine(
+    acts: ItemActivations,
+    pools: Mapping[str, TypePool],
+    *,
+    method: Method,
+    preprocess: Preprocess,
+    seed: int,
+) -> NDArray[np.float64]:
+    signed = []
+    for half in (0, 1):
+        sequence = np.random.SeedSequence([seed, 2, half])
+        readers = [
+            fit_type_reader(
+                acts,
+                _half_pool(pool, half),
+                method=method,
+                preprocess=preprocess,
+                n_pairs=None,
+                seed=int(sequence.generate_state(1)[0]),
+            )
+            for pool in pools.values()
+        ]
+        signed.append(
+            np.stack([r.directions * r.signs[:, None] for r in readers])
+        )
+    n_types = len(pools)
+    cosine = np.empty((len(acts.layers), n_types, n_types))
+    for k in range(len(acts.layers)):
+        both = cosine_matrix(np.concatenate([signed[0][:, k], signed[1][:, k]]))
+        cross = both[:n_types, n_types:]
+        cosine[k] = (cross + cross.T) / 2
+    return cosine
 
 
 def reading_cube(
@@ -340,8 +419,24 @@ def reading_cube(
     items of its own contrast. The first method is also scored on the test
     items of every other contrast, which crosses the two kinds of contrast: a
     knowledge direction scored on an unknown-type contrast asks whether
-    "known" is only "familiar entity". The cosines come from readers fitted
-    on all train pairs with `seed`.
+    "known" is only "familiar entity". The val and test rows of every
+    contrast are gathered once; each fitted reader scores them once and a
+    contrast takes its slice of the scores, so the activations are not
+    copied per reader and split.
+
+    The cosines are split-half cross-fits. A fit on all train pairs would
+    bias the cosine of two contrasts that share a side (about +0.5 on pure
+    noise, against under 0.1 for disjoint sides), because the sample noise
+    of the shared items enters both directions. Instead, a hash of the uid
+    puts every train item in one of two halves, the same half for every
+    contrast, so a shared item never feeds both sides of a comparison. Pairs
+    are formed inside a half, so they stay whole. The first method is fitted
+    on each half of each contrast (pairs and finder seeded from `seed`, a
+    different seed per half), and the cosine of contrasts i and j is the mean
+    of cos(i in half 0, j in half 1) and cos(i in half 1, j in half 0). The
+    diagonal i == j uses the same formula, so it measures the split-half
+    stability of a contrast. The partition depends on the uids only, which
+    lets `check_pool` tell whether both halves of a contrast can be fitted.
 
     Args:
         acts: The activations of every item of the pools.
@@ -375,12 +470,18 @@ def reading_cube(
         split: {name: _split_arrays(acts, pools[name], split) for name in names}
         for split in splits
     }
+    eval_rows = np.unique(
+        np.concatenate(
+            [rows for by_name in held.values() for rows, _ in by_name.values()]
+        )
+    )
+    eval_data = acts.data[:, eval_rows]
 
     def score(
-        reader: RepReader, split: Split, name: str
+        scores: NDArray[np.float32], split: Split, name: str
     ) -> NDArray[np.float64]:
         rows, labels = held[split][name]
-        return auroc(reader.score(acts.data[:, rows]), labels)
+        return auroc(scores[:, np.searchsorted(eval_rows, rows)], labels)
 
     for t, name in enumerate(names):
         for s in range(n_seeds):
@@ -393,14 +494,15 @@ def reading_cube(
                     n_pairs=n_pairs,
                     seed=_draw_seed(seed, s),
                 )
-                val[m, t, s] = score(reader, "val", name)
-                test[m, t, s] = score(reader, "test", name)
+                scores = reader.score(eval_data)
+                val[m, t, s] = score(scores, "val", name)
+                test[m, t, s] = score(scores, "test", name)
                 if m == 0:
                     for u, other in enumerate(names):
                         transfer[s, :, t, u] = (
                             test[m, t, s]
                             if u == t
-                            else score(reader, "test", other)
+                            else score(scores, "test", other)
                         )
     full = {
         name: fit_type_reader(
@@ -413,15 +515,8 @@ def reading_cube(
         )
         for name in names
     }
-    cosine = np.stack(
-        [
-            cosine_matrix(
-                np.stack(
-                    [full[n].directions[k] * full[n].signs[k] for n in names]
-                )
-            )
-            for k in range(n_layers)
-        ]
+    cosine = _cross_fit_cosine(
+        acts, pools, method=methods[0], preprocess=preprocess, seed=seed
     )
     return ReadingCube(
         names, tuple(methods), acts.layers, val, test, transfer, cosine, full
