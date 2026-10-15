@@ -26,6 +26,7 @@ from tomography.experiments.p9d_steering import resolve_mode
 from tomography.experiments.p9d_steering import run
 from tomography.experiments.steering import Arm
 from tomography.experiments.steering import GenSettings
+from tomography.experiments.steering import reader_arm
 from tomography.experiments.sweep import chat_format_for
 from tomography.knowledge import DEFAULT_SHOTS
 from tomography.knowledge import ItemLabel
@@ -44,6 +45,7 @@ from tomography.p9.signals import TokenStats
 from tomography.p9.signals import first_answer_token
 from tomography.p9.unknowns import type_pools
 from tomography.reading.metrics import wilson_ci
+from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
 
 SPLITS: tuple[Split, ...] = ("train", "train", "train", "val", "test")
@@ -191,6 +193,10 @@ def test_the_shot_count_accepts_its_bounds(n_shots: int) -> None:
     assert _config(n_shots=n_shots).n_shots == n_shots
 
 
+def test_the_shot_count_range_is_left_to_the_labels_config() -> None:
+    assert _config(n_shots=16).n_shots == 16
+
+
 def test_config_defaults_and_round_trip() -> None:
     config = Config(labels_run="runs/p9a")
 
@@ -202,7 +208,6 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.eval_types == (
         "obscure_real",
         "fictional_generated",
-        "post_cutoff",
         "unknowable_detail",
         "false_premise",
     )
@@ -237,20 +242,42 @@ def test_labels_run_is_required() -> None:
     [
         ({"coeffs": (-0.2, 0.2)}, "0.0"),
         ({"coeffs": (0.0, float("nan"))}, "finite"),
-        ({"n_shots": -1}, "n_shots"),
-        ({"n_shots": 16}, "n_shots"),
         ({"n_random": 0}, "n_random"),
         ({"n_prompts": 0}, "n_prompts"),
         ({"behavior": "sometimes"}, "behavior"),
+        ({"min_eval": 0}, "min_eval"),
+        ({"min_pairs": 0}, "min_pairs"),
+        ({"n_pairs": 0}, "n_pairs"),
+        ({"num_samples": 2}, "needs a temperature"),
+        ({"temperature": 0.0}, "temperature"),
+        ({"temperature": -0.5}, "temperature"),
+        ({"temperature": 0.8, "top_p": 0.0}, "top_p"),
+        ({"temperature": 0.8, "top_p": 1.5}, "top_p"),
+        ({"max_new_tokens": 0}, "max_new_tokens"),
+        ({"batch_size": 0}, "batch_size"),
+        ({"mode": "fractional"}, "mode must be one of"),
+        ({"op": "cubic"}, "op must be one of"),
+        ({"mask": "first"}, "mask must be one of"),
     ],
     ids=[
         "no_zero",
         "nan_coeff",
-        "negative_shots",
-        "too_many_shots",
         "no_random",
         "no_prompts",
         "bad_behavior",
+        "no_eval_items",
+        "no_pairs_minimum",
+        "no_pairs",
+        "samples_without_temperature",
+        "zero_temperature",
+        "negative_temperature",
+        "zero_top_p",
+        "large_top_p",
+        "no_new_tokens",
+        "no_batch",
+        "bad_mode",
+        "bad_operator",
+        "bad_mask",
     ],
 )
 def test_config_rejects_settings_that_would_fail_late(
@@ -258,6 +285,14 @@ def test_config_rejects_settings_that_would_fail_late(
 ) -> None:
     with pytest.raises(ValueError, match=match):
         _config(**overrides)
+
+
+@pytest.mark.parametrize("behavior", ["auto", "abstention", "shift"])
+def test_every_behavior_rejects_the_same_generation_settings(
+    behavior: str,
+) -> None:
+    with pytest.raises(ValueError, match="needs a temperature"):
+        _config(behavior=behavior, num_samples=2)
 
 
 def test_a_closed_gate_raises_before_any_model_work(
@@ -298,6 +333,15 @@ def test_an_unknown_type_contrast_is_refused(
         plan_groups(_config(**overrides), _items(), True)
 
 
+def test_post_cutoff_is_selectable_though_not_a_default() -> None:
+    config = _config(eval_types=("obscure_real", "post_cutoff"))
+
+    plan = plan_groups(config, _items(), True)
+
+    assert "post_cutoff" not in Config(labels_run="runs/p9a").eval_types
+    assert plan.skipped == {"post_cutoff": "no such type"}
+
+
 def test_the_direction_contrast_must_exist() -> None:
     with pytest.raises(ValueError, match=r"post_cutoff.*available"):
         plan_groups(_config(direction_type="post_cutoff"), _items(), True)
@@ -306,6 +350,14 @@ def test_the_direction_contrast_must_exist() -> None:
 def test_the_direction_contrast_must_pass_the_pool_check() -> None:
     with pytest.raises(ValueError, match="fewer than 1000 train items"):
         plan_groups(_config(min_pairs=1000), _items(), True)
+
+
+def test_the_evaluation_groups_follow_the_calibration_group() -> None:
+    plan = plan_groups(_config(), _items(), True)
+
+    assert plan.groups[0].name == "calibration"
+    assert plan.evaluation == plan.groups[1:]
+    assert plan.evaluation
 
 
 def test_a_contrast_without_enough_test_items_is_skipped_and_named() -> None:
@@ -1075,6 +1127,7 @@ def test_the_hand_check_alternates_between_abstained_and_answered(
     with (run_dir.path / "hand_check.csv").open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     questions = {i.example.uid: i.example.question for i in _items()}
+    known = {i.example.uid: _is_known(i) for i in _items()}
     assert list(rows[0]) == list(CHECK_COLUMNS)
     assert len(rows) == 10 == _summary(run_dir)["hand_check_rows"]
     assert [r["abstained"] for r in rows] == ["1", "0"] * 5
@@ -1085,7 +1138,35 @@ def test_the_hand_check_alternates_between_abstained_and_answered(
         assert row["completion"] in {ABSTAIN, "gold", "other"}
         assert row["abstained"] == str(int(row["completion"] == ABSTAIN))
         assert row["correct"] == str(int(row["completion"] == "gold"))
-        assert row["coeff"] in {"-0.2", "0.2"} or row["completion"] != ABSTAIN
+        if row["completion"] == ABSTAIN:
+            assert (row["coeff"], known[row["uid"]]) in {
+                ("-0.2", True),
+                ("0.2", False),
+            }
+
+
+def test_the_abstention_x_label_names_the_coefficient_mode(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _canned_run(
+        tiny_qwen3, tmp_path, monkeypatch, _planted, mode="absolute"
+    )
+
+    sidecar = run_dir.read_json("curves_obscure_real")
+    assert isinstance(sidecar, dict)
+    assert sidecar["xlabel"] == "Coefficient"
+
+
+def test_the_shift_x_label_names_the_coefficient_mode(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _execute(
+        tiny_arch, tmp_path, eval_types=SHIFT_TYPES, mode="absolute"
+    )
+
+    sidecar = run_dir.read_json("curves_obscure_real_entropy")
+    assert isinstance(sidecar, dict)
+    assert sidecar["xlabel"] == "Coefficient"
 
 
 def test_the_arms_are_built_with_the_config_settings(
@@ -1112,11 +1193,14 @@ def test_the_arms_are_built_with_the_config_settings(
         _chat_prompt(tiny_qwen3, config, i) for i in unique.values()
     )
     (norms,) = spies.norms
-    assert [c["index"] for c in calls.arms] == [0] * 3 + [1] * 3 + [2] * 3
-    assert [c["coeff"] for c in calls.arms] == [-0.2, 0.0, 0.2] * 3
+    assert [c["index"] for c in calls.arms] == [0] * 3 + [1] * 2 + [2] * 2
+    assert [c["coeff"] for c in calls.arms] == [-0.2, 0.0, 0.2] + [
+        -0.2,
+        0.2,
+    ] * 2
     assert [c["reader"].method for c in calls.arms] == ["logistic"] * 3 + [
         "random"
-    ] * 6
+    ] * 4
     for call in calls.arms:
         assert call["settings"] == GenSettings.from_config(config)
         assert tuple(call["layers"]) == tuple(_summary(run_dir)["layers"])
@@ -1127,9 +1211,57 @@ def test_the_arms_are_built_with_the_config_settings(
             "all",
         )
         assert call["preserve_norm"] is True
-    assert len(calls.prompts) == 9
+    assert len(calls.prompts) == 7
     for prompts in calls.prompts:
         assert sorted(prompts) == expected
+
+
+def test_the_random_arms_share_the_unsteered_rates(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _canned_run(tiny_qwen3, tmp_path, monkeypatch, _planted)
+
+    columns, rows = _table(run_dir)
+    for name in ("calibration", "obscure_real", "fictional_generated"):
+        lat = _row(rows, columns, type=name, arm="lat0", coeff=0.0)
+        for arm in ("random0", "random1"):
+            row = _row(rows, columns, type=name, arm=arm, coeff=0.0)
+            assert row == {**lat, "arm": arm}
+
+
+@pytest.mark.parametrize("temperature", [None, 0.8], ids=["greedy", "sampled"])
+def test_a_zero_coefficient_generates_the_same_text_for_any_direction(
+    tiny_qwen3: LoadedModel, temperature: float | None
+) -> None:
+    rng = np.random.default_rng(0)
+    layers = (1, 2)
+    settings = GenSettings(
+        max_new_tokens=6,
+        temperature=temperature,
+        num_samples=1 if temperature is None else 2,
+        batch_size=2,
+    )
+    prompts = ["Q: Who wrote it?\nA:", "Q: Where is it?\nA:"]
+
+    texts = []
+    for _ in range(2):
+        reader = RepReader.from_arrays(
+            "random",
+            layers,
+            rng.standard_normal((2, tiny_qwen3.d_model)),
+            np.zeros((2, tiny_qwen3.d_model)),
+        )
+        arm = reader_arm(
+            tiny_qwen3,
+            settings,
+            reader,
+            layers=layers,
+            coeff=0.0,
+            norms={1: 2.0, 2: 3.0},
+        )
+        texts.append([[c.text for c in row] for row in arm.generate(prompts)])
+
+    assert texts[0] == texts[1]
 
 
 def test_the_norms_are_measured_on_the_chat_prompts_of_the_train_items(
@@ -1295,7 +1427,9 @@ def test_run_refuses_labels_made_with_another_number_of_shots(
     monkeypatch.setattr(p9d_steering, "load_model", never)
     config = _config(labels_run=str(labels.path), n_shots=2)
 
-    with pytest.raises(ValueError, match=r"n_shots.*15.*2"):
+    with pytest.raises(
+        ValueError, match=r"n_shots 15.*n_shots is 2.*direction is read on"
+    ):
         run(config, _run_dir(tmp_path, config))
 
 
