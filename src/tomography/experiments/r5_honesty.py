@@ -68,7 +68,7 @@ class Config(ReadingConfig):
 
     Attributes:
         n_scan_statements: Number of fixed test statements drawn as token by
-            layer scans.
+            layer scans; 0 writes none.
     """
 
     experiment: str = "r5"
@@ -223,9 +223,9 @@ def execute(
             a true statement and 0 for a false one.
 
     Raises:
-        ValueError: If `config.n_scan_statements` exceeds the number of true
-            test statements, or a split lacks true or false statements for
-            the transfer pairs.
+        ValueError: If `config.n_scan_statements` is negative or exceeds the
+            number of true test statements, or a split lacks true or false
+            statements for the transfer pairs.
     """
 
     def part(split: Split, *, only_true: bool) -> list[Example]:
@@ -236,10 +236,10 @@ def execute(
         ]
 
     test = part("test", only_true=True)
-    if config.n_scan_statements > len(test):
+    if not 0 <= config.n_scan_statements <= len(test):
         raise ValueError(
-            f"n_scan_statements={config.n_scan_statements} exceeds the "
-            f"{len(test)} true test statements"
+            f"n_scan_statements={config.n_scan_statements} must be between 0 "
+            f"and the {len(test)} true test statements"
         )
     train_sets = [
         _stimuli(
@@ -310,9 +310,10 @@ def execute(
             chance=0.5,
             n_layers=loaded.n_layers,
         )
-    _write_scans(
-        config, run_dir, loaded, result, test[: config.n_scan_statements]
-    )
+    if config.n_scan_statements > 0:
+        _write_scans(
+            config, run_dir, loaded, result, test[: config.n_scan_statements]
+        )
     sizes = {
         "transfer": {
             name: int(transfer_sets[f"transfer_{name}"].groups.shape[0])

@@ -397,7 +397,11 @@ def test_scans_follow_the_input_order_of_the_test_statements(
             assert "".join(tokens).strip() == statement.text.strip()
 
 
-def test_too_many_scan_statements_fail_before_the_model_runs(
+@pytest.mark.parametrize(
+    "n_scan", [-1, 13], ids=["negative", "more-than-the-true-test-statements"]
+)
+def test_a_bad_scan_count_fails_before_the_model_runs(
+    n_scan: int,
     tiny_arch: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -407,10 +411,27 @@ def test_too_many_scan_statements_fail_before_the_model_runs(
 
     monkeypatch.setattr(r5_honesty, "sweep_from_activations", forbidden)
     monkeypatch.setattr(r5_honesty, "stimulus_activations", forbidden)
-    config = _config(n_scan_statements=13)
+    config = _config(n_scan_statements=n_scan)
     run_dir = RunDir.create(config, out_root=tmp_path)
     with pytest.raises(ValueError, match="n_scan_statements"):
         execute(config, run_dir, tiny_arch, _statements())
+
+
+def test_zero_scan_statements_write_no_scans(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(n_scan_statements=0)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _statements())
+    assert not list(run_dir.path.glob("scan_*"))
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["n_scan"] == 0
+    paths = plot(run_dir, tmp_path / "figs")
+    assert [p.stem for p in paths if p.suffix == ".pdf"] == [
+        "curves_transfer",
+        "curves",
+    ]
 
 
 def test_statements_without_both_labels_fail_before_the_model_runs(
