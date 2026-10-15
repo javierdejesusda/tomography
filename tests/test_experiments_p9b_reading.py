@@ -72,7 +72,7 @@ CURVE_STEMS = [
 
 
 def _items(*, post_awards_apart: bool = False) -> list[LabeledItem]:
-    """A planted pool: ten contrasts are usable, two are too small.
+    """A planted pool: eleven contrasts are usable, two are too small.
 
     With `post_awards_apart` the post-cutoff awards share no relation with
     the real ones, so `post_cutoff` has no pair to match.
