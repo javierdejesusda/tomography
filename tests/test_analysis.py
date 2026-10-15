@@ -1,5 +1,6 @@
 """Tests for the layer analyses: PCA variance and t-SNE."""
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -7,7 +8,14 @@ from numpy.typing import NDArray
 import pytest
 from sklearn.manifold import TSNE
 
+from tomography.analysis import layer_cosines
+from tomography.analysis import lens_logits
+from tomography.analysis import mean_direction
 from tomography.analysis import pca_explained_variance
+from tomography.analysis import pole_separation
+from tomography.analysis import seed_agreement
+from tomography.analysis import standardize
+from tomography.analysis import top_tokens
 from tomography.analysis import tsne_embed
 
 
@@ -208,3 +216,216 @@ def test_tsne_rejects_bad_h() -> None:
     bad[0, 0, 0] = np.nan
     with pytest.raises(ValueError, match="finite"):
         tsne_embed(bad, perplexity=5.0)
+
+
+def _runs(n: int = 4, k: int = 3, d: int = 6, seed: int = 0) -> Any:
+    return np.random.default_rng(seed).normal(size=(n, k, d)) * 3.0
+
+
+def _unit(vectors: NDArray[np.float64]) -> NDArray[np.float64]:
+    return vectors / np.linalg.norm(vectors, axis=-1, keepdims=True)
+
+
+def test_layer_cosines_average_the_runs_and_normalize_the_inputs() -> None:
+    root = np.sqrt(0.5)
+    vectors = np.array(
+        [
+            [[5.0, 0.0], [0.0, 2.0]],
+            [[3.0, 0.0], [1.0, 1.0]],
+        ]
+    )
+    got = layer_cosines(vectors)
+    np.testing.assert_allclose(
+        got, [[1.0, root / 2], [root / 2, 1.0]], atol=1e-12
+    )
+
+
+def test_layer_cosines_has_a_unit_diagonal_and_is_symmetric() -> None:
+    got = layer_cosines(_runs())
+    assert got.shape == (3, 3)
+    np.testing.assert_allclose(np.diag(got), 1.0, atol=1e-12)
+    np.testing.assert_allclose(got, got.T, atol=1e-12)
+
+
+def test_seed_agreement_is_the_mean_cosine_to_the_other_runs() -> None:
+    vectors = _runs()
+    got = seed_agreement(vectors)
+    unit = _unit(vectors)
+    assert got.shape == (4, 3)
+    for n in range(4):
+        others = [m for m in range(4) if m != n]
+        expected = np.mean(
+            [np.sum(unit[n] * unit[m], axis=-1) for m in others], axis=0
+        )
+        np.testing.assert_allclose(got[n], expected, atol=1e-12)
+
+
+def test_the_mean_agreement_is_the_mean_pairwise_cosine() -> None:
+    vectors = _runs(n=5)
+    unit = _unit(vectors)
+    pairs = [(i, j) for i in range(5) for j in range(i + 1, 5)]
+    pairwise = np.mean(
+        [np.sum(unit[i] * unit[j], axis=-1) for i, j in pairs], axis=0
+    )
+    np.testing.assert_allclose(
+        seed_agreement(vectors).mean(axis=0), pairwise, atol=1e-12
+    )
+
+
+def test_seed_agreement_of_identical_and_opposite_runs() -> None:
+    one = _runs(n=1)
+    np.testing.assert_allclose(
+        seed_agreement(np.concatenate([one, 2.0 * one, 0.5 * one])), 1.0
+    )
+    np.testing.assert_allclose(
+        seed_agreement(np.concatenate([one, -one])), -1.0
+    )
+
+
+def test_seed_agreement_needs_two_runs() -> None:
+    with pytest.raises(ValueError, match="two runs"):
+        seed_agreement(_runs(n=1))
+
+
+def test_mean_direction_averages_the_unit_directions() -> None:
+    vectors = np.array([[[10.0, 0.0]], [[0.0, 0.1]]])
+    got = mean_direction(vectors)
+    np.testing.assert_allclose(got, [[np.sqrt(0.5), np.sqrt(0.5)]])
+
+
+def test_mean_direction_is_a_unit_vector_per_layer() -> None:
+    got = mean_direction(_runs())
+    assert got.shape == (3, 6)
+    np.testing.assert_allclose(np.linalg.norm(got, axis=-1), 1.0)
+
+
+def test_mean_direction_refuses_runs_that_cancel() -> None:
+    one = _runs(n=1)
+    with pytest.raises(ValueError, match="cancel"):
+        mean_direction(np.concatenate([one, -one]))
+
+
+@pytest.mark.parametrize(
+    "function",
+    [layer_cosines, seed_agreement, mean_direction],
+    ids=["layer_cosines", "seed_agreement", "mean_direction"],
+)
+def test_the_geometry_functions_check_their_input(
+    function: Callable[[NDArray[np.float64]], object],
+) -> None:
+    zero = _runs()
+    zero[1, 2] = 0.0
+    with pytest.raises(ValueError, match="zero"):
+        function(zero)
+    with pytest.raises(ValueError, match="shape"):
+        function(_runs()[0])
+    nan = _runs()
+    nan[0, 0, 0] = np.nan
+    with pytest.raises(ValueError, match="finite"):
+        function(nan)
+
+
+def test_lens_logits_reads_a_direction_through_the_unembedding() -> None:
+    rng = np.random.default_rng(0)
+    unembedding = rng.normal(size=(7, 4)).astype(np.float32)
+    vectors = rng.normal(size=(3, 4))
+    got = lens_logits(vectors, unembedding)
+    assert got.dtype == np.float32
+    assert got.shape == (3, 7)
+    np.testing.assert_allclose(
+        got, vectors @ unembedding.T.astype(np.float64), rtol=1e-5, atol=1e-6
+    )
+
+
+def test_lens_logits_centers_then_scales_by_the_norm_weight() -> None:
+    rng = np.random.default_rng(1)
+    unembedding = rng.normal(size=(7, 4)).astype(np.float32)
+    scale = rng.uniform(0.5, 2.0, size=4).astype(np.float32)
+    vector = rng.normal(size=4)
+    centered = vector - vector.mean()
+    got = lens_logits(vector, unembedding, scale=scale, center=True)
+    assert got.shape == (7,)
+    np.testing.assert_allclose(
+        got, (centered * scale) @ unembedding.T, rtol=1e-5, atol=1e-6
+    )
+    scaled_only = lens_logits(vector, unembedding, scale=scale)
+    np.testing.assert_allclose(
+        scaled_only, (vector * scale) @ unembedding.T, rtol=1e-5, atol=1e-6
+    )
+    centered_only = lens_logits(vector, unembedding, center=True)
+    np.testing.assert_allclose(
+        centered_only, centered @ unembedding.T, rtol=1e-5, atol=1e-6
+    )
+
+
+def test_lens_logits_checks_the_widths() -> None:
+    unembedding = np.ones((7, 4), dtype=np.float32)
+    with pytest.raises(ValueError, match="width"):
+        lens_logits(np.ones(5), unembedding)
+    with pytest.raises(ValueError, match="scale"):
+        lens_logits(np.ones(4), unembedding, scale=np.ones(3))
+
+
+def test_standardize_is_the_z_score_over_the_last_axis() -> None:
+    logits = np.random.default_rng(2).normal(size=(3, 50)).astype(np.float32)
+    got = standardize(logits)
+    assert got.dtype == np.float64
+    np.testing.assert_allclose(got.mean(axis=-1), 0.0, atol=1e-9)
+    np.testing.assert_allclose(got.std(axis=-1), 1.0, atol=1e-9)
+
+
+def test_standardize_refuses_a_constant_row() -> None:
+    logits = np.ones((2, 5), dtype=np.float32)
+    logits[0] = [1.0, 2.0, 3.0, 4.0, 5.0]
+    with pytest.raises(ValueError, match="constant"):
+        standardize(logits)
+
+
+def test_pole_separation_is_the_gap_between_the_pole_means_in_z() -> None:
+    logits = np.array([3.0, 1.0, -1.0, -3.0, 0.0])
+    sd = np.sqrt(np.mean(logits**2))
+    got = pole_separation(logits, [0, 1], [3])
+    np.testing.assert_allclose(got, (2.0 - (-3.0)) / sd)
+    np.testing.assert_allclose(pole_separation(logits, [3], [0, 1]), -got)
+    np.testing.assert_allclose(pole_separation(logits, [4], [4]), 0.0)
+
+
+def test_pole_separation_keeps_the_leading_axes() -> None:
+    rng = np.random.default_rng(3)
+    logits = rng.normal(size=(2, 3, 20))
+    got = pole_separation(logits, [0, 1], [2])
+    assert got.shape == (2, 3)
+    np.testing.assert_allclose(
+        got[1, 2], pole_separation(logits[1, 2], [0, 1], [2])
+    )
+
+
+def test_pole_separation_checks_the_poles() -> None:
+    logits = np.arange(5.0)
+    with pytest.raises(ValueError, match="pole"):
+        pole_separation(logits, [], [1])
+    with pytest.raises(ValueError, match="pole"):
+        pole_separation(logits, [1], [])
+    with pytest.raises(ValueError, match="ids"):
+        pole_separation(logits, [5], [1])
+    with pytest.raises(ValueError, match="ids"):
+        pole_separation(logits, [-1], [1])
+
+
+def test_top_tokens_returns_the_extremes_in_stable_order() -> None:
+    logits = np.array([1.0, 5.0, 5.0, 0.0, 3.0, 0.0], dtype=np.float32)
+    top, bottom = top_tokens(logits, 3)
+    assert top.dtype == bottom.dtype == np.int64
+    assert top.tolist() == [1, 2, 4]
+    assert bottom.tolist() == [3, 5, 0]
+
+
+@pytest.mark.parametrize("k", [0, 7], ids=["zero", "above"])
+def test_top_tokens_checks_k(k: int) -> None:
+    with pytest.raises(ValueError, match="k must"):
+        top_tokens(np.arange(6.0), k)
+
+
+def test_top_tokens_needs_one_row() -> None:
+    with pytest.raises(ValueError, match="shape"):
+        top_tokens(np.ones((2, 6)), 1)
