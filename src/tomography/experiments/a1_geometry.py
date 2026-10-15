@@ -38,9 +38,6 @@ class Config(ExperimentConfig):
         sources: Experiments whose default runs on `model` are read.
         extra_runs: Finished runs that replace a default run.
         depth: Relative depth of the cross-concept matrix.
-        n_boot: Not used by the agreement band, which is a closed-form
-            interval; kept, at least 1, so existing configs and run hashes
-            stay valid.
     """
 
     experiment: str = "a1"
@@ -48,7 +45,6 @@ class Config(ExperimentConfig):
     sources: tuple[str, ...] = ("r1", "r2", "r3", "r5", "r7")
     extra_runs: tuple[str, ...] = ()
     depth: float = 0.5
-    n_boot: int = 2000
 
 
 def execute(
@@ -79,11 +75,9 @@ def execute(
     Raises:
         ValueError: If there is no set, there are too many, they were read
             at different layers or depths, a concept has fewer than three
-            seeds, `config.depth` is outside (0, 1], `config.n_boot` is below
-            1 or `config.seed` is negative.
+            seeds, `config.depth` is outside (0, 1] or `config.seed` is
+            negative.
     """
-    if config.n_boot < 1:
-        raise ValueError(f"n_boot must be at least 1, got {config.n_boot}")
     if config.seed < 0:
         raise ValueError(f"seed must be non-negative, got {config.seed}")
     layers, n_layers, n_min = common_layers(readers)

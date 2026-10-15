@@ -66,7 +66,7 @@ def _sets() -> dict[str, ReaderSet]:
 
 
 def _config(**overrides: Any) -> Config:
-    base = Config(model=MODEL, sources=SOURCES, n_boot=20)
+    base = Config(model=MODEL, sources=SOURCES)
     return dataclasses.replace(base, **overrides)
 
 
@@ -91,8 +91,12 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.sources == ("r1", "r2", "r3", "r5", "r7")
     assert config.extra_runs == ()
     assert config.depth == 0.5
-    assert config.n_boot == 2000
     assert Config.from_dict(config.to_dict()) == config
+
+
+def test_the_config_has_no_bootstrap_setting() -> None:
+    names = {field.name for field in dataclasses.fields(Config)}
+    assert "n_boot" not in names
 
 
 def test_the_cli_discovers_the_experiment() -> None:
@@ -165,9 +169,9 @@ def test_execute_uses_the_first_seeds_of_the_longer_sets(
 
 
 def test_execute_writes_the_agreement_curves(tmp_path: Path) -> None:
-    run_dir = _run_dir(tmp_path, _config(seed=3, n_boot=10))
+    run_dir = _run_dir(tmp_path, _config(seed=3))
     readers = _sets()
-    execute(_config(seed=3, n_boot=10), run_dir, readers)
+    execute(_config(seed=3), run_dir, readers)
     curves = run_dir.read_arrays("curves_agreement")
     assert curves["x"].tolist() == [1.0, 2.0, 3.0]
     np.testing.assert_allclose(curves["mean"], curves["per_seed"].mean(axis=1))
@@ -259,7 +263,6 @@ def _single(seeds: int) -> Mapping[str, ReaderSet]:
         ),
         ({"a": _sets()["r1"]}, _config(depth=0.0), "depth"),
         ({"a": _sets()["r1"]}, _config(depth=1.5), "depth"),
-        ({"a": _sets()["r1"]}, _config(n_boot=0), "n_boot"),
         ({"a": _sets()["r1"]}, _config(seed=-1), "seed"),
     ],
     ids=[
@@ -270,7 +273,6 @@ def _single(seeds: int) -> Mapping[str, ReaderSet]:
         "layers",
         "depth-zero",
         "depth-above",
-        "n-boot",
         "seed",
     ],
 )
