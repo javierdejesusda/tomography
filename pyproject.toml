@@ -16,6 +16,7 @@ dependencies = [
     "peft>=0.21.2,<0.22",
     "plotly>=7.1,<8",
     "scikit-learn>=1.9,<2",
+    "scipy>=1.18,<2",
     "transformers>=5.19,<6",
 ]
 

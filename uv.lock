@@ -1380,6 +1380,7 @@ dependencies = [
     { name = "peft" },
     { name = "plotly" },
     { name = "scikit-learn" },
+    { name = "scipy" },
     { name = "transformers" },
 ]
 
@@ -1406,6 +1407,7 @@ requires-dist = [
     { name = "peft", specifier = ">=0.21.2,<0.22" },
     { name = "plotly", specifier = ">=7.1,<8" },
     { name = "scikit-learn", specifier = ">=1.9,<2" },
+    { name = "scipy", specifier = ">=1.18,<2" },
     { name = "transformers", specifier = ">=5.19,<6" },
 ]
 

@@ -327,7 +327,12 @@ def test_pseudo_values_need_three_runs() -> None:
         agreement_pseudo_values(_runs(n=2))
 
 
-def test_the_agreement_band_is_the_bootstrap_of_the_pseudo_values() -> None:
+def test_the_agreement_band_agrees_with_the_bootstrap_at_many_runs() -> None:
+    """Approximate agreement check against a bootstrap of the pseudo-values.
+
+    With 40 runs each bound lies within a tenth of the band's width of the
+    bootstrap bound.
+    """
     vectors = _runs(n=40)
     lo, hi = agreement_band(vectors)
     boot_lo, boot_hi = bootstrap_ci(

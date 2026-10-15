@@ -153,7 +153,7 @@ def seed_agreement(vectors: FloatArray) -> NDArray[np.float64]:
 
     The mean over runs equals the mean pairwise cosine. The rows are not
     independent, because every pair of runs enters two of them, so a band for
-    that mean resamples `agreement_pseudo_values` instead.
+    that mean is built from `agreement_pseudo_values` instead.
 
     Args:
         vectors: Directions of shape (N, K, d): run, layer, width. Each one
@@ -180,10 +180,10 @@ def agreement_pseudo_values(vectors: FloatArray) -> NDArray[np.float64]:
     """Computes the jackknife pseudo-values of the mean pairwise cosine.
 
     The mean pairwise cosine is a U-statistic of degree two. The rows of
-    `seed_agreement` share pairs, so resampling them gives a band that is too
-    narrow. The pseudo-value of run i is `N * U - (N - 1) * U_without_i`; the
-    pseudo-values average to the mean pairwise cosine and are the units to
-    resample for its band.
+    `seed_agreement` share pairs, so a band that treats them as independent is
+    too narrow. The pseudo-value of run i is `N * U - (N - 1) * U_without_i`;
+    the pseudo-values average to the mean pairwise cosine and are the units
+    `agreement_band` takes its standard error from.
 
     Args:
         vectors: Directions of shape (N, K, d): run, layer, width. Each one
