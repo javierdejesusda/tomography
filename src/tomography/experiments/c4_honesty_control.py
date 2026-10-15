@@ -526,9 +526,10 @@ class Config(SteeringConfig):
 
 def _check_grid(name: str, grid: Sequence[float]) -> None:
     labels = [f"{value:g}" for value in grid]
-    if len(set(labels)) != len(labels):
+    values = {float(value) for value in grid}
+    if len(set(labels)) != len(labels) or len(values) != len(grid):
         raise ValueError(f"{name} repeats a value, got {tuple(grid)}")
-    if 0.0 not in grid or len(grid) < 2:
+    if 0.0 not in values or all(value == 0.0 for value in values):
         raise ValueError(
             f"{name} needs 0.0 and another value, got {tuple(grid)}"
         )
