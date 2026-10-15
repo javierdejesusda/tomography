@@ -13,7 +13,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -34,6 +33,7 @@ from tomography.experiments.p6_scale import MAX_MODELS
 from tomography.experiments.p6_scale import MAX_PANELS
 from tomography.experiments.p6_scale import copy_reader_curves
 from tomography.experiments.p6_scale import plot_depth_panels
+from tomography.experiments.p6_scale import read_table
 from tomography.experiments.p6_scale import steering_slopes
 from tomography.experiments.sweep import plot_curves_file
 from tomography.reading.metrics import bootstrap_ci
@@ -631,17 +631,9 @@ def run(config: Config, run_dir: RunDir) -> None:
     execute(config, run_dir, runs)
 
 
-def _table(run_dir: RunDir) -> list[dict[str, Any]]:
-    payload = cast(dict[str, Any], run_dir.read_json("table"))
-    return [
-        dict(zip(payload["columns"], row, strict=True))
-        for row in payload["rows"]
-    ]
-
-
 def _plot_pairs(run_dir: RunDir, out_dir: Path, config: Config) -> list[Path]:
     """Joins the base and tuned best accuracy of every source, per pair."""
-    table = _table(run_dir)
+    table = read_table(run_dir, "table")
     pairs, sources = _pairs(config), _sources(config)
     columns = min(2, len(pairs))
     rows = -(-len(pairs) // columns)

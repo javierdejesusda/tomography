@@ -211,6 +211,13 @@ def _check_config(config: Config) -> None:
         raise ValueError(f"sources must not repeat, got {config.sources}")
 
 
+def _experiments(config: Config) -> list[str]:
+    """The sources, then the steering source when there is one."""
+    if config.steering_source is None:
+        return list(config.sources)
+    return [*config.sources, config.steering_source]
+
+
 def _check(
     config: Config,
     runs: Mapping[tuple[str, str], RunDir],
@@ -218,12 +225,9 @@ def _check(
 ) -> None:
     """Checks the config and the inputs before anything is read."""
     _check_config(config)
-    experiments = list(config.sources)
-    if config.steering_source is not None:
-        experiments.append(config.steering_source)
     lacking = [
         (experiment, model)
-        for experiment in experiments
+        for experiment in _experiments(config)
         for model in config.models
         if (experiment, model) not in runs
     ]
@@ -402,11 +406,11 @@ def run(config: Config, run_dir: RunDir) -> None:
             run is looked up.
     """
     _check_config(config)
-    experiments = list(config.sources)
-    if config.steering_source is not None:
-        experiments.append(config.steering_source)
     runs = resolve_runs(
-        out_root_of(run_dir), experiments, config.models, config.extra_runs
+        out_root_of(run_dir),
+        _experiments(config),
+        config.models,
+        config.extra_runs,
     )
     execute(
         config,
@@ -500,7 +504,16 @@ def plot_depth_panels(
     return save_figure(fig, out_dir, name)
 
 
-def _table(run_dir: RunDir, stem: str) -> list[dict[str, Any]]:
+def read_table(run_dir: RunDir, stem: str) -> list[dict[str, Any]]:
+    """Reads a table of a run as one dict per row, keyed by column.
+
+    Args:
+        run_dir: A run holding the JSON table `stem`.
+        stem: The file stem of the table, such as "table".
+
+    Returns:
+        The rows in file order.
+    """
     payload = cast(dict[str, Any], run_dir.read_json(stem))
     return [
         dict(zip(payload["columns"], row, strict=True))
@@ -521,11 +534,11 @@ def _spread(
 def _plot_best(
     run_dir: RunDir, out_dir: Path, config: Config, name: str
 ) -> list[Path]:
-    table = _table(run_dir, "table")
+    table = read_table(run_dir, "table")
     steering = (
         None
         if config.steering_source is None
-        else _table(run_dir, "table_steering")
+        else read_table(run_dir, "table_steering")
     )
     panels = 2 if steering is None else 3
     fig, axes = new_figure(
