@@ -184,8 +184,15 @@ def test_heuristic_scores_follow_the_bos_policy(
     monkeypatch.setattr(r6_truthfulqa, "HEURISTIC_TEMPLATE", SHORT_TEMPLATE)
     assert tiny_arch.default_bos == "prepend"
     expected_id = tiny_arch.bos_id if bos_id == "default" else None
+    other_id = None if expected_id is not None else tiny_arch.bos_id
     logprobs = _heuristic_logprobs(tiny_arch, _items(), expected_id)
-    expected = heuristic_score(logprobs.reshape(-1, len(HEURISTIC_LEVELS)))
+    elsewhere = _heuristic_logprobs(tiny_arch, _items(), other_id)
+    levels = (-1, len(HEURISTIC_LEVELS))
+    expected = heuristic_score(logprobs.reshape(levels))
+    assert not np.allclose(logprobs, elsewhere, atol=1e-3)
+    assert not np.array_equal(
+        expected, heuristic_score(elsewhere.reshape(levels))
+    )
 
     got = heuristic_scores(tiny_arch, _items(), bos=bos)
 

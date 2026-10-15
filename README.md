@@ -166,8 +166,10 @@ otherwise. `device=` and `dtype=` override the defaults.
 The default dtype is float32 for the GPT-2 checkpoints (float16 for `gpt2-xl`) and bfloat16 for Qwen3. The
 registry is `MODELS` and the architecture specs are `ARCHS` in [`model.py`](src/tomography/model.py); any
 other architecture raises `UnsupportedArchitectureError`. For a post-trained model, build its chat format with
-`ChatFormat.from_tokenizer(loaded.tokenizer)`. `LoadedModel.encode` is the single place that decides BOS,
-padding and character offsets, so activation collection and generation tokenize identically.
+`ChatFormat.from_tokenizer(loaded.tokenizer)`. `LoadedModel.encode` decides BOS, padding and character
+offsets for activation collection and generation, so both tokenize identically; `scoring_bos` in
+[`experiments/steering.py`](src/tomography/experiments/steering.py) applies the same BOS rule to scored
+continuations.
 
 ### Layers and token positions
 

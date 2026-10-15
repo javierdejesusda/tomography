@@ -73,8 +73,10 @@ HEURISTIC_TEMPLATE = (
 class Config(ReadingConfig):
     """R6 settings: TruthfulQA MC1 on GPT-2 with three training sources.
 
-    The shared defaults apply except for `method`, which is `logistic` as in
-    R1: `pca_diff` reads weakly on GPT-2 even on matched pairs.
+    The shared defaults apply except for the experiment id, the model, the
+    number of seeds (15, not 10) and the direction finder. R6 fits a
+    supervised `logistic` direction as in R1, because `pca_diff` reads weakly
+    on GPT-2 even on matched pairs.
 
     Attributes:
         sources: Training sources of the LAT readers, from "truthfulqa" (its
