@@ -1658,9 +1658,13 @@ def test_an_unfinished_lorra_run_raises_and_attaches_nothing(
 
 
 def _stub_lorra_run(
-    root: Path, *, layers: tuple[int, ...] = (1, 2), finish: bool = True
+    root: Path,
+    *,
+    model: str = "tiny",
+    layers: tuple[int, ...] = (1, 2),
+    finish: bool = True,
 ) -> Path:
-    config = lr1_lorra.Config(model="tiny", layers=layers)
+    config = lr1_lorra.Config(model=model, layers=layers)
     run_dir = RunDir.create(config, out_root=root)
     if finish:
         run_dir.finalize()
@@ -1697,6 +1701,20 @@ def test_execute_rejects_a_bad_lorra_run_before_any_work(
         execute(config, run_dir, tiny_gpt2, QUESTIONS, _alpaca())
     assert _lora_layers(tiny_gpt2) == []
     assert not list(run_dir.path.glob("*.npz"))
+
+
+def test_run_rejects_an_adapter_of_another_model_before_loading_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def forbidden(key: str) -> LoadedModel:
+        raise AssertionError("a model was loaded before the adapter passed")
+
+    monkeypatch.setattr(c4_honesty_control, "load_model", forbidden)
+    path = _stub_lorra_run(tmp_path / "lr1", model="other")
+    config = _config(lorra_run=str(path))
+    run_dir = RunDir.create(config, out_root=tmp_path / "run")
+    with pytest.raises(ValueError, match="trained on other, not on tiny"):
+        run(config, run_dir)
 
 
 @pytest.mark.slow

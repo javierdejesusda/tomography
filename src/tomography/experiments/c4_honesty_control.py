@@ -949,7 +949,18 @@ def run(config: Config, run_dir: RunDir) -> None:
     Args:
         config: The experiment settings.
         run_dir: The run to write into.
+
+    Raises:
+        ValueError: If `lorra_run` is not a finished run or was trained on
+            another model than `model`; nothing is loaded then.
     """
+    if config.lorra_run is not None:
+        trained_on = _lorra_config(config.lorra_run).model
+        if trained_on != config.model:
+            raise ValueError(
+                f"the adapter was trained on {trained_on}, not on "
+                f"{config.model}"
+            )
     execute(
         config,
         run_dir,
