@@ -933,10 +933,17 @@ def test_the_validation_split_chooses_the_layer_of_lat(
     assert summary["layer_source"] == "validation"
 
 
+@pytest.mark.parametrize(
+    ("val_keep", "layer"),
+    [((0,), 1), ((1,), 2)],
+    ids=["validation-peaks-first", "validation-peaks-second"],
+)
 def test_no_test_item_chooses_the_layer(
     tiny_gpt2: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    val_keep: tuple[int, ...],
+    layer: int,
 ) -> None:
     def split_acts(
         loaded: LoadedModel,
@@ -952,7 +959,7 @@ def test_no_test_item_chooses_the_layer(
         data = acts.data.copy()
         for j, item in enumerate(items):
             split = item.example.split
-            keep = {"train": (0, 1, 2), "val": (1,), "test": (2,)}[split]
+            keep = {"train": (0, 1, 2), "val": val_keep, "test": (2,)}[split]
             for k in range(len(layers)):
                 if k not in keep:
                     data[k, j, :2] = 0.0
@@ -965,7 +972,7 @@ def test_no_test_item_chooses_the_layer(
     run_dir = _execute(tiny_gpt2, tmp_path)
 
     summary = _summary(run_dir)
-    assert summary["layer"] == 2
+    assert summary["layer"] == layer
     assert summary["layer_source"] == "validation"
     curve = run_dir.read_arrays("curves")["per_seed"][1, 0]
     assert curve[2] > curve[0]
