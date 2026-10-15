@@ -653,7 +653,8 @@ def execute(
     Raises:
         ValueError: If `coeffs` has no 0.0 or no other value, `n_steer_seeds`
             is outside `1..n_seeds`, the sweep layers, the operators or the
-            window do not fit the model, the held-out texts are fewer than
+            window do not fit the model, `n_calibration` or `n_neutral` is
+            below 1, the held-out texts are fewer than
             `n_calibration + n_neutral`, or the validation sentences give
             fewer than `2 * n_prompts` distinct prompts.
     """
