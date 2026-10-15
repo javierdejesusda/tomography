@@ -15,6 +15,7 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
+from tomography.activations import PositionStrategy
 from tomography.datasets.records import Example
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
@@ -41,6 +42,7 @@ from tomography.experiments.variants import prepare
 from tomography.experiments.variants import target_of
 from tomography.experiments.variants import task_examples
 from tomography.experiments.variants import task_set
+from tomography.experiments.variants import task_sources
 from tomography.experiments.variants import task_splits
 from tomography.experiments.variants import template_variants
 from tomography.experiments.variants import variant_cosines
@@ -52,6 +54,7 @@ from tomography.reading.metrics import best_layer
 from tomography.reading.metrics import bootstrap_ci
 from tomography.templates import ChatFormat
 
+POSITIONS: tuple[PositionStrategy, ...] = ("last", "mean")
 READER = SERIES.index("reader")
 RANDOM = SERIES.index("random")
 SHUFFLED = SERIES.index("shuffled")
@@ -334,6 +337,38 @@ def _read_task(
     return _TaskResult(rows, layer, skipped, sizes)
 
 
+def _check(config: Config) -> tuple[str, ...]:
+    """Checks what the config alone settles and expands its tasks."""
+    tasks = expand_tasks(config.tasks)
+    if not tasks:
+        raise ValueError("p1 needs at least one task")
+    if config.n_seeds < 2:
+        raise ValueError(
+            "p1 needs n_seeds of at least 2, because the stability of a "
+            "reader is a cosine between two seeds"
+        )
+    unknown = [kind for kind in config.kinds if kind not in VARIANT_KINDS]
+    if unknown:
+        raise ValueError(
+            f"unknown variant kinds {unknown}, expected one of {VARIANT_KINDS}"
+        )
+    if "paper" not in config.kinds:
+        raise ValueError(
+            "kinds must include 'paper', the reference of every comparison"
+        )
+    for field, position in (
+        ("position", config.position),
+        ("eval_position", config.eval_position),
+    ):
+        if position is not None and position not in POSITIONS:
+            raise ValueError(
+                f"{field} {position!r} is not read by p1, expected one of "
+                f"{list(POSITIONS)}: the concept position belongs to p2 and "
+                "not every variant has a concept token"
+            )
+    return tasks
+
+
 def execute(
     config: Config,
     run_dir: RunDir,
@@ -361,16 +396,11 @@ def execute(
         examples: The examples of each source, by source name.
 
     Raises:
-        ValueError: If `n_seeds` is below 2, a task is unknown or a source is
-            missing (all checked before any model call), or the evaluable
+        ValueError: If the config is refused (see `run`) or a source is
+            missing (both checked before any model call), or the evaluable
             variants of a task do not share their evaluation items.
     """
-    tasks = expand_tasks(config.tasks)
-    if config.n_seeds < 2:
-        raise ValueError(
-            "p1 needs n_seeds of at least 2, because the stability of a "
-            "reader is a cosine between two seeds"
-        )
+    tasks = _check(config)
     for name in tasks:
         task_examples(READING_TASKS[name], examples)
         task_examples(target_of(READING_TASKS[name]), examples)
@@ -410,18 +440,13 @@ def run(config: Config, run_dir: RunDir) -> None:
         run_dir: The run to write into.
 
     Raises:
-        ValueError: If a task is unknown (before the model is loaded).
+        ValueError: If there is no task, `n_seeds` is below 2, a task or a
+            kind is unknown, `kinds` lacks `paper`, or `position` or
+            `eval_position` is not "last" or "mean" (all checked before the
+            model is loaded).
     """
-    sources = list(
-        dict.fromkeys(
-            source
-            for name in expand_tasks(config.tasks)
-            for source in (
-                READING_TASKS[name].source,
-                target_of(READING_TASKS[name]).source,
-            )
-        )
-    )
+    _check(config)
+    sources = task_sources(config.tasks)
     execute(config, run_dir, load_model(config.model), load_sources(sources))
 
 
