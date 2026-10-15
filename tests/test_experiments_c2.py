@@ -716,6 +716,62 @@ def test_a_split_too_small_for_one_emotion_raises_before_any_reader_is_fitted(
         execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
 
 
+REAL_TRAIN = (117, 145, 117, 109, 124, 127)
+REAL_VAL = (48, 39, 41, 41, 41, 45)
+
+
+def _real_size_scenarios() -> list[Example]:
+    """Builds scenarios with the per-emotion split sizes of the real data."""
+    return [
+        Example(
+            uid=f"{emotion}-{split}{i}",
+            text=f"{emotion} scenario {i}",
+            label=label,
+            split=split,
+            meta={"emotion": emotion},
+        )
+        for label, emotion in enumerate(EMOTIONS)
+        for split, count in (
+            ("train", REAL_TRAIN[label]),
+            ("val", REAL_VAL[label]),
+        )
+        for i in range(count)
+    ]
+
+
+def test_the_default_config_draws_every_emotion_at_the_real_split_sizes(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class StopError(Exception):
+        pass
+
+    drawn: list[tuple[list[int], int]] = []
+
+    def fit(loaded: LoadedModel, train: Any, evals: Any, **kwargs: Any) -> Any:
+        drawn.append(
+            ([s.pairs.shape[0] for s in train], evals["val"].pairs.shape[0])
+        )
+        if len(drawn) == len(EMOTIONS):
+            raise StopError
+        return None
+
+    monkeypatch.setattr(c2_emotion_steering, "reading_sweep", fit)
+    config = Config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(StopError):
+        execute(
+            config,
+            run_dir,
+            tiny_arch,
+            _real_size_scenarios(),
+            _texts(600),
+            _score,
+        )
+    assert drawn == [([config.n_pairs] * config.n_seeds, n) for n in REAL_VAL]
+
+
 def test_the_other_emotions_cap_the_pairs_when_they_are_fewer(
     tiny_arch: LoadedModel,
     tmp_path: Path,
