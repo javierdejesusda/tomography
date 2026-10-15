@@ -599,6 +599,7 @@ def test_the_summary_names_the_pairs_sources_and_models(
     assert summary["models"] == ["b3", "t3", "b6", "t6", "ref"]
 
 
+STEERING_REUSED = "must not also be a reading or template source"
 BAD_CONFIGS = [
     ({"model": "ref"}, "must be one of tuned_models"),
     ({"base_models": ("b3",)}, "same length"),
@@ -613,6 +614,12 @@ BAD_CONFIGS = [
         "at most 6",
     ),
     ({"function_sources": ("r1",)}, "only once"),
+    ({"steering_source": "r1"}, STEERING_REUSED),
+    ({"steering_source": "r5"}, STEERING_REUSED),
+    (
+        {"template_source": "p1", "steering_source": "p1"},
+        STEERING_REUSED,
+    ),
     ({"base_models": ("b3", "b3")}, "only once"),
     ({"reference": "b3"}, "only once"),
     (
@@ -632,6 +639,9 @@ BAD_CONFIG_IDS = [
     "no-function",
     "seven-sources",
     "source-of-both-kinds",
+    "steering-is-a-concept-source",
+    "steering-is-a-function-source",
+    "steering-is-the-template-source",
     "repeated-base",
     "reference-is-a-base",
     "nine-models",

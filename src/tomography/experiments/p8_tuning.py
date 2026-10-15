@@ -63,6 +63,8 @@ class Config(ExperimentConfig):
         template_task: The task of the template runs that is read.
         steering_source: The steering experiment whose default runs on the
             paired models give the dose response, or None for no such part.
+            It is none of the reading sources and not `template_source`, so
+            that no run serves two roles.
         extra_runs: Finished runs with other settings; each replaces the
             default run of its own experiment and model.
         n_boot: Bootstrap resamples of every interval.
@@ -246,6 +248,13 @@ def _check_config(config: Config) -> None:
         )
     if len(set(sources)) != len(sources):
         raise ValueError(f"each source may appear only once, got {sources}")
+    steering = config.steering_source
+    if steering is not None and steering in (*sources, config.template_source):
+        raise ValueError(
+            f"steering_source {steering!r} must not also be a reading or "
+            f"template source, got sources {sources} and template_source "
+            f"{config.template_source!r}"
+        )
     if len(models) > MAX_MODELS:
         raise ValueError(
             f"at most {MAX_MODELS} models are drawn, got {len(models)}"
@@ -515,8 +524,9 @@ def execute(
             length and at least one, `model` is not a tuned model, the models
             (with the reference) are not at most `MAX_MODELS` and distinct,
             the sources are not distinct, at most `MAX_PANELS` and of both
-            kinds, a run is missing, or a run cannot be read. The first
-            checks run before any file is read.
+            kinds, the steering source is also a reading or template source,
+            a run is missing, or a run cannot be read. The first checks run
+            before any file is read.
     """
     _check(config, runs)
     points = _read_sources(config, run_dir, runs)
