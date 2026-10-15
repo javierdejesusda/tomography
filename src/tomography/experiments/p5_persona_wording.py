@@ -27,7 +27,6 @@ from tomography.experiments.sweep import ReadingConfig
 from tomography.experiments.sweep import SweepResult
 from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.sweep import plot_curves_file
-from tomography.experiments.sweep import shuffle_within_groups
 from tomography.experiments.sweep import stimulus_activations
 from tomography.experiments.sweep import sweep_from_activations
 from tomography.experiments.sweep import write_curves
@@ -35,6 +34,7 @@ from tomography.model import LoadedModel
 from tomography.model import load_model
 from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
+from tomography.reading.metrics import parse_groups
 from tomography.templates import PAPER_TEMPLATES
 from tomography.templates import ChatFormat
 from tomography.templates import ConceptTemplate
@@ -165,6 +165,41 @@ def plain_stimuli(
     )
 
 
+def balanced_flip(
+    labels: NDArray[np.int64], groups: NDArray[np.int64], *, seed: int
+) -> NDArray[np.int64]:
+    """Swaps the two labels of exactly half of the pairs.
+
+    An independent shuffle per pair leaves a binomial imbalance of flipped
+    pairs, and a label-fitting direction leaks the true one in proportion to
+    it. Flipping exactly `n // 2` of the `n` pairs removes that first-order
+    leak; an odd `n` leaves one pair, a leak of `1 / n`.
+
+    Args:
+        labels: Binary labels of shape (m,).
+        groups: Row pairs of shape (n, 2), each with exactly one label-1
+            member.
+        seed: Seed of the choice of the swapped pairs.
+
+    Returns:
+        New labels of shape (m,): the pairs `np.random.default_rng(seed)
+        .permutation(n)[: n // 2]` have their two labels exchanged, so every
+        pair keeps exactly one label-1 member.
+
+    Raises:
+        ValueError: If a group does not have exactly two members, one of them
+            labeled 1.
+    """
+    index = parse_groups(groups, labels)
+    if not (index.valid.sum(axis=1) == 2).all():
+        raise ValueError("balanced_flip needs groups of exactly two members")
+    n = groups.shape[0]
+    swapped = groups[np.random.default_rng(seed).permutation(n)[: n // 2]]
+    flipped = labels.astype(np.int64, copy=True)
+    flipped[swapped] = labels[swapped][:, ::-1]
+    return flipped
+
+
 def condition_stimuli(
     condition: str,
     statements: Sequence[Example],
@@ -189,9 +224,10 @@ def condition_stimuli(
         n_pairs: Number of statements (pairs); None takes every one.
         seed: Seed of the draw.
         train: Whether the stimuli train a reader. Only `random_label`
-            changes: its training labels are shuffled within each pair, with
-            the seed `derive_seed(seed, "random_label")`, and its evaluation
-            labels stay real.
+            changes: its training labels are swapped in exactly half of the
+            pairs (`balanced_flip`, with the seed
+            `derive_seed(seed, "random_label")`), and its evaluation labels
+            stay real.
 
     Returns:
         The stimuli of the condition.
@@ -218,7 +254,7 @@ def condition_stimuli(
         true, template, chat, pairing="persona", n_pairs=n_pairs, seed=seed
     )
     if condition == "random_label" and train:
-        labels = shuffle_within_groups(
+        labels = balanced_flip(
             stimuli.labels,
             stimuli.groups,
             seed=derive_seed(seed, "random_label"),
