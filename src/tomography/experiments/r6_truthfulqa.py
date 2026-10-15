@@ -354,7 +354,9 @@ def execute(
     rule), `curves_<source>` (test accuracy per layer) and `summary.json`.
     The baselines in the table are scored on the test questions that LAT is
     tested on (all of them unless `n_eval_pairs` keeps a subset), and the
-    chance line is drawn for those same questions.
+    chance line is drawn for those same questions. The summary reports the
+    split sizes and, in `n_eval_pairs`, how many groups each evaluation set
+    scored.
 
     Args:
         config: The experiment settings.
@@ -474,6 +476,10 @@ def execute(
             "n_val": len(by_split["val"]),
             "n_test": len(by_split["test"]),
             "n_seeds": config.n_seeds,
+            "n_eval_pairs": {
+                split: int(stimuli.groups.shape[0])
+                for split, stimuli in eval_sets.items()
+            },
             "baselines_all_questions": baselines,
             "lat": lat_summary,
         },

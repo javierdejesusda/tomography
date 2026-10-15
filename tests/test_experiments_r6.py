@@ -396,9 +396,11 @@ def test_execute_writes_the_table_curves_and_summary(
         "n_val",
         "n_test",
         "n_seeds",
+        "n_eval_pairs",
         "baselines_all_questions",
         "lat",
     }
+    assert summary["n_eval_pairs"] == {"val": 6, "test": 8}
     assert summary["n_questions"] == 28
     assert (summary["n_train"], summary["n_val"], summary["n_test"]) == (
         14,
@@ -480,6 +482,10 @@ def test_execute_scores_the_baselines_on_the_questions_lat_is_tested_on(
     sidecar = run_dir.read_json("curves_truthfulqa")
     assert isinstance(sidecar, dict)
     assert sidecar["chance"] == pytest.approx(_test_chance(kept))
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["n_eval_pairs"] == {"val": 4, "test": 4}
+    assert summary["n_test"] == 8
 
 
 @pytest.mark.parametrize(
