@@ -34,9 +34,11 @@ from tomography.p9.reading import collect_item_activations
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
 from tomography.p9.reading import surface_baselines
+from tomography.p9.reading import within_relation_pairs
 from tomography.p9.unknowns import UNKNOWN_TYPES
 from tomography.p9.unknowns import type_pools
 from tomography.reading.directions import Method
+from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.reader import RepReader
 
 SPLITS: tuple[Split, ...] = ("train", "train", "train", "val", "test")
@@ -63,6 +65,24 @@ USABLE = [
     "real_vs_generated",
 ]
 SKIPPED = ["kuq_false_assumption", "pre_vs_post_cutoff"]
+RELATIONAL = [
+    "fictional_synthal",
+    "fictional_generated",
+    "obscure_real",
+    "obscure_real_pop",
+    "post_cutoff",
+    "real_vs_synthal",
+    "real_vs_generated",
+]
+WITHIN_COLUMNS = [
+    "logistic_within",
+    "lo_within",
+    "hi_within",
+    "text_word_within",
+    "text_char_within",
+    "popularity_within",
+    "n_pairs_within",
+]
 CURVE_STEMS = [
     *(f"curves_{name}" for name in USABLE),
     "curves_entity",
@@ -584,6 +604,7 @@ def test_the_table_reports_the_auroc_at_the_layer(
         "text_word",
         "text_char",
         "popularity",
+        *WITHIN_COLUMNS,
     ]
     assert [row[0] for row in table["rows"]] == USABLE
     for t, row in enumerate(table["rows"]):
@@ -622,6 +643,158 @@ def test_the_table_holds_the_surface_baselines_of_every_contrast(
             assert isinstance(row_dict["popularity"], float)
         else:
             assert row_dict["popularity"] is None, name
+
+
+def test_the_within_arrays_are_saved_next_to_the_pooled_ones(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cubes = _record_cubes(monkeypatch)
+
+    run_dir = _execute(tiny_arch, tmp_path)
+
+    (cube,) = cubes
+    transfer = run_dir.read_arrays("transfer")
+    assert set(transfer) == {
+        "auroc",
+        "cosine",
+        "val",
+        "test",
+        "val_within",
+        "test_within",
+        "layers",
+    }
+    for name in ("val_within", "test_within"):
+        assert transfer[name].shape == transfer["test"].shape
+        np.testing.assert_array_equal(
+            transfer[name], getattr(cube, name), strict=True
+        )
+        for t, type_name in enumerate(USABLE):
+            held = transfer[name][:, t]
+            if type_name in RELATIONAL:
+                assert np.isfinite(held).all(), type_name
+            else:
+                assert np.isnan(held).all(), type_name
+
+
+def test_the_within_values_leave_the_pooled_ones_and_the_layer_alone(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cubes = _record_cubes(monkeypatch)
+
+    run_dir = _execute(tiny_arch, tmp_path)
+
+    (cube,) = cubes
+    transfer = run_dir.read_arrays("transfer")
+    np.testing.assert_array_equal(transfer["val"], cube.val)
+    np.testing.assert_array_equal(transfer["test"], cube.test)
+    assert (
+        _summary(run_dir)["layer"]
+        == int(np.argmax(cube.val[0].mean(axis=(0, 1)))) + 1
+    )
+
+
+def test_the_table_holds_the_within_relation_columns(
+    tiny_arch: LoadedModel, default_run: RunDir
+) -> None:
+    summary = _summary(default_run)
+    transfer = default_run.read_arrays("transfer")
+    k = transfer["layers"].tolist().index(summary["layer"])
+    pools = type_pools(_items())
+    seed = Config(labels_run="x").seed
+
+    table = default_run.read_json("table")
+    assert isinstance(table, dict)
+    for t, row in enumerate(table["rows"]):
+        row_dict = dict(zip(table["columns"], row, strict=True))
+        name = row_dict["type"]
+        if name not in RELATIONAL:
+            for column in WITHIN_COLUMNS:
+                assert row_dict[column] is None, (name, column)
+            continue
+        held = transfer["test_within"][0, t, :, k]
+        lo, hi = bootstrap_ci(held, n_boot=200, seed=seed)
+        want = surface_baselines(pools[name])
+        assert row_dict["logistic_within"] == pytest.approx(held.mean())
+        assert row_dict["lo_within"] == pytest.approx(float(lo))
+        assert row_dict["hi_within"] == pytest.approx(float(hi))
+        assert row_dict["lo_within"] <= row_dict["logistic_within"]
+        assert row_dict["logistic_within"] <= row_dict["hi_within"]
+        for column in ("text_word_within", "text_char_within"):
+            assert row_dict[column] == pytest.approx(want[column]), name
+        if name in ("obscure_real", "obscure_real_pop"):
+            assert row_dict["popularity_within"] == pytest.approx(
+                want["popularity_within"]
+            )
+        else:
+            assert row_dict["popularity_within"] is None, name
+        assert row_dict["n_pairs_within"] == within_relation_pairs(
+            pools[name], "test"
+        )
+        assert row_dict["n_pairs_within"] > 0
+
+
+def test_the_within_column_follows_the_headline_method(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _execute(tiny_arch, tmp_path, methods=("pca_diff", "logistic"))
+
+    table = run_dir.read_json("table")
+    assert isinstance(table, dict)
+    assert "pca_diff_within" in table["columns"]
+    assert "logistic_within" not in table["columns"]
+    assert table["columns"][-7:] == [
+        "pca_diff_within",
+        "lo_within",
+        "hi_within",
+        "text_word_within",
+        "text_char_within",
+        "popularity_within",
+        "n_pairs_within",
+    ]
+
+
+def test_a_relational_contrast_without_a_shared_relation_has_null_columns() -> (
+    None
+):
+    pool = type_pools(_items())["obscure_real"]
+
+    def apart(item: LabeledItem) -> LabeledItem:
+        if item.example.split != "test":
+            return item
+        relation = "alpha" if item in pool.positive else "beta"
+        meta = {**item.example.meta, "relation": relation}
+        example = dataclasses.replace(item.example, meta=meta)
+        return dataclasses.replace(item, example=example)
+
+    pool = dataclasses.replace(
+        pool,
+        positive=tuple(apart(i) for i in pool.positive),
+        negative=tuple(apart(i) for i in pool.negative),
+    )
+    cube = ReadingCube(
+        types=(pool.name,),
+        methods=("logistic",),
+        layers=(1, 2),
+        val=np.full((1, 1, 2, 2), 0.7),
+        test=np.full((1, 1, 2, 2), 0.7),
+        val_within=np.full((1, 1, 2, 2), np.nan),
+        test_within=np.full((1, 1, 2, 2), np.nan),
+        transfer=np.zeros((2, 2, 1, 1)),
+        cosine=np.zeros((2, 1, 1)),
+        readers={},
+    )
+    baselines = surface_baselines(pool)
+
+    (row,) = p9b_reading._table_rows(
+        cube, {pool.name: pool}, {pool.name: baselines}, 0, 0
+    )
+
+    assert row[-7:] == [None, None, None, None, None, None, 0]
+    assert baselines["text_word_within"] is None
 
 
 def test_a_baseline_that_cannot_work_fails_before_the_forward_pass(

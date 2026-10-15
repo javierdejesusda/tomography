@@ -514,7 +514,10 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   panel curves and chooses the layer when `layer` is `None`, `n_seeds` 5, `n_pairs` 64, `min_pairs` 16,
   `min_eval` 10, `types` every contrast with enough items and `layers` 1 to L. It writes `curves_<contrast>`,
   the panel curves `curves_entity`, `curves_question` and `curves_unknown`, `matrix`, `matrix_cosine`,
-  `transfer`, `readers`, `table` and `summary`. The table closes with the surface baselines described below.
+  `transfer`, `readers`, `table` and `summary`. `transfer.npz` also holds `val_within` and `test_within`, the
+  within-relation AUROC of the same scores as `val` and `test` (same shape, NaN for a contrast that is not
+  relational), and the table closes with the surface baselines and the within-relation columns described
+  below.
 - `p9c` ([`p9c_reliability.py`](src/tomography/experiments/p9c_reliability.py)): do the reading direction and
   the output confidence predict the model's errors. The target is the model's own greedy few-shot answer, so
   the study asks about errors and not about a label of the question. Every predictor is a score where higher
@@ -566,6 +569,26 @@ is always shown next to the surface baselines named in `SURFACE_BASELINES` of `t
 character n-grams of the question, fitted on all the train items of the contrast and scored on the exact
 test items of the reader. `popularity` is the AUROC of the popularity of the subject on those items, and is
 null unless every test item on both sides has an integer popularity.
+A contrast is relational when every val and test item on both sides has a string `meta["relation"]`: the
+PopQA, SyntHal, generated-name and Wikidata award questions carry one (the award name for the awards),
+the TriviaQA, NQ-open, FalseQA and KUQ questions do not. So `fictional_synthal`, `fictional_generated`,
+`obscure_real`, `obscure_real_pop`, `post_cutoff`, `real_vs_synthal`, `real_vs_generated` and
+`pre_vs_post_cutoff` are relational, and `triviaqa_known`, `unknowable_detail`, `false_premise` and
+`kuq_<category>` are not. For a relational contrast the reader is also scored inside each relation:
+`reading_cube` ranks the same per-item scores within every relation and averages the AUROCs by their
+positive x negative pairs (`grouped_auroc` of `tomography.p9.risk`), which gives `val_within` and
+`test_within`. The pooled AUROC and the layer, still chosen on the pooled validation AUROC, do not change.
+The table appends `logistic_within` (the headline method, named after it), `lo_within` and `hi_within` (the
+same draw bootstrap and seed as `logistic`, `lo` and `hi`, on `test_within` at the chosen layer),
+`text_word_within`, `text_char_within` and `popularity_within` (`WITHIN_BASELINES`: the same test scores of
+the baselines, ranked inside each relation) and `n_pairs_within`, the positive and negative test items that
+share a relation. They are null for a contrast that is not relational, and the values are null if no
+relation holds both sides on test. The reporting rule for the contrasts that have PopQA questions on a side
+(`fictional_synthal`, `fictional_generated`, `obscure_real`, `obscure_real_pop`, `real_vs_synthal` and
+`real_vs_generated`) is that the within-relation reader AUROC is the headline, always shown next to the
+within-relation popularity and text baselines. Relations differ in how many of their questions are known, so
+the wording of a question alone can rank the sides through the relation, and a pooled AUROC cannot tell that
+from reading the question. The pooled AUROC stays as a secondary column.
 
 The reading experiments (`r1` to `r7` and `p1` to `p5`) share `ReadingConfig`
 ([`experiments/sweep.py`](src/tomography/experiments/sweep.py)): `n_seeds` training sets (10; 15 for `r6`, 20
