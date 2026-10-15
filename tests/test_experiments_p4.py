@@ -636,7 +636,7 @@ def test_cross_validation_orients_each_component_on_the_fit_folds(
     assert _cv(train) == 1
 
 
-def test_the_folds_hold_out_every_pair_once_and_follow_the_seed(
+def test_each_fold_is_fitted_on_the_pairs_it_does_not_hold_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     train = _planted_pairs(10, seed=3, signal=1.0, nuisance=5.0)
@@ -651,14 +651,14 @@ def test_the_folds_hold_out_every_pair_once_and_follow_the_seed(
 
     monkeypatch.setattr(p4_pairing, "diff_components", record)
     _cv(train, n_folds=3, seed=11)
-    everything = train[0].pairs
-    order = np.random.default_rng(11).permutation(10)
-    held_out = np.array_split(order, 3)
-    assert sorted(i for fold in held_out for i in fold) == list(range(10))
+    stimuli, _ = train
+    labels = stimuli.labels
+    distinct = labels[stimuli.pairs[:, 0]] != labels[stimuli.pairs[:, 1]]
+    folds = p4_pairing._deal_folds(distinct, 3, 11)
     assert len(fitted) == 3
-    for fold, pairs in zip(held_out, fitted, strict=True):
+    for fold, pairs in zip(folds, fitted, strict=True):
         kept = np.setdiff1d(np.arange(10), fold)
-        np.testing.assert_array_equal(pairs, everything[kept])
+        np.testing.assert_array_equal(pairs, stimuli.pairs[kept])
 
 
 def test_components_are_oriented_and_scored_on_distinct_label_pairs_only(
@@ -679,10 +679,10 @@ def test_components_are_oriented_and_scored_on_distinct_label_pairs_only(
 
     monkeypatch.setattr(p4_pairing, "_pair_credit", record)
     _cv(train, n_folds=4, seed=2)
-    order = np.random.default_rng(2).permutation(len(stimuli.pairs))
+    folds = p4_pairing._deal_folds(distinct, 4, 2)
     assert len(credited) == 8
-    for fold, held_out in enumerate(np.array_split(order, 4)):
-        fit = np.setdiff1d(order, held_out)
+    for fold, held_out in enumerate(folds):
+        fit = np.setdiff1d(np.arange(len(distinct)), held_out)
         np.testing.assert_array_equal(
             credited[2 * fold], stimuli.pairs[fit[distinct[fit]]]
         )
@@ -690,6 +690,91 @@ def test_components_are_oriented_and_scored_on_distinct_label_pairs_only(
             credited[2 * fold + 1],
             stimuli.pairs[held_out[distinct[held_out]]],
         )
+
+
+def test_cross_validation_survives_every_split_of_two_distinct_pairs() -> None:
+    data = np.random.default_rng(0).normal(size=(1, 16, WIDTH))
+    labels = np.array([1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1])
+    pairs = np.arange(16, dtype=np.int64).reshape(-1, 2)
+    train = _prepared(data, labels.astype(np.int64), pairs)
+    assert int((labels[0::2] != labels[1::2]).sum()) == 2
+    for seed in range(30):
+        _cv(train, n_components=2, seed=seed)
+
+
+def test_cross_validation_needs_two_pairs_with_distinct_labels() -> None:
+    data = np.random.default_rng(0).normal(size=(1, 16, WIDTH))
+    labels = np.array([1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0])
+    pairs = np.arange(16, dtype=np.int64).reshape(-1, 2)
+    assert int((labels[0::2] != labels[1::2]).sum()) == 1
+    with pytest.raises(ValueError, match="at least 2 pairs with distinct"):
+        _cv(_prepared(data, labels.astype(np.int64), pairs), n_components=2)
+
+
+def _flags(n_pairs: int, distinct: list[int]) -> NDArray[np.bool_]:
+    flags = np.zeros(n_pairs, dtype=np.bool_)
+    flags[distinct] = True
+    return flags
+
+
+def test_the_folds_partition_the_pairs_and_spread_the_distinct_ones() -> None:
+    flags = _flags(14, [0, 2, 3, 7, 11])
+    folds = p4_pairing._deal_folds(flags, 4, 3)
+    assert len(folds) == 4
+    assert sorted(i for fold in folds for i in fold) == list(range(14))
+    sizes = [len(fold) for fold in folds]
+    counts = [int(flags[fold].sum()) for fold in folds]
+    assert max(sizes) - min(sizes) <= 1
+    assert max(counts) - min(counts) <= 1
+    assert sum(counts) == 5
+
+
+def test_the_folds_follow_the_seed() -> None:
+    flags = _flags(20, list(range(0, 20, 2)))
+    first = p4_pairing._deal_folds(flags, 4, 5)
+    again = p4_pairing._deal_folds(flags, 4, 5)
+    other = p4_pairing._deal_folds(flags, 4, 6)
+    for a, b in zip(first, again, strict=True):
+        np.testing.assert_array_equal(a, b)
+    assert any(
+        len(a) != len(b) or (a != b).any()
+        for a, b in zip(first, other, strict=True)
+    )
+
+
+@pytest.mark.parametrize("seed", range(30))
+def test_two_distinct_pairs_never_share_a_fold(seed: int) -> None:
+    flags = _flags(8, [1, 5])
+    folds = p4_pairing._deal_folds(flags, 4, seed)
+    assert all(len(fold) == 2 for fold in folds)
+    assert all(flags[fold].sum() <= 1 for fold in folds)
+
+
+def test_a_fit_share_of_exactly_one_half_keeps_the_sign(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    favoured = [1, 1, 1, 1, 1, 1, 0, 0]
+    data = np.zeros((1, 16, WIDTH))
+    for i, up in enumerate(favoured):
+        data[0, 2 * i, 0] = 1.0 if up else -1.0
+        data[0, 2 * i + 1, 0] = -1.0 if up else 1.0
+    labels = np.tile(np.array([1, 0], dtype=np.int64), 8)
+    pairs = np.arange(16, dtype=np.int64).reshape(-1, 2)
+
+    def two_folds(*args: Any) -> list[NDArray[np.int64]]:
+        return [np.arange(0, 4), np.arange(4, 8)]
+
+    def first_axis(
+        h: NDArray[np.float32], pairs: NDArray[np.int64], **kwargs: Any
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        basis = np.zeros((1, kwargs["n_components"], WIDTH))
+        basis[0, 0, 0] = 1.0
+        return basis, np.zeros((1, kwargs["n_components"]))
+
+    monkeypatch.setattr(p4_pairing, "_deal_folds", two_folds)
+    monkeypatch.setattr(p4_pairing, "diff_components", first_axis)
+    chosen = _cv(_prepared(data, labels, pairs), n_components=2, n_folds=2)
+    assert chosen == 0
 
 
 def _split_sst2() -> list[Example]:

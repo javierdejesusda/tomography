@@ -273,12 +273,14 @@ def cv_component(
 ) -> int:
     """Picks the principal component that reads best on held-out pairs.
 
-    The pairs are split into folds at random. For each fold the components
-    are fitted on the other folds, each is oriented there so that the
-    label-1 member wins at least half of the pairs with distinct labels, and
-    it is scored on the held-out pairs with distinct labels, a win counting
-    one and a tie one half. The component with the most credit over all
-    folds is chosen, the first on a tie. Only the training pairs are used.
+    The pairs are dealt into folds at random, those with distinct labels
+    first so that they spread evenly and every fit keeps some. For each fold
+    the components are fitted on the other folds, each is oriented there so
+    that the label-1 member wins at least half of the pairs with distinct
+    labels, and it is scored on the held-out pairs with distinct labels, a
+    win counting one and a tie one half. The component with the most credit
+    over all folds is chosen, the first on a tie. Only the training pairs
+    are used.
 
     Args:
         prepared: The training stimuli and activations.
@@ -293,8 +295,8 @@ def cv_component(
 
     Raises:
         ValueError: If the layer is out of range, the folds do not fit the
-            pairs and components, or the pairs have no distinct labels to
-            orient and score the components.
+            pairs and components, or fewer than 2 pairs have distinct
+            labels to orient and score the components.
     """
     stimuli, act = prepared
     n_layers = act.data.shape[0]
@@ -316,26 +318,44 @@ def cv_component(
         )
     labels = act.row_values(stimuli.labels)
     distinct = labels[pairs[:, 0]] != labels[pairs[:, 1]]
+    if distinct.sum() < 2:
+        raise ValueError(
+            "cv_component needs at least 2 pairs with distinct labels to "
+            f"orient and score the components, got {int(distinct.sum())}"
+        )
     rows = act.data[layer_index : layer_index + 1].astype(np.float64)
-    order = np.random.default_rng(seed).permutation(n_pairs)
     credit = np.zeros(n_components)
-    for held_out in np.array_split(order, n_folds):
-        fit = np.setdiff1d(order, held_out)
+    for held_out in _deal_folds(distinct, n_folds, seed):
+        fit = np.setdiff1d(np.arange(n_pairs), held_out)
         components, _ = diff_components(
             rows, pairs[fit], preprocess=preprocess, n_components=n_components
         )
         fit_pairs = pairs[fit[distinct[fit]]]
-        if not len(fit_pairs):
-            raise ValueError(
-                "cv_component needs pairs with distinct labels outside "
-                "every fold to orient the components"
-            )
         test_pairs = pairs[held_out[distinct[held_out]]]
         fit_credit = _pair_credit(rows, components, fit_pairs, labels)
         share = fit_credit / len(fit_pairs)
         won = _pair_credit(rows, components, test_pairs, labels)
         credit += np.where(share >= 0.5, won, len(test_pairs) - won)
     return int(credit.argmax())
+
+
+def _deal_folds(
+    distinct: NDArray[np.bool_], n_folds: int, seed: int
+) -> list[NDArray[np.int64]]:
+    """Deals the pairs into folds, those with distinct labels first.
+
+    Args:
+        distinct: Whether each pair holds two different labels, shape (m,).
+        n_folds: Number of folds.
+        seed: Seed of the shuffle.
+
+    Returns:
+        The sorted pair indices of each fold. Fold sizes and the counts of
+        distinct pairs per fold each differ by at most one.
+    """
+    order = np.random.default_rng(seed).permutation(distinct.shape[0])
+    ranked = np.concatenate([order[distinct[order]], order[~distinct[order]]])
+    return [np.sort(ranked[f::n_folds]) for f in range(n_folds)]
 
 
 def _pair_credit(
