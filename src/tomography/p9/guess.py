@@ -93,11 +93,17 @@ def stratum_guesses(
         The guess of every stratum present, keyed and sorted by stratum.
 
     Raises:
-        ValueError: If `min_modal_count` is below 1.
+        ValueError: If `min_modal_count` is below 1 or `max_guess_accuracy`
+            is not a share in [0, 1].
     """
     if min_modal_count < 1:
         raise ValueError(
             f"min_modal_count must be at least 1, got {min_modal_count}"
+        )
+    if not 0.0 <= max_guess_accuracy <= 1.0:
+        raise ValueError(
+            "max_guess_accuracy must be a share in [0, 1], "
+            f"got {max_guess_accuracy}"
         )
     members: dict[str, list[LabeledItem]] = {}
     for item in items:

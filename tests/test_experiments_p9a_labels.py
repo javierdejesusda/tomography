@@ -1,5 +1,6 @@
 """Tests for the P9a labeling experiment."""
 
+from collections.abc import Callable
 import csv
 import dataclasses
 from pathlib import Path
@@ -33,6 +34,14 @@ RELATIONS = ("father", "mother", "occupation", "sport")
 POPULARITY = (50_000, 5_000, 100, 20_000)
 YEARS = range(2005, 2017)
 FIELDS = ("known_raw", "known", "unknown", "uncertain")
+CAPS = {
+    "n_popqa": 4,
+    "n_synthal": 4,
+    "n_kuq": 2,
+    "n_falseqa": 3,
+    "n_triviaqa": 6,
+    "n_nq_open": 4,
+}
 
 
 def _make(prefix: str, n: int, source: str, **fields: Any) -> list[QAExample]:
@@ -225,16 +234,63 @@ def _plant(
     return labels
 
 
+def _plant_constant_father(
+    loaded: LoadedModel, examples: list[QAExample], **kwargs: Any
+) -> list[ItemLabel]:
+    """As `_plant`, but every father answer is "John" (known if gold)."""
+    labels = _plant(loaded, examples, **kwargs)
+    planted = []
+    for example, label in zip(examples, labels, strict=True):
+        if example.meta.get("relation") != "father" or not example.answers:
+            planted.append(label)
+            continue
+        hit = example.answers == ("John",)
+        planted.append(
+            ItemLabel(
+                example.uid,
+                "known" if hit else "unknown",
+                "behavior",
+                "John",
+                hit,
+                ("John",) * 5,
+                5 if hit else 0,
+            )
+        )
+    return planted
+
+
+def _regold(
+    loaders: PoolLoaders,
+    field: str,
+    gold: Callable[[QAExample], tuple[str, ...] | None],
+) -> PoolLoaders:
+    """Swaps the gold answers of a source where `gold` returns answers."""
+    load: Callable[[], list[QAExample]] = getattr(loaders, field)
+
+    def regolded() -> list[QAExample]:
+        return [
+            e
+            if (answers := gold(e)) is None
+            else dataclasses.replace(e, answers=answers)
+            for e in load()
+        ]
+
+    return dataclasses.replace(loaders, **{field: regolded})
+
+
 def _planted_run(
     tiny_arch: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    plant: Callable[..., list[ItemLabel]] = _plant,
+    loaders: PoolLoaders | None = None,
     **overrides: Any,
 ) -> RunDir:
-    monkeypatch.setattr(p9a_labels, "label_questions", _plant)
+    monkeypatch.setattr(p9a_labels, "label_questions", plant)
     config = _config(**overrides)
     run_dir = RunDir.create(config, out_root=tmp_path)
-    execute(config, run_dir, tiny_arch, _loaders())
+    execute(config, run_dir, tiny_arch, loaders or _loaders())
     return run_dir
 
 
@@ -248,6 +304,10 @@ def _records(run_dir: RunDir) -> list[dict[str, Any]]:
     records = run_dir.read_json("items")
     assert isinstance(records, list)
     return records
+
+
+def _hand_check(run_dir: RunDir) -> str:
+    return (run_dir.path / "hand_check.csv").read_text(encoding="utf-8")
 
 
 def _group(record: dict[str, Any]) -> str:
@@ -302,6 +362,34 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.batch_size == 8
     assert config.offline is False
     assert Config.from_dict(config.to_dict()) == config
+
+
+@pytest.mark.parametrize("n_shots", [-1, -15, 16, 100])
+def test_n_shots_outside_the_demonstrations_raises(n_shots: int) -> None:
+    with pytest.raises(ValueError, match="n_shots"):
+        Config(n_shots=n_shots)
+
+
+def test_a_negative_n_shots_set_on_the_command_line_raises() -> None:
+    data = {**Config().to_dict(), "n_shots": -1}
+
+    with pytest.raises(ValueError, match="n_shots"):
+        Config.from_dict(data)
+
+
+@pytest.mark.parametrize("n_shots", [0, 1, len(DEFAULT_SHOTS)])
+def test_n_shots_within_the_demonstrations_is_accepted(n_shots: int) -> None:
+    assert Config(n_shots=n_shots).n_shots == n_shots
+
+
+@pytest.mark.parametrize(
+    "limit",
+    [float("nan"), float("inf"), -0.1, 1.1],
+    ids=["nan", "inf", "below_zero", "above_one"],
+)
+def test_a_max_guess_accuracy_that_is_not_a_share_raises(limit: float) -> None:
+    with pytest.raises(ValueError, match="max_guess_accuracy"):
+        Config(max_guess_accuracy=limit)
 
 
 def test_the_cli_discovers_the_experiment() -> None:
@@ -574,6 +662,105 @@ def test_known_contrasts_is_the_gate_on_guess_adjusted_knowns(
     assert summary["known_contrasts"] is expected
 
 
+@pytest.mark.parametrize(
+    ("never_known", "excluded", "verdicts"),
+    [
+        ((), [], {"guessable_stratum": 8}),
+        (
+            ("father",),
+            ["popqa:father"],
+            {"excluded_stratum": 4, "guessable_stratum": 8},
+        ),
+    ],
+    ids=["none", "father"],
+)
+def test_never_known_names_the_excluded_strata(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    never_known: tuple[str, ...],
+    excluded: list[str],
+    verdicts: dict[str, int],
+) -> None:
+    run_dir = _planted_run(
+        tiny_arch, tmp_path, monkeypatch, never_known=never_known
+    )
+    rows = run_dir.read_json("table_guess")["rows"]
+
+    assert sorted(row[0] for row in rows if row[5]) == excluded
+    guess = _summary(run_dir)["guess"]
+    assert guess["never_known"] == list(never_known)
+    assert guess["verdicts"] == verdicts
+
+
+@pytest.mark.parametrize(
+    ("limit", "eligible", "verdict"),
+    [(0.10, False, "guessable_stratum"), (0.3, True, "modal_answer")],
+    ids=["default", "raised"],
+)
+def test_max_guess_accuracy_sets_the_guessable_limit(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    limit: float,
+    eligible: bool,
+    verdict: str,
+) -> None:
+    loaders = _regold(
+        _loaders(),
+        "popqa",
+        lambda e: ("John",) if e.uid in ("popqa:0", "popqa:4") else None,
+    )
+    run_dir = _planted_run(
+        tiny_arch,
+        tmp_path,
+        monkeypatch,
+        plant=_plant_constant_father,
+        loaders=loaders,
+        max_guess_accuracy=limit,
+    )
+    rows = {row[0]: row for row in run_dir.read_json("table_guess")["rows"]}
+    known_fathers = [
+        r
+        for r in _records(run_dir)
+        if r["meta"]["source"] == "popqa"
+        and r["meta"]["relation"] == "father"
+        and r["label"] == "known"
+    ]
+
+    father = rows["popqa:father"]
+    assert (father[1], father[2], father[4]) == (8, "john", 0.25)
+    assert father[6] is eligible
+    assert len(known_fathers) == 2
+    assert {r["guess"] for r in known_fathers} == {verdict}
+
+
+def test_the_curves_follow_the_guess_adjusted_labels(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaders = _regold(
+        _loaders(),
+        "awards",
+        lambda e: ("Marie Curie",) if e.meta["relation"] == "Award0" else None,
+    )
+    run_dir = _planted_run(tiny_arch, tmp_path, monkeypatch, loaders=loaders)
+    awards = [r for r in _records(run_dir) if _group(r) == "award"]
+    years = sorted({r["meta"]["year"] for r in awards})
+    by_year = [[r for r in awards if r["meta"]["year"] == y] for y in years]
+    adjusted = [
+        sum(r["label"] == "known" and r["guess"] is None for r in rs) / len(rs)
+        for rs in by_year
+    ]
+    raw = [sum(r["label"] == "known" for r in rs) / len(rs) for rs in by_year]
+    curves = run_dir.read_arrays("curves")
+
+    assert adjusted != raw
+    assert curves["x"].tolist() == [float(y) for y in years]
+    assert curves["mean"][0].tolist() == pytest.approx(adjusted)
+
+
 def test_the_probe_supplies_the_cutoff_when_the_config_has_none(
     tiny_arch: LoadedModel,
     tmp_path: Path,
@@ -636,6 +823,48 @@ def test_a_pool_without_awards_writes_no_curves(
     assert not (run_dir.path / "curves.json").exists()
     assert not (run_dir.path / "curves.npz").exists()
     assert plot(run_dir, tmp_path / "figs") == []
+
+
+def test_a_seed_gives_the_same_pool_and_hand_check_twice(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _planted_run(tiny_arch, tmp_path / "a", monkeypatch, seed=3, **CAPS)
+    second = _planted_run(
+        tiny_arch, tmp_path / "b", monkeypatch, seed=3, **CAPS
+    )
+
+    assert _records(first) == _records(second)
+    assert _hand_check(first) == _hand_check(second)
+
+
+def test_the_seed_draws_the_capped_pool(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    three = _planted_run(tiny_arch, tmp_path / "a", monkeypatch, seed=3, **CAPS)
+    four = _planted_run(tiny_arch, tmp_path / "b", monkeypatch, seed=4, **CAPS)
+
+    assert {r["uid"] for r in _records(three)} != {
+        r["uid"] for r in _records(four)
+    }
+
+
+def test_the_seed_draws_the_hand_check_rows(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    three = _planted_run(tiny_arch, tmp_path / "a", monkeypatch, seed=3)
+    four = _planted_run(tiny_arch, tmp_path / "b", monkeypatch, seed=4)
+
+    def behavior(run_dir: RunDir) -> list[dict[str, Any]]:
+        return [r for r in _records(run_dir) if r["basis"] == "behavior"]
+
+    assert behavior(three) == behavior(four)
+    assert _hand_check(three) != _hand_check(four)
 
 
 def test_load_labeled_reads_a_finished_run(

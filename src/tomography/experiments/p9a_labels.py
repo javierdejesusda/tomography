@@ -63,8 +63,9 @@ class Config(ExperimentConfig):
         n_triviaqa: TriviaQA questions; None keeps all.
         n_nq_open: NQ-open questions; None keeps all.
         n_detail: Unknowable-detail questions.
-        n_shots: How many of `knowledge.DEFAULT_SHOTS` open the prompt (the
-            tiny test models have 128 positions and use 2).
+        n_shots: How many of `knowledge.DEFAULT_SHOTS` open the prompt,
+            from 0 to all of them (the tiny test models have 128 positions
+            and use 2).
         n_samples: Temperature samples per question.
         temperature: Sampling temperature.
         known_min_correct: Samples that must be correct, besides the greedy
@@ -107,6 +108,26 @@ class Config(ExperimentConfig):
     popular_share: float = 0.5
     batch_size: int = 8
     offline: bool = False
+
+    def __post_init__(self) -> None:
+        """Checks the settings that would act silently or fail late.
+
+        Raises:
+            ValueError: If `n_shots` is outside 0 to the number of default
+                demonstrations (a negative count would drop the last ones
+                without a word) or `max_guess_accuracy` is not a share in
+                [0, 1] (it would only fail after the labeling).
+        """
+        if not 0 <= self.n_shots <= len(DEFAULT_SHOTS):
+            raise ValueError(
+                f"n_shots must be in [0, {len(DEFAULT_SHOTS)}], "
+                f"got {self.n_shots}"
+            )
+        if not 0.0 <= self.max_guess_accuracy <= 1.0:
+            raise ValueError(
+                "max_guess_accuracy must be a share in [0, 1], "
+                f"got {self.max_guess_accuracy}"
+            )
 
 
 def _estimate(rates: list[YearRate]) -> CutoffEstimate | None:

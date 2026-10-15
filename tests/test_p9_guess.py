@@ -236,6 +236,62 @@ def test_max_guess_accuracy_and_excluded_are_parameters() -> None:
     assert not guesses["popqa:sport"].excluded
 
 
+@pytest.mark.parametrize(
+    ("n_gold", "eligible"),
+    [(2, True), (3, False)],
+    ids=["at_the_limit", "above_the_limit"],
+)
+def test_a_guess_accuracy_at_the_limit_is_still_eligible(
+    n_gold: int, eligible: bool
+) -> None:
+    items = [
+        _item(
+            f"f{i}",
+            "father",
+            "John" if i < 4 else f"Dad {i}",
+            "John" if i < n_gold else f"Dad {i}",
+        )
+        for i in range(20)
+    ]
+
+    guess = stratum_guesses(items)["popqa:father"]
+
+    assert guess.modal == "john"
+    assert guess.guess_accuracy == n_gold / 20
+    assert guess.eligible is eligible
+
+
+def test_an_excluded_stratum_is_never_eligible() -> None:
+    guess = stratum_guesses(_pilot_items(), excluded=("popqa:mother",))[
+        "popqa:mother"
+    ]
+
+    assert guess.excluded
+    assert guess.guess_accuracy == pytest.approx(0.05)
+    assert not guess.eligible
+
+
+@pytest.mark.parametrize(
+    "limit",
+    [float("nan"), float("inf"), -0.01, 1.01],
+    ids=["nan", "inf", "below_zero", "above_one"],
+)
+def test_a_max_guess_accuracy_that_is_not_a_share_raises(limit: float) -> None:
+    with pytest.raises(ValueError, match="max_guess_accuracy"):
+        stratum_guesses(_pilot_items(), max_guess_accuracy=limit)
+
+
+@pytest.mark.parametrize(
+    ("limit", "eligible"), [(0.0, False), (1.0, True)], ids=["zero", "one"]
+)
+def test_the_ends_of_the_share_range_are_valid_limits(
+    limit: float, eligible: bool
+) -> None:
+    guesses = stratum_guesses(_pilot_items(), max_guess_accuracy=limit)
+
+    assert guesses["popqa:mother"].eligible is eligible
+
+
 def test_the_modal_answer_is_normalized() -> None:
     items = [
         _item("a", "father", "John", "x"),
