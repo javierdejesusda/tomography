@@ -301,7 +301,8 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   sentiment, truth and emotion (the six emotion tasks), `method` is `logistic` (`--set method=pca_diff` is a
   second run) and `n_eval_pairs` 256. The readers are compared at the best select layer of the paper reader.
   It writes, per task, `sweep_<task>`, `curves_<task>`, `curves_<task>_val`, `curves_<task>_<family>`,
-  `transfer_<task>` and `cosine_<task>`, and `table` and `summary` for the run; the plot draws a curve figure
+  `transfer_<task>` and `cosine_<task>`, and `table` and `summary` for the run. The curves of the first task
+  are also written as `curves` and `curves_val`, and `summary` names that task. The plot draws a curve figure
   per family, the transfer matrix and the cosine matrix.
 - `p2` ([`p2_positions.py`](src/tomography/experiments/p2_positions.py)): where to read, and what a
   misleading sentence in the prompt costs. The reader is trained on the paper template at each token
@@ -323,8 +324,10 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   the share of failed draws (accuracy below `failure_accuracy`, 0.6), the agreement of the pair differences as
   a warning sign, and the size where returns diminish (`saturation_delta`, 0.01). Tasks that name the same
   target are sources of one concept, scored on one set of items. `method` is `logistic`, `n_eval_pairs` 256 and
-  `n_boot` 2000; `n_pairs` is not read. It writes `summary`, `table` and `sizes_<task>`; the plot draws every
-  curve on a log2 axis and every sources matrix.
+  `n_boot` 2000; `n_pairs` is not read. It writes, per task, `sizes_<task>`, `curves_<task>` and
+  `curves_<task>_cosine`; for each target with several sources, `curves_sources_<target>` and
+  `sources_<target>`; and `table` and `summary` for the run. The plot draws every curve on a log2 axis and
+  every sources matrix.
 - `p4` ([`p4_pairing.py`](src/tomography/experiments/p4_pairing.py)): how much the pairing and the
   preprocessing matter. The pairs a direction is fitted on (`pairings`: matched, label_contrastive, random),
   the preparation of their differences (`preprocesses`: center, unit, none) and the direction finder
@@ -332,17 +335,20 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   `pca_diff`, the paper's), `preprocess` (`center`) and the task's own pairing. The first `n_components` (8)
   principal components of the pair differences are also read, with the component chosen on the training pairs
   alone by `n_folds` (5) cross-validation. `tasks` are sentiment, truth and utility, `n_eval_pairs` is 256 and
-  `n_boot` 2000. It writes `summary`, `table`, `table_components` and `grid_<task>`; the plot draws every curve
-  and every methods matrix.
+  `n_boot` 2000. It writes, per task, `grid_<task>`, `methods_<task>` (the cosine between the directions of
+  the methods), `convergence_<task>`, `curves_<task>_methods`, `curves_<task>_pairing`,
+  `curves_<task>_preprocess` and `components_<task>`, and `table`, `table_components` and `summary` for the
+  run; the plot draws every curve and every methods matrix.
 - `p5` ([`p5_persona_wording.py`](src/tomography/experiments/p5_persona_wording.py)): whether the honesty
   reader reads honesty or the persona's wording. Each condition (`conditions`, names from `CONDITIONS`, at most
   8, `paper` required) changes one thing against the paper persona prompt, the persona words or the stimuli.
   The reader is trained as in `r5`, on the response tokens of true statements, and scored on plain true
   against false statements at the token mean; accuracies are raw, so a reader whose first persona aligns with
   false statements scores below 0.5. `got_subsets` are scored on their Geometry of Truth test splits.
-  `position` is `response`, `method` `logistic`, `n_eval_pairs` 256 and `n_boot` 2000. It writes `summary`,
-  `table` and `readers_<condition>`; the plot draws `curves_<set>`, `curves_cosine` and a persona scatter of
-  each condition's in-distribution accuracy against its facts accuracy.
+  `position` is `response`, `method` `logistic`, `n_eval_pairs` 256 and `n_boot` 2000. It writes
+  `curves_<set>` for every evaluation set, `curves_cosine` (the cosine of each reader with the paper reader;
+  absent when only `paper` runs), `readers_<condition>`, `table` and `summary`; the plot draws the curves and
+  a persona scatter of each condition's in-distribution accuracy against its facts accuracy.
 - `c1` ([`c1_sentiment_steering.py`](src/tomography/experiments/c1_sentiment_steering.py)): steering the
   sentiment of GPT-2 text with a reading vector fitted on SST-2 as in `r1`. A layer sweep (`sweep_layers`, the
   model's default sweep when `None`) on one prompt list chooses where to steer; the operators in `ops`
@@ -368,8 +374,8 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   are those of `c1`. Defaults: `n_seeds` 10, `n_steer_seeds` 3, `n_pairs` 64, `n_eval_pairs` every pair,
   `preprocess` `center`, `position` `last`, `truncate_words` 6, `n_termination` 100 test pairs, `n_prompts`
   250 and `num_samples` 1; `layers` is the model's default control layers when `None`. It writes `summary`,
-  `table`, `table_seeds`, `trials` and `trials_termination`; the plot draws the correlation and success
-  curves.
+  `table`, `table_seeds`, `trials`, `trials_termination` and the curve files `curves`, `curves_val`,
+  `curves_success` and `curves_success_check`, which the plot draws.
 - `c4` ([`c4_honesty_control.py`](src/tomography/experiments/c4_honesty_control.py)): the honesty control of
   Table 2 on TruthfulQA MC1. The arms are scored, not generated: the plain model, a prompting baseline, the
   prompt difference, a reading vector from Alpaca stimuli and a contrast vector. Each vector arm picks its
@@ -378,8 +384,8 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   128, `coeffs` -0.2 to 0.2 (reading and difference arms, relative to the mean residual norm) and `alphas`
   -0.5 to 0.5 (contrast arm). With `--set lorra_run=<LR1 run directory>` the adapter of a finished `lr1` run
   is scored as one more arm: this is the LoRRA honesty control. `c4` must run on the model of the `lr1` run
-  (`--model qwen3-1.7b` unless `lr1` was given another). It writes `scores`, `summary` and `table`; the plot
-  draws `curves_reading`, `curves_difference`, `curves_contrast` and `mc1_arms`.
+  (`--model qwen3-1.7b` unless `lr1` was given another). It writes `scores`, `summary`, `table` and the curve
+  files `curves_reading`, `curves_difference` and `curves_contrast`; the plot draws the three and `mc1_arms`.
 - `c5` ([`c5_gallery.py`](src/tomography/experiments/c5_gallery.py)): the galleries of Figs. 10 and 17. The lie
   gallery asks `n_pool` (200) TriviaQA questions under the plain model and under the honesty reader of `c4`
   steered toward and away from honesty (`strength`, 0.1). The emotion galleries read the completions of a
@@ -401,15 +407,17 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   across layers, seeds and concepts. It loads no model and reads no activations: it reads the `readers*.npz`
   files of finished runs under its own `--out` root, the default run on `model` of each experiment in
   `sources` (`r1`, `r2`, `r3`, `r5`, `r7`), where `extra_runs` names finished runs that replace a default run.
-  `depth` (0.5) is the relative depth of the cross-concept matrix. It writes `summary`; the plot draws the
-  agreement curves and every matrix.
+  `depth` (0.5) is the relative depth of the cross-concept matrix. It writes `matrix_layers_<label>` (the
+  cosine between layers of one concept, one per concept), `matrix_concepts` (the cosine between the concepts
+  at the layer nearest `depth`), `curves_agreement` (the cosine of each seed to the other seeds, per layer)
+  and `summary`; the plot draws the agreement curves and every matrix.
 - `a2` ([`a2_logit_lens.py`](src/tomography/experiments/a2_logit_lens.py)): the logit lens of the reading
   directions. Each direction is read through the linear part of the final norm and the unembedding, and the
   analysis asks which tokens it promotes. The directions come from the `readers*.npz` files of the finished
   runs of `sources` and `extra_runs`, as in `a1`; the model is loaded only for its unembedding, final norm and
   tokenizer. Defaults: `top_k` 10 tokens per pole, layer and concept, `n_random` 100 random directions as the
-  baseline and `n_boot` 2000. It writes `summary` and `table`; the plot draws `curves_lens` and the token
-  tables `lens_tokens`.
+  baseline and `n_boot` 2000. It writes `table` and `summary` and, for the concepts that have pole words,
+  `curves_lens`; the plot draws `curves_lens` and the token tables `lens_tokens`.
 - `p6` ([`p6_scale.py`](src/tomography/experiments/p6_scale.py)): whether the reading changes with model size,
   across the GPT-2 sizes. It loads no model and reads the finished default runs under its own `--out` root, as
   in `a1`: the `reader` series of the reading experiments in `sources` (`r1`, `r2`, `r3`, `r5`, `r7`) and, for
@@ -450,8 +458,9 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   few-shot prompt, one greedy answer and `n_samples` temperature samples. A guess control then demotes the
   known labels that a constant answer would explain, the award questions give an estimate of the training
   cutoff, and the summary records whether the model has at least `min_known` guess-adjusted known items to
-  enter the known versus unknown contrasts. It writes `items`, label tables, a `hand_check.csv` sample for
-  manual checking and `summary.json`.
+  enter the known versus unknown contrasts. It writes `items`, the label tables (`table`, `table_popularity`
+  and `table_guess`), a `hand_check.csv` sample for manual checking, `curves` (the known rate by year of the
+  award questions, only when the pool has any; the plot draws it) and `summary.json`.
 - `p9b` ([`p9b_reading.py`](src/tomography/experiments/p9b_reading.py)): reading known against unknown
   questions from the activations. It consumes a finished `p9a` run of the same model, given as the required
   `labels_run` (`--set labels_run=<P9A run directory>`). The contrasts set known questions against unknown
