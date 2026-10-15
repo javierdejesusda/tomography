@@ -1675,12 +1675,13 @@ def test_a_training_set_with_too_few_distinct_pairs_fails_before_the_model(
 
     def is_wanted(found: list[int]) -> bool:
         if later:
-            return found[0] >= 2 and min(found[1:]) < 2
+            return min(found[:-1]) >= 2 and found[-1] < 2
         return found[0] < 2
 
-    seed = next(s for s in range(100) if is_wanted(counts(s)))
+    seed = next((s for s in range(100) if is_wanted(counts(s))), None)
+    assert seed is not None, "no seed below 100 gives the wanted counts"
     found = counts(seed)
-    short = next(i for i, count in enumerate(found) if count < 2)
+    short = len(found) - 1 if later else 0
     config = dataclasses.replace(base, seed=seed)
     run_dir = RunDir.create(config, out_root=tmp_path)
     with pytest.raises(
