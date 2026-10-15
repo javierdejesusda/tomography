@@ -55,6 +55,7 @@ class Curves:
         per_seed: Values of each seed, shape (S, N, K).
         series: The name of each series.
         n_layers: Depth of the model, or None if the writer gave none.
+        chance: Level of the chance line, or None if there is none.
     """
 
     x: NDArray[np.float64]
@@ -64,6 +65,24 @@ class Curves:
     per_seed: NDArray[np.float64]
     series: tuple[str, ...]
     n_layers: int | None
+    chance: float | None
+
+
+@dataclass(frozen=True, eq=False)
+class ReadingPoint:
+    """One reading run at its selected layer.
+
+    Attributes:
+        layer: The selected layer.
+        n_layers: Depth of the model the run read.
+        values: Per-seed values of the reported split at `layer`, shape (N,).
+        selected_on: The stem of the curves the layer was chosen on.
+    """
+
+    layer: int
+    n_layers: int
+    values: NDArray[np.float64]
+    selected_on: str
 
 
 def out_root_of(run_dir: RunDir) -> Path:
@@ -338,7 +357,9 @@ def gather_readers(
 
 
 def read_curves(run: RunDir, stem: str = "curves") -> Curves:
-    """Reads the arrays and the sidecar of one `write_curves` pair.
+    """Reads the arrays and the sidecar of a `write_curves` pair.
+
+    A `write_dose_curves` pair has the same layout.
 
     Args:
         run: The run holding the pair.
@@ -350,6 +371,7 @@ def read_curves(run: RunDir, stem: str = "curves") -> Curves:
     arrays = run.read_arrays(stem)
     sidecar = cast(dict[str, Any], run.read_json(stem))
     n_layers = sidecar["n_layers"]
+    chance = sidecar["chance"]
     return Curves(
         x=arrays["x"].astype(np.float64),
         mean=arrays["mean"].astype(np.float64),
@@ -358,34 +380,88 @@ def read_curves(run: RunDir, stem: str = "curves") -> Curves:
         per_seed=arrays["per_seed"].astype(np.float64),
         series=tuple(sidecar["series"]),
         n_layers=None if n_layers is None else int(n_layers),
+        chance=None if chance is None else float(chance),
     )
 
 
 def best_point(
-    curves: Curves, series: str = "reader"
+    curves: Curves, series: str = "reader", select: Curves | None = None
 ) -> tuple[int, NDArray[np.float64]]:
     """Finds the best layer of a series and its value for every seed.
 
     Args:
-        curves: The curves of a run.
+        curves: The curves to report.
         series: Name of the series.
+        select: Curves to choose the layer on, read at the same layers as
+            `curves`; None chooses on `curves` itself.
 
     Returns:
-        The layer with the highest mean, the first on ties, and the values of
-        the N seeds at that layer. Runs that share seeds compare through
-        these paired values.
+        The layer with the highest mean in `select`, the first on ties, and
+        the values of the N seeds of `curves` at that layer. Runs that share
+        seeds compare through these paired values.
 
     Raises:
-        ValueError: If the series is not in `curves`.
+        ValueError: If the series is not in `curves` or in `select`, or
+            `select` was read at other layers.
     """
     if series not in curves.series:
         raise ValueError(
             f"unknown series {series!r}, expected one of {curves.series}"
         )
-    index = curves.series.index(series)
+    chooser = curves if select is None else select
+    if series not in chooser.series:
+        raise ValueError(
+            f"unknown series {series!r} in select, expected one of "
+            f"{chooser.series}"
+        )
+    if not np.array_equal(chooser.x, curves.x):
+        raise ValueError(
+            f"select was read at layers {chooser.x.tolist()}, "
+            f"not {curves.x.tolist()}"
+        )
     layers = [int(layer) for layer in curves.x]
-    layer = best_layer(curves.mean[index], layers)
+    layer = best_layer(chooser.mean[chooser.series.index(series)], layers)
+    index = curves.series.index(series)
     return layer, curves.per_seed[index, :, layers.index(layer)]
+
+
+def reading_point(
+    run: RunDir,
+    series: str = "reader",
+    report: str = "curves",
+    select: str = "curves_val",
+) -> ReadingPoint:
+    """Applies one layer-selection rule to a reading run.
+
+    The layer is chosen on the validation curves when the run writes them
+    and on the reported curves otherwise, so a selection and a report on one
+    split stay visible through `selected_on`.
+
+    Args:
+        run: A finished reading run.
+        series: Name of the series.
+        report: Stem of the curves to report.
+        select: Stem of the curves to choose the layer on, when the run
+            wrote them.
+
+    Returns:
+        The selected layer, the depth of the model, the per-seed values of
+        the reported curves there and the stem the layer was chosen on.
+
+    Raises:
+        ValueError: If the series is unknown or the reported curves have no
+            `n_layers`.
+    """
+    reported = read_curves(run, report)
+    if reported.n_layers is None:
+        raise ValueError(f"the {report} curves of {run.path} have no n_layers")
+    chooser: Curves | None = None
+    selected_on = report
+    if (run.path / f"{select}.npz").is_file():
+        chooser = read_curves(run, select)
+        selected_on = select
+    layer, values = best_point(reported, series, chooser)
+    return ReadingPoint(layer, reported.n_layers, values, selected_on)
 
 
 def relative_depth(layers: Sequence[int], n_layers: int) -> NDArray[np.float64]:

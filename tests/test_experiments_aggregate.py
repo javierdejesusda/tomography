@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 import pytest
 
 from tomography.cli import load_experiment
+from tomography.experiments.aggregate import Curves
 from tomography.experiments.aggregate import ReaderSet
 from tomography.experiments.aggregate import best_point
 from tomography.experiments.aggregate import common_layers
@@ -21,6 +22,7 @@ from tomography.experiments.aggregate import oriented
 from tomography.experiments.aggregate import out_root_of
 from tomography.experiments.aggregate import read_curves
 from tomography.experiments.aggregate import read_readers
+from tomography.experiments.aggregate import reading_point
 from tomography.experiments.aggregate import relative_depth
 from tomography.experiments.aggregate import resolve_runs
 from tomography.experiments.aggregate import run_depth
@@ -180,6 +182,7 @@ def _curves(
     layers: tuple[int, ...] = (1, 2, 3),
     series: tuple[str, ...] = ("reader", "random"),
     values: NDArray[np.float64] | None = None,
+    chance: float | None = None,
 ) -> None:
     per_seed = (
         np.random.default_rng(0).uniform(size=(len(series), 3, len(layers)))
@@ -193,6 +196,7 @@ def _curves(
         series=series,
         stem=stem,
         n_layers=n_layers,
+        chance=chance,
         n_boot=10,
     )
 
@@ -419,6 +423,7 @@ def test_read_curves_returns_the_arrays_and_the_sidecar(
         "curves_x",
         layers=(2, 4, 6, 8),
         values=values,
+        chance=0.5,
     )
     curves = read_curves(run_dir, "curves_x")
     np.testing.assert_array_equal(curves.x, [2.0, 4.0, 6.0, 8.0])
@@ -428,8 +433,10 @@ def test_read_curves_returns_the_arrays_and_the_sidecar(
     assert (curves.mean <= curves.hi).all()
     assert curves.series == ("reader", "random")
     assert curves.n_layers == 12
+    assert curves.chance == 0.5
     _curves(run_dir, "curves_y", layers=(2, 4, 6, 8), n_layers=None)
     assert read_curves(run_dir, "curves_y").n_layers is None
+    assert read_curves(run_dir, "curves_y").chance is None
 
 
 def test_best_point_is_the_first_best_layer_with_its_seed_values(
@@ -450,6 +457,126 @@ def test_best_point_is_the_first_best_layer_with_its_seed_values(
     np.testing.assert_array_equal(seeds, [0.5, 0.6, 0.7])
     with pytest.raises(ValueError, match="shuffled"):
         best_point(curves, "shuffled")
+
+
+def _two_curves(
+    tmp_path: Path, *, select_layers: tuple[int, ...] = (2, 4, 6, 8)
+) -> tuple[Curves, Curves]:
+    run_dir = _run(tmp_path, "r1")
+    reported = np.zeros((2, 3, 4))
+    reported[0, :, 3] = [0.9, 0.8, 0.7]
+    reported[0, :, 1] = [0.6, 0.5, 0.4]
+    reported[1, :, 0] = [0.3, 0.2, 0.1]
+    chosen = np.zeros((2, 3, 4))
+    chosen[0, :, 1] = 0.8
+    chosen[1, :, 2] = 0.7
+    _curves(run_dir, "curves", layers=(2, 4, 6, 8), values=reported)
+    _curves(run_dir, "curves_val", layers=select_layers, values=chosen)
+    return read_curves(run_dir, "curves"), read_curves(run_dir, "curves_val")
+
+
+def test_best_point_chooses_the_layer_on_the_select_curves(
+    tmp_path: Path,
+) -> None:
+    curves, select = _two_curves(tmp_path)
+    layer, seeds = best_point(curves, select=select)
+    assert layer == 4
+    np.testing.assert_array_equal(seeds, [0.6, 0.5, 0.4])
+    assert best_point(curves)[0] == 8
+    layer, seeds = best_point(curves, "random", select)
+    assert layer == 6
+    np.testing.assert_array_equal(seeds, [0.0, 0.0, 0.0])
+
+
+def test_best_point_refuses_select_curves_at_other_layers(
+    tmp_path: Path,
+) -> None:
+    curves, select = _two_curves(tmp_path, select_layers=(1, 2, 3, 4))
+    with pytest.raises(ValueError, match="layers"):
+        best_point(curves, select=select)
+
+
+def test_best_point_refuses_select_curves_without_the_series(
+    tmp_path: Path,
+) -> None:
+    curves, select = _two_curves(tmp_path)
+    narrow = dataclasses.replace(select, series=("reader", "other"))
+    with pytest.raises(ValueError, match="random"):
+        best_point(curves, "random", narrow)
+
+
+def _reading_run(
+    tmp_path: Path,
+    *,
+    stems: tuple[str, ...] = ("curves", "curves_val"),
+    n_layers: int | None = 12,
+) -> RunDir:
+    """A run whose reported curves peak at layer 8 and val curves at 4."""
+    run_dir = _run(tmp_path, "r2")
+    reported = np.zeros((2, 3, 4))
+    reported[0, :, 3] = [0.9, 0.8, 0.7]
+    reported[0, :, 1] = [0.6, 0.5, 0.4]
+    reported[1, :, 2] = [0.3, 0.2, 0.1]
+    chosen = np.zeros((2, 3, 4))
+    chosen[0, :, 1] = 0.8
+    chosen[1, :, 2] = 0.7
+    for stem in stems:
+        values = chosen if stem == "curves_val" else reported
+        _curves(
+            run_dir,
+            stem,
+            layers=(2, 4, 6, 8),
+            values=values,
+            n_layers=n_layers,
+        )
+    return run_dir
+
+
+def test_reading_point_chooses_the_layer_on_the_validation_curves(
+    tmp_path: Path,
+) -> None:
+    point = reading_point(_reading_run(tmp_path))
+    assert point.layer == 4
+    assert point.n_layers == 12
+    assert point.selected_on == "curves_val"
+    np.testing.assert_array_equal(point.values, [0.6, 0.5, 0.4])
+
+
+def test_reading_point_chooses_on_the_reported_curves_without_validation(
+    tmp_path: Path,
+) -> None:
+    point = reading_point(_reading_run(tmp_path, stems=("curves",)))
+    assert point.layer == 8
+    assert point.selected_on == "curves"
+    np.testing.assert_array_equal(point.values, [0.9, 0.8, 0.7])
+
+
+def test_reading_point_takes_the_series_and_the_stems_asked_for(
+    tmp_path: Path,
+) -> None:
+    run_dir = _reading_run(tmp_path, stems=("curves", "curves_val", "curves_x"))
+    point = reading_point(
+        run_dir, "random", report="curves_x", select="curves_val"
+    )
+    assert point.layer == 6
+    assert point.selected_on == "curves_val"
+    np.testing.assert_array_equal(point.values, [0.3, 0.2, 0.1])
+    other = reading_point(run_dir, report="curves_x", select="curves_none")
+    assert other.selected_on == "curves_x"
+    assert other.layer == 8
+
+
+def test_reading_point_reads_the_depth_of_the_reported_curves(
+    tmp_path: Path,
+) -> None:
+    run_dir = _reading_run(tmp_path, n_layers=None)
+    with pytest.raises(ValueError, match="n_layers"):
+        reading_point(run_dir)
+
+
+def test_reading_point_refuses_an_unknown_series(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="shuffled"):
+        reading_point(_reading_run(tmp_path), "shuffled")
 
 
 def test_relative_depth_is_the_layer_over_the_depth() -> None:
