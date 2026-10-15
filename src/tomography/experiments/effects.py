@@ -104,7 +104,9 @@ def fluency(
     The value is the mean over non-empty completions of the summed
     continuation log-probability given the original prompt (no prefix),
     divided by the token count of the completion text. Every arm is judged
-    by this one yardstick, outside any hook.
+    by this one yardstick, outside any hook. The BOS follows the model
+    default, not `GenSettings.bos`, so the yardstick is the same for every
+    arm.
 
     Args:
         loaded: The wrapped model.

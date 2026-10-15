@@ -39,6 +39,7 @@ from tomography.experiments.sweep import SweepResult
 from tomography.hooks import edit_residuals
 from tomography.judges import heuristic_score
 from tomography.judges import sequence_logprob
+from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.model import load_model
 from tomography.reading.metrics import bootstrap_ci
@@ -83,6 +84,111 @@ def test_standard_scores_sum_the_answer_logprob_after_the_user_prompt(
             bos_id=_bos(tiny_arch),
         )
         np.testing.assert_allclose(scores, expected, rtol=1e-4, atol=1e-4)
+
+
+def _standard_rows(
+    items: Sequence[ChoiceExample],
+) -> tuple[list[str], list[str]]:
+    prompts = [
+        f"USER: {i.question} ASSISTANT:" for i in items for _ in i.choices
+    ]
+    continuations = [" " + c for i in items for c in i.choices]
+    return prompts, continuations
+
+
+@pytest.mark.parametrize(
+    "bos", [None, "prepend"], ids=["model_default", "explicit_default"]
+)
+def test_standard_scores_at_the_default_bos_are_bit_identical_to_before(
+    tiny_arch: LoadedModel, bos: BosMode | None
+) -> None:
+    assert tiny_arch.default_bos == "prepend"
+    prompts, continuations = _standard_rows(_items())
+    expected = sequence_logprob(
+        tiny_arch.model,
+        tiny_arch.tokenizer,
+        prompts,
+        continuations,
+        batch_size=16,
+        bos_id=tiny_arch.bos_id,
+    )
+
+    got = standard_scores(tiny_arch, _items(), bos=bos)
+
+    assert np.array_equal(np.concatenate(got), expected)
+
+
+@pytest.mark.parametrize(
+    ("bos", "default"),
+    [("none", "prepend"), ("prepend", "none")],
+    ids=["none_on_a_prepend_model", "prepend_on_a_none_model"],
+)
+def test_standard_scores_follow_the_bos_policy(
+    tiny_arch: LoadedModel, bos: BosMode, default: BosMode
+) -> None:
+    loaded = dataclasses.replace(tiny_arch, default_bos=default)
+    prompts, continuations = _standard_rows(_items())
+
+    def reference(policy: BosMode) -> NDArray[np.float32]:
+        return sequence_logprob(
+            loaded.model,
+            loaded.tokenizer,
+            prompts,
+            continuations,
+            batch_size=16,
+            bos_id=loaded.bos_id if policy == "prepend" else None,
+        )
+
+    other = "none" if bos == "prepend" else "prepend"
+    assert not np.allclose(reference(bos), reference(other), atol=1e-3)
+
+    got = standard_scores(loaded, _items(), bos=bos)
+
+    assert np.array_equal(np.concatenate(got), reference(bos))
+
+
+def _heuristic_logprobs(
+    loaded: LoadedModel, items: Sequence[ChoiceExample], bos_id: int | None
+) -> NDArray[np.float32]:
+    levels = [" " + level for level in HEURISTIC_LEVELS]
+    prompts = [
+        SHORT_TEMPLATE.replace(
+            "{scenario}", f"Question: {i.question}\nAnswer: {choice}"
+        )
+        for i in items
+        for choice in i.choices
+        for _ in levels
+    ]
+    return sequence_logprob(
+        loaded.model,
+        loaded.tokenizer,
+        prompts,
+        levels * (len(prompts) // len(levels)),
+        batch_size=16,
+        bos_id=bos_id,
+    )
+
+
+@pytest.mark.parametrize(
+    ("bos", "bos_id"),
+    [(None, "default"), ("prepend", "default"), ("none", None)],
+    ids=["model_default", "explicit_default", "none_on_a_prepend_model"],
+)
+def test_heuristic_scores_follow_the_bos_policy(
+    tiny_arch: LoadedModel,
+    monkeypatch: pytest.MonkeyPatch,
+    bos: BosMode | None,
+    bos_id: str | None,
+) -> None:
+    monkeypatch.setattr(r6_truthfulqa, "HEURISTIC_TEMPLATE", SHORT_TEMPLATE)
+    assert tiny_arch.default_bos == "prepend"
+    expected_id = tiny_arch.bos_id if bos_id == "default" else None
+    logprobs = _heuristic_logprobs(tiny_arch, _items(), expected_id)
+    expected = heuristic_score(logprobs.reshape(-1, len(HEURISTIC_LEVELS)))
+
+    got = heuristic_scores(tiny_arch, _items(), bos=bos)
+
+    assert np.array_equal(np.concatenate(got), expected)
 
 
 def test_standard_scores_are_deterministic(tiny_arch: LoadedModel) -> None:
@@ -486,6 +592,37 @@ def test_execute_scores_the_baselines_on_the_questions_lat_is_tested_on(
     assert isinstance(summary, dict)
     assert summary["n_eval_pairs"] == {"val": 4, "test": 4}
     assert summary["n_test"] == 8
+
+
+@pytest.mark.parametrize(
+    ("bos", "expected"),
+    [(None, "default"), ("none", None)],
+    ids=["model_default", "none_on_a_prepend_model"],
+)
+def test_execute_scores_the_baselines_under_the_bos_of_the_config(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bos: BosMode | None,
+    expected: str | None,
+) -> None:
+    assert tiny_arch.default_bos == "prepend"
+    _record_sweeps(monkeypatch)
+    seen: list[int | None] = []
+    real = r6_truthfulqa.sequence_logprob
+
+    def spy(*args: Any, **kwargs: Any) -> NDArray[np.float32]:
+        seen.append(kwargs["bos_id"])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(r6_truthfulqa, "sequence_logprob", spy)
+    config = _config(sources=("truthfulqa",), n_eval_pairs=4, bos=bos)
+
+    _run_execute(config, tiny_arch, tmp_path, monkeypatch)
+
+    wanted = tiny_arch.bos_id if expected == "default" else None
+    assert seen
+    assert set(seen) == {wanted}
 
 
 @pytest.mark.parametrize(
