@@ -33,6 +33,7 @@ from tomography.datasets.truthfulqa import load_truthfulqa
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.effects import write_dose_curves
+from tomography.experiments.lr1_lorra import Config as Lr1Config
 from tomography.experiments.lr1_lorra import gated_arm
 from tomography.experiments.lr1_lorra import load_adapter
 from tomography.experiments.steering import Arm
@@ -560,6 +561,23 @@ def check_relative_op(config: SteeringConfig) -> None:
         )
 
 
+def _lorra_config(run_path: str) -> Lr1Config:
+    run_dir = RunDir.open(run_path)
+    if run_dir.meta["finished_at"] is None:
+        raise ValueError(f"{run_dir.path} is not a finished run")
+    return Lr1Config.from_dict(run_dir.config)
+
+
+def _check_lorra_run(run_path: str, n_layers: int) -> None:
+    """Checks that a run can supply an adapter, without attaching it."""
+    top = _lorra_config(run_path).settings(n_layers).layers[-1]
+    if top > n_layers:
+        raise ValueError(
+            f"layer {top} of the adapter is above the {n_layers} layers of "
+            "the model"
+        )
+
+
 def _check_config(
     config: Config, questions: Sequence[ChoiceExample], n_layers: int
 ) -> tuple[tuple[int, ...], NDArray[np.bool_], NDArray[np.bool_]]:
@@ -579,6 +597,8 @@ def _check_config(
         raise ValueError(f"batch_size must be >= 1, got {config.batch_size}")
     check_relative_op(config)
     layers = resolve_layers(config.layers, n_layers)
+    if config.lorra_run is not None:
+        _check_lorra_run(config.lorra_run, n_layers)
     select = np.array(
         [question.split in ("train", "val") for question in questions],
         dtype=np.bool_,
@@ -754,8 +774,9 @@ def execute(
             layers are outside 1..L, `n_seeds`, `n_boot`, `batch_size` or
             `n_calibration` is below 1, the projection operator has relative
             coefficients, the Alpaca `test` split is empty, or there is no
-            selection or no test question; or, once the readers are built,
-            if `lorra_run` is not a finished run or does not fit the model.
+            selection or no test question, or `lorra_run` is not a finished
+            run or has a layer above the model; or, once the readers are
+            built, if the adapter weights do not fit the model.
     """
     layers, select, test = _check_config(config, questions, loaded.n_layers)
     texts = calibration_texts(

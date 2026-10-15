@@ -706,6 +706,7 @@ def _forbid_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
         "plain_arm",
         "reader_arm",
         "contrast_logprobs",
+        "load_adapter",
     ):
         monkeypatch.setattr(c4_honesty_control, name, forbidden)
 
@@ -1654,6 +1655,48 @@ def test_an_unfinished_lorra_run_raises_and_attaches_nothing(
     with pytest.raises(ValueError, match="not a finished run"):
         _real_run(tmp_path / "run", fresh, lorra_run=str(adapter_run.path))
     assert _lora_layers(fresh) == []
+
+
+def _stub_lorra_run(
+    root: Path, *, layers: tuple[int, ...] = (1, 2), finish: bool = True
+) -> Path:
+    config = lr1_lorra.Config(model="tiny", layers=layers)
+    run_dir = RunDir.create(config, out_root=root)
+    if finish:
+        run_dir.finalize()
+    return run_dir.path
+
+
+@pytest.mark.parametrize(
+    ("kind", "message"),
+    [
+        ("missing", "not a run directory"),
+        ("unfinished", "not a finished run"),
+        ("too-deep", "above the"),
+    ],
+    ids=["missing-path", "unfinished-run", "layer-beyond-depth"],
+)
+def test_execute_rejects_a_bad_lorra_run_before_any_work(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    message: str,
+) -> None:
+    _forbid_scoring(monkeypatch)
+    path = tmp_path / "absent"
+    if kind != "missing":
+        path = _stub_lorra_run(
+            tmp_path / "lr1",
+            layers=(1, 99) if kind == "too-deep" else (1, 2),
+            finish=kind != "unfinished",
+        )
+    config = _config(lorra_run=str(path))
+    run_dir = RunDir.create(config, out_root=tmp_path / "run")
+    with pytest.raises(ValueError, match=message):
+        execute(config, run_dir, tiny_gpt2, QUESTIONS, _alpaca())
+    assert _lora_layers(tiny_gpt2) == []
+    assert not list(run_dir.path.glob("*.npz"))
 
 
 @pytest.mark.slow
