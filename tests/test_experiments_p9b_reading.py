@@ -466,6 +466,155 @@ def test_the_saved_signs_are_those_of_the_fitted_readers(
         )
 
 
+def test_each_contrast_has_a_curve_file_of_the_methods(
+    tiny_arch: LoadedModel, default_run: RunDir
+) -> None:
+    run_dir = default_run
+    n_layers = tiny_arch.n_layers
+    transfer = run_dir.read_arrays("transfer")
+
+    for t, name in enumerate(USABLE):
+        arrays = run_dir.read_arrays(f"curves_{name}")
+        sidecar = run_dir.read_json(f"curves_{name}")
+        assert isinstance(sidecar, dict)
+        assert arrays["x"].tolist() == list(range(1, n_layers + 1))
+        assert arrays["per_seed"].shape == (4, 2, n_layers)
+        np.testing.assert_allclose(arrays["per_seed"], transfer["test"][:, t])
+        assert sidecar["series"] == list(READING_METHODS)
+        assert sidecar["chance"] == 0.5
+        assert sidecar["n_layers"] == n_layers
+        want = (
+            "AUROC (unknown-type contrast)"
+            if name in UNKNOWN_TYPES
+            else "AUROC (known vs unknown)"
+        )
+        assert sidecar["ylabel"] == want
+
+
+def test_the_panels_draw_the_first_method_of_their_contrasts(
+    tiny_arch: LoadedModel, default_run: RunDir
+) -> None:
+    run_dir = default_run
+    test = run_dir.read_arrays("transfer")["test"]
+    panels = {
+        "entity": USABLE[:5],
+        "question": USABLE[5:8],
+        "unknown": USABLE[8:],
+    }
+
+    for panel, names in panels.items():
+        arrays = run_dir.read_arrays(f"curves_{panel}")
+        sidecar = run_dir.read_json(f"curves_{panel}")
+        assert isinstance(sidecar, dict)
+        assert sidecar["series"] == names
+        rows = [USABLE.index(n) for n in names]
+        np.testing.assert_allclose(arrays["per_seed"], test[0][rows])
+        assert sidecar["chance"] == 0.5
+        want = (
+            "AUROC (unknown-type contrast)"
+            if panel == "unknown"
+            else "AUROC (known vs unknown)"
+        )
+        assert sidecar["ylabel"] == want
+
+
+def test_the_matrices_hold_the_transfer_and_the_cosines_at_the_layer(
+    tiny_arch: LoadedModel, default_run: RunDir
+) -> None:
+    run_dir = default_run
+    summary = _summary(run_dir)
+    transfer = run_dir.read_arrays("transfer")
+    k = transfer["layers"].tolist().index(summary["layer"])
+
+    matrix = run_dir.read_arrays("matrix")["values"]
+    sidecar = run_dir.read_json("matrix")
+    assert isinstance(sidecar, dict)
+    assert sidecar["rows"] == USABLE
+    assert sidecar["cols"] == USABLE
+    assert f"layer {summary['layer']}" in sidecar["title"]
+    np.testing.assert_allclose(matrix, transfer["auroc"][:, k].mean(axis=0))
+    cosine = run_dir.read_arrays("matrix_cosine")["values"]
+    sidecar = run_dir.read_json("matrix_cosine")
+    assert isinstance(sidecar, dict)
+    assert sidecar["rows"] == USABLE
+    assert f"layer {summary['layer']}" in sidecar["title"]
+    np.testing.assert_allclose(cosine, transfer["cosine"][k])
+
+
+def test_the_validation_split_chooses_the_layer(
+    tiny_arch: LoadedModel, default_run: RunDir
+) -> None:
+    run_dir = default_run
+
+    summary = _summary(run_dir)
+    val = run_dir.read_arrays("transfer")["val"]
+    mean = val[0].mean(axis=(0, 1))
+    assert summary["layer"] == int(np.argmax(mean)) + 1
+    for t, name in enumerate(USABLE):
+        best = int(np.argmax(val[0, t].mean(axis=0))) + 1
+        assert summary["best_layer_by_type"][name] == best
+
+
+def test_the_table_reports_the_auroc_at_the_layer(
+    tiny_arch: LoadedModel, default_run: RunDir
+) -> None:
+    run_dir = default_run
+    summary = _summary(run_dir)
+    transfer = run_dir.read_arrays("transfer")
+    k = transfer["layers"].tolist().index(summary["layer"])
+    pools = type_pools(_items())
+
+    table = run_dir.read_json("table")
+    assert isinstance(table, dict)
+    assert table["columns"] == [
+        "type",
+        "contrast",
+        "n_positive_train",
+        "n_negative_train",
+        "n_positive_test",
+        "n_negative_test",
+        "logistic",
+        "lo",
+        "hi",
+        "pca_diff",
+        "mean_diff",
+        "random",
+    ]
+    assert [row[0] for row in table["rows"]] == USABLE
+    for t, row in enumerate(table["rows"]):
+        row_dict = dict(zip(table["columns"], row, strict=True))
+        name = row_dict["type"]
+        pool = pools[name]
+        assert row_dict["contrast"] == summary["contrasts"][name]
+        assert row_dict["n_positive_train"] == len(pool.split("train")[0])
+        assert row_dict["n_negative_train"] == len(pool.split("train")[1])
+        assert row_dict["n_positive_test"] == len(pool.split("test")[0])
+        assert row_dict["n_negative_test"] == len(pool.split("test")[1])
+        for m, method in enumerate(READING_METHODS):
+            assert row_dict[method] == pytest.approx(
+                transfer["test"][m, t, :, k].mean()
+            )
+        assert row_dict["lo"] <= row_dict["logistic"] <= row_dict["hi"]
+
+
+def test_the_layer_of_the_config_wins(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _execute(tiny_arch, tmp_path, layer=2)
+
+    summary = _summary(run_dir)
+    assert summary["layer"] == 2
+    assert summary["layer_source"] == "config"
+    sidecar = run_dir.read_json("matrix")
+    assert isinstance(sidecar, dict)
+    assert "layer 2" in sidecar["title"]
+    transfer = run_dir.read_arrays("transfer")
+    np.testing.assert_allclose(
+        run_dir.read_arrays("matrix")["values"],
+        transfer["auroc"][:, 1].mean(axis=0),
+    )
+
+
 def test_the_layers_of_the_config_restrict_the_reading(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
