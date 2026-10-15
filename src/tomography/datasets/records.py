@@ -140,21 +140,24 @@ def assign_splits(
     seed: int = 0,
     fractions: tuple[float, float, float] = (0.6, 0.2, 0.2),
 ) -> list[Split]:
-    """Assigns each uid to train, val or test by hashing.
+    """Assigns each split key to train, val or test by hashing.
 
-    The split is a pure function of (dataset, uid, seed): it ignores row
-    order and library versions, and a repeated uid always lands in the same
-    split, so everything derived from one source statement stays together.
+    The split is a pure function of (dataset, key, seed): it ignores row
+    order and library versions, and a repeated key always lands in the same
+    split. A key is either a uid or a grouping key such as a subject, so
+    every example that carries one key shares a split and everything derived
+    from one source statement or one subject stays together.
 
     Args:
-        uids: Source identifiers, one per example.
-        dataset: Dataset name, so the same uid splits differently across
+        uids: Split keys, one per example: a source identifier, or a
+            grouping key shared by the examples that must not be separated.
+        dataset: Dataset name, so the same key splits differently across
             datasets.
         seed: Changes the assignment without changing its proportions.
         fractions: Shares of (train, val, test); non-negative, sum to 1.
 
     Returns:
-        One split per uid, in the order of `uids`.
+        One split per key, in the order of `uids`.
 
     Raises:
         ValueError: If `fractions` has a negative part or does not sum to 1.
