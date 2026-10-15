@@ -189,12 +189,15 @@ def balanced_flip(
         pair keeps exactly one label-1 member.
 
     Raises:
-        ValueError: If a group does not have exactly two members, one of them
-            labeled 1.
+        ValueError: If `groups` is not an (n, 2) array without -1 padding or a
+            group does not have exactly one label-1 member.
     """
     index = parse_groups(groups, labels)
-    if not (index.valid.sum(axis=1) == 2).all():
-        raise ValueError("balanced_flip needs groups of exactly two members")
+    if groups.shape[1] != 2 or not index.valid.all():
+        raise ValueError(
+            "balanced_flip needs (n, 2) groups of exactly two members, "
+            "without padding"
+        )
     n = groups.shape[0]
     swapped = groups[np.random.default_rng(seed).permutation(n)[: n // 2]]
     flipped = labels.astype(np.int64, copy=True)

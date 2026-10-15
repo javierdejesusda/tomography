@@ -296,6 +296,7 @@ def test_balanced_flip_is_deterministic_and_the_seed_picks_the_pairs() -> None:
     [
         pytest.param("three", "two members", id="three-members"),
         pytest.param("one", "two members", id="one-member"),
+        pytest.param("padded", "two members", id="padded-column"),
         pytest.param("no_positive", "one label-1 member", id="no-positive"),
         pytest.param("two_positive", "one label-1 member", id="two-positive"),
     ],
@@ -310,6 +311,9 @@ def test_balanced_flip_needs_pairs_with_one_positive_member(
     elif case == "one":
         groups = groups.copy()
         groups[1, 1] = -1
+    elif case == "padded":
+        pad = np.full((4, 1), -1, dtype=np.int64)
+        groups = np.concatenate([groups, pad], axis=1)
     elif case == "no_positive":
         labels[groups[2]] = 0
     else:
