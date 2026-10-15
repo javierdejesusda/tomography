@@ -216,13 +216,11 @@ def _check_pair_counts(config: Config, scenarios: Sequence[Example]) -> None:
         ("train", "n_pairs", config.n_pairs),
         ("val", "n_eval_pairs", config.n_eval_pairs),
     ):
-        if wanted is None:
-            continue
         labels = np.array([e.label for e in scenarios if e.split == split])
         for emotion in config.emotions:
             target = int(np.sum(labels == EMOTIONS.index(emotion)))
             available = min(target, len(labels) - target)
-            if wanted > available:
+            if (1 if wanted is None else wanted) > available:
                 raise ValueError(
                     f"{name} is {wanted} but at most {available} pairs exist "
                     f"for {emotion!r} in the {split} split"

@@ -743,6 +743,24 @@ def test_the_other_emotions_cap_the_pairs_when_they_are_fewer(
         execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
 
 
+def test_an_emotion_without_a_val_pair_raises_when_n_eval_pairs_is_none(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reached(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a reader was fitted")
+
+    monkeypatch.setattr(c2_emotion_steering, "reading_sweep", reached)
+    config = _config(n_eval_pairs=None)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    scenarios = _keep_only(_scenarios(), "anger", "val", keep=0)
+    with pytest.raises(
+        ValueError, match=r"n_eval_pairs is None but at most 0 .*'anger'.*val"
+    ):
+        execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
+
+
 def test_every_val_pair_is_used_when_n_eval_pairs_is_none(
     tiny_arch: LoadedModel,
     tmp_path: Path,
