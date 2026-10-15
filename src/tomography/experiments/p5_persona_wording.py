@@ -4,20 +4,48 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace
+from pathlib import Path
 from types import MappingProxyType
+from typing import Any
+from typing import cast
+
+from matplotlib.figure import Figure
+import numpy as np
+from numpy.typing import NDArray
 
 from tomography.activations import PositionStrategy
+from tomography.datasets.facts import load_facts
+from tomography.datasets.geometry_of_truth import load_geometry_of_truth
 from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.datasets.stimulus import build_stimulus_set
+from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.sweep import SERIES
+from tomography.experiments.sweep import Prepared
 from tomography.experiments.sweep import ReadingConfig
+from tomography.experiments.sweep import SweepResult
+from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.sweep import plot_curves_file
 from tomography.experiments.sweep import shuffle_within_groups
+from tomography.experiments.sweep import stimulus_activations
+from tomography.experiments.sweep import sweep_from_activations
+from tomography.experiments.sweep import write_curves
+from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.reading.directions import Method
+from tomography.reading.metrics import best_layer
 from tomography.templates import PAPER_TEMPLATES
 from tomography.templates import ChatFormat
 from tomography.templates import ConceptTemplate
 from tomography.templates import FunctionTemplate
+from tomography.viz.style import INK_MUTED
+from tomography.viz.style import PX
+from tomography.viz.style import TEXT_WIDTH
+from tomography.viz.style import categorical_colors
+from tomography.viz.style import new_figure
+from tomography.viz.style import save_figure
+from tomography.viz.style import style_context
 
 PERSONA_PAIRS: Mapping[str, tuple[str, str]] = MappingProxyType(
     {
@@ -40,6 +68,9 @@ GOT_SUBSETS: tuple[str, ...] = (
 PLAIN = ConceptTemplate("honesty_plain", "{stimulus}", tagged=False)
 PLAIN_POSITION: PositionStrategy = "mean"
 MAX_CONDITIONS = 8
+_READER = SERIES.index("reader")
+_RELATED = ("paper", "synonym_0", "synonym_1")
+_UNRELATED = ("unrelated_0", "unrelated_1")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -214,3 +245,392 @@ def condition_position(
     if condition == "fact_only":
         return PLAIN_POSITION
     return position
+
+
+def _check(
+    config: Config, facts: Sequence[Example], got: Sequence[Example]
+) -> dict[str, list[Example]]:
+    conditions = config.conditions
+    if not 1 <= len(conditions) <= MAX_CONDITIONS:
+        raise ValueError(
+            f"conditions must hold between 1 and {MAX_CONDITIONS} names, "
+            f"got {len(conditions)}"
+        )
+    if len(set(conditions)) != len(conditions):
+        raise ValueError(f"conditions must be distinct, got {conditions}")
+    if "paper" not in conditions:
+        raise ValueError(f"conditions must include 'paper', got {conditions}")
+    if len(set(config.got_subsets)) != len(config.got_subsets):
+        raise ValueError(
+            f"got_subsets must be distinct, got {config.got_subsets}"
+        )
+    for split in ("train", "val", "test"):
+        if not any(e.split == split and e.label == 1 for e in facts):
+            raise ValueError(
+                f"the {split} split of the facts has no true statements"
+            )
+    test_rows = {
+        subset: [
+            e
+            for e in got
+            if e.meta.get("subset") == subset and e.split == "test"
+        ]
+        for subset in config.got_subsets
+    }
+    missing = [subset for subset, rows in test_rows.items() if not rows]
+    if missing:
+        raise ValueError(
+            f"no test statements for the Geometry of Truth subsets {missing}"
+        )
+    return test_rows
+
+
+def _plan(
+    config: Config,
+    condition: str,
+    by_split: Mapping[str, Sequence[Example]],
+    chat: ChatFormat,
+) -> tuple[list[StimulusSet], dict[str, StimulusSet]]:
+    train = [
+        condition_stimuli(
+            condition,
+            by_split["train"],
+            chat,
+            n_pairs=config.n_pairs,
+            seed=derive_seed(config.seed, "train", i),
+            train=True,
+        )
+        for i in range(config.n_seeds)
+    ]
+    if condition == "fact_only":
+        return train, {}
+    evals = {}
+    for name, split in (("id_val", "val"), ("id", "test")):
+        statements = by_split[split]
+        n_true = sum(e.label == 1 for e in statements)
+        evals[name] = condition_stimuli(
+            condition,
+            statements,
+            chat,
+            n_pairs=(
+                None
+                if config.n_eval_pairs is None
+                else min(config.n_eval_pairs, n_true)
+            ),
+            seed=derive_seed(config.seed, "eval", "id", split),
+            train=False,
+        )
+    return train, evals
+
+
+def _prepare(
+    config: Config,
+    loaded: LoadedModel,
+    layers: tuple[int, ...],
+    stimuli: StimulusSet,
+    position: PositionStrategy,
+) -> Prepared:
+    act = stimulus_activations(
+        loaded,
+        stimuli,
+        layers=layers,
+        position=position,
+        bos=config.bos,
+        batch_size=config.batch_size,
+    )
+    return stimuli, act
+
+
+def _fit_condition(
+    config: Config,
+    loaded: LoadedModel,
+    layers: tuple[int, ...],
+    condition: str,
+    plan: tuple[list[StimulusSet], dict[str, StimulusSet]],
+    shared: Mapping[str, Prepared],
+) -> SweepResult:
+    train, evals = plan
+    where = condition_position(condition, config.position)
+    where_eval = condition_position(
+        condition,
+        config.position
+        if config.eval_position is None
+        else config.eval_position,
+    )
+    trained = [_prepare(config, loaded, layers, s, where) for s in train]
+    own = {
+        name: _prepare(config, loaded, layers, stimuli, where_eval)
+        for name, stimuli in evals.items()
+    }
+    if condition == "fact_only":
+        own = {"id_val": shared["facts_val"], "id": shared["facts"]}
+    return sweep_from_activations(
+        trained,
+        {**own, **shared},
+        method=config.method,
+        preprocess=config.preprocess,
+        seed=config.seed,
+    )
+
+
+def _table_rows(
+    config: Config,
+    curves: Mapping[str, Mapping[str, NDArray[Any]]],
+    layers: Sequence[int],
+    ood: Sequence[str],
+) -> list[list[Any]]:
+    def at_layer(name: str, c: int, layer: int) -> list[float]:
+        at = layers.index(layer)
+        return [float(curves[name][key][c, at]) for key in ("mean", "lo", "hi")]
+
+    rows = []
+    for c, condition in enumerate(config.conditions):
+        id_layer = best_layer(curves["id_val"]["mean"][c], layers)
+        ood_layer = best_layer(curves["facts_val"]["mean"][c], layers)
+        rows.append(
+            [
+                condition,
+                id_layer,
+                *at_layer("id", c, id_layer),
+                ood_layer,
+                *(v for name in ood for v in at_layer(name, c, ood_layer)),
+            ]
+        )
+    return rows
+
+
+def execute(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    facts: Sequence[Example],
+    got: Sequence[Example],
+) -> None:
+    """Reads honesty under every condition and scores the truth sets.
+
+    The shared evaluation sets are plain true against false statements read
+    once at `PLAIN_POSITION` and reused by every condition: the facts val and
+    test splits (`facts_val`, `facts`) and the test split of each Geometry of
+    Truth subset (`got_<subset>`). Each condition trains `n_seeds` readers on
+    the train split, scores its own in-distribution val and test sets (`id_val`
+    and `id`, built like its training sets with the real labels; for
+    `fact_only` they are the facts sets) and every shared set, and releases
+    its activations before the next one.
+
+    Writes `curves_<set>` for every set, with one series per condition and the
+    accuracy of its reader at each layer, and `curves_cosine`, the cosine of
+    each condition's reader with the paper reader of the same seed (absent
+    when only `paper` runs). Also writes `readers_<condition>`, `table.json`
+    and `summary.json`. The table reports `id` at the layer that is best on
+    the condition's `id_val` curve and every other set at the layer that is
+    best on its `facts_val` curve, so no test set picks a layer. Accuracies
+    are raw, not folded above 0.5.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+        loaded: The wrapped model.
+        facts: Facts with `train`, `val` and `test` splits, label 1 for a
+            true statement and 0 for a false one.
+        got: Geometry of Truth statements; `meta["subset"]` names the subset
+            and the `test` split of each subset in `config.got_subsets` is
+            scored.
+
+    Raises:
+        ValueError: If `config.conditions` are not 1 to `MAX_CONDITIONS`
+            distinct names of `CONDITIONS` including `paper`, the
+            `got_subsets` repeat, a split of the facts has no true
+            statement, a subset has no test statement, or a split cannot
+            supply the requested pairs.
+    """
+    test_rows = _check(config, facts, got)
+    by_split = {
+        split: [e for e in facts if e.split == split]
+        for split in ("train", "val", "test")
+    }
+    chat = chat_format_for(loaded)
+    sets = {
+        name: plain_stimuli(
+            rows,
+            n_pairs=config.n_eval_pairs,
+            seed=derive_seed(config.seed, "eval", *keys),
+        )
+        for name, rows, keys in (
+            ("facts_val", by_split["val"], ("facts", "val")),
+            ("facts", by_split["test"], ("facts", "test")),
+            *(
+                (f"got_{subset}", rows, (subset,))
+                for subset, rows in test_rows.items()
+            ),
+        )
+    }
+    plans = {c: _plan(config, c, by_split, chat) for c in config.conditions}
+    layers = (
+        tuple(range(1, loaded.n_layers + 1))
+        if config.layers is None
+        else config.layers
+    )
+    shared = {
+        name: _prepare(config, loaded, layers, stimuli, PLAIN_POSITION)
+        for name, stimuli in sets.items()
+    }
+    names = ("id_val", "id", *shared)
+    accuracy: dict[str, list[NDArray[np.float64]]] = {n: [] for n in names}
+    oriented = {}
+    for condition in config.conditions:
+        result = _fit_condition(
+            config, loaded, layers, condition, plans[condition], shared
+        )
+        for name in names:
+            accuracy[name].append(result.per_seed(name)[_READER])
+        directions = np.stack([r.directions for r in result.readers])
+        signs = np.stack([r.signs for r in result.readers])
+        run_dir.write_arrays(
+            f"readers_{condition}",
+            layers=np.asarray(result.layers, dtype=np.int64),
+            directions=directions,
+            signs=signs,
+        )
+        oriented[condition] = signs[:, :, None] * directions
+    for name in names:
+        write_curves(
+            run_dir,
+            np.stack(accuracy[name]),
+            layers,
+            series=config.conditions,
+            stem=f"curves_{name}",
+            chance=0.5,
+            n_layers=loaded.n_layers,
+            n_boot=config.n_boot,
+        )
+    others = [c for c in config.conditions if c != "paper"]
+    if others:
+        write_curves(
+            run_dir,
+            np.stack(
+                [
+                    np.einsum("nkd,nkd->nk", oriented[c], oriented["paper"])
+                    for c in others
+                ]
+            ).astype(np.float64),
+            layers,
+            series=others,
+            stem="curves_cosine",
+            ylabel="Cosine with the paper reader",
+            chance=0.0,
+            n_layers=loaded.n_layers,
+            n_boot=config.n_boot,
+        )
+    ood = ["facts", *(f"got_{subset}" for subset in config.got_subsets)]
+    curves = {name: run_dir.read_arrays(f"curves_{name}") for name in names}
+    columns = [
+        "condition",
+        "id_layer",
+        "id",
+        "id_lo",
+        "id_hi",
+        "ood_layer",
+        *(f"{name}{suffix}" for name in ood for suffix in ("", "_lo", "_hi")),
+    ]
+    rows = _table_rows(config, curves, layers, ood)
+    run_dir.write_json("table", {"columns": columns, "rows": rows})
+    by_condition = {
+        row[0]: dict(zip(columns, row, strict=True)) for row in rows
+    }
+    summary: dict[str, Any] = {
+        "conditions": list(config.conditions),
+        "personas": {
+            c: list(PERSONA_PAIRS[c])
+            for c in config.conditions
+            if c in PERSONA_PAIRS
+        },
+        "got_subsets": list(config.got_subsets),
+        "n_eval_pairs": {
+            name: int(stimuli.groups.shape[0]) for name, stimuli in sets.items()
+        },
+        "n_seeds": config.n_seeds,
+    }
+    related = [c for c in config.conditions if c in _RELATED]
+    unrelated = [c for c in config.conditions if c in _UNRELATED]
+    if unrelated:
+        summary["lexical_gap"] = {
+            name: float(
+                np.mean([by_condition[c][name] for c in related])
+                - np.mean([by_condition[c][name] for c in unrelated])
+            )
+            for name in ood
+        }
+    run_dir.write_json("summary", summary)
+
+
+def run(config: Config, run_dir: RunDir) -> None:
+    """Loads the model, the facts and Geometry of Truth, then runs `execute`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+    """
+    execute(
+        config,
+        run_dir,
+        load_model(config.model),
+        load_facts(),
+        load_geometry_of_truth(subsets=config.got_subsets),
+    )
+
+
+def _persona_scatter(table: Mapping[str, Any]) -> Figure:
+    rows = [
+        dict(zip(table["columns"], row, strict=True)) for row in table["rows"]
+    ]
+    colors = categorical_colors(len(rows))
+    with style_context():
+        fig, axes = new_figure(width=TEXT_WIDTH, aspect=0.55)
+        ax = axes[0, 0]
+        for row, color in zip(rows, colors, strict=True):
+            ax.hlines(
+                row["facts"], row["id_lo"], row["id_hi"], color=color, lw=PX
+            )
+            ax.vlines(
+                row["id"], row["facts_lo"], row["facts_hi"], color=color, lw=PX
+            )
+            ax.plot(
+                row["id"],
+                row["facts"],
+                "o",
+                color=color,
+                label=row["condition"],
+            )
+        ax.axhline(0.5, color=INK_MUTED, lw=PX, label="_chance")
+        ax.axvline(0.5, color=INK_MUTED, lw=PX, label="_chance")
+        ax.set_xlim(-0.05, 1.05)
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_xlabel("In-distribution accuracy")
+        ax.set_ylabel("Facts accuracy")
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
+    return fig
+
+
+def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
+    """Draws the P5 curves and the persona confound scatter.
+
+    Args:
+        run_dir: A finished P5 run.
+        out_dir: Folder of the figures.
+
+    Returns:
+        The PDF, PNG and SVG paths of every `curves_<set>` file in stem
+        order, then of `persona_scatter`: each condition's in-distribution
+        accuracy against its facts accuracy, both with their intervals and
+        the chance level of each axis at 0.5.
+    """
+    stems = sorted(p.stem for p in run_dir.path.glob("curves*.npz"))
+    paths = [
+        path
+        for stem in stems
+        for path in plot_curves_file(run_dir, out_dir, stem=stem)
+    ]
+    table = cast(dict[str, Any], run_dir.read_json("table"))
+    return paths + save_figure(
+        _persona_scatter(table), out_dir, "persona_scatter"
+    )
