@@ -220,9 +220,14 @@ def _pairs(config: Config) -> list[tuple[str, str]]:
     return list(zip(config.base_models, config.tuned_models, strict=True))
 
 
+def _paired_models(config: Config) -> list[str]:
+    """The pairs in order, base then tuned, without the reference."""
+    return [model for pair in _pairs(config) for model in pair]
+
+
 def _models(config: Config) -> list[str]:
     """The pairs in order, base then tuned, then the reference."""
-    models = [model for pair in _pairs(config) for model in pair]
+    models = _paired_models(config)
     if config.reference is not None:
         models.append(config.reference)
     return models
@@ -272,9 +277,7 @@ def _check(config: Config, runs: Mapping[tuple[str, str], RunDir]) -> None:
         needed += [(config.template_source, model) for model in models]
     if config.steering_source is not None:
         needed += [
-            (config.steering_source, model)
-            for pair in _pairs(config)
-            for model in pair
+            (config.steering_source, model) for model in _paired_models(config)
         ]
     lacking = [pair for pair in needed if pair not in runs]
     if lacking:
@@ -634,7 +637,7 @@ def run(config: Config, run_dir: RunDir) -> None:
             resolve_runs(
                 out_root,
                 [config.steering_source],
-                [model for pair in _pairs(config) for model in pair],
+                _paired_models(config),
                 steering_extras,
             )
         )
