@@ -39,6 +39,7 @@ from tomography.experiments.variants import prepare
 from tomography.experiments.variants import target_of
 from tomography.experiments.variants import task_examples
 from tomography.experiments.variants import task_set
+from tomography.experiments.variants import task_sources
 from tomography.experiments.variants import task_splits
 from tomography.experiments.variants import template_variants
 from tomography.experiments.variants import variant_cosines
@@ -423,7 +424,7 @@ def test_the_alternate_is_the_second_emotion_wording() -> None:
 
 
 def _sst2(n_train: int = 12, n_val: int = 20) -> list[Example]:
-    """Train phrases (two of them too short) and val sentences."""
+    """Train phrases (two too short, two of exactly three words) and val."""
     rows = []
     for label in (0, 1):
         for i in range(n_train):
@@ -437,6 +438,14 @@ def _sst2(n_train: int = 12, n_val: int = 20) -> list[Example]:
             )
         rows.append(
             Example(f"sst2-train-short-{label}", "so good", label, "train")
+        )
+        rows.append(
+            Example(
+                f"sst2-train-edge-{label}",
+                "just fine today" if label else "quite dull today",
+                label,
+                "train",
+            )
         )
         for i in range(n_val):
             rows.append(
@@ -570,9 +579,12 @@ def test_eval_seeds_are_keyed_by_the_target_and_the_split() -> None:
 
 def test_training_examples_drop_the_phrases_below_min_words() -> None:
     splits = task_splits(READING_TASKS["sentiment"], _sources(), seed=0)
-    assert len(splits.train) == 24
+    assert len(splits.train) == 26
     assert all(e.split == "train" for e in splits.train)
     assert all(len(e.text.split()) >= 3 for e in splits.train)
+    kept = {e.uid for e in splits.train}
+    assert {"sst2-train-edge-0", "sst2-train-edge-1"} <= kept
+    assert not {"sst2-train-short-0", "sst2-train-short-1"} & kept
 
 
 def test_sst2_halves_its_validation_split_by_uid() -> None:
@@ -1184,6 +1196,20 @@ def test_load_sources_rejects_an_unknown_source() -> None:
     sources: Sequence[Any] = ["sst2", "imdb"]
     with pytest.raises(ValueError, match="unknown source 'imdb'"):
         load_sources(sources)
+
+
+def test_task_sources_lists_each_source_once_targets_included() -> None:
+    assert task_sources(["truth_cities", "truth", "utility"]) == [
+        "geometry_of_truth",
+        "facts",
+        "ethics_utility",
+    ]
+    assert task_sources(["emotion", "sentiment"]) == ["emotions", "sst2"]
+
+
+def test_task_sources_rejects_an_unknown_task() -> None:
+    with pytest.raises(ValueError, match="unknown task 'nope'"):
+        task_sources(["sentiment", "nope"])
 
 
 def _short_emotions(per_class: int = 4) -> list[Example]:

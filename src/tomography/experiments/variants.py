@@ -866,6 +866,31 @@ def variant_cosines(directions: NDArray[np.float32]) -> NDArray[np.float64]:
     return cosines
 
 
+def task_sources(names: Sequence[str]) -> list[TaskSource]:
+    """Lists the datasets that some tasks and their targets read.
+
+    Args:
+        names: Keys of `READING_TASKS`, where "emotion" stands for the six
+            emotion tasks.
+
+    Returns:
+        Each source once, in the order of first use; a task's own source
+        comes before its target's.
+
+    Raises:
+        ValueError: If a task is unknown.
+    """
+    sources = [
+        source
+        for name in expand_tasks(names)
+        for source in (
+            READING_TASKS[name].source,
+            target_of(READING_TASKS[name]).source,
+        )
+    ]
+    return list(dict.fromkeys(sources))
+
+
 def load_sources(
     sources: Sequence[TaskSource],
     *,
