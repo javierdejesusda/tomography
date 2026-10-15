@@ -12,9 +12,9 @@ that record their code state and library versions; and both architectures behind
 
 Status: research code under active development. `main` ships the framework described below and the
 experiments listed under [Running experiments](#running-experiments): the reading experiments (R1 to R7 and
-P1 to P5), the steering and control experiments (C1, C2, C4, C5, M1 and the LoRRA adapter LR1), five analyses of
-finished runs (A1, A2, A5, P6 and P8) and P9a to P9d, a study of known versus unknown questions. It reports no
-results.
+P1 to P5), the steering and control experiments (C1, C2, C4, C5, M1, P7 and the LoRRA adapter LR1), five
+analyses of finished runs (A1, A2, A5, P6 and P8) and P9a to P9d, a study of known versus unknown questions. It
+reports no results.
 
 ## How it fits together
 
@@ -349,6 +349,22 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   `curves_<set>` for every evaluation set, `curves_cosine` (the cosine of each reader with the paper reader;
   absent when only `paper` runs), `readers_<condition>`, `table` and `summary`; the plot draws the curves and
   a persona scatter of each condition's in-distribution accuracy against its facts accuracy.
+- `p7` ([`p7_extraction_steering.py`](src/tomography/experiments/p7_extraction_steering.py)): whether a
+  sentiment reader that reads well steers well. Readers are fitted on SST-2 under the template variants of the
+  sentiment task, as in `p1` (`templates`, at most 8, `paper` required), steer text with the protocol of `c1`
+  at each layer of `sweep_layers` (the model's default sweep when `None`), and then steer the same prompts
+  rewritten in three formats (`formats`: `raw`, `chat`, `story`). A unit is a template, a sweep layer and a
+  steering reader; it is readable when its validation accuracy is at least `read_threshold` and inverted when
+  it is readable and its primary-judge dose slope is negative. The summary holds the inversion rate with a Wilson
+  interval, the Spearman correlation of reading accuracy and of logit lens separation with the slope, the
+  share of templates whose lens peak is their steering layer, the mean gap between the reading and the
+  steering depth, and the share of units on which the two judges agree on the sign. Defaults: `method`
+  `logistic`, `n_seeds` 10, `n_steer_seeds` 2, `n_pairs` 64, `n_eval_pairs` 256, `read_threshold` 0.6,
+  `truncate_words` 3, `n_boot` 2000 and the shared steering fields `n_prompts` 50, `num_samples` 2 and
+  `coeffs` -0.3 to 0.3, relative to the mean residual norm. It writes `curves_read`, `curves_lens`,
+  `curves_slope`, `curves_slope_check`, `matrix_transfer`, `trials_sweep`, `trials_transfer_<format>`, `table`
+  (one row per template) and `summary`; the plot draws the four curves, the matrix and `read_vs_steer`, each
+  unit's reading accuracy against its dose slope.
 - `c1` ([`c1_sentiment_steering.py`](src/tomography/experiments/c1_sentiment_steering.py)): steering the
   sentiment of GPT-2 text with a reading vector fitted on SST-2 as in `r1`. A layer sweep (`sweep_layers`, the
   model's default sweep when `None`) on one prompt list chooses where to steer; the operators in `ops`
@@ -630,7 +646,7 @@ src/tomography/
                    risk.py (error predictors, risk-coverage), behavior.py (abstention and shift)
   experiments/     base.py (configs, run dirs, seeding), sweep.py, intervals.py, steering.py, effects.py,
                    matrices.py, variants.py, aggregate.py, and one module per experiment: r1 to r7, p1 to
-                   p5 (reading), c1, c2, c4, c5, m1 (steering and control), lr1 (LoRRA), a1, a2, a5, p6, p8
+                   p5 (reading), c1, c2, c4, c5, m1, p7 (steering and control), lr1 (LoRRA), a1, a2, a5, p6, p8
                    (analyses of finished runs) and p9a to p9d (known versus unknown)
   viz/             figure style, layer curves, token scans, matrices and embeddings
   cli.py           the tomography command (also python -m tomography)

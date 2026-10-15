@@ -1,21 +1,28 @@
 """Tests for the P7 extraction template versus steering experiment."""
 
+from collections.abc import Callable
 from collections.abc import Iterator
+from collections.abc import Sequence
 import contextlib
 import dataclasses
 from pathlib import Path
+import time
 from types import SimpleNamespace
 from typing import Any
 from typing import NamedTuple
 
+from huggingface_hub import snapshot_download
 import numpy as np
 from numpy.typing import NDArray
 import pytest
 
 from tomography.analysis import lens_logits
 from tomography.analysis import pole_separation
+from tomography.cli import load_experiment
 from tomography.control.controllers import mean_residual_norms
 from tomography.datasets.records import Example
+from tomography.datasets.sst2 import load_sst2
+from tomography.datasets.wikitext import load_wikitext
 from tomography.experiments import p7_extraction_steering as p7
 from tomography.experiments.a2_logit_lens import lens_params
 from tomography.experiments.a2_logit_lens import pole_ids
@@ -35,6 +42,8 @@ from tomography.experiments.p7_extraction_steering import Config
 from tomography.experiments.p7_extraction_steering import execute
 from tomography.experiments.p7_extraction_steering import extraction_variants
 from tomography.experiments.p7_extraction_steering import lens_separation
+from tomography.experiments.p7_extraction_steering import plot
+from tomography.experiments.p7_extraction_steering import run
 from tomography.experiments.p7_extraction_steering import safe_slope
 from tomography.experiments.p7_extraction_steering import shift_prompts
 from tomography.experiments.p7_extraction_steering import spearman
@@ -46,7 +55,10 @@ from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import task_set
 from tomography.experiments.variants import template_variants
+from tomography.judges import JUDGES
+from tomography.judges import load_judge
 from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.reading.metrics import wilson_ci
 from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
@@ -1227,3 +1239,174 @@ def test_nothing_readable_leaves_the_inversion_rate_empty(
         "ci": None,
     }
     assert [row["n_readable"] for row in _table(run_dir)] == [0, 0]
+
+
+def test_the_cli_discovers_the_experiment() -> None:
+    experiment = load_experiment("p7")
+    assert experiment.config_cls is Config
+    assert experiment.run is run
+    assert experiment.plot is plot
+
+
+class StubJudge:
+    def __init__(self, column: int) -> None:
+        self.column = column
+
+    def score(self, texts: Any) -> NDArray[np.float32]:
+        return np.ascontiguousarray(_score(texts)[:, self.column])
+
+
+def test_run_scores_with_both_judges_in_two_columns(
+    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: dict[str, list[str]] = {"model": [], "judge": []}
+
+    def load_model(key: str) -> LoadedModel:
+        asked["model"].append(key)
+        return finished.loaded
+
+    def load_judge(key: str) -> StubJudge:
+        asked["judge"].append(key)
+        return StubJudge(0 if key == "sentiment-primary" else 1)
+
+    real = p7.execute
+    monkeypatch.setattr(p7, "load_model", load_model)
+    monkeypatch.setattr(p7, "load_judge", load_judge)
+    monkeypatch.setattr(p7, "load_sst2", _sst2)
+    monkeypatch.setattr(
+        p7, "load_wikitext", lambda: [SimpleNamespace(text=t) for t in _texts()]
+    )
+    monkeypatch.setattr(p7, "execute", lambda *args: real(*args, words=WORDS))
+    run_dir = RunDir.create(finished.config, out_root=tmp_path)
+    run(finished.config, run_dir)
+
+    assert asked == {
+        "model": ["tiny"],
+        "judge": ["sentiment-primary", "sentiment-secondary"],
+    }
+    for stem in ("trials_sweep", "trials_transfer_raw"):
+        np.testing.assert_array_equal(
+            run_dir.read_arrays(stem)["scores"],
+            finished.run_dir.read_arrays(stem)["scores"],
+        )
+
+
+PLOT_STEMS = (
+    "curves_read",
+    "curves_lens",
+    "curves_slope",
+    "curves_slope_check",
+    "matrix_transfer",
+    "read_vs_steer",
+)
+
+
+def test_plot_draws_the_four_curves_the_matrix_and_the_scatter(
+    finished: Finished, tmp_path: Path
+) -> None:
+    paths = plot(finished.run_dir, tmp_path / "figs")
+    assert [p.name for p in paths] == [
+        f"{stem}.{ext}" for stem in PLOT_STEMS for ext in ("pdf", "png", "svg")
+    ]
+    assert all(p.stat().st_size > 0 for p in paths)
+
+
+def test_the_transfer_matrix_is_drawn_on_a_diverging_scale(
+    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[dict[str, Any]] = []
+    real = p7.plot_matrix_file
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        asked.append(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(p7, "plot_matrix_file", spy)
+    plot(finished.run_dir, tmp_path)
+    assert len(asked) == 1
+    assert asked[0]["stem"] == "matrix_transfer"
+    assert asked[0]["kind"] == "diverging"
+
+
+def test_the_scatter_puts_each_unit_at_its_reading_accuracy_and_slope(
+    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved: dict[str, Any] = {}
+    real = p7.save_figure
+
+    def spy(fig: Any, out_dir: Any, name: str, **kwargs: Any) -> Any:
+        saved[name] = fig
+        return real(fig, out_dir, name, **kwargs)
+
+    monkeypatch.setattr(p7, "save_figure", spy)
+    plot(finished.run_dir, tmp_path)
+    ax = saved["read_vs_steer"].axes[0]
+    lines = {line.get_label(): line for line in ax.lines}
+    units = _units(finished.run_dir)
+    for t, template in enumerate(TEMPLATE_NAMES):
+        x, y = lines[template].get_data()
+        np.testing.assert_allclose(x, units.read[t].T.ravel())
+        np.testing.assert_allclose(y, units.slope[t].T.ravel())
+    colors = {lines[template].get_color() for template in TEMPLATE_NAMES}
+    assert len(colors) == len(TEMPLATE_NAMES)
+    assert lines["_zero_slope"].get_ydata()[0] == 0.0
+    assert lines["_threshold"].get_xdata()[0] == finished.config.read_threshold
+    assert ax.get_xlabel() == "Reading accuracy"
+    assert ax.get_ylabel() == "Dose slope (primary judge)"
+
+
+def _cached[T](load: Callable[[], T]) -> T:
+    try:
+        return load()
+    except FileNotFoundError as error:
+        pytest.skip(f"cache missing: {error}")
+
+
+def _cached_judge(key: str) -> Any:
+    spec = JUDGES[key]
+    try:
+        snapshot_download(
+            spec.repo_id, revision=spec.revision, local_files_only=True
+        )
+    except FileNotFoundError as error:
+        pytest.skip(f"cache missing: {error}")
+    return load_judge(key)
+
+
+@pytest.mark.slow
+def test_p7_on_gpt2_prints_the_slopes_under_both_judges(tmp_path: Path) -> None:
+    sst2 = _cached(lambda: load_sst2(offline=True))
+    texts = [e.text for e in _cached(lambda: load_wikitext(offline=True))]
+    first = _cached_judge("sentiment-primary")
+    second = _cached_judge("sentiment-secondary")
+
+    def score(batch: Sequence[str]) -> NDArray[np.float32]:
+        return np.column_stack([first.score(batch), second.score(batch)])
+
+    config = Config(
+        templates=("paper", "no_template"),
+        formats=("raw",),
+        n_seeds=3,
+        n_steer_seeds=1,
+        n_pairs=32,
+        n_eval_pairs=128,
+        sweep_layers=(4, 8),
+        coeffs=(-0.2, 0.0, 0.2),
+        n_prompts=10,
+        num_samples=1,
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    started = time.perf_counter()
+    execute(config, run_dir, load_model("gpt2"), sst2, texts, score)
+    seconds = time.perf_counter() - started
+
+    generations = sum(
+        int(trial.scores.shape[0] * trial.scores.shape[1])
+        for stem in ("trials_sweep", "trials_transfer_raw")
+        for trial in read_trials(run_dir, stem)
+    )
+    print(f"{seconds / generations:.3f} s per generation, whole run")
+    print(_summary(run_dir))
+    for row in _table(run_dir):
+        print(row)
+    assert _summary(run_dir)["sweep_layers"] == [4, 8]

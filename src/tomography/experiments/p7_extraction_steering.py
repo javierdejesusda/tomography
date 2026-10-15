@@ -10,8 +10,11 @@ asks whether the logit lens predicts the dose response.
 from collections.abc import Sequence
 import dataclasses
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+from typing import cast
 
+from matplotlib.figure import Figure
 import numpy as np
 from numpy.typing import ArrayLike
 from numpy.typing import NDArray
@@ -20,6 +23,8 @@ from tomography.analysis import lens_logits
 from tomography.analysis import pole_separation
 from tomography.control.controllers import mean_residual_norms
 from tomography.datasets.records import Example
+from tomography.datasets.sst2 import load_sst2
+from tomography.datasets.wikitext import load_wikitext
 from tomography.experiments.a2_logit_lens import POLE_WORDS
 from tomography.experiments.a2_logit_lens import PoleWords
 from tomography.experiments.a2_logit_lens import lens_params
@@ -34,6 +39,7 @@ from tomography.experiments.c1_sentiment_steering import prompt_fragments
 from tomography.experiments.c1_sentiment_steering import slope_layer
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.effects import write_trials
+from tomography.experiments.matrices import plot_matrix_file
 from tomography.experiments.matrices import write_matrix
 from tomography.experiments.p3_size import spearman as rank_correlation
 from tomography.experiments.r1_sentiment import select_examples
@@ -49,6 +55,7 @@ from tomography.experiments.steering import reader_arm
 from tomography.experiments.steering import run_trial
 from tomography.experiments.sweep import SERIES
 from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.sweep import plot_curves_file
 from tomography.experiments.sweep import reading_sweep
 from tomography.experiments.sweep import write_curves
 from tomography.experiments.variants import READING_TASKS
@@ -58,12 +65,21 @@ from tomography.experiments.variants import VariantKind
 from tomography.experiments.variants import pair_capacity
 from tomography.experiments.variants import task_set
 from tomography.experiments.variants import template_variants
+from tomography.judges import load_judge
 from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
 from tomography.reading.metrics import wilson_ci
 from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
+from tomography.viz.style import INK_MUTED
+from tomography.viz.style import PX
+from tomography.viz.style import TEXT_WIDTH
+from tomography.viz.style import categorical_colors
+from tomography.viz.style import new_figure
+from tomography.viz.style import save_figure
+from tomography.viz.style import style_context
 
 TEMPLATES: tuple[str, ...] = (
     "paper",
@@ -888,4 +904,91 @@ def execute(
         _Measured(
             names, layers, sweep, reads, lens, primary, check, steer_layers
         ),
+    )
+
+
+def run(config: Config, run_dir: RunDir) -> None:
+    """Loads GPT-2, SST-2, WikiText and the two judges, then runs `execute`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+    """
+    first = load_judge(config.judge)
+    second = load_judge(config.judge_check)
+
+    def score(texts: Sequence[str]) -> NDArray[np.float32]:
+        return np.column_stack([first.score(texts), second.score(texts)])
+
+    execute(
+        config,
+        run_dir,
+        load_model(config.model),
+        load_sst2(),
+        [example.text for example in load_wikitext()],
+        score,
+    )
+
+
+def _read_vs_steer(run_dir: RunDir) -> Figure:
+    reads = run_dir.read_arrays("curves_read")
+    slopes = run_dir.read_arrays("curves_slope")
+    names = cast(dict[str, Any], run_dir.read_json("curves_slope"))["series"]
+    at = [int(np.flatnonzero(reads["x"] == layer)[0]) for layer in slopes["x"]]
+    n_readers = slopes["per_seed"].shape[1]
+    with style_context():
+        fig, axes = new_figure(width=TEXT_WIDTH, aspect=0.55)
+        ax = axes[0, 0]
+        for t, (name, color) in enumerate(
+            zip(names, categorical_colors(len(names)), strict=True)
+        ):
+            ax.plot(
+                reads["per_seed"][t, :n_readers][:, at].ravel(),
+                slopes["per_seed"][t].ravel(),
+                "o",
+                color=color,
+                label=name,
+            )
+        ax.axhline(0.0, color=INK_MUTED, lw=PX, label="_zero_slope")
+        ax.axvline(
+            float(run_dir.config["read_threshold"]),
+            color=INK_MUTED,
+            lw=PX,
+            label="_threshold",
+        )
+        ax.set_xlabel("Reading accuracy")
+        ax.set_ylabel("Dose slope (primary judge)")
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
+    return fig
+
+
+def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
+    """Draws the curves, the transfer matrix and the read versus steer scatter.
+
+    Args:
+        run_dir: A finished P7 run.
+        out_dir: Folder of the figures.
+
+    Returns:
+        The PDF, PNG and SVG paths of `curves_read`, `curves_lens`,
+        `curves_slope` and `curves_slope_check`, then of `matrix_transfer`
+        on a diverging scale, then of `read_vs_steer`: each unit's reading
+        accuracy against its primary dose slope, one color per template, with
+        the zero slope and the readable threshold marked.
+    """
+    paths = [
+        path
+        for stem in (
+            "curves_read",
+            "curves_lens",
+            "curves_slope",
+            "curves_slope_check",
+        )
+        for path in plot_curves_file(run_dir, out_dir, stem=stem)
+    ]
+    paths += plot_matrix_file(
+        run_dir, out_dir, stem="matrix_transfer", kind="diverging"
+    )
+    return paths + save_figure(
+        _read_vs_steer(run_dir), out_dir, "read_vs_steer"
     )
