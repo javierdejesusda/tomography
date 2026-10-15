@@ -33,6 +33,7 @@ from tomography.p9.reading import ReadingCube
 from tomography.p9.reading import collect_item_activations
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
+from tomography.p9.reading import surface_baselines
 from tomography.p9.unknowns import UNKNOWN_TYPES
 from tomography.p9.unknowns import type_pools
 from tomography.reading.directions import Method
@@ -54,6 +55,7 @@ USABLE = [
     "obscure_real",
     "obscure_real_pop",
     "post_cutoff",
+    "triviaqa_known",
     "unknowable_detail",
     "false_premise",
     "kuq_future_unknown",
@@ -331,7 +333,7 @@ def test_execute_writes_the_files_of_a_run(
     ):
         expected |= {f"{stem}.npz", f"{stem}.json"}
     assert set(names) == expected
-    assert len(names) == 38
+    assert len(names) == 40
 
 
 def test_summary_records_the_run(
@@ -497,9 +499,9 @@ def test_the_panels_draw_the_first_method_of_their_contrasts(
     run_dir = default_run
     test = run_dir.read_arrays("transfer")["test"]
     panels = {
-        "entity": USABLE[:5],
-        "question": USABLE[5:8],
-        "unknown": USABLE[8:],
+        "entity": USABLE[:6],
+        "question": USABLE[6:9],
+        "unknown": USABLE[9:],
     }
 
     for panel, names in panels.items():
@@ -579,6 +581,9 @@ def test_the_table_reports_the_auroc_at_the_layer(
         "pca_diff",
         "mean_diff",
         "random",
+        "text_word",
+        "text_char",
+        "popularity",
     ]
     assert [row[0] for row in table["rows"]] == USABLE
     for t, row in enumerate(table["rows"]):
@@ -595,6 +600,46 @@ def test_the_table_reports_the_auroc_at_the_layer(
                 transfer["test"][m, t, :, k].mean()
             )
         assert row_dict["lo"] <= row_dict["logistic"] <= row_dict["hi"]
+
+
+def test_the_table_holds_the_surface_baselines_of_every_contrast(
+    tiny_arch: LoadedModel, default_run: RunDir
+) -> None:
+    table = default_run.read_json("table")
+    assert isinstance(table, dict)
+    pools = type_pools(_items())
+
+    for row in table["rows"]:
+        row_dict = dict(zip(table["columns"], row, strict=True))
+        name = row_dict["type"]
+        want = surface_baselines(pools[name])
+        assert 0.0 <= row_dict["text_word"] <= 1.0, name
+        assert 0.0 <= row_dict["text_char"] <= 1.0, name
+        assert row_dict["text_word"] == pytest.approx(want["text_word"]), name
+        assert row_dict["text_char"] == pytest.approx(want["text_char"]), name
+        if name in ("obscure_real", "obscure_real_pop"):
+            assert row_dict["popularity"] == pytest.approx(want["popularity"])
+            assert isinstance(row_dict["popularity"], float)
+        else:
+            assert row_dict["popularity"] is None, name
+
+
+def test_a_baseline_that_cannot_work_fails_before_the_forward_pass(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def never(*args: Any, **kw: Any) -> ItemActivations:
+        raise AssertionError("the forward pass must not start")
+
+    def broken(pool: Any) -> dict[str, float | None]:
+        raise ValueError("no baseline")
+
+    monkeypatch.setattr(p9b_reading, "collect_item_activations", never)
+    monkeypatch.setattr(p9b_reading, "surface_baselines", broken)
+
+    with pytest.raises(ValueError, match="no baseline"):
+        _execute(tiny_arch, tmp_path)
 
 
 def test_the_layer_of_the_config_wins(
@@ -725,6 +770,22 @@ def test_types_restricts_the_contrasts(
     assert summary["skipped"] == {}
     assert not (run_dir.path / "curves_question.npz").exists()
     assert not (run_dir.path / "curves_post_cutoff.npz").exists()
+
+
+def test_triviaqa_known_alone_reads_the_same_dataset_contrast(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _execute(tiny_arch, tmp_path, types=("triviaqa_known",))
+
+    summary = _summary(run_dir)
+    assert summary["types"] == ["triviaqa_known"]
+    assert summary["skipped"] == {}
+    assert summary["curve_stems"] == ["curves_triviaqa_known", "curves_entity"]
+    table = run_dir.read_json("table")
+    assert isinstance(table, dict)
+    row = table["rows"][0]
+    assert row[0] == "triviaqa_known"
+    assert row[1] == "knowledge"
 
 
 def test_a_skipped_type_in_types_is_reported_not_fatal(
@@ -880,7 +941,9 @@ def test_the_gate_leaves_the_unknown_type_contrasts_only(
     assert {row[1] for row in table["rows"]} == {"unknown_type"}
 
 
-@pytest.mark.parametrize("name", ["obscure_real", "kuq_future_unknown"])
+@pytest.mark.parametrize(
+    "name", ["obscure_real", "kuq_future_unknown", "triviaqa_known"]
+)
 def test_the_gate_refuses_a_knowledge_contrast_by_name(
     tiny_arch: LoadedModel, tmp_path: Path, name: str
 ) -> None:
@@ -907,7 +970,7 @@ def test_plot_draws_every_curve_and_both_matrices(
 
     paths = plot(run_dir, tmp_path / "figures")
 
-    assert len(paths) == 45
+    assert len(paths) == 48
     assert all(p.is_file() for p in paths)
     stems = {p.stem for p in paths}
     assert stems == {*CURVE_STEMS, "matrix", "matrix_cosine"}

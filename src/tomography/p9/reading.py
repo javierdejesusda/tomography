@@ -22,6 +22,8 @@ from tomography.knowledge import few_shot_prompt
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.p9.pool import LabeledItem
+from tomography.p9.risk import popularity_auroc
+from tomography.p9.risk import text_auroc
 from tomography.p9.unknowns import Strata
 from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import stratum_name
@@ -44,6 +46,7 @@ READING_METHODS: tuple[Method, ...] = (
     "mean_diff",
     "random",
 )
+SURFACE_BASELINES: tuple[str, ...] = ("text_word", "text_char", "popularity")
 _HALF_SALT = "p9-split-half"
 _HALF_MIN_PAIRS = 2
 
@@ -330,6 +333,57 @@ def type_auroc(
     """
     rows, labels = _split_arrays(acts, pool, split)
     return auroc(reader.score(acts.data[:, rows]), labels)
+
+
+def surface_baselines(pool: TypePool) -> dict[str, float | None]:
+    """Scores the surface form of the items of a contrast, without a model.
+
+    A text classifier is fitted on the questions of all train items of both
+    sides and scored on the questions of the items `type_auroc` scores on the
+    test split, so a reader AUROC can be read against what the wording alone
+    gives (see `tomography.p9.risk.text_auroc`). The popularity baseline is
+    the AUROC of the popularity of those test items.
+
+    Args:
+        pool: One contrast.
+
+    Returns:
+        The AUROC by `SURFACE_BASELINES` name: "text_word" and "text_char"
+        for word and character n-grams of the question text, and
+        "popularity", None unless every test item of both sides has an
+        integer popularity.
+
+    Raises:
+        ValueError: If a test side is empty or the train questions leave no
+            feature for a text classifier.
+    """
+    positive_train, negative_train = pool.split("train")
+    positive_test, negative_test = pool.split("test")
+    train = [*positive_train, *negative_train]
+    test = [*positive_test, *negative_test]
+    train_labels = np.r_[
+        np.ones(len(positive_train)), np.zeros(len(negative_train))
+    ].astype(np.int64)
+    test_labels = np.r_[
+        np.ones(len(positive_test)), np.zeros(len(negative_test))
+    ].astype(np.int64)
+    train_texts = [i.example.question for i in train]
+    test_texts = [i.example.question for i in test]
+    values = [i.example.meta.get("popularity") for i in test]
+    counts = [v for v in values if isinstance(v, int)]
+    return {
+        "text_word": text_auroc(
+            train_texts, train_labels, test_texts, test_labels, analyzer="word"
+        ),
+        "text_char": text_auroc(
+            train_texts, train_labels, test_texts, test_labels, analyzer="char"
+        ),
+        "popularity": (
+            popularity_auroc(np.asarray(counts, dtype=np.float64), test_labels)
+            if len(counts) == len(values)
+            else None
+        ),
+    }
 
 
 @dataclass(frozen=True, eq=False)

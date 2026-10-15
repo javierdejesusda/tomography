@@ -1,19 +1,27 @@
 """Tests for the interval and selective-prediction tools of the P9 study."""
 
+from typing import Any
+from typing import Literal
+
 import numpy as np
 from numpy.typing import NDArray
 import pytest
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
 
+import tomography.p9.risk as risk_module
 from tomography.p9.risk import aurc
 from tomography.p9.risk import auroc_ci
 from tomography.p9.risk import auroc_diff_ci
 from tomography.p9.risk import auroc_replicates
 from tomography.p9.risk import group_rate
 from tomography.p9.risk import orient_on_train
+from tomography.p9.risk import popularity_auroc
 from tomography.p9.risk import risk_at
 from tomography.p9.risk import risk_band
 from tomography.p9.risk import risk_coverage
 from tomography.p9.risk import stack_scores
+from tomography.p9.risk import text_auroc
 from tomography.reading.metrics import auroc
 
 GRID = tuple(range(5, 101, 5))
@@ -326,3 +334,217 @@ def test_group_rate_gives_an_unseen_key_the_overall_rate() -> None:
     rates = group_rate(train_keys, train_correct, ["c"])
 
     np.testing.assert_allclose(rates, [2 / 3])
+
+
+def _two_word_texts(
+    n: int, first: str = "alpha", second: str = "beta"
+) -> tuple[list[str], NDArray[np.int64]]:
+    texts = [f"who wrote the {first} novel"] * n
+    texts += [f"who wrote the {second} novel"] * n
+    labels = np.r_[np.ones(n), np.zeros(n)].astype(np.int64)
+    return texts, labels
+
+
+ANALYZERS = pytest.mark.parametrize(
+    "analyzer", ["word", "char"], ids=["word", "char"]
+)
+
+
+@ANALYZERS
+def test_text_auroc_is_one_when_the_sides_differ_by_one_word(
+    analyzer: Literal["word", "char"],
+) -> None:
+    train_texts, train_labels = _two_word_texts(12)
+    test_texts, test_labels = _two_word_texts(6)
+
+    score = text_auroc(
+        train_texts, train_labels, test_texts, test_labels, analyzer=analyzer
+    )
+
+    assert score == pytest.approx(1.0)
+
+
+@ANALYZERS
+def test_text_auroc_is_chance_on_identical_texts(
+    analyzer: Literal["word", "char"],
+) -> None:
+    texts = ["who wrote the same novel"] * 24
+    labels = np.tile(np.array([1, 0], dtype=np.int64), 12)
+
+    score = text_auroc(texts, labels, texts, labels, analyzer=analyzer)
+
+    assert score == pytest.approx(0.5)
+
+
+@ANALYZERS
+def test_text_auroc_learns_from_the_train_items_only(
+    analyzer: Literal["word", "char"],
+) -> None:
+    train_texts, train_labels = _two_word_texts(12)
+    test_texts, test_labels = _two_word_texts(6)
+
+    score = text_auroc(
+        train_texts,
+        train_labels,
+        test_texts,
+        1 - test_labels,
+        analyzer=analyzer,
+    )
+
+    assert score == pytest.approx(0.0)
+
+
+@ANALYZERS
+def test_text_auroc_builds_its_vocabulary_from_the_train_texts_only(
+    monkeypatch: pytest.MonkeyPatch, analyzer: Literal["word", "char"]
+) -> None:
+    corpora: list[list[str]] = []
+
+    class Recorder(TfidfVectorizer):
+        def fit_transform(self, raw_documents: Any, y: Any = None) -> Any:
+            corpora.append(list(raw_documents))
+            return super().fit_transform(raw_documents, y)
+
+    monkeypatch.setattr(risk_module, "TfidfVectorizer", Recorder)
+    train_texts, train_labels = _two_word_texts(12)
+    test_texts, test_labels = _two_word_texts(6, "gamma", "delta")
+
+    text_auroc(
+        train_texts, train_labels, test_texts, test_labels, analyzer=analyzer
+    )
+
+    assert corpora == [train_texts]
+
+
+@pytest.mark.parametrize(
+    ("analyzer", "expected"),
+    [
+        (
+            "word",
+            {
+                "analyzer": "word",
+                "ngram_range": (1, 2),
+                "min_df": 2,
+                "lowercase": True,
+            },
+        ),
+        (
+            "char",
+            {
+                "analyzer": "char_wb",
+                "ngram_range": (2, 5),
+                "min_df": 3,
+                "lowercase": True,
+            },
+        ),
+    ],
+    ids=["word", "char"],
+)
+def test_text_auroc_uses_the_documented_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    analyzer: Literal["word", "char"],
+    expected: dict[str, Any],
+) -> None:
+    seen: dict[str, dict[str, Any]] = {}
+
+    class Vectorizer(TfidfVectorizer):
+        def fit_transform(self, raw_documents: Any, y: Any = None) -> Any:
+            seen["vectorizer"] = self.get_params()
+            return super().fit_transform(raw_documents, y)
+
+    class Classifier(LogisticRegression):
+        def fit(self, *args: Any, **kwargs: Any) -> Any:
+            seen["classifier"] = self.get_params()
+            return super().fit(*args, **kwargs)
+
+    monkeypatch.setattr(risk_module, "TfidfVectorizer", Vectorizer)
+    monkeypatch.setattr(risk_module, "LogisticRegression", Classifier)
+    train_texts, train_labels = _two_word_texts(12)
+    test_texts, test_labels = _two_word_texts(6)
+
+    text_auroc(
+        train_texts, train_labels, test_texts, test_labels, analyzer=analyzer
+    )
+
+    for name, value in expected.items():
+        assert seen["vectorizer"][name] == value, name
+    assert seen["classifier"]["C"] == 10
+    assert seen["classifier"]["max_iter"] == 2000
+    assert seen["classifier"]["class_weight"] == "balanced"
+
+
+@ANALYZERS
+def test_text_auroc_is_deterministic(
+    analyzer: Literal["word", "char"],
+) -> None:
+    train_texts, train_labels = _two_word_texts(12)
+    test_texts, test_labels = _two_word_texts(6, "alpha", "gamma")
+
+    first = text_auroc(
+        train_texts, train_labels, test_texts, test_labels, analyzer=analyzer
+    )
+    second = text_auroc(
+        train_texts, train_labels, test_texts, test_labels, analyzer=analyzer
+    )
+
+    assert second == first
+
+
+def test_text_auroc_rejects_an_unknown_analyzer() -> None:
+    texts, labels = _two_word_texts(12)
+
+    with pytest.raises(ValueError, match="analyzer"):
+        text_auroc(
+            texts,
+            labels,
+            texts,
+            labels,
+            analyzer="bytes",  # type: ignore[arg-type]
+        )
+
+
+def test_text_auroc_needs_both_classes_in_the_test_labels() -> None:
+    train_texts, train_labels = _two_word_texts(12)
+    test_texts, _ = _two_word_texts(6)
+
+    with pytest.raises(ValueError, match="both classes"):
+        text_auroc(
+            train_texts,
+            train_labels,
+            test_texts,
+            np.ones(len(test_texts), dtype=np.int64),
+            analyzer="word",
+        )
+
+
+def test_popularity_auroc_is_one_when_the_positives_are_more_popular() -> None:
+    popularity = np.array([5_000.0, 900.0, 20.0, 3.0])
+    labels = np.array([1, 1, 0, 0], dtype=np.int64)
+
+    assert popularity_auroc(popularity, labels) == pytest.approx(1.0)
+
+
+def test_popularity_auroc_is_not_oriented() -> None:
+    popularity = np.array([5_000.0, 900.0, 20.0, 3.0])
+    labels = np.array([0, 0, 1, 1], dtype=np.int64)
+
+    assert popularity_auroc(popularity, labels) == pytest.approx(0.0)
+
+
+def test_popularity_auroc_is_finite_at_zero_popularity() -> None:
+    popularity = np.array([0.0, 0.0, 4.0, 9.0])
+    labels = np.array([0, 0, 1, 1], dtype=np.int64)
+
+    assert popularity_auroc(popularity, labels) == pytest.approx(1.0)
+
+
+def test_popularity_auroc_is_chance_on_equal_popularity() -> None:
+    popularity = np.full(6, 100.0)
+    labels = np.array([1, 0, 1, 0, 1, 0], dtype=np.int64)
+
+    assert popularity_auroc(popularity, labels) == pytest.approx(0.5)
+
+
+def test_popularity_auroc_needs_both_classes() -> None:
+    with pytest.raises(ValueError, match="both classes"):
+        popularity_auroc(np.array([1.0, 2.0]), np.ones(2, dtype=np.int64))

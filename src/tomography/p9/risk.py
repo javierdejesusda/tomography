@@ -8,9 +8,11 @@ on the same items so that the pairing is kept.
 """
 
 from collections.abc import Sequence
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
@@ -315,3 +317,73 @@ def orient_on_train(
     if float(auroc(train_scores, train_labels)) >= 0.5:
         return test_scores
     return -test_scores
+
+
+def text_auroc(
+    train_texts: Sequence[str],
+    train_labels: NDArray[np.int64],
+    test_texts: Sequence[str],
+    test_labels: NDArray[np.int64],
+    *,
+    analyzer: Literal["word", "char"],
+) -> float:
+    """AUROC of a text-only classifier, the surface-form baseline of a reader.
+
+    The features are TF-IDF weights fitted on the train texts only: word
+    1-grams and 2-grams seen in at least 2 texts for "word", character 2-grams
+    to 5-grams inside words seen in at least 3 texts for "char". A logistic
+    regression (C=10, class-balanced) is fitted on the train labels and
+    scores the test texts. The fit is deterministic.
+
+    Args:
+        train_texts: The texts the classifier is fitted on.
+        train_labels: 0/1 labels of the train texts.
+        test_texts: The texts that are scored.
+        test_labels: 0/1 labels of the test texts.
+        analyzer: "word" or "char" n-grams.
+
+    Returns:
+        The AUROC of the decision scores on the test texts, label 1 positive.
+
+    Raises:
+        ValueError: If `analyzer` is neither "word" nor "char", the test
+            labels hold one class, or the train texts leave no feature.
+    """
+    if analyzer == "word":
+        vectorizer = TfidfVectorizer(
+            ngram_range=(1, 2), min_df=2, lowercase=True
+        )
+    elif analyzer == "char":
+        vectorizer = TfidfVectorizer(
+            analyzer="char_wb", ngram_range=(2, 5), min_df=3, lowercase=True
+        )
+    else:
+        raise ValueError(f"analyzer must be 'word' or 'char', got {analyzer!r}")
+    train_features = vectorizer.fit_transform(train_texts)
+    classifier = LogisticRegression(
+        C=10, max_iter=2000, class_weight="balanced"
+    )
+    classifier.fit(train_features, train_labels)
+    scores = classifier.decision_function(vectorizer.transform(test_texts))
+    return float(auroc(np.asarray(scores, dtype=np.float64), test_labels))
+
+
+def popularity_auroc(
+    popularity: NDArray[np.float64], labels: NDArray[np.int64]
+) -> float:
+    """AUROC of the popularity of an item, the baseline of a known contrast.
+
+    The score is `log10(popularity + 1)` and is not oriented: a value below
+    0.5 means the positive side is the less popular one.
+
+    Args:
+        popularity: Non-negative popularity of each item, shape (n,).
+        labels: 0/1 labels, shape (n,).
+
+    Returns:
+        The AUROC of the score, label 1 positive.
+
+    Raises:
+        ValueError: If the labels hold one class.
+    """
+    return float(auroc(np.log10(popularity + 1.0), labels))

@@ -210,6 +210,7 @@ def test_constants_name_the_types_in_table_order() -> None:
         "obscure_real",
         "obscure_real_pop",
         "post_cutoff",
+        "triviaqa_known",
     )
     assert UNKNOWN_TYPES == (
         "real_vs_synthal",
@@ -219,7 +220,11 @@ def test_constants_name_the_types_in_table_order() -> None:
 
 
 def test_type_pools_builds_nine_knowledge_and_three_unknown_contrasts() -> None:
-    pools = type_pools(_items())
+    pools = {
+        name: pool
+        for name, pool in type_pools(_items()).items()
+        if name != "triviaqa_known"
+    }
 
     assert list(pools) == [*KNOWLEDGE_NAMES, *UNKNOWN_TYPES]
     assert {name: pools[name].contrast for name in pools} == {
@@ -241,6 +246,7 @@ def test_type_pools_selects_the_sides_of_every_contrast() -> None:
         "obscure_real": (popqa_known, obscure),
         "obscure_real_pop": (popqa_known, obscure),
         "post_cutoff": ({"aw-r-k0"}, {"aw-p-u0"}),
+        "triviaqa_known": ({"tq-0"}, {"tq-1"}),
         "unknowable_detail": (open_known, {"de-0"}),
         "false_premise": (open_known, {"fq-0"}),
         "kuq_false_assumption": (open_known, {"ku-fa-0"}),
@@ -290,7 +296,7 @@ def test_items_outside_every_contrast_stay_out() -> None:
         for uid in _uids(pool.positive) | _uids(pool.negative)
     }
 
-    assert not used & {"aw-p-k0", "de-1", "ku-fu-1", "tq-1"}
+    assert not used & {"aw-p-k0", "de-1", "ku-fu-1"}
 
 
 def test_strata_follow_the_contrast() -> None:
@@ -302,6 +308,7 @@ def test_strata_follow_the_contrast() -> None:
         "obscure_real": "relation",
         "obscure_real_pop": "relation_popularity",
         "post_cutoff": "relation",
+        "triviaqa_known": "none",
         "unknowable_detail": "none",
         "false_premise": "none",
         "kuq_false_assumption": "none",
@@ -404,6 +411,71 @@ def test_synthal_contrasts_vanish_without_a_shared_relation() -> None:
     }
 
 
+def _triviaqa_items() -> list[LabeledItem]:
+    return [
+        _item("tq-a", "triviaqa", "open", "known"),
+        _item("tq-b", "triviaqa", "open", "known", split="val"),
+        _item("tq-c", "triviaqa", "open", "unknown"),
+        _item("tq-d", "triviaqa", "open", "unknown", split="test"),
+        _item("tq-e", "triviaqa", "open", "uncertain"),
+        _item("nq-a", "nq_open", "open", "known", split="test"),
+        _item("nq-b", "nq_open", "open", "unknown"),
+    ]
+
+
+def test_triviaqa_known_sets_known_against_unknown_triviaqa() -> None:
+    pool = type_pools([*_items(), *_triviaqa_items()])["triviaqa_known"]
+
+    assert pool.contrast == "knowledge"
+    assert pool.strata == "none"
+    assert _uids(pool.positive) == {"tq-0", "tq-a", "tq-b"}
+    assert _uids(pool.negative) == {"tq-1", "tq-c", "tq-d"}
+
+
+def test_triviaqa_known_draws_only_triviaqa_items() -> None:
+    pool = type_pools([*_items(), *_triviaqa_items()])["triviaqa_known"]
+
+    sources = {
+        str(item.example.meta["source"])
+        for item in (*pool.positive, *pool.negative)
+    }
+    assert sources == {"triviaqa"}
+    assert {item.contrast_label for item in pool.positive} == {"known"}
+    assert {item.contrast_label for item in pool.negative} == {"unknown"}
+
+
+def test_triviaqa_known_follows_the_entity_contrasts() -> None:
+    names = list(type_pools(_items()))
+
+    assert names.index("triviaqa_known") == names.index("post_cutoff") + 1
+
+
+def test_triviaqa_known_needs_both_sides() -> None:
+    triviaqa = [i for i in _triviaqa_items() if i.group == "triviaqa"]
+    knowns = [i for i in triviaqa if i.contrast_label == "known"]
+    unknowns = [i for i in triviaqa if i.contrast_label == "unknown"]
+
+    assert "triviaqa_known" not in type_pools(knowns)
+    assert "triviaqa_known" not in type_pools(unknowns)
+
+
+def test_triviaqa_known_is_a_knowledge_contrast_only() -> None:
+    assert type_pools(_triviaqa_items(), knowledge=False) == {}
+
+
+def test_a_known_triviaqa_item_that_failed_the_guess_control_stays_out() -> (
+    None
+):
+    items = [
+        *_triviaqa_items(),
+        _item("tq-g", "triviaqa", "open", "known", guess="excluded_stratum"),
+    ]
+
+    pool = type_pools(items)["triviaqa_known"]
+
+    assert "tq-g" not in _uids(pool.positive)
+
+
 def test_knowledge_off_keeps_the_three_unknown_type_contrasts_only() -> None:
     items = _items()
     full = type_pools(items)
@@ -426,6 +498,7 @@ def test_a_contrast_needs_both_sides() -> None:
 
     assert list(pools) == [
         "post_cutoff",
+        "triviaqa_known",
         "unknowable_detail",
         "false_premise",
         "kuq_false_assumption",
@@ -541,6 +614,19 @@ def test_the_relation_modes_ignore_popularity() -> None:
 @pytest.mark.parametrize("name", ENTITY_TYPES)
 def test_panel_of_entity_types(name: str) -> None:
     assert panel_of(name) == "entity"
+
+
+def test_triviaqa_known_is_drawn_with_the_entity_contrasts() -> None:
+    assert panel_of("triviaqa_known") == "entity"
+
+
+def test_the_question_panel_holds_eight_series_at_most() -> None:
+    kuq = [f"kuq_category_{i}" for i in range(6)]
+    names = ["unknowable_detail", "false_premise", "triviaqa_known", *kuq]
+
+    in_panel = [name for name in names if panel_of(name) == "question"]
+
+    assert len(in_panel) == 8
 
 
 @pytest.mark.parametrize("name", UNKNOWN_TYPES)

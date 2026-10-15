@@ -22,6 +22,7 @@ ENTITY_TYPES: tuple[str, ...] = (
     "obscure_real",
     "obscure_real_pop",
     "post_cutoff",
+    "triviaqa_known",
 )
 UNKNOWN_TYPES: tuple[str, ...] = (
     "real_vs_synthal",
@@ -127,6 +128,9 @@ def type_pools(
     - `obscure_real`: popqa_known against obscure.
     - `obscure_real_pop`: the same, paired inside a popularity bin.
     - `post_cutoff`: known real awards against unknown post-cutoff awards.
+    - `triviaqa_known`: the TriviaQA questions labeled known against those
+      labeled unknown. Both sides are one dataset, so the question format is
+      the same and the cross-dataset contrasts below do not hold that fixed.
     - `unknowable_detail`: open_known against the unknowable details.
     - `false_premise`: open_known against FalseQA.
     - `kuq_<category>`: open_known against one KUQ category, sorted.
@@ -205,6 +209,12 @@ def type_pools(
         pick("award", "unknown", "post_cutoff"),
         "relation",
     )
+    add(
+        "triviaqa_known",
+        pick("triviaqa", "known"),
+        pick("triviaqa", "unknown"),
+        "none",
+    )
     add("unknowable_detail", open_known, pick("detail", "unknown"), "none")
     add("false_premise", open_known, pick("falseqa", "unknown"), "none")
     for kind in sorted({i.example.kind for i in items if i.group == "kuq"}):
@@ -237,8 +247,10 @@ def type_pools(
 def panel_of(type_name: str) -> Literal["entity", "question", "unknown"]:
     """Names the figure panel of a contrast.
 
-    The figure style allows eight series at most, and there can be sixteen
-    contrasts, so the curves are drawn in three panels.
+    The figure style allows eight series at most, and there can be seventeen
+    contrasts, so the curves are drawn in three panels. `triviaqa_known` is
+    drawn with the entity contrasts, because the question panel already holds
+    eight series with the six KUQ categories.
 
     Args:
         type_name: A contrast name.

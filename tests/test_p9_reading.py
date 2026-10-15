@@ -32,6 +32,7 @@ from tomography.p9.reading import fit_type_reader
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
 from tomography.p9.reading import render_items
+from tomography.p9.reading import surface_baselines
 from tomography.p9.reading import type_auroc
 from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import stratum_name
@@ -558,7 +559,7 @@ def test_check_pool_names_a_train_half_that_cannot_be_fitted() -> None:
 
 
 def test_planted_pools_are_all_usable(planted: Planted) -> None:
-    assert len(planted.pools) == 12
+    assert len(planted.pools) == 13
     for name, pool in planted.pools.items():
         assert check_pool(pool, min_pairs=8, min_eval=5) is None, name
 
@@ -1235,3 +1236,140 @@ def test_choose_layer_reads_the_first_method_only() -> None:
     val[1, 0, 0] = [0.1, 1.0]
 
     assert choose_layer(val, (1, 2)) == 1
+
+
+def _baseline_pool(
+    *,
+    test_popularity: tuple[MetaValue, MetaValue] = (900, 12),
+    train_popularity: MetaValue = 50,
+) -> TypePool:
+    def make(
+        uid: str, question: str, label: Label, split: Split, popularity: Any
+    ) -> LabeledItem:
+        item = _labeled(uid, label, split=split, popularity=popularity)
+        return dataclasses.replace(
+            item, example=dataclasses.replace(item.example, question=question)
+        )
+
+    positive: list[LabeledItem] = []
+    negative: list[LabeledItem] = []
+    for split, n in (("train", 12), ("val", 4), ("test", 6)):
+        for i in range(n):
+            popularity_pos = test_popularity[0] if split == "test" else 500
+            popularity_neg = (
+                test_popularity[1] if split == "test" else train_popularity
+            )
+            positive.append(
+                make(
+                    f"p-{split}-{i}",
+                    "who wrote the alpha novel",
+                    "known",
+                    split,  # type: ignore[arg-type]
+                    popularity_pos,
+                )
+            )
+            negative.append(
+                make(
+                    f"n-{split}-{i}",
+                    "who wrote the beta novel",
+                    "unknown",
+                    split,  # type: ignore[arg-type]
+                    popularity_neg,
+                )
+            )
+    return TypePool("t", tuple(positive), tuple(negative), "none", "knowledge")
+
+
+def test_surface_baselines_name_the_three_columns_in_order() -> None:
+    assert list(surface_baselines(_baseline_pool())) == [
+        "text_word",
+        "text_char",
+        "popularity",
+    ]
+
+
+def test_surface_baselines_read_a_one_word_difference() -> None:
+    baselines = surface_baselines(_baseline_pool())
+
+    assert baselines["text_word"] == pytest.approx(1.0)
+    assert baselines["text_char"] == pytest.approx(1.0)
+    assert baselines["popularity"] == pytest.approx(1.0)
+
+
+def test_surface_baselines_fit_on_all_train_items_and_score_the_test_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = _baseline_pool()
+    calls: list[tuple[list[str], list[int], list[str], list[int], str]] = []
+    real = reading_module.text_auroc
+
+    def spy(
+        train_texts: Sequence[str],
+        train_labels: NDArray[np.int64],
+        test_texts: Sequence[str],
+        test_labels: NDArray[np.int64],
+        *,
+        analyzer: Any,
+    ) -> float:
+        calls.append(
+            (
+                list(train_texts),
+                train_labels.tolist(),
+                list(test_texts),
+                test_labels.tolist(),
+                analyzer,
+            )
+        )
+        return real(
+            train_texts,
+            train_labels,
+            test_texts,
+            test_labels,
+            analyzer=analyzer,
+        )
+
+    monkeypatch.setattr(reading_module, "text_auroc", spy)
+
+    surface_baselines(pool)
+
+    positive_train, negative_train = pool.split("train")
+    positive_test, negative_test = pool.split("test")
+    want_train = [
+        i.example.question for i in (*positive_train, *negative_train)
+    ]
+    want_test = [i.example.question for i in (*positive_test, *negative_test)]
+    assert [call[4] for call in calls] == ["word", "char"]
+    for train_texts, train_labels, test_texts, test_labels, _ in calls:
+        assert train_texts == want_train
+        assert train_labels == [1] * 12 + [0] * 12
+        assert test_texts == want_test
+        assert test_labels == [1] * 6 + [0] * 6
+
+
+def test_surface_baselines_popularity_is_null_when_a_test_item_has_none() -> (
+    None
+):
+    pool = _baseline_pool(test_popularity=(900, None))
+
+    baselines = surface_baselines(pool)
+
+    assert baselines["popularity"] is None
+    assert baselines["text_word"] == pytest.approx(1.0)
+
+
+def test_surface_baselines_popularity_is_null_for_a_non_integer() -> None:
+    pool = _baseline_pool(test_popularity=(900, 12.5))
+
+    assert surface_baselines(pool)["popularity"] is None
+
+
+def test_surface_baselines_popularity_is_null_without_the_field() -> None:
+    pool = _pool_of()
+
+    assert surface_baselines(pool)["popularity"] is None
+
+
+def test_surface_baselines_popularity_reads_the_test_items_only() -> None:
+    pool = _baseline_pool(train_popularity=None)
+
+    assert surface_baselines(pool)["popularity"] == pytest.approx(1.0)
