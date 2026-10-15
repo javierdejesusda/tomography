@@ -196,7 +196,9 @@ def resolve_lat(
         items: The labeled questions.
         lat_type: The contrast the user asked for.
         known_contrasts: The P9a gate.
-        min_pairs: Fewest train items on each side.
+        min_pairs: Fewest train items on each side, and fewest matched train
+            pairs (pairs that never cross two strata); each split half of the
+            train items must also hold 2 matched pairs.
 
     Returns:
         The contrast and None, or None and the reason: the `check_pool`
