@@ -632,6 +632,11 @@ def _forbid_work(monkeypatch: pytest.MonkeyPatch) -> None:
         ({"n_shots": 16}, "n_shots"),
         ({"layers": (0, 1)}, "layers"),
         ({"layers": (1, 4)}, "layers"),
+        ({"n_calibration": 0}, "n must be"),
+        ({"num_samples": 0}, "num_samples"),
+        ({"max_new_tokens": 0}, "max_new_tokens"),
+        ({"batch_size": 0}, "batch_size"),
+        ({"op": "projection"}, "projection"),
     ],
     ids=[
         "zero-strength",
@@ -642,6 +647,11 @@ def _forbid_work(monkeypatch: pytest.MonkeyPatch) -> None:
         "sixteen-shots",
         "layer-zero",
         "layer-beyond-depth",
+        "no-calibration-texts",
+        "no-samples",
+        "no-new-tokens",
+        "no-batch",
+        "relative-projection",
     ],
 )
 def test_execute_rejects_a_bad_configuration_before_any_work(

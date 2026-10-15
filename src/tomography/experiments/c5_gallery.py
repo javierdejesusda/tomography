@@ -28,6 +28,7 @@ from tomography.datasets.triviaqa import load_triviaqa
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.c4_honesty_control import calibration_texts
+from tomography.experiments.c4_honesty_control import check_relative_op
 from tomography.experiments.c4_honesty_control import honesty_readers
 from tomography.experiments.c4_honesty_control import resolve_layers
 from tomography.experiments.effects import read_trials
@@ -349,6 +350,7 @@ def _check_config(
         raise ValueError(f"n_show must be >= 1, got {config.n_show}")
     if not 1 <= config.n_pool <= n_facts:
         raise ValueError(f"n_pool must be in 1..{n_facts}, got {config.n_pool}")
+    check_relative_op(config)
     return resolve_layers(config.layers, n_layers)
 
 
@@ -398,10 +400,16 @@ def execute(
     Raises:
         ValueError: If `strength` is not positive, `n_show` is below 1,
             `n_pool` is outside `1..len(facts)`, `n_shots` is outside
-            `0..15`, the layers are outside `1..L`, or the emotion run is
-            not usable.
+            `0..15`, the layers are outside `1..L`, `n_calibration`,
+            `num_samples`, `max_new_tokens` or `batch_size` is below 1, the
+            projection operator has relative coefficients, the Alpaca `test`
+            split is empty, or the emotion run is not usable.
     """
     layers = _check_config(config, len(facts), loaded.n_layers)
+    settings = GenSettings.from_config(config)
+    texts = calibration_texts(
+        alpaca, config.n_calibration, seed=derive_seed(config.seed, "norms")
+    )
     chat = chat_format_for(loaded)
     order = np.random.default_rng(derive_seed(config.seed, "pool")).permutation(
         len(facts)
@@ -431,15 +439,8 @@ def execute(
         batch_size=config.batch_size,
     )
     norms = mean_residual_norms(
-        loaded,
-        calibration_texts(
-            alpaca, config.n_calibration, seed=derive_seed(config.seed, "norms")
-        ),
-        layers,
-        bos=config.bos,
-        batch_size=config.batch_size,
+        loaded, texts, layers, bos=config.bos, batch_size=config.batch_size
     )
-    settings = GenSettings.from_config(config)
     arms = [plain_arm(loaded, settings)] + [
         reader_arm(
             loaded,
