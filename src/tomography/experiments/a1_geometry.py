@@ -38,7 +38,6 @@ class Config(ExperimentConfig):
         sources: Experiments whose default runs on `model` are read.
         extra_runs: Finished runs that replace a default run.
         depth: Relative depth of the cross-concept matrix.
-        n_boot: Bootstrap resamples of the agreement bands, at least 1.
     """
 
     experiment: str = "a1"
@@ -46,7 +45,6 @@ class Config(ExperimentConfig):
     sources: tuple[str, ...] = ("r1", "r2", "r3", "r5", "r7")
     extra_runs: tuple[str, ...] = ()
     depth: float = 0.5
-    n_boot: int = 2000
 
 
 def execute(
@@ -60,12 +58,13 @@ def execute(
     (the cosine between the mean directions of the concepts at the layer
     nearest `config.depth`), `curves_agreement` and `summary.json`. The
     curves hold the cosine of each seed to the other seeds per layer, whose
-    mean is the mean pairwise cosine. Its band is a percentile bootstrap of
-    the jackknife pseudo-values of that mean, because the per-seed rows share
-    pairs and are not independent. The summary holds `chance_abs_cosine`, the
-    mean absolute cosine of two random directions, as the reference for
-    `matrix_concepts`, and `source_runs`, the config hash of the run each
-    concept was read from (None for a set built by hand).
+    mean is the mean pairwise cosine. Its band is a t-interval over the
+    jackknife pseudo-values of that mean, clipped to [-1, 1], because the
+    per-seed rows share pairs and are not independent. The summary holds
+    `chance_abs_cosine`, the mean absolute cosine of two random directions,
+    as the reference for `matrix_concepts`, and `source_runs`, the config
+    hash of the run each concept was read from (None for a set built by
+    hand).
 
     Args:
         config: The experiment settings.
@@ -76,11 +75,9 @@ def execute(
     Raises:
         ValueError: If there is no set, there are too many, they were read
             at different layers or depths, a concept has fewer than three
-            seeds, `config.depth` is outside (0, 1], `config.n_boot` is below
-            1 or `config.seed` is negative.
+            seeds, `config.depth` is outside (0, 1] or `config.seed` is
+            negative.
     """
-    if config.n_boot < 1:
-        raise ValueError(f"n_boot must be at least 1, got {config.n_boot}")
     if config.seed < 0:
         raise ValueError(f"seed must be non-negative, got {config.seed}")
     layers, n_layers, n_min = common_layers(readers)
@@ -111,10 +108,7 @@ def execute(
         cols=labels,
         title=f"Cosine between concepts at layer {layer}",
     )
-    bands = [
-        agreement_band(v, n_boot=config.n_boot, seed=config.seed)
-        for v in vectors
-    ]
+    bands = [agreement_band(v) for v in vectors]
     write_interval_curves(
         run_dir,
         layers,

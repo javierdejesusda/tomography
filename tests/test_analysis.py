@@ -328,12 +328,60 @@ def test_pseudo_values_need_three_runs() -> None:
 
 
 def test_the_agreement_band_is_the_bootstrap_of_the_pseudo_values() -> None:
-    vectors = _runs(n=5)
-    lo, hi = agreement_band(vectors, n_boot=50, seed=4)
-    expected = bootstrap_ci(agreement_pseudo_values(vectors), n_boot=50, seed=4)
-    np.testing.assert_array_equal(lo, expected[0])
-    np.testing.assert_array_equal(hi, expected[1])
+    vectors = _runs(n=40)
+    lo, hi = agreement_band(vectors)
+    boot_lo, boot_hi = bootstrap_ci(
+        agreement_pseudo_values(vectors), n_boot=20000, seed=0
+    )
     assert lo.shape == hi.shape == (3,)
+    assert (np.abs(lo - boot_lo) < 0.1 * (hi - lo)).all()
+    assert (np.abs(hi - boot_hi) < 0.1 * (hi - lo)).all()
+
+
+T_4_DF = 2.7764451051977934
+T_2_DF = 4.302652729749462
+
+
+def test_the_agreement_band_is_a_t_interval_of_the_pseudo_values() -> None:
+    vectors = _runs(n=5)
+    pseudo = agreement_pseudo_values(vectors)
+    mean = _mean_pairwise(_unit(vectors))
+    half = T_4_DF * pseudo.std(axis=0, ddof=1) / np.sqrt(5)
+    assert (np.abs(mean) + half < 1.0).all()
+    lo, hi = agreement_band(vectors)
+    np.testing.assert_allclose(lo, mean - half, atol=1e-12)
+    np.testing.assert_allclose(hi, mean + half, atol=1e-12)
+
+
+def test_a_wider_alpha_gives_a_narrower_band() -> None:
+    vectors = _runs(n=5)
+    lo, hi = agreement_band(vectors)
+    lo_90, hi_90 = agreement_band(vectors, alpha=0.1)
+    assert (lo < lo_90).all()
+    assert (hi_90 < hi).all()
+
+
+@pytest.mark.parametrize("alpha", [0.0, 1.0, -0.1])
+def test_the_agreement_band_refuses_an_alpha_outside_the_unit_interval(
+    alpha: float,
+) -> None:
+    with pytest.raises(ValueError, match="alpha"):
+        agreement_band(_runs(n=5), alpha=alpha)
+
+
+def test_the_agreement_band_is_clipped_to_the_cosine_range() -> None:
+    near = np.array([[[1.0, 0.0]], [[1.0, 0.0]], [[0.8, 0.6]]])
+    pseudo = agreement_pseudo_values(near)[:, 0]
+    mean = pseudo.mean()
+    half = T_2_DF * pseudo.std(ddof=1) / np.sqrt(3)
+    assert mean + half > 1.0
+    assert mean - half > -1.0
+    lo, hi = agreement_band(near)
+    assert hi[0] == 1.0
+    assert lo[0] == pytest.approx(mean - half)
+    split = np.array([[[1.0, 0.0]], [[1.0, 0.0]], [[0.0, 1.0]]])
+    lo, hi = agreement_band(split)
+    assert (lo[0], hi[0]) == (-1.0, 1.0)
 
 
 def test_the_band_covers_the_pairwise_mean_in_most_replications() -> None:
@@ -350,11 +398,9 @@ def test_the_band_covers_the_pairwise_mean_in_most_replications() -> None:
     hits = 0
     replications = 300
     for i in range(replications):
-        lo, hi = agreement_band(
-            seeds(np.random.default_rng(1000 + i), 6), n_boot=300, seed=i
-        )
+        lo, hi = agreement_band(seeds(np.random.default_rng(1000 + i), 6))
         hits += int(lo[0] <= truth <= hi[0])
-    assert hits / replications > 0.78
+    assert hits / replications > 0.9
 
 
 def test_mean_direction_averages_the_unit_directions() -> None:
@@ -431,6 +477,19 @@ def test_lens_logits_centers_then_scales_by_the_norm_weight() -> None:
     np.testing.assert_allclose(
         centered_only, centered @ unembedding.T, rtol=1e-5, atol=1e-6
     )
+
+
+def test_lens_logits_centers_every_direction_of_a_batch_over_its_width() -> (
+    None
+):
+    rng = np.random.default_rng(3)
+    unembedding = rng.normal(size=(7, 4)).astype(np.float32)
+    scale = rng.uniform(0.5, 2.0, size=4).astype(np.float32)
+    batch = rng.normal(size=(3, 4)) + np.array([[5.0], [-3.0], [1.0]])
+    got = lens_logits(batch, unembedding, scale=scale, center=True)
+    oracle = ((batch - batch.mean(-1, keepdims=True)) * scale) @ unembedding.T
+    assert got.shape == (3, 7)
+    np.testing.assert_allclose(got, oracle, rtol=1e-4, atol=1e-5)
 
 
 def test_lens_logits_checks_the_widths() -> None:

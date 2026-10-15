@@ -570,6 +570,30 @@ def test_run_loads_the_model_and_gathers_the_readers(
     assert calls["execute"] == (config, run_dir, tiny_arch, readers)
 
 
+@pytest.mark.parametrize("name", ["top-k", "n-random", "n-boot", "seed"])
+def test_run_refuses_a_bad_config_before_loading_the_model(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    loaded: list[str] = []
+
+    def fake_load_model(key: str) -> LoadedModel:
+        loaded.append(key)
+        return tiny_arch
+
+    def fake_gather(*args: Any) -> dict[str, ReaderSet]:
+        return _readers(tiny_arch)
+
+    monkeypatch.setattr(a2_logit_lens, "load_model", fake_load_model)
+    monkeypatch.setattr(a2_logit_lens, "gather_readers", fake_gather)
+    config, _, _, match = _unfit(name, tiny_arch)
+    with pytest.raises(ValueError, match=match):
+        run(config, _run_dir(tmp_path, config))
+    assert loaded == []
+
+
 def _executed(tiny_arch: LoadedModel, tmp_path: Path) -> RunDir:
     config = _config(top_k=5)
     run_dir = _run_dir(tmp_path, config)

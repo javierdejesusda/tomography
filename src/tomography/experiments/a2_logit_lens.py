@@ -181,6 +181,26 @@ def _poles(
     return poles
 
 
+def _check_config(config: Config) -> None:
+    """Refuses a config the analysis cannot use.
+
+    Args:
+        config: The experiment settings.
+
+    Raises:
+        ValueError: If `top_k` is below 1, `n_random` is below 2, `n_boot`
+            is below 1, or `seed` is negative.
+    """
+    if config.top_k < 1:
+        raise ValueError(f"top_k must be at least 1, got {config.top_k}")
+    if config.n_random < 2:
+        raise ValueError(f"n_random must be at least 2, got {config.n_random}")
+    if config.n_boot < 1:
+        raise ValueError(f"n_boot must be at least 1, got {config.n_boot}")
+    if config.seed < 0:
+        raise ValueError(f"seed must be non-negative, got {config.seed}")
+
+
 def execute(
     config: Config,
     run_dir: RunDir,
@@ -219,14 +239,7 @@ def execute(
             or a concept with words has an empty pole after the single-token
             filter.
     """
-    if config.top_k < 1:
-        raise ValueError(f"top_k must be at least 1, got {config.top_k}")
-    if config.n_random < 2:
-        raise ValueError(f"n_random must be at least 2, got {config.n_random}")
-    if config.n_boot < 1:
-        raise ValueError(f"n_boot must be at least 1, got {config.n_boot}")
-    if config.seed < 0:
-        raise ValueError(f"seed must be non-negative, got {config.seed}")
+    _check_config(config)
     layers, n_layers, n_min = common_layers(readers)
     labels = list(readers)
     poles = _poles(loaded, labels, words)
@@ -321,10 +334,18 @@ def run(config: Config, run_dir: RunDir) -> None:
 
     The source runs are looked up under the out root of `run_dir`.
 
+    The config is checked first, so a bad one fails before any source run is
+    read or the model is loaded.
+
     Args:
         config: The experiment settings.
         run_dir: The run to write into.
+
+    Raises:
+        ValueError: If the config is unusable (see `execute`), or the source
+            runs cannot be gathered.
     """
+    _check_config(config)
     readers = gather_readers(
         out_root_of(run_dir), config.sources, config.model, config.extra_runs
     )
