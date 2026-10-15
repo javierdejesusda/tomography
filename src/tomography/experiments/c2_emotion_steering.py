@@ -213,9 +213,9 @@ def _check_config(config: Config, n_layers: int) -> float:
 def _check_pair_counts(config: Config, scenarios: Sequence[Example]) -> None:
     """Checks that every steered emotion has the pairs the settings ask for."""
     _check_emotions(config.emotions)
-    for split, name, wanted in (
-        ("train", "n_pairs", config.n_pairs),
-        ("val", "n_eval_pairs", config.n_eval_pairs),
+    for split, name, wanted, allow_none in (
+        ("train", "n_pairs", config.n_pairs, False),
+        ("val", "n_eval_pairs", config.n_eval_pairs, True),
     ):
         labels = np.array([e.label for e in scenarios if e.split == split])
         for emotion in config.emotions:
@@ -225,6 +225,7 @@ def _check_pair_counts(config: Config, scenarios: Sequence[Example]) -> None:
                 wanted,
                 min(target, len(labels) - target),
                 f"for {emotion!r} in the {split} split",
+                allow_none=allow_none,
             )
 
 

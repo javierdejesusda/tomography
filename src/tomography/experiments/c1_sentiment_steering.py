@@ -336,7 +336,12 @@ def judge_agreement(
 
 
 def check_pair_count(
-    name: str, wanted: int | None, available: int, where: str
+    name: str,
+    wanted: int | None,
+    available: int,
+    where: str,
+    *,
+    allow_none: bool = False,
 ) -> None:
     """Checks that a split can form the pairs a setting asks for.
 
@@ -346,13 +351,16 @@ def check_pair_count(
             one.
         available: Pairs the split can form.
         where: Where the pairs are drawn from, as the message words it.
+        allow_none: Whether the setting accepts None, which the message
+            offers as an alternative to a count below 1.
 
     Raises:
         ValueError: If `wanted` is below 1 or above `available`, or is None
             while no pair can be formed.
     """
     if wanted is not None and wanted < 1:
-        raise ValueError(f"{name} must be at least 1 or None, got {wanted}")
+        accepted = "at least 1 or None" if allow_none else "at least 1"
+        raise ValueError(f"{name} must be {accepted}, got {wanted}")
     if (1 if wanted is None else wanted) > available:
         raise ValueError(
             f"{name} is {wanted} but at most {available} pairs exist {where}"
@@ -363,9 +371,9 @@ def _check_pair_counts(
     config: Config, train: Sequence[Example], val: Sequence[Example]
 ) -> None:
     """Checks that each split forms the pairs the settings ask for."""
-    for split, name, wanted, examples in (
-        ("train", "n_pairs", config.n_pairs, train),
-        ("val", "n_eval_pairs", config.n_eval_pairs, val),
+    for split, name, wanted, examples, allow_none in (
+        ("train", "n_pairs", config.n_pairs, train, False),
+        ("val", "n_eval_pairs", config.n_eval_pairs, val, True),
     ):
         positive = sum(e.label == 1 for e in examples)
         check_pair_count(
@@ -373,6 +381,7 @@ def _check_pair_counts(
             wanted,
             min(positive, len(examples) - positive),
             f"in the {split} split",
+            allow_none=allow_none,
         )
 
 
