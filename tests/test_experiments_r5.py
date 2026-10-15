@@ -19,11 +19,14 @@ from tomography.experiments.r5_honesty import execute
 from tomography.experiments.r5_honesty import plot
 from tomography.experiments.r5_honesty import run
 from tomography.experiments.sweep import SERIES
+from tomography.experiments.sweep import SweepResult
 from tomography.model import LoadedModel
 from tomography.model import load_model
 from tomography.templates import PAPER_TEMPLATES
 
 PERSONAS = ("honest", "untruthful")
+READER = SERIES.index("reader")
+PEAKS = {"val": 1, "test": 2, "transfer_val": 0, "transfer_test": 1}
 
 
 def _statements(
@@ -164,6 +167,96 @@ def test_execute_writes_curves_scans_and_summary(
         "in_template": {"val": 4, "test": 4},
     }
     assert summary["n_scan"] == 2
+
+
+def _plant_sweep(monkeypatch: pytest.MonkeyPatch) -> list[SweepResult]:
+    planted: list[SweepResult] = []
+    real = r5_honesty.sweep_from_activations
+
+    def spy(*args: Any, **kwargs: Any) -> SweepResult:
+        result = real(*args, **kwargs)
+        accuracy = np.zeros(result.accuracy.shape)
+        for e, name in enumerate(result.eval_names):
+            for s in range(accuracy.shape[1]):
+                for seed in range(accuracy.shape[2]):
+                    accuracy[e, s, seed] = 0.5 - 0.05 * s + 0.01 * seed
+                    accuracy[e, s, seed, PEAKS[name]] += 0.3
+        planted.append(dataclasses.replace(result, accuracy=accuracy))
+        return planted[-1]
+
+    monkeypatch.setattr(r5_honesty, "sweep_from_activations", spy)
+    return planted
+
+
+def test_each_layer_is_chosen_on_val_and_reported_on_test(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planted = _plant_sweep(monkeypatch)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _statements())
+    [result] = planted
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    reports = (
+        ("curves_transfer", "transfer_val", "transfer_test", summary),
+        ("curves", "val", "test", summary["in_template"]),
+    )
+    for stem, val_name, test_name, report in reports:
+        curves = run_dir.read_arrays(stem)
+        np.testing.assert_allclose(
+            curves["per_seed"], result.per_seed(test_name)
+        )
+        val = result.per_seed(val_name)[READER].mean(axis=0)
+        test = result.per_seed(test_name)[READER].mean(axis=0)
+        at = PEAKS[val_name]
+        assert report["best_layer"] == result.layers[at]
+        assert report["val_accuracy"] == pytest.approx(val[at])
+        assert report["test_accuracy"] == pytest.approx(test[at])
+        assert report["ci"] == pytest.approx(
+            [curves["lo"][READER, at], curves["hi"][READER, at]]
+        )
+
+
+def test_the_scans_are_scored_by_the_first_reader(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planted = _plant_sweep(monkeypatch)
+    activations: list[Any] = []
+    real = r5_honesty.stimulus_activations
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        activations.append(real(*args, **kwargs))
+        return activations[-1]
+
+    monkeypatch.setattr(r5_honesty, "stimulus_activations", spy)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _statements())
+    expected = planted[0].readers[0].score(activations[-1].data)
+    stored = np.concatenate(
+        [
+            run_dir.read_arrays(f"scan_{i}_{persona}")["scores"]
+            for i in range(config.n_scan_statements)
+            for persona in PERSONAS
+        ],
+        axis=1,
+    )
+    np.testing.assert_allclose(
+        np.sort(stored, axis=1), np.sort(expected, axis=1), rtol=1e-5
+    )
+
+
+def test_the_honest_scan_scores_above_the_untruthful_one(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _statements())
+    for i in range(config.n_scan_statements):
+        honest = run_dir.read_arrays(f"scan_{i}_honest")["scores"]
+        untruthful = run_dir.read_arrays(f"scan_{i}_untruthful")["scores"]
+        assert (honest.mean(axis=1) > untruthful.mean(axis=1)).all()
 
 
 def test_the_default_direction_is_logistic_and_pca_diff_stays_selectable(
