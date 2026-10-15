@@ -7,6 +7,7 @@ from typing import Any
 import weakref
 
 import numpy as np
+from numpy.typing import NDArray
 import pytest
 
 from tomography.cli import load_experiment
@@ -241,26 +242,23 @@ def test_a_persona_condition_renders_its_own_words(condition: str) -> None:
 
 
 @pytest.mark.parametrize("n_pairs", [12, 11])
-def test_random_label_shuffles_the_training_labels_within_pairs(
-    n_pairs: int,
-) -> None:
+def test_random_label_swaps_half_of_the_training_pairs(n_pairs: int) -> None:
     real = _persona("paper", n_pairs=n_pairs)
     flipped = _persona("random_label", n_pairs=n_pairs)
     assert flipped.texts == real.texts
-    expected = balanced_flip(
-        real.labels, real.groups, seed=derive_seed(3, "random_label")
-    )
-    np.testing.assert_array_equal(flipped.labels, expected)
+    assert real.groups.shape[0] == n_pairs
     first = real.groups[:, 0]
     swapped = flipped.labels[first] != real.labels[first]
-    assert swapped.sum() == n_pairs // 2
+    seed = derive_seed(3, "random_label")
+    chosen = np.random.default_rng(seed).permutation(n_pairs)[: n_pairs // 2]
+    assert sorted(np.flatnonzero(swapped).tolist()) == sorted(chosen.tolist())
     for group in flipped.groups:
         assert sorted(flipped.labels[group]) == [0, 1]
     evaluation = _persona("random_label", n_pairs=n_pairs, train=False)
     np.testing.assert_array_equal(evaluation.labels, real.labels)
 
 
-def _pair_labels(n: int) -> tuple[Any, Any]:
+def _pair_labels(n: int) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
     groups = np.arange(2 * n, dtype=np.int64).reshape(n, 2)
     labels = np.empty(2 * n, dtype=np.int64)
     labels[0::2] = np.arange(n) % 2
