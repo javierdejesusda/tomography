@@ -65,8 +65,12 @@ CURVE_STEMS = [
 ]
 
 
-def _items() -> list[LabeledItem]:
-    """A planted pool: ten contrasts are usable, two are too small."""
+def _items(*, post_awards_apart: bool = False) -> list[LabeledItem]:
+    """A planted pool: ten contrasts are usable, two are too small.
+
+    With `post_awards_apart` the post-cutoff awards share no relation with
+    the real ones, so `post_cutoff` has no pair to match.
+    """
     items: list[LabeledItem] = []
 
     def add(
@@ -133,7 +137,10 @@ def _items() -> list[LabeledItem]:
         "wikidata",
         "post_cutoff",
         unknown,
-        lambda i: {"relation": f"Award{i % 2}", "year": 2015 + i % 10},
+        lambda i: {
+            "relation": f"{'Post' if post_awards_apart else 'Award'}{i % 2}",
+            "year": 2015 + i % 10,
+        },
     )
     add(
         "detail",
@@ -593,6 +600,24 @@ def test_a_skipped_type_in_types_is_reported_not_fatal(
     summary = _summary(run_dir)
     assert summary["types"] == ["obscure_real"]
     assert list(summary["skipped"]) == ["pre_vs_post_cutoff"]
+
+
+def test_a_contrast_without_a_shared_stratum_is_skipped_not_fatal(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    items = _items(post_awards_apart=True)
+    labels = _labels_run(tmp_path, items)
+    config = _config(labels)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    execute(config, run_dir, tiny_arch, items, known_contrasts=True)
+
+    summary = _summary(run_dir)
+    assert summary["skipped"]["post_cutoff"] == (
+        "fewer than 8 matched train pairs"
+    )
+    assert "post_cutoff" not in summary["types"]
+    assert summary["types"] == [n for n in USABLE if n != "post_cutoff"]
 
 
 def test_a_type_that_does_not_exist_is_an_error(

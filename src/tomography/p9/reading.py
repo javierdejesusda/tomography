@@ -20,6 +20,7 @@ from tomography.knowledge import few_shot_prompt
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.p9.pool import LabeledItem
+from tomography.p9.unknowns import Strata
 from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import stratum_name
 from tomography.pairing import label_contrastive_pairs
@@ -182,21 +183,37 @@ def collect_item_activations(
     )
 
 
+def _matched_pairs(
+    positive: Sequence[LabeledItem],
+    negative: Sequence[LabeledItem],
+    strata: Strata,
+) -> int:
+    counts: dict[str, list[int]] = {}
+    for side, items in enumerate((positive, negative)):
+        for item in items:
+            counts.setdefault(stratum_name(item, strata), [0, 0])[side] += 1
+    return sum(min(pair) for pair in counts.values())
+
+
 def check_pool(pool: TypePool, *, min_pairs: int, min_eval: int) -> str | None:
     """Says why a contrast cannot be read, if it cannot.
 
     Args:
         pool: One contrast.
-        min_pairs: Fewest train items on each side.
+        min_pairs: Fewest train items on each side, and fewest train pairs
+            that never cross two strata.
         min_eval: Fewest val items, and fewest test items, on each side.
 
     Returns:
-        None for a usable pool, else the reason: the train split is checked
-        first, then val, then test.
+        None for a usable pool, else the reason: the train items on each
+        side are checked first, then the matched train pairs, then val, then
+        test.
     """
     positive, negative = pool.split("train")
     if min(len(positive), len(negative)) < min_pairs:
         return f"fewer than {min_pairs} train items on one side"
+    if _matched_pairs(positive, negative, pool.strata) < min_pairs:
+        return f"fewer than {min_pairs} matched train pairs"
     splits: tuple[Split, ...] = ("val", "test")
     for split in splits:
         positive, negative = pool.split(split)

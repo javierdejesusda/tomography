@@ -480,6 +480,53 @@ def test_check_pool_checks_train_first() -> None:
     )
 
 
+def _stratified_pool(train: dict[str, tuple[int, int]]) -> TypePool:
+    positive: list[LabeledItem] = []
+    negative: list[LabeledItem] = []
+    for relation, (n_pos, n_neg) in train.items():
+        positive += [
+            _labeled(f"p-{relation}-{i}", "known", relation=relation)
+            for i in range(n_pos)
+        ]
+        negative += [
+            _labeled(f"n-{relation}-{i}", "unknown", relation=relation)
+            for i in range(n_neg)
+        ]
+    for split in ("val", "test"):
+        positive += [
+            _labeled(f"p-{split}-{i}", "known", split=split, relation="a")  # type: ignore[arg-type]
+            for i in range(3)
+        ]
+        negative += [
+            _labeled(f"n-{split}-{i}", "unknown", split=split, relation="a")  # type: ignore[arg-type]
+            for i in range(3)
+        ]
+    return TypePool(
+        "t", tuple(positive), tuple(negative), "relation", "knowledge"
+    )
+
+
+def test_check_pool_counts_the_pairs_the_strata_allow() -> None:
+    apart = _stratified_pool({"a": (6, 0), "b": (0, 6)})
+    mixed = _stratified_pool({"a": (3, 5), "b": (4, 2), "c": (1, 1)})
+
+    assert check_pool(apart, min_pairs=4, min_eval=3) == (
+        "fewer than 4 matched train pairs"
+    )
+    assert check_pool(mixed, min_pairs=6, min_eval=3) is None
+    assert check_pool(mixed, min_pairs=7, min_eval=3) == (
+        "fewer than 7 matched train pairs"
+    )
+
+
+def test_check_pool_names_the_short_side_before_the_matched_pairs() -> None:
+    pool = _stratified_pool({"a": (1, 9), "b": (0, 9)})
+
+    assert check_pool(pool, min_pairs=3, min_eval=3) == (
+        "fewer than 3 train items on one side"
+    )
+
+
 def test_planted_pools_are_all_usable(planted: Planted) -> None:
     assert len(planted.pools) == 12
     for name, pool in planted.pools.items():
