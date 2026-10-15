@@ -854,12 +854,31 @@ def test_a_position_that_not_every_variant_has_is_refused(
         execute(config, _run_dir(config, tmp_path), cast(Any, None), _sources())
 
 
+@pytest.mark.parametrize("eval_position", ["mean", None])
 def test_the_mean_position_is_read(
-    tiny_gpt2: LoadedModel, tmp_path: Path
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    eval_position: PositionStrategy | None,
 ) -> None:
-    config = _small(position="mean", eval_position="mean")
+    real = p1_templates.prepare
+    read: list[PositionStrategy] = []
+
+    def spy(
+        loaded: LoadedModel,
+        stimuli: StimulusSet,
+        position: PositionStrategy,
+        config: ReadingConfig,
+    ) -> Prepared:
+        read.append(position)
+        return real(loaded, stimuli, position, config)
+
+    monkeypatch.setattr(p1_templates, "prepare", spy)
+    config = _small(position="mean", eval_position=eval_position)
     run_dir = _execute(config, tiny_gpt2, tmp_path)
     assert len(_json(run_dir, "table")) == len(SMALL_VARIANTS)
+    assert len(read) > len(SMALL_VARIANTS) * config.n_seeds
+    assert set(read) == {"mean"}
 
 
 @pytest.mark.parametrize(
