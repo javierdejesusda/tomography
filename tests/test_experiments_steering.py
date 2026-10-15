@@ -6,7 +6,9 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 import pytest
+import torch
 
+from tomography.control.contrast import PromptDifference
 from tomography.control.controllers import ReadingVectorController
 from tomography.control.controllers import mean_residual_norms
 from tomography.control.generate import Completion
@@ -23,6 +25,7 @@ from tomography.experiments.steering import plain_arm
 from tomography.experiments.steering import reader_arm
 from tomography.experiments.steering import run_trial
 from tomography.experiments.steering import scoring_bos
+from tomography.hooks import edit_residuals
 from tomography.judges import perplexity
 from tomography.judges import sequence_logprob
 from tomography.model import LoadedModel
@@ -693,6 +696,145 @@ def test_response_and_all_masks_score_identically(
         everywhere.logprobs(PROMPTS, CONTINUATIONS),
     )
     assert response.perplexity(NEUTRAL) == everywhere.perplexity(NEUTRAL)
+
+
+DIFF_POSITIVE = "Be truthful and honest in every answer today."
+DIFF_NEGATIVE = "Never tell the truth, always lying."
+DIFF_SCORED_PROMPTS = [
+    "The quick brown fox jumps over",
+    "Hi",
+    "Honest answers are",
+    "Hi",
+]
+DIFF_SCORED_CONTINUATIONS = [
+    " the lazy dog",
+    " there",
+    " true and good",
+    " all",
+]
+DIFF_SETTINGS = GenSettings(
+    max_new_tokens=4, temperature=None, num_samples=1, batch_size=2
+)
+
+
+def make_prompt_difference(loaded: LoadedModel) -> PromptDifference:
+    return PromptDifference.from_prompts(
+        loaded, DIFF_POSITIVE, DIFF_NEGATIVE, [1, 2], coeff=5.0
+    )
+
+
+def prompt_difference_reference_logprobs(
+    loaded: LoadedModel,
+    diff: PromptDifference,
+    prompts: Sequence[str],
+    continuations: Sequence[str],
+) -> NDArray[np.float32]:
+    """Scores one row at a time with the edit of generation: j < prompt."""
+    bos = scoring_bos(loaded)
+    scores = []
+    for prompt, continuation in zip(prompts, continuations, strict=True):
+        head = [] if bos is None else [bos]
+        head += loaded.tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        tail = loaded.tokenizer(continuation, add_special_tokens=False)[
+            "input_ids"
+        ]
+        ids = torch.tensor([head + tail])
+        mask = torch.ones_like(ids)
+        positions = (mask.cumsum(dim=-1) - 1).clamp(min=0)
+        with torch.no_grad(), edit_residuals(loaded, diff.edits(len(head))):
+            logits = loaded.model(
+                input_ids=ids, attention_mask=mask, position_ids=positions
+            ).logits
+        logp = logits[0, len(head) - 1 : -1].float().log_softmax(-1)
+        picked = logp[torch.arange(len(tail)), torch.tensor(tail)]
+        scores.append(float(picked.sum()))
+    return np.array(scores, dtype=np.float32)
+
+
+@pytest.mark.parametrize("prefix", ["", "Be kind. "], ids=["bare", "prefixed"])
+def test_prompt_difference_arm_scores_with_the_edit_of_generation(
+    tiny_arch: LoadedModel, prefix: str
+) -> None:
+    diff = make_prompt_difference(tiny_arch)
+    arm = edit_arm(tiny_arch, DIFF_SETTINGS, diff, name="d", prefix=prefix)
+    plain = plain_arm(tiny_arch, DIFF_SETTINGS, prefix=prefix)
+    assert arm.logprobs is not None
+    assert plain.logprobs is not None
+    k = diff.vectors[1].shape[0]
+    short = tiny_arch.encode([prefix + "Hi"]).lengths[0]
+    assert short < k
+
+    expected = prompt_difference_reference_logprobs(
+        tiny_arch,
+        diff,
+        [prefix + p for p in DIFF_SCORED_PROMPTS],
+        DIFF_SCORED_CONTINUATIONS,
+    )
+    scored = arm.logprobs(DIFF_SCORED_PROMPTS, DIFF_SCORED_CONTINUATIONS)
+
+    np.testing.assert_allclose(scored, expected, rtol=1e-4, atol=1e-4)
+    assert not np.allclose(
+        scored,
+        plain.logprobs(DIFF_SCORED_PROMPTS, DIFF_SCORED_CONTINUATIONS),
+        atol=1e-3,
+    )
+    assert hooks_left(tiny_arch) == 0
+
+
+def test_prompt_difference_arm_logprobs_are_not_the_plain_arm_logprobs(
+    tiny_arch: LoadedModel,
+) -> None:
+    arm = edit_arm(
+        tiny_arch, DIFF_SETTINGS, make_prompt_difference(tiny_arch), name="d"
+    )
+    plain = plain_arm(tiny_arch, DIFF_SETTINGS)
+    assert arm.logprobs is not None
+    assert plain.logprobs is not None
+
+    assert not np.array_equal(
+        arm.logprobs(DIFF_SCORED_PROMPTS, DIFF_SCORED_CONTINUATIONS),
+        plain.logprobs(DIFF_SCORED_PROMPTS, DIFF_SCORED_CONTINUATIONS),
+    )
+
+
+def test_prompt_difference_arm_perplexity_edits_the_leading_positions(
+    tiny_arch: LoadedModel,
+) -> None:
+    diff = make_prompt_difference(tiny_arch)
+    arm = edit_arm(tiny_arch, DIFF_SETTINGS, diff, name="d")
+    plain = plain_arm(tiny_arch, DIFF_SETTINGS)
+    assert arm.perplexity is not None
+    assert plain.perplexity is not None
+
+    with edit_residuals(tiny_arch, diff.edits()):
+        expected = perplexity(
+            tiny_arch.model,
+            tiny_arch.tokenizer,
+            NEUTRAL,
+            max_length=DIFF_SETTINGS.score_max_length,
+            batch_size=2,
+            bos_id=scoring_bos(tiny_arch),
+        )
+
+    assert arm.perplexity(NEUTRAL) == pytest.approx(expected, rel=1e-5)
+    assert arm.perplexity(NEUTRAL) != plain.perplexity(NEUTRAL)
+    assert hooks_left(tiny_arch) == 0
+
+
+def test_prompt_difference_arm_logprobs_check_their_inputs(
+    tiny_arch: LoadedModel,
+) -> None:
+    arm = edit_arm(
+        tiny_arch, DIFF_SETTINGS, make_prompt_difference(tiny_arch), name="d"
+    )
+    assert arm.logprobs is not None
+
+    empty = arm.logprobs([], [])
+
+    assert empty.shape == (0,)
+    assert empty.dtype == np.float32
+    with pytest.raises(ValueError, match="same length"):
+        arm.logprobs(["Hi", "Hi"], [" there"])
 
 
 def test_prefix_is_prepended_to_prompts_and_not_to_the_completion(
