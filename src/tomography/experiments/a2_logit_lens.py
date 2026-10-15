@@ -348,6 +348,7 @@ def _token_figure(table: Mapping[str, Any]) -> Figure:
             for cell in grid.get_celld().values():
                 cell.set_edgecolor(style.GRID)
                 cell.set_linewidth(style.PX)
+                cell.get_text().set_parse_math(False)
     return fig
 
 

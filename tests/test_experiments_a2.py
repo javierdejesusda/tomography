@@ -489,8 +489,8 @@ def test_plot_writes_tokens_as_ascii_escapes(
 ) -> None:
     run_dir = _executed(tiny_arch, tmp_path)
     table = _json(run_dir, "table")
-    odd = ["\u65e5\u672c", "\u00e9t\u00e9", "\ufffd", "\n"]
-    for row, token in zip(table["rows"][:4], odd, strict=True):
+    odd = ["\u65e5\u672c", "\u00e9t\u00e9", "\ufffd", "\n", "$$", "$^$"]
+    for row, token in zip(table["rows"][: len(odd)], odd, strict=True):
         row[4] = token
     run_dir.write_json("table", table)
     figure = _plotted_figure(run_dir, tmp_path / "figs", monkeypatch)
@@ -501,6 +501,14 @@ def test_plot_writes_tokens_as_ascii_escapes(
         for cell in t.get_celld().values()
     ]
     assert all(text.isascii() for text in cells)
+    assert "$$" in cells
+    assert "$^$" in cells
+    assert not any(
+        cell.get_text().get_parse_math()
+        for ax in figure.axes
+        for t in ax.tables
+        for cell in t.get_celld().values()
+    )
     assert "\\u65e5\\u672c" in cells
     assert "\\xe9t\\xe9" in cells
     assert "\\ufffd" in cells
