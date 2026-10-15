@@ -755,8 +755,8 @@ def execute(
     the readers, the difference vector and the norms are built, and scored
     as the last arm, `lorra`, on the plain prompts. Every other arm then runs
     with the adapter off, so its scores are those of a run without an adapter.
-    The adapter stays attached to `loaded`, so such a run needs a freshly
-    loaded model.
+    The adapter is unloaded when the scoring ends, even if it fails, so
+    `loaded` comes back as it was.
 
     Writes `curves_reading`, `curves_difference` and `curves_contrast`, the
     `scores` of every arm with its sidecar, `table.json` and `summary.json`.
@@ -803,16 +803,20 @@ def execute(
         if config.lorra_run is None
         else load_adapter(loaded, config.lorra_run)
     )
-    rows = _arm_scores(
-        config,
-        loaded,
-        questions,
-        layers,
-        sweep.readers,
-        difference,
-        norms,
-        adapter,
-    )
+    try:
+        rows = _arm_scores(
+            config,
+            loaded,
+            questions,
+            layers,
+            sweep.readers,
+            difference,
+            norms,
+            adapter,
+        )
+    finally:
+        if adapter is not None:
+            adapter.peft_model.unload()
     offsets = choice_offsets(questions)
     correct = np.array([question.correct for question in questions])
     tie_seed = derive_seed(config.seed, "mc1")

@@ -1657,6 +1657,39 @@ def test_an_unfinished_lorra_run_raises_and_attaches_nothing(
     assert _lora_layers(fresh) == []
 
 
+def test_execute_gives_the_model_back_without_the_adapter(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    adapter_run = _train_lorra(
+        copy.deepcopy(tiny_arch), tmp_path / "lr1", finish=True
+    )
+    never = _real_run(tmp_path / "never", copy.deepcopy(tiny_arch))
+    model = copy.deepcopy(tiny_arch)
+    _real_run(tmp_path / "lorra", model, lorra_run=str(adapter_run.path))
+    assert _lora_layers(model) == []
+    again = _real_run(tmp_path / "again", model)
+    np.testing.assert_array_equal(
+        again.read_arrays("scores")["values"],
+        never.read_arrays("scores")["values"],
+    )
+
+
+def test_execute_gives_the_model_back_when_scoring_fails(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter_run = _train_lorra(
+        copy.deepcopy(tiny_gpt2), tmp_path / "lr1", finish=True
+    )
+
+    def failing(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("scoring failed")
+
+    monkeypatch.setattr(c4_honesty_control, "contrast_logprobs", failing)
+    with pytest.raises(RuntimeError, match="scoring failed"):
+        _real_run(tmp_path / "run", tiny_gpt2, lorra_run=str(adapter_run.path))
+    assert _lora_layers(tiny_gpt2) == []
+
+
 def _stub_lorra_run(
     root: Path,
     *,
