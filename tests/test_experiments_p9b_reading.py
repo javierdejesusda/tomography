@@ -54,6 +54,7 @@ USABLE = [
     "obscure_real",
     "obscure_real_pop",
     "post_cutoff",
+    "triviaqa_known",
     "unknowable_detail",
     "false_premise",
     "kuq_future_unknown",
@@ -331,7 +332,7 @@ def test_execute_writes_the_files_of_a_run(
     ):
         expected |= {f"{stem}.npz", f"{stem}.json"}
     assert set(names) == expected
-    assert len(names) == 38
+    assert len(names) == 40
 
 
 def test_summary_records_the_run(
@@ -497,9 +498,9 @@ def test_the_panels_draw_the_first_method_of_their_contrasts(
     run_dir = default_run
     test = run_dir.read_arrays("transfer")["test"]
     panels = {
-        "entity": USABLE[:5],
-        "question": USABLE[5:8],
-        "unknown": USABLE[8:],
+        "entity": USABLE[:6],
+        "question": USABLE[6:9],
+        "unknown": USABLE[9:],
     }
 
     for panel, names in panels.items():
@@ -727,6 +728,22 @@ def test_types_restricts_the_contrasts(
     assert not (run_dir.path / "curves_post_cutoff.npz").exists()
 
 
+def test_triviaqa_known_alone_reads_the_same_dataset_contrast(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _execute(tiny_arch, tmp_path, types=("triviaqa_known",))
+
+    summary = _summary(run_dir)
+    assert summary["types"] == ["triviaqa_known"]
+    assert summary["skipped"] == {}
+    assert summary["curve_stems"] == ["curves_triviaqa_known", "curves_entity"]
+    table = run_dir.read_json("table")
+    assert isinstance(table, dict)
+    row = table["rows"][0]
+    assert row[0] == "triviaqa_known"
+    assert row[1] == "knowledge"
+
+
 def test_a_skipped_type_in_types_is_reported_not_fatal(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
@@ -880,7 +897,9 @@ def test_the_gate_leaves_the_unknown_type_contrasts_only(
     assert {row[1] for row in table["rows"]} == {"unknown_type"}
 
 
-@pytest.mark.parametrize("name", ["obscure_real", "kuq_future_unknown"])
+@pytest.mark.parametrize(
+    "name", ["obscure_real", "kuq_future_unknown", "triviaqa_known"]
+)
 def test_the_gate_refuses_a_knowledge_contrast_by_name(
     tiny_arch: LoadedModel, tmp_path: Path, name: str
 ) -> None:
@@ -907,7 +926,7 @@ def test_plot_draws_every_curve_and_both_matrices(
 
     paths = plot(run_dir, tmp_path / "figures")
 
-    assert len(paths) == 45
+    assert len(paths) == 48
     assert all(p.is_file() for p in paths)
     stems = {p.stem for p in paths}
     assert stems == {*CURVE_STEMS, "matrix", "matrix_cosine"}

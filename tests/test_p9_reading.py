@@ -558,7 +558,7 @@ def test_check_pool_names_a_train_half_that_cannot_be_fitted() -> None:
 
 
 def test_planted_pools_are_all_usable(planted: Planted) -> None:
-    assert len(planted.pools) == 12
+    assert len(planted.pools) == 13
     for name, pool in planted.pools.items():
         assert check_pool(pool, min_pairs=8, min_eval=5) is None, name
 
