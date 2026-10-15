@@ -1265,6 +1265,21 @@ def test_run_with_a_closed_gate_raises_the_gate_error(
         run(config, _run_dir(tmp_path, config))
 
 
+def test_run_refuses_labels_made_for_another_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    labels = _labels_run(tmp_path, _items())
+
+    def never(name: str) -> LoadedModel:
+        raise AssertionError("the model must not load first")
+
+    monkeypatch.setattr(p9d_steering, "load_model", never)
+    config = _config(labels_run=str(labels.path), model="gpt2")
+
+    with pytest.raises(ValueError, match="labeled 'tiny', not 'gpt2'"):
+        run(config, _run_dir(tmp_path, config))
+
+
 def test_run_refuses_an_unfinished_labeling_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

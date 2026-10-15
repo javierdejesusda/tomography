@@ -929,9 +929,10 @@ def run(config: Config, run_dir: RunDir) -> None:
         run_dir: The run to write into.
 
     Raises:
-        ValueError: If `config.labels_run` is not a finished run.
+        ValueError: If `config.labels_run` is not a finished run or is a run
+            of another model than `config.model`.
     """
-    items, summary = load_labeled(config.labels_run)
+    items, summary = load_labeled(config.labels_run, model=config.model)
     execute(
         config,
         run_dir,
