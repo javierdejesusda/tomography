@@ -271,6 +271,27 @@ def test_an_excluded_stratum_is_never_eligible() -> None:
     assert not guess.eligible
 
 
+@pytest.mark.parametrize(
+    "limit",
+    [float("nan"), float("inf"), -0.01, 1.01],
+    ids=["nan", "inf", "below_zero", "above_one"],
+)
+def test_a_max_guess_accuracy_that_is_not_a_share_raises(limit: float) -> None:
+    with pytest.raises(ValueError, match="max_guess_accuracy"):
+        stratum_guesses(_pilot_items(), max_guess_accuracy=limit)
+
+
+@pytest.mark.parametrize(
+    ("limit", "eligible"), [(0.0, False), (1.0, True)], ids=["zero", "one"]
+)
+def test_the_ends_of_the_share_range_are_valid_limits(
+    limit: float, eligible: bool
+) -> None:
+    guesses = stratum_guesses(_pilot_items(), max_guess_accuracy=limit)
+
+    assert guesses["popqa:mother"].eligible is eligible
+
+
 def test_the_modal_answer_is_normalized() -> None:
     items = [
         _item("a", "father", "John", "x"),

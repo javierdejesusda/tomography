@@ -364,6 +364,34 @@ def test_config_defaults_and_round_trip() -> None:
     assert Config.from_dict(config.to_dict()) == config
 
 
+@pytest.mark.parametrize("n_shots", [-1, -15, 16, 100])
+def test_n_shots_outside_the_demonstrations_raises(n_shots: int) -> None:
+    with pytest.raises(ValueError, match="n_shots"):
+        Config(n_shots=n_shots)
+
+
+def test_a_negative_n_shots_set_on_the_command_line_raises() -> None:
+    data = {**Config().to_dict(), "n_shots": -1}
+
+    with pytest.raises(ValueError, match="n_shots"):
+        Config.from_dict(data)
+
+
+@pytest.mark.parametrize("n_shots", [0, 1, len(DEFAULT_SHOTS)])
+def test_n_shots_within_the_demonstrations_is_accepted(n_shots: int) -> None:
+    assert Config(n_shots=n_shots).n_shots == n_shots
+
+
+@pytest.mark.parametrize(
+    "limit",
+    [float("nan"), float("inf"), -0.1, 1.1],
+    ids=["nan", "inf", "below_zero", "above_one"],
+)
+def test_a_max_guess_accuracy_that_is_not_a_share_raises(limit: float) -> None:
+    with pytest.raises(ValueError, match="max_guess_accuracy"):
+        Config(max_guess_accuracy=limit)
+
+
 def test_the_cli_discovers_the_experiment() -> None:
     experiment = load_experiment("p9a")
 
