@@ -256,11 +256,13 @@ def consistency(label: ItemLabel) -> float:
         label: The label of one question.
 
     Returns:
-        The share after answer normalization, NaN without samples.
+        The share after answer normalization, NaN without samples and NaN
+        when the greedy answer has no content left after normalization,
+        because agreeing with nothing says nothing about confidence.
     """
-    if not label.samples:
-        return float("nan")
     target = normalize_answer(label.greedy)
+    if not label.samples or not target:
+        return float("nan")
     return float(
         np.mean([normalize_answer(s) == target for s in label.samples])
     )
@@ -287,8 +289,9 @@ def item_signals(
     Returns:
         One array of shape (n,) per name in `SIGNAL_NAMES`. A signal is NaN
         where it is undefined: the answer-based ones for an empty greedy
-        answer, `consistency` without samples, `popularity` without a
-        positive count and `name_logprob` without a subject.
+        answer, `consistency` without samples or with an empty greedy answer,
+        `popularity` without a positive count and `name_logprob` without a
+        subject.
     """
     n = len(items)
     prompts = [few_shot_prompt(i.example.question, shots) for i in items]

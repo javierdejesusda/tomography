@@ -342,6 +342,15 @@ def test_consistency_is_nan_without_samples() -> None:
     assert math.isnan(consistency(_label("Paris")))
 
 
+@pytest.mark.parametrize("greedy", ["", "the", "A."])
+def test_consistency_is_nan_for_a_greedy_answer_without_content(
+    greedy: str,
+) -> None:
+    label = _label(greedy, ("", "x", greedy))
+
+    assert math.isnan(consistency(label))
+
+
 def test_item_signals_hold_the_nine_arrays(tiny_arch: LoadedModel) -> None:
     items = _items()
 
@@ -371,7 +380,7 @@ def test_item_signals_leave_nan_only_where_the_value_is_missing(
     assert np.isnan(signals["consistency"]).tolist() == [
         False,
         True,
-        False,
+        True,
         True,
     ]
     for name in ("answer_logprob", "mean_token_logprob", "p_true"):
