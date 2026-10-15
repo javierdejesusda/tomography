@@ -179,7 +179,9 @@ def _plant_sweep(monkeypatch: pytest.MonkeyPatch) -> list[SweepResult]:
         for e, name in enumerate(result.eval_names):
             for s in range(accuracy.shape[1]):
                 for seed in range(accuracy.shape[2]):
-                    accuracy[e, s, seed] = 0.5 - 0.05 * s + 0.01 * seed
+                    accuracy[e, s, seed] = (
+                        0.5 - 0.05 * s + 0.01 * seed + 0.02 * e
+                    )
                     accuracy[e, s, seed, PEAKS[name]] += 0.3
         planted.append(dataclasses.replace(result, accuracy=accuracy))
         return planted[-1]
@@ -415,6 +417,17 @@ def test_a_bad_scan_count_fails_before_the_model_runs(
     run_dir = RunDir.create(config, out_root=tmp_path)
     with pytest.raises(ValueError, match="n_scan_statements"):
         execute(config, run_dir, tiny_arch, _statements())
+
+
+def test_as_many_scan_statements_as_true_test_statements_are_accepted(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(n_scan_statements=12)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _statements())
+    assert (run_dir.path / "scan_11_honest.npz").is_file()
+    assert (run_dir.path / "scan_11_untruthful.npz").is_file()
+    assert not (run_dir.path / "scan_12_honest.npz").exists()
 
 
 def test_zero_scan_statements_write_no_scans(
