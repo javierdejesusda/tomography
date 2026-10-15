@@ -651,10 +651,11 @@ def run(config: Config, run_dir: RunDir) -> None:
         run_dir: The run to write into.
 
     Raises:
-        ValueError: If `config.labels_run` is not a finished run, or it was
-            made with another number of shots than `config.n_shots`.
+        ValueError: If `config.labels_run` is not a finished run, it labeled
+            another model than `config.model`, or it was made with another
+            number of shots than `config.n_shots`.
     """
-    items, summary = load_labeled(config.labels_run)
+    items, summary = load_labeled(config.labels_run, model=config.model)
     labeled_shots = summary["recipe"]["n_shots"]
     if labeled_shots != config.n_shots:
         raise ValueError(

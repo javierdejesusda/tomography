@@ -233,6 +233,24 @@ def _items() -> list[LabeledItem]:
     ]
 
 
+def _starved_items() -> list[LabeledItem]:
+    """`_items` where known and unknown PopQA share no relation."""
+    popqa = [
+        dataclasses.replace(
+            i,
+            example=dataclasses.replace(
+                i.example,
+                meta={
+                    **i.example.meta,
+                    "relation": RELATIONS[0 if i.label.label == "known" else 1],
+                },
+            ),
+        )
+        for i in _popqa()
+    ]
+    return [*popqa, *_items()[len(popqa) :]]
+
+
 def _behavior(items: Sequence[LabeledItem], dataset: str) -> list[LabeledItem]:
     return [
         i for i in items if i.group == dataset and i.label.basis == "behavior"
@@ -619,6 +637,15 @@ def test_resolve_lat_gives_the_check_pool_reason() -> None:
 
     assert pool is None
     assert reason == "fewer than 10000 train items on one side"
+
+
+def test_resolve_lat_gives_the_matched_pairs_reason() -> None:
+    pool, reason = resolve_lat(
+        _starved_items(), "obscure_real", known_contrasts=True, min_pairs=8
+    )
+
+    assert pool is None
+    assert reason == "fewer than 8 matched train pairs"
 
 
 def test_resolve_lat_only_needs_train_pairs() -> None:
@@ -1127,6 +1154,17 @@ def test_a_misspelled_contrast_skips_lat_without_raising(
     assert "lat" not in _predictors(_table(run_dir), "popqa")
 
 
+def test_a_lat_contrast_without_matched_pairs_is_skipped_not_fatal(
+    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+) -> None:
+    run_dir = _execute(tiny_gpt2, tmp_path, items=_starved_items())
+
+    summary = _summary(run_dir)
+    assert summary["lat_skipped"] == "fewer than 8 matched train pairs"
+    assert summary["layer_source"] == "probe_validation"
+    assert "lat" not in _predictors(_table(run_dir), "popqa")
+
+
 def test_the_curves_fit_one_reader_per_draw_on_the_test_items(
     tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
 ) -> None:
@@ -1602,6 +1640,22 @@ def test_run_refuses_labels_made_with_other_shots(
     run_dir = RunDir.create(config, out_root=tmp_path)
 
     with pytest.raises(ValueError, match=r"n_shots.*15.*2"):
+        run(config, run_dir)
+
+
+def test_run_refuses_labels_made_for_another_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    labels = _labels_run(tmp_path, _items())
+
+    def never(name: str) -> LoadedModel:
+        raise AssertionError("the model must not load first")
+
+    monkeypatch.setattr(p9c_reliability, "load_model", never)
+    config = _config(labels_run=str(labels.path), model="gpt2")
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match="labeled 'tiny', not 'gpt2'"):
         run(config, run_dir)
 
 
