@@ -19,10 +19,17 @@ from tomography.experiments.r4_emotions import execute
 from tomography.experiments.r4_emotions import plot
 from tomography.experiments.r4_emotions import run
 from tomography.experiments.sweep import SERIES
+from tomography.experiments.sweep import SweepResult
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading.metrics import cosine_matrix
 import tomography.templates as template_data
 from tomography.templates import PAPER_TEMPLATES
+
+READER = SERIES.index("reader")
+SUBSET = ("anger", "fear", "surprise")
+VAL_PEAKS = (1, 0, 1)
+TEST_PEAKS = (2, 1, 0)
 
 
 def _scenarios(per_split: int = 14) -> list[Example]:
@@ -35,7 +42,7 @@ def _scenarios(per_split: int = 14) -> list[Example]:
                         uid=f"emotion-{name}-{split}-{r}",
                         text=(
                             f"I feel {name} and {name} again, "
-                            f"scene {r} of kind {k}"
+                            f"scene {r} of kind {k} in {split}"
                         ),
                         label=k,
                         split=split,
@@ -148,6 +155,111 @@ def test_execute_writes_curves_matrix_embedding_and_summary(
             [test["lo"][0, at], test["hi"][0, at]]
         )
         assert summary["n_eval_pairs"][emotion] == {"val": 4, "test": 4}
+
+
+def _plant_sweeps(monkeypatch: pytest.MonkeyPatch) -> list[SweepResult]:
+    planted: list[SweepResult] = []
+    real = r4_emotions.reading_sweep
+
+    def spy(*args: Any, **kwargs: Any) -> SweepResult:
+        result = real(*args, **kwargs)
+        k = len(planted)
+        accuracy = np.zeros(result.accuracy.shape)
+        for name, peak in (("val", VAL_PEAKS[k]), ("test", TEST_PEAKS[k])):
+            e = result.eval_names.index(name)
+            for s in range(accuracy.shape[1]):
+                for seed in range(accuracy.shape[2]):
+                    accuracy[e, s, seed] = 0.5 - 0.05 * s + 0.01 * seed
+                    accuracy[e, s, seed, peak] += 0.3
+        first = result.readers[0]
+        readers = (
+            dataclasses.replace(first, signs=-first.signs),
+            *result.readers[1:],
+        )
+        planted.append(
+            dataclasses.replace(result, accuracy=accuracy, readers=readers)
+        )
+        return planted[-1]
+
+    monkeypatch.setattr(r4_emotions, "reading_sweep", spy)
+    return planted
+
+
+def test_each_layer_is_chosen_on_val_and_reported_on_test(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planted = _plant_sweeps(monkeypatch)
+    config = _config(emotions=SUBSET)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _scenarios())
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    for emotion, result, peak in zip(SUBSET, planted, VAL_PEAKS, strict=True):
+        curves = run_dir.read_arrays(f"curves_{emotion}")
+        np.testing.assert_allclose(curves["per_seed"], result.per_seed("test"))
+        val = result.per_seed("val")[READER].mean(axis=0)
+        test = result.per_seed("test")[READER].mean(axis=0)
+        entry = summary["emotions"][emotion]
+        assert entry["best_layer"] == result.layers[peak]
+        assert entry["val_accuracy"] == pytest.approx(val[peak])
+        assert entry["test_accuracy"] == pytest.approx(test[peak])
+        assert entry["ci"] == pytest.approx(
+            [curves["lo"][READER, peak], curves["hi"][READER, peak]]
+        )
+
+
+def test_the_matrix_compares_the_signed_seed_means_at_the_best_val_layer(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planted = _plant_sweeps(monkeypatch)
+    config = _config(emotions=SUBSET)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _scenarios())
+    layers = planted[0].layers
+    mean_val = np.mean(
+        [r.per_seed("val")[READER].mean(axis=0) for r in planted], axis=0
+    )
+    at = int(np.argmax(mean_val))
+    assert at != len(layers) - 1
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["matrix_layer"] == layers[at]
+    directions = np.stack(
+        [
+            np.mean([r.signs[at] * r.directions[at] for r in p.readers], axis=0)
+            for p in planted
+        ]
+    )
+    np.testing.assert_allclose(
+        run_dir.read_arrays("matrix")["values"],
+        cosine_matrix(directions),
+        atol=1e-6,
+    )
+
+
+def test_the_embedding_draws_test_scenarios_at_the_requested_layers(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[list[str], Any]] = []
+    real = r4_emotions.collect_activations
+
+    def spy(loaded: LoadedModel, texts: Any, **kwargs: Any) -> Any:
+        seen.append((list(texts), kwargs["layers"]))
+        return real(loaded, texts, **kwargs)
+
+    monkeypatch.setattr(r4_emotions, "collect_activations", spy)
+    config = _config(emotions=SUBSET, embed_layers=(2, 3))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    scenarios = _scenarios()
+    execute(config, run_dir, tiny_arch, scenarios)
+    [(texts, layers)] = seen
+    assert tuple(layers) == (2, 3)
+    assert run_dir.read_arrays("embedding")["layers"].tolist() == [2, 3]
+    assert len(texts) == config.embed_points
+    for text in texts:
+        [owner] = [e for e in scenarios if e.text in text]
+        assert owner.split == "test"
+        assert owner.meta["emotion"] in SUBSET
 
 
 def test_pairing_is_one_vs_rest_per_emotion_and_split_before_pairing(
