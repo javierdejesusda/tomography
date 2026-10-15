@@ -10,8 +10,9 @@ What is distinctive: six direction finders behind one `method` argument, so they
 every checkpoint pinned to a commit and every data file pinned to a commit or a SHA-256 digest; seeded runs
 that record their code state and library versions; and both architectures behind one model interface.
 
-Status: research code under active development. `main` ships the framework described below and the first
-experiment (R1, sentiment reading); it reports no results.
+Status: research code under active development. `main` ships the framework described below and the
+experiments listed under [Running experiments](#running-experiments): the reading experiments R1 to R7 and
+P9a, the labeling step of a study of known versus unknown questions. It reports no results.
 
 ## How it fits together
 
@@ -233,17 +234,79 @@ norm of each layer (not available for `projection`), the edit applies to `all` t
 `response` tokens, and `preserve_norm` rescales each edited vector to its prior norm. `generate`
 ([`control/generate.py`](src/tomography/control/generate.py)) takes the controller as `edits=`.
 
+Two further controllers in [`control/contrast.py`](src/tomography/control/contrast.py) need no fitted reader and
+take a positive and a negative text instead:
+
+- `PromptDifference` is an ActAdd-style controller. `PromptDifference.from_prompts` captures the residual
+  streams of the two texts and its edit adds `coeff` times their raw difference, position by position, at the
+  chosen layers. It is passed to `generate` as `edits=`.
+- `contrast_generate`, `contrast_logits` and `contrast_logprobs` run each prompt together with its positive and
+  negative text as three streams of one batch. At the chosen layers they add `alpha` times the difference
+  between the positive and the negative stream to all three streams, over the last `window` token positions
+  (for `contrast_logprobs`, the scored continuation). `contrast_generate` generates greedily,
+  `contrast_logits` returns the next-token logits of the main prompts and `contrast_logprobs` scores one
+  continuation per prompt.
+
 ## Running experiments
 
 An experiment is a module `src/tomography/experiments/<id>_<slug>.py` that defines `Config` (a subclass of
 `ExperimentConfig`), `run(config, run_dir)` and `plot(run_dir, out_dir)`. The id starts with a lowercase
-letter and continues with lowercase letters and digits. Experiment modules land as separate pull requests. On
-`main`: the framework in [`experiments/base.py`](src/tomography/experiments/base.py), the shared layer sweep
-in [`experiments/sweep.py`](src/tomography/experiments/sweep.py), steering trials and their side effects in
-[`experiments/steering.py`](src/tomography/experiments/steering.py) and
-[`experiments/effects.py`](src/tomography/experiments/effects.py), and the first experiment, `r1`
-([`experiments/r1_sentiment.py`](src/tomography/experiments/r1_sentiment.py)). `tomography run` with an
-unknown id lists the available ids.
+letter and continues with lowercase letters and digits. `tomography run` with an unknown id lists the
+available ids.
+
+The shared pieces are the framework in [`experiments/base.py`](src/tomography/experiments/base.py), the layer
+sweep of the reading experiments in [`experiments/sweep.py`](src/tomography/experiments/sweep.py), curves with
+given interval bands in [`experiments/intervals.py`](src/tomography/experiments/intervals.py), and steering
+trials and their side effects in [`experiments/steering.py`](src/tomography/experiments/steering.py) and
+[`experiments/effects.py`](src/tomography/experiments/effects.py).
+
+### Experiments on main
+
+Each id is the argument of `tomography run`. Every experiment defaults to `gpt2`; `--model` selects another
+checkpoint key.
+
+- `r1` ([`r1_sentiment.py`](src/tomography/experiments/r1_sentiment.py)): sentiment. Positive versus negative
+  SST-2 phrases (at least 3 words by default); the reader is fitted on the train split and scored on the val
+  split.
+- `r2` ([`r2_utility.py`](src/tomography/experiments/r2_utility.py)): utility (pleasantness) on ETHICS utility
+  pairs, plus the explained variance of the principal components of the training pair differences.
+- `r3` ([`r3_morality.py`](src/tomography/experiments/r3_morality.py)): morality. Acceptable versus
+  unacceptable ETHICS commonsense scenarios, short scenarios only by default (`short_only`), because some of
+  the long posts exceed the 1,024 positions of GPT-2.
+- `r4` ([`r4_emotions.py`](src/tomography/experiments/r4_emotions.py)): six emotions (happiness, sadness,
+  anger, fear, disgust, surprise), each read one-vs-rest on the emotion scenarios, plus the cosine similarity
+  of the six directions and a t-SNE map of test scenarios.
+- `r5` ([`r5_honesty.py`](src/tomography/experiments/r5_honesty.py)): honesty. Readers are fitted on the
+  response tokens of true statements shown under an honest and an untruthful persona, then scored with no refit
+  on held-out plain true and false statements (an exploratory transfer evaluation) and on the persona
+  renderings of held-out statements (a sanity check). It also writes token by layer scans.
+- `r6` ([`r6_truthfulqa.py`](src/tomography/experiments/r6_truthfulqa.py)): TruthfulQA MC1. A standard
+  log-probability baseline and a heuristic baseline (the model rates the truthfulness of a scenario) next to
+  readers trained on each of three sources (`sources`): TruthfulQA train questions, ARC-Challenge train items
+  and the true statements as persona pairs.
+- `r7` ([`r7_truth.py`](src/tomography/experiments/r7_truth.py)): truthfulness on fact statements, scored on
+  the fact val and test splits and, with no refit, on the out-of-distribution Geometry of Truth subsets
+  (`ood_subsets`).
+- `p9a` ([`p9a_labels.py`](src/tomography/experiments/p9a_labels.py)): the labeling step of the known versus
+  unknown study. It fits no reader. It builds a pool of closed-book questions (PopQA, SyntHal, KUQ, FalseQA,
+  TriviaQA and NQ-open questions, fictional counterparts of real items, and award winners and unknowable
+  details from Wikidata) and labels each `known`, `unknown` or `uncertain` from what the model does: a
+  few-shot prompt, one greedy answer and `n_samples` temperature samples. A guess control then demotes the
+  known labels that a constant answer would explain, the award questions give an estimate of the training
+  cutoff, and the summary records whether the model has at least `min_known` guess-adjusted known items to
+  enter the known versus unknown contrasts. It writes `items`, label tables, a `hand_check.csv` sample for
+  manual checking and `summary.json`.
+
+The reading experiments (`r1` to `r7`) share `ReadingConfig`
+([`experiments/sweep.py`](src/tomography/experiments/sweep.py)): `n_seeds` training sets (10; 15 for `r6`) of
+`n_pairs` pairs (64) each, a direction finder `method`, a `preprocess` mode, the token `position` read and
+the `layers` to sweep. Each fits one reader per training set and layer and writes per-layer accuracy curves for
+three series: `reader` (the fitted direction), `random` (a random unit direction with the same orientation
+rule) and `shuffled` (the reader scored against labels shuffled within each group, a permutation null).
+
+The default `method` is `logistic`, a supervised direction, for `r1` to `r5` and `r7`. `r6` keeps the shared
+default, `pca_diff`, the paper's PCA on pair differences. `pca_diff` stays selectable in every reading
+experiment, for example with `--set method=pca_diff`. The `p9a` config has no `method`.
 
 The `tomography` command (`python -m tomography` is equivalent) has two subcommands:
 
@@ -259,6 +322,10 @@ uv run tomography plot <id|all> [--run DIR] [--out DIR]
   delete it to rerun.
 - `plot` regenerates the figures of saved runs into the `figures/` folder of each run. `all` plots every
   finished run under `--out`, and `--run` plots one run directory, finished or not.
+
+For example, `uv run tomography run r1` runs the sentiment experiment on GPT-2 small,
+`uv run tomography run r1 --set method=pca_diff` reruns it with the paper's direction finder, and
+`uv run tomography run p9a --model qwen3-0.6b-base --set n_samples=3` labels the pool for another checkpoint.
 
 Each run gets its own directory, named by a hash of its config, so equal configs share a directory:
 
@@ -309,7 +376,10 @@ src/tomography/
   datasets/        pinned sources, one loader per dataset, example records, build_stimulus_set
   judges.py        pinned sentiment and emotion classifiers, perplexity and log-probability scoring
   knowledge.py     known, unknown and uncertain labels for closed-book questions
-  experiments/     base.py (configs, run dirs, seeding), sweep.py, steering.py, effects.py, r1_sentiment.py
+  analysis.py      layer-wise PCA explained variance and t-SNE maps
+  p9/              pool.py (question pool), guess.py (guess control), probe.py (cutoff probe, label tables)
+  experiments/     base.py (configs, run dirs, seeding), sweep.py, intervals.py, steering.py, effects.py,
+                   and one module per experiment: r1 to r7 (reading) and p9a (labeling)
   viz/             figure style, layer curves, token scans, matrices and embeddings
   cli.py           the tomography command (also python -m tomography)
 tests/             unit tests, roughly one file per module
