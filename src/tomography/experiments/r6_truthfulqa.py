@@ -297,7 +297,7 @@ def _sweep_source(
             for seed in seeds
         ]
         position = "response"
-        eval_position = config.eval_position or config.position
+        eval_position = config.eval_position or "last"
     else:
         items = cast(Sequence[ChoiceExample], train_items)
         train_sets = [

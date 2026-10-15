@@ -8,6 +8,7 @@ from typing import Any
 from typing import cast
 
 import numpy as np
+from numpy.typing import NDArray
 import pytest
 import torch
 
@@ -390,7 +391,21 @@ def test_execute_writes_the_table_curves_and_summary(
         assert set(entry["best-layer"]) == {"mc1", "lo", "hi", "layer"}
 
 
-def _record_sweeps(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+def _planted_sweep(
+    val: NDArray[np.float64],
+    test: NDArray[np.float64],
+    layers: Sequence[int],
+) -> SweepResult:
+    accuracy = np.zeros((2, len(SERIES), *test.shape))
+    for e, cube in enumerate((val, test)):
+        for s in range(len(SERIES)):
+            accuracy[e, s] = cube - 0.1 * s
+    return SweepResult(tuple(layers), ("val", "test"), accuracy, ())
+
+
+def _record_sweeps(
+    monkeypatch: pytest.MonkeyPatch, result: SweepResult | None = None
+) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     real = r6_truthfulqa.reading_sweep
 
@@ -407,6 +422,8 @@ def _record_sweeps(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
                 **kwargs,
             }
         )
+        if result is not None:
+            return result
         return real(loaded, train_sets, eval_sets, **kwargs)
 
     monkeypatch.setattr(r6_truthfulqa, "reading_sweep", spy)
@@ -443,6 +460,31 @@ def test_execute_scores_the_baselines_on_the_questions_lat_is_tested_on(
         ]
     )
     assert sidecar["chance"] == pytest.approx(expected_chance)
+
+
+@pytest.mark.parametrize(
+    ("eval_position", "expected"),
+    [(None, "last"), ("mean", "mean")],
+    ids=["default-last", "explicit"],
+)
+def test_the_honesty_source_evaluates_at_the_last_token_unless_told_otherwise(
+    tiny_gpt2: LoadedModel,
+    monkeypatch: pytest.MonkeyPatch,
+    eval_position: str | None,
+    expected: str,
+) -> None:
+    layers = (1, 2)
+    calls = _record_sweeps(
+        monkeypatch,
+        _planted_sweep(np.zeros((2, 2)), np.zeros((2, 2)), layers),
+    )
+    config = _config(position="response", eval_position=eval_position)
+    facts = [f for f in _facts() if f.label == 1 and f.split == "train"]
+    r6_truthfulqa._sweep_source(config, "honesty", tiny_gpt2, {}, facts)
+    assert (calls[0]["position"], calls[0]["eval_position"]) == (
+        "response",
+        expected,
+    )
 
 
 def test_execute_best_layer_row_matches_the_saved_test_curves(
