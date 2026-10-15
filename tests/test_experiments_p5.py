@@ -4,6 +4,7 @@ import dataclasses
 import gc
 from pathlib import Path
 from typing import Any
+from typing import get_args
 import weakref
 
 import numpy as np
@@ -41,6 +42,7 @@ from tomography.experiments.sweep import SweepResult
 from tomography.experiments.sweep import shuffle_within_groups
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading.directions import Method
 from tomography.reading.reader import RepReader
 from tomography.templates import PAPER_TEMPLATES
 from tomography.templates import ChatFormat
@@ -55,6 +57,10 @@ WORDS = {
     "unrelated_1": ("an old", "a young"),
 }
 
+
+LABEL_FREE_METHODS = tuple(
+    m for m in get_args(Method) if m not in LABEL_METHODS
+)
 
 PLAIN_CHAT = ChatFormat("plain")
 PERSONA_CONDITIONS = (*WORDS, "random_label")
@@ -951,7 +957,11 @@ def test_the_summary_describes_the_run(ran: RunDir) -> None:
     assert summary["n_seeds"] == 3
 
 
-@pytest.mark.parametrize("method", ["pca_diff", "pca_raw", "kmeans", "random"])
+def test_label_methods_are_methods() -> None:
+    assert set(LABEL_METHODS) <= set(get_args(Method))
+
+
+@pytest.mark.parametrize("method", LABEL_FREE_METHODS)
 @pytest.mark.parametrize(
     "conditions",
     [("paper", "synonym_0", "random_label"), ("paper", "random_label")],
