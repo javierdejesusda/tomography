@@ -140,7 +140,10 @@ class Config(ExperimentConfig):
             validation items of the first usable dataset.
         n_seeds: Draws of the pairs of the per-layer `lat` curve.
         n_pairs: Pairs per draw of that curve.
-        min_pairs: Fewest train items on each side of the `lat` contrast.
+        min_pairs: Fewest train items on each side of the `lat` contrast, and
+            fewest matched train pairs (pairs that never cross two strata);
+            each split half of its train items must also hold 2 matched
+            pairs, see `tomography.p9.reading.check_pool`.
         n_boot: Bootstrap resamples of every interval.
         min_probe: Fewest train items of a dataset that fit its probe.
         bos: BOS policy of the activations; None uses the model's default.
@@ -193,12 +196,16 @@ def resolve_lat(
         items: The labeled questions.
         lat_type: The contrast the user asked for.
         known_contrasts: The P9a gate.
-        min_pairs: Fewest train items on each side.
+        min_pairs: Fewest train items on each side, and fewest matched train
+            pairs (pairs that never cross two strata); each split half of the
+            train items must also hold 2 matched pairs.
 
     Returns:
         The contrast and None, or None and the reason: the `check_pool`
-        reason, the gate for a contrast that needs a known side, or the
-        missing name.
+        reason (fewer than `min_pairs` train items on one side, fewer than
+        `min_pairs` matched train pairs, or fewer than 2 matched train pairs
+        in one split half), the gate for a contrast that needs a known side,
+        or the missing name.
     """
     available = type_pools(items, knowledge=known_contrasts)
     if lat_type in available:
