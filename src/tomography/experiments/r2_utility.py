@@ -28,6 +28,7 @@ from tomography.model import load_model
 from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
 from tomography.templates import PAPER_TEMPLATES
+from tomography.templates import ChatFormat
 
 _COMPONENTS = ("PC1", "PC2", "PC3")
 
@@ -60,14 +61,14 @@ class Config(ReadingConfig):
 
 def _stimuli(
     examples: Sequence[Example],
-    loaded: LoadedModel,
+    chat_format: ChatFormat,
     n_pairs: int | None,
     seed: int,
 ) -> StimulusSet:
     return build_stimulus_set(
         examples,
         PAPER_TEMPLATES["utility"],
-        chat_format_for(loaded),
+        chat_format,
         pairing="by_group",
         group_ids=[str(e.meta["pair"]) for e in examples],
         n_pairs=n_pairs,
@@ -107,13 +108,15 @@ def execute(
             f"d_model)={limit}, got {config.n_components}"
         )
 
+    chat_format = chat_format_for(loaded)
+
     def part(split: Split) -> list[Example]:
         return [e for e in examples if e.split == split]
 
     train_sets = [
         _stimuli(
             part("train"),
-            loaded,
+            chat_format,
             config.n_pairs,
             derive_seed(config.seed, "train", i),
         )
@@ -122,7 +125,7 @@ def execute(
     eval_sets = {
         name: _stimuli(
             part(name),
-            loaded,
+            chat_format,
             config.n_eval_pairs,
             derive_seed(config.seed, "eval", name),
         )
