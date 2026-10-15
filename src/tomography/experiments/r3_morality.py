@@ -20,22 +20,39 @@ from tomography.experiments.sweep import reading_sweep
 from tomography.experiments.sweep import write_curves
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
 from tomography.templates import PAPER_TEMPLATES
 
 
 @dataclass(frozen=True, kw_only=True)
 class Config(ReadingConfig):
-    """R3 settings: GPT-2 morality on ETHICS with the shared defaults.
+    """R3 settings: GPT-2 morality on ETHICS commonsense scenarios.
+
+    The shared defaults apply except for `method` and `short_only`.
+    `short_only` exists because the long ETHICS posts reach 2,857 GPT-2
+    tokens (median 415, 236 over 900) against the 1,024 positions of GPT-2,
+    while the short scenarios have a median of 13 and a maximum of 61 tokens.
+    `method` is `logistic` instead of the paper's `pca_diff` because on short
+    scenarios the principal component of the pair differences followed content
+    and not morality (test accuracy 0.536 with 32 pairs and 0.500 with 128
+    pairs, chance, against 0.659 and 0.732 for `logistic` with 3 seeds).
 
     Attributes:
         match_length: Pair scenarios only inside the same length class
             (`meta["is_short"]`), so length cannot separate the pair members.
+            It only has an effect when `short_only` is off, because with only
+            short scenarios there is a single length class.
+        short_only: Keep only the short scenarios (`meta["is_short"] == 1`)
+            before the split into train, val and test and before pairing.
+            Examples without `meta["is_short"]` raise `KeyError` when it is on.
     """
 
     experiment: str = "r3"
     model: str = "gpt2"
     match_length: bool = True
+    short_only: bool = True
+    method: Method = "logistic"
 
 
 def _stimuli(
@@ -70,16 +87,24 @@ def execute(
     Writes `curves` (the `reader`, `random` and `shuffled` series on the test
     split), `curves_val` (the same on the val split), `readers.npz` (the
     fitted directions and signs, one per seed) and `summary.json`. The layer
-    is chosen on val, never on test.
+    is chosen on val, never on test. With `short_only` on only the short
+    scenarios are used; otherwise, with `match_length` on, pairs never cross a
+    length class.
 
     Args:
         config: The experiment settings.
         run_dir: The run to write into.
         loaded: The wrapped model.
         examples: ETHICS commonsense scenarios with `train`, `val` and `test`
-            splits (label 1 = acceptable). With `match_length` on they need
-            `meta["is_short"]`, and pairs never cross a length class.
+            splits (label 1 = acceptable). With `short_only` or
+            `match_length` on they need `meta["is_short"]`.
+
+    Raises:
+        KeyError: An example has no `meta["is_short"]` and `short_only` is
+            on, or `short_only` is off and `match_length` is on.
     """
+    if config.short_only:
+        examples = [e for e in examples if e.meta["is_short"] == 1]
     by_split = {
         split: [e for e in examples if e.split == split]
         for split in ("train", "val", "test")

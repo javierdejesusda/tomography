@@ -1,5 +1,7 @@
 """Tests for the R3 morality reading experiment."""
 
+from collections.abc import Mapping
+from collections.abc import Sequence
 import dataclasses
 from pathlib import Path
 from types import SimpleNamespace
@@ -47,7 +49,13 @@ def _examples(per_cell: int = 10) -> list[Example]:
 
 
 def _config(**overrides: Any) -> Config:
-    base = Config(model="tiny", n_seeds=3, n_pairs=8, n_eval_pairs=12)
+    base = Config(
+        model="tiny",
+        n_seeds=3,
+        n_pairs=8,
+        n_eval_pairs=12,
+        short_only=False,
+    )
     return dataclasses.replace(base, **overrides)
 
 
@@ -66,16 +74,65 @@ def _planted_sweep(
     return SweepResult(layers, tuple(peaks), accuracy, (reader, reader))
 
 
+@dataclasses.dataclass
+class _Call:
+    loaded: LoadedModel
+    train_sets: list[StimulusSet]
+    eval_sets: dict[str, StimulusSet]
+    kwargs: dict[str, Any]
+
+
+class _SweepSpy:
+    """Replaces `reading_sweep`: records each call, returns a fixed result."""
+
+    def __init__(self, result: SweepResult) -> None:
+        self.result = result
+        self.calls: list[_Call] = []
+
+    def __call__(
+        self,
+        loaded: LoadedModel,
+        train_sets: Sequence[StimulusSet],
+        eval_sets: Mapping[str, StimulusSet],
+        **kwargs: Any,
+    ) -> SweepResult:
+        self.calls.append(
+            _Call(loaded, list(train_sets), dict(eval_sets), kwargs)
+        )
+        return self.result
+
+
+def _execute_with_spy(
+    config: Config,
+    loaded: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _SweepSpy:
+    peaks = {"val": (0, 0.9), "test": (2, 0.8)}
+    spy = _SweepSpy(_planted_sweep(loaded, peaks))
+    monkeypatch.setattr(r3_morality, "reading_sweep", spy)
+    execute(
+        config,
+        RunDir.create(config, out_root=tmp_path),
+        loaded,
+        _examples(),
+    )
+    return spy
+
+
 def test_config_defaults_and_round_trip() -> None:
     config = Config()
     assert config.experiment == "r3"
     assert config.model == "gpt2"
     assert config.match_length is True
+    assert config.short_only is True
+    assert config.method == "logistic"
     assert config.n_seeds == 10
     assert config.n_pairs == 64
     assert config.n_eval_pairs is None
     assert Config.from_dict(config.to_dict()) == config
     assert Config.from_dict({"match_length": False}).match_length is False
+    assert Config.from_dict({"short_only": False}).short_only is False
 
 
 def test_the_cli_discovers_the_experiment() -> None:
@@ -209,6 +266,99 @@ def test_match_length_toggle_matters_when_length_tracks_the_label(
     assert (run_dir.path / "summary.json").is_file()
 
 
+def test_short_only_keeps_only_short_scenarios(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built: list[StimulusSet] = []
+
+    def recording(*args: Any, **kwargs: Any) -> StimulusSet:
+        stimuli = build_stimulus_set(*args, **kwargs)
+        built.append(stimuli)
+        return stimuli
+
+    monkeypatch.setattr(r3_morality, "build_stimulus_set", recording)
+    examples = _examples()
+    by_uid = {e.uid: e for e in examples}
+    shorts: dict[bool, set[Any]] = {}
+    counts: dict[bool, Any] = {}
+    for short_only in (True, False):
+        built.clear()
+        config = _config(short_only=short_only, n_eval_pairs=None)
+        run_dir = RunDir.create(config, out_root=tmp_path / str(short_only))
+        execute(config, run_dir, tiny_arch, examples)
+        summary = run_dir.read_json("summary")
+        assert isinstance(summary, dict)
+        counts[short_only] = summary["n_eval_pairs"]
+        shorts[short_only] = {
+            by_uid[u].meta["is_short"] for s in built for u in s.uids
+        }
+    assert counts[True] == {"val": 10, "test": 10}
+    assert counts[False] == {"val": 20, "test": 20}
+    assert shorts[True] == {1}
+    assert shorts[False] == {0, 1}
+
+
+def test_short_only_limits_the_training_pairs(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    capped = _config(short_only=True, n_pairs=12)
+    with pytest.raises(ValueError, match="n_pairs"):
+        execute(
+            capped,
+            RunDir.create(capped, out_root=tmp_path / "capped"),
+            tiny_arch,
+            _examples(),
+        )
+    open_ = _config(short_only=False, n_pairs=12)
+    run_dir = RunDir.create(open_, out_root=tmp_path / "open")
+    execute(open_, run_dir, tiny_arch, _examples())
+    assert (run_dir.path / "summary.json").is_file()
+
+
+def test_execute_forwards_every_sweep_setting(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(
+        method="mean_diff",
+        preprocess="unit",
+        position="concept",
+        eval_position="last",
+        layers=(1, 2),
+        seed=5,
+        bos="none",
+        batch_size=4,
+    )
+    spy = _execute_with_spy(config, tiny_arch, tmp_path, monkeypatch)
+    (call,) = spy.calls
+    assert call.loaded is tiny_arch
+    assert list(call.eval_sets) == ["val", "test"]
+    assert call.kwargs == {
+        "method": "mean_diff",
+        "preprocess": "unit",
+        "position": "concept",
+        "eval_position": "last",
+        "layers": (1, 2),
+        "seed": 5,
+        "bos": "none",
+        "batch_size": 4,
+    }
+
+
+def test_execute_trains_every_seed_on_its_own_train_stimuli(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(n_seeds=4, n_pairs=8)
+    spy = _execute_with_spy(config, tiny_arch, tmp_path, monkeypatch)
+    train_sets = spy.calls[0].train_sets
+    assert len(train_sets) == 4
+    assert len({stimuli.texts for stimuli in train_sets}) == 4
+    for stimuli in train_sets:
+        assert stimuli.groups.shape[0] == 8
+        assert all(uid.startswith("train-") for uid in stimuli.uids)
+
+
 def test_execute_is_deterministic(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
@@ -263,7 +413,7 @@ def test_run_loads_the_model_and_the_data(
 
 @pytest.mark.slow
 def test_r3_on_gpt2_reads_morality_above_the_floor(tmp_path: Path) -> None:
-    config = Config(n_seeds=3, n_pairs=32, n_eval_pairs=128)
+    config = Config(n_seeds=3, n_pairs=128, n_eval_pairs=128)
     run_dir = RunDir.create(config, out_root=tmp_path)
     execute(
         config,

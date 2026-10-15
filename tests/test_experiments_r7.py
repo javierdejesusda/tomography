@@ -1,5 +1,7 @@
 """Tests for the R7 truthfulness reading experiment."""
 
+from collections.abc import Mapping
+from collections.abc import Sequence
 import dataclasses
 from pathlib import Path
 from types import SimpleNamespace
@@ -94,11 +96,63 @@ def _planted_sweep(
     return SweepResult(layers, tuple(peaks), accuracy, (reader, reader))
 
 
+@dataclasses.dataclass
+class _Call:
+    loaded: LoadedModel
+    train_sets: list[StimulusSet]
+    eval_sets: dict[str, StimulusSet]
+    kwargs: dict[str, Any]
+
+
+class _SweepSpy:
+    """Replaces `reading_sweep`: records each call, returns a fixed result."""
+
+    def __init__(self, result: SweepResult) -> None:
+        self.result = result
+        self.calls: list[_Call] = []
+
+    def __call__(
+        self,
+        loaded: LoadedModel,
+        train_sets: Sequence[StimulusSet],
+        eval_sets: Mapping[str, StimulusSet],
+        **kwargs: Any,
+    ) -> SweepResult:
+        self.calls.append(
+            _Call(loaded, list(train_sets), dict(eval_sets), kwargs)
+        )
+        return self.result
+
+
+def _execute_with_spy(
+    config: Config,
+    loaded: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _SweepSpy:
+    peaks = {
+        "val": (0, 0.9),
+        "test": (2, 0.8),
+        **{name: (1, 0.7) for name in config.ood_subsets},
+    }
+    spy = _SweepSpy(_planted_sweep(loaded, peaks))
+    monkeypatch.setattr(r7_truth, "reading_sweep", spy)
+    execute(
+        config,
+        RunDir.create(config, out_root=tmp_path),
+        loaded,
+        _facts(),
+        _truth_sets(),
+    )
+    return spy
+
+
 def test_config_defaults_and_round_trip() -> None:
     config = Config()
     assert config.experiment == "r7"
     assert config.model == "gpt2"
     assert config.concept == "truthfulness"
+    assert config.method == "logistic"
     assert config.ood_subsets == SUBSETS
     assert len(config.ood_subsets) == 9
     assert config.n_eval_pairs is None
@@ -158,6 +212,7 @@ def test_execute_writes_curves_readers_and_summary(
             "best_accuracy",
             "ci",
             "accuracy_at_val_layer",
+            "ci_at_val_layer",
             "n_eval_pairs",
         }
         assert entry["best_layer"] in layers.tolist()
@@ -169,6 +224,10 @@ def test_execute_writes_curves_readers_and_summary(
         assert lo == pytest.approx(curves[name]["lo"][0, at])
         assert hi == pytest.approx(curves[name]["hi"][0, at])
         assert lo <= entry["best_accuracy"] <= hi
+        lo_val, hi_val = entry["ci_at_val_layer"]
+        assert lo_val == pytest.approx(curves[name]["lo"][0, at_val])
+        assert hi_val == pytest.approx(curves[name]["hi"][0, at_val])
+        assert lo_val <= entry["accuracy_at_val_layer"] <= hi_val
         assert entry["n_eval_pairs"] == 12
 
 
@@ -206,6 +265,33 @@ def test_each_set_reports_its_best_layer_and_the_val_layer_accuracy(
         assert entry["best_layer"] == layer
         assert entry["best_accuracy"] == pytest.approx(best)
         assert entry["accuracy_at_val_layer"] == pytest.approx(at_val)
+
+
+def test_the_val_layer_accuracy_carries_the_interval_at_that_layer(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planted = _planted_sweep(
+        tiny_arch, {"val": (0, 0.9), "test": (2, 0.8), "cities": (1, 0.7)}
+    )
+    planted.accuracy[:, 0, 0, :] -= 0.1
+    planted.accuracy[:, 0, 1, :] += 0.1
+    monkeypatch.setattr(r7_truth, "reading_sweep", lambda *a, **k: planted)
+    config = _config(n_seeds=2, ood_subsets=("cities",))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _facts(), _truth_sets())
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["val_layer"] == 1
+    entry = summary["sets"]["test"]
+    assert entry["best_layer"] == 3
+    curves = run_dir.read_arrays("curves")
+    lo, hi = entry["ci_at_val_layer"]
+    assert lo == pytest.approx(curves["lo"][0, 0])
+    assert hi == pytest.approx(curves["hi"][0, 0])
+    assert lo < entry["accuracy_at_val_layer"] < hi
+    assert entry["ci_at_val_layer"] != entry["ci"]
 
 
 def test_the_readers_are_fitted_once_and_scored_on_every_set(
@@ -309,6 +395,48 @@ def test_a_subset_without_examples_is_an_error(
         execute(config, run_dir, tiny_arch, _facts(), _truth_sets())
 
 
+def test_execute_forwards_every_sweep_setting(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(
+        method="mean_diff",
+        preprocess="unit",
+        position="concept",
+        eval_position="last",
+        layers=(1, 2),
+        seed=5,
+        bos="none",
+        batch_size=4,
+    )
+    spy = _execute_with_spy(config, tiny_arch, tmp_path, monkeypatch)
+    (call,) = spy.calls
+    assert call.loaded is tiny_arch
+    assert list(call.eval_sets) == ["val", "test", *config.ood_subsets]
+    assert call.kwargs == {
+        "method": "mean_diff",
+        "preprocess": "unit",
+        "position": "concept",
+        "eval_position": "last",
+        "layers": (1, 2),
+        "seed": 5,
+        "bos": "none",
+        "batch_size": 4,
+    }
+
+
+def test_execute_trains_every_seed_on_its_own_train_stimuli(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(n_seeds=4, n_pairs=8)
+    spy = _execute_with_spy(config, tiny_arch, tmp_path, monkeypatch)
+    train_sets = spy.calls[0].train_sets
+    assert len(train_sets) == 4
+    assert len({stimuli.texts for stimuli in train_sets}) == 4
+    for stimuli in train_sets:
+        assert stimuli.groups.shape[0] == 8
+        assert all(uid.startswith("facts-train-") for uid in stimuli.uids)
+
+
 def test_execute_is_deterministic(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
@@ -370,8 +498,7 @@ def test_run_loads_the_model_and_the_data(
 def test_r7_on_gpt2_reads_truthfulness_above_the_floor(tmp_path: Path) -> None:
     config = Config(
         n_seeds=3,
-        n_pairs=32,
-        n_eval_pairs=128,
+        n_pairs=128,
         ood_subsets=("cities", "neg_cities", "sp_en_trans"),
     )
     run_dir = RunDir.create(config, out_root=tmp_path)
@@ -391,4 +518,4 @@ def test_r7_on_gpt2_reads_truthfulness_above_the_floor(tmp_path: Path) -> None:
             round(entry["best_accuracy"], 3),
             round(entry["accuracy_at_val_layer"], 3),
         )
-    assert summary["sets"]["test"]["best_accuracy"] > 0.55
+    assert summary["sets"]["test"]["accuracy_at_val_layer"] > 0.55
