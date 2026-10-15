@@ -16,6 +16,7 @@ from numpy.typing import NDArray
 import torch
 
 from tomography.control.generate import EditFactory
+from tomography.experiments.steering import scoring_bos
 from tomography.hooks import edit_residuals
 from tomography.judges import sequence_logprob
 from tomography.knowledge import DEFAULT_SHOTS
@@ -54,18 +55,6 @@ class TokenStats:
     max_prob: NDArray[np.float64]
     entropy: NDArray[np.float64]
     target_logprob: NDArray[np.float64] | None
-
-
-def scoring_bos(loaded: LoadedModel) -> int | None:
-    """Returns the BOS id that scoring prepends, if any.
-
-    Args:
-        loaded: The wrapped model.
-
-    Returns:
-        `loaded.bos_id` iff the model default is to prepend a BOS.
-    """
-    return loaded.bos_id if loaded.default_bos == "prepend" else None
 
 
 def next_token_stats(

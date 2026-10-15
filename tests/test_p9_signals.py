@@ -12,6 +12,7 @@ import torch
 
 from tomography.datasets.records import MetaValue
 from tomography.datasets.records import QAExample
+from tomography.experiments.steering import scoring_bos
 from tomography.hooks import ResidualEdit
 from tomography.judges import sequence_logprob
 from tomography.knowledge import ItemLabel
@@ -29,7 +30,6 @@ from tomography.p9.signals import item_signals
 from tomography.p9.signals import name_logprobs
 from tomography.p9.signals import next_token_stats
 from tomography.p9.signals import p_true
-from tomography.p9.signals import scoring_bos
 
 PROMPTS = [
     "Q: who wrote it?\nA:",
@@ -112,12 +112,57 @@ def _direct_stats(
     )
 
 
-def test_scoring_bos_follows_the_model_default(tiny_arch: LoadedModel) -> None:
-    prepending = dataclasses.replace(tiny_arch, default_bos="prepend", bos_id=5)
-    plain = dataclasses.replace(tiny_arch, default_bos="none")
+def _score_with(
+    loaded: LoadedModel, mode: str, bos_id: int | None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    model = dataclasses.replace(loaded, default_bos=mode, bos_id=5)
+    answers = ["the cat", "a"]
+    total, _ = answer_logprobs(model, PROMPTS[:2], answers)
+    direct = sequence_logprob(
+        model.model,
+        model.tokenizer,
+        PROMPTS[:2],
+        [" " + a for a in answers],
+        batch_size=2,
+        bos_id=bos_id,
+    )
+    questions = ["who wrote it?", "where?"]
+    graded = p_true(model, questions, answers)
+    prompts = [
+        f"Question: {q}\nProposed answer: {a}\n"
+        "Is the proposed answer correct? Answer True or False.\nAnswer:"
+        for q, a in zip(questions, answers, strict=True)
+    ]
+    yes = sequence_logprob(
+        model.model,
+        model.tokenizer,
+        prompts,
+        [" True"] * 2,
+        batch_size=2,
+        bos_id=bos_id,
+    )
+    no = sequence_logprob(
+        model.model,
+        model.tokenizer,
+        prompts,
+        [" False"] * 2,
+        batch_size=2,
+        bos_id=bos_id,
+    )
+    expected = 1.0 / (1.0 + np.exp(-(yes.astype(np.float64) - no)))
+    return total, direct, graded, expected
 
-    assert scoring_bos(prepending) == 5
-    assert scoring_bos(plain) is None
+
+def test_scores_follow_the_model_default_bos(tiny_arch: LoadedModel) -> None:
+    with_bos = _score_with(tiny_arch, "prepend", 5)
+    without = _score_with(tiny_arch, "none", None)
+
+    np.testing.assert_allclose(with_bos[0], with_bos[1], atol=1e-4)
+    np.testing.assert_allclose(with_bos[2], with_bos[3], atol=1e-6)
+    np.testing.assert_allclose(without[0], without[1], atol=1e-4)
+    np.testing.assert_allclose(without[2], without[3], atol=1e-6)
+    assert not np.allclose(with_bos[0], without[0], atol=1e-3)
+    assert not np.allclose(with_bos[2], without[2], atol=1e-5)
 
 
 def test_stats_match_a_direct_forward(tiny_arch: LoadedModel) -> None:
