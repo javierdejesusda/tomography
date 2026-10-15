@@ -42,7 +42,9 @@ from tomography.p9.risk import aurc
 from tomography.p9.risk import auroc_ci
 from tomography.p9.risk import auroc_diff_ci
 from tomography.p9.risk import group_rate
+from tomography.p9.risk import grouped_auroc_ci
 from tomography.p9.risk import orient_on_train
+from tomography.p9.risk import per_group_auroc
 from tomography.p9.risk import risk_band
 from tomography.p9.risk import stack_scores
 from tomography.p9.signals import item_signals
@@ -110,7 +112,12 @@ TABLE_COLUMNS = [
     "lo",
     "hi",
     "aurc",
+    "auroc_within",
+    "lo_within",
+    "hi_within",
+    "n_pairs_within",
 ]
+RELATION_COLUMNS = ["predictor", "relation", "n_correct", "n_error", "auroc"]
 INCREMENTAL_COLUMNS = [
     "dataset",
     "features",
@@ -146,6 +153,8 @@ class Config(ExperimentConfig):
             pairs, see `tomography.p9.reading.check_pool`.
         n_boot: Bootstrap resamples of every interval.
         min_probe: Fewest train items of a dataset that fit its probe.
+        min_relation_class: Fewest correct and fewest wrong test items a
+            relation needs for its own AUROC to be reported.
         bos: BOS policy of the activations; None uses the model's default.
             The signals keep the default of the labeling run.
         batch_size: Prompts per forward pass.
@@ -166,6 +175,7 @@ class Config(ExperimentConfig):
     min_pairs: int = 16
     n_boot: int = 1000
     min_probe: int = 50
+    min_relation_class: int = 5
     bos: BosMode | None = None
     batch_size: int = 8
 
@@ -398,6 +408,45 @@ def _incremental_rows(
     return incremental
 
 
+def _test_relations(dataset: _Dataset) -> NDArray[np.str_] | None:
+    """The relation of every test item, or None unless all of them have one."""
+    values = [
+        i.example.meta.get("relation")
+        for i, is_test in zip(dataset.items, dataset.masks["test"], strict=True)
+        if is_test
+    ]
+    if not all(isinstance(v, str) for v in values):
+        return None
+    return np.array(values, dtype=np.str_)
+
+
+def _within_pairs(
+    correct: NDArray[np.int64], relation: NDArray[np.str_]
+) -> int:
+    return sum(
+        int((correct[relation == r] == 1).sum())
+        * int((correct[relation == r] == 0).sum())
+        for r in np.unique(relation)
+    )
+
+
+def _within_columns(
+    config: Config,
+    scores: NDArray[np.float64],
+    correct: NDArray[np.int64],
+    relation: NDArray[np.str_] | None,
+    n_pairs: int,
+) -> list[object]:
+    if relation is None:
+        return [None] * 4
+    if n_pairs == 0:
+        return [None, None, None, 0]
+    point, lo, hi = grouped_auroc_ci(
+        scores, correct, relation, n_boot=config.n_boot, seed=config.seed
+    )
+    return [point, lo, hi, n_pairs]
+
+
 def _write_dataset(
     config: Config,
     run_dir: RunDir,
@@ -408,7 +457,10 @@ def _write_dataset(
     test = dataset.masks["test"]
     correct = dataset.correct
     names = list(signals)
+    relation = _test_relations(dataset)
+    n_pairs = 0 if relation is None else _within_pairs(correct[test], relation)
     table: list[list[object]] = []
+    relation_rows: list[list[object]] = []
     bands: dict[str, tuple[Any, Any, Any]] = {}
     for name in names:
         scores = signals[name][test]
@@ -426,8 +478,21 @@ def _write_dataset(
                 lo,
                 hi,
                 aurc(scores, correct[test], seed=config.seed),
+                *_within_columns(
+                    config, scores, correct[test], relation, n_pairs
+                ),
             ]
         )
+        if relation is not None:
+            relation_rows += [
+                [name, row.group, row.n_pos, row.n_neg, row.auroc]
+                for row in per_group_auroc(
+                    scores,
+                    correct[test],
+                    relation,
+                    min_class=config.min_relation_class,
+                )
+            ]
         bands[name] = risk_band(
             scores,
             correct[test],
@@ -448,10 +513,15 @@ def _write_dataset(
             xlabel="Coverage (%)",
             ylabel="Risk (error rate among answered)",
         )
+    arrays: dict[str, NDArray[Any]] = {n: signals[n][test] for n in names}
+    if relation is not None:
+        arrays["relation"] = relation
+        run_dir.write_json(
+            f"relations_{dataset.name}",
+            {"columns": RELATION_COLUMNS, "rows": relation_rows},
+        )
     run_dir.write_arrays(
-        f"signals_{dataset.name}",
-        **{n: signals[n][test] for n in names},
-        correct=correct[test],
+        f"signals_{dataset.name}", **arrays, correct=correct[test]
     )
     return table
 
@@ -521,16 +591,22 @@ def execute(
     A dataset whose train, validation or test split does not hold both
     outcomes is skipped. The signals are scored at the prompt the labels were
     made with, and a signal without a value is filled with the minimum finite
-    train value (a missing answer is the least confident case). Writes
-    `table` (the test AUROC, interval and AURC of every predictor),
-    `table_incremental` (what `lat` and the probe add to the output
+    train value (a missing answer is the least confident case). A dataset is
+    relational when every test item has a string `relation` (PopQA). Writes
+    `table` (the test AUROC, interval and AURC of every predictor; for a
+    relational dataset also the AUROC within relation, its interval and its
+    number of pairs, and null for the others), `relations_<dataset>` (a
+    relational dataset only: the AUROC of every predictor inside each
+    relation, null below `config.min_relation_class` items of either
+    outcome), `table_incremental` (what `lat` and the probe add to the output
     confidence, as a paired AUROC difference; the stacker is fitted on the
     validation items because the readers were fitted on the train ones),
     `riskcov_<dataset>_outputs` and `riskcov_<dataset>_controls` (the
     risk-coverage curves of the panels), `signals_<dataset>` (the filled and
-    oriented test signals and the outcomes), `curves` (the test AUROC per
-    layer of `lat` and the probe on the first usable dataset; the probe is
-    fitted there even when it is below `min_probe`) and `summary`.
+    oriented test signals and the outcomes, and the relations of a relational
+    dataset), `curves` (the test AUROC per layer of `lat` and the probe on
+    the first usable dataset; the probe is fitted there even when it is below
+    `min_probe`) and `summary`.
 
     Args:
         config: The experiment settings.
@@ -541,10 +617,16 @@ def execute(
             needs a known side.
 
     Raises:
-        ValueError: If the template is unknown, `config.datasets` repeats a
-            name, no dataset holds both outcomes in every split, or
-            `config.layer` is not among the layers.
+        ValueError: If `config.min_relation_class` is below 1, the template
+            is unknown, `config.datasets` repeats a name, no dataset holds
+            both outcomes in every split, or `config.layer` is not among the
+            layers.
     """
+    if config.min_relation_class < 1:
+        raise ValueError(
+            f"min_relation_class must be at least 1, got "
+            f"{config.min_relation_class}"
+        )
     template = p9_template(config.template, DEFAULT_SHOTS[: config.n_shots])
     lat_pool, lat_skipped = resolve_lat(
         items,

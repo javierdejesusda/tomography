@@ -525,9 +525,19 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   `popularity` of the subject, `template` (the accuracy of the relation), `length` of the question and
   `name_logprob` of the subject's name. It needs a finished `p9a` run (`labels_run`) made with the same
   `n_shots` (15). Other defaults: `datasets` `popqa`, `triviaqa` and `nq_open`, `n_seeds` 5, `n_pairs` 64,
-  `min_pairs` 16, `n_boot` 1000 and `min_probe` 50. It writes `table` (test AUROC, interval and AURC of every
-  predictor), `table_incremental`, `signals_<dataset>`, `curves`, the risk-coverage files
-  `riskcov_<dataset>_outputs` and `riskcov_<dataset>_controls`, and `summary`.
+  `min_pairs` 16, `n_boot` 1000, `min_probe` 50 and `min_relation_class` 5. It writes `table` (test AUROC,
+  interval and AURC of every predictor, then `auroc_within`, `lo_within`, `hi_within` and `n_pairs_within`:
+  the AUROC inside each relation, pooled by pairs, with a bootstrap interval that resamples inside each
+  relation and outcome, and the number of within-relation (correct, wrong) pairs; null for a dataset whose
+  test questions do not all carry a relation, which is TriviaQA and NQ-open), `table_incremental`,
+  `relations_<dataset>` (PopQA only: the AUROC of every predictor inside each relation, null below
+  `min_relation_class` correct or wrong items), `signals_<dataset>` (which also holds the `relation` of each
+  test item for PopQA), `curves`, the risk-coverage files `riskcov_<dataset>_outputs` and
+  `riskcov_<dataset>_controls`, and `summary`. Reporting rule: the wording of a PopQA question alone predicts
+  whether the model answers it correctly (the `template` control ranks items by relation), so for PopQA the
+  within-relation AUROC is the headline, shown next to the within-relation popularity control, and the pooled
+  AUROC is the secondary column; the AUROC of a single relation is reported only with 5 or more items of each
+  outcome.
 - `p9d` ([`p9d_steering.py`](src/tomography/experiments/p9d_steering.py)): does the known versus unknown
   direction control what a model does. The direction of `direction_type` (`obscure_real`) is added to the
   residual stream while the model answers, at a norm calibrated on held-out questions (`coeffs` -0.4 to 0.4
