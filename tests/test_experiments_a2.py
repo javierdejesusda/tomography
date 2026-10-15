@@ -341,6 +341,8 @@ def _unfit(name: str, loaded: LoadedModel) -> tuple[Config, Any, Any, str]:
     cases: dict[str, tuple[Config, Any, Any, str]] = {
         "top-k": (_config(top_k=0), readers, WORDS, "top_k"),
         "n-random": (_config(n_random=1), readers, WORDS, "n_random"),
+        "n-boot": (_config(n_boot=0), readers, WORDS, "n_boot"),
+        "seed": (_config(seed=-1), readers, WORDS, "seed"),
         "no-single-token": (
             _config(),
             readers,
@@ -370,11 +372,26 @@ def _unfit(name: str, loaded: LoadedModel) -> tuple[Config, Any, Any, str]:
 
 @pytest.mark.parametrize(
     "name",
-    ["top-k", "n-random", "no-single-token", "nine", "layers"],
+    [
+        "top-k",
+        "n-random",
+        "n-boot",
+        "seed",
+        "no-single-token",
+        "nine",
+        "layers",
+    ],
 )
 def test_execute_refuses_unusable_input_before_any_work(
-    tiny_arch: LoadedModel, tmp_path: Path, name: str
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
 ) -> None:
+    def started(*args: Any) -> None:
+        raise AssertionError("the model was read before the checks")
+
+    monkeypatch.setattr(a2_logit_lens, "lens_params", started)
     config, readers, words, match = _unfit(name, tiny_arch)
     run_dir = _run_dir(tmp_path, config)
     with pytest.raises(ValueError, match=match):

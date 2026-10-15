@@ -90,7 +90,7 @@ class Config(ExperimentConfig):
         extra_runs: Finished runs that replace a default run.
         top_k: Tokens per pole, layer and concept in the table.
         n_random: Random directions of the baseline.
-        n_boot: Bootstrap resamples of the separation bands.
+        n_boot: Bootstrap resamples of the separation bands, at least 1.
     """
 
     experiment: str = "a2"
@@ -201,14 +201,19 @@ def execute(
             through `WORDS_OF`.
 
     Raises:
-        ValueError: If `top_k` is below 1, `n_random` is below 2, the
-            readers cannot be compared, or a concept with words has an empty
-            pole after the single-token filter.
+        ValueError: If `top_k` is below 1, `n_random` is below 2, `n_boot`
+            is below 1, `seed` is negative, the readers cannot be compared,
+            or a concept with words has an empty pole after the single-token
+            filter.
     """
     if config.top_k < 1:
         raise ValueError(f"top_k must be at least 1, got {config.top_k}")
     if config.n_random < 2:
         raise ValueError(f"n_random must be at least 2, got {config.n_random}")
+    if config.n_boot < 1:
+        raise ValueError(f"n_boot must be at least 1, got {config.n_boot}")
+    if config.seed < 0:
+        raise ValueError(f"seed must be non-negative, got {config.seed}")
     layers, n_layers, n_min = common_layers(readers)
     labels = list(readers)
     poles = _poles(loaded, labels, words)
