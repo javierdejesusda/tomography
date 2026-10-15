@@ -16,6 +16,8 @@ from typing import cast
 
 import numpy as np
 
+from tomography.datasets.popqa import POPQA_RELATIONS
+from tomography.datasets.popqa import TEMPLATES
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.intervals import write_interval_curves
@@ -75,6 +77,9 @@ class Config(ExperimentConfig):
         max_guess_accuracy: A stratum whose constant guess is right more
             often than this supplies no known items.
         never_known: PopQA relations that never supply known items.
+        popqa_relations: The PopQA relations in the pool.
+        popqa_min_popularity: Lowest PopQA popularity in the pool; None
+            keeps every question.
         min_known: Guess-adjusted known items a model needs to enter the
             known versus unknown contrasts.
         popular_min: A PopQA question is popular when its popularity is at
@@ -103,6 +108,8 @@ class Config(ExperimentConfig):
     n_hand_check: int = 200
     max_guess_accuracy: float = 0.10
     never_known: tuple[str, ...] = ("sport",)
+    popqa_relations: tuple[str, ...] = POPQA_RELATIONS
+    popqa_min_popularity: int | None = None
     min_known: int = 100
     popular_min: int = 10_000
     popular_share: float = 0.5
@@ -115,8 +122,11 @@ class Config(ExperimentConfig):
         Raises:
             ValueError: If `n_shots` is outside 0 to the number of default
                 demonstrations (a negative count would drop the last ones
-                without a word) or `max_guess_accuracy` is not a share in
-                [0, 1] (it would only fail after the labeling).
+                without a word), `max_guess_accuracy` is not a share in
+                [0, 1] (it would only fail after the labeling),
+                `popqa_relations` is empty, repeats a relation or names one
+                PopQA does not have (the loader would read nothing for it
+                without a word) or `popqa_min_popularity` is negative.
         """
         if not 0 <= self.n_shots <= len(DEFAULT_SHOTS):
             raise ValueError(
@@ -127,6 +137,25 @@ class Config(ExperimentConfig):
             raise ValueError(
                 "max_guess_accuracy must be a share in [0, 1], "
                 f"got {self.max_guess_accuracy}"
+            )
+        if not self.popqa_relations:
+            raise ValueError("popqa_relations must not be empty")
+        unknown = sorted(set(self.popqa_relations) - set(TEMPLATES))
+        if unknown:
+            raise ValueError(
+                f"popqa_relations names unknown relations {unknown}; "
+                f"PopQA has {sorted(TEMPLATES)}"
+            )
+        if len(set(self.popqa_relations)) != len(self.popqa_relations):
+            raise ValueError(
+                f"popqa_relations repeats a relation: {self.popqa_relations}"
+            )
+        if self.popqa_min_popularity is not None and (
+            self.popqa_min_popularity < 0
+        ):
+            raise ValueError(
+                "popqa_min_popularity must be non-negative, "
+                f"got {self.popqa_min_popularity}"
             )
 
 
@@ -352,7 +381,11 @@ def run(config: Config, run_dir: RunDir) -> None:
         run_dir: The run to write into.
     """
     loaders = PoolLoaders.default(
-        offline=config.offline, seed=config.seed, n_detail=config.n_detail
+        offline=config.offline,
+        seed=config.seed,
+        n_detail=config.n_detail,
+        popqa_relations=config.popqa_relations,
+        popqa_min_popularity=config.popqa_min_popularity,
     )
     execute(config, run_dir, load_model(config.model), loaders)
 

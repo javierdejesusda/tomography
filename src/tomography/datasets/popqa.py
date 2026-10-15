@@ -1,8 +1,9 @@
 """PopQA: entity questions with a popularity score (Mallen et al., 2023).
 
-The knowledge-boundary study reads the four relations that SyntHal shares
-(father, mother, occupation, sport), so real and fictional subjects can be
-asked with one template.
+The four relations that SyntHal shares (father, mother, occupation, sport)
+let real and fictional subjects be asked with one template. The knowledge
+boundary study also reads the open-answer relations, whose answer a constant
+guess rarely hits.
 """
 
 from collections import Counter
@@ -48,6 +49,17 @@ TEMPLATES: Mapping[str, str] = {
 }
 
 SHARED_RELATIONS: tuple[str, ...] = ("father", "mother", "occupation", "sport")
+POPQA_RELATIONS: tuple[str, ...] = (
+    *SHARED_RELATIONS,
+    "director",
+    "screenwriter",
+    "author",
+    "producer",
+    "composer",
+    "capital",
+    "place of birth",
+    "capital of",
+)
 
 
 def load_popqa(
@@ -58,6 +70,7 @@ def load_popqa(
     min_alias_chars: int = 4,
     min_subject_chars: int = 3,
     drop_ambiguous: bool = True,
+    min_popularity: int | None = None,
 ) -> list[QAExample]:
     """Loads PopQA from the pinned Hub revision.
 
@@ -68,6 +81,7 @@ def load_popqa(
         min_alias_chars: Shortest alias kept.
         min_subject_chars: Shortest subject kept.
         drop_ambiguous: Whether to drop questions that occur more than once.
+        min_popularity: Lowest `s_pop` kept; None keeps every item.
 
     Returns:
         The items `parse_popqa` builds from the pinned `test.tsv`.
@@ -75,6 +89,7 @@ def load_popqa(
     Raises:
         OfflineCacheMissError: If `offline` is True and the file is not
             cached.
+        ValueError: As `parse_popqa`.
     """
     path = fetch(SOURCE, cache=cache, offline=offline)
     with path.open(encoding="utf-8", newline="") as handle:
@@ -84,6 +99,7 @@ def load_popqa(
             min_alias_chars=min_alias_chars,
             min_subject_chars=min_subject_chars,
             drop_ambiguous=drop_ambiguous,
+            min_popularity=min_popularity,
         )
 
 
@@ -94,6 +110,7 @@ def parse_popqa(
     min_alias_chars: int = 4,
     min_subject_chars: int = 3,
     drop_ambiguous: bool = True,
+    min_popularity: int | None = None,
 ) -> list[QAExample]:
     """Turns PopQA rows into question items.
 
@@ -101,8 +118,10 @@ def parse_popqa(
     dropped. A row left without an alias, or with a subject shorter than
     `min_subject_chars`, is dropped. A question string that occurs in more
     than one row names several entities with different golds, so every copy
-    is dropped unless `drop_ambiguous` is False. The split is a function of
-    the subject, so every question about one subject lands in one split.
+    is dropped unless `drop_ambiguous` is False, whatever its popularity. A
+    row below `min_popularity` is dropped. The split is a function of the
+    subject, so every question about one subject lands in one split and the
+    floor never moves an item to another split.
 
     Args:
         rows: Mappings with the PopQA columns "id", "subj", "prop", "s_pop",
@@ -111,14 +130,19 @@ def parse_popqa(
         min_alias_chars: Shortest alias kept.
         min_subject_chars: Shortest subject kept.
         drop_ambiguous: Whether to drop questions that occur more than once.
+        min_popularity: Lowest "s_pop" kept; None keeps every row.
 
     Returns:
         One "real" item per kept row, in row order.
 
     Raises:
-        ValueError: If a kept row's "possible_answers" is not a JSON list of
-            strings.
+        ValueError: If `min_popularity` is negative or a kept row's
+            "possible_answers" is not a JSON list of strings.
     """
+    if min_popularity is not None and min_popularity < 0:
+        raise ValueError(
+            f"min_popularity must be non-negative, got {min_popularity}"
+        )
     candidates = [
         row for row in rows if relations is None or row["prop"] in relations
     ]
@@ -128,6 +152,8 @@ def parse_popqa(
         if len(row["subj"].strip()) < min_subject_chars:
             continue
         if drop_ambiguous and seen[row["question"]] > 1:
+            continue
+        if min_popularity is not None and int(row["s_pop"]) < min_popularity:
             continue
         uid = f"popqa:{row['id']}"
         answers = _clean_aliases(uid, row["possible_answers"], min_alias_chars)

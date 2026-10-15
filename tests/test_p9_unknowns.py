@@ -312,6 +312,98 @@ def test_strata_follow_the_contrast() -> None:
     }
 
 
+def _open_answer_items() -> list[LabeledItem]:
+    """PopQA questions of a relation SyntHal does not have."""
+    return [
+        _popqa("pq-d-k0", "known", "director", 40_000),
+        _popqa("pq-d-k1", "known", "director", 30_000, split="val"),
+        _popqa("pq-d-k2", "known", "director", 20_000, split="test"),
+        _popqa("pq-d-u0", "unknown", "director", 30),
+        _popqa("pq-d-u1", "unknown", "director", 60, split="val"),
+    ]
+
+
+def test_synthal_contrasts_keep_only_the_relations_synthal_has() -> None:
+    pools = type_pools([*_items(), *_open_answer_items()])
+
+    director = {
+        "pq-d-k0",
+        "pq-d-k1",
+        "pq-d-k2",
+        "pq-d-u0",
+        "pq-d-u1",
+    }
+    assert not _uids(pools["fictional_synthal"].positive) & director
+    assert not _uids(pools["real_vs_synthal"].positive) & director
+    assert _uids(pools["fictional_synthal"].positive) == {
+        "pq-f-k0",
+        "pq-f-k1",
+        "pq-f-k2",
+    }
+    assert _uids(pools["real_vs_synthal"].positive) == {
+        "pq-f-u0",
+        "pq-f-u1",
+        "pq-s-u0",
+    }
+
+
+def test_the_other_contrasts_keep_the_relations_synthal_lacks() -> None:
+    pools = type_pools([*_items(), *_open_answer_items()])
+
+    known = {"pq-d-k0", "pq-d-k1", "pq-d-k2"}
+    for name in ("fictional_generated", "obscure_real", "obscure_real_pop"):
+        assert known <= _uids(pools[name].positive), name
+    unknown = {"pq-d-u0", "pq-d-u1"}
+    assert unknown <= _uids(pools["obscure_real"].negative)
+    assert unknown <= _uids(pools["real_vs_generated"].positive)
+
+
+def test_a_synthal_relation_counts_through_its_unknown_items_only() -> None:
+    items = [
+        *_items(),
+        _popqa("pq-m-k0", "known", "mother", 40_000),
+        _item("sy-3", "synthal", "fictional", "uncertain", relation="mother"),
+    ]
+
+    pools = type_pools(items)
+
+    assert "pq-m-k0" not in _uids(pools["fictional_synthal"].positive)
+    assert "pq-m-k0" in _uids(pools["obscure_real"].positive)
+
+
+def test_synthal_questions_of_a_relation_keep_its_popqa_questions() -> None:
+    items = [
+        *_items(),
+        _item("sy-4", "synthal", "fictional", "unknown", relation="director"),
+        *_open_answer_items(),
+    ]
+
+    pools = type_pools(items)
+
+    assert {"pq-d-k0", "pq-d-k1", "pq-d-k2"} <= _uids(
+        pools["fictional_synthal"].positive
+    )
+    assert {"pq-d-u0", "pq-d-u1"} <= _uids(pools["real_vs_synthal"].positive)
+
+
+def test_synthal_contrasts_vanish_without_a_shared_relation() -> None:
+    items = [
+        item
+        for item in _items()
+        if not (item.group == "popqa" and item.contrast_label == "known")
+    ]
+    items += _open_answer_items()
+
+    pools = type_pools(items)
+
+    assert "fictional_synthal" not in pools
+    assert "real_vs_synthal" in pools
+    assert not _uids(pools["real_vs_synthal"].positive) & {
+        "pq-d-u0",
+        "pq-d-u1",
+    }
+
+
 def test_knowledge_off_keeps_the_three_unknown_type_contrasts_only() -> None:
     items = _items()
     full = type_pools(items)

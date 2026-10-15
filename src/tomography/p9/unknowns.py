@@ -119,7 +119,10 @@ def type_pools(
     kind "real" labeled known. `obscure` is the PopQA questions labeled
     unknown. The contrasts, in this order, are:
 
-    - `fictional_synthal`: popqa_known against SyntHal.
+    - `fictional_synthal`: popqa_known against SyntHal, keeping the
+      relations SyntHal has (the pairs are matched inside a relation, but the
+      validation and test sets pool every item of a split, so a relation
+      with no SyntHal question would stay on the positive side alone).
     - `fictional_generated`: popqa_known against the generated names.
     - `obscure_real`: popqa_known against obscure.
     - `obscure_real_pop`: the same, paired inside a popularity bin.
@@ -127,7 +130,8 @@ def type_pools(
     - `unknowable_detail`: open_known against the unknowable details.
     - `false_premise`: open_known against FalseQA.
     - `kuq_<category>`: open_known against one KUQ category, sorted.
-    - `real_vs_synthal`: obscure against SyntHal (unknown_type).
+    - `real_vs_synthal`: obscure against SyntHal, keeping the relations
+      SyntHal has (unknown_type).
     - `real_vs_generated`: obscure against the generated names
       (unknown_type).
     - `pre_vs_post_cutoff`: unknown real awards against unknown post-cutoff
@@ -156,7 +160,18 @@ def type_pools(
     popqa_known = pick("popqa", "known")
     open_known = (*pick("triviaqa", "known"), *pick("nq_open", "known"))
     obscure = pick("popqa", "unknown")
+    synthal = pick("synthal", "unknown")
+    synthal_relations = {str(i.example.meta["relation"]) for i in synthal}
     pools: dict[str, TypePool] = {}
+
+    def synthal_relations_of(
+        side: Sequence[LabeledItem],
+    ) -> tuple[LabeledItem, ...]:
+        return tuple(
+            i
+            for i in side
+            if str(i.example.meta["relation"]) in synthal_relations
+        )
 
     def add(
         name: str,
@@ -171,7 +186,10 @@ def type_pools(
             )
 
     add(
-        "fictional_synthal", popqa_known, pick("synthal", "unknown"), "relation"
+        "fictional_synthal",
+        synthal_relations_of(popqa_known),
+        synthal,
+        "relation",
     )
     add(
         "fictional_generated",
@@ -194,8 +212,8 @@ def type_pools(
         add(name, open_known, pick("kuq", "unknown", kind), "none")
     add(
         "real_vs_synthal",
-        obscure,
-        pick("synthal", "unknown"),
+        synthal_relations_of(obscure),
+        synthal,
         "relation",
         "unknown_type",
     )

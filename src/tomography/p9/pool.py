@@ -7,6 +7,7 @@ control of `tomography.p9.guess` may later demote a known label.
 """
 
 from collections.abc import Callable
+from collections.abc import Collection
 from collections.abc import Mapping
 from collections.abc import Sequence
 import dataclasses
@@ -23,6 +24,7 @@ from tomography.datasets.falseqa import load_falseqa
 from tomography.datasets.fictional import generate_fictional
 from tomography.datasets.kuq import load_kuq
 from tomography.datasets.nq_open import load_nq_open
+from tomography.datasets.popqa import POPQA_RELATIONS
 from tomography.datasets.popqa import load_popqa
 from tomography.datasets.records import MetaValue
 from tomography.datasets.records import QAExample
@@ -228,7 +230,7 @@ class PoolLoaders:
     """The sources of the pool, injectable so tests read no dataset.
 
     Attributes:
-        popqa: PopQA questions of the shared relations.
+        popqa: PopQA questions of the configured relations.
         synthal: SyntHal questions about invented entities.
         kuq: KUQ questions.
         falseqa: FalseQA questions with a false premise.
@@ -256,6 +258,8 @@ class PoolLoaders:
         seed: int = 0,
         n_detail: int = 300,
         cache: Path | None = None,
+        popqa_relations: Collection[str] = POPQA_RELATIONS,
+        popqa_min_popularity: int | None = None,
     ) -> Self:
         """Binds the dataset loaders of the study.
 
@@ -268,12 +272,20 @@ class PoolLoaders:
             seed: Seed of the unknowable-detail draw.
             n_detail: Number of unknowable-detail questions.
             cache: Cache directory; None means the shared cache.
+            popqa_relations: The PopQA relations to read.
+            popqa_min_popularity: Lowest PopQA popularity read; None reads
+                every question.
 
         Returns:
             The loaders; nothing is read until one is called.
         """
         return cls(
-            popqa=lambda: load_popqa(cache=cache, offline=offline),
+            popqa=lambda: load_popqa(
+                cache=cache,
+                offline=offline,
+                relations=popqa_relations,
+                min_popularity=popqa_min_popularity,
+            ),
             synthal=lambda: load_synthal(cache=cache, offline=offline),
             kuq=lambda: load_kuq(cache=cache, offline=offline),
             falseqa=lambda: load_falseqa(cache=cache, offline=offline),

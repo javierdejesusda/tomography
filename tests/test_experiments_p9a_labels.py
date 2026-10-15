@@ -11,6 +11,8 @@ import numpy as np
 import pytest
 
 from tomography.cli import load_experiment
+from tomography.datasets.popqa import POPQA_RELATIONS
+from tomography.datasets.popqa import TEMPLATES
 from tomography.datasets.records import QAExample
 from tomography.datasets.records import assign_splits
 from tomography.datasets.sources import OfflineCacheMissError
@@ -26,6 +28,7 @@ from tomography.knowledge import ItemLabel
 from tomography.knowledge import LabelRecipe
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.p9 import pool as pool_module
 from tomography.p9.pool import GROUPS
 from tomography.p9.pool import PoolLoaders
 from tomography.p9.pool import group_of
@@ -356,6 +359,9 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.n_hand_check == 200
     assert config.max_guess_accuracy == 0.10
     assert config.never_known == ("sport",)
+    assert config.popqa_relations == POPQA_RELATIONS
+    assert len(config.popqa_relations) == 12
+    assert config.popqa_min_popularity is None
     assert config.min_known == 100
     assert config.popular_min == 10_000
     assert config.popular_share == 0.5
@@ -390,6 +396,61 @@ def test_n_shots_within_the_demonstrations_is_accepted(n_shots: int) -> None:
 def test_a_max_guess_accuracy_that_is_not_a_share_raises(limit: float) -> None:
     with pytest.raises(ValueError, match="max_guess_accuracy"):
         Config(max_guess_accuracy=limit)
+
+
+def test_a_popqa_subset_and_floor_round_trip() -> None:
+    config = Config(
+        popqa_relations=("director", "capital of"), popqa_min_popularity=500
+    )
+
+    assert Config.from_dict(config.to_dict()) == config
+
+
+@pytest.mark.parametrize(
+    "relations",
+    [("director",), ("father", "mother"), ("capital of", "place of birth")],
+    ids=["one", "two_shared", "two_open"],
+)
+def test_a_subset_of_the_popqa_relations_is_accepted(
+    relations: tuple[str, ...],
+) -> None:
+    assert Config(popqa_relations=relations).popqa_relations == relations
+
+
+def test_every_popqa_relation_name_is_accepted() -> None:
+    relations = tuple(TEMPLATES)
+
+    assert Config(popqa_relations=relations).popqa_relations == relations
+
+
+@pytest.mark.parametrize(
+    "relations",
+    [(), ("director", "not a relation"), ("Director",), ("father", "father")],
+    ids=["empty", "unknown", "wrong_case", "duplicate"],
+)
+def test_bad_popqa_relations_raise_before_any_model_work(
+    relations: tuple[str, ...],
+) -> None:
+    with pytest.raises(ValueError, match="popqa_relations"):
+        Config(popqa_relations=relations)
+
+
+def test_bad_popqa_relations_set_on_the_command_line_raise() -> None:
+    data = {**Config().to_dict(), "popqa_relations": ["director", "nonsense"]}
+
+    with pytest.raises(ValueError, match="popqa_relations"):
+        Config.from_dict(data)
+
+
+@pytest.mark.parametrize("floor", [-1, -10_000], ids=["minus_one", "large"])
+def test_a_negative_popqa_floor_raises(floor: int) -> None:
+    with pytest.raises(ValueError, match="popqa_min_popularity"):
+        Config(popqa_min_popularity=floor)
+
+
+@pytest.mark.parametrize("floor", [0, 1, 10_000], ids=["zero", "one", "high"])
+def test_a_non_negative_popqa_floor_is_accepted(floor: int) -> None:
+    assert Config(popqa_min_popularity=floor).popqa_min_popularity == floor
 
 
 def test_the_cli_discovers_the_experiment() -> None:
@@ -975,8 +1036,47 @@ def test_run_loads_the_model_and_the_default_loaders(
     run(config, run_dir)
 
     assert asked == ["tiny"]
-    assert bound == {"offline": True, "seed": 4, "n_detail": 11}
+    assert bound == {
+        "offline": True,
+        "seed": 4,
+        "n_detail": 11,
+        "popqa_relations": POPQA_RELATIONS,
+        "popqa_min_popularity": None,
+    }
     assert (run_dir.path / "summary.json").is_file()
+
+
+def test_run_reads_the_configured_popqa_relations_and_floor(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[dict[str, Any]] = []
+    real_default = PoolLoaders.default
+
+    def fake_load_popqa(**kwargs: Any) -> list[QAExample]:
+        asked.append(kwargs)
+        return _loaders().popqa()
+
+    def fake_default(cls: type[PoolLoaders], **kwargs: Any) -> PoolLoaders:
+        return dataclasses.replace(
+            _loaders(), popqa=real_default(**kwargs).popqa
+        )
+
+    monkeypatch.setattr(p9a_labels, "load_model", lambda key: tiny_arch)
+    monkeypatch.setattr(pool_module, "load_popqa", fake_load_popqa)
+    monkeypatch.setattr(PoolLoaders, "default", classmethod(fake_default))
+    monkeypatch.setattr(p9a_labels, "label_questions", _plant)
+    config = _config(
+        popqa_relations=("father", "mother", "sport"), popqa_min_popularity=100
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    run(config, run_dir)
+
+    assert len(asked) == 1
+    assert tuple(asked[0]["relations"]) == ("father", "mother", "sport")
+    assert asked[0]["min_popularity"] == 100
 
 
 @pytest.mark.slow

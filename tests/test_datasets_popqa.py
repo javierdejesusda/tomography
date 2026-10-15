@@ -291,3 +291,91 @@ def test_network_loads_the_pinned_revision_with_one_template_per_relation() -> (
         "sport": 547,
     }
     assert len({i.uid for i in items}) == len(items)
+
+
+def test_popqa_relations_add_the_open_answer_relations_to_the_shared_ones() -> (
+    None
+):
+    open_answer = (
+        "director",
+        "screenwriter",
+        "author",
+        "producer",
+        "composer",
+        "capital",
+        "place of birth",
+        "capital of",
+    )
+
+    assert (*popqa.SHARED_RELATIONS, *open_answer) == popqa.POPQA_RELATIONS
+    assert set(popqa.POPQA_RELATIONS) <= set(popqa.TEMPLATES)
+    assert not {"genre", "country", "religion", "color"} & set(
+        popqa.POPQA_RELATIONS
+    )
+
+
+def test_parse_min_popularity_keeps_the_items_at_or_above_the_floor() -> None:
+    rows = [
+        _row(uid="1", subject="Ada Smith", popularity=99),
+        _row(uid="2", subject="Ben Jones", popularity=100),
+        _row(uid="3", subject="Cy Brown", popularity=5000),
+    ]
+
+    items = popqa.parse_popqa(rows, min_popularity=100)
+
+    assert [i.uid for i in items] == ["popqa:2", "popqa:3"]
+
+
+def test_parse_min_popularity_none_and_zero_keep_every_item() -> None:
+    rows = [
+        _row(uid="1", subject="Ada Smith", popularity=0),
+        _row(uid="2", subject="Ben Jones", popularity=7),
+    ]
+
+    assert len(popqa.parse_popqa(rows, min_popularity=None)) == 2
+    assert len(popqa.parse_popqa(rows, min_popularity=0)) == 2
+
+
+def test_parse_min_popularity_does_not_hide_an_ambiguous_question() -> None:
+    rows = [
+        _row(uid="1", subject="John Mayne", popularity=50),
+        _row(uid="2", subject="John Mayne", popularity=500),
+    ]
+
+    assert popqa.parse_popqa(rows, min_popularity=100) == []
+
+
+def test_parse_min_popularity_keeps_the_split_of_every_kept_item() -> None:
+    rows = [
+        _row(uid=str(n), subject=f"Name{n} Smith", popularity=n * 100)
+        for n in range(1, 40)
+    ]
+
+    everything = {i.uid: i.split for i in popqa.parse_popqa(rows)}
+    floored = {
+        i.uid: i.split for i in popqa.parse_popqa(rows, min_popularity=2000)
+    }
+
+    assert 0 < len(floored) < len(everything)
+    assert all(everything[uid] == split for uid, split in floored.items())
+
+
+def test_parse_rejects_a_negative_popularity_floor() -> None:
+    with pytest.raises(ValueError, match="min_popularity"):
+        popqa.parse_popqa([_row()], min_popularity=-1)
+
+
+def test_load_forwards_the_popularity_floor(
+    fetched: list[tuple[object, Path | None, bool]], tmp_path: Path
+) -> None:
+    _write_tsv(
+        tmp_path / "test.tsv",
+        [
+            _row(uid="1", subject="Ada Smith", popularity=10),
+            _row(uid="2", subject="Ben Jones", popularity=1000),
+        ],
+    )
+
+    items = popqa.load_popqa(min_popularity=100)
+
+    assert [i.uid for i in items] == ["popqa:2"]

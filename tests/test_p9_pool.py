@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from tomography.datasets.popqa import POPQA_RELATIONS
 from tomography.datasets.popqa import TEMPLATES
 from tomography.datasets.popqa import parse_popqa
 from tomography.datasets.records import QAExample
@@ -791,3 +792,69 @@ def test_default_loaders_bind_the_dataset_loaders(
     assert calls["load_post_cutoff"]["cutoff_year"] == 9999
     assert calls["load_unknowable_detail"]["seed"] == 7
     assert calls["load_unknowable_detail"]["limit"] == 11
+
+
+def _popqa_calls(
+    monkeypatch: pytest.MonkeyPatch, **settings: Any
+) -> dict[str, Any]:
+    calls: dict[str, Any] = {}
+
+    def load(**kwargs: Any) -> list[QAExample]:
+        calls.update(kwargs)
+        return []
+
+    monkeypatch.setattr(pool_module, "load_popqa", load)
+    PoolLoaders.default(offline=True, **settings).popqa()
+    return calls
+
+
+def test_default_loaders_read_the_popqa_relations_of_the_study_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _popqa_calls(monkeypatch)
+
+    assert tuple(calls["relations"]) == POPQA_RELATIONS
+    assert calls["min_popularity"] is None
+
+
+def test_default_loaders_pass_the_popqa_relations_and_the_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _popqa_calls(
+        monkeypatch,
+        popqa_relations=("director", "capital"),
+        popqa_min_popularity=1000,
+    )
+
+    assert tuple(calls["relations"]) == ("director", "capital")
+    assert calls["min_popularity"] == 1000
+    assert calls["offline"] is True
+
+
+def test_build_pool_generates_a_counterpart_for_every_popqa_relation() -> None:
+    rows = [
+        {
+            "id": str(n),
+            "subj": f"Name{n} of The Long Title Number {n} Part Two",
+            "prop": relation,
+            "s_pop": "100",
+            "question": TEMPLATES[relation].replace(
+                "{}", f"Name{n} of The Long Title Number {n} Part Two"
+            ),
+            "possible_answers": '["Bob Smith"]',
+        }
+        for n, relation in enumerate(POPQA_RELATIONS)
+    ]
+    loaders = _loaders(parse_popqa(rows, relations=POPQA_RELATIONS))
+
+    pool = build_pool(loaders, SIZES, count_tokens=_words, seed=3)
+
+    real = [e for e in pool if group_of(e) == "popqa"]
+    generated = [e for e in pool if group_of(e) == "fictional"]
+    assert {e.meta["relation"] for e in real} == set(POPQA_RELATIONS)
+    assert {e.meta["relation"] for e in generated} == set(POPQA_RELATIONS)
+    for example in generated:
+        template = TEMPLATES[str(example.meta["relation"])]
+        prefix, _, suffix = template.partition("{}")
+        assert example.question.startswith(prefix)
+        assert example.question.endswith(suffix)
