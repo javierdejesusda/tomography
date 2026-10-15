@@ -236,6 +236,41 @@ def test_max_guess_accuracy_and_excluded_are_parameters() -> None:
     assert not guesses["popqa:sport"].excluded
 
 
+@pytest.mark.parametrize(
+    ("n_gold", "eligible"),
+    [(2, True), (3, False)],
+    ids=["at_the_limit", "above_the_limit"],
+)
+def test_a_guess_accuracy_at_the_limit_is_still_eligible(
+    n_gold: int, eligible: bool
+) -> None:
+    items = [
+        _item(
+            f"f{i}",
+            "father",
+            "John" if i < 4 else f"Dad {i}",
+            "John" if i < n_gold else f"Dad {i}",
+        )
+        for i in range(20)
+    ]
+
+    guess = stratum_guesses(items)["popqa:father"]
+
+    assert guess.modal == "john"
+    assert guess.guess_accuracy == n_gold / 20
+    assert guess.eligible is eligible
+
+
+def test_an_excluded_stratum_is_never_eligible() -> None:
+    guess = stratum_guesses(_pilot_items(), excluded=("popqa:mother",))[
+        "popqa:mother"
+    ]
+
+    assert guess.excluded
+    assert guess.guess_accuracy == pytest.approx(0.05)
+    assert not guess.eligible
+
+
 def test_the_modal_answer_is_normalized() -> None:
     items = [
         _item("a", "father", "John", "x"),

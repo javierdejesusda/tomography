@@ -208,6 +208,12 @@ def test_estimate_cutoff_respects_min_years() -> None:
     assert estimate_cutoff(rates, min_years=3).year >= 2002
 
 
+def test_estimate_cutoff_tries_the_last_admissible_split() -> None:
+    estimate = estimate_cutoff(_planted([10] * 7 + [1] * 3), min_years=3)
+
+    assert estimate.year == 2006
+
+
 def test_estimate_cutoff_rejects_a_flat_rate() -> None:
     with pytest.raises(ValueError, match="drop"):
         estimate_cutoff(_planted([5] * 10))
