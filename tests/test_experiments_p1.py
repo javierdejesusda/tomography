@@ -889,6 +889,8 @@ def test_the_mean_position_is_read(
         ({"tasks": ("nope",)}, "unknown task 'nope'"),
         ({"position": "concept"}, "position 'concept'"),
         ({"eval_position": "response"}, "eval_position 'response'"),
+        ({"kinds": ("bare",)}, "kinds must include 'paper'"),
+        ({"kinds": ("paper", "nope")}, r"unknown variant kinds \['nope'\]"),
     ],
 )
 def test_run_checks_the_config_before_loading_anything(

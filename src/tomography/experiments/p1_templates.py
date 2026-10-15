@@ -347,6 +347,15 @@ def _check(config: Config) -> tuple[str, ...]:
             "p1 needs n_seeds of at least 2, because the stability of a "
             "reader is a cosine between two seeds"
         )
+    unknown = [kind for kind in config.kinds if kind not in VARIANT_KINDS]
+    if unknown:
+        raise ValueError(
+            f"unknown variant kinds {unknown}, expected one of {VARIANT_KINDS}"
+        )
+    if "paper" not in config.kinds:
+        raise ValueError(
+            "kinds must include 'paper', the reference of every comparison"
+        )
     for field, position in (
         ("position", config.position),
         ("eval_position", config.eval_position),
@@ -431,9 +440,10 @@ def run(config: Config, run_dir: RunDir) -> None:
         run_dir: The run to write into.
 
     Raises:
-        ValueError: If there is no task, `n_seeds` is below 2, a task is
-            unknown, or `position` or `eval_position` is not "last" or
-            "mean" (all checked before the model is loaded).
+        ValueError: If there is no task, `n_seeds` is below 2, a task or a
+            kind is unknown, `kinds` lacks `paper`, or `position` or
+            `eval_position` is not "last" or "mean" (all checked before the
+            model is loaded).
     """
     _check(config)
     sources = task_sources(config.tasks)
