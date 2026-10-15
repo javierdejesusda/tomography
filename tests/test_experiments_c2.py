@@ -639,6 +639,8 @@ def test_the_strength_picks_the_coefficient_of_the_matrix(
         ({"window": 4}, "window"),
         ({"n_prompts": 100}, "pool"),
         ({"n_eval_pairs": 7}, "n_eval_pairs"),
+        ({"temperature": None}, "needs a temperature"),
+        ({"top_p": 1.5}, "top_p"),
     ],
     ids=[
         "one-emotion",
@@ -656,6 +658,8 @@ def test_the_strength_picks_the_coefficient_of_the_matrix(
         "window-too-wide",
         "prompt-pool-too-small",
         "eval-pairs-above-the-split",
+        "sampling-without-a-temperature",
+        "top-p-above-one",
     ],
 )
 def test_an_invalid_config_raises_before_the_model_runs(

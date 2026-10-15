@@ -895,6 +895,8 @@ def test_the_steering_mode_mask_and_norm_follow_the_config(
         ({"n_prompts": 100}, "pool"),
         ({"n_calibration": 0}, "n_calibration"),
         ({"n_neutral": 0}, "n_calibration and n_neutral"),
+        ({"temperature": None}, "needs a temperature"),
+        ({"top_p": 1.5}, "top_p"),
     ],
     ids=[
         "no-zero",
@@ -913,6 +915,8 @@ def test_the_steering_mode_mask_and_norm_follow_the_config(
         "prompt-pool-too-small",
         "no-calibration-text",
         "no-neutral-text",
+        "sampling-without-a-temperature",
+        "top-p-above-one",
     ],
 )
 def test_an_invalid_config_raises_before_the_model_runs(

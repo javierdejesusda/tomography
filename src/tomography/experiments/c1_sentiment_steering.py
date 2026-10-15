@@ -653,13 +653,15 @@ def execute(
     Raises:
         ValueError: If `coeffs` has no 0.0 or no other value, `n_steer_seeds`
             is outside `1..n_seeds`, the sweep layers, the operators or the
-            window do not fit the model, `n_calibration` or `n_neutral` is
-            below 1, the held-out texts are fewer than
-            `n_calibration + n_neutral`, or the validation sentences give
-            fewer than `2 * n_prompts` distinct prompts.
+            window do not fit the model, the generation settings are invalid
+            (see `GenSettings`), `n_calibration` or `n_neutral` is below 1,
+            the held-out texts are fewer than `n_calibration + n_neutral`, or
+            the validation sentences give fewer than `2 * n_prompts` distinct
+            prompts.
     """
     n_layers = loaded.n_layers
     sweep = _check_config(config, n_layers)
+    settings = GenSettings.from_config(config)
     held = split_held_out(
         texts,
         n_calibration=config.n_calibration,
@@ -704,7 +706,6 @@ def execute(
         result.layers,
     )
     readers = result.readers[: config.n_steer_seeds]
-    settings = GenSettings.from_config(config)
     steering = _Steering(
         config=config,
         loaded=loaded,

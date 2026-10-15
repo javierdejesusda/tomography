@@ -324,14 +324,16 @@ def execute(
             of `coeffs`, `n_steer_seeds` is outside `1..n_seeds`, `window`
             does not fit the model, `n_pairs` or `n_eval_pairs` exceeds the
             pairs one steered emotion can form in its split (an emotion with
-            no pair fails even when `n_eval_pairs` is None), `n_calibration`
-            or `n_neutral` is below 1, the held-out texts are fewer than
+            no pair fails even when `n_eval_pairs` is None), the generation
+            settings are invalid (see `GenSettings`), `n_calibration` or
+            `n_neutral` is below 1, the held-out texts are fewer than
             `n_calibration + n_neutral`, or the neutral ones give fewer than
             `n_prompts` distinct prompts.
     """
     n_layers = loaded.n_layers
     strength = _check_config(config, n_layers)
     _check_pair_counts(config, scenarios)
+    settings = GenSettings.from_config(config)
     held = split_held_out(
         texts,
         n_calibration=config.n_calibration,
@@ -364,7 +366,6 @@ def execute(
         bos=config.bos,
         batch_size=config.batch_size,
     )
-    settings = GenSettings.from_config(config)
 
     def steering_arms(reader: RepReader) -> Callable[[float], Arm]:
         def make(coeff: float) -> Arm:
