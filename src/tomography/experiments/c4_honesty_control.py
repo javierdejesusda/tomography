@@ -535,6 +535,25 @@ def _check_grid(name: str, grid: Sequence[float]) -> None:
         )
 
 
+def check_relative_op(config: SteeringConfig) -> None:
+    """Rejects the projection operator with relative coefficients.
+
+    The controller rejects the pair too, but only once the first arm is built,
+    after the readers and the norms.
+
+    Args:
+        config: The experiment settings.
+
+    Raises:
+        ValueError: If `op` is `projection` and `mode` is `relative`.
+    """
+    if config.op == "projection" and config.mode == "relative":
+        raise ValueError(
+            "relative coefficients are not supported for the projection "
+            "operator: its coefficient is dimensionless"
+        )
+
+
 def _check_config(
     config: Config, questions: Sequence[ChoiceExample], n_layers: int
 ) -> tuple[tuple[int, ...], NDArray[np.bool_], NDArray[np.bool_]]:
@@ -550,6 +569,9 @@ def _check_config(
         raise ValueError(f"n_seeds must be >= 1, got {config.n_seeds}")
     if config.n_boot < 1:
         raise ValueError(f"n_boot must be >= 1, got {config.n_boot}")
+    if config.batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {config.batch_size}")
+    check_relative_op(config)
     layers = resolve_layers(config.layers, n_layers)
     select = np.array(
         [question.split in ("train", "val") for question in questions],
@@ -691,10 +713,15 @@ def execute(
 
     Raises:
         ValueError: If a grid lacks 0.0 or another value or repeats one, the
-            layers are outside 1..L, `n_seeds` or `n_boot` is below 1, or
-            there is no selection or no test question.
+            layers are outside 1..L, `n_seeds`, `n_boot`, `batch_size` or
+            `n_calibration` is below 1, the projection operator has relative
+            coefficients, the Alpaca `test` split is empty, or there is no
+            selection or no test question.
     """
     layers, select, test = _check_config(config, questions, loaded.n_layers)
+    texts = calibration_texts(
+        alpaca, config.n_calibration, seed=derive_seed(config.seed, "norms")
+    )
     sweep = honesty_readers(
         loaded,
         alpaca,
@@ -709,13 +736,7 @@ def execute(
     )
     difference = difference_reader(loaded, layers, bos=config.bos)
     norms = mean_residual_norms(
-        loaded,
-        calibration_texts(
-            alpaca, config.n_calibration, seed=derive_seed(config.seed, "norms")
-        ),
-        layers,
-        bos=config.bos,
-        batch_size=config.batch_size,
+        loaded, texts, layers, bos=config.bos, batch_size=config.batch_size
     )
     rows = _arm_scores(
         config, loaded, questions, layers, sweep.readers, difference, norms

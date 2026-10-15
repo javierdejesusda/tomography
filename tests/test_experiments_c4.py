@@ -720,6 +720,9 @@ def _forbid_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
         ({"layers": ()}, "layers"),
         ({"n_seeds": 0}, "n_seeds"),
         ({"n_boot": 0}, "n_boot"),
+        ({"n_calibration": 0}, "n must be"),
+        ({"batch_size": 0}, "batch_size"),
+        ({"op": "projection"}, "projection"),
     ],
     ids=[
         "coeffs-without-zero",
@@ -735,6 +738,9 @@ def _forbid_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
         "layers-empty",
         "no-seeds",
         "no-resamples",
+        "no-calibration-texts",
+        "no-batch",
+        "relative-projection",
     ],
 )
 def test_execute_rejects_a_bad_configuration_before_any_scoring(
