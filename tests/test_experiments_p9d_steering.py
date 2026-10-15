@@ -202,7 +202,6 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.eval_types == (
         "obscure_real",
         "fictional_generated",
-        "post_cutoff",
         "unknowable_detail",
         "false_premise",
     )
@@ -324,6 +323,15 @@ def test_an_unknown_type_contrast_is_refused(
         ValueError, match="known versus unknown contrasts only, not"
     ):
         plan_groups(_config(**overrides), _items(), True)
+
+
+def test_post_cutoff_is_selectable_though_not_a_default() -> None:
+    config = _config(eval_types=("obscure_real", "post_cutoff"))
+
+    plan = plan_groups(config, _items(), True)
+
+    assert "post_cutoff" not in Config(labels_run="runs/p9a").eval_types
+    assert plan.skipped == {"post_cutoff": "no such type"}
 
 
 def test_the_direction_contrast_must_exist() -> None:

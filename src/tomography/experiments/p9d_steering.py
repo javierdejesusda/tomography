@@ -130,6 +130,10 @@ class Config(SteeringConfig):
         n_shots: Demonstrations of the "fewshot" prompts.
         direction_type: The knowledge contrast whose direction steers.
         eval_types: The knowledge contrasts the behavior is reported on.
+            `post_cutoff` is not a default: its test side holds at most
+            1.6 x (2026 - cutoff year) unknown awards, about 3 for a 2024
+            cutoff, so it is always skipped for the Qwen3 models. Name it
+            to score it for a model with an earlier cutoff.
         method: The direction finder.
         preprocess: Vector preparation, see `fit_direction`.
         n_pairs: Pairs the direction is fitted on.
@@ -153,7 +157,6 @@ class Config(SteeringConfig):
     eval_types: tuple[str, ...] = (
         "obscure_real",
         "fictional_generated",
-        "post_cutoff",
         "unknowable_detail",
         "false_premise",
     )
