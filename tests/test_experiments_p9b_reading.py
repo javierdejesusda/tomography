@@ -33,6 +33,7 @@ from tomography.p9.reading import ReadingCube
 from tomography.p9.reading import collect_item_activations
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
+from tomography.p9.reading import surface_baselines
 from tomography.p9.unknowns import UNKNOWN_TYPES
 from tomography.p9.unknowns import type_pools
 from tomography.reading.directions import Method
@@ -580,6 +581,9 @@ def test_the_table_reports_the_auroc_at_the_layer(
         "pca_diff",
         "mean_diff",
         "random",
+        "text_word",
+        "text_char",
+        "popularity",
     ]
     assert [row[0] for row in table["rows"]] == USABLE
     for t, row in enumerate(table["rows"]):
@@ -596,6 +600,46 @@ def test_the_table_reports_the_auroc_at_the_layer(
                 transfer["test"][m, t, :, k].mean()
             )
         assert row_dict["lo"] <= row_dict["logistic"] <= row_dict["hi"]
+
+
+def test_the_table_holds_the_surface_baselines_of_every_contrast(
+    tiny_arch: LoadedModel, default_run: RunDir
+) -> None:
+    table = default_run.read_json("table")
+    assert isinstance(table, dict)
+    pools = type_pools(_items())
+
+    for row in table["rows"]:
+        row_dict = dict(zip(table["columns"], row, strict=True))
+        name = row_dict["type"]
+        want = surface_baselines(pools[name])
+        assert 0.0 <= row_dict["text_word"] <= 1.0, name
+        assert 0.0 <= row_dict["text_char"] <= 1.0, name
+        assert row_dict["text_word"] == pytest.approx(want["text_word"]), name
+        assert row_dict["text_char"] == pytest.approx(want["text_char"]), name
+        if name in ("obscure_real", "obscure_real_pop"):
+            assert row_dict["popularity"] == pytest.approx(want["popularity"])
+            assert isinstance(row_dict["popularity"], float)
+        else:
+            assert row_dict["popularity"] is None, name
+
+
+def test_a_baseline_that_cannot_work_fails_before_the_forward_pass(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def never(*args: Any, **kw: Any) -> ItemActivations:
+        raise AssertionError("the forward pass must not start")
+
+    def broken(pool: Any) -> dict[str, float | None]:
+        raise ValueError("no baseline")
+
+    monkeypatch.setattr(p9b_reading, "collect_item_activations", never)
+    monkeypatch.setattr(p9b_reading, "surface_baselines", broken)
+
+    with pytest.raises(ValueError, match="no baseline"):
+        _execute(tiny_arch, tmp_path)
 
 
 def test_the_layer_of_the_config_wins(

@@ -30,12 +30,14 @@ from tomography.model import LoadedModel
 from tomography.model import load_model
 from tomography.p9.pool import LabeledItem
 from tomography.p9.reading import READING_METHODS
+from tomography.p9.reading import SURFACE_BASELINES
 from tomography.p9.reading import ReadingCube
 from tomography.p9.reading import check_pool
 from tomography.p9.reading import choose_layer
 from tomography.p9.reading import collect_item_activations
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
+from tomography.p9.reading import surface_baselines
 from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import panel_of
 from tomography.p9.unknowns import type_pools
@@ -182,7 +184,11 @@ def _write_curves(
 
 
 def _table_rows(
-    cube: ReadingCube, pools: dict[str, TypePool], k: int, seed: int
+    cube: ReadingCube,
+    pools: dict[str, TypePool],
+    baselines: dict[str, dict[str, float | None]],
+    k: int,
+    seed: int,
 ) -> list[list[object]]:
     rows: list[list[object]] = []
     for t, name in enumerate(cube.types):
@@ -206,6 +212,7 @@ def _table_rows(
                 float(lo),
                 float(hi),
                 *means[1:],
+                *(baselines[name][column] for column in SURFACE_BASELINES),
             ]
         )
     return rows
@@ -230,7 +237,11 @@ def execute(
     `matrix_cosine` (split-half cross-fit cosines, whose diagonal is the
     split-half stability of a contrast, see `reading_cube`), `transfer`
     (every AUROC and cosine), `readers` (the all-pairs directions of the
-    headline method), `table` and `summary`.
+    headline method), `table` and `summary`. The table closes with the
+    surface baselines of each contrast (`text_word`, `text_char` and
+    `popularity`, see `surface_baselines`), computed on the CPU before the
+    forward pass, so a reader AUROC can be read against what the wording and
+    the popularity of the questions give alone.
 
     Args:
         config: The experiment settings.
@@ -244,8 +255,9 @@ def execute(
         ValueError: If `n_seeds` is below 1, `methods` is empty, `n_pairs` is
             below 2 or `min_eval` is below 1, if the template is unknown,
             `config.types` names a contrast that does not exist (or one the
-            gate excludes), no contrast is usable, or `config.layer` is not
-            among the layers. Nothing runs through the model before these.
+            gate excludes), no contrast is usable, a surface baseline cannot
+            be computed, or `config.layer` is not among the layers. Nothing
+            runs through the model before these.
     """
     for message, ok in (
         ("n_seeds must be at least 1", config.n_seeds >= 1),
@@ -257,6 +269,7 @@ def execute(
             raise ValueError(message)
     template = p9_template(config.template, DEFAULT_SHOTS[: config.n_shots])
     usable, skipped = _usable_pools(config, items, known_contrasts)
+    baselines = {name: surface_baselines(pool) for name, pool in usable.items()}
     layers = (
         tuple(range(1, loaded.n_layers + 1))
         if config.layers is None
@@ -347,8 +360,9 @@ def execute(
                 "lo",
                 "hi",
                 *cube.methods[1:],
+                *SURFACE_BASELINES,
             ],
-            "rows": _table_rows(cube, usable, k, config.seed),
+            "rows": _table_rows(cube, usable, baselines, k, config.seed),
         },
     )
     run_dir.write_json(
