@@ -25,6 +25,7 @@ from tomography.datasets.stimulus import build_stimulus_set
 from tomography.datasets.wikitext import load_wikitext
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.c1_sentiment_steering import check_pair_count
 from tomography.experiments.c1_sentiment_steering import dose_with_none
 from tomography.experiments.c1_sentiment_steering import draw_prompts
 from tomography.experiments.c1_sentiment_steering import prompt_fragments
@@ -219,12 +220,12 @@ def _check_pair_counts(config: Config, scenarios: Sequence[Example]) -> None:
         labels = np.array([e.label for e in scenarios if e.split == split])
         for emotion in config.emotions:
             target = int(np.sum(labels == EMOTIONS.index(emotion)))
-            available = min(target, len(labels) - target)
-            if (1 if wanted is None else wanted) > available:
-                raise ValueError(
-                    f"{name} is {wanted} but at most {available} pairs exist "
-                    f"for {emotion!r} in the {split} split"
-                )
+            check_pair_count(
+                name,
+                wanted,
+                min(target, len(labels) - target),
+                f"for {emotion!r} in the {split} split",
+            )
 
 
 def _fit_readers(

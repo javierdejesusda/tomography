@@ -335,6 +335,47 @@ def judge_agreement(
     return float(np.mean(np.sign(first[both]) == np.sign(second[both])))
 
 
+def check_pair_count(
+    name: str, wanted: int | None, available: int, where: str
+) -> None:
+    """Checks that a split can form the pairs a setting asks for.
+
+    Args:
+        name: The setting, as the message names it.
+        wanted: Pairs asked for; None means every pair, which needs at least
+            one.
+        available: Pairs the split can form.
+        where: Where the pairs are drawn from, as the message words it.
+
+    Raises:
+        ValueError: If `wanted` is below 1 or above `available`, or is None
+            while no pair can be formed.
+    """
+    if wanted is not None and wanted < 1:
+        raise ValueError(f"{name} must be at least 1 or None, got {wanted}")
+    if (1 if wanted is None else wanted) > available:
+        raise ValueError(
+            f"{name} is {wanted} but at most {available} pairs exist {where}"
+        )
+
+
+def _check_pair_counts(
+    config: Config, train: Sequence[Example], val: Sequence[Example]
+) -> None:
+    """Checks that each split forms the pairs the settings ask for."""
+    for split, name, wanted, examples in (
+        ("train", "n_pairs", config.n_pairs, train),
+        ("val", "n_eval_pairs", config.n_eval_pairs, val),
+    ):
+        positive = sum(e.label == 1 for e in examples)
+        check_pair_count(
+            name,
+            wanted,
+            min(positive, len(examples) - positive),
+            f"in the {split} split",
+        )
+
+
 def _stimuli(
     examples: Sequence[Example],
     chat_format: ChatFormat,
@@ -670,6 +711,7 @@ def execute(
     )
     train = select_examples(sst2, split="train", min_words=config.min_words)
     val = select_examples(sst2, split="val", min_words=config.min_words)
+    _check_pair_counts(config, train, val)
     select_prompts, report_prompts = draw_prompts(
         prompt_fragments([e.text for e in val], config.truncate_words),
         config.n_prompts,
