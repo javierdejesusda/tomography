@@ -19,6 +19,7 @@ from typing import Self
 import numpy as np
 from numpy.typing import NDArray
 
+from tomography.control.contrast import PromptDifference
 from tomography.control.controllers import CoeffMode
 from tomography.control.controllers import ReadingVectorController
 from tomography.control.controllers import ResponseMask
@@ -481,9 +482,13 @@ def _build_arm(
     bos_id = scoring_bos(loaded)
     greedy = settings.temperature is None
 
-    def scoring_context() -> contextlib.AbstractContextManager[None]:
+    def scoring_context(
+        prompt_length: int | None = None,
+    ) -> contextlib.AbstractContextManager[None]:
         if controller is None:
             return contextlib.nullcontext()
+        if isinstance(controller, PromptDifference):
+            return edit_residuals(loaded, controller.edits(prompt_length))
         return edit_residuals(loaded, controller.edits(1))
 
     def generate_all(prompts: Sequence[str]) -> list[list[Completion]]:
@@ -501,18 +506,47 @@ def _build_arm(
             batch_size=settings.batch_size,
         )
 
+    def score(
+        texts: Sequence[str], continuations: Sequence[str]
+    ) -> NDArray[np.float32]:
+        return sequence_logprob(
+            loaded.model,
+            loaded.tokenizer,
+            texts,
+            continuations,
+            batch_size=settings.batch_size,
+            bos_id=bos_id,
+        )
+
+    def score_by_prompt_length(
+        texts: Sequence[str], continuations: Sequence[str]
+    ) -> NDArray[np.float32]:
+        if len(texts) != len(continuations):
+            raise ValueError(
+                "prompts and continuations must have the same length"
+            )
+        if not texts:
+            return np.zeros(0, dtype=np.float32)
+        tokens = loaded.tokenizer(list(texts), add_special_tokens=False)
+        offset = 0 if bos_id is None else 1
+        lengths = [offset + len(ids) for ids in tokens["input_ids"]]
+        scores = np.zeros(len(texts), dtype=np.float32)
+        for length in sorted(set(lengths)):
+            rows = [i for i, n in enumerate(lengths) if n == length]
+            with scoring_context(length):
+                scores[rows] = score(
+                    [texts[i] for i in rows], [continuations[i] for i in rows]
+                )
+        return scores
+
     def logprobs(
         prompts: Sequence[str], continuations: Sequence[str]
     ) -> NDArray[np.float32]:
+        texts = [prefix + prompt for prompt in prompts]
+        if isinstance(controller, PromptDifference):
+            return score_by_prompt_length(texts, continuations)
         with scoring_context():
-            return sequence_logprob(
-                loaded.model,
-                loaded.tokenizer,
-                [prefix + prompt for prompt in prompts],
-                continuations,
-                batch_size=settings.batch_size,
-                bos_id=bos_id,
-            )
+            return score(texts, continuations)
 
     def neutral_perplexity(texts: Sequence[str]) -> float:
         with scoring_context():
@@ -570,6 +604,13 @@ def edit_arm(
     Generation passes the controller to `generate` as its edit factory.
     Scoring runs under `controller.edits(1)`, so a `response` mask edits
     every real token there, as a deployed vector would.
+
+    A `PromptDifference` is position local and capped by the prompt length,
+    so `edits(1)` would edit only token 0, whose difference is zero under a
+    BOS. Its log-probabilities are scored in groups of equal prompt length,
+    each under `edits(length)`, the edit that generation applies to the
+    prompt; its neutral perplexity runs under `edits()`, which steers the
+    first `k` tokens of every text.
 
     Args:
         loaded: The wrapped model.
