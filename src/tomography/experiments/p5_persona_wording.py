@@ -326,13 +326,13 @@ def _check(
     return test_rows
 
 
-def _plan(
+def _train_sets(
     config: Config,
     condition: str,
     by_split: Mapping[str, Sequence[Example]],
     chat: ChatFormat,
-) -> tuple[list[StimulusSet], dict[str, StimulusSet]]:
-    train = [
+) -> list[StimulusSet]:
+    return [
         condition_stimuli(
             condition,
             by_split["train"],
@@ -343,8 +343,14 @@ def _plan(
         )
         for i in range(config.n_seeds)
     ]
-    if condition == "fact_only":
-        return train, {}
+
+
+def _id_sets(
+    config: Config,
+    condition: str,
+    by_split: Mapping[str, Sequence[Example]],
+    chat: ChatFormat,
+) -> dict[str, StimulusSet]:
     evals = {}
     for name, split in (("id_val", "val"), ("id", "test")):
         statements = by_split[split]
@@ -361,7 +367,7 @@ def _plan(
             seed=derive_seed(config.seed, "eval", "id", split),
             train=False,
         )
-    return train, evals
+    return evals
 
 
 def _prepare(
@@ -387,24 +393,28 @@ def _fit_condition(
     loaded: LoadedModel,
     layers: tuple[int, ...],
     condition: str,
-    plan: tuple[list[StimulusSet], dict[str, StimulusSet]],
+    train: Sequence[StimulusSet],
+    by_split: Mapping[str, Sequence[Example]],
+    chat: ChatFormat,
     shared: Mapping[str, Prepared],
 ) -> SweepResult:
-    train, evals = plan
     where = condition_position(condition, config.position)
-    where_eval = condition_position(
-        condition,
-        config.position
-        if config.eval_position is None
-        else config.eval_position,
-    )
     trained = [_prepare(config, loaded, layers, s, where) for s in train]
-    own = {
-        name: _prepare(config, loaded, layers, stimuli, where_eval)
-        for name, stimuli in evals.items()
-    }
     if condition == "fact_only":
         own = {"id_val": shared["facts_val"], "id": shared["facts"]}
+    else:
+        where_eval = condition_position(
+            condition,
+            config.position
+            if config.eval_position is None
+            else config.eval_position,
+        )
+        own = {
+            name: _prepare(config, loaded, layers, stimuli, where_eval)
+            for name, stimuli in _id_sets(
+                config, condition, by_split, chat
+            ).items()
+        }
     return sweep_from_activations(
         trained,
         {**own, **shared},
@@ -528,7 +538,7 @@ def execute(
             ),
         )
     }
-    plans = {c: _plan(config, c, by_split, chat) for c in conditions}
+    trains = {c: _train_sets(config, c, by_split, chat) for c in conditions}
     layers = (
         tuple(range(1, loaded.n_layers + 1))
         if config.layers is None
@@ -543,7 +553,14 @@ def execute(
     oriented = {}
     for condition in conditions:
         result = _fit_condition(
-            config, loaded, layers, condition, plans[condition], shared
+            config,
+            loaded,
+            layers,
+            condition,
+            trains[condition],
+            by_split,
+            chat,
+            shared,
         )
         for name in names:
             accuracy[name].append(result.per_seed(name)[_READER])

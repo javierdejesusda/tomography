@@ -797,7 +797,9 @@ def test_the_conditions_draw_their_stimuli_per_seed_and_split(
                 )
                 for split in ("val", "test")
             ]
-    assert [c[:5] for c in calls] == expected
+    assert sorted((c[:5] for c in calls), key=repr) == sorted(
+        expected, key=repr
+    )
 
 
 def test_every_persona_condition_trains_on_the_same_statements(
