@@ -226,8 +226,8 @@ def _models(config: Config) -> list[str]:
     return models
 
 
-def _check(config: Config, runs: Mapping[tuple[str, str], RunDir]) -> None:
-    """Checks the config and the inputs before anything is read."""
+def _check_config(config: Config) -> None:
+    """Checks the settings alone, so that no run is looked up for a bad one."""
     _pairs(config)
     if not config.tuned_models:
         raise ValueError("at least one pair of models is needed")
@@ -252,6 +252,12 @@ def _check(config: Config, runs: Mapping[tuple[str, str], RunDir]) -> None:
         )
     if len(set(models)) != len(models):
         raise ValueError(f"each model may appear only once, got {models}")
+
+
+def _check(config: Config, runs: Mapping[tuple[str, str], RunDir]) -> None:
+    """Checks the config and the inputs before anything is read."""
+    _check_config(config)
+    sources, models = _sources(config), _models(config)
     needed = [(source, model) for source in sources for model in models]
     if config.template_source is not None:
         needed += [(config.template_source, model) for model in models]
@@ -596,7 +602,12 @@ def run(config: Config, run_dir: RunDir) -> None:
         config: The experiment settings.
         run_dir: The run to write into; the source runs are looked up in its
             out root.
+
+    Raises:
+        ValueError: If the settings are not valid. This is checked before any
+            run is looked up.
     """
+    _check_config(config)
     out_root = out_root_of(run_dir)
     experiments = _sources(config)
     if config.template_source is not None:

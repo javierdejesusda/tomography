@@ -191,12 +191,8 @@ def steering_slopes(run: RunDir) -> NDArray[np.float64]:
     )
 
 
-def _check(
-    config: Config,
-    runs: Mapping[tuple[str, str], RunDir],
-    n_params: Mapping[str, int],
-) -> None:
-    """Checks the config and the inputs before anything is read."""
+def _check_config(config: Config) -> None:
+    """Checks the settings alone, so that no run is looked up for a bad one."""
     if config.model not in config.models:
         raise ValueError(
             f"model {config.model!r} must be one of models {config.models}"
@@ -213,6 +209,15 @@ def _check(
         )
     if len(set(config.sources)) != len(config.sources):
         raise ValueError(f"sources must not repeat, got {config.sources}")
+
+
+def _check(
+    config: Config,
+    runs: Mapping[tuple[str, str], RunDir],
+    n_params: Mapping[str, int],
+) -> None:
+    """Checks the config and the inputs before anything is read."""
+    _check_config(config)
     experiments = list(config.sources)
     if config.steering_source is not None:
         experiments.append(config.steering_source)
@@ -391,7 +396,12 @@ def run(config: Config, run_dir: RunDir) -> None:
         config: The experiment settings.
         run_dir: The run to write into; the source runs are looked up in its
             out root.
+
+    Raises:
+        ValueError: If the settings are not valid. This is checked before any
+            run is looked up.
     """
+    _check_config(config)
     experiments = list(config.sources)
     if config.steering_source is not None:
         experiments.append(config.steering_source)

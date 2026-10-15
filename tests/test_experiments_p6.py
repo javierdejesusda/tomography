@@ -501,29 +501,31 @@ def test_the_summary_names_the_run_and_the_accuracy_per_decade(
     assert per_decade["r2"] == pytest.approx(0.10)
 
 
+BAD_CONFIGS = [
+    ({"model": "other"}, "model"),
+    ({"models": ("s3",)}, "models"),
+    ({"models": tuple(f"s{i}" for i in range(9))}, "models"),
+    ({"models": ("s3", "s3", "s6")}, "models"),
+    ({"sources": ()}, "sources"),
+    (
+        {"sources": ("r1", "r2", "r3", "r4", "r5", "r6", "r7")},
+        "sources",
+    ),
+    ({"sources": ("r1", "r1")}, "sources"),
+]
+BAD_CONFIG_IDS = [
+    "model-outside",
+    "one-model",
+    "nine-models",
+    "repeated-model",
+    "no-source",
+    "seven-sources",
+    "repeated-source",
+]
+
+
 @pytest.mark.parametrize(
-    ("overrides", "message"),
-    [
-        ({"model": "other"}, "model"),
-        ({"models": ("s3",)}, "models"),
-        ({"models": tuple(f"s{i}" for i in range(9))}, "models"),
-        ({"models": ("s3", "s3", "s6")}, "models"),
-        ({"sources": ()}, "sources"),
-        (
-            {"sources": ("r1", "r2", "r3", "r4", "r5", "r6", "r7")},
-            "sources",
-        ),
-        ({"sources": ("r1", "r1")}, "sources"),
-    ],
-    ids=[
-        "model-outside",
-        "one-model",
-        "nine-models",
-        "repeated-model",
-        "no-source",
-        "seven-sources",
-        "repeated-source",
-    ],
+    ("overrides", "message"), BAD_CONFIGS, ids=BAD_CONFIG_IDS
 )
 def test_execute_rejects_a_bad_config_before_reading_anything(
     tmp_path: Path, overrides: dict[str, Any], message: str
@@ -536,6 +538,26 @@ def test_execute_rejects_a_bad_config_before_reading_anything(
         execute(config, run_dir, runs, PARAMS)
 
     assert not list(run_dir.path.glob("*.npz"))
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"), BAD_CONFIGS, ids=BAD_CONFIG_IDS
+)
+def test_run_rejects_a_bad_config_before_it_looks_for_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, Any],
+    message: str,
+) -> None:
+    def resolve(*args: Any, **kwargs: Any) -> dict[tuple[str, str], RunDir]:
+        raise AssertionError("no run should be looked up")
+
+    monkeypatch.setattr(p6_scale, "resolve_runs", resolve)
+    config = _config(**overrides)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match=message):
+        run(config, run_dir)
 
 
 def test_execute_names_a_missing_run(tmp_path: Path) -> None:

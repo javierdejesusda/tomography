@@ -599,45 +599,47 @@ def test_the_summary_names_the_pairs_sources_and_models(
     assert summary["models"] == ["b3", "t3", "b6", "t6", "ref"]
 
 
+BAD_CONFIGS = [
+    ({"model": "ref"}, "must be one of tuned_models"),
+    ({"base_models": ("b3",)}, "same length"),
+    ({"base_models": (), "tuned_models": ()}, "at least one pair"),
+    ({"concept_sources": ()}, "concept_sources"),
+    ({"function_sources": ()}, "function_sources"),
+    (
+        {
+            "concept_sources": ("r1", "r2", "r3", "r4", "r6", "r7"),
+            "function_sources": ("r5",),
+        },
+        "at most 6",
+    ),
+    ({"function_sources": ("r1",)}, "only once"),
+    ({"base_models": ("b3", "b3")}, "only once"),
+    ({"reference": "b3"}, "only once"),
+    (
+        {
+            "base_models": tuple(f"b{i}" for i in range(4)),
+            "tuned_models": tuple(f"t{i}" for i in range(4)),
+            "model": "t0",
+        },
+        "at most 8",
+    ),
+]
+BAD_CONFIG_IDS = [
+    "model-not-tuned",
+    "unpaired",
+    "no-pair",
+    "no-concept",
+    "no-function",
+    "seven-sources",
+    "source-of-both-kinds",
+    "repeated-base",
+    "reference-is-a-base",
+    "nine-models",
+]
+
+
 @pytest.mark.parametrize(
-    ("overrides", "message"),
-    [
-        ({"model": "ref"}, "must be one of tuned_models"),
-        ({"base_models": ("b3",)}, "same length"),
-        ({"base_models": (), "tuned_models": ()}, "at least one pair"),
-        ({"concept_sources": ()}, "concept_sources"),
-        ({"function_sources": ()}, "function_sources"),
-        (
-            {
-                "concept_sources": ("r1", "r2", "r3", "r4", "r6", "r7"),
-                "function_sources": ("r5",),
-            },
-            "at most 6",
-        ),
-        ({"function_sources": ("r1",)}, "only once"),
-        ({"base_models": ("b3", "b3")}, "only once"),
-        ({"reference": "b3"}, "only once"),
-        (
-            {
-                "base_models": tuple(f"b{i}" for i in range(4)),
-                "tuned_models": tuple(f"t{i}" for i in range(4)),
-                "model": "t0",
-            },
-            "at most 8",
-        ),
-    ],
-    ids=[
-        "model-not-tuned",
-        "unpaired",
-        "no-pair",
-        "no-concept",
-        "no-function",
-        "seven-sources",
-        "source-of-both-kinds",
-        "repeated-base",
-        "reference-is-a-base",
-        "nine-models",
-    ],
+    ("overrides", "message"), BAD_CONFIGS, ids=BAD_CONFIG_IDS
 )
 def test_execute_rejects_a_bad_config_before_reading_anything(
     tmp_path: Path, overrides: dict[str, Any], message: str
@@ -650,6 +652,26 @@ def test_execute_rejects_a_bad_config_before_reading_anything(
         execute(config, run_dir, runs)
 
     assert not list(run_dir.path.glob("*.npz"))
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"), BAD_CONFIGS, ids=BAD_CONFIG_IDS
+)
+def test_run_rejects_a_bad_config_before_it_looks_for_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, Any],
+    message: str,
+) -> None:
+    def resolve(*args: Any, **kwargs: Any) -> dict[tuple[str, str], RunDir]:
+        raise AssertionError("no run should be looked up")
+
+    monkeypatch.setattr(p8_tuning, "resolve_runs", resolve)
+    config = _config(**overrides)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match=message):
+        run(config, run_dir)
 
 
 def test_execute_names_a_missing_run(tmp_path: Path) -> None:
