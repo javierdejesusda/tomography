@@ -29,8 +29,11 @@ from typing import get_args
 import numpy as np
 from numpy.typing import NDArray
 
+from tomography.control.controllers import CoeffMode
 from tomography.control.controllers import ReadingVectorController
+from tomography.control.controllers import ResponseMask
 from tomography.control.controllers import mean_residual_norms
+from tomography.control.operators import Operator
 from tomography.experiments.base import RunDir
 from tomography.experiments.intervals import write_interval_curves
 from tomography.experiments.p9a_labels import load_labeled
@@ -75,7 +78,10 @@ RANDOM = "random"
 STEERING_ARM = f"{LAT}0"
 METRICS = ("entropy", "answer_logprob")
 SIDES = ("known", "unknown")
-XLABEL = "Relative coefficient"
+XLABELS: Mapping[CoeffMode, str] = {
+    "relative": "Relative coefficient",
+    "absolute": "Coefficient",
+}
 
 SHIFT_COLUMNS = [
     "type",
@@ -190,9 +196,10 @@ class Config(SteeringConfig):
             ValueError: If `coeffs` lacks 0.0 (the unsteered reference)
                 or holds a non-finite value, `n_random`, `n_prompts`,
                 `n_pairs`, `min_pairs` or `min_eval` is below 1,
-                `behavior` is not one of the three modes, or a generation
-                setting is invalid (see `GenSettings`). Every behavior is
-                held to the same generation settings.
+                `behavior` is not one of the three modes, `mode`, `op` or
+                `mask` is not a known value, or a generation setting is
+                invalid (see `GenSettings`). Every behavior is held to the
+                same generation settings.
         """
         if 0.0 not in self.coeffs:
             raise ValueError(
@@ -217,6 +224,16 @@ class Config(SteeringConfig):
                 f"behavior must be one of {get_args(Behavior)}, "
                 f"got {self.behavior!r}"
             )
+        for name, kinds in (
+            ("mode", CoeffMode),
+            ("op", Operator),
+            ("mask", ResponseMask),
+        ):
+            if getattr(self, name) not in get_args(kinds):
+                raise ValueError(
+                    f"{name} must be one of {get_args(kinds)}, "
+                    f"got {getattr(self, name)!r}"
+                )
         GenSettings.from_config(self)
 
 
@@ -526,6 +543,7 @@ def _write_arm_curves(
     *,
     n_random: int,
     coeffs: Sequence[float],
+    xlabel: str,
     ylabel: str,
 ) -> None:
     """Writes the four series of one curves file; writes nothing if empty.
@@ -541,6 +559,7 @@ def _write_arm_curves(
             coefficient); a missing cell has no entry.
         n_random: Number of random arms.
         coeffs: The x values.
+        xlabel: Label of the x axis.
         ylabel: Label of the y axis.
     """
     arms = arm_names(n_random)
@@ -574,7 +593,7 @@ def _write_arm_curves(
             np.stack(stacks[2]),
             series=names,
             stem=stem,
-            xlabel=XLABEL,
+            xlabel=xlabel,
             ylabel=ylabel,
         )
 
@@ -692,6 +711,7 @@ def _run_shift(
                 cells.get((group.name, metric), {}),
                 n_random=config.n_random,
                 coeffs=config.coeffs,
+                xlabel=XLABELS[config.mode],
                 ylabel=f"Shift in {metric}",
             )
     run_dir.write_json(
@@ -828,6 +848,7 @@ def _run_abstention(
             cells,
             n_random=config.n_random,
             coeffs=config.coeffs,
+            xlabel=XLABELS[config.mode],
             ylabel="Abstention rate",
         )
     records = [

@@ -255,6 +255,9 @@ def test_labels_run_is_required() -> None:
         ({"temperature": 0.8, "top_p": 1.5}, "top_p"),
         ({"max_new_tokens": 0}, "max_new_tokens"),
         ({"batch_size": 0}, "batch_size"),
+        ({"mode": "fractional"}, "mode must be one of"),
+        ({"op": "cubic"}, "op must be one of"),
+        ({"mask": "first"}, "mask must be one of"),
     ],
     ids=[
         "no_zero",
@@ -272,6 +275,9 @@ def test_labels_run_is_required() -> None:
         "large_top_p",
         "no_new_tokens",
         "no_batch",
+        "bad_mode",
+        "bad_operator",
+        "bad_mask",
     ],
 )
 def test_config_rejects_settings_that_would_fail_late(
@@ -1137,6 +1143,30 @@ def test_the_hand_check_alternates_between_abstained_and_answered(
                 ("-0.2", True),
                 ("0.2", False),
             }
+
+
+def test_the_abstention_x_label_names_the_coefficient_mode(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _canned_run(
+        tiny_qwen3, tmp_path, monkeypatch, _planted, mode="absolute"
+    )
+
+    sidecar = run_dir.read_json("curves_obscure_real")
+    assert isinstance(sidecar, dict)
+    assert sidecar["xlabel"] == "Coefficient"
+
+
+def test_the_shift_x_label_names_the_coefficient_mode(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _execute(
+        tiny_arch, tmp_path, eval_types=SHIFT_TYPES, mode="absolute"
+    )
+
+    sidecar = run_dir.read_json("curves_obscure_real_entropy")
+    assert isinstance(sidecar, dict)
+    assert sidecar["xlabel"] == "Coefficient"
 
 
 def test_the_arms_are_built_with_the_config_settings(
