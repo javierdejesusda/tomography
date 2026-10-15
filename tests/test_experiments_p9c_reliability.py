@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import dataclasses
 from pathlib import Path
 import time
+import types
 from typing import Any
 import zlib
 
@@ -40,8 +41,10 @@ from tomography.p9.reading import fit_type_reader
 from tomography.p9.reading import p9_template
 from tomography.p9.risk import aurc
 from tomography.p9.risk import auroc_ci
+from tomography.p9.signals import item_signals
 from tomography.p9.unknowns import type_pools
 from tomography.reading.metrics import auroc
+from tomography.reading.reader import RepReader
 
 SPLITS: tuple[Split, ...] = ("train", "train", "train", "val", "test")
 RELATIONS = ("father", "mother", "occupation")
@@ -292,6 +295,50 @@ def _fake_collect(
     return fake
 
 
+def _noise_collect(d_model: int) -> Callable[..., ItemActivations]:
+    def fake(
+        loaded: LoadedModel,
+        items: Sequence[LabeledItem],
+        template: Any,
+        chat: Any,
+        *,
+        layers: Sequence[int],
+        bos: Any = None,
+        batch_size: int = 8,
+    ) -> ItemActivations:
+        data = np.zeros((len(layers), len(items), d_model), dtype=np.float32)
+        for j, item in enumerate(items):
+            rng = np.random.default_rng(zlib.crc32(item.example.uid.encode()))
+            data[:, j] = rng.standard_normal((len(layers), d_model))
+        return ItemActivations(
+            tuple(i.example.uid for i in items), tuple(layers), data
+        )
+
+    return fake
+
+
+def _flip_test_popularity(
+    items: Sequence[LabeledItem],
+) -> list[LabeledItem]:
+    flipped = []
+    for item in items:
+        if (
+            item.example.split == "test"
+            and item.example.meta["popularity"] is not None
+        ):
+            i = int(item.example.uid.split(":")[1])
+            pop = 10 ** (1 + (3 if item.label.greedy_correct else 0) + i % 2)
+            meta: dict[str, MetaValue] = {
+                **item.example.meta,
+                "popularity": pop,
+            }
+            item = dataclasses.replace(
+                item, example=dataclasses.replace(item.example, meta=meta)
+            )
+        flipped.append(item)
+    return flipped
+
+
 @pytest.fixture
 def planted(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Replaces the collection by planted activations; records each call."""
@@ -357,12 +404,16 @@ def _labels_run(
     *,
     known_contrasts: bool = True,
     finish: bool = True,
+    n_shots: int = 2,
 ) -> RunDir:
     run_dir = RunDir.create(
         LabelsConfig(model="tiny"), out_root=tmp_path / "labels"
     )
     run_dir.write_json("items", pool_records(items))
-    run_dir.write_json("summary", {"known_contrasts": known_contrasts})
+    run_dir.write_json(
+        "summary",
+        {"known_contrasts": known_contrasts, "recipe": {"n_shots": n_shots}},
+    )
     if finish:
         run_dir.finalize()
     return run_dir
@@ -1315,6 +1366,137 @@ def test_template_scores_the_smoothed_train_accuracy_of_the_relation(
     assert _row(_table(planted_run), "popqa", "template")["auroc"] > 0.85
 
 
+def test_noise_activations_add_nothing_beyond_the_confidence(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        p9c_reliability, "collect_item_activations", _noise_collect(512)
+    )
+    items = [
+        *_popqa(600),
+        *_open("triviaqa", 300),
+        *_open("nq_open", 300),
+        *_fictional(100),
+    ]
+
+    run_dir = _execute(tiny_gpt2, tmp_path, items=items)
+
+    rows = _rows(run_dir, "table_incremental", INCREMENTAL_COLUMNS)
+    probe = [r for r in rows if r["features"] == "confidence+probe"]
+    lat = [
+        r
+        for r in rows
+        if r["features"] == "confidence+lat" and r["dataset"] == "popqa"
+    ]
+    assert len(probe) == 3
+    assert len(lat) == 1
+    for row in probe:
+        assert row["lo"] <= 0.0 <= row["hi"], row
+        assert abs(row["diff_vs_confidence"]) < 0.05, row
+    assert abs(lat[0]["diff_vs_confidence"]) < 0.02, lat[0]
+
+
+def test_the_stacker_is_fitted_on_the_validation_rows(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    planted: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+    real = p9c_reliability.stack_scores
+
+    def spy(
+        train_x: np.ndarray, train_y: np.ndarray, test_x: np.ndarray, **kw: Any
+    ) -> np.ndarray:
+        calls.append((train_x, train_y, test_x))
+        return real(train_x, train_y, test_x, **kw)
+
+    monkeypatch.setattr(p9c_reliability, "stack_scores", spy)
+
+    _execute(tiny_gpt2, tmp_path, datasets=("popqa",))
+
+    popqa = _behavior(_items(), "popqa")
+    val = [i for i in popqa if i.example.split == "val"]
+    test = _test(popqa)
+    first = item_signals(
+        tiny_gpt2, popqa, shots=DEFAULT_SHOTS[:2], batch_size=16
+    )["first_token_prob"]
+    split = np.array([i.example.split for i in popqa])
+    assert len(calls) == 3
+    for train_x, train_y, test_x in calls:
+        np.testing.assert_array_equal(train_y, _correct(val))
+        assert train_x.shape[0] == len(val)
+        assert test_x.shape[0] == len(test)
+        np.testing.assert_allclose(
+            train_x[:, 0], first[split == "val"], atol=1e-5
+        )
+        np.testing.assert_allclose(
+            test_x[:, 0], first[split == "test"], atol=1e-5
+        )
+
+
+def test_the_probe_is_fitted_on_the_train_rows_only(
+    tiny_gpt2: LoadedModel, planted_run: RunDir
+) -> None:
+    popqa = _behavior(_items(), "popqa")
+    train = [i for i in popqa if i.example.split == "train"]
+    test = _test(popqa)
+    acts = _planted_acts(popqa, (1, 2, 3), tiny_gpt2.d_model)
+    probe = RepReader.fit(
+        "logistic",
+        acts.data[1:2, acts.rows(train)],
+        (2,),
+        labels=_correct(train),
+    )
+    expected = probe.score(acts.data[1:2, acts.rows(test)])[0]
+
+    arrays = planted_run.read_arrays("signals_popqa")
+
+    assert _summary(planted_run)["layer"] == 2
+    np.testing.assert_allclose(arrays["probe"], expected, rtol=1e-4, atol=1e-5)
+
+
+def test_a_control_follows_the_train_orientation_not_the_test_one(
+    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+) -> None:
+    items = [*_flip_test_popularity(_popqa()), *_open("nq_open")]
+
+    run_dir = _execute(
+        tiny_gpt2, tmp_path, items=items, datasets=("popqa", "nq_open")
+    )
+
+    assert _row(_table(run_dir), "popqa", "popularity")["auroc"] < 0.5
+
+
+@pytest.mark.parametrize("known_contrasts", [True, False])
+def test_the_all_layer_probe_is_fitted_once(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    planted: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    known_contrasts: bool,
+) -> None:
+    shapes: list[tuple[int, ...]] = []
+    real = p9c_reliability.RepReader.fit
+
+    def spy(method: Any, h: np.ndarray, layers: Any, **kw: Any) -> Any:
+        shapes.append(h.shape[:2])
+        return real(method, h, layers, **kw)
+
+    monkeypatch.setattr(
+        p9c_reliability, "RepReader", types.SimpleNamespace(fit=spy)
+    )
+    n_train = sum(
+        i.example.split == "train" for i in _behavior(_items(), "popqa")
+    )
+
+    _execute(tiny_gpt2, tmp_path, known_contrasts=known_contrasts)
+
+    assert shapes.count((3, n_train)) == 1
+
+
 def test_execute_is_deterministic(
     tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
 ) -> None:
@@ -1331,16 +1513,39 @@ def test_execute_is_deterministic(
     )
 
 
-def test_a_dataset_that_names_a_missing_group_is_skipped(
+def test_a_dataset_without_behavior_items_has_its_own_reason(
     tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
 ) -> None:
     run_dir = _execute(
         tiny_gpt2, tmp_path, datasets=("popqa", "triviaqa", "falseqa")
     )
 
-    assert _summary(run_dir)["skipped"] == {
-        "falseqa": "the train split does not hold both outcomes"
-    }
+    assert _summary(run_dir)["skipped"] == {"falseqa": "no behavior items"}
+
+
+def test_a_group_of_construction_items_has_no_behavior_items(
+    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+) -> None:
+    items = [*_construction(), *_open("nq_open"), *_fictional()]
+
+    run_dir = _execute(
+        tiny_gpt2,
+        tmp_path,
+        items=items,
+        datasets=("popqa", "nq_open"),
+        known_contrasts=False,
+    )
+
+    assert _summary(run_dir)["skipped"] == {"popqa": "no behavior items"}
+
+
+def test_a_dataset_named_twice_is_rejected(
+    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+) -> None:
+    with pytest.raises(ValueError, match=r"duplicate.*popqa"):
+        _execute(tiny_gpt2, tmp_path, datasets=("popqa", "triviaqa", "popqa"))
+
+    assert not planted
 
 
 def test_run_reads_the_labels_and_the_gate(
@@ -1381,6 +1586,22 @@ def test_run_refuses_an_unfinished_labeling_run(
     run_dir = RunDir.create(config, out_root=tmp_path)
 
     with pytest.raises(ValueError, match="not a finished run"):
+        run(config, run_dir)
+
+
+def test_run_refuses_labels_made_with_other_shots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    labels = _labels_run(tmp_path, _items(), n_shots=15)
+
+    def never(name: str) -> LoadedModel:
+        raise AssertionError("the model must not load first")
+
+    monkeypatch.setattr(p9c_reliability, "load_model", never)
+    config = _config(labels_run=str(labels.path), n_shots=2)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match=r"n_shots.*15.*2"):
         run(config, run_dir)
 
 

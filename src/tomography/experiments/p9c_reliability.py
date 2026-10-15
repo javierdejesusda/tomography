@@ -214,12 +214,20 @@ def resolve_lat(
 def _split_datasets(
     config: Config, items: Sequence[LabeledItem]
 ) -> tuple[list[_Dataset], dict[str, str]]:
+    repeated = sorted(
+        {n for n in config.datasets if config.datasets.count(n) > 1}
+    )
+    if repeated:
+        raise ValueError(f"duplicate datasets in the config: {repeated}")
     usable: list[_Dataset] = []
     skipped: dict[str, str] = {}
     for name in config.datasets:
         rows = [
             i for i in items if i.group == name and i.label.basis == "behavior"
         ]
+        if not rows:
+            skipped[name] = "no behavior items"
+            continue
         correct = np.array(
             [i.label.greedy_correct for i in rows], dtype=np.int64
         )
@@ -250,14 +258,12 @@ def _choose_layer(
     h: NDArray[np.float32],
     layers: Sequence[int],
     reader: RepReader | None,
+    probe: RepReader,
 ) -> tuple[int, str]:
-    train, val = dataset.masks["train"], dataset.masks["val"]
+    val = dataset.masks["val"]
     if reader is not None:
         scores, source = reader.score(h), "validation"
     else:
-        probe = RepReader.fit(
-            "logistic", h[:, train], layers, labels=dataset.correct[train]
-        )
         scores, source = probe.score(h), "probe_validation"
     curve = auroc(scores[:, val].astype(np.float64), dataset.correct[val])
     return best_layer(curve, layers), source
@@ -333,12 +339,19 @@ def _incremental_rows(
     dataset: _Dataset,
     signals: dict[str, NDArray[np.float64]],
 ) -> list[list[object]]:
-    train, test = dataset.masks["train"], dataset.masks["test"]
+    """Rows of what `lat` and the probe add to the output confidence.
+
+    The readers were fitted on the train items, so their train scores are
+    in-sample and a stacker that learned its weights there would trust them
+    too much. The stacker is fitted on the validation rows, where every
+    column is out of sample, and the rows are scored on the test items.
+    """
+    fit, test = dataset.masks["val"], dataset.masks["test"]
     correct = dataset.correct
     columns = [c for c in CONFIDENCE if c in signals]
-    base_train = np.stack([signals[c][train] for c in columns], axis=1)
+    base_train = np.stack([signals[c][fit] for c in columns], axis=1)
     base_test = np.stack([signals[c][test] for c in columns], axis=1)
-    base = stack_scores(base_train, correct[train], base_test, seed=config.seed)
+    base = stack_scores(base_train, correct[fit], base_test, seed=config.seed)
     incremental: list[list[object]] = [
         [
             dataset.name,
@@ -353,8 +366,8 @@ def _incremental_rows(
         if extra not in signals:
             continue
         plus = stack_scores(
-            np.column_stack([base_train, signals[extra][train]]),
-            correct[train],
+            np.column_stack([base_train, signals[extra][fit]]),
+            correct[fit],
             np.column_stack([base_test, signals[extra][test]]),
             seed=config.seed,
         )
@@ -384,7 +397,7 @@ def _write_dataset(
     dataset: _Dataset,
     signals: dict[str, NDArray[np.float64]],
     n_filled: dict[str, int],
-) -> tuple[list[list[object]], list[list[object]]]:
+) -> list[list[object]]:
     test = dataset.masks["test"]
     correct = dataset.correct
     names = list(signals)
@@ -433,7 +446,7 @@ def _write_dataset(
         **{n: signals[n][test] for n in names},
         correct=correct[test],
     )
-    return table, _incremental_rows(config, dataset, signals)
+    return table
 
 
 def _write_layer_curves(
@@ -444,11 +457,9 @@ def _write_layer_curves(
     acts: ItemActivations,
     h: NDArray[np.float32],
     lat_pool: TypePool | None,
+    probe: RepReader,
 ) -> None:
-    train, test = dataset.masks["train"], dataset.masks["test"]
-    probe = RepReader.fit(
-        "logistic", h[:, train], acts.layers, labels=dataset.correct[train]
-    )
+    test = dataset.masks["test"]
     probe_curve = auroc(
         probe.score(h)[:, test].astype(np.float64), dataset.correct[test]
     )
@@ -506,12 +517,13 @@ def execute(
     train value (a missing answer is the least confident case). Writes
     `table` (the test AUROC, interval and AURC of every predictor),
     `table_incremental` (what `lat` and the probe add to the output
-    confidence, as a paired AUROC difference), `riskcov_<dataset>_outputs`
-    and `riskcov_<dataset>_controls` (the risk-coverage curves of the
-    panels), `signals_<dataset>` (the filled and oriented test signals and
-    the outcomes), `curves` (the test AUROC per layer of `lat` and the probe
-    on the first usable dataset; the probe is fitted there even when it is
-    below `min_probe`) and `summary`.
+    confidence, as a paired AUROC difference; the stacker is fitted on the
+    validation items because the readers were fitted on the train ones),
+    `riskcov_<dataset>_outputs` and `riskcov_<dataset>_controls` (the
+    risk-coverage curves of the panels), `signals_<dataset>` (the filled and
+    oriented test signals and the outcomes), `curves` (the test AUROC per
+    layer of `lat` and the probe on the first usable dataset; the probe is
+    fitted there even when it is below `min_probe`) and `summary`.
 
     Args:
         config: The experiment settings.
@@ -522,9 +534,9 @@ def execute(
             needs a known side.
 
     Raises:
-        ValueError: If the template is unknown, no dataset holds both
-            outcomes in every split, or `config.layer` is not among the
-            layers.
+        ValueError: If the template is unknown, `config.datasets` repeats a
+            name, no dataset holds both outcomes in every split, or
+            `config.layer` is not among the layers.
     """
     template = p9_template(config.template, DEFAULT_SHOTS[: config.n_shots])
     lat_pool, lat_skipped = resolve_lat(
@@ -571,9 +583,17 @@ def execute(
         )
     )
     hidden = {d.name: acts.data[:, acts.rows(d.items)] for d in datasets}
+    first = datasets[0]
+    train = first.masks["train"]
+    probe_all = RepReader.fit(
+        "logistic",
+        hidden[first.name][:, train],
+        acts.layers,
+        labels=first.correct[train],
+    )
     if config.layer is None:
         layer, source = _choose_layer(
-            datasets[0], hidden[datasets[0].name], acts.layers, reader
+            first, hidden[first.name], acts.layers, reader, probe_all
         )
     else:
         layer, source = config.layer, "config"
@@ -589,12 +609,17 @@ def execute(
         if reason is not None:
             probe_skipped[dataset.name] = reason
         signals, n_filled = _fill_and_orient(raw, dataset)
-        rows, plus = _write_dataset(config, run_dir, dataset, signals, n_filled)
-        table += rows
-        incremental += plus
-    first = datasets[0]
+        table += _write_dataset(config, run_dir, dataset, signals, n_filled)
+        incremental += _incremental_rows(config, dataset, signals)
     _write_layer_curves(
-        config, run_dir, loaded, first, acts, hidden[first.name], lat_pool
+        config,
+        run_dir,
+        loaded,
+        first,
+        acts,
+        hidden[first.name],
+        lat_pool,
+        probe_all,
     )
     run_dir.write_json("table", {"columns": TABLE_COLUMNS, "rows": table})
     run_dir.write_json(
@@ -626,9 +651,17 @@ def run(config: Config, run_dir: RunDir) -> None:
         run_dir: The run to write into.
 
     Raises:
-        ValueError: If `config.labels_run` is not a finished run.
+        ValueError: If `config.labels_run` is not a finished run, or it was
+            made with another number of shots than `config.n_shots`.
     """
     items, summary = load_labeled(config.labels_run)
+    labeled_shots = summary["recipe"]["n_shots"]
+    if labeled_shots != config.n_shots:
+        raise ValueError(
+            f"the labels run was made with n_shots {labeled_shots} but "
+            f"config.n_shots is {config.n_shots}; the signals must be scored "
+            "at the prompt the labels were made with"
+        )
     execute(
         config,
         run_dir,
