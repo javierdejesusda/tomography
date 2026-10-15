@@ -58,8 +58,9 @@ WORDS = {
 }
 
 
+LABEL_FITTING_METHODS = ("mean_diff", "logistic")
 LABEL_FREE_METHODS = tuple(
-    m for m in get_args(Method) if m not in LABEL_METHODS
+    m for m in get_args(Method) if m not in LABEL_FITTING_METHODS
 )
 
 PLAIN_CHAT = ChatFormat("plain")
@@ -957,8 +958,8 @@ def test_the_summary_describes_the_run(ran: RunDir) -> None:
     assert summary["n_seeds"] == 3
 
 
-def test_label_methods_are_methods() -> None:
-    assert set(LABEL_METHODS) <= set(get_args(Method))
+def test_label_methods_are_the_ones_that_fit_on_labels() -> None:
+    assert LABEL_METHODS == LABEL_FITTING_METHODS
 
 
 @pytest.mark.parametrize("method", LABEL_FREE_METHODS)
