@@ -353,23 +353,33 @@ def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
 
 
 def load_labeled(
-    run_path: str | Path,
+    run_path: str | Path, *, model: str | None = None
 ) -> tuple[list[LabeledItem], dict[str, Any]]:
     """Reads the labels of a finished P9a run.
 
     Args:
         run_path: The run directory.
+        model: The model the caller is about to read; None skips the check.
+            The known and unknown labels depend on the model that was asked,
+            so another model's labels must not feed its study.
 
     Returns:
         The labeled items, with their guess verdicts, and the summary.
 
     Raises:
-        ValueError: If the directory is not a run or the run is not
-            finished: an unfinished labeling run must not feed a study.
+        ValueError: If the directory is not a run, the run is not
+            finished (an unfinished labeling run must not feed a study), or
+            `model` is given and is not the model of the run.
     """
     run_dir = RunDir.open(run_path)
     if run_dir.meta.get("finished_at") is None:
         raise ValueError(f"{run_path} is not a finished run")
+    labeled_model = run_dir.config.get("model")
+    if model is not None and labeled_model != model:
+        raise ValueError(
+            f"{run_path} labeled {labeled_model!r}, not {model!r}: the known "
+            "and unknown labels depend on the model"
+        )
     records = cast(list[dict[str, object]], run_dir.read_json("items"))
     summary = cast(dict[str, Any], run_dir.read_json("summary"))
     return pool_from_records(records), summary

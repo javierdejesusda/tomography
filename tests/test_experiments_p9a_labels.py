@@ -670,6 +670,42 @@ def test_load_labeled_refuses_an_unfinished_run(
         load_labeled(run_dir.path)
 
 
+def test_load_labeled_refuses_a_run_of_another_model(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _planted_run(tiny_arch, tmp_path, monkeypatch)
+    run_dir.finalize()
+
+    with pytest.raises(ValueError, match=r"'tiny'.*'gpt2'"):
+        load_labeled(run_dir.path, model="gpt2")
+
+
+def test_load_labeled_accepts_the_model_of_the_run(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _planted_run(tiny_arch, tmp_path, monkeypatch)
+    run_dir.finalize()
+
+    items, _ = load_labeled(run_dir.path, model="tiny")
+
+    assert items
+
+
+def test_load_labeled_checks_the_finish_before_the_model(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _planted_run(tiny_arch, tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match="is not a finished run"):
+        load_labeled(run_dir.path, model="gpt2")
+
+
 def test_run_loads_the_model_and_the_default_loaders(
     tiny_arch: LoadedModel,
     tmp_path: Path,
