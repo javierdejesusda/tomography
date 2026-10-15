@@ -639,6 +639,10 @@ def test_the_strength_picks_the_coefficient_of_the_matrix(
         ({"window": 4}, "window"),
         ({"n_prompts": 100}, "pool"),
         ({"n_eval_pairs": 7}, "n_eval_pairs"),
+        ({"temperature": None}, "needs a temperature"),
+        ({"top_p": 1.5}, "top_p"),
+        ({"n_pairs": 0}, "n_pairs must be at least 1"),
+        ({"n_eval_pairs": -1}, "n_eval_pairs must be at least 1"),
     ],
     ids=[
         "one-emotion",
@@ -656,6 +660,10 @@ def test_the_strength_picks_the_coefficient_of_the_matrix(
         "window-too-wide",
         "prompt-pool-too-small",
         "eval-pairs-above-the-split",
+        "sampling-without-a-temperature",
+        "top-p-above-one",
+        "no-train-pairs",
+        "negative-eval-pairs",
     ],
 )
 def test_an_invalid_config_raises_before_the_model_runs(
@@ -716,6 +724,62 @@ def test_a_split_too_small_for_one_emotion_raises_before_any_reader_is_fitted(
         execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
 
 
+REAL_TRAIN = (117, 145, 117, 109, 124, 127)
+REAL_VAL = (48, 39, 41, 41, 41, 45)
+
+
+def _real_size_scenarios() -> list[Example]:
+    """Builds scenarios with the per-emotion split sizes of the real data."""
+    return [
+        Example(
+            uid=f"{emotion}-{split}{i}",
+            text=f"{emotion} scenario {i}",
+            label=label,
+            split=split,
+            meta={"emotion": emotion},
+        )
+        for label, emotion in enumerate(EMOTIONS)
+        for split, count in (
+            ("train", REAL_TRAIN[label]),
+            ("val", REAL_VAL[label]),
+        )
+        for i in range(count)
+    ]
+
+
+def test_the_default_config_draws_every_emotion_at_the_real_split_sizes(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class StopError(Exception):
+        pass
+
+    drawn: list[tuple[list[int], int]] = []
+
+    def fit(loaded: LoadedModel, train: Any, evals: Any, **kwargs: Any) -> Any:
+        drawn.append(
+            ([s.pairs.shape[0] for s in train], evals["val"].pairs.shape[0])
+        )
+        if len(drawn) == len(EMOTIONS):
+            raise StopError
+        return None
+
+    monkeypatch.setattr(c2_emotion_steering, "reading_sweep", fit)
+    config = Config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(StopError):
+        execute(
+            config,
+            run_dir,
+            tiny_arch,
+            _real_size_scenarios(),
+            _texts(600),
+            _score,
+        )
+    assert drawn == [([config.n_pairs] * config.n_seeds, n) for n in REAL_VAL]
+
+
 def test_the_other_emotions_cap_the_pairs_when_they_are_fewer(
     tiny_arch: LoadedModel,
     tmp_path: Path,
@@ -743,20 +807,40 @@ def test_the_other_emotions_cap_the_pairs_when_they_are_fewer(
         execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
 
 
-def test_every_val_pair_is_used_when_n_eval_pairs_is_none(
+def test_an_emotion_without_a_val_pair_raises_when_n_eval_pairs_is_none(
     tiny_arch: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    def reached(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a reader was fitted")
+
+    monkeypatch.setattr(c2_emotion_steering, "reading_sweep", reached)
+    config = _config(n_eval_pairs=None)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    scenarios = _keep_only(_scenarios(), "anger", "val", keep=0)
+    with pytest.raises(
+        ValueError, match=r"n_eval_pairs is None but at most 0 .*'anger'.*val"
+    ):
+        execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
+
+
+@pytest.mark.parametrize("keep", [1, 3])
+def test_every_val_pair_is_used_when_n_eval_pairs_is_none(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    keep: int,
+) -> None:
     calls = _spy_reading_sweep(monkeypatch)
     config = _config(n_eval_pairs=None)
     run_dir = RunDir.create(config, out_root=tmp_path)
-    scenarios = _keep_only(_scenarios(), "anger", "val", keep=3)
+    scenarios = _keep_only(_scenarios(), "anger", "val", keep=keep)
     execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
     sizes = [
         next(iter(call["evals"].values())).pairs.shape[0] for call in calls
     ]
-    assert sizes == [6, 6, 3]
+    assert sizes == [6, 6, keep]
 
 
 class StubJudge:
@@ -908,6 +992,10 @@ def _cached_judge(key: str) -> Any:
 @pytest.mark.slow
 def test_c2_on_gpt2_prints_both_matrices(tmp_path: Path) -> None:
     scenarios = _cached(lambda: load_emotions(offline=True))
+    for split, sizes in (("train", REAL_TRAIN), ("val", REAL_VAL)):
+        labels = [e.label for e in scenarios if e.split == split]
+        counts = np.bincount(labels, minlength=len(EMOTIONS))
+        assert counts.tolist() == list(sizes)
     texts = [e.text for e in _cached(lambda: load_wikitext(offline=True))]
     first = _cached_judge("emotion-primary")
     second = _cached_judge("emotion-secondary")

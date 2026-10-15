@@ -23,6 +23,7 @@ from tomography.experiments import c1_sentiment_steering
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.c1_sentiment_steering import Config
+from tomography.experiments.c1_sentiment_steering import check_pair_count
 from tomography.experiments.c1_sentiment_steering import default_sweep_layers
 from tomography.experiments.c1_sentiment_steering import dose_with_none
 from tomography.experiments.c1_sentiment_steering import draw_prompts
@@ -267,6 +268,34 @@ def test_draw_prompts_rejects_a_bad_size_or_a_short_pool(
 ) -> None:
     with pytest.raises(ValueError, match=r"n |sets|pool"):
         draw_prompts(POOL, n, sets=sets, seed=0)
+
+
+@pytest.mark.parametrize(
+    ("wanted", "available"),
+    [(None, 1), (None, 7), (1, 1), (3, 3), (2, 9)],
+    ids=["all-of-one", "all-of-many", "one-of-one", "exact", "fewer"],
+)
+def test_check_pair_count_accepts_what_the_split_can_form(
+    wanted: int | None, available: int
+) -> None:
+    check_pair_count("n_pairs", wanted, available, "in the train split")
+
+
+@pytest.mark.parametrize(
+    ("wanted", "available", "message"),
+    [
+        (None, 0, "n_eval_pairs is None but at most 0 pairs exist in the val"),
+        (4, 3, "n_eval_pairs is 4 but at most 3 pairs exist in the val split"),
+        (0, 3, "n_eval_pairs must be at least 1 or None, got 0"),
+        (-2, 3, "n_eval_pairs must be at least 1 or None, got -2"),
+    ],
+    ids=["none-without-a-pair", "above", "zero", "negative"],
+)
+def test_check_pair_count_names_the_setting_and_the_maximum(
+    wanted: int | None, available: int, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        check_pair_count("n_eval_pairs", wanted, available, "in the val split")
 
 
 def _arms(
@@ -895,6 +924,13 @@ def test_the_steering_mode_mask_and_norm_follow_the_config(
         ({"n_prompts": 100}, "pool"),
         ({"n_calibration": 0}, "n_calibration"),
         ({"n_neutral": 0}, "n_calibration and n_neutral"),
+        ({"temperature": None}, "needs a temperature"),
+        ({"top_p": 1.5}, "top_p"),
+        ({"n_pairs": 31}, "n_pairs is 31 but at most 30 pairs exist"),
+        ({"n_eval_pairs": 11}, "n_eval_pairs is 11 but at most 10 pairs"),
+        ({"min_words": 7}, "n_pairs is 8 but at most 0 pairs exist"),
+        ({"n_pairs": 0}, "n_pairs must be at least 1"),
+        ({"n_eval_pairs": -1}, "n_eval_pairs must be at least 1"),
     ],
     ids=[
         "no-zero",
@@ -913,6 +949,13 @@ def test_the_steering_mode_mask_and_norm_follow_the_config(
         "prompt-pool-too-small",
         "no-calibration-text",
         "no-neutral-text",
+        "sampling-without-a-temperature",
+        "top-p-above-one",
+        "train-pairs-above-the-split",
+        "eval-pairs-above-the-split",
+        "no-sentence-long-enough",
+        "no-train-pairs",
+        "negative-eval-pairs",
     ],
 )
 def test_an_invalid_config_raises_before_the_model_runs(
@@ -930,6 +973,35 @@ def test_an_invalid_config_raises_before_the_model_runs(
     run_dir = RunDir.create(config, out_root=tmp_path)
     with pytest.raises(ValueError, match=message):
         execute(config, run_dir, tiny_arch, _sst2(), _texts(), _score)
+
+
+@pytest.mark.parametrize(
+    "scarce", [0, 1], ids=["few-negatives", "few-positives"]
+)
+def test_the_scarcer_label_caps_the_val_pairs(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scarce: int,
+) -> None:
+    def reached(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("the model was reached")
+
+    monkeypatch.setattr(c1_sentiment_steering, "reading_sweep", reached)
+    kept = 0
+    sst2 = []
+    for example in _sst2():
+        if example.split == "val" and example.label == scarce:
+            kept += 1
+            if kept > 4:
+                continue
+        sst2.append(example)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(
+        ValueError, match="n_eval_pairs is 8 but at most 4 pairs exist"
+    ):
+        execute(config, run_dir, tiny_arch, sst2, _texts(), _score)
 
 
 def test_too_few_held_out_texts_raise_before_the_model_runs(
