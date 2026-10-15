@@ -1242,6 +1242,7 @@ def _baseline_pool(
     *,
     test_popularity: tuple[MetaValue, MetaValue] = (900, 12),
     train_popularity: MetaValue = 50,
+    train_positive_popularity: MetaValue = 500,
 ) -> TypePool:
     def make(
         uid: str, question: str, label: Label, split: Split, popularity: Any
@@ -1255,7 +1256,11 @@ def _baseline_pool(
     negative: list[LabeledItem] = []
     for split, n in (("train", 12), ("val", 4), ("test", 6)):
         for i in range(n):
-            popularity_pos = test_popularity[0] if split == "test" else 500
+            popularity_pos = (
+                test_popularity[0]
+                if split == "test"
+                else train_positive_popularity
+            )
             popularity_neg = (
                 test_popularity[1] if split == "test" else train_popularity
             )
@@ -1371,5 +1376,13 @@ def test_surface_baselines_popularity_is_null_without_the_field() -> None:
 
 def test_surface_baselines_popularity_reads_the_test_items_only() -> None:
     pool = _baseline_pool(train_popularity=None)
+
+    assert surface_baselines(pool)["popularity"] == pytest.approx(1.0)
+
+
+def test_surface_baselines_popularity_is_not_oriented_on_the_train_items() -> (
+    None
+):
+    pool = _baseline_pool(train_positive_popularity=10, train_popularity=5000)
 
     assert surface_baselines(pool)["popularity"] == pytest.approx(1.0)
