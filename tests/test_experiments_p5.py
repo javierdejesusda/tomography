@@ -7,6 +7,7 @@ from typing import Any
 import weakref
 
 import numpy as np
+from numpy.typing import NDArray
 import pytest
 
 from tomography.cli import load_experiment
@@ -241,26 +242,23 @@ def test_a_persona_condition_renders_its_own_words(condition: str) -> None:
 
 
 @pytest.mark.parametrize("n_pairs", [12, 11])
-def test_random_label_shuffles_the_training_labels_within_pairs(
-    n_pairs: int,
-) -> None:
+def test_random_label_swaps_half_of_the_training_pairs(n_pairs: int) -> None:
     real = _persona("paper", n_pairs=n_pairs)
     flipped = _persona("random_label", n_pairs=n_pairs)
     assert flipped.texts == real.texts
-    expected = balanced_flip(
-        real.labels, real.groups, seed=derive_seed(3, "random_label")
-    )
-    np.testing.assert_array_equal(flipped.labels, expected)
+    assert real.groups.shape[0] == n_pairs
     first = real.groups[:, 0]
     swapped = flipped.labels[first] != real.labels[first]
-    assert swapped.sum() == n_pairs // 2
+    seed = derive_seed(3, "random_label")
+    chosen = np.random.default_rng(seed).permutation(n_pairs)[: n_pairs // 2]
+    assert sorted(np.flatnonzero(swapped).tolist()) == sorted(chosen.tolist())
     for group in flipped.groups:
         assert sorted(flipped.labels[group]) == [0, 1]
     evaluation = _persona("random_label", n_pairs=n_pairs, train=False)
     np.testing.assert_array_equal(evaluation.labels, real.labels)
 
 
-def _pair_labels(n: int) -> tuple[Any, Any]:
+def _pair_labels(n: int) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
     groups = np.arange(2 * n, dtype=np.int64).reshape(n, 2)
     labels = np.empty(2 * n, dtype=np.int64)
     labels[0::2] = np.arange(n) % 2
@@ -296,6 +294,7 @@ def test_balanced_flip_is_deterministic_and_the_seed_picks_the_pairs() -> None:
     [
         pytest.param("three", "two members", id="three-members"),
         pytest.param("one", "two members", id="one-member"),
+        pytest.param("padded", "two members", id="padded-column"),
         pytest.param("no_positive", "one label-1 member", id="no-positive"),
         pytest.param("two_positive", "one label-1 member", id="two-positive"),
     ],
@@ -310,6 +309,9 @@ def test_balanced_flip_needs_pairs_with_one_positive_member(
     elif case == "one":
         groups = groups.copy()
         groups[1, 1] = -1
+    elif case == "padded":
+        pad = np.full((4, 1), -1, dtype=np.int64)
+        groups = np.concatenate([groups, pad], axis=1)
     elif case == "no_positive":
         labels[groups[2]] = 0
     else:
@@ -949,12 +951,7 @@ def test_the_summary_describes_the_run(ran: RunDir) -> None:
     assert summary["n_seeds"] == 3
 
 
-def test_random_label_runs_only_under_the_methods_that_read_the_labels() -> (
-    None
-):
-    assert LABEL_METHODS == ("mean_diff", "logistic")
-
-
+@pytest.mark.parametrize("method", ["pca_diff", "pca_raw", "kmeans", "random"])
 @pytest.mark.parametrize(
     "conditions",
     [("paper", "synonym_0", "random_label"), ("paper", "random_label")],
@@ -964,10 +961,12 @@ def test_random_label_is_skipped_under_a_method_that_ignores_labels(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     conditions: tuple[str, ...],
+    method: Any,
 ) -> None:
+    assert method not in LABEL_METHODS
     calls = _record_conditions(monkeypatch)
     run_dir = _execute(
-        tiny_arch, tmp_path, method="pca_diff", conditions=conditions
+        tiny_arch, tmp_path, method=method, conditions=conditions
     )
     run = [c for c in conditions if c != "random_label"]
     assert "random_label" not in {c[0] for c in calls}
@@ -975,8 +974,8 @@ def test_random_label_is_skipped_under_a_method_that_ignores_labels(
     assert isinstance(summary, dict)
     assert summary["conditions"] == run
     assert summary["skipped"] == {
-        "random_label": "method 'pca_diff' fits its direction without labels; "
-        "flipped labels would only set its sign"
+        "random_label": f"method '{method}' fits its direction without "
+        "labels; flipped labels would only set its sign"
     }
     names = {p.name for p in run_dir.path.iterdir()}
     assert "readers_random_label.npz" not in names
