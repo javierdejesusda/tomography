@@ -825,20 +825,22 @@ def test_an_emotion_without_a_val_pair_raises_when_n_eval_pairs_is_none(
         execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
 
 
+@pytest.mark.parametrize("keep", [1, 3])
 def test_every_val_pair_is_used_when_n_eval_pairs_is_none(
     tiny_arch: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    keep: int,
 ) -> None:
     calls = _spy_reading_sweep(monkeypatch)
     config = _config(n_eval_pairs=None)
     run_dir = RunDir.create(config, out_root=tmp_path)
-    scenarios = _keep_only(_scenarios(), "anger", "val", keep=3)
+    scenarios = _keep_only(_scenarios(), "anger", "val", keep=keep)
     execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
     sizes = [
         next(iter(call["evals"].values())).pairs.shape[0] for call in calls
     ]
-    assert sizes == [6, 6, 3]
+    assert sizes == [6, 6, keep]
 
 
 class StubJudge:
