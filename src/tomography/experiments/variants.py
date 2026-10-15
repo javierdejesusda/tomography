@@ -856,7 +856,9 @@ def variant_cosines(directions: NDArray[np.float32]) -> NDArray[np.float64]:
             f"got {unit.shape}"
         )
     n_variants, n_seeds = unit.shape[:2]
-    cosines = np.einsum("vnkd,wnkd->kvw", unit, unit) / n_seeds
+    cosines: NDArray[np.float64] = (
+        np.einsum("vnkd,wnkd->kvw", unit, unit) / n_seeds
+    )
     first, second = np.triu_indices(n_seeds, k=1)
     for v in range(n_variants):
         own = np.einsum("nkd,mkd->knm", unit[v], unit[v])
