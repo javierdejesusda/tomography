@@ -379,17 +379,23 @@ def _table_rows(
     layers: Sequence[int],
     ood: Sequence[str],
 ) -> list[list[Any]]:
+    def at_layer(name: str, c: int, layer: int) -> list[float]:
+        at = layers.index(layer)
+        return [float(curves[name][key][c, at]) for key in ("mean", "lo", "hi")]
+
     rows = []
     for c, condition in enumerate(config.conditions):
         id_layer = best_layer(curves["id_val"]["mean"][c], layers)
         ood_layer = best_layer(curves["facts_val"]["mean"][c], layers)
-        row: list[Any] = [condition, id_layer]
-        for name, layer in [("id", id_layer), *((n, ood_layer) for n in ood)]:
-            at = layers.index(layer)
-            row += [float(curves[name][k][c, at]) for k in ("mean", "lo", "hi")]
-            if name == "id":
-                row.append(ood_layer)
-        rows.append(row)
+        rows.append(
+            [
+                condition,
+                id_layer,
+                *at_layer("id", c, id_layer),
+                ood_layer,
+                *(v for name in ood for v in at_layer(name, c, ood_layer)),
+            ]
+        )
     return rows
 
 
