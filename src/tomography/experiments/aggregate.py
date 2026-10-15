@@ -388,6 +388,23 @@ def read_curves(run: RunDir, stem: str = "curves") -> Curves:
     )
 
 
+def read_table(run_dir: RunDir, stem: str) -> list[dict[str, Any]]:
+    """Reads a table of a run as one dict per row, keyed by column.
+
+    Args:
+        run_dir: A run holding the JSON table `stem`.
+        stem: The file stem of the table, such as "table".
+
+    Returns:
+        The rows in file order.
+    """
+    payload = cast(dict[str, Any], run_dir.read_json(stem))
+    return [
+        dict(zip(payload["columns"], row, strict=True))
+        for row in payload["rows"]
+    ]
+
+
 def best_point(
     curves: Curves, series: str = "reader", select: Curves | None = None
 ) -> tuple[int, NDArray[np.float64]]:

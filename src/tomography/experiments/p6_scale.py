@@ -24,6 +24,7 @@ from transformers import PretrainedConfig
 
 from tomography.experiments.aggregate import out_root_of
 from tomography.experiments.aggregate import read_curves
+from tomography.experiments.aggregate import read_table
 from tomography.experiments.aggregate import reading_point
 from tomography.experiments.aggregate import relative_depth
 from tomography.experiments.aggregate import resolve_runs
@@ -502,23 +503,6 @@ def plot_depth_panels(
             ncols=min(len(models), MAX_LEGEND_COLUMNS),
         )
     return save_figure(fig, out_dir, name)
-
-
-def read_table(run_dir: RunDir, stem: str) -> list[dict[str, Any]]:
-    """Reads a table of a run as one dict per row, keyed by column.
-
-    Args:
-        run_dir: A run holding the JSON table `stem`.
-        stem: The file stem of the table, such as "table".
-
-    Returns:
-        The rows in file order.
-    """
-    payload = cast(dict[str, Any], run_dir.read_json(stem))
-    return [
-        dict(zip(payload["columns"], row, strict=True))
-        for row in payload["rows"]
-    ]
 
 
 def _spread(

@@ -21,6 +21,7 @@ from tomography.experiments.aggregate import ReadingPoint
 from tomography.experiments.aggregate import finished_run
 from tomography.experiments.aggregate import out_root_of
 from tomography.experiments.aggregate import read_curves
+from tomography.experiments.aggregate import read_table
 from tomography.experiments.aggregate import reading_point
 from tomography.experiments.aggregate import resolve_runs
 from tomography.experiments.base import ExperimentConfig
@@ -33,7 +34,6 @@ from tomography.experiments.p6_scale import MAX_MODELS
 from tomography.experiments.p6_scale import MAX_PANELS
 from tomography.experiments.p6_scale import copy_reader_curves
 from tomography.experiments.p6_scale import plot_depth_panels
-from tomography.experiments.p6_scale import read_table
 from tomography.experiments.p6_scale import steering_slopes
 from tomography.experiments.sweep import plot_curves_file
 from tomography.reading.metrics import bootstrap_ci
