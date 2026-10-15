@@ -97,7 +97,7 @@ class Config(SteeringConfig):
     n_seeds: int = 10
     n_steer_seeds: int = 3
     n_pairs: int = 64
-    n_eval_pairs: int | None = 256
+    n_eval_pairs: int | None = None
     window: int = 3
     strength: float | None = None
     truncate_words: int = 4
@@ -171,9 +171,8 @@ def diagonal_stats(matrix: NDArray[np.float64]) -> tuple[float, float]:
     return hit_rate, float(matrix[diagonal].mean() - matrix[~diagonal].mean())
 
 
-def _check_config(config: Config, n_layers: int) -> float:
-    """Checks the settings that need no data and returns the strength."""
-    emotions = config.emotions
+def _check_emotions(emotions: tuple[str, ...]) -> None:
+    """Checks that the steered emotions are at least two distinct names."""
     if (
         len(emotions) < 2
         or len(set(emotions)) != len(emotions)
@@ -183,6 +182,11 @@ def _check_config(config: Config, n_layers: int) -> float:
             f"emotions must be at least two distinct names of {EMOTIONS}, "
             f"got {emotions}"
         )
+
+
+def _check_config(config: Config, n_layers: int) -> float:
+    """Checks the settings that need no data and returns the strength."""
+    _check_emotions(config.emotions)
     if 0.0 not in config.coeffs or all(c == 0.0 for c in config.coeffs):
         raise ValueError("coeffs must contain 0.0 and a nonzero value")
     strength = (
@@ -203,6 +207,26 @@ def _check_config(config: Config, n_layers: int) -> float:
             f"window must be in 1..{n_layers}, got {config.window}"
         )
     return strength
+
+
+def _check_pair_counts(config: Config, scenarios: Sequence[Example]) -> None:
+    """Checks that every steered emotion has the pairs the settings ask for."""
+    _check_emotions(config.emotions)
+    for split, name, wanted in (
+        ("train", "n_pairs", config.n_pairs),
+        ("val", "n_eval_pairs", config.n_eval_pairs),
+    ):
+        if wanted is None:
+            continue
+        labels = np.array([e.label for e in scenarios if e.split == split])
+        for emotion in config.emotions:
+            target = int(np.sum(labels == EMOTIONS.index(emotion)))
+            available = min(target, len(labels) - target)
+            if wanted > available:
+                raise ValueError(
+                    f"{name} is {wanted} but at most {available} pairs exist "
+                    f"for {emotion!r} in the {split} split"
+                )
 
 
 def _fit_readers(
@@ -300,11 +324,13 @@ def execute(
         ValueError: If fewer than two distinct emotions are steered, `coeffs`
             has no 0.0 or no other value, `strength` is not a positive value
             of `coeffs`, `n_steer_seeds` is outside `1..n_seeds`, `window`
-            does not fit the model, or the held-out texts give fewer than
-            `n_prompts` distinct prompts.
+            does not fit the model, `n_pairs` or `n_eval_pairs` exceeds the
+            pairs one steered emotion can form in its split, or the held-out
+            texts give fewer than `n_prompts` distinct prompts.
     """
     n_layers = loaded.n_layers
     strength = _check_config(config, n_layers)
+    _check_pair_counts(config, scenarios)
     held = split_held_out(
         texts,
         n_calibration=config.n_calibration,
@@ -466,21 +492,23 @@ def run(config: Config, run_dir: RunDir) -> None:
     Args:
         config: The experiment settings.
         run_dir: The run to write into.
+
+    Raises:
+        ValueError: If the steered emotions are not at least two distinct
+            names of `EMOTIONS`, or `n_pairs` or `n_eval_pairs` exceeds the
+            pairs one steered emotion can form in its split. Both are raised
+            before any judge or the model is loaded.
     """
+    scenarios = load_emotions()
+    _check_pair_counts(config, scenarios)
+    texts = [example.text for example in load_wikitext()]
     first = load_judge(config.judge)
     second = load_judge(config.judge_check)
 
-    def score(texts: Sequence[str]) -> NDArray[np.float32]:
-        return np.concatenate([first.score(texts), second.score(texts)], axis=1)
+    def score(batch: Sequence[str]) -> NDArray[np.float32]:
+        return np.concatenate([first.score(batch), second.score(batch)], axis=1)
 
-    execute(
-        config,
-        run_dir,
-        load_model(config.model),
-        load_emotions(),
-        [example.text for example in load_wikitext()],
-        score,
-    )
+    execute(config, run_dir, load_model(config.model), scenarios, texts, score)
 
 
 def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:

@@ -199,7 +199,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.n_seeds == 10
     assert config.n_steer_seeds == 3
     assert config.n_pairs == 64
-    assert config.n_eval_pairs == 256
+    assert config.n_eval_pairs is None
     assert config.window == 3
     assert config.strength is None
     assert config.truncate_words == 4
@@ -561,6 +561,7 @@ def test_the_strength_picks_the_coefficient_of_the_matrix(
         ({"window": 0}, "window"),
         ({"window": 4}, "window"),
         ({"n_prompts": 100}, "pool"),
+        ({"n_eval_pairs": 7}, "n_eval_pairs"),
     ],
     ids=[
         "one-emotion",
@@ -577,6 +578,7 @@ def test_the_strength_picks_the_coefficient_of_the_matrix(
         "window-zero",
         "window-too-wide",
         "prompt-pool-too-small",
+        "eval-pairs-above-the-split",
     ],
 )
 def test_an_invalid_config_raises_before_the_model_runs(
@@ -596,6 +598,90 @@ def test_an_invalid_config_raises_before_the_model_runs(
         execute(config, run_dir, tiny_arch, _scenarios(), _texts(), _score)
 
 
+def _keep_only(
+    scenarios: Sequence[Example], emotion: str, split: str, keep: int
+) -> list[Example]:
+    """Drops all but the first `keep` examples of one emotion in one split."""
+    seen = 0
+    kept = []
+    for example in scenarios:
+        if example.split == split and example.meta["emotion"] == emotion:
+            seen += 1
+            if seen > keep:
+                continue
+        kept.append(example)
+    return kept
+
+
+@pytest.mark.parametrize(
+    ("split", "field", "wanted"),
+    [("train", "n_pairs", 6), ("val", "n_eval_pairs", 5)],
+)
+def test_a_split_too_small_for_one_emotion_raises_before_any_reader_is_fitted(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    split: str,
+    field: str,
+    wanted: int,
+) -> None:
+    def reached(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a reader was fitted")
+
+    monkeypatch.setattr(c2_emotion_steering, "reading_sweep", reached)
+    config = _config(n_pairs=6, n_eval_pairs=5)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    scenarios = _keep_only(_scenarios(), "anger", split, keep=3)
+    with pytest.raises(
+        ValueError,
+        match=rf"{field} is {wanted} but at most 3 .*'anger'.*{split}",
+    ):
+        execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
+
+
+def test_the_other_emotions_cap_the_pairs_when_they_are_fewer(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reached(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a reader was fitted")
+
+    monkeypatch.setattr(c2_emotion_steering, "reading_sweep", reached)
+    config = _config(emotions=("anger", "sadness"), n_eval_pairs=5)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    scenarios = _keep_only(
+        [
+            e
+            for e in _scenarios()
+            if e.split != "val" or e.meta["emotion"] in config.emotions
+        ],
+        "sadness",
+        "val",
+        keep=2,
+    )
+    with pytest.raises(
+        ValueError, match=r"n_eval_pairs is 5 but at most 2 .*'anger'"
+    ):
+        execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
+
+
+def test_every_val_pair_is_used_when_n_eval_pairs_is_none(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _spy_reading_sweep(monkeypatch)
+    config = _config(n_eval_pairs=None)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    scenarios = _keep_only(_scenarios(), "anger", "val", keep=3)
+    execute(config, run_dir, tiny_arch, scenarios, _texts(), _score)
+    sizes = [
+        next(iter(call["evals"].values())).pairs.shape[0] for call in calls
+    ]
+    assert sizes == [6, 6, 3]
+
+
 class StubJudge:
     def __init__(self, offset: int) -> None:
         self.offset = offset
@@ -604,38 +690,92 @@ class StubJudge:
         return np.ascontiguousarray(_score(texts)[:, self.offset :][:, :6])
 
 
-def test_run_scores_with_both_judges_in_twelve_columns(
-    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    asked: dict[str, list[str]] = {"model": [], "judge": []}
+def _stub_loaders(
+    monkeypatch: pytest.MonkeyPatch, loaded: LoadedModel
+) -> list[tuple[str, str | None]]:
+    """Replaces every loader of `run` and records the calls in order."""
+    calls: list[tuple[str, str | None]] = []
 
     def load_model_stub(key: str) -> LoadedModel:
-        asked["model"].append(key)
-        return finished.loaded
+        calls.append(("model", key))
+        return loaded
 
     def load_judge_stub(key: str) -> StubJudge:
-        asked["judge"].append(key)
+        calls.append(("judge", key))
         return StubJudge(0 if key == "emotion-primary" else 6)
+
+    def load_emotions_stub() -> list[Example]:
+        calls.append(("emotions", None))
+        return _scenarios()
+
+    def load_wikitext_stub() -> list[SimpleNamespace]:
+        calls.append(("wikitext", None))
+        return [SimpleNamespace(text=t) for t in _texts()]
 
     monkeypatch.setattr(c2_emotion_steering, "load_model", load_model_stub)
     monkeypatch.setattr(c2_emotion_steering, "load_judge", load_judge_stub)
-    monkeypatch.setattr(c2_emotion_steering, "load_emotions", _scenarios)
     monkeypatch.setattr(
-        c2_emotion_steering,
-        "load_wikitext",
-        lambda: [SimpleNamespace(text=t) for t in _texts()],
+        c2_emotion_steering, "load_emotions", load_emotions_stub
     )
+    monkeypatch.setattr(
+        c2_emotion_steering, "load_wikitext", load_wikitext_stub
+    )
+    return calls
+
+
+def test_run_scores_with_both_judges_in_twelve_columns(
+    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _stub_loaders(monkeypatch, finished.loaded)
     run_dir = RunDir.create(finished.config, out_root=tmp_path)
     run(finished.config, run_dir)
 
-    assert asked == {
-        "model": ["tiny"],
-        "judge": ["emotion-primary", "emotion-secondary"],
-    }
+    assert [call for call in calls if call[1] is not None] == [
+        ("judge", "emotion-primary"),
+        ("judge", "emotion-secondary"),
+        ("model", "tiny"),
+    ]
     np.testing.assert_array_equal(
         run_dir.read_arrays("trials")["scores"],
         finished.run_dir.read_arrays("trials")["scores"],
     )
+
+
+def test_run_loads_the_data_before_the_judges_and_the_model(
+    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _stub_loaders(monkeypatch, finished.loaded)
+    run_dir = RunDir.create(finished.config, out_root=tmp_path)
+    run(finished.config, run_dir)
+    assert [kind for kind, _ in calls] == [
+        "emotions",
+        "wikitext",
+        "judge",
+        "judge",
+        "model",
+    ]
+
+
+def test_run_rejects_too_many_eval_pairs_before_loading_a_judge(
+    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _stub_loaders(monkeypatch, finished.loaded)
+    config = dataclasses.replace(finished.config, n_eval_pairs=7)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(ValueError, match="n_eval_pairs"):
+        run(config, run_dir)
+    assert [kind for kind, _ in calls] == ["emotions"]
+
+
+def test_run_rejects_an_unknown_emotion_before_loading_a_judge(
+    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _stub_loaders(monkeypatch, finished.loaded)
+    config = dataclasses.replace(finished.config, emotions=("joy", "sadness"))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(ValueError, match="emotions"):
+        run(config, run_dir)
+    assert [kind for kind, _ in calls] == ["emotions"]
 
 
 def test_plot_draws_the_curves_and_the_matrices(
@@ -703,7 +843,7 @@ def test_c2_on_gpt2_prints_both_matrices(tmp_path: Path) -> None:
         n_seeds=3,
         n_steer_seeds=1,
         n_pairs=32,
-        n_eval_pairs=128,
+        n_eval_pairs=None,
         coeffs=(-0.2, 0.0, 0.2),
         n_prompts=16,
         num_samples=1,
