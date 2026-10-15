@@ -693,12 +693,15 @@ def execute(
 
     Raises:
         ValueError: If `coeffs` has no 0.0 or no other value, `n_steer_seeds`
-            is outside `1..n_seeds`, the sweep layers, the operators or the
-            window do not fit the model, the generation settings are invalid
-            (see `GenSettings`), `n_calibration` or `n_neutral` is below 1,
-            the held-out texts are fewer than `n_calibration + n_neutral`, or
-            the validation sentences give fewer than `2 * n_prompts` distinct
-            prompts.
+            is outside `1..n_seeds`, the sweep layers or the window do not
+            fit the model, the operators are empty or repeated, the
+            generation settings are invalid (see `GenSettings`),
+            `n_calibration` or `n_neutral` is below 1, the usable (at least
+            40 characters) held-out texts are fewer than
+            `n_calibration + n_neutral`, `n_pairs` or `n_eval_pairs` is below
+            1 or exceeds the pairs its split can form (`n_eval_pairs` of None
+            needs one), or the validation sentences give fewer than
+            `2 * n_prompts` distinct prompts.
     """
     n_layers = loaded.n_layers
     sweep = _check_config(config, n_layers)
