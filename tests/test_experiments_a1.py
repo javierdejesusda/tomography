@@ -293,9 +293,14 @@ def _write_source(
     out_root: Path,
     experiment: str,
     sets: Mapping[str, ReaderSet],
+    flip_seed: int | None = None,
     **overrides: Any,
 ) -> RunDir:
-    """A finished default run holding the given sets as readers files."""
+    """A finished default run holding the given sets as readers files.
+
+    With `flip_seed` every direction is stored negated or not at random, with
+    the sign that restores it, so the oriented vectors do not change.
+    """
     config = load_experiment(experiment).config_cls.from_dict(
         {"experiment": experiment, "model": MODEL}
     )
@@ -313,24 +318,36 @@ def _write_source(
     )
     for label, readers in sets.items():
         suffix = label.partition(":")[2]
+        directions = readers.vectors.astype(np.float32)
+        signs = np.ones(directions.shape[:2], dtype=np.float32)
+        if flip_seed is not None:
+            signs = (
+                np.random.default_rng(flip_seed)
+                .choice([-1.0, 1.0], size=signs.shape)
+                .astype(np.float32)
+            )
+            directions = directions * signs[..., None]
         run_dir.write_arrays(
             f"readers_{suffix}" if suffix else "readers",
             layers=np.asarray(readers.layers, dtype=np.int64),
-            directions=readers.vectors.astype(np.float32),
-            signs=np.ones(readers.vectors.shape[:2], dtype=np.float32),
+            directions=directions,
+            signs=signs,
         )
     run_dir.finalize()
     return run_dir
 
 
-def _write_all_sources(out_root: Path) -> None:
+def _write_all_sources(out_root: Path, flip_seed: int | None = None) -> None:
     sets = _sets()
     for experiment in ("r1", "r2", "r3", "r7"):
-        _write_source(out_root, experiment, {experiment: sets[experiment]})
+        _write_source(
+            out_root, experiment, {experiment: sets[experiment]}, flip_seed
+        )
     _write_source(
         out_root,
         "r6",
         {label: r for label, r in sets.items() if label.startswith("r6")},
+        flip_seed,
     )
 
 
@@ -345,6 +362,29 @@ def test_run_reads_the_default_runs_under_its_own_out_root(
     assert summary["concepts"] == list(_sets())
     assert summary["n_seeds"] == 4
     assert (run_dir.path / "matrix_concepts.npz").is_file()
+
+
+def test_negated_directions_with_negative_signs_change_nothing(
+    tmp_path: Path,
+) -> None:
+    config = _config()
+    runs = {}
+    for name, flip_seed in (("plain", None), ("flipped", 5)):
+        _write_all_sources(tmp_path / name / "res", flip_seed)
+        runs[name] = _run_dir(tmp_path / name, config)
+        run(config, runs[name])
+    stems = sorted(p.stem for p in runs["plain"].path.glob("*.npz"))
+    assert "curves_agreement" in stems
+    assert len(stems) == 8
+    for stem in stems:
+        plain = runs["plain"].read_arrays(stem)
+        flipped = runs["flipped"].read_arrays(stem)
+        assert set(plain) == set(flipped)
+        for key in plain:
+            np.testing.assert_allclose(
+                flipped[key], plain[key], atol=1e-12, err_msg=f"{stem}:{key}"
+            )
+    assert _summary(runs["flipped"]) == _summary(runs["plain"])
 
 
 def test_run_names_the_source_run_that_is_missing(tmp_path: Path) -> None:

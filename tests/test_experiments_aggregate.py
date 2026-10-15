@@ -159,6 +159,13 @@ def test_an_extra_run_of_a_pair_that_was_not_requested_is_refused(
         resolve_runs(tmp_path, ("r1",), (MODEL,), [str(stray.path)])
 
 
+def test_an_extra_run_of_another_model_is_refused(tmp_path: Path) -> None:
+    _run(tmp_path, "r1")
+    stray = _run(tmp_path, "r1", "other", n_seeds=4)
+    with pytest.raises(ValueError, match=r"r1 on other.*not requested"):
+        resolve_runs(tmp_path, ("r1",), (MODEL,), [str(stray.path)])
+
+
 def test_an_unfinished_extra_run_is_refused(tmp_path: Path) -> None:
     _run(tmp_path, "r1")
     extra = _run(tmp_path, "r1", finished=False, n_seeds=4)
