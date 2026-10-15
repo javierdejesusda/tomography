@@ -19,6 +19,7 @@ from tomography.datasets.sst2 import load_sst2
 from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import p1_templates
 from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.p1_templates import COLUMNS
 from tomography.experiments.p1_templates import Config
 from tomography.experiments.p1_templates import execute
@@ -31,6 +32,7 @@ from tomography.experiments.variants import VARIANT_KINDS
 from tomography.experiments.variants import ReadingTask
 from tomography.experiments.variants import Variant
 from tomography.experiments.variants import VariantKind
+from tomography.experiments.variants import VariantSweep
 from tomography.model import LoadedModel
 from tomography.model import load_model
 from tomography.reading.metrics import best_layer
@@ -758,3 +760,129 @@ def test_p1_on_gpt2_reads_sentiment_through_three_templates(
     print(f"{elapsed / len(rows):.1f} seconds per variant")
     paper = next(row for row in rows if row["variant"] == "paper")
     assert paper["report"] > 0.5
+
+
+def test_the_layer_is_chosen_on_the_select_split(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = p1_templates.variant_sweep
+
+    def skewed(*args: Any, **kwargs: Any) -> VariantSweep:
+        sweep = real(*args, **kwargs)
+        accuracy = sweep.accuracy.copy()
+        accuracy[:, :, :, READER] = 0.5
+        accuracy[0, :, :, READER, :, 0] = 0.9
+        accuracy[1, :, :, READER, :, -1] = 0.9
+        return dataclasses.replace(sweep, accuracy=accuracy)
+
+    monkeypatch.setattr(p1_templates, "variant_sweep", skewed)
+    run_dir = _execute(_small(), tiny_gpt2, tmp_path)
+    assert _json(run_dir, "summary")["layers"] == {"sentiment": 1}
+    assert _json(run_dir, "sweep_sentiment")["layer"] == 1
+    rows = _json(run_dir, "table")
+    assert {row["layer"] for row in rows} == {1}
+    assert {row["own_layer"] for row in rows} == {1}
+
+
+def test_every_variant_trains_on_the_same_seeded_draws(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = p1_templates.task_set
+    seeds: dict[str, list[int]] = {}
+
+    def spy(
+        task: ReadingTask,
+        variant: Variant,
+        examples: Sequence[Example],
+        *,
+        n_pairs: int | None,
+        seed: int,
+    ) -> StimulusSet:
+        if n_pairs == 4:
+            seeds.setdefault(variant.name, []).append(seed)
+        return real(task, variant, examples, n_pairs=n_pairs, seed=seed)
+
+    monkeypatch.setattr(p1_templates, "task_set", spy)
+    _execute(_small(), tiny_gpt2, tmp_path)
+    expected = [derive_seed(0, "train", i) for i in range(2)]
+    assert expected[0] != expected[1]
+    assert seeds == {name: expected for name in SMALL_VARIANTS}
+
+
+def test_the_written_cube_is_the_sweep_under_the_run_seed(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = p1_templates.variant_sweep
+    calls: list[tuple[Any, Any]] = []
+
+    def spy(train: Any, evals: Any, **kwargs: Any) -> VariantSweep:
+        calls.append((train, evals))
+        return real(train, evals, **kwargs)
+
+    monkeypatch.setattr(p1_templates, "variant_sweep", spy)
+    config = _small(seed=3)
+    run_dir = _execute(config, tiny_gpt2, tmp_path)
+    ((train, evals),) = calls
+    direct = real(
+        train,
+        evals,
+        method=config.method,
+        preprocess=config.preprocess,
+        seed=3,
+    )
+    cube = run_dir.read_arrays("sweep_sentiment")["accuracy"]
+    np.testing.assert_array_equal(cube, direct.accuracy)
+
+
+def test_no_task_is_refused_before_any_model_call(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="at least one task"):
+        execute(
+            _config(tasks=()),
+            _run_dir(_config(tasks=()), tmp_path),
+            cast(Any, None),
+            _sources(),
+        )
+
+
+@pytest.mark.parametrize("field", ["position", "eval_position"])
+@pytest.mark.parametrize("position", ["concept", "response"])
+def test_a_position_that_not_every_variant_has_is_refused(
+    tmp_path: Path, field: str, position: PositionStrategy
+) -> None:
+    config = _config(**{field: position})
+    with pytest.raises(ValueError, match=f"{field} '{position}'"):
+        execute(config, _run_dir(config, tmp_path), cast(Any, None), _sources())
+
+
+def test_the_mean_position_is_read(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    config = _small(position="mean", eval_position="mean")
+    run_dir = _execute(config, tiny_gpt2, tmp_path)
+    assert len(_json(run_dir, "table")) == len(SMALL_VARIANTS)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"n_seeds": 1}, "n_seeds"),
+        ({"tasks": ()}, "at least one task"),
+        ({"tasks": ("nope",)}, "unknown task 'nope'"),
+        ({"position": "concept"}, "position 'concept'"),
+        ({"eval_position": "response"}, "eval_position 'response'"),
+    ],
+)
+def test_run_checks_the_config_before_loading_anything(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, Any],
+    message: str,
+) -> None:
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("nothing may load before the config is checked")
+
+    monkeypatch.setattr(p1_templates, "load_model", refuse)
+    monkeypatch.setattr(p1_templates, "load_sources", refuse)
+    config = _config(**overrides)
+    with pytest.raises(ValueError, match=message):
+        run(config, _run_dir(config, tmp_path))
