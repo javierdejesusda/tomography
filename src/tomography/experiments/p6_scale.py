@@ -46,6 +46,7 @@ from tomography.viz.style import style_context
 GPT2_SIZES: tuple[str, ...] = ("gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
 MAX_PANELS = 6
 MAX_MODELS = 8
+LEGEND_COLUMNS = 4
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -190,12 +191,8 @@ def steering_slopes(run: RunDir) -> NDArray[np.float64]:
     )
 
 
-def _check(
-    config: Config,
-    runs: Mapping[tuple[str, str], RunDir],
-    n_params: Mapping[str, int],
-) -> None:
-    """Checks the config and the inputs before anything is read."""
+def _check_config(config: Config) -> None:
+    """Checks the settings alone, so that no run is looked up for a bad one."""
     if config.model not in config.models:
         raise ValueError(
             f"model {config.model!r} must be one of models {config.models}"
@@ -212,12 +209,25 @@ def _check(
         )
     if len(set(config.sources)) != len(config.sources):
         raise ValueError(f"sources must not repeat, got {config.sources}")
-    experiments = list(config.sources)
-    if config.steering_source is not None:
-        experiments.append(config.steering_source)
+
+
+def _experiments(config: Config) -> list[str]:
+    """The sources, then the steering source when there is one."""
+    if config.steering_source is None:
+        return list(config.sources)
+    return [*config.sources, config.steering_source]
+
+
+def _check(
+    config: Config,
+    runs: Mapping[tuple[str, str], RunDir],
+    n_params: Mapping[str, int],
+) -> None:
+    """Checks the config and the inputs before anything is read."""
+    _check_config(config)
     lacking = [
         (experiment, model)
-        for experiment in experiments
+        for experiment in _experiments(config)
         for model in config.models
         if (experiment, model) not in runs
     ]
@@ -226,6 +236,11 @@ def _check(
     unknown = [model for model in config.models if model not in n_params]
     if unknown:
         raise ValueError(f"n_params lacks the models {unknown}")
+    counts = [n_params[model] for model in config.models]
+    if len(set(counts)) < 2:
+        raise ValueError(
+            f"n_params must hold at least two distinct counts, got {counts}"
+        )
 
 
 def _steering_row(
@@ -275,8 +290,9 @@ def execute(
     Raises:
         ValueError: If `model` is not one of 2 to 8 distinct `models`, there
             are not 1 to `MAX_PANELS` distinct sources, a run or a parameter
-            count is missing, or a run cannot be read. The first checks run
-            before any file is read.
+            count is missing, the parameter counts are all equal so that no
+            slope on their logarithm exists, or a run cannot be read. The
+            first checks run before any file is read.
     """
     _check(config, runs, n_params)
     rows: list[list[object]] = []
@@ -384,12 +400,17 @@ def run(config: Config, run_dir: RunDir) -> None:
         config: The experiment settings.
         run_dir: The run to write into; the source runs are looked up in its
             out root.
+
+    Raises:
+        ValueError: If the settings are not valid. This is checked before any
+            run is looked up.
     """
-    experiments = list(config.sources)
-    if config.steering_source is not None:
-        experiments.append(config.steering_source)
+    _check_config(config)
     runs = resolve_runs(
-        out_root_of(run_dir), experiments, config.models, config.extra_runs
+        out_root_of(run_dir),
+        _experiments(config),
+        config.models,
+        config.extra_runs,
     )
     execute(
         config,
@@ -410,8 +431,9 @@ def plot_depth_panels(
 
     One panel per source, at most three to a row, each with one curve and band
     per model over the relative depth `layer / L` so that models of different
-    depth share an axis. The legend sits above the first panel only. Only the
-    run's own `curves_<source>_<model>` files are read.
+    depth share an axis. One legend for the whole figure sits above the panels,
+    in at most `LEGEND_COLUMNS` columns. Only the run's own
+    `curves_<source>_<model>` files are read.
 
     Args:
         run_dir: A run holding a `curves_<source>_<model>` file for every
@@ -466,23 +488,32 @@ def plot_depth_panels(
                 ylabel="Accuracy" if i % columns == 0 else "",
                 chance=curves[0].chance,
                 n_layers=1,
-                legend=i == 0,
+                legend=False,
                 ax=ax,
             )
-        legend = axes[0, 0].get_legend()
-        pad = 6.0 + (
-            0.0
-            if legend is None
-            else legend.get_window_extent().height * 72 / fig.dpi
-        )
-        for i, source in enumerate(sources):
-            axes[i // columns, i % columns].set_title(source, pad=pad)
+            ax.set_title(source)
         for i in range(len(sources), rows * columns):
             fig.delaxes(axes[i // columns, i % columns])
+        handles, names = axes[0, 0].get_legend_handles_labels()
+        fig.legend(
+            handles,
+            names,
+            loc="outside upper center",
+            ncols=min(len(models), LEGEND_COLUMNS),
+        )
     return save_figure(fig, out_dir, name)
 
 
-def _table(run_dir: RunDir, stem: str) -> list[dict[str, Any]]:
+def read_table(run_dir: RunDir, stem: str) -> list[dict[str, Any]]:
+    """Reads a table of a run as one dict per row, keyed by column.
+
+    Args:
+        run_dir: A run holding the JSON table `stem`.
+        stem: The file stem of the table, such as "table".
+
+    Returns:
+        The rows in file order.
+    """
     payload = cast(dict[str, Any], run_dir.read_json(stem))
     return [
         dict(zip(payload["columns"], row, strict=True))
@@ -503,11 +534,11 @@ def _spread(
 def _plot_best(
     run_dir: RunDir, out_dir: Path, config: Config, name: str
 ) -> list[Path]:
-    table = _table(run_dir, "table")
+    table = read_table(run_dir, "table")
     steering = (
         None
         if config.steering_source is None
-        else _table(run_dir, "table_steering")
+        else read_table(run_dir, "table_steering")
     )
     panels = 2 if steering is None else 3
     fig, axes = new_figure(

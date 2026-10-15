@@ -48,6 +48,13 @@ R2_VAL = {"s3": (1, 0.55), "s6": (2, 0.65), "s12": (4, 0.75)}
 SLOPE = {"s3": 0.5, "s6": 1.5, "s12": 2.5}
 READING_LAYER = {"s3": 2, "s6": 3, "s12": 8}
 STEER_LAYER = {"s3": 3, "s6": 4, "s12": 6}
+REGISTERED = (
+    *GPT2_SIZES,
+    "qwen3-0.6b-base",
+    "qwen3-0.6b",
+    "qwen3-1.7b-base",
+    "qwen3-1.7b",
+)
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -494,29 +501,31 @@ def test_the_summary_names_the_run_and_the_accuracy_per_decade(
     assert per_decade["r2"] == pytest.approx(0.10)
 
 
+BAD_CONFIGS = [
+    ({"model": "other"}, "model"),
+    ({"models": ("s3",)}, "models"),
+    ({"models": tuple(f"s{i}" for i in range(9))}, "models"),
+    ({"models": ("s3", "s3", "s6")}, "models"),
+    ({"sources": ()}, "sources"),
+    (
+        {"sources": ("r1", "r2", "r3", "r4", "r5", "r6", "r7")},
+        "sources",
+    ),
+    ({"sources": ("r1", "r1")}, "sources"),
+]
+BAD_CONFIG_IDS = [
+    "model-outside",
+    "one-model",
+    "nine-models",
+    "repeated-model",
+    "no-source",
+    "seven-sources",
+    "repeated-source",
+]
+
+
 @pytest.mark.parametrize(
-    ("overrides", "message"),
-    [
-        ({"model": "other"}, "model"),
-        ({"models": ("s3",)}, "models"),
-        ({"models": tuple(f"s{i}" for i in range(9))}, "models"),
-        ({"models": ("s3", "s3", "s6")}, "models"),
-        ({"sources": ()}, "sources"),
-        (
-            {"sources": ("r1", "r2", "r3", "r4", "r5", "r6", "r7")},
-            "sources",
-        ),
-        ({"sources": ("r1", "r1")}, "sources"),
-    ],
-    ids=[
-        "model-outside",
-        "one-model",
-        "nine-models",
-        "repeated-model",
-        "no-source",
-        "seven-sources",
-        "repeated-source",
-    ],
+    ("overrides", "message"), BAD_CONFIGS, ids=BAD_CONFIG_IDS
 )
 def test_execute_rejects_a_bad_config_before_reading_anything(
     tmp_path: Path, overrides: dict[str, Any], message: str
@@ -529,6 +538,26 @@ def test_execute_rejects_a_bad_config_before_reading_anything(
         execute(config, run_dir, runs, PARAMS)
 
     assert not list(run_dir.path.glob("*.npz"))
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"), BAD_CONFIGS, ids=BAD_CONFIG_IDS
+)
+def test_run_rejects_a_bad_config_before_it_looks_for_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, Any],
+    message: str,
+) -> None:
+    def resolve(*args: Any, **kwargs: Any) -> dict[tuple[str, str], RunDir]:
+        raise AssertionError("no run should be looked up")
+
+    monkeypatch.setattr(p6_scale, "resolve_runs", resolve)
+    config = _config(**overrides)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match=message):
+        run(config, run_dir)
 
 
 def test_execute_names_a_missing_run(tmp_path: Path) -> None:
@@ -554,6 +583,33 @@ def test_execute_names_a_model_without_a_parameter_count(
         execute(config, run_dir, runs, {"s3": 1, "s6": 2})
 
 
+def test_execute_needs_two_distinct_parameter_counts(tmp_path: Path) -> None:
+    config = _config()
+    runs = _world(tmp_path / "in")
+    run_dir = RunDir.create(config, out_root=tmp_path / "out")
+    before = sorted(path.name for path in run_dir.path.iterdir())
+
+    with pytest.raises(ValueError, match=r"n_params.*two distinct"):
+        execute(config, run_dir, runs, {model: 5_000 for model in SIZES})
+
+    assert sorted(path.name for path in run_dir.path.iterdir()) == before
+
+
+def test_models_of_one_size_still_give_a_slope_against_another_size(
+    tmp_path: Path,
+) -> None:
+    config = _config(steering_source=None)
+    runs = _world(tmp_path / "in", steering=False)
+    run_dir = RunDir.create(config, out_root=tmp_path / "out")
+    params = {"s3": 1_000, "s6": 1_000, "s12": 100_000}
+
+    execute(config, run_dir, runs, params)
+
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert set(summary["accuracy_per_decade"]) == {"r1", "r2"}
+
+
 @pytest.fixture
 def figures(monkeypatch: pytest.MonkeyPatch) -> list[Figure]:
     """The figures that `p6_scale` saves, in order."""
@@ -575,7 +631,7 @@ def _panel_run(
     run_dir = _new_run(tmp_path, "p6", "s3")
     for source in sources:
         for model in models:
-            depth = DEPTH[model]
+            depth = DEPTH.get(model, 6)
             write_curves(
                 run_dir,
                 _per_seed(_peaked(depth, 2, 0.8))[:1],
@@ -646,16 +702,53 @@ def test_the_depth_panels_draw_each_model_on_relative_depth(
             )
 
 
-def test_only_the_first_depth_panel_has_a_legend(
+def test_the_depth_panels_share_one_figure_legend(
     tmp_path: Path, figures: list[Figure]
 ) -> None:
     run_dir = _execute(tmp_path)
 
     plot_depth_panels(run_dir, tmp_path / "figs", ["r1", "r2"], SIZES, "depth")
 
-    first, second = figures[0].axes
-    assert first.get_legend() is not None
-    assert second.get_legend() is None
+    fig = figures[0]
+    assert all(ax.get_legend() is None for ax in fig.axes)
+    (legend,) = fig.legends
+    assert [t.get_text() for t in legend.get_texts()] == list(SIZES)
+
+
+@pytest.mark.parametrize(
+    ("n_models", "columns"),
+    [(2, 2), (3, 3), (4, 4), (5, 4), (8, 4)],
+    ids=["two", "three", "four", "five", "eight"],
+)
+def test_the_figure_legend_takes_four_columns_at_most(
+    tmp_path: Path, figures: list[Figure], n_models: int, columns: int
+) -> None:
+    models = REGISTERED[:n_models]
+    run_dir = _panel_run(tmp_path, ["r1", "r2"], models)
+
+    plot_depth_panels(run_dir, tmp_path / "figs", ["r1", "r2"], models, "depth")
+
+    (legend,) = figures[0].legends
+    lefts = {round(t.get_window_extent().x0) for t in legend.get_texts()}
+    assert len(lefts) == columns
+
+
+@pytest.mark.parametrize(
+    ("n_models", "n_sources"),
+    [(5, 5), (8, 6), (8, 3)],
+    ids=["five-by-five", "eight-by-six", "eight-by-three"],
+)
+def test_the_depth_panels_keep_a_quarter_of_the_figure_height(
+    tmp_path: Path, figures: list[Figure], n_models: int, n_sources: int
+) -> None:
+    sources = [f"r{i}" for i in range(1, n_sources + 1)]
+    models = REGISTERED[:n_models]
+    run_dir = _panel_run(tmp_path, sources, models)
+
+    plot_depth_panels(run_dir, tmp_path / "figs", sources, models, "depth")
+
+    heights = [ax.get_position().height for ax in figures[0].axes]
+    assert min(heights) >= 0.25
 
 
 @pytest.mark.parametrize(
@@ -820,19 +913,18 @@ def test_an_interval_that_misses_the_mean_still_plots(tmp_path: Path) -> None:
     assert len(paths) == 6
 
 
-def test_the_panel_titles_sit_above_the_legend(
+def test_the_panel_titles_sit_below_the_figure_legend(
     tmp_path: Path, figures: list[Figure]
 ) -> None:
     run_dir = _execute(tmp_path)
 
     plot_depth_panels(run_dir, tmp_path / "figs", ["r1", "r2"], SIZES, "depth")
 
-    first, second = figures[0].axes
-    legend = first.get_legend()
-    assert legend is not None
-    legend_top = legend.get_window_extent().y1
-    assert first.title.get_window_extent().y0 >= legend_top
-    assert second.title.get_window_extent().y0 >= legend_top
+    fig = figures[0]
+    (legend,) = fig.legends
+    legend_bottom = legend.get_window_extent().y0
+    for ax in fig.axes:
+        assert ax.title.get_window_extent().y1 <= legend_bottom
 
 
 @pytest.mark.slow
