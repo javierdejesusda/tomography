@@ -602,7 +602,8 @@ def attach_adapter(
     Raises:
         ValueError: If a target layer is above the model depth, or gradient
             checkpointing is on for a base model with an active
-            `nn.Dropout` (train mode would activate it).
+            `nn.Dropout` or a positive `attention_dropout` (train mode
+            would activate it).
     """
     top = settings.layers[-1]
     if top > loaded.n_layers:
@@ -610,7 +611,8 @@ def attach_adapter(
             f"layer {top} is above the {loaded.n_layers} layers of the model"
         )
     if settings.gradient_checkpointing and any(
-        isinstance(module, torch.nn.Dropout) and module.p > 0
+        (isinstance(module, torch.nn.Dropout) and module.p > 0)
+        or getattr(module, "attention_dropout", 0.0) > 0
         for module in loaded.model.modules()
     ):
         raise ValueError(
