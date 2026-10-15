@@ -952,6 +952,38 @@ def test_the_cosines_use_the_signed_directions(
         )
 
 
+@pytest.mark.parametrize("seed", [0, 5])
+def test_the_half_fits_do_not_reuse_a_draw_seed(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, seed: int
+) -> None:
+    calls: list[tuple[int | None, int]] = []
+    real = reading_module.fit_type_reader
+
+    def spy(*args: Any, **kw: Any) -> RepReader:
+        calls.append((kw["n_pairs"], kw["seed"]))
+        return real(*args, **kw)
+
+    monkeypatch.setattr(reading_module, "fit_type_reader", spy)
+    names = ("obscure_real", "real_vs_synthal")
+    pools = {name: planted.pools[name] for name in names}
+
+    reading_cube(
+        planted.acts,
+        pools,
+        methods=("logistic",),
+        n_seeds=3,
+        n_pairs=16,
+        seed=seed,
+    )
+
+    draw_seeds = {s for n_pairs, s in calls if n_pairs is not None}
+    all_pairs = [s for n_pairs, s in calls if n_pairs is None]
+    half_seeds = all_pairs[len(names) :]
+    assert len(draw_seeds) == 3
+    assert len(set(half_seeds)) == 2
+    assert not draw_seeds & {*half_seeds, seed}
+
+
 def test_the_cosines_are_deterministic_under_the_seed() -> None:
     acts, pools = _noise_case(0, d=64)
 

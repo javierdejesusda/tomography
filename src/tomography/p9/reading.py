@@ -378,7 +378,9 @@ def _cross_fit_cosine(
 ) -> NDArray[np.float64]:
     signed = []
     for half in (0, 1):
-        sequence = np.random.SeedSequence([seed, 2, half])
+        # Entropy [seed, 2, 0] equals [seed, 2], the seed of draw 2; a spawn
+        # key never collides with the [seed, draw] entropy of the draws.
+        sequence = np.random.SeedSequence(seed, spawn_key=(half,))
         readers = [
             fit_type_reader(
                 acts,
