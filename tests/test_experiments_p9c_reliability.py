@@ -952,7 +952,7 @@ def test_no_test_item_chooses_the_layer(
         data = acts.data.copy()
         for j, item in enumerate(items):
             split = item.example.split
-            keep = {"train": (0, 1, 2), "val": (0,), "test": (2,)}[split]
+            keep = {"train": (0, 1, 2), "val": (1,), "test": (2,)}[split]
             for k in range(len(layers)):
                 if k not in keep:
                     data[k, j, :2] = 0.0
@@ -965,7 +965,7 @@ def test_no_test_item_chooses_the_layer(
     run_dir = _execute(tiny_gpt2, tmp_path)
 
     summary = _summary(run_dir)
-    assert summary["layer"] == 1
+    assert summary["layer"] == 2
     assert summary["layer_source"] == "validation"
     curve = run_dir.read_arrays("curves")["per_seed"][1, 0]
     assert curve[2] > curve[0]
@@ -1475,6 +1475,54 @@ def test_the_stacker_is_fitted_on_the_validation_rows(
         )
 
 
+def _firm_on_val(items: Sequence[LabeledItem]) -> list[LabeledItem]:
+    firm = []
+    for item in items:
+        if item.example.split == "val":
+            greedy = "gold" if item.label.greedy_correct else "other"
+            label = dataclasses.replace(
+                item.label, greedy=greedy, samples=(greedy,) * 5
+            )
+            item = dataclasses.replace(item, label=label)
+        firm.append(item)
+    return firm
+
+
+def _without_samples(items: Sequence[LabeledItem]) -> list[LabeledItem]:
+    return [
+        dataclasses.replace(
+            item, label=dataclasses.replace(item.label, samples=())
+        )
+        for item in items
+    ]
+
+
+def test_a_confidence_column_constant_on_the_validation_rows_gets_no_weight(
+    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+) -> None:
+    items = _firm_on_val(_items())
+
+    constant = _execute(
+        tiny_gpt2, tmp_path / "constant", items=items, datasets=("popqa",)
+    )
+    dropped = _execute(
+        tiny_gpt2,
+        tmp_path / "dropped",
+        items=_without_samples(items),
+        datasets=("popqa",),
+    )
+
+    assert "consistency" in _predictors(_table(constant), "popqa")
+    assert "consistency" not in _predictors(_table(dropped), "popqa")
+    rows = _rows(constant, "table_incremental", INCREMENTAL_COLUMNS)
+    reference = _rows(dropped, "table_incremental", INCREMENTAL_COLUMNS)
+    assert [r["features"] for r in rows] == [r["features"] for r in reference]
+    for row, expected in zip(rows, reference, strict=True):
+        for column in ("auroc", "diff_vs_confidence", "lo", "hi"):
+            assert np.isfinite(row[column]), row
+            assert row[column] == pytest.approx(expected[column], abs=1e-6)
+
+
 def test_the_probe_is_fitted_on_the_train_rows_only(
     tiny_gpt2: LoadedModel, planted_run: RunDir
 ) -> None:
@@ -1506,6 +1554,37 @@ def test_a_control_follows_the_train_orientation_not_the_test_one(
     )
 
     assert _row(_table(run_dir), "popqa", "popularity")["auroc"] < 0.5
+
+
+def test_the_controls_are_oriented_on_the_train_rows(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    planted: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+    real = p9c_reliability.orient_on_train
+
+    def spy(
+        train_scores: np.ndarray,
+        train_labels: np.ndarray,
+        test_scores: np.ndarray,
+    ) -> np.ndarray:
+        calls.append((train_scores, train_labels, test_scores))
+        return real(train_scores, train_labels, test_scores)
+
+    monkeypatch.setattr(p9c_reliability, "orient_on_train", spy)
+
+    _execute(tiny_gpt2, tmp_path, datasets=("popqa",))
+
+    popqa = _behavior(_items(), "popqa")
+    train = np.array([i.example.split == "train" for i in popqa])
+    assert len(calls) == 3
+    for train_scores, train_labels, column in calls:
+        assert column.shape == (len(popqa),)
+        assert len(np.unique(column)) > 2
+        np.testing.assert_array_equal(train_scores, column[train])
+        np.testing.assert_array_equal(train_labels, _correct(popqa)[train])
 
 
 @pytest.mark.parametrize("known_contrasts", [True, False])
