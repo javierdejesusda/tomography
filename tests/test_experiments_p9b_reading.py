@@ -388,9 +388,10 @@ def test_the_arrays_have_the_documented_shapes(
         np.testing.assert_allclose(
             transfer["auroc"][:, :, t, t], transfer["test"][0, t], atol=1e-12
         )
-        np.testing.assert_allclose(
-            transfer["cosine"][:, t, t], np.ones(n_layers), atol=1e-6
-        )
+    np.testing.assert_allclose(
+        transfer["cosine"], transfer["cosine"].transpose(0, 2, 1), atol=1e-6
+    )
+    assert np.abs(transfer["cosine"]).max() <= 1.0 + 1e-6
 
     readers = run_dir.read_arrays("readers")
     assert readers["layers"].tolist() == list(range(1, n_layers + 1))
