@@ -13,6 +13,11 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from tomography.analysis import lens_logits
+from tomography.analysis import pole_separation
+from tomography.experiments.a2_logit_lens import PoleWords
+from tomography.experiments.a2_logit_lens import lens_params
+from tomography.experiments.a2_logit_lens import pole_ids
 from tomography.experiments.p3_size import spearman as rank_correlation
 from tomography.experiments.steering import dose_slope
 from tomography.experiments.variants import READING_TASKS
@@ -20,6 +25,8 @@ from tomography.experiments.variants import VARIANT_KINDS
 from tomography.experiments.variants import Variant
 from tomography.experiments.variants import VariantKind
 from tomography.experiments.variants import template_variants
+from tomography.model import LoadedModel
+from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
 
 TEMPLATES: tuple[str, ...] = (
@@ -159,3 +166,44 @@ def safe_slope(coeffs: Sequence[float], values: NDArray[Any]) -> float:
     ):
         return float("nan")
     return dose_slope(coeffs, y)
+
+
+def lens_separation(
+    loaded: LoadedModel, readers: Sequence[RepReader], words: PoleWords
+) -> NDArray[np.float64]:
+    """Measures how far the logit lens puts the poles apart for each reader.
+
+    Args:
+        loaded: The wrapped model; only its unembedding, final norm and
+            tokenizer are used.
+        readers: The readers, each with one direction per layer.
+        words: The words of the positive and the negative pole, with their
+            leading space. Those that are not one token are dropped.
+
+    Returns:
+        Array of shape (R, K): the pole separation (see `pole_separation`)
+        of every reader's oriented direction (`directions * signs`) at every
+        layer. An empty `readers` gives an array of shape (0, 0).
+
+    Raises:
+        ValueError: If no word of a pole is a single token.
+    """
+    positive, _ = pole_ids(loaded, words[0])
+    negative, _ = pole_ids(loaded, words[1])
+    if not positive or not negative:
+        raise ValueError("no pole word is a single token for this tokenizer")
+    unembedding, scale, center = lens_params(loaded)
+    rows = [
+        pole_separation(
+            lens_logits(
+                reader.directions * reader.signs[:, None],
+                unembedding,
+                scale=scale,
+                center=center,
+            ),
+            positive,
+            negative,
+        )
+        for reader in readers
+    ]
+    return np.stack(rows) if rows else np.empty((0, 0), dtype=np.float64)

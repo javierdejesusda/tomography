@@ -1,19 +1,29 @@
 """Tests for the P7 extraction template versus steering experiment."""
 
+from typing import Any
+
 import numpy as np
+from numpy.typing import NDArray
 import pytest
 
+from tomography.analysis import lens_logits
+from tomography.analysis import pole_separation
+from tomography.experiments.a2_logit_lens import lens_params
+from tomography.experiments.a2_logit_lens import pole_ids
 from tomography.experiments.p7_extraction_steering import CHAT_INSTRUCTION
 from tomography.experiments.p7_extraction_steering import FORMATS
 from tomography.experiments.p7_extraction_steering import STORY_PREFIX
 from tomography.experiments.p7_extraction_steering import TEMPLATES
 from tomography.experiments.p7_extraction_steering import extraction_variants
+from tomography.experiments.p7_extraction_steering import lens_separation
 from tomography.experiments.p7_extraction_steering import safe_slope
 from tomography.experiments.p7_extraction_steering import shift_prompts
 from tomography.experiments.p7_extraction_steering import spearman
 from tomography.experiments.steering import dose_slope
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import template_variants
+from tomography.model import LoadedModel
+from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
 
 PLAIN = ChatFormat("plain")
@@ -194,3 +204,87 @@ def test_safe_slope_is_nan_below_two_finite_points() -> None:
 def test_safe_slope_keeps_the_length_error() -> None:
     with pytest.raises(ValueError, match="differ in length"):
         safe_slope(COEFFS, np.zeros(3))
+
+
+WORDS = ((" good", " very"), (" dog", " text"))
+
+
+def _reader(directions: NDArray[np.float32], sign: float = 1.0) -> RepReader:
+    layers = directions.shape[0]
+    return RepReader(
+        "test",
+        tuple(range(1, layers + 1)),
+        directions,
+        np.zeros_like(directions),
+        np.full(layers, sign, dtype=np.float32),
+    )
+
+
+def _random_reader(
+    loaded: LoadedModel, seed: int, sign: float = 1.0
+) -> RepReader:
+    rng = np.random.default_rng(seed)
+    unit = rng.standard_normal((3, loaded.d_model)).astype(np.float32)
+    unit /= np.linalg.norm(unit, axis=1, keepdims=True)
+    return _reader(unit, sign)
+
+
+def test_lens_separation_is_one_row_per_reader_and_one_column_per_layer(
+    tiny_arch: LoadedModel,
+) -> None:
+    readers = [_random_reader(tiny_arch, 0), _random_reader(tiny_arch, 1)]
+    values = lens_separation(tiny_arch, readers, WORDS)
+    assert values.shape == (2, 3)
+    unembedding, scale, center = lens_params(tiny_arch)
+    positive, _ = pole_ids(tiny_arch, WORDS[0])
+    negative, _ = pole_ids(tiny_arch, WORDS[1])
+    for row, reader in zip(values, readers, strict=True):
+        logits = lens_logits(
+            reader.directions, unembedding, scale=scale, center=center
+        )
+        np.testing.assert_allclose(
+            row, pole_separation(logits, positive, negative)
+        )
+
+
+def test_lens_separation_reads_the_oriented_direction(
+    tiny_arch: LoadedModel,
+) -> None:
+    up = lens_separation(tiny_arch, [_random_reader(tiny_arch, 0)], WORDS)
+    down = lens_separation(
+        tiny_arch, [_random_reader(tiny_arch, 0, sign=-1.0)], WORDS
+    )
+    np.testing.assert_allclose(down, -up)
+
+
+def test_lens_separation_is_positive_for_a_direction_toward_the_positive_pole(
+    tiny_arch: LoadedModel,
+) -> None:
+    unembedding, _, _ = lens_params(tiny_arch)
+    (good,), (dog,) = (pole_ids(tiny_arch, [w])[0] for w in (" good", " dog"))
+    planted = (unembedding[good] - unembedding[dog])[None, :]
+    words = ((" good",), (" dog",))
+    toward = lens_separation(tiny_arch, [_reader(planted)], words)
+    away = lens_separation(tiny_arch, [_reader(-planted)], words)
+    assert toward[0, 0] > 1.0
+    np.testing.assert_allclose(away, -toward)
+
+
+def test_lens_separation_without_readers_is_an_empty_matrix(
+    tiny_arch: LoadedModel,
+) -> None:
+    values = lens_separation(tiny_arch, [], WORDS)
+    assert values.ndim == 2
+    assert values.shape[0] == 0
+
+
+@pytest.mark.parametrize(
+    "words",
+    [((" zzzqqq",), (" dog",)), ((" good",), (" zzzqqq",))],
+    ids=["no-positive", "no-negative"],
+)
+def test_lens_separation_needs_a_single_token_word_per_pole(
+    tiny_arch: LoadedModel, words: Any
+) -> None:
+    with pytest.raises(ValueError, match="no pole word is a single token"):
+        lens_separation(tiny_arch, [_random_reader(tiny_arch, 0)], words)
