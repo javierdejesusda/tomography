@@ -58,6 +58,7 @@ PERSONA_PAIRS: Mapping[str, tuple[str, str]] = MappingProxyType(
 )
 CONTROLS: tuple[str, ...] = ("instruction_only", "fact_only", "random_label")
 CONDITIONS: tuple[str, ...] = (*PERSONA_PAIRS, *CONTROLS)
+LABEL_METHODS: tuple[Method, ...] = ("mean_diff", "logistic")
 GOT_SUBSETS: tuple[str, ...] = (
     "cities",
     "neg_cities",
@@ -86,7 +87,8 @@ class Config(ReadingConfig):
 
     Attributes:
         conditions: Names from `CONDITIONS`, at most `MAX_CONDITIONS`, and
-            `paper` is required.
+            `paper` is required. `random_label` is skipped unless `method` is
+            in `LABEL_METHODS`.
         got_subsets: Geometry of Truth subsets scored on their test split.
         n_boot: Number of bootstrap resamples of every interval.
     """
@@ -214,8 +216,11 @@ def condition_stimuli(
     The persona conditions and `random_label` use the true statements only,
     and the persona plan depends on the statements and the seed alone, so
     with the same seed they draw the same statements. `instruction_only`
-    renders the paper personas with an empty response. `fact_only` drops the
-    persona and pairs plain true with plain false statements.
+    renders the paper personas with an empty response, so every training set
+    holds the same two texts: its readers are identical across seeds, its
+    intervals have zero width and only its out-of-distribution columns carry
+    information. `fact_only` drops the persona and pairs plain true with
+    plain false statements.
 
     Args:
         condition: A name from `CONDITIONS`.
@@ -321,13 +326,13 @@ def _check(
     return test_rows
 
 
-def _plan(
+def _train_sets(
     config: Config,
     condition: str,
     by_split: Mapping[str, Sequence[Example]],
     chat: ChatFormat,
-) -> tuple[list[StimulusSet], dict[str, StimulusSet]]:
-    train = [
+) -> list[StimulusSet]:
+    return [
         condition_stimuli(
             condition,
             by_split["train"],
@@ -338,8 +343,14 @@ def _plan(
         )
         for i in range(config.n_seeds)
     ]
-    if condition == "fact_only":
-        return train, {}
+
+
+def _id_sets(
+    config: Config,
+    condition: str,
+    by_split: Mapping[str, Sequence[Example]],
+    chat: ChatFormat,
+) -> dict[str, StimulusSet]:
     evals = {}
     for name, split in (("id_val", "val"), ("id", "test")):
         statements = by_split[split]
@@ -356,7 +367,7 @@ def _plan(
             seed=derive_seed(config.seed, "eval", "id", split),
             train=False,
         )
-    return train, evals
+    return evals
 
 
 def _prepare(
@@ -382,24 +393,28 @@ def _fit_condition(
     loaded: LoadedModel,
     layers: tuple[int, ...],
     condition: str,
-    plan: tuple[list[StimulusSet], dict[str, StimulusSet]],
+    train: Sequence[StimulusSet],
+    by_split: Mapping[str, Sequence[Example]],
+    chat: ChatFormat,
     shared: Mapping[str, Prepared],
 ) -> SweepResult:
-    train, evals = plan
     where = condition_position(condition, config.position)
-    where_eval = condition_position(
-        condition,
-        config.position
-        if config.eval_position is None
-        else config.eval_position,
-    )
     trained = [_prepare(config, loaded, layers, s, where) for s in train]
-    own = {
-        name: _prepare(config, loaded, layers, stimuli, where_eval)
-        for name, stimuli in evals.items()
-    }
     if condition == "fact_only":
         own = {"id_val": shared["facts_val"], "id": shared["facts"]}
+    else:
+        where_eval = condition_position(
+            condition,
+            config.position
+            if config.eval_position is None
+            else config.eval_position,
+        )
+        own = {
+            name: _prepare(config, loaded, layers, stimuli, where_eval)
+            for name, stimuli in _id_sets(
+                config, condition, by_split, chat
+            ).items()
+        }
     return sweep_from_activations(
         trained,
         {**own, **shared},
@@ -409,8 +424,21 @@ def _fit_condition(
     )
 
 
+def _skipped(config: Config) -> dict[str, str]:
+    if "random_label" in config.conditions and (
+        config.method not in LABEL_METHODS
+    ):
+        return {
+            "random_label": (
+                f"method {config.method!r} fits its direction without "
+                "labels; flipped labels would only set its sign"
+            )
+        }
+    return {}
+
+
 def _table_rows(
-    config: Config,
+    conditions: Sequence[str],
     curves: Mapping[str, Mapping[str, NDArray[Any]]],
     layers: Sequence[int],
     ood: Sequence[str],
@@ -420,7 +448,7 @@ def _table_rows(
         return [float(curves[name][key][c, at]) for key in ("mean", "lo", "hi")]
 
     rows = []
-    for c, condition in enumerate(config.conditions):
+    for c, condition in enumerate(conditions):
         id_layer = best_layer(curves["id_val"]["mean"][c], layers)
         ood_layer = best_layer(curves["facts_val"]["mean"][c], layers)
         rows.append(
@@ -444,6 +472,13 @@ def execute(
 ) -> None:
     """Reads honesty under every condition and scores the truth sets.
 
+    `random_label` runs only when `config.method` is in `LABEL_METHODS`: a
+    finder that fits its direction without the labels (`pca_diff` and the
+    others) would only take its sign from the flipped labels, so the reader
+    would be the paper reader up to sign and its row would read as a null.
+    The condition is then named in `skipped` with its reason and has no
+    series, reader, table row or scatter point.
+
     The shared evaluation sets are plain true against false statements read
     once at `PLAIN_POSITION` and reused by every condition: the facts val and
     test splits (`facts_val`, `facts`) and the test split of each Geometry of
@@ -457,10 +492,11 @@ def execute(
     accuracy of its reader at each layer, and `curves_cosine`, the cosine of
     each condition's reader with the paper reader of the same seed (absent
     when only `paper` runs). Also writes `readers_<condition>`, `table.json`
-    and `summary.json`. The table reports `id` at the layer that is best on
-    the condition's `id_val` curve and every other set at the layer that is
-    best on its `facts_val` curve, so no test set picks a layer. Accuracies
-    are raw, not folded above 0.5.
+    and `summary.json`, which lists the conditions run and, under `skipped`,
+    the reason of each skipped one. The table reports `id` at the layer that
+    is best on the condition's `id_val` curve and every other set at the layer
+    that is best on its `facts_val` curve, so no test set picks a layer.
+    Accuracies are raw, not folded above 0.5.
 
     Args:
         config: The experiment settings.
@@ -480,6 +516,8 @@ def execute(
             supply the requested pairs.
     """
     test_rows = _check(config, facts, got)
+    skipped = _skipped(config)
+    conditions = tuple(c for c in config.conditions if c not in skipped)
     by_split = {
         split: [e for e in facts if e.split == split]
         for split in ("train", "val", "test")
@@ -500,7 +538,7 @@ def execute(
             ),
         )
     }
-    plans = {c: _plan(config, c, by_split, chat) for c in config.conditions}
+    trains = {c: _train_sets(config, c, by_split, chat) for c in conditions}
     layers = (
         tuple(range(1, loaded.n_layers + 1))
         if config.layers is None
@@ -513,9 +551,16 @@ def execute(
     names = ("id_val", "id", *shared)
     accuracy: dict[str, list[NDArray[np.float64]]] = {n: [] for n in names}
     oriented = {}
-    for condition in config.conditions:
+    for condition in conditions:
         result = _fit_condition(
-            config, loaded, layers, condition, plans[condition], shared
+            config,
+            loaded,
+            layers,
+            condition,
+            trains[condition],
+            by_split,
+            chat,
+            shared,
         )
         for name in names:
             accuracy[name].append(result.per_seed(name)[_READER])
@@ -533,13 +578,13 @@ def execute(
             run_dir,
             np.stack(accuracy[name]),
             layers,
-            series=config.conditions,
+            series=conditions,
             stem=f"curves_{name}",
             chance=0.5,
             n_layers=loaded.n_layers,
             n_boot=config.n_boot,
         )
-    others = [c for c in config.conditions if c != "paper"]
+    others = [c for c in conditions if c != "paper"]
     if others:
         write_curves(
             run_dir,
@@ -568,26 +613,25 @@ def execute(
         "ood_layer",
         *(f"{name}{suffix}" for name in ood for suffix in ("", "_lo", "_hi")),
     ]
-    rows = _table_rows(config, curves, layers, ood)
+    rows = _table_rows(conditions, curves, layers, ood)
     run_dir.write_json("table", {"columns": columns, "rows": rows})
     by_condition = {
         row[0]: dict(zip(columns, row, strict=True)) for row in rows
     }
     summary: dict[str, Any] = {
-        "conditions": list(config.conditions),
+        "conditions": list(conditions),
         "personas": {
-            c: list(PERSONA_PAIRS[c])
-            for c in config.conditions
-            if c in PERSONA_PAIRS
+            c: list(PERSONA_PAIRS[c]) for c in conditions if c in PERSONA_PAIRS
         },
         "got_subsets": list(config.got_subsets),
         "n_eval_pairs": {
             name: int(stimuli.groups.shape[0]) for name, stimuli in sets.items()
         },
         "n_seeds": config.n_seeds,
+        "skipped": skipped,
     }
-    related = [c for c in config.conditions if c in _RELATED]
-    unrelated = [c for c in config.conditions if c in _UNRELATED]
+    related = [c for c in conditions if c in _RELATED]
+    unrelated = [c for c in conditions if c in _UNRELATED]
     if unrelated:
         summary["lexical_gap"] = {
             name: float(

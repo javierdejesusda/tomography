@@ -21,6 +21,7 @@ from tomography.experiments.base import derive_seed
 from tomography.experiments.p5_persona_wording import CONDITIONS
 from tomography.experiments.p5_persona_wording import CONTROLS
 from tomography.experiments.p5_persona_wording import GOT_SUBSETS
+from tomography.experiments.p5_persona_wording import LABEL_METHODS
 from tomography.experiments.p5_persona_wording import MAX_CONDITIONS
 from tomography.experiments.p5_persona_wording import PERSONA_PAIRS
 from tomography.experiments.p5_persona_wording import PLAIN
@@ -796,7 +797,9 @@ def test_the_conditions_draw_their_stimuli_per_seed_and_split(
                 )
                 for split in ("val", "test")
             ]
-    assert [c[:5] for c in calls] == expected
+    assert sorted((c[:5] for c in calls), key=repr) == sorted(
+        expected, key=repr
+    )
 
 
 def test_every_persona_condition_trains_on_the_same_statements(
@@ -929,7 +932,9 @@ def test_the_summary_describes_the_run(ran: RunDir) -> None:
         "n_eval_pairs",
         "lexical_gap",
         "n_seeds",
+        "skipped",
     }
+    assert summary["skipped"] == {}
     assert summary["conditions"] == list(CONDITIONS)
     assert summary["personas"] == {
         name: list(words) for name, words in WORDS.items()
@@ -942,6 +947,121 @@ def test_the_summary_describes_the_run(ran: RunDir) -> None:
         "got_larger_than": 4,
     }
     assert summary["n_seeds"] == 3
+
+
+def test_random_label_runs_only_under_the_methods_that_read_the_labels() -> (
+    None
+):
+    assert LABEL_METHODS == ("mean_diff", "logistic")
+
+
+@pytest.mark.parametrize(
+    "conditions",
+    [("paper", "synonym_0", "random_label"), ("paper", "random_label")],
+)
+def test_random_label_is_skipped_under_a_method_that_ignores_labels(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    conditions: tuple[str, ...],
+) -> None:
+    calls = _record_conditions(monkeypatch)
+    run_dir = _execute(
+        tiny_arch, tmp_path, method="pca_diff", conditions=conditions
+    )
+    run = [c for c in conditions if c != "random_label"]
+    assert "random_label" not in {c[0] for c in calls}
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["conditions"] == run
+    assert summary["skipped"] == {
+        "random_label": "method 'pca_diff' fits its direction without labels; "
+        "flipped labels would only set its sign"
+    }
+    names = {p.name for p in run_dir.path.iterdir()}
+    assert "readers_random_label.npz" not in names
+    assert {n for n in names if n.startswith("readers_")} == {
+        f"readers_{c}.npz" for c in run
+    }
+    for name in EVALS:
+        sidecar = run_dir.read_json(f"curves_{name}")
+        assert isinstance(sidecar, dict)
+        assert sidecar["series"] == run
+        assert run_dir.read_arrays(f"curves_{name}")["mean"].shape[0] == len(
+            run
+        )
+    assert list(_table(run_dir)) == run
+    assert (run_dir.path / "curves_cosine.npz").exists() == (len(run) > 1)
+    if len(run) > 1:
+        cosine = run_dir.read_json("curves_cosine")
+        assert isinstance(cosine, dict)
+        assert cosine["series"] == run[1:]
+
+
+def test_the_skipped_condition_has_no_point_in_the_scatter(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _execute(
+        tiny_arch,
+        tmp_path,
+        method="pca_diff",
+        conditions=("paper", "random_label"),
+    )
+    saved: dict[str, Any] = {}
+    real = p5_persona_wording.save_figure
+
+    def spy(fig: Any, out_dir: Any, name: str, **kwargs: Any) -> Any:
+        saved[name] = fig
+        return real(fig, out_dir, name, **kwargs)
+
+    monkeypatch.setattr(p5_persona_wording, "save_figure", spy)
+    plot(run_dir, tmp_path / "figs")
+    ax = saved["persona_scatter"].axes[0]
+    labels = {line.get_label() for line in ax.lines}
+    assert "paper" in labels
+    assert "random_label" not in labels
+
+
+@pytest.mark.parametrize("n_pairs", [8, 7])
+def test_random_label_runs_under_mean_diff_with_balanced_flips(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    n_pairs: int,
+) -> None:
+    sweeps: list[tuple[Any, Any]] = []
+    real = p5_persona_wording.sweep_from_activations
+
+    def spy(train: Any, evaluation: Any, **kwargs: Any) -> Any:
+        sweeps.append((train, dict(evaluation)))
+        return real(train, evaluation, **kwargs)
+
+    monkeypatch.setattr(p5_persona_wording, "sweep_from_activations", spy)
+    run_dir = _execute(
+        tiny_arch,
+        tmp_path,
+        method="mean_diff",
+        n_pairs=n_pairs,
+        conditions=("paper", "random_label"),
+    )
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["skipped"] == {}
+    assert summary["conditions"] == ["paper", "random_label"]
+    assert (run_dir.path / "readers_random_label.npz").is_file()
+    assert list(_table(run_dir)) == ["paper", "random_label"]
+    (paper_train, paper_eval), (flipped_train, flipped_eval) = sweeps
+    assert len(flipped_train) == 3
+    for (real_set, _), (flipped_set, _) in zip(
+        paper_train, flipped_train, strict=True
+    ):
+        first = real_set.groups[:, 0]
+        swapped = flipped_set.labels[first] != real_set.labels[first]
+        assert swapped.sum() == n_pairs // 2
+    for name in ("id", "id_val"):
+        np.testing.assert_array_equal(
+            flipped_eval[name][0].labels, paper_eval[name][0].labels
+        )
 
 
 @pytest.mark.parametrize(
