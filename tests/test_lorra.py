@@ -1112,6 +1112,29 @@ def test_train_lorra_depends_on_the_seed(tiny_arch: LoadedModel) -> None:
     assert traces[0].losses != traces[1].losses
 
 
+def test_train_lorra_dropout_does_not_depend_on_the_global_seed(
+    tiny_arch: LoadedModel,
+) -> None:
+    twin = _twin(tiny_arch)
+    settings = _train_settings(steps=6, dropout=0.3)
+    runs = []
+    for loaded, global_seed in ((tiny_arch, 11), (twin, 22)):
+        adapter = attach_adapter(loaded, settings)
+        torch.manual_seed(global_seed)
+        runs.append(
+            train_lorra(loaded, adapter, EIGHT_PAIRS, ChatFormat("plain"))
+        )
+    assert runs[0].losses == runs[1].losses
+
+
+def test_train_lorra_applies_no_weight_decay(tiny_arch: LoadedModel) -> None:
+    adapter = attach_adapter(tiny_arch, _train_settings(steps=1))
+    before = _lora_a(adapter)
+    train_lorra(tiny_arch, adapter, EIGHT_PAIRS, ChatFormat("plain"))
+    for a, b in zip(before, _lora_a(adapter), strict=True):
+        assert torch.equal(a, b)
+
+
 def test_train_lorra_leaves_the_callers_random_state_alone(
     tiny_arch: LoadedModel,
 ) -> None:
@@ -1200,6 +1223,28 @@ def test_train_lorra_needs_a_full_batch(tiny_arch: LoadedModel) -> None:
     adapter = attach_adapter(tiny_arch, settings)
     with pytest.raises(ValueError, match="batch"):
         train_lorra(tiny_arch, adapter, PAIRS[:3], ChatFormat("plain"))
+
+
+def _no_bos_window(loaded: LoadedModel, chat: ChatFormat) -> int:
+    """The longest prompt stream of `REPEATED_PAIR` without a BOS token."""
+    wide = _settings()
+    batch = build_batch(loaded, REPEATED_PAIR[:1], chat, wide, bos="none")
+    prompts = batch.attention_mask[:, : wide.max_prompt_tokens]
+    return int(prompts.sum(dim=1).max().item())
+
+
+def test_train_lorra_passes_the_bos_policy_to_every_batch(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    chat = ChatFormat("plain")
+    settings = _train_settings(
+        steps=2, max_prompt_tokens=_no_bos_window(tiny_gpt2, chat)
+    )
+    adapter = attach_adapter(tiny_gpt2, settings)
+    with pytest.raises(ValueError, match="prompt"):
+        train_lorra(tiny_gpt2, adapter, REPEATED_PAIR, chat)
+    trace = train_lorra(tiny_gpt2, adapter, REPEATED_PAIR, chat, bos="none")
+    assert all(math.isfinite(loss) for loss in trace.losses)
 
 
 def test_train_lorra_gives_finite_losses_on_a_bf16_base(
@@ -1303,21 +1348,85 @@ def test_heldout_losses_use_no_dropout_and_no_gradients(
     assert not any(module.training for module in tiny_arch.model.modules())
 
 
+def _hand_layer_losses(
+    loaded: LoadedModel, adapter: LorraAdapter, pairs: Sequence[Pair]
+) -> dict[int, float]:
+    """Scores one batch by hand: a frozen pass, an adapted pass, the losses."""
+    settings = adapter.settings
+    batch = build_batch(loaded, pairs, ChatFormat("plain"), settings)
+    n = len(pairs)
+    layers = list(settings.layers)
+    with (
+        torch.no_grad(),
+        adapter.disabled(),
+        capture_residuals(loaded, layers) as frozen,
+    ):
+        loaded.model(
+            batch.input_ids,
+            attention_mask=batch.attention_mask,
+            position_ids=batch.position_ids,
+            use_cache=False,
+        )
+    with torch.no_grad(), capture_residuals(loaded, layers) as current:
+        loaded.model(
+            batch.input_ids[:n],
+            attention_mask=batch.attention_mask[:n],
+            position_ids=batch.position_ids[:n],
+            use_cache=False,
+        )
+    losses = layer_losses(current, frozen, batch, settings)
+    return {layer: loss.item() for layer, loss in losses.items()}
+
+
 def test_heldout_losses_average_over_batches_of_the_batch_size(
     tiny_arch: LoadedModel,
 ) -> None:
-    chat = ChatFormat("plain")
     adapter = attach_adapter(tiny_arch, _settings(batch_size=2))
     _randomize(adapter)
     pairs = PAIRS[:5]
-    whole = heldout_losses(tiny_arch, adapter, pairs, chat)
-    parts = [
-        heldout_losses(tiny_arch, adapter, pairs[start : start + 2], chat)
+    per_batch = [
+        _hand_layer_losses(tiny_arch, adapter, pairs[start : start + 2])
         for start in (0, 2, 4)
     ]
-    for layer in whole:
-        mean = sum(part[layer] for part in parts) / 3
-        assert whole[layer] == pytest.approx(mean, rel=1e-5)
+    got = heldout_losses(tiny_arch, adapter, pairs, ChatFormat("plain"))
+    assert sorted(got) == [1, 2]
+    for layer, value in got.items():
+        expected = sum(losses[layer] for losses in per_batch) / 3
+        assert value == pytest.approx(expected, rel=1e-5)
+
+
+def test_heldout_losses_run_every_forward_without_gradients(
+    tiny_arch: LoadedModel,
+) -> None:
+    adapter = attach_adapter(tiny_arch, _settings(batch_size=2))
+    _randomize(adapter)
+    grad_modes: list[bool] = []
+
+    def record(module: torch.nn.Module, args: tuple[Any, ...]) -> None:
+        grad_modes.append(torch.is_grad_enabled())
+
+    handle = tiny_arch.blocks[0].register_forward_pre_hook(record)
+    try:
+        heldout_losses(tiny_arch, adapter, PAIRS[:3], ChatFormat("plain"))
+    finally:
+        handle.remove()
+    assert grad_modes == [False] * 4
+
+
+def test_heldout_losses_pass_the_bos_policy_to_every_batch(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    chat = ChatFormat("plain")
+    settings = _settings(
+        batch_size=2, max_prompt_tokens=_no_bos_window(tiny_gpt2, chat)
+    )
+    adapter = attach_adapter(tiny_gpt2, settings)
+    with pytest.raises(ValueError, match="prompt"):
+        heldout_losses(tiny_gpt2, adapter, REPEATED_PAIR[:3], chat)
+    losses = heldout_losses(
+        tiny_gpt2, adapter, REPEATED_PAIR[:3], chat, bos="none"
+    )
+    assert all(math.isfinite(loss) for loss in losses.values())
 
 
 def test_heldout_losses_keep_the_adapter_enabled(
