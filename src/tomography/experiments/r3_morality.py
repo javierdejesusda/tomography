@@ -100,7 +100,8 @@ def execute(
             `match_length` on they need `meta["is_short"]`.
 
     Raises:
-        KeyError: `short_only` is on and an example has no `meta["is_short"]`.
+        KeyError: An example has no `meta["is_short"]` and `short_only` is
+            on, or `short_only` is off and `match_length` is on.
     """
     if config.short_only:
         examples = [e for e in examples if e.meta["is_short"] == 1]
