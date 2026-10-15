@@ -287,6 +287,13 @@ def test_config_rejects_settings_that_would_fail_late(
         _config(**overrides)
 
 
+@pytest.mark.parametrize(
+    "name", ["n_random", "n_prompts", "n_pairs", "min_pairs", "min_eval"]
+)
+def test_config_accepts_a_count_of_one(name: str) -> None:
+    assert getattr(_config(**{name: 1}), name) == 1
+
+
 @pytest.mark.parametrize("behavior", ["auto", "abstention", "shift"])
 def test_every_behavior_rejects_the_same_generation_settings(
     behavior: str,
