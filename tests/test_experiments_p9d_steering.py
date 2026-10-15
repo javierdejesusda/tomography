@@ -143,12 +143,16 @@ def _labels_run(
     items: Sequence[LabeledItem],
     *,
     known_contrasts: bool = True,
+    n_shots: int = 2,
 ) -> RunDir:
     run_dir = RunDir.create(
         LabelsConfig(model="tiny"), out_root=tmp_path / "labels"
     )
     run_dir.write_json("items", pool_records(items))
-    run_dir.write_json("summary", {"known_contrasts": known_contrasts})
+    run_dir.write_json(
+        "summary",
+        {"known_contrasts": known_contrasts, "recipe": {"n_shots": n_shots}},
+    )
     run_dir.finalize()
     return run_dir
 
@@ -1277,6 +1281,21 @@ def test_run_refuses_labels_made_for_another_model(
     config = _config(labels_run=str(labels.path), model="gpt2")
 
     with pytest.raises(ValueError, match="labeled 'tiny', not 'gpt2'"):
+        run(config, _run_dir(tmp_path, config))
+
+
+def test_run_refuses_labels_made_with_another_number_of_shots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    labels = _labels_run(tmp_path, _items(), n_shots=15)
+
+    def never(name: str) -> LoadedModel:
+        raise AssertionError("the model must not load first")
+
+    monkeypatch.setattr(p9d_steering, "load_model", never)
+    config = _config(labels_run=str(labels.path), n_shots=2)
+
+    with pytest.raises(ValueError, match=r"n_shots.*15.*2"):
         run(config, _run_dir(tmp_path, config))
 
 
