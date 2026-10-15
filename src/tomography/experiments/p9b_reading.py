@@ -226,8 +226,10 @@ def execute(
     `curves_unknown` (the headline method of the contrasts of a panel, a
     panel without contrasts is not written), `matrix` (the transfer AUROC at
     the chosen layer, row = fit contrast, column = scored contrast),
-    `matrix_cosine`, `transfer` (every AUROC and cosine), `readers` (the
-    all-pairs directions of the headline method), `table` and `summary`.
+    `matrix_cosine` (split-half cross-fit cosines, whose diagonal is the
+    split-half stability of a contrast, see `reading_cube`), `transfer`
+    (every AUROC and cosine), `readers` (the all-pairs directions of the
+    headline method), `table` and `summary`.
 
     Args:
         config: The experiment settings.
