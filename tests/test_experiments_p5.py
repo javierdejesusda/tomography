@@ -9,8 +9,12 @@ import weakref
 import numpy as np
 import pytest
 
+from tomography.cli import load_experiment
+from tomography.datasets.facts import load_facts
+from tomography.datasets.geometry_of_truth import load_geometry_of_truth
 from tomography.datasets.records import Example
 from tomography.datasets.records import Split
+from tomography.datasets.sources import OfflineCacheMissError
 from tomography.experiments import p5_persona_wording
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
@@ -27,11 +31,13 @@ from tomography.experiments.p5_persona_wording import condition_stimuli
 from tomography.experiments.p5_persona_wording import execute
 from tomography.experiments.p5_persona_wording import persona_template
 from tomography.experiments.p5_persona_wording import plain_stimuli
+from tomography.experiments.p5_persona_wording import plot
 from tomography.experiments.p5_persona_wording import run
 from tomography.experiments.sweep import SERIES
 from tomography.experiments.sweep import SweepResult
 from tomography.experiments.sweep import shuffle_within_groups
 from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.templates import PAPER_TEMPLATES
 from tomography.templates import ChatFormat
 from tomography.templates import ConceptTemplate
@@ -1009,3 +1015,127 @@ def test_fact_only_evaluates_on_the_shared_facts_activations(
     assert paper["id_val"] is not paper["facts_val"]
     for name in ("facts", "facts_val", "got_cities", "got_larger_than"):
         assert fact_only[name] is paper[name]
+
+
+def test_the_cli_discovers_the_experiment() -> None:
+    experiment = load_experiment("p5")
+    assert experiment.config_cls is Config
+    assert experiment.run is run
+    assert experiment.plot is plot
+
+
+def test_plot_writes_every_curves_pair_and_the_persona_scatter(
+    ran: RunDir, tmp_path: Path
+) -> None:
+    paths = plot(ran, tmp_path / "figs")
+    stems = [
+        "curves_cosine",
+        "curves_facts",
+        "curves_facts_val",
+        "curves_got_cities",
+        "curves_got_larger_than",
+        "curves_id",
+        "curves_id_val",
+        "persona_scatter",
+    ]
+    assert [p.stem for p in paths if p.suffix == ".pdf"] == stems
+    assert sorted(p.name for p in paths) == sorted(
+        f"{stem}.{ext}" for stem in stems for ext in ("pdf", "png", "svg")
+    )
+    assert len(paths) == 24
+    assert all(p.stat().st_size > 0 for p in paths)
+    assert sorted(p.name for p in (tmp_path / "figs").iterdir()) == sorted(
+        p.name for p in paths
+    )
+
+
+def test_the_persona_scatter_puts_each_condition_at_its_two_accuracies(
+    ran: RunDir, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved: dict[str, Any] = {}
+    real = p5_persona_wording.save_figure
+
+    def spy(fig: Any, out_dir: Any, name: str, **kwargs: Any) -> Any:
+        saved[name] = fig
+        return real(fig, out_dir, name, **kwargs)
+
+    monkeypatch.setattr(p5_persona_wording, "save_figure", spy)
+    plot(ran, tmp_path)
+    ax = saved["persona_scatter"].axes[0]
+    rows = _table(ran)
+    points = {
+        line.get_label(): line
+        for line in ax.lines
+        if line.get_label() in CONDITIONS
+    }
+    assert list(points) == list(CONDITIONS)
+    segments = [c.get_segments() for c in ax.collections]
+    assert len(segments) == 2 * len(CONDITIONS)
+    for i, condition in enumerate(CONDITIONS):
+        row = rows[condition]
+        x, y = points[condition].get_data()
+        assert (x[0], y[0]) == pytest.approx((row["id"], row["facts"]))
+        np.testing.assert_allclose(
+            segments[2 * i][0],
+            [[row["id_lo"], row["facts"]], [row["id_hi"], row["facts"]]],
+        )
+        np.testing.assert_allclose(
+            segments[2 * i + 1][0],
+            [[row["id"], row["facts_lo"]], [row["id"], row["facts_hi"]]],
+        )
+    chance = [
+        line
+        for line in ax.lines
+        if line.get_label() not in CONDITIONS
+        and 0.5 in (*line.get_xdata(), *line.get_ydata())
+    ]
+    assert len(chance) == 2
+    assert ax.get_xlabel() == "In-distribution accuracy"
+    assert ax.get_ylabel() == "Facts accuracy"
+
+
+def test_plot_of_the_paper_condition_alone_has_no_cosine_figure(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _execute(tiny_arch, tmp_path, conditions=("paper",))
+    paths = plot(run_dir, tmp_path / "figs")
+    stems = {p.stem for p in paths}
+    assert "curves_cosine" not in stems
+    assert "persona_scatter" in stems
+    assert len(paths) == 7 * 3
+
+
+@pytest.mark.slow
+def test_p5_on_gpt2_reads_the_persona_conditions(tmp_path: Path) -> None:
+    config = Config(
+        n_seeds=2,
+        n_pairs=32,
+        conditions=("paper", "unrelated_0", "fact_only"),
+    )
+    try:
+        facts = load_facts(offline=True)
+        got = load_geometry_of_truth(subsets=config.got_subsets, offline=True)
+    except OfflineCacheMissError:
+        pytest.skip("the facts or Geometry of Truth cache is missing")
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, load_model("gpt2"), facts, got)
+    table = run_dir.read_json("table")
+    assert isinstance(table, dict)
+    for row in table["rows"]:
+        print(
+            dict(
+                zip(
+                    table["columns"],
+                    [round(v, 3) if isinstance(v, float) else v for v in row],
+                    strict=True,
+                )
+            )
+        )
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    print(summary)
+    rows = _table(run_dir)
+    assert rows["paper"]["id"] > 0.9
+    for row in rows.values():
+        for name in ("id", "facts", *(f"got_{s}" for s in config.got_subsets)):
+            assert 0.0 <= row[name] <= 1.0

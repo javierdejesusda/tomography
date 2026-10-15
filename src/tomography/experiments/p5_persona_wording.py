@@ -4,9 +4,12 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
+from typing import cast
 
+from matplotlib.figure import Figure
 import numpy as np
 from numpy.typing import NDArray
 
@@ -23,6 +26,7 @@ from tomography.experiments.sweep import Prepared
 from tomography.experiments.sweep import ReadingConfig
 from tomography.experiments.sweep import SweepResult
 from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.sweep import plot_curves_file
 from tomography.experiments.sweep import shuffle_within_groups
 from tomography.experiments.sweep import stimulus_activations
 from tomography.experiments.sweep import sweep_from_activations
@@ -35,6 +39,13 @@ from tomography.templates import PAPER_TEMPLATES
 from tomography.templates import ChatFormat
 from tomography.templates import ConceptTemplate
 from tomography.templates import FunctionTemplate
+from tomography.viz.style import INK_MUTED
+from tomography.viz.style import PX
+from tomography.viz.style import TEXT_WIDTH
+from tomography.viz.style import categorical_colors
+from tomography.viz.style import new_figure
+from tomography.viz.style import save_figure
+from tomography.viz.style import style_context
 
 PERSONA_PAIRS: Mapping[str, tuple[str, str]] = MappingProxyType(
     {
@@ -559,4 +570,61 @@ def run(config: Config, run_dir: RunDir) -> None:
         load_model(config.model),
         load_facts(),
         load_geometry_of_truth(subsets=config.got_subsets),
+    )
+
+
+def _persona_scatter(table: Mapping[str, Any]) -> Figure:
+    rows = [
+        dict(zip(table["columns"], row, strict=True)) for row in table["rows"]
+    ]
+    colors = categorical_colors(len(rows))
+    with style_context():
+        fig, axes = new_figure(width=TEXT_WIDTH, aspect=0.55)
+        ax = axes[0, 0]
+        for row, color in zip(rows, colors, strict=True):
+            ax.hlines(
+                row["facts"], row["id_lo"], row["id_hi"], color=color, lw=PX
+            )
+            ax.vlines(
+                row["id"], row["facts_lo"], row["facts_hi"], color=color, lw=PX
+            )
+            ax.plot(
+                row["id"],
+                row["facts"],
+                "o",
+                color=color,
+                label=row["condition"],
+            )
+        ax.axhline(0.5, color=INK_MUTED, lw=PX, label="_chance")
+        ax.axvline(0.5, color=INK_MUTED, lw=PX, label="_chance")
+        ax.set_xlim(-0.05, 1.05)
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_xlabel("In-distribution accuracy")
+        ax.set_ylabel("Facts accuracy")
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
+    return fig
+
+
+def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
+    """Draws the P5 curves and the persona confound scatter.
+
+    Args:
+        run_dir: A finished P5 run.
+        out_dir: Folder of the figures.
+
+    Returns:
+        The PDF, PNG and SVG paths of every `curves_<set>` file in stem
+        order, then of `persona_scatter`: each condition's in-distribution
+        accuracy against its facts accuracy, both with their intervals and
+        the chance level of each axis at 0.5.
+    """
+    stems = sorted(p.stem for p in run_dir.path.glob("curves*.npz"))
+    paths = [
+        path
+        for stem in stems
+        for path in plot_curves_file(run_dir, out_dir, stem=stem)
+    ]
+    table = cast(dict[str, Any], run_dir.read_json("table"))
+    return paths + save_figure(
+        _persona_scatter(table), out_dir, "persona_scatter"
     )
