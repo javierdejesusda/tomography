@@ -1475,5 +1475,5 @@ def test_c4_on_gpt2_small_pilots_the_layers(tmp_path: Path) -> None:
     table = _read(run_dir, "table")
     for row in table["rows"]:
         print(row)
-    assert len(table["rows"]) == 8
+    assert len(table["rows"]) == 5 + config.n_seeds
     assert all(0.0 <= row[4] <= 1.0 for row in table["rows"])
