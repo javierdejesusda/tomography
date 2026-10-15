@@ -953,12 +953,7 @@ def test_the_summary_describes_the_run(ran: RunDir) -> None:
     assert summary["n_seeds"] == 3
 
 
-def test_random_label_runs_only_under_the_methods_that_read_the_labels() -> (
-    None
-):
-    assert LABEL_METHODS == ("mean_diff", "logistic")
-
-
+@pytest.mark.parametrize("method", ["pca_diff", "pca_raw", "kmeans", "random"])
 @pytest.mark.parametrize(
     "conditions",
     [("paper", "synonym_0", "random_label"), ("paper", "random_label")],
@@ -968,10 +963,12 @@ def test_random_label_is_skipped_under_a_method_that_ignores_labels(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     conditions: tuple[str, ...],
+    method: Any,
 ) -> None:
+    assert method not in LABEL_METHODS
     calls = _record_conditions(monkeypatch)
     run_dir = _execute(
-        tiny_arch, tmp_path, method="pca_diff", conditions=conditions
+        tiny_arch, tmp_path, method=method, conditions=conditions
     )
     run = [c for c in conditions if c != "random_label"]
     assert "random_label" not in {c[0] for c in calls}
@@ -979,8 +976,8 @@ def test_random_label_is_skipped_under_a_method_that_ignores_labels(
     assert isinstance(summary, dict)
     assert summary["conditions"] == run
     assert summary["skipped"] == {
-        "random_label": "method 'pca_diff' fits its direction without labels; "
-        "flipped labels would only set its sign"
+        "random_label": f"method '{method}' fits its direction without "
+        "labels; flipped labels would only set its sign"
     }
     names = {p.name for p in run_dir.path.iterdir()}
     assert "readers_random_label.npz" not in names
