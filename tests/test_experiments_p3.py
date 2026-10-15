@@ -2,11 +2,13 @@
 
 from collections.abc import Sequence
 import dataclasses
+import gc
 import math
 from pathlib import Path
 import re
 import time
 from typing import Any
+import weakref
 
 from matplotlib.figure import Figure
 import numpy as np
@@ -308,6 +310,28 @@ def test_the_interval_of_a_constant_curve_sits_at_the_first_size() -> None:
     assert got == (2, 2, 2)
 
 
+def test_the_sizes_are_bootstrapped_with_separate_draws() -> None:
+    row = np.array([0.5, 0.7, 0.6, 0.8, 0.55, 0.65])
+    accuracy = np.stack([row, row])
+    got = saturation_ci((2, 4), accuracy, delta=0.0, n_boot=200, seed=0)
+    assert got == (2, 2, 4)
+
+
+def test_the_point_is_the_full_sample_value_and_not_the_bootstrap_median() -> (
+    None
+):
+    accuracy = np.array(
+        [
+            [0.65, 0.66, 0.78, 0.47, 0.81],
+            [0.74, 0.79, 0.50, 0.80, 0.50],
+            [0.44, 0.83, 0.83, 0.84, 0.64],
+        ]
+    )
+    got = saturation_ci((2, 4, 8), accuracy, delta=0.02, n_boot=100, seed=0)
+    assert saturation_size((2, 4, 8), accuracy, delta=0.02) == 8
+    assert got == (8, 2, 8)
+
+
 def test_the_interval_rejects_bad_inputs() -> None:
     with pytest.raises(ValueError, match="saturation"):
         saturation_ci(SIZES, np.ones((4, 3)), delta=0.01, n_boot=10, seed=0)
@@ -491,6 +515,11 @@ def _reference_sweep(
         config.position,
         config,
     )
+    position = (
+        config.position
+        if config.eval_position is None
+        else config.eval_position
+    )
     evals = {
         split: prepare(
             loaded,
@@ -501,7 +530,7 @@ def _reference_sweep(
                 n_pairs=eval_pairs(task, part, config.n_eval_pairs),
                 seed=eval_seed(task, split, config.seed),
             ),
-            config.position,
+            position,
             config,
         )
         for split, part in (
@@ -600,6 +629,130 @@ def test_the_reference_is_one_reader_on_the_shared_select_and_report_items(
         np.testing.assert_allclose(
             reference[1, 0], sweep.per_seed("report")[0, 0]
         )
+
+
+def _resample_cosine(
+    loaded: LoadedModel, config: Config, name: str, size: int, r: int
+) -> NDArray[np.float64]:
+    """Recomputes the cosine of one resample to the reference direction."""
+    task = READING_TASKS[name]
+    (paper,), _ = template_variants(
+        task, chat_format_for(loaded), kinds=("paper",)
+    )
+    splits = task_splits(task, _sources(), seed=config.seed)
+    train = prepare(
+        loaded,
+        task_set(
+            task,
+            paper,
+            splits.train,
+            n_pairs=size,
+            seed=derive_seed(config.seed, "size", name, size, r),
+        ),
+        config.position,
+        config,
+    )
+    resample = sweep_from_activations(
+        [train],
+        {"train": train},
+        method=config.method,
+        preprocess=config.preprocess,
+    ).readers[0]
+    reference = _reference_sweep(loaded, config, name).readers[0]
+    ours = (resample.directions * resample.signs[:, None]).astype(np.float64)
+    theirs = (reference.directions * reference.signs[:, None]).astype(
+        np.float64
+    )
+    return np.clip(np.einsum("kd,kd->k", ours, theirs), -1.0, 1.0)
+
+
+@pytest.mark.parametrize(("z", "size", "r"), [(0, 2, 0), (1, 4, 1)])
+def test_the_cosine_compares_oriented_directions_at_the_same_layer(
+    tiny_arch: LoadedModel,
+    finished: tuple[Config, RunDir],
+    z: int,
+    size: int,
+    r: int,
+) -> None:
+    config, run_dir = finished
+    expected = _resample_cosine(tiny_arch, config, "utility", size, r)
+    cosine = run_dir.read_arrays("sizes_utility")["cosine"]
+    np.testing.assert_allclose(cosine[z, r], expected)
+    assert (expected < 0.99).any()
+
+
+def test_the_reference_takes_at_most_reference_pairs_pairs(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(
+        tasks=("sentiment", "utility"),
+        sizes=(2, 4),
+        n_seeds=2,
+        reference_pairs=5,
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _sources())
+    summary = _json(run_dir, "summary")
+    for task in ("sentiment", "utility"):
+        assert summary["reference"][task]["pairs"] == 5
+        assert _json(run_dir, f"sizes_{task}")["reference_pairs"] == 5
+        sweep = _reference_sweep(tiny_arch, config, task)
+        reference = run_dir.read_arrays(f"sizes_{task}")["reference"]
+        np.testing.assert_allclose(
+            reference[0, 0], sweep.per_seed("select")[0, 0]
+        )
+        np.testing.assert_allclose(
+            reference[1, 0], sweep.per_seed("report")[0, 0]
+        )
+        np.testing.assert_allclose(
+            run_dir.read_arrays(f"sizes_{task}")["cosine"][0, 0],
+            _resample_cosine(tiny_arch, config, task, 2, 0),
+        )
+
+
+def test_the_evaluation_items_are_read_at_the_eval_position(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(
+        tasks=("sentiment",), sizes=(2, 4), n_seeds=2, eval_position="mean"
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _sources())
+    sweep = _reference_sweep(tiny_arch, config, "sentiment")
+    last = _reference_sweep(
+        tiny_arch, dataclasses.replace(config, eval_position=None), "sentiment"
+    )
+    assert not np.allclose(
+        sweep.per_seed("report")[0, 0], last.per_seed("report")[0, 0]
+    )
+    reference = run_dir.read_arrays("sizes_sentiment")["reference"]
+    np.testing.assert_allclose(reference[0, 0], sweep.per_seed("select")[0, 0])
+    np.testing.assert_allclose(reference[1, 0], sweep.per_seed("report")[0, 0])
+
+
+def test_a_size_releases_its_activations_before_the_next_size_is_read(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real = p3_size.prepare
+    prepared: list[weakref.ref[Activations]] = []
+    alive_at_call: list[int] = []
+
+    def tracked(*args: Any) -> Prepared:
+        gc.collect()
+        alive_at_call.append(sum(ref() is not None for ref in prepared[3:]))
+        result = real(*args)
+        prepared.append(weakref.ref(result[1]))
+        return result
+
+    monkeypatch.setattr(p3_size, "prepare", tracked)
+    config = _config(tasks=("utility",), sizes=(2, 4, 8), n_seeds=2)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _sources())
+    first_of_each_size = [3 + 2 * z for z in range(3)]
+    assert len(prepared) == 3 + 3 * 2
+    assert [alive_at_call[i] for i in first_of_each_size] == [0, 0, 0]
 
 
 def test_a_resample_is_trained_on_the_seeded_pairs_of_its_size(

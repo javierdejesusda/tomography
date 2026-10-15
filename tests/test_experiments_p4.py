@@ -1,6 +1,10 @@
 """Tests for the P4 pairing, preprocessing and component study."""
 
+from collections.abc import Sequence
 import dataclasses
+from pathlib import Path
+import re
+import time
 from typing import Any
 
 import numpy as np
@@ -8,21 +12,47 @@ from numpy.typing import NDArray
 import pytest
 
 from tomography.activations import Activations
+from tomography.cli import load_experiment
 from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import p4_pairing
+from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
+from tomography.experiments.p4_pairing import COLUMNS
+from tomography.experiments.p4_pairing import COMPONENT_COLUMNS
+from tomography.experiments.p4_pairing import Config
 from tomography.experiments.p4_pairing import Pairing
 from tomography.experiments.p4_pairing import component_accuracy
 from tomography.experiments.p4_pairing import cv_component
 from tomography.experiments.p4_pairing import diff_components
+from tomography.experiments.p4_pairing import execute
 from tomography.experiments.p4_pairing import pairing_mode
 from tomography.experiments.p4_pairing import pairing_set
+from tomography.experiments.p4_pairing import plot
+from tomography.experiments.p4_pairing import run
 from tomography.experiments.sweep import Prepared
+from tomography.experiments.sweep import SweepResult
+from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.sweep import sweep_from_activations
 from tomography.experiments.variants import READING_TASKS
+from tomography.experiments.variants import ReadingTask
+from tomography.experiments.variants import TaskSplits
 from tomography.experiments.variants import Variant
+from tomography.experiments.variants import eval_pairs
+from tomography.experiments.variants import eval_seed
+from tomography.experiments.variants import load_sources
+from tomography.experiments.variants import prepare
+from tomography.experiments.variants import task_set
+from tomography.experiments.variants import task_splits
 from tomography.experiments.variants import template_variants
+from tomography.experiments.variants import variant_cosines
+from tomography.model import LoadedModel
+from tomography.model import load_model
+from tomography.reading.directions import Method
 from tomography.reading.directions import Preprocess
 from tomography.reading.directions import fit_direction
+from tomography.reading.metrics import best_layer
+from tomography.reading.metrics import bootstrap_ci
 from tomography.templates import ChatFormat
 
 PLAIN = ChatFormat("plain")
@@ -606,7 +636,7 @@ def test_cross_validation_orients_each_component_on_the_fit_folds(
     assert _cv(train) == 1
 
 
-def test_the_folds_hold_out_every_pair_once_and_follow_the_seed(
+def test_each_fold_is_fitted_on_the_pairs_it_does_not_hold_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     train = _planted_pairs(10, seed=3, signal=1.0, nuisance=5.0)
@@ -621,14 +651,14 @@ def test_the_folds_hold_out_every_pair_once_and_follow_the_seed(
 
     monkeypatch.setattr(p4_pairing, "diff_components", record)
     _cv(train, n_folds=3, seed=11)
-    everything = train[0].pairs
-    order = np.random.default_rng(11).permutation(10)
-    held_out = np.array_split(order, 3)
-    assert sorted(i for fold in held_out for i in fold) == list(range(10))
+    stimuli, _ = train
+    labels = stimuli.labels
+    distinct = labels[stimuli.pairs[:, 0]] != labels[stimuli.pairs[:, 1]]
+    folds = p4_pairing._deal_folds(distinct, 3, 11)
     assert len(fitted) == 3
-    for fold, pairs in zip(held_out, fitted, strict=True):
+    for fold, pairs in zip(folds, fitted, strict=True):
         kept = np.setdiff1d(np.arange(10), fold)
-        np.testing.assert_array_equal(pairs, everything[kept])
+        np.testing.assert_array_equal(pairs, stimuli.pairs[kept])
 
 
 def test_components_are_oriented_and_scored_on_distinct_label_pairs_only(
@@ -649,10 +679,10 @@ def test_components_are_oriented_and_scored_on_distinct_label_pairs_only(
 
     monkeypatch.setattr(p4_pairing, "_pair_credit", record)
     _cv(train, n_folds=4, seed=2)
-    order = np.random.default_rng(2).permutation(len(stimuli.pairs))
+    folds = p4_pairing._deal_folds(distinct, 4, 2)
     assert len(credited) == 8
-    for fold, held_out in enumerate(np.array_split(order, 4)):
-        fit = np.setdiff1d(order, held_out)
+    for fold, held_out in enumerate(folds):
+        fit = np.setdiff1d(np.arange(len(distinct)), held_out)
         np.testing.assert_array_equal(
             credited[2 * fold], stimuli.pairs[fit[distinct[fit]]]
         )
@@ -660,3 +690,1083 @@ def test_components_are_oriented_and_scored_on_distinct_label_pairs_only(
             credited[2 * fold + 1],
             stimuli.pairs[held_out[distinct[held_out]]],
         )
+
+
+def test_cross_validation_survives_every_split_of_two_distinct_pairs() -> None:
+    data = np.random.default_rng(0).normal(size=(1, 16, WIDTH))
+    labels = np.array([1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1])
+    pairs = np.arange(16, dtype=np.int64).reshape(-1, 2)
+    train = _prepared(data, labels.astype(np.int64), pairs)
+    assert int((labels[0::2] != labels[1::2]).sum()) == 2
+    for seed in range(30):
+        _cv(train, n_components=2, seed=seed)
+
+
+def test_cross_validation_needs_two_pairs_with_distinct_labels() -> None:
+    data = np.random.default_rng(0).normal(size=(1, 16, WIDTH))
+    labels = np.array([1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0])
+    pairs = np.arange(16, dtype=np.int64).reshape(-1, 2)
+    assert int((labels[0::2] != labels[1::2]).sum()) == 1
+    with pytest.raises(ValueError, match="at least 2 pairs with distinct"):
+        _cv(_prepared(data, labels.astype(np.int64), pairs), n_components=2)
+
+
+def _flags(n_pairs: int, distinct: list[int]) -> NDArray[np.bool_]:
+    flags = np.zeros(n_pairs, dtype=np.bool_)
+    flags[distinct] = True
+    return flags
+
+
+def test_the_folds_partition_the_pairs_and_spread_the_distinct_ones() -> None:
+    flags = _flags(14, [0, 2, 3, 7, 11])
+    folds = p4_pairing._deal_folds(flags, 4, 3)
+    assert len(folds) == 4
+    assert sorted(i for fold in folds for i in fold) == list(range(14))
+    sizes = [len(fold) for fold in folds]
+    counts = [int(flags[fold].sum()) for fold in folds]
+    assert max(sizes) - min(sizes) <= 1
+    assert max(counts) - min(counts) <= 1
+    assert sum(counts) == 5
+
+
+def test_the_folds_follow_the_seed() -> None:
+    flags = _flags(20, list(range(0, 20, 2)))
+    first = p4_pairing._deal_folds(flags, 4, 5)
+    again = p4_pairing._deal_folds(flags, 4, 5)
+    other = p4_pairing._deal_folds(flags, 4, 6)
+    for a, b in zip(first, again, strict=True):
+        np.testing.assert_array_equal(a, b)
+    assert any(
+        len(a) != len(b) or (a != b).any()
+        for a, b in zip(first, other, strict=True)
+    )
+
+
+@pytest.mark.parametrize("seed", range(30))
+def test_two_distinct_pairs_never_share_a_fold(seed: int) -> None:
+    flags = _flags(8, [1, 5])
+    folds = p4_pairing._deal_folds(flags, 4, seed)
+    assert all(len(fold) == 2 for fold in folds)
+    assert all(flags[fold].sum() <= 1 for fold in folds)
+
+
+def test_a_fit_share_of_exactly_one_half_keeps_the_sign(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    favoured = [1, 1, 1, 1, 1, 1, 0, 0]
+    data = np.zeros((1, 16, WIDTH))
+    for i, up in enumerate(favoured):
+        data[0, 2 * i, 0] = 1.0 if up else -1.0
+        data[0, 2 * i + 1, 0] = -1.0 if up else 1.0
+    labels = np.tile(np.array([1, 0], dtype=np.int64), 8)
+    pairs = np.arange(16, dtype=np.int64).reshape(-1, 2)
+
+    def two_folds(*args: Any) -> list[NDArray[np.int64]]:
+        return [np.arange(0, 4), np.arange(4, 8)]
+
+    def first_axis(
+        h: NDArray[np.float32], pairs: NDArray[np.int64], **kwargs: Any
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        basis = np.zeros((1, kwargs["n_components"], WIDTH))
+        basis[0, 0, 0] = 1.0
+        return basis, np.zeros((1, kwargs["n_components"]))
+
+    monkeypatch.setattr(p4_pairing, "_deal_folds", two_folds)
+    monkeypatch.setattr(p4_pairing, "diff_components", first_axis)
+    chosen = _cv(_prepared(data, labels, pairs), n_components=2, n_folds=2)
+    assert chosen == 0
+
+
+def _split_sst2() -> list[Example]:
+    return [
+        Example(
+            f"sst2-{split}-{label}-{i}",
+            f"{split} phrase {label} number {i}",
+            label,
+            split,
+        )
+        for split, count in (("train", 24), ("val", 20))
+        for label in (0, 1)
+        for i in range(count)
+    ]
+
+
+def _split_facts() -> list[Example]:
+    return [
+        Example(
+            f"facts-{split}-{label}-{i}",
+            f"fact {split} {label} {i}",
+            label,
+            split,
+        )
+        for split in ("train", "val", "test")
+        for label in (0, 1)
+        for i in range(20)
+    ]
+
+
+def _split_utility() -> list[Example]:
+    rows = []
+    for split in ("train", "val", "test"):
+        for i in range(16):
+            pair = f"ethics-{split}-{i}"
+            for suffix, label in (("a", 1), ("b", 0)):
+                rows.append(
+                    Example(
+                        f"{pair}:{suffix}",
+                        f"scenario {split} {i} {suffix}",
+                        label,
+                        split,
+                        {"pair": pair},
+                    )
+                )
+    return rows
+
+
+def _split_truth_sets() -> list[Example]:
+    return [
+        Example(
+            f"got-{subset}-{split}-{label}-{i}",
+            f"{subset} claim {split} {label} {i}",
+            label,
+            split,
+            {"subset": subset},
+        )
+        for subset in ("cities", "common_claim_true_false", "neg_cities")
+        for split in ("train", "val", "test")
+        for label in (0, 1)
+        for i in range(6)
+    ]
+
+
+def _sources() -> dict[str, list[Example]]:
+    return {
+        "sst2": _split_sst2(),
+        "facts": _split_facts(),
+        "ethics_utility": _split_utility(),
+        "geometry_of_truth": _split_truth_sets(),
+    }
+
+
+def _config(**overrides: Any) -> Config:
+    base = Config(
+        model="tiny",
+        n_seeds=3,
+        n_pairs=16,
+        n_eval_pairs=6,
+        n_components=4,
+        n_folds=4,
+        n_boot=50,
+    )
+    return dataclasses.replace(base, **overrides)
+
+
+TASKS = ("sentiment", "truth", "utility")
+OWN = {
+    "sentiment": "label_contrastive",
+    "truth": "label_contrastive",
+    "utility": "matched",
+}
+PAIRINGS_OF = {
+    "sentiment": ("label_contrastive", "random"),
+    "truth": ("label_contrastive", "random"),
+    "utility": ("matched", "label_contrastive", "random"),
+}
+METHODS = ("pca_diff", "pca_raw", "mean_diff", "logistic", "kmeans", "random")
+PREPROCESSES = ("center", "unit", "none")
+CELLS = [
+    ("sentiment", "pca_diff", "label_contrastive", "center"),
+    ("sentiment", "logistic", "random", "unit"),
+    ("truth", "kmeans", "label_contrastive", "none"),
+    ("utility", "mean_diff", "matched", "center"),
+    ("utility", "pca_raw", "random", "unit"),
+    ("utility", "random", "label_contrastive", "none"),
+]
+
+
+@pytest.fixture(scope="module")
+def runs() -> dict[str, tuple[Config, RunDir]]:
+    return {}
+
+
+@pytest.fixture
+def finished(
+    tiny_arch: LoadedModel,
+    runs: dict[str, tuple[Config, RunDir]],
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Config, RunDir]:
+    """One P4 run per architecture, shared by the tests that only read it."""
+    key = str(tiny_arch.model.config.model_type)
+    if key not in runs:
+        config = _config()
+        run_dir = RunDir.create(config, out_root=tmp_path_factory.mktemp(key))
+        execute(config, run_dir, tiny_arch, _sources())
+        runs[key] = (config, run_dir)
+    return runs[key]
+
+
+def _json(run_dir: RunDir, name: str) -> Any:
+    return run_dir.read_json(name)
+
+
+def _pieces(
+    loaded: LoadedModel, config: Config, name: str
+) -> tuple[ReadingTask, Variant, TaskSplits]:
+    task = READING_TASKS[name]
+    (paper,), _ = template_variants(
+        task, chat_format_for(loaded), kinds=("paper",)
+    )
+    return task, paper, task_splits(task, _sources(), seed=config.seed)
+
+
+def _trained(
+    loaded: LoadedModel, config: Config, name: str, pairing: Pairing
+) -> list[Prepared]:
+    """Rebuilds the training sets of a task and pairing through the pieces."""
+    task, paper, splits = _pieces(loaded, config, name)
+    return [
+        prepare(
+            loaded,
+            pairing_set(
+                task,
+                paper,
+                splits.train,
+                pairing,
+                n_pairs=config.n_pairs,
+                seed=derive_seed(config.seed, "train", i),
+            ),
+            config.position,
+            config,
+        )
+        for i in range(config.n_seeds)
+    ]
+
+
+def _evaluated(
+    loaded: LoadedModel, config: Config, name: str
+) -> dict[str, Prepared]:
+    task, paper, splits = _pieces(loaded, config, name)
+    return {
+        split: prepare(
+            loaded,
+            task_set(
+                task,
+                paper,
+                part,
+                n_pairs=eval_pairs(task, part, config.n_eval_pairs),
+                seed=eval_seed(task, split, config.seed),
+            ),
+            config.eval_position or config.position,
+            config,
+        )
+        for split, part in (
+            ("select", splits.select),
+            ("report", splits.report),
+        )
+    }
+
+
+def _cell(
+    loaded: LoadedModel,
+    config: Config,
+    name: str,
+    method: Method,
+    pairing: Pairing,
+    preprocess: Preprocess,
+) -> SweepResult:
+    return sweep_from_activations(
+        _trained(loaded, config, name, pairing),
+        _evaluated(loaded, config, name),
+        method=method,
+        preprocess=preprocess,
+        seed=config.seed,
+    )
+
+
+def _oriented(sweep: SweepResult) -> NDArray[np.float32]:
+    return np.stack(
+        [reader.directions * reader.signs[:, None] for reader in sweep.readers]
+    )
+
+
+def test_config_defaults_and_round_trip() -> None:
+    config = Config()
+    assert config.experiment == "p4"
+    assert config.model == "gpt2"
+    assert config.method == "pca_diff"
+    assert config.preprocess == "center"
+    assert config.n_seeds == 10
+    assert config.n_pairs == 64
+    assert config.n_eval_pairs == 256
+    assert config.tasks == TASKS
+    assert config.methods == METHODS
+    assert config.pairings == ("matched", "label_contrastive", "random")
+    assert config.preprocesses == PREPROCESSES
+    assert config.n_components == 8
+    assert config.n_folds == 5
+    assert config.n_boot == 2000
+    assert Config.from_dict(config.to_dict()) == config
+
+
+def test_the_cli_discovers_the_experiment() -> None:
+    experiment = load_experiment("p4")
+    assert experiment.config_cls is Config
+    assert experiment.run is run
+    assert experiment.plot is plot
+
+
+def test_execute_writes_the_files_of_every_task(
+    finished: tuple[Config, RunDir],
+) -> None:
+    _, run_dir = finished
+    expected = {
+        "config.json",
+        "meta.json",
+        "summary.json",
+        "table.json",
+        "table_components.json",
+    }
+    for task in TASKS:
+        expected.add(f"grid_{task}.npz")
+        for stem in (
+            f"methods_{task}",
+            f"convergence_{task}",
+            f"curves_{task}_methods",
+            f"curves_{task}_pairing",
+            f"curves_{task}_preprocess",
+            f"components_{task}",
+        ):
+            expected |= {f"{stem}.json", f"{stem}.npz"}
+    assert {p.name for p in run_dir.path.iterdir()} == expected
+    assert len(expected) == 44
+
+
+def test_the_table_has_a_row_per_cell_in_a_fixed_order(
+    finished: tuple[Config, RunDir],
+) -> None:
+    config, run_dir = finished
+    rows = _json(run_dir, "table")
+    expected = [
+        (task, method, pairing, preprocess)
+        for task in TASKS
+        for method in config.methods
+        for pairing in PAIRINGS_OF[task]
+        for preprocess in config.preprocesses
+    ]
+    assert len(rows) == 126
+    assert [
+        (r["task"], r["method"], r["pairing"], r["preprocess"]) for r in rows
+    ] == expected
+    assert all(list(row) == list(COLUMNS) for row in rows)
+
+
+@pytest.mark.parametrize(
+    ("name", "method", "pairing", "preprocess"),
+    CELLS,
+    ids=[" ".join(cell) for cell in CELLS],
+)
+def test_a_cell_is_read_at_its_own_best_select_layer(
+    tiny_arch: LoadedModel,
+    finished: tuple[Config, RunDir],
+    name: str,
+    method: Method,
+    pairing: Pairing,
+    preprocess: Preprocess,
+) -> None:
+    config, run_dir = finished
+    sweep = _cell(tiny_arch, config, name, method, pairing, preprocess)
+    select, report = sweep.per_seed("select"), sweep.per_seed("report")
+    layer = best_layer(select[0].mean(axis=0), sweep.layers)
+    at = sweep.layers.index(layer)
+    low, high = bootstrap_ci(
+        report[0, :, at],
+        n_boot=config.n_boot,
+        seed=derive_seed(config.seed, "ci", name, method, pairing, preprocess),
+    )
+    (row,) = (
+        r
+        for r in _json(run_dir, "table")
+        if (r["task"], r["method"], r["pairing"], r["preprocess"])
+        == (name, method, pairing, preprocess)
+    )
+    assert row["layer"] == layer
+    assert row["select"] == pytest.approx(select[0, :, at].mean())
+    assert row["report"] == pytest.approx(report[0, :, at].mean())
+    assert row["lo"] == pytest.approx(float(low))
+    assert row["hi"] == pytest.approx(float(high))
+    assert row["shuffled"] == pytest.approx(report[2, :, at].mean())
+    grid = run_dir.read_arrays(f"grid_{name}")
+    m = METHODS.index(method)
+    p = PAIRINGS_OF[name].index(pairing)
+    r = PREPROCESSES.index(preprocess)
+    np.testing.assert_allclose(grid["accuracy"][m, p, r, 0], select)
+    np.testing.assert_allclose(grid["accuracy"][m, p, r, 1], report)
+
+
+def test_the_grid_arrays_have_the_documented_shapes(
+    finished: tuple[Config, RunDir],
+) -> None:
+    config, run_dir = finished
+    for name in TASKS:
+        grid = run_dir.read_arrays(f"grid_{name}")
+        p = len(PAIRINGS_OF[name])
+        assert set(grid) == {
+            "layers",
+            "accuracy",
+            "cosine",
+            "components",
+            "explained",
+            "cv_accuracy",
+            "cv_component",
+        }
+        np.testing.assert_array_equal(grid["layers"], [1, 2, 3])
+        assert grid["accuracy"].shape == (6, p, 3, 2, 3, 3, 3)
+        assert grid["cosine"].shape == (3, 6, 6)
+        assert grid["components"].shape == (p, 3, 4)
+        assert grid["explained"].shape == (p, 3, 4)
+        assert grid["cv_accuracy"].shape == (p, 3)
+        assert grid["cv_component"].shape == (p, 3)
+        assert np.issubdtype(grid["cv_component"].dtype, np.integer)
+        assert grid["cv_component"].min() >= 0
+        assert grid["cv_component"].max() < config.n_components
+
+
+def test_the_task_layer_is_the_best_select_layer_of_the_reference_cell(
+    finished: tuple[Config, RunDir],
+) -> None:
+    _, run_dir = finished
+    summary = _json(run_dir, "summary")
+    rows = _json(run_dir, "table")
+    assert summary["tasks"] == list(TASKS)
+    for name in TASKS:
+        (row,) = (
+            r
+            for r in rows
+            if (r["task"], r["method"], r["pairing"], r["preprocess"])
+            == (name, "pca_diff", OWN[name], "center")
+        )
+        assert summary["layers"][name] == row["layer"]
+        assert summary["reference"][name] == {
+            "method": "pca_diff",
+            "pairing": OWN[name],
+            "preprocess": "center",
+        }
+
+
+@pytest.mark.parametrize("name", TASKS)
+def test_the_methods_matrix_holds_the_cosines_of_the_oriented_directions(
+    tiny_arch: LoadedModel, finished: tuple[Config, RunDir], name: str
+) -> None:
+    config, run_dir = finished
+    cosines = variant_cosines(
+        np.stack(
+            [
+                _oriented(
+                    _cell(
+                        tiny_arch,
+                        config,
+                        name,
+                        method,
+                        OWN[name],  # type: ignore[arg-type]
+                        config.preprocess,
+                    )
+                )
+                for method in config.methods
+            ]
+        )
+    )
+    grid = run_dir.read_arrays(f"grid_{name}")
+    np.testing.assert_allclose(grid["cosine"], cosines)
+    at = list(grid["layers"]).index(_json(run_dir, "summary")["layers"][name])
+    matrix = run_dir.read_arrays(f"methods_{name}")["values"]
+    np.testing.assert_allclose(matrix, cosines[at])
+    np.testing.assert_allclose(matrix, matrix.T)
+    sidecar = _json(run_dir, f"methods_{name}")
+    assert sidecar["rows"] == list(METHODS)
+    assert sidecar["cols"] == list(METHODS)
+    assert f"layer {at + 1}" in sidecar["title"]
+
+
+@pytest.mark.parametrize("name", TASKS)
+def test_the_convergence_curves_compare_each_method_with_the_reference(
+    finished: tuple[Config, RunDir], name: str
+) -> None:
+    config, run_dir = finished
+    grid = run_dir.read_arrays(f"grid_{name}")
+    arrays = run_dir.read_arrays(f"convergence_{name}")
+    sidecar = _json(run_dir, f"convergence_{name}")
+    others = [m for m in METHODS if m != config.method]
+    assert sidecar["series"] == others
+    assert sidecar["ylabel"] == "Cosine to pca_diff"
+    assert sidecar["chance"] is None
+    assert sidecar["n_layers"] == 3
+    assert arrays["per_seed"].shape == (5, 3, 3)
+    reference = METHODS.index(config.method)
+    for s, method in enumerate(others):
+        np.testing.assert_allclose(
+            arrays["per_seed"][s].mean(axis=0),
+            grid["cosine"][:, reference, METHODS.index(method)],
+        )
+
+
+@pytest.mark.parametrize("name", TASKS)
+def test_the_cuts_repeat_the_report_accuracy_of_the_grid(
+    finished: tuple[Config, RunDir], name: str
+) -> None:
+    config, run_dir = finished
+    grid = run_dir.read_arrays(f"grid_{name}")
+    p = PAIRINGS_OF[name].index(OWN[name])
+    r = PREPROCESSES.index(config.preprocess)
+    m = METHODS.index(config.method)
+    cuts = {
+        "methods": (grid["accuracy"][:, p, r, 1, 0], list(METHODS)),
+        "pairing": (
+            grid["accuracy"][m, :, r, 1, 0],
+            list(PAIRINGS_OF[name]),
+        ),
+        "preprocess": (grid["accuracy"][m, p, :, 1, 0], list(PREPROCESSES)),
+    }
+    for cut, (expected, series) in cuts.items():
+        stem = f"curves_{name}_{cut}"
+        arrays = run_dir.read_arrays(stem)
+        sidecar = _json(run_dir, stem)
+        np.testing.assert_array_equal(arrays["per_seed"], expected)
+        np.testing.assert_array_equal(arrays["x"], [1.0, 2.0, 3.0])
+        np.testing.assert_allclose(arrays["mean"], expected.mean(axis=1))
+        assert sidecar["series"] == series
+        assert sidecar["chance"] == 0.5
+        assert sidecar["n_layers"] == 3
+        assert sidecar["xlabel"] == "Layer"
+        assert (arrays["lo"] <= arrays["mean"] + 1e-12).all()
+        assert (arrays["mean"] <= arrays["hi"] + 1e-12).all()
+
+
+def _assert_components(
+    loaded: LoadedModel,
+    config: Config,
+    run_dir: RunDir,
+    name: str,
+    pairing: Pairing,
+    pairings: Sequence[str],
+) -> None:
+    """Recomputes the components of one task and pairing, and compares."""
+    grid = run_dir.read_arrays(f"grid_{name}")
+    at = list(grid["layers"]).index(_json(run_dir, "summary")["layers"][name])
+    report = _evaluated(loaded, config, name)["report"]
+    p = list(pairings).index(pairing)
+    for i, prepared in enumerate(_trained(loaded, config, name, pairing)):
+        stimuli, act = prepared
+        basis, share = diff_components(
+            act.data,
+            act.row_groups(stimuli.pairs),
+            preprocess=config.preprocess,
+            n_components=config.n_components,
+        )
+        accuracy = component_accuracy(prepared, report, basis)[at]
+        np.testing.assert_allclose(grid["components"][p, i], accuracy)
+        np.testing.assert_allclose(grid["explained"][p, i], share[at])
+        chosen = cv_component(
+            prepared,
+            layer_index=at,
+            preprocess=config.preprocess,
+            n_components=config.n_components,
+            n_folds=config.n_folds,
+            seed=derive_seed(config.seed, "cv", pairing, i),
+        )
+        assert grid["cv_component"][p, i] == chosen
+        assert grid["cv_accuracy"][p, i] == accuracy[chosen]
+
+
+@pytest.mark.parametrize(
+    ("name", "pairing"),
+    [
+        ("sentiment", "random"),
+        ("truth", "label_contrastive"),
+        ("utility", "matched"),
+        ("utility", "random"),
+    ],
+)
+def test_the_components_are_recomputed_from_the_public_pieces(
+    tiny_arch: LoadedModel,
+    finished: tuple[Config, RunDir],
+    name: str,
+    pairing: Pairing,
+) -> None:
+    config, run_dir = finished
+    _assert_components(
+        tiny_arch, config, run_dir, name, pairing, PAIRINGS_OF[name]
+    )
+
+
+@pytest.mark.parametrize("name", TASKS)
+def test_the_component_curve_has_a_series_per_pairing(
+    finished: tuple[Config, RunDir], name: str
+) -> None:
+    _, run_dir = finished
+    grid = run_dir.read_arrays(f"grid_{name}")
+    arrays = run_dir.read_arrays(f"components_{name}")
+    sidecar = _json(run_dir, f"components_{name}")
+    np.testing.assert_array_equal(arrays["per_seed"], grid["components"])
+    np.testing.assert_array_equal(arrays["x"], [1.0, 2.0, 3.0, 4.0])
+    assert sidecar["series"] == list(PAIRINGS_OF[name])
+    assert sidecar["xlabel"] == "Component"
+    assert sidecar["chance"] == 0.5
+    assert sidecar["n_layers"] is None
+
+
+def test_the_component_table_summarizes_the_grid(
+    finished: tuple[Config, RunDir],
+) -> None:
+    config, run_dir = finished
+    rows = _json(run_dir, "table_components")
+    assert [(r["task"], r["pairing"]) for r in rows] == [
+        (task, pairing) for task in TASKS for pairing in PAIRINGS_OF[task]
+    ]
+    assert all(list(row) == list(COMPONENT_COLUMNS) for row in rows)
+    summary = _json(run_dir, "summary")
+    for row in rows:
+        name, pairing = row["task"], row["pairing"]
+        grid = run_dir.read_arrays(f"grid_{name}")
+        p = PAIRINGS_OF[name].index(pairing)
+        pc1, cv = grid["components"][p, :, 0], grid["cv_accuracy"][p]
+        assert row["layer"] == summary["layers"][name]
+        assert row["pc1"] == pytest.approx(pc1.mean())
+        assert row["cv"] == pytest.approx(cv.mean())
+        assert row["explained_pc1"] == pytest.approx(
+            grid["explained"][p, :, 0].mean()
+        )
+        for key, values in (("pc1", pc1), ("cv", cv)):
+            low, high = bootstrap_ci(
+                values,
+                n_boot=config.n_boot,
+                seed=derive_seed(config.seed, "ci", name, pairing, key),
+            )
+            assert row[f"{key}_lo"] == pytest.approx(float(low))
+            assert row[f"{key}_hi"] == pytest.approx(float(high))
+        chosen = np.bincount(grid["cv_component"][p]).argmax()
+        assert row["cv_component"] == chosen
+
+
+def test_matched_is_skipped_for_the_tasks_without_groups(
+    finished: tuple[Config, RunDir],
+) -> None:
+    _, run_dir = finished
+    skipped = _json(run_dir, "summary")["skipped"]
+    assert skipped == {
+        "sentiment": {
+            "matched": "matched pairing needs a task with groups, "
+            "'sentiment' has none"
+        },
+        "truth": {
+            "matched": "matched pairing needs a task with groups, "
+            "'truth' has none"
+        },
+        "utility": {},
+    }
+
+
+def test_a_changed_reference_moves_every_comparison(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(
+        tasks=("utility",),
+        n_seeds=2,
+        method="logistic",
+        preprocess="unit",
+        methods=("pca_diff", "logistic", "mean_diff"),
+        pairings=("random", "matched"),
+        preprocesses=("center", "unit"),
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _sources())
+    assert len(_json(run_dir, "table")) == 12
+    assert _json(run_dir, "summary")["reference"] == {
+        "utility": {
+            "method": "logistic",
+            "pairing": "matched",
+            "preprocess": "unit",
+        }
+    }
+    convergence = _json(run_dir, "convergence_utility")
+    assert convergence["series"] == ["pca_diff", "mean_diff"]
+    assert convergence["ylabel"] == "Cosine to logistic"
+    grid = run_dir.read_arrays("grid_utility")
+    for stem, expected in (
+        ("methods", grid["accuracy"][:, 1, 1, 1, 0]),
+        ("pairing", grid["accuracy"][1, :, 1, 1, 0]),
+        ("preprocess", grid["accuracy"][1, 1, :, 1, 0]),
+    ):
+        np.testing.assert_array_equal(
+            run_dir.read_arrays(f"curves_utility_{stem}")["per_seed"],
+            expected,
+        )
+    assert _json(run_dir, "curves_utility_pairing")["series"] == [
+        "random",
+        "matched",
+    ]
+    assert _json(run_dir, "curves_utility_preprocess")["series"] == [
+        "center",
+        "unit",
+    ]
+    assert len(list(run_dir.path.iterdir())) == 18
+    for pairing in config.pairings:
+        _assert_components(
+            tiny_arch, config, run_dir, "utility", pairing, config.pairings
+        )
+    directions = {
+        method: _oriented(
+            _cell(tiny_arch, config, "utility", method, "matched", "unit")
+        )
+        for method in config.methods
+    }
+    per_seed = run_dir.read_arrays("convergence_utility")["per_seed"]
+    for s, method in enumerate(("pca_diff", "mean_diff")):
+        np.testing.assert_allclose(
+            per_seed[s],
+            np.einsum(
+                "nkd,nkd->nk",
+                directions[method].astype(np.float64),
+                directions["logistic"].astype(np.float64),
+            ),
+        )
+    np.testing.assert_allclose(
+        grid["cosine"],
+        variant_cosines(np.stack([directions[m] for m in config.methods])),
+    )
+
+
+def test_execute_is_deterministic(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(tasks=("utility",), n_seeds=2)
+    first = RunDir.create(config, out_root=tmp_path / "a")
+    second = RunDir.create(config, out_root=tmp_path / "b")
+    execute(config, first, tiny_arch, _sources())
+    execute(config, second, tiny_arch, _sources())
+    for stem in (
+        "grid_utility",
+        "methods_utility",
+        "convergence_utility",
+        "curves_utility_methods",
+        "components_utility",
+    ):
+        a, b = first.read_arrays(stem), second.read_arrays(stem)
+        assert a.keys() == b.keys()
+        for key in a:
+            np.testing.assert_array_equal(a[key], b[key])
+    for name in ("table", "table_components", "summary"):
+        assert _json(first, name) == _json(second, name)
+
+
+@pytest.fixture
+def no_forward_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the model ran before the settings were checked")
+
+    monkeypatch.setattr(p4_pairing, "prepare", refuse)
+
+
+@pytest.mark.usefixtures("no_forward_pass")
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"tasks": ("emotion_happiness",)},
+            "p4 reads binary tasks only, not 'emotion_happiness'",
+        ),
+        ({"position": "response"}, "'response' position"),
+        ({"eval_position": "response"}, "'response' position"),
+        ({"n_seeds": 1}, "n_seeds must be at least 2"),
+        ({"tasks": ("nonsense",)}, "unknown task 'nonsense'"),
+        ({"methods": ("pca_diff",)}, "methods needs at least two"),
+        ({"methods": ("pca_diff", "svm")}, "unknown method 'svm'"),
+        (
+            {"methods": ("pca_diff", "pca_diff")},
+            "methods must not repeat",
+        ),
+        (
+            {"methods": ("mean_diff", "logistic")},
+            "method 'pca_diff' is not in methods",
+        ),
+        ({"pairings": ()}, "pairings must not be empty"),
+        ({"pairings": ("matched", "strata")}, "unknown pairing 'strata'"),
+        (
+            {"preprocesses": ("unit", "none")},
+            "preprocess 'center' is not in preprocesses",
+        ),
+        ({"preprocesses": ("center", "whiten")}, "unknown preprocess"),
+        (
+            {"pairings": ("random",)},
+            "task 'sentiment' is read on its own pairing "
+            "'label_contrastive', which is not in pairings ('random',)",
+        ),
+        ({"n_components": 0}, "n_components must be at least 1"),
+        ({"n_folds": 1}, "n_folds must be between 2 and the 16 pairs"),
+        ({"n_folds": 17}, "n_folds must be between 2 and the 16 pairs"),
+        (
+            {"n_components": 9, "n_folds": 2},
+            "folds too small",
+        ),
+        (
+            {"n_pairs": 64, "n_components": 40},
+            "n_components must be at most the model width 32",
+        ),
+        (
+            {"n_pairs": 17},
+            "task 'utility' has 16 training pairs, fewer than n_pairs = 17",
+        ),
+    ],
+    ids=[
+        "one_vs_rest",
+        "response",
+        "eval_response",
+        "one_seed",
+        "unknown_task",
+        "one_method",
+        "unknown_method",
+        "repeated_method",
+        "reference_method_missing",
+        "no_pairings",
+        "unknown_pairing",
+        "reference_preprocess_missing",
+        "unknown_preprocess",
+        "own_pairing_missing",
+        "no_components",
+        "one_fold",
+        "more_folds_than_pairs",
+        "folds_too_small",
+        "wider_than_the_model",
+        "more_pairs_than_the_capacity",
+    ],
+)
+def test_execute_rejects_invalid_settings_before_any_forward_pass(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    overrides: dict[str, Any],
+    message: str,
+) -> None:
+    config = _config(**overrides)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(ValueError, match=re.escape(message)):
+        execute(config, run_dir, tiny_arch, _sources())
+
+
+def test_plot_draws_every_curve_and_matrix(
+    finished: tuple[Config, RunDir], tmp_path: Path
+) -> None:
+    _, run_dir = finished
+    paths = plot(run_dir, tmp_path)
+    stems = [
+        f"{prefix}_{task}{suffix}"
+        for task in TASKS
+        for prefix, suffix in (
+            ("curves", "_methods"),
+            ("curves", "_pairing"),
+            ("curves", "_preprocess"),
+            ("convergence", ""),
+            ("components", ""),
+            ("methods", ""),
+        )
+    ]
+    assert sorted(p.name for p in paths) == sorted(
+        f"{stem}.{ext}" for stem in stems for ext in ("pdf", "png", "svg")
+    )
+    assert len(paths) == 54
+    assert all(p.stat().st_size > 0 for p in paths)
+
+
+def test_run_loads_the_model_and_the_sources_of_the_tasks(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: dict[str, Any] = {}
+
+    def fake_load_model(key: str) -> LoadedModel:
+        asked["model"] = key
+        return tiny_arch
+
+    def fake_load_sources(sources: Sequence[str]) -> dict[str, list[Example]]:
+        asked["sources"] = list(sources)
+        return {name: _sources()[name] for name in sources}
+
+    monkeypatch.setattr(p4_pairing, "load_model", fake_load_model)
+    monkeypatch.setattr(p4_pairing, "load_sources", fake_load_sources)
+    config = _config(tasks=("sentiment", "utility"), n_seeds=2)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    run(config, run_dir)
+    assert asked["model"] == "tiny"
+    assert sorted(asked["sources"]) == ["ethics_utility", "sst2"]
+    assert _json(run_dir, "summary")["tasks"] == ["sentiment", "utility"]
+    assert run_dir.meta["finished_at"] is None
+
+
+def test_the_evaluation_items_are_read_at_the_eval_position(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(tasks=("utility",), n_seeds=2, eval_position="mean")
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _sources())
+    last = _cell(
+        tiny_arch,
+        dataclasses.replace(config, eval_position=None),
+        "utility",
+        "pca_diff",
+        "matched",
+        "center",
+    )
+    mean = _cell(tiny_arch, config, "utility", "pca_diff", "matched", "center")
+    assert not np.allclose(
+        mean.per_seed("report")[0], last.per_seed("report")[0]
+    )
+    accuracy = run_dir.read_arrays("grid_utility")["accuracy"]
+    np.testing.assert_allclose(accuracy[0, 0, 0, 0], mean.per_seed("select"))
+    np.testing.assert_allclose(accuracy[0, 0, 0, 1], mean.per_seed("report"))
+
+
+def _distinct_pairs(config: Config, pairing: Pairing) -> list[int]:
+    """Counts the pairs with distinct labels in each seed's training set."""
+    task = READING_TASKS["sentiment"]
+    splits = task_splits(task, _sources(), seed=config.seed)
+    counts = []
+    for i in range(config.n_seeds):
+        stimuli = pairing_set(
+            task,
+            _paper("sentiment"),
+            splits.train,
+            pairing,
+            n_pairs=config.n_pairs,
+            seed=derive_seed(config.seed, "train", i),
+        )
+        first, second = stimuli.pairs.T
+        counts.append(
+            int((stimuli.labels[first] != stimuli.labels[second]).sum())
+        )
+    return counts
+
+
+@pytest.mark.usefixtures("no_forward_pass")
+def test_a_training_set_with_too_few_distinct_pairs_fails_before_the_model(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    base = _config(
+        tasks=("sentiment",),
+        pairings=("label_contrastive", "random"),
+        n_pairs=2,
+        n_folds=2,
+        n_components=1,
+    )
+    seed = next(
+        s
+        for s in range(50)
+        if min(_distinct_pairs(dataclasses.replace(base, seed=s), "random")) < 2
+    )
+    config = dataclasses.replace(base, seed=seed)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"the random training pairs of 'sentiment' for seed [0-9] hold "
+            r"[01] pairs with distinct labels, fewer than the 2"
+        ),
+    ):
+        execute(config, run_dir, tiny_arch, _sources())
+
+
+@pytest.mark.parametrize("seed", [3, 4])
+def test_the_test_configuration_runs_whatever_the_seed(
+    tiny_arch: LoadedModel, tmp_path: Path, seed: int
+) -> None:
+    config = _config(seed=seed, methods=("pca_diff", "mean_diff"))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _sources())
+    assert len(_json(run_dir, "table")) == 42
+
+
+def test_run_loads_the_target_source_of_a_task(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: dict[str, Any] = {}
+
+    def fake_load_sources(sources: Sequence[str]) -> dict[str, list[Example]]:
+        asked["sources"] = list(sources)
+        return {name: _sources()[name] for name in sources}
+
+    monkeypatch.setattr(p4_pairing, "load_model", lambda key: tiny_arch)
+    monkeypatch.setattr(p4_pairing, "load_sources", fake_load_sources)
+    config = _config(
+        tasks=("truth_cities",),
+        n_seeds=2,
+        n_pairs=6,
+        n_folds=3,
+        n_components=2,
+        pairings=("label_contrastive",),
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    run(config, run_dir)
+    assert sorted(asked["sources"]) == ["facts", "geometry_of_truth"]
+    assert _json(run_dir, "summary")["tasks"] == ["truth_cities"]
+
+
+def test_run_loads_the_sources_before_the_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded: list[str] = []
+
+    def offline(sources: Sequence[str]) -> dict[str, list[Example]]:
+        loaded.append("sources")
+        raise ValueError("offline")
+
+    def model(key: str) -> LoadedModel:
+        loaded.append("model")
+        raise AssertionError("the model loaded before the sources")
+
+    monkeypatch.setattr(p4_pairing, "load_model", model)
+    monkeypatch.setattr(p4_pairing, "load_sources", offline)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(ValueError, match="offline"):
+        run(config, run_dir)
+    assert loaded == ["sources"]
+
+
+def test_run_loads_nothing_when_the_settings_are_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded: list[str] = []
+
+    def record(*args: object) -> None:
+        loaded.append("loaded")
+
+    monkeypatch.setattr(p4_pairing, "load_model", record)
+    monkeypatch.setattr(p4_pairing, "load_sources", record)
+    config = _config(n_folds=1)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(ValueError, match="n_folds must be between 2"):
+        run(config, run_dir)
+    assert loaded == []
+
+
+@pytest.mark.slow
+def test_gpt2_reads_sentiment_over_the_whole_grid(tmp_path: Path) -> None:
+    config = Config(
+        tasks=("sentiment",),
+        n_seeds=3,
+        n_pairs=16,
+        n_eval_pairs=32,
+        n_components=4,
+        n_folds=4,
+        n_boot=100,
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    loaded = load_model("gpt2")
+    examples = load_sources(["sst2"])
+    start = time.perf_counter()
+    execute(config, run_dir, loaded, examples)
+    seconds = time.perf_counter() - start
+    rows = _json(run_dir, "table")
+    assert len(rows) == 36
+    assert max(row["report"] for row in rows) > 0.6
+    print(f"p4: {seconds:.1f} s for {len(rows)} cells on gpt2")
