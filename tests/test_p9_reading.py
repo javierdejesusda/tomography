@@ -1,5 +1,6 @@
 """Tests for the reading half of the P9 knowledge boundary study."""
 
+from collections.abc import Callable
 from collections.abc import Sequence
 import dataclasses
 from typing import Any
@@ -22,6 +23,7 @@ from tomography.p9.pool import LabeledItem
 import tomography.p9.reading as reading_module
 from tomography.p9.reading import READING_METHODS
 from tomography.p9.reading import TEMPLATE_NAMES
+from tomography.p9.reading import WITHIN_BASELINES
 from tomography.p9.reading import ItemActivations
 from tomography.p9.reading import ReadingCube
 from tomography.p9.reading import check_pool
@@ -31,10 +33,13 @@ from tomography.p9.reading import draw_seed
 from tomography.p9.reading import fit_type_reader
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
+from tomography.p9.reading import relation_groups
 from tomography.p9.reading import render_items
 from tomography.p9.reading import surface_baselines
 from tomography.p9.reading import type_auroc
+from tomography.p9.reading import within_relation_pairs
 from tomography.p9.unknowns import TypePool
+from tomography.p9.unknowns import relation_of
 from tomography.p9.unknowns import stratum_name
 from tomography.p9.unknowns import type_pools
 from tomography.reading.metrics import auroc
@@ -1286,7 +1291,7 @@ def _baseline_pool(
 
 
 def test_surface_baselines_name_the_three_columns_in_order() -> None:
-    assert list(surface_baselines(_baseline_pool())) == [
+    assert list(surface_baselines(_baseline_pool()))[:3] == [
         "text_word",
         "text_char",
         "popularity",
@@ -1305,35 +1310,27 @@ def test_surface_baselines_fit_on_all_train_items_and_score_the_test_items(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pool = _baseline_pool()
-    calls: list[tuple[list[str], list[int], list[str], list[int], str]] = []
-    real = reading_module.text_auroc
+    calls: list[tuple[list[str], list[int], list[str], str]] = []
+    real = reading_module.text_scores
 
     def spy(
         train_texts: Sequence[str],
         train_labels: NDArray[np.int64],
         test_texts: Sequence[str],
-        test_labels: NDArray[np.int64],
         *,
         analyzer: Any,
-    ) -> float:
+    ) -> NDArray[np.float64]:
         calls.append(
             (
                 list(train_texts),
                 train_labels.tolist(),
                 list(test_texts),
-                test_labels.tolist(),
                 analyzer,
             )
         )
-        return real(
-            train_texts,
-            train_labels,
-            test_texts,
-            test_labels,
-            analyzer=analyzer,
-        )
+        return real(train_texts, train_labels, test_texts, analyzer=analyzer)
 
-    monkeypatch.setattr(reading_module, "text_auroc", spy)
+    monkeypatch.setattr(reading_module, "text_scores", spy)
 
     surface_baselines(pool)
 
@@ -1343,12 +1340,11 @@ def test_surface_baselines_fit_on_all_train_items_and_score_the_test_items(
         i.example.question for i in (*positive_train, *negative_train)
     ]
     want_test = [i.example.question for i in (*positive_test, *negative_test)]
-    assert [call[4] for call in calls] == ["word", "char"]
-    for train_texts, train_labels, test_texts, test_labels, _ in calls:
+    assert [call[3] for call in calls] == ["word", "char"]
+    for train_texts, train_labels, test_texts, _ in calls:
         assert train_texts == want_train
         assert train_labels == [1] * 12 + [0] * 12
         assert test_texts == want_test
-        assert test_labels == [1] * 6 + [0] * 6
 
 
 def test_surface_baselines_popularity_is_null_when_a_test_item_has_none() -> (
@@ -1386,3 +1382,373 @@ def test_surface_baselines_popularity_is_not_oriented_on_the_train_items() -> (
     pool = _baseline_pool(train_positive_popularity=10, train_popularity=5000)
 
     assert surface_baselines(pool)["popularity"] == pytest.approx(1.0)
+
+
+CAPITAL = "capital"
+OCCUPATION = "occupation"
+RELATION_COUNTS: dict[Split, tuple[int, int]] = {
+    "train": (40, 8),
+    "val": (20, 4),
+    "test": (60, 6),
+}
+RELATION_POPULARITY = {CAPITAL: 100_000, OCCUPATION: 100}
+RELATIONAL_TYPES = [
+    "fictional_synthal",
+    "fictional_generated",
+    "obscure_real",
+    "obscure_real_pop",
+    "post_cutoff",
+    "real_vs_synthal",
+    "real_vs_generated",
+    "pre_vs_post_cutoff",
+]
+# One test split of the confounded pool holds 66 x 66 pairs: 60 x 60 rank
+# capital above occupation, and the 60 x 6 + 6 x 60 inside a relation tie.
+POOLED_BASE_RATE_AUROC = (60 * 60 + (60 * 6 + 6 * 60) / 2) / (66 * 66)
+
+
+def _relation_item(
+    uid: str, label: Label, split: Split, relation: str
+) -> LabeledItem:
+    item = _labeled(
+        uid,
+        label,
+        split=split,
+        relation=relation,
+        popularity=RELATION_POPULARITY[relation],
+    )
+    question = f"what is the {relation} of this person"
+    return dataclasses.replace(
+        item, example=dataclasses.replace(item.example, question=question)
+    )
+
+
+def _confounded_pool(*, apart: Sequence[Split] = ()) -> TypePool:
+    """Capital questions are mostly known and occupation ones mostly unknown.
+
+    The wording and the popularity of a question depend on its relation alone,
+    so each of them separates the sides through the relation only. In a split
+    of `apart` every positive item is a capital one and every negative item an
+    occupation one, so the sides share no relation there.
+    """
+    positive: list[LabeledItem] = []
+    negative: list[LabeledItem] = []
+    for split, (major, minor) in RELATION_COUNTS.items():
+        if split in apart:
+            minor = 0
+        for relation, n_positive, n_negative in (
+            (CAPITAL, major, minor),
+            (OCCUPATION, minor, major),
+        ):
+            positive += [
+                _relation_item(
+                    f"p-{split}-{relation}-{i}", "known", split, relation
+                )
+                for i in range(n_positive)
+            ]
+            negative += [
+                _relation_item(
+                    f"n-{split}-{relation}-{i}", "unknown", split, relation
+                )
+                for i in range(n_negative)
+            ]
+    return TypePool(
+        "confounded", tuple(positive), tuple(negative), "none", "knowledge"
+    )
+
+
+def _relation_activations(pool: TypePool) -> ItemActivations:
+    """Layer 1 is noise; layer 2 holds the relation of the item alone."""
+    items = [*pool.positive, *pool.negative]
+    rng = np.random.default_rng(11)
+    data = np.zeros((2, len(items), 16), dtype=np.float32)
+    data[0] = rng.standard_normal((len(items), 16))
+    data[1, [relation_of(i) == CAPITAL for i in items], 0] = SHIFT
+    return ItemActivations(tuple(i.example.uid for i in items), (1, 2), data)
+
+
+def _map_items(
+    pool: TypePool, change: Callable[[LabeledItem], LabeledItem]
+) -> TypePool:
+    return dataclasses.replace(
+        pool,
+        positive=tuple(change(i) for i in pool.positive),
+        negative=tuple(change(i) for i in pool.negative),
+    )
+
+
+def _with_meta(item: LabeledItem, **meta: MetaValue) -> LabeledItem:
+    example = dataclasses.replace(
+        item.example, meta={**item.example.meta, **meta}
+    )
+    return dataclasses.replace(item, example=example)
+
+
+def _without_relation(item: LabeledItem) -> LabeledItem:
+    meta = {k: v for k, v in item.example.meta.items() if k != "relation"}
+    return dataclasses.replace(
+        item, example=dataclasses.replace(item.example, meta=meta)
+    )
+
+
+def test_relation_groups_follow_the_items_of_a_split() -> None:
+    pool = _confounded_pool()
+
+    test = relation_groups(pool, "test")
+    val = relation_groups(pool, "val")
+
+    assert test is not None
+    assert test.tolist() == (
+        [CAPITAL] * 60 + [OCCUPATION] * 6 + [CAPITAL] * 6 + [OCCUPATION] * 60
+    )
+    assert val is not None
+    assert val.tolist() == (
+        [CAPITAL] * 20 + [OCCUPATION] * 4 + [CAPITAL] * 4 + [OCCUPATION] * 20
+    )
+
+
+@pytest.mark.parametrize("split", ["val", "test"])
+def test_relation_groups_need_a_relation_on_every_eval_item(
+    split: Split,
+) -> None:
+    pool = _confounded_pool()
+    lone = next(i for i in pool.positive if i.example.split == split)
+    pool = _map_items(pool, lambda i: _without_relation(i) if i is lone else i)
+
+    for asked in ("val", "test"):
+        assert relation_groups(pool, asked) is None
+
+
+def test_relation_groups_ignore_the_train_items() -> None:
+    pool = _map_items(
+        _confounded_pool(),
+        lambda i: _without_relation(i) if i.example.split == "train" else i,
+    )
+
+    assert relation_groups(pool, "test") is not None
+    assert relation_groups(pool, "val") is not None
+
+
+def test_relation_groups_are_none_for_a_non_string_relation() -> None:
+    pool = _map_items(_confounded_pool(), lambda i: _with_meta(i, relation=3))
+
+    assert relation_groups(pool, "test") is None
+
+
+def test_within_relation_pairs_count_the_pairs_inside_a_relation() -> None:
+    pool = _confounded_pool()
+
+    assert within_relation_pairs(pool, "test") == 60 * 6 + 6 * 60
+    assert within_relation_pairs(pool, "val") == 20 * 4 + 4 * 20
+
+
+def test_within_relation_pairs_are_zero_without_a_shared_relation() -> None:
+    pool = _confounded_pool(apart=("test",))
+
+    assert within_relation_pairs(pool, "test") == 0
+    assert within_relation_pairs(pool, "val") == 20 * 4 + 4 * 20
+
+
+def test_within_relation_pairs_are_none_without_relations() -> None:
+    pool = _map_items(_confounded_pool(), _without_relation)
+
+    assert within_relation_pairs(pool, "test") is None
+
+
+def test_the_within_arrays_have_the_shape_of_the_pooled_ones(
+    planted: Planted,
+) -> None:
+    cube = planted.cube
+
+    assert cube.val_within.shape == cube.val.shape
+    assert cube.test_within.shape == cube.test.shape
+
+
+def test_only_the_relational_contrasts_have_within_values(
+    planted: Planted,
+) -> None:
+    cube = planted.cube
+
+    for t, name in enumerate(cube.types):
+        for within in (cube.val_within[:, t], cube.test_within[:, t]):
+            if name in RELATIONAL_TYPES:
+                assert np.isfinite(within).all(), name
+            else:
+                assert np.isnan(within).all(), name
+
+
+def test_the_within_reader_finds_the_planted_directions(
+    planted: Planted,
+) -> None:
+    cube = planted.cube
+    rows = [_row(cube, name) for name in RELATIONAL_TYPES]
+
+    for m in range(3):
+        for within in (cube.val_within, cube.test_within):
+            at_signal = within[m][rows][:, :, SIGNAL].mean(axis=1)
+            at_noise = within[m][rows][:, :, 0].mean(axis=1)
+            assert at_signal.min() > 0.9, cube.methods[m]
+            assert at_noise.max() < 0.75, cube.methods[m]
+
+
+def test_inside_one_relation_the_within_auroc_is_the_pooled_auroc(
+    planted: Planted,
+) -> None:
+    pool = _map_items(
+        dataclasses.replace(planted.pools["obscure_real"], strata="none"),
+        lambda i: _with_meta(i, relation="all"),
+    )
+
+    cube = reading_cube(
+        planted.acts,
+        {"one": pool},
+        methods=("logistic", "pca_diff"),
+        n_seeds=2,
+        n_pairs=16,
+        seed=1,
+    )
+
+    np.testing.assert_allclose(cube.val_within, cube.val, atol=1e-12)
+    np.testing.assert_allclose(cube.test_within, cube.test, atol=1e-12)
+
+
+def test_a_base_rate_gap_between_relations_inflates_the_pooled_auroc_only() -> (
+    None
+):
+    pool = _confounded_pool()
+
+    cube = reading_cube(
+        _relation_activations(pool),
+        {"confounded": pool},
+        methods=("logistic",),
+        n_seeds=2,
+        n_pairs=64,
+        seed=1,
+    )
+
+    assert cube.layers == (1, 2)
+    np.testing.assert_allclose(cube.test[0, 0, :, 1], POOLED_BASE_RATE_AUROC)
+    np.testing.assert_allclose(cube.test_within[0, 0, :, 1], 0.5)
+    np.testing.assert_allclose(cube.val[0, 0, :, 1], 480 / 576)
+    np.testing.assert_allclose(cube.val_within[0, 0, :, 1], 0.5)
+    assert choose_layer(cube.val, cube.layers) == 2
+
+
+def test_the_within_values_are_nan_where_a_split_shares_no_relation() -> None:
+    pool = _confounded_pool(apart=("val",))
+
+    cube = reading_cube(
+        _relation_activations(pool),
+        {"confounded": pool},
+        methods=("logistic",),
+        n_seeds=2,
+        n_pairs=64,
+        seed=1,
+    )
+
+    assert np.isnan(cube.val_within).all()
+    assert np.isfinite(cube.test_within).all()
+    assert np.isfinite(cube.val).all()
+    assert choose_layer(cube.val, cube.layers) == 2
+
+
+def test_the_pooled_arrays_do_not_depend_on_the_relations(
+    planted: Planted,
+) -> None:
+    relational = dataclasses.replace(
+        planted.pools["obscure_real"], strata="none"
+    )
+    flat = _map_items(relational, _without_relation)
+    kwargs: dict[str, Any] = {
+        "methods": ("logistic", "pca_diff"),
+        "n_seeds": 2,
+        "n_pairs": 16,
+        "seed": 1,
+    }
+
+    with_relations = reading_cube(planted.acts, {"t": relational}, **kwargs)
+    without = reading_cube(planted.acts, {"t": flat}, **kwargs)
+
+    assert np.isfinite(with_relations.test_within).all()
+    assert np.isnan(without.test_within).all()
+    assert np.isnan(without.val_within).all()
+    for name in ("val", "test", "transfer", "cosine"):
+        np.testing.assert_array_equal(
+            getattr(with_relations, name), getattr(without, name)
+        )
+    assert choose_layer(with_relations.val, with_relations.layers) == (
+        choose_layer(without.val, without.layers)
+    )
+
+
+def test_surface_baselines_name_the_six_columns_in_order() -> None:
+    assert list(surface_baselines(_confounded_pool())) == [
+        "text_word",
+        "text_char",
+        "popularity",
+        "text_word_within",
+        "text_char_within",
+        "popularity_within",
+    ]
+    assert WITHIN_BASELINES == (
+        "text_word_within",
+        "text_char_within",
+        "popularity_within",
+    )
+
+
+def test_surface_baselines_fall_to_chance_inside_a_relation() -> None:
+    baselines = surface_baselines(_confounded_pool())
+
+    for name in ("text_word", "text_char", "popularity"):
+        assert baselines[name] == pytest.approx(POOLED_BASE_RATE_AUROC), name
+    for name in WITHIN_BASELINES:
+        assert baselines[name] == pytest.approx(0.5), name
+
+
+def test_surface_baselines_inside_a_relation_read_a_word_difference() -> None:
+    pool = _map_items(
+        _baseline_pool(),
+        lambda i: _with_meta(
+            i, relation="even" if int(i.example.uid[-1]) % 2 == 0 else "odd"
+        ),
+    )
+
+    baselines = surface_baselines(pool)
+
+    for name in WITHIN_BASELINES:
+        assert baselines[name] == pytest.approx(1.0), name
+
+
+def test_surface_baselines_inside_a_relation_are_null_without_relations() -> (
+    None
+):
+    pool = _map_items(_confounded_pool(), _without_relation)
+
+    baselines = surface_baselines(pool)
+
+    for name in WITHIN_BASELINES:
+        assert baselines[name] is None, name
+    assert baselines["text_word"] == pytest.approx(POOLED_BASE_RATE_AUROC)
+
+
+def test_surface_baselines_inside_a_relation_are_null_without_a_pair() -> None:
+    baselines = surface_baselines(_confounded_pool(apart=("test",)))
+
+    for name in WITHIN_BASELINES:
+        assert baselines[name] is None, name
+    assert baselines["popularity"] == pytest.approx(1.0)
+
+
+def test_surface_baselines_popularity_within_follows_the_null_rule() -> None:
+    pool = _confounded_pool()
+    lone = next(i for i in pool.negative if i.example.split == "test")
+    pool = _map_items(
+        pool, lambda i: _with_meta(i, popularity=None) if i is lone else i
+    )
+
+    baselines = surface_baselines(pool)
+
+    assert baselines["popularity"] is None
+    assert baselines["popularity_within"] is None
+    assert baselines["text_word_within"] == pytest.approx(0.5)

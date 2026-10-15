@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace
 import hashlib
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,10 +23,12 @@ from tomography.knowledge import few_shot_prompt
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.p9.pool import LabeledItem
+from tomography.p9.risk import grouped_auroc
 from tomography.p9.risk import popularity_auroc
-from tomography.p9.risk import text_auroc
+from tomography.p9.risk import text_scores
 from tomography.p9.unknowns import Strata
 from tomography.p9.unknowns import TypePool
+from tomography.p9.unknowns import relation_of
 from tomography.p9.unknowns import stratum_name
 from tomography.pairing import label_contrastive_pairs
 from tomography.reading.directions import Method
@@ -47,6 +50,12 @@ READING_METHODS: tuple[Method, ...] = (
     "random",
 )
 SURFACE_BASELINES: tuple[str, ...] = ("text_word", "text_char", "popularity")
+WITHIN_BASELINES: tuple[str, ...] = (
+    "text_word_within",
+    "text_char_within",
+    "popularity_within",
+)
+_ANALYZERS: tuple[Literal["word", "char"], ...] = ("word", "char")
 _HALF_SALT = "p9-split-half"
 _HALF_MIN_PAIRS = 2
 
@@ -251,13 +260,79 @@ def check_pool(pool: TypePool, *, min_pairs: int, min_eval: int) -> str | None:
     return None
 
 
+def _split_labels(pool: TypePool, split: Split) -> NDArray[np.int64]:
+    positive, negative = pool.split(split)
+    labels = np.r_[np.ones(len(positive)), np.zeros(len(negative))]
+    return np.asarray(labels, dtype=np.int64)
+
+
 def _split_arrays(
     acts: ItemActivations, pool: TypePool, split: Split
 ) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
     positive, negative = pool.split(split)
-    rows = acts.rows([*positive, *negative])
-    labels = np.r_[np.ones(len(positive)), np.zeros(len(negative))]
-    return rows, labels.astype(np.int64)
+    return acts.rows([*positive, *negative]), _split_labels(pool, split)
+
+
+def relation_groups(pool: TypePool, split: Split) -> NDArray[np.str_] | None:
+    """Names the relation of each item of a split of a relational contrast.
+
+    A contrast is relational when every val and test item of both sides has a
+    string relation (see `relation_of`), so a score can be read inside the
+    relations. The train items are paired by `pool.strata` and are looked at
+    only when they are the split asked for.
+
+    Args:
+        pool: One contrast.
+        split: "train", "val" or "test".
+
+    Returns:
+        The relation of each item of the split, in the row order of
+        `type_auroc` (the positive items, then the negative ones); None when
+        the contrast is not relational.
+    """
+    splits: tuple[Split, ...] = ("val", "test", split)
+    for held in splits:
+        positive, negative = pool.split(held)
+        if any(relation_of(i) is None for i in (*positive, *negative)):
+            return None
+    positive, negative = pool.split(split)
+    names = [str(relation_of(i)) for i in (*positive, *negative)]
+    return np.array(names, dtype=np.str_)
+
+
+def _pair_count(labels: NDArray[np.int64], groups: NDArray[np.str_]) -> int:
+    return sum(
+        int(((groups == name) & (labels == 1)).sum())
+        * int(((groups == name) & (labels == 0)).sum())
+        for name in np.unique(groups)
+    )
+
+
+def _paired_relations(
+    pool: TypePool, split: Split, labels: NDArray[np.int64]
+) -> NDArray[np.str_] | None:
+    groups = relation_groups(pool, split)
+    if groups is None or _pair_count(labels, groups) == 0:
+        return None
+    return groups
+
+
+def within_relation_pairs(pool: TypePool, split: Split) -> int | None:
+    """Counts the pairs of a positive and a negative item of one relation.
+
+    Args:
+        pool: One contrast.
+        split: "train", "val" or "test".
+
+    Returns:
+        The number of pairs of a positive and a negative item that share a
+        relation in the split, the pairs a within-relation AUROC ranks; None
+        when the contrast is not relational (see `relation_groups`).
+    """
+    groups = relation_groups(pool, split)
+    if groups is None:
+        return None
+    return _pair_count(_split_labels(pool, split), groups)
 
 
 def fit_type_reader(
@@ -341,20 +416,28 @@ def surface_baselines(pool: TypePool) -> dict[str, float | None]:
     A text classifier is fitted on the questions of all train items of both
     sides and scored on the questions of the items `type_auroc` scores on the
     test split, so a reader AUROC can be read against what the wording alone
-    gives (see `tomography.p9.risk.text_auroc`). The reader keeps at most
+    gives (see `tomography.p9.risk.text_scores`). The reader keeps at most
     `n_pairs` pairs of the train items (see `fit_type_reader`) while the
     classifier fits on all of them, so the baseline is the stronger control.
     The popularity baseline is the AUROC of the popularity of those test
     items.
 
+    For a relational contrast (see `relation_groups`) each baseline also comes
+    as its within-relation AUROC, `tomography.p9.risk.grouped_auroc` of the
+    same test scores: the wording of a question, and its popularity, can rank
+    the sides through the relation alone, which a pooled AUROC cannot tell
+    apart.
+
     Args:
         pool: One contrast.
 
     Returns:
-        The AUROC by `SURFACE_BASELINES` name: "text_word" and "text_char"
-        for word and character n-grams of the question text, and
-        "popularity", None unless every test item of both sides has an
-        integer popularity.
+        The AUROC by name, `SURFACE_BASELINES` then `WITHIN_BASELINES`:
+        "text_word" and "text_char" for word and character n-grams of the
+        question text, and "popularity", None unless every test item of both
+        sides has an integer popularity. Each name ending in "_within" is
+        None when the baseline is, when the contrast is not relational, or
+        when no relation holds a positive and a negative test item.
 
     Raises:
         ValueError: If a test side is empty or the train questions leave no
@@ -362,30 +445,45 @@ def surface_baselines(pool: TypePool) -> dict[str, float | None]:
     """
     positive_train, negative_train = pool.split("train")
     positive_test, negative_test = pool.split("test")
-    train = [*positive_train, *negative_train]
+    train_labels = _split_labels(pool, "train")
+    test_labels = _split_labels(pool, "test")
+    groups = _paired_relations(pool, "test", test_labels)
+    train_texts = [
+        i.example.question for i in (*positive_train, *negative_train)
+    ]
     test = [*positive_test, *negative_test]
-    train_labels = np.r_[
-        np.ones(len(positive_train)), np.zeros(len(negative_train))
-    ].astype(np.int64)
-    test_labels = np.r_[
-        np.ones(len(positive_test)), np.zeros(len(negative_test))
-    ].astype(np.int64)
-    train_texts = [i.example.question for i in train]
     test_texts = [i.example.question for i in test]
     values = [i.example.meta.get("popularity") for i in test]
     counts = [v for v in values if isinstance(v, int)]
+    baselines: dict[str, float | None] = {}
+    for analyzer in _ANALYZERS:
+        scores = text_scores(
+            train_texts, train_labels, test_texts, analyzer=analyzer
+        )
+        baselines[f"text_{analyzer}"] = float(auroc(scores, test_labels))
+        baselines[f"text_{analyzer}_within"] = (
+            None
+            if groups is None
+            else grouped_auroc(scores, test_labels, groups)
+        )
+    popularity = (
+        np.asarray(counts, dtype=np.float64)
+        if len(counts) == len(values)
+        else None
+    )
+    baselines["popularity"] = (
+        None
+        if popularity is None
+        else popularity_auroc(popularity, test_labels)
+    )
+    baselines["popularity_within"] = (
+        None
+        if popularity is None or groups is None
+        else grouped_auroc(np.log10(popularity + 1.0), test_labels, groups)
+    )
     return {
-        "text_word": text_auroc(
-            train_texts, train_labels, test_texts, test_labels, analyzer="word"
-        ),
-        "text_char": text_auroc(
-            train_texts, train_labels, test_texts, test_labels, analyzer="char"
-        ),
-        "popularity": (
-            popularity_auroc(np.asarray(counts, dtype=np.float64), test_labels)
-            if len(counts) == len(values)
-            else None
-        ),
+        name: baselines[name]
+        for name in (*SURFACE_BASELINES, *WITHIN_BASELINES)
     }
 
 
@@ -400,6 +498,12 @@ class ReadingCube:
         val: Shape (M, T, S, K): the AUROC on the validation items of the
             same contrast, for each method, contrast, draw and layer.
         test: Shape (M, T, S, K): the same on the test items.
+        val_within: Shape (M, T, S, K): the within-relation AUROC of the
+            same scores as `val` (see `relation_groups`); NaN for a contrast
+            that is not relational and for one whose val items share no
+            relation across the sides.
+        test_within: Shape (M, T, S, K): the same on the test items. The
+            layer is never chosen on these values.
         transfer: Shape (S, K, T, T): the first method fitted on contrast i
             (row) and scored on the test items of contrast j (column).
         cosine: Shape (K, T, T): split-half cross-fit cosines of the signed
@@ -415,6 +519,8 @@ class ReadingCube:
     layers: tuple[int, ...]
     val: NDArray[np.float64]
     test: NDArray[np.float64]
+    val_within: NDArray[np.float64]
+    test_within: NDArray[np.float64]
     transfer: NDArray[np.float64]
     cosine: NDArray[np.float64]
     readers: dict[str, RepReader]
@@ -492,6 +598,14 @@ def reading_cube(
     contrast takes its slice of the scores, so the activations are not
     copied per reader and split.
 
+    The pooled AUROC ranks every item of a split together, so a relation that
+    holds mostly known items lifts it without any reading of the question. For
+    a relational contrast (see `relation_groups`) the same scores are also
+    ranked inside each relation and averaged by pairs (see
+    `tomography.p9.risk.grouped_auroc`): `val_within` and `test_within`. They
+    are reported next to the pooled values and change neither them nor the
+    layer chosen on `val`.
+
     The cosines are split-half cross-fits. A fit on all train pairs would
     bias the cosine of two contrasts that share a side (about +0.5 on pure
     noise, against under 0.1 for disjoint sides), because the sample noise
@@ -532,6 +646,8 @@ def reading_cube(
     n_layers = len(acts.layers)
     val = np.zeros((len(methods), len(names), n_seeds, n_layers))
     test = np.zeros_like(val)
+    val_within = np.full_like(val, np.nan)
+    test_within = np.full_like(val, np.nan)
     transfer = np.zeros((n_seeds, n_layers, len(names), len(names)))
     splits: tuple[Split, ...] = ("val", "test")
     held = {
@@ -544,12 +660,35 @@ def reading_cube(
         )
     )
     eval_data = acts.data[:, eval_rows]
+    relations = {
+        split: {
+            name: _paired_relations(pools[name], split, held[split][name][1])
+            for name in names
+        }
+        for split in splits
+    }
 
     def score(
         scores: NDArray[np.float32], split: Split, name: str
     ) -> NDArray[np.float64]:
         rows, labels = held[split][name]
         return auroc(scores[:, np.searchsorted(eval_rows, rows)], labels)
+
+    def score_within(
+        scores: NDArray[np.float32], split: Split, name: str
+    ) -> NDArray[np.float64]:
+        groups = relations[split][name]
+        if groups is None:
+            return np.full(scores.shape[0], np.nan)
+        rows, labels = held[split][name]
+        return np.array(
+            [
+                grouped_auroc(
+                    np.asarray(layer, dtype=np.float64), labels, groups
+                )
+                for layer in scores[:, np.searchsorted(eval_rows, rows)]
+            ]
+        )
 
     for t, name in enumerate(names):
         for s in range(n_seeds):
@@ -565,6 +704,8 @@ def reading_cube(
                 scores = reader.score(eval_data)
                 val[m, t, s] = score(scores, "val", name)
                 test[m, t, s] = score(scores, "test", name)
+                val_within[m, t, s] = score_within(scores, "val", name)
+                test_within[m, t, s] = score_within(scores, "test", name)
                 if m == 0:
                     for u, other in enumerate(names):
                         transfer[s, :, t, u] = (
@@ -587,7 +728,16 @@ def reading_cube(
         acts, pools, method=methods[0], preprocess=preprocess, seed=seed
     )
     return ReadingCube(
-        names, tuple(methods), acts.layers, val, test, transfer, cosine, full
+        names,
+        tuple(methods),
+        acts.layers,
+        val,
+        test,
+        val_within,
+        test_within,
+        transfer,
+        cosine,
+        full,
     )
 
 
