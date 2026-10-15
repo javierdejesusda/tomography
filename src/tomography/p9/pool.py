@@ -6,8 +6,13 @@ behavioral label of `tomography.knowledge.label_questions`, and the guess
 control of `tomography.p9.guess` may later demote a known label.
 """
 
+from collections.abc import Callable
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
+import zlib
+
+import numpy as np
 
 from tomography.datasets.records import QAExample
 from tomography.knowledge import ItemLabel
@@ -105,3 +110,66 @@ class LabeledItem:
         raw label.
         """
         return "uncertain" if self.guess is not None else self.label.label
+
+
+def subsample(
+    items: Sequence[QAExample],
+    n: int | None,
+    *,
+    seed: int,
+    by: Callable[[QAExample], str] | None = None,
+    prefer: Callable[[QAExample], bool] | None = None,
+    share: float = 0.5,
+) -> list[QAExample]:
+    """Caps the number of questions per stratum with a seeded draw.
+
+    A stratum larger than `n` keeps `n` questions chosen by a seeded
+    permutation of its uid-sorted members, so the draw does not depend on
+    the input order. The result keeps the order of `items`.
+
+    With `prefer`, a capped stratum takes up to `round(share * n)` preferred
+    questions first, fills the rest from the others, and tops up from the
+    preferred ones when the others run short.
+
+    Args:
+        items: The questions.
+        n: Questions kept per stratum; None keeps every question.
+        seed: Seeds the draw.
+        by: Stratum of a question; None puts all questions in one stratum.
+        prefer: Marks the questions the draw favors, if any.
+        share: Share of `n` drawn from the preferred questions first.
+
+    Returns:
+        The kept questions, in their original order.
+
+    Raises:
+        ValueError: If `n` is negative or `share` is outside [0, 1].
+    """
+    if not 0.0 <= share <= 1.0:
+        raise ValueError(f"share must be in [0, 1], got {share}")
+    if n is None:
+        return list(items)
+    if n < 0:
+        raise ValueError(f"n must be non-negative, got {n}")
+    strata: dict[str, list[int]] = {}
+    for index, example in enumerate(items):
+        key = "" if by is None else by(example)
+        strata.setdefault(key, []).append(index)
+    keep: set[int] = set()
+    for key, indices in strata.items():
+        if len(indices) <= n:
+            keep.update(indices)
+            continue
+        ordered = sorted(indices, key=lambda i: items[i].uid)
+        rng = np.random.default_rng([seed, zlib.crc32(key.encode())])
+        shuffled = [ordered[int(j)] for j in rng.permutation(len(ordered))]
+        if prefer is None:
+            keep.update(shuffled[:n])
+            continue
+        first = [i for i in shuffled if prefer(items[i])]
+        rest = [i for i in shuffled if not prefer(items[i])]
+        take = min(len(first), round(share * n))
+        chosen = first[:take] + rest[: n - take]
+        chosen += first[take : take + n - len(chosen)]
+        keep.update(chosen)
+    return [example for i, example in enumerate(items) if i in keep]
