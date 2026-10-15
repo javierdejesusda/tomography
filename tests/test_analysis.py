@@ -433,6 +433,19 @@ def test_lens_logits_centers_then_scales_by_the_norm_weight() -> None:
     )
 
 
+def test_lens_logits_centers_every_direction_of_a_batch_over_its_width() -> (
+    None
+):
+    rng = np.random.default_rng(3)
+    unembedding = rng.normal(size=(7, 4)).astype(np.float32)
+    scale = rng.uniform(0.5, 2.0, size=4).astype(np.float32)
+    batch = rng.normal(size=(3, 4)) + np.array([[5.0], [-3.0], [1.0]])
+    got = lens_logits(batch, unembedding, scale=scale, center=True)
+    oracle = ((batch - batch.mean(-1, keepdims=True)) * scale) @ unembedding.T
+    assert got.shape == (3, 7)
+    np.testing.assert_allclose(got, oracle, rtol=1e-4, atol=1e-5)
+
+
 def test_lens_logits_checks_the_widths() -> None:
     unembedding = np.ones((7, 4), dtype=np.float32)
     with pytest.raises(ValueError, match="width"):
