@@ -930,30 +930,50 @@ def test_the_readers_train_on_train_and_score_on_test_pairs_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     splits: list[set[str]] = []
+    origin: dict[tuple[str, ...], str] = {}
+    collected: list[tuple[str, Any]] = []
     probes: list[tuple[int, int]] = []
+    sources: list[tuple[set[str], set[str]]] = []
     real_stimuli = m1_methods.build_stimulus_set
+    real_activations = m1_methods.stimulus_activations
     real_probe = m1_methods.erased_probe_accuracy
 
     def stimuli_spy(examples: Any, *args: Any, **kwargs: Any) -> Any:
         splits.append({e.split for e in examples})
-        return real_stimuli(examples, *args, **kwargs)
+        built = real_stimuli(examples, *args, **kwargs)
+        origin[built.texts] = ",".join(sorted(splits[-1]))
+        return built
+
+    def activations_spy(loaded: Any, stimuli: Any, **kwargs: Any) -> Any:
+        act = real_activations(loaded, stimuli, **kwargs)
+        collected.append((origin[stimuli.texts], act))
+        return act
+
+    def came_from(array: Any) -> set[str]:
+        return {
+            split
+            for split, act in collected
+            if np.shares_memory(array, act.data)
+        }
 
     def probe_spy(
         train_h: Any, train_labels: Any, test_h: Any, *args: Any, **kwargs: Any
     ) -> Any:
         probes.append((train_h.shape[0], test_h.shape[0]))
+        sources.append((came_from(train_h), came_from(test_h)))
         return real_probe(train_h, train_labels, test_h, *args, **kwargs)
 
     monkeypatch.setattr(m1_methods, "build_stimulus_set", stimuli_spy)
+    monkeypatch.setattr(m1_methods, "stimulus_activations", activations_spy)
     monkeypatch.setattr(m1_methods, "erased_probe_accuracy", probe_spy)
     config = _config(**SMALL)
 
     _execute(tiny_arch, tmp_path, **SMALL)
 
     assert splits == [{"train"}] * config.n_seeds + [{"val"}, {"test"}]
-    assert probes == [(2 * config.n_pairs, 2 * N_TEST_PAIRS)] * (
-        len(config.methods) * N_STEER * 2
-    )
+    n_probes = len(config.methods) * N_STEER * 2
+    assert probes == [(2 * config.n_pairs, 2 * N_TEST_PAIRS)] * n_probes
+    assert sources == [({"train"}, {"test"})] * n_probes
 
 
 def test_the_prompts_are_distinct_even_when_pairs_open_alike(
