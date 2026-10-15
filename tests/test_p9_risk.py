@@ -778,6 +778,46 @@ def test_grouped_auroc_ci_widens_as_alpha_shrinks() -> None:
     assert hi99 > hi95
 
 
+@pytest.mark.parametrize("alpha", [0.05, 0.2])
+def test_grouped_auroc_ci_bounds_are_the_percentiles_of_its_resamples(
+    monkeypatch: pytest.MonkeyPatch, alpha: float
+) -> None:
+    scores, labels, groups = _three_groups()
+    seen: list[float] = []
+    real = risk_module._weighted_auroc
+
+    def spy(cells: Any) -> float:
+        seen.append(real(cells))
+        return seen[-1]
+
+    monkeypatch.setattr(risk_module, "_weighted_auroc", spy)
+
+    point, lo, hi = grouped_auroc_ci(
+        scores, labels, groups, n_boot=80, seed=1, alpha=alpha
+    )
+
+    *replicates, last = seen
+    levels = [100 * alpha / 2, 100 * (1 - alpha / 2)]
+    assert len(replicates) == 80
+    assert point == last
+    assert (lo, hi) == pytest.approx(tuple(np.percentile(replicates, levels)))
+
+
+@pytest.mark.parametrize("alpha", [0.6, 0.8])
+def test_grouped_auroc_ci_reads_the_median_when_alpha_is_wide(
+    alpha: float,
+) -> None:
+    scores = np.array([0.5, 0.2, 0.8])
+    labels = np.array([1, 0, 0], dtype=np.int64)
+    groups = np.array(["a", "a", "a"])
+
+    interval = grouped_auroc_ci(
+        scores, labels, groups, n_boot=2000, seed=0, alpha=alpha
+    )
+
+    assert interval == (0.5, 0.5, 0.5)
+
+
 def test_grouped_auroc_ci_resamples_inside_each_cell_at_its_size(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -812,6 +852,26 @@ def test_grouped_auroc_ci_collapses_when_every_cell_holds_one_item() -> None:
 
     assert point == pytest.approx(2 / 3)
     assert lo == hi == point
+
+
+@pytest.mark.parametrize(
+    ("scores", "labels"),
+    [([0.5, 0.2, 0.8], [1, 0, 0]), ([0.2, 0.8, 0.5], [1, 1, 0])],
+)
+def test_grouped_auroc_ci_resamples_both_classes_of_a_cell(
+    scores: list[float], labels: list[int]
+) -> None:
+    groups = np.array(["a", "a", "a"])
+
+    interval = grouped_auroc_ci(
+        np.array(scores),
+        np.array(labels, dtype=np.int64),
+        groups,
+        n_boot=400,
+        seed=0,
+    )
+
+    assert interval == (0.5, 0.0, 1.0)
 
 
 def test_grouped_auroc_ci_drops_a_group_with_a_single_class() -> None:
@@ -913,6 +973,29 @@ def test_per_group_auroc_keeps_a_group_with_a_single_class_as_null() -> None:
     ]
 
 
+def test_per_group_auroc_keeps_a_group_with_only_positives_as_null() -> None:
+    scores = np.array([0.1, 0.2, 0.3, 0.4])
+    labels = np.array([1, 1, 1, 0], dtype=np.int64)
+    groups = np.array(["a", "a", "b", "b"])
+
+    rows = per_group_auroc(scores, labels, groups, min_class=1)
+
+    assert rows == [
+        GroupAuroc(group="a", n_pos=2, n_neg=0, auroc=None),
+        GroupAuroc(group="b", n_pos=1, n_neg=1, auroc=0.0),
+    ]
+
+
+def test_per_group_auroc_is_null_when_only_the_negatives_are_thin() -> None:
+    scores = np.array([0.9, 0.8, 0.7, 0.1])
+    labels = np.array([1, 1, 1, 0], dtype=np.int64)
+    groups = np.array(["a", "a", "a", "a"])
+
+    rows = per_group_auroc(scores, labels, groups, min_class=2)
+
+    assert rows == [GroupAuroc(group="a", n_pos=3, n_neg=1, auroc=None)]
+
+
 def test_per_group_auroc_matches_auroc_inside_each_group() -> None:
     scores, labels, groups = _base_rate_confound(300)
 
@@ -921,6 +1004,17 @@ def test_per_group_auroc_matches_auroc_inside_each_group() -> None:
     for row in rows:
         member = groups == row.group
         assert row.auroc == float(auroc(scores[member], labels[member]))
+
+
+def test_per_group_auroc_ranks_ties_by_the_average_rank() -> None:
+    scores = np.array([1.0, 1.0, 1.0, 0.0])
+    labels = np.array([1, 1, 0, 0], dtype=np.int64)
+    groups = np.array(["a", "a", "a", "a"])
+
+    (row,) = per_group_auroc(scores, labels, groups, min_class=1)
+
+    assert row.auroc == 0.75
+    assert row.auroc == float(auroc(scores, labels))
 
 
 def test_per_group_auroc_rejects_a_min_class_below_one() -> None:
@@ -936,3 +1030,28 @@ def test_per_group_auroc_rejects_a_label_that_is_not_zero_or_one() -> None:
 
     with pytest.raises(ValueError, match=r"0 or 1.*3"):
         per_group_auroc(scores, labels, groups, min_class=1)
+
+
+@pytest.mark.parametrize(
+    ("bad", "shown"), [(np.nan, "nan"), (np.inf, "inf"), (-np.inf, "-inf")]
+)
+def test_per_group_auroc_rejects_a_score_that_is_not_finite(
+    bad: float, shown: str
+) -> None:
+    scores = np.array([0.1, bad, 0.3, 0.4])
+    labels = np.array([0, 1, 0, 1], dtype=np.int64)
+    groups = np.array(["a", "a", "b", "b"])
+
+    with pytest.raises(ValueError, match=f"finite.*{shown}"):
+        per_group_auroc(scores, labels, groups, min_class=5)
+
+
+def test_per_group_auroc_rejects_lengths_that_differ() -> None:
+    scores = np.array([0.1, 0.2, 0.3, 0.4])
+    labels = np.array([0, 1, 0, 1], dtype=np.int64)
+    groups = np.array(["a", "a", "b", "b"])
+
+    with pytest.raises(ValueError, match=r"4.*3.*4"):
+        per_group_auroc(scores, labels[:3], groups, min_class=1)
+    with pytest.raises(ValueError, match=r"4.*4.*3"):
+        per_group_auroc(scores, labels, groups[:3], min_class=1)
