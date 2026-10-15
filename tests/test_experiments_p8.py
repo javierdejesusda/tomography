@@ -681,11 +681,13 @@ def _spread_run(
     variants: Mapping[str, float],
     *,
     task: str,
+    scale: NDArray[np.float64] = SPREAD_SCALE,
 ) -> RunDir:
     """A finished P1-like run: one flat curve with a peak per variant.
 
     The variants sit around their mean by a per-seed multiple, so every seed
-    has its own spread over the variants and the mean multiple is one.
+    has its own spread over the variants. With the default `scale` the mean
+    multiple is one.
     """
     run_dir = _new_run(out_root, "p1", model)
     levels = np.array(list(variants.values()))
@@ -695,9 +697,9 @@ def _spread_run(
                 _peaked_floor(
                     4,
                     2,
-                    levels.mean() + (level - levels.mean()) * scale,
+                    levels.mean() + (level - levels.mean()) * multiple,
                 )
-                for scale in SPREAD_SCALE
+                for multiple in scale
             ]
             for level in levels
         ]
@@ -726,12 +728,14 @@ def _template_runs(
     *,
     task: str = "sentiment",
     first_order: Sequence[str] = VARIANTS,
+    scales: Mapping[str, NDArray[np.float64]] | None = None,
 ) -> dict[tuple[str, str], RunDir]:
     """P1-like runs on the five models.
 
     Base models and the reference also have `no_trailing_space`, which exists
     only under the plain format. The first model lists the variants in
-    `first_order`.
+    `first_order`. `scales` gives the per-seed multiple of a model, by key,
+    for the models that do not take the default.
     """
     runs: dict[tuple[str, str], RunDir] = {}
     for model in MODELS_ORDER:
@@ -742,7 +746,13 @@ def _template_runs(
         variants = {name: levels[name] for name in names}
         if model not in PAIR_OF:
             variants["no_trailing_space"] = 0.6
-        runs[("p1", model)] = _spread_run(out_root, model, variants, task=task)
+        runs[("p1", model)] = _spread_run(
+            out_root,
+            model,
+            variants,
+            task=task,
+            scale=(scales or {}).get(model, SPREAD_SCALE),
+        )
     return runs
 
 
@@ -837,6 +847,29 @@ def test_tuning_that_narrows_the_spread_gives_a_negative_sd_delta(
         assert entry["mean"] == pytest.approx(expected)
         assert entry["lo"] <= entry["mean"] <= entry["hi"] < 0.0
         assert entry["lo"] < entry["hi"]
+
+
+def test_the_sd_delta_pairs_every_seed_with_its_own_seed(
+    tmp_path: Path,
+) -> None:
+    shift = 0.01
+    scales = {
+        tuned: (SPREAD_SCALE * _expected_sd(base) + shift) / _expected_sd(tuned)
+        for tuned, base in PAIR_OF.items()
+    }
+    config = _config(template_source="p1")
+    runs = _reading_runs(tmp_path / "in")
+    runs.update(_template_runs(tmp_path / "in", scales=scales))
+    run_dir = RunDir.create(config, out_root=tmp_path / "out")
+
+    execute(config, run_dir, runs)
+
+    delta = _summary(run_dir)["template_sd_delta"]
+    for tuned in PAIR_OF:
+        assert delta[tuned]["mean"] == pytest.approx(shift)
+        assert delta[tuned]["hi"] - delta[tuned]["lo"] == pytest.approx(
+            0.0, abs=1e-12
+        )
 
 
 def test_the_task_picks_the_template_curves(tmp_path: Path) -> None:
