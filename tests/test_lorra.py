@@ -1352,21 +1352,26 @@ def test_checkpointing_gives_the_same_gradients_and_recomputes_two_blocks(
 def test_a_checkpointed_step_with_dropout_has_the_gradients_of_a_plain_one(
     tiny_qwen3: LoadedModel,
 ) -> None:
-    twin = _twin(tiny_qwen3)
+    models = [tiny_qwen3, _twin(tiny_qwen3), _twin(tiny_qwen3)]
+    arms = [(0.05, False), (0.05, True), (0.0, False)]
     grads: list[list[torch.Tensor]] = []
-    for loaded, checkpointing in ((tiny_qwen3, False), (twin, True)):
+    for loaded, (dropout, checkpointing) in zip(models, arms, strict=True):
         settings = _train_settings(
-            steps=1, dropout=0.05, gradient_checkpointing=checkpointing
+            steps=1, dropout=dropout, gradient_checkpointing=checkpointing
         )
         adapter = attach_adapter(loaded, settings)
         train_lorra(loaded, adapter, EIGHT_PAIRS, ChatFormat("plain"))
         grads.append(
             [p.grad.clone() for p in adapter.trainable() if p.grad is not None]
         )
-    assert len(grads[0]) == len(grads[1]) > 0
+    assert len(grads[0]) == len(grads[1]) == len(grads[2]) > 0
     for plain, checkpointed in zip(grads[0], grads[1], strict=True):
         assert torch.allclose(plain, checkpointed, atol=1e-5)
     assert any(grad.abs().sum().item() > 0.0 for grad in grads[0])
+    assert any(
+        not torch.allclose(dropped, undropped, atol=1e-5)
+        for dropped, undropped in zip(grads[0], grads[2], strict=True)
+    )
 
 
 def test_heldout_losses_has_one_float_per_target_layer(
