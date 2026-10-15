@@ -35,6 +35,7 @@ from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
 from tomography.p9.unknowns import UNKNOWN_TYPES
 from tomography.p9.unknowns import type_pools
+from tomography.reading.directions import Method
 from tomography.reading.reader import RepReader
 
 SPLITS: tuple[Split, ...] = ("train", "train", "train", "val", "test")
@@ -407,11 +408,7 @@ def test_the_arrays_have_the_documented_shapes(
     assert run_dir.read_json("readers") == {"types": USABLE}
 
 
-def test_the_saved_readers_score_like_the_fitted_ones(
-    tiny_arch: LoadedModel,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _record_cubes(monkeypatch: pytest.MonkeyPatch) -> list[ReadingCube]:
     cubes: list[ReadingCube] = []
 
     def spy(*args: Any, **kw: Any) -> ReadingCube:
@@ -419,8 +416,19 @@ def test_the_saved_readers_score_like_the_fitted_ones(
         return cubes[-1]
 
     monkeypatch.setattr(p9b_reading, "reading_cube", spy)
+    return cubes
 
-    run_dir = _execute(tiny_arch, tmp_path)
+
+@pytest.mark.parametrize("headline", ["logistic", "pca_diff"])
+def test_the_saved_readers_score_like_the_fitted_ones(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    headline: Method,
+) -> None:
+    cubes = _record_cubes(monkeypatch)
+
+    run_dir = _execute(tiny_arch, tmp_path, methods=(headline,))
 
     saved = run_dir.read_arrays("readers")
     (cube,) = cubes
@@ -429,7 +437,7 @@ def test_the_saved_readers_score_like_the_fitted_ones(
     )
     for t, name in enumerate(cube.types):
         rebuilt = RepReader.from_arrays(
-            "logistic",
+            headline,
             saved["layers"].tolist(),
             saved["directions"][t],
             saved["means"][t],
@@ -437,6 +445,24 @@ def test_the_saved_readers_score_like_the_fitted_ones(
         )
         np.testing.assert_allclose(
             rebuilt.score(h), cube.readers[name].score(h), atol=1e-5
+        )
+
+
+def test_the_saved_signs_are_those_of_the_fitted_readers(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cubes = _record_cubes(monkeypatch)
+
+    run_dir = _execute(tiny_arch, tmp_path, methods=("pca_diff",))
+
+    saved = run_dir.read_arrays("readers")
+    (cube,) = cubes
+    assert (saved["signs"] == -1).any()
+    for t, name in enumerate(cube.types):
+        np.testing.assert_array_equal(
+            saved["signs"][t], cube.readers[name].signs
         )
 
 
@@ -601,23 +627,42 @@ def test_the_layers_of_the_config_restrict_the_reading(
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
-    [("n_seeds", 0), ("methods", ()), ("n_pairs", 1), ("min_eval", 0)],
+    ("overrides", "match"),
+    [
+        ({"n_seeds": 0}, "n_seeds"),
+        ({"methods": ()}, "methods"),
+        ({"n_pairs": 1}, "n_pairs"),
+        ({"min_eval": 0}, "min_eval"),
+        ({"template": "nonsense"}, "unknown template"),
+        ({"types": ("nonsense",)}, "unknown or empty types"),
+        ({"min_pairs": 10_000}, "no usable type"),
+        ({"layers": (1, 2), "layer": 3}, "layer 3"),
+    ],
+    ids=[
+        "n_seeds",
+        "methods",
+        "n_pairs",
+        "min_eval",
+        "template",
+        "types",
+        "no_usable_type",
+        "layer",
+    ],
 )
 def test_a_setting_that_cannot_work_fails_before_the_forward_pass(
     tiny_arch: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    field: str,
-    value: Any,
+    overrides: dict[str, Any],
+    match: str,
 ) -> None:
     def never(*args: Any, **kw: Any) -> ItemActivations:
         raise AssertionError("the forward pass must not start")
 
     monkeypatch.setattr(p9b_reading, "collect_item_activations", never)
 
-    with pytest.raises(ValueError, match=field):
-        _execute(tiny_arch, tmp_path, **{field: value})
+    with pytest.raises(ValueError, match=match):
+        _execute(tiny_arch, tmp_path, **overrides)
 
 
 def test_the_smallest_valid_settings_run(

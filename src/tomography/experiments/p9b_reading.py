@@ -72,7 +72,8 @@ class Config(ExperimentConfig):
         layers: Layers to read; None reads 1..L.
         layer: Layer of the transfer and cosine matrices; None chooses it on
             the validation split.
-        min_pairs: Fewest train items on each side of a contrast.
+        min_pairs: Fewest train items on each side of a contrast, and fewest
+            train pairs that never cross two strata.
         min_eval: Fewest val items, and fewest test items, on each side.
         bos: BOS policy; None uses the model's default.
         batch_size: Prompts per forward pass.

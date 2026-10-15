@@ -27,6 +27,7 @@ from tomography.p9.reading import ReadingCube
 from tomography.p9.reading import check_pool
 from tomography.p9.reading import choose_layer
 from tomography.p9.reading import collect_item_activations
+from tomography.p9.reading import draw_seed
 from tomography.p9.reading import fit_type_reader
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
@@ -911,6 +912,86 @@ def test_identical_contrasts_have_identical_cosines() -> None:
 
     np.testing.assert_array_equal(cube.cosine[:, 0, 0], cube.cosine[:, 0, 1])
     np.testing.assert_array_equal(cube.cosine[:, 0, 0], cube.cosine[:, 1, 1])
+
+
+def test_the_cosines_use_the_signed_directions(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fitted: list[RepReader] = []
+    real = reading_module.fit_type_reader
+
+    def spy(*args: Any, **kw: Any) -> RepReader:
+        reader = real(*args, **kw)
+        if kw["n_pairs"] is None:
+            fitted.append(reader)
+        return reader
+
+    monkeypatch.setattr(reading_module, "fit_type_reader", spy)
+    names = ("obscure_real", "real_vs_synthal", "post_cutoff")
+    pools = {name: planted.pools[name] for name in names}
+
+    cube = reading_cube(
+        planted.acts,
+        pools,
+        methods=("pca_diff",),
+        n_seeds=1,
+        n_pairs=16,
+        seed=0,
+    )
+
+    n_types = len(names)
+    first, second = fitted[-2 * n_types : -n_types], fitted[-n_types:]
+    for half in (first, second):
+        assert any((r.signs == -1).any() for r in half)
+    for k in range(len(LAYERS)):
+        a = np.stack([r.directions[k] * r.signs[k] for r in first])
+        b = np.stack([r.directions[k] * r.signs[k] for r in second])
+        cross = (a / np.linalg.norm(a, axis=1, keepdims=True)) @ (
+            b / np.linalg.norm(b, axis=1, keepdims=True)
+        ).T
+        np.testing.assert_allclose(
+            cube.cosine[k], (cross + cross.T) / 2, atol=1e-6
+        )
+
+
+def test_draw_seed_is_the_first_word_of_the_seed_sequence() -> None:
+    expected = np.random.SeedSequence([7, 3]).generate_state(1)[0]
+
+    assert draw_seed(7, 3) == int(expected)
+    assert len({draw_seed(7, d) for d in range(8)}) == 8
+    assert draw_seed(7, 3) != draw_seed(8, 3)
+
+
+@pytest.mark.parametrize("seed", [0, 5])
+def test_the_half_fits_do_not_reuse_a_draw_seed(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch, seed: int
+) -> None:
+    calls: list[tuple[int | None, int]] = []
+    real = reading_module.fit_type_reader
+
+    def spy(*args: Any, **kw: Any) -> RepReader:
+        calls.append((kw["n_pairs"], kw["seed"]))
+        return real(*args, **kw)
+
+    monkeypatch.setattr(reading_module, "fit_type_reader", spy)
+    names = ("obscure_real", "real_vs_synthal")
+    pools = {name: planted.pools[name] for name in names}
+
+    reading_cube(
+        planted.acts,
+        pools,
+        methods=("logistic",),
+        n_seeds=3,
+        n_pairs=16,
+        seed=seed,
+    )
+
+    draw_seeds = {s for n_pairs, s in calls if n_pairs is not None}
+    all_pairs = [s for n_pairs, s in calls if n_pairs is None]
+    half_seeds = all_pairs[len(names) :]
+    assert len(draw_seeds) == 3
+    assert len(set(half_seeds)) == 2
+    assert not draw_seeds & {*half_seeds, seed}
 
 
 def test_the_cosines_are_deterministic_under_the_seed() -> None:
