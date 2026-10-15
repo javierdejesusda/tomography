@@ -735,17 +735,30 @@ def test_max_guess_accuracy_sets_the_guessable_limit(
     assert {r["guess"] for r in known_fathers} == {verdict}
 
 
+def _curie_gold(example: QAExample) -> tuple[str, ...] | None:
+    """Marie Curie is the gold of Award0 up to 2013; later items have none.
+
+    The six known items then answer her against three "wrong" answers, so
+    her answer is the strict mode of the stratum and no tie-break picks it.
+    The three later items have no gold, are labeled by construction and
+    leave the stratum.
+    """
+    if example.meta["relation"] != "Award0":
+        return None
+    year = example.meta["year"]
+    assert isinstance(year, int)
+    return ("Marie Curie",) if year <= 2013 else ()
+
+
 def test_the_curves_follow_the_guess_adjusted_labels(
     tiny_arch: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    loaders = _regold(
-        _loaders(),
-        "awards",
-        lambda e: ("Marie Curie",) if e.meta["relation"] == "Award0" else None,
-    )
+    loaders = _regold(_loaders(), "awards", _curie_gold)
     run_dir = _planted_run(tiny_arch, tmp_path, monkeypatch, loaders=loaders)
+    rows = {row[0]: row for row in run_dir.read_json("table_guess")["rows"]}
+    curie = rows["award:Award0"]
     awards = [r for r in _records(run_dir) if _group(r) == "award"]
     years = sorted({r["meta"]["year"] for r in awards})
     by_year = [[r for r in awards if r["meta"]["year"] == y] for y in years]
@@ -756,6 +769,8 @@ def test_the_curves_follow_the_guess_adjusted_labels(
     raw = [sum(r["label"] == "known" for r in rs) / len(rs) for rs in by_year]
     curves = run_dir.read_arrays("curves")
 
+    assert (curie[1], curie[2]) == (9, "marie curie")
+    assert curie[3] == pytest.approx(6 / 9)
     assert adjusted != raw
     assert curves["x"].tolist() == [float(y) for y in years]
     assert curves["mean"][0].tolist() == pytest.approx(adjusted)
