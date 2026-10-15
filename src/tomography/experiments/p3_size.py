@@ -548,6 +548,7 @@ def _read_task(
             agreement[z, r] = directional_agreement(
                 oriented_differences(prepared)
             )
+        del train, sweep, prepared
     return _Result(
         plan.task,
         plan.sizes,
