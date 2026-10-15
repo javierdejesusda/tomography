@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 import pytest
+from sklearn.manifold import TSNE
 
 from tomography.analysis import pca_explained_variance
 from tomography.analysis import tsne_embed
@@ -33,6 +34,16 @@ def test_planted_spectrum_gives_the_planted_ratios() -> None:
     assert got.shape == (2, 5)
     for layer in got:
         np.testing.assert_allclose(layer, s**2 / np.sum(s**2), atol=1e-9)
+
+
+def test_a_truncated_spectrum_keeps_the_ratios_over_all_components() -> None:
+    s = np.array([5.0, 3.0, 2.0, 1.0, 0.5])
+    h = _planted(s, n=12, d=5)
+    got = pca_explained_variance(h, n_components=2)
+    assert got.shape == (2, 2)
+    for layer in got:
+        np.testing.assert_allclose(layer, s[:2] ** 2 / np.sum(s**2), atol=1e-9)
+        assert layer.sum() < 1
 
 
 def test_random_ratios_are_ordered_and_bounded() -> None:
@@ -151,6 +162,18 @@ def test_tsne_shape_dtype_and_determinism() -> None:
     assert first.dtype == np.float32
     again = tsne_embed(h, perplexity=5.0, seed=0)
     np.testing.assert_array_equal(first, again)
+
+
+def test_tsne_follows_the_scikit_learn_settings() -> None:
+    points, _ = _clusters()
+    other = np.random.default_rng(9).standard_normal(points.shape)
+    h = np.stack([points, other])
+    got = tsne_embed(h, perplexity=6.0, seed=3)
+    for k, rows in enumerate(h):
+        expected = TSNE(
+            n_components=2, init="pca", perplexity=6.0, random_state=3
+        ).fit_transform(rows)
+        np.testing.assert_array_equal(got[k], expected.astype(np.float32))
 
 
 def test_tsne_keeps_separated_clusters_apart() -> None:
