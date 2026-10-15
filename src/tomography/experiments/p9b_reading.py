@@ -238,10 +238,20 @@ def execute(
             known side may be read.
 
     Raises:
-        ValueError: If the template is unknown, `config.types` names a
-            contrast that does not exist (or one the gate excludes), no
-            contrast is usable, or `config.layer` is not among the layers.
+        ValueError: If `n_seeds` is below 1, `methods` is empty, `n_pairs` is
+            below 2 or `min_eval` is below 1, if the template is unknown,
+            `config.types` names a contrast that does not exist (or one the
+            gate excludes), no contrast is usable, or `config.layer` is not
+            among the layers. Nothing runs through the model before these.
     """
+    for message, ok in (
+        ("n_seeds must be at least 1", config.n_seeds >= 1),
+        ("methods must not be empty", bool(config.methods)),
+        ("n_pairs must be at least 2", config.n_pairs >= 2),
+        ("min_eval must be at least 1", config.min_eval >= 1),
+    ):
+        if not ok:
+            raise ValueError(message)
     template = p9_template(config.template, DEFAULT_SHOTS[: config.n_shots])
     usable, skipped = _usable_pools(config, items, known_contrasts)
     layers = (

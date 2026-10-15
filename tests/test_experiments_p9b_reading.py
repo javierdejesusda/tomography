@@ -564,6 +564,41 @@ def test_the_layers_of_the_config_restrict_the_reading(
     assert _summary(run_dir)["layer"] in (1, 3)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("n_seeds", 0), ("methods", ()), ("n_pairs", 1), ("min_eval", 0)],
+)
+def test_a_setting_that_cannot_work_fails_before_the_forward_pass(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: Any,
+) -> None:
+    def never(*args: Any, **kw: Any) -> ItemActivations:
+        raise AssertionError("the forward pass must not start")
+
+    monkeypatch.setattr(p9b_reading, "collect_item_activations", never)
+
+    with pytest.raises(ValueError, match=field):
+        _execute(tiny_arch, tmp_path, **{field: value})
+
+
+def test_the_smallest_valid_settings_run(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _execute(
+        tiny_arch,
+        tmp_path,
+        n_seeds=1,
+        n_pairs=2,
+        min_eval=1,
+        methods=("logistic",),
+    )
+
+    assert _summary(run_dir)["types"] == USABLE
+
+
 def test_a_layer_that_is_not_read_is_an_error(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
