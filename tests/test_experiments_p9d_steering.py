@@ -193,6 +193,10 @@ def test_the_shot_count_accepts_its_bounds(n_shots: int) -> None:
     assert _config(n_shots=n_shots).n_shots == n_shots
 
 
+def test_the_shot_count_range_is_left_to_the_labels_config() -> None:
+    assert _config(n_shots=16).n_shots == 16
+
+
 def test_config_defaults_and_round_trip() -> None:
     config = Config(labels_run="runs/p9a")
 
@@ -238,8 +242,6 @@ def test_labels_run_is_required() -> None:
     [
         ({"coeffs": (-0.2, 0.2)}, "0.0"),
         ({"coeffs": (0.0, float("nan"))}, "finite"),
-        ({"n_shots": -1}, "n_shots"),
-        ({"n_shots": 16}, "n_shots"),
         ({"n_random": 0}, "n_random"),
         ({"n_prompts": 0}, "n_prompts"),
         ({"behavior": "sometimes"}, "behavior"),
@@ -257,8 +259,6 @@ def test_labels_run_is_required() -> None:
     ids=[
         "no_zero",
         "nan_coeff",
-        "negative_shots",
-        "too_many_shots",
         "no_random",
         "no_prompts",
         "bad_behavior",
@@ -344,6 +344,14 @@ def test_the_direction_contrast_must_exist() -> None:
 def test_the_direction_contrast_must_pass_the_pool_check() -> None:
     with pytest.raises(ValueError, match="fewer than 1000 train items"):
         plan_groups(_config(min_pairs=1000), _items(), True)
+
+
+def test_the_evaluation_groups_follow_the_calibration_group() -> None:
+    plan = plan_groups(_config(), _items(), True)
+
+    assert plan.groups[0].name == "calibration"
+    assert plan.evaluation == plan.groups[1:]
+    assert plan.evaluation
 
 
 def test_a_contrast_without_enough_test_items_is_skipped_and_named() -> None:
@@ -1389,7 +1397,9 @@ def test_run_refuses_labels_made_with_another_number_of_shots(
     monkeypatch.setattr(p9d_steering, "load_model", never)
     config = _config(labels_run=str(labels.path), n_shots=2)
 
-    with pytest.raises(ValueError, match=r"n_shots.*15.*2"):
+    with pytest.raises(
+        ValueError, match=r"n_shots 15.*n_shots is 2.*direction is read on"
+    ):
         run(config, _run_dir(tmp_path, config))
 
 

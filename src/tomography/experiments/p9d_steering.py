@@ -72,6 +72,7 @@ from tomography.templates import ChatFormat
 CALIBRATION = "calibration"
 LAT = "lat"
 RANDOM = "random"
+STEERING_ARM = f"{LAT}0"
 METRICS = ("entropy", "answer_logprob")
 SIDES = ("known", "unknown")
 XLABEL = "Relative coefficient"
@@ -127,7 +128,9 @@ class Config(SteeringConfig):
             is open.
         template: The prompt the direction is read on, one of
             `tomography.p9.reading.TEMPLATE_NAMES`.
-        n_shots: Demonstrations of the "fewshot" prompts.
+        n_shots: Demonstrations of the "fewshot" prompts; `run` requires
+            the number the labels were made with, whose own config bounds
+            it.
         direction_type: The knowledge contrast whose direction steers.
         eval_types: The knowledge contrasts the behavior is reported on.
             `post_cutoff` is not a default: its test side holds at most
@@ -184,19 +187,13 @@ class Config(SteeringConfig):
         """Checks the settings that would act silently or fail late.
 
         Raises:
-            ValueError: If `n_shots` is outside 0 to the number of default
-                demonstrations, `coeffs` lacks 0.0 (the unsteered reference)
+            ValueError: If `coeffs` lacks 0.0 (the unsteered reference)
                 or holds a non-finite value, `n_random`, `n_prompts`,
                 `n_pairs`, `min_pairs` or `min_eval` is below 1,
                 `behavior` is not one of the three modes, or a generation
                 setting is invalid (see `GenSettings`). Every behavior is
                 held to the same generation settings.
         """
-        if not 0 <= self.n_shots <= len(DEFAULT_SHOTS):
-            raise ValueError(
-                f"n_shots must be in [0, {len(DEFAULT_SHOTS)}], "
-                f"got {self.n_shots}"
-            )
         if 0.0 not in self.coeffs:
             raise ValueError(
                 "coeffs must contain 0.0, the unsteered reference, "
@@ -257,6 +254,11 @@ class Plan:
     direction: TypePool
     groups: tuple[Group, ...]
     skipped: dict[str, str]
+
+    @property
+    def evaluation(self) -> tuple[Group, ...]:
+        """The groups that are scored, after the calibration group."""
+        return self.groups[1:]
 
 
 def _first_by_uid(
@@ -376,7 +378,7 @@ def arm_names(n_random: int) -> list[str]:
     Returns:
         "lat0", then "random0" to "random{n_random - 1}".
     """
-    return [f"{LAT}0", *(f"{RANDOM}{r}" for r in range(n_random))]
+    return [STEERING_ARM, *(f"{RANDOM}{r}" for r in range(n_random))]
 
 
 @dataclass(frozen=True)
@@ -589,8 +591,20 @@ def _summary(
             "val_auroc": steering.val_auroc,
         },
         "coeffs": list(config.coeffs),
-        "types": [g.name for g in plan.groups[1:]],
+        "types": [g.name for g in plan.evaluation],
         "skipped": plan.skipped,
+    }
+
+
+def _edit_arguments(config: Config, steering: _Steering) -> dict[str, Any]:
+    """The edit settings that a controller and a generation arm share."""
+    return {
+        "layers": steering.layers,
+        "op": config.op,
+        "mode": config.mode,
+        "norms": steering.norms,
+        "mask": config.mask,
+        "preserve_norm": config.preserve_norm,
     }
 
 
@@ -603,14 +617,9 @@ def _controller(
 ) -> ReadingVectorController:
     return ReadingVectorController.from_reader(
         steering.readers[arm],
-        steering.layers,
         coeff=coeff,
-        op=config.op,
-        mode=config.mode,
-        norms=steering.norms,
-        mask=config.mask,
-        preserve_norm=config.preserve_norm,
         device=loaded.device,
+        **_edit_arguments(config, steering),
     )
 
 
@@ -675,7 +684,7 @@ def _run_shift(
                 cells.setdefault((group.name, metric), {})[
                     (side, name, coeff)
                 ] = cell
-    for group in plan.groups[1:]:
+    for group in plan.evaluation:
         for metric in METRICS:
             _write_arm_curves(
                 run_dir,
@@ -714,34 +723,28 @@ def _generate_outcomes(
     distinct: _Items,
 ) -> tuple[dict[tuple[str, float], list[Outcome]], dict[float, list[str]]]:
     settings = GenSettings.from_config(config)
-    steering_arm = arm_names(config.n_random)[0]
     outcomes: dict[tuple[str, float], list[Outcome]] = {}
     texts: dict[float, list[str]] = {}
     for name, reader in steering.readers.items():
         for coeff in config.coeffs:
             # A zero coefficient edits nothing, so every arm generates what
             # the steering arm does.
-            if coeff == 0 and name != steering_arm:
-                outcomes[(name, coeff)] = outcomes[(steering_arm, coeff)]
+            if coeff == 0 and name != STEERING_ARM:
+                outcomes[(name, coeff)] = outcomes[(STEERING_ARM, coeff)]
                 continue
             arm = reader_arm(
                 loaded,
                 settings,
                 reader,
-                layers=steering.layers,
                 coeff=coeff,
-                op=config.op,
-                mode=config.mode,
-                norms=steering.norms,
-                mask=config.mask,
-                preserve_norm=config.preserve_norm,
+                **_edit_arguments(config, steering),
             )
             first = [samples[0] for samples in arm.generate(distinct.prompts)]
             outcomes[(name, coeff)] = [
                 classify(completion, item.example.answers)
                 for completion, item in zip(first, distinct.items, strict=True)
             ]
-            if name == steering_arm:
+            if name == STEERING_ARM:
                 texts[coeff] = [completion.text for completion in first]
     return outcomes, texts
 
@@ -786,7 +789,8 @@ def _run_abstention(
             ]
         )
     chosen = select_coefficient(
-        config.coeffs, [rates[(CALIBRATION, arms[0], c)] for c in config.coeffs]
+        config.coeffs,
+        [rates[(CALIBRATION, STEERING_ARM, c)] for c in config.coeffs],
     )
 
     indicator = {
@@ -798,7 +802,7 @@ def _run_abstention(
         return np.mean([indicator[(a, coeff)] for a in kind_arms], axis=0)
 
     effects: list[list[Any]] = []
-    for group in plan.groups[1:]:
+    for group in plan.evaluation:
         cells: dict[tuple[str, str, float], Cell] = {}
         for side, members in group.sides:
             index = distinct.index(members)
@@ -840,7 +844,7 @@ def _run_abstention(
         for item, text, outcome in zip(
             distinct.items,
             texts[coeff],
-            outcomes[(arms[0], coeff)],
+            outcomes[(STEERING_ARM, coeff)],
             strict=True,
         )
     ]
@@ -957,8 +961,8 @@ def run(config: Config, run_dir: RunDir) -> None:
     if labeled_shots != config.n_shots:
         raise ValueError(
             f"the labels run was made with n_shots {labeled_shots} but "
-            f"config.n_shots is {config.n_shots}; the steering prompt is "
-            "the prompt the labels were made with"
+            f"config.n_shots is {config.n_shots}; the direction is read on "
+            "the few-shot prompt the labels were made with"
         )
     execute(
         config,
