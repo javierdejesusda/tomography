@@ -1,6 +1,7 @@
-"""Layer-wise analyses: PCA variance, t-SNE maps, direction geometry, lens."""
+"""Layer-wise analyses: PCA variance, t-SNE maps, geometry, lens, SAE fits."""
 
 from collections.abc import Sequence
+import itertools
 from typing import get_args
 
 import numpy as np
@@ -118,16 +119,22 @@ def tsne_embed(
     )
 
 
-def _unit_runs(vectors: FloatArray) -> NDArray[np.float64]:
-    runs = np.asarray(vectors, dtype=np.float64)
-    if runs.ndim != 3:
-        raise ValueError(f"vectors must have shape (N, K, d), got {runs.shape}")
-    if not np.isfinite(runs).all():
+def _unit_vectors(
+    vectors: FloatArray, ndim: int, shape: str
+) -> NDArray[np.float64]:
+    values = np.asarray(vectors, dtype=np.float64)
+    if values.ndim != ndim:
+        raise ValueError(f"vectors must have shape {shape}, got {values.shape}")
+    if not np.isfinite(values).all():
         raise ValueError("vectors must be finite")
-    norms = np.linalg.norm(runs, axis=-1, keepdims=True)
+    norms = np.linalg.norm(values, axis=-1, keepdims=True)
     if (norms == 0.0).any():
         raise ValueError("vectors must not contain a zero vector")
-    return np.asarray(runs / norms)
+    return np.asarray(values / norms)
+
+
+def _unit_runs(vectors: FloatArray) -> NDArray[np.float64]:
+    return _unit_vectors(vectors, 3, "(N, K, d)")
 
 
 def layer_cosines(vectors: FloatArray) -> NDArray[np.float64]:
@@ -390,3 +397,242 @@ def top_tokens(
     top = np.argsort(-row, kind="stable")[:k]
     bottom = np.argsort(row, kind="stable")[:k]
     return top.astype(np.int64), bottom.astype(np.int64)
+
+
+_FIT_BLOCK = 128
+_FIT_TIE = 1e-6
+_BASIS_FLOOR = 1e-10
+
+
+def _decoder32(decoder: FloatArray) -> NDArray[np.float32]:
+    matrix = np.asarray(decoder, dtype=np.float32)
+    if matrix.ndim != 2:
+        raise ValueError(f"decoder must have shape (d, F), got {matrix.shape}")
+    return matrix
+
+
+def column_norms(decoder: FloatArray) -> NDArray[np.float64]:
+    """Computes the Euclidean norm of each decoder column.
+
+    The squares are accumulated in float64 without copying the decoder.
+
+    Args:
+        decoder: Feature directions of shape (d, F): one column per feature.
+
+    Returns:
+        Array of shape (F,) in float64.
+
+    Raises:
+        ValueError: If `decoder` is not 2-D, has a zero column or holds a
+            value that is not finite.
+    """
+    matrix = _decoder32(decoder)
+    squares = np.einsum("df,df->f", matrix, matrix, dtype=np.float64)
+    norms = np.sqrt(squares)
+    if not np.isfinite(norms).all():
+        raise ValueError("decoder must be finite")
+    if (norms == 0.0).any():
+        raise ValueError("decoder must not contain a zero column")
+    return np.asarray(norms)
+
+
+def _decoder_inputs(
+    vectors: FloatArray, decoder: FloatArray
+) -> tuple[NDArray[np.float64], NDArray[np.float32], NDArray[np.float32]]:
+    matrix = _decoder32(decoder)
+    unit = _unit_vectors(vectors, 2, "(n, d)")
+    if unit.shape[1] != matrix.shape[0]:
+        raise ValueError(
+            f"vectors have width {unit.shape[1]} but the decoder has "
+            f"{matrix.shape[0]} rows"
+        )
+    inverse = (1.0 / column_norms(matrix)).astype(np.float32)
+    return unit, matrix, inverse
+
+
+def decoder_cosines(
+    vectors: FloatArray, decoder: FloatArray
+) -> NDArray[np.float32]:
+    """Computes the cosine of each vector with each decoder column.
+
+    The vectors are normalized and the products are divided by the column
+    norms, so neither the vectors nor the decoder is rescaled in memory.
+    The products are taken in float32.
+
+    Args:
+        vectors: Directions of shape (n, d).
+        decoder: Feature directions of shape (d, F): one column per feature.
+
+    Returns:
+        Array of shape (n, F) in float32.
+
+    Raises:
+        ValueError: If `vectors` or `decoder` is not 2-D, the widths differ,
+            a vector is zero, a decoder column is zero or a value is not
+            finite.
+    """
+    unit, matrix, inverse = _decoder_inputs(vectors, decoder)
+    cosines = unit.astype(np.float32) @ matrix
+    cosines *= inverse
+    return np.asarray(cosines)
+
+
+def top_features(cosines: FloatArray, k: int) -> NDArray[np.int64]:
+    """Finds the features with the largest absolute cosine.
+
+    Args:
+        cosines: Array of shape (n, F), one row per direction.
+        k: How many ids to return per row, in 1..F.
+
+    Returns:
+        Array of shape (n, k): the ids by decreasing `|cosine|`, the lower id
+        first on ties.
+
+    Raises:
+        ValueError: If `cosines` is not 2-D or not finite, or `k` is outside
+            1..F.
+    """
+    values = np.asarray(cosines)
+    if values.ndim != 2:
+        raise ValueError(f"cosines must have shape (n, F), got {values.shape}")
+    if not 1 <= k <= values.shape[1]:
+        raise ValueError(f"k must be in 1..{values.shape[1]}, got {k}")
+    if not np.isfinite(values).all():
+        raise ValueError("cosines must be finite")
+    top = np.empty((values.shape[0], k), dtype=np.int64)
+    for i, row in enumerate(values):
+        top[i] = np.argsort(-np.abs(row), kind="stable")[:k]
+    return top
+
+
+def _match(
+    unit: NDArray[np.float64],
+    decoder: NDArray[np.float32],
+    inverse: NDArray[np.float32],
+    n_atoms: int,
+) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
+    n, d = unit.shape
+    rows = np.arange(n)
+    residual = unit.copy()
+    basis = np.zeros((n, n_atoms, d))
+    taken = np.zeros((n, decoder.shape[1]), dtype=bool)
+    atoms = np.empty((n, n_atoms), dtype=np.int64)
+    gains = np.empty((n, n_atoms))
+    for t in range(n_atoms):
+        score = np.abs(residual.astype(np.float32) @ decoder * inverse)
+        score[taken] = -1.0
+        near_best = score >= score.max(axis=1, keepdims=True) - _FIT_TIE
+        chosen = near_best.argmax(axis=1)
+        atoms[:, t] = chosen
+        taken[rows, chosen] = True
+        atom = decoder[:, chosen].T.astype(np.float64)
+        atom *= inverse[chosen].astype(np.float64)[:, None]
+        for _ in range(2):
+            atom -= np.einsum(
+                "bt,btd->bd",
+                np.einsum("btd,bd->bt", basis[:, :t], atom),
+                basis[:, :t],
+            )
+        length = np.linalg.norm(atom, axis=1)
+        usable = length > _BASIS_FLOOR
+        basis[usable, t] = atom[usable] / length[usable, None]
+        along = np.einsum("bd,bd->b", basis[:, t], residual)
+        residual -= along[:, None] * basis[:, t]
+        gains[:, t] = along**2
+    return np.minimum(np.cumsum(gains, axis=1), 1.0), atoms
+
+
+def sparse_fit(
+    vectors: FloatArray, decoder: FloatArray, n_atoms: int
+) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
+    """Fits each vector with a few decoder columns by orthogonal matching.
+
+    Each step picks the unselected column most correlated with the residual
+    (ties within 1e-6 go to the lower id), then refits all selected columns
+    to the vector by least squares. The vectors are normalized and the
+    correlations divided by the column norms, so the decoder is read in
+    place. Rows are fitted in blocks, so memory does not grow with their
+    number.
+
+    Args:
+        vectors: Directions of shape (n, d).
+        decoder: Feature directions of shape (d, F): one column per feature.
+        n_atoms: Number of columns to select, in 1..min(d, F).
+
+    Returns:
+        The explained fraction after 1..`n_atoms` atoms, `1 - |v - A c|^2`
+        for the unit vector `v`, shape (n, n_atoms), non-decreasing and in
+        [0, 1]; and the selected ids in order, shape (n, n_atoms), distinct
+        within a row.
+
+    Raises:
+        ValueError: If the inputs are unusable (see `decoder_cosines`) or
+            `n_atoms` is outside 1..min(d, F).
+    """
+    unit, matrix, inverse = _decoder_inputs(vectors, decoder)
+    limit = min(matrix.shape)
+    if not 1 <= n_atoms <= limit:
+        raise ValueError(f"n_atoms must be in 1..{limit}, got {n_atoms}")
+    explained = np.empty((unit.shape[0], n_atoms))
+    atoms = np.empty((unit.shape[0], n_atoms), dtype=np.int64)
+    for start in range(0, unit.shape[0], _FIT_BLOCK):
+        block = slice(start, start + _FIT_BLOCK)
+        explained[block], atoms[block] = _match(
+            unit[block], matrix, inverse, n_atoms
+        )
+    return explained, atoms
+
+
+def dictionary_directions(
+    decoder: FloatArray, n: int, rng: np.random.Generator
+) -> NDArray[np.float64]:
+    """Draws unit directions with the covariance of the decoder columns.
+
+    Each direction is `normalize(g @ decoder.T)` for a standard normal `g`
+    over the F features, so it follows the anisotropy of the dictionary that
+    an isotropic Gaussian ignores. `g` is drawn as
+    `rng.standard_normal((n, F))` and cast to float32.
+
+    Args:
+        decoder: Feature directions of shape (d, F): one column per feature.
+        n: Number of directions, at least 1.
+        rng: The source of the draws.
+
+    Returns:
+        Array of shape (n, d) in float64 with unit rows.
+
+    Raises:
+        ValueError: If `decoder` is not 2-D, `n` is below 1, or a draw is
+            not finite or is zero, as when the decoder holds a non-finite
+            value or only zeros.
+    """
+    matrix = _decoder32(decoder)
+    if n < 1:
+        raise ValueError(f"n must be at least 1, got {n}")
+    draws = rng.standard_normal((n, matrix.shape[1])).astype(np.float32)
+    return _unit_vectors(draws @ matrix.T, 2, "(n, d)")
+
+
+def top_overlap(ids: NDArray[np.int64]) -> float:
+    """Averages the Jaccard index of the id sets over every pair of rows.
+
+    Args:
+        ids: Array of shape (n, k), n >= 2: the top ids of each run.
+
+    Returns:
+        The mean over the n (n - 1) / 2 row pairs of
+        `|A and B| / |A or B|`: 1 when every row holds the same ids, 0 when
+        no two rows share one.
+
+    Raises:
+        ValueError: If `ids` is not of shape (n, k) with k >= 1, or has fewer
+            than 2 rows.
+    """
+    rows = np.asarray(ids)
+    if rows.ndim != 2 or rows.shape[1] < 1:
+        raise ValueError(f"ids must have shape (n, k), got {rows.shape}")
+    if rows.shape[0] < 2:
+        raise ValueError(f"ids needs at least 2 rows, got {rows.shape[0]}")
+    sets = [set(row.tolist()) for row in rows]
+    pairs = itertools.combinations(sets, 2)
+    return float(np.mean([len(a & b) / len(a | b) for a, b in pairs]))
