@@ -242,6 +242,16 @@ def test_labels_run_is_required() -> None:
         ({"n_random": 0}, "n_random"),
         ({"n_prompts": 0}, "n_prompts"),
         ({"behavior": "sometimes"}, "behavior"),
+        ({"min_eval": 0}, "min_eval"),
+        ({"min_pairs": 0}, "min_pairs"),
+        ({"n_pairs": 0}, "n_pairs"),
+        ({"num_samples": 2}, "needs a temperature"),
+        ({"temperature": 0.0}, "temperature"),
+        ({"temperature": -0.5}, "temperature"),
+        ({"temperature": 0.8, "top_p": 0.0}, "top_p"),
+        ({"temperature": 0.8, "top_p": 1.5}, "top_p"),
+        ({"max_new_tokens": 0}, "max_new_tokens"),
+        ({"batch_size": 0}, "batch_size"),
     ],
     ids=[
         "no_zero",
@@ -251,6 +261,16 @@ def test_labels_run_is_required() -> None:
         "no_random",
         "no_prompts",
         "bad_behavior",
+        "no_eval_items",
+        "no_pairs_minimum",
+        "no_pairs",
+        "samples_without_temperature",
+        "zero_temperature",
+        "negative_temperature",
+        "zero_top_p",
+        "large_top_p",
+        "no_new_tokens",
+        "no_batch",
     ],
 )
 def test_config_rejects_settings_that_would_fail_late(
@@ -258,6 +278,14 @@ def test_config_rejects_settings_that_would_fail_late(
 ) -> None:
     with pytest.raises(ValueError, match=match):
         _config(**overrides)
+
+
+@pytest.mark.parametrize("behavior", ["auto", "abstention", "shift"])
+def test_every_behavior_rejects_the_same_generation_settings(
+    behavior: str,
+) -> None:
+    with pytest.raises(ValueError, match="needs a temperature"):
+        _config(behavior=behavior, num_samples=2)
 
 
 def test_a_closed_gate_raises_before_any_model_work(

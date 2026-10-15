@@ -183,8 +183,11 @@ class Config(SteeringConfig):
         Raises:
             ValueError: If `n_shots` is outside 0 to the number of default
                 demonstrations, `coeffs` lacks 0.0 (the unsteered reference)
-                or holds a non-finite value, `n_random` or `n_prompts` is
-                below 1, or `behavior` is not one of the three modes.
+                or holds a non-finite value, `n_random`, `n_prompts`,
+                `n_pairs`, `min_pairs` or `min_eval` is below 1,
+                `behavior` is not one of the three modes, or a generation
+                setting is invalid (see `GenSettings`). Every behavior is
+                held to the same generation settings.
         """
         if not 0 <= self.n_shots <= len(DEFAULT_SHOTS):
             raise ValueError(
@@ -198,7 +201,13 @@ class Config(SteeringConfig):
             )
         if not all(math.isfinite(c) for c in self.coeffs):
             raise ValueError(f"coeffs must be finite, got {self.coeffs}")
-        for name in ("n_random", "n_prompts"):
+        for name in (
+            "n_random",
+            "n_prompts",
+            "n_pairs",
+            "min_pairs",
+            "min_eval",
+        ):
             if getattr(self, name) < 1:
                 raise ValueError(
                     f"{name} must be at least 1, got {getattr(self, name)}"
@@ -208,6 +217,7 @@ class Config(SteeringConfig):
                 f"behavior must be one of {get_args(Behavior)}, "
                 f"got {self.behavior!r}"
             )
+        GenSettings.from_config(self)
 
 
 @dataclass(frozen=True)
