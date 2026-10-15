@@ -213,6 +213,85 @@ def test_variance_reads_the_token_rows_of_the_response_pairs(
         np.testing.assert_allclose(per_seed[:, i], expected.T)
 
 
+def test_every_stimulus_set_gets_its_own_seed(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seeds: list[int] = []
+    real = r2_utility.build_stimulus_set
+
+    def spy(examples: Any, template: Any, chat: Any, **kwargs: Any) -> Any:
+        seeds.append(kwargs["seed"])
+        return real(examples, template, chat, **kwargs)
+
+    monkeypatch.setattr(r2_utility, "build_stimulus_set", spy)
+    config = _config()
+    execute(
+        config,
+        RunDir.create(config, out_root=tmp_path),
+        tiny_arch,
+        _examples(),
+    )
+    assert len(seeds) == config.n_seeds + 2
+    assert len(set(seeds)) == len(seeds)
+
+
+def test_layers_and_positions_follow_the_config(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reads: list[tuple[str, tuple[int, ...] | None]] = []
+    real = r2_utility.stimulus_activations
+
+    def spy(loaded: LoadedModel, stimuli: Any, **kwargs: Any) -> Any:
+        reads.append((kwargs["position"], kwargs["layers"]))
+        return real(loaded, stimuli, **kwargs)
+
+    monkeypatch.setattr(r2_utility, "stimulus_activations", spy)
+    config = _config(layers=(2,), position="last", eval_position="mean")
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _examples())
+    assert reads == [("last", (2,))] * config.n_seeds + [("mean", (2,))] * 2
+    for stem in ("curves", "curves_val", "variance"):
+        assert run_dir.read_arrays(stem)["x"].tolist() == [2]
+
+
+def test_the_layer_is_chosen_on_val_and_reported_on_test(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = SERIES.index("reader")
+    planted = np.full((2, len(SERIES), 3, tiny_arch.n_layers), 0.5)
+    planted[0, reader] = [0.9, 0.6, 0.5]
+    planted[1, reader] = [0.55, 0.6, 0.8]
+    real = r2_utility.sweep_from_activations
+
+    def spy(train: Sequence[Prepared], evals: Any, **kwargs: Any) -> Any:
+        result = real(train, evals, **kwargs)
+        assert result.eval_names == ("val", "test")
+        return dataclasses.replace(result, accuracy=planted)
+
+    monkeypatch.setattr(r2_utility, "sweep_from_activations", spy)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _examples())
+    np.testing.assert_allclose(
+        run_dir.read_arrays("curves_val")["mean"][reader], [0.9, 0.6, 0.5]
+    )
+    np.testing.assert_allclose(
+        run_dir.read_arrays("curves")["mean"][reader], [0.55, 0.6, 0.8]
+    )
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["best_layer"] == 1
+    assert summary["val_accuracy"] == pytest.approx(0.9)
+    assert summary["test_accuracy"] == pytest.approx(0.55)
+    assert summary["ci"] == pytest.approx([0.55, 0.55])
+
+
 def test_execute_reports_the_rows_of_each_eval_split(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
