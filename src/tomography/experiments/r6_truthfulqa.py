@@ -29,6 +29,7 @@ from tomography.datasets.stimulus import build_stimulus_set
 from tomography.datasets.truthfulqa import load_truthfulqa
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.steering import scoring_bos
 from tomography.experiments.sweep import SERIES
 from tomography.experiments.sweep import ReadingConfig
 from tomography.experiments.sweep import SweepResult
@@ -39,8 +40,10 @@ from tomography.experiments.sweep import write_curves
 from tomography.judges import heuristic_score
 from tomography.judges import mc1_accuracy
 from tomography.judges import sequence_logprob
+from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
 from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import wilson_ci
@@ -70,6 +73,11 @@ HEURISTIC_TEMPLATE = (
 class Config(ReadingConfig):
     """R6 settings: TruthfulQA MC1 on GPT-2 with three training sources.
 
+    The shared defaults apply except for the experiment id, the model, the
+    number of seeds (15, not 10) and the direction finder. R6 fits a
+    supervised `logistic` direction as in R1, because `pca_diff` reads weakly
+    on GPT-2 even on matched pairs.
+
     Attributes:
         sources: Training sources of the LAT readers, from "truthfulqa" (its
             train questions), "arc" (ARC-Challenge train items) and "honesty"
@@ -79,6 +87,7 @@ class Config(ReadingConfig):
     experiment: str = "r6"
     model: str = "gpt2"
     n_seeds: int = 15
+    method: Method = "logistic"
     sources: tuple[str, ...] = SOURCES
 
 
@@ -87,6 +96,7 @@ def _score(
     prompts: Sequence[str],
     continuations: Sequence[str],
     batch_size: int,
+    bos: BosMode | None,
 ) -> NDArray[np.float32]:
     return sequence_logprob(
         loaded.model,
@@ -94,7 +104,7 @@ def _score(
         prompts,
         continuations,
         batch_size=batch_size,
-        bos_id=loaded.bos_id if loaded.default_bos == "prepend" else None,
+        bos_id=scoring_bos(loaded, bos),
     )
 
 
@@ -109,7 +119,11 @@ def _split[T: np.generic](
 
 
 def standard_scores(
-    loaded: LoadedModel, items: Sequence[ChoiceExample], *, batch_size: int = 16
+    loaded: LoadedModel,
+    items: Sequence[ChoiceExample],
+    *,
+    batch_size: int = 16,
+    bos: BosMode | None = None,
 ) -> list[NDArray[np.float32]]:
     """Scores each choice by the log-probability of its answer.
 
@@ -122,6 +136,7 @@ def standard_scores(
         loaded: The wrapped model.
         items: The questions.
         batch_size: Sequences per forward pass.
+        bos: BOS policy of the scoring; None uses the model default.
 
     Returns:
         One float32 array per item, aligned with `item.choices`.
@@ -137,7 +152,9 @@ def standard_scores(
         for choice in item.choices:
             prompts.append(prompt)
             continuations.append(lead + choice)
-    return _split(_score(loaded, prompts, continuations, batch_size), items)
+    return _split(
+        _score(loaded, prompts, continuations, batch_size, bos), items
+    )
 
 
 def heuristic_scores(
@@ -146,6 +163,7 @@ def heuristic_scores(
     *,
     batch_size: int = 16,
     template: str | None = None,
+    bos: BosMode | None = None,
 ) -> list[NDArray[np.float64]]:
     """Scores each choice by a verbalized truthfulness level.
 
@@ -159,6 +177,7 @@ def heuristic_scores(
         batch_size: Sequences per forward pass.
         template: Prompt with one `{scenario}` slot; None means the module's
             `HEURISTIC_TEMPLATE` at call time.
+        bos: BOS policy of the scoring; None uses the model default.
 
     Returns:
         One float64 array per item, aligned with `item.choices`.
@@ -171,7 +190,11 @@ def heuristic_scores(
             scenario = f"Question: {item.question}\nAnswer: {choice}"
             prompts.extend([base.replace("{scenario}", scenario)] * len(levels))
     flat = _score(
-        loaded, prompts, levels * (len(prompts) // len(levels)), batch_size
+        loaded,
+        prompts,
+        levels * (len(prompts) // len(levels)),
+        batch_size,
+        bos,
     )
     scores = heuristic_score(flat.reshape(-1, len(levels)))
     return _split(scores, items)
@@ -443,7 +466,9 @@ def execute(
         "heuristic": heuristic_scores,
     }
     for method, score in scorers.items():
-        scores = score(loaded, questions, batch_size=config.batch_size)
+        scores = score(
+            loaded, questions, batch_size=config.batch_size, bos=config.bos
+        )
         baselines[method] = _baseline(
             scores, questions, derive_seed(config.seed, "mc1", method, "all")
         )

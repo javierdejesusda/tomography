@@ -166,8 +166,10 @@ otherwise. `device=` and `dtype=` override the defaults.
 The default dtype is float32 for the GPT-2 checkpoints (float16 for `gpt2-xl`) and bfloat16 for Qwen3. The
 registry is `MODELS` and the architecture specs are `ARCHS` in [`model.py`](src/tomography/model.py); any
 other architecture raises `UnsupportedArchitectureError`. For a post-trained model, build its chat format with
-`ChatFormat.from_tokenizer(loaded.tokenizer)`. `LoadedModel.encode` is the single place that decides BOS,
-padding and character offsets, so activation collection and generation tokenize identically.
+`ChatFormat.from_tokenizer(loaded.tokenizer)`. `LoadedModel.encode` decides BOS, padding and character
+offsets for activation collection and generation, so both tokenize identically; `scoring_bos` in
+[`experiments/steering.py`](src/tomography/experiments/steering.py) applies the same BOS rule to scored
+continuations.
 
 ### Layers and token positions
 
@@ -304,9 +306,9 @@ the `layers` to sweep. Each fits one reader per training set and layer and write
 three series: `reader` (the fitted direction), `random` (a random unit direction with the same orientation
 rule) and `shuffled` (the reader scored against labels shuffled within each group, a permutation null).
 
-The default `method` is `logistic`, a supervised direction, for `r1` to `r5` and `r7`. `r6` keeps the shared
-default, `pca_diff`, the paper's PCA on pair differences. `pca_diff` stays selectable in every reading
-experiment, for example with `--set method=pca_diff`. The `p9a` config has no `method`.
+The default `method` is `logistic`, a supervised direction, for `r1` to `r7`. `pca_diff`, the paper's PCA on
+pair differences, stays selectable in every reading experiment, for example with `--set method=pca_diff`. The
+`p9a` config has no `method`.
 
 The `tomography` command (`python -m tomography` is equivalent) has two subcommands:
 
