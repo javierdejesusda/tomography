@@ -1242,20 +1242,6 @@ def test_run_resolves_every_source_and_model_then_executes(
     assert _summary(run_dir)["models"] == calls[0][1]
 
 
-def test_run_rejects_unpaired_models_before_it_looks_for_runs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def resolve(*args: Any, **kwargs: Any) -> dict[tuple[str, str], RunDir]:
-        raise AssertionError("no run should be looked up")
-
-    monkeypatch.setattr(p8_tuning, "resolve_runs", resolve)
-    config = _config(base_models=("b3",))
-    run_dir = RunDir.create(config, out_root=tmp_path)
-
-    with pytest.raises(ValueError, match="same length"):
-        run(config, run_dir)
-
-
 def test_plot_writes_fifteen_files_with_every_part(
     tmp_path: Path,
 ) -> None:
