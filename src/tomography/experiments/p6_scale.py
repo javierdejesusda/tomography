@@ -35,6 +35,7 @@ from tomography.experiments.sweep import write_curves
 from tomography.model import MODELS
 from tomography.model import UnknownCheckpointError
 from tomography.reading.metrics import bootstrap_ci
+from tomography.viz.reading import MAX_LEGEND_COLUMNS
 from tomography.viz.reading import plot_curves
 from tomography.viz.style import COLUMN_WIDTH
 from tomography.viz.style import INK
@@ -46,7 +47,6 @@ from tomography.viz.style import style_context
 GPT2_SIZES: tuple[str, ...] = ("gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
 MAX_PANELS = 6
 MAX_MODELS = 8
-LEGEND_COLUMNS = 4
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -432,7 +432,7 @@ def plot_depth_panels(
     One panel per source, at most three to a row, each with one curve and band
     per model over the relative depth `layer / L` so that models of different
     depth share an axis. One legend for the whole figure sits above the panels,
-    in at most `LEGEND_COLUMNS` columns. Only the run's own
+    in at most `MAX_LEGEND_COLUMNS` columns. Only the run's own
     `curves_<source>_<model>` files are read.
 
     Args:
@@ -499,7 +499,7 @@ def plot_depth_panels(
             handles,
             names,
             loc="outside upper center",
-            ncols=min(len(models), LEGEND_COLUMNS),
+            ncols=min(len(models), MAX_LEGEND_COLUMNS),
         )
     return save_figure(fig, out_dir, name)
 
