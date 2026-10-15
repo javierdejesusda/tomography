@@ -8,6 +8,7 @@ asks whether the logit lens predicts the dose response.
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -16,17 +17,37 @@ from numpy.typing import NDArray
 
 from tomography.analysis import lens_logits
 from tomography.analysis import pole_separation
+from tomography.datasets.records import Example
+from tomography.experiments.a2_logit_lens import POLE_WORDS
 from tomography.experiments.a2_logit_lens import PoleWords
 from tomography.experiments.a2_logit_lens import lens_params
 from tomography.experiments.a2_logit_lens import pole_ids
+from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
+from tomography.experiments.c1_sentiment_steering import check_pair_count
+from tomography.experiments.c1_sentiment_steering import default_sweep_layers
+from tomography.experiments.c1_sentiment_steering import draw_prompts
+from tomography.experiments.c1_sentiment_steering import prompt_fragments
+from tomography.experiments.effects import split_held_out
 from tomography.experiments.p3_size import spearman as rank_correlation
+from tomography.experiments.r1_sentiment import select_examples
+from tomography.experiments.steering import GenSettings
+from tomography.experiments.steering import Scorer
+from tomography.experiments.steering import SteeringConfig
 from tomography.experiments.steering import dose_slope
+from tomography.experiments.sweep import SERIES
+from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.sweep import reading_sweep
+from tomography.experiments.sweep import write_curves
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import VARIANT_KINDS
 from tomography.experiments.variants import Variant
 from tomography.experiments.variants import VariantKind
+from tomography.experiments.variants import pair_capacity
+from tomography.experiments.variants import task_set
 from tomography.experiments.variants import template_variants
 from tomography.model import LoadedModel
+from tomography.reading.directions import Method
 from tomography.reading.metrics import wilson_ci
 from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
@@ -42,6 +63,59 @@ TEMPLATES: tuple[str, ...] = (
 FORMATS: tuple[str, ...] = ("raw", "chat", "story")
 CHAT_INSTRUCTION = "Continue the text."
 STORY_PREFIX = "Here is a short story: "
+MAX_SERIES = 8
+_READER = SERIES.index("reader")
+
+
+@dataclass(frozen=True, kw_only=True)
+class Config(SteeringConfig):
+    """P7 settings: sentiment readers extracted under different templates.
+
+    Every template is a variant of the sentiment task of P1, read with the
+    same seeds and items, and steers text with C1's protocol: relative
+    coefficients calibrated on held-out WikiText, C1's prompt fragments and
+    both sentiment judges at once. The inherited `layers` is not used: P7
+    steers the single layers of `sweep_layers`.
+
+    Attributes:
+        method: The direction finder, as in R1 and C1.
+        judge: Key of the primary judge, score column 0.
+        judge_check: Key of the check judge, score column 1.
+        templates: Variant names of the sentiment task, at most
+            `MAX_SERIES`, `paper` required. An indexed kind is named with
+            its index, such as `scaffold_0`.
+        formats: Prompt formats of the transfer, names from `FORMATS`.
+        n_seeds: Readers fitted per template, for the reading curves.
+        n_steer_seeds: The first readers, in fit order, that steer.
+        n_pairs: Training pairs per reader.
+        n_eval_pairs: Validation pairs; None means every pair.
+        min_words: SST-2 phrases with fewer words are dropped.
+        sweep_layers: Single layers of the sweep, at most `MAX_SERIES`;
+            None means `default_sweep_layers` of the model depth.
+        truncate_words: Words kept of each validation sentence as a prompt.
+        read_threshold: A reader reads well at or above this validation
+            accuracy, in [0.5, 1).
+        n_boot: Number of bootstrap resamples of every curve band.
+    """
+
+    experiment: str = "p7"
+    model: str = "gpt2"
+    method: Method = "logistic"
+    judge: str = "sentiment-primary"
+    judge_check: str = "sentiment-secondary"
+    templates: tuple[str, ...] = TEMPLATES
+    formats: tuple[str, ...] = FORMATS
+    n_seeds: int = 10
+    n_steer_seeds: int = 2
+    n_pairs: int = 64
+    n_eval_pairs: int | None = 256
+    min_words: int = 3
+    sweep_layers: tuple[int, ...] | None = None
+    coeffs: tuple[float, ...] = (-0.3, -0.15, 0.0, 0.15, 0.3)
+    n_prompts: int = 50
+    truncate_words: int = 3
+    read_threshold: float = 0.6
+    n_boot: int = 2000
 
 
 def _kind_of(name: str) -> VariantKind:
@@ -170,6 +244,17 @@ def safe_slope(coeffs: Sequence[float], values: NDArray[Any]) -> float:
     return dose_slope(coeffs, y)
 
 
+def _pole_tokens(
+    loaded: LoadedModel, words: PoleWords
+) -> tuple[list[int], list[int]]:
+    """Returns the token ids of the pole words that are one token each."""
+    positive, _ = pole_ids(loaded, words[0])
+    negative, _ = pole_ids(loaded, words[1])
+    if not positive or not negative:
+        raise ValueError("no pole word is a single token for this tokenizer")
+    return positive, negative
+
+
 def lens_separation(
     loaded: LoadedModel, readers: Sequence[RepReader], words: PoleWords
 ) -> NDArray[np.float64]:
@@ -190,10 +275,7 @@ def lens_separation(
     Raises:
         ValueError: If no word of a pole is a single token.
     """
-    positive, _ = pole_ids(loaded, words[0])
-    negative, _ = pole_ids(loaded, words[1])
-    if not positive or not negative:
-        raise ValueError("no pole word is a single token for this tokenizer")
+    positive, negative = _pole_tokens(loaded, words)
     unembedding, scale, center = lens_params(loaded)
     rows = [
         pole_separation(
@@ -292,3 +374,186 @@ def _lens_summary(
     mean_lens = lens.mean(axis=1)
     layer = int(sweep[int(np.argmax(mean_lens))])
     return layer, spearman(mean_lens, _finite_mean(slope, axis=1))
+
+
+def _check(config: Config, n_layers: int) -> tuple[int, ...]:
+    """Checks the settings that need no data and returns the sweep layers."""
+    if not 1 <= len(config.templates) <= MAX_SERIES:
+        raise ValueError(
+            f"templates needs 1 to {MAX_SERIES} names, got "
+            f"{len(config.templates)}"
+        )
+    if len(set(config.templates)) != len(config.templates):
+        raise ValueError(f"templates must be distinct, got {config.templates}")
+    if not config.formats or len(set(config.formats)) != len(config.formats):
+        raise ValueError(
+            f"formats must be non-empty and distinct, got {config.formats}"
+        )
+    unknown = [f for f in config.formats if f not in FORMATS]
+    if unknown:
+        raise ValueError(
+            f"unknown formats {unknown}, expected a subset of {FORMATS}"
+        )
+    if not 1 <= config.n_steer_seeds <= config.n_seeds:
+        raise ValueError(
+            f"n_steer_seeds must be in 1..{config.n_seeds}, got "
+            f"{config.n_steer_seeds}"
+        )
+    if 0.0 not in config.coeffs or all(c == 0.0 for c in config.coeffs):
+        raise ValueError("coeffs must contain 0.0 and a nonzero value")
+    sweep = (
+        default_sweep_layers(n_layers)
+        if config.sweep_layers is None
+        else config.sweep_layers
+    )
+    if not 1 <= len(sweep) <= MAX_SERIES:
+        raise ValueError(
+            f"sweep_layers needs 1 to {MAX_SERIES} layers, got {len(sweep)}"
+        )
+    if len(set(sweep)) != len(sweep) or not all(
+        1 <= layer <= n_layers for layer in sweep
+    ):
+        raise ValueError(
+            f"sweep_layers must be distinct layers in 1..{n_layers}, got "
+            f"{sweep}"
+        )
+    if not 0.5 <= config.read_threshold < 1.0:
+        raise ValueError(
+            f"read_threshold must be in [0.5, 1), got {config.read_threshold}"
+        )
+    return sweep
+
+
+def execute(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    sst2: Sequence[Example],
+    texts: Sequence[str],
+    score: Scorer,
+    words: PoleWords = POLE_WORDS["r1"],
+) -> None:
+    """Reads sentiment under every template.
+
+    Every template of `config.templates` is a variant of the sentiment task.
+    It fits `n_seeds` readers on SST-2 train pairs, with the seeds of C1, and
+    scores them on the same SST-2 val pairs as every other template.
+
+    Writes `curves_read` (the validation accuracy of the readers of each
+    template at every layer) and `curves_lens` (the logit lens separation of
+    the first `n_steer_seeds` readers at every layer).
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+        loaded: The wrapped model.
+        sst2: SST-2 examples with `train` and `val` splits.
+        texts: Held-out texts that set the relative coefficients.
+        score: Maps texts to scores of shape (n, 2): the primary judge, then
+            the check judge.
+        words: The words of the positive and the negative pole of the lens.
+
+    Raises:
+        ValueError: If `templates` are not 1 to `MAX_SERIES` distinct names
+            that `extraction_variants` accepts, `formats` are empty, repeated
+            or unknown, `n_steer_seeds` is outside `1..n_seeds`, `coeffs` has
+            no 0.0 or no other value, `sweep_layers` are empty, repeated,
+            more than `MAX_SERIES` or outside `1..L`, `read_threshold` is
+            outside `[0.5, 1)`, the generation settings are invalid (see
+            `GenSettings`), no word of a pole is a single token,
+            `n_calibration` or `n_neutral` is below 1, the usable (at least
+            40 characters) held-out texts are fewer than `n_calibration +
+            n_neutral`, `n_pairs` or `n_eval_pairs` is below 1 or exceeds the
+            pairs its split can form (`n_eval_pairs` of None needs one), or
+            the validation sentences give fewer than `2 * n_prompts`
+            distinct prompts.
+    """
+    _check(config, loaded.n_layers)
+    GenSettings.from_config(config)
+    _pole_tokens(loaded, words)
+    variants = extraction_variants(chat_format_for(loaded), config.templates)
+    split_held_out(
+        texts,
+        n_calibration=config.n_calibration,
+        n_neutral=config.n_neutral,
+        seed=config.seed,
+    )
+    task = READING_TASKS["sentiment"]
+    train = select_examples(sst2, split="train", min_words=config.min_words)
+    val = select_examples(sst2, split="val", min_words=config.min_words)
+    for split, name, wanted, part, allow_none in (
+        ("train", "n_pairs", config.n_pairs, train, False),
+        ("val", "n_eval_pairs", config.n_eval_pairs, val, True),
+    ):
+        check_pair_count(
+            name,
+            wanted,
+            pair_capacity(task, part),
+            f"in the {split} split",
+            allow_none=allow_none,
+        )
+    draw_prompts(
+        prompt_fragments([e.text for e in val], config.truncate_words),
+        config.n_prompts,
+        sets=2,
+        seed=derive_seed(config.seed, "prompts"),
+    )
+    accuracy = []
+    readers = []
+    for variant in variants:
+        result = reading_sweep(
+            loaded,
+            [
+                task_set(
+                    task,
+                    variant,
+                    train,
+                    n_pairs=config.n_pairs,
+                    seed=derive_seed(config.seed, "train", i),
+                )
+                for i in range(config.n_seeds)
+            ],
+            {
+                "val": task_set(
+                    task,
+                    variant,
+                    val,
+                    n_pairs=config.n_eval_pairs,
+                    seed=derive_seed(config.seed, "eval"),
+                )
+            },
+            method=config.method,
+            seed=config.seed,
+            bos=config.bos,
+            batch_size=config.batch_size,
+        )
+        accuracy.append(result.per_seed("val")[_READER])
+        readers.append(result.readers[: config.n_steer_seeds])
+        layers = result.layers
+    series = [v.name for v in variants]
+    write_curves(
+        run_dir,
+        np.stack(accuracy),
+        layers,
+        series=series,
+        stem="curves_read",
+        chance=0.5,
+        n_layers=loaded.n_layers,
+        n_boot=config.n_boot,
+        seed=config.seed,
+    )
+    lens = lens_separation(
+        loaded, [reader for row in readers for reader in row], words
+    )
+    write_curves(
+        run_dir,
+        lens.reshape(len(variants), config.n_steer_seeds, -1),
+        layers,
+        series=series,
+        stem="curves_lens",
+        ylabel="Lens separation (z)",
+        chance=0.0,
+        n_layers=loaded.n_layers,
+        n_boot=config.n_boot,
+        seed=config.seed,
+    )

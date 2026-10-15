@@ -1,5 +1,8 @@
 """Tests for the P7 extraction template versus steering experiment."""
 
+import dataclasses
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -8,20 +11,29 @@ import pytest
 
 from tomography.analysis import lens_logits
 from tomography.analysis import pole_separation
+from tomography.datasets.records import Example
 from tomography.experiments import p7_extraction_steering as p7
 from tomography.experiments.a2_logit_lens import lens_params
 from tomography.experiments.a2_logit_lens import pole_ids
+from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.p7_extraction_steering import CHAT_INSTRUCTION
 from tomography.experiments.p7_extraction_steering import FORMATS
+from tomography.experiments.p7_extraction_steering import MAX_SERIES
 from tomography.experiments.p7_extraction_steering import STORY_PREFIX
 from tomography.experiments.p7_extraction_steering import TEMPLATES
+from tomography.experiments.p7_extraction_steering import Config
+from tomography.experiments.p7_extraction_steering import execute
 from tomography.experiments.p7_extraction_steering import extraction_variants
 from tomography.experiments.p7_extraction_steering import lens_separation
 from tomography.experiments.p7_extraction_steering import safe_slope
 from tomography.experiments.p7_extraction_steering import shift_prompts
 from tomography.experiments.p7_extraction_steering import spearman
+from tomography.experiments.r1_sentiment import select_examples
 from tomography.experiments.steering import dose_slope
+from tomography.experiments.sweep import SERIES
 from tomography.experiments.variants import READING_TASKS
+from tomography.experiments.variants import task_set
 from tomography.experiments.variants import template_variants
 from tomography.model import LoadedModel
 from tomography.reading.metrics import wilson_ci
@@ -372,3 +384,313 @@ def test_the_lens_layer_of_a_tie_is_the_first_and_rho_needs_three_layers() -> (
     layer, rho = p7._lens_summary(lens, slope, (2, 5))
     assert layer == 2
     assert np.isnan(rho)
+
+
+def test_the_config_defaults_and_round_trip() -> None:
+    config = Config()
+    assert (config.experiment, config.model, config.method) == (
+        "p7",
+        "gpt2",
+        "logistic",
+    )
+    assert (config.judge, config.judge_check) == (
+        "sentiment-primary",
+        "sentiment-secondary",
+    )
+    assert (config.templates, config.formats) == (TEMPLATES, FORMATS)
+    assert (config.n_seeds, config.n_steer_seeds, config.n_pairs) == (10, 2, 64)
+    assert (config.n_eval_pairs, config.min_words, config.n_prompts) == (
+        256,
+        3,
+        50,
+    )
+    assert config.coeffs == (-0.3, -0.15, 0.0, 0.15, 0.3)
+    assert config.sweep_layers is None
+    assert (config.read_threshold, config.truncate_words) == (0.6, 3)
+    assert MAX_SERIES == 8
+    custom = Config(
+        templates=("paper", "scaffold_1"),
+        formats=("raw", "story"),
+        sweep_layers=(2, 5),
+        read_threshold=0.7,
+    )
+    assert Config.from_dict(custom.to_dict()) == custom
+
+
+SENTENCE_WORDS = tuple(
+    [
+        "alpha",
+        "beta",
+        "gamma",
+        "delta",
+        "epsilon",
+        "zeta",
+        "eta",
+        "theta",
+        "iota",
+        "kappa",
+        "lambda",
+        "mu",
+        "nu",
+        "xi",
+        "omicron",
+        "pi",
+        "rho",
+        "sigma",
+        "tau",
+        "upsilon",
+    ]
+)
+SWEEP = (1, 2, 3)
+NONZERO = (-0.2, 0.2)
+
+
+def _sst2(n: int = 80) -> list[Example]:
+    rng = np.random.default_rng(2)
+    return [
+        Example(
+            uid=f"s{i}",
+            text=" ".join(rng.choice(SENTENCE_WORDS, 6)),
+            label=i % 2,
+            split="train" if (i // 2) % 4 else "val",
+        )
+        for i in range(n)
+    ]
+
+
+def _texts(n: int = 60) -> list[str]:
+    return [
+        " ".join(np.random.default_rng(i).choice(SENTENCE_WORDS, 12))
+        for i in range(n)
+    ]
+
+
+def _score(texts: Any) -> NDArray[np.float32]:
+    vowels = [sum(ch in "aeiou" for ch in t) / max(len(t), 1) for t in texts]
+    spaces = [t.count(" ") / max(len(t), 1) for t in texts]
+    return np.stack([vowels, spaces], axis=1).astype(np.float32)
+
+
+def _config(**overrides: Any) -> Config:
+    base = Config(
+        model="tiny",
+        templates=("paper", "no_template"),
+        formats=("raw", "chat"),
+        n_seeds=3,
+        n_steer_seeds=2,
+        n_pairs=8,
+        n_eval_pairs=8,
+        sweep_layers=SWEEP,
+        coeffs=(-0.2, 0.0, 0.2),
+        n_prompts=3,
+        n_calibration=10,
+        n_neutral=8,
+        max_new_tokens=4,
+        batch_size=8,
+        n_boot=50,
+    )
+    return dataclasses.replace(base, **overrides)
+
+
+def _execute(loaded: LoadedModel, tmp_path: Path, **overrides: Any) -> RunDir:
+    config = _config(**overrides)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, loaded, _sst2(), _texts(), _score, WORDS)
+    return run_dir
+
+
+def _spy_reading_sweep(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    calls: list[Any] = []
+    real = p7.reading_sweep
+
+    def spy(loaded: Any, train_sets: Any, eval_sets: Any, **kwargs: Any) -> Any:
+        result = real(loaded, train_sets, eval_sets, **kwargs)
+        calls.append(
+            SimpleNamespace(
+                train=train_sets, evals=eval_sets, kwargs=kwargs, result=result
+            )
+        )
+        return result
+
+    monkeypatch.setattr(p7, "reading_sweep", spy)
+    return calls
+
+
+def _forbid_reading(monkeypatch: pytest.MonkeyPatch) -> None:
+    def reached(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("the model was reached")
+
+    monkeypatch.setattr(p7, "reading_sweep", reached)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"templates": ()}, "templates"),
+        (
+            {"templates": ("paper", *(f"paraphrase_{i}" for i in range(8)))},
+            "templates",
+        ),
+        ({"templates": ("paper", "paper")}, "templates must be distinct"),
+        ({"templates": ("paper", "shuffle")}, "not a variant kind"),
+        ({"templates": ("paper", "framing_swap")}, "no function framing"),
+        ({"templates": ("paper", "scaffold_9")}, "no variant of that name"),
+        ({"templates": ("no_template",)}, "kinds must include 'paper'"),
+        ({"formats": ()}, "formats"),
+        ({"formats": ("raw", "raw")}, "formats"),
+        ({"formats": ("raw", "poem")}, "unknown formats"),
+        ({"n_steer_seeds": 0}, "n_steer_seeds"),
+        ({"n_steer_seeds": 4}, "n_steer_seeds"),
+        ({"coeffs": (-0.2, 0.2)}, "coeffs"),
+        ({"coeffs": (0.0,)}, "coeffs"),
+        ({"sweep_layers": ()}, "sweep_layers"),
+        ({"sweep_layers": (0, 2)}, "sweep_layers"),
+        ({"sweep_layers": (1, 4)}, "sweep_layers"),
+        ({"sweep_layers": (1, 1)}, "sweep_layers"),
+        ({"sweep_layers": (1,) * 9}, "sweep_layers"),
+        ({"read_threshold": 0.49}, "read_threshold"),
+        ({"read_threshold": 1.0}, "read_threshold"),
+        ({"n_prompts": 100}, "pool"),
+        ({"n_calibration": 0}, "n_calibration"),
+        ({"temperature": None}, "needs a temperature"),
+        ({"n_pairs": 31}, "n_pairs is 31 but at most 30 pairs exist"),
+        ({"n_eval_pairs": 11}, "n_eval_pairs is 11 but at most 10 pairs"),
+        ({"n_pairs": 0}, "n_pairs must be at least 1, got 0"),
+    ],
+    ids=[
+        "no-template",
+        "nine-templates",
+        "template-repeated",
+        "unknown-kind",
+        "framing-swap",
+        "index-past-the-last",
+        "no-paper",
+        "no-format",
+        "format-repeated",
+        "unknown-format",
+        "steer-seeds-zero",
+        "steer-seeds-above-seeds",
+        "no-zero",
+        "only-zero",
+        "no-sweep-layer",
+        "sweep-layer-zero",
+        "sweep-layer-too-deep",
+        "sweep-layer-repeated",
+        "nine-sweep-layers",
+        "threshold-below-chance",
+        "threshold-one",
+        "prompt-pool-too-small",
+        "no-calibration-text",
+        "sampling-without-a-temperature",
+        "train-pairs-above-the-split",
+        "eval-pairs-above-the-split",
+        "no-train-pairs",
+    ],
+)
+def test_an_invalid_config_raises_before_the_model_runs(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, Any],
+    message: str,
+) -> None:
+    _forbid_reading(monkeypatch)
+    with pytest.raises(ValueError, match=message):
+        _execute(tiny_arch, tmp_path, **overrides)
+
+
+def test_pole_words_without_a_single_token_raise_before_the_model_runs(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid_reading(monkeypatch)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    words = ((" good",), (" zzzqqq",))
+    with pytest.raises(ValueError, match="no pole word is a single token"):
+        execute(config, run_dir, tiny_arch, _sst2(), _texts(), _score, words)
+
+
+def test_too_few_held_out_texts_raise_before_the_model_runs(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid_reading(monkeypatch)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(ValueError, match="need 18 texts"):
+        execute(config, run_dir, tiny_arch, _sst2(), _texts(5), _score, WORDS)
+
+
+def test_every_template_reads_the_same_seeds_and_items(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _spy_reading_sweep(monkeypatch)
+    config = _config()
+    _execute(tiny_arch, tmp_path)
+    assert len(calls) == 2
+    task = READING_TASKS["sentiment"]
+    train = select_examples(_sst2(), split="train", min_words=3)
+    val = select_examples(_sst2(), split="val", min_words=3)
+    variants = extraction_variants(PLAIN, config.templates)
+    for call, variant in zip(calls, variants, strict=True):
+        expected = [
+            task_set(
+                task,
+                variant,
+                train,
+                n_pairs=8,
+                seed=derive_seed(config.seed, "train", i),
+            )
+            for i in range(config.n_seeds)
+        ]
+        assert [s.texts for s in call.train] == [s.texts for s in expected]
+        assert list(call.evals) == ["val"]
+        item = task_set(
+            task, variant, val, n_pairs=8, seed=derive_seed(config.seed, "eval")
+        )
+        assert call.evals["val"].texts == item.texts
+        assert call.kwargs == {
+            "method": "logistic",
+            "seed": config.seed,
+            "bos": None,
+            "batch_size": 8,
+        }
+    assert calls[0].evals["val"].uids == calls[1].evals["val"].uids
+    assert calls[0].train[0].texts != calls[1].train[0].texts
+
+
+def test_the_reading_curves_hold_the_reader_accuracy_of_each_template(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _spy_reading_sweep(monkeypatch)
+    run_dir = _execute(tiny_arch, tmp_path)
+    curves = run_dir.read_arrays("curves_read")
+    sidecar = run_dir.read_json("curves_read")
+    assert isinstance(sidecar, dict)
+    assert sidecar["series"] == ["paper", "no_template"]
+    assert sidecar["chance"] == 0.5
+    assert sidecar["n_layers"] == 3
+    assert curves["x"].tolist() == [1.0, 2.0, 3.0]
+    assert curves["per_seed"].shape == (2, 3, 3)
+    reader = SERIES.index("reader")
+    for t, call in enumerate(calls):
+        np.testing.assert_array_equal(
+            curves["per_seed"][t], call.result.per_seed("val")[reader]
+        )
+
+
+def test_the_lens_curves_hold_the_separation_of_the_steering_readers(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _spy_reading_sweep(monkeypatch)
+    run_dir = _execute(tiny_arch, tmp_path)
+    curves = run_dir.read_arrays("curves_lens")
+    sidecar = run_dir.read_json("curves_lens")
+    assert isinstance(sidecar, dict)
+    assert sidecar["series"] == ["paper", "no_template"]
+    assert sidecar["chance"] == 0.0
+    assert curves["per_seed"].shape == (2, 2, 3)
+    for t, call in enumerate(calls):
+        np.testing.assert_allclose(
+            curves["per_seed"][t],
+            lens_separation(tiny_arch, call.result.readers[:2], WORDS),
+        )
