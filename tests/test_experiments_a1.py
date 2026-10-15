@@ -10,6 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 import pytest
 
+from tomography.analysis import agreement_pseudo_values
 from tomography.analysis import layer_cosines
 from tomography.analysis import mean_direction
 from tomography.analysis import seed_agreement
@@ -171,9 +172,10 @@ def test_execute_writes_the_agreement_curves(tmp_path: Path) -> None:
     curves = run_dir.read_arrays("curves_agreement")
     assert curves["x"].tolist() == [1.0, 2.0, 3.0]
     np.testing.assert_allclose(curves["mean"], curves["per_seed"].mean(axis=1))
-    lo, hi = bootstrap_ci(
-        np.moveaxis(curves["per_seed"], 1, 0), n_boot=10, seed=3
+    pseudo = np.stack(
+        [agreement_pseudo_values(r.vectors[:4]) for r in readers.values()]
     )
+    lo, hi = bootstrap_ci(np.moveaxis(pseudo, 1, 0), n_boot=10, seed=3)
     np.testing.assert_array_equal(curves["lo"], lo)
     np.testing.assert_array_equal(curves["hi"], hi)
     assert run_dir.read_json("curves_agreement") == {
@@ -241,7 +243,8 @@ def _single(seeds: int) -> Mapping[str, ReaderSet]:
 @pytest.mark.parametrize(
     ("readers", "config", "match"),
     [
-        (_single(1), _config(), "at least 2 seeds"),
+        (_single(1), _config(), "at least 3 seeds"),
+        (_single(2), _config(), "at least 3 seeds"),
         ({}, _config(), "no reader"),
         (
             {f"c{i}": _sets()["r1"] for i in range(9)},
@@ -258,8 +261,20 @@ def _single(seeds: int) -> Mapping[str, ReaderSet]:
         ),
         ({"a": _sets()["r1"]}, _config(depth=0.0), "depth"),
         ({"a": _sets()["r1"]}, _config(depth=1.5), "depth"),
+        ({"a": _sets()["r1"]}, _config(n_boot=0), "n_boot"),
+        ({"a": _sets()["r1"]}, _config(seed=-1), "seed"),
     ],
-    ids=["one-seed", "none", "nine", "layers", "depth-zero", "depth-above"],
+    ids=[
+        "one-seed",
+        "two-seeds",
+        "none",
+        "nine",
+        "layers",
+        "depth-zero",
+        "depth-above",
+        "n-boot",
+        "seed",
+    ],
 )
 def test_execute_refuses_unusable_input_before_writing(
     tmp_path: Path,

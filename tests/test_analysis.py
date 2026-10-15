@@ -8,6 +8,8 @@ from numpy.typing import NDArray
 import pytest
 from sklearn.manifold import TSNE
 
+from tomography.analysis import agreement_band
+from tomography.analysis import agreement_pseudo_values
 from tomography.analysis import layer_cosines
 from tomography.analysis import lens_logits
 from tomography.analysis import mean_direction
@@ -17,6 +19,7 @@ from tomography.analysis import seed_agreement
 from tomography.analysis import standardize
 from tomography.analysis import top_tokens
 from tomography.analysis import tsne_embed
+from tomography.reading.metrics import bootstrap_ci
 
 
 def _planted(
@@ -287,6 +290,73 @@ def test_seed_agreement_needs_two_runs() -> None:
         seed_agreement(_runs(n=1))
 
 
+def _mean_pairwise(unit: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Mean cosine over all pairs of runs, per layer, by explicit pairs."""
+    n = unit.shape[0]
+    return np.mean(
+        [
+            np.sum(unit[i] * unit[j], axis=-1)
+            for i in range(n)
+            for j in range(i + 1, n)
+        ],
+        axis=0,
+    )
+
+
+def test_pseudo_values_are_the_leave_one_out_jackknife() -> None:
+    unit = _unit(_runs(n=5))
+    whole = _mean_pairwise(unit)
+    got = agreement_pseudo_values(unit)
+    assert got.shape == (5, 3)
+    for i in range(5):
+        left_out = _mean_pairwise(np.delete(unit, i, axis=0))
+        np.testing.assert_allclose(got[i], 5 * whole - 4 * left_out, atol=1e-12)
+
+
+def test_the_pseudo_values_average_to_the_mean_pairwise_cosine() -> None:
+    vectors = _runs(n=6)
+    np.testing.assert_allclose(
+        agreement_pseudo_values(vectors).mean(axis=0),
+        _mean_pairwise(_unit(vectors)),
+        atol=1e-12,
+    )
+
+
+def test_pseudo_values_need_three_runs() -> None:
+    with pytest.raises(ValueError, match="three runs"):
+        agreement_pseudo_values(_runs(n=2))
+
+
+def test_the_agreement_band_is_the_bootstrap_of_the_pseudo_values() -> None:
+    vectors = _runs(n=5)
+    lo, hi = agreement_band(vectors, n_boot=50, seed=4)
+    expected = bootstrap_ci(agreement_pseudo_values(vectors), n_boot=50, seed=4)
+    np.testing.assert_array_equal(lo, expected[0])
+    np.testing.assert_array_equal(hi, expected[1])
+    assert lo.shape == hi.shape == (3,)
+
+
+def test_the_band_covers_the_pairwise_mean_in_most_replications() -> None:
+    width, sigma = 8, 0.8
+    shared = np.zeros(width)
+    shared[0] = 1.0
+
+    def seeds(rng: np.random.Generator, n: int) -> NDArray[np.float64]:
+        return _unit(shared + sigma * rng.normal(size=(n, 1, width)))
+
+    rng = np.random.default_rng(12345)
+    first, second = seeds(rng, 200000)[:, 0], seeds(rng, 200000)[:, 0]
+    truth = float(np.sum(first * second, axis=-1).mean())
+    hits = 0
+    replications = 300
+    for i in range(replications):
+        lo, hi = agreement_band(
+            seeds(np.random.default_rng(1000 + i), 6), n_boot=300, seed=i
+        )
+        hits += int(lo[0] <= truth <= hi[0])
+    assert hits / replications > 0.78
+
+
 def test_mean_direction_averages_the_unit_directions() -> None:
     vectors = np.array([[[10.0, 0.0]], [[0.0, 0.1]]])
     got = mean_direction(vectors)
@@ -307,8 +377,13 @@ def test_mean_direction_refuses_runs_that_cancel() -> None:
 
 @pytest.mark.parametrize(
     "function",
-    [layer_cosines, seed_agreement, mean_direction],
-    ids=["layer_cosines", "seed_agreement", "mean_direction"],
+    [layer_cosines, seed_agreement, mean_direction, agreement_pseudo_values],
+    ids=[
+        "layer_cosines",
+        "seed_agreement",
+        "mean_direction",
+        "agreement_pseudo_values",
+    ],
 )
 def test_the_geometry_functions_check_their_input(
     function: Callable[[NDArray[np.float64]], object],
