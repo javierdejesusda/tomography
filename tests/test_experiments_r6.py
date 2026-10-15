@@ -1,5 +1,7 @@
 """Tests for the R6 TruthfulQA experiment."""
 
+from collections.abc import Mapping
+from collections.abc import Sequence
 import dataclasses
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ from tomography.datasets.facts import load_facts
 from tomography.datasets.records import ChoiceExample
 from tomography.datasets.records import Example
 from tomography.datasets.records import Split
+from tomography.datasets.stimulus import StimulusSet
 from tomography.datasets.truthfulqa import load_truthfulqa
 from tomography.experiments import r6_truthfulqa
 from tomography.experiments.base import RunDir
@@ -29,6 +32,7 @@ from tomography.experiments.r6_truthfulqa import run
 from tomography.experiments.r6_truthfulqa import standard_scores
 from tomography.experiments.r6_truthfulqa import validation_layer_accuracy
 from tomography.experiments.sweep import SERIES
+from tomography.experiments.sweep import SweepResult
 from tomography.hooks import edit_residuals
 from tomography.judges import heuristic_score
 from tomography.judges import sequence_logprob
@@ -384,6 +388,61 @@ def test_execute_writes_the_table_curves_and_summary(
         assert set(entry) == {"validation-layer", "best-layer"}
         assert set(entry["validation-layer"]) == {"mc1", "lo", "hi"}
         assert set(entry["best-layer"]) == {"mc1", "lo", "hi", "layer"}
+
+
+def _record_sweeps(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    real = r6_truthfulqa.reading_sweep
+
+    def spy(
+        loaded: LoadedModel,
+        train_sets: Sequence[StimulusSet],
+        eval_sets: Mapping[str, StimulusSet],
+        **kwargs: Any,
+    ) -> SweepResult:
+        calls.append(
+            {
+                "train_sets": list(train_sets),
+                "eval_sets": dict(eval_sets),
+                **kwargs,
+            }
+        )
+        return real(loaded, train_sets, eval_sets, **kwargs)
+
+    monkeypatch.setattr(r6_truthfulqa, "reading_sweep", spy)
+    return calls
+
+
+def _question_uids(stimuli: StimulusSet) -> set[str]:
+    return {uid.rsplit(":", 1)[0] for uid in stimuli.uids}
+
+
+def test_execute_scores_the_baselines_on_the_questions_lat_is_tested_on(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _record_sweeps(monkeypatch)
+    config = _config(sources=("truthfulqa",), n_eval_pairs=4)
+    run_dir = _run_execute(config, tiny_arch, tmp_path, monkeypatch)
+    kept = _question_uids(calls[0]["eval_sets"]["test"])
+    assert len(kept) == 4
+
+    table = run_dir.read_json("table")
+    assert isinstance(table, dict)
+    for row in table["rows"][:2]:
+        mc1, lo, hi, _ = row[3:]
+        assert mc1 * 4 == pytest.approx(round(mc1 * 4))
+        assert (lo, hi) == wilson_ci(round(mc1 * 4), 4)
+
+    sidecar = run_dir.read_json("curves_truthfulqa")
+    assert isinstance(sidecar, dict)
+    expected_chance = np.mean(
+        [
+            1 / len(q.choices)
+            for q in _questions()
+            if q.split == "test" and q.uid in kept
+        ]
+    )
+    assert sidecar["chance"] == pytest.approx(expected_chance)
 
 
 def test_execute_best_layer_row_matches_the_saved_test_curves(

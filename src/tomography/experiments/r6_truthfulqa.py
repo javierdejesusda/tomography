@@ -331,7 +331,9 @@ def execute(
 
     Writes `table.json` (one row per baseline and per source and layer
     rule), `curves_<source>` (test accuracy per layer) and `summary.json`.
-    The baselines in the table are scored on the `test` questions, like LAT.
+    The baselines in the table are scored on the test questions that LAT is
+    tested on (all of them unless `n_eval_pairs` keeps a subset), and the
+    chance line is drawn for those same questions.
 
     Args:
         config: The experiment settings.
@@ -365,7 +367,14 @@ def execute(
         "arc": [item for item in arc if item.split == "train"],
         "honesty": [f for f in facts if f.label == 1 and f.split == "train"],
     }
-    chance = float(np.mean([1 / len(q.choices) for q in by_split["test"]]))
+    scored = {uid.rsplit(":", 1)[0] for uid in eval_sets["test"].uids}
+    test_ids = [
+        i
+        for i, q in enumerate(questions)
+        if q.split == "test" and q.uid in scored
+    ]
+    test_questions = [questions[i] for i in test_ids]
+    chance = float(np.mean([1 / len(q.choices) for q in test_questions]))
     reader = SERIES.index("reader")
 
     lat_rows: list[list[object]] = []
@@ -404,8 +413,6 @@ def execute(
             lat_summary[source][rule] = dict(stats)
         lat_summary[source]["best-layer"]["layer"] = best
 
-    test_ids = [i for i, q in enumerate(questions) if q.split == "test"]
-    test_questions = [questions[i] for i in test_ids]
     rows: list[list[object]] = []
     baselines: dict[str, dict[str, float]] = {}
     scorers: dict[str, Callable[..., Sequence[NDArray[np.floating[Any]]]]] = {
