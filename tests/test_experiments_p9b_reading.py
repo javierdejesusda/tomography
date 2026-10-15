@@ -854,6 +854,22 @@ def test_run_refuses_an_unfinished_labeling_run(
         run(config, run_dir)
 
 
+def test_run_refuses_a_labels_run_of_another_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    labels = _labels_run(tmp_path, _items())
+
+    def never(name: str) -> LoadedModel:
+        raise AssertionError("the model must not load first")
+
+    monkeypatch.setattr(p9b_reading, "load_model", never)
+    config = _config(labels, model="gpt2")
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match=r"'tiny'.*'gpt2'"):
+        run(config, run_dir)
+
+
 @pytest.mark.slow
 def test_p9b_on_gpt2_reads_a_synthetic_pool(tmp_path: Path) -> None:
     items = _popqa_shaped(200)

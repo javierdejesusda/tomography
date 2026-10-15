@@ -369,9 +369,17 @@ def run(config: Config, run_dir: RunDir) -> None:
         run_dir: The run to write into.
 
     Raises:
-        ValueError: If `config.labels_run` is not a finished run.
+        ValueError: If `config.labels_run` is not a finished run, or is a
+            run of another model.
     """
     items, summary = load_labeled(config.labels_run)
+    labeled_model = RunDir.open(config.labels_run).config.get("model")
+    if labeled_model != config.model:
+        raise ValueError(
+            f"{config.labels_run} labeled {labeled_model!r}, "
+            f"not {config.model!r}: the known and unknown labels depend on "
+            "the model"
+        )
     execute(
         config,
         run_dir,
