@@ -8,6 +8,7 @@ asks whether the logit lens predicts the dose response.
 """
 
 from collections.abc import Sequence
+import dataclasses
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,7 @@ from numpy.typing import NDArray
 
 from tomography.analysis import lens_logits
 from tomography.analysis import pole_separation
+from tomography.control.controllers import mean_residual_norms
 from tomography.datasets.records import Example
 from tomography.experiments.a2_logit_lens import POLE_WORDS
 from tomography.experiments.a2_logit_lens import PoleWords
@@ -26,15 +28,25 @@ from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.c1_sentiment_steering import check_pair_count
 from tomography.experiments.c1_sentiment_steering import default_sweep_layers
+from tomography.experiments.c1_sentiment_steering import dose_with_none
 from tomography.experiments.c1_sentiment_steering import draw_prompts
 from tomography.experiments.c1_sentiment_steering import prompt_fragments
+from tomography.experiments.c1_sentiment_steering import slope_layer
 from tomography.experiments.effects import split_held_out
+from tomography.experiments.effects import write_trials
+from tomography.experiments.matrices import write_matrix
 from tomography.experiments.p3_size import spearman as rank_correlation
 from tomography.experiments.r1_sentiment import select_examples
+from tomography.experiments.steering import Arm
+from tomography.experiments.steering import DoseResponse
 from tomography.experiments.steering import GenSettings
 from tomography.experiments.steering import Scorer
 from tomography.experiments.steering import SteeringConfig
+from tomography.experiments.steering import Trial
 from tomography.experiments.steering import dose_slope
+from tomography.experiments.steering import plain_arm
+from tomography.experiments.steering import reader_arm
+from tomography.experiments.steering import run_trial
 from tomography.experiments.sweep import SERIES
 from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.sweep import reading_sweep
@@ -376,6 +388,67 @@ def _lens_summary(
     return layer, spearman(mean_lens, _finite_mean(slope, axis=1))
 
 
+@dataclass(frozen=True)
+class _Steering:
+    """What every steered arm of a run shares."""
+
+    config: Config
+    loaded: LoadedModel
+    settings: GenSettings
+    norms: dict[int, float]
+    score: Scorer
+    plain: Arm
+
+    def none(self, prompts: Sequence[str]) -> Trial:
+        return run_trial(self.plain, prompts, self.score, columns=2)
+
+    def dose(
+        self,
+        reader: RepReader,
+        layer: int,
+        prompts: Sequence[str],
+        none: Trial,
+    ) -> DoseResponse:
+        config = self.config
+        return dose_with_none(
+            lambda coeff: reader_arm(
+                self.loaded,
+                self.settings,
+                reader,
+                layers=[layer],
+                coeff=coeff,
+                norms=self.norms,
+                op=config.op,
+                mode=config.mode,
+                mask=config.mask,
+                preserve_norm=config.preserve_norm,
+            ),
+            config.coeffs,
+            prompts,
+            self.score,
+            none,
+            columns=2,
+        )
+
+
+def _steered_trials(dose: DoseResponse, prefix: str) -> list[Trial]:
+    """Names the nonzero-coefficient trials `<prefix>/<coefficient>`."""
+    return [
+        dataclasses.replace(trial, name=f"{prefix}/{coeff:g}")
+        for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
+        if coeff != 0.0
+    ]
+
+
+def _slopes(
+    curves: NDArray[np.float64], coeffs: Sequence[float]
+) -> NDArray[np.float64]:
+    """Fits the dose slope along the last axis of some dose curves."""
+    flat = curves.reshape(-1, curves.shape[-1])
+    slopes = np.array([safe_slope(coeffs, row) for row in flat])
+    return slopes.reshape(curves.shape[:-1])
+
+
 def _check(config: Config, n_layers: int) -> tuple[int, ...]:
     """Checks the settings that need no data and returns the sweep layers."""
     if not 1 <= len(config.templates) <= MAX_SERIES:
@@ -439,9 +512,20 @@ def execute(
     It fits `n_seeds` readers on SST-2 train pairs, with the seeds of C1, and
     scores them on the same SST-2 val pairs as every other template.
 
+    The first `n_steer_seeds` readers of each template steer, as in C1: a
+    dose response at every single layer of `sweep_layers` on a first list of
+    prompts, with coefficient 0 generated once. The steering layer of a
+    template is the sweep layer where the primary judge's score rises the
+    most per unit of coefficient. The prompt-shift transfer then steers a
+    second list of prompts, rendered in each of `formats`, at that layer.
+
     Writes `curves_read` (the validation accuracy of the readers of each
-    template at every layer) and `curves_lens` (the logit lens separation of
-    the first `n_steer_seeds` readers at every layer).
+    template at every layer), `curves_lens` (the logit lens separation of
+    the first `n_steer_seeds` readers at every layer), `curves_slope` and
+    `curves_slope_check` (the dose slope of each steering reader at every
+    sweep layer under the primary and the check judge), `matrix_transfer`
+    (the mean primary slope of each template and format), `trials_sweep` and
+    `trials_transfer_<format>`.
 
     Args:
         config: The experiment settings.
@@ -468,11 +552,13 @@ def execute(
             the validation sentences give fewer than `2 * n_prompts`
             distinct prompts.
     """
-    _check(config, loaded.n_layers)
-    GenSettings.from_config(config)
+    n_layers = loaded.n_layers
+    sweep = _check(config, n_layers)
+    settings = GenSettings.from_config(config)
     _pole_tokens(loaded, words)
-    variants = extraction_variants(chat_format_for(loaded), config.templates)
-    split_held_out(
+    chat = chat_format_for(loaded)
+    variants = extraction_variants(chat, config.templates)
+    held = split_held_out(
         texts,
         n_calibration=config.n_calibration,
         n_neutral=config.n_neutral,
@@ -492,7 +578,7 @@ def execute(
             f"in the {split} split",
             allow_none=allow_none,
         )
-    draw_prompts(
+    select_prompts, report_prompts = draw_prompts(
         prompt_fragments([e.text for e in val], config.truncate_words),
         config.n_prompts,
         sets=2,
@@ -553,7 +639,84 @@ def execute(
         stem="curves_lens",
         ylabel="Lens separation (z)",
         chance=0.0,
-        n_layers=loaded.n_layers,
+        n_layers=n_layers,
         n_boot=config.n_boot,
         seed=config.seed,
+    )
+    steering = _Steering(
+        config=config,
+        loaded=loaded,
+        settings=settings,
+        norms=mean_residual_norms(
+            loaded,
+            held.calibration,
+            range(1, n_layers + 1),
+            bos=config.bos,
+            batch_size=config.batch_size,
+        ),
+        score=score,
+        plain=plain_arm(loaded, settings),
+    )
+    none = steering.none(select_prompts)
+    sweep_trials = [none]
+    shape = (
+        len(variants),
+        len(sweep),
+        config.n_steer_seeds,
+        len(config.coeffs),
+    )
+    primary = np.full(shape, np.nan)
+    check = np.full(shape, np.nan)
+    for t, variant in enumerate(variants):
+        for s, layer in enumerate(sweep):
+            for r, reader in enumerate(readers[t]):
+                dose = steering.dose(reader, layer, select_prompts, none)
+                primary[t, s, r] = dose.curve(0)
+                check[t, s, r] = dose.curve(1)
+                sweep_trials.extend(
+                    _steered_trials(dose, f"{variant.name}/layer{layer}/{r}")
+                )
+    write_trials(run_dir, "trials_sweep", sweep_trials)
+    for stem, curves, ylabel in (
+        ("curves_slope", primary, "Dose slope (primary judge)"),
+        ("curves_slope_check", check, "Dose slope (check judge)"),
+    ):
+        write_curves(
+            run_dir,
+            _slopes(curves, config.coeffs).transpose(0, 2, 1),
+            sweep,
+            series=series,
+            stem=stem,
+            ylabel=ylabel,
+            chance=0.0,
+            n_layers=n_layers,
+            n_boot=config.n_boot,
+            seed=config.seed,
+        )
+    steer_layers = [
+        slope_layer(primary[t], config.coeffs, sweep)
+        for t in range(len(variants))
+    ]
+    transfer = np.full(
+        (len(variants), len(config.formats), config.n_steer_seeds), np.nan
+    )
+    for f, fmt in enumerate(config.formats):
+        prompts = shift_prompts(report_prompts, fmt, chat)
+        none = steering.none(prompts)
+        transfer_trials = [none]
+        for t, variant in enumerate(variants):
+            for r, reader in enumerate(readers[t]):
+                dose = steering.dose(reader, steer_layers[t], prompts, none)
+                transfer[t, f, r] = safe_slope(config.coeffs, dose.curve(0))
+                transfer_trials.extend(
+                    _steered_trials(dose, f"{variant.name}/{r}")
+                )
+        write_trials(run_dir, f"trials_transfer_{fmt}", transfer_trials)
+    write_matrix(
+        run_dir,
+        "matrix_transfer",
+        _finite_mean(transfer, axis=2),
+        rows=series,
+        cols=config.formats,
+        title="Mean primary dose slope by steering prompt format",
     )

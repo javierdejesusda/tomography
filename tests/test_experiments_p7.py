@@ -4,6 +4,7 @@ import dataclasses
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from typing import NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -11,12 +12,17 @@ import pytest
 
 from tomography.analysis import lens_logits
 from tomography.analysis import pole_separation
+from tomography.control.controllers import mean_residual_norms
 from tomography.datasets.records import Example
 from tomography.experiments import p7_extraction_steering as p7
 from tomography.experiments.a2_logit_lens import lens_params
 from tomography.experiments.a2_logit_lens import pole_ids
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.c1_sentiment_steering import draw_prompts
+from tomography.experiments.c1_sentiment_steering import prompt_fragments
+from tomography.experiments.effects import read_trials
+from tomography.experiments.effects import split_held_out
 from tomography.experiments.p7_extraction_steering import CHAT_INSTRUCTION
 from tomography.experiments.p7_extraction_steering import FORMATS
 from tomography.experiments.p7_extraction_steering import MAX_SERIES
@@ -30,8 +36,10 @@ from tomography.experiments.p7_extraction_steering import safe_slope
 from tomography.experiments.p7_extraction_steering import shift_prompts
 from tomography.experiments.p7_extraction_steering import spearman
 from tomography.experiments.r1_sentiment import select_examples
+from tomography.experiments.steering import Trial
 from tomography.experiments.steering import dose_slope
 from tomography.experiments.sweep import SERIES
+from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import task_set
 from tomography.experiments.variants import template_variants
@@ -693,4 +701,288 @@ def test_the_lens_curves_hold_the_separation_of_the_steering_readers(
         np.testing.assert_allclose(
             curves["per_seed"][t],
             lens_separation(tiny_arch, call.result.readers[:2], WORDS),
+        )
+
+
+TEMPLATE_NAMES = ("paper", "no_template")
+FORMAT_NAMES = ("raw", "chat")
+READERS = (0, 1)
+DOSE_COEFFS = (-0.2, 0.0, 0.2)
+
+
+class Finished(NamedTuple):
+    config: Config
+    run_dir: RunDir
+    loaded: LoadedModel
+
+
+_FINISHED: dict[str, Finished] = {}
+
+
+@pytest.fixture
+def finished(
+    tiny_arch: LoadedModel, tmp_path_factory: pytest.TempPathFactory
+) -> Finished:
+    """One default tiny run per architecture, shared by the read-only tests."""
+    key = type(tiny_arch.model).__name__
+    if key not in _FINISHED:
+        config = _config()
+        run_dir = RunDir.create(config, out_root=tmp_path_factory.mktemp("p7"))
+        execute(config, run_dir, tiny_arch, _sst2(), _texts(), _score, WORDS)
+        _FINISHED[key] = Finished(config, run_dir, tiny_arch)
+    return _FINISHED[key]
+
+
+def _trials(run_dir: RunDir, stem: str) -> dict[str, Trial]:
+    return {t.name: t for t in read_trials(run_dir, stem)}
+
+
+def _dose(
+    trials: dict[str, Trial], prefix: str, column: int
+) -> NDArray[np.float64]:
+    """Rebuilds a dose response, with the unsteered trial at coefficient 0."""
+    return np.array(
+        [
+            (
+                trials["none"] if c == 0.0 else trials[f"{prefix}/{c:g}"]
+            ).mean_score()[column]
+            for c in DOSE_COEFFS
+        ]
+    )
+
+
+def test_the_sweep_trials_are_named_after_template_layer_and_reader(
+    finished: Finished,
+) -> None:
+    trials = read_trials(finished.run_dir, "trials_sweep")
+    assert [t.name for t in trials] == [
+        "none",
+        *(
+            f"{template}/layer{layer}/{reader}/{c:g}"
+            for template in TEMPLATE_NAMES
+            for layer in SWEEP
+            for reader in READERS
+            for c in NONZERO
+        ),
+    ]
+    assert trials[0].scores.shape == (3, 2, 2)
+
+
+@pytest.mark.parametrize("fmt", FORMAT_NAMES)
+def test_the_transfer_trials_are_named_after_template_and_reader(
+    finished: Finished, fmt: str
+) -> None:
+    trials = read_trials(finished.run_dir, f"trials_transfer_{fmt}")
+    assert [t.name for t in trials] == [
+        "none",
+        *(
+            f"{template}/{reader}/{c:g}"
+            for template in TEMPLATE_NAMES
+            for reader in READERS
+            for c in NONZERO
+        ),
+    ]
+
+
+def test_selection_and_report_prompts_are_disjoint_draws(
+    finished: Finished,
+) -> None:
+    val = select_examples(_sst2(), split="val", min_words=3)
+    pool = prompt_fragments([e.text for e in val], 3)
+    select, report = draw_prompts(
+        pool, 3, sets=2, seed=derive_seed(finished.config.seed, "prompts")
+    )
+    assert not set(select) & set(report)
+    sweep = read_trials(finished.run_dir, "trials_sweep")
+    assert {t.prompts for t in sweep} == {tuple(select)}
+    chat = chat_format_for(finished.loaded)
+    for fmt in FORMAT_NAMES:
+        trials = read_trials(finished.run_dir, f"trials_transfer_{fmt}")
+        expected = tuple(shift_prompts(report, fmt, chat))
+        assert {t.prompts for t in trials} == {expected}
+
+
+def test_each_prompt_list_has_one_unsteered_trial(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arms: list[str] = []
+    real = p7.run_trial
+
+    def spy(arm: Any, *args: Any, **kwargs: Any) -> Any:
+        arms.append(arm.name)
+        return real(arm, *args, **kwargs)
+
+    monkeypatch.setattr(p7, "run_trial", spy)
+    run_dir = _execute(tiny_arch, tmp_path)
+    assert arms == ["none"] * 3
+    for stem in ("trials_sweep", "trials_transfer_raw", "trials_transfer_chat"):
+        names = [t.name for t in read_trials(run_dir, stem)]
+        assert names.count("none") == 1
+
+
+@pytest.mark.parametrize(
+    ("stem", "column"), [("curves_slope", 0), ("curves_slope_check", 1)]
+)
+def test_the_slope_curves_are_the_dose_slopes_of_the_sweep_trials(
+    finished: Finished, stem: str, column: int
+) -> None:
+    arrays = finished.run_dir.read_arrays(stem)
+    sidecar = finished.run_dir.read_json(stem)
+    assert isinstance(sidecar, dict)
+    assert sidecar["series"] == list(TEMPLATE_NAMES)
+    assert sidecar["chance"] == 0.0
+    assert sidecar["xlabel"] == "Layer"
+    assert sidecar["n_layers"] == 3
+    assert ("primary", "check")[column] in sidecar["ylabel"]
+    assert arrays["x"].tolist() == [1.0, 2.0, 3.0]
+    trials = _trials(finished.run_dir, "trials_sweep")
+    expected = np.array(
+        [
+            [
+                [
+                    dose_slope(
+                        DOSE_COEFFS,
+                        _dose(trials, f"{template}/layer{layer}/{r}", column),
+                    )
+                    for layer in SWEEP
+                ]
+                for r in READERS
+            ]
+            for template in TEMPLATE_NAMES
+        ]
+    )
+    assert arrays["per_seed"].shape == (2, 2, 3)
+    np.testing.assert_allclose(arrays["per_seed"], expected, atol=1e-6)
+
+
+def _spy_slope_layer(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    calls: list[Any] = []
+    real = p7.slope_layer
+
+    def spy(per_seed: Any, coeffs: Any, layers: Any) -> int:
+        layer = real(per_seed, coeffs, layers)
+        calls.append(
+            SimpleNamespace(per_seed=per_seed, layers=layers, out=layer)
+        )
+        return layer
+
+    monkeypatch.setattr(p7, "slope_layer", spy)
+    return calls
+
+
+def _spy_reader_arm(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    real = p7.reader_arm
+
+    def spy(
+        loaded: LoadedModel, settings: Any, reader: Any, **kwargs: Any
+    ) -> Any:
+        calls.append({"reader": reader, **kwargs})
+        return real(loaded, settings, reader, **kwargs)
+
+    monkeypatch.setattr(p7, "reader_arm", spy)
+    return calls
+
+
+def test_the_steering_layer_of_a_template_is_where_the_primary_slope_peaks(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layers = _spy_slope_layer(monkeypatch)
+    arms = _spy_reader_arm(monkeypatch)
+    run_dir = _execute(tiny_arch, tmp_path)
+    trials = _trials(run_dir, "trials_sweep")
+    assert len(layers) == 2
+    for template, call in zip(TEMPLATE_NAMES, layers, strict=True):
+        assert call.layers == SWEEP
+        primary = np.array(
+            [
+                [
+                    _dose(trials, f"{template}/layer{layer}/{r}", 0)
+                    for r in READERS
+                ]
+                for layer in SWEEP
+            ]
+        )
+        np.testing.assert_allclose(call.per_seed, primary)
+    chosen = [call.out for call in layers]
+    expected = [
+        [chosen[t]]
+        for _ in FORMAT_NAMES
+        for t in (0, 1)
+        for _ in READERS
+        for _ in NONZERO
+    ]
+    assert [c["layers"] for c in arms[24:]] == expected
+
+
+def test_the_arms_use_the_sweep_layers_and_the_first_readers(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arms = _spy_reader_arm(monkeypatch)
+    reads = _spy_reading_sweep(monkeypatch)
+    _execute(tiny_arch, tmp_path)
+    sweep = arms[:24]
+    seen: list[tuple[tuple[int, ...], int]] = []
+    for call in sweep:
+        key = (tuple(call["layers"]), id(call["reader"]))
+        if key not in seen:
+            seen.append(key)
+    first = {t: [id(r) for r in reads[t].result.readers[:2]] for t in (0, 1)}
+    assert seen == [
+        ((layer,), first[t][r])
+        for t in (0, 1)
+        for layer in SWEEP
+        for r in READERS
+    ]
+    assert all(c["coeff"] != 0.0 for c in arms)
+    steering = {id(r) for call in reads for r in call.result.readers[:2]}
+    assert {id(c["reader"]) for c in arms} == steering
+    held = split_held_out(_texts(), n_calibration=10, n_neutral=8, seed=0)
+    norms = mean_residual_norms(
+        tiny_arch, held.calibration, [1, 2, 3], batch_size=8
+    )
+    assert all(c["norms"] == norms for c in arms)
+
+
+def test_the_steering_mode_mask_and_norm_follow_the_config(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arms = _spy_reader_arm(monkeypatch)
+    _execute(
+        tiny_arch,
+        tmp_path,
+        mode="absolute",
+        mask="all",
+        preserve_norm=True,
+        op="piecewise",
+        templates=("paper",),
+        formats=("raw",),
+        n_steer_seeds=1,
+        sweep_layers=(2,),
+    )
+    assert arms
+    assert {c["mode"] for c in arms} == {"absolute"}
+    assert {c["mask"] for c in arms} == {"all"}
+    assert {c["preserve_norm"] for c in arms} == {True}
+    assert {c["op"] for c in arms} == {"piecewise"}
+
+
+@pytest.mark.parametrize("fmt", FORMAT_NAMES)
+def test_the_transfer_matrix_is_the_mean_primary_slope_of_the_transfer_trials(
+    finished: Finished, fmt: str
+) -> None:
+    arrays = finished.run_dir.read_arrays("matrix_transfer")
+    sidecar = finished.run_dir.read_json("matrix_transfer")
+    assert isinstance(sidecar, dict)
+    assert sidecar["rows"] == list(TEMPLATE_NAMES)
+    assert sidecar["cols"] == list(FORMAT_NAMES)
+    assert arrays["values"].shape == (2, 2)
+    trials = _trials(finished.run_dir, f"trials_transfer_{fmt}")
+    for t, template in enumerate(TEMPLATE_NAMES):
+        slopes = [
+            dose_slope(DOSE_COEFFS, _dose(trials, f"{template}/{r}", 0))
+            for r in READERS
+        ]
+        assert arrays["values"][t, FORMAT_NAMES.index(fmt)] == pytest.approx(
+            np.mean(slopes), abs=1e-6
         )
