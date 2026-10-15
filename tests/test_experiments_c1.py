@@ -795,6 +795,20 @@ def test_the_arms_use_the_sweep_layers_the_window_and_the_first_readers(
     assert {c["op"] for c in headline} == set(OPS)
     steering = {id(r) for r in results[0].readers[:2]}
     assert {id(c["reader"]) for c in calls} == steering
+    first_readers = [id(results[0].readers[i]) for i in READERS]
+    seen: dict[tuple[tuple[int, ...], str], list[int]] = {}
+    for c in calls:
+        ids = seen.setdefault((tuple(c["layers"]), c.get("op", "linear")), [])
+        if id(c["reader"]) not in ids:
+            ids.append(id(c["reader"]))
+    window = tuple(summary["window"])
+    assert list(seen) == [
+        ((1,), "linear"),
+        ((2,), "linear"),
+        (window, "linear"),
+        (window, "piecewise"),
+    ]
+    assert all(ids == first_readers for ids in seen.values())
     assert all(c["coeff"] != 0.0 for c in calls)
     assert {c["mode"] for c in calls} == {"relative"}
     assert {c["mask"] for c in calls} == {"response"}
@@ -879,6 +893,8 @@ def test_the_steering_mode_mask_and_norm_follow_the_config(
         ({"ops": ()}, "ops"),
         ({"ops": ("linear", "linear")}, "ops"),
         ({"n_prompts": 100}, "pool"),
+        ({"n_calibration": 0}, "n_calibration"),
+        ({"n_neutral": 0}, "n_calibration and n_neutral"),
     ],
     ids=[
         "no-zero",
@@ -895,6 +911,8 @@ def test_the_steering_mode_mask_and_norm_follow_the_config(
         "no-operator",
         "operator-repeated",
         "prompt-pool-too-small",
+        "no-calibration-text",
+        "no-neutral-text",
     ],
 )
 def test_an_invalid_config_raises_before_the_model_runs(
@@ -912,6 +930,31 @@ def test_an_invalid_config_raises_before_the_model_runs(
     run_dir = RunDir.create(config, out_root=tmp_path)
     with pytest.raises(ValueError, match=message):
         execute(config, run_dir, tiny_arch, _sst2(), _texts(), _score)
+
+
+def test_too_few_held_out_texts_raise_before_the_model_runs(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reached(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("the model was reached")
+
+    monkeypatch.setattr(c1_sentiment_steering, "reading_sweep", reached)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(ValueError, match="need 18 texts"):
+        execute(config, run_dir, tiny_arch, _sst2(), _texts(5), _score)
+
+
+def test_a_headline_compares_and_hashes_by_identity() -> None:
+    def make() -> c1_sentiment_steering._Headline:
+        return c1_sentiment_steering._Headline(np.zeros(2), np.zeros(2), [], [])
+
+    first, second = make(), make()
+    assert first == first
+    assert first != second
+    assert len({first, second}) == 2
 
 
 class StubJudge:
