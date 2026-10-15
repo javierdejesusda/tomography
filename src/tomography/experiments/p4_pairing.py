@@ -886,8 +886,9 @@ def execute(
 
     Raises:
         ValueError: If a setting is invalid, a task is not binary, a source
-            is missing, the task's own pairing is not among the pairings, or
-            the training examples cannot give `n_pairs` pairs.
+            is missing, the task's own pairing is not among the pairings, the
+            training examples cannot give `n_pairs` pairs, or the pairs of
+            any seed hold fewer than 2 with distinct labels.
     """
     tasks = _checked_tasks(config)
     if config.n_components > loaded.d_model:
