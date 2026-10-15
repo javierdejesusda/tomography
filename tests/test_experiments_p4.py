@@ -785,7 +785,7 @@ def _split_sst2() -> list[Example]:
             label,
             split,
         )
-        for split, count in (("train", 12), ("val", 20))
+        for split, count in (("train", 24), ("val", 20))
         for label in (0, 1)
         for i in range(count)
     ]
@@ -801,14 +801,14 @@ def _split_facts() -> list[Example]:
         )
         for split in ("train", "val", "test")
         for label in (0, 1)
-        for i in range(10)
+        for i in range(20)
     ]
 
 
 def _split_utility() -> list[Example]:
     rows = []
     for split in ("train", "val", "test"):
-        for i in range(8):
+        for i in range(16):
             pair = f"ethics-{split}-{i}"
             for suffix, label in (("a", 1), ("b", 0)):
                 rows.append(
@@ -823,20 +823,36 @@ def _split_utility() -> list[Example]:
     return rows
 
 
+def _split_truth_sets() -> list[Example]:
+    return [
+        Example(
+            f"got-{subset}-{split}-{label}-{i}",
+            f"{subset} claim {split} {label} {i}",
+            label,
+            split,
+            {"subset": subset},
+        )
+        for subset in ("cities", "common_claim_true_false", "neg_cities")
+        for split in ("train", "val", "test")
+        for label in (0, 1)
+        for i in range(6)
+    ]
+
+
 def _sources() -> dict[str, list[Example]]:
     return {
         "sst2": _split_sst2(),
         "facts": _split_facts(),
         "ethics_utility": _split_utility(),
+        "geometry_of_truth": _split_truth_sets(),
     }
 
 
 def _config(**overrides: Any) -> Config:
     base = Config(
         model="tiny",
-        seed=1,
         n_seeds=3,
-        n_pairs=8,
+        n_pairs=16,
         n_eval_pairs=6,
         n_components=4,
         n_folds=4,
@@ -940,7 +956,7 @@ def _evaluated(
                 n_pairs=eval_pairs(task, part, config.n_eval_pairs),
                 seed=eval_seed(task, split, config.seed),
             ),
-            config.position,
+            config.eval_position or config.position,
             config,
         )
         for split, part in (
@@ -1225,27 +1241,20 @@ def test_the_cuts_repeat_the_report_accuracy_of_the_grid(
         assert (arrays["mean"] <= arrays["hi"] + 1e-12).all()
 
 
-@pytest.mark.parametrize(
-    ("name", "pairing"),
-    [
-        ("sentiment", "random"),
-        ("truth", "label_contrastive"),
-        ("utility", "matched"),
-        ("utility", "random"),
-    ],
-)
-def test_the_components_are_recomputed_from_the_public_pieces(
-    tiny_arch: LoadedModel,
-    finished: tuple[Config, RunDir],
+def _assert_components(
+    loaded: LoadedModel,
+    config: Config,
+    run_dir: RunDir,
     name: str,
     pairing: Pairing,
+    pairings: Sequence[str],
 ) -> None:
-    config, run_dir = finished
+    """Recomputes the components of one task and pairing, and compares."""
     grid = run_dir.read_arrays(f"grid_{name}")
     at = list(grid["layers"]).index(_json(run_dir, "summary")["layers"][name])
-    report = _evaluated(tiny_arch, config, name)["report"]
-    p = PAIRINGS_OF[name].index(pairing)
-    for i, prepared in enumerate(_trained(tiny_arch, config, name, pairing)):
+    report = _evaluated(loaded, config, name)["report"]
+    p = list(pairings).index(pairing)
+    for i, prepared in enumerate(_trained(loaded, config, name, pairing)):
         stimuli, act = prepared
         basis, share = diff_components(
             act.data,
@@ -1266,6 +1275,27 @@ def test_the_components_are_recomputed_from_the_public_pieces(
         )
         assert grid["cv_component"][p, i] == chosen
         assert grid["cv_accuracy"][p, i] == accuracy[chosen]
+
+
+@pytest.mark.parametrize(
+    ("name", "pairing"),
+    [
+        ("sentiment", "random"),
+        ("truth", "label_contrastive"),
+        ("utility", "matched"),
+        ("utility", "random"),
+    ],
+)
+def test_the_components_are_recomputed_from_the_public_pieces(
+    tiny_arch: LoadedModel,
+    finished: tuple[Config, RunDir],
+    name: str,
+    pairing: Pairing,
+) -> None:
+    config, run_dir = finished
+    _assert_components(
+        tiny_arch, config, run_dir, name, pairing, PAIRINGS_OF[name]
+    )
 
 
 @pytest.mark.parametrize("name", TASKS)
@@ -1313,7 +1343,7 @@ def test_the_component_table_summarizes_the_grid(
             )
             assert row[f"{key}_lo"] == pytest.approx(float(low))
             assert row[f"{key}_hi"] == pytest.approx(float(high))
-        chosen = np.bincount(grid["cv_component"][p]).argmax() + 1
+        chosen = np.bincount(grid["cv_component"][p]).argmax()
         assert row["cv_component"] == chosen
 
 
@@ -1379,6 +1409,30 @@ def test_a_changed_reference_moves_every_comparison(
         "unit",
     ]
     assert len(list(run_dir.path.iterdir())) == 18
+    for pairing in config.pairings:
+        _assert_components(
+            tiny_arch, config, run_dir, "utility", pairing, config.pairings
+        )
+    directions = {
+        method: _oriented(
+            _cell(tiny_arch, config, "utility", method, "matched", "unit")
+        )
+        for method in config.methods
+    }
+    per_seed = run_dir.read_arrays("convergence_utility")["per_seed"]
+    for s, method in enumerate(("pca_diff", "mean_diff")):
+        np.testing.assert_allclose(
+            per_seed[s],
+            np.einsum(
+                "nkd,nkd->nk",
+                directions[method].astype(np.float64),
+                directions["logistic"].astype(np.float64),
+            ),
+        )
+    np.testing.assert_allclose(
+        grid["cosine"],
+        variant_cosines(np.stack([directions[m] for m in config.methods])),
+    )
 
 
 def test_execute_is_deterministic(
@@ -1447,10 +1501,10 @@ def no_forward_pass(monkeypatch: pytest.MonkeyPatch) -> None:
             "'label_contrastive', which is not in pairings ('random',)",
         ),
         ({"n_components": 0}, "n_components must be at least 1"),
-        ({"n_folds": 1}, "n_folds must be between 2 and the 8 pairs"),
-        ({"n_folds": 9}, "n_folds must be between 2 and the 8 pairs"),
+        ({"n_folds": 1}, "n_folds must be between 2 and the 16 pairs"),
+        ({"n_folds": 17}, "n_folds must be between 2 and the 16 pairs"),
         (
-            {"n_components": 5, "n_folds": 2},
+            {"n_components": 9, "n_folds": 2},
             "folds too small",
         ),
         (
@@ -1458,8 +1512,8 @@ def no_forward_pass(monkeypatch: pytest.MonkeyPatch) -> None:
             "n_components must be at most the model width 32",
         ),
         (
-            {"n_pairs": 10},
-            "task 'utility' has 8 training pairs, fewer than n_pairs = 10",
+            {"n_pairs": 17},
+            "task 'utility' has 16 training pairs, fewer than n_pairs = 17",
         ),
     ],
     ids=[
@@ -1534,7 +1588,7 @@ def test_run_loads_the_model_and_the_sources_of_the_tasks(
 
     def fake_load_sources(sources: Sequence[str]) -> dict[str, list[Example]]:
         asked["sources"] = list(sources)
-        return _sources()
+        return {name: _sources()[name] for name in sources}
 
     monkeypatch.setattr(p4_pairing, "load_model", fake_load_model)
     monkeypatch.setattr(p4_pairing, "load_sources", fake_load_sources)
@@ -1545,6 +1599,154 @@ def test_run_loads_the_model_and_the_sources_of_the_tasks(
     assert sorted(asked["sources"]) == ["ethics_utility", "sst2"]
     assert _json(run_dir, "summary")["tasks"] == ["sentiment", "utility"]
     assert run_dir.meta["finished_at"] is None
+
+
+def test_the_evaluation_items_are_read_at_the_eval_position(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(tasks=("utility",), n_seeds=2, eval_position="mean")
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _sources())
+    last = _cell(
+        tiny_arch,
+        dataclasses.replace(config, eval_position=None),
+        "utility",
+        "pca_diff",
+        "matched",
+        "center",
+    )
+    mean = _cell(tiny_arch, config, "utility", "pca_diff", "matched", "center")
+    assert not np.allclose(
+        mean.per_seed("report")[0], last.per_seed("report")[0]
+    )
+    accuracy = run_dir.read_arrays("grid_utility")["accuracy"]
+    np.testing.assert_allclose(accuracy[0, 0, 0, 0], mean.per_seed("select"))
+    np.testing.assert_allclose(accuracy[0, 0, 0, 1], mean.per_seed("report"))
+
+
+def _distinct_pairs(config: Config, pairing: Pairing) -> list[int]:
+    """Counts the pairs with distinct labels in each seed's training set."""
+    task = READING_TASKS["sentiment"]
+    splits = task_splits(task, _sources(), seed=config.seed)
+    counts = []
+    for i in range(config.n_seeds):
+        stimuli = pairing_set(
+            task,
+            _paper("sentiment"),
+            splits.train,
+            pairing,
+            n_pairs=config.n_pairs,
+            seed=derive_seed(config.seed, "train", i),
+        )
+        first, second = stimuli.pairs.T
+        counts.append(
+            int((stimuli.labels[first] != stimuli.labels[second]).sum())
+        )
+    return counts
+
+
+@pytest.mark.usefixtures("no_forward_pass")
+def test_a_training_set_with_too_few_distinct_pairs_fails_before_the_model(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    base = _config(
+        tasks=("sentiment",),
+        pairings=("label_contrastive", "random"),
+        n_pairs=2,
+        n_folds=2,
+        n_components=1,
+    )
+    seed = next(
+        s
+        for s in range(50)
+        if min(_distinct_pairs(dataclasses.replace(base, seed=s), "random")) < 2
+    )
+    config = dataclasses.replace(base, seed=seed)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"the random training pairs of 'sentiment' for seed [0-9] hold "
+            r"[01] pairs with distinct labels, fewer than the 2"
+        ),
+    ):
+        execute(config, run_dir, tiny_arch, _sources())
+
+
+@pytest.mark.parametrize("seed", [3, 4])
+def test_the_test_configuration_runs_whatever_the_seed(
+    tiny_arch: LoadedModel, tmp_path: Path, seed: int
+) -> None:
+    config = _config(seed=seed, methods=("pca_diff", "mean_diff"))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _sources())
+    assert len(_json(run_dir, "table")) == 42
+
+
+def test_run_loads_the_target_source_of_a_task(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: dict[str, Any] = {}
+
+    def fake_load_sources(sources: Sequence[str]) -> dict[str, list[Example]]:
+        asked["sources"] = list(sources)
+        return {name: _sources()[name] for name in sources}
+
+    monkeypatch.setattr(p4_pairing, "load_model", lambda key: tiny_arch)
+    monkeypatch.setattr(p4_pairing, "load_sources", fake_load_sources)
+    config = _config(
+        tasks=("truth_cities",),
+        n_seeds=2,
+        n_pairs=6,
+        n_folds=3,
+        n_components=2,
+        pairings=("label_contrastive",),
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    run(config, run_dir)
+    assert sorted(asked["sources"]) == ["facts", "geometry_of_truth"]
+    assert _json(run_dir, "summary")["tasks"] == ["truth_cities"]
+
+
+def test_run_loads_the_sources_before_the_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded: list[str] = []
+
+    def offline(sources: Sequence[str]) -> dict[str, list[Example]]:
+        loaded.append("sources")
+        raise ValueError("offline")
+
+    def model(key: str) -> LoadedModel:
+        loaded.append("model")
+        raise AssertionError("the model loaded before the sources")
+
+    monkeypatch.setattr(p4_pairing, "load_model", model)
+    monkeypatch.setattr(p4_pairing, "load_sources", offline)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(ValueError, match="offline"):
+        run(config, run_dir)
+    assert loaded == ["sources"]
+
+
+def test_run_loads_nothing_when_the_settings_are_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded: list[str] = []
+
+    def record(*args: object) -> None:
+        loaded.append("loaded")
+
+    monkeypatch.setattr(p4_pairing, "load_model", record)
+    monkeypatch.setattr(p4_pairing, "load_sources", record)
+    config = _config(n_folds=1)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with pytest.raises(ValueError, match="n_folds must be between 2"):
+        run(config, run_dir)
+    assert loaded == []
 
 
 @pytest.mark.slow

@@ -41,6 +41,7 @@ from tomography.experiments.variants import expand_tasks
 from tomography.experiments.variants import load_sources
 from tomography.experiments.variants import pair_capacity
 from tomography.experiments.variants import prepare
+from tomography.experiments.variants import target_of
 from tomography.experiments.variants import task_set
 from tomography.experiments.variants import task_splits
 from tomography.experiments.variants import template_variants
@@ -602,6 +603,17 @@ def _plan(
                 f"cannot pair the training examples of {name!r} as "
                 f"{pairing!r}: {error}"
             ) from error
+        for i, stimuli in enumerate(train[pairing]):
+            first, second = stimuli.pairs.T
+            distinct = int(
+                (stimuli.labels[first] != stimuli.labels[second]).sum()
+            )
+            if distinct < 2:
+                raise ValueError(
+                    f"the {pairing} training pairs of {name!r} for seed {i} "
+                    f"hold {distinct} pairs with distinct labels, fewer than "
+                    "the 2 that cross-validation needs"
+                )
     evaluation = {
         split: task_set(
             task,
@@ -841,8 +853,7 @@ def _write_task(
             "cv": cv.mean(),
             "cv_lo": cv_lo,
             "cv_hi": cv_hi,
-            "cv_component": int(np.bincount(result.cv_component[p]).argmax())
-            + 1,
+            "cv_component": int(np.bincount(result.cv_component[p]).argmax()),
             "explained_pc1": result.explained[p, :, 0].mean(),
         }
         component_rows.append({c: values[c] for c in COMPONENT_COLUMNS})
@@ -863,7 +874,9 @@ def execute(
     scores of the components), `methods_<task>`, `convergence_<task>`,
     `curves_<task>_methods`, `curves_<task>_pairing`,
     `curves_<task>_preprocess` and `components_<task>`; and `table.json`,
-    `table_components.json` and `summary.json`.
+    `table_components.json` and `summary.json`. The `cv_component` of the
+    grid and of the components table is the 0-based index of the component,
+    while the component curves count the components from 1.
 
     Args:
         config: The experiment settings.
@@ -923,8 +936,15 @@ def run(config: Config, run_dir: RunDir) -> None:
         run_dir: The run to write into.
     """
     tasks = _checked_tasks(config)
-    sources = list(dict.fromkeys(task.source for task in tasks))
-    execute(config, run_dir, load_model(config.model), load_sources(sources))
+    sources = list(
+        dict.fromkeys(
+            source
+            for task in tasks
+            for source in (task.source, target_of(task).source)
+        )
+    )
+    examples = load_sources(sources)
+    execute(config, run_dir, load_model(config.model), examples)
 
 
 def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
