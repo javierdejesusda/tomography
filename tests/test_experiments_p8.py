@@ -1120,36 +1120,68 @@ def test_the_cli_discovers_the_experiment() -> None:
     assert experiment.plot is plot
 
 
+ALL_MODELS = ["b3", "t3", "b6", "t6", "ref"]
+PAIRED = ["b3", "t3", "b6", "t6"]
+
+
+def _extra_run(out_root: Path, experiment: str, model: str) -> str:
+    """The path of a finished run that stands in for a default run."""
+    run_dir = _new_run(out_root, experiment, model)
+    run_dir.finalize()
+    return str(run_dir.path)
+
+
 @pytest.mark.parametrize(
-    ("overrides", "experiments", "models"),
+    ("overrides", "calls"),
     [
-        ({}, ["r1", "r2", "r5", "p1", "c1"], ["b3", "t3", "b6", "t6", "ref"]),
+        (
+            {},
+            [
+                (["r1", "r2", "r5", "p1"], ALL_MODELS, "reading"),
+                (["c1"], PAIRED, "steering"),
+            ],
+        ),
+        (
+            {"reference": None},
+            [
+                (["r1", "r2", "r5", "p1"], PAIRED, "reading"),
+                (["c1"], PAIRED, "steering"),
+            ],
+        ),
+        (
+            {"steering_source": None},
+            [(["r1", "r2", "r5", "p1"], ALL_MODELS, "reading")],
+        ),
         (
             {
                 "template_source": None,
                 "steering_source": None,
                 "reference": None,
             },
-            ["r1", "r2", "r5"],
-            ["b3", "t3", "b6", "t6"],
+            [(["r1", "r2", "r5"], PAIRED, "reading")],
         ),
     ],
-    ids=["all-parts", "reading-only"],
+    ids=["all-parts", "no-reference", "no-steering", "reading-only"],
 )
-def test_run_resolves_every_source_and_model_then_executes(
+def test_run_resolves_the_steering_runs_on_the_paired_models_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     overrides: dict[str, Any],
-    experiments: list[str],
-    models: list[str],
+    calls: list[tuple[list[str], list[str], str]],
 ) -> None:
-    settings = {
-        "template_source": "p1",
-        "steering_source": "c1",
-        "extra_runs": ("elsewhere",),
-        **overrides,
+    extras = {
+        "steering": _extra_run(tmp_path / "extra", "c1", "t3"),
+        "reading": _extra_run(tmp_path / "extra", "r1", "b3"),
     }
-    config = _config(**settings)
+    settings = {"template_source": "p1", "steering_source": "c1", **overrides}
+    config = _config(
+        extra_runs=tuple(
+            path
+            for kind, path in extras.items()
+            if kind == "reading" or settings["steering_source"] is not None
+        ),
+        **settings,
+    )
     runs = _full_runs(tmp_path)
     asked: list[tuple[Path, list[str], list[str], tuple[str, ...]]] = []
 
@@ -1160,15 +1192,22 @@ def test_run_resolves_every_source_and_model_then_executes(
         extra_runs: Sequence[str] = (),
     ) -> dict[tuple[str, str], RunDir]:
         asked.append((out_root, list(wanted), list(names), tuple(extra_runs)))
-        return runs
+        return {
+            pair: found
+            for pair, found in runs.items()
+            if pair[0] in wanted and pair[1] in names
+        }
 
     monkeypatch.setattr(p8_tuning, "resolve_runs", resolve)
     run_dir = RunDir.create(config, out_root=tmp_path / "out")
 
     run(config, run_dir)
 
-    assert asked == [(tmp_path / "out", experiments, models, ("elsewhere",))]
-    assert _summary(run_dir)["models"] == models
+    assert asked == [
+        (tmp_path / "out", experiments, models, (extras[kind],))
+        for experiments, models, kind in calls
+    ]
+    assert _summary(run_dir)["models"] == calls[0][1]
 
 
 def test_run_rejects_unpaired_models_before_it_looks_for_runs(

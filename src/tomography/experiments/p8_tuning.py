@@ -19,6 +19,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from tomography.experiments.aggregate import ReadingPoint
+from tomography.experiments.aggregate import finished_run
 from tomography.experiments.aggregate import out_root_of
 from tomography.experiments.aggregate import read_curves
 from tomography.experiments.aggregate import reading_point
@@ -572,21 +573,50 @@ def execute(
     run_dir.write_json("summary", summary)
 
 
+def _steering_extra_runs(config: Config) -> list[str]:
+    """The extra runs that belong to the steering source."""
+    if config.steering_source is None:
+        return []
+    return [
+        path
+        for path in config.extra_runs
+        if finished_run(path).config["experiment"] == config.steering_source
+    ]
+
+
 def run(config: Config, run_dir: RunDir) -> None:
     """Finds the source runs, then runs `execute`.
+
+    The sources and the template source are looked up on every model, the
+    reference included, and the steering source on the paired models only,
+    since the reference is not steered. Each extra run goes to the lookup of
+    its own experiment.
 
     Args:
         config: The experiment settings.
         run_dir: The run to write into; the source runs are looked up in its
             out root.
     """
+    out_root = out_root_of(run_dir)
     experiments = _sources(config)
-    for extra in (config.template_source, config.steering_source):
-        if extra is not None:
-            experiments.append(extra)
+    if config.template_source is not None:
+        experiments.append(config.template_source)
+    steering_extras = _steering_extra_runs(config)
     runs = resolve_runs(
-        out_root_of(run_dir), experiments, _models(config), config.extra_runs
+        out_root,
+        experiments,
+        _models(config),
+        [path for path in config.extra_runs if path not in steering_extras],
     )
+    if config.steering_source is not None:
+        runs.update(
+            resolve_runs(
+                out_root,
+                [config.steering_source],
+                [model for pair in _pairs(config) for model in pair],
+                steering_extras,
+            )
+        )
     execute(config, run_dir, runs)
 
 
