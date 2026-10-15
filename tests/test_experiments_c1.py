@@ -295,7 +295,20 @@ def test_check_pair_count_names_the_setting_and_the_maximum(
     wanted: int | None, available: int, message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        check_pair_count("n_eval_pairs", wanted, available, "in the val split")
+        check_pair_count(
+            "n_eval_pairs",
+            wanted,
+            available,
+            "in the val split",
+            allow_none=True,
+        )
+
+
+def test_check_pair_count_offers_none_only_where_it_is_allowed() -> None:
+    with pytest.raises(
+        ValueError, match=r"^n_pairs must be at least 1, got 0$"
+    ):
+        check_pair_count("n_pairs", 0, 3, "in the train split")
 
 
 def _arms(
@@ -929,8 +942,11 @@ def test_the_steering_mode_mask_and_norm_follow_the_config(
         ({"n_pairs": 31}, "n_pairs is 31 but at most 30 pairs exist"),
         ({"n_eval_pairs": 11}, "n_eval_pairs is 11 but at most 10 pairs"),
         ({"min_words": 7}, "n_pairs is 8 but at most 0 pairs exist"),
-        ({"n_pairs": 0}, "n_pairs must be at least 1"),
-        ({"n_eval_pairs": -1}, "n_eval_pairs must be at least 1"),
+        ({"n_pairs": 0}, "n_pairs must be at least 1, got 0"),
+        (
+            {"n_eval_pairs": -1},
+            "n_eval_pairs must be at least 1 or None, got -1",
+        ),
     ],
     ids=[
         "no-zero",

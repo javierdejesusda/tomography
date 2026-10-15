@@ -641,8 +641,11 @@ def test_the_strength_picks_the_coefficient_of_the_matrix(
         ({"n_eval_pairs": 7}, "n_eval_pairs"),
         ({"temperature": None}, "needs a temperature"),
         ({"top_p": 1.5}, "top_p"),
-        ({"n_pairs": 0}, "n_pairs must be at least 1"),
-        ({"n_eval_pairs": -1}, "n_eval_pairs must be at least 1"),
+        ({"n_pairs": 0}, "n_pairs must be at least 1, got 0"),
+        (
+            {"n_eval_pairs": -1},
+            "n_eval_pairs must be at least 1 or None, got -1",
+        ),
     ],
     ids=[
         "one-emotion",
