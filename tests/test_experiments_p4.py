@@ -729,6 +729,16 @@ def test_the_folds_partition_the_pairs_and_spread_the_distinct_ones() -> None:
     assert sum(counts) == 5
 
 
+def test_the_folds_are_dealt_in_a_fixed_order_for_a_seed() -> None:
+    folds = p4_pairing._deal_folds(_flags(14, [0, 2, 3, 7, 11]), 4, 3)
+    assert [fold.tolist() for fold in folds] == [
+        [2, 3, 5, 12],
+        [0, 1, 8, 10],
+        [4, 7, 9],
+        [6, 11, 13],
+    ]
+
+
 def test_the_folds_follow_the_seed() -> None:
     flags = _flags(20, list(range(0, 20, 2)))
     first = p4_pairing._deal_folds(flags, 4, 5)
@@ -1646,8 +1656,11 @@ def _distinct_pairs(config: Config, pairing: Pairing) -> list[int]:
 
 
 @pytest.mark.usefixtures("no_forward_pass")
+@pytest.mark.parametrize(
+    "later", [False, True], ids=["first_seed", "later_seed"]
+)
 def test_a_training_set_with_too_few_distinct_pairs_fails_before_the_model(
-    tiny_arch: LoadedModel, tmp_path: Path
+    tiny_arch: LoadedModel, tmp_path: Path, later: bool
 ) -> None:
     base = _config(
         tasks=("sentiment",),
@@ -1656,18 +1669,25 @@ def test_a_training_set_with_too_few_distinct_pairs_fails_before_the_model(
         n_folds=2,
         n_components=1,
     )
-    seed = next(
-        s
-        for s in range(50)
-        if min(_distinct_pairs(dataclasses.replace(base, seed=s), "random")) < 2
-    )
+
+    def counts(seed: int) -> list[int]:
+        return _distinct_pairs(dataclasses.replace(base, seed=seed), "random")
+
+    def is_wanted(found: list[int]) -> bool:
+        if later:
+            return found[0] >= 2 and min(found[1:]) < 2
+        return found[0] < 2
+
+    seed = next(s for s in range(100) if is_wanted(counts(s)))
+    found = counts(seed)
+    short = next(i for i, count in enumerate(found) if count < 2)
     config = dataclasses.replace(base, seed=seed)
     run_dir = RunDir.create(config, out_root=tmp_path)
     with pytest.raises(
         ValueError,
-        match=(
-            r"the random training pairs of 'sentiment' for seed [0-9] hold "
-            r"[01] pairs with distinct labels, fewer than the 2"
+        match=re.escape(
+            f"the random training pairs of 'sentiment' for seed {short} hold "
+            f"{found[short]} pairs with distinct labels, fewer than the 2"
         ),
     ):
         execute(config, run_dir, tiny_arch, _sources())
