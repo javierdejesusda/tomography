@@ -714,10 +714,16 @@ def _generate_outcomes(
     distinct: _Items,
 ) -> tuple[dict[tuple[str, float], list[Outcome]], dict[float, list[str]]]:
     settings = GenSettings.from_config(config)
+    steering_arm = arm_names(config.n_random)[0]
     outcomes: dict[tuple[str, float], list[Outcome]] = {}
     texts: dict[float, list[str]] = {}
     for name, reader in steering.readers.items():
         for coeff in config.coeffs:
+            # A zero coefficient edits nothing, so every arm generates what
+            # the steering arm does.
+            if coeff == 0 and name != steering_arm:
+                outcomes[(name, coeff)] = outcomes[(steering_arm, coeff)]
+                continue
             arm = reader_arm(
                 loaded,
                 settings,
@@ -735,7 +741,7 @@ def _generate_outcomes(
                 classify(completion, item.example.answers)
                 for completion, item in zip(first, distinct.items, strict=True)
             ]
-            if name == arm_names(config.n_random)[0]:
+            if name == steering_arm:
                 texts[coeff] = [completion.text for completion in first]
     return outcomes, texts
 

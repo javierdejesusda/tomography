@@ -26,6 +26,7 @@ from tomography.experiments.p9d_steering import resolve_mode
 from tomography.experiments.p9d_steering import run
 from tomography.experiments.steering import Arm
 from tomography.experiments.steering import GenSettings
+from tomography.experiments.steering import reader_arm
 from tomography.experiments.sweep import chat_format_for
 from tomography.knowledge import DEFAULT_SHOTS
 from tomography.knowledge import ItemLabel
@@ -44,6 +45,7 @@ from tomography.p9.signals import TokenStats
 from tomography.p9.signals import first_answer_token
 from tomography.p9.unknowns import type_pools
 from tomography.reading.metrics import wilson_ci
+from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
 
 SPLITS: tuple[Split, ...] = ("train", "train", "train", "val", "test")
@@ -1153,11 +1155,14 @@ def test_the_arms_are_built_with_the_config_settings(
         _chat_prompt(tiny_qwen3, config, i) for i in unique.values()
     )
     (norms,) = spies.norms
-    assert [c["index"] for c in calls.arms] == [0] * 3 + [1] * 3 + [2] * 3
-    assert [c["coeff"] for c in calls.arms] == [-0.2, 0.0, 0.2] * 3
+    assert [c["index"] for c in calls.arms] == [0] * 3 + [1] * 2 + [2] * 2
+    assert [c["coeff"] for c in calls.arms] == [-0.2, 0.0, 0.2] + [
+        -0.2,
+        0.2,
+    ] * 2
     assert [c["reader"].method for c in calls.arms] == ["logistic"] * 3 + [
         "random"
-    ] * 6
+    ] * 4
     for call in calls.arms:
         assert call["settings"] == GenSettings.from_config(config)
         assert tuple(call["layers"]) == tuple(_summary(run_dir)["layers"])
@@ -1168,9 +1173,57 @@ def test_the_arms_are_built_with_the_config_settings(
             "all",
         )
         assert call["preserve_norm"] is True
-    assert len(calls.prompts) == 9
+    assert len(calls.prompts) == 7
     for prompts in calls.prompts:
         assert sorted(prompts) == expected
+
+
+def test_the_random_arms_share_the_unsteered_rates(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _canned_run(tiny_qwen3, tmp_path, monkeypatch, _planted)
+
+    columns, rows = _table(run_dir)
+    for name in ("calibration", "obscure_real", "fictional_generated"):
+        lat = _row(rows, columns, type=name, arm="lat0", coeff=0.0)
+        for arm in ("random0", "random1"):
+            row = _row(rows, columns, type=name, arm=arm, coeff=0.0)
+            assert row == {**lat, "arm": arm}
+
+
+@pytest.mark.parametrize("temperature", [None, 0.8], ids=["greedy", "sampled"])
+def test_a_zero_coefficient_generates_the_same_text_for_any_direction(
+    tiny_qwen3: LoadedModel, temperature: float | None
+) -> None:
+    rng = np.random.default_rng(0)
+    layers = (1, 2)
+    settings = GenSettings(
+        max_new_tokens=6,
+        temperature=temperature,
+        num_samples=1 if temperature is None else 2,
+        batch_size=2,
+    )
+    prompts = ["Q: Who wrote it?\nA:", "Q: Where is it?\nA:"]
+
+    texts = []
+    for _ in range(2):
+        reader = RepReader.from_arrays(
+            "random",
+            layers,
+            rng.standard_normal((2, tiny_qwen3.d_model)),
+            np.zeros((2, tiny_qwen3.d_model)),
+        )
+        arm = reader_arm(
+            tiny_qwen3,
+            settings,
+            reader,
+            layers=layers,
+            coeff=0.0,
+            norms={1: 2.0, 2: 3.0},
+        )
+        texts.append([[c.text for c in row] for row in arm.generate(prompts)])
+
+    assert texts[0] == texts[1]
 
 
 def test_the_norms_are_measured_on_the_chat_prompts_of_the_train_items(
