@@ -992,6 +992,10 @@ def _cached_judge(key: str) -> Any:
 @pytest.mark.slow
 def test_c2_on_gpt2_prints_both_matrices(tmp_path: Path) -> None:
     scenarios = _cached(lambda: load_emotions(offline=True))
+    for split, sizes in (("train", REAL_TRAIN), ("val", REAL_VAL)):
+        labels = [e.label for e in scenarios if e.split == split]
+        counts = np.bincount(labels, minlength=len(EMOTIONS))
+        assert counts.tolist() == list(sizes)
     texts = [e.text for e in _cached(lambda: load_wikitext(offline=True))]
     first = _cached_judge("emotion-primary")
     second = _cached_judge("emotion-secondary")
