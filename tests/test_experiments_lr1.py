@@ -17,6 +17,7 @@ from tomography.control.generate import Completion
 from tomography.datasets.records import Example
 from tomography.experiments import lr1_lorra
 from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.lr1_lorra import Config
 from tomography.experiments.lr1_lorra import execute
 from tomography.experiments.lr1_lorra import gated_arm
@@ -28,7 +29,9 @@ from tomography.experiments.steering import GenSettings
 from tomography.experiments.steering import LogprobFn
 from tomography.experiments.steering import PerplexityFn
 from tomography.experiments.steering import plain_arm
+from tomography.experiments.sweep import chat_format_for
 from tomography.lorra import LorraTrace
+from tomography.lorra import build_batch
 from tomography.lorra import default_layers
 from tomography.model import LoadedModel
 
@@ -398,6 +401,42 @@ def test_execute_draws_train_and_heldout_pairs_from_their_splits(
     assert len({pair[0] for pair in seen["heldout"]}) == 5
 
 
+def test_execute_draws_each_split_with_its_own_seed(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[list[Any]] = []
+    real = lr1_lorra.fit_rows
+
+    def spy(loaded: Any, pairs: Any, *a: Any, **k: Any) -> Any:
+        seen.append(list(pairs))
+        return real(loaded, pairs, *a, **k)
+
+    monkeypatch.setattr(lr1_lorra, "fit_rows", spy)
+    examples = _examples()
+    _execute(
+        tiny_arch,
+        tmp_path,
+        examples,
+        n_train=10,
+        n_heldout=5,
+        steps=2,
+        seed=3,
+    )
+    assert len(seen) == 2
+    for drawn, split, label, bound in (
+        (seen[0], "train", "train", 10),
+        (seen[1], "val", "heldout", 5),
+    ):
+        rows = [example for example in examples if example.split == split]
+        order = np.random.default_rng(derive_seed(3, "lr1", label)).permutation(
+            len(rows)
+        )[:bound]
+        assert drawn == [
+            (str(rows[i].meta["instruction"]), rows[i].text)
+            for i in order.tolist()
+        ]
+
+
 def test_execute_uses_every_row_when_the_bound_is_larger(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
@@ -452,6 +491,44 @@ def test_execute_drops_the_pairs_that_do_not_fit(
     summary = _summary(run_dir)
     assert (summary["dropped_train"], summary["dropped_heldout"]) == (1, 1)
     assert (summary["n_train"], summary["n_heldout"]) == (24, 8)
+
+
+def _no_bos_window(loaded: LoadedModel, config: Config) -> int:
+    """The longest prompt stream of the single-instruction rows, no BOS."""
+    settings = config.settings(loaded.n_layers)
+    batch = build_batch(
+        loaded,
+        [(INSTRUCTIONS[0], RESPONSES[0])],
+        chat_format_for(loaded),
+        settings,
+        bos="none",
+    )
+    prompts = batch.attention_mask[:, : settings.max_prompt_tokens]
+    return int(prompts.sum(dim=1).max().item())
+
+
+def test_execute_passes_the_bos_policy_to_every_step(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    examples = [
+        dataclasses.replace(example, meta={"instruction": INSTRUCTIONS[0]})
+        for example in _examples()
+    ]
+    window = _no_bos_window(tiny_gpt2, _config())
+    with pytest.raises(ValueError, match="batch size"):
+        _execute(
+            tiny_gpt2, tmp_path / "default", examples, max_prompt_tokens=window
+        )
+    run_dir = _execute(
+        tiny_gpt2,
+        tmp_path / "none",
+        examples,
+        bos="none",
+        max_prompt_tokens=window,
+    )
+    summary = _summary(run_dir)
+    assert (summary["n_train"], summary["n_heldout"]) == (20, 6)
+    assert (summary["dropped_train"], summary["dropped_heldout"]) == (0, 0)
 
 
 def test_execute_needs_a_full_batch_of_training_pairs(
