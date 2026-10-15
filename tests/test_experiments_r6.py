@@ -26,6 +26,7 @@ from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.r6_truthfulqa import HEURISTIC_LEVELS
 from tomography.experiments.r6_truthfulqa import LAYER_RULES
+from tomography.experiments.r6_truthfulqa import SOURCES
 from tomography.experiments.r6_truthfulqa import Config
 from tomography.experiments.r6_truthfulqa import best_layer_accuracy
 from tomography.experiments.r6_truthfulqa import execute
@@ -360,6 +361,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.experiment == "r6"
     assert config.model == "gpt2"
     assert config.n_seeds == 15
+    assert config.method == "logistic"
     assert config.sources == ("truthfulqa", "arc", "honesty")
     assert Config.from_dict(config.to_dict()) == config
 
@@ -814,6 +816,25 @@ def test_execute_scores_the_planted_baselines_on_the_right_questions(
         assert baselines[method] == pytest.approx(
             {"mc1": hits / 28, "lo": lo, "hi": hi}
         )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [({}, "logistic"), ({"method": "pca_diff"}, "pca_diff")],
+    ids=["default", "pca_diff_stays_selectable"],
+)
+def test_execute_fits_the_readers_with_the_method_of_the_config(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, Any],
+    expected: str,
+) -> None:
+    _, calls = _run_planted(
+        _config(**overrides), tiny_gpt2, tmp_path, monkeypatch
+    )
+
+    assert [call["method"] for call in calls] == [expected] * len(SOURCES)
 
 
 def test_execute_trains_on_the_train_split_and_evaluates_on_val_and_test(

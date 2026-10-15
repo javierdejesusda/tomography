@@ -304,9 +304,9 @@ the `layers` to sweep. Each fits one reader per training set and layer and write
 three series: `reader` (the fitted direction), `random` (a random unit direction with the same orientation
 rule) and `shuffled` (the reader scored against labels shuffled within each group, a permutation null).
 
-The default `method` is `logistic`, a supervised direction, for `r1` to `r5` and `r7`. `r6` keeps the shared
-default, `pca_diff`, the paper's PCA on pair differences. `pca_diff` stays selectable in every reading
-experiment, for example with `--set method=pca_diff`. The `p9a` config has no `method`.
+The default `method` is `logistic`, a supervised direction, for `r1` to `r7`. `pca_diff`, the paper's PCA on
+pair differences, stays selectable in every reading experiment, for example with `--set method=pca_diff`. The
+`p9a` config has no `method`.
 
 The `tomography` command (`python -m tomography` is equivalent) has two subcommands:
 

@@ -43,6 +43,7 @@ from tomography.judges import sequence_logprob
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
 from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import wilson_ci
@@ -72,6 +73,9 @@ HEURISTIC_TEMPLATE = (
 class Config(ReadingConfig):
     """R6 settings: TruthfulQA MC1 on GPT-2 with three training sources.
 
+    The shared defaults apply except for `method`, which is `logistic` as in
+    R1: `pca_diff` reads weakly on GPT-2 even on matched pairs.
+
     Attributes:
         sources: Training sources of the LAT readers, from "truthfulqa" (its
             train questions), "arc" (ARC-Challenge train items) and "honesty"
@@ -81,6 +85,7 @@ class Config(ReadingConfig):
     experiment: str = "r6"
     model: str = "gpt2"
     n_seeds: int = 15
+    method: Method = "logistic"
     sources: tuple[str, ...] = SOURCES
 
 
