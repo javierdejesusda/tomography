@@ -286,6 +286,25 @@ def _sweep_source(
     eval_sets: dict[str, StimulusSet],
     train_items: Sequence[ChoiceExample] | Sequence[Example],
 ) -> SweepResult:
+    """Runs the reading sweep of one training source.
+
+    The "truthfulqa" and "arc" sources train on the answers of their
+    questions, paired within each question, and read the position of
+    `config`. The "honesty" source trains on persona pairs of true statements
+    read at the response span, and is evaluated at `config.eval_position`, or
+    at the last token when that is None.
+
+    Args:
+        config: The experiment settings.
+        source: One of `SOURCES`.
+        loaded: The wrapped model.
+        eval_sets: The `val` and `test` stimulus sets.
+        train_items: The `ChoiceExample` items of the source, or the true
+            `Example` facts for "honesty".
+
+    Returns:
+        The accuracy of every evaluation set, series, seed and layer.
+    """
     seeds = [
         derive_seed(config.seed, "train", source, i)
         for i in range(config.n_seeds)

@@ -825,8 +825,6 @@ def test_r6_on_gpt2_runs_end_to_end(tmp_path: Path) -> None:
     summary = run_dir.read_json("summary")
     assert isinstance(table, dict)
     assert isinstance(summary, dict)
-    for row in table["rows"]:
-        print(row)
     assert len(table["rows"]) == 8
     assert all(0.0 <= row[3] <= 1.0 for row in table["rows"])
     assert 0.10 < summary["baselines_all_questions"]["standard"]["mc1"] < 0.40
