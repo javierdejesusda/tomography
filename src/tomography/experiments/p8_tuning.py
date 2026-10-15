@@ -21,6 +21,7 @@ from tomography.experiments.aggregate import ReadingPoint
 from tomography.experiments.aggregate import finished_run
 from tomography.experiments.aggregate import out_root_of
 from tomography.experiments.aggregate import read_curves
+from tomography.experiments.aggregate import read_table
 from tomography.experiments.aggregate import reading_point
 from tomography.experiments.aggregate import resolve_runs
 from tomography.experiments.base import ExperimentConfig
@@ -33,7 +34,6 @@ from tomography.experiments.p6_scale import MAX_MODELS
 from tomography.experiments.p6_scale import MAX_PANELS
 from tomography.experiments.p6_scale import copy_reader_curves
 from tomography.experiments.p6_scale import plot_depth_panels
-from tomography.experiments.p6_scale import read_table
 from tomography.experiments.p6_scale import steering_slopes
 from tomography.experiments.sweep import plot_curves_file
 from tomography.reading.metrics import bootstrap_ci
@@ -63,6 +63,8 @@ class Config(ExperimentConfig):
         template_task: The task of the template runs that is read.
         steering_source: The steering experiment whose default runs on the
             paired models give the dose response, or None for no such part.
+            It is none of the reading sources and not `template_source`, so
+            that no run serves two roles.
         extra_runs: Finished runs with other settings; each replaces the
             default run of its own experiment and model.
         n_boot: Bootstrap resamples of every interval.
@@ -218,9 +220,14 @@ def _pairs(config: Config) -> list[tuple[str, str]]:
     return list(zip(config.base_models, config.tuned_models, strict=True))
 
 
+def _paired_models(config: Config) -> list[str]:
+    """The pairs in order, base then tuned, without the reference."""
+    return [model for pair in _pairs(config) for model in pair]
+
+
 def _models(config: Config) -> list[str]:
     """The pairs in order, base then tuned, then the reference."""
-    models = [model for pair in _pairs(config) for model in pair]
+    models = _paired_models(config)
     if config.reference is not None:
         models.append(config.reference)
     return models
@@ -246,6 +253,13 @@ def _check_config(config: Config) -> None:
         )
     if len(set(sources)) != len(sources):
         raise ValueError(f"each source may appear only once, got {sources}")
+    steering = config.steering_source
+    if steering is not None and steering in (*sources, config.template_source):
+        raise ValueError(
+            f"steering_source {steering!r} must not also be a reading or "
+            f"template source, got sources {sources} and template_source "
+            f"{config.template_source!r}"
+        )
     if len(models) > MAX_MODELS:
         raise ValueError(
             f"at most {MAX_MODELS} models are drawn, got {len(models)}"
@@ -263,9 +277,7 @@ def _check(config: Config, runs: Mapping[tuple[str, str], RunDir]) -> None:
         needed += [(config.template_source, model) for model in models]
     if config.steering_source is not None:
         needed += [
-            (config.steering_source, model)
-            for pair in _pairs(config)
-            for model in pair
+            (config.steering_source, model) for model in _paired_models(config)
         ]
     lacking = [pair for pair in needed if pair not in runs]
     if lacking:
@@ -515,8 +527,9 @@ def execute(
             length and at least one, `model` is not a tuned model, the models
             (with the reference) are not at most `MAX_MODELS` and distinct,
             the sources are not distinct, at most `MAX_PANELS` and of both
-            kinds, a run is missing, or a run cannot be read. The first
-            checks run before any file is read.
+            kinds, the steering source is also a reading or template source,
+            a run is missing, or a run cannot be read. The first checks run
+            before any file is read.
     """
     _check(config, runs)
     points = _read_sources(config, run_dir, runs)
@@ -624,7 +637,7 @@ def run(config: Config, run_dir: RunDir) -> None:
             resolve_runs(
                 out_root,
                 [config.steering_source],
-                [model for pair in _pairs(config) for model in pair],
+                _paired_models(config),
                 steering_extras,
             )
         )

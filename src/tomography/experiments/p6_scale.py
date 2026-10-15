@@ -24,6 +24,7 @@ from transformers import PretrainedConfig
 
 from tomography.experiments.aggregate import out_root_of
 from tomography.experiments.aggregate import read_curves
+from tomography.experiments.aggregate import read_table
 from tomography.experiments.aggregate import reading_point
 from tomography.experiments.aggregate import relative_depth
 from tomography.experiments.aggregate import resolve_runs
@@ -35,6 +36,7 @@ from tomography.experiments.sweep import write_curves
 from tomography.model import MODELS
 from tomography.model import UnknownCheckpointError
 from tomography.reading.metrics import bootstrap_ci
+from tomography.viz.reading import MAX_LEGEND_COLUMNS
 from tomography.viz.reading import plot_curves
 from tomography.viz.style import COLUMN_WIDTH
 from tomography.viz.style import INK
@@ -46,7 +48,6 @@ from tomography.viz.style import style_context
 GPT2_SIZES: tuple[str, ...] = ("gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
 MAX_PANELS = 6
 MAX_MODELS = 8
-LEGEND_COLUMNS = 4
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -432,7 +433,7 @@ def plot_depth_panels(
     One panel per source, at most three to a row, each with one curve and band
     per model over the relative depth `layer / L` so that models of different
     depth share an axis. One legend for the whole figure sits above the panels,
-    in at most `LEGEND_COLUMNS` columns. Only the run's own
+    in at most `MAX_LEGEND_COLUMNS` columns. Only the run's own
     `curves_<source>_<model>` files are read.
 
     Args:
@@ -499,26 +500,9 @@ def plot_depth_panels(
             handles,
             names,
             loc="outside upper center",
-            ncols=min(len(models), LEGEND_COLUMNS),
+            ncols=min(len(models), MAX_LEGEND_COLUMNS),
         )
     return save_figure(fig, out_dir, name)
-
-
-def read_table(run_dir: RunDir, stem: str) -> list[dict[str, Any]]:
-    """Reads a table of a run as one dict per row, keyed by column.
-
-    Args:
-        run_dir: A run holding the JSON table `stem`.
-        stem: The file stem of the table, such as "table".
-
-    Returns:
-        The rows in file order.
-    """
-    payload = cast(dict[str, Any], run_dir.read_json(stem))
-    return [
-        dict(zip(payload["columns"], row, strict=True))
-        for row in payload["rows"]
-    ]
 
 
 def _spread(

@@ -22,6 +22,7 @@ from tomography.experiments.aggregate import oriented
 from tomography.experiments.aggregate import out_root_of
 from tomography.experiments.aggregate import read_curves
 from tomography.experiments.aggregate import read_readers
+from tomography.experiments.aggregate import read_table
 from tomography.experiments.aggregate import reading_point
 from tomography.experiments.aggregate import relative_depth
 from tomography.experiments.aggregate import resolve_runs
@@ -650,3 +651,21 @@ def test_depth_layer_needs_a_layer() -> None:
 def test_label_stem_replaces_the_colon() -> None:
     assert label_stem("r6:truthfulqa") == "r6_truthfulqa"
     assert label_stem("r1") == "r1"
+
+
+def test_read_table_gives_one_dict_per_row_in_file_order(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run(tmp_path, "r1", finished=False)
+    run_dir.write_json(
+        "table",
+        {
+            "columns": ["source", "accuracy"],
+            "rows": [["r1", 0.5], ["r2", 0.75]],
+        },
+    )
+
+    assert read_table(run_dir, "table") == [
+        {"source": "r1", "accuracy": 0.5},
+        {"source": "r2", "accuracy": 0.75},
+    ]

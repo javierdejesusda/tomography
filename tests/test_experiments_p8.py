@@ -599,6 +599,7 @@ def test_the_summary_names_the_pairs_sources_and_models(
     assert summary["models"] == ["b3", "t3", "b6", "t6", "ref"]
 
 
+STEERING_REUSED = "must not also be a reading or template source"
 BAD_CONFIGS = [
     ({"model": "ref"}, "must be one of tuned_models"),
     ({"base_models": ("b3",)}, "same length"),
@@ -613,6 +614,12 @@ BAD_CONFIGS = [
         "at most 6",
     ),
     ({"function_sources": ("r1",)}, "only once"),
+    ({"steering_source": "r1"}, STEERING_REUSED),
+    ({"steering_source": "r5"}, STEERING_REUSED),
+    (
+        {"template_source": "p1", "steering_source": "p1"},
+        STEERING_REUSED,
+    ),
     ({"base_models": ("b3", "b3")}, "only once"),
     ({"reference": "b3"}, "only once"),
     (
@@ -632,6 +639,9 @@ BAD_CONFIG_IDS = [
     "no-function",
     "seven-sources",
     "source-of-both-kinds",
+    "steering-is-a-concept-source",
+    "steering-is-a-function-source",
+    "steering-is-the-template-source",
     "repeated-base",
     "reference-is-a-base",
     "nine-models",
@@ -1230,20 +1240,6 @@ def test_run_resolves_every_source_and_model_then_executes(
         for experiments, models, kind in calls
     ]
     assert _summary(run_dir)["models"] == calls[0][1]
-
-
-def test_run_rejects_unpaired_models_before_it_looks_for_runs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def resolve(*args: Any, **kwargs: Any) -> dict[tuple[str, str], RunDir]:
-        raise AssertionError("no run should be looked up")
-
-    monkeypatch.setattr(p8_tuning, "resolve_runs", resolve)
-    config = _config(base_models=("b3",))
-    run_dir = RunDir.create(config, out_root=tmp_path)
-
-    with pytest.raises(ValueError, match="same length"):
-        run(config, run_dir)
 
 
 def test_plot_writes_fifteen_files_with_every_part(
