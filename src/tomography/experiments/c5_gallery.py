@@ -1,28 +1,54 @@
 """C5: the galleries of Figs. 10 and 17.
 
 The lie gallery asks TriviaQA questions under the plain model, under the
-honesty reader steered towards honesty and under the same reader steered
-away from it. The emotion galleries read the completions that a finished C2
-run already generated and scored. Every gallery shows rows that were not
-chosen for how they look (the first ones) next to rows that were (the ones
-that show the effect), so the reader can tell how much the choice flatters.
+honesty reader of C4 steered towards honesty and under the same reader
+steered away from it. The emotion galleries read the completions that a
+finished C2 run already generated and scored. Every gallery shows rows that
+were not chosen for how they look (the first ones) next to rows that were
+(the ones that show the effect), so the reader can tell how much the choice
+flatters.
 """
 
 from collections.abc import Sequence
-import dataclasses
+from dataclasses import dataclass
+from dataclasses import replace
 import math
+from pathlib import Path
+from typing import Any
+from typing import cast
 
 import numpy as np
 
+from tomography.control.controllers import mean_residual_norms
+from tomography.datasets.alpaca import load_alpaca
 from tomography.datasets.emotions import EMOTIONS
+from tomography.datasets.records import Example
+from tomography.datasets.records import QAExample
+from tomography.datasets.triviaqa import load_triviaqa
+from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
+from tomography.experiments.c4_honesty_control import calibration_texts
+from tomography.experiments.c4_honesty_control import honesty_readers
+from tomography.experiments.c4_honesty_control import resolve_layers
+from tomography.experiments.effects import read_trials
+from tomography.experiments.effects import write_trials
 from tomography.experiments.steering import Arm
+from tomography.experiments.steering import GenSettings
+from tomography.experiments.steering import SteeringConfig
 from tomography.experiments.steering import Trial
 from tomography.experiments.steering import is_empty_completion
+from tomography.experiments.steering import plain_arm
+from tomography.experiments.steering import reader_arm
 from tomography.experiments.steering import run_trial
+from tomography.experiments.sweep import chat_format_for
 from tomography.knowledge import DEFAULT_SHOTS
 from tomography.knowledge import extract_answer
 from tomography.knowledge import few_shot_prompt
 from tomography.knowledge import is_correct
+from tomography.model import LoadedModel
+from tomography.model import load_model
+from tomography.reading.directions import Method
+from tomography.reading.metrics import wilson_ci
 from tomography.templates import ChatFormat
 
 TABLE_COLUMNS = [
@@ -113,7 +139,7 @@ def fact_trial(
         ],
         dtype=np.float32,
     )
-    return dataclasses.replace(trial, scores=scores)
+    return replace(trial, scores=scores)
 
 
 def _verdict(score: float) -> bool | None:
@@ -167,12 +193,13 @@ def lie_rows(
         for prompt in pool
         if none.scores[prompt, 0] == 1.0 and lie.scores[prompt, 0] == 0.0
     ]
+    kinds: list[tuple[str, Sequence[int]]] = [
+        ("unfiltered", pool[:n_show]),
+        ("curated", flips[:n_show]),
+    ]
     return [
         _lie_row(kind, arm, trial, prompt)
-        for kind, prompts in (
-            ("unfiltered", pool[:n_show]),
-            ("curated", flips[:n_show]),
-        )
+        for kind, prompts in kinds
         for prompt in prompts
         for arm, trial in arms
     ]
@@ -280,3 +307,258 @@ def emotion_rows(
             for _, seed, prompt, sample in ranked[:n_show]
         )
     return rows
+
+
+@dataclass(frozen=True, kw_only=True)
+class Config(SteeringConfig):
+    """C5 settings: the galleries of Figs. 10 and 17.
+
+    Attributes:
+        method: Direction finder of the honesty reader.
+        n_pairs: Alpaca rows of the reader's training set.
+        n_eval_pairs: Alpaca rows of its validation set; None takes all.
+        strength: Relative coefficient of the lie gallery: the honest arm
+            steers with `+strength` and the lie arm with `-strength`.
+        n_pool: TriviaQA questions answered under the three arms.
+        n_show: Questions or completions per gallery and kind.
+        n_shots: Demonstrations of the plain-kind prompt.
+        c2_run: Path of a finished C2 run, or None for no emotion galleries.
+    """
+
+    experiment: str = "c5"
+    model: str = "gpt2"
+    method: Method = "logistic"
+    n_pairs: int = 128
+    n_eval_pairs: int | None = 128
+    strength: float = 0.1
+    n_pool: int = 200
+    n_show: int = 4
+    n_shots: int = len(DEFAULT_SHOTS)
+    num_samples: int = 1
+    max_new_tokens: int = 24
+    c2_run: str | None = None
+
+
+def _check_config(
+    config: Config, n_facts: int, n_layers: int
+) -> tuple[int, ...]:
+    """Validates a run before any work and returns the steered layers."""
+    if not config.strength > 0:
+        raise ValueError(f"strength must be positive, got {config.strength}")
+    if config.n_show < 1:
+        raise ValueError(f"n_show must be >= 1, got {config.n_show}")
+    if not 1 <= config.n_pool <= n_facts:
+        raise ValueError(f"n_pool must be in 1..{n_facts}, got {config.n_pool}")
+    return resolve_layers(config.layers, n_layers)
+
+
+def _emotion_strength(emotion_run: RunDir) -> float:
+    summary = emotion_run.read_json("summary")
+    if not isinstance(summary, dict) or "strength" not in summary:
+        raise ValueError("the emotion run has no 'strength' in its summary")
+    return float(summary["strength"])
+
+
+def _mean_score(trial: Trial) -> float | None:
+    value = float(trial.mean_score())
+    return None if math.isnan(value) else value
+
+
+def execute(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    alpaca: Sequence[Example],
+    facts: Sequence[QAExample],
+    emotion_run: RunDir | None = None,
+) -> None:
+    """Builds the lie gallery and reads the emotion galleries.
+
+    The honesty reader is the reader 0 of C4 for the same seed and recipe.
+    The pool is a seeded draw of the questions, answered by the plain model,
+    by the reader steered towards honesty and by the reader steered away
+    from it, all three with the same sampling seed. A flip is a question that
+    the plain model answers correctly and the lie arm answers wrongly, both
+    at sample 0.
+
+    The emotion galleries need no model: they read the completions of a
+    finished C2 run at the strength of that run.
+
+    Writes `trials` (`none`, `reading/0/<s>`, `reading/0/<-s>`), `table.json`
+    and `summary.json`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+        loaded: The wrapped model.
+        alpaca: Alpaca rows with splits.
+        facts: TriviaQA questions with gold aliases.
+        emotion_run: A finished C2 run, or None for no emotion galleries.
+
+    Raises:
+        ValueError: If `strength` is not positive, `n_show` is below 1,
+            `n_pool` is outside `1..len(facts)`, `n_shots` is outside
+            `0..15`, the layers are outside `1..L`, or the emotion run is
+            not usable.
+    """
+    layers = _check_config(config, len(facts), loaded.n_layers)
+    chat = chat_format_for(loaded)
+    order = np.random.default_rng(derive_seed(config.seed, "pool")).permutation(
+        len(facts)
+    )
+    pool = [facts[i] for i in order[: config.n_pool]]
+    prompts = [fact_prompt(chat, q.question, config.n_shots) for q in pool]
+    answers = [q.answers for q in pool]
+    emotion_table: list[list[object]] = []
+    emotion_strength = None
+    if emotion_run is not None:
+        emotion_strength = _emotion_strength(emotion_run)
+        emotion_table = emotion_rows(
+            read_trials(emotion_run, "trials"),
+            emotion_strength,
+            config.n_show,
+        )
+    sweep = honesty_readers(
+        loaded,
+        alpaca,
+        layers,
+        n_seeds=1,
+        n_pairs=config.n_pairs,
+        n_eval_pairs=config.n_eval_pairs,
+        method=config.method,
+        seed=config.seed,
+        bos=config.bos,
+        batch_size=config.batch_size,
+    )
+    norms = mean_residual_norms(
+        loaded,
+        calibration_texts(
+            alpaca, config.n_calibration, seed=derive_seed(config.seed, "norms")
+        ),
+        layers,
+        bos=config.bos,
+        batch_size=config.batch_size,
+    )
+    settings = GenSettings.from_config(config)
+    arms = [plain_arm(loaded, settings)] + [
+        reader_arm(
+            loaded,
+            settings,
+            sweep.readers[0],
+            layers=layers,
+            coeff=coeff,
+            norms=norms,
+            op=config.op,
+            mode=config.mode,
+            mask=config.mask,
+            preserve_norm=config.preserve_norm,
+            name=f"reading/0/{coeff:g}",
+        )
+        for coeff in (config.strength, -config.strength)
+    ]
+    none, honest, lie = (fact_trial(arm, prompts, answers) for arm in arms)
+    write_trials(run_dir, "trials", [none, honest, lie])
+    rows = lie_rows(none, honest, lie, config.n_show) + emotion_table
+    run_dir.write_json("table", {"columns": TABLE_COLUMNS, "rows": rows})
+    known = none.scores[:, 0] == 1.0
+    n_known = int(known.sum())
+    n_flipped = int((known & (lie.scores[:, 0] == 0.0)).sum())
+    run_dir.write_json(
+        "summary",
+        {
+            "layers": list(layers),
+            "strength": config.strength,
+            "n_pool": config.n_pool,
+            "correct_none": _mean_score(none),
+            "correct_honest": _mean_score(honest),
+            "correct_lie": _mean_score(lie),
+            "n_known": n_known,
+            "n_flipped": n_flipped,
+            "flip_rate": n_flipped / n_known if n_known else None,
+            "flip_ci": list(wilson_ci(n_flipped, n_known)) if n_known else None,
+            "emotions": list(
+                dict.fromkeys(
+                    str(row[0]).removeprefix("emotion:")
+                    for row in emotion_table
+                )
+            ),
+            "emotion_strength": emotion_strength,
+            "c2_run": config.c2_run,
+        },
+    )
+
+
+def run(config: Config, run_dir: RunDir) -> None:
+    """Loads the model, the data and the emotion run, then runs `execute`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+    """
+    execute(
+        config,
+        run_dir,
+        load_model(config.model),
+        load_alpaca(),
+        load_triviaqa(),
+        None if config.c2_run is None else RunDir.open(config.c2_run),
+    )
+
+
+def _without_demonstrations(prompt: str) -> str:
+    _, separator, question = prompt.rpartition("\n\nQ: ")
+    return f"Q: {question}" if separator else prompt
+
+
+def _cell(value: object, column: str) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float):
+        return f"{value:.3g}"
+    text = str(value)
+    if column == "prompt":
+        text = _without_demonstrations(text)
+    return " ".join(text.split()).replace("|", "\\|")
+
+
+def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
+    """Writes the galleries as one markdown file.
+
+    A gallery is text, so the file holds a section per gallery and a table
+    per section, not a figure. The few-shot demonstrations are cut from the
+    prompts, a pipe is escaped and a line break becomes a space. A column
+    that is empty in a whole gallery is left out.
+
+    Args:
+        run_dir: A finished C5 run.
+        out_dir: Directory of the output.
+
+    Returns:
+        The path of `gallery.md`.
+    """
+    table = cast(dict[str, Any], run_dir.read_json("table"))
+    columns: list[str] = table["columns"]
+    galleries: dict[str, list[list[object]]] = {}
+    for row in table["rows"]:
+        galleries.setdefault(row[0], []).append(row)
+    lines = ["# Galleries", ""]
+    for gallery, rows in galleries.items():
+        shown = [
+            i
+            for i in range(1, len(columns))
+            if any(row[i] is not None for row in rows)
+        ]
+        lines += [f"## {gallery}", ""]
+        lines.append("| " + " | ".join(columns[i] for i in shown) + " |")
+        lines.append("| " + " | ".join("---" for _ in shown) + " |")
+        lines += [
+            "| " + " | ".join(_cell(row[i], columns[i]) for i in shown) + " |"
+            for row in rows
+        ]
+        lines.append("")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "gallery.md"
+    path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    return [path]
