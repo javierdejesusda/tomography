@@ -27,6 +27,7 @@ from tomography.p9.reading import ReadingCube
 from tomography.p9.reading import check_pool
 from tomography.p9.reading import choose_layer
 from tomography.p9.reading import collect_item_activations
+from tomography.p9.reading import draw_seed
 from tomography.p9.reading import fit_type_reader
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
@@ -950,6 +951,14 @@ def test_the_cosines_use_the_signed_directions(
         np.testing.assert_allclose(
             cube.cosine[k], (cross + cross.T) / 2, atol=1e-6
         )
+
+
+def test_draw_seed_is_the_first_word_of_the_seed_sequence() -> None:
+    expected = np.random.SeedSequence([7, 3]).generate_state(1)[0]
+
+    assert draw_seed(7, 3) == int(expected)
+    assert len({draw_seed(7, d) for d in range(8)}) == 8
+    assert draw_seed(7, 3) != draw_seed(8, 3)
 
 
 @pytest.mark.parametrize("seed", [0, 5])

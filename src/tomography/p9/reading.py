@@ -363,7 +363,16 @@ class ReadingCube:
     readers: dict[str, RepReader]
 
 
-def _draw_seed(seed: int, draw: int) -> int:
+def draw_seed(seed: int, draw: int) -> int:
+    """Derives the seed of one draw of the pairs from the run seed.
+
+    Args:
+        seed: The run seed.
+        draw: Index of the draw.
+
+    Returns:
+        The first word of `SeedSequence([seed, draw])`.
+    """
     sequence = np.random.SeedSequence([seed, draw])
     return int(sequence.generate_state(1)[0])
 
@@ -494,7 +503,7 @@ def reading_cube(
                     method=method,
                     preprocess=preprocess,
                     n_pairs=n_pairs,
-                    seed=_draw_seed(seed, s),
+                    seed=draw_seed(seed, s),
                 )
                 scores = reader.score(eval_data)
                 val[m, t, s] = score(scores, "val", name)
