@@ -227,6 +227,11 @@ def _check(
     unknown = [model for model in config.models if model not in n_params]
     if unknown:
         raise ValueError(f"n_params lacks the models {unknown}")
+    counts = [n_params[model] for model in config.models]
+    if len(set(counts)) < 2:
+        raise ValueError(
+            f"n_params must hold at least two distinct counts, got {counts}"
+        )
 
 
 def _steering_row(
@@ -276,8 +281,9 @@ def execute(
     Raises:
         ValueError: If `model` is not one of 2 to 8 distinct `models`, there
             are not 1 to `MAX_PANELS` distinct sources, a run or a parameter
-            count is missing, or a run cannot be read. The first checks run
-            before any file is read.
+            count is missing, the parameter counts are all equal so that no
+            slope on their logarithm exists, or a run cannot be read. The
+            first checks run before any file is read.
     """
     _check(config, runs, n_params)
     rows: list[list[object]] = []

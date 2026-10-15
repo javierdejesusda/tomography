@@ -561,6 +561,33 @@ def test_execute_names_a_model_without_a_parameter_count(
         execute(config, run_dir, runs, {"s3": 1, "s6": 2})
 
 
+def test_execute_needs_two_distinct_parameter_counts(tmp_path: Path) -> None:
+    config = _config()
+    runs = _world(tmp_path / "in")
+    run_dir = RunDir.create(config, out_root=tmp_path / "out")
+    before = sorted(path.name for path in run_dir.path.iterdir())
+
+    with pytest.raises(ValueError, match=r"n_params.*two distinct"):
+        execute(config, run_dir, runs, {model: 5_000 for model in SIZES})
+
+    assert sorted(path.name for path in run_dir.path.iterdir()) == before
+
+
+def test_models_of_one_size_still_give_a_slope_against_another_size(
+    tmp_path: Path,
+) -> None:
+    config = _config(steering_source=None)
+    runs = _world(tmp_path / "in", steering=False)
+    run_dir = RunDir.create(config, out_root=tmp_path / "out")
+    params = {"s3": 1_000, "s6": 1_000, "s12": 100_000}
+
+    execute(config, run_dir, runs, params)
+
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert set(summary["accuracy_per_decade"]) == {"r1", "r2"}
+
+
 @pytest.fixture
 def figures(monkeypatch: pytest.MonkeyPatch) -> list[Figure]:
     """The figures that `p6_scale` saves, in order."""
