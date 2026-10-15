@@ -849,10 +849,10 @@ def _plant(
             return hit("prompting+1")
         return hit("prompting-1" if UNTRUTHFUL in prompt else "none")
 
-    def dummy(layers: Sequence[int]) -> RepReader:
+    def dummy(layers: Sequence[int], name: str) -> RepReader:
         shape = (len(layers), 4)
         return RepReader.from_arrays(
-            "dummy", layers, np.ones(shape), np.zeros(shape)
+            name, layers, np.ones(shape), np.zeros(shape)
         )
 
     def readers(
@@ -869,14 +869,14 @@ def _plant(
             tuple(layers),
             ("val",),
             accuracy,
-            tuple(dummy(layers) for _ in range(n_seeds)),
+            tuple(dummy(layers, f"reader/{i}") for i in range(n_seeds)),
         )
 
     def difference(
         loaded: LoadedModel, layers: Sequence[int], **kwargs: Any
     ) -> RepReader:
         calls["difference"].append({"layers": tuple(layers), **kwargs})
-        return dummy(layers)
+        return dummy(layers, "difference")
 
     def norms(
         loaded: LoadedModel,
@@ -900,7 +900,9 @@ def _plant(
         reader: RepReader,
         **kwargs: Any,
     ) -> Arm:
-        calls["arms"].append({"settings": settings, **kwargs})
+        calls["arms"].append(
+            {"settings": settings, "reader": reader.method, **kwargs}
+        )
         name = kwargs["name"]
         return Arm(name, lambda prompts: [], _scorer(lambda _: hit(name)))
 
@@ -1196,6 +1198,20 @@ def test_execute_steers_every_vector_arm_the_same_way(
         "reading/0/0.1",
         "reading/1/-0.1",
         "reading/1/0.1",
+    ]
+
+
+def test_execute_steers_each_arm_with_its_own_vector(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, calls = _run_planted(tmp_path, monkeypatch, tiny_gpt2)
+    assert [(call["name"], call["reader"]) for call in calls["arms"]] == [
+        ("difference/-0.1", "difference"),
+        ("difference/0.1", "difference"),
+        ("reading/0/-0.1", "reader/0"),
+        ("reading/0/0.1", "reader/0"),
+        ("reading/1/-0.1", "reader/1"),
+        ("reading/1/0.1", "reader/1"),
     ]
 
 
