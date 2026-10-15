@@ -501,12 +501,15 @@ LIE_EMPTY = {2, 9}
 
 
 def _expected_scores(
-    n_pool: int, correct: set[int], empty: set[int] | None = None
+    n_pool: int,
+    correct: set[int],
+    empty: set[int] | None = None,
+    seed: int = 0,
 ) -> NDArray[np.float64]:
     return np.array(
         [
             np.nan if i in (empty or set()) else float(i in correct)
-            for i in _pool(n_pool)
+            for i in _pool(n_pool, seed)
         ]
     )
 
@@ -758,10 +761,14 @@ def test_execute_steers_towards_and_away_from_honesty_with_one_reader(
         }
 
 
+@pytest.mark.parametrize("seed", [0, 1], ids=["seed-0", "seed-1"])
 def test_execute_stores_the_three_trials_on_the_pool(
-    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    seed: int,
 ) -> None:
-    run_dir, _ = _run_planted(tmp_path, monkeypatch, tiny_gpt2)
+    run_dir, _ = _run_planted(tmp_path, monkeypatch, tiny_gpt2, seed=seed)
     chat = chat_format_for(tiny_gpt2)
     trials = read_trials(run_dir, "trials")
     assert [trial.name for trial in trials] == [
@@ -769,14 +776,16 @@ def test_execute_stores_the_three_trials_on_the_pool(
         "reading/0/0.1",
         "reading/0/-0.1",
     ]
-    prompts = tuple(fact_prompt(chat, FACTS[i].question, 1) for i in _pool(12))
+    prompts = tuple(
+        fact_prompt(chat, FACTS[i].question, 1) for i in _pool(12, seed)
+    )
     assert all(trial.prompts == prompts for trial in trials)
     for trial, expected in zip(
         trials,
         (
-            _expected_scores(12, NONE_OK),
-            _expected_scores(12, HONEST_OK),
-            _expected_scores(12, LIE_OK, LIE_EMPTY),
+            _expected_scores(12, NONE_OK, seed=seed),
+            _expected_scores(12, HONEST_OK, seed=seed),
+            _expected_scores(12, LIE_OK, LIE_EMPTY, seed=seed),
         ),
         strict=True,
     ):
