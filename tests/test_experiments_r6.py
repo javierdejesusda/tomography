@@ -1,5 +1,6 @@
 """Tests for the R6 TruthfulQA experiment."""
 
+from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
 import dataclasses
@@ -100,6 +101,15 @@ def test_standard_scores_run_under_the_callers_hooks(
     with edit_residuals(tiny_arch, {1: shift}):
         edited = standard_scores(tiny_arch, _items())
     assert not np.array_equal(np.concatenate(plain), np.concatenate(edited))
+
+
+@pytest.mark.parametrize(
+    "scorer", [standard_scores, heuristic_scores], ids=["standard", "heuristic"]
+)
+def test_the_scorers_return_an_empty_list_for_no_items(
+    tiny_arch: LoadedModel, scorer: Callable[..., list[NDArray[Any]]]
+) -> None:
+    assert scorer(tiny_arch, []) == []
 
 
 def test_the_heuristic_levels_run_from_low_to_high() -> None:

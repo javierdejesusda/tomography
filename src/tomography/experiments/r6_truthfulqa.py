@@ -98,11 +98,14 @@ def _score(
     )
 
 
-def _split(
-    flat: NDArray[np.float32], items: Sequence[ChoiceExample]
-) -> list[NDArray[np.float32]]:
-    edges = np.cumsum([len(item.choices) for item in items])[:-1]
-    return list(np.split(flat, edges))
+def _split[T: np.generic](
+    flat: NDArray[T], items: Sequence[ChoiceExample]
+) -> list[NDArray[T]]:
+    sizes = [len(item.choices) for item in items]
+    ends = np.cumsum(sizes).tolist()
+    return [
+        flat[end - size : end] for size, end in zip(sizes, ends, strict=True)
+    ]
 
 
 def standard_scores(
@@ -171,8 +174,7 @@ def heuristic_scores(
         loaded, prompts, levels * (len(prompts) // len(levels)), batch_size
     )
     scores = heuristic_score(flat.reshape(-1, len(levels)))
-    edges = np.cumsum([len(item.choices) for item in items])[:-1]
-    return list(np.split(scores, edges))
+    return _split(scores, items)
 
 
 def validation_layer_accuracy(
