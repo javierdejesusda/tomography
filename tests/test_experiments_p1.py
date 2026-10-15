@@ -263,6 +263,8 @@ def test_execute_writes_the_files_of_a_task_and_the_two_summaries(
     run_dir = _execute(_small(), tiny_arch, tmp_path)
     stems = [
         "sweep_sentiment",
+        "curves",
+        "curves_val",
         "curves_sentiment",
         "curves_sentiment_val",
         "curves_sentiment_frame",
@@ -340,7 +342,13 @@ def test_the_curves_hold_one_reader_series_per_variant(
 ) -> None:
     run_dir = _execute(_small(), tiny_gpt2, tmp_path)
     accuracy = run_dir.read_arrays("sweep_sentiment")["accuracy"]
-    for stem, split in (("curves_sentiment", 1), ("curves_sentiment_val", 0)):
+    pairs = (
+        ("curves_sentiment", 1),
+        ("curves_sentiment_val", 0),
+        ("curves", 1),
+        ("curves_val", 0),
+    )
+    for stem, split in pairs:
         curves = run_dir.read_arrays(stem)
         sidecar = _json(run_dir, stem)
         assert sidecar["series"] == SMALL_VARIANTS
@@ -478,8 +486,10 @@ def test_the_summary_lists_the_tasks_layers_skips_and_pair_counts(
         "skipped",
         "n_eval_pairs",
         "method",
+        "curves_task",
     }
     assert summary["tasks"] == ["utility", "sentiment"]
+    assert summary["curves_task"] == "utility"
     assert summary["method"] == "logistic"
     assert set(summary["layers"]) == {"utility", "sentiment"}
     assert summary["skipped"]["sentiment"] == {}
@@ -503,14 +513,34 @@ def test_execute_is_deterministic(
     assert _json(first, "table") == _json(second, "table")
 
 
-def test_four_tasks_write_sixty_six_files_and_sixty_one_rows(
+def test_the_plain_curves_are_the_pair_of_the_first_task(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(
+        tasks=("utility", "sentiment"), kinds=("paper", "concept_swap")
+    )
+    run_dir = _execute(config, tiny_gpt2, tmp_path)
+    assert _json(run_dir, "summary")["curves_task"] == "utility"
+    for plain, stem in (
+        ("curves", "curves_utility"),
+        ("curves_val", "curves_utility_val"),
+    ):
+        assert _json(run_dir, plain)["series"] == ["paper"]
+        a, b = run_dir.read_arrays(plain), run_dir.read_arrays(stem)
+        assert a.keys() == b.keys()
+        for key in a:
+            np.testing.assert_array_equal(a[key], b[key])
+        assert _json(run_dir, plain)["n_layers"] == tiny_gpt2.n_layers
+
+
+def test_four_tasks_write_seventy_files_and_sixty_one_rows(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
     config = _config(
         tasks=("sentiment", "truth", "utility", "emotion_happiness")
     )
     run_dir = _execute(config, tiny_arch, tmp_path)
-    assert len(_stems(run_dir)) == 66
+    assert len(_stems(run_dir)) == 70
     rows = _json(run_dir, "table")
     assert len(rows) == 61
     counts = {name: 0 for name in _json(run_dir, "summary")["tasks"]}

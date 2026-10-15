@@ -172,8 +172,14 @@ def _write_task(
     sweep: VariantSweep,
     cosines: NDArray[np.float64],
     layer: int,
+    *,
+    plain: bool,
 ) -> None:
-    """Writes the sweep, the curves and the two matrices of a task."""
+    """Writes the sweep, the curves and the two matrices of a task.
+
+    With `plain`, the report and select curves are written a second time
+    under the plain stems `curves` and `curves_val`.
+    """
     name = task.name
     k = sweep.layers.index(layer)
     run_dir.write_arrays(
@@ -208,6 +214,9 @@ def _write_task(
     names = [v.name for v in variants]
     curves(f"curves_{name}", "report", names)
     curves(f"curves_{name}_val", "select", names)
+    if plain:
+        curves("curves", "report", names)
+        curves("curves_val", "select", names)
     for family in FAMILIES:
         members = [
             v.name for v in variants if v.family == family or v.name == "paper"
@@ -292,6 +301,8 @@ def _read_task(
     chat: ChatFormat,
     task: ReadingTask,
     examples: Mapping[str, Sequence[Example]],
+    *,
+    plain: bool,
 ) -> _TaskResult:
     variants, skipped = template_variants(task, chat, kinds=config.kinds)
     train, evals, sizes = _prepared_sets(
@@ -308,7 +319,17 @@ def _read_task(
     layer = best_layer(
         sweep.at("select", "paper", "paper")[READER].mean(axis=0), sweep.layers
     )
-    _write_task(config, run_dir, loaded, task, variants, sweep, cosines, layer)
+    _write_task(
+        config,
+        run_dir,
+        loaded,
+        task,
+        variants,
+        sweep,
+        cosines,
+        layer,
+        plain=plain,
+    )
     rows = _table_rows(config, task, variants, sweep, cosines, layer)
     return _TaskResult(rows, layer, skipped, sizes)
 
@@ -329,7 +350,9 @@ def execute(
     `curves_<task>_val` (the reader of every variant on its own items, report
     and select split), `curves_<task>_<family>` (the report curves of `paper`
     and one family, for the figures), `transfer_<task>` and `cosine_<task>`;
-    and `table.json` and `summary.json` for the whole run.
+    and `table.json` and `summary.json` for the whole run. The first task's
+    pair of curves is also written under the plain stems `curves` and
+    `curves_val`, with `summary["curves_task"]` naming that task.
 
     Args:
         config: The experiment settings.
@@ -359,10 +382,17 @@ def execute(
         "skipped": {},
         "n_eval_pairs": {},
         "method": config.method,
+        "curves_task": tasks[0],
     }
     for name in tasks:
         result = _read_task(
-            config, run_dir, loaded, chat, READING_TASKS[name], examples
+            config,
+            run_dir,
+            loaded,
+            chat,
+            READING_TASKS[name],
+            examples,
+            plain=name == tasks[0],
         )
         rows.extend(result.rows)
         summary["layers"][name] = result.layer
