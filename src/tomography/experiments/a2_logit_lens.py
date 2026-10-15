@@ -90,7 +90,7 @@ class Config(ExperimentConfig):
         extra_runs: Finished runs that replace a default run.
         top_k: Tokens per pole, layer and concept in the table.
         n_random: Random directions of the baseline.
-        n_boot: Bootstrap resamples of the separation bands.
+        n_boot: Bootstrap resamples of the separation bands, at least 1.
     """
 
     experiment: str = "a2"
@@ -108,6 +108,8 @@ class _Poles:
     negative: list[int]
     kept_positive: list[str]
     kept_negative: list[str]
+    dropped_positive: list[str]
+    dropped_negative: list[str]
 
 
 def lens_params(
@@ -168,7 +170,14 @@ def _poles(
             raise ValueError(
                 f"{label}: no pole word is a single token for this tokenizer"
             )
-        poles[label] = _Poles(positive, negative, kept_positive, kept_negative)
+        poles[label] = _Poles(
+            positive,
+            negative,
+            kept_positive,
+            kept_negative,
+            [w for w in source[0] if w not in kept_positive],
+            [w for w in source[1] if w not in kept_negative],
+        )
     return poles
 
 
@@ -187,7 +196,11 @@ def execute(
     compared with random directions in the summary; the lens of a random
     direction does not depend on the layer. Every concept, with or without
     words, gets the highest and lowest tokens of the lens of its mean
-    direction at every layer (`table.json`).
+    direction at every layer (`table.json`, which also holds `n_layers`, the
+    depth of the model). The summary lists, for each concept with words, the
+    pole words the single-token filter kept (`words`) and dropped
+    (`dropped_words`), and for every concept the config hash of the run it
+    was read from (`source_runs`).
 
     Args:
         config: The experiment settings.
@@ -201,14 +214,19 @@ def execute(
             through `WORDS_OF`.
 
     Raises:
-        ValueError: If `top_k` is below 1, `n_random` is below 2, the
-            readers cannot be compared, or a concept with words has an empty
-            pole after the single-token filter.
+        ValueError: If `top_k` is below 1, `n_random` is below 2, `n_boot`
+            is below 1, `seed` is negative, the readers cannot be compared,
+            or a concept with words has an empty pole after the single-token
+            filter.
     """
     if config.top_k < 1:
         raise ValueError(f"top_k must be at least 1, got {config.top_k}")
     if config.n_random < 2:
         raise ValueError(f"n_random must be at least 2, got {config.n_random}")
+    if config.n_boot < 1:
+        raise ValueError(f"n_boot must be at least 1, got {config.n_boot}")
+    if config.seed < 0:
+        raise ValueError(f"seed must be non-negative, got {config.seed}")
     layers, n_layers, n_min = common_layers(readers)
     labels = list(readers)
     poles = _poles(loaded, labels, words)
@@ -280,6 +298,10 @@ def execute(
                 label: {"+": p.kept_positive, "-": p.kept_negative}
                 for label, p in poles.items()
             },
+            "dropped_words": {
+                label: {"+": p.dropped_positive, "-": p.dropped_negative}
+                for label, p in poles.items()
+            },
             "random_separation": baseline,
             "best_lens_layer": {
                 label: best_layer(values.mean(axis=0), layers)
@@ -287,6 +309,9 @@ def execute(
             },
             "center": center,
             "scaled": scale is not None,
+            "source_runs": {
+                label: readers[label].config_hash for label in labels
+            },
         },
     )
 
@@ -348,6 +373,7 @@ def _token_figure(table: Mapping[str, Any]) -> Figure:
             for cell in grid.get_celld().values():
                 cell.set_edgecolor(style.GRID)
                 cell.set_linewidth(style.PX)
+                cell.get_text().set_parse_math(False)
     return fig
 
 

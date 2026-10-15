@@ -22,6 +22,7 @@ from tomography.datasets.records import Split
 from tomography.datasets.stimulus import StimulusSet
 from tomography.datasets.truthfulqa import load_truthfulqa
 from tomography.experiments import r6_truthfulqa
+from tomography.experiments.aggregate import read_readers
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.r6_truthfulqa import HEURISTIC_LEVELS
@@ -45,6 +46,7 @@ from tomography.model import LoadedModel
 from tomography.model import load_model
 from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import wilson_ci
+from tomography.reading.reader import RepReader
 
 SHORT_TEMPLATE = "T {scenario} A:"
 
@@ -534,6 +536,36 @@ def test_execute_writes_the_table_curves_and_summary(
         assert set(entry["best-layer"]) == {"mc1", "lo", "hi", "layer"}
 
 
+def test_execute_writes_the_readers_of_every_source(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    results: list[SweepResult] = []
+    real = r6_truthfulqa.reading_sweep
+
+    def spy(*args: Any, **kwargs: Any) -> SweepResult:
+        results.append(real(*args, **kwargs))
+        return results[-1]
+
+    monkeypatch.setattr(r6_truthfulqa, "reading_sweep", spy)
+    run_dir = _run_execute(_config(), tiny_arch, tmp_path, monkeypatch)
+    n_layers = tiny_arch.n_layers
+    sources = ("truthfulqa", "arc", "honesty")
+    for source, result in zip(sources, results, strict=True):
+        readers = run_dir.read_arrays(f"readers_{source}")
+        assert readers["layers"].dtype == np.int64
+        assert readers["layers"].tolist() == list(range(1, n_layers + 1))
+        assert readers["directions"].shape == (2, n_layers, tiny_arch.d_model)
+        assert readers["signs"].shape == (2, n_layers)
+        np.testing.assert_array_equal(
+            readers["directions"],
+            np.stack([r.directions for r in result.readers]),
+        )
+        np.testing.assert_array_equal(
+            readers["signs"], np.stack([r.signs for r in result.readers])
+        )
+    assert list(read_readers(run_dir)) == [f"r6:{s}" for s in sorted(sources)]
+
+
 def _planted_sweep(
     val: NDArray[np.float64],
     test: NDArray[np.float64],
@@ -543,7 +575,14 @@ def _planted_sweep(
     for e, cube in enumerate((val, test)):
         for s in range(len(SERIES)):
             accuracy[e, s] = cube - 0.1 * s
-    return SweepResult(tuple(layers), ("val", "test"), accuracy, ())
+    directions = np.tile([1.0, 0.0], (len(layers), 1))
+    readers = tuple(
+        RepReader.from_arrays(
+            "planted", layers, directions, np.zeros_like(directions)
+        )
+        for _ in range(test.shape[0])
+    )
+    return SweepResult(tuple(layers), ("val", "test"), accuracy, readers)
 
 
 def _record_sweeps(

@@ -29,12 +29,14 @@ def write_interval_curves(
     ylabel: str,
     chance: float | None = None,
     n_layers: int | None = None,
+    per_seed: NDArray[np.float64] | None = None,
 ) -> None:
     """Writes the `curves` arrays and sidecar with given interval bands.
 
     The arrays hold `x (K,)`, `mean (S, K)`, `lo (S, K)`, `hi (S, K)` and
-    `per_seed (S, 1, K)`, a one-row copy of the mean that the plot reader
-    expects and that draws as a single hairline under the mean line.
+    `per_seed (S, N, K)`. Without `per_seed` the last is a one-row copy of
+    the mean that the plot reader expects and that draws as a single hairline
+    under the mean line.
 
     Args:
         run_dir: The run to write into.
@@ -48,10 +50,13 @@ def write_interval_curves(
         ylabel: Label of the y axis.
         chance: Level of the chance line, or None for no line.
         n_layers: Depth of the model, which fixes the x range to 0..n_layers.
+        per_seed: The N rows of each series, shape (S, N, K) with N >= 1, to
+            draw as hairlines; None draws the mean only.
 
     Raises:
         ValueError: If `mean`, `lo` and `hi` do not share one shape (S, K),
-            or `series` does not have S names, or `x` does not have K values.
+            or `series` does not have S names, or `x` does not have K values,
+            or `per_seed` does not have shape (S, N, K).
     """
     values = np.asarray(mean, dtype=np.float64)
     lower = np.asarray(lo, dtype=np.float64)
@@ -70,13 +75,26 @@ def write_interval_curves(
         )
     if len(x) != values.shape[1]:
         raise ValueError(f"got {len(x)} x values for {values.shape[1]} columns")
+    rows = values[:, None, :]
+    if per_seed is not None:
+        rows = np.asarray(per_seed, dtype=np.float64)
+        if (
+            rows.ndim != 3
+            or rows.shape[0] != values.shape[0]
+            or rows.shape[1] < 1
+            or rows.shape[2] != values.shape[1]
+        ):
+            raise ValueError(
+                f"per_seed must have shape ({values.shape[0]}, N, "
+                f"{values.shape[1]}) with N >= 1, got {rows.shape}"
+            )
     run_dir.write_arrays(
         stem,
         x=np.asarray(x, dtype=np.float64),
         mean=values,
         lo=lower,
         hi=upper,
-        per_seed=values[:, None, :],
+        per_seed=rows,
     )
     run_dir.write_json(
         stem,

@@ -13,6 +13,7 @@ from tomography.datasets.facts import load_facts
 from tomography.datasets.records import Example
 from tomography.datasets.records import Split
 from tomography.experiments import r5_honesty
+from tomography.experiments.aggregate import read_readers
 from tomography.experiments.base import RunDir
 from tomography.experiments.r5_honesty import Config
 from tomography.experiments.r5_honesty import execute
@@ -218,6 +219,30 @@ def test_each_layer_is_chosen_on_val_and_reported_on_test(
         assert report["ci"] == pytest.approx(
             [curves["lo"][READER, at], curves["hi"][READER, at]]
         )
+
+
+def test_execute_writes_the_readers_of_the_sweep(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planted = _plant_sweep(monkeypatch)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _statements())
+    [result] = planted
+    n_layers = tiny_arch.n_layers
+    readers = run_dir.read_arrays("readers")
+    assert readers["layers"].dtype == np.int64
+    assert readers["layers"].tolist() == list(range(1, n_layers + 1))
+    assert readers["directions"].shape == (2, n_layers, tiny_arch.d_model)
+    assert readers["signs"].shape == (2, n_layers)
+    np.testing.assert_array_equal(
+        readers["directions"],
+        np.stack([r.directions for r in result.readers]),
+    )
+    np.testing.assert_array_equal(
+        readers["signs"], np.stack([r.signs for r in result.readers])
+    )
+    assert list(read_readers(run_dir)) == ["r5"]
 
 
 def test_the_scans_are_scored_by_the_first_reader(

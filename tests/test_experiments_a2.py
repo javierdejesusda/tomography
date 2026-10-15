@@ -25,8 +25,10 @@ from tomography.experiments.a2_logit_lens import plot
 from tomography.experiments.a2_logit_lens import pole_ids
 from tomography.experiments.a2_logit_lens import run
 from tomography.experiments.aggregate import ReaderSet
+from tomography.experiments.aggregate import gather_readers
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.sweep import write_curves
 from tomography.model import MODELS
 from tomography.model import LoadedModel
 
@@ -268,8 +270,16 @@ def test_the_summary_names_the_concepts_the_words_and_the_best_layers(
         "best_lens_layer",
         "center",
         "scaled",
+        "dropped_words",
+        "source_runs",
     }
     assert summary["concepts"] == list(readers)
+    assert summary["dropped_words"] == {
+        "r1": {"+": [], "-": [" bad"]},
+        "r7": {"+": [], "-": []},
+        "r6:arc": {"+": [], "-": []},
+    }
+    assert summary["source_runs"] == dict.fromkeys(readers)
     assert summary["lens_concepts"] == ["r1", "r7", "r6:arc"]
     assert summary["words"]["r1"] == {"+": list(GOOD), "-": list(BAD)}
     assert summary["words"]["r6:arc"] == summary["words"]["r7"]
@@ -314,9 +324,135 @@ def test_execute_uses_the_first_seeds_of_the_longer_sets(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
     run_dir = _run_dir(tmp_path)
-    execute(_config(), run_dir, tiny_arch, _readers(tiny_arch), WORDS)
+    readers = _readers(tiny_arch)
+    execute(_config(), run_dir, tiny_arch, readers, WORDS)
     arrays = run_dir.read_arrays("curves_lens")
     assert arrays["per_seed"].shape == (3, 4, 3)
+    unembedding, scale, center = lens_params(tiny_arch)
+    positive, negative = (pole_ids(tiny_arch, pole)[0] for pole in WORDS["r7"])
+    for i, label in ((1, "r7"), (2, "r6:arc")):
+        longer = readers[label].vectors
+        assert longer.shape[0] > 4
+        expected = np.stack(
+            [
+                pole_separation(
+                    lens_logits(
+                        longer[:4, k], unembedding, scale=scale, center=center
+                    ),
+                    positive,
+                    negative,
+                )
+                for k in range(len(LAYERS))
+            ],
+            axis=1,
+        )
+        np.testing.assert_allclose(arrays["per_seed"][i], expected, atol=1e-4)
+
+
+def _stored(
+    out_root: Path, loaded: LoadedModel, flip_seed: int | None
+) -> dict[str, ReaderSet]:
+    """The r1 readers of `_readers` as a finished run, read back.
+
+    With `flip_seed` every direction is stored negated or not at random, with
+    the sign that restores it, so the oriented vectors do not change.
+    """
+    config = load_experiment("r1").config_cls.from_dict(
+        {"experiment": "r1", "model": "tiny"}
+    )
+    run_dir = RunDir.create(config, out_root=out_root)
+    directions = _readers(loaded)["r1"].vectors.astype(np.float32)
+    write_curves(
+        run_dir,
+        np.zeros((1, directions.shape[0], len(LAYERS))),
+        LAYERS,
+        series=("reader",),
+        n_layers=loaded.n_layers,
+        n_boot=10,
+    )
+    signs = np.ones(directions.shape[:2], dtype=np.float32)
+    if flip_seed is not None:
+        signs = (
+            np.random.default_rng(flip_seed)
+            .choice([-1.0, 1.0], size=signs.shape)
+            .astype(np.float32)
+        )
+        directions = directions * signs[..., None]
+    run_dir.write_arrays(
+        "readers",
+        layers=np.asarray(LAYERS, dtype=np.int64),
+        directions=directions,
+        signs=signs,
+    )
+    run_dir.finalize()
+    return gather_readers(out_root, ("r1",), "tiny")
+
+
+def test_negated_directions_with_negative_signs_change_nothing(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    runs = {}
+    for name, flip_seed in (("plain", None), ("flipped", 5)):
+        readers = _stored(tmp_path / name / "src", tiny_arch, flip_seed)
+        runs[name] = _run_dir(tmp_path / name / "res")
+        execute(_config(), runs[name], tiny_arch, readers, WORDS)
+    plain = runs["plain"].read_arrays("curves_lens")
+    flipped = runs["flipped"].read_arrays("curves_lens")
+    assert plain["per_seed"].min() > 2.5
+    for key in plain:
+        np.testing.assert_allclose(flipped[key], plain[key], atol=1e-12)
+    for name in ("table", "summary"):
+        assert _json(runs["flipped"], name) == _json(runs["plain"], name)
+
+
+def test_the_summary_names_the_runs_the_readers_came_from(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    readers = _stored(tmp_path / "src", tiny_arch, None)
+    run_dir = _run_dir(tmp_path / "res")
+    execute(_config(), run_dir, tiny_arch, readers, WORDS)
+    expected = (
+        load_experiment("r1")
+        .config_cls.from_dict({"experiment": "r1", "model": "tiny"})
+        .config_hash()
+    )
+    assert _json(run_dir, "summary")["source_runs"] == {"r1": expected}
+
+
+def test_the_lens_centers_the_directions_of_a_layernorm_model(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    unembedding, scale, _ = lens_params(tiny_arch)
+    centers = tiny_arch.spec.model_type == "gpt2"
+    offset = _unit(_planted(tiny_arch, 4) + 0.5)
+    run_dir = _run_dir(tmp_path)
+    execute(
+        _config(),
+        run_dir,
+        tiny_arch,
+        {"r1": ReaderSet(LAYERS, offset, tiny_arch.n_layers)},
+        WORDS,
+    )
+    positive, negative = (pole_ids(tiny_arch, pole)[0] for pole in WORDS["r1"])
+
+    def separation(center: bool) -> NDArray[np.float64]:
+        return np.stack(
+            [
+                pole_separation(
+                    lens_logits(
+                        offset[:, k], unembedding, scale=scale, center=center
+                    ),
+                    positive,
+                    negative,
+                )
+                for k in range(len(LAYERS))
+            ],
+            axis=1,
+        )
+
+    got = run_dir.read_arrays("curves_lens")["per_seed"][0]
+    np.testing.assert_allclose(got, separation(centers), atol=1e-4)
+    assert np.abs(separation(True) - separation(False)).min() > 0.1
 
 
 def test_a_concept_without_words_gets_the_token_table_only(
@@ -332,6 +468,7 @@ def test_a_concept_without_words_gets_the_token_table_only(
     assert summary["concepts"] == ["r4:anger"]
     assert summary["lens_concepts"] == []
     assert summary["words"] == {}
+    assert summary["dropped_words"] == {}
     assert summary["random_separation"] == {}
     assert summary["best_lens_layer"] == {}
 
@@ -341,6 +478,8 @@ def _unfit(name: str, loaded: LoadedModel) -> tuple[Config, Any, Any, str]:
     cases: dict[str, tuple[Config, Any, Any, str]] = {
         "top-k": (_config(top_k=0), readers, WORDS, "top_k"),
         "n-random": (_config(n_random=1), readers, WORDS, "n_random"),
+        "n-boot": (_config(n_boot=0), readers, WORDS, "n_boot"),
+        "seed": (_config(seed=-1), readers, WORDS, "seed"),
         "no-single-token": (
             _config(),
             readers,
@@ -370,11 +509,26 @@ def _unfit(name: str, loaded: LoadedModel) -> tuple[Config, Any, Any, str]:
 
 @pytest.mark.parametrize(
     "name",
-    ["top-k", "n-random", "no-single-token", "nine", "layers"],
+    [
+        "top-k",
+        "n-random",
+        "n-boot",
+        "seed",
+        "no-single-token",
+        "nine",
+        "layers",
+    ],
 )
 def test_execute_refuses_unusable_input_before_any_work(
-    tiny_arch: LoadedModel, tmp_path: Path, name: str
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
 ) -> None:
+    def started(*args: Any) -> None:
+        raise AssertionError("the model was read before the checks")
+
+    monkeypatch.setattr(a2_logit_lens, "lens_params", started)
     config, readers, words, match = _unfit(name, tiny_arch)
     run_dir = _run_dir(tmp_path, config)
     with pytest.raises(ValueError, match=match):
@@ -489,8 +643,8 @@ def test_plot_writes_tokens_as_ascii_escapes(
 ) -> None:
     run_dir = _executed(tiny_arch, tmp_path)
     table = _json(run_dir, "table")
-    odd = ["\u65e5\u672c", "\u00e9t\u00e9", "\ufffd", "\n"]
-    for row, token in zip(table["rows"][:4], odd, strict=True):
+    odd = ["\u65e5\u672c", "\u00e9t\u00e9", "\ufffd", "\n", "$$", "$^$"]
+    for row, token in zip(table["rows"][: len(odd)], odd, strict=True):
         row[4] = token
     run_dir.write_json("table", table)
     figure = _plotted_figure(run_dir, tmp_path / "figs", monkeypatch)
@@ -501,6 +655,14 @@ def test_plot_writes_tokens_as_ascii_escapes(
         for cell in t.get_celld().values()
     ]
     assert all(text.isascii() for text in cells)
+    assert "$$" in cells
+    assert "$^$" in cells
+    assert not any(
+        cell.get_text().get_parse_math()
+        for ax in figure.axes
+        for t in ax.tables
+        for cell in t.get_celld().values()
+    )
     assert "\\u65e5\\u672c" in cells
     assert "\\xe9t\\xe9" in cells
     assert "\\ufffd" in cells

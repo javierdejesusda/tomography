@@ -159,6 +159,13 @@ def test_an_extra_run_of_a_pair_that_was_not_requested_is_refused(
         resolve_runs(tmp_path, ("r1",), (MODEL,), [str(stray.path)])
 
 
+def test_an_extra_run_of_another_model_is_refused(tmp_path: Path) -> None:
+    _run(tmp_path, "r1")
+    stray = _run(tmp_path, "r1", "other", n_seeds=4)
+    with pytest.raises(ValueError, match=r"r1 on other.*not requested"):
+        resolve_runs(tmp_path, ("r1",), (MODEL,), [str(stray.path)])
+
+
 def test_an_unfinished_extra_run_is_refused(tmp_path: Path) -> None:
     _run(tmp_path, "r1")
     extra = _run(tmp_path, "r1", finished=False, n_seeds=4)
@@ -290,6 +297,25 @@ def test_read_readers_returns_one_oriented_set_for_a_readers_file(
     )
     expected = directions[1, 2] / np.linalg.norm(directions[1, 2])
     np.testing.assert_allclose(readers.vectors[1, 2], -expected, atol=1e-7)
+
+
+def test_read_readers_records_the_config_hash_of_the_run(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run(tmp_path, "r6")
+    _curves(run_dir, n_layers=12)
+    _readers(run_dir, "readers_arc")
+    _readers(run_dir, "readers_truthfulqa")
+    got = read_readers(run_dir)
+    expected = _config("r6").config_hash()
+    assert {label: r.config_hash for label, r in got.items()} == {
+        "r6:arc": expected,
+        "r6:truthfulqa": expected,
+    }
+
+
+def test_a_reader_set_built_by_hand_has_no_config_hash() -> None:
+    assert ReaderSet((1,), np.ones((1, 1, 2)), 4).config_hash is None
 
 
 def test_read_readers_labels_each_suffixed_file_and_skips_other_names(

@@ -68,6 +68,55 @@ def test_writes_the_arrays_and_the_sidecar(tmp_path: Path) -> None:
     }
 
 
+def test_given_per_seed_rows_replace_the_one_row_copy_of_the_mean(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    mean, lo, hi = _bands()
+    rows = np.random.default_rng(0).normal(size=(2, 3, 4))
+
+    write_interval_curves(
+        run_dir,
+        X,
+        mean,
+        lo,
+        hi,
+        series=SERIES,
+        xlabel="Year",
+        ylabel="Known rate",
+        per_seed=rows,
+    )
+
+    arrays = run_dir.read_arrays("curves")
+    np.testing.assert_array_equal(arrays["per_seed"], rows)
+    np.testing.assert_array_equal(arrays["mean"], mean)
+
+
+@pytest.mark.parametrize("shape", [(2, 4), (3, 3, 4), (2, 0, 4), (2, 3, 5)])
+def test_per_seed_rows_must_match_the_series_and_columns(
+    tmp_path: Path, shape: tuple[int, ...]
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    mean, lo, hi = _bands()
+
+    with pytest.raises(
+        ValueError, match=r"per_seed must have shape \(2, N, 4\)"
+    ):
+        write_interval_curves(
+            run_dir,
+            X,
+            mean,
+            lo,
+            hi,
+            series=SERIES,
+            xlabel="x",
+            ylabel="y",
+            per_seed=np.zeros(shape),
+        )
+
+    assert not (run_dir.path / "curves.npz").exists()
+
+
 def test_stores_float64_whatever_the_input_type(tmp_path: Path) -> None:
     run_dir = _run_dir(tmp_path)
     mean = np.array([[1, 2, 3], [4, 5, 6]])

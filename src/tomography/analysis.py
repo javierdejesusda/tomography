@@ -9,6 +9,7 @@ from sklearn.manifold import TSNE
 
 from tomography.reading.directions import FloatArray
 from tomography.reading.directions import Preprocess
+from tomography.reading.metrics import bootstrap_ci
 
 _PREPROCESSES = get_args(Preprocess)
 
@@ -150,9 +151,9 @@ def layer_cosines(vectors: FloatArray) -> NDArray[np.float64]:
 def seed_agreement(vectors: FloatArray) -> NDArray[np.float64]:
     """Computes how well each run agrees with the others at every layer.
 
-    The mean over runs equals the mean pairwise cosine. The rows are the
-    bootstrap units, one per run, because pairs share runs and a bootstrap
-    over pairs would give a band that is too narrow.
+    The mean over runs equals the mean pairwise cosine. The rows are not
+    independent, because every pair of runs enters two of them, so a band for
+    that mean resamples `agreement_pseudo_values` instead.
 
     Args:
         vectors: Directions of shape (N, K, d): run, layer, width. Each one
@@ -173,6 +174,67 @@ def seed_agreement(vectors: FloatArray) -> NDArray[np.float64]:
     to_total = np.einsum("nkd,kd->nk", unit, unit.sum(axis=0))
     to_self = np.einsum("nkd,nkd->nk", unit, unit)
     return np.asarray((to_total - to_self) / (n_runs - 1))
+
+
+def agreement_pseudo_values(vectors: FloatArray) -> NDArray[np.float64]:
+    """Computes the jackknife pseudo-values of the mean pairwise cosine.
+
+    The mean pairwise cosine is a U-statistic of degree two. The rows of
+    `seed_agreement` share pairs, so resampling them gives a band that is too
+    narrow. The pseudo-value of run i is `N * U - (N - 1) * U_without_i`; the
+    pseudo-values average to the mean pairwise cosine and are the units to
+    resample for its band.
+
+    Args:
+        vectors: Directions of shape (N, K, d): run, layer, width. Each one
+            is normalized first.
+
+    Returns:
+        Array of shape (N, K): for each run and layer, the pseudo-value.
+
+    Raises:
+        ValueError: If `vectors` is not 3-D, not finite or has a zero vector,
+            or there are fewer than three runs.
+    """
+    unit = _unit_runs(vectors)
+    n_runs = unit.shape[0]
+    if n_runs < 3:
+        raise ValueError("pseudo-values need at least three runs")
+    rows = seed_agreement(unit)
+    mean = rows.mean(axis=0)
+    return np.asarray(mean + 2.0 * (n_runs - 1) / (n_runs - 2) * (rows - mean))
+
+
+def agreement_band(
+    vectors: FloatArray,
+    *,
+    alpha: float = 0.05,
+    n_boot: int = 2000,
+    seed: int = 0,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Computes a bootstrap band of the mean pairwise cosine at every layer.
+
+    The band is the percentile bootstrap interval of the mean of
+    `agreement_pseudo_values`, resampled over runs.
+
+    Args:
+        vectors: Directions of shape (N, K, d): run, layer, width. Each one
+            is normalized first.
+        alpha: One minus the coverage; 0.05 gives a 95% band.
+        n_boot: Number of bootstrap resamples.
+        seed: Seed of the resampling.
+
+    Returns:
+        The lower and upper bounds, each of shape (K,).
+
+    Raises:
+        ValueError: If `vectors` is not 3-D, not finite or has a zero vector,
+            there are fewer than three runs, or `alpha` or `n_boot` is
+            invalid.
+    """
+    return bootstrap_ci(
+        agreement_pseudo_values(vectors), alpha=alpha, n_boot=n_boot, seed=seed
+    )
 
 
 def mean_direction(vectors: FloatArray) -> NDArray[np.float64]:
