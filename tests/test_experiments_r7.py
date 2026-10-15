@@ -212,6 +212,7 @@ def test_execute_writes_curves_readers_and_summary(
             "best_accuracy",
             "ci",
             "accuracy_at_val_layer",
+            "ci_at_val_layer",
             "n_eval_pairs",
         }
         assert entry["best_layer"] in layers.tolist()
@@ -223,6 +224,10 @@ def test_execute_writes_curves_readers_and_summary(
         assert lo == pytest.approx(curves[name]["lo"][0, at])
         assert hi == pytest.approx(curves[name]["hi"][0, at])
         assert lo <= entry["best_accuracy"] <= hi
+        lo_val, hi_val = entry["ci_at_val_layer"]
+        assert lo_val == pytest.approx(curves[name]["lo"][0, at_val])
+        assert hi_val == pytest.approx(curves[name]["hi"][0, at_val])
+        assert lo_val <= entry["accuracy_at_val_layer"] <= hi_val
         assert entry["n_eval_pairs"] == 12
 
 
@@ -260,6 +265,33 @@ def test_each_set_reports_its_best_layer_and_the_val_layer_accuracy(
         assert entry["best_layer"] == layer
         assert entry["best_accuracy"] == pytest.approx(best)
         assert entry["accuracy_at_val_layer"] == pytest.approx(at_val)
+
+
+def test_the_val_layer_accuracy_carries_the_interval_at_that_layer(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planted = _planted_sweep(
+        tiny_arch, {"val": (0, 0.9), "test": (2, 0.8), "cities": (1, 0.7)}
+    )
+    planted.accuracy[:, 0, 0, :] -= 0.1
+    planted.accuracy[:, 0, 1, :] += 0.1
+    monkeypatch.setattr(r7_truth, "reading_sweep", lambda *a, **k: planted)
+    config = _config(n_seeds=2, ood_subsets=("cities",))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _facts(), _truth_sets())
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["val_layer"] == 1
+    entry = summary["sets"]["test"]
+    assert entry["best_layer"] == 3
+    curves = run_dir.read_arrays("curves")
+    lo, hi = entry["ci_at_val_layer"]
+    assert lo == pytest.approx(curves["lo"][0, 0])
+    assert hi == pytest.approx(curves["hi"][0, 0])
+    assert lo < entry["accuracy_at_val_layer"] < hi
+    assert entry["ci_at_val_layer"] != entry["ci"]
 
 
 def test_the_readers_are_fitted_once_and_scored_on_every_set(

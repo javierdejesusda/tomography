@@ -82,8 +82,8 @@ def execute(
     with no refit, on the fact `val` and `test` splits and on every
     out-of-distribution Geometry of Truth subset. Writes `curves` (the test
     set), one `curves_<name>` per other set, `readers.npz` and `summary.json`
-    (the best-layer accuracy of each set and its accuracy at the layer
-    chosen on val).
+    (the best-layer accuracy of each set with its interval, and its accuracy
+    with its interval at the layer chosen on val).
 
     Args:
         config: The experiment settings.
@@ -178,6 +178,10 @@ def execute(
                 float(curves[name]["hi"][index, at]),
             ],
             "accuracy_at_val_layer": float(mean[at_val]),
+            "ci_at_val_layer": [
+                float(curves[name]["lo"][index, at_val]),
+                float(curves[name]["hi"][index, at_val]),
+            ],
             "n_eval_pairs": int(stimuli.groups.shape[0]),
         }
     run_dir.write_json(
