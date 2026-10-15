@@ -26,6 +26,7 @@ from tomography.experiments.p5_persona_wording import PERSONA_PAIRS
 from tomography.experiments.p5_persona_wording import PLAIN
 from tomography.experiments.p5_persona_wording import PLAIN_POSITION
 from tomography.experiments.p5_persona_wording import Config
+from tomography.experiments.p5_persona_wording import balanced_flip
 from tomography.experiments.p5_persona_wording import condition_position
 from tomography.experiments.p5_persona_wording import condition_stimuli
 from tomography.experiments.p5_persona_wording import execute
@@ -38,6 +39,7 @@ from tomography.experiments.sweep import SweepResult
 from tomography.experiments.sweep import shuffle_within_groups
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading.reader import RepReader
 from tomography.templates import PAPER_TEMPLATES
 from tomography.templates import ChatFormat
 from tomography.templates import ConceptTemplate
@@ -185,6 +187,12 @@ def test_plain_stimuli_pair_true_against_false_statements() -> None:
     assert stimuli.labels.shape == (8,)
     for group in stimuli.groups:
         assert sorted(stimuli.labels[group]) == [0, 1]
+    source = {e.uid: e for e in statements}
+    for text, label, uid in zip(
+        stimuli.texts, stimuli.labels, stimuli.uids, strict=True
+    ):
+        assert label == source[uid].label
+        assert text == source[uid].text
 
 
 def test_plain_stimuli_cap_the_pairs_and_pass_none_through() -> None:
@@ -231,19 +239,118 @@ def test_a_persona_condition_renders_its_own_words(condition: str) -> None:
     assert stimuli.groups.shape == (8, 2)
 
 
-def test_random_label_shuffles_the_training_labels_within_pairs() -> None:
-    real = _persona("paper", n_pairs=30)
-    shuffled = _persona("random_label", n_pairs=30)
-    assert shuffled.texts == real.texts
-    expected = shuffle_within_groups(
+@pytest.mark.parametrize("n_pairs", [12, 11])
+def test_random_label_shuffles_the_training_labels_within_pairs(
+    n_pairs: int,
+) -> None:
+    real = _persona("paper", n_pairs=n_pairs)
+    flipped = _persona("random_label", n_pairs=n_pairs)
+    assert flipped.texts == real.texts
+    expected = balanced_flip(
         real.labels, real.groups, seed=derive_seed(3, "random_label")
     )
-    np.testing.assert_array_equal(shuffled.labels, expected)
-    assert (shuffled.labels != real.labels).any()
-    for group in shuffled.groups:
-        assert sorted(shuffled.labels[group]) == [0, 1]
-    evaluation = _persona("random_label", n_pairs=30, train=False)
+    np.testing.assert_array_equal(flipped.labels, expected)
+    first = real.groups[:, 0]
+    swapped = flipped.labels[first] != real.labels[first]
+    assert swapped.sum() == n_pairs // 2
+    for group in flipped.groups:
+        assert sorted(flipped.labels[group]) == [0, 1]
+    evaluation = _persona("random_label", n_pairs=n_pairs, train=False)
     np.testing.assert_array_equal(evaluation.labels, real.labels)
+
+
+def _pair_labels(n: int) -> tuple[Any, Any]:
+    groups = np.arange(2 * n, dtype=np.int64).reshape(n, 2)
+    labels = np.empty(2 * n, dtype=np.int64)
+    labels[0::2] = np.arange(n) % 2
+    labels[1::2] = 1 - labels[0::2]
+    return labels, groups
+
+
+@pytest.mark.parametrize("n", [1, 2, 6, 7])
+def test_balanced_flip_swaps_exactly_half_of_the_pairs(n: int) -> None:
+    labels, groups = _pair_labels(n)
+    before = labels.copy()
+    flipped = balanced_flip(labels, groups, seed=5)
+    np.testing.assert_array_equal(labels, before)
+    swapped = flipped[groups[:, 0]] != labels[groups[:, 0]]
+    assert swapped.sum() == n // 2
+    for group in groups:
+        assert sorted(flipped[group]) == [0, 1]
+    chosen = np.random.default_rng(5).permutation(n)[: n // 2]
+    assert sorted(np.flatnonzero(swapped).tolist()) == sorted(chosen.tolist())
+
+
+def test_balanced_flip_is_deterministic_and_the_seed_picks_the_pairs() -> None:
+    labels, groups = _pair_labels(20)
+    first = balanced_flip(labels, groups, seed=1)
+    np.testing.assert_array_equal(first, balanced_flip(labels, groups, seed=1))
+    for seed in (2, 3, 4):
+        other = balanced_flip(labels, groups, seed=seed)
+        assert not np.array_equal(other, first)
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        pytest.param("three", "two members", id="three-members"),
+        pytest.param("one", "two members", id="one-member"),
+        pytest.param("no_positive", "one label-1 member", id="no-positive"),
+        pytest.param("two_positive", "one label-1 member", id="two-positive"),
+    ],
+)
+def test_balanced_flip_needs_pairs_with_one_positive_member(
+    case: str, message: str
+) -> None:
+    labels, groups = _pair_labels(4)
+    if case == "three":
+        groups = np.arange(12, dtype=np.int64).reshape(4, 3)
+        labels = np.tile(np.array([1, 0, 0], dtype=np.int64), 4)
+    elif case == "one":
+        groups = groups.copy()
+        groups[1, 1] = -1
+    elif case == "no_positive":
+        labels[groups[2]] = 0
+    else:
+        labels[groups[2]] = 1
+    with pytest.raises(ValueError, match=message):
+        balanced_flip(labels, groups, seed=0)
+
+
+def test_balanced_flip_leaks_less_than_a_per_pair_shuffle() -> None:
+    n, d = 32, 64
+    rng = np.random.default_rng(0)
+    direction = rng.normal(size=d)
+    direction /= np.linalg.norm(direction)
+    shift = 2.0 * rng.normal(size=(n, d))
+    labels, groups = _pair_labels(n)
+    h = np.empty((1, 2 * n, d))
+    sign = (2 * labels[0::2] - 1)[:, None]
+    h[0, 0::2] = shift + sign * direction + 0.3 * rng.normal(size=(n, d))
+    h[0, 1::2] = shift - sign * direction + 0.3 * rng.normal(size=(n, d))
+
+    def read(fitted: Any) -> Any:
+        reader = RepReader.fit(
+            "mean_diff",
+            h,
+            (1,),
+            labels=fitted,
+            pairs=groups,
+            groups=groups,
+            preprocess="center",
+        )
+        return reader.directions[0]
+
+    paper = read(labels)
+    seeds = range(20)
+
+    def overlap(make: Any) -> float:
+        return float(np.mean([abs(read(make(s)) @ paper) for s in seeds]))
+
+    balanced = overlap(lambda s: balanced_flip(labels, groups, seed=s))
+    shuffled = overlap(lambda s: shuffle_within_groups(labels, groups, seed=s))
+    assert balanced < 0.5 * shuffled
+    assert balanced < 0.2
 
 
 def test_instruction_only_is_the_persona_instruction_alone() -> None:
@@ -450,6 +557,30 @@ def test_the_readers_files_use_the_reading_layout(
         assert set(np.unique(readers["signs"])) <= {-1.0, 1.0}
 
 
+def test_the_readers_files_hold_the_fitted_readers(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    results: list[SweepResult] = []
+    real = p5_persona_wording.sweep_from_activations
+
+    def spy(*args: Any, **kwargs: Any) -> SweepResult:
+        result = real(*args, **kwargs)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(p5_persona_wording, "sweep_from_activations", spy)
+    conditions = ("paper", "synonym_0")
+    run_dir = _execute(tiny_arch, tmp_path, conditions=conditions)
+    assert len(results) == len(conditions)
+    for condition, result in zip(conditions, results, strict=True):
+        saved = run_dir.read_arrays(f"readers_{condition}")
+        directions = np.stack([r.directions for r in result.readers])
+        signs = np.stack([r.signs for r in result.readers])
+        assert saved["layers"].tolist() == list(result.layers)
+        np.testing.assert_array_equal(saved["directions"], directions)
+        np.testing.assert_array_equal(saved["signs"], signs)
+
+
 def test_the_cosine_curves_compare_each_reader_with_the_paper_reader(
     ran: RunDir, tiny_arch: LoadedModel
 ) -> None:
@@ -642,7 +773,7 @@ def test_the_conditions_draw_their_stimuli_per_seed_and_split(
     calls = _record_conditions(monkeypatch)
     config = _config()
     _execute(tiny_arch, tmp_path)
-    expected = []
+    expected: list[tuple[str, bool, int, int | None, set[str]]] = []
     for condition in config.conditions:
         expected += [
             (
@@ -700,6 +831,29 @@ def test_a_none_evaluation_size_takes_every_pair(
     calls = _record_conditions(monkeypatch)
     _execute(tiny_arch, tmp_path, n_eval_pairs=None)
     assert {c[3] for c in calls if not c[1]} == {None}
+
+
+def test_the_in_distribution_sets_are_capped_at_their_own_split(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts = (
+        _statements(count=12, splits=("train",))
+        + _statements(count=5, splits=("val",))
+        + _statements(count=7, splits=("test",))
+    )
+    calls = _record_conditions(monkeypatch)
+    _execute(
+        tiny_arch,
+        tmp_path,
+        facts=facts,
+        conditions=("paper",),
+        n_eval_pairs=256,
+    )
+    sizes = {next(iter(c[4])): c[3] for c in calls if not c[1]}
+    assert sizes == {"val": 5, "test": 7}
+    for c in calls:
+        if not c[1]:
+            assert c[5].groups.shape[0] == c[3]
 
 
 def _expected_positions(config: Config) -> list[str]:
