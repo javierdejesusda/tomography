@@ -46,6 +46,7 @@ from tomography.viz.style import style_context
 GPT2_SIZES: tuple[str, ...] = ("gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
 MAX_PANELS = 6
 MAX_MODELS = 8
+LEGEND_COLUMNS = 4
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -410,8 +411,9 @@ def plot_depth_panels(
 
     One panel per source, at most three to a row, each with one curve and band
     per model over the relative depth `layer / L` so that models of different
-    depth share an axis. The legend sits above the first panel only. Only the
-    run's own `curves_<source>_<model>` files are read.
+    depth share an axis. One legend for the whole figure sits above the panels,
+    in at most `LEGEND_COLUMNS` columns. Only the run's own
+    `curves_<source>_<model>` files are read.
 
     Args:
         run_dir: A run holding a `curves_<source>_<model>` file for every
@@ -466,19 +468,19 @@ def plot_depth_panels(
                 ylabel="Accuracy" if i % columns == 0 else "",
                 chance=curves[0].chance,
                 n_layers=1,
-                legend=i == 0,
+                legend=False,
                 ax=ax,
             )
-        legend = axes[0, 0].get_legend()
-        pad = 6.0 + (
-            0.0
-            if legend is None
-            else legend.get_window_extent().height * 72 / fig.dpi
-        )
-        for i, source in enumerate(sources):
-            axes[i // columns, i % columns].set_title(source, pad=pad)
+            ax.set_title(source)
         for i in range(len(sources), rows * columns):
             fig.delaxes(axes[i // columns, i % columns])
+        handles, names = axes[0, 0].get_legend_handles_labels()
+        fig.legend(
+            handles,
+            names,
+            loc="outside upper center",
+            ncols=min(len(models), LEGEND_COLUMNS),
+        )
     return save_figure(fig, out_dir, name)
 
 

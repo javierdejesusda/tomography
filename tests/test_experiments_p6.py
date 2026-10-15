@@ -48,6 +48,13 @@ R2_VAL = {"s3": (1, 0.55), "s6": (2, 0.65), "s12": (4, 0.75)}
 SLOPE = {"s3": 0.5, "s6": 1.5, "s12": 2.5}
 READING_LAYER = {"s3": 2, "s6": 3, "s12": 8}
 STEER_LAYER = {"s3": 3, "s6": 4, "s12": 6}
+REGISTERED = (
+    *GPT2_SIZES,
+    "qwen3-0.6b-base",
+    "qwen3-0.6b",
+    "qwen3-1.7b-base",
+    "qwen3-1.7b",
+)
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -575,7 +582,7 @@ def _panel_run(
     run_dir = _new_run(tmp_path, "p6", "s3")
     for source in sources:
         for model in models:
-            depth = DEPTH[model]
+            depth = DEPTH.get(model, 6)
             write_curves(
                 run_dir,
                 _per_seed(_peaked(depth, 2, 0.8))[:1],
@@ -646,16 +653,53 @@ def test_the_depth_panels_draw_each_model_on_relative_depth(
             )
 
 
-def test_only_the_first_depth_panel_has_a_legend(
+def test_the_depth_panels_share_one_figure_legend(
     tmp_path: Path, figures: list[Figure]
 ) -> None:
     run_dir = _execute(tmp_path)
 
     plot_depth_panels(run_dir, tmp_path / "figs", ["r1", "r2"], SIZES, "depth")
 
-    first, second = figures[0].axes
-    assert first.get_legend() is not None
-    assert second.get_legend() is None
+    fig = figures[0]
+    assert all(ax.get_legend() is None for ax in fig.axes)
+    (legend,) = fig.legends
+    assert [t.get_text() for t in legend.get_texts()] == list(SIZES)
+
+
+@pytest.mark.parametrize(
+    ("n_models", "columns"),
+    [(2, 2), (3, 3), (4, 4), (5, 4), (8, 4)],
+    ids=["two", "three", "four", "five", "eight"],
+)
+def test_the_figure_legend_takes_four_columns_at_most(
+    tmp_path: Path, figures: list[Figure], n_models: int, columns: int
+) -> None:
+    models = REGISTERED[:n_models]
+    run_dir = _panel_run(tmp_path, ["r1", "r2"], models)
+
+    plot_depth_panels(run_dir, tmp_path / "figs", ["r1", "r2"], models, "depth")
+
+    (legend,) = figures[0].legends
+    lefts = {round(t.get_window_extent().x0) for t in legend.get_texts()}
+    assert len(lefts) == columns
+
+
+@pytest.mark.parametrize(
+    ("n_models", "n_sources"),
+    [(5, 5), (8, 6), (8, 3)],
+    ids=["five-by-five", "eight-by-six", "eight-by-three"],
+)
+def test_the_depth_panels_keep_a_quarter_of_the_figure_height(
+    tmp_path: Path, figures: list[Figure], n_models: int, n_sources: int
+) -> None:
+    sources = [f"r{i}" for i in range(1, n_sources + 1)]
+    models = REGISTERED[:n_models]
+    run_dir = _panel_run(tmp_path, sources, models)
+
+    plot_depth_panels(run_dir, tmp_path / "figs", sources, models, "depth")
+
+    heights = [ax.get_position().height for ax in figures[0].axes]
+    assert min(heights) >= 0.25
 
 
 @pytest.mark.parametrize(
@@ -820,19 +864,18 @@ def test_an_interval_that_misses_the_mean_still_plots(tmp_path: Path) -> None:
     assert len(paths) == 6
 
 
-def test_the_panel_titles_sit_above_the_legend(
+def test_the_panel_titles_sit_below_the_figure_legend(
     tmp_path: Path, figures: list[Figure]
 ) -> None:
     run_dir = _execute(tmp_path)
 
     plot_depth_panels(run_dir, tmp_path / "figs", ["r1", "r2"], SIZES, "depth")
 
-    first, second = figures[0].axes
-    legend = first.get_legend()
-    assert legend is not None
-    legend_top = legend.get_window_extent().y1
-    assert first.title.get_window_extent().y0 >= legend_top
-    assert second.title.get_window_extent().y0 >= legend_top
+    fig = figures[0]
+    (legend,) = fig.legends
+    legend_bottom = legend.get_window_extent().y0
+    for ax in fig.axes:
+        assert ax.title.get_window_extent().y1 <= legend_bottom
 
 
 @pytest.mark.slow
