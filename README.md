@@ -352,10 +352,11 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
 - `p7` ([`p7_extraction_steering.py`](src/tomography/experiments/p7_extraction_steering.py)): whether a
   sentiment reader that reads well steers well. Readers are fitted on SST-2 under the template variants of the
   sentiment task, as in `p1` (`templates`, at most 8, `paper` required), steer text with the protocol of `c1`
-  at each layer of `sweep_layers` (the model's default sweep when `None`), and then steer the same prompts
-  rewritten in three formats (`formats`: `raw`, `chat`, `story`). A unit is a template, a sweep layer and a
-  steering reader; it is readable when its validation accuracy is at least `read_threshold` and inverted when
-  it is readable and its primary-judge dose slope is negative. The summary holds the inversion rate with a Wilson
+  at each layer of `sweep_layers` (the model's default sweep when `None`), and then steer a second, disjoint
+  prompt list rewritten in three formats (`formats`: `raw`, `chat`, `story`) at the layer where each template
+  steers best. A unit is a template, a sweep layer and a steering reader; it is readable when its own
+  validation accuracy is at least `read_threshold` and inverted when it is readable and its primary-judge
+  dose slope is negative. The summary holds the inversion rate with a Wilson
   interval, the Spearman correlation of reading accuracy and of logit lens separation with the slope, the
   share of templates whose lens peak is their steering layer, the mean gap between the reading and the
   steering depth, and the share of units on which the two judges agree on the sign. Defaults: `method`

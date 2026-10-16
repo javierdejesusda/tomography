@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 import contextlib
 import dataclasses
+from functools import partial
 from pathlib import Path
 import time
 from types import SimpleNamespace
@@ -26,6 +27,7 @@ from tomography.datasets.wikitext import load_wikitext
 from tomography.experiments import p7_extraction_steering as p7
 from tomography.experiments.a2_logit_lens import lens_params
 from tomography.experiments.a2_logit_lens import pole_ids
+from tomography.experiments.aggregate import read_table
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.c1_sentiment_steering import draw_prompts
@@ -465,7 +467,11 @@ SENTENCE_WORDS = tuple(
     ]
 )
 SWEEP = (1, 2, 3)
-NONZERO = (-0.2, 0.2)
+TEMPLATE_NAMES = ("paper", "no_template")
+FORMAT_NAMES = ("raw", "chat")
+READERS = (0, 1)
+DOSE_COEFFS = (-0.2, 0.0, 0.2)
+NONZERO = tuple(c for c in DOSE_COEFFS if c != 0.0)
 
 
 def _sst2(n: int = 80) -> list[Example]:
@@ -497,14 +503,14 @@ def _score(texts: Any) -> NDArray[np.float32]:
 def _config(**overrides: Any) -> Config:
     base = Config(
         model="tiny",
-        templates=("paper", "no_template"),
-        formats=("raw", "chat"),
+        templates=TEMPLATE_NAMES,
+        formats=FORMAT_NAMES,
         n_seeds=3,
         n_steer_seeds=2,
         n_pairs=8,
         n_eval_pairs=8,
         sweep_layers=SWEEP,
-        coeffs=(-0.2, 0.0, 0.2),
+        coeffs=DOSE_COEFFS,
         n_prompts=3,
         n_calibration=10,
         n_neutral=8,
@@ -719,23 +725,26 @@ def test_the_lens_curves_hold_the_separation_of_the_steering_readers(
         )
 
 
-TEMPLATE_NAMES = ("paper", "no_template")
-FORMAT_NAMES = ("raw", "chat")
-READERS = (0, 1)
-DOSE_COEFFS = (-0.2, 0.0, 0.2)
-READ = {"paper": (0.9, 0.7, 0.4), "no_template": (0.5, 0.6, 0.8)}
+READ = {
+    "paper": ((0.9, 0.7, 0.4), (0.5, 0.65, 0.3), (0.1, 0.1, 0.1)),
+    "no_template": ((0.5, 0.6, 0.8), (0.7, 0.55, 0.9), (0.2, 0.2, 0.2)),
+}
 
 
 @contextlib.contextmanager
 def _planted_reading() -> Iterator[None]:
-    """Replaces the reader accuracy of each template by the `READ` values."""
+    """Replaces the reader accuracy of each template by the `READ` values.
+
+    `READ[template]` holds one row per seed and one column per layer. The
+    third seed does not steer.
+    """
     real = p7.reading_sweep
     planted = iter(READ.values())
 
     def sweep(loaded: Any, train: Any, evals: Any, **kwargs: Any) -> Any:
         result = real(loaded, train, evals, **kwargs)
         accuracy = result.accuracy.copy()
-        accuracy[:, SERIES.index("reader")] = next(planted)
+        accuracy[:, SERIES.index("reader")] = np.array(next(planted))
         return dataclasses.replace(result, accuracy=accuracy)
 
     with pytest.MonkeyPatch.context() as patch:
@@ -951,6 +960,24 @@ def test_the_steering_layer_of_a_template_is_where_the_primary_slope_peaks(
     assert [c["layers"] for c in arms[24:]] == expected
 
 
+def test_each_template_steers_the_transfer_at_its_own_layer(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planted = iter((1, 3))
+    monkeypatch.setattr(p7, "slope_layer", lambda *args: next(planted))
+    arms = _spy_reader_arm(monkeypatch)
+    run_dir = _execute(tiny_arch, tmp_path)
+    expected = [
+        [(1, 3)[t]]
+        for _ in FORMAT_NAMES
+        for t in (0, 1)
+        for _ in READERS
+        for _ in NONZERO
+    ]
+    assert [c["layers"] for c in arms[24:]] == expected
+    assert [row["steer_layer"] for row in _table(run_dir)] == [1, 3]
+
+
 def test_the_arms_use_the_sweep_layers_and_the_first_readers(
     tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1024,12 +1051,7 @@ def test_the_transfer_matrix_is_the_mean_primary_slope_of_the_transfer_trials(
         )
 
 
-def _table(run_dir: RunDir) -> list[dict[str, Any]]:
-    table = run_dir.read_json("table")
-    assert isinstance(table, dict)
-    return [
-        dict(zip(table["columns"], row, strict=True)) for row in table["rows"]
-    ]
+_table = partial(read_table, stem="table")
 
 
 def _summary(run_dir: RunDir) -> dict[str, Any]:
@@ -1038,14 +1060,14 @@ def _summary(run_dir: RunDir) -> dict[str, Any]:
     return summary
 
 
-def _units(run_dir: RunDir) -> SimpleNamespace:
+def _units(run_dir: RunDir, sweep: tuple[int, ...] = SWEEP) -> SimpleNamespace:
     """The (template, sweep layer, reader) units, rebuilt from the files."""
     slope = run_dir.read_arrays("curves_slope")["per_seed"]
     check = run_dir.read_arrays("curves_slope_check")["per_seed"]
     lens = run_dir.read_arrays("curves_lens")["per_seed"]
     read = np.array(
         [
-            [[READ[template][layer - 1]] * 2 for layer in SWEEP]
+            [[READ[template][r][layer - 1] for r in READERS] for layer in sweep]
             for template in TEMPLATE_NAMES
         ]
     )
@@ -1109,7 +1131,9 @@ def test_the_table_reads_each_template_at_its_best_validation_layer(
     rows = _table(finished.run_dir)
     assert [row["read_layer"] for row in rows] == [1, 3]
     assert [row["read_depth"] for row in rows] == pytest.approx([1 / 3, 1.0])
-    assert [row["read_accuracy"] for row in rows] == pytest.approx([0.9, 0.8])
+    assert [row["read_accuracy"] for row in rows] == pytest.approx(
+        [0.5, 1.9 / 3]
+    )
 
 
 def test_the_table_steers_each_template_at_its_steepest_sweep_layer(
@@ -1156,7 +1180,7 @@ def test_the_table_counts_the_readable_and_the_inverted_units(
     readable = units.read >= 0.6
     inverted = readable & (units.slope < 0)
     rows = _table(finished.run_dir)
-    assert [row["n_readable"] for row in rows] == [4, 4]
+    assert [row["n_readable"] for row in rows] == [3, 4]
     assert [row["n_inverted"] for row in rows] == inverted.sum(
         axis=(1, 2)
     ).tolist()
@@ -1190,10 +1214,10 @@ def test_the_inversion_is_the_readable_units_with_a_negative_slope(
     inverted = int((readable & (units.slope < 0)).sum())
     inversion = _summary(finished.run_dir)["inversion"]
     assert inversion == {
-        "readable": 8,
+        "readable": 7,
         "inverted": inverted,
-        "rate": inverted / 8,
-        "ci": list(wilson_ci(inverted, 8)),
+        "rate": inverted / 7,
+        "ci": list(wilson_ci(inverted, 7)),
     }
     rows = _table(finished.run_dir)
     assert sum(row["n_readable"] for row in rows) == inversion["readable"]
@@ -1231,7 +1255,14 @@ def test_nothing_readable_leaves_the_inversion_rate_empty(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
     with _planted_reading():
-        run_dir = _execute(tiny_arch, tmp_path, read_threshold=0.99)
+        run_dir = _execute(
+            tiny_arch,
+            tmp_path,
+            read_threshold=0.99,
+            formats=("raw",),
+            sweep_layers=(2,),
+            n_steer_seeds=1,
+        )
     assert _summary(run_dir)["inversion"] == {
         "readable": 0,
         "inverted": 0,
@@ -1260,6 +1291,7 @@ def test_run_scores_with_both_judges_in_two_columns(
     finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     asked: dict[str, list[str]] = {"model": [], "judge": []}
+    executed: list[tuple[Any, ...]] = []
 
     def load_model(key: str) -> LoadedModel:
         asked["model"].append(key)
@@ -1269,14 +1301,13 @@ def test_run_scores_with_both_judges_in_two_columns(
         asked["judge"].append(key)
         return StubJudge(0 if key == "sentiment-primary" else 1)
 
-    real = p7.execute
     monkeypatch.setattr(p7, "load_model", load_model)
     monkeypatch.setattr(p7, "load_judge", load_judge)
     monkeypatch.setattr(p7, "load_sst2", _sst2)
     monkeypatch.setattr(
         p7, "load_wikitext", lambda: [SimpleNamespace(text=t) for t in _texts()]
     )
-    monkeypatch.setattr(p7, "execute", lambda *args: real(*args, words=WORDS))
+    monkeypatch.setattr(p7, "execute", lambda *args: executed.append(args))
     run_dir = RunDir.create(finished.config, out_root=tmp_path)
     run(finished.config, run_dir)
 
@@ -1284,11 +1315,13 @@ def test_run_scores_with_both_judges_in_two_columns(
         "model": ["tiny"],
         "judge": ["sentiment-primary", "sentiment-secondary"],
     }
-    for stem in ("trials_sweep", "trials_transfer_raw"):
-        np.testing.assert_array_equal(
-            run_dir.read_arrays(stem)["scores"],
-            finished.run_dir.read_arrays(stem)["scores"],
-        )
+    [(config, target, loaded, sst2, texts, score)] = executed
+    assert config is finished.config
+    assert target is run_dir
+    assert loaded is finished.loaded
+    assert sst2 == _sst2()
+    assert texts == _texts()
+    np.testing.assert_array_equal(score(texts), _score(texts))
 
 
 PLOT_STEMS = (
@@ -1328,9 +1361,10 @@ def test_the_transfer_matrix_is_drawn_on_a_diverging_scale(
     assert asked[0]["kind"] == "diverging"
 
 
-def test_the_scatter_puts_each_unit_at_its_reading_accuracy_and_slope(
-    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _scatter(
+    run_dir: RunDir, out_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> Any:
+    """Plots a run and returns the axes of the read versus steer figure."""
     saved: dict[str, Any] = {}
     real = p7.save_figure
 
@@ -1339,20 +1373,44 @@ def test_the_scatter_puts_each_unit_at_its_reading_accuracy_and_slope(
         return real(fig, out_dir, name, **kwargs)
 
     monkeypatch.setattr(p7, "save_figure", spy)
-    plot(finished.run_dir, tmp_path)
-    ax = saved["read_vs_steer"].axes[0]
+    plot(run_dir, out_dir)
+    return saved["read_vs_steer"].axes[0]
+
+
+def _assert_points(ax: Any, units: SimpleNamespace) -> None:
     lines = {line.get_label(): line for line in ax.lines}
-    units = _units(finished.run_dir)
     for t, template in enumerate(TEMPLATE_NAMES):
         x, y = lines[template].get_data()
         np.testing.assert_allclose(x, units.read[t].T.ravel())
         np.testing.assert_allclose(y, units.slope[t].T.ravel())
+
+
+def test_the_scatter_puts_each_unit_at_its_reading_accuracy_and_slope(
+    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ax = _scatter(finished.run_dir, tmp_path, monkeypatch)
+    _assert_points(ax, _units(finished.run_dir))
+    lines = {line.get_label(): line for line in ax.lines}
     colors = {lines[template].get_color() for template in TEMPLATE_NAMES}
     assert len(colors) == len(TEMPLATE_NAMES)
     assert lines["_zero_slope"].get_ydata()[0] == 0.0
     assert lines["_threshold"].get_xdata()[0] == finished.config.read_threshold
     assert ax.get_xlabel() == "Reading accuracy"
     assert ax.get_ylabel() == "Dose slope (primary judge)"
+
+
+def test_each_unit_reads_at_its_own_sweep_layer(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sweep = (2, 3)
+    with _planted_reading():
+        run_dir = _execute(
+            tiny_arch, tmp_path, sweep_layers=sweep, formats=("raw",)
+        )
+    units = _units(run_dir, sweep)
+    assert [row["n_readable"] for row in _table(run_dir)] == [2, 3]
+    assert _summary(run_dir)["inversion"]["readable"] == 5
+    _assert_points(_scatter(run_dir, tmp_path / "figs", monkeypatch), units)
 
 
 def _cached[T](load: Callable[[], T]) -> T:
@@ -1364,12 +1422,11 @@ def _cached[T](load: Callable[[], T]) -> T:
 
 def _cached_judge(key: str) -> Any:
     spec = JUDGES[key]
-    try:
-        snapshot_download(
+    _cached(
+        lambda: snapshot_download(
             spec.repo_id, revision=spec.revision, local_files_only=True
         )
-    except FileNotFoundError as error:
-        pytest.skip(f"cache missing: {error}")
+    )
     return load_judge(key)
 
 
