@@ -844,8 +844,8 @@ def test_grouped_auroc_ci_resamples_inside_each_group_at_its_size(
         positives = {pos for b, _, pos in seen if b == block}
         assert len(positives) > 1
 
-    None
-):
+
+def test_grouped_auroc_ci_is_not_degenerate_for_two_item_groups() -> None:
     scores = np.array([0.9, 0.1, 0.4, 0.6, 0.3, 0.2])
     labels = np.array([1, 0, 1, 0, 1, 0], dtype=np.int64)
     groups = np.array(["a", "a", "b", "b", "c", "c"])
