@@ -521,3 +521,58 @@ def test_abs_slope_gap_rejects_a_shape_mismatch_and_no_finite_item() -> None:
         abs_slope_gap_ci(np.zeros(3), np.zeros(4))
     with pytest.raises(ValueError, match="finite"):
         abs_slope_gap_ci(np.array([np.nan]), np.array([1.0]))
+
+
+def test_abs_slope_gap_takes_the_absolute_value_of_the_resampled_means() -> (
+    None
+):
+    gap = abs_slope_gap_ci(np.array([-1.0, 1.0]), np.zeros(2), n_boot=500)
+    assert gap == (0.0, 0.0, 1.0)
+
+
+def test_abs_slope_gap_interval_uses_the_alpha_tails() -> None:
+    _, lo, hi = abs_slope_gap_ci(
+        np.array([0.0, 2.0]), np.zeros(2), n_boot=4000, alpha=0.4
+    )
+    assert (lo, hi) == (0.0, 2.0)
+
+
+_IRREGULAR = np.array(
+    [-2.5, 0.5, 1.5, -0.25, 3.0, 0.75, -1.0, 2.0, -3.5, 0.1, 1.1, -0.6]
+)
+
+
+def test_slope_ci_interval_depends_on_the_seed() -> None:
+    first = slope_ci(_IRREGULAR, n_boot=50, seed=1)
+    second = slope_ci(_IRREGULAR, n_boot=50, seed=2)
+    assert first[0] == second[0]
+    assert first[1:] != second[1:]
+
+
+def test_abs_slope_gap_interval_depends_on_the_seed() -> None:
+    reference = np.roll(_IRREGULAR, 5) / 2
+    first = abs_slope_gap_ci(_IRREGULAR, reference, n_boot=50, seed=1)
+    second = abs_slope_gap_ci(_IRREGULAR, reference, n_boot=50, seed=2)
+    assert first[0] == second[0]
+    assert first[1:] != second[1:]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The date is not publicised.",
+        "dont know the answer",
+        "The date is not generally publicly known.",
+        "The titles were not disclosed.",
+    ],
+)
+def test_more_phrases_that_abstain(text: str) -> None:
+    assert is_abstention(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["The Unknown Soldiers marched.", "He is not known as a poet."],
+)
+def test_more_phrases_that_answer(text: str) -> None:
+    assert not is_abstention(text)
