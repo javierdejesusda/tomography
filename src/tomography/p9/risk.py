@@ -469,7 +469,7 @@ def orient_on_train(
     return -test_scores
 
 
-type TextAnalyzer = Literal["word", "char"]
+TextAnalyzer = Literal["word", "char"]
 TEXT_ANALYZERS: tuple[TextAnalyzer, ...] = ("word", "char")
 
 
