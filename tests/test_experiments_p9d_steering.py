@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 import pytest
 
 from tomography.cli import load_experiment
@@ -221,7 +222,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.instruction.startswith("Answer the question in a few words.")
     assert config.n_hand_check == 100
     assert config.n_boot == 1000
-    assert config.n_prompts == 50
+    assert config.n_prompts == 100
     assert config.max_new_tokens == 24
     assert config.temperature is None
     assert config.top_p == 1.0
@@ -242,6 +243,8 @@ def test_labels_run_is_required() -> None:
     [
         ({"coeffs": (-0.2, 0.2)}, "0.0"),
         ({"coeffs": (0.0, float("nan"))}, "finite"),
+        ({"coeffs": (0.0,)}, "distinct"),
+        ({"coeffs": (0.0, 0.0)}, "distinct"),
         ({"n_random": 0}, "n_random"),
         ({"n_prompts": 0}, "n_prompts"),
         ({"behavior": "sometimes"}, "behavior"),
@@ -262,6 +265,8 @@ def test_labels_run_is_required() -> None:
     ids=[
         "no_zero",
         "nan_coeff",
+        "single_coeff",
+        "repeated_coeff",
         "no_random",
         "no_prompts",
         "bad_behavior",
@@ -560,6 +565,7 @@ def test_shift_mode_writes_a_curve_pair_per_contrast_and_metric(
             "meta.json",
             "summary.json",
             "table.json",
+            "table_dose.json",
             *(f"{stem}.{ext}" for stem in stems for ext in ("json", "npz")),
         ]
     )
@@ -1033,14 +1039,17 @@ def test_the_chosen_coefficient_and_the_paired_effects(
         "lo",
         "hi",
     ]
-    assert len(rows) == 8
+    assert len(rows) == 12
     assert {r[0] for r in rows} == {"obscure_real", "fictional_generated"}
+    assert {r[2] for r in rows} == {"lat0", "random0", "random1"}
     assert {r[3] for r in rows} == {0.2}
     shifts = {
-        ("known", "lat"): 0.0,
-        ("unknown", "lat"): 1.0,
-        ("known", "random"): 0.5,
-        ("unknown", "random"): 0.0,
+        ("known", "lat0"): 0.0,
+        ("unknown", "lat0"): 1.0,
+        ("known", "random0"): 1.0,
+        ("unknown", "random0"): 0.0,
+        ("known", "random1"): 0.0,
+        ("unknown", "random1"): 0.0,
     }
     for (side, arm), shift in shifts.items():
         row = _row(rows, columns, type="obscure_real", side=side, arm=arm)
@@ -1068,7 +1077,7 @@ def test_the_coefficient_is_chosen_on_the_calibration_items_only(
         table["columns"],
         type="obscure_real",
         side="unknown",
-        arm="lat",
+        arm="lat0",
     )
     assert (summary["chosen_coeff"], summary["chosen_index"]) == (-0.2, 0)
     assert row["coeff"] == -0.2
@@ -1327,6 +1336,9 @@ def test_abstention_summary(
     assert summary["types"] == ["obscure_real", "fictional_generated"]
     assert summary["skipped"] == {}
     assert "n_with_answer" not in summary
+    assert summary["calibration_balanced_range"] == pytest.approx(
+        {"lat0": 1.0, "random0": 0.5, "random1": 0.0}
+    )
 
 
 def test_abstention_runs_end_to_end_on_the_tiny_qwen3(
@@ -1344,7 +1356,7 @@ def test_abstention_runs_end_to_end_on_the_tiny_qwen3(
     table = run_dir.read_json("table_effect")
     assert isinstance(table, dict)
     assert len(rows) == 36
-    assert len(table["rows"]) == 12
+    assert len(table["rows"]) == 18
     for row in table["rows"]:
         assert row[6] <= row[5] <= row[7]
     assert _files(run_dir) == sorted(
@@ -1353,6 +1365,7 @@ def test_abstention_runs_end_to_end_on_the_tiny_qwen3(
             "meta.json",
             "summary.json",
             "table.json",
+            "table_dose.json",
             "table_effect.json",
             "hand_check.csv",
             *(
@@ -1500,30 +1513,47 @@ def test_the_bootstrap_settings_reach_every_shift_interval(
         return real(base, steered, **kwargs)
 
     monkeypatch.setattr(p9d_steering, "shift_ci", spy)
+    slope_calls: list[dict[str, Any]] = []
+    real_slope = p9d_steering.slope_ci
+
+    def slope_spy(values: Any, reference: Any = None, **kwargs: Any) -> Any:
+        slope_calls.append(kwargs)
+        return real_slope(values, reference, **kwargs)
+
+    monkeypatch.setattr(p9d_steering, "slope_ci", slope_spy)
 
     _execute(tiny_arch, tmp_path, seed=5, n_boot=77)
 
     assert calls
     assert all(c == {"n_boot": 77, "seed": 5} for c in calls)
+    assert slope_calls
+    assert all(c == {"n_boot": 77, "seed": 5} for c in slope_calls)
 
 
 def test_the_seed_and_sizes_reach_the_helpers_of_abstention_mode(
     tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     intervals: list[dict[str, Any]] = []
+    slopes: list[dict[str, Any]] = []
     checks: list[dict[str, Any]] = []
     real_shift = p9d_steering.shift_ci
+    real_slope = p9d_steering.slope_ci
     real_check = p9d_steering.write_completion_check
 
     def shift_spy(base: Any, steered: Any, **kwargs: Any) -> Any:
         intervals.append(kwargs)
         return real_shift(base, steered, **kwargs)
 
+    def slope_spy(values: Any, reference: Any = None, **kwargs: Any) -> Any:
+        slopes.append(kwargs)
+        return real_slope(values, reference, **kwargs)
+
     def check_spy(path: Path, records: Any, **kwargs: Any) -> int:
         checks.append(kwargs)
         return real_check(path, records, **kwargs)
 
     monkeypatch.setattr(p9d_steering, "shift_ci", shift_spy)
+    monkeypatch.setattr(p9d_steering, "slope_ci", slope_spy)
     monkeypatch.setattr(p9d_steering, "write_completion_check", check_spy)
 
     _canned_run(
@@ -1536,6 +1566,386 @@ def test_the_seed_and_sizes_reach_the_helpers_of_abstention_mode(
         n_hand_check=6,
     )
 
-    assert len(intervals) == 8
+    assert len(intervals) == 12
     assert all(c == {"n_boot": 77, "seed": 5} for c in intervals)
+    assert len(slopes) == 20
+    assert all(c == {"n_boot": 77, "seed": 5} for c in slopes)
     assert checks == [{"n": 6, "seed": 5}]
+
+
+def _dose_pool(config: Config) -> set[str]:
+    """The first unknown question of every group, by uid."""
+    plan = plan_groups(config, _items(), True)
+    return {g.unknown[0].example.uid for g in plan.groups}
+
+
+DOSE_GRID = (-0.4, -0.2, 0.0, 0.2, 0.4)
+DOSE_OVERRIDES: dict[str, Any] = {
+    "n_prompts": 2,
+    "n_random": 3,
+    "n_boot": 200,
+    "coeffs": DOSE_GRID,
+}
+
+
+def _dose_run(
+    loaded: LoadedModel,
+    out: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    random1_acts: bool = True,
+    **overrides: Any,
+) -> RunDir:
+    """Runs abstention mode where the arms plant known per-item slopes.
+
+    On the unknown items, the steering arm abstains below zero, the first
+    random arm never, the second on the first item of each group below zero
+    (when `random1_acts`), the third on both items above zero.
+    """
+    settings = {**DOSE_OVERRIDES, **overrides}
+    first = _dose_pool(_config(**settings))
+
+    def rule(item: LabeledItem, arm: int, coeff: float) -> list[str]:
+        if _is_known(item):
+            return _answer(item)
+        refuse = {
+            0: coeff < 0,
+            1: False,
+            2: random1_acts and item.example.uid in first and coeff < 0,
+            3: coeff > 0,
+        }
+        return [ABSTAIN] if refuse.get(arm, False) else _answer(item)
+
+    run_dir, _ = _canned_run(loaded, out, monkeypatch, rule, **settings)
+    return run_dir
+
+
+def _dose(run_dir: RunDir) -> tuple[list[str], list[list[Any]]]:
+    table = run_dir.read_json("table_dose")
+    assert isinstance(table, dict)
+    return table["columns"], table["rows"]
+
+
+def test_abstention_dose_slopes_per_arm_and_paired_contrast(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _dose_run(tiny_qwen3, tmp_path, monkeypatch)
+
+    columns, rows = _dose(run_dir)
+
+    assert columns == [
+        "type",
+        "side",
+        "metric",
+        "arm",
+        "vs",
+        "n",
+        "slope",
+        "lo",
+        "hi",
+        "span",
+        "abs_gap",
+        "abs_lo",
+        "abs_hi",
+    ]
+    assert len(rows) == 28
+    assert {r[2] for r in rows} == {"abstention"}
+    expected = {
+        ("lat0", ""): (-1.5, -1.5, -1.5),
+        ("random0", ""): (0.0, 0.0, 0.0),
+        ("random1", ""): (-0.75, -1.5, 0.0),
+        ("random2", ""): (1.5, 1.5, 1.5),
+        ("lat0", "random0"): (-1.5, -1.5, -1.5),
+        ("lat0", "random1"): (-0.75, -1.5, 0.0),
+        ("lat0", "random2"): (-3.0, -3.0, -3.0),
+    }
+    gaps = {
+        "random0": (1.5, 1.5, 1.5),
+        "random1": (0.75, 0.0, 1.5),
+        "random2": (0.0, 0.0, 0.0),
+    }
+    for name in ("obscure_real", "fictional_generated"):
+        for (arm, vs), (slope, lo, hi) in expected.items():
+            row = _row(rows, columns, type=name, side="unknown", arm=arm, vs=vs)
+            assert row["n"] == 2
+            assert (row["slope"], row["lo"], row["hi"]) == pytest.approx(
+                (slope, lo, hi)
+            )
+            assert row["span"] == pytest.approx(slope * 0.8)
+            cells = (row["abs_gap"], row["abs_lo"], row["abs_hi"])
+            if vs:
+                assert cells == pytest.approx(gaps[vs])
+            else:
+                assert cells == (None, None, None)
+        known = _row(rows, columns, type=name, side="known", arm="lat0", vs="")
+        assert known["slope"] == 0.0
+
+
+def test_the_headline_is_the_unknown_side_of_the_direction_contrast(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _dose_run(tiny_qwen3, tmp_path, monkeypatch)
+
+    headline = _summary(run_dir)["headline"]
+
+    assert headline["group"] == "obscure_real"
+    assert headline["side"] == "unknown"
+    assert headline["metric"] == "abstention"
+    assert headline["lat_slope"] == pytest.approx(-1.5)
+    assert (headline["lat_lo"], headline["lat_hi"]) == pytest.approx(
+        (-1.5, -1.5)
+    )
+    assert headline["max_abs_random_slope"] == pytest.approx(1.5)
+    gaps = {
+        "random0": [1.5, 1.5, 1.5],
+        "random1": [0.75, 0.0, 1.5],
+        "random2": [0.0, 0.0, 0.0],
+    }
+    assert list(headline["abs_gaps"]) == list(gaps)
+    for arm, cell in gaps.items():
+        assert headline["abs_gaps"][arm] == pytest.approx(cell)
+    assert headline["distinguishable"] is False
+
+
+def test_the_claim_holds_when_steering_outmoves_every_random_arm(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _dose_run(
+        tiny_qwen3, tmp_path, monkeypatch, random1_acts=False, n_random=2
+    )
+
+    headline = _summary(run_dir)["headline"]
+
+    assert headline["max_abs_random_slope"] == 0.0
+    assert headline["distinguishable"] is True
+
+
+def test_the_headline_is_null_without_the_direction_contrast(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _dose_run(
+        tiny_qwen3,
+        tmp_path,
+        monkeypatch,
+        eval_types=("fictional_generated",),
+    )
+
+    assert _summary(run_dir)["headline"] is None
+
+
+def test_every_arm_has_its_own_effect_row(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _dose_run(tiny_qwen3, tmp_path, monkeypatch)
+
+    summary = _summary(run_dir)
+    table = run_dir.read_json("table_effect")
+    assert isinstance(table, dict)
+    columns, rows = table["columns"], table["rows"]
+    chosen = summary["chosen_coeff"]
+    assert chosen == -0.2
+    assert len(rows) == 16
+    assert {r[2] for r in rows} == {"lat0", "random0", "random1", "random2"}
+    shifts = {"lat0": 1.0, "random0": 0.0, "random1": 0.5, "random2": 0.0}
+    for arm, shift in shifts.items():
+        row = _row(rows, columns, type="obscure_real", side="unknown", arm=arm)
+        assert row["coeff"] == chosen
+        assert row["abstention_shift"] == pytest.approx(shift)
+
+
+def test_the_summary_records_the_template_and_the_group_sizes(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _canned_run(
+        tiny_qwen3, tmp_path, monkeypatch, _planted, n_prompts=3
+    )
+
+    summary = _summary(run_dir)
+    plan = plan_groups(_config(n_prompts=3), _items(), True)
+    assert summary["template"] == "fewshot"
+    assert summary["n_items"] == {
+        g.name: {"known": len(g.known), "unknown": len(g.unknown)}
+        for g in plan.groups
+    }
+    assert summary["n_items"]["obscure_real"] == {"known": 3, "unknown": 3}
+
+
+def test_shift_dose_slopes_follow_the_planted_entropy_dose(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    weight = {"lat0": 2.0, "random0": 0.0, "random1": 0.0}
+    seen: dict[bytes, str] = {}
+
+    def fake_stats(
+        loaded: LoadedModel, prompts: Sequence[str], **kwargs: Any
+    ) -> TokenStats:
+        entropy = 1.0 + 0.1 * np.arange(len(prompts))
+        controller = kwargs["edits"]
+        if controller is not None:
+            vector = next(iter(controller.vectors.values())).numpy()
+            if vector.tobytes() not in seen:
+                seen[vector.tobytes()] = list(weight)[len(seen)]
+            arm = seen[vector.tobytes()]
+            entropy = entropy + controller.coeff * weight[arm]
+        n = len(prompts)
+        return TokenStats(np.zeros(n), entropy, np.full(n, -2.0))
+
+    monkeypatch.setattr(p9d_steering, "next_token_stats", fake_stats)
+    config = _config(coeffs=DOSE_GRID)
+    run_dir = _run_dir(tmp_path, config)
+    execute(config, run_dir, tiny_arch, _items(), known_contrasts=True)
+
+    columns, rows = _dose(run_dir)
+
+    assert len(rows) == 35
+    assert {r[2] for r in rows} == {"entropy", "answer_logprob"}
+    answer_rows = [r for r in rows if r[2] == "answer_logprob"]
+    assert {(r[0], r[1]) for r in answer_rows} == {
+        ("obscure_real", "known"),
+        ("obscure_real", "unknown"),
+        ("fictional_generated", "known"),
+    }
+    assert {r[5] for r in answer_rows} == {4}
+    assert {r[6] for r in answer_rows} == {0.0}
+    for side in ("known", "unknown"):
+        match = {"type": "fictional_generated", "side": side}
+        own = _row(rows, columns, metric="entropy", arm="lat0", vs="", **match)
+        assert own["n"] == 4
+        assert (own["slope"], own["lo"], own["hi"]) == pytest.approx(
+            (2.0, 2.0, 2.0)
+        )
+        assert own["span"] == pytest.approx(1.6)
+        flat = _row(
+            rows, columns, metric="entropy", arm="random0", vs="", **match
+        )
+        assert flat["slope"] == pytest.approx(0.0)
+        diff = _row(
+            rows, columns, metric="entropy", arm="lat0", vs="random1", **match
+        )
+        assert diff["slope"] == pytest.approx(2.0)
+    headline = _summary(run_dir)["headline"]
+    assert headline["metric"] == "entropy"
+    assert headline["lat_slope"] == pytest.approx(2.0)
+    assert headline["max_abs_random_slope"] == pytest.approx(0.0)
+    assert headline["distinguishable"] is True
+
+
+def _planted_values(*columns: list[float]) -> NDArray[np.float64]:
+    """Stacks per item columns into the (coefficients, items) layout."""
+    return np.array(columns, dtype=np.float64).T
+
+
+def _dose_row(arm: str, vs: str, slope: float | None, abs_lo: float | None):
+    """A hand built row of the dose table for the headline tests."""
+    cells = [None] * 4 if slope is None else [slope, slope, slope, 0.0]
+    gap = [None, None, None] if not vs else [0.5, abs_lo, 1.0]
+    return ["g", "unknown", "abstention", arm, vs, 2, *cells, *gap]
+
+
+def test_the_seed_and_size_reach_every_absolute_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    real = p9d_steering.abs_slope_gap_ci
+
+    def spy(slopes: Any, reference: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return real(slopes, reference, **kwargs)
+
+    monkeypatch.setattr(p9d_steering, "abs_slope_gap_ci", spy)
+    step = [1.0, 1.0, 0.0, 0.0, 0.0]
+    values = {
+        "lat0": _planted_values(step, step[::-1]),
+        "random0": _planted_values(step, step),
+        "random1": _planted_values(step[::-1], step),
+    }
+
+    p9d_steering._dose_rows(
+        "g", "unknown", "abstention", DOSE_GRID, values, n_boot=77, seed=5
+    )
+
+    assert calls == [{"n_boot": 77, "seed": 5}] * 2
+
+
+def test_a_zero_lower_bound_of_the_gap_does_not_establish_the_claim() -> None:
+    rows = [
+        _dose_row("lat0", "", -1.0, None),
+        _dose_row("random0", "", 0.0, None),
+        _dose_row("lat0", "random0", -1.0, 0.0),
+    ]
+    assert (
+        p9d_steering._headline(rows, "g", "abstention")["distinguishable"]
+        is False
+    )
+    rows[-1] = _dose_row("lat0", "random0", -1.0, 0.25)
+    assert (
+        p9d_steering._headline(rows, "g", "abstention")["distinguishable"]
+        is True
+    )
+
+
+def test_the_largest_random_slope_is_taken_in_magnitude() -> None:
+    rows = [
+        _dose_row("lat0", "", 1.0, None),
+        _dose_row("random0", "", -2.0, None),
+        _dose_row("random1", "", 0.5, None),
+    ]
+    headline = p9d_steering._headline(rows, "g", "abstention")
+    assert headline["max_abs_random_slope"] == 2.0
+
+
+def test_an_item_without_a_finite_slope_is_not_counted() -> None:
+    step = [1.0, 1.0, 0.0, 0.0, 0.0]
+    broken = [1.0, np.nan, 0.0, 0.0, 0.0]
+    values = {
+        "lat0": _planted_values(step, broken, step),
+        "random0": _planted_values(step, broken, step[::-1]),
+    }
+
+    rows = p9d_steering._dose_rows(
+        "g", "unknown", "abstention", DOSE_GRID, values, n_boot=20, seed=0
+    )
+
+    assert [r[5] for r in rows] == [2, 2, 2]
+
+
+def test_a_random_arm_without_slopes_leaves_empty_rows() -> None:
+    step = [1.0, 1.0, 0.0, 0.0, 0.0]
+    nothing = [np.nan] * 5
+    values = {
+        "lat0": _planted_values(step, step),
+        "random0": _planted_values(nothing, nothing),
+        "random1": _planted_values(step[::-1], step[::-1]),
+    }
+
+    rows = p9d_steering._dose_rows(
+        "g", "unknown", "abstention", DOSE_GRID, values, n_boot=20, seed=0
+    )
+
+    by_key = {(r[3], r[4]): r for r in rows}
+    assert len(rows) == 5
+    assert by_key[("random0", "")][5:] == [0] + [None] * 7
+    assert by_key[("lat0", "random0")][5:] == [0] + [None] * 7
+    assert by_key[("lat0", "random1")][5] == 2
+    headline = p9d_steering._headline(rows, "g", "abstention")
+    assert headline["distinguishable"] is False
+    assert headline["max_abs_random_slope"] == pytest.approx(1.5)
+
+
+def test_items_finite_in_only_one_arm_leave_the_contrast_empty() -> None:
+    step = [1.0, 1.0, 0.0, 0.0, 0.0]
+    nothing = [np.nan] * 5
+    values = {
+        "lat0": _planted_values(step, nothing),
+        "random0": _planted_values(nothing, step),
+    }
+
+    rows = p9d_steering._dose_rows(
+        "g", "unknown", "abstention", DOSE_GRID, values, n_boot=20, seed=0
+    )
+
+    by_key = {(r[3], r[4]): r for r in rows}
+    assert by_key[("random0", "")][5] == 1
+    assert by_key[("lat0", "random0")][5:] == [0] + [None] * 7

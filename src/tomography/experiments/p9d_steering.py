@@ -49,10 +49,13 @@ from tomography.model import load_model
 from tomography.p9.behavior import BehaviorRates
 from tomography.p9.behavior import CompletionRecord
 from tomography.p9.behavior import Outcome
+from tomography.p9.behavior import abs_slope_gap_ci
 from tomography.p9.behavior import behavior_rates
 from tomography.p9.behavior import classify
+from tomography.p9.behavior import item_slopes
 from tomography.p9.behavior import select_coefficient
 from tomography.p9.behavior import shift_ci
+from tomography.p9.behavior import slope_ci
 from tomography.p9.behavior import write_completion_check
 from tomography.p9.pool import LabeledItem
 from tomography.p9.reading import check_pool
@@ -112,6 +115,21 @@ EFFECT_COLUMNS = [
     "abstention_shift",
     "lo",
     "hi",
+]
+DOSE_COLUMNS = [
+    "type",
+    "side",
+    "metric",
+    "arm",
+    "vs",
+    "n",
+    "slope",
+    "lo",
+    "hi",
+    "span",
+    "abs_gap",
+    "abs_lo",
+    "abs_hi",
 ]
 
 Cell = tuple[float, float, float]
@@ -182,7 +200,7 @@ class Config(SteeringConfig):
     )
     n_hand_check: int = 100
     n_boot: int = 1000
-    n_prompts: int = 50
+    n_prompts: int = 100
     max_new_tokens: int = 24
     temperature: float | None = None
     top_p: float = 1.0
@@ -193,13 +211,13 @@ class Config(SteeringConfig):
         """Checks the settings that would act silently or fail late.
 
         Raises:
-            ValueError: If `coeffs` lacks 0.0 (the unsteered reference)
-                or holds a non-finite value, `n_random`, `n_prompts`,
-                `n_pairs`, `min_pairs` or `min_eval` is below 1,
-                `behavior` is not one of the three modes, `mode`, `op` or
-                `mask` is not a known value, or a generation setting is
-                invalid (see `GenSettings`). Every behavior is held to the
-                same generation settings.
+            ValueError: If `coeffs` lacks 0.0 (the unsteered reference),
+                holds a non-finite value or fewer than two distinct
+                values, `n_random`, `n_prompts`, `n_pairs`, `min_pairs` or
+                `min_eval` is below 1, `behavior` is not one of the three
+                modes, `mode`, `op` or `mask` is not a known value, or a
+                generation setting is invalid (see `GenSettings`). Every
+                behavior is held to the same generation settings.
         """
         if 0.0 not in self.coeffs:
             raise ValueError(
@@ -208,6 +226,11 @@ class Config(SteeringConfig):
             )
         if not all(math.isfinite(c) for c in self.coeffs):
             raise ValueError(f"coeffs must be finite, got {self.coeffs}")
+        if len(set(self.coeffs)) < 2:
+            raise ValueError(
+                "coeffs need at least two distinct values for a dose slope, "
+                f"got {self.coeffs}"
+            )
         for name in (
             "n_random",
             "n_prompts",
@@ -291,7 +314,8 @@ def plan_groups(
 
     The calibration group holds the validation questions of the direction
     contrast, the evaluation groups the test questions of each usable
-    evaluation contrast, the first `n_prompts` by uid on each side.
+    evaluation contrast, the first `n_prompts` by uid on each side (fewer
+    when a pool is smaller).
 
     Args:
         config: The experiment settings.
@@ -598,11 +622,138 @@ def _write_arm_curves(
         )
 
 
+def _dose_rows(
+    group: str,
+    side: str,
+    metric: str,
+    coeffs: Sequence[float],
+    values: Mapping[str, NDArray[np.float64]],
+    *,
+    n_boot: int,
+    seed: int,
+) -> list[list[Any]]:
+    """Fits the dose slope of every arm and its contrast with each random arm.
+
+    Args:
+        group: Name of the evaluation contrast.
+        side: "known" or "unknown".
+        metric: Name of the outcome.
+        coeffs: The coefficients, in the row order of `values`.
+        values: By arm, the outcome of each item at each coefficient, shape
+            (len(coeffs), n_items), with the steering arm first.
+        n_boot: Bootstrap resamples of the items.
+        seed: Seed of the resampling.
+
+    Returns:
+        One row of `DOSE_COLUMNS` per arm, then one per random arm for the
+        paired difference of the steering slope to the slope of that arm,
+        which also carries the gap of the absolute mean slopes with its
+        interval (None on the rows of one arm); none if no item has a finite
+        steering slope. A row without a finite item has `n` 0 and None in
+        every other cell, so a random arm without finite slopes does not
+        stop the run.
+    """
+    slopes = {arm: item_slopes(coeffs, v) for arm, v in values.items()}
+    if not np.isfinite(slopes[STEERING_ARM]).any():
+        return []
+    width = max(coeffs) - min(coeffs)
+    random_arms = [arm for arm in slopes if arm != STEERING_ARM]
+    pairs = [(arm, "") for arm in slopes] + [
+        (STEERING_ARM, arm) for arm in random_arms
+    ]
+    rows: list[list[Any]] = []
+    for arm, vs in pairs:
+        reference = slopes[vs] if vs else None
+        own = slopes[arm]
+        used = own if reference is None else own - reference
+        n = int(np.isfinite(used).sum())
+        if n == 0:
+            rows.append([group, side, metric, arm, vs, 0, *[None] * 7])
+            continue
+        slope, lo, hi = slope_ci(own, reference, n_boot=n_boot, seed=seed)
+        gap: list[float | None] = [None, None, None]
+        if reference is not None:
+            gap = list(
+                abs_slope_gap_ci(
+                    slopes[arm], reference, n_boot=n_boot, seed=seed
+                )
+            )
+        rows.append(
+            [
+                group,
+                side,
+                metric,
+                arm,
+                vs,
+                n,
+                slope,
+                lo,
+                hi,
+                slope * width,
+                *gap,
+            ]
+        )
+    return rows
+
+
+def _headline(
+    dose: Sequence[Sequence[Any]], group: str, metric: str
+) -> dict[str, Any] | None:
+    """Reads the pre-registered claim from the dose rows.
+
+    Args:
+        dose: The rows of `DOSE_COLUMNS` of the whole run.
+        group: The direction contrast.
+        metric: The outcome of the headline.
+
+    Returns:
+        The steering slope on the unknown side with its interval, the
+        largest absolute random slope, the paired difference to each random
+        arm, the gap of the absolute mean slopes to each random arm and
+        whether every one of those intervals lies above zero, which is
+        false for an arm whose gap is missing; None if the run did not score
+        that contrast.
+    """
+    rows = [r for r in dose if list(r[:3]) == [group, "unknown", metric]]
+    own = {r[3]: r for r in rows if not r[4]}
+    if STEERING_ARM not in own:
+        return None
+    differences = {r[4]: [r[6], r[7], r[8]] for r in rows if r[4]}
+    abs_gaps = {r[4]: [r[10], r[11], r[12]] for r in rows if r[4]}
+    lat = own[STEERING_ARM]
+    return {
+        "group": group,
+        "side": "unknown",
+        "metric": metric,
+        "lat_slope": lat[6],
+        "lat_lo": lat[7],
+        "lat_hi": lat[8],
+        "max_abs_random_slope": max(
+            (
+                abs(r[6])
+                for arm, r in own.items()
+                if arm != STEERING_ARM and r[6] is not None
+            ),
+            default=0.0,
+        ),
+        "differences": differences,
+        "abs_gaps": abs_gaps,
+        "distinguishable": all(
+            lo is not None and lo > 0 for _, lo, _ in abs_gaps.values()
+        ),
+    }
+
+
 def _summary(
     config: Config, mode: Mode, plan: Plan, steering: _Steering
 ) -> dict[str, Any]:
     return {
         "mode": mode,
+        "template": config.template,
+        "n_items": {
+            g.name: {"known": len(g.known), "unknown": len(g.unknown)}
+            for g in plan.groups
+        },
         "layers": list(steering.layers),
         "layer_source": steering.layer_source,
         "direction": {
@@ -703,6 +854,29 @@ def _run_shift(
                 cells.setdefault((group.name, metric), {})[
                     (side, name, coeff)
                 ] = cell
+    dose: list[list[Any]] = []
+    for group in plan.evaluation:
+        for side, members in group.sides:
+            index = distinct.index(members)
+            for metric in METRICS:
+                values = {
+                    name: np.stack(
+                        [
+                            steered[(name, coeff)][metric] - base[metric]
+                            for coeff in config.coeffs
+                        ]
+                    )[:, index]
+                    for name in steering.readers
+                }
+                dose += _dose_rows(
+                    group.name,
+                    side,
+                    metric,
+                    config.coeffs,
+                    values,
+                    n_boot=config.n_boot,
+                    seed=config.seed,
+                )
     for group in plan.evaluation:
         for metric in METRICS:
             _write_arm_curves(
@@ -721,10 +895,12 @@ def _run_shift(
             "rows": rows,
         },
     )
+    run_dir.write_json("table_dose", {"columns": DOSE_COLUMNS, "rows": dose})
     run_dir.write_json(
         "summary",
         {
             **_summary(config, "shift", plan, steering),
+            "headline": _headline(dose, config.direction_type, "entropy"),
             "n_with_answer": {
                 g.name: {
                     side: sum(bool(i.example.answers) for i in members)
@@ -818,10 +994,8 @@ def _run_abstention(
         for key, value in outcomes.items()
     }
 
-    def share(kind_arms: Sequence[str], coeff: float) -> NDArray[np.float64]:
-        return np.mean([indicator[(a, coeff)] for a in kind_arms], axis=0)
-
     effects: list[list[Any]] = []
+    dose: list[list[Any]] = []
     for group in plan.evaluation:
         cells: dict[tuple[str, str, float], Cell] = {}
         for side, members in group.sides:
@@ -832,16 +1006,31 @@ def _run_abstention(
                     float(flags.mean()),
                     *wilson_ci(int(flags.sum()), len(flags)),
                 )
-            for kind, kind_arms in ((LAT, arms[:1]), (RANDOM, arms[1:])):
+            for arm in arms:
                 shift = shift_ci(
-                    share(kind_arms, 0.0)[index],
-                    share(kind_arms, chosen)[index],
+                    indicator[(arm, 0.0)][index],
+                    indicator[(arm, chosen)][index],
                     n_boot=config.n_boot,
                     seed=config.seed,
                 )
                 effects.append(
-                    [group.name, side, kind, chosen, len(index), *shift]
+                    [group.name, side, arm, chosen, len(index), *shift]
                 )
+            values = {
+                arm: np.stack(
+                    [indicator[(arm, coeff)] for coeff in config.coeffs]
+                )[:, index]
+                for arm in arms
+            }
+            dose += _dose_rows(
+                group.name,
+                side,
+                "abstention",
+                config.coeffs,
+                values,
+                n_boot=config.n_boot,
+                seed=config.seed,
+            )
         _write_arm_curves(
             run_dir,
             f"curves_{group.name}",
@@ -889,12 +1078,22 @@ def _run_abstention(
             "rows": effects,
         },
     )
+    balanced = {
+        arm: [rates[(CALIBRATION, arm, c)].balanced for c in config.coeffs]
+        for arm in arms
+    }
+    run_dir.write_json("table_dose", {"columns": DOSE_COLUMNS, "rows": dose})
     run_dir.write_json(
         "summary",
         {
             **_summary(config, "abstention", plan, steering),
+            "headline": _headline(dose, config.direction_type, "abstention"),
             "chosen_coeff": chosen,
             "chosen_index": list(config.coeffs).index(chosen),
+            "calibration_balanced_range": {
+                arm: max(values) - min(values)
+                for arm, values in balanced.items()
+            },
             "hand_check_rows": written,
         },
     )
@@ -918,19 +1117,33 @@ def execute(
 
     In abstention mode the first completion of each question is classified
     and the rates of each group, arm and coefficient are written to `table`.
-    The coefficient is chosen on the calibration group only and reported on
-    the evaluation groups: `table_effect` holds the paired change of the
-    abstention indicator against coefficient 0.0 at that coefficient. Also
-    written are `curves_<type>` per evaluation contrast, `hand_check.csv`
-    (completions of the steering arm for checking the abstention patterns
-    by hand) and `summary`.
+    The headline is the dose slope: per evaluation group, side and arm,
+    `table_dose` holds the mean over items of the least-squares slope of the
+    abstention indicator on the coefficient, with an item bootstrap
+    interval, and for each random arm the paired difference of the steering
+    slope to that arm, and the gap between the absolute mean slopes. The
+    `summary` headline reads the unknown side of the direction contrast:
+    steering is distinguishable from any edit of this size iff, for every
+    random arm, the lower bound of that gap is above zero, that is, steering
+    moves the outcome more than the random arm does, whatever the sign.
+    The coefficient chosen on the calibration group is secondary, because
+    the calibration score can be flat over the grid
+    (`calibration_balanced_range` shows how flat): `table_effect` holds,
+    for each arm separately, the paired change of the abstention indicator
+    against coefficient 0.0 at that coefficient. Also written are
+    `curves_<type>` per evaluation contrast, `hand_check.csv` (completions
+    of the steering arm for checking the abstention patterns by hand) and
+    `summary`.
 
     In shift mode each group, side and arm get the paired shift of the
     entropy and of the answer log-probability of the next token against the
-    unsteered model, and no coefficient is chosen. Writes
-    `curves_<type>_entropy` and `curves_<type>_answer_logprob` per
-    evaluation contrast (a series with a missing cell is left out, a file
-    without series is not written), `table` and `summary`.
+    unsteered model, and no coefficient is chosen. `table_dose` holds the
+    same slopes and differences for both metrics on the evaluation groups
+    (a side without finite values is left out) and the headline metric is
+    the entropy. Writes `curves_<type>_entropy` and
+    `curves_<type>_answer_logprob` per evaluation contrast (a series with a
+    missing cell is left out, a file without series is not written),
+    `table`, `table_dose` and `summary`.
 
     Args:
         config: The experiment settings.

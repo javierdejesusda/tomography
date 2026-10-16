@@ -551,9 +551,40 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   for a model the `p9a` gate admits and only on contrasts of known against unknown questions (`eval_types`:
   `obscure_real`, `fictional_generated`, `unknowable_detail` and `false_premise`; `post_cutoff` can be named).
   It needs `labels_run` and the `n_shots` of the labels, and defaults to `qwen3-1.7b`, with `n_pairs` 64,
-  `n_prompts` 50, `max_new_tokens` 24, greedy decoding and `n_boot` 1000. It writes `table`, `summary`, the
-  `curves_<contrast>` files and, in abstention mode, `table_effect` and a `hand_check.csv` of completions; the
-  shift mode writes `curves_<contrast>_entropy` and `curves_<contrast>_answer_logprob` instead.
+  `n_prompts` 100, `max_new_tokens` 24, greedy decoding and `n_boot` 1000.
+
+  The headline is a dose slope. For every item the outcome (the abstention indicator, or the entropy in
+  shift mode) is regressed on the whole coefficient grid, and the slope of an arm is the mean of the item
+  slopes, with a percentile bootstrap over items. The steering slope is compared with each random arm
+  separately, on the same items. Random directions can move the outcome as much as the steering direction,
+  and in the opposite direction, so the comparison is of magnitudes: for each random arm the statistic is the
+  absolute mean steering slope minus the absolute mean slope of that arm, with a paired item bootstrap
+  (`abs_gap`, `abs_lo`, `abs_hi`). The claim is that steering is distinguishable from any edit of this size
+  only if, for every random arm, the lower bound of that gap is above zero, that is, steering moves the
+  metric more than each random arm does, whatever the sign (a random arm without
+  finite slopes makes the claim false). The signed difference of the slopes is also
+  reported, and the largest absolute random slope gives the scale.
+  The headline cell is the unknown side of the `direction_type` contrast, where the entropy is used in shift
+  mode because the answer log-probability needs a gold answer and only `obscure_real` has them on its
+  unknown side. Every other cell is descriptive, with no correction for multiple comparisons; the
+  known-side rows (the false refusal rate in abstention mode) show whether the effect is selective for
+  unknown questions. Unsteered
+  abstention is low (under 20 percent of the unknown calibration questions for the Qwen3 models), so slopes
+  are bounded by the floor and the ceiling and are reported as they are.
+
+  It writes `table`, `summary` (with the `headline`, the `template` and the group sizes `n_items`),
+  `table_dose` (the slope of every arm and each steering-minus-random difference, per contrast and side), the
+  `curves_<contrast>` files and, in abstention mode, `table_effect` and a `hand_check.csv` of completions;
+  the shift mode writes `curves_<contrast>_entropy` and `curves_<contrast>_answer_logprob` instead.
+  `table_effect` is secondary: it reports the change of the abstention indicator at one coefficient chosen
+  on the calibration questions, for each arm separately, and the calibration score is nearly flat over the
+  grid (`calibration_balanced_range` in the summary shows by how much), so that coefficient is weakly
+  determined. The subset of each group is the first `n_prompts` questions by uid string, a deterministic
+  but not random choice, and a group has fewer when its pool is smaller (the known side of
+  `unknowable_detail` and `false_premise` holds 21 to 76 questions by model). The abstention patterns are
+  phrase matches: a title that contains a pattern word (for example "Unknown Pleasures") still counts as an
+  abstention, which the hand check measures. The patterns are not part of the config, so a run with an
+  explicit `n_prompts` of 50 reuses the directory of an older run with the same settings.
 
 **P9 methodology.** The `p9a` pool draws its PopQA questions from the 12 relations of `POPQA_RELATIONS`
 ([`datasets/popqa.py`](src/tomography/datasets/popqa.py); `popqa_relations`), the guess control demotes the
