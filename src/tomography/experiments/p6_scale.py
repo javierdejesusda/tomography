@@ -282,11 +282,10 @@ def execute(
     seeds there with its percentile bootstrap interval. R5 reports its
     transfer test at the layer chosen on the transfer validation split, as R5
     itself does, because its in-template test is not a held-out measure.
-    With a steering
-    source it also writes `table_steering` with the mean dose slope of every
-    model and the range over its readers, and `summary` holds the least-squares
-    slope of the best accuracy on log10 of the parameter count of every
-    source.
+    With a steering source it also writes `table_steering` with the mean
+    dose slope of every model and the range over its readers, and `summary`
+    holds the least-squares slope of the best accuracy on log10 of the
+    parameter count of every source.
 
     Args:
         config: The experiment settings.
