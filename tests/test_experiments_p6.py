@@ -179,18 +179,19 @@ def _world(
     return runs
 
 
-def _r5_run(out_root: Path, model: str) -> RunDir:
+def _r5_run(
+    out_root: Path, model: str, *, depth: int, layer: int, peak: float
+) -> RunDir:
     """A finished R5-like run: a perfect in-template test and a transfer one.
 
-    The in-template curves are perfect at the last layer. The transfer test
-    peaks at the last layer too, but the summary names an earlier layer, the
-    one the transfer validation split chose.
+    The transfer test peaks at `layer`, the one the summary names, and is
+    higher still at the last layer; the in-template curves are perfect at
+    the last layer.
     """
     run_dir = _new_run(out_root, "r5", model)
-    depth, pick = DEPTH[model], R5_PICK[model]
     layers = list(range(1, depth + 1))
-    transfer = _peaked(depth, depth, R5_TRANSFER[model] + 0.1)
-    transfer[pick - 1] = R5_TRANSFER[model]
+    transfer = _peaked(depth, layer, peak)
+    transfer[depth - 1] = peak + 0.1
     for stem, values in (
         ("curves", _peaked(depth, depth, 1.0)),
         ("curves_transfer", transfer),
@@ -204,7 +205,7 @@ def _r5_run(out_root: Path, model: str) -> RunDir:
             chance=0.5,
             n_layers=depth,
         )
-    run_dir.write_json("summary", {"best_layer": pick})
+    run_dir.write_json("summary", {"best_layer": layer})
     run_dir.finalize()
     return run_dir
 
@@ -461,7 +462,13 @@ def _execute_with_r5(tmp_path: Path) -> RunDir:
     config = _config(sources=("r1", "r5"))
     runs = _world(tmp_path / "in")
     for model in SIZES:
-        runs[("r5", model)] = _r5_run(tmp_path / "in", model)
+        runs[("r5", model)] = _r5_run(
+            tmp_path / "in",
+            model,
+            depth=DEPTH[model],
+            layer=R5_PICK[model],
+            peak=R5_TRANSFER[model],
+        )
     run_dir = RunDir.create(config, out_root=tmp_path / "out")
     execute(config, run_dir, runs, PARAMS)
     return run_dir

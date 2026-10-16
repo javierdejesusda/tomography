@@ -131,8 +131,7 @@ def copy_reader_curves(
 
     The copy is written as `curves_<source>_<model>` with one series named
     after the model and a fresh band, so the figures read only this run's own
-    files. R5 copies its transfer curves, as R5 reports its transfer test:
-    its in-template test is not a held-out measure.
+    files. R5 contributes its transfer curves (see `source_reading_point`).
 
     Args:
         run_dir: The run to write into.
@@ -280,8 +279,7 @@ def execute(
     with one row per source and model: the best layer, chosen on the
     validation curves when the run has them, and the mean accuracy of the
     seeds there with its percentile bootstrap interval. R5 reports its
-    transfer test at the layer chosen on the transfer validation split, as R5
-    itself does, because its in-template test is not a held-out measure.
+    transfer test, as R5 itself does.
     With a steering source it also writes `table_steering` with the mean
     dose slope of every model and the range over its readers, and `summary`
     holds the least-squares slope of the best accuracy on log10 of the

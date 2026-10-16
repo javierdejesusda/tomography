@@ -292,8 +292,7 @@ def _read_sources(
 ) -> dict[tuple[str, str], ReadingPoint]:
     """Copies the reader curves and picks the layer of every run.
 
-    R5 reads its transfer test, as R5 itself does, because its in-template
-    test is not a held-out measure.
+    R5 contributes its transfer test (see `source_reading_point`).
     """
     points: dict[tuple[str, str], ReadingPoint] = {}
     for source in _sources(config):
@@ -517,10 +516,9 @@ def execute(
     with one row per pair and source: the best accuracy of the base and the
     tuned model, their mean per-seed difference with its percentile bootstrap
     interval, and the layers as depths. The reference gets `table_reference`.
-    R5 reports its transfer test, as R5 itself does, because its in-template
-    test is not a held-out measure.
-    `summary` holds the `function_gap` of every tuned model, the mean gain of
-    the function sources minus that of the concept sources.
+    R5 contributes its transfer test (see `source_reading_point`). `summary`
+    holds the `function_gap` of every tuned model, the mean gain of the
+    function sources minus that of the concept sources.
 
     Args:
         config: The experiment settings.
