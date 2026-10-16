@@ -628,6 +628,22 @@ def test_an_invalid_config_raises_before_the_model_runs(
         _execute(tiny_arch, tmp_path, **overrides)
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [{"n_steer_seeds": 3}, {"read_threshold": 0.5}],
+    ids=["every-reader-steers", "threshold-at-chance"],
+)
+def test_settings_on_the_edge_of_their_range_pass_the_checks(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, Any],
+) -> None:
+    _forbid_reading(monkeypatch)
+    with pytest.raises(AssertionError, match="the model was reached"):
+        _execute(tiny_arch, tmp_path, **overrides)
+
+
 def test_pole_words_without_a_single_token_raise_before_the_model_runs(
     tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1411,6 +1427,23 @@ def test_each_unit_reads_at_its_own_sweep_layer(
     assert [row["n_readable"] for row in _table(run_dir)] == [2, 3]
     assert _summary(run_dir)["inversion"]["readable"] == 5
     _assert_points(_scatter(run_dir, tmp_path / "figs", monkeypatch), units)
+
+
+def test_the_scatter_marks_the_threshold_of_the_run(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _planted_reading():
+        run_dir = _execute(
+            tiny_arch,
+            tmp_path,
+            read_threshold=0.7,
+            formats=("raw",),
+            sweep_layers=(2,),
+            n_steer_seeds=1,
+        )
+    ax = _scatter(run_dir, tmp_path / "figs", monkeypatch)
+    lines = {line.get_label(): line for line in ax.lines}
+    assert lines["_threshold"].get_xdata()[0] == 0.7
 
 
 def _cached[T](load: Callable[[], T]) -> T:
