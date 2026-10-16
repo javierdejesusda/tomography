@@ -16,6 +16,7 @@ from tomography.p9.unknowns import POP_EDGES
 from tomography.p9.unknowns import UNKNOWN_TYPES
 from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import panel_of
+from tomography.p9.unknowns import relation_of
 from tomography.p9.unknowns import stratum_name
 from tomography.p9.unknowns import type_pools
 
@@ -553,6 +554,26 @@ def test_stratum_name_of_none_is_empty() -> None:
 def test_stratum_name_by_relation() -> None:
     assert (
         stratum_name(_popqa("a", "known", "father", 5), "relation") == "father"
+    )
+
+
+def test_relation_of_an_item_is_its_string_relation() -> None:
+    assert relation_of(_popqa("a", "known", "father", 5)) == "father"
+    assert relation_of(_item("b", "popqa", "real", "known", relation="")) == ""
+
+
+@pytest.mark.parametrize("relation", [None, 3, 1.5])
+def test_relation_of_an_item_without_a_string_relation_is_none(
+    relation: MetaValue,
+) -> None:
+    item = _item("a", "popqa", "real", "known", relation=relation)
+
+    assert relation_of(item) is None
+
+
+def test_relation_of_an_item_without_the_field_is_none() -> None:
+    assert (
+        relation_of(_item("a", "falseqa", "false_premise", "unknown")) is None
     )
 
 

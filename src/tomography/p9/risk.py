@@ -517,38 +517,6 @@ def text_scores(
     return np.asarray(scores, dtype=np.float64)
 
 
-def text_auroc(
-    train_texts: Sequence[str],
-    train_labels: NDArray[np.int64],
-    test_texts: Sequence[str],
-    test_labels: NDArray[np.int64],
-    *,
-    analyzer: Literal["word", "char"],
-) -> float:
-    """AUROC of a text-only classifier, the surface-form baseline of a reader.
-
-    The classifier is the one of `text_scores`.
-
-    Args:
-        train_texts: The texts the classifier is fitted on.
-        train_labels: 0/1 labels of the train texts.
-        test_texts: The texts that are scored.
-        test_labels: 0/1 labels of the test texts.
-        analyzer: "word" or "char" n-grams.
-
-    Returns:
-        The AUROC of the decision scores on the test texts, label 1 positive.
-
-    Raises:
-        ValueError: If `analyzer` is neither "word" nor "char", the test
-            labels hold one class, or the train texts leave no feature.
-    """
-    scores = text_scores(
-        train_texts, train_labels, test_texts, analyzer=analyzer
-    )
-    return float(auroc(scores, test_labels))
-
-
 def popularity_auroc(
     popularity: NDArray[np.float64], labels: NDArray[np.int64]
 ) -> float:

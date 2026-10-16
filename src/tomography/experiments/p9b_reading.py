@@ -31,6 +31,7 @@ from tomography.model import load_model
 from tomography.p9.pool import LabeledItem
 from tomography.p9.reading import READING_METHODS
 from tomography.p9.reading import SURFACE_BASELINES
+from tomography.p9.reading import WITHIN_BASELINES
 from tomography.p9.reading import ReadingCube
 from tomography.p9.reading import check_pool
 from tomography.p9.reading import choose_layer
@@ -38,6 +39,7 @@ from tomography.p9.reading import collect_item_activations
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
 from tomography.p9.reading import surface_baselines
+from tomography.p9.reading import within_relation_pairs
 from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import panel_of
 from tomography.p9.unknowns import type_pools
@@ -183,6 +185,16 @@ def _write_curves(
     return stems
 
 
+def _within_columns(
+    cube: ReadingCube, t: int, k: int, seed: int
+) -> list[float | None]:
+    held = cube.test_within[0, t, :, k]
+    if np.isnan(held).any():
+        return [None, None, None]
+    lo, hi = bootstrap_ci(held, n_boot=200, seed=seed)
+    return [float(held.mean()), float(lo), float(hi)]
+
+
 def _table_rows(
     cube: ReadingCube,
     pools: dict[str, TypePool],
@@ -213,6 +225,9 @@ def _table_rows(
                 float(hi),
                 *means[1:],
                 *(baselines[name][column] for column in SURFACE_BASELINES),
+                *_within_columns(cube, t, k, seed),
+                *(baselines[name][column] for column in WITHIN_BASELINES),
+                within_relation_pairs(pool, "test"),
             ]
         )
     return rows
@@ -236,12 +251,22 @@ def execute(
     the chosen layer, row = fit contrast, column = scored contrast),
     `matrix_cosine` (split-half cross-fit cosines, whose diagonal is the
     split-half stability of a contrast, see `reading_cube`), `transfer`
-    (every AUROC and cosine), `readers` (the all-pairs directions of the
-    headline method), `table` and `summary`. The table closes with the
-    surface baselines of each contrast (`text_word`, `text_char` and
-    `popularity`, see `surface_baselines`), computed on the CPU before the
-    forward pass, so a reader AUROC can be read against what the wording and
-    the popularity of the questions give alone.
+    (every AUROC and cosine, with the within-relation AUROC of the val and
+    test items as `val_within` and `test_within`, NaN for a contrast that is
+    not relational), `readers` (the all-pairs directions of the headline
+    method), `table` and `summary`. The table holds the surface baselines of
+    each contrast (`text_word`, `text_char` and `popularity`, see
+    `surface_baselines`), computed on the CPU before the forward pass, so a
+    reader AUROC can be read against what the wording and the popularity of
+    the questions give alone. It closes with the within-relation values of
+    the contrasts whose val and test items all carry a relation: the
+    headline method as `<method>_within` with its interval `lo_within` and
+    `hi_within` (the same draw bootstrap as `lo` and `hi`, on `test_within`
+    at the chosen layer), the three baselines scored inside each relation
+    (`WITHIN_BASELINES`) and `n_pairs_within`, the number of (positive,
+    negative) pairs of test items that share a relation. All of them are null
+    for any other contrast, and the values are null where no relation holds
+    both sides.
 
     Args:
         config: The experiment settings.
@@ -333,6 +358,8 @@ def execute(
         cosine=cube.cosine,
         val=cube.val,
         test=cube.test,
+        val_within=cube.val_within,
+        test_within=cube.test_within,
         layers=np.asarray(cube.layers, dtype=np.int64),
     )
     run_dir.write_json(
@@ -361,6 +388,11 @@ def execute(
                 "hi",
                 *cube.methods[1:],
                 *SURFACE_BASELINES,
+                f"{cube.methods[0]}_within",
+                "lo_within",
+                "hi_within",
+                *WITHIN_BASELINES,
+                "n_pairs_within",
             ],
             "rows": _table_rows(cube, usable, baselines, k, config.seed),
         },

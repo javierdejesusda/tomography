@@ -76,6 +76,20 @@ class TypePool:
         )
 
 
+def relation_of(item: LabeledItem) -> str | None:
+    """Returns the relation of an item.
+
+    Args:
+        item: A labeled question.
+
+    Returns:
+        The string `meta["relation"]` of the question, None when the field
+        is missing or is not a string.
+    """
+    relation = item.example.meta.get("relation")
+    return relation if isinstance(relation, str) else None
+
+
 def stratum_name(item: LabeledItem, mode: Strata) -> str:
     """Names the stratum of an item under a strata mode.
 
