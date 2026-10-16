@@ -15,6 +15,7 @@ from tomography.p9.behavior import CHECK_COLUMNS
 from tomography.p9.behavior import BehaviorRates
 from tomography.p9.behavior import CompletionRecord
 from tomography.p9.behavior import Outcome
+from tomography.p9.behavior import abs_slope_gap_ci
 from tomography.p9.behavior import behavior_rates
 from tomography.p9.behavior import classify
 from tomography.p9.behavior import is_abstention
@@ -479,3 +480,44 @@ def test_slope_ci_against_a_reference_is_paired() -> None:
     assert slope_ci(same, same, n_boot=100) == (0.0, 0.0, 0.0)
     lat = np.array([-1.5, -1.5])
     assert slope_ci(lat, np.zeros(2), n_boot=100) == (-1.5, -1.5, -1.5)
+
+
+def test_abs_slope_gap_is_the_difference_of_the_absolute_mean_slopes() -> None:
+    lat = np.array([-1.5, -1.5])
+    assert abs_slope_gap_ci(lat, np.array([1.0, 1.0]), n_boot=50) == (
+        0.5,
+        0.5,
+        0.5,
+    )
+    assert abs_slope_gap_ci(lat, np.array([2.0, 2.0]), n_boot=50) == (
+        -0.5,
+        -0.5,
+        -0.5,
+    )
+
+
+def test_abs_slope_gap_resamples_both_arms_on_the_same_items() -> None:
+    same = np.array([-3.0, 0.0, -1.0, 2.0])
+    assert abs_slope_gap_ci(same, same, n_boot=100) == (0.0, 0.0, 0.0)
+
+
+def test_abs_slope_gap_interval_covers_the_estimate() -> None:
+    lat = np.array([-2.0, -1.0, 0.0, -3.0])
+    ref = np.array([0.0, 1.0, 1.0, 0.0])
+    gap, lo, hi = abs_slope_gap_ci(lat, ref, n_boot=200, seed=1)
+    assert gap == pytest.approx(1.5 - 0.5)
+    assert lo <= gap <= hi
+    assert abs_slope_gap_ci(lat, ref, n_boot=200, seed=1) == (gap, lo, hi)
+
+
+def test_abs_slope_gap_drops_an_item_not_finite_in_both_arms() -> None:
+    lat = np.array([-2.0, np.nan, -2.0])
+    ref = np.array([1.0, 5.0, np.nan])
+    assert abs_slope_gap_ci(lat, ref, n_boot=20)[0] == pytest.approx(1.0)
+
+
+def test_abs_slope_gap_rejects_a_shape_mismatch_and_no_finite_item() -> None:
+    with pytest.raises(ValueError, match="shape"):
+        abs_slope_gap_ci(np.zeros(3), np.zeros(4))
+    with pytest.raises(ValueError, match="finite"):
+        abs_slope_gap_ci(np.array([np.nan]), np.array([1.0]))

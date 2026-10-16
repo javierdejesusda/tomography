@@ -384,3 +384,56 @@ def write_completion_check(
                 ]
             )
     return len(chosen)
+
+
+def abs_slope_gap_ci(
+    slopes: NDArray[np.float64],
+    reference: NDArray[np.float64],
+    *,
+    n_boot: int = 1000,
+    alpha: float = 0.05,
+    seed: int = 0,
+) -> tuple[float, float, float]:
+    """Computes how much more one arm moves the outcome than another.
+
+    The statistic is `|mean(slopes)| - |mean(reference)|`, so the sign of the
+    movement does not matter. Each bootstrap resample draws the same items
+    for both arms.
+
+    Args:
+        slopes: The slope of each item under the arm of interest.
+        reference: The slope of the same items under the other arm.
+        n_boot: Bootstrap resamples of the items.
+        alpha: One minus the coverage.
+        seed: Seed of the resampling.
+
+    Returns:
+        The statistic over the items where both slopes are finite, and the
+        lower and upper bounds of its percentile interval.
+
+    Raises:
+        ValueError: If the arrays differ in shape, no item is finite, or
+            `alpha` or `n_boot` is invalid.
+    """
+    own = np.asarray(slopes, dtype=np.float64)
+    other = np.asarray(reference, dtype=np.float64)
+    if own.shape != other.shape:
+        raise ValueError(
+            f"slopes and reference must have one shape, got {own.shape} "
+            f"and {other.shape}"
+        )
+    keep = np.isfinite(own) & np.isfinite(other)
+    if not keep.any():
+        raise ValueError("no item with a finite slope in both arms")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha must lie in (0, 1), got {alpha}")
+    if n_boot < 1:
+        raise ValueError("n_boot must be at least 1")
+    own, other = own[keep], other[keep]
+    draws = np.random.default_rng(seed).integers(
+        0, own.size, size=(n_boot, own.size)
+    )
+    gaps = np.abs(own[draws].mean(axis=1)) - np.abs(other[draws].mean(axis=1))
+    lo, hi = np.quantile(gaps, [alpha / 2, 1 - alpha / 2])
+    gap = abs(own.mean()) - abs(other.mean())
+    return float(gap), float(lo), float(hi)
