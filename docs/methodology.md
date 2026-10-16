@@ -54,7 +54,7 @@ in the README.
 | `r3`           | Morality on ETHICS commonsense scenarios                               | Sec. 5.2, App. D.1.9                                                                 |
 | `r4`           | Six emotions, one-vs-rest, t-SNE                                       | Sec. 6.1, App. D.1.10, Fig. 18                                                       |
 | `r5`           | Honesty function with persona prompts                                  | Sec. 4.3, App. D.1.2, Figs. 8 and 9                                                  |
-| `r6`           | TruthfulQA MC1: standard, heuristic and LAT                            | Sec. 4.1, Table 1, Table 8                                                           |
+| `r6`           | TruthfulQA MC1: standard, heuristic, text-only and LAT                 | Sec. 4.1, Table 1, Table 8                                                           |
 | `r7`           | Truthfulness on true and false facts, plus out-of-distribution sets    | Sec. 4.1 and 4.2; the out-of-distribution truth sets are an extension                |
 | `m1`           | Six direction finders: correlation, manipulation, termination          | Sec. 5.1.1, Fig. 12                                                                  |
 | `c1`           | Sentiment steering: sweep, operators, side effects                     | Extension (uses the Sec. 3.2.1 operators and adds a prompting baseline arm)          |

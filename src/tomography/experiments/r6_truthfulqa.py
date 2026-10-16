@@ -43,6 +43,9 @@ from tomography.judges import sequence_logprob
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.p9.risk import TEXT_ANALYZERS
+from tomography.p9.risk import TextAnalyzer
+from tomography.p9.risk import text_scores
 from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
 from tomography.reading.metrics import bootstrap_ci
@@ -302,6 +305,21 @@ def _baseline(
     return {"mc1": mc1, "lo": lo, "hi": hi}
 
 
+def _text_baseline_scores(
+    train: Sequence[ChoiceExample],
+    test: Sequence[ChoiceExample],
+    analyzer: TextAnalyzer,
+) -> list[NDArray[np.float64]]:
+    flat = [example for item in train for example in item.flatten()]
+    train_texts = [example.text for example in flat]
+    train_labels = np.array([example.label for example in flat], dtype=np.int64)
+    test_texts = [choice for item in test for choice in item.choices]
+    return _split(
+        text_scores(train_texts, train_labels, test_texts, analyzer=analyzer),
+        test,
+    )
+
+
 def _sweep_source(
     config: Config,
     source: str,
@@ -371,7 +389,7 @@ def execute(
     arc: Sequence[ChoiceExample],
     facts: Sequence[Example],
 ) -> None:
-    """Scores TruthfulQA MC1 with the two baselines and the LAT readers.
+    """Scores TruthfulQA MC1 with the baselines and the LAT readers.
 
     Writes `table.json` (one row per baseline and per source and layer
     rule), `curves_<source>` (test accuracy per layer), `readers_<source>`
@@ -381,6 +399,14 @@ def execute(
     chance line is drawn for those same questions. The summary reports the
     split sizes and, in `n_eval_pairs`, how many groups each evaluation set
     scored.
+
+    Besides the standard and heuristic baselines, two text-only baselines,
+    `text_word` and `text_char`, measure how far the surface form of the
+    answers alone goes. Each fits a TF-IDF logistic regression on the choice
+    texts of the train questions (label 1 for the correct choice, without the
+    question or any template) and ranks the choices of the test questions.
+    They never call the model. Their rows come after the heuristic row and
+    their MC1 is also in the summary under `text_baselines`.
 
     Args:
         config: The experiment settings.
@@ -485,6 +511,15 @@ def execute(
             derive_seed(config.seed, "mc1", method, "test"),
         )
         rows.append([method, None, None, *on_test.values(), None])
+    text_baselines: dict[str, dict[str, float]] = {}
+    for analyzer in TEXT_ANALYZERS:
+        name = f"text_{analyzer}"
+        text_baselines[name] = _baseline(
+            _text_baseline_scores(by_split["train"], test_questions, analyzer),
+            test_questions,
+            derive_seed(config.seed, "mc1", name, "test"),
+        )
+        rows.append([name, None, None, *text_baselines[name].values(), None])
     run_dir.write_json(
         "table",
         {
@@ -513,6 +548,7 @@ def execute(
                 for split, stimuli in eval_sets.items()
             },
             "baselines_all_questions": baselines,
+            "text_baselines": text_baselines,
             "lat": lat_summary,
         },
     )

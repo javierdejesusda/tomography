@@ -29,6 +29,8 @@ from tomography.experiments.r6_truthfulqa import HEURISTIC_LEVELS
 from tomography.experiments.r6_truthfulqa import LAYER_RULES
 from tomography.experiments.r6_truthfulqa import SOURCES
 from tomography.experiments.r6_truthfulqa import Config
+from tomography.experiments.r6_truthfulqa import _baseline
+from tomography.experiments.r6_truthfulqa import _text_baseline_scores
 from tomography.experiments.r6_truthfulqa import best_layer_accuracy
 from tomography.experiments.r6_truthfulqa import execute
 from tomography.experiments.r6_truthfulqa import heuristic_scores
@@ -44,6 +46,8 @@ from tomography.judges import sequence_logprob
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.p9.risk import TEXT_ANALYZERS
+from tomography.p9.risk import TextAnalyzer
 from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import wilson_ci
 from tomography.reading.reader import RepReader
@@ -476,6 +480,8 @@ def test_execute_writes_the_table_curves_and_summary(
     assert [row[:3] for row in rows] == [
         ["standard", None, None],
         ["heuristic", None, None],
+        ["text_word", None, None],
+        ["text_char", None, None],
         ["lat", "validation-layer", "truthfulqa"],
         ["lat", "best-layer", "truthfulqa"],
         ["lat", "validation-layer", "arc"],
@@ -483,13 +489,13 @@ def test_execute_writes_the_table_curves_and_summary(
         ["lat", "validation-layer", "honesty"],
         ["lat", "best-layer", "honesty"],
     ]
-    for row in rows[:2]:
+    for row in rows[:4]:
         mc1, lo, hi, n_trials = row[3:]
         assert 0.0 <= lo <= mc1 <= hi <= 1.0
         assert n_trials is None
         assert mc1 * 8 == pytest.approx(round(mc1 * 8))
         assert (lo, hi) == wilson_ci(round(mc1 * 8), 8)
-    for row in rows[2:]:
+    for row in rows[4:]:
         mc1, lo, hi, n_trials = row[3:]
         assert 0.0 <= lo <= hi <= 1.0
         assert 0.0 <= mc1 <= 1.0
@@ -515,6 +521,7 @@ def test_execute_writes_the_table_curves_and_summary(
         "n_seeds",
         "n_eval_pairs",
         "baselines_all_questions",
+        "text_baselines",
         "lat",
     }
     assert summary["n_eval_pairs"] == {"val": 6, "test": 8}
@@ -529,6 +536,16 @@ def test_execute_writes_the_table_curves_and_summary(
     for entry in summary["baselines_all_questions"].values():
         assert set(entry) == {"mc1", "lo", "hi"}
         assert entry["lo"] <= entry["mc1"] <= entry["hi"]
+    assert set(summary["text_baselines"]) == {"text_word", "text_char"}
+    for entry in summary["text_baselines"].values():
+        assert set(entry) == {"mc1", "lo", "hi"}
+        assert 0.0 <= entry["lo"] <= entry["mc1"] <= entry["hi"] <= 1.0
+    for row, name in zip(rows[2:4], summary["text_baselines"], strict=True):
+        assert row[:3] == [name, None, None]
+        assert row[6] is None
+        assert row[3:6] == pytest.approx(
+            [summary["text_baselines"][name][k] for k in ("mc1", "lo", "hi")]
+        )
     assert set(summary["lat"]) == {"truthfulqa", "arc", "honesty"}
     for entry in summary["lat"].values():
         assert set(entry) == {"validation-layer", "best-layer"}
@@ -864,6 +881,49 @@ def test_execute_scores_the_planted_baselines_on_the_right_questions(
         )
 
 
+def _cue_questions(train_cue: bool, test_cue: bool) -> list[ChoiceExample]:
+    items = []
+    for split, count in (("train", 12), ("val", 3), ("test", 12)):
+        cue = train_cue if split == "train" else test_cue
+        for i in range(count):
+            choices = [f"option {j}" for j in range(3)]
+            if cue:
+                choices[i % 3] += " zebra"
+            items.append(
+                ChoiceExample(
+                    uid=f"q-{split}-{i}",
+                    question=f"{split} question {i}",
+                    choices=tuple(choices),
+                    correct=i % 3,
+                    split=cast(Split, split),
+                )
+            )
+    return items
+
+
+@pytest.mark.parametrize("analyzer", TEXT_ANALYZERS, ids=TEXT_ANALYZERS)
+@pytest.mark.parametrize(
+    ("train_cue", "test_cue", "expected_perfect"),
+    [(True, True, True), (False, False, False), (False, True, False)],
+    ids=["cue_in_both", "no_cue", "cue_in_test_only"],
+)
+def test_the_text_baselines_learn_a_cue_only_from_the_train_split(
+    analyzer: TextAnalyzer,
+    train_cue: bool,
+    test_cue: bool,
+    expected_perfect: bool,
+) -> None:
+    questions = _cue_questions(train_cue, test_cue)
+    train = [q for q in questions if q.split == "train"]
+    test = [q for q in questions if q.split == "test"]
+
+    mc1 = _baseline(_text_baseline_scores(train, test, analyzer), test, 0)[
+        "mc1"
+    ]
+
+    assert (mc1 == 1.0) is expected_perfect
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected"),
     [({}, "logistic"), ({"method": "pca_diff"}, "pca_diff")],
@@ -953,7 +1013,7 @@ def test_execute_runs_only_the_requested_sources(
     run_dir = _run_execute(config, tiny_gpt2, tmp_path, monkeypatch)
     table = run_dir.read_json("table")
     assert isinstance(table, dict)
-    assert len(table["rows"]) == 4
+    assert len(table["rows"]) == 6
     assert sorted(p.name for p in run_dir.path.glob("curves_*")) == [
         "curves_truthfulqa.json",
         "curves_truthfulqa.npz",
@@ -1035,6 +1095,6 @@ def test_r6_on_gpt2_runs_end_to_end(tmp_path: Path) -> None:
     summary = run_dir.read_json("summary")
     assert isinstance(table, dict)
     assert isinstance(summary, dict)
-    assert len(table["rows"]) == 8
+    assert len(table["rows"]) == 10
     assert all(0.0 <= row[3] <= 1.0 for row in table["rows"])
     assert 0.10 < summary["baselines_all_questions"]["standard"]["mc1"] < 0.40

@@ -286,9 +286,10 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   on held-out plain true and false statements (an exploratory transfer evaluation) and on the persona
   renderings of held-out statements (a sanity check). It also writes token by layer scans.
 - `r6` ([`r6_truthfulqa.py`](src/tomography/experiments/r6_truthfulqa.py)): TruthfulQA MC1. A standard
-  log-probability baseline and a heuristic baseline (the model rates the truthfulness of a scenario) next to
-  readers trained on each of three sources (`sources`): TruthfulQA train questions, ARC-Challenge train items
-  and the true statements as persona pairs.
+  log-probability baseline and a heuristic baseline (the model rates the truthfulness of a scenario) and two
+  text-only baselines (word and character TF-IDF classifiers on the answer texts, `text_word` and
+  `text_char`) next to readers trained on each of three sources (`sources`): TruthfulQA train questions,
+  ARC-Challenge train items and the true statements as persona pairs.
 - `r7` ([`r7_truth.py`](src/tomography/experiments/r7_truth.py)): truthfulness on fact statements, scored on
   the fact val and test splits and, with no refit, on the out-of-distribution Geometry of Truth subsets
   (`ood_subsets`).
