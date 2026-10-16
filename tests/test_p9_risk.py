@@ -1,5 +1,6 @@
 """Tests for the interval and selective-prediction tools of the P9 study."""
 
+from collections.abc import Sequence
 from typing import Any
 from typing import Literal
 
@@ -25,7 +26,6 @@ from tomography.p9.risk import risk_at
 from tomography.p9.risk import risk_band
 from tomography.p9.risk import risk_coverage
 from tomography.p9.risk import stack_scores
-from tomography.p9.risk import text_auroc
 from tomography.p9.risk import text_scores
 from tomography.reading.metrics import auroc
 
@@ -355,14 +355,28 @@ ANALYZERS = pytest.mark.parametrize(
 )
 
 
+def _text_auroc(
+    train_texts: Sequence[str],
+    train_labels: NDArray[np.int64],
+    test_texts: Sequence[str],
+    test_labels: NDArray[np.int64],
+    *,
+    analyzer: Literal["word", "char"],
+) -> float:
+    scores = text_scores(
+        train_texts, train_labels, test_texts, analyzer=analyzer
+    )
+    return float(auroc(scores, test_labels))
+
+
 @ANALYZERS
-def test_text_auroc_is_one_when_the_sides_differ_by_one_word(
+def test_text_scores_auroc_is_one_when_the_sides_differ_by_one_word(
     analyzer: Literal["word", "char"],
 ) -> None:
     train_texts, train_labels = _two_word_texts(12)
     test_texts, test_labels = _two_word_texts(6)
 
-    score = text_auroc(
+    score = _text_auroc(
         train_texts, train_labels, test_texts, test_labels, analyzer=analyzer
     )
 
@@ -370,25 +384,25 @@ def test_text_auroc_is_one_when_the_sides_differ_by_one_word(
 
 
 @ANALYZERS
-def test_text_auroc_is_chance_on_identical_texts(
+def test_text_scores_auroc_is_chance_on_identical_texts(
     analyzer: Literal["word", "char"],
 ) -> None:
     texts = ["who wrote the same novel"] * 24
     labels = np.tile(np.array([1, 0], dtype=np.int64), 12)
 
-    score = text_auroc(texts, labels, texts, labels, analyzer=analyzer)
+    score = _text_auroc(texts, labels, texts, labels, analyzer=analyzer)
 
     assert score == pytest.approx(0.5)
 
 
 @ANALYZERS
-def test_text_auroc_learns_from_the_train_items_only(
+def test_text_scores_auroc_learns_from_the_train_items_only(
     analyzer: Literal["word", "char"],
 ) -> None:
     train_texts, train_labels = _two_word_texts(12)
     test_texts, test_labels = _two_word_texts(6)
 
-    score = text_auroc(
+    score = _text_auroc(
         train_texts,
         train_labels,
         test_texts,
@@ -400,7 +414,7 @@ def test_text_auroc_learns_from_the_train_items_only(
 
 
 @ANALYZERS
-def test_text_auroc_builds_its_vocabulary_from_the_train_texts_only(
+def test_text_scores_auroc_builds_its_vocabulary_from_the_train_texts_only(
     monkeypatch: pytest.MonkeyPatch, analyzer: Literal["word", "char"]
 ) -> None:
     corpora: list[list[str]] = []
@@ -414,7 +428,7 @@ def test_text_auroc_builds_its_vocabulary_from_the_train_texts_only(
     train_texts, train_labels = _two_word_texts(12)
     test_texts, test_labels = _two_word_texts(6, "gamma", "delta")
 
-    text_auroc(
+    _text_auroc(
         train_texts, train_labels, test_texts, test_labels, analyzer=analyzer
     )
 
@@ -445,7 +459,7 @@ def test_text_auroc_builds_its_vocabulary_from_the_train_texts_only(
     ],
     ids=["word", "char"],
 )
-def test_text_auroc_uses_the_documented_settings(
+def test_text_scores_auroc_uses_the_documented_settings(
     monkeypatch: pytest.MonkeyPatch,
     analyzer: Literal["word", "char"],
     expected: dict[str, Any],
@@ -467,7 +481,7 @@ def test_text_auroc_uses_the_documented_settings(
     train_texts, train_labels = _two_word_texts(12)
     test_texts, test_labels = _two_word_texts(6)
 
-    text_auroc(
+    _text_auroc(
         train_texts, train_labels, test_texts, test_labels, analyzer=analyzer
     )
 
@@ -479,41 +493,28 @@ def test_text_auroc_uses_the_documented_settings(
 
 
 @ANALYZERS
-def test_text_auroc_is_deterministic(
+def test_text_scores_auroc_is_deterministic(
     analyzer: Literal["word", "char"],
 ) -> None:
     train_texts, train_labels = _two_word_texts(12)
     test_texts, test_labels = _two_word_texts(6, "alpha", "gamma")
 
-    first = text_auroc(
+    first = _text_auroc(
         train_texts, train_labels, test_texts, test_labels, analyzer=analyzer
     )
-    second = text_auroc(
+    second = _text_auroc(
         train_texts, train_labels, test_texts, test_labels, analyzer=analyzer
     )
 
     assert second == first
 
 
-def test_text_auroc_rejects_an_unknown_analyzer() -> None:
-    texts, labels = _two_word_texts(12)
-
-    with pytest.raises(ValueError, match="analyzer"):
-        text_auroc(
-            texts,
-            labels,
-            texts,
-            labels,
-            analyzer="bytes",  # type: ignore[arg-type]
-        )
-
-
-def test_text_auroc_needs_both_classes_in_the_test_labels() -> None:
+def test_text_scores_auroc_needs_both_classes_in_the_test_labels() -> None:
     train_texts, train_labels = _two_word_texts(12)
     test_texts, _ = _two_word_texts(6)
 
     with pytest.raises(ValueError, match="both classes"):
-        text_auroc(
+        _text_auroc(
             train_texts,
             train_labels,
             test_texts,
@@ -536,22 +537,6 @@ def test_text_scores_give_one_finite_score_per_test_text(
     assert scores.shape == (len(test_texts),)
     assert np.isfinite(scores).all()
     assert scores[test_labels == 1].min() > scores[test_labels == 0].max()
-
-
-@ANALYZERS
-def test_text_auroc_is_the_auroc_of_the_text_scores(
-    analyzer: Literal["word", "char"],
-) -> None:
-    train_texts, train_labels = _two_word_texts(12)
-    test_texts, test_labels = _two_word_texts(6, "alpha", "gamma")
-
-    scores = text_scores(
-        train_texts, train_labels, test_texts, analyzer=analyzer
-    )
-
-    assert text_auroc(
-        train_texts, train_labels, test_texts, test_labels, analyzer=analyzer
-    ) == float(auroc(scores, test_labels))
 
 
 def test_text_scores_reject_an_unknown_analyzer() -> None:
