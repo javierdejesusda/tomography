@@ -707,6 +707,66 @@ results/                        # --out
 - **Offline mode.** Every dataset loader takes `offline=True` and then reads only the cache, raising
   `OfflineCacheMissError` when a file is missing. For model weights set `HF_HUB_OFFLINE=1`.
 
+## Data sources, models and licenses
+
+Everything the package downloads is listed here, with the revision the code pins and the license each source
+states. Hub licenses were read from the card metadata at the pinned revision. Where a card states none or
+"unknown", the upstream GitHub repository was checked as well, and both readings are given.
+
+Models, loaded by `load_model`, `load_judge` and `load_decoder`. Experiments that run a model load it through
+`MODELS`; `p6` reads only the configs, and `a1` and `p8` read finished runs.
+
+| Model                         | Hub ID                                                       | Revision | dtype           | Used by          | License (Hub card) |
+| ----------------------------- | ------------------------------------------------------------ | -------- | --------------- | ---------------- | ------------------ |
+| `gpt2`                        | `openai-community/gpt2`                                      | 607a30d  | float32         | experiments      | MIT                |
+| `gpt2-medium`                 | `openai-community/gpt2-medium`                               | 6dcaa7a  | float32         | experiments      | MIT                |
+| `gpt2-large`                  | `openai-community/gpt2-large`                                | 32b71b1  | float32         | experiments      | MIT                |
+| `gpt2-xl`                     | `openai-community/gpt2-xl`                                   | 15ea56d  | float16         | experiments      | MIT                |
+| `qwen3-1.7b-base`             | `Qwen/Qwen3-1.7B-Base`                                       | ea980cb  | bfloat16        | experiments      | Apache-2.0         |
+| `qwen3-1.7b`                  | `Qwen/Qwen3-1.7B`                                            | 70d244c  | bfloat16        | experiments      | Apache-2.0         |
+| `qwen3-0.6b-base`             | `Qwen/Qwen3-0.6B-Base`                                       | da87bfb  | bfloat16        | experiments      | Apache-2.0         |
+| `qwen3-0.6b`                  | `Qwen/Qwen3-0.6B`                                            | c1899de  | bfloat16        | experiments      | Apache-2.0         |
+| `sentiment-primary`           | `siebert/sentiment-roberta-large-english`                    | 74cea61  | library default | `c1`, `m1`, `p7` | none stated        |
+| `sentiment-secondary`         | `distilbert/distilbert-base-uncased-finetuned-sst-2-english` | 714eb0f  | library default | `c1`, `m1`, `p7` | Apache-2.0         |
+| `emotion-primary`             | `j-hartmann/emotion-english-distilroberta-base`              | 0e1cd91  | library default | `c2`             | none stated        |
+| `emotion-secondary`           | `cardiffnlp/twitter-roberta-base-emotion-latest`             | 415620c  | library default | `c2`             | MIT                |
+| `qwen-scope-1.7b-base-l0-50`  | `Qwen/SAE-Res-Qwen3-1.7B-Base-W32K-L0_50`                    | ce1a79d  | as stored       | `a5`             | other (Qwen)       |
+| `qwen-scope-1.7b-base-l0-100` | `Qwen/SAE-Res-Qwen3-1.7B-Base-W32K-L0_100`                   | 2756a49  | as stored       | `a5`             | other (Qwen)       |
+
+The GPT-2 cards say MIT, while the upstream `openai/gpt-2` repository carries a "Modified MIT License" (the
+`MODELS` rows record "Modified MIT"); read that text before reuse. The two judges marked "none stated" have no
+`license` field on their cards, and their GitHub repositories declare no license either. The Qwen-Scope cards say
+`other` with a `LICENSE` file that is Apache-2.0; the last section of this README gives the usage caution.
+
+Datasets and other remote sources, read by the loaders in [`datasets/`](src/tomography/datasets):
+
+| Source              | Hub ID or URL                                            | Revision                   | Used by                              | License as stated                                                                                                                            | Verified at                                              |
+| ------------------- | -------------------------------------------------------- | -------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Alpaca              | `tatsu-lab/alpaca`                                       | dce01c9                    | `c4`, `c5`, `lr1`                    | CC BY-NC 4.0 (data), research use only; generated with OpenAI `text-davinci-003`, so OpenAI terms may also apply; code repository Apache-2.0 | Hub card; `tatsu-lab/stanford_alpaca` LICENSE            |
+| ARC-Challenge       | `allenai/ai2_arc`                                        | 210d026                    | `r6`                                 | CC-BY-SA-4.0                                                                                                                                 | Hub card                                                 |
+| Emotions statements | RepE repository, `data/emotions/*.json` and replies      | 5455d8a                    | `r4`, `c2`, `c5`, `p1` to `p4`       | MIT (repository)                                                                                                                             | `andyzoujm/representation-engineering` LICENSE           |
+| Facts true/false    | RepE repository, `data/facts/facts_true_false.csv`       | 5455d8a                    | `r5`, `r6`, `r7`, `p5`, `p1` to `p4` | MIT (repository)                                                                                                                             | `andyzoujm/representation-engineering` LICENSE           |
+| ETHICS              | `https://people.eecs.berkeley.edu/~hendrycks/ethics.tar` | SHA-256 40acbf1            | `r2`, `r3`, `m1`, `p1` to `p4`       | MIT (repository)                                                                                                                             | `hendrycks/ethics` LICENSE                               |
+| FalseQA             | `thunlp/FalseQA`, `dataset/test.csv`                     | 9a97299                    | `p9a` (read by `p9b` to `p9d`)       | none stated                                                                                                                                  | GitHub repository: no LICENSE file, no license in README |
+| Geometry of Truth   | `saprmarks/geometry-of-truth`, `datasets/*.csv`          | 5d1c630                    | `r7`, `p5`, `p1` to `p4`             | none stated                                                                                                                                  | GitHub repository: no LICENSE file, no license in README |
+| KUQ                 | `amayuelas/KUQ`                                          | f99b53a                    | `p9a` (read by `p9b` to `p9d`)       | MIT                                                                                                                                          | Hub card                                                 |
+| NQ-Open             | `google-research-datasets/nq_open`                       | 5dd9790                    | `p9a` (read by `p9b` to `p9d`)       | CC-BY-SA-3.0                                                                                                                                 | Hub card                                                 |
+| PopQA               | `akariasai/PopQA`                                        | 098765c                    | `p9a` (read by `p9b` to `p9d`)       | none on the Hub card; the code repository `AlexTMallen/adaptive-retrieval` is MIT                                                            | Hub card; GitHub LICENSE (code only)                     |
+| SST-2               | `stanfordnlp/sst2`                                       | 8d51e7e                    | `r1`, `c1`, `p7`, `p1` to `p4`       | unknown on the Hub card; none on the Stanford SST page                                                                                       | Hub card; `nlp.stanford.edu/sentiment`                   |
+| SyntHal             | `yuetianluNLP/SyntHal`, prompts file                     | c4fe4ce                    | `p9a` (read by `p9b` to `p9d`)       | research and review terms, no permissive license                                                                                             | GitHub README, "Terms" section                           |
+| TriviaQA            | `mandarjoshi/trivia_qa`                                  | 0f7faf3                    | `c5`, `p9a` (read by `p9b` to `p9d`) | unknown on the Hub card; Apache-2.0 on the GitHub repository                                                                                 | Hub card; `mandarjoshi90/triviaqa` LICENSE               |
+| TruthfulQA          | `truthfulqa/truthful_qa`                                 | 741b827                    | `r6`, `c4`                           | Apache-2.0                                                                                                                                   | Hub card                                                 |
+| WikiText-103        | `Salesforce/wikitext`                                    | b08601e                    | `c1`, `c2`, `m1`, `p7`               | CC-BY-SA-3.0 and GFDL                                                                                                                        | Hub card                                                 |
+| Wikidata            | `https://query.wikidata.org/sparql` (SPARQL snapshots)   | retrieval date and SHA-256 | `p9a` (read by `p9b` to `p9d`)       | CC0 (structured data)                                                                                                                        | `wikidata.org/wiki/Wikidata:Licensing`                   |
+
+The fictional names of the `p9` pool are generated locally and downloaded from nowhere.
+
+The repository's own license covers its code only. Every model and data source above keeps its own terms, and
+some are non-commercial (Alpaca), share-alike (ARC, NQ-Open, WikiText) or carry no stated license (FalseQA,
+Geometry of Truth); SyntHal limits use to research and review. None is redistributed here; anyone reusing a
+checkpoint or a derived dataset is responsible for its terms. Wikidata content is CC0, so the snapshots the
+`p9` pool caches add no restriction of their own.
+
 ## Repository layout
 
 ```text
