@@ -2,16 +2,20 @@
 
 Sentiment readers are extracted under the template variants of P1 and steer
 text with C1's protocol, so the template changes nothing but the direction.
-The study counts the readers that read sentiment well and steer it the wrong
-way, compares the layer that reads best with the layer that steers best, and
-asks whether the logit lens predicts the dose response.
+The study counts the units (a template, a layer and a reader) that read
+sentiment well and steer it the wrong way, compares the layer that reads best
+with the layer that steers best, and asks whether the logit lens predicts the
+dose response.
 """
 
 from collections.abc import Sequence
 import dataclasses
 from dataclasses import dataclass
+from functools import partial
+from pathlib import Path
 from typing import Any
 
+from matplotlib.figure import Figure
 import numpy as np
 from numpy.typing import ArrayLike
 from numpy.typing import NDArray
@@ -20,10 +24,13 @@ from tomography.analysis import lens_logits
 from tomography.analysis import pole_separation
 from tomography.control.controllers import mean_residual_norms
 from tomography.datasets.records import Example
+from tomography.datasets.sst2 import load_sst2
+from tomography.datasets.wikitext import load_wikitext
 from tomography.experiments.a2_logit_lens import POLE_WORDS
 from tomography.experiments.a2_logit_lens import PoleWords
 from tomography.experiments.a2_logit_lens import lens_params
 from tomography.experiments.a2_logit_lens import pole_ids
+from tomography.experiments.aggregate import read_curves
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.c1_sentiment_steering import check_pair_count
@@ -34,6 +41,7 @@ from tomography.experiments.c1_sentiment_steering import prompt_fragments
 from tomography.experiments.c1_sentiment_steering import slope_layer
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.effects import write_trials
+from tomography.experiments.matrices import plot_matrix_file
 from tomography.experiments.matrices import write_matrix
 from tomography.experiments.p3_size import spearman as rank_correlation
 from tomography.experiments.r1_sentiment import select_examples
@@ -49,6 +57,7 @@ from tomography.experiments.steering import reader_arm
 from tomography.experiments.steering import run_trial
 from tomography.experiments.sweep import SERIES
 from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.sweep import plot_curves_file
 from tomography.experiments.sweep import reading_sweep
 from tomography.experiments.sweep import write_curves
 from tomography.experiments.variants import READING_TASKS
@@ -58,11 +67,21 @@ from tomography.experiments.variants import VariantKind
 from tomography.experiments.variants import pair_capacity
 from tomography.experiments.variants import task_set
 from tomography.experiments.variants import template_variants
+from tomography.judges import load_judge
 from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.reading.directions import Method
+from tomography.reading.metrics import best_layer
 from tomography.reading.metrics import wilson_ci
 from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
+from tomography.viz.style import INK_MUTED
+from tomography.viz.style import PX
+from tomography.viz.style import TEXT_WIDTH
+from tomography.viz.style import categorical_colors
+from tomography.viz.style import new_figure
+from tomography.viz.style import save_figure
+from tomography.viz.style import style_context
 
 TEMPLATES: tuple[str, ...] = (
     "paper",
@@ -77,6 +96,19 @@ CHAT_INSTRUCTION = "Continue the text."
 STORY_PREFIX = "Here is a short story: "
 MAX_SERIES = 8
 _READER = SERIES.index("reader")
+_COLUMNS = (
+    "template",
+    "read_layer",
+    "read_depth",
+    "read_accuracy",
+    "steer_layer",
+    "steer_depth",
+    "steer_slope",
+    "lens_layer",
+    "lens_rho",
+    "n_readable",
+    "n_inverted",
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -325,12 +357,10 @@ def _inversion(
 
     Returns:
         The readable units, and the readable units with a negative slope. A
-        unit without a finite slope is never inverted.
+        unit with a NaN slope is never inverted.
     """
     readable = read >= threshold
-    finite = np.isfinite(slope)
-    negative = np.where(finite, slope, 0.0) < 0.0
-    return readable, readable & negative
+    return readable, readable & (slope < 0.0)
 
 
 def _inversion_summary(
@@ -497,6 +527,227 @@ def _check(config: Config, n_layers: int) -> tuple[int, ...]:
     return sweep
 
 
+def _split_sst2(
+    config: Config, sst2: Sequence[Example]
+) -> tuple[list[Example], list[Example]]:
+    """Selects the SST-2 train and val examples and checks their pairs."""
+    task = READING_TASKS["sentiment"]
+    train = select_examples(sst2, split="train", min_words=config.min_words)
+    val = select_examples(sst2, split="val", min_words=config.min_words)
+    for split, name, wanted, part, allow_none in (
+        ("train", "n_pairs", config.n_pairs, train, False),
+        ("val", "n_eval_pairs", config.n_eval_pairs, val, True),
+    ):
+        check_pair_count(
+            name,
+            wanted,
+            pair_capacity(task, part),
+            f"in the {split} split",
+            allow_none=allow_none,
+        )
+    return train, val
+
+
+def _read_templates(
+    config: Config,
+    loaded: LoadedModel,
+    variants: Sequence[Variant],
+    train: Sequence[Example],
+    val: Sequence[Example],
+) -> tuple[NDArray[np.float64], list[tuple[RepReader, ...]], tuple[int, ...]]:
+    """Fits the readers of every template and scores them on the val pairs.
+
+    Returns:
+        The validation accuracy of shape (T, N, K): template, reader, layer;
+        the first `n_steer_seeds` readers of each template; and the layers.
+    """
+    task = READING_TASKS["sentiment"]
+    accuracy = []
+    readers = []
+    for variant in variants:
+        result = reading_sweep(
+            loaded,
+            [
+                task_set(
+                    task,
+                    variant,
+                    train,
+                    n_pairs=config.n_pairs,
+                    seed=derive_seed(config.seed, "train", i),
+                )
+                for i in range(config.n_seeds)
+            ],
+            {
+                "val": task_set(
+                    task,
+                    variant,
+                    val,
+                    n_pairs=config.n_eval_pairs,
+                    seed=derive_seed(config.seed, "eval"),
+                )
+            },
+            method=config.method,
+            seed=config.seed,
+            bos=config.bos,
+            batch_size=config.batch_size,
+        )
+        accuracy.append(result.per_seed("val")[_READER])
+        readers.append(result.readers[: config.n_steer_seeds])
+        layers = result.layers
+    return np.stack(accuracy), readers, layers
+
+
+def _dose_sweep(
+    steering: _Steering,
+    run_dir: RunDir,
+    names: Sequence[str],
+    readers: Sequence[Sequence[RepReader]],
+    sweep: Sequence[int],
+    prompts: Sequence[str],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Runs the dose response of every reader at every sweep layer.
+
+    Writes `trials_sweep`.
+
+    Returns:
+        The primary and the check scores, each of shape (T, S, R, K):
+        template, sweep layer, reader, coefficient.
+    """
+    config = steering.config
+    none = steering.none(prompts)
+    trials = [none]
+    shape = (len(names), len(sweep), config.n_steer_seeds, len(config.coeffs))
+    primary = np.full(shape, np.nan)
+    check = np.full(shape, np.nan)
+    for t, name in enumerate(names):
+        for s, layer in enumerate(sweep):
+            for r, reader in enumerate(readers[t]):
+                dose = steering.dose(reader, layer, prompts, none)
+                primary[t, s, r] = dose.curve(0)
+                check[t, s, r] = dose.curve(1)
+                trials.extend(_steered_trials(dose, f"{name}/layer{layer}/{r}"))
+    write_trials(run_dir, "trials_sweep", trials)
+    return primary, check
+
+
+def _prompt_shift(
+    steering: _Steering,
+    run_dir: RunDir,
+    names: Sequence[str],
+    readers: Sequence[Sequence[RepReader]],
+    steer_layers: Sequence[int],
+    prompts: Sequence[str],
+    chat: ChatFormat,
+) -> NDArray[np.float64]:
+    """Steers the report prompts in each format at the steering layers.
+
+    Writes `trials_transfer_<format>`.
+
+    Returns:
+        The primary slopes of shape (T, F, R): template, format, reader.
+    """
+    config = steering.config
+    slopes = np.full(
+        (len(names), len(config.formats), config.n_steer_seeds), np.nan
+    )
+    for f, fmt in enumerate(config.formats):
+        shifted = shift_prompts(prompts, fmt, chat)
+        none = steering.none(shifted)
+        trials = [none]
+        for t, name in enumerate(names):
+            for r, reader in enumerate(readers[t]):
+                dose = steering.dose(reader, steer_layers[t], shifted, none)
+                slopes[t, f, r] = safe_slope(config.coeffs, dose.curve(0))
+                trials.extend(_steered_trials(dose, f"{name}/{r}"))
+        write_trials(run_dir, f"trials_transfer_{fmt}", trials)
+    return slopes
+
+
+@dataclass(frozen=True, eq=False)
+class _Measured:
+    """What a run measured, with the template on the first axis.
+
+    Attributes:
+        names: The templates.
+        layers: The layers of the reading and lens curves.
+        sweep: The sweep layers.
+        reads: Validation accuracy of shape (T, N, K).
+        lens: Lens separation of shape (T, R, K).
+        slope: Primary-judge dose slope of shape (T, S, R): sweep layer and
+            steering reader.
+        check: Check-judge dose slope of the same shape.
+        steer_layers: The steering layer of each template.
+    """
+
+    names: tuple[str, ...]
+    layers: tuple[int, ...]
+    sweep: tuple[int, ...]
+    reads: NDArray[np.float64]
+    lens: NDArray[np.float64]
+    slope: NDArray[np.float64]
+    check: NDArray[np.float64]
+    steer_layers: list[int]
+
+
+def _write_report(
+    config: Config, run_dir: RunDir, n_layers: int, measured: _Measured
+) -> None:
+    """Writes `table.json` and `summary.json` from the measurements."""
+    names, layers, sweep = measured.names, measured.layers, measured.sweep
+    sweep_pos = [layers.index(layer) for layer in sweep]
+    read_units = measured.reads[:, : config.n_steer_seeds, sweep_pos]
+    read_units = read_units.transpose(0, 2, 1)
+    lens_units = measured.lens[:, :, sweep_pos].transpose(0, 2, 1)
+    slope = measured.slope
+    readable, inverted = _inversion(read_units, slope, config.read_threshold)
+    rows: list[list[Any]] = []
+    depth_gaps: list[float] = []
+    lens_hits: list[bool] = []
+    for t, name in enumerate(names):
+        read_curve = measured.reads[t].mean(axis=0)
+        read_layer = best_layer(read_curve, layers)
+        steer_layer = measured.steer_layers[t]
+        steer_pos = sweep.index(steer_layer)
+        lens_layer, lens_rho = _lens_summary(lens_units[t], slope[t], sweep)
+        read_depth = read_layer / n_layers
+        steer_depth = steer_layer / n_layers
+        depth_gaps.append(abs(read_depth - steer_depth))
+        lens_hits.append(lens_layer == steer_layer)
+        rows.append(
+            [
+                name,
+                read_layer,
+                read_depth,
+                float(read_curve[layers.index(read_layer)]),
+                steer_layer,
+                steer_depth,
+                float(_finite_mean(slope[t, steer_pos], axis=0)),
+                lens_layer,
+                lens_rho,
+                int(readable[t].sum()),
+                int(inverted[t].sum()),
+            ]
+        )
+    run_dir.write_json("table", {"columns": list(_COLUMNS), "rows": rows})
+    run_dir.write_json(
+        "summary",
+        {
+            "templates": list(names),
+            "formats": list(config.formats),
+            "sweep_layers": list(sweep),
+            "n_prompts": config.n_prompts,
+            "inversion": _inversion_summary(readable, inverted),
+            "read_steer_rho": spearman(read_units.ravel(), slope.ravel()),
+            "lens_steer_rho": spearman(lens_units.ravel(), slope.ravel()),
+            "lens_agreement": float(np.mean(lens_hits)),
+            "layer_gap": float(np.mean(depth_gaps)),
+            "judge_sign_agreement": _sign_agreement(
+                slope.ravel(), measured.check.ravel()
+            ),
+        },
+    )
+
+
 def execute(
     config: Config,
     run_dir: RunDir,
@@ -525,7 +776,14 @@ def execute(
     `curves_slope_check` (the dose slope of each steering reader at every
     sweep layer under the primary and the check judge), `matrix_transfer`
     (the mean primary slope of each template and format), `trials_sweep` and
-    `trials_transfer_<format>`.
+    `trials_transfer_<format>`, `table.json` (one row per template) and
+    `summary.json`. A unit is a template, a sweep layer and a steering
+    reader. It is readable when its reader's validation accuracy at that
+    layer is at least `read_threshold`, and inverted when it is readable and
+    its primary slope is negative. The `steer_slope`
+    column of the table is the mean primary slope at the steering layer measured
+    on the selection prompts that chose that layer, so it is optimistic; the
+    report prompts feed the prompt-shift transfer.
 
     Args:
         config: The experiment settings.
@@ -564,84 +822,35 @@ def execute(
         n_neutral=config.n_neutral,
         seed=config.seed,
     )
-    task = READING_TASKS["sentiment"]
-    train = select_examples(sst2, split="train", min_words=config.min_words)
-    val = select_examples(sst2, split="val", min_words=config.min_words)
-    for split, name, wanted, part, allow_none in (
-        ("train", "n_pairs", config.n_pairs, train, False),
-        ("val", "n_eval_pairs", config.n_eval_pairs, val, True),
-    ):
-        check_pair_count(
-            name,
-            wanted,
-            pair_capacity(task, part),
-            f"in the {split} split",
-            allow_none=allow_none,
-        )
+    train, val = _split_sst2(config, sst2)
     select_prompts, report_prompts = draw_prompts(
         prompt_fragments([e.text for e in val], config.truncate_words),
         config.n_prompts,
         sets=2,
         seed=derive_seed(config.seed, "prompts"),
     )
-    accuracy = []
-    readers = []
-    for variant in variants:
-        result = reading_sweep(
-            loaded,
-            [
-                task_set(
-                    task,
-                    variant,
-                    train,
-                    n_pairs=config.n_pairs,
-                    seed=derive_seed(config.seed, "train", i),
-                )
-                for i in range(config.n_seeds)
-            ],
-            {
-                "val": task_set(
-                    task,
-                    variant,
-                    val,
-                    n_pairs=config.n_eval_pairs,
-                    seed=derive_seed(config.seed, "eval"),
-                )
-            },
-            method=config.method,
-            seed=config.seed,
-            bos=config.bos,
-            batch_size=config.batch_size,
-        )
-        accuracy.append(result.per_seed("val")[_READER])
-        readers.append(result.readers[: config.n_steer_seeds])
-        layers = result.layers
-    series = [v.name for v in variants]
-    write_curves(
-        run_dir,
-        np.stack(accuracy),
-        layers,
-        series=series,
-        stem="curves_read",
-        chance=0.5,
-        n_layers=loaded.n_layers,
-        n_boot=config.n_boot,
-        seed=config.seed,
+    names = tuple(v.name for v in variants)
+    reads, readers, layers = _read_templates(
+        config, loaded, variants, train, val
     )
     lens = lens_separation(
         loaded, [reader for row in readers for reader in row], words
-    )
-    write_curves(
+    ).reshape(len(names), config.n_steer_seeds, -1)
+    curves = partial(
+        write_curves,
         run_dir,
-        lens.reshape(len(variants), config.n_steer_seeds, -1),
-        layers,
-        series=series,
-        stem="curves_lens",
-        ylabel="Lens separation (z)",
-        chance=0.0,
         n_layers=n_layers,
         n_boot=config.n_boot,
         seed=config.seed,
+    )
+    curves(reads, layers, series=names, stem="curves_read", chance=0.5)
+    curves(
+        lens,
+        layers,
+        series=names,
+        stem="curves_lens",
+        ylabel="Lens separation (z)",
+        chance=0.0,
     )
     steering = _Steering(
         config=config,
@@ -657,66 +866,132 @@ def execute(
         score=score,
         plain=plain_arm(loaded, settings),
     )
-    none = steering.none(select_prompts)
-    sweep_trials = [none]
-    shape = (
-        len(variants),
-        len(sweep),
-        config.n_steer_seeds,
-        len(config.coeffs),
+    primary, check = _dose_sweep(
+        steering, run_dir, names, readers, sweep, select_prompts
     )
-    primary = np.full(shape, np.nan)
-    check = np.full(shape, np.nan)
-    for t, variant in enumerate(variants):
-        for s, layer in enumerate(sweep):
-            for r, reader in enumerate(readers[t]):
-                dose = steering.dose(reader, layer, select_prompts, none)
-                primary[t, s, r] = dose.curve(0)
-                check[t, s, r] = dose.curve(1)
-                sweep_trials.extend(
-                    _steered_trials(dose, f"{variant.name}/layer{layer}/{r}")
-                )
-    write_trials(run_dir, "trials_sweep", sweep_trials)
-    for stem, curves, ylabel in (
-        ("curves_slope", primary, "Dose slope (primary judge)"),
-        ("curves_slope_check", check, "Dose slope (check judge)"),
+    slope = _slopes(primary, config.coeffs)
+    check_slope = _slopes(check, config.coeffs)
+    for stem, units, ylabel in (
+        ("curves_slope", slope, "Dose slope (primary judge)"),
+        ("curves_slope_check", check_slope, "Dose slope (check judge)"),
     ):
-        write_curves(
-            run_dir,
-            _slopes(curves, config.coeffs).transpose(0, 2, 1),
+        curves(
+            units.transpose(0, 2, 1),
             sweep,
-            series=series,
+            series=names,
             stem=stem,
             ylabel=ylabel,
             chance=0.0,
-            n_layers=n_layers,
-            n_boot=config.n_boot,
-            seed=config.seed,
         )
     steer_layers = [
-        slope_layer(primary[t], config.coeffs, sweep)
-        for t in range(len(variants))
+        slope_layer(primary[t], config.coeffs, sweep) for t in range(len(names))
     ]
-    transfer = np.full(
-        (len(variants), len(config.formats), config.n_steer_seeds), np.nan
+    transfer = _prompt_shift(
+        steering, run_dir, names, readers, steer_layers, report_prompts, chat
     )
-    for f, fmt in enumerate(config.formats):
-        prompts = shift_prompts(report_prompts, fmt, chat)
-        none = steering.none(prompts)
-        transfer_trials = [none]
-        for t, variant in enumerate(variants):
-            for r, reader in enumerate(readers[t]):
-                dose = steering.dose(reader, steer_layers[t], prompts, none)
-                transfer[t, f, r] = safe_slope(config.coeffs, dose.curve(0))
-                transfer_trials.extend(
-                    _steered_trials(dose, f"{variant.name}/{r}")
-                )
-        write_trials(run_dir, f"trials_transfer_{fmt}", transfer_trials)
     write_matrix(
         run_dir,
         "matrix_transfer",
         _finite_mean(transfer, axis=2),
-        rows=series,
+        rows=names,
         cols=config.formats,
         title="Mean primary dose slope by steering prompt format",
+    )
+    _write_report(
+        config,
+        run_dir,
+        n_layers,
+        _Measured(
+            names, layers, sweep, reads, lens, slope, check_slope, steer_layers
+        ),
+    )
+
+
+def run(config: Config, run_dir: RunDir) -> None:
+    """Loads GPT-2, SST-2, WikiText and the two judges, then runs `execute`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+    """
+    first = load_judge(config.judge)
+    second = load_judge(config.judge_check)
+
+    def score(texts: Sequence[str]) -> NDArray[np.float32]:
+        return np.column_stack([first.score(texts), second.score(texts)])
+
+    execute(
+        config,
+        run_dir,
+        load_model(config.model),
+        load_sst2(),
+        [example.text for example in load_wikitext()],
+        score,
+    )
+
+
+def _read_vs_steer(run_dir: RunDir) -> Figure:
+    reads = read_curves(run_dir, "curves_read")
+    slopes = read_curves(run_dir, "curves_slope")
+    at = [int(np.flatnonzero(reads.x == layer)[0]) for layer in slopes.x]
+    n_readers = slopes.per_seed.shape[1]
+    with style_context():
+        fig, axes = new_figure(width=TEXT_WIDTH, aspect=0.55)
+        ax = axes[0, 0]
+        for t, (name, color) in enumerate(
+            zip(
+                slopes.series,
+                categorical_colors(len(slopes.series)),
+                strict=True,
+            )
+        ):
+            ax.plot(
+                reads.per_seed[t, :n_readers][:, at].ravel(),
+                slopes.per_seed[t].ravel(),
+                "o",
+                color=color,
+                label=name,
+            )
+        ax.axhline(0.0, color=INK_MUTED, lw=PX, label="_zero_slope")
+        ax.axvline(
+            float(run_dir.config["read_threshold"]),
+            color=INK_MUTED,
+            lw=PX,
+            label="_threshold",
+        )
+        ax.set_xlabel("Reading accuracy")
+        ax.set_ylabel("Dose slope (primary judge)")
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
+    return fig
+
+
+def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
+    """Draws the curves, the transfer matrix and the read versus steer scatter.
+
+    Args:
+        run_dir: A finished P7 run.
+        out_dir: Folder of the figures.
+
+    Returns:
+        The PDF, PNG and SVG paths of `curves_read`, `curves_lens`,
+        `curves_slope` and `curves_slope_check`, then of `matrix_transfer`
+        on a diverging scale, then of `read_vs_steer`: each unit's reading
+        accuracy against its primary dose slope, one color per template, with
+        the zero slope and the readable threshold marked.
+    """
+    paths = [
+        path
+        for stem in (
+            "curves_read",
+            "curves_lens",
+            "curves_slope",
+            "curves_slope_check",
+        )
+        for path in plot_curves_file(run_dir, out_dir, stem=stem)
+    ]
+    paths += plot_matrix_file(
+        run_dir, out_dir, stem="matrix_transfer", kind="diverging"
+    )
+    return paths + save_figure(
+        _read_vs_steer(run_dir), out_dir, "read_vs_steer"
     )
