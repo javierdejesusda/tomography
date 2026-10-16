@@ -554,6 +554,10 @@ def sparse_fit(
     place. Rows are fitted in blocks, so memory does not grow with their
     number.
 
+    The tie tolerance is absolute. Once the residual is spent, so that every
+    match score is within it of the best, the remaining atoms go by lowest
+    id and add no explained fraction.
+
     Args:
         vectors: Directions of shape (n, d).
         decoder: Feature directions of shape (d, F): one column per feature.

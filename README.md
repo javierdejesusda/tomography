@@ -12,8 +12,8 @@ that record their code state and library versions; and both architectures behind
 
 Status: research code under active development. `main` ships the framework described below and the
 experiments listed under [Running experiments](#running-experiments): the reading experiments (R1 to R7 and
-P1 to P5), the steering and control experiments (C1, C2, C4, C5, M1 and the LoRRA adapter LR1), four analyses of
-finished runs (A1, A2, P6 and P8) and P9a to P9d, a study of known versus unknown questions. It reports no
+P1 to P5), the steering and control experiments (C1, C2, C4, C5, M1 and the LoRRA adapter LR1), five analyses of
+finished runs (A1, A2, A5, P6 and P8) and P9a to P9d, a study of known versus unknown questions. It reports no
 results.
 
 ## How it fits together
@@ -418,6 +418,28 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   tokenizer. Defaults: `top_k` 10 tokens per pole, layer and concept, `n_random` 100 random directions as the
   baseline and `n_boot` 2000. It writes `table` and `summary` and, for the concepts that have pole words,
   `curves_lens`; the plot draws `curves_lens` and the token tables `lens_tokens`.
+- `a5` ([`a5_sae_features.py`](src/tomography/experiments/a5_sae_features.py)): what the reading directions
+  encode, read against the decoder of the official Qwen-Scope residual sparse autoencoders of
+  `qwen3-1.7b-base` (the 32K-feature release with TopK 50, pinned by commit in
+  [`sae.py`](src/tomography/sae.py); `sae` selects the 100-active release). The directions come from the
+  `readers*.npz` files of the finished runs of `sources` and `extra_runs`, as in `a1`; the model is loaded
+  only for its unembedding, final norm and tokenizer. Our layer `l` is the output of block `l`, which
+  autoencoder `l - 1` reads, so layers 1 to 28 have one and layer 0 is skipped. For each concept and layer
+  the analysis gives the `top_k` (10) features of the mean direction by absolute cosine with their sign, the
+  tokens each one promotes through the lens, a greedy orthogonal matching pursuit with signed coefficients
+  over `n_atoms` (50) columns, and the overlap of the top ids across seeds. Every number is read against a
+  null drawn per layer from `n_random` (64) unit directions with the covariance of the decoder, which keeps
+  the anisotropy of the dictionary that an isotropic Gaussian ignores. `layers` selects a subset of reading
+  layers (default: all of them) and `n_boot` is 2000. It writes `table` (with the null quantile of each rank
+  and the position among the atoms of the fit), `curves_explained` (the explained fraction above the null
+  mean), `matrix_stability`, `explained` and `summary`; the plot draws the curves and the matrix. The model
+  the autoencoder was trained on is `qwen3-1.7b-base`; `model="qwen3-1.7b"` runs the transfer check, which
+  the summary flags (`transfer`), and no other model fits. The sign of a cosine tells which pole of the
+  contrast a feature is more active at, since activations are non-negative; it is a reading aid, not a
+  causal claim. Each analyzed layer downloads one 537 MB file into the project cache (`TOMOGRAPHY_CACHE`,
+  default `~/.cache/tomography`, under `hub`) and reads only its decoder: all 28 layers are 15 GB, every
+  fourth layer 3.8 GB and the four depth quartiles (`layers` 7, 14, 21 and 28) 2.1 GB. A cached layer is not
+  downloaded again and the files can be deleted after the run.
 - `p6` ([`p6_scale.py`](src/tomography/experiments/p6_scale.py)): whether the reading changes with model size,
   across the GPT-2 sizes. It loads no model and reads the finished default runs under its own `--out` root, as
   in `a1`: the `reader` series of the reading experiments in `sources` (`r1`, `r2`, `r3`, `r5`, `r7`) and, for
@@ -601,13 +623,14 @@ src/tomography/
   judges.py        pinned sentiment and emotion classifiers, perplexity and log-probability scoring
   knowledge.py     known, unknown and uncertain labels for closed-book questions
   analysis.py      layer-wise PCA explained variance and t-SNE maps
+  sae.py           pinned Qwen-Scope SAE decoders (SAES, sae_layer, load_decoder)
   lorra.py         LoRRA: low-rank representation adaptation (adapter, training, held-out loss)
   p9/              pool.py (question pool), guess.py (guess control), probe.py (cutoff probe, label tables),
                    unknowns.py (contrasts), reading.py (reading and surface baselines), signals.py and
                    risk.py (error predictors, risk-coverage), behavior.py (abstention and shift)
   experiments/     base.py (configs, run dirs, seeding), sweep.py, intervals.py, steering.py, effects.py,
                    matrices.py, variants.py, aggregate.py, and one module per experiment: r1 to r7, p1 to
-                   p5 (reading), c1, c2, c4, c5, m1 (steering and control), lr1 (LoRRA), a1, a2, p6, p8
+                   p5 (reading), c1, c2, c4, c5, m1 (steering and control), lr1 (LoRRA), a1, a2, a5, p6, p8
                    (analyses of finished runs) and p9a to p9d (known versus unknown)
   viz/             figure style, layer curves, token scans, matrices and embeddings
   cli.py           the tomography command (also python -m tomography)
@@ -664,7 +687,11 @@ This repository reimplements the method of the following paper; please cite the 
 The code is MIT licensed (see [`LICENSE`](LICENSE)). Datasets and model checkpoints are downloaded at runtime
 and keep their own licenses; none are redistributed here. Each dataset records its license in its
 `PinnedSource` row (some are non-commercial or state none) and each checkpoint in `MODELS`, so check them
-before reuse.
+before reuse. `a5` reads the decoder weights of the Qwen-Scope sparse autoencoders, which are not
+redistributed: the Hub tag is "other" and the `LICENSE` file in the repository is Apache-2.0. Their README
+asks that interpretability tools are not used for non-scientific interference with model capabilities or to
+produce harmful content (`a5` steers nothing) and asks for a citation of arXiv:2605.11887. Its outputs hold
+feature ids, cosines, fractions and lens tokens, never weights.
 
 This project builds on the work of the authors of Representation Engineering. Their reference implementation
 is [andyzoujm/representation-engineering](https://github.com/andyzoujm/representation-engineering); the true
