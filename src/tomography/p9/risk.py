@@ -8,6 +8,7 @@ on the same items so that the pairing is kept.
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -19,6 +20,25 @@ from sklearn.preprocessing import StandardScaler
 from tomography.reading.metrics import auroc
 
 NO_RESAMPLE = "no bootstrap resample holds both classes"
+NO_PAIRED_GROUP = "no group holds both classes"
+
+
+@dataclass(frozen=True)
+class GroupAuroc:
+    """The AUROC of one group of items.
+
+    Attributes:
+        group: The group name.
+        n_pos: Items of the group with label 1.
+        n_neg: Items of the group with label 0.
+        auroc: The AUROC of the group, or None when either class has fewer
+            items than the minimum asked for.
+    """
+
+    group: str
+    n_pos: int
+    n_neg: int
+    auroc: float | None
 
 
 def auroc_replicates(
@@ -127,6 +147,136 @@ def auroc_diff_ci(
         raise ValueError(NO_RESAMPLE)
     lo, hi = np.percentile(diffs, [50 * alpha, 100 - 50 * alpha])
     return float(auroc(a, labels) - auroc(b, labels)), float(lo), float(hi)
+
+
+def grouped_auroc(
+    scores: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    groups: NDArray[np.str_] | Sequence[str],
+) -> float:
+    """AUROC within groups, the groups weighted by their pairs.
+
+    The value is the probability that a positive item scores above a negative
+    item of the SAME group: the sum over groups of n_pos * n_neg * AUROC_g,
+    divided by the sum of n_pos * n_neg. A group is scored with `auroc`, so
+    ties share the credit. A group that holds a single class has no pair and
+    contributes nothing.
+
+    Args:
+        scores: Scores, shape (n,).
+        labels: 0/1 labels, shape (n,).
+        groups: The group of every item, shape (n,).
+
+    Returns:
+        The pair-weighted AUROC.
+
+    Raises:
+        ValueError: If the lengths differ, a score is not finite, a label is
+            neither 0 nor 1, or no group holds both classes.
+    """
+    return _weighted_auroc(_paired_cells(scores, labels, groups))
+
+
+def grouped_auroc_ci(
+    scores: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    groups: NDArray[np.str_] | Sequence[str],
+    *,
+    n_boot: int,
+    seed: int,
+    alpha: float = 0.05,
+) -> tuple[float, float, float]:
+    """Grouped AUROC with a percentile bootstrap interval over items.
+
+    Groups that hold a single class are dropped first, as they never
+    contribute. A resample draws items with replacement inside each group at
+    the size of the group, so a draw never mixes groups, group sizes stay
+    fixed and the class counts of a group, hence its pairs and its weight in
+    `grouped_auroc`, vary as they would under a new test split. A group that
+    holds a single class in a draw contributes nothing to it, and a draw in
+    which no group holds both classes is skipped. With one group the interval
+    equals `auroc_ci` for the same seed, `n_boot` and `alpha`.
+
+    Args:
+        scores: Scores, shape (n,).
+        labels: 0/1 labels, shape (n,).
+        groups: The group of every item, shape (n,).
+        n_boot: Number of resamples, at least 1.
+        seed: Seed of the resampling.
+        alpha: Total tail mass of the interval, inside (0, 1).
+
+    Returns:
+        The grouped AUROC, the lower bound and the upper bound.
+
+    Raises:
+        ValueError: If `n_boot` or `alpha` is out of range, the lengths
+            differ, a score is not finite, a label is neither 0 nor 1, no
+            group holds both classes, or no resample holds both classes in
+            any group.
+    """
+    if n_boot < 1:
+        raise ValueError(f"n_boot must be at least 1, got {n_boot}")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}")
+    items = _paired_items(scores, labels, groups)
+    rng = np.random.default_rng(seed)
+    reps = []
+    for _ in range(n_boot):
+        draws = [
+            _split(values[idx], marks[idx])
+            for values, marks in items
+            for idx in (rng.integers(values.size, size=values.size),)
+        ]
+        usable = [cell for cell in draws if cell[0].size and cell[1].size]
+        if usable:
+            reps.append(_weighted_auroc(usable))
+    if not reps:
+        raise ValueError(NO_RESAMPLE)
+    lo, hi = np.percentile(reps, [50 * alpha, 100 - 50 * alpha])
+    return (
+        _weighted_auroc([_split(v, m) for v, m in items]),
+        float(lo),
+        float(hi),
+    )
+
+
+def per_group_auroc(
+    scores: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    groups: NDArray[np.str_] | Sequence[str],
+    *,
+    min_class: int,
+) -> list[GroupAuroc]:
+    """The AUROC of every group, null where a class is too thin.
+
+    Args:
+        scores: Scores, shape (n,).
+        labels: 0/1 labels, shape (n,).
+        groups: The group of every item, shape (n,).
+        min_class: The fewest items either class may hold for the AUROC to be
+            reported, at least 1.
+
+    Returns:
+        One row per group in sorted group order. A group with a class below
+        `min_class`, a single-class group among them, has an AUROC of None.
+
+    Raises:
+        ValueError: If `min_class` is below 1, the lengths differ, a score is
+            not finite, or a label is neither 0 nor 1.
+    """
+    if min_class < 1:
+        raise ValueError(f"min_class must be at least 1, got {min_class}")
+    return [
+        GroupAuroc(
+            group=name,
+            n_pos=positive.size,
+            n_neg=negative.size,
+            auroc=_cell_auroc(positive, negative)
+            if min(positive.size, negative.size) >= min_class
+            else None,
+        )
+        for name, positive, negative in _cells(scores, labels, groups)
+    ]
 
 
 def risk_coverage(
@@ -319,15 +469,14 @@ def orient_on_train(
     return -test_scores
 
 
-def text_auroc(
+def text_scores(
     train_texts: Sequence[str],
     train_labels: NDArray[np.int64],
     test_texts: Sequence[str],
-    test_labels: NDArray[np.int64],
     *,
     analyzer: Literal["word", "char"],
-) -> float:
-    """AUROC of a text-only classifier, the surface-form baseline of a reader.
+) -> NDArray[np.float64]:
+    """Scores of a text-only classifier, the surface-form baseline of a reader.
 
     The features are TF-IDF weights fitted on the train texts only: word
     1-grams and 2-grams seen in at least 2 texts for "word", character 2-grams
@@ -339,15 +488,15 @@ def text_auroc(
         train_texts: The texts the classifier is fitted on.
         train_labels: 0/1 labels of the train texts.
         test_texts: The texts that are scored.
-        test_labels: 0/1 labels of the test texts.
         analyzer: "word" or "char" n-grams.
 
     Returns:
-        The AUROC of the decision scores on the test texts, label 1 positive.
+        The decision score of every test text, shape (n_test,), higher
+        meaning more likely label 1.
 
     Raises:
-        ValueError: If `analyzer` is neither "word" nor "char", the test
-            labels hold one class, or the train texts leave no feature.
+        ValueError: If `analyzer` is neither "word" nor "char", or the train
+            texts leave no feature.
     """
     if analyzer == "word":
         vectorizer = TfidfVectorizer(
@@ -365,7 +514,39 @@ def text_auroc(
     )
     classifier.fit(train_features, train_labels)
     scores = classifier.decision_function(vectorizer.transform(test_texts))
-    return float(auroc(np.asarray(scores, dtype=np.float64), test_labels))
+    return np.asarray(scores, dtype=np.float64)
+
+
+def text_auroc(
+    train_texts: Sequence[str],
+    train_labels: NDArray[np.int64],
+    test_texts: Sequence[str],
+    test_labels: NDArray[np.int64],
+    *,
+    analyzer: Literal["word", "char"],
+) -> float:
+    """AUROC of a text-only classifier, the surface-form baseline of a reader.
+
+    The classifier is the one of `text_scores`.
+
+    Args:
+        train_texts: The texts the classifier is fitted on.
+        train_labels: 0/1 labels of the train texts.
+        test_texts: The texts that are scored.
+        test_labels: 0/1 labels of the test texts.
+        analyzer: "word" or "char" n-grams.
+
+    Returns:
+        The AUROC of the decision scores on the test texts, label 1 positive.
+
+    Raises:
+        ValueError: If `analyzer` is neither "word" nor "char", the test
+            labels hold one class, or the train texts leave no feature.
+    """
+    scores = text_scores(
+        train_texts, train_labels, test_texts, analyzer=analyzer
+    )
+    return float(auroc(scores, test_labels))
 
 
 def popularity_auroc(
@@ -387,3 +568,96 @@ def popularity_auroc(
         ValueError: If the labels hold one class.
     """
     return float(auroc(np.log10(popularity + 1.0), labels))
+
+
+def _checked_items(
+    scores: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    groups: NDArray[np.str_] | Sequence[str],
+) -> tuple[NDArray[np.float64], NDArray[np.int64], NDArray[np.str_]]:
+    values = np.asarray(scores, dtype=np.float64)
+    marks = np.asarray(labels)
+    names = np.asarray(groups)
+    if values.ndim != 1 or {marks.shape, names.shape} != {values.shape}:
+        raise ValueError(
+            f"scores {values.shape}, labels {marks.shape} and groups "
+            f"{names.shape} must be vectors of the same length"
+        )
+    infinite = ~np.isfinite(values)
+    if infinite.any():
+        raise ValueError(f"scores must be finite, got {values[infinite][0]}")
+    other = ~np.isin(marks, (0, 1))
+    if other.any():
+        raise ValueError(f"labels must be 0 or 1, got {marks[other][0]}")
+    return values, marks.astype(np.int64), names
+
+
+def _group_items(
+    scores: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    groups: NDArray[np.str_] | Sequence[str],
+) -> list[tuple[str, NDArray[np.float64], NDArray[np.int64]]]:
+    values, marks, names = _checked_items(scores, labels, groups)
+    return [
+        (str(name), values[names == name], marks[names == name])
+        for name in np.unique(names)
+    ]
+
+
+def _split(
+    values: NDArray[np.float64], marks: NDArray[np.int64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    return values[marks == 1], values[marks == 0]
+
+
+def _cells(
+    scores: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    groups: NDArray[np.str_] | Sequence[str],
+) -> list[tuple[str, NDArray[np.float64], NDArray[np.float64]]]:
+    return [
+        (name, *_split(values, marks))
+        for name, values, marks in _group_items(scores, labels, groups)
+    ]
+
+
+def _paired_items(
+    scores: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    groups: NDArray[np.str_] | Sequence[str],
+) -> list[tuple[NDArray[np.float64], NDArray[np.int64]]]:
+    paired = [
+        (values, marks)
+        for _, values, marks in _group_items(scores, labels, groups)
+        if 0 < marks.sum() < marks.size
+    ]
+    if not paired:
+        raise ValueError(NO_PAIRED_GROUP)
+    return paired
+
+
+def _paired_cells(
+    scores: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    groups: NDArray[np.str_] | Sequence[str],
+) -> list[tuple[NDArray[np.float64], NDArray[np.float64]]]:
+    return [
+        _split(values, marks)
+        for values, marks in _paired_items(scores, labels, groups)
+    ]
+
+
+def _cell_auroc(
+    positive: NDArray[np.float64], negative: NDArray[np.float64]
+) -> float:
+    labels = np.r_[np.ones(positive.size), np.zeros(negative.size)]
+    return float(auroc(np.r_[positive, negative], labels.astype(np.int64)))
+
+
+def _weighted_auroc(
+    cells: Sequence[tuple[NDArray[np.float64], NDArray[np.float64]]],
+) -> float:
+    weights = [positive.size * negative.size for positive, negative in cells]
+    values = [_cell_auroc(positive, negative) for positive, negative in cells]
+    total = sum(w * v for w, v in zip(weights, values, strict=True))
+    return total / sum(weights)
