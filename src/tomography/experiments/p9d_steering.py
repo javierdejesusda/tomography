@@ -716,6 +716,14 @@ def _dose_rows(
     return rows
 
 
+def _finite_steering_slopes(
+    cell_slopes: CellSlopes, key: tuple[str, str, str]
+) -> NDArray[np.float64]:
+    """The finite steering slopes of one cell, empty if it has none."""
+    own = cell_slopes.get(key, {}).get(STEERING_ARM, np.array([]))
+    return own[np.isfinite(own)]
+
+
 def _selectivity_rows(
     cell_slopes: CellSlopes, *, n_boot: int, seed: int
 ) -> list[list[Any]]:
@@ -733,15 +741,11 @@ def _selectivity_rows(
         elsewhere if a side has no finite slope.
     """
     rows: list[list[Any]] = []
-    cells = dict.fromkeys((g, m) for g, _, m in cell_slopes)
-    for group, metric in cells:
-        finite = {}
-        for side in ("known", "unknown"):
-            own = cell_slopes.get((group, side, metric), {}).get(STEERING_ARM)
-            finite[side] = (
-                np.array([]) if own is None else own[np.isfinite(own)]
-            )
-        known, unknown = finite["known"], finite["unknown"]
+    for group, metric in dict.fromkeys((g, m) for g, _, m in cell_slopes):
+        known, unknown = (
+            _finite_steering_slopes(cell_slopes, (group, side, metric))
+            for side in ("known", "unknown")
+        )
         if known.size == 0 and unknown.size == 0:
             continue
         counts = [group, metric, known.size, unknown.size]
@@ -786,6 +790,31 @@ def _write_item_slopes(
     run_dir.write_arrays("item_slopes", **arrays)
 
 
+def _write_selectivity(
+    run_dir: RunDir, plan: Plan, cell_slopes: CellSlopes, config: Config
+) -> list[list[Any]]:
+    """Writes the selectivity table and the item slopes.
+
+    Args:
+        run_dir: Where the files are written.
+        plan: The contrasts of the run.
+        cell_slopes: By (type, side, metric), the slope of every item under
+            every arm.
+        config: The run settings, for the bootstrap size and seed.
+
+    Returns:
+        The rows of `SELECTIVITY_COLUMNS`.
+    """
+    rows = _selectivity_rows(
+        cell_slopes, n_boot=config.n_boot, seed=config.seed
+    )
+    run_dir.write_json(
+        "table_selectivity", {"columns": SELECTIVITY_COLUMNS, "rows": rows}
+    )
+    _write_item_slopes(run_dir, plan, cell_slopes)
+    return rows
+
+
 def _with_selective(
     headline: dict[str, Any] | None, selectivity: Sequence[Sequence[Any]]
 ) -> dict[str, Any] | None:
@@ -801,11 +830,11 @@ def _with_selective(
     """
     if headline is None:
         return None
-    selective = None
-    for row in selectivity:
-        if list(row[:2]) == [headline["group"], headline["metric"]]:
-            selective = row[9]
-    return {**headline, "selective": selective}
+    selective = {(r[0], r[1]): r[9] for r in selectivity}
+    return {
+        **headline,
+        "selective": selective.get((headline["group"], headline["metric"])),
+    }
 
 
 def _headline(
@@ -1012,14 +1041,7 @@ def _run_shift(
         },
     )
     run_dir.write_json("table_dose", {"columns": DOSE_COLUMNS, "rows": dose})
-    selectivity = _selectivity_rows(
-        cell_slopes, n_boot=config.n_boot, seed=config.seed
-    )
-    run_dir.write_json(
-        "table_selectivity",
-        {"columns": SELECTIVITY_COLUMNS, "rows": selectivity},
-    )
-    _write_item_slopes(run_dir, plan, cell_slopes)
+    selectivity = _write_selectivity(run_dir, plan, cell_slopes, config)
     run_dir.write_json(
         "summary",
         {
@@ -1213,14 +1235,7 @@ def _run_abstention(
         for arm in arms
     }
     run_dir.write_json("table_dose", {"columns": DOSE_COLUMNS, "rows": dose})
-    selectivity = _selectivity_rows(
-        cell_slopes, n_boot=config.n_boot, seed=config.seed
-    )
-    run_dir.write_json(
-        "table_selectivity",
-        {"columns": SELECTIVITY_COLUMNS, "rows": selectivity},
-    )
-    _write_item_slopes(run_dir, plan, cell_slopes)
+    selectivity = _write_selectivity(run_dir, plan, cell_slopes, config)
     run_dir.write_json(
         "summary",
         {
