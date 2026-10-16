@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 import pytest
 
 from tomography.cli import load_experiment
@@ -1829,3 +1830,82 @@ def test_shift_dose_slopes_follow_the_planted_entropy_dose(
     assert headline["lat_slope"] == pytest.approx(2.0)
     assert headline["max_abs_random_slope"] == pytest.approx(0.0)
     assert headline["distinguishable"] is True
+
+
+def _planted_values(*columns: list[float]) -> NDArray[np.float64]:
+    """Stacks per item columns into the (coefficients, items) layout."""
+    return np.array(columns, dtype=np.float64).T
+
+
+def _dose_row(arm: str, vs: str, slope: float | None, abs_lo: float | None):
+    """A hand built row of the dose table for the headline tests."""
+    cells = [None] * 4 if slope is None else [slope, slope, slope, 0.0]
+    gap = [None, None, None] if not vs else [0.5, abs_lo, 1.0]
+    return ["g", "unknown", "abstention", arm, vs, 2, *cells, *gap]
+
+
+def test_the_seed_and_size_reach_every_absolute_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    real = p9d_steering.abs_slope_gap_ci
+
+    def spy(slopes: Any, reference: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return real(slopes, reference, **kwargs)
+
+    monkeypatch.setattr(p9d_steering, "abs_slope_gap_ci", spy)
+    step = [1.0, 1.0, 0.0, 0.0, 0.0]
+    values = {
+        "lat0": _planted_values(step, step[::-1]),
+        "random0": _planted_values(step, step),
+        "random1": _planted_values(step[::-1], step),
+    }
+
+    p9d_steering._dose_rows(
+        "g", "unknown", "abstention", DOSE_GRID, values, n_boot=77, seed=5
+    )
+
+    assert calls == [{"n_boot": 77, "seed": 5}] * 2
+
+
+def test_a_zero_lower_bound_of_the_gap_does_not_establish_the_claim() -> None:
+    rows = [
+        _dose_row("lat0", "", -1.0, None),
+        _dose_row("random0", "", 0.0, None),
+        _dose_row("lat0", "random0", -1.0, 0.0),
+    ]
+    assert (
+        p9d_steering._headline(rows, "g", "abstention")["distinguishable"]
+        is False
+    )
+    rows[-1] = _dose_row("lat0", "random0", -1.0, 0.25)
+    assert (
+        p9d_steering._headline(rows, "g", "abstention")["distinguishable"]
+        is True
+    )
+
+
+def test_the_largest_random_slope_is_taken_in_magnitude() -> None:
+    rows = [
+        _dose_row("lat0", "", 1.0, None),
+        _dose_row("random0", "", -2.0, None),
+        _dose_row("random1", "", 0.5, None),
+    ]
+    headline = p9d_steering._headline(rows, "g", "abstention")
+    assert headline["max_abs_random_slope"] == 2.0
+
+
+def test_an_item_without_a_finite_slope_is_not_counted() -> None:
+    step = [1.0, 1.0, 0.0, 0.0, 0.0]
+    broken = [1.0, np.nan, 0.0, 0.0, 0.0]
+    values = {
+        "lat0": _planted_values(step, broken, step),
+        "random0": _planted_values(step, broken, step[::-1]),
+    }
+
+    rows = p9d_steering._dose_rows(
+        "g", "unknown", "abstention", DOSE_GRID, values, n_boot=20, seed=0
+    )
+
+    assert [r[5] for r in rows] == [2, 2, 2]
