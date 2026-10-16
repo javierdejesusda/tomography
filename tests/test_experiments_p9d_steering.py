@@ -567,6 +567,7 @@ def test_shift_mode_writes_a_curve_pair_per_contrast_and_metric(
             "table.json",
             "table_dose.json",
             "table_selectivity.json",
+            "item_slopes.npz",
             *(f"{stem}.{ext}" for stem in stems for ext in ("json", "npz")),
         ]
     )
@@ -1368,6 +1369,7 @@ def test_abstention_runs_end_to_end_on_the_tiny_qwen3(
             "table.json",
             "table_dose.json",
             "table_selectivity.json",
+            "item_slopes.npz",
             "table_effect.json",
             "hand_check.csv",
             *(
@@ -2162,3 +2164,80 @@ def test_shift_mode_writes_the_selectivity_table(
     headline = _summary(run_dir)["headline"]
     both = _row(rows, columns, type="obscure_real", metric="entropy")
     assert headline["selective"] == both["selective"]
+
+
+def test_item_slopes_hold_every_arm_with_the_uid_order(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _dose_run(tiny_qwen3, tmp_path, monkeypatch)
+
+    arrays = run_dir.read_arrays("item_slopes")
+
+    plan = plan_groups(_config(**DOSE_OVERRIDES), _items(), True)
+    arms = ("lat0", "random0", "random1", "random2")
+    for group in plan.evaluation:
+        for side, members in group.sides:
+            uids = arrays[f"uids__{group.name}__{side}"]
+            assert uids.tolist() == [m.example.uid for m in members]
+            for arm in arms:
+                name = f"slope__{group.name}__{side}__abstention__{arm}"
+                assert arrays[name].shape == (len(members),)
+    unknown = arrays["slope__obscure_real__unknown__abstention__lat0"]
+    assert unknown.tolist() == pytest.approx([-1.5, -1.5])
+    known = arrays["slope__obscure_real__known__abstention__lat0"]
+    assert known.tolist() == pytest.approx([0.0, 0.0])
+    assert arrays[
+        "slope__obscure_real__unknown__abstention__random2"
+    ].tolist() == (pytest.approx([1.5, 1.5]))
+
+
+def test_item_slope_means_equal_the_dose_table(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _selective_run(tiny_qwen3, tmp_path, monkeypatch, -0.3)
+
+    arrays = run_dir.read_arrays("item_slopes")
+
+    columns, rows = _dose(run_dir)
+    for side in ("known", "unknown"):
+        row = _row(
+            rows,
+            columns,
+            type="obscure_real",
+            side=side,
+            arm="lat0",
+            vs="",
+        )
+        values = arrays[f"slope__obscure_real__{side}__abstention__lat0"]
+        assert float(values.mean()) == pytest.approx(row["slope"])
+
+
+def test_shift_mode_saves_item_slopes_including_empty_sides(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_stats(
+        loaded: LoadedModel, prompts: Sequence[str], **kwargs: Any
+    ) -> TokenStats:
+        n = len(prompts)
+        entropy = 1.0 + 0.1 * np.arange(n)
+        if kwargs["edits"] is not None:
+            entropy = entropy + kwargs["edits"].coeff
+        return TokenStats(np.zeros(n), entropy, np.full(n, -2.0))
+
+    monkeypatch.setattr(p9d_steering, "next_token_stats", fake_stats)
+    config = _config(coeffs=DOSE_GRID)
+    run_dir = _run_dir(tmp_path, config)
+    execute(config, run_dir, tiny_arch, _items(), known_contrasts=True)
+
+    arrays = run_dir.read_arrays("item_slopes")
+
+    entropy = arrays["slope__fictional_generated__unknown__entropy__lat0"]
+    assert entropy.shape == (4,)
+    assert entropy.tolist() == pytest.approx([1.0] * 4)
+    answer = arrays["slope__fictional_generated__unknown__answer_logprob__lat0"]
+    assert answer.shape == (4,)
+    assert np.isnan(answer).all()
+    assert arrays["uids__fictional_generated__unknown"].shape == (4,)
+    assert "slope__fictional_generated__known__entropy__random0" in arrays

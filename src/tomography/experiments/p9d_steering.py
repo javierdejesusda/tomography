@@ -763,6 +763,29 @@ def _selectivity_rows(
     return rows
 
 
+def _write_item_slopes(
+    run_dir: RunDir, plan: Plan, cell_slopes: CellSlopes
+) -> None:
+    """Saves the slope of every item under every arm.
+
+    Args:
+        run_dir: Where `item_slopes.npz` is written.
+        plan: The contrasts of the run, which give the item order.
+        cell_slopes: By (type, side, metric), the slope of every item under
+            every arm.
+    """
+    arrays: dict[str, NDArray[Any]] = {}
+    for group in plan.evaluation:
+        for side, members in group.sides:
+            arrays[f"uids__{group.name}__{side}"] = np.array(
+                [m.example.uid for m in members], dtype=str
+            )
+    for (name, side, metric), arms in cell_slopes.items():
+        for arm, values in arms.items():
+            arrays[f"slope__{name}__{side}__{metric}__{arm}"] = values
+    run_dir.write_arrays("item_slopes", **arrays)
+
+
 def _with_selective(
     headline: dict[str, Any] | None, selectivity: Sequence[Sequence[Any]]
 ) -> dict[str, Any] | None:
@@ -996,6 +1019,7 @@ def _run_shift(
         "table_selectivity",
         {"columns": SELECTIVITY_COLUMNS, "rows": selectivity},
     )
+    _write_item_slopes(run_dir, plan, cell_slopes)
     run_dir.write_json(
         "summary",
         {
@@ -1196,6 +1220,7 @@ def _run_abstention(
         "table_selectivity",
         {"columns": SELECTIVITY_COLUMNS, "rows": selectivity},
     )
+    _write_item_slopes(run_dir, plan, cell_slopes)
     run_dir.write_json(
         "summary",
         {
