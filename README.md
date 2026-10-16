@@ -527,8 +527,8 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   `n_shots` (15). Other defaults: `datasets` `popqa`, `triviaqa` and `nq_open`, `n_seeds` 5, `n_pairs` 64,
   `min_pairs` 16, `n_boot` 1000, `min_probe` 50 and `min_relation_class` 5. It writes `table` (test AUROC,
   interval and AURC of every predictor, then `auroc_within`, `lo_within`, `hi_within` and `n_pairs_within`:
-  the AUROC inside each relation, pooled by pairs, with a bootstrap interval that resamples inside each
-  relation and outcome, and the number of within-relation (correct, wrong) pairs; null for a dataset whose
+  the AUROC inside each relation, pooled by pairs, with a bootstrap interval that resamples the items inside
+  each relation, and the number of within-relation (correct, wrong) pairs; null for a dataset whose
   test questions do not all carry a relation, which is TriviaQA and NQ-open), `table_incremental`,
   `relations_<dataset>` (PopQA only: the AUROC of every predictor inside each relation, null below
   `min_relation_class` correct or wrong items), `signals_<dataset>` (which also holds the `relation` of each
