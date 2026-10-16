@@ -259,6 +259,14 @@ called distinguishable from a random edit of the same size only if the lower bou
 every random arm. A random arm without finite slopes makes the claim false. The signed difference of the slopes is
 also reported.
 
+Selectivity is a separate claim. For the steering arm, the statistic is the absolute mean slope over the unknown
+items minus the absolute mean slope over the known items (`gap` in `table_selectivity`). The two sides hold different
+items, so each bootstrap resample draws the items of each side independently, and the effect is called selective
+only if the lower bound of the percentile interval is above zero. Distinguishable and selective are reported as
+separate flags, with no correction for multiple comparisons, as for the other P9d intervals. Types that share a known
+pool (`obscure_real` with `fictional_generated`, `unknowable_detail` with `false_premise`) share known-side items,
+so their gaps are correlated.
+
 The headline cell is the unknown side of the `direction_type` contrast; every other cell is descriptive, with no
 correction for multiple comparisons. The abstention patterns are phrase matches, so a title that contains a pattern
 word still counts as an abstention; the `hand_check.csv` sample measures this.

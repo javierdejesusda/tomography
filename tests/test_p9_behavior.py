@@ -21,6 +21,7 @@ from tomography.p9.behavior import classify
 from tomography.p9.behavior import is_abstention
 from tomography.p9.behavior import item_slopes
 from tomography.p9.behavior import select_coefficient
+from tomography.p9.behavior import selectivity_gap
 from tomography.p9.behavior import shift_ci
 from tomography.p9.behavior import slope_ci
 from tomography.p9.behavior import write_completion_check
@@ -576,3 +577,95 @@ def test_more_phrases_that_abstain(text: str) -> None:
 )
 def test_more_phrases_that_answer(text: str) -> None:
     assert not is_abstention(text)
+
+
+def test_selectivity_gap_is_the_difference_of_the_absolute_mean_slopes() -> (
+    None
+):
+    unknown = np.array([-2.0, -4.0])
+    known = np.array([1.0, 0.0, 2.0])
+    gap, _, _ = selectivity_gap(unknown, known, n_boot=50)
+    assert gap == pytest.approx(3.0 - 1.0)
+
+
+def test_selectivity_gap_is_negative_when_known_moves_more() -> None:
+    gap, lo, hi = selectivity_gap(np.full(5, 0.5), np.full(5, -2.0), n_boot=50)
+    assert (gap, lo, hi) == (-1.5, -1.5, -1.5)
+
+
+def test_selectivity_gap_planted_effect_has_a_positive_lower_bound() -> None:
+    rng = np.random.default_rng(3)
+    unknown = rng.normal(2.0, 0.5, size=60)
+    known = rng.normal(0.0, 0.5, size=60)
+    gap, lo, hi = selectivity_gap(unknown, known, n_boot=300, seed=1)
+    assert lo > 0.0
+    assert lo <= gap <= hi
+
+
+def test_selectivity_gap_no_effect_interval_includes_zero() -> None:
+    rng = np.random.default_rng(4)
+    unknown = rng.normal(0.0, 1.0, size=40)
+    known = rng.normal(0.0, 1.0, size=40)
+    _, lo, hi = selectivity_gap(unknown, known, n_boot=300, seed=1)
+    assert lo < 0.0 < hi
+
+
+def test_selectivity_gap_resamples_each_side_independently() -> None:
+    unknown = np.arange(1.0, 8.0)
+    known = np.arange(1.0, 8.0)
+    n_boot = 40
+    rng = np.random.default_rng(5)
+    known_draws = rng.integers(0, known.size, size=(n_boot, known.size))
+    unknown_draws = rng.integers(0, unknown.size, size=(n_boot, unknown.size))
+    gaps = np.abs(unknown[unknown_draws].mean(axis=1)) - np.abs(
+        known[known_draws].mean(axis=1)
+    )
+    lo, hi = np.quantile(gaps, [0.025, 0.975])
+    _, got_lo, got_hi = selectivity_gap(unknown, known, n_boot=n_boot, seed=5)
+    assert (got_lo, got_hi) == (float(lo), float(hi))
+    assert got_lo < 0.0 < got_hi
+
+
+def test_selectivity_gap_sides_may_differ_in_size() -> None:
+    gap, lo, hi = selectivity_gap(np.ones(3), np.zeros(9), n_boot=20)
+    assert (gap, lo, hi) == (1.0, 1.0, 1.0)
+
+
+def test_selectivity_gap_keeps_only_finite_slopes_per_side() -> None:
+    gap, _, _ = selectivity_gap(
+        np.array([2.0, np.nan, 4.0]),
+        np.array([np.inf, 1.0]),
+        n_boot=20,
+    )
+    assert gap == pytest.approx(3.0 - 1.0)
+
+
+def test_selectivity_gap_is_deterministic_and_depends_on_the_seed() -> None:
+    rng = np.random.default_rng(6)
+    unknown, known = rng.normal(1.0, 1.0, 30), rng.normal(0.0, 1.0, 30)
+    first = selectivity_gap(unknown, known, n_boot=100, seed=2)
+    assert selectivity_gap(unknown, known, n_boot=100, seed=2) == first
+    assert selectivity_gap(unknown, known, n_boot=100, seed=3) != first
+
+
+def test_selectivity_gap_interval_uses_the_alpha_tails() -> None:
+    rng = np.random.default_rng(7)
+    unknown, known = rng.normal(1.0, 1.0, 30), rng.normal(0.0, 1.0, 30)
+    _, lo95, hi95 = selectivity_gap(unknown, known, n_boot=400, alpha=0.05)
+    _, lo50, hi50 = selectivity_gap(unknown, known, n_boot=400, alpha=0.5)
+    assert lo95 < lo50 < hi50 < hi95
+
+
+def test_selectivity_gap_names_the_side_without_a_finite_slope() -> None:
+    with pytest.raises(ValueError, match="unknown"):
+        selectivity_gap(np.array([np.nan]), np.array([1.0]))
+    with pytest.raises(ValueError, match="known"):
+        selectivity_gap(np.array([1.0]), np.array([]))
+
+
+def test_selectivity_gap_rejects_a_bad_alpha_and_n_boot() -> None:
+    ones = np.ones(3)
+    with pytest.raises(ValueError, match="alpha"):
+        selectivity_gap(ones, ones, alpha=1.0)
+    with pytest.raises(ValueError, match="n_boot"):
+        selectivity_gap(ones, ones, n_boot=0)

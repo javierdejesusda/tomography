@@ -566,6 +566,8 @@ def test_shift_mode_writes_a_curve_pair_per_contrast_and_metric(
             "summary.json",
             "table.json",
             "table_dose.json",
+            "table_selectivity.json",
+            "item_slopes.npz",
             *(f"{stem}.{ext}" for stem in stems for ext in ("json", "npz")),
         ]
     )
@@ -1366,6 +1368,8 @@ def test_abstention_runs_end_to_end_on_the_tiny_qwen3(
             "summary.json",
             "table.json",
             "table_dose.json",
+            "table_selectivity.json",
+            "item_slopes.npz",
             "table_effect.json",
             "hand_check.csv",
             *(
@@ -1770,12 +1774,16 @@ def test_the_summary_records_the_template_and_the_group_sizes(
     assert summary["n_items"]["obscure_real"] == {"known": 3, "unknown": 3}
 
 
-def test_shift_dose_slopes_follow_the_planted_entropy_dose(
-    tiny_arch: LoadedModel,
+def _planted_shift_run(
+    loaded: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    weight = {"lat0": 2.0, "random0": 0.0, "random1": 0.0}
+    weight: dict[str, float],
+) -> RunDir:
+    """Runs shift mode where each arm adds `coeff * weight[arm]` to entropy.
+
+    The arms are named in the order the run first applies their vector.
+    """
     seen: dict[bytes, str] = {}
 
     def fake_stats(
@@ -1795,7 +1803,21 @@ def test_shift_dose_slopes_follow_the_planted_entropy_dose(
     monkeypatch.setattr(p9d_steering, "next_token_stats", fake_stats)
     config = _config(coeffs=DOSE_GRID)
     run_dir = _run_dir(tmp_path, config)
-    execute(config, run_dir, tiny_arch, _items(), known_contrasts=True)
+    execute(config, run_dir, loaded, _items(), known_contrasts=True)
+    return run_dir
+
+
+def test_shift_dose_slopes_follow_the_planted_entropy_dose(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _planted_shift_run(
+        tiny_arch,
+        tmp_path,
+        monkeypatch,
+        {"lat0": 2.0, "random0": 0.0, "random1": 0.0},
+    )
 
     columns, rows = _dose(run_dir)
 
@@ -1949,3 +1971,267 @@ def test_items_finite_in_only_one_arm_leave_the_contrast_empty() -> None:
     by_key = {(r[3], r[4]): r for r in rows}
     assert by_key[("random0", "")][5] == 1
     assert by_key[("lat0", "random0")][5:] == [0] + [None] * 7
+
+
+SELECTIVITY_COLUMNS = [
+    "type",
+    "metric",
+    "n_known",
+    "n_unknown",
+    "known_slope",
+    "unknown_slope",
+    "gap",
+    "lo",
+    "hi",
+    "selective",
+]
+
+
+def _selectivity(run_dir: RunDir) -> tuple[list[str], list[list[Any]]]:
+    table = run_dir.read_json("table_selectivity")
+    assert isinstance(table, dict)
+    return table["columns"], table["rows"]
+
+
+def _selective_run(
+    loaded: LoadedModel,
+    out: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    known_below: float,
+) -> RunDir:
+    """Runs abstention mode with a planted slope on both sides.
+
+    The steering arm abstains on the unknown items below -0.1 and on the known
+    items below `known_below`, so the unknown slope is -1.5 and the known
+    slope is -1.5 for -0.1, -1.0 for -0.3 and 0.0 for -0.5.
+    """
+
+    def rule(item: LabeledItem, arm: int, coeff: float) -> list[str]:
+        edge = known_below if _is_known(item) else -0.1
+        return [ABSTAIN] if arm == 0 and coeff < edge else _answer(item)
+
+    run_dir, _ = _canned_run(loaded, out, monkeypatch, rule, **DOSE_OVERRIDES)
+    return run_dir
+
+
+def test_the_selectivity_table_has_the_agreed_columns_and_rows(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _dose_run(tiny_qwen3, tmp_path, monkeypatch)
+
+    columns, rows = _selectivity(run_dir)
+
+    assert columns == SELECTIVITY_COLUMNS
+    assert [(r[0], r[1]) for r in rows] == [
+        ("obscure_real", "abstention"),
+        ("fictional_generated", "abstention"),
+    ]
+
+
+def test_a_larger_unknown_slope_is_selective(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _selective_run(tiny_qwen3, tmp_path, monkeypatch, -0.3)
+
+    columns, rows = _selectivity(run_dir)
+
+    for name in ("obscure_real", "fictional_generated"):
+        row = _row(rows, columns, type=name)
+        assert (row["n_known"], row["n_unknown"]) == (2, 2)
+        assert row["known_slope"] == pytest.approx(-1.0)
+        assert row["unknown_slope"] == pytest.approx(-1.5)
+        assert (row["gap"], row["lo"], row["hi"]) == pytest.approx(
+            (0.5, 0.5, 0.5)
+        )
+        assert row["selective"] is True
+    assert _summary(run_dir)["headline"]["selective"] is True
+
+
+def test_an_equal_slope_on_both_sides_is_not_selective(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _selective_run(tiny_qwen3, tmp_path, monkeypatch, -0.1)
+
+    columns, rows = _selectivity(run_dir)
+
+    row = _row(rows, columns, type="obscure_real")
+    assert row["known_slope"] == pytest.approx(-1.5)
+    assert row["gap"] == pytest.approx(0.0)
+    assert row["selective"] is False
+    assert _summary(run_dir)["headline"]["selective"] is False
+
+
+def test_the_selectivity_gap_uses_magnitudes(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def rule(item: LabeledItem, arm: int, coeff: float) -> list[str]:
+        if _is_known(item):
+            moved = arm == 0 and coeff > 0
+        else:
+            moved = arm == 0 and coeff < 0
+        return [ABSTAIN] if moved else _answer(item)
+
+    run_dir, _ = _canned_run(
+        tiny_qwen3, tmp_path, monkeypatch, rule, **DOSE_OVERRIDES
+    )
+
+    columns, rows = _selectivity(run_dir)
+
+    row = _row(rows, columns, type="obscure_real")
+    assert row["known_slope"] == pytest.approx(1.5)
+    assert row["unknown_slope"] == pytest.approx(-1.5)
+    assert row["gap"] == pytest.approx(0.0)
+    assert row["selective"] is False
+
+
+def test_the_selectivity_interval_gets_the_seed_and_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    real = p9d_steering.selectivity_gap
+
+    def spy(unknown: Any, known: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return real(unknown, known, **kwargs)
+
+    monkeypatch.setattr(p9d_steering, "selectivity_gap", spy)
+    slopes = {
+        ("g", "known", "abstention"): {"lat0": np.array([0.0, 0.5])},
+        ("g", "unknown", "abstention"): {"lat0": np.array([1.0, 1.5])},
+    }
+
+    rows = p9d_steering._selectivity_rows(slopes, n_boot=77, seed=5)
+
+    assert calls == [{"n_boot": 77, "seed": 5}]
+    assert rows[0][:4] == ["g", "abstention", 2, 2]
+
+
+def test_a_side_without_finite_slopes_leaves_an_empty_row() -> None:
+    slopes = {
+        ("g", "known", "answer_logprob"): {"lat0": np.array([0.5, np.nan])},
+        ("g", "unknown", "answer_logprob"): {
+            "lat0": np.array([np.nan, np.nan])
+        },
+        ("h", "known", "answer_logprob"): {"lat0": np.array([np.nan])},
+        ("h", "unknown", "answer_logprob"): {"lat0": np.array([np.nan])},
+    }
+
+    rows = p9d_steering._selectivity_rows(slopes, n_boot=20, seed=0)
+
+    assert rows == [["g", "answer_logprob", 1, 0, *[None] * 6]]
+
+
+def test_the_selective_flag_is_null_for_an_empty_row_or_no_headline() -> None:
+    dose = [
+        _dose_row("lat0", "", -1.0, None),
+        _dose_row("random0", "", 0.0, None),
+        _dose_row("lat0", "random0", -1.0, 0.25),
+    ]
+    empty = [["g", "abstention", 1, 0, *[None] * 6]]
+    full = [["g", "abstention", 2, 2, 0.0, 1.0, 1.0, 0.5, 1.5, True]]
+    headline = p9d_steering._headline(dose, "g", "abstention")
+
+    assert p9d_steering._with_selective(headline, empty)["selective"] is None
+    assert p9d_steering._with_selective(headline, full)["selective"] is True
+    assert p9d_steering._with_selective(None, full) is None
+
+
+def test_shift_mode_writes_the_selectivity_table(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _planted_shift_run(
+        tiny_arch,
+        tmp_path,
+        monkeypatch,
+        {"lat0": 2.0, "random0": 0.0, "random1": 0.0},
+    )
+
+    columns, rows = _selectivity(run_dir)
+
+    assert columns == SELECTIVITY_COLUMNS
+    entropy = _row(rows, columns, type="fictional_generated", metric="entropy")
+    assert (entropy["n_known"], entropy["n_unknown"]) == (4, 4)
+    assert entropy["known_slope"] == pytest.approx(2.0)
+    assert entropy["unknown_slope"] == pytest.approx(2.0)
+    only_known = _row(
+        rows, columns, type="fictional_generated", metric="answer_logprob"
+    )
+    assert only_known["n_known"] == 4
+    assert only_known["n_unknown"] == 0
+    assert only_known["selective"] is None
+    assert only_known["gap"] is None
+    headline = _summary(run_dir)["headline"]
+    both = _row(rows, columns, type="obscure_real", metric="entropy")
+    assert headline["selective"] == both["selective"]
+
+
+def test_item_slopes_hold_every_arm_with_the_uid_order(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _dose_run(tiny_qwen3, tmp_path, monkeypatch)
+
+    arrays = run_dir.read_arrays("item_slopes")
+
+    plan = plan_groups(_config(**DOSE_OVERRIDES), _items(), True)
+    arms = ("lat0", "random0", "random1", "random2")
+    for group in plan.evaluation:
+        for side, members in group.sides:
+            uids = arrays[f"uids__{group.name}__{side}"]
+            assert uids.tolist() == [m.example.uid for m in members]
+            for arm in arms:
+                name = f"slope__{group.name}__{side}__abstention__{arm}"
+                assert arrays[name].shape == (len(members),)
+    unknown = arrays["slope__obscure_real__unknown__abstention__lat0"]
+    assert unknown.tolist() == pytest.approx([-1.5, -1.5])
+    known = arrays["slope__obscure_real__known__abstention__lat0"]
+    assert known.tolist() == pytest.approx([0.0, 0.0])
+    assert arrays[
+        "slope__obscure_real__unknown__abstention__random2"
+    ].tolist() == (pytest.approx([1.5, 1.5]))
+
+
+def test_item_slope_means_equal_the_dose_table(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _selective_run(tiny_qwen3, tmp_path, monkeypatch, -0.3)
+
+    arrays = run_dir.read_arrays("item_slopes")
+
+    columns, rows = _dose(run_dir)
+    for side in ("known", "unknown"):
+        row = _row(
+            rows,
+            columns,
+            type="obscure_real",
+            side=side,
+            arm="lat0",
+            vs="",
+        )
+        values = arrays[f"slope__obscure_real__{side}__abstention__lat0"]
+        assert float(values.mean()) == pytest.approx(row["slope"])
+
+
+def test_shift_mode_saves_item_slopes_including_empty_sides(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _planted_shift_run(
+        tiny_arch,
+        tmp_path,
+        monkeypatch,
+        {"lat0": 1.0, "random0": 1.0, "random1": 1.0},
+    )
+
+    arrays = run_dir.read_arrays("item_slopes")
+
+    entropy = arrays["slope__fictional_generated__unknown__entropy__lat0"]
+    assert entropy.shape == (4,)
+    assert entropy.tolist() == pytest.approx([1.0] * 4)
+    answer = arrays["slope__fictional_generated__unknown__answer_logprob__lat0"]
+    assert answer.shape == (4,)
+    assert np.isnan(answer).all()
+    assert arrays["uids__fictional_generated__unknown"].shape == (4,)
+    assert "slope__fictional_generated__known__entropy__random0" in arrays

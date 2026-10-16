@@ -437,3 +437,56 @@ def abs_slope_gap_ci(
     lo, hi = np.quantile(gaps, [alpha / 2, 1 - alpha / 2])
     gap = abs(own.mean()) - abs(other.mean())
     return float(gap), float(lo), float(hi)
+
+
+def selectivity_gap(
+    unknown_slopes: NDArray[np.float64],
+    known_slopes: NDArray[np.float64],
+    *,
+    n_boot: int = 1000,
+    alpha: float = 0.05,
+    seed: int = 0,
+) -> tuple[float, float, float]:
+    """Computes how much more an arm moves unknown items than known ones.
+
+    The statistic is `|mean(unknown_slopes)| - |mean(known_slopes)|`, so the
+    sign of the movement does not matter. The two sides hold different
+    items, so each bootstrap resample draws the items of each side
+    independently.
+
+    Args:
+        unknown_slopes: The slope of each unknown item.
+        known_slopes: The slope of each known item.
+        n_boot: Bootstrap resamples of the items.
+        alpha: One minus the coverage.
+        seed: Seed of the resampling. The known side is drawn first.
+
+    Returns:
+        The statistic over the items with a finite slope on each side, and
+        the lower and upper bounds of its percentile interval.
+
+    Raises:
+        ValueError: If a side has no finite slope, or `alpha` or `n_boot`
+            is invalid.
+    """
+    unknown = np.asarray(unknown_slopes, dtype=np.float64)
+    known = np.asarray(known_slopes, dtype=np.float64)
+    unknown = unknown[np.isfinite(unknown)]
+    known = known[np.isfinite(known)]
+    if unknown.size == 0:
+        raise ValueError("no unknown item with a finite slope")
+    if known.size == 0:
+        raise ValueError("no known item with a finite slope")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha must lie in (0, 1), got {alpha}")
+    if n_boot < 1:
+        raise ValueError("n_boot must be at least 1")
+    rng = np.random.default_rng(seed)
+    known_draws = rng.integers(0, known.size, size=(n_boot, known.size))
+    unknown_draws = rng.integers(0, unknown.size, size=(n_boot, unknown.size))
+    gaps = np.abs(unknown[unknown_draws].mean(axis=1)) - np.abs(
+        known[known_draws].mean(axis=1)
+    )
+    lo, hi = np.quantile(gaps, [alpha / 2, 1 - alpha / 2])
+    gap = abs(unknown.mean()) - abs(known.mean())
+    return float(gap), float(lo), float(hi)

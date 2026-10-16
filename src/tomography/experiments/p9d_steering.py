@@ -54,6 +54,7 @@ from tomography.p9.behavior import behavior_rates
 from tomography.p9.behavior import classify
 from tomography.p9.behavior import item_slopes
 from tomography.p9.behavior import select_coefficient
+from tomography.p9.behavior import selectivity_gap
 from tomography.p9.behavior import shift_ci
 from tomography.p9.behavior import slope_ci
 from tomography.p9.behavior import write_completion_check
@@ -132,7 +133,21 @@ DOSE_COLUMNS = [
     "abs_hi",
 ]
 
+SELECTIVITY_COLUMNS = [
+    "type",
+    "metric",
+    "n_known",
+    "n_unknown",
+    "known_slope",
+    "unknown_slope",
+    "gap",
+    "lo",
+    "hi",
+    "selective",
+]
+
 Cell = tuple[float, float, float]
+CellSlopes = dict[tuple[str, str, str], dict[str, NDArray[np.float64]]]
 
 Behavior = Literal["auto", "abstention", "shift"]
 Mode = Literal["abstention", "shift"]
@@ -631,6 +646,7 @@ def _dose_rows(
     *,
     n_boot: int,
     seed: int,
+    slopes_out: dict[str, NDArray[np.float64]] | None = None,
 ) -> list[list[Any]]:
     """Fits the dose slope of every arm and its contrast with each random arm.
 
@@ -643,6 +659,8 @@ def _dose_rows(
             (len(coeffs), n_items), with the steering arm first.
         n_boot: Bootstrap resamples of the items.
         seed: Seed of the resampling.
+        slopes_out: If given, receives the slope of every item under every
+            arm, whether or not any row is returned.
 
     Returns:
         One row of `DOSE_COLUMNS` per arm, then one per random arm for the
@@ -654,6 +672,8 @@ def _dose_rows(
         stop the run.
     """
     slopes = {arm: item_slopes(coeffs, v) for arm, v in values.items()}
+    if slopes_out is not None:
+        slopes_out.update(slopes)
     if not np.isfinite(slopes[STEERING_ARM]).any():
         return []
     width = max(coeffs) - min(coeffs)
@@ -694,6 +714,127 @@ def _dose_rows(
             ]
         )
     return rows
+
+
+def _finite_steering_slopes(
+    cell_slopes: CellSlopes, key: tuple[str, str, str]
+) -> NDArray[np.float64]:
+    """The finite steering slopes of one cell, empty if it has none."""
+    own = cell_slopes.get(key, {}).get(STEERING_ARM, np.array([]))
+    return own[np.isfinite(own)]
+
+
+def _selectivity_rows(
+    cell_slopes: CellSlopes, *, n_boot: int, seed: int
+) -> list[list[Any]]:
+    """Compares the steering slope on the unknown and the known items.
+
+    Args:
+        cell_slopes: By (type, side, metric), the slope of every item under
+            every arm.
+        n_boot: Bootstrap resamples of the items.
+        seed: Seed of the resampling.
+
+    Returns:
+        One row of `SELECTIVITY_COLUMNS` per type and metric where either
+        side has a finite steering slope. The row holds the counts and None
+        elsewhere if a side has no finite slope.
+    """
+    rows: list[list[Any]] = []
+    for group, metric in dict.fromkeys((g, m) for g, _, m in cell_slopes):
+        known, unknown = (
+            _finite_steering_slopes(cell_slopes, (group, side, metric))
+            for side in ("known", "unknown")
+        )
+        if known.size == 0 and unknown.size == 0:
+            continue
+        counts = [group, metric, known.size, unknown.size]
+        if known.size == 0 or unknown.size == 0:
+            rows.append([*counts, *[None] * 6])
+            continue
+        gap, lo, hi = selectivity_gap(unknown, known, n_boot=n_boot, seed=seed)
+        rows.append(
+            [
+                *counts,
+                float(known.mean()),
+                float(unknown.mean()),
+                gap,
+                lo,
+                hi,
+                lo > 0,
+            ]
+        )
+    return rows
+
+
+def _write_item_slopes(
+    run_dir: RunDir, plan: Plan, cell_slopes: CellSlopes
+) -> None:
+    """Saves the slope of every item under every arm.
+
+    Args:
+        run_dir: Where `item_slopes.npz` is written.
+        plan: The contrasts of the run, which give the item order.
+        cell_slopes: By (type, side, metric), the slope of every item under
+            every arm.
+    """
+    arrays: dict[str, NDArray[Any]] = {}
+    for group in plan.evaluation:
+        for side, members in group.sides:
+            arrays[f"uids__{group.name}__{side}"] = np.array(
+                [m.example.uid for m in members], dtype=str
+            )
+    for (name, side, metric), arms in cell_slopes.items():
+        for arm, values in arms.items():
+            arrays[f"slope__{name}__{side}__{metric}__{arm}"] = values
+    run_dir.write_arrays("item_slopes", **arrays)
+
+
+def _write_selectivity(
+    run_dir: RunDir, plan: Plan, cell_slopes: CellSlopes, config: Config
+) -> list[list[Any]]:
+    """Writes the selectivity table and the item slopes.
+
+    Args:
+        run_dir: Where the files are written.
+        plan: The contrasts of the run.
+        cell_slopes: By (type, side, metric), the slope of every item under
+            every arm.
+        config: The run settings, for the bootstrap size and seed.
+
+    Returns:
+        The rows of `SELECTIVITY_COLUMNS`.
+    """
+    rows = _selectivity_rows(
+        cell_slopes, n_boot=config.n_boot, seed=config.seed
+    )
+    run_dir.write_json(
+        "table_selectivity", {"columns": SELECTIVITY_COLUMNS, "rows": rows}
+    )
+    _write_item_slopes(run_dir, plan, cell_slopes)
+    return rows
+
+
+def _with_selective(
+    headline: dict[str, Any] | None, selectivity: Sequence[Sequence[Any]]
+) -> dict[str, Any] | None:
+    """Adds whether the headline contrast is selective.
+
+    Args:
+        headline: The result of `_headline`.
+        selectivity: The rows of `SELECTIVITY_COLUMNS` of the whole run.
+
+    Returns:
+        The headline with `selective` from the row of its type and metric,
+        None if that row is missing or empty; None if there is no headline.
+    """
+    if headline is None:
+        return None
+    selective = {(r[0], r[1]): r[9] for r in selectivity}
+    return {
+        **headline,
+        "selective": selective.get((headline["group"], headline["metric"])),
+    }
 
 
 def _headline(
@@ -855,6 +996,7 @@ def _run_shift(
                     (side, name, coeff)
                 ] = cell
     dose: list[list[Any]] = []
+    cell_slopes: CellSlopes = {}
     for group in plan.evaluation:
         for side, members in group.sides:
             index = distinct.index(members)
@@ -876,6 +1018,9 @@ def _run_shift(
                     values,
                     n_boot=config.n_boot,
                     seed=config.seed,
+                    slopes_out=cell_slopes.setdefault(
+                        (group.name, side, metric), {}
+                    ),
                 )
     for group in plan.evaluation:
         for metric in METRICS:
@@ -896,11 +1041,14 @@ def _run_shift(
         },
     )
     run_dir.write_json("table_dose", {"columns": DOSE_COLUMNS, "rows": dose})
+    selectivity = _write_selectivity(run_dir, plan, cell_slopes, config)
     run_dir.write_json(
         "summary",
         {
             **_summary(config, "shift", plan, steering),
-            "headline": _headline(dose, config.direction_type, "entropy"),
+            "headline": _with_selective(
+                _headline(dose, config.direction_type, "entropy"), selectivity
+            ),
             "n_with_answer": {
                 g.name: {
                     side: sum(bool(i.example.answers) for i in members)
@@ -996,6 +1144,7 @@ def _run_abstention(
 
     effects: list[list[Any]] = []
     dose: list[list[Any]] = []
+    cell_slopes: CellSlopes = {}
     for group in plan.evaluation:
         cells: dict[tuple[str, str, float], Cell] = {}
         for side, members in group.sides:
@@ -1030,6 +1179,9 @@ def _run_abstention(
                 values,
                 n_boot=config.n_boot,
                 seed=config.seed,
+                slopes_out=cell_slopes.setdefault(
+                    (group.name, side, "abstention"), {}
+                ),
             )
         _write_arm_curves(
             run_dir,
@@ -1083,11 +1235,15 @@ def _run_abstention(
         for arm in arms
     }
     run_dir.write_json("table_dose", {"columns": DOSE_COLUMNS, "rows": dose})
+    selectivity = _write_selectivity(run_dir, plan, cell_slopes, config)
     run_dir.write_json(
         "summary",
         {
             **_summary(config, "abstention", plan, steering),
-            "headline": _headline(dose, config.direction_type, "abstention"),
+            "headline": _with_selective(
+                _headline(dose, config.direction_type, "abstention"),
+                selectivity,
+            ),
             "chosen_coeff": chosen,
             "chosen_index": list(config.coeffs).index(chosen),
             "calibration_balanced_range": {
