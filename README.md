@@ -571,7 +571,9 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   Selectivity is a second claim, reported separately from "distinguishable". For the steering arm the
   statistic is the absolute mean slope over the unknown items minus the absolute mean slope over the known
   items (`gap`). The two sides hold different items, so each bootstrap resample draws the items of each side
-  independently, and the percentile interval is `lo` to `hi`. The effect is `selective` if `lo` is above
+  independently. The unknown side is oriented by the sign of its mean slope, so a resample gives the signed
+  unknown mean minus the absolute known mean (the reported `gap` is still the difference of absolute means),
+  and the percentile interval is `lo` to `hi`. The effect is `selective` if `lo` is above
   zero. The result is in `table_selectivity` (one row per type and metric, with empty cells when a side has
   no finite slope) and as `selective` in the headline. The two flags are separate, and neither is corrected
   for multiple comparisons, as for the other P9d intervals. Types that share a known pool (`obscure_real`

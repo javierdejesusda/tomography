@@ -261,8 +261,10 @@ also reported.
 
 Selectivity is a separate claim. For the steering arm, the statistic is the absolute mean slope over the unknown
 items minus the absolute mean slope over the known items (`gap` in `table_selectivity`). The two sides hold different
-items, so each bootstrap resample draws the items of each side independently, and the effect is called selective
-only if the lower bound of the percentile interval is above zero. Distinguishable and selective are reported as
+items, so each bootstrap resample draws the items of each side independently. The unknown side is oriented by the
+sign of its mean slope, so a resample gives the signed unknown mean minus the absolute known mean; this avoids the
+upward bias of the absolute value of a mean near zero, and the reported `gap` is still the difference of absolute
+means. The effect is called selective only if the lower bound of the percentile interval is above zero. Distinguishable and selective are reported as
 separate flags, with no correction for multiple comparisons, as for the other P9d intervals. Types that share a known
 pool (`obscure_real` with `fictional_generated`, `unknowable_detail` with `false_premise`) share known-side items,
 so their gaps are correlated.
