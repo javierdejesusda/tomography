@@ -1,6 +1,7 @@
 """Tests for the layer analyses: PCA variance and t-SNE."""
 
 from collections.abc import Callable
+import itertools
 from typing import Any
 
 import numpy as np
@@ -8,15 +9,22 @@ from numpy.typing import NDArray
 import pytest
 from sklearn.manifold import TSNE
 
+from tomography import analysis
 from tomography.analysis import agreement_band
 from tomography.analysis import agreement_pseudo_values
+from tomography.analysis import column_norms
+from tomography.analysis import decoder_cosines
+from tomography.analysis import dictionary_directions
 from tomography.analysis import layer_cosines
 from tomography.analysis import lens_logits
 from tomography.analysis import mean_direction
 from tomography.analysis import pca_explained_variance
 from tomography.analysis import pole_separation
 from tomography.analysis import seed_agreement
+from tomography.analysis import sparse_fit
 from tomography.analysis import standardize
+from tomography.analysis import top_features
+from tomography.analysis import top_overlap
 from tomography.analysis import top_tokens
 from tomography.analysis import tsne_embed
 from tomography.reading.metrics import bootstrap_ci
@@ -568,3 +576,344 @@ def test_top_tokens_checks_k(k: int) -> None:
 def test_top_tokens_needs_one_row() -> None:
     with pytest.raises(ValueError, match="shape"):
         top_tokens(np.ones((2, 6)), 1)
+
+
+def _columns() -> NDArray[np.float32]:
+    """Returns a (32, 20) float32 decoder with orthonormal columns."""
+    raw = np.random.default_rng(0).standard_normal((32, 20))
+    q, _ = np.linalg.qr(raw)
+    return q.astype(np.float32)
+
+
+def _planted_vector(decoder: NDArray[np.float32]) -> NDArray[np.float64]:
+    columns = decoder.astype(np.float64)
+    return 0.8 * columns[:, 3] - 0.6 * columns[:, 7]
+
+
+def test_column_norms_are_the_float64_norms_of_the_columns() -> None:
+    decoder = _columns()
+    scales = np.random.default_rng(2).uniform(0.5, 3.0, size=20)
+    scaled = (decoder * scales).astype(np.float32)
+    norms = column_norms(scaled)
+    assert norms.dtype == np.float64
+    assert norms.shape == (20,)
+    np.testing.assert_allclose(
+        norms, np.linalg.norm(scaled.astype(np.float64), axis=0)
+    )
+    np.testing.assert_allclose(norms, scales, rtol=1e-5)
+
+
+def test_column_norms_refuse_a_bad_decoder() -> None:
+    decoder = _columns()
+    with pytest.raises(ValueError, match="shape"):
+        column_norms(decoder[0])
+    zero_column = decoder.copy()
+    zero_column[:, 4] = 0.0
+    with pytest.raises(ValueError, match="zero column"):
+        column_norms(zero_column)
+    bad_column = decoder.copy()
+    bad_column[2, 4] = np.inf
+    with pytest.raises(ValueError, match="finite"):
+        column_norms(bad_column)
+
+
+def test_decoder_cosines_reads_the_planted_vector_off_the_columns() -> None:
+    decoder = _columns()
+    cosines = decoder_cosines(_planted_vector(decoder)[None], decoder)
+    assert cosines.dtype == np.float32
+    assert cosines.shape == (1, 20)
+    assert cosines[0, 3] == pytest.approx(0.8, abs=1e-6)
+    assert cosines[0, 7] == pytest.approx(-0.6, abs=1e-6)
+    others = np.delete(cosines[0], [3, 7])
+    assert np.abs(others).max() < 1e-6
+
+
+def test_decoder_cosines_ignores_the_scale_of_vectors_and_columns() -> None:
+    decoder = _columns()
+    vectors = np.random.default_rng(1).standard_normal((4, 32))
+    scales = np.random.default_rng(2).uniform(0.5, 3.0, size=20)
+    expected = decoder_cosines(vectors, decoder)
+    scaled = decoder_cosines(
+        vectors * 7.0, (decoder * scales).astype(np.float32)
+    )
+    np.testing.assert_allclose(scaled, expected, atol=1e-6)
+    unit = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+    np.testing.assert_allclose(
+        expected, unit @ decoder.astype(np.float64), atol=1e-6
+    )
+
+
+def test_decoder_cosines_leaves_its_inputs_alone() -> None:
+    decoder = _columns()
+    decoder *= np.float32(2.0)
+    decoder.setflags(write=False)
+    vectors = np.random.default_rng(1).standard_normal((2, 32))
+    before = vectors.copy()
+    decoder_cosines(vectors, decoder)
+    np.testing.assert_array_equal(vectors, before)
+    assert float(np.linalg.norm(decoder[:, 0])) == pytest.approx(2.0, abs=1e-6)
+
+
+def test_top_features_orders_the_columns_by_absolute_cosine() -> None:
+    decoder = _columns()
+    cosines = decoder_cosines(_planted_vector(decoder)[None], decoder)
+    top = top_features(cosines, 4)
+    assert top.dtype == np.int64
+    assert top.shape == (1, 4)
+    assert top[0, :2].tolist() == [3, 7]
+
+
+def test_top_features_gives_ties_to_the_lower_id() -> None:
+    cosines = np.array(
+        [[0.1, -0.5, 0.5, 0.0, 0.5, -0.1], [0.2, 0.2, 0.2, 0.2, 0.2, 0.2]],
+        dtype=np.float32,
+    )
+    assert top_features(cosines, 3).tolist() == [[1, 2, 4], [0, 1, 2]]
+
+
+def test_sparse_fit_recovers_the_planted_atoms() -> None:
+    decoder = _columns()
+    explained, atoms = sparse_fit(_planted_vector(decoder)[None], decoder, 5)
+    assert explained.shape == (1, 5)
+    assert atoms.shape == (1, 5)
+    assert atoms.dtype == np.int64
+    assert atoms[0, :2].tolist() == [3, 7]
+    np.testing.assert_allclose(
+        explained[0], [0.64, 1.0, 1.0, 1.0, 1.0], atol=1e-6
+    )
+
+
+def test_sparse_fit_ignores_scale_and_sign() -> None:
+    decoder = _columns()
+    vector = _planted_vector(decoder)[None]
+    explained, atoms = sparse_fit(vector, decoder, 4)
+    scales = np.random.default_rng(2).uniform(0.5, 3.0, size=20)
+    for changed, columns in (
+        (vector * 9.0, decoder),
+        (vector, (decoder * scales).astype(np.float32)),
+        (vector, (decoder * 1e-12).astype(np.float32)),
+        (-vector, decoder),
+    ):
+        got_explained, got_atoms = sparse_fit(changed, columns, 4)
+        np.testing.assert_allclose(got_explained, explained, atol=1e-6)
+        np.testing.assert_array_equal(got_atoms, atoms)
+
+
+def test_sparse_fit_gives_ties_to_the_lower_id() -> None:
+    decoder = _columns()
+    decoder[:, 12] = decoder[:, 5]
+    decoder[:, 15] = decoder[:, 5]
+    vector = decoder[:, 5].astype(np.float64)
+    explained, atoms = sparse_fit(vector[None], decoder, 2)
+    assert atoms[0, 0] == 5
+    assert explained[0, 0] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_sparse_fit_ties_are_within_1e_6_of_the_best_score() -> None:
+    def first_atom(gap: float) -> int:
+        angles = np.arccos(np.array([0.1, 0.5, 0.5 + gap, 0.2]))
+        decoder = np.stack([np.cos(angles), np.sin(angles)]).astype(np.float32)
+        return int(sparse_fit(np.array([[1.0, 0.0]]), decoder, 1)[1][0, 0])
+
+    assert first_atom(5e-7) == 1
+    assert first_atom(1e-5) == 2
+
+
+def test_sparse_fit_survives_a_column_that_is_already_in_the_span() -> None:
+    decoder = _columns()
+    decoder[:, 0] = 0.0
+    decoder[0, 0] = 1.0
+    decoder[:, 1] = decoder[:, 0]
+    vector = np.zeros((1, 32))
+    vector[0, 0] = 1.0
+    explained, atoms = sparse_fit(vector, decoder, 3)
+    assert atoms[0, :2].tolist() == [0, 1]
+    assert np.isfinite(explained).all()
+    np.testing.assert_allclose(explained[0], 1.0)
+
+
+def test_sparse_fit_picks_by_the_residual_and_not_by_the_cosine() -> None:
+    decoder = np.array(
+        [[1.0, 0.9, 0.0], [0.0, np.sqrt(0.19), 0.0], [0.0, 0.0, 1.0]],
+        dtype=np.float32,
+    )
+    vector = np.array([[0.8, 0.0, 0.6]])
+    cosines = decoder_cosines(vector, decoder)
+    assert top_features(cosines, 3).tolist() == [[0, 1, 2]]
+    explained, atoms = sparse_fit(vector, decoder, 2)
+    assert atoms.tolist() == [[0, 2]]
+    np.testing.assert_allclose(explained[0], [0.64, 1.0], atol=1e-6)
+
+
+def test_sparse_fit_takes_no_more_atoms_than_the_dimension() -> None:
+    rng = np.random.default_rng(0)
+    decoder = rng.standard_normal((16, 40)).astype(np.float32)
+    vectors = rng.standard_normal((2, 16))
+    with pytest.raises(ValueError, match="n_atoms"):
+        sparse_fit(vectors, decoder, 17)
+
+
+def test_sparse_fit_is_monotone_bounded_and_picks_distinct_atoms() -> None:
+    rng = np.random.default_rng(4)
+    decoder = rng.standard_normal((16, 40)).astype(np.float32)
+    vectors = rng.standard_normal((6, 16))
+    explained, atoms = sparse_fit(vectors, decoder, 16)
+    assert (np.diff(explained, axis=1) >= 0.0).all()
+    assert explained.min() >= 0.0
+    assert explained.max() <= 1.0
+    assert all(len(set(row)) == 16 for row in atoms.tolist())
+    assert explained[:, -1] == pytest.approx(1.0, abs=1e-5)
+
+
+def _best_subset_fit(
+    vector: NDArray[np.float64], decoder: NDArray[np.float32], size: int
+) -> float:
+    unit = vector / np.linalg.norm(vector)
+    best = 0.0
+    for subset in itertools.combinations(range(decoder.shape[1]), size):
+        columns = decoder[:, subset].astype(np.float64)
+        coefficients, *_ = np.linalg.lstsq(columns, unit, rcond=None)
+        fit = 1.0 - float(np.sum((unit - columns @ coefficients) ** 2))
+        best = max(best, fit)
+    return best
+
+
+def test_sparse_fit_never_beats_the_best_subset_of_the_same_size() -> None:
+    rng = np.random.default_rng(5)
+    decoder = rng.standard_normal((12, 14)).astype(np.float32)
+    vectors = rng.standard_normal((5, 12))
+    explained, _ = sparse_fit(vectors, decoder, 3)
+    for i, vector in enumerate(vectors):
+        bests = [_best_subset_fit(vector, decoder, s) for s in (1, 2, 3)]
+        assert (explained[i] <= np.array(bests) + 1e-6).all()
+        assert explained[i, 0] == pytest.approx(bests[0], abs=1e-6)
+
+
+def test_sparse_fit_reorthogonalizes_nearly_collinear_atoms() -> None:
+    rng = np.random.default_rng(7)
+    d, f = 40, 30
+    q, _ = np.linalg.qr(rng.standard_normal((d, f)))
+    columns = np.empty((d, f))
+    columns[:, 0] = q[:, 0]
+    for j in range(1, f):
+        columns[:, j] = columns[:, j - 1] + 1e-6 * q[:, j]
+    columns /= np.linalg.norm(columns, axis=0)
+    decoder = columns.astype(np.float32)
+    vectors = rng.standard_normal((4, d))
+    explained, atoms = sparse_fit(vectors, decoder, 20)
+    matrix = decoder.astype(np.float64)
+    for i, vector in enumerate(vectors):
+        unit = vector / np.linalg.norm(vector)
+        for t in range(20):
+            chosen = matrix[:, atoms[i, : t + 1]]
+            coef = np.linalg.lstsq(chosen, unit, rcond=None)[0]
+            oracle = 1.0 - np.sum((unit - chosen @ coef) ** 2)
+            assert explained[i, t] == pytest.approx(oracle, abs=1e-9)
+
+
+def test_sparse_fit_matches_the_best_pair_on_a_planted_pair() -> None:
+    rng = np.random.default_rng(6)
+    decoder = rng.standard_normal((64, 8)).astype(np.float32)
+    vector = decoder[:, 2].astype(np.float64) + 0.5 * decoder[:, 5]
+    explained, atoms = sparse_fit(vector[None], decoder, 2)
+    assert sorted(atoms[0].tolist()) == [2, 5]
+    assert _best_subset_fit(vector, decoder, 2) == pytest.approx(1.0, abs=1e-6)
+    assert explained[0, 1] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_sparse_fit_rows_do_not_depend_on_the_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rng = np.random.default_rng(7)
+    decoder = rng.standard_normal((16, 30)).astype(np.float32)
+    vectors = rng.standard_normal((5, 16))
+    monkeypatch.setattr(analysis, "_FIT_BLOCK", 2)
+    explained, atoms = sparse_fit(vectors, decoder, 6)
+    for i, vector in enumerate(vectors):
+        one_explained, one_atoms = sparse_fit(vector[None], decoder, 6)
+        np.testing.assert_allclose(explained[i], one_explained[0], atol=1e-9)
+        np.testing.assert_array_equal(atoms[i], one_atoms[0])
+
+
+def test_dictionary_directions_are_unit_and_stay_in_the_decoder_span() -> None:
+    decoder = np.zeros((8, 5), dtype=np.float32)
+    decoder[:3] = np.random.default_rng(0).standard_normal((3, 5))
+    directions = dictionary_directions(decoder, 50, np.random.default_rng(1))
+    assert directions.shape == (50, 8)
+    assert directions.dtype == np.float64
+    np.testing.assert_allclose(np.linalg.norm(directions, axis=1), 1.0)
+    assert (directions[:, 3:] == 0.0).all()
+
+
+def test_dictionary_directions_replay_the_draw_of_the_contract() -> None:
+    decoder = _columns()
+    got = dictionary_directions(decoder, 7, np.random.default_rng(3))
+    g = np.random.default_rng(3).standard_normal((7, 20)).astype(np.float32)
+    expected = (g @ decoder.T).astype(np.float64)
+    expected /= np.linalg.norm(expected, axis=1, keepdims=True)
+    np.testing.assert_allclose(got, expected, atol=1e-7)
+
+
+def test_dictionary_directions_follow_the_covariance_of_the_decoder() -> None:
+    decoder = np.zeros((8, 11), dtype=np.float32)
+    decoder[0, :10] = 1.0
+    decoder[1, 10] = 1.0
+    directions = dictionary_directions(decoder, 4000, np.random.default_rng(0))
+    share = float((directions[:, 0] ** 2).mean())
+    expected = (10 / 9) * (1 - 1 / np.sqrt(10))
+    assert share == pytest.approx(expected, abs=0.02)
+    assert abs(share - 0.5) > 0.2
+
+
+def test_top_overlap_is_the_mean_pairwise_jaccard_of_the_id_sets() -> None:
+    ids = np.array([[1, 2, 3], [1, 2, 4], [3, 2, 1]], dtype=np.int64)
+    assert top_overlap(ids) == pytest.approx(2 / 3)
+    assert top_overlap(np.array([[1, 2], [1, 2]])) == 1.0
+    assert top_overlap(np.array([[1, 2], [3, 4], [5, 6]])) == 0.0
+
+
+def test_the_sae_functions_check_their_input() -> None:
+    decoder = _columns()
+    vectors = np.ones((2, 32))
+    with pytest.raises(ValueError, match="shape"):
+        decoder_cosines(np.ones(32), decoder)
+    with pytest.raises(ValueError, match="shape"):
+        decoder_cosines(vectors, decoder[0])
+    with pytest.raises(ValueError, match="width"):
+        decoder_cosines(np.ones((2, 31)), decoder)
+    with pytest.raises(ValueError, match="zero vector"):
+        decoder_cosines(np.zeros((2, 32)), decoder)
+    with pytest.raises(ValueError, match="finite"):
+        decoder_cosines(np.full((2, 32), np.nan), decoder)
+    zero_column = decoder.copy()
+    zero_column[:, 4] = 0.0
+    with pytest.raises(ValueError, match="zero column"):
+        decoder_cosines(vectors, zero_column)
+    bad_column = decoder.copy()
+    bad_column[2, 4] = np.inf
+    with pytest.raises(ValueError, match="finite"):
+        sparse_fit(vectors, bad_column, 2)
+    with pytest.raises(ValueError, match="zero vector"):
+        sparse_fit(np.zeros((2, 32)), decoder, 2)
+    for n_atoms in (0, 21):
+        with pytest.raises(ValueError, match="n_atoms"):
+            sparse_fit(vectors, decoder, n_atoms)
+    with pytest.raises(ValueError, match="shape"):
+        top_features(np.ones(5), 1)
+    for k in (0, 6):
+        with pytest.raises(ValueError, match="k must"):
+            top_features(np.ones((2, 5)), k)
+    with pytest.raises(ValueError, match="finite"):
+        top_features(np.full((2, 5), np.nan), 1)
+    with pytest.raises(ValueError, match="at least 2"):
+        top_overlap(np.array([[1, 2]]))
+    with pytest.raises(ValueError, match="shape"):
+        top_overlap(np.array([1, 2, 3]))
+    with pytest.raises(ValueError, match="shape"):
+        dictionary_directions(decoder[0], 3, np.random.default_rng(0))
+    with pytest.raises(ValueError, match="n must"):
+        dictionary_directions(decoder, 0, np.random.default_rng(0))
+    with pytest.raises(ValueError, match="finite"):
+        dictionary_directions(bad_column, 3, np.random.default_rng(0))
+    with pytest.raises(ValueError, match="zero vector"):
+        dictionary_directions(np.zeros((8, 5)), 3, np.random.default_rng(0))
