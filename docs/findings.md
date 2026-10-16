@@ -4,10 +4,11 @@ This document reports the results of this repository so far. It is a reference f
 [methodology.md](methodology.md) and [related-work.md](related-work.md): it states what each run measured, the number it
 produced, and what that number does and does not show. Experiment ids (`r1`, `p6`, `c1` and so on) are those of the
 paper mapping in the methodology, which also describes the pipeline choices, the statistics and the run settings that
-are not repeated here. Every number is read from the files of a finished run (`summary.json`, `table.json` or the curves
-files), except the text baselines of R6 on `gpt2`, whose origin is stated in that section. Runs are identified by config
-hash in [Run identity](#run-identity). The document is not complete: [Pending](#pending) lists what it does not yet
-report.
+are not repeated here. Most numbers are read from the files of a finished run (`summary.json`, `table.json` or the
+curves files). The derived ones are the R6 text baselines on `gpt2` (see that section), the P6 tables (recomputed from
+the runs), the random-direction cosine of A1, the span of the sizes in decades, and differences or ranges quoted in the
+text. Runs are identified by config hash in [Run identity](#run-identity). The document is not complete:
+[Pending](#pending) lists what it does not yet report.
 
 Contents:
 
@@ -41,8 +42,9 @@ Contents:
   one run per experiment.
 - **R5 is reported as the transfer test only.** The in-template accuracy is 1.0 on every model by construction, because
   it scores statements inside the persona template the reader was fitted on. It is not a held-out measure and is not
-  reported. The transfer test scores plain true and false statements with no refit, and the sign of each layer is fixed
-  on the persona pairs, so a below-chance transfer value is not read as an anti-honesty direction.
+  reported. The transfer test is exploratory, as in the README and the config docstring of `r5`: it scores plain true
+  and false statements at the mean token position (`_TRANSFER_POSITION = "mean"`) with no refit, and the sign of each
+  layer is fixed on the persona pairs, so a below-chance transfer value is not read as an anti-honesty direction.
 - **R7 sets.** Besides the fact test split, R7 scores the out-of-distribution subsets of Geometry of Truth with no
   refit, at the layer chosen on the fact validation split. `neg_` sets negate the statements, `larger_than` and
   `smaller_than` are numeric comparisons, `cities_conj` and `cities_disj` join two city statements.
@@ -59,7 +61,7 @@ Contents:
 | R3 morality test         | 0.623 [0.601, 0.645] | 0.682 [0.664, 0.697] | 0.727 [0.715, 0.738] | 0.768 [0.759, 0.777] |
 |   selected layer         | L11                  | L20                  | L27                  | L34                  |
 |   validation accuracy    | 0.623                | 0.682                | 0.724                | 0.765                |
-| R5 honesty transfer test | 0.386 [0.369, 0.403] | 0.598 [0.583, 0.612] | 0.566 [0.556, 0.576] | 0.492 [0.475, 0.510] |
+| R5 transfer, exploratory | 0.386 [0.369, 0.403] | 0.598 [0.583, 0.612] | 0.566 [0.556, 0.576] | 0.492 [0.475, 0.510] |
 |   selected layer         | L7                   | L9                   | L16                  | L1                   |
 |   validation accuracy    | 0.519                | 0.474                | 0.591                | 0.508                |
 | R7 truth test            | 0.656 [0.629, 0.681] | 0.573 [0.541, 0.608] | 0.620 [0.592, 0.649] | 0.614 [0.578, 0.646] |
@@ -76,11 +78,11 @@ Findings:
   validation accuracy is above the test accuracy by 0.025 to 0.042 on every size, the layer having been chosen on it.
 - **R3 morality.** Accuracy rises at every step, 0.623, 0.682, 0.727, 0.768, and the intervals of neighbouring sizes do
   not overlap. Validation and test accuracy agree within 0.004.
-- **R5 honesty transfer.** The four values (0.386, 0.598, 0.566, 0.492) do not follow size. The validation accuracy at
-  the selected layer is 0.519, 0.474, 0.591 and 0.508: near or below chance on three of four sizes, so the layer pick is
-  noise there and these test values are not a measure of how much honesty transfers. `gpt2` is below chance on the test
-  pairs; `gpt2-medium` is above chance although its layer was chosen at a validation accuracy below chance; `gpt2-xl` is
-  at chance.
+- **R5 honesty transfer (exploratory).** The four values (0.386, 0.598, 0.566, 0.492) do not follow size. The validation
+  accuracy at the selected layer is 0.519, 0.474, 0.591 and 0.508: near or below chance on three of four sizes, so the
+  layer pick is noise there and these test values are not a measure of how much honesty transfers. `gpt2` is below
+  chance on the test pairs; `gpt2-medium` is above chance although its layer was chosen at a validation accuracy below
+  chance; `gpt2-xl` is at chance.
 - **R7 truth.** Test accuracy at the validation layer is 0.656, 0.573, 0.620 and 0.614 on 59 pairs, against validation
   accuracy of 0.634 to 0.674.
 
@@ -100,10 +102,12 @@ R7 on the out-of-distribution sets, accuracy at the same layer with its interval
 
 - Plain city statements are above chance on every size (0.560 to 0.622), and the negated city statements are below
   chance on every size (0.428 to 0.475, upper interval bounds below 0.5). Below chance means the reader ranks the true
-  negated statement under the false one, as expected from a signal of the polarity of the sentence and not of its truth.
+  negated statement under the false one, which is consistent with a reader that follows the polarity of the sentence
+  rather than its truth; this is not tested here and does not extend to every set (see the Qwen3 section).
 - `larger_than` and `smaller_than` mirror each other on `gpt2-medium` (0.300 and 0.730) and `gpt2-large` (0.336 and
-  0.680): one is far below chance and the other far above. This is a magnitude or direction signal and not truth. On
-  `gpt2` and `gpt2-xl` both are within 0.05 of chance.
+  0.680): one is far below chance and the other far above. This mirroring is consistent with a reader that tracks
+  magnitude or direction rather than truth; no run here tests that. On `gpt2` and `gpt2-xl` both are within 0.05 of
+  chance.
 - The conjunction and disjunction sets sit between 0.521 and 0.545. `common_claim` (2,225 pairs) is 0.638 to 0.656.
 
 R4 on `gpt2` (one reader per emotion against the others, same protocol):
@@ -124,7 +128,9 @@ All six emotions are read at 0.876 or above on `gpt2`, lowest for happiness and 
 
 Same protocol on the base and post-trained checkpoints of Qwen3 0.6B and 1.7B. The post-trained checkpoints use the chat
 template with thinking disabled; the base checkpoints use plain tags (see
-[methodology](methodology.md#scope-and-models)).
+[methodology](methodology.md#scope-and-models)). The post-trained checkpoints are small distilled models used with
+thinking disabled, so a base against post-trained contrast here is a contrast with that recipe and not with instruction
+tuning in general. It is descriptive; the paired comparison (P8) is pending.
 
 | Experiment               | qwen3-0.6b-base      | qwen3-0.6b           | qwen3-1.7b-base      | qwen3-1.7b           |
 | ------------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
@@ -136,7 +142,7 @@ template with thinking disabled; the base checkpoints use plain tags (see
 | R3 morality test         | 0.793 [0.787, 0.800] | 0.778 [0.762, 0.789] | 0.896 [0.892, 0.900] | 0.892 [0.887, 0.897] |
 |   selected layer         | L24                  | L18                  | L20                  | L18                  |
 |   validation accuracy    | 0.791                | 0.791                | 0.887                | 0.887                |
-| R5 honesty transfer test | 0.456 [0.444, 0.468] | 0.529 [0.525, 0.534] | 0.778 [0.766, 0.790] | 0.781 [0.746, 0.819] |
+| R5 transfer, exploratory | 0.456 [0.444, 0.468] | 0.529 [0.525, 0.534] | 0.778 [0.766, 0.790] | 0.781 [0.746, 0.819] |
 |   selected layer         | L27                  | L21                  | L20                  | L20                  |
 |   validation accuracy    | 0.651                | 0.734                | 0.830                | 0.857                |
 | R7 truth test            | 0.763 [0.749, 0.776] | 0.736 [0.695, 0.776] | 0.934 [0.925, 0.942] | 0.937 [0.924, 0.949] |
@@ -172,11 +178,12 @@ R7 on the out-of-distribution sets:
 
 - At 1.7B the plain sets are at or near ceiling (`cities` 1.000 and 0.993, `sp_en_trans` 1.000 and 0.997, `larger_than`
   0.997 and 0.982), and the negated city statements stay above chance (0.943 base, 0.856 post-trained).
-- `neg_sp_en_trans` is the set where the reader follows polarity: 0.238 on `qwen3-1.7b` and 0.337 on `qwen3-0.6b` are
-  below chance while the un-negated `sp_en_trans` is 0.997 and 0.937. The 1.7B base checkpoint is at chance (0.508) and
-  the 0.6B base checkpoint is above it (0.734).
-- At 0.6B the negated city statements are close to chance (0.568 and 0.553). Every other set is above chance except
-  `neg_sp_en_trans` on the post-trained checkpoint (0.337).
+- `neg_sp_en_trans` is the set where values fall below chance, which is consistent with a reader that follows polarity
+  there: 0.238 on `qwen3-1.7b` and 0.337 on `qwen3-0.6b` are below chance while the un-negated `sp_en_trans` is 0.997
+  and 0.937. The 1.7B base checkpoint is at chance (0.508) and the 0.6B base checkpoint is above it (0.734).
+- At 0.6B the negated city statements are above chance (0.568 [0.558, 0.577] and 0.553 [0.523, 0.584]) but far below the
+  1.7B models (0.943 and 0.856), so negation is not handled alike across sets or sizes. Every other set is above chance
+  except `neg_sp_en_trans` on the post-trained checkpoint (0.337).
 
 ## TruthfulQA MC1 against text baselines (R6)
 
@@ -277,8 +284,9 @@ in the 768-dimensional residual stream have a mean absolute cosine of 0.029.
 
 **A2, logit lens.** Each seed's direction is read through the final norm and the unembedding. The separation is the mean
 z-score (in standard deviations of the logits over the vocabulary) of six positive pole tokens minus that of six
-negative pole tokens, listed in the run; no pole word was dropped. The last column is the mean and standard deviation of
-the same quantity for 100 random directions. The best layer is chosen on the same curve, so the values are optimistic.
+negative pole tokens, listed in the run; no pole word was dropped. The interval is a 95 percent percentile bootstrap
+over the 10 seeds (2000 resamples), as for the reading curves. The last column is the mean and standard deviation of the
+same quantity for 100 random directions. The best layer is chosen on the same curve, so the values are optimistic.
 
 | Reading | Best layer | Separation z [95% interval] | Random directions: mean, sd |
 | ------- | ---------- | --------------------------- | --------------------------- |
@@ -340,10 +348,10 @@ Perplexity of neutral text:
 | linear -0.2 | 160.5 (139.4 to 177.2) | 191.2 (169.3 to 208.6)    | 67.3 (66.1 to 68.7)    | 118.2 (104.8 to 127.6) |
 | linear -0.3 | 503.7 (412.9 to 590.1) | 813.1 (736.6 to 867.5)    | 139.4 (135.4 to 142.0) | 382.6 (311.5 to 434.6) |
 
-- **Direction.** Linear steering at a coefficient of 0.1 moves the score on every size in the intended direction: from
-  0.58, 0.55, 0.63 and 0.63 without steering to 0.92, 0.89, 0.81 and 0.84 at +0.1, and to 0.27, 0.20, 0.38 and 0.26 at
-  -0.1. The check judge agrees in direction (at +0.1 it gives 0.876, 0.849, 0.756 and 0.815 against 0.495, 0.505, 0.583
-  and 0.524 without steering, and at -0.1 it gives 0.150, 0.093, 0.252 and 0.176).
+- **Direction.** Linear steering at a coefficient of 0.1 raises the score at positive and lowers it at negative
+  coefficients on every size: from 0.58, 0.55, 0.63 and 0.63 without steering to 0.92, 0.89, 0.81 and 0.84 at +0.1, and
+  to 0.27, 0.20, 0.38 and 0.26 at -0.1. The check judge agrees in direction (at +0.1 it gives 0.876, 0.849, 0.756 and
+  0.815 against 0.495, 0.505, 0.583 and 0.524 without steering, and at -0.1 it gives 0.150, 0.093, 0.252 and 0.176).
 - **Against prompting.** At a coefficient of 0.1 the steered score is above both prompting arms (+1 and +2) on `gpt2`
   and `gpt2-medium`, and level with the stronger one on `gpt2-large` (0.81 against 0.81) and `gpt2-xl` (0.84 against
   0.83, inside the range over readers). Downward, -0.1 is below both negative prompting arms on `gpt2`, `gpt2-medium`
@@ -355,16 +363,20 @@ Perplexity of neutral text:
   -0.3) and at most 1254.1 (`gpt2-medium` at +0.3).
 - **Saturation and `gpt2-xl`.** On the three smaller sizes the score at +0.2 and +0.3 stays at or above 0.87 for every
   reader. On `gpt2-xl` it does not: at +0.3 the readers score between 0.60 and 0.99, and the mean falls from 0.85 at
-  +0.2 to 0.74 at +0.3.
+  +0.2 to 0.74 at +0.3. High scores at +0.3 come with degenerate text: distinct-1 (distinct unigrams over all unigrams)
+  is 0.043, 0.047, 0.099 and 0.074 at +0.3 against 0.269, 0.285, 0.265 and 0.262 without steering. C1 has no control
+  with a random direction of the same norm, so the table shows the effect of the sentiment vector at each size but not
+  how it compares with an arbitrary edit of that size.
 
 ## Run identity
 
 All reading runs (R1 to R7) and the A1 and A2 runs were made at commit `a39ae61` with a clean tree, on one laptop GPU
 with 8 GB of memory, with the default config of each experiment (batch size 8). The A1 and A2 runs read the `gpt2` runs
 of R1, R2, R3, R5 and R7 below. The C1 runs of `gpt2` and `gpt2-xl` were made at `d59a2f7` and those of `gpt2-medium`
-and `gpt2-large` at `a39ae61`; the two commits differ only in P9 files, so the C1 code is the same. The C1 batch size is
-16 for `gpt2` and `gpt2-medium` and 4 for `gpt2-large` and `gpt2-xl`. The P6 tables were recomputed on the CPU from the
-finished runs at commit `ca2546c` (no model is loaded). Library versions and the device are in each run's `meta.json`.
+and `gpt2-large` at `a39ae61`; the C1 and reading source code is unchanged between them (`git diff --stat` over `src`
+lists only `p9d_steering.py` and `p9/behavior.py`). The C1 batch size is 16 for `gpt2` and `gpt2-medium` and 4 for
+`gpt2-large` and `gpt2-xl`. The P6 tables were recomputed on the CPU from the finished runs at commit `ca2546c` (no
+model is loaded). Library versions and the device are in each run's `meta.json`.
 
 Config hashes (12 hex digits), GPT-2:
 
