@@ -610,6 +610,35 @@ def test_selectivity_gap_no_effect_interval_includes_zero() -> None:
     assert lo < 0.0 < hi
 
 
+def test_selectivity_gap_zero_known_and_centered_unknown_is_not_selective() -> (
+    None
+):
+    unknown = np.array([1.0] * 30 + [-1.0] * 30)
+    known = np.zeros(60)
+    _, lo, _ = selectivity_gap(unknown, known, n_boot=300, seed=1)
+    assert lo <= 0.0
+
+
+def test_selectivity_gap_unknown_mean_near_zero_is_not_selective() -> None:
+    unknown = np.array([0.0] * 57 + [-1.429, -0.952, 0.714, -0.2])
+    known = np.zeros(69)
+    gap, lo, _ = selectivity_gap(unknown, known, n_boot=1000, seed=0)
+    assert gap > 0.0
+    assert lo < 0.0
+
+
+@pytest.mark.parametrize(("mean", "seed"), [(1.5, 8), (-1.5, 9)])
+def test_selectivity_gap_unknown_effect_of_either_sign_stays_selective(
+    mean: float, seed: int
+) -> None:
+    rng = np.random.default_rng(seed)
+    unknown = rng.normal(mean, 0.3, size=50)
+    known = rng.normal(0.0, 0.1, size=50)
+    gap, lo, hi = selectivity_gap(unknown, known, n_boot=300, seed=1)
+    assert lo > 0.0
+    assert lo <= gap <= hi
+
+
 def test_selectivity_gap_resamples_each_side_independently() -> None:
     unknown = np.arange(1.0, 8.0)
     known = np.arange(1.0, 8.0)

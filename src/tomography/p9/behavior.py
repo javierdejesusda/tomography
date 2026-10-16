@@ -450,9 +450,15 @@ def selectivity_gap(
     """Computes how much more an arm moves unknown items than known ones.
 
     The statistic is `|mean(unknown_slopes)| - |mean(known_slopes)|`, so the
-    sign of the movement does not matter. The two sides hold different
-    items, so each bootstrap resample draws the items of each side
-    independently.
+    sign of the movement does not matter. The bootstrap orients the unknown
+    side by the sign of its point estimate: each resample gives
+    `sign(mean(unknown)) * mean(unknown resample) - |mean(known resample)|`.
+    Taking the absolute value of every unknown resample would fold the
+    interval above zero when the unknown mean is near zero, because
+    `|mean|` is biased upward there. The point statistic is unchanged, and
+    an unknown mean of exactly zero gives a bound that cannot exceed zero.
+    The two sides hold different items, so each bootstrap resample draws the
+    items of each side independently.
 
     Args:
         unknown_slopes: The slope of each unknown item.
@@ -484,7 +490,8 @@ def selectivity_gap(
     rng = np.random.default_rng(seed)
     known_draws = rng.integers(0, known.size, size=(n_boot, known.size))
     unknown_draws = rng.integers(0, unknown.size, size=(n_boot, unknown.size))
-    gaps = np.abs(unknown[unknown_draws].mean(axis=1)) - np.abs(
+    orientation = np.sign(unknown.mean())
+    gaps = orientation * unknown[unknown_draws].mean(axis=1) - np.abs(
         known[known_draws].mean(axis=1)
     )
     lo, hi = np.quantile(gaps, [alpha / 2, 1 - alpha / 2])
