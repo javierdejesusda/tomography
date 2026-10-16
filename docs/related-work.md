@@ -52,8 +52,9 @@ Contents:
 
 - **Activation addition** [turner2023steering]. Adds a vector computed from a pair of prompts to the residual
   stream. The early versions demonstrate it on GPT-2 models, and the authors state that a coefficient, a layer and
-  a prompt pair have to be chosen. The sweeps of `c1` and `c2` over coefficient and layer, and the prompt-pair
-  variants of `p1`, address the same choices.
+  a prompt pair have to be chosen. The layer and coefficient sweep of `c1`, the coefficient list and
+  layer window of `c2` (centred on the best reading layer), and the template variants of `p1` address the same
+  choices.
 - **Steering GPT-2-XL** [turner2023gpt2xl]. A blog post (not peer reviewed) with many GPT-2-XL examples. It reports
   layer dependence and sensitivity to token spacing in the prompt pair. `c5` produces the qualitative galleries
   that correspond to such demonstrations, and `p1` includes a variant with the trailing space stripped.

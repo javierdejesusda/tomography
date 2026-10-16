@@ -96,9 +96,6 @@ module = [
 ]
 ignore_missing_imports = true
 
-[tool.codespell]
-ignore-words-list = "asai,leace,mor,sclar"
-
 [tool.pytest]
 testpaths = ["tests"]
 addopts = ["--import-mode=importlib", "-m", "not slow and not network"]
