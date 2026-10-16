@@ -2,17 +2,18 @@
 
 Sentiment readers are extracted under the template variants of P1 and steer
 text with C1's protocol, so the template changes nothing but the direction.
-The study counts the readers that read sentiment well and steer it the wrong
-way, compares the layer that reads best with the layer that steers best, and
-asks whether the logit lens predicts the dose response.
+The study counts the units (a template, a layer and a reader) that read
+sentiment well and steer it the wrong way, compares the layer that reads best
+with the layer that steers best, and asks whether the logit lens predicts the
+dose response.
 """
 
 from collections.abc import Sequence
 import dataclasses
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
-from typing import cast
 
 from matplotlib.figure import Figure
 import numpy as np
@@ -29,6 +30,7 @@ from tomography.experiments.a2_logit_lens import POLE_WORDS
 from tomography.experiments.a2_logit_lens import PoleWords
 from tomography.experiments.a2_logit_lens import lens_params
 from tomography.experiments.a2_logit_lens import pole_ids
+from tomography.experiments.aggregate import read_curves
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.c1_sentiment_steering import check_pair_count
@@ -355,12 +357,10 @@ def _inversion(
 
     Returns:
         The readable units, and the readable units with a negative slope. A
-        unit without a finite slope is never inverted.
+        unit with a NaN slope is never inverted.
     """
     readable = read >= threshold
-    finite = np.isfinite(slope)
-    negative = np.where(finite, slope, 0.0) < 0.0
-    return readable, readable & negative
+    return readable, readable & (slope < 0.0)
 
 
 def _inversion_summary(
@@ -593,7 +593,8 @@ def _read_templates(
         )
         accuracy.append(result.per_seed("val")[_READER])
         readers.append(result.readers[: config.n_steer_seeds])
-    return np.stack(accuracy), readers, result.layers
+        layers = result.layers
+    return np.stack(accuracy), readers, layers
 
 
 def _dose_sweep(
@@ -672,9 +673,9 @@ class _Measured:
         sweep: The sweep layers.
         reads: Validation accuracy of shape (T, N, K).
         lens: Lens separation of shape (T, R, K).
-        primary: Primary-judge scores of shape (T, S, R, C): sweep layer,
-            steering reader and coefficient.
-        check: Check-judge scores of the same shape.
+        slope: Primary-judge dose slope of shape (T, S, R): sweep layer and
+            steering reader.
+        check: Check-judge dose slope of the same shape.
         steer_layers: The steering layer of each template.
     """
 
@@ -683,35 +684,44 @@ class _Measured:
     sweep: tuple[int, ...]
     reads: NDArray[np.float64]
     lens: NDArray[np.float64]
-    primary: NDArray[np.float64]
+    slope: NDArray[np.float64]
     check: NDArray[np.float64]
     steer_layers: list[int]
 
 
 def _write_report(
-    config: Config, run_dir: RunDir, n_layers: int, m: _Measured
+    config: Config, run_dir: RunDir, n_layers: int, measured: _Measured
 ) -> None:
     """Writes `table.json` and `summary.json` from the measurements."""
-    at = [m.layers.index(layer) for layer in m.sweep]
-    read_units = m.reads[:, : config.n_steer_seeds, at].transpose(0, 2, 1)
-    lens_units = m.lens[:, :, at].transpose(0, 2, 1)
-    slope = _slopes(m.primary, config.coeffs)
+    names, layers, sweep = measured.names, measured.layers, measured.sweep
+    sweep_pos = [layers.index(layer) for layer in sweep]
+    read_units = measured.reads[:, : config.n_steer_seeds, sweep_pos]
+    read_units = read_units.transpose(0, 2, 1)
+    lens_units = measured.lens[:, :, sweep_pos].transpose(0, 2, 1)
+    slope = measured.slope
     readable, inverted = _inversion(read_units, slope, config.read_threshold)
     rows: list[list[Any]] = []
-    for t, name in enumerate(m.names):
-        read_curve = m.reads[t].mean(axis=0)
-        read_at = best_layer(read_curve, m.layers)
-        steer_at = m.sweep.index(m.steer_layers[t])
-        lens_layer, lens_rho = _lens_summary(lens_units[t], slope[t], m.sweep)
+    depth_gaps: list[float] = []
+    lens_hits: list[bool] = []
+    for t, name in enumerate(names):
+        read_curve = measured.reads[t].mean(axis=0)
+        read_layer = best_layer(read_curve, layers)
+        steer_layer = measured.steer_layers[t]
+        steer_pos = sweep.index(steer_layer)
+        lens_layer, lens_rho = _lens_summary(lens_units[t], slope[t], sweep)
+        read_depth = read_layer / n_layers
+        steer_depth = steer_layer / n_layers
+        depth_gaps.append(abs(read_depth - steer_depth))
+        lens_hits.append(lens_layer == steer_layer)
         rows.append(
             [
                 name,
-                read_at,
-                read_at / n_layers,
-                float(read_curve[m.layers.index(read_at)]),
-                m.steer_layers[t],
-                m.steer_layers[t] / n_layers,
-                float(_finite_mean(slope[t, steer_at], axis=0)),
+                read_layer,
+                read_depth,
+                float(read_curve[layers.index(read_layer)]),
+                steer_layer,
+                steer_depth,
+                float(_finite_mean(slope[t, steer_pos], axis=0)),
                 lens_layer,
                 lens_rho,
                 int(readable[t].sum()),
@@ -719,24 +729,20 @@ def _write_report(
             ]
         )
     run_dir.write_json("table", {"columns": list(_COLUMNS), "rows": rows})
-    read_depth = np.array([row[2] for row in rows])
-    steer_depth = np.array([row[5] for row in rows])
     run_dir.write_json(
         "summary",
         {
-            "templates": list(m.names),
+            "templates": list(names),
             "formats": list(config.formats),
-            "sweep_layers": list(m.sweep),
+            "sweep_layers": list(sweep),
             "n_prompts": config.n_prompts,
             "inversion": _inversion_summary(readable, inverted),
             "read_steer_rho": spearman(read_units.ravel(), slope.ravel()),
             "lens_steer_rho": spearman(lens_units.ravel(), slope.ravel()),
-            "lens_agreement": float(
-                np.mean([row[7] == row[4] for row in rows])
-            ),
-            "layer_gap": float(np.mean(np.abs(read_depth - steer_depth))),
+            "lens_agreement": float(np.mean(lens_hits)),
+            "layer_gap": float(np.mean(depth_gaps)),
             "judge_sign_agreement": _sign_agreement(
-                slope.ravel(), _slopes(m.check, config.coeffs).ravel()
+                slope.ravel(), measured.check.ravel()
             ),
         },
     )
@@ -827,28 +833,21 @@ def execute(
     lens = lens_separation(
         loaded, [reader for row in readers for reader in row], words
     ).reshape(len(names), config.n_steer_seeds, -1)
-    write_curves(
+    curves = partial(
+        write_curves,
         run_dir,
-        reads,
-        layers,
-        series=names,
-        stem="curves_read",
-        chance=0.5,
         n_layers=n_layers,
         n_boot=config.n_boot,
         seed=config.seed,
     )
-    write_curves(
-        run_dir,
+    curves(reads, layers, series=names, stem="curves_read", chance=0.5)
+    curves(
         lens,
         layers,
         series=names,
         stem="curves_lens",
         ylabel="Lens separation (z)",
         chance=0.0,
-        n_layers=n_layers,
-        n_boot=config.n_boot,
-        seed=config.seed,
     )
     steering = _Steering(
         config=config,
@@ -867,21 +866,19 @@ def execute(
     primary, check = _dose_sweep(
         steering, run_dir, names, readers, sweep, select_prompts
     )
-    for stem, curves, ylabel in (
-        ("curves_slope", primary, "Dose slope (primary judge)"),
-        ("curves_slope_check", check, "Dose slope (check judge)"),
+    slope = _slopes(primary, config.coeffs)
+    check_slope = _slopes(check, config.coeffs)
+    for stem, units, ylabel in (
+        ("curves_slope", slope, "Dose slope (primary judge)"),
+        ("curves_slope_check", check_slope, "Dose slope (check judge)"),
     ):
-        write_curves(
-            run_dir,
-            _slopes(curves, config.coeffs).transpose(0, 2, 1),
+        curves(
+            units.transpose(0, 2, 1),
             sweep,
             series=names,
             stem=stem,
             ylabel=ylabel,
             chance=0.0,
-            n_layers=n_layers,
-            n_boot=config.n_boot,
-            seed=config.seed,
         )
     steer_layers = [
         slope_layer(primary[t], config.coeffs, sweep) for t in range(len(names))
@@ -902,7 +899,7 @@ def execute(
         run_dir,
         n_layers,
         _Measured(
-            names, layers, sweep, reads, lens, primary, check, steer_layers
+            names, layers, sweep, reads, lens, slope, check_slope, steer_layers
         ),
     )
 
@@ -931,20 +928,23 @@ def run(config: Config, run_dir: RunDir) -> None:
 
 
 def _read_vs_steer(run_dir: RunDir) -> Figure:
-    reads = run_dir.read_arrays("curves_read")
-    slopes = run_dir.read_arrays("curves_slope")
-    names = cast(dict[str, Any], run_dir.read_json("curves_slope"))["series"]
-    at = [int(np.flatnonzero(reads["x"] == layer)[0]) for layer in slopes["x"]]
-    n_readers = slopes["per_seed"].shape[1]
+    reads = read_curves(run_dir, "curves_read")
+    slopes = read_curves(run_dir, "curves_slope")
+    at = [int(np.flatnonzero(reads.x == layer)[0]) for layer in slopes.x]
+    n_readers = slopes.per_seed.shape[1]
     with style_context():
         fig, axes = new_figure(width=TEXT_WIDTH, aspect=0.55)
         ax = axes[0, 0]
         for t, (name, color) in enumerate(
-            zip(names, categorical_colors(len(names)), strict=True)
+            zip(
+                slopes.series,
+                categorical_colors(len(slopes.series)),
+                strict=True,
+            )
         ):
             ax.plot(
-                reads["per_seed"][t, :n_readers][:, at].ravel(),
-                slopes["per_seed"][t].ravel(),
+                reads.per_seed[t, :n_readers][:, at].ravel(),
+                slopes.per_seed[t].ravel(),
                 "o",
                 color=color,
                 label=name,
