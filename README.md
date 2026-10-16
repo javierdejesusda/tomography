@@ -581,14 +581,16 @@ positive x negative pairs (`grouped_auroc` of `tomography.p9.risk`), which gives
 The table appends `logistic_within` (the headline method, named after it), `lo_within` and `hi_within` (the
 same draw bootstrap and seed as `logistic`, `lo` and `hi`, on `test_within` at the chosen layer),
 `text_word_within`, `text_char_within` and `popularity_within` (`WITHIN_BASELINES`: the same test scores of
-the baselines, ranked inside each relation) and `n_pairs_within`, the positive and negative test items that
-share a relation. They are null for a contrast that is not relational, and the values are null if no
+the baselines, ranked inside each relation) and `n_pairs_within`, the number of (positive, negative) pairs of test items
+that share a relation. They are null for a contrast that is not relational, and the values are null if no
 relation holds both sides on test. The reporting rule for the contrasts that have PopQA questions on a side
 (`fictional_synthal`, `fictional_generated`, `obscure_real`, `obscure_real_pop`, `real_vs_synthal` and
 `real_vs_generated`) is that the within-relation reader AUROC is the headline, always shown next to the
 within-relation popularity and text baselines. Relations differ in how many of their questions are known, so
 the wording of a question alone can rank the sides through the relation, and a pooled AUROC cannot tell that
-from reading the question. The pooled AUROC stays as a secondary column.
+from reading the question. The pooled AUROC stays as a secondary column. Like the pooled `logistic` interval, the within interval is a
+bootstrap over reader draws: it covers the variation of the reader fit and not the noise of the test items,
+which dominates when few pairs share a relation, so read it next to `n_pairs_within`.
 
 The reading experiments (`r1` to `r7` and `p1` to `p5`) share `ReadingConfig`
 ([`experiments/sweep.py`](src/tomography/experiments/sweep.py)): `n_seeds` training sets (10; 15 for `r6`, 20

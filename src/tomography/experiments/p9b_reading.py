@@ -263,9 +263,10 @@ def execute(
     headline method as `<method>_within` with its interval `lo_within` and
     `hi_within` (the same draw bootstrap as `lo` and `hi`, on `test_within`
     at the chosen layer), the three baselines scored inside each relation
-    (`WITHIN_BASELINES`) and `n_pairs_within`, the positive and negative test
-    items that share a relation. All of them are null for any other
-    contrast, and the values are null where no relation holds both sides.
+    (`WITHIN_BASELINES`) and `n_pairs_within`, the number of (positive,
+    negative) pairs of test items that share a relation. All of them are null
+    for any other contrast, and the values are null where no relation holds
+    both sides.
 
     Args:
         config: The experiment settings.
