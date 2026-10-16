@@ -789,6 +789,28 @@ def test_sparse_fit_never_beats_the_best_subset_of_the_same_size() -> None:
         assert explained[i, 0] == pytest.approx(bests[0], abs=1e-6)
 
 
+def test_sparse_fit_reorthogonalizes_nearly_collinear_atoms() -> None:
+    rng = np.random.default_rng(7)
+    d, f = 40, 30
+    q, _ = np.linalg.qr(rng.standard_normal((d, f)))
+    columns = np.empty((d, f))
+    columns[:, 0] = q[:, 0]
+    for j in range(1, f):
+        columns[:, j] = columns[:, j - 1] + 1e-6 * q[:, j]
+    columns /= np.linalg.norm(columns, axis=0)
+    decoder = columns.astype(np.float32)
+    vectors = rng.standard_normal((4, d))
+    explained, atoms = sparse_fit(vectors, decoder, 20)
+    matrix = decoder.astype(np.float64)
+    for i, vector in enumerate(vectors):
+        unit = vector / np.linalg.norm(vector)
+        for t in range(20):
+            chosen = matrix[:, atoms[i, : t + 1]]
+            coef = np.linalg.lstsq(chosen, unit, rcond=None)[0]
+            oracle = 1.0 - np.sum((unit - chosen @ coef) ** 2)
+            assert explained[i, t] == pytest.approx(oracle, abs=1e-9)
+
+
 def test_sparse_fit_matches_the_best_pair_on_a_planted_pair() -> None:
     rng = np.random.default_rng(6)
     decoder = rng.standard_normal((64, 8)).astype(np.float32)
