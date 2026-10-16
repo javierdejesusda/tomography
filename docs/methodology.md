@@ -62,14 +62,14 @@ in the README.
 | `c4`           | Honesty control on TruthfulQA MC1                                      | Sec. 4.3.3, Table 2; adds a prompting baseline arm                                   |
 | `c5`           | Qualitative steering galleries                                         | Figs. 10 and 17                                                                      |
 | `lr1`          | One LoRRA adapter (loss curve and held-out loss)                       | Algorithm 1; `c4` scores the adapter through `lorra_run`                             |
-| `p1`           | Template ablations                                                     | Extension (the paper uses one template per task)                                     |
-| `p2`           | Token position and a misleading sentence in the prompt                 | App. B.9, Tables 13 and 14 for the misleading sentence; the positions are an extension |
+| `p1`           | Template ablations                                                     | Sec. 5.1.1, Fig. 13 (ETHICS utility with and without the LAT template); the other variants are an extension |
+| `p2`           | Token position and a misleading sentence in the prompt                 | App. B.9, Table 14 and Fig. 27 (LAT at token indices -1, -6, -7 and -8, original and biased prompts), Table 13 (zero-shot heuristic). The code reads `last` (the paper's -1), `concept` and `mean`; the -6 to -8 offsets are not reproduced, so `concept` and `mean` go beyond the paper |
 | `p3`           | Stimulus-set size                                                      | Extension                                                                            |
 | `p4`           | Pairing and preprocessing                                              | Extension (the options include the paper's `unit` and the reference code's `center`) |
 | `p5`           | Persona wording and instruction confounds for honesty                  | Extension                                                                            |
 | `p6`           | Scale across the four GPT-2 sizes                                      | Extension                                                                            |
 | `p7`           | Whether a reader that reads well also steers well                      | Extension                                                                            |
-| `p8`           | Base against post-trained Qwen3                                        | Extension                                                                            |
+| `p8`           | Base against post-trained Qwen3                                        | App. B.8, Fig. 26 (base against chat LLaMA-2); the Qwen3 base and post-trained pairs are an extension |
 | `p9a` to `p9d` | Known against unknown questions: labels, reading, reliability, steering | Extension                                                                           |
 | `a1`           | Direction geometry across layers, seeds and concepts                   | Extension                                                                            |
 | `a2`           | Logit lens of the reading directions                                   | Extension                                                                            |
@@ -88,7 +88,7 @@ text, the default follows the reference code and the other variant is selectable
 | Choice                              | Deviation from the paper                                                                                                                                                                                              | Reason                                                                                                                                                                                  | Where                                                    |
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | Base models without a chat template | The paper prompts chat models. GPT-2 and the Qwen3 base models get plain tags (`USER: ...`, `ASSISTANT: ...`, the paper's placeholders).                                                                                | They have no template. The format is itself varied in `p1`, `p5` and `p8`.                                                                                                              | `templates.py`                                           |
-| Trailing space of `ASSISTANT: `     | None. The paper's LLaMA prompts end in the same lone-space token, so it is kept.                                                                                                                                      | `p1` includes a variant with the space stripped.                                                                                                                                        | `templates.py`, `experiments/p1_templates.py`            |
+| Trailing space of `ASSISTANT: `     | None. The paper's LLaMA prompts end in the same lone-space token, so it is kept.                                                                                                                                      | `p1` includes a variant with the space stripped.                                                                                                                                        | `templates.py`, `experiments/variants.py`                |
 | BOS handling                        | The paper does not say. GPT-2 and the Qwen3 base models prepend the document separator. The post-trained Qwen3 models prepend nothing, because the chat template carries its own special tokens.                      | Without a prepended token the first content token becomes the attention sink and its residual norm dwarfs the rest. A probe on the Qwen3 base models showed a prepended separator takes over that role. | `model.py` (`default_bos`, `LoadedModel.encode`), `tests/test_models_slow.py` |
 | Position 0 in token scans           | Not discussed. Position 0 is the BOS, or the sink token when there is no BOS.                                                                                                                                         | The token-scan plots can blank the first column (`mask_first`). The honesty scans of `r5` cover the response span only, so they never contain position 0 and do not use the mask.      | `viz/tokens.py`                                          |
 | Context guard                       | None.                                                                                                                                                                                                                 | `LoadedModel.encode` raises `ValueError` when a text exceeds `max_position_embeddings`; an over-long scenario had crashed a GPU run. `r3` reads short scenarios only by default (`short_only`). | `model.py`, `experiments/r3_morality.py`                 |
@@ -104,7 +104,7 @@ text, the default follows the reference code and the other variant is selectable
 | `pca_diff` preprocessing                    | The paper says the differences are normalized (`unit`). The reference code subtracts the mean (`center`) and does not normalize.                                              | `center` is the default, as in the reference code; `unit` and `none` are options and `p4` compares them.                                                                              | `reading/directions.py`                  |
 | Deterministic PCA                           | The reference code uses scikit-learn's randomized solver without a seed.                                                                                                      | A full SVD is used, so a direction is a function of its inputs.                                                                                                                       | `reading/directions.py`                  |
 | Held-out splits                             | The reference code evaluates honesty and emotions on strings that also occur in training.                                                                                      | Splits are assigned by hashing the source statement or scenario id before any truncation or pairing, so no source appears in two splits.                                              | `datasets/records.py` (`assign_splits`)  |
-| Finders and stimuli the reference omits     | The reference ships only the PCA, cluster-mean and random finders, and no utility or morality code.                                                                           | The logistic, K-means and prompt-difference finders follow the paper text. Utility and morality stimuli are built from the paper's templates and ETHICS.                              | `reading/directions.py`, `datasets/ethics.py` |
+| Finders and stimuli the reference omits     | The reference ships only the PCA, cluster-mean and random finders, and no utility or morality code.                                                                           | The logistic and K-means finders follow the paper text, and `pca_raw` is an added variant. Utility and morality stimuli are built from the paper's templates and ETHICS. The prompt difference is a control contrast of `c4` (`control/contrast.py`), not a reading finder. | `reading/directions.py`, `datasets/ethics.py` |
 
 ### Stimuli and data
 
@@ -136,8 +136,8 @@ text, the default follows the reference code and the other variant is selectable
 - A run is identified by `config_hash()`, the first 12 hex digits of the SHA-256 of its canonical config JSON.
   Every config field is part of the hash, so a change of `batch_size` is a different run (see
   [Run settings](#run-settings-of-the-gpu-runs)). `meta.json` records the code state, device and library versions.
-- The reading experiments train `n_seeds` readers on independent training sets: 10 by default, 15 for `r6`, and 20
-  resamples per size for `p3`.
+- The reading experiments train `n_seeds` readers on independent training sets: 10 by default (5 for `p9b` and `p9c`), 15
+  for `r6`, and 20 resamples per size for `p3`.
 
 ### Series and controls
 
@@ -159,8 +159,8 @@ that resamples whole runs along axis 0, and `wilson_ci` gives intervals for rate
 | `r1` to `r7`, `p1`, `p2`, `p4`, `p5` curves                    | percentile bootstrap                                           | the seeds (independent training sets)                                     |
 | `p3`                                                           | percentile bootstrap                                           | the resamples of each training size                                       |
 | `c1`, `c2` dose-response curves                                | percentile bootstrap                                           | the units of each series (seeds or readers)                               |
-| `m1`                                                           | percentile bootstrap                                           | the seeds                                                                 |
-| `c4`                                                           | paired percentile bootstrap                                    | the held-out test questions                                               |
+| `m1`                                                           | percentile bootstrap; Wilson interval for win rates            | the seeds                                                                 |
+| `c4`                                                           | paired percentile bootstrap; Wilson interval for win rates     | the held-out test questions                                               |
 | `p6`, `p8`                                                     | percentile bootstrap                                           | the seeds; `p8` pairs a base and a post-trained model by seed             |
 | `p7` inversion rate                                            | Wilson interval                                                | the units (template, layer, steering reader) that are readable            |
 | `a1` agreement band                                            | t-interval on jackknife pseudo-values, clipped to [-1, 1]      | the seeds (at least 3)                                                    |
@@ -192,10 +192,11 @@ Questions without a gold answer (fictional subjects) are unknown by construction
 
 ### Guess control
 
-Some relations have answers that a constant guess often hits. `p9/guess.py` computes, per model and per stratum
-(relation), the accuracy of the modal greedy answer. A stratum whose constant-guess accuracy is above 0.10
-(`max_guess_accuracy`) supplies no known items, and an item whose greedy answer is the modal answer of its stratum is
-never known. The summary records the demotions (`guessable_stratum`, `modal_answer`, `excluded_stratum`). A model
+Some relations have answers that a constant guess often hits. `p9/guess.py` computes, per model and per stratum,
+the accuracy of the modal greedy answer. A stratum is `popqa:<relation>` or `award:<relation>`, or the whole dataset
+for `triviaqa` and `nq_open`. A stratum whose constant-guess accuracy is above 0.10
+(`max_guess_accuracy`) supplies no known items, and `popqa:sport` is excluded by default. An item whose greedy
+answer is the modal answer of its stratum is never known. The summary records the demotions (`guessable_stratum`, `modal_answer`, `excluded_stratum`). A model
 enters the known versus unknown contrasts only with at least `min_known` (100) guess-adjusted known items. Otherwise
 `p9b` reads only the unknown-type contrasts and `p9d` does not run.
 
