@@ -1774,12 +1774,16 @@ def test_the_summary_records_the_template_and_the_group_sizes(
     assert summary["n_items"]["obscure_real"] == {"known": 3, "unknown": 3}
 
 
-def test_shift_dose_slopes_follow_the_planted_entropy_dose(
-    tiny_arch: LoadedModel,
+def _planted_shift_run(
+    loaded: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    weight = {"lat0": 2.0, "random0": 0.0, "random1": 0.0}
+    weight: dict[str, float],
+) -> RunDir:
+    """Runs shift mode where each arm adds `coeff * weight[arm]` to entropy.
+
+    The arms are named in the order the run first applies their vector.
+    """
     seen: dict[bytes, str] = {}
 
     def fake_stats(
@@ -1799,7 +1803,21 @@ def test_shift_dose_slopes_follow_the_planted_entropy_dose(
     monkeypatch.setattr(p9d_steering, "next_token_stats", fake_stats)
     config = _config(coeffs=DOSE_GRID)
     run_dir = _run_dir(tmp_path, config)
-    execute(config, run_dir, tiny_arch, _items(), known_contrasts=True)
+    execute(config, run_dir, loaded, _items(), known_contrasts=True)
+    return run_dir
+
+
+def test_shift_dose_slopes_follow_the_planted_entropy_dose(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _planted_shift_run(
+        tiny_arch,
+        tmp_path,
+        monkeypatch,
+        {"lat0": 2.0, "random0": 0.0, "random1": 0.0},
+    )
 
     columns, rows = _dose(run_dir)
 
@@ -1987,13 +2005,12 @@ def _selective_run(
     items below `known_below`, so the unknown slope is -1.5 and the known
     slope is -1.5 for -0.1, -1.0 for -0.3 and 0.0 for -0.5.
     """
-    settings = {**DOSE_OVERRIDES}
 
     def rule(item: LabeledItem, arm: int, coeff: float) -> list[str]:
         edge = known_below if _is_known(item) else -0.1
         return [ABSTAIN] if arm == 0 and coeff < edge else _answer(item)
 
-    run_dir, _ = _canned_run(loaded, out, monkeypatch, rule, **settings)
+    run_dir, _ = _canned_run(loaded, out, monkeypatch, rule, **DOSE_OVERRIDES)
     return run_dir
 
 
@@ -2124,28 +2141,12 @@ def test_shift_mode_writes_the_selectivity_table(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    weight = {"lat0": 2.0, "random0": 0.0, "random1": 0.0}
-    seen: dict[bytes, str] = {}
-
-    def fake_stats(
-        loaded: LoadedModel, prompts: Sequence[str], **kwargs: Any
-    ) -> TokenStats:
-        entropy = 1.0 + 0.1 * np.arange(len(prompts))
-        controller = kwargs["edits"]
-        if controller is not None:
-            vector = next(iter(controller.vectors.values())).numpy()
-            if vector.tobytes() not in seen:
-                seen[vector.tobytes()] = list(weight)[len(seen)]
-            entropy = (
-                entropy + controller.coeff * weight[seen[vector.tobytes()]]
-            )
-        n = len(prompts)
-        return TokenStats(np.zeros(n), entropy, np.full(n, -2.0))
-
-    monkeypatch.setattr(p9d_steering, "next_token_stats", fake_stats)
-    config = _config(coeffs=DOSE_GRID)
-    run_dir = _run_dir(tmp_path, config)
-    execute(config, run_dir, tiny_arch, _items(), known_contrasts=True)
+    run_dir = _planted_shift_run(
+        tiny_arch,
+        tmp_path,
+        monkeypatch,
+        {"lat0": 2.0, "random0": 0.0, "random1": 0.0},
+    )
 
     columns, rows = _selectivity(run_dir)
 
@@ -2217,19 +2218,12 @@ def test_shift_mode_saves_item_slopes_including_empty_sides(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_stats(
-        loaded: LoadedModel, prompts: Sequence[str], **kwargs: Any
-    ) -> TokenStats:
-        n = len(prompts)
-        entropy = 1.0 + 0.1 * np.arange(n)
-        if kwargs["edits"] is not None:
-            entropy = entropy + kwargs["edits"].coeff
-        return TokenStats(np.zeros(n), entropy, np.full(n, -2.0))
-
-    monkeypatch.setattr(p9d_steering, "next_token_stats", fake_stats)
-    config = _config(coeffs=DOSE_GRID)
-    run_dir = _run_dir(tmp_path, config)
-    execute(config, run_dir, tiny_arch, _items(), known_contrasts=True)
+    run_dir = _planted_shift_run(
+        tiny_arch,
+        tmp_path,
+        monkeypatch,
+        {"lat0": 1.0, "random0": 1.0, "random1": 1.0},
+    )
 
     arrays = run_dir.read_arrays("item_slopes")
 
