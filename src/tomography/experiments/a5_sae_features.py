@@ -25,7 +25,6 @@ from tomography.analysis import mean_direction
 from tomography.analysis import sparse_fit
 from tomography.analysis import top_features
 from tomography.analysis import top_overlap
-from tomography.analysis import top_tokens
 from tomography.experiments.a2_logit_lens import lens_params
 from tomography.experiments.aggregate import ReaderSet
 from tomography.experiments.aggregate import common_layers
@@ -235,7 +234,10 @@ def _promoted_tokens(
     logits = lens(columns.astype(np.float32)).reshape(*features.shape, -1)
     return [
         [
-            [decode(int(t)) for t in top_tokens(row, SHOWN_TOKENS)[0]]
+            [
+                decode(int(t))
+                for t in np.argsort(-row, kind="stable")[:SHOWN_TOKENS]
+            ]
             for row in concept
         ]
         for concept in logits
