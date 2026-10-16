@@ -566,10 +566,20 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   reported, and the largest absolute random slope gives the scale.
   The headline cell is the unknown side of the `direction_type` contrast, where the entropy is used in shift
   mode because the answer log-probability needs a gold answer and only `obscure_real` has them on its
-  unknown side. Every other cell is descriptive, with no correction for multiple comparisons; the
-  known-side rows (the false refusal rate in abstention mode) show whether the effect is selective for
-  unknown questions. Unsteered
-  abstention is low (under 20 percent of the unknown calibration questions for the Qwen3 models), so slopes
+  unknown side. Every other cell is descriptive, with no correction for multiple comparisons.
+
+  Selectivity is a second claim, reported separately from "distinguishable". For the steering arm the
+  statistic is the absolute mean slope over the unknown items minus the absolute mean slope over the known
+  items (`gap`). The two sides hold different items, so each bootstrap resample draws the items of each side
+  independently, and the percentile interval is `lo` to `hi`. The effect is `selective` if `lo` is above
+  zero. The result is in `table_selectivity` (one row per type and metric, with empty cells when a side has
+  no finite slope) and as `selective` in the headline. The two flags are separate, and neither is corrected
+  for multiple comparisons, as for the other P9d intervals. Types that share a known pool (`obscure_real`
+  with `fictional_generated`, `unknowable_detail` with `false_premise`) share known-side items, so their gaps
+  are correlated. `item_slopes` stores the slope of every item under every arm
+  (`slope__<type>__<side>__<metric>__<arm>`, with the item order in `uids__<type>__<side>`).
+
+  Unsteered abstention is low (under 20 percent of the unknown calibration questions for the Qwen3 models), so slopes
   are bounded by the floor and the ceiling and are reported as they are.
 
   It writes `table`, `summary` (with the `headline`, the `template` and the group sizes `n_items`),
