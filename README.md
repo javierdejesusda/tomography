@@ -532,12 +532,12 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   test questions do not all carry a relation, which is TriviaQA and NQ-open), `table_incremental`,
   `relations_<dataset>` (PopQA only: the AUROC of every predictor inside each relation, null below
   `min_relation_class` correct or wrong items), `signals_<dataset>` (which also holds the `relation` of each
-  test item for PopQA), `curves`, the risk-coverage files `riskcov_<dataset>_outputs` and
-  `riskcov_<dataset>_controls`, and `summary`. Reporting rule: the wording of a PopQA question alone predicts
-  whether the model answers it correctly (the `template` control ranks items by relation), so for PopQA the
-  within-relation AUROC is the headline, shown next to the within-relation popularity control, and the pooled
-  AUROC is the secondary column; the AUROC of a single relation is reported only with 5 or more items of each
-  outcome.
+  test item for PopQA, a label and not a predictor), `curves`, the risk-coverage files
+  `riskcov_<dataset>_outputs` and `riskcov_<dataset>_controls`, and `summary`. Reporting rule: the wording of
+  a PopQA question alone predicts whether the model answers it correctly (the `template` control ranks items
+  by relation), so for PopQA the within-relation AUROC is the headline, shown next to the within-relation
+  popularity control, and the pooled AUROC is the secondary column; the AUROC of a single relation is
+  reported only with 5 or more items of each outcome.
 - `p9d` ([`p9d_steering.py`](src/tomography/experiments/p9d_steering.py)): does the known versus unknown
   direction control what a model does. The direction of `direction_type` (`obscure_real`) is added to the
   residual stream while the model answers, at a norm calibrated on held-out questions (`coeffs` -0.4 to 0.4
