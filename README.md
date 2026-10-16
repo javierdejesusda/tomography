@@ -691,6 +691,9 @@ results/                        # --out
   others) and start and finish times.
 - **Methodology.** [`docs/methodology.md`](docs/methodology.md) lists the deviations from the paper and the
   statistics behind the reported intervals.
+- **Related work.** [`docs/related-work.md`](docs/related-work.md) places the experiments next to the published
+  work they replicate, contrast with or control for; [`docs/references.bib`](docs/references.bib) holds the
+  checked BibTeX entries.
 - **Offline mode.** Every dataset loader takes `offline=True` and then reads only the cache, raising
   `OfflineCacheMissError` when a file is missing. For model weights set `HF_HUB_OFFLINE=1`.
 
