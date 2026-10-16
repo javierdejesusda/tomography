@@ -15,11 +15,14 @@ from tomography.p9.behavior import CHECK_COLUMNS
 from tomography.p9.behavior import BehaviorRates
 from tomography.p9.behavior import CompletionRecord
 from tomography.p9.behavior import Outcome
+from tomography.p9.behavior import abs_slope_gap_ci
 from tomography.p9.behavior import behavior_rates
 from tomography.p9.behavior import classify
 from tomography.p9.behavior import is_abstention
+from tomography.p9.behavior import item_slopes
 from tomography.p9.behavior import select_coefficient
 from tomography.p9.behavior import shift_ci
+from tomography.p9.behavior import slope_ci
 from tomography.p9.behavior import write_completion_check
 
 
@@ -43,12 +46,12 @@ def _record(
     )
 
 
-def test_the_nine_patterns_are_compiled_in_order() -> None:
-    assert len(ABSTAIN_PATTERNS) == 9
-    assert len(ABSTAIN_REGEXES) == 9
+def test_the_eleven_patterns_are_compiled_in_order() -> None:
+    assert len(ABSTAIN_PATTERNS) == 11
+    assert len(ABSTAIN_REGEXES) == 11
     assert all(isinstance(r, re.Pattern) for r in ABSTAIN_REGEXES)
     assert ABSTAIN_PATTERNS[0] == "i (?:do not|don't|dont) know"
-    assert ABSTAIN_PATTERNS[7] == "unknown"
+    assert ABSTAIN_PATTERNS[7] == r"unknown(?! soldiers?\b)"
 
 
 def test_the_check_columns() -> None:
@@ -91,6 +94,18 @@ def test_the_check_columns() -> None:
         "Unknown.",
         "It cannot be determined.",
         "This cannot be answered.",
+        "Do not know.",
+        "1. Do not know.",
+        "- Don't know",
+        "Answer:\nDo not know",
+        "The author of Figu is not publicly known.",
+        "The producer of North is not publicly disclosed.",
+        'The director of the film "Student" is not widely publicized in'
+        " mainstream sources.",
+        "The answer is not known.",
+        "The producer of In Conflict is not specified in the provided"
+        " information.",
+        "The author is unknown.",
     ],
 )
 def test_phrases_that_abstain(text: str) -> None:
@@ -107,6 +122,15 @@ def test_phrases_that_abstain(text: str) -> None:
         "The unknowns remain.",
         "hi do not know",
         "He is not sure.",
+        "The author is John Smith.",
+        "He was not only a poet but also a painter.",
+        "Known as the Iron Lady.",
+        "He is known as Smith.",
+        "The Tomb of the Unknown Soldier.",
+        "He is not known for his films.",
+        "He is not known to have written it.",
+        "They do not know the answer.",
+        "The film is not available on Netflix.",
     ],
 )
 def test_phrases_that_answer(text: str) -> None:
@@ -381,3 +405,174 @@ def test_the_completion_check_of_no_records_writes_the_header(
     assert write_completion_check(path, []) == 0
     assert _read(path) == []
     assert path.read_text(encoding="utf-8").startswith("uid,kind,coeff")
+
+
+GRID = (-0.4, -0.2, 0.0, 0.2, 0.4)
+
+
+def test_item_slopes_of_a_step_down_and_a_step_up() -> None:
+    values = np.array(
+        [[1.0, 0.0], [1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [0.0, 1.0]]
+    )
+    np.testing.assert_allclose(item_slopes(GRID, values), [-1.5, 1.5])
+
+
+def test_item_slopes_of_a_constant_and_of_a_line() -> None:
+    values = np.array(
+        [[0.7, -0.3], [0.7, 0.1], [0.7, 0.5], [0.7, 0.9], [0.7, 1.3]]
+    )
+    np.testing.assert_allclose(
+        item_slopes(GRID, values), [0.0, 2.0], atol=1e-12
+    )
+
+
+def test_item_slopes_on_the_real_grid_with_one_spike() -> None:
+    grid = (-0.4, -0.2, -0.1, 0.0, 0.1, 0.2, 0.4)
+    values = np.array([1.0, 0, 0, 0, 0, 0, 0]).reshape(7, 1)
+    assert item_slopes(grid, values)[0] == pytest.approx(-20 / 21)
+
+
+def test_item_slopes_on_an_asymmetric_grid() -> None:
+    values = np.array([0.0, 1.0, 2.0]).reshape(3, 1)
+    assert item_slopes((0.0, 1.0, 3.0), values)[0] == pytest.approx(9 / 14)
+
+
+def test_item_slopes_is_nan_only_for_a_column_with_a_non_finite_value() -> None:
+    values = np.array(
+        [[1.0, 0.0], [1.0, np.nan], [0.0, 0.0], [0.0, 1.0], [0.0, 1.0]]
+    )
+    slopes = item_slopes(GRID, values)
+    assert slopes[0] == pytest.approx(-1.5)
+    assert math.isnan(slopes[1])
+
+
+def test_item_slopes_rejects_a_shape_mismatch_and_one_coefficient() -> None:
+    with pytest.raises(ValueError, match="rows"):
+        item_slopes(GRID, np.zeros((4, 2)))
+    with pytest.raises(ValueError, match="distinct"):
+        item_slopes((0.1, 0.1, 0.1), np.zeros((3, 2)))
+
+
+def test_slope_ci_is_the_mean_slope_with_an_item_interval() -> None:
+    mean, lo, hi = slope_ci(np.array([-1.5, -1.5, 0.0]), n_boot=200)
+    assert mean == pytest.approx(-1.0)
+    assert -1.5 <= lo <= -1.0 <= hi <= 0.0
+
+
+def test_slope_ci_of_identical_slopes_has_no_width() -> None:
+    assert slope_ci(np.array([0.5, 0.5, 0.5]), n_boot=50) == (0.5, 0.5, 0.5)
+
+
+def test_slope_ci_is_deterministic_and_seeded() -> None:
+    slopes = np.array([-1.5, 0.0, 1.5, 0.3])
+    assert slope_ci(slopes, n_boot=100, seed=3) == slope_ci(
+        slopes, n_boot=100, seed=3
+    )
+
+
+def test_slope_ci_drops_an_item_without_a_finite_slope() -> None:
+    mean, _, _ = slope_ci(np.array([-1.5, np.nan, -0.5]), n_boot=50)
+    assert mean == pytest.approx(-1.0)
+
+
+def test_slope_ci_against_a_reference_is_paired() -> None:
+    same = np.array([-1.5, 0.0])
+    assert slope_ci(same, same, n_boot=100) == (0.0, 0.0, 0.0)
+    lat = np.array([-1.5, -1.5])
+    assert slope_ci(lat, np.zeros(2), n_boot=100) == (-1.5, -1.5, -1.5)
+
+
+def test_abs_slope_gap_is_the_difference_of_the_absolute_mean_slopes() -> None:
+    lat = np.array([-1.5, -1.5])
+    assert abs_slope_gap_ci(lat, np.array([1.0, 1.0]), n_boot=50) == (
+        0.5,
+        0.5,
+        0.5,
+    )
+    assert abs_slope_gap_ci(lat, np.array([2.0, 2.0]), n_boot=50) == (
+        -0.5,
+        -0.5,
+        -0.5,
+    )
+
+
+def test_abs_slope_gap_resamples_both_arms_on_the_same_items() -> None:
+    same = np.array([-3.0, 0.0, -1.0, 2.0])
+    assert abs_slope_gap_ci(same, same, n_boot=100) == (0.0, 0.0, 0.0)
+
+
+def test_abs_slope_gap_interval_covers_the_estimate() -> None:
+    lat = np.array([-2.0, -1.0, 0.0, -3.0])
+    ref = np.array([0.0, 1.0, 1.0, 0.0])
+    gap, lo, hi = abs_slope_gap_ci(lat, ref, n_boot=200, seed=1)
+    assert gap == pytest.approx(1.5 - 0.5)
+    assert lo <= gap <= hi
+    assert abs_slope_gap_ci(lat, ref, n_boot=200, seed=1) == (gap, lo, hi)
+
+
+def test_abs_slope_gap_drops_an_item_not_finite_in_both_arms() -> None:
+    lat = np.array([-2.0, np.nan, -2.0])
+    ref = np.array([1.0, 5.0, np.nan])
+    assert abs_slope_gap_ci(lat, ref, n_boot=20)[0] == pytest.approx(1.0)
+
+
+def test_abs_slope_gap_rejects_a_shape_mismatch_and_no_finite_item() -> None:
+    with pytest.raises(ValueError, match="shape"):
+        abs_slope_gap_ci(np.zeros(3), np.zeros(4))
+    with pytest.raises(ValueError, match="finite"):
+        abs_slope_gap_ci(np.array([np.nan]), np.array([1.0]))
+
+
+def test_abs_slope_gap_takes_the_absolute_value_of_the_resampled_means() -> (
+    None
+):
+    gap = abs_slope_gap_ci(np.array([-1.0, 1.0]), np.zeros(2), n_boot=500)
+    assert gap == (0.0, 0.0, 1.0)
+
+
+def test_abs_slope_gap_interval_uses_the_alpha_tails() -> None:
+    _, lo, hi = abs_slope_gap_ci(
+        np.array([0.0, 2.0]), np.zeros(2), n_boot=4000, alpha=0.4
+    )
+    assert (lo, hi) == (0.0, 2.0)
+
+
+_IRREGULAR = np.array(
+    [-2.5, 0.5, 1.5, -0.25, 3.0, 0.75, -1.0, 2.0, -3.5, 0.1, 1.1, -0.6]
+)
+
+
+def test_slope_ci_interval_depends_on_the_seed() -> None:
+    first = slope_ci(_IRREGULAR, n_boot=50, seed=1)
+    second = slope_ci(_IRREGULAR, n_boot=50, seed=2)
+    assert first[0] == second[0]
+    assert first[1:] != second[1:]
+
+
+def test_abs_slope_gap_interval_depends_on_the_seed() -> None:
+    reference = np.roll(_IRREGULAR, 5) / 2
+    first = abs_slope_gap_ci(_IRREGULAR, reference, n_boot=50, seed=1)
+    second = abs_slope_gap_ci(_IRREGULAR, reference, n_boot=50, seed=2)
+    assert first[0] == second[0]
+    assert first[1:] != second[1:]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The date is not publicised.",
+        "dont know the answer",
+        "The date is not generally publicly known.",
+        "The titles were not disclosed.",
+    ],
+)
+def test_more_phrases_that_abstain(text: str) -> None:
+    assert is_abstention(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["The Unknown Soldiers marched.", "He is not known as a poet."],
+)
+def test_more_phrases_that_answer(text: str) -> None:
+    assert not is_abstention(text)

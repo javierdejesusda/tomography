@@ -1,7 +1,7 @@
 """What a model does about a question it may not know: abstain or answer.
 
 A completion is an abstention when it says that the model does not know, by
-one of nine phrase patterns, and no judge model is called. Otherwise it is
+one of eleven phrase patterns, and no judge model is called. Otherwise it is
 scored against the gold aliases exactly as the labels are, so "correct" means
 the same here as in the labeling run. The rates, the choice of a steering
 coefficient and the interval of a shift are plain functions of those
@@ -32,11 +32,16 @@ ABSTAIN_PATTERNS: tuple[str, ...] = (
     r"no (?:reliable |public |such )?(?:information|record|data)",
     r"not (?:aware|familiar)",
     r"(?:does not|doesn't|do not|don't) (?:exist|have (?:any )?information)",
-    r"unknown",
+    r"unknown(?! soldiers?\b)",
     r"cannot be (?:determined|known|answered)",
+    r"^\W*(?:\d+\W+)?(?:do not|don't|dont) know",
+    r"(?:is|are|was|were) not"
+    r" (?:(?:publicly|widely|generally|commonly|readily) ){0,2}"
+    r"(?:known(?! (?:for|to|as)\b)|disclosed|publicized|publicised|specified)",
 )
 ABSTAIN_REGEXES: tuple[re.Pattern[str], ...] = tuple(
-    re.compile(rf"\b(?:{pattern})\b") for pattern in ABSTAIN_PATTERNS
+    re.compile(rf"(?<!\w)(?:{pattern})(?!\w)", re.MULTILINE)
+    for pattern in ABSTAIN_PATTERNS
 )
 CHECK_COLUMNS: tuple[str, ...] = (
     "uid",
@@ -241,6 +246,69 @@ def shift_ci(
     return float(shift.mean()), float(lo), float(hi)
 
 
+def item_slopes(
+    coeffs: Sequence[float], values: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Fits a least-squares line through the coefficients for every item.
+
+    Args:
+        coeffs: The K steering coefficients, one per row of `values`.
+        values: Array of shape (K, n): the outcome of each of n items at each
+            coefficient.
+
+    Returns:
+        The slope of every item, shape (n,): the change of the outcome per
+        unit of coefficient. NaN for an item with a non-finite value.
+
+    Raises:
+        ValueError: If `values` does not have one row per coefficient, or
+            `coeffs` has fewer than two distinct values.
+    """
+    grid = np.asarray(coeffs, dtype=np.float64)
+    table = np.asarray(values, dtype=np.float64)
+    if table.ndim != 2 or table.shape[0] != grid.size:
+        raise ValueError(
+            f"values must have one of its {grid.size} rows per coefficient, "
+            f"got shape {table.shape}"
+        )
+    centered = grid - grid.mean()
+    spread = float(centered @ centered)
+    if np.unique(grid).size < 2 or spread == 0.0:
+        raise ValueError("coeffs need at least two distinct values")
+    return (centered @ (table - table.mean(axis=0))) / spread
+
+
+def slope_ci(
+    slopes: NDArray[np.float64],
+    reference: NDArray[np.float64] | None = None,
+    *,
+    n_boot: int = 1000,
+    alpha: float = 0.05,
+    seed: int = 0,
+) -> tuple[float, float, float]:
+    """Computes the mean item slope, or its paired difference, and its interval.
+
+    Args:
+        slopes: The slope of each item.
+        reference: The slope of the same items under another arm; None
+            compares against zero.
+        n_boot: Bootstrap resamples of the items.
+        alpha: One minus the coverage.
+        seed: Seed of the resampling.
+
+    Returns:
+        The mean of `slopes - reference` over the items where both are
+        finite, and the lower and upper bounds of its percentile interval.
+
+    Raises:
+        ValueError: If the arrays differ in shape, no item is finite, or
+            `alpha` or `n_boot` is invalid.
+    """
+    own = np.asarray(slopes, dtype=np.float64)
+    other = np.zeros_like(own) if reference is None else reference
+    return shift_ci(other, own, n_boot=n_boot, alpha=alpha, seed=seed)
+
+
 @dataclass(frozen=True)
 class CompletionRecord:
     """One generated completion, for the manual check.
@@ -316,3 +384,56 @@ def write_completion_check(
                 ]
             )
     return len(chosen)
+
+
+def abs_slope_gap_ci(
+    slopes: NDArray[np.float64],
+    reference: NDArray[np.float64],
+    *,
+    n_boot: int = 1000,
+    alpha: float = 0.05,
+    seed: int = 0,
+) -> tuple[float, float, float]:
+    """Computes how much more one arm moves the outcome than another.
+
+    The statistic is `|mean(slopes)| - |mean(reference)|`, so the sign of the
+    movement does not matter. Each bootstrap resample draws the same items
+    for both arms.
+
+    Args:
+        slopes: The slope of each item under the arm of interest.
+        reference: The slope of the same items under the other arm.
+        n_boot: Bootstrap resamples of the items.
+        alpha: One minus the coverage.
+        seed: Seed of the resampling.
+
+    Returns:
+        The statistic over the items where both slopes are finite, and the
+        lower and upper bounds of its percentile interval.
+
+    Raises:
+        ValueError: If the arrays differ in shape, no item is finite, or
+            `alpha` or `n_boot` is invalid.
+    """
+    own = np.asarray(slopes, dtype=np.float64)
+    other = np.asarray(reference, dtype=np.float64)
+    if own.shape != other.shape:
+        raise ValueError(
+            f"slopes and reference must have one shape, got {own.shape} "
+            f"and {other.shape}"
+        )
+    keep = np.isfinite(own) & np.isfinite(other)
+    if not keep.any():
+        raise ValueError("no item with a finite slope in both arms")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha must lie in (0, 1), got {alpha}")
+    if n_boot < 1:
+        raise ValueError("n_boot must be at least 1")
+    own, other = own[keep], other[keep]
+    draws = np.random.default_rng(seed).integers(
+        0, own.size, size=(n_boot, own.size)
+    )
+    gaps = np.abs(own[draws].mean(axis=1)) - np.abs(other[draws].mean(axis=1))
+    lo, hi = np.quantile(gaps, [alpha / 2, 1 - alpha / 2])
+    gap = abs(own.mean()) - abs(other.mean())
+    return float(gap), float(lo), float(hi)
