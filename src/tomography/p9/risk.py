@@ -189,9 +189,13 @@ def grouped_auroc_ci(
     """Grouped AUROC with a percentile bootstrap interval over items.
 
     Groups that hold a single class are dropped first, as they never
-    contribute. A resample draws with replacement inside each (group, label)
-    cell and keeps the cell size, so the pairs of every group and the weights
-    of `grouped_auroc` stay fixed.
+    contribute. A resample draws items with replacement inside each group at
+    the size of the group, so a draw never mixes groups, group sizes stay
+    fixed and the class counts of a group, hence its pairs and its weight in
+    `grouped_auroc`, vary as they would under a new test split. A group that
+    holds a single class in a draw contributes nothing to it, and a draw in
+    which no group holds both classes is skipped. With one group the interval
+    equals `auroc_ci` for the same seed, `n_boot` and `alpha`.
 
     Args:
         scores: Scores, shape (n,).
@@ -206,29 +210,34 @@ def grouped_auroc_ci(
 
     Raises:
         ValueError: If `n_boot` or `alpha` is out of range, the lengths
-            differ, a score is not finite, a label is neither 0 nor 1, or no
-            group holds both classes.
+            differ, a score is not finite, a label is neither 0 nor 1, no
+            group holds both classes, or no resample holds both classes in
+            any group.
     """
     if n_boot < 1:
         raise ValueError(f"n_boot must be at least 1, got {n_boot}")
     if not 0.0 < alpha < 1.0:
         raise ValueError(f"alpha must be in (0, 1), got {alpha}")
-    cells = _paired_cells(scores, labels, groups)
+    items = _paired_items(scores, labels, groups)
     rng = np.random.default_rng(seed)
-    reps = [
-        _weighted_auroc(
-            [
-                (
-                    positive[rng.integers(positive.size, size=positive.size)],
-                    negative[rng.integers(negative.size, size=negative.size)],
-                )
-                for positive, negative in cells
-            ]
-        )
-        for _ in range(n_boot)
-    ]
+    reps = []
+    for _ in range(n_boot):
+        draws = [
+            _split(values[idx], marks[idx])
+            for values, marks in items
+            for idx in (rng.integers(values.size, size=values.size),)
+        ]
+        usable = [cell for cell in draws if cell[0].size and cell[1].size]
+        if usable:
+            reps.append(_weighted_auroc(usable))
+    if not reps:
+        raise ValueError(NO_RESAMPLE)
     lo, hi = np.percentile(reps, [50 * alpha, 100 - 50 * alpha])
-    return _weighted_auroc(cells), float(lo), float(hi)
+    return (
+        _weighted_auroc([_split(v, m) for v, m in items]),
+        float(lo),
+        float(hi),
+    )
 
 
 def per_group_auroc(
@@ -583,20 +592,48 @@ def _checked_items(
     return values, marks.astype(np.int64), names
 
 
+def _group_items(
+    scores: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    groups: NDArray[np.str_] | Sequence[str],
+) -> list[tuple[str, NDArray[np.float64], NDArray[np.int64]]]:
+    values, marks, names = _checked_items(scores, labels, groups)
+    return [
+        (str(name), values[names == name], marks[names == name])
+        for name in np.unique(names)
+    ]
+
+
+def _split(
+    values: NDArray[np.float64], marks: NDArray[np.int64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    return values[marks == 1], values[marks == 0]
+
+
 def _cells(
     scores: NDArray[np.float64],
     labels: NDArray[np.int64],
     groups: NDArray[np.str_] | Sequence[str],
 ) -> list[tuple[str, NDArray[np.float64], NDArray[np.float64]]]:
-    values, marks, names = _checked_items(scores, labels, groups)
     return [
-        (
-            str(name),
-            values[(names == name) & (marks == 1)],
-            values[(names == name) & (marks == 0)],
-        )
-        for name in np.unique(names)
+        (name, *_split(values, marks))
+        for name, values, marks in _group_items(scores, labels, groups)
     ]
+
+
+def _paired_items(
+    scores: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    groups: NDArray[np.str_] | Sequence[str],
+) -> list[tuple[NDArray[np.float64], NDArray[np.int64]]]:
+    paired = [
+        (values, marks)
+        for _, values, marks in _group_items(scores, labels, groups)
+        if 0 < marks.sum() < marks.size
+    ]
+    if not paired:
+        raise ValueError(NO_PAIRED_GROUP)
+    return paired
 
 
 def _paired_cells(
@@ -604,14 +641,10 @@ def _paired_cells(
     labels: NDArray[np.int64],
     groups: NDArray[np.str_] | Sequence[str],
 ) -> list[tuple[NDArray[np.float64], NDArray[np.float64]]]:
-    paired = [
-        (positive, negative)
-        for _, positive, negative in _cells(scores, labels, groups)
-        if positive.size and negative.size
+    return [
+        _split(values, marks)
+        for values, marks in _paired_items(scores, labels, groups)
     ]
-    if not paired:
-        raise ValueError(NO_PAIRED_GROUP)
-    return paired
 
 
 def _cell_auroc(

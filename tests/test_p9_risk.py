@@ -807,58 +807,60 @@ def test_grouped_auroc_ci_bounds_are_the_percentiles_of_its_resamples(
 def test_grouped_auroc_ci_reads_the_median_when_alpha_is_wide(
     alpha: float,
 ) -> None:
-    scores = np.array([0.5, 0.2, 0.8])
-    labels = np.array([1, 0, 0], dtype=np.int64)
-    groups = np.array(["a", "a", "a"])
+    scores = np.array([0.5, 0.2, 0.8, 0.1, 0.9, 0.4])
+    labels = np.array([1, 0, 0, 1, 0, 1], dtype=np.int64)
+    groups = np.array(["a"] * 6)
 
     interval = grouped_auroc_ci(
         scores, labels, groups, n_boot=2000, seed=0, alpha=alpha
     )
 
-    assert interval == (0.5, 0.5, 0.5)
+    assert interval == auroc_ci(
+        scores, labels, n_boot=2000, seed=0, alpha=alpha
+    )
 
 
-def test_grouped_auroc_ci_resamples_inside_each_cell_at_its_size(
+def test_grouped_auroc_ci_resamples_inside_each_group_at_its_size(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     scores, labels, groups = _three_groups()
-    sizes = [
-        (
-            int((labels[groups == g] == 1).sum()),
-            int((labels[groups == g] == 0).sum()),
-        )
-        for g in ("a", "b", "c")
-    ]
-    seen: list[tuple[int, int]] = []
+    offsets = {"a": 0, "b": 1, "c": 2}
+    scores = scores + 100.0 * np.array([offsets[g] for g in groups])
+    sizes = {0: 40, 1: 30, 2: 20}
+    seen: list[tuple[int, int, int]] = []
 
     def spy(values: Any, marks: Any) -> Any:
-        seen.append((int(marks.sum()), int(marks.size - marks.sum())))
+        block = {round(v / 100.0) for v in values}
+        assert len(block) == 1
+        seen.append((block.pop(), int(marks.size), int(marks.sum())))
         return auroc(values, marks)
 
     monkeypatch.setattr(risk_module, "auroc", spy)
 
     grouped_auroc_ci(scores, labels, groups, n_boot=25, seed=0)
 
-    assert len(seen) == 3 * (1 + 25)
-    assert seen == sizes * 26
+    assert {(block, size) for block, size, _ in seen} == set(sizes.items())
+    for block in sizes:
+        positives = {pos for b, _, pos in seen if b == block}
+        assert len(positives) > 1
 
-
-def test_grouped_auroc_ci_collapses_when_every_cell_holds_one_item() -> None:
+    None
+):
     scores = np.array([0.9, 0.1, 0.4, 0.6, 0.3, 0.2])
     labels = np.array([1, 0, 1, 0, 1, 0], dtype=np.int64)
     groups = np.array(["a", "a", "b", "b", "c", "c"])
 
-    point, lo, hi = grouped_auroc_ci(scores, labels, groups, n_boot=50, seed=0)
+    point, lo, hi = grouped_auroc_ci(scores, labels, groups, n_boot=200, seed=0)
 
     assert point == pytest.approx(2 / 3)
-    assert lo == hi == point
+    assert lo < point < hi
 
 
 @pytest.mark.parametrize(
     ("scores", "labels"),
     [([0.5, 0.2, 0.8], [1, 0, 0]), ([0.2, 0.8, 0.5], [1, 1, 0])],
 )
-def test_grouped_auroc_ci_resamples_both_classes_of_a_cell(
+def test_grouped_auroc_ci_lets_the_class_counts_of_a_group_change(
     scores: list[float], labels: list[int]
 ) -> None:
     groups = np.array(["a", "a", "a"])
@@ -871,7 +873,124 @@ def test_grouped_auroc_ci_resamples_both_classes_of_a_cell(
         seed=0,
     )
 
-    assert interval == (0.5, 0.0, 1.0)
+    assert interval == auroc_ci(
+        np.array(scores), np.array(labels, dtype=np.int64), n_boot=400, seed=0
+    )
+    assert interval[1] < 0.5 < interval[2]
+
+
+@pytest.mark.parametrize("seed", [0, 1, 7, 42])
+@pytest.mark.parametrize("size", [5, 40])
+def test_grouped_auroc_ci_of_one_group_is_auroc_ci(
+    seed: int, size: int
+) -> None:
+    rng = np.random.default_rng(100 + seed)
+    labels = np.zeros(size, dtype=np.int64)
+    labels[: max(2, size // 4)] = 1
+    scores = 0.7 * labels + rng.standard_normal(size)
+    groups = np.array(["only"] * size)
+
+    for alpha in (0.05, 0.3):
+        got = grouped_auroc_ci(
+            scores, labels, groups, n_boot=300, seed=seed, alpha=alpha
+        )
+
+        assert got == auroc_ci(
+            scores, labels, n_boot=300, seed=seed, alpha=alpha
+        )
+
+
+def test_grouped_auroc_ci_raises_when_no_resample_holds_both_classes() -> None:
+    seed = next(
+        s
+        for s in range(100)
+        if np.unique(np.random.default_rng(s).integers(2, size=2)).size == 1
+    )
+
+    with pytest.raises(ValueError, match="no bootstrap resample"):
+        grouped_auroc_ci(
+            np.array([0.2, 0.8]),
+            np.array([1, 0], dtype=np.int64),
+            np.array(["a", "a"]),
+            n_boot=1,
+            seed=seed,
+        )
+
+
+def _reference_grouped_interval(
+    scores: list[float],
+    labels: list[int],
+    groups: list[str],
+    *,
+    n_boot: int,
+    seed: int,
+    alpha: float,
+) -> tuple[float, float, float]:
+    def weighted(parts: list[tuple[list[float], list[int]]]) -> float | None:
+        num = den = 0.0
+        for values, marks in parts:
+            pos = [v for v, m in zip(values, marks, strict=True) if m == 1]
+            neg = [v for v, m in zip(values, marks, strict=True) if m == 0]
+            if not pos or not neg:
+                continue
+            wins = sum(
+                1.0 if p > n else 0.5 if p == n else 0.0
+                for p in pos
+                for n in neg
+            )
+            num += wins
+            den += len(pos) * len(neg)
+        return num / den if den else None
+
+    kept = []
+    for name in sorted(set(groups)):
+        rows = [i for i, g in enumerate(groups) if g == name]
+        marks = [labels[i] for i in rows]
+        if 0 < sum(marks) < len(marks):
+            kept.append(([scores[i] for i in rows], marks))
+    rng = np.random.default_rng(seed)
+    reps = []
+    for _ in range(n_boot):
+        parts = []
+        for values, marks in kept:
+            idx = rng.integers(len(values), size=len(values))
+            parts.append(([values[i] for i in idx], [marks[i] for i in idx]))
+        rep = weighted(parts)
+        if rep is not None:
+            reps.append(rep)
+    lo, hi = np.percentile(reps, [50 * alpha, 100 - 50 * alpha])
+    point = weighted(kept)
+    assert point is not None
+    return point, float(lo), float(hi)
+
+
+@pytest.mark.parametrize("seed", [0, 3])
+def test_grouped_auroc_ci_matches_an_independent_two_group_reference(
+    seed: int,
+) -> None:
+    rng = np.random.default_rng(11)
+    groups = ["b"] * 14 + ["a"] * 9 + ["z"] * 2
+    labels = [int(x) for x in rng.random(25) < 0.45]
+    labels[-2:] = [0, 0]
+    scores = [
+        round(float(x), 1) for x in 0.5 * np.array(labels) + rng.random(25)
+    ]
+
+    got = grouped_auroc_ci(
+        np.array(scores),
+        np.array(labels, dtype=np.int64),
+        np.array(groups),
+        n_boot=500,
+        seed=seed,
+        alpha=0.1,
+    )
+
+    assert got == pytest.approx(
+        _reference_grouped_interval(
+            scores, labels, groups, n_boot=500, seed=seed, alpha=0.1
+        ),
+        abs=1e-12,
+    )
 
 
 def test_grouped_auroc_ci_drops_a_group_with_a_single_class() -> None:
