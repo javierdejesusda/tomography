@@ -29,6 +29,8 @@ from tomography.experiments.r6_truthfulqa import HEURISTIC_LEVELS
 from tomography.experiments.r6_truthfulqa import LAYER_RULES
 from tomography.experiments.r6_truthfulqa import SOURCES
 from tomography.experiments.r6_truthfulqa import Config
+from tomography.experiments.r6_truthfulqa import _baseline
+from tomography.experiments.r6_truthfulqa import _text_baseline_scores
 from tomography.experiments.r6_truthfulqa import best_layer_accuracy
 from tomography.experiments.r6_truthfulqa import execute
 from tomography.experiments.r6_truthfulqa import heuristic_scores
@@ -44,6 +46,8 @@ from tomography.judges import sequence_logprob
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.p9.risk import TEXT_ANALYZERS
+from tomography.p9.risk import TextAnalyzer
 from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import wilson_ci
 from tomography.reading.reader import RepReader
@@ -536,6 +540,12 @@ def test_execute_writes_the_table_curves_and_summary(
     for entry in summary["text_baselines"].values():
         assert set(entry) == {"mc1", "lo", "hi"}
         assert 0.0 <= entry["lo"] <= entry["mc1"] <= entry["hi"] <= 1.0
+    for row, name in zip(rows[2:4], summary["text_baselines"], strict=True):
+        assert row[:3] == [name, None, None]
+        assert row[6] is None
+        assert row[3:6] == pytest.approx(
+            [summary["text_baselines"][name][k] for k in ("mc1", "lo", "hi")]
+        )
     assert set(summary["lat"]) == {"truthfulqa", "arc", "honesty"}
     for entry in summary["lat"].values():
         assert set(entry) == {"validation-layer", "best-layer"}
@@ -891,60 +901,27 @@ def _cue_questions(train_cue: bool, test_cue: bool) -> list[ChoiceExample]:
     return items
 
 
-def _text_baselines(
-    questions: list[ChoiceExample],
-    loaded: LoadedModel,
-    out_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> dict[str, Any]:
-    monkeypatch.setattr(r6_truthfulqa, "HEURISTIC_TEMPLATE", SHORT_TEMPLATE)
-    config = _config(sources=("truthfulqa",))
-    run_dir = RunDir.create(config, out_root=out_root)
-    execute(config, run_dir, loaded, questions, _arc(), _facts())
-    return _read(run_dir, "summary")["text_baselines"]
-
-
-def test_the_text_baselines_pick_up_a_planted_surface_cue(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("analyzer", TEXT_ANALYZERS, ids=TEXT_ANALYZERS)
+@pytest.mark.parametrize(
+    ("train_cue", "test_cue", "expected_perfect"),
+    [(True, True, True), (False, False, False), (False, True, False)],
+    ids=["cue_in_both", "no_cue", "cue_in_test_only"],
+)
+def test_the_text_baselines_learn_a_cue_only_from_the_train_split(
+    analyzer: TextAnalyzer,
+    train_cue: bool,
+    test_cue: bool,
+    expected_perfect: bool,
 ) -> None:
-    baselines = _text_baselines(
-        _cue_questions(True, True), tiny_arch, tmp_path, monkeypatch
-    )
-    assert baselines["text_word"]["mc1"] == 1.0
-    assert baselines["text_char"]["mc1"] == 1.0
+    questions = _cue_questions(train_cue, test_cue)
+    train = [q for q in questions if q.split == "train"]
+    test = [q for q in questions if q.split == "test"]
 
+    mc1 = _baseline(_text_baseline_scores(train, test, analyzer), test, 0)[
+        "mc1"
+    ]
 
-def test_the_text_baselines_stay_below_one_without_a_cue(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    baselines = _text_baselines(
-        _cue_questions(False, False), tiny_arch, tmp_path, monkeypatch
-    )
-    assert baselines["text_word"]["mc1"] < 1.0
-    assert baselines["text_char"]["mc1"] < 1.0
-
-
-def test_the_text_baselines_fit_on_the_train_split_only(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    baselines = _text_baselines(
-        _cue_questions(False, True), tiny_arch, tmp_path, monkeypatch
-    )
-    assert baselines["text_word"]["mc1"] < 1.0
-
-
-def test_the_text_baselines_match_the_table_rows(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    run_dir = _run_execute(_config(), tiny_arch, tmp_path, monkeypatch)
-    rows = _read(run_dir, "table")["rows"]
-    summary = _read(run_dir, "summary")["text_baselines"]
-    for row, name in zip(rows[2:4], ("text_word", "text_char"), strict=True):
-        assert row[:3] == [name, None, None]
-        assert row[6] is None
-        assert row[3:6] == pytest.approx(
-            [summary[name]["mc1"], summary[name]["lo"], summary[name]["hi"]]
-        )
+    assert (mc1 == 1.0) is expected_perfect
 
 
 @pytest.mark.parametrize(
