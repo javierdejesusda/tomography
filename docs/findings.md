@@ -364,9 +364,9 @@ Perplexity of neutral text:
 - **Saturation and `gpt2-xl`.** On the three smaller sizes the score at +0.2 and +0.3 stays at or above 0.87 for every
   reader. On `gpt2-xl` it does not: at +0.3 the readers score between 0.60 and 0.99, and the mean falls from 0.85 at
   +0.2 to 0.74 at +0.3. High scores at +0.3 come with degenerate text: distinct-1 (distinct unigrams over all unigrams)
-  is 0.043, 0.047, 0.099 and 0.074 at +0.3 against 0.269, 0.285, 0.265 and 0.262 without steering. C1 has no control
-  with a random direction of the same norm, so the table shows the effect of the sentiment vector at each size but not
-  how it compares with an arbitrary edit of that size.
+  is 0.043, 0.047, 0.099 and 0.074 at +0.3 (mean over the three readers) against 0.269, 0.285, 0.265 and 0.262 without
+  steering. C1 has no control with a random direction of the same norm, so the table shows the effect of the sentiment
+  vector at each size but not how it compares with an arbitrary edit of that size.
 
 ## Run identity
 
