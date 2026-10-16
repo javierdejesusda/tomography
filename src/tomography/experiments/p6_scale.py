@@ -25,9 +25,10 @@ from transformers import PretrainedConfig
 from tomography.experiments.aggregate import out_root_of
 from tomography.experiments.aggregate import read_curves
 from tomography.experiments.aggregate import read_table
-from tomography.experiments.aggregate import reading_point
 from tomography.experiments.aggregate import relative_depth
 from tomography.experiments.aggregate import resolve_runs
+from tomography.experiments.aggregate import source_reading_point
+from tomography.experiments.aggregate import source_stem
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
@@ -130,23 +131,26 @@ def copy_reader_curves(
 
     The copy is written as `curves_<source>_<model>` with one series named
     after the model and a fresh band, so the figures read only this run's own
-    files.
+    files. R5 copies its transfer curves, as R5 reports its transfer test:
+    its in-template test is not a held-out measure.
 
     Args:
         run_dir: The run to write into.
         source: The experiment id of the source run, such as "r1".
         model: The checkpoint key of the source run.
-        run: The finished source run holding `curves`.
+        run: The finished source run holding `curves`, or `curves_transfer`
+            for R5.
         n_boot: Bootstrap resamples of the band.
         seed: Seed of the resampling.
 
     Raises:
         ValueError: If the source curves have no `reader` series.
     """
-    curves = read_curves(run)
+    stem = source_stem(source)
+    curves = read_curves(run, stem)
     if "reader" not in curves.series:
         raise ValueError(
-            f"the curves of {run.path} have no reader series, got "
+            f"the {stem} of {run.path} have no reader series, got "
             f"{curves.series}"
         )
     per_seed = curves.per_seed[curves.series.index("reader")]
@@ -275,7 +279,10 @@ def execute(
     Writes `curves_<source>_<model>` for every source and model and `table`
     with one row per source and model: the best layer, chosen on the
     validation curves when the run has them, and the mean accuracy of the
-    seeds there with its percentile bootstrap interval. With a steering
+    seeds there with its percentile bootstrap interval. R5 reports its
+    transfer test at the layer chosen on the transfer validation split, as R5
+    itself does, because its in-template test is not a held-out measure.
+    With a steering
     source it also writes `table_steering` with the mean dose slope of every
     model and the range over its readers, and `summary` holds the least-squares
     slope of the best accuracy on log10 of the parameter count of every
@@ -310,7 +317,7 @@ def execute(
                 n_boot=config.n_boot,
                 seed=config.seed,
             )
-            point = reading_point(run)
+            point = source_reading_point(run, source)
             lo, hi = bootstrap_ci(
                 point.values,
                 n_boot=config.n_boot,

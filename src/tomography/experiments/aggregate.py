@@ -70,6 +70,10 @@ class Curves:
     chance: float | None
 
 
+TRANSFER_SOURCE = "r5"
+TRANSFER_STEM = "curves_transfer"
+
+
 @dataclass(frozen=True, eq=False)
 class ReadingPoint:
     """One reading run at its selected layer.
@@ -483,6 +487,59 @@ def reading_point(
         selected_on = select
     layer, values = best_point(reported, series, chooser)
     return ReadingPoint(layer, reported.n_layers, values, selected_on)
+
+
+def source_stem(source: str) -> str:
+    """Names the curves a source experiment reports.
+
+    Args:
+        source: The experiment id of a reading run, such as "r1".
+
+    Returns:
+        "curves_transfer" for R5, whose `curves` are its in-template test and
+        so not a held-out measure, and "curves" for every other source.
+    """
+    return TRANSFER_STEM if source == TRANSFER_SOURCE else "curves"
+
+
+def source_reading_point(run: RunDir, source: str) -> ReadingPoint:
+    """Applies the reading rule of a source experiment to its run.
+
+    Every source but R5 follows `reading_point`. R5 reports its transfer test,
+    as its own summary does, at the layer its summary names, which R5 chose on
+    the transfer validation split.
+
+    Args:
+        run: A finished reading run of the experiment `source`.
+        source: The experiment id of the run, such as "r1".
+
+    Returns:
+        The selected layer, the depth of the model, the per-seed values of the
+        reported curves there and what the layer was chosen on:
+        "transfer_val" for R5.
+
+    Raises:
+        ValueError: As `reading_point`, or if the R5 summary names a layer the
+            transfer curves do not cover, or the curves have no `n_layers`.
+    """
+    if source != TRANSFER_SOURCE:
+        return reading_point(run)
+    reported = read_curves(run, TRANSFER_STEM)
+    if reported.n_layers is None:
+        raise ValueError(
+            f"the {TRANSFER_STEM} curves of {run.path} have no n_layers"
+        )
+    summary = cast(dict[str, Any], run.read_json("summary"))
+    layer = int(summary["best_layer"])
+    layers = [int(x) for x in reported.x]
+    if layer not in layers:
+        raise ValueError(
+            f"the summary of {run.path} names layer {layer}, not in {layers}"
+        )
+    values = reported.per_seed[
+        reported.series.index("reader"), :, layers.index(layer)
+    ]
+    return ReadingPoint(layer, reported.n_layers, values, "transfer_val")
 
 
 def relative_depth(layers: Sequence[int], n_layers: int) -> NDArray[np.float64]:

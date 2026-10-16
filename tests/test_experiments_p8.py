@@ -386,19 +386,64 @@ def _peak(source: str, model: str) -> float:
     return base + SHIFT.get(model, {}).get(source, 0.0)
 
 
+def _r5_run(
+    out_root: Path,
+    model: str,
+    *,
+    depth: int,
+    layer: int,
+    peak: float,
+    offsets: NDArray[np.float64] = OFFSETS,
+) -> RunDir:
+    """A finished R5-like run: a perfect in-template test and a transfer one.
+
+    The transfer test peaks at `layer`, the one the summary names, and is
+    higher still at the last layer; the in-template curves are perfect at
+    the last layer.
+    """
+    run_dir = _new_run(out_root, "r5", model)
+    layers = list(range(1, depth + 1))
+    transfer = _peaked(depth, layer, peak)
+    transfer[depth - 1] = peak + 0.1
+    for stem, values in (
+        ("curves", _peaked(depth, depth, 1.0)),
+        ("curves_transfer", transfer),
+    ):
+        write_curves(
+            run_dir,
+            _per_seed(values, offsets),
+            layers,
+            series=SERIES,
+            stem=stem,
+            chance=0.5,
+            n_layers=depth,
+        )
+    run_dir.write_json("summary", {"best_layer": layer})
+    run_dir.finalize()
+    return run_dir
+
+
 def _reading_runs(out_root: Path) -> dict[tuple[str, str], RunDir]:
     """Finished R-like runs of three sources on the five models.
 
     R1-like runs have no validation curves, R2-like runs have them on the base
-    models only and R5-like runs have them on every model.
+    models only and R5-like runs carry the in-template and the transfer test.
     """
     runs: dict[tuple[str, str], RunDir] = {}
     for model in MODELS_ORDER:
         tuned = model in PAIR_OF
         offsets = OFFSETS + SEED_DELTA if tuned else OFFSETS
-        for source in (*CONCEPTS, *FUNCTIONS):
+        runs[("r5", model)] = _r5_run(
+            out_root,
+            model,
+            depth=DEPTH[model],
+            layer=LAYER[model],
+            peak=_peak("r5", model),
+            offsets=offsets,
+        )
+        for source in CONCEPTS:
             curve = _peaked(DEPTH[model], LAYER[model], _peak(source, model))
-            has_val = source == "r5" or (source == "r2" and not tuned)
+            has_val = source == "r2" and not tuned
             val = _peaked(DEPTH[model], LAYER[model], 0.9) if has_val else None
             runs[(source, model)] = _reading_run(
                 out_root, source, model, curve, val=val, offsets=offsets
@@ -456,6 +501,18 @@ def test_execute_copies_the_reader_curves_of_every_source_and_model(
             assert copied.n_layers == DEPTH[model]
 
 
+def test_r5_copies_the_transfer_curve_not_the_in_template_one(
+    tmp_path: Path,
+) -> None:
+    run_dir = _execute(tmp_path)
+
+    for model in MODELS_ORDER:
+        copied = read_curves(run_dir, f"curves_r5_{model}")
+        assert copied.mean[0, DEPTH[model] - 1] == pytest.approx(
+            _peak("r5", model) + 0.1, abs=0.03
+        )
+
+
 def test_the_table_has_one_row_per_pair_and_source(tmp_path: Path) -> None:
     run_dir = _execute(tmp_path)
 
@@ -509,7 +566,7 @@ def test_selected_on_is_the_shared_curves_or_both_joined(
     assert chosen == {
         "r1": "curves",
         "r2": "curves_val/curves",
-        "r5": "curves_val",
+        "r5": "transfer_val",
     }
 
 
@@ -1372,8 +1429,11 @@ def _many_pairs(
     runs: dict[tuple[str, str], RunDir] = {}
     for base, tuned in pairs:
         for model, peak in ((base, 0.6), (tuned, 0.7)):
-            for source in (*CONCEPTS, *FUNCTIONS):
+            for source in CONCEPTS:
                 runs[(source, model)] = _reading_run(
                     out_root, source, model, _peaked(3, 2, peak)
                 )
+            runs[("r5", model)] = _r5_run(
+                out_root, model, depth=3, layer=2, peak=peak
+            )
     return runs

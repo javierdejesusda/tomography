@@ -48,6 +48,8 @@ R2_VAL = {"s3": (1, 0.55), "s6": (2, 0.65), "s12": (4, 0.75)}
 SLOPE = {"s3": 0.5, "s6": 1.5, "s12": 2.5}
 READING_LAYER = {"s3": 2, "s6": 3, "s12": 8}
 STEER_LAYER = {"s3": 3, "s6": 4, "s12": 6}
+R5_PICK = {"s3": 2, "s6": 3, "s12": 8}
+R5_TRANSFER = {"s3": 0.58, "s6": 0.66, "s12": 0.74}
 REGISTERED = (
     *GPT2_SIZES,
     "qwen3-0.6b-base",
@@ -175,6 +177,36 @@ def _world(
                 steer_layer=STEER_LAYER[model],
             )
     return runs
+
+
+def _r5_run(out_root: Path, model: str) -> RunDir:
+    """A finished R5-like run: a perfect in-template test and a transfer one.
+
+    The in-template curves are perfect at the last layer. The transfer test
+    peaks at the last layer too, but the summary names an earlier layer, the
+    one the transfer validation split chose.
+    """
+    run_dir = _new_run(out_root, "r5", model)
+    depth, pick = DEPTH[model], R5_PICK[model]
+    layers = list(range(1, depth + 1))
+    transfer = _peaked(depth, depth, R5_TRANSFER[model] + 0.1)
+    transfer[pick - 1] = R5_TRANSFER[model]
+    for stem, values in (
+        ("curves", _peaked(depth, depth, 1.0)),
+        ("curves_transfer", transfer),
+    ):
+        write_curves(
+            run_dir,
+            _per_seed(values),
+            layers,
+            series=SERIES,
+            stem=stem,
+            chance=0.5,
+            n_layers=depth,
+        )
+    run_dir.write_json("summary", {"best_layer": pick})
+    run_dir.finalize()
+    return run_dir
 
 
 def _config(**overrides: Any) -> Config:
@@ -423,6 +455,44 @@ def test_the_layer_is_chosen_on_validation_curves_when_the_run_has_them(
     assert [r["accuracy"] for r in second] == pytest.approx(
         [R2_VAL[m][1] for m in SIZES]
     )
+
+
+def _execute_with_r5(tmp_path: Path) -> RunDir:
+    config = _config(sources=("r1", "r5"))
+    runs = _world(tmp_path / "in")
+    for model in SIZES:
+        runs[("r5", model)] = _r5_run(tmp_path / "in", model)
+    run_dir = RunDir.create(config, out_root=tmp_path / "out")
+    execute(config, run_dir, runs, PARAMS)
+    return run_dir
+
+
+def test_r5_reports_the_transfer_test_at_the_transfer_layer(
+    tmp_path: Path,
+) -> None:
+    run_dir = _execute_with_r5(tmp_path)
+
+    rows = [r for r in _rows(run_dir) if r["source"] == "r5"]
+    assert [r["layer"] for r in rows] == [R5_PICK[m] for m in SIZES]
+    assert [r["accuracy"] for r in rows] == pytest.approx(
+        [R5_TRANSFER[m] for m in SIZES]
+    )
+    assert {r["selected_on"] for r in rows} == {"transfer_val"}
+
+
+def test_r5_copies_the_transfer_curve_not_the_in_template_one(
+    tmp_path: Path,
+) -> None:
+    run_dir = _execute_with_r5(tmp_path)
+
+    for model in SIZES:
+        copied = read_curves(run_dir, f"curves_r5_{model}")
+        assert copied.mean[0, DEPTH[model] - 1] == pytest.approx(
+            R5_TRANSFER[model] + 0.1
+        )
+        assert copied.mean[0, R5_PICK[model] - 1] == pytest.approx(
+            R5_TRANSFER[model]
+        )
 
 
 def test_the_steering_table_gives_the_slopes_and_the_depths(
