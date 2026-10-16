@@ -689,6 +689,8 @@ results/                        # --out
 - **Run metadata.** `meta.json` records the experiment id, config hash, seed, git commit and whether tracked
   files differ from it, device, platform, library versions (Python, `torch`, `transformers`, `numpy` and
   others) and start and finish times.
+- **Methodology.** [`docs/methodology.md`](docs/methodology.md) lists the deviations from the paper and the
+  statistics behind the reported intervals.
 - **Offline mode.** Every dataset loader takes `offline=True` and then reads only the cache, raising
   `OfflineCacheMissError` when a file is missing. For model weights set `HF_HUB_OFFLINE=1`.
 
