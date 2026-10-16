@@ -1,7 +1,7 @@
 """What a model does about a question it may not know: abstain or answer.
 
 A completion is an abstention when it says that the model does not know, by
-one of nine phrase patterns, and no judge model is called. Otherwise it is
+one of eleven phrase patterns, and no judge model is called. Otherwise it is
 scored against the gold aliases exactly as the labels are, so "correct" means
 the same here as in the labeling run. The rates, the choice of a steering
 coefficient and the interval of a shift are plain functions of those
@@ -32,11 +32,16 @@ ABSTAIN_PATTERNS: tuple[str, ...] = (
     r"no (?:reliable |public |such )?(?:information|record|data)",
     r"not (?:aware|familiar)",
     r"(?:does not|doesn't|do not|don't) (?:exist|have (?:any )?information)",
-    r"unknown",
+    r"unknown(?! soldiers?\b)",
     r"cannot be (?:determined|known|answered)",
+    r"^\W*(?:\d+\W+)?(?:do not|don't|dont) know",
+    r"(?:is|are|was|were) not"
+    r" (?:(?:publicly|widely|generally|commonly|readily) ){0,2}"
+    r"(?:known(?! (?:for|to|as)\b)|disclosed|publicized|publicised|specified)",
 )
 ABSTAIN_REGEXES: tuple[re.Pattern[str], ...] = tuple(
-    re.compile(rf"\b(?:{pattern})\b") for pattern in ABSTAIN_PATTERNS
+    re.compile(rf"(?<!\w)(?:{pattern})(?!\w)", re.MULTILINE)
+    for pattern in ABSTAIN_PATTERNS
 )
 CHECK_COLUMNS: tuple[str, ...] = (
     "uid",

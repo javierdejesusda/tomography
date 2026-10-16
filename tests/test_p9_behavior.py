@@ -43,12 +43,12 @@ def _record(
     )
 
 
-def test_the_nine_patterns_are_compiled_in_order() -> None:
-    assert len(ABSTAIN_PATTERNS) == 9
-    assert len(ABSTAIN_REGEXES) == 9
+def test_the_eleven_patterns_are_compiled_in_order() -> None:
+    assert len(ABSTAIN_PATTERNS) == 11
+    assert len(ABSTAIN_REGEXES) == 11
     assert all(isinstance(r, re.Pattern) for r in ABSTAIN_REGEXES)
     assert ABSTAIN_PATTERNS[0] == "i (?:do not|don't|dont) know"
-    assert ABSTAIN_PATTERNS[7] == "unknown"
+    assert ABSTAIN_PATTERNS[7] == r"unknown(?! soldiers?\b)"
 
 
 def test_the_check_columns() -> None:
@@ -91,6 +91,18 @@ def test_the_check_columns() -> None:
         "Unknown.",
         "It cannot be determined.",
         "This cannot be answered.",
+        "Do not know.",
+        "1. Do not know.",
+        "- Don't know",
+        "Answer:\nDo not know",
+        "The author of Figu is not publicly known.",
+        "The producer of North is not publicly disclosed.",
+        'The director of the film "Student" is not widely publicized in'
+        " mainstream sources.",
+        "The answer is not known.",
+        "The producer of In Conflict is not specified in the provided"
+        " information.",
+        "The author is unknown.",
     ],
 )
 def test_phrases_that_abstain(text: str) -> None:
@@ -107,6 +119,15 @@ def test_phrases_that_abstain(text: str) -> None:
         "The unknowns remain.",
         "hi do not know",
         "He is not sure.",
+        "The author is John Smith.",
+        "He was not only a poet but also a painter.",
+        "Known as the Iron Lady.",
+        "He is known as Smith.",
+        "The Tomb of the Unknown Soldier.",
+        "He is not known for his films.",
+        "He is not known to have written it.",
+        "They do not know the answer.",
+        "The film is not available on Netflix.",
     ],
 )
 def test_phrases_that_answer(text: str) -> None:
