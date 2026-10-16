@@ -1452,21 +1452,103 @@ def test_popqa_rows_follow_the_within_relation_interval(
 ) -> None:
     arrays = default_run.read_arrays("signals_popqa")
     pairs = _pairs_within(_test(_behavior(_items(), "popqa")))
+    config = _config()
+    father = arrays["relation"] == "father"
 
     for row in (r for r in _table(default_run) if r["dataset"] == "popqa"):
+        scores = arrays[row["predictor"]]
         point, lo, hi = grouped_auroc_ci(
-            arrays[row["predictor"]],
+            scores,
             arrays["correct"],
             arrays["relation"],
-            n_boot=60,
-            seed=0,
+            n_boot=config.n_boot,
+            seed=config.seed,
         )
         assert row["auroc_within"] == pytest.approx(point)
+        assert row["auroc_within"] == pytest.approx(
+            float(auroc(scores[father], arrays["correct"][father]))
+        )
         assert row["lo_within"] == pytest.approx(lo)
         assert row["hi_within"] == pytest.approx(hi)
         assert 0.0 <= row["lo_within"] <= row["hi_within"] <= 1.0
         assert row["n_pairs_within"] == pairs
     assert pairs == 25
+
+
+def _blocked_items() -> list[LabeledItem]:
+    """`_items` where PopQA relations come in contiguous blocks of 50."""
+    popqa = [
+        dataclasses.replace(
+            i,
+            example=dataclasses.replace(
+                i.example,
+                meta={
+                    **i.example.meta,
+                    "relation": RELATIONS[min(int(i.example.uid[6:]) // 50, 2)],
+                },
+            ),
+        )
+        for i in _popqa()
+    ]
+    return [*popqa, *_items()[len(popqa) :]]
+
+
+def _thin_blocked_items() -> list[LabeledItem]:
+    """Blocked relations where `occupation` has 3 correct, 7 wrong tests."""
+    items = _blocked_items()
+    thin = [
+        i
+        for i in _test(_behavior(items, "popqa"))
+        if i.example.meta["relation"] == "occupation" and i.label.greedy_correct
+    ][:2]
+    flipped = {id(i) for i in thin}
+    return [_wrong(i) if id(i) in flipped else i for i in items]
+
+
+def test_the_within_auroc_pools_every_relation_by_its_pairs(
+    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+) -> None:
+    items = _thin_blocked_items()
+    test = _test(_behavior(items, "popqa"))
+    relation = np.array([i.example.meta["relation"] for i in test])
+    correct = _correct(test)
+    pairs = {
+        r: int(correct[relation == r].sum())
+        * int((1 - correct[relation == r]).sum())
+        for r in RELATIONS
+    }
+    assert sorted(pairs.values()) == [21, 25, 25]
+
+    run_dir = _execute(tiny_gpt2, tmp_path, items=items)
+
+    arrays = run_dir.read_arrays("signals_popqa")
+    for row in (r for r in _table(run_dir) if r["dataset"] == "popqa"):
+        scores = arrays[row["predictor"]]
+        expected = sum(
+            pairs[r]
+            * float(auroc(scores[relation == r], correct[relation == r]))
+            for r in RELATIONS
+        ) / sum(pairs.values())
+        assert row["auroc_within"] == pytest.approx(expected)
+        assert row["n_pairs_within"] == sum(pairs.values()) == 71
+
+
+def test_the_within_interval_follows_the_config_seed(
+    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+) -> None:
+    run_dir = _execute(tiny_gpt2, tmp_path, seed=3)
+    arrays = run_dir.read_arrays("signals_popqa")
+
+    for row in (r for r in _table(run_dir) if r["dataset"] == "popqa"):
+        _, lo, hi = grouped_auroc_ci(
+            arrays[row["predictor"]],
+            arrays["correct"],
+            arrays["relation"],
+            n_boot=_config().n_boot,
+            seed=3,
+        )
+        assert row["lo_within"] == pytest.approx(lo)
+        assert row["hi_within"] == pytest.approx(hi)
 
 
 def test_the_template_control_is_exactly_chance_within_a_relation(
@@ -1540,6 +1622,19 @@ def test_no_pair_inside_a_relation_gives_null_columns_and_zero_pairs(
     assert all(r["auroc"] is None for r in _relations(run_dir, "popqa"))
 
 
+def test_a_dataset_without_a_within_pair_still_lists_every_relation_row(
+    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+) -> None:
+    run_dir = _execute(tiny_gpt2, tmp_path, items=_starved_items())
+
+    predictors = _predictors(_table(run_dir), "popqa")
+    rows = _relations(run_dir, "popqa")
+    assert [(r["predictor"], r["relation"]) for r in rows] == [
+        (p, r) for p in predictors for r in ("father", "mother")
+    ]
+    assert all(r["auroc"] is None for r in rows)
+
+
 def test_a_test_item_without_a_string_relation_makes_the_dataset_non_relational(
     tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
 ) -> None:
@@ -1566,6 +1661,18 @@ def test_a_test_item_without_a_string_relation_makes_the_dataset_non_relational(
         assert [row[c] for c in WITHIN_COLUMNS] == [None] * 4
     assert "relations_popqa.json" not in _files(run_dir)
     assert "relation" not in run_dir.read_arrays("signals_popqa")
+
+
+def test_a_min_relation_class_of_one_is_valid(
+    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+) -> None:
+    run_dir = _execute(tiny_gpt2, tmp_path, min_relation_class=1)
+
+    father = [
+        r for r in _relations(run_dir, "popqa") if r["relation"] == "father"
+    ]
+    assert father
+    assert all(r["auroc"] is not None for r in father)
 
 
 def test_a_min_relation_class_below_one_fails_before_any_forward_pass(
