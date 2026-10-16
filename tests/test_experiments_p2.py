@@ -1040,7 +1040,6 @@ def test_p2_on_gpt2_reads_sentiment_under_a_decoy_against_zero_shot(
         positions=("last", "mean"),
         n_seeds=2,
         n_pairs=16,
-        n_eval_pairs=16,
     )
     run_dir = RunDir.create(config, out_root=tmp_path)
     started = time.perf_counter()
