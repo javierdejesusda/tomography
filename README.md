@@ -467,7 +467,9 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   finished runs that replace a default run. The parameter counts come from the pinned configs of the
   checkpoints and no weights are read. Each reading run keeps its own layer rule, chosen on the validation
   curves when the run writes them and reported on the test curves, so a larger model, with more layers to take
-  a maximum over, does not gain from choosing and reporting on one split. `n_boot` is 2000. It writes
+  a maximum over, does not gain from choosing and reporting on one split. `r5` is read on its transfer test, at
+  the layer it chose on the transfer validation split (`transfer_val` in the table), as `r5` reports it: its
+  in-template test is not a held-out measure. `n_boot` is 2000. It writes
   `curves_<source>_<model>`, `table` (per source and model: the best layer, its relative depth, the split it
   was chosen on and the mean accuracy of the seeds with a percentile bootstrap interval), `table_steering`
   (the mean dose slope of the readers of each model and the range over them) and `summary`, whose
@@ -483,8 +485,9 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   `r7`) and `function_sources` (`r5`, the persona templates) and the `template_source` (`p1`, read on
   `template_task`, `sentiment`) on every model, and the `steering_source` (`c1`) on the paired models only,
   since the reference is not steered (either source can be `None` to leave out its part); `extra_runs` and
-  `n_boot` (2000) are as in `p6`. The seed is the paired unit: seed `i` draws the same stimuli on a base
-  model and on its tuned pair, so the per-seed difference removes the variation of the stimuli. It writes
+  `n_boot` (2000) are as in `p6`, including the transfer test of `r5`. The seed is the paired unit: seed `i`
+  draws the same stimuli on a base model and on its tuned pair, so the per-seed difference removes the
+  variation of the stimuli. It writes
   `curves_<source>_<model>`, `table` (per pair and source: the best accuracy of the base and the tuned model,
   their mean per-seed difference with a percentile bootstrap interval, and the layers as depths),
   `table_reference`, `matrix_templates` (accuracy by template variant), `curves_dose_<tuned>` and `summary`.

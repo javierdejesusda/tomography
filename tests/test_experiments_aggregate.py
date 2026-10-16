@@ -27,6 +27,8 @@ from tomography.experiments.aggregate import reading_point
 from tomography.experiments.aggregate import relative_depth
 from tomography.experiments.aggregate import resolve_runs
 from tomography.experiments.aggregate import run_depth
+from tomography.experiments.aggregate import source_reading_point
+from tomography.experiments.aggregate import source_stem
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.sweep import write_curves
@@ -604,6 +606,60 @@ def test_reading_point_reads_the_depth_of_the_reported_curves(
 def test_reading_point_refuses_an_unknown_series(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="shuffled"):
         reading_point(_reading_run(tmp_path), "shuffled")
+
+
+def _r5_run(tmp_path: Path) -> RunDir:
+    """A run with perfect in-template curves and a transfer test at layer 4."""
+    run_dir = _run(tmp_path, "r5")
+    in_template = np.zeros((2, 3, 4))
+    in_template[0, :, 3] = 1.0
+    transfer = np.zeros((2, 3, 4))
+    transfer[0, :, 3] = [0.9, 0.8, 0.7]
+    transfer[0, :, 1] = [0.6, 0.5, 0.4]
+    for stem, values in (
+        ("curves", in_template),
+        ("curves_transfer", transfer),
+    ):
+        _curves(run_dir, stem, layers=(2, 4, 6, 8), values=values, n_layers=12)
+    run_dir.write_json("summary", {"best_layer": 4})
+    return run_dir
+
+
+def test_source_stem_is_the_transfer_curves_for_r5_only() -> None:
+    assert source_stem("r5") == "curves_transfer"
+    assert source_stem("r1") == "curves"
+
+
+def test_source_reading_point_reads_the_r5_transfer_layer_of_the_summary(
+    tmp_path: Path,
+) -> None:
+    point = source_reading_point(_r5_run(tmp_path), "r5")
+    assert point.layer == 4
+    assert point.n_layers == 12
+    assert point.selected_on == "transfer_val"
+    np.testing.assert_array_equal(point.values, [0.6, 0.5, 0.4])
+
+
+def test_source_reading_point_rejects_an_r5_layer_not_in_the_curves(
+    tmp_path: Path,
+) -> None:
+    run_dir = _r5_run(tmp_path)
+    run_dir.write_json("summary", {"best_layer": 5})
+    with pytest.raises(ValueError, match="layer 5"):
+        source_reading_point(run_dir, "r5")
+
+
+def test_source_reading_point_is_reading_point_for_other_sources(
+    tmp_path: Path,
+) -> None:
+    run_dir = _reading_run(tmp_path)
+    point = source_reading_point(run_dir, "r2")
+    expected = reading_point(run_dir)
+    assert (point.layer, point.selected_on) == (
+        expected.layer,
+        expected.selected_on,
+    )
+    np.testing.assert_array_equal(point.values, expected.values)
 
 
 def test_relative_depth_is_the_layer_over_the_depth() -> None:

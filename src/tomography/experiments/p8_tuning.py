@@ -24,6 +24,7 @@ from tomography.experiments.aggregate import read_curves
 from tomography.experiments.aggregate import read_table
 from tomography.experiments.aggregate import reading_point
 from tomography.experiments.aggregate import resolve_runs
+from tomography.experiments.aggregate import source_reading_point
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
@@ -289,7 +290,10 @@ def _read_sources(
     run_dir: RunDir,
     runs: Mapping[tuple[str, str], RunDir],
 ) -> dict[tuple[str, str], ReadingPoint]:
-    """Copies the reader curves and picks the layer of every run."""
+    """Copies the reader curves and picks the layer of every run.
+
+    R5 contributes its transfer test (see `source_reading_point`).
+    """
     points: dict[tuple[str, str], ReadingPoint] = {}
     for source in _sources(config):
         for model in _models(config):
@@ -302,7 +306,7 @@ def _read_sources(
                 n_boot=config.n_boot,
                 seed=config.seed,
             )
-            points[(source, model)] = reading_point(run)
+            points[(source, model)] = source_reading_point(run, source)
     return points
 
 
@@ -512,8 +516,9 @@ def execute(
     with one row per pair and source: the best accuracy of the base and the
     tuned model, their mean per-seed difference with its percentile bootstrap
     interval, and the layers as depths. The reference gets `table_reference`.
-    `summary` holds the `function_gap` of every tuned model, the mean gain of
-    the function sources minus that of the concept sources.
+    R5 contributes its transfer test (see `source_reading_point`). `summary`
+    holds the `function_gap` of every tuned model, the mean gain of the
+    function sources minus that of the concept sources.
 
     Args:
         config: The experiment settings.
