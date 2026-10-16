@@ -246,6 +246,69 @@ def shift_ci(
     return float(shift.mean()), float(lo), float(hi)
 
 
+def item_slopes(
+    coeffs: Sequence[float], values: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Fits a least-squares line through the coefficients for every item.
+
+    Args:
+        coeffs: The K steering coefficients, one per row of `values`.
+        values: Array of shape (K, n): the outcome of each of n items at each
+            coefficient.
+
+    Returns:
+        The slope of every item, shape (n,): the change of the outcome per
+        unit of coefficient. NaN for an item with a non-finite value.
+
+    Raises:
+        ValueError: If `values` does not have one row per coefficient, or
+            `coeffs` has fewer than two distinct values.
+    """
+    grid = np.asarray(coeffs, dtype=np.float64)
+    table = np.asarray(values, dtype=np.float64)
+    if table.ndim != 2 or table.shape[0] != grid.size:
+        raise ValueError(
+            f"values must have one of its {grid.size} rows per coefficient, "
+            f"got shape {table.shape}"
+        )
+    centered = grid - grid.mean()
+    spread = float(centered @ centered)
+    if np.unique(grid).size < 2 or spread == 0.0:
+        raise ValueError("coeffs need at least two distinct values")
+    return (centered @ (table - table.mean(axis=0))) / spread
+
+
+def slope_ci(
+    slopes: NDArray[np.float64],
+    reference: NDArray[np.float64] | None = None,
+    *,
+    n_boot: int = 1000,
+    alpha: float = 0.05,
+    seed: int = 0,
+) -> tuple[float, float, float]:
+    """Computes the mean item slope, or its paired difference, and its interval.
+
+    Args:
+        slopes: The slope of each item.
+        reference: The slope of the same items under another arm; None
+            compares against zero.
+        n_boot: Bootstrap resamples of the items.
+        alpha: One minus the coverage.
+        seed: Seed of the resampling.
+
+    Returns:
+        The mean of `slopes - reference` over the items where both are
+        finite, and the lower and upper bounds of its percentile interval.
+
+    Raises:
+        ValueError: If the arrays differ in shape, no item is finite, or
+            `alpha` or `n_boot` is invalid.
+    """
+    own = np.asarray(slopes, dtype=np.float64)
+    other = np.zeros_like(own) if reference is None else reference
+    return shift_ci(other, own, n_boot=n_boot, alpha=alpha, seed=seed)
+
+
 @dataclass(frozen=True)
 class CompletionRecord:
     """One generated completion, for the manual check.
