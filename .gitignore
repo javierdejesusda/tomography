@@ -28,3 +28,6 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Generated figures of the results tree
+results/**/figures/

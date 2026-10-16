@@ -654,12 +654,13 @@ the paper's PCA on pair differences, stays selectable in every reading experimen
 `--set method=pca_diff`. The `p9a` config has no `method`; `p9b` takes a list `methods` and `p9c` a
 `lat_method`.
 
-The `tomography` command (`python -m tomography` is equivalent) has two subcommands:
+The `tomography` command (`python -m tomography` is equivalent) has three subcommands:
 
 ```bash
 uv run tomography --help
 uv run tomography run <id> [--model KEY] [--seed N] [--set KEY=VALUE] [--out DIR]
 uv run tomography plot <id|all> [--run DIR] [--out DIR]
+uv run tomography export --out DIR ROOT [ROOT ...]
 ```
 
 - `run` runs one experiment and prints the run directory. `--model` takes a checkpoint key, `--seed` sets the
@@ -668,6 +669,12 @@ uv run tomography plot <id|all> [--run DIR] [--out DIR]
   delete it to rerun.
 - `plot` regenerates the figures of saved runs into the `figures/` folder of each run. `all` plots every
   finished run under `--out`, and `--run` plots one run directory, finished or not.
+- `export` copies every finished run found under the given roots, at any nesting, to
+  `DIR/<experiment>/<model>/<hash>`.
+  It keeps the JSON, NPZ and CSV files the plots read and drops the raw reader vectors, trials, item files, logs
+  and figures, rewrites absolute local paths to `results/<experiment>/<model>/<hash>` names, and refuses to write
+  if two roots hold the same run or a copied file still names a local drive path, `Users` or the user name.
+  Unfinished runs are skipped and listed.
 
 For example, `uv run tomography run r1` runs the sentiment experiment on GPT-2 small,
 `uv run tomography run r1 --set method=pca_diff` reruns it with the paper's direction finder, and
@@ -685,6 +692,20 @@ results/                        # --out
         <name>.json, <name>.npz # results, written with the config and metadata embedded
         figures/
 ```
+
+### Reproduce the figures
+
+Figures are generated, not committed (`results/**/figures/` is ignored). With the exported results in
+`results/`, one command regenerates every figure from the saved JSON and NPZ files, as PDF, PNG and SVG in each
+run's `figures/` folder:
+
+```bash
+uv sync
+uv run tomography plot all --out results
+```
+
+The raw reader vectors (`readers*.npz`) are not committed, so recomputing a run's results needs `tomography run`;
+plotting does not. The committed results are added with the run exports.
 
 ## Reproducibility
 
