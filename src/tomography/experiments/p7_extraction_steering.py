@@ -780,7 +780,10 @@ def execute(
     `summary.json`. A unit is a template, a sweep layer and a steering
     reader. It is readable when its reader's validation accuracy at that
     layer is at least `read_threshold`, and inverted when it is readable and
-    its primary slope is negative.
+    its primary slope is negative. The `steer_slope`
+    column of the table is the mean primary slope at the steering layer measured
+    on the selection prompts that chose that layer, so it is optimistic; the
+    report prompts feed the prompt-shift transfer.
 
     Args:
         config: The experiment settings.

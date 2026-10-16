@@ -364,7 +364,8 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   `truncate_words` 3, `n_boot` 2000 and the shared steering fields `n_prompts` 50, `num_samples` 2 and
   `coeffs` -0.3 to 0.3, relative to the mean residual norm. It writes `curves_read`, `curves_lens`,
   `curves_slope`, `curves_slope_check`, `matrix_transfer`, `trials_sweep`, `trials_transfer_<format>`, `table`
-  (one row per template) and `summary`; the plot draws the four curves, the matrix and `read_vs_steer`, each
+  (one row per template; its `steer_slope` is measured on the selection prompts that chose the steering layer,
+  so it is optimistic, and the report prompts feed the prompt-shift transfer) and `summary`; the plot draws the four curves, the matrix and `read_vs_steer`, each
   unit's reading accuracy against its dose slope.
 - `c1` ([`c1_sentiment_steering.py`](src/tomography/experiments/c1_sentiment_steering.py)): steering the
   sentiment of GPT-2 text with a reading vector fitted on SST-2 as in `r1`. A layer sweep (`sweep_layers`, the
