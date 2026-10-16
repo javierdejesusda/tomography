@@ -450,18 +450,20 @@ rank the two sides through the relation alone. `obscure_real` is PopQA known aga
 matched inside a relation; `obscure_real_pop` also matches the popularity bin. The interval stored by P9b is a
 bootstrap over the five pair draws of the reader. It measures how much the reader moves with its training draw, not
 the sampling of the test questions, so it is not an interval on the AUROC and is not shown; the test sides are small
-(the PopQA known side has 87, 118 and 78 questions).
+(the PopQA known side has 87, 118 and 78 questions). In the table below `Test pairs` is `n_pairs_within` of the run:
+the number of (known, unknown) pairs of test questions that share a relation, over which the within-relation AUROC
+averages. It counts test pairs and is not the 64 training pairs of the reader.
 
 PopQA known against unknown, within relation (the headline), mean AUROC over the five readers:
 
-| Model           | Contrast         | Test known / unknown | Pairs  | Reader | popularity | text_word | text_char |
-| --------------- | ---------------- | -------------------- | ------ | ------ | ---------- | --------- | --------- |
-| qwen3-0.6b-base | obscure_real     | 87 / 1,661           | 6,941  | 0.919  | 0.799      | 0.678     | 0.673     |
-| qwen3-0.6b-base | obscure_real_pop | 87 / 1,661           | 6,941  | 0.891  | 0.799      | 0.678     | 0.673     |
-| qwen3-1.7b-base | obscure_real     | 118 / 1,611          | 10,113 | 0.959  | 0.879      | 0.625     | 0.636     |
-| qwen3-1.7b-base | obscure_real_pop | 118 / 1,611          | 10,113 | 0.960  | 0.879      | 0.625     | 0.636     |
-| gpt2-xl         | obscure_real     | 78 / 1,711           | 6,691  | 0.902  | 0.838      | 0.511     | 0.543     |
-| gpt2-xl         | obscure_real_pop | 78 / 1,711           | 6,691  | 0.879  | 0.838      | 0.511     | 0.543     |
+| Model           | Contrast         | Test known / unknown | Test pairs | Reader | popularity | text_word | text_char |
+| --------------- | ---------------- | -------------------- | ---------- | ------ | ---------- | --------- | --------- |
+| qwen3-0.6b-base | obscure_real     | 87 / 1,661           | 6,941      | 0.919  | 0.799      | 0.678     | 0.673     |
+| qwen3-0.6b-base | obscure_real_pop | 87 / 1,661           | 6,941      | 0.891  | 0.799      | 0.678     | 0.673     |
+| qwen3-1.7b-base | obscure_real     | 118 / 1,611          | 10,113     | 0.959  | 0.879      | 0.625     | 0.636     |
+| qwen3-1.7b-base | obscure_real_pop | 118 / 1,611          | 10,113     | 0.960  | 0.879      | 0.625     | 0.636     |
+| gpt2-xl         | obscure_real     | 78 / 1,711           | 6,691      | 0.902  | 0.838      | 0.511     | 0.543     |
+| gpt2-xl         | obscure_real_pop | 78 / 1,711           | 6,691      | 0.879  | 0.838      | 0.511     | 0.543     |
 
 The same contrasts pooled over relations, with the AUROC of a random direction:
 
@@ -483,7 +485,10 @@ The same contrasts pooled over relations, with the AUROC of a random direction:
   against 0.880 and 0.884) the pooled reader is above the text baselines. A random direction reads 0.682, 0.648 and
   0.490 pooled on `obscure_real`, below the logistic reader on every model.
 - **Matching the popularity bin.** On `obscure_real_pop` the within-relation reader reads 0.891, 0.960 and 0.879,
-  within 0.03 of `obscure_real`, with the same baselines.
+  within 0.03 of `obscure_real`. The two contrasts have the same test counts and the same baseline values: popularity
+  0.799, 0.879 and 0.838, `text_word` 0.678, 0.625 and 0.511, `text_char` 0.673, 0.636 and 0.543. Pooled,
+  `qwen3-0.6b-base` reads 0.948 on both contrasts (0.9475 and 0.9482 before rounding), and its random direction has
+  one stored value, 0.682, for both; on the other two models the random direction differs between the two contrasts.
 - **What this does not show.** Popularity and the wording of the question are the only surface controls that P9b
   computes. A reader above both of them is not shown to read what the model knows rather than some other property of
   the question that neither control captures, and each value is one set of five readers on one labeling run.
@@ -512,10 +517,11 @@ The others, pooled:
 | kuq_future_unknown   | 0.999 / 0.997 / 0.993 | 1.000 / 0.992 / 0.986 | 1.000 / 0.992 / 0.990 |
 | kuq_unsolved_problem | 0.985 / 0.949 / 0.943 | 0.992 / 0.953 / 0.967 | 0.994 / 0.950 / 0.956 |
 
-- **The reader has a margin over every text baseline on two contrasts.** `triviaqa_known` sets TriviaQA questions
-  labeled known against TriviaQA questions labeled unknown, so one question format stands on both sides: the reader
-  reads 0.905, 0.883 and 0.905, against a better text baseline of 0.774, 0.693 and 0.787. `kuq_ambiguous` is the other
-  one, with margins of 0.10, 0.08 and 0.07. The `triviaqa_known` test sets are small (32, 55 and 19 known questions).
+- **The reader has a margin of 0.07 or more over the better text baseline on two contrasts.** `triviaqa_known` sets
+  TriviaQA questions labeled known against TriviaQA questions labeled unknown, so one question format stands on both
+  sides: the reader reads 0.905, 0.883 and 0.905, against a better text baseline of 0.774, 0.693 and 0.787.
+  `kuq_ambiguous` is the other one, with margins of 0.105, 0.079 and 0.070. On every other contrast the largest margin
+  over the better baseline is 0.038. The `triviaqa_known` test sets are small (32, 55 and 19 known questions).
 - **On several contrasts the reader does not exceed the text baselines.** `unknowable_detail` is 1.000 for the reader
   and for both baselines on all three models, so the wording alone separates it. On `false_premise` the reader (0.951,
   0.974, 0.964) is below the better baseline (0.978, 0.977, 0.980). The two contrasts between kinds of unknown
@@ -524,7 +530,7 @@ The others, pooled:
   `real_vs_synthal`, 0.980, 0.986 and 0.981 on `real_vs_generated`).
 - **Elsewhere the margin is small.** `fictional_generated` (PopQA known against generated names, within relation) has
   the reader above `text_char` by 0.002 to 0.015; four KUQ categories (`kuq_controversial`, `kuq_counterfactual`,
-  `kuq_false_assumption`, `kuq_future_unknown`) are within 0.02 of the better baseline in either direction, and
+  `kuq_false_assumption`, `kuq_future_unknown`) are within 0.025 of the better baseline in either direction, and
   `kuq_unsolved_problem` is above it by 0.025 to 0.038. `pre_vs_post_cutoff` (`gpt2-xl` only, 46 against 20 test
   questions) is 1.000 for the reader and both baselines.
 - **Read these cross-dataset rows as a format contrast too.** The known side of most of them is PopQA, TriviaQA or
@@ -541,10 +547,11 @@ own output: `answer_logprob` (log-probability of the greedy answer), `first_toke
 likely token at the start of the answer), `neg_entropy` (minus the entropy of that distribution),
 `mean_token_logprob`, `consistency` (share of the five sampled answers that equal the greedy one) and `p_true` (the
 model grades its own answer). `probe` is a logistic probe fitted on the correctness of the train questions of the same
-dataset, so it sees the label of the target. `lat` is the label-free reader of the `obscure_real` contrast of P9b,
-applied here without refitting. `popularity` and `template` (the accuracy rate of the relation on the train questions)
-use no hidden state and no confidence. The probe and `lat` read layer L27 (`qwen3-0.6b-base`), L27 (`qwen3-1.7b-base`)
-and L48 (`gpt2-xl`), chosen on validation.
+dataset, so it sees the label of the target. `lat` is a reader of the `obscure_real` known against unknown contrast,
+with the contrast and the recipe of P9b (logistic, 64 pairs, five draws), refitted in this run and with no correctness
+label. `popularity` and `template` (the accuracy rate of the relation on the train questions) use no hidden state and
+no confidence. The probe and `lat` read layer L27 (`qwen3-0.6b-base`), L27 (`qwen3-1.7b-base`) and L48 (`gpt2-xl`),
+chosen on the validation split of P9c, so not the layers of the P9b readers.
 
 For PopQA the headline is the within-relation AUROC, with the interval of the methodology: the items are resampled
 with replacement inside each relation (1,000 resamples), at that relation's size. The pooled AUROC is secondary,
@@ -623,14 +630,14 @@ with its interval. These are pooled AUROCs; no within-relation increment is stor
   against 0.703, 0.655 and 0.749 (lower is better), and the risk at 20 percent coverage is within the other's interval
   on every model. The accuracy rate of the relation alone reads 0.892, 0.843 and 0.880 pooled. Added to the
   output-confidence stack, the probe raises the pooled AUROC by +0.044, +0.044 and +0.048, with intervals above zero;
-  `lat` adds +0.000, +0.002 and +0.011, with intervals that include zero. How much of the probe's pooled gain is
-  within-relation is not stored.
+  `lat` adds +0.000, +0.002 and +0.011, with intervals that include or touch zero (the interval of `lat` at
+  `qwen3-0.6b-base` is [-0.0001, +0.0004]). How much of the probe's pooled gain is within-relation is not stored.
 - **TriviaQA and NQ-open.** On TriviaQA the probe is below `answer_logprob` on every model (0.868 against 0.886, 0.811
   against 0.819, 0.740 against 0.774). On NQ-open its point estimate is above it (0.795 against 0.776, 0.812 against
   0.790, 0.725 against 0.636), but the sets hold 20, 38 and 12 correct answers and the intervals are 0.14 to 0.37 wide
-  and overlap. The increments over the confidence stack have intervals that include zero on both sets (the probe on
-  TriviaQA at `qwen3-0.6b-base` has a lower bound of exactly 0.000), except `lat` (+0.047) and the probe (+0.036) on
-  NQ-open at `qwen3-1.7b-base`.
+  and overlap. The increments over the confidence stack have intervals that include or touch zero on both sets (the
+  probe on TriviaQA at `qwen3-0.6b-base` has a lower bound of exactly 0.000), except `lat` (+0.047) and the probe
+  (+0.036) on NQ-open at `qwen3-1.7b-base`.
 - **`p_true` on `gpt2-xl` is below chance on PopQA.** It reads 0.293 [0.253, 0.334] pooled and 0.431 [0.373, 0.487]
   within relation, with intervals below 0.5. On TriviaQA (0.481) and NQ-open (0.347) the intervals include 0.5. On the
   Qwen3 models it is 0.719 and 0.776 within relation, below `answer_logprob`.
@@ -665,18 +672,26 @@ correction for multiple comparisons. `obscure_real` and `fictional_generated` sh
 `unknowable_detail` and `false_premise` share another, so their rows are not independent. In the tables `post` is the
 post-trained checkpoint, scored on abstention, and `base` the base checkpoint, scored on entropy.
 
-Headline cell (unknown side of `obscure_real`), slope of the direction with its 95 percent interval. The validation
-AUROC of the direction at the steered layer is 0.943, 0.922, 0.869, 0.795 for the four post-trained runs and 0.966 and
-0.934 for the base ones, in the order of the rows.
+Headline cell (unknown side of `obscure_real`), post-trained checkpoints, abstention mode: slope of the share of
+abstentions per unit of relative coefficient, for the direction (95 percent interval) and for the three random arms.
+The validation AUROC of the direction at the steered layer is 0.943, 0.922, 0.869, 0.795 in the order of the rows.
 
-| Run (steered layer)      | Slope of the direction  | Slopes of random0 / 1 / 2 | Min gap bound | Distinguishable |
-| ------------------------ | ----------------------- | ------------------------- | ------------- | --------------- |
-| 1.7b post, fewshot (L24) | 0.040 [-0.031, 0.114]   | 0.388 / -0.017 / 0.095    | -0.481        | no              |
-| 0.6b post, fewshot (L28) | 0.114 [0.033, 0.198]    | -0.386 / -0.129 / -0.693  | -0.738        | no              |
-| 1.7b post, concept (L12) | -1.112 [-1.224, -1.002] | -0.348 / 0.483 / 0.174    | 0.514         | yes             |
-| 0.6b post, concept (L26) | 0.005 [-0.091, 0.102]   | -0.564 / -0.157 / 0.229   | -0.674        | no              |
-| 1.7b base (L20)          | -5.882 [-6.095, -5.655] | 0.155 / 0.941 / 0.023     | 4.722         | yes             |
-| 0.6b base (L27)          | -4.099 [-4.360, -3.781] | 0.111 / -0.662 / -0.221   | 3.096         | yes             |
+| Run (steered layer)      | Direction, abstention   | random0 / 1 / 2, abstention | Min gap bound | Distinguishable |
+| ------------------------ | ----------------------- | --------------------------- | ------------- | --------------- |
+| 1.7b post, fewshot (L24) | 0.040 [-0.031, 0.114]   | 0.388 / -0.017 / 0.095      | -0.481        | no              |
+| 0.6b post, fewshot (L28) | 0.114 [0.033, 0.198]    | -0.386 / -0.129 / -0.693    | -0.738        | no              |
+| 1.7b post, concept (L12) | -1.112 [-1.224, -1.002] | -0.348 / 0.483 / 0.174      | 0.514         | yes             |
+| 0.6b post, concept (L26) | 0.005 [-0.091, 0.102]   | -0.564 / -0.157 / 0.229     | -0.674        | no              |
+
+Headline cell (unknown side of `obscure_real`), base checkpoints, shift mode: slope of the entropy of the next-token
+distribution per unit of relative coefficient, same columns. The validation AUROC of the direction is 0.966 and 0.934
+in the order of the rows. These slopes are of the entropy, not of a share of abstentions, and are not comparable with
+the table above.
+
+| Run (steered layer) | Direction, entropy      | random0 / 1 / 2, entropy | Min gap bound | Distinguishable |
+| ------------------- | ----------------------- | ------------------------ | ------------- | --------------- |
+| 1.7b base (L20)     | -5.882 [-6.095, -5.655] | 0.155 / 0.941 / 0.023    | 4.722         | yes             |
+| 0.6b base (L27)     | -4.099 [-4.360, -3.781] | 0.111 / -0.662 / -0.221  | 3.096         | yes             |
 
 Post-trained checkpoints: abstention on the `obscure_real` items at the coefficient chosen on the calibration items,
 as the change in the share of abstentions from the unsteered run (95 percent interval). The last row is the false
