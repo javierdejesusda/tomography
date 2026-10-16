@@ -1294,3 +1294,46 @@ def _popqa_shaped(n: int) -> list[LabeledItem]:
         )
         items.append(LabeledItem(example, item_label))
     return items
+
+
+def test_the_layer_is_chosen_on_the_pooled_validation_auroc(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def skewed(*args: Any, **kw: Any) -> ReadingCube:
+        cube = reading_cube(*args, **kw)
+        n = len(cube.layers)
+        steps = np.arange(n, dtype=np.float64)
+        falling = np.broadcast_to(-steps, cube.val.shape).copy()
+        rising = np.broadcast_to(100.0 * steps, cube.val.shape).copy()
+        return dataclasses.replace(cube, val=falling, val_within=rising)
+
+    monkeypatch.setattr(p9b_reading, "reading_cube", skewed)
+
+    run_dir = _execute(tiny_arch, tmp_path)
+
+    assert _summary(run_dir)["layer"] == 1
+
+
+def test_the_within_interval_is_drawn_as_the_pooled_one() -> None:
+    pool = type_pools(_items())["obscure_real"]
+    draws = np.random.default_rng(4).uniform(0.5, 0.9, size=(1, 1, 8, 2))
+    cube = ReadingCube(
+        types=(pool.name,),
+        methods=("logistic",),
+        layers=(1, 2),
+        val=draws.copy(),
+        test=draws.copy(),
+        val_within=draws.copy(),
+        test_within=draws.copy(),
+        transfer=np.zeros((8, 2, 1, 1)),
+        cosine=np.zeros((2, 1, 1)),
+        readers={},
+    )
+
+    (row,) = p9b_reading._table_rows(
+        cube, {pool.name: pool}, {pool.name: surface_baselines(pool)}, 1, 7
+    )
+
+    assert row[12:15] == row[6:9]

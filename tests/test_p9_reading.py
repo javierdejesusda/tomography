@@ -1752,3 +1752,194 @@ def test_surface_baselines_popularity_within_follows_the_null_rule() -> None:
     assert baselines["popularity"] is None
     assert baselines["popularity_within"] is None
     assert baselines["text_word_within"] == pytest.approx(0.5)
+
+
+def _stem_item(
+    uid: str,
+    label: Label,
+    split: Split,
+    relation: str,
+    question: str,
+    popularity: int = 10,
+) -> LabeledItem:
+    item = _labeled(
+        uid, label, split=split, relation=relation, popularity=popularity
+    )
+    return dataclasses.replace(
+        item, example=dataclasses.replace(item.example, question=question)
+    )
+
+
+def test_surface_baselines_give_a_within_value_for_a_single_shared_pair() -> (
+    None
+):
+    positive: list[LabeledItem] = []
+    negative: list[LabeledItem] = []
+    for i in range(12):
+        relation = CAPITAL if i % 2 else OCCUPATION
+        positive.append(
+            _stem_item(
+                f"p-train-{i}",
+                "known",
+                "train",
+                relation,
+                "who wrote the alpha novel",
+                500,
+            )
+        )
+        negative.append(
+            _stem_item(
+                f"n-train-{i}",
+                "unknown",
+                "train",
+                relation,
+                "who wrote the beta novel",
+                50,
+            )
+        )
+    for split in ("val", "test"):
+        positive.append(
+            _stem_item(
+                f"p-{split}-c",
+                "known",
+                split,
+                CAPITAL,
+                "who wrote the alpha novel",
+                900,
+            )
+        )
+        negative.append(
+            _stem_item(
+                f"n-{split}-c",
+                "unknown",
+                split,
+                CAPITAL,
+                "who wrote the beta novel",
+                12,
+            )
+        )
+    positive.append(
+        _stem_item(
+            "p-test-o",
+            "known",
+            "test",
+            OCCUPATION,
+            "who wrote the alpha novel",
+            900,
+        )
+    )
+    pool = TypePool("t", tuple(positive), tuple(negative), "none", "knowledge")
+
+    baselines = surface_baselines(pool)
+
+    assert within_relation_pairs(pool, "test") == 1
+    assert baselines["popularity_within"] == pytest.approx(1.0)
+    assert baselines["text_word_within"] == pytest.approx(1.0)
+    assert baselines["text_char_within"] == pytest.approx(1.0)
+
+
+def test_surface_baselines_fit_the_within_text_on_the_train_items() -> None:
+    def change(item: LabeledItem) -> LabeledItem:
+        item = _with_meta(
+            item,
+            relation="even" if int(item.example.uid[-1]) % 2 == 0 else "odd",
+        )
+        if item.example.split != "test":
+            return item
+        word = "beta" if item.example.uid.startswith("p-") else "alpha"
+        return dataclasses.replace(
+            item,
+            example=dataclasses.replace(
+                item.example, question=f"who wrote the {word} novel"
+            ),
+        )
+
+    baselines = surface_baselines(_map_items(_baseline_pool(), change))
+
+    for name in ("text_word", "text_char", *WITHIN_BASELINES[:2]):
+        assert baselines[name] == pytest.approx(0.0), name
+
+
+def test_surface_baselines_keep_the_within_word_and_char_baselines_apart() -> (
+    None
+):
+    positive: list[LabeledItem] = []
+    negative: list[LabeledItem] = []
+    for split, n in (("train", 12), ("val", 4), ("test", 6)):
+        for i in range(n):
+            relation = "even" if i % 2 == 0 else "odd"
+            positive.append(
+                _stem_item(
+                    f"p-{split}-{i}",
+                    "known",
+                    split,
+                    relation,
+                    f"who wrote the novel qqa{split}{i}",
+                )
+            )
+            negative.append(
+                _stem_item(
+                    f"n-{split}-{i}",
+                    "unknown",
+                    split,
+                    relation,
+                    f"who wrote the novel zzb{split}{i}",
+                )
+            )
+    pool = TypePool("t", tuple(positive), tuple(negative), "none", "knowledge")
+
+    baselines = surface_baselines(pool)
+
+    assert baselines["text_word_within"] == pytest.approx(0.5)
+    assert baselines["text_char_within"] == pytest.approx(1.0)
+
+
+def test_reading_cube_within_arrays_match_a_per_relation_oracle(
+    planted: Planted,
+) -> None:
+    pool = dataclasses.replace(planted.pools["obscure_real"], strata="none")
+    methods: tuple[Any, ...] = ("logistic", "pca_diff")
+
+    cube = reading_cube(
+        planted.acts,
+        {"t": pool},
+        methods=methods,
+        n_seeds=2,
+        n_pairs=16,
+        seed=1,
+    )
+
+    for split, held in (("val", cube.val_within), ("test", cube.test_within)):
+        positive, negative = pool.split(split)
+        items = [*positive, *negative]
+        rows = planted.acts.rows(items)
+        labels = np.r_[np.ones(len(positive)), np.zeros(len(negative))]
+        labels = labels.astype(np.int64)
+        relation = np.array([relation_of(i) for i in items])
+        for m, method in enumerate(methods):
+            for s in range(2):
+                reader = fit_type_reader(
+                    planted.acts,
+                    pool,
+                    method=method,
+                    n_pairs=16,
+                    seed=draw_seed(1, s),
+                )
+                scores = reader.score(planted.acts.data[:, rows])
+                for k in range(len(planted.acts.layers)):
+                    total = 0.0
+                    pairs = 0.0
+                    for name in np.unique(relation):
+                        here = relation == name
+                        n_pos = int(labels[here].sum())
+                        n_neg = int(here.sum()) - n_pos
+                        if n_pos and n_neg:
+                            total += (
+                                n_pos
+                                * n_neg
+                                * float(auroc(scores[k][here], labels[here]))
+                            )
+                            pairs += n_pos * n_neg
+                    assert held[m, 0, s, k] == pytest.approx(
+                        total / pairs, abs=1e-12
+                    )
