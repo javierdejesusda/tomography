@@ -466,6 +466,42 @@ def test_python_dash_m_exits_with_the_code_of_main(tmp_path: Path) -> None:
     assert "no finished runs" in completed.stderr
 
 
+def test_export_copies_runs_and_plot_all_works_on_the_copy(
+    experiments_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_experiment(experiments_dir, "d1_dummy")
+    source = tmp_path / "source"
+    run = _run_experiment(capsys, "d1", source, "--set", "n=4")
+    dest = tmp_path / "dest"
+
+    code, printed = _run_cli(capsys, "export", "--out", str(dest), str(source))
+
+    assert code == 0
+    exported = dest / "d1" / "gpt2" / run.name
+    assert (exported / "result.json").is_file()
+    assert any(run.name in word for word in printed)
+    assert main(["plot", "all", "--out", str(dest)]) == 0
+    assert (exported / "figures" / "result.txt").read_text("utf-8") == "4"
+
+
+def test_export_reports_a_collision_as_a_usage_error(
+    experiments_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_experiment(experiments_dir, "d1_dummy")
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _run_experiment(capsys, "d1", first)
+    _run_experiment(capsys, "d1", second)
+    dest = tmp_path / "dest"
+
+    error = _usage_error(
+        capsys, "export", "--out", str(dest), str(first), str(second)
+    )
+
+    assert "two runs share" in error
+    assert not dest.exists()
+
+
 def test_console_script_entry_point_is_declared() -> None:
     """The installed distribution declares the tomography console script."""
     entry_points = importlib.metadata.entry_points(

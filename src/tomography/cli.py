@@ -1,4 +1,4 @@
-"""Command line entry point: `python -m tomography run|plot`."""
+"""Command line entry point: `python -m tomography run|plot|export`."""
 
 import argparse
 from collections.abc import Callable
@@ -15,6 +15,8 @@ import tomography.experiments as experiments_package
 from tomography.experiments.base import EXPERIMENT_ID
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
+from tomography.export import ExportError
+from tomography.export import export_runs
 
 
 @dataclasses.dataclass(frozen=True)
@@ -214,6 +216,24 @@ def _plot(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     return 0
 
 
+def _export(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    try:
+        report = export_runs([Path(root) for root in args.roots], args.out)
+    except ExportError as error:
+        parser.error(str(error))
+    for path in report.skipped:
+        print(f"skipping unfinished run: {path}", file=sys.stderr)
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    for run in report.exported:
+        print(f"{run.status} {run.key} {run.size} bytes")
+    print(
+        f"exported {len(report.exported)} runs, "
+        f"{report.total_bytes} bytes, to {args.out}"
+    )
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tomography", description="Run experiments and plot results."
@@ -244,6 +264,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     plot.add_argument("--out", default="results", help="results root folder")
     plot.set_defaults(handler=_plot)
+    export = commands.add_parser(
+        "export", help="copy finished runs into a committable results tree"
+    )
+    export.add_argument(
+        "--out", required=True, help="results root folder to write"
+    )
+    export.add_argument(
+        "roots", nargs="+", help="folders holding run directories"
+    )
+    export.set_defaults(handler=_export)
     return parser
 
 
