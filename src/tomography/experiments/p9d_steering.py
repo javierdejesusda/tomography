@@ -649,7 +649,9 @@ def _dose_rows(
         paired difference of the steering slope to the slope of that arm,
         which also carries the gap of the absolute mean slopes with its
         interval (None on the rows of one arm); none if no item has a finite
-        slope.
+        steering slope. A row without a finite item has `n` 0 and None in
+        every other cell, so a random arm without finite slopes does not
+        stop the run.
     """
     slopes = {arm: item_slopes(coeffs, v) for arm, v in values.items()}
     if not np.isfinite(slopes[STEERING_ARM]).any():
@@ -664,6 +666,10 @@ def _dose_rows(
         reference = slopes[vs] if vs else None
         own = slopes[arm]
         used = own if reference is None else own - reference
+        n = int(np.isfinite(used).sum())
+        if n == 0:
+            rows.append([group, side, metric, arm, vs, 0, *[None] * 7])
+            continue
         slope, lo, hi = slope_ci(own, reference, n_boot=n_boot, seed=seed)
         gap: list[float | None] = [None, None, None]
         if reference is not None:
@@ -679,7 +685,7 @@ def _dose_rows(
                 metric,
                 arm,
                 vs,
-                int(np.isfinite(used).sum()),
+                n,
                 slope,
                 lo,
                 hi,
@@ -704,8 +710,9 @@ def _headline(
         The steering slope on the unknown side with its interval, the
         largest absolute random slope, the paired difference to each random
         arm, the gap of the absolute mean slopes to each random arm and
-        whether every one of those intervals lies above zero; None if the
-        run did not score that contrast.
+        whether every one of those intervals lies above zero, which is
+        false for an arm whose gap is missing; None if the run did not score
+        that contrast.
     """
     rows = [r for r in dose if list(r[:3]) == [group, "unknown", metric]]
     own = {r[3]: r for r in rows if not r[4]}
@@ -722,11 +729,18 @@ def _headline(
         "lat_lo": lat[7],
         "lat_hi": lat[8],
         "max_abs_random_slope": max(
-            abs(r[6]) for arm, r in own.items() if arm != STEERING_ARM
+            (
+                abs(r[6])
+                for arm, r in own.items()
+                if arm != STEERING_ARM and r[6] is not None
+            ),
+            default=0.0,
         ),
         "differences": differences,
         "abs_gaps": abs_gaps,
-        "distinguishable": all(lo > 0 for _, lo, _ in abs_gaps.values()),
+        "distinguishable": all(
+            lo is not None and lo > 0 for _, lo, _ in abs_gaps.values()
+        ),
     }
 
 

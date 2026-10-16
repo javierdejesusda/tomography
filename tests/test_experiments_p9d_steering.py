@@ -1909,3 +1909,43 @@ def test_an_item_without_a_finite_slope_is_not_counted() -> None:
     )
 
     assert [r[5] for r in rows] == [2, 2, 2]
+
+
+def test_a_random_arm_without_slopes_leaves_empty_rows() -> None:
+    step = [1.0, 1.0, 0.0, 0.0, 0.0]
+    nothing = [np.nan] * 5
+    values = {
+        "lat0": _planted_values(step, step),
+        "random0": _planted_values(nothing, nothing),
+        "random1": _planted_values(step[::-1], step[::-1]),
+    }
+
+    rows = p9d_steering._dose_rows(
+        "g", "unknown", "abstention", DOSE_GRID, values, n_boot=20, seed=0
+    )
+
+    by_key = {(r[3], r[4]): r for r in rows}
+    assert len(rows) == 5
+    assert by_key[("random0", "")][5:] == [0] + [None] * 7
+    assert by_key[("lat0", "random0")][5:] == [0] + [None] * 7
+    assert by_key[("lat0", "random1")][5] == 2
+    headline = p9d_steering._headline(rows, "g", "abstention")
+    assert headline["distinguishable"] is False
+    assert headline["max_abs_random_slope"] == pytest.approx(1.5)
+
+
+def test_items_finite_in_only_one_arm_leave_the_contrast_empty() -> None:
+    step = [1.0, 1.0, 0.0, 0.0, 0.0]
+    nothing = [np.nan] * 5
+    values = {
+        "lat0": _planted_values(step, nothing),
+        "random0": _planted_values(nothing, step),
+    }
+
+    rows = p9d_steering._dose_rows(
+        "g", "unknown", "abstention", DOSE_GRID, values, n_boot=20, seed=0
+    )
+
+    by_key = {(r[3], r[4]): r for r in rows}
+    assert by_key[("random0", "")][5] == 1
+    assert by_key[("lat0", "random0")][5:] == [0] + [None] * 7

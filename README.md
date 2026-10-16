@@ -561,7 +561,8 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   absolute mean steering slope minus the absolute mean slope of that arm, with a paired item bootstrap
   (`abs_gap`, `abs_lo`, `abs_hi`). The claim is that steering is distinguishable from any edit of this size
   only if, for every random arm, the lower bound of that gap is above zero, that is, steering moves the
-  metric more than each random arm does, whatever the sign. The signed difference of the slopes is also
+  metric more than each random arm does, whatever the sign (a random arm without
+  finite slopes makes the claim false). The signed difference of the slopes is also
   reported, and the largest absolute random slope gives the scale.
   The headline cell is the unknown side of the `direction_type` contrast, where the entropy is used in shift
   mode because the answer log-probability needs a gold answer and only `obscure_real` has them on its
