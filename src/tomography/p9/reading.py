@@ -11,7 +11,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace
 import hashlib
-from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -23,6 +22,7 @@ from tomography.knowledge import few_shot_prompt
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.p9.pool import LabeledItem
+from tomography.p9.risk import TEXT_ANALYZERS
 from tomography.p9.risk import grouped_auroc
 from tomography.p9.risk import popularity_auroc
 from tomography.p9.risk import text_scores
@@ -55,7 +55,6 @@ WITHIN_BASELINES: tuple[str, ...] = (
     "text_char_within",
     "popularity_within",
 )
-_ANALYZERS: tuple[Literal["word", "char"], ...] = ("word", "char")
 _HALF_SALT = "p9-split-half"
 _HALF_MIN_PAIRS = 2
 
@@ -456,7 +455,7 @@ def surface_baselines(pool: TypePool) -> dict[str, float | None]:
     values = [i.example.meta.get("popularity") for i in test]
     counts = [v for v in values if isinstance(v, int)]
     baselines: dict[str, float | None] = {}
-    for analyzer in _ANALYZERS:
+    for analyzer in TEXT_ANALYZERS:
         scores = text_scores(
             train_texts, train_labels, test_texts, analyzer=analyzer
         )

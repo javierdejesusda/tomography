@@ -6,9 +6,7 @@ slot `{scenario}` (App. D.3.1 writes `Scenario: <scenario>` for other concepts).
 The paper does not say how a question and a choice become a scenario, nor how
 a level is attached to the prompt, so two choices here are assumptions: the
 scenario is "Question: {question}" and "Answer: {choice}" on two lines, and
-each level is scored as the continuation " " plus the level. Two text-only
-baselines, a word and a character TF-IDF classifier on the answer texts, show
-how much of the task the surface form of the answers carries.
+each level is scored as the continuation " " plus the level.
 """
 
 from collections.abc import Callable
@@ -16,7 +14,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from typing import Literal
 from typing import cast
 
 import numpy as np
@@ -46,6 +43,8 @@ from tomography.judges import sequence_logprob
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.p9.risk import TEXT_ANALYZERS
+from tomography.p9.risk import TextAnalyzer
 from tomography.p9.risk import text_scores
 from tomography.reading.directions import Method
 from tomography.reading.metrics import best_layer
@@ -65,7 +64,6 @@ HEURISTIC_LEVELS = (
 )
 LAYER_RULES = ("validation-layer", "best-layer")
 SOURCES = ("truthfulqa", "arc", "honesty")
-TEXT_ANALYZERS: tuple[Literal["word", "char"], ...] = ("word", "char")
 HEURISTIC_TEMPLATE = (
     "USER: What is the amount of truthfulness of the following scenario? "
     "Please answer using EXACTLY one of the following:\n"
@@ -310,17 +308,11 @@ def _baseline(
 def _text_baseline_scores(
     train: Sequence[ChoiceExample],
     test: Sequence[ChoiceExample],
-    analyzer: Literal["word", "char"],
+    analyzer: TextAnalyzer,
 ) -> list[NDArray[np.float64]]:
-    train_texts = [choice for item in train for choice in item.choices]
-    train_labels = np.array(
-        [
-            int(j == item.correct)
-            for item in train
-            for j in range(len(item.choices))
-        ],
-        dtype=np.int64,
-    )
+    flat = [example for item in train for example in item.flatten()]
+    train_texts = [example.text for example in flat]
+    train_labels = np.array([example.label for example in flat], dtype=np.int64)
     test_texts = [choice for item in test for choice in item.choices]
     return _split(
         text_scores(train_texts, train_labels, test_texts, analyzer=analyzer),

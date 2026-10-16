@@ -469,12 +469,16 @@ def orient_on_train(
     return -test_scores
 
 
+type TextAnalyzer = Literal["word", "char"]
+TEXT_ANALYZERS: tuple[TextAnalyzer, ...] = ("word", "char")
+
+
 def text_scores(
     train_texts: Sequence[str],
     train_labels: NDArray[np.int64],
     test_texts: Sequence[str],
     *,
-    analyzer: Literal["word", "char"],
+    analyzer: TextAnalyzer,
 ) -> NDArray[np.float64]:
     """Scores of a text-only classifier, the surface-form baseline of a reader.
 
