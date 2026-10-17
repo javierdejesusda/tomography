@@ -159,11 +159,11 @@ under a minute on a CPU once the weights are cached.
 `load_model(key)` loads a checkpoint from the Hugging Face Hub, on CUDA when available and on the CPU
 otherwise. `device=` and `dtype=` override the defaults.
 
-| Family             | Keys                                           | Chat format                      |
-| ------------------ | ---------------------------------------------- | -------------------------------- |
-| GPT-2              | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` | plain tags                       |
-| Qwen3 base         | `qwen3-0.6b-base`, `qwen3-1.7b-base`           | plain tags                       |
-| Qwen3 post-trained | `qwen3-0.6b`, `qwen3-1.7b`                     | chat template, thinking disabled |
+| Family             | Keys                                                  | Chat format                      |
+| ------------------ | ----------------------------------------------------- | -------------------------------- |
+| GPT-2              | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl`        | plain tags                       |
+| Qwen3 base         | `qwen3-0.6b-base`, `qwen3-1.7b-base`, `qwen3-4b-base` | plain tags                       |
+| Qwen3 post-trained | `qwen3-0.6b`, `qwen3-1.7b`, `qwen3-4b`                | chat template, thinking disabled |
 
 The default dtype is float32 for the GPT-2 checkpoints (float16 for `gpt2-xl`) and bfloat16 for Qwen3. The
 registry is `MODELS` and the architecture specs are `ARCHS` in [`model.py`](src/tomography/model.py); any
@@ -874,6 +874,8 @@ Models, loaded by `load_model`, `load_judge` and `load_decoder`. Experiments tha
 | `qwen3-1.7b`                  | `Qwen/Qwen3-1.7B`                                            | 70d244c  | bfloat16        | experiments      | Apache-2.0         |
 | `qwen3-0.6b-base`             | `Qwen/Qwen3-0.6B-Base`                                       | da87bfb  | bfloat16        | experiments      | Apache-2.0         |
 | `qwen3-0.6b`                  | `Qwen/Qwen3-0.6B`                                            | c1899de  | bfloat16        | experiments      | Apache-2.0         |
+| `qwen3-4b-base`               | `Qwen/Qwen3-4B-Base`                                         | 906bfd4  | bfloat16        | experiments      | Apache-2.0         |
+| `qwen3-4b`                    | `Qwen/Qwen3-4B`                                              | 1cfa9a7  | bfloat16        | experiments      | Apache-2.0         |
 | `sentiment-primary`           | `siebert/sentiment-roberta-large-english`                    | 74cea61  | library default | `c1`, `m1`, `p7` | none stated        |
 | `sentiment-secondary`         | `distilbert/distilbert-base-uncased-finetuned-sst-2-english` | 714eb0f  | library default | `c1`, `m1`, `p7` | Apache-2.0         |
 | `emotion-primary`             | `j-hartmann/emotion-english-distilroberta-base`              | 0e1cd91  | library default | `c2`             | none stated        |
