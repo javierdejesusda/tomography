@@ -452,6 +452,11 @@ def _preflight(
     args: argparse.Namespace, deps: Deps, state: Mapping[str, Any]
 ) -> list[str]:
     result = _remote(args, deps, state, _PREFLIGHT)
+    if result.returncode:
+        raise CloudError(
+            f"the preflight over ssh failed (exit {result.returncode}); "
+            "is the connection up?"
+        )
     return [
         line[len("missing ") :].strip()
         for line in result.stdout.splitlines()
@@ -551,6 +556,23 @@ def _wait_for_ssh(
     return True
 
 
+def _pod_error(
+    error: BaseException, deps: Deps, pod_id: str, next_step: str
+) -> CloudError:
+    if isinstance(error, CloudError):
+        detail = str(error)
+    elif isinstance(error, KeyboardInterrupt):
+        detail = "interrupted"
+    else:
+        detail = f"{type(error).__name__}: {error}"
+    key = deps.env.get("RUNPOD_API_KEY")
+    if key:
+        detail = detail.replace(key, "[redacted]")
+    return CloudError(
+        f"{detail}; pod {pod_id} may still be running, {next_step}"
+    )
+
+
 def _stop_pod(
     args: argparse.Namespace, deps: Deps, api: Api, state: dict[str, Any]
 ) -> None:
@@ -566,6 +588,7 @@ def _reach_pod(
     api: Api,
     state: dict[str, Any],
     pod: Mapping[str, Any],
+    next_step: str,
 ) -> tuple[str, int] | None:
     pod_id = state["pod_id"]
     deadline = deps.clock() + args.timeout_minutes * 60
@@ -573,7 +596,7 @@ def _reach_pod(
         if deps.clock() >= deadline:
             deps.out(
                 f"pod {pod_id} did not expose ssh within "
-                f"{args.timeout_minutes:g} minutes; run `down` to remove it"
+                f"{args.timeout_minutes:g} minutes; {next_step}"
             )
             return None
         deps.sleep(_POLL_SECONDS)
@@ -587,7 +610,7 @@ def _reach_pod(
     if not _wait_for_ssh(args, deps, state):
         deps.out(
             f"ssh to pod {pod_id} did not answer within "
-            f"{args.ssh_timeout_minutes:g} minutes; run `down` to remove it"
+            f"{args.ssh_timeout_minutes:g} minutes; {next_step}"
         )
         return None
     return endpoint
@@ -617,7 +640,9 @@ def _bring_up(
     pod: Mapping[str, Any],
 ) -> int:
     pod_id = state["pod_id"]
-    endpoint = _reach_pod(args, deps, api, state, pod)
+    endpoint = _reach_pod(
+        args, deps, api, state, pod, "run `down` to remove it"
+    )
     if endpoint is None:
         return 1
     missing = _preflight(args, deps, state)
@@ -680,6 +705,11 @@ def cmd_up(args: argparse.Namespace, deps: Deps) -> int:
             "console and delete it there"
         ) from error
     pod = api.check(status, created, "create pod")
+    if not isinstance(pod, Mapping) or not pod.get("id"):
+        raise CloudError(
+            "the create response had no pod id; check the RunPod console "
+            "and delete any new pod there"
+        )
     pod_id = str(pod["id"])
     identity = args.public_key.expanduser().with_suffix("")
     state: dict[str, Any] = {
@@ -697,10 +727,9 @@ def cmd_up(args: argparse.Namespace, deps: Deps) -> int:
     deps.out(f"created pod {pod_id}; waiting for ssh")
     try:
         return _bring_up(args, deps, api, state, pod)
-    except CloudError as error:
-        raise CloudError(
-            f"{error}; pod {pod_id} may still be running, run `down` to "
-            "remove it"
+    except (Exception, KeyboardInterrupt) as error:
+        raise _pod_error(
+            error, deps, pod_id, "run `down` to remove it"
         ) from error
 
 
@@ -947,7 +976,8 @@ def cmd_start(args: argparse.Namespace, deps: Deps) -> int:
         deps,
         state,
         f"pid=$(cat {pid_file} 2>/dev/null); "
-        'if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; '
+        'if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null '
+        "&& tr '\\0' ' ' </proc/$pid/cmdline | grep -q chain.sh; "
         "then echo CHAIN_LIVE; fi",
     )
     if "CHAIN_LIVE" in live.stdout:
@@ -979,9 +1009,14 @@ def cmd_start(args: argparse.Namespace, deps: Deps) -> int:
     )
     if _remote(args, deps, state, command).returncode:
         raise CloudError("launching the chain failed")
+    state["started"] = _now_iso()
+    state.pop("pulled", None)
+    _save_state(args.state, state)
     deps.out(
         "chain started; the watchdog stops the pod after "
-        f"{max_seconds / 3600:g} h or {args.grace_minutes:g} min after the end"
+        f"{max_seconds / 3600:g} h or {args.grace_minutes:g} min after the "
+        "end. "
+        "A stopped pod still bills its volume disk until `pull` and `down`"
     )
     return 0
 
@@ -1002,7 +1037,8 @@ def _report_if_not_running(deps: Deps, state: Mapping[str, Any]) -> bool:
     ):
         deps.out(
             f"pod {pod_id} is stopped ({body.get('desiredStatus')}); "
-            "run `resume` to read its log or pull the results"
+            "run `resume` to read its log or pull the results. A stopped "
+            "pod still bills its volume disk until you `pull` and `down`"
         )
         return True
     return False
@@ -1125,6 +1161,8 @@ def cmd_pull(args: argparse.Namespace, deps: Deps) -> int:
                 f"the archive is not valid: {errors[0]}", args.dest, extracted
             )
         )
+    state["pulled"] = _now_iso()
+    _save_state(args.state, state)
     deps.out(f"pulled {remote} into {args.dest}")
     return 0
 
@@ -1172,8 +1210,17 @@ def cmd_resume(args: argparse.Namespace, deps: Deps) -> int:
     state["status"] = "starting"
     _save_state(args.state, state)
     try:
-        endpoint = _reach_pod(args, deps, api, state, {})
+        endpoint = _reach_pod(
+            args,
+            deps,
+            api,
+            state,
+            {},
+            "stopping it again; run `resume` to retry, then `pull` "
+            "before `down`",
+        )
         if endpoint is None:
+            _stop_pod(args, deps, api, state)
             return 1
         gpu = _remote(
             args,
@@ -1197,9 +1244,9 @@ def cmd_resume(args: argparse.Namespace, deps: Deps) -> int:
             )
             return 1
         _arm_deadline(args, deps, state, missing)
-    except CloudError as error:
-        raise CloudError(
-            f"{error}; pod {pod_id} may be running, run `down` to remove it"
+    except (Exception, KeyboardInterrupt) as error:
+        raise _pod_error(
+            error, deps, pod_id, "`pull` any results, then run `down`"
         ) from error
     deps.out(
         f"pod {pod_id} resumed at {endpoint[0]}:{endpoint[1]}; the container "
@@ -1224,6 +1271,14 @@ def cmd_down(args: argparse.Namespace, deps: Deps) -> int:
     state = _load_state(args.state)
     api = Api(deps)
     pod_id = state["pod_id"]
+    if state.get("started") and not state.get("pulled"):
+        lost = f"results under {state.get('remote_out')} on pod {pod_id}"
+        if not args.discard:
+            raise CloudError(
+                f"the {lost} were not pulled; run `resume` if the pod is "
+                "stopped, then `pull`, or pass --discard to delete them"
+            )
+        deps.out(f"WARNING: discarding the {lost}")
     status, body = api.request("DELETE", f"/pods/{pod_id}")
     if status == 404:
         deps.out(f"pod {pod_id} was already gone")
@@ -1324,6 +1379,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     down = add("down", cmd_down)
     down.add_argument("--timeout-minutes", type=float, default=2)
+    down.add_argument("--discard", action="store_true")
     return parser
 
 

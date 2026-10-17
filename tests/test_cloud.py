@@ -139,6 +139,7 @@ class Harness:
         self.git_ok = True
         self.cache_present = True
         self.gpu_ok = True
+        self.preflight_rc = 0
         self.missing: list[str] = []
         self.chain_live = False
         self.ssh_failures = 0
@@ -172,7 +173,8 @@ class Harness:
             return cloud.CommandResult(0, "")
         if "/proc/1/environ" in command and "runpodctl" in command:
             return cloud.CommandResult(
-                0, "".join(f"missing {name}\n" for name in self.missing)
+                self.preflight_rc,
+                "".join(f"missing {name}\n" for name in self.missing),
             )
         if "CHAIN_LIVE" in command:
             return cloud.CommandResult(
@@ -1297,12 +1299,13 @@ def test_resume_reports_a_start_error_without_the_key(tmp_path: Path) -> None:
     assert API_KEY not in h.output()
 
 
-def test_resume_timeout_keeps_the_state_for_down(tmp_path: Path) -> None:
+def test_resume_timeout_stops_the_pod_again(tmp_path: Path) -> None:
     h = stopped_harness(tmp_path, [(200, None), (200, starting_pod())])
     assert h.main("resume", "--max-hours", "2", "--timeout-minutes", "1") == 1
-    assert "down" in h.output()
+    assert h.transport.calls[-1][:2] == ("POST", f"{BASE}/pods/pod1/stop")
+    assert "resume" in h.output()
+    assert h.state()["status"] == "stopped"
     assert h.state()["pod_id"] == "pod1"
-    assert h.state()["ip"] == "203.0.113.7"
 
 
 def test_resume_stops_the_pod_again_when_no_gpu_is_attached(
@@ -1388,3 +1391,196 @@ def test_pull_does_not_claim_a_partial_extraction_when_nothing_landed(
     h.runner.stream_data = make_tar([("/abs_evil.txt", b"y")])
     assert h.main("pull", "--dest", str(tmp_path / "pulled")) == 1
     assert "partial" not in h.output()
+
+
+def test_resume_stops_the_pod_again_when_ssh_never_answers(
+    tmp_path: Path,
+) -> None:
+    h = stopped_harness(
+        tmp_path, [(200, None), (200, resumed_pod()), (200, None)]
+    )
+    h.ssh_failures = 10_000
+    code = h.main("resume", "--max-hours", "2", "--ssh-timeout-minutes", "1")
+    assert code == 1
+    assert h.transport.calls[-1][:2] == ("POST", f"{BASE}/pods/pod1/stop")
+    assert h.state()["status"] == "stopped"
+
+
+def test_pull_records_the_time_it_finished(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    pushed(h, started="2026-01-01T00:00:00+00:00")
+    h.runner.stream_data = make_tar([("a.txt", b"x")])
+    assert h.main("pull", "--dest", str(tmp_path / "pulled")) == 0
+    assert h.state()["pulled"]
+
+
+def test_a_failed_pull_does_not_record_anything(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    pushed(h, started="2026-01-01T00:00:00+00:00")
+    h.runner.stream_code = 2
+    assert h.main("pull", "--dest", str(tmp_path / "pulled")) == 1
+    assert "pulled" not in h.state()
+
+
+def test_start_records_the_launch_and_clears_an_old_pull(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    pushed(h, pulled="2026-01-01T00:00:00+00:00")
+    started(h)
+    state = h.state()
+    assert state["started"]
+    assert "pulled" not in state
+
+
+def test_down_refuses_to_discard_unpulled_results(tmp_path: Path) -> None:
+    h = Harness(tmp_path, [(204, None), (404, None)])
+    pushed(h, started="2026-01-01T00:00:00+00:00")
+    assert h.main("down") == 1
+    assert OUT in h.output()
+    assert "pull" in h.output()
+    assert "--discard" in h.output()
+    assert h.transport.calls == []
+    assert h.state()["status"] == "running"
+
+
+def test_down_discard_deletes_with_a_loud_warning(tmp_path: Path) -> None:
+    h = Harness(tmp_path, [(204, None), (404, None)])
+    pushed(h, started="2026-01-01T00:00:00+00:00")
+    assert h.main("down", "--discard") == 0
+    assert "WARNING" in h.output()
+    assert OUT in h.output()
+    assert h.state()["status"] == "deleted"
+
+
+def test_down_deletes_after_a_pull(tmp_path: Path) -> None:
+    h = Harness(tmp_path, [(204, None), (404, None)])
+    pushed(
+        h,
+        started="2026-01-01T00:00:00+00:00",
+        pulled="2026-01-02T00:00:00+00:00",
+    )
+    assert h.main("down") == 0
+    assert h.state()["status"] == "deleted"
+
+
+def test_down_needs_no_pull_before_any_start(tmp_path: Path) -> None:
+    h = Harness(tmp_path, [(204, None), (404, None)])
+    pushed(h)
+    assert h.main("down") == 0
+
+
+def test_a_dropped_connection_fails_the_preflight_on_up(
+    tmp_path: Path,
+) -> None:
+    h = up_harness(tmp_path)
+    h.preflight_rc = 255
+    assert up(h) == 1
+    assert "preflight" in h.output()
+    assert "pod1" in h.output()
+    assert "DELETE" not in [c[0] for c in h.transport.calls]
+
+
+def test_a_dropped_connection_fails_the_preflight_on_start(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    h.preflight_rc = 255
+    pushed(h)
+    code = h.main("start", "--spec", "chain11.toml", "--max-hours", "1")
+    assert code == 1
+    assert "preflight" in h.output()
+    assert not [r for r in h.runner.runs if r[1]]
+
+
+def test_a_dropped_connection_fails_the_preflight_on_resume(
+    tmp_path: Path,
+) -> None:
+    h = stopped_harness(
+        tmp_path, [(200, None), (200, resumed_pod()), (200, None)]
+    )
+    h.preflight_rc = 255
+    assert h.main("resume", "--max-hours", "2") == 1
+    assert "preflight" in h.output()
+    assert "pod1" in h.output()
+
+
+def test_up_keeps_the_pod_id_when_the_port_mapping_is_malformed(
+    tmp_path: Path,
+) -> None:
+    pod = ready_pod()
+    pod["portMappings"] = {"22": "not-a-port"}
+    h = up_harness(tmp_path, [(201, pod)])
+    assert up(h) == 1
+    assert "pod1" in h.output()
+    assert "down" in h.output()
+    assert "ValueError" in h.output()
+
+
+def test_up_names_the_pod_when_interrupted(tmp_path: Path) -> None:
+    h = up_harness(tmp_path)
+
+    def interrupt(argv: Sequence[str]) -> cloud.CommandResult:
+        raise KeyboardInterrupt
+
+    h.runner.handler = interrupt
+    assert up(h) == 1
+    assert "pod1" in h.output()
+    assert "down" in h.output()
+
+
+def test_up_reports_a_create_response_without_an_id(tmp_path: Path) -> None:
+    h = up_harness(tmp_path, [(201, {"unexpected": True})])
+    assert up(h) == 1
+    assert "no pod id" in h.output()
+    assert "console" in h.output()
+
+
+def test_up_survives_a_known_hosts_write_error(tmp_path: Path) -> None:
+    h = up_harness(tmp_path)
+    h.known_hosts().parent.mkdir(parents=True, exist_ok=True)
+    h.known_hosts().mkdir()
+    assert up(h) == 1
+    assert "pod1" in h.output()
+    assert "down" in h.output()
+
+
+def test_resume_names_the_pod_when_the_probe_blows_up(tmp_path: Path) -> None:
+    h = stopped_harness(tmp_path, [(200, None), (200, resumed_pod())])
+
+    def explode(argv: Sequence[str]) -> cloud.CommandResult:
+        raise RuntimeError("boom")
+
+    h.runner.handler = explode
+    assert h.main("resume", "--max-hours", "2") == 1
+    assert "pod1" in h.output()
+    assert "pull" in h.output()
+
+
+def test_status_on_a_stopped_pod_reminds_about_the_volume_bill(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path, [(200, {"id": "pod1", "desiredStatus": "EXITED"})])
+    pushed(h)
+    assert h.main("status") == 0
+    assert "bills" in h.output()
+    assert "volume" in h.output()
+
+
+def test_start_reminds_that_a_stopped_pod_still_bills(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    started(h)
+    assert "volume" in h.output()
+    assert "down" in h.output()
+
+
+def test_the_live_chain_guard_checks_the_process_command_line(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    started(h)
+    command = next(c for c in h.commands() if "CHAIN_LIVE" in c)
+    assert "/proc/$pid/cmdline" in command
+    assert "chain.sh" in command
