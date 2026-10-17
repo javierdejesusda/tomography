@@ -943,10 +943,10 @@ def test_start_counts_only_chain_done_lines_after_the_launch_offset(
 ) -> None:
     h = Harness(tmp_path)
     pushed(h)
-    _, dog, launches = started(h)
+    _, dog, _ = started(h)
     assert "log_offset" in dog
     assert "tail -c +" in dog
-    joined = " ".join(launches)
+    joined = " ".join(h.commands())
     assert "stat -c %s" in joined
     assert "/workspace/run/log_offset" in joined
     assert CHAIN_LOG in joined
@@ -962,10 +962,48 @@ def test_start_launches_both_detached(tmp_path: Path) -> None:
             f"setsid nohup bash /workspace/run/{script} "
             f"> /workspace/run/{script}.out 2>&1 < /dev/null &"
         ) in joined
-    assert "touch /workspace/run/started" in joined
+    assert "touch /workspace/run/started" in " ".join(h.commands())
     assert API_KEY not in repr(h.runner.runs)
     launch_run = next(r for r in h.runner.runs if "setsid nohup" in r[0][-1])
     assert launch_run[0][1] == "-n"
+
+
+def test_start_launches_with_nothing_chained_before_the_background_jobs(
+    tmp_path: Path,
+) -> None:
+    # `a && b &` backgrounds the whole list, so its subshell keeps the ssh
+    # channel open until the chain ends and `start` never returns.
+    h = Harness(tmp_path)
+    pushed(h)
+    _, _, launches = started(h)
+    assert launches == [
+        "setsid nohup bash /workspace/run/chain.sh "
+        "> /workspace/run/chain.sh.out 2>&1 < /dev/null & "
+        "setsid nohup bash /workspace/run/watchdog.sh "
+        "> /workspace/run/watchdog.sh.out 2>&1 < /dev/null &"
+    ]
+    commands = h.commands()
+    prepare = next(c for c in commands if "touch /workspace/run/started" in c)
+    assert "&" not in prepare.replace("&&", "")
+    assert commands.index(prepare) < commands.index(launches[0])
+
+
+def test_start_stops_when_the_launch_preparation_fails(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    original = h.runner.handler
+
+    def fail_prepare(argv: Sequence[str]) -> cloud.CommandResult:
+        if argv[0] == "ssh" and "touch /workspace/run/started" in argv[-1]:
+            return cloud.CommandResult(1, "")
+        return original(argv)
+
+    h.runner.handler = fail_prepare
+    code = h.main("start", "--spec", "chain11.toml", "--max-hours", "1")
+    assert code == 1
+    assert not [c for c in h.commands() if "setsid nohup" in c]
 
 
 def test_start_uses_the_earlier_of_the_two_deadlines(tmp_path: Path) -> None:

@@ -1039,16 +1039,20 @@ def cmd_start(args: argparse.Namespace, deps: Deps) -> int:
     for name, text in scripts.items():
         _upload_script(args, deps, state, name, text)
     offset = f"{REMOTE_RUN}/log_offset"
-    command = (
+    prepare = (
         f"rm -f {pid_file} {REMOTE_RUN}/chain.exit && "
         f"(stat -c %s {shlex.quote(chain_log)} 2>/dev/null || echo 0) "
-        f"> {offset} && touch {REMOTE_RUN}/started && "
-        f"{_launch_command(list(scripts))}"
+        f"> {offset} && touch {REMOTE_RUN}/started"
     )
     state["started"] = _now_iso()
     state.pop("pulled", None)
     _save_state(args.state, state)
-    if _remote(args, deps, state, command).returncode:
+    if _remote(args, deps, state, prepare).returncode:
+        raise CloudError("preparing the chain launch failed")
+    # A separate command: `a && b &` would background the whole list, and
+    # its subshell would hold the ssh channel open until the chain ends.
+    launch = _launch_command(list(scripts))
+    if _remote(args, deps, state, launch).returncode:
         raise CloudError("launching the chain failed")
     deps.out(
         "chain started; the watchdog stops the pod after "
