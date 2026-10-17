@@ -244,14 +244,16 @@ class _PathRewriter:
 
     A path into an exported run becomes `results/<key>` (plus what follows
     the run folder), into a run that is not exported `<key>`, and any other
-    path `<external>/<last name>`. A path recorded on another machine is
-    matched to a run by its `<experiment>/<model>/<config hash>` tail.
+    path `<external>/<last name>`. A POSIX path recorded on another machine
+    (a rented pod) is matched to a run by its
+    `<experiment>/<model>/<config hash>` tail.
     """
 
     def __init__(
         self, index: Mapping[str, RunInfo], exported_keys: set[str]
     ) -> None:
         self._index = index
+        self._by_key = {run.key: run for run in index.values()}
         self._exported = exported_keys
         self._seen: set[str] = set()
         self.warnings: list[str] = []
@@ -301,7 +303,7 @@ class _PathRewriter:
         if located is not None:
             run, rest = located
             return self._named(run, rest)
-        keyed = self._locate_by_key(segments)
+        keyed = self._locate_by_key(segments) if text.startswith("/") else None
         if keyed is not None:
             run, rest = keyed
             return self._named(run, rest)
@@ -327,7 +329,6 @@ class _PathRewriter:
         This maps the paths a run recorded on another machine (for example
         `/workspace/out/...` on a rented pod) to the pulled copy of the run.
         """
-        by_key = {run.key: run for run in self._index.values()}
         parts: list[str] = []
         for segment in segments:
             if segment == "..":
@@ -336,7 +337,7 @@ class _PathRewriter:
             elif segment != ".":
                 parts.append(segment)
         for end in range(len(parts), 2, -1):
-            run = by_key.get("/".join(parts[end - 3 : end]))
+            run = self._by_key.get("/".join(parts[end - 3 : end]))
             if run is not None:
                 return run, parts[end:]
         return None
