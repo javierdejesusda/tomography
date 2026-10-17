@@ -780,13 +780,13 @@ once on the one GPU:
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `slots` | `1` | The most jobs that run at the same time (an integer of at least 1). |
-| `min_free_gpu_mib` | `0` | While another job runs, a job starts only when the GPU reports at least this much free memory (0 turns the check off). A failed `nvidia-smi` query counts as not enough. A job never waits on this when none runs. |
-| `start_gap_seconds` | `60` | The least time between two job starts when `slots` is above 1, so a job has allocated its memory before the free memory is read for the next. |
+| `min_free_gpu_mib` | `0` | While another job runs, a job starts only when the GPU reports at least this much free memory (0 turns the check off). A failed `nvidia-smi` query counts as not enough. The check does not apply when no job is running: the first job, or the next one after all running jobs ended, starts at once. |
+| `start_gap_seconds` | `60` | The least time between two job starts when `slots` is above 1, so a job has allocated its memory before the free memory is read for the next. It does not apply when no job is running, so the first job, or the next one after all running jobs ended, starts at once. A retry passes the same gap and gate when another job runs. |
 
 Jobs still start in spec order. A job is ready when every job in its `run_dir_from` has ended, and the first
 ready job starts when a slot is free and the gate passes, so a job that waits on a dependency does not hold back a
 later independent one. The retries of a job run one after another in its slot. A job that fails does not stop the
-others, and Ctrl-C or SIGTERM stops every running job. With `slots = 1` the chain behaves as before.
+others, and Ctrl-C or SIGTERM stops every running job together, so a child that ignores SIGTERM does not delay the others. With `slots = 1` the chain behaves as before.
 
 With several jobs the log lines interleave, and each names its job. The `peak_gpu` of an `END` line is the
 device-wide peak while that job ran, so it includes the other jobs. A `HEARTBEAT` line adds `gpu_util=<percent>`
