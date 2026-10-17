@@ -16,6 +16,7 @@ from datetime import date
 from pathlib import Path
 import re
 from typing import Literal
+import unicodedata
 
 from tomography.datasets.records import Split
 from tomography.datasets.records import assign_splits
@@ -338,9 +339,10 @@ def parse_side(
     An entity is dropped for: more than one best-rank statement (the value
     is ambiguous, for example heights by sex), unless the side sets
     `union_statements`; fewer than `min_sitelinks` sitelinks; a missing
-    label or a label that is just its item id; for a taxon side, a label
-    equal to its scientific name (compared ignoring case), so only common
-    names remain; a statement without a unit in the side's table
+    label, a label that is just its item id or a label with a letter outside
+    the Latin script (accented Latin letters are kept); for a taxon side, a
+    label equal to its scientific name (compared ignoring case), so only
+    common names remain; a statement without a unit in the side's table
     (`LENGTH_UNITS` or `TIME_UNITS`) or with a non-positive amount.
 
     A range statement must have bounds with lower < upper, the amount
@@ -422,7 +424,7 @@ def _entity_id(row: Mapping[str, str]) -> str:
 
 def _has_common_name(rows: list[Mapping[str, str]], side: Side) -> bool:
     label = rows[0].get("itemLabel", "")
-    if not label or _ITEM_ID.fullmatch(label):
+    if not label or _ITEM_ID.fullmatch(label) or not _is_latin(label):
         return False
     if side.taxon:
         names = {
@@ -430,6 +432,14 @@ def _has_common_name(rows: list[Mapping[str, str]], side: Side) -> bool:
         }
         return label.casefold() not in names
     return True
+
+
+def _is_latin(text: str) -> bool:
+    return all(
+        unicodedata.name(char, "").startswith("LATIN")
+        for char in text
+        if char.isalpha()
+    )
 
 
 def _in_base_unit(

@@ -510,6 +510,33 @@ def test_parse_side_drops_an_entity_labelled_by_its_id(label: str) -> None:
     assert _parse([_row(5, label=label)]) == []
 
 
+@pytest.mark.parametrize(
+    "label",
+    [
+        "X-36\u8a66\u9a57\u6a5f",
+        "\u0422\u0443-160",
+        "\u0391\u03b8\u03ae\u03bd\u03b1",
+        "Tower \u0627",
+    ],
+)
+def test_parse_side_drops_a_label_with_a_letter_outside_latin(
+    label: str,
+) -> None:
+    assert _parse([_row(1, label=label)]) == []
+
+
+def test_parse_side_keeps_accented_latin_labels() -> None:
+    labels = [
+        "Torre Gl\u00f2ries",
+        "Bayraktar Ak\u0131nc\u0131",
+        "Super \u00c9tendard",
+        "Stra\u00dfe 7 (2004)",
+    ]
+    rows = [_row(n, label=label) for n, label in enumerate(labels, 1)]
+
+    assert [i.entity for i in _parse(rows)] == labels
+
+
 def test_parse_side_drops_a_taxon_labelled_by_its_scientific_name() -> None:
     rows = [
         _row(1, label="Canis lupus", taxon_name="canis lupus"),
