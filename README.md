@@ -681,10 +681,10 @@ uv run tomography chain run SPEC [--dry-run]
   Windows and Linux. A job that fails is retried at each of its `retry_batch_sizes`, and a job
   can pass the run directory of an earlier job as a config value with `run_dir_from`. Events go to
   `<out>/_chain/<name>.log`; each attempt writes its stdout (the run directory) to `<out>/_chain/<job>/stdout.txt` and
-  its stderr to `run.log` next to it. A job counts as done only when it prints a finished run directory. Its
+  its stderr is appended to `run.log` next to it, one header line per attempt. A job counts as done only when it prints a finished run directory. Its
   `DONE.txt` then records that directory and a hash of the job, so rerunning the command resumes the chain and a
   changed job runs again. A run directory that already exists and is finished is reused, not rerun. Ctrl-C and
-  SIGTERM stop the running job and exit with 130. The exit code is 0 when no job failed, 1 otherwise.
+  SIGTERM and SIGHUP stop the running job and exit with 130. The exit code is 0 when no job failed, 1 otherwise.
   `--dry-run` validates the spec and prints the commands without running anything.
 
   ```toml

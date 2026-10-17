@@ -28,6 +28,8 @@ JOB_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 ON_MISSING = ("skip", "drop")
 TAIL_BYTES = 64 * 1024
 TERMINATE_SECONDS = 10.0
+STDOUT_LINES = 20
+POSIX = os.name == "posix"
 EXISTING_RUN = re.compile(
     r"run directory already exists: (.+?) \(delete it to rerun\)"
 )
@@ -313,6 +315,8 @@ def dry_run_lines(spec: ChainSpec) -> list[str]:
 class Process(Protocol):
     """The part of a running process the runner needs."""
 
+    pid: int
+
     def poll(self) -> int | None:
         """Returns the exit code, or None while the process runs."""
 
@@ -343,25 +347,25 @@ def launch_process(
     stdout_path: Path,
     log_path: Path,
 ) -> subprocess.Popen[bytes]:
-    """Starts a command with stdout and stderr in separate fresh files.
+    """Starts a command with stdout and stderr in separate files.
 
     Args:
         command: The argument vector.
         env: The environment of the process.
         stdout_path: Receives stdout, truncated first.
-        log_path: Receives stderr, truncated first.
+        log_path: Receives stderr, appended to.
 
     Returns:
         The running process, in its own session on POSIX.
     """
-    with stdout_path.open("wb") as out, log_path.open("wb") as log:
+    with stdout_path.open("wb") as out, log_path.open("ab") as log:
         return subprocess.Popen(
             list(command),
             env=dict(env),
             stdin=subprocess.DEVNULL,
             stdout=out,
             stderr=log,
-            start_new_session=os.name == "posix",
+            start_new_session=POSIX,
         )
 
 
@@ -413,11 +417,10 @@ def read_tail(path: Path, size: int = TAIL_BYTES) -> str:
         return handle.read().decode("utf-8", errors="replace")
 
 
-def _last_line(path: Path) -> str | None:
-    for line in reversed(read_tail(path).splitlines()):
-        if line.strip():
-            return line.strip()
-    return None
+def _last_lines(path: Path) -> list[str]:
+    """Returns the last non-empty stdout lines, newest first."""
+    lines = [line.strip() for line in read_tail(path).splitlines()]
+    return [line for line in reversed(lines) if line][:STDOUT_LINES]
 
 
 def is_finished_run(path: str | Path) -> bool:
@@ -469,39 +472,69 @@ def _show(mebibytes: int | None) -> str:
     return "na" if mebibytes is None else str(mebibytes)
 
 
+def _signals(*extra: signal.Signals) -> list[signal.Signals]:
+    names = ["SIGTERM", "SIGHUP"]
+    found = [getattr(signal, name, None) for name in names]
+    return [sig for sig in (*found, *extra) if sig is not None]
+
+
 @contextlib.contextmanager
-def interrupt_on_sigterm() -> Iterator[None]:
-    """Makes SIGTERM raise `KeyboardInterrupt` inside the block.
-
-    Does nothing outside the main thread.
-
-    Yields:
-        Nothing.
-    """
+def _handlers(
+    signals: Sequence[signal.Signals], handler: Any
+) -> Iterator[None]:
     if threading.current_thread() is not threading.main_thread():
         yield
         return
-
-    def handler(signum: int, frame: object) -> None:
-        raise KeyboardInterrupt
-
-    previous = signal.signal(signal.SIGTERM, handler)
+    previous = {sig: signal.signal(sig, handler) for sig in signals}
     try:
         yield
     finally:
-        if previous is not None:
-            signal.signal(signal.SIGTERM, previous)
+        for sig, old in previous.items():
+            if old is not None:
+                signal.signal(sig, old)
 
 
-def _stop(process: Process) -> None:
+def _raise_interrupt(signum: int, frame: object) -> None:
+    raise KeyboardInterrupt
+
+
+def interrupt_on_sigterm() -> contextlib.AbstractContextManager[None]:
+    """Makes SIGTERM and SIGHUP raise `KeyboardInterrupt` in the block.
+
+    Does nothing outside the main thread.
+
+    Returns:
+        A context manager that restores the previous handlers on exit.
+    """
+    return _handlers(_signals(), _raise_interrupt)
+
+
+def _signal_child(process: Process, sig: int, fallback: str) -> None:
+    killpg = getattr(os, "killpg", None)
+    if POSIX and killpg is not None:
+        killpg(process.pid, sig)
+    else:
+        getattr(process, fallback)()
+
+
+def stop_process(process: Process) -> None:
+    """Stops a running child: SIGTERM, then SIGKILL after a grace period.
+
+    On POSIX the signals go to the child's whole process group. Further
+    SIGTERM, SIGHUP and SIGINT are ignored while stopping.
+
+    Args:
+        process: The child.
+    """
     if process.poll() is not None:
         return
-    process.terminate()
-    try:
-        process.wait(timeout=TERMINATE_SECONDS)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
+    with _handlers(_signals(signal.SIGINT), signal.SIG_IGN):
+        _signal_child(process, signal.SIGTERM, "terminate")
+        try:
+            process.wait(timeout=TERMINATE_SECONDS)
+        except subprocess.TimeoutExpired:
+            _signal_child(process, getattr(signal, "SIGKILL", 9), "kill")
+            process.wait()
 
 
 @dataclasses.dataclass
@@ -514,10 +547,13 @@ class _Runner:
     launch: Launcher
     gpu_query: Callable[[], int | None]
 
-    def log(self, event: str) -> None:
-        stamp = datetime.fromtimestamp(self.clock()).isoformat(
+    def _stamp(self) -> str:
+        return datetime.fromtimestamp(self.clock()).isoformat(
             timespec="seconds"
         )
+
+    def log(self, event: str) -> None:
+        stamp = self._stamp()
         path = self.spec.out / "_chain" / f"{self.spec.name}.log"
         with path.open("a", encoding="utf-8") as handle:
             handle.write(f"{stamp} {event}\n")
@@ -532,7 +568,6 @@ class _Runner:
 
     def attempt(self, name: str, command: Sequence[str]) -> _Attempt:
         folder = self.spec.out / "_chain" / name
-        folder.mkdir(parents=True, exist_ok=True)
         stdout_path = folder / "stdout.txt"
         log_path = folder / "run.log"
         env = {
@@ -541,12 +576,19 @@ class _Runner:
             **os.environ,
             **self.spec.env,
         }
-        self.log(f"START {name}")
         start = self.clock()
         try:
+            folder.mkdir(parents=True, exist_ok=True)
+            self.log(f"START {name}")
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write(f"# {self._stamp()} {name}\n")
             process = self.launch(command, env, stdout_path, log_path)
         except (OSError, ValueError) as error:
-            log_path.write_text(f"launch failed: {error}\n", encoding="utf-8")
+            with (
+                contextlib.suppress(OSError),
+                log_path.open("a", encoding="utf-8") as handle,
+            ):
+                handle.write(f"launch failed: {error}\n")
             self.log(f"END {name} exit=-1 seconds=0 peak_gpu=na last=-")
             return _Attempt(-1, launched=False)
         peak: int | None = None
@@ -571,7 +613,7 @@ class _Runner:
             self.log(f"INTERRUPTED {name}")
             raise
         finally:
-            _stop(process)
+            stop_process(process)
         result = self._outcome(code, stdout_path, log_path)
         self.log(
             f"END {name} exit={code} seconds={int(self.clock() - start)} "
@@ -585,9 +627,9 @@ class _Runner:
         self, code: int, stdout_path: Path, log_path: Path
     ) -> _Attempt:
         if code == 0:
-            line = _last_line(stdout_path)
-            if line is not None and is_finished_run(line):
-                return _Attempt(code, line)
+            for line in _last_lines(stdout_path):
+                if is_finished_run(line):
+                    return _Attempt(code, line)
         elif code == 2:
             found = EXISTING_RUN.findall(read_tail(log_path))
             if found and is_finished_run(found[-1]):

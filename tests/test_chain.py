@@ -16,6 +16,7 @@ import textwrap
 
 import pytest
 
+import tomography.chain as chain_module
 from tomography.chain import ChainSpec
 from tomography.chain import Job
 from tomography.chain import build_command
@@ -334,6 +335,7 @@ class FakeProcess:
         self.clock = clock
         self.end = clock.now + seconds
         self.code = code
+        self.pid = 4242
         self.terminated = False
         self.killed = False
 
@@ -402,7 +404,8 @@ class FakeLauncher:
         if stderr is None:
             stderr = "loading\n" if outcome.code == 0 else "boom\n"
         stdout_path.write_text(stdout, encoding="utf-8")
-        log_path.write_text(stderr, encoding="utf-8")
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(stderr)
         process = FakeProcess(self.clock, outcome.seconds, outcome.code)
         self.processes.append(process)
         return process
@@ -508,9 +511,7 @@ def test_each_job_gets_a_log_and_a_done_marker(tmp_path: Path) -> None:
     done = json.loads((folder / "DONE.txt").read_text(encoding="utf-8"))
     assert launcher.logs == [folder / "run.log"]
     assert launcher.stdouts == [folder / "stdout.txt"]
-    assert (
-        (folder / "run.log").read_text(encoding="utf-8").startswith("loading")
-    )
+    assert "loading" in (folder / "run.log").read_text(encoding="utf-8")
     assert done == {
         "run_dir": str(runs / "run1"),
         "digest": job_digest(spec, spec.jobs[0], {}),
@@ -829,7 +830,7 @@ def test_make_gpu_query_is_none_when_the_query_fails(
     assert make_gpu_query()() is None
 
 
-def test_launch_process_splits_stdout_from_stderr_and_truncates(
+def test_launch_process_splits_stdout_and_appends_stderr(
     tmp_path: Path,
 ) -> None:
     out, log = tmp_path / "stdout.txt", tmp_path / "run.log"
@@ -843,7 +844,7 @@ def test_launch_process_splits_stdout_from_stderr_and_truncates(
 
     assert process.wait(timeout=60) == 0
     assert out.read_text(encoding="utf-8").split() == ["out"]
-    assert log.read_text(encoding="utf-8").split() == ["err"]
+    assert log.read_text(encoding="utf-8").split() == ["old", "err"]
 
 
 def test_run_chain_runs_real_subprocesses_end_to_end(tmp_path: Path) -> None:
@@ -1267,3 +1268,126 @@ def test_a_launch_error_does_not_try_the_retry_batch_sizes(
     assert code == 1
     assert len(attempts) == 1
     assert not [t for t in texts if t.startswith("RETRY")]
+
+
+def test_a_new_attempt_keeps_the_previous_stderr_under_a_header(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    _run(spec, FakeLauncher(clock, runs, lambda c: Outcome(code=1)), clock)
+    clock.sleep(60)
+
+    _run(spec, FakeLauncher(clock, runs, lambda c: Outcome(code=1)), clock)
+
+    text = (spec.out / "_chain" / "a" / "run.log").read_text(encoding="utf-8")
+    headers = [line for line in text.splitlines() if line.startswith("#")]
+    assert text.count("boom") == 2
+    assert len(headers) == 2
+    assert all(" a " in f"{h} " for h in headers)
+    assert headers[0] != headers[1]
+
+
+def test_a_trailing_library_line_does_not_hide_the_run_dir(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    run_dir = _make_run(runs / "r")
+    stdout = f"{run_dir}\nlibrary says bye\nanother line\n"
+    launcher = FakeLauncher(
+        clock, runs, lambda c: Outcome(stdout=stdout, run_dir=run_dir)
+    )
+
+    assert _run(spec, launcher, clock) == 0
+    done = json.loads(
+        (spec.out / "_chain" / "a" / "DONE.txt").read_text(encoding="utf-8")
+    )
+    assert done["run_dir"] == str(run_dir)
+
+
+def test_an_attempt_folder_error_fails_the_job_not_the_chain(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"), _job("b", experiment="r2"))
+    (spec.out / "_chain").mkdir(parents=True)
+    (spec.out / "_chain" / "a").write_text("in the way", encoding="utf-8")
+    launcher = FakeLauncher(clock, runs)
+
+    code = _run(spec, launcher, clock)
+
+    texts = _texts(spec)
+    assert code == 1
+    assert "END a exit=-1 seconds=0 peak_gpu=na last=-" in texts
+    assert "START b" in texts
+    assert texts[-1] == "CHAIN_DONE failed=1"
+
+
+def test_sighup_is_handled_like_sigterm_and_restored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installed: list[tuple[int, object]] = []
+    monkeypatch.setattr(signal, "SIGHUP", 1, raising=False)
+    monkeypatch.setattr(signal, "getsignal", lambda sig: f"old{sig}")
+
+    def fake_signal(sig: int, handler: object) -> object:
+        installed.append((sig, handler))
+        return f"old{sig}"
+
+    monkeypatch.setattr(signal, "signal", fake_signal)
+
+    with interrupt_on_sigterm():
+        pass
+
+    signals = [sig for sig, _ in installed]
+    assert signal.SIGTERM in signals
+    assert 1 in signals
+    restored = {(1, "old1"), (signal.SIGTERM, f"old{signal.SIGTERM}")}
+    assert restored <= set(installed)
+
+
+def test_a_second_sigterm_while_stopping_does_not_skip_the_kill(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock()
+    process = FakeProcess(clock, 1000, 0)
+
+    def wait(timeout: float | None = None) -> int:
+        signal.raise_signal(signal.SIGTERM)
+        if timeout is not None:
+            raise subprocess.TimeoutExpired("x", timeout)
+        return 0
+
+    process.wait = wait  # type: ignore[method-assign]
+
+    with interrupt_on_sigterm():
+        chain_module.stop_process(process)
+
+    assert process.terminated
+    assert process.killed
+
+
+def test_stopping_signals_the_whole_process_group_on_posix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FakeClock()
+    process = FakeProcess(clock, 1000, 0)
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr(chain_module, "POSIX", True)
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(
+        os, "killpg", lambda pid, sig: sent.append((pid, sig)), raising=False
+    )
+
+    def wait(timeout: float | None = None) -> int:
+        if timeout is not None:
+            raise subprocess.TimeoutExpired("x", timeout)
+        return 0
+
+    process.wait = wait  # type: ignore[method-assign]
+
+    chain_module.stop_process(process)
+
+    assert sent == [(4242, signal.SIGTERM), (4242, 9)]
+    assert not process.terminated
