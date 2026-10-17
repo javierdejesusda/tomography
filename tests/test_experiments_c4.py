@@ -43,6 +43,7 @@ from tomography.experiments.c4_honesty_control import honesty_readers
 from tomography.experiments.c4_honesty_control import honesty_stimuli
 from tomography.experiments.c4_honesty_control import mc1_correct
 from tomography.experiments.c4_honesty_control import mc1_inputs
+from tomography.experiments.c4_honesty_control import neutral_texts
 from tomography.experiments.c4_honesty_control import plot
 from tomography.experiments.c4_honesty_control import render_prompt
 from tomography.experiments.c4_honesty_control import resolve_layers
@@ -51,6 +52,7 @@ from tomography.experiments.c4_honesty_control import select_coeff
 from tomography.experiments.steering import Arm
 from tomography.experiments.steering import GenSettings
 from tomography.experiments.steering import LogprobFn
+from tomography.experiments.steering import PerplexityFn
 from tomography.experiments.steering import plain_arm
 from tomography.experiments.steering import reader_arm
 from tomography.experiments.sweep import SweepResult
@@ -643,6 +645,34 @@ def test_calibration_texts_reject_a_missing_test_split() -> None:
         calibration_texts(rows, 5, seed=0)
 
 
+def test_neutral_texts_follow_the_calibration_slice_of_one_shuffle() -> None:
+    rows = _alpaca()
+    calibration = calibration_texts(rows, 5, seed=3)
+    neutral = neutral_texts(rows, 5, 4, seed=3)
+    assert calibration_texts(rows, 9, seed=3) == calibration + neutral
+    assert not set(calibration) & set(neutral)
+    allowed = {row.text for row in rows if row.split == "test"}
+    assert set(neutral) <= allowed
+
+
+def test_neutral_texts_keep_what_is_left_of_a_short_split() -> None:
+    rows = _alpaca()
+    neutral = neutral_texts(rows, 10, 100, seed=0)
+    assert len(neutral) == 6
+    assert sorted(calibration_texts(rows, 10, seed=0) + neutral) == sorted(
+        r.text for r in rows if r.split == "test"
+    )
+
+
+def test_neutral_texts_reject_an_empty_slice() -> None:
+    with pytest.raises(ValueError, match="n_neutral"):
+        neutral_texts(_alpaca(), 5, 0, seed=0)
+    with pytest.raises(ValueError, match="no text left"):
+        neutral_texts(_alpaca(), 16, 5, seed=0)
+    with pytest.raises(ValueError, match="test split"):
+        neutral_texts([r for r in _alpaca() if r.split != "test"], 5, 5, seed=0)
+
+
 SPLIT_OFFSET: dict[Split, int] = {"train": 0, "val": 1, "test": 2}
 
 
@@ -674,6 +704,7 @@ def _config(**overrides: Any) -> Config:
         alphas=(-0.25, 0.0, 0.25),
         n_boot=50,
         n_calibration=8,
+        n_random=2,
         batch_size=8,
     )
     return dataclasses.replace(base, **overrides)
@@ -689,6 +720,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.coeffs == (-0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2)
     assert config.alphas == (-0.5, -0.25, 0.0, 0.25, 0.5)
     assert config.n_boot == 2000
+    assert config.n_random == 3
     assert config.lorra_run is None
     assert Config.from_dict(config.to_dict()) == config
     with_adapter = dataclasses.replace(config, lorra_run="runs/lr1")
@@ -727,6 +759,8 @@ def _forbid_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
         ({"layers": ()}, "layers"),
         ({"n_seeds": 0}, "n_seeds"),
         ({"n_boot": 0}, "n_boot"),
+        ({"n_random": 0}, "n_random"),
+        ({"n_neutral": 0}, "n_neutral"),
         ({"n_calibration": 0}, "n must be"),
         ({"batch_size": 0}, "batch_size"),
         ({"op": "projection"}, "projection"),
@@ -745,6 +779,8 @@ def _forbid_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
         "layers-empty",
         "no-seeds",
         "no-resamples",
+        "no-random-arms",
+        "no-neutral-texts",
         "no-calibration-texts",
         "no-batch",
         "relative-projection",
@@ -794,6 +830,10 @@ PLAN: dict[str, tuple[int, int]] = {
     "reading/0/0.1": (4, 9),
     "reading/1/-0.1": (8, 5),
     "reading/1/0.1": (8, 7),
+    "random/0/-0.1": (5, 5),
+    "random/0/0.1": (6, 4),
+    "random/1/-0.1": (7, 2),
+    "random/1/0.1": (3, 8),
     "contrast/-0.25": (3, 1),
     "contrast/0.25": (5, 6),
 }
@@ -836,6 +876,10 @@ def _scorer(
     return score
 
 
+def _planted_perplexity(name: str) -> float:
+    return float(sum(map(ord, name)))
+
+
 def _plant(
     monkeypatch: pytest.MonkeyPatch,
     plan: Mapping[str, tuple[int, int]] = PLAN,
@@ -846,6 +890,7 @@ def _plant(
         "norms": [],
         "arms": [],
         "contrast": [],
+        "perplexity": [],
     }
 
     def hit(name: str) -> Callable[[ChoiceExample], bool]:
@@ -896,10 +941,23 @@ def _plant(
         )
         return {layer: 2.0 for layer in layers}
 
+    def planted_perplexity(name: str) -> PerplexityFn:
+        def score(texts: Sequence[str]) -> float:
+            calls["perplexity"].append({"name": name, "texts": list(texts)})
+            return _planted_perplexity(name)
+
+        return score
+
     def fake_plain_arm(
         loaded: LoadedModel, settings: GenSettings, **kwargs: Any
     ) -> Arm:
-        return Arm("none", lambda prompts: [], _scorer(plain))
+        name = kwargs.get("name", "none")
+        return Arm(
+            name,
+            lambda prompts: [],
+            _scorer(plain),
+            planted_perplexity(name),
+        )
 
     def fake_reader_arm(
         loaded: LoadedModel,
@@ -908,10 +966,20 @@ def _plant(
         **kwargs: Any,
     ) -> Arm:
         calls["arms"].append(
-            {"settings": settings, "reader": reader.method, **kwargs}
+            {
+                "settings": settings,
+                "reader": reader.method,
+                "directions": reader.directions,
+                **kwargs,
+            }
         )
         name = kwargs["name"]
-        return Arm(name, lambda prompts: [], _scorer(lambda _: hit(name)))
+        return Arm(
+            name,
+            lambda prompts: [],
+            _scorer(lambda _: hit(name)),
+            planted_perplexity(name),
+        )
 
     def fake_contrast(
         loaded: LoadedModel,
@@ -993,6 +1061,8 @@ CHOSEN = [
     "none",
     "reading/1/-0.1",
     "contrast/0.25",
+    "random/0/0.1",
+    "random/1/-0.1",
 ]
 
 
@@ -1021,6 +1091,8 @@ def test_execute_reports_the_table_of_the_planted_arms(
         ["reading", 0.0, 0],
         ["reading", -0.1, 1],
         ["contrast", 0.25, None],
+        ["random", 0.1, 0],
+        ["random", -0.1, 1],
     ]
     for row, chosen in zip(table["rows"], CHOSEN, strict=True):
         assert row[3:] == pytest.approx(_expected_stats(chosen))
@@ -1032,13 +1104,13 @@ def test_execute_reports_the_known_planted_numbers(
     run_dir, _ = _run_planted(tmp_path, monkeypatch, tiny_gpt2)
     rows = _read(run_dir, "table")["rows"]
     assert [row[3] for row in rows] == pytest.approx(
-        [0.4, 0.0, 1.0, 0.6, 0.4, 0.7, 0.5]
+        [0.4, 0.0, 1.0, 0.6, 0.4, 0.7, 0.5, 0.6, 0.65]
     )
     assert [row[4] for row in rows] == pytest.approx(
-        [0.3, 1.0, 0.0, 0.2, 0.3, 0.5, 0.6]
+        [0.3, 1.0, 0.0, 0.2, 0.3, 0.5, 0.6, 0.4, 0.2]
     )
     assert [row[7] for row in rows] == pytest.approx(
-        [0.0, 0.7, -0.3, -0.1, 0.0, 0.2, 0.3]
+        [0.0, 0.7, -0.3, -0.1, 0.0, 0.2, 0.3, 0.1, -0.1]
     )
     assert rows[0][7:] == [0.0, 0.0, 0.0]
 
@@ -1051,6 +1123,7 @@ def test_execute_selects_each_coefficient_on_the_selection_questions(
     assert summary["coeff_difference"] == 0.1
     assert summary["coeff_reading"] == [0.0, -0.1]
     assert summary["alpha_contrast"] == 0.25
+    assert summary["coeff_random"] == [0.1, -0.1]
 
 
 def test_the_selection_does_not_read_the_test_questions(
@@ -1063,7 +1136,12 @@ def test_the_selection_does_not_read_the_test_questions(
     first, _ = _run_planted(tmp_path / "a", monkeypatch, tiny_gpt2)
     second, _ = _run_planted(tmp_path / "b", monkeypatch, tiny_gpt2, permuted)
     one, two = _read(first, "summary"), _read(second, "summary")
-    for key in ("coeff_difference", "coeff_reading", "alpha_contrast"):
+    for key in (
+        "coeff_difference",
+        "coeff_reading",
+        "coeff_random",
+        "alpha_contrast",
+    ):
         assert one[key] == two[key]
     rows_one = _read(first, "table")["rows"]
     rows_two = _read(second, "table")["rows"]
@@ -1092,6 +1170,13 @@ def test_execute_writes_the_planted_dose_curves(
             [-0.25, 0.0, 0.25],
             [[[0.3, 0.4, 0.5]], [[0.1, 0.3, 0.6]]],
         ),
+        "curves_random": (
+            [-0.1, 0.0, 0.1],
+            [
+                [[0.5, 0.4, 0.6], [0.65, 0.4, 0.3]],
+                [[0.5, 0.3, 0.4], [0.2, 0.3, 0.8]],
+            ],
+        ),
     }
     for stem, (x, per_seed) in expected.items():
         arrays = run_dir.read_arrays(stem)
@@ -1112,11 +1197,11 @@ def test_execute_scores_no_arm_at_grid_point_zero(
 ) -> None:
     run_dir, calls = _run_planted(tmp_path, monkeypatch, tiny_gpt2)
     assert sorted(call["coeff"] for call in calls["arms"]) == sorted(
-        [-0.1, 0.1] * 3
+        [-0.1, 0.1] * 5
     )
     assert sorted(call["alpha"] for call in calls["contrast"]) == [-0.25, 0.25]
     assert _read(run_dir, "scores")["rows"] == SCORE_ROWS
-    assert run_dir.read_arrays("scores")["values"].shape[0] == 11
+    assert run_dir.read_arrays("scores")["values"].shape[0] == 15
 
 
 def test_execute_stores_the_scores_with_their_questions(
@@ -1126,7 +1211,7 @@ def test_execute_stores_the_scores_with_their_questions(
     arrays = run_dir.read_arrays("scores")
     n_choices = sum(len(q.choices) for q in QUESTIONS)
     assert arrays["values"].dtype == np.float32
-    assert arrays["values"].shape == (11, n_choices)
+    assert arrays["values"].shape == (15, n_choices)
     assert arrays["offsets"].tolist() == choice_offsets(QUESTIONS).tolist()
     assert arrays["correct"].tolist() == [q.correct for q in QUESTIONS]
     sidecar = _read(run_dir, "scores")
@@ -1189,7 +1274,7 @@ def test_execute_steers_every_vector_arm_the_same_way(
         batch_size=4,
     )
     layers = honesty_layers(tiny_gpt2.n_layers)
-    assert len(calls["arms"]) == 6
+    assert len(calls["arms"]) == 10
     for call in calls["arms"]:
         assert call["layers"] == layers
         assert call["norms"] == {layer: 2.0 for layer in layers}
@@ -1205,6 +1290,10 @@ def test_execute_steers_every_vector_arm_the_same_way(
         "reading/0/0.1",
         "reading/1/-0.1",
         "reading/1/0.1",
+        "random/0/-0.1",
+        "random/0/0.1",
+        "random/1/-0.1",
+        "random/1/0.1",
     ]
 
 
@@ -1219,6 +1308,10 @@ def test_execute_steers_each_arm_with_its_own_vector(
         ("reading/0/0.1", "reader/0"),
         ("reading/1/-0.1", "reader/1"),
         ("reading/1/0.1", "reader/1"),
+        ("random/0/-0.1", "random"),
+        ("random/0/0.1", "random"),
+        ("random/1/-0.1", "random"),
+        ("random/1/0.1", "random"),
     ]
 
 
@@ -1239,6 +1332,111 @@ def test_execute_contrasts_the_truthful_and_untruthful_prompts(
         assert call.get("bos") is None
 
 
+def test_the_random_arms_are_unit_directions_drawn_from_the_seed(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, calls = _run_planted(tmp_path, monkeypatch, tiny_gpt2, seed=7)
+    layers = honesty_layers(tiny_gpt2.n_layers)
+    rng = np.random.default_rng(7)
+    drawn = [rng.standard_normal((len(layers), 4)) for _ in range(2)]
+    random_calls = [c for c in calls["arms"] if c["name"].startswith("random")]
+    assert [c["name"] for c in random_calls] == [
+        f"random/{k}/{coeff:g}" for k in range(2) for coeff in (-0.1, 0.1)
+    ]
+    for index, call in enumerate(random_calls):
+        draw = drawn[index // 2]
+        expected = draw / np.linalg.norm(draw, axis=1, keepdims=True)
+        np.testing.assert_allclose(call["directions"], expected, atol=1e-6)
+        np.testing.assert_allclose(
+            np.linalg.norm(call["directions"], axis=1), 1.0, atol=1e-6
+        )
+        assert call["layers"] == layers
+
+
+def test_the_random_arms_are_steered_like_the_vector_arms(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, calls = _run_planted(
+        tmp_path,
+        monkeypatch,
+        tiny_gpt2,
+        op="piecewise",
+        mode="absolute",
+        mask="all",
+        preserve_norm=True,
+        batch_size=4,
+    )
+    keys = ("layers", "norms", "op", "mode", "mask", "preserve_norm")
+    reading = next(c for c in calls["arms"] if c["name"] == "reading/0/0.1")
+    random = [c for c in calls["arms"] if c["name"].startswith("random")]
+    assert len(random) == 4
+    for call in random:
+        assert {k: call[k] for k in keys} == {k: reading[k] for k in keys}
+        assert call["settings"].batch_size == 4
+
+
+def test_more_random_arms_leave_the_other_arms_and_the_first_draw_alone(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    few, few_calls = _run_planted(
+        tmp_path / "a", monkeypatch, tiny_gpt2, n_random=1
+    )
+    many, many_calls = _run_planted(
+        tmp_path / "b", monkeypatch, tiny_gpt2, n_random=2
+    )
+    rows_few = _read(few, "table")["rows"]
+    rows_many = _read(many, "table")["rows"]
+    assert rows_many[:-1] == rows_few
+    assert len(_read(few, "scores")["rows"]) == 11 + 2
+    assert len(_read(many, "scores")["rows"]) == 11 + 4
+    first = [c for c in few_calls["arms"] if c["name"].startswith("random")]
+    assert len(first) == 2
+    for one, other in zip(first, many_calls["arms"][-4:-2], strict=True):
+        np.testing.assert_array_equal(one["directions"], other["directions"])
+
+
+def test_execute_reports_the_perplexity_of_every_scored_arm(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, calls = _run_planted(tmp_path, monkeypatch, tiny_gpt2)
+    effects = _read(run_dir, "table_effects")
+    assert effects["columns"] == ["arm", "coeff", "seed", "perplexity"]
+    expected = [
+        ("none", None, None, "none"),
+        ("difference", -0.1, None, "difference/-0.1"),
+        ("difference", 0.1, None, "difference/0.1"),
+        ("reading", -0.1, 0, "reading/0/-0.1"),
+        ("reading", 0.1, 0, "reading/0/0.1"),
+        ("reading", -0.1, 1, "reading/1/-0.1"),
+        ("reading", 0.1, 1, "reading/1/0.1"),
+        ("random", -0.1, 0, "random/0/-0.1"),
+        ("random", 0.1, 0, "random/0/0.1"),
+        ("random", -0.1, 1, "random/1/-0.1"),
+        ("random", 0.1, 1, "random/1/0.1"),
+    ]
+    assert effects["rows"] == [
+        [arm, coeff, seed, _planted_perplexity(name)]
+        for arm, coeff, seed, name in expected
+    ]
+    assert [c["name"] for c in calls["perplexity"]] == [e[3] for e in expected]
+
+
+def test_the_perplexity_reads_neutral_text_disjoint_from_the_calibration(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, calls = _run_planted(tmp_path, monkeypatch, tiny_gpt2, n_neutral=5)
+    neutral = neutral_texts(_alpaca(), 8, 5, seed=derive_seed(0, "norms"))
+    assert len(neutral) == 5
+    (norms,) = calls["norms"]
+    assert not set(norms["texts"]) & set(neutral)
+    assert len(calls["perplexity"]) == 11
+    assert norms["texts"] == calibration_texts(
+        _alpaca(), 8, seed=derive_seed(0, "norms")
+    )
+    for call in calls["perplexity"]:
+        assert call["texts"] == list(neutral)
+
+
 def test_execute_summarizes_the_run(
     tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1252,10 +1450,13 @@ def test_execute_summarizes_the_run(
         "reading_val_accuracy",
         "coeff_difference",
         "coeff_reading",
+        "coeff_random",
         "alpha_contrast",
         "reading_test_mean",
         "reading_test_min",
         "reading_test_max",
+        "random_test_mean",
+        "random_test_max",
         "lorra_run",
     }
     assert summary["layers"] == list(honesty_layers(tiny_gpt2.n_layers))
@@ -1267,6 +1468,8 @@ def test_execute_summarizes_the_run(
     assert summary["reading_test_mean"] == pytest.approx(0.4)
     assert summary["reading_test_min"] == pytest.approx(0.3)
     assert summary["reading_test_max"] == pytest.approx(0.5)
+    assert summary["random_test_mean"] == pytest.approx(0.3)
+    assert summary["random_test_max"] == pytest.approx(0.4)
     assert summary["lorra_run"] is None
 
 
@@ -1287,6 +1490,8 @@ def test_execute_writes_the_files_of_the_experiment(
         "curves_contrast.npz",
         "curves_difference.json",
         "curves_difference.npz",
+        "curves_random.json",
+        "curves_random.npz",
         "curves_reading.json",
         "curves_reading.npz",
         "meta.json",
@@ -1294,16 +1499,17 @@ def test_execute_writes_the_files_of_the_experiment(
         "scores.npz",
         "summary.json",
         "table.json",
+        "table_effects.json",
     ]
 
 
-def test_execute_scores_the_eleven_arm_rows_on_every_choice(
+def test_execute_scores_the_fifteen_arm_rows_on_every_choice(
     tiny_arch: LoadedModel, tmp_path: Path
 ) -> None:
     run_dir = _real_run(tmp_path, tiny_arch)
     n_choices = sum(len(q.choices) for q in QUESTIONS)
     values = run_dir.read_arrays("scores")["values"]
-    assert values.shape == (11, n_choices)
+    assert values.shape == (15, n_choices)
     assert np.isfinite(values).all()
     assert _read(run_dir, "scores")["rows"] == [
         "none",
@@ -1315,6 +1521,10 @@ def test_execute_scores_the_eleven_arm_rows_on_every_choice(
         "reading/0/0.1",
         "reading/1/-0.1",
         "reading/1/0.1",
+        "random/0/-0.1",
+        "random/0/0.1",
+        "random/1/-0.1",
+        "random/1/0.1",
         "contrast/-0.25",
         "contrast/0.25",
     ]
@@ -1329,7 +1539,23 @@ def test_execute_scores_the_eleven_arm_rows_on_every_choice(
         ("reading", 0),
         ("reading", 1),
         ("contrast", None),
+        ("random", 0),
+        ("random", 1),
     ]
+
+
+def test_the_random_arms_move_the_perplexity_of_the_model(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _real_run(tmp_path, tiny_arch)
+    rows = _read(run_dir, "table_effects")["rows"]
+    perplexity = {(r[0], r[1], r[2]): r[3] for r in rows}
+    assert all(
+        np.isfinite(value) and value > 0 for value in perplexity.values()
+    )
+    assert len(rows) == 1 + 2 + 2 * 2 + 2 * 2
+    assert perplexity[("random", 0.1, 0)] != perplexity[("none", None, None)]
+    assert perplexity[("random", 0.1, 0)] != perplexity[("random", 0.1, 1)]
 
 
 def test_the_table_agrees_with_the_stored_scores(
@@ -1498,6 +1724,10 @@ ARM_ROWS = [
     "reading/0/0.1",
     "reading/1/-0.1",
     "reading/1/0.1",
+    "random/0/-0.1",
+    "random/0/0.1",
+    "random/1/-0.1",
+    "random/1/0.1",
     "contrast/-0.25",
     "contrast/0.25",
 ]
@@ -1556,9 +1786,9 @@ def test_a_lorra_run_appends_the_lorra_row_to_every_file(
 ) -> None:
     plain, lorra = adapter_pair.plain, adapter_pair.lorra
     assert _read(lorra, "scores")["rows"] == [*ARM_ROWS, "lorra"]
-    assert lorra.read_arrays("scores")["values"].shape[0] == 12
+    assert lorra.read_arrays("scores")["values"].shape[0] == 16
     table = _read(lorra, "table")["rows"]
-    assert len(table) == 8
+    assert len(table) == 10
     assert table[-1][:3] == ["lorra", None, None]
     assert table[:-1] == _read(plain, "table")["rows"]
     summary = _read(lorra, "summary")
@@ -1567,6 +1797,9 @@ def test_a_lorra_run_appends_the_lorra_row_to_every_file(
         **_read(plain, "summary"),
         "lorra_run": summary["lorra_run"],
     }
+    effects = _read(lorra, "table_effects")["rows"]
+    assert effects[-1][:3] == ["lorra", None, None]
+    assert effects[:-1] == _read(plain, "table_effects")["rows"]
     assert len(plot(lorra, tmp_path / "figs")) == 12
 
 
