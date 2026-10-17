@@ -803,7 +803,7 @@ class _Runner:
                 return _Attempt(code, found[-1], reused=True)
         return _Attempt(code)
 
-    def _finish_attempt(self, running: _Active, code: int) -> bool:
+    def _finish_attempt(self, running: _Active, code: int) -> None:
         """Logs a finished attempt and moves the job on.
 
         A retry is not launched here: the job keeps its slot without a
@@ -812,9 +812,6 @@ class _Runner:
         Args:
             running: The job whose attempt ended.
             code: The exit code of the attempt.
-
-        Returns:
-            True while the job still holds its slot, waiting for a retry.
         """
         folder = self.spec.out / "_chain" / running.name
         result = self._outcome(
@@ -832,25 +829,36 @@ class _Runner:
                 self.log(f"SKIP {running.job.name} reason=existing")
             _write_done(folder, result.run_dir, running.digest)
             self.run_dirs[running.job.name] = result.run_dir
-            self._end(running.job.name, ok=True)
-            return False
-        if running.index + 1 < len(running.names):
+            self._retire(running.job.name, ok=True)
+        elif running.index + 1 < len(running.names):
             running.index += 1
             running.process = None
-            return True
-        self._end(running.job.name, ok=False)
-        return False
+        else:
+            self._retire(running.job.name, ok=False)
 
-    def _end(self, name: str, ok: bool) -> None:
-        """Marks a job as ended, counting it as failed unless it was ok.
+    def _retire(self, name: str, ok: bool) -> None:
+        """Takes a job out of the queue and the slots and marks it ended.
 
         Args:
             name: The job name.
-            ok: Whether the job finished a run directory.
+            ok: Whether the job finished a run directory; a job that did
+                not counts as failed.
         """
+        self.pending = [job for job in self.pending if job.name != name]
+        self.active = [r for r in self.active if r.job.name != name]
         self.ended.add(name)
         if not ok:
             self.failed += 1
+
+    def _launch(self, running: _Active) -> None:
+        """Records a start and begins an attempt, retiring a failed launch.
+
+        Args:
+            running: The job, already holding its slot.
+        """
+        self.last_start = self.clock()
+        if not self._begin(running):
+            self._retire(running.job.name, ok=False)
 
     def _gate_open(self) -> bool:
         """Tells whether a job may start now.
@@ -881,10 +889,7 @@ class _Runner:
         for running in list(self.active):
             if running.process is not None or not self._gate_open():
                 continue
-            self.last_start = self.clock()
-            if not self._begin(running):
-                self.active.remove(running)
-                self._end(running.job.name, ok=False)
+            self._launch(running)
 
     def _start_ready(self) -> None:
         """Starts the first ready jobs, in spec order, while slots are free."""
@@ -898,8 +903,7 @@ class _Runner:
             if done is not None:
                 self.run_dirs[job.name] = done
                 self.log(f"SKIP {job.name} reason=done")
-                self.pending.remove(job)
-                self.ended.add(job.name)
+                self._retire(job.name, ok=True)
                 continue
             missing = {
                 key: dep
@@ -909,8 +913,7 @@ class _Runner:
             if missing and job.on_missing == "skip":
                 first = next(iter(missing.values()))
                 self.log(f"SKIP {job.name} reason=missing:{first}")
-                self.pending.remove(job)
-                self._end(job.name, ok=False)
+                self._retire(job.name, ok=False)
                 continue
             if not self._gate_open():
                 return
@@ -923,11 +926,8 @@ class _Runner:
                 attempt_names(job),
                 [None, *job.retry_batch_sizes],
             )
-            self.last_start = self.clock()
             self.active.append(running)
-            if not self._begin(running):
-                self.active.remove(running)
-                self._end(job.name, ok=False)
+            self._launch(running)
 
     def _poll_active(self) -> bool:
         """Samples the GPU and checks every running job once.
@@ -950,8 +950,7 @@ class _Runner:
             code = running.process.poll()
             if code is not None:
                 reaped = True
-                if not self._finish_attempt(running, code):
-                    self.active.remove(running)
+                self._finish_attempt(running, code)
                 continue
             due = self.clock() - running.last_beat >= self.heartbeat_seconds
             if due and not util_read:
@@ -980,6 +979,29 @@ class _Runner:
             )
         self.log(f"CHAIN_DONE failed={self.failed}")
         return 1 if self.failed else 0
+
+
+def _with_defaults(
+    used: Callable[[], int | None] | None,
+    free: Callable[[], int | None] | None,
+    util: Callable[[], int | None] | None,
+) -> GpuQueries:
+    """Fills each missing GPU query from `nvidia-smi`, looked up once.
+
+    Args:
+        used: The memory used query, or None.
+        free: The free memory query, or None.
+        util: The utilization query, or None.
+
+    Returns:
+        The three queries.
+    """
+    if used and free and util:
+        return GpuQueries(used, free, util)
+    defaults = make_gpu_queries()
+    return GpuQueries(
+        used or defaults.used, free or defaults.free, util or defaults.util
+    )
 
 
 def run_chain(
@@ -1030,11 +1052,7 @@ def run_chain(
     Returns:
         0 when no job failed, 1 when one did, 130 when interrupted.
     """
-    if gpu_query is None or gpu_free_query is None or gpu_util_query is None:
-        defaults = make_gpu_queries()
-        gpu_query = gpu_query or defaults.used
-        gpu_free_query = gpu_free_query or defaults.free
-        gpu_util_query = gpu_util_query or defaults.util
+    queries = _with_defaults(gpu_query, gpu_free_query, gpu_util_query)
     runner = _Runner(
         spec,
         heartbeat_seconds,
@@ -1042,9 +1060,9 @@ def run_chain(
         clock,
         sleep,
         launch,
-        gpu_query,
-        gpu_free_query,
-        gpu_util_query,
+        queries.used,
+        queries.free,
+        queries.util,
     )
     (spec.out / "_chain").mkdir(parents=True, exist_ok=True)
     runner.log(
