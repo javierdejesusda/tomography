@@ -242,17 +242,32 @@ def _read(match: re.Match[str]) -> tuple[float, int | None]:
     return total + current, factor
 
 
-def _joins(before: str, joiner: re.Match[str]) -> bool:
-    """Tells whether a joiner may link two numbers into a range.
+def _quantity(text: str, first: re.Match[str]) -> tuple[float, float] | None:
+    """Reads the point or range that starts at a number.
 
     Args:
-        before: The text before the first number.
-        joiner: A match of `_JOINER`.
+        text: The answer line.
+        first: The match of `_NUMBER` that opens the quantity.
 
     Returns:
-        False for "and" unless "between" opens the range.
+        The lower and upper bounds, equal for a point; None when `first` is
+        a bare "one" that does not open a range.
     """
-    return not joiner["and"] or bool(_BETWEEN.search(before))
+    value, factor = _read(first)
+    joined = _JOINER.match(text, first.end())
+    second = _NUMBER.match(text, joined.end()) if joined else None
+    if joined and second:
+        between = _BETWEEN.search(text[: first.start()])
+        if not joined["and"] or between:
+            other, other_factor = _read(second)
+            if joined["pm"]:
+                return value - other, value + other
+            if factor is None and other_factor is not None:
+                value *= other_factor
+            return min(value, other), max(value, other)
+    if first["words"] and first["words"].lower() == "one":
+        return None
+    return value, value
 
 
 def parse_answer(completion: str) -> Parsed:
@@ -273,35 +288,21 @@ def parse_answer(completion: str) -> Parsed:
     for first in _NUMBER.finditer(text):
         if vague and vague.start() <= first.start():
             break
-        value, factor = _read(first)
-        low, high = value, value
-        joined = _JOINER.match(text, first.end())
-        second = _NUMBER.match(text, joined.end()) if joined else None
-        if joined and second and _joins(text[: first.start()], joined):
-            other, other_factor = _read(second)
-            if joined["pm"]:
-                low, high = value - other, value + other
-            else:
-                if factor is None and other_factor is not None:
-                    value *= other_factor
-                low, high = min(value, other), max(value, other)
-        elif first["words"] and first["words"].lower() == "one":
+        bounds = _quantity(text, first)
+        if bounds is None:
             continue
         approximate = bool(
             _LEADING.search(text[: first.start()])
             or _HABIT.search(text)
             or _TRAILING.search(text[first.end() :])
         )
+        low, high = bounds
         form: Form = "point" if low == high else "range"
         return Parsed(form, low, high, approximate)
     if vague:
         return Parsed("none", None, None, True)
-    none_form: Form = (
-        "abstain"
-        if is_abstention(text, (*ABSTAIN_REGEXES, *EXTRA_ABSTAIN_REGEXES))
-        else "none"
-    )
-    return Parsed(none_form, None, None, False)
+    abstained = is_abstention(text, (*ABSTAIN_REGEXES, *EXTRA_ABSTAIN_REGEXES))
+    return Parsed("abstain" if abstained else "none", None, None, False)
 
 
 def grade(
