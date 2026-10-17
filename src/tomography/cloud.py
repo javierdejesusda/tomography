@@ -399,6 +399,10 @@ def _ssh_argv(
     no_stdin: bool = False,
 ) -> list[str]:
     known_hosts = _known_hosts(args.state, state["pod_id"]).as_posix()
+    # Quotes only where ssh needs them: the Windows argv escaping turns
+    # quotes in an argument without spaces into \" and ssh rejects that.
+    if any(c.isspace() for c in known_hosts):
+        known_hosts = f'"{known_hosts}"'
     return [
         "ssh",
         *(["-n"] if no_stdin else []),
@@ -409,7 +413,7 @@ def _ssh_argv(
         "-o",
         "StrictHostKeyChecking=accept-new",
         "-o",
-        f'UserKnownHostsFile="{known_hosts}"',
+        f"UserKnownHostsFile={known_hosts}",
         "-o",
         "ServerAliveInterval=30",
         "-o",
@@ -499,11 +503,15 @@ def _watchdog_script(
 
 
 def _launch_command(names: Sequence[str]) -> str:
-    return " ".join(
+    # The braces keep each `&` inside the group: `a && b &` would background
+    # the whole list, and its subshell would hold the ssh channel open until
+    # the chain ends.
+    jobs = " ".join(
         f"setsid nohup bash {REMOTE_RUN}/{name} "
         f"> {REMOTE_RUN}/{name}.out 2>&1 < /dev/null &"
         for name in names
     )
+    return f"{{ {jobs} }}"
 
 
 def _upload_script(
@@ -1035,16 +1043,18 @@ def cmd_start(args: argparse.Namespace, deps: Deps) -> int:
     for name, text in scripts.items():
         _upload_script(args, deps, state, name, text)
     offset = f"{REMOTE_RUN}/log_offset"
-    command = (
+    prepare = (
         f"rm -f {pid_file} {REMOTE_RUN}/chain.exit && "
         f"(stat -c %s {shlex.quote(chain_log)} 2>/dev/null || echo 0) "
-        f"> {offset} && touch {REMOTE_RUN}/started && "
-        f"{_launch_command(list(scripts))}"
+        f"> {offset} && touch {REMOTE_RUN}/started"
     )
     state["started"] = _now_iso()
     state.pop("pulled", None)
     _save_state(args.state, state)
-    if _remote(args, deps, state, command).returncode:
+    if _remote(args, deps, state, prepare).returncode:
+        raise CloudError("preparing the chain launch failed")
+    launch = _launch_command(list(scripts))
+    if _remote(args, deps, state, launch).returncode:
         raise CloudError("launching the chain failed")
     deps.out(
         "chain started; the watchdog stops the pod after "
