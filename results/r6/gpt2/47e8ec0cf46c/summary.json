@@ -1,0 +1,109 @@
+{
+  "_meta": {
+    "experiment": "r6",
+    "config_hash": "47e8ec0cf46c",
+    "seed": 0,
+    "git_sha": "a39ae61d1ea0214babb0f234a4fcf0c966c82c08",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-16T20:33:20+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "r6",
+      "model": "gpt2",
+      "seed": 0,
+      "n_seeds": 15,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "sources": [
+        "truthfulqa",
+        "arc",
+        "honesty"
+      ]
+    }
+  },
+  "data": {
+    "n_questions": 817,
+    "n_train": 511,
+    "n_val": 133,
+    "n_test": 173,
+    "n_seeds": 15,
+    "n_eval_pairs": {
+      "val": 133,
+      "test": 173
+    },
+    "baselines_all_questions": {
+      "standard": {
+        "mc1": 0.24479804161566707,
+        "lo": 0.21655413297473056,
+        "hi": 0.2754305913359719
+      },
+      "heuristic": {
+        "mc1": 0.2864137086903305,
+        "lo": 0.25647006589886917,
+        "hi": 0.3183564779486973
+      }
+    },
+    "lat": {
+      "truthfulqa": {
+        "validation-layer": {
+          "mc1": 0.6489402697495184,
+          "lo": 0.6400770712909442,
+          "hi": 0.657418111753372
+        },
+        "best-layer": {
+          "mc1": 0.652408477842004,
+          "lo": 0.6466281310211947,
+          "hi": 0.6585741811175336,
+          "layer": 9
+        }
+      },
+      "arc": {
+        "validation-layer": {
+          "mc1": 0.3830443159922929,
+          "lo": 0.35259152215799616,
+          "hi": 0.4142581888246628
+        },
+        "best-layer": {
+          "mc1": 0.3853564547206165,
+          "lo": 0.34373795761078996,
+          "hi": 0.42890173410404614,
+          "layer": 9
+        }
+      },
+      "honesty": {
+        "validation-layer": {
+          "mc1": 0.2701348747591522,
+          "lo": 0.2635838150289017,
+          "hi": 0.2770712909441233
+        },
+        "best-layer": {
+          "mc1": 0.2774566473988439,
+          "lo": 0.27090558766859346,
+          "hi": 0.284393063583815,
+          "layer": 12
+        }
+      }
+    }
+  }
+}

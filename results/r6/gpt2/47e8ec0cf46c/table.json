@@ -1,0 +1,130 @@
+{
+  "_meta": {
+    "experiment": "r6",
+    "config_hash": "47e8ec0cf46c",
+    "seed": 0,
+    "git_sha": "a39ae61d1ea0214babb0f234a4fcf0c966c82c08",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-16T20:33:20+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "r6",
+      "model": "gpt2",
+      "seed": 0,
+      "n_seeds": 15,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "sources": [
+        "truthfulqa",
+        "arc",
+        "honesty"
+      ]
+    }
+  },
+  "data": {
+    "columns": [
+      "method",
+      "layer_rule",
+      "source",
+      "mc1",
+      "lo",
+      "hi",
+      "n_trials"
+    ],
+    "rows": [
+      [
+        "standard",
+        null,
+        null,
+        0.1676300578034682,
+        0.11932443307849663,
+        0.23037557071641315,
+        null
+      ],
+      [
+        "heuristic",
+        null,
+        null,
+        0.2774566473988439,
+        0.21612291011066354,
+        0.3484588315607108,
+        null
+      ],
+      [
+        "lat",
+        "validation-layer",
+        "truthfulqa",
+        0.6489402697495184,
+        0.6400770712909442,
+        0.657418111753372,
+        15
+      ],
+      [
+        "lat",
+        "best-layer",
+        "truthfulqa",
+        0.652408477842004,
+        0.6466281310211947,
+        0.6585741811175336,
+        15
+      ],
+      [
+        "lat",
+        "validation-layer",
+        "arc",
+        0.3830443159922929,
+        0.35259152215799616,
+        0.4142581888246628,
+        15
+      ],
+      [
+        "lat",
+        "best-layer",
+        "arc",
+        0.3853564547206165,
+        0.34373795761078996,
+        0.42890173410404614,
+        15
+      ],
+      [
+        "lat",
+        "validation-layer",
+        "honesty",
+        0.2701348747591522,
+        0.2635838150289017,
+        0.2770712909441233,
+        15
+      ],
+      [
+        "lat",
+        "best-layer",
+        "honesty",
+        0.2774566473988439,
+        0.27090558766859346,
+        0.284393063583815,
+        15
+      ]
+    ]
+  }
+}

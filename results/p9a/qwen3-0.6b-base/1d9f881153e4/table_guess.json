@@ -1,0 +1,279 @@
+{
+  "_meta": {
+    "experiment": "p9a",
+    "config_hash": "1d9f881153e4",
+    "seed": 0,
+    "git_sha": "ff1177ad3e7e7ae5ea30cfd7a523e099b2f6f796",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-15T18:29:56+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9a",
+      "model": "qwen3-0.6b-base",
+      "seed": 0,
+      "cutoff_year": 2024,
+      "n_popqa": null,
+      "n_synthal": null,
+      "n_kuq": 200,
+      "n_falseqa": 500,
+      "n_triviaqa": 1000,
+      "n_nq_open": 1000,
+      "n_detail": 300,
+      "n_shots": 15,
+      "n_samples": 5,
+      "temperature": 1.0,
+      "known_min_correct": 3,
+      "max_new_tokens": 16,
+      "n_hand_check": 200,
+      "max_guess_accuracy": 0.1,
+      "never_known": [
+        "sport"
+      ],
+      "popqa_relations": [
+        "father",
+        "mother",
+        "occupation",
+        "sport",
+        "director",
+        "screenwriter",
+        "author",
+        "producer",
+        "composer",
+        "capital",
+        "place of birth",
+        "capital of"
+      ],
+      "popqa_min_popularity": null,
+      "min_known": 100,
+      "popular_min": 10000,
+      "popular_share": 0.5,
+      "batch_size": 8,
+      "offline": false
+    }
+  },
+  "data": {
+    "columns": [
+      "stratum",
+      "n",
+      "modal",
+      "modal_share",
+      "guess_accuracy",
+      "excluded",
+      "eligible"
+    ],
+    "rows": [
+      [
+        "award:Fields medal",
+        10,
+        "roger penrose",
+        0.6,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Peace Prize",
+        37,
+        "nelson mandela",
+        0.5675675675675675,
+        0.02702702702702703,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Chemistry",
+        37,
+        "linus pauling",
+        0.5405405405405406,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Literature",
+        37,
+        "salman rushdie",
+        0.5135135135135135,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Physics",
+        37,
+        "rainer weiss kip thorne and barry barish",
+        0.2972972972972973,
+        0.02702702702702703,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Physiology or Medicine",
+        37,
+        "linus pauling",
+        0.2702702702702703,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Prize in Economic Sciences in Memory of Alfred Nobel",
+        37,
+        "nobel laureate paul krugman",
+        0.5405405405405406,
+        0.02702702702702703,
+        false,
+        true
+      ],
+      [
+        "award:Turing Award",
+        36,
+        "alan turing",
+        0.5277777777777778,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "nq_open",
+        1000,
+        "beatles",
+        0.031,
+        0.001,
+        false,
+        true
+      ],
+      [
+        "popqa:author",
+        1304,
+        "john steinbeck",
+        0.21012269938650308,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:capital",
+        602,
+        "cairo",
+        0.011627906976744186,
+        0.0049833887043189366,
+        false,
+        true
+      ],
+      [
+        "popqa:capital of",
+        199,
+        "texas",
+        0.07035175879396985,
+        0.005025125628140704,
+        false,
+        true
+      ],
+      [
+        "popqa:composer",
+        796,
+        "john williams",
+        0.32537688442211055,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:director",
+        1609,
+        "john carpenter",
+        0.12678682411435674,
+        0.0006215040397762585,
+        false,
+        true
+      ],
+      [
+        "popqa:father",
+        552,
+        "king solomon",
+        0.030797101449275364,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:mother",
+        186,
+        "margaret of anjou",
+        0.03225806451612903,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:occupation",
+        528,
+        "actor",
+        0.1875,
+        0.21401515151515152,
+        false,
+        false
+      ],
+      [
+        "popqa:place of birth",
+        583,
+        "new york",
+        0.26758147512864494,
+        0.02058319039451115,
+        false,
+        true
+      ],
+      [
+        "popqa:producer",
+        1132,
+        "john landis",
+        0.2773851590106007,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:screenwriter",
+        1429,
+        "john hughes",
+        0.23792862141357593,
+        0.0013995801259622112,
+        false,
+        true
+      ],
+      [
+        "popqa:sport",
+        547,
+        "football",
+        0.489945155393053,
+        0.6416819012797075,
+        true,
+        false
+      ],
+      [
+        "triviaqa",
+        1000,
+        "london",
+        0.01,
+        0.001,
+        false,
+        true
+      ]
+    ]
+  }
+}

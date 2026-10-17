@@ -1,0 +1,279 @@
+{
+  "_meta": {
+    "experiment": "p9a",
+    "config_hash": "cc283b36fcae",
+    "seed": 0,
+    "git_sha": "ff1177ad3e7e7ae5ea30cfd7a523e099b2f6f796",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-15T16:05:22+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9a",
+      "model": "gpt2-xl",
+      "seed": 0,
+      "cutoff_year": 2017,
+      "n_popqa": null,
+      "n_synthal": null,
+      "n_kuq": 200,
+      "n_falseqa": 500,
+      "n_triviaqa": 1000,
+      "n_nq_open": 1000,
+      "n_detail": 300,
+      "n_shots": 15,
+      "n_samples": 5,
+      "temperature": 1.0,
+      "known_min_correct": 3,
+      "max_new_tokens": 16,
+      "n_hand_check": 200,
+      "max_guess_accuracy": 0.1,
+      "never_known": [
+        "sport"
+      ],
+      "popqa_relations": [
+        "father",
+        "mother",
+        "occupation",
+        "sport",
+        "director",
+        "screenwriter",
+        "author",
+        "producer",
+        "composer",
+        "capital",
+        "place of birth",
+        "capital of"
+      ],
+      "popqa_min_popularity": null,
+      "min_known": 100,
+      "popular_min": 10000,
+      "popular_share": 0.5,
+      "batch_size": 4,
+      "offline": false
+    }
+  },
+  "data": {
+    "columns": [
+      "stratum",
+      "n",
+      "modal",
+      "modal_share",
+      "guess_accuracy",
+      "excluded",
+      "eligible"
+    ],
+    "rows": [
+      [
+        "award:Fields medal",
+        10,
+        "russia",
+        0.4,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Peace Prize",
+        37,
+        "barack obama",
+        0.2972972972972973,
+        0.02702702702702703,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Chemistry",
+        37,
+        "jose luis carreras",
+        0.6216216216216216,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Literature",
+        37,
+        "toni morrison",
+        0.7837837837837838,
+        0.02702702702702703,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Physics",
+        37,
+        "kip thorne",
+        0.5405405405405406,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Physiology or Medicine",
+        37,
+        "james watson",
+        0.5405405405405406,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Prize in Economic Sciences in Memory of Alfred Nobel",
+        37,
+        "netherlands",
+        0.5405405405405406,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Turing Award",
+        36,
+        "alan turing",
+        0.8333333333333334,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "nq_open",
+        1000,
+        "beatles",
+        0.03,
+        0.001,
+        false,
+        true
+      ],
+      [
+        "popqa:author",
+        1304,
+        "john steinbeck",
+        0.18098159509202455,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:capital",
+        602,
+        "moscow",
+        0.02159468438538206,
+        0.0033222591362126247,
+        false,
+        true
+      ],
+      [
+        "popqa:capital of",
+        199,
+        "india",
+        0.05527638190954774,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:composer",
+        796,
+        "john cage",
+        0.20728643216080403,
+        0.001256281407035176,
+        false,
+        true
+      ],
+      [
+        "popqa:director",
+        1609,
+        "stanley kubrick",
+        0.15351149782473586,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:father",
+        552,
+        "abraham",
+        0.012681159420289856,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:mother",
+        186,
+        "queen victoria",
+        0.06989247311827956,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:occupation",
+        528,
+        "professor",
+        0.22916666666666666,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:place of birth",
+        583,
+        "new york",
+        0.2692967409948542,
+        0.02058319039451115,
+        false,
+        true
+      ],
+      [
+        "popqa:producer",
+        1132,
+        "beatles",
+        0.1157243816254417,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:screenwriter",
+        1429,
+        "john huston",
+        0.2603219034289713,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:sport",
+        547,
+        "soccer",
+        0.37477148080438755,
+        0.5978062157221207,
+        true,
+        false
+      ],
+      [
+        "triviaqa",
+        1000,
+        "london",
+        0.011,
+        0.001,
+        false,
+        true
+      ]
+    ]
+  }
+}

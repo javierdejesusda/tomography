@@ -1,0 +1,60 @@
+{
+  "_meta": {
+    "experiment": "p6",
+    "config_hash": "25ee6de331d4",
+    "seed": 0,
+    "git_sha": "ca2546cd5cb9a14a6b01ff84224c6ace0db01a1f",
+    "git_dirty": false,
+    "device": "cpu",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-16T21:42:30+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p6",
+      "model": "gpt2",
+      "seed": 0,
+      "models": [
+        "gpt2",
+        "gpt2-medium",
+        "gpt2-large",
+        "gpt2-xl"
+      ],
+      "sources": [
+        "r1",
+        "r2",
+        "r3",
+        "r5",
+        "r7"
+      ],
+      "steering_source": "c1",
+      "extra_runs": [
+        "results/c1/gpt2-large/353f91e1b8dc",
+        "results/c1/gpt2-medium/2ed2e53ba7fe",
+        "results/c1/gpt2-xl/de76af1a8a07",
+        "results/c1/gpt2/add59c39f574"
+      ],
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "series": [
+      "gpt2-xl"
+    ],
+    "xlabel": "Layer",
+    "ylabel": "Accuracy",
+    "chance": 0.5,
+    "n_layers": 48
+  }
+}

@@ -1,0 +1,407 @@
+{
+  "_meta": {
+    "experiment": "p9d",
+    "config_hash": "42b7a0daf9b9",
+    "seed": 0,
+    "git_sha": "a39ae61d1ea0214babb0f234a4fcf0c966c82c08",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-16T16:46:34+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9d",
+      "model": "qwen3-1.7b",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 24,
+      "temperature": null,
+      "top_p": 1.0,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        -0.4,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.4
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 8,
+      "bos": null,
+      "labels_run": "results/p9a/qwen3-1.7b/f413efcae268",
+      "template": "fewshot",
+      "n_shots": 15,
+      "direction_type": "obscure_real",
+      "eval_types": [
+        "obscure_real",
+        "fictional_generated",
+        "unknowable_detail",
+        "false_premise"
+      ],
+      "method": "logistic",
+      "preprocess": "center",
+      "n_pairs": 64,
+      "n_random": 3,
+      "min_pairs": 16,
+      "min_eval": 10,
+      "behavior": "auto",
+      "instruction": "Answer the question in a few words. If you do not know the answer, say that you do not know.",
+      "n_hand_check": 100,
+      "n_boot": 1000
+    }
+  },
+  "data": {
+    "columns": [
+      "type",
+      "side",
+      "arm",
+      "coeff",
+      "n",
+      "abstention_shift",
+      "lo",
+      "hi"
+    ],
+    "rows": [
+      [
+        "obscure_real",
+        "known",
+        "lat0",
+        0.4,
+        100,
+        -0.01,
+        -0.04,
+        0.02
+      ],
+      [
+        "obscure_real",
+        "known",
+        "random0",
+        0.4,
+        100,
+        0.03,
+        -0.01,
+        0.07
+      ],
+      [
+        "obscure_real",
+        "known",
+        "random1",
+        0.4,
+        100,
+        0.02,
+        0.0,
+        0.05
+      ],
+      [
+        "obscure_real",
+        "known",
+        "random2",
+        0.4,
+        100,
+        -0.04,
+        -0.08,
+        -0.01
+      ],
+      [
+        "obscure_real",
+        "unknown",
+        "lat0",
+        0.4,
+        100,
+        -0.01,
+        -0.06,
+        0.04
+      ],
+      [
+        "obscure_real",
+        "unknown",
+        "random0",
+        0.4,
+        100,
+        0.09,
+        0.03,
+        0.16
+      ],
+      [
+        "obscure_real",
+        "unknown",
+        "random1",
+        0.4,
+        100,
+        0.01,
+        -0.04,
+        0.06
+      ],
+      [
+        "obscure_real",
+        "unknown",
+        "random2",
+        0.4,
+        100,
+        0.01,
+        -0.060249999999999984,
+        0.08024999999999978
+      ],
+      [
+        "fictional_generated",
+        "known",
+        "lat0",
+        0.4,
+        100,
+        -0.01,
+        -0.04,
+        0.02
+      ],
+      [
+        "fictional_generated",
+        "known",
+        "random0",
+        0.4,
+        100,
+        0.03,
+        -0.01,
+        0.07
+      ],
+      [
+        "fictional_generated",
+        "known",
+        "random1",
+        0.4,
+        100,
+        0.02,
+        0.0,
+        0.05
+      ],
+      [
+        "fictional_generated",
+        "known",
+        "random2",
+        0.4,
+        100,
+        -0.04,
+        -0.08,
+        -0.01
+      ],
+      [
+        "fictional_generated",
+        "unknown",
+        "lat0",
+        0.4,
+        100,
+        -0.12,
+        -0.2,
+        -0.03
+      ],
+      [
+        "fictional_generated",
+        "unknown",
+        "random0",
+        0.4,
+        100,
+        0.13,
+        0.07,
+        0.21
+      ],
+      [
+        "fictional_generated",
+        "unknown",
+        "random1",
+        0.4,
+        100,
+        -0.02,
+        -0.09,
+        0.06
+      ],
+      [
+        "fictional_generated",
+        "unknown",
+        "random2",
+        0.4,
+        100,
+        -0.05,
+        -0.12,
+        0.02
+      ],
+      [
+        "unknowable_detail",
+        "known",
+        "lat0",
+        0.4,
+        69,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "unknowable_detail",
+        "known",
+        "random0",
+        0.4,
+        69,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "unknowable_detail",
+        "known",
+        "random1",
+        0.4,
+        69,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "unknowable_detail",
+        "known",
+        "random2",
+        0.4,
+        69,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "unknowable_detail",
+        "unknown",
+        "lat0",
+        0.4,
+        60,
+        -0.05,
+        -0.11666666666666667,
+        0.0
+      ],
+      [
+        "unknowable_detail",
+        "unknown",
+        "random0",
+        0.4,
+        60,
+        0.06666666666666667,
+        0.016666666666666666,
+        0.13333333333333333
+      ],
+      [
+        "unknowable_detail",
+        "unknown",
+        "random1",
+        0.4,
+        60,
+        0.016666666666666666,
+        0.0,
+        0.05
+      ],
+      [
+        "unknowable_detail",
+        "unknown",
+        "random2",
+        0.4,
+        60,
+        -0.05,
+        -0.11666666666666667,
+        0.0
+      ],
+      [
+        "false_premise",
+        "known",
+        "lat0",
+        0.4,
+        69,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "false_premise",
+        "known",
+        "random0",
+        0.4,
+        69,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "false_premise",
+        "known",
+        "random1",
+        0.4,
+        69,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "false_premise",
+        "known",
+        "random2",
+        0.4,
+        69,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "false_premise",
+        "unknown",
+        "lat0",
+        0.4,
+        83,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "false_premise",
+        "unknown",
+        "random0",
+        0.4,
+        83,
+        0.024096385542168676,
+        0.0,
+        0.060240963855421686
+      ],
+      [
+        "false_premise",
+        "unknown",
+        "random1",
+        0.4,
+        83,
+        -0.012048192771084338,
+        -0.03614457831325301,
+        0.0
+      ],
+      [
+        "false_premise",
+        "unknown",
+        "random2",
+        0.4,
+        83,
+        -0.07228915662650602,
+        -0.13253012048192772,
+        -0.024096385542168676
+      ]
+    ]
+  }
+}

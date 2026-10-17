@@ -1,0 +1,95 @@
+{
+  "_meta": {
+    "experiment": "c1",
+    "config_hash": "add59c39f574",
+    "seed": 0,
+    "git_sha": "d59a2f7a9db738e62ef7ad386cf282b052febae0",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-16T15:11:55+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "c1",
+      "model": "gpt2",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 40,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 2,
+      "layers": null,
+      "coeffs": [
+        -0.3,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.3
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "judge": "sentiment-primary",
+      "judge_check": "sentiment-secondary",
+      "n_seeds": 10,
+      "n_steer_seeds": 3,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "min_words": 3,
+      "sweep_layers": null,
+      "window": 3,
+      "ops": [
+        "linear",
+        "piecewise"
+      ],
+      "truncate_words": 3,
+      "prompt_positive": [
+        "Write a happy and positive text. ",
+        "Write a very happy, joyful and enthusiastic text. "
+      ],
+      "prompt_negative": [
+        "Write a sad and negative text. ",
+        "Write a very sad, angry and hateful text. "
+      ]
+    }
+  },
+  "data": {
+    "reading_layer": 8,
+    "steer_layer": 12,
+    "window": [
+      10,
+      11,
+      12
+    ],
+    "sweep_layers": [
+      1,
+      3,
+      5,
+      8,
+      10,
+      12
+    ],
+    "judge_agreement": 1.0,
+    "n_prompts": 100
+  }
+}

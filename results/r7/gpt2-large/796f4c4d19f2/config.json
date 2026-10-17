@@ -1,0 +1,27 @@
+{
+  "experiment": "r7",
+  "model": "gpt2-large",
+  "seed": 0,
+  "n_seeds": 10,
+  "n_pairs": 64,
+  "n_eval_pairs": null,
+  "method": "logistic",
+  "preprocess": "center",
+  "position": "last",
+  "eval_position": null,
+  "layers": null,
+  "bos": null,
+  "batch_size": 8,
+  "concept": "truthfulness",
+  "ood_subsets": [
+    "cities",
+    "neg_cities",
+    "sp_en_trans",
+    "neg_sp_en_trans",
+    "larger_than",
+    "smaller_than",
+    "cities_cities_conj",
+    "cities_cities_disj",
+    "common_claim_true_false"
+  ]
+}

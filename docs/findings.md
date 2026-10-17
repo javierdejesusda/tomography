@@ -845,6 +845,10 @@ Qwen3:
 Other runs: R6 text baselines computed at `ca2546c` (not a run); A1 `ad6abbba8fd0`; A2 `be4e34f21b35`; P6
 `25ee6de331d4`.
 
+The files of every run named here are committed under `results/<experiment>/<model>/<hash>/`, copied with
+`tomography export`, which keeps the JSON, NPZ and CSV files the plots read and rewrites local paths. The figures are
+not committed; `tomography plot all --out results` redraws them from these files.
+
 ## Pending
 
 Not in this document yet. No dates are promised.
