@@ -120,6 +120,7 @@ def _config(**overrides: Any) -> Config:
         max_new_tokens=5,
         coeffs=(-0.2, 0.0, 0.2),
         window=2,
+        n_random=2,
         batch_size=8,
     )
     return dataclasses.replace(base, **overrides)
@@ -203,6 +204,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.window == 3
     assert config.strength is None
     assert config.truncate_words == 4
+    assert config.n_random == 3
     custom = Config(emotions=("fear", "anger"), strength=0.1)
     assert Config.from_dict(custom.to_dict()) == custom
 
@@ -642,6 +644,7 @@ def test_the_strength_picks_the_coefficient_of_the_matrix(
         ({"temperature": None}, "needs a temperature"),
         ({"top_p": 1.5}, "top_p"),
         ({"n_pairs": 0}, "n_pairs must be at least 1, got 0"),
+        ({"n_random": 0}, "n_random must be at least 1, got 0"),
         (
             {"n_eval_pairs": -1},
             "n_eval_pairs must be at least 1 or None, got -1",
@@ -666,6 +669,7 @@ def test_the_strength_picks_the_coefficient_of_the_matrix(
         "sampling-without-a-temperature",
         "top-p-above-one",
         "no-train-pairs",
+        "no-random-arm",
         "negative-eval-pairs",
     ],
 )

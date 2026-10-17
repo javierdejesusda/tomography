@@ -87,6 +87,8 @@ class Config(SteeringConfig):
         strength: The coefficient of the matrix; None means the largest of
             `coeffs`. It must be positive and one of `coeffs`.
         truncate_words: Words kept of each neutral text as a prompt.
+        n_random: Random control directions, unit vectors drawn from the
+            seed and norm-matched to the steering arm.
     """
 
     experiment: str = "c2"
@@ -102,6 +104,7 @@ class Config(SteeringConfig):
     window: int = 3
     strength: float | None = None
     truncate_words: int = 4
+    n_random: int = 3
 
 
 def emotion_stimuli(
@@ -198,6 +201,8 @@ def _check_config(config: Config, n_layers: int) -> float:
             f"strength must be a positive value of coeffs {config.coeffs}, "
             f"got {strength}"
         )
+    if config.n_random < 1:
+        raise ValueError(f"n_random must be at least 1, got {config.n_random}")
     if not 1 <= config.n_steer_seeds <= config.n_seeds:
         raise ValueError(
             f"n_steer_seeds must be in 1..{config.n_seeds}, got "
