@@ -1,0 +1,239 @@
+{
+  "_meta": {
+    "experiment": "p9d",
+    "config_hash": "096a207db665",
+    "seed": 0,
+    "git_sha": "a39ae61d1ea0214babb0f234a4fcf0c966c82c08",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T01:08:08+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9d",
+      "model": "gpt2-xl",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 24,
+      "temperature": null,
+      "top_p": 1.0,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        -0.4,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.4
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 4,
+      "bos": null,
+      "labels_run": "results/p9a/gpt2-xl/cc283b36fcae",
+      "template": "fewshot",
+      "n_shots": 15,
+      "direction_type": "obscure_real",
+      "eval_types": [
+        "obscure_real",
+        "fictional_generated",
+        "unknowable_detail",
+        "false_premise"
+      ],
+      "method": "logistic",
+      "preprocess": "center",
+      "n_pairs": 64,
+      "n_random": 3,
+      "min_pairs": 16,
+      "min_eval": 10,
+      "behavior": "auto",
+      "instruction": "Answer the question in a few words. If you do not know the answer, say that you do not know.",
+      "n_hand_check": 100,
+      "n_boot": 1000
+    }
+  },
+  "data": {
+    "mode": "shift",
+    "template": "fewshot",
+    "n_items": {
+      "calibration": {
+        "known": 56,
+        "unknown": 100
+      },
+      "obscure_real": {
+        "known": 78,
+        "unknown": 100
+      },
+      "fictional_generated": {
+        "known": 78,
+        "unknown": 100
+      },
+      "unknowable_detail": {
+        "known": 21,
+        "unknown": 60
+      },
+      "false_premise": {
+        "known": 21,
+        "unknown": 83
+      }
+    },
+    "layers": [
+      48
+    ],
+    "layer_source": "validation",
+    "direction": {
+      "type": "obscure_real",
+      "val_auroc": [
+        0.7036381842456609,
+        0.7198375611927014,
+        0.7197040498442367,
+        0.7242656875834446,
+        0.7401535380507344,
+        0.7453382287494437,
+        0.7512794837561193,
+        0.74942145082332,
+        0.7468513573653761,
+        0.7353137516688919,
+        0.7200044503782822,
+        0.717946150422786,
+        0.724076546506453,
+        0.7315865598575879,
+        0.7784045393858477,
+        0.7648642634623943,
+        0.7765465064530485,
+        0.8216065865598576,
+        0.8316866933689364,
+        0.8253449043168669,
+        0.8397085002225189,
+        0.8600801068090788,
+        0.87413217623498,
+        0.8680685358255452,
+        0.8920894526034713,
+        0.9036381842456609,
+        0.9090342679127725,
+        0.9099243435692034,
+        0.9122051624388073,
+        0.9143302180685359,
+        0.9182799287939475,
+        0.9249332443257677,
+        0.9307632398753894,
+        0.9266243880729862,
+        0.9298731642189586,
+        0.9311526479750779,
+        0.9310191366266133,
+        0.9313640409434802,
+        0.9267467734757454,
+        0.9224076546506453,
+        0.9202825990209168,
+        0.9233311081441923,
+        0.9226079216733423,
+        0.92471072541166,
+        0.9260680907877169,
+        0.938495772140632,
+        0.9467734757454384,
+        0.9486092567868268
+      ]
+    },
+    "coeffs": [
+      -0.4,
+      -0.2,
+      -0.1,
+      0.0,
+      0.1,
+      0.2,
+      0.4
+    ],
+    "types": [
+      "obscure_real",
+      "fictional_generated",
+      "unknowable_detail",
+      "false_premise"
+    ],
+    "skipped": {},
+    "headline": {
+      "group": "obscure_real",
+      "side": "unknown",
+      "metric": "entropy",
+      "lat_slope": -2.8153458348342344,
+      "lat_lo": -3.086715039547,
+      "lat_hi": -2.575743554120972,
+      "max_abs_random_slope": 0.834075100365139,
+      "differences": {
+        "random0": [
+          -2.9517110694022404,
+          -3.303213043198698,
+          -2.680571339939321
+        ],
+        "random1": [
+          -2.629381946438834,
+          -2.9894024675516846,
+          -2.3242854323770312
+        ],
+        "random2": [
+          -1.9812707344690954,
+          -2.4152347020024343,
+          -1.6364490077325278
+        ]
+      },
+      "abs_gaps": {
+        "random0": [
+          2.678980600266229,
+          2.371930358168625,
+          2.992790846895603
+        ],
+        "random1": [
+          2.6293819464388344,
+          2.3013658124847067,
+          2.9708753089748674
+        ],
+        "random2": [
+          1.9812707344690954,
+          1.635423120693081,
+          2.38101266270592
+        ]
+      },
+      "distinguishable": true,
+      "selective": true
+    },
+    "n_with_answer": {
+      "calibration": {
+        "known": 56,
+        "unknown": 100
+      },
+      "obscure_real": {
+        "known": 78,
+        "unknown": 100
+      },
+      "fictional_generated": {
+        "known": 78,
+        "unknown": 0
+      },
+      "unknowable_detail": {
+        "known": 21,
+        "unknown": 0
+      },
+      "false_premise": {
+        "known": 21,
+        "unknown": 0
+      }
+    }
+  }
+}

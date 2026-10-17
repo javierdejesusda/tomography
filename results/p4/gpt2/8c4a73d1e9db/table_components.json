@@ -1,0 +1,159 @@
+{
+  "_meta": {
+    "experiment": "p4",
+    "config_hash": "8c4a73d1e9db",
+    "seed": 0,
+    "git_sha": "ca2546cd5cb9a14a6b01ff84224c6ace0db01a1f",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T02:12:43+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p4",
+      "model": "gpt2",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "utility"
+      ],
+      "methods": [
+        "pca_diff",
+        "pca_raw",
+        "mean_diff",
+        "logistic",
+        "kmeans",
+        "random"
+      ],
+      "pairings": [
+        "matched",
+        "label_contrastive",
+        "random"
+      ],
+      "preprocesses": [
+        "center",
+        "unit",
+        "none"
+      ],
+      "n_components": 8,
+      "n_folds": 5,
+      "n_boot": 2000
+    }
+  },
+  "data": [
+    {
+      "task": "sentiment",
+      "pairing": "label_contrastive",
+      "layer": 11,
+      "pc1": 0.5116822429906542,
+      "pc1_lo": 0.49672897196261684,
+      "pc1_hi": 0.5266355140186916,
+      "cv": 0.5518691588785047,
+      "cv_lo": 0.5172897196261682,
+      "cv_hi": 0.5948598130841121,
+      "cv_component": 0,
+      "explained_pc1": 0.20371327009628998
+    },
+    {
+      "task": "sentiment",
+      "pairing": "random",
+      "layer": 11,
+      "pc1": 0.49766355140186913,
+      "pc1_lo": 0.4855140186915888,
+      "pc1_hi": 0.5088901869158878,
+      "cv": 0.5369158878504673,
+      "cv_lo": 0.5060747663551401,
+      "cv_hi": 0.5630841121495327,
+      "cv_component": 7,
+      "explained_pc1": 0.18653252689795832
+    },
+    {
+      "task": "truth",
+      "pairing": "label_contrastive",
+      "layer": 6,
+      "pc1": 0.4813559322033898,
+      "pc1_lo": 0.4627118644067797,
+      "pc1_hi": 0.5016949152542373,
+      "cv": 0.48474576271186437,
+      "cv_lo": 0.4661016949152542,
+      "cv_hi": 0.5050847457627119,
+      "cv_component": 0,
+      "explained_pc1": 0.2602480972477565
+    },
+    {
+      "task": "truth",
+      "pairing": "random",
+      "layer": 6,
+      "pc1": 0.48644067796610174,
+      "pc1_lo": 0.4711864406779661,
+      "pc1_hi": 0.5016949152542374,
+      "cv": 0.5,
+      "cv_lo": 0.4728813559322034,
+      "cv_hi": 0.5271186440677966,
+      "cv_component": 0,
+      "explained_pc1": 0.2667759635060062
+    },
+    {
+      "task": "utility",
+      "pairing": "matched",
+      "layer": 3,
+      "pc1": 0.55078125,
+      "pc1_lo": 0.502724609375,
+      "pc1_hi": 0.584765625,
+      "cv": 0.505859375,
+      "cv_lo": 0.48671875,
+      "cv_hi": 0.530087890625,
+      "cv_component": 3,
+      "explained_pc1": 0.7402283792557949
+    },
+    {
+      "task": "utility",
+      "pairing": "label_contrastive",
+      "layer": 3,
+      "pc1": 0.54140625,
+      "pc1_lo": 0.49765625,
+      "pc1_hi": 0.572265625,
+      "cv": 0.490625,
+      "cv_lo": 0.462890625,
+      "cv_hi": 0.521484375,
+      "cv_component": 0,
+      "explained_pc1": 0.6403358060800934
+    },
+    {
+      "task": "utility",
+      "pairing": "random",
+      "layer": 3,
+      "pc1": 0.50234375,
+      "pc1_lo": 0.458203125,
+      "pc1_hi": 0.547265625,
+      "cv": 0.51015625,
+      "cv_lo": 0.4796875,
+      "cv_hi": 0.541015625,
+      "cv_component": 4,
+      "explained_pc1": 0.6306143672375303
+    }
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "_meta": {
+    "experiment": "r6",
+    "config_hash": "f058c0f19396",
+    "seed": 0,
+    "git_sha": "ca2546cd5cb9a14a6b01ff84224c6ace0db01a1f",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T01:31:14+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "r6",
+      "model": "gpt2-large",
+      "seed": 0,
+      "n_seeds": 15,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "sources": [
+        "truthfulqa",
+        "arc",
+        "honesty"
+      ]
+    }
+  },
+  "data": {
+    "n_questions": 817,
+    "n_train": 511,
+    "n_val": 133,
+    "n_test": 173,
+    "n_seeds": 15,
+    "n_eval_pairs": {
+      "val": 133,
+      "test": 173
+    },
+    "baselines_all_questions": {
+      "standard": {
+        "mc1": 0.2252141982864137,
+        "lo": 0.19789487233809458,
+        "hi": 0.25510546630820147
+      },
+      "heuristic": {
+        "mc1": 0.3488372093023256,
+        "lo": 0.3169326809652754,
+        "hi": 0.3821565921875868
+      }
+    },
+    "text_baselines": {
+      "text_word": {
+        "mc1": 0.6763005780346821,
+        "lo": 0.6034046663938186,
+        "hi": 0.7415370707236641
+      },
+      "text_char": {
+        "mc1": 0.6705202312138728,
+        "lo": 0.5974421528971253,
+        "hi": 0.7361900190689644
+      }
+    },
+    "lat": {
+      "truthfulqa": {
+        "validation-layer": {
+          "mc1": 0.6759152215799613,
+          "lo": 0.6655105973025048,
+          "hi": 0.6867052023121386
+        },
+        "best-layer": {
+          "mc1": 0.6932562620423892,
+          "lo": 0.6847784200385356,
+          "hi": 0.7013487475915221,
+          "layer": 22
+        }
+      },
+      "arc": {
+        "validation-layer": {
+          "mc1": 0.40809248554913297,
+          "lo": 0.376868978805395,
+          "hi": 0.44007707129094414
+        },
+        "best-layer": {
+          "mc1": 0.4111753371868979,
+          "lo": 0.37918111753371875,
+          "hi": 0.43815028901734104,
+          "layer": 16
+        }
+      },
+      "honesty": {
+        "validation-layer": {
+          "mc1": 0.3040462427745665,
+          "lo": 0.29595375722543354,
+          "hi": 0.3109826589595376
+        },
+        "best-layer": {
+          "mc1": 0.317533718689788,
+          "lo": 0.31252408477842003,
+          "hi": 0.3236994219653179,
+          "layer": 29
+        }
+      }
+    }
+  }
+}
