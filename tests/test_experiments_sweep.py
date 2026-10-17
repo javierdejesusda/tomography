@@ -236,6 +236,25 @@ def test_sweep_reader_recovers_a_planted_direction() -> None:
     np.testing.assert_array_equal(reader, np.ones_like(reader))
 
 
+def test_sweep_passes_refit_at_zero_to_the_reader_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[Any] = []
+    real = RepReader.fit.__func__  # type: ignore[attr-defined]
+
+    def spy(cls: Any, *args: Any, **kwargs: Any) -> RepReader:
+        seen.append(kwargs.get("refit_at_zero"))
+        return real(cls, *args, **kwargs)  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(RepReader, "fit", classmethod(spy))
+    train, evals = _inputs(n_train=1)
+
+    sweep_from_activations(train, evals, method="logistic")
+    sweep_from_activations(train, evals, method="logistic", refit_at_zero=True)
+
+    assert seen == [False, False, True, True]
+
+
 def test_sweep_shuffled_series_sits_at_chance() -> None:
     train, evals = _inputs()
     result = sweep_from_activations(train, evals, seed=0)

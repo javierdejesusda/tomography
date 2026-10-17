@@ -24,6 +24,7 @@ Preprocess = Literal["center", "unit", "none"]
 
 _METHODS = get_args(Method)
 _PREPROCESSES = get_args(Preprocess)
+_FAINT_TOL = 1e-10
 
 
 @dataclass(frozen=True, eq=False)
@@ -51,6 +52,7 @@ def fit_direction(
     pairs: NDArray[np.int64] | None = None,
     preprocess: Preprocess = "center",
     seed: int = 0,
+    refit_at_zero: bool = False,
 ) -> FitResult:
     """Fits one direction to the activations of one layer.
 
@@ -78,6 +80,11 @@ def fit_direction(
             describes, then centers. `none` does neither. The returned mean
             is the mean of the vectors after any unit scaling.
         seed: Seed for the stochastic finders.
+        refit_at_zero: Only for `logistic`. When the solver stops at its
+            start with all-zero coefficients because the gradient there is
+            under its tolerance, repeat the fit with a tighter one instead
+            of failing with a zero norm. Off by default, so a fit that
+            finds no signal is an error.
 
     Returns:
         The unit direction, the mean it was centered on and the raw norm.
@@ -108,7 +115,7 @@ def fit_direction(
         if method == "mean_diff":
             direction = _class_difference(fitted, positive)
         else:
-            direction = _logistic_coefficients(fitted, positive)
+            direction = _logistic_coefficients(fitted, positive, refit_at_zero)
     elif method == "kmeans":
         direction = _centroid_difference(fitted, seed)
     elif method == "random":
@@ -171,12 +178,19 @@ def _class_difference(
 
 
 def _logistic_coefficients(
-    rows: NDArray[np.float64], positive: NDArray[np.bool_]
+    rows: NDArray[np.float64],
+    positive: NDArray[np.bool_],
+    refit_at_zero: bool,
 ) -> NDArray[np.float64]:
     scale = float(np.linalg.norm(rows) / np.sqrt(rows.shape[0]))
     if scale == 0.0:
         raise ValueError("the fitted direction has zero norm")
-    model = LogisticRegression(max_iter=1000).fit(rows / scale, positive)
+    scaled = rows / scale
+    model = LogisticRegression(max_iter=1000).fit(scaled, positive)
+    if refit_at_zero and not model.coef_.any():
+        model = LogisticRegression(max_iter=1000, tol=_FAINT_TOL).fit(
+            scaled, positive
+        )
     return np.asarray(model.coef_[0], dtype=np.float64) / scale
 
 

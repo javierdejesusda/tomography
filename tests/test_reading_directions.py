@@ -291,6 +291,31 @@ def test_logistic_direction_does_not_depend_on_activation_scale() -> None:
     assert scaled.raw_norm == pytest.approx(base.raw_norm / 1000.0, rel=1e-3)
 
 
+def faint_signal() -> tuple[NDArray[np.float64], NDArray[np.int64]]:
+    rng = np.random.default_rng(18)
+    labels = np.tile(np.array([1, 0], dtype=np.int64), 100)
+    sign = 2.0 * labels - 1.0
+    h = rng.standard_normal((200, 8))
+    h -= np.outer(sign, sign @ h / (sign @ sign))
+    h[:, 0] += 1e-4 * sign
+    return h, labels
+
+
+def test_logistic_finds_a_faint_signal_when_asked_to_refit() -> None:
+    h, labels = faint_signal()
+
+    fit = fit_direction("logistic", h, labels=labels, refit_at_zero=True)
+
+    assert abs(fit.direction[0]) > 0.95
+
+
+def test_logistic_stopping_at_zero_is_an_error_by_default() -> None:
+    h, labels = faint_signal()
+
+    with pytest.raises(ValueError, match="zero norm"):
+        fit_direction("logistic", h, labels=labels)
+
+
 @pytest.mark.parametrize(
     "method", ["mean_diff", "logistic"], ids=["mean_diff", "logistic"]
 )
