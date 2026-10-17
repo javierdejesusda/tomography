@@ -739,6 +739,75 @@ uv run tomography plot all --out results
 The raw reader vectors (`readers*.npz`) are not committed, so recomputing a run's results needs `tomography run`;
 plotting does not. The committed results are added with the run exports.
 
+### Running a chain on a rented GPU
+
+`python -m tomography.cloud` rents a RunPod pod, runs a `tomography chain` spec on it and brings the results
+back. Each step is one command: `up` creates the pod, `push` uploads a commit, the spec and the data cache,
+`setup` installs the environment, `start` launches the chain detached, `status` reports on it, `pull` copies
+the out root to a local folder, and `down` deletes the pod. `ssh` prints the ssh command or runs a command on
+the pod, and `resume` starts a stopped pod again.
+
+The API key is read from the `RUNPOD_API_KEY` environment variable only. It is never written to a file, printed
+or sent to the pod.
+
+```bash
+export RUNPOD_API_KEY=...
+uv run python -m tomography.cloud up --max-hours 12
+```
+
+Always pass `--max-hours`. A watchdog on the pod stops it at that deadline, or `--grace-minutes` (default 30)
+after the chain ends, whichever comes first. A stopped pod keeps `/workspace` but still bills its volume disk
+until `down`.
+
+A minimal spec. A relative `out` resolves against `/workspace/chains` on the pod, so `../out/chain1` writes to
+`/workspace/out/chain1`:
+
+```toml
+[chain]
+name = "chain1"
+out = "../out/chain1"
+
+[[job]]
+name = "r1-qwen3-1.7b"
+experiment = "r1"
+model = "qwen3-1.7b"
+retry_batch_sizes = [8]
+```
+
+Then push, set up and start (`--spec` is the spec's file name, as pushed):
+
+```bash
+uv run python -m tomography.cloud push --ref HEAD --spec chain1.toml
+uv run python -m tomography.cloud setup
+uv run python -m tomography.cloud start --spec chain1.toml --max-hours 12
+uv run python -m tomography.cloud status
+```
+
+Community Cloud stock is volatile: `up` can fail with "no instances available" even when the stock field says
+otherwise. Retry with `--cloud secure`.
+
+Pull before the watchdog stop or the deadline. A stopped pod may not restart, because `resume` can fail when
+its host has no free GPU. Run `down` only after `pull`:
+
+```bash
+uv run python -m tomography.cloud pull --dest cloud/chain1
+uv run python -m tomography.cloud down
+```
+
+To run a remote script, pass it as one `bash -c` command, because a single quoted argument runs as a command
+name:
+
+```bash
+uv run python -m tomography.cloud ssh -- bash -c 'ls /workspace/out/chain1'
+```
+
+Runs made on the pod keep their config hash: it is computed from the config alone, so the same config gives
+the same run directory name on the laptop and on the pod. What differs is recorded per run in its `meta.json`:
+`device` (for example `cuda:0 (<GPU name>)`), `platform` and the library `versions`, plus the git commit. Compare
+those fields before pooling runs from the pod and the laptop. Run configs hold POSIX paths such as
+`/workspace/out/chain1/...`; `tomography export` maps those to the pulled copy of the run by its
+`<experiment>/<model>/<hash>` tail.
+
 ## Reproducibility
 
 - **Checkpoints.** Every entry of `MODELS` pins a full 40-character commit SHA, and `load_model` always passes
