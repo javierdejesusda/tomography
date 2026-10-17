@@ -30,7 +30,10 @@ from tomography.experiments.c1_sentiment_steering import dose_with_none
 from tomography.experiments.c1_sentiment_steering import draw_prompts
 from tomography.experiments.c1_sentiment_steering import prompt_fragments
 from tomography.experiments.c1_sentiment_steering import window_around
+from tomography.experiments.controls import max_abs
+from tomography.experiments.controls import random_readers
 from tomography.experiments.effects import SideEffects
+from tomography.experiments.effects import effects_row
 from tomography.experiments.effects import side_effects
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.effects import write_dose_curves
@@ -286,40 +289,6 @@ def _fit_readers(
     }
 
 
-def _effect_row(
-    arm: str,
-    coeff: float,
-    seed: int | None,
-    emotion: str | None,
-    effects: SideEffects,
-) -> list[object]:
-    """Builds one row of `table_effects`.
-
-    Args:
-        arm: `none`, `reading` or `random`.
-        coeff: The coefficient of the arm.
-        seed: Index of the reader or random arm; None for `none`.
-        emotion: The steered emotion; None for `none` and random arms.
-        effects: The side effects measured for the arm.
-
-    Returns:
-        The identifying values, then the six side effects, in the order of
-        `_EFFECT_COLUMNS`.
-    """
-    return [
-        arm,
-        coeff,
-        seed,
-        emotion,
-        effects.perplexity,
-        effects.fluency,
-        effects.distinct_1,
-        effects.distinct_2,
-        effects.mean_length,
-        effects.empty_rate,
-    ]
-
-
 def _write_matrix(
     run_dir: RunDir,
     stem: str,
@@ -452,20 +421,12 @@ def execute(
 
         return make
 
-    rng = np.random.default_rng(config.seed)
-    shape_random = (
-        len(window),
+    randoms = random_readers(
+        window,
         next(iter(results.values())).readers[0].directions.shape[1],
+        config.n_random,
+        seed=config.seed,
     )
-    randoms = [
-        RepReader.from_arrays(
-            "random",
-            window,
-            rng.standard_normal(shape_random),
-            np.zeros(shape_random),
-        )
-        for _ in range(config.n_random)
-    ]
     columns = 2 * _N
     plain = plain_arm(loaded, settings)
     none = run_trial(plain, prompts, score, columns=columns)
@@ -477,7 +438,7 @@ def execute(
         )
 
     effect_rows: list[list[object]] = [
-        _effect_row("none", 0.0, None, None, effects_of(plain, none))
+        effects_row(effects_of(plain, none), "none", 0.0, None, None)
     ]
     at_strength = list(config.coeffs).index(strength)
     shape = (len(config.emotions), config.n_steer_seeds)
@@ -502,12 +463,12 @@ def execute(
                 if coeff != 0.0
             )
             effect_rows.extend(
-                _effect_row(
+                effects_row(
+                    effects_of(steering_arms(reader)(coeff), trial),
                     "reading",
                     coeff,
                     i,
                     emotion,
-                    effects_of(steering_arms(reader)(coeff), trial),
                 )
                 for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
                 if coeff != 0.0
@@ -536,12 +497,12 @@ def execute(
             if coeff != 0.0
         )
         effect_rows.extend(
-            _effect_row(
+            effects_row(
+                effects_of(steering_arms(reader)(coeff), trial),
                 "random",
                 coeff,
                 r,
                 None,
-                effects_of(steering_arms(reader)(coeff), trial),
             )
             for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
             if coeff != 0.0
@@ -601,10 +562,7 @@ def execute(
         if first.std() > 0 and second.std() > 0
         else float("nan")
     )
-    finite = np.abs(random_change[np.isfinite(random_change)])
-    summary["max_abs_random_change"] = (
-        float(finite.max()) if finite.size else float("nan")
-    )
+    summary["max_abs_random_change"] = max_abs(random_change)
     write_trials(run_dir, "trials", trials)
     write_trials(run_dir, "trials_random", random_trials)
     run_dir.write_json(

@@ -1,6 +1,7 @@
 """Side effects of steering, held-out text splits and result writers."""
 
 from collections.abc import Sequence
+from dataclasses import astuple
 from dataclasses import dataclass
 
 import numpy as np
@@ -37,6 +38,20 @@ class SideEffects:
     distinct_2: float
     mean_length: float
     empty_rate: float
+
+
+def effects_row(effects: SideEffects, *lead: object) -> list[object]:
+    """Lays out one row of a `table_effects` table.
+
+    Args:
+        effects: The side effects of the trial.
+        *lead: The identifying columns that come first.
+
+    Returns:
+        The `lead` values, then the six side-effect columns in the order of
+        `SideEffects`.
+    """
+    return [*lead, *astuple(effects)]
 
 
 @dataclass(frozen=True)

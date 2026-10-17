@@ -35,6 +35,7 @@ from tomography.control.controllers import ResponseMask
 from tomography.control.controllers import mean_residual_norms
 from tomography.control.operators import Operator
 from tomography.experiments.base import RunDir
+from tomography.experiments.controls import random_readers
 from tomography.experiments.intervals import write_interval_curves
 from tomography.experiments.p9a_labels import load_labeled
 from tomography.experiments.steering import GenSettings
@@ -555,17 +556,20 @@ def _steering(
         bos=config.bos,
         batch_size=config.batch_size,
     )
-    rng = np.random.default_rng(config.seed)
-    zeros = np.zeros_like(reader.directions)
     names = arm_names(config.n_random)
     readers = {names[0]: reader}
-    for name in names[1:]:
-        readers[name] = RepReader.from_arrays(
-            RANDOM,
-            reader.layers,
-            rng.standard_normal(reader.directions.shape),
-            zeros,
+    readers.update(
+        zip(
+            names[1:],
+            random_readers(
+                reader.layers,
+                reader.directions.shape[1],
+                config.n_random,
+                seed=config.seed,
+            ),
+            strict=True,
         )
+    )
     return _Steering(
         layers=tuple(layers),
         layer_source="validation" if config.layers is None else "config",

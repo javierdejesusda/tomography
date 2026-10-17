@@ -39,7 +39,10 @@ from tomography.experiments.c1_sentiment_steering import dose_with_none
 from tomography.experiments.c1_sentiment_steering import draw_prompts
 from tomography.experiments.c1_sentiment_steering import prompt_fragments
 from tomography.experiments.c1_sentiment_steering import slope_layer
+from tomography.experiments.controls import max_abs
+from tomography.experiments.controls import recording
 from tomography.experiments.effects import SideEffects
+from tomography.experiments.effects import effects_row
 from tomography.experiments.effects import side_effects
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.effects import write_trials
@@ -363,12 +366,6 @@ def _finite_mean(values: NDArray[Any], axis: int) -> NDArray[np.float64]:
     return np.where(count > 0, total / np.maximum(count, 1), np.nan)
 
 
-def _max_abs(values: NDArray[np.float64]) -> float:
-    """Gives the largest absolute finite value; NaN when none is finite."""
-    finite = np.abs(values[np.isfinite(values)])
-    return float(finite.max()) if finite.size else float("nan")
-
-
 def _inversion(
     read: NDArray[np.float64], slope: NDArray[np.float64], threshold: float
 ) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
@@ -468,7 +465,7 @@ class _Steering:
         config = self.config
 
         def make(coeff: float) -> Arm:
-            arm = reader_arm(
+            return reader_arm(
                 self.loaded,
                 self.settings,
                 reader,
@@ -480,12 +477,14 @@ class _Steering:
                 mask=config.mask,
                 preserve_norm=config.preserve_norm,
             )
-            if built is not None:
-                built[coeff] = arm
-            return arm
 
         return dose_with_none(
-            make, config.coeffs, prompts, self.score, none, columns=2
+            make if built is None else recording(make, built),
+            config.coeffs,
+            prompts,
+            self.score,
+            none,
+            columns=2,
         )
 
     def effects(
@@ -519,39 +518,6 @@ def _steered_trials(dose: DoseResponse, prefix: str) -> list[Trial]:
     ]
 
 
-def _effects_row(
-    template: str,
-    layer: int | None,
-    reader: int | None,
-    coeff: float,
-    effects: SideEffects,
-) -> list[object]:
-    """Builds one row of `table_effects`.
-
-    Args:
-        template: The template, `random` for a random arm or `none`.
-        layer: The sweep layer; None for the unsteered trial.
-        reader: The reader or random arm index; None for the unsteered trial.
-        coeff: The coefficient.
-        effects: The side effects of the trial.
-
-    Returns:
-        The identifying columns, then the six side-effect columns.
-    """
-    return [
-        template,
-        layer,
-        reader,
-        coeff,
-        effects.perplexity,
-        effects.fluency,
-        effects.distinct_1,
-        effects.distinct_2,
-        effects.mean_length,
-        effects.empty_rate,
-    ]
-
-
 def _dose_rows(
     steering: _Steering,
     dose: DoseResponse,
@@ -563,12 +529,12 @@ def _dose_rows(
 ) -> list[list[object]]:
     """Measures the side effects of the nonzero-coefficient trials."""
     return [
-        _effects_row(
+        effects_row(
+            steering.effects(built[coeff], trial, neutral),
             template,
             layer,
             reader,
             coeff,
-            steering.effects(built[coeff], trial, neutral),
         )
         for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
         if coeff != 0.0
@@ -739,7 +705,7 @@ def _dose_sweep(
     config = steering.config
     trials = [none]
     plain_effects = steering.effects(steering.plain, none, neutral)
-    rows = [_effects_row("none", None, None, 0.0, plain_effects)]
+    rows = [effects_row(plain_effects, "none", None, None, 0.0)]
     shape = (len(names), len(sweep), config.n_steer_seeds, len(config.coeffs))
     primary = np.full(shape, np.nan)
     check = np.full(shape, np.nan)
@@ -930,7 +896,7 @@ def _write_report(
             "judge_sign_agreement": _sign_agreement(
                 slope.ravel(), measured.check.ravel()
             ),
-            "max_abs_random_slope": _max_abs(measured.random_slope),
+            "max_abs_random_slope": max_abs(measured.random_slope),
         },
     )
 
