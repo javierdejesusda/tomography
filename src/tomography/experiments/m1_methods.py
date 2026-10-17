@@ -27,6 +27,8 @@ from tomography.datasets.stimulus import build_stimulus_set
 from tomography.datasets.wikitext import load_wikitext
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.effects import SideEffects
+from tomography.experiments.effects import side_effects
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.effects import write_dose_curves
 from tomography.experiments.effects import write_trials
@@ -93,6 +95,17 @@ _SEED_COLUMNS = (
     "rate",
     "lo",
     "hi",
+)
+_EFFECT_COLUMNS = (
+    "method",
+    "seed",
+    "coeff",
+    "perplexity",
+    "fluency",
+    "distinct_1",
+    "distinct_2",
+    "mean_length",
+    "empty_rate",
 )
 _NAN = float("nan")
 
@@ -383,6 +396,7 @@ class _Manipulation:
     trials: list[Trial]
     rows: list[list[object]]
     seed_rows: list[list[object]]
+    effect_rows: list[list[object]]
     success: NDArray[np.float64]
     agreement: float
 
@@ -643,17 +657,50 @@ def _arm_factory(ctx: _Steering, reader: RepReader) -> Callable[[float], Arm]:
     return make
 
 
+def _recording(
+    make: Callable[[float], Arm], arms: dict[float, Arm]
+) -> Callable[[float], Arm]:
+    """Wraps an arm factory so that the arm of each coefficient is kept."""
+
+    def record(coeff: float) -> Arm:
+        arms[coeff] = make(coeff)
+        return arms[coeff]
+
+    return record
+
+
+def _effect_row(
+    method: str,
+    seed: int | None,
+    coeff: float,
+    effects: SideEffects,
+) -> list[object]:
+    return [
+        method,
+        seed,
+        coeff,
+        effects.perplexity,
+        effects.fluency,
+        effects.distinct_1,
+        effects.distinct_2,
+        effects.mean_length,
+        effects.empty_rate,
+    ]
+
+
 def _manipulate(
     ctx: _Steering,
     sweeps: dict[Method, SweepResult],
     prompts: Sequence[str],
     strengths: tuple[float, ...],
+    neutral: Sequence[str],
 ) -> _Manipulation:
     """Steers with the first readers of each method and tallies successes.
 
     A prompt is a success for a strength and a judge when its score under
     the positive coefficient is strictly above its score under the negative
-    one.
+    one. The side effects of every steered trial are measured on the arm
+    that produced it, with `neutral` as the held-out text of the perplexity.
     """
     config = ctx.config
     methods = config.methods
@@ -665,16 +712,33 @@ def _manipulate(
     counts = np.zeros((len(_JUDGES), len(methods), len(strengths), 3), np.int64)
     trials: list[Trial] = []
     seed_rows: list[list[object]] = []
+    effect_rows: list[list[object]] = []
     for m, method in enumerate(methods):
         for i in range(config.n_steer_seeds):
+            arms: dict[float, Arm] = {}
             dose = dose_response(
-                _arm_factory(ctx, sweeps[method].readers[i]),
+                _recording(_arm_factory(ctx, sweeps[method].readers[i]), arms),
                 signed,
                 prompts,
                 ctx.score,
                 columns=len(_JUDGES),
             )
             by_coeff = dict(zip(signed, dose.trials, strict=True))
+            effect_rows.extend(
+                _effect_row(
+                    method,
+                    i,
+                    coeff,
+                    side_effects(
+                        ctx.loaded,
+                        arms[coeff],
+                        trial,
+                        neutral,
+                        batch_size=config.batch_size,
+                    ),
+                )
+                for coeff, trial in by_coeff.items()
+            )
             trials.extend(
                 dataclasses.replace(trial, name=f"{method}/{i}/{coeff:g}")
                 for coeff, trial in by_coeff.items()
@@ -721,7 +785,12 @@ def _manipulate(
                     ]
                 )
     return _Manipulation(
-        trials, rows, seed_rows, success, _agreement(pooled[0], pooled[1])
+        trials,
+        rows,
+        seed_rows,
+        effect_rows,
+        success,
+        _agreement(pooled[0], pooled[1]),
     )
 
 
@@ -870,7 +939,11 @@ def execute(
     twin on the same completions.
 
     Writes `curves`, `curves_val`, `curves_success`, `curves_success_check`,
-    `trials`, `trials_termination`, `table`, `table_seeds` and `summary`.
+    `trials`, `trials_termination`, `table`, `table_seeds`, `table_effects`
+    and `summary`. `table_effects` holds the side effects of the unsteered
+    arm and of every method, seed and coefficient trial: neutral perplexity
+    of the steered model, completion fluency under the unsteered model,
+    distinct-1 and distinct-2, mean length and empty rate.
 
     Args:
         config: The experiment settings.
@@ -912,13 +985,14 @@ def execute(
         config, loaded, GenSettings.from_config(config), score, control, norms
     )
     prompts = _prompts(config, checked.scenarios)
-    none = run_trial(
-        plain_arm(loaded, ctx.settings, name="none"),
-        prompts,
-        score,
-        columns=len(_JUDGES),
+    plain = plain_arm(loaded, ctx.settings, name="none")
+    none = run_trial(plain, prompts, score, columns=len(_JUDGES))
+    none_effects = side_effects(
+        loaded, plain, none, held.neutral, batch_size=config.batch_size
     )
-    manipulation = _manipulate(ctx, reading.sweeps, prompts, strengths)
+    manipulation = _manipulate(
+        ctx, reading.sweeps, prompts, strengths, held.neutral
+    )
     termination = _terminate(ctx, reading, pleasant, unpleasant)
 
     for j, (stem, ylabel) in enumerate(_SUCCESS_CURVES):
@@ -946,6 +1020,16 @@ def execute(
     run_dir.write_json(
         "table_seeds",
         {"columns": list(_SEED_COLUMNS), "rows": manipulation.seed_rows},
+    )
+    run_dir.write_json(
+        "table_effects",
+        {
+            "columns": list(_EFFECT_COLUMNS),
+            "rows": [
+                _effect_row("none", None, 0.0, none_effects),
+                *manipulation.effect_rows,
+            ],
+        },
     )
     run_dir.write_json(
         "summary",

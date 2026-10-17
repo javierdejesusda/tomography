@@ -18,6 +18,7 @@ from tomography.datasets.sources import OfflineCacheMissError
 from tomography.datasets.wikitext import load_wikitext
 from tomography.experiments import m1_methods
 from tomography.experiments.base import RunDir
+from tomography.experiments.effects import SideEffects
 from tomography.experiments.effects import read_trials
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.m1_methods import METHODS
@@ -339,7 +340,7 @@ FILES = sorted(
         )
         for extension in ("npz", "json")
     ]
-    + ["table.json", "table_seeds.json", "summary.json"]
+    + ["table.json", "table_seeds.json", "table_effects.json", "summary.json"]
     + ["config.json", "meta.json"]
 )
 
@@ -1229,3 +1230,103 @@ def test_the_agreement_gives_exactly_one_half_its_own_side() -> None:
 def test_the_spread_ignores_non_finite_values() -> None:
     assert m1_methods._spread([1.0, NAN, 3.0]) == (2.0, 1.0, 3.0)
     assert all(np.isnan(m1_methods._spread([NAN, NAN])))
+
+
+def test_the_effects_table_has_one_row_per_arm_with_planted_side_effects(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    arms: dict[int, dict[str, Any]] = {}
+    calls: list[dict[str, Any]] = []
+    real_arm = m1_methods.reader_arm
+    real_plain = m1_methods.plain_arm
+
+    def arm_spy(loaded: Any, settings: Any, reader: Any, **kwargs: Any) -> Any:
+        arm = real_arm(loaded, settings, reader, **kwargs)
+        arms[id(arm)] = {"reader": reader, **kwargs}
+        return arm
+
+    def plain_spy(*args: Any, **kwargs: Any) -> Any:
+        arm = real_plain(*args, **kwargs)
+        arms[id(arm)] = {"plain": True}
+        return arm
+
+    def effects_spy(
+        loaded: Any,
+        arm: Any,
+        trial: Any,
+        neutral: Sequence[str],
+        *,
+        batch_size: int,
+    ) -> SideEffects:
+        calls.append(
+            {
+                "arm": arms[id(arm)],
+                "name": trial.name,
+                "neutral": tuple(neutral),
+                "batch_size": batch_size,
+            }
+        )
+        k = float(len(calls))
+        return SideEffects(
+            perplexity=None if k == 1.0 else 10.0 * k,
+            fluency=-k,
+            distinct_1=k / 100,
+            distinct_2=k / 50,
+            mean_length=k + 0.5,
+            empty_rate=k / 1000,
+        )
+
+    monkeypatch.setattr(m1_methods, "reader_arm", arm_spy)
+    monkeypatch.setattr(m1_methods, "plain_arm", plain_spy)
+    monkeypatch.setattr(m1_methods, "side_effects", effects_spy)
+    config = _config(**SMALL)
+    run_dir = _execute(tiny_arch, tmp_path, **SMALL)
+
+    payload = run_dir.read_json("table_effects")
+    assert isinstance(payload, dict)
+    assert payload["columns"] == [
+        "method",
+        "seed",
+        "coeff",
+        "perplexity",
+        "fluency",
+        "distinct_1",
+        "distinct_2",
+        "mean_length",
+        "empty_rate",
+    ]
+    trials = read_trials(run_dir, "trials")
+    assert len(payload["rows"]) == len(trials)
+    assert len(calls) == len(trials)
+    held = split_held_out(
+        _texts(), n_calibration=8, n_neutral=8, seed=config.seed
+    )
+    assert calls[0]["arm"] == {"plain": True}
+    assert payload["rows"][0] == [
+        "none",
+        None,
+        0.0,
+        None,
+        -1.0,
+        0.01,
+        0.02,
+        1.5,
+        0.001,
+    ]
+    for k, (row, call, trial) in enumerate(
+        zip(payload["rows"], calls, trials, strict=True), start=1
+    ):
+        assert call["name"] == trial.name.rsplit("/", 1)[-1]
+        assert call["neutral"] == held.neutral
+        assert call["batch_size"] == config.batch_size
+        if k > 1:
+            method, seed, coeff = trial.name.split("/")
+            assert row[:3] == [method, int(seed), float(coeff)]
+            assert call["arm"]["coeff"] == float(coeff)
+            assert call["arm"]["op"] == "linear"
+            assert call["arm"]["reader"].method == method
+            assert row[3:] == pytest.approx(
+                [10.0 * k, -k, k / 100, k / 50, k + 0.5, k / 1000]
+            )
