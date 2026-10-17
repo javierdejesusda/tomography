@@ -352,8 +352,9 @@ def parse_side(
     over the midpoint. An exact statement must have no bounds or a relative
     half-width of at most `MAX_EXACT_RELATIVE_HALF_WIDTH`, and then low =
     high = amount. Values are converted from the statement's own unit and
-    rounded to `DECIMALS` places. The split comes from the family, uid and
-    seed alone, so an item keeps its split when other rows change.
+    rounded to `DECIMALS` places; a range whose rounded low is not below its
+    rounded high is dropped. The split comes from the family, uid and seed
+    alone, so an item keeps its split when other rows change.
 
     Args:
         result: Rows from `side_query`.
@@ -384,8 +385,12 @@ def parse_side(
         if not _has_common_name(rows, side):
             continue
         interval = _interval(rows, side)
-        if interval is not None:
-            kept.append((entity_id, first, interval))
+        if interval is None:
+            continue
+        low, high = (round(end * side.scale, DECIMALS) for end in interval)
+        if side.kind == "range" and low >= high:
+            continue
+        kept.append((entity_id, first, (low, high)))
     kept.sort(key=lambda entry: (-int(entry[1]["links"]), int(entry[0][1:])))
     uids = [f"{family}-{side.kind}-{entity_id}" for entity_id, _, _ in kept]
     splits = assign_splits(uids, dataset=f"quantities:{family}", seed=seed)
@@ -397,8 +402,8 @@ def parse_side(
             entity=row["itemLabel"],
             entity_id=entity_id,
             question=side.template.format(entity=row["itemLabel"]),
-            low=round(low * side.scale, DECIMALS),
-            high=round(high * side.scale, DECIMALS),
+            low=low,
+            high=high,
             unit=side.unit,
             sitelinks=int(row["links"]),
             split=split,

@@ -170,6 +170,7 @@ DOG = _side(union_statements=True)
 
 METRE = "http://www.wikidata.org/entity/Q11573"
 SECOND = "http://www.wikidata.org/entity/Q11574"
+DAY = "http://www.wikidata.org/entity/Q573"
 
 
 def _unit(qid: str) -> str:
@@ -188,7 +189,7 @@ def _row(
     taxon_name: str | None = None,
     unit: str | None = None,
 ) -> dict[str, str]:
-    default_unit = METRE if taxon_name is None else SECOND
+    default_unit = METRE if taxon_name is None else DAY
     row = {
         "item": f"http://www.wikidata.org/entity/Q{number}",
         "itemLabel": f"Thing {number}" if label is None else label,
@@ -297,35 +298,57 @@ def test_parse_side_converts_each_length_unit_to_the_question_unit(
 
 
 @pytest.mark.parametrize(
-    ("qid", "days"),
+    ("qid", "lower", "upper", "days"),
     [
-        ("Q11574", 1 / 86400),
-        ("Q7727", 1 / 1440),
-        ("Q25235", 1 / 24),
-        ("Q573", 1.0),
-        ("Q23387", 7.0),
-        ("Q5151", 30.4375),
-        ("Q577", 365.25),
+        ("Q11574", 5_184_000.0, 6_048_000.0, (60.0, 70.0)),
+        ("Q7727", 100_800.0, 115_200.0, (70.0, 80.0)),
+        ("Q25235", 1_920.0, 2_160.0, (80.0, 90.0)),
+        ("Q573", 90.0, 100.0, (90.0, 100.0)),
+        ("Q23387", 14.0, 16.0, (98.0, 112.0)),
+        ("Q5151", 4.0, 5.0, (121.75, 152.19)),
+        ("Q577", 1.0, 2.0, (365.25, 730.5)),
     ],
 )
 def test_parse_side_converts_each_time_unit_to_days(
-    qid: str, days: float
+    qid: str, lower: float, upper: float, days: tuple[float, float]
 ) -> None:
     row = _row(
         1,
-        amount=100.0,
-        lower=80.0,
-        upper=120.0,
+        amount=(lower + upper) / 2,
+        lower=lower,
+        upper=upper,
         unit=_unit(qid),
         taxon_name="x",
     )
 
     (item,) = _parse([row], TAXON)
 
-    assert (item.low, item.high) == (
-        round(80 * days, 2),
-        round(120 * days, 2),
-    )
+    assert (item.low, item.high) == days
+
+
+def test_parse_side_drops_a_range_that_rounds_to_one_value() -> None:
+    rows = [
+        _row(1, amount=100.0, lower=80.0, upper=120.0, unit=SECOND),
+        _row(2, amount=4320.0, lower=3974.4, upper=4665.6, unit=SECOND),
+        _row(
+            3,
+            amount=5_616_000.0,
+            lower=5_184_000.0,
+            upper=6_048_000.0,
+            unit=SECOND,
+        ),
+    ]
+
+    assert [i.entity_id for i in _parse(rows, TAXON)] == ["Q3"]
+
+
+def test_parse_side_drops_a_union_that_rounds_to_one_value() -> None:
+    rows = [
+        _row(1, statement="a", amount=0.00001, lower=None, upper=None),
+        _row(1, statement="b", amount=0.00002, lower=None, upper=None),
+    ]
+
+    assert _parse(rows, DOG) == []
 
 
 def test_parse_side_keeps_the_original_bounds_exactly() -> None:
@@ -499,7 +522,7 @@ def test_parse_side_drops_a_taxon_labelled_by_its_scientific_name() -> None:
 
 def test_parse_side_keeps_a_taxon_without_a_scientific_name() -> None:
     assert [
-        i.entity_id for i in _parse([_row(1, label="ox", unit=SECOND)], TAXON)
+        i.entity_id for i in _parse([_row(1, label="ox", unit=DAY)], TAXON)
     ] == ["Q1"]
 
 
