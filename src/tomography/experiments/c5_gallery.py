@@ -30,8 +30,10 @@ from tomography.experiments.base import derive_seed
 from tomography.experiments.c4_honesty_control import calibration_texts
 from tomography.experiments.c4_honesty_control import check_relative_op
 from tomography.experiments.c4_honesty_control import honesty_readers
+from tomography.experiments.c4_honesty_control import neutral_texts
 from tomography.experiments.c4_honesty_control import resolve_layers
-from tomography.experiments.effects import SideEffects
+from tomography.experiments.controls import random_readers
+from tomography.experiments.effects import effects_row
 from tomography.experiments.effects import read_trials
 from tomography.experiments.effects import side_effects
 from tomography.experiments.effects import write_trials
@@ -403,96 +405,6 @@ def _mean_over_arms(trials: Sequence[Trial]) -> float | None:
     return float(np.mean(means)) if means else None
 
 
-def neutral_texts(
-    alpaca: Sequence[Example], config: Config, *, seed: int
-) -> list[str]:
-    """Draws the neutral texts of the perplexity.
-
-    They are the texts that follow the calibration texts in the draw of
-    `calibration_texts`, so the two sets are disjoint and the calibration
-    texts are the ones a run without controls draws.
-
-    Args:
-        alpaca: Alpaca rows with splits.
-        config: The experiment settings.
-        seed: Seed of the calibration draw.
-
-    Returns:
-        Up to `n_neutral` texts.
-
-    Raises:
-        ValueError: If the Alpaca `test` split has no text left after the
-            calibration texts.
-    """
-    drawn = calibration_texts(
-        alpaca, config.n_calibration + config.n_neutral, seed=seed
-    )
-    neutral = drawn[config.n_calibration :]
-    if not neutral:
-        raise ValueError(
-            f"the Alpaca test split has no neutral text after the "
-            f"{config.n_calibration} calibration texts"
-        )
-    return neutral
-
-
-def _random_readers(reader: RepReader, config: Config) -> list[RepReader]:
-    """Draws the random control readers.
-
-    The directions are unit vectors drawn in order from one generator seeded
-    with `config.seed`, with the layers and shape of `reader`.
-
-    Args:
-        reader: The steering reader whose layers and shape to match.
-        config: The experiment settings.
-
-    Returns:
-        `config.n_random` readers.
-    """
-    rng = np.random.default_rng(config.seed)
-    zeros = np.zeros_like(reader.directions)
-    return [
-        RepReader.from_arrays(
-            RANDOM,
-            reader.layers,
-            rng.standard_normal(reader.directions.shape),
-            zeros,
-        )
-        for _ in range(config.n_random)
-    ]
-
-
-def _effect_row(
-    arm: str,
-    coeff: float | None,
-    seed: int | None,
-    effects: SideEffects,
-) -> list[object]:
-    """Builds one row of the effects table.
-
-    Args:
-        arm: The arm family: "none", "reading" or "random".
-        coeff: The relative coefficient, or None for the plain model.
-        seed: The random direction index k for a random arm, 0 for the
-            reading arm, None for the plain model.
-        effects: The side effects of the arm.
-
-    Returns:
-        The row in the order of `EFFECT_COLUMNS`.
-    """
-    return [
-        arm,
-        coeff,
-        seed,
-        effects.perplexity,
-        effects.fluency,
-        effects.distinct_1,
-        effects.distinct_2,
-        effects.mean_length,
-        effects.empty_rate,
-    ]
-
-
 def execute(
     config: Config,
     run_dir: RunDir,
@@ -548,7 +460,10 @@ def execute(
         alpaca, config.n_calibration, seed=derive_seed(config.seed, "norms")
     )
     neutral = neutral_texts(
-        alpaca, config, seed=derive_seed(config.seed, "norms")
+        alpaca,
+        config.n_calibration,
+        config.n_neutral,
+        seed=derive_seed(config.seed, "norms"),
     )
     chat = chat_format_for(loaded)
     order = np.random.default_rng(derive_seed(config.seed, "pool")).permutation(
@@ -604,9 +519,15 @@ def execute(
         steering_arm(sweep.readers[0], "reading", 0, coeff)
         for coeff in strengths
     ]
+    randoms = random_readers(
+        sweep.readers[0].layers,
+        sweep.readers[0].directions.shape[1],
+        config.n_random,
+        seed=config.seed,
+    )
     random_arms = [
         steering_arm(reader, RANDOM, k, coeff)
-        for k, reader in enumerate(_random_readers(sweep.readers[0], config))
+        for k, reader in enumerate(randoms)
         for coeff in strengths
     ]
     none, honest, lie = (fact_trial(arm, prompts, answers) for arm in arms)
@@ -624,13 +545,13 @@ def execute(
         ),
     ]
     effect_rows = [
-        _effect_row(
-            label,
-            coeff,
-            seed,
+        effects_row(
             side_effects(
                 loaded, arm, trial, neutral, batch_size=config.batch_size
             ),
+            label,
+            coeff,
+            seed,
         )
         for (label, coeff, seed), arm, trial in zip(
             labels,

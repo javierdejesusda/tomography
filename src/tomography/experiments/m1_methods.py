@@ -27,7 +27,8 @@ from tomography.datasets.stimulus import build_stimulus_set
 from tomography.datasets.wikitext import load_wikitext
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
-from tomography.experiments.effects import SideEffects
+from tomography.experiments.controls import recording
+from tomography.experiments.effects import effects_row
 from tomography.experiments.effects import side_effects
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.effects import write_dose_curves
@@ -663,56 +664,6 @@ def _arm_factory(ctx: _Steering, reader: RepReader) -> Callable[[float], Arm]:
     return make
 
 
-def _recording(
-    make: Callable[[float], Arm], arms: dict[float, Arm]
-) -> Callable[[float], Arm]:
-    """Wraps an arm factory so that the arm of each coefficient is kept.
-
-    Args:
-        make: Builds the arm of a coefficient.
-        arms: Filled in place, coefficient to the arm built for it.
-
-    Returns:
-        A factory that calls `make`, stores the arm in `arms` and returns it.
-    """
-
-    def record(coeff: float) -> Arm:
-        arms[coeff] = make(coeff)
-        return arms[coeff]
-
-    return record
-
-
-def _effect_row(
-    method: str,
-    seed: int | None,
-    coeff: float,
-    effects: SideEffects,
-) -> list[object]:
-    """Lays out the side effects of one trial as a `table_effects` row.
-
-    Args:
-        method: Name of the direction finder, or "none" for the unsteered arm.
-        seed: Index of the steering reader; None for the unsteered arm.
-        coeff: Relative steering coefficient of the trial.
-        effects: The side effects measured on the trial.
-
-    Returns:
-        The row, in the order of `_EFFECT_COLUMNS`.
-    """
-    return [
-        method,
-        seed,
-        coeff,
-        effects.perplexity,
-        effects.fluency,
-        effects.distinct_1,
-        effects.distinct_2,
-        effects.mean_length,
-        effects.empty_rate,
-    ]
-
-
 def _manipulate(
     ctx: _Steering,
     sweeps: dict[Method, SweepResult],
@@ -743,7 +694,7 @@ def _manipulate(
         for i in range(config.n_steer_seeds):
             arms: dict[float, Arm] = {}
             dose = dose_response(
-                _recording(_arm_factory(ctx, sweeps[method].readers[i]), arms),
+                recording(_arm_factory(ctx, sweeps[method].readers[i]), arms),
                 signed,
                 prompts,
                 ctx.score,
@@ -752,10 +703,7 @@ def _manipulate(
             by_coeff = dict(zip(signed, dose.trials, strict=True))
             if neutral is not None:
                 effect_rows.extend(
-                    _effect_row(
-                        method,
-                        i,
-                        coeff,
+                    effects_row(
                         side_effects(
                             ctx.loaded,
                             arms[coeff],
@@ -763,6 +711,9 @@ def _manipulate(
                             neutral,
                             batch_size=config.batch_size,
                         ),
+                        method,
+                        i,
+                        coeff,
                     )
                     for coeff, trial in by_coeff.items()
                 )
@@ -1058,7 +1009,7 @@ def execute(
             {
                 "columns": list(_EFFECT_COLUMNS),
                 "rows": [
-                    _effect_row("none", None, 0.0, none_effects),
+                    effects_row(none_effects, "none", None, 0.0),
                     *manipulation.effect_rows,
                 ],
             },

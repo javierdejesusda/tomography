@@ -41,6 +41,7 @@ from tomography.datasets.stimulus import build_stimulus_set
 from tomography.datasets.truthfulqa import load_truthfulqa
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.controls import random_readers
 from tomography.experiments.effects import write_dose_curves
 from tomography.experiments.lr1_lorra import Config as Lr1Config
 from tomography.experiments.lr1_lorra import gated_arm
@@ -543,8 +544,8 @@ def neutral_texts(
     texts = _shuffled_test_texts(alpaca, seed=seed)[n_calibration:]
     if not texts:
         raise ValueError(
-            f"no text left in the Alpaca test split after {n_calibration} "
-            "calibration texts"
+            "no text left in the Alpaca test split for the neutral texts "
+            f"after {n_calibration} calibration texts"
         )
     return texts[:n_neutral]
 
@@ -681,32 +682,6 @@ def _scorer(arm: Arm) -> LogprobFn:
 def _perplexity_fn(arm: Arm) -> PerplexityFn:
     assert arm.perplexity is not None
     return arm.perplexity
-
-
-def random_readers(
-    reference: RepReader, n: int, *, seed: int
-) -> list[RepReader]:
-    """Draws the random readers that control the vector arms.
-
-    Args:
-        reference: The reader whose layers and shape the draws copy.
-        n: Number of readers.
-        seed: Seed of the one generator that draws them in order.
-
-    Returns:
-        `n` readers of unit directions with zero means.
-    """
-    rng = np.random.default_rng(seed)
-    zeros = np.zeros_like(reference.directions)
-    return [
-        RepReader.from_arrays(
-            "random",
-            reference.layers,
-            rng.standard_normal(reference.directions.shape),
-            zeros,
-        )
-        for _ in range(n)
-    ]
 
 
 def _gate[**P, R](
@@ -932,7 +907,12 @@ def execute(
     norms = mean_residual_norms(
         loaded, texts, layers, bos=config.bos, batch_size=config.batch_size
     )
-    randoms = random_readers(difference, config.n_random, seed=config.seed)
+    randoms = random_readers(
+        difference.layers,
+        difference.directions.shape[1],
+        config.n_random,
+        seed=config.seed,
+    )
     adapter = (
         None
         if config.lorra_run is None

@@ -25,6 +25,7 @@ from tomography.datasets.wikitext import load_wikitext
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.effects import SideEffects
+from tomography.experiments.effects import effects_row
 from tomography.experiments.effects import side_effects
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.effects import write_dose_curves
@@ -522,19 +523,9 @@ def _row(
     effects: SideEffects,
 ) -> list[object]:
     mean = trial.mean_score()
-    return [
-        arm,
-        coeff,
-        seed,
-        float(mean[0]),
-        float(mean[1]),
-        effects.perplexity,
-        effects.fluency,
-        effects.distinct_1,
-        effects.distinct_2,
-        effects.mean_length,
-        effects.empty_rate,
-    ]
+    return effects_row(
+        effects, arm, coeff, seed, float(mean[0]), float(mean[1])
+    )
 
 
 def _layer_sweep(
