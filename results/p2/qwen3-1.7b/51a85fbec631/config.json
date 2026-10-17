@@ -1,0 +1,30 @@
+{
+  "experiment": "p2",
+  "model": "qwen3-1.7b",
+  "seed": 0,
+  "n_seeds": 10,
+  "n_pairs": 64,
+  "n_eval_pairs": 256,
+  "method": "logistic",
+  "preprocess": "center",
+  "position": "last",
+  "eval_position": null,
+  "layers": null,
+  "bos": null,
+  "batch_size": 8,
+  "tasks": [
+    "sentiment",
+    "truth",
+    "utility"
+  ],
+  "positions": [
+    "last",
+    "concept",
+    "mean"
+  ],
+  "decoys": [
+    "random",
+    "against"
+  ],
+  "zero_shot": true
+}
