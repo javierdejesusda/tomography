@@ -564,6 +564,56 @@ def test_export_refuses_users_as_a_path_segment_with_a_snippet(
     assert not dest.exists()
 
 
+def test_export_accepts_a_users_token_in_a_logit_lens_table(
+    tmp_path: Path,
+) -> None:
+    run = _make_run(tmp_path / "r1")
+    row = ["r5", 5, "+", 9, "/Users", 4.0628535619353485]
+    (run.path / "table.json").write_text(json.dumps({"rows": [row]}), "utf-8")
+    dest = tmp_path / "dest"
+
+    report = export_runs([tmp_path / "r1"], dest)
+
+    assert len(report.exported) == 1
+
+
+@pytest.mark.parametrize(
+    ("text", "allowed"),
+    [
+        ("\\Users", True),
+        ("/Users", True),
+        ("x/Users", False),
+        ("Users", False),
+        ("C:/Users", False),
+    ],
+)
+def test_export_allows_only_a_whole_string_separator_and_users(
+    tmp_path: Path, text: str, allowed: bool
+) -> None:
+    run = _make_run(tmp_path / "r1")
+    (run.path / "table.json").write_text(json.dumps({"t": text}), "utf-8")
+    dest = tmp_path / "dest"
+
+    if allowed:
+        assert len(export_runs([tmp_path / "r1"], dest).exported) == 1
+    else:
+        with pytest.raises(ExportError):
+            export_runs([tmp_path / "r1"], dest)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["/Users/someone/x", "C:\\Users\\someone\\x", "C:/Users/someone"],
+    ids=["posix", "backslash", "slash"],
+)
+def test_private_marker_still_flags_users_followed_by_a_name(
+    text: str,
+) -> None:
+    _, users = export_module._PRIVATE_PATTERNS[-1]
+
+    assert users.search(text)
+
+
 @pytest.mark.parametrize(
     "text",
     [

@@ -53,7 +53,9 @@ _PRIVATE_PATTERNS = (
     ("a POSIX absolute path", re.compile(_POSIX_START)),
     (
         "a 'Users' path segment",
-        re.compile(r"(?:^|[\\/:])Users(?=[\\/]|$)", re.MULTILINE),
+        re.compile(
+            r"(?:^|(?!^[\\/]Users$)[\\/:])Users(?=[\\/]|$)", re.MULTILINE
+        ),
     ),
 )
 _WHOLE_PATH = re.compile(rf"{_DRIVE_START}|{_UNC_START}|//?[^/\s]+/")
