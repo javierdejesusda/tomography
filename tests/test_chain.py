@@ -25,7 +25,7 @@ from tomography.chain import interrupt_on_sigterm
 from tomography.chain import job_digest
 from tomography.chain import launch_process
 from tomography.chain import load_spec
-from tomography.chain import make_gpu_query
+from tomography.chain import make_gpu_queries
 from tomography.chain import read_tail
 from tomography.chain import run_chain
 
@@ -800,7 +800,7 @@ def test_make_gpu_query_is_none_without_nvidia_smi(
 ) -> None:
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
-    assert make_gpu_query()() is None
+    assert make_gpu_queries().used() is None
 
 
 def _fake_smi(
@@ -822,7 +822,7 @@ def test_make_gpu_query_reads_the_first_gpu(
 ) -> None:
     calls = _fake_smi(monkeypatch, 0, "2048\n512\n")
 
-    assert make_gpu_query()() == 2048
+    assert make_gpu_queries().used() == 2048
     assert calls[0] == [
         "smi",
         "--query-gpu=memory.used",
@@ -838,7 +838,7 @@ def test_make_gpu_query_is_none_when_the_query_fails(
 ) -> None:
     _fake_smi(monkeypatch, code, out)
 
-    assert make_gpu_query()() is None
+    assert make_gpu_queries().used() is None
 
 
 def test_launch_process_splits_stdout_and_appends_stderr(
@@ -1373,7 +1373,7 @@ def test_a_second_sigterm_while_stopping_does_not_skip_the_kill(
     process.wait = wait  # type: ignore[method-assign]
 
     with interrupt_on_sigterm():
-        chain_module.stop_process(process)
+        chain_module.stop_processes([process])
 
     assert process.terminated
     assert process.killed
@@ -1398,7 +1398,7 @@ def test_stopping_signals_the_whole_process_group_on_posix(
 
     process.wait = wait  # type: ignore[method-assign]
 
-    chain_module.stop_process(process)
+    chain_module.stop_processes([process])
 
     assert sent == [(4242, signal.SIGTERM), (4242, 9)]
     assert not process.terminated
@@ -1415,7 +1415,7 @@ def test_a_group_member_that_outlives_the_leader_is_killed(
         os, "killpg", lambda pid, sig: sent.append((pid, sig)), raising=False
     )
 
-    chain_module.stop_process(process)
+    chain_module.stop_processes([process])
 
     assert sent == [(4242, signal.SIGTERM), (4242, 9)]
 
@@ -1433,7 +1433,7 @@ def test_a_vanished_process_group_is_not_an_error(
 
     monkeypatch.setattr(os, "killpg", gone, raising=False)
 
-    chain_module.stop_process(process)
+    chain_module.stop_processes([process])
 
 
 def test_exit_two_ignores_an_already_exists_line_of_an_earlier_attempt(

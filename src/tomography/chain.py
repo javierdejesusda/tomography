@@ -517,16 +517,6 @@ def make_gpu_queries() -> GpuQueries:
     )
 
 
-def make_gpu_query() -> Callable[[], int | None]:
-    """Builds a query for the memory in use on the first GPU, in MiB.
-
-    Returns:
-        A function giving the memory used, or None when `nvidia-smi` is
-        missing or fails.
-    """
-    return make_gpu_queries().used
-
-
 def read_tail(path: Path, size: int = TAIL_BYTES, floor: int = 0) -> str:
     """Reads at most the last `size` bytes of a file as text.
 
@@ -675,15 +665,6 @@ def stop_processes(processes: Sequence[Process]) -> None:
                 _signal_child(process, getattr(signal, "SIGKILL", 9), "kill")
             if timed_out:
                 process.wait()
-
-
-def stop_process(process: Process) -> None:
-    """Stops a running child: SIGTERM, then SIGKILL.
-
-    Args:
-        process: The child.
-    """
-    stop_processes([process])
 
 
 @dataclasses.dataclass
