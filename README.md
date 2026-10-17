@@ -654,13 +654,14 @@ the paper's PCA on pair differences, stays selectable in every reading experimen
 `--set method=pca_diff`. The `p9a` config has no `method`; `p9b` takes a list `methods` and `p9c` a
 `lat_method`.
 
-The `tomography` command (`python -m tomography` is equivalent) has three subcommands:
+The `tomography` command (`python -m tomography` is equivalent) has four subcommands:
 
 ```bash
 uv run tomography --help
 uv run tomography run <id> [--model KEY] [--seed N] [--set KEY=VALUE] [--out DIR]
 uv run tomography plot <id|all> [--run DIR] [--out DIR]
 uv run tomography export --out DIR ROOT [ROOT ...]
+uv run tomography chain run SPEC [--dry-run]
 ```
 
 - `run` runs one experiment and prints the run directory. `--model` takes a checkpoint key, `--seed` sets the
@@ -676,6 +677,33 @@ uv run tomography export --out DIR ROOT [ROOT ...]
   if two roots hold the same run or a copied file still names a local path (drive, UNC, home or system folder, a
   `Users` segment) or the user or host name.
   Unfinished runs are skipped and listed.
+- `chain run` runs the jobs of a TOML spec one after another, each as `tomography run`, and works the same on
+  Windows and Linux. A job that exits non-zero is retried at each of its `retry_batch_sizes`, and a job
+  can pass the run directory of an earlier job as a config value with `run_dir_from`. Events go to
+  `<out>/_chain/<name>.log` and each attempt's output to `<out>/_chain/<job>/run.log`. A job with a `DONE.txt`
+  naming an existing run directory is skipped, so rerunning the command resumes the chain. The exit code is
+  0 when no job failed. `--dry-run` validates the spec and prints the commands without running anything.
+
+  ```toml
+  [chain]
+  name = "example"
+  out = "results"                    # relative to this file
+  env = { HF_HUB_OFFLINE = "1" }     # optional, added to every job
+
+  [[job]]
+  name = "lr1-qwen3-1.7b"
+  experiment = "lr1"
+  model = "qwen3-1.7b"
+  set = { gradient_checkpointing = true }
+  retry_batch_sizes = [8]
+
+  [[job]]
+  name = "c4-qwen3-1.7b"
+  experiment = "c4"
+  model = "qwen3-1.7b"
+  run_dir_from = { lorra_run = "lr1-qwen3-1.7b" }
+  on_missing = "drop"                # or "skip" (default) when lr1 failed
+  ```
 
 For example, `uv run tomography run r1` runs the sentiment experiment on GPT-2 small,
 `uv run tomography run r1 --set method=pca_diff` reruns it with the paper's direction finder, and
