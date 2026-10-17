@@ -30,6 +30,8 @@ from tomography.experiments.c1_sentiment_steering import dose_with_none
 from tomography.experiments.c1_sentiment_steering import draw_prompts
 from tomography.experiments.c1_sentiment_steering import prompt_fragments
 from tomography.experiments.c1_sentiment_steering import window_around
+from tomography.experiments.effects import SideEffects
+from tomography.experiments.effects import side_effects
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.effects import write_dose_curves
 from tomography.experiments.effects import write_trials
@@ -60,6 +62,18 @@ from tomography.viz.style import style_context
 
 _N = len(EMOTIONS)
 _JUDGES = ("primary", "check")
+_EFFECT_COLUMNS = (
+    "arm",
+    "coeff",
+    "seed",
+    "emotion",
+    "perplexity",
+    "fluency",
+    "distinct_1",
+    "distinct_2",
+    "mean_length",
+    "empty_rate",
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -272,6 +286,27 @@ def _fit_readers(
     }
 
 
+def _effect_row(
+    arm: str,
+    coeff: float,
+    seed: int | None,
+    emotion: str | None,
+    effects: SideEffects,
+) -> list[object]:
+    return [
+        arm,
+        coeff,
+        seed,
+        emotion,
+        effects.perplexity,
+        effects.fluency,
+        effects.distinct_1,
+        effects.distinct_2,
+        effects.mean_length,
+        effects.empty_rate,
+    ]
+
+
 def _write_matrix(
     run_dir: RunDir,
     stem: str,
@@ -319,7 +354,10 @@ def execute(
     coefficient), `matrix` and `matrix_check`, `trials`, `trials_random`
     (trials named `random/<index>/<coefficient>`), `table.json`,
     `table_random.json` (the change of every measured emotion at `strength`
-    under each random arm) and `summary.json`, whose
+    under each random arm), `table_effects.json` (perplexity of neutral
+    held-out text, completion fluency, distinct-1, distinct-2, mean length
+    and empty rate of `none`, every emotion arm and every random arm, as in
+    C1) and `summary.json`, whose
     `max_abs_random_change` is the largest absolute change of any measured
     emotion under any random arm and coefficient.
 
@@ -416,10 +454,18 @@ def execute(
         for _ in range(config.n_random)
     ]
     columns = 2 * _N
-    none = run_trial(
-        plain_arm(loaded, settings), prompts, score, columns=columns
-    )
+    plain = plain_arm(loaded, settings)
+    none = run_trial(plain, prompts, score, columns=columns)
     baseline = none.mean_score()
+
+    def effects_of(arm: Arm, trial: Trial) -> SideEffects:
+        return side_effects(
+            loaded, arm, trial, held.neutral, batch_size=config.batch_size
+        )
+
+    effect_rows: list[list[object]] = [
+        _effect_row("none", 0.0, None, None, effects_of(plain, none))
+    ]
     at_strength = list(config.coeffs).index(strength)
     shape = (len(config.emotions), config.n_steer_seeds)
     own = np.full((len(_JUDGES), *shape, len(config.coeffs)), np.nan)
@@ -439,6 +485,17 @@ def execute(
             )
             trials.extend(
                 dataclasses.replace(trial, name=f"{emotion}/{i}/{coeff:g}")
+                for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
+                if coeff != 0.0
+            )
+            effect_rows.extend(
+                _effect_row(
+                    "reading",
+                    coeff,
+                    i,
+                    emotion,
+                    effects_of(steering_arms(reader)(coeff), trial),
+                )
                 for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
                 if coeff != 0.0
             )
@@ -462,6 +519,17 @@ def execute(
         )
         random_trials.extend(
             dataclasses.replace(trial, name=f"random/{r}/{coeff:g}")
+            for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
+            if coeff != 0.0
+        )
+        effect_rows.extend(
+            _effect_row(
+                "random",
+                coeff,
+                r,
+                None,
+                effects_of(steering_arms(reader)(coeff), trial),
+            )
             for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
             if coeff != 0.0
         )
@@ -526,6 +594,10 @@ def execute(
     )
     write_trials(run_dir, "trials", trials)
     write_trials(run_dir, "trials_random", random_trials)
+    run_dir.write_json(
+        "table_effects",
+        {"columns": list(_EFFECT_COLUMNS), "rows": effect_rows},
+    )
     run_dir.write_json(
         "table_random",
         {

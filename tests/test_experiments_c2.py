@@ -33,6 +33,7 @@ from tomography.experiments.c2_emotion_steering import execute
 from tomography.experiments.c2_emotion_steering import plot
 from tomography.experiments.c2_emotion_steering import run
 from tomography.experiments.c5_gallery import emotion_rows
+from tomography.experiments.effects import SideEffects
 from tomography.experiments.effects import read_trials
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.sweep import chat_format_for
@@ -240,7 +241,7 @@ def finished(
     return _FINISHED[key]
 
 
-def test_execute_writes_seventeen_files(finished: Finished) -> None:
+def test_execute_writes_eighteen_files(finished: Finished) -> None:
     names = sorted(p.name for p in finished.run_dir.path.iterdir())
     stems = (
         "curves",
@@ -257,6 +258,7 @@ def test_execute_writes_seventeen_files(finished: Finished) -> None:
             "summary.json",
             "table.json",
             "table_random.json",
+            "table_effects.json",
             *(f"{stem}.{ext}" for stem in stems for ext in ("npz", "json")),
         ]
     )
@@ -332,7 +334,7 @@ def test_the_random_arms_are_unit_directions_drawn_from_the_seed(
     steering = [a for a in arms if a["reader"].method != "random"]
     readers = list(dict.fromkeys(id(a["reader"]) for a in random))
     assert len(readers) == config.n_random
-    assert [a["coeff"] for a in random] == list(NONZERO) * config.n_random
+    assert [a["coeff"] for a in random] == list(NONZERO) * 2 * config.n_random
     rng = np.random.default_rng(7)
     for ident in readers:
         reader = next(a["reader"] for a in random if id(a["reader"]) == ident)
@@ -386,6 +388,91 @@ def test_the_largest_random_change_covers_every_coefficient(
     assert isinstance(summary, dict)
     assert summary["max_abs_random_change"] == pytest.approx(expected)
     assert summary["max_abs_random_change"] > 0.0
+
+
+EFFECT_COLUMNS = [
+    "arm",
+    "coeff",
+    "seed",
+    "emotion",
+    "perplexity",
+    "fluency",
+    "distinct_1",
+    "distinct_2",
+    "mean_length",
+    "empty_rate",
+]
+
+
+def _effect_labels() -> list[list[object]]:
+    return [
+        ["none", 0.0, None, None],
+        *(
+            ["reading", c, seed, emotion]
+            for emotion in STEERED
+            for seed in READERS
+            for c in NONZERO
+        ),
+        *(["random", c, r, None] for r in range(2) for c in NONZERO),
+    ]
+
+
+def test_the_effects_table_plants_the_side_effects_of_every_arm(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, Sequence[str]]] = []
+
+    def stub(
+        loaded: LoadedModel,
+        arm: Any,
+        trial: Any,
+        neutral: Sequence[str],
+        *,
+        batch_size: int,
+    ) -> SideEffects:
+        calls.append((trial.name, neutral))
+        k = float(len(calls))
+        return SideEffects(
+            perplexity=k,
+            fluency=-k,
+            distinct_1=k / 100,
+            distinct_2=k / 200,
+            mean_length=k + 0.5,
+            empty_rate=k / 1000,
+        )
+
+    monkeypatch.setattr(c2_emotion_steering, "side_effects", stub)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _scenarios(), _texts(), _score)
+
+    held = split_held_out(_texts(), n_calibration=10, n_neutral=8, seed=0)
+    labels = _effect_labels()
+    assert len(calls) == len(labels)
+    assert [name for name, _ in calls][0] == "none"
+    assert {neutral for _, neutral in calls} == {held.neutral}
+    table = run_dir.read_json("table_effects")
+    assert isinstance(table, dict)
+    assert table["columns"] == EFFECT_COLUMNS
+    assert table["rows"] == [
+        [*label, k, -k, k / 100, k / 200, k + 0.5, k / 1000]
+        for k, label in ((float(i + 1), x) for i, x in enumerate(labels))
+    ]
+
+
+def test_the_effects_of_a_real_run_are_finite_for_every_arm(
+    finished: Finished,
+) -> None:
+    table = finished.run_dir.read_json("table_effects")
+    assert isinstance(table, dict)
+    assert table["columns"] == EFFECT_COLUMNS
+    assert [row[:4] for row in table["rows"]] == _effect_labels()
+    values = np.array([row[4:] for row in table["rows"]], dtype=float)
+    assert np.isfinite(values[:, [0, 1, 4, 5]]).all()
+    assert (values[:, 0] > 0).all()
+    assert ((values[:, 2:4] >= 0) & (values[:, 2:4] <= 1)).all()
 
 
 def test_the_prompts_are_neutral_fragments_drawn_once(
@@ -675,7 +762,9 @@ def test_each_emotion_steers_with_its_own_first_readers(
         for coeff in NONZERO
     ]
     steering = [a for a in arms if a["reader"].method != "random"]
-    assert [(id(a["reader"]), a["coeff"]) for a in steering] == expected
+    built = [(id(a["reader"]), a["coeff"]) for a in steering]
+    assert list(dict.fromkeys(built)) == expected
+    assert len(built) == 2 * len(expected)
     assert (
         len({ident for ident, _ in expected})
         == len(STEERED) * config.n_steer_seeds
