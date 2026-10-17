@@ -11,7 +11,7 @@ slopes), the span of the sizes in decades, the P1 spans, family ranges and trans
 and matrix files of the P1 runs), the means and ranges over readers of the Qwen3 C1 tables (computed from the
 per-reader rows), the maxima over layers of the random-direction series of R6, the P1 spans and cosine ranges of the
 `gpt2` truth and emotion tasks (computed from the table file), the C2 and P7 curve values (read from the curves
-files), the random and shuffled-label values at the selected layer of R4 on Qwen3, the maxima over layers of the R6
+files), the P7 counts of inverted units by layer on the Qwen3 1.7B pair (recomputed from the per-seed curves), the random and shuffled-label values at the selected layer of R4 on Qwen3, the maxima over layers of the R6
 random series on Qwen3, the layer ranges of A1 and the A2 separations on Qwen3 (all computed from the curves files), the
 C2 values on Qwen3 (read from the curves and table files), the C4 reader means and ranges on Qwen3 (computed from the
 table rows), and differences or ranges quoted in the text. The P8 tables are read from the P8 run, which aggregates
@@ -35,9 +35,10 @@ C5)](#other-steering-experiments-on-gpt2-m1-c2-p7-lr1-c4-c5) 12. [Base against p
 (P8)](#base-against-post-trained-qwen3-p8) 13. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
 14. [Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5,
 LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 15. [Position
-and stimulus-set size on qwen3-1.7b-base (P2,
-P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-p2-p3) 16. [Persona wording and instruction confounds
-(P5)](#persona-wording-and-instruction-confounds-p5) 17. [Run identity](#run-identity) 18. [Pending](#pending)
+and stimulus-set size on qwen3-1.7b-base and qwen3-1.7b (P2,
+P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 16. [Persona wording and instruction confounds
+(P5)](#persona-wording-and-instruction-confounds-p5) 17. [Template steering on the Qwen3 1.7B pair
+(P7)](#template-steering-on-the-qwen3-17b-pair-p7) 18. [Run identity](#run-identity) 19. [Pending](#pending)
 
 ## Reading conventions
 
@@ -2333,9 +2334,9 @@ question alone in the chat template, so the two shares are not a comparison of t
   selection and not evidence for a rate. An emotion gallery from the C2 run of the same checkpoint is stored with it and
   is not read here.
 
-## Position and stimulus-set size on qwen3-1.7b-base (P2, P3)
+## Position and stimulus-set size on qwen3-1.7b-base and qwen3-1.7b (P2, P3)
 
-P2 and P3 ran on one Qwen3 checkpoint, the base `qwen3-1.7b-base`, with the settings of the `gpt2` runs (logistic finder, 64 training pairs; 10 seeds for P2 and 20 draws per size for P3, the intervals of the [reading conventions](#reading-conventions)). Each is one run, `p2/qwen3-1.7b-base/119f0ac54451` and `p3/qwen3-1.7b-base/61baf30a8a59`, made at `c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090). The post-trained `qwen3-1.7b` and the 0.6B checkpoints did not run these two experiments, so there is no base against post-trained comparison here, and the `gpt2` and Qwen3 numbers come from two different models, not from a scaling series.
+P2 ran on two Qwen3 checkpoints, the base `qwen3-1.7b-base` and the post-trained `qwen3-1.7b`, and P3 ran on the base checkpoint only. Both use the settings of the `gpt2` runs (logistic finder, 64 training pairs; 10 seeds for P2 and 20 draws per size for P3, the intervals of the [reading conventions](#reading-conventions)). Each is one run: `p2/qwen3-1.7b-base/119f0ac54451` and `p3/qwen3-1.7b-base/61baf30a8a59`, made at `c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090), and `p2/qwen3-1.7b/51a85fbec631`, made at `20650c5` with a clean tree on a laptop GPU (NVIDIA GeForce RTX 4070 Laptop GPU). The two P2 runs therefore differ in hardware and code commit as well as in checkpoint; the P2 code is the same at both commits (only `cloud.py` differs under `src`). The 0.6B checkpoints did not run these experiments, and P3 did not run on the post-trained checkpoint. Base and post-trained are two models: their P2 tables are separate and no metric is pooled over them, and the `gpt2` and Qwen3 numbers come from different models, not from a scaling series.
 
 ### Token position and a misleading sentence on qwen3-1.7b-base (P2)
 
@@ -2360,6 +2361,40 @@ The design is that of [P2 on gpt2](#token-position-and-a-misleading-sentence-p2)
 - **Random decoy.** The reader moves by at most 0.051 at `last` for sentiment (0.944 to 0.908) and utility (0.761 to 0.709), and truth drops by 0.212 (0.968 to 0.756). At `concept` and `mean` no task moves by more than 0.031 (truth at `concept` goes up, 0.858 to 0.888, with overlapping intervals).
 - **Against decoy.** At `last` the reader falls on every task: sentiment to 0.785 (a drop of 0.160), utility to 0.302 and truth to 0.058 [0.052, 0.064], far below chance, where the reader ranks the pairs the wrong way round. At `concept` sentiment drops 0.070 (0.865), truth 0.234 (0.624) and utility 0.414 (0.330). At `mean` sentiment (0.914) and truth (0.817) are within 0.034 of the original with overlapping intervals; utility is 0.621 [0.595, 0.646], a drop of 0.084 with an interval that does not overlap the original [0.683, 0.727]. On `gpt2` only utility at `last` collapsed under this decoy; on this checkpoint the drop is large at `last` for all three tasks and at `concept` for truth and utility. The run does not say why.
 - **Zero-shot.** The model's own answer drops from 0.963, 0.932 and 0.773 to 0.762, 0.814 and 0.656 under the random decoy and to 0.248, 0.424 and 0.012 under the `against` decoy (for truth the interval, [0.305, 0.542], reaches 0.5). The reader at `mean` stays at 0.914 and 0.817 under the `against` decoy on sentiment and truth, against 0.248 and 0.424 for the model's answer, so on those two tasks the decoy that turns the model's verbalized answer around does not turn that reader; on utility the reader falls to 0.621 and the model's answer to 0.012.
+
+### Token position and a misleading sentence on qwen3-1.7b (P2)
+
+The design, the report splits (214, 59 and 256 pairs) and the layer rule are those of the base checkpoint above.
+
+| Task      | Position  | Layer | Original             | Random decoy         | Against decoy        |
+| --------- | --------- | ----- | -------------------- | -------------------- | -------------------- |
+| sentiment | last      | L18   | 0.880 [0.866, 0.894] | 0.827 [0.810, 0.844] | 0.722 [0.700, 0.743] |
+| sentiment | concept   | L14   | 0.900 [0.892, 0.908] | 0.874 [0.858, 0.890] | 0.865 [0.850, 0.880] |
+| sentiment | mean      | L16   | 0.909 [0.900, 0.918] | 0.916 [0.905, 0.926] | 0.910 [0.900, 0.921] |
+| sentiment | zero-shot | -     | 0.921 [0.883, 0.958] | 0.631 [0.570, 0.696] | 0.000 [0.000, 0.000] |
+| truth     | last      | L18   | 0.934 [0.924, 0.946] | 0.778 [0.763, 0.792] | 0.551 [0.525, 0.576] |
+| truth     | concept   | L27   | 0.756 [0.732, 0.778] | 0.617 [0.595, 0.639] | 0.392 [0.334, 0.441] |
+| truth     | mean      | L16   | 0.847 [0.831, 0.866] | 0.807 [0.786, 0.829] | 0.807 [0.788, 0.827] |
+| truth     | zero-shot | -     | 0.915 [0.847, 0.983] | 0.695 [0.576, 0.814] | 0.254 [0.153, 0.373] |
+| utility   | last      | L28   | 0.764 [0.755, 0.773] | 0.714 [0.696, 0.732] | 0.358 [0.294, 0.432] |
+| utility   | concept   | L18   | 0.763 [0.755, 0.770] | 0.757 [0.746, 0.768] | 0.604 [0.521, 0.679] |
+| utility   | mean      | L16   | 0.695 [0.673, 0.717] | 0.715 [0.690, 0.738] | 0.677 [0.650, 0.701] |
+| utility   | zero-shot | -     | 0.695 [0.637, 0.746] | 0.605 [0.547, 0.664] | 0.000 [0.000, 0.000] |
+
+- **Position.** On the original prompts the positions read within 0.029 of each other for sentiment (0.880, 0.900, 0.909) and within 0.069 for utility (0.764, 0.763, 0.695). Truth differs by 0.178: `last` reads 0.934, `concept` 0.756 and `mean` 0.847. `last` is the highest position for truth and, level with `concept`, for utility; for sentiment it is the lowest. Utility at `last` is read at L28, the last block, which is the edge of the layers read.
+- **Random decoy.** At `last` the reader moves by 0.053 for sentiment (0.880 to 0.827), 0.156 for truth (0.934 to 0.778) and 0.050 for utility (0.764 to 0.714). At `concept` sentiment moves by 0.026 (0.900 to 0.874) and utility by 0.006, but truth drops by 0.139 (0.756 to 0.617). At `mean` truth drops by 0.040 (0.847 to 0.807, intervals that do not overlap), and sentiment and utility go up (0.909 to 0.916 and 0.695 to 0.715) with overlapping intervals.
+- **Against decoy.** At `last` the reader falls on every task: sentiment to 0.722 (a drop of 0.158), truth to 0.551 [0.525, 0.576] (a drop of 0.383, with an interval above chance) and utility to 0.358 [0.294, 0.432], below chance, where the reader ranks the pairs the wrong way round. At `concept` sentiment drops 0.035 (0.865), truth falls to 0.392 [0.334, 0.441], below chance (a drop of 0.364), and utility to 0.604 [0.521, 0.679] (a drop of 0.159). At `mean` sentiment (0.910) and utility (0.677, an interval that overlaps the original) are within 0.018 of the original; truth is 0.807 [0.788, 0.827], a drop of 0.040 with an interval that does not overlap the original [0.831, 0.866]. The run does not say why the position and the task decide where the reader falls below chance.
+- **Zero-shot.** The model's own answer drops from 0.921, 0.915 and 0.695 to 0.631, 0.695 and 0.605 under the random decoy and to 0.000, 0.254 and 0.000 under the `against` decoy (the intervals of sentiment and utility are [0.000, 0.000]; for truth the interval is [0.153, 0.373]). The reader at `mean` stays at 0.910, 0.807 and 0.677 under the `against` decoy, so the decoy that turns the model's verbalized answer around on all three tasks does not turn that reader.
+
+### Base against post-trained on P2
+
+The two checkpoints are two models and each has one run, so this compares cells and does not pool them.
+
+- **Original prompts.** At `mean` the two read within 0.010 on every task (sentiment 0.909 against 0.910, truth 0.847 against 0.851, utility 0.695 against 0.705), and utility at `last` and `concept` is within 0.019 (0.764 against 0.761, 0.763 against 0.744). The post-trained reader is lower in four cells, with intervals that do not overlap: sentiment at `last` (0.880 against 0.944) and `concept` (0.900 against 0.935), and truth at `last` (0.934 against 0.968) and `concept` (0.756 against 0.858).
+- **Against decoy.** The cells where the reader falls below chance differ. On the base checkpoint truth at `last` is 0.058 [0.052, 0.064], while on the post-trained checkpoint it is 0.551 [0.525, 0.576]; truth at `concept` runs the other way, 0.624 [0.600, 0.647] on the base and 0.392 [0.334, 0.441] on the post-trained checkpoint. Utility at `last` is below chance on both (0.302 [0.249, 0.352] and 0.358 [0.294, 0.432], overlapping intervals), while utility at `concept` is 0.330 on the base and 0.604 on the post-trained checkpoint. Sentiment at `last` is 0.785 and 0.722. The run does not say why.
+- **Zero-shot.** The post-trained point values are lower than the base ones on all three tasks, with overlapping intervals under the original prompts (0.921, 0.915 and 0.695 against 0.963, 0.932 and 0.773). Under the `against` decoy the model's own answer is below chance on both checkpoints on all three tasks (0.000, 0.254 and 0.000 against 0.248, 0.424 and 0.012; the base interval for truth, [0.305, 0.542], reaches 0.5).
+- **Layers.** The layer chosen on the original prompts differs between the checkpoints in 5 of the 9 reader cells: sentiment at `concept` (L14 against L27) and `mean` (L16 against L15), truth at `concept` (L27 against L18), and utility at `last` (L28 against L18) and `concept` (L18 against L26). A difference in those cells mixes the checkpoint with the layer selected on the select split.
+- **Limits.** The intervals are over the 10 training draws and do not include the sampling of the evaluation pairs, which matters most for truth (59 report pairs). The two runs also differ in hardware and in code commit, though not in the P2 code.
 
 ### Stimulus-set size on qwen3-1.7b-base (P3)
 
@@ -2445,6 +2480,42 @@ The runs are `p5/gpt2/80b4ae80a6ca`, `p5/qwen3-1.7b-base/a4bd463deeca` and `p5/q
 - On both Qwen3 checkpoints the readers of the unrelated persona words fall to or near chance on `facts` (0.600 and 0.520 on the base, 0.510 and 0.492 on the post-trained checkpoint) while the paper and synonym readers stay at 0.647 or above. This is consistent with a reader that depends on the meaning of the persona words, but it is one run per checkpoint on 59 `facts` pairs, and `unrelated_0` on the base checkpoint (0.600 [0.581, 0.620]) is above chance. Some cells under the unrelated words sit far from 0.5 (`larger_than` on `gpt2`, 0.670 and 0.826; `sp_en_trans` on the post-trained checkpoint, 0.353 and 0.367); the runs do not say what those readers read.
 - Each cell is one run of one model at one layer chosen on 53 pairs and scored on small sets, with intervals over the training draw only. The runs do not test persona wordings beyond the five pairs above.
 
+## Template steering on the Qwen3 1.7B pair (P7)
+
+P7 is the protocol of [P7 on gpt2](#template-steering-p7): the sentiment reader is extracted under six templates of P1 and used to steer with the C1 protocol (coefficients -0.3, -0.15, 0, 0.15 and 0.3, 50 prompts, 2 samples per prompt, 2 steering readers per template), over the sweep layers 1, 6, 12, 17, 23 and 28 (28 is the last block). A unit is a template, a sweep layer and a steering reader (72 units). It is readable if the validation accuracy of its reader at that layer is at least 0.6, and inverted if it is readable and its primary dose slope is negative. The runs are `p7/qwen3-1.7b-base/947fef33a7c5` and `p7/qwen3-1.7b/7921f3fe5754`, both made at `20650c5` with a clean tree on a laptop GPU (NVIDIA GeForce RTX 4070 Laptop GPU). Base and post-trained are two models: the tables are separate and no metric is pooled over them. These runs have no norm-matched random-direction arm and no fluency measure (perplexity or distinct-1), so nothing below says whether the steered text is fluent or whether the edit is specific to the sentiment direction.
+
+### qwen3-1.7b-base
+
+| Template       | Read layer | Read accuracy | Steer layer | Dose slope at L28 | Dose slope, sweep layers 1 to 23 | Readable units | Inverted |
+| -------------- | ---------- | ------------- | ----------- | ----------------- | -------------------------------- | -------------- | -------- |
+| paper          | L18        | 0.905         | L28         | 1.217             | 0.029 to 0.561                   | 12             | 1        |
+| no_template    | L20        | 0.929         | L28         | 1.373             | 0.046 to 0.849                   | 12             | 0        |
+| no_chat_tags   | L18        | 0.921         | L28         | 1.302             | -0.029 to 0.725                  | 12             | 3        |
+| neutral_frame  | L18        | 0.943         | L28         | 1.408             | 0.029 to 0.786                   | 12             | 0        |
+| scaffold_0     | L27        | 0.958         | L28         | 1.365             | -0.051 to 0.840                  | 12             | 4        |
+| concept_swap_0 | L27        | 0.854         | L28         | 1.289             | -0.104 to 0.553                  | 12             | 1        |
+
+### qwen3-1.7b
+
+| Template       | Read layer | Read accuracy | Steer layer | Dose slope at L28 | Dose slope, sweep layers 1 to 23 | Readable units | Inverted |
+| -------------- | ---------- | ------------- | ----------- | ----------------- | -------------------------------- | -------------- | -------- |
+| paper          | L18        | 0.864         | L28         | 0.824             | -0.071 to 0.449                  | 12             | 3        |
+| no_template    | L16        | 0.938         | L28         | 0.612             | -0.070 to 0.554                  | 12             | 1        |
+| no_chat_tags   | L19        | 0.839         | L28         | 0.802             | -0.097 to 0.484                  | 12             | 4        |
+| neutral_frame  | L18        | 0.911         | L28         | 0.600             | -0.035 to 0.297                  | 12             | 2        |
+| scaffold_0     | L16        | 0.916         | L28         | 0.729             | -0.107 to 0.597                  | 12             | 3        |
+| concept_swap_0 | L18        | 0.848         | L28         | 0.691             | -0.042 to 0.479                  | 12             | 3        |
+
+The read accuracy is the best point of the mean reading curve over the 10 readers, so it is optimistic by the selection. The sweep-layer column is the minimum and maximum of the mean dose slope over layers 1, 6, 12, 17 and 23, read from the curves files.
+
+- **Every template steers at the last block.** The steering layer is L28 for all twelve templates of the two runs, the last layer of the sweep and the last block of the model, so it is the edge of what was swept and not an interior optimum. The slope at L28 is the highest of the six sweep layers for every template, and it is not monotone before that (`paper` on the post-trained checkpoint: -0.071, 0.123, 0.093, 0.298, 0.449 and 0.824 at layers 1, 6, 12, 17, 23 and 28; on the base checkpoint 0.029, 0.059, 0.285, 0.186, 0.561 and 1.217). The slope at the steering layer is measured on the prompts that chose that layer and is optimistic. It is 1.217 to 1.408 on the base and 0.600 to 0.824 on the post-trained checkpoint; the run does not say what makes the two differ.
+- **Reading layers.** The reading layer is L18 to L20 for four of the six templates on the base checkpoint and L27 for `scaffold_0` and `concept_swap_0`; on the post-trained checkpoint it is L16 to L19 for all six. The mean absolute gap between the reading depth and the steering depth (layer divided by 28) is 0.238 on the base and 0.375 on the post-trained checkpoint.
+- **Inversion.** Every unit is readable (72 of 72 on both). On the base checkpoint 9 are inverted, a rate of 0.125 [0.067, 0.221]; on the post-trained checkpoint 16, a rate of 0.222 [0.142, 0.331] (Wilson intervals over the 72 units, which overlap). The counts by template are 1, 0, 3, 0, 4 and 1 on the base checkpoint and 3, 1, 4, 2, 3 and 3 on the post-trained one. On `gpt2` the rate was 1 of 72 (0.014). Every inverted unit is at layer 1, 6 or 12 (base: 2, 4 and 3 units; post-trained: 10, 4 and 2) and none is at layer 17, 23 or 28, so in these runs the sign of the slope is positive at the deeper layers.
+- **Reading and steering.** The Spearman correlation over the 72 units between reading accuracy and dose slope is 0.787 on the base and 0.741 on the post-trained checkpoint, and between the logit-lens score and dose slope 0.722 and 0.803. The sign of the slope agrees between the two judges for 0.806 of the units on the base checkpoint (58 of 72) and 0.889 on the post-trained one (64 of 72). The sweep layer with the largest logit-lens separation is the steering layer for 5 of 6 templates on the base checkpoint (`scaffold_0` has L23) and for 6 of 6 on the post-trained one.
+- **The correlation is not separated from depth.** Both the reading accuracy and the slope rise with depth over the sweep, so a rank correlation over units that mixes layers can be driven by depth alone. The summary does not give the within-layer correlation.
+- **Prompt format.** The mean primary dose slope by steering prompt format (raw, chat and story) is 1.135 to 1.397, 1.073 to 1.475 and 1.249 to 1.554 over the six templates on the base checkpoint. On the post-trained checkpoint it is 0.569 to 0.803 for raw, 0.279 to 0.559 for chat and 0.604 to 0.944 for story, so the chat value is below every raw and story value for all six templates there.
+- **Not stored and not controlled.** These runs store no perplexity or distinct-1 and have no random-direction arm. The grid reaches 0.3, where C1 on the same checkpoints has a perplexity of 93.3 (base) and 130.6 (post-trained) and a distinct-1 of 0.068 and 0.061 (see [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1)), so a dose slope fitted over the grid is not a rate of steering within fluent text, and the dose slopes and the inversion counts above do not show that the steered outputs are fluent or that the steering is selective.
+
 ## Run identity
 
 All reading runs (R1 to R7) except the R4 and R6 runs of `gpt2-medium`, `gpt2-large` and `gpt2-xl` (made at `ca2546c`,
@@ -2474,6 +2545,8 @@ are not exported and not reported.
 The P2 and P3 runs of `qwen3-1.7b-base` and the P5 runs of `gpt2`, `qwen3-1.7b-base` and `qwen3-1.7b` were made at
 `c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090, torch 2.14.1+cu130, transformers 5.19.0), with the
 default config of each experiment and batch size 8 (`config.json` of each run).
+
+The P2 run of `qwen3-1.7b` and the P7 runs of `qwen3-1.7b-base` and `qwen3-1.7b` were made at `20650c5` (an ancestor of the current main; the P2 and P7 code is unchanged since) with a clean tree on a laptop GPU (NVIDIA GeForce RTX 4070 Laptop GPU, torch 2.14.1+cu130, transformers 5.19.0), with the default config of each experiment (batch size 8 for P2, 16 for P7). The time between `started_at` and `finished_at` of the stored `meta.json` is 912 s for `p2/qwen3-1.7b/51a85fbec631`, 3,383 s for `p7/qwen3-1.7b/7921f3fe5754` and 4,112 s for `p7/qwen3-1.7b-base/947fef33a7c5`. None of the Qwen3 P7 runs stores the perplexity or the distinct-1 of the generated text.
 
 The P9 runs were made on the same laptop GPU with a clean tree: P9a at `ff1177a` (batch size 8, 4 for `gpt2-xl`), P9b
 and P9c at `95a8243` (batch size 8, 4 for `gpt2-xl`) and P9d at `a39ae61` (batch size 8, 4 for `gpt2-xl`). The P9 runs of `gpt2`,
@@ -2534,9 +2607,10 @@ Qwen3:
 | A1          | 4e8f8cfa0021    | 0cb04910086e | 769590eef456    | 2326d9ec9b7d |
 | A2          | 109c4aa851bf    | 91b62e58953f | 09b991efaf7f    | 1e528ddfbffa |
 | P1          | a540a2497ac4    | 31a6ee65d6ab | ef3f8c0d3389    | f4aa9b57824a |
-| P2          | not run         | not run      | 119f0ac54451    | not run      |
+| P2          | not run         | not run      | 119f0ac54451    | 51a85fbec631 |
 | P3          | not run         | not run      | 61baf30a8a59    | not run      |
 | P5          | not run         | not run      | a4bd463deeca    | 7e5e579d102e |
+| P7          | not run         | not run      | 947fef33a7c5    | 7921f3fe5754 |
 | C1          | 7ae3e2aa34e2    | 832462b7b04e | 0cd5a36d3408    | a91f950ad9f5 |
 | M1          | not run         | not run      | 3fe3a8644289    | de2cdd3146ac |
 | C2          | not run         | not run      | 37d187b75a7f    | 227d782df8ba |
@@ -2564,8 +2638,10 @@ Not in this document yet. No dates are promised.
 - P1 on the truth and emotion tasks on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the Qwen3 checkpoints, and with the
   `pca_diff` finder (the truth and emotion tasks ran on `gpt2` only; the sentiment task ran with the logistic finder on
   `gpt2` and the four Qwen3 checkpoints).
-- P2 and P3 on the other GPT-2 sizes and on the post-trained and 0.6B Qwen3 checkpoints (they ran on `gpt2` and
-  `qwen3-1.7b-base`). P4 and P7 on the other GPT-2 sizes and on the Qwen3 checkpoints (both ran on `gpt2` only). M1, C2, C4 and LR1
+- P2 on the other GPT-2 sizes and on the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `qwen3-1.7b-base` and
+  `qwen3-1.7b`). P3 on the other GPT-2 sizes and on the post-trained and 0.6B Qwen3 checkpoints (it ran on `gpt2` and
+  `qwen3-1.7b-base`). P4 on the other GPT-2 sizes and on the Qwen3 checkpoints (it ran on `gpt2` only). P7 on the other
+  GPT-2 sizes and on the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `qwen3-1.7b-base` and `qwen3-1.7b`). M1, C2, C4 and LR1
   on the other GPT-2 sizes and on the two 0.6B Qwen3 checkpoints (they ran on `gpt2`, `qwen3-1.7b-base` and `qwen3-1.7b`).
   C5 on `gpt2`, `gpt2-medium`, `gpt2-large` and the two 0.6B Qwen3 checkpoints (it ran on `gpt2-xl`, `qwen3-1.7b-base`
   and `qwen3-1.7b`). A1 and A2 on `gpt2-medium`, `gpt2-large` and `gpt2-xl`.
