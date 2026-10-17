@@ -1,0 +1,91 @@
+{
+  "_meta": {
+    "experiment": "c2",
+    "config_hash": "85c9a670bf17",
+    "seed": 0,
+    "git_sha": "ca2546cd5cb9a14a6b01ff84224c6ace0db01a1f",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T02:34:19+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "c2",
+      "model": "gpt2",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 40,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 2,
+      "layers": null,
+      "coeffs": [
+        -0.3,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.3
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "judge": "emotion-primary",
+      "judge_check": "emotion-secondary",
+      "emotions": [
+        "happiness",
+        "sadness",
+        "anger",
+        "fear",
+        "disgust",
+        "surprise"
+      ],
+      "n_seeds": 10,
+      "n_steer_seeds": 3,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "window": 3,
+      "strength": null,
+      "truncate_words": 4
+    }
+  },
+  "data": {
+    "rows": [
+      "happiness",
+      "sadness",
+      "anger",
+      "fear",
+      "disgust",
+      "surprise"
+    ],
+    "cols": [
+      "happiness",
+      "sadness",
+      "anger",
+      "fear",
+      "disgust",
+      "surprise"
+    ],
+    "title": "Change in measured emotion at strength 0.3 (primary judge)",
+    "layer": 10
+  }
+}

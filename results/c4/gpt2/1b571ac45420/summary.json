@@ -1,0 +1,109 @@
+{
+  "_meta": {
+    "experiment": "c4",
+    "config_hash": "1b571ac45420",
+    "seed": 0,
+    "git_sha": "ca2546cd5cb9a14a6b01ff84224c6ace0db01a1f",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T02:41:19+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "c4",
+      "model": "gpt2",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 40,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 2,
+      "layers": null,
+      "coeffs": [
+        -0.2,
+        -0.1,
+        -0.05,
+        0.0,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "n_seeds": 10,
+      "n_pairs": 128,
+      "n_eval_pairs": 128,
+      "alphas": [
+        -0.5,
+        -0.25,
+        0.0,
+        0.25,
+        0.5
+      ],
+      "n_boot": 2000,
+      "lorra_run": "results/lr1/gpt2/1e9cd6f56388"
+    }
+  },
+  "data": {
+    "layers": [
+      4,
+      5,
+      6,
+      7,
+      9,
+      10,
+      11,
+      12
+    ],
+    "n_select": 644,
+    "n_test": 173,
+    "chance": 0.22803468208092484,
+    "reading_val_accuracy": [
+      0.9990959498553519,
+      0.9979990356798458,
+      0.9990477338476375,
+      0.9999397299903567,
+      0.9999879459980715,
+      0.9999879459980715,
+      1.0,
+      0.9999035679845709
+    ],
+    "coeff_difference": 0.1,
+    "coeff_reading": [
+      -0.05,
+      0.0,
+      0.05,
+      -0.1,
+      0.05,
+      0.05,
+      -0.1,
+      -0.2,
+      0.0,
+      -0.2
+    ],
+    "alpha_contrast": 0.25,
+    "reading_test_mean": 0.17976878612716762,
+    "reading_test_min": 0.1676300578034682,
+    "reading_test_max": 0.19653179190751446,
+    "lorra_run": "results/lr1/gpt2/1e9cd6f56388"
+  }
+}

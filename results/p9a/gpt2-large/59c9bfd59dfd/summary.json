@@ -1,0 +1,155 @@
+{
+  "_meta": {
+    "experiment": "p9a",
+    "config_hash": "59c9bfd59dfd",
+    "seed": 0,
+    "git_sha": "ca2546cd5cb9a14a6b01ff84224c6ace0db01a1f",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T04:15:04+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9a",
+      "model": "gpt2-large",
+      "seed": 0,
+      "cutoff_year": 2017,
+      "n_popqa": null,
+      "n_synthal": null,
+      "n_kuq": 200,
+      "n_falseqa": 500,
+      "n_triviaqa": 1000,
+      "n_nq_open": 1000,
+      "n_detail": 300,
+      "n_shots": 15,
+      "n_samples": 5,
+      "temperature": 1.0,
+      "known_min_correct": 3,
+      "max_new_tokens": 16,
+      "n_hand_check": 200,
+      "max_guess_accuracy": 0.1,
+      "never_known": [
+        "sport"
+      ],
+      "popqa_relations": [
+        "father",
+        "mother",
+        "occupation",
+        "sport",
+        "director",
+        "screenwriter",
+        "author",
+        "producer",
+        "composer",
+        "capital",
+        "place of birth",
+        "capital of"
+      ],
+      "popqa_min_popularity": null,
+      "min_known": 100,
+      "popular_min": 10000,
+      "popular_share": 0.5,
+      "batch_size": 3,
+      "offline": false
+    }
+  },
+  "data": {
+    "cutoff": {
+      "year": 2017,
+      "source": "config",
+      "estimate": null
+    },
+    "n_items": 22028,
+    "counts": {
+      "popqa": {
+        "known_raw": 367,
+        "known": 243,
+        "unknown": 8495,
+        "uncertain": 729
+      },
+      "synthal": {
+        "known_raw": 0,
+        "known": 0,
+        "unknown": 800,
+        "uncertain": 0
+      },
+      "fictional": {
+        "known_raw": 0,
+        "known": 0,
+        "unknown": 7493,
+        "uncertain": 0
+      },
+      "award": {
+        "known_raw": 0,
+        "known": 0,
+        "unknown": 266,
+        "uncertain": 2
+      },
+      "detail": {
+        "known_raw": 0,
+        "known": 0,
+        "unknown": 300,
+        "uncertain": 0
+      },
+      "falseqa": {
+        "known_raw": 0,
+        "known": 0,
+        "unknown": 500,
+        "uncertain": 0
+      },
+      "kuq": {
+        "known_raw": 0,
+        "known": 0,
+        "unknown": 1200,
+        "uncertain": 0
+      },
+      "triviaqa": {
+        "known_raw": 49,
+        "known": 49,
+        "unknown": 767,
+        "uncertain": 184
+      },
+      "nq_open": {
+        "known_raw": 12,
+        "known": 12,
+        "unknown": 937,
+        "uncertain": 51
+      }
+    },
+    "recipe": {
+      "n_samples": 5,
+      "temperature": 1.0,
+      "known_min_correct": 3,
+      "max_new_tokens": 16,
+      "stop": "\n",
+      "n_shots": 15
+    },
+    "guess": {
+      "n_known_raw": 428,
+      "n_known": 304,
+      "verdicts": {
+        "modal_answer": 4,
+        "excluded_stratum": 120
+      },
+      "max_guess_accuracy": 0.1,
+      "never_known": [
+        "sport"
+      ]
+    },
+    "min_known": 100,
+    "known_contrasts": true,
+    "hand_check_rows": 200
+  }
+}

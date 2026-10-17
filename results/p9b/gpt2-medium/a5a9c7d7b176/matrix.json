@@ -1,0 +1,68 @@
+{
+  "_meta": {
+    "experiment": "p9b",
+    "config_hash": "a5a9c7d7b176",
+    "seed": 0,
+    "git_sha": "ca2546cd5cb9a14a6b01ff84224c6ace0db01a1f",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T06:19:01+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9b",
+      "model": "gpt2-medium",
+      "seed": 0,
+      "labels_run": "results/p9a/gpt2-medium/4272635aa065",
+      "template": "fewshot",
+      "n_shots": 15,
+      "types": null,
+      "methods": [
+        "logistic",
+        "pca_diff",
+        "mean_diff",
+        "random"
+      ],
+      "preprocess": "center",
+      "n_seeds": 5,
+      "n_pairs": 64,
+      "layers": null,
+      "layer": null,
+      "min_pairs": 16,
+      "min_eval": 10,
+      "bos": null,
+      "batch_size": 8
+    }
+  },
+  "data": {
+    "rows": [
+      "fictional_generated",
+      "obscure_real",
+      "obscure_real_pop",
+      "real_vs_synthal",
+      "real_vs_generated",
+      "pre_vs_post_cutoff"
+    ],
+    "cols": [
+      "fictional_generated",
+      "obscure_real",
+      "obscure_real_pop",
+      "real_vs_synthal",
+      "real_vs_generated",
+      "pre_vs_post_cutoff"
+    ],
+    "title": "Transfer AUROC, layer 24"
+  }
+}

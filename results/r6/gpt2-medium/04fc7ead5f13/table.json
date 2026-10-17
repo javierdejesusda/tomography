@@ -1,0 +1,148 @@
+{
+  "_meta": {
+    "experiment": "r6",
+    "config_hash": "04fc7ead5f13",
+    "seed": 0,
+    "git_sha": "ca2546cd5cb9a14a6b01ff84224c6ace0db01a1f",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T01:23:02+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "r6",
+      "model": "gpt2-medium",
+      "seed": 0,
+      "n_seeds": 15,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "sources": [
+        "truthfulqa",
+        "arc",
+        "honesty"
+      ]
+    }
+  },
+  "data": {
+    "columns": [
+      "method",
+      "layer_rule",
+      "source",
+      "mc1",
+      "lo",
+      "hi",
+      "n_trials"
+    ],
+    "rows": [
+      [
+        "standard",
+        null,
+        null,
+        0.17341040462427745,
+        0.1242550450756765,
+        0.23675452387062615,
+        null
+      ],
+      [
+        "heuristic",
+        null,
+        null,
+        0.2658959537572254,
+        0.205666583433825,
+        0.3362960279347636,
+        null
+      ],
+      [
+        "text_word",
+        null,
+        null,
+        0.6763005780346821,
+        0.6034046663938186,
+        0.7415370707236641,
+        null
+      ],
+      [
+        "text_char",
+        null,
+        null,
+        0.6705202312138728,
+        0.5974421528971253,
+        0.7361900190689644,
+        null
+      ],
+      [
+        "lat",
+        "validation-layer",
+        "truthfulqa",
+        0.6670520231213873,
+        0.6593448940269748,
+        0.6755298651252407,
+        15
+      ],
+      [
+        "lat",
+        "best-layer",
+        "truthfulqa",
+        0.6878612716763006,
+        0.6801541425818881,
+        0.6971098265895954,
+        15
+      ],
+      [
+        "lat",
+        "validation-layer",
+        "arc",
+        0.489402697495183,
+        0.4531791907514451,
+        0.5210019267822736,
+        15
+      ],
+      [
+        "lat",
+        "best-layer",
+        "arc",
+        0.4635838150289018,
+        0.42273603082851635,
+        0.5021194605009633,
+        15
+      ],
+      [
+        "lat",
+        "validation-layer",
+        "honesty",
+        0.476300578034682,
+        0.4651156069364161,
+        0.48747591522157996,
+        15
+      ],
+      [
+        "lat",
+        "best-layer",
+        "honesty",
+        0.4921001926782273,
+        0.4886319845857418,
+        0.4959537572254335,
+        15
+      ]
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "experiment": "r6",
+  "model": "gpt2-large",
+  "seed": 0,
+  "n_seeds": 15,
+  "n_pairs": 64,
+  "n_eval_pairs": null,
+  "method": "logistic",
+  "preprocess": "center",
+  "position": "last",
+  "eval_position": null,
+  "layers": null,
+  "bos": null,
+  "batch_size": 8,
+  "sources": [
+    "truthfulqa",
+    "arc",
+    "honesty"
+  ]
+}

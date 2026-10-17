@@ -1,0 +1,138 @@
+{
+  "_meta": {
+    "experiment": "r4",
+    "config_hash": "981d9dd9916e",
+    "seed": 0,
+    "git_sha": "ca2546cd5cb9a14a6b01ff84224c6ace0db01a1f",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T01:22:10+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "r4",
+      "model": "gpt2-medium",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "emotions": [
+        "happiness",
+        "sadness",
+        "anger",
+        "fear",
+        "disgust",
+        "surprise"
+      ],
+      "embed_layers": null,
+      "embed_points": 600,
+      "perplexity": 30.0
+    }
+  },
+  "data": {
+    "matrix_layer": 22,
+    "emotions": {
+      "happiness": {
+        "best_layer": 22,
+        "val_accuracy": 0.9354166666666666,
+        "test_accuracy": 0.9210526315789475,
+        "ci": [
+          0.9,
+          0.9421052631578947
+        ]
+      },
+      "sadness": {
+        "best_layer": 12,
+        "val_accuracy": 0.964102564102564,
+        "test_accuracy": 0.9295454545454545,
+        "ci": [
+          0.9181818181818182,
+          0.940909090909091
+        ]
+      },
+      "anger": {
+        "best_layer": 9,
+        "val_accuracy": 0.929268292682927,
+        "test_accuracy": 0.9422222222222223,
+        "ci": [
+          0.9311111111111112,
+          0.9533333333333334
+        ]
+      },
+      "fear": {
+        "best_layer": 18,
+        "val_accuracy": 0.9926829268292682,
+        "test_accuracy": 0.969811320754717,
+        "ci": [
+          0.9622641509433961,
+          0.9773584905660379
+        ]
+      },
+      "disgust": {
+        "best_layer": 10,
+        "val_accuracy": 1.0,
+        "test_accuracy": 1.0,
+        "ci": [
+          1.0,
+          1.0
+        ]
+      },
+      "surprise": {
+        "best_layer": 16,
+        "val_accuracy": 0.9844444444444445,
+        "test_accuracy": 0.9666666666666666,
+        "ci": [
+          0.9583333333333333,
+          0.9722222222222221
+        ]
+      }
+    },
+    "n_seeds": 10,
+    "n_pairs": 64,
+    "n_eval_pairs": {
+      "happiness": {
+        "val": 48,
+        "test": 38
+      },
+      "sadness": {
+        "val": 39,
+        "test": 44
+      },
+      "anger": {
+        "val": 41,
+        "test": 45
+      },
+      "fear": {
+        "val": 41,
+        "test": 53
+      },
+      "disgust": {
+        "val": 41,
+        "test": 39
+      },
+      "surprise": {
+        "val": 45,
+        "test": 36
+      }
+    }
+  }
+}

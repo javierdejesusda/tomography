@@ -1,0 +1,279 @@
+{
+  "_meta": {
+    "experiment": "p9a",
+    "config_hash": "5461200f995c",
+    "seed": 0,
+    "git_sha": "ca2546cd5cb9a14a6b01ff84224c6ace0db01a1f",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T03:08:52+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9a",
+      "model": "gpt2",
+      "seed": 0,
+      "cutoff_year": 2017,
+      "n_popqa": null,
+      "n_synthal": null,
+      "n_kuq": 200,
+      "n_falseqa": 500,
+      "n_triviaqa": 1000,
+      "n_nq_open": 1000,
+      "n_detail": 300,
+      "n_shots": 15,
+      "n_samples": 5,
+      "temperature": 1.0,
+      "known_min_correct": 3,
+      "max_new_tokens": 16,
+      "n_hand_check": 200,
+      "max_guess_accuracy": 0.1,
+      "never_known": [
+        "sport"
+      ],
+      "popqa_relations": [
+        "father",
+        "mother",
+        "occupation",
+        "sport",
+        "director",
+        "screenwriter",
+        "author",
+        "producer",
+        "composer",
+        "capital",
+        "place of birth",
+        "capital of"
+      ],
+      "popqa_min_popularity": null,
+      "min_known": 100,
+      "popular_min": 10000,
+      "popular_share": 0.5,
+      "batch_size": 8,
+      "offline": false
+    }
+  },
+  "data": {
+    "columns": [
+      "stratum",
+      "n",
+      "modal",
+      "modal_share",
+      "guess_accuracy",
+      "excluded",
+      "eligible"
+    ],
+    "rows": [
+      [
+        "award:Fields medal",
+        10,
+        "france",
+        0.6,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Peace Prize",
+        37,
+        "united states",
+        0.43243243243243246,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Chemistry",
+        37,
+        "french",
+        0.6756756756756757,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Literature",
+        37,
+        "french",
+        0.8378378378378378,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Physics",
+        37,
+        "french",
+        0.40540540540540543,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Nobel Prize in Physiology or Medicine",
+        37,
+        "united states",
+        0.40540540540540543,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Prize in Economic Sciences in Memory of Alfred Nobel",
+        37,
+        "french",
+        0.7567567567567568,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "award:Turing Award",
+        36,
+        "french",
+        0.6944444444444444,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "nq_open",
+        1000,
+        "egypt",
+        0.119,
+        0.001,
+        false,
+        true
+      ],
+      [
+        "popqa:author",
+        1304,
+        "author of book",
+        0.09125766871165644,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:capital",
+        602,
+        "rome",
+        0.054817275747508304,
+        0.0033222591362126247,
+        false,
+        true
+      ],
+      [
+        "popqa:capital of",
+        199,
+        "egypt",
+        0.1407035175879397,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:composer",
+        796,
+        "composer of opera",
+        0.1457286432160804,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:director",
+        1609,
+        "egyptian government",
+        0.34244872591671843,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:father",
+        552,
+        "china",
+        0.041666666666666664,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:mother",
+        186,
+        "france",
+        0.15591397849462366,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:occupation",
+        528,
+        "doctor",
+        0.30113636363636365,
+        0.017045454545454544,
+        false,
+        true
+      ],
+      [
+        "popqa:place of birth",
+        583,
+        "new york",
+        0.3653516295025729,
+        0.02058319039451115,
+        false,
+        true
+      ],
+      [
+        "popqa:producer",
+        1132,
+        "egyptians",
+        0.5892226148409894,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:screenwriter",
+        1429,
+        "george orwell",
+        0.3540937718684395,
+        0.0,
+        false,
+        true
+      ],
+      [
+        "popqa:sport",
+        547,
+        "basketball",
+        0.4351005484460695,
+        0.07312614259597806,
+        true,
+        false
+      ],
+      [
+        "triviaqa",
+        1000,
+        "egypt",
+        0.048,
+        0.001,
+        false,
+        true
+      ]
+    ]
+  }
+}
