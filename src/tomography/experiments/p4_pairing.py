@@ -663,6 +663,7 @@ def _read_task(loaded: LoadedModel, config: Config, plan: _Plan) -> _Result:
                     method=method,
                     preprocess=preprocess,
                     seed=config.seed,
+                    refit_at_zero=True,
                 )
                 layers = sweep.layers
                 cells[m, p, r] = np.stack(
