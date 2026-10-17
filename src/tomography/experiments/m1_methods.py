@@ -660,7 +660,15 @@ def _arm_factory(ctx: _Steering, reader: RepReader) -> Callable[[float], Arm]:
 def _recording(
     make: Callable[[float], Arm], arms: dict[float, Arm]
 ) -> Callable[[float], Arm]:
-    """Wraps an arm factory so that the arm of each coefficient is kept."""
+    """Wraps an arm factory so that the arm of each coefficient is kept.
+
+    Args:
+        make: Builds the arm of a coefficient.
+        arms: Filled in place, coefficient to the arm built for it.
+
+    Returns:
+        A factory that calls `make`, stores the arm in `arms` and returns it.
+    """
 
     def record(coeff: float) -> Arm:
         arms[coeff] = make(coeff)
@@ -675,6 +683,17 @@ def _effect_row(
     coeff: float,
     effects: SideEffects,
 ) -> list[object]:
+    """Lays out the side effects of one trial as a `table_effects` row.
+
+    Args:
+        method: Name of the direction finder, or "none" for the unsteered arm.
+        seed: Index of the steering reader; None for the unsteered arm.
+        coeff: Relative steering coefficient of the trial.
+        effects: The side effects measured on the trial.
+
+    Returns:
+        The row, in the order of `_EFFECT_COLUMNS`.
+    """
     return [
         method,
         seed,
