@@ -52,6 +52,7 @@ def fit_direction(
     pairs: NDArray[np.int64] | None = None,
     preprocess: Preprocess = "center",
     seed: int = 0,
+    refit_at_zero: bool = False,
 ) -> FitResult:
     """Fits one direction to the activations of one layer.
 
@@ -66,9 +67,6 @@ def fit_direction(
             coefficients of an L2-regularized logistic regression; both need
             `labels`. The regression runs on rows divided by one global
             scalar, so the penalty does not depend on the activation scale.
-            When the solver stops at its start with all-zero coefficients
-            because the gradient there is under its tolerance, the fit is
-            repeated with a tighter one.
             `kmeans` is the centroid difference of a two-cluster K-means and
             `random` a Gaussian draw from `seed`; neither reads labels.
         h: Activations of shape (n, d).
@@ -82,6 +80,11 @@ def fit_direction(
             describes, then centers. `none` does neither. The returned mean
             is the mean of the vectors after any unit scaling.
         seed: Seed for the stochastic finders.
+        refit_at_zero: Only for `logistic`. When the solver stops at its
+            start with all-zero coefficients because the gradient there is
+            under its tolerance, repeat the fit with a tighter one instead
+            of failing with a zero norm. Off by default, so a fit that
+            finds no signal is an error.
 
     Returns:
         The unit direction, the mean it was centered on and the raw norm.
@@ -112,7 +115,7 @@ def fit_direction(
         if method == "mean_diff":
             direction = _class_difference(fitted, positive)
         else:
-            direction = _logistic_coefficients(fitted, positive)
+            direction = _logistic_coefficients(fitted, positive, refit_at_zero)
     elif method == "kmeans":
         direction = _centroid_difference(fitted, seed)
     elif method == "random":
@@ -175,14 +178,16 @@ def _class_difference(
 
 
 def _logistic_coefficients(
-    rows: NDArray[np.float64], positive: NDArray[np.bool_]
+    rows: NDArray[np.float64],
+    positive: NDArray[np.bool_],
+    refit_at_zero: bool,
 ) -> NDArray[np.float64]:
     scale = float(np.linalg.norm(rows) / np.sqrt(rows.shape[0]))
     if scale == 0.0:
         raise ValueError("the fitted direction has zero norm")
     scaled = rows / scale
     model = LogisticRegression(max_iter=1000).fit(scaled, positive)
-    if not model.coef_.any():
+    if refit_at_zero and not model.coef_.any():
         model = LogisticRegression(max_iter=1000, tol=_FAINT_TOL).fit(
             scaled, positive
         )

@@ -591,6 +591,22 @@ def test_the_readers_files_hold_the_fitted_readers(
         np.testing.assert_array_equal(saved["signs"], signs)
 
 
+def test_every_condition_is_fitted_with_the_tight_logistic_refit(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flags: list[Any] = []
+    real = p5_persona_wording.sweep_from_activations
+
+    def spy(*args: Any, **kwargs: Any) -> SweepResult:
+        flags.append(kwargs.get("refit_at_zero"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(p5_persona_wording, "sweep_from_activations", spy)
+    _execute(tiny_arch, tmp_path, conditions=("paper", "synonym_0"))
+
+    assert flags == [True, True]
+
+
 def test_the_cosine_curves_compare_each_reader_with_the_paper_reader(
     ran: RunDir, tiny_arch: LoadedModel
 ) -> None:

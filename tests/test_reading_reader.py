@@ -544,3 +544,21 @@ def test_random_direction_scores_near_chance_on_held_out_groups(
     )
     assert test.pairs.shape[0] >= 200
     assert accuracy[0] == pytest.approx(0.5, abs=0.15)
+
+
+def test_fit_passes_refit_at_zero_to_the_finder() -> None:
+    rng = np.random.default_rng(18)
+    labels = np.tile(np.array([1, 0], dtype=np.int64), 100)
+    sign = 2.0 * labels - 1.0
+    h = rng.standard_normal((200, 8))
+    h -= np.outer(sign, sign @ h / (sign @ sign))
+    h[:, 0] += 1e-4 * sign
+    stacked = h[None].astype(np.float32)
+
+    with pytest.raises(ValueError, match="zero norm"):
+        RepReader.fit("logistic", stacked, [0], labels=labels)
+    reader = RepReader.fit(
+        "logistic", stacked, [0], labels=labels, refit_at_zero=True
+    )
+
+    assert abs(reader.directions[0, 0]) > 0.95

@@ -53,6 +53,7 @@ class RepReader:
         groups: NDArray[np.int64] | None = None,
         preprocess: Preprocess = "center",
         seed: int = 0,
+        refit_at_zero: bool = False,
     ) -> Self:
         """Fits and orients one direction per layer.
 
@@ -78,6 +79,7 @@ class RepReader:
                 member each, padded with -1.
             preprocess: Vector preparation, see `fit_direction`.
             seed: Base seed of the stochastic finders.
+            refit_at_zero: See `fit_direction`.
 
         Returns:
             The fitted reader.
@@ -102,6 +104,7 @@ class RepReader:
                 pairs=pairs,
                 preprocess=preprocess,
                 seed=_layer_seed(seed, k),
+                refit_at_zero=refit_at_zero,
             )
             for k in range(h.shape[0])
         ]

@@ -116,6 +116,7 @@ def sweep_from_activations(
     method: Method = "pca_diff",
     preprocess: Preprocess = "center",
     seed: int = 0,
+    refit_at_zero: bool = False,
 ) -> SweepResult:
     """Fits the three series on each training set and scores every eval set.
 
@@ -131,6 +132,8 @@ def sweep_from_activations(
         method: Direction finder of the `reader` series.
         preprocess: Vector preparation, see `fit_direction`.
         seed: Base seed; each fit and shuffle derives its own.
+        refit_at_zero: Passed to `RepReader.fit` for both fitted series, see
+            `fit_direction`.
 
     Returns:
         The accuracy of every evaluation set, series, seed and layer.
@@ -152,10 +155,20 @@ def sweep_from_activations(
     readers = []
     for i, (stimuli, act) in enumerate(train):
         reader = _fit(
-            method, stimuli, act, preprocess, derive_seed(seed, "reader", i)
+            method,
+            stimuli,
+            act,
+            preprocess,
+            derive_seed(seed, "reader", i),
+            refit_at_zero,
         )
         baseline = _fit(
-            "random", stimuli, act, preprocess, derive_seed(seed, "random", i)
+            "random",
+            stimuli,
+            act,
+            preprocess,
+            derive_seed(seed, "random", i),
+            refit_at_zero,
         )
         readers.append(reader)
         for e, name in enumerate(eval_names):
@@ -226,6 +239,7 @@ def _fit(
     act: Activations,
     preprocess: Preprocess,
     seed: int,
+    refit_at_zero: bool,
 ) -> RepReader:
     return RepReader.fit(
         method,
@@ -236,6 +250,7 @@ def _fit(
         groups=act.row_groups(stimuli.groups),
         preprocess=preprocess,
         seed=seed,
+        refit_at_zero=refit_at_zero,
     )
 
 

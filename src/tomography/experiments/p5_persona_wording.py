@@ -424,6 +424,7 @@ def _fit_condition(
         method=config.method,
         preprocess=config.preprocess,
         seed=config.seed,
+        refit_at_zero=True,
     )
 
 
