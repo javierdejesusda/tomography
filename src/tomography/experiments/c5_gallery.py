@@ -391,6 +391,14 @@ def _mean_score(trial: Trial) -> float | None:
 
 
 def _mean_over_arms(trials: Sequence[Trial]) -> float | None:
+    """Averages the mean scores of several arms.
+
+    Args:
+        trials: The trials of the arms to average.
+
+    Returns:
+        The mean of the arm means, or None when every arm mean is missing.
+    """
     means = [m for trial in trials if (m := _mean_score(trial)) is not None]
     return float(np.mean(means)) if means else None
 
@@ -429,6 +437,18 @@ def neutral_texts(
 
 
 def _random_readers(reader: RepReader, config: Config) -> list[RepReader]:
+    """Draws the random control readers.
+
+    The directions are unit vectors drawn in order from one generator seeded
+    with `config.seed`, with the layers and shape of `reader`.
+
+    Args:
+        reader: The steering reader whose layers and shape to match.
+        config: The experiment settings.
+
+    Returns:
+        `config.n_random` readers.
+    """
     rng = np.random.default_rng(config.seed)
     zeros = np.zeros_like(reader.directions)
     return [
@@ -448,6 +468,18 @@ def _effect_row(
     seed: int | None,
     effects: SideEffects,
 ) -> list[object]:
+    """Builds one row of the effects table.
+
+    Args:
+        arm: The arm family: "none", "reading" or "random".
+        coeff: The relative coefficient, or None for the plain model.
+        seed: The random direction index k for a random arm, 0 for the
+            reading arm, None for the plain model.
+        effects: The side effects of the arm.
+
+    Returns:
+        The row in the order of `EFFECT_COLUMNS`.
+    """
     return [
         arm,
         coeff,
