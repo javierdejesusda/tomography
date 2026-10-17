@@ -5,9 +5,11 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 import dataclasses
 from datetime import datetime
+import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import textwrap
@@ -18,9 +20,12 @@ from tomography.chain import ChainSpec
 from tomography.chain import Job
 from tomography.chain import build_command
 from tomography.chain import dry_run_lines
+from tomography.chain import interrupt_on_sigterm
+from tomography.chain import job_digest
 from tomography.chain import launch_process
 from tomography.chain import load_spec
-from tomography.chain import query_gpu_used
+from tomography.chain import make_gpu_query
+from tomography.chain import read_tail
 from tomography.chain import run_chain
 
 HEADER = """
@@ -314,6 +319,14 @@ class FakeClock:
         self.now += seconds
 
 
+def _make_run(path: Path, finished: bool = True) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "config.json").write_text("{}", encoding="utf-8")
+    meta = {"finished_at": "2026-01-01T00:00:00" if finished else None}
+    (path / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    return path
+
+
 class FakeProcess:
     """A process that exits once the fake clock reaches its end time."""
 
@@ -321,9 +334,22 @@ class FakeProcess:
         self.clock = clock
         self.end = clock.now + seconds
         self.code = code
+        self.terminated = False
+        self.killed = False
 
     def poll(self) -> int | None:
+        if self.terminated or self.killed:
+            return -15
         return self.code if self.clock.now >= self.end else None
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.killed = True
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.code if self.poll() is None else self.poll() or 0
 
 
 @dataclasses.dataclass
@@ -331,6 +357,9 @@ class Outcome:
     code: int = 0
     seconds: float = 10.0
     stdout: str | None = None
+    stderr: str | None = None
+    run_dir: Path | None = None
+    finished: bool = True
 
 
 class FakeLauncher:
@@ -348,22 +377,35 @@ class FakeLauncher:
         self.commands: list[list[str]] = []
         self.envs: list[Mapping[str, str]] = []
         self.logs: list[Path] = []
+        self.stdouts: list[Path] = []
+        self.processes: list[FakeProcess] = []
 
     def __call__(
-        self, command: Sequence[str], env: Mapping[str, str], log_path: Path
+        self,
+        command: Sequence[str],
+        env: Mapping[str, str],
+        stdout_path: Path,
+        log_path: Path,
     ) -> FakeProcess:
         self.commands.append(list(command))
         self.envs.append(env)
         self.logs.append(log_path)
+        self.stdouts.append(stdout_path)
         outcome = self.plan(command)
-        run_dir = self.runs / f"run{len(self.commands)}"
-        run_dir.mkdir(parents=True, exist_ok=True)
-        text = outcome.stdout
-        if text is None:
-            text = f"loading\n{run_dir}\n\n" if outcome.code == 0 else "boom\n"
-        with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(text)
-        return FakeProcess(self.clock, outcome.seconds, outcome.code)
+        run_dir = outcome.run_dir or self.runs / f"run{len(self.commands)}"
+        if outcome.code == 0 and outcome.run_dir is None:
+            _make_run(run_dir, outcome.finished)
+        stdout = outcome.stdout
+        if stdout is None:
+            stdout = f"{run_dir}\n\n" if outcome.code == 0 else ""
+        stderr = outcome.stderr
+        if stderr is None:
+            stderr = "loading\n" if outcome.code == 0 else "boom\n"
+        stdout_path.write_text(stdout, encoding="utf-8")
+        log_path.write_text(stderr, encoding="utf-8")
+        process = FakeProcess(self.clock, outcome.seconds, outcome.code)
+        self.processes.append(process)
+        return process
 
     def sets(self, index: int) -> list[str]:
         command = self.commands[index]
@@ -406,6 +448,12 @@ def _events(spec: ChainSpec) -> list[tuple[str, str]]:
 
 def _texts(spec: ChainSpec) -> list[str]:
     return [text for _, text in _events(spec)]
+
+
+def _mark_done(folder: Path, run_dir: Path, digest: str) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    text = json.dumps({"run_dir": str(run_dir), "digest": digest})
+    (folder / "DONE.txt").write_text(text, encoding="utf-8")
 
 
 def _fresh(tmp_path: Path) -> tuple[FakeClock, Path]:
@@ -457,12 +505,16 @@ def test_each_job_gets_a_log_and_a_done_marker(tmp_path: Path) -> None:
     _run(spec, launcher, clock)
 
     folder = spec.out / "_chain" / "a"
-    done = (folder / "DONE.txt").read_text(encoding="utf-8").strip()
+    done = json.loads((folder / "DONE.txt").read_text(encoding="utf-8"))
     assert launcher.logs == [folder / "run.log"]
+    assert launcher.stdouts == [folder / "stdout.txt"]
     assert (
         (folder / "run.log").read_text(encoding="utf-8").startswith("loading")
     )
-    assert done == str(runs / "run1")
+    assert done == {
+        "run_dir": str(runs / "run1"),
+        "digest": job_digest(spec, spec.jobs[0], {}),
+    }
 
 
 def test_the_job_environment_is_the_process_env_plus_the_chain_env(
@@ -553,7 +605,7 @@ def test_a_done_marker_naming_a_missing_directory_does_not_skip(
     spec = _chain(tmp_path, _job("a"))
     folder = spec.out / "_chain" / "a"
     folder.mkdir(parents=True)
-    (folder / "DONE.txt").write_text(str(runs / "gone"), encoding="utf-8")
+    _mark_done(folder, runs / "gone", job_digest(spec, spec.jobs[0], {}))
     launcher = FakeLauncher(clock, runs)
 
     _run(spec, launcher, clock)
@@ -731,12 +783,12 @@ def test_a_failed_attempt_logs_no_run_dir(tmp_path: Path) -> None:
     assert end == "END a exit=2 seconds=10 peak_gpu=na last=-"
 
 
-def test_query_gpu_used_is_none_without_nvidia_smi(
+def test_make_gpu_query_is_none_without_nvidia_smi(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
-    assert query_gpu_used() is None
+    assert make_gpu_query()() is None
 
 
 def _fake_smi(
@@ -753,14 +805,14 @@ def _fake_smi(
     return calls
 
 
-def test_query_gpu_used_reads_the_first_gpu(
+def test_make_gpu_query_reads_the_first_gpu(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _fake_smi(monkeypatch, 0, "2048\n512\n")
 
-    assert query_gpu_used() == 2048
+    assert make_gpu_query()() == 2048
     assert calls[0] == [
-        "nvidia-smi",
+        "smi",
         "--query-gpu=memory.used",
         "--format=csv,noheader,nounits",
     ]
@@ -769,49 +821,419 @@ def test_query_gpu_used_reads_the_first_gpu(
 @pytest.mark.parametrize(
     ("code", "out"), [(1, "2048\n"), (0, "N/A\n"), (0, "")]
 )
-def test_query_gpu_used_is_none_when_the_query_fails(
+def test_make_gpu_query_is_none_when_the_query_fails(
     monkeypatch: pytest.MonkeyPatch, code: int, out: str
 ) -> None:
     _fake_smi(monkeypatch, code, out)
 
-    assert query_gpu_used() is None
+    assert make_gpu_query()() is None
 
 
-def test_launch_process_appends_stdout_and_stderr_to_the_log(
+def test_launch_process_splits_stdout_from_stderr_and_truncates(
     tmp_path: Path,
 ) -> None:
-    log = tmp_path / "run.log"
-    log.write_text("before\n", encoding="utf-8")
+    out, log = tmp_path / "stdout.txt", tmp_path / "run.log"
+    out.write_text("old\n", encoding="utf-8")
+    log.write_text("old\n", encoding="utf-8")
     script = "import sys; print('out'); print('err', file=sys.stderr)"
 
-    process = launch_process([sys.executable, "-c", script], os.environ, log)
+    process = launch_process(
+        [sys.executable, "-c", script], os.environ, out, log
+    )
 
     assert process.wait(timeout=60) == 0
-    lines = log.read_text(encoding="utf-8").split()
-    assert lines[0] == "before"
-    assert sorted(lines[1:]) == ["err", "out"]
+    assert out.read_text(encoding="utf-8").split() == ["out"]
+    assert log.read_text(encoding="utf-8").split() == ["err"]
 
 
 def test_run_chain_runs_real_subprocesses_end_to_end(tmp_path: Path) -> None:
     script = (
-        "import pathlib, sys; "
-        "d = pathlib.Path(sys.argv[1]); d.mkdir(exist_ok=True); print(d)"
+        "import json, pathlib, sys; "
+        "d = pathlib.Path(sys.argv[1]); d.mkdir(exist_ok=True); "
+        "(d / 'config.json').write_text('{}'); "
+        "(d / 'meta.json').write_text(json.dumps({'finished_at': 'x'})); "
+        "print(d)"
     )
     runs = tmp_path / "runs"
     runs.mkdir()
 
     def launch(
-        command: Sequence[str], env: Mapping[str, str], log_path: Path
+        command: Sequence[str],
+        env: Mapping[str, str],
+        stdout_path: Path,
+        log_path: Path,
     ) -> subprocess.Popen[bytes]:
         target = str(runs / command[4])
         return launch_process(
-            [sys.executable, "-c", script, target], env, log_path
+            [sys.executable, "-c", script, target], env, stdout_path, log_path
         )
 
     spec = _chain(tmp_path, _job("a", experiment="x1"))
 
     code = run_chain(spec, launch=launch, poll_seconds=0.01)
 
+    done = json.loads(
+        (spec.out / "_chain" / "a" / "DONE.txt").read_text(encoding="utf-8")
+    )
     assert code == 0
-    done = (spec.out / "_chain" / "a" / "DONE.txt").read_text(encoding="utf-8")
-    assert done.strip() == str(runs / "x1")
+    assert done["run_dir"] == str(runs / "x1")
+
+
+def _exists_message(path: Path) -> str:
+    return (
+        "tomography: error: run directory already exists: "
+        f"{path} (delete it to rerun)\n"
+    )
+
+
+def test_an_existing_finished_run_dir_is_reused_without_a_retry(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    existing = _make_run(tmp_path / "old")
+    spec = _chain(
+        tmp_path,
+        _job("a", retry_batch_sizes=(4,)),
+        _job("b", experiment="r2", run_dir_from={"lorra_run": "a"}),
+    )
+    launcher = FakeLauncher(
+        clock,
+        runs,
+        lambda c: (
+            Outcome(code=2, stderr=_exists_message(existing))
+            if "r1" in c
+            else Outcome()
+        ),
+    )
+
+    code = _run(spec, launcher, clock)
+
+    texts = _texts(spec)
+    done = json.loads(
+        (spec.out / "_chain" / "a" / "DONE.txt").read_text(encoding="utf-8")
+    )
+    assert code == 0
+    assert len(launcher.commands) == 2
+    assert "SKIP a reason=existing" in texts
+    assert "RETRY a batch_size=4" not in texts
+    assert done["run_dir"] == str(existing)
+    assert launcher.sets(1) == [f"lorra_run={existing}"]
+    assert texts[-1] == "CHAIN_DONE failed=0"
+
+
+def test_an_existing_unfinished_run_dir_is_a_failure(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    existing = _make_run(tmp_path / "old", finished=False)
+    spec = _chain(tmp_path, _job("a", retry_batch_sizes=(4,)))
+    launcher = FakeLauncher(
+        clock, runs, lambda c: Outcome(code=2, stderr=_exists_message(existing))
+    )
+
+    code = _run(spec, launcher, clock)
+
+    assert code == 1
+    assert len(launcher.commands) == 2
+    assert "SKIP a reason=existing" not in _texts(spec)
+
+
+@pytest.mark.parametrize("stdout", ["", "\n\n", "not a directory\n"])
+def test_exit_zero_without_a_run_dir_is_a_failure(
+    tmp_path: Path, stdout: str
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    launcher = FakeLauncher(clock, runs, lambda c: Outcome(stdout=stdout))
+
+    code = _run(spec, launcher, clock)
+
+    assert code == 1
+    assert not (spec.out / "_chain" / "a" / "DONE.txt").exists()
+    assert _texts(spec)[-1] == "CHAIN_DONE failed=1"
+
+
+def test_exit_zero_naming_an_unfinished_run_dir_is_a_failure(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    launcher = FakeLauncher(clock, runs, lambda c: Outcome(finished=False))
+
+    assert _run(spec, launcher, clock) == 1
+
+
+def test_a_stderr_line_after_the_run_dir_does_not_hide_it(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    launcher = FakeLauncher(
+        clock, runs, lambda c: Outcome(stderr="warning: late\n")
+    )
+
+    assert _run(spec, launcher, clock) == 0
+
+
+def test_the_run_dir_is_found_in_a_huge_stdout(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    run_dir = _make_run(runs / "big")
+    stdout = "x" * 300_000 + f"\n{run_dir}\n"
+    launcher = FakeLauncher(
+        clock, runs, lambda c: Outcome(stdout=stdout, run_dir=run_dir)
+    )
+
+    assert _run(spec, launcher, clock) == 0
+
+
+def test_read_tail_returns_only_the_last_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "f.txt"
+    path.write_text("abcdefghij" * 5, encoding="utf-8")
+
+    assert read_tail(path, 10) == "abcdefghij"
+    assert read_tail(path, 1000) == "abcdefghij" * 5
+
+
+@pytest.mark.parametrize(
+    "content", ['{"run_di', "garbage", "", "[]", '{"run_dir": 3}']
+)
+def test_a_damaged_done_marker_is_ignored(tmp_path: Path, content: str) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    folder = spec.out / "_chain" / "a"
+    folder.mkdir(parents=True)
+    (folder / "DONE.txt").write_text(content, encoding="utf-8")
+    launcher = FakeLauncher(clock, runs)
+
+    _run(spec, launcher, clock)
+
+    assert len(launcher.commands) == 1
+
+
+def test_a_done_marker_naming_an_unfinished_run_dir_is_ignored(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    unfinished = _make_run(runs / "u", finished=False)
+    _mark_done(
+        spec.out / "_chain" / "a",
+        unfinished,
+        job_digest(spec, spec.jobs[0], {}),
+    )
+    launcher = FakeLauncher(clock, runs)
+
+    _run(spec, launcher, clock)
+
+    assert len(launcher.commands) == 1
+
+
+def test_a_done_marker_of_a_changed_job_is_ignored(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    before = _chain(tmp_path, _job("a", settings={"n": 1}))
+    _run(before, FakeLauncher(clock, runs), clock)
+    after = _chain(tmp_path, _job("a", settings={"n": 2}))
+    launcher = FakeLauncher(clock, runs)
+
+    _run(after, launcher, clock)
+
+    assert len(launcher.commands) == 1
+    assert "SKIP a reason=done" not in _texts(after)
+
+
+def test_a_done_marker_survives_a_retry_batch_size_change(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    before = _chain(tmp_path, _job("a", retry_batch_sizes=(4,)))
+    _run(before, FakeLauncher(clock, runs), clock)
+    after = _chain(tmp_path, _job("a", retry_batch_sizes=(4, 2)))
+    launcher = FakeLauncher(clock, runs)
+
+    _run(after, launcher, clock)
+
+    assert launcher.commands == []
+
+
+def test_the_done_marker_is_written_through_a_temp_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    replaced: list[tuple[str, str]] = []
+    real_replace = os.replace
+
+    def spy(src: str | Path, dst: str | Path) -> None:
+        replaced.append((Path(src).name, Path(dst).name))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", spy)
+
+    _run(spec, FakeLauncher(clock, runs), clock)
+
+    folder = spec.out / "_chain" / "a"
+    assert replaced == [("DONE.txt.tmp", "DONE.txt")]
+    assert not (folder / "DONE.txt.tmp").exists()
+
+
+def test_an_interrupt_stops_the_child_and_logs_it(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"), _job("b"))
+    launcher = FakeLauncher(clock, runs, lambda c: Outcome(seconds=1000))
+    sleeps = 0
+
+    def sleep(seconds: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 3:
+            raise KeyboardInterrupt
+        clock.sleep(seconds)
+
+    code = run_chain(
+        spec,
+        clock=clock,
+        sleep=sleep,
+        launch=launcher,
+        gpu_query=lambda: None,
+    )
+
+    texts = _texts(spec)
+    assert code == 130
+    assert launcher.processes[0].terminated
+    assert len(launcher.commands) == 1
+    assert "INTERRUPTED a" in texts
+    assert texts[-1] == "CHAIN_INTERRUPTED"
+
+
+def test_a_child_that_ignores_terminate_is_killed(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    launcher = FakeLauncher(clock, runs, lambda c: Outcome(seconds=1000))
+    sleeps = 0
+
+    def sleep(seconds: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 2:
+            raise KeyboardInterrupt
+        clock.sleep(seconds)
+
+    original = FakeProcess.wait
+
+    def stubborn(self: FakeProcess, timeout: float | None = None) -> int:
+        if not self.killed:
+            raise subprocess.TimeoutExpired("x", timeout or 0)
+        return original(self, timeout)
+
+    FakeProcess.wait = stubborn  # type: ignore[method-assign]
+    try:
+        run_chain(
+            spec,
+            clock=clock,
+            sleep=sleep,
+            launch=launcher,
+            gpu_query=lambda: None,
+        )
+    finally:
+        FakeProcess.wait = original  # type: ignore[method-assign]
+
+    assert launcher.processes[0].terminated
+    assert launcher.processes[0].killed
+
+
+def test_sigterm_becomes_a_keyboard_interrupt_and_is_restored() -> None:
+    before = signal.getsignal(signal.SIGTERM)
+
+    with pytest.raises(KeyboardInterrupt), interrupt_on_sigterm():
+        signal.raise_signal(signal.SIGTERM)
+
+    assert signal.getsignal(signal.SIGTERM) == before
+
+
+@pytest.mark.parametrize("error", [OSError("no exec"), ValueError("bad env")])
+def test_a_launch_error_fails_the_job_and_the_chain_goes_on(
+    tmp_path: Path, error: Exception
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"), _job("b", experiment="r2"))
+    inner = FakeLauncher(clock, runs)
+
+    def launch(
+        command: Sequence[str],
+        env: Mapping[str, str],
+        stdout_path: Path,
+        log_path: Path,
+    ) -> FakeProcess:
+        if "r1" in command:
+            raise error
+        return inner(command, env, stdout_path, log_path)
+
+    code = run_chain(
+        spec,
+        clock=clock,
+        sleep=clock.sleep,
+        launch=launch,
+        gpu_query=lambda: None,
+    )
+
+    texts = _texts(spec)
+    assert code == 1
+    assert "END a exit=-1 seconds=0 peak_gpu=na last=-" in texts
+    assert "START b" in texts
+    assert texts[-1] == "CHAIN_DONE failed=1"
+    assert str(error) in (spec.out / "_chain" / "a" / "run.log").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_the_gpu_tool_is_looked_up_once_per_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"), _job("b", experiment="r2"))
+    lookups: list[str] = []
+
+    def which(name: str) -> None:
+        lookups.append(name)
+
+    monkeypatch.setattr(shutil, "which", which)
+    launcher = FakeLauncher(clock, runs, lambda c: Outcome(seconds=60))
+
+    run_chain(
+        spec, clock=clock, sleep=clock.sleep, launch=launcher, poll_seconds=5
+    )
+
+    assert lookups == ["nvidia-smi"]
+
+
+@pytest.mark.parametrize(
+    "line",
+    ['env = { "A=B" = "x" }', 'env = { "" = "x" }', 'env = { A = "x\\u0000" }'],
+)
+def test_load_spec_rejects_bad_env_names_and_values(
+    tmp_path: Path, line: str
+) -> None:
+    path = _write_spec(tmp_path, JOB_A, HEADER + line + "\n")
+
+    with pytest.raises(ValueError, match="env"):
+        load_spec(path)
+
+
+@pytest.mark.parametrize("name", ["a/b", "a\\\\b", "a..b", ".hidden", "x y"])
+def test_load_spec_rejects_an_unsafe_chain_name(
+    tmp_path: Path, name: str
+) -> None:
+    header = f'[chain]\nname = "{name}"\nout = "r"\n'
+    path = _write_spec(tmp_path, JOB_A, header)
+
+    with pytest.raises(ValueError, match=r"chain\.name"):
+        load_spec(path)
+
+
+def test_load_spec_rejects_a_job_name_that_collides_with_the_log(
+    tmp_path: Path,
+) -> None:
+    body = '[[job]]\nname = "x.log"\nexperiment = "r1"\nmodel = "m"\n'
+    path = _write_spec(tmp_path, body)
+
+    with pytest.raises(ValueError, match=r"\.log"):
+        load_spec(path)

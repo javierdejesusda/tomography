@@ -1,24 +1,36 @@
 """Runs a chain of experiment jobs described by a TOML spec."""
 
 from collections.abc import Callable
+from collections.abc import Iterator
 from collections.abc import Mapping
 from collections.abc import Sequence
+import contextlib
 import dataclasses
 from datetime import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from typing import Any
 from typing import Protocol
 
+from tomography.experiments.base import RunDir
+
 JOB_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 ON_MISSING = ("skip", "drop")
+TAIL_BYTES = 64 * 1024
+TERMINATE_SECONDS = 10.0
+EXISTING_RUN = re.compile(
+    r"run directory already exists: (.+?) \(delete it to rerun\)"
+)
 CHAIN_KEYS = {"name", "out", "env"}
 JOB_KEYS = {
     "name",
@@ -88,6 +100,10 @@ def _check_keys(
         raise ValueError(f"{where}: unknown key {unknown[0]!r}")
 
 
+def _safe_name(name: str) -> bool:
+    return JOB_NAME.fullmatch(name) is not None and ".." not in name
+
+
 def _table(value: Any, where: str) -> Mapping[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{where} must be a table")
@@ -99,10 +115,12 @@ def _parse_job(table: Mapping[str, Any], index: int) -> Job:
     _check_keys(table, JOB_KEYS, where)
     name = _string(table, "name", where)
     where = f"job {name!r}"
-    if not JOB_NAME.fullmatch(name):
+    if not _safe_name(name):
         raise ValueError(
             f"{where}: job name must be letters, digits, '.', '_' or '-'"
         )
+    if name.endswith(".log"):
+        raise ValueError(f"{where}: job name must not end in '.log'")
     on_missing = table.get("on_missing", "skip")
     if on_missing not in ON_MISSING:
         raise ValueError(
@@ -198,10 +216,15 @@ def load_spec(
     chain = _table(data["chain"], "chain")
     _check_keys(chain, CHAIN_KEYS, "chain")
     name = _string(chain, "name", "chain")
+    if not _safe_name(name):
+        raise ValueError("chain.name must be letters, digits, '.', '_' or '-'")
     out = Path(_string(chain, "out", "chain"))
     env = _table(chain.get("env", {}), "chain.env")
-    if not all(isinstance(value, str) for value in env.values()):
-        raise ValueError("chain.env values must be strings")
+    for key, value in env.items():
+        if not key or "=" in key or "\0" in key:
+            raise ValueError(f"chain.env key {key!r} is not a variable name")
+        if not isinstance(value, str) or "\0" in value:
+            raise ValueError(f"chain.env value of {key!r} must be a string")
     _check_keys(data, {"chain", "job"}, "spec")
     tables = data.get("job", [])
     if not tables:
@@ -294,78 +317,191 @@ class Process(Protocol):
     def poll(self) -> int | None:
         """Returns the exit code, or None while the process runs."""
 
+    def terminate(self) -> None:
+        """Asks the process to stop."""
 
-Launcher = Callable[[Sequence[str], Mapping[str, str], Path], Process]
+    def kill(self) -> None:
+        """Stops the process without asking."""
+
+    def wait(self, timeout: float | None = None) -> int:
+        """Waits for the exit code, raising `TimeoutExpired` on timeout."""
+
+
+Launcher = Callable[[Sequence[str], Mapping[str, str], Path, Path], Process]
+
+
+@dataclasses.dataclass(frozen=True)
+class _Attempt:
+    code: int
+    run_dir: str | None = None
+    reused: bool = False
 
 
 def launch_process(
-    command: Sequence[str], env: Mapping[str, str], log_path: Path
+    command: Sequence[str],
+    env: Mapping[str, str],
+    stdout_path: Path,
+    log_path: Path,
 ) -> subprocess.Popen[bytes]:
-    """Starts a command with stdout and stderr appended to a log file.
+    """Starts a command with stdout and stderr in separate fresh files.
 
     Args:
         command: The argument vector.
         env: The environment of the process.
-        log_path: The log file, created if missing.
+        stdout_path: Receives stdout, truncated first.
+        log_path: Receives stderr, truncated first.
 
     Returns:
-        The running process.
+        The running process, in its own session on POSIX.
     """
-    with log_path.open("ab") as log:
+    with stdout_path.open("wb") as out, log_path.open("wb") as log:
         return subprocess.Popen(
             list(command),
             env=dict(env),
-            stdout=log,
-            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            stdout=out,
+            stderr=log,
+            start_new_session=os.name == "posix",
         )
 
 
-def query_gpu_used() -> int | None:
-    """Reads the memory in use on the first GPU, in MiB.
+def make_gpu_query() -> Callable[[], int | None]:
+    """Builds a query for the memory in use on the first GPU, in MiB.
+
+    The `nvidia-smi` lookup happens once, here.
 
     Returns:
-        The memory used, or None when `nvidia-smi` is missing or fails.
+        A function giving the memory used, or None when `nvidia-smi` is
+        missing or fails.
     """
-    if shutil.which("nvidia-smi") is None:
-        return None
-    try:
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.used",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if result.returncode != 0:
+    smi = shutil.which("nvidia-smi")
+    if smi is None:
+        return lambda: None
+    command = [smi, "--query-gpu=memory.used", "--format=csv,noheader,nounits"]
+
+    def query() -> int | None:
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if result.returncode != 0:
+                return None
+            return int(result.stdout.splitlines()[0].strip())
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
             return None
-        return int(result.stdout.splitlines()[0].strip())
-    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
-        return None
+
+    return query
+
+
+def read_tail(path: Path, size: int = TAIL_BYTES) -> str:
+    """Reads at most the last `size` bytes of a file as text.
+
+    Args:
+        path: The file.
+        size: The most bytes to read.
+
+    Returns:
+        The decoded tail; undecodable bytes are replaced.
+    """
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        handle.seek(max(0, handle.tell() - size))
+        return handle.read().decode("utf-8", errors="replace")
 
 
 def _last_line(path: Path) -> str | None:
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    for line in reversed(lines):
+    for line in reversed(read_tail(path).splitlines()):
         if line.strip():
             return line.strip()
     return None
 
 
-def _done_dir(folder: Path) -> str | None:
-    """Returns the run directory saved in a folder's DONE.txt, if it exists."""
-    marker = folder / "DONE.txt"
-    if not marker.is_file():
+def _is_finished(path: str | Path) -> bool:
+    """Tells whether a path is a run directory whose run finished."""
+    try:
+        return RunDir.open(path).meta.get("finished_at") is not None
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def job_digest(spec: ChainSpec, job: Job, run_dirs: Mapping[str, str]) -> str:
+    """Hashes what a job runs, so a changed job does not resume.
+
+    Args:
+        spec: The chain.
+        job: The job.
+        run_dirs: Run directory by job name of the jobs that finished.
+
+    Returns:
+        A short hex digest of the job's first-attempt arguments.
+    """
+    arguments = build_command(spec, job, run_dirs)[3:]
+    text = json.dumps(arguments)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _write_done(folder: Path, run_dir: str, digest: str) -> None:
+    temporary = folder / "DONE.txt.tmp"
+    text = json.dumps({"run_dir": run_dir, "digest": digest})
+    temporary.write_text(text + "\n", encoding="utf-8")
+    os.replace(temporary, folder / "DONE.txt")
+
+
+def _read_done(folder: Path, digest: str) -> str | None:
+    """Returns the finished run directory a valid DONE.txt names."""
+    try:
+        data = json.loads((folder / "DONE.txt").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return None
-    text = marker.read_text(encoding="utf-8").strip()
-    return text if text and Path(text).is_dir() else None
+    if not isinstance(data, dict) or data.get("digest") != digest:
+        return None
+    run_dir = data.get("run_dir")
+    if isinstance(run_dir, str) and _is_finished(run_dir):
+        return run_dir
+    return None
 
 
 def _show(mebibytes: int | None) -> str:
     return "na" if mebibytes is None else str(mebibytes)
+
+
+@contextlib.contextmanager
+def interrupt_on_sigterm() -> Iterator[None]:
+    """Makes SIGTERM raise `KeyboardInterrupt` inside the block.
+
+    Does nothing outside the main thread.
+
+    Yields:
+        Nothing.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def handler(signum: int, frame: object) -> None:
+        raise KeyboardInterrupt
+
+    previous = signal.signal(signal.SIGTERM, handler)
+    try:
+        yield
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
+
+
+def _stop(process: Process) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=TERMINATE_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
 
 
 @dataclasses.dataclass
@@ -386,18 +522,18 @@ class _Runner:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(f"{stamp} {event}\n")
 
-    def find_done(self, job: Job) -> str | None:
+    def find_done(self, job: Job, run_dirs: Mapping[str, str]) -> str | None:
+        digest = job_digest(self.spec, job, run_dirs)
         for attempt in attempt_names(job):
-            found = _done_dir(self.spec.out / "_chain" / attempt)
+            found = _read_done(self.spec.out / "_chain" / attempt, digest)
             if found is not None:
                 return found
         return None
 
-    def attempt(
-        self, name: str, command: Sequence[str]
-    ) -> tuple[int, str | None]:
+    def attempt(self, name: str, command: Sequence[str]) -> _Attempt:
         folder = self.spec.out / "_chain" / name
         folder.mkdir(parents=True, exist_ok=True)
+        stdout_path = folder / "stdout.txt"
         log_path = folder / "run.log"
         env = {
             "PYTHONUNBUFFERED": "1",
@@ -407,45 +543,100 @@ class _Runner:
         }
         self.log(f"START {name}")
         start = self.clock()
-        last_beat = start
+        try:
+            process = self.launch(command, env, stdout_path, log_path)
+        except (OSError, ValueError) as error:
+            log_path.write_text(f"launch failed: {error}\n", encoding="utf-8")
+            self.log(f"END {name} exit=-1 seconds=0 peak_gpu=na last=-")
+            return _Attempt(-1)
         peak: int | None = None
-        process = self.launch(command, env, log_path)
-        while True:
-            used = self.gpu_query()
-            if used is not None:
-                peak = used if peak is None else max(peak, used)
-            code = process.poll()
-            if code is not None:
-                break
-            now = self.clock()
-            if now - last_beat >= self.heartbeat_seconds:
-                last_beat = now
-                self.log(
-                    f"HEARTBEAT {name} elapsed={int(now - start)} "
-                    f"gpu_used={_show(used)}"
-                )
-            self.sleep(self.poll_seconds)
-        run_dir = _last_line(log_path) if code == 0 else None
-        if run_dir is not None:
-            (folder / "DONE.txt").write_text(run_dir + "\n", encoding="utf-8")
+        last_beat = start
+        try:
+            while True:
+                used = self.gpu_query()
+                if used is not None:
+                    peak = used if peak is None else max(peak, used)
+                code = process.poll()
+                if code is not None:
+                    break
+                now = self.clock()
+                if now - last_beat >= self.heartbeat_seconds:
+                    last_beat = now
+                    self.log(
+                        f"HEARTBEAT {name} elapsed={int(now - start)} "
+                        f"gpu_used={_show(used)}"
+                    )
+                self.sleep(self.poll_seconds)
+        except KeyboardInterrupt:
+            self.log(f"INTERRUPTED {name}")
+            raise
+        finally:
+            _stop(process)
+        result = self._outcome(code, stdout_path, log_path)
         self.log(
             f"END {name} exit={code} seconds={int(self.clock() - start)} "
-            f"peak_gpu={_show(peak)} last={run_dir or '-'}"
+            f"peak_gpu={_show(peak)} last={result.run_dir or '-'}"
         )
-        return code, run_dir
+        if code == 0 and result.run_dir is None:
+            self.log(f"FAILED {name} reason=no-run-dir")
+        return result
+
+    def _outcome(
+        self, code: int, stdout_path: Path, log_path: Path
+    ) -> _Attempt:
+        if code == 0:
+            line = _last_line(stdout_path)
+            if line is not None and _is_finished(line):
+                return _Attempt(code, line)
+        elif code == 2:
+            found = EXISTING_RUN.findall(read_tail(log_path))
+            if found and _is_finished(found[-1]):
+                return _Attempt(code, found[-1], reused=True)
+        return _Attempt(code)
 
     def run_job(self, job: Job, run_dirs: dict[str, str]) -> bool:
+        digest = job_digest(self.spec, job, run_dirs)
         sizes: list[int | None] = [None, *job.retry_batch_sizes]
         for name, size in zip(attempt_names(job), sizes, strict=True):
             if size is not None:
                 self.log(f"RETRY {job.name} batch_size={size}")
             command = build_command(self.spec, job, run_dirs, size)
-            code, run_dir = self.attempt(name, command)
-            if code == 0:
-                if run_dir is not None:
-                    run_dirs[job.name] = run_dir
-                return True
+            result = self.attempt(name, command)
+            if result.run_dir is None:
+                continue
+            if result.reused:
+                self.log(f"SKIP {job.name} reason=existing")
+            folder = self.spec.out / "_chain" / name
+            _write_done(folder, result.run_dir, digest)
+            run_dirs[job.name] = result.run_dir
+            return True
         return False
+
+    def run_all(self) -> int:
+        run_dirs: dict[str, str] = {}
+        failed = 0
+        for job in self.spec.jobs:
+            done = self.find_done(job, run_dirs)
+            if done is not None:
+                run_dirs[job.name] = done
+                self.log(f"SKIP {job.name} reason=done")
+                continue
+            missing = {
+                key: dep
+                for key, dep in job.run_dir_from.items()
+                if dep not in run_dirs
+            }
+            if missing and job.on_missing == "skip":
+                first = next(iter(missing.values()))
+                self.log(f"SKIP {job.name} reason=missing:{first}")
+                failed += 1
+                continue
+            for key, dep in missing.items():
+                self.log(f"DROP {job.name} key={key} reason=missing:{dep}")
+            if not self.run_job(job, run_dirs):
+                failed += 1
+        self.log(f"CHAIN_DONE failed={failed}")
+        return 1 if failed else 0
 
 
 def run_chain(
@@ -456,13 +647,15 @@ def run_chain(
     clock: Callable[[], float] = time.time,
     sleep: Callable[[float], None] = time.sleep,
     launch: Launcher = launch_process,
-    gpu_query: Callable[[], int | None] = query_gpu_used,
+    gpu_query: Callable[[], int | None] | None = None,
 ) -> int:
     """Runs the jobs of a chain one after another.
 
-    Each attempt logs to `<out>/_chain/<attempt>/run.log` and the chain
-    appends its events to `<out>/_chain/<name>.log`. A job whose DONE.txt
-    names an existing directory is skipped, so a restart resumes the chain.
+    Each attempt writes `<out>/_chain/<attempt>/stdout.txt` and `run.log`
+    (stderr), and the chain appends its events to `<out>/_chain/<name>.log`.
+    A job whose DONE.txt names a finished run directory for the same
+    arguments is skipped, so a restart resumes the chain. SIGTERM and Ctrl-C
+    stop the running child, log the interruption and return 130.
 
     Args:
         spec: The chain.
@@ -470,41 +663,30 @@ def run_chain(
         poll_seconds: Seconds between checks of a running job and the GPU.
         clock: Returns the time in seconds since the epoch.
         sleep: Waits for the given seconds.
-        launch: Starts a command, with the log file it writes to.
-        gpu_query: Returns the GPU memory used in MiB, or None.
+        launch: Starts a command with its stdout and stderr files.
+        gpu_query: Returns the GPU memory used in MiB, or None; by default
+            a query of `nvidia-smi`, looked up once.
 
     Returns:
-        0 when no job failed, 1 otherwise.
+        0 when no job failed, 1 when one did, 130 when interrupted.
     """
     runner = _Runner(
-        spec, heartbeat_seconds, poll_seconds, clock, sleep, launch, gpu_query
+        spec,
+        heartbeat_seconds,
+        poll_seconds,
+        clock,
+        sleep,
+        launch,
+        gpu_query or make_gpu_query(),
     )
     (spec.out / "_chain").mkdir(parents=True, exist_ok=True)
     runner.log(
         f"CHAIN_START name={spec.name} jobs={len(spec.jobs)} "
         f"python={sys.version.split()[0]}"
     )
-    run_dirs: dict[str, str] = {}
-    failed = 0
-    for job in spec.jobs:
-        done = runner.find_done(job)
-        if done is not None:
-            run_dirs[job.name] = done
-            runner.log(f"SKIP {job.name} reason=done")
-            continue
-        missing = {
-            key: dep
-            for key, dep in job.run_dir_from.items()
-            if dep not in run_dirs
-        }
-        if missing and job.on_missing == "skip":
-            first = next(iter(missing.values()))
-            runner.log(f"SKIP {job.name} reason=missing:{first}")
-            failed += 1
-            continue
-        for key, dep in missing.items():
-            runner.log(f"DROP {job.name} key={key} reason=missing:{dep}")
-        if not runner.run_job(job, run_dirs):
-            failed += 1
-    runner.log(f"CHAIN_DONE failed={failed}")
-    return 1 if failed else 0
+    try:
+        with interrupt_on_sigterm():
+            return runner.run_all()
+    except KeyboardInterrupt:
+        runner.log("CHAIN_INTERRUPTED")
+        return 130
