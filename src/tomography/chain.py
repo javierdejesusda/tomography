@@ -401,19 +401,20 @@ def make_gpu_query() -> Callable[[], int | None]:
     return query
 
 
-def read_tail(path: Path, size: int = TAIL_BYTES) -> str:
+def read_tail(path: Path, size: int = TAIL_BYTES, floor: int = 0) -> str:
     """Reads at most the last `size` bytes of a file as text.
 
     Args:
         path: The file.
         size: The most bytes to read.
+        floor: Byte offset before which nothing is read.
 
     Returns:
         The decoded tail; undecodable bytes are replaced.
     """
     with path.open("rb") as handle:
         handle.seek(0, os.SEEK_END)
-        handle.seek(max(0, handle.tell() - size))
+        handle.seek(max(floor, handle.tell() - size))
         return handle.read().decode("utf-8", errors="replace")
 
 
@@ -512,15 +513,17 @@ def interrupt_on_sigterm() -> contextlib.AbstractContextManager[None]:
 def _signal_child(process: Process, sig: int, fallback: str) -> None:
     killpg = getattr(os, "killpg", None)
     if POSIX and killpg is not None:
-        killpg(process.pid, sig)
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            killpg(process.pid, sig)
     else:
         getattr(process, fallback)()
 
 
 def stop_process(process: Process) -> None:
-    """Stops a running child: SIGTERM, then SIGKILL after a grace period.
+    """Stops a running child: SIGTERM, then SIGKILL.
 
-    On POSIX the signals go to the child's whole process group. Further
+    On POSIX the signals go to the child's whole process group, and the
+    SIGKILL also reaches group members that outlive the leader. Further
     SIGTERM, SIGHUP and SIGINT are ignored while stopping.
 
     Args:
@@ -530,10 +533,14 @@ def stop_process(process: Process) -> None:
         return
     with _handlers(_signals(signal.SIGINT), signal.SIG_IGN):
         _signal_child(process, signal.SIGTERM, "terminate")
+        timed_out = False
         try:
             process.wait(timeout=TERMINATE_SECONDS)
         except subprocess.TimeoutExpired:
+            timed_out = True
+        if timed_out or POSIX:
             _signal_child(process, getattr(signal, "SIGKILL", 9), "kill")
+        if timed_out:
             process.wait()
 
 
@@ -582,6 +589,7 @@ class _Runner:
             self.log(f"START {name}")
             with log_path.open("a", encoding="utf-8") as handle:
                 handle.write(f"# {self._stamp()} {name}\n")
+            offset = log_path.stat().st_size
             process = self.launch(command, env, stdout_path, log_path)
         except (OSError, ValueError) as error:
             with (
@@ -614,7 +622,7 @@ class _Runner:
             raise
         finally:
             stop_process(process)
-        result = self._outcome(code, stdout_path, log_path)
+        result = self._outcome(code, stdout_path, log_path, offset)
         self.log(
             f"END {name} exit={code} seconds={int(self.clock() - start)} "
             f"peak_gpu={_show(peak)} last={result.run_dir or '-'}"
@@ -624,14 +632,14 @@ class _Runner:
         return result
 
     def _outcome(
-        self, code: int, stdout_path: Path, log_path: Path
+        self, code: int, stdout_path: Path, log_path: Path, offset: int
     ) -> _Attempt:
         if code == 0:
             for line in _last_lines(stdout_path):
                 if is_finished_run(line):
                     return _Attempt(code, line)
         elif code == 2:
-            found = EXISTING_RUN.findall(read_tail(log_path))
+            found = EXISTING_RUN.findall(read_tail(log_path, floor=offset))
             if found and is_finished_run(found[-1]):
                 return _Attempt(code, found[-1], reused=True)
         return _Attempt(code)

@@ -307,6 +307,15 @@ def test_dry_run_lines_show_every_command_and_placeholders() -> None:
     assert lines[2].endswith("--set lorra_run=<run dir of a>")
 
 
+@pytest.fixture(autouse=True)
+def _no_real_process_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(pid: int, sig: int) -> None:
+        pytest.fail(f"real os.killpg({pid}, {sig}) reached")
+
+    monkeypatch.setattr(chain_module, "POSIX", False)
+    monkeypatch.setattr(os, "killpg", forbidden, raising=False)
+
+
 class FakeClock:
     """A clock that only moves when the runner sleeps."""
 
@@ -1391,3 +1400,61 @@ def test_stopping_signals_the_whole_process_group_on_posix(
 
     assert sent == [(4242, signal.SIGTERM), (4242, 9)]
     assert not process.terminated
+
+
+def test_a_group_member_that_outlives_the_leader_is_killed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = FakeProcess(FakeClock(), 1000, 0)
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr(chain_module, "POSIX", True)
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(
+        os, "killpg", lambda pid, sig: sent.append((pid, sig)), raising=False
+    )
+
+    chain_module.stop_process(process)
+
+    assert sent == [(4242, signal.SIGTERM), (4242, 9)]
+
+
+@pytest.mark.parametrize("error", [ProcessLookupError, PermissionError])
+def test_a_vanished_process_group_is_not_an_error(
+    monkeypatch: pytest.MonkeyPatch, error: type[OSError]
+) -> None:
+    process = FakeProcess(FakeClock(), 1000, 0)
+    monkeypatch.setattr(chain_module, "POSIX", True)
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
+
+    def gone(pid: int, sig: int) -> None:
+        raise error
+
+    monkeypatch.setattr(os, "killpg", gone, raising=False)
+
+    chain_module.stop_process(process)
+
+
+def test_exit_two_ignores_an_already_exists_line_of_an_earlier_attempt(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    existing = _make_run(tmp_path / "old")
+    spec = _chain(tmp_path, _job("a"))
+    folder = spec.out / "_chain" / "a"
+    folder.mkdir(parents=True)
+    (folder / "run.log").write_text(_exists_message(existing), encoding="utf-8")
+    launcher = FakeLauncher(
+        clock, runs, lambda c: Outcome(code=2, stderr="usage error\n")
+    )
+
+    code = _run(spec, launcher, clock)
+
+    assert code == 1
+    assert "SKIP a reason=existing" not in _texts(spec)
+
+
+def test_read_tail_can_start_at_a_floor(tmp_path: Path) -> None:
+    path = tmp_path / "f.txt"
+    path.write_text("old-new", encoding="utf-8")
+
+    assert read_tail(path, 1000, floor=4) == "new"
