@@ -1,0 +1,68 @@
+{
+  "_meta": {
+    "experiment": "p8",
+    "config_hash": "e9f9bc04ba3c",
+    "seed": 0,
+    "git_sha": "beb5801cc8bb4296c475d4a166fb80b21d610f5b",
+    "git_dirty": false,
+    "device": "cpu",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T01:08:21+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p8",
+      "model": "qwen3-1.7b",
+      "seed": 0,
+      "base_models": [
+        "qwen3-1.7b-base",
+        "qwen3-0.6b-base"
+      ],
+      "tuned_models": [
+        "qwen3-1.7b",
+        "qwen3-0.6b"
+      ],
+      "reference": "gpt2",
+      "concept_sources": [
+        "r1",
+        "r2",
+        "r3",
+        "r7"
+      ],
+      "function_sources": [
+        "r5"
+      ],
+      "template_source": "p1",
+      "template_task": "sentiment",
+      "steering_source": "c1",
+      "extra_runs": [
+        "results/p1/gpt2/673af340b77d",
+        "results/p1/qwen3-0.6b-base/a540a2497ac4",
+        "results/p1/qwen3-0.6b/31a6ee65d6ab",
+        "results/p1/qwen3-1.7b-base/ef3f8c0d3389",
+        "results/p1/qwen3-1.7b/f4aa9b57824a"
+      ],
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "series": [
+      "gpt2"
+    ],
+    "xlabel": "Layer",
+    "ylabel": "Accuracy",
+    "chance": 0.5,
+    "n_layers": 12
+  }
+}
