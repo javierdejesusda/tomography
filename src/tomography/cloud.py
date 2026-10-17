@@ -560,13 +560,13 @@ def _stop_pod(
     _save_state(args.state, state)
 
 
-def _bring_up(
+def _reach_pod(
     args: argparse.Namespace,
     deps: Deps,
     api: Api,
     state: dict[str, Any],
     pod: Mapping[str, Any],
-) -> int:
+) -> tuple[str, int] | None:
     pod_id = state["pod_id"]
     deadline = deps.clock() + args.timeout_minutes * 60
     while (endpoint := _pod_endpoint(pod)) is None:
@@ -575,17 +575,50 @@ def _bring_up(
                 f"pod {pod_id} did not expose ssh within "
                 f"{args.timeout_minutes:g} minutes; run `down` to remove it"
             )
-            return 1
+            return None
         deps.sleep(_POLL_SECONDS)
         status, got = api.request("GET", f"/pods/{pod_id}")
         pod = api.check(status, got, "get pod")
     state.update(ip=endpoint[0], ssh_port=endpoint[1], status="running")
     _save_state(args.state, state)
+    known_hosts = _known_hosts(args.state, pod_id)
+    known_hosts.unlink(missing_ok=True)
+    known_hosts.touch()
     if not _wait_for_ssh(args, deps, state):
         deps.out(
             f"ssh to pod {pod_id} did not answer within "
             f"{args.ssh_timeout_minutes:g} minutes; run `down` to remove it"
         )
+        return None
+    return endpoint
+
+
+def _arm_deadline(
+    args: argparse.Namespace,
+    deps: Deps,
+    state: Mapping[str, Any],
+    missing: Sequence[str],
+) -> None:
+    if missing:
+        _warn_no_self_removal(deps, missing)
+        return
+    script = _deadline_script(int(args.max_hours * 3600))
+    _upload_script(args, deps, state, "deadline.sh", script)
+    launch = _launch_command(["deadline.sh"])
+    if _remote(args, deps, state, launch).returncode:
+        raise CloudError("launching the deadline watchdog failed")
+
+
+def _bring_up(
+    args: argparse.Namespace,
+    deps: Deps,
+    api: Api,
+    state: dict[str, Any],
+    pod: Mapping[str, Any],
+) -> int:
+    pod_id = state["pod_id"]
+    endpoint = _reach_pod(args, deps, api, state, pod)
+    if endpoint is None:
         return 1
     missing = _preflight(args, deps, state)
     if missing and not args.no_self_removal:
@@ -599,14 +632,7 @@ def _bring_up(
             f"deleted pod {pod_id}. Use --no-self-removal to keep such a pod"
         )
         return 1
-    if missing:
-        _warn_no_self_removal(deps, missing)
-    else:
-        script = _deadline_script(int(args.max_hours * 3600))
-        _upload_script(args, deps, state, "deadline.sh", script)
-        launch = _launch_command(["deadline.sh"])
-        if _remote(args, deps, state, launch).returncode:
-            raise CloudError("launching the deadline watchdog failed")
+    _arm_deadline(args, deps, state, missing)
     deps.out(f"pod {pod_id} ready at {endpoint[0]}:{endpoint[1]}")
     return 0
 
@@ -655,7 +681,7 @@ def cmd_up(args: argparse.Namespace, deps: Deps) -> int:
         ) from error
     pod = api.check(status, created, "create pod")
     pod_id = str(pod["id"])
-    identity = args.identity or args.public_key.expanduser().with_suffix("")
+    identity = args.public_key.expanduser().with_suffix("")
     state: dict[str, Any] = {
         "pod_id": pod_id,
         "name": args.name,
@@ -668,7 +694,6 @@ def cmd_up(args: argparse.Namespace, deps: Deps) -> int:
         "status": "starting",
     }
     _save_state(args.state, state)
-    _known_hosts(args.state, pod_id).touch()
     deps.out(f"created pod {pod_id}; waiting for ssh")
     try:
         return _bring_up(args, deps, api, state, pod)
@@ -1146,33 +1171,9 @@ def cmd_resume(args: argparse.Namespace, deps: Deps) -> int:
     state["deadline"] = deps.wall() + args.max_hours * 3600
     state["status"] = "starting"
     _save_state(args.state, state)
-    deadline = deps.clock() + args.timeout_minutes * 60
     try:
-        while True:
-            status, got = api.request("GET", f"/pods/{pod_id}")
-            pod = api.check(status, got, "get pod")
-            endpoint = _pod_endpoint(pod)
-            if endpoint is not None:
-                break
-            if deps.clock() >= deadline:
-                deps.out(
-                    f"pod {pod_id} did not expose ssh within "
-                    f"{args.timeout_minutes:g} minutes; run `down` to "
-                    "remove it, or try `resume` again"
-                )
-                return 1
-            deps.sleep(_POLL_SECONDS)
-        state.update(ip=endpoint[0], ssh_port=endpoint[1], status="running")
-        _save_state(args.state, state)
-        known_hosts = _known_hosts(args.state, pod_id)
-        known_hosts.unlink(missing_ok=True)
-        known_hosts.touch()
-        if not _wait_for_ssh(args, deps, state):
-            deps.out(
-                f"ssh to pod {pod_id} did not answer within "
-                f"{args.ssh_timeout_minutes:g} minutes; run `down` to "
-                "remove it, or try `resume` again"
-            )
+        endpoint = _reach_pod(args, deps, api, state, {})
+        if endpoint is None:
             return 1
         gpu = _remote(
             args,
@@ -1195,14 +1196,7 @@ def cmd_resume(args: argparse.Namespace, deps: Deps) -> int:
                 f"stopped pod {pod_id}. Use --no-self-removal to run anyway"
             )
             return 1
-        if missing:
-            _warn_no_self_removal(deps, missing)
-        else:
-            script = _deadline_script(int(args.max_hours * 3600))
-            _upload_script(args, deps, state, "deadline.sh", script)
-            launch = _launch_command(["deadline.sh"])
-            if _remote(args, deps, state, launch).returncode:
-                raise CloudError("launching the deadline watchdog failed")
+        _arm_deadline(args, deps, state, missing)
     except CloudError as error:
         raise CloudError(
             f"{error}; pod {pod_id} may be running, run `down` to remove it"
@@ -1292,7 +1286,6 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--volume-gb", type=int, default=50)
     up.add_argument("--disk-gb", type=int, default=30)
     up.add_argument("--public-key", type=Path, default=DEFAULT_PUBLIC_KEY)
-    up.add_argument("--identity", type=Path)
     up.add_argument("--name", default="tomography")
     up.add_argument("--max-hours", type=_max_hours, required=True)
     up.add_argument("--timeout-minutes", type=float, default=15)
