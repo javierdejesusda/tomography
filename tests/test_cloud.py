@@ -343,12 +343,13 @@ def test_up_polls_until_ip_and_port_are_exposed(tmp_path: Path) -> None:
     assert state["created"]
 
 
-def test_up_timeout_keeps_the_pod_id_for_down(tmp_path: Path) -> None:
+def test_up_timeout_deletes_the_pod(tmp_path: Path) -> None:
     h = up_harness(tmp_path, [(201, starting_pod()), (200, starting_pod())])
     assert up(h, "--timeout-minutes", "2") == 1
+    assert h.transport.calls[-1][:2] == ("DELETE", f"{BASE}/pods/pod1")
+    assert h.state()["status"] == "deleted"
     assert h.state()["pod_id"] == "pod1"
-    assert h.state()["status"] == "starting"
-    assert "down" in h.output()
+    assert "deleted" in h.output()
     assert sum(h.clock.sleeps) >= 120
 
 
@@ -419,8 +420,10 @@ def test_poll_failure_keeps_the_pod_id_in_the_message(tmp_path: Path) -> None:
     h.transport.error_on_call[1] = TimeoutError("read timed out")
     assert up(h) == 1
     assert "pod1" in h.output()
-    assert "down" in h.output()
+    assert h.transport.calls[-1][:2] == ("DELETE", f"{BASE}/pods/pod1")
+    assert h.state()["status"] == "deleted"
     assert h.state()["pod_id"] == "pod1"
+    assert "deleted" in h.output()
 
 
 def test_create_timeout_is_a_clean_error(tmp_path: Path) -> None:
@@ -446,8 +449,10 @@ def test_up_reports_when_ssh_never_answers(tmp_path: Path) -> None:
     h.ssh_failures = 10_000
     assert up(h, "--ssh-timeout-minutes", "1") == 1
     assert "ssh" in h.output()
-    assert "down" in h.output()
+    assert h.transport.calls[-1][:2] == ("DELETE", f"{BASE}/pods/pod1")
+    assert h.state()["status"] == "deleted"
     assert h.state()["pod_id"] == "pod1"
+    assert "deleted" in h.output()
 
 
 def test_up_creates_a_known_hosts_file_per_pod(tmp_path: Path) -> None:
@@ -1478,7 +1483,8 @@ def test_a_dropped_connection_fails_the_preflight_on_up(
     assert up(h) == 1
     assert "preflight" in h.output()
     assert "pod1" in h.output()
-    assert "DELETE" not in [c[0] for c in h.transport.calls]
+    assert h.transport.calls[-1][:2] == ("DELETE", f"{BASE}/pods/pod1")
+    assert h.state()["status"] == "deleted"
 
 
 def test_a_dropped_connection_fails_the_preflight_on_start(
@@ -1513,20 +1519,11 @@ def test_up_keeps_the_pod_id_when_the_port_mapping_is_malformed(
     h = up_harness(tmp_path, [(201, pod)])
     assert up(h) == 1
     assert "pod1" in h.output()
-    assert "down" in h.output()
     assert "ValueError" in h.output()
-
-
-def test_up_names_the_pod_when_interrupted(tmp_path: Path) -> None:
-    h = up_harness(tmp_path)
-
-    def interrupt(argv: Sequence[str]) -> cloud.CommandResult:
-        raise KeyboardInterrupt
-
-    h.runner.handler = interrupt
-    assert up(h) == 1
-    assert "pod1" in h.output()
-    assert "down" in h.output()
+    assert h.transport.calls[-1][:2] == ("DELETE", f"{BASE}/pods/pod1")
+    assert h.state()["status"] == "deleted"
+    assert h.state()["pod_id"] == "pod1"
+    assert "deleted" in h.output()
 
 
 def test_up_reports_a_create_response_without_an_id(tmp_path: Path) -> None:
@@ -1542,7 +1539,10 @@ def test_up_survives_a_known_hosts_write_error(tmp_path: Path) -> None:
     h.known_hosts().mkdir()
     assert up(h) == 1
     assert "pod1" in h.output()
-    assert "down" in h.output()
+    assert h.transport.calls[-1][:2] == ("DELETE", f"{BASE}/pods/pod1")
+    assert h.state()["status"] == "deleted"
+    assert h.state()["pod_id"] == "pod1"
+    assert "deleted" in h.output()
 
 
 def test_resume_names_the_pod_when_the_probe_blows_up(tmp_path: Path) -> None:
@@ -1586,7 +1586,7 @@ def test_the_live_chain_guard_checks_the_process_command_line(
     assert "chain.sh" in command
 
 
-def test_up_stops_the_pod_when_interrupted(tmp_path: Path) -> None:
+def test_up_deletes_the_pod_when_interrupted(tmp_path: Path) -> None:
     h = up_harness(tmp_path)
 
     def interrupt(argv: Sequence[str]) -> cloud.CommandResult:
@@ -1594,12 +1594,12 @@ def test_up_stops_the_pod_when_interrupted(tmp_path: Path) -> None:
 
     h.runner.handler = interrupt
     assert up(h) == 1
-    assert h.transport.calls[-1][:2] == ("POST", f"{BASE}/pods/pod1/stop")
-    assert "was stopped" in h.output()
-    assert h.state()["status"] == "stopped"
+    assert h.transport.calls[-1][:2] == ("DELETE", f"{BASE}/pods/pod1")
+    assert "was deleted" in h.output()
+    assert h.state()["status"] == "deleted"
 
 
-def test_up_reports_a_failed_stop_without_hiding_the_cause(
+def test_up_reports_a_failed_delete_without_hiding_the_cause(
     tmp_path: Path,
 ) -> None:
     h = up_harness(
@@ -1613,7 +1613,7 @@ def test_up_reports_a_failed_stop_without_hiding_the_cause(
     h.runner.handler = explode
     assert up(h) == 1
     assert "probe broke" in h.output()
-    assert "stopping it failed" in h.output()
+    assert "deleting it failed" in h.output()
     assert "500" in h.output()
     assert "down" in h.output()
 

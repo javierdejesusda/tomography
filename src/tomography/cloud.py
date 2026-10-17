@@ -31,6 +31,7 @@ import argparse
 from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
+import contextlib
 import dataclasses
 import datetime
 import json
@@ -626,24 +627,42 @@ def _arm_deadline(
         raise CloudError("launching the deadline watchdog failed")
 
 
+def _delete_pod(
+    args: argparse.Namespace, deps: Deps, api: Api, state: dict[str, Any]
+) -> None:
+    pod_id = state["pod_id"]
+    status, body = api.request("DELETE", f"/pods/{pod_id}")
+    if status != 404:
+        api.check(status, body, "delete pod")
+    state["status"] = "deleted"
+    _save_state(args.state, state)
+    with contextlib.suppress(OSError):
+        _known_hosts(args.state, pod_id).unlink(missing_ok=True)
+
+
 def _fail_pod(
     error: BaseException,
     args: argparse.Namespace,
     deps: Deps,
     api: Api,
     state: dict[str, Any],
-    next_step: str,
+    delete: bool,
+    hint: str = "",
 ) -> CloudError:
     pod_id = state["pod_id"]
     detail = _error_detail(error, deps)
+    done, doing = ("deleted", "deleting") if delete else ("stopped", "stopping")
     try:
-        _stop_pod(args, deps, api, state)
-    except Exception as stop_error:
+        (_delete_pod if delete else _stop_pod)(args, deps, api, state)
+    except Exception as release_error:
         return CloudError(
-            f"{detail}; pod {pod_id} may still be running and stopping it "
-            f"failed ({_error_detail(stop_error, deps)}), {next_step}"
+            f"{detail}; pod {pod_id} may still be running and {doing} it "
+            f"failed ({_error_detail(release_error, deps)}), "
+            f"{'run `down`' if delete else hint}"
         )
-    return CloudError(f"{detail}; pod {pod_id} was stopped, {next_step}")
+    return CloudError(
+        f"{detail}; pod {pod_id} was {done}" + (f", {hint}" if hint else "")
+    )
 
 
 def _bring_up(
@@ -654,18 +673,14 @@ def _bring_up(
     pod: Mapping[str, Any],
 ) -> int:
     pod_id = state["pod_id"]
-    endpoint = _reach_pod(
-        args, deps, api, state, pod, "run `down` to remove it"
-    )
+    endpoint = _reach_pod(args, deps, api, state, pod, "deleting it")
     if endpoint is None:
+        _delete_pod(args, deps, api, state)
+        deps.out(f"deleted pod {pod_id}")
         return 1
     missing = _preflight(args, deps, state)
     if missing and not args.no_self_removal:
-        status, got = api.request("DELETE", f"/pods/{pod_id}")
-        api.check(status, got, "delete pod")
-        state["status"] = "deleted"
-        _save_state(args.state, state)
-        _known_hosts(args.state, pod_id).unlink(missing_ok=True)
+        _delete_pod(args, deps, api, state)
         deps.out(
             f"the pod cannot stop itself (missing: {', '.join(missing)}); "
             f"deleted pod {pod_id}. Use --no-self-removal to keep such a pod"
@@ -742,9 +757,7 @@ def cmd_up(args: argparse.Namespace, deps: Deps) -> int:
     try:
         return _bring_up(args, deps, api, state, pod)
     except (Exception, KeyboardInterrupt) as error:
-        raise _fail_pod(
-            error, args, deps, api, state, "run `down` to remove it"
-        ) from error
+        raise _fail_pod(error, args, deps, api, state, delete=True) from error
 
 
 def cmd_ssh(args: argparse.Namespace, deps: Deps) -> int:
@@ -1278,7 +1291,8 @@ def cmd_resume(args: argparse.Namespace, deps: Deps) -> int:
             deps,
             api,
             state,
-            "run `resume` to retry, then `pull` before `down`",
+            delete=False,
+            hint="run `resume` to retry, then `pull` before `down`",
         ) from error
     deps.out(
         f"pod {pod_id} resumed at {endpoint[0]}:{endpoint[1]}; the container "
