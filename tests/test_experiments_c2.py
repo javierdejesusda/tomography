@@ -32,6 +32,7 @@ from tomography.experiments.c2_emotion_steering import emotion_stimuli
 from tomography.experiments.c2_emotion_steering import execute
 from tomography.experiments.c2_emotion_steering import plot
 from tomography.experiments.c2_emotion_steering import run
+from tomography.experiments.c5_gallery import emotion_rows
 from tomography.experiments.effects import read_trials
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.sweep import chat_format_for
@@ -239,15 +240,23 @@ def finished(
     return _FINISHED[key]
 
 
-def test_execute_writes_fourteen_files(finished: Finished) -> None:
+def test_execute_writes_seventeen_files(finished: Finished) -> None:
     names = sorted(p.name for p in finished.run_dir.path.iterdir())
-    stems = ("curves", "curves_check", "matrix", "matrix_check", "trials")
+    stems = (
+        "curves",
+        "curves_check",
+        "matrix",
+        "matrix_check",
+        "trials",
+        "trials_random",
+    )
     assert names == sorted(
         [
             "config.json",
             "meta.json",
             "summary.json",
             "table.json",
+            "table_random.json",
             *(f"{stem}.{ext}" for stem in stems for ext in ("npz", "json")),
         ]
     )
@@ -270,6 +279,113 @@ def test_the_trials_are_named_after_what_made_them(finished: Finished) -> None:
         2,
         12,
     )
+
+
+def test_the_random_trials_are_named_apart_from_the_emotions(
+    finished: Finished,
+) -> None:
+    random = read_trials(finished.run_dir, "trials_random")
+    assert [t.name for t in random] == [
+        f"random/{r}/{c:g}" for r in range(2) for c in NONZERO
+    ]
+    assert finished.run_dir.read_arrays("trials_random")["scores"].shape == (
+        4,
+        6,
+        2,
+        12,
+    )
+    (prompts,) = {t.prompts for t in read_trials(finished.run_dir, "trials")}
+    assert {t.prompts for t in random} == {prompts}
+
+
+def test_the_gallery_ignores_the_random_trials(finished: Finished) -> None:
+    trials = read_trials(finished.run_dir, "trials")
+    random = read_trials(finished.run_dir, "trials_random")
+    assert emotion_rows([*trials, *random], 0.2, 2) == emotion_rows(
+        trials, 0.2, 2
+    )
+
+
+def test_the_random_arms_are_unit_directions_drawn_from_the_seed(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    arms: list[dict[str, Any]] = []
+    real = c2_emotion_steering.reader_arm
+
+    def spy(
+        loaded: LoadedModel, settings: Any, reader: Any, **kwargs: Any
+    ) -> Any:
+        arms.append({"reader": reader, **kwargs})
+        return real(loaded, settings, reader, **kwargs)
+
+    monkeypatch.setattr(c2_emotion_steering, "reader_arm", spy)
+    config = _config(seed=7)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _scenarios(), _texts(), _score)
+
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    window = summary["window"]
+    random = [a for a in arms if a["reader"].method == "random"]
+    steering = [a for a in arms if a["reader"].method != "random"]
+    readers = list(dict.fromkeys(id(a["reader"]) for a in random))
+    assert len(readers) == config.n_random
+    assert [a["coeff"] for a in random] == list(NONZERO) * config.n_random
+    rng = np.random.default_rng(7)
+    for ident in readers:
+        reader = next(a["reader"] for a in random if id(a["reader"]) == ident)
+        draw = rng.standard_normal((len(window), tiny_arch.d_model))
+        expected = draw / np.linalg.norm(draw, axis=1, keepdims=True)
+        assert list(reader.layers) == window
+        np.testing.assert_allclose(reader.directions, expected, atol=1e-6)
+        np.testing.assert_allclose(
+            np.linalg.norm(reader.directions, axis=1), 1.0, atol=1e-6
+        )
+        np.testing.assert_array_equal(reader.signs, np.ones(len(window)))
+    for key in ("layers", "norms", "op", "mode", "mask", "preserve_norm"):
+        assert {repr(a[key]) for a in random} == {
+            repr(a[key]) for a in steering
+        }
+
+
+def test_the_random_table_has_one_row_per_arm_and_measured_emotion(
+    finished: Finished,
+) -> None:
+    table = finished.run_dir.read_json("table_random")
+    assert isinstance(table, dict)
+    assert table["columns"] == [
+        "steered",
+        "random",
+        "measured",
+        "change",
+        "change_check",
+    ]
+    assert [row[:3] for row in table["rows"]] == [
+        ["random", r, measured] for r in range(2) for measured in EMOTIONS
+    ]
+    trials = {t.name: t for t in read_trials(finished.run_dir, "trials_random")}
+    base = read_trials(finished.run_dir, "trials")[0].mean_score()
+    for r in range(2):
+        moved = trials[f"random/{r}/0.2"].mean_score() - base
+        got = table["rows"][r * 6 : (r + 1) * 6]
+        np.testing.assert_allclose([x[3] for x in got], moved[:6], atol=1e-6)
+        np.testing.assert_allclose([x[4] for x in got], moved[6:], atol=1e-6)
+
+
+def test_the_largest_random_change_covers_every_coefficient(
+    finished: Finished,
+) -> None:
+    base = read_trials(finished.run_dir, "trials")[0].mean_score()
+    expected = max(
+        float(np.nanmax(np.abs(t.mean_score() - base)))
+        for t in read_trials(finished.run_dir, "trials_random")
+    )
+    summary = finished.run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["max_abs_random_change"] == pytest.approx(expected)
+    assert summary["max_abs_random_change"] > 0.0
 
 
 def test_the_prompts_are_neutral_fragments_drawn_once(
@@ -382,6 +498,7 @@ def test_the_summary_reports_the_layer_the_window_and_the_diagonal(
         "matrix_check_hit_rate",
         "matrix_check_specificity",
         "judge_correlation",
+        "max_abs_random_change",
     }
     n_layers = finished.loaded.n_layers
     assert summary["reading_layer"] in range(1, n_layers + 1)
@@ -557,7 +674,8 @@ def test_each_emotion_steers_with_its_own_first_readers(
         for i in range(config.n_steer_seeds)
         for coeff in NONZERO
     ]
-    assert [(id(a["reader"]), a["coeff"]) for a in arms] == expected
+    steering = [a for a in arms if a["reader"].method != "random"]
+    assert [(id(a["reader"]), a["coeff"]) for a in steering] == expected
     assert (
         len({ident for ident, _ in expected})
         == len(STEERED) * config.n_steer_seeds

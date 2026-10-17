@@ -310,9 +310,18 @@ def execute(
     The unsteered trial is generated once. The matrix is the change of every
     measured emotion at `strength` against it, averaged over readers.
 
+    The random arms are `n_random` unit directions drawn from the seed and
+    norm-matched to the steering arm: same window, relative coefficients,
+    operator, mode and mask. They are run apart from the emotions and
+    never enter the matrix.
+
     Writes `curves` and `curves_check` (own-emotion probability against the
-    coefficient), `matrix` and `matrix_check`, `trials`, `table.json` and
-    `summary.json`.
+    coefficient), `matrix` and `matrix_check`, `trials`, `trials_random`
+    (trials named `random/<index>/<coefficient>`), `table.json`,
+    `table_random.json` (the change of every measured emotion at `strength`
+    under each random arm) and `summary.json`, whose
+    `max_abs_random_change` is the largest absolute change of any measured
+    emotion under any random arm and coefficient.
 
     Args:
         config: The experiment settings.
@@ -392,6 +401,20 @@ def execute(
 
         return make
 
+    rng = np.random.default_rng(config.seed)
+    shape_random = (
+        len(window),
+        next(iter(results.values())).readers[0].directions.shape[1],
+    )
+    randoms = [
+        RepReader.from_arrays(
+            "random",
+            window,
+            rng.standard_normal(shape_random),
+            np.zeros(shape_random),
+        )
+        for _ in range(config.n_random)
+    ]
     columns = 2 * _N
     none = run_trial(
         plain_arm(loaded, settings), prompts, score, columns=columns
@@ -423,6 +446,27 @@ def execute(
             for j in range(len(_JUDGES)):
                 own[j, e, i] = dose.curve(j * _N + own_column)
                 change[j, e, i] = moved[j * _N : (j + 1) * _N]
+
+    random_trials: list[Trial] = []
+    random_change = np.full(
+        (config.n_random, len(config.coeffs), len(_JUDGES) * _N), np.nan
+    )
+    for r, reader in enumerate(randoms):
+        dose = dose_with_none(
+            steering_arms(reader),
+            config.coeffs,
+            prompts,
+            score,
+            none,
+            columns=columns,
+        )
+        random_trials.extend(
+            dataclasses.replace(trial, name=f"random/{r}/{coeff:g}")
+            for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
+            if coeff != 0.0
+        )
+        for c, trial in enumerate(dose.trials):
+            random_change[r, c] = trial.mean_score() - baseline
 
     xlabel = (
         "Coefficient (relative)" if config.mode == "relative" else "Coefficient"
@@ -476,7 +520,35 @@ def execute(
         if first.std() > 0 and second.std() > 0
         else float("nan")
     )
+    finite = np.abs(random_change[np.isfinite(random_change)])
+    summary["max_abs_random_change"] = (
+        float(finite.max()) if finite.size else float("nan")
+    )
     write_trials(run_dir, "trials", trials)
+    write_trials(run_dir, "trials_random", random_trials)
+    run_dir.write_json(
+        "table_random",
+        {
+            "columns": [
+                "steered",
+                "random",
+                "measured",
+                "change",
+                "change_check",
+            ],
+            "rows": [
+                [
+                    "random",
+                    r,
+                    measured,
+                    float(random_change[r, at_strength, m]),
+                    float(random_change[r, at_strength, _N + m]),
+                ]
+                for r in range(config.n_random)
+                for m, measured in enumerate(EMOTIONS)
+            ],
+        },
+    )
     run_dir.write_json(
         "table",
         {
