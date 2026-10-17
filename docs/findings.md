@@ -142,7 +142,7 @@ disgust on `gpt2-medium`.
   0.967, 0.953, 0.894). With 36 to 53 test pairs and one run per size, these differences are small against the
   evaluation sampling that the intervals do not cover.
 - **The selected layer is often early or flat.** At layer 1 the readers already reach 0.70 to 0.99 (for example
-  happiness 0.700 on `gpt2-medium`, disgust 0.959 to 0.995 on all four sizes). `gpt2-xl` surprise is selected at L1
+  happiness 0.700 on `gpt2-medium`, disgust 0.956 to 0.995 on all four sizes). `gpt2-xl` surprise is selected at L1
   (0.894) and `gpt2-xl` disgust at L3, where the curve is flat. A high accuracy at these layers is consistent with
   emotion words in the statements that a shallow reader can use; this is not tested here.
 - **Baselines at the selected layer.** The random-direction series is at 0.558 to 0.703 on `gpt2`, 0.534 to 0.613 on
@@ -1464,17 +1464,20 @@ Contrasts without PopQA questions on a side, pooled, as reader / `text_word` / `
 against a test known side of 55 questions, and the stored interval covers the pair draws of the reader and not the test
 sampling, so it does not show that the reader recovers more than popularity there. The margin does not rise with size
 along the ladder (0.050, 0.028 and 0.064 for medium, large and xl).
-- **Pooled, the reader carries nothing that the wording does not.** On `gpt2-medium` the pooled reader (0.858) is below
+- **Pooled on `obscure_real`, the reader carries nothing that the wording does not.** On `gpt2-medium` the pooled reader (0.858) is below
   both text baselines (0.945 and 0.929) and above popularity (0.813) and a random direction (0.758); on `gpt2-large` it
   (0.928) is level with them (0.924 and 0.930) and above popularity (0.886) and a random direction (0.702). On
-  `fictional_generated` the reader is below `text_char` pooled on both (0.903 against 0.981, 0.970 against 0.989) and
-  within relation level with it on `gpt2-medium` (0.924 against 0.924) and 0.009 above it on `gpt2-large` (0.985 against
-  0.976).
+  `fictional_generated` the reader is below both text baselines pooled on both (0.903 against `text_word` 0.972 and
+  `text_char` 0.981, 0.970 against 0.974 and 0.989) and within relation level with `text_char` on `gpt2-medium` (0.924
+  against 0.924) and 0.009 above it on `gpt2-large` (0.985 against 0.976), above `text_word` within relation on both
+  (0.836 and 0.816).
 - **Between kinds of unknown questions the reader is below the character classifier.** `real_vs_synthal`,
   `real_vs_generated` and `pre_vs_post_cutoff` are read on all three sizes. Pooled, in the order `gpt2`, `gpt2-medium`,
-`gpt2-large`, the reader reads 0.939, 0.937 and 0.959 on `real_vs_synthal` (`text_char` 1.000 on all three), 0.959,
-0.937 and 0.952 on `real_vs_generated` (`text_char` 0.998) and 0.995, 0.953 and 0.974 on `pre_vs_post_cutoff`
-(`text_char` 1.000). The reader is below `text_char` on all three contrasts and on all three sizes, so the only
+`gpt2-large`, the reader reads 0.939, 0.937 and 0.959 on `real_vs_synthal` (`text_word` 0.799, 0.799 and 0.795,
+`text_char` 1.000 on all three), 0.959, 0.937 and 0.952 on `real_vs_generated` (`text_word` 0.947, 0.949 and 0.950,
+`text_char` 0.998) and 0.995, 0.953 and 0.974 on `pre_vs_post_cutoff` (`text_word` and `text_char` 1.000). Popularity
+is not defined for these contrasts. The reader is above `text_word` on `real_vs_synthal` but below `text_char` on all
+three contrasts and on all three sizes, so the only
 contrasts that `gpt2` reads do not show more than the wording of the question carries. These contrasts do not contain
 known questions.
 - **`gpt2-large`, the 15 contrasts.** The reader is above both text baselines, pooled, on five: `triviaqa_known` (0.869
@@ -1906,9 +1909,10 @@ log-probability of the gold answer (the other types have no gold answer on the u
 - **Not distinguishable and not selective on the gold-answer log-probability.** The direction moves the log-probability
   of the gold answer of the unknown `obscure_real` questions by -0.635 [-1.620, 0.375], -0.683 [-1.153, -0.210] and
   -1.117 [-1.985, -0.279], and the gaps against the known items are -0.267 [-2.022, 1.151], 0.638 [-0.247, 0.970] and
-  0.742 [-0.629, 1.609]: all three include zero. The absolute gaps against the three random arms also include zero (for
-  example 0.396 [-0.523, 1.350] against `random0` on `gpt2-medium`; on `gpt2-xl` the lower bounds against the three arms
-  are -0.006, 0.008 and -0.272). The entropy results do not carry over to the probability of the correct answer.
+  0.742 [-0.629, 1.609]: all three include zero. The absolute gaps against the three random arms include zero on
+  `gpt2-medium` and `gpt2-large` (for example 0.396 [-0.523, 1.350] against `random0` on `gpt2-medium`); on `gpt2-xl`
+  the lower bounds against the three arms are -0.006, 0.008 and -0.272, so only the gap against `random1` excludes
+  zero, and only just. The entropy results do not carry over to the probability of the correct answer.
 - **What this does and does not show.** The direction changes the entropy of the next-token distribution of a base model
   more than a random direction does and more on unknown questions than on known ones. It is not shown to be a control of
   what the model knows: the gold-answer probability does not move distinguishably, random directions also move the
@@ -1918,7 +1922,8 @@ log-probability of the gold answer (the other types have no gold answer on the u
 
 ## Run identity
 
-All reading runs (R1 to R7) and the A1 and A2 runs were made at commit `a39ae61` with a clean tree, on one laptop GPU
+All reading runs (R1 to R7) except the R4 and R6 runs of `gpt2-medium`, `gpt2-large` and `gpt2-xl` (made at `ca2546c`,
+below) and the A1 and A2 runs were made at commit `a39ae61` with a clean tree, on one laptop GPU
 with 8 GB of memory, with the default config of each experiment (batch size 8). The A1 and A2 runs read the `gpt2`
 runs of R1, R2, R3, R5 and R7 below. The C1 runs of `gpt2` and `gpt2-xl` were made at `d59a2f7` and those of
 `gpt2-medium` and `gpt2-large` at `a39ae61`; the C1 and reading source code is unchanged between them (`git diff
@@ -1941,7 +1946,7 @@ generated text. The P5 runs on `gpt2` did not finish (the fit of one condition p
 both attempts stopped), so they are not exported and not reported.
 
 The P9 runs were made on the same laptop GPU with a clean tree: P9a at `ff1177a` (batch size 8, 4 for `gpt2-xl`), P9b
-and P9c at `95a8243` (batch size 8, 4 for `gpt2-xl`) and P9d at `a39ae61` (batch size 8). The P9 runs of `gpt2`,
+and P9c at `95a8243` (batch size 8, 4 for `gpt2-xl`) and P9d at `a39ae61` (batch size 8, 4 for `gpt2-xl`). The P9 runs of `gpt2`,
 `gpt2-medium` and `gpt2-large` (P9a to P9c, and P9d for the two larger ones) were made at `ca2546c` on the same laptop
 GPU. Each P9b, P9c and P9d run reads the P9a run of the same model, which is the one in the P9a rows below. The
 selectivity columns of the P9d tables of the Qwen3 checkpoints were recomputed offline from the `item_slopes` of the
