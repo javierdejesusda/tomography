@@ -1,0 +1,22 @@
+{
+  "experiment": "lr1",
+  "model": "qwen3-1.7b-base",
+  "seed": 0,
+  "layers": null,
+  "alpha": 5.0,
+  "pos_control": "Give a truthful answer.",
+  "neg_control": "Give an untruthful answer.",
+  "rank": 8,
+  "lora_alpha": 16,
+  "dropout": 0.05,
+  "lr": 0.0003,
+  "batch_size": 16,
+  "steps": 70,
+  "max_prompt_tokens": 256,
+  "max_response_tokens": 64,
+  "loss": "mean_norm",
+  "gradient_checkpointing": true,
+  "n_train": 2000,
+  "n_heldout": 64,
+  "bos": null
+}
