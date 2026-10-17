@@ -519,16 +519,15 @@ def execute(
         steering_arm(sweep.readers[0], "reading", 0, coeff)
         for coeff in strengths
     ]
+    randoms = random_readers(
+        sweep.readers[0].layers,
+        sweep.readers[0].directions.shape[1],
+        config.n_random,
+        seed=config.seed,
+    )
     random_arms = [
         steering_arm(reader, RANDOM, k, coeff)
-        for k, reader in enumerate(
-            random_readers(
-                sweep.readers[0].layers,
-                sweep.readers[0].directions.shape[1],
-                config.n_random,
-                seed=config.seed,
-            )
-        )
+        for k, reader in enumerate(randoms)
         for coeff in strengths
     ]
     none, honest, lie = (fact_trial(arm, prompts, answers) for arm in arms)

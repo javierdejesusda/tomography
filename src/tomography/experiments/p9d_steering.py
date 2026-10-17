@@ -557,19 +557,13 @@ def _steering(
         batch_size=config.batch_size,
     )
     names = arm_names(config.n_random)
-    readers = {names[0]: reader}
-    readers.update(
-        zip(
-            names[1:],
-            random_readers(
-                reader.layers,
-                reader.directions.shape[1],
-                config.n_random,
-                seed=config.seed,
-            ),
-            strict=True,
-        )
+    randoms = random_readers(
+        reader.layers,
+        reader.directions.shape[1],
+        config.n_random,
+        seed=config.seed,
     )
+    readers = dict(zip(names, [reader, *randoms], strict=True))
     return _Steering(
         layers=tuple(layers),
         layer_source="validation" if config.layers is None else "config",
