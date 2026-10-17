@@ -677,14 +677,14 @@ uv run tomography chain run SPEC [--dry-run]
   if two roots hold the same run or a copied file still names a local path (drive, UNC, home or system folder, a
   `Users` segment) or the user or host name.
   Unfinished runs are skipped and listed.
-- `chain run` runs the jobs of a TOML spec one after another, each as `tomography run`, and works the same on
+- `chain run` runs the jobs of a TOML spec, one at a time by default (see `slots` below), each as `tomography run`, and works the same on
   Windows and Linux. A job that fails is retried at each of its `retry_batch_sizes`, and a job
   can pass the run directory of an earlier job as a config value with `run_dir_from`. Events go to
   `<out>/_chain/<name>.log`; each attempt writes its stdout (the run directory) to `<out>/_chain/<job>/stdout.txt` and
   its stderr is appended to `run.log` next to it, one header line per attempt. A job counts as done only when it prints a finished run directory. Its
   `DONE.txt` then records that directory and a hash of the job, so rerunning the command resumes the chain and a
   changed job runs again. A run directory that already exists and is finished is reused, not rerun. Ctrl-C and
-  SIGTERM and SIGHUP stop the running job and exit with 130. The exit code is 0 when no job failed, 1 otherwise.
+  SIGTERM and SIGHUP stop every running job and exit with 130. The exit code is 0 when no job failed, 1 otherwise.
   `--dry-run` validates the spec and prints the commands without running anything.
 
   ```toml
@@ -773,6 +773,25 @@ experiment = "r1"
 model = "qwen3-1.7b"
 retry_batch_sizes = [8]
 ```
+
+One job often leaves most of a rented GPU idle. Three optional `[chain]` keys let the chain run several jobs at
+once on the one GPU:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `slots` | `1` | The most jobs that run at the same time (an integer of at least 1). |
+| `min_free_gpu_mib` | `0` | While another job runs, a job starts only when the GPU reports at least this much free memory (0 turns the check off). A failed `nvidia-smi` query counts as not enough. A job never waits on this when none runs. |
+| `start_gap_seconds` | `60` | The least time between two job starts when `slots` is above 1, so a job has allocated its memory before the free memory is read for the next. |
+
+Jobs still start in spec order. A job is ready when every job in its `run_dir_from` has ended, and the first
+ready job starts when a slot is free and the gate passes, so a job that waits on a dependency does not hold back a
+later independent one. The retries of a job run one after another in its slot. A job that fails does not stop the
+others, and Ctrl-C or SIGTERM stops every running job. With `slots = 1` the chain behaves as before.
+
+With several jobs the log lines interleave, and each names its job. The `peak_gpu` of an `END` line is the
+device-wide peak while that job ran, so it includes the other jobs. A `HEARTBEAT` line adds `gpu_util=<percent>`
+(the `nvidia-smi` utilization) when the query answers; raise `slots` while it stays well below 100 and the peak
+memory leaves room.
 
 Then push, set up and start (`--spec` is the spec's file name, as pushed):
 
