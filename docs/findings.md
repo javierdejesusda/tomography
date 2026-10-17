@@ -2089,7 +2089,7 @@ the same quantity for 100 random directions, as stored by the run. Runs `a2/qwen
 M1 reads utility (ETHICS) with six finders and compares them on held-out reading, on steering and on erasure, as on
 `gpt2` (runs `m1/qwen3-1.7b-base/3fe3a8644289` and `m1/qwen3-1.7b/de2cdd3146ac`; 10 readers per finder, the first 3
 used for steering, 250 prompts, one sample per prompt, steered at layers 11, 15 and 20). The win rate is the share of
-(prompt, reader) pairs, 750 per cell (749 where a pair was lost), in which the completion steered with +s is scored
+(prompt, reader) pairs, 750 per cell (748 or 749 where a pair was lost), in which the completion steered with +s is scored
 higher by the primary sentiment judge than the completion steered with -s on the same seed, so 0.5 means no effect.
 The prompts are shared by all finders and readers, so the Wilson intervals are narrower than the variation between
 prompt draws. Test accuracy is on 4,808 pairs, at the layer of each finder.
@@ -2125,8 +2125,9 @@ prompt draws. Test accuracy is on 4,808 pairs, at the layer of each finder.
   0.582]).
 - **The random direction.** Its test accuracy is 0.644 [0.597, 0.690] and 0.641 [0.598, 0.680], above the random
   direction of M1 on `gpt2` (0.533), and 0.12 to 0.15 below the five finders. Its win rate is below 0.5 on the base
-  checkpoint at every strength (0.463, 0.423, 0.440) and above it on the post-trained checkpoint (0.528, 0.565, 0.563,
-  with [0.527, 0.598] at 0.3). A random edit of the same relative size moves the completions one way on the base
+  checkpoint at every strength (0.463, 0.423, 0.440) and above 0.5 on the post-trained checkpoint on the primary judge at 0.2
+  and 0.3 only (0.565 [0.530, 0.600] and 0.563 [0.527, 0.598]); at 0.1 it is 0.528 [0.492, 0.563], which includes 0.5,
+  and the check-judge intervals (0.507, 0.532, 0.547) include 0.5 except at 0.3 ([0.511, 0.582]). A random edit of the same relative size moves the completions one way on the base
   checkpoint and the other on the post-trained one, so a finder's win rate is read against the random win rate of its
   own checkpoint and not against 0.5. At 0.3 the finders are above it by 0.309 to 0.453 (base) and by 0.182
   (`logistic`) to 0.381 (`kmeans`) (post-trained). The run does not say why the random direction moves the win rate.
@@ -2318,7 +2319,7 @@ question alone in the chat template, so the two shares are not a comparison of t
 | Correct, lie-steered                         | 0.258                | 0.178                |
 | Answered correctly without steering          | 341                  | 252                  |
 | Of these, answered wrongly under the lie arm | 100                  | 97                   |
-| Flip rate [95% interval]                     | 0.293 [0.248, 0.344] | 0.385 [0.327, 0.446] |
+| Flip rate [95% interval]                     | 0.293 [0.247, 0.344] | 0.385 [0.327, 0.446] |
 
 - **Both steered arms are below the unsteered one on both checkpoints**, the lie arm further (by 0.083 and 0.074, the
   honesty arm by 0.026 and 0.036). The lie arm is 0.057 and 0.038 below the honesty arm. There is no random-direction
@@ -2333,9 +2334,10 @@ question alone in the chat template, so the two shares are not a comparison of t
 ## Run identity
 
 All reading runs (R1 to R7) except the R4 and R6 runs of `gpt2-medium`, `gpt2-large` and `gpt2-xl` (made at `ca2546c`,
-below), the R4 and R6 runs of the Qwen3 checkpoints (made at `a6e2333`, below) and the A1 and A2 runs were made at
-commit `a39ae61` with a clean tree, on one laptop GPU with 8 GB of memory, with the default config of each experiment
-(batch size 8). The A1 and A2 runs of `gpt2` read the `gpt2` runs of R1, R2, R3, R5 and R7 below. The C1 runs of `gpt2` and `gpt2-xl` were made at `d59a2f7` and those of
+below) and the R4, R6, A1 and A2 runs of the Qwen3 checkpoints (made at `a6e2333`, below) were made at commit
+`a39ae61` with a clean tree, on one laptop GPU with 8 GB of memory, with the default config of each experiment (batch
+size 8 for the reading runs; the A1 and A2 configs store no batch size). The A1 and A2 runs of `gpt2` were made at
+`a39ae61` as well and read the `gpt2` runs of R1, R2, R3, R5 and R7 below. The C1 runs of `gpt2` and `gpt2-xl` were made at `d59a2f7` and those of
 `gpt2-medium` and `gpt2-large` at `a39ae61`; the C1 and reading source code is unchanged between them (`git diff
 --stat` over `src` lists only `p9d_steering.py` and `p9/behavior.py`). The C1 batch size is 16 for `gpt2` and
 `gpt2-medium` and 4 for `gpt2-large` and `gpt2-xl`. The Qwen3 C1 runs were made at `a39ae61` with a clean tree and
