@@ -150,6 +150,24 @@ def test_side_query_rejects_a_bad_state_or_date_property() -> None:
         quantities.side_query(_side(dated_by=("Q1",)), limit=5)
 
 
+def test_side_query_excludes_subclasses_only_when_asked() -> None:
+    plain = quantities.side_query(_side(), limit=5)
+    kinds = quantities.side_query(
+        _side(exclude_subclasses_of=("Q974850",)), limit=5
+    )
+
+    assert "P279" not in plain
+    assert (
+        "  FILTER NOT EXISTS { VALUES ?kind { wd:Q974850 }"
+        " ?item (wdt:P31|wdt:P279)/wdt:P279* ?kind }\n"
+    ) in kinds
+
+
+def test_side_query_rejects_a_bad_excluded_superclass() -> None:
+    with pytest.raises(ValueError, match="item id"):
+        quantities.side_query(_side(exclude_subclasses_of=("P31",)), limit=5)
+
+
 def test_side_rejects_an_unknown_dimension_and_an_exact_union() -> None:
     with pytest.raises(ValueError, match="dimension"):
         _side(dimension="mass")
@@ -937,3 +955,17 @@ def test_the_height_exact_side_keeps_only_completed_structures() -> None:
     assert side.exclude_classes == quantities.UNBUILT_STRUCTURES
     assert side.exclude_states == quantities.UNBUILT_STRUCTURES
     assert side.dated_by == ("P1619", "P571")
+
+
+def test_the_wingspan_exact_side_names_the_aircraft_and_drops_missiles() -> (
+    None
+):
+    family = _default("wingspan")
+
+    assert family.exact_side.template == (
+        "What is the wingspan of the {entity} aircraft, in metres?"
+    )
+    assert family.exact_side.exclude_subclasses_of == ("Q974850",)
+    assert family.range_side.template == (
+        "What is the wingspan of the {entity}, in centimetres?"
+    )

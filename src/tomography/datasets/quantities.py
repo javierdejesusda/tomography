@@ -102,6 +102,9 @@ class Side:
         exclude_states: Item ids of states of use (P5817) whose entities
             are left out, such as "building or structure under
             construction".
+        exclude_subclasses_of: Item ids of classes, such as missile, whose
+            instances and subclasses at any depth (P31 or P279, then any
+            chain of P279) are left out.
         dated_by: Property ids of dates, such as official opening (P1619).
             If given, an entity is kept only with a value of one of them no
             later than the query time.
@@ -131,6 +134,7 @@ class Side:
     dimension: str = "length"
     exclude_classes: tuple[str, ...] = ()
     exclude_states: tuple[str, ...] = ()
+    exclude_subclasses_of: tuple[str, ...] = ()
     dated_by: tuple[str, ...] = ()
     union_statements: bool = False
     query_min_sitelinks: int = 0
@@ -207,7 +211,10 @@ FAMILIES: tuple[Family, ...] = (
             prop="P2050",
             classes=("Q15056995",),
             exclude_classes=("Q15056993",),
-            template="What is the wingspan of the {entity}, in metres?",
+            exclude_subclasses_of=("Q974850",),
+            template=(
+                "What is the wingspan of the {entity} aircraft, in metres?"
+            ),
             unit="metres",
             scale=1.0,
         ),
@@ -297,8 +304,8 @@ def side_query(side: Side, *, limit: int) -> str:
 
     Raises:
         ValueError: If the quantity or a date property, a kept or excluded
-            class or an excluded state is not an id, no class is given or
-            `limit` is below 1.
+            class, an excluded state or an excluded superclass is not an id,
+            no class is given or `limit` is below 1.
     """
     prop = _property_id(side.prop)
     if not side.classes:
@@ -329,6 +336,9 @@ def side_query(side: Side, *, limit: int) -> str:
         lines.append(_none_of("excluded", "wdt:P31", side.exclude_classes))
     if side.exclude_states:
         lines.append(_none_of("state", "wdt:P5817", side.exclude_states))
+    if side.exclude_subclasses_of:
+        path = "(wdt:P31|wdt:P279)/wdt:P279*"
+        lines.append(_none_of("kind", path, side.exclude_subclasses_of))
     if side.dated_by:
         dates = "|".join(f"wdt:{_property_id(p)}" for p in side.dated_by)
         lines.append(
