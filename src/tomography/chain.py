@@ -974,9 +974,10 @@ class _Runner:
                     self.log(f"INTERRUPTED {running.name}")
             raise
         finally:
-            stop_processes(
-                [r.process for r in self.active if r.process is not None]
-            )
+            with _handlers(_signals(signal.SIGINT), signal.SIG_IGN):
+                stop_processes(
+                    [r.process for r in self.active if r.process is not None]
+                )
         self.log(f"CHAIN_DONE failed={self.failed}")
         return 1 if self.failed else 0
 

@@ -2070,3 +2070,31 @@ def test_each_gpu_query_defaults_on_its_own(
     assert "--query-gpu=memory.free" in fields
     assert "--query-gpu=utilization.gpu" in fields
     assert "--query-gpu=memory.used" not in fields
+
+
+def test_a_signal_entering_the_cleanup_does_not_skip_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    launcher = FakeLauncher(clock, runs, lambda c: Outcome(seconds=1000))
+    stop = chain_module.stop_processes
+
+    def signalled_stop(processes: Sequence[chain_module.Process]) -> None:
+        signal.raise_signal(signal.SIGTERM)
+        stop(processes)
+
+    monkeypatch.setattr(chain_module, "stop_processes", signalled_stop)
+    sleeps = 0
+
+    def sleep(seconds: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 2:
+            raise KeyboardInterrupt
+        clock.sleep(seconds)
+
+    code = _run_slots(spec, launcher, clock, sleep=sleep)
+
+    assert code == 130
+    assert launcher.processes[0].terminated
