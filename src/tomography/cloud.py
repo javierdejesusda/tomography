@@ -7,14 +7,24 @@ detached, report its status, pull the results and delete the pod.
 The API key is read from `RUNPOD_API_KEY` only. It is sent in the
 `Authorization` header to the RunPod API and nowhere else: it is never written
 to the state file, printed, put on a command line or sent to the pod. The pod
-removes itself through its own pod-scoped key, which RunPod sets inside the
-pod.
+stops itself through its own pod-scoped key, which RunPod sets inside the
+pod. It never removes itself: stopping keeps /workspace (the volume disk) and
+clears the container disk, so results survive until `pull`, and only `down`
+deletes the pod. A stopped pod still bills for its volume disk. `resume`
+starts it again; RunPod may attach no GPU if the host capacity changed, and
+network volumes exist on Secure Cloud only, so a Community pod keeps its
+data on the pod volume.
 
 References:
     https://docs.runpod.io/api-reference/pods/POST/pods
     https://docs.runpod.io/pods/configuration/use-ssh
     https://docs.runpod.io/pods/references/environment-variables
     https://docs.runpod.io/runpodctl/manage-pods
+    https://docs.runpod.io/api-reference/pods/POST/pods/podId/start
+    https://docs.runpod.io/api-reference/pods/POST/pods/podId/stop
+    https://docs.runpod.io/pods/manage-pods
+    https://docs.runpod.io/runpodctl/reference/runpodctl-stop-pod
+    https://docs.runpod.io/storage/network-volumes
 """
 
 import argparse
@@ -71,15 +81,16 @@ while IFS= read -r -d '' kv; do
     RUNPOD_POD_ID=*|RUNPOD_API_KEY=*) export "$kv" ;;
   esac
 done < /proc/1/environ
-remove_pod() {
-  log "removing the pod: $1"
+stop_pod() {
+  log "stopping the pod: $1"
   attempt=1
-  until runpodctl remove pod "$RUNPOD_POD_ID" >> "$LOG" 2>&1; do
-    log "removal attempt $attempt failed; retrying in 60 s"
+  until runpodctl stop pod "$RUNPOD_POD_ID" >> "$LOG" 2>&1 \
+      || runpodctl pod stop "$RUNPOD_POD_ID" >> "$LOG" 2>&1; do
+    log "stop attempt $attempt failed; retrying in 60 s"
     attempt=$((attempt + 1))
     sleep 60
   done
-  log "pod removal confirmed"
+  log "pod stop confirmed"
   exit 0
 }
 """
@@ -101,7 +112,7 @@ finished_at=""
 while true; do
   now=$(date +%s)
   if [ $((now - start)) -ge "$MAX_SECONDS" ]; then
-    remove_pod "max runtime reached"
+    stop_pod "max runtime reached"
   fi
   if [ -z "$finished_at" ] && chain_finished; then
     finished_at=$now
@@ -109,7 +120,7 @@ while true; do
   fi
   waited=$((now - ${finished_at:-$now}))
   if [ -n "$finished_at" ] && [ "$waited" -ge "$GRACE_SECONDS" ]; then
-    remove_pod "grace period after the chain ended"
+    stop_pod "grace period after the chain ended"
   fi
   sleep 30
 done
@@ -450,27 +461,27 @@ def _preflight(
 
 def _warn_no_self_removal(deps: Deps, missing: Sequence[str]) -> None:
     deps.out(
-        "WARNING: the pod cannot remove itself (missing: "
+        "WARNING: the pod cannot stop itself (missing: "
         f"{', '.join(missing)}); it bills until you run `down`"
     )
 
 
-def _remove_script(header: Sequence[str], tail: str) -> str:
+def _script(header: Sequence[str], tail: str) -> str:
     return "\n".join(["#!/bin/bash", *header]) + "\n" + tail
 
 
 def _deadline_script(max_seconds: int) -> str:
-    return _remove_script(
+    return _script(
         [f"MAX_SECONDS={max_seconds}", f"RUN={REMOTE_RUN}"],
         _WATCHDOG_COMMON
-        + 'sleep "$MAX_SECONDS"\nremove_pod "deadline reached"\n',
+        + 'sleep "$MAX_SECONDS"\nstop_pod "deadline reached"\n',
     )
 
 
 def _watchdog_script(
     chain_log: str, max_seconds: int, grace_minutes: float
 ) -> str:
-    return _remove_script(
+    return _script(
         [
             f"MAX_SECONDS={max_seconds}",
             f"GRACE_SECONDS={int(grace_minutes * 60)}",
@@ -540,6 +551,15 @@ def _wait_for_ssh(
     return True
 
 
+def _stop_pod(
+    args: argparse.Namespace, deps: Deps, api: Api, state: dict[str, Any]
+) -> None:
+    status, body = api.request("POST", f"/pods/{state['pod_id']}/stop")
+    api.check(status, body, "stop pod")
+    state["status"] = "stopped"
+    _save_state(args.state, state)
+
+
 def _bring_up(
     args: argparse.Namespace,
     deps: Deps,
@@ -575,7 +595,7 @@ def _bring_up(
         _save_state(args.state, state)
         _known_hosts(args.state, pod_id).unlink(missing_ok=True)
         deps.out(
-            f"the pod cannot remove itself (missing: {', '.join(missing)}); "
+            f"the pod cannot stop itself (missing: {', '.join(missing)}); "
             f"deleted pod {pod_id}. Use --no-self-removal to keep such a pod"
         )
         return 1
@@ -592,7 +612,7 @@ def _bring_up(
 
 
 def cmd_up(args: argparse.Namespace, deps: Deps) -> int:
-    """Creates a pod and waits until ssh works and it can remove itself.
+    """Creates a pod and waits until ssh works and it can stop itself.
 
     Args:
         args: Parsed command line.
@@ -912,7 +932,7 @@ def cmd_start(args: argparse.Namespace, deps: Deps) -> int:
     missing = _preflight(args, deps, state)
     if missing and not args.no_self_removal:
         raise CloudError(
-            f"the pod cannot remove itself (missing: {', '.join(missing)}); "
+            f"the pod cannot stop itself (missing: {', '.join(missing)}); "
             "fix that, or pass --no-self-removal to run anyway"
         )
     if missing:
@@ -935,10 +955,32 @@ def cmd_start(args: argparse.Namespace, deps: Deps) -> int:
     if _remote(args, deps, state, command).returncode:
         raise CloudError("launching the chain failed")
     deps.out(
-        "chain started; the watchdog removes the pod after "
+        "chain started; the watchdog stops the pod after "
         f"{max_seconds / 3600:g} h or {args.grace_minutes:g} min after the end"
     )
     return 0
+
+
+def _report_if_not_running(deps: Deps, state: Mapping[str, Any]) -> bool:
+    if not deps.env.get("RUNPOD_API_KEY"):
+        return False
+    api = Api(deps)
+    pod_id = state["pod_id"]
+    status, body = api.request("GET", f"/pods/{pod_id}")
+    if status == 404:
+        deps.out(f"pod {pod_id} no longer exists; nothing to read")
+        return True
+    if (
+        status == 200
+        and isinstance(body, Mapping)
+        and body.get("desiredStatus") not in (None, "RUNNING")
+    ):
+        deps.out(
+            f"pod {pod_id} is stopped ({body.get('desiredStatus')}); "
+            "run `resume` to read its log or pull the results"
+        )
+        return True
+    return False
 
 
 def cmd_status(args: argparse.Namespace, deps: Deps) -> int:
@@ -958,6 +1000,8 @@ def cmd_status(args: argparse.Namespace, deps: Deps) -> int:
     chain_log = state.get("remote_chain_log")
     if not chain_log:
         raise CloudError("no chain log is recorded; run `push` first")
+    if _report_if_not_running(deps, state):
+        return 0
     log = shlex.quote(chain_log)
     pid_file = f"{REMOTE_RUN}/chain.pid"
     exit_file = f"{REMOTE_RUN}/chain.exit"
@@ -980,19 +1024,36 @@ def _check_member(member: tarfile.TarInfo) -> None:
         raise CloudError(f"unsafe path in the archive: {member.name}")
 
 
-def _extract(stream: IO[bytes], dest: Path, errors: list[Exception]) -> None:
+def _extract(
+    stream: IO[bytes],
+    dest: Path,
+    errors: list[Exception],
+    extracted: list[str],
+) -> None:
     try:
         with tarfile.open(fileobj=stream, mode="r|") as tar:
             for member in tar:
                 _check_member(member)
                 try:
                     tar.extract(member, path=dest, filter="data")
+                    extracted.append(member.name)
                 except tarfile.FilterError as error:
                     raise CloudError(
                         f"unsafe member in the archive: {error}"
                     ) from error
     except tarfile.TarError as error:
         errors.append(error)
+
+
+def _with_partial_note(
+    message: object, dest: Path, extracted: list[str]
+) -> str:
+    if not extracted:
+        return str(message)
+    return (
+        f"{message}; {dest} holds a partial extraction "
+        f"({len(extracted)} members), not a full pull"
+    )
 
 
 def cmd_pull(args: argparse.Namespace, deps: Deps) -> int:
@@ -1018,18 +1079,138 @@ def cmd_pull(args: argparse.Namespace, deps: Deps) -> int:
         raise CloudError(f"destination {args.dest} is not empty")
     args.dest.mkdir(parents=True, exist_ok=True)
     errors: list[Exception] = []
-    code = deps.runner.stream(
+    extracted: list[str] = []
+    try:
+        code = _pull_stream(args, deps, state, remote, errors, extracted)
+    except CloudError as error:
+        raise CloudError(
+            _with_partial_note(error, args.dest, extracted)
+        ) from error
+    if code:
+        raise CloudError(
+            _with_partial_note(
+                f"tar over ssh failed with exit code {code}",
+                args.dest,
+                extracted,
+            )
+        )
+    if errors:
+        raise CloudError(
+            _with_partial_note(
+                f"the archive is not valid: {errors[0]}", args.dest, extracted
+            )
+        )
+    deps.out(f"pulled {remote} into {args.dest}")
+    return 0
+
+
+def _pull_stream(
+    args: argparse.Namespace,
+    deps: Deps,
+    state: Mapping[str, Any],
+    remote: str,
+    errors: list[Exception],
+    extracted: list[str],
+) -> int:
+    code: int = deps.runner.stream(
         [
             *_ssh_argv(args, state, no_stdin=True),
             f"tar -c -C {shlex.quote(remote)} .",
         ],
-        lambda stream: _extract(stream, args.dest, errors),
+        lambda stream: _extract(stream, args.dest, errors, extracted),
     )
-    if code:
-        raise CloudError(f"tar over ssh failed with exit code {code}")
-    if errors:
-        raise CloudError(f"the archive is not valid: {errors[0]}")
-    deps.out(f"pulled {remote} into {args.dest}")
+    return code
+
+
+def cmd_resume(args: argparse.Namespace, deps: Deps) -> int:
+    """Starts a stopped pod again and waits until ssh works.
+
+    Args:
+        args: Parsed command line.
+        deps: Side effects.
+
+    Returns:
+        0 when the pod is ready, 1 on a timeout, a missing GPU or a pod
+        that cannot stop itself (it is stopped again in the last two cases).
+
+    Raises:
+        CloudError: On an API failure or a deleted pod.
+    """
+    state = _load_state(args.state)
+    if state.get("status") == "deleted":
+        raise CloudError("the pod was deleted; there is nothing to resume")
+    api = Api(deps)
+    pod_id = state["pod_id"]
+    status, body = api.request("POST", f"/pods/{pod_id}/start")
+    api.check(status, body, "start pod")
+    state["deadline"] = deps.wall() + args.max_hours * 3600
+    state["status"] = "starting"
+    _save_state(args.state, state)
+    deadline = deps.clock() + args.timeout_minutes * 60
+    try:
+        while True:
+            status, got = api.request("GET", f"/pods/{pod_id}")
+            pod = api.check(status, got, "get pod")
+            endpoint = _pod_endpoint(pod)
+            if endpoint is not None:
+                break
+            if deps.clock() >= deadline:
+                deps.out(
+                    f"pod {pod_id} did not expose ssh within "
+                    f"{args.timeout_minutes:g} minutes; run `down` to "
+                    "remove it, or try `resume` again"
+                )
+                return 1
+            deps.sleep(_POLL_SECONDS)
+        state.update(ip=endpoint[0], ssh_port=endpoint[1], status="running")
+        _save_state(args.state, state)
+        known_hosts = _known_hosts(args.state, pod_id)
+        known_hosts.unlink(missing_ok=True)
+        known_hosts.touch()
+        if not _wait_for_ssh(args, deps, state):
+            deps.out(
+                f"ssh to pod {pod_id} did not answer within "
+                f"{args.ssh_timeout_minutes:g} minutes; run `down` to "
+                "remove it, or try `resume` again"
+            )
+            return 1
+        gpu = _remote(
+            args,
+            deps,
+            state,
+            "nvidia-smi --query-gpu=name --format=csv,noheader",
+        )
+        if gpu.returncode or not gpu.stdout.strip():
+            _stop_pod(args, deps, api, state)
+            deps.out(
+                f"pod {pod_id} came back without a GPU (the host capacity "
+                "changed); stopped it again, try `resume` later"
+            )
+            return 1
+        missing = _preflight(args, deps, state)
+        if missing and not args.no_self_removal:
+            _stop_pod(args, deps, api, state)
+            deps.out(
+                f"the pod cannot stop itself (missing: {', '.join(missing)}); "
+                f"stopped pod {pod_id}. Use --no-self-removal to run anyway"
+            )
+            return 1
+        if missing:
+            _warn_no_self_removal(deps, missing)
+        else:
+            script = _deadline_script(int(args.max_hours * 3600))
+            _upload_script(args, deps, state, "deadline.sh", script)
+            launch = _launch_command(["deadline.sh"])
+            if _remote(args, deps, state, launch).returncode:
+                raise CloudError("launching the deadline watchdog failed")
+    except CloudError as error:
+        raise CloudError(
+            f"{error}; pod {pod_id} may be running, run `down` to remove it"
+        ) from error
+    deps.out(
+        f"pod {pod_id} resumed at {endpoint[0]}:{endpoint[1]}; the container "
+        "disk was cleared, so run `setup` again before `start`"
+    )
     return 0
 
 
@@ -1141,6 +1322,12 @@ def build_parser() -> argparse.ArgumentParser:
     pull = add("pull", cmd_pull)
     pull.add_argument("--dest", type=Path, required=True)
     pull.add_argument("--path")
+
+    resume = add("resume", cmd_resume)
+    resume.add_argument("--max-hours", type=_max_hours, required=True)
+    resume.add_argument("--timeout-minutes", type=float, default=15)
+    resume.add_argument("--ssh-timeout-minutes", type=float, default=5)
+    resume.add_argument("--no-self-removal", action="store_true")
 
     down = add("down", cmd_down)
     down.add_argument("--timeout-minutes", type=float, default=2)

@@ -27,6 +27,7 @@ OUT = "/workspace/out/chain11"
 CHAIN_LOG = f"{OUT}/_chain/chain11.log"
 WALL0 = 1_700_000_000.0
 SMI = "nvidia-smi --query-gpu=driver_version,name,memory.total"
+GPU_CHECK = "nvidia-smi --query-gpu=name --format=csv,noheader"
 
 Response = tuple[int, Any]
 
@@ -137,6 +138,7 @@ class Harness:
         self.torch_ok = True
         self.git_ok = True
         self.cache_present = True
+        self.gpu_ok = True
         self.missing: list[str] = []
         self.chain_live = False
         self.ssh_failures = 0
@@ -178,6 +180,11 @@ class Harness:
             )
         if "test -d" in command:
             return cloud.CommandResult(0 if self.cache_present else 1, "")
+        if command.startswith(GPU_CHECK):
+            return cloud.CommandResult(
+                0 if self.gpu_ok else 9,
+                "NVIDIA GeForce RTX 4090\n" if self.gpu_ok else "",
+            )
         if command.startswith(SMI):
             return cloud.CommandResult(
                 0, f"{self.driver}, NVIDIA GeForce RTX 4090, 24564 MiB\n"
@@ -458,7 +465,8 @@ def test_up_records_the_deadline_and_arms_a_pod_watchdog(
     ]
     _command, script = next(u for u in uploads if u[0].endswith("deadline.sh"))
     assert "MAX_SECONDS=3600" in script or "MAX_SECONDS=36" in script
-    assert 'runpodctl remove pod "$RUNPOD_POD_ID"' in script
+    assert 'runpodctl stop pod "$RUNPOD_POD_ID"' in script
+    assert "remove pod" not in script
     assert API_KEY not in script
     launches = [c for c in h.commands() if "setsid nohup" in c]
     assert len(launches) == 1
@@ -902,7 +910,9 @@ def test_start_writes_a_watchdog_that_retries_the_removal(
     assert "CHAIN_DONE" in dog
     assert f"CHAINLOG={CHAIN_LOG}" in dog
     assert "/proc/1/environ" in dog
-    assert 'runpodctl remove pod "$RUNPOD_POD_ID"' in dog
+    assert 'runpodctl stop pod "$RUNPOD_POD_ID"' in dog
+    assert "remove pod" not in dog
+    assert "stop attempt" in dog
     assert "sleep 60" in dog
     assert "until " in dog
     assert API_KEY not in dog
@@ -1039,7 +1049,7 @@ def test_start_refuses_a_second_chain(tmp_path: Path) -> None:
 def test_status_tails_the_recorded_log_and_reports_the_exit(
     tmp_path: Path,
 ) -> None:
-    h = Harness(tmp_path)
+    h = Harness(tmp_path, [(200, ready_pod())])
     original = h.runner.handler
 
     def handle(argv: Sequence[str]) -> cloud.CommandResult:
@@ -1128,6 +1138,7 @@ def test_down_fails_when_the_pod_never_disappears(tmp_path: Path) -> None:
         ["setup"],
         ["start", "--spec", "s.toml", "--max-hours", "3"],
         ["start", "--spec", "s.toml", "--max-hours", "3", "--no-self-removal"],
+        ["resume", "--max-hours", "2", "--no-self-removal"],
         ["status"],
         ["pull", "--dest", "d"],
         ["down"],
@@ -1141,7 +1152,7 @@ def test_every_subcommand_parses(argv: list[str]) -> None:
 
 
 def test_remote_commands_never_carry_the_key(tmp_path: Path) -> None:
-    h = Harness(tmp_path)
+    h = Harness(tmp_path, [(200, ready_pod())])
     pushed(h)
     for command in (
         ["setup"],
@@ -1204,3 +1215,176 @@ def test_the_real_runner_kills_the_command_when_the_consumer_fails() -> None:
         cloud.SubprocessRunner().stream(
             [sys.executable, "-c", "import time; time.sleep(60)"], refuse
         )
+
+
+def resumed_pod() -> dict[str, Any]:
+    pod = ready_pod()
+    pod["publicIp"] = "198.51.100.9"
+    pod["portMappings"] = {"22": 20222}
+    return pod
+
+
+def stopped_harness(
+    tmp_path: Path, responses: Sequence[Response] | None = None
+) -> Harness:
+    if responses is None:
+        responses = [(200, None), (200, starting_pod()), (200, resumed_pod())]
+    h = Harness(tmp_path, responses)
+    pushed(h, status="stopped")
+    return h
+
+
+def test_resume_starts_the_pod_and_polls_for_the_new_endpoint(
+    tmp_path: Path,
+) -> None:
+    h = stopped_harness(tmp_path)
+    assert h.main("resume", "--max-hours", "2") == 0
+    methods = [(c[0], c[1]) for c in h.transport.calls]
+    assert methods == [
+        ("POST", f"{BASE}/pods/pod1/start"),
+        ("GET", f"{BASE}/pods/pod1"),
+        ("GET", f"{BASE}/pods/pod1"),
+    ]
+    state = h.state()
+    assert state["ip"] == "198.51.100.9"
+    assert state["ssh_port"] == 20222
+    assert state["status"] == "running"
+    assert state["remote_src"] == SRC
+    assert state["deadline"] == pytest.approx(WALL0 + 7200, abs=60)
+
+
+def test_resume_resets_the_known_hosts_file(tmp_path: Path) -> None:
+    h = stopped_harness(tmp_path)
+    h.known_hosts().write_text("old host key", encoding="utf-8")
+    assert h.main("resume", "--max-hours", "2") == 0
+    assert h.known_hosts().read_text(encoding="utf-8") == ""
+
+
+def test_resume_probes_ssh_checks_the_gpu_and_rearms_the_deadline(
+    tmp_path: Path,
+) -> None:
+    h = stopped_harness(tmp_path)
+    h.ssh_failures = 1
+    assert h.main("resume", "--max-hours", "2") == 0
+    probes = [r[0] for r in h.runner.runs if r[0][-1] == "true"]
+    assert len(probes) == 2
+    assert "20222" in probes[0]
+    assert "root@198.51.100.9" in probes[0]
+    commands = h.commands()
+    assert any(c.startswith(GPU_CHECK) for c in commands)
+    uploads = [
+        (r[0][-1], (r[1] or b"").decode()) for r in h.runner.runs if r[1]
+    ]
+    script = next(u[1] for u in uploads if u[0].endswith("deadline.sh"))
+    assert "MAX_SECONDS=7200" in script
+    assert 'runpodctl stop pod "$RUNPOD_POD_ID"' in script
+    assert [c for c in commands if "setsid nohup" in c]
+
+
+def test_resume_refuses_a_deleted_pod(tmp_path: Path) -> None:
+    h = Harness(tmp_path, [(200, None)])
+    pushed(h, status="deleted")
+    assert h.main("resume", "--max-hours", "2") == 1
+    assert "deleted" in h.output()
+    assert h.transport.calls == []
+
+
+def test_resume_reports_a_start_error_without_the_key(tmp_path: Path) -> None:
+    h = stopped_harness(tmp_path, [(400, {"error": f"no gpu {API_KEY}"})])
+    assert h.main("resume", "--max-hours", "2") == 1
+    assert "400" in h.output()
+    assert "no gpu" in h.output()
+    assert API_KEY not in h.output()
+
+
+def test_resume_timeout_keeps_the_state_for_down(tmp_path: Path) -> None:
+    h = stopped_harness(tmp_path, [(200, None), (200, starting_pod())])
+    assert h.main("resume", "--max-hours", "2", "--timeout-minutes", "1") == 1
+    assert "down" in h.output()
+    assert h.state()["pod_id"] == "pod1"
+    assert h.state()["ip"] == "203.0.113.7"
+
+
+def test_resume_stops_the_pod_again_when_no_gpu_is_attached(
+    tmp_path: Path,
+) -> None:
+    h = stopped_harness(
+        tmp_path,
+        [(200, None), (200, resumed_pod()), (200, None)],
+    )
+    h.gpu_ok = False
+    assert h.main("resume", "--max-hours", "2") == 1
+    assert h.transport.calls[-1][:2] == ("POST", f"{BASE}/pods/pod1/stop")
+    assert "GPU" in h.output()
+    assert "resume" in h.output()
+    assert h.state()["status"] == "stopped"
+
+
+def test_resume_stops_the_pod_when_it_cannot_stop_itself(
+    tmp_path: Path,
+) -> None:
+    h = stopped_harness(
+        tmp_path,
+        [(200, None), (200, resumed_pod()), (200, None)],
+    )
+    h.missing = ["runpodctl"]
+    assert h.main("resume", "--max-hours", "2") == 1
+    assert h.transport.calls[-1][:2] == ("POST", f"{BASE}/pods/pod1/stop")
+    assert "runpodctl" in h.output()
+    assert h.state()["status"] == "stopped"
+
+
+def test_resume_can_skip_self_removal_with_a_warning(tmp_path: Path) -> None:
+    h = stopped_harness(tmp_path, [(200, None), (200, resumed_pod())])
+    h.missing = ["runpodctl"]
+    assert h.main("resume", "--max-hours", "2", "--no-self-removal") == 0
+    assert "WARNING" in h.output()
+    assert not [c for c in h.commands() if "setsid nohup" in c]
+
+
+def test_status_says_when_the_pod_is_stopped(tmp_path: Path) -> None:
+    h = Harness(tmp_path, [(200, {"id": "pod1", "desiredStatus": "EXITED"})])
+    pushed(h)
+    assert h.main("status") == 0
+    assert "stopped" in h.output()
+    assert "resume" in h.output()
+    assert h.runner.runs == []
+
+
+def test_status_says_when_the_pod_no_longer_exists(tmp_path: Path) -> None:
+    h = Harness(tmp_path, [(404, {"error": "pod not found"})])
+    pushed(h)
+    assert h.main("status") == 0
+    assert "no longer exists" in h.output()
+    assert h.runner.runs == []
+
+
+def test_status_still_reads_the_log_without_an_api_key(tmp_path: Path) -> None:
+    h = Harness(tmp_path, env={})
+    pushed(h)
+    assert h.main("status") == 0
+    assert h.transport.calls == []
+    assert h.runner.runs
+
+
+def test_pull_names_the_folder_when_the_extraction_is_partial(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    h.runner.stream_data = make_tar([("ok.txt", b"x"), ("/abs_evil.txt", b"y")])
+    dest = tmp_path / "pulled"
+    assert h.main("pull", "--dest", str(dest)) == 1
+    assert "partial extraction" in h.output()
+    assert str(dest) in h.output()
+    assert (dest / "ok.txt").exists()
+
+
+def test_pull_does_not_claim_a_partial_extraction_when_nothing_landed(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    h.runner.stream_data = make_tar([("/abs_evil.txt", b"y")])
+    assert h.main("pull", "--dest", str(tmp_path / "pulled")) == 1
+    assert "partial" not in h.output()
