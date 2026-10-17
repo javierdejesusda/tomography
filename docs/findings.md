@@ -9,8 +9,10 @@ curves files). The derived ones are the R6 text baselines on `gpt2` (see that se
 the runs), the random-direction cosine of A1, the P9d selectivity columns (recomputed from the stored per-item
 slopes), the span of the sizes in decades, the P1 spans, family ranges and transfer ranges (computed from the table
 and matrix files of the P1 runs), the means and ranges over readers of the Qwen3 C1 tables (computed from the
-per-reader rows), and differences or ranges quoted in the text. The P8 tables are read from the P8 run, which
-aggregates finished runs. Runs are identified by config hash in [Run identity](#run-identity). The document is not
+per-reader rows), the maxima over layers of the random-direction series of R6, the P1 spans and cosine ranges of the
+`gpt2` truth and emotion tasks (computed from the table file), the C2 and P7 curve values (read from the curves
+files), and differences or ranges quoted in the text. The P8 tables are read from the P8 run, which aggregates
+finished runs. Runs are identified by config hash in [Run identity](#run-identity). The document is not
 complete: [Pending](#pending) lists what it does not yet report.
 
 Contents:
@@ -22,12 +24,13 @@ Contents:
 5. [Scaling across the GPT-2 sizes (P6)](#scaling-across-the-gpt-2-sizes-p6)
 6. [Direction agreement and logit lens on gpt2 (A1, A2)](#direction-agreement-and-logit-lens-on-gpt2-a1-a2)
 7. [Template sensitivity of the sentiment reader (P1)](#template-sensitivity-of-the-sentiment-reader-p1)
-8. [Sentiment steering on the GPT-2 ladder (C1)](#sentiment-steering-on-the-gpt-2-ladder-c1)
-9. [Sentiment steering on Qwen3 (C1)](#sentiment-steering-on-qwen3-c1)
-10. [Base against post-trained Qwen3 (P8)](#base-against-post-trained-qwen3-p8)
-11. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
-12. [Run identity](#run-identity)
-13. [Pending](#pending)
+8. [Position, sample size and direction finder on gpt2 (P2, P3,
+P4)](#position-sample-size-and-direction-finder-on-gpt2-p2-p3-p4) 9. [Sentiment steering on the GPT-2 ladder
+(C1)](#sentiment-steering-on-the-gpt-2-ladder-c1) 10. [Sentiment steering on Qwen3
+(C1)](#sentiment-steering-on-qwen3-c1) 11. [Other steering experiments on gpt2 (M1, C2, P7, LR1, C4,
+C5)](#other-steering-experiments-on-gpt2-m1-c2-p7-lr1-c4-c5) 12. [Base against post-trained Qwen3
+(P8)](#base-against-post-trained-qwen3-p8) 13. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
+14. [Run identity](#run-identity) 15. [Pending](#pending)
 
 ## Reading conventions
 
@@ -76,7 +79,7 @@ Contents:
 |   validation accuracy    | 0.640                | 0.634                | 0.643                | 0.674                |
 
 Test accuracy with its interval; the layer and the validation accuracy at that layer are in the rows below it. R4 and R6
-were run on `gpt2` only and have their own tables.
+have their own tables below and in the R6 section.
 
 Findings:
 
@@ -117,19 +120,36 @@ R7 on the out-of-distribution sets, accuracy at the same layer with its interval
   chance.
 - The conjunction and disjunction sets sit between 0.521 and 0.545. `common_claim` (2,225 pairs) is 0.638 to 0.656.
 
-R4 on `gpt2` (one reader per emotion against the others, same protocol):
+R4 on the four GPT-2 sizes (one reader per emotion against the others, same protocol; test accuracy with its interval
+and the selected layer; runs `r4/gpt2/4702fcb81ed3`, `r4/gpt2-medium/981d9dd9916e`, `r4/gpt2-large/788316a35990` and
+`r4/gpt2-xl/bee62b37444a`):
 
-| Emotion   | Test accuracy        | Layer | Validation accuracy | Test pairs |
-| --------- | -------------------- | ----- | ------------------- | ---------- |
-| happiness | 0.876 [0.847, 0.908] | L12   | 0.883               | 38         |
-| sadness   | 0.930 [0.916, 0.943] | L9    | 0.979               | 44         |
-| anger     | 0.976 [0.971, 0.978] | L11   | 0.929               | 45         |
-| fear      | 0.968 [0.964, 0.974] | L11   | 0.971               | 53         |
-| disgust   | 0.997 [0.992, 1.000] | L5    | 1.000               | 39         |
-| surprise  | 0.922 [0.906, 0.936] | L8    | 0.984               | 36         |
+| Emotion   | gpt2                     | gpt2-medium              | gpt2-large               | gpt2-xl                  |
+| --------- | ------------------------ | ------------------------ | ------------------------ | ------------------------ |
+| happiness | 0.876 [0.847, 0.908] L12 | 0.921 [0.900, 0.942] L22 | 0.968 [0.955, 0.984] L36 | 0.937 [0.926, 0.947] L47 |
+| sadness   | 0.930 [0.916, 0.943] L9  | 0.930 [0.918, 0.941] L12 | 0.950 [0.936, 0.964] L18 | 0.984 [0.970, 0.995] L21 |
+| anger     | 0.976 [0.971, 0.978] L11 | 0.942 [0.931, 0.953] L9  | 0.942 [0.933, 0.951] L13 | 0.949 [0.940, 0.958] L21 |
+| fear      | 0.968 [0.964, 0.974] L11 | 0.970 [0.962, 0.977] L18 | 0.960 [0.955, 0.966] L27 | 0.985 [0.977, 0.992] L33 |
+| disgust   | 0.997 [0.992, 1.000] L5  | 1.000 [1.000, 1.000] L10 | 0.997 [0.992, 1.000] L18 | 0.995 [0.987, 1.000] L3  |
+| surprise  | 0.922 [0.906, 0.936] L8  | 0.967 [0.958, 0.972] L16 | 0.953 [0.944, 0.961] L22 | 0.894 [0.889, 0.903] L1  |
 
-All six emotions are read at 0.876 or above on `gpt2`, lowest for happiness and highest for disgust. Each test set has
-36 to 53 pairs.
+The test sets are the same on every size (38, 44, 45, 53, 39 and 36 pairs for the six emotions in the order of the
+table). Every one of the 24 cells is at 0.876 or above, the lowest being `gpt2` for happiness and the highest 1.000 for
+disgust on `gpt2-medium`.
+
+- **No trend with size.** Accuracy rises with size for happiness (0.876, 0.921, 0.968, 0.937) and sadness (0.930, 0.930,
+  0.950, 0.984), falls from `gpt2` for anger (0.976, then 0.942 to 0.949), and is non-monotonic for surprise (0.922,
+  0.967, 0.953, 0.894). With 36 to 53 test pairs and one run per size, these differences are small against the
+  evaluation sampling that the intervals do not cover.
+- **The selected layer is often early or flat.** At layer 1 the readers already reach 0.70 to 0.99 (for example
+  happiness 0.700 on `gpt2-medium`, disgust 0.959 to 0.995 on all four sizes). `gpt2-xl` surprise is selected at L1
+  (0.894) and `gpt2-xl` disgust at L3, where the curve is flat. A high accuracy at these layers is consistent with
+  emotion words in the statements that a shallow reader can use; this is not tested here.
+- **Baselines at the selected layer.** The random-direction series is at 0.558 to 0.703 on `gpt2`, 0.534 to 0.613 on
+  `gpt2-medium`, 0.587 to 0.639 on `gpt2-large` and 0.547 to 0.620 on `gpt2-xl`, and the shuffled-label series at 0.477
+  to 0.566, 0.486 to 0.537, 0.489 to 0.531 and 0.477 to 0.533 (computed from the curves files). Validation accuracy is
+  above test accuracy by at most 0.062 on `gpt2`, 0.035 on `gpt2-medium`, 0.040 on `gpt2-large` and 0.057 on
+  `gpt2-xl` (it is below it for some cells).
 
 ## LAT reading on Qwen3
 
@@ -195,14 +215,14 @@ R7 on the out-of-distribution sets:
 
 ## TruthfulQA MC1 against text baselines (R6)
 
-R6 was run on `gpt2` only. The question set is split by hash into 511 train, 133 validation and 173 test questions of
-817. Every row below is scored on the same 173 test questions; the chance line (the mean of one over the number of
-choices) is 0.228. The LAT rows come from the run; the standard and heuristic rows come from the same run's table. The
-two text-only baselines are classifiers on the answer texts alone (TF-IDF with a logistic regression fitted on the train
-answers, no question and no model). The `gpt2` run was made before the text baselines were added to R6, so their rows
-were computed with the code that now writes them (`text_scores`, the same estimator, and the same split and test
-questions as the LAT rows), not read from the run; the rerun of R6 on the GPU is pending. They do not depend on the
-model.
+R6 was run on all four GPT-2 sizes; this table is the `gpt2` run and the other sizes follow below it. The question set
+is split by hash into 511 train, 133 validation and 173 test questions of 817. Every row below is scored on the same 173
+test questions; the chance line (the mean of one over the number of choices) is 0.228. The LAT rows come from the run;
+the standard and heuristic rows come from the same run's table. The two text-only baselines are classifiers on the
+answer texts alone (TF-IDF with a logistic regression fitted on the train answers, no question and no model). The `gpt2`
+run was made before the text baselines were added to R6, so their rows were computed with the code that now writes them
+(`text_scores`, the same estimator, and the same split and test questions as the LAT rows), not read from the run. The
+runs of the three larger sizes store them, and they are identical there, as they do not depend on the model.
 
 | Row            | Layer rule       | Trained on                       | MC1 [95% interval]   |
 | -------------- | ---------------- | -------------------------------- | -------------------- |
@@ -231,6 +251,43 @@ the best mean test accuracy, so it is selected on the test questions and is opti
 - **Standard and heuristic.** The standard log-probability MC1 is 0.168, below the chance line, and the interval reaches
   it (upper bound 0.230). The heuristic is 0.277. On all 817 questions the run records 0.245 [0.217, 0.275] for the
   standard and 0.286 [0.256, 0.318] for the heuristic.
+
+R6 on the four GPT-2 sizes (runs `r6/gpt2/47e8ec0cf46c`, `r6/gpt2-medium/04fc7ead5f13`,
+`r6/gpt2-large/f058c0f19396` and `r6/gpt2-xl/60cc952b4ec5`). The same 173 test questions, the same text baselines and
+the same layer rules in every column; the interval of a LAT row is over the 15 readers and the interval of the other
+rows is a Wilson interval over the 173 questions, so the two kinds are not comparable in width. The `gpt2` run does not
+store the two text rows (computed values in the table above, equal to those shown for the other sizes). Best-layer rows
+give the layer.
+
+| Row                              | gpt2                     | gpt2-medium              | gpt2-large               | gpt2-xl                  |
+| -------------------------------- | ------------------------ | ------------------------ | ------------------------ | ------------------------ |
+| standard                         | 0.168 [0.119, 0.230]     | 0.173 [0.124, 0.237]     | 0.179 [0.129, 0.243]     | 0.173 [0.124, 0.237]     |
+| heuristic                        | 0.277 [0.216, 0.348]     | 0.266 [0.206, 0.336]     | 0.358 [0.291, 0.432]     | 0.289 [0.227, 0.361]     |
+| text_word                        | not stored               | 0.676 [0.603, 0.742]     | 0.676 [0.603, 0.742]     | 0.676 [0.603, 0.742]     |
+| text_char                        | not stored               | 0.671 [0.597, 0.736]     | 0.671 [0.597, 0.736]     | 0.671 [0.597, 0.736]     |
+| LAT truthfulqa, validation-layer | 0.649 [0.640, 0.657]     | 0.667 [0.659, 0.676]     | 0.676 [0.666, 0.687]     | 0.699 [0.687, 0.710]     |
+| LAT truthfulqa, best-layer       | 0.652 [0.647, 0.659] L9  | 0.688 [0.680, 0.697] L15 | 0.693 [0.685, 0.701] L22 | 0.716 [0.705, 0.726] L28 |
+| LAT arc, validation-layer        | 0.383 [0.353, 0.414]     | 0.489 [0.453, 0.521]     | 0.408 [0.377, 0.440]     | 0.432 [0.384, 0.480]     |
+| LAT arc, best-layer              | 0.385 [0.344, 0.429] L9  | 0.464 [0.423, 0.502] L18 | 0.411 [0.379, 0.438] L16 | 0.375 [0.319, 0.433] L25 |
+| LAT honesty, validation-layer    | 0.270 [0.264, 0.277]     | 0.476 [0.465, 0.487]     | 0.304 [0.296, 0.311]     | 0.371 [0.358, 0.382]     |
+| LAT honesty, best-layer          | 0.277 [0.271, 0.284] L12 | 0.492 [0.489, 0.496] L18 | 0.318 [0.313, 0.324] L29 | 0.380 [0.374, 0.387] L25 |
+
+- **The TruthfulQA-source reader does not separate from the text baselines on any size.** At the validation layer the
+  reader reaches 0.649, 0.667, 0.676 and 0.699, against `text_word` 0.676 [0.603, 0.742] and `text_char` 0.671 [0.597,
+  0.736]. Every one of the four values lies inside both Wilson intervals. The point estimate rises with size, but only
+  `gpt2-xl` (0.699) is above the two text point estimates, by 0.023 and 0.028, and the text intervals are 0.14 wide. The
+  best-layer rows (0.652, 0.688, 0.693, 0.716) pick the layer on the test questions, are optimistic, and are also inside
+  both text intervals.
+- **The other two sources stay below the text baselines.** The ARC-trained reader is at 0.383, 0.489, 0.408 and 0.432
+  and the honesty-persona reader at 0.270, 0.476, 0.304 and 0.371 at the validation layer, none above 0.489. Neither is
+  trained on TruthfulQA answers. `gpt2-medium` is the highest of the four on both sources, with no pattern in size.
+- **Random directions.** The highest mean over layers of the random-direction series of the TruthfulQA source is 0.370,
+  0.429, 0.432 and 0.425 (`gpt2` to `gpt2-xl`), below the reader on every size. For the honesty source the best-layer
+  reader is below the highest random value on `gpt2` (0.277 against 0.316), `gpt2-large` (0.318 against 0.352) and
+  `gpt2-xl` (0.380 against 0.408), and for ARC on `gpt2-xl` (0.375 against 0.400); the ARC and honesty readers are not
+  read as separating from a random direction there. The shuffled-label series stays at or below 0.249.
+- **Standard and heuristic.** The standard log-probability MC1 is 0.168 to 0.179 on the four sizes (chance 0.228) and
+  the heuristic is 0.277, 0.266, 0.358 and 0.289 in the order of the columns, without a trend in size.
 
 ## Scaling across the GPT-2 sizes (P6)
 
@@ -314,7 +371,8 @@ same quantity for 100 random directions. The best layer is chosen on the same cu
 ## Template sensitivity of the sentiment reader (P1)
 
 P1 reads the SST-2 sentiment concept through variants of the prompt template, on `gpt2` and the four Qwen3
-checkpoints. Only the sentiment task was run. The paper template is `Consider the amount of sentiment in the
+checkpoints. The tables of this section are for the sentiment task; `gpt2` also has a second run with the truth and
+emotion tasks, reported at the end of the section. The paper template is `Consider the amount of sentiment in the
 following:`, the sentence, and `The amount of sentiment is`. Every variant is fitted on the same 10 draws of 64 SST-2
 training pairs as the paper variant (logistic finder, last token), so a difference between variants belongs to the
 wording and not to the draw. All are scored on the same 214 pairs of the SST-2 validation split (the report half; a
@@ -528,6 +586,194 @@ readers fitted under different prompts differ in direction; it does not show whi
 Base and post-trained checkpoints are different models, so the pairs are compared in P8 and the two are not pooled
 here.
 
+P1 with the truth and emotion tasks on `gpt2` (run `p1/gpt2/078b9d6482a2`, made after the sentiment run
+`p1/gpt2/673af340b77d` with the same settings and the task list as the only difference in the config; its sentiment
+rows are identical to the ones above). The tasks are the truth statements of the Geometry of Truth split and the six
+emotions of R4, each read against the others. Every variant is read at the one layer of the paper reader on the select
+half, and the report half has the number of pairs in parentheses (59 for truth and 36 to 53 for the emotions). Lowest
+and highest variant over all the variants of the task, including `framing_swap` for the emotions:
+
+| Task (report pairs) | Layer | Paper accuracy [95% interval] | Random | Shuffled | Lowest variant     | Highest variant         | Span  |
+| ------------------- | ----- | ----------------------------- | ------ | -------- | ------------------ | ----------------------- | ----- |
+| truth (59)          | L9    | 0.698 [0.681, 0.717]          | 0.517  | 0.495    | scaffold_1 0.608   | paraphrase_0 0.708      | 0.100 |
+| happiness (38)      | L12   | 0.850 [0.834, 0.868]          | 0.566  | 0.500    | bare 0.811         | no_template 0.884       | 0.074 |
+| sadness (44)        | L12   | 0.930 [0.916, 0.941]          | 0.586  | 0.511    | framing_swap 0.414 | neutral_frame 0.957     | 0.543 |
+| anger (45)          | L9    | 0.947 [0.938, 0.956]          | 0.622  | 0.467    | framing_swap 0.478 | no_chat_tags 0.967      | 0.489 |
+| fear (53)           | L9    | 0.989 [0.975, 1.000]          | 0.562  | 0.509    | framing_swap 0.802 | no_trailing_space 0.998 | 0.196 |
+| disgust (39)        | L12   | 1.000 [1.000, 1.000]          | 0.608  | 0.474    | framing_swap 0.818 | paper 1.000             | 0.182 |
+| surprise (36)       | L10   | 0.933 [0.922, 0.942]          | 0.586  | 0.472    | framing_swap 0.686 | scaffold_1 0.947        | 0.261 |
+
+- **Truth.** The paper template reads at 0.698 [0.681, 0.717] on 59 pairs (random 0.517, shuffled 0.495). The 16 other
+  variants range from 0.608 to 0.708; the interval of 8 of them lies entirely below the paper interval and none lies
+  above it. `bare` (0.675) and `no_chat_tags` (0.676) are below the paper accuracy, unlike the sentiment task, and the
+  cosine of the 4 concept swaps with the paper reader is 0.943 to 0.950. The highest random value among the truth
+  variants is 0.568 (`no_trailing_question`), so the smallest margin of a variant over its random series is 0.063. The
+  test set is 59 pairs and the intervals cover the training draw only.
+- **Emotions.** Outside `framing_swap` the variants of each emotion range from 0.811 to 0.884 for happiness, 0.905 to
+0.957 for sadness, 0.904 to 0.967 for anger, 0.923 to 0.998 for fear, 0.982 to 1.000 for disgust and 0.908 to 0.947 for
+surprise, around the paper values of 0.850, 0.930, 0.947, 0.989, 1.000 and 0.933. The cosine of the concept swaps with
+the paper reader is 0.965 to 0.989, and `bare` reads at 0.811, 0.905, 0.964, 0.936, 0.982 and 0.928 with a cosine with
+the paper reader of 0.620, 0.600, 0.318, 0.324, 0.618 and 0.413. The random series of the emotion variants is at most
+0.658.
+- **The function framing is the exception.** `framing_swap` is the function template of an emotion, trained at the
+  response position and scored on its own items:
+
+| Emotion   | Function framing accuracy [95% interval] | Random | Shuffled | Cosine with paper | Paper accuracy |
+| --------- | ---------------------------------------- | ------ | -------- | ----------------- | -------------- |
+| happiness | 0.829 [0.805, 0.853]                     | 0.508  | 0.495    | 0.372             | 0.850          |
+| sadness   | 0.414 [0.384, 0.445]                     | 0.527  | 0.486    | 0.049             | 0.930          |
+| anger     | 0.478 [0.453, 0.502]                     | 0.449  | 0.509    | 0.075             | 0.947          |
+| fear      | 0.802 [0.781, 0.825]                     | 0.496  | 0.530    | 0.174             | 0.989          |
+| disgust   | 0.818 [0.792, 0.838]                     | 0.585  | 0.462    | 0.202             | 1.000          |
+| surprise  | 0.686 [0.667, 0.708]                     | 0.497  | 0.519    | 0.025             | 0.933          |
+
+  Its direction is nearly orthogonal to the paper direction (cosine 0.025 to 0.372). Sadness (0.414 [0.384, 0.445]) is
+  below chance with an interval entirely below 0.5, and anger (0.478 [0.453, 0.502]) is at chance with an interval that
+  reaches 0.502; happiness (0.829), fear (0.802), disgust (0.818) and surprise (0.686) are above their random series.
+  Below chance on a held-out set means the reader ranks the pairs the wrong way round, which for sadness and anger is
+  consistent with a direction that does not carry the emotion under that framing; this is not tested further here.
+  This is one run on 36 to 53 pairs per emotion, and the intervals cover the training draw only.
+
+## Position, sample size and direction finder on gpt2 (P2, P3, P4)
+
+These three runs vary one setting of the reading protocol on `gpt2` (logistic finder unless stated, 64 training pairs,
+10 seeds, the intervals of the [reading conventions](#reading-conventions)). Each is one run: `p2/gpt2/ee099a704022`,
+`p3/gpt2/676c31488397` and `p4/gpt2/8c4a73d1e9db`, all made at `ca2546c`.
+
+### Token position and a misleading sentence (P2)
+
+P2 reads sentiment (214 report pairs), truth (59) and utility (256) at three token positions: `last` (the final token,
+as everywhere else), `concept` (the token of the concept word in the prompt) and `mean` (the mean over the tokens). The
+decoy is a sentence added to the prompt that states a low or a high amount of the concept ("I think the amount of the
+concept in the scenario is low, but I'm curious to hear what you think"). A `random` decoy draws low or high per item
+independently of the label; an `against` decoy gives label 1 the low value and label 0 the high value, so that it always
+contradicts the label (the `against` decoy is an addition of this study; the random one is the paper's). The reader is
+trained on the paper template at each position and scored on the original prompts and on the prompts with the decoy.
+The zero-shot rows score the model's own verbalized level for the same scenarios, with no reader. The layer is the one
+chosen on the original prompts.
+
+| Task      | Position  | Layer | Original             | Random decoy         | Against decoy        |
+| --------- | --------- | ----- | -------------------- | -------------------- | -------------------- |
+| sentiment | last      | L8    | 0.765 [0.744, 0.780] | 0.763 [0.750, 0.774] | 0.761 [0.746, 0.773] |
+| sentiment | concept   | L10   | 0.829 [0.817, 0.840] | 0.826 [0.815, 0.838] | 0.783 [0.768, 0.797] |
+| sentiment | mean      | L9    | 0.823 [0.810, 0.837] | 0.834 [0.820, 0.848] | 0.834 [0.820, 0.849] |
+| sentiment | zero-shot | -     | 0.565 [0.495, 0.636] | 0.551 [0.486, 0.617] | 0.150 [0.103, 0.201] |
+| truth     | last      | L9    | 0.698 [0.681, 0.717] | 0.663 [0.649, 0.680] | 0.673 [0.654, 0.693] |
+| truth     | concept   | L10   | 0.676 [0.656, 0.698] | 0.651 [0.617, 0.678] | 0.578 [0.542, 0.615] |
+| truth     | mean      | L8    | 0.671 [0.649, 0.692] | 0.685 [0.654, 0.714] | 0.685 [0.654, 0.714] |
+| truth     | zero-shot | -     | 0.542 [0.424, 0.661] | 0.475 [0.339, 0.594] | 0.085 [0.017, 0.169] |
+| utility   | last      | L10   | 0.644 [0.628, 0.663] | 0.620 [0.604, 0.637] | 0.133 [0.087, 0.181] |
+| utility   | concept   | L8    | 0.650 [0.636, 0.667] | 0.654 [0.636, 0.671] | 0.634 [0.612, 0.657] |
+| utility   | mean      | L8    | 0.650 [0.629, 0.668] | 0.647 [0.628, 0.664] | 0.653 [0.635, 0.671] |
+| utility   | zero-shot | -     | 0.586 [0.527, 0.648] | 0.570 [0.508, 0.625] | 0.023 [0.008, 0.043] |
+
+- **Position.** On the original prompts the three positions read within 0.07 of each other: sentiment 0.765, 0.829 and
+  0.823, truth 0.698, 0.676 and 0.671, utility 0.644, 0.650 and 0.650. Sentiment reads higher at `concept` and `mean`
+  than at `last`; truth and utility do not.
+- **Random decoy.** The reader moves by at most 0.035 at `last` (truth: 0.698 to 0.663) and at most 0.025 at the other
+  positions; the intervals of the original and random columns overlap everywhere except truth at `last`.
+- **Against decoy: the effect depends on the task and the position.** At `last` sentiment (0.761) and truth (0.673) are
+  within 0.03 of the original, but utility drops to 0.133 [0.087, 0.181], far below chance: the reader ranks the pairs
+  the wrong way round when the decoy contradicts the label. At `concept` the drops are 0.045 (sentiment, 0.783) and
+  0.098 (truth, 0.578) and utility 0.634 is within 0.016. At `mean` no task moves by more than 0.014 (all three upward)
+  and the interval of the decoy column overlaps the original in all three. Utility at `mean` is 0.650 and 0.653, so the
+  collapse at `last` belongs to that position and that task; the run does not say why.
+- **Zero-shot.** The model's own answer drops from 0.565, 0.542 and 0.586 to 0.150, 0.085 and 0.023 under the `against`
+decoy, below chance, and is at 0.551, 0.475 and 0.570 under the random decoy. The reader at `mean` moves by at most
+0.014 under the same decoys, so the decoy that turns the model's verbalized answer around does not turn that reader.
+
+### Stimulus-set size (P3)
+
+P3 fits the reader on 2 to 512 pairs, 20 draws per size, and reports the mean accuracy. In parentheses is the failure
+rate: the share of the 20 draws whose accuracy is below 0.6. The truth set has 172 pairs, so its sizes stop at 128 (the
+256 and 512 cells are skipped). `truth_cities` and `truth_common` fit the reader on those subsets of the truth
+statements and score it on the truth target; the intervals are over the draws.
+
+| Source -> target       | 2            | 4            | 8            | 16           | 32           | 64           | 128          | 256          | 512          |
+| ---------------------- | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ |
+| sentiment -> sentiment | 0.526 (1.00) | 0.566 (0.80) | 0.583 (0.65) | 0.646 (0.20) | 0.704 (0.00) | 0.758 (0.00) | 0.790 (0.00) | 0.820 (0.00) | 0.844 (0.00) |
+| truth -> truth         | 0.510 (0.90) | 0.537 (0.85) | 0.507 (0.90) | 0.525 (0.95) | 0.551 (0.80) | 0.564 (0.70) | 0.642 (0.25) | -            | -            |
+| truth_cities -> truth  | 0.536 (0.80) | 0.518 (0.85) | 0.530 (0.85) | 0.579 (0.70) | 0.584 (0.70) | 0.606 (0.60) | 0.633 (0.05) | 0.638 (0.00) | -            |
+| truth_common -> truth  | 0.512 (0.90) | 0.492 (1.00) | 0.535 (0.85) | 0.539 (0.95) | 0.557 (0.80) | 0.565 (0.80) | 0.592 (0.60) | 0.619 (0.30) | 0.636 (0.20) |
+| utility -> utility     | 0.518 (0.80) | 0.500 (0.90) | 0.564 (0.65) | 0.581 (0.50) | 0.609 (0.30) | 0.654 (0.00) | 0.657 (0.05) | 0.660 (0.00) | 0.669 (0.00) |
+
+The accuracy of a reader fitted on all the data of the source (the reference) is 0.883 for sentiment (2,048 pairs),
+0.644 for truth (172), 0.661 for `truth_cities` (452), 0.678 for `truth_common` (1,296) and 0.711 for utility (2,048).
+The shuffled-label series is between 0.46 and 0.53 at every size.
+
+- **Sentiment** reaches 0.704 at 32 pairs with no failing draw and still rises at 512 (0.844 [0.837, 0.851]), below the
+  full-data reference of 0.883. **Utility** has no failing draw from 64 pairs (0.654) and gains 0.015 between 64 and 512
+  (0.669 [0.661, 0.676]), against 0.711 for the full data.
+- **Truth** is the slow case. The mean accuracy is 0.564 at 64 pairs (failure 0.70) and 0.642 [0.619, 0.662] at 128
+  (failure 0.25), at its reference of 0.644 but on a source that is exhausted at 172 pairs; it is still rising at 128.
+  The cities and common subsets reach 0.638 (256 pairs) and 0.636 (512) without leveling off, and with 0.00 and 0.20
+  failing draws. The data do not locate a saturation point for truth.
+- The stored saturation size is the smallest size whose mean accuracy is within 0.01 of the mean at the largest size:
+  512 for sentiment, 128 for truth, 256 for utility (bootstrap range 64 to 512), 128 for `truth_cities` (range 64 to
+  256) and 512 for `truth_common` (range 256 to 512). For truth and `truth_cities` the largest size is the end of a
+  small set (128 and 256 pairs), so their saturation sizes are limits of the set and not measured saturation.
+
+### Direction finder, pairing and preprocessing (P4)
+
+P4 compares six finders on the same pairs: `pca_diff` (the paper's finder and the P4 reference), `pca_raw`, `mean_diff`,
+`logistic`, `kmeans` and a `random` direction. The pairings are `matched` (a label-1 member of a group with another
+member of the same group, available for utility only), `label_contrastive` (a label-1 with a label-0 stimulus anywhere
+in the examples) and `random` (any two stimuli, whatever their labels). The preprocessing is `center`, `unit` or `none`.
+Report-split accuracy at the layer chosen on the select split, with the interval over the 10 seeds; shuffled-label
+accuracy is between 0.45 and 0.52. Centered preprocessing, the pairing the task has:
+
+| Task (pairing)                | pca_diff             | pca_raw              | mean_diff            | logistic             | kmeans               | random               |
+| ----------------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| sentiment (label_contrastive) | 0.512 [0.497, 0.527] | 0.496 [0.479, 0.512] | 0.667 [0.634, 0.695] | 0.765 [0.744, 0.781] | 0.495 [0.483, 0.507] | 0.543 [0.514, 0.572] |
+| truth (label_contrastive)     | 0.481 [0.463, 0.502] | 0.475 [0.461, 0.493] | 0.537 [0.524, 0.553] | 0.698 [0.681, 0.717] | 0.478 [0.464, 0.493] | 0.510 [0.486, 0.532] |
+| utility (matched)             | 0.551 [0.502, 0.585] | 0.555 [0.522, 0.573] | 0.627 [0.609, 0.643] | 0.644 [0.628, 0.663] | 0.557 [0.524, 0.577] | 0.526 [0.495, 0.555] |
+
+By pairing, centered preprocessing:
+
+| Task      | Pairing           | pca_diff | pca_raw | mean_diff | logistic | kmeans | random |
+| --------- | ----------------- | -------- | ------- | --------- | -------- | ------ | ------ |
+| sentiment | label_contrastive | 0.512    | 0.496   | 0.667     | 0.765    | 0.495  | 0.543  |
+| sentiment | random            | 0.482    | 0.497   | 0.689     | 0.742    | 0.478  | 0.547  |
+| truth     | label_contrastive | 0.481    | 0.475   | 0.537     | 0.698    | 0.478  | 0.510  |
+| truth     | random            | 0.480    | 0.498   | 0.642     | 0.669    | 0.490  | 0.510  |
+| utility   | matched           | 0.551    | 0.555   | 0.627     | 0.644    | 0.557  | 0.526  |
+| utility   | label_contrastive | 0.518    | 0.543   | 0.590     | 0.624    | 0.547  | 0.505  |
+| utility   | random            | 0.513    | 0.528   | 0.598     | 0.617    | 0.559  | 0.506  |
+
+By preprocessing, with the pairing above:
+
+| Task      | Finder    | center               | unit                 | none                 |
+| --------- | --------- | -------------------- | -------------------- | -------------------- |
+| sentiment | pca_diff  | 0.512 [0.497, 0.527] | 0.503 [0.484, 0.519] | 0.496 [0.479, 0.512] |
+| sentiment | pca_raw   | 0.496 [0.479, 0.512] | 0.496 [0.484, 0.507] | 0.523 [0.511, 0.529] |
+| sentiment | mean_diff | 0.667 [0.634, 0.695] | 0.678 [0.649, 0.706] | 0.667 [0.638, 0.694] |
+| sentiment | logistic  | 0.765 [0.744, 0.781] | 0.746 [0.729, 0.760] | 0.669 [0.636, 0.696] |
+| truth     | pca_diff  | 0.481 [0.463, 0.502] | 0.475 [0.458, 0.495] | 0.481 [0.464, 0.502] |
+| truth     | pca_raw   | 0.475 [0.461, 0.493] | 0.473 [0.461, 0.488] | 0.627 [0.627, 0.627] |
+| truth     | mean_diff | 0.537 [0.524, 0.553] | 0.536 [0.522, 0.551] | 0.537 [0.522, 0.553] |
+| truth     | logistic  | 0.698 [0.681, 0.717] | 0.658 [0.634, 0.678] | 0.537 [0.524, 0.553] |
+| utility   | pca_diff  | 0.551 [0.502, 0.585] | 0.550 [0.507, 0.582] | 0.550 [0.500, 0.584] |
+| utility   | pca_raw   | 0.555 [0.522, 0.573] | 0.555 [0.521, 0.574] | 0.533 [0.529, 0.537] |
+| utility   | mean_diff | 0.627 [0.609, 0.643] | 0.623 [0.602, 0.642] | 0.627 [0.609, 0.643] |
+| utility   | logistic  | 0.644 [0.628, 0.663] | 0.644 [0.630, 0.660] | 0.627 [0.609, 0.644] |
+
+- **The paper finder does not read here.** `pca_diff` is at 0.512 for sentiment and 0.481 for truth, no better than the
+  random direction (0.543 and 0.510), and 0.551 for utility against 0.526. `pca_raw` and `kmeans` are the same. The
+  first principal component explains 20 percent (sentiment), 26 percent (truth) and 74 percent (utility, matched) of
+  the variance of the pair differences, and the component chosen by cross-validation among the first eight
+  reads 0.552 [0.517, 0.595] (sentiment), 0.485 (truth) and 0.506 (utility, matched).
+- **The supervised finders read.** `logistic` is the highest on all three tasks (0.765, 0.698, 0.644) and `mean_diff` is
+  second (0.667, 0.537, 0.627). On utility the two are within 0.017 of each other and their intervals overlap; on
+  truth `mean_diff` (0.537) is only just above the random direction.
+- **Pairing.** The best pairing for `logistic` is `label_contrastive` for sentiment (0.765 against 0.742 for `random`)
+  and truth (0.698 against 0.669), and `matched` for utility (0.644 against 0.624 for `label_contrastive` and 0.617).
+  The differences between pairings are at most 0.03 for `logistic`; for `mean_diff` on truth the `random` pairing is
+  higher (0.642 against 0.537).
+- **Preprocessing.** `logistic` loses with less preprocessing on sentiment (0.765, 0.746, 0.669) and truth (0.698,
+  0.658, 0.537) and not on utility (0.644, 0.644, 0.627). The `pca_raw` truth cell without preprocessing, 0.627, has an
+  interval of zero width: the ten readers give the same value, so it is not read as a reader result.
+- These are one run on `gpt2`; the finder ranking is not shown to hold on the other sizes.
+
 ## Sentiment steering on the GPT-2 ladder (C1)
 
 C1 steers generation with the SST-2 sentiment reading vector and scores the completions of 100 neutral prompts with two
@@ -718,6 +964,168 @@ below the distinct-1 cutoff (0.147 for a reader of `qwen3-0.6b` and of `qwen3-1.
   show the effect of the sentiment vector at each coefficient but not how it compares with an arbitrary edit of that
   size.
 
+## Other steering experiments on gpt2 (M1, C2, P7, LR1, C4, C5)
+
+Six further runs on `gpt2` that steer or edit the model along a reading direction, all made at `ca2546c` with a clean
+tree (C5 on `gpt2-xl`). **None of these runs stores the perplexity or the distinct-1 of the generated text.** The C1
+sections show that a high steered score at a large coefficient can come with degenerate text: on `gpt2` the C1
+perplexity is 139.3 at +0.2 and 438.0 at +0.3 against 53.6 without steering, and the distinct-1 at +0.3 is between 0.043
+and 0.099 across the four sizes. These runs use coefficients of the same relative range (up to 0.3), and nothing in
+their files shows whether the steered text is fluent. No score in this section is called fluent or read as steering that
+works. Only M1 has a random-direction arm; C2, P7, LR1, C4 and C5 do not.
+
+### Six direction finders on utility (M1)
+
+M1 reads utility (ETHICS) with six finders and compares them on held-out reading, on steering and on erasure (run
+`m1/gpt2/4e394ed1a72c`; 10 readers per finder, the first 3 used for steering, 250 prompts, one sample per prompt). The
+steering score is a win rate: the share of (prompt, reader) pairs, 750 per cell, in which the completion steered with +s
+is scored higher by the primary sentiment judge than the completion steered with -s on the same sampling seed, so 0.5
+means no effect. All finders steer at the same control layers (5, 7 and 8), so depth is not a confound. The prompts are
+shared by all finders and readers, so the Wilson intervals below are narrower than the variation between prompt draws.
+Test accuracy is on 4,808 pairs, at the layer of each finder (the `correlation` task of the run).
+
+| Finder    | Test accuracy        | Layer | Win rate 0.1         | Win rate 0.2         | Win rate 0.3         | Check judge 0.3      |
+| --------- | -------------------- | ----- | -------------------- | -------------------- | -------------------- | -------------------- |
+| pca_diff  | 0.544 [0.521, 0.557] | L9    | 0.595 [0.559, 0.629] | 0.637 [0.602, 0.671] | 0.713 [0.680, 0.745] | 0.655 [0.620, 0.688] |
+| pca_raw   | 0.538 [0.515, 0.551] | L10   | 0.533 [0.498, 0.569] | 0.607 [0.571, 0.641] | 0.672 [0.638, 0.705] | 0.629 [0.594, 0.663] |
+| mean_diff | 0.627 [0.614, 0.640] | L12   | 0.721 [0.688, 0.752] | 0.872 [0.846, 0.894] | 0.903 [0.879, 0.922] | 0.869 [0.843, 0.891] |
+| logistic  | 0.655 [0.644, 0.667] | L12   | 0.771 [0.739, 0.799] | 0.880 [0.855, 0.901] | 0.925 [0.904, 0.942] | 0.916 [0.894, 0.934] |
+| kmeans    | 0.535 [0.513, 0.548] | L10   | 0.497 [0.462, 0.533] | 0.517 [0.482, 0.553] | 0.592 [0.556, 0.627] | 0.543 [0.507, 0.578] |
+| random    | 0.533 [0.509, 0.558] | L10   | 0.491 [0.455, 0.526] | 0.456 [0.421, 0.492] | 0.432 [0.397, 0.468] | 0.413 [0.379, 0.449] |
+
+- **Reading and steering rank the finders alike, with one exception.** `logistic` (0.655 test accuracy, 0.925 win rate
+  at 0.3) and `mean_diff` (0.627, 0.903) steer most. `pca_raw` (0.672) and `kmeans` (0.592) steer less, and `random` is
+  at or below 0.5 at every strength and falls with it (0.491, 0.456, 0.432). The check judge gives the same ranking
+  (`logistic` 0.916, `mean_diff` 0.869, `random` 0.413 at 0.3); the share of swept settings with the same dose sign
+  under both judges is 0.889.
+- **`pca_diff` steers more than it reads.** It reads at 0.544, level with the random direction (0.533), and steers at
+  0.713 at 0.3, above the random direction by 0.281. Reading accuracy and steering do not track each other one for one
+  for the paper's finder.
+- **The random direction is below 0.5.** At 0.3 its interval [0.397, 0.468] excludes 0.5, so a random edit of the same
+  relative size moves the completions the other way on average, and a finder's win rate is not read against 0.5 alone.
+  The run does not say why.
+- **No fluency measure is stored**, so no win rate here is a measure of steering that keeps the text readable. The
+  share of empty completions over all generations is 0.00007.
+
+Erasure. Projecting a finder's direction out of the activations and fitting a fresh logistic probe on the stored
+activations of the control layers gives a probe accuracy of 0.628 [0.571, 0.696] before. After the projection it is
+0.500 for `mean_diff`, 0.563 [0.512, 0.608] for `logistic`, and 0.635, 0.630, 0.633 and 0.627 for `pca_diff`, `pca_raw`,
+`kmeans` and `random` (a fit that stops at zero counts as chance in this measure). The behavioral gap (the score after
+the more pleasant scenario of a pair minus after the less pleasant one) is 0.042 [-0.082, 0.162] without a projection
+and between 0.039 and 0.118 under the projection of each finder (`logistic` [-0.000, 0.082], `random` [0.109, 0.124]).
+No finder lowers it by more than 0.003 and all the intervals overlap the unprojected one. The two operationalizations of
+erasure disagree: the probe is erased for two finders and the behavioral gap for none.
+
+### Emotion steering (C2)
+
+C2 steers `gpt2` along the logistic reader of each of the six R4 emotions and measures, with the primary emotion
+judge, the probability of every emotion in the completions (run `c2/gpt2/85c9a670bf17`; reading layer L10, steered over
+layers 9, 10 and 11, relative strength +0.3, 100 prompts, 2 samples per prompt, 3 steering seeds). The range is the
+minimum and maximum over the three steering seeds; the change is the own-emotion probability at +0.3 minus the
+unsteered one, read from the change matrix of the run.
+
+| Emotion   | Primary judge: no steering | Primary judge: at +0.3 [range over seeds] | Primary judge: change | Check judge: no steering | Check judge: at +0.3 | Check judge: change | Largest off-diagonal change (primary) |
+| --------- | -------------------------- | ----------------------------------------- | --------------------- | ------------------------ | -------------------- | ------------------- | ------------------------------------- |
+| happiness | 0.126                      | 0.686 [0.593, 0.750]                      | +0.560                | 0.347                    | 0.889                | +0.542              | surprise +0.010                       |
+| sadness   | 0.084                      | 0.403 [0.382, 0.441]                      | +0.319                | 0.166                    | 0.424                | +0.258              | disgust -0.005                        |
+| anger     | 0.056                      | 0.090 [0.077, 0.102]                      | +0.034                | 0.106                    | 0.278                | +0.172              | sadness +0.036                        |
+| fear      | 0.102                      | 0.559 [0.489, 0.683]                      | +0.458                | 0.136                    | 0.166                | +0.030              | anger -0.023                          |
+| disgust   | 0.073                      | 0.313 [0.222, 0.412]                      | +0.240                | 0.141                    | 0.269                | +0.128              | anger +0.027                          |
+| surprise  | 0.094                      | 0.151 [0.141, 0.165]                      | +0.057                | 0.084                    | 0.073                | -0.011              | anger -0.035                          |
+
+- **On the primary judge four of six emotions rise toward their own score.** Happiness (0.126 to 0.686), fear (0.102 to
+  0.559), sadness (0.084 to 0.403) and disgust (0.073 to 0.313) rise, with the range over seeds above the unsteered
+value. Anger (0.056 to 0.090) and surprise (0.094 to 0.151) rise by 0.034 and 0.057 only. The curve of disgust peaks at
++0.2 (0.411) and falls at +0.3.
+- **Hit rate and specificity** (the share of rows of the change matrix whose largest entry is on the diagonal, and the
+  mean diagonal change minus the mean off-diagonal change) are 0.833 and 0.323 on the primary judge and 1.000 and 0.264
+on the check judge. The primary judge misses once, for anger, whose largest change is on sadness (+0.036 against +0.034
+on the diagonal). The check judge's hit for anger is a margin of 0.001 over disgust (+0.172 against +0.171).
+- **The judges disagree on fear and anger.** The diagonal change of fear is +0.458 on the primary judge and +0.030 on
+  the check judge, and the check judge puts anger at +0.172 where the primary judge has +0.034. The correlation between
+  the two judges over the matrix is 0.792. Fear is steered on one judge and not on the other.
+- **Not stored and not controlled.** No perplexity or distinct-1 and no random-direction arm, so the table shows an
+  effect of the emotion vector at +0.3 on a judge, not whether the text is fluent and not how an arbitrary edit of the
+  same size compares. The probabilities are those of a classifier on short completions; the run does not measure whether
+  a human would read them as the emotion.
+
+### Template steering (P7)
+
+P7 extracts the sentiment reader under six templates of P1 and steers with the C1 protocol (run `p7/gpt2/6c19128c5192`;
+coefficients -0.3, -0.15, 0, 0.15 and 0.3, 50 prompts, 2 samples per prompt, 2 steering readers per template), over the
+sweep layers 1, 3, 5, 8, 10 and 12. A unit is a template, a sweep layer and a steering reader (72 units). It is readable
+if the validation accuracy of its reader at that layer is at least 0.6, and inverted if it is readable and its primary
+dose slope is negative.
+
+| Template       | Read layer | Read accuracy | Steer layer | Dose slope at L12 | Dose slope, sweep layers 1 to 10 | Readable units | Inverted |
+| -------------- | ---------- | ------------- | ----------- | ----------------- | -------------------------------- | -------------- | -------- |
+| paper          | L8         | 0.772         | L12         | 1.535             | 0.155 to 0.885                   | 12             | 0        |
+| no_template    | L10        | 0.817         | L12         | 1.664             | 0.029 to 0.853                   | 12             | 0        |
+| no_chat_tags   | L11        | 0.870         | L12         | 1.715             | 0.307 to 1.144                   | 12             | 0        |
+| neutral_frame  | L10        | 0.798         | L12         | 1.639             | 0.020 to 0.972                   | 12             | 1        |
+| scaffold_0     | L11        | 0.862         | L12         | 1.681             | 0.102 to 1.013                   | 12             | 0        |
+| concept_swap_0 | L10        | 0.791         | L12         | 1.657             | 0.106 to 0.791                   | 12             | 0        |
+
+- **Every template steers most at the last sweep layer.** The steering layer is L12 for all six templates, the last
+  layer of the sweep and the last block of the model, so it is the edge of what was swept and not an interior optimum.
+  The slope rises with the layer overall, with a dip at layer 5 for the paper template (0.155, 0.426, 0.271, 0.650,
+  0.885 and 1.535 at layers 1, 3, 5, 8, 10 and 12). The slope at the steering layer is measured on the prompts that
+  chose that layer and is optimistic.
+- **Reading and steering.** Every unit is readable (72 of 72) and one is inverted (`neutral_frame`), a rate of 0.014
+  [0.002, 0.075]. The Spearman correlation over the 72 units is 0.875 between reading accuracy and dose slope and 0.937
+  between the logit-lens score and dose slope, and the sign of the slope agrees between the two judges for 0.958 of the
+  units. The mean slope in the prompt-format transfer (raw, chat and story formats) is 1.507 to 1.679 for the six
+  templates.
+- **The correlation is not separated from depth.** Both the reading accuracy and the slope rise with depth over the
+  sweep, so a rank correlation over units that mixes layers can be driven by depth alone. The run does not give the
+  within-layer correlation.
+- **Not stored and not controlled.** No perplexity or distinct-1, and no random-direction arm. The grid reaches 0.3,
+  where C1 on `gpt2` has a perplexity of 438.0, so a dose slope fitted over it is not a rate of steering within fluent
+  text.
+
+### LoRRA adapter (LR1) and the TruthfulQA control (C4)
+
+LR1 trains one LoRRA adapter on `gpt2` (run `lr1/gpt2/1e9cd6f56388`: layers 4, 6 and 8, rank 8, learning rate 3e-4, 70
+steps, 196,608 trainable parameters, 2,000 training examples and 64 held-out, with the control prompts "Give a truthful
+answer." and "Give an untruthful answer."). The training loss goes from 27.4 to 15.7, and the held-out loss from 7.07 to
+3.80 at layer 4, from 8.05 to 4.65 at layer 6 and from 11.11 to 6.72 at layer 8 (reductions of 0.463, 0.423 and 0.396).
+LR1 has no honesty evaluation; it trains the adapter that C4 uses.
+
+C4 asks whether steering or the adapter changes TruthfulQA MC1 (run `c4/gpt2/1b571ac45420`, which reads the LR1
+adapter). MC1 is scored on the log-probabilities of the answer choices under the edited model, not on generated text.
+The 173 test questions are those of R6, the coefficients are chosen on the 644 train and validation questions, and the
+chance line is 0.228. The unsteered row (0.168) is the standard row of R6. C4 scores the edited model itself and trains
+no reader on the test answers, so the R6 text baselines (0.676 and 0.671) are not its comparison.
+
+| Arm                        | Test MC1 [95% interval] | Change from unsteered [95% interval]       |
+| -------------------------- | ----------------------- | ------------------------------------------ |
+| none                       | 0.168 [0.119, 0.230]    | 0                                          |
+| prompting +1 and -1        | 0.168 [0.119, 0.230]    | 0.000 [-0.023, +0.023]                     |
+| difference (0.1)           | 0.214 [0.159, 0.281]    | +0.046 [+0.006, +0.087]                    |
+| contrast (0.25)            | 0.173 [0.124, 0.237]    | +0.006 [0.000, +0.017]                     |
+| LoRRA                      | 0.179 [0.129, 0.243]    | +0.012 [0.000, +0.029]                     |
+| reading (10 readers, mean) | 0.180 (0.168 to 0.197)  | +0.012 (every reader's interval has zero)  |
+
+- **Every arm is below the chance line of 0.228.** The only change whose interval excludes zero is `difference`
+  (+0.046, a gain of 8 questions of 173), among all the arms of the table and with no correction for multiple
+  comparisons. The `contrast` and LoRRA intervals touch zero at 0.000.
+- **The ten readers move MC1 little.** Their test MC1 ranges from 0.168 to 0.197. The coefficient chosen on the train
+  and validation questions was negative for five readers (-0.05, -0.1, -0.1, -0.2 and -0.2), zero for two and +0.05 for
+  three, so the selection did not find one sign, and the largest changes (+0.023 to +0.029) are those of readers with a
+  negative coefficient.
+- **No perplexity or distinct-1** is stored for C4. The scoring is not generation, so the cost to the text is not
+  measured.
+
+### Lie gallery (C5)
+
+C5 on `gpt2-xl` (run `c5/gpt2-xl/155f0f72bc3f`; 1,000 TriviaQA questions, a 15-shot prompt, one sample per question at
+temperature 0.8, relative strength 0.1, steered over layers 13, 17, 22, 27, 31, 35, 40 and 45) records the share of
+correct answers without steering and under an honesty-steered and a lie-steered arm: 0.147, 0.107 and 0.080. Of the 147
+questions answered correctly without steering, 77 are answered wrongly under the lie arm, a flip rate of 0.524 [0.443,
+0.603]. The honesty-steered arm is also below the unsteered one, and there is no random-direction arm, so the flips do
+not separate an effect of the lie direction from a generic perturbation of the model. No perplexity or distinct-1 is
+stored. This run has no emotion gallery.
+
 ## Base against post-trained Qwen3 (P8)
 
 P8 pairs each base checkpoint of Qwen3 with its post-trained one, at 1.7B and 0.6B, and reads the finished runs of the
@@ -819,10 +1227,13 @@ the known against unknown direction, P9c predicts the errors of the model and P9
 while it answers. The definitions, the guess control and the statistics are in the
 [methodology](methodology.md#known-versus-unknown-questions-p9).
 
-The runs reported here use the current label schema (12 PopQA relations, the guess control) and are those of `gpt2-xl`
-and of the Qwen3 0.6B and 1.7B checkpoints. P9a covers all five models. P9b and P9c ran on `gpt2-xl` and the two base
-checkpoints, and P9d on the four Qwen3 checkpoints (base and post-trained); P9b and P9c have no post-trained run. The
-GPT-2 ladder below `gpt2-xl` and P9d on `gpt2-xl` are in [Pending](#pending). Questions are labeled from the behavior
+The runs reported here use the current label schema (12 PopQA relations, the guess control) and are those of the four
+GPT-2 sizes and of the Qwen3 0.6B and 1.7B checkpoints. P9a covers all eight models. P9b and P9c ran on the four GPT-2
+sizes and the two Qwen3 base checkpoints, and P9d on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the four Qwen3
+checkpoints (base and post-trained); P9b and P9c have no post-trained run. `gpt2` is the one model whose label gate
+closes (70 known questions after the guess control, below the 100 the gate asks for), so it has no known against
+unknown contrast: its P9b run reads only the contrasts between kinds of unknown questions, its P9c run has no label-free
+`lat` predictor, and P9d did not run on it. Questions are labeled from the behavior
 of each model, so each model has its own question sets and a count or an AUROC is not a measure of the same questions
 across models. Each cell is one run, so no interval includes variation between runs. The post-trained checkpoints use
 the chat template with thinking disabled (see the Qwen3 section).
@@ -831,11 +1242,11 @@ the chat template with thinking disabled (see the Qwen3 section).
 
 P9a labels each closed-book question from the behavior of the model on a 15-shot prompt: known if the greedy answer is
 correct and at least 3 of 5 samples at temperature 1.0 are correct, unknown if the greedy answer is wrong and no
-sample is correct, uncertain otherwise. A run labels 21,988 questions (22,028 for `gpt2-xl`). The sources whose
-questions can be known are PopQA (9,467 questions over 12 relations), TriviaQA and NQ-open (1,000 each) and the real
-award questions; the others (SyntHal, generated names, unknowable details, FalseQA, KUQ) are unknown by construction.
-The counts below are after the guess control, which turns a known question that it rejects into an uncertain one. Each
-model is labeled on its own behavior, so the question sets differ between models.
+sample is correct, uncertain otherwise. A run labels 21,988 questions (22,028 for the four GPT-2 sizes). The sources
+whose questions can be known are PopQA (9,467 questions over 12 relations), TriviaQA and NQ-open (1,000 each) and the
+real award questions; the others (SyntHal, generated names, unknowable details, FalseQA, KUQ) are unknown by
+construction. The counts below are after the guess control, which turns a known question that it rejects into an
+uncertain one. Each model is labeled on its own behavior, so the question sets differ between models.
 
 Known / unknown / uncertain questions per source:
 
@@ -845,6 +1256,9 @@ Known / unknown / uncertain questions per source:
 | qwen3-0.6b      | 277 / 8,446 / 744   | 89 / 776 / 135   | 27 / 911 / 62   |
 | qwen3-1.7b-base | 501 / 7,928 / 1,038 | 291 / 502 / 207  | 70 / 775 / 155  |
 | qwen3-1.7b      | 517 / 8,137 / 813   | 271 / 592 / 137  | 71 / 848 / 81   |
+| gpt2            | 69 / 8,836 / 562    | 1 / 919 / 80     | 0 / 973 / 27    |
+| gpt2-medium     | 176 / 8,569 / 722   | 20 / 851 / 129   | 5 / 936 / 59    |
+| gpt2-large      | 243 / 8,495 / 729   | 49 / 767 / 184   | 12 / 937 / 51   |
 | gpt2-xl         | 324 / 8,397 / 746   | 94 / 710 / 196   | 14 / 909 / 77   |
 
 Guess control, in questions:
@@ -855,23 +1269,29 @@ Guess control, in questions:
 | qwen3-0.6b      | 669          | 393         | 0                 | 7            | 269              |
 | qwen3-1.7b-base | 1,090        | 863         | 42                | 12           | 173              |
 | qwen3-1.7b      | 1,118        | 860         | 24                | 11           | 223              |
+| gpt2            | 87           | 70          | 0                 | 2            | 15               |
+| gpt2-medium     | 301          | 201         | 0                 | 4            | 96               |
+| gpt2-large      | 428          | 304         | 0                 | 4            | 120              |
 | gpt2-xl         | 540          | 432         | 0                 | 5            | 103              |
 
-- **Known questions are few.** After the guess control a model has 393 to 863 known questions: 393 (`qwen3-0.6b`), 432
-  (`gpt2-xl`), 525 (`qwen3-0.6b-base`), 860 (`qwen3-1.7b`) and 863 (`qwen3-1.7b-base`), against 21,988 to 22,028
-  questions. They come from PopQA (277 to 517 per model), TriviaQA (89 to 291) and NQ-open (14 to 71); the real award
-  questions give at most 1.
-- **The guess control matters.** It demotes 108 (`gpt2-xl`) to 276 (`qwen3-0.6b`) of the known questions of a model,
-  103 to 269 of them because their stratum is excluded (`popqa:sport` is excluded by default, and so are the strata
+- **Known questions are few.** After the guess control a model has 70 to 863 known questions: 70 (`gpt2`), 201
+  (`gpt2-medium`), 304 (`gpt2-large`), 393 (`qwen3-0.6b`), 432 (`gpt2-xl`), 525 (`qwen3-0.6b-base`), 860
+  (`qwen3-1.7b`) and 863 (`qwen3-1.7b-base`), against 21,988 to 22,028 questions. They come from PopQA (69 to 517 per
+  model), TriviaQA (1 to 291) and NQ-open (0 to 71); the real award questions give at most 1, and no source other than
+  these three has a known question on `gpt2`, `gpt2-medium` or `gpt2-large`. The count rises with size inside the GPT-2
+  family (70, 201, 304, 432).
+- **The guess control matters.** It demotes 17 (`gpt2`) to 276 (`qwen3-0.6b`) of the known questions of a model, 15 to
+  269 of them because their stratum is excluded (`popqa:sport` is excluded by default, and so are the strata
   whose constant-guess accuracy is above 0.10).
 - **Base against post-trained.** At 1.7B the two checkpoints have 863 and 860 known questions; at 0.6B the base
   checkpoint has 525 and the post-trained one 393. Labels come from each model's own behavior, so this is a count of
   what each model answers under the labeling recipe, not a comparison on common questions.
-- **Gate and cutoff.** All five models pass the gate (at least 100 guess-adjusted known questions), so the known
-  against unknown contrasts are built. The cutoff year is a setting (2017 for `gpt2-xl`, 2024 for Qwen3). The cutoff
+- **Gate and cutoff.** Seven of the eight models pass the gate (at least 100 guess-adjusted known questions), so the
+  known against unknown contrasts are built for them. `gpt2` does not (70), and the run records
+  `known_contrasts = false`. The cutoff year is a setting (2017 for `gpt2-xl`, 2024 for Qwen3). The cutoff
   estimated from the labels is stored for two runs, 2014 for `qwen3-1.7b-base` and 2007 for `qwen3-1.7b`, and does not
-  match the setting. The only result below that uses the cutoff is the `pre_vs_post_cutoff` row of `gpt2-xl`; the
-  post-cutoff contrasts have too few items for the Qwen3 models.
+match the setting. The only results below that use the cutoff are the `pre_vs_post_cutoff` rows of the four GPT-2 sizes;
+the post-cutoff contrasts have too few items for the Qwen3 models.
 
 ### Reading the direction (P9b)
 
@@ -979,6 +1399,95 @@ The others, pooled:
   at 0.94 or above (the better of the two) on every row except `triviaqa_known` and `kuq_ambiguous`, which says that
   the wording separates the sides there; a reader at 0.98 to 1.00 on those rows does not show that it reads knowledge.
 
+#### The other GPT-2 sizes
+
+P9b on `gpt2`, `gpt2-medium` and `gpt2-large` (runs `p9b/gpt2/fd3bdc5a4b0d`, `p9b/gpt2-medium/a5a9c7d7b176` and
+`p9b/gpt2-large/7b3fd5d1bfb5`, made at `ca2546c` on the labels of the P9a runs of the same size) uses the same recipe
+as above: five logistic readers on 64 pairs each, one layer per model chosen on the pooled validation AUROC, which is
+L4 on `gpt2`, L24 on `gpt2-medium` and L36 on `gpt2-large` (the last block of both larger models). Every reader value
+is given next to `text_word`, `text_char` and `popularity`. Only the contrasts with at least 16 training questions on
+each side and 10 validation questions on each side are read: `gpt2` has no known against unknown contrast (its gate
+closed), so it reads only the three contrasts between kinds of unknown questions; `gpt2-medium` reads six contrasts
+(`fictional_synthal`, `triviaqa_known`, `unknowable_detail`, `false_premise` and the six KUQ categories are skipped for
+lack of items) and `gpt2-large` reads 15 (only `fictional_synthal` is skipped).
+
+PopQA known against unknown, within relation (the headline), mean AUROC over the five readers. `obscure_real_pop` also
+matches the popularity bin, so it is the within-popularity version of the contrast:
+
+| Model       | Contrast         | Test known / unknown | Test pairs | Reader | popularity | text_word | text_char |
+| ----------- | ---------------- | -------------------- | ---------- | ------ | ---------- | --------- | --------- |
+| gpt2-medium | obscure_real     | 46 / 1,746           | 3,500      | 0.778  | 0.728      | 0.556     | 0.557     |
+| gpt2-medium | obscure_real_pop | 46 / 1,746           | 3,500      | 0.808  | 0.728      | 0.556     | 0.557     |
+| gpt2-large  | obscure_real     | 55 / 1,734           | 3,999      | 0.815  | 0.787      | 0.550     | 0.536     |
+| gpt2-large  | obscure_real_pop | 55 / 1,734           | 3,999      | 0.800  | 0.787      | 0.550     | 0.536     |
+
+The same contrasts pooled over relations, with the AUROC of a random direction:
+
+| Model       | Contrast         | Reader | Random direction | popularity | text_word | text_char |
+| ----------- | ---------------- | ------ | ---------------- | ---------- | --------- | --------- |
+| gpt2-medium | obscure_real     | 0.858  | 0.758            | 0.813      | 0.945     | 0.929     |
+| gpt2-medium | obscure_real_pop | 0.850  | 0.758            | 0.813      | 0.945     | 0.929     |
+| gpt2-large  | obscure_real     | 0.928  | 0.702            | 0.886      | 0.924     | 0.930     |
+| gpt2-large  | obscure_real_pop | 0.937  | 0.702            | 0.886      | 0.924     | 0.930     |
+
+Other relational contrasts, within relation, as reader / `text_word` / `text_char` (`popularity` is not defined for
+them):
+
+| Contrast                              | gpt2                  | gpt2-medium           | gpt2-large            |
+| ------------------------------------- | --------------------- | --------------------- | --------------------- |
+| fictional_generated (within relation) | not read              | 0.924 / 0.836 / 0.924 | 0.985 / 0.816 / 0.976 |
+| real_vs_synthal (within relation)     | 0.940 / 0.738 / 1.000 | 0.946 / 0.738 / 1.000 | 0.968 / 0.737 / 1.000 |
+| real_vs_generated (within relation)   | 0.977 / 0.951 / 0.998 | 0.956 / 0.951 / 0.998 | 0.971 / 0.951 / 0.998 |
+| pre_vs_post_cutoff (within relation)  | 1.000 / 1.000 / 1.000 | 0.947 / 1.000 / 1.000 | 0.984 / 1.000 / 1.000 |
+
+Contrasts without PopQA questions on a side, pooled, as reader / `text_word` / `text_char` (`gpt2-large` only; the
+`triviaqa_known` test set has 10 known questions and each KUQ category 11):
+
+| Contrast             | gpt2     | gpt2-medium | gpt2-large            |
+| -------------------- | -------- | ----------- | --------------------- |
+| triviaqa_known       | not read | not read    | 0.869 / 0.761 / 0.743 |
+| unknowable_detail    | not read | not read    | 1.000 / 1.000 / 1.000 |
+| false_premise        | not read | not read    | 0.961 / 0.975 / 0.955 |
+| kuq_ambiguous        | not read | not read    | 0.960 / 0.842 / 0.925 |
+| kuq_controversial    | not read | not read    | 0.977 / 0.901 / 0.927 |
+| kuq_counterfactual   | not read | not read    | 0.997 / 0.998 / 1.000 |
+| kuq_false_assumption | not read | not read    | 0.963 / 0.980 / 0.960 |
+| kuq_future_unknown   | not read | not read    | 0.978 / 0.997 / 1.000 |
+| kuq_unsolved_problem | not read | not read    | 0.985 / 0.951 / 0.967 |
+
+- **Within relation the reader is above popularity and the text baselines, by less than on the other models.** On
+  `obscure_real` the reader reads 0.778 on `gpt2-medium` and 0.815 on `gpt2-large`, against a popularity baseline of
+  0.728 and 0.787: a margin of 0.050 and 0.028, against 0.064 on `gpt2-xl` and 0.080 to 0.120 on the Qwen3 base
+  checkpoints. The word and character classifiers are at 0.556 and 0.557 on `gpt2-medium` and 0.550 and 0.536 on
+  `gpt2-large`, close to chance. With the popularity bin matched (`obscure_real_pop`) the reader reads 0.808 and 0.800,
+  a margin over popularity of 0.080 on `gpt2-medium` and about 0.01 on `gpt2-large`. The margin on `gpt2-large` is small
+against a test known side of 55 questions, and the stored interval covers the pair draws of the reader and not the test
+sampling, so it does not show that the reader recovers more than popularity there. The margin does not rise with size
+along the ladder (0.050, 0.028 and 0.064 for medium, large and xl).
+- **Pooled, the reader carries nothing that the wording does not.** On `gpt2-medium` the pooled reader (0.858) is below
+  both text baselines (0.945 and 0.929) and above popularity (0.813) and a random direction (0.758); on `gpt2-large` it
+  (0.928) is level with them (0.924 and 0.930) and above popularity (0.886) and a random direction (0.702). On
+  `fictional_generated` the reader is below `text_char` pooled on both (0.903 against 0.981, 0.970 against 0.989) and
+  within relation level with it on `gpt2-medium` (0.924 against 0.924) and 0.009 above it on `gpt2-large` (0.985 against
+  0.976).
+- **Between kinds of unknown questions the reader is below the character classifier.** `real_vs_synthal`,
+  `real_vs_generated` and `pre_vs_post_cutoff` are read on all three sizes. Pooled, in the order `gpt2`, `gpt2-medium`,
+`gpt2-large`, the reader reads 0.939, 0.937 and 0.959 on `real_vs_synthal` (`text_char` 1.000 on all three), 0.959,
+0.937 and 0.952 on `real_vs_generated` (`text_char` 0.998) and 0.995, 0.953 and 0.974 on `pre_vs_post_cutoff`
+(`text_char` 1.000). The reader is below `text_char` on all three contrasts and on all three sizes, so the only
+contrasts that `gpt2` reads do not show more than the wording of the question carries. These contrasts do not contain
+known questions.
+- **`gpt2-large`, the 15 contrasts.** The reader is above both text baselines, pooled, on five: `triviaqa_known` (0.869
+  against 0.761 and 0.743), `kuq_controversial` (0.977 against 0.901 and 0.927), `kuq_ambiguous` (0.960 against 0.842
+  and 0.925), `kuq_unsolved_problem` (0.985 against 0.951 and 0.967) and `obscure_real_pop` (0.937 against 0.924 and
+  0.930, a margin of 0.006). `text_char` is at or above the reader on 8 of the 15 (7 strictly above; `unknowable_detail`
+  is 1.000 for the reader and both baselines) and `text_word` on 7 of the 15 (6 strictly). On `false_premise`
+  (0.961 against 0.975 and 0.955), `kuq_counterfactual`, `kuq_false_assumption` and `kuq_future_unknown` the reader is
+  within 0.022 of the better baseline in either direction. The `triviaqa_known` margin of 0.108 rests on 10 known test
+  questions.
+- **What this does not show.** As above: popularity and the wording of the question are the only surface controls, each
+  value is one set of five readers on one labeling run, and the question sets differ between models.
+
 ### Error prediction (P9c)
 
 P9c asks which score predicts whether the greedy few-shot answer of the model is correct, on held-out PopQA (1,937),
@@ -1082,6 +1591,99 @@ with its interval. These are pooled AUROCs; no within-relation increment is stor
 - **`p_true` on `gpt2-xl` is below chance on PopQA.** It reads 0.293 [0.253, 0.334] pooled and 0.431 [0.373, 0.487]
   within relation, with intervals below 0.5. On TriviaQA (0.481) and NQ-open (0.347) the intervals include 0.5. On the
   Qwen3 models it is 0.719 and 0.776 within relation, below `answer_logprob`.
+
+#### The other GPT-2 sizes
+
+P9c on `gpt2`, `gpt2-medium` and `gpt2-large` (runs `p9c/gpt2/7ed884a2e8df`, `p9c/gpt2-medium/b3d936ab3f3b` and
+`p9c/gpt2-large/fb5b8a90c085`, made at `ca2546c`) has the same predictors, the same held-out PopQA (1,937), TriviaQA
+(191) and NQ-open (210) questions and the same intervals as above. The probe and `lat` read L11 (`gpt2`), L23
+(`gpt2-medium`) and L36 (`gpt2-large`), chosen on the validation split of P9c. `gpt2` has no label-free `lat` (its gate
+closed, so there is no known against unknown contrast to fit it on). The number of correct answers, which sets how much
+a within-relation AUROC can show, is small: 98, 158 and 161 of the 1,937 PopQA questions.
+
+PopQA, within relation, AUROC with its interval (the headline; `template` is 0.500 by construction and is not shown).
+The `popularity` row is the within-relation popularity baseline. No AUROC within popularity bins is stored for this
+experiment:
+
+| Predictor          | gpt2                 | gpt2-medium          | gpt2-large           |
+| ------------------ | -------------------- | -------------------- | -------------------- |
+| answer_logprob     | 0.701 [0.629, 0.766] | 0.790 [0.740, 0.840] | 0.832 [0.782, 0.875] |
+| first_token_prob   | 0.715 [0.645, 0.778] | 0.773 [0.718, 0.822] | 0.831 [0.782, 0.873] |
+| neg_entropy        | 0.670 [0.599, 0.741] | 0.777 [0.721, 0.827] | 0.803 [0.748, 0.850] |
+| mean_token_logprob | 0.720 [0.655, 0.781] | 0.773 [0.723, 0.823] | 0.863 [0.819, 0.899] |
+| consistency        | 0.595 [0.526, 0.659] | 0.706 [0.650, 0.759] | 0.752 [0.700, 0.805] |
+| lat                | not run              | 0.670 [0.609, 0.735] | 0.690 [0.621, 0.754] |
+| probe              | 0.789 [0.733, 0.842] | 0.726 [0.664, 0.784] | 0.800 [0.745, 0.847] |
+| p_true             | 0.445 [0.368, 0.523] | 0.521 [0.464, 0.579] | 0.529 [0.462, 0.590] |
+| popularity         | 0.541 [0.470, 0.618] | 0.577 [0.511, 0.646] | 0.628 [0.558, 0.700] |
+
+PopQA pooled over relations, as AUROC / AURC (lower is better for the AURC):
+
+| Predictor                  | gpt2          | gpt2-medium   | gpt2-large    |
+| -------------------------- | ------------- | ------------- | ------------- |
+| probe                      | 0.961 / 0.829 | 0.948 / 0.753 | 0.944 / 0.751 |
+| answer_logprob             | 0.899 / 0.857 | 0.926 / 0.768 | 0.930 / 0.764 |
+| neg_entropy                | 0.913 / 0.855 | 0.897 / 0.778 | 0.917 / 0.770 |
+| lat                        | not run       | 0.835 / 0.797 | 0.852 / 0.799 |
+| template                   | 0.939 / 0.848 | 0.929 / 0.764 | 0.907 / 0.772 |
+| popularity                 | 0.469 / 0.927 | 0.480 / 0.879 | 0.542 / 0.863 |
+| correct answers (of 1,937) | 98            | 158           | 161           |
+
+TriviaQA and NQ-open, pooled AUROC with its interval (the items have no relation):
+
+| Predictor                | gpt2                 | gpt2-medium          | gpt2-large           |
+| ------------------------ | -------------------- | -------------------- | -------------------- |
+| TriviaQA answer_logprob  | 0.730 [0.602, 0.850] | 0.823 [0.742, 0.896] | 0.741 [0.652, 0.827] |
+| TriviaQA neg_entropy     | 0.703 [0.511, 0.867] | 0.712 [0.588, 0.820] | 0.704 [0.603, 0.789] |
+| TriviaQA probe           | 0.692 [0.530, 0.829] | 0.773 [0.658, 0.888] | 0.749 [0.653, 0.835] |
+| TriviaQA lat             | not run              | 0.605 [0.462, 0.739] | 0.703 [0.601, 0.791] |
+| TriviaQA p_true          | 0.644 [0.487, 0.784] | 0.389 [0.268, 0.508] | 0.383 [0.276, 0.500] |
+| TriviaQA correct answers | 12 of 191            | 23 of 191            | 37 of 191            |
+| NQ-open answer_logprob   | 0.834 [0.641, 0.995] | 0.690 [0.425, 0.933] | 0.813 [0.627, 0.949] |
+| NQ-open neg_entropy      | 0.760 [0.490, 1.000] | 0.714 [0.554, 0.865] | 0.727 [0.560, 0.891] |
+| NQ-open probe            | 0.666 [0.392, 0.928] | 0.700 [0.530, 0.858] | 0.806 [0.678, 0.920] |
+| NQ-open lat              | not run              | 0.626 [0.477, 0.766] | 0.781 [0.619, 0.933] |
+| NQ-open p_true           | 0.231 [0.057, 0.427] | 0.589 [0.436, 0.757] | 0.547 [0.323, 0.761] |
+| NQ-open correct answers  | 2 of 210             | 9 of 210             | 9 of 210             |
+
+What `probe` and `lat` add to the output confidence (the logistic stacker of the five confidence columns of the
+sections above, as a paired AUROC difference with its interval; pooled, no within-relation increment is stored):
+
+| Increment over the confidence stack | gpt2                    | gpt2-medium             | gpt2-large              |
+| ----------------------------------- | ----------------------- | ----------------------- | ----------------------- |
+| PopQA confidence stack              | 0.926                   | 0.912                   | 0.920                   |
+| PopQA + lat                         | not run                 | -0.004 [-0.023, +0.020] | -0.009 [-0.020, +0.002] |
+| PopQA + probe                       | +0.037 [+0.025, +0.054] | +0.042 [+0.020, +0.067] | +0.033 [+0.017, +0.050] |
+| TriviaQA confidence stack           | 0.591                   | 0.755                   | 0.711                   |
+| TriviaQA + lat                      | not run                 | +0.002 [-0.004, +0.008] | +0.005 [-0.003, +0.012] |
+| TriviaQA + probe                    | +0.032 [-0.051, +0.129] | +0.026 [-0.006, +0.061] | +0.019 [-0.016, +0.052] |
+| NQ-open confidence stack            | 0.548                   | 0.714                   | 0.808                   |
+| NQ-open + lat                       | not run                 | -0.020 [-0.069, +0.032] | +0.004 [-0.001, +0.014] |
+| NQ-open + probe                     | -0.005 [-0.086, +0.075] | +0.013 [-0.025, +0.055] | -0.002 [-0.006, +0.000] |
+
+- **The probe is the best within relation only on `gpt2`.** On `gpt2` the probe reads 0.789 [0.733, 0.842] within
+  relation against 0.701 for `answer_logprob`, with the intervals overlapping at 0.733 to 0.766. On `gpt2-medium`
+  `answer_logprob` (0.790) is above the probe (0.726) and on `gpt2-large` `mean_token_logprob` (0.863), `answer_logprob`
+  (0.832) and `first_token_prob` (0.831) are above the probe (0.800). The probe sees the correctness label of the
+target dataset; the output-confidence predictors do not. On `gpt2-medium` and `gpt2-large` the probe, `answer_logprob`,
+`first_token_prob`, `neg_entropy` and `mean_token_logprob` are above the within-relation popularity baseline (0.577 and
+0.628) with separated intervals; `lat` is above it as a point estimate on both with overlapping intervals (0.690 [0.621,
+0.754] against 0.628 [0.558, 0.700] on `gpt2-large`).
+- **`lat` is below the output confidence.** The label-free `lat` reads 0.670 and 0.690 within relation on `gpt2-medium`
+  and `gpt2-large`, below `answer_logprob` (0.790, 0.832) and the probe. Added to the confidence stack its increment is
+  -0.004 [-0.023, +0.020] and -0.009 [-0.020, +0.002] on PopQA, with intervals that include zero.
+- **Pooled, the relation does most of the work.** The accuracy rate of the relation alone (`template`) reads 0.939,
+  0.929 and 0.907 pooled, against 0.961, 0.948 and 0.944 for the probe and 0.899, 0.926 and 0.930 for `answer_logprob`;
+  on `gpt2` `template` is above `answer_logprob` pooled and above the output-confidence stack (0.926). The probe adds
+  +0.037, +0.042 and +0.033 to the stack, with intervals above zero on all three sizes. Popularity pooled is at 0.469,
+  0.480 and 0.542, and the intervals include 0.5 on all three sizes.
+- **TriviaQA and NQ-open are not informative on these sizes.** The sets hold 12, 23 and 37 correct TriviaQA answers
+  and 2, 9 and 9 correct NQ-open answers, and the intervals are 0.15 to 0.51 wide, so the ordering of predictors there
+  (for example `answer_logprob` above the probe on `gpt2-medium` TriviaQA, 0.823 against 0.773) is within the
+  intervals. With 2 correct answers the `gpt2` NQ-open values (such as 0.231 for `p_true`) are not read. No
+  increment over the stack on these two sets has an interval that excludes zero.
+- **`p_true`** reads 0.445, 0.521 and 0.529 within relation on PopQA, at chance; the model's grade of its own answer
+  does not predict correctness on these sizes.
 
 ### Steering (P9d)
 
@@ -1234,6 +1836,86 @@ the direction (95 percent interval) and the range of the three random directions
   runs, the effect on the known items is not absent, and the abstention indicator is a phrase match whose errors were
   not measured. The runs are one per cell, and base and post-trained results answer different questions.
 
+#### The GPT-2 sizes (base checkpoints)
+
+P9d on `gpt2-medium`, `gpt2-large` and `gpt2-xl` (runs `p9d/gpt2-medium/e8d925ebaacf` and `p9d/gpt2-large/958cf229514f`,
+made at `ca2546c`, and `p9d/gpt2-xl/096a207db665`, made at `a39ae61`) uses the same recipe as the base Qwen3
+checkpoints: the `obscure_real` direction added to the residual stream at one layer (the last block of each model),
+three random directions of the same norm, the `fewshot` template, and the shift of the entropy of the next-token
+distribution (and, on `obscure_real`, of the log-probability of the gold answer) as the behavior, because a GPT-2
+checkpoint cannot abstain. There is no P9d on `gpt2` (its gate closed). `gpt2-medium` has no `unknowable_detail` and
+`false_premise` rows (fewer than 10 known test items). The units are the entropy of each model's own next-token
+distribution, so these slopes are not compared across models here, and they are not comparable with the abstention
+slopes of the post-trained Qwen3 checkpoints, which answer a different question.
+
+Headline cell (unknown side of `obscure_real`): slope of the entropy per unit of relative coefficient for the direction
+(95 percent interval over the items) and for the three random arms, with the validation AUROC of the direction at the
+steered layer. **Distinguishable** means that the direction moves the outcome more than a random direction of the same
+norm: the absolute slope of the direction minus the absolute slope of each random arm has a lower bound above zero for
+all three (`Min gap bound` is the smallest of the three lower bounds).
+
+| Run (steered layer) | Validation AUROC | Direction, entropy      | random0 / 1 / 2, entropy | Min gap bound | Distinguishable |
+| ------------------- | ---------------- | ----------------------- | ------------------------ | ------------- | --------------- |
+| medium base (L24)   | 0.954            | -3.728 [-4.020, -3.402] | 0.669 / 0.665 / -0.226   | 2.724         | yes             |
+| large base (L36)    | 0.895            | -2.713 [-2.845, -2.572] | -1.024 / 0.100 / -0.014  | 1.524         | yes             |
+| xl base (L48)       | 0.949            | -2.815 [-3.087, -2.576] | 0.136 / -0.186 / -0.834  | 1.635         | yes             |
+
+Known items of `obscure_real`, same columns of slopes, to show how much the known items move:
+
+| Run         | Direction, known items  | random0 / 1 / 2, known items |
+| ----------- | ----------------------- | ---------------------------- |
+| medium base | -0.437 [-1.450, 0.540]  | 1.490 / 2.658 / -0.222       |
+| large base  | -1.448 [-2.135, -0.728] | -0.871 / -1.056 / -0.166     |
+| xl base     | -1.417 [-2.231, -0.630] | 0.217 / 1.502 / -1.031       |
+
+Selectivity: the absolute mean slope on the unknown items minus that on the known items, with the lower bound above zero
+as the criterion. This is a separate claim from the one above. Entropy on every type, and on `obscure_real` also the
+log-probability of the gold answer (the other types have no gold answer on the unknown side):
+
+| Run         | Type                | Outcome      | n (k / u) | Known  | Unknown | Gap [95% interval]     | Selective |
+| ----------- | ------------------- | ------------ | --------- | ------ | ------- | ---------------------- | --------- |
+| medium base | obscure_real        | entropy      | 46 / 100  | -0.437 | -3.728  | 3.292 [2.329, 3.792]   | yes       |
+| medium base | obscure_real        | gold logprob | 46 / 100  | -0.902 | -0.635  | -0.267 [-2.022, 1.151] | no        |
+| medium base | fictional_generated | entropy      | 46 / 100  | -0.437 | -2.484  | 2.047 [1.069, 2.586]   | yes       |
+| large base  | obscure_real        | entropy      | 55 / 100  | -1.448 | -2.713  | 1.265 [0.514, 2.003]   | yes       |
+| large base  | obscure_real        | gold logprob | 55 / 100  | -0.046 | -0.683  | 0.638 [-0.247, 0.970]  | no        |
+| large base  | fictional_generated | entropy      | 55 / 100  | -1.448 | -2.332  | 0.884 [0.148, 1.673]   | yes       |
+| large base  | unknowable_detail   | entropy      | 11 / 60   | -1.725 | -4.327  | 2.602 [1.057, 4.140]   | yes       |
+| large base  | false_premise       | entropy      | 11 / 83   | -1.725 | -3.748  | 2.023 [0.463, 3.514]   | yes       |
+| xl base     | obscure_real        | entropy      | 78 / 100  | -1.417 | -2.815  | 1.399 [0.582, 2.200]   | yes       |
+| xl base     | obscure_real        | gold logprob | 78 / 100  | 0.375  | -1.117  | 0.742 [-0.629, 1.609]  | no        |
+| xl base     | fictional_generated | entropy      | 78 / 100  | -1.417 | -2.884  | 1.467 [0.595, 2.305]   | yes       |
+| xl base     | unknowable_detail   | entropy      | 21 / 60   | -1.536 | -5.365  | 3.829 [2.606, 5.161]   | yes       |
+| xl base     | false_premise       | entropy      | 21 / 83   | -1.536 | -4.344  | 2.808 [1.533, 4.097]   | yes       |
+
+- **Distinguishable on entropy, on all three sizes.** The direction moves the entropy of the unknown questions by
+  -3.728, -2.713 and -2.815 per unit coefficient, and the largest absolute slope of a random arm is 0.669, 1.024 and
+  0.834. The smallest gap bounds are 2.724, 1.524 and 1.635. The distinction rests on the unknown side only; see the
+  known items below.
+- **Selective on entropy, as a separate result.** The headline gap is 3.292 [2.329, 3.792] (medium), 1.265 [0.514,
+  2.003] (large) and 1.399 [0.582, 2.200] (xl), and `fictional_generated` is selective on all three. On `gpt2-large` and
+  `gpt2-xl` `unknowable_detail` and `false_premise` are selective too (gaps 2.602 and 2.023, 3.829 and 2.808). The
+  evidence is a slope gap, and it is smaller on `gpt2-large` and `gpt2-xl` than on `gpt2-medium`: the lower bound of the
+  headline gap is 2.329, 0.514 and 0.582.
+- **The known items move too.** On `gpt2-large` and `gpt2-xl` the direction changes the entropy of the known questions
+  at -1.448 [-2.135, -0.728] and -1.417 [-2.231, -0.630], about half of the unknown-side slope, so the effect is larger
+  on the unknown side and not absent on the known side. On `gpt2-medium` the known slope is -0.437 [-1.450, 0.540],
+  while two random arms move the known items by +1.490 and +2.658 and the third by -0.222: a random direction of the
+  same norm moves the known questions of that model more than the direction does, and on `gpt2-xl` one random arm does
+  (+1.502). A slope-based gap does not describe this, as for the Qwen3 base checkpoints above.
+- **Not distinguishable and not selective on the gold-answer log-probability.** The direction moves the log-probability
+  of the gold answer of the unknown `obscure_real` questions by -0.635 [-1.620, 0.375], -0.683 [-1.153, -0.210] and
+  -1.117 [-1.985, -0.279], and the gaps against the known items are -0.267 [-2.022, 1.151], 0.638 [-0.247, 0.970] and
+  0.742 [-0.629, 1.609]: all three include zero. The absolute gaps against the three random arms also include zero (for
+  example 0.396 [-0.523, 1.350] against `random0` on `gpt2-medium`; on `gpt2-xl` the lower bounds against the three arms
+  are -0.006, 0.008 and -0.272). The entropy results do not carry over to the probability of the correct answer.
+- **What this does and does not show.** The direction changes the entropy of the next-token distribution of a base model
+  more than a random direction does and more on unknown questions than on known ones. It is not shown to be a control of
+  what the model knows: the gold-answer probability does not move distinguishably, random directions also move the
+  entropy on the known items on `gpt2-medium` and `gpt2-xl`, and the stored selectivity of the `gpt2-xl` run, made
+  before the interval was oriented, agrees with a recomputation with the current code (every bound within 0.005). The
+  runs are one per cell.
+
 ## Run identity
 
 All reading runs (R1 to R7) and the A1 and A2 runs were made at commit `a39ae61` with a clean tree, on one laptop GPU
@@ -1250,30 +1932,52 @@ clean tree refers to the code: P8 read the run folders from the local output roo
 under `results/`. Its config names the five P1 runs as extra runs. Library versions and the device are in each run's
 `meta.json`.
 
+The R4 and R6 runs of `gpt2-medium`, `gpt2-large` and `gpt2-xl`, the second P1 run of `gpt2` (sentiment, truth and
+emotion tasks), and the P2, P3, P4, M1, C2, LR1, C4, P7 and C5 runs were made at `ca2546c` with a clean tree on the
+same laptop GPU, with the default config of each experiment (the batch size of each run is in its `config.json`). The
+P1 run `078b9d6482a2` differs from the sentiment run `673af340b77d` in the task list only. The C4 run reads the LR1
+adapter named in its config. None of the M1, C2, P7, C4 and C5 runs stores the perplexity or the distinct-1 of the
+generated text. The P5 runs on `gpt2` did not finish (the fit of one condition produced a direction of zero norm, and
+both attempts stopped), so they are not exported and not reported.
+
 The P9 runs were made on the same laptop GPU with a clean tree: P9a at `ff1177a` (batch size 8, 4 for `gpt2-xl`), P9b
-and P9c at `95a8243` (batch size 8, 4 for `gpt2-xl`) and P9d at `a39ae61` (batch size 8). Each P9b, P9c and P9d run
-reads the P9a run of the same model, which is the one in the P9a rows below. The selectivity columns of the P9d tables
-were recomputed offline from the `item_slopes` of the runs with the current code, not read from the stored
-`table_selectivity`. Earlier P9 runs exist, made with the four-relation label pool or before the within-relation
-headline, the item resampling of the intervals and the dose-slope headline; they are superseded and are not reported.
+and P9c at `95a8243` (batch size 8, 4 for `gpt2-xl`) and P9d at `a39ae61` (batch size 8). The P9 runs of `gpt2`,
+`gpt2-medium` and `gpt2-large` (P9a to P9c, and P9d for the two larger ones) were made at `ca2546c` on the same laptop
+GPU. Each P9b, P9c and P9d run reads the P9a run of the same model, which is the one in the P9a rows below. The
+selectivity columns of the P9d tables of the Qwen3 checkpoints were recomputed offline from the `item_slopes` of the
+runs with the current code, not read from the stored `table_selectivity`; the GPT-2 tables are the stored ones, which
+agree with a recomputation (every bound within 0.005). Earlier P9 runs exist, made with the four-relation label pool or
+before the within-relation headline, the item resampling of the intervals and the dose-slope headline; they are
+superseded and are not reported.
 
 Config hashes (12 hex digits), GPT-2:
 
-| Experiment | gpt2         | gpt2-medium  | gpt2-large   | gpt2-xl      |
-| ---------- | ------------ | ------------ | ------------ | ------------ |
-| R1         | bd4438c46cef | 01fd70a05fa8 | b64b756fad46 | 81e8ecd71341 |
-| R2         | e1821ff197ce | 098a48a58a83 | 1a2679b49855 | 83124998c2b8 |
-| R3         | a9f7b2a71c22 | d10ebba10935 | 5d0f4f92fc9b | 3507b0628650 |
-| R4         | 4702fcb81ed3 | not run      | not run      | not run      |
-| R5         | 779f5b093803 | e447c8958b80 | 322bd80f6d19 | 7f0afd7dfe12 |
-| R6         | 47e8ec0cf46c | not run      | not run      | not run      |
-| R7         | 5908a78acf64 | 3030e4186690 | 796f4c4d19f2 | 5eed122bfd4e |
-| P1         | 673af340b77d | not run      | not run      | not run      |
-| C1         | add59c39f574 | 2ed2e53ba7fe | 353f91e1b8dc | de76af1a8a07 |
-| P9a        | pending      | pending      | pending      | cc283b36fcae |
-| P9b        | pending      | pending      | pending      | 92664dccb7d9 |
-| P9c        | pending      | pending      | pending      | 1839575c0eaa |
-| P9d        | pending      | pending      | pending      | pending      |
+| Experiment     | gpt2         | gpt2-medium  | gpt2-large   | gpt2-xl      |
+| -------------- | ------------ | ------------ | ------------ | ------------ |
+| R1             | bd4438c46cef | 01fd70a05fa8 | b64b756fad46 | 81e8ecd71341 |
+| R2             | e1821ff197ce | 098a48a58a83 | 1a2679b49855 | 83124998c2b8 |
+| R3             | a9f7b2a71c22 | d10ebba10935 | 5d0f4f92fc9b | 3507b0628650 |
+| R4             | 4702fcb81ed3 | 981d9dd9916e | 788316a35990 | bee62b37444a |
+| R5             | 779f5b093803 | e447c8958b80 | 322bd80f6d19 | 7f0afd7dfe12 |
+| R6             | 47e8ec0cf46c | 04fc7ead5f13 | f058c0f19396 | 60cc952b4ec5 |
+| R7             | 5908a78acf64 | 3030e4186690 | 796f4c4d19f2 | 5eed122bfd4e |
+| P1 (sentiment) | 673af340b77d | not run      | not run      | not run      |
+| P1 (all tasks) | 078b9d6482a2 | not run      | not run      | not run      |
+| P2             | ee099a704022 | not run      | not run      | not run      |
+| P3             | 676c31488397 | not run      | not run      | not run      |
+| P4             | 8c4a73d1e9db | not run      | not run      | not run      |
+| P5             | not finished | not run      | not run      | not run      |
+| P7             | 6c19128c5192 | not run      | not run      | not run      |
+| C1             | add59c39f574 | 2ed2e53ba7fe | 353f91e1b8dc | de76af1a8a07 |
+| M1             | 4e394ed1a72c | not run      | not run      | not run      |
+| C2             | 85c9a670bf17 | not run      | not run      | not run      |
+| C4             | 1b571ac45420 | not run      | not run      | not run      |
+| C5             | not run      | not run      | not run      | 155f0f72bc3f |
+| LR1            | 1e9cd6f56388 | not run      | not run      | not run      |
+| P9a            | 5461200f995c | 4272635aa065 | 59c9bfd59dfd | cc283b36fcae |
+| P9b            | fd3bdc5a4b0d | a5a9c7d7b176 | 7b3fd5d1bfb5 | 92664dccb7d9 |
+| P9c            | 7ed884a2e8df | b3d936ab3f3b | fb5b8a90c085 | 1839575c0eaa |
+| P9d            | gate closed  | e8d925ebaacf | 958cf229514f | 096a207db665 |
 
 Qwen3:
 
@@ -1292,7 +1996,7 @@ Qwen3:
 | P9d fewshot | f9a8f827b6b4    | 9c94025d9ad4 | 9543312bcc45    | 42b7a0daf9b9 |
 | P9d concept | not run         | f0b3f4eb3988 | not run         | d43b9e297e42 |
 
-Other runs: R6 text baselines computed at `ca2546c` (not a run); A1 `ad6abbba8fd0`; A2 `be4e34f21b35`; P6
+Other runs: R6 text baselines of `gpt2` computed at `ca2546c` (not a run); A1 `ad6abbba8fd0`; A2 `be4e34f21b35`; P6
 `25ee6de331d4`; P8 `e9f9bc04ba3c`.
 
 The files of every run named here are committed under `results/<experiment>/<model>/<hash>/`, copied with
@@ -1303,23 +2007,20 @@ not committed; `tomography plot all --out results` redraws them from these files
 
 Not in this document yet. No dates are promised.
 
-- R4 on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the Qwen3 checkpoints.
-- R6 on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the Qwen3 checkpoints, and a rerun of R6 on `gpt2` that writes the
-  text baselines itself.
-- P1 on the truth and emotion tasks, on `gpt2-medium`, `gpt2-large` and `gpt2-xl`, and with the `pca_diff` finder
-  (only the sentiment task was run, with the logistic finder, on `gpt2` and the four Qwen3 checkpoints).
-- P2, token position and a misleading sentence in the prompt.
-- P3, stimulus-set size.
-- P4, pairing and preprocessing.
-- P5, persona wording and instruction confounds for honesty.
-- P7, whether a reader that reads well also steers well.
-- M1, the six direction finders.
-- C2, emotion steering; C4, honesty control on TruthfulQA; C5, qualitative galleries (there is no C3).
-- LR1, one LoRRA adapter.
-- P9a to P9c on `gpt2`, `gpt2-medium` and `gpt2-large`, and P9d on `gpt2-xl` and on any of the three smaller sizes
-  that the label gate admits.
+- R4 and R6 on the Qwen3 checkpoints, and a rerun of R6 on `gpt2` that writes the text baselines itself (the three
+  larger GPT-2 runs store them).
+- P1 on the truth and emotion tasks on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the Qwen3 checkpoints, and with the
+  `pca_diff` finder (the truth and emotion tasks ran on `gpt2` only; the sentiment task ran with the logistic finder on
+  `gpt2` and the four Qwen3 checkpoints).
+- P2, P3, P4, P7, M1, C2, C4 and LR1 on the other GPT-2 sizes and on the Qwen3 checkpoints (all ran on `gpt2` only), and
+  C5 on any model other than `gpt2-xl`.
+- P5, persona wording and instruction confounds for honesty: the `gpt2` runs did not finish (a fit produced a direction
+  of zero norm), so the experiment has to be rerun before any result is reported.
+- A random-direction arm for C2, P7 and C5, and a fluency measure (perplexity and distinct-1) for M1, C2, P7, C4 and
+  C5.
 - P9b and P9c on the post-trained Qwen3 checkpoints.
 - P9: a hand check of the abstention indicator of P9d (the stored samples carry no human labels), an item-level
   interval for the P9b AUROC (only the interval over the pair draws is stored), and a within-relation increment of
   the probe over the output confidence in P9c (only the pooled increment is stored).
 - A5, reading directions against Qwen-Scope SAE decoders.
+
