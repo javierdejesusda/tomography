@@ -673,7 +673,8 @@ uv run tomography export --out DIR ROOT [ROOT ...]
   `DIR/<experiment>/<model>/<hash>`.
   It keeps the JSON, NPZ and CSV files the plots read and drops the raw reader vectors, trials, item files, logs
   and figures, rewrites absolute local paths to `results/<experiment>/<model>/<hash>` names, and refuses to write
-  if two roots hold the same run or a copied file still names a local drive path, `Users` or the user name.
+  if two roots hold the same run or a copied file still names a local path (drive, UNC, home or system folder, a
+  `Users` segment) or the user or host name.
   Unfinished runs are skipped and listed.
 
 For example, `uv run tomography run r1` runs the sentiment experiment on GPT-2 small,

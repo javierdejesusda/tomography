@@ -5,6 +5,7 @@ import getpass
 import io
 import json
 from pathlib import Path
+import socket
 import sys
 
 import numpy as np
@@ -14,7 +15,9 @@ from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.matrices import plot_matrix_file
 from tomography.experiments.matrices import write_matrix
+import tomography.export as export_module
 from tomography.export import ExportError
+from tomography.export import RunInfo
 from tomography.export import export_runs
 from tomography.export import is_exported
 
@@ -26,6 +29,12 @@ class _Config(ExperimentConfig):
     tag: str = "x"
     source: str | None = None
     sources: tuple[str, ...] = ()
+
+
+@pytest.fixture(autouse=True)
+def _fixed_machine(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(getpass, "getuser", lambda: "tester-user")
+    monkeypatch.setattr(socket, "gethostname", lambda: "testhost-box.lan")
 
 
 def _make_run(
@@ -73,6 +82,8 @@ def _data(run_dir: Path, name: str) -> object:
         "matrix.npz",
         "readers.json",
         "hand_check.csv",
+        "transfer_sentiment.npz",
+        "transfer_sentiment.json",
     ],
 )
 def test_is_exported_keeps_the_files_the_plots_and_docs_need(
@@ -425,11 +436,11 @@ def test_export_refuses_the_substring_users_and_the_local_user_name(
         export_runs([tmp_path / "r1"], tmp_path / "dest")
 
 
-def test_export_refuses_a_private_name_inside_npz_metadata(
+def test_export_refuses_a_private_segment_inside_npz_metadata(
     tmp_path: Path,
 ) -> None:
     run = _make_run(tmp_path / "r1")
-    meta = {**run.meta, "note": "the Users table"}
+    meta = {**run.meta, "note": "kept in x/Users/y"}
     buffer = io.BytesIO()
     np.savez(buffer, _meta=np.array(json.dumps(meta)), values=np.zeros(2))
     (run.path / "curves.npz").write_bytes(buffer.getvalue())
@@ -466,3 +477,209 @@ def test_an_exported_run_can_be_plotted(tmp_path: Path) -> None:
 
     assert len(paths) == 3
     assert all(path.is_file() for path in paths)
+
+
+def test_a_p1_run_keeps_its_transfer_matrix_for_the_plot(
+    tmp_path: Path,
+) -> None:
+    run = _make_run(tmp_path / "r1", experiment="p1", tag="transfer")
+    write_matrix(
+        run,
+        "transfer_sentiment",
+        np.eye(2),
+        rows=("a", "b"),
+        cols=("a", "b"),
+        title="t",
+    )
+    (run.path / "transfer.npz").write_bytes(b"raw cube")
+    dest = tmp_path / "dest"
+
+    export_runs([tmp_path / "r1"], dest)
+
+    exported = RunDir.open(dest / "p1" / "gpt2" / run.meta["config_hash"])
+    assert not (exported.path / "transfer.npz").exists()
+    paths = plot_matrix_file(
+        exported,
+        exported.path / "figures",
+        stem="transfer_sentiment",
+        vmin=0.0,
+        vmax=1.0,
+    )
+    assert len(paths) == 3
+
+
+def _leak_run(tmp_path: Path, text: str) -> Path:
+    run = _make_run(tmp_path / "r1")
+    (run.path / "hand_check.csv").write_text(text, "utf-8")
+    return tmp_path / "dest"
+
+
+def test_export_accepts_prose_that_mentions_users(tmp_path: Path) -> None:
+    dest = _leak_run(tmp_path, "Users who asked twice, users table\n")
+
+    report = export_runs([tmp_path / "r1"], dest)
+
+    assert len(report.exported) == 1
+
+
+@pytest.mark.parametrize(
+    "text", ["x/Users/y", "x\\Users\\y"], ids=["slash", "backslash"]
+)
+def test_export_refuses_users_as_a_path_segment_with_a_snippet(
+    tmp_path: Path, text: str
+) -> None:
+    dest = _leak_run(tmp_path, f"before {text} after")
+
+    with pytest.raises(ExportError) as error:
+        export_runs([tmp_path / "r1"], dest)
+
+    assert "before" in str(error.value)
+    assert "after" in str(error.value)
+    assert not dest.exists()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "kept in /home/alice/runs/x",
+        "kept in /mnt/d/data/x",
+        "at \\\\fileserver\\share\\runs",
+        "on testhost-box today",
+        "on TESTHOST-BOX.lan today",
+        "by Tester-User today",
+    ],
+    ids=["posix", "wsl", "unc", "host-label", "host-full", "user"],
+)
+def test_export_refuses_posix_unc_host_and_user_leaks(
+    tmp_path: Path, text: str
+) -> None:
+    dest = _leak_run(tmp_path, text)
+
+    with pytest.raises(ExportError, match=r"hand_check\.csv"):
+        export_runs([tmp_path / "r1"], dest)
+
+
+def test_export_rewrites_embedded_posix_and_unc_paths(tmp_path: Path) -> None:
+    source = "read /home/alice/data/old-run and \\\\srv1\\share\\x\\last"
+    _make_run(tmp_path / "r1", tag="embedded", source=source)
+
+    export_runs([tmp_path / "r1"], tmp_path / "dest")
+
+    config = json.loads(
+        _user_config(tmp_path / "dest", "embedded").read_text("utf-8")
+    )
+    assert config["source"] == "read <external>/old-run and <external>/last"
+
+
+KEY = "p1/gpt2/abc123def456"
+
+
+def _literal_rewriter() -> export_module._PathRewriter:
+    path = "C:/work/res/p1/gpt2/abc123def456"
+    run = RunInfo(Path(path), "p1", "gpt2", "abc123def456", None, True)
+    index = {export_module._index_key(export_module._segments(path)): run}
+    return export_module._PathRewriter(index, {KEY})
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("C:\\work\\res\\p1\\gpt2\\abc123def456", f"results/{KEY}"),
+        (
+            "c:/WORK/res/p1/gpt2/abc123def456/curves.npz",
+            f"results/{KEY}/curves.npz",
+        ),
+        ("/mnt/c/work/res/p1/gpt2/abc123def456", f"results/{KEY}"),
+        ("/c/work/res/p1/gpt2/abc123def456/", f"results/{KEY}"),
+        ("C:\\other\\place\\old-run", "<external>/old-run"),
+        (
+            "see file:///D:/other/place/old-run now",
+            "see file:///<external>/old-run now",
+        ),
+        ("at \\\\srv1\\share\\old-run ok", "at <external>/old-run ok"),
+        ("/home/alice/old-run", "<external>/old-run"),
+        ("use C:\\a\\Jane Doe\\x for it", "use <external>/x for it"),
+        ("C:\\a\\b and more", "<external>/b and more"),
+        ("plain words", "plain words"),
+    ],
+)
+def test_path_rewriter_maps_literal_paths_on_any_platform(
+    text: str, expected: str
+) -> None:
+    assert _literal_rewriter().rewrite(text) == expected
+
+
+def test_path_rewriter_leaves_no_space_path_tail() -> None:
+    result = _literal_rewriter().rewrite("see C:\\Users\\Jane Doe\\runs\\x for")
+
+    assert "Doe" not in result
+    assert result == "see <external>/x for"
+
+
+def test_export_refuses_a_drive_path_in_a_string_array_of_an_npz(
+    tmp_path: Path,
+) -> None:
+    run = _make_run(tmp_path / "r1")
+    run.write_arrays(
+        "names",
+        names=np.array(["fine", "D:\\private\\x"]),
+        values=np.zeros(2),
+    )
+    dest = tmp_path / "dest"
+
+    with pytest.raises(ExportError, match=r"names\.npz"):
+        export_runs([tmp_path / "r1"], dest)
+
+    assert not dest.exists()
+
+
+def test_a_write_error_leaves_no_partial_run_and_export_can_be_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _make_run(tmp_path / "r1")
+    dest = tmp_path / "dest"
+    real = export_module._write_file
+    calls: list[Path] = []
+
+    def fail_on_second(target: Path, data: bytes) -> None:
+        calls.append(target)
+        if len(calls) == 2:
+            raise OSError("disk full")
+        real(target, data)
+
+    with monkeypatch.context() as scope:
+        scope.setattr(export_module, "_write_file", fail_on_second)
+        with pytest.raises(ExportError, match="disk full"):
+            export_runs([tmp_path / "r1"], dest)
+
+    key = f"t1/gpt2/{run.meta['config_hash']}"
+    assert not (dest / key).exists()
+    assert not list(dest.rglob("*.tmp"))
+    report = export_runs([tmp_path / "r1"], dest)
+    assert [item.status for item in report.exported] == ["copied"]
+
+
+def test_export_names_a_truncated_json_file(tmp_path: Path) -> None:
+    run = _make_run(tmp_path / "r1")
+    (run.path / "table.json").write_text('{"data": [1, 2', "utf-8")
+
+    with pytest.raises(ExportError, match=r"table\.json"):
+        export_runs([tmp_path / "r1"], tmp_path / "dest")
+
+
+def test_export_names_a_json_file_that_cannot_be_rewritten(
+    tmp_path: Path,
+) -> None:
+    run = _make_run(tmp_path / "r1")
+    (run.path / "table.json").write_text('{"data": [NaN, "C:/x/y/z"]}', "utf-8")
+
+    with pytest.raises(ExportError, match=r"table\.json"):
+        export_runs([tmp_path / "r1"], tmp_path / "dest")
+
+
+def test_export_names_an_unreadable_npz_file(tmp_path: Path) -> None:
+    run = _make_run(tmp_path / "r1")
+    (run.path / "curves.npz").write_bytes(b"not a zip")
+
+    with pytest.raises(ExportError, match=r"curves\.npz"):
+        export_runs([tmp_path / "r1"], tmp_path / "dest")

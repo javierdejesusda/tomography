@@ -9,6 +9,8 @@ that still names the local machine or user.
 """
 
 from collections.abc import Iterable
+from collections.abc import Iterator
+from collections.abc import Mapping
 from collections.abc import Sequence
 import dataclasses
 import fnmatch
@@ -18,8 +20,12 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import socket
 from typing import Any
 from typing import Literal
+import uuid
+import zipfile
 
 import numpy as np
 
@@ -30,13 +36,34 @@ _EXCLUDED_NAMES = (
     "sweep*.npz",
     "items.json",
     "trials*",
-    "transfer*.npz",
+    "transfer.npz",
     "signals*.npz",
 )
-_WHOLE_PATH = re.compile(r"[A-Za-z]:[\\/]|\\\\[^\\/\s]")
-_EMBEDDED_PATH = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s\"',;)\]]*")
-_DRIVE_PATH = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]")
+_POSIX_ROOTS = "home|Users|root|tmp|var|mnt|private|Volumes|media|opt|srv"
+_DRIVE_START = r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]"
+_UNC_START = r"(?<![\\\w])\\\\[^\\/\s]+[\\/]"
+_POSIX_START = rf"(?<![\w/.\-~])/(?:{_POSIX_ROOTS})/"
+# A path continues across a space when the next word holds a separator.
+_PATH_BODY = r"[^\s\"',;)\]]*(?:[ \t]+(?=\S*[\\/])[^\s\"',;)\]]+)*"
+_EMBEDDED_PATH = re.compile(
+    rf"(?:{_DRIVE_START}|{_UNC_START}|{_POSIX_START}){_PATH_BODY}"
+)
+_PRIVATE_PATTERNS = (
+    ("a drive-letter path", re.compile(_DRIVE_START)),
+    ("a UNC path", re.compile(_UNC_START + r"[^\\/\s]")),
+    ("a POSIX home or system path", re.compile(_POSIX_START)),
+    ("a 'Users' path segment", re.compile(r"[\\/]Users[\\/]")),
+)
+_SNIPPET_MARGIN = 20
 _MIN_USER_NAME = 3
+_FILE_ERRORS = (
+    ValueError,
+    OSError,
+    EOFError,
+    KeyError,
+    TypeError,
+    zipfile.BadZipFile,
+)
 RESULTS_PREFIX = "results"
 EXTERNAL_PREFIX = "<external>"
 
@@ -200,14 +227,16 @@ def _segments(text: str) -> list[str]:
 
 def _index_key(segments: Sequence[str]) -> str:
     joined = "/".join(segments).lower()
-    return re.sub(r"^/([a-z])/", r"\1:/", joined)
+    return re.sub(r"^/(?:mnt/)?([a-z])/", r"\1:/", joined)
+
+
+def _run_index(runs: Sequence[RunInfo]) -> dict[str, RunInfo]:
+    return {_index_key(_segments(str(run.path.resolve()))): run for run in runs}
 
 
 def _is_path(text: str) -> bool:
     if "\n" in text:
         return False
-    if _WHOLE_PATH.match(text):
-        return True
     return len(text) > 1 and text[0] == "/" and not re.search(r"\s", text)
 
 
@@ -220,11 +249,9 @@ class _PathRewriter:
     """
 
     def __init__(
-        self, runs: Sequence[RunInfo], exported_keys: set[str]
+        self, index: Mapping[str, RunInfo], exported_keys: set[str]
     ) -> None:
-        self._index = {
-            _index_key(_segments(str(run.path.resolve()))): run for run in runs
-        }
+        self._index = index
         self._exported = exported_keys
         self._seen: set[str] = set()
         self.warnings: list[str] = []
@@ -319,31 +346,74 @@ def _rewrite(name: str, data: bytes, rewriter: _PathRewriter) -> bytes:
     return data
 
 
-def _scanned_text(name: str, data: bytes) -> str:
-    if not name.endswith(".npz"):
-        return data.decode("utf-8", errors="replace")
-    with np.load(io.BytesIO(data), allow_pickle=False) as archive:
-        return str(archive["_meta"]) if "_meta" in archive.files else ""
+def _json_strings(value: Any) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _json_strings(item)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from _json_strings(item)
+
+
+def _scanned_members(name: str, data: bytes) -> Iterator[tuple[str, str]]:
+    """Yields the (member, text) pairs of a file that the check reads."""
+    if name.endswith(".json"):
+        yield name, "\n".join(_json_strings(json.loads(data)))
+    elif name.endswith(".npz"):
+        with np.load(io.BytesIO(data), allow_pickle=False) as archive:
+            for key in archive.files:
+                array = archive[key]
+                if key == "_meta":
+                    meta = json.loads(str(array))
+                    yield f"{name}:{key}", "\n".join(_json_strings(meta))
+                elif array.dtype.kind in "US":
+                    text = "\n".join(str(item) for item in array.ravel())
+                    yield f"{name}:{key}", text
+    else:
+        yield name, data.decode("utf-8", errors="replace")
+
+
+def _machine_names() -> list[str]:
+    """Returns the user name and host name (full and first label)."""
+    try:
+        host = socket.gethostname()
+    except OSError:
+        host = ""
+    names = {getpass.getuser(), host, host.partition(".")[0]}
+    return sorted(name for name in names if len(name) >= _MIN_USER_NAME)
+
+
+def _snippet(text: str, start: int, end: int) -> str:
+    around = text[max(0, start - _SNIPPET_MARGIN) : end + _SNIPPET_MARGIN]
+    return " ".join(around.split())
 
 
 def _private_marker(text: str) -> str | None:
-    """Returns the first thing in the text that names the local machine."""
-    match = _DRIVE_PATH.search(text)
-    if match:
-        return f"a drive-letter path ({match.group(0)!r})"
-    if "Users" in text:
-        return "the text 'Users'"
-    user = getpass.getuser()
-    if len(user) >= _MIN_USER_NAME and user.lower() in text.lower():
-        return "the local user name"
+    """Describes the first thing in the text that names the local machine."""
+    for label, pattern in _PRIVATE_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return f"{label} near {_snippet(text, *match.span())!r}"
+    for name in _machine_names():
+        match = re.search(re.escape(name), text, re.IGNORECASE)
+        if match:
+            return (
+                "the local user or host name near "
+                f"{_snippet(text, *match.span())!r}"
+            )
     return None
 
 
-def _check_private(key: str, files: dict[str, bytes]) -> None:
-    for name, data in sorted(files.items()):
-        marker = _private_marker(_scanned_text(name, data))
+def _private_problem(name: str, data: bytes) -> str | None:
+    for member, text in _scanned_members(name, data):
+        marker = _private_marker(text)
         if marker is not None:
-            raise ExportError(f"{key}/{name} still holds {marker}")
+            where = "" if member == name else f" ({member})"
+            return f"{marker}{where}"
+    return None
 
 
 def _plan_run(run: RunInfo, rewriter: _PathRewriter) -> dict[str, bytes]:
@@ -351,9 +421,16 @@ def _plan_run(run: RunInfo, rewriter: _PathRewriter) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     for file in sorted(run.path.rglob("*")):
         name = file.relative_to(run.path).as_posix()
-        if file.is_file() and is_exported(name):
-            files[name] = _rewrite(name, file.read_bytes(), rewriter)
-    _check_private(run.key, files)
+        if not (file.is_file() and is_exported(name)):
+            continue
+        try:
+            data = _rewrite(name, file.read_bytes(), rewriter)
+            problem = _private_problem(name, data)
+        except _FILE_ERRORS as error:
+            raise ExportError(f"{run.key}/{name}: {error}") from error
+        if problem is not None:
+            raise ExportError(f"{run.key}/{name} still holds {problem}")
+        files[name] = data
     return files
 
 
@@ -374,11 +451,35 @@ def _differences(
     return [name for name in names if planned.get(name) != existing.get(name)]
 
 
+def _write_file(target: Path, data: bytes) -> None:
+    target.write_bytes(data)
+
+
+def _write_run(folder: Path, files: dict[str, bytes]) -> None:
+    """Writes a run next to its place and moves it in, so none is partial."""
+    staging = folder.parent / f".{folder.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        for name, data in files.items():
+            target = staging / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _write_file(target, data)
+        if folder.exists():
+            for entry in staging.iterdir():
+                os.replace(entry, folder / entry.name)
+        else:
+            os.replace(staging, folder)
+    except OSError as error:
+        raise ExportError(f"cannot write {folder}: {error}") from error
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
 def export_runs(roots: Sequence[Path], dest: Path) -> ExportReport:
     """Copies the finished runs under the roots into a results tree.
 
-    Everything is planned and checked before the first file is written, so an
-    error leaves the destination untouched.
+    Everything is planned and checked before the first file is written, so a
+    planning error leaves the destination untouched. Each run is moved into
+    place whole, so a write error leaves no partial run.
 
     Args:
         roots: Folders holding run directories, at any nesting.
@@ -395,7 +496,7 @@ def export_runs(roots: Sequence[Path], dest: Path) -> ExportReport:
     runs = find_runs(roots)
     finished = [run for run in runs if run.finished]
     _check_collisions(finished)
-    rewriter = _PathRewriter(runs, {run.key for run in finished})
+    rewriter = _PathRewriter(_run_index(runs), {run.key for run in finished})
     plans: list[tuple[RunInfo, dict[str, bytes], bool]] = []
     for run in sorted(finished, key=lambda item: item.key):
         files = _plan_run(run, rewriter)
@@ -409,12 +510,8 @@ def export_runs(roots: Sequence[Path], dest: Path) -> ExportReport:
         plans.append((run, files, bool(existing)))
     exported = []
     for run, files, present in plans:
-        folder = Path(dest) / run.key
         if not present:
-            for name, data in files.items():
-                target = folder / name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(data)
+            _write_run(Path(dest) / run.key, files)
         exported.append(
             ExportedRun(
                 key=run.key,
