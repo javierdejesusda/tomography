@@ -87,14 +87,14 @@ _HUNDRED = (
     rf"(?:\s+(?:and\s+)?{_SMALL})?"
 )
 _THOUSAND = (
-    rf"(?:(?:a|{_SMALL})\s+)?(?:thousand|million)(?!\w)"
+    rf"(?:(?:{_HUNDRED}|a|{_SMALL})\s+)?(?:thousand|million)(?!\w)"
     rf"(?:\s+(?:and\s+)?(?:{_HUNDRED}|{_SMALL}))?"
 )
 _DOZEN = rf"(?:(?:a|{_DIGIT_WORDS})\s+)?dozen(?!\w)"
 _DIGITS = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
 _NUMBER = re.compile(
     rf"(?P<digits>{_DIGITS})(?:(?P<k>k)(?!\w)"
-    r"|\s+(?P<dscale>hundred|thousand|million)(?!\w))?"
+    rf"|\s+(?P<dscale>{_alternatives(list(SCALE_WORDS))})(?!\w))?"
     rf"|(?<!\w)(?P<words>{_THOUSAND}|{_HUNDRED}|{_DOZEN}|{_SMALL})",
     re.IGNORECASE,
 )

@@ -535,3 +535,28 @@ def test_unit_words_leave_an_abstention_alone():
 )
 def test_by_default_the_first_quantity_still_wins(completion, expected):
     assert parse_answer(completion) == expected
+
+
+@pytest.mark.parametrize(
+    ("completion", "expected"),
+    [
+        ("two hundred thousand", _point(200_000)),
+        ("about one hundred and fifty thousand", _point(150_000, True)),
+        ("a hundred thousand", _point(100_000)),
+        ("three hundred million", _point(300_000_000)),
+        ("two hundred fifty thousand five hundred", _point(250_500)),
+    ],
+)
+def test_a_hundreds_phrase_before_thousand_or_million(completion, expected):
+    assert parse_answer(completion) == expected
+
+
+@pytest.mark.parametrize(
+    ("completion", "expected"),
+    [
+        ("3 dozen", _point(36)),
+        ("2 to 3 dozen eggs", _range(24, 36)),
+    ],
+)
+def test_a_digit_dozen_is_scaled(completion, expected):
+    assert parse_answer(completion) == expected
