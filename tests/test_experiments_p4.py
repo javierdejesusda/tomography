@@ -1791,3 +1791,22 @@ def test_gpt2_reads_sentiment_over_the_whole_grid(tmp_path: Path) -> None:
     assert len(rows) == 36
     assert max(row["report"] for row in rows) > 0.6
     print(f"p4: {seconds:.1f} s for {len(rows)} cells on gpt2")
+
+
+def test_every_task_is_read_with_the_tight_logistic_refit(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flags: list[Any] = []
+    real = p4_pairing.sweep_from_activations
+
+    def spy(*args: Any, **kwargs: Any) -> SweepResult:
+        flags.append(kwargs.get("refit_at_zero"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(p4_pairing, "sweep_from_activations", spy)
+    config = _config(tasks=("utility",), n_seeds=2)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, tiny_arch, _sources())
+
+    assert flags
+    assert all(flag is True for flag in flags)
