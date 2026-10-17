@@ -1,0 +1,167 @@
+{
+  "_meta": {
+    "experiment": "p3",
+    "config_hash": "61baf30a8a59",
+    "seed": 0,
+    "git_sha": "c7d8051ce399c82d115c5cf4ba85d8f0a938b01e",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4090)",
+    "platform": "Linux-6.8.0-117-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T13:09:08+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p3",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "n_seeds": 20,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "truth_cities",
+        "truth_common",
+        "utility"
+      ],
+      "sizes": [
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128,
+        256,
+        512
+      ],
+      "reference_pairs": 2048,
+      "failure_accuracy": 0.6,
+      "saturation_delta": 0.01,
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "tasks": [
+      "sentiment",
+      "truth",
+      "truth_cities",
+      "truth_common",
+      "utility"
+    ],
+    "targets": {
+      "sentiment": "sentiment",
+      "truth": "truth",
+      "truth_cities": "truth",
+      "truth_common": "truth",
+      "utility": "utility"
+    },
+    "layers": {
+      "sentiment": 18,
+      "truth": 18,
+      "truth_cities": 18,
+      "truth_common": 26,
+      "utility": 19
+    },
+    "reference": {
+      "sentiment": {
+        "pairs": 2048,
+        "select": 0.9813084112149533,
+        "report": 0.9813084112149533
+      },
+      "truth": {
+        "pairs": 172,
+        "select": 0.9622641509433962,
+        "report": 0.9661016949152542
+      },
+      "truth_cities": {
+        "pairs": 452,
+        "select": 0.9811320754716981,
+        "report": 0.9661016949152542
+      },
+      "truth_common": {
+        "pairs": 1296,
+        "select": 1.0,
+        "report": 0.9491525423728814
+      },
+      "utility": {
+        "pairs": 2048,
+        "select": 0.91015625,
+        "report": 0.76953125
+      }
+    },
+    "skipped_sizes": {
+      "sentiment": [],
+      "truth": [
+        256,
+        512
+      ],
+      "truth_cities": [
+        512
+      ],
+      "truth_common": [],
+      "utility": []
+    },
+    "skipped_sources": {
+      "sentiment": "no other task in tasks has 'sentiment' as its target",
+      "utility": "no other task in tasks has 'utility' as its target"
+    },
+    "saturation": {
+      "sentiment": {
+        "size": 256,
+        "lo": 128,
+        "hi": 256,
+        "delta": 0.01
+      },
+      "truth": {
+        "size": 16,
+        "lo": 16,
+        "hi": 32,
+        "delta": 0.01
+      },
+      "truth_cities": {
+        "size": 4,
+        "lo": 2,
+        "hi": 16,
+        "delta": 0.01
+      },
+      "truth_common": {
+        "size": 128,
+        "lo": 32,
+        "hi": 256,
+        "delta": 0.01
+      },
+      "utility": {
+        "size": 8,
+        "lo": 8,
+        "hi": 16,
+        "delta": 0.01
+      }
+    },
+    "failure_auroc": {
+      "sentiment": 0.03910614525139665,
+      "truth": null,
+      "truth_cities": null,
+      "truth_common": 0.07630813953488372,
+      "utility": 0.08333333333333333
+    }
+  }
+}

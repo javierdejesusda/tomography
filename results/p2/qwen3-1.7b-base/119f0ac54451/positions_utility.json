@@ -1,0 +1,68 @@
+{
+  "_meta": {
+    "experiment": "p2",
+    "config_hash": "119f0ac54451",
+    "seed": 0,
+    "git_sha": "c7d8051ce399c82d115c5cf4ba85d8f0a938b01e",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4090)",
+    "platform": "Linux-6.8.0-117-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T10:37:02+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p2",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "utility"
+      ],
+      "positions": [
+        "last",
+        "concept",
+        "mean"
+      ],
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "zero_shot": true
+    }
+  },
+  "data": {
+    "rows": [
+      "last",
+      "concept",
+      "mean"
+    ],
+    "cols": [
+      "last",
+      "concept",
+      "mean"
+    ],
+    "title": "utility: train position (rows, at its layer) vs evaluation position"
+  }
+}
