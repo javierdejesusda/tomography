@@ -33,6 +33,7 @@ from tomography.experiments.base import derive_seed
 from tomography.experiments.c1_sentiment_steering import draw_prompts
 from tomography.experiments.c1_sentiment_steering import prompt_fragments
 from tomography.experiments.c1_sentiment_steering import slope_layer
+from tomography.experiments.effects import SideEffects
 from tomography.experiments.effects import read_trials
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.p7_extraction_steering import CHAT_INSTRUCTION
@@ -432,6 +433,7 @@ def test_the_config_defaults_and_round_trip() -> None:
     assert config.coeffs == (-0.3, -0.15, 0.0, 0.15, 0.3)
     assert config.sweep_layers is None
     assert (config.read_threshold, config.truncate_words) == (0.6, 3)
+    assert config.n_random == 3
     assert MAX_SERIES == 8
     custom = Config(
         templates=("paper", "scaffold_1"),
@@ -579,6 +581,7 @@ def _forbid_reading(monkeypatch: pytest.MonkeyPatch) -> None:
         ({"sweep_layers": (1,) * 9}, "sweep_layers"),
         ({"read_threshold": 0.49}, "read_threshold"),
         ({"read_threshold": 1.0}, "read_threshold"),
+        ({"n_random": 0}, "n_random must be at least 1, got 0"),
         ({"n_prompts": 100}, "pool"),
         ({"n_calibration": 0}, "n_calibration"),
         ({"temperature": None}, "needs a temperature"),
@@ -608,6 +611,7 @@ def _forbid_reading(monkeypatch: pytest.MonkeyPatch) -> None:
         "nine-sweep-layers",
         "threshold-below-chance",
         "threshold-one",
+        "no-random-arm",
         "prompt-pool-too-small",
         "no-calibration-text",
         "sampling-without-a-temperature",
@@ -630,8 +634,8 @@ def test_an_invalid_config_raises_before_the_model_runs(
 
 @pytest.mark.parametrize(
     "overrides",
-    [{"n_steer_seeds": 3}, {"read_threshold": 0.5}],
-    ids=["every-reader-steers", "threshold-at-chance"],
+    [{"n_steer_seeds": 3}, {"read_threshold": 0.5}, {"n_random": 1}],
+    ids=["every-reader-steers", "threshold-at-chance", "one-random-arm"],
 )
 def test_settings_on_the_edge_of_their_range_pass_the_checks(
     tiny_arch: LoadedModel,
@@ -973,7 +977,7 @@ def test_the_steering_layer_of_a_template_is_where_the_primary_slope_peaks(
         for _ in READERS
         for _ in NONZERO
     ]
-    assert [c["layers"] for c in arms[24:]] == expected
+    assert [c["layers"] for c in arms[24 : 24 + len(expected)]] == expected
 
 
 def test_each_template_steers_the_transfer_at_its_own_layer(
@@ -990,16 +994,17 @@ def test_each_template_steers_the_transfer_at_its_own_layer(
         for _ in READERS
         for _ in NONZERO
     ]
-    assert [c["layers"] for c in arms[24:]] == expected
+    assert [c["layers"] for c in arms[24 : 24 + len(expected)]] == expected
     assert [row["steer_layer"] for row in _table(run_dir)] == [1, 3]
 
 
 def test_the_arms_use_the_sweep_layers_and_the_first_readers(
     tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    arms = _spy_reader_arm(monkeypatch)
+    calls = _spy_reader_arm(monkeypatch)
     reads = _spy_reading_sweep(monkeypatch)
     _execute(tiny_arch, tmp_path)
+    arms = [c for c in calls if c["reader"].method != "random"]
     sweep = arms[:24]
     seen: list[tuple[tuple[int, ...], int]] = []
     for call in sweep:
@@ -1067,6 +1072,202 @@ def test_the_transfer_matrix_is_the_mean_primary_slope_of_the_transfer_trials(
         )
 
 
+def test_the_random_arms_are_unit_directions_drawn_from_the_seed(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _spy_reader_arm(monkeypatch)
+    _execute(tiny_arch, tmp_path, seed=7, n_random=2)
+    random = [c for c in calls if c["reader"].method == "random"]
+    assert len(random) == len(SWEEP) * 2 * len(NONZERO)
+    rng = np.random.default_rng(7)
+    draws = [
+        (layer, rng.standard_normal((tiny_arch.n_layers, tiny_arch.d_model)))
+        for layer in SWEEP
+        for _ in range(2)
+    ]
+    for (layer, draw), start in zip(
+        draws, range(0, len(random), len(NONZERO)), strict=True
+    ):
+        row = draw[layer - 1]
+        for call in random[start : start + len(NONZERO)]:
+            assert call["layers"] == [layer]
+            direction = call["reader"].directions[layer - 1]
+            assert direction == pytest.approx(
+                row / np.linalg.norm(row), abs=1e-5
+            )
+            assert np.linalg.norm(direction) == pytest.approx(1.0, abs=1e-5)
+
+
+def test_the_random_arms_steer_like_the_reader_arms_of_the_config(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _spy_reader_arm(monkeypatch)
+    _execute(
+        tiny_arch,
+        tmp_path,
+        mode="absolute",
+        mask="all",
+        preserve_norm=True,
+        op="piecewise",
+        templates=("paper",),
+        formats=("raw",),
+        n_steer_seeds=1,
+        sweep_layers=(2,),
+    )
+    random = [c for c in calls if c["reader"].method == "random"]
+    assert len(random) == 3 * len(NONZERO)
+    assert {c["mode"] for c in random} == {"absolute"}
+    assert {c["mask"] for c in random} == {"all"}
+    assert {c["preserve_norm"] for c in random} == {True}
+    assert {c["op"] for c in random} == {"piecewise"}
+    assert [c["coeff"] for c in random] == list(NONZERO) * 3
+    assert {tuple(c["norms"]) for c in random} == {tuple(calls[0]["norms"])}
+
+
+def test_the_random_trials_are_named_after_arm_layer_and_coefficient(
+    finished: Finished,
+) -> None:
+    trials = read_trials(finished.run_dir, "trials_random")
+    assert [t.name for t in trials] == [
+        "none",
+        *(
+            f"random{k}/layer{layer}/{c:g}"
+            for layer in SWEEP
+            for k in range(3)
+            for c in NONZERO
+        ),
+    ]
+    sweep = read_trials(finished.run_dir, "trials_sweep")
+    assert trials[0].prompts == sweep[0].prompts
+    assert trials[0].completions == sweep[0].completions
+
+
+def test_the_random_slopes_are_the_dose_slopes_of_the_random_trials(
+    finished: Finished,
+) -> None:
+    arrays = finished.run_dir.read_arrays("curves_slope_random")
+    sidecar = finished.run_dir.read_json("curves_slope_random")
+    assert isinstance(sidecar, dict)
+    assert sidecar["series"] == ["random0", "random1", "random2"]
+    assert sidecar["chance"] == 0.0
+    assert sidecar["xlabel"] == "Layer"
+    assert "primary" in sidecar["ylabel"]
+    assert arrays["x"].tolist() == [1.0, 2.0, 3.0]
+    trials = _trials(finished.run_dir, "trials_random")
+    expected = np.array(
+        [
+            [
+                [
+                    dose_slope(
+                        DOSE_COEFFS, _dose(trials, f"random{k}/layer{layer}", 0)
+                    )
+                    for layer in SWEEP
+                ]
+            ]
+            for k in range(3)
+        ]
+    )
+    assert arrays["per_seed"].shape == (3, 1, 3)
+    np.testing.assert_allclose(arrays["per_seed"], expected, atol=1e-6)
+    assert _summary(finished.run_dir)["max_abs_random_slope"] == pytest.approx(
+        np.abs(expected).max(), abs=1e-6
+    )
+
+
+EFFECTS_COLUMNS = [
+    "template",
+    "layer",
+    "reader",
+    "coeff",
+    "perplexity",
+    "fluency",
+    "distinct_1",
+    "distinct_2",
+    "mean_length",
+    "empty_rate",
+]
+
+
+def _planted_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[SimpleNamespace]:
+    """Replaces `side_effects` by values that identify the call."""
+    calls: list[SimpleNamespace] = []
+
+    def fake(
+        loaded: Any, arm: Any, trial: Any, neutral: Any, **kwargs: Any
+    ) -> SideEffects:
+        n = float(len(calls) + 1)
+        calls.append(
+            SimpleNamespace(
+                arm=arm, trial=trial, neutral=neutral, kwargs=kwargs, n=n
+            )
+        )
+        return SideEffects(
+            perplexity=n,
+            fluency=-n,
+            distinct_1=n / 10,
+            distinct_2=n / 20,
+            mean_length=n + 0.5,
+            empty_rate=n / 100,
+        )
+
+    monkeypatch.setattr(p7, "side_effects", fake)
+    return calls
+
+
+def test_the_effects_table_has_one_row_per_generated_trial(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _planted_effects(monkeypatch)
+    run_dir = _execute(tiny_arch, tmp_path, n_random=2)
+    table = run_dir.read_json("table_effects")
+    assert isinstance(table, dict)
+    assert table["columns"] == EFFECTS_COLUMNS
+    head = [
+        ["none", None, None, 0.0],
+        *(
+            [template, layer, reader, c]
+            for template in TEMPLATE_NAMES
+            for layer in SWEEP
+            for reader in READERS
+            for c in NONZERO
+        ),
+        *(
+            ["random", layer, k, c]
+            for layer in SWEEP
+            for k in range(2)
+            for c in NONZERO
+        ),
+    ]
+    assert [row[:4] for row in table["rows"]] == head
+    assert len(calls) == len(head)
+    for row, call in zip(table["rows"], calls, strict=True):
+        n = call.n
+        assert row[4:] == [n, -n, n / 10, n / 20, n + 0.5, n / 100]
+
+
+def test_the_effects_follow_the_trials_and_the_arms_that_made_them(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _planted_effects(monkeypatch)
+    run_dir = _execute(tiny_arch, tmp_path, n_random=2)
+    sweep = read_trials(run_dir, "trials_sweep")
+    random = read_trials(run_dir, "trials_random")
+    wanted = [*sweep, *random[1:]]
+    assert [c.trial.completions for c in calls] == [
+        t.completions for t in wanted
+    ]
+    assert calls[0].arm.name == "none"
+    tails = [t.name.rpartition("/")[2] for t in wanted[1:]]
+    assert [c.arm.name for c in calls[1:]] == tails
+    assert [c.trial.name for c in calls[1:]] == tails
+    held = split_held_out(_texts(), n_calibration=10, n_neutral=8, seed=0)
+    for call in calls:
+        assert call.neutral == held.neutral
+        assert call.kwargs == {"batch_size": 8}
+
+
 _table = partial(read_table, stem="table")
 
 
@@ -1095,7 +1296,7 @@ def _units(run_dir: RunDir, sweep: tuple[int, ...] = SWEEP) -> SimpleNamespace:
     )
 
 
-def test_execute_writes_twenty_files(finished: Finished) -> None:
+def test_execute_writes_twenty_five_files(finished: Finished) -> None:
     names = sorted(p.name for p in finished.run_dir.path.iterdir())
     stems = (
         "curves_read",
@@ -1106,6 +1307,8 @@ def test_execute_writes_twenty_files(finished: Finished) -> None:
         "trials_sweep",
         "trials_transfer_raw",
         "trials_transfer_chat",
+        "curves_slope_random",
+        "trials_random",
     )
     assert names == sorted(
         [
@@ -1113,6 +1316,7 @@ def test_execute_writes_twenty_files(finished: Finished) -> None:
             "meta.json",
             "summary.json",
             "table.json",
+            "table_effects.json",
             *(f"{stem}.{ext}" for stem in stems for ext in ("npz", "json")),
         ]
     )
@@ -1215,6 +1419,7 @@ def test_the_summary_lists_the_run(finished: Finished) -> None:
         "lens_agreement",
         "layer_gap",
         "judge_sign_agreement",
+        "max_abs_random_slope",
     ]
     assert summary["templates"] == list(TEMPLATE_NAMES)
     assert summary["formats"] == list(FORMAT_NAMES)
