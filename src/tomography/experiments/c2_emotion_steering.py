@@ -293,6 +293,19 @@ def _effect_row(
     emotion: str | None,
     effects: SideEffects,
 ) -> list[object]:
+    """Builds one row of `table_effects`.
+
+    Args:
+        arm: `none`, `reading` or `random`.
+        coeff: The coefficient of the arm.
+        seed: Index of the reader or random arm; None for `none`.
+        emotion: The steered emotion; None for `none` and random arms.
+        effects: The side effects measured for the arm.
+
+    Returns:
+        The identifying values, then the six side effects, in the order of
+        `_EFFECT_COLUMNS`.
+    """
     return [
         arm,
         coeff,
@@ -375,15 +388,15 @@ def execute(
     Raises:
         ValueError: If fewer than two distinct emotions are steered, `coeffs`
             has no 0.0 or no other value, `strength` is not a positive value
-            of `coeffs`, `n_steer_seeds` is outside `1..n_seeds`, `window`
-            does not fit the model, `n_pairs` or `n_eval_pairs` is below 1
-            or exceeds the pairs one steered emotion can form in its split
-            (an emotion with no pair fails even when `n_eval_pairs` is
-            None), the generation settings are invalid (see `GenSettings`),
-            `n_calibration` or `n_neutral` is below 1, the usable (at least
-            40 characters) held-out texts are fewer than
-            `n_calibration + n_neutral`, or the neutral ones give fewer than
-            `n_prompts` distinct prompts.
+            of `coeffs`, `n_random` is below 1, `n_steer_seeds` is outside
+            `1..n_seeds`, `window` does not fit the model, `n_pairs` or
+            `n_eval_pairs` is below 1 or exceeds the pairs one steered
+            emotion can form in its split (an emotion with no pair fails
+            even when `n_eval_pairs` is None), the generation settings are
+            invalid (see `GenSettings`), `n_calibration` or `n_neutral` is
+            below 1, the usable (at least 40 characters) held-out texts are
+            fewer than `n_calibration + n_neutral`, or the neutral ones give
+            fewer than `n_prompts` distinct prompts.
     """
     n_layers = loaded.n_layers
     strength = _check_config(config, n_layers)
