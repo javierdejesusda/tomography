@@ -195,8 +195,8 @@ def parse_answer(completion: str) -> Parsed:
     text = answer_text(completion)
     first = _NUMBER.search(text)
     if first is None:
-        form: Form = "abstain" if is_abstention(completion) else "none"
-        return Parsed(form, None, None, False)
+        none_form: Form = "abstain" if is_abstention(completion) else "none"
+        return Parsed(none_form, None, None, False)
     value = _value(first)
     low, high = value, value
     joined = _JOINER.match(text, first.end())
