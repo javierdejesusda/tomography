@@ -556,9 +556,7 @@ def _wait_for_ssh(
     return True
 
 
-def _pod_error(
-    error: BaseException, deps: Deps, pod_id: str, next_step: str
-) -> CloudError:
+def _error_detail(error: BaseException, deps: Deps) -> str:
     if isinstance(error, CloudError):
         detail = str(error)
     elif isinstance(error, KeyboardInterrupt):
@@ -566,11 +564,7 @@ def _pod_error(
     else:
         detail = f"{type(error).__name__}: {error}"
     key = deps.env.get("RUNPOD_API_KEY")
-    if key:
-        detail = detail.replace(key, "[redacted]")
-    return CloudError(
-        f"{detail}; pod {pod_id} may still be running, {next_step}"
-    )
+    return detail.replace(key, "[redacted]") if key else detail
 
 
 def _stop_pod(
@@ -630,6 +624,26 @@ def _arm_deadline(
     launch = _launch_command(["deadline.sh"])
     if _remote(args, deps, state, launch).returncode:
         raise CloudError("launching the deadline watchdog failed")
+
+
+def _fail_pod(
+    error: BaseException,
+    args: argparse.Namespace,
+    deps: Deps,
+    api: Api,
+    state: dict[str, Any],
+    next_step: str,
+) -> CloudError:
+    pod_id = state["pod_id"]
+    detail = _error_detail(error, deps)
+    try:
+        _stop_pod(args, deps, api, state)
+    except Exception as stop_error:
+        return CloudError(
+            f"{detail}; pod {pod_id} may still be running and stopping it "
+            f"failed ({_error_detail(stop_error, deps)}), {next_step}"
+        )
+    return CloudError(f"{detail}; pod {pod_id} was stopped, {next_step}")
 
 
 def _bring_up(
@@ -728,8 +742,8 @@ def cmd_up(args: argparse.Namespace, deps: Deps) -> int:
     try:
         return _bring_up(args, deps, api, state, pod)
     except (Exception, KeyboardInterrupt) as error:
-        raise _pod_error(
-            error, deps, pod_id, "run `down` to remove it"
+        raise _fail_pod(
+            error, args, deps, api, state, "run `down` to remove it"
         ) from error
 
 
@@ -945,6 +959,22 @@ def _chain_script(src: str, spec: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _chain_live(
+    args: argparse.Namespace, deps: Deps, state: Mapping[str, Any]
+) -> bool:
+    pid_file = f"{REMOTE_RUN}/chain.pid"
+    live = _remote(
+        args,
+        deps,
+        state,
+        f"pid=$(cat {pid_file} 2>/dev/null); "
+        'if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null '
+        "&& tr '\\0' ' ' </proc/$pid/cmdline | grep -q chain.sh; "
+        "then echo CHAIN_LIVE; fi",
+    )
+    return "CHAIN_LIVE" in live.stdout
+
+
 def cmd_start(args: argparse.Namespace, deps: Deps) -> int:
     """Starts the chain and its watchdog detached on the pod.
 
@@ -971,16 +1001,7 @@ def cmd_start(args: argparse.Namespace, deps: Deps) -> int:
             raise CloudError("the deadline set by `up` has passed; run `down`")
         max_seconds = int(min(max_seconds, remaining))
     pid_file = f"{REMOTE_RUN}/chain.pid"
-    live = _remote(
-        args,
-        deps,
-        state,
-        f"pid=$(cat {pid_file} 2>/dev/null); "
-        'if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null '
-        "&& tr '\\0' ' ' </proc/$pid/cmdline | grep -q chain.sh; "
-        "then echo CHAIN_LIVE; fi",
-    )
-    if "CHAIN_LIVE" in live.stdout:
+    if _chain_live(args, deps, state):
         raise CloudError(
             f"a chain is already running on the pod (see {pid_file})"
         )
@@ -1007,11 +1028,11 @@ def cmd_start(args: argparse.Namespace, deps: Deps) -> int:
         f"> {offset} && touch {REMOTE_RUN}/started && "
         f"{_launch_command(list(scripts))}"
     )
-    if _remote(args, deps, state, command).returncode:
-        raise CloudError("launching the chain failed")
     state["started"] = _now_iso()
     state.pop("pulled", None)
     _save_state(args.state, state)
+    if _remote(args, deps, state, command).returncode:
+        raise CloudError("launching the chain failed")
     deps.out(
         "chain started; the watchdog stops the pod after "
         f"{max_seconds / 3600:g} h or {args.grace_minutes:g} min after the "
@@ -1161,8 +1182,14 @@ def cmd_pull(args: argparse.Namespace, deps: Deps) -> int:
                 f"the archive is not valid: {errors[0]}", args.dest, extracted
             )
         )
-    state["pulled"] = _now_iso()
-    _save_state(args.state, state)
+    if _chain_live(args, deps, state):
+        deps.out(
+            "WARNING: the chain is still writing results, so this pull is "
+            "not recorded; pull again when it has finished"
+        )
+    else:
+        state["pulled"] = _now_iso()
+        _save_state(args.state, state)
     deps.out(f"pulled {remote} into {args.dest}")
     return 0
 
@@ -1245,8 +1272,13 @@ def cmd_resume(args: argparse.Namespace, deps: Deps) -> int:
             return 1
         _arm_deadline(args, deps, state, missing)
     except (Exception, KeyboardInterrupt) as error:
-        raise _pod_error(
-            error, deps, pod_id, "`pull` any results, then run `down`"
+        raise _fail_pod(
+            error,
+            args,
+            deps,
+            api,
+            state,
+            "run `resume` to retry, then `pull` before `down`",
         ) from error
     deps.out(
         f"pod {pod_id} resumed at {endpoint[0]}:{endpoint[1]}; the container "

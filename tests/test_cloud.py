@@ -1584,3 +1584,81 @@ def test_the_live_chain_guard_checks_the_process_command_line(
     command = next(c for c in h.commands() if "CHAIN_LIVE" in c)
     assert "/proc/$pid/cmdline" in command
     assert "chain.sh" in command
+
+
+def test_up_stops_the_pod_when_interrupted(tmp_path: Path) -> None:
+    h = up_harness(tmp_path)
+
+    def interrupt(argv: Sequence[str]) -> cloud.CommandResult:
+        raise KeyboardInterrupt
+
+    h.runner.handler = interrupt
+    assert up(h) == 1
+    assert h.transport.calls[-1][:2] == ("POST", f"{BASE}/pods/pod1/stop")
+    assert "was stopped" in h.output()
+    assert h.state()["status"] == "stopped"
+
+
+def test_up_reports_a_failed_stop_without_hiding_the_cause(
+    tmp_path: Path,
+) -> None:
+    h = up_harness(
+        tmp_path,
+        [(201, starting_pod()), (200, ready_pod()), (500, {"error": "nope"})],
+    )
+
+    def explode(argv: Sequence[str]) -> cloud.CommandResult:
+        raise RuntimeError("probe broke")
+
+    h.runner.handler = explode
+    assert up(h) == 1
+    assert "probe broke" in h.output()
+    assert "stopping it failed" in h.output()
+    assert "500" in h.output()
+    assert "down" in h.output()
+
+
+def test_resume_stops_the_pod_when_a_step_blows_up(tmp_path: Path) -> None:
+    h = stopped_harness(
+        tmp_path, [(200, None), (200, resumed_pod()), (200, None)]
+    )
+
+    def explode(argv: Sequence[str]) -> cloud.CommandResult:
+        raise RuntimeError("boom")
+
+    h.runner.handler = explode
+    assert h.main("resume", "--max-hours", "2") == 1
+    assert h.transport.calls[-1][:2] == ("POST", f"{BASE}/pods/pod1/stop")
+    assert "boom" in h.output()
+    assert h.state()["status"] == "stopped"
+
+
+def test_start_records_the_launch_before_sending_it(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    pushed(h, pulled="2026-01-01T00:00:00+00:00")
+    original = h.runner.handler
+
+    def drop_launch(argv: Sequence[str]) -> cloud.CommandResult:
+        if argv[0] == "ssh" and "setsid nohup" in argv[-1]:
+            return cloud.CommandResult(255, "")
+        return original(argv)
+
+    h.runner.handler = drop_launch
+    code = h.main("start", "--spec", "chain11.toml", "--max-hours", "1")
+    assert code == 1
+    state = h.state()
+    assert state["started"]
+    assert "pulled" not in state
+
+
+def test_pull_while_the_chain_runs_does_not_record_a_pull(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    h.chain_live = True
+    pushed(h, started="2026-01-01T00:00:00+00:00")
+    h.runner.stream_data = make_tar([("a.txt", b"x")])
+    assert h.main("pull", "--dest", str(tmp_path / "pulled")) == 0
+    assert "WARNING" in h.output()
+    assert "still" in h.output()
+    assert "pulled" not in h.state()
