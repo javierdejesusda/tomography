@@ -1,0 +1,118 @@
+{
+  "_meta": {
+    "experiment": "p5",
+    "config_hash": "fb664c3b4be2",
+    "seed": 0,
+    "git_sha": "fb3b5dd71d339258fde47b6c9f6c0bbe58f4bebf",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T17:00:46+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p5",
+      "model": "qwen3-0.6b",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "response",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "conditions": [
+        "paper",
+        "synonym_0",
+        "synonym_1",
+        "unrelated_0",
+        "unrelated_1",
+        "instruction_only",
+        "fact_only",
+        "random_label"
+      ],
+      "got_subsets": [
+        "cities",
+        "neg_cities",
+        "sp_en_trans",
+        "larger_than",
+        "common_claim_true_false"
+      ],
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "conditions": [
+      "paper",
+      "synonym_0",
+      "synonym_1",
+      "unrelated_0",
+      "unrelated_1",
+      "instruction_only",
+      "fact_only",
+      "random_label"
+    ],
+    "personas": {
+      "paper": [
+        "an honest",
+        "an untruthful"
+      ],
+      "synonym_0": [
+        "a truthful",
+        "a deceitful"
+      ],
+      "synonym_1": [
+        "a sincere",
+        "a lying"
+      ],
+      "unrelated_0": [
+        "a tall",
+        "a short"
+      ],
+      "unrelated_1": [
+        "an old",
+        "a young"
+      ]
+    },
+    "got_subsets": [
+      "cities",
+      "neg_cities",
+      "sp_en_trans",
+      "larger_than",
+      "common_claim_true_false"
+    ],
+    "n_eval_pairs": {
+      "facts_val": 53,
+      "facts": 59,
+      "got_cities": 133,
+      "got_neg_cities": 142,
+      "got_sp_en_trans": 36,
+      "got_larger_than": 187,
+      "got_common_claim_true_false": 256
+    },
+    "n_seeds": 10,
+    "skipped": {},
+    "lexical_gap": {
+      "facts": 0.0070621468926554964,
+      "got_cities": 0.03834586466165402,
+      "got_neg_cities": -0.011502347417840397,
+      "got_sp_en_trans": 0.16759259259259257,
+      "got_larger_than": -0.06060606060606044,
+      "got_common_claim_true_false": 0.07402343750000007
+    }
+  }
+}

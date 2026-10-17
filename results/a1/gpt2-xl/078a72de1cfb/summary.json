@@ -1,0 +1,66 @@
+{
+  "_meta": {
+    "experiment": "a1",
+    "config_hash": "078a72de1cfb",
+    "seed": 0,
+    "git_sha": "fb3b5dd71d339258fde47b6c9f6c0bbe58f4bebf",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T16:29:24+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "a1",
+      "model": "gpt2-xl",
+      "seed": 0,
+      "sources": [
+        "r1",
+        "r2",
+        "r3",
+        "r5",
+        "r7"
+      ],
+      "extra_runs": [],
+      "depth": 0.5
+    }
+  },
+  "data": {
+    "concepts": [
+      "r1",
+      "r2",
+      "r3",
+      "r5",
+      "r7"
+    ],
+    "layer": 24,
+    "depth": 0.5,
+    "n_seeds": 10,
+    "chance_abs_cosine": 0.019947114020071634,
+    "agreement_at_layer": {
+      "r1": 0.504497998508865,
+      "r2": 0.3688919733932905,
+      "r3": 0.4790889489843878,
+      "r5": 0.97960965237654,
+      "r7": 0.6066024232412323
+    },
+    "source_runs": {
+      "r1": "81e8ecd71341",
+      "r2": "83124998c2b8",
+      "r3": "3507b0628650",
+      "r5": "7f0afd7dfe12",
+      "r7": "5eed122bfd4e"
+    }
+  }
+}

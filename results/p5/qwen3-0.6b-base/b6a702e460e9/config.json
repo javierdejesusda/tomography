@@ -1,0 +1,33 @@
+{
+  "experiment": "p5",
+  "model": "qwen3-0.6b-base",
+  "seed": 0,
+  "n_seeds": 10,
+  "n_pairs": 64,
+  "n_eval_pairs": 256,
+  "method": "logistic",
+  "preprocess": "center",
+  "position": "response",
+  "eval_position": null,
+  "layers": null,
+  "bos": null,
+  "batch_size": 8,
+  "conditions": [
+    "paper",
+    "synonym_0",
+    "synonym_1",
+    "unrelated_0",
+    "unrelated_1",
+    "instruction_only",
+    "fact_only",
+    "random_label"
+  ],
+  "got_subsets": [
+    "cities",
+    "neg_cities",
+    "sp_en_trans",
+    "larger_than",
+    "common_claim_true_false"
+  ],
+  "n_boot": 2000
+}
