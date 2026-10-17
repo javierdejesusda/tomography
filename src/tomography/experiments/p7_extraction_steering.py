@@ -491,6 +491,16 @@ class _Steering:
     def effects(
         self, arm: Arm, trial: Trial, neutral: Sequence[str]
     ) -> SideEffects:
+        """Measures the side effects of an arm.
+
+        Args:
+            arm: The arm that produced `trial`.
+            trial: The judged trial of the arm.
+            neutral: Held-out text for the neutral perplexity.
+
+        Returns:
+            The side effects, with the run's batch size.
+        """
         return side_effects(
             self.loaded,
             arm,
@@ -516,6 +526,18 @@ def _effects_row(
     coeff: float,
     effects: SideEffects,
 ) -> list[object]:
+    """Builds one row of `table_effects`.
+
+    Args:
+        template: The template, `random` for a random arm or `none`.
+        layer: The sweep layer; None for the unsteered trial.
+        reader: The reader or random arm index; None for the unsteered trial.
+        coeff: The coefficient.
+        effects: The side effects of the trial.
+
+    Returns:
+        The identifying columns, then the six side-effect columns.
+    """
     return [
         template,
         layer,
@@ -707,9 +729,12 @@ def _dose_sweep(
         neutral: Held-out text for the neutral perplexity.
 
     Returns:
-        The primary and the check scores, each of shape (T, S, R, K):
-        template, sweep layer, reader, coefficient; and the rows of
-        `table_effects` of the unsteered trial and the sweep trials.
+        A tuple of three elements:
+        - The primary scores, of shape (T, S, R, K): template, sweep layer,
+          reader, coefficient.
+        - The check scores, of the same shape.
+        - The rows of `table_effects` of the unsteered trial and the sweep
+          trials.
     """
     config = steering.config
     trials = [none]
@@ -758,8 +783,10 @@ def _random_sweep(
         neutral: Held-out text for the neutral perplexity.
 
     Returns:
-        The primary scores of shape (n_random, S, K): random arm, sweep
-        layer, coefficient; and the rows of `table_effects` of the trials.
+        A tuple of two elements:
+        - The primary scores, of shape (n_random, S, K): random arm, sweep
+          layer, coefficient.
+        - The rows of `table_effects` of the random trials.
     """
     config = steering.config
     rng = np.random.default_rng(config.seed)
@@ -966,16 +993,15 @@ def execute(
             that `extraction_variants` accepts, `formats` are empty, repeated
             or unknown, `n_steer_seeds` is outside `1..n_seeds`, `coeffs` has
             no 0.0 or no other value, `n_random` is below 1, `sweep_layers`
-            are empty, repeated,
-            more than `MAX_SERIES` or outside `1..L`, `read_threshold` is
-            outside `[0.5, 1)`, the generation settings are invalid (see
-            `GenSettings`), no word of a pole is a single token,
-            `n_calibration` or `n_neutral` is below 1, the usable (at least
-            40 characters) held-out texts are fewer than `n_calibration +
-            n_neutral`, `n_pairs` or `n_eval_pairs` is below 1 or exceeds the
-            pairs its split can form (`n_eval_pairs` of None needs one), or
-            the validation sentences give fewer than `2 * n_prompts`
-            distinct prompts.
+            are empty, repeated, more than `MAX_SERIES` or outside `1..L`,
+            `read_threshold` is outside `[0.5, 1)`, the generation settings
+            are invalid (see `GenSettings`), no word of a pole is a single
+            token, `n_calibration` or `n_neutral` is below 1, the usable (at
+            least 40 characters) held-out texts are fewer than
+            `n_calibration + n_neutral`, `n_pairs` or `n_eval_pairs` is below
+            1 or exceeds the pairs its split can form (`n_eval_pairs` of None
+            needs one), or the validation sentences give fewer than
+            `2 * n_prompts` distinct prompts.
     """
     n_layers = loaded.n_layers
     sweep = _check(config, n_layers)
