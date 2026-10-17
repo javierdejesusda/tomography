@@ -327,7 +327,8 @@ the tables below, unlike the template spread of [P8](#base-against-post-trained-
   (`Consider the following text:` and the sentence, naming no concept), `no_trailing_question` (the text cut after the
   sentence) and `no_trailing_space` (no space after the assistant tag).
 - **Wording**: `paraphrase_0` to `paraphrase_2` (three other wordings of the template) and `scaffold_0` to
-  `scaffold_2` (the sentence followed by `Conclusion: This movie is`, `This text is` or `Overall, it was`).
+  `scaffold_2` (the sentence followed by `Conclusion: This movie is`, `Conclusion: This text is` or `Conclusion:
+  Overall, it was`).
 - **Concept**: `concept_swap_0` to `concept_swap_3` (the word `sentiment` replaced by `furniture`, `geometry`,
   `weather` or `cooking`).
 
@@ -468,10 +469,11 @@ scored on the items of the second):
   `qwen3-0.6b-base`, 0.752 to 0.941 on `qwen3-0.6b`, 0.889 to 0.975 on `qwen3-1.7b-base` and 0.762 to 0.943 on
   `qwen3-1.7b`. The reader of each variant scored on the paper items spans 0.686 to 0.770, 0.764 to 0.962, 0.638 to
   0.871, 0.857 to 0.956 and 0.708 to 0.890.
-- **Lowest cell.** On all five models the lowest off-diagonal cell is a reader fitted on `bare`. On `qwen3-0.6b-base`
-  (0.556) and `qwen3-0.6b` (0.564) it is no higher than the highest random value of the run (0.589 and 0.644). The
-  random series of the cross-scored cells is not among the committed files, so this compares the cell with the random
-  series on the diagonal items.
+- **Lowest cell.** On all five models the lowest off-diagonal cell is a reader fitted on `bare`. The cell is no higher
+  than the highest random value of the run on `qwen3-0.6b-base` (0.556 against 0.589), `qwen3-0.6b` (0.564 against
+  0.644) and `qwen3-1.7b` (0.591 against 0.620), and it is higher on `gpt2` (0.654 against 0.555) and
+  `qwen3-1.7b-base` (0.700 against 0.674). The random series of the cross-scored cells is not among the committed
+  files, so this compares the cell with the random series on the diagonal items.
 
 Every variant of every model, as report accuracy with the random and the shuffled series in parentheses (`not run`
 marks a kind that was skipped):
@@ -517,11 +519,11 @@ marks a kind that was skipped):
 | concept_swap_3       | 0.898 (0.556, 0.505) | 0.814 (0.550, 0.506) |
 
 What this does and does not show. On `gpt2` the wording of the template moves the reader little (0.752 to 0.782
-outside `bare` and `no_chat_tags`), and removing the tags raises it (0.843 for `no_chat_tags`, 0.802 for `bare`). On
-the Qwen3 checkpoints the accuracy moves by 0.136 to 0.204 across the variants and the paper template is neither the
-best nor the worst variant of any model. Each variant changes one aspect of the prompt, but the table does not say
-which aspect drives a difference: every cell is one run, the intervals cover the training draw only, and the 214
-evaluation pairs are shared by all variants. The near-orthogonality of the bare and paper directions shows that
+outside `bare` and `no_chat_tags`), and the variants without tags score higher (0.843 for `no_chat_tags`, 0.802 for
+`bare`). On the Qwen3 checkpoints the accuracy moves by 0.136 to 0.204 across the variants and the paper template is
+neither the best nor the worst variant of any model. Each variant changes one aspect of the prompt, but the table does
+not say which aspect drives a difference: every cell is one run, the intervals cover the training draw only, and the
+214 evaluation pairs are shared by all variants. The near-orthogonality of the bare and paper directions shows that
 readers fitted under different prompts differ in direction; it does not show which of them tracks the concept better.
 Base and post-trained checkpoints are different models, so the pairs are compared in P8 and the two are not pooled
 here.
@@ -674,10 +676,11 @@ degenerated, so this section marks where that happens. As a descriptive rule cho
 code, a coefficient is called fluent for a checkpoint when the mean perplexity is at most 1.5 times the unsteered one
 and the mean distinct-1 is at least 0.15. The coefficients +0.1 and -0.1 are fluent on all four checkpoints
 (perplexity at most 1.37 times the unsteered one, distinct-1 at least 0.181); +0.2, +0.3, -0.2 and -0.3 are not fluent
-on any of them.
+on any of them. The rule is applied to the mean over the three steering readers; at -0.1 single readers fall just
+below the distinct-1 cutoff (0.147 for a reader of `qwen3-0.6b` and of `qwen3-1.7b-base`).
 
 - **Direction at the fluent coefficients.** At these coefficients (perplexity at most 1.37 times the unsteered one,
-  distinct-1 at least 0.181) the score on the primary judge the score goes from 0.62, 0.59, 0.66 and 0.62 without
+  distinct-1 at least 0.181) the score on the primary judge goes from 0.62, 0.59, 0.66 and 0.62 without
   steering (in the column order of the tables) to 0.89, 0.76, 0.79 and 0.74 at +0.1 and to 0.22, 0.30, 0.26 and 0.37
   at -0.1. The check judge agrees in direction: 0.42, 0.44, 0.46 and 0.50 without steering, 0.81, 0.67, 0.69 and 0.67
   at +0.1, and 0.11, 0.18, 0.14 and 0.25 at -0.1.
@@ -694,12 +697,13 @@ on any of them.
 - **Within a pair.** At +0.1 the base checkpoint scores above its post-trained pair (0.89 against 0.76 at 0.6B, 0.79
   against 0.74 at 1.7B) and at -0.1 below it (0.22 against 0.30, 0.26 against 0.37). The ranges over readers overlap
   in the 0.6B pair at both coefficients and do not in the 1.7B pair.
-- **Beyond the fluent coefficients the text degenerates.** At +0.2 the perplexity is 2.84, 2.69, 2.13 and 1.70 times
-  the unsteered one and the distinct-1 is 0.126, 0.123, 0.157 and 0.152 against 0.274, 0.213, 0.271 and 0.222 without
-  steering. At +0.3 the perplexity is 283.1, 350.4, 93.3 and 130.6 (10.5, 7.4, 5.0 and 3.9 times the unsteered one)
-  and the distinct-1 is between 0.060 and 0.070. At -0.2 the perplexity is 106.1, 169.1, 86.9 and 94.7 with a
-  distinct-1 of 0.077, 0.095, 0.022 and 0.052. At -0.3 the perplexity is 461.2, 836.2, 646.2 and 546.1 and the
-  distinct-1 falls to 0.044, 0.057, 0.009 and 0.015. The scores at these coefficients, such as 0.98 at +0.3 on
+- **Beyond the fluent coefficients the text degrades.** At +0.2 the perplexity is 2.84, 2.69, 2.13 and 1.70 times the
+  unsteered one, so no checkpoint passes the perplexity cutoff. The distinct-1 is 0.126, 0.123, 0.157 and 0.152
+  against 0.274, 0.213, 0.271 and 0.222 without steering: it fails the cutoff on the two 0.6B checkpoints and stays
+  above it on the two 1.7B ones. At +0.3 the perplexity is 283.1, 350.4, 93.3 and 130.6 (10.5, 7.4, 5.0 and 3.9 times
+  the unsteered one) and the distinct-1 is between 0.060 and 0.070. At -0.2 the perplexity is 106.1, 169.1, 86.9 and
+  94.7 with a distinct-1 of 0.077, 0.095, 0.022 and 0.052. At -0.3 the perplexity is 461.2, 836.2, 646.2 and 546.1 and
+  the distinct-1 falls to 0.044, 0.057, 0.009 and 0.015. The scores at these coefficients, such as 0.98 at +0.3 on
   `qwen3-0.6b-base` (perplexity 283.1, distinct-1 0.070) and 0.05 at -0.3 on `qwen3-1.7b` (perplexity 546.1,
   distinct-1 0.015), are the scores of repetitive text, and are not read as steering that works.
 - **The judges disagree where the text is least readable.** On `qwen3-1.7b-base` the primary-judge mean at -0.3 rises
@@ -763,9 +767,9 @@ The `gpt2` reference, with an interval recomputed by P8 (a bound differs from th
   delta is not a measure of how much honesty transfers.
 
 Function gap, the mean delta of the function source (R5) minus the mean delta of the four concept sources, and the
-template spread: the standard deviation over the 16 variants shared by every model (the variants of P1 without
-`no_trailing_space`), computed per seed with each variant read at the layer its own validation curve picks, and
-averaged over the seeds. The `gpt2` row is the reference and has no pair.
+template spread: the population standard deviation (divisor N) over the 16 variants shared by every model (the
+variants of P1 without `no_trailing_space`), computed per seed with each variant read at the layer its own validation
+curve picks, and averaged over the seeds. The `gpt2` row is the reference and has no pair.
 
 | Pair | Function gap [95% interval] | SD base              | SD post-trained      | SD delta [95% interval] |
 | ---- | --------------------------- | -------------------- | -------------------- | ----------------------- |
@@ -1233,16 +1237,18 @@ the direction (95 percent interval) and the range of the three random directions
 ## Run identity
 
 All reading runs (R1 to R7) and the A1 and A2 runs were made at commit `a39ae61` with a clean tree, on one laptop GPU
-with 8 GB of memory, with the default config of each experiment (batch size 8). The A1 and A2 runs read the `gpt2` runs
-of R1, R2, R3, R5 and R7 below. The C1 runs of `gpt2` and `gpt2-xl` were made at `d59a2f7` and those of `gpt2-medium`
-and `gpt2-large` at `a39ae61`; the C1 and reading source code is unchanged between them (`git diff --stat` over `src`
-lists only `p9d_steering.py` and `p9/behavior.py`). The C1 batch size is 16 for `gpt2` and `gpt2-medium` and 4 for
-`gpt2-large` and `gpt2-xl`. The Qwen3 C1 runs were made at `a39ae61` with a clean tree and batch size 16 on all four
-checkpoints. The P1 runs of the five models were made at `a39ae61` with a clean tree, with the sentiment task only,
-10 seeds of 64 training pairs, up to 256 evaluation pairs per split (214 available) and batch size 8. The P6 tables were
-recomputed on the CPU from the finished runs at commit `ca2546c` (no model is loaded). The P8 run was recomputed on the
-CPU at commit `beb5801` (clean tree, no model is loaded), after the runs it reads; its config names the five P1 runs
-as extra runs. Library versions and the device are in each run's `meta.json`.
+with 8 GB of memory, with the default config of each experiment (batch size 8). The A1 and A2 runs read the `gpt2`
+runs of R1, R2, R3, R5 and R7 below. The C1 runs of `gpt2` and `gpt2-xl` were made at `d59a2f7` and those of
+`gpt2-medium` and `gpt2-large` at `a39ae61`; the C1 and reading source code is unchanged between them (`git diff
+--stat` over `src` lists only `p9d_steering.py` and `p9/behavior.py`). The C1 batch size is 16 for `gpt2` and
+`gpt2-medium` and 4 for `gpt2-large` and `gpt2-xl`. The Qwen3 C1 runs were made at `a39ae61` with a clean tree and
+batch size 16 on all four checkpoints. The P1 runs of the five models were made at `a39ae61` with a clean tree, with
+the sentiment task only, 10 seeds of 64 training pairs, up to 256 evaluation pairs per split (214 available) and batch
+size 8. The P6 tables were recomputed on the CPU from the finished runs at commit `ca2546c` (no model is loaded). The
+P8 run was recomputed on the CPU at commit `beb5801` (clean tree, no model is loaded), after the runs it reads. The
+clean tree refers to the code: P8 read the run folders from the local output root, and the runs it reads are committed
+under `results/`. Its config names the five P1 runs as extra runs. Library versions and the device are in each run's
+`meta.json`.
 
 The P9 runs were made on the same laptop GPU with a clean tree: P9a at `ff1177a` (batch size 8, 4 for `gpt2-xl`), P9b
 and P9c at `95a8243` (batch size 8, 4 for `gpt2-xl`) and P9d at `a39ae61` (batch size 8). Each P9b, P9c and P9d run
