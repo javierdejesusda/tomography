@@ -34,8 +34,10 @@ P4)](#position-sample-size-and-direction-finder-on-gpt2-p2-p3-p4) 9. [Sentiment 
 C5)](#other-steering-experiments-on-gpt2-m1-c2-p7-lr1-c4-c5) 12. [Base against post-trained Qwen3
 (P8)](#base-against-post-trained-qwen3-p8) 13. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
 14. [Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5,
-LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 15. [Run
-identity](#run-identity) 16. [Pending](#pending)
+LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 15. [Position
+and stimulus-set size on qwen3-1.7b-base (P2,
+P3)](#position-and-stimulus-set-size-on-qwen3-1.7b-base-p2-p3) 16. [Persona wording and instruction confounds
+(P5)](#persona-wording-and-instruction-confounds-p5) 17. [Run identity](#run-identity) 18. [Pending](#pending)
 
 ## Reading conventions
 
@@ -2331,6 +2333,118 @@ question alone in the chat template, so the two shares are not a comparison of t
   selection and not evidence for a rate. An emotion gallery from the C2 run of the same checkpoint is stored with it and
   is not read here.
 
+## Position and stimulus-set size on qwen3-1.7b-base (P2, P3)
+
+P2 and P3 ran on one Qwen3 checkpoint, the base `qwen3-1.7b-base`, with the settings of the `gpt2` runs (logistic finder, 64 training pairs; 10 seeds for P2 and 20 draws per size for P3, the intervals of the [reading conventions](#reading-conventions)). Each is one run, `p2/qwen3-1.7b-base/119f0ac54451` and `p3/qwen3-1.7b-base/61baf30a8a59`, made at `c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090). The post-trained `qwen3-1.7b` and the 0.6B checkpoints did not run these two experiments, so there is no base against post-trained comparison here, and the `gpt2` and Qwen3 numbers come from two different models, not from a scaling series.
+
+### Token position and a misleading sentence (P2)
+
+The design is that of [P2 on gpt2](#token-position-and-a-misleading-sentence-p2): sentiment (214 report pairs), truth (59) and utility (256) at the positions `last`, `concept` and `mean`, with a `random` and an `against` decoy sentence, and a zero-shot row that scores the model's own verbalized level. The layer is the one chosen on the original prompts.
+
+| Task      | Position  | Layer | Original             | Random decoy         | Against decoy        |
+| --------- | --------- | ----- | -------------------- | -------------------- | -------------------- |
+| sentiment | last      | L18   | 0.944 [0.939, 0.950] | 0.908 [0.901, 0.914] | 0.785 [0.774, 0.795] |
+| sentiment | concept   | L27   | 0.935 [0.927, 0.943] | 0.915 [0.908, 0.922] | 0.865 [0.857, 0.875] |
+| sentiment | mean      | L15   | 0.910 [0.900, 0.921] | 0.919 [0.908, 0.929] | 0.914 [0.905, 0.925] |
+| sentiment | zero-shot | -     | 0.963 [0.935, 0.986] | 0.762 [0.706, 0.818] | 0.248 [0.192, 0.308] |
+| truth     | last      | L18   | 0.968 [0.961, 0.975] | 0.756 [0.742, 0.769] | 0.058 [0.052, 0.064] |
+| truth     | concept   | L18   | 0.858 [0.841, 0.876] | 0.888 [0.869, 0.905] | 0.624 [0.600, 0.647] |
+| truth     | mean      | L16   | 0.851 [0.829, 0.875] | 0.822 [0.797, 0.853] | 0.817 [0.790, 0.847] |
+| truth     | zero-shot | -     | 0.932 [0.864, 0.983] | 0.814 [0.712, 0.915] | 0.424 [0.305, 0.542] |
+| utility   | last      | L18   | 0.761 [0.750, 0.773] | 0.709 [0.695, 0.723] | 0.302 [0.249, 0.352] |
+| utility   | concept   | L26   | 0.744 [0.731, 0.760] | 0.725 [0.712, 0.737] | 0.330 [0.299, 0.367] |
+| utility   | mean      | L16   | 0.705 [0.683, 0.727] | 0.716 [0.693, 0.736] | 0.621 [0.595, 0.646] |
+| utility   | zero-shot | -     | 0.773 [0.719, 0.824] | 0.656 [0.598, 0.711] | 0.012 [0.000, 0.027] |
+
+- **Position.** On the original prompts the positions read within 0.035 of each other for sentiment (0.944, 0.935, 0.910) and within 0.055 for utility (0.761, 0.744, 0.705). Truth differs by 0.117: `last` reads 0.968, `concept` 0.858 and `mean` 0.851. On `gpt2` sentiment read higher at `concept` and `mean` than at `last`; here `last` is the highest position on all three tasks.
+- **Random decoy.** The reader moves by at most 0.051 at `last` for sentiment (0.944 to 0.908) and utility (0.761 to 0.709), and truth drops by 0.212 (0.968 to 0.756). At `concept` and `mean` no task moves by more than 0.031 (truth at `concept` goes up, 0.858 to 0.888, with overlapping intervals).
+- **Against decoy.** At `last` the reader falls on every task: sentiment to 0.785 (a drop of 0.160), utility to 0.302 and truth to 0.058 [0.052, 0.064], far below chance, where the reader ranks the pairs the wrong way round. At `concept` sentiment drops 0.070 (0.865), truth 0.234 (0.624) and utility 0.414 (0.330). At `mean` sentiment (0.914) and truth (0.817) are within 0.034 of the original with overlapping intervals; utility is 0.621 [0.595, 0.646], a drop of 0.084 with an interval that does not overlap the original [0.683, 0.727]. On `gpt2` only utility at `last` collapsed under this decoy; on this checkpoint the drop is large at `last` for all three tasks and at `concept` for truth and utility. The run does not say why.
+- **Zero-shot.** The model's own answer drops from 0.963, 0.932 and 0.773 to 0.762, 0.814 and 0.656 under the random decoy and to 0.248, 0.424 and 0.012 under the `against` decoy (for truth the interval, [0.305, 0.542], reaches 0.5). The reader at `mean` stays at 0.914 and 0.817 under the `against` decoy on sentiment and truth, against 0.248 and 0.424 for the model's answer, so on those two tasks the decoy that turns the model's verbalized answer around does not turn that reader; on utility the reader falls to 0.621 and the model's answer to 0.012.
+
+### Stimulus-set size (P3)
+
+The design is that of [P3 on gpt2](#stimulus-set-size-p3): 2 to 512 pairs, 20 draws per size, the mean accuracy in each cell and in parentheses the share of the 20 draws whose accuracy is below 0.6. The truth set has 172 pairs, so its 256 and 512 cells are skipped, as is the 512 cell of `truth_cities` (452 pairs).
+
+| Source -> target       | 2            | 4            | 8            | 16           | 32           | 64           | 128          | 256          | 512          |
+| ---------------------- | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ |
+| sentiment -> sentiment | 0.755 (0.05) | 0.820 (0.00) | 0.855 (0.00) | 0.901 (0.00) | 0.926 (0.00) | 0.937 (0.00) | 0.958 (0.00) | 0.968 (0.00) | 0.971 (0.00) |
+| truth -> truth         | 0.886 (0.00) | 0.886 (0.00) | 0.936 (0.00) | 0.962 (0.00) | 0.972 (0.00) | 0.972 (0.00) | 0.971 (0.00) | -            | -            |
+| truth_cities -> truth  | 0.946 (0.00) | 0.957 (0.00) | 0.953 (0.00) | 0.958 (0.00) | 0.958 (0.00) | 0.961 (0.00) | 0.962 (0.00) | 0.963 (0.00) | -            |
+| truth_common -> truth  | 0.709 (0.30) | 0.810 (0.10) | 0.878 (0.00) | 0.915 (0.00) | 0.932 (0.00) | 0.931 (0.00) | 0.947 (0.00) | 0.954 (0.00) | 0.953 (0.00) |
+| utility -> utility     | 0.651 (0.25) | 0.701 (0.05) | 0.748 (0.00) | 0.747 (0.00) | 0.756 (0.00) | 0.758 (0.00) | 0.749 (0.00) | 0.754 (0.00) | 0.749 (0.00) |
+
+The accuracy of a reader fitted on all the data of the source (the reference, report split) is 0.981 for sentiment (2,048 pairs), 0.966 for truth (172), 0.966 for `truth_cities` (452), 0.949 for `truth_common` (1,296) and 0.770 for utility (2,048). The shuffled-label series is between 0.47 and 0.56 at every size.
+
+- **Sentiment** has one failing draw in 20 at 2 pairs and none from 4 pairs; it reaches 0.937 at 64 pairs and 0.971 [0.969, 0.972] at 512, below the reference of 0.981. **Utility** plateaus early: 0.748 at 8 pairs and 0.749 [0.742, 0.756] at 512, below its reference of 0.770, with no failing draw from 8 pairs.
+- **Truth is not the slow case here.** The mean accuracy is 0.886 at 2 pairs with no failing draw, 0.972 at 32 and 64 pairs and 0.971 [0.968, 0.975] at 128, at its reference of 0.966; the source is exhausted at 172 pairs. `truth_cities` is at 0.946 with 2 pairs and 0.963 at 256. `truth_common` needs more: 0.709 at 2 pairs (failure 0.30), 0.878 at 8 and 0.953 [0.947, 0.961] at 512, at its reference of 0.949. On `gpt2` the same truth runs read at most 0.642 at every size; the two models are different, so this is a difference between models on the same data and the run does not say what causes it.
+- The stored saturation size is the smallest size whose mean accuracy is within 0.01 of the mean at the largest size, with its bootstrap range: 256 for sentiment (128 to 256), 16 for truth (16 to 32), 4 for `truth_cities` (2 to 16), 128 for `truth_common` (32 to 256) and 8 for utility (8 to 16). For truth and `truth_cities` the largest size is the end of a small set (128 and 256 pairs), so their saturation sizes are limits of the set as well as measured plateaus.
+
+## Persona wording and instruction confounds (P5)
+
+P5 asks whether the honesty reader reads honesty or the persona's words. Each condition changes one thing against the paper persona prompt; the reader is trained on the response tokens of true statements as in R5, and scored on plain true against false statements at the token mean, on the 59 `facts` test pairs and on the test splits of five Geometry of Truth subsets (133 `cities`, 142 `neg_cities`, 36 `sp_en_trans`, 187 `larger_than` and 256 `common_claim_true_false` pairs). The conditions are the paper pair ("an honest" against "an untruthful"), two synonym pairs (`synonym_0`: "a truthful" and "a deceitful"; `synonym_1`: "a sincere" and "a lying"), two unrelated pairs (`unrelated_0`: "a tall" and "a short"; `unrelated_1`: "an old" and "a young"), and three controls: `instruction_only` (the paper personas with an empty response), `fact_only` (no persona, plain true against plain false statements) and `random_label` (the paper stimuli with the training labels swapped in exactly half of the pairs). Accuracies are raw: a reader whose first persona aligns with the false statements scores below 0.5. Layers are chosen per condition on the 53 `facts` validation pairs (the `Layer` column) and every set is scored at that layer. The in-template accuracy of the persona conditions is 1.0 by construction, as for R5, and is not reported. The `instruction_only` readers are identical across seeds (every training set holds the same two texts), so that row comes from one reader and carries no interval; any other cell shown without an interval has a stored interval that rounds to the point value. Intervals are over the 10 readers; they do not include the sampling of the evaluation pairs, which matters most for `facts` (59) and `sp_en_trans` (36).
+
+The runs are `p5/gpt2/80b4ae80a6ca`, `p5/qwen3-1.7b-base/a4bd463deeca` and `p5/qwen3-1.7b/7e5e579d102e`, all made at `c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090). The earlier `gpt2` attempts stopped on a fit that produced a direction of zero norm; these are the runs after the fix. Base and post-trained rows are separate tables and are never pooled. The stored gap is the mean of the paper and the two synonym conditions minus the mean of the two unrelated ones, per set.
+
+### gpt2
+
+| Condition        | Layer | facts                | cities               | neg_cities           | sp_en_trans          | larger_than          | common_claim         |
+| ---------------- | ----- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| paper            | L10   | 0.353 [0.327, 0.380] | 0.467 [0.456, 0.477] | 0.478 [0.475, 0.482] | 0.531 [0.517, 0.544] | 0.185 [0.177, 0.194] | 0.533 [0.525, 0.542] |
+| synonym_0        | L7    | 0.507 [0.492, 0.520] | 0.508 [0.498, 0.519] | 0.460 [0.451, 0.469] | 0.581 [0.561, 0.600] | 0.329 [0.318, 0.340] | 0.588 [0.579, 0.596] |
+| synonym_1        | L7    | 0.542 [0.525, 0.559] | 0.568 [0.556, 0.579] | 0.522 [0.515, 0.528] | 0.558 [0.533, 0.581] | 0.333 [0.325, 0.341] | 0.552 [0.545, 0.559] |
+| unrelated_0      | L5    | 0.459 [0.436, 0.481] | 0.531 [0.520, 0.541] | 0.456 [0.445, 0.465] | 0.456 [0.442, 0.469] | 0.670 [0.659, 0.681] | 0.514 [0.507, 0.522] |
+| unrelated_1      | L7    | 0.449 [0.439, 0.461] | 0.398 [0.382, 0.413] | 0.527 [0.516, 0.538] | 0.564 [0.531, 0.594] | 0.826 [0.818, 0.833] | 0.380 [0.372, 0.389] |
+| instruction_only | L11   | 0.576                | 0.526                | 0.514                | 0.639                | 0.433                | 0.492                |
+| fact_only        | L7    | 0.663 [0.641, 0.683] | 0.524 [0.498, 0.547] | 0.507 [0.496, 0.519] | 0.500 [0.469, 0.531] | 0.367 [0.325, 0.414] | 0.593 [0.579, 0.607] |
+| random_label     | L5    | 0.529 [0.486, 0.568] | 0.489 [0.457, 0.520] | 0.475 [0.449, 0.503] | 0.481 [0.431, 0.522] | 0.516 [0.448, 0.592] | 0.530 [0.498, 0.557] |
+
+- **The paper persona does not read honesty on `gpt2`.** On `facts` it scores 0.353 [0.327, 0.380], with an interval entirely below 0.5: the reader ranks true and false the wrong way round. The other sets are 0.467 (`cities`), 0.478 (`neg_cities`), 0.531 (`sp_en_trans`), 0.533 (`common_claim`) and, far below chance, 0.185 on `larger_than`.
+- **The synonyms and the unrelated words do not separate on `facts`.** `synonym_0` and `synonym_1` read 0.507 and 0.542, and the unrelated pairs 0.459 and 0.449; the stored gap on `facts` is 0.013. The only condition above 0.6 on `facts` is `fact_only`, 0.663 [0.641, 0.683], which reads plain statements with no persona.
+- **`larger_than` depends on the persona words.** The paper and synonym readers score 0.185, 0.329 and 0.333, the unrelated readers 0.670 and 0.826 (a gap of -0.465), with intervals that exclude 0.5 in all five, so the sign of the reading on that set follows the words. The other gaps are 0.050 (`cities`), -0.005 (`neg_cities`), 0.047 (`sp_en_trans`) and 0.111 (`common_claim`). The run does not say what the readers of the unrelated words read on `larger_than`.
+- **The shuffled-label control reads at chance.** `random_label` has intervals that include 0.5 on all six sets (for example 0.529 [0.486, 0.568] on `facts`). Its stored in-template column, a reader fitted on the half-swapped labels and scored on the real labels of the persona pairs, is 0.602 [0.308, 0.863] at L6.
+
+### qwen3-1.7b-base
+
+| Condition        | Layer | facts                | cities               | neg_cities           | sp_en_trans          | larger_than          | common_claim         |
+| ---------------- | ----- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| paper            | L20   | 0.736 [0.715, 0.754] | 0.889 [0.881, 0.896] | 0.558 [0.547, 0.570] | 0.664 [0.647, 0.678] | 0.734 [0.730, 0.737] | 0.645 [0.640, 0.650] |
+| synonym_0        | L20   | 0.695 [0.678, 0.715] | 0.887 [0.876, 0.900] | 0.629 [0.620, 0.637] | 0.647 [0.619, 0.678] | 0.681 [0.671, 0.692] | 0.697 [0.691, 0.705] |
+| synonym_1        | L21   | 0.647 [0.625, 0.675] | 0.718 [0.712, 0.724] | 0.460 [0.450, 0.470] | 0.686 [0.661, 0.708] | 0.573 [0.560, 0.585] | 0.664 [0.657, 0.671] |
+| unrelated_0      | L17   | 0.600 [0.581, 0.620] | 0.659 [0.649, 0.671] | 0.465 [0.451, 0.480] | 0.592 [0.564, 0.619] | 0.730 [0.714, 0.748] | 0.627 [0.620, 0.634] |
+| unrelated_1      | L4    | 0.520 [0.510, 0.529] | 0.518 [0.508, 0.528] | 0.474 [0.465, 0.481] | 0.494 [0.478, 0.511] | 0.669 [0.661, 0.676] | 0.477 [0.473, 0.482] |
+| instruction_only | L25   | 0.627                | 0.684                | 0.415                | 0.639                | 0.428                | 0.492                |
+| fact_only        | L28   | 0.702 [0.678, 0.719] | 0.544 [0.533, 0.556] | 0.567 [0.558, 0.577] | 0.519 [0.508, 0.533] | 0.693 [0.690, 0.696] | 0.681 [0.668, 0.693] |
+| random_label     | L21   | 0.514 [0.446, 0.585] | 0.523 [0.443, 0.605] | 0.477 [0.408, 0.558] | 0.514 [0.456, 0.567] | 0.501 [0.382, 0.617] | 0.520 [0.465, 0.575] |
+
+- **The paper persona reads above chance on this checkpoint**: 0.736 [0.715, 0.754] on `facts`, 0.889 on `cities`, 0.664 on `sp_en_trans`, 0.734 on `larger_than` and 0.645 on `common_claim`; `neg_cities` is close to chance (0.558). `fact_only`, with no persona, reads `facts` at 0.702 [0.678, 0.719] but `cities` only at 0.544, so the persona prompt reads `cities` better than the plain statements do.
+- **The persona words matter on `facts` and `cities`.** The paper and synonym readers score 0.736, 0.695 and 0.647 on `facts` and the unrelated readers 0.600 and 0.520 (stored gap 0.132); on `cities` they score 0.889, 0.887 and 0.718 against 0.659 and 0.518 (gap 0.243). The words do not account for all of it: `unrelated_0` ("a tall", "a short") reads 0.600 on `facts`, above chance with an interval of [0.581, 0.620], and 0.730 on `larger_than`, as high as the paper reader (gap -0.037 on that set). The other gaps are 0.079 (`neg_cities`), 0.123 (`sp_en_trans`) and 0.116 (`common_claim`).
+- **The shuffled-label control reads at chance.** `random_label` has intervals that include 0.5 on all six sets (0.514 [0.446, 0.585] on `facts`). Its stored in-template column is 0.676 [0.413, 0.898] at L3.
+- `instruction_only` is one reader per cell: 0.627 on `facts` and 0.684 on `cities`. With no interval and 59 `facts` pairs it is not compared with the other rows here.
+
+### qwen3-1.7b
+
+| Condition        | Layer | facts                | cities               | neg_cities           | sp_en_trans          | larger_than          | common_claim         |
+| ---------------- | ----- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| paper            | L20   | 0.744 [0.719, 0.769] | 0.820 [0.805, 0.832] | 0.525 [0.514, 0.538] | 0.731 [0.706, 0.750] | 0.734 [0.722, 0.747] | 0.730 [0.725, 0.735] |
+| synonym_0        | L19   | 0.678 [0.664, 0.690] | 0.775 [0.760, 0.790] | 0.440 [0.425, 0.456] | 0.767 [0.736, 0.797] | 0.485 [0.436, 0.529] | 0.676 [0.667, 0.684] |
+| synonym_1        | L18   | 0.688 [0.663, 0.714] | 0.822 [0.801, 0.841] | 0.609 [0.597, 0.621] | 0.853 [0.825, 0.875] | 0.769 [0.760, 0.777] | 0.680 [0.673, 0.688] |
+| unrelated_0      | L3    | 0.510 [0.508, 0.514] | 0.508 [0.505, 0.512] | 0.485 [0.482, 0.489] | 0.353 [0.339, 0.367] | 0.588 [0.583, 0.592] | 0.529 [0.528, 0.530] |
+| unrelated_1      | L5    | 0.492                | 0.533 [0.529, 0.537] | 0.547 [0.544, 0.550] | 0.367 [0.361, 0.375] | 0.600 [0.597, 0.603] | 0.537 [0.536, 0.540] |
+| instruction_only | L28   | 0.576                | 0.556                | 0.486                | 0.472                | 0.684                | 0.664                |
+| fact_only        | L28   | 0.736 [0.719, 0.754] | 0.608 [0.590, 0.628] | 0.513 [0.501, 0.525] | 0.547 [0.506, 0.586] | 0.661 [0.639, 0.684] | 0.694 [0.687, 0.702] |
+| random_label     | L22   | 0.524 [0.488, 0.563] | 0.556 [0.482, 0.625] | 0.505 [0.470, 0.546] | 0.550 [0.514, 0.583] | 0.540 [0.441, 0.637] | 0.495 [0.457, 0.533] |
+
+- **The paper persona reads above chance**: 0.744 [0.719, 0.769] on `facts`, 0.820 on `cities`, 0.731 on `sp_en_trans`, 0.734 on `larger_than` and 0.730 on `common_claim`; `neg_cities` is 0.525 [0.514, 0.538]. `fact_only` reads `facts` at 0.736 [0.719, 0.754] and `common_claim` at 0.694, and the other four sets between 0.513 and 0.661.
+- **The persona words matter more than on the base checkpoint.** The paper and synonym readers read 0.744, 0.678 and 0.688 on `facts` against 0.510 and 0.492 for the unrelated pairs (gap 0.203), 0.820, 0.775 and 0.822 on `cities` against 0.508 and 0.533 (0.285), and 0.731, 0.767 and 0.853 on `sp_en_trans` against 0.353 and 0.367 (0.424), where the unrelated readers fall below chance with intervals entirely below 0.5. On `common_claim` the gap is 0.162, with 0.730, 0.676 and 0.680 against 0.529 and 0.537. The sets with the weakest dependence are `neg_cities` (gap 0.009, with readings between 0.440 and 0.609 across the five persona conditions) and `larger_than` (0.069; `synonym_0` reads 0.485 [0.436, 0.529] there while `synonym_1` reads 0.769).
+- **The shuffled-label control reads at chance.** `random_label` has intervals that include 0.5 on all six sets (0.524 [0.488, 0.563] on `facts`). Its stored in-template column is 0.701 [0.462, 0.894] at L4.
+- `instruction_only` is one reader per cell: 0.576 on `facts` and 0.664 on `common_claim`, without an interval.
+
+### What the three runs show together
+
+- On `gpt2` the paper persona reader scores below chance on `facts` (0.353) and no persona condition reads `facts` above 0.6; only `fact_only` (0.663) does. On both Qwen3 checkpoints the paper persona reads `facts` at 0.736 and 0.744, close to `fact_only` (0.702 and 0.736).
+- On both Qwen3 checkpoints the readers of the unrelated persona words fall to or near chance on `facts` (0.600 and 0.520 on the base, 0.510 and 0.492 on the post-trained checkpoint) while the paper and synonym readers stay at 0.647 or above. This is consistent with a reader that depends on the meaning of the persona words, but it is one run per checkpoint on 59 `facts` pairs, and `unrelated_0` on the base checkpoint (0.600 [0.581, 0.620]) is above chance. Some cells under the unrelated words sit far from 0.5 (`larger_than` on `gpt2`, 0.670 and 0.826; `sp_en_trans` on the post-trained checkpoint, 0.353 and 0.367); the runs do not say what those readers read.
+- Each cell is one run of one model at one layer chosen on 53 pairs and scored on small sets, with intervals over the training draw only. The runs do not test persona wordings beyond the four pairs above.
+
 ## Run identity
 
 All reading runs (R1 to R7) except the R4 and R6 runs of `gpt2-medium`, `gpt2-large` and `gpt2-xl` (made at `ca2546c`,
@@ -2354,8 +2468,12 @@ emotion tasks), and the P2, P3, P4, M1, C2, LR1, C4, P7 and C5 runs were made at
 same laptop GPU, with the default config of each experiment (the batch size of each run is in its `config.json`). The
 P1 run `078b9d6482a2` differs from the sentiment run `673af340b77d` in the task list only. The C4 run reads the LR1
 adapter named in its config. None of the M1, C2, P7, C4 and C5 runs stores the perplexity or the distinct-1 of the
-generated text. The P5 runs on `gpt2` did not finish (the fit of one condition produced a direction of zero norm, and
-both attempts stopped), so they are not exported and not reported.
+generated text. The `gpt2` P5 run is the rerun after the fix of the zero-norm fit that stopped the earlier attempts; those attempts
+are not exported and not reported.
+
+The P2 and P3 runs of `qwen3-1.7b-base` and the P5 runs of `gpt2`, `qwen3-1.7b-base` and `qwen3-1.7b` were made at
+`c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090, torch 2.14.1+cu130, transformers 5.19.0), with the
+default config of each experiment and batch size 8 (`config.json` of each run).
 
 The P9 runs were made on the same laptop GPU with a clean tree: P9a at `ff1177a` (batch size 8, 4 for `gpt2-xl`), P9b
 and P9c at `95a8243` (batch size 8, 4 for `gpt2-xl`) and P9d at `a39ae61` (batch size 8, 4 for `gpt2-xl`). The P9 runs of `gpt2`,
@@ -2389,7 +2507,7 @@ Config hashes (12 hex digits), GPT-2:
 | P2             | ee099a704022 | not run      | not run      | not run      |
 | P3             | 676c31488397 | not run      | not run      | not run      |
 | P4             | 8c4a73d1e9db | not run      | not run      | not run      |
-| P5             | not finished | not run      | not run      | not run      |
+| P5             | 80b4ae80a6ca | not run      | not run      | not run      |
 | P7             | 6c19128c5192 | not run      | not run      | not run      |
 | C1             | add59c39f574 | 2ed2e53ba7fe | 353f91e1b8dc | de76af1a8a07 |
 | M1             | 4e394ed1a72c | not run      | not run      | not run      |
@@ -2416,6 +2534,9 @@ Qwen3:
 | A1          | 4e8f8cfa0021    | 0cb04910086e | 769590eef456    | 2326d9ec9b7d |
 | A2          | 109c4aa851bf    | 91b62e58953f | 09b991efaf7f    | 1e528ddfbffa |
 | P1          | a540a2497ac4    | 31a6ee65d6ab | ef3f8c0d3389    | f4aa9b57824a |
+| P2          | not run         | not run      | 119f0ac54451    | not run      |
+| P3          | not run         | not run      | 61baf30a8a59    | not run      |
+| P5          | not run         | not run      | a4bd463deeca    | 7e5e579d102e |
 | C1          | 7ae3e2aa34e2    | 832462b7b04e | 0cd5a36d3408    | a91f950ad9f5 |
 | M1          | not run         | not run      | 3fe3a8644289    | de2cdd3146ac |
 | C2          | not run         | not run      | 37d187b75a7f    | 227d782df8ba |
@@ -2443,16 +2564,19 @@ Not in this document yet. No dates are promised.
 - P1 on the truth and emotion tasks on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the Qwen3 checkpoints, and with the
   `pca_diff` finder (the truth and emotion tasks ran on `gpt2` only; the sentiment task ran with the logistic finder on
   `gpt2` and the four Qwen3 checkpoints).
-- P2, P3, P4 and P7 on the other GPT-2 sizes and on the Qwen3 checkpoints (all ran on `gpt2` only). M1, C2, C4 and LR1
+- P2 and P3 on the other GPT-2 sizes and on the post-trained and 0.6B Qwen3 checkpoints (they ran on `gpt2` and
+  `qwen3-1.7b-base`). P4 and P7 on the other GPT-2 sizes and on the Qwen3 checkpoints (both ran on `gpt2` only). M1, C2, C4 and LR1
   on the other GPT-2 sizes and on the two 0.6B Qwen3 checkpoints (they ran on `gpt2`, `qwen3-1.7b-base` and `qwen3-1.7b`).
   C5 on `gpt2`, `gpt2-medium`, `gpt2-large` and the two 0.6B Qwen3 checkpoints (it ran on `gpt2-xl`, `qwen3-1.7b-base`
   and `qwen3-1.7b`). A1 and A2 on `gpt2-medium`, `gpt2-large` and `gpt2-xl`.
-- P5, persona wording and instruction confounds for honesty: the `gpt2` runs did not finish (a fit produced a direction
-  of zero norm), so the experiment has to be rerun before any result is reported.
+- P5, persona wording and instruction confounds for honesty, on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the two 0.6B
+  Qwen3 checkpoints (it ran on `gpt2`, `qwen3-1.7b-base` and `qwen3-1.7b`), and with persona wordings beyond the four
+  pairs of the run.
 - A random-direction arm for C2, P7, C4 and C5 (on GPT-2 and on Qwen3), and a fluency measure (perplexity and
   distinct-1) for M1, C2, P7, C4 and C5 (on GPT-2 and on Qwen3).
 - Stored but not read in this document: the emotion direction matrix and embedding of the Qwen3 R4 runs, the A1 matrices
-  of concept and layer agreement, and the emotion gallery of the Qwen3 C5 runs.
+  of concept and layer agreement, the emotion gallery of the Qwen3 C5 runs, and the P5 curves over layers and the
+  cosine curves between the paper reader and the other readers.
 - P9b and P9c on the post-trained Qwen3 checkpoints.
 - P9: a hand check of the abstention indicator of P9d (the stored samples carry no human labels), an item-level
   interval for the P9b AUROC (only the interval over the pair draws is stored), and a within-relation increment of
