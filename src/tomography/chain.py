@@ -9,6 +9,7 @@ import dataclasses
 from datetime import datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -33,7 +34,15 @@ POSIX = os.name == "posix"
 EXISTING_RUN = re.compile(
     r"run directory already exists: (.+?) \(delete it to rerun\)"
 )
-CHAIN_KEYS = {"name", "out", "env"}
+CHAIN_KEYS = {
+    "name",
+    "out",
+    "env",
+    "slots",
+    "min_free_gpu_mib",
+    "start_gap_seconds",
+}
+DEFAULT_START_GAP_SECONDS = 60.0
 JOB_KEYS = {
     "name",
     "experiment",
@@ -79,12 +88,20 @@ class ChainSpec:
         out: The results root every job writes to.
         env: Variables added to every job's environment.
         jobs: The jobs, in run order.
+        slots: The most jobs that run at the same time.
+        min_free_gpu_mib: Free GPU memory a job needs before it starts
+            while another job runs; 0 turns the check off.
+        start_gap_seconds: The least time between two job starts when
+            `slots` is above 1.
     """
 
     name: str
     out: Path
     env: Mapping[str, str]
     jobs: tuple[Job, ...]
+    slots: int = 1
+    min_free_gpu_mib: int = 0
+    start_gap_seconds: float = DEFAULT_START_GAP_SECONDS
 
 
 def _string(table: Mapping[str, Any], key: str, where: str) -> str:
@@ -100,6 +117,31 @@ def _check_keys(
     unknown = sorted(set(table) - allowed)
     if unknown:
         raise ValueError(f"{where}: unknown key {unknown[0]!r}")
+
+
+def _integer(
+    table: Mapping[str, Any], key: str, default: int, minimum: int, where: str
+) -> int:
+    value = table.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+        raise ValueError(
+            f"{where}.{key} must be an integer of at least {minimum}"
+        )
+    return value
+
+
+def _seconds(
+    table: Mapping[str, Any], key: str, default: float, where: str
+) -> float:
+    value = table.get(key, default)
+    if (
+        not isinstance(value, int | float)
+        or isinstance(value, bool)
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        raise ValueError(f"{where}.{key} must be a number of at least 0")
+    return float(value)
 
 
 def _safe_name(name: str) -> bool:
@@ -226,6 +268,11 @@ def load_spec(
             raise ValueError(f"chain.env key {key!r} is not a variable name")
         if not isinstance(value, str) or "\0" in value:
             raise ValueError(f"chain.env value of {key!r} must be a string")
+    slots = _integer(chain, "slots", 1, 1, "chain")
+    min_free = _integer(chain, "min_free_gpu_mib", 0, 0, "chain")
+    gap = _seconds(
+        chain, "start_gap_seconds", DEFAULT_START_GAP_SECONDS, "chain"
+    )
     _check_keys(data, {"chain", "job"}, "spec")
     tables = data.get("job", [])
     if not tables:
@@ -237,7 +284,15 @@ def load_spec(
             check_experiment(job.experiment)
     if not out.is_absolute():
         out = spec_path.resolve().parent / out
-    return ChainSpec(name=name, out=out, env=dict(env), jobs=jobs)
+    return ChainSpec(
+        name=name,
+        out=out,
+        env=dict(env),
+        jobs=jobs,
+        slots=slots,
+        min_free_gpu_mib=min_free,
+        start_gap_seconds=gap,
+    )
 
 
 def _encode(value: Any) -> str:

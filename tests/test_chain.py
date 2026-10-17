@@ -1458,3 +1458,52 @@ def test_read_tail_can_start_at_a_floor(tmp_path: Path) -> None:
     path.write_text("old-new", encoding="utf-8")
 
     assert read_tail(path, 1000, floor=4) == "new"
+
+
+def test_load_spec_reads_the_concurrency_keys(tmp_path: Path) -> None:
+    header = HEADER + "slots = 3\nmin_free_gpu_mib = 6000\n"
+    header += "start_gap_seconds = 12.5\n"
+    path = _write_spec(tmp_path, JOB_A, header)
+
+    spec = load_spec(path)
+
+    assert spec.slots == 3
+    assert spec.min_free_gpu_mib == 6000
+    assert spec.start_gap_seconds == 12.5
+
+
+def test_the_concurrency_keys_default_to_one_job_at_a_time(
+    tmp_path: Path,
+) -> None:
+    spec = load_spec(_write_spec(tmp_path, JOB_A))
+
+    assert spec.slots == 1
+    assert spec.min_free_gpu_mib == 0
+    assert spec.start_gap_seconds == 60.0
+
+
+@pytest.mark.parametrize(
+    ("line", "message"),
+    [
+        ("slots = 0", r"chain\.slots"),
+        ("slots = -2", r"chain\.slots"),
+        ("slots = 1.5", r"chain\.slots"),
+        ('slots = "2"', r"chain\.slots"),
+        ("slots = true", r"chain\.slots"),
+        ("min_free_gpu_mib = -1", r"chain\.min_free_gpu_mib"),
+        ("min_free_gpu_mib = 2.5", r"chain\.min_free_gpu_mib"),
+        ("min_free_gpu_mib = false", r"chain\.min_free_gpu_mib"),
+        ("start_gap_seconds = -1", r"chain\.start_gap_seconds"),
+        ('start_gap_seconds = "5"', r"chain\.start_gap_seconds"),
+        ("start_gap_seconds = true", r"chain\.start_gap_seconds"),
+        ("start_gap_seconds = nan", r"chain\.start_gap_seconds"),
+        ("start_gap_seconds = inf", r"chain\.start_gap_seconds"),
+    ],
+)
+def test_load_spec_rejects_bad_concurrency_values(
+    tmp_path: Path, line: str, message: str
+) -> None:
+    path = _write_spec(tmp_path, JOB_A, HEADER + line + "\n")
+
+    with pytest.raises(ValueError, match=message):
+        load_spec(path)
