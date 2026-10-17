@@ -4,6 +4,14 @@ The arms are scored, not generated: every arm is a log-probability function
 applied to every choice of every question, with the App. C.2 format. The arms
 are the plain model, the prompting baseline, the prompt difference of the
 paper, the reading vector from Alpaca stimuli and the contrast vector.
+`n_random` random arms are unit directions drawn from the seed and
+norm-matched to the reading arm: they use the same layers, grid, operator and
+selection rule, so a reading effect can be told apart from the damage of any
+push of that size.
+
+C4 never generates, so the only fluency measure is the perplexity of each
+scored arm on neutral held-out Alpaca text; the completion fluency and the
+distinct-n values of the generating experiments do not apply.
 
 Each vector arm picks its coefficient on the TruthfulQA `train` and `val`
 questions and is reported on the held-out `test` questions. The paper fixed
@@ -11,6 +19,7 @@ its coefficients on a few self-generated examples, so these are tuned closer
 to the task: an optimistic but held-out estimate.
 """
 
+from collections.abc import Callable
 from collections.abc import Sequence
 from dataclasses import dataclass
 import itertools
@@ -39,6 +48,7 @@ from tomography.experiments.lr1_lorra import load_adapter
 from tomography.experiments.steering import Arm
 from tomography.experiments.steering import GenSettings
 from tomography.experiments.steering import LogprobFn
+from tomography.experiments.steering import PerplexityFn
 from tomography.experiments.steering import SteeringConfig
 from tomography.experiments.steering import plain_arm
 from tomography.experiments.steering import reader_arm
@@ -72,6 +82,7 @@ PAPER_DEPTH = 32
 INSTRUCTIONS = (("prompting+1", TRUTHFUL), ("prompting-1", UNTRUTHFUL))
 SERIES_NAMES = ("selection questions", "test questions")
 YLABEL = "TruthfulQA MC1"
+EFFECT_COLUMNS = ["arm", "coeff", "seed", "perplexity"]
 TABLE_COLUMNS = [
     "arm",
     "coeff",
@@ -472,6 +483,14 @@ def difference_reader(
     )
 
 
+def _shuffled_test_texts(alpaca: Sequence[Example], *, seed: int) -> list[str]:
+    texts = [row.text for row in alpaca if row.split == "test"]
+    if not texts:
+        raise ValueError("the Alpaca test split is empty")
+    order = np.random.default_rng(seed).permutation(len(texts))
+    return [texts[i] for i in order]
+
+
 def calibration_texts(
     alpaca: Sequence[Example], n: int, *, seed: int
 ) -> list[str]:
@@ -492,11 +511,42 @@ def calibration_texts(
     """
     if n < 1:
         raise ValueError(f"n must be >= 1, got {n}")
-    texts = [row.text for row in alpaca if row.split == "test"]
+    return _shuffled_test_texts(alpaca, seed=seed)[:n]
+
+
+def neutral_texts(
+    alpaca: Sequence[Example], n_calibration: int, n_neutral: int, *, seed: int
+) -> list[str]:
+    """Draws the neutral texts of the perplexity.
+
+    The texts are the slice of the Alpaca `test` split that follows the
+    `n_calibration` calibration texts in the shuffle that `calibration_texts`
+    draws from the same seed, so the two sets are disjoint and the
+    calibration texts of a run are those `calibration_texts` returns.
+
+    Args:
+        alpaca: Alpaca rows with splits.
+        n_calibration: Size of the calibration slice.
+        n_neutral: Texts to draw; what is left of the split when it is
+            smaller.
+        seed: Seed of the draw; the one of `calibration_texts`.
+
+    Returns:
+        The texts, in drawn order.
+
+    Raises:
+        ValueError: If `n_neutral` is below 1, the `test` split is empty or
+            the calibration slice takes all of it.
+    """
+    if n_neutral < 1:
+        raise ValueError(f"n_neutral must be >= 1, got {n_neutral}")
+    texts = _shuffled_test_texts(alpaca, seed=seed)[n_calibration:]
     if not texts:
-        raise ValueError("the Alpaca test split is empty")
-    order = np.random.default_rng(seed).permutation(len(texts))
-    return [texts[i] for i in order[:n]]
+        raise ValueError(
+            f"no text left in the Alpaca test split after {n_calibration} "
+            "calibration texts"
+        )
+    return texts[:n_neutral]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -515,6 +565,8 @@ class Config(SteeringConfig):
         coeffs: Grid of the difference and reading arms.
         alphas: Grid of the contrast arm.
         n_boot: Resamples of the paired bootstrap.
+        n_random: Random arms, unit directions drawn from the seed and
+            norm-matched to the reading and difference arms.
         lorra_run: Path of a finished LR1 run; its adapter is scored as one
             more arm. None leaves the model as it is and adds no arm.
     """
@@ -528,6 +580,7 @@ class Config(SteeringConfig):
     coeffs: tuple[float, ...] = (-0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2)
     alphas: tuple[float, ...] = (-0.5, -0.25, 0.0, 0.25, 0.5)
     n_boot: int = 2000
+    n_random: int = 3
     lorra_run: str | None = None
 
 
@@ -593,6 +646,8 @@ def _check_config(
         raise ValueError(f"n_seeds must be >= 1, got {config.n_seeds}")
     if config.n_boot < 1:
         raise ValueError(f"n_boot must be >= 1, got {config.n_boot}")
+    if config.n_random < 1:
+        raise ValueError(f"n_random must be >= 1, got {config.n_random}")
     if config.batch_size < 1:
         raise ValueError(f"batch_size must be >= 1, got {config.batch_size}")
     check_relative_op(config)
@@ -623,8 +678,41 @@ def _scorer(arm: Arm) -> LogprobFn:
     return arm.logprobs
 
 
-def _gate(adapter: LorraAdapter | None, score: LogprobFn) -> LogprobFn:
-    return score if adapter is None else adapter.gated(score, enabled=False)
+def _perplexity_fn(arm: Arm) -> PerplexityFn:
+    assert arm.perplexity is not None
+    return arm.perplexity
+
+
+def random_readers(
+    reference: RepReader, n: int, *, seed: int
+) -> list[RepReader]:
+    """Draws the random readers that control the vector arms.
+
+    Args:
+        reference: The reader whose layers and shape the draws copy.
+        n: Number of readers.
+        seed: Seed of the one generator that draws them in order.
+
+    Returns:
+        `n` readers of unit directions with zero means.
+    """
+    rng = np.random.default_rng(seed)
+    zeros = np.zeros_like(reference.directions)
+    return [
+        RepReader.from_arrays(
+            "random",
+            reference.layers,
+            rng.standard_normal(reference.directions.shape),
+            zeros,
+        )
+        for _ in range(n)
+    ]
+
+
+def _gate[**P, R](
+    adapter: LorraAdapter | None, fn: Callable[P, R]
+) -> Callable[P, R]:
+    return fn if adapter is None else adapter.gated(fn, enabled=False)
 
 
 def _arm_scores(
@@ -634,26 +722,48 @@ def _arm_scores(
     layers: tuple[int, ...],
     readers: Sequence[RepReader],
     difference: RepReader,
+    randoms: Sequence[RepReader],
     norms: dict[int, float],
+    neutral: Sequence[str],
     adapter: LorraAdapter | None,
-) -> dict[str, NDArray[np.float32]]:
+) -> tuple[dict[str, NDArray[np.float32]], list[list[object]]]:
     """Scores every choice under every arm at the nonzero grid points.
 
     With an adapter, every arm but `lorra` runs with the adapter off, so
-    those rows are those of a model that never had one.
+    those rows are those of a model that never had one. The plain model,
+    every vector arm at every nonzero grid point and `lorra` also get the
+    perplexity of the neutral texts; the prompting and contrast arms have
+    none.
+
+    Returns:
+        The scores of every arm and the rows `[arm, coeff, seed, perplexity]`
+        of the perplexities.
     """
     chat = chat_format_for(loaded)
     settings = GenSettings(batch_size=config.batch_size)
     plain, answers = mc1_inputs(chat, questions)
     rows: dict[str, NDArray[np.float32]] = {}
-    unsteered = _gate(adapter, _scorer(plain_arm(loaded, settings)))
+    none = plain_arm(loaded, settings)
+    unsteered = _gate(adapter, _scorer(none))
     rows["none"] = unsteered(plain, answers)
+    effects: list[list[object]] = [
+        [
+            "none",
+            None,
+            None,
+            _gate(adapter, _perplexity_fn(none))(neutral),
+        ]
+    ]
     for name, instruction in INSTRUCTIONS:
         prompts, texts = mc1_inputs(chat, questions, instruction)
         rows[name] = unsteered(prompts, texts)
-    vectors = [("difference", difference)]
-    vectors += [(f"reading/{i}", reader) for i, reader in enumerate(readers)]
-    for label, vector in vectors:
+    vectors: list[tuple[str, int | None, RepReader]] = [
+        ("difference", None, difference)
+    ]
+    for family, group in (("reading", readers), ("random", randoms)):
+        vectors += [(family, i, reader) for i, reader in enumerate(group)]
+    for family, index, vector in vectors:
+        label = family if index is None else f"{family}/{index}"
         for coeff in _nonzero(config.coeffs):
             arm = reader_arm(
                 loaded,
@@ -669,6 +779,14 @@ def _arm_scores(
                 name=f"{label}/{coeff:g}",
             )
             rows[arm.name] = _gate(adapter, _scorer(arm))(plain, answers)
+            effects.append(
+                [
+                    family,
+                    coeff,
+                    index,
+                    _gate(adapter, _perplexity_fn(arm))(neutral),
+                ]
+            )
     positive = mc1_inputs(chat, questions, TRUTHFUL)[0]
     negative = mc1_inputs(chat, questions, UNTRUTHFUL)[0]
 
@@ -698,7 +816,8 @@ def _arm_scores(
             adapter, plain_arm(loaded, settings, name="lorra"), enabled=True
         )
         rows["lorra"] = _scorer(lorra)(plain, answers)
-    return rows
+        effects.append(["lorra", None, None, _perplexity_fn(lorra)(neutral)])
+    return rows, effects
 
 
 def _table_row(
@@ -758,8 +877,16 @@ def execute(
     The adapter is unloaded when the scoring ends, even if it fails, so
     `loaded` comes back as it was.
 
-    Writes `curves_reading`, `curves_difference` and `curves_contrast`, the
-    `scores` of every arm with its sidecar, `table.json` and `summary.json`.
+    The random arms are scored and selected like the reading arms, on the
+    same questions and grid, and reported under `random` with their index as
+    the seed. The neutral texts of the perplexity are the Alpaca `test` rows
+    that follow the calibration texts in the shuffle of `calibration_texts`.
+
+    Writes `curves_reading`, `curves_difference`, `curves_contrast` and
+    `curves_random`, the `scores` of every arm with its sidecar,
+    `table.json`, `table_effects.json` (the perplexity of the plain model,
+    of every vector arm at every nonzero grid point and of `lorra`) and
+    `summary.json`.
 
     Args:
         config: The experiment settings.
@@ -771,16 +898,23 @@ def execute(
 
     Raises:
         ValueError: If a grid lacks 0.0 or another value or repeats one, the
-            layers are outside 1..L, `n_seeds`, `n_boot`, `batch_size` or
-            `n_calibration` is below 1, the projection operator has relative
-            coefficients, the Alpaca `test` split is empty, or there is no
-            selection or no test question, or `lorra_run` is not a finished
-            run or has a layer above the model; or, once the readers are
-            built, if the adapter weights do not fit the model.
+            layers are outside 1..L, `n_seeds`, `n_boot`, `n_random`,
+            `batch_size`, `n_calibration` or `n_neutral` is below 1, the
+            projection operator has relative coefficients, the Alpaca `test`
+            split is empty or has no text left after the calibration texts,
+            or there is no selection or no test question, or `lorra_run` is
+            not a finished run or has a layer above the model; or, once the
+            readers are built, if the adapter weights do not fit the model.
     """
     layers, select, test = _check_config(config, questions, loaded.n_layers)
     texts = calibration_texts(
         alpaca, config.n_calibration, seed=derive_seed(config.seed, "norms")
+    )
+    held_out = neutral_texts(
+        alpaca,
+        config.n_calibration,
+        config.n_neutral,
+        seed=derive_seed(config.seed, "norms"),
     )
     sweep = honesty_readers(
         loaded,
@@ -798,20 +932,23 @@ def execute(
     norms = mean_residual_norms(
         loaded, texts, layers, bos=config.bos, batch_size=config.batch_size
     )
+    randoms = random_readers(difference, config.n_random, seed=config.seed)
     adapter = (
         None
         if config.lorra_run is None
         else load_adapter(loaded, config.lorra_run)
     )
     try:
-        rows = _arm_scores(
+        rows, effects = _arm_scores(
             config,
             loaded,
             questions,
             layers,
             sweep.readers,
             difference,
+            randoms,
             norms,
+            held_out,
             adapter,
         )
     finally:
@@ -841,10 +978,12 @@ def execute(
     reading = [
         cube(f"reading/{i}", config.coeffs) for i in range(len(sweep.readers))
     ]
+    random = [cube(f"random/{i}", config.coeffs) for i in range(len(randoms))]
     grids = [
         ("difference", config.coeffs, [cube("difference", config.coeffs)]),
         ("reading", config.coeffs, reading),
         ("contrast", config.alphas, [cube("contrast", config.alphas)]),
+        ("random", config.coeffs, random),
     ]
     chance = float(
         np.mean(
@@ -894,6 +1033,7 @@ def execute(
     ]
     selected: dict[str, list[float]] = {}
     reading_test: list[float] = []
+    random_test: list[float] = []
     for label, grid, cubes in grids:
         selected[label] = []
         for seed, points in enumerate(cubes):
@@ -902,11 +1042,13 @@ def execute(
             selected[label].append(float(grid[index]))
             if label == "reading":
                 reading_test.append(float(points[index][test].mean()))
+            if label == "random":
+                random_test.append(float(points[index][test].mean()))
             table.append(
                 row(
                     label,
                     float(grid[index]),
-                    seed if label == "reading" else None,
+                    seed if label in ("reading", "random") else None,
                     points[index],
                 )
             )
@@ -927,6 +1069,9 @@ def execute(
         },
     )
     run_dir.write_json("table", {"columns": TABLE_COLUMNS, "rows": table})
+    run_dir.write_json(
+        "table_effects", {"columns": EFFECT_COLUMNS, "rows": effects}
+    )
     val = sweep.per_seed("val")[SERIES.index("reader")]
     run_dir.write_json(
         "summary",
@@ -938,10 +1083,13 @@ def execute(
             "reading_val_accuracy": val.mean(axis=0).tolist(),
             "coeff_difference": selected["difference"][0],
             "coeff_reading": selected["reading"],
+            "coeff_random": selected["random"],
             "alpha_contrast": selected["contrast"][0],
             "reading_test_mean": float(np.mean(reading_test)),
             "reading_test_min": float(np.min(reading_test)),
             "reading_test_max": float(np.max(reading_test)),
+            "random_test_mean": float(np.mean(random_test)),
+            "random_test_max": float(np.max(random_test)),
             "lorra_run": config.lorra_run,
         },
     )
