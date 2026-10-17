@@ -30,6 +30,8 @@ from tomography.experiments.c1_sentiment_steering import dose_with_none
 from tomography.experiments.c1_sentiment_steering import draw_prompts
 from tomography.experiments.c1_sentiment_steering import prompt_fragments
 from tomography.experiments.c1_sentiment_steering import window_around
+from tomography.experiments.effects import SideEffects
+from tomography.experiments.effects import side_effects
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.effects import write_dose_curves
 from tomography.experiments.effects import write_trials
@@ -60,6 +62,18 @@ from tomography.viz.style import style_context
 
 _N = len(EMOTIONS)
 _JUDGES = ("primary", "check")
+_EFFECT_COLUMNS = (
+    "arm",
+    "coeff",
+    "seed",
+    "emotion",
+    "perplexity",
+    "fluency",
+    "distinct_1",
+    "distinct_2",
+    "mean_length",
+    "empty_rate",
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -87,6 +101,8 @@ class Config(SteeringConfig):
         strength: The coefficient of the matrix; None means the largest of
             `coeffs`. It must be positive and one of `coeffs`.
         truncate_words: Words kept of each neutral text as a prompt.
+        n_random: Random control directions, unit vectors drawn from the
+            seed and norm-matched to the steering arm.
     """
 
     experiment: str = "c2"
@@ -102,6 +118,7 @@ class Config(SteeringConfig):
     window: int = 3
     strength: float | None = None
     truncate_words: int = 4
+    n_random: int = 3
 
 
 def emotion_stimuli(
@@ -198,6 +215,8 @@ def _check_config(config: Config, n_layers: int) -> float:
             f"strength must be a positive value of coeffs {config.coeffs}, "
             f"got {strength}"
         )
+    if config.n_random < 1:
+        raise ValueError(f"n_random must be at least 1, got {config.n_random}")
     if not 1 <= config.n_steer_seeds <= config.n_seeds:
         raise ValueError(
             f"n_steer_seeds must be in 1..{config.n_seeds}, got "
@@ -267,6 +286,40 @@ def _fit_readers(
     }
 
 
+def _effect_row(
+    arm: str,
+    coeff: float,
+    seed: int | None,
+    emotion: str | None,
+    effects: SideEffects,
+) -> list[object]:
+    """Builds one row of `table_effects`.
+
+    Args:
+        arm: `none`, `reading` or `random`.
+        coeff: The coefficient of the arm.
+        seed: Index of the reader or random arm; None for `none`.
+        emotion: The steered emotion; None for `none` and random arms.
+        effects: The side effects measured for the arm.
+
+    Returns:
+        The identifying values, then the six side effects, in the order of
+        `_EFFECT_COLUMNS`.
+    """
+    return [
+        arm,
+        coeff,
+        seed,
+        emotion,
+        effects.perplexity,
+        effects.fluency,
+        effects.distinct_1,
+        effects.distinct_2,
+        effects.mean_length,
+        effects.empty_rate,
+    ]
+
+
 def _write_matrix(
     run_dir: RunDir,
     stem: str,
@@ -305,9 +358,21 @@ def execute(
     The unsteered trial is generated once. The matrix is the change of every
     measured emotion at `strength` against it, averaged over readers.
 
+    The random arms are `n_random` unit directions drawn from the seed and
+    norm-matched to the steering arm: same window, relative coefficients,
+    operator, mode and mask. They are run apart from the emotions and
+    never enter the matrix.
+
     Writes `curves` and `curves_check` (own-emotion probability against the
-    coefficient), `matrix` and `matrix_check`, `trials`, `table.json` and
-    `summary.json`.
+    coefficient), `matrix` and `matrix_check`, `trials`, `trials_random`
+    (trials named `random/<index>/<coefficient>`), `table.json`,
+    `table_random.json` (the change of every measured emotion at `strength`
+    under each random arm), `table_effects.json` (perplexity of neutral
+    held-out text, completion fluency, distinct-1, distinct-2, mean length
+    and empty rate of `none`, every emotion arm and every random arm, as in
+    C1) and `summary.json`, whose
+    `max_abs_random_change` is the largest absolute change of any measured
+    emotion under any random arm and coefficient.
 
     Args:
         config: The experiment settings.
@@ -323,15 +388,15 @@ def execute(
     Raises:
         ValueError: If fewer than two distinct emotions are steered, `coeffs`
             has no 0.0 or no other value, `strength` is not a positive value
-            of `coeffs`, `n_steer_seeds` is outside `1..n_seeds`, `window`
-            does not fit the model, `n_pairs` or `n_eval_pairs` is below 1
-            or exceeds the pairs one steered emotion can form in its split
-            (an emotion with no pair fails even when `n_eval_pairs` is
-            None), the generation settings are invalid (see `GenSettings`),
-            `n_calibration` or `n_neutral` is below 1, the usable (at least
-            40 characters) held-out texts are fewer than
-            `n_calibration + n_neutral`, or the neutral ones give fewer than
-            `n_prompts` distinct prompts.
+            of `coeffs`, `n_random` is below 1, `n_steer_seeds` is outside
+            `1..n_seeds`, `window` does not fit the model, `n_pairs` or
+            `n_eval_pairs` is below 1 or exceeds the pairs one steered
+            emotion can form in its split (an emotion with no pair fails
+            even when `n_eval_pairs` is None), the generation settings are
+            invalid (see `GenSettings`), `n_calibration` or `n_neutral` is
+            below 1, the usable (at least 40 characters) held-out texts are
+            fewer than `n_calibration + n_neutral`, or the neutral ones give
+            fewer than `n_prompts` distinct prompts.
     """
     n_layers = loaded.n_layers
     strength = _check_config(config, n_layers)
@@ -387,11 +452,33 @@ def execute(
 
         return make
 
-    columns = 2 * _N
-    none = run_trial(
-        plain_arm(loaded, settings), prompts, score, columns=columns
+    rng = np.random.default_rng(config.seed)
+    shape_random = (
+        len(window),
+        next(iter(results.values())).readers[0].directions.shape[1],
     )
+    randoms = [
+        RepReader.from_arrays(
+            "random",
+            window,
+            rng.standard_normal(shape_random),
+            np.zeros(shape_random),
+        )
+        for _ in range(config.n_random)
+    ]
+    columns = 2 * _N
+    plain = plain_arm(loaded, settings)
+    none = run_trial(plain, prompts, score, columns=columns)
     baseline = none.mean_score()
+
+    def effects_of(arm: Arm, trial: Trial) -> SideEffects:
+        return side_effects(
+            loaded, arm, trial, held.neutral, batch_size=config.batch_size
+        )
+
+    effect_rows: list[list[object]] = [
+        _effect_row("none", 0.0, None, None, effects_of(plain, none))
+    ]
     at_strength = list(config.coeffs).index(strength)
     shape = (len(config.emotions), config.n_steer_seeds)
     own = np.full((len(_JUDGES), *shape, len(config.coeffs)), np.nan)
@@ -414,10 +501,53 @@ def execute(
                 for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
                 if coeff != 0.0
             )
+            effect_rows.extend(
+                _effect_row(
+                    "reading",
+                    coeff,
+                    i,
+                    emotion,
+                    effects_of(steering_arms(reader)(coeff), trial),
+                )
+                for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
+                if coeff != 0.0
+            )
             moved = dose.trials[at_strength].mean_score() - baseline
             for j in range(len(_JUDGES)):
                 own[j, e, i] = dose.curve(j * _N + own_column)
                 change[j, e, i] = moved[j * _N : (j + 1) * _N]
+
+    random_trials: list[Trial] = []
+    random_change = np.full(
+        (config.n_random, len(config.coeffs), len(_JUDGES) * _N), np.nan
+    )
+    for r, reader in enumerate(randoms):
+        dose = dose_with_none(
+            steering_arms(reader),
+            config.coeffs,
+            prompts,
+            score,
+            none,
+            columns=columns,
+        )
+        random_trials.extend(
+            dataclasses.replace(trial, name=f"random/{r}/{coeff:g}")
+            for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
+            if coeff != 0.0
+        )
+        effect_rows.extend(
+            _effect_row(
+                "random",
+                coeff,
+                r,
+                None,
+                effects_of(steering_arms(reader)(coeff), trial),
+            )
+            for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
+            if coeff != 0.0
+        )
+        for c, trial in enumerate(dose.trials):
+            random_change[r, c] = trial.mean_score() - baseline
 
     xlabel = (
         "Coefficient (relative)" if config.mode == "relative" else "Coefficient"
@@ -471,7 +601,39 @@ def execute(
         if first.std() > 0 and second.std() > 0
         else float("nan")
     )
+    finite = np.abs(random_change[np.isfinite(random_change)])
+    summary["max_abs_random_change"] = (
+        float(finite.max()) if finite.size else float("nan")
+    )
     write_trials(run_dir, "trials", trials)
+    write_trials(run_dir, "trials_random", random_trials)
+    run_dir.write_json(
+        "table_effects",
+        {"columns": list(_EFFECT_COLUMNS), "rows": effect_rows},
+    )
+    run_dir.write_json(
+        "table_random",
+        {
+            "columns": [
+                "steered",
+                "random",
+                "measured",
+                "change",
+                "change_check",
+            ],
+            "rows": [
+                [
+                    "random",
+                    r,
+                    measured,
+                    float(random_change[r, at_strength, m]),
+                    float(random_change[r, at_strength, _N + m]),
+                ]
+                for r in range(config.n_random)
+                for m, measured in enumerate(EMOTIONS)
+            ],
+        },
+    )
     run_dir.write_json(
         "table",
         {
