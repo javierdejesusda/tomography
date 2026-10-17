@@ -523,18 +523,33 @@ def test_export_accepts_prose_that_mentions_users(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "text", ["x/Users/y", "x\\Users\\y"], ids=["slash", "backslash"]
+    "text",
+    [
+        "before x/Users/y after",
+        "before x\\Users\\y after",
+        "before\nUsers/bob/x after",
+        "before\nUsers\\bob after",
+        "before C:Users\\bob after",
+        "before x/Users",
+    ],
+    ids=[
+        "slash",
+        "backslash",
+        "start-slash",
+        "start-backslash",
+        "colon",
+        "end",
+    ],
 )
 def test_export_refuses_users_as_a_path_segment_with_a_snippet(
     tmp_path: Path, text: str
 ) -> None:
-    dest = _leak_run(tmp_path, f"before {text} after")
+    dest = _leak_run(tmp_path, text)
 
     with pytest.raises(ExportError) as error:
         export_runs([tmp_path / "r1"], dest)
 
     assert "before" in str(error.value)
-    assert "after" in str(error.value)
     assert not dest.exists()
 
 
@@ -542,13 +557,14 @@ def test_export_refuses_users_as_a_path_segment_with_a_snippet(
     "text",
     [
         "kept in /home/alice/runs/x",
+        "kept in /scratch/x/y",
         "kept in /mnt/d/data/x",
         "at \\\\fileserver\\share\\runs",
         "on testhost-box today",
         "on TESTHOST-BOX.lan today",
         "by Tester-User today",
     ],
-    ids=["posix", "wsl", "unc", "host-label", "host-full", "user"],
+    ids=["posix", "posix-any", "wsl", "unc", "host-label", "host-full", "user"],
 )
 def test_export_refuses_posix_unc_host_and_user_leaks(
     tmp_path: Path, text: str
@@ -594,12 +610,24 @@ def _literal_rewriter() -> export_module._PathRewriter:
         ("C:\\other\\place\\old-run", "<external>/old-run"),
         (
             "see file:///D:/other/place/old-run now",
-            "see file:///<external>/old-run now",
+            "see file://<external>/old-run now",
         ),
         ("at \\\\srv1\\share\\old-run ok", "at <external>/old-run ok"),
         ("/home/alice/old-run", "<external>/old-run"),
         ("use C:\\a\\Jane Doe\\x for it", "use <external>/x for it"),
-        ("C:\\a\\b and more", "<external>/b and more"),
+        ("see C:\\a\\b and more", "see <external>/b and more"),
+        ("C:\\a\\My Runs", "<external>/My Runs"),
+        ("/home/a/My Runs", "<external>/My Runs"),
+        ("see /data/alice/run now", "see <external>/run now"),
+        ("at /scratch/x/y now", "at <external>/y now"),
+        ("open file:///home/x/y now", "open file://<external>/y now"),
+        (
+            "https://huggingface.co/datasets/x",
+            "https://huggingface.co/datasets/x",
+        ),
+        ("allenai/ai2_arc", "allenai/ai2_arc"),
+        ("60 km/h", "60 km/h"),
+        (f"results/{KEY}/x", f"results/{KEY}/x"),
         ("plain words", "plain words"),
     ],
 )
@@ -683,3 +711,26 @@ def test_export_names_an_unreadable_npz_file(tmp_path: Path) -> None:
 
     with pytest.raises(ExportError, match=r"curves\.npz"):
         export_runs([tmp_path / "r1"], tmp_path / "dest")
+
+
+def test_path_rewriter_refuses_an_ambiguous_path_tail() -> None:
+    with pytest.raises(ValueError, match="a path tail after a rewritten path"):
+        _literal_rewriter().rewrite("run C:\\Program Files (x86)\\tool now")
+
+
+def test_export_refuses_a_destination_folder_without_the_runs_files(
+    tmp_path: Path,
+) -> None:
+    run = _make_run(tmp_path / "r1")
+    dest = tmp_path / "dest"
+    folder = dest / "t1" / "gpt2" / run.meta["config_hash"]
+    (folder / "figures").mkdir(parents=True)
+    (folder / "figures" / "x.png").write_bytes(b"png")
+
+    with pytest.raises(ExportError, match="exists without the run's files"):
+        export_runs([tmp_path / "r1"], dest)
+
+    assert _relative_files(dest) == [
+        f"t1/gpt2/{run.meta['config_hash']}/figures/x.png"
+    ]
+    assert not list(dest.rglob("*.tmp"))

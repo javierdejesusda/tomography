@@ -39,10 +39,9 @@ _EXCLUDED_NAMES = (
     "transfer.npz",
     "signals*.npz",
 )
-_POSIX_ROOTS = "home|Users|root|tmp|var|mnt|private|Volumes|media|opt|srv"
 _DRIVE_START = r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]"
 _UNC_START = r"(?<![\\\w])\\\\[^\\/\s]+[\\/]"
-_POSIX_START = rf"(?<![\w/.\-~])/(?:{_POSIX_ROOTS})/"
+_POSIX_START = r"(?:(?<![\w/.\-~])|(?<=file://))/[^/\s\"',;)\]]+/"
 # A path continues across a space when the next word holds a separator.
 _PATH_BODY = r"[^\s\"',;)\]]*(?:[ \t]+(?=\S*[\\/])[^\s\"',;)\]]+)*"
 _EMBEDDED_PATH = re.compile(
@@ -51,9 +50,13 @@ _EMBEDDED_PATH = re.compile(
 _PRIVATE_PATTERNS = (
     ("a drive-letter path", re.compile(_DRIVE_START)),
     ("a UNC path", re.compile(_UNC_START + r"[^\\/\s]")),
-    ("a POSIX home or system path", re.compile(_POSIX_START)),
-    ("a 'Users' path segment", re.compile(r"[\\/]Users[\\/]")),
+    ("a POSIX absolute path", re.compile(_POSIX_START)),
+    (
+        "a 'Users' path segment",
+        re.compile(r"(?:^|[\\/:])Users(?=[\\/]|$)", re.MULTILINE),
+    ),
 )
+_WHOLE_PATH = re.compile(rf"{_DRIVE_START}|{_UNC_START}|//?[^/\s]+/")
 _SNIPPET_MARGIN = 20
 _MIN_USER_NAME = 3
 _FILE_ERRORS = (
@@ -235,9 +238,7 @@ def _run_index(runs: Sequence[RunInfo]) -> dict[str, RunInfo]:
 
 
 def _is_path(text: str) -> bool:
-    if "\n" in text:
-        return False
-    return len(text) > 1 and text[0] == "/" and not re.search(r"\s", text)
+    return "\n" not in text and _WHOLE_PATH.match(text) is not None
 
 
 class _PathRewriter:
@@ -273,7 +274,21 @@ class _PathRewriter:
     def _string(self, text: str) -> str:
         if _is_path(text):
             return self._path(text)
-        return _EMBEDDED_PATH.sub(lambda m: self._path(m.group(0)), text)
+        return _EMBEDDED_PATH.sub(
+            lambda match: self._embedded(text, match), text
+        )
+
+    def _embedded(self, text: str, match: re.Match[str]) -> str:
+        replacement = self._path(match.group(0))
+        rest = text[match.end() :]
+        if replacement.startswith(EXTERNAL_PREFIX) and re.match(r"[ \t]", rest):
+            tail = _EMBEDDED_PATH.sub("", rest).split("\n")[0]
+            if re.search(r"[\\/]", tail):
+                raise ValueError(
+                    "a path tail after a rewritten path near "
+                    f"{_snippet(text, *match.span())!r}"
+                )
+        return replacement
 
     def _path(self, text: str) -> str:
         segments = _segments(text)
@@ -463,11 +478,7 @@ def _write_run(folder: Path, files: dict[str, bytes]) -> None:
             target = staging / name
             target.parent.mkdir(parents=True, exist_ok=True)
             _write_file(target, data)
-        if folder.exists():
-            for entry in staging.iterdir():
-                os.replace(entry, folder / entry.name)
-        else:
-            os.replace(staging, folder)
+        os.replace(staging, folder)
     except OSError as error:
         raise ExportError(f"cannot write {folder}: {error}") from error
     finally:
@@ -500,7 +511,13 @@ def export_runs(roots: Sequence[Path], dest: Path) -> ExportReport:
     plans: list[tuple[RunInfo, dict[str, bytes], bool]] = []
     for run in sorted(finished, key=lambda item: item.key):
         files = _plan_run(run, rewriter)
-        existing = _existing_files(Path(dest) / run.key)
+        folder = Path(dest) / run.key
+        existing = _existing_files(folder)
+        if folder.exists() and not existing:
+            raise ExportError(
+                f"{folder} exists without the run's files; "
+                "delete it to export again"
+            )
         differing = _differences(files, existing) if existing else []
         if differing:
             raise ExportError(
