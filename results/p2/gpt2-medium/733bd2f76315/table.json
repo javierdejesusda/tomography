@@ -1,0 +1,417 @@
+{
+  "_meta": {
+    "experiment": "p2",
+    "config_hash": "733bd2f76315",
+    "seed": 0,
+    "git_sha": "fb3b5dd71d339258fde47b6c9f6c0bbe58f4bebf",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T16:30:07+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p2",
+      "model": "gpt2-medium",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "utility"
+      ],
+      "positions": [
+        "last",
+        "concept",
+        "mean"
+      ],
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "zero_shot": true
+    }
+  },
+  "data": [
+    {
+      "task": "sentiment",
+      "position": "last",
+      "condition": "original",
+      "layer": 20,
+      "accuracy": 0.7420560747663552,
+      "lo": 0.7242873831775701,
+      "hi": 0.7584112149532709,
+      "change": 0.0
+    },
+    {
+      "task": "sentiment",
+      "position": "last",
+      "condition": "random",
+      "layer": 20,
+      "accuracy": 0.7238317757009345,
+      "lo": 0.710747663551402,
+      "hi": 0.7369158878504672,
+      "change": -2.4559193954660095
+    },
+    {
+      "task": "sentiment",
+      "position": "last",
+      "condition": "against",
+      "layer": 20,
+      "accuracy": 0.7079439252336449,
+      "lo": 0.6962616822429908,
+      "hi": 0.720105140186916,
+      "change": -4.5969773299748065
+    },
+    {
+      "task": "sentiment",
+      "position": "concept",
+      "condition": "original",
+      "layer": 13,
+      "accuracy": 0.8130841121495328,
+      "lo": 0.7990654205607477,
+      "hi": 0.8252336448598131,
+      "change": 0.0
+    },
+    {
+      "task": "sentiment",
+      "position": "concept",
+      "condition": "random",
+      "layer": 13,
+      "accuracy": 0.8257009345794393,
+      "lo": 0.8098130841121496,
+      "hi": 0.838785046728972,
+      "change": 1.5517241379310256
+    },
+    {
+      "task": "sentiment",
+      "position": "concept",
+      "condition": "against",
+      "layer": 13,
+      "accuracy": 0.8135514018691588,
+      "lo": 0.7911214953271027,
+      "hi": 0.8294392523364487,
+      "change": 0.05747126436778947
+    },
+    {
+      "task": "sentiment",
+      "position": "mean",
+      "condition": "original",
+      "layer": 11,
+      "accuracy": 0.8425233644859812,
+      "lo": 0.8299065420560747,
+      "hi": 0.8574766355140188,
+      "change": 0.0
+    },
+    {
+      "task": "sentiment",
+      "position": "mean",
+      "condition": "random",
+      "layer": 11,
+      "accuracy": 0.8495327102803738,
+      "lo": 0.8373831775700935,
+      "hi": 0.8630841121495327,
+      "change": 0.831946755407664
+    },
+    {
+      "task": "sentiment",
+      "position": "mean",
+      "condition": "against",
+      "layer": 11,
+      "accuracy": 0.8495327102803738,
+      "lo": 0.8373831775700935,
+      "hi": 0.8640186915887851,
+      "change": 0.831946755407664
+    },
+    {
+      "task": "sentiment",
+      "position": "zero_shot",
+      "condition": "original",
+      "layer": null,
+      "accuracy": 0.602803738317757,
+      "lo": 0.5420560747663551,
+      "hi": 0.6682242990654206,
+      "change": 0.0
+    },
+    {
+      "task": "sentiment",
+      "position": "zero_shot",
+      "condition": "random",
+      "layer": null,
+      "accuracy": 0.5794392523364486,
+      "lo": 0.514018691588785,
+      "hi": 0.6448598130841121,
+      "change": -3.8759689922480716
+    },
+    {
+      "task": "sentiment",
+      "position": "zero_shot",
+      "condition": "against",
+      "layer": null,
+      "accuracy": 0.09345794392523364,
+      "lo": 0.056074766355140186,
+      "hi": 0.13551401869158877,
+      "change": -84.49612403100775
+    },
+    {
+      "task": "truth",
+      "position": "last",
+      "condition": "original",
+      "layer": 19,
+      "accuracy": 0.6559322033898305,
+      "lo": 0.6254237288135593,
+      "hi": 0.6847457627118644,
+      "change": 0.0
+    },
+    {
+      "task": "truth",
+      "position": "last",
+      "condition": "random",
+      "layer": 19,
+      "accuracy": 0.6169491525423729,
+      "lo": 0.6,
+      "hi": 0.6390254237288133,
+      "change": -5.9431524547803525
+    },
+    {
+      "task": "truth",
+      "position": "last",
+      "condition": "against",
+      "layer": 19,
+      "accuracy": 0.5932203389830508,
+      "lo": 0.5711864406779661,
+      "hi": 0.6152542372881357,
+      "change": -9.560723514211888
+    },
+    {
+      "task": "truth",
+      "position": "concept",
+      "condition": "original",
+      "layer": 20,
+      "accuracy": 0.728813559322034,
+      "lo": 0.7101694915254237,
+      "hi": 0.7491525423728814,
+      "change": 0.0
+    },
+    {
+      "task": "truth",
+      "position": "concept",
+      "condition": "random",
+      "layer": 20,
+      "accuracy": 0.6898305084745762,
+      "lo": 0.6796610169491525,
+      "hi": 0.6983050847457628,
+      "change": -5.3488372093023475
+    },
+    {
+      "task": "truth",
+      "position": "concept",
+      "condition": "against",
+      "layer": 20,
+      "accuracy": 0.6457627118644068,
+      "lo": 0.6322033898305084,
+      "hi": 0.6610169491525424,
+      "change": -11.395348837209305
+    },
+    {
+      "task": "truth",
+      "position": "mean",
+      "condition": "original",
+      "layer": 20,
+      "accuracy": 0.6677966101694915,
+      "lo": 0.6440677966101694,
+      "hi": 0.6915254237288135,
+      "change": 0.0
+    },
+    {
+      "task": "truth",
+      "position": "mean",
+      "condition": "random",
+      "layer": 20,
+      "accuracy": 0.6813559322033899,
+      "lo": 0.652542372881356,
+      "hi": 0.7135593220338983,
+      "change": 2.0304568527918794
+    },
+    {
+      "task": "truth",
+      "position": "mean",
+      "condition": "against",
+      "layer": 20,
+      "accuracy": 0.6813559322033899,
+      "lo": 0.652542372881356,
+      "hi": 0.7135593220338983,
+      "change": 2.0304568527918794
+    },
+    {
+      "task": "truth",
+      "position": "zero_shot",
+      "condition": "original",
+      "layer": null,
+      "accuracy": 0.559322033898305,
+      "lo": 0.4406779661016949,
+      "hi": 0.6949152542372882,
+      "change": 0.0
+    },
+    {
+      "task": "truth",
+      "position": "zero_shot",
+      "condition": "random",
+      "layer": null,
+      "accuracy": 0.559322033898305,
+      "lo": 0.4406779661016949,
+      "hi": 0.6949152542372882,
+      "change": 0.0
+    },
+    {
+      "task": "truth",
+      "position": "zero_shot",
+      "condition": "against",
+      "layer": null,
+      "accuracy": 0.2033898305084746,
+      "lo": 0.1016949152542373,
+      "hi": 0.3050847457627119,
+      "change": -63.63636363636363
+    },
+    {
+      "task": "utility",
+      "position": "last",
+      "condition": "original",
+      "layer": 15,
+      "accuracy": 0.68515625,
+      "lo": 0.665234375,
+      "hi": 0.700791015625,
+      "change": 0.0
+    },
+    {
+      "task": "utility",
+      "position": "last",
+      "condition": "random",
+      "layer": 15,
+      "accuracy": 0.658203125,
+      "lo": 0.641796875,
+      "hi": 0.675390625,
+      "change": -3.933865450399091
+    },
+    {
+      "task": "utility",
+      "position": "last",
+      "condition": "against",
+      "layer": 15,
+      "accuracy": 0.330078125,
+      "lo": 0.22303710937500001,
+      "hi": 0.44883789062499996,
+      "change": -51.824401368301025
+    },
+    {
+      "task": "utility",
+      "position": "concept",
+      "condition": "original",
+      "layer": 14,
+      "accuracy": 0.69609375,
+      "lo": 0.677724609375,
+      "hi": 0.71171875,
+      "change": 0.0
+    },
+    {
+      "task": "utility",
+      "position": "concept",
+      "condition": "random",
+      "layer": 14,
+      "accuracy": 0.705859375,
+      "lo": 0.689453125,
+      "hi": 0.720712890625,
+      "change": 1.4029180695847363
+    },
+    {
+      "task": "utility",
+      "position": "concept",
+      "condition": "against",
+      "layer": 14,
+      "accuracy": 0.649609375,
+      "lo": 0.605849609375,
+      "hi": 0.68828125,
+      "change": -6.677890011223332
+    },
+    {
+      "task": "utility",
+      "position": "mean",
+      "condition": "original",
+      "layer": 15,
+      "accuracy": 0.659765625,
+      "lo": 0.642578125,
+      "hi": 0.67421875,
+      "change": 0.0
+    },
+    {
+      "task": "utility",
+      "position": "mean",
+      "condition": "random",
+      "layer": 15,
+      "accuracy": 0.6515625,
+      "lo": 0.630859375,
+      "hi": 0.668359375,
+      "change": -1.2433392539964443
+    },
+    {
+      "task": "utility",
+      "position": "mean",
+      "condition": "against",
+      "layer": 15,
+      "accuracy": 0.673828125,
+      "lo": 0.649609375,
+      "hi": 0.6953125,
+      "change": 2.131438721136764
+    },
+    {
+      "task": "utility",
+      "position": "zero_shot",
+      "condition": "original",
+      "layer": null,
+      "accuracy": 0.51953125,
+      "lo": 0.45703125,
+      "hi": 0.58203125,
+      "change": 0.0
+    },
+    {
+      "task": "utility",
+      "position": "zero_shot",
+      "condition": "random",
+      "layer": null,
+      "accuracy": 0.54296875,
+      "lo": 0.48046875,
+      "hi": 0.609375,
+      "change": 4.511278195488722
+    },
+    {
+      "task": "utility",
+      "position": "zero_shot",
+      "condition": "against",
+      "layer": null,
+      "accuracy": 0.01953125,
+      "lo": 0.00390625,
+      "hi": 0.0390625,
+      "change": -96.2406015037594
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "_meta": {
+    "experiment": "p9b",
+    "config_hash": "9641ab8235a9",
+    "seed": 0,
+    "git_sha": "fb3b5dd71d339258fde47b6c9f6c0bbe58f4bebf",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T15:50:28+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9b",
+      "model": "qwen3-1.7b",
+      "seed": 0,
+      "labels_run": "results/p9a/qwen3-1.7b/f413efcae268",
+      "template": "fewshot",
+      "n_shots": 15,
+      "types": null,
+      "methods": [
+        "logistic",
+        "pca_diff",
+        "mean_diff",
+        "random"
+      ],
+      "preprocess": "center",
+      "n_seeds": 5,
+      "n_pairs": 64,
+      "layers": null,
+      "layer": null,
+      "min_pairs": 16,
+      "min_eval": 10,
+      "bos": null,
+      "batch_size": 8
+    }
+  },
+  "data": {
+    "rows": [
+      "fictional_generated",
+      "obscure_real",
+      "obscure_real_pop",
+      "triviaqa_known",
+      "unknowable_detail",
+      "false_premise",
+      "kuq_ambiguous",
+      "kuq_controversial",
+      "kuq_counterfactual",
+      "kuq_false_assumption",
+      "kuq_future_unknown",
+      "kuq_unsolved_problem",
+      "real_vs_synthal",
+      "real_vs_generated"
+    ],
+    "cols": [
+      "fictional_generated",
+      "obscure_real",
+      "obscure_real_pop",
+      "triviaqa_known",
+      "unknowable_detail",
+      "false_premise",
+      "kuq_ambiguous",
+      "kuq_controversial",
+      "kuq_counterfactual",
+      "kuq_false_assumption",
+      "kuq_future_unknown",
+      "kuq_unsolved_problem",
+      "real_vs_synthal",
+      "real_vs_generated"
+    ],
+    "title": "Cosine, layer 25"
+  }
+}

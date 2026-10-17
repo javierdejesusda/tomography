@@ -1,0 +1,209 @@
+{
+  "_meta": {
+    "experiment": "a2",
+    "config_hash": "6c8366625d7a",
+    "seed": 0,
+    "git_sha": "fb3b5dd71d339258fde47b6c9f6c0bbe58f4bebf",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T16:28:21+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "a2",
+      "model": "gpt2-medium",
+      "seed": 0,
+      "sources": [
+        "r1",
+        "r2",
+        "r3",
+        "r5",
+        "r7"
+      ],
+      "extra_runs": [],
+      "top_k": 10,
+      "n_random": 100,
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "concepts": [
+      "r1",
+      "r2",
+      "r3",
+      "r5",
+      "r7"
+    ],
+    "lens_concepts": [
+      "r1",
+      "r2",
+      "r3",
+      "r5",
+      "r7"
+    ],
+    "words": {
+      "r1": {
+        "+": [
+          " good",
+          " great",
+          " excellent",
+          " wonderful",
+          " love",
+          " best"
+        ],
+        "-": [
+          " bad",
+          " terrible",
+          " awful",
+          " horrible",
+          " hate",
+          " worst"
+        ]
+      },
+      "r2": {
+        "+": [
+          " pleasant",
+          " happy",
+          " enjoy",
+          " glad",
+          " fun",
+          " nice"
+        ],
+        "-": [
+          " unpleasant",
+          " sad",
+          " pain",
+          " miserable",
+          " hurt",
+          " awful"
+        ]
+      },
+      "r3": {
+        "+": [
+          " right",
+          " good",
+          " kind",
+          " fair",
+          " moral",
+          " decent"
+        ],
+        "-": [
+          " wrong",
+          " bad",
+          " cruel",
+          " unfair",
+          " evil",
+          " selfish"
+        ]
+      },
+      "r5": {
+        "+": [
+          " honest",
+          " true",
+          " truth",
+          " sincere",
+          " truthful",
+          " accurate"
+        ],
+        "-": [
+          " lie",
+          " false",
+          " liar",
+          " fake",
+          " deceptive",
+          " dishonest"
+        ]
+      },
+      "r7": {
+        "+": [
+          " true",
+          " correct",
+          " fact",
+          " right",
+          " accurate",
+          " real"
+        ],
+        "-": [
+          " false",
+          " incorrect",
+          " wrong",
+          " fake",
+          " untrue",
+          " myth"
+        ]
+      }
+    },
+    "dropped_words": {
+      "r1": {
+        "+": [],
+        "-": []
+      },
+      "r2": {
+        "+": [],
+        "-": []
+      },
+      "r3": {
+        "+": [],
+        "-": []
+      },
+      "r5": {
+        "+": [],
+        "-": []
+      },
+      "r7": {
+        "+": [],
+        "-": []
+      }
+    },
+    "random_separation": {
+      "r1": [
+        0.05169199132352778,
+        0.5184481768944308
+      ],
+      "r2": [
+        -0.007699452388318008,
+        0.4806094896924118
+      ],
+      "r3": [
+        0.0668998736137871,
+        0.4940300481994761
+      ],
+      "r5": [
+        0.04373481298493201,
+        0.7396515334918768
+      ],
+      "r7": [
+        0.036292447260114005,
+        0.5369277388579371
+      ]
+    },
+    "best_lens_layer": {
+      "r1": 20,
+      "r2": 24,
+      "r3": 21,
+      "r5": 10,
+      "r7": 8
+    },
+    "center": true,
+    "scaled": true,
+    "source_runs": {
+      "r1": "01fd70a05fa8",
+      "r2": "098a48a58a83",
+      "r3": "d10ebba10935",
+      "r5": "e447c8958b80",
+      "r7": "3030e4186690"
+    }
+  }
+}

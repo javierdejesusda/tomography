@@ -1,0 +1,24 @@
+{
+  "experiment": "p9b",
+  "model": "qwen3-0.6b",
+  "seed": 0,
+  "labels_run": "results/p9a/qwen3-0.6b/10d95352866e",
+  "template": "fewshot",
+  "n_shots": 15,
+  "types": null,
+  "methods": [
+    "logistic",
+    "pca_diff",
+    "mean_diff",
+    "random"
+  ],
+  "preprocess": "center",
+  "n_seeds": 5,
+  "n_pairs": 64,
+  "layers": null,
+  "layer": null,
+  "min_pairs": 16,
+  "min_eval": 10,
+  "bos": null,
+  "batch_size": 8
+}
