@@ -31,7 +31,9 @@ from tomography.experiments.c4_honesty_control import calibration_texts
 from tomography.experiments.c4_honesty_control import check_relative_op
 from tomography.experiments.c4_honesty_control import honesty_readers
 from tomography.experiments.c4_honesty_control import resolve_layers
+from tomography.experiments.effects import SideEffects
 from tomography.experiments.effects import read_trials
+from tomography.experiments.effects import side_effects
 from tomography.experiments.effects import write_trials
 from tomography.experiments.steering import Arm
 from tomography.experiments.steering import GenSettings
@@ -50,6 +52,7 @@ from tomography.model import LoadedModel
 from tomography.model import load_model
 from tomography.reading.directions import Method
 from tomography.reading.metrics import wilson_ci
+from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
 
 TABLE_COLUMNS = [
@@ -64,6 +67,18 @@ TABLE_COLUMNS = [
     "score",
     "score_check",
 ]
+EFFECT_COLUMNS = [
+    "arm",
+    "coeff",
+    "seed",
+    "perplexity",
+    "fluency",
+    "distinct_1",
+    "distinct_2",
+    "mean_length",
+    "empty_rate",
+]
+RANDOM = "random"
 CHECK_OFFSET = len(EMOTIONS)
 N_JUDGE_COLUMNS = 2 * len(EMOTIONS)
 
@@ -324,6 +339,9 @@ class Config(SteeringConfig):
         n_show: Questions or completions per gallery and kind.
         n_shots: Demonstrations of the plain-kind prompt.
         c2_run: Path of a finished C2 run, or None for no emotion galleries.
+        n_random: Random directions, unit vectors drawn from the seed and
+            norm-matched to the steering arm, that steer at `+strength`
+            and `-strength` as controls.
     """
 
     experiment: str = "c5"
@@ -338,6 +356,7 @@ class Config(SteeringConfig):
     num_samples: int = 1
     max_new_tokens: int = 24
     c2_run: str | None = None
+    n_random: int = 3
 
 
 def _check_config(
@@ -346,6 +365,11 @@ def _check_config(
     """Validates a run before any work and returns the steered layers."""
     if not config.strength > 0:
         raise ValueError(f"strength must be positive, got {config.strength}")
+    for name in ("n_random", "n_neutral"):
+        if getattr(config, name) < 1:
+            raise ValueError(
+                f"{name} must be >= 1, got {getattr(config, name)}"
+            )
     if config.n_show < 1:
         raise ValueError(f"n_show must be >= 1, got {config.n_show}")
     if not 1 <= config.n_pool <= n_facts:
@@ -364,6 +388,109 @@ def _emotion_strength(emotion_run: RunDir) -> float:
 def _mean_score(trial: Trial) -> float | None:
     value = float(trial.mean_score())
     return None if math.isnan(value) else value
+
+
+def _mean_over_arms(trials: Sequence[Trial]) -> float | None:
+    """Averages the mean scores of several arms.
+
+    Args:
+        trials: The trials of the arms to average.
+
+    Returns:
+        The mean of the arm means, or None when every arm mean is missing.
+    """
+    means = [m for trial in trials if (m := _mean_score(trial)) is not None]
+    return float(np.mean(means)) if means else None
+
+
+def neutral_texts(
+    alpaca: Sequence[Example], config: Config, *, seed: int
+) -> list[str]:
+    """Draws the neutral texts of the perplexity.
+
+    They are the texts that follow the calibration texts in the draw of
+    `calibration_texts`, so the two sets are disjoint and the calibration
+    texts are the ones a run without controls draws.
+
+    Args:
+        alpaca: Alpaca rows with splits.
+        config: The experiment settings.
+        seed: Seed of the calibration draw.
+
+    Returns:
+        Up to `n_neutral` texts.
+
+    Raises:
+        ValueError: If the Alpaca `test` split has no text left after the
+            calibration texts.
+    """
+    drawn = calibration_texts(
+        alpaca, config.n_calibration + config.n_neutral, seed=seed
+    )
+    neutral = drawn[config.n_calibration :]
+    if not neutral:
+        raise ValueError(
+            f"the Alpaca test split has no neutral text after the "
+            f"{config.n_calibration} calibration texts"
+        )
+    return neutral
+
+
+def _random_readers(reader: RepReader, config: Config) -> list[RepReader]:
+    """Draws the random control readers.
+
+    The directions are unit vectors drawn in order from one generator seeded
+    with `config.seed`, with the layers and shape of `reader`.
+
+    Args:
+        reader: The steering reader whose layers and shape to match.
+        config: The experiment settings.
+
+    Returns:
+        `config.n_random` readers.
+    """
+    rng = np.random.default_rng(config.seed)
+    zeros = np.zeros_like(reader.directions)
+    return [
+        RepReader.from_arrays(
+            RANDOM,
+            reader.layers,
+            rng.standard_normal(reader.directions.shape),
+            zeros,
+        )
+        for _ in range(config.n_random)
+    ]
+
+
+def _effect_row(
+    arm: str,
+    coeff: float | None,
+    seed: int | None,
+    effects: SideEffects,
+) -> list[object]:
+    """Builds one row of the effects table.
+
+    Args:
+        arm: The arm family: "none", "reading" or "random".
+        coeff: The relative coefficient, or None for the plain model.
+        seed: The random direction index k for a random arm, 0 for the
+            reading arm, None for the plain model.
+        effects: The side effects of the arm.
+
+    Returns:
+        The row in the order of `EFFECT_COLUMNS`.
+    """
+    return [
+        arm,
+        coeff,
+        seed,
+        effects.perplexity,
+        effects.fluency,
+        effects.distinct_1,
+        effects.distinct_2,
+        effects.mean_length,
+        effects.empty_rate,
+    ]
 
 
 def execute(
@@ -386,8 +513,16 @@ def execute(
     The emotion galleries need no model: they read the completions of a
     finished C2 run at the strength of that run.
 
-    Writes `trials` (`none`, `reading/0/<s>`, `reading/0/<-s>`), `table.json`
-    and `summary.json`.
+    The random arms are `n_random` unit directions drawn from the seed and
+    norm-matched to the steering arm: same layers, strengths, operator, mode,
+    mask and norm handling. Their questions are the pool's and their trials
+    stay out of the lie gallery.
+
+    Writes `trials` (`none`, `reading/0/<s>`, `reading/0/<-s>`),
+    `trials_random` (`random/<k>/<s>` and `random/<k>/<-s>` for each random
+    direction `k`), `table.json`, `table_effects.json` (perplexity of
+    neutral held-out text, unsteered completion fluency, distinct-n, length
+    and empty rate of every arm) and `summary.json`.
 
     Args:
         config: The experiment settings.
@@ -401,14 +536,19 @@ def execute(
         ValueError: If `strength` is not positive, `n_show` is below 1,
             `n_pool` is outside `1..len(facts)`, `n_shots` is outside
             `0..15`, the layers are outside `1..L`, `n_calibration`,
-            `num_samples`, `max_new_tokens` or `batch_size` is below 1, the
-            projection operator has relative coefficients, the Alpaca `test`
-            split is empty, or the emotion run is not usable.
+            `n_neutral`, `n_random`, `num_samples`, `max_new_tokens` or
+            `batch_size` is below 1, the projection operator has relative
+            coefficients, the Alpaca `test` split is empty or has no text
+            left after the calibration texts, or the emotion run is not
+            usable.
     """
     layers = _check_config(config, len(facts), loaded.n_layers)
     settings = GenSettings.from_config(config)
     texts = calibration_texts(
         alpaca, config.n_calibration, seed=derive_seed(config.seed, "norms")
+    )
+    neutral = neutral_texts(
+        alpaca, config, seed=derive_seed(config.seed, "norms")
     )
     chat = chat_format_for(loaded)
     order = np.random.default_rng(derive_seed(config.seed, "pool")).permutation(
@@ -441,11 +581,14 @@ def execute(
     norms = mean_residual_norms(
         loaded, texts, layers, bos=config.bos, batch_size=config.batch_size
     )
-    arms = [plain_arm(loaded, settings)] + [
-        reader_arm(
+
+    def steering_arm(
+        reader: RepReader, label: str, k: int, coeff: float
+    ) -> Arm:
+        return reader_arm(
             loaded,
             settings,
-            sweep.readers[0],
+            reader,
             layers=layers,
             coeff=coeff,
             norms=norms,
@@ -453,12 +596,52 @@ def execute(
             mode=config.mode,
             mask=config.mask,
             preserve_norm=config.preserve_norm,
-            name=f"reading/0/{coeff:g}",
+            name=f"{label}/{k}/{coeff:g}",
         )
-        for coeff in (config.strength, -config.strength)
+
+    strengths = (config.strength, -config.strength)
+    arms = [plain_arm(loaded, settings)] + [
+        steering_arm(sweep.readers[0], "reading", 0, coeff)
+        for coeff in strengths
+    ]
+    random_arms = [
+        steering_arm(reader, RANDOM, k, coeff)
+        for k, reader in enumerate(_random_readers(sweep.readers[0], config))
+        for coeff in strengths
     ]
     none, honest, lie = (fact_trial(arm, prompts, answers) for arm in arms)
+    random_trials = [fact_trial(arm, prompts, answers) for arm in random_arms]
     write_trials(run_dir, "trials", [none, honest, lie])
+    write_trials(run_dir, "trials_random", random_trials)
+    labels: list[tuple[str, float | None, int | None]] = [
+        ("none", None, None),
+        ("reading", strengths[0], 0),
+        ("reading", strengths[1], 0),
+        *(
+            (RANDOM, coeff, k)
+            for k in range(config.n_random)
+            for coeff in strengths
+        ),
+    ]
+    effect_rows = [
+        _effect_row(
+            label,
+            coeff,
+            seed,
+            side_effects(
+                loaded, arm, trial, neutral, batch_size=config.batch_size
+            ),
+        )
+        for (label, coeff, seed), arm, trial in zip(
+            labels,
+            [*arms, *random_arms],
+            [none, honest, lie, *random_trials],
+            strict=True,
+        )
+    ]
+    run_dir.write_json(
+        "table_effects", {"columns": EFFECT_COLUMNS, "rows": effect_rows}
+    )
     rows = lie_rows(none, honest, lie, config.n_show) + emotion_table
     run_dir.write_json("table", {"columns": TABLE_COLUMNS, "rows": rows})
     known = none.scores[:, 0] == 1.0
@@ -473,6 +656,9 @@ def execute(
             "correct_none": _mean_score(none),
             "correct_honest": _mean_score(honest),
             "correct_lie": _mean_score(lie),
+            "n_random": config.n_random,
+            "correct_random_plus": _mean_over_arms(random_trials[0::2]),
+            "correct_random_minus": _mean_over_arms(random_trials[1::2]),
             "n_known": n_known,
             "n_flipped": n_flipped,
             "flip_rate": n_flipped / n_known if n_known else None,

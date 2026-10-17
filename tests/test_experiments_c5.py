@@ -32,6 +32,7 @@ from tomography.experiments.c5_gallery import fact_trial
 from tomography.experiments.c5_gallery import lie_rows
 from tomography.experiments.c5_gallery import plot
 from tomography.experiments.c5_gallery import run
+from tomography.experiments.effects import SideEffects
 from tomography.experiments.effects import read_trials
 from tomography.experiments.effects import write_trials
 from tomography.experiments.steering import Arm
@@ -443,7 +444,8 @@ def _config(**overrides: Any) -> Config:
         n_show=3,
         n_shots=1,
         max_new_tokens=6,
-        n_calibration=8,
+        n_calibration=4,
+        n_neutral=4,
         batch_size=8,
     )
     return dataclasses.replace(base, **overrides)
@@ -467,6 +469,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.n_shots == len(DEFAULT_SHOTS) == 15
     assert (config.num_samples, config.max_new_tokens) == (1, 24)
     assert config.c2_run is None
+    assert config.n_random == 3
     assert Config.from_dict(config.to_dict()) == config
 
 
@@ -498,6 +501,14 @@ NONE_OK = {0, 2, 3, 4, 6, 8, 9, 11, 12}
 HONEST_OK = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13}
 LIE_OK = {0, 3, 5, 6, 12, 13}
 LIE_EMPTY = {2, 9}
+RANDOM_OK = {
+    (0, "+"): {0, 1, 2, 3},
+    (0, "-"): {4, 5},
+    (1, "+"): {6, 7, 8, 9, 10},
+    (1, "-"): set(),
+    (2, "+"): {11},
+    (2, "-"): {0, 12, 13},
+}
 
 
 def _expected_scores(
@@ -534,7 +545,12 @@ def _canned_arm(name: str, correct: set[int], empty: set[int]) -> Arm:
 def _plant(
     monkeypatch: pytest.MonkeyPatch, none_ok: set[int]
 ) -> dict[str, Any]:
-    calls: dict[str, Any] = {"readers": [], "norms": [], "arms": []}
+    calls: dict[str, Any] = {
+        "readers": [],
+        "norms": [],
+        "arms": [],
+        "effects": [],
+    }
 
     def readers(
         loaded: LoadedModel,
@@ -580,12 +596,43 @@ def _plant(
     ) -> Arm:
         calls["arms"].append({"settings": settings, "reader": reader, **kwargs})
         honest = kwargs["coeff"] > 0
+        if kwargs["name"].startswith("random/"):
+            _, k, _ = kwargs["name"].split("/")
+            sign = "+" if honest else "-"
+            return _canned_arm(kwargs["name"], RANDOM_OK[int(k), sign], set())
         return _canned_arm(
             kwargs["name"],
             HONEST_OK if honest else LIE_OK,
             set() if honest else LIE_EMPTY,
         )
 
+    def effects(
+        loaded: LoadedModel,
+        arm: Arm,
+        trial: Trial,
+        neutral: Sequence[str],
+        *,
+        batch_size: int,
+    ) -> SideEffects:
+        i = len(calls["effects"])
+        calls["effects"].append(
+            {
+                "arm": arm.name,
+                "trial": trial.name,
+                "neutral": tuple(neutral),
+                "batch_size": batch_size,
+            }
+        )
+        return SideEffects(
+            perplexity=None if i == 1 else 10.0 + i,
+            fluency=-1.0 - i,
+            distinct_1=0.1 + i / 100,
+            distinct_2=0.2 + i / 100,
+            mean_length=2.0 + i,
+            empty_rate=i / 100,
+        )
+
+    monkeypatch.setattr(c5_gallery, "side_effects", effects)
     monkeypatch.setattr(c5_gallery, "honesty_readers", readers)
     monkeypatch.setattr(c5_gallery, "mean_residual_norms", norms)
     monkeypatch.setattr(c5_gallery, "plain_arm", fake_plain_arm)
@@ -620,6 +667,7 @@ def _forbid_work(monkeypatch: pytest.MonkeyPatch) -> None:
         "mean_residual_norms",
         "plain_arm",
         "reader_arm",
+        "side_effects",
     ):
         monkeypatch.setattr(c5_gallery, name, forbidden)
 
@@ -636,6 +684,9 @@ def _forbid_work(monkeypatch: pytest.MonkeyPatch) -> None:
         ({"layers": (0, 1)}, "layers"),
         ({"layers": (1, 4)}, "layers"),
         ({"n_calibration": 0}, "n must be"),
+        ({"n_random": 0}, "n_random"),
+        ({"n_neutral": 0}, "n_neutral"),
+        ({"n_calibration": 8}, "neutral"),
         ({"num_samples": 0}, "num_samples"),
         ({"max_new_tokens": 0}, "max_new_tokens"),
         ({"batch_size": 0}, "batch_size"),
@@ -651,6 +702,9 @@ def _forbid_work(monkeypatch: pytest.MonkeyPatch) -> None:
         "layer-zero",
         "layer-beyond-depth",
         "no-calibration-texts",
+        "no-random-arm",
+        "no-neutral-texts",
+        "calibration-takes-every-text",
         "no-samples",
         "no-new-tokens",
         "no-batch",
@@ -715,7 +769,7 @@ def test_execute_builds_the_reader_and_the_norms_once(
     assert calls["norms"] == [
         {
             "texts": calibration_texts(
-                _alpaca(), 8, seed=derive_seed(0, "norms")
+                _alpaca(), 4, seed=derive_seed(0, "norms")
             ),
             "layers": layers,
             "bos": "none",
@@ -741,7 +795,7 @@ def test_execute_steers_towards_and_away_from_honesty_with_one_reader(
     settings = GenSettings.from_config(
         _config(strength=0.15, mode="absolute", mask="all")
     )
-    plain, honest, lie = calls["arms"]
+    plain, honest, lie, *_ = calls["arms"]
     assert plain == {"settings": settings}
     for arm, coeff, name in (
         (honest, 0.15, "reading/0/0.15"),
@@ -898,6 +952,183 @@ def test_execute_without_an_emotion_run_has_only_the_lie_gallery(
     assert summary["emotion_strength"] is None
 
 
+def _random_arms(calls: dict[str, Any]) -> list[dict[str, Any]]:
+    return calls["arms"][3:]
+
+
+def test_execute_adds_norm_matched_random_arms_after_the_steering_arms(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, calls = _run_planted(
+        tmp_path,
+        monkeypatch,
+        tiny_gpt2,
+        seed=5,
+        strength=0.15,
+        op="projection",
+        mode="absolute",
+        mask="all",
+        preserve_norm=True,
+    )
+    layers = honesty_layers(tiny_gpt2.n_layers)
+    settings = GenSettings.from_config(
+        _config(seed=5, strength=0.15, mode="absolute", mask="all")
+    )
+    arms = _random_arms(calls)
+    assert [arm["name"] for arm in arms] == [
+        f"random/{k}/{coeff}" for k in range(3) for coeff in ("0.15", "-0.15")
+    ]
+    for arm in arms:
+        coeff = float(arm["name"].split("/")[2])
+        rest = {key: value for key, value in arm.items() if key != "reader"}
+        assert rest == {
+            "settings": settings,
+            "layers": layers,
+            "coeff": coeff,
+            "norms": {layer: 2.0 for layer in layers},
+            "op": "projection",
+            "mode": "absolute",
+            "mask": "all",
+            "preserve_norm": True,
+            "name": arm["name"],
+        }
+
+
+def test_the_random_arms_are_unit_directions_drawn_from_the_seed(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, calls = _run_planted(tmp_path, monkeypatch, tiny_gpt2, seed=7)
+    shape = calls["reader"].directions.shape
+    rng = np.random.default_rng(7)
+    arms = _random_arms(calls)
+    assert len(arms) == 6
+    for k in range(3):
+        draw = rng.standard_normal(shape)
+        expected = draw / np.linalg.norm(draw, axis=1, keepdims=True)
+        for arm in arms[2 * k : 2 * k + 2]:
+            reader = arm["reader"]
+            assert reader.layers == calls["reader"].layers
+            np.testing.assert_allclose(reader.directions, expected, atol=1e-6)
+            np.testing.assert_allclose(
+                np.linalg.norm(reader.directions, axis=1), 1.0, atol=1e-5
+            )
+
+
+def test_n_random_sets_the_number_of_random_arms(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, calls = _run_planted(tmp_path, monkeypatch, tiny_gpt2, n_random=1)
+    assert len(_random_arms(calls)) == 2
+    assert [t.name for t in read_trials(run_dir, "trials_random")] == [
+        "random/0/0.1",
+        "random/0/-0.1",
+    ]
+
+
+def test_execute_stores_the_random_trials_apart_from_the_three(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _run_planted(tmp_path, monkeypatch, tiny_gpt2)
+    chat = chat_format_for(tiny_gpt2)
+    trials = read_trials(run_dir, "trials_random")
+    assert [trial.name for trial in trials] == [
+        f"random/{k}/{coeff}" for k in range(3) for coeff in ("0.1", "-0.1")
+    ]
+    prompts = tuple(fact_prompt(chat, FACTS[i].question, 1) for i in _pool(12))
+    for trial, key in zip(trials, RANDOM_OK, strict=True):
+        assert trial.prompts == prompts
+        np.testing.assert_array_equal(
+            trial.scores[:, 0], _expected_scores(12, RANDOM_OK[key])
+        )
+    assert [t.name for t in read_trials(run_dir, "trials")] == [
+        "none",
+        "reading/0/0.1",
+        "reading/0/-0.1",
+    ]
+
+
+def test_execute_summarizes_the_random_arms_as_a_mean_over_the_arms(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _run_planted(tmp_path, monkeypatch, tiny_gpt2)
+    summary = _read(run_dir, "summary")
+    for key, sign in (
+        ("correct_random_plus", "+"),
+        ("correct_random_minus", "-"),
+    ):
+        arm_means = [
+            np.nanmean(_expected_scores(12, RANDOM_OK[k, sign]))
+            for k in range(3)
+        ]
+        assert summary[key] == pytest.approx(np.mean(arm_means))
+    assert summary["n_random"] == 3
+    assert summary["correct_none"] == pytest.approx(
+        np.nanmean(_expected_scores(12, NONE_OK))
+    )
+
+
+def test_the_random_rows_stay_out_of_the_lie_gallery(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _run_planted(tmp_path, monkeypatch, tiny_gpt2)
+    rows = _read(run_dir, "table")["rows"]
+    assert not any("random" in str(row[2]) for row in rows)
+
+
+EFFECT_COLUMNS = [
+    "arm",
+    "coeff",
+    "seed",
+    "perplexity",
+    "fluency",
+    "distinct_1",
+    "distinct_2",
+    "mean_length",
+    "empty_rate",
+]
+
+
+def test_execute_tables_the_effects_of_every_generated_arm(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _run_planted(tmp_path, monkeypatch, tiny_gpt2)
+    table = _read(run_dir, "table_effects")
+    assert table["columns"] == EFFECT_COLUMNS
+    labels = [
+        ["none", None, None],
+        ["reading", 0.1, 0],
+        ["reading", -0.1, 0],
+        *(["random", coeff, k] for k in range(3) for coeff in (0.1, -0.1)),
+    ]
+    rows = table["rows"]
+    assert [row[:3] for row in rows] == labels
+    for i, row in enumerate(rows):
+        assert row[3] == (None if i == 1 else pytest.approx(10.0 + i))
+        assert row[4:] == pytest.approx(
+            [-1.0 - i, 0.1 + i / 100, 0.2 + i / 100, 2.0 + i, i / 100]
+        )
+
+
+def test_the_effects_are_measured_per_trial_on_disjoint_neutral_texts(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, calls = _run_planted(tmp_path, monkeypatch, tiny_gpt2, batch_size=4)
+    seed = derive_seed(0, "norms")
+    calibration = calibration_texts(_alpaca(), 4, seed=seed)
+    neutral = tuple(calibration_texts(_alpaca(), 8, seed=seed)[4:])
+    assert len(neutral) == 4
+    assert not set(neutral) & set(calibration)
+    assert [call["trial"] for call in calls["effects"]] == [
+        "none",
+        "reading/0/0.1",
+        "reading/0/-0.1",
+        *(f"random/{k}/{coeff}" for k in range(3) for coeff in ("0.1", "-0.1")),
+    ]
+    assert {call["neutral"] for call in calls["effects"]} == {neutral}
+    assert {call["batch_size"] for call in calls["effects"]} == {4}
+    assert calls["norms"][0]["texts"] == calibration
+
+
 def _real_run(
     tmp_path: Path,
     loaded: LoadedModel,
@@ -921,8 +1152,11 @@ def test_execute_writes_the_files_of_the_experiment(
         "meta.json",
         "summary.json",
         "table.json",
+        "table_effects.json",
         "trials.json",
         "trials.npz",
+        "trials_random.json",
+        "trials_random.npz",
     ]
 
 
@@ -1131,3 +1365,15 @@ def test_c5_on_gpt2_small_prints_the_flip_rate(tmp_path: Path) -> None:
         print(row)
     rate = summary["flip_rate"]
     assert rate is None or 0.0 <= rate <= 1.0
+
+
+def test_a_real_run_measures_the_fluency_of_every_arm(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _real_run(tmp_path, tiny_arch, emotions=False)
+    rows = _read(run_dir, "table_effects")["rows"]
+    assert len(rows) == 3 + 2 * 3
+    for row in rows:
+        assert all(isinstance(value, float) for value in row[3:])
+        assert all(np.isfinite(row[3:]))
+        assert row[3] > 1.0
