@@ -1507,3 +1507,390 @@ def test_load_spec_rejects_bad_concurrency_values(
 
     with pytest.raises(ValueError, match=message):
         load_spec(path)
+
+
+def _planned(
+    clock: FakeClock,
+    seconds: Mapping[str, float],
+    codes: Mapping[str, int] | None = None,
+) -> tuple[Callable[[Sequence[str]], Outcome], dict[str, float]]:
+    """Plans an outcome per experiment id and records each launch time."""
+    started: dict[str, float] = {}
+
+    def plan(command: Sequence[str]) -> Outcome:
+        experiment = command[4]
+        started[experiment] = clock.now - 1_700_000_000.0
+        return Outcome(
+            code=(codes or {}).get(experiment, 0),
+            seconds=seconds[experiment],
+        )
+
+    return plan, started
+
+
+def _run_slots(
+    spec: ChainSpec,
+    launcher: FakeLauncher,
+    clock: FakeClock,
+    *,
+    used: Callable[[], int | None] | None = None,
+    free: Callable[[], int | None] | None = None,
+    util: Callable[[], int | None] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    **options: float,
+) -> int:
+    return run_chain(
+        spec,
+        clock=clock,
+        sleep=sleep or clock.sleep,
+        launch=launcher,
+        gpu_query=used or (lambda: None),
+        gpu_free_query=free or (lambda: None),
+        gpu_util_query=util or (lambda: None),
+        **options,
+    )
+
+
+def _slotted(tmp_path: Path, *jobs: Job, **fields: float) -> ChainSpec:
+    values: dict[str, float] = {"slots": 2, "start_gap_seconds": 0}
+    values.update(fields)
+    return dataclasses.replace(_chain(tmp_path, *jobs), **values)
+
+
+def _forbidden_query() -> int | None:
+    pytest.fail("the free memory was read with the gate off")
+
+
+def test_two_independent_jobs_run_at_the_same_time(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(tmp_path, _job("a"), _job("b", experiment="r2"))
+    plan, started = _planned(clock, {"r1": 100, "r2": 100})
+    launcher = FakeLauncher(clock, runs, plan)
+
+    code = _run_slots(spec, launcher, clock, free=_forbidden_query)
+
+    texts = _texts(spec)
+    ends = [t for t in texts if t.startswith("END")]
+    assert code == 0
+    assert started == {"r1": 0, "r2": 0}
+    assert texts.index("START b") < texts.index(ends[0])
+    assert [e.split()[1] for e in ends] == ["a", "b"]
+    assert all(" seconds=100 " in e for e in ends)
+    assert texts[-1] == "CHAIN_DONE failed=0"
+
+
+def test_a_third_job_waits_for_a_free_slot(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(
+        tmp_path,
+        _job("a"),
+        _job("b", experiment="r2"),
+        _job("c", experiment="r3"),
+    )
+    plan, started = _planned(clock, {"r1": 50, "r2": 100, "r3": 10})
+    launcher = FakeLauncher(clock, runs, plan)
+
+    _run_slots(spec, launcher, clock)
+
+    texts = _texts(spec)
+    end_a = next(i for i, t in enumerate(texts) if t.startswith("END a "))
+    end_b = next(i for i, t in enumerate(texts) if t.startswith("END b "))
+    assert started == {"r1": 0, "r2": 0, "r3": 50}
+    assert end_a < texts.index("START c") < end_b
+
+
+def test_a_dependent_job_waits_while_a_later_independent_job_starts(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(
+        tmp_path,
+        _job("a"),
+        _job("b", experiment="r2", run_dir_from={"lorra_run": "a"}),
+        _job("c", experiment="r3"),
+    )
+    plan, started = _planned(clock, {"r1": 100, "r2": 10, "r3": 20})
+    launcher = FakeLauncher(clock, runs, plan)
+
+    _run_slots(spec, launcher, clock)
+
+    texts = _texts(spec)
+    starts = [t for t in texts if t.startswith("START")]
+    assert starts == ["START a", "START c", "START b"]
+    assert started == {"r1": 0, "r3": 0, "r2": 100}
+    assert texts.index("START b") > next(
+        i for i, t in enumerate(texts) if t.startswith("END a ")
+    )
+    assert launcher.sets(2) == [f"lorra_run={runs / 'run1'}"]
+
+
+def test_a_failed_dependency_skips_the_dependent_while_others_run(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(
+        tmp_path,
+        _job("a"),
+        _job("b", experiment="r2", run_dir_from={"lorra_run": "a"}),
+        _job("c", experiment="r3"),
+    )
+    plan, _ = _planned(clock, {"r1": 10, "r2": 10, "r3": 40}, {"r1": 1})
+    launcher = FakeLauncher(clock, runs, plan)
+
+    code = _run_slots(spec, launcher, clock)
+
+    texts = _texts(spec)
+    assert code == 1
+    assert "SKIP b reason=missing:a" in texts
+    assert "START b" not in texts
+    assert any(t.startswith("END c exit=0") for t in texts)
+    assert texts[-1] == "CHAIN_DONE failed=2"
+
+
+def test_a_failed_job_does_not_stop_the_others(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(tmp_path, _job("a"), _job("b", experiment="r2"))
+    plan, _ = _planned(clock, {"r1": 10, "r2": 30}, {"r1": 3})
+    launcher = FakeLauncher(clock, runs, plan)
+
+    code = _run_slots(spec, launcher, clock)
+
+    texts = _texts(spec)
+    assert code == 1
+    assert any(t.startswith("END a exit=3") for t in texts)
+    assert any(t.startswith("END b exit=0") for t in texts)
+    assert texts[-1] == "CHAIN_DONE failed=1"
+
+
+def test_the_retries_of_a_job_run_one_after_another_in_its_slot(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(
+        tmp_path,
+        _job("a", settings={"batch_size": 16}, retry_batch_sizes=(8,)),
+        _job("b", experiment="r2"),
+        _job("c", experiment="r3"),
+    )
+    launcher = FakeLauncher(
+        clock,
+        runs,
+        lambda c: (
+            Outcome(code=1, seconds=10)
+            if "batch_size=16" in c
+            else Outcome(seconds=100 if "r1" in c else 30)
+        ),
+    )
+
+    code = _run_slots(spec, launcher, clock)
+
+    texts = _texts(spec)
+    assert code == 0
+    assert texts.index("RETRY a batch_size=8") < texts.index("START a-b8")
+    assert texts.index("START a-b8") < texts.index("START c")
+    assert any(t.startswith("END a-b8 exit=0") for t in texts)
+
+
+def test_the_gate_holds_a_start_until_enough_memory_is_free(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(
+        tmp_path,
+        _job("a"),
+        _job("b", experiment="r2"),
+        min_free_gpu_mib=5000,
+    )
+    plan, started = _planned(clock, {"r1": 100, "r2": 10})
+    launcher = FakeLauncher(clock, runs, plan)
+
+    def free() -> int:
+        return 8000 if clock.now - 1_700_000_000.0 >= 30 else 1000
+
+    code = _run_slots(spec, launcher, clock, free=free)
+
+    assert code == 0
+    assert started == {"r1": 0, "r2": 30}
+
+
+def test_the_first_job_never_waits_on_the_gate(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(tmp_path, _job("a"), min_free_gpu_mib=5000)
+    plan, started = _planned(clock, {"r1": 10})
+
+    code = _run_slots(
+        spec, FakeLauncher(clock, runs, plan), clock, free=lambda: 0
+    )
+
+    assert code == 0
+    assert started == {"r1": 0}
+
+
+def test_a_failed_gpu_query_holds_the_gate_only_while_a_job_runs(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(
+        tmp_path,
+        _job("a"),
+        _job("b", experiment="r2"),
+        _job("c", experiment="r3"),
+        min_free_gpu_mib=5000,
+    )
+    plan, started = _planned(clock, {"r1": 50, "r2": 30, "r3": 10})
+
+    code = _run_slots(
+        spec, FakeLauncher(clock, runs, plan), clock, free=lambda: None
+    )
+
+    assert code == 0
+    assert started == {"r1": 0, "r2": 50, "r3": 80}
+
+
+def test_the_start_gap_spaces_the_starts(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(
+        tmp_path,
+        _job("a"),
+        _job("b", experiment="r2"),
+        _job("c", experiment="r3"),
+        slots=3,
+        start_gap_seconds=30,
+    )
+    plan, started = _planned(clock, {"r1": 200, "r2": 200, "r3": 200})
+
+    _run_slots(spec, FakeLauncher(clock, runs, plan), clock)
+
+    assert started == {"r1": 0, "r2": 30, "r3": 60}
+
+
+def test_the_start_gap_does_not_delay_a_job_when_none_runs(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(
+        tmp_path,
+        _job("a"),
+        _job("b", experiment="r2"),
+        start_gap_seconds=600,
+    )
+    plan, started = _planned(clock, {"r1": 10, "r2": 10})
+
+    _run_slots(spec, FakeLauncher(clock, runs, plan), clock)
+
+    assert started == {"r1": 0, "r2": 10}
+
+
+def test_an_interrupt_stops_every_running_job(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(tmp_path, _job("a"), _job("b", experiment="r2"))
+    plan, _ = _planned(clock, {"r1": 1000, "r2": 1000})
+    launcher = FakeLauncher(clock, runs, plan)
+    sleeps = 0
+
+    def sleep(seconds: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 3:
+            raise KeyboardInterrupt
+        clock.sleep(seconds)
+
+    code = _run_slots(spec, launcher, clock, sleep=sleep)
+
+    texts = _texts(spec)
+    assert code == 130
+    assert len(launcher.processes) == 2
+    assert all(process.terminated for process in launcher.processes)
+    assert "INTERRUPTED a" in texts
+    assert "INTERRUPTED b" in texts
+    assert texts[-1] == "CHAIN_INTERRUPTED"
+
+
+def test_the_peak_of_a_job_is_the_device_wide_peak_while_it_ran(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(
+        tmp_path,
+        _job("a"),
+        _job("b", experiment="r2"),
+        start_gap_seconds=20,
+    )
+    plan, _ = _planned(clock, {"r1": 100, "r2": 10})
+
+    def used() -> int:
+        elapsed = clock.now - 1_700_000_000.0
+        return 900 if 20 <= elapsed < 30 else 100
+
+    _run_slots(spec, FakeLauncher(clock, runs, plan), clock, used=used)
+
+    ends = {t.split()[1]: t for t in _texts(spec) if t.startswith("END")}
+    assert " peak_gpu=900 " in ends["a"]
+    assert " peak_gpu=900 " in ends["b"]
+
+
+def test_a_heartbeat_reports_the_gpu_utilization(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    launcher = FakeLauncher(clock, runs, lambda c: Outcome(seconds=400))
+
+    _run_slots(
+        spec,
+        launcher,
+        clock,
+        used=lambda: 1234,
+        util=lambda: 87,
+        heartbeat_seconds=300,
+        poll_seconds=5,
+    )
+
+    assert "HEARTBEAT a elapsed=300 gpu_used=1234 gpu_util=87" in _texts(spec)
+
+
+def test_every_running_job_logs_its_own_heartbeat(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(tmp_path, _job("a"), _job("b", experiment="r2"))
+    plan, _ = _planned(clock, {"r1": 400, "r2": 400})
+
+    _run_slots(
+        spec,
+        FakeLauncher(clock, runs, plan),
+        clock,
+        heartbeat_seconds=300,
+        poll_seconds=5,
+    )
+
+    beats = [t for t in _texts(spec) if t.startswith("HEARTBEAT")]
+    assert sorted(beats) == [
+        "HEARTBEAT a elapsed=300 gpu_used=na",
+        "HEARTBEAT b elapsed=300 gpu_used=na",
+    ]
+
+
+def test_make_gpu_queries_read_the_free_memory_and_the_utilization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _fake_smi(monkeypatch, 0, "42\n7\n")
+
+    queries = chain_module.make_gpu_queries()
+
+    assert queries.free() == 42
+    assert queries.util() == 42
+    assert [c[1] for c in calls] == [
+        "--query-gpu=memory.free",
+        "--query-gpu=utilization.gpu",
+    ]
+
+
+def test_make_gpu_queries_are_none_without_nvidia_smi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+    queries = chain_module.make_gpu_queries()
+
+    assert (queries.used(), queries.free(), queries.util()) == (
+        None,
+        None,
+        None,
+    )
