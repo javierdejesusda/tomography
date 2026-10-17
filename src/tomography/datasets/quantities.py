@@ -29,13 +29,37 @@ SideKind = Literal["range", "exact"]
 _PROPERTY_ID = re.compile(r"P\d+")
 _ITEM_ID = re.compile(r"Q\d+")
 _KINDS = ("range", "exact")
+_ENTITY_URI = "http://www.wikidata.org/entity/"
+_SECONDS_PER_DAY = 86400.0
 _TOLERANCE = 1e-9
 
 MIN_RANGE_RELATIVE_WIDTH = 0.10
 MAX_EXACT_RELATIVE_HALF_WIDTH = 0.01
 DECIMALS = 2
 DEFAULT_MIN_SITELINKS = 5
-QUERY_ROWS_PER_ITEM = 4
+QUERY_ROWS_PER_ITEM = 8
+
+LENGTH_UNITS: Mapping[str, float] = {
+    "Q11573": 1.0,
+    "Q174728": 0.01,
+    "Q174789": 0.001,
+    "Q828224": 1000.0,
+    "Q3710": 0.3048,
+    "Q218593": 0.0254,
+}
+TIME_UNITS: Mapping[str, float] = {
+    "Q11574": 1.0,
+    "Q7727": 60.0,
+    "Q25235": 3600.0,
+    "Q573": _SECONDS_PER_DAY,
+    "Q23387": 7 * _SECONDS_PER_DAY,
+    "Q5151": 30.4375 * _SECONDS_PER_DAY,
+    "Q577": 365.25 * _SECONDS_PER_DAY,
+}
+UNITS: Mapping[str, Mapping[str, float]] = {
+    "length": LENGTH_UNITS,
+    "time": TIME_UNITS,
+}
 
 
 @dataclass(frozen=True)
@@ -49,16 +73,30 @@ class Side:
         classes: Item ids of the direct P31 classes the entities belong to.
         template: Question text with an "{entity}" slot.
         unit: Word for the unit used in the question.
-        scale: Factor from the normalized SI value to the question unit.
+        scale: Factor from the SI base unit of `dimension` (metre or
+            second) to the question unit.
         taxon: True if the entities are taxa, whose scientific names are
             fetched so that items named by them can be dropped.
+        dimension: "length" or "time": which table of unit item ids
+            (`LENGTH_UNITS`, `TIME_UNITS`, factors to metres or seconds)
+            converts the statement's own unit. A statement in another unit
+            is dropped.
+        exclude_classes: Item ids of direct P31 classes whose entities are
+            left out, such as aircraft families in a pool of aircraft
+            models.
+        union_statements: If True, an entity's several best-rank
+            statements are not ambiguous: its answer is the union of them
+            (the lowest low to the highest high). Only for a range side
+            whose entities give one statement per sex or variety, as dog
+            breed heights do.
         query_min_sitelinks: If positive, the query itself keeps only
             entities with at least this many sitelinks. A class with
             hundreds of thousands of statements (films) times out on the
             public service without it.
 
     Raises:
-        ValueError: If `kind` is not "range" or "exact" or
+        ValueError: If `kind` is not "range" or "exact", `dimension` is
+            unknown, `union_statements` is set on an exact side or
             `query_min_sitelinks` is negative.
     """
 
@@ -69,10 +107,17 @@ class Side:
     unit: str
     scale: float
     taxon: bool = False
+    dimension: str = "length"
+    exclude_classes: tuple[str, ...] = ()
+    union_statements: bool = False
     query_min_sitelinks: int = 0
 
     def __post_init__(self) -> None:
-        """Validates the kind and the query floor."""
+        """Validates the kind, dimension, union and query floor."""
+        if self.dimension not in UNITS:
+            raise ValueError(f"unknown dimension {self.dimension!r}")
+        if self.union_statements and self.kind != "range":
+            raise ValueError("union_statements applies to a range side only")
         if self.query_min_sitelinks < 0:
             raise ValueError(
                 "query_min_sitelinks must not be negative, got "
@@ -101,6 +146,26 @@ class Family:
 
 FAMILIES: tuple[Family, ...] = (
     Family(
+        name="height",
+        range_side=Side(
+            kind="range",
+            prop="P2048",
+            classes=("Q39367",),
+            template="How tall is a {entity}, in centimetres?",
+            unit="centimetres",
+            scale=100.0,
+            union_statements=True,
+        ),
+        exact_side=Side(
+            kind="exact",
+            prop="P2048",
+            classes=("Q11303", "Q12518", "Q18142"),
+            template="How tall is the {entity}, in metres?",
+            unit="metres",
+            scale=1.0,
+        ),
+    ),
+    Family(
         name="wingspan",
         range_side=Side(
             kind="range",
@@ -114,7 +179,8 @@ FAMILIES: tuple[Family, ...] = (
         exact_side=Side(
             kind="exact",
             prop="P2050",
-            classes=("Q15056993", "Q15056995"),
+            classes=("Q15056995",),
+            exclude_classes=("Q15056993",),
             template="What is the wingspan of the {entity}, in metres?",
             unit="metres",
             scale=1.0,
@@ -132,6 +198,7 @@ FAMILIES: tuple[Family, ...] = (
             unit="days",
             scale=1 / 86400,
             taxon=True,
+            dimension="time",
         ),
         exact_side=Side(
             kind="exact",
@@ -140,6 +207,7 @@ FAMILIES: tuple[Family, ...] = (
             template="How long is the film {entity}, in minutes?",
             unit="minutes",
             scale=1 / 60,
+            dimension="time",
             query_min_sitelinks=20,
         ),
     ),
@@ -186,9 +254,10 @@ class QuantityQuestion:
 def side_query(side: Side, *, limit: int) -> str:
     """Builds the query for one side's entities and normalized quantities.
 
-    Values are the normalized (`psn:`) quantities, so every statement is in
-    SI units whatever unit its editor used. Only best-rank statements are
-    returned; one entity with several of them gives several rows.
+    Values are the statement's own (`psv:`) amount, bounds and unit, not
+    the normalized SI value, whose bounds Wikidata rounds to about two
+    significant figures. Only best-rank statements are returned; one entity
+    with several of them gives several rows.
 
     Args:
         side: The side to query.
@@ -196,12 +265,13 @@ def side_query(side: Side, *, limit: int) -> str:
 
     Returns:
         A SPARQL query with the variables item, itemLabel, links, st,
-        amount, lower, upper and, for a taxon side, taxonName. Bounds are
+        amount, unit, lower, upper and, for a taxon side, taxonName. Bounds are
         unbound when the statement has none. Labels are English, falling
         back to the language-neutral `mul` label.
 
     Raises:
-        ValueError: If the property or a class is not an id, no class is
+        ValueError: If the property or a (kept or excluded) class is not an
+            id, no class is
             given or `limit` is below 1.
     """
     prop = side.prop
@@ -217,7 +287,7 @@ def side_query(side: Side, *, limit: int) -> str:
         if side.query_min_sitelinks
         else []
     )
-    variables = "?item ?itemLabel ?links ?st ?amount ?lower ?upper"
+    variables = "?item ?itemLabel ?links ?st ?amount ?unit ?lower ?upper"
     lines = [
         f"SELECT {variables}{' ?taxonName' if side.taxon else ''} WHERE {{",
         f"  VALUES ?class {{ {values} }}",
@@ -225,11 +295,18 @@ def side_query(side: Side, *, limit: int) -> str:
         "        wikibase:sitelinks ?links ;",
         f"        p:{prop} ?st .",
         *floor,
-        f"  ?st a wikibase:BestRank ; psn:{prop} ?v .",
-        "  ?v wikibase:quantityAmount ?amount .",
+        f"  ?st a wikibase:BestRank ; psv:{prop} ?v .",
+        "  ?v wikibase:quantityAmount ?amount ;",
+        "     wikibase:quantityUnit ?unit .",
         "  OPTIONAL { ?v wikibase:quantityLowerBound ?lower ;"
         " wikibase:quantityUpperBound ?upper . }",
     ]
+    if side.exclude_classes:
+        excluded = " ".join(f"wd:{_item_id(c)}" for c in side.exclude_classes)
+        lines.append(
+            f"  FILTER NOT EXISTS {{ VALUES ?excluded {{ {excluded} }}"
+            " ?item wdt:P31 ?excluded }"
+        )
     if side.taxon:
         lines.append("  OPTIONAL { ?item wdt:P225 ?taxonName }")
     lines += [
@@ -254,22 +331,29 @@ def parse_side(
     side: Side,
     min_sitelinks: int,
     seed: int = 0,
+    row_limit: int | None = None,
 ) -> list[QuantityQuestion]:
     """Turns one side's query rows into questions.
 
     An entity is dropped for: more than one best-rank statement (the value
-    is ambiguous, for example heights by sex); fewer than `min_sitelinks`
-    sitelinks; a missing label or a label that is just its item id; for a
-    taxon side, a label equal to its scientific name (compared ignoring
-    case), so only common names remain. A range statement must have bounds
-    with lower < upper, the amount inside them and a relative width
-    (upper - lower) / amount of at least `MIN_RANGE_RELATIVE_WIDTH`;
-    narrower bounds are measurement precision, not a population range. An
-    exact statement must have no bounds or a relative half-width of at most
-    `MAX_EXACT_RELATIVE_HALF_WIDTH`, and then low = high = amount. Values
-    are multiplied by the side's `scale` and rounded to `DECIMALS` places.
-    The split comes from the family, uid and seed alone, so an item keeps
-    its split when other rows change.
+    is ambiguous, for example heights by sex), unless the side sets
+    `union_statements`; fewer than `min_sitelinks` sitelinks; a missing
+    label or a label that is just its item id; for a taxon side, a label
+    equal to its scientific name (compared ignoring case), so only common
+    names remain; a statement without a unit in the side's table
+    (`LENGTH_UNITS` or `TIME_UNITS`) or with a non-positive amount.
+
+    A range statement must have bounds with lower < upper, the amount
+    inside them and a relative width (upper - lower) / amount of at least
+    `MIN_RANGE_RELATIVE_WIDTH`; narrower bounds are measurement precision,
+    not a population range. With `union_statements`, each statement
+    contributes its bounds (or its amount, if it has none), the answer runs
+    from the lowest low to the highest high, and the relative width is taken
+    over the midpoint. An exact statement must have no bounds or a relative
+    half-width of at most `MAX_EXACT_RELATIVE_HALF_WIDTH`, and then low =
+    high = amount. Values are converted from the statement's own unit and
+    rounded to `DECIMALS` places. The split comes from the family, uid and
+    seed alone, so an item keeps its split when other rows change.
 
     Args:
         result: Rows from `side_query`.
@@ -277,23 +361,29 @@ def parse_side(
         side: The side the rows belong to.
         min_sitelinks: Smallest sitelink count kept.
         seed: Changes the split assignment.
+        row_limit: The LIMIT the query had. If the result reached it, the
+            last entity may have lost some of its statements and is dropped.
 
     Returns:
         The kept questions, most linked first, ties by item id number.
     """
-    entities: dict[str, list[Mapping[str, str]]] = {}
+    entities: dict[str, dict[str, Mapping[str, str]]] = {}
     for row in result.rows:
-        entities.setdefault(row["item"].rsplit("/", 1)[-1], []).append(row)
+        statements = entities.setdefault(_entity_id(row), {})
+        statements.setdefault(row["st"], row)
+    if row_limit is not None and len(result.rows) >= row_limit:
+        entities.pop(_entity_id(result.rows[-1]), None)
     kept: list[tuple[str, Mapping[str, str], tuple[float, float]]] = []
-    for entity_id, rows in entities.items():
-        if len({row["st"] for row in rows}) > 1:
-            continue
+    for entity_id, statements in entities.items():
+        rows = list(statements.values())
         first = rows[0]
+        if len(rows) > 1 and not side.union_statements:
+            continue
         if int(first["links"]) < min_sitelinks:
             continue
-        if not _has_common_name(entity_id, rows, side):
+        if not _has_common_name(rows, side):
             continue
-        interval = _interval(first, side)
+        interval = _interval(rows, side)
         if interval is not None:
             kept.append((entity_id, first, interval))
     kept.sort(key=lambda entry: (-int(entry[1]["links"]), int(entry[0][1:])))
@@ -321,9 +411,11 @@ def parse_side(
     ]
 
 
-def _has_common_name(
-    entity_id: str, rows: list[Mapping[str, str]], side: Side
-) -> bool:
+def _entity_id(row: Mapping[str, str]) -> str:
+    return row["item"].rsplit("/", 1)[-1]
+
+
+def _has_common_name(rows: list[Mapping[str, str]], side: Side) -> bool:
     label = rows[0].get("itemLabel", "")
     if not label or _ITEM_ID.fullmatch(label):
         return False
@@ -335,18 +427,40 @@ def _has_common_name(
     return True
 
 
-def _interval(row: Mapping[str, str], side: Side) -> tuple[float, float] | None:
+def _in_base_unit(
+    row: Mapping[str, str], side: Side
+) -> tuple[float, float | None, float | None] | None:
+    """Returns (amount, lower, upper) in metres or seconds, or None."""
+    unit = row.get("unit", "")
+    if not unit.startswith(_ENTITY_URI):
+        return None
+    factor = UNITS[side.dimension].get(unit[len(_ENTITY_URI) :])
     amount = float(row["amount"])
-    if amount <= 0:
+    if factor is None or amount <= 0:
         return None
-    if "lower" in row and "upper" in row:
-        lower, upper = float(row["lower"]), float(row["upper"])
-    elif "lower" in row or "upper" in row:
+    if ("lower" in row) != ("upper" in row):
         return None
-    elif side.kind == "exact":
-        return amount, amount
-    else:
+    if "lower" not in row:
+        return amount * factor, None, None
+    return (
+        amount * factor,
+        float(row["lower"]) * factor,
+        float(row["upper"]) * factor,
+    )
+
+
+def _interval(
+    rows: list[Mapping[str, str]], side: Side
+) -> tuple[float, float] | None:
+    values = [_in_base_unit(row, side) for row in rows]
+    points = [value for value in values if value is not None]
+    if len(points) < len(values):
         return None
+    if side.union_statements:
+        return _union(points)
+    amount, lower, upper = points[0]
+    if lower is None or upper is None:
+        return (amount, amount) if side.kind == "exact" else None
     if side.kind == "range":
         inside = lower <= amount <= upper
         wide = (upper - lower) / amount >= MIN_RANGE_RELATIVE_WIDTH - _TOLERANCE
@@ -355,6 +469,25 @@ def _interval(row: Mapping[str, str], side: Side) -> tuple[float, float] | None:
     if half <= MAX_EXACT_RELATIVE_HALF_WIDTH + _TOLERANCE:
         return amount, amount
     return None
+
+
+def _union(
+    points: list[tuple[float, float | None, float | None]],
+) -> tuple[float, float] | None:
+    lows, highs = [], []
+    for amount, lower, upper in points:
+        if lower is not None and upper is not None:
+            if not lower <= amount <= upper:
+                return None
+            lows.append(lower)
+            highs.append(upper)
+        else:
+            lows.append(amount)
+            highs.append(amount)
+    low, high = min(lows), max(highs)
+    midpoint = (low + high) / 2
+    wide = (high - low) / midpoint >= MIN_RANGE_RELATIVE_WIDTH - _TOLERANCE
+    return (low, high) if low < high and wide else None
 
 
 def load_quantities(
@@ -423,6 +556,7 @@ def load_quantities(
                     side=side,
                     min_sitelinks=min_sitelinks,
                     seed=seed,
+                    row_limit=limit,
                 )
             )
         keep = min(n_per_side, *(len(side) for side in sides))

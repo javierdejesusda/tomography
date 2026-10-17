@@ -25,13 +25,17 @@ def _side(**overrides: object) -> Side:
     return Side(**fields)  # type: ignore[arg-type]
 
 
-def test_side_query_asks_for_normalized_best_rank_values() -> None:
+def test_side_query_asks_for_original_best_rank_values_with_their_unit() -> (
+    None
+):
     query = quantities.side_query(_side(), limit=50)
 
     assert "p:P2048 ?st" in query
     assert "?st a wikibase:BestRank" in query
-    assert "psn:P2048 ?v" in query
+    assert "psv:P2048 ?v" in query
+    assert "psn:" not in query
     assert "wikibase:quantityAmount ?amount" in query
+    assert "wikibase:quantityUnit ?unit" in query
     assert "wikibase:quantityLowerBound ?lower" in query
     assert "wikibase:quantityUpperBound ?upper" in query
     assert "wd:Q39367" in query
@@ -98,6 +102,30 @@ def test_side_query_filters_by_links_only_when_asked() -> None:
     assert "FILTER(?links >= 20)" in floor
 
 
+def test_side_query_excludes_classes_only_when_asked() -> None:
+    plain = quantities.side_query(_side(), limit=5)
+    excl = quantities.side_query(
+        _side(exclude_classes=("Q15056993", "Q1")), limit=5
+    )
+
+    assert "NOT EXISTS" not in plain
+    assert "FILTER NOT EXISTS" in excl
+    assert "VALUES ?excluded { wd:Q15056993 wd:Q1 }" in excl
+    assert "?item wdt:P31 ?excluded" in excl
+
+
+def test_side_query_rejects_a_bad_excluded_class() -> None:
+    with pytest.raises(ValueError, match="item id"):
+        quantities.side_query(_side(exclude_classes=("x",)), limit=5)
+
+
+def test_side_rejects_an_unknown_dimension_and_an_exact_union() -> None:
+    with pytest.raises(ValueError, match="dimension"):
+        _side(dimension="mass")
+    with pytest.raises(ValueError, match="union"):
+        _side(kind="exact", union_statements=True)
+
+
 def test_side_rejects_a_negative_query_floor() -> None:
     with pytest.raises(ValueError, match="query_min_sitelinks"):
         _side(query_min_sitelinks=-1)
@@ -136,7 +164,16 @@ TAXON = _side(
     unit="days",
     scale=1 / 86400,
     taxon=True,
+    dimension="time",
 )
+DOG = _side(union_statements=True)
+
+METRE = "http://www.wikidata.org/entity/Q11573"
+SECOND = "http://www.wikidata.org/entity/Q11574"
+
+
+def _unit(qid: str) -> str:
+    return f"http://www.wikidata.org/entity/{qid}"
 
 
 def _row(
@@ -149,7 +186,9 @@ def _row(
     lower: float | None = 0.4,
     upper: float | None = 0.6,
     taxon_name: str | None = None,
+    unit: str | None = None,
 ) -> dict[str, str]:
+    default_unit = METRE if taxon_name is None else SECOND
     row = {
         "item": f"http://www.wikidata.org/entity/Q{number}",
         "itemLabel": f"Thing {number}" if label is None else label,
@@ -159,6 +198,7 @@ def _row(
             f"Q{number}-{statement or 'a'}"
         ),
         "amount": str(amount),
+        "unit": default_unit if unit is None else unit,
     }
     if lower is not None:
         row["lower"] = str(lower)
@@ -226,11 +266,195 @@ def test_parse_side_converts_seconds_to_days_and_rounds() -> None:
         upper=66.123456 * day,
         taxon_name="Canis lupus",
         label="wolf",
+        unit=SECOND,
     )
 
     (item,) = _parse([row], TAXON)
 
     assert (item.low, item.high) == (58.0, 66.12)
+
+
+@pytest.mark.parametrize(
+    ("qid", "factor"),
+    [
+        ("Q11573", 1.0),
+        ("Q174728", 0.01),
+        ("Q174789", 0.001),
+        ("Q828224", 1000.0),
+        ("Q3710", 0.3048),
+        ("Q218593", 0.0254),
+    ],
+)
+def test_parse_side_converts_each_length_unit_to_the_question_unit(
+    qid: str, factor: float
+) -> None:
+    row = _row(1, amount=100.0, lower=80.0, upper=120.0, unit=_unit(qid))
+
+    (item,) = _parse([row])
+
+    expected = (round(80 * factor * 100, 2), round(120 * factor * 100, 2))
+    assert (item.low, item.high) == expected
+
+
+@pytest.mark.parametrize(
+    ("qid", "days"),
+    [
+        ("Q11574", 1 / 86400),
+        ("Q7727", 1 / 1440),
+        ("Q25235", 1 / 24),
+        ("Q573", 1.0),
+        ("Q23387", 7.0),
+        ("Q5151", 30.4375),
+        ("Q577", 365.25),
+    ],
+)
+def test_parse_side_converts_each_time_unit_to_days(
+    qid: str, days: float
+) -> None:
+    row = _row(
+        1,
+        amount=100.0,
+        lower=80.0,
+        upper=120.0,
+        unit=_unit(qid),
+        taxon_name="x",
+    )
+
+    (item,) = _parse([row], TAXON)
+
+    assert (item.low, item.high) == (
+        round(80 * days, 2),
+        round(120 * days, 2),
+    )
+
+
+def test_parse_side_keeps_the_original_bounds_exactly() -> None:
+    row = _row(
+        1,
+        amount=130.0,
+        lower=97.0,
+        upper=163.0,
+        unit=_unit("Q573"),
+        taxon_name="x",
+    )
+
+    (item,) = _parse([row], TAXON)
+
+    assert (item.low, item.high) == (97.0, 163.0)
+
+
+@pytest.mark.parametrize("unit", ["Q99999", "Q573", "", "not a uri"])
+def test_parse_side_drops_a_statement_in_an_unknown_unit(unit: str) -> None:
+    assert _parse([_row(1, unit=unit)]) == []
+
+
+def test_parse_side_drops_a_statement_without_a_unit() -> None:
+    row = _row(1)
+    del row["unit"]
+
+    assert _parse([row]) == []
+
+
+def test_parse_side_counts_a_statement_in_an_unknown_unit_as_ambiguity() -> (
+    None
+):
+    rows = [
+        _row(1, statement="a"),
+        _row(1, statement="b", unit=_unit("Q99999")),
+    ]
+
+    assert _parse(rows) == []
+
+
+def test_parse_side_exact_converts_feet() -> None:
+    row = _row(1, amount=1000.0, lower=None, upper=None, unit=_unit("Q3710"))
+
+    (item,) = _parse([row], EXACT)
+
+    assert (item.low, item.high) == (304.8, 304.8)
+
+
+def test_parse_side_union_spans_every_statement() -> None:
+    rows = [
+        _row(1, statement="a", amount=0.60, lower=None, upper=None),
+        _row(1, statement="b", amount=0.50, lower=0.48, upper=0.52),
+        _row(1, statement="c", amount=0.66, lower=0.64, upper=0.68),
+    ]
+
+    (item,) = _parse(rows, DOG)
+
+    assert (item.low, item.high) == (48.0, 68.0)
+
+
+def test_parse_side_union_needs_ten_percent_of_the_midpoint() -> None:
+    wide = [
+        _row(1, statement="a", amount=0.50, lower=None, upper=None),
+        _row(1, statement="b", amount=0.60, lower=None, upper=None),
+    ]
+    narrow = [
+        _row(2, statement="a", amount=0.50, lower=None, upper=None),
+        _row(2, statement="b", amount=0.52, lower=None, upper=None),
+    ]
+
+    assert [i.entity_id for i in _parse(wide + narrow, DOG)] == ["Q1"]
+
+
+def test_parse_side_union_takes_a_single_bounded_statement() -> None:
+    (item,) = _parse([_row(1, amount=0.5, lower=0.4, upper=0.6)], DOG)
+
+    assert (item.low, item.high) == (40.0, 60.0)
+
+
+def test_parse_side_union_drops_an_entity_with_any_unusable_statement() -> None:
+    rows = [
+        _row(1, statement="a", amount=0.5, lower=None, upper=None),
+        _row(1, statement="b", amount=0.7, lower=None, upper=None, unit="x"),
+        _row(2, statement="a", amount=0.5, lower=0.6, upper=0.7),
+        _row(2, statement="b", amount=0.9, lower=None, upper=None),
+        _row(3, statement="a", amount=0.0, lower=None, upper=None),
+        _row(3, statement="b", amount=0.9, lower=None, upper=None),
+    ]
+
+    assert _parse(rows, DOG) == []
+
+
+def test_parse_side_union_still_filters_popularity_and_labels() -> None:
+    rows = [
+        _row(1, links=2, statement="a", amount=0.3, lower=None, upper=None),
+        _row(1, links=2, statement="b", amount=0.6, lower=None, upper=None),
+        _row(2, label="Q2", statement="a", amount=0.3, lower=None, upper=None),
+        _row(2, label="Q2", statement="b", amount=0.6, lower=None, upper=None),
+    ]
+
+    assert _parse(rows, DOG) == []
+
+
+def test_parse_side_drops_the_entity_a_full_limit_may_have_cut() -> None:
+    rows = [
+        _row(1, links=30),
+        _row(2, links=20, statement="a"),
+        _row(2, links=20, statement="b"),
+        _row(3, links=10, statement="a"),
+    ]
+    result = _result(rows)
+
+    kept = quantities.parse_side(
+        result,
+        family="height",
+        side=RANGE,
+        min_sitelinks=1,
+        row_limit=4,
+    )
+    all_kept = quantities.parse_side(
+        result,
+        family="height",
+        side=RANGE,
+        min_sitelinks=1,
+        row_limit=5,
+    )
+
+    assert [i.entity_id for i in kept] == ["Q1"]
+    assert [i.entity_id for i in all_kept] == ["Q1", "Q3"]
 
 
 def test_parse_side_drops_an_entity_with_two_best_rank_statements() -> None:
@@ -274,7 +498,9 @@ def test_parse_side_drops_a_taxon_labelled_by_its_scientific_name() -> None:
 
 
 def test_parse_side_keeps_a_taxon_without_a_scientific_name() -> None:
-    assert [i.entity_id for i in _parse([_row(1, label="ox")], TAXON)] == ["Q1"]
+    assert [
+        i.entity_id for i in _parse([_row(1, label="ox", unit=SECOND)], TAXON)
+    ] == ["Q1"]
 
 
 def test_parse_side_range_needs_bounds() -> None:
@@ -493,7 +719,7 @@ def test_load_quantities_returns_items_sorted_by_uid(tmp_path: Path) -> None:
     assert len({i.uid for i in items}) == len(items)
 
 
-def test_load_quantities_asks_for_four_times_n_rows_per_side(
+def test_load_quantities_asks_for_eight_times_n_rows_per_side(
     tmp_path: Path,
 ) -> None:
     fetch = _endpoint(8, 8)
@@ -501,7 +727,7 @@ def test_load_quantities_asks_for_four_times_n_rows_per_side(
     _load(fetch, tmp_path, n_per_side=7)
 
     assert len(fetch.queries) == 2
-    assert all(q.rstrip().endswith("LIMIT 28") for q in fetch.queries)
+    assert all(q.rstrip().endswith("LIMIT 56") for q in fetch.queries)
 
 
 def test_load_quantities_covers_every_family(tmp_path: Path) -> None:
@@ -574,3 +800,40 @@ def test_load_quantities_rejects_a_bad_n_and_no_families(
         _load(_endpoint(8, 8), tmp_path, n_per_side=0)
     with pytest.raises(ValueError, match="families"):
         _load(_endpoint(8, 8), tmp_path, families=())
+
+
+def _default(name: str) -> Family:
+    return next(f for f in quantities.FAMILIES if f.name == name)
+
+
+def test_default_families_are_height_wingspan_and_duration() -> None:
+    assert [f.name for f in quantities.FAMILIES] == [
+        "height",
+        "wingspan",
+        "duration",
+    ]
+
+
+def test_the_wingspan_exact_side_is_aircraft_models_without_families() -> None:
+    side = _default("wingspan").exact_side
+
+    assert side.classes == ("Q15056995",)
+    assert side.exclude_classes == ("Q15056993",)
+
+
+def test_only_the_height_range_side_unions_statements() -> None:
+    unions = [
+        (f.name, s.kind)
+        for f in quantities.FAMILIES
+        for s in (f.range_side, f.exact_side)
+        if s.union_statements
+    ]
+
+    assert unions == [("height", "range")]
+    assert _default("height").range_side.classes == ("Q39367",)
+
+
+def test_time_families_convert_from_time_units() -> None:
+    assert _default("duration").range_side.dimension == "time"
+    assert _default("duration").exact_side.dimension == "time"
+    assert _default("height").exact_side.dimension == "length"
