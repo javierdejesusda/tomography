@@ -24,6 +24,7 @@ Preprocess = Literal["center", "unit", "none"]
 
 _METHODS = get_args(Method)
 _PREPROCESSES = get_args(Preprocess)
+_FAINT_TOL = 1e-10
 
 
 @dataclass(frozen=True, eq=False)
@@ -65,6 +66,9 @@ def fit_direction(
             coefficients of an L2-regularized logistic regression; both need
             `labels`. The regression runs on rows divided by one global
             scalar, so the penalty does not depend on the activation scale.
+            When the solver stops at its start with all-zero coefficients
+            because the gradient there is under its tolerance, the fit is
+            repeated with a tighter one.
             `kmeans` is the centroid difference of a two-cluster K-means and
             `random` a Gaussian draw from `seed`; neither reads labels.
         h: Activations of shape (n, d).
@@ -176,7 +180,12 @@ def _logistic_coefficients(
     scale = float(np.linalg.norm(rows) / np.sqrt(rows.shape[0]))
     if scale == 0.0:
         raise ValueError("the fitted direction has zero norm")
-    model = LogisticRegression(max_iter=1000).fit(rows / scale, positive)
+    scaled = rows / scale
+    model = LogisticRegression(max_iter=1000).fit(scaled, positive)
+    if not model.coef_.any():
+        model = LogisticRegression(max_iter=1000, tol=_FAINT_TOL).fit(
+            scaled, positive
+        )
     return np.asarray(model.coef_[0], dtype=np.float64) / scale
 
 
