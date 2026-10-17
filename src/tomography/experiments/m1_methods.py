@@ -133,6 +133,11 @@ class Config(SteeringConfig):
         position: Token positions read.
         truncate_words: Words of a test scenario kept as a prompt.
         n_termination: Test pairs of the behavioral termination gap.
+        fluency: When True, M1 measures the fluency and side effects of every
+            steered trial (neutral perplexity and completion fluency) and
+            writes `table_effects`. When False it skips those extra passes
+            and writes no `table_effects`, so the run costs what it did
+            without them.
     """
 
     experiment: str = "m1"
@@ -150,6 +155,7 @@ class Config(SteeringConfig):
     n_termination: int = 100
     n_prompts: int = 250
     num_samples: int = 1
+    fluency: bool = True
 
 
 @dataclass(frozen=True)
@@ -712,14 +718,15 @@ def _manipulate(
     sweeps: dict[Method, SweepResult],
     prompts: Sequence[str],
     strengths: tuple[float, ...],
-    neutral: Sequence[str],
+    neutral: Sequence[str] | None,
 ) -> _Manipulation:
     """Steers with the first readers of each method and tallies successes.
 
     A prompt is a success for a strength and a judge when its score under
     the positive coefficient is strictly above its score under the negative
     one. The side effects of every steered trial are measured on the arm
-    that produced it, with `neutral` as the held-out text of the perplexity.
+    that produced it, with `neutral` as the held-out text of the perplexity;
+    with `neutral` None nothing is measured and no effect row is made.
     """
     config = ctx.config
     methods = config.methods
@@ -743,21 +750,22 @@ def _manipulate(
                 columns=len(_JUDGES),
             )
             by_coeff = dict(zip(signed, dose.trials, strict=True))
-            effect_rows.extend(
-                _effect_row(
-                    method,
-                    i,
-                    coeff,
-                    side_effects(
-                        ctx.loaded,
-                        arms[coeff],
-                        trial,
-                        neutral,
-                        batch_size=config.batch_size,
-                    ),
+            if neutral is not None:
+                effect_rows.extend(
+                    _effect_row(
+                        method,
+                        i,
+                        coeff,
+                        side_effects(
+                            ctx.loaded,
+                            arms[coeff],
+                            trial,
+                            neutral,
+                            batch_size=config.batch_size,
+                        ),
+                    )
+                    for coeff, trial in by_coeff.items()
                 )
-                for coeff, trial in by_coeff.items()
-            )
             trials.extend(
                 dataclasses.replace(trial, name=f"{method}/{i}/{coeff:g}")
                 for coeff, trial in by_coeff.items()
@@ -959,10 +967,11 @@ def execute(
 
     Writes `curves`, `curves_val`, `curves_success`, `curves_success_check`,
     `trials`, `trials_termination`, `table`, `table_seeds`, `table_effects`
-    and `summary`. `table_effects` holds the side effects of the unsteered
-    arm and of every method, seed and coefficient trial: neutral perplexity
-    of the steered model, completion fluency under the unsteered model,
-    distinct-1 and distinct-2, mean length and empty rate.
+    (only when `config.fluency`) and `summary`. `table_effects` holds the
+    side effects of the unsteered arm and of every method, seed and
+    coefficient trial: neutral perplexity of the steered model, completion
+    fluency under the unsteered model, distinct-1 and distinct-2, mean length
+    and empty rate.
 
     Args:
         config: The experiment settings.
@@ -1006,12 +1015,15 @@ def execute(
     prompts = _prompts(config, checked.scenarios)
     plain = plain_arm(loaded, ctx.settings, name="none")
     none = run_trial(plain, prompts, score, columns=len(_JUDGES))
-    none_effects = side_effects(
-        loaded, plain, none, held.neutral, batch_size=config.batch_size
+    neutral = held.neutral if config.fluency else None
+    none_effects = (
+        None
+        if neutral is None
+        else side_effects(
+            loaded, plain, none, neutral, batch_size=config.batch_size
+        )
     )
-    manipulation = _manipulate(
-        ctx, reading.sweeps, prompts, strengths, held.neutral
-    )
+    manipulation = _manipulate(ctx, reading.sweeps, prompts, strengths, neutral)
     termination = _terminate(ctx, reading, pleasant, unpleasant)
 
     for j, (stem, ylabel) in enumerate(_SUCCESS_CURVES):
@@ -1040,16 +1052,17 @@ def execute(
         "table_seeds",
         {"columns": list(_SEED_COLUMNS), "rows": manipulation.seed_rows},
     )
-    run_dir.write_json(
-        "table_effects",
-        {
-            "columns": list(_EFFECT_COLUMNS),
-            "rows": [
-                _effect_row("none", None, 0.0, none_effects),
-                *manipulation.effect_rows,
-            ],
-        },
-    )
+    if none_effects is not None:
+        run_dir.write_json(
+            "table_effects",
+            {
+                "columns": list(_EFFECT_COLUMNS),
+                "rows": [
+                    _effect_row("none", None, 0.0, none_effects),
+                    *manipulation.effect_rows,
+                ],
+            },
+        )
     run_dir.write_json(
         "summary",
         {

@@ -345,6 +345,9 @@ FILES = sorted(
 )
 
 
+FILES_WITHOUT_EFFECTS = [f for f in FILES if f != "table_effects.json"]
+
+
 def _utility(
     n_pairs: int = 60, *, shared_openings: bool = False
 ) -> list[Example]:
@@ -528,6 +531,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.n_termination == 100
     assert config.n_prompts == 250
     assert config.num_samples == 1
+    assert config.fluency is True
     assert Config.from_dict(config.to_dict()) == config
 
 
@@ -1330,3 +1334,22 @@ def test_the_effects_table_has_one_row_per_arm_with_planted_side_effects(
             assert row[3:] == pytest.approx(
                 [10.0 * k, -k, k / 100, k / 50, k + 0.5, k / 1000]
             )
+
+
+def test_without_fluency_no_effects_are_measured_or_written(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("side_effects must not run")
+
+    monkeypatch.setattr(m1_methods, "side_effects", forbidden)
+    run_dir = _execute(tiny_arch, tmp_path, fluency=False, **SMALL)
+
+    names = sorted(p.name for p in run_dir.path.iterdir() if p.is_file())
+    assert names == FILES_WITHOUT_EFFECTS
+
+
+def test_the_fluency_switch_changes_the_config_hash() -> None:
+    assert _config().config_hash() != _config(fluency=False).config_hash()
