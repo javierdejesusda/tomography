@@ -790,7 +790,7 @@ Pull before the watchdog stop or the deadline. A stopped pod may not restart, be
 its host has no free GPU. Run `down` only after `pull`:
 
 ```bash
-uv run python -m tomography.cloud pull --dest cloud/chain1
+uv run python -m tomography.cloud pull --dest ../chain1-pull
 uv run python -m tomography.cloud down
 ```
 
