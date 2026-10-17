@@ -9,6 +9,7 @@ import dataclasses
 from datetime import datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -33,7 +34,15 @@ POSIX = os.name == "posix"
 EXISTING_RUN = re.compile(
     r"run directory already exists: (.+?) \(delete it to rerun\)"
 )
-CHAIN_KEYS = {"name", "out", "env"}
+CHAIN_KEYS = {
+    "name",
+    "out",
+    "env",
+    "slots",
+    "min_free_gpu_mib",
+    "start_gap_seconds",
+}
+DEFAULT_START_GAP_SECONDS = 60.0
 JOB_KEYS = {
     "name",
     "experiment",
@@ -79,12 +88,20 @@ class ChainSpec:
         out: The results root every job writes to.
         env: Variables added to every job's environment.
         jobs: The jobs, in run order.
+        slots: The most jobs that run at the same time.
+        min_free_gpu_mib: Free GPU memory a job needs before it starts
+            while another job runs; 0 turns the check off.
+        start_gap_seconds: The least time between two job starts when
+            `slots` is above 1.
     """
 
     name: str
     out: Path
     env: Mapping[str, str]
     jobs: tuple[Job, ...]
+    slots: int = 1
+    min_free_gpu_mib: int = 0
+    start_gap_seconds: float = DEFAULT_START_GAP_SECONDS
 
 
 def _string(table: Mapping[str, Any], key: str, where: str) -> str:
@@ -100,6 +117,60 @@ def _check_keys(
     unknown = sorted(set(table) - allowed)
     if unknown:
         raise ValueError(f"{where}: unknown key {unknown[0]!r}")
+
+
+def _integer(
+    table: Mapping[str, Any], key: str, default: int, minimum: int, where: str
+) -> int:
+    """Reads an optional integer setting of at least `minimum`.
+
+    Args:
+        table: The TOML table.
+        key: The setting name.
+        default: The value when the key is absent.
+        minimum: The smallest accepted value.
+        where: The table name for error messages.
+
+    Returns:
+        The value.
+
+    Raises:
+        ValueError: If the value is not an integer or is below `minimum`.
+    """
+    value = table.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+        raise ValueError(
+            f"{where}.{key} must be an integer of at least {minimum}"
+        )
+    return value
+
+
+def _seconds(
+    table: Mapping[str, Any], key: str, default: float, where: str
+) -> float:
+    """Reads an optional finite number of at least 0.
+
+    Args:
+        table: The TOML table.
+        key: The setting name.
+        default: The value when the key is absent.
+        where: The table name for error messages.
+
+    Returns:
+        The value as a float.
+
+    Raises:
+        ValueError: If the value is not a finite number of at least 0.
+    """
+    value = table.get(key, default)
+    if (
+        not isinstance(value, int | float)
+        or isinstance(value, bool)
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        raise ValueError(f"{where}.{key} must be a number of at least 0")
+    return float(value)
 
 
 def _safe_name(name: str) -> bool:
@@ -226,6 +297,11 @@ def load_spec(
             raise ValueError(f"chain.env key {key!r} is not a variable name")
         if not isinstance(value, str) or "\0" in value:
             raise ValueError(f"chain.env value of {key!r} must be a string")
+    slots = _integer(chain, "slots", 1, 1, "chain")
+    min_free = _integer(chain, "min_free_gpu_mib", 0, 0, "chain")
+    gap = _seconds(
+        chain, "start_gap_seconds", DEFAULT_START_GAP_SECONDS, "chain"
+    )
     _check_keys(data, {"chain", "job"}, "spec")
     tables = data.get("job", [])
     if not tables:
@@ -237,7 +313,15 @@ def load_spec(
             check_experiment(job.experiment)
     if not out.is_absolute():
         out = spec_path.resolve().parent / out
-    return ChainSpec(name=name, out=out, env=dict(env), jobs=jobs)
+    return ChainSpec(
+        name=name,
+        out=out,
+        env=dict(env),
+        jobs=jobs,
+        slots=slots,
+        min_free_gpu_mib=min_free,
+        start_gap_seconds=gap,
+    )
 
 
 def _encode(value: Any) -> str:
@@ -369,19 +453,20 @@ def launch_process(
         )
 
 
-def make_gpu_query() -> Callable[[], int | None]:
-    """Builds a query for the memory in use on the first GPU, in MiB.
+def _smi_query(smi: str | None, field: str) -> Callable[[], int | None]:
+    """Builds a query of one `nvidia-smi` field of the first GPU.
 
-    The `nvidia-smi` lookup happens once, here.
+    Args:
+        smi: The `nvidia-smi` path, or None when the tool is missing.
+        field: The `--query-gpu` field, for example `memory.free`.
 
     Returns:
-        A function giving the memory used, or None when `nvidia-smi` is
-        missing or fails.
+        A function giving the integer value, or None when the tool is
+        missing, fails or prints something else.
     """
-    smi = shutil.which("nvidia-smi")
     if smi is None:
         return lambda: None
-    command = [smi, "--query-gpu=memory.used", "--format=csv,noheader,nounits"]
+    command = [smi, f"--query-gpu={field}", "--format=csv,noheader,nounits"]
 
     def query() -> int | None:
         try:
@@ -399,6 +484,37 @@ def make_gpu_query() -> Callable[[], int | None]:
             return None
 
     return query
+
+
+@dataclasses.dataclass(frozen=True)
+class GpuQueries:
+    """Queries of the first GPU, each giving None when it cannot answer.
+
+    Attributes:
+        used: The memory in use, in MiB.
+        free: The free memory, in MiB.
+        util: The utilization of the last sample period, in percent.
+    """
+
+    used: Callable[[], int | None]
+    free: Callable[[], int | None]
+    util: Callable[[], int | None]
+
+
+def make_gpu_queries() -> GpuQueries:
+    """Builds the `nvidia-smi` queries of the first GPU.
+
+    The `nvidia-smi` lookup happens once, here.
+
+    Returns:
+        The queries; each gives None when `nvidia-smi` is missing or fails.
+    """
+    smi = shutil.which("nvidia-smi")
+    return GpuQueries(
+        used=_smi_query(smi, "memory.used"),
+        free=_smi_query(smi, "memory.free"),
+        util=_smi_query(smi, "utilization.gpu"),
+    )
 
 
 def read_tail(path: Path, size: int = TAIL_BYTES, floor: int = 0) -> str:
@@ -519,29 +635,56 @@ def _signal_child(process: Process, sig: int, fallback: str) -> None:
         getattr(process, fallback)()
 
 
-def stop_process(process: Process) -> None:
-    """Stops a running child: SIGTERM, then SIGKILL.
+def stop_processes(processes: Sequence[Process]) -> None:
+    """Stops running children: SIGTERM to all, then SIGKILL.
 
-    On POSIX the signals go to the child's whole process group, and the
-    SIGKILL also reaches group members that outlive the leader. Further
-    SIGTERM, SIGHUP and SIGINT are ignored while stopping.
+    Every child gets SIGTERM first, then the children are waited on against
+    one shared deadline of `TERMINATE_SECONDS`, so a child that ignores
+    SIGTERM does not delay the others. On POSIX the signals go to each
+    child's whole process group, and the SIGKILL also reaches group members
+    that outlive the leader. Further SIGTERM, SIGHUP and SIGINT are ignored
+    while stopping.
 
     Args:
-        process: The child.
+        processes: The children.
     """
-    if process.poll() is not None:
+    running = [process for process in processes if process.poll() is None]
+    if not running:
         return
     with _handlers(_signals(signal.SIGINT), signal.SIG_IGN):
-        _signal_child(process, signal.SIGTERM, "terminate")
-        timed_out = False
-        try:
-            process.wait(timeout=TERMINATE_SECONDS)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-        if timed_out or POSIX:
-            _signal_child(process, getattr(signal, "SIGKILL", 9), "kill")
-        if timed_out:
-            process.wait()
+        for process in running:
+            _signal_child(process, signal.SIGTERM, "terminate")
+        deadline = time.monotonic() + TERMINATE_SECONDS
+        for process in running:
+            timed_out = False
+            try:
+                process.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+            if timed_out or POSIX:
+                _signal_child(process, getattr(signal, "SIGKILL", 9), "kill")
+            if timed_out:
+                process.wait()
+
+
+@dataclasses.dataclass
+class _Active:
+    """A job that holds a slot, at one of its attempts."""
+
+    job: Job
+    digest: str
+    names: list[str]
+    sizes: list[int | None]
+    index: int = 0
+    process: Process | None = None
+    offset: int = 0
+    start: float = 0.0
+    last_beat: float = 0.0
+    peak: int | None = None
+
+    @property
+    def name(self) -> str:
+        return self.names[self.index]
 
 
 @dataclasses.dataclass
@@ -553,6 +696,14 @@ class _Runner:
     sleep: Callable[[float], None]
     launch: Launcher
     gpu_query: Callable[[], int | None]
+    gpu_free_query: Callable[[], int | None]
+    gpu_util_query: Callable[[], int | None]
+    run_dirs: dict[str, str] = dataclasses.field(default_factory=dict)
+    active: list[_Active] = dataclasses.field(default_factory=list)
+    pending: list[Job] = dataclasses.field(default_factory=list)
+    ended: set[str] = dataclasses.field(default_factory=set)
+    failed: int = 0
+    last_start: float | None = None
 
     def _stamp(self) -> str:
         return datetime.fromtimestamp(self.clock()).isoformat(
@@ -573,7 +724,23 @@ class _Runner:
                 return found
         return None
 
-    def attempt(self, name: str, command: Sequence[str]) -> _Attempt:
+    def _begin(self, running: _Active) -> bool:
+        """Starts the current attempt of a job.
+
+        Logs RETRY for a retry and START, prepares the attempt folder and
+        launches the command. A launch error is logged as an END line.
+
+        Args:
+            running: The job and the attempt it is at.
+
+        Returns:
+            True when the process runs, False when it could not launch.
+        """
+        name = running.name
+        size = running.sizes[running.index]
+        if size is not None:
+            self.log(f"RETRY {running.job.name} batch_size={size}")
+        command = build_command(self.spec, running.job, self.run_dirs, size)
         folder = self.spec.out / "_chain" / name
         stdout_path = folder / "stdout.txt"
         log_path = folder / "run.log"
@@ -583,14 +750,14 @@ class _Runner:
             **os.environ,
             **self.spec.env,
         }
-        start = self.clock()
+        started = self.clock()
         try:
             folder.mkdir(parents=True, exist_ok=True)
             self.log(f"START {name}")
             with log_path.open("a", encoding="utf-8") as handle:
                 handle.write(f"# {self._stamp()} {name}\n")
-            offset = log_path.stat().st_size
-            process = self.launch(command, env, stdout_path, log_path)
+            running.offset = log_path.stat().st_size
+            running.process = self.launch(command, env, stdout_path, log_path)
         except (OSError, ValueError) as error:
             with (
                 contextlib.suppress(OSError),
@@ -598,38 +765,30 @@ class _Runner:
             ):
                 handle.write(f"launch failed: {error}\n")
             self.log(f"END {name} exit=-1 seconds=0 peak_gpu=na last=-")
-            return _Attempt(-1, launched=False)
-        peak: int | None = None
-        last_beat = start
-        try:
-            while True:
-                used = self.gpu_query()
-                if used is not None:
-                    peak = used if peak is None else max(peak, used)
-                code = process.poll()
-                if code is not None:
-                    break
-                now = self.clock()
-                if now - last_beat >= self.heartbeat_seconds:
-                    last_beat = now
-                    self.log(
-                        f"HEARTBEAT {name} elapsed={int(now - start)} "
-                        f"gpu_used={_show(used)}"
-                    )
-                self.sleep(self.poll_seconds)
-        except KeyboardInterrupt:
-            self.log(f"INTERRUPTED {name}")
-            raise
-        finally:
-            stop_process(process)
-        result = self._outcome(code, stdout_path, log_path, offset)
-        self.log(
-            f"END {name} exit={code} seconds={int(self.clock() - start)} "
-            f"peak_gpu={_show(peak)} last={result.run_dir or '-'}"
+            return False
+        running.start = running.last_beat = started
+        running.peak = None
+        return True
+
+    def _heartbeat(
+        self, running: _Active, used: int | None, util: int | None
+    ) -> None:
+        """Logs a HEARTBEAT line of a running attempt.
+
+        Args:
+            running: The attempt.
+            used: The latest GPU memory used in MiB, or None.
+            util: The GPU utilization in percent, or None to leave it out.
+        """
+        now = self.clock()
+        line = (
+            f"HEARTBEAT {running.name} elapsed={int(now - running.start)} "
+            f"gpu_used={_show(used)}"
         )
-        if code == 0 and result.run_dir is None:
-            self.log(f"FAILED {name} reason=no-run-dir")
-        return result
+        if util is not None:
+            line += f" gpu_util={util}"
+        running.last_beat = now
+        self.log(line)
 
     def _outcome(
         self, code: int, stdout_path: Path, log_path: Path, offset: int
@@ -644,51 +803,206 @@ class _Runner:
                 return _Attempt(code, found[-1], reused=True)
         return _Attempt(code)
 
-    def run_job(self, job: Job, run_dirs: dict[str, str]) -> bool:
-        digest = job_digest(self.spec, job, run_dirs)
-        sizes: list[int | None] = [None, *job.retry_batch_sizes]
-        for name, size in zip(attempt_names(job), sizes, strict=True):
-            if size is not None:
-                self.log(f"RETRY {job.name} batch_size={size}")
-            command = build_command(self.spec, job, run_dirs, size)
-            result = self.attempt(name, command)
-            if not result.launched:
-                return False
-            if result.run_dir is None:
-                continue
-            if result.reused:
-                self.log(f"SKIP {job.name} reason=existing")
-            folder = self.spec.out / "_chain" / name
-            _write_done(folder, result.run_dir, digest)
-            run_dirs[job.name] = result.run_dir
-            return True
-        return False
+    def _finish_attempt(self, running: _Active, code: int) -> None:
+        """Logs a finished attempt and moves the job on.
 
-    def run_all(self) -> int:
-        run_dirs: dict[str, str] = {}
-        failed = 0
-        for job in self.spec.jobs:
-            done = self.find_done(job, run_dirs)
+        A retry is not launched here: the job keeps its slot without a
+        process until `_start_ready` passes the start gate for it.
+
+        Args:
+            running: The job whose attempt ended.
+            code: The exit code of the attempt.
+        """
+        folder = self.spec.out / "_chain" / running.name
+        result = self._outcome(
+            code, folder / "stdout.txt", folder / "run.log", running.offset
+        )
+        self.log(
+            f"END {running.name} exit={code} "
+            f"seconds={int(self.clock() - running.start)} "
+            f"peak_gpu={_show(running.peak)} last={result.run_dir or '-'}"
+        )
+        if code == 0 and result.run_dir is None:
+            self.log(f"FAILED {running.name} reason=no-run-dir")
+        if result.run_dir is not None:
+            if result.reused:
+                self.log(f"SKIP {running.job.name} reason=existing")
+            _write_done(folder, result.run_dir, running.digest)
+            self.run_dirs[running.job.name] = result.run_dir
+            self._retire(running.job.name, ok=True)
+        elif running.index + 1 < len(running.names):
+            running.index += 1
+            running.process = None
+        else:
+            self._retire(running.job.name, ok=False)
+
+    def _retire(self, name: str, ok: bool) -> None:
+        """Takes a job out of the queue and the slots and marks it ended.
+
+        Args:
+            name: The job name.
+            ok: Whether the job finished a run directory; a job that did
+                not counts as failed.
+        """
+        self.pending = [job for job in self.pending if job.name != name]
+        self.active = [r for r in self.active if r.job.name != name]
+        self.ended.add(name)
+        if not ok:
+            self.failed += 1
+
+    def _launch(self, running: _Active) -> None:
+        """Records a start and begins an attempt, retiring a failed launch.
+
+        Args:
+            running: The job, already holding its slot.
+        """
+        self.last_start = self.clock()
+        if not self._begin(running):
+            self._retire(running.job.name, ok=False)
+
+    def _gate_open(self) -> bool:
+        """Tells whether a job may start now.
+
+        Always true while no process runs. Otherwise the last start must be
+        `start_gap_seconds` ago when `slots` is above 1, and the GPU must
+        report `min_free_gpu_mib` free when that is set; a failed query
+        keeps the gate closed.
+
+        Returns:
+            True when a start is allowed.
+        """
+        if not any(r.process is not None for r in self.active):
+            return True
+        if (
+            self.spec.slots > 1
+            and self.last_start is not None
+            and self.clock() - self.last_start < self.spec.start_gap_seconds
+        ):
+            return False
+        if self.spec.min_free_gpu_mib <= 0:
+            return True
+        free = self.gpu_free_query()
+        return free is not None and free >= self.spec.min_free_gpu_mib
+
+    def _resume_retries(self) -> None:
+        """Starts the retries that wait in a slot once the gate is open."""
+        for running in list(self.active):
+            if running.process is not None or not self._gate_open():
+                continue
+            self._launch(running)
+
+    def _start_ready(self) -> None:
+        """Starts the first ready jobs, in spec order, while slots are free."""
+        self._resume_retries()
+        for job in list(self.pending):
+            if len(self.active) >= self.spec.slots:
+                return
+            if not all(dep in self.ended for dep in job.run_dir_from.values()):
+                continue
+            done = self.find_done(job, self.run_dirs)
             if done is not None:
-                run_dirs[job.name] = done
+                self.run_dirs[job.name] = done
                 self.log(f"SKIP {job.name} reason=done")
+                self._retire(job.name, ok=True)
                 continue
             missing = {
                 key: dep
                 for key, dep in job.run_dir_from.items()
-                if dep not in run_dirs
+                if dep not in self.run_dirs
             }
             if missing and job.on_missing == "skip":
                 first = next(iter(missing.values()))
                 self.log(f"SKIP {job.name} reason=missing:{first}")
-                failed += 1
+                self._retire(job.name, ok=False)
                 continue
+            if not self._gate_open():
+                return
             for key, dep in missing.items():
                 self.log(f"DROP {job.name} key={key} reason=missing:{dep}")
-            if not self.run_job(job, run_dirs):
-                failed += 1
-        self.log(f"CHAIN_DONE failed={failed}")
-        return 1 if failed else 0
+            self.pending.remove(job)
+            running = _Active(
+                job,
+                job_digest(self.spec, job, self.run_dirs),
+                attempt_names(job),
+                [None, *job.retry_batch_sizes],
+            )
+            self.active.append(running)
+            self._launch(running)
+
+    def _poll_active(self) -> bool:
+        """Samples the GPU and checks every running job once.
+
+        Returns:
+            True when a job ended, so the caller should not sleep first.
+        """
+        used = self.gpu_query()
+        if used is not None:
+            for running in self.active:
+                if running.process is not None:
+                    peak = running.peak
+                    running.peak = used if peak is None else max(peak, used)
+        util: int | None = None
+        util_read = False
+        reaped = False
+        for running in list(self.active):
+            if running.process is None:
+                continue
+            code = running.process.poll()
+            if code is not None:
+                reaped = True
+                self._finish_attempt(running, code)
+                continue
+            due = self.clock() - running.last_beat >= self.heartbeat_seconds
+            if due and not util_read:
+                util = self.gpu_util_query()
+                util_read = True
+            if due:
+                self._heartbeat(running, used, util)
+        return reaped
+
+    def run_all(self) -> int:
+        self.pending = list(self.spec.jobs)
+        try:
+            while self.pending or self.active:
+                self._start_ready()
+                if self.active and self._poll_active():
+                    continue
+                self.sleep(self.poll_seconds)
+        except KeyboardInterrupt:
+            for running in self.active:
+                if running.process is not None:
+                    self.log(f"INTERRUPTED {running.name}")
+            raise
+        finally:
+            with _handlers(_signals(signal.SIGINT), signal.SIG_IGN):
+                stop_processes(
+                    [r.process for r in self.active if r.process is not None]
+                )
+        self.log(f"CHAIN_DONE failed={self.failed}")
+        return 1 if self.failed else 0
+
+
+def _with_defaults(
+    used: Callable[[], int | None] | None,
+    free: Callable[[], int | None] | None,
+    util: Callable[[], int | None] | None,
+) -> GpuQueries:
+    """Fills each missing GPU query from `nvidia-smi`, looked up once.
+
+    Args:
+        used: The memory used query, or None.
+        free: The free memory query, or None.
+        util: The utilization query, or None.
+
+    Returns:
+        The three queries.
+    """
+    if used and free and util:
+        return GpuQueries(used, free, util)
+    defaults = make_gpu_queries()
+    return GpuQueries(
+        used or defaults.used, free or defaults.free, util or defaults.util
+    )
 
 
 def run_chain(
@@ -700,28 +1014,46 @@ def run_chain(
     sleep: Callable[[float], None] = time.sleep,
     launch: Launcher = launch_process,
     gpu_query: Callable[[], int | None] | None = None,
+    gpu_free_query: Callable[[], int | None] | None = None,
+    gpu_util_query: Callable[[], int | None] | None = None,
 ) -> int:
-    """Runs the jobs of a chain one after another.
+    """Runs the jobs of a chain, up to `spec.slots` of them at a time.
 
     Each attempt writes `<out>/_chain/<attempt>/stdout.txt` and `run.log`
     (stderr), and the chain appends its events to `<out>/_chain/<name>.log`.
     A job whose DONE.txt names a finished run directory for the same
-    arguments is skipped, so a restart resumes the chain. SIGTERM and Ctrl-C
-    stop the running child, log the interruption and return 130.
+    arguments is skipped, so a restart resumes the chain. Jobs start in spec
+    order; a job is ready once every job in its `run_dir_from` has ended, and
+    a blocked job does not hold back a later ready one. The retries of a job
+    run one after another in its slot and pass the same start gate. While
+    another job runs, a start also
+    waits for `spec.start_gap_seconds` since the last start and, when
+    `spec.min_free_gpu_mib` is set, for that much free GPU memory (a failed
+    query keeps the gate closed); an idle runner always starts. With
+    several jobs the log lines interleave, and the `peak_gpu` of an END line
+    is the device-wide peak while that job ran, not the memory of that job
+    alone. SIGTERM, SIGHUP and Ctrl-C stop every running child at once,
+    log the interruption and return 130.
 
     Args:
         spec: The chain.
         heartbeat_seconds: Seconds between HEARTBEAT lines of a running job.
-        poll_seconds: Seconds between checks of a running job and the GPU.
+        poll_seconds: Seconds between checks of the running jobs and the GPU.
         clock: Returns the time in seconds since the epoch.
         sleep: Waits for the given seconds.
         launch: Starts a command with its stdout and stderr files.
-        gpu_query: Returns the GPU memory used in MiB, or None; by default
-            a query of `nvidia-smi`, looked up once.
+        gpu_query: Returns the GPU memory used in MiB, or None.
+        gpu_free_query: Returns the free GPU memory in MiB, or None; read
+            only for the start gate.
+        gpu_util_query: Returns the GPU utilization in percent, or None; read
+            only for a HEARTBEAT line, which adds `gpu_util` when it answers.
+            Each query that is omitted defaults on its own to the matching
+            `nvidia-smi` query, with one lookup of the tool for all of them.
 
     Returns:
         0 when no job failed, 1 when one did, 130 when interrupted.
     """
+    queries = _with_defaults(gpu_query, gpu_free_query, gpu_util_query)
     runner = _Runner(
         spec,
         heartbeat_seconds,
@@ -729,7 +1061,9 @@ def run_chain(
         clock,
         sleep,
         launch,
-        gpu_query or make_gpu_query(),
+        queries.used,
+        queries.free,
+        queries.util,
     )
     (spec.out / "_chain").mkdir(parents=True, exist_ok=True)
     runner.log(
