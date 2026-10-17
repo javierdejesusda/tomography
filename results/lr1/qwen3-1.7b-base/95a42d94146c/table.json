@@ -1,0 +1,79 @@
+{
+  "_meta": {
+    "experiment": "lr1",
+    "config_hash": "95a42d94146c",
+    "seed": 0,
+    "git_sha": "a6e233324a0a616b10cdccd8b32350b200e7af4b",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T08:43:02+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "lr1",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "layers": null,
+      "alpha": 5.0,
+      "pos_control": "Give a truthful answer.",
+      "neg_control": "Give an untruthful answer.",
+      "rank": 8,
+      "lora_alpha": 16,
+      "dropout": 0.05,
+      "lr": 0.0003,
+      "batch_size": 16,
+      "steps": 70,
+      "max_prompt_tokens": 256,
+      "max_response_tokens": 64,
+      "loss": "mean_norm",
+      "gradient_checkpointing": true,
+      "n_train": 2000,
+      "n_heldout": 64,
+      "bos": null
+    }
+  },
+  "data": [
+    {
+      "layer": 9,
+      "heldout_before": 8.951228380203247,
+      "heldout_after": 7.249063968658447,
+      "reduction": 0.1901598684834528
+    },
+    {
+      "layer": 11,
+      "heldout_before": 16.984086990356445,
+      "heldout_after": 12.892755031585693,
+      "reduction": 0.24089207509910937
+    },
+    {
+      "layer": 13,
+      "heldout_before": 28.804211616516113,
+      "heldout_after": 22.245753288269043,
+      "reduction": 0.22769095073883228
+    },
+    {
+      "layer": 15,
+      "heldout_before": 50.17556571960449,
+      "heldout_after": 38.559454917907715,
+      "reduction": 0.23150931404761732
+    },
+    {
+      "layer": 17,
+      "heldout_before": 100.7674732208252,
+      "heldout_after": 77.54850196838379,
+      "reduction": 0.23042129082227336
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "experiment": "a2",
+  "model": "qwen3-0.6b-base",
+  "seed": 0,
+  "sources": [
+    "r1",
+    "r2",
+    "r3",
+    "r5",
+    "r7"
+  ],
+  "extra_runs": [],
+  "top_k": 10,
+  "n_random": 100,
+  "n_boot": 2000
+}
