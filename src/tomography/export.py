@@ -244,13 +244,16 @@ class _PathRewriter:
 
     A path into an exported run becomes `results/<key>` (plus what follows
     the run folder), into a run that is not exported `<key>`, and any other
-    path `<external>/<last name>`.
+    path `<external>/<last name>`. A POSIX path recorded on another machine
+    (a rented pod) is matched to a run by its
+    `<experiment>/<model>/<config hash>` tail.
     """
 
     def __init__(
         self, index: Mapping[str, RunInfo], exported_keys: set[str]
     ) -> None:
         self._index = index
+        self._by_key = {run.key: run for run in index.values()}
         self._exported = exported_keys
         self._seen: set[str] = set()
         self.warnings: list[str] = []
@@ -300,6 +303,10 @@ class _PathRewriter:
         if located is not None:
             run, rest = located
             return self._named(run, rest)
+        keyed = self._locate_by_key(segments) if text.startswith("/") else None
+        if keyed is not None:
+            run, rest = keyed
+            return self._named(run, rest)
         name = next((part for part in reversed(segments) if part), "")
         replacement = f"{_EXTERNAL_PREFIX}/{name}"
         if text not in self._seen:
@@ -313,6 +320,27 @@ class _PathRewriter:
     def _named(self, run: RunInfo, rest: Sequence[str]) -> str:
         prefix = f"{_RESULTS_PREFIX}/" if run.key in self._exported else ""
         return "/".join([f"{prefix}{run.key}", *rest])
+
+    def _locate_by_key(
+        self, segments: Sequence[str]
+    ) -> tuple[RunInfo, Sequence[str]] | None:
+        """Finds a run by the `<experiment>/<model>/<hash>` tail of a path.
+
+        This maps the paths a run recorded on another machine (for example
+        `/workspace/out/...` on a rented pod) to the pulled copy of the run.
+        """
+        parts: list[str] = []
+        for segment in segments:
+            if segment == "..":
+                if parts:
+                    parts.pop()
+            elif segment != ".":
+                parts.append(segment)
+        for end in range(len(parts), 2, -1):
+            run = self._by_key.get("/".join(parts[end - 3 : end]))
+            if run is not None:
+                return run, parts[end:]
+        return None
 
     def _locate_on_disk(
         self, segments: Sequence[str]

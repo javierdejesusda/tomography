@@ -338,6 +338,57 @@ def test_export_names_an_outside_run_by_its_own_files(tmp_path: Path) -> None:
     assert report.warnings == []
 
 
+def test_export_rewrites_pod_paths_to_the_pulled_runs(tmp_path: Path) -> None:
+    target = _make_run(tmp_path / "pulled", tag="target")
+    target_key = f"t1/gpt2/{target.meta['config_hash']}"
+    unfinished = _make_run(tmp_path / "pulled", tag="open", finished=False)
+    unfinished_key = f"t1/gpt2/{unfinished.meta['config_hash']}"
+    pod = "/workspace/out/chain11"
+    _make_run(
+        tmp_path / "pulled",
+        tag="user",
+        source=f"{pod}/{target_key}",
+        sources=(
+            f"/workspace/chains/../out/chain11/{target_key}/summary.json",
+            f"{pod}/{unfinished_key}",
+            f"{pod}/t1/gpt2/0123456789ab",
+        ),
+    )
+
+    report = export_runs([tmp_path / "pulled"], tmp_path / "dest")
+
+    config = json.loads(
+        _user_config(tmp_path / "dest", "user").read_text("utf-8")
+    )
+    assert config["source"] == f"results/{target_key}"
+    assert config["sources"] == [
+        f"results/{target_key}/summary.json",
+        unfinished_key,
+        "<external>/0123456789ab",
+    ]
+    assert len(report.warnings) == 1
+
+
+def test_export_keeps_a_missing_drive_path_external(tmp_path: Path) -> None:
+    # A laptop run that is gone may differ from an exported run with the
+    # same config hash, so only pod paths are matched by their key.
+    target = _make_run(tmp_path / "pulled", tag="target")
+    config_hash = target.meta["config_hash"]
+    _make_run(
+        tmp_path / "pulled",
+        tag="user",
+        source=f"C:/gone/runs/t1/gpt2/{config_hash}",
+    )
+
+    report = export_runs([tmp_path / "pulled"], tmp_path / "dest")
+
+    config = json.loads(
+        _user_config(tmp_path / "dest", "user").read_text("utf-8")
+    )
+    assert config["source"] == f"<external>/{config_hash}"
+    assert len(report.warnings) == 1
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="backslash paths")
 def test_export_rewrites_backslash_and_mixed_slash_paths(
     tmp_path: Path,
