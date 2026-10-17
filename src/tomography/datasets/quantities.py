@@ -62,6 +62,20 @@ UNITS: Mapping[str, Mapping[str, float]] = {
     "time": TIME_UNITS,
 }
 
+# Classes (P31) and states of use (P5817) of a structure that was never
+# completed: under construction, proposed, proposed tower, proposed entity,
+# unbuilt, unfinished, abandoned project and on hold.
+UNBUILT_STRUCTURES: tuple[str, ...] = (
+    "Q12377751",
+    "Q811683",
+    "Q124835105",
+    "Q64728694",
+    "Q105821051",
+    "Q1570262",
+    "Q21514702",
+    "Q97317113",
+)
+
 
 @dataclass(frozen=True)
 class Side:
@@ -85,6 +99,12 @@ class Side:
         exclude_classes: Item ids of direct P31 classes whose entities are
             left out, such as aircraft families in a pool of aircraft
             models.
+        exclude_states: Item ids of states of use (P5817) whose entities
+            are left out, such as "building or structure under
+            construction".
+        dated_by: Property ids of dates, such as official opening (P1619).
+            If given, an entity is kept only with a value of one of them no
+            later than the query time.
         union_statements: If True, an entity's several best-rank
             statements are not ambiguous: its answer is the union of them
             (the lowest low to the highest high). Only for a range side
@@ -110,6 +130,8 @@ class Side:
     taxon: bool = False
     dimension: str = "length"
     exclude_classes: tuple[str, ...] = ()
+    exclude_states: tuple[str, ...] = ()
+    dated_by: tuple[str, ...] = ()
     union_statements: bool = False
     query_min_sitelinks: int = 0
 
@@ -161,6 +183,9 @@ FAMILIES: tuple[Family, ...] = (
             kind="exact",
             prop="P2048",
             classes=("Q11303", "Q12518", "Q18142"),
+            exclude_classes=UNBUILT_STRUCTURES,
+            exclude_states=UNBUILT_STRUCTURES,
+            dated_by=("P1619", "P571"),
             template="How tall is the {entity}, in metres?",
             unit="metres",
             scale=1.0,
@@ -271,13 +296,11 @@ def side_query(side: Side, *, limit: int) -> str:
         back to the language-neutral `mul` label.
 
     Raises:
-        ValueError: If the property or a (kept or excluded) class is not an
-            id, no class is
-            given or `limit` is below 1.
+        ValueError: If the quantity or a date property, a kept or excluded
+            class or an excluded state is not an id, no class is given or
+            `limit` is below 1.
     """
-    prop = side.prop
-    if not _PROPERTY_ID.fullmatch(prop):
-        raise ValueError(f"not a Wikidata property id: {prop!r}")
+    prop = _property_id(side.prop)
     if not side.classes:
         raise ValueError("a side must name at least one class")
     if limit < 1:
@@ -303,10 +326,14 @@ def side_query(side: Side, *, limit: int) -> str:
         " wikibase:quantityUpperBound ?upper . }",
     ]
     if side.exclude_classes:
-        excluded = " ".join(f"wd:{_item_id(c)}" for c in side.exclude_classes)
+        lines.append(_none_of("excluded", "wdt:P31", side.exclude_classes))
+    if side.exclude_states:
+        lines.append(_none_of("state", "wdt:P5817", side.exclude_states))
+    if side.dated_by:
+        dates = "|".join(f"wdt:{_property_id(p)}" for p in side.dated_by)
         lines.append(
-            f"  FILTER NOT EXISTS {{ VALUES ?excluded {{ {excluded} }}"
-            " ?item wdt:P31 ?excluded }"
+            f"  FILTER EXISTS {{ ?item {dates} ?built ."
+            " FILTER(?built <= NOW()) }"
         )
     if side.taxon:
         lines.append("  OPTIONAL { ?item wdt:P225 ?taxonName }")
@@ -319,9 +346,23 @@ def side_query(side: Side, *, limit: int) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _none_of(variable: str, path: str, items: tuple[str, ...]) -> str:
+    values = " ".join(f"wd:{_item_id(item)}" for item in items)
+    return (
+        f"  FILTER NOT EXISTS {{ VALUES ?{variable} {{ {values} }}"
+        f" ?item {path} ?{variable} }}"
+    )
+
+
 def _item_id(value: str) -> str:
     if not _ITEM_ID.fullmatch(value):
         raise ValueError(f"not a Wikidata item id: {value!r}")
+    return value
+
+
+def _property_id(value: str) -> str:
+    if not _PROPERTY_ID.fullmatch(value):
+        raise ValueError(f"not a Wikidata property id: {value!r}")
     return value
 
 

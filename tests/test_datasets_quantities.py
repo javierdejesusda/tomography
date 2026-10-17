@@ -119,6 +119,37 @@ def test_side_query_rejects_a_bad_excluded_class() -> None:
         quantities.side_query(_side(exclude_classes=("x",)), limit=5)
 
 
+def test_side_query_excludes_states_of_use_only_when_asked() -> None:
+    plain = quantities.side_query(_side(), limit=5)
+    states = quantities.side_query(
+        _side(exclude_states=("Q12377751", "Q811683")), limit=5
+    )
+
+    assert "P5817" not in plain
+    assert (
+        "  FILTER NOT EXISTS { VALUES ?state { wd:Q12377751 wd:Q811683 }"
+        " ?item wdt:P5817 ?state }\n"
+    ) in states
+
+
+def test_side_query_needs_a_past_date_only_when_asked() -> None:
+    plain = quantities.side_query(_side(), limit=5)
+    dated = quantities.side_query(_side(dated_by=("P1619", "P571")), limit=5)
+
+    assert "NOW()" not in plain
+    assert (
+        "  FILTER EXISTS { ?item wdt:P1619|wdt:P571 ?built ."
+        " FILTER(?built <= NOW()) }\n"
+    ) in dated
+
+
+def test_side_query_rejects_a_bad_state_or_date_property() -> None:
+    with pytest.raises(ValueError, match="item id"):
+        quantities.side_query(_side(exclude_states=("x",)), limit=5)
+    with pytest.raises(ValueError, match="property"):
+        quantities.side_query(_side(dated_by=("Q1",)), limit=5)
+
+
 def test_side_rejects_an_unknown_dimension_and_an_exact_union() -> None:
     with pytest.raises(ValueError, match="dimension"):
         _side(dimension="mass")
@@ -887,3 +918,22 @@ def test_time_families_convert_from_time_units() -> None:
     assert _default("duration").range_side.dimension == "time"
     assert _default("duration").exact_side.dimension == "time"
     assert _default("height").exact_side.dimension == "length"
+
+
+def test_the_height_exact_side_keeps_only_completed_structures() -> None:
+    side = _default("height").exact_side
+    unbuilt = {
+        "Q12377751",
+        "Q811683",
+        "Q124835105",
+        "Q64728694",
+        "Q105821051",
+        "Q1570262",
+        "Q21514702",
+        "Q97317113",
+    }
+
+    assert set(quantities.UNBUILT_STRUCTURES) == unbuilt
+    assert side.exclude_classes == quantities.UNBUILT_STRUCTURES
+    assert side.exclude_states == quantities.UNBUILT_STRUCTURES
+    assert side.dated_by == ("P1619", "P571")
