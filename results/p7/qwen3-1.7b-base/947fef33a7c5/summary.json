@@ -1,0 +1,114 @@
+{
+  "_meta": {
+    "experiment": "p7",
+    "config_hash": "947fef33a7c5",
+    "seed": 0,
+    "git_sha": "20650c50310954b674e2b3628970fe1f611bb2c7",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T14:00:02+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p7",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "n_prompts": 50,
+      "max_new_tokens": 40,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 2,
+      "layers": null,
+      "coeffs": [
+        -0.3,
+        -0.15,
+        0.0,
+        0.15,
+        0.3
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "judge": "sentiment-primary",
+      "judge_check": "sentiment-secondary",
+      "templates": [
+        "paper",
+        "no_template",
+        "no_chat_tags",
+        "neutral_frame",
+        "scaffold_0",
+        "concept_swap_0"
+      ],
+      "formats": [
+        "raw",
+        "chat",
+        "story"
+      ],
+      "n_seeds": 10,
+      "n_steer_seeds": 2,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "min_words": 3,
+      "sweep_layers": null,
+      "truncate_words": 3,
+      "read_threshold": 0.6,
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "templates": [
+      "paper",
+      "no_template",
+      "no_chat_tags",
+      "neutral_frame",
+      "scaffold_0",
+      "concept_swap_0"
+    ],
+    "formats": [
+      "raw",
+      "chat",
+      "story"
+    ],
+    "sweep_layers": [
+      1,
+      6,
+      12,
+      17,
+      23,
+      28
+    ],
+    "n_prompts": 50,
+    "inversion": {
+      "readable": 72,
+      "inverted": 9,
+      "rate": 0.125,
+      "ci": [
+        0.06717784220573507,
+        0.22081053724160826
+      ]
+    },
+    "read_steer_rho": 0.7873782587636836,
+    "lens_steer_rho": 0.7222329410251463,
+    "lens_agreement": 0.8333333333333334,
+    "layer_gap": 0.23809523809523805,
+    "judge_sign_agreement": 0.8055555555555556
+  }
+}
