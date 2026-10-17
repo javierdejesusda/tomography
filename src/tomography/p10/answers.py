@@ -220,8 +220,8 @@ def _read(match: re.Match[str]) -> tuple[float, int | None]:
         if match["k"]:
             return value * 1000, 1000
         if match["dscale"]:
-            factor = SCALE_WORDS[match["dscale"].lower()]
-            return value * factor, factor
+            scale = SCALE_WORDS[match["dscale"].lower()]
+            return value * scale, scale
         return value, None
     words = [
         w for w in re.split(r"[-\s]+", match["words"].lower()) if w != "and"
@@ -236,10 +236,9 @@ def _read(match: re.Match[str]) -> tuple[float, int | None]:
         else:
             current += _WORD_VALUES[word]
     scales = [w for w in words if w in SCALE_WORDS]
-    factor = SCALE_WORDS[scales[0]] if len(scales) == 1 else None
-    if words[-1] not in SCALE_WORDS:
-        factor = None
-    return total + current, factor
+    ends_in_scale = words[-1] in SCALE_WORDS
+    only_scale = SCALE_WORDS[scales[0]] if len(scales) == 1 else None
+    return total + current, only_scale if ends_in_scale else None
 
 
 def _quantity(text: str, first: re.Match[str]) -> tuple[float, float] | None:
