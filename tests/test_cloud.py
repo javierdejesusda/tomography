@@ -3,10 +3,14 @@
 from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
+import io
 import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+import tarfile
+from typing import IO
 from typing import Any
 
 import pytest
@@ -16,6 +20,13 @@ from tomography import cloud
 API_KEY = "rpa_SECRET_SENTINEL_123"
 PUBLIC_KEY = "ssh-ed25519 AAAAC3Nza-test laptop"
 BASE = "https://rest.runpod.io/v1"
+FULL = "abc123def456" + "0" * 28
+SHORT = "abc123def456"
+SRC = f"/workspace/src/{SHORT}"
+OUT = "/workspace/out/chain11"
+CHAIN_LOG = f"{OUT}/_chain/chain11.log"
+WALL0 = 1_700_000_000.0
+SMI = "nvidia-smi --query-gpu=driver_version,name,memory.total"
 
 Response = tuple[int, Any]
 
@@ -26,6 +37,7 @@ class FakeTransport:
     def __init__(self, responses: Sequence[Response] = ()) -> None:
         self.responses = list(responses)
         self.calls: list[tuple[str, str, Mapping[str, str], bytes | None]] = []
+        self.error_on_call: dict[int, Exception] = {}
 
     def __call__(
         self,
@@ -34,34 +46,46 @@ class FakeTransport:
         headers: Mapping[str, str],
         body: bytes | None,
     ) -> Response:
+        index = len(self.calls)
         self.calls.append((method, url, headers, body))
+        if index in self.error_on_call:
+            raise self.error_on_call[index]
         if len(self.responses) > 1:
             return self.responses.pop(0)
         return self.responses[0]
 
 
 class FakeRunner:
-    """Records commands; answers from a handler or returns success."""
+    """Records commands and answers them through a handler."""
 
     def __init__(
         self,
-        handler: Callable[[Sequence[str]], cloud.CommandResult] | None = None,
+        handler: Callable[[Sequence[str]], cloud.CommandResult],
     ) -> None:
         self.handler = handler
         self.runs: list[tuple[list[str], bytes | None]] = []
         self.pipes: list[tuple[list[str], list[str]]] = []
+        self.streams: list[list[str]] = []
+        self.stream_data = b""
+        self.stream_code = 0
+        self.pipe_code = 0
 
     def run(
         self, argv: Sequence[str], input_bytes: bytes | None = None
     ) -> cloud.CommandResult:
         self.runs.append((list(argv), input_bytes))
-        if self.handler is not None:
-            return self.handler(argv)
-        return cloud.CommandResult(0, "")
+        return self.handler(argv)
 
     def pipe(self, source: Sequence[str], sink: Sequence[str]) -> int:
         self.pipes.append((list(source), list(sink)))
-        return 0
+        return self.pipe_code
+
+    def stream(
+        self, argv: Sequence[str], consumer: Callable[[IO[bytes]], None]
+    ) -> int:
+        self.streams.append(list(argv))
+        consumer(io.BytesIO(self.stream_data))
+        return self.stream_code
 
 
 class FakeClock:
@@ -71,6 +95,9 @@ class FakeClock:
 
     def __call__(self) -> float:
         return self.now
+
+    def wall(self) -> float:
+        return WALL0 + (self.now - 1000.0)
 
     def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
@@ -103,25 +130,63 @@ class Harness:
         self,
         tmp_path: Path,
         responses: Sequence[Response] = (),
-        handler: Callable[[Sequence[str]], cloud.CommandResult] | None = None,
         env: Mapping[str, str] | None = None,
     ) -> None:
         self.tmp_path = tmp_path
+        self.driver = "580.65.06"
+        self.torch_ok = True
+        self.git_ok = True
+        self.cache_present = True
+        self.missing: list[str] = []
+        self.chain_live = False
+        self.ssh_failures = 0
         self.transport = FakeTransport(responses)
-        self.runner = FakeRunner(handler)
+        self.runner = FakeRunner(self._handle)
         self.clock = FakeClock()
         self.printed: list[str] = []
-        self.state_path = tmp_path / "state" / "pod.json"
+        self.state_path = tmp_path / "state dir" / "pod.json"
         self.pub_path = tmp_path / "id_test.pub"
         self.pub_path.write_text(PUBLIC_KEY + "\n", encoding="utf-8")
         self.deps = cloud.Deps(
             transport=self.transport,
             runner=self.runner,
             clock=self.clock,
+            wall=self.clock.wall,
             sleep=self.clock.sleep,
             env={"RUNPOD_API_KEY": API_KEY} if env is None else env,
             out=self.printed.append,
         )
+
+    def _handle(self, argv: Sequence[str]) -> cloud.CommandResult:
+        if argv[:2] == ["git", "rev-parse"]:
+            return cloud.CommandResult(0, FULL + "\n")
+        if argv[0] != "ssh":
+            return cloud.CommandResult(0, "")
+        command = argv[-1]
+        if command == "true":
+            if self.ssh_failures > 0:
+                self.ssh_failures -= 1
+                return cloud.CommandResult(255, "")
+            return cloud.CommandResult(0, "")
+        if "/proc/1/environ" in command and "runpodctl" in command:
+            return cloud.CommandResult(
+                0, "".join(f"missing {name}\n" for name in self.missing)
+            )
+        if "CHAIN_LIVE" in command:
+            return cloud.CommandResult(
+                0, "CHAIN_LIVE\n" if self.chain_live else ""
+            )
+        if "test -d" in command:
+            return cloud.CommandResult(0 if self.cache_present else 1, "")
+        if command.startswith(SMI):
+            return cloud.CommandResult(
+                0, f"{self.driver}, NVIDIA GeForce RTX 4090, 24564 MiB\n"
+            )
+        if "command -v git" in command:
+            return cloud.CommandResult(0 if self.git_ok else 1, "")
+        if "torch.cuda.is_available" in command:
+            return cloud.CommandResult(0 if self.torch_ok else 1, "")
+        return cloud.CommandResult(0, "")
 
     def main(self, *args: str) -> int:
         return cloud.main(
@@ -138,6 +203,12 @@ class Harness:
     def output(self) -> str:
         return "\n".join(self.printed)
 
+    def known_hosts(self, pod_id: str = "pod1") -> Path:
+        return self.state_path.parent / f"known_hosts_{pod_id}"
+
+    def commands(self) -> list[str]:
+        return [run[0][-1] for run in self.runner.runs if run[0][0] == "ssh"]
+
 
 def up_harness(
     tmp_path: Path, responses: Sequence[Response] | None = None
@@ -148,7 +219,9 @@ def up_harness(
 
 
 def up(h: Harness, *extra: str) -> int:
-    return h.main("up", "--public-key", str(h.pub_path), *extra)
+    return h.main(
+        "up", "--public-key", str(h.pub_path), "--max-hours", "1", *extra
+    )
 
 
 def write_state(h: Harness, **overrides: Any) -> None:
@@ -159,10 +232,44 @@ def write_state(h: Harness, **overrides: Any) -> None:
         "ssh_port": 10341,
         "identity": str(h.tmp_path / "id_test"),
         "status": "running",
+        "deadline": WALL0 + 10 * 3600,
     }
     data.update(overrides)
     h.state_path.parent.mkdir(parents=True, exist_ok=True)
     h.state_path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def pushed(h: Harness, **extra: Any) -> None:
+    write_state(
+        h,
+        remote_src=SRC,
+        remote_spec="/workspace/chains/chain11.toml",
+        remote_cache="/workspace/cache/tomography",
+        remote_out=OUT,
+        remote_chain_log=CHAIN_LOG,
+        **extra,
+    )
+
+
+def ssh_prefix(h: Harness, no_stdin: bool = False) -> list[str]:
+    known_hosts = h.known_hosts().as_posix()
+    return [
+        "ssh",
+        *(["-n"] if no_stdin else []),
+        "-p",
+        "10341",
+        "-i",
+        str(h.tmp_path / "id_test"),
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        f'UserKnownHostsFile="{known_hosts}"',
+        "-o",
+        "ServerAliveInterval=30",
+        "-o",
+        "ConnectTimeout=15",
+        "root@203.0.113.7",
+    ]
 
 
 def test_up_posts_the_community_pod_request(tmp_path: Path) -> None:
@@ -263,22 +370,138 @@ def test_up_requires_the_key_in_the_environment(tmp_path: Path) -> None:
     assert h.transport.calls == []
 
 
-def ssh_prefix(h: Harness) -> list[str]:
-    known_hosts = (h.state_path.parent / "known_hosts").as_posix()
-    return [
-        "ssh",
-        "-p",
-        "10341",
-        "-i",
-        str(h.tmp_path / "id_test"),
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-        "-o",
-        f"UserKnownHostsFile={known_hosts}",
-        "-o",
-        "ServerAliveInterval=30",
-        "root@203.0.113.7",
+def test_up_refuses_to_overwrite_a_live_pod(tmp_path: Path) -> None:
+    h = up_harness(tmp_path)
+    write_state(h, pod_id="old77")
+    assert up(h) == 1
+    assert "old77" in h.output()
+    assert h.transport.calls == []
+    assert h.state()["pod_id"] == "old77"
+
+
+def test_up_force_replaces_the_state_and_names_the_old_pod(
+    tmp_path: Path,
+) -> None:
+    h = up_harness(tmp_path)
+    write_state(h, pod_id="old77")
+    assert up(h, "--force") == 0
+    assert "old77" in h.output()
+    assert h.state()["pod_id"] == "pod1"
+
+
+def test_up_allows_a_new_pod_after_a_deleted_one(tmp_path: Path) -> None:
+    h = up_harness(tmp_path)
+    write_state(h, pod_id="old77", status="deleted")
+    assert up(h) == 0
+    assert h.state()["pod_id"] == "pod1"
+
+
+def test_a_corrupt_state_file_is_reported(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    h.state_path.parent.mkdir(parents=True)
+    h.state_path.write_text("{not json", encoding="utf-8")
+    assert h.main("status") == 1
+    assert "state file" in h.output()
+    assert "not valid JSON" in h.output()
+
+
+def test_poll_failure_keeps_the_pod_id_in_the_message(tmp_path: Path) -> None:
+    h = up_harness(tmp_path, [(201, starting_pod()), (200, starting_pod())])
+    h.transport.error_on_call[1] = TimeoutError("read timed out")
+    assert up(h) == 1
+    assert "pod1" in h.output()
+    assert "down" in h.output()
+    assert h.state()["pod_id"] == "pod1"
+
+
+def test_create_timeout_is_a_clean_error(tmp_path: Path) -> None:
+    h = up_harness(tmp_path)
+    h.transport.error_on_call[0] = TimeoutError("read timed out")
+    assert up(h) == 1
+    assert "timed out" in h.output()
+    assert "console" in h.output()
+
+
+def test_up_waits_until_ssh_answers(tmp_path: Path) -> None:
+    h = up_harness(tmp_path)
+    h.ssh_failures = 2
+    assert up(h) == 0
+    probes = [r[0] for r in h.runner.runs if r[0][-1] == "true"]
+    assert len(probes) == 3
+    assert probes[0] == [*ssh_prefix(h, no_stdin=True), "true"]
+    assert h.state()["status"] == "running"
+
+
+def test_up_reports_when_ssh_never_answers(tmp_path: Path) -> None:
+    h = up_harness(tmp_path)
+    h.ssh_failures = 10_000
+    assert up(h, "--ssh-timeout-minutes", "1") == 1
+    assert "ssh" in h.output()
+    assert "down" in h.output()
+    assert h.state()["pod_id"] == "pod1"
+
+
+def test_up_creates_a_known_hosts_file_per_pod(tmp_path: Path) -> None:
+    h = up_harness(tmp_path)
+    assert up(h) == 0
+    assert h.known_hosts().exists()
+
+
+def test_up_records_the_deadline_and_arms_a_pod_watchdog(
+    tmp_path: Path,
+) -> None:
+    h = up_harness(tmp_path)
+    assert up(h) == 0
+    assert h.state()["deadline"] == pytest.approx(WALL0 + 3600, abs=60)
+    uploads = [
+        (r[0][-1], (r[1] or b"").decode()) for r in h.runner.runs if r[1]
     ]
+    _command, script = next(u for u in uploads if u[0].endswith("deadline.sh"))
+    assert "MAX_SECONDS=3600" in script or "MAX_SECONDS=36" in script
+    assert 'runpodctl remove pod "$RUNPOD_POD_ID"' in script
+    assert API_KEY not in script
+    launches = [c for c in h.commands() if "setsid nohup" in c]
+    assert len(launches) == 1
+    assert "deadline.sh" in launches[0]
+
+
+def test_up_deletes_the_pod_when_self_removal_is_missing(
+    tmp_path: Path,
+) -> None:
+    h = up_harness(
+        tmp_path,
+        [(201, starting_pod()), (200, ready_pod()), (204, None)],
+    )
+    h.missing = ["RUNPOD_API_KEY"]
+    assert up(h) == 1
+    assert [c[0] for c in h.transport.calls][-1] == "DELETE"
+    assert "RUNPOD_API_KEY" in h.output()
+    assert h.state()["status"] == "deleted"
+
+
+def test_up_keeps_the_pod_with_no_self_removal_and_warns(
+    tmp_path: Path,
+) -> None:
+    h = up_harness(tmp_path)
+    h.missing = ["runpodctl"]
+    assert up(h, "--no-self-removal") == 0
+    assert "DELETE" not in [c[0] for c in h.transport.calls]
+    assert "WARNING" in h.output()
+    assert "bills" in h.output()
+    assert not [c for c in h.commands() if "setsid nohup" in c]
+
+
+@pytest.mark.parametrize("hours", ["0", "24.5", "abc"])
+def test_up_rejects_a_bad_max_hours(tmp_path: Path, hours: str) -> None:
+    h = up_harness(tmp_path)
+    with pytest.raises(SystemExit):
+        h.main("up", "--max-hours", hours)
+
+
+def test_up_requires_max_hours(tmp_path: Path) -> None:
+    h = up_harness(tmp_path)
+    with pytest.raises(SystemExit):
+        h.main("up")
 
 
 def test_ssh_without_a_command_prints_the_ssh_line(tmp_path: Path) -> None:
@@ -298,51 +521,117 @@ def test_ssh_with_a_command_runs_it_as_one_remote_string(
     h = Harness(tmp_path)
     write_state(h)
     assert h.main("ssh", "--", "ls", "/work space") == 0
-    assert h.runner.runs == [([*ssh_prefix(h), "ls '/work space'"], None)]
+    assert h.runner.runs == [
+        ([*ssh_prefix(h, no_stdin=True), "ls '/work space'"], None)
+    ]
 
 
-def push_handler(
-    cache_present: bool,
-) -> Callable[[Sequence[str]], cloud.CommandResult]:
-    def handle(argv: Sequence[str]) -> cloud.CommandResult:
-        if argv[:2] == ["git", "rev-parse"]:
-            return cloud.CommandResult(0, "abc123def456\n")
-        if "test -d" in argv[-1]:
-            return cloud.CommandResult(0 if cache_present else 1, "")
-        return cloud.CommandResult(0, "")
-
-    return handle
-
-
-def push_harness(tmp_path: Path, cache_present: bool) -> tuple[Harness, Path]:
-    h = Harness(tmp_path, handler=push_handler(cache_present))
+def test_known_hosts_path_with_a_space_is_quoted(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
     write_state(h)
+    assert h.main("ssh", "--", "true") == 0
+    option = next(
+        a for a in h.runner.runs[0][0] if a.startswith("UserKnownHostsFile=")
+    )
+    assert "state dir" in option
+    assert option.endswith('known_hosts_pod1"')
+    assert option.startswith('UserKnownHostsFile="')
+
+
+def write_spec(tmp_path: Path, name: str = "chain11", out: str = OUT) -> Path:
     spec = tmp_path / "chain11.toml"
-    spec.write_text("[chain]\nname = 'x'\n", encoding="utf-8")
-    return h, spec
+    spec.write_text(
+        f'[chain]\nname = "{name}"\nout = "{out}"\n', encoding="utf-8"
+    )
+    return spec
 
 
-def test_push_streams_git_archive_into_the_source_folder(
+def push_args(h: Harness, spec: Path, *extra: str) -> tuple[str, ...]:
+    return ("push", "--ref", "HEAD", "--spec", str(spec), *extra)
+
+
+def test_push_bundles_a_temporary_ref_and_deletes_it(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    write_state(h)
+    spec = write_spec(tmp_path)
+    assert h.main(*push_args(h, spec)) == 0
+    assert h.runner.runs[0][0] == [
+        "git",
+        "rev-parse",
+        "--verify",
+        "HEAD^{commit}",
+    ]
+    ref = f"refs/tomography-cloud/{SHORT}"
+    local = [r[0] for r in h.runner.runs if r[0][0] == "git"]
+    assert local[1] == ["git", "update-ref", ref, FULL]
+    assert local[-1] == ["git", "update-ref", "-d", ref]
+    bundle = f"/workspace/src/{SHORT}.bundle"
+    assert h.runner.pipes[0] == (
+        ["git", "bundle", "create", "-", ref],
+        [*ssh_prefix(h), f"mkdir -p /workspace/src && cat > {bundle}"],
+    )
+
+
+def test_push_clones_the_bundle_and_checks_out_the_commit(
     tmp_path: Path,
 ) -> None:
-    h, spec = push_harness(tmp_path, cache_present=True)
-    assert h.main("push", "--ref", "HEAD", "--spec", str(spec)) == 0
-    assert h.runner.runs[0][0] == ["git", "rev-parse", "--short=12", "HEAD"]
-    src = "/workspace/src/abc123def456"
-    assert h.runner.pipes[0] == (
-        ["git", "archive", "--format=tar", "abc123def456"],
-        [*ssh_prefix(h), f"mkdir -p {src} && tar -x -C {src}"],
-    )
-    assert len(h.runner.pipes) == 1
-    state = h.state()
-    assert state["remote_src"] == src
-    assert state["remote_spec"] == "/workspace/chains/chain11.toml"
+    h = Harness(tmp_path)
+    write_state(h)
+    assert h.main(*push_args(h, write_spec(tmp_path))) == 0
+    fetch = next(c for c in h.commands() if "git fetch" in c)
+    assert f"git init -q {SRC}" in fetch
+    assert f"/workspace/src/{SHORT}.bundle" in fetch
+    assert "refs/tomography-cloud/*:refs/tomography-cloud/*" in fetch
+    assert f"git checkout -q --detach {FULL}" in fetch
+    assert h.state()["remote_src"] == SRC
+
+
+def test_push_deletes_the_temporary_ref_when_the_bundle_fails(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    write_state(h)
+    h.runner.pipe_code = 3
+    assert h.main(*push_args(h, write_spec(tmp_path))) == 1
+    local = [r[0] for r in h.runner.runs if r[0][0] == "git"]
+    assert local[-1][:3] == ["git", "update-ref", "-d"]
+    assert "exit code 3" in h.output()
+
+
+@pytest.mark.parametrize("ref", ["--upload-pack=x", "-h"])
+def test_push_refuses_a_ref_starting_with_a_dash(
+    tmp_path: Path, ref: str
+) -> None:
+    h = Harness(tmp_path)
+    write_state(h)
+    code = h.main("push", f"--ref={ref}", "--spec", str(write_spec(tmp_path)))
+    assert code == 1
+    assert h.runner.runs == []
+    assert "ref" in h.output()
+
+
+def test_push_refuses_a_ref_git_cannot_resolve(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    write_state(h)
+    original = h.runner.handler
+
+    def failing(argv: Sequence[str]) -> cloud.CommandResult:
+        if argv[:2] == ["git", "rev-parse"]:
+            return cloud.CommandResult(128, "")
+        return original(argv)
+
+    h.runner.handler = failing
+    assert h.main(*push_args(h, write_spec(tmp_path))) == 1
+    assert "cannot resolve" in h.output()
+    assert h.runner.pipes == []
 
 
 def test_push_copies_the_spec_through_stdin(tmp_path: Path) -> None:
-    h, spec = push_harness(tmp_path, cache_present=True)
-    assert h.main("push", "--ref", "HEAD", "--spec", str(spec)) == 0
-    copies = [r for r in h.runner.runs if "cat >" in r[0][-1]]
+    h = Harness(tmp_path)
+    write_state(h)
+    spec = write_spec(tmp_path)
+    assert h.main(*push_args(h, spec)) == 0
+    copies = [r for r in h.runner.runs if r[1] is not None]
     assert copies == [
         (
             [
@@ -356,11 +645,13 @@ def test_push_copies_the_spec_through_stdin(tmp_path: Path) -> None:
 
 
 def test_push_sends_the_cache_only_when_missing(tmp_path: Path) -> None:
-    h, spec = push_harness(tmp_path, cache_present=False)
+    h = Harness(tmp_path)
+    h.cache_present = False
+    write_state(h)
     cache = tmp_path / "cache"
     cache.mkdir()
-    args = ("push", "--ref", "HEAD", "--spec", str(spec), "--cache", str(cache))
-    assert h.main(*args) == 0
+    spec = write_spec(tmp_path)
+    assert h.main(*push_args(h, spec, "--cache", str(cache))) == 0
     dest = "/workspace/cache/tomography"
     assert h.runner.pipes[1] == (
         ["tar", "-c", "-C", str(cache), "."],
@@ -370,56 +661,153 @@ def test_push_sends_the_cache_only_when_missing(tmp_path: Path) -> None:
 
 
 def test_push_skips_a_present_cache_unless_sync_cache(tmp_path: Path) -> None:
-    h, spec = push_harness(tmp_path, cache_present=True)
+    h = Harness(tmp_path)
+    write_state(h)
     cache = tmp_path / "cache"
     cache.mkdir()
-    args = ("push", "--ref", "HEAD", "--spec", str(spec), "--cache", str(cache))
-    assert h.main(*args) == 0
+    spec = write_spec(tmp_path)
+    assert h.main(*push_args(h, spec, "--cache", str(cache))) == 0
     assert len(h.runner.pipes) == 1
-    assert h.main(*args, "--sync-cache") == 0
+    args = push_args(h, spec, "--cache", str(cache), "--sync-cache")
+    assert h.main(*args) == 0
     assert len(h.runner.pipes) == 3
     assert h.runner.pipes[-1][0][:2] == ["tar", "-c"]
 
 
-def test_push_fails_when_the_pipeline_fails(tmp_path: Path) -> None:
-    h, spec = push_harness(tmp_path, cache_present=True)
-    h.runner.pipe = lambda source, sink: 2  # type: ignore[method-assign]
-    assert h.main("push", "--ref", "HEAD", "--spec", str(spec)) == 1
+def test_push_records_the_out_root_from_the_spec(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    write_state(h)
+    assert h.main(*push_args(h, write_spec(tmp_path))) == 0
+    state = h.state()
+    assert state["remote_out"] == OUT
+    assert state["remote_chain_log"] == CHAIN_LOG
+    assert state["remote_spec"] == "/workspace/chains/chain11.toml"
+
+
+def test_push_resolves_a_relative_out_against_the_chains_folder(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    write_state(h)
+    spec = write_spec(tmp_path, out="../out/c11")
+    assert h.main(*push_args(h, spec)) == 0
+    assert h.state()["remote_out"] == "/workspace/out/c11"
+
+
+@pytest.mark.parametrize("out", ["C:/results", "D:\\\\results", "out\\\\x"])
+def test_push_refuses_windows_out_paths(tmp_path: Path, out: str) -> None:
+    h = Harness(tmp_path)
+    write_state(h)
+    assert h.main(*push_args(h, write_spec(tmp_path, out=out))) == 1
+    assert "out" in h.output()
+    assert h.runner.pipes == []
+
+
+def test_push_refuses_a_spec_without_a_chain_name(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    write_state(h)
+    spec = tmp_path / "bad.toml"
+    spec.write_text('[chain]\nout = "/workspace/out"\n', encoding="utf-8")
+    assert h.main(*push_args(h, spec)) == 1
+    assert "name" in h.output()
+
+
+def test_pull_extracts_the_stream_in_python(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    h.runner.stream_data = make_tar([("a/b.txt", b"hello")])
+    dest = tmp_path / "pulled"
+    assert h.main("pull", "--dest", str(dest)) == 0
+    assert (dest / "a" / "b.txt").read_bytes() == b"hello"
+    assert h.runner.streams == [
+        [*ssh_prefix(h, no_stdin=True), f"tar -c -C {OUT} ."]
+    ]
+    assert h.runner.pipes == []
+
+
+def test_pull_accepts_another_remote_path(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    h.runner.stream_data = make_tar([])
+    dest = tmp_path / "pulled"
+    assert h.main("pull", "--dest", str(dest), "--path", "/workspace/a b") == 0
+    assert h.runner.streams[0][-1] == "tar -c -C '/workspace/a b' ."
+
+
+def make_tar(
+    members: Sequence[tuple[str, bytes]],
+    links: Sequence[tuple[str, str]] = (),
+) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        for name, data in members:
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        for name, target in links:
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.SYMTYPE
+            info.linkname = target
+            tar.addfile(info)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    "members",
+    [
+        [("/abs_evil.txt", b"x")],
+        [("../escape.txt", b"x")],
+        [("ok/../../escape.txt", b"x")],
+    ],
+)
+def test_pull_rejects_paths_that_leave_the_destination(
+    tmp_path: Path, members: list[tuple[str, bytes]]
+) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    h.runner.stream_data = make_tar(members)
+    dest = tmp_path / "sandbox" / "pulled"
+    assert h.main("pull", "--dest", str(dest)) == 1
+    assert "unsafe" in h.output()
+    assert not (tmp_path / "sandbox" / "escape.txt").exists()
+    assert not (tmp_path / "escape.txt").exists()
+    assert list(dest.rglob("*")) == []
+
+
+def test_pull_rejects_a_symlink_pointing_outside(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    h.runner.stream_data = make_tar(
+        [("data.txt", b"x")], links=[("link", "../../outside")]
+    )
+    dest = tmp_path / "sandbox" / "pulled"
+    assert h.main("pull", "--dest", str(dest)) == 1
+    assert "unsafe" in h.output()
+    assert not (dest / "link").is_symlink()
+
+
+def test_pull_refuses_a_non_empty_destination(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    dest = tmp_path / "pulled"
+    dest.mkdir()
+    (dest / "keep.txt").write_text("x", encoding="utf-8")
+    assert h.main("pull", "--dest", str(dest)) == 1
+    assert "not empty" in h.output()
+    assert h.runner.streams == []
+
+
+def test_pull_fails_when_the_remote_tar_fails(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    h.runner.stream_code = 2
+    assert h.main("pull", "--dest", str(tmp_path / "pulled")) == 1
     assert "exit code 2" in h.output()
 
 
-SRC = "/workspace/src/abc123def456"
-SMI = "nvidia-smi --query-gpu=driver_version,name,memory.total"
-
-
-def pushed(h: Harness, **extra: Any) -> None:
-    write_state(
-        h,
-        remote_src=SRC,
-        remote_spec="/workspace/chains/chain11.toml",
-        remote_cache="/workspace/cache/tomography",
-        **extra,
-    )
-
-
-def smi_handler(
-    driver: str, torch_ok: bool = True
-) -> Callable[[Sequence[str]], cloud.CommandResult]:
-    def handle(argv: Sequence[str]) -> cloud.CommandResult:
-        command = argv[-1]
-        if command.startswith(SMI):
-            return cloud.CommandResult(
-                0, f"{driver}, NVIDIA GeForce RTX 4090, 24564 MiB\n"
-            )
-        if "torch.cuda.is_available" in command:
-            return cloud.CommandResult(0 if torch_ok else 1, "")
-        return cloud.CommandResult(0, "")
-
-    return handle
-
-
 def test_setup_refuses_a_driver_older_than_580(tmp_path: Path) -> None:
-    h = Harness(tmp_path, handler=smi_handler("570.133.20"))
+    h = Harness(tmp_path)
+    h.driver = "570.133.20"
     pushed(h)
     assert h.main("setup") == 1
     assert "580" in h.output()
@@ -428,25 +816,40 @@ def test_setup_refuses_a_driver_older_than_580(tmp_path: Path) -> None:
 
 
 def test_setup_installs_uv_syncs_and_checks_cuda(tmp_path: Path) -> None:
-    h = Harness(tmp_path, handler=smi_handler("580.65.06"))
+    h = Harness(tmp_path)
     pushed(h)
     assert h.main("setup") == 0
-    commands = [run[0][-1] for run in h.runner.runs]
-    assert len(commands) == 3
+    commands = h.commands()
+    assert len(commands) == 4
     assert commands[0].startswith(SMI)
-    install = commands[1]
+    assert "command -v git" in commands[1]
+    install = commands[2]
     assert "command -v uv" in install
-    assert "https://astral.sh/uv/install.sh" in install
+    assert f"https://astral.sh/uv/{cloud.UV_VERSION}/install.sh" in install
     assert f"cd {SRC}" in install
     assert "UV_CACHE_DIR=/workspace/uv-cache" in install
-    assert "UV_PROJECT_ENVIRONMENT=/workspace/venv/abc123def456" in install
+    assert f"UV_PROJECT_ENVIRONMENT=/workspace/venv/{SHORT}" in install
     assert "uv sync --locked" in install
-    assert "import torch; assert torch.cuda.is_available()" in commands[2]
-    assert "UV_PROJECT_ENVIRONMENT=/workspace/venv/abc123def456" in commands[2]
+    assert "import torch; assert torch.cuda.is_available()" in commands[3]
+    assert f"UV_PROJECT_ENVIRONMENT=/workspace/venv/{SHORT}" in commands[3]
+
+
+def test_uv_version_is_pinned() -> None:
+    assert cloud.UV_VERSION.count(".") == 2
+    assert cloud.UV_VERSION[0].isdigit()
+
+
+def test_setup_fails_without_git(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    h.git_ok = False
+    pushed(h)
+    assert h.main("setup") == 1
+    assert "git" in h.output()
 
 
 def test_setup_fails_when_cuda_is_unavailable(tmp_path: Path) -> None:
-    h = Harness(tmp_path, handler=smi_handler("580.65.06", torch_ok=False))
+    h = Harness(tmp_path)
+    h.torch_ok = False
     pushed(h)
     assert h.main("setup") == 1
     assert "cuda" in h.output().lower()
@@ -460,25 +863,25 @@ def test_setup_needs_a_pushed_source(tmp_path: Path) -> None:
 
 
 def started(h: Harness, *extra: str) -> tuple[str, str, list[str]]:
-    code = h.main("start", "--spec", "chain11.toml", *extra)
+    code = h.main("start", "--spec", "chain11.toml", "--max-hours", "2", *extra)
     assert code == 0
     uploads = {
         run[0][-1]: (run[1] or b"").decode() for run in h.runner.runs if run[1]
     }
     chain = next(v for k, v in uploads.items() if k.endswith("chain.sh"))
     dog = next(v for k, v in uploads.items() if k.endswith("watchdog.sh"))
-    launches = [run[0][-1] for run in h.runner.runs if not run[1]]
+    launches = [c for c in h.commands() if "setsid nohup" in c]
     return chain, dog, launches
 
 
 def test_start_writes_the_chain_launcher(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     pushed(h)
-    chain, _, _ = started(h, "--max-hours", "2")
+    chain, _, _ = started(h)
     assert "export HF_HOME=/workspace/hf" in chain
     assert "export TOMOGRAPHY_CACHE=/workspace/cache/tomography" in chain
     assert "export UV_CACHE_DIR=/workspace/uv-cache" in chain
-    assert "export UV_PROJECT_ENVIRONMENT=/workspace/venv/abc123def456" in chain
+    assert f"export UV_PROJECT_ENVIRONMENT=/workspace/venv/{SHORT}" in chain
     assert f"cd {SRC}" in chain
     assert "echo $$ > /workspace/run/chain.pid" in chain
     assert (
@@ -488,23 +891,41 @@ def test_start_writes_the_chain_launcher(tmp_path: Path) -> None:
     assert "HF_HUB_ENABLE_HF_TRANSFER" not in chain
 
 
-def test_start_writes_a_watchdog_that_removes_the_pod(tmp_path: Path) -> None:
+def test_start_writes_a_watchdog_that_retries_the_removal(
+    tmp_path: Path,
+) -> None:
     h = Harness(tmp_path)
     pushed(h)
-    _, dog, _ = started(h, "--max-hours", "2", "--grace-minutes", "5")
+    _, dog, _ = started(h, "--grace-minutes", "5")
     assert "MAX_SECONDS=7200" in dog
     assert "GRACE_SECONDS=300" in dog
     assert "CHAIN_DONE" in dog
-    assert "/workspace/out/_chain" in dog
+    assert f"CHAINLOG={CHAIN_LOG}" in dog
     assert "/proc/1/environ" in dog
     assert 'runpodctl remove pod "$RUNPOD_POD_ID"' in dog
+    assert "sleep 60" in dog
+    assert "until " in dog
     assert API_KEY not in dog
+
+
+def test_start_counts_only_chain_done_lines_after_the_launch_offset(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    _, dog, launches = started(h)
+    assert "log_offset" in dog
+    assert "tail -c +" in dog
+    joined = " ".join(launches)
+    assert "stat -c %s" in joined
+    assert "/workspace/run/log_offset" in joined
+    assert CHAIN_LOG in joined
 
 
 def test_start_launches_both_detached(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     pushed(h)
-    _, _, launches = started(h, "--max-hours", "1")
+    _, _, launches = started(h)
     joined = " ".join(launches)
     for script in ("chain.sh", "watchdog.sh"):
         assert (
@@ -513,14 +934,28 @@ def test_start_launches_both_detached(tmp_path: Path) -> None:
         ) in joined
     assert "touch /workspace/run/started" in joined
     assert API_KEY not in repr(h.runner.runs)
+    launch_run = next(r for r in h.runner.runs if "setsid nohup" in r[0][-1])
+    assert launch_run[0][1] == "-n"
 
 
-def test_start_uses_the_chosen_out_root(tmp_path: Path) -> None:
+def test_start_uses_the_earlier_of_the_two_deadlines(tmp_path: Path) -> None:
     h = Harness(tmp_path)
-    pushed(h)
-    _, dog, _ = started(h, "--max-hours", "1", "--out", "/workspace/results")
-    assert "/workspace/results/_chain" in dog
-    assert h.state()["remote_out"] == "/workspace/results"
+    pushed(h, deadline=WALL0 + 3 * 3600)
+    h.main("start", "--spec", "chain11.toml", "--max-hours", "20")
+    dog = next(
+        (r[1] or b"").decode()
+        for r in h.runner.runs
+        if r[1] and r[0][-1].endswith("watchdog.sh")
+    )
+    assert "MAX_SECONDS=10800" in dog
+
+
+def test_start_refuses_after_the_up_deadline(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    pushed(h, deadline=WALL0 - 5)
+    assert h.main("start", "--spec", "chain11.toml", "--max-hours", "1") == 1
+    assert "deadline" in h.output()
+    assert h.runner.runs == []
 
 
 @pytest.mark.parametrize("hours", ["0", "-1", "24.5", "abc"])
@@ -528,59 +963,112 @@ def test_start_rejects_a_bad_max_hours(tmp_path: Path, hours: str) -> None:
     h = Harness(tmp_path)
     pushed(h)
     with pytest.raises(SystemExit):
-        h.main("start", "--spec", "c.toml", "--max-hours", hours)
+        h.main("start", "--spec", "chain11.toml", "--max-hours", hours)
 
 
 def test_start_requires_a_pushed_source(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     write_state(h)
-    assert h.main("start", "--spec", "c.toml", "--max-hours", "1") == 1
+    code = h.main("start", "--spec", "chain11.toml", "--max-hours", "1")
+    assert code == 1
     assert "push" in h.output()
 
 
-def test_status_tails_the_log_and_reports_the_process(tmp_path: Path) -> None:
-    def handle(argv: Sequence[str]) -> cloud.CommandResult:
-        return cloud.CommandResult(0, "END r1 exit=0\nCHAIN_ALIVE\n")
-
-    h = Harness(tmp_path, handler=handle)
-    pushed(h, remote_out="/workspace/out")
-    assert h.main("status") == 0
-    command = h.runner.runs[0][0][-1]
-    assert "ls -t /workspace/out/_chain/*.log" in command
-    assert "tail -n 20" in command
-    assert "kill -0" in command
-    assert "CHAIN_ALIVE" in h.output()
-
-
-def test_pull_streams_a_tar_into_the_destination(tmp_path: Path) -> None:
-    h = Harness(tmp_path)
-    pushed(h, remote_out="/workspace/out")
-    dest = tmp_path / "pulled"
-    assert h.main("pull", "--dest", str(dest)) == 0
-    assert dest.is_dir()
-    assert h.runner.pipes == [
-        (
-            [*ssh_prefix(h), "tar -c -C /workspace/out ."],
-            ["tar", "-x", "-C", str(dest)],
-        )
-    ]
-
-
-def test_pull_accepts_another_remote_path(tmp_path: Path) -> None:
+def test_start_refuses_a_spec_that_was_not_pushed(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     pushed(h)
-    dest = tmp_path / "pulled"
-    assert h.main("pull", "--dest", str(dest), "--path", "/workspace/a b") == 0
-    assert h.runner.pipes[0][0][-1] == "tar -c -C '/workspace/a b' ."
+    assert h.main("start", "--spec", "other.toml", "--max-hours", "1") == 1
+    assert "push" in h.output()
+    assert h.runner.runs == []
+
+
+def test_start_has_no_out_option() -> None:
+    with pytest.raises(SystemExit):
+        cloud.build_parser().parse_args(
+            ["start", "--spec", "s.toml", "--max-hours", "1", "--out", "x"]
+        )
+
+
+def test_start_refuses_when_self_removal_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    h.missing = ["RUNPOD_POD_ID", "runpodctl"]
+    pushed(h)
+    code = h.main("start", "--spec", "chain11.toml", "--max-hours", "1")
+    assert code == 1
+    assert "RUNPOD_POD_ID" in h.output()
+    assert "runpodctl" in h.output()
+    assert not [c for c in h.commands() if "setsid nohup" in c]
+    assert not [r for r in h.runner.runs if r[1]]
+
+
+def test_start_can_skip_self_removal_with_a_loud_warning(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    h.missing = ["runpodctl"]
+    pushed(h)
+    _, _, launches = started(h, "--no-self-removal")
+    assert "WARNING" in h.output()
+    assert "bills" in h.output()
+    assert launches
+
+
+def test_preflight_never_asks_for_values(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    pushed(h)
+    started(h)
+    command = next(c for c in h.commands() if "/proc/1/environ" in c)
+    assert "grep -q" in command
+    assert "runpodctl" in command
+    assert "RUNPOD_API_KEY" in command
+    assert "cat /proc/1/environ" not in command
+
+
+def test_start_refuses_a_second_chain(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    h.chain_live = True
+    pushed(h)
+    code = h.main("start", "--spec", "chain11.toml", "--max-hours", "1")
+    assert code == 1
+    assert "already running" in h.output()
+    assert not [c for c in h.commands() if "setsid nohup" in c]
+
+
+def test_status_tails_the_recorded_log_and_reports_the_exit(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    original = h.runner.handler
+
+    def handle(argv: Sequence[str]) -> cloud.CommandResult:
+        if argv[0] == "ssh":
+            return cloud.CommandResult(
+                0, "END r1 exit=0\nCHAIN_EXIT 0\nCHAIN_ALIVE\n"
+            )
+        return original(argv)
+
+    h.runner.handler = handle
+    pushed(h)
+    assert h.main("status") == 0
+    command = h.runner.runs[0][0][-1]
+    assert f"tail -n 20 {CHAIN_LOG}" in command
+    assert "kill -0" in command
+    assert "/workspace/run/chain.exit" in command
+    assert h.runner.runs[0][0][1] == "-n"
+    assert "CHAIN_ALIVE" in h.output()
 
 
 def test_down_deletes_and_confirms_the_pod_is_gone(tmp_path: Path) -> None:
     h = Harness(tmp_path, [(204, None), (404, {"error": "pod not found"})])
     write_state(h)
+    h.known_hosts().write_text("x", encoding="utf-8")
     assert h.main("down") == 0
     assert [c[0] for c in h.transport.calls] == ["DELETE", "GET"]
     assert h.transport.calls[0][1] == f"{BASE}/pods/pod1"
     assert h.state()["status"] == "deleted"
+    assert not h.known_hosts().exists()
     assert "deleted" in h.output()
 
 
@@ -620,13 +1108,26 @@ def test_down_fails_when_the_pod_never_disappears(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "argv",
     [
-        ["up"],
-        ["up", "--gpu", "G", "--cloud", "secure", "--volume-id", "v"],
+        ["up", "--max-hours", "2"],
+        [
+            "up",
+            "--max-hours",
+            "2",
+            "--gpu",
+            "G",
+            "--cloud",
+            "secure",
+            "--volume-id",
+            "v",
+            "--force",
+            "--no-self-removal",
+        ],
         ["ssh"],
         ["ssh", "--", "nvidia-smi"],
         ["push", "--ref", "HEAD", "--spec", "s.toml", "--sync-cache"],
         ["setup"],
         ["start", "--spec", "s.toml", "--max-hours", "3"],
+        ["start", "--spec", "s.toml", "--max-hours", "3", "--no-self-removal"],
         ["status"],
         ["pull", "--dest", "d"],
         ["down"],
@@ -640,11 +1141,11 @@ def test_every_subcommand_parses(argv: list[str]) -> None:
 
 
 def test_remote_commands_never_carry_the_key(tmp_path: Path) -> None:
-    h = Harness(tmp_path, handler=smi_handler("580.65.06"))
+    h = Harness(tmp_path)
     pushed(h)
     for command in (
         ["setup"],
-        ["start", "--spec", "c.toml", "--max-hours", "1"],
+        ["start", "--spec", "chain11.toml", "--max-hours", "1"],
         ["status"],
     ):
         assert h.main(*command) == 0
@@ -666,11 +1167,40 @@ def _bash_works() -> bool:
 def test_generated_scripts_are_valid_bash(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     pushed(h)
-    chain, dog, _ = started(h, "--max-hours", "1")
-    for name, text in (("chain.sh", chain), ("watchdog.sh", dog)):
+    chain, dog, _ = started(h)
+    deadline = cloud._deadline_script(3600)
+    for name, text in (
+        ("chain.sh", chain),
+        ("watchdog.sh", dog),
+        ("deadline.sh", deadline),
+    ):
         script = tmp_path / name
         script.write_text(text, encoding="utf-8", newline="\n")
         done = subprocess.run(
             ["bash", "-n", str(script)], capture_output=True, check=False
         )
         assert done.returncode == 0, done.stderr.decode()
+
+
+def test_the_real_runner_streams_stdout_and_reports_the_exit() -> None:
+    chunks: list[bytes] = []
+    code = cloud.SubprocessRunner().stream(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(b'abc'); sys.exit(3)",
+        ],
+        lambda stream: chunks.append(stream.read()),
+    )
+    assert chunks == [b"abc"]
+    assert code == 3
+
+
+def test_the_real_runner_kills_the_command_when_the_consumer_fails() -> None:
+    def refuse(stream: IO[bytes]) -> None:
+        raise cloud.CloudError("unsafe")
+
+    with pytest.raises(cloud.CloudError):
+        cloud.SubprocessRunner().stream(
+            [sys.executable, "-c", "import time; time.sleep(60)"], refuse
+        )
