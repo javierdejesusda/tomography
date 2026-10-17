@@ -1,0 +1,199 @@
+{
+  "_meta": {
+    "experiment": "p8",
+    "config_hash": "e9f9bc04ba3c",
+    "seed": 0,
+    "git_sha": "beb5801cc8bb4296c475d4a166fb80b21d610f5b",
+    "git_dirty": false,
+    "device": "cpu",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T01:08:21+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p8",
+      "model": "qwen3-1.7b",
+      "seed": 0,
+      "base_models": [
+        "qwen3-1.7b-base",
+        "qwen3-0.6b-base"
+      ],
+      "tuned_models": [
+        "qwen3-1.7b",
+        "qwen3-0.6b"
+      ],
+      "reference": "gpt2",
+      "concept_sources": [
+        "r1",
+        "r2",
+        "r3",
+        "r7"
+      ],
+      "function_sources": [
+        "r5"
+      ],
+      "template_source": "p1",
+      "template_task": "sentiment",
+      "steering_source": "c1",
+      "extra_runs": [
+        "results/p1/gpt2/673af340b77d",
+        "results/p1/qwen3-0.6b-base/a540a2497ac4",
+        "results/p1/qwen3-0.6b/31a6ee65d6ab",
+        "results/p1/qwen3-1.7b-base/ef3f8c0d3389",
+        "results/p1/qwen3-1.7b/f4aa9b57824a"
+      ],
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "pairs": [
+      [
+        "qwen3-1.7b-base",
+        "qwen3-1.7b"
+      ],
+      [
+        "qwen3-0.6b-base",
+        "qwen3-0.6b"
+      ]
+    ],
+    "sources": {
+      "concept": [
+        "r1",
+        "r2",
+        "r3",
+        "r7"
+      ],
+      "function": [
+        "r5"
+      ]
+    },
+    "models": [
+      "qwen3-1.7b-base",
+      "qwen3-1.7b",
+      "qwen3-0.6b-base",
+      "qwen3-0.6b",
+      "gpt2"
+    ],
+    "function_gap": {
+      "qwen3-1.7b": {
+        "point": 0.01656874134331658,
+        "lo": -0.03297881090460895,
+        "hi": 0.061390821424423425
+      },
+      "qwen3-0.6b": {
+        "point": 0.10904224603675752,
+        "lo": 0.09187922501069687,
+        "hi": 0.1266592812932865
+      }
+    },
+    "template_variants": [
+      "paper",
+      "no_template",
+      "bare",
+      "no_chat_tags",
+      "neutral_frame",
+      "no_trailing_question",
+      "paraphrase_0",
+      "paraphrase_1",
+      "paraphrase_2",
+      "scaffold_0",
+      "scaffold_1",
+      "scaffold_2",
+      "concept_swap_0",
+      "concept_swap_1",
+      "concept_swap_2",
+      "concept_swap_3"
+    ],
+    "template_dropped": {
+      "qwen3-1.7b-base": [
+        "no_trailing_space"
+      ],
+      "qwen3-1.7b": [],
+      "qwen3-0.6b-base": [
+        "no_trailing_space"
+      ],
+      "qwen3-0.6b": [],
+      "gpt2": [
+        "no_trailing_space"
+      ]
+    },
+    "template_sd": {
+      "qwen3-1.7b-base": {
+        "mean": 0.039469294491466404,
+        "lo": 0.033366366796224164,
+        "hi": 0.04652427038794183
+      },
+      "qwen3-1.7b": {
+        "mean": 0.057384227033897936,
+        "lo": 0.04954850891035256,
+        "hi": 0.06483113143002124
+      },
+      "qwen3-0.6b-base": {
+        "mean": 0.0588260699941196,
+        "lo": 0.052762487279102405,
+        "hi": 0.06492055851416746
+      },
+      "qwen3-0.6b": {
+        "mean": 0.05414817893631788,
+        "lo": 0.04895166438897636,
+        "hi": 0.05970547702799044
+      },
+      "gpt2": {
+        "mean": 0.02948924797346252,
+        "lo": 0.02555639881325153,
+        "hi": 0.03382027306977741
+      }
+    },
+    "template_sd_delta": {
+      "qwen3-1.7b": {
+        "mean": 0.01791493254243152,
+        "lo": 0.007006572060535182,
+        "hi": 0.026786804190329843
+      },
+      "qwen3-0.6b": {
+        "mean": -0.004677891057801715,
+        "lo": -0.014009005287162887,
+        "hi": 0.002970183324384008
+      }
+    },
+    "slopes": {
+      "qwen3-1.7b": {
+        "base": [
+          1.1033283497088373,
+          1.3250263733799719,
+          1.0919574740608886
+        ],
+        "tuned": [
+          1.1597322920844555,
+          1.729571989415178,
+          1.2667106187572894
+        ],
+        "delta": 0.2119009010357417
+      },
+      "qwen3-0.6b": {
+        "base": [
+          1.6794781293867083,
+          1.8991897546991823,
+          1.8149896893562896
+        ],
+        "tuned": [
+          1.6787031477168575,
+          1.8900565795371735,
+          1.1270918600944109
+        ],
+        "delta": -0.2326019953645794
+      }
+    }
+  }
+}
