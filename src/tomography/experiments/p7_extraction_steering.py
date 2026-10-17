@@ -39,6 +39,8 @@ from tomography.experiments.c1_sentiment_steering import dose_with_none
 from tomography.experiments.c1_sentiment_steering import draw_prompts
 from tomography.experiments.c1_sentiment_steering import prompt_fragments
 from tomography.experiments.c1_sentiment_steering import slope_layer
+from tomography.experiments.effects import SideEffects
+from tomography.experiments.effects import side_effects
 from tomography.experiments.effects import split_held_out
 from tomography.experiments.effects import write_trials
 from tomography.experiments.matrices import plot_matrix_file
@@ -109,6 +111,19 @@ _COLUMNS = (
     "n_readable",
     "n_inverted",
 )
+_EFFECTS_COLUMNS = (
+    "template",
+    "layer",
+    "reader",
+    "coeff",
+    "perplexity",
+    "fluency",
+    "distinct_1",
+    "distinct_2",
+    "mean_length",
+    "empty_rate",
+)
+RANDOM = "random"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -119,7 +134,8 @@ class Config(SteeringConfig):
     same seeds and items, and steers text with C1's protocol: relative
     coefficients calibrated on held-out WikiText, C1's prompt fragments and
     both sentiment judges at once. The inherited `layers` is not used: P7
-    steers the single layers of `sweep_layers`.
+    steers the single layers of `sweep_layers`. The random arms are unit
+    directions drawn from the seed and norm-matched to the steering arm.
 
     Attributes:
         method: The direction finder, as in R1 and C1.
@@ -140,6 +156,7 @@ class Config(SteeringConfig):
         read_threshold: A reader reads well at or above this validation
             accuracy, in [0.5, 1).
         n_boot: Number of bootstrap resamples of every curve band.
+        n_random: Random directions steered at every sweep layer.
     """
 
     experiment: str = "p7"
@@ -160,6 +177,7 @@ class Config(SteeringConfig):
     truncate_words: int = 3
     read_threshold: float = 0.6
     n_boot: int = 2000
+    n_random: int = 3
 
 
 def _kind_of(name: str) -> VariantKind:
@@ -345,6 +363,12 @@ def _finite_mean(values: NDArray[Any], axis: int) -> NDArray[np.float64]:
     return np.where(count > 0, total / np.maximum(count, 1), np.nan)
 
 
+def _max_abs(values: NDArray[np.float64]) -> float:
+    """Gives the largest absolute finite value; NaN when none is finite."""
+    finite = np.abs(values[np.isfinite(values)])
+    return float(finite.max()) if finite.size else float("nan")
+
+
 def _inversion(
     read: NDArray[np.float64], slope: NDArray[np.float64], threshold: float
 ) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
@@ -438,10 +462,13 @@ class _Steering:
         layer: int,
         prompts: Sequence[str],
         none: Trial,
+        built: dict[float, Arm] | None = None,
     ) -> DoseResponse:
+        """Runs a dose response, keeping the arms in `built` when given."""
         config = self.config
-        return dose_with_none(
-            lambda coeff: reader_arm(
+
+        def make(coeff: float) -> Arm:
+            arm = reader_arm(
                 self.loaded,
                 self.settings,
                 reader,
@@ -452,12 +479,34 @@ class _Steering:
                 mode=config.mode,
                 mask=config.mask,
                 preserve_norm=config.preserve_norm,
-            ),
-            config.coeffs,
-            prompts,
-            self.score,
-            none,
-            columns=2,
+            )
+            if built is not None:
+                built[coeff] = arm
+            return arm
+
+        return dose_with_none(
+            make, config.coeffs, prompts, self.score, none, columns=2
+        )
+
+    def effects(
+        self, arm: Arm, trial: Trial, neutral: Sequence[str]
+    ) -> SideEffects:
+        """Measures the side effects of an arm.
+
+        Args:
+            arm: The arm that produced `trial`.
+            trial: The judged trial of the arm.
+            neutral: Held-out text for the neutral perplexity.
+
+        Returns:
+            The side effects, with the run's batch size.
+        """
+        return side_effects(
+            self.loaded,
+            arm,
+            trial,
+            neutral,
+            batch_size=self.config.batch_size,
         )
 
 
@@ -465,6 +514,62 @@ def _steered_trials(dose: DoseResponse, prefix: str) -> list[Trial]:
     """Names the nonzero-coefficient trials `<prefix>/<coefficient>`."""
     return [
         dataclasses.replace(trial, name=f"{prefix}/{coeff:g}")
+        for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
+        if coeff != 0.0
+    ]
+
+
+def _effects_row(
+    template: str,
+    layer: int | None,
+    reader: int | None,
+    coeff: float,
+    effects: SideEffects,
+) -> list[object]:
+    """Builds one row of `table_effects`.
+
+    Args:
+        template: The template, `random` for a random arm or `none`.
+        layer: The sweep layer; None for the unsteered trial.
+        reader: The reader or random arm index; None for the unsteered trial.
+        coeff: The coefficient.
+        effects: The side effects of the trial.
+
+    Returns:
+        The identifying columns, then the six side-effect columns.
+    """
+    return [
+        template,
+        layer,
+        reader,
+        coeff,
+        effects.perplexity,
+        effects.fluency,
+        effects.distinct_1,
+        effects.distinct_2,
+        effects.mean_length,
+        effects.empty_rate,
+    ]
+
+
+def _dose_rows(
+    steering: _Steering,
+    dose: DoseResponse,
+    built: dict[float, Arm],
+    neutral: Sequence[str],
+    template: str,
+    layer: int,
+    reader: int,
+) -> list[list[object]]:
+    """Measures the side effects of the nonzero-coefficient trials."""
+    return [
+        _effects_row(
+            template,
+            layer,
+            reader,
+            coeff,
+            steering.effects(built[coeff], trial, neutral),
+        )
         for coeff, trial in zip(dose.coeffs, dose.trials, strict=True)
         if coeff != 0.0
     ]
@@ -520,6 +625,8 @@ def _check(config: Config, n_layers: int) -> tuple[int, ...]:
             f"sweep_layers must be distinct layers in 1..{n_layers}, got "
             f"{sweep}"
         )
+    if config.n_random < 1:
+        raise ValueError(f"n_random must be at least 1, got {config.n_random}")
     if not 0.5 <= config.read_threshold < 1.0:
         raise ValueError(
             f"read_threshold must be in [0.5, 1), got {config.read_threshold}"
@@ -604,30 +711,106 @@ def _dose_sweep(
     readers: Sequence[Sequence[RepReader]],
     sweep: Sequence[int],
     prompts: Sequence[str],
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    none: Trial,
+    neutral: Sequence[str],
+) -> tuple[NDArray[np.float64], NDArray[np.float64], list[list[object]]]:
     """Runs the dose response of every reader at every sweep layer.
 
     Writes `trials_sweep`.
 
+    Args:
+        steering: What every steered arm shares.
+        run_dir: The run to write into.
+        names: The templates.
+        readers: The steering readers of each template.
+        sweep: The sweep layers.
+        prompts: The selection prompts.
+        none: The unsteered trial on `prompts`.
+        neutral: Held-out text for the neutral perplexity.
+
     Returns:
-        The primary and the check scores, each of shape (T, S, R, K):
-        template, sweep layer, reader, coefficient.
+        A tuple of three elements:
+        - The primary scores, of shape (T, S, R, K): template, sweep layer,
+          reader, coefficient.
+        - The check scores, of the same shape.
+        - The rows of `table_effects` of the unsteered trial and the sweep
+          trials.
     """
     config = steering.config
-    none = steering.none(prompts)
     trials = [none]
+    plain_effects = steering.effects(steering.plain, none, neutral)
+    rows = [_effects_row("none", None, None, 0.0, plain_effects)]
     shape = (len(names), len(sweep), config.n_steer_seeds, len(config.coeffs))
     primary = np.full(shape, np.nan)
     check = np.full(shape, np.nan)
     for t, name in enumerate(names):
         for s, layer in enumerate(sweep):
             for r, reader in enumerate(readers[t]):
-                dose = steering.dose(reader, layer, prompts, none)
+                built: dict[float, Arm] = {}
+                dose = steering.dose(reader, layer, prompts, none, built)
                 primary[t, s, r] = dose.curve(0)
                 check[t, s, r] = dose.curve(1)
                 trials.extend(_steered_trials(dose, f"{name}/layer{layer}/{r}"))
+                rows.extend(
+                    _dose_rows(steering, dose, built, neutral, name, layer, r)
+                )
     write_trials(run_dir, "trials_sweep", trials)
-    return primary, check
+    return primary, check, rows
+
+
+def _random_sweep(
+    steering: _Steering,
+    run_dir: RunDir,
+    like: RepReader,
+    sweep: Sequence[int],
+    prompts: Sequence[str],
+    none: Trial,
+    neutral: Sequence[str],
+) -> tuple[NDArray[np.float64], list[list[object]]]:
+    """Runs the dose response of random directions at every sweep layer.
+
+    One generator seeded with `config.seed` draws the directions, one per
+    sweep layer and random arm, layer by layer. Writes `trials_random`.
+
+    Args:
+        steering: What every steered arm shares.
+        run_dir: The run to write into.
+        like: A steering reader, whose layers and shape the random readers
+            take.
+        sweep: The sweep layers.
+        prompts: The selection prompts.
+        none: The unsteered trial on `prompts`.
+        neutral: Held-out text for the neutral perplexity.
+
+    Returns:
+        A tuple of two elements:
+        - The primary scores, of shape (n_random, S, K): random arm, sweep
+          layer, coefficient.
+        - The rows of `table_effects` of the random trials.
+    """
+    config = steering.config
+    rng = np.random.default_rng(config.seed)
+    zeros = np.zeros_like(like.directions)
+    primary = np.full((config.n_random, len(sweep), len(config.coeffs)), np.nan)
+    trials = [none]
+    rows: list[list[object]] = []
+    for s, layer in enumerate(sweep):
+        for k in range(config.n_random):
+            reader = RepReader.from_arrays(
+                RANDOM,
+                like.layers,
+                rng.standard_normal(like.directions.shape),
+                zeros,
+            )
+            built: dict[float, Arm] = {}
+            dose = steering.dose(reader, layer, prompts, none, built)
+            primary[k, s] = dose.curve(0)
+            trials.extend(_steered_trials(dose, f"{RANDOM}{k}/layer{layer}"))
+            rows.extend(
+                _dose_rows(steering, dose, built, neutral, RANDOM, layer, k)
+            )
+    write_trials(run_dir, "trials_random", trials)
+    return primary, rows
 
 
 def _prompt_shift(
@@ -677,6 +860,8 @@ class _Measured:
             steering reader.
         check: Check-judge dose slope of the same shape.
         steer_layers: The steering layer of each template.
+        random_slope: Primary-judge dose slope of the random arms, of shape
+            (n_random, S).
     """
 
     names: tuple[str, ...]
@@ -687,6 +872,7 @@ class _Measured:
     slope: NDArray[np.float64]
     check: NDArray[np.float64]
     steer_layers: list[int]
+    random_slope: NDArray[np.float64]
 
 
 def _write_report(
@@ -744,6 +930,7 @@ def _write_report(
             "judge_sign_agreement": _sign_agreement(
                 slope.ravel(), measured.check.ravel()
             ),
+            "max_abs_random_slope": _max_abs(measured.random_slope),
         },
     )
 
@@ -777,10 +964,16 @@ def execute(
     sweep layer under the primary and the check judge), `matrix_transfer`
     (the mean primary slope of each template and format), `trials_sweep` and
     `trials_transfer_<format>`, `table.json` (one row per template) and
-    `summary.json`. A unit is a template, a sweep layer and a steering
-    reader. It is readable when its reader's validation accuracy at that
-    layer is at least `read_threshold`, and inverted when it is readable and
-    its primary slope is negative. The `steer_slope`
+    `summary.json`. Every sweep layer also steers `n_random` random
+    directions with the same dose call: `trials_random`,
+    `curves_slope_random` (their primary dose slope, one series each) and
+    the summary key `max_abs_random_slope`. `table_effects` holds the
+    neutral perplexity, the completion fluency, the distinct-n values, the
+    mean length and the empty rate of the unsteered trial, every sweep
+    trial and every random trial. A unit is a template, a sweep layer and a
+    steering reader. It is readable when its reader's validation accuracy at
+    that layer is at least `read_threshold`, and inverted when it is readable
+    and its primary slope is negative. The `steer_slope`
     column of the table is the mean primary slope at the steering layer measured
     on the selection prompts that chose that layer, so it is optimistic; the
     report prompts feed the prompt-shift transfer.
@@ -799,16 +992,16 @@ def execute(
         ValueError: If `templates` are not 1 to `MAX_SERIES` distinct names
             that `extraction_variants` accepts, `formats` are empty, repeated
             or unknown, `n_steer_seeds` is outside `1..n_seeds`, `coeffs` has
-            no 0.0 or no other value, `sweep_layers` are empty, repeated,
-            more than `MAX_SERIES` or outside `1..L`, `read_threshold` is
-            outside `[0.5, 1)`, the generation settings are invalid (see
-            `GenSettings`), no word of a pole is a single token,
-            `n_calibration` or `n_neutral` is below 1, the usable (at least
-            40 characters) held-out texts are fewer than `n_calibration +
-            n_neutral`, `n_pairs` or `n_eval_pairs` is below 1 or exceeds the
-            pairs its split can form (`n_eval_pairs` of None needs one), or
-            the validation sentences give fewer than `2 * n_prompts`
-            distinct prompts.
+            no 0.0 or no other value, `n_random` is below 1, `sweep_layers`
+            are empty, repeated, more than `MAX_SERIES` or outside `1..L`,
+            `read_threshold` is outside `[0.5, 1)`, the generation settings
+            are invalid (see `GenSettings`), no word of a pole is a single
+            token, `n_calibration` or `n_neutral` is below 1, the usable (at
+            least 40 characters) held-out texts are fewer than
+            `n_calibration + n_neutral`, `n_pairs` or `n_eval_pairs` is below
+            1 or exceeds the pairs its split can form (`n_eval_pairs` of None
+            needs one), or the validation sentences give fewer than
+            `2 * n_prompts` distinct prompts.
     """
     n_layers = loaded.n_layers
     sweep = _check(config, n_layers)
@@ -866,8 +1059,16 @@ def execute(
         score=score,
         plain=plain_arm(loaded, settings),
     )
-    primary, check = _dose_sweep(
-        steering, run_dir, names, readers, sweep, select_prompts
+    none = steering.none(select_prompts)
+    primary, check, rows = _dose_sweep(
+        steering,
+        run_dir,
+        names,
+        readers,
+        sweep,
+        select_prompts,
+        none,
+        held.neutral,
     )
     slope = _slopes(primary, config.coeffs)
     check_slope = _slopes(check, config.coeffs)
@@ -889,6 +1090,28 @@ def execute(
     transfer = _prompt_shift(
         steering, run_dir, names, readers, steer_layers, report_prompts, chat
     )
+    random_primary, random_rows = _random_sweep(
+        steering,
+        run_dir,
+        readers[0][0],
+        sweep,
+        select_prompts,
+        none,
+        held.neutral,
+    )
+    random_slope = _slopes(random_primary, config.coeffs)
+    curves(
+        random_slope[:, None, :],
+        sweep,
+        series=[f"{RANDOM}{k}" for k in range(config.n_random)],
+        stem="curves_slope_random",
+        ylabel="Dose slope (primary judge)",
+        chance=0.0,
+    )
+    run_dir.write_json(
+        "table_effects",
+        {"columns": list(_EFFECTS_COLUMNS), "rows": [*rows, *random_rows]},
+    )
     write_matrix(
         run_dir,
         "matrix_transfer",
@@ -902,7 +1125,15 @@ def execute(
         run_dir,
         n_layers,
         _Measured(
-            names, layers, sweep, reads, lens, slope, check_slope, steer_layers
+            names,
+            layers,
+            sweep,
+            reads,
+            lens,
+            slope,
+            check_slope,
+            steer_layers,
+            random_slope,
         ),
     )
 
