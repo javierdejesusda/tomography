@@ -1,0 +1,14 @@
+{
+  "experiment": "a1",
+  "model": "gpt2",
+  "seed": 0,
+  "sources": [
+    "r1",
+    "r2",
+    "r3",
+    "r5",
+    "r7"
+  ],
+  "extra_runs": [],
+  "depth": 0.5
+}

@@ -1,0 +1,136 @@
+{
+  "_meta": {
+    "experiment": "p9b",
+    "config_hash": "34c0ebff50b0",
+    "seed": 0,
+    "git_sha": "95a8243f28f538882c1b49bff0780ce15fbca093",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-16T10:15:06+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9b",
+      "model": "qwen3-0.6b-base",
+      "seed": 0,
+      "labels_run": "results/p9a/qwen3-0.6b-base/1d9f881153e4",
+      "template": "fewshot",
+      "n_shots": 15,
+      "types": null,
+      "methods": [
+        "logistic",
+        "pca_diff",
+        "mean_diff",
+        "random"
+      ],
+      "preprocess": "center",
+      "n_seeds": 5,
+      "n_pairs": 64,
+      "layers": null,
+      "layer": null,
+      "min_pairs": 16,
+      "min_eval": 10,
+      "bos": null,
+      "batch_size": 8
+    }
+  },
+  "data": {
+    "layer": 27,
+    "layer_source": "validation",
+    "template": "fewshot",
+    "methods": [
+      "logistic",
+      "pca_diff",
+      "mean_diff",
+      "random"
+    ],
+    "types": [
+      "fictional_generated",
+      "obscure_real",
+      "obscure_real_pop",
+      "triviaqa_known",
+      "unknowable_detail",
+      "false_premise",
+      "kuq_ambiguous",
+      "kuq_controversial",
+      "kuq_counterfactual",
+      "kuq_false_assumption",
+      "kuq_future_unknown",
+      "kuq_unsolved_problem",
+      "real_vs_synthal",
+      "real_vs_generated"
+    ],
+    "contrasts": {
+      "fictional_generated": "knowledge",
+      "obscure_real": "knowledge",
+      "obscure_real_pop": "knowledge",
+      "triviaqa_known": "knowledge",
+      "unknowable_detail": "knowledge",
+      "false_premise": "knowledge",
+      "kuq_ambiguous": "knowledge",
+      "kuq_controversial": "knowledge",
+      "kuq_counterfactual": "knowledge",
+      "kuq_false_assumption": "knowledge",
+      "kuq_future_unknown": "knowledge",
+      "kuq_unsolved_problem": "knowledge",
+      "real_vs_synthal": "unknown_type",
+      "real_vs_generated": "unknown_type"
+    },
+    "known_contrasts": true,
+    "skipped": {
+      "fictional_synthal": "fewer than 16 train items on one side",
+      "pre_vs_post_cutoff": "fewer than 16 train items on one side"
+    },
+    "curve_stems": [
+      "curves_fictional_generated",
+      "curves_obscure_real",
+      "curves_obscure_real_pop",
+      "curves_triviaqa_known",
+      "curves_unknowable_detail",
+      "curves_false_premise",
+      "curves_kuq_ambiguous",
+      "curves_kuq_controversial",
+      "curves_kuq_counterfactual",
+      "curves_kuq_false_assumption",
+      "curves_kuq_future_unknown",
+      "curves_kuq_unsolved_problem",
+      "curves_real_vs_synthal",
+      "curves_real_vs_generated",
+      "curves_entity",
+      "curves_question",
+      "curves_unknown"
+    ],
+    "matrix_stems": [
+      "matrix",
+      "matrix_cosine"
+    ],
+    "best_layer_by_type": {
+      "fictional_generated": 9,
+      "obscure_real": 27,
+      "obscure_real_pop": 28,
+      "triviaqa_known": 28,
+      "unknowable_detail": 3,
+      "false_premise": 11,
+      "kuq_ambiguous": 25,
+      "kuq_controversial": 11,
+      "kuq_counterfactual": 16,
+      "kuq_false_assumption": 22,
+      "kuq_future_unknown": 7,
+      "kuq_unsolved_problem": 18,
+      "real_vs_synthal": 24,
+      "real_vs_generated": 22
+    }
+  }
+}

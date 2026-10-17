@@ -1,0 +1,54 @@
+{
+  "_meta": {
+    "experiment": "a2",
+    "config_hash": "be4e34f21b35",
+    "seed": 0,
+    "git_sha": "a39ae61d1ea0214babb0f234a4fcf0c966c82c08",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-16T20:37:19+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "a2",
+      "model": "gpt2",
+      "seed": 0,
+      "sources": [
+        "r1",
+        "r2",
+        "r3",
+        "r5",
+        "r7"
+      ],
+      "extra_runs": [],
+      "top_k": 10,
+      "n_random": 100,
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "series": [
+      "r1",
+      "r2",
+      "r3",
+      "r5",
+      "r7"
+    ],
+    "xlabel": "Layer",
+    "ylabel": "Lens separation (z)",
+    "chance": 0.0,
+    "n_layers": 12
+  }
+}

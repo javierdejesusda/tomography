@@ -1,0 +1,51 @@
+{
+  "experiment": "c1",
+  "model": "gpt2-medium",
+  "seed": 0,
+  "n_prompts": 100,
+  "max_new_tokens": 40,
+  "temperature": 0.8,
+  "top_p": 0.95,
+  "num_samples": 2,
+  "layers": null,
+  "coeffs": [
+    -0.3,
+    -0.2,
+    -0.1,
+    0.0,
+    0.1,
+    0.2,
+    0.3
+  ],
+  "op": "linear",
+  "mode": "relative",
+  "mask": "response",
+  "preserve_norm": false,
+  "n_calibration": 200,
+  "n_neutral": 200,
+  "batch_size": 16,
+  "bos": null,
+  "method": "logistic",
+  "judge": "sentiment-primary",
+  "judge_check": "sentiment-secondary",
+  "n_seeds": 10,
+  "n_steer_seeds": 3,
+  "n_pairs": 64,
+  "n_eval_pairs": 256,
+  "min_words": 3,
+  "sweep_layers": null,
+  "window": 3,
+  "ops": [
+    "linear",
+    "piecewise"
+  ],
+  "truncate_words": 3,
+  "prompt_positive": [
+    "Write a happy and positive text. ",
+    "Write a very happy, joyful and enthusiastic text. "
+  ],
+  "prompt_negative": [
+    "Write a sad and negative text. ",
+    "Write a very sad, angry and hateful text. "
+  ]
+}

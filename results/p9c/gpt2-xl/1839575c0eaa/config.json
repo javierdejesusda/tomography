@@ -1,0 +1,25 @@
+{
+  "experiment": "p9c",
+  "model": "gpt2-xl",
+  "seed": 0,
+  "labels_run": "results/p9a/gpt2-xl/cc283b36fcae",
+  "template": "fewshot",
+  "n_shots": 15,
+  "datasets": [
+    "popqa",
+    "triviaqa",
+    "nq_open"
+  ],
+  "lat_type": "obscure_real",
+  "lat_method": "logistic",
+  "layers": null,
+  "layer": null,
+  "n_seeds": 5,
+  "n_pairs": 64,
+  "min_pairs": 16,
+  "n_boot": 1000,
+  "min_probe": 50,
+  "min_relation_class": 5,
+  "bos": null,
+  "batch_size": 4
+}

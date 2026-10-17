@@ -1,0 +1,216 @@
+{
+  "_meta": {
+    "experiment": "p9a",
+    "config_hash": "f413efcae268",
+    "seed": 0,
+    "git_sha": "ff1177ad3e7e7ae5ea30cfd7a523e099b2f6f796",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-15T22:01:03+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9a",
+      "model": "qwen3-1.7b",
+      "seed": 0,
+      "cutoff_year": 2024,
+      "n_popqa": null,
+      "n_synthal": null,
+      "n_kuq": 200,
+      "n_falseqa": 500,
+      "n_triviaqa": 1000,
+      "n_nq_open": 1000,
+      "n_detail": 300,
+      "n_shots": 15,
+      "n_samples": 5,
+      "temperature": 1.0,
+      "known_min_correct": 3,
+      "max_new_tokens": 16,
+      "n_hand_check": 200,
+      "max_guess_accuracy": 0.1,
+      "never_known": [
+        "sport"
+      ],
+      "popqa_relations": [
+        "father",
+        "mother",
+        "occupation",
+        "sport",
+        "director",
+        "screenwriter",
+        "author",
+        "producer",
+        "composer",
+        "capital",
+        "place of birth",
+        "capital of"
+      ],
+      "popqa_min_popularity": null,
+      "min_known": 100,
+      "popular_min": 10000,
+      "popular_share": 0.5,
+      "batch_size": 8,
+      "offline": false
+    }
+  },
+  "data": {
+    "columns": [
+      "group",
+      "kind",
+      "n",
+      "known_raw",
+      "known",
+      "unknown",
+      "uncertain"
+    ],
+    "rows": [
+      [
+        "popqa",
+        "real",
+        9467,
+        774,
+        517,
+        8137,
+        813
+      ],
+      [
+        "synthal",
+        "fictional",
+        800,
+        0,
+        0,
+        800,
+        0
+      ],
+      [
+        "fictional",
+        "fictional",
+        7453,
+        0,
+        0,
+        7453,
+        0
+      ],
+      [
+        "award",
+        "post_cutoff",
+        14,
+        0,
+        0,
+        14,
+        0
+      ],
+      [
+        "award",
+        "real",
+        254,
+        2,
+        1,
+        242,
+        11
+      ],
+      [
+        "detail",
+        "unknowable_detail",
+        300,
+        0,
+        0,
+        300,
+        0
+      ],
+      [
+        "falseqa",
+        "false_premise",
+        500,
+        0,
+        0,
+        500,
+        0
+      ],
+      [
+        "kuq",
+        "kuq:ambiguous",
+        200,
+        0,
+        0,
+        200,
+        0
+      ],
+      [
+        "kuq",
+        "kuq:controversial",
+        200,
+        0,
+        0,
+        200,
+        0
+      ],
+      [
+        "kuq",
+        "kuq:counterfactual",
+        200,
+        0,
+        0,
+        200,
+        0
+      ],
+      [
+        "kuq",
+        "kuq:false_assumption",
+        200,
+        0,
+        0,
+        200,
+        0
+      ],
+      [
+        "kuq",
+        "kuq:future_unknown",
+        200,
+        0,
+        0,
+        200,
+        0
+      ],
+      [
+        "kuq",
+        "kuq:unsolved_problem",
+        200,
+        0,
+        0,
+        200,
+        0
+      ],
+      [
+        "triviaqa",
+        "open",
+        1000,
+        271,
+        271,
+        592,
+        137
+      ],
+      [
+        "nq_open",
+        "open",
+        1000,
+        71,
+        71,
+        848,
+        81
+      ]
+    ]
+  }
+}

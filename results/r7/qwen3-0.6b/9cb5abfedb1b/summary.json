@@ -1,0 +1,213 @@
+{
+  "_meta": {
+    "experiment": "r7",
+    "config_hash": "9cb5abfedb1b",
+    "seed": 0,
+    "git_sha": "a39ae61d1ea0214babb0f234a4fcf0c966c82c08",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-16T21:29:03+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "r7",
+      "model": "qwen3-0.6b",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "concept": "truthfulness",
+      "ood_subsets": [
+        "cities",
+        "neg_cities",
+        "sp_en_trans",
+        "neg_sp_en_trans",
+        "larger_than",
+        "smaller_than",
+        "cities_cities_conj",
+        "cities_cities_disj",
+        "common_claim_true_false"
+      ]
+    }
+  },
+  "data": {
+    "val_layer": 18,
+    "sets": {
+      "val": {
+        "best_layer": 18,
+        "best_accuracy": 0.7377358490566037,
+        "ci": [
+          0.718867924528302,
+          0.7547169811320755
+        ],
+        "accuracy_at_val_layer": 0.7377358490566037,
+        "ci_at_val_layer": [
+          0.718867924528302,
+          0.7547169811320755
+        ],
+        "n_eval_pairs": 53
+      },
+      "test": {
+        "best_layer": 18,
+        "best_accuracy": 0.735593220338983,
+        "ci": [
+          0.6949152542372882,
+          0.7762711864406778
+        ],
+        "accuracy_at_val_layer": 0.735593220338983,
+        "ci_at_val_layer": [
+          0.6949152542372882,
+          0.7762711864406778
+        ],
+        "n_eval_pairs": 59
+      },
+      "cities": {
+        "best_layer": 18,
+        "best_accuracy": 0.8381016042780749,
+        "ci": [
+          0.8108155080213904,
+          0.8643081550802139
+        ],
+        "accuracy_at_val_layer": 0.8381016042780749,
+        "ci_at_val_layer": [
+          0.8108155080213904,
+          0.8643081550802139
+        ],
+        "n_eval_pairs": 748
+      },
+      "neg_cities": {
+        "best_layer": 28,
+        "best_accuracy": 0.5652406417112299,
+        "ci": [
+          0.548125,
+          0.5816911764705882
+        ],
+        "accuracy_at_val_layer": 0.5525401069518716,
+        "ci_at_val_layer": [
+          0.5232620320855614,
+          0.584090909090909
+        ],
+        "n_eval_pairs": 748
+      },
+      "sp_en_trans": {
+        "best_layer": 18,
+        "best_accuracy": 0.936723163841808,
+        "ci": [
+          0.9271186440677965,
+          0.9457627118644067
+        ],
+        "accuracy_at_val_layer": 0.936723163841808,
+        "ci_at_val_layer": [
+          0.9271186440677965,
+          0.9457627118644067
+        ],
+        "n_eval_pairs": 177
+      },
+      "neg_sp_en_trans": {
+        "best_layer": 7,
+        "best_accuracy": 0.5491525423728814,
+        "ci": [
+          0.5333333333333333,
+          0.5661016949152542
+        ],
+        "accuracy_at_val_layer": 0.3367231638418079,
+        "ci_at_val_layer": [
+          0.31412429378531076,
+          0.3581920903954802
+        ],
+        "n_eval_pairs": 177
+      },
+      "larger_than": {
+        "best_layer": 21,
+        "best_accuracy": 0.8044444444444444,
+        "ci": [
+          0.7814116161616163,
+          0.8273737373737374
+        ],
+        "accuracy_at_val_layer": 0.787070707070707,
+        "ci_at_val_layer": [
+          0.7644444444444446,
+          0.8107070707070706
+        ],
+        "n_eval_pairs": 990
+      },
+      "smaller_than": {
+        "best_layer": 18,
+        "best_accuracy": 0.8679797979797981,
+        "ci": [
+          0.850909090909091,
+          0.8827272727272726
+        ],
+        "accuracy_at_val_layer": 0.8679797979797981,
+        "ci_at_val_layer": [
+          0.850909090909091,
+          0.8827272727272726
+        ],
+        "n_eval_pairs": 990
+      },
+      "cities_cities_conj": {
+        "best_layer": 18,
+        "best_accuracy": 0.6657754010695187,
+        "ci": [
+          0.6401069518716578,
+          0.6910461229946525
+        ],
+        "accuracy_at_val_layer": 0.6657754010695187,
+        "ci_at_val_layer": [
+          0.6401069518716578,
+          0.6910461229946525
+        ],
+        "n_eval_pairs": 748
+      },
+      "cities_cities_disj": {
+        "best_layer": 20,
+        "best_accuracy": 0.6057486631016042,
+        "ci": [
+          0.5898395721925134,
+          0.620855614973262
+        ],
+        "accuracy_at_val_layer": 0.6053475935828877,
+        "ci_at_val_layer": [
+          0.5959859625668449,
+          0.6160461229946524
+        ],
+        "n_eval_pairs": 748
+      },
+      "common_claim_true_false": {
+        "best_layer": 18,
+        "best_accuracy": 0.6762696629213483,
+        "ci": [
+          0.6684033707865168,
+          0.6858438202247191
+        ],
+        "accuracy_at_val_layer": 0.6762696629213483,
+        "ci_at_val_layer": [
+          0.6684033707865168,
+          0.6858438202247191
+        ],
+        "n_eval_pairs": 2225
+      }
+    },
+    "n_seeds": 10,
+    "n_pairs": 64
+  }
+}
