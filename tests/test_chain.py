@@ -437,6 +437,8 @@ def _run(
         sleep=clock.sleep,
         launch=launcher,
         gpu_query=gpu or (lambda: None),
+        gpu_free_query=lambda: None,
+        gpu_util_query=lambda: None,
         **options,
     )
 
@@ -1894,3 +1896,177 @@ def test_make_gpu_queries_are_none_without_nvidia_smi(
         None,
         None,
     )
+
+
+def test_the_shutdown_terminates_every_child_before_waiting_on_one(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(tmp_path, _job("a"), _job("b", experiment="r2"))
+    plan, _ = _planned(clock, {"r1": 1000, "r2": 1000})
+    inner = FakeLauncher(clock, runs, plan)
+    events: list[tuple[str, str]] = []
+
+    def launch(
+        command: Sequence[str],
+        env: Mapping[str, str],
+        stdout_path: Path,
+        log_path: Path,
+    ) -> FakeProcess:
+        process = inner(command, env, stdout_path, log_path)
+        name = command[4]
+        terminate, wait = process.terminate, process.wait
+
+        def noting_terminate() -> None:
+            events.append(("terminate", name))
+            terminate()
+
+        def noting_wait(timeout: float | None = None) -> int:
+            events.append(("wait", name))
+            if name == "r1" and not process.killed:
+                raise subprocess.TimeoutExpired("x", timeout or 0)
+            return wait(timeout)
+
+        process.terminate = noting_terminate  # type: ignore[method-assign]
+        process.wait = noting_wait  # type: ignore[method-assign]
+        return process
+
+    sleeps = 0
+
+    def sleep(seconds: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 2:
+            raise KeyboardInterrupt
+        clock.sleep(seconds)
+
+    run_chain(
+        spec,
+        clock=clock,
+        sleep=sleep,
+        launch=launch,
+        gpu_query=lambda: None,
+        gpu_free_query=lambda: None,
+        gpu_util_query=lambda: None,
+    )
+
+    assert events.index(("terminate", "r2")) < events.index(("wait", "r1"))
+    assert all(process.terminated for process in inner.processes)
+    assert inner.processes[0].killed
+
+
+def _retry_plan(
+    clock: FakeClock, seconds: Mapping[str, float]
+) -> tuple[Callable[[Sequence[str]], Outcome], dict[str, float]]:
+    started: dict[str, float] = {}
+
+    def plan(command: Sequence[str]) -> Outcome:
+        retry = "batch_size=8" in command
+        key = "retry" if retry else command[4]
+        started[key] = clock.now - 1_700_000_000.0
+        if command[4] == "r1":
+            return Outcome(code=0 if retry else 1, seconds=seconds["r1"])
+        return Outcome(seconds=seconds["r2"])
+
+    return plan, started
+
+
+def _retrying_spec(tmp_path: Path, **fields: float) -> ChainSpec:
+    return _slotted(
+        tmp_path,
+        _job("a", settings={"batch_size": 16}, retry_batch_sizes=(8,)),
+        _job("b", experiment="r2"),
+        **fields,
+    )
+
+
+def test_a_retry_waits_for_the_gate_while_another_job_runs(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _retrying_spec(tmp_path, min_free_gpu_mib=5000)
+    plan, started = _retry_plan(clock, {"r1": 10, "r2": 200})
+
+    def free() -> int:
+        elapsed = clock.now - 1_700_000_000.0
+        return 8000 if elapsed < 5 or elapsed >= 40 else 1000
+
+    code = _run_slots(spec, FakeLauncher(clock, runs, plan), clock, free=free)
+
+    assert code == 0
+    assert started["r2"] == 0
+    assert started["retry"] == 40
+
+
+def test_a_retry_respects_the_start_gap(tmp_path: Path) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _retrying_spec(tmp_path, start_gap_seconds=30)
+    plan, started = _retry_plan(clock, {"r1": 40, "r2": 200})
+
+    code = _run_slots(spec, FakeLauncher(clock, runs, plan), clock)
+
+    assert code == 0
+    assert started["r2"] == 30
+    assert started["retry"] == 60
+
+
+def test_a_retry_starts_at_once_when_no_other_job_runs(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _retrying_spec(tmp_path, min_free_gpu_mib=5000, slots=1)
+    plan, started = _retry_plan(clock, {"r1": 10, "r2": 5})
+
+    code = _run_slots(spec, FakeLauncher(clock, runs, plan), clock)
+
+    assert code == 0
+    assert started["retry"] == 10
+
+
+def test_a_child_is_stopped_if_an_interrupt_lands_after_its_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a"))
+    launcher = FakeLauncher(clock, runs, lambda c: Outcome(seconds=1000))
+    begin = chain_module._Runner._begin
+
+    def interrupted_begin(self: object, running: object) -> bool:
+        begin(self, running)  # type: ignore[arg-type]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(chain_module._Runner, "_begin", interrupted_begin)
+
+    code = _run_slots(spec, launcher, clock)
+
+    assert code == 130
+    assert launcher.processes[0].terminated
+
+
+def test_each_gpu_query_defaults_on_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _slotted(
+        tmp_path,
+        _job("a"),
+        _job("b", experiment="r2"),
+        min_free_gpu_mib=5000,
+    )
+    plan, started = _planned(clock, {"r1": 400, "r2": 400})
+    calls = _fake_smi(monkeypatch, 0, "8000\n")
+
+    run_chain(
+        spec,
+        clock=clock,
+        sleep=clock.sleep,
+        launch=FakeLauncher(clock, runs, plan),
+        gpu_query=lambda: 1,
+        heartbeat_seconds=300,
+    )
+
+    fields = {c[1] for c in calls}
+    assert started == {"r1": 0, "r2": 0}
+    assert "--query-gpu=memory.free" in fields
+    assert "--query-gpu=utilization.gpu" in fields
+    assert "--query-gpu=memory.used" not in fields

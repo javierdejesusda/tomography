@@ -122,6 +122,21 @@ def _check_keys(
 def _integer(
     table: Mapping[str, Any], key: str, default: int, minimum: int, where: str
 ) -> int:
+    """Reads an optional integer setting of at least `minimum`.
+
+    Args:
+        table: The TOML table.
+        key: The setting name.
+        default: The value when the key is absent.
+        minimum: The smallest accepted value.
+        where: The table name for error messages.
+
+    Returns:
+        The value.
+
+    Raises:
+        ValueError: If the value is not an integer or is below `minimum`.
+    """
     value = table.get(key, default)
     if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
         raise ValueError(
@@ -133,6 +148,20 @@ def _integer(
 def _seconds(
     table: Mapping[str, Any], key: str, default: float, where: str
 ) -> float:
+    """Reads an optional finite number of at least 0.
+
+    Args:
+        table: The TOML table.
+        key: The setting name.
+        default: The value when the key is absent.
+        where: The table name for error messages.
+
+    Returns:
+        The value as a float.
+
+    Raises:
+        ValueError: If the value is not a finite number of at least 0.
+    """
     value = table.get(key, default)
     if (
         not isinstance(value, int | float)
@@ -425,6 +454,16 @@ def launch_process(
 
 
 def _smi_query(smi: str | None, field: str) -> Callable[[], int | None]:
+    """Builds a query of one `nvidia-smi` field of the first GPU.
+
+    Args:
+        smi: The `nvidia-smi` path, or None when the tool is missing.
+        field: The `--query-gpu` field, for example `memory.free`.
+
+    Returns:
+        A function giving the integer value, or None when the tool is
+        missing, fails or prints something else.
+    """
     if smi is None:
         return lambda: None
     command = [smi, f"--query-gpu={field}", "--format=csv,noheader,nounits"]
@@ -606,29 +645,45 @@ def _signal_child(process: Process, sig: int, fallback: str) -> None:
         getattr(process, fallback)()
 
 
+def stop_processes(processes: Sequence[Process]) -> None:
+    """Stops running children: SIGTERM to all, then SIGKILL.
+
+    Every child gets SIGTERM first, then the children are waited on against
+    one shared deadline of `TERMINATE_SECONDS`, so a child that ignores
+    SIGTERM does not delay the others. On POSIX the signals go to each
+    child's whole process group, and the SIGKILL also reaches group members
+    that outlive the leader. Further SIGTERM, SIGHUP and SIGINT are ignored
+    while stopping.
+
+    Args:
+        processes: The children.
+    """
+    running = [process for process in processes if process.poll() is None]
+    if not running:
+        return
+    with _handlers(_signals(signal.SIGINT), signal.SIG_IGN):
+        for process in running:
+            _signal_child(process, signal.SIGTERM, "terminate")
+        deadline = time.monotonic() + TERMINATE_SECONDS
+        for process in running:
+            timed_out = False
+            try:
+                process.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+            if timed_out or POSIX:
+                _signal_child(process, getattr(signal, "SIGKILL", 9), "kill")
+            if timed_out:
+                process.wait()
+
+
 def stop_process(process: Process) -> None:
     """Stops a running child: SIGTERM, then SIGKILL.
-
-    On POSIX the signals go to the child's whole process group, and the
-    SIGKILL also reaches group members that outlive the leader. Further
-    SIGTERM, SIGHUP and SIGINT are ignored while stopping.
 
     Args:
         process: The child.
     """
-    if process.poll() is not None:
-        return
-    with _handlers(_signals(signal.SIGINT), signal.SIG_IGN):
-        _signal_child(process, signal.SIGTERM, "terminate")
-        timed_out = False
-        try:
-            process.wait(timeout=TERMINATE_SECONDS)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-        if timed_out or POSIX:
-            _signal_child(process, getattr(signal, "SIGKILL", 9), "kill")
-        if timed_out:
-            process.wait()
+    stop_processes([process])
 
 
 @dataclasses.dataclass
@@ -689,7 +744,17 @@ class _Runner:
         return None
 
     def _begin(self, running: _Active) -> bool:
-        """Starts the current attempt of a job; False if it cannot launch."""
+        """Starts the current attempt of a job.
+
+        Logs RETRY for a retry and START, prepares the attempt folder and
+        launches the command. A launch error is logged as an END line.
+
+        Args:
+            running: The job and the attempt it is at.
+
+        Returns:
+            True when the process runs, False when it could not launch.
+        """
         name = running.name
         size = running.sizes[running.index]
         if size is not None:
@@ -727,6 +792,13 @@ class _Runner:
     def _heartbeat(
         self, running: _Active, used: int | None, util: int | None
     ) -> None:
+        """Logs a HEARTBEAT line of a running attempt.
+
+        Args:
+            running: The attempt.
+            used: The latest GPU memory used in MiB, or None.
+            util: The GPU utilization in percent, or None to leave it out.
+        """
         now = self.clock()
         line = (
             f"HEARTBEAT {running.name} elapsed={int(now - running.start)} "
@@ -753,8 +825,15 @@ class _Runner:
     def _finish_attempt(self, running: _Active, code: int) -> bool:
         """Logs a finished attempt and moves the job on.
 
+        A retry is not launched here: the job keeps its slot without a
+        process until `_start_ready` passes the start gate for it.
+
+        Args:
+            running: The job whose attempt ended.
+            code: The exit code of the attempt.
+
         Returns:
-            True while the job still holds its slot, because a retry started.
+            True while the job still holds its slot, waiting for a retry.
         """
         folder = self.spec.out / "_chain" / running.name
         result = self._outcome(
@@ -776,18 +855,34 @@ class _Runner:
             return False
         if running.index + 1 < len(running.names):
             running.index += 1
-            if self._begin(running):
-                return True
+            running.process = None
+            return True
         self._end(running.job.name, ok=False)
         return False
 
     def _end(self, name: str, ok: bool) -> None:
+        """Marks a job as ended, counting it as failed unless it was ok.
+
+        Args:
+            name: The job name.
+            ok: Whether the job finished a run directory.
+        """
         self.ended.add(name)
         if not ok:
             self.failed += 1
 
     def _gate_open(self) -> bool:
-        if not self.active:
+        """Tells whether a job may start now.
+
+        Always true while no process runs. Otherwise the last start must be
+        `start_gap_seconds` ago when `slots` is above 1, and the GPU must
+        report `min_free_gpu_mib` free when that is set; a failed query
+        keeps the gate closed.
+
+        Returns:
+            True when a start is allowed.
+        """
+        if not any(r.process is not None for r in self.active):
             return True
         if (
             self.spec.slots > 1
@@ -800,8 +895,19 @@ class _Runner:
         free = self.gpu_free_query()
         return free is not None and free >= self.spec.min_free_gpu_mib
 
+    def _resume_retries(self) -> None:
+        """Starts the retries that wait in a slot once the gate is open."""
+        for running in list(self.active):
+            if running.process is not None or not self._gate_open():
+                continue
+            self.last_start = self.clock()
+            if not self._begin(running):
+                self.active.remove(running)
+                self._end(running.job.name, ok=False)
+
     def _start_ready(self) -> None:
         """Starts the first ready jobs, in spec order, while slots are free."""
+        self._resume_retries()
         for job in list(self.pending):
             if len(self.active) >= self.spec.slots:
                 return
@@ -837,9 +943,9 @@ class _Runner:
                 [None, *job.retry_batch_sizes],
             )
             self.last_start = self.clock()
-            if self._begin(running):
-                self.active.append(running)
-            else:
+            self.active.append(running)
+            if not self._begin(running):
+                self.active.remove(running)
                 self._end(job.name, ok=False)
 
     def _poll_active(self) -> bool:
@@ -851,13 +957,15 @@ class _Runner:
         used = self.gpu_query()
         if used is not None:
             for running in self.active:
-                peak = running.peak
-                running.peak = used if peak is None else max(peak, used)
+                if running.process is not None:
+                    peak = running.peak
+                    running.peak = used if peak is None else max(peak, used)
         util: int | None = None
         util_read = False
         reaped = False
         for running in list(self.active):
-            assert running.process is not None
+            if running.process is None:
+                continue
             code = running.process.poll()
             if code is not None:
                 reaped = True
@@ -882,12 +990,13 @@ class _Runner:
                 self.sleep(self.poll_seconds)
         except KeyboardInterrupt:
             for running in self.active:
-                self.log(f"INTERRUPTED {running.name}")
+                if running.process is not None:
+                    self.log(f"INTERRUPTED {running.name}")
             raise
         finally:
-            for running in self.active:
-                if running.process is not None:
-                    stop_process(running.process)
+            stop_processes(
+                [r.process for r in self.active if r.process is not None]
+            )
         self.log(f"CHAIN_DONE failed={self.failed}")
         return 1 if self.failed else 0
 
@@ -912,14 +1021,15 @@ def run_chain(
     arguments is skipped, so a restart resumes the chain. Jobs start in spec
     order; a job is ready once every job in its `run_dir_from` has ended, and
     a blocked job does not hold back a later ready one. The retries of a job
-    run one after another in its slot. While another job runs, a start also
+    run one after another in its slot and pass the same start gate. While
+    another job runs, a start also
     waits for `spec.start_gap_seconds` since the last start and, when
     `spec.min_free_gpu_mib` is set, for that much free GPU memory (a failed
     query keeps the gate closed); an idle runner always starts. With
     several jobs the log lines interleave, and the `peak_gpu` of an END line
     is the device-wide peak while that job ran, not the memory of that job
-    alone. SIGTERM, SIGHUP and Ctrl-C stop every running child, log the
-    interruption and return 130.
+    alone. SIGTERM, SIGHUP and Ctrl-C stop every running child at once,
+    log the interruption and return 130.
 
     Args:
         spec: The chain.
@@ -928,17 +1038,22 @@ def run_chain(
         clock: Returns the time in seconds since the epoch.
         sleep: Waits for the given seconds.
         launch: Starts a command with its stdout and stderr files.
-        gpu_query: Returns the GPU memory used in MiB, or None; by default
-            a query of `nvidia-smi`, looked up once.
+        gpu_query: Returns the GPU memory used in MiB, or None.
         gpu_free_query: Returns the free GPU memory in MiB, or None; read
             only for the start gate.
         gpu_util_query: Returns the GPU utilization in percent, or None; read
             only for a HEARTBEAT line, which adds `gpu_util` when it answers.
+            Each query that is omitted defaults on its own to the matching
+            `nvidia-smi` query, with one lookup of the tool for all of them.
 
     Returns:
         0 when no job failed, 1 when one did, 130 when interrupted.
     """
-    queries = make_gpu_queries() if gpu_query is None else None
+    if gpu_query is None or gpu_free_query is None or gpu_util_query is None:
+        defaults = make_gpu_queries()
+        gpu_query = gpu_query or defaults.used
+        gpu_free_query = gpu_free_query or defaults.free
+        gpu_util_query = gpu_util_query or defaults.util
     runner = _Runner(
         spec,
         heartbeat_seconds,
@@ -946,9 +1061,9 @@ def run_chain(
         clock,
         sleep,
         launch,
-        queries.used if queries else gpu_query or (lambda: None),
-        gpu_free_query or (queries.free if queries else lambda: None),
-        gpu_util_query or (queries.util if queries else lambda: None),
+        gpu_query,
+        gpu_free_query,
+        gpu_util_query,
     )
     (spec.out / "_chain").mkdir(parents=True, exist_ok=True)
     runner.log(
