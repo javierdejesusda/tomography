@@ -413,3 +413,125 @@ def test_a_trailing_marker_after_a_range_flags_it():
 )
 def test_only_the_answer_line_can_abstain(completion):
     assert parse_answer(completion) == Parsed("none", None, None, False)
+
+
+METRES = ("m", "metres", "meters")
+
+
+@pytest.mark.parametrize(
+    ("completion", "label", "expected"),
+    [
+        (
+            "The Boeing 737-800 has a wingspan of 35.8 m.",
+            "Boeing 737-800",
+            _point(35.8),
+        ),
+        (
+            "The Airbus A320 has a wingspan of 35.8 metres.",
+            "Airbus A320",
+            _point(35.8),
+        ),
+        ("The Su-27 has a wingspan of 14.7 m.", "Su-27", _point(14.7)),
+        ("The B-52 has a wingspan of 56.4 m", "B-52", _point(56.4)),
+        (
+            "The Cessna 172 has a wingspan of about 11 m.",
+            "Cessna 172",
+            _point(11, approximate=True),
+        ),
+        ("The boeing 737-800 spans 35.8 m.", "BOEING 737-800", _point(35.8)),
+    ],
+)
+def test_an_ignored_label_is_not_read_as_the_answer(
+    completion, label, expected
+):
+    assert parse_answer(completion, ignore=(label,)) == expected
+
+
+def test_an_ignored_label_does_not_merge_its_neighbours():
+    assert parse_answer("12B-523", ignore=("B-52",)) == _point(12)
+
+
+def test_the_longest_ignored_label_is_removed_first():
+    completion = "The Boeing 737-800 has a wingspan of 35.8 m."
+    assert parse_answer(
+        completion, ignore=("Boeing", "Boeing 737-800")
+    ) == _point(35.8)
+
+
+def test_an_empty_ignored_label_changes_nothing():
+    assert parse_answer("30 to 40 cm", ignore=("",)) == _range(30, 40)
+
+
+@pytest.mark.parametrize(
+    ("completion", "units", "expected"),
+    [
+        ("The Boeing 737-800 has a wingspan of 35.8 m", METRES, _point(35.8)),
+        (
+            "The Airbus A320 has a wingspan of 35.8 metres.",
+            METRES,
+            _point(35.8),
+        ),
+        ("The Su-27 has a wingspan of 14.7m.", METRES, _point(14.7)),
+        ("The B-52 has a wingspan of 56.4 M", METRES, _point(56.4)),
+        (
+            "The Cessna 172 has a wingspan of about 11 m.",
+            METRES,
+            _point(11, approximate=True),
+        ),
+        ("Pulp Fiction (1994) runs 154 minutes.", ("minutes",), _point(154)),
+        (
+            "It was released in 1994 and runs 142 minutes.",
+            ("minutes",),
+            _point(142),
+        ),
+        ("Born 1990, it is 160 to 188 cm tall", ("cm",), _range(160, 188)),
+        ("Born 1990, it is 160 cm to 188 tall", ("cm",), _range(160, 188)),
+        (
+            "In 1990 it was about 30-35 m",
+            METRES,
+            _range(30, 35, approximate=True),
+        ),
+    ],
+)
+def test_a_quantity_followed_by_a_unit_word_is_preferred(
+    completion, units, expected
+):
+    assert parse_answer(completion, unit_words=units) == expected
+
+
+@pytest.mark.parametrize(
+    "completion",
+    ["In 1994 it ran 154 minutes", "In 1994 it was 5 million"],
+)
+def test_a_unit_word_must_end_at_a_word_boundary(completion):
+    assert parse_answer(completion, unit_words=("m",)) == _point(1994)
+
+
+def test_without_a_unit_word_the_first_quantity_is_the_answer():
+    assert parse_answer("The Cessna 172 spans 11", unit_words=METRES) == _point(
+        172
+    )
+
+
+def test_ignore_and_unit_words_combine():
+    completion = "The Boeing 737-800 (1998) has a wingspan of 35.8 m."
+    assert parse_answer(
+        completion, ignore=("Boeing 737-800",), unit_words=METRES
+    ) == _point(35.8)
+
+
+def test_unit_words_leave_an_abstention_alone():
+    assert parse_answer("I don't know", unit_words=METRES) == Parsed(
+        "abstain", None, None, False
+    )
+
+
+@pytest.mark.parametrize(
+    ("completion", "expected"),
+    [
+        ("The Boeing 737-800 has a wingspan of 35.8 m.", _range(737, 800)),
+        ("Pulp Fiction (1994) runs 154 minutes.", _point(1994)),
+    ],
+)
+def test_by_default_the_first_quantity_still_wins(completion, expected):
+    assert parse_answer(completion) == expected

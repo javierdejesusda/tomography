@@ -2,15 +2,20 @@
 
 A completion is cut to its first non-empty line and that line decides
 everything: the first quantity on it is the answer, and an abstention phrase
-counts only when the line holds no quantity. Abstention reuses the P9 phrase
-patterns, so "does not know" means the same thing in both studies. Grading
-compares the parsed value or range with a gold interval widened by a relative
-tolerance.
+counts only when the line holds no quantity. So that the digits of a name or a
+year are not read as the answer, the caller can remove strings such as the
+entity label from the line, and can name unit words so that the first quantity
+followed by one wins. Values are read in whatever unit the model used ("9
+months" for a days question is 9); the experiment reports unit mismatches from
+its hand check. Abstention reuses the P9 phrase patterns, so "does not know"
+means the same thing in both studies. Grading compares the parsed value or
+range with a gold interval widened by a relative tolerance.
 
 Negative numbers are out of scope: every P10 quantity is positive, and a
 leading minus sign reads as a range separator.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 import re
 from typing import Literal
@@ -241,7 +246,9 @@ def _read(match: re.Match[str]) -> tuple[float, int | None]:
     return total + current, only_scale if ends_in_scale else None
 
 
-def _quantity(text: str, first: re.Match[str]) -> tuple[float, float] | None:
+def _quantity(
+    text: str, first: re.Match[str]
+) -> tuple[float, float, int] | None:
     """Reads the point or range that starts at a number.
 
     Args:
@@ -249,8 +256,9 @@ def _quantity(text: str, first: re.Match[str]) -> tuple[float, float] | None:
         first: The match of `_NUMBER` that opens the quantity.
 
     Returns:
-        The lower and upper bounds, equal for a point; None when `first` is
-        a bare "one" that does not open a range.
+        The lower and upper bounds, equal for a point, and the index where
+        the quantity ends; None when `first` is a bare "one" that does not
+        open a range.
     """
     value, factor = _read(first)
     joined = _JOINER.match(text, first.end())
@@ -260,16 +268,53 @@ def _quantity(text: str, first: re.Match[str]) -> tuple[float, float] | None:
         if not joined["and"] or between:
             other, other_factor = _read(second)
             if joined["pm"]:
-                return value - other, value + other
+                return value - other, value + other, second.end()
             if factor is None and other_factor is not None:
                 value *= other_factor
-            return min(value, other), max(value, other)
+            return min(value, other), max(value, other), second.end()
     if first["words"] and first["words"].lower() == "one":
         return None
-    return value, value
+    return value, value, first.end()
 
 
-def parse_answer(completion: str) -> Parsed:
+def _without(text: str, ignore: Sequence[str]) -> str:
+    """Replaces every ignored string in a text with a space.
+
+    Args:
+        text: The answer line.
+        ignore: The strings to remove, matched case-insensitively; empty
+            strings are skipped.
+
+    Returns:
+        The text without them.
+    """
+    labels = [re.escape(label) for label in ignore if label]
+    if not labels:
+        return text
+    return re.sub(_alternatives(labels), " ", text, flags=re.IGNORECASE)
+
+
+def _unit_pattern(unit_words: Sequence[str]) -> re.Pattern[str] | None:
+    """Compiles a pattern for a unit word right after a quantity.
+
+    Args:
+        unit_words: The unit words; empty strings are skipped.
+
+    Returns:
+        The pattern, or None when there is no unit word.
+    """
+    units = [re.escape(unit) for unit in unit_words if unit]
+    if not units:
+        return None
+    return re.compile(rf"\s*(?:{_alternatives(units)})(?!\w)", re.IGNORECASE)
+
+
+def parse_answer(
+    completion: str,
+    *,
+    ignore: Sequence[str] = (),
+    unit_words: Sequence[str] = (),
+) -> Parsed:
     """Parses a completion into a point, a range, an abstention or nothing.
 
     A vague quantity such as "several hundred" has no usable value, so it is
@@ -278,24 +323,39 @@ def parse_answer(completion: str) -> Parsed:
 
     Args:
         completion: The generated text.
+        ignore: Strings removed from the answer line, case-insensitively,
+            before any number is read, such as the entity label "Boeing
+            737-800" whose digits are not the answer.
+        unit_words: Unit words such as "m" or "minutes". When given, the
+            answer is the first quantity followed by one of them ("35.8 m",
+            "35.8m", "160 to 188 cm"), and the first quantity when none is.
 
     Returns:
         The parse of its first non-empty line.
     """
-    text = answer_text(completion)
+    text = _without(answer_text(completion), ignore)
+    unit = _unit_pattern(unit_words)
     vague = _VAGUE.search(text)
+    chosen: tuple[re.Match[str], tuple[float, float, int]] | None = None
     for first in _NUMBER.finditer(text):
         if vague and vague.start() <= first.start():
             break
-        bounds = _quantity(text, first)
-        if bounds is None:
+        quantity = _quantity(text, first)
+        if quantity is None:
             continue
+        chosen = chosen or (first, quantity)
+        if unit is None:
+            break
+        if unit.match(text, quantity[2]) or unit.match(text, first.end()):
+            chosen = first, quantity
+            break
+    if chosen is not None:
+        first, (low, high, _) = chosen
         approximate = bool(
             _LEADING.search(text[: first.start()])
             or _HABIT.search(text)
             or _TRAILING.search(text[first.end() :])
         )
-        low, high = bounds
         form: Form = "point" if low == high else "range"
         return Parsed(form, low, high, approximate)
     if vague:
