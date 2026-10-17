@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import re
 from typing import Literal
 
+from tomography.p9.behavior import ABSTAIN_REGEXES
 from tomography.p9.behavior import is_abstention
 
 UNIT_WORDS: dict[str, int] = {
@@ -33,9 +34,9 @@ UNIT_WORDS: dict[str, int] = {
     "seventeen": 17,
     "eighteen": 18,
     "nineteen": 19,
-    "twenty": 20,
 }
 TENS_WORDS: dict[str, int] = {
+    "twenty": 20,
     "thirty": 30,
     "forty": 40,
     "fifty": 50,
@@ -44,20 +45,59 @@ TENS_WORDS: dict[str, int] = {
     "eighty": 80,
     "ninety": 90,
 }
-_TENS_AND_TWENTY = {**TENS_WORDS, "twenty": 20}
-_SINGLE_DIGIT_WORDS = {w: v for w, v in UNIT_WORDS.items() if 1 <= v <= 9}
+SCALE_WORDS: dict[str, int] = {
+    "hundred": 100,
+    "thousand": 1000,
+    "million": 1_000_000,
+    "dozen": 12,
+}
+_WORD_VALUES: dict[str, int] = {"a": 1, **UNIT_WORDS, **TENS_WORDS}
 
+
+def _alternatives(words: list[str]) -> str:
+    """Joins words into a regex alternation, longest first.
+
+    Args:
+        words: The words.
+
+    Returns:
+        The alternation, without a group.
+    """
+    return "|".join(sorted(words, key=len, reverse=True))
+
+
+_DIGIT_WORDS = _alternatives([w for w, v in UNIT_WORDS.items() if 1 <= v <= 9])
+_SMALL = (
+    rf"(?:(?:{_alternatives(list(TENS_WORDS))})(?:-|\s+)(?:{_DIGIT_WORDS})"
+    rf"|{_alternatives(list(TENS_WORDS))}|{_alternatives(list(UNIT_WORDS))})"
+    r"(?!\w)"
+)
+_HUNDRED = (
+    rf"(?:(?:a|{_DIGIT_WORDS})\s+)?hundred(?!\w)"
+    rf"(?:\s+(?:and\s+)?{_SMALL})?"
+)
+_THOUSAND = (
+    rf"(?:(?:a|{_SMALL})\s+)?(?:thousand|million)(?!\w)"
+    rf"(?:\s+(?:and\s+)?(?:{_HUNDRED}|{_SMALL}))?"
+)
+_DOZEN = rf"(?:(?:a|{_DIGIT_WORDS})\s+)?dozen(?!\w)"
 _DIGITS = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
-_TENS_PATTERN = "|".join(_TENS_AND_TWENTY)
-_UNIT_PATTERN = "|".join(_SINGLE_DIGIT_WORDS)
-_HUNDRED_PATTERN = "|".join(["a", *_SINGLE_DIGIT_WORDS])
 _NUMBER = re.compile(
-    rf"(?P<digits>{_DIGITS})"
-    rf"|(?<![\w])(?:(?P<mult>{_HUNDRED_PATTERN})\s+)?(?P<hundred>hundred)(?!\w)"
-    rf"|(?<![\w])(?P<tens>{_TENS_PATTERN})(?:-(?P<unit>{_UNIT_PATTERN}))?(?!\w)"
-    rf"|(?<![\w])(?P<word>{'|'.join(UNIT_WORDS)})(?!\w)",
+    rf"(?P<digits>{_DIGITS})(?:(?P<k>k)(?!\w)"
+    r"|\s+(?P<dscale>hundred|thousand|million)(?!\w))?"
+    rf"|(?<!\w)(?P<words>{_THOUSAND}|{_HUNDRED}|{_DOZEN}|{_SMALL})",
     re.IGNORECASE,
 )
+EXTRA_ABSTAIN_REGEXES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?<!\w)no one (?:knows|can (?:know|say|tell))(?!\w)"),
+)
+_VAGUE = re.compile(
+    r"(?<!\w)(?:(?:several|a\s+few|a\s+couple\s+of)\s+"
+    r"(?:hundred|thousand|million)"
+    r"|(?:hundreds|dozens|thousands|millions)\s+of)(?!\w)",
+    re.IGNORECASE,
+)
+
 
 LEADING_MARKERS: tuple[str, ...] = (
     "about",
@@ -77,6 +117,9 @@ LEADING_MARKERS: tuple[str, ...] = (
     "maybe",
     "perhaps",
     "probably",
+    "several",
+    "a few",
+    "a couple of",
 )
 SYMBOL_MARKERS: tuple[str, ...] = ("~", "\u2248")
 HABIT_MARKERS: tuple[str, ...] = (
@@ -147,27 +190,41 @@ def answer_text(completion: str) -> str:
     return ""
 
 
-def _value(match: re.Match[str]) -> float:
+def _read(match: re.Match[str]) -> tuple[float, int | None]:
     """Converts a number match to its value.
 
     Args:
         match: A match of `_NUMBER`.
 
     Returns:
-        The value.
+        The value, and the factor of its only scale word ("six hundred",
+        "3 thousand", "30k") or None when it has none or several.
     """
     if match["digits"] is not None:
-        return float(match["digits"].replace(",", ""))
-    if match["hundred"] is not None:
-        factor = match["mult"].lower() if match["mult"] else "a"
-        return 100.0 * _SINGLE_DIGIT_WORDS.get(factor, 1)
-    if match["tens"] is not None:
-        tens = _TENS_AND_TWENTY[match["tens"].lower()]
-        unit = (
-            _SINGLE_DIGIT_WORDS[match["unit"].lower()] if match["unit"] else 0
-        )
-        return float(tens + unit)
-    return float(UNIT_WORDS[match["word"].lower()])
+        value = float(match["digits"].replace(",", ""))
+        if match["k"]:
+            return value * 1000, 1000
+        if match["dscale"]:
+            factor = SCALE_WORDS[match["dscale"].lower()]
+            return value * factor, factor
+        return value, None
+    words = [
+        w for w in re.split(r"[-\s]+", match["words"].lower()) if w != "and"
+    ]
+    total = current = 0.0
+    for word in words:
+        if word in ("thousand", "million"):
+            total += (current or 1) * SCALE_WORDS[word]
+            current = 0.0
+        elif word in SCALE_WORDS:
+            current = (current or 1) * SCALE_WORDS[word]
+        else:
+            current += _WORD_VALUES[word]
+    scales = [w for w in words if w in SCALE_WORDS]
+    factor = SCALE_WORDS[scales[0]] if len(scales) == 1 else None
+    if words[-1] not in SCALE_WORDS:
+        factor = None
+    return total + current, factor
 
 
 def _joins(before: str, joiner: re.Match[str]) -> bool:
@@ -186,6 +243,10 @@ def _joins(before: str, joiner: re.Match[str]) -> bool:
 def parse_answer(completion: str) -> Parsed:
     """Parses a completion into a point, a range, an abstention or nothing.
 
+    A vague quantity such as "several hundred" has no usable value, so it is
+    "none" but still approximate: the one case where `approximate` is True
+    without a value.
+
     Args:
         completion: The generated text.
 
@@ -193,25 +254,37 @@ def parse_answer(completion: str) -> Parsed:
         The parse of its first non-empty line.
     """
     text = answer_text(completion)
-    first = _NUMBER.search(text)
-    if first is None:
-        none_form: Form = "abstain" if is_abstention(completion) else "none"
-        return Parsed(none_form, None, None, False)
-    value = _value(first)
-    low, high = value, value
-    joined = _JOINER.match(text, first.end())
-    second = _NUMBER.match(text, joined.end()) if joined else None
-    if joined and second and _joins(text[: first.start()], joined):
-        other = _value(second)
-        if joined["pm"]:
-            low, high = value - other, value + other
-        else:
-            low, high = min(value, other), max(value, other)
-    approximate = bool(
-        _LEADING.search(text[: first.start()]) or _HABIT.search(text)
+    vague = _VAGUE.search(text)
+    for first in _NUMBER.finditer(text):
+        if vague and vague.start() <= first.start():
+            break
+        value, factor = _read(first)
+        low, high = value, value
+        joined = _JOINER.match(text, first.end())
+        second = _NUMBER.match(text, joined.end()) if joined else None
+        if joined and second and _joins(text[: first.start()], joined):
+            other, other_factor = _read(second)
+            if joined["pm"]:
+                low, high = value - other, value + other
+            else:
+                if factor is None and other_factor is not None:
+                    value *= other_factor
+                low, high = min(value, other), max(value, other)
+        elif first["words"] and first["words"].lower() == "one":
+            continue
+        approximate = bool(
+            _LEADING.search(text[: first.start()]) or _HABIT.search(text)
+        )
+        form: Form = "point" if low == high else "range"
+        return Parsed(form, low, high, approximate)
+    if vague:
+        return Parsed("none", None, None, True)
+    none_form: Form = (
+        "abstain"
+        if is_abstention(completion, (*ABSTAIN_REGEXES, *EXTRA_ABSTAIN_REGEXES))
+        else "none"
     )
-    form: Form = "point" if low == high else "range"
-    return Parsed(form, low, high, approximate)
+    return Parsed(none_form, None, None, False)
 
 
 def grade(

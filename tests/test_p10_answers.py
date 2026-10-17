@@ -306,3 +306,75 @@ def test_grade_rejects_an_invalid_gold_or_tolerance(
 def test_grade_validates_even_when_there_is_nothing_to_grade():
     with pytest.raises(ValueError, match="gold"):
         grade(Parsed("none", None, None, False), 41, 33)
+
+
+@pytest.mark.parametrize(
+    "completion",
+    ["No one knows", "No one knows the answer.", "one", "One of a kind"],
+)
+def test_a_bare_one_is_not_a_number(completion):
+    assert parse_answer(completion).form in ("abstain", "none")
+    assert parse_answer(completion).low is None
+
+
+def test_no_one_knows_is_an_abstention():
+    assert parse_answer("No one knows").form == "abstain"
+
+
+def test_a_bare_one_is_skipped_for_the_next_number():
+    parsed = parse_answer("One of the smallest hounds, about 38 cm")
+    assert parsed == _point(38, True)
+
+
+@pytest.mark.parametrize(
+    ("completion", "expected"),
+    [
+        ("one to two", _range(1, 2)),
+        ("zero to one", _range(0, 1)),
+        ("one hundred twenty", _point(120)),
+        ("one hundred and twenty", _point(120)),
+        ("two hundred fifty", _point(250)),
+        ("a hundred and five metres", _point(105)),
+        ("twenty five", _point(25)),
+        ("Thirty  Five days", _point(35)),
+        ("a thousand", _point(1000)),
+        ("one thousand two hundred", _point(1200)),
+        ("twenty thousand", _point(20000)),
+        ("3 thousand", _point(3000)),
+        ("1.5 million", _point(1.5e6)),
+        ("3 hundred metres", _point(300)),
+        ("30k", _point(30000)),
+        ("1.5K km", _point(1500)),
+        ("30km", _point(30)),
+        ("a dozen", _point(12)),
+        ("two dozen", _point(24)),
+        ("5 to 6 hundred", _range(500, 600)),
+        ("five to six hundred days", _range(500, 600)),
+        ("2 or 3 thousand", _range(2000, 3000)),
+        ("50 to 600", _range(50, 600)),
+        ("1 thousand to 2 thousand", _range(1000, 2000)),
+    ],
+)
+def test_compound_and_scale_words(completion, expected):
+    assert parse_answer(completion) == expected
+
+
+@pytest.mark.parametrize(
+    "completion",
+    [
+        "several hundred",
+        "a few hundred metres",
+        "a couple of hundred",
+        "hundreds of",
+        "Dozens of days",
+        "thousands of years",
+        "several thousand",
+    ],
+)
+def test_a_vague_quantity_is_approximate_and_has_no_value(completion):
+    assert parse_answer(completion) == Parsed("none", None, None, True)
+
+
+@pytest.mark.parametrize("marker", ["several", "a few", "a couple of"])
+def test_a_count_word_before_a_real_number_is_a_marker(marker):
+    assert parse_answer(f"{marker} 30 cm") == _point(30, approximate=True)
