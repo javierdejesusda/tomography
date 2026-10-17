@@ -12,7 +12,7 @@ and matrix files of the P1 runs), the means and ranges over readers of the Qwen3
 per-reader rows), the maxima over layers of the random-direction series of R6, the P1 spans and cosine ranges of the
 `gpt2` truth and emotion tasks (computed from the table file), the C2 and P7 curve values (read from the curves
 files), the P7 counts of inverted units by layer on the Qwen3 1.7B pair (recomputed from the per-seed curves), the random and shuffled-label values at the selected layer of R4 on Qwen3, the maxima over layers of the R6
-random series on Qwen3, the layer ranges of A1 and the A2 separations on Qwen3 (all computed from the curves files), the
+random series on Qwen3, the layer ranges of A1 and the A2 separations on Qwen3 and on the three larger GPT-2 sizes (all computed from the curves files), the
 C2 values on Qwen3 (read from the curves and table files), the C4 reader means and ranges on Qwen3 (computed from the
 table rows), and differences or ranges quoted in the text. The P8 tables are read from the P8 run, which aggregates
 finished runs. Runs are identified by config hash in [Run identity](#run-identity). The document is not
@@ -375,6 +375,37 @@ same quantity for 100 random directions. The best layer is chosen on the same cu
   deviations (1.02 for R3 and 1.08 for R7), so their directions do not clearly separate their pole tokens through the
   lens.
 - R5 peaks at 1.68 at layer 7.
+
+### The other GPT-2 sizes (A1, A2)
+
+A1 and A2 on `gpt2-medium`, `gpt2-large` and `gpt2-xl` (runs `a1/gpt2-medium/d1eeb0585ca6`, `a1/gpt2-large/3ed23ece4e63`, `a1/gpt2-xl/078a72de1cfb` and `a2/gpt2-medium/6c8366625d7a`, `a2/gpt2-large/b6cf80cfb26f`, `a2/gpt2-xl/46d59dbefe95`, made at `fb3b5dd` with a clean tree on a laptop GPU) read the R1, R2, R3, R5 and R7 runs of the same size (hashes under Run identity) with the same recipe as above, and run no forward pass over data. The `gpt2` column repeats the values above so that the four sizes sit side by side. The A1 layer is relative depth 0.5 (L6, L12, L18 and L24 of 12, 24, 36 and 48 blocks); two random unit directions have a mean absolute cosine of 0.029, 0.025, 0.022 and 0.020 in the 768, 1,024, 1,280 and 1,600 dimensions.
+
+A1, mean cosine between the directions of the 10 seeds at the middle layer, with the 95 percent t-interval over seeds and in parentheses the range of the mean over all layers:
+
+| Reading | gpt2                                  | gpt2-medium                           | gpt2-large                            | gpt2-xl                               |
+| ------- | ------------------------------------- | ------------------------------------- | ------------------------------------- | ------------------------------------- |
+| r1      | 0.447 [0.395, 0.498] (0.363 to 0.520) | 0.431 [0.369, 0.493] (0.326 to 0.457) | 0.469 [0.423, 0.514] (0.279 to 0.531) | 0.504 [0.467, 0.542] (0.339 to 0.504) |
+| r2      | 0.288 [0.205, 0.372] (0.171 to 0.356) | 0.302 [0.215, 0.389] (0.210 to 0.409) | 0.349 [0.263, 0.436] (0.107 to 0.388) | 0.369 [0.285, 0.452] (0.112 to 0.522) |
+| r3      | 0.252 [0.163, 0.341] (0.163 to 0.290) | 0.257 [0.162, 0.352] (0.164 to 0.392) | 0.395 [0.319, 0.471] (0.133 to 0.445) | 0.479 [0.398, 0.561] (0.141 to 0.520) |
+| r5      | 0.986 [0.985, 0.987] (0.939 to 0.986) | 0.983 [0.982, 0.985] (0.904 to 0.985) | 0.984 [0.983, 0.986] (0.975 to 0.990) | 0.980 [0.978, 0.981] (0.964 to 0.986) |
+| r7      | 0.525 [0.487, 0.563] (0.450 to 0.592) | 0.583 [0.537, 0.629] (0.449 to 0.619) | 0.579 [0.538, 0.619] (0.438 to 0.587) | 0.607 [0.576, 0.638] (0.445 to 0.609) |
+
+A2, best layer, separation z with its 95 percent bootstrap interval over the 10 seeds, and in parentheses the mean and standard deviation of the same quantity for 100 random directions (the best layer is chosen on the same curve, so the values are optimistic):
+
+| Reading | gpt2                                | gpt2-medium                         | gpt2-large                          | gpt2-xl                             |
+| ------- | ----------------------------------- | ----------------------------------- | ----------------------------------- | ----------------------------------- |
+| r1      | L12 3.33 [3.17, 3.49] (-0.02, 0.52) | L20 3.50 [3.25, 3.73] (0.05, 0.52)  | L32 4.08 [3.87, 4.27] (-0.07, 0.53) | L47 3.92 [3.65, 4.17] (-0.07, 0.51) |
+| r2      | L12 2.87 [2.36, 3.36] (-0.02, 0.54) | L24 2.34 [1.97, 2.71] (-0.01, 0.48) | L35 2.65 [2.17, 3.08] (-0.00, 0.59) | L37 3.18 [2.71, 3.69] (-0.10, 0.50) |
+| r3      | L7 0.91 [0.53, 1.27] (0.03, 0.51)   | L21 1.16 [1.01, 1.32] (0.07, 0.49)  | L11 0.85 [0.58, 1.13] (0.10, 0.53)  | L5 1.03 [0.62, 1.43] (-0.15, 0.52)  |
+| r5      | L7 1.68 [1.64, 1.74] (-0.08, 0.56)  | L10 1.11 [1.07, 1.13] (0.04, 0.74)  | L32 2.68 [2.60, 2.74] (-0.06, 0.70) | L44 2.48 [2.41, 2.54] (0.00, 0.62)  |
+| r7      | L8 0.89 [0.69, 1.06] (-0.01, 0.54)  | L8 0.60 [0.35, 0.80] (0.04, 0.54)   | L4 1.02 [0.78, 1.25] (-0.04, 0.53)  | L43 0.67 [0.44, 0.90] (-0.06, 0.63) |
+
+- **All 20 A1 values are far above the random level, and the directions depend on the training draw.** The lowest value is 0.252 (R3 on `gpt2`) against a random level of 0.025 to 0.029. R1, R2, R3 and R7 read between 0.252 and 0.607 at the middle layer across the four sizes, as the Qwen3 checkpoints do at layer 14 (R1 0.423 to 0.578, R2 0.306 to 0.389, R3 0.335 to 0.497, R7 0.562 to 0.645; the GPT-2 ranges are 0.431 to 0.504, 0.288 to 0.369, 0.252 to 0.479 and 0.525 to 0.607).
+- **Agreement rises with size for two readings.** The point estimates of R2 (0.288, 0.302, 0.349, 0.369) and R3 (0.252, 0.257, 0.395, 0.479) rise at every step, and the intervals of R3 on `gpt2` [0.163, 0.341] and on `gpt2-xl` [0.398, 0.561] do not overlap. R1 (0.447, 0.431, 0.469, 0.504) and R7 (0.525, 0.583, 0.579, 0.607) do not rise at every step and R5 falls slightly (0.986, 0.983, 0.984, 0.980). Each size is one run, so no step between neighbouring sizes is shown to be larger than the variation between runs.
+- **R5 agrees at 0.980 to 0.986 at the middle layer on every size, and at 0.904 or above at every layer** (lowest layer value 0.939, 0.904, 0.975 and 0.964 on the four sizes), while its transfer test accuracy is 0.386, 0.598, 0.566 and 0.492 (see the reading tables). A direction that is stable across seeds is not for that reason a direction that transfers, as on `gpt2` and on the Qwen3 checkpoints.
+- **R1 and R2 separate their pole tokens far above the random spread on every size.** R1 reads 3.33, 3.50, 4.08 and 3.92 against a random standard deviation of 0.51 to 0.53, and R2 2.87, 2.34, 2.65 and 3.18 against 0.48 to 0.59. R5 reads 1.68, 1.11, 2.68 and 2.48; on `gpt2-medium` its 1.11 [1.07, 1.13] is 1.5 random standard deviations (0.74), below two, while on `gpt2-large` and `gpt2-xl` it is above two.
+- **R3 and R7 stay small, as on `gpt2`.** R3 reads 0.91, 1.16, 0.85 and 1.03 and R7 0.89, 0.60, 1.02 and 0.67. In 7 of the 8 values the separation is below two random standard deviations (1.02, 0.99, 1.06 and 1.04 for R3; 1.08, 1.07, 1.06 and 1.26 for R7); the exception is R3 on `gpt2-medium` (1.16 [1.01, 1.32] against 0.99). The Qwen3 values are 3.13 to 4.74 for R3 and 2.65 to 5.86 for R7, so none of the four GPT-2 sizes reaches the lowest of them. The best layer of R3 and R7 jumps between sizes (R3: L7, L21, L11, L5; R7: L8, L8, L4, L43), which is what a maximum over a flat curve of small separation looks like, and is not read as a layer location.
+- **What this does not show.** A high pole separation is not read as a reading of the concept in the vocabulary (see R5 on `qwen3-1.7b` below), the interval covers the 10 seeds of one run per size, and the best layer is chosen on the curve it is read from.
 
 ## Template sensitivity of the sentiment reader (P1)
 
@@ -1236,9 +1267,8 @@ while it answers. The definitions, the guess control and the statistics are in t
 [methodology](methodology.md#known-versus-unknown-questions-p9).
 
 The runs reported here use the current label schema (12 PopQA relations, the guess control) and are those of the four
-GPT-2 sizes and of the Qwen3 0.6B and 1.7B checkpoints. P9a covers all eight models. P9b and P9c ran on the four GPT-2
-sizes and the two Qwen3 base checkpoints, and P9d on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the four Qwen3
-checkpoints (base and post-trained); P9b and P9c have no post-trained run. `gpt2` is the one model whose label gate
+GPT-2 sizes and of the Qwen3 0.6B and 1.7B checkpoints. P9a, P9b and P9c cover all eight models, and P9d ran on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the four Qwen3
+checkpoints (base and post-trained). `gpt2` is the one model whose label gate
 closes (70 known questions after the guess control, below the 100 the gate asks for), so it has no known against
 unknown contrast: its P9b run reads only the contrasts between kinds of unknown questions, its P9c run has no label-free
 `lat` predictor, and P9d did not run on it. Questions are labeled from the behavior
@@ -1499,6 +1529,69 @@ known questions.
 - **What this does not show.** As above: popularity and the wording of the question are the only surface controls, each
   value is one set of five readers on one labeling run, and the question sets differ between models.
 
+#### The post-trained Qwen3 checkpoints
+
+P9b on `qwen3-0.6b` and `qwen3-1.7b` (runs `p9b/qwen3-0.6b/975dbcf95759` and `p9b/qwen3-1.7b/9641ab8235a9`, made at `fb3b5dd` with a clean tree on a laptop GPU (NVIDIA GeForce RTX 4070 Laptop GPU), on the labels of the P9a run of the same checkpoint) uses the recipe above: five logistic readers on 64 pairs each, one layer per model chosen on the pooled validation AUROC, which is L27 on `qwen3-0.6b` and L25 on `qwen3-1.7b` (L27 and L21 on the base checkpoints). The base rows below are those of the base runs above, repeated so that each post-trained row has its base checkpoint next to it. A checkpoint is labeled on its own behavior, so the test counts differ between the base and the post-trained row (72 against 87 known PopQA test questions at 0.6B, 122 against 118 at 1.7B); the rows are never pooled, and a difference between two rows mixes the checkpoint with the question set. Every reader value is next to `text_word`, `text_char` and `popularity`. The P9b and P9c code is unchanged since the commit of the base runs (`95a8243`) except that the two text-baseline names moved into one constant.
+
+PopQA known against unknown, within relation (the headline), mean AUROC over the five readers:
+
+| Model           | Contrast         | Test known / unknown | Test pairs | Reader | popularity | text_word | text_char |
+| --------------- | ---------------- | -------------------- | ---------- | ------ | ---------- | --------- | --------- |
+| qwen3-0.6b-base | obscure_real     | 87 / 1,661           | 6,941      | 0.919  | 0.799      | 0.678     | 0.673     |
+| qwen3-0.6b-base | obscure_real_pop | 87 / 1,661           | 6,941      | 0.891  | 0.799      | 0.678     | 0.673     |
+| qwen3-0.6b      | obscure_real     | 72 / 1,713           | 6,765      | 0.909  | 0.752      | 0.619     | 0.657     |
+| qwen3-0.6b      | obscure_real_pop | 72 / 1,713           | 6,765      | 0.873  | 0.752      | 0.619     | 0.657     |
+| qwen3-1.7b-base | obscure_real     | 118 / 1,611          | 10,113     | 0.959  | 0.879      | 0.625     | 0.636     |
+| qwen3-1.7b-base | obscure_real_pop | 118 / 1,611          | 10,113     | 0.960  | 0.879      | 0.625     | 0.636     |
+| qwen3-1.7b      | obscure_real     | 122 / 1,657          | 10,680     | 0.893  | 0.850      | 0.561     | 0.602     |
+| qwen3-1.7b      | obscure_real_pop | 122 / 1,657          | 10,680     | 0.845  | 0.850      | 0.561     | 0.602     |
+
+The same contrasts pooled over relations, with the AUROC of a random direction:
+
+| Model           | Contrast         | Reader | Random direction | popularity | text_word | text_char |
+| --------------- | ---------------- | ------ | ---------------- | ---------- | --------- | --------- |
+| qwen3-0.6b-base | obscure_real     | 0.948  | 0.682            | 0.840      | 0.944     | 0.941     |
+| qwen3-0.6b-base | obscure_real_pop | 0.948  | 0.682            | 0.840      | 0.944     | 0.941     |
+| qwen3-0.6b      | obscure_real     | 0.927  | 0.573            | 0.771      | 0.905     | 0.903     |
+| qwen3-0.6b      | obscure_real_pop | 0.885  | 0.578            | 0.771      | 0.905     | 0.903     |
+| qwen3-1.7b-base | obscure_real     | 0.961  | 0.648            | 0.865      | 0.873     | 0.873     |
+| qwen3-1.7b-base | obscure_real_pop | 0.970  | 0.522            | 0.865      | 0.873     | 0.873     |
+| qwen3-1.7b      | obscure_real     | 0.927  | 0.529            | 0.834      | 0.867     | 0.885     |
+| qwen3-1.7b      | obscure_real_pop | 0.918  | 0.617            | 0.834      | 0.867     | 0.885     |
+
+- **Within relation the reader is above popularity and both text baselines on three of the four post-trained cells.** On `obscure_real` it reads 0.909 and 0.893 against a popularity baseline of 0.752 and 0.850, margins of 0.157 and 0.043 (0.120 and 0.080 on the base checkpoints); `text_word` and `text_char` are at 0.619 and 0.657 at 0.6B and at 0.561 and 0.602 at 1.7B. The exception is `obscure_real_pop` on `qwen3-1.7b`: the reader reads 0.845 and popularity 0.850, so with the popularity bin matched the reader is 0.006 below the popularity baseline (and far above both text baselines). On `qwen3-0.6b` the matched contrast reads 0.873, 0.121 above popularity.
+- **The margin over popularity does not move the same way at the two sizes.** At 0.6B it is larger on the post-trained checkpoint (0.157 against 0.120); at 1.7B it is smaller (0.043 against 0.080), where the reader falls from 0.959 to 0.893 and the popularity baseline from 0.879 to 0.850. Each cell is one run on a test known side of 72 to 122 questions, with an interval over the pair draws only, so the size of these margins is not a measured difference between the checkpoints.
+- **Pooled, the post-trained reader is above both text baselines on `obscure_real` and below them on `obscure_real_pop` at 0.6B.** On `obscure_real` it reads 0.927 against 0.905 and 0.903 at 0.6B (a margin of 0.021) and 0.927 against 0.867 and 0.885 at 1.7B (0.042). On `obscure_real_pop` it reads 0.885 at 0.6B, 0.020 below the better text baseline, and 0.918 at 1.7B, 0.033 above it. On `qwen3-0.6b-base` the pooled reader was level with the text baselines (0.948 against 0.944 and 0.941). A random direction reads 0.573 and 0.578 at 0.6B and 0.529 and 0.617 at 1.7B, below the logistic reader in all four cells.
+
+Other relational contrasts, within relation, as reader / `text_word` / `text_char` (`popularity` is not defined for them):
+
+| Contrast                              | qwen3-0.6b-base       | qwen3-0.6b            | qwen3-1.7b-base       | qwen3-1.7b            |
+| ------------------------------------- | --------------------- | --------------------- | --------------------- | --------------------- |
+| fictional_generated (within relation) | 0.989 / 0.819 / 0.987 | 0.988 / 0.845 / 0.981 | 1.000 / 0.851 / 0.992 | 0.993 / 0.845 / 0.989 |
+| real_vs_synthal (within relation)     | 0.978 / 0.736 / 1.000 | 0.979 / 0.739 / 1.000 | 0.986 / 0.728 / 1.000 | 0.980 / 0.732 / 1.000 |
+| real_vs_generated (within relation)   | 0.980 / 0.953 / 0.999 | 0.974 / 0.952 / 0.999 | 0.986 / 0.954 / 0.999 | 0.968 / 0.952 / 0.999 |
+| pre_vs_post_cutoff                    | not read              | not read              | not read              | not read              |
+
+The other contrasts, pooled:
+
+| Contrast             | qwen3-0.6b-base       | qwen3-0.6b            | qwen3-1.7b-base       | qwen3-1.7b            |
+| -------------------- | --------------------- | --------------------- | --------------------- | --------------------- |
+| triviaqa_known       | 0.905 / 0.774 / 0.727 | 0.877 / 0.750 / 0.711 | 0.883 / 0.693 / 0.671 | 0.840 / 0.664 / 0.588 |
+| unknowable_detail    | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 |
+| false_premise        | 0.951 / 0.978 / 0.973 | 0.947 / 0.978 / 0.988 | 0.974 / 0.977 / 0.975 | 0.951 / 0.974 / 0.967 |
+| kuq_ambiguous        | 0.987 / 0.852 / 0.882 | 0.988 / 0.862 / 0.923 | 0.996 / 0.878 / 0.918 | 0.996 / 0.876 / 0.903 |
+| kuq_controversial    | 0.985 / 0.969 / 0.980 | 0.987 / 0.947 / 0.978 | 0.993 / 0.975 / 0.987 | 0.983 / 0.971 / 0.985 |
+| kuq_counterfactual   | 0.995 / 1.000 / 1.000 | 0.996 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 | 0.993 / 1.000 / 1.000 |
+| kuq_false_assumption | 0.991 / 0.976 / 0.985 | 0.984 / 0.974 / 0.964 | 0.993 / 0.978 / 0.991 | 0.981 / 0.964 / 0.980 |
+| kuq_future_unknown   | 0.999 / 0.997 / 0.993 | 1.000 / 0.994 / 0.992 | 1.000 / 0.992 / 0.986 | 0.999 / 0.990 / 0.981 |
+| kuq_unsolved_problem | 0.985 / 0.949 / 0.943 | 0.992 / 0.953 / 0.955 | 0.992 / 0.953 / 0.967 | 0.981 / 0.953 / 0.961 |
+
+- **The reader has a margin of 0.066 or more over the better text baseline on two contrasts, as on the base checkpoints.** `triviaqa_known`: the reader reads 0.877 and 0.840 against a better text baseline of 0.750 and 0.664 (margins of 0.127 and 0.176, against 0.131 and 0.191 on the base checkpoints); its test known sides hold 21 and 54 questions (32 and 55 on the base checkpoints). `kuq_ambiguous`: margins of 0.066 and 0.092 (0.105 and 0.079 on the base checkpoints). On every other pooled contrast the largest margin over the better baseline is 0.036 (`kuq_unsolved_problem` on `qwen3-0.6b`).
+- **On several contrasts the reader does not exceed the text baselines.** `unknowable_detail` is 1.000 for the reader and both baselines on all four checkpoints. On `false_premise` the reader (0.947 and 0.951) is below the better baseline (0.988 and 0.974). The two contrasts between kinds of unknown questions (`real_vs_synthal`, `real_vs_generated`) have `text_char` at 1.000 and 0.999, above the reader within relation (0.979 and 0.980 on `real_vs_synthal`, 0.974 and 0.968 on `real_vs_generated`) and pooled.
+- **Elsewhere the margin is small.** `fictional_generated` has the reader above `text_char` within relation by 0.006 and 0.004 on the post-trained checkpoints; four KUQ categories (`kuq_controversial`, `kuq_counterfactual`, `kuq_false_assumption`, `kuq_future_unknown`) are within 0.010 of the better baseline in either direction. `pre_vs_post_cutoff` is not read on these checkpoints (the post-cutoff contrasts have too few items).
+- **Read these cross-dataset rows as a format contrast too.** The better text baseline is at 0.955 or above on every cross-dataset row of the post-trained checkpoints except `triviaqa_known` (0.750 and 0.664) and `kuq_ambiguous` (0.923 and 0.903), so a reader at 0.98 to 1.00 on the others does not show that it reads knowledge.
+- **What this does not show.** As above: popularity and the wording of the question are the only surface controls, each value is one set of five readers on one labeling run per checkpoint, and P9b compares the reader with the text baselines only. Whether the reader predicts the errors of the checkpoint better than its output confidence is the question of P9c.
+
 ### Error prediction (P9c)
 
 P9c asks which score predicts whether the greedy few-shot answer of the model is correct, on held-out PopQA (1,937),
@@ -1695,6 +1788,73 @@ target dataset; the output-confidence predictors do not. On `gpt2-medium` and `g
   increment over the stack on these two sets has an interval that excludes zero.
 - **`p_true`** reads 0.445, 0.521 and 0.529 within relation on PopQA, at chance; the model's grade of its own answer
   does not predict correctness on these sizes.
+
+#### The post-trained Qwen3 checkpoints
+
+P9c on `qwen3-0.6b` and `qwen3-1.7b` (runs `p9c/qwen3-0.6b/0f8b118c9692` and `p9c/qwen3-1.7b/7c142334e5fe`, made at `fb3b5dd` with a clean tree on a laptop GPU, on the labels of the P9a run of the same checkpoint) has the same predictors and the same sizes of held-out sets (1,937 PopQA, 191 TriviaQA and 210 NQ-open questions) as above. The probe and `lat` read L27 on all four checkpoints (chosen on the validation split of P9c). The question is whether the label-free reader `lat` predicts the errors of a post-trained checkpoint better than the output confidence of the checkpoint. The base columns are those of the base runs above, repeated; a checkpoint answers different questions correctly (correct answers on PopQA: 208, 176, 264, 222 of 1,937 in the column order below), so columns are separate rows of evidence and are never pooled.
+
+PopQA, within relation, AUROC with its interval:
+
+| Predictor          | qwen3-0.6b-base      | qwen3-0.6b           | qwen3-1.7b-base      | qwen3-1.7b           |
+| ------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| answer_logprob     | 0.841 [0.796, 0.876] | 0.843 [0.797, 0.881] | 0.883 [0.857, 0.907] | 0.855 [0.822, 0.887] |
+| probe              | 0.826 [0.781, 0.864] | 0.793 [0.737, 0.842] | 0.881 [0.856, 0.905] | 0.853 [0.820, 0.885] |
+| first_token_prob   | 0.826 [0.779, 0.865] | 0.832 [0.782, 0.875] | 0.879 [0.853, 0.902] | 0.842 [0.807, 0.875] |
+| neg_entropy        | 0.824 [0.781, 0.862] | 0.813 [0.759, 0.862] | 0.879 [0.853, 0.903] | 0.847 [0.812, 0.880] |
+| mean_token_logprob | 0.836 [0.794, 0.870] | 0.845 [0.797, 0.884] | 0.862 [0.831, 0.889] | 0.841 [0.807, 0.874] |
+| consistency        | 0.773 [0.727, 0.820] | 0.803 [0.755, 0.848] | 0.803 [0.763, 0.841] | 0.807 [0.760, 0.846] |
+| lat                | 0.787 [0.734, 0.829] | 0.757 [0.693, 0.814] | 0.848 [0.815, 0.877] | 0.814 [0.773, 0.850] |
+| p_true             | 0.719 [0.667, 0.769] | 0.739 [0.689, 0.784] | 0.776 [0.726, 0.821] | 0.772 [0.714, 0.825] |
+| popularity         | 0.696 [0.641, 0.749] | 0.637 [0.575, 0.701] | 0.776 [0.736, 0.815] | 0.749 [0.700, 0.795] |
+
+PopQA pooled over relations, as AUROC / AURC (lower AURC is better):
+
+| Predictor                          | qwen3-0.6b-base | qwen3-0.6b    | qwen3-1.7b-base | qwen3-1.7b    |
+| ---------------------------------- | --------------- | ------------- | --------------- | ------------- |
+| probe                              | 0.946 / 0.694   | 0.946 / 0.730 | 0.940 / 0.635   | 0.939 / 0.678 |
+| answer_logprob                     | 0.933 / 0.703   | 0.935 / 0.740 | 0.910 / 0.655   | 0.919 / 0.710 |
+| neg_entropy                        | 0.907 / 0.710   | 0.932 / 0.743 | 0.899 / 0.661   | 0.906 / 0.715 |
+| lat                                | 0.875 / 0.727   | 0.889 / 0.763 | 0.879 / 0.679   | 0.857 / 0.731 |
+| template                           | 0.892 / 0.740   | 0.913 / 0.753 | 0.843 / 0.688   | 0.873 / 0.723 |
+| popularity                         | 0.588 / 0.811   | 0.515 / 0.851 | 0.648 / 0.748   | 0.640 / 0.784 |
+| error rate (risk at full coverage) | 0.893           | 0.909         | 0.864           | 0.885         |
+
+TriviaQA and NQ-open, pooled AUROC with its interval:
+
+| Predictor                | qwen3-0.6b-base      | qwen3-0.6b           | qwen3-1.7b-base      | qwen3-1.7b           |
+| ------------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| TriviaQA answer_logprob  | 0.886 [0.836, 0.931] | 0.796 [0.722, 0.869] | 0.819 [0.758, 0.878] | 0.832 [0.771, 0.888] |
+| TriviaQA neg_entropy     | 0.862 [0.803, 0.917] | 0.758 [0.664, 0.842] | 0.843 [0.784, 0.894] | 0.798 [0.730, 0.864] |
+| TriviaQA probe           | 0.868 [0.809, 0.926] | 0.764 [0.674, 0.843] | 0.811 [0.753, 0.868] | 0.808 [0.743, 0.865] |
+| TriviaQA lat             | 0.716 [0.639, 0.795] | 0.710 [0.623, 0.800] | 0.674 [0.601, 0.750] | 0.686 [0.608, 0.756] |
+| TriviaQA p_true          | 0.778 [0.699, 0.853] | 0.724 [0.628, 0.820] | 0.772 [0.701, 0.840] | 0.734 [0.657, 0.805] |
+| TriviaQA correct answers | 48 of 191            | 38 of 191            | 78 of 191            | 63 of 191            |
+| NQ-open answer_logprob   | 0.776 [0.648, 0.880] | 0.867 [0.801, 0.929] | 0.790 [0.697, 0.867] | 0.834 [0.724, 0.923] |
+| NQ-open neg_entropy      | 0.740 [0.641, 0.826] | 0.700 [0.598, 0.785] | 0.745 [0.659, 0.831] | 0.750 [0.668, 0.828] |
+| NQ-open probe            | 0.795 [0.688, 0.895] | 0.817 [0.705, 0.917] | 0.812 [0.742, 0.878] | 0.879 [0.811, 0.941] |
+| NQ-open lat              | 0.783 [0.653, 0.897] | 0.858 [0.730, 0.959] | 0.848 [0.777, 0.913] | 0.861 [0.771, 0.939] |
+| NQ-open p_true           | 0.788 [0.683, 0.879] | 0.591 [0.463, 0.721] | 0.694 [0.590, 0.787] | 0.599 [0.458, 0.722] |
+| NQ-open correct answers  | 20 of 210            | 12 of 210            | 38 of 210            | 20 of 210            |
+
+What `probe` and `lat` add to the output confidence (the logistic stacker of the five confidence columns against the same stacker plus the predictor, as a paired AUROC difference with its interval; pooled AUROCs):
+
+| Predictor                 | qwen3-0.6b-base         | qwen3-0.6b              | qwen3-1.7b-base         | qwen3-1.7b              |
+| ------------------------- | ----------------------- | ----------------------- | ----------------------- | ----------------------- |
+| PopQA confidence stack    | 0.908                   | 0.935                   | 0.900                   | 0.932                   |
+| PopQA + lat               | 0.000 [0.000, 0.000]   | 0.000 [-0.002, +0.001] | +0.002 [-0.002, +0.006] | -0.001 [-0.003, +0.002] |
+| PopQA + probe             | +0.044 [+0.026, +0.063] | +0.021 [+0.012, +0.031] | +0.044 [+0.028, +0.061] | +0.016 [+0.006, +0.026] |
+| TriviaQA confidence stack | 0.869                   | 0.735                   | 0.858                   | 0.837                   |
+| TriviaQA + lat            | -0.008 [-0.024, +0.005] | +0.003 [-0.017, +0.024] | -0.006 [-0.018, +0.006] | -0.005 [-0.037, +0.028] |
+| TriviaQA + probe          | +0.008 [+0.000, +0.018] | +0.022 [-0.006, +0.050] | +0.013 [-0.004, +0.029] | +0.020 [-0.017, +0.058] |
+| NQ-open confidence stack  | 0.819                   | 0.847                   | 0.800                   | 0.866                   |
+| NQ-open + lat             | -0.013 [-0.048, +0.023] | +0.006 [-0.011, +0.023] | +0.047 [+0.015, +0.085] | +0.028 [-0.004, +0.060] |
+| NQ-open + probe           | -0.003 [-0.027, +0.022] | +0.004 [-0.005, +0.013] | +0.036 [+0.007, +0.066] | +0.040 [+0.002, +0.077] |
+
+- **`lat` does not beat the output confidence within relation on either post-trained checkpoint.** On PopQA it reads 0.757 [0.693, 0.814] on `qwen3-0.6b` and 0.814 [0.773, 0.850] on `qwen3-1.7b`, against 0.843 [0.797, 0.881] and 0.855 [0.822, 0.887] for `answer_logprob` (the best of the six confidence scores is `mean_token_logprob` at 0.845 on `qwen3-0.6b` and `answer_logprob` on `qwen3-1.7b`). The gap is -0.086 and -0.041 (-0.055 and -0.035 on the base checkpoints); the intervals overlap at both, and no paired interval is stored. `lat` is above the popularity baseline (0.637 and 0.749) as a point estimate, with overlapping intervals at both.
+- **Pooled, `lat` is below the confidence and below the accuracy rate of the relation.** It reads 0.889 and 0.857 against 0.935 and 0.919 for `answer_logprob`, and below `template` alone (0.913 and 0.873), as on `qwen3-0.6b-base` (0.875 against 0.892); only on `qwen3-1.7b-base` is it above `template` (0.879 against 0.843). Added to the confidence stack it changes the pooled AUROC by -0.0004 [-0.0016, 0.0008] and -0.0006 [-0.0035, 0.0020] on the post-trained checkpoints (+0.0001 and +0.0022 on the base checkpoints), so it adds nothing that the confidence does not carry on PopQA.
+- **The probe, which sees the label, is below `answer_logprob` within relation and above it pooled.** Within relation the probe reads 0.793 [0.737, 0.842] and 0.853 [0.820, 0.885] against 0.843 and 0.855; pooled it reads 0.946 and 0.939 against 0.935 and 0.919. Its gain over the confidence stack is +0.021 [0.012, 0.031] and +0.016 [0.006, 0.026], with intervals above zero and a smaller point value than on the base checkpoints (+0.044 on both), where the stack itself is lower (0.908 and 0.900 against 0.935 and 0.932).
+- **TriviaQA and NQ-open.** On TriviaQA `lat` reads 0.710 [0.623, 0.800] and 0.686 [0.608, 0.756], below `answer_logprob` on both (0.796 and 0.832). On NQ-open `lat` reads 0.858 [0.730, 0.959] against 0.867 [0.801, 0.929] at 0.6B and 0.861 [0.771, 0.939] against 0.834 [0.724, 0.923] at 1.7B, on 12 and 20 correct answers, with intervals 0.13 to 0.23 wide that overlap. Its increments over the confidence stack have intervals that include zero on both sets (TriviaQA +0.0033 [-0.0173, 0.0239] and -0.0053 [-0.0367, 0.0276], NQ-open +0.0063 [-0.0105, 0.0226] and +0.0276 [-0.0038, 0.0597]). The probe's increment excludes zero only for NQ-open at 1.7B (+0.0400 [0.0023, 0.0768]). The confidence stack of `qwen3-0.6b` is below `answer_logprob` alone on TriviaQA (0.735 against 0.796) and NQ-open (0.847 against 0.867), which is consistent with a stacker fitted on few correct answers (the test sets hold 38 and 12).
+- **What this does not show.** Each cell is one run of one checkpoint, the sets of correct answers are small outside PopQA, and the increments are pooled (no within-relation increment is stored). The result is that `lat` does not predict errors better than the output confidence on these two post-trained checkpoints; it does not say that the reader is useless, since it is label-free and above popularity as a point estimate.
 
 ### Steering (P9d)
 
@@ -2336,7 +2496,7 @@ question alone in the chat template, so the two shares are not a comparison of t
 
 ## Position and stimulus-set size on qwen3-1.7b-base and qwen3-1.7b (P2, P3)
 
-P2 ran on two Qwen3 checkpoints, the base `qwen3-1.7b-base` and the post-trained `qwen3-1.7b`, and P3 ran on the base checkpoint only. Both use the settings of the `gpt2` runs (logistic finder, 64 training pairs; 10 seeds for P2 and 20 draws per size for P3, the intervals of the [reading conventions](#reading-conventions)). Each is one run: `p2/qwen3-1.7b-base/119f0ac54451` and `p3/qwen3-1.7b-base/61baf30a8a59`, made at `c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090), and `p2/qwen3-1.7b/51a85fbec631`, made at `20650c5` with a clean tree on a laptop GPU (NVIDIA GeForce RTX 4070 Laptop GPU). The two P2 runs therefore differ in hardware and code commit as well as in checkpoint; the P2 code is the same at both commits (only `cloud.py` differs under `src`). The 0.6B checkpoints did not run these experiments, and P3 did not run on the post-trained checkpoint. Base and post-trained are two models: their P2 tables are separate and no metric is pooled over them, and the `gpt2` and Qwen3 numbers come from different models, not from a scaling series.
+P2 ran on the Qwen3 1.7B pair, the base `qwen3-1.7b-base` and the post-trained `qwen3-1.7b`, and P3 ran on the base 1.7B checkpoint only; P2 later ran on `qwen3-0.6b-base`, `qwen3-0.6b` and `gpt2-medium` (last subsections below). Both use the settings of the `gpt2` runs (logistic finder, 64 training pairs; 10 seeds for P2 and 20 draws per size for P3, the intervals of the [reading conventions](#reading-conventions)). Each is one run: `p2/qwen3-1.7b-base/119f0ac54451` and `p3/qwen3-1.7b-base/61baf30a8a59`, made at `c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090), and `p2/qwen3-1.7b/51a85fbec631`, made at `20650c5` with a clean tree on a laptop GPU (NVIDIA GeForce RTX 4070 Laptop GPU). The two P2 runs therefore differ in hardware and code commit as well as in checkpoint; the P2 code is the same at both commits (only `cloud.py` differs under `src`). The 0.6B checkpoints did not run P3, and P3 did not run on the post-trained checkpoint. Base and post-trained are two models: their P2 tables are separate and no metric is pooled over them, and the `gpt2` and Qwen3 numbers come from different models, not from a scaling series.
 
 ### Token position and a misleading sentence on qwen3-1.7b-base (P2)
 
@@ -2396,6 +2556,86 @@ The two checkpoints are two models and each has one run, so this compares cells 
 - **Layers.** The layer chosen on the original prompts differs between the checkpoints in 5 of the 9 reader cells: sentiment at `concept` (L14 against L27) and `mean` (L16 against L15), truth at `concept` (L27 against L18), and utility at `last` (L28 against L18) and `concept` (L18 against L26). A difference in those cells mixes the checkpoint with the layer selected on the select split.
 - **Limits.** The intervals are over the 10 training draws and do not include the sampling of the evaluation pairs, which matters most for truth (59 report pairs). The two runs also differ in hardware and in code commit, though not in the P2 code.
 
+### Token position and a misleading sentence on gpt2-medium and the 0.6B checkpoints (P2)
+
+P2 also ran on `gpt2-medium` and on the two 0.6B Qwen3 checkpoints (runs `p2/gpt2-medium/733bd2f76315`, `p2/qwen3-0.6b-base/59a53843dccd` and `p2/qwen3-0.6b/442ebe80ca68`), all made at `fb3b5dd` with a clean tree on one laptop GPU (NVIDIA GeForce RTX 4070 Laptop GPU) with batch size 8. The design, the report splits (214, 59 and 256 pairs) and the layer rule are those of the runs above. The P2 experiment code is unchanged since the earlier P2 runs; the differences under `src` are tooling (`chain.py`, `cloud.py`, `cli.py`, `export.py`) and an opt-in refit flag in the shared fit code that P2 does not set. Unlike the 1.7B pair, the 0.6B pair differs in checkpoint only (same hardware and commit). The three tables are separate and no metric is pooled over them.
+
+#### gpt2-medium
+
+| Task      | Position  | Layer | Original             | Random decoy         | Against decoy        |
+| --------- | --------- | ----- | -------------------- | -------------------- | -------------------- |
+| sentiment | last      | L20   | 0.742 [0.724, 0.758] | 0.724 [0.711, 0.737] | 0.708 [0.696, 0.720] |
+| sentiment | concept   | L13   | 0.813 [0.799, 0.825] | 0.826 [0.810, 0.839] | 0.814 [0.791, 0.829] |
+| sentiment | mean      | L11   | 0.843 [0.830, 0.857] | 0.850 [0.837, 0.863] | 0.850 [0.837, 0.864] |
+| sentiment | zero-shot | -     | 0.603 [0.542, 0.668] | 0.579 [0.514, 0.645] | 0.093 [0.056, 0.136] |
+| truth     | last      | L19   | 0.656 [0.625, 0.685] | 0.617 [0.600, 0.639] | 0.593 [0.571, 0.615] |
+| truth     | concept   | L20   | 0.729 [0.710, 0.749] | 0.690 [0.680, 0.698] | 0.646 [0.632, 0.661] |
+| truth     | mean      | L20   | 0.668 [0.644, 0.692] | 0.681 [0.653, 0.714] | 0.681 [0.653, 0.714] |
+| truth     | zero-shot | -     | 0.559 [0.441, 0.695] | 0.559 [0.441, 0.695] | 0.203 [0.102, 0.305] |
+| utility   | last      | L15   | 0.685 [0.665, 0.701] | 0.658 [0.642, 0.675] | 0.330 [0.223, 0.449] |
+| utility   | concept   | L14   | 0.696 [0.678, 0.712] | 0.706 [0.689, 0.721] | 0.650 [0.606, 0.688] |
+| utility   | mean      | L15   | 0.660 [0.643, 0.674] | 0.652 [0.631, 0.668] | 0.674 [0.650, 0.695] |
+| utility   | zero-shot | -     | 0.520 [0.457, 0.582] | 0.543 [0.480, 0.609] | 0.020 [0.004, 0.039] |
+
+- **Position.** On the original prompts the positions read 0.742, 0.813 and 0.843 for sentiment (a spread of 0.101), 0.656, 0.729 and 0.668 for truth (0.073) and 0.685, 0.696 and 0.660 for utility (0.036). As on `gpt2`, sentiment reads higher at `concept` and `mean` than at `last`; truth reads highest at `concept` here, where `last` was highest on `gpt2` (0.698).
+- **Random decoy.** The reader moves by at most 0.039 in any cell (truth at `last`, 0.656 to 0.617, and at `concept`, 0.729 to 0.690); the intervals of the original and random columns overlap everywhere except truth at `concept`.
+- **Against decoy.** At `last` sentiment (0.708) and truth (0.593 [0.571, 0.615]) lose 0.034 and 0.063 and stay above chance, and utility falls to 0.330 [0.223, 0.449], a drop of 0.355 to below chance (0.133 on `gpt2`). At `concept` sentiment is unchanged (0.814), truth drops 0.083 (0.646 [0.632, 0.661]) and utility 0.046 (0.650, with overlapping intervals). At `mean` no task moves by more than 0.014 and the intervals overlap in all three. As on `gpt2`, the collapse at `last` belongs to utility.
+- **Zero-shot.** The model's own answer reads 0.603, 0.559 and 0.520 on the original prompts, 0.579, 0.559 and 0.543 under the random decoy and 0.093, 0.203 and 0.020 under the `against` decoy, below chance (the truth intervals, [0.441, 0.695] under the original and the random decoy, include 0.5). The reader at `mean` stays at 0.850, 0.681 and 0.674 under the same decoy.
+
+#### qwen3-0.6b-base
+
+| Task      | Position  | Layer | Original             | Random decoy         | Against decoy        |
+| --------- | --------- | ----- | -------------------- | -------------------- | -------------------- |
+| sentiment | last      | L18   | 0.952 [0.946, 0.958] | 0.790 [0.776, 0.802] | 0.437 [0.415, 0.457] |
+| sentiment | concept   | L28   | 0.927 [0.912, 0.940] | 0.828 [0.818, 0.836] | 0.551 [0.525, 0.577] |
+| sentiment | mean      | L16   | 0.876 [0.861, 0.890] | 0.881 [0.869, 0.892] | 0.880 [0.867, 0.892] |
+| sentiment | zero-shot | -     | 0.935 [0.897, 0.967] | 0.650 [0.584, 0.710] | 0.023 [0.005, 0.047] |
+| truth     | last      | L24   | 0.764 [0.747, 0.781] | 0.712 [0.686, 0.739] | 0.208 [0.163, 0.258] |
+| truth     | concept   | L20   | 0.673 [0.656, 0.685] | 0.722 [0.705, 0.744] | 0.629 [0.610, 0.644] |
+| truth     | mean      | L15   | 0.751 [0.729, 0.775] | 0.756 [0.741, 0.771] | 0.758 [0.744, 0.773] |
+| truth     | zero-shot | -     | 0.864 [0.780, 0.949] | 0.712 [0.593, 0.814] | 0.068 [0.017, 0.136] |
+| utility   | last      | L18   | 0.714 [0.705, 0.726] | 0.688 [0.676, 0.699] | 0.375 [0.332, 0.421] |
+| utility   | concept   | L22   | 0.731 [0.714, 0.748] | 0.715 [0.701, 0.727] | 0.543 [0.499, 0.586] |
+| utility   | mean      | L16   | 0.692 [0.670, 0.711] | 0.695 [0.670, 0.718] | 0.671 [0.651, 0.688] |
+| utility   | zero-shot | -     | 0.707 [0.652, 0.762] | 0.633 [0.570, 0.691] | 0.043 [0.020, 0.070] |
+
+- **Position.** On the original prompts sentiment reads 0.952, 0.927 and 0.876 (`last` highest, a spread of 0.076), truth 0.764, 0.673 and 0.751 (`last` highest, 0.091) and utility 0.714, 0.731 and 0.692 (`concept` highest, 0.039).
+- **Random decoy.** At `last` the reader falls by 0.162 for sentiment (0.952 to 0.790), 0.053 for truth and 0.026 for utility. At `concept` sentiment falls by 0.099 (0.927 to 0.828) and truth goes up by 0.049 (0.673 to 0.722, with intervals that do not overlap). At `mean` no task moves by more than 0.005.
+- **Against decoy.** At `last` the reader falls below chance on all three tasks, with intervals below 0.5: sentiment 0.437 [0.415, 0.457], truth 0.208 [0.163, 0.258] and utility 0.375 [0.332, 0.421]. At `concept` sentiment drops 0.375 (0.551 [0.525, 0.577]), truth 0.044 (0.629) and utility 0.188 (0.543 [0.499, 0.586], an interval that reaches 0.5). At `mean` the three tasks (0.880, 0.758, 0.671) are within 0.021 of the original with overlapping intervals.
+- **Zero-shot.** The model's own answer drops from 0.935, 0.864 and 0.707 to 0.650, 0.712 and 0.633 under the random decoy and to 0.023, 0.068 and 0.043 under the `against` decoy. The reader at `mean` stays at 0.880, 0.758 and 0.671 under the `against` decoy, so the decoy that turns the model's verbalized answer around does not turn that reader.
+
+#### qwen3-0.6b
+
+| Task      | Position  | Layer | Original             | Random decoy         | Against decoy        |
+| --------- | --------- | ----- | -------------------- | -------------------- | -------------------- |
+| sentiment | last      | L18   | 0.860 [0.843, 0.875] | 0.837 [0.825, 0.850] | 0.754 [0.739, 0.768] |
+| sentiment | concept   | L14   | 0.798 [0.775, 0.822] | 0.801 [0.777, 0.824] | 0.761 [0.726, 0.794] |
+| sentiment | mean      | L14   | 0.875 [0.861, 0.891] | 0.885 [0.873, 0.895] | 0.887 [0.875, 0.897] |
+| sentiment | zero-shot | -     | 0.864 [0.818, 0.907] | 0.523 [0.458, 0.593] | 0.000 [0.000, 0.000] |
+| truth     | last      | L18   | 0.747 [0.725, 0.771] | 0.783 [0.766, 0.802] | 0.786 [0.758, 0.819] |
+| truth     | concept   | L28   | 0.625 [0.586, 0.666] | 0.654 [0.624, 0.685] | 0.659 [0.636, 0.681] |
+| truth     | mean      | L16   | 0.761 [0.734, 0.792] | 0.758 [0.732, 0.788] | 0.759 [0.736, 0.788] |
+| truth     | zero-shot | -     | 0.661 [0.542, 0.780] | 0.576 [0.441, 0.695] | 0.000 [0.000, 0.000] |
+| utility   | last      | L28   | 0.706 [0.691, 0.720] | 0.674 [0.657, 0.690] | 0.296 [0.247, 0.356] |
+| utility   | concept   | L22   | 0.709 [0.691, 0.727] | 0.705 [0.690, 0.719] | 0.422 [0.371, 0.475] |
+| utility   | mean      | L16   | 0.676 [0.655, 0.694] | 0.685 [0.664, 0.705] | 0.676 [0.654, 0.696] |
+| utility   | zero-shot | -     | 0.641 [0.578, 0.699] | 0.633 [0.570, 0.691] | 0.000 [0.000, 0.000] |
+
+- **Position.** On the original prompts sentiment reads 0.860, 0.798 and 0.875 (`concept` lowest, a spread of 0.077), truth 0.747, 0.625 and 0.761 (0.136) and utility 0.706, 0.709 and 0.676 (0.033). Utility at `last` and truth at `concept` are read at L28, the last block, which is the edge of the layers read.
+- **Random decoy.** At `last` the reader moves by 0.023 for sentiment (down), 0.036 for truth (up) and 0.032 for utility (down, with intervals that do not overlap); at `concept` and `mean` no task moves by more than 0.029, and all those intervals overlap.
+- **Against decoy.** Truth does not collapse: 0.786 [0.758, 0.819] at `last` and 0.659 [0.636, 0.681] at `concept`, both above the original with overlapping intervals. Utility falls below chance at `last` (0.296 [0.247, 0.356], a drop of 0.411) and at `concept` (0.422 [0.371, 0.475], a drop of 0.287). Sentiment drops 0.106 at `last` (0.754) and 0.037 at `concept` (0.761, overlapping). At `mean` the three tasks (0.887, 0.759, 0.676) are within 0.012 of the original.
+- **Zero-shot.** The model's own answer drops from 0.864, 0.661 and 0.641 to 0.523, 0.576 and 0.633 under the random decoy and to 0.000 on all three tasks under the `against` decoy (the stored intervals are [0.000, 0.000]). The reader at `mean` stays at 0.887, 0.759 and 0.676.
+
+#### Base against post-trained at 0.6B
+
+The two checkpoints are two models and each has one run, so this compares cells and does not pool them.
+
+- **Original prompts.** The post-trained point value is lower in 8 of the 9 cells; the exception is truth at `mean` (0.761 against 0.751). The intervals do not overlap in two cells, sentiment at `last` (0.860 against 0.952) and `concept` (0.798 against 0.927); in the other seven they overlap.
+- **Against decoy.** The cells that fall below chance differ. The base reader is below chance in three cells (sentiment, truth and utility at `last`) and the post-trained reader in two (utility at `last` and `concept`). Truth at `last` is 0.208 [0.163, 0.258] on the base and 0.786 [0.758, 0.819] on the post-trained checkpoint; sentiment at `last` is 0.437 and 0.754. At 1.7B truth at `last` also differs in the same direction (0.058 on the base, 0.551 on the post-trained checkpoint), though there the post-trained value is below its original. Utility at `concept` is 0.543 on the base and 0.422 on the post-trained checkpoint.
+- **Zero-shot.** The post-trained point values are lower on all three tasks under the original prompts (0.864, 0.661 and 0.641 against 0.935, 0.864 and 0.707, with overlapping intervals), and under the `against` decoy the model's own answer is below chance on both checkpoints, exactly 0.000 on all three tasks for the post-trained one (0.023, 0.068 and 0.043 on the base).
+- **Layers.** The layer chosen on the original prompts differs in 6 of the 9 reader cells: sentiment at `concept` (L28 against L14) and `mean` (L16 against L14), truth at `last` (L24 against L18), `concept` (L20 against L28) and `mean` (L15 against L16), and utility at `last` (L18 against L28). A difference in those cells mixes the checkpoint with the layer selected on the select split.
+- **Limits.** The intervals are over the 10 training draws and do not include the sampling of the evaluation pairs, which matters most for truth (59 report pairs).
+
 ### Stimulus-set size on qwen3-1.7b-base (P3)
 
 The design is that of [P3 on gpt2](#stimulus-set-size-p3): 2 to 512 pairs, 20 draws per size, the mean accuracy in each cell and in parentheses the share of the 20 draws whose accuracy is below 0.6. The truth set has 172 pairs, so its 256 and 512 cells are skipped, as is the 512 cell of `truth_cities` (452 pairs).
@@ -2418,7 +2658,7 @@ The accuracy of a reader fitted on all the data of the source (the reference, re
 
 P5 asks whether the honesty reader reads honesty or the persona's words. Each condition changes one thing against the paper persona prompt; the reader is trained on the response tokens of true statements as in R5, and scored on plain true against false statements at the token mean, on the 59 `facts` test pairs and on the test splits of five Geometry of Truth subsets (133 `cities`, 142 `neg_cities`, 36 `sp_en_trans`, 187 `larger_than` and 256 `common_claim_true_false` pairs). The conditions are the paper pair ("an honest" against "an untruthful"), two synonym pairs (`synonym_0`: "a truthful" and "a deceitful"; `synonym_1`: "a sincere" and "a lying"), two unrelated pairs (`unrelated_0`: "a tall" and "a short"; `unrelated_1`: "an old" and "a young"), and three controls: `instruction_only` (the paper personas with an empty response), `fact_only` (no persona, plain true against plain false statements) and `random_label` (the paper stimuli with the training labels swapped in exactly half of the pairs). Accuracies are raw: a reader whose first persona aligns with the false statements scores below 0.5. Layers are chosen per condition on the 53 `facts` validation pairs (the `Layer` column) and every set is scored at that layer. The in-template accuracy of the persona conditions is 1.0 by construction, as for R5, and is not reported. The `instruction_only` readers are identical across seeds (every training set holds the same two texts), so that row comes from one reader and carries no interval; any other cell shown without an interval has a stored interval that rounds to the point value. Intervals are over the 10 readers; they do not include the sampling of the evaluation pairs, which matters most for `facts` (59) and `sp_en_trans` (36).
 
-The runs are `p5/gpt2/80b4ae80a6ca`, `p5/qwen3-1.7b-base/a4bd463deeca` and `p5/qwen3-1.7b/7e5e579d102e`, all made at `c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090). The earlier `gpt2` attempts stopped on a fit that produced a direction of zero norm; these are the runs after the fix. Base and post-trained rows are separate tables and are never pooled. The stored gap is the mean of the paper and the two synonym conditions minus the mean of the two unrelated ones, per set.
+The runs are `p5/gpt2/80b4ae80a6ca`, `p5/qwen3-1.7b-base/a4bd463deeca` and `p5/qwen3-1.7b/7e5e579d102e`, all made at `c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090). The earlier `gpt2` attempts stopped on a fit that produced a direction of zero norm; these are the runs after the fix. Three more runs, `p5/gpt2-medium/bd9f565baa76`, `p5/qwen3-0.6b-base/b6a702e460e9` and `p5/qwen3-0.6b/fb664c3b4be2`, were made at `fb3b5dd` with a clean tree on a laptop GPU (NVIDIA GeForce RTX 4070 Laptop GPU) with batch size 8 and the same config; the P5 code is unchanged between `c7d8051` and `fb3b5dd`, so these runs differ from the first three in checkpoint and in hardware. Base and post-trained rows are separate tables and are never pooled. The stored gap is the mean of the paper and the two synonym conditions minus the mean of the two unrelated ones, per set.
 
 ### gpt2
 
@@ -2474,11 +2714,67 @@ The runs are `p5/gpt2/80b4ae80a6ca`, `p5/qwen3-1.7b-base/a4bd463deeca` and `p5/q
 - **The shuffled-label control reads at chance.** `random_label` has intervals that include 0.5 on five of the six sets (0.524 [0.488, 0.563] on `facts`); the exception is `sp_en_trans`, 0.550 [0.514, 0.583]. Its stored in-template column is 0.701 [0.462, 0.894] at L4.
 - `instruction_only` is one reader per cell: 0.576 on `facts` and 0.664 on `common_claim`, without an interval.
 
-### What the three runs show together
+### gpt2-medium
 
-- On `gpt2` the paper persona reader scores below chance on `facts` (0.353) and no persona condition reads `facts` above 0.6; only `fact_only` (0.663) does. On both Qwen3 checkpoints the paper persona reads `facts` at 0.736 and 0.744, close to `fact_only` (0.702 and 0.736).
-- On both Qwen3 checkpoints the readers of the unrelated persona words fall to or near chance on `facts` (0.600 and 0.520 on the base, 0.510 and 0.492 on the post-trained checkpoint) while the paper and synonym readers stay at 0.647 or above. This is consistent with a reader that depends on the meaning of the persona words, but it is one run per checkpoint on 59 `facts` pairs, and `unrelated_0` on the base checkpoint (0.600 [0.581, 0.620]) is above chance. Some cells under the unrelated words sit far from 0.5 (`larger_than` on `gpt2`, 0.670 and 0.826; `sp_en_trans` on the post-trained checkpoint, 0.353 and 0.367); the runs do not say what those readers read.
-- Each cell is one run of one model at one layer chosen on 53 pairs and scored on small sets, with intervals over the training draw only. The runs do not test persona wordings beyond the five pairs above.
+| Condition        | Layer | facts                | cities               | neg_cities           | sp_en_trans          | larger_than          | common_claim         |
+| ---------------- | ----- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| paper            | L24   | 0.592 [0.578, 0.605] | 0.522 [0.511, 0.531] | 0.485 [0.474, 0.494] | 0.592 [0.553, 0.628] | 0.481 [0.458, 0.501] | 0.467 [0.459, 0.475] |
+| synonym_0        | L15   | 0.449 [0.431, 0.466] | 0.502 [0.493, 0.511] | 0.451 [0.444, 0.461] | 0.475 [0.461, 0.492] | 0.295 [0.282, 0.309] | 0.527 [0.517, 0.537] |
+| synonym_1        | L11   | 0.500 [0.480, 0.519] | 0.598 [0.585, 0.611] | 0.517 [0.508, 0.525] | 0.467 [0.444, 0.494] | 0.502 [0.472, 0.540] | 0.551 [0.541, 0.560] |
+| unrelated_0      | L16   | 0.514 [0.495, 0.529] | 0.510 [0.498, 0.520] | 0.506 [0.500, 0.514] | 0.428 [0.408, 0.447] | 0.519 [0.506, 0.530] | 0.497 [0.490, 0.503] |
+| unrelated_1      | L10   | 0.486 [0.466, 0.503] | 0.475 [0.462, 0.490] | 0.477 [0.470, 0.484] | 0.522 [0.514, 0.533] | 0.796 [0.778, 0.818] | 0.412 [0.402, 0.424] |
+| instruction_only | L11   | 0.542                | 0.586                | 0.444                | 0.556                | 0.738                | 0.555                |
+| fact_only        | L20   | 0.644 [0.619, 0.669] | 0.546 [0.537, 0.556] | 0.519 [0.512, 0.525] | 0.475 [0.436, 0.522] | 0.617 [0.548, 0.678] | 0.632 [0.621, 0.645] |
+| random_label     | L9    | 0.536 [0.500, 0.573] | 0.501 [0.476, 0.530] | 0.480 [0.442, 0.516] | 0.556 [0.517, 0.592] | 0.440 [0.374, 0.526] | 0.547 [0.511, 0.578] |
+
+- **The paper persona reads `facts` above chance on `gpt2-medium`, unlike `gpt2`.** It scores 0.592 [0.578, 0.605] (0.353 on `gpt2`). The other sets are 0.522 (`cities`), 0.592 [0.553, 0.628] (`sp_en_trans`) and, with intervals below 0.5, 0.485 (`neg_cities`) and 0.467 (`common_claim`); `larger_than` is 0.481 [0.458, 0.501].
+- **The group means of the synonyms and the unrelated words do not separate on `facts`.** `synonym_0` and `synonym_1` read 0.449 and 0.500, the unrelated pairs 0.514 and 0.486; the stored gap is 0.014 (0.013 on `gpt2`). `synonym_0` is below chance on `facts` (0.449 [0.431, 0.466]). `fact_only`, with no persona, is the highest condition on `facts` (0.644 [0.619, 0.669]), above the paper persona.
+- **`larger_than` depends on the persona words.** The paper and synonym readers score 0.481, 0.295 [0.282, 0.309] and 0.502, the unrelated readers 0.519 and 0.796 [0.778, 0.818]; the stored gap is -0.231 (-0.465 on `gpt2`), and the two unrelated pairs differ by 0.277 between themselves. The other gaps are 0.048 (`cities`), -0.007 (`neg_cities`), 0.036 (`sp_en_trans`) and 0.060 (`common_claim`). The run does not say what the readers of the unrelated words read on `larger_than`.
+- **The shuffled-label control reads at chance on four of the six sets.** `random_label` has intervals that include 0.5 on `facts` (0.536 [0.500, 0.573], a lower bound at 0.500), `cities`, `neg_cities` and `larger_than`; the exceptions are `sp_en_trans` (0.556 [0.517, 0.592]) and `common_claim` (0.547 [0.511, 0.578]). Its stored in-template column is 0.662 [0.420, 0.866] at L24.
+- `instruction_only` is one reader per cell: 0.542 on `facts` and 0.738 on `larger_than`, without an interval.
+
+### qwen3-0.6b-base
+
+| Condition        | Layer | facts                | cities               | neg_cities           | sp_en_trans          | larger_than          | common_claim         |
+| ---------------- | ----- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| paper            | L18   | 0.597 [0.581, 0.614] | 0.658 [0.650, 0.665] | 0.387 [0.381, 0.392] | 0.750 [0.733, 0.767] | 0.316 [0.302, 0.328] | 0.618 [0.611, 0.624] |
+| synonym_0        | L21   | 0.744 [0.727, 0.761] | 0.735 [0.723, 0.751] | 0.540 [0.526, 0.556] | 0.606 [0.581, 0.631] | 0.399 [0.377, 0.426] | 0.620 [0.611, 0.630] |
+| synonym_1        | L21   | 0.575 [0.558, 0.590] | 0.610 [0.601, 0.617] | 0.432 [0.425, 0.437] | 0.700 [0.678, 0.719] | 0.363 [0.329, 0.396] | 0.630 [0.626, 0.635] |
+| unrelated_0      | L17   | 0.541 [0.525, 0.556] | 0.547 [0.529, 0.560] | 0.585 [0.575, 0.595] | 0.497 [0.469, 0.528] | 0.603 [0.593, 0.615] | 0.621 [0.613, 0.630] |
+| unrelated_1      | L15   | 0.419 [0.392, 0.447] | 0.414 [0.403, 0.425] | 0.538 [0.532, 0.544] | 0.344 [0.319, 0.369] | 0.463 [0.456, 0.469] | 0.453 [0.443, 0.461] |
+| instruction_only | L1    | 0.525                | 0.504                | 0.542                | 0.556                | 0.455                | 0.574                |
+| fact_only        | L17   | 0.746 [0.732, 0.759] | 0.753 [0.729, 0.777] | 0.450 [0.432, 0.470] | 0.811 [0.781, 0.839] | 0.432 [0.388, 0.488] | 0.682 [0.671, 0.694] |
+| random_label     | L21   | 0.517 [0.429, 0.607] | 0.541 [0.508, 0.569] | 0.476 [0.441, 0.509] | 0.525 [0.428, 0.622] | 0.426 [0.334, 0.512] | 0.518 [0.463, 0.575] |
+
+- **The paper persona reads `facts` above chance and two sets below it.** It scores 0.597 [0.581, 0.614] on `facts`, 0.658 on `cities`, 0.750 on `sp_en_trans` and 0.618 on `common_claim`; `neg_cities` (0.387 [0.381, 0.392]) and `larger_than` (0.316 [0.302, 0.328]) have intervals below 0.5. `fact_only` reads `facts` at 0.746 [0.732, 0.759], and `synonym_0` reads it as high (0.744 [0.727, 0.761]).
+- **The persona words matter on `facts`, as on the 1.7B base checkpoint.** The paper and synonym readers read 0.597, 0.744 and 0.575 on `facts` against 0.541 and 0.419 [0.392, 0.447] for the unrelated pairs (stored gap 0.159), 0.658, 0.735 and 0.610 on `cities` against 0.547 and 0.414 (0.187), and 0.750, 0.606 and 0.700 on `sp_en_trans` against 0.497 and 0.344 (0.264). The gaps are negative on `neg_cities` (-0.108) and `larger_than` (-0.174), where `unrelated_0` ("a tall", "a short") reads 0.585 and 0.603 against 0.387 and 0.316 for the paper persona; the other gap is 0.086 (`common_claim`).
+- **The shuffled-label control reads at chance on five of the six sets.** `random_label` has intervals that include 0.5 except on `cities` (0.541 [0.508, 0.569]); on `facts` it reads 0.517 [0.429, 0.607]. Its stored in-template column is 0.650 [0.415, 0.853] at L11.
+- `instruction_only` is one reader per cell: 0.525 on `facts` and 0.504 on `cities`.
+
+### qwen3-0.6b
+
+| Condition        | Layer | facts                | cities               | neg_cities           | sp_en_trans          | larger_than          | common_claim         |
+| ---------------- | ----- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| paper            | L19   | 0.598 [0.583, 0.619] | 0.693 [0.663, 0.722] | 0.475 [0.456, 0.492] | 0.661 [0.606, 0.714] | 0.720 [0.656, 0.771] | 0.612 [0.599, 0.624] |
+| synonym_0        | L25   | 0.575 [0.553, 0.597] | 0.604 [0.598, 0.609] | 0.550 [0.541, 0.559] | 0.492 [0.461, 0.522] | 0.710 [0.702, 0.718] | 0.629 [0.619, 0.643] |
+| synonym_1        | L28   | 0.666 [0.649, 0.681] | 0.595 [0.587, 0.602] | 0.489 [0.480, 0.499] | 0.500 [0.489, 0.511] | 0.564 [0.553, 0.575] | 0.632 [0.625, 0.641] |
+| unrelated_0      | L18   | 0.654 [0.644, 0.664] | 0.644 [0.617, 0.677] | 0.487 [0.478, 0.494] | 0.444 [0.419, 0.469] | 0.755 [0.716, 0.783] | 0.571 [0.559, 0.588] |
+| unrelated_1      | L8    | 0.558 [0.553, 0.563] | 0.541 [0.535, 0.550] | 0.546 [0.537, 0.556] | 0.322 [0.311, 0.333] | 0.696 [0.611, 0.745] | 0.529 [0.520, 0.537] |
+| instruction_only | L4    | 0.508                | 0.519                | 0.549                | 0.389                | 0.738                | 0.527                |
+| fact_only        | L27   | 0.653 [0.639, 0.666] | 0.543 [0.535, 0.551] | 0.517 [0.508, 0.524] | 0.478 [0.433, 0.531] | 0.736 [0.696, 0.765] | 0.611 [0.595, 0.625] |
+| random_label     | L21   | 0.534 [0.498, 0.566] | 0.529 [0.508, 0.552] | 0.494 [0.482, 0.506] | 0.472 [0.403, 0.547] | 0.588 [0.446, 0.703] | 0.523 [0.493, 0.549] |
+
+- **The paper persona reads above chance except on `neg_cities`.** It scores 0.598 [0.583, 0.619] on `facts`, 0.693 on `cities`, 0.661 on `sp_en_trans`, 0.720 on `larger_than` and 0.612 on `common_claim`; `neg_cities` is 0.475 [0.456, 0.492]. `fact_only` reads `facts` at 0.653 [0.639, 0.666] and `larger_than` at 0.736.
+- **The persona words do not matter on `facts` at this checkpoint.** The paper and synonym readers read 0.598, 0.575 and 0.666 and the unrelated readers 0.654 [0.644, 0.664] and 0.558 (stored gap 0.007): `unrelated_0` ("a tall", "a short") reads above the paper persona and as high as `fact_only`. On `larger_than` it reads 0.755 [0.716, 0.783] against 0.720 for the paper persona (gap -0.061). The gaps are positive on `cities` (0.038), `sp_en_trans` (0.168) and `common_claim` (0.074) and negative on `neg_cities` (-0.012). On `sp_en_trans` the unrelated readers fall below chance, with intervals below 0.5 (0.444 [0.419, 0.469] and 0.322 [0.311, 0.333]), while the paper persona reads 0.661; the run does not say what those readers read.
+- **The shuffled-label control reads at chance on five of the six sets.** `random_label` has intervals that include 0.5 except on `cities` (0.529 [0.508, 0.552]); on `facts` it reads 0.534 [0.498, 0.566]. Its stored in-template column is 0.648 [0.427, 0.833] at L15.
+- `instruction_only` is one reader per cell: 0.508 on `facts` and 0.738 on `larger_than`.
+
+### What the six runs show together
+
+- The paper persona reader scores below chance on `facts` on `gpt2` (0.353) and above it on every other model: 0.592 on `gpt2-medium`, 0.597 on `qwen3-0.6b-base`, 0.598 on `qwen3-0.6b`, 0.736 on `qwen3-1.7b-base` and 0.744 on `qwen3-1.7b`. On `gpt2` and `gpt2-medium` only `fact_only` reads `facts` above 0.6 (0.663 and 0.644); on the Qwen3 checkpoints several persona conditions do.
+- The stored gap between the paper and synonym readers and the unrelated readers on `facts` is 0.013 (`gpt2`), 0.014 (`gpt2-medium`), 0.159 (`qwen3-0.6b-base`), 0.007 (`qwen3-0.6b`), 0.132 (`qwen3-1.7b-base`) and 0.203 (`qwen3-1.7b`). A dependence on the persona words shows on the 1.7B pair and on `qwen3-0.6b-base`, where the unrelated readers fall to or near chance on `facts` (0.600 and 0.520 on `qwen3-1.7b-base`, 0.541 and 0.419 on `qwen3-0.6b-base`, 0.510 and 0.492 on `qwen3-1.7b`) while the paper and synonym readers stay at 0.575 or above; it does not show on `gpt2`, `gpt2-medium` or `qwen3-0.6b`, where the unrelated readers read `facts` as the others do. The sign of the base to post-trained difference in this gap is not the same at the two sizes (0.159 to 0.007 at 0.6B, 0.132 to 0.203 at 1.7B). Each gap rests on one run per checkpoint and 59 `facts` pairs, and `unrelated_0` on `qwen3-1.7b-base` (0.600 [0.581, 0.620]) is above chance.
+- Some cells under the unrelated words sit far from 0.5 (`larger_than` on `gpt2`, 0.670 and 0.826, and on `gpt2-medium`, 0.796 for `unrelated_1`; `sp_en_trans` on `qwen3-1.7b`, 0.353 and 0.367, on `qwen3-0.6b-base`, 0.344 for `unrelated_1`, and on `qwen3-0.6b`, 0.444 and 0.322); the runs do not say what those readers read.
+- Each cell is one run of one model at one layer chosen on 53 pairs and scored on small sets, with intervals over the training draw only. The runs do not test persona wordings beyond the five pairs above. The three newest runs were made on a laptop GPU and the first three on a cloud GPU, with the same config and the same P5 code.
 
 ## Template steering on the Qwen3 1.7B pair (P7)
 
@@ -2564,6 +2860,9 @@ runs read the Qwen3 runs of R1, R2, R3, R5 and R7 below (their hashes are stored
 read the LR1 adapter of their checkpoint and the C5 runs read the C2 run of their checkpoint, both named in their
 configs. None of the Qwen3 M1, C2, C4 and C5 runs stores the perplexity or the distinct-1 of the generated text.
 
+The A1 and A2 runs of `gpt2-medium`, `gpt2-large` and `gpt2-xl`, the P2 runs of `gpt2-medium`, `qwen3-0.6b-base` and `qwen3-0.6b`, the P5 runs of the same three models and the P9b and P9c runs of `qwen3-0.6b` and `qwen3-1.7b` were made at `fb3b5dd` with a clean tree on a laptop GPU (NVIDIA GeForce RTX 4070 Laptop GPU, torch 2.14.1+cu130, transformers 5.19.0), with the default config of each experiment (batch size 8 for P2, P5, P9b and P9c; the A1 and A2 configs store no batch size). The A1 and A2 runs read the R1, R2, R3, R5 and R7 runs of the same size listed below, and the P9b and P9c runs read the P9a run of the same checkpoint. The source files of these experiments are the same at `fb3b5dd` and at `f4d414d` (`git diff --stat fb3b5dd f4d414d -- src` lists only `chain.py` and the C2, C4, C5, M1 and P7 experiments). Against the commits of the committed runs they are compared with, the differences under `src` for these experiments are tooling (`chain.py`, `cloud.py`, `cli.py`, `export.py`), an opt-in refit flag in the shared fit code (default off, set by P4 and P5 only), and a constant moved in the P9 reading code. The P9d code and its abstention patterns also changed, which the P9b and P9c runs do not use.
+
+
 Config hashes (12 hex digits), GPT-2:
 
 | Experiment     | gpt2         | gpt2-medium  | gpt2-large   | gpt2-xl      |
@@ -2575,12 +2874,14 @@ Config hashes (12 hex digits), GPT-2:
 | R5             | 779f5b093803 | e447c8958b80 | 322bd80f6d19 | 7f0afd7dfe12 |
 | R6             | 47e8ec0cf46c | 04fc7ead5f13 | f058c0f19396 | 60cc952b4ec5 |
 | R7             | 5908a78acf64 | 3030e4186690 | 796f4c4d19f2 | 5eed122bfd4e |
+| A1             | ad6abbba8fd0 | d1eeb0585ca6 | 3ed23ece4e63 | 078a72de1cfb |
+| A2             | be4e34f21b35 | 6c8366625d7a | b6cf80cfb26f | 46d59dbefe95 |
 | P1 (sentiment) | 673af340b77d | not run      | not run      | not run      |
 | P1 (all tasks) | 078b9d6482a2 | not run      | not run      | not run      |
-| P2             | ee099a704022 | not run      | not run      | not run      |
+| P2             | ee099a704022 | 733bd2f76315 | not run      | not run      |
 | P3             | 676c31488397 | not run      | not run      | not run      |
 | P4             | 8c4a73d1e9db | not run      | not run      | not run      |
-| P5             | 80b4ae80a6ca | not run      | not run      | not run      |
+| P5             | 80b4ae80a6ca | bd9f565baa76 | not run      | not run      |
 | P7             | 6c19128c5192 | not run      | not run      | not run      |
 | C1             | add59c39f574 | 2ed2e53ba7fe | 353f91e1b8dc | de76af1a8a07 |
 | M1             | 4e394ed1a72c | not run      | not run      | not run      |
@@ -2607,9 +2908,9 @@ Qwen3:
 | A1          | 4e8f8cfa0021    | 0cb04910086e | 769590eef456    | 2326d9ec9b7d |
 | A2          | 109c4aa851bf    | 91b62e58953f | 09b991efaf7f    | 1e528ddfbffa |
 | P1          | a540a2497ac4    | 31a6ee65d6ab | ef3f8c0d3389    | f4aa9b57824a |
-| P2          | not run         | not run      | 119f0ac54451    | 51a85fbec631 |
+| P2          | 59a53843dccd    | 442ebe80ca68 | 119f0ac54451    | 51a85fbec631 |
 | P3          | not run         | not run      | 61baf30a8a59    | not run      |
-| P5          | not run         | not run      | a4bd463deeca    | 7e5e579d102e |
+| P5          | b6a702e460e9    | fb664c3b4be2 | a4bd463deeca    | 7e5e579d102e |
 | P7          | not run         | not run      | 947fef33a7c5    | 7921f3fe5754 |
 | C1          | 7ae3e2aa34e2    | 832462b7b04e | 0cd5a36d3408    | a91f950ad9f5 |
 | M1          | not run         | not run      | 3fe3a8644289    | de2cdd3146ac |
@@ -2618,13 +2919,12 @@ Qwen3:
 | C5          | not run         | not run      | fafc346bc266    | 672f70c5406a |
 | LR1         | not run         | not run      | 95a42d94146c    | bf86ed5ccde1 |
 | P9a         | 1d9f881153e4    | 10d95352866e | d5d522bfecd4    | f413efcae268 |
-| P9b         | 34c0ebff50b0    | not run      | 5ca7821318ef    | not run      |
-| P9c         | 264bf7ca3a01    | not run      | 0f684b3c4b66    | not run      |
+| P9b         | 34c0ebff50b0    | 975dbcf95759 | 5ca7821318ef    | 9641ab8235a9 |
+| P9c         | 264bf7ca3a01    | 0f8b118c9692 | 0f684b3c4b66    | 7c142334e5fe |
 | P9d fewshot | f9a8f827b6b4    | 9c94025d9ad4 | 9543312bcc45    | 42b7a0daf9b9 |
 | P9d concept | not run         | f0b3f4eb3988 | not run         | d43b9e297e42 |
 
-Other runs: R6 text baselines of `gpt2` computed at `ca2546c` (not a run); A1 `ad6abbba8fd0` and A2 `be4e34f21b35` (both
-on `gpt2`); P6 `25ee6de331d4`; P8 `e9f9bc04ba3c`.
+Other runs: R6 text baselines of `gpt2` computed at `ca2546c` (not a run); P6 `25ee6de331d4`; P8 `e9f9bc04ba3c`.
 
 The files of every run named here are committed under `results/<experiment>/<model>/<hash>/`, copied with
 `tomography export`, which keeps the JSON, NPZ and CSV files the plots read and rewrites local paths. The figures are
@@ -2638,22 +2938,19 @@ Not in this document yet. No dates are promised.
 - P1 on the truth and emotion tasks on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the Qwen3 checkpoints, and with the
   `pca_diff` finder (the truth and emotion tasks ran on `gpt2` only; the sentiment task ran with the logistic finder on
   `gpt2` and the four Qwen3 checkpoints).
-- P2 on the other GPT-2 sizes and on the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `qwen3-1.7b-base` and
-  `qwen3-1.7b`). P3 on the other GPT-2 sizes and on the post-trained and 0.6B Qwen3 checkpoints (it ran on `gpt2` and
+- P2 on `gpt2-large` and `gpt2-xl` (it ran on `gpt2`, `gpt2-medium` and the four Qwen3 checkpoints). P3 on the other GPT-2 sizes and on the post-trained and 0.6B Qwen3 checkpoints (it ran on `gpt2` and
   `qwen3-1.7b-base`). P4 on the other GPT-2 sizes and on the Qwen3 checkpoints (it ran on `gpt2` only). P7 on the other
   GPT-2 sizes and on the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `qwen3-1.7b-base` and `qwen3-1.7b`). M1, C2, C4 and LR1
   on the other GPT-2 sizes and on the two 0.6B Qwen3 checkpoints (they ran on `gpt2`, `qwen3-1.7b-base` and `qwen3-1.7b`).
   C5 on `gpt2`, `gpt2-medium`, `gpt2-large` and the two 0.6B Qwen3 checkpoints (it ran on `gpt2-xl`, `qwen3-1.7b-base`
-  and `qwen3-1.7b`). A1 and A2 on `gpt2-medium`, `gpt2-large` and `gpt2-xl`.
-- P5, persona wording and instruction confounds for honesty, on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the two 0.6B
-  Qwen3 checkpoints (it ran on `gpt2`, `qwen3-1.7b-base` and `qwen3-1.7b`), and with persona wordings beyond the five
-  pairs of the run.
+  and `qwen3-1.7b`).
+- P5, persona wording and instruction confounds for honesty, on `gpt2-large` and `gpt2-xl` (it ran on `gpt2`, `gpt2-medium` and the
+  four Qwen3 checkpoints), and with persona wordings beyond the five pairs of the run.
 - A random-direction arm for C2, P7, C4 and C5 (on GPT-2 and on Qwen3), and a fluency measure (perplexity and
   distinct-1) for M1, C2, P7, C4 and C5 (on GPT-2 and on Qwen3).
 - Stored but not read in this document: the emotion direction matrix and embedding of the Qwen3 R4 runs, the A1 matrices
   of concept and layer agreement, the emotion gallery of the Qwen3 C5 runs, and the P5 curves over layers and the
   cosine curves between the paper reader and the other readers.
-- P9b and P9c on the post-trained Qwen3 checkpoints.
 - P9: a hand check of the abstention indicator of P9d (the stored samples carry no human labels), an item-level
   interval for the P9b AUROC (only the interval over the pair draws is stored), and a within-relation increment of
   the probe over the output confidence in P9c (only the pooled increment is stored).
