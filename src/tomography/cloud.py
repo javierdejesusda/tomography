@@ -399,6 +399,10 @@ def _ssh_argv(
     no_stdin: bool = False,
 ) -> list[str]:
     known_hosts = _known_hosts(args.state, state["pod_id"]).as_posix()
+    # Quotes only where ssh needs them: the Windows argv escaping turns
+    # quotes in an argument without spaces into \" and ssh rejects that.
+    if any(c.isspace() for c in known_hosts):
+        known_hosts = f'"{known_hosts}"'
     return [
         "ssh",
         *(["-n"] if no_stdin else []),
@@ -409,7 +413,7 @@ def _ssh_argv(
         "-o",
         "StrictHostKeyChecking=accept-new",
         "-o",
-        f'UserKnownHostsFile="{known_hosts}"',
+        f"UserKnownHostsFile={known_hosts}",
         "-o",
         "ServerAliveInterval=30",
         "-o",

@@ -553,6 +553,19 @@ def test_known_hosts_path_with_a_space_is_quoted(tmp_path: Path) -> None:
     assert option.startswith('UserKnownHostsFile="')
 
 
+def test_known_hosts_path_without_a_space_is_not_quoted(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    h.state_path = tmp_path / "state" / "pod.json"
+    write_state(h)
+    assert h.main("ssh", "--", "true") == 0
+    option = next(
+        a for a in h.runner.runs[0][0] if a.startswith("UserKnownHostsFile=")
+    )
+    assert option == f"UserKnownHostsFile={h.known_hosts().as_posix()}"
+
+
 def write_spec(tmp_path: Path, name: str = "chain11", out: str = OUT) -> Path:
     spec = tmp_path / "chain11.toml"
     spec.write_text(
