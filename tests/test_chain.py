@@ -1237,3 +1237,33 @@ def test_load_spec_rejects_a_job_name_that_collides_with_the_log(
 
     with pytest.raises(ValueError, match=r"\.log"):
         load_spec(path)
+
+
+def test_a_launch_error_does_not_try_the_retry_batch_sizes(
+    tmp_path: Path,
+) -> None:
+    clock, runs = _fresh(tmp_path)
+    spec = _chain(tmp_path, _job("a", retry_batch_sizes=(4, 2)))
+    attempts: list[Sequence[str]] = []
+
+    def launch(
+        command: Sequence[str],
+        env: Mapping[str, str],
+        stdout_path: Path,
+        log_path: Path,
+    ) -> FakeProcess:
+        attempts.append(command)
+        raise OSError("no exec")
+
+    code = run_chain(
+        spec,
+        clock=clock,
+        sleep=clock.sleep,
+        launch=launch,
+        gpu_query=lambda: None,
+    )
+
+    texts = _texts(spec)
+    assert code == 1
+    assert len(attempts) == 1
+    assert not [t for t in texts if t.startswith("RETRY")]

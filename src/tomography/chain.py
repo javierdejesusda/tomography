@@ -176,7 +176,6 @@ def _check_dependencies(jobs: tuple[Job, ...]) -> None:
                     f"later job {dep!r}"
                 )
         seen.add(job.name)
-    for job in jobs:
         for attempt in attempt_names(job):
             if attempt in attempts:
                 raise ValueError(f"attempt name {attempt!r} is used twice")
@@ -335,6 +334,7 @@ class _Attempt:
     code: int
     run_dir: str | None = None
     reused: bool = False
+    launched: bool = True
 
 
 def launch_process(
@@ -420,7 +420,7 @@ def _last_line(path: Path) -> str | None:
     return None
 
 
-def _is_finished(path: str | Path) -> bool:
+def is_finished_run(path: str | Path) -> bool:
     """Tells whether a path is a run directory whose run finished."""
     try:
         return RunDir.open(path).meta.get("finished_at") is not None
@@ -460,7 +460,7 @@ def _read_done(folder: Path, digest: str) -> str | None:
     if not isinstance(data, dict) or data.get("digest") != digest:
         return None
     run_dir = data.get("run_dir")
-    if isinstance(run_dir, str) and _is_finished(run_dir):
+    if isinstance(run_dir, str) and is_finished_run(run_dir):
         return run_dir
     return None
 
@@ -548,7 +548,7 @@ class _Runner:
         except (OSError, ValueError) as error:
             log_path.write_text(f"launch failed: {error}\n", encoding="utf-8")
             self.log(f"END {name} exit=-1 seconds=0 peak_gpu=na last=-")
-            return _Attempt(-1)
+            return _Attempt(-1, launched=False)
         peak: int | None = None
         last_beat = start
         try:
@@ -586,11 +586,11 @@ class _Runner:
     ) -> _Attempt:
         if code == 0:
             line = _last_line(stdout_path)
-            if line is not None and _is_finished(line):
+            if line is not None and is_finished_run(line):
                 return _Attempt(code, line)
         elif code == 2:
             found = EXISTING_RUN.findall(read_tail(log_path))
-            if found and _is_finished(found[-1]):
+            if found and is_finished_run(found[-1]):
                 return _Attempt(code, found[-1], reused=True)
         return _Attempt(code)
 
@@ -602,6 +602,8 @@ class _Runner:
                 self.log(f"RETRY {job.name} batch_size={size}")
             command = build_command(self.spec, job, run_dirs, size)
             result = self.attempt(name, command)
+            if not result.launched:
+                return False
             if result.run_dir is None:
                 continue
             if result.reused:
