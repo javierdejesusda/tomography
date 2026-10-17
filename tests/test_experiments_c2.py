@@ -451,7 +451,7 @@ def test_the_effects_table_plants_the_side_effects_of_every_arm(
     held = split_held_out(_texts(), n_calibration=10, n_neutral=8, seed=0)
     labels = _effect_labels()
     assert len(calls) == len(labels)
-    assert [name for name, _ in calls][0] == "none"
+    assert calls[0][0] == "none"
     assert {neutral for _, neutral in calls} == {held.neutral}
     table = run_dir.read_json("table_effects")
     assert isinstance(table, dict)
