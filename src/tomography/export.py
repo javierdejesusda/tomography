@@ -63,12 +63,10 @@ _FILE_ERRORS = (
     ValueError,
     OSError,
     EOFError,
-    KeyError,
-    TypeError,
     zipfile.BadZipFile,
 )
-RESULTS_PREFIX = "results"
-EXTERNAL_PREFIX = "<external>"
+_RESULTS_PREFIX = "results"
+_EXTERNAL_PREFIX = "<external>"
 
 
 class ExportError(Exception):
@@ -202,7 +200,7 @@ def find_runs(roots: Iterable[Path]) -> list[RunInfo]:
     """
     found: dict[Path, RunInfo] = {}
     for root in roots:
-        if not Path(root).is_dir():
+        if not root.is_dir():
             raise ExportError(f"not a directory: {root}")
         for folder, subfolders, files in os.walk(root):
             if "config.json" in files and "meta.json" in files:
@@ -281,7 +279,9 @@ class _PathRewriter:
     def _embedded(self, text: str, match: re.Match[str]) -> str:
         replacement = self._path(match.group(0))
         rest = text[match.end() :]
-        if replacement.startswith(EXTERNAL_PREFIX) and re.match(r"[ \t]", rest):
+        if replacement.startswith(_EXTERNAL_PREFIX) and re.match(
+            r"[ \t]", rest
+        ):
             tail = _EMBEDDED_PATH.sub("", rest).split("\n")[0]
             if re.search(r"[\\/]", tail):
                 raise ValueError(
@@ -301,7 +301,7 @@ class _PathRewriter:
             run, rest = located
             return self._named(run, rest)
         name = next((part for part in reversed(segments) if part), "")
-        replacement = f"{EXTERNAL_PREFIX}/{name}"
+        replacement = f"{_EXTERNAL_PREFIX}/{name}"
         if text not in self._seen:
             self._seen.add(text)
             self.warnings.append(
@@ -311,7 +311,7 @@ class _PathRewriter:
         return replacement
 
     def _named(self, run: RunInfo, rest: Sequence[str]) -> str:
-        prefix = f"{RESULTS_PREFIX}/" if run.key in self._exported else ""
+        prefix = f"{_RESULTS_PREFIX}/" if run.key in self._exported else ""
         return "/".join([f"{prefix}{run.key}", *rest])
 
     def _locate_on_disk(
@@ -328,14 +328,12 @@ class _PathRewriter:
         return None
 
 
-def _dump_json(value: Any) -> bytes:
-    return f"{json.dumps(value, indent=2, allow_nan=False)}\n".encode()
-
-
 def _rewrite_json(data: bytes, rewriter: _PathRewriter) -> bytes:
     value = json.loads(data)
     rewritten = rewriter.rewrite(value)
-    return data if rewritten == value else _dump_json(rewritten)
+    if rewritten == value:
+        return data
+    return f"{json.dumps(rewritten, indent=2, allow_nan=False)}\n".encode()
 
 
 def _rewrite_npz(data: bytes, rewriter: _PathRewriter) -> bytes:
@@ -393,10 +391,7 @@ def _scanned_members(name: str, data: bytes) -> Iterator[tuple[str, str]]:
 
 def _machine_names() -> list[str]:
     """Returns the user name and host name (full and first label)."""
-    try:
-        host = socket.gethostname()
-    except OSError:
-        host = ""
+    host = socket.gethostname()
     names = {getpass.getuser(), host, host.partition(".")[0]}
     return sorted(name for name in names if len(name) >= _MIN_USER_NAME)
 
@@ -431,15 +426,21 @@ def _private_problem(name: str, data: bytes) -> str | None:
     return None
 
 
+def _exported_names(folder: Path) -> list[str]:
+    names = (file.relative_to(folder).as_posix() for file in folder.rglob("*"))
+    return sorted(
+        name
+        for name in names
+        if (folder / name).is_file() and is_exported(name)
+    )
+
+
 def _plan_run(run: RunInfo, rewriter: _PathRewriter) -> dict[str, bytes]:
     rewriter.context = run.key
     files: dict[str, bytes] = {}
-    for file in sorted(run.path.rglob("*")):
-        name = file.relative_to(run.path).as_posix()
-        if not (file.is_file() and is_exported(name)):
-            continue
+    for name in _exported_names(run.path):
         try:
-            data = _rewrite(name, file.read_bytes(), rewriter)
+            data = _rewrite(name, (run.path / name).read_bytes(), rewriter)
             problem = _private_problem(name, data)
         except _FILE_ERRORS as error:
             raise ExportError(f"{run.key}/{name}: {error}") from error
@@ -450,13 +451,11 @@ def _plan_run(run: RunInfo, rewriter: _PathRewriter) -> dict[str, bytes]:
 
 
 def _existing_files(folder: Path) -> dict[str, bytes]:
-    existing: dict[str, bytes] = {}
-    if folder.is_dir():
-        for file in sorted(folder.rglob("*")):
-            name = file.relative_to(folder).as_posix()
-            if file.is_file() and is_exported(name):
-                existing[name] = file.read_bytes()
-    return existing
+    if not folder.is_dir():
+        return {}
+    return {
+        name: (folder / name).read_bytes() for name in _exported_names(folder)
+    }
 
 
 def _differences(
@@ -466,10 +465,6 @@ def _differences(
     return [name for name in names if planned.get(name) != existing.get(name)]
 
 
-def _write_file(target: Path, data: bytes) -> None:
-    target.write_bytes(data)
-
-
 def _write_run(folder: Path, files: dict[str, bytes]) -> None:
     """Writes a run next to its place and moves it in, so none is partial."""
     staging = folder.parent / f".{folder.name}.{uuid.uuid4().hex}.tmp"
@@ -477,7 +472,7 @@ def _write_run(folder: Path, files: dict[str, bytes]) -> None:
         for name, data in files.items():
             target = staging / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            _write_file(target, data)
+            target.write_bytes(data)
         os.replace(staging, folder)
     except OSError as error:
         raise ExportError(f"cannot write {folder}: {error}") from error
@@ -508,10 +503,11 @@ def export_runs(roots: Sequence[Path], dest: Path) -> ExportReport:
     finished = [run for run in runs if run.finished]
     _check_collisions(finished)
     rewriter = _PathRewriter(_run_index(runs), {run.key for run in finished})
-    plans: list[tuple[RunInfo, dict[str, bytes], bool]] = []
+    exported: list[ExportedRun] = []
+    pending: list[tuple[Path, dict[str, bytes]]] = []
     for run in sorted(finished, key=lambda item: item.key):
         files = _plan_run(run, rewriter)
-        folder = Path(dest) / run.key
+        folder = dest / run.key
         existing = _existing_files(folder)
         if folder.exists() and not existing:
             raise ExportError(
@@ -521,21 +517,20 @@ def export_runs(roots: Sequence[Path], dest: Path) -> ExportReport:
         differing = _differences(files, existing) if existing else []
         if differing:
             raise ExportError(
-                f"{Path(dest) / run.key} differs from {run.path} in "
+                f"{folder} differs from {run.path} in "
                 f"{', '.join(differing)}; delete it to export again"
             )
-        plans.append((run, files, bool(existing)))
-    exported = []
-    for run, files, present in plans:
-        if not present:
-            _write_run(Path(dest) / run.key, files)
+        if not existing:
+            pending.append((folder, files))
         exported.append(
             ExportedRun(
                 key=run.key,
                 size=sum(len(data) for data in files.values()),
-                status="unchanged" if present else "copied",
+                status="unchanged" if existing else "copied",
             )
         )
+    for folder, files in pending:
+        _write_run(folder, files)
     return ExportReport(
         exported=exported,
         skipped=[run.path for run in runs if not run.finished],

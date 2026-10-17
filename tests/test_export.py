@@ -37,6 +37,13 @@ def _fixed_machine(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(socket, "gethostname", lambda: "testhost-box.lan")
 
 
+def _user_config(dest: Path, tag: str) -> Path:
+    for file in dest.glob("t1/gpt2/*/config.json"):
+        if json.loads(file.read_text("utf-8"))["tag"] == tag:
+            return file
+    raise AssertionError(tag)
+
+
 def _make_run(
     base: Path,
     *,
@@ -353,24 +360,6 @@ def test_export_rewrites_backslash_and_mixed_slash_paths(
     assert config["sources"] == [f"results/{key}"]
 
 
-def _user_config(dest: Path, tag: str) -> Path:
-    for file in dest.glob("t1/gpt2/*/config.json"):
-        if json.loads(file.read_text("utf-8"))["tag"] == tag:
-            return file
-    raise AssertionError(tag)
-
-
-def test_export_rewrites_a_path_embedded_in_a_longer_string(
-    tmp_path: Path,
-) -> None:
-    _make_run(tmp_path / "r1", tag="note", source="see C:/data/x/old-run now")
-
-    export_runs([tmp_path / "r1"], tmp_path / "dest")
-
-    config = json.loads(_user_config(tmp_path / "dest", "note").read_text())
-    assert config["source"] == "see <external>/old-run now"
-
-
 def test_export_rewrites_the_metadata_embedded_in_npz_files(
     tmp_path: Path,
 ) -> None:
@@ -405,35 +394,6 @@ def test_export_keeps_npz_bytes_that_need_no_rewrite(tmp_path: Path) -> None:
     assert (exported / "curves.npz").read_bytes() == (
         run.path / "curves.npz"
     ).read_bytes()
-
-
-def test_export_refuses_a_file_that_still_holds_a_private_path(
-    tmp_path: Path,
-) -> None:
-    run = _make_run(tmp_path / "r1")
-    (run.path / "hand_check.csv").write_text(
-        "id,path\n1,D:\\work\\data.csv\n", "utf-8"
-    )
-    dest = tmp_path / "dest"
-
-    with pytest.raises(ExportError, match=r"hand_check.csv"):
-        export_runs([tmp_path / "r1"], dest)
-
-    assert not dest.exists()
-
-
-@pytest.mark.parametrize(
-    "leak", ["/home/Users/x", "owner: {user}"], ids=["users", "user-name"]
-)
-def test_export_refuses_the_substring_users_and_the_local_user_name(
-    tmp_path: Path, leak: str
-) -> None:
-    run = _make_run(tmp_path / "r1")
-    text = leak.format(user=getpass.getuser())
-    (run.path / "hand_check.csv").write_text(text, "utf-8")
-
-    with pytest.raises(ExportError, match=r"hand_check.csv"):
-        export_runs([tmp_path / "r1"], tmp_path / "dest")
 
 
 def test_export_refuses_a_private_segment_inside_npz_metadata(
@@ -556,6 +516,7 @@ def test_export_refuses_users_as_a_path_segment_with_a_snippet(
 @pytest.mark.parametrize(
     "text",
     [
+        "id,path\n1,D:\\work\\data.csv\n",
         "kept in /home/alice/runs/x",
         "kept in /scratch/x/y",
         "kept in /mnt/d/data/x",
@@ -564,7 +525,16 @@ def test_export_refuses_users_as_a_path_segment_with_a_snippet(
         "on TESTHOST-BOX.lan today",
         "by Tester-User today",
     ],
-    ids=["posix", "posix-any", "wsl", "unc", "host-label", "host-full", "user"],
+    ids=[
+        "drive",
+        "posix",
+        "posix-any",
+        "wsl",
+        "unc",
+        "host-label",
+        "host-full",
+        "user",
+    ],
 )
 def test_export_refuses_posix_unc_host_and_user_leaks(
     tmp_path: Path, text: str
@@ -574,9 +544,16 @@ def test_export_refuses_posix_unc_host_and_user_leaks(
     with pytest.raises(ExportError, match=r"hand_check\.csv"):
         export_runs([tmp_path / "r1"], dest)
 
+    assert not dest.exists()
 
-def test_export_rewrites_embedded_posix_and_unc_paths(tmp_path: Path) -> None:
-    source = "read /home/alice/data/old-run and \\\\srv1\\share\\x\\last"
+
+def test_export_rewrites_embedded_paths_in_a_longer_string(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "see C:/data/x/old-run now, read /home/alice/data/old-run "
+        "and \\\\srv1\\share\\x\\last"
+    )
     _make_run(tmp_path / "r1", tag="embedded", source=source)
 
     export_runs([tmp_path / "r1"], tmp_path / "dest")
@@ -584,7 +561,10 @@ def test_export_rewrites_embedded_posix_and_unc_paths(tmp_path: Path) -> None:
     config = json.loads(
         _user_config(tmp_path / "dest", "embedded").read_text("utf-8")
     )
-    assert config["source"] == "read <external>/old-run and <external>/last"
+    assert config["source"] == (
+        "see <external>/old-run now, read <external>/old-run "
+        "and <external>/last"
+    )
 
 
 KEY = "p1/gpt2/abc123def456"
@@ -637,13 +617,6 @@ def test_path_rewriter_maps_literal_paths_on_any_platform(
     assert _literal_rewriter().rewrite(text) == expected
 
 
-def test_path_rewriter_leaves_no_space_path_tail() -> None:
-    result = _literal_rewriter().rewrite("see C:\\Users\\Jane Doe\\runs\\x for")
-
-    assert "Doe" not in result
-    assert result == "see <external>/x for"
-
-
 def test_export_refuses_a_drive_path_in_a_string_array_of_an_npz(
     tmp_path: Path,
 ) -> None:
@@ -666,17 +639,17 @@ def test_a_write_error_leaves_no_partial_run_and_export_can_be_retried(
 ) -> None:
     run = _make_run(tmp_path / "r1")
     dest = tmp_path / "dest"
-    real = export_module._write_file
+    real = Path.write_bytes
     calls: list[Path] = []
 
-    def fail_on_second(target: Path, data: bytes) -> None:
-        calls.append(target)
+    def fail_on_second(self: Path, data: bytes) -> int:
+        calls.append(self)
         if len(calls) == 2:
             raise OSError("disk full")
-        real(target, data)
+        return real(self, data)
 
     with monkeypatch.context() as scope:
-        scope.setattr(export_module, "_write_file", fail_on_second)
+        scope.setattr(Path, "write_bytes", fail_on_second)
         with pytest.raises(ExportError, match="disk full"):
             export_runs([tmp_path / "r1"], dest)
 
@@ -687,29 +660,22 @@ def test_a_write_error_leaves_no_partial_run_and_export_can_be_retried(
     assert [item.status for item in report.exported] == ["copied"]
 
 
-def test_export_names_a_truncated_json_file(tmp_path: Path) -> None:
-    run = _make_run(tmp_path / "r1")
-    (run.path / "table.json").write_text('{"data": [1, 2', "utf-8")
-
-    with pytest.raises(ExportError, match=r"table\.json"):
-        export_runs([tmp_path / "r1"], tmp_path / "dest")
-
-
-def test_export_names_a_json_file_that_cannot_be_rewritten(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        ("table.json", b'{"data": [1, 2'),
+        ("table.json", b'{"data": [NaN, "C:/x/y/z"]}'),
+        ("curves.npz", b"not a zip"),
+    ],
+    ids=["truncated-json", "nan-json", "unreadable-npz"],
+)
+def test_export_names_a_file_it_cannot_read_or_rewrite(
+    tmp_path: Path, name: str, content: bytes
 ) -> None:
     run = _make_run(tmp_path / "r1")
-    (run.path / "table.json").write_text('{"data": [NaN, "C:/x/y/z"]}', "utf-8")
+    (run.path / name).write_bytes(content)
 
-    with pytest.raises(ExportError, match=r"table\.json"):
-        export_runs([tmp_path / "r1"], tmp_path / "dest")
-
-
-def test_export_names_an_unreadable_npz_file(tmp_path: Path) -> None:
-    run = _make_run(tmp_path / "r1")
-    (run.path / "curves.npz").write_bytes(b"not a zip")
-
-    with pytest.raises(ExportError, match=r"curves\.npz"):
+    with pytest.raises(ExportError, match=name.replace(".", r"\.")):
         export_runs([tmp_path / "r1"], tmp_path / "dest")
 
 

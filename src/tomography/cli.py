@@ -218,7 +218,9 @@ def _plot(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
 
 def _export(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     try:
-        report = export_runs([Path(root) for root in args.roots], args.out)
+        report = export_runs(
+            [Path(root) for root in args.roots], Path(args.out)
+        )
     except ExportError as error:
         parser.error(str(error))
     for path in report.skipped:
