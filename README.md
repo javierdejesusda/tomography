@@ -159,11 +159,11 @@ under a minute on a CPU once the weights are cached.
 `load_model(key)` loads a checkpoint from the Hugging Face Hub, on CUDA when available and on the CPU
 otherwise. `device=` and `dtype=` override the defaults.
 
-| Family             | Keys                                           | Chat format                      |
-| ------------------ | ---------------------------------------------- | -------------------------------- |
-| GPT-2              | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` | plain tags                       |
-| Qwen3 base         | `qwen3-0.6b-base`, `qwen3-1.7b-base`           | plain tags                       |
-| Qwen3 post-trained | `qwen3-0.6b`, `qwen3-1.7b`                     | chat template, thinking disabled |
+| Family             | Keys                                                  | Chat format                      |
+| ------------------ | ----------------------------------------------------- | -------------------------------- |
+| GPT-2              | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl`        | plain tags                       |
+| Qwen3 base         | `qwen3-0.6b-base`, `qwen3-1.7b-base`, `qwen3-4b-base` | plain tags                       |
+| Qwen3 post-trained | `qwen3-0.6b`, `qwen3-1.7b`, `qwen3-4b`                | chat template, thinking disabled |
 
 The default dtype is float32 for the GPT-2 checkpoints (float16 for `gpt2-xl`) and bfloat16 for Qwen3. The
 registry is `MODELS` and the architecture specs are `ARCHS` in [`model.py`](src/tomography/model.py); any

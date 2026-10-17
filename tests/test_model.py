@@ -509,6 +509,16 @@ QWEN3_PINS = {
         "c1899de289a04d12100db370d81485cdf75e47ca",
         True,
     ),
+    "qwen3-4b-base": (
+        "Qwen/Qwen3-4B-Base",
+        "906bfd4b4dc7f14ee4320094d8b41684abff8539",
+        False,
+    ),
+    "qwen3-4b": (
+        "Qwen/Qwen3-4B",
+        "1cfa9a7208912126459214e8b04321603b3df60c",
+        True,
+    ),
 }
 
 
