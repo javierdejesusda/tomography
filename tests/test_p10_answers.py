@@ -182,7 +182,6 @@ def test_a_habit_word_anywhere_in_the_line_is_approximate(completion):
     "completion",
     [
         "30 cm",
-        "30 cm or so",
         "The tower is 330 m, about as tall as a building",
         "It is someone's 30 cm",
         "Moreover 30 cm",
@@ -221,7 +220,6 @@ def test_an_almost_equal_sign_is_a_marker():
         "I don\u2019t know the height",
         "\n\nI do not know",
         "Unknown",
-        "Let me think.\nI don't know",
     ],
 )
 def test_no_number_and_an_abstention_phrase_is_an_abstention(completion):
@@ -378,3 +376,40 @@ def test_a_vague_quantity_is_approximate_and_has_no_value(completion):
 @pytest.mark.parametrize("marker", ["several", "a few", "a couple of"])
 def test_a_count_word_before_a_real_number_is_a_marker(marker):
     assert parse_answer(f"{marker} 30 cm") == _point(30, approximate=True)
+
+
+@pytest.mark.parametrize(
+    "dash",
+    ["\u2212", "\u2010", "\u2011", "~", " ~ ", "\u2212 "],
+)
+def test_more_range_separators(dash):
+    assert parse_answer(f"30{dash}40 cm") == _range(30, 40)
+
+
+def test_a_leading_tilde_is_a_marker_not_a_separator():
+    assert parse_answer("~12") == _point(12, approximate=True)
+    assert parse_answer("~30~40") == _range(30, 40, approximate=True)
+
+
+@pytest.mark.parametrize(
+    "completion",
+    ["30 cm or so", "30 give or take", "30 cm or thereabouts", "30, OR SO"],
+)
+def test_a_trailing_marker_is_approximate(completion):
+    assert parse_answer(completion) == _point(30, approximate=True)
+
+
+def test_a_trailing_marker_after_a_range_flags_it():
+    assert parse_answer("30 to 40 or so") == _range(30, 40, approximate=True)
+
+
+@pytest.mark.parametrize(
+    "completion",
+    [
+        "Tall.\nQ: How old is X?\nA: I don't know",
+        "Let me think.\nI don't know",
+        "Hmm\nNo one knows",
+    ],
+)
+def test_only_the_answer_line_can_abstain(completion):
+    assert parse_answer(completion) == Parsed("none", None, None, False)

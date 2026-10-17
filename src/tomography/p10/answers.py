@@ -1,9 +1,14 @@
 """Reading a quantity answer: a point, a range, an abstention or nothing.
 
-A completion is cut to its first non-empty line and the first quantity of that
-line decides what it is. Abstention reuses the P9 phrase patterns, so "does
-not know" means the same thing in both studies. Grading compares the parsed
-value or range with a gold interval widened by a relative tolerance.
+A completion is cut to its first non-empty line and that line decides
+everything: the first quantity on it is the answer, and an abstention phrase
+counts only when the line holds no quantity. Abstention reuses the P9 phrase
+patterns, so "does not know" means the same thing in both studies. Grading
+compares the parsed value or range with a gold interval widened by a relative
+tolerance.
+
+Negative numbers are out of scope: every P10 quantity is positive, and a
+leading minus sign reads as a range separator.
 """
 
 from dataclasses import dataclass
@@ -136,6 +141,13 @@ _LEADING = re.compile(
     + "|".join(re.escape(m) for m in SYMBOL_MARKERS),
     re.IGNORECASE,
 )
+TRAILING_MARKERS: tuple[str, ...] = ("or so", "give or take", "or thereabouts")
+_TRAILING = re.compile(
+    r"(?<!\w)(?:"
+    + "|".join(re.escape(m).replace(r"\ ", r"\s+") for m in TRAILING_MARKERS)
+    + r")(?!\w)",
+    re.IGNORECASE,
+)
 _HABIT = re.compile(
     r"(?<!\w)(?:"
     + "|".join(re.escape(m).replace(r"\ ", r"\s+") for m in HABIT_MARKERS)
@@ -146,7 +158,7 @@ _HABIT = re.compile(
 _UNIT = r"(?:[^\W\d_]+\.?(?:\s+[^\W\d_]+\.?)?)?"
 _JOINER = re.compile(
     rf"\s*{_UNIT}\s*"
-    r"(?:(?P<pm>\+/-|\+-|\u00b1)|(?P<join>-|\u2013|\u2014|to|or)"
+    r"(?:(?P<pm>\+/-|\+-|\u00b1)|(?P<join>-|\u2010|\u2011|\u2013|\u2014|\u2212|~|to|or)"
     r"|(?P<and>and))\s*",
     re.IGNORECASE,
 )
@@ -166,7 +178,10 @@ class Parsed:
             quantity.
         high: The value, or the upper bound of a range; equal to `low` for a
             point; None without a quantity.
-        approximate: Whether the answer marks itself as approximate.
+        approximate: Whether the answer marks itself as approximate. It is
+            False for "abstain" and for "none" except a vague quantity
+            ("several hundred", "dozens of"), which is "none" with
+            `approximate` True: it has no usable value to grade.
     """
 
     form: Form
@@ -273,7 +288,9 @@ def parse_answer(completion: str) -> Parsed:
         elif first["words"] and first["words"].lower() == "one":
             continue
         approximate = bool(
-            _LEADING.search(text[: first.start()]) or _HABIT.search(text)
+            _LEADING.search(text[: first.start()])
+            or _HABIT.search(text)
+            or _TRAILING.search(text[first.end() :])
         )
         form: Form = "point" if low == high else "range"
         return Parsed(form, low, high, approximate)
@@ -281,7 +298,7 @@ def parse_answer(completion: str) -> Parsed:
         return Parsed("none", None, None, True)
     none_form: Form = (
         "abstain"
-        if is_abstention(completion, (*ABSTAIN_REGEXES, *EXTRA_ABSTAIN_REGEXES))
+        if is_abstention(text, (*ABSTAIN_REGEXES, *EXTRA_ABSTAIN_REGEXES))
         else "none"
     )
     return Parsed(none_form, None, None, False)
