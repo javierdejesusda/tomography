@@ -503,11 +503,15 @@ def _watchdog_script(
 
 
 def _launch_command(names: Sequence[str]) -> str:
-    return " ".join(
+    # The braces keep each `&` inside the group: `a && b &` would background
+    # the whole list, and its subshell would hold the ssh channel open until
+    # the chain ends.
+    jobs = " ".join(
         f"setsid nohup bash {REMOTE_RUN}/{name} "
         f"> {REMOTE_RUN}/{name}.out 2>&1 < /dev/null &"
         for name in names
     )
+    return f"{{ {jobs} }}"
 
 
 def _upload_script(
@@ -1049,8 +1053,6 @@ def cmd_start(args: argparse.Namespace, deps: Deps) -> int:
     _save_state(args.state, state)
     if _remote(args, deps, state, prepare).returncode:
         raise CloudError("preparing the chain launch failed")
-    # A separate command: `a && b &` would background the whole list, and
-    # its subshell would hold the ssh channel open until the chain ends.
     launch = _launch_command(list(scripts))
     if _remote(args, deps, state, launch).returncode:
         raise CloudError("launching the chain failed")

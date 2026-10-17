@@ -541,29 +541,20 @@ def test_ssh_with_a_command_runs_it_as_one_remote_string(
     ]
 
 
-def test_known_hosts_path_with_a_space_is_quoted(tmp_path: Path) -> None:
-    h = Harness(tmp_path)
-    write_state(h)
-    assert h.main("ssh", "--", "true") == 0
-    option = next(
-        a for a in h.runner.runs[0][0] if a.startswith("UserKnownHostsFile=")
-    )
-    assert "state dir" in option
-    assert option.endswith('known_hosts_pod1"')
-    assert option.startswith('UserKnownHostsFile="')
-
-
-def test_known_hosts_path_without_a_space_is_not_quoted(
-    tmp_path: Path,
+@pytest.mark.parametrize("state_dir", ["state dir", "state"])
+def test_known_hosts_path_is_quoted_only_when_it_has_a_space(
+    tmp_path: Path, state_dir: str
 ) -> None:
     h = Harness(tmp_path)
-    h.state_path = tmp_path / "state" / "pod.json"
+    h.state_path = tmp_path / state_dir / "pod.json"
     write_state(h)
     assert h.main("ssh", "--", "true") == 0
     option = next(
         a for a in h.runner.runs[0][0] if a.startswith("UserKnownHostsFile=")
     )
-    assert option == f"UserKnownHostsFile={h.known_hosts().as_posix()}"
+    path = h.known_hosts().as_posix()
+    expected = f'"{path}"' if " " in state_dir else path
+    assert option == f"UserKnownHostsFile={expected}"
 
 
 def write_spec(tmp_path: Path, name: str = "chain11", out: str = OUT) -> Path:
@@ -962,30 +953,27 @@ def test_start_launches_both_detached(tmp_path: Path) -> None:
             f"setsid nohup bash /workspace/run/{script} "
             f"> /workspace/run/{script}.out 2>&1 < /dev/null &"
         ) in joined
-    assert "touch /workspace/run/started" in " ".join(h.commands())
+    commands = h.commands()
+    prepare = next(c for c in commands if "touch /workspace/run/started" in c)
+    assert commands.index(prepare) < commands.index(launches[0])
     assert API_KEY not in repr(h.runner.runs)
     launch_run = next(r for r in h.runner.runs if "setsid nohup" in r[0][-1])
     assert launch_run[0][1] == "-n"
 
 
-def test_start_launches_with_nothing_chained_before_the_background_jobs(
-    tmp_path: Path,
-) -> None:
+def test_start_groups_the_background_jobs_in_braces(tmp_path: Path) -> None:
     # `a && b &` backgrounds the whole list, so its subshell keeps the ssh
-    # channel open until the chain ends and `start` never returns.
+    # channel open until the chain ends and `start` never returns. The
+    # braces keep each `&` inside the group whatever precedes it.
     h = Harness(tmp_path)
     pushed(h)
     _, _, launches = started(h)
     assert launches == [
-        "setsid nohup bash /workspace/run/chain.sh "
+        "{ setsid nohup bash /workspace/run/chain.sh "
         "> /workspace/run/chain.sh.out 2>&1 < /dev/null & "
         "setsid nohup bash /workspace/run/watchdog.sh "
-        "> /workspace/run/watchdog.sh.out 2>&1 < /dev/null &"
+        "> /workspace/run/watchdog.sh.out 2>&1 < /dev/null & }"
     ]
-    commands = h.commands()
-    prepare = next(c for c in commands if "touch /workspace/run/started" in c)
-    assert "&" not in prepare.replace("&&", "")
-    assert commands.index(prepare) < commands.index(launches[0])
 
 
 def test_start_stops_when_the_launch_preparation_fails(
