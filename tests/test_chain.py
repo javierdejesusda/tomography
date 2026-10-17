@@ -1242,7 +1242,7 @@ def test_load_spec_rejects_a_job_name_that_collides_with_the_log(
 def test_a_launch_error_does_not_try_the_retry_batch_sizes(
     tmp_path: Path,
 ) -> None:
-    clock, runs = _fresh(tmp_path)
+    clock, _ = _fresh(tmp_path)
     spec = _chain(tmp_path, _job("a", retry_batch_sizes=(4, 2)))
     attempts: list[Sequence[str]] = []
 

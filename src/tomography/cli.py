@@ -146,13 +146,6 @@ def _build_config(
     return experiment.config_cls.from_dict(data)
 
 
-def _is_finished(path: Path) -> bool:
-    try:
-        return RunDir.open(path).meta["finished_at"] is not None
-    except ValueError:
-        return False
-
-
 def _run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     try:
         experiment = load_experiment(args.experiment)
@@ -160,7 +153,7 @@ def _run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         path = RunDir.path_for(config, out_root=args.out)
     except ValueError as error:
         parser.error(str(error))
-    if _is_finished(path):
+    if chain.is_finished_run(path):
         parser.error(
             f"run directory already exists: {path} (delete it to rerun)"
         )
