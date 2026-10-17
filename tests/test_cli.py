@@ -8,6 +8,7 @@ import sys
 
 import pytest
 
+import tomography.chain as chain_module
 from tomography.cli import main
 import tomography.experiments as experiments_package
 from tomography.experiments.base import RunDir
@@ -525,3 +526,84 @@ def test_console_script_executable_runs() -> None:
 
     assert completed.returncode == 0
     assert "plot" in completed.stdout
+
+
+CHAIN_SPEC = """
+[chain]
+name = "c1"
+out = "results"
+
+[[job]]
+name = "a"
+experiment = "d1"
+model = "gpt2"
+set = {{ n = 2 }}
+
+[[job]]
+name = "b"
+experiment = "{second}"
+model = "gpt2"
+run_dir_from = {{ tag = "a" }}
+"""
+
+
+def _chain_spec(tmp_path: Path, second: str = "d1") -> Path:
+    path = tmp_path / "chain.toml"
+    path.write_text(CHAIN_SPEC.format(second=second), encoding="utf-8")
+    return path
+
+
+def test_chain_dry_run_prints_the_commands_and_writes_nothing(
+    experiments_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_experiment(experiments_dir, "d1_dummy")
+    spec = _chain_spec(tmp_path)
+
+    code = main(["chain", "run", str(spec), "--dry-run"])
+
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    assert [line.partition(": ")[0] for line in lines] == ["a", "b"]
+    assert "--set n=2" in lines[0]
+    assert lines[1].endswith("--set tag=<run dir of a>")
+    assert not (tmp_path / "results").exists()
+
+
+def test_chain_run_rejects_an_unknown_experiment(
+    experiments_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_experiment(experiments_dir, "d1_dummy")
+    spec = _chain_spec(tmp_path, second="nope")
+
+    error = _usage_error(capsys, "chain", "run", str(spec), "--dry-run")
+
+    assert "unknown experiment 'nope'" in error
+
+
+def test_chain_run_rejects_a_missing_spec_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    error = _usage_error(capsys, "chain", "run", str(tmp_path / "none.toml"))
+
+    assert "none.toml" in error
+
+
+def test_chain_run_returns_the_exit_code_of_the_runner(
+    experiments_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_experiment(experiments_dir, "d1_dummy")
+    spec = _chain_spec(tmp_path)
+    seen: list[str] = []
+
+    def fake_run_chain(chain: chain_module.ChainSpec) -> int:
+        seen.append(chain.name)
+        return 1
+
+    monkeypatch.setattr(chain_module, "run_chain", fake_run_chain)
+
+    code = main(["chain", "run", str(spec)])
+
+    assert code == 1
+    assert seen == ["c1"]

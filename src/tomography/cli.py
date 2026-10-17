@@ -1,4 +1,4 @@
-"""Command line entry point: `python -m tomography run|plot|export`."""
+"""Command line entry point: `python -m tomography run|plot|export|chain`."""
 
 import argparse
 from collections.abc import Callable
@@ -11,6 +11,7 @@ import sys
 import typing
 from typing import Any
 
+from tomography import chain
 import tomography.experiments as experiments_package
 from tomography.experiments.base import EXPERIMENT_ID
 from tomography.experiments.base import ExperimentConfig
@@ -145,13 +146,6 @@ def _build_config(
     return experiment.config_cls.from_dict(data)
 
 
-def _is_finished(path: Path) -> bool:
-    try:
-        return RunDir.open(path).meta["finished_at"] is not None
-    except ValueError:
-        return False
-
-
 def _run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     try:
         experiment = load_experiment(args.experiment)
@@ -159,7 +153,7 @@ def _run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         path = RunDir.path_for(config, out_root=args.out)
     except ValueError as error:
         parser.error(str(error))
-    if _is_finished(path):
+    if chain.is_finished_run(path):
         parser.error(
             f"run directory already exists: {path} (delete it to rerun)"
         )
@@ -236,6 +230,18 @@ def _export(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     return 0
 
 
+def _chain(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    try:
+        spec = chain.load_spec(args.spec, check_experiment=load_experiment)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    if args.dry_run:
+        for line in chain.dry_run_lines(spec):
+            print(line)
+        return 0
+    return chain.run_chain(spec)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tomography", description="Run experiments and plot results."
@@ -276,6 +282,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "roots", nargs="+", help="folders holding run directories"
     )
     export.set_defaults(handler=_export)
+    chain_parser = commands.add_parser(
+        "chain", help="run a chain of experiment jobs"
+    )
+    chain_commands = chain_parser.add_subparsers(
+        dest="chain_command", required=True
+    )
+    chain_run = chain_commands.add_parser(
+        "run", help="run the jobs of a TOML chain spec in order"
+    )
+    chain_run.add_argument("spec", help="chain spec file (TOML)")
+    chain_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate the spec and print the commands without running them",
+    )
+    chain_run.set_defaults(handler=_chain)
     return parser
 
 
