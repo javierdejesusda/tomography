@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from collections.abc import Sequence
+import csv
 import dataclasses
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ import numpy as np
 from numpy.typing import NDArray
 import pytest
 
+from tomography.cli import load_experiment
 from tomography.datasets.quantities import QuantityQuestion
 from tomography.experiments import p10c_links
 from tomography.experiments.base import RunDir
@@ -1155,7 +1157,7 @@ def _position(item: QuantityQuestion) -> int:
 Link = Callable[[QuantityQuestion], tuple[float, float]]
 
 
-def _behavior(
+def _views(
     items: Sequence[QuantityQuestion],
     link: Link,
     *,
@@ -1164,11 +1166,11 @@ def _behavior(
     outside: Link | None = None,
     reader: str = READERS[0],
     per_cell: Callable[[float, str], float] = lambda share, cell: share,
-    **changes: int,
-) -> list[dict[str, object]]:
-    """Runs behavior_rows with link giving (score, hedge share).
+    directions: NDArray[np.float32] | None = None,
+) -> tuple[p10c_links.P10bRun, p10c_links.P10aRun]:
+    """Builds in-memory runs where link gives (score, hedge share).
 
-    The other reader of the run scores every item the other way round.
+    The other reader of the P10b run scores every item the other way round.
     """
     records = []
     answers = {}
@@ -1193,13 +1195,27 @@ def _behavior(
             "answers": {c: _share_cell(per_cell(share, c)) for c in cells},
         }
     p10b = _range_run(
-        np.zeros((3, 4), np.float32), items=records, reader=reader
+        np.zeros((3, 4), np.float32) if directions is None else directions,
+        items=records,
+        reader=reader,
     )
     p10a = p10c_links.P10aRun(
         path="p10a", config_hash="h", config={}, items=answers, snapshots={}
     )
-    settings = {"n_boot": 200, "seed": 0, **changes}
-    return p10c_links.behavior_rows(p10b, p10a, **settings)
+    return p10b, p10a
+
+
+def _behavior(
+    items: Sequence[QuantityQuestion], link: Link, **changes: Any
+) -> list[dict[str, object]]:
+    settings = {"n_boot": 200, "seed": 0}
+    views = {
+        k: changes.pop(k)
+        for k in ("cells", "people", "outside", "reader", "per_cell")
+        if k in changes
+    }
+    p10b, p10a = _views(items, link, **views)
+    return p10c_links.behavior_rows(p10b, p10a, **{**settings, **changes})
 
 
 def _monotone(item: QuantityQuestion) -> tuple[float, float]:
@@ -1425,3 +1441,561 @@ def test_the_behavior_rows_repeat_for_one_seed() -> None:
     again = _behavior(_items(), _monotone, seed=3)
 
     np.testing.assert_equal(first, again)
+
+
+TINY_WIDTH = 32
+
+
+def _tiny_views(
+    *,
+    knowledge: bool = True,
+    behavior: bool = True,
+    link: Link = _monotone,
+    n_types: int = 2,
+) -> tuple[
+    Config,
+    p10c_links.P10bRun,
+    p10c_links.P9bRun | None,
+    p10c_links.P10aRun | None,
+]:
+    """In-memory runs for a model of width 32 and three layers."""
+    people = _people(4)
+    p10b, p10a = _views(
+        _items(),
+        link,
+        people=people,
+        directions=_random_directions((3, TINY_WIDTH), 1),
+    )
+    p9b = _known_run(
+        _random_directions((n_types, 3, TINY_WIDTH), 2),
+        types=[f"type_{n}" for n in range(n_types)],
+        config={"template": "fewshot", "n_shots": 2, "bos": None},
+    )
+    p10b = dataclasses.replace(p10b, path="p10b", config_hash="h10b")
+    config = Config(
+        model="tiny",
+        p10b_run="p10b",
+        knowledge_run="p9b" if knowledge else None,
+        behavior_run="p10a" if behavior else None,
+        n_boot=30,
+        n_random=20,
+        batch_size=4,
+    )
+    return (
+        config,
+        p10b,
+        p9b if knowledge else None,
+        p10a if behavior else None,
+    )
+
+
+def _executed(
+    loaded: LoadedModel | None,
+    tmp_path: Path,
+    *,
+    knowledge: bool = True,
+    behavior: bool = True,
+    **changes: Any,
+) -> RunDir:
+    config, p10b, p9b, p10a = _tiny_views(
+        knowledge=knowledge, behavior=behavior, **changes
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    p10c_links.execute(
+        config,
+        run_dir,
+        loaded if knowledge else None,
+        _items() if knowledge else None,
+        _people(4) if knowledge else None,
+        p10b,
+        p9b,
+        p10a,
+    )
+    return run_dir
+
+
+def _csv(run_dir: RunDir, name: str) -> list[dict[str, str]]:
+    with (run_dir.path / name).open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+@pytest.mark.parametrize(
+    ("knowledge", "behavior"), [(True, False), (False, True), (True, True)]
+)
+def test_execute_writes_the_files_of_each_link(
+    knowledge: bool, behavior: bool, tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _executed(
+        tiny_gpt2, tmp_path, knowledge=knowledge, behavior=behavior
+    )
+
+    written = {p.name for p in run_dir.path.glob("*.*")}
+    assert ("cosine.csv" in written) is knowledge
+    assert ("knowledge.csv" in written) is knowledge
+    assert ("behavior.csv" in written) is behavior
+    assert "summary.json" in written
+
+
+def test_the_csv_files_have_the_documented_columns_and_rows(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _executed(tiny_gpt2, tmp_path)
+
+    cosine = _csv(run_dir, "cosine.csv")
+    knowledge = _csv(run_dir, "knowledge.csv")
+    behavior = _csv(run_dir, "behavior.csv")
+
+    assert tuple(cosine[0]) == p10c_links.COSINE_COLUMNS
+    assert tuple(knowledge[0]) == p10c_links.KNOWLEDGE_COLUMNS
+    assert tuple(behavior[0]) == p10c_links.BEHAVIOR_COLUMNS
+    assert len(cosine) == 2 * 3
+    assert len(knowledge) == 2 * 3 * 2 * 3
+    assert len(behavior) == 2 * 2 * (2 * 3 + 1)
+    assert {r["test_family"] for r in behavior} == {
+        "height",
+        "wingspan",
+        "pooled",
+        "person_height",
+    }
+
+
+def test_the_knowledge_link_costs_one_forward_pass_over_the_questions(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, Any]] = []
+    real = p10c_links.collect_activations
+
+    def spy(loaded: LoadedModel, texts: Sequence[str], **kwargs: Any) -> Any:
+        calls.append({"n": len(texts), **kwargs})
+        return real(loaded, texts, **kwargs)
+
+    monkeypatch.setattr(p10c_links, "collect_activations", spy)
+
+    _executed(tiny_gpt2, tmp_path)
+
+    assert len(calls) == 1
+    assert calls[0]["n"] == len(_items())
+    assert tuple(calls[0]["layers"]) == LAYERS
+    assert calls[0]["position"] == "last"
+    assert calls[0]["batch_size"] == 4
+
+
+def test_the_behavior_link_alone_needs_no_model(tmp_path: Path) -> None:
+    run_dir = _executed(None, tmp_path, knowledge=False)
+
+    assert (run_dir.path / "behavior.csv").is_file()
+
+
+def test_a_knowledge_link_without_the_model_or_the_items_is_refused(
+    tmp_path: Path,
+) -> None:
+    config, p10b, p9b, _ = _tiny_views(behavior=False)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match="model"):
+        p10c_links.execute(config, run_dir, None, None, None, p10b, p9b, None)
+
+
+def test_a_constant_hedge_share_is_written_as_nan_with_the_flag(
+    tmp_path: Path,
+) -> None:
+    run_dir = _executed(
+        None,
+        tmp_path,
+        knowledge=False,
+        link=lambda item: (float(_position(item)), 0.0),
+    )
+
+    rows = _csv(run_dir, "behavior.csv")
+
+    assert {r["constant"] for r in rows} == {"True"}
+    assert {r["spearman"] for r in rows} == {"nan"}
+    assert {r["lo"] for r in rows} == {"nan"}
+
+
+def test_the_summary_reports_the_runs_the_layer_and_the_links(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _executed(tiny_gpt2, tmp_path)
+
+    summary = run_dir.read_json("summary")
+    cosine = _csv(run_dir, "cosine.csv")
+    knowledge = _csv(run_dir, "knowledge.csv")
+
+    assert summary["model"] == "tiny"  # type: ignore[index]
+    assert summary["runs"] == {  # type: ignore[index]
+        "p10b": {"path": "p10b", "config_hash": "h10b"},
+        "p9b": {"path": "p9b", "config_hash": "h9b"},
+        "p10a": {"path": "p10a", "config_hash": "h"},
+    }
+    assert summary["reader"] == "plain/logistic"  # type: ignore[index]
+    assert summary["layer"] == 2  # type: ignore[index]
+    assert summary["p9_types"] == ["type_0", "type_1"]  # type: ignore[index]
+    for name in ("type_0", "type_1"):
+        row = next(
+            r for r in cosine if r["p9_type"] == name and r["layer"] == "2"
+        )
+        assert summary["cosine"][name] == {  # type: ignore[index]
+            "cosine": pytest.approx(float(row["cosine"])),
+            "band_lo": pytest.approx(float(row["band_lo"])),
+            "band_hi": pytest.approx(float(row["band_hi"])),
+        }
+        pooled = next(
+            r
+            for r in knowledge
+            if (r["p9_type"], r["layer"], r["items"], r["test_family"])
+            == (name, "2", "all", "pooled")
+        )
+        assert set(summary["knowledge"][name]) == {  # type: ignore[index]
+            "n_range",
+            "n_exact",
+            "auroc",
+            "lo",
+            "hi",
+            "rand_lo",
+            "rand_hi",
+        }
+        assert summary["knowledge"][name]["auroc"] == pytest.approx(  # type: ignore[index]
+            float(pooled["auroc"])
+        )
+    behavior = summary["behavior"]  # type: ignore[index]
+    assert behavior
+    assert {r["test_family"] for r in behavior} == {"pooled"}
+    assert summary["config"]["reader"] == "plain/logistic"  # type: ignore[index]
+    assert summary["counts"]["knowledge"]["height"] == {  # type: ignore[index]
+        "range": 12,
+        "exact": 12,
+    }
+    assert summary["counts"]["people"] == 4  # type: ignore[index]
+    assert summary["counts"]["behavior"]["height"] == {  # type: ignore[index]
+        "range": 6,
+        "exact": 6,
+    }
+    assert summary["counts"]["behavior"]["person_height"] == {  # type: ignore[index]
+        "exact": 4
+    }
+
+
+def test_the_summary_of_a_single_link_leaves_the_other_empty(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    only_behavior = _executed(None, tmp_path / "b", knowledge=False)
+    only_knowledge = _executed(tiny_gpt2, tmp_path / "k", behavior=False)
+
+    first = only_behavior.read_json("summary")
+    second = only_knowledge.read_json("summary")
+
+    assert first["runs"]["p9b"] is None  # type: ignore[index]
+    assert first["cosine"] == {}  # type: ignore[index]
+    assert first["knowledge"] == {}  # type: ignore[index]
+    assert first["behavior"]  # type: ignore[index]
+    assert second["runs"]["p10a"] is None  # type: ignore[index]
+    assert second["behavior"] == []  # type: ignore[index]
+    assert second["cosine"]  # type: ignore[index]
+
+
+def test_the_experiment_is_registered() -> None:
+    experiment = load_experiment("p10c")
+
+    assert experiment.config_cls is Config
+    assert experiment.run is p10c_links.run
+    assert experiment.plot is p10c_links.plot
+
+
+def _plotted(run_dir: RunDir, tmp_path: Path) -> list[Path]:
+    paths = p10c_links.plot(run_dir, tmp_path / "figures")
+    assert all(p.is_file() for p in paths)
+    return paths
+
+
+def _stems(paths: Sequence[Path]) -> set[str]:
+    return {p.stem for p in paths}
+
+
+def test_plot_draws_every_figure_whose_csv_exists(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    both = _executed(tiny_gpt2, tmp_path / "both")
+    only_k = _executed(tiny_gpt2, tmp_path / "k", behavior=False)
+    only_b = _executed(None, tmp_path / "b", knowledge=False)
+
+    paths = _plotted(both, tmp_path / "both")
+
+    assert _stems(paths) == {"cosine", "knowledge_auroc", "behavior_spearman"}
+    assert sorted(p.suffix for p in paths) == sorted(
+        [".pdf", ".png", ".svg"] * 3
+    )
+    assert _stems(_plotted(only_k, tmp_path / "k")) == {
+        "cosine",
+        "knowledge_auroc",
+    }
+    assert _stems(_plotted(only_b, tmp_path / "b")) == {"behavior_spearman"}
+
+
+def test_more_than_eight_types_are_split_over_several_figures(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _executed(tiny_gpt2, tmp_path, behavior=False, n_types=10)
+
+    paths = _plotted(run_dir, tmp_path)
+
+    assert _stems(paths) == {
+        "cosine",
+        "cosine_2",
+        "knowledge_auroc",
+        "knowledge_auroc_2",
+    }
+
+
+def test_plot_survives_a_behavior_run_where_every_row_is_constant(
+    tmp_path: Path,
+) -> None:
+    run_dir = _executed(
+        None,
+        tmp_path,
+        knowledge=False,
+        link=lambda item: (float(_position(item)), 0.0),
+    )
+
+    assert _stems(_plotted(run_dir, tmp_path)) == {"behavior_spearman"}
+
+
+class _ForbiddenCallError(AssertionError):
+    """Raised by a loader that a test says must not run."""
+
+
+def _forbid(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise _ForbiddenCallError("must not be called")
+
+    for name in names:
+        monkeypatch.setattr(p10c_links, name, refuse)
+
+
+def _runs_on_disk(
+    root: Path,
+    *,
+    p10b_people: bool = True,
+    p10a_people: bool = True,
+    p10a_items: Sequence[QuantityQuestion] | None = None,
+    p10b: dict[str, Any] | None = None,
+    p9b: dict[str, Any] | None = None,
+    p10a: dict[str, Any] | None = None,
+) -> dict[str, RunDir]:
+    """Writes a P10b, a P9b and a P10a run for the tiny model."""
+    items = _items()
+    people = _people(4)
+    p10b_args = {"model": "tiny", **(p10b or {})}
+    config = P10bConfig(
+        model=p10b_args["model"],
+        families=USED,
+        n_per_side=7,
+        min_sitelinks=9,
+        seed=4,
+        people=p10b_people,
+    )
+    runs = {
+        "p10b": _write_p10b(
+            root / "p10b",
+            [*items, *(people if p10b_people else [])],
+            directions=_random_directions((len(READERS), 3, TINY_WIDTH), 1),
+            config=config,
+            **p10b_args,
+        ),
+        "p9b": _write_p9b(
+            root / "p9b",
+            **{
+                "width": TINY_WIDTH,
+                "config": P9bConfig(
+                    model=(p9b or {}).get("model", "tiny"),
+                    labels_run="x",
+                    template="fewshot",
+                    n_shots=2,
+                ),
+                **(p9b or {}),
+            },
+        ),
+        "p10a": _write_p10a(
+            root / "p10a",
+            [
+                *(items if p10a_items is None else p10a_items),
+                *(people if p10a_people else []),
+            ],
+            **(p10a or {}),
+        ),
+    }
+    return runs
+
+
+def _config_for(runs: dict[str, RunDir], **changes: Any) -> Config:
+    settings: dict[str, Any] = {
+        "model": "tiny",
+        "p10b_run": str(runs["p10b"].path),
+        "knowledge_run": str(runs["p9b"].path),
+        "behavior_run": str(runs["p10a"].path),
+        "n_boot": 20,
+        "n_random": 20,
+        "batch_size": 4,
+    }
+    return Config(**{**settings, **changes})
+
+
+def _p10c_dir(config: Config, root: Path) -> RunDir:
+    return RunDir.create(config, out_root=root / "out")
+
+
+STALE = [dataclasses.replace(i, sha256="b" * 64) for i in _items()]
+BAD_INPUTS: dict[str, tuple[dict[str, Any], str]] = {
+    "unfinished p10b": ({"p10b": {"finished": False}}, "not a finished run"),
+    "p10b of another model": ({"p10b": {"model": "other"}}, "'other'"),
+    "unfinished p9b": ({"p9b": {"finished": False}}, "not a finished run"),
+    "p9b of another model": ({"p9b": {"model": "other"}}, "'other'"),
+    "p9b other layers": ({"p9b": {"layers": (2, 3, 4)}}, "layers"),
+    "p9b other hidden size": (
+        {"p9b": {"width": TINY_WIDTH * 2}},
+        "hidden size",
+    ),
+    "unfinished p10a": ({"p10a": {"finished": False}}, "not a finished run"),
+    "p10a of another model": ({"p10a": {"model": "other"}}, "'other'"),
+    "p10a missing item": (
+        {"p10a_items": [i for i in _items() if i.uid != "height-range-test3"]},
+        "height-range-test3",
+    ),
+    "p10a other snapshot": ({"p10a": {"stamps": _stamps(STALE)}}, "sha256"),
+}
+
+
+@pytest.mark.parametrize("case", [*BAD_INPUTS, "reader missing"])
+def test_run_refuses_bad_inputs_before_any_model_or_item_load(
+    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid(monkeypatch, "load_model", "load_quantities", "load_people_heights")
+    changes, message = BAD_INPUTS.get(case, ({}, "plain/random"))
+    runs = _runs_on_disk(tmp_path, **changes)
+    config = _config_for(
+        runs, **({"reader": "plain/random"} if case == "reader missing" else {})
+    )
+
+    with pytest.raises(ValueError, match=message):
+        p10c_links.run(config, _p10c_dir(config, tmp_path))
+
+
+def test_run_refuses_items_that_differ_from_the_p10b_items_before_the_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid(monkeypatch, "load_model")
+    runs = _runs_on_disk(tmp_path)
+    fewer = [i for i in _items() if i.uid != "wingspan-exact-train1"]
+    monkeypatch.setattr(p10c_links, "load_quantities", lambda **kw: fewer)
+    monkeypatch.setattr(
+        p10c_links, "load_people_heights", lambda **kw: _people(4)
+    )
+    config = _config_for(runs)
+
+    with pytest.raises(ValueError, match="wingspan-exact-train1"):
+        p10c_links.run(config, _p10c_dir(config, tmp_path))
+
+
+def test_run_refuses_items_in_another_split_than_the_p10b_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid(monkeypatch, "load_model")
+    runs = _runs_on_disk(tmp_path)
+    moved = [
+        dataclasses.replace(i, split="train")
+        if i.uid == "height-range-test0"
+        else i
+        for i in _items()
+    ]
+    monkeypatch.setattr(p10c_links, "load_quantities", lambda **kw: moved)
+    monkeypatch.setattr(
+        p10c_links, "load_people_heights", lambda **kw: _people(4)
+    )
+    config = _config_for(runs)
+
+    with pytest.raises(ValueError, match="height-range-test0"):
+        p10c_links.run(config, _p10c_dir(config, tmp_path))
+
+
+def test_run_rebuilds_the_items_from_the_p10b_config_and_writes_everything(
+    tmp_path: Path, tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, dict[str, Any]] = {}
+
+    def quantities(**kwargs: Any) -> list[QuantityQuestion]:
+        seen["quantities"] = kwargs
+        return _items()
+
+    def people(**kwargs: Any) -> list[QuantityQuestion]:
+        seen["people"] = kwargs
+        return _people(4)
+
+    monkeypatch.setattr(p10c_links, "load_quantities", quantities)
+    monkeypatch.setattr(p10c_links, "load_people_heights", people)
+    monkeypatch.setattr(p10c_links, "load_model", lambda key: tiny_gpt2)
+    runs = _runs_on_disk(tmp_path)
+    config = _config_for(runs, offline=False)
+    run_dir = _p10c_dir(config, tmp_path)
+
+    p10c_links.run(config, run_dir)
+
+    loaded = seen["quantities"]
+    assert [f.name for f in loaded["families"]] == ["height", "wingspan"]
+    assert loaded["n_per_side"] == 7
+    assert loaded["min_sitelinks"] == 9
+    assert loaded["seed"] == 4
+    assert loaded["offline"] is False
+    assert seen["people"] == {"offline": False}
+    for name in ("cosine.csv", "knowledge.csv", "behavior.csv", "summary.json"):
+        assert (run_dir.path / name).is_file()
+    summary = run_dir.read_json("summary")
+    assert (
+        summary["runs"]["p10b"]["config_hash"]
+        == (  # type: ignore[index]
+            runs["p10b"].meta["config_hash"]
+        )
+    )
+
+
+def test_run_skips_the_people_the_p10b_run_did_not_use(
+    tmp_path: Path, tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid(monkeypatch, "load_people_heights")
+    monkeypatch.setattr(p10c_links, "load_quantities", lambda **kw: _items())
+    monkeypatch.setattr(p10c_links, "load_model", lambda key: tiny_gpt2)
+    runs = _runs_on_disk(tmp_path, p10b_people=False, p10a_people=False)
+    config = _config_for(runs)
+    run_dir = _p10c_dir(config, tmp_path)
+
+    p10c_links.run(config, run_dir)
+
+    assert (run_dir.path / "knowledge.csv").is_file()
+
+
+def test_run_with_only_the_behavior_link_loads_no_model_and_no_items(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid(monkeypatch, "load_model", "load_quantities", "load_people_heights")
+    runs = _runs_on_disk(tmp_path)
+    config = _config_for(runs, knowledge_run=None)
+    run_dir = _p10c_dir(config, tmp_path)
+
+    p10c_links.run(config, run_dir)
+
+    assert (run_dir.path / "behavior.csv").is_file()
+    assert not (run_dir.path / "knowledge.csv").exists()
+    assert not (run_dir.path / "cosine.csv").exists()
+
+
+def test_a_p10a_run_without_the_people_still_links_the_other_items(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid(monkeypatch, "load_model", "load_quantities", "load_people_heights")
+    runs = _runs_on_disk(tmp_path, p10a_people=False)
+    config = _config_for(runs, knowledge_run=None)
+    run_dir = _p10c_dir(config, tmp_path)
+
+    p10c_links.run(config, run_dir)
+
+    rows = _csv(run_dir, "behavior.csv")
+    assert "person_height" not in {r["test_family"] for r in rows}

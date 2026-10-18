@@ -20,6 +20,7 @@ so this experiment runs where the full run directories exist.
 
 from collections.abc import Mapping
 from collections.abc import Sequence
+import csv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -30,8 +31,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from tomography.activations import collect_activations
+from tomography.datasets.quantities import FAMILIES
 from tomography.datasets.quantities import PEOPLE_FAMILY
 from tomography.datasets.quantities import QuantityQuestion
+from tomography.datasets.quantities import load_people_heights
+from tomography.datasets.quantities import load_quantities
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
@@ -44,6 +48,7 @@ from tomography.experiments.sweep import chat_format_for
 from tomography.knowledge import DEFAULT_SHOTS
 from tomography.model import BosMode
 from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.p9.reading import READING_METHODS
 from tomography.p9.reading import p9_template
 from tomography.p9.risk import auroc_ci
@@ -51,6 +56,17 @@ from tomography.reading.metrics import auroc
 from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
 from tomography.templates import ConceptTemplate
+from tomography.viz.reading import curves_from_arrays
+from tomography.viz.reading import plot_curves
+from tomography.viz.style import BASELINE
+from tomography.viz.style import COLUMN_WIDTH
+from tomography.viz.style import INK_MUTED
+from tomography.viz.style import INK_SECONDARY
+from tomography.viz.style import PX
+from tomography.viz.style import categorical_colors
+from tomography.viz.style import new_figure
+from tomography.viz.style import save_figure
+from tomography.viz.style import style_context
 
 READER_PARTS: Final = 2
 COSINE_COLUMNS: Final = ("p9_type", "layer", "cosine", "band_lo", "band_hi")
@@ -83,6 +99,7 @@ BEHAVIOR_COLUMNS: Final = (
 DECODINGS: Final = ("greedy", "sampled")
 KINDS: Final = ("range", "exact")
 MIN_LINKED_ITEMS: Final = 3
+MAX_SERIES: Final = 8
 CONSTANT_TOLERANCE: Final = 1e-12
 BAND_PERCENTILES: Final = (2.5, 97.5)
 ALL_ITEMS: Final = "all"
@@ -897,3 +914,436 @@ def behavior_rows(
                         }
                     )
     return rows
+
+
+def load_inputs(
+    config: Config,
+) -> tuple[P10bRun, P9bRun | None, P10aRun | None]:
+    """Reads and cross-checks the runs a config links.
+
+    Args:
+        config: The experiment settings.
+
+    Returns:
+        The P10b run, and the P9b and P10a runs when the config names them.
+
+    Raises:
+        ValueError: If a run cannot be linked or the runs disagree, see
+            `load_p10b`, `load_p9b`, `load_p10a` and `check_links`.
+    """
+    p10b = load_p10b(config.p10b_run, model=config.model, reader=config.reader)
+    p9b = (
+        None
+        if config.knowledge_run is None
+        else load_p9b(config.knowledge_run, model=config.model)
+    )
+    p10a = (
+        None
+        if config.behavior_run is None
+        else load_p10a(config.behavior_run, model=config.model)
+    )
+    check_links(p10b, p9b, p10a)
+    return p10b, p9b, p10a
+
+
+def load_items(
+    p10b: P10bRun, *, offline: bool
+) -> tuple[list[QuantityQuestion], list[QuantityQuestion]]:
+    """Rebuilds the questions of a P10b run from its config.
+
+    Args:
+        p10b: The P10b run.
+        offline: Whether the questions are read from the cache only.
+
+    Returns:
+        The questions of the families, then the people (empty when the P10b
+        run did not score them).
+    """
+    settings = p10b.config
+    wanted = settings["families"]
+    families = [f for f in FAMILIES if wanted is None or f.name in wanted]
+    items = load_quantities(
+        families=families,
+        n_per_side=settings["n_per_side"],
+        min_sitelinks=settings["min_sitelinks"],
+        seed=settings["seed"],
+        offline=offline,
+    )
+    people = load_people_heights(offline=offline) if settings["people"] else []
+    return items, people
+
+
+def check_items(
+    items: Sequence[QuantityQuestion],
+    people: Sequence[QuantityQuestion],
+    p10b: P10bRun,
+) -> None:
+    """Checks that the rebuilt questions are those the P10b run scored.
+
+    Args:
+        items: The rebuilt questions of the families.
+        people: The rebuilt people.
+        p10b: The P10b run.
+
+    Raises:
+        ValueError: If the uids differ from those of `items.json` of the
+            P10b run, or an item is in another split.
+    """
+    rebuilt = {i.uid: i for i in [*items, *people]}
+    stored = {r["uid"]: r for r in p10b.items}
+    missing = sorted(set(stored) - set(rebuilt))
+    extra = sorted(set(rebuilt) - set(stored))
+    if missing or extra:
+        raise ValueError(
+            "the rebuilt questions differ from those of the P10b run: "
+            f"{len(missing)} missing (first {missing[:1]}), {len(extra)} "
+            f"extra (first {extra[:1]})"
+        )
+    for uid, item in rebuilt.items():
+        if item.split != stored[uid]["split"]:
+            raise ValueError(
+                f"item {uid!r} is in the {item.split} split of the rebuilt "
+                f"questions and in the {stored[uid]['split']} split of the "
+                "P10b run"
+            )
+
+
+def _write_csv(path: Path, columns: Sequence[str], rows: Sequence[Row]) -> None:
+    """Writes a CSV with unix line ends; None becomes an empty cell."""
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=columns,
+            lineterminator="\n",
+            extrasaction="raise",
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    with path.open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _counts(items: Sequence[QuantityQuestion]) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {}
+    for item in items:
+        by_kind = counts.setdefault(item.family, {})
+        by_kind[item.kind] = by_kind.get(item.kind, 0) + 1
+    return counts
+
+
+def _behavior_counts(rows: Sequence[Row]) -> dict[str, dict[str, int]]:
+    """Counts the linked items of one cell by test family and kind."""
+    counts: dict[str, dict[str, int]] = {}
+    cell = ((r["condition"], r["format"], r["decoding"]) for r in rows)
+    first = next(cell, None)
+    for row in rows:
+        if (row["condition"], row["format"], row["decoding"]) == first:
+            by_kind = counts.setdefault(str(row["test_family"]), {})
+            by_kind[str(row["kind"])] = cast(int, row["n"])
+    return counts
+
+
+def _at_layer(rows: Sequence[Row], layer: int, **where: object) -> list[Row]:
+    return [
+        r
+        for r in rows
+        if r["layer"] == layer and all(r[k] == v for k, v in where.items())
+    ]
+
+
+def execute(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel | None,
+    items: Sequence[QuantityQuestion] | None,
+    people: Sequence[QuantityQuestion] | None,
+    p10b: P10bRun,
+    p9b: P9bRun | None,
+    p10a: P10aRun | None,
+) -> None:
+    """Links the range reader to the P9 readers and to the hedging.
+
+    Writes `cosine.csv` and `knowledge.csv` when there is a knowledge link
+    (see `cosine_rows` and `knowledge_rows`; the questions go through the
+    model once), `behavior.csv` when there is a behavior link (see
+    `behavior_rows`) and `summary.json`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+        loaded: The wrapped model; None without a knowledge link.
+        items: The questions of the families, as rebuilt from the P10b run;
+            None without a knowledge link.
+        people: The rebuilt people, which no P9 reader scores since they
+            have no range side; None without a knowledge link.
+        p10b: The P10b run.
+        p9b: The P9b run; None without a knowledge link.
+        p10a: The P10a run; None without a behavior link.
+
+    Raises:
+        ValueError: If there is a knowledge link but no model or no items.
+    """
+    path = run_dir.path
+    cosine: list[Row] = []
+    knowledge: list[Row] = []
+    behavior: list[Row] = []
+    if p9b is not None:
+        if loaded is None or items is None:
+            raise ValueError("the knowledge link needs the model and the items")
+        cosine = cosine_rows(
+            p10b, p9b, n_random=config.n_random, seed=config.seed
+        )
+        _write_csv(path / "cosine.csv", COSINE_COLUMNS, cosine)
+        data = collect_question_activations(
+            loaded,
+            items,
+            p9b,
+            layers=p10b.layers,
+            batch_size=config.batch_size,
+        )
+        knowledge = knowledge_rows(
+            data,
+            items,
+            p9b,
+            n_boot=config.n_boot,
+            n_random=config.n_random,
+            seed=config.seed,
+        )
+        _write_csv(path / "knowledge.csv", KNOWLEDGE_COLUMNS, knowledge)
+    if p10a is not None:
+        behavior = behavior_rows(
+            p10b, p10a, n_boot=config.n_boot, seed=config.seed
+        )
+        _write_csv(path / "behavior.csv", BEHAVIOR_COLUMNS, behavior)
+    types = [] if p9b is None else list(p9b.types)
+    run_dir.write_json(
+        "summary",
+        {
+            "model": config.model,
+            "runs": {
+                "p10b": _stamp(p10b),
+                "p9b": None if p9b is None else _stamp(p9b),
+                "p10a": None if p10a is None else _stamp(p10a),
+            },
+            "reader": config.reader,
+            "layer": p10b.layer,
+            "p9_types": types,
+            "cosine": {
+                name: {
+                    key: _at_layer(cosine, p10b.layer, p9_type=name)[0][key]
+                    for key in ("cosine", "band_lo", "band_hi")
+                }
+                for name in types
+            },
+            "knowledge": {
+                name: {
+                    key: row[key]
+                    for key in (
+                        "n_range",
+                        "n_exact",
+                        "auroc",
+                        "lo",
+                        "hi",
+                        "rand_lo",
+                        "rand_hi",
+                    )
+                }
+                for name in types
+                for row in _at_layer(
+                    knowledge,
+                    p10b.layer,
+                    p9_type=name,
+                    items=ALL_ITEMS,
+                    test_family=POOLED,
+                )
+            },
+            "behavior": [r for r in behavior if r["test_family"] == POOLED],
+            "counts": {
+                "knowledge": _counts(items or []),
+                "people": len(people or []),
+                "behavior": _behavior_counts(behavior),
+            },
+            "config": config.to_dict(),
+        },
+    )
+
+
+def _stamp(run: P10bRun | P9bRun | P10aRun) -> dict[str, str]:
+    return {"path": run.path, "config_hash": run.config_hash}
+
+
+def run(config: Config, run_dir: RunDir) -> None:
+    """Reads the finished runs, rebuilds the questions and runs `execute`.
+
+    Every input is checked before the model is loaded or a question is
+    fetched, and a behavior link alone loads neither.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+
+    Raises:
+        ValueError: If a run cannot be linked, the runs disagree or the
+            rebuilt questions are not those of the P10b run.
+    """
+    p10b, p9b, p10a = load_inputs(config)
+    loaded = items = people = None
+    if p9b is not None:
+        items, people = load_items(p10b, offline=config.offline)
+        check_items(items, people, p10b)
+        loaded = load_model(config.model)
+    execute(config, run_dir, loaded, items, people, p10b, p9b, p10a)
+
+
+def _plot_by_type(
+    rows: Sequence[dict[str, str]],
+    out_dir: Path,
+    *,
+    stem: str,
+    column: str,
+    ylabel: str,
+    band: tuple[str, str],
+    band_label: str,
+    ylim: tuple[float, float] | None,
+) -> list[Path]:
+    """Draws one value per layer for each P9 type over a shared band.
+
+    There is one figure per eight types, since a figure has eight hues.
+    """
+    types = list(dict.fromkeys(r["p9_type"] for r in rows))
+    paths: list[Path] = []
+    for number, start in enumerate(range(0, len(types), MAX_SERIES), start=1):
+        group = types[start : start + MAX_SERIES]
+        by_type = [[r for r in rows if r["p9_type"] == t] for t in group]
+        layers = np.array([float(r["layer"]) for r in by_type[0]])
+        values = np.array([[float(r[column]) for r in t] for t in by_type])
+        low = np.array([float(r[band[0]]) for r in by_type[0]])
+        high = np.array([float(r[band[1]]) for r in by_type[0]])
+        with style_context():
+            fig, axes = new_figure()
+            ax = axes[0, 0]
+            ax.fill_between(
+                layers,
+                low,
+                high,
+                color=BASELINE,
+                alpha=0.5,
+                lw=0,
+                label=band_label,
+            )
+            plot_curves(
+                curves_from_arrays(layers, values, values, values),
+                series=group,
+                ylabel=ylabel,
+                n_layers=int(layers.max()),
+                ylim=ylim,
+                legend=True,
+                ax=ax,
+            )
+        name = stem if number == 1 else f"{stem}_{number}"
+        paths += save_figure(fig, out_dir, name)
+    return paths
+
+
+def _plot_behavior(rows: Sequence[dict[str, str]], out_dir: Path) -> list[Path]:
+    """Draws the pooled Spearman correlation of each kind with its interval.
+
+    The bars are the sampled decoding, one group per condition and format.
+    A group whose correlation is undefined has no bar.
+    """
+    pooled = [
+        r
+        for r in rows
+        if r["test_family"] == POOLED and r["decoding"] == "sampled"
+    ]
+    cells = list(dict.fromkeys((r["condition"], r["format"]) for r in pooled))
+    if not cells:
+        return []
+    colors = categorical_colors(len(KINDS))
+    width = 0.8 / len(KINDS)
+    with style_context():
+        fig, axes = new_figure(width=COLUMN_WIDTH * max(1.0, len(cells) / 2))
+        ax = axes[0, 0]
+        for j, (kind, color) in enumerate(zip(KINDS, colors, strict=True)):
+            found = [
+                (i, r)
+                for i, cell in enumerate(cells)
+                for r in pooled
+                if (r["condition"], r["format"], r["kind"]) == (*cell, kind)
+                and r["constant"] != "True"
+            ]
+            x = np.array([i + (j - 0.5) * width for i, _ in found])
+            value = np.array([float(r["spearman"]) for _, r in found])
+            low = np.array([float(r["lo"]) for _, r in found])
+            high = np.array([float(r["hi"]) for _, r in found])
+            ax.bar(x, value, width=width, color=color, label=kind)
+            ax.errorbar(
+                x,
+                value,
+                yerr=[value - low, high - value],
+                fmt="none",
+                ecolor=INK_SECONDARY,
+                elinewidth=PX,
+                capsize=2,
+            )
+        ax.axhline(0.0, color=INK_MUTED, lw=PX)
+        ax.set_xticks(np.arange(len(cells)), [f"{c}\n{f}" for c, f in cells])
+        ax.set_ylabel("Spearman, P10b score vs hedge share")
+        ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncols=len(KINDS))
+    return save_figure(fig, out_dir, "behavior_spearman")
+
+
+def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
+    """Draws the figures whose CSV the run wrote.
+
+    `cosine` shows the cosine to the range direction against the layer for
+    each P9 type, over the band of random vectors. `knowledge_auroc` shows
+    the AUROC of each P9 reader on all P10 items, pooled over the families,
+    over the random-direction band; compare a curve with the band, never
+    with 0.5. `behavior_spearman` shows, for the sampled decoding, the
+    pooled Spearman correlation of the range score with the hedge share
+    within each kind, with its bootstrap interval, for each condition and
+    format. More than eight P9 types are split over `<stem>_2` and so on.
+
+    Args:
+        run_dir: A finished P10c run.
+        out_dir: Folder of the figures.
+
+    Returns:
+        The PDF, PNG and SVG paths of every figure.
+    """
+    path = run_dir.path
+    paths: list[Path] = []
+    if (path / "cosine.csv").is_file():
+        paths += _plot_by_type(
+            _read_csv(path / "cosine.csv"),
+            out_dir,
+            stem="cosine",
+            column="cosine",
+            ylabel="Cosine to the range direction",
+            band=("band_lo", "band_hi"),
+            band_label="random vectors, 95%",
+            ylim=(-1.0, 1.0),
+        )
+    if (path / "knowledge.csv").is_file():
+        pooled = [
+            r
+            for r in _read_csv(path / "knowledge.csv")
+            if r["items"] == ALL_ITEMS and r["test_family"] == POOLED
+        ]
+        paths += _plot_by_type(
+            pooled,
+            out_dir,
+            stem="knowledge_auroc",
+            column="auroc",
+            ylabel="AUROC (range vs exact)",
+            band=("rand_lo", "rand_hi"),
+            band_label="random directions, 95%",
+            ylim=(0.0, 1.0),
+        )
+    if (path / "behavior.csv").is_file():
+        paths += _plot_behavior(_read_csv(path / "behavior.csv"), out_dir)
+    return paths
