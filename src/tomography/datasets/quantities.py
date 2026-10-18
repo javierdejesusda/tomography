@@ -8,10 +8,12 @@ Both come from Wikidata (CC0) through the snapshot cache in
 date and response digest.
 """
 
+from collections import Counter
 from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 import re
@@ -39,6 +41,11 @@ MAX_EXACT_RELATIVE_HALF_WIDTH = 0.01
 DECIMALS = 2
 DEFAULT_MIN_SITELINKS = 5
 QUERY_ROWS_PER_ITEM = 8
+PEOPLE_FAMILY = "person_height"
+PEOPLE_MIN_SITELINKS = 60
+PEOPLE_MIN_CM = 140.0
+PEOPLE_MAX_CM = 230.0
+PEOPLE_OCCUPATIONS: tuple[str, ...] = ("Q3665646", "Q937857", "Q33999")
 
 LENGTH_UNITS: Mapping[str, float] = {
     "Q11573": 1.0,
@@ -647,3 +654,107 @@ def load_quantities(
         for parsed in sides:
             items.extend(parsed[:keep])
     return sorted(items, key=lambda item: item.uid)
+
+
+def load_people_heights(
+    *,
+    n: int = 120,
+    min_sitelinks: int = PEOPLE_MIN_SITELINKS,
+    occupations: Sequence[str] = PEOPLE_OCCUPATIONS,
+    min_cm: float = PEOPLE_MIN_CM,
+    max_cm: float = PEOPLE_MAX_CM,
+    cache: Path | None = None,
+    offline: bool = False,
+    fetch: QueryFetch | None = None,
+    today: Callable[[], date] | None = None,
+) -> list[QuantityQuestion]:
+    """Loads a test-only set of well-known people with one exact height.
+
+    A diagnostic for readers trained on the `FAMILIES`, whose range sides
+    are living things and whose exact sides are artifacts: a person is a
+    living thing whose height is one value, so a reader that encodes range
+    versus exact calls these items exact, and one that encodes living
+    versus artifact does not. Every item is exact, in centimetres, in the
+    test split, and has no range partner.
+
+    Humans with a height cannot be queried at once on the public service
+    (timeouts and HTTP 429), so there is one cached query per occupation
+    (P106), each with a sitelink floor in the query. A person is kept with
+    exactly one best-rank height statement without bounds, in a unit of
+    `LENGTH_UNITS` (converted to centimetres), between `min_cm` and
+    `max_cm`, with a Latin-script label that has no digits. A person found
+    under several occupations counts once, and a label shared by several
+    people drops all of them. The most linked `n` remain.
+
+    Args:
+        n: Largest number of items.
+        min_sitelinks: Smallest sitelink count kept.
+        occupations: Item ids of the occupations to query, one query each.
+        min_cm: Smallest height kept, in centimetres.
+        max_cm: Largest height kept, in centimetres.
+        cache: Cache directory; defaults to the shared tomography cache.
+        offline: If True, use only cached query results.
+        fetch: Returns the raw response for a query; defaults to
+            `sparql_fetch`.
+        today: Gives the retrieval date; defaults to today in UTC.
+
+    Returns:
+        The people, most linked first, ties by item id number.
+
+    Raises:
+        ValueError: If `n` is below 1, `occupations` is empty or `min_cm`
+            is not below `max_cm`.
+        ChecksumError: If a cached result does not match its digest.
+        OfflineCacheMissError: If `offline` is True and a query is not
+            cached.
+        http.client.IncompleteRead: If the connection closed before the
+            whole response arrived on every attempt.
+    """
+    if n < 1:
+        raise ValueError(f"n must be at least 1, got {n}")
+    if not occupations:
+        raise ValueError("occupations must name at least one occupation")
+    if not min_cm < max_cm:
+        raise ValueError(
+            f"band must have min_cm < max_cm, got {min_cm}, {max_cm}"
+        )
+    limit = QUERY_ROWS_PER_ITEM * n
+    found: dict[str, QuantityQuestion] = {}
+    for occupation in occupations:
+        side = Side(
+            kind="exact",
+            prop="P2048",
+            classes=("Q5",),
+            template="How tall is {entity}, in centimetres?",
+            unit="centimetres",
+            scale=100.0,
+            query_min_sitelinks=min_sitelinks,
+            occupations=(occupation,),
+            unbounded_only=True,
+        )
+        result = run_query(
+            side_query(side, limit=limit),
+            fetch=fetch,
+            cache=cache,
+            offline=offline,
+            today=today,
+        )
+        parsed = parse_side(
+            result,
+            family=PEOPLE_FAMILY,
+            side=side,
+            min_sitelinks=min_sitelinks,
+            row_limit=limit,
+        )
+        for item in parsed:
+            found.setdefault(item.entity_id, item)
+    labels = Counter(item.entity for item in found.values())
+    kept = [
+        replace(item, split="test")
+        for item in found.values()
+        if labels[item.entity] == 1
+        and not any(char.isdigit() for char in item.entity)
+        and min_cm <= item.low <= max_cm
+    ]
+    kept.sort(key=lambda item: (-item.sitelinks, int(item.entity_id[1:])))
+    return kept[:n]
