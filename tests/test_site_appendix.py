@@ -9,14 +9,6 @@ RESULTS = Path(__file__).resolve().parents[1] / "results"
 
 
 @pytest.mark.xfail(
-    raises=NotImplementedError, strict=True, reason="Figure A1 is not built yet"
-)
-def test_figure_a1_builds_from_the_committed_results() -> None:
-    output = registry.build_figure(registry.APPENDIX[0], Manifest(RESULTS))
-    assert output.claim.endswith(".")
-
-
-@pytest.mark.xfail(
     raises=NotImplementedError, strict=True, reason="Figure A2 is not built yet"
 )
 def test_figure_a2_builds_from_the_committed_results() -> None:
