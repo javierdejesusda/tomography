@@ -1,0 +1,64 @@
+{
+  "_meta": {
+    "experiment": "p9c",
+    "config_hash": "4307bb435ab8",
+    "seed": 0,
+    "git_sha": "89ea7cb3bbc7d8419c85f221dde833a7e87e49a1",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A6000)",
+    "platform": "Linux-6.8.0-134-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T00:20:04+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9c",
+      "model": "qwen3-4b",
+      "seed": 0,
+      "labels_run": "results/p9a/qwen3-4b/7bd160f5a7e0",
+      "template": "fewshot",
+      "n_shots": 15,
+      "datasets": [
+        "popqa",
+        "triviaqa",
+        "nq_open"
+      ],
+      "lat_type": "obscure_real",
+      "lat_method": "logistic",
+      "layers": null,
+      "layer": null,
+      "n_seeds": 5,
+      "n_pairs": 64,
+      "min_pairs": 16,
+      "n_boot": 1000,
+      "min_probe": 50,
+      "min_relation_class": 5,
+      "bos": null,
+      "batch_size": 8
+    }
+  },
+  "data": {
+    "series": [
+      "lat",
+      "probe",
+      "popularity",
+      "template",
+      "length",
+      "name_logprob"
+    ],
+    "xlabel": "Coverage (%)",
+    "ylabel": "Risk (error rate among answered)",
+    "chance": null,
+    "n_layers": null
+  }
+}

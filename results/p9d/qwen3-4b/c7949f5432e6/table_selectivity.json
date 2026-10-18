@@ -1,0 +1,137 @@
+{
+  "_meta": {
+    "experiment": "p9d",
+    "config_hash": "c7949f5432e6",
+    "seed": 0,
+    "git_sha": "89ea7cb3bbc7d8419c85f221dde833a7e87e49a1",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A6000)",
+    "platform": "Linux-6.8.0-134-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T01:48:31+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9d",
+      "model": "qwen3-4b",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 24,
+      "temperature": null,
+      "top_p": 1.0,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        -0.4,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.4
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "labels_run": "results/p9a/qwen3-4b/7bd160f5a7e0",
+      "template": "fewshot",
+      "n_shots": 15,
+      "direction_type": "obscure_real",
+      "eval_types": [
+        "obscure_real",
+        "fictional_generated",
+        "unknowable_detail",
+        "false_premise"
+      ],
+      "method": "logistic",
+      "preprocess": "center",
+      "n_pairs": 64,
+      "n_random": 3,
+      "min_pairs": 16,
+      "min_eval": 10,
+      "behavior": "auto",
+      "instruction": "Answer the question in a few words. If you do not know the answer, say that you do not know.",
+      "n_hand_check": 100,
+      "n_boot": 1000
+    }
+  },
+  "data": {
+    "columns": [
+      "type",
+      "metric",
+      "n_known",
+      "n_unknown",
+      "known_slope",
+      "unknown_slope",
+      "gap",
+      "lo",
+      "hi",
+      "selective"
+    ],
+    "rows": [
+      [
+        "obscure_real",
+        "abstention",
+        100,
+        100,
+        -0.21190476190476182,
+        -0.6476190476190474,
+        0.4357142857142856,
+        0.2785119047619047,
+        0.5976785714285713,
+        true
+      ],
+      [
+        "fictional_generated",
+        "abstention",
+        100,
+        100,
+        -0.21190476190476182,
+        -0.576190476190476,
+        0.3642857142857142,
+        0.22374999999999984,
+        0.5047619047619046,
+        true
+      ],
+      [
+        "unknowable_detail",
+        "abstention",
+        100,
+        60,
+        -0.04761904761904761,
+        -0.2063492063492063,
+        0.1587301587301587,
+        0.035714285714285705,
+        0.2841468253968253,
+        true
+      ],
+      [
+        "false_premise",
+        "abstention",
+        100,
+        83,
+        -0.04761904761904761,
+        -0.20940906483075156,
+        0.16179001721170394,
+        0.050826878944348806,
+        0.27928858290304065,
+        true
+      ]
+    ]
+  }
+}
