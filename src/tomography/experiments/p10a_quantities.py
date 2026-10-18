@@ -1116,7 +1116,13 @@ def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
             np.arange(len(groups)),
             [f"{g['kind']}\n{g['condition']}" for g in groups],
         )
-        ax.set_ylim(0, 1)
-        ax.set_ylabel(f"Share of greedy answers ({fmt})")
-        ax.legend(title="Answer form", frameon=False)
+        ax.set_ylim(-0.02, 1.02)
+        ax.set_xlabel(f"Kind and condition ({fmt} format)")
+        ax.set_ylabel("Share of greedy answers")
+        ax.legend(
+            ncol=len(forms),
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.0),
+            frameon=False,
+        )
     return save_figure(figure_of(ax), out_dir, "form_shares")
