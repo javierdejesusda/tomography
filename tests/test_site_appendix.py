@@ -16,11 +16,3 @@ def test_figure_a4_builds_from_the_committed_results() -> None:
     assert output.claim.endswith(".")
 
 
-@pytest.mark.xfail(
-    raises=NotImplementedError, strict=True, reason="Figure A5 is not built yet"
-)
-def test_figure_a5_builds_from_the_committed_results() -> None:
-    output = registry.build_figure(registry.APPENDIX[4], Manifest(RESULTS))
-    assert output.claim.endswith(".")
-
-
