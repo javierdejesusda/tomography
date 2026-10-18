@@ -379,6 +379,7 @@ def _answer(
     correct: bool | None = None,
     approximate: bool = False,
     mismatch: bool = False,
+    truncated: bool = False,
 ) -> Answer:
     high = value if form == "point" else None if value is None else value + 5
     if form in ("abstain", "none"):
@@ -391,6 +392,8 @@ def _answer(
         approximate=approximate,
         correct=correct,
         unit_mismatch=mismatch,
+        finished=not truncated,
+        truncated=truncated,
     )
 
 
@@ -799,9 +802,11 @@ class _Calls:
         self,
         items: list[QuantityQuestion],
         rule: Rule = _planted,
+        finished: Callable[[bool], bool] = lambda greedy: True,
     ) -> None:
         self.items = items
         self.rule = rule
+        self.finished = finished
         self.calls: list[dict[str, Any]] = []
 
     def __call__(
@@ -838,7 +843,7 @@ class _Calls:
                             item, forced, temperature is None, k, order
                         ),
                         token_ids=(),
-                        finished=True,
+                        finished=self.finished(temperature is None),
                     )
                     for k in range(num_samples)
                 ]
@@ -864,10 +869,11 @@ def _executed(
     *,
     items: list[QuantityQuestion] | None = None,
     rule: Rule = _planted,
+    finished: Callable[[bool], bool] = lambda greedy: True,
     **overrides: Any,
 ) -> tuple[RunDir, _Calls]:
     items = items if items is not None else _pool(per_side=6)
-    calls = _Calls(items, rule)
+    calls = _Calls(items, rule, finished)
     monkeypatch.setattr(p10a_quantities, "generate", calls)
     config = _config(**overrides)
     run_dir = RunDir.create(config, out_root=tmp_path)
@@ -1733,7 +1739,7 @@ def test_a_mixed_row_names_the_metrics_with_an_item_wilson_interval() -> None:
 
     assert row["interval"] == "item_bootstrap+item_wilson"
     assert row["item_wilson"] == (
-        "approximate;abstain;none;unit_mismatch;correct"
+        "approximate;abstain;none;unit_mismatch;truncated;correct"
     )
     assert (row["range_lo"], row["range_hi"]) == (0.0, 1.0)
     greedy = _find(
@@ -1996,3 +2002,68 @@ def test_the_hand_check_rows_keep_the_order_of_the_items() -> None:
     _, rows = hand_check_table(items, results, n=12, seed=0)
 
     assert [row[0] for row in rows] == [item.uid for item in items]
+
+
+@pytest.mark.parametrize(
+    ("fmt", "text", "finished", "truncated"),
+    [
+        ("chat", " 35 cm", False, True),
+        ("chat", " 35 cm", True, False),
+        ("chat", " 35 cm\nmore", False, True),
+        ("fewshot", " 35 cm", False, True),
+        ("fewshot", " 35 cm\nQ: next", False, False),
+        ("fewshot", " 35 cm", True, False),
+    ],
+)
+def test_an_answer_is_truncated_when_the_budget_cut_it(
+    fmt: str, text: str, finished: bool, truncated: bool
+) -> None:
+    answer = score_answer(_item(), text, fmt, rel_tol=0.05, finished=finished)
+
+    assert answer.finished is finished
+    assert answer.truncated is truncated
+
+
+def test_the_table_rates_the_truncated_answers_with_an_interval() -> None:
+    items = _pool(("alpha",), per_side=2)
+    cut = _answer("point", truncated=True)
+    done = _answer("point")
+    outcomes = [
+        _outcome(cut if i == 0 else done, done, cut, done, cut)
+        for i, _ in enumerate(items)
+    ]
+    results: Results = {("free", "fewshot", "range_last"): outcomes}
+
+    columns, body = build_table(items, results, seed=0)
+    rows = _rows(columns, body)
+
+    greedy = _find(rows, family="alpha", kind="range", decoding="greedy")
+    assert (greedy["truncated"], greedy["truncated_rate"]) == (1, 0.5)
+    assert (greedy["truncated_lo"], greedy["truncated_hi"]) == wilson_ci(1, 2)
+    sampled = _find(rows, family="alpha", kind="range", decoding="sampled")
+    assert (sampled["truncated"], sampled["truncated_rate"]) == (4, 0.5)
+    assert sampled["truncated_lo"] <= 0.5 <= sampled["truncated_hi"]
+
+
+def test_items_json_keeps_whether_each_completion_finished(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(
+        tiny_gpt2,
+        tmp_path,
+        monkeypatch,
+        finished=lambda greedy: not greedy,
+    )
+
+    records = run_dir.read_json("items")
+    cell = records[0]["answers"]["free/fewshot/range_last"]
+
+    assert cell["greedy"]["finished"] is False
+    assert cell["greedy"]["truncated"] is True
+    assert all(a["finished"] is True for a in cell["samples"])
+    assert not any(a["truncated"] for a in cell["samples"])
+    rows = _csv(run_dir, "table.csv")
+    greedy = [r for r in rows if r["decoding"] == "greedy"]
+    assert {r["truncated_rate"] for r in greedy} == {"1.0"}
+    sampled = [r for r in rows if r["decoding"] == "sampled"]
+    assert {r["truncated_rate"] for r in sampled} == {"0.0"}

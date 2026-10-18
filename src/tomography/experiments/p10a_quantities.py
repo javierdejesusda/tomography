@@ -359,6 +359,10 @@ class Answer:
             same dimension as the question's, such as "9 months" for a
             question in days, or a compound such as "2 hours 22 minutes".
             Values are not converted.
+        finished: Whether the model ended the completion itself, with an
+            end-of-sequence token, within the token budget.
+        truncated: Whether the token budget cut the answer: not finished,
+            and for a few-shot completion no newline was reached either.
     """
 
     text: str
@@ -368,6 +372,8 @@ class Answer:
     approximate: bool
     correct: bool | None
     unit_mismatch: bool
+    finished: bool = True
+    truncated: bool = False
 
 
 _QUANTITY: Final = r"\d[\d,]*(?:\.\d+)?"
@@ -422,7 +428,12 @@ def _unit_mismatch(line: str, item: QuantityQuestion, parsed: Parsed) -> bool:
 
 
 def score_answer(
-    item: QuantityQuestion, text: str, fmt: str, *, rel_tol: float
+    item: QuantityQuestion,
+    text: str,
+    fmt: str,
+    *,
+    rel_tol: float,
+    finished: bool = True,
 ) -> Answer:
     """Reads one completion of a question.
 
@@ -436,6 +447,7 @@ def score_answer(
         text: The generated text.
         fmt: "fewshot" or "chat".
         rel_tol: Relative tolerance of the grader.
+        finished: Whether the completion ended with an end-of-sequence token.
 
     Returns:
         The reading of the completion.
@@ -456,6 +468,8 @@ def score_answer(
         correct=grade(parsed, item.low, item.high, rel_tol=rel_tol),
         unit_mismatch=has_number
         and _unit_mismatch(answer_text(line), item, parsed),
+        finished=finished,
+        truncated=not finished and (fmt == "chat" or "\n" not in text),
     )
 
 
@@ -485,6 +499,7 @@ METRICS: Final = (
     "abstain",
     "none",
     "unit_mismatch",
+    "truncated",
     "correct",
 )
 _KINDS: Final = ("range", "exact")
@@ -506,6 +521,7 @@ def _counts(answers: Sequence[Answer]) -> dict[str, int]:
         "none": sum(a.form == "none" for a in answers),
         "approximate": sum(a.approximate for a in answers),
         "unit_mismatch": sum(a.unit_mismatch for a in answers),
+        "truncated": sum(a.truncated for a in answers),
         "correct": sum(a.correct is True for a in answers),
     }
 
@@ -1221,7 +1237,13 @@ def _ask(
     )
 
     def read(item: QuantityQuestion, completion: Completion) -> Answer:
-        return score_answer(item, completion.text, fmt, rel_tol=config.rel_tol)
+        return score_answer(
+            item,
+            completion.text,
+            fmt,
+            rel_tol=config.rel_tol,
+            finished=completion.finished,
+        )
 
     return [
         Outcome(
