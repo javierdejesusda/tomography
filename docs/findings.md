@@ -39,9 +39,11 @@ C5)](#other-steering-experiments-on-gpt2-and-the-larger-gpt-2-sizes-m1-c2-p7-lr1
 (P10)](#approximate-answers-range-against-exact-quantities-p10) 15. [Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5,
 LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 16. [Position
 and stimulus-set size on qwen3-1.7b-base and qwen3-1.7b (P2,
-P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 17. [Persona wording and instruction confounds
-(P5)](#persona-wording-and-instruction-confounds-p5) 18. [Template steering on the Qwen3 1.7B pair
-(P7)](#template-steering-on-the-qwen3-17b-pair-p7) 19. [Run identity](#run-identity) 20. [Pending](#pending)
+P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 17. [Stimulus-set size and direction finder
+across the GPT-2 sizes and Qwen3
+(P3, P4)](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) 18. [Persona wording and
+instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 19. [Template steering on the Qwen3 1.7B pair
+(P7)](#template-steering-on-the-qwen3-17b-pair-p7) 20. [Run identity](#run-identity) 21. [Pending](#pending)
 
 ## Reading conventions
 
@@ -813,7 +815,7 @@ statements and score it on the truth target; the intervals are over the draws.
 
 The accuracy of a reader fitted on all the data of the source (the reference) is 0.883 for sentiment (2,048 pairs),
 0.644 for truth (172), 0.661 for `truth_cities` (452), 0.678 for `truth_common` (1,296) and 0.711 for utility (2,048).
-The shuffled-label series is between 0.46 and 0.53 at every size.
+The shuffled-label series is between 0.48 and 0.52 at every size.
 
 - **Sentiment** reaches 0.704 at 32 pairs with no failing draw and still rises at 512 (0.844 [0.837, 0.851]), below the
   full-data reference of 0.883. **Utility** has no failing draw from 64 pairs (0.654) and gains 0.015 between 64 and 512
@@ -886,7 +888,7 @@ By preprocessing, with the pairing above:
 - **Preprocessing.** `logistic` loses with less preprocessing on sentiment (0.765, 0.746, 0.669) and truth (0.698,
   0.658, 0.537) and not on utility (0.644, 0.644, 0.627). The `pca_raw` truth cell without preprocessing, 0.627, has an
   interval of zero width: the ten readers give the same value, so it is not read as a reader result.
-- These are one run on `gpt2`; the finder ranking is not shown to hold on the other sizes.
+- These are one run on `gpt2`; the other GPT-2 sizes and the Qwen3 checkpoints are in [the section on P3 and P4 across the GPT-2 sizes and Qwen3](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4).
 
 ## Sentiment steering on the GPT-2 ladder (C1)
 
@@ -3810,7 +3812,7 @@ C5 records the share of correct answers without steering and under an honesty-st
 
 ## Position and stimulus-set size on qwen3-1.7b-base and qwen3-1.7b (P2, P3)
 
-P2 ran on the Qwen3 1.7B pair, the base `qwen3-1.7b-base` and the post-trained `qwen3-1.7b`, and P3 ran on the base 1.7B checkpoint only; P2 later ran on `qwen3-0.6b-base`, `qwen3-0.6b`, `gpt2-medium`, `gpt2-large` and `gpt2-xl` (last subsections below). Both use the settings of the `gpt2` runs (logistic finder, 64 training pairs; 10 seeds for P2 and 20 draws per size for P3, the intervals of the [reading conventions](#reading-conventions)). Each is one run: `p2/qwen3-1.7b-base/119f0ac54451` and `p3/qwen3-1.7b-base/61baf30a8a59`, made at `c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090), and `p2/qwen3-1.7b/51a85fbec631`, made at `20650c5` with a clean tree on a laptop GPU (NVIDIA GeForce RTX 4070 Laptop GPU). The two P2 runs therefore differ in hardware and code commit as well as in checkpoint; the P2 code is the same at both commits (only `cloud.py` differs under `src`). The 0.6B checkpoints did not run P3, and P3 did not run on the post-trained checkpoint. Base and post-trained are two models: their P2 tables are separate and no metric is pooled over them, and the `gpt2` and Qwen3 numbers come from different models, not from a scaling series.
+P2 ran on the Qwen3 1.7B pair, the base `qwen3-1.7b-base` and the post-trained `qwen3-1.7b`, and P3 ran on the base 1.7B checkpoint only; P2 later ran on `qwen3-0.6b-base`, `qwen3-0.6b`, `gpt2-medium`, `gpt2-large` and `gpt2-xl` (last subsections below). Both use the settings of the `gpt2` runs (logistic finder, 64 training pairs; 10 seeds for P2 and 20 draws per size for P3, the intervals of the [reading conventions](#reading-conventions)). Each is one run: `p2/qwen3-1.7b-base/119f0ac54451` and `p3/qwen3-1.7b-base/61baf30a8a59`, made at `c7d8051` with a clean tree on a cloud GPU (NVIDIA GeForce RTX 4090), and `p2/qwen3-1.7b/51a85fbec631`, made at `20650c5` with a clean tree on a laptop GPU (NVIDIA GeForce RTX 4070 Laptop GPU). The two P2 runs therefore differ in hardware and code commit as well as in checkpoint; the P2 code is the same at both commits (only `cloud.py` differs under `src`). P3 on the 0.6B checkpoints and on the post-trained 1.7B checkpoint is in [the section on P3 and P4 across the GPT-2 sizes and Qwen3](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4). Base and post-trained are two models: their P2 tables are separate and no metric is pooled over them, and the `gpt2` and Qwen3 numbers come from different models, not from a scaling series.
 
 ### Token position and a misleading sentence on qwen3-1.7b-base (P2)
 
@@ -4021,6 +4023,483 @@ The accuracy of a reader fitted on all the data of the source (the reference, re
 - **Sentiment** has one failing draw in 20 at 2 pairs and none from 4 pairs; it reaches 0.937 at 64 pairs and 0.971 [0.969, 0.972] at 512, below the reference of 0.981. **Utility** plateaus early: 0.748 at 8 pairs and 0.749 [0.742, 0.756] at 512, below its reference of 0.770, with no failing draw from 8 pairs.
 - **Truth is not the slow case here.** The mean accuracy is 0.886 at 2 pairs with no failing draw, 0.972 at 32 and 64 pairs and 0.971 [0.968, 0.975] at 128, at its reference of 0.966; the source is exhausted at 172 pairs. `truth_cities` is at 0.946 with 2 pairs and 0.963 at 256. `truth_common` needs more: 0.709 at 2 pairs (failure 0.30), 0.878 at 8 and 0.953 [0.947, 0.961] at 512, at its reference of 0.949. On `gpt2` the same truth runs read at most 0.642 at every size; the two models are different, so this is a difference between models on the same data and the run does not say what causes it.
 - The stored saturation size is the smallest size whose mean accuracy is within 0.01 of the mean at the largest size, with its bootstrap range: 256 for sentiment (128 to 256), 16 for truth (16 to 32), 4 for `truth_cities` (2 to 16), 128 for `truth_common` (32 to 256) and 8 for utility (8 to 16). For truth and `truth_cities` the largest size is the end of a small set (128 and 256 pairs), so their saturation sizes are limits of the set as well as measured plateaus.
+
+## Stimulus-set size and direction finder across the GPT-2 sizes and Qwen3 (P3, P4)
+
+P3 and P4 are described under [gpt2](#position-sample-size-and-direction-finder-on-gpt2-p2-p3-p4), where [P3](#stimulus-set-size-p3) and [P4](#direction-finder-pairing-and-preprocessing-p4) ran on `gpt2` only; P3 on `qwen3-1.7b-base` is reported [with P2](#stimulus-set-size-on-qwen3-17b-base-p3). This section reports the other runs, all with the settings of the `gpt2` runs (the logistic finder, 64 training pairs and 10 seeds for P4, 20 draws per size from 2 to 512 pairs for P3, the intervals of the [reading conventions](#reading-conventions)): P3 on `gpt2-medium`, `gpt2-large`, `gpt2-xl`, `qwen3-0.6b-base`, `qwen3-0.6b` and `qwen3-1.7b`, and P4 on `gpt2-medium`, `gpt2-large`, `gpt2-xl`, `qwen3-0.6b-base`, `qwen3-0.6b`, `qwen3-1.7b-base` and `qwen3-1.7b`. Each is one run, at the default config of its experiment (batch size 8): `p3/gpt2-medium/b80a5a3c0faf`, `p3/gpt2-large/327dd31a1de6`, `p3/gpt2-xl/12ee53fd16fe`, `p3/qwen3-0.6b-base/776d454d5ca2`, `p3/qwen3-0.6b/b38783812e71`, `p3/qwen3-1.7b/72edcdd9158e`, `p4/gpt2-medium/9a2f3f02568b`, `p4/gpt2-large/f4e8481cbbbf`, `p4/gpt2-xl/427a6b2f9da4`, `p4/qwen3-0.6b-base/3b2677205f7d`, `p4/qwen3-0.6b/e40fa46cf517`, `p4/qwen3-1.7b-base/b772e1cc4db9` and `p4/qwen3-1.7b/607e86d9c7f6`. The `gpt2-medium` runs were made at `fb3b5dd` with a clean tree on CPU, and the others at `80baffb` with a clean tree on rented GPU pods (NVIDIA GeForce RTX 3090, except `p4/qwen3-1.7b-base`, which ran on an NVIDIA L4); the config hashes of all of them agree with the hashes recomputed under the current code (see [Run identity](#run-identity)). Base and post-trained checkpoints are two models: their tables are separate and no metric is pooled over them, and the `gpt2` and Qwen3 numbers come from different models, not from a scaling series.
+
+### Stimulus-set size (P3)
+
+The design is that of [P3 on gpt2](#stimulus-set-size-p3): 2 to 512 pairs, 20 draws per size, the mean accuracy in each cell and in parentheses the share of the 20 draws whose accuracy is below 0.6. The truth set has 172 pairs, so its 256 and 512 cells are skipped, as is the 512 cell of `truth_cities` (452 pairs). `truth_cities` and `truth_common` fit the reader on those subsets of the truth statements and score it on the truth target. The intervals quoted in the text are over the 20 draws; they do not include the sampling of the evaluation pairs, which matters most for the truth target (59 report pairs). Each table is followed by the accuracy of a reader fitted on all the data of the source (the reference, report split) and the range of the shuffled-label series.
+
+#### gpt2-medium
+
+| Source -> target       | 2            | 4            | 8            | 16           | 32           | 64           | 128          | 256          | 512          |
+| ---------------------- | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ |
+| sentiment -> sentiment | 0.523 (1.00) | 0.564 (0.80) | 0.588 (0.70) | 0.626 (0.35) | 0.684 (0.10) | 0.754 (0.00) | 0.797 (0.00) | 0.837 (0.00) | 0.869 (0.00) |
+| truth -> truth         | 0.543 (0.75) | 0.567 (0.65) | 0.583 (0.55) | 0.602 (0.50) | 0.624 (0.35) | 0.651 (0.10) | 0.654 (0.00) | -            | -            |
+| truth_cities -> truth  | 0.550 (0.70) | 0.569 (0.70) | 0.563 (0.70) | 0.610 (0.45) | 0.683 (0.10) | 0.714 (0.00) | 0.730 (0.00) | 0.736 (0.00) | -            |
+| truth_common -> truth  | 0.551 (0.75) | 0.503 (0.85) | 0.564 (0.75) | 0.617 (0.40) | 0.621 (0.25) | 0.631 (0.30) | 0.664 (0.10) | 0.691 (0.05) | 0.717 (0.00) |
+| utility -> utility     | 0.522 (0.65) | 0.508 (0.85) | 0.602 (0.40) | 0.598 (0.40) | 0.637 (0.15) | 0.684 (0.00) | 0.695 (0.00) | 0.709 (0.00) | 0.710 (0.00) |
+
+The reference is 0.911 for sentiment (2,048 pairs), 0.678 for truth (172), 0.763 for `truth_cities` (452), 0.729 for `truth_common` (1,296) and 0.719 for utility (2,048). The shuffled-label series is between 0.47 and 0.53 at every size.
+
+- **Sentiment** has no failing draw from 64 pairs (0.754 [0.736, 0.771]; at 32 pairs the mean is 0.684 with 0.10 failing) and still rises at 512 (0.869 [0.861, 0.878]), below the reference of 0.911. **Utility** has no failing draw from 64 pairs (0.684) and gains 0.026 between 64 and 512 (0.710 [0.701, 0.718]), against 0.719 for the full data.
+- **Truth** has failing draws up to 64 pairs (0.35 at 32 pairs, 0.10 at 64) and none at 128, where the mean is 0.654 [0.644, 0.664], below its reference of 0.678; the source is exhausted at 172 pairs. `truth_cities` has no failing draw from 64 pairs and reaches 0.736 [0.725, 0.746] at 256, below its reference of 0.763. `truth_common` is at 0.631 at 64 pairs (failure 0.30) and 0.717 [0.700, 0.733] at 512, with no failing draw, near its reference of 0.729 and still rising (it gains 0.026 from 256 to 512).
+- The stored saturation size is the smallest size whose mean accuracy is within 0.01 of the mean at the largest size, with its bootstrap range: 512 for sentiment (512 to 512), 64 for truth (32 to 128), 128 for `truth_cities` (64 to 256), 512 for `truth_common` (256 to 512) and 256 for utility (64 to 512). For truth and `truth_cities` the largest size is the end of a small set (128 and 256 pairs), so their saturation sizes are measured against the end of the set and do not show a plateau beyond it.
+
+#### gpt2-large
+
+| Source -> target       | 2            | 4            | 8            | 16           | 32           | 64           | 128          | 256          | 512          |
+| ---------------------- | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ |
+| sentiment -> sentiment | 0.514 (1.00) | 0.538 (0.85) | 0.593 (0.50) | 0.648 (0.25) | 0.721 (0.00) | 0.805 (0.00) | 0.855 (0.00) | 0.880 (0.00) | 0.899 (0.00) |
+| truth -> truth         | 0.542 (0.80) | 0.551 (0.80) | 0.564 (0.65) | 0.575 (0.65) | 0.591 (0.60) | 0.639 (0.25) | 0.676 (0.00) | -            | -            |
+| truth_cities -> truth  | 0.503 (1.00) | 0.500 (1.00) | 0.484 (1.00) | 0.469 (1.00) | 0.478 (1.00) | 0.480 (1.00) | 0.475 (1.00) | 0.491 (1.00) | -            |
+| truth_common -> truth  | 0.509 (0.95) | 0.480 (0.95) | 0.518 (0.80) | 0.553 (0.70) | 0.571 (0.65) | 0.576 (0.55) | 0.619 (0.30) | 0.654 (0.05) | 0.674 (0.05) |
+| utility -> utility     | 0.533 (0.70) | 0.527 (0.75) | 0.579 (0.60) | 0.593 (0.50) | 0.631 (0.15) | 0.674 (0.00) | 0.686 (0.00) | 0.704 (0.00) | 0.711 (0.00) |
+
+The reference is 0.935 for sentiment (2,048 pairs), 0.695 for truth (172), 0.508 for `truth_cities` (452), 0.661 for `truth_common` (1,296) and 0.719 for utility (2,048). The shuffled-label series is between 0.47 and 0.54 at every size.
+
+- **Sentiment** has no failing draw from 32 pairs (0.721 [0.705, 0.736]) and reaches 0.899 [0.894, 0.904] at 512, below the reference of 0.935; it gains 0.019 between 256 and 512 (0.880 to 0.899). **Utility** has no failing draw from 64 pairs (0.674) and gains 0.037 between 64 and 512 (0.711 [0.701, 0.721]), against 0.719 for the full data.
+- **Truth** has a failure rate of 0.25 at 64 pairs (0.639) and none at 128, where the mean is 0.676 [0.667, 0.685], below its reference of 0.695; the source is exhausted at 172 pairs. `truth_common` is at 0.619 at 128 pairs (failure 0.30) and 0.674 [0.659, 0.688] at 512 (failure 0.05), above its reference of 0.661.
+- **`truth_cities` is at chance on the truth target.** The mean accuracy is between 0.469 and 0.503 at every size, and all 20 draws are below 0.6 at every size (failure 1.00). The reference reader fitted on all 452 `truth_cities` pairs scores 0.508 on the report split, and 0.642 on the select split, which chose layer 11. On `gpt2` and `gpt2-medium` the same row reads 0.638 and 0.736 at 256 pairs. The run does not say why.
+- The stored saturation size is 512 for sentiment (512 to 512), 128 for truth (128 to 128), 2 for `truth_cities` (2 to 4), 512 for `truth_common` (256 to 512) and 256 for utility (256 to 512). The `truth_cities` value belongs to a series that is at chance at every size and marks no plateau of a reader. For truth the largest size is the end of a small set (128 pairs), so its saturation size is measured against the end of the set.
+
+#### gpt2-xl
+
+| Source -> target       | 2            | 4            | 8            | 16           | 32           | 64           | 128          | 256          | 512          |
+| ---------------------- | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ |
+| sentiment -> sentiment | 0.533 (1.00) | 0.554 (0.90) | 0.583 (0.60) | 0.638 (0.25) | 0.728 (0.00) | 0.800 (0.00) | 0.853 (0.00) | 0.898 (0.00) | 0.931 (0.00) |
+| truth -> truth         | 0.525 (0.90) | 0.559 (0.75) | 0.566 (0.85) | 0.578 (0.60) | 0.617 (0.35) | 0.636 (0.10) | 0.662 (0.00) | -            | -            |
+| truth_cities -> truth  | 0.527 (1.00) | 0.502 (1.00) | 0.547 (0.95) | 0.563 (0.75) | 0.607 (0.40) | 0.609 (0.35) | 0.620 (0.30) | 0.607 (0.30) | -            |
+| truth_common -> truth  | 0.512 (0.95) | 0.497 (1.00) | 0.505 (0.90) | 0.530 (0.90) | 0.560 (0.60) | 0.576 (0.75) | 0.616 (0.40) | 0.656 (0.05) | 0.677 (0.00) |
+| utility -> utility     | 0.543 (0.70) | 0.534 (0.85) | 0.612 (0.45) | 0.608 (0.55) | 0.651 (0.05) | 0.679 (0.00) | 0.688 (0.00) | 0.704 (0.00) | 0.716 (0.00) |
+
+The reference is 0.953 for sentiment (2,048 pairs), 0.661 for truth (172), 0.644 for `truth_cities` (452), 0.661 for `truth_common` (1,296) and 0.727 for utility (2,048). The shuffled-label series is between 0.46 and 0.54 at every size.
+
+- **Sentiment** has no failing draw from 32 pairs (0.728 [0.710, 0.747]) and reaches 0.931 [0.926, 0.936] at 512, below the reference of 0.953; it gains 0.033 between 256 and 512 (0.898 to 0.931). **Utility** has no failing draw from 64 pairs (0.679) and gains 0.037 between 64 and 512 (0.716 [0.708, 0.724]), against 0.727 for the full data.
+- **Truth** has a failure rate of 0.35 at 32 pairs and 0.10 at 64 (0.636) and none at 128, where the mean is 0.662 [0.653, 0.670], at its reference of 0.661; the source is exhausted at 172 pairs. `truth_cities` has no size without failing draws: the failure rate is 0.30 at 128 and at 256 pairs (0.620 [0.608, 0.633] and 0.607 [0.598, 0.615]), against a reference of 0.644. `truth_common` is at 0.576 at 64 pairs (failure 0.75), 0.656 at 256 (0.05) and 0.677 [0.664, 0.690] at 512 with no failing draw, above its reference of 0.661 and still rising.
+- The stored saturation size is 512 for sentiment (512 to 512), 128 for truth (128 to 128), 32 for `truth_cities` (32 to 128), 512 for `truth_common` (256 to 512) and 512 for utility (256 to 512). For truth and `truth_cities` the largest size is the end of a small set (128 and 256 pairs), so their saturation sizes are measured against the end of the set.
+
+#### qwen3-0.6b-base
+
+| Source -> target       | 2            | 4            | 8            | 16           | 32           | 64           | 128          | 256          | 512          |
+| ---------------------- | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ |
+| sentiment -> sentiment | 0.653 (0.20) | 0.725 (0.05) | 0.790 (0.00) | 0.833 (0.00) | 0.903 (0.00) | 0.919 (0.00) | 0.935 (0.00) | 0.942 (0.00) | 0.944 (0.00) |
+| truth -> truth         | 0.575 (0.60) | 0.602 (0.40) | 0.667 (0.20) | 0.744 (0.05) | 0.786 (0.00) | 0.814 (0.00) | 0.830 (0.00) | -            | -            |
+| truth_cities -> truth  | 0.677 (0.20) | 0.655 (0.25) | 0.692 (0.00) | 0.731 (0.05) | 0.743 (0.00) | 0.762 (0.00) | 0.759 (0.00) | 0.773 (0.00) | -            |
+| truth_common -> truth  | 0.560 (0.75) | 0.546 (0.80) | 0.574 (0.65) | 0.629 (0.25) | 0.671 (0.15) | 0.714 (0.05) | 0.748 (0.05) | 0.754 (0.00) | 0.762 (0.00) |
+| utility -> utility     | 0.616 (0.30) | 0.614 (0.40) | 0.680 (0.10) | 0.686 (0.00) | 0.704 (0.00) | 0.711 (0.00) | 0.714 (0.00) | 0.715 (0.00) | 0.707 (0.00) |
+
+The reference is 0.949 for sentiment (2,048 pairs), 0.831 for truth (172), 0.780 for `truth_cities` (452), 0.780 for `truth_common` (1,296) and 0.715 for utility (2,048). The shuffled-label series is between 0.47 and 0.55 at every size.
+
+- **Sentiment** is at 0.653 [0.622, 0.682] with 2 pairs (failure 0.20), has no failing draw from 8 pairs (0.790) and reaches 0.944 [0.941, 0.948] at 512, just below the reference of 0.949 (0.919 at 64 pairs). **Utility** plateaus early: 0.680 at 8 pairs (failure 0.10), 0.686 at 16 pairs with no failing draw, 0.711 [0.703, 0.719] at 64 and 0.707 [0.698, 0.715] at 512, below its reference of 0.715; beyond 64 pairs the mean moves by at most 0.004 (the highest cell is 0.715 at 256).
+- **Truth** is at 0.575 with 2 pairs (failure 0.60), 0.744 at 16 pairs (0.05) and has no failing draw from 32 pairs (0.786); it reaches 0.830 [0.820, 0.839] at 128, at its reference of 0.831, and the source is exhausted at 172 pairs. `truth_cities` is at 0.677 [0.648, 0.707] with 2 pairs (failure 0.20), has no failing draw from 32 pairs (0.743) and reaches 0.773 [0.768, 0.778] at 256, below its reference of 0.780. `truth_common` needs more: 0.560 at 2 pairs (failure 0.75), 0.714 at 64 (0.05), no failing draw from 256 pairs (0.754) and 0.762 [0.753, 0.773] at 512, below its reference of 0.780.
+- The stored saturation size is 128 for sentiment (128 to 256), 128 for truth (64 to 128), 256 for `truth_cities` (64 to 256), 256 for `truth_common` (128 to 512) and 32 for utility (8 to 64). For truth and `truth_cities` the largest size is the end of a small set (128 and 256 pairs), so their saturation sizes are measured against the end of the set.
+
+#### qwen3-0.6b
+
+| Source -> target       | 2            | 4            | 8            | 16           | 32           | 64           | 128          | 256          | 512          |
+| ---------------------- | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ |
+| sentiment -> sentiment | 0.593 (0.50) | 0.606 (0.55) | 0.666 (0.25) | 0.722 (0.05) | 0.793 (0.00) | 0.834 (0.00) | 0.868 (0.00) | 0.889 (0.00) | 0.913 (0.00) |
+| truth -> truth         | 0.530 (0.95) | 0.538 (0.80) | 0.591 (0.65) | 0.648 (0.20) | 0.712 (0.05) | 0.780 (0.00) | 0.838 (0.00) | -            | -            |
+| truth_cities -> truth  | 0.585 (0.60) | 0.603 (0.60) | 0.651 (0.25) | 0.680 (0.05) | 0.717 (0.00) | 0.751 (0.00) | 0.742 (0.00) | 0.750 (0.00) | -            |
+| truth_common -> truth  | 0.525 (0.95) | 0.521 (0.95) | 0.531 (0.90) | 0.559 (0.75) | 0.565 (0.75) | 0.626 (0.25) | 0.645 (0.15) | 0.681 (0.00) | 0.699 (0.00) |
+| utility -> utility     | 0.644 (0.20) | 0.629 (0.25) | 0.703 (0.00) | 0.703 (0.00) | 0.708 (0.00) | 0.706 (0.00) | 0.712 (0.00) | 0.720 (0.00) | 0.715 (0.00) |
+
+The reference is 0.930 for sentiment (2,048 pairs), 0.847 for truth (172), 0.712 for `truth_cities` (452), 0.763 for `truth_common` (1,296) and 0.738 for utility (2,048). The shuffled-label series is between 0.48 and 0.54 at every size.
+
+- **Sentiment** is at 0.593 [0.544, 0.640] with 2 pairs (failure 0.50), has no failing draw from 32 pairs (0.793) and reaches 0.913 [0.908, 0.917] at 512, below the reference of 0.930; it gains 0.024 between 256 and 512 (0.889 to 0.913). **Utility** has no failing draw from 8 pairs (0.703) and the mean stays between 0.703 and 0.720 from 8 pairs on (0.715 [0.704, 0.726] at 512), below its reference of 0.738.
+- **Truth** is at 0.530 with 2 pairs (failure 0.95), 0.712 at 32 pairs (0.05) and has no failing draw from 64 pairs (0.780); it reaches 0.838 [0.826, 0.851] at 128, below its reference of 0.847. `truth_cities` has no failing draw from 32 pairs (0.717) and stays between 0.742 and 0.751 from 64 pairs on (0.750 [0.742, 0.759] at 256), above its reference of 0.712. `truth_common` is slow: 0.626 at 64 pairs (failure 0.25), no failing draw from 256 pairs (0.681) and 0.699 [0.683, 0.715] at 512, still rising and below its reference of 0.763.
+- The stored saturation size is 512 for sentiment (512 to 512), 128 for truth (128 to 128), 64 for `truth_cities` (64 to 256), 512 for `truth_common` (256 to 512) and 32 for utility (8 to 256). For truth and `truth_cities` the largest size is the end of a small set (128 and 256 pairs), so their saturation sizes are measured against the end of the set.
+
+#### qwen3-1.7b-base
+
+Reported above with P2, in [Stimulus-set size on qwen3-1.7b-base (P3)](#stimulus-set-size-on-qwen3-17b-base-p3).
+
+#### qwen3-1.7b
+
+| Source -> target       | 2            | 4            | 8            | 16           | 32           | 64           | 128          | 256          | 512          |
+| ---------------------- | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ |
+| sentiment -> sentiment | 0.586 (0.50) | 0.626 (0.30) | 0.692 (0.15) | 0.785 (0.00) | 0.840 (0.00) | 0.888 (0.00) | 0.907 (0.00) | 0.934 (0.00) | 0.946 (0.00) |
+| truth -> truth         | 0.836 (0.00) | 0.840 (0.05) | 0.881 (0.00) | 0.925 (0.00) | 0.929 (0.00) | 0.920 (0.00) | 0.932 (0.00) | -            | -            |
+| truth_cities -> truth  | 0.830 (0.00) | 0.818 (0.00) | 0.844 (0.00) | 0.881 (0.00) | 0.876 (0.00) | 0.897 (0.00) | 0.891 (0.00) | 0.897 (0.00) | -            |
+| truth_common -> truth  | 0.669 (0.35) | 0.672 (0.20) | 0.755 (0.05) | 0.786 (0.00) | 0.841 (0.00) | 0.859 (0.00) | 0.904 (0.00) | 0.893 (0.00) | 0.900 (0.00) |
+| utility -> utility     | 0.665 (0.20) | 0.707 (0.05) | 0.749 (0.00) | 0.742 (0.00) | 0.760 (0.00) | 0.762 (0.00) | 0.762 (0.00) | 0.756 (0.00) | 0.750 (0.00) |
+
+The reference is 0.972 for sentiment (2,048 pairs), 0.932 for truth (172), 0.881 for `truth_cities` (452), 0.915 for `truth_common` (1,296) and 0.738 for utility (2,048). The shuffled-label series is between 0.48 and 0.55 at every size.
+
+- **Sentiment** is at 0.586 [0.557, 0.612] with 2 pairs (failure 0.50), has no failing draw from 16 pairs (0.785) and reaches 0.946 [0.943, 0.950] at 512, below the reference of 0.972; it gains 0.012 between 256 and 512 (0.934 to 0.946). **Utility** has no failing draw from 8 pairs (0.749) and the mean stays between 0.742 and 0.762 from 8 pairs on (0.750 [0.744, 0.755] at 512), above its reference of 0.738.
+- **Truth** reads from 2 pairs: 0.836 [0.810, 0.858] with no failing draw (one draw in 20 fails at 4 pairs), 0.925 at 16 pairs and 0.932 [0.929, 0.936] at 128, at its reference of 0.932; the source is exhausted at 172 pairs. `truth_cities` has no failing draw at any size (0.830 at 2 pairs, 0.897 [0.889, 0.903] at 256, reference 0.881). `truth_common` is at 0.669 [0.614, 0.722] with 2 pairs (failure 0.35), has no failing draw from 16 pairs (0.786), and reads 0.904 [0.891, 0.917] at 128 and 0.900 [0.889, 0.910] at 512, below its reference of 0.915.
+- The stored saturation size is 512 for sentiment (256 to 512), 16 for truth (16 to 128), 64 for `truth_cities` (16 to 64), 128 for `truth_common` (128 to 512) and 8 for utility (8 to 32). For truth and `truth_cities` the largest size is the end of a small set (128 and 256 pairs), so their saturation sizes are measured against the end of the set.
+
+### Direction finder, pairing and preprocessing (P4)
+
+The design is that of [P4 on gpt2](#direction-finder-pairing-and-preprocessing-p4): the six finders `pca_diff` (the paper's finder and the P4 reference), `pca_raw`, `mean_diff`, `logistic`, `kmeans` and a `random` direction, the pairings `matched` (utility only), `label_contrastive` and `random`, and the preprocessing `center`, `unit` and `none`. Each cell is the report-split accuracy at the layer chosen on the select split for that cell, with the interval over the 10 seeds; the `random` direction is scored at its own selected layer like the others. The principal-component figures are at the layer of the reference cell (`pca_diff`, the pairing the task has, centered), which is the layer named in the text. Shuffled-label accuracy is given per run. "Above the random direction" means that the interval of the finder lies above the interval of the random direction in the same table row.
+
+#### gpt2-medium
+
+Shuffled-label accuracy is between 0.46 and 0.51.
+
+Centered preprocessing, the pairing the task has:
+
+| Task (pairing)                | pca_diff             | pca_raw              | mean_diff            | logistic             | kmeans               | random               |
+| ----------------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| sentiment (label_contrastive) | 0.517 [0.504, 0.529] | 0.509 [0.499, 0.519] | 0.689 [0.667, 0.713] | 0.742 [0.723, 0.758] | 0.506 [0.490, 0.522] | 0.557 [0.515, 0.593] |
+| truth (label_contrastive)     | 0.517 [0.510, 0.524] | 0.473 [0.453, 0.490] | 0.615 [0.600, 0.632] | 0.656 [0.625, 0.686] | 0.514 [0.508, 0.522] | 0.536 [0.490, 0.571] |
+| utility (matched)             | 0.618 [0.559, 0.652] | 0.636 [0.627, 0.644] | 0.652 [0.643, 0.660] | 0.685 [0.665, 0.702] | 0.632 [0.622, 0.641] | 0.553 [0.520, 0.584] |
+
+By pairing, centered preprocessing:
+
+| Task      | Pairing           | pca_diff | pca_raw | mean_diff | logistic | kmeans | random |
+| --------- | ----------------- | -------- | ------- | --------- | -------- | ------ | ------ |
+| sentiment | label_contrastive | 0.517    | 0.509   | 0.689     | 0.742    | 0.506  | 0.557  |
+| sentiment | random            | 0.522    | 0.490   | 0.693     | 0.750    | 0.497  | 0.570  |
+| truth     | label_contrastive | 0.517    | 0.473   | 0.615     | 0.656    | 0.514  | 0.536  |
+| truth     | random            | 0.473    | 0.469   | 0.644     | 0.685    | 0.503  | 0.554  |
+| utility   | matched           | 0.618    | 0.636   | 0.652     | 0.685    | 0.632  | 0.553  |
+| utility   | label_contrastive | 0.585    | 0.580   | 0.658     | 0.658    | 0.579  | 0.553  |
+| utility   | random            | 0.594    | 0.598   | 0.650     | 0.655    | 0.602  | 0.570  |
+
+By preprocessing, with the pairing above:
+
+| Task      | Finder    | center               | unit                 | none                 |
+| --------- | --------- | -------------------- | -------------------- | -------------------- |
+| sentiment | pca_diff  | 0.517 [0.504, 0.529] | 0.515 [0.503, 0.524] | 0.509 [0.499, 0.518] |
+| sentiment | pca_raw   | 0.509 [0.499, 0.519] | 0.509 [0.497, 0.520] | 0.554 [0.552, 0.556] |
+| sentiment | mean_diff | 0.689 [0.667, 0.713] | 0.692 [0.668, 0.717] | 0.689 [0.666, 0.713] |
+| sentiment | logistic  | 0.742 [0.723, 0.758] | 0.741 [0.722, 0.757] | 0.691 [0.668, 0.714] |
+| truth     | pca_diff  | 0.517 [0.510, 0.524] | 0.437 [0.417, 0.463] | 0.488 [0.473, 0.500] |
+| truth     | pca_raw   | 0.473 [0.453, 0.490] | 0.469 [0.451, 0.486] | 0.605 [0.600, 0.610] |
+| truth     | mean_diff | 0.615 [0.600, 0.632] | 0.612 [0.595, 0.632] | 0.615 [0.600, 0.631] |
+| truth     | logistic  | 0.656 [0.625, 0.686] | 0.661 [0.634, 0.688] | 0.619 [0.602, 0.636] |
+| utility   | pca_diff  | 0.618 [0.559, 0.652] | 0.641 [0.631, 0.649] | 0.615 [0.556, 0.649] |
+| utility   | pca_raw   | 0.636 [0.627, 0.644] | 0.635 [0.626, 0.645] | 0.503 [0.495, 0.511] |
+| utility   | mean_diff | 0.652 [0.643, 0.660] | 0.660 [0.654, 0.666] | 0.652 [0.644, 0.660] |
+| utility   | logistic  | 0.685 [0.665, 0.702] | 0.684 [0.665, 0.699] | 0.655 [0.648, 0.663] |
+
+- **The paper finder is no better than the random direction.** `pca_diff` is at 0.517 [0.504, 0.529] for sentiment and 0.517 [0.510, 0.524] for truth, against 0.557 and 0.536 for the random direction, and at 0.618 [0.559, 0.652] for utility against 0.553 [0.520, 0.584]; on every task its interval overlaps that of the random direction. The first principal component explains 19 percent (sentiment, L12), 58 percent (truth, L1) and 26 percent (utility, matched, L24) of the variance of the pair differences, and the component chosen by cross-validation among the first eight reads 0.546 [0.527, 0.567] (sentiment), 0.532 [0.503, 0.564] (truth) and 0.569 [0.515, 0.619] (utility, matched).
+- **The supervised finders read, and on utility so do the others.** `logistic` is the highest on all three tasks (0.742, 0.656, 0.685) and `mean_diff` is second (0.689, 0.615, 0.652), both above the random direction. On utility `pca_raw` (0.636 [0.627, 0.644]) and `kmeans` (0.632 [0.622, 0.641]) are above the random direction as well, which they are not on `gpt2` (0.555 and 0.557 against 0.526).
+- **Pairing.** The best pairing for `logistic` is `random` for sentiment (0.750 against 0.742 for `label_contrastive`) and truth (0.685 against 0.656) and `matched` for utility (0.685 against 0.658 for `label_contrastive` and 0.655); the differences between pairings are at most 0.030. For `mean_diff` on truth the `random` pairing is higher (0.644 against 0.615).
+- **Preprocessing.** `logistic` loses with no preprocessing on all three tasks (sentiment 0.742, 0.741, 0.691; truth 0.656, 0.661, 0.619; utility 0.685, 0.684, 0.655), and `unit` is level with `center`. `pca_raw` without preprocessing is higher than centered on sentiment (0.554 against 0.509) and truth (0.605 against 0.473) and lower on utility (0.503 against 0.636). The two higher cells have intervals of width 0.004 and 0.010 ([0.552, 0.556] and [0.600, 0.610]): the ten readers give nearly the same value, so they are not read as reader results. `pca_diff` on truth with `unit` falls to 0.437 [0.417, 0.463], below chance.
+
+#### gpt2-large
+
+Shuffled-label accuracy is between 0.46 and 0.54.
+
+Centered preprocessing, the pairing the task has:
+
+| Task (pairing)                | pca_diff             | pca_raw              | mean_diff            | logistic             | kmeans               | random               |
+| ----------------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| sentiment (label_contrastive) | 0.495 [0.486, 0.505] | 0.501 [0.498, 0.504] | 0.719 [0.681, 0.756] | 0.807 [0.792, 0.823] | 0.501 [0.498, 0.505] | 0.525 [0.486, 0.561] |
+| truth (label_contrastive)     | 0.534 [0.527, 0.541] | 0.541 [0.537, 0.542] | 0.546 [0.525, 0.568] | 0.653 [0.629, 0.680] | 0.539 [0.532, 0.546] | 0.534 [0.507, 0.561] |
+| utility (matched)             | 0.571 [0.535, 0.592] | 0.611 [0.602, 0.618] | 0.658 [0.636, 0.681] | 0.688 [0.666, 0.710] | 0.614 [0.606, 0.620] | 0.546 [0.513, 0.575] |
+
+By pairing, centered preprocessing:
+
+| Task      | Pairing           | pca_diff | pca_raw | mean_diff | logistic | kmeans | random |
+| --------- | ----------------- | -------- | ------- | --------- | -------- | ------ | ------ |
+| sentiment | label_contrastive | 0.495    | 0.501   | 0.719     | 0.807    | 0.501  | 0.525  |
+| sentiment | random            | 0.497    | 0.498   | 0.725     | 0.816    | 0.498  | 0.543  |
+| truth     | label_contrastive | 0.534    | 0.541   | 0.546     | 0.653    | 0.539  | 0.534  |
+| truth     | random            | 0.492    | 0.498   | 0.551     | 0.664    | 0.493  | 0.502  |
+| utility   | matched           | 0.571    | 0.611   | 0.658     | 0.688    | 0.614  | 0.546  |
+| utility   | label_contrastive | 0.547    | 0.549   | 0.623     | 0.642    | 0.547  | 0.532  |
+| utility   | random            | 0.558    | 0.548   | 0.643     | 0.651    | 0.569  | 0.539  |
+
+By preprocessing, with the pairing above:
+
+| Task      | Finder    | center               | unit                 | none                 |
+| --------- | --------- | -------------------- | -------------------- | -------------------- |
+| sentiment | pca_diff  | 0.495 [0.486, 0.505] | 0.501 [0.496, 0.506] | 0.505 [0.500, 0.509] |
+| sentiment | pca_raw   | 0.501 [0.498, 0.504] | 0.500 [0.500, 0.500] | 0.613 [0.555, 0.643] |
+| sentiment | mean_diff | 0.719 [0.681, 0.756] | 0.721 [0.680, 0.761] | 0.719 [0.680, 0.755] |
+| sentiment | logistic  | 0.807 [0.792, 0.823] | 0.809 [0.792, 0.828] | 0.724 [0.684, 0.764] |
+| truth     | pca_diff  | 0.534 [0.527, 0.541] | 0.536 [0.529, 0.541] | 0.532 [0.525, 0.539] |
+| truth     | pca_raw   | 0.541 [0.537, 0.542] | 0.539 [0.534, 0.542] | 0.492 [0.492, 0.492] |
+| truth     | mean_diff | 0.546 [0.525, 0.568] | 0.541 [0.524, 0.561] | 0.546 [0.527, 0.566] |
+| truth     | logistic  | 0.653 [0.629, 0.680] | 0.610 [0.583, 0.634] | 0.544 [0.524, 0.564] |
+| utility   | pca_diff  | 0.571 [0.535, 0.592] | 0.557 [0.506, 0.593] | 0.573 [0.536, 0.594] |
+| utility   | pca_raw   | 0.611 [0.602, 0.618] | 0.612 [0.604, 0.618] | 0.516 [0.509, 0.521] |
+| utility   | mean_diff | 0.658 [0.636, 0.681] | 0.656 [0.635, 0.679] | 0.658 [0.636, 0.680] |
+| utility   | logistic  | 0.688 [0.666, 0.710] | 0.689 [0.667, 0.711] | 0.673 [0.650, 0.695] |
+
+- **The paper finder is no better than the random direction.** `pca_diff` is at 0.495 [0.486, 0.505] for sentiment, 0.534 [0.527, 0.541] for truth and 0.571 [0.535, 0.592] for utility, against 0.525, 0.534 and 0.546 for the random direction, and its interval overlaps that of the random direction on every task. The first principal component explains 27 percent (sentiment, L18), 34 percent (truth, L2) and 22 percent (utility, matched, L36) of the variance of the pair differences, and the component chosen by cross-validation among the first eight reads 0.536 [0.496, 0.583] (sentiment), 0.553 [0.527, 0.588] (truth) and 0.599 [0.576, 0.623] (utility, matched); only the utility interval lies above that of the random direction (0.546 [0.513, 0.575]), by less than 0.001.
+- **The supervised finders read, and on utility so do the others.** `logistic` is the highest on all three tasks (0.807, 0.653, 0.688) and `mean_diff` is second on sentiment (0.719) and utility (0.658). On truth only `logistic` is above the random direction: `mean_diff` is at 0.546 [0.525, 0.568] against 0.534 [0.507, 0.561]. On utility `pca_raw` (0.611 [0.602, 0.618]) and `kmeans` (0.614 [0.606, 0.620]) are above the random direction as well.
+- **Pairing.** The best pairing for `logistic` is `random` for sentiment (0.816 against 0.807 for `label_contrastive`) and truth (0.664 against 0.653) and `matched` for utility (0.688 against 0.651 for `random` and 0.642); the differences are at most 0.046. On utility `pca_raw` and `kmeans` are higher with the `matched` pairing (0.611 and 0.614) than with the others (0.549 and 0.547 for `label_contrastive`, 0.548 and 0.569 for `random`).
+- **Preprocessing.** `logistic` loses with no preprocessing on sentiment (0.807, 0.809, 0.724), truth (0.653, 0.610, 0.544) and, by 0.015, utility (0.688, 0.689, 0.673); on truth `unit` is also lower than `center`. `pca_raw` is higher without preprocessing on sentiment (0.613 [0.555, 0.643] against 0.501) and lower on utility (0.516 against 0.611). Two `pca_raw` cells have intervals of zero width, sentiment with `unit` (0.500) and truth with no preprocessing (0.492): the ten readers give the same value, so they are not read as reader results.
+
+#### gpt2-xl
+
+Shuffled-label accuracy is between 0.46 and 0.54.
+
+Centered preprocessing, the pairing the task has:
+
+| Task (pairing)                | pca_diff             | pca_raw              | mean_diff            | logistic             | kmeans               | random               |
+| ----------------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| sentiment (label_contrastive) | 0.507 [0.493, 0.521] | 0.506 [0.491, 0.520] | 0.664 [0.646, 0.684] | 0.776 [0.756, 0.794] | 0.500 [0.485, 0.516] | 0.545 [0.508, 0.586] |
+| truth (label_contrastive)     | 0.488 [0.478, 0.500] | 0.486 [0.478, 0.495] | 0.514 [0.497, 0.536] | 0.656 [0.644, 0.666] | 0.480 [0.469, 0.488] | 0.503 [0.468, 0.537] |
+| utility (matched)             | 0.576 [0.539, 0.598] | 0.597 [0.594, 0.600] | 0.640 [0.628, 0.653] | 0.686 [0.672, 0.701] | 0.582 [0.579, 0.586] | 0.525 [0.492, 0.552] |
+
+By pairing, centered preprocessing:
+
+| Task      | Pairing           | pca_diff | pca_raw | mean_diff | logistic | kmeans | random |
+| --------- | ----------------- | -------- | ------- | --------- | -------- | ------ | ------ |
+| sentiment | label_contrastive | 0.507    | 0.506   | 0.664     | 0.776    | 0.500  | 0.545  |
+| sentiment | random            | 0.497    | 0.513   | 0.678     | 0.771    | 0.503  | 0.541  |
+| truth     | label_contrastive | 0.488    | 0.486   | 0.514     | 0.656    | 0.480  | 0.503  |
+| truth     | random            | 0.478    | 0.485   | 0.602     | 0.649    | 0.454  | 0.541  |
+| utility   | matched           | 0.576    | 0.597   | 0.640     | 0.686    | 0.582  | 0.525  |
+| utility   | label_contrastive | 0.539    | 0.562   | 0.626     | 0.653    | 0.552  | 0.528  |
+| utility   | random            | 0.563    | 0.566   | 0.632     | 0.653    | 0.572  | 0.539  |
+
+By preprocessing, with the pairing above:
+
+| Task      | Finder    | center               | unit                 | none                 |
+| --------- | --------- | -------------------- | -------------------- | -------------------- |
+| sentiment | pca_diff  | 0.507 [0.493, 0.521] | 0.507 [0.495, 0.520] | 0.506 [0.488, 0.522] |
+| sentiment | pca_raw   | 0.506 [0.491, 0.520] | 0.498 [0.493, 0.504] | 0.552 [0.501, 0.586] |
+| sentiment | mean_diff | 0.664 [0.646, 0.684] | 0.683 [0.657, 0.714] | 0.664 [0.645, 0.683] |
+| sentiment | logistic  | 0.776 [0.756, 0.794] | 0.779 [0.758, 0.797] | 0.668 [0.649, 0.692] |
+| truth     | pca_diff  | 0.488 [0.478, 0.500] | 0.485 [0.475, 0.497] | 0.488 [0.478, 0.498] |
+| truth     | pca_raw   | 0.486 [0.478, 0.495] | 0.488 [0.481, 0.495] | 0.471 [0.461, 0.485] |
+| truth     | mean_diff | 0.514 [0.497, 0.536] | 0.561 [0.544, 0.578] | 0.514 [0.497, 0.532] |
+| truth     | logistic  | 0.656 [0.644, 0.666] | 0.659 [0.646, 0.671] | 0.563 [0.547, 0.578] |
+| utility   | pca_diff  | 0.576 [0.539, 0.598] | 0.577 [0.534, 0.600] | 0.577 [0.537, 0.599] |
+| utility   | pca_raw   | 0.597 [0.594, 0.600] | 0.596 [0.593, 0.600] | 0.563 [0.560, 0.566] |
+| utility   | mean_diff | 0.640 [0.628, 0.653] | 0.641 [0.628, 0.657] | 0.640 [0.628, 0.654] |
+| utility   | logistic  | 0.686 [0.672, 0.701] | 0.690 [0.677, 0.700] | 0.648 [0.636, 0.661] |
+
+- **The paper finder is no better than the random direction.** `pca_diff` is at 0.507 [0.493, 0.521] for sentiment, 0.488 [0.478, 0.500] for truth and 0.576 [0.539, 0.598] for utility, against 0.545, 0.503 and 0.525 for the random direction, and its interval overlaps that of the random direction on every task. The first principal component explains 25 percent (sentiment, L45), 20 percent (truth, L2) and 32 percent (utility, matched, L26) of the variance of the pair differences, and the component chosen by cross-validation among the first eight reads 0.595 [0.546, 0.646] (sentiment), 0.493 [0.481, 0.505] (truth) and 0.609 [0.580, 0.637] (utility, matched); only the utility value has an interval above that of the random direction.
+- **The supervised finders read.** `logistic` is the highest on all three tasks (0.776, 0.656, 0.686) and `mean_diff` is second on sentiment (0.664) and utility (0.640). On truth `mean_diff` is at 0.514 [0.497, 0.536], an interval that overlaps the random direction (0.503 [0.468, 0.537]). On utility `pca_raw` (0.597 [0.594, 0.600]) and `kmeans` (0.582 [0.579, 0.586]) are above the random direction.
+- **Pairing.** The best pairing for `logistic` is `label_contrastive` for sentiment (0.776 against 0.771 for `random`) and truth (0.656 against 0.649) and `matched` for utility (0.686 against 0.653 for both others); the differences are at most 0.034, and 0.007 or less on sentiment and truth. For `mean_diff` on truth the `random` pairing is higher (0.602 against 0.514).
+- **Preprocessing.** `logistic` loses with no preprocessing on all three tasks (sentiment 0.776, 0.779, 0.668; truth 0.656, 0.659, 0.563; utility 0.686, 0.690, 0.648), and `unit` is level with `center`. `mean_diff` on truth is higher with `unit` (0.561 [0.544, 0.578] against 0.514 [0.497, 0.536]). No cell has an interval of zero width.
+
+#### qwen3-0.6b-base
+
+Shuffled-label accuracy is between 0.45 and 0.51.
+
+Centered preprocessing, the pairing the task has:
+
+| Task (pairing)                | pca_diff             | pca_raw              | mean_diff            | logistic             | kmeans               | random               |
+| ----------------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| sentiment (label_contrastive) | 0.665 [0.613, 0.722] | 0.557 [0.509, 0.601] | 0.937 [0.927, 0.947] | 0.952 [0.946, 0.958] | 0.576 [0.538, 0.615] | 0.658 [0.619, 0.700] |
+| truth (label_contrastive)     | 0.588 [0.573, 0.607] | 0.547 [0.517, 0.578] | 0.688 [0.664, 0.712] | 0.764 [0.749, 0.778] | 0.532 [0.505, 0.559] | 0.549 [0.524, 0.578] |
+| utility (matched)             | 0.727 [0.722, 0.731] | 0.737 [0.727, 0.745] | 0.734 [0.727, 0.741] | 0.709 [0.698, 0.720] | 0.740 [0.733, 0.747] | 0.604 [0.567, 0.638] |
+
+By pairing, centered preprocessing:
+
+| Task      | Pairing           | pca_diff | pca_raw | mean_diff | logistic | kmeans | random |
+| --------- | ----------------- | -------- | ------- | --------- | -------- | ------ | ------ |
+| sentiment | label_contrastive | 0.665    | 0.557   | 0.937     | 0.952    | 0.576  | 0.658  |
+| sentiment | random            | 0.550    | 0.539   | 0.935     | 0.950    | 0.541  | 0.658  |
+| truth     | label_contrastive | 0.588    | 0.547   | 0.688     | 0.764    | 0.532  | 0.549  |
+| truth     | random            | 0.568    | 0.554   | 0.705     | 0.781    | 0.541  | 0.517  |
+| utility   | matched           | 0.727    | 0.737   | 0.734     | 0.709    | 0.740  | 0.604  |
+| utility   | label_contrastive | 0.736    | 0.741   | 0.731     | 0.709    | 0.716  | 0.636  |
+| utility   | random            | 0.723    | 0.726   | 0.732     | 0.691    | 0.729  | 0.627  |
+
+By preprocessing, with the pairing above:
+
+| Task      | Finder    | center               | unit                 | none                 |
+| --------- | --------- | -------------------- | -------------------- | -------------------- |
+| sentiment | pca_diff  | 0.665 [0.613, 0.722] | 0.713 [0.658, 0.770] | 0.667 [0.611, 0.723] |
+| sentiment | pca_raw   | 0.557 [0.509, 0.601] | 0.556 [0.512, 0.597] | 0.769 [0.765, 0.773] |
+| sentiment | mean_diff | 0.937 [0.927, 0.947] | 0.940 [0.930, 0.949] | 0.937 [0.928, 0.947] |
+| sentiment | logistic  | 0.952 [0.946, 0.958] | 0.953 [0.947, 0.959] | 0.940 [0.931, 0.949] |
+| truth     | pca_diff  | 0.588 [0.573, 0.607] | 0.563 [0.551, 0.575] | 0.583 [0.569, 0.597] |
+| truth     | pca_raw   | 0.547 [0.517, 0.578] | 0.512 [0.493, 0.532] | 0.583 [0.578, 0.588] |
+| truth     | mean_diff | 0.688 [0.664, 0.712] | 0.685 [0.658, 0.712] | 0.688 [0.663, 0.715] |
+| truth     | logistic  | 0.764 [0.749, 0.778] | 0.768 [0.753, 0.783] | 0.697 [0.675, 0.720] |
+| utility   | pca_diff  | 0.727 [0.722, 0.731] | 0.725 [0.717, 0.732] | 0.727 [0.723, 0.732] |
+| utility   | pca_raw   | 0.737 [0.727, 0.745] | 0.736 [0.727, 0.743] | 0.597 [0.589, 0.605] |
+| utility   | mean_diff | 0.734 [0.727, 0.741] | 0.733 [0.727, 0.741] | 0.734 [0.727, 0.741] |
+| utility   | logistic  | 0.709 [0.698, 0.720] | 0.708 [0.696, 0.718] | 0.733 [0.727, 0.739] |
+
+- **The paper finder is no better than the random direction on sentiment and truth, and reads on utility.** The random direction itself reads 0.658 [0.619, 0.700] on sentiment here, and `pca_diff` is at 0.665 [0.613, 0.722]; on truth `pca_diff` is at 0.588 [0.573, 0.607] against 0.549 [0.524, 0.578], with overlapping intervals; on utility it is at 0.727 [0.722, 0.731] against 0.604 [0.567, 0.638]. `pca_raw` and `kmeans` are below the random direction on sentiment (0.557 and 0.576, intervals below that of the random direction). The first principal component explains 22 percent (sentiment, L20), 16 percent (truth, L28) and 39 percent (utility, matched, L25) of the variance of the pair differences. The component chosen by cross-validation among the first eight reads 0.818 [0.744, 0.873] for sentiment against 0.665 for the first component, and the component chosen most often across the 10 seeds is the second; the other values are 0.583 [0.561, 0.605] (truth) and 0.714 [0.688, 0.730] (utility, matched).
+- **The supervised finders lead on sentiment and truth, and trail on utility.** `logistic` is the highest on sentiment (0.952 [0.946, 0.958]) and truth (0.764) and `mean_diff` is second (0.937, 0.688). On utility the order is reversed: `kmeans` (0.740), `pca_raw` (0.737), `mean_diff` (0.734) and `pca_diff` (0.727) have intervals above that of `logistic` (0.709 [0.698, 0.720]), and all five are above the random direction.
+- **Pairing.** The differences between pairings for `logistic` are at most 0.018 (sentiment 0.952 and 0.950, truth 0.764 and 0.781 for `random`, utility 0.709, 0.709 and 0.691). `pca_diff` on sentiment depends on the pairing more than any other finder and task: 0.665 with `label_contrastive` and 0.550 with `random`.
+- **Preprocessing.** `logistic` loses with no preprocessing on sentiment (0.952, 0.953, 0.940) and truth (0.764, 0.768, 0.697) and gains on utility (0.709, 0.708, 0.733). `pca_raw` on sentiment is 0.769 [0.765, 0.773] without preprocessing against 0.557 centered, an interval of width 0.008 (the ten readers give nearly the same value, so it is not read as a reader result), and on utility it falls to 0.597 without preprocessing (0.737 centered). `pca_diff` on sentiment is 0.713 [0.658, 0.770] with `unit` and 0.665 [0.613, 0.722] centered, with overlapping intervals.
+
+#### qwen3-0.6b
+
+Shuffled-label accuracy is between 0.47 and 0.53.
+
+Centered preprocessing, the pairing the task has:
+
+| Task (pairing)                | pca_diff             | pca_raw              | mean_diff            | logistic             | kmeans               | random               |
+| ----------------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| sentiment (label_contrastive) | 0.564 [0.541, 0.588] | 0.574 [0.549, 0.597] | 0.750 [0.726, 0.770] | 0.860 [0.844, 0.875] | 0.551 [0.481, 0.611] | 0.594 [0.557, 0.637] |
+| truth (label_contrastive)     | 0.444 [0.432, 0.456] | 0.434 [0.420, 0.446] | 0.600 [0.578, 0.629] | 0.744 [0.720, 0.770] | 0.449 [0.441, 0.458] | 0.558 [0.514, 0.605] |
+| utility (matched)             | 0.718 [0.713, 0.724] | 0.720 [0.716, 0.722] | 0.720 [0.715, 0.725] | 0.711 [0.696, 0.725] | 0.712 [0.705, 0.718] | 0.614 [0.560, 0.662] |
+
+By pairing, centered preprocessing:
+
+| Task      | Pairing           | pca_diff | pca_raw | mean_diff | logistic | kmeans | random |
+| --------- | ----------------- | -------- | ------- | --------- | -------- | ------ | ------ |
+| sentiment | label_contrastive | 0.564    | 0.574   | 0.750     | 0.860    | 0.551  | 0.594  |
+| sentiment | random            | 0.576    | 0.568   | 0.783     | 0.873    | 0.550  | 0.588  |
+| truth     | label_contrastive | 0.444    | 0.434   | 0.600     | 0.744    | 0.449  | 0.558  |
+| truth     | random            | 0.456    | 0.498   | 0.531     | 0.786    | 0.551  | 0.561  |
+| utility   | matched           | 0.718    | 0.720   | 0.720     | 0.711    | 0.712  | 0.614  |
+| utility   | label_contrastive | 0.720    | 0.717   | 0.729     | 0.716    | 0.722  | 0.614  |
+| utility   | random            | 0.717    | 0.718   | 0.720     | 0.696    | 0.722  | 0.614  |
+
+By preprocessing, with the pairing above:
+
+| Task      | Finder    | center               | unit                 | none                 |
+| --------- | --------- | -------------------- | -------------------- | -------------------- |
+| sentiment | pca_diff  | 0.564 [0.541, 0.588] | 0.553 [0.498, 0.603] | 0.569 [0.547, 0.593] |
+| sentiment | pca_raw   | 0.574 [0.549, 0.597] | 0.574 [0.550, 0.596] | 0.648 [0.569, 0.690] |
+| sentiment | mean_diff | 0.750 [0.726, 0.770] | 0.751 [0.728, 0.773] | 0.750 [0.727, 0.771] |
+| sentiment | logistic  | 0.860 [0.844, 0.875] | 0.860 [0.842, 0.876] | 0.759 [0.737, 0.781] |
+| truth     | pca_diff  | 0.444 [0.432, 0.456] | 0.483 [0.466, 0.502] | 0.451 [0.437, 0.464] |
+| truth     | pca_raw   | 0.434 [0.420, 0.446] | 0.463 [0.454, 0.471] | 0.690 [0.683, 0.697] |
+| truth     | mean_diff | 0.600 [0.578, 0.629] | 0.519 [0.508, 0.527] | 0.600 [0.578, 0.627] |
+| truth     | logistic  | 0.744 [0.720, 0.770] | 0.744 [0.720, 0.771] | 0.608 [0.585, 0.637] |
+| utility   | pca_diff  | 0.718 [0.713, 0.724] | 0.720 [0.714, 0.727] | 0.719 [0.713, 0.725] |
+| utility   | pca_raw   | 0.720 [0.716, 0.722] | 0.716 [0.714, 0.718] | 0.688 [0.684, 0.692] |
+| utility   | mean_diff | 0.720 [0.715, 0.725] | 0.722 [0.716, 0.727] | 0.720 [0.714, 0.725] |
+| utility   | logistic  | 0.711 [0.696, 0.725] | 0.711 [0.694, 0.726] | 0.725 [0.717, 0.731] |
+
+- **The paper finder is no better than the random direction on sentiment and truth, and reads on utility.** `pca_diff` is at 0.564 [0.541, 0.588] on sentiment against 0.594 [0.557, 0.637] for the random direction, and at 0.444 [0.432, 0.456] on truth, below chance and below the random direction (0.558 [0.514, 0.605]); `pca_raw` (0.434) and `kmeans` (0.449) are also below chance on truth. On utility `pca_diff` is at 0.718 [0.713, 0.724] against 0.614 [0.560, 0.662]. The first principal component explains 30 percent (sentiment, L10), 28 percent (truth, L2) and 44 percent (utility, matched, L28) of the variance of the pair differences, and the component chosen by cross-validation among the first eight reads 0.556 [0.519, 0.591] (sentiment), 0.471 [0.444, 0.512] (truth) and 0.718 [0.713, 0.724] (utility, matched).
+- **The supervised finders lead on sentiment and truth, and the finders are level on utility.** `logistic` is the highest on sentiment (0.860) and truth (0.744) and `mean_diff` is second on sentiment (0.750); on truth `mean_diff` is at 0.600 [0.578, 0.629], an interval that overlaps the random direction. On utility the five finders read between 0.711 and 0.720, all above the random direction, and `logistic` has the lowest point value (0.711).
+- **Pairing.** The best pairing for `logistic` is `random` for sentiment (0.873 against 0.860 for `label_contrastive`) and truth (0.786 against 0.744) and `label_contrastive` for utility (0.716 against 0.711 for `matched` and 0.696); the differences are at most 0.042. For `mean_diff` on truth `label_contrastive` is higher (0.600 against 0.531), the reverse of `gpt2`. `kmeans` on truth depends on the pairing more than any other finder and task: 0.449 with `label_contrastive` and 0.551 with `random`.
+- **Preprocessing.** `logistic` loses with no preprocessing on sentiment (0.860, 0.860, 0.759) and truth (0.744, 0.744, 0.608) and gains on utility (0.711, 0.711, 0.725). `pca_raw` on truth is 0.690 [0.683, 0.697] without preprocessing against 0.434 centered, an interval of width 0.014 (the ten readers give nearly the same value, so it is not read as a reader result). `mean_diff` on truth is lower with `unit` (0.519 [0.508, 0.527]) than centered (0.600).
+
+#### qwen3-1.7b-base
+
+Shuffled-label accuracy is between 0.45 and 0.52.
+
+Centered preprocessing, the pairing the task has:
+
+| Task (pairing)                | pca_diff             | pca_raw              | mean_diff            | logistic             | kmeans               | random               |
+| ----------------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| sentiment (label_contrastive) | 0.846 [0.832, 0.857] | 0.837 [0.827, 0.847] | 0.893 [0.881, 0.905] | 0.943 [0.937, 0.948] | 0.847 [0.839, 0.855] | 0.676 [0.632, 0.720] |
+| truth (label_contrastive)     | 0.959 [0.949, 0.966] | 0.944 [0.932, 0.956] | 0.963 [0.956, 0.966] | 0.971 [0.964, 0.978] | 0.951 [0.941, 0.961] | 0.724 [0.646, 0.795] |
+| utility (matched)             | 0.799 [0.793, 0.805] | 0.793 [0.782, 0.804] | 0.791 [0.787, 0.796] | 0.761 [0.748, 0.774] | 0.788 [0.783, 0.793] | 0.649 [0.620, 0.684] |
+
+By pairing, centered preprocessing:
+
+| Task      | Pairing           | pca_diff | pca_raw | mean_diff | logistic | kmeans | random |
+| --------- | ----------------- | -------- | ------- | --------- | -------- | ------ | ------ |
+| sentiment | label_contrastive | 0.846    | 0.837   | 0.893     | 0.943    | 0.847  | 0.676  |
+| sentiment | random            | 0.836    | 0.834   | 0.900     | 0.943    | 0.840  | 0.697  |
+| truth     | label_contrastive | 0.959    | 0.944   | 0.963     | 0.971    | 0.951  | 0.724  |
+| truth     | random            | 0.956    | 0.958   | 0.966     | 0.971    | 0.929  | 0.724  |
+| utility   | matched           | 0.799    | 0.793   | 0.791     | 0.761    | 0.788  | 0.649  |
+| utility   | label_contrastive | 0.797    | 0.800   | 0.788     | 0.758    | 0.789  | 0.649  |
+| utility   | random            | 0.792    | 0.786   | 0.783     | 0.735    | 0.789  | 0.612  |
+
+By preprocessing, with the pairing above:
+
+| Task      | Finder    | center               | unit                 | none                 |
+| --------- | --------- | -------------------- | -------------------- | -------------------- |
+| sentiment | pca_diff  | 0.846 [0.832, 0.857] | 0.857 [0.844, 0.868] | 0.857 [0.848, 0.865] |
+| sentiment | pca_raw   | 0.837 [0.827, 0.847] | 0.843 [0.836, 0.851] | 0.649 [0.644, 0.652] |
+| sentiment | mean_diff | 0.893 [0.881, 0.905] | 0.894 [0.881, 0.906] | 0.893 [0.881, 0.905] |
+| sentiment | logistic  | 0.943 [0.937, 0.948] | 0.944 [0.939, 0.949] | 0.901 [0.893, 0.911] |
+| truth     | pca_diff  | 0.959 [0.949, 0.966] | 0.963 [0.958, 0.966] | 0.959 [0.949, 0.966] |
+| truth     | pca_raw   | 0.944 [0.932, 0.956] | 0.946 [0.932, 0.959] | 0.612 [0.610, 0.615] |
+| truth     | mean_diff | 0.963 [0.956, 0.966] | 0.963 [0.956, 0.966] | 0.963 [0.956, 0.966] |
+| truth     | logistic  | 0.971 [0.964, 0.978] | 0.971 [0.964, 0.978] | 0.964 [0.961, 0.966] |
+| utility   | pca_diff  | 0.799 [0.793, 0.805] | 0.795 [0.789, 0.801] | 0.802 [0.795, 0.808] |
+| utility   | pca_raw   | 0.793 [0.782, 0.804] | 0.792 [0.780, 0.804] | 0.612 [0.599, 0.625] |
+| utility   | mean_diff | 0.791 [0.787, 0.796] | 0.806 [0.800, 0.812] | 0.791 [0.787, 0.796] |
+| utility   | logistic  | 0.761 [0.748, 0.774] | 0.762 [0.749, 0.776] | 0.797 [0.792, 0.801] |
+
+- **The paper finder reads on all three tasks.** `pca_diff` is at 0.846 [0.832, 0.857] for sentiment, 0.959 [0.949, 0.966] for truth and 0.799 [0.793, 0.805] for utility, against 0.676 [0.632, 0.720], 0.724 [0.646, 0.795] and 0.649 [0.620, 0.684] for the random direction, and its interval lies above that of the random direction on every task. The first principal component explains 25 percent (sentiment, L19), 45 percent (truth, L22) and 46 percent (utility, matched, L26) of the variance of the pair differences. The component chosen by cross-validation among the first eight is, most often across the 10 seeds, the first on all three tasks, and it reads 0.846 [0.833, 0.857] (sentiment), 0.959 [0.949, 0.966] (truth) and 0.799 [0.793, 0.805] (utility, matched), the same value as the first component to three decimals.
+- **All five finders are above the random direction on every task, and the order depends on the task.** On sentiment the order is `logistic` (0.943 [0.937, 0.948]), `mean_diff` (0.893 [0.881, 0.905]), `kmeans` (0.847), `pca_diff` (0.846) and `pca_raw` (0.837), and the interval of each of the first two lies above those of all that follow. On truth the five read between 0.944 and 0.971: `logistic` is at 0.971 [0.964, 0.978], with an interval above those of `kmeans` (0.951) and `pca_raw` (0.944) and overlapping those of `mean_diff` (0.963 [0.956, 0.966]) and `pca_diff`. On utility `logistic` has the lowest point value of the five, as on the other three Qwen3 checkpoints, and here its interval is below those of the other four: `pca_diff` (0.799), `pca_raw` (0.793), `mean_diff` (0.791) and `kmeans` (0.788) against 0.761 [0.748, 0.774].
+- **Pairing.** The differences between pairings for `logistic` are at most 0.026 (sentiment 0.943 with both `label_contrastive` and `random`, truth 0.971 with both, utility 0.761, 0.758 and 0.735 for `matched`, `label_contrastive` and `random`). None of the other four finders changes by more than that: the next largest difference is `kmeans` on truth (0.951 with `label_contrastive` and 0.929 with `random`, 0.022). On utility `pca_raw` is at 0.793 with `matched` and 0.800 with `label_contrastive`.
+- **Preprocessing.** `logistic` is lower with no preprocessing on sentiment (0.943, 0.944, 0.901 [0.893, 0.911]) and, with overlapping intervals, on truth (0.971, 0.971, 0.964 [0.961, 0.966]), and higher on utility (0.761, 0.762, 0.797 [0.792, 0.801]). `pca_raw` is lower without preprocessing on all three tasks (sentiment 0.649 [0.644, 0.652] against 0.837, truth 0.612 [0.610, 0.615] against 0.944, utility 0.612 [0.599, 0.625] against 0.793); the first two intervals have widths 0.008 and 0.005 (the ten readers give nearly the same value, so they are not read as reader results). `pca_diff` changes by at most 0.011 across the three on every task, and `mean_diff` on utility is higher with `unit` (0.806 [0.800, 0.812] against 0.791 [0.787, 0.796]). Three cells with the `random` pairing on truth have intervals of zero width, at 0.966 in all ten seeds: `mean_diff` centered and with no preprocessing, and `logistic` with no preprocessing.
+
+#### qwen3-1.7b
+
+Shuffled-label accuracy is between 0.46 and 0.52.
+
+Centered preprocessing, the pairing the task has:
+
+| Task (pairing)                | pca_diff             | pca_raw              | mean_diff            | logistic             | kmeans               | random               |
+| ----------------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| sentiment (label_contrastive) | 0.531 [0.504, 0.557] | 0.521 [0.493, 0.546] | 0.750 [0.729, 0.771] | 0.877 [0.865, 0.889] | 0.523 [0.493, 0.547] | 0.585 [0.547, 0.621] |
+| truth (label_contrastive)     | 0.869 [0.842, 0.893] | 0.781 [0.759, 0.802] | 0.912 [0.903, 0.924] | 0.932 [0.920, 0.944] | 0.808 [0.771, 0.846] | 0.639 [0.573, 0.715] |
+| utility (matched)             | 0.780 [0.777, 0.784] | 0.775 [0.772, 0.779] | 0.784 [0.782, 0.786] | 0.760 [0.750, 0.771] | 0.779 [0.775, 0.783] | 0.627 [0.566, 0.682] |
+
+By pairing, centered preprocessing:
+
+| Task      | Pairing           | pca_diff | pca_raw | mean_diff | logistic | kmeans | random |
+| --------- | ----------------- | -------- | ------- | --------- | -------- | ------ | ------ |
+| sentiment | label_contrastive | 0.531    | 0.521   | 0.750     | 0.877    | 0.523  | 0.585  |
+| sentiment | random            | 0.507    | 0.513   | 0.815     | 0.886    | 0.504  | 0.580  |
+| truth     | label_contrastive | 0.869    | 0.781   | 0.912     | 0.932    | 0.808  | 0.639  |
+| truth     | random            | 0.763    | 0.792   | 0.915     | 0.914    | 0.827  | 0.636  |
+| utility   | matched           | 0.780    | 0.775   | 0.784     | 0.760    | 0.779  | 0.627  |
+| utility   | label_contrastive | 0.780    | 0.774   | 0.780     | 0.755    | 0.777  | 0.627  |
+| utility   | random            | 0.774    | 0.777   | 0.772     | 0.739    | 0.778  | 0.616  |
+
+By preprocessing, with the pairing above:
+
+| Task      | Finder    | center               | unit                 | none                 |
+| --------- | --------- | -------------------- | -------------------- | -------------------- |
+| sentiment | pca_diff  | 0.531 [0.504, 0.557] | 0.529 [0.518, 0.540] | 0.532 [0.505, 0.553] |
+| sentiment | pca_raw   | 0.521 [0.493, 0.546] | 0.521 [0.495, 0.544] | 0.577 [0.539, 0.596] |
+| sentiment | mean_diff | 0.750 [0.729, 0.771] | 0.766 [0.736, 0.795] | 0.750 [0.728, 0.771] |
+| sentiment | logistic  | 0.877 [0.865, 0.889] | 0.876 [0.861, 0.889] | 0.791 [0.766, 0.813] |
+| truth     | pca_diff  | 0.869 [0.842, 0.893] | 0.876 [0.856, 0.893] | 0.871 [0.846, 0.893] |
+| truth     | pca_raw   | 0.781 [0.759, 0.802] | 0.792 [0.775, 0.808] | 0.612 [0.610, 0.615] |
+| truth     | mean_diff | 0.912 [0.903, 0.924] | 0.910 [0.903, 0.919] | 0.912 [0.903, 0.922] |
+| truth     | logistic  | 0.932 [0.920, 0.944] | 0.934 [0.920, 0.947] | 0.912 [0.902, 0.922] |
+| utility   | pca_diff  | 0.780 [0.777, 0.784] | 0.783 [0.779, 0.787] | 0.780 [0.777, 0.784] |
+| utility   | pca_raw   | 0.775 [0.772, 0.779] | 0.775 [0.772, 0.779] | 0.639 [0.627, 0.650] |
+| utility   | mean_diff | 0.784 [0.782, 0.786] | 0.784 [0.782, 0.786] | 0.784 [0.782, 0.786] |
+| utility   | logistic  | 0.760 [0.750, 0.771] | 0.761 [0.751, 0.772] | 0.788 [0.780, 0.796] |
+
+- **The paper finder reads truth and utility, and not sentiment.** On sentiment `pca_diff` is at 0.531 [0.504, 0.557] against 0.585 [0.547, 0.621] for the random direction, with overlapping intervals. On truth it is at 0.869 [0.842, 0.893] against 0.639 [0.573, 0.715], and on utility at 0.780 [0.777, 0.784] against 0.627 [0.566, 0.682]. The first principal component explains 33 percent (sentiment), 30 percent (truth) and 39 percent (utility, matched) of the variance of the pair differences, at L20 for all three. The component chosen by cross-validation among the first eight reads 0.712 [0.673, 0.744] for sentiment, against 0.531 for the first component, and the component chosen most often across the 10 seeds is the second; for truth and utility it is the first component (0.869 and 0.780).
+- **The finders are ordered differently by task.** On sentiment only `logistic` (0.877) and `mean_diff` (0.750) are above the random direction. On truth all five finders are, in the order `logistic` 0.932 [0.920, 0.944], `mean_diff` 0.912, `pca_diff` 0.869, `kmeans` 0.808 and `pca_raw` 0.781; the interval of `pca_diff` lies below that of `logistic`. On utility `logistic` is the lowest of the five, as on `qwen3-0.6b-base`: `mean_diff` (0.784), `pca_diff` (0.780), `kmeans` (0.779) and `pca_raw` (0.775) have intervals above that of `logistic` (0.760 [0.750, 0.771]), and all five are above the random direction.
+- **Pairing.** The differences between pairings for `logistic` are at most 0.021 (sentiment 0.877 and 0.886 for `random`, truth 0.932 and 0.914, utility 0.760, 0.755 and 0.739). `pca_diff` on truth depends on the pairing more than any other finder and task: 0.869 with `label_contrastive` and 0.763 with `random`. `mean_diff` on sentiment is 0.750 with `label_contrastive` and 0.815 with `random`.
+- **Preprocessing.** `logistic` loses with no preprocessing on sentiment (0.877, 0.876, 0.791) and truth (0.932, 0.934, 0.912) and gains on utility (0.760, 0.761, 0.788 [0.780, 0.796]). `pca_diff` changes by at most 0.007 across the three on every task. `pca_raw` falls without preprocessing on truth (0.612 [0.610, 0.615] against 0.781, an interval of width 0.005) and on utility (0.639 against 0.775).
+
+### What P3 and P4 show across sizes
+
+Each model has one run, and base and post-trained checkpoints are compared cell by cell and not pooled.
+
+**P3.** The table gives, per model, the smallest size from which none of the 20 draws is below 0.6 at that size or at any larger one (`none` when the largest size still has failing draws; for truth the largest size is 128 pairs, the end of the source). The `gpt2` and `qwen3-1.7b-base` rows are the runs reported [above](#stimulus-set-size-p3).
+
+| Model           | sentiment | truth | truth_cities | truth_common | utility |
+| --------------- | --------- | ----- | ------------ | ------------ | ------- |
+| gpt2            | 32        | none  | 256          | none         | 256     |
+| gpt2-medium     | 64        | 128   | 64           | 512          | 64      |
+| gpt2-large      | 32        | 128   | none         | none         | 64      |
+| gpt2-xl         | 32        | 128   | none         | 512          | 64      |
+| qwen3-0.6b-base | 8         | 32    | 32           | 256          | 16      |
+| qwen3-0.6b      | 32        | 64    | 32           | 256          | 8       |
+| qwen3-1.7b-base | 4         | 2     | 2            | 8            | 8       |
+| qwen3-1.7b      | 16        | 8     | 2            | 16           | 8       |
+
+- **Sentiment and utility.** The GPT-2 readers need 32 to 64 pairs for sentiment and 64 pairs (256 on `gpt2`) for utility before no draw fails; the Qwen3 readers need 4 to 32 pairs for sentiment and 8 to 16 for utility. At the largest size the sentiment mean is below the full-data reference on all eight models (by 0.004 to 0.042), and its stored saturation size is 512 on six of them (`gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl`, `qwen3-0.6b` and `qwen3-1.7b`), so on those six the sentiment curve has not flattened by 512 pairs. Utility flattens earlier on Qwen3 (stored saturation size 32 on the 0.6B pair and 8 on the 1.7B pair, and the mean moves by between -0.012 and 0.009 from 64 to 512 pairs) than on the GPT-2 sizes (256 on three and 512 on `gpt2-xl`, with a gain of 0.015 to 0.037 from 64 to 512 pairs).
+- **Truth.** On the four GPT-2 sizes the truth reader has failing draws at every size below 128 pairs; at 128 pairs, the end of the source, the mean is 0.642 (`gpt2`), 0.654, 0.676 and 0.662, within 0.024 of the references (0.644, 0.678, 0.695 and 0.661). On Qwen3 no draw fails from 32 pairs on `qwen3-0.6b-base`, from 64 on `qwen3-0.6b`, from 8 on `qwen3-1.7b` and from 2 on `qwen3-1.7b-base`, and the 128-pair means (0.830, 0.838, 0.932 and 0.971) are within 0.009 of their references. On all eight models the truth mean at 128 pairs is within 0.024 of its reference.
+- **The truth subsets.** `truth_cities` has no failing draw from 2 pairs on both 1.7B checkpoints, but it still has a failure rate of 0.30 at 256 pairs on `gpt2-xl`, and on `gpt2-large` it is at chance on the truth target at every size (0.469 to 0.503, reference 0.508). `truth_common` reaches no failing draw only at 256 or 512 pairs on `gpt2-medium`, `gpt2-xl` and the 0.6B pair, never on `gpt2` and `gpt2-large`, and at 8 and 16 pairs on the two 1.7B checkpoints.
+- **Base against post-trained.** At 0.6B and 1.7B the post-trained point value is below the base one in all 9 sentiment cells, all 9 `truth_common` cells and all 8 `truth_cities` cells, and in 6 of 7 (0.6B) and 7 of 7 (1.7B) truth cells; the intervals over the draws are separate in 8 (0.6B) and 9 (1.7B) of the 9 sentiment cells. On utility the two are level: the differences are between -0.005 and 0.028 and no interval is separate. The base 1.7B run was made at `c7d8051` on a different card (NVIDIA GeForce RTX 4090) than the post-trained one, as in the P2 comparison above.
+
+**P4.** The table gives, for each model, the accuracy of the paper finder (`pca_diff`), of `logistic` and of the random direction in the reference cell of each task (centered, with the pairing the task has). The `gpt2` row is the run reported [above](#direction-finder-pairing-and-preprocessing-p4). A `+` after a value means that its interval lies above the interval of the random direction in the same task, a `~` that the two overlap and a `-` that it lies below. The intervals are over the 10 seeds and do not include the sampling of the evaluation pairs.
+
+| Model           | sentiment random | sentiment pca_diff | sentiment logistic | truth random | truth pca_diff | truth logistic | utility random | utility pca_diff | utility logistic |
+| --------------- | ---------------- | ------------------ | ------------------ | ------------ | -------------- | -------------- | -------------- | ---------------- | ---------------- |
+| gpt2            | 0.543            | 0.512 ~            | 0.765 +            | 0.510        | 0.481 ~        | 0.698 +        | 0.526          | 0.551 ~          | 0.644 +          |
+| gpt2-medium     | 0.557            | 0.517 ~            | 0.742 +            | 0.536        | 0.517 ~        | 0.656 +        | 0.553          | 0.618 ~          | 0.685 +          |
+| gpt2-large      | 0.525            | 0.495 ~            | 0.807 +            | 0.534        | 0.534 ~        | 0.653 +        | 0.546          | 0.571 ~          | 0.688 +          |
+| gpt2-xl         | 0.545            | 0.507 ~            | 0.776 +            | 0.503        | 0.488 ~        | 0.656 +        | 0.525          | 0.576 ~          | 0.686 +          |
+| qwen3-0.6b-base | 0.658            | 0.665 ~            | 0.952 +            | 0.549        | 0.588 ~        | 0.764 +        | 0.604          | 0.727 +          | 0.709 +          |
+| qwen3-0.6b      | 0.594            | 0.564 ~            | 0.860 +            | 0.558        | 0.444 -        | 0.744 +        | 0.614          | 0.718 +          | 0.711 +          |
+| qwen3-1.7b-base | 0.676            | 0.846 +            | 0.943 +            | 0.724        | 0.959 +        | 0.971 +        | 0.649          | 0.799 +          | 0.761 +          |
+| qwen3-1.7b      | 0.585            | 0.531 ~            | 0.877 +            | 0.639        | 0.869 +        | 0.932 +        | 0.627          | 0.780 +          | 0.760 +          |
+
+- **Finders.** `logistic` has the highest point value on sentiment and truth on all eight models, and on utility on the four GPT-2 sizes. On utility on Qwen3 it has the lowest point value of the five finders on all four checkpoints: its interval is below those of the other four on `qwen3-0.6b-base`, `qwen3-1.7b-base` and `qwen3-1.7b`, and on `qwen3-0.6b` the five are level (0.711 to 0.720). `mean_diff` is above the random direction on sentiment and utility on all eight models and on truth on four (`gpt2-medium`, `qwen3-0.6b-base`, `qwen3-1.7b-base` and `qwen3-1.7b`). `pca_raw` and `kmeans` are above it on utility on seven models (all but `gpt2`), on sentiment only on `qwen3-1.7b-base` and on truth only on `qwen3-1.7b-base` and `qwen3-1.7b`.
+- **The paper finder against the random direction.** The interval of `pca_diff` lies above that of the random direction on sentiment on one model (`qwen3-1.7b-base`), on truth on two (`qwen3-1.7b-base` and `qwen3-1.7b`) and on utility on four (the four Qwen3 checkpoints), and on none of the four GPT-2 sizes on any task; on truth on `qwen3-0.6b` it lies below (0.444 [0.432, 0.456] against 0.558 [0.514, 0.605]). Choosing the component by cross-validation among the first eight adds four cells where the first component is not above the random direction: sentiment on `qwen3-0.6b-base` (0.818) and `qwen3-1.7b` (0.712), where the component chosen most often is the second, and utility on `gpt2-large` (0.599) and `gpt2-xl` (0.609).
+- **The random direction.** It reads between 0.503 and 0.557 on the GPT-2 sizes and between 0.549 and 0.724 on the Qwen3 checkpoints, and on `qwen3-1.7b-base` it is the highest of the eight models on each task (0.676, 0.724 and 0.649). The shuffled-label accuracy is between 0.45 and 0.54 in all eight runs.
+- **Pairing.** For `logistic` the pairings differ by at most 0.046 on any task and model (utility on `gpt2-large`). On utility the best pairing for `logistic` is `matched` on six models and `label_contrastive` on the 0.6B pair, where it exceeds `matched` by 0.005 or less; on sentiment and truth the best pairing changes from model to model (differences of at most 0.023 and 0.042). On utility `pca_raw` is higher with `matched` than with the other two pairings on the four GPT-2 sizes (by 0.011 to 0.062) and within 0.006 of the best other pairing on the Qwen3 checkpoints.
+- **Preprocessing.** `logistic` has a lower point value with no preprocessing than centered on sentiment and truth on all eight models (by 0.012 to 0.108 on sentiment and 0.007 to 0.161 on truth) and on utility on the four GPT-2 sizes (by 0.016 to 0.038), and a higher one on utility on the four Qwen3 checkpoints (by 0.013 to 0.036). `unit` is within 0.006 of centered in 21 of the 24 `logistic` cells; it is lower on sentiment on `gpt2` (by 0.020) and on truth on `gpt2` (0.041) and `gpt2-large` (0.042).
+- **Base against post-trained.** Over the five finders and the three tasks, the base checkpoint has the higher point value in 13 of 15 cells at 0.6B and in 15 of 15 at 1.7B. Where the intervals are separate (10 cells at 0.6B and 14 at 1.7B) the base checkpoint is the higher one, and the post-trained checkpoint is never above. The largest differences are on sentiment at 1.7B for `pca_diff`, `pca_raw` and `kmeans` (0.314 to 0.324); on utility the differences are between -0.002 and 0.029. The random direction is also higher on the base checkpoint on sentiment at both sizes (0.658 against 0.594 and 0.676 against 0.585), with separate intervals at 1.7B only. The base 1.7B run was made on an NVIDIA L4 and the post-trained 1.7B run on an RTX 3090.
 
 ## Persona wording and instruction confounds (P5)
 
@@ -4274,6 +4753,8 @@ The 22 runs of chain 14 were made at `f4d414d` with a clean tree on a rented GPU
 
 The 8 runs of chain 17 that cover P9 on the Qwen3 4B pair (P9a to P9d on `qwen3-4b-base` and `qwen3-4b`) were made at `89ea7cb` with a clean tree on a rented GPU pod (NVIDIA RTX A6000 48 GB, torch 2.14.1+cu130, transformers 5.19.0), with the default config of each experiment on that commit except one field (`config.json` of each run): the batch size is 8 for P9a, P9b and P9c and 16 for P9d, and `p9b/qwen3-4b/5481dab673d4` ran at batch size 4 after the batch size 8 attempt was killed by the out-of-memory killer of the container. The batch size is a config field, so the retry has its own hash; the default P9b config for `qwen3-4b` would have the hash `ecbd8e8a1b1b`, which is the unfinished attempt and is not exported. The P9a configs keep the default `cutoff_year` (2017), where the other Qwen3 P9a runs set 2024. The time between `started_at` and `finished_at` of the stored `meta.json` is 972 s (`p9d/qwen3-4b-base/7fe658a89920`) to 36,819 s (`p9b/qwen3-4b-base/91d3fe92e1c9`). The config hashes of the eight runs were recomputed from the original `config.json` of each run with the code of `86c319b` (since `89ea7cb` only P10 files changed under `src/tomography/experiments/`) and all eight agree with the stored ones; the exported configs rewrite the `labels_run` path of P9b, P9c and P9d, so the hash of an exported config of those differs from its stored hash. Exporting these runs changed no tracked result.
 
+The 13 runs of [the P3 and P4 section across the GPT-2 sizes and Qwen3](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) (P3 on `gpt2-medium`, `gpt2-large`, `gpt2-xl`, `qwen3-0.6b-base`, `qwen3-0.6b` and `qwen3-1.7b`; P4 on `gpt2-medium`, `gpt2-large`, `gpt2-xl`, `qwen3-0.6b-base`, `qwen3-0.6b`, `qwen3-1.7b-base` and `qwen3-1.7b`) were made with a clean tree and the default config of each experiment on its commit, with batch size 8 (`config.json` of each run). The two `gpt2-medium` runs were made at `fb3b5dd` on a machine without a GPU (`device` is `cpu`, torch 2.14.1+cpu, transformers 5.19.0); the time between `started_at` and `finished_at` of the stored `meta.json` is 42,657 s for P3 (`p3/gpt2-medium/b80a5a3c0faf`) and 3,008 s for P4 (`p4/gpt2-medium/9a2f3f02568b`). The other 11 runs were made at `80baffb` on rented GPU pods (torch 2.14.1+cu130, transformers 5.19.0): ten on an NVIDIA GeForce RTX 3090 and `p4/qwen3-1.7b-base/b772e1cc4db9` on an NVIDIA L4. Their times are 518 s (`p4/qwen3-0.6b/e40fa46cf517`) to 1,464 s (`p4/qwen3-1.7b/607e86d9c7f6`). The config hashes of the 13 runs were recomputed from the stored `config.json` of each run with the code of `0a66255` and all 13 agree with the stored ones, and each stored config equals the default config of its experiment and model. Between `fb3b5dd` and `0a66255` the source files that P3 and P4 import (the import closure of `p3_size.py` and `p4_pairing.py`) differ only in `model.py` (12 added lines, two Qwen3 4B entries of the model registry). The `gpt2` P4 run was made at `ca2546c`, before P4 set the opt-in refit flag of the shared fit code: the flag repeats a logistic fit with a tighter tolerance only when the solver returns all-zero coefficients, which earlier stopped a run with a zero-norm error, so it changes no fit of a run that finished without it. The `gpt2` P3 run and the P3 run of `qwen3-1.7b-base` do not use the flag. Exporting these runs changed no tracked result.
+
 Config hashes (12 hex digits), P9 on the Qwen3 4B pair:
 
 | Experiment  | qwen3-4b-base | qwen3-4b                    |
@@ -4325,8 +4806,8 @@ Config hashes (12 hex digits), GPT-2:
 | P1 (sentiment) | 673af340b77d | not run      | not run      | not run      |
 | P1 (all tasks) | 078b9d6482a2 | not run      | not run      | not run      |
 | P2             | ee099a704022 | 733bd2f76315 | 3ea9b00fe28f | feafacc97cbb |
-| P3             | 676c31488397 | not run      | not run      | not run      |
-| P4             | 8c4a73d1e9db | not run      | not run      | not run      |
+| P3             | 676c31488397 | b80a5a3c0faf | 327dd31a1de6 | 12ee53fd16fe |
+| P4             | 8c4a73d1e9db | 9a2f3f02568b | f4e8481cbbbf | 427a6b2f9da4 |
 | P5             | 80b4ae80a6ca | bd9f565baa76 | 430d434007c9 | 4171a611f734 |
 | P7             | 6c19128c5192 | not run      | d03910535564 | eb67813e769d |
 | C1             | add59c39f574 | 2ed2e53ba7fe | 353f91e1b8dc | de76af1a8a07 |
@@ -4355,7 +4836,8 @@ Qwen3:
 | A2          | 109c4aa851bf    | 91b62e58953f | 09b991efaf7f    | 1e528ddfbffa |
 | P1          | a540a2497ac4    | 31a6ee65d6ab | ef3f8c0d3389    | f4aa9b57824a |
 | P2          | 59a53843dccd    | 442ebe80ca68 | 119f0ac54451    | 51a85fbec631 |
-| P3          | not run         | not run      | 61baf30a8a59    | not run      |
+| P3          | 776d454d5ca2    | b38783812e71 | 61baf30a8a59    | 72edcdd9158e |
+| P4          | 3b2677205f7d    | e40fa46cf517 | b772e1cc4db9    | 607e86d9c7f6 |
 | P5          | b6a702e460e9    | fb664c3b4be2 | a4bd463deeca    | 7e5e579d102e |
 | P7          | not run         | not run      | 16a7a9e4facf    | eacde3abd0aa |
 | C1          | 7ae3e2aa34e2    | 832462b7b04e | 0cd5a36d3408    | a91f950ad9f5 |
@@ -4426,9 +4908,7 @@ Not in this document yet. No dates are promised.
 - P1 on the truth and emotion tasks on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the Qwen3 checkpoints, and with the
   `pca_diff` finder (the truth and emotion tasks ran on `gpt2` only; the sentiment task ran with the logistic finder on
   `gpt2` and the four Qwen3 checkpoints).
-- P3 on the other GPT-2 sizes and on the post-trained and 0.6B Qwen3 checkpoints (it ran on `gpt2` and
-  `qwen3-1.7b-base`). P4 on the other GPT-2 sizes and on the Qwen3 checkpoints (it ran on `gpt2` only). P7 on
-  `gpt2-medium` and on the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B pair). M1
+- P7 on `gpt2-medium` and on the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B pair). M1
   and C2 on `gpt2-medium` and the two 0.6B Qwen3 checkpoints (they ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B
   pair). C4 and LR1 on the two 0.6B Qwen3 checkpoints (LR1 ran on the four GPT-2 sizes and the 1.7B and 4B pairs, C4 on
   the four GPT-2 sizes and the 1.7B pair). C5 on `gpt2`, `gpt2-medium` and the two 0.6B Qwen3 checkpoints (it ran on `gpt2-large`, `gpt2-xl` and the 1.7B
