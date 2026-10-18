@@ -1,0 +1,117 @@
+{
+  "_meta": {
+    "experiment": "c4",
+    "config_hash": "7dd49d64a540",
+    "seed": 0,
+    "git_sha": "f4d414d3a41edebf000d90a6b706d766119b1f42",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A4500)",
+    "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T21:46:06+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "c4",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 40,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 2,
+      "layers": null,
+      "coeffs": [
+        -0.2,
+        -0.1,
+        -0.05,
+        0.0,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "n_seeds": 10,
+      "n_pairs": 128,
+      "n_eval_pairs": 128,
+      "alphas": [
+        -0.5,
+        -0.25,
+        0.0,
+        0.25,
+        0.5
+      ],
+      "n_boot": 2000,
+      "n_random": 3,
+      "lorra_run": "<external>/95a42d94146c"
+    }
+  },
+  "data": {
+    "layers": [
+      8,
+      11,
+      13,
+      16,
+      19,
+      21,
+      24,
+      26
+    ],
+    "n_select": 644,
+    "n_test": 173,
+    "chance": 0.22803468208092484,
+    "reading_val_accuracy": [
+      0.9994718093600294,
+      0.9999877164967449,
+      0.9998648814641935,
+      0.9997543299348977,
+      0.999914015477214,
+      0.9999877164967449,
+      0.9998771649674488,
+      0.9999631494902346
+    ],
+    "coeff_difference": 0.2,
+    "coeff_reading": [
+      0.1,
+      0.2,
+      -0.2,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      -0.2,
+      -0.2
+    ],
+    "coeff_random": [
+      -0.2,
+      0.2,
+      -0.2
+    ],
+    "alpha_contrast": 0.5,
+    "reading_test_mean": 0.20867052023121388,
+    "reading_test_min": 0.18497109826589594,
+    "reading_test_max": 0.2254335260115607,
+    "random_test_mean": 0.22350674373795762,
+    "random_test_max": 0.23699421965317918,
+    "lorra_run": "<external>/95a42d94146c"
+  }
+}
