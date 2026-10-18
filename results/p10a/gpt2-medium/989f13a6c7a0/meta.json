@@ -1,0 +1,23 @@
+{
+  "experiment": "p10a",
+  "config_hash": "989f13a6c7a0",
+  "seed": 0,
+  "git_sha": "d09822b637f8aafbd25a3a6d91b280b0efa7bc16",
+  "git_dirty": false,
+  "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+  "platform": "Linux-6.8.0-110-generic-x86_64-with-glibc2.39",
+  "versions": {
+    "python": "3.12.3",
+    "tomography": "0.1.0",
+    "torch": "2.14.1+cu130",
+    "transformers": "5.19.0",
+    "numpy": "2.5.4",
+    "scikit-learn": "1.9.1",
+    "datasets": "5.1.0",
+    "peft": "0.21.2",
+    "matplotlib": "3.11.2",
+    "plotly": "7.1.0"
+  },
+  "started_at": "2026-10-18T15:41:15+00:00",
+  "finished_at": "2026-10-18T15:56:32+00:00"
+}

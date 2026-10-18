@@ -1,0 +1,28 @@
+{
+  "experiment": "p10a",
+  "model": "gpt2",
+  "seed": 0,
+  "families": null,
+  "n_per_side": 120,
+  "min_sitelinks": 5,
+  "conditions": [
+    "free",
+    "forced"
+  ],
+  "formats": [
+    "fewshot",
+    "chat"
+  ],
+  "shot_orders": [
+    "range_last",
+    "exact_last"
+  ],
+  "n_samples": 5,
+  "temperature": 1.0,
+  "max_new_tokens": 32,
+  "rel_tol": 0.05,
+  "n_hand_check": 120,
+  "batch_size": 8,
+  "offline": true,
+  "people": true
+}

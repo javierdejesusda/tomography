@@ -1,0 +1,551 @@
+{
+  "_meta": {
+    "experiment": "p10a",
+    "config_hash": "d03b40bf6194",
+    "seed": 0,
+    "git_sha": "d09822b637f8aafbd25a3a6d91b280b0efa7bc16",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-110-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T15:21:54+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p10a",
+      "model": "gpt2-large",
+      "seed": 0,
+      "families": null,
+      "n_per_side": 120,
+      "min_sitelinks": 5,
+      "conditions": [
+        "free",
+        "forced"
+      ],
+      "formats": [
+        "fewshot",
+        "chat"
+      ],
+      "shot_orders": [
+        "range_last",
+        "exact_last"
+      ],
+      "n_samples": 5,
+      "temperature": 1.0,
+      "max_new_tokens": 32,
+      "rel_tol": 0.05,
+      "n_hand_check": 120,
+      "batch_size": 8,
+      "offline": true,
+      "people": true
+    }
+  },
+  "data": {
+    "model": "gpt2-large",
+    "n_items": 840,
+    "families": [
+      "duration",
+      "height",
+      "person_height",
+      "wingspan"
+    ],
+    "counts": {
+      "duration": {
+        "exact": 120,
+        "range": 120
+      },
+      "height": {
+        "exact": 120,
+        "range": 120
+      },
+      "wingspan": {
+        "exact": 120,
+        "range": 120
+      },
+      "person_height": {
+        "exact": 120
+      }
+    },
+    "snapshots": {
+      "duration": {
+        "exact": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "563b04eec28d77173be10646373a7f6471b1d447e30ec663cf3d34340ba47f20"
+          ]
+        },
+        "range": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "5bf01602ada0ac48edbc63679f76fd8497d0d2c9998f29d4790ff06fdf6a3f32"
+          ]
+        }
+      },
+      "height": {
+        "exact": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "ae5bffc5f561c1ad34fea7eb1f65dc75d94bd4a7f57d523be74219c4b4cb9961"
+          ]
+        },
+        "range": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "5efa1651af57be25edeb2c64725eb16fe844e5be39428e2421364aec2eebefb7"
+          ]
+        }
+      },
+      "wingspan": {
+        "exact": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "bb1e1fe25e4d94adf9fe54eafa0a59c445b2a6dbccb62348406839d545f6311f"
+          ]
+        },
+        "range": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "6bfbcc1693740e315e4d1efd3b3571b90d1a6657c30e09af7479332ec43289d6"
+          ]
+        }
+      },
+      "person_height": {
+        "exact": {
+          "retrieved_on": [
+            "2026-10-18"
+          ],
+          "sha256": [
+            "76316cb479449c9f1b4da7be726e143e56092b72da4d622819625360ac435166",
+            "a7cab55a62fe39ff9379809aaca627c8e5933df061eb1541155b8c06e96e645a",
+            "d7e8c59e2e8bc640368e2eb8bc82d380606789dc2100e2da7c90e9ac672251de"
+          ]
+        }
+      }
+    },
+    "conditions": [
+      "free",
+      "forced"
+    ],
+    "formats": [
+      "fewshot"
+    ],
+    "shot_orders": [
+      "range_last",
+      "exact_last"
+    ],
+    "hand_check_rows": 120,
+    "hand_check_sample_rows": 120,
+    "config": {
+      "experiment": "p10a",
+      "model": "gpt2-large",
+      "seed": 0,
+      "families": null,
+      "n_per_side": 120,
+      "min_sitelinks": 5,
+      "conditions": [
+        "free",
+        "forced"
+      ],
+      "formats": [
+        "fewshot",
+        "chat"
+      ],
+      "shot_orders": [
+        "range_last",
+        "exact_last"
+      ],
+      "n_samples": 5,
+      "temperature": 1.0,
+      "max_new_tokens": 32,
+      "rel_tol": 0.05,
+      "n_hand_check": 120,
+      "batch_size": 8,
+      "offline": true,
+      "people": true
+    },
+    "diagnostic": [
+      {
+        "condition": "free",
+        "format": "fewshot",
+        "shot_order": "range_last",
+        "decoding": "greedy",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 0,
+        "people_rate": 0.0,
+        "people_lo": 0.0,
+        "people_hi": 0.031019166418703472,
+        "people_interval": "wilson",
+        "breeds": 62,
+        "breeds_rate": 0.5166666666666667,
+        "breeds_lo": 0.4281358041299209,
+        "breeds_hi": 0.6041635569894558,
+        "breeds_interval": "wilson",
+        "buildings": 8,
+        "buildings_rate": 0.06666666666666667,
+        "buildings_lo": 0.03416530686090635,
+        "buildings_hi": 0.12605130403530335,
+        "buildings_interval": "wilson",
+        "people_minus_breeds": -0.5166666666666667,
+        "people_minus_breeds_lo": -0.6083333333333333,
+        "people_minus_breeds_hi": -0.425,
+        "people_minus_buildings": -0.06666666666666667,
+        "people_minus_buildings_lo": -0.11666666666666667,
+        "people_minus_buildings_hi": -0.025
+      },
+      {
+        "condition": "free",
+        "format": "fewshot",
+        "shot_order": "range_last",
+        "decoding": "sampled",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 24,
+        "people_rate": 0.04,
+        "people_lo": 0.025,
+        "people_hi": 0.058333333333333334,
+        "people_interval": "item_bootstrap",
+        "breeds": 102,
+        "breeds_rate": 0.17,
+        "breeds_lo": 0.14,
+        "breeds_hi": 0.20166666666666666,
+        "breeds_interval": "item_bootstrap",
+        "buildings": 35,
+        "buildings_rate": 0.058333333333333334,
+        "buildings_lo": 0.04,
+        "buildings_hi": 0.07833333333333334,
+        "buildings_interval": "item_bootstrap",
+        "people_minus_breeds": -0.12999999999999998,
+        "people_minus_breeds_lo": -0.16666666666666663,
+        "people_minus_breeds_hi": -0.09329166666666688,
+        "people_minus_buildings": -0.018333333333333326,
+        "people_minus_buildings_lo": -0.043333333333333335,
+        "people_minus_buildings_hi": 0.008333333333333318
+      },
+      {
+        "condition": "free",
+        "format": "fewshot",
+        "shot_order": "exact_last",
+        "decoding": "greedy",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 0,
+        "people_rate": 0.0,
+        "people_lo": 0.0,
+        "people_hi": 0.031019166418703472,
+        "people_interval": "wilson",
+        "breeds": 1,
+        "breeds_rate": 0.008333333333333333,
+        "breeds_lo": 0.0014725557333420923,
+        "breeds_hi": 0.04569629124504966,
+        "breeds_interval": "wilson",
+        "buildings": 0,
+        "buildings_rate": 0.0,
+        "buildings_lo": 0.0,
+        "buildings_hi": 0.031019166418703472,
+        "buildings_interval": "wilson",
+        "people_minus_breeds": -0.008333333333333333,
+        "people_minus_breeds_lo": -0.025,
+        "people_minus_breeds_hi": 0.0,
+        "people_minus_buildings": 0.0,
+        "people_minus_buildings_lo": 0.0,
+        "people_minus_buildings_hi": 0.0
+      },
+      {
+        "condition": "free",
+        "format": "fewshot",
+        "shot_order": "exact_last",
+        "decoding": "sampled",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 11,
+        "people_rate": 0.018333333333333333,
+        "people_lo": 0.008333333333333333,
+        "people_hi": 0.03166666666666667,
+        "people_interval": "item_bootstrap",
+        "breeds": 63,
+        "breeds_rate": 0.105,
+        "breeds_lo": 0.08166666666666667,
+        "breeds_hi": 0.12666666666666668,
+        "breeds_interval": "item_bootstrap",
+        "buildings": 12,
+        "buildings_rate": 0.02,
+        "buildings_lo": 0.008333333333333333,
+        "buildings_hi": 0.03166666666666667,
+        "buildings_interval": "item_bootstrap",
+        "people_minus_breeds": -0.08666666666666667,
+        "people_minus_breeds_lo": -0.11333333333333333,
+        "people_minus_breeds_hi": -0.061666666666666654,
+        "people_minus_buildings": -0.0016666666666666705,
+        "people_minus_buildings_lo": -0.018333333333333333,
+        "people_minus_buildings_hi": 0.015000000000000003
+      },
+      {
+        "condition": "forced",
+        "format": "fewshot",
+        "shot_order": "range_last",
+        "decoding": "greedy",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 0,
+        "people_rate": 0.0,
+        "people_lo": 0.0,
+        "people_hi": 0.031019166418703472,
+        "people_interval": "wilson",
+        "breeds": 0,
+        "breeds_rate": 0.0,
+        "breeds_lo": 0.0,
+        "breeds_hi": 0.031019166418703472,
+        "breeds_interval": "wilson",
+        "buildings": 0,
+        "buildings_rate": 0.0,
+        "buildings_lo": 0.0,
+        "buildings_hi": 0.031019166418703472,
+        "buildings_interval": "wilson",
+        "people_minus_breeds": 0.0,
+        "people_minus_breeds_lo": 0.0,
+        "people_minus_breeds_hi": 0.0,
+        "people_minus_buildings": 0.0,
+        "people_minus_buildings_lo": 0.0,
+        "people_minus_buildings_hi": 0.0
+      },
+      {
+        "condition": "forced",
+        "format": "fewshot",
+        "shot_order": "range_last",
+        "decoding": "sampled",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 10,
+        "people_rate": 0.016666666666666666,
+        "people_lo": 0.008333333333333333,
+        "people_hi": 0.02666666666666667,
+        "people_interval": "item_bootstrap",
+        "breeds": 11,
+        "breeds_rate": 0.018333333333333333,
+        "breeds_lo": 0.008333333333333333,
+        "breeds_hi": 0.03,
+        "breeds_interval": "item_bootstrap",
+        "buildings": 2,
+        "buildings_rate": 0.0033333333333333335,
+        "buildings_lo": 0.0,
+        "buildings_hi": 0.008333333333333333,
+        "buildings_interval": "item_bootstrap",
+        "people_minus_breeds": -0.001666666666666667,
+        "people_minus_breeds_lo": -0.016666666666666663,
+        "people_minus_breeds_hi": 0.013333333333333332,
+        "people_minus_buildings": 0.013333333333333332,
+        "people_minus_buildings_lo": 0.0033333333333333322,
+        "people_minus_buildings_hi": 0.024999999999999998
+      },
+      {
+        "condition": "forced",
+        "format": "fewshot",
+        "shot_order": "exact_last",
+        "decoding": "greedy",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 0,
+        "people_rate": 0.0,
+        "people_lo": 0.0,
+        "people_hi": 0.031019166418703472,
+        "people_interval": "wilson",
+        "breeds": 0,
+        "breeds_rate": 0.0,
+        "breeds_lo": 0.0,
+        "breeds_hi": 0.031019166418703472,
+        "breeds_interval": "wilson",
+        "buildings": 0,
+        "buildings_rate": 0.0,
+        "buildings_lo": 0.0,
+        "buildings_hi": 0.031019166418703472,
+        "buildings_interval": "wilson",
+        "people_minus_breeds": 0.0,
+        "people_minus_breeds_lo": 0.0,
+        "people_minus_breeds_hi": 0.0,
+        "people_minus_buildings": 0.0,
+        "people_minus_buildings_lo": 0.0,
+        "people_minus_buildings_hi": 0.0
+      },
+      {
+        "condition": "forced",
+        "format": "fewshot",
+        "shot_order": "exact_last",
+        "decoding": "sampled",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 7,
+        "people_rate": 0.011666666666666667,
+        "people_lo": 0.005,
+        "people_hi": 0.02,
+        "people_interval": "item_bootstrap",
+        "breeds": 9,
+        "breeds_rate": 0.015,
+        "breeds_lo": 0.005,
+        "breeds_hi": 0.02666666666666667,
+        "breeds_interval": "item_bootstrap",
+        "buildings": 7,
+        "buildings_rate": 0.011666666666666667,
+        "buildings_lo": 0.0033333333333333335,
+        "buildings_hi": 0.02,
+        "buildings_interval": "item_bootstrap",
+        "people_minus_breeds": -0.0033333333333333357,
+        "people_minus_breeds_lo": -0.01666666666666667,
+        "people_minus_breeds_hi": 0.008333333333333338,
+        "people_minus_buildings": 1.734723475976807e-18,
+        "people_minus_buildings_lo": -0.01333333333333333,
+        "people_minus_buildings_hi": 0.011666666666666667
+      },
+      {
+        "condition": "free",
+        "format": "fewshot",
+        "shot_order": "both",
+        "decoding": "greedy",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 0,
+        "people_rate": 0.0,
+        "people_lo": 0.0,
+        "people_hi": 0.031019166418703472,
+        "people_interval": "item_wilson",
+        "breeds": 63,
+        "breeds_rate": 0.2625,
+        "breeds_lo": 0.21666666666666667,
+        "breeds_hi": 0.30833333333333335,
+        "breeds_interval": "item_bootstrap",
+        "buildings": 8,
+        "buildings_rate": 0.03333333333333333,
+        "buildings_lo": 0.0125,
+        "buildings_hi": 0.058333333333333334,
+        "buildings_interval": "item_bootstrap",
+        "people_minus_breeds": -0.2625,
+        "people_minus_breeds_lo": -0.30833333333333335,
+        "people_minus_breeds_hi": -0.21666666666666667,
+        "people_minus_buildings": -0.03333333333333333,
+        "people_minus_buildings_lo": -0.058333333333333334,
+        "people_minus_buildings_hi": -0.0125
+      },
+      {
+        "condition": "free",
+        "format": "fewshot",
+        "shot_order": "both",
+        "decoding": "sampled",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 35,
+        "people_rate": 0.029166666666666667,
+        "people_lo": 0.019166666666666665,
+        "people_hi": 0.04083333333333333,
+        "people_interval": "item_bootstrap",
+        "breeds": 165,
+        "breeds_rate": 0.1375,
+        "breeds_lo": 0.11666666666666667,
+        "breeds_hi": 0.15833333333333333,
+        "breeds_interval": "item_bootstrap",
+        "buildings": 47,
+        "buildings_rate": 0.03916666666666667,
+        "buildings_lo": 0.0275,
+        "buildings_hi": 0.051666666666666666,
+        "buildings_interval": "item_bootstrap",
+        "people_minus_breeds": -0.10833333333333334,
+        "people_minus_breeds_lo": -0.1325,
+        "people_minus_breeds_hi": -0.085,
+        "people_minus_buildings": -0.009999999999999995,
+        "people_minus_buildings_lo": -0.026666666666666655,
+        "people_minus_buildings_hi": 0.006666666666666661
+      },
+      {
+        "condition": "forced",
+        "format": "fewshot",
+        "shot_order": "both",
+        "decoding": "greedy",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 0,
+        "people_rate": 0.0,
+        "people_lo": 0.0,
+        "people_hi": 0.031019166418703472,
+        "people_interval": "item_wilson",
+        "breeds": 0,
+        "breeds_rate": 0.0,
+        "breeds_lo": 0.0,
+        "breeds_hi": 0.031019166418703472,
+        "breeds_interval": "item_wilson",
+        "buildings": 0,
+        "buildings_rate": 0.0,
+        "buildings_lo": 0.0,
+        "buildings_hi": 0.031019166418703472,
+        "buildings_interval": "item_wilson",
+        "people_minus_breeds": 0.0,
+        "people_minus_breeds_lo": 0.0,
+        "people_minus_breeds_hi": 0.0,
+        "people_minus_buildings": 0.0,
+        "people_minus_buildings_lo": 0.0,
+        "people_minus_buildings_hi": 0.0
+      },
+      {
+        "condition": "forced",
+        "format": "fewshot",
+        "shot_order": "both",
+        "decoding": "sampled",
+        "n_people": 120,
+        "n_breeds": 120,
+        "n_buildings": 120,
+        "people": 17,
+        "people_rate": 0.014166666666666666,
+        "people_lo": 0.008333333333333333,
+        "people_hi": 0.020833333333333332,
+        "people_interval": "item_bootstrap",
+        "breeds": 20,
+        "breeds_rate": 0.016666666666666666,
+        "breeds_lo": 0.01,
+        "breeds_hi": 0.024166666666666666,
+        "breeds_interval": "item_bootstrap",
+        "buildings": 9,
+        "buildings_rate": 0.0075,
+        "buildings_lo": 0.0033333333333333335,
+        "buildings_hi": 0.0125,
+        "buildings_interval": "item_bootstrap",
+        "people_minus_breeds": -0.0024999999999999988,
+        "people_minus_breeds_lo": -0.012520833333333337,
+        "people_minus_breeds_hi": 0.0075,
+        "people_minus_buildings": 0.006666666666666666,
+        "people_minus_buildings_lo": -0.0016666666666666661,
+        "people_minus_buildings_hi": 0.015000000000000001
+      }
+    ]
+  }
+}

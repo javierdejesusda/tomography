@@ -1,0 +1,62 @@
+{
+  "_meta": {
+    "experiment": "p10b",
+    "config_hash": "f0782e792903",
+    "seed": 0,
+    "git_sha": "d09822b637f8aafbd25a3a6d91b280b0efa7bc16",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-110-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T15:12:41+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p10b",
+      "model": "gpt2-large",
+      "seed": 0,
+      "families": null,
+      "n_per_side": 120,
+      "min_sitelinks": 5,
+      "people": true,
+      "offline": true,
+      "templates": [
+        "plain",
+        "concept"
+      ],
+      "concept": "variability",
+      "methods": [
+        "logistic",
+        "pca_diff",
+        "mean_diff",
+        "random"
+      ],
+      "n_seeds": 5,
+      "n_boot": 1000,
+      "batch_size": 8
+    }
+  },
+  "data": {
+    "readers": [
+      "plain/logistic",
+      "plain/pca_diff",
+      "plain/mean_diff",
+      "plain/random",
+      "concept/logistic",
+      "concept/pca_diff",
+      "concept/mean_diff",
+      "concept/random"
+    ],
+    "train_set": "all"
+  }
+}

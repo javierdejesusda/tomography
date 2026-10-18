@@ -1,0 +1,423 @@
+{
+  "_meta": {
+    "experiment": "p10b",
+    "config_hash": "82459bd192fa",
+    "seed": 0,
+    "git_sha": "d09822b637f8aafbd25a3a6d91b280b0efa7bc16",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-110-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T15:10:39+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p10b",
+      "model": "gpt2-medium",
+      "seed": 0,
+      "families": null,
+      "n_per_side": 120,
+      "min_sitelinks": 5,
+      "people": true,
+      "offline": true,
+      "templates": [
+        "plain",
+        "concept"
+      ],
+      "concept": "variability",
+      "methods": [
+        "logistic",
+        "pca_diff",
+        "mean_diff",
+        "random"
+      ],
+      "n_seeds": 5,
+      "n_boot": 1000,
+      "batch_size": 8
+    }
+  },
+  "data": {
+    "model": "gpt2-medium",
+    "n_layers": 24,
+    "families": [
+      "height",
+      "wingspan",
+      "duration"
+    ],
+    "train_sets": {
+      "height": [
+        "height"
+      ],
+      "wingspan": [
+        "wingspan"
+      ],
+      "duration": [
+        "duration"
+      ],
+      "wingspan+duration": [
+        "wingspan",
+        "duration"
+      ],
+      "height+duration": [
+        "height",
+        "duration"
+      ],
+      "height+wingspan": [
+        "height",
+        "wingspan"
+      ],
+      "all": [
+        "height",
+        "wingspan",
+        "duration"
+      ]
+    },
+    "full_train_set": "all",
+    "templates": [
+      "plain",
+      "concept"
+    ],
+    "methods": [
+      "logistic",
+      "pca_diff",
+      "mean_diff",
+      "random"
+    ],
+    "counts": {
+      "duration": {
+        "exact": {
+          "val": 27,
+          "train": 70,
+          "test": 23
+        },
+        "range": {
+          "train": 73,
+          "test": 24,
+          "val": 23
+        }
+      },
+      "height": {
+        "exact": {
+          "train": 69,
+          "val": 21,
+          "test": 30
+        },
+        "range": {
+          "train": 77,
+          "val": 20,
+          "test": 23
+        }
+      },
+      "wingspan": {
+        "exact": {
+          "train": 65,
+          "test": 22,
+          "val": 33
+        },
+        "range": {
+          "test": 25,
+          "val": 29,
+          "train": 66
+        }
+      }
+    },
+    "n_people": 120,
+    "snapshots": {
+      "duration": {
+        "exact": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "563b04eec28d77173be10646373a7f6471b1d447e30ec663cf3d34340ba47f20"
+          ]
+        },
+        "range": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "5bf01602ada0ac48edbc63679f76fd8497d0d2c9998f29d4790ff06fdf6a3f32"
+          ]
+        }
+      },
+      "height": {
+        "exact": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "ae5bffc5f561c1ad34fea7eb1f65dc75d94bd4a7f57d523be74219c4b4cb9961"
+          ]
+        },
+        "range": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "5efa1651af57be25edeb2c64725eb16fe844e5be39428e2421364aec2eebefb7"
+          ]
+        }
+      },
+      "wingspan": {
+        "exact": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "bb1e1fe25e4d94adf9fe54eafa0a59c445b2a6dbccb62348406839d545f6311f"
+          ]
+        },
+        "range": {
+          "retrieved_on": [
+            "2026-10-17"
+          ],
+          "sha256": [
+            "6bfbcc1693740e315e4d1efd3b3571b90d1a6657c30e09af7479332ec43289d6"
+          ]
+        }
+      },
+      "person_height": {
+        "exact": {
+          "retrieved_on": [
+            "2026-10-18"
+          ],
+          "sha256": [
+            "76316cb479449c9f1b4da7be726e143e56092b72da4d622819625360ac435166",
+            "a7cab55a62fe39ff9379809aaca627c8e5933df061eb1541155b8c06e96e645a",
+            "d7e8c59e2e8bc640368e2eb8bc82d380606789dc2100e2da7c90e9ac672251de"
+          ]
+        }
+      }
+    },
+    "layers": {
+      "plain/logistic/height": 1,
+      "plain/pca_diff/height": 4,
+      "plain/mean_diff/height": 3,
+      "plain/random/height": 14,
+      "plain/logistic/wingspan": 1,
+      "plain/pca_diff/wingspan": 2,
+      "plain/mean_diff/wingspan": 1,
+      "plain/random/wingspan": 16,
+      "plain/logistic/duration": 1,
+      "plain/pca_diff/duration": 3,
+      "plain/mean_diff/duration": 3,
+      "plain/random/duration": 18,
+      "plain/logistic/wingspan+duration": 1,
+      "plain/pca_diff/wingspan+duration": 5,
+      "plain/mean_diff/wingspan+duration": 4,
+      "plain/random/wingspan+duration": 20,
+      "plain/logistic/height+duration": 3,
+      "plain/pca_diff/height+duration": 10,
+      "plain/mean_diff/height+duration": 4,
+      "plain/random/height+duration": 7,
+      "plain/logistic/height+wingspan": 1,
+      "plain/pca_diff/height+wingspan": 3,
+      "plain/mean_diff/height+wingspan": 3,
+      "plain/random/height+wingspan": 7,
+      "plain/logistic/all": 1,
+      "plain/pca_diff/all": 5,
+      "plain/mean_diff/all": 4,
+      "plain/random/all": 11,
+      "concept/logistic/height": 1,
+      "concept/pca_diff/height": 3,
+      "concept/mean_diff/height": 2,
+      "concept/random/height": 5,
+      "concept/logistic/wingspan": 1,
+      "concept/pca_diff/wingspan": 1,
+      "concept/mean_diff/wingspan": 1,
+      "concept/random/wingspan": 7,
+      "concept/logistic/duration": 1,
+      "concept/pca_diff/duration": 2,
+      "concept/mean_diff/duration": 1,
+      "concept/random/duration": 5,
+      "concept/logistic/wingspan+duration": 1,
+      "concept/pca_diff/wingspan+duration": 22,
+      "concept/mean_diff/wingspan+duration": 20,
+      "concept/random/wingspan+duration": 16,
+      "concept/logistic/height+duration": 2,
+      "concept/pca_diff/height+duration": 22,
+      "concept/mean_diff/height+duration": 22,
+      "concept/random/height+duration": 1,
+      "concept/logistic/height+wingspan": 1,
+      "concept/pca_diff/height+wingspan": 18,
+      "concept/mean_diff/height+wingspan": 16,
+      "concept/random/height+wingspan": 2,
+      "concept/logistic/all": 1,
+      "concept/pca_diff/all": 22,
+      "concept/mean_diff/all": 22,
+      "concept/random/all": 6
+    },
+    "pooled_all": {
+      "plain/logistic": 1.0,
+      "plain/pca_diff": 0.9992592592592593,
+      "plain/mean_diff": 0.9996296296296296,
+      "plain/random": 0.9981481481481481,
+      "concept/logistic": 1.0,
+      "concept/pca_diff": 0.9890740740740741,
+      "concept/mean_diff": 0.9992592592592593,
+      "concept/random": 0.9662962962962963
+    },
+    "held_out": {
+      "wingspan+duration": {
+        "test_family": "height",
+        "auroc": {
+          "plain/logistic": 1.0,
+          "plain/pca_diff": 0.991304347826087,
+          "plain/mean_diff": 1.0,
+          "plain/random": 0.14492753623188406,
+          "concept/logistic": 1.0,
+          "concept/pca_diff": 0.9304347826086956,
+          "concept/mean_diff": 0.9855072463768116,
+          "concept/random": 0.8376811594202899
+        }
+      },
+      "height+duration": {
+        "test_family": "wingspan",
+        "auroc": {
+          "plain/logistic": 1.0,
+          "plain/pca_diff": 0.9745454545454545,
+          "plain/mean_diff": 0.9854545454545455,
+          "plain/random": 0.9836363636363636,
+          "concept/logistic": 0.9563636363636364,
+          "concept/pca_diff": 0.9763636363636363,
+          "concept/mean_diff": 0.990909090909091,
+          "concept/random": 0.9345454545454546
+        }
+      },
+      "height+wingspan": {
+        "test_family": "duration",
+        "auroc": {
+          "plain/logistic": 0.9239130434782609,
+          "plain/pca_diff": 0.967391304347826,
+          "plain/mean_diff": 0.9746376811594203,
+          "plain/random": 1.0,
+          "concept/logistic": 0.967391304347826,
+          "concept/pca_diff": 0.9927536231884058,
+          "concept/mean_diff": 1.0,
+          "concept/random": 0.967391304347826
+        }
+      }
+    },
+    "people": {
+      "all": {
+        "plain/logistic": {
+          "breeds_vs_people": 0.7913043478260869,
+          "people_vs_buildings": 1.0,
+          "position": 0.8586871475807534
+        },
+        "plain/pca_diff": {
+          "breeds_vs_people": 0.8739130434782608,
+          "people_vs_buildings": 0.995,
+          "position": 0.7203216913023067
+        },
+        "plain/mean_diff": {
+          "breeds_vs_people": 0.881159420289855,
+          "people_vs_buildings": 1.0,
+          "position": 0.7644439983716395
+        },
+        "plain/random": {
+          "breeds_vs_people": 0.9981884057971014,
+          "people_vs_buildings": 0.8983333333333333,
+          "position": 0.3735844358961732
+        },
+        "concept/logistic": {
+          "breeds_vs_people": 0.8909420289855072,
+          "people_vs_buildings": 1.0,
+          "position": 0.7935178733321846
+        },
+        "concept/pca_diff": {
+          "breeds_vs_people": 0.9851449275362318,
+          "people_vs_buildings": 0.36083333333333334,
+          "position": -0.18757551143865775
+        },
+        "concept/mean_diff": {
+          "breeds_vs_people": 0.9829710144927536,
+          "people_vs_buildings": 0.8,
+          "position": 0.2864465586501038
+        },
+        "concept/random": {
+          "breeds_vs_people": 0.6221014492753624,
+          "people_vs_buildings": 0.8905555555555555,
+          "position": 0.8899947881615985
+        }
+      },
+      "wingspan+duration": {
+        "plain/logistic": {
+          "breeds_vs_people": 0.8307971014492753,
+          "people_vs_buildings": 0.9983333333333333,
+          "position": 0.7767643642889642
+        },
+        "plain/pca_diff": {
+          "breeds_vs_people": 0.8891304347826087,
+          "people_vs_buildings": 0.8247222222222222,
+          "position": 0.4481132158514344
+        },
+        "plain/mean_diff": {
+          "breeds_vs_people": 0.9043478260869565,
+          "people_vs_buildings": 0.9816666666666667,
+          "position": 0.6151062266682644
+        },
+        "plain/random": {
+          "breeds_vs_people": 0.9884057971014493,
+          "people_vs_buildings": 0.0033333333333333335,
+          "position": 4.061286724006488
+        },
+        "concept/logistic": {
+          "breeds_vs_people": 0.8793478260869565,
+          "people_vs_buildings": 0.9977777777777778,
+          "position": 0.7350904869655188
+        },
+        "concept/pca_diff": {
+          "breeds_vs_people": 0.9840579710144928,
+          "people_vs_buildings": 0.26472222222222225,
+          "position": -0.4316486061155787
+        },
+        "concept/mean_diff": {
+          "breeds_vs_people": 0.9775362318840579,
+          "people_vs_buildings": 0.5197222222222222,
+          "position": 0.05848579396312709
+        },
+        "concept/random": {
+          "breeds_vs_people": 0.47355072463768116,
+          "people_vs_buildings": 0.8391666666666666,
+          "position": 1.079104312217106
+        }
+      }
+    },
+    "config": {
+      "experiment": "p10b",
+      "model": "gpt2-medium",
+      "seed": 0,
+      "families": null,
+      "n_per_side": 120,
+      "min_sitelinks": 5,
+      "people": true,
+      "offline": true,
+      "templates": [
+        "plain",
+        "concept"
+      ],
+      "concept": "variability",
+      "methods": [
+        "logistic",
+        "pca_diff",
+        "mean_diff",
+        "random"
+      ],
+      "n_seeds": 5,
+      "n_boot": 1000,
+      "batch_size": 8
+    }
+  }
+}
