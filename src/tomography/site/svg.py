@@ -282,8 +282,9 @@ def render_dot_panel(panel: DotPanel) -> str:
         if row.band is not None:
             x0, x1 = x_of(row.band[0]), x_of(row.band[1])
             parts.append(
-                f'<rect class="band" x="{x0:.1f}" y="{cy - ROW_H / 2 + 3:.1f}" '
-                f'width="{max(x1 - x0, 1.5):.1f}" height="{ROW_H - 6}" rx="2"/>'
+                f'<rect class="band" x="{x0:.1f}" y="{cy - ROW_H / 2 + 5:.1f}" '
+                f'width="{max(x1 - x0, 1.5):.1f}" '
+                f'height="{ROW_H - 10}" rx="2"/>'
             )
         for i, mark in enumerate(row.marks):
             style = panel.styles[mark.series]

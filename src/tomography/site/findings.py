@@ -134,6 +134,10 @@ def _axis(
     return (round(start, 6), round(end, 6)), ticks
 
 
+def _size_key(model: str) -> str:
+    return model.removesuffix("-base")
+
+
 def signed(value: float) -> str:
     """Formats a difference with a sign, without a negative zero.
 
@@ -398,6 +402,7 @@ def knowledge(store: Store) -> Finding | None:
                         read_styles,
                         domain,
                         ticks,
+                        stagger=True,
                         refs=((0.5, "chance"),),
                     ),
                 ),
@@ -418,6 +423,7 @@ def knowledge(store: Store) -> Finding | None:
                         err_styles,
                         domain,
                         ticks,
+                        stagger=True,
                         refs=((0.5, "chance"),),
                     ),
                 ),
@@ -720,6 +726,7 @@ def approximate_answers(store: Store) -> Finding | None:
                         kinds,
                         (0.0, 1.0),
                         (0.0, 0.25, 0.5, 0.75, 1.0),
+                        stagger=True,
                         fmt="{:.3f}",
                     ),
                 ),
@@ -740,6 +747,7 @@ def approximate_answers(store: Store) -> Finding | None:
                         reader_styles,
                         (0.4, 1.0),
                         (0.4, 0.6, 0.8, 1.0),
+                        stagger=True,
                         refs=((0.5, "chance"),),
                     ),
                 ),
@@ -827,15 +835,16 @@ def sentiment_steering(store: Store) -> Finding | None:
         models = [m for m in per_model if _family(m) == family]
         if not models:
             continue
+        sizes = list(dict.fromkeys(_size_key(m) for m in models))
 
         def lines(
-            key: str, models: list[str] = models
+            key: str, models: list[str] = models, sizes: list[str] = sizes
         ) -> tuple[svg.LineSeries, ...]:
             return tuple(
                 svg.LineSeries(
                     m,
                     m,
-                    STYLE_CLASSES[i],
+                    STYLE_CLASSES[sizes.index(_size_key(m))],
                     tuple(per_model[m][key]),
                     dashed=is_post_trained(m),
                 )
@@ -853,8 +862,8 @@ def sentiment_steering(store: Store) -> Finding | None:
         x_domain = (coeffs[0], coeffs[-1])
         x_ticks = tuple(coeffs)
         key_styles = {
-            m: svg.Style(STYLE_CLASSES[i], "circle", m)
-            for i, m in enumerate(models)
+            m: svg.Style(STYLE_CLASSES[sizes.index(_size_key(m))], "circle", m)
+            for m in models
         }
         panels = (
             svg.LinePanel(
@@ -1111,6 +1120,7 @@ def finder_comparison(store: Store) -> Finding | None:
                 styles,
                 (0.4, 1.0),
                 (0.4, 0.6, 0.8, 1.0),
+                stagger=True,
                 refs=((0.5, "chance"),),
             )
         )
