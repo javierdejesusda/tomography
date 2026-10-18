@@ -2449,8 +2449,11 @@ def test_the_diagnostic_has_a_both_row_that_averages_the_shot_orders() -> None:
     assert both["breeds_rate"] == pytest.approx(0.5)
     assert both["people_minus_breeds"] == pytest.approx(0.0)
     assert both["people_minus_buildings"] == pytest.approx(0.5)
+    assert both["people_interval"] == "item_bootstrap"
+    assert both["breeds_interval"] == "item_bootstrap"
     first = _find(rows, shot_order="range_last", decoding="greedy")
     assert first["people_minus_breeds"] == pytest.approx(-1.0)
+    assert first["people_interval"] == "wilson"
 
 
 def test_the_diagnostic_is_empty_without_people_or_the_height_family() -> None:
