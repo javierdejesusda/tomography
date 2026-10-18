@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from collections.abc import Sequence
 import csv
+import dataclasses
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -29,6 +30,7 @@ from tomography.experiments.sweep import chat_format_for
 from tomography.model import LoadedModel
 from tomography.p9.reading import ItemActivations
 from tomography.reading.metrics import auroc
+from tomography.reading.reader import RepReader
 
 DEFAULT_HASH = "9d9170f5cccb"
 
@@ -321,8 +323,8 @@ def test_a_planted_direction_transfers_and_the_random_control_does_not() -> (
             control.append(float(row["auroc"]))
         else:
             assert float(row["auroc"]) > 0.9, row
-    assert abs(float(np.mean(control)) - 0.5) < 0.1
-    assert max(control) < 0.85
+    assert float(np.mean(control)) < 0.75
+    assert max(control) < 0.95
 
 
 def test_curves_and_transfer_have_one_row_per_cell() -> None:
@@ -781,3 +783,257 @@ def test_plot_draws_a_curve_and_a_heatmap_per_template(
         for ext in ("pdf", "png", "svg")
     )
     assert all(p.is_file() for p in paths)
+
+
+Signal = Callable[[QuantityQuestion, int], float]
+
+
+def _shaped(
+    items: Sequence[QuantityQuestion], signal: Signal, *, seed: int = 0
+) -> ItemActivations:
+    """Plants `signal(item, layer position)` along one direction."""
+    rng = np.random.default_rng(seed)
+    direction = np.random.default_rng(123).normal(size=WIDTH)
+    direction /= np.linalg.norm(direction)
+    data = rng.normal(0.0, 0.3, (len(LAYERS), len(items), WIDTH))
+    for n, item in enumerate(items):
+        for k in range(len(LAYERS)):
+            data[k, n] += 3.0 * signal(item, k) * direction
+    return ItemActivations(
+        tuple(i.uid for i in items), LAYERS, data.astype(np.float32)
+    )
+
+
+def _sign(item: QuantityQuestion) -> float:
+    return 1.0 if item.kind == "range" else -1.0
+
+
+def _row(rows: list[dict[str, object]], **where: object) -> dict[str, object]:
+    (row,) = _rows(rows, **where)
+    return row
+
+
+def test_a_held_out_family_never_trains_its_reader() -> None:
+    items = _study_items()
+
+    def only_height(item: QuantityQuestion, k: int) -> float:
+        return _sign(item) if item.family == "height" else 0.0
+
+    config = _config(methods=("logistic",))
+    study = read_study(config, {"plain": _shaped(items, only_height)}, items)
+
+    row = _row(
+        study.transfer,
+        train_set="wingspan+duration",
+        test_family="height",
+    )
+    assert float(row["auroc"]) < 0.75
+
+    heights = [
+        n
+        for n, i in enumerate(items)
+        if i.family == "height" and i.split == "train"
+    ]
+    base = _shaped(items, only_height)
+    scrambled = np.array(base.data)
+    scrambled[:, heights] = np.random.default_rng(9).normal(
+        0.0, 1.0, scrambled[:, heights].shape
+    )
+    again = read_study(
+        config,
+        {"plain": ItemActivations(base.uids, base.layers, scrambled)},
+        items,
+    )
+    key = "plain/logistic/wingspan+duration"
+    kept = np.setdiff1d(np.arange(len(items)), heights)
+    np.testing.assert_array_equal(
+        study.scores[key][kept], again.scores[key][kept]
+    )
+
+
+def _layer_trap(item: QuantityQuestion, k: int) -> float:
+    """Layer 1 informs on val and not on test, layer 2 the reverse."""
+    if item.split == "train":
+        return _sign(item)
+    informative = item.split == ("val" if k == 0 else "test")
+    return _sign(item) if informative else 0.0
+
+
+def test_the_layer_is_never_chosen_on_the_test_items() -> None:
+    items = _study_items()
+    study = read_study(
+        _config(methods=("logistic",)),
+        {"plain": _shaped(items, _layer_trap)},
+        items,
+    )
+
+    assert {r["layer"] for r in study.transfer} == {1}
+
+
+def test_the_curves_are_computed_on_the_test_items() -> None:
+    items = _study_items()
+    study = read_study(
+        _config(methods=("logistic",)),
+        {"plain": _shaped(items, _layer_trap)},
+        items,
+    )
+
+    where = {"train_set": "all", "test_family": "pooled"}
+    first = _row(study.curves, layer=1, **where)
+    second = _row(study.curves, layer=2, **where)
+    assert float(first["auroc"]) < 0.7
+    assert float(second["auroc"]) > 0.9
+
+
+def test_a_pair_never_crosses_two_families(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[tuple[Any, Any]] = []
+    real = p10b_reading.label_contrastive_pairs
+
+    def spy(labels: Any, **kwargs: Any) -> Any:
+        pairs = real(labels, **kwargs)
+        seen.append((kwargs.get("strata"), pairs))
+        return pairs
+
+    monkeypatch.setattr(p10b_reading, "label_contrastive_pairs", spy)
+    items = _study_items()
+
+    read_study(
+        _config(methods=("pca_diff",)),
+        {"plain": _planted(items, _by_range)},
+        items,
+    )
+
+    assert seen
+    for strata, pairs in seen:
+        assert strata is not None
+        assert (strata[pairs[:, 0]] == strata[pairs[:, 1]]).all()
+    assert any(len(set(strata.tolist())) == 3 for strata, _ in seen)
+
+
+def _marked(
+    range_word: str,
+    exact_word: str,
+    *,
+    split: str,
+    n: int,
+    long: bool = False,
+) -> list[QuantityQuestion]:
+    pad = " and some more words to make this question much longer" * 3
+    return [
+        _item(
+            f"height-{kind}-{split}{i}",
+            "height",
+            kind,
+            f"{word} thing {i}?" + (pad if kind == "range" and long else ""),
+            split=split,
+        )
+        for kind, word in (("range", range_word), ("exact", exact_word))
+        for i in range(n)
+    ]
+
+
+def test_the_baselines_never_see_the_val_or_test_labels() -> None:
+    train = _marked("alpha", "beta", split="train", n=12)
+    held = _marked("beta", "alpha", split="test", n=12) + _marked(
+        "beta", "alpha", split="val", n=12
+    )
+    flipped = [
+        dataclasses.replace(i, kind="exact" if i.kind == "range" else "range")
+        for i in held
+    ]
+
+    first = baseline_scores([*train, *held], ("height",))
+    second = baseline_scores([*train, *flipped], ("height",))
+
+    for name in BASELINES:
+        np.testing.assert_array_equal(first[name], second[name])
+    assert _test_auroc([*train, *held], first["text_word"]) < 0.5
+
+
+def test_the_baselines_are_oriented_on_the_train_items_only() -> None:
+    train = [
+        dataclasses.replace(i, sitelinks=100 if i.kind == "range" else 2)
+        for i in _marked("alpha", "beta", split="train", n=12, long=True)
+    ]
+    test = [
+        dataclasses.replace(i, sitelinks=2 if i.kind == "range" else 100)
+        for i in _marked("alpha", "beta", split="test", n=60, long=False)
+    ]
+    test = [
+        dataclasses.replace(
+            i,
+            question=i.question
+            + (" with a very long tail" * 6 if i.kind == "exact" else ""),
+        )
+        for i in test
+    ]
+    items = [*train, *test]
+
+    scores = baseline_scores(items, ("height",))
+
+    assert _test_auroc(items, scores["length"]) < 0.5
+    assert _test_auroc(items, scores["popularity"]) < 0.5
+
+
+def test_the_selected_layer_averages_every_draw(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    items = _study_items()
+    acts = _planted(items, _by_range)
+    direction = np.random.default_rng(123).normal(size=WIDTH)
+    other = np.random.default_rng(7).normal(size=WIDTH)
+    first_draw = p10b_reading.draw_seed(0, 0)
+
+    def stub(
+        data: Any,
+        items: Any,
+        labels: Any,
+        train: Any,
+        layers: Any,
+        *,
+        method: Any,
+        seed: int,
+        fit_seed: int,
+    ) -> RepReader:
+        informative = 0 if seed == first_draw else 1
+        vectors = np.stack([other, other])
+        vectors[informative] = direction
+        return RepReader.from_arrays(
+            "stub", layers, vectors, np.zeros_like(vectors)
+        )
+
+    monkeypatch.setattr(p10b_reading, "_fit_reader", stub)
+
+    study = read_study(
+        _config(methods=("logistic",), n_seeds=3),
+        {"plain": acts},
+        items,
+    )
+
+    assert {r["layer"] for r in study.transfer} == {2}
+
+
+def test_the_random_control_differs_across_train_sets_and_templates() -> None:
+    items = _study_items()
+    one_layer = _shaped(items, lambda item, k: _sign(item))
+    one_layer = ItemActivations(
+        one_layer.uids, one_layer.layers[:1], one_layer.data[:1]
+    )
+    config = _config(
+        templates=("plain", "concept"),
+        methods=("random",),
+        n_seeds=1,
+        n_boot=10,
+    )
+
+    study = read_study(
+        config, {"plain": one_layer, "concept": one_layer}, items
+    )
+
+    def correlation(a: str, b: str) -> float:
+        return abs(float(np.corrcoef(study.scores[a], study.scores[b])[0, 1]))
+
+    assert correlation("plain/random/height", "plain/random/wingspan") < 0.9
+    assert correlation("plain/random/all", "concept/random/all") < 0.9

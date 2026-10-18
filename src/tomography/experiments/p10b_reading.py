@@ -31,6 +31,7 @@ from tomography.datasets.quantities import load_people_heights
 from tomography.datasets.quantities import load_quantities
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.sweep import chat_format_for
 from tomography.model import LoadedModel
 from tomography.model import load_model
@@ -399,11 +400,29 @@ def _fit_reader(
     *,
     method: Method,
     seed: int,
+    fit_seed: int,
 ) -> RepReader:
     """Fits a reader on the train items, pairing a range and an exact item.
 
     A pair never crosses two families. The reader orients each layer on the
-    labels, so a higher score means a range answer.
+    labels, so a higher score means a range answer. The `pca_diff` method
+    fits the pair differences. The unpaired `logistic` and `mean_diff`
+    methods fit only the items that belong to a pair, so with unbalanced
+    sides the unmatched items of the larger side are dropped.
+
+    Args:
+        data: Activations of every item, shape (K, n, d).
+        items: The questions, in the order of `data`.
+        labels: 1 for a range item, 0 for an exact one.
+        train: Row indices of the train items.
+        layers: Layer index of each slice of `data`.
+        method: The direction finder.
+        seed: Seeds the pairing, the same for every method of a draw.
+        fit_seed: Seeds the finder, so the random control differs across
+            templates and train sets.
+
+    Returns:
+        The reader.
     """
     y = labels[train]
     families = [items[n].family for n in train]
@@ -419,7 +438,7 @@ def _fit_reader(
         pairs=local,
         groups=local,
         preprocess="center",
-        seed=seed,
+        seed=fit_seed,
     )
 
 
@@ -538,8 +557,11 @@ def read_study(
     train set's families; no test item chooses anything. The curves hold the
     test AUROC at every layer and the transfer rows the test AUROC of the
     draw-averaged score at the chosen layer, with an item bootstrap interval.
-    The surface baselines (see `baseline_scores`) are fitted on the same
-    train items. The people diagnostic (see `people_row`) needs
+    The two kinds of interval are not comparable: the curve intervals
+    resample the draws (seeds), so with `n_seeds` 1 they have zero width,
+    while the transfer and people intervals resample items. The surface
+    baselines (see `baseline_scores`) are fitted on the same train items.
+    The people diagnostic (see `people_row`) needs
     `config.people`, the "height" family and the people items, the items of
     the family `PEOPLE_FAMILY`, which are test items and never train a
     reader.
@@ -606,6 +628,9 @@ def read_study(
                         layers,
                         method=cast(Method, name),
                         seed=draw_seed(seed, draw),
+                        fit_seed=derive_seed(
+                            draw_seed(seed, draw), template, set_name, name
+                        ),
                     )
                     if draw == 0 and set_name == full:
                         readers[f"{template}/{name}"] = reader
