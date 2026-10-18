@@ -1,0 +1,72 @@
+{
+  "_meta": {
+    "experiment": "p1",
+    "config_hash": "62073cecf6d5",
+    "seed": 0,
+    "git_sha": "f4d414d3a41edebf000d90a6b706d766119b1f42",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T13:48:56+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p1",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "emotion"
+      ],
+      "kinds": [
+        "paper",
+        "no_template",
+        "bare",
+        "no_chat_tags",
+        "neutral_frame",
+        "no_trailing_question",
+        "no_trailing_space",
+        "paraphrase",
+        "scaffold",
+        "alternate",
+        "concept_swap",
+        "framing_swap"
+      ]
+    }
+  },
+  "data": {
+    "series": [
+      "paper",
+      "concept_swap_0",
+      "concept_swap_1",
+      "concept_swap_2",
+      "concept_swap_3"
+    ],
+    "xlabel": "Layer",
+    "ylabel": "Accuracy",
+    "chance": 0.5,
+    "n_layers": 28
+  }
+}
