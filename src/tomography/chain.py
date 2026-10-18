@@ -543,6 +543,7 @@ def _quota_ratio(quota: str, period: str) -> float | None:
 
 
 def _read_words(path: Path) -> list[str]:
+    """Returns the words of a file, or [] when it cannot be read."""
     try:
         return path.read_text(encoding="utf-8").split()
     except OSError:
@@ -567,14 +568,14 @@ def cpu_quota(root: Path = CGROUP_ROOT) -> float:
     if len(words) == 2:
         ratio = _quota_ratio(*words)
         if ratio is not None:
-            return ratio
+            return min(ratio, float(_visible_cpus()))
     v1 = root / "cpu"
     quota = _read_words(v1 / "cpu.cfs_quota_us")
     period = _read_words(v1 / "cpu.cfs_period_us")
     if quota and period:
         ratio = _quota_ratio(quota[0], period[0])
         if ratio is not None:
-            return ratio
+            return min(ratio, float(_visible_cpus()))
     return float(_visible_cpus())
 
 

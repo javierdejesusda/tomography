@@ -555,7 +555,9 @@ def twelve_cpus(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(chain_module, "_visible_cpus", lambda: 12)
 
 
-def test_cpu_quota_reads_the_cgroup_v2_limit(tmp_path: Path) -> None:
+def test_cpu_quota_reads_the_cgroup_v2_limit(
+    tmp_path: Path, twelve_cpus: None
+) -> None:
     (tmp_path / "cpu.max").write_text("765000 100000\n", encoding="utf-8")
 
     assert cpu_quota(tmp_path) == pytest.approx(7.65)
@@ -576,7 +578,9 @@ def _v1(root: Path, quota: str, period: str = "100000") -> None:
     (folder / "cpu.cfs_period_us").write_text(period + "\n", encoding="utf-8")
 
 
-def test_cpu_quota_reads_the_cgroup_v1_limit(tmp_path: Path) -> None:
+def test_cpu_quota_reads_the_cgroup_v1_limit(
+    tmp_path: Path, twelve_cpus: None
+) -> None:
     _v1(tmp_path, "250000")
 
     assert cpu_quota(tmp_path) == pytest.approx(2.5)
@@ -602,6 +606,24 @@ def test_cpu_quota_falls_back_on_a_malformed_file(
     (tmp_path / "cpu.max").write_text("garbage", encoding="utf-8")
 
     assert cpu_quota(tmp_path) == 12.0
+
+
+def test_cpu_quota_is_capped_by_the_visible_cpus_for_v2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(chain_module, "_visible_cpus", lambda: 4)
+    (tmp_path / "cpu.max").write_text("1600000 100000\n", encoding="utf-8")
+
+    assert cpu_quota(tmp_path) == 4.0
+
+
+def test_cpu_quota_is_capped_by_the_visible_cpus_for_v1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(chain_module, "_visible_cpus", lambda: 4)
+    _v1(tmp_path, "1600000")
+
+    assert cpu_quota(tmp_path) == 4.0
 
 
 @pytest.mark.parametrize(
