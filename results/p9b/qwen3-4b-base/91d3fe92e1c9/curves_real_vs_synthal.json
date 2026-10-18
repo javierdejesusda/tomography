@@ -1,0 +1,61 @@
+{
+  "_meta": {
+    "experiment": "p9b",
+    "config_hash": "91d3fe92e1c9",
+    "seed": 0,
+    "git_sha": "89ea7cb3bbc7d8419c85f221dde833a7e87e49a1",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A6000)",
+    "platform": "Linux-6.8.0-134-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T00:14:42+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9b",
+      "model": "qwen3-4b-base",
+      "seed": 0,
+      "labels_run": "results/p9a/qwen3-4b-base/25d7cc240fef",
+      "template": "fewshot",
+      "n_shots": 15,
+      "types": null,
+      "methods": [
+        "logistic",
+        "pca_diff",
+        "mean_diff",
+        "random"
+      ],
+      "preprocess": "center",
+      "n_seeds": 5,
+      "n_pairs": 64,
+      "layers": null,
+      "layer": null,
+      "min_pairs": 16,
+      "min_eval": 10,
+      "bos": null,
+      "batch_size": 8
+    }
+  },
+  "data": {
+    "series": [
+      "logistic",
+      "pca_diff",
+      "mean_diff",
+      "random"
+    ],
+    "xlabel": "Layer",
+    "ylabel": "AUROC (unknown-type contrast)",
+    "chance": 0.5,
+    "n_layers": 36
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "_meta": {
+    "experiment": "p9c",
+    "config_hash": "4307bb435ab8",
+    "seed": 0,
+    "git_sha": "89ea7cb3bbc7d8419c85f221dde833a7e87e49a1",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A6000)",
+    "platform": "Linux-6.8.0-134-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T00:20:04+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9c",
+      "model": "qwen3-4b",
+      "seed": 0,
+      "labels_run": "results/p9a/qwen3-4b/7bd160f5a7e0",
+      "template": "fewshot",
+      "n_shots": 15,
+      "datasets": [
+        "popqa",
+        "triviaqa",
+        "nq_open"
+      ],
+      "lat_type": "obscure_real",
+      "lat_method": "logistic",
+      "layers": null,
+      "layer": null,
+      "n_seeds": 5,
+      "n_pairs": 64,
+      "min_pairs": 16,
+      "n_boot": 1000,
+      "min_probe": 50,
+      "min_relation_class": 5,
+      "bos": null,
+      "batch_size": 8
+    }
+  },
+  "data": {
+    "columns": [
+      "dataset",
+      "features",
+      "auroc",
+      "diff_vs_confidence",
+      "lo",
+      "hi"
+    ],
+    "rows": [
+      [
+        "popqa",
+        "confidence",
+        0.9231091401823109,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "popqa",
+        "confidence+lat",
+        0.9244005091566068,
+        0.0012913689742958256,
+        -0.0009703879940999277,
+        0.003538140592524707
+      ],
+      [
+        "popqa",
+        "confidence+probe",
+        0.939106512277244,
+        0.015997372094933016,
+        0.0087974129299557,
+        0.024084495028576864
+      ],
+      [
+        "triviaqa",
+        "confidence",
+        0.7920509442248572,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "triviaqa",
+        "confidence+lat",
+        0.7962231005709267,
+        0.004172156346069489,
+        -0.004391669434997372,
+        0.012357515574196712
+      ],
+      [
+        "triviaqa",
+        "confidence+probe",
+        0.8037988581466843,
+        0.011747913921827058,
+        -0.0014485992290371034,
+        0.02626155621683222
+      ],
+      [
+        "nq_open",
+        "confidence",
+        0.8069155446756426,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        "nq_open",
+        "confidence+lat",
+        0.833843329253366,
+        0.02692778457772338,
+        -0.00447069818666915,
+        0.060332079765451546
+      ],
+      [
+        "nq_open",
+        "confidence+probe",
+        0.8196144430844553,
+        0.012698898408812664,
+        -0.013370191997938222,
+        0.04188900092946333
+      ]
+    ]
+  }
+}

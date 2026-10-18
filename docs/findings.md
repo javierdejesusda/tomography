@@ -1709,8 +1709,8 @@ while it answers. The definitions, the guess control and the statistics are in t
 [methodology](methodology.md#known-versus-unknown-questions-p9).
 
 The runs reported here use the current label schema (12 PopQA relations, the guess control) and are those of the four
-GPT-2 sizes and of the Qwen3 0.6B and 1.7B checkpoints. P9a, P9b and P9c cover all eight models, and P9d ran on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the four Qwen3
-checkpoints (base and post-trained). `gpt2` is the one model whose label gate
+GPT-2 sizes and of the Qwen3 0.6B, 1.7B and 4B checkpoints. P9a, P9b and P9c cover all ten models, and P9d ran on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the six Qwen3
+checkpoints (base and post-trained; the 4B post-trained checkpoint with the `fewshot` template only). The 4B pair was run last, on a rented GPU pod, and has its own subsection under P9b, P9c and P9d. `gpt2` is the one model whose label gate
 closes (70 known questions after the guess control, below the 100 the gate asks for), so it has no known against
 unknown contrast: its P9b run reads only the contrasts between kinds of unknown questions, its P9c run has no label-free
 `lat` predictor, and P9d did not run on it. Questions are labeled from the behavior
@@ -1736,6 +1736,8 @@ Known / unknown / uncertain questions per source:
 | qwen3-0.6b      | 277 / 8,446 / 744   | 89 / 776 / 135   | 27 / 911 / 62   |
 | qwen3-1.7b-base | 501 / 7,928 / 1,038 | 291 / 502 / 207  | 70 / 775 / 155  |
 | qwen3-1.7b      | 517 / 8,137 / 813   | 271 / 592 / 137  | 71 / 848 / 81   |
+| qwen3-4b-base   | 803 / 7,499 / 1,165 | 440 / 373 / 187  | 96 / 715 / 189  |
+| qwen3-4b        | 774 / 7,784 / 909   | 408 / 451 / 141  | 135 / 774 / 91  |
 | gpt2            | 69 / 8,836 / 562    | 1 / 919 / 80     | 0 / 973 / 27    |
 | gpt2-medium     | 176 / 8,569 / 722   | 20 / 851 / 129   | 5 / 936 / 59    |
 | gpt2-large      | 243 / 8,495 / 729   | 49 / 767 / 184   | 12 / 937 / 51   |
@@ -1749,29 +1751,34 @@ Guess control, in questions:
 | qwen3-0.6b      | 669          | 393         | 0                 | 7            | 269              |
 | qwen3-1.7b-base | 1,090        | 863         | 42                | 12           | 173              |
 | qwen3-1.7b      | 1,118        | 860         | 24                | 11           | 223              |
+| qwen3-4b-base   | 1,632        | 1,377       | 42                | 12           | 201              |
+| qwen3-4b        | 1,702        | 1,346       | 48                | 23           | 285              |
 | gpt2            | 87           | 70          | 0                 | 2            | 15               |
 | gpt2-medium     | 301          | 201         | 0                 | 4            | 96               |
 | gpt2-large      | 428          | 304         | 0                 | 4            | 120              |
 | gpt2-xl         | 540          | 432         | 0                 | 5            | 103              |
 
-- **Known questions are few.** After the guess control a model has 70 to 863 known questions: 70 (`gpt2`), 201
+- **Known questions are few.** After the guess control a model has 70 to 1,377 known questions: 70 (`gpt2`), 201
   (`gpt2-medium`), 304 (`gpt2-large`), 393 (`qwen3-0.6b`), 432 (`gpt2-xl`), 525 (`qwen3-0.6b-base`), 860
-  (`qwen3-1.7b`) and 863 (`qwen3-1.7b-base`), against 21,988 to 22,028 questions. They come from PopQA (69 to 517 per
-  model), TriviaQA (1 to 291) and NQ-open (0 to 71); the real award questions give at most 1, and no source other than
-  these three has a known question on `gpt2`, `gpt2-medium` or `gpt2-large`. The count rises with size inside the GPT-2
-  family (70, 201, 304, 432).
-- **The guess control matters.** It demotes 17 (`gpt2`) to 276 (`qwen3-0.6b`) of the known questions of a model, 15 to
-  269 of them because their stratum is excluded (`popqa:sport` is excluded by default, and so are the strata
+  (`qwen3-1.7b`), 863 (`qwen3-1.7b-base`), 1,346 (`qwen3-4b`) and 1,377 (`qwen3-4b-base`), against 21,988 to 22,028
+  questions. They come from PopQA (69 to 803 per model), TriviaQA (1 to 440) and NQ-open (0 to 135); the real award
+  questions give at most 1 on the other eight models and 38 (`qwen3-4b-base`) and 29 (`qwen3-4b`) on the 4B pair, and
+  no source other than these three has a known question on `gpt2`, `gpt2-medium` or `gpt2-large`. The count rises with
+  size inside the GPT-2 family (70, 201, 304, 432) and inside the Qwen3 base (525, 863, 1,377) and post-trained (393,
+  860, 1,346) checkpoints.
+- **The guess control matters.** It demotes 17 (`gpt2`) to 356 (`qwen3-4b`) of the known questions of a model, 15 to
+  285 of them because their stratum is excluded (`popqa:sport` is excluded by default, and so are the strata
   whose constant-guess accuracy is above 0.10).
-- **Base against post-trained.** At 1.7B the two checkpoints have 863 and 860 known questions; at 0.6B the base
+- **Base against post-trained.** At 1.7B the two checkpoints have 863 and 860 known questions and at 4B 1,377 and 1,346; at 0.6B the base
   checkpoint has 525 and the post-trained one 393. Labels come from each model's own behavior, so this is a count of
   what each model answers under the labeling recipe, not a comparison on common questions.
-- **Gate and cutoff.** Seven of the eight models pass the gate (at least 100 guess-adjusted known questions), so the
+- **Gate and cutoff.** Nine of the ten models pass the gate (at least 100 guess-adjusted known questions), so the
   known against unknown contrasts are built for them. `gpt2` does not (70), and the run records
-  `known_contrasts = false`. The cutoff year is a setting (2017 for `gpt2-xl`, 2024 for Qwen3). The cutoff
-  estimated from the labels is stored for two runs, 2014 for `qwen3-1.7b-base` and 2007 for `qwen3-1.7b`, and does not
-match the setting. The only results below that use the cutoff are the `pre_vs_post_cutoff` rows of the four GPT-2 sizes;
-the post-cutoff contrasts have too few items for the Qwen3 models.
+  `known_contrasts = false`. The cutoff year is a setting: 2017 for the GPT-2 sizes and for the two 4B runs (the config
+  default, which the 4B runs kept) and 2024 for the other four Qwen3 checkpoints. The cutoff estimated from the labels
+  is stored for four runs, 2014 for `qwen3-1.7b-base`, 2007 for `qwen3-1.7b` and 2022 for both 4B checkpoints, and does
+  not match the setting of its run. The only results below that use the cutoff are the `pre_vs_post_cutoff` rows of the
+  four GPT-2 sizes; the post-cutoff contrasts have too few items for the Qwen3 models, the 4B pair included.
 
 ### Reading the direction (P9b)
 
@@ -2033,6 +2040,69 @@ The other contrasts, pooled:
 - **Elsewhere the margin is small.** `fictional_generated` has the reader above `text_char` within relation by 0.006 and 0.004 on the post-trained checkpoints; four KUQ categories (`kuq_controversial`, `kuq_counterfactual`, `kuq_false_assumption`, `kuq_future_unknown`) are within 0.010 of the better baseline in either direction. `pre_vs_post_cutoff` is not read on these checkpoints (the post-cutoff contrasts have too few items).
 - **Read these cross-dataset rows as a format contrast too.** The better text baseline is at 0.955 or above on every cross-dataset row of the post-trained checkpoints except `triviaqa_known` (0.750 and 0.664) and `kuq_ambiguous` (0.923 and 0.903), so a reader between 0.947 and 1.000 on the others does not show that it reads knowledge; on `false_premise` the reader is below both text baselines.
 - **What this does not show.** As above: popularity and the wording of the question are the only surface controls, each value is one set of five readers on one labeling run per checkpoint, and P9b compares the reader with the text baselines only. Whether the reader predicts the errors of the checkpoint better than its output confidence is the question of P9c.
+
+#### The Qwen3 4B pair
+
+P9b on `qwen3-4b-base` and `qwen3-4b` (runs `p9b/qwen3-4b-base/91d3fe92e1c9` and `p9b/qwen3-4b/5481dab673d4`, made at `89ea7cb` with a clean tree on a rented GPU pod (NVIDIA RTX A6000), on the labels of the P9a run of the same checkpoint) uses the recipe above: five logistic readers on 64 pairs each, one layer per model chosen on the pooled validation AUROC, which is L22 on `qwen3-4b-base` and L25 on `qwen3-4b`. The post-trained run is a retry at batch size 4: the first attempt, at batch size 8, was killed by the out-of-memory killer of the container and is not reported. In P9b the batch size only sets how many prompts go through one forward pass when the last-token activations are collected; it does not enter the draws of pairs, the seeds, the train and test split or the layer choice, so the retry can differ from a batch size 8 run only through the numerical effects of batching and padding. The batch size is a field of the config, so the retry has its own hash by design. A checkpoint is labeled on its own behavior, so the test counts differ between the base and the post-trained row (177 against 172 known PopQA test questions); the rows are never pooled, and a difference between two rows mixes the checkpoint with the question set. The 1.7B rows are those of the runs above, repeated so that the step in size is next to the 4B rows. Every reader value is next to `text_word`, `text_char` and `popularity`. As on the 1.7B checkpoints, `fictional_synthal` and `pre_vs_post_cutoff` are skipped for lack of items, for different reasons by size (the `skipped` field of each summary): at 1.7B `fictional_synthal` has fewer than 10 validation items on one side and `pre_vs_post_cutoff` fewer than 16 train items on one side, on both checkpoints; at 4B `pre_vs_post_cutoff` has fewer than 10 validation items on one side on both checkpoints, and `fictional_synthal` has fewer than 10 test items on one side on `qwen3-4b-base` and fewer than 10 validation items on one side on `qwen3-4b`.
+
+PopQA known against unknown, within relation (the headline), mean AUROC over the five readers:
+
+| Model           | Contrast         | Test known / unknown | Test pairs | Reader | popularity | text_word | text_char |
+| --------------- | ---------------- | -------------------- | ---------- | ------ | ---------- | --------- | --------- |
+| qwen3-1.7b-base | obscure_real     | 118 / 1,611          | 10,113     | 0.959  | 0.879      | 0.625     | 0.636     |
+| qwen3-1.7b-base | obscure_real_pop | 118 / 1,611          | 10,113     | 0.960  | 0.879      | 0.625     | 0.636     |
+| qwen3-1.7b      | obscure_real     | 122 / 1,657          | 10,680     | 0.893  | 0.850      | 0.561     | 0.602     |
+| qwen3-1.7b      | obscure_real_pop | 122 / 1,657          | 10,680     | 0.845  | 0.850      | 0.561     | 0.602     |
+| qwen3-4b-base   | obscure_real     | 177 / 1,529          | 19,228     | 0.957  | 0.905      | 0.568     | 0.555     |
+| qwen3-4b-base   | obscure_real_pop | 177 / 1,529          | 19,228     | 0.960  | 0.905      | 0.568     | 0.555     |
+| qwen3-4b        | obscure_real     | 172 / 1,586          | 16,894     | 0.927  | 0.863      | 0.534     | 0.553     |
+| qwen3-4b        | obscure_real_pop | 172 / 1,586          | 16,894     | 0.925  | 0.863      | 0.534     | 0.553     |
+
+The same contrasts pooled over relations, with the AUROC of a random direction:
+
+| Model           | Contrast         | Reader | Random direction | popularity | text_word | text_char |
+| --------------- | ---------------- | ------ | ---------------- | ---------- | --------- | --------- |
+| qwen3-1.7b-base | obscure_real     | 0.961  | 0.648            | 0.865      | 0.873     | 0.873     |
+| qwen3-1.7b-base | obscure_real_pop | 0.970  | 0.522            | 0.865      | 0.873     | 0.873     |
+| qwen3-1.7b      | obscure_real     | 0.927  | 0.529            | 0.834      | 0.867     | 0.885     |
+| qwen3-1.7b      | obscure_real_pop | 0.918  | 0.617            | 0.834      | 0.867     | 0.885     |
+| qwen3-4b-base   | obscure_real     | 0.940  | 0.589            | 0.861      | 0.815     | 0.801     |
+| qwen3-4b-base   | obscure_real_pop | 0.966  | 0.657            | 0.861      | 0.815     | 0.801     |
+| qwen3-4b        | obscure_real     | 0.916  | 0.603            | 0.821      | 0.829     | 0.831     |
+| qwen3-4b        | obscure_real_pop | 0.943  | 0.441            | 0.821      | 0.829     | 0.831     |
+
+- **Within relation the 4B reader is above popularity and both text baselines on both checkpoints, by a margin that does not grow with size on the base checkpoints and is not monotone on the post-trained ones.** On `obscure_real` it reads 0.957 and 0.927 against a popularity baseline of 0.905 and 0.863, margins of 0.051 and 0.063; `text_word` and `text_char` are at 0.568 and 0.555 and at 0.534 and 0.553. With the popularity bin matched (`obscure_real_pop`) it reads 0.960 and 0.925, margins of 0.055 and 0.061, where `qwen3-1.7b` was 0.006 below popularity. On the base checkpoints the margin over popularity is 0.120, 0.080 and 0.051 at 0.6B, 1.7B and 4B: the reader reads 0.919, 0.959 and 0.957, and the popularity baseline rises faster (0.799, 0.879, 0.905). On the post-trained checkpoints it is 0.157, 0.043 and 0.063, not monotone. The test known sides hold 87, 118 and 177 (base) and 72, 122 and 172 (post-trained) questions and the stored interval covers the pair draws only, so these margins are not measured differences between sizes.
+- **Pooled, the 4B reader is above the text baselines on both checkpoints.** On `obscure_real` it reads 0.940 and 0.916 against 0.815 and 0.801 (base) and 0.829 and 0.831 (post-trained), margins over the better text baseline of 0.125 and 0.085; it is also above popularity (0.861 and 0.821) and a random direction (0.589 and 0.603). On `obscure_real_pop` it reads 0.966 and 0.943, and the random direction of the post-trained run reads 0.441, below 0.5. The pooled text baselines fall with size on the base checkpoints (0.944 and 0.941, 0.873 and 0.873, 0.815 and 0.801 at 0.6B, 1.7B and 4B) and the pooled margin of the reader over the better one rises (0.004, 0.089, 0.125); on the post-trained checkpoints it is 0.021, 0.042 and 0.085. The text classifiers are fitted on the labeled questions of each model, so this is a change in the sets as much as in the reader.
+
+Other contrasts, as reader / `text_word` / `text_char` (`popularity` is not defined for them), with the 1.7B pair repeated. The relational contrasts are within relation:
+
+| Contrast                              | qwen3-1.7b-base       | qwen3-1.7b            | qwen3-4b-base         | qwen3-4b              |
+| ------------------------------------- | --------------------- | --------------------- | --------------------- | --------------------- |
+| fictional_generated (within relation) | 1.000 / 0.851 / 0.992 | 0.993 / 0.845 / 0.989 | 1.000 / 0.891 / 0.998 | 0.999 / 0.887 / 0.996 |
+| real_vs_synthal (within relation)     | 0.986 / 0.728 / 1.000 | 0.980 / 0.732 / 1.000 | 0.980 / 0.718 / 1.000 | 0.987 / 0.706 / 1.000 |
+| real_vs_generated (within relation)   | 0.986 / 0.954 / 0.999 | 0.968 / 0.952 / 0.999 | 0.985 / 0.953 / 0.999 | 0.983 / 0.951 / 0.999 |
+| pre_vs_post_cutoff                    | not read              | not read              | not read              | not read              |
+
+The others, pooled:
+
+| Contrast             | qwen3-1.7b-base       | qwen3-1.7b            | qwen3-4b-base         | qwen3-4b              |
+| -------------------- | --------------------- | --------------------- | --------------------- | --------------------- |
+| triviaqa_known       | 0.883 / 0.693 / 0.671 | 0.840 / 0.664 / 0.588 | 0.852 / 0.627 / 0.592 | 0.827 / 0.606 / 0.600 |
+| unknowable_detail    | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 |
+| false_premise        | 0.974 / 0.977 / 0.975 | 0.951 / 0.974 / 0.967 | 0.992 / 0.979 / 0.977 | 0.976 / 0.965 / 0.965 |
+| kuq_ambiguous        | 0.996 / 0.878 / 0.918 | 0.996 / 0.876 / 0.903 | 0.998 / 0.877 / 0.939 | 0.993 / 0.855 / 0.918 |
+| kuq_controversial    | 0.993 / 0.975 / 0.987 | 0.983 / 0.971 / 0.985 | 0.996 / 0.968 / 0.996 | 0.998 / 0.969 / 0.996 |
+| kuq_counterfactual   | 1.000 / 1.000 / 1.000 | 0.993 / 1.000 / 1.000 | 0.997 / 0.998 / 0.999 | 0.997 / 0.999 / 0.999 |
+| kuq_false_assumption | 0.993 / 0.978 / 0.991 | 0.981 / 0.964 / 0.980 | 0.993 / 0.984 / 0.994 | 0.992 / 0.954 / 0.986 |
+| kuq_future_unknown   | 1.000 / 0.992 / 0.986 | 0.999 / 0.990 / 0.981 | 0.999 / 0.991 / 0.989 | 0.998 / 0.993 / 0.988 |
+| kuq_unsolved_problem | 0.992 / 0.953 / 0.967 | 0.981 / 0.953 / 0.961 | 0.995 / 0.951 / 0.970 | 0.994 / 0.936 / 0.962 |
+
+- **The reader has a margin of 0.059 or more over the better text baseline on two contrasts, as on the other Qwen3 checkpoints.** `triviaqa_known`: the reader reads 0.852 and 0.827 against a better text baseline of 0.627 and 0.606, margins of 0.226 and 0.222 (0.191 and 0.176 at 1.7B), on test known sides of 87 and 84 questions. `kuq_ambiguous`: margins of 0.059 and 0.075 (0.079 and 0.092 at 1.7B). On every other cross-dataset contrast the largest margin over the better baseline is 0.032 (`kuq_unsolved_problem` on `qwen3-4b`).
+- **On `false_premise` the 4B reader is above the better text baseline, where the smaller Qwen3 checkpoints were below it.** It reads 0.992 and 0.976 against 0.979 and 0.965, margins of 0.013 and 0.011; on the four smaller checkpoints the reader was below the better baseline by 0.002 to 0.041. A margin of about 0.01 on 107 and 114 known test questions, with no interval over the test questions stored, is not shown to be a difference.
+- **On several contrasts the reader does not exceed the text baselines.** `unknowable_detail` is 1.000 for the reader and both baselines on both checkpoints. The two contrasts between kinds of unknown questions (`real_vs_synthal`, `real_vs_generated`) have `text_char` at 1.000 and 0.999, above the reader within relation (0.980 and 0.987 on `real_vs_synthal`, 0.985 and 0.983 on `real_vs_generated`) and pooled.
+- **Elsewhere the margin is small.** `fictional_generated` has the reader above `text_char` within relation by 0.002 and 0.003; four KUQ categories (`kuq_controversial`, `kuq_counterfactual`, `kuq_false_assumption`, `kuq_future_unknown`) are within 0.009 of the better baseline in either direction, and `kuq_unsolved_problem` is above it by 0.025 and 0.032. `pre_vs_post_cutoff` is not read on these checkpoints.
+- **Read these cross-dataset rows as a format contrast too.** The better text baseline is at 0.962 or above on every cross-dataset row of the 4B pair except `triviaqa_known` (0.627 and 0.606) and `kuq_ambiguous` (0.939 and 0.918), so a reader between 0.976 and 1.000 on the others (as the tables show them) does not show that it reads knowledge.
+- **What this does not show.** As above: popularity and the wording of the question are the only surface controls, each value is one set of five readers on one labeling run per checkpoint, and the question sets differ between models. Whether the reader predicts the errors of the 4B checkpoints better than their output confidence is the question of P9c.
 
 ### Error prediction (P9c)
 
@@ -2298,6 +2368,76 @@ What `probe` and `lat` add to the output confidence (the logistic stacker of the
 - **TriviaQA and NQ-open.** On TriviaQA `lat` reads 0.710 [0.623, 0.800] and 0.686 [0.608, 0.756], below `answer_logprob` on both (0.796 and 0.832). On NQ-open `lat` reads 0.858 [0.730, 0.959] against 0.867 [0.801, 0.929] at 0.6B and 0.861 [0.771, 0.939] against 0.834 [0.724, 0.923] at 1.7B, on 12 and 20 correct answers, with intervals 0.13 to 0.23 wide that overlap. Its increments over the confidence stack have intervals that include zero on both sets (TriviaQA +0.0033 [-0.0173, 0.0239] and -0.0053 [-0.0367, 0.0276], NQ-open +0.0063 [-0.0105, 0.0226] and +0.0276 [-0.0038, 0.0597]). The probe's increment excludes zero only for NQ-open at 1.7B (+0.0400 [0.0023, 0.0768]). The confidence stack of `qwen3-0.6b` is below `answer_logprob` alone on TriviaQA (0.735 against 0.796) and NQ-open (0.847 against 0.867), which is consistent with a stacker fitted on few correct answers (the test sets hold 38 and 12).
 - **What this does not show.** Each cell is one run of one checkpoint, the sets of correct answers are small outside PopQA, and the increments are pooled (no within-relation increment is stored). The result is that `lat` does not predict errors better than the output confidence on these two post-trained checkpoints; it does not say that the reader is useless, since it is label-free and above popularity as a point estimate.
 
+#### The Qwen3 4B pair
+
+P9c on `qwen3-4b-base` and `qwen3-4b` (runs `p9c/qwen3-4b-base/ab86a6dc49d2` and `p9c/qwen3-4b/4307bb435ab8`, made at `89ea7cb` with a clean tree on a rented GPU pod (NVIDIA RTX A6000), batch size 8, on the labels of the P9a run of the same checkpoint) has the same predictors and the same sizes of held-out sets (1,937 PopQA, 191 TriviaQA and 210 NQ-open questions) as above. The probe and `lat` read L23 on both checkpoints (chosen on the validation split of P9c). The 1.7B columns are those of the runs above, repeated so that the step in size is next to the 4B columns. A checkpoint answers different questions correctly (correct answers on PopQA: 264, 222, 337 and 297 of 1,937 in the column order below), so columns are separate rows of evidence and are never pooled.
+
+PopQA, within relation, AUROC with its interval:
+
+| Predictor          | qwen3-1.7b-base      | qwen3-1.7b           | qwen3-4b-base        | qwen3-4b             |
+| ------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| answer_logprob     | 0.883 [0.857, 0.907] | 0.855 [0.822, 0.887] | 0.914 [0.895, 0.931] | 0.873 [0.847, 0.899] |
+| probe              | 0.881 [0.856, 0.905] | 0.853 [0.820, 0.885] | 0.886 [0.858, 0.910] | 0.869 [0.840, 0.895] |
+| first_token_prob   | 0.879 [0.853, 0.902] | 0.842 [0.807, 0.875] | 0.910 [0.888, 0.929] | 0.864 [0.838, 0.891] |
+| neg_entropy        | 0.879 [0.853, 0.903] | 0.847 [0.812, 0.880] | 0.905 [0.884, 0.923] | 0.869 [0.843, 0.894] |
+| mean_token_logprob | 0.862 [0.831, 0.889] | 0.841 [0.807, 0.874] | 0.897 [0.875, 0.918] | 0.870 [0.842, 0.894] |
+| consistency        | 0.803 [0.763, 0.841] | 0.807 [0.760, 0.846] | 0.860 [0.830, 0.890] | 0.832 [0.800, 0.861] |
+| lat                | 0.848 [0.815, 0.877] | 0.814 [0.773, 0.850] | 0.879 [0.854, 0.902] | 0.859 [0.832, 0.885] |
+| p_true             | 0.776 [0.726, 0.821] | 0.772 [0.714, 0.825] | 0.794 [0.757, 0.831] | 0.763 [0.714, 0.811] |
+| popularity         | 0.776 [0.736, 0.815] | 0.749 [0.700, 0.795] | 0.813 [0.782, 0.846] | 0.782 [0.745, 0.822] |
+
+PopQA pooled over relations, as AUROC / AURC (lower AURC is better), and the risk at 20 percent coverage (error rate among the answered questions, with its interval):
+
+| Predictor                            | qwen3-1.7b-base      | qwen3-1.7b           | qwen3-4b-base        | qwen3-4b             |
+| ------------------------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| probe                                | 0.940 / 0.635        | 0.939 / 0.678        | 0.933 / 0.572        | 0.933 / 0.608        |
+| answer_logprob                       | 0.910 / 0.655        | 0.919 / 0.710        | 0.919 / 0.579        | 0.903 / 0.629        |
+| neg_entropy                          | 0.899 / 0.661        | 0.906 / 0.715        | 0.917 / 0.583        | 0.910 / 0.629        |
+| lat                                  | 0.879 / 0.679        | 0.857 / 0.731        | 0.878 / 0.610        | 0.862 / 0.656        |
+| template                             | 0.843 / 0.688        | 0.873 / 0.723        | 0.804 / 0.641        | 0.829 / 0.666        |
+| popularity                           | 0.648 / 0.748        | 0.640 / 0.784        | 0.671 / 0.688        | 0.650 / 0.724        |
+| error rate (risk at full coverage)   | 0.864                | 0.885                | 0.826                | 0.847                |
+| risk at 20% coverage, probe          | 0.456 [0.399, 0.523] | 0.531 [0.477, 0.593] | 0.376 [0.320, 0.430] | 0.418 [0.369, 0.474] |
+| risk at 20% coverage, answer_logprob | 0.492 [0.436, 0.546] | 0.552 [0.495, 0.603] | 0.384 [0.327, 0.433] | 0.443 [0.389, 0.497] |
+
+TriviaQA and NQ-open, pooled AUROC with its interval:
+
+| Predictor                | qwen3-1.7b-base      | qwen3-1.7b           | qwen3-4b-base        | qwen3-4b             |
+| ------------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| TriviaQA answer_logprob  | 0.819 [0.758, 0.878] | 0.832 [0.771, 0.888] | 0.831 [0.769, 0.882] | 0.731 [0.664, 0.797] |
+| TriviaQA neg_entropy     | 0.843 [0.784, 0.894] | 0.798 [0.730, 0.864] | 0.816 [0.753, 0.866] | 0.741 [0.674, 0.806] |
+| TriviaQA probe           | 0.811 [0.753, 0.868] | 0.808 [0.743, 0.865] | 0.785 [0.722, 0.846] | 0.789 [0.724, 0.846] |
+| TriviaQA lat             | 0.674 [0.601, 0.750] | 0.686 [0.608, 0.756] | 0.766 [0.698, 0.829] | 0.752 [0.682, 0.818] |
+| TriviaQA p_true          | 0.772 [0.701, 0.840] | 0.734 [0.657, 0.805] | 0.801 [0.737, 0.861] | 0.816 [0.756, 0.874] |
+| TriviaQA correct answers | 78 of 191            | 63 of 191            | 107 of 191           | 99 of 191            |
+| NQ-open answer_logprob   | 0.790 [0.697, 0.867] | 0.834 [0.724, 0.923] | 0.714 [0.618, 0.802] | 0.780 [0.698, 0.851] |
+| NQ-open neg_entropy      | 0.745 [0.659, 0.831] | 0.750 [0.668, 0.828] | 0.761 [0.689, 0.827] | 0.722 [0.631, 0.804] |
+| NQ-open probe            | 0.812 [0.742, 0.878] | 0.879 [0.811, 0.941] | 0.749 [0.672, 0.819] | 0.774 [0.703, 0.845] |
+| NQ-open lat              | 0.848 [0.777, 0.913] | 0.861 [0.771, 0.939] | 0.741 [0.666, 0.814] | 0.798 [0.729, 0.871] |
+| NQ-open p_true           | 0.694 [0.590, 0.787] | 0.599 [0.458, 0.722] | 0.693 [0.613, 0.770] | 0.781 [0.707, 0.847] |
+| NQ-open correct answers  | 38 of 210            | 20 of 210            | 46 of 210            | 38 of 210            |
+
+What `probe` and `lat` add to the output confidence (the logistic stacker of the five confidence columns against the same stacker plus the predictor, as a paired AUROC difference with its interval; pooled AUROCs):
+
+| Predictor                 | qwen3-1.7b-base         | qwen3-1.7b              | qwen3-4b-base           | qwen3-4b                |
+| ------------------------- | ----------------------- | ----------------------- | ----------------------- | ----------------------- |
+| PopQA confidence stack    | 0.900                   | 0.932                   | 0.922                   | 0.923                   |
+| PopQA + lat               | +0.002 [-0.002, +0.006] | -0.001 [-0.003, +0.002] | -0.001 [-0.002, +0.001] | +0.001 [-0.001, +0.004] |
+| PopQA + probe             | +0.044 [+0.028, +0.061] | +0.016 [+0.006, +0.026] | +0.020 [+0.010, +0.031] | +0.016 [+0.009, +0.024] |
+| TriviaQA confidence stack | 0.858                   | 0.837                   | 0.847                   | 0.792                   |
+| TriviaQA + lat            | -0.006 [-0.018, +0.006] | -0.005 [-0.037, +0.028] | 0.000 [-0.002, +0.002]  | +0.004 [-0.004, +0.012] |
+| TriviaQA + probe          | +0.013 [-0.004, +0.029] | +0.020 [-0.017, +0.058] | +0.010 [-0.009, +0.032] | +0.012 [-0.001, +0.026] |
+| NQ-open confidence stack  | 0.800                   | 0.866                   | 0.798                   | 0.807                   |
+| NQ-open + lat             | +0.047 [+0.015, +0.085] | +0.028 [-0.004, +0.060] | 0.000 [-0.029, +0.033]  | +0.027 [-0.004, +0.060] |
+| NQ-open + probe           | +0.036 [+0.007, +0.066] | +0.040 [+0.002, +0.077] | +0.008 [-0.010, +0.027] | +0.013 [-0.013, +0.042] |
+
+- **Within relation `lat` is below the output confidence on both 4B checkpoints, by a gap that is smaller than at 0.6B on both, equal to the 1.7B gap on the base checkpoint and smaller than it on the post-trained one, and its interval is separated from the popularity baseline.** It reads 0.879 [0.854, 0.902] on `qwen3-4b-base` and 0.859 [0.832, 0.885] on `qwen3-4b`, against 0.914 [0.895, 0.931] and 0.873 [0.847, 0.899] for `answer_logprob`, which is the best of the six confidence scores on both. The gap is -0.035 and -0.014 (-0.055 and -0.035 on the 0.6B and 1.7B base checkpoints, -0.086 and -0.041 on the post-trained ones), so on the base checkpoint it is the same at 1.7B and 4B at three decimals and on the post-trained ones it shrinks at each step; the intervals overlap at both and no paired interval is stored. The popularity baseline is 0.813 [0.782, 0.846] and 0.782 [0.745, 0.822]; the interval of `lat` lies above it on both (by 0.008 and 0.010 between the ends), where on the smaller checkpoints the intervals overlapped or touched. Within relation `lat` rises with size on both families (0.787, 0.848, 0.879 on the base checkpoints; 0.757, 0.814, 0.859 on the post-trained ones, at 0.6B, 1.7B and 4B), and so do `answer_logprob` (0.841, 0.883, 0.914; 0.843, 0.855, 0.873) and the popularity baseline (0.696, 0.776, 0.813; 0.637, 0.749, 0.782).
+- **The probe is below `answer_logprob` within relation and above it pooled, as before.** Within relation it reads 0.886 [0.858, 0.910] and 0.869 [0.840, 0.895] against 0.914 and 0.873. Pooled it reads 0.933 on both against 0.919 and 0.903, and the AURC is 0.572 and 0.608 against 0.579 and 0.629 (lower is better). The risk at 20 percent coverage is 0.376 [0.320, 0.430] and 0.418 [0.369, 0.474] for the probe against 0.384 [0.327, 0.433] and 0.443 [0.389, 0.497] for `answer_logprob`: each within the other's interval. Added to the confidence stack the probe raises the pooled AUROC by +0.020 [+0.010, +0.031] and +0.016 [+0.009, +0.024], with intervals above zero; the stack itself is 0.922 and 0.923 (0.900 and 0.932 at 1.7B), and the probe's gain on the base checkpoint is smaller at 4B than at 0.6B and 1.7B (+0.044 on both). `lat` adds -0.001 [-0.002, +0.001] and +0.001 [-0.001, +0.004], so it adds nothing that the confidence does not carry on PopQA.
+- **Pooled, `lat` is above the accuracy rate of the relation on both 4B checkpoints.** It reads 0.878 and 0.862 against 0.804 and 0.829 for `template`, and below `answer_logprob` (0.919 and 0.903). On the smaller checkpoints only `qwen3-1.7b-base` was above `template`.
+- **The 4B checkpoints make fewer errors on PopQA than the 1.7B ones.** The error rate of the greedy answer is 0.826 and 0.847 on the 4B checkpoints, against 0.864 and 0.885 at 1.7B, and the AURC of `answer_logprob` is 0.579 and 0.629 against 0.655 and 0.710.
+- **TriviaQA and NQ-open.** The sets hold 107 and 99 correct TriviaQA answers and 46 and 38 correct NQ-open answers, and the intervals are 0.11 to 0.19 wide, so the ordering of predictors there is within the intervals. On TriviaQA `lat` reads 0.766 [0.698, 0.829] and 0.752 [0.682, 0.818] against 0.831 and 0.731 for `answer_logprob`; on NQ-open it reads 0.741 and 0.798 against 0.714 and 0.780. Every increment of `lat` and of the probe over the confidence stack on these two sets has an interval that includes zero (the probe on TriviaQA at `qwen3-4b` has a lower bound of -0.001), where at 1.7B the NQ-open increments of `lat` (+0.047) and the probe (+0.036, +0.040) excluded it. The self-grade `p_true` is the highest predictor on TriviaQA at `qwen3-4b` (0.816 [0.756, 0.874]), with an interval that overlaps that of the probe and `answer_logprob`.
+- **What this does not show.** Each cell is one run of one checkpoint, the sets of correct answers are small outside PopQA, and the increments are pooled (no within-relation increment is stored). The result is that `lat` does not predict errors better than the output confidence on the 4B checkpoints either, and that the gap is smaller than at 0.6B in point estimate on both families and smaller than at 1.7B on the post-trained checkpoint only (the same on the base one); it does not say that the reader is useless, since it is label-free and its interval is separated from the popularity baseline within relation.
+
 ### Steering (P9d)
 
 P9d adds the `obscure_real` direction (PopQA known against PopQA unknown, logistic, 64 pairs, one layer chosen on the
@@ -2529,6 +2669,65 @@ log-probability of the gold answer (the other types have no gold answer on the u
   entropy on the known items on `gpt2-medium` and `gpt2-xl`, and the stored selectivity of the `gpt2-xl` run, made
   before the interval was oriented, agrees with a recomputation with the current code (every bound within 0.005). The
   runs are one per cell.
+
+#### The Qwen3 4B pair
+
+P9d on `qwen3-4b-base` and `qwen3-4b` (runs `p9d/qwen3-4b-base/7fe658a89920` and `p9d/qwen3-4b/c7949f5432e6`, made at `89ea7cb` with a clean tree on a rented GPU pod (NVIDIA RTX A6000), batch size 16, on the labels of the P9a run of the same checkpoint) uses the recipe above with the `fewshot` template only: the post-trained checkpoint has no concept-template run, so its row is compared with the `fewshot` rows of the smaller checkpoints. The base checkpoint is scored on the shift of the entropy and the post-trained one on abstention, which are different quantities. The stored selectivity tables of these two runs were made by the current code (the interval oriented by the sign of the unknown mean), so they are used as stored. The abstention indicator is still a phrase match whose 100-row sample (`hand_check.csv`) carries no human labels. P9d stores no perplexity or distinct-1 of the steered text, so this section has no fluency measure for the 4B runs; the side effects it shows are the movement of the known items and the false refusals. The 1.7B rows below are those of the runs above, repeated.
+
+Headline cell (unknown side of `obscure_real`), base checkpoints, shift mode: slope of the entropy per unit of relative coefficient, same columns as above.
+
+| Run (steered layer) | Validation AUROC | Direction, entropy      | random0 / 1 / 2, entropy | Min gap bound | Distinguishable |
+| ------------------- | ---------------- | ----------------------- | ------------------------ | ------------- | --------------- |
+| 1.7b base (L20)     | 0.966            | -5.882 [-6.095, -5.655] | 0.155 / 0.941 / 0.023    | 4.722         | yes             |
+| 4b base (L22)       | 0.961            | -5.226 [-5.508, -4.960] | 0.121 / 0.062 / -0.363   | 4.584         | yes             |
+
+Headline cell, post-trained checkpoints, abstention mode, `fewshot` template: slope of the share of abstentions per unit of relative coefficient.
+
+| Run (steered layer) | Validation AUROC | Direction, abstention   | random0 / 1 / 2, abstention | Min gap bound | Distinguishable |
+| ------------------- | ---------------- | ----------------------- | --------------------------- | ------------- | --------------- |
+| 1.7b post (L24)     | 0.943            | 0.040 [-0.031, 0.114]   | 0.388 / -0.017 / 0.095      | -0.481        | no              |
+| 4b post (L29)       | 0.913            | -0.648 [-0.779, -0.517] | 0.057 / -0.286 / -0.162     | 0.255         | yes             |
+
+Selectivity of the 4B runs, same columns as above (the 1.7B and 0.6B rows are in the tables above):
+
+| Run     | Type                | Outcome      | n (k / u) | Known  | Unknown | Gap [95% interval]      | Selective |
+| ------- | ------------------- | ------------ | --------- | ------ | ------- | ----------------------- | --------- |
+| 4b base | obscure_real        | entropy      | 100 / 100 | -3.253 | -5.226  | 1.972 [1.424, 2.521]    | yes       |
+| 4b base | obscure_real        | gold logprob | 100 / 100 | 0.557  | -3.866  | 3.309 [2.333, 4.329]    | yes       |
+| 4b base | fictional_generated | entropy      | 100 / 100 | -3.253 | -4.363  | 1.110 [0.562, 1.692]    | yes       |
+| 4b base | unknowable_detail   | entropy      | 100 / 60  | -2.870 | -3.158  | 0.288 [-0.163, 0.706]   | no        |
+| 4b base | false_premise       | entropy      | 100 / 83  | -2.870 | -2.461  | -0.410 [-0.851, -0.005] | no        |
+| 4b post | obscure_real        | abstention   | 100 / 100 | -0.212 | -0.648  | 0.436 [0.279, 0.598]    | yes       |
+| 4b post | fictional_generated | abstention   | 100 / 100 | -0.212 | -0.576  | 0.364 [0.224, 0.505]    | yes       |
+| 4b post | unknowable_detail   | abstention   | 100 / 60  | -0.048 | -0.206  | 0.159 [0.036, 0.284]    | yes       |
+| 4b post | false_premise       | abstention   | 100 / 83  | -0.048 | -0.209  | 0.162 [0.051, 0.279]    | yes       |
+
+Base checkpoints, the curve behind the slopes: shift of the entropy on `obscure_real` at the two ends of the grid for the direction (95 percent interval) and the range of the three random directions.
+
+| Run       | Side    | Direction at -0.4       | Direction at +0.4       | Random at -0.4 | Random at +0.4 |
+| --------- | ------- | ----------------------- | ----------------------- | -------------- | -------------- |
+| 1.7b base | known   | +3.861 [+3.630, +4.097] | -0.140 [-0.338, +0.051] | -0.04 to +0.20 | +0.17 to +0.49 |
+| 1.7b base | unknown | +1.618 [+1.447, +1.813] | -2.947 [-3.155, -2.715] | -0.35 to +0.07 | +0.09 to +0.39 |
+| 4b base   | known   | +2.611 [+2.288, +2.942] | -0.047 [-0.175, +0.095] | +0.17 to +0.30 | +0.22 to +0.25 |
+| 4b base   | unknown | +1.356 [+1.186, +1.539] | -2.747 [-2.989, -2.500] | +0.07 to +0.29 | +0.02 to +0.17 |
+
+Post-trained 4B checkpoint: abstention on the `obscure_real` items at the coefficient chosen on the calibration items (the end of the grid), as the change in the share of abstentions from the unsteered run (95 percent interval). The share of abstentions on the unknown items goes from 0.27 to 0.53, and the false refusals on the known items from 0.05 to 0.19.
+
+|                    | 4b post, fewshot     |
+| ------------------ | -------------------- |
+| Coefficient        | -0.4                 |
+| Direction, unknown | +0.26 [+0.18, +0.35] |
+| random0, unknown   | -0.07 [-0.13, -0.02] |
+| random1, unknown   | +0.07 [+0.03, +0.13] |
+| random2, unknown   | +0.01 [-0.03, +0.05] |
+| Direction, known   | +0.14 [+0.08, +0.22] |
+
+- **Distinguishable on both 4B checkpoints.** The base direction moves the entropy of the unknown questions by -5.226 [-5.508, -4.960] per unit coefficient; the largest absolute slope of a random arm is 0.363 and the smallest gap bound is 4.584. The post-trained direction moves abstention by -0.648 [-0.779, -0.517] against a largest random slope of 0.286, with a smallest gap bound of 0.255. Among the post-trained `fewshot` runs only `qwen3-4b` is distinguishable (smallest gap bounds -0.481 at 1.7B and -0.738 at 0.6B). Two random arms also move abstention on the unknown `obscure_real` items of `qwen3-4b`: `random1` has a slope of -0.286 [-0.395, -0.181] and `random2` of -0.162 [-0.264, -0.069], both intervals exclude zero, and both slopes are smaller than that of the direction (0.44 and 0.25 of it); `random0` has +0.057 [-0.019, +0.138]. On the other types the unknown-side random arms that exclude zero are `random1` on `fictional_generated` (-0.212 [-0.314, -0.114]) and `random1` and `random2` on `false_premise` (-0.129 [-0.215, -0.055] and -0.092 [-0.164, -0.029]); on `unknowable_detail` the intervals of the random arms reach zero at an end. On the known `obscure_real` items `random1` also excludes zero (-0.057 [-0.119, -0.010], against -0.212 for the direction).
+- **Selective is a separate result.** `qwen3-4b` is selective on all four types (gaps 0.436 [0.279, 0.598] on `obscure_real`, 0.364 on `fictional_generated`, 0.159 [0.036, 0.284] on `unknowable_detail` and 0.162 [0.051, 0.279] on `false_premise`). `qwen3-4b-base` is selective on `obscure_real` (entropy gap 1.972 [1.424, 2.521]) and `fictional_generated` (1.110 [0.562, 1.692]) and not on `unknowable_detail` (0.288 [-0.163, 0.706]); on `false_premise` the gap is -0.410 [-0.851, -0.005], an interval below zero, so the entropy of the known items moves more than that of the unknown ones there. The base checkpoints are selective on 4, 2 and 2 of the four types at 0.6B, 1.7B and 4B, which is not a trend in size.
+- **The known items move too.** On `qwen3-4b-base` the entropy slope on the known items is -3.253 [-3.721, -2.810], about 62 percent of the unknown-side slope (-5.226). The curve shows why: the entropy of the known items rises by +2.611 at -0.4 and changes by -0.047 at +0.4, while the unknown items rise by +1.356 and fall by -2.747; the random directions move the known items by at most +0.30 at the ends of the grid. On `qwen3-4b` the abstention slope on the known items is -0.212 [-0.310, -0.124], about a third of the unknown-side slope, and at the coefficient -0.4 the false refusals on the known questions rise by +0.14 [+0.08, +0.22], against +0.26 [+0.18, +0.35] on the unknown ones. The random arms move the unknown questions by -0.07, +0.07 and +0.01, so at this coefficient the largest random effect is 0.07 in absolute value against +0.26 for the direction. The coefficient is the end of the grid, so the grid does not show where the effect stops growing.
+- **Gold-answer log-probability (base).** On the known items the slope is 0.557 [0.099, 0.996]; on the unknown items it is -3.866 [-4.774, -2.932]; the gap is 3.309 [2.333, 4.329] (4.290 at 1.7B, 2.861 at 0.6B). The absolute gaps of the direction against the three random arms have lower bounds of 2.830, 2.637 and 2.792, all above zero, so on the 4B base checkpoint the gold-answer log-probability moves distinguishably as well, as on `qwen3-1.7b-base` (lower bounds 3.318 to 3.613 in its stored dose table) and unlike the GPT-2 sizes, where the gaps include zero or clear it only just. Like the entropy, it is defined only on the questions that have a gold answer.
+- **Size.** The entropy slopes of the base checkpoints (-4.099, -5.882 and -5.226 at 0.6B, 1.7B and 4B) are in the units of each model's own entropy and are not compared across models. The validation AUROC of the direction at the steered layer is 0.934, 0.966 and 0.961 on the base checkpoints and 0.922, 0.943 and 0.913 on the post-trained `fewshot` ones, so it rises from 0.6B to 1.7B and does not rise from 1.7B to 4B.
+- **What this does and does not show.** On the headline outcome the direction moves abstention (post-trained, `fewshot`) or entropy (base) more than a random direction of the same norm does, at 4B on both checkpoints and at 1.7B on the base checkpoint only (the 1.7B post-trained `fewshot` run is not distinguishable). It is not shown to be a control of what the model knows: the known items move too (false refusals +0.14), two of the three random arms also move abstention on `qwen3-4b`, the effect is largest at the end of the grid, and the abstention indicator is a phrase match whose errors were not measured. The runs are one per cell, there is no concept-template run for the 4B post-trained checkpoint, and base and post-trained results answer different questions.
 
 ## Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5, LR1)
 
@@ -3600,6 +3799,18 @@ The A1 and A2 runs of `gpt2-medium`, `gpt2-large` and `gpt2-xl`, the P2 runs of 
 
 The 22 runs of chain 14 were made at `f4d414d` with a clean tree on a rented GPU pod (NVIDIA RTX A4500, torch 2.14.1+cu130, transformers 5.19.0), with the default config of each experiment on that commit except where noted below (`config.json` of each run): M1, C2 and P7 on `gpt2-large`, `gpt2-xl` and the Qwen3 1.7B pair, C4 on the Qwen3 1.7B pair, C5 on `gpt2-large`, `gpt2-xl` and the Qwen3 1.7B pair, and P2 and P5 on `gpt2-large` and `gpt2-xl`. The batch size is 16 for M1, C2, C4, C5 and P7 and 8 for P2 and P5, and the time between `started_at` and `finished_at` of the stored `meta.json` is 830 s (`c5/qwen3-1.7b/52057b2ddc30`) to 5,541 s (`p7/qwen3-1.7b/eacde3abd0aa`). The config hashes of the 22 runs were recomputed from the config defaults of `0353db7` (the commit this document is written against; two refactors of the C2, C4, C5, M1 and P7 modules sit between `f4d414d` and it) and all 22 agree with the stored ones. The config values that are not defaults are the C4 `lorra_run`, which names the LR1 run it reads, and the C5 `n_pool` (1,000) and `c2_run`, which names the C2 run it reads; the exported configs rewrite those path fields, so the hash of an exported C4 or C5 config differs from its stored hash. Against the earlier tracked runs of the same checkpoints, the configs of the Qwen3 1.7B C2, C4, C5 and P7 runs differ in `n_random` (absent earlier, 3 now) and, for C5, in the C2 run read; the Qwen3 M1 configs differ in `fluency` (off earlier, on now); and the `gpt2-xl` C5 config differs in `n_random` and in `c2_run` (none earlier). The P2 and P5 code is unchanged since `fb3b5dd`. Exporting these runs changed no tracked result.
 
+The 8 runs of chain 17 that cover P9 on the Qwen3 4B pair (P9a to P9d on `qwen3-4b-base` and `qwen3-4b`) were made at `89ea7cb` with a clean tree on a rented GPU pod (NVIDIA RTX A6000 48 GB, torch 2.14.1+cu130, transformers 5.19.0), with the default config of each experiment on that commit except one field (`config.json` of each run): the batch size is 8 for P9a, P9b and P9c and 16 for P9d, and `p9b/qwen3-4b/5481dab673d4` ran at batch size 4 after the batch size 8 attempt was killed by the out-of-memory killer of the container. The batch size is a config field, so the retry has its own hash; the default P9b config for `qwen3-4b` would have the hash `ecbd8e8a1b1b`, which is the unfinished attempt and is not exported. The P9a configs keep the default `cutoff_year` (2017), where the other Qwen3 P9a runs set 2024. The time between `started_at` and `finished_at` of the stored `meta.json` is 972 s (`p9d/qwen3-4b-base/7fe658a89920`) to 36,819 s (`p9b/qwen3-4b-base/91d3fe92e1c9`). The config hashes of the eight runs were recomputed from the original `config.json` of each run with the code of `86c319b` (since `89ea7cb` only P10 files changed under `src/tomography/experiments/`) and all eight agree with the stored ones; the exported configs rewrite the `labels_run` path of P9b, P9c and P9d, so the hash of an exported config of those differs from its stored hash. Exporting these runs changed no tracked result.
+
+Config hashes (12 hex digits), P9 on the Qwen3 4B pair:
+
+| Experiment  | qwen3-4b-base | qwen3-4b                    |
+| ----------- | ------------- | --------------------------- |
+| P9a         | 25d7cc240fef  | 7bd160f5a7e0                |
+| P9b         | 91d3fe92e1c9  | 5481dab673d4 (batch size 4) |
+| P9c         | ab86a6dc49d2  | 4307bb435ab8                |
+| P9d fewshot | 7fe658a89920  | c7949f5432e6                |
+| P9d concept | not run       | not run                     |
+
 
 Config hashes (12 hex digits), GPT-2:
 
@@ -3738,5 +3949,6 @@ Not in this document yet. No dates are promised.
 - P9: a hand check of the abstention indicator of P9d (the stored samples carry no human labels), an item-level
   interval for the P9b AUROC (only the interval over the pair draws is stored), and a within-relation increment of
   the probe over the output confidence in P9c (only the pooled increment is stored).
+- P9d with the concept template on `qwen3-4b` (the 4B pair ran with the `fewshot` template only).
 - A5, reading directions against Qwen-Scope SAE decoders.
 
