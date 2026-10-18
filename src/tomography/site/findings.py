@@ -797,6 +797,8 @@ def approximate_answers(store: Store) -> Finding | None:
                     )
         if marks:
             r_rows.append(svg.Row(model, tuple(marks), group=_family(model)))
+    read_values = [0.5, 1.0] + [m.value for r in r_rows for m in r.marks]
+    read_domain, read_ticks = _axis(read_values)
     link_figure = _links_figure(store)
     if not b_rows and not r_rows and link_figure is None:
         return None
@@ -837,8 +839,8 @@ def approximate_answers(store: Store) -> Finding | None:
                         "AUROC on held-out durations",
                         tuple(r_rows),
                         reader_styles,
-                        (0.4, 1.0),
-                        (0.4, 0.6, 0.8, 1.0),
+                        read_domain,
+                        read_ticks,
                         stagger=True,
                         refs=((0.5, "chance"),),
                     ),
@@ -973,7 +975,7 @@ def sentiment_steering(store: Store) -> Finding | None:
             ),
             svg.LinePanel(
                 f"c1-{family}-ppl",
-                f"{name}: perplexity relative to unsteered text",
+                f"{name}: perplexity ratio",
                 lines("ratio"),
                 y_domain=(0.8, float(top)),
                 y_ticks=tuple(
@@ -988,7 +990,7 @@ def sentiment_steering(store: Store) -> Finding | None:
             ),
             svg.LinePanel(
                 f"c1-{family}-distinct",
-                f"{name}: distinct-1 (share of unique words)",
+                f"{name}: distinct-1",
                 lines("distinct"),
                 y_domain=(0.0, d_top),
                 y_ticks=tuple(

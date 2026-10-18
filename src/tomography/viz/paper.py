@@ -16,7 +16,7 @@ from typing import cast
 import matplotlib as mpl
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.text import Text
+from matplotlib.text import Annotation
 
 FULL_WIDTH = 5.5
 HALF_WIDTH = 2.7
@@ -163,7 +163,7 @@ def size_ramp(family_key: str, count: int) -> list[str]:
     return colors
 
 
-def panel_letter(ax: Axes, letter: str) -> Text:
+def panel_letter(ax: Axes, letter: str) -> Annotation:
     """Writes the bold panel letter above the top left corner of an axes.
 
     Args:
@@ -173,11 +173,12 @@ def panel_letter(ax: Axes, letter: str) -> Text:
     Returns:
         The text artist.
     """
-    return ax.text(
-        0.0,
-        1.02,
+    return ax.annotate(
         f"({letter})",
-        transform=ax.transAxes,
+        xy=(0.0, 1.0),
+        xycoords="axes fraction",
+        xytext=(0, 5),
+        textcoords="offset points",
         fontsize=LETTER,
         fontweight="bold",
         ha="right",
