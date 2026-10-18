@@ -630,8 +630,9 @@ variant scored on the paper items, and the random series of the 16 variants on t
 | qwen3-1.7b-base | 0.889 to 0.975                | 0.857 to 0.956                | 0.518 to 0.674      |
 | qwen3-1.7b      | 0.762 to 0.943                | 0.708 to 0.890                | 0.509 to 0.620      |
 
-The lowest and the highest cell of the full 16 by 16 transfer matrix off the diagonal (reader of the first variant
-scored on the items of the second):
+The lowest and the highest cell of the 16 by 16 transfer matrix of the 16 variants every model has, off the diagonal
+(the stored matrix is 17 by 17 on `gpt2`, `qwen3-0.6b-base` and `qwen3-1.7b-base`, and the cells of `no_trailing_space`
+are left out; reader of the first variant scored on the items of the second):
 
 | Model           | Lowest cell: trained on, scored on | Highest cell: trained on, scored on       |
 | --------------- | ---------------------------------- | ----------------------------------------- |
@@ -829,20 +830,21 @@ Lowest and highest variant among the 16, with the random series of that variant 
   `pca_diff` (`no_template`, `concept_swap_3`); the paper variant of the `pca_diff` run is itself below its random
   series, so a variant above its interval is not thereby a reader.
 
-- **Random and shuffled series.** The shuffled series is between 0.473 and 0.530 on all 96 cells of the three models and
-  both finders. With logistic the reader is above the random series of its cell on all 16 variants, by at least 0.274 on
-  the base checkpoint and 0.214 on the post-trained one. With `pca_diff` it is not. On the base checkpoint the reader is
-  at or below the random series in 8 of 16 cells (the smallest margin is -0.055, `neutral_frame`) and its interval lies
-  entirely above the random value in 4 cells (`paper`, `paraphrase_0`, `paraphrase_1`, `paraphrase_2`) and entirely
-  below it in 5. On the post-trained checkpoint the reader is at or below the random series in 14 of 16 cells (smallest
-  margin -0.084, `paraphrase_2`), its interval lies entirely below the random value in 10 cells and entirely above it in
-  none, and the highest variant, `no_template` (0.597), has a random series of 0.599. The random value of a variant has
-  no interval in the committed files, so these comparisons put a reader against one number and are not tests. On
-  `gpt2-large` the logistic reader is above the random series of its cell on all 16 variants (the smallest margin is
-  0.252, `concept_swap_1`). With `pca_diff` it is at or below the random series in 13 of 16 cells (smallest margin
-  -0.092, `scaffold_2`), its interval lies entirely below the random value in 12 cells and entirely above it in none,
-  and the highest variant, `no_template` (0.657), has a random series of 0.610 and an interval [0.571, 0.709] that
-  contains it.
+- **Random and shuffled series.** The shuffled series is between 0.473 and 0.530 on the 32 cells of `gpt2-large`,
+  between 0.476 and 0.515 on those of `qwen3-1.7b-base` and between 0.482 and 0.519 on those of `qwen3-1.7b` (16
+  variants, both finders). With logistic the reader is above the random series of its cell on all 16 variants, by at
+  least 0.274 on the base checkpoint and 0.214 on the post-trained one. With `pca_diff` it is not. On the base
+  checkpoint the reader is at or below the random series in 8 of 16 cells (the smallest margin is -0.055,
+  `neutral_frame`) and its interval lies entirely above the random value in 4 cells (`paper`, `paraphrase_0`,
+  `paraphrase_1`, `paraphrase_2`) and entirely below it in 5. On the post-trained checkpoint the reader is at or below
+  the random series in 14 of 16 cells (smallest margin -0.084, `paraphrase_2`), its interval lies entirely below the
+  random value in 10 cells and entirely above it in none, and the highest variant, `no_template` (0.597), has a random
+  series of 0.599. The random value of a variant has no interval in the committed files, so these comparisons put a
+  reader against one number and are not tests. On `gpt2-large` the logistic reader is above the random series of its
+  cell on all 16 variants (the smallest margin is 0.252, `concept_swap_1`). With `pca_diff` it is at or below the random
+  series in 13 of 16 cells (smallest margin -0.092, `scaffold_2`), its interval lies entirely below the random value in
+  12 cells and entirely above it in none, and the highest variant, `no_template` (0.657), has a random series of 0.610
+  and an interval [0.571, 0.709] that contains it.
 
 The `bare` variant, the sentence with nothing around it:
 
@@ -873,12 +875,13 @@ The paper reader and the bare reader scored on each other's items:
   0.501 (random 0.572); their cosines with the paper reader are 0.274 and 0.043, and the cosines between the bare
   directions of two draws are 0.416 and 0.257.
 
-- **Cross-scoring.** The `pca_diff` paper reader scored on bare items reaches 0.898 on the base checkpoint (logistic
-  0.906) and 0.574 on the post-trained one (logistic 0.886); the bare `pca_diff` reader scored on paper items reaches
-  0.510 and 0.541. On the base checkpoint the direction fitted under the paper template reads the bare items at a level
-  close to that of the logistic paper reader, while the direction fitted on the bare items is at the level of the random
-  series. On `gpt2-large` the logistic paper reader reaches 0.855 on bare items and the bare logistic reader 0.779 on
-  paper items; with `pca_diff` they reach 0.513 and 0.521.
+- **Cross-scoring.** The `pca_diff` paper reader scored on bare items reaches 0.898 on the base checkpoint (random
+  0.515; logistic 0.906, random 0.518) and 0.574 on the post-trained one (random 0.525; logistic 0.886, random 0.556);
+  the bare `pca_diff` reader scored on paper items reaches 0.510 and 0.541. On the base checkpoint the direction fitted
+  under the paper template reads the bare items at a level close to that of the logistic paper reader, while the
+  direction fitted on the bare items is at the level of the random series. On `gpt2-large` the logistic paper reader
+  reaches 0.855 on bare items and the bare logistic reader 0.779 on paper items (random 0.504); with `pca_diff` they
+  reach 0.513 and 0.521 (random 0.572).
 
 The concept-swap and wording variants, as ranges over the variants of the kind, with the random series and the cosine
 with the paper reader over the same variants:
@@ -921,8 +924,9 @@ with the paper reader over the same variants:
 
 Transfer between variants. The paper reader scored on the items of each of the 15 other variants, the reader of each
 variant scored on the paper items, the random series of the 16 variants on their own items, and the lowest and the
-highest cell of the whole transfer matrix off the diagonal (16 by 16, and 17 by 17 where `no_trailing_space` was run;
-reader of the first variant scored on the items of the second):
+highest cell of the whole transfer matrix off the diagonal (16 by 16, and 17 by 17 where `no_trailing_space` was run, so
+these two columns can include it while the first three do not; reader of the first variant scored on the items of the
+second):
 
 | Model           | Finder   | Paper reader on variant items | Variant reader on paper items | Random, 16 variants | Lowest cell: trained on, scored on    | Highest cell: trained on, scored on       |
 | --------------- | -------- | ----------------------------- | ----------------------------- | ------------------- | ------------------------------------- | ----------------------------------------- |
@@ -1083,16 +1087,16 @@ other pairs.
   base checkpoint (random 0.646, shuffled 0.490) against 0.969 [0.961, 0.976] with logistic, and 0.864 [0.836, 0.890] on
   the post-trained one (random 0.615, shuffled 0.495) against 0.934 [0.924, 0.946]. Across the variants the span is
   0.475 on the base checkpoint (0.525 to 1.000) and 0.436 on the post-trained one (0.531 to 0.966) with `pca_diff`,
-  against 0.224 and 0.153 with logistic. Of the other variants, 2 lie entirely above and 13 entirely below the paper
-  interval with `pca_diff` on the base checkpoint (2 and 12 with logistic), and 5 and 5 on the post-trained one (5 and
-  4). With `pca_diff` the smallest margin of a variant over its random series is -0.063 on the base checkpoint
-  (`no_chat_tags`, 0.525) and -0.034 on the post-trained one (`no_chat_tags`, 0.531), against 0.234 and 0.263 with
-  logistic. The test set is 59 pairs and the intervals cover the training draw only. On `gpt2-large` the `pca_diff`
-  paper reader reads truth at 0.534 [0.527, 0.541] (L2, random 0.517, shuffled 0.514) against 0.653 [0.629, 0.678] (L23)
-  with logistic. The span across the variants is 0.044 (0.495 to 0.539) with `pca_diff` and 0.137 (0.615 to 0.753) with
-  logistic; 0 variants lie entirely above and 7 entirely below the paper interval with `pca_diff` (2 and 0 with
-  logistic), and the smallest margin of a variant over its random series is -0.039 (`no_chat_tags`, 0.495) with
-  `pca_diff` and 0.095 with logistic.
+  against 0.224 and 0.153 with logistic. Of the other variants (16 on the base checkpoint and `gpt2-large`, 15 on the
+  post-trained one), 2 lie entirely above and 13 entirely below the paper interval with `pca_diff` on the base
+  checkpoint (2 and 12 with logistic), and 5 and 5 on the post-trained one (5 and 4). With `pca_diff` the smallest
+  margin of a variant over its random series is -0.063 on the base checkpoint (`no_chat_tags`, 0.525) and -0.034 on the
+  post-trained one (`no_chat_tags`, 0.531), against 0.234 and 0.263 with logistic. The test set is 59 pairs and the
+  intervals cover the training draw only. On `gpt2-large` the `pca_diff` paper reader reads truth at 0.534 [0.527,
+  0.541] (L2, random 0.517, shuffled 0.514) against 0.653 [0.629, 0.678] (L23) with logistic. The span across the
+  variants is 0.044 (0.495 to 0.539) with `pca_diff` and 0.137 (0.615 to 0.753) with logistic; 0 variants lie entirely
+  above and 7 entirely below the paper interval with `pca_diff` (2 and 0 with logistic), and the smallest margin of a
+  variant over its random series is -0.039 (`no_chat_tags`, 0.495) with `pca_diff` and 0.095 with logistic.
 
 - **Emotions.** The paper readers of the six emotions read at 0.964 to 1.000 on the base checkpoint and 0.928 to 0.998
   on the post-trained one with logistic, and at 0.917 to 1.000 and 0.822 to 1.000 with `pca_diff`. The random series of
@@ -1107,8 +1111,9 @@ other pairs.
   and the six emotions (0.822 to 1.000) above their random series but does not read sentiment above its random series
   (0.534, random 0.550). On the base checkpoint it reads sentiment at 0.846, truth at 0.947 and the emotions at 0.917 to
   1.000. The runs do not say why sentiment fails on the post-trained checkpoint. On `gpt2-large` the `pca_diff` paper
-  reader does not read sentiment above its random series (0.495, random 0.566), reads truth only slightly above its own
-  (0.534, random 0.517), and reads the six emotions above their random series (0.772 to 0.987).
+  reader does not read sentiment above its random series (0.495, random 0.566), reads truth at 0.534 (random 0.517 in
+  this run; the random direction of the P4 reference cell is 0.534), within 0.02 of the random series, and reads the six
+  emotions above their random series (0.772 to 0.987).
 
 The function framing (`framing_swap`) of each emotion, trained at the response position and scored on its own items:
 
