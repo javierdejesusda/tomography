@@ -4,10 +4,14 @@ P10b reads a direction that separates questions whose true answer is a range
 (aleatoric) from questions with one exact answer. Two links are measured on
 finished runs, so no earlier config hash changes.
 
-Knowledge: P9b reads directions that separate known from unknown questions
-(epistemic). Are the two kinds of direction the same, opposite or unrelated in
-one model? The cosine between the stored directions answers it layer by
-layer, and so does the AUROC of each stored P9 reader on the P10 items.
+Knowledge: P9b reads one direction per contrast of labeled questions. A
+"knowledge" contrast has the known questions on its positive side and
+unknown ones on its negative side. An "unknown_type" contrast sets one kind
+of unknown against another, with the real or pre-cutoff questions on its
+positive side. How is the range direction related to each of them in one
+model? The cosine between the stored directions answers it layer by layer,
+and so does the AUROC of each stored P9 reader on the P10 items. Every row
+carries the kind of contrast of its P9 type.
 
 Behavior: within one kind of question, does the P10b score of a test item
 predict how often the model hedges (answers with a range) on the P10a run?
@@ -69,9 +73,17 @@ from tomography.viz.style import save_figure
 from tomography.viz.style import style_context
 
 READER_PARTS: Final = 2
-COSINE_COLUMNS: Final = ("p9_type", "layer", "cosine", "band_lo", "band_hi")
+COSINE_COLUMNS: Final = (
+    "p9_type",
+    "contrast",
+    "layer",
+    "cosine",
+    "band_lo",
+    "band_hi",
+)
 KNOWLEDGE_COLUMNS: Final = (
     "p9_type",
+    "contrast",
     "layer",
     "items",
     "test_family",
@@ -105,6 +117,7 @@ BAND_PERCENTILES: Final = (2.5, 97.5)
 ALL_ITEMS: Final = "all"
 TEST_ITEMS: Final = "test"
 KNOWLEDGE_CONCEPT: Final = "knowledge"
+CONTRASTS: Final = ("knowledge", "unknown_type")
 
 Row = dict[str, object]
 Record = dict[str, Any]
@@ -211,18 +224,27 @@ class P9bRun:
         path: The run directory, as given.
         config_hash: The hash of the run's config.
         config: The run's config as JSON values.
-        types: The contrast of each reader, in the order of the arrays.
+        types: The contrast each reader was fitted on, in the order of the
+            arrays.
+        contrasts: The kind of each contrast in `types`, one of `CONTRASTS`.
+            A "knowledge" contrast has the known questions on its positive
+            side. An "unknown_type" contrast has the real unknowns
+            (real_vs_synthal, real_vs_generated) or the pre-cutoff unknowns
+            (pre_vs_post_cutoff) on its positive side, see
+            `tomography.p9.unknowns.TypePool`.
         layers: The layer index of each layer slice.
         directions: Unit directions of shape (N, K, d), one reader per type.
         means: The vectors subtracted before projecting, shape (N, K, d).
-        signs: The orientation per type and layer, shape (N, K), +1 when a
-            positive projection means known.
+        signs: The orientation per type and layer, shape (N, K): a reader
+            scores the positive side of its contrast higher when the
+            direction is multiplied by the sign.
     """
 
     path: str
     config_hash: str
     config: Record
     types: tuple[str, ...]
+    contrasts: tuple[str, ...]
     layers: tuple[int, ...]
     directions: NDArray[np.float32]
     means: NDArray[np.float32]
@@ -345,13 +367,29 @@ def load_p9b(path: str | Path, *, model: str) -> P9bRun:
         The run contents.
 
     Raises:
-        ValueError: If the run cannot be linked (see `_open_finished`) or its
-            arrays disagree with its types and layers.
+        ValueError: If the run cannot be linked (see `_open_finished`), its
+            summary gives no kind of contrast to a type or a kind that is not
+            in `CONTRASTS`, or its arrays disagree with its types and layers.
     """
     run_dir = _open_finished(
-        path, model=model, files=["readers.npz", "readers.json"]
+        path,
+        model=model,
+        files=["readers.npz", "readers.json", "summary.json"],
     )
     types = tuple(cast(Record, run_dir.read_json("readers"))["types"])
+    stored = cast(Record, run_dir.read_json("summary")).get("contrasts")
+    if stored is None:
+        raise ValueError(f"{path}: the summary has no contrasts")
+    for name in types:
+        if name not in stored:
+            raise ValueError(
+                f"{path}: the summary has no contrast for {name!r}"
+            )
+        if stored[name] not in CONTRASTS:
+            raise ValueError(
+                f"{path}: the contrast {stored[name]!r} of {name!r} is not "
+                f"one of {CONTRASTS}"
+            )
     arrays = run_dir.read_arrays("readers")
     layers = tuple(int(layer) for layer in arrays["layers"])
     shape = (len(types), len(layers))
@@ -370,6 +408,7 @@ def load_p9b(path: str | Path, *, model: str) -> P9bRun:
         config_hash=str(run_dir.meta["config_hash"]),
         config=run_dir.config,
         types=types,
+        contrasts=tuple(stored[name] for name in types),
         layers=layers,
         directions=arrays["directions"],
         means=arrays["means"],
@@ -515,10 +554,11 @@ def cosine_rows(
 
     At each layer the cosine is taken between the oriented P10b direction
     (positive means range) and the oriented direction of a P9 reader
-    (positive means known). The band holds the 2.5th and 97.5th percentiles
-    of the cosine between the P10b direction and `n_random` random unit
+    (positive means the positive side of its contrast, see
+    `P9bRun.contrasts`). The band holds the 2.5th and 97.5th percentiles of
+    the cosine between the P10b direction and `n_random` random unit
     vectors, seeded per layer. A negative cosine outside the band means the
-    range direction points toward what the P9 reader calls unknown.
+    range direction points toward the negative side of that contrast.
 
     The stored P10b direction is the one of draw 0 fitted on the full train
     set, not an average over the draws.
@@ -536,7 +576,7 @@ def cosine_rows(
         ValueError: If a direction is a zero vector.
     """
     range_side = oriented(p10b.directions, p10b.signs)
-    known_side = oriented(p9b.directions, p9b.signs)
+    p9_side = oriented(p9b.directions, p9b.signs)
     bands: list[tuple[float, float]] = []
     units: list[NDArray[np.float64]] = []
     for k, layer in enumerate(p10b.layers):
@@ -553,11 +593,12 @@ def cosine_rows(
     for t, name in enumerate(p9b.types):
         for k, layer in enumerate(p10b.layers):
             other = _unit_vector(
-                known_side[t, k], f"the P9 direction of {name} at layer {layer}"
+                p9_side[t, k], f"the P9 direction of {name} at layer {layer}"
             )
             rows.append(
                 {
                     "p9_type": name,
+                    "contrast": p9b.contrasts[t],
                     "layer": layer,
                     "cosine": float(units[k] @ other),
                     "band_lo": bands[k][0],
@@ -667,7 +708,8 @@ def knowledge_rows(
     """Scores the P10 items with every P9 reader and ranks range over exact.
 
     The AUROC has the range items as the positive class and the P9 score as
-    stored, so a value below 0.5 means the range items read as less known.
+    stored, so a value below 0.5 means the range items score toward the
+    negative side of the contrast.
     No P10 item trained a P9 reader, so the "all" rows use every split; the
     "test" rows use the test split only. The interval resamples items. The
     random band holds the 2.5th and 97.5th percentiles of the AUROC of
@@ -718,6 +760,7 @@ def knowledge_rows(
                 result.append(
                     {
                         "p9_type": name,
+                        "contrast": p9b.contrasts[t],
                         "layer": layer,
                         "items": subset,
                         "test_family": family,
@@ -1134,7 +1177,7 @@ def execute(
             "cosine": {
                 name: {
                     key: _at_layer(cosine, p10b.layer, p9_type=name)[0][key]
-                    for key in ("cosine", "band_lo", "band_hi")
+                    for key in ("contrast", "cosine", "band_lo", "band_hi")
                 }
                 for name in types
             },
@@ -1142,6 +1185,7 @@ def execute(
                 name: {
                     key: row[key]
                     for key in (
+                        "contrast",
                         "n_range",
                         "n_exact",
                         "auroc",

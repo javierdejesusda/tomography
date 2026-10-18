@@ -27,6 +27,7 @@ from tomography.experiments.sweep import chat_format_for
 from tomography.knowledge import DEFAULT_SHOTS
 from tomography.knowledge import few_shot_prompt
 from tomography.model import LoadedModel
+from tomography.p9.unknowns import UNKNOWN_TYPES
 from tomography.templates import ChatFormat
 
 PINNED_HASH = "ff466673e0c1"
@@ -235,6 +236,10 @@ def _write_p10b(
     return run_dir
 
 
+def _contrast_of(name: str) -> str:
+    return "unknown_type" if name in UNKNOWN_TYPES else "knowledge"
+
+
 def _write_p9b(
     root: Path,
     *,
@@ -247,6 +252,7 @@ def _write_p9b(
     width: int = WIDTH,
     finished: bool = True,
     config: P9bConfig | None = None,
+    summary: dict[str, object] | None = None,
 ) -> RunDir:
     config = config or P9bConfig(
         model=model, labels_run="labels", template="fewshot", n_shots=3
@@ -267,6 +273,17 @@ def _write_p9b(
         layers=np.asarray(layers, dtype=np.int64),
     )
     run_dir.write_json("readers", {"types": list(types)})
+    contrasts = {name: _contrast_of(name) for name in types}
+    run_dir.write_json(
+        "summary",
+        summary
+        if summary is not None
+        else {
+            "types": list(types),
+            "contrasts": contrasts,
+            "known_contrasts": "knowledge" in contrasts.values(),
+        },
+    )
     if finished:
         run_dir.finalize()
     return run_dir
@@ -384,6 +401,48 @@ def test_the_p9b_run_gives_the_types_and_the_arrays(tmp_path: Path) -> None:
     assert run.config_hash == written.meta["config_hash"]
 
 
+def test_the_p9b_run_gives_the_contrast_of_each_type(tmp_path: Path) -> None:
+    types = ("obscure_real", "real_vs_synthal", "pre_vs_post_cutoff")
+    written = _write_p9b(tmp_path, types=types)
+
+    run = p10c_links.load_p9b(written.path, model="tiny")
+
+    assert run.types == types
+    assert run.contrasts == ("knowledge", "unknown_type", "unknown_type")
+
+
+def _without_contrasts(types: Sequence[str]) -> dict[str, object]:
+    return {"types": list(types)}
+
+
+def _missing_a_type(types: Sequence[str]) -> dict[str, object]:
+    return {"contrasts": {types[0]: "unknown_type"}}
+
+
+def _with_another_kind(types: Sequence[str]) -> dict[str, object]:
+    return {"contrasts": {name: "mixed" for name in types}}
+
+
+@pytest.mark.parametrize(
+    ("summary", "message"),
+    [
+        (_without_contrasts, "no contrasts"),
+        (_missing_a_type, "no contrast for 'real_vs_generated'"),
+        (_with_another_kind, "'mixed'"),
+    ],
+    ids=["no contrasts", "type without contrast", "unknown contrast kind"],
+)
+def test_a_p9b_run_without_a_usable_contrast_per_type_is_refused(
+    summary: Callable[[Sequence[str]], dict[str, object]],
+    message: str,
+    tmp_path: Path,
+) -> None:
+    written = _write_p9b(tmp_path, summary=summary(TYPES))
+
+    with pytest.raises(ValueError, match=message):
+        p10c_links.load_p9b(written.path, model="tiny")
+
+
 def test_the_p10a_run_gives_the_items_by_uid_and_the_snapshots(
     tmp_path: Path,
 ) -> None:
@@ -442,7 +501,12 @@ def test_a_folder_that_is_not_a_run_is_refused(
 
 @pytest.mark.parametrize(
     ("kind", "dropped"),
-    [("p10b", "readers.npz"), ("p9b", "readers.npz"), ("p10a", "items.json")],
+    [
+        ("p10b", "readers.npz"),
+        ("p9b", "readers.npz"),
+        ("p9b", "summary.json"),
+        ("p10a", "items.json"),
+    ],
 )
 def test_an_export_without_the_local_files_is_refused(
     kind: str, dropped: str, tmp_path: Path
@@ -596,12 +660,13 @@ def _range_run(
     )
 
 
-def _known_run(
+def _p9b_run(
     directions: NDArray[np.float32],
     signs: NDArray[np.float32] | None = None,
     means: NDArray[np.float32] | None = None,
     types: Sequence[str] = TYPES,
     config: dict[str, object] | None = None,
+    contrasts: Sequence[str] | None = None,
 ) -> p10c_links.P9bRun:
     n_types, n_layers = directions.shape[:2]
     return p10c_links.P9bRun(
@@ -609,6 +674,9 @@ def _known_run(
         config_hash="h9b",
         config=config or {"template": "fewshot", "n_shots": 3, "bos": None},
         types=tuple(types[:n_types]),
+        contrasts=tuple(_contrast_of(name) for name in types[:n_types])
+        if contrasts is None
+        else tuple(contrasts),
         layers=tuple(range(1, n_layers + 1)),
         directions=directions,
         means=np.zeros_like(directions) if means is None else means,
@@ -634,10 +702,10 @@ def _cosines(rows: list[dict[str, object]], p9_type: str) -> dict[int, float]:
 
 def test_cosine_rows_have_one_row_per_type_and_layer() -> None:
     range_dir = _random_directions((3, 16), 1)
-    known = _random_directions((2, 3, 16), 2)
+    p9 = _random_directions((2, 3, 16), 2)
 
     rows = p10c_links.cosine_rows(
-        _range_run(range_dir), _known_run(known), n_random=50, seed=0
+        _range_run(range_dir), _p9b_run(p9), n_random=50, seed=0
     )
 
     assert len(rows) == 6
@@ -649,14 +717,30 @@ def test_cosine_rows_have_one_row_per_type_and_layer() -> None:
         assert -1.0 <= float(row["cosine"]) <= 1.0  # type: ignore[arg-type]
 
 
-def test_the_same_direction_has_cosine_one_and_the_opposite_minus_one() -> None:
-    range_dir = _random_directions((3, 16), 1)
-    known = _random_directions((2, 3, 16), 2)
-    known[0] = range_dir
-    known[1] = -range_dir
+def test_cosine_rows_name_the_contrast_of_each_type() -> None:
+    p9 = _p9b_run(
+        _random_directions((2, 3, 16), 2),
+        types=("obscure_real", "real_vs_synthal"),
+    )
 
     rows = p10c_links.cosine_rows(
-        _range_run(range_dir), _known_run(known), n_random=50, seed=0
+        _range_run(_random_directions((3, 16), 1)), p9, n_random=20, seed=0
+    )
+
+    assert {(r["p9_type"], r["contrast"]) for r in rows} == {
+        ("obscure_real", "knowledge"),
+        ("real_vs_synthal", "unknown_type"),
+    }
+
+
+def test_the_same_direction_has_cosine_one_and_the_opposite_minus_one() -> None:
+    range_dir = _random_directions((3, 16), 1)
+    p9 = _random_directions((2, 3, 16), 2)
+    p9[0] = range_dir
+    p9[1] = -range_dir
+
+    rows = p10c_links.cosine_rows(
+        _range_run(range_dir), _p9b_run(p9), n_random=50, seed=0
     )
 
     assert _cosines(rows, TYPES[0]) == pytest.approx({1: 1.0, 2: 1.0, 3: 1.0})
@@ -667,12 +751,12 @@ def test_the_same_direction_has_cosine_one_and_the_opposite_minus_one() -> None:
 
 def test_a_sign_flip_of_the_p10b_reader_flips_that_layer() -> None:
     range_dir = _random_directions((3, 16), 1)
-    known = _random_directions((1, 3, 16), 2)
-    known[0] = range_dir
+    p9 = _random_directions((1, 3, 16), 2)
+    p9[0] = range_dir
     signs = np.array([1.0, -1.0, 1.0], dtype=np.float32)
 
     rows = p10c_links.cosine_rows(
-        _range_run(range_dir, signs), _known_run(known), n_random=50, seed=0
+        _range_run(range_dir, signs), _p9b_run(p9), n_random=50, seed=0
     )
 
     assert _cosines(rows, TYPES[0]) == pytest.approx({1: 1.0, 2: -1.0, 3: 1.0})
@@ -680,12 +764,12 @@ def test_a_sign_flip_of_the_p10b_reader_flips_that_layer() -> None:
 
 def test_a_sign_flip_of_the_p9_reader_flips_that_layer_and_type() -> None:
     range_dir = _random_directions((3, 16), 1)
-    known = np.stack([range_dir, range_dir])
+    p9 = np.stack([range_dir, range_dir])
     signs = np.array([[1.0, 1.0, 1.0], [1.0, -1.0, 1.0]], dtype=np.float32)
 
     rows = p10c_links.cosine_rows(
         _range_run(range_dir),
-        _known_run(known, signs),
+        _p9b_run(p9, signs),
         n_random=50,
         seed=0,
     )
@@ -696,12 +780,12 @@ def test_a_sign_flip_of_the_p9_reader_flips_that_layer_and_type() -> None:
 
 def test_flipping_both_signs_leaves_the_cosine_unchanged() -> None:
     range_dir = _random_directions((3, 16), 1)
-    known = np.stack([range_dir])
+    p9 = np.stack([range_dir])
     flipped = -np.ones((1, 3), dtype=np.float32)
 
     rows = p10c_links.cosine_rows(
         _range_run(range_dir, -np.ones(3, np.float32)),
-        _known_run(known, flipped),
+        _p9b_run(p9, flipped),
         n_random=50,
         seed=0,
     )
@@ -711,14 +795,14 @@ def test_flipping_both_signs_leaves_the_cosine_unchanged() -> None:
 
 def test_the_cosine_ignores_the_norm_of_the_stored_directions() -> None:
     range_dir = _random_directions((3, 16), 1)
-    known = _random_directions((1, 3, 16), 2)
+    p9 = _random_directions((1, 3, 16), 2)
     base = p10c_links.cosine_rows(
-        _range_run(range_dir), _known_run(known), n_random=50, seed=0
+        _range_run(range_dir), _p9b_run(p9), n_random=50, seed=0
     )
 
     scaled = p10c_links.cosine_rows(
         _range_run(3.0 * range_dir),
-        _known_run(5.0 * known),
+        _p9b_run(5.0 * p9),
         n_random=50,
         seed=0,
     )
@@ -728,21 +812,21 @@ def test_the_cosine_ignores_the_norm_of_the_stored_directions() -> None:
 
 def test_a_zero_direction_is_refused() -> None:
     range_dir = _random_directions((3, 16), 1)
-    known = _random_directions((1, 3, 16), 2)
-    known[0, 1] = 0.0
+    p9 = _random_directions((1, 3, 16), 2)
+    p9[0, 1] = 0.0
 
     with pytest.raises(ValueError, match="zero"):
         p10c_links.cosine_rows(
-            _range_run(range_dir), _known_run(known), n_random=50, seed=0
+            _range_run(range_dir), _p9b_run(p9), n_random=50, seed=0
         )
 
 
 def test_the_band_brackets_zero_and_is_shared_by_the_types() -> None:
     range_dir = _random_directions((3, 64), 1)
-    known = _random_directions((2, 3, 64), 2)
+    p9 = _random_directions((2, 3, 64), 2)
 
     rows = p10c_links.cosine_rows(
-        _range_run(range_dir), _known_run(known), n_random=200, seed=0
+        _range_run(range_dir), _p9b_run(p9), n_random=200, seed=0
     )
 
     for row in rows:
@@ -758,7 +842,7 @@ def test_the_band_narrows_as_the_width_grows() -> None:
     def width(d: int) -> float:
         rows = p10c_links.cosine_rows(
             _range_run(_random_directions((2, d), 1)),
-            _known_run(_random_directions((1, 2, d), 2)),
+            _p9b_run(_random_directions((1, 2, d), 2)),
             n_random=400,
             seed=0,
         )
@@ -769,11 +853,11 @@ def test_the_band_narrows_as_the_width_grows() -> None:
 
 def test_the_band_follows_the_seed_and_repeats_for_one_seed() -> None:
     range_dir = _random_directions((2, 32), 1)
-    known = _random_directions((1, 2, 32), 2)
+    p9 = _random_directions((1, 2, 32), 2)
 
     def band(seed: int) -> tuple[object, object]:
         row = p10c_links.cosine_rows(
-            _range_run(range_dir), _known_run(known), n_random=100, seed=seed
+            _range_run(range_dir), _p9b_run(p9), n_random=100, seed=seed
         )[0]
         return row["band_lo"], row["band_hi"]
 
@@ -783,9 +867,9 @@ def test_the_band_follows_the_seed_and_repeats_for_one_seed() -> None:
 
 def test_the_band_holds_about_95_percent_of_random_cosines() -> None:
     range_dir = _random_directions((2, 32), 1)
-    known = _random_directions((1, 2, 32), 2)
+    p9 = _random_directions((1, 2, 32), 2)
     row = p10c_links.cosine_rows(
-        _range_run(range_dir), _known_run(known), n_random=400, seed=0
+        _range_run(range_dir), _p9b_run(p9), n_random=400, seed=0
     )[0]
     fresh = _random_directions((5000, 32), 99).astype(np.float64)
     inside = (
@@ -797,7 +881,7 @@ def test_the_band_holds_about_95_percent_of_random_cosines() -> None:
     assert 0.92 < float(inside.mean()) < 0.98
 
 
-KNOWN_WIDTH = 256
+P9_WIDTH = 256
 Shift = Callable[[QuantityQuestion], float]
 
 
@@ -816,29 +900,29 @@ def _planted(
     return data.astype(np.float32)
 
 
-def _range_is_unknown(item: QuantityQuestion) -> float:
+def _range_is_negative(item: QuantityQuestion) -> float:
     return -1.5 if item.kind == "range" else 1.5
 
 
-def _range_is_known(item: QuantityQuestion) -> float:
-    return -_range_is_unknown(item)
+def _range_is_positive(item: QuantityQuestion) -> float:
+    return -_range_is_negative(item)
 
 
 def _plant_direction() -> NDArray[np.float64]:
-    return _random_directions((KNOWN_WIDTH,), 5).astype(np.float64)
+    return _random_directions((P9_WIDTH,), 5).astype(np.float64)
 
 
-def _known_pair(
+def _p9b_pair(
     plant: NDArray[np.float64],
     *,
     signs: NDArray[np.float32] | None = None,
 ) -> p10c_links.P9bRun:
     """Type 0 reads along `plant`, type 1 along an orthogonal direction."""
-    other = _random_directions((KNOWN_WIDTH,), 7).astype(np.float64)
+    other = _random_directions((P9_WIDTH,), 7).astype(np.float64)
     other -= plant * float(other @ plant)
     other /= np.linalg.norm(other)
     both = np.stack([plant, other]).astype(np.float32)
-    return _known_run(np.stack([both] * len(LAYERS), axis=1), signs)
+    return _p9b_run(np.stack([both] * len(LAYERS), axis=1), signs)
 
 
 def _rows_of(
@@ -866,12 +950,12 @@ def _auroc(row: dict[str, object]) -> float:
     return float(row["auroc"])  # type: ignore[arg-type]
 
 
-def test_range_items_on_the_unknown_side_fall_below_the_random_band() -> None:
+def test_range_items_on_the_negative_side_fall_below_the_random_band() -> None:
     items = _items()
     plant = _plant_direction()
-    data = _planted(items, _range_is_unknown, plant)
+    data = _planted(items, _range_is_negative, plant)
 
-    rows = _knowledge(data, items, _known_pair(plant))
+    rows = _knowledge(data, items, _p9b_pair(plant))
 
     for layer in LAYERS:
         row = _one(
@@ -885,12 +969,12 @@ def test_range_items_on_the_unknown_side_fall_below_the_random_band() -> None:
         assert _auroc(row) < float(row["rand_lo"])  # type: ignore[arg-type]
 
 
-def test_range_items_on_the_known_side_rise_above_the_random_band() -> None:
+def test_range_items_on_the_positive_side_rise_above_the_random_band() -> None:
     items = _items()
     plant = _plant_direction()
-    data = _planted(items, _range_is_known, plant)
+    data = _planted(items, _range_is_positive, plant)
 
-    rows = _knowledge(data, items, _known_pair(plant))
+    rows = _knowledge(data, items, _p9b_pair(plant))
 
     for layer in LAYERS:
         row = _one(
@@ -906,9 +990,9 @@ def test_range_items_on_the_known_side_rise_above_the_random_band() -> None:
 
 def test_an_orthogonal_plant_stays_inside_the_random_band() -> None:
     items = _items()
-    pair = _known_pair(_plant_direction())
+    pair = _p9b_pair(_plant_direction())
     orthogonal = pair.directions[1, 0].astype(np.float64)
-    data = _planted(items, _range_is_unknown, orthogonal)
+    data = _planted(items, _range_is_negative, orthogonal)
 
     rows = _knowledge(data, items, pair)
 
@@ -924,11 +1008,11 @@ def test_an_orthogonal_plant_stays_inside_the_random_band() -> None:
 def test_the_stored_sign_of_a_p9_reader_flips_its_auroc() -> None:
     items = _items()
     plant = _plant_direction()
-    data = _planted(items, _range_is_unknown, plant)
+    data = _planted(items, _range_is_negative, plant)
     signs = np.ones((2, len(LAYERS)), dtype=np.float32)
     signs[0, 1] = -1.0
 
-    rows = _knowledge(data, items, _known_pair(plant, signs=signs))
+    rows = _knowledge(data, items, _p9b_pair(plant, signs=signs))
 
     where = {"p9_type": TYPES[0], "items": "all", "test_family": "pooled"}
     kept = _auroc(_one(rows, layer=1, **where))
@@ -937,12 +1021,29 @@ def test_the_stored_sign_of_a_p9_reader_flips_its_auroc() -> None:
     assert flipped > 0.9
 
 
+def test_knowledge_rows_name_the_contrast_of_each_type() -> None:
+    items = _items()
+    plant = _plant_direction()
+    pair = dataclasses.replace(
+        _p9b_pair(plant),
+        types=("obscure_real", "real_vs_synthal"),
+        contrasts=("knowledge", "unknown_type"),
+    )
+
+    rows = _knowledge(_planted(items, _range_is_negative, plant), items, pair)
+
+    assert {(r["p9_type"], r["contrast"]) for r in rows} == {
+        ("obscure_real", "knowledge"),
+        ("real_vs_synthal", "unknown_type"),
+    }
+
+
 def test_knowledge_rows_cover_every_type_layer_set_and_family() -> None:
     items = _items()
     plant = _plant_direction()
-    data = _planted(items, _range_is_unknown, plant)
+    data = _planted(items, _range_is_negative, plant)
 
-    rows = _knowledge(data, items, _known_pair(plant))
+    rows = _knowledge(data, items, _p9b_pair(plant))
 
     assert tuple(rows[0]) == p10c_links.KNOWLEDGE_COLUMNS
     assert len(rows) == 2 * len(LAYERS) * 2 * 3
@@ -968,9 +1069,9 @@ def test_knowledge_rows_cover_every_type_layer_set_and_family() -> None:
 def test_the_random_band_depends_on_the_layer_set_and_family_only() -> None:
     items = _items()
     plant = _plant_direction()
-    data = _planted(items, _range_is_unknown, plant)
+    data = _planted(items, _range_is_negative, plant)
 
-    rows = _knowledge(data, items, _known_pair(plant))
+    rows = _knowledge(data, items, _p9b_pair(plant))
 
     bands = {
         (r["layer"], r["items"], r["test_family"], r["rand_lo"], r["rand_hi"])
@@ -986,9 +1087,9 @@ def test_a_group_without_both_kinds_has_no_row() -> None:
         if not (i.family == "wingspan" and i.kind == "range")
     ]
     plant = _plant_direction()
-    data = _planted(items, _range_is_unknown, plant)
+    data = _planted(items, _range_is_negative, plant)
 
-    rows = _knowledge(data, items, _known_pair(plant))
+    rows = _knowledge(data, items, _p9b_pair(plant))
 
     assert {r["test_family"] for r in rows} == {"height", "pooled"}
     pooled = _one(
@@ -1002,7 +1103,7 @@ def test_a_group_without_both_kinds_has_no_row() -> None:
 
 
 def _fewshot_run(n_shots: int, template: str = "fewshot") -> p10c_links.P9bRun:
-    return _known_run(
+    return _p9b_run(
         _random_directions((1, 3, 16)),
         config={"template": template, "n_shots": n_shots, "bos": None},
     )
@@ -1069,7 +1170,7 @@ def test_activations_are_read_at_the_last_token_with_the_p9b_bos(
 
     monkeypatch.setattr(p10c_links, "collect_activations", spy)
     items = _items()[:3]
-    p9b = _known_run(
+    p9b = _p9b_run(
         _random_directions((1, 3, 32)),
         config={"template": "fewshot", "n_shots": 2, "bos": bos},
     )
@@ -1452,6 +1553,7 @@ def _tiny_views(
     behavior: bool = True,
     link: Link = _monotone,
     n_types: int = 2,
+    types: Sequence[str] | None = None,
 ) -> tuple[
     Config,
     p10c_links.P10bRun,
@@ -1460,15 +1562,16 @@ def _tiny_views(
 ]:
     """In-memory runs for a model of width 32 and three layers."""
     people = _people(4)
+    names = list(types or [f"type_{n}" for n in range(n_types)])
     p10b, p10a = _views(
         _items(),
         link,
         people=people,
         directions=_random_directions((3, TINY_WIDTH), 1),
     )
-    p9b = _known_run(
-        _random_directions((n_types, 3, TINY_WIDTH), 2),
-        types=[f"type_{n}" for n in range(n_types)],
+    p9b = _p9b_run(
+        _random_directions((len(names), 3, TINY_WIDTH), 2),
+        types=names,
         config={"template": "fewshot", "n_shots": 2, "bos": None},
     )
     p10b = dataclasses.replace(p10b, path="p10b", config_hash="h10b")
@@ -1559,6 +1662,32 @@ def test_the_csv_files_have_the_documented_columns_and_rows(
     }
 
 
+def test_the_files_name_the_contrast_of_each_type(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _executed(
+        tiny_gpt2,
+        tmp_path,
+        types=("obscure_real", "real_vs_synthal"),
+    )
+
+    expected = {
+        "obscure_real": "knowledge",
+        "real_vs_synthal": "unknown_type",
+    }
+    for name in ("cosine.csv", "knowledge.csv"):
+        rows = _csv(run_dir, name)
+        assert {(r["p9_type"], r["contrast"]) for r in rows} == set(
+            expected.items()
+        )
+    summary = run_dir.read_json("summary")
+    for section in ("cosine", "knowledge"):
+        assert {
+            name: entry["contrast"]  # type: ignore[index]
+            for name, entry in summary[section].items()  # type: ignore[index]
+        } == expected
+
+
 def test_the_knowledge_link_costs_one_forward_pass_over_the_questions(
     tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1636,6 +1765,7 @@ def test_the_summary_reports_the_runs_the_layer_and_the_links(
             r for r in cosine if r["p9_type"] == name and r["layer"] == "2"
         )
         assert summary["cosine"][name] == {  # type: ignore[index]
+            "contrast": "knowledge",
             "cosine": pytest.approx(float(row["cosine"])),
             "band_lo": pytest.approx(float(row["band_lo"])),
             "band_hi": pytest.approx(float(row["band_hi"])),
@@ -1647,6 +1777,7 @@ def test_the_summary_reports_the_runs_the_layer_and_the_links(
             == (name, "2", "all", "pooled")
         )
         assert set(summary["knowledge"][name]) == {  # type: ignore[index]
+            "contrast",
             "n_range",
             "n_exact",
             "auroc",
