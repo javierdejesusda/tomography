@@ -1,0 +1,73 @@
+{
+  "_meta": {
+    "experiment": "p5",
+    "config_hash": "9c3330f88a67",
+    "seed": 0,
+    "git_sha": "86c319b4b076d231612e6b2b08d22094d638fe03",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A4000)",
+    "platform": "Linux-6.8.0-90-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T12:23:07+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p5",
+      "model": "qwen3-4b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "response",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "conditions": [
+        "paper",
+        "synonym_0",
+        "synonym_1",
+        "unrelated_0",
+        "unrelated_1",
+        "instruction_only",
+        "fact_only",
+        "random_label"
+      ],
+      "got_subsets": [
+        "cities",
+        "neg_cities",
+        "sp_en_trans",
+        "larger_than",
+        "common_claim_true_false"
+      ],
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "series": [
+      "synonym_0",
+      "synonym_1",
+      "unrelated_0",
+      "unrelated_1",
+      "instruction_only",
+      "fact_only",
+      "random_label"
+    ],
+    "xlabel": "Layer",
+    "ylabel": "Cosine with the paper reader",
+    "chance": 0.0,
+    "n_layers": 36
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "_meta": {
+    "experiment": "r6",
+    "config_hash": "913301b5547b",
+    "seed": 0,
+    "git_sha": "86c319b4b076d231612e6b2b08d22094d638fe03",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A4000)",
+    "platform": "Linux-6.8.0-90-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T11:17:36+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "r6",
+      "model": "qwen3-4b-base",
+      "seed": 0,
+      "n_seeds": 15,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "sources": [
+        "truthfulqa",
+        "arc",
+        "honesty"
+      ]
+    }
+  },
+  "data": {
+    "n_questions": 817,
+    "n_train": 511,
+    "n_val": 133,
+    "n_test": 173,
+    "n_seeds": 15,
+    "n_eval_pairs": {
+      "val": 133,
+      "test": 173
+    },
+    "baselines_all_questions": {
+      "standard": {
+        "mc1": 0.2484700122399021,
+        "lo": 0.22006207599302413,
+        "hi": 0.27923222062975467
+      },
+      "heuristic": {
+        "mc1": 0.2582619339045288,
+        "lo": 0.22943035351039287,
+        "hi": 0.2893561359445892
+      }
+    },
+    "text_baselines": {
+      "text_word": {
+        "mc1": 0.6763005780346821,
+        "lo": 0.6034046663938186,
+        "hi": 0.7415370707236641
+      },
+      "text_char": {
+        "mc1": 0.6705202312138728,
+        "lo": 0.5974421528971253,
+        "hi": 0.7361900190689644
+      }
+    },
+    "lat": {
+      "truthfulqa": {
+        "validation-layer": {
+          "mc1": 0.7510597302504818,
+          "lo": 0.7456647398843931,
+          "hi": 0.756849710982659
+        },
+        "best-layer": {
+          "mc1": 0.754913294797688,
+          "lo": 0.7479768786127167,
+          "hi": 0.7618497109826589,
+          "layer": 22
+        }
+      },
+      "arc": {
+        "validation-layer": {
+          "mc1": 0.43391136801541436,
+          "lo": 0.4254335260115607,
+          "hi": 0.4443159922928709
+        },
+        "best-layer": {
+          "mc1": 0.4358381502890174,
+          "lo": 0.4327552986512524,
+          "hi": 0.43892100192678224,
+          "layer": 24
+        }
+      },
+      "honesty": {
+        "validation-layer": {
+          "mc1": 0.5105973025048169,
+          "lo": 0.5059730250481695,
+          "hi": 0.5152215799614643
+        },
+        "best-layer": {
+          "mc1": 0.5105973025048169,
+          "lo": 0.5063583815028901,
+          "hi": 0.5152215799614643,
+          "layer": 22
+        }
+      }
+    }
+  }
+}
