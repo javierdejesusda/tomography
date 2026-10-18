@@ -17,6 +17,7 @@ from collections.abc import Sequence
 import csv
 from dataclasses import asdict
 from dataclasses import dataclass
+import itertools
 from pathlib import Path
 import re
 from typing import Any
@@ -39,6 +40,7 @@ from tomography.experiments.sweep import chat_format_for
 from tomography.knowledge import few_shot_prompt
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.p10.answers import Parsed
 from tomography.p10.answers import answer_text
 from tomography.p10.answers import grade
 from tomography.p10.answers import parse_answer
@@ -341,13 +343,6 @@ def build_prompt(
     raise ValueError(f"unknown format {fmt!r}")
 
 
-def _word_pattern(words: Sequence[str]) -> re.Pattern[str]:
-    """Compiles a pattern for whole words, longest first, ignoring case."""
-    ordered = sorted(words, key=len, reverse=True)
-    alternatives = "|".join(re.escape(word) for word in ordered)
-    return re.compile(rf"(?<![A-Za-z])(?:{alternatives})(?![A-Za-z])", re.I)
-
-
 @dataclass(frozen=True)
 class Answer:
     """One completion read against a question.
@@ -360,9 +355,10 @@ class Answer:
         approximate: Whether the answer marks itself as approximate.
         correct: Whether the value or range fits the sourced range within the
             tolerance; None for an abstention or an answer without a value.
-        unit_mismatch: Whether the answer line has a number, none of the
-            question's unit words and a unit word of the same dimension, such
-            as "9 months" for a question in days. Values are not converted.
+        unit_mismatch: Whether the answer gives a number in a unit of the
+            same dimension as the question's, such as "9 months" for a
+            question in days, or a compound such as "2 hours 22 minutes".
+            Values are not converted.
     """
 
     text: str
@@ -374,19 +370,54 @@ class Answer:
     unit_mismatch: bool
 
 
-def _unit_mismatch(line: str, item: QuantityQuestion) -> bool:
-    """Whether a line with a number names a foreign unit of the dimension."""
-    own = unit_words(item.unit)
-    foreign = [
-        word
-        for word in DIMENSION_WORDS[UNIT_DIMENSIONS[item.unit]]
-        if word not in own
-    ]
+_QUANTITY: Final = r"\d[\d,]*(?:\.\d+)?"
+_JOINER: Final = re.compile(r"[\s,]*(?:and)?[\s,]*", re.I)
+
+
+def _unit_mismatch(line: str, item: QuantityQuestion, parsed: Parsed) -> bool:
+    """Whether a number is given in a foreign unit of the dimension.
+
+    A unit word counts only when it directly follows a number, so "I'm" and
+    "second" in "ranked second" are not units. The answer is flagged when
+    none of the question's unit words follows the chosen quantity and a
+    foreign unit follows some number ("9 months"), or when a foreign unit
+    sits in a compound answer, next to another quantity with a unit
+    ("2 hours 22 minutes"). Alternatives joined by "or" are not compound.
+
+    Args:
+        line: The answer line.
+        item: The question.
+        parsed: The reading of the line.
+
+    Returns:
+        Whether the answer is flagged; values are not converted.
+    """
+    own = {word.lower() for word in unit_words(item.unit)}
+    words = DIMENSION_WORDS[UNIT_DIMENSIONS[item.unit]]
+    foreign = {word.lower() for word in words if word.lower() not in own}
+    alternatives = "|".join(
+        re.escape(word) for word in sorted(words, key=len, reverse=True)
+    )
+    pattern = re.compile(
+        rf"(?P<number>{_QUANTITY})\s*(?P<unit>{alternatives})(?![A-Za-z])",
+        re.I,
+    )
     text = re.sub(re.escape(item.entity), " ", line, flags=re.I)
-    return bool(
-        re.search(r"\d", text)
-        and not _word_pattern(own).search(text)
-        and _word_pattern(foreign).search(text)
+    pairs = [
+        (m, float(m["number"].replace(",", "")), m["unit"].lower())
+        for m in pattern.finditer(text)
+    ]
+    if not any(unit in foreign for _, _, unit in pairs):
+        return False
+    chosen = {parsed.low, parsed.high}
+    if not any(unit in own and value in chosen for _, value, unit in pairs):
+        return True
+    return any(
+        (first_unit in foreign or second_unit in foreign)
+        and _JOINER.fullmatch(text[first.end() : second.start()]) is not None
+        for (first, _, first_unit), (second, _, second_unit) in (
+            itertools.pairwise(pairs)
+        )
     )
 
 
@@ -423,7 +454,8 @@ def score_answer(
         high=parsed.high,
         approximate=parsed.approximate,
         correct=grade(parsed, item.low, item.high, rel_tol=rel_tol),
-        unit_mismatch=has_number and _unit_mismatch(answer_text(line), item),
+        unit_mismatch=has_number
+        and _unit_mismatch(answer_text(line), item, parsed),
     )
 
 
