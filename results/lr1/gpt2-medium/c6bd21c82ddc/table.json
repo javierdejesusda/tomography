@@ -1,0 +1,73 @@
+{
+  "_meta": {
+    "experiment": "lr1",
+    "config_hash": "c6bd21c82ddc",
+    "seed": 0,
+    "git_sha": "89ea7cb3bbc7d8419c85f221dde833a7e87e49a1",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A6000)",
+    "platform": "Linux-6.8.0-134-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T20:15:49+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "lr1",
+      "model": "gpt2-medium",
+      "seed": 0,
+      "layers": null,
+      "alpha": 5.0,
+      "pos_control": "Give a truthful answer.",
+      "neg_control": "Give an untruthful answer.",
+      "rank": 8,
+      "lora_alpha": 16,
+      "dropout": 0.05,
+      "lr": 0.0003,
+      "batch_size": 16,
+      "steps": 70,
+      "max_prompt_tokens": 256,
+      "max_response_tokens": 64,
+      "loss": "mean_norm",
+      "gradient_checkpointing": false,
+      "n_train": 2000,
+      "n_heldout": 64,
+      "bos": null
+    }
+  },
+  "data": [
+    {
+      "layer": 8,
+      "heldout_before": 11.57918119430542,
+      "heldout_after": 6.188805937767029,
+      "reduction": 0.46552300772263144
+    },
+    {
+      "layer": 10,
+      "heldout_before": 12.039010524749756,
+      "heldout_after": 7.335210800170898,
+      "reduction": 0.39071314996434314
+    },
+    {
+      "layer": 12,
+      "heldout_before": 14.519097566604614,
+      "heldout_after": 9.598527431488037,
+      "reduction": 0.3389033039101813
+    },
+    {
+      "layer": 14,
+      "heldout_before": 18.512096405029297,
+      "heldout_after": 12.46622920036316,
+      "reduction": 0.3265900885770895
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "_meta": {
+    "experiment": "lr1",
+    "config_hash": "f54173153b29",
+    "seed": 0,
+    "git_sha": "89ea7cb3bbc7d8419c85f221dde833a7e87e49a1",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A6000)",
+    "platform": "Linux-6.8.0-134-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T20:09:05+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "lr1",
+      "model": "gpt2-xl",
+      "seed": 0,
+      "layers": null,
+      "alpha": 5.0,
+      "pos_control": "Give a truthful answer.",
+      "neg_control": "Give an untruthful answer.",
+      "rank": 8,
+      "lora_alpha": 16,
+      "dropout": 0.05,
+      "lr": 0.0003,
+      "batch_size": 16,
+      "steps": 70,
+      "max_prompt_tokens": 256,
+      "max_response_tokens": 64,
+      "loss": "mean_norm",
+      "gradient_checkpointing": false,
+      "n_train": 2000,
+      "n_heldout": 64,
+      "bos": null
+    }
+  },
+  "data": [
+    {
+      "layer": 15,
+      "heldout_before": 11.469955921173096,
+      "heldout_after": 7.656580090522766,
+      "reduction": 0.33246647649368777
+    },
+    {
+      "layer": 17,
+      "heldout_before": 12.741708755493164,
+      "heldout_after": 8.40835964679718,
+      "reduction": 0.3400916778001071
+    },
+    {
+      "layer": 19,
+      "heldout_before": 14.877904891967773,
+      "heldout_after": 9.910829544067383,
+      "reduction": 0.33385583413575903
+    },
+    {
+      "layer": 21,
+      "heldout_before": 17.563663721084595,
+      "heldout_after": 11.893337488174438,
+      "reduction": 0.32284415842596204
+    },
+    {
+      "layer": 23,
+      "heldout_before": 22.36198902130127,
+      "heldout_after": 15.284698963165283,
+      "reduction": 0.3164875025828159
+    },
+    {
+      "layer": 25,
+      "heldout_before": 27.026988983154297,
+      "heldout_after": 18.63284921646118,
+      "reduction": 0.31058360855236644
+    },
+    {
+      "layer": 27,
+      "heldout_before": 32.3346152305603,
+      "heldout_after": 22.612133502960205,
+      "reduction": 0.3006833901771969
+    },
+    {
+      "layer": 29,
+      "heldout_before": 38.91186332702637,
+      "heldout_after": 27.393218517303467,
+      "reduction": 0.2960188442510947
+    }
+  ]
+}

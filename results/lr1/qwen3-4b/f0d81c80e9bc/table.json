@@ -1,0 +1,85 @@
+{
+  "_meta": {
+    "experiment": "lr1",
+    "config_hash": "f0d81c80e9bc",
+    "seed": 0,
+    "git_sha": "89ea7cb3bbc7d8419c85f221dde833a7e87e49a1",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A6000)",
+    "platform": "Linux-6.8.0-134-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T20:18:05+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "lr1",
+      "model": "qwen3-4b",
+      "seed": 0,
+      "layers": null,
+      "alpha": 5.0,
+      "pos_control": "Give a truthful answer.",
+      "neg_control": "Give an untruthful answer.",
+      "rank": 8,
+      "lora_alpha": 16,
+      "dropout": 0.05,
+      "lr": 0.0003,
+      "batch_size": 16,
+      "steps": 70,
+      "max_prompt_tokens": 256,
+      "max_response_tokens": 64,
+      "loss": "mean_norm",
+      "gradient_checkpointing": true,
+      "n_train": 2000,
+      "n_heldout": 64,
+      "bos": null
+    }
+  },
+  "data": [
+    {
+      "layer": 11,
+      "heldout_before": 5.486488938331604,
+      "heldout_after": 4.462318301200867,
+      "reduction": 0.18667141201640314
+    },
+    {
+      "layer": 13,
+      "heldout_before": 8.51772654056549,
+      "heldout_after": 6.311522722244263,
+      "reduction": 0.25901322469255494
+    },
+    {
+      "layer": 15,
+      "heldout_before": 12.196743249893188,
+      "heldout_after": 9.552622556686401,
+      "reduction": 0.21678907549602988
+    },
+    {
+      "layer": 17,
+      "heldout_before": 17.689383029937744,
+      "heldout_after": 14.194117307662964,
+      "reduction": 0.1975911605486379
+    },
+    {
+      "layer": 19,
+      "heldout_before": 29.01310443878174,
+      "heldout_after": 23.28609561920166,
+      "reduction": 0.19739386495727085
+    },
+    {
+      "layer": 21,
+      "heldout_before": 52.51296901702881,
+      "heldout_after": 41.661316871643066,
+      "reduction": 0.20664708830054512
+    }
+  ]
+}

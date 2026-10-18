@@ -1,0 +1,16 @@
+{
+  "experiment": "r2",
+  "model": "qwen3-4b",
+  "seed": 0,
+  "n_seeds": 10,
+  "n_pairs": 64,
+  "n_eval_pairs": null,
+  "method": "logistic",
+  "preprocess": "center",
+  "position": "last",
+  "eval_position": null,
+  "layers": null,
+  "bos": null,
+  "batch_size": 8,
+  "n_components": 10
+}
