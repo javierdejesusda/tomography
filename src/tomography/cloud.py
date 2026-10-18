@@ -728,6 +728,8 @@ def cmd_up(args: argparse.Namespace, deps: Deps) -> int:
         "interruptible": False,
         "env": {"PUBLIC_KEY": public_key.strip()},
     }
+    if args.min_vcpu is not None:
+        body["minVCPUPerGPU"] = args.min_vcpu
     if args.volume_id:
         body["networkVolumeId"] = args.volume_id
     else:
@@ -1372,6 +1374,16 @@ def _max_hours(text: str) -> float:
     return hours
 
 
+def _min_vcpu(text: str) -> int:
+    try:
+        count = int(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"not an integer: {text}") from error
+    if count < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return count
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Builds the command line parser.
 
@@ -1396,6 +1408,7 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--volume-id")
     up.add_argument("--volume-gb", type=int, default=50)
     up.add_argument("--disk-gb", type=int, default=30)
+    up.add_argument("--min-vcpu", type=_min_vcpu)
     up.add_argument("--public-key", type=Path, default=DEFAULT_PUBLIC_KEY)
     up.add_argument("--name", default="tomography")
     up.add_argument("--max-hours", type=_max_hours, required=True)
