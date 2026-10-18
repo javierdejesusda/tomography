@@ -969,3 +969,42 @@ def test_the_wingspan_exact_side_names_the_aircraft_and_drops_missiles() -> (
     assert family.range_side.template == (
         "What is the wingspan of the {entity}, in centimetres?"
     )
+
+
+def test_side_query_restricts_to_the_listed_occupations() -> None:
+    query = quantities.side_query(
+        _side(classes=("Q5",), occupations=("Q3665646", "Q937857")), limit=5
+    )
+
+    assert "VALUES ?occupation { wd:Q3665646 wd:Q937857 }" in query
+    assert "?item wdt:P106 ?occupation" in query
+
+
+def test_side_query_has_no_occupation_filter_by_default() -> None:
+    assert "P106" not in quantities.side_query(_side(), limit=5)
+
+
+def test_side_query_rejects_a_bad_occupation() -> None:
+    with pytest.raises(ValueError, match="item"):
+        quantities.side_query(_side(occupations=("P106",)), limit=5)
+
+
+def test_side_unbounded_only_applies_to_an_exact_side_only() -> None:
+    with pytest.raises(ValueError, match="unbounded_only"):
+        _side(unbounded_only=True)
+
+
+def test_parse_side_unbounded_only_drops_any_bounded_statement() -> None:
+    side = _side(kind="exact", unbounded_only=True, unit="metres", scale=1.0)
+    result = _result(
+        [
+            _row(1, amount=2.0, lower=None, upper=None),
+            _row(2, amount=2.0, lower=1.995, upper=2.005),
+        ]
+    )
+
+    items = quantities.parse_side(
+        result, family="f", side=side, min_sitelinks=1
+    )
+
+    assert [i.entity_id for i in items] == ["Q1"]

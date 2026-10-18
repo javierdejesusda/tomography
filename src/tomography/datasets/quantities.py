@@ -117,10 +117,16 @@ class Side:
             entities with at least this many sitelinks. A class with
             hundreds of thousands of statements (films) times out on the
             public service without it.
+        occupations: Item ids of occupations (P106). If given, the query
+            keeps only entities with one of them, which keeps a query over
+            a huge class such as humans within the service's time limit.
+        unbounded_only: If True, an exact statement with any lower or upper
+            bound is dropped, however narrow.
 
     Raises:
         ValueError: If `kind` is not "range" or "exact", `dimension` is
-            unknown, `union_statements` is set on an exact side or
+            unknown, `union_statements` is set on an exact side,
+            `unbounded_only` is set on a range side or
             `query_min_sitelinks` is negative.
     """
 
@@ -138,9 +144,13 @@ class Side:
     dated_by: tuple[str, ...] = ()
     union_statements: bool = False
     query_min_sitelinks: int = 0
+    occupations: tuple[str, ...] = ()
+    unbounded_only: bool = False
 
     def __post_init__(self) -> None:
-        """Validates the kind, dimension, union and query floor."""
+        """Validates the kind, dimension, union, bounds and query floor."""
+        if self.unbounded_only and self.kind != "exact":
+            raise ValueError("unbounded_only applies to an exact side only")
         if self.dimension not in UNITS:
             raise ValueError(f"unknown dimension {self.dimension!r}")
         if self.union_statements and self.kind != "range":
@@ -332,6 +342,12 @@ def side_query(side: Side, *, limit: int) -> str:
         "  OPTIONAL { ?v wikibase:quantityLowerBound ?lower ;"
         " wikibase:quantityUpperBound ?upper . }",
     ]
+    if side.occupations:
+        jobs = " ".join(f"wd:{_item_id(item)}" for item in side.occupations)
+        lines += [
+            f"  VALUES ?occupation {{ {jobs} }}",
+            "  ?item wdt:P106 ?occupation .",
+        ]
     if side.exclude_classes:
         lines.append(_none_of("excluded", "wdt:P31", side.exclude_classes))
     if side.exclude_states:
@@ -527,6 +543,8 @@ def _interval(
     amount, lower, upper = points[0]
     if lower is None or upper is None:
         return (amount, amount) if side.kind == "exact" else None
+    if side.unbounded_only:
+        return None
     if side.kind == "range":
         inside = lower <= amount <= upper
         wide = (upper - lower) / amount >= MIN_RANGE_RELATIVE_WIDTH - _TOLERANCE
