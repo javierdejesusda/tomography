@@ -269,12 +269,14 @@ def scaling(store: Store) -> Finding | None:
         "reader uses, so the baseline is not 0.5 on the larger models."
     )
     figure = Figure(
-        "Held-out accuracy of the logistic reader",
+        "Held-out accuracy rises with model size on morality and truth, "
+        "rises slowly on utility, and does not follow size on sentiment.",
         tuple(panels),
         _keys([*MODEL_KEYS, ("band", "Random direction (interval)")]),
-        "Points are accuracy with the stored 95% interval over the training "
-        "draws. The grey band is the random-direction series at the same "
-        "layer.",
+        "Held-out accuracy of the logistic reader. Whiskers are the stored "
+        "95% interval over the training draws. The grey band is the "
+        "random-direction series at the same layer. Open markers are "
+        "post-trained checkpoints.",
     )
     return Finding(
         "scaling",
@@ -566,11 +568,16 @@ def steering_along_direction(store: Store) -> Finding | None:
         ],
     )
     figure = Figure(
-        "Slope of the model's answer along the direction",
+        "Adding the known against unknown direction shifts entropy (base) "
+        "or abstention (post-trained) more than random directions in most "
+        "runs, and it also moves the known questions.",
         tuple(panels),
         legend,
-        "Each panel has its own axis: entropy and abstention are different "
-        "quantities and are never put on one scale.",
+        "Slope of the model's answer along the direction, per unit of "
+        "coefficient. Each panel has its own axis: entropy and abstention "
+        "are different quantities and are never put on one scale. Open "
+        "markers are slopes that are not distinguishable from random "
+        "directions.",
     )
     return Finding(
         "steering",
@@ -814,9 +821,9 @@ def approximate_answers(store: Store) -> Finding | None:
     if b_rows:
         figures.append(
             Figure(
-                "Qwen3 checkpoints answer with a range only on some range "
-                "questions, never for people heights; GPT-2 hedges "
-                "everywhere.",
+                "Qwen3 checkpoints give a range on only part of the range "
+                "questions, almost never on exact ones and never for people "
+                "heights; GPT-2 sizes give ranges for exact questions too.",
                 (
                     svg.DotPanel(
                         "approx-behavior",
@@ -1131,11 +1138,15 @@ def template_sensitivity(store: Store) -> Finding | None:
         whiskers=False,
     )
     figure = Figure(
-        "One dot per prompt variant",
+        "Changing only the wording of the prompt moves a fixed sentiment "
+        "reader by a tenth to a fifth of accuracy, and the paper template is "
+        "neither the best nor the worst.",
         (panel,),
         _keys([*MODEL_KEYS[1:], ("band", "Random direction (range)")]),
-        "Hover a dot for its variant name and interval. Intervals are in "
-        "the data table.",
+        "Accuracy of one sentiment reader for each prompt variant (blue) "
+        "and the paper template (vermillion). The grey band is the "
+        "range of a random direction across the same variants. Open "
+        "markers are post-trained checkpoints.",
     )
     return Finding(
         "templates",
@@ -1237,10 +1248,13 @@ def finder_comparison(store: Store) -> Finding | None:
     if not panels:
         return None
     figure = Figure(
-        "Test accuracy in the reference cell of each task",
+        "On sentiment and truth the paper finder is not above a random "
+        "direction on any GPT-2 size, while logistic regression is.",
         tuple(panels),
         _keys(MODEL_KEYS[1:]),
-        "Centered activations. Whiskers are 95% intervals over ten seeds.",
+        "Test accuracy in the reference cell of each task, centered "
+        "activations. Whiskers are 95% intervals over ten seeds. Open "
+        "markers are post-trained checkpoints.",
     )
     return Finding(
         "finders",
@@ -1342,10 +1356,13 @@ def truthfulqa(store: Store) -> Finding | None:
             f"{len(rows_out)} checkpoints."
         )
     figure = Figure(
-        "Does the reader beat a classifier that never sees the model?",
+        "A classifier that sees only the answer words scores about as well "
+        "as the reader, which sits inside the text-only band on most "
+        "checkpoints.",
         (panel,),
         _keys([*MODEL_KEYS[1:], ("band", "Text-only baselines")]),
-        "Reader whiskers are intervals over 15 readers; the grey band is a "
+        "TruthfulQA multiple-choice accuracy on held-out questions. Reader "
+        "whiskers are intervals over 15 readers; the grey band is a "
         "Wilson interval over questions. They are different kinds of "
         "interval, so compare positions, not widths.",
     )
