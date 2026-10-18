@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 
 from tomography.site import findings
+from tomography.site import panels as shapes
 from tomography.site import store as store_module
-from tomography.site import svg
 
 
 def write_run(
@@ -157,7 +157,7 @@ def test_scaling_pairs_each_reader_with_its_random_band(tmp_path: Path) -> None:
     finding = findings.scaling(store_module.Store(tmp_path))
     assert finding is not None
     sentiment = finding.figures[0].panels[0]
-    assert isinstance(sentiment, svg.DotPanel)
+    assert isinstance(sentiment, shapes.DotPanel)
     assert [r.label for r in sentiment.rows] == [
         "gpt2",
         "qwen3-0.6b-base",
@@ -225,8 +225,8 @@ def test_knowledge_compares_reader_to_popularity_and_text(
     )
     finding = findings.knowledge(store_module.Store(tmp_path))
     assert finding is not None
-    reading, errors = finding.figures[0].panels, finding.figures[1].panels
-    (read_panel,) = reading
+    read_panel, err_panel = finding.figures[0].panels
+    assert len(finding.figures) == 1
     assert [r.label for r in read_panel.rows] == ["gpt2-xl", "qwen3-4b"]
     assert {m.series for m in read_panel.rows[0].marks} == {
         "reader",
@@ -234,7 +234,6 @@ def test_knowledge_compares_reader_to_popularity_and_text(
         "text_word",
         "text_char",
     }
-    (err_panel,) = errors
     series = {m.series for m in err_panel.rows[0].marks}
     assert series == {"answer_logprob", "probe", "lat", "popularity"}
     assert any("+0.011" in line for line in finding.numbers)
@@ -399,8 +398,9 @@ def test_sentiment_steering_pairs_score_with_fluency(tmp_path: Path) -> None:
     write_run(tmp_path, "c1", "gpt2", "a", {"table.json": table(cols, rows)})
     finding = findings.sentiment_steering(store_module.Store(tmp_path))
     assert finding is not None
-    score, ppl, distinct = finding.figures[0].panels
-    assert isinstance(score, svg.LinePanel)
+    score, ppl, distinct = finding.figures[0].panels[:3]
+    assert finding.figures[0].columns == 3
+    assert isinstance(score, shapes.LinePanel)
     (line,) = score.series
     assert [x for x, _ in line.points] == [-0.1, 0.0, 0.1]
     assert [y for _, y in line.points] == pytest.approx([0.35, 0.6, 0.85])
@@ -573,3 +573,56 @@ def test_finder_comparison_counts_wins_per_family(tmp_path: Path) -> None:
     assert finding is not None
     assert "0 of 1 GPT-2" in finding.numbers[0]
     assert "1 of 1 Qwen3" in finding.numbers[0]
+
+
+def test_links_to_knowledge_use_the_layer_p10b_selected(tmp_path: Path) -> None:
+    def run(model: str, cosine: float, auroc: float) -> None:
+        summary = {
+            "layer": 1,
+            "cosine": {
+                "obscure_real": {
+                    "contrast": "knowledge",
+                    "cosine": cosine,
+                    "band_lo": -0.05,
+                    "band_hi": 0.06,
+                }
+            },
+        }
+        rows = [
+            {
+                "p9_type": "obscure_real",
+                "contrast": "knowledge",
+                "layer": layer,
+                "items": "all",
+                "test_family": "pooled",
+                "n_range": 360,
+                "n_exact": 360,
+                "auroc": auroc if layer == 1 else 0.99,
+                "lo": auroc - 0.03,
+                "hi": auroc + 0.03,
+                "rand_lo": 0.1,
+                "rand_hi": 0.9,
+            }
+            for layer in (1, 2)
+        ]
+        write_run(
+            tmp_path,
+            "p10c",
+            model,
+            "a",
+            {"summary.json": summary, "knowledge.csv": rows},
+        )
+
+    run("gpt2", 0.1, 0.45)
+    run("qwen3-4b", 0.01, 0.95)
+    finding = findings.approximate_answers(store_module.Store(tmp_path))
+    assert finding is not None
+    assert len(finding.figures) == 1
+    cosine, auroc = finding.figures[0].panels
+    assert [r.label for r in cosine.rows] == ["gpt2", "qwen3-4b"]
+    assert cosine.rows[0].marks[0].value == 0.1
+    assert cosine.rows[0].band == (-0.05, 0.06)
+    assert auroc.rows[0].marks[0].value == 0.45
+    assert auroc.rows[0].band == (0.1, 0.9)
+    assert any("1 of 2" in line for line in finding.numbers)
+    assert not any("yet" in c for c in finding.caveats)

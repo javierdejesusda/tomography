@@ -13,7 +13,7 @@ import dataclasses
 import math
 import re
 
-from tomography.site import svg
+from tomography.site import panels as svg
 from tomography.site.store import MODEL_ORDER
 from tomography.site.store import Record
 from tomography.site.store import Store
@@ -25,19 +25,21 @@ STYLE_CLASSES = ("s1", "s2", "s3", "s4", "s5", "s6")
 
 @dataclasses.dataclass(frozen=True)
 class Figure:
-    """A group of panels that share a legend.
+    """A group of panels drawn as one figure with one legend.
 
     Attributes:
         title: Short heading above the panels.
         panels: Dot or line panels.
-        legend: Legend markup.
+        keys: Extra legend entries as (kind, label); kind is filled,
+            hollow, band or dashed. Series entries come from the panels.
         note: One line saying how to read the figure.
     """
 
     title: str
     panels: tuple[svg.DotPanel | svg.LinePanel, ...]
-    legend: str
+    keys: tuple[tuple[str, str], ...]
     note: str = ""
+    columns: int = 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -159,10 +161,8 @@ def _is_number(value: object) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 
-def _legend(
-    styles: dict[str, svg.Style], extras: Sequence[tuple[str, str]] = ()
-) -> str:
-    return svg.legend(styles, extras)
+def _keys(extras: Sequence[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
+    return tuple(extras)
 
 
 MODEL_KEYS = (
@@ -271,7 +271,7 @@ def scaling(store: Store) -> Finding | None:
     figure = Figure(
         "Held-out accuracy of the logistic reader",
         tuple(panels),
-        _legend(styles, [*MODEL_KEYS, ("band", "Random direction (interval)")]),
+        _keys([*MODEL_KEYS, ("band", "Random direction (interval)")]),
         "Points are accuracy with the stored 95% interval over the training "
         "draws. The grey band is the random-direction series at the same "
         "layer.",
@@ -388,49 +388,50 @@ def knowledge(store: Store) -> Finding | None:
         e_rows.append(svg.Row(model, tuple(marks), group=_family(model)))
     if not b_rows and not e_rows:
         return None
-    figures: list[Figure] = []
     domain, ticks = (0.4, 1.0), (0.4, 0.6, 0.8, 1.0)
+    panels = []
     if b_rows:
-        figures.append(
-            Figure(
-                "Does a direction separate known from unknown questions?",
-                (
-                    svg.DotPanel(
-                        "knowledge-read",
-                        "Within-relation AUROC, known against unknown",
-                        tuple(b_rows),
-                        read_styles,
-                        domain,
-                        ticks,
-                        stagger=True,
-                        refs=((0.5, "chance"),),
-                    ),
-                ),
-                _legend(read_styles, MODEL_KEYS[1:]),
-                "The whisker on the reader is the interval over five reader "
-                "draws, not over test questions.",
+        panels.append(
+            svg.DotPanel(
+                "knowledge-read",
+                "Known against unknown",
+                tuple(b_rows),
+                read_styles,
+                domain,
+                ticks,
+                stagger=True,
+                refs=((0.5, "chance"),),
             )
         )
     if e_rows:
-        figures.append(
-            Figure(
-                "Does it predict errors better than the model's confidence?",
-                (
-                    svg.DotPanel(
-                        "knowledge-errors",
-                        "Within-relation AUROC for predicting wrong answers",
-                        tuple(e_rows),
-                        err_styles,
-                        domain,
-                        ticks,
-                        stagger=True,
-                        refs=((0.5, "chance"),),
-                    ),
-                ),
-                _legend(err_styles, MODEL_KEYS[1:]),
-                "Whiskers are item-bootstrap 95% intervals.",
+        panels.append(
+            svg.DotPanel(
+                "knowledge-errors",
+                "Predicting wrong answers",
+                tuple(e_rows),
+                err_styles,
+                domain,
+                ticks,
+                stagger=True,
+                refs=((0.5, "chance"),),
             )
         )
+    figures = [
+        Figure(
+            "A direction separates known from unknown questions above "
+            "popularity, but does not predict errors better than the "
+            "model's confidence.",
+            tuple(panels),
+            _keys(MODEL_KEYS[1:]),
+            "Within-relation AUROC on PopQA. (a) Reader, subject popularity "
+            "and two text-only baselines for known against unknown "
+            "questions; the whisker on the reader is the interval over five "
+            "reader draws. (b) Predictors of a wrong answer; whiskers are "
+            "item-bootstrap 95% intervals. Open markers are post-trained "
+            "checkpoints.",
+            columns=len(panels),
+        )
+    ]
     numbers: list[str] = []
     if margins:
         numbers.append(
@@ -557,8 +558,7 @@ def steering_along_direction(store: Store) -> Finding | None:
         f"The direction is distinguishable from three random directions in "
         f"{clear} of {len(runs_all)} runs.",
     )
-    legend = _legend(
-        styles,
+    legend = _keys(
         [
             ("filled", "Distinguishable from random directions"),
             ("hollow", "Not distinguishable"),
@@ -610,6 +610,106 @@ def _in_cell(rec: Record) -> bool:
 def _span(values: Sequence[float]) -> str:
     low, high = round(min(values)), round(max(values))
     return str(low) if low == high else f"{low} to {high}"
+
+
+def _links_figure(store: Store) -> tuple[Figure, list[str]] | None:
+    cos_rows: list[svg.Row] = []
+    auc_rows: list[svg.Row] = []
+    layer = None
+    for model in store.models("p10c"):
+        run = store.latest("p10c", model, "summary.json")
+        if run is None or not (run / "knowledge.csv").is_file():
+            continue
+        summary = store.summary(run)
+        layer = summary["layer"]
+        link = summary["cosine"]["obscure_real"]
+        post = is_post_trained(model)
+        group = _family(model)
+        cos_rows.append(
+            svg.Row(
+                model,
+                (svg.Mark("cosine", link["cosine"], hollow=post),),
+                (link["band_lo"], link["band_hi"]),
+                group,
+            )
+        )
+        for rec in store.rows(run, "knowledge.csv"):
+            if (
+                rec["p9_type"] == "obscure_real"
+                and rec["layer"] == layer
+                and rec["items"] == "all"
+                and rec["test_family"] == "pooled"
+            ):
+                mark = svg.Mark(
+                    "auroc", rec["auroc"], rec["lo"], rec["hi"], post
+                )
+                band = (rec["rand_lo"], rec["rand_hi"])
+                auc_rows.append(svg.Row(model, (mark,), band, group))
+    if not cos_rows:
+        return None
+    cos_values = [0.0]
+    for row in cos_rows:
+        cos_values += [row.marks[0].value, *(row.band or (0.0, 0.0))]
+    domain, ticks = _axis(cos_values)
+    cos_style = {"cosine": svg.Style("s1", "circle", "Range direction")}
+    auc_style = {"auroc": svg.Style("s1", "circle", "Knowledge reader")}
+    panels = [
+        svg.DotPanel(
+            "links-cosine",
+            "Cosine with the knowledge direction",
+            tuple(cos_rows),
+            cos_style,
+            domain,
+            ticks,
+            refs=((0.0, "orthogonal"),),
+            band_label="random unit vectors (2.5th to 97.5th percentile)",
+            fmt="{:.3f}",
+        ),
+        svg.DotPanel(
+            "links-auroc",
+            "Knowledge reader on range questions",
+            tuple(auc_rows),
+            auc_style,
+            (0.0, 1.0),
+            (0.0, 0.5, 1.0),
+            refs=((0.5, "chance"),),
+            band_label="random directions (95% interval)",
+        ),
+    ]
+    inside_cos = sum(
+        r.band is not None and r.band[0] <= r.marks[0].value <= r.band[1]
+        for r in cos_rows
+    )
+    inside_auc = sum(
+        r.band is not None
+        and r.marks[0].lo is not None
+        and r.marks[0].hi is not None
+        and r.band[0] <= r.marks[0].lo
+        and r.marks[0].hi <= r.band[1]
+        for r in auc_rows
+    )
+    numbers = [
+        f"At layer {layer}, the cosine between the range direction and the "
+        f"obscure-question direction lies inside the random band on "
+        f"{inside_cos} of {len(cos_rows)} checkpoints, and the AUROC "
+        f"interval lies inside its random band on {inside_auc} of "
+        f"{len(auc_rows)}."
+    ]
+    figure = Figure(
+        "The range direction is nearly orthogonal to the knowledge "
+        "direction, and the knowledge reader does not separate range from "
+        "exact questions outside a random band.",
+        tuple(panels),
+        _keys([("band", "Random directions")]),
+        f"Layer {layer}, the layer P10b selected. (a) Cosine between the "
+        "range direction and the direction of the obscure-question reader. "
+        "(b) AUROC of that reader on the 720 range and exact questions; "
+        "whiskers are item-bootstrap 95% intervals. Grey bands are the "
+        "random-direction control. Open markers are post-trained "
+        "checkpoints.",
+        columns=2,
+    )
+    return figure, numbers
 
 
 def approximate_answers(store: Store) -> Finding | None:
@@ -711,13 +811,16 @@ def approximate_answers(store: Store) -> Finding | None:
                     )
         if marks:
             r_rows.append(svg.Row(model, tuple(marks), group=_family(model)))
-    if not b_rows and not r_rows:
+    link_figure = _links_figure(store)
+    if not b_rows and not r_rows and link_figure is None:
         return None
     figures: list[Figure] = []
     if b_rows:
         figures.append(
             Figure(
-                "Does the model answer with a range?",
+                "Qwen3 checkpoints answer with a range only on some range "
+                "questions, never for people heights; GPT-2 hedges "
+                "everywhere.",
                 (
                     svg.DotPanel(
                         "approx-behavior",
@@ -730,15 +833,18 @@ def approximate_answers(store: Store) -> Finding | None:
                         fmt="{:.3f}",
                     ),
                 ),
-                _legend(kinds, MODEL_KEYS[1:]),
-                "Greedy decoding, free few-shot prompt, range example last. "
-                "Whiskers are Wilson 95% intervals.",
+                _keys(MODEL_KEYS[1:]),
+                "Share of greedy answers that are a range, free few-shot "
+                "prompt, range example last. Whiskers are Wilson 95% "
+                "intervals. Open markers are post-trained checkpoints.",
             )
         )
     if r_rows:
         figures.append(
             Figure(
-                "Can a hidden-state reader tell range from exact questions?",
+                "A reader separates range from exact questions on held-out "
+                "durations, but so do a text-only baseline and a random "
+                "direction.",
                 (
                     svg.DotPanel(
                         "approx-reading",
@@ -751,12 +857,15 @@ def approximate_answers(store: Store) -> Finding | None:
                         refs=((0.5, "chance"),),
                     ),
                 ),
-                _legend(reader_styles, MODEL_KEYS[1:]),
-                "Fitted on height and wingspan questions, tested on duration. "
-                "Whiskers are item-bootstrap 95% intervals.",
+                _keys(MODEL_KEYS[1:]),
+                "AUROC on held-out duration questions, fitted on height and "
+                "wingspan, concept template. Whiskers are item-bootstrap "
+                "95% intervals.",
             )
         )
-    numbers = []
+    if link_figure is not None:
+        figures.append(link_figure[0])
+    numbers = list(link_figure[1]) if link_figure else []
     if people:
         total = people[0][1]
         numbers.append(
@@ -784,10 +893,12 @@ def approximate_answers(store: Store) -> Finding | None:
             "GPT-2 sizes give ranges for exact questions too, so their "
             "hedging is not read as understanding. The parser has no human "
             "check, and it is one question set and one seed.",
-            "No result links the range direction to knowledge or to "
-            "per-question hedging yet.",
+            "The links to knowledge use the layer P10b selected, which is a "
+            "layer-1 value, not a finding about where a link lives. The "
+            "knowledge readers score no people, so the link cannot separate "
+            "a range-valued answer from a living subject.",
         ),
-        ("p10a", "p10b"),
+        ("p10a", "p10b", "p10c"),
     )
 
 
@@ -829,6 +940,7 @@ def sentiment_steering(store: Store) -> Finding | None:
     if not per_model:
         return None
     figures: list[Figure] = []
+    all_panels: list[svg.LinePanel] = []
     numbers: list[str] = []
     groups = (("qwen3", "Qwen3"), ("gpt2", "GPT-2"))
     for family, name in groups:
@@ -861,10 +973,6 @@ def sentiment_steering(store: Store) -> Finding | None:
         coeffs = sorted({x for m in models for x, _ in per_model[m]["score"]})
         x_domain = (coeffs[0], coeffs[-1])
         x_ticks = tuple(coeffs)
-        key_styles = {
-            m: svg.Style(STYLE_CLASSES[sizes.index(_size_key(m))], "circle", m)
-            for m in models
-        }
         panels = (
             svg.LinePanel(
                 f"c1-{family}-score",
@@ -907,19 +1015,7 @@ def sentiment_steering(store: Store) -> Finding | None:
                 x_ticks=x_ticks,
             ),
         )
-        figures.append(
-            Figure(
-                f"{name} checkpoints",
-                panels,
-                _legend(
-                    key_styles, [("dashed", "Dashed lines are post-trained")]
-                ),
-                "Mean over three steering readers. The two limits are a "
-                "descriptive rule of the write-up: text counts as fluent "
-                "only when perplexity stays under 1.5x and distinct-1 stays "
-                "above 0.15.",
-            )
-        )
+        all_panels.extend(panels)
         for m in models:
             ok = [
                 x
@@ -930,6 +1026,21 @@ def sentiment_steering(store: Store) -> Finding | None:
             ]
             span = f"{min(ok):+g} to {max(ok):+g}" if ok else "none"
             numbers.append(f"{m}: coefficients that stay fluent: {span}.")
+    figures.append(
+        Figure(
+            "A small push moves the sentiment score while perplexity and "
+            "repetition stay near normal; larger pushes do not.",
+            tuple(all_panels),
+            _keys([("dashed", "Post-trained checkpoint (dashed)")]),
+            "Sentiment steering, mean over three steering readers. Each "
+            "hue is a model size, lighter for smaller; solid lines are base "
+            "or GPT-2 checkpoints and dashed lines are post-trained ones. "
+            "Perplexity is relative to the unsteered text (log axis). The "
+            "dotted limits, 1.5x and 0.15, are a descriptive rule of the "
+            "write-up: text counts as fluent only when both hold.",
+            columns=3,
+        )
+    )
     return Finding(
         "fluency",
         "A small push steers sentiment and stays fluent; bigger pushes score "
@@ -1026,9 +1137,7 @@ def template_sensitivity(store: Store) -> Finding | None:
     figure = Figure(
         "One dot per prompt variant",
         (panel,),
-        _legend(
-            styles, [*MODEL_KEYS[1:], ("band", "Random direction (range)")]
-        ),
+        _keys([*MODEL_KEYS[1:], ("band", "Random direction (range)")]),
         "Hover a dot for its variant name and interval. Intervals are in "
         "the data table.",
     )
@@ -1134,7 +1243,7 @@ def finder_comparison(store: Store) -> Finding | None:
     figure = Figure(
         "Test accuracy in the reference cell of each task",
         tuple(panels),
-        _legend(styles, MODEL_KEYS[1:]),
+        _keys(MODEL_KEYS[1:]),
         "Centered activations. Whiskers are 95% intervals over ten seeds.",
     )
     return Finding(
@@ -1239,7 +1348,7 @@ def truthfulqa(store: Store) -> Finding | None:
     figure = Figure(
         "Does the reader beat a classifier that never sees the model?",
         (panel,),
-        _legend(styles, [*MODEL_KEYS[1:], ("band", "Text-only baselines")]),
+        _keys([*MODEL_KEYS[1:], ("band", "Text-only baselines")]),
         "Reader whiskers are intervals over 15 readers; the grey band is a "
         "Wilson interval over questions. They are different kinds of "
         "interval, so compare positions, not widths.",
