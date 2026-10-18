@@ -16,6 +16,7 @@ from tomography.cli import load_experiment
 from tomography.datasets.quantities import QuantityQuestion
 from tomography.experiments import p10c_links
 from tomography.experiments.base import RunDir
+from tomography.experiments.p3_size import spearman
 from tomography.experiments.p9b_reading import Config as P9bConfig
 from tomography.experiments.p10a_quantities import Answer
 from tomography.experiments.p10a_quantities import Config as P10aConfig
@@ -1228,6 +1229,27 @@ def test_the_hedge_share_matches_the_item_rates_of_p10a(decoding: str) -> None:
         assert share == pytest.approx(expected)
 
 
+def _sample_cell(ranged: int, total: int = 5) -> dict[str, object]:
+    forms = ["range"] * ranged + ["point"] * (total - ranged)
+    return _serialized(_outcome("point", *forms))
+
+
+def _two_cells(first: int, second: int) -> dict[str, dict[str, object]]:
+    return {
+        "free/fewshot/range_last": _sample_cell(first),
+        "free/fewshot/exact_last": _sample_cell(second),
+    }
+
+
+def test_equal_shares_from_different_cell_splits_are_equal() -> None:
+    narrow = _two_cells(1, 2)
+    wide = _two_cells(0, 3)
+
+    assert p10c_links.hedge_share(
+        narrow, "free", "fewshot", "sampled"
+    ) == p10c_links.hedge_share(wide, "free", "fewshot", "sampled")
+
+
 def test_an_item_without_the_cell_is_refused() -> None:
     answers = {
         "free/fewshot/range_last": _serialized(_outcome("point", "point"))
@@ -1462,6 +1484,40 @@ def test_the_chat_format_gets_rows_when_the_run_has_it() -> None:
         ("free", "chat"),
         ("free", "fewshot"),
     }
+
+
+TIE_SPLITS = {0.30: (1 / 24, 4 / 24), 0.31: (0.0, 5 / 24)}
+
+
+def test_items_with_equal_shares_from_different_splits_tie_in_the_rank() -> (
+    None
+):
+    def split_cells(share: float, cell: str) -> float:
+        if share not in TIE_SPLITS:
+            return share
+        return TIE_SPLITS[share][0 if "range_last" in cell else 1]
+
+    def link(item: QuantityQuestion) -> tuple[float, float]:
+        position = _position(item) % 6
+        shares = (0.05, 0.1, 0.30, 0.31, 0.5, 0.6)
+        return float(position), shares[position]
+
+    rows = _behavior(_items(), link, per_cell=split_cells)
+
+    row = _sampled(
+        rows,
+        condition="free",
+        format="fewshot",
+        kind="range",
+        test_family="height",
+    )
+    tied = 5 / 48
+    exact = spearman(
+        np.arange(6.0),
+        np.array([1 / 24, 2 / 24, tied, tied, 12 / 24, 14 / 24]),
+    )
+    assert _rho(row) == pytest.approx(exact)
+    assert _rho(row) < 1.0
 
 
 def test_the_shot_orders_are_averaged_into_one_share() -> None:

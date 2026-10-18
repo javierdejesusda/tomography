@@ -26,6 +26,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 import csv
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 from typing import Final
@@ -785,7 +786,9 @@ def hedge_share(
     the answers with the form "range" (the greedy answer for "greedy", the
     sampled ones for "sampled") in each cell of the condition and format,
     averaged over the cells, which are the shot orders of the few-shot
-    format.
+    format. The average is taken in exact fractions, so two items whose
+    shares are equal compare equal whatever their cells hold, and the rank
+    correlation ties them.
 
     Args:
         answers: The parsed answers of the item by "condition/format/order".
@@ -809,8 +812,9 @@ def hedge_share(
         given = [cell["greedy"]] if decoding == "greedy" else cell["samples"]
         if not given:
             raise ValueError(f"no {decoding} answer in {condition}/{fmt}")
-        shares.append(np.mean([a["form"] == "range" for a in given]))
-    return float(np.mean(shares))
+        ranged = sum(answer["form"] == "range" for answer in given)
+        shares.append(Fraction(ranged, len(given)))
+    return float(sum(shares) / len(shares))
 
 
 def _is_constant(values: NDArray[np.float64]) -> bool:
