@@ -437,7 +437,7 @@ def test_the_table_counts_forms_per_cell_with_wilson_intervals() -> None:
     columns, body = build_table(items, results, seed=0)
     rows = _rows(columns, body)
 
-    assert columns[:9] == [
+    assert columns[:10] == [
         "family",
         "kind",
         "condition",
@@ -445,6 +445,7 @@ def test_the_table_counts_forms_per_cell_with_wilson_intervals() -> None:
         "shot_order",
         "decoding",
         "interval",
+        "item_wilson",
         "n",
         "n_gradable",
     ]
@@ -1675,6 +1676,81 @@ def test_cluster_cis_skips_resamples_without_a_denominator() -> None:
     assert np.isnan(cis[1]).all()
 
 
+def _uniform(form: str, correct: bool | None) -> tuple[list[Any], Results]:
+    items = _pool(("alpha",), per_side=3)
+    samples = tuple(_answer(form, correct=correct) for _ in range(4))
+    outcomes = [Outcome(greedy=_answer(form, correct=correct), samples=samples)]
+    results: Results = {
+        ("free", "fewshot", "range_last"): outcomes * len(items)
+    }
+    return items, results
+
+
+def test_a_sampled_rate_of_zero_gets_an_item_wilson_interval() -> None:
+    items, results = _uniform("point", True)
+
+    columns, body = build_table(items, results, seed=0)
+    row = _find(
+        _rows(columns, body), family="alpha", kind="range", decoding="sampled"
+    )
+
+    assert row["range_rate"] == 0.0
+    assert (row["range_lo"], row["range_hi"]) == wilson_ci(0, 3)
+    assert row["range_hi"] > 0.0
+    assert row["interval"] == "item_wilson"
+
+
+def test_a_sampled_rate_of_one_gets_an_item_wilson_interval() -> None:
+    items, results = _uniform("range", True)
+
+    columns, body = build_table(items, results, seed=0)
+    row = _find(
+        _rows(columns, body), family="alpha", kind="range", decoding="sampled"
+    )
+
+    assert row["range_rate"] == 1.0
+    assert (row["range_lo"], row["range_hi"]) == wilson_ci(3, 3)
+    assert row["range_lo"] < 1.0
+    assert (row["correct_lo"], row["correct_hi"]) == wilson_ci(3, 3)
+
+
+def test_a_mixed_row_names_the_metrics_with_an_item_wilson_interval() -> None:
+    items, results = _clustered([5, 5, 0, 0])
+
+    columns, body = build_table(items, results, seed=3)
+    row = _find(
+        _rows(columns, body), family="alpha", kind="range", decoding="sampled"
+    )
+
+    assert row["interval"] == "item_bootstrap+item_wilson"
+    assert row["item_wilson"] == (
+        "approximate;abstain;none;unit_mismatch;correct"
+    )
+    assert (row["range_lo"], row["range_hi"]) == (0.0, 1.0)
+    greedy = _find(
+        _rows(columns, body), family="alpha", kind="range", decoding="greedy"
+    )
+    assert greedy["item_wilson"] == ""
+
+
+def test_the_item_wilson_count_is_the_items_with_a_denominator() -> None:
+    items = _pool(("alpha",), per_side=3)
+    graded = _answer("range", correct=True)
+    ungraded = _answer("abstain")
+    outcomes = [Outcome(greedy=graded, samples=(graded,) * 2)] * 2
+    outcomes += [Outcome(greedy=ungraded, samples=(ungraded,) * 2)]
+    results: Results = {
+        ("free", "fewshot", "range_last"): outcomes + list(outcomes)
+    }
+
+    columns, body = build_table(items, results, seed=0)
+    row = _find(
+        _rows(columns, body), family="alpha", kind="range", decoding="sampled"
+    )
+
+    assert (row["correct_lo"], row["correct_hi"]) == wilson_ci(2, 2)
+
+
 def test_the_sampled_rows_use_the_item_bootstrap() -> None:
     items, results = _clustered([5, 5, 0, 0])
 
@@ -1682,7 +1758,7 @@ def test_the_sampled_rows_use_the_item_bootstrap() -> None:
     rows = _rows(columns, body)
 
     sampled = _find(rows, family="alpha", kind="range", decoding="sampled")
-    assert sampled["interval"] == "item_bootstrap"
+    assert sampled["interval"] == "item_bootstrap+item_wilson"
     assert sampled["range_rate"] == 0.5
     assert (sampled["range_lo"], sampled["range_hi"]) == (0.0, 1.0)
     assert (sampled["range_lo"], sampled["range_hi"]) != wilson_ci(10, 20)
@@ -1702,7 +1778,7 @@ def test_the_sampled_correct_rate_is_over_the_gradable_samples() -> None:
     assert (sampled["n"], sampled["n_gradable"]) == (20, 20)
     assert sampled["correct"] == 20
     assert sampled["correct_rate"] == 1.0
-    assert sampled["correct_lo"] == sampled["correct_hi"] == 1.0
+    assert (sampled["correct_lo"], sampled["correct_hi"]) == wilson_ci(4, 4)
 
 
 def test_a_sampled_cell_without_gradable_samples_has_no_interval() -> None:
@@ -1741,7 +1817,7 @@ def test_the_table_forwards_the_seed_to_the_bootstrap(
     assert seeds == [11] * 4
 
 
-def test_width_sampled_rows_use_the_item_bootstrap() -> None:
+def test_width_sampled_rows_with_degenerate_rates_use_item_wilson() -> None:
     items = [
         _item(uid=f"u{k}", low=100.0, high=100.0 + 10 * (k + 1))
         for k in range(3)
@@ -1762,7 +1838,7 @@ def test_width_sampled_rows_use_the_item_bootstrap() -> None:
         "wilson"
     }
     assert {r["interval"] for r in rows if r["decoding"] == "sampled"} == {
-        "item_bootstrap"
+        "item_wilson"
     }
 
 
@@ -1828,9 +1904,11 @@ def test_the_run_files_use_the_config_seed_for_the_intervals(
     assert {r["interval"] for r in rows if r["decoding"] == "greedy"} == {
         "wilson"
     }
-    assert {r["interval"] for r in rows if r["decoding"] == "sampled"} == {
-        "item_bootstrap"
+    assert {r["interval"] for r in rows if r["decoding"] == "sampled"} <= {
+        "item_bootstrap",
+        "item_wilson",
+        "item_bootstrap+item_wilson",
     }
     widths = _csv(run_dir, "width.csv")
     assert {r["family"] for r in widths} == {"alpha", "beta", "all"}
-    assert {r["interval"] for r in widths} == {"wilson", "item_bootstrap"}
+    assert {r["interval"] for r in widths} >= {"wilson"}

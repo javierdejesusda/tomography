@@ -549,12 +549,15 @@ def _rate_cells(
     metrics: Sequence[str],
     decoding: str,
     seed: int,
-) -> tuple[str, dict[str, list[float | None]]]:
+) -> tuple[str, list[str], dict[str, list[float | None]]]:
     """Rates and 95 percent intervals of the metrics of one group of items.
 
     The greedy decoding has one answer per item and gets Wilson intervals;
-    the sampled decoding gets the item bootstrap of `cluster_cis`. The rate
-    of `correct` is over the gradable answers and the others are over all.
+    the sampled decoding gets the item bootstrap of `cluster_cis`. A sampled
+    rate of exactly 0 or 1 makes every resample agree, so its interval would
+    collapse to a point; it gets the Wilson interval with the number of items
+    that have a denominator as n instead. The rate of `correct` is over the
+    gradable answers and the others are over all.
 
     Args:
         per_item: The `_counts` of each item's answers.
@@ -563,8 +566,10 @@ def _rate_cells(
         seed: Seed of the bootstrap.
 
     Returns:
-        The interval method ("wilson" or "item_bootstrap") and, per metric,
-        its rate, lower and upper bounds (None when it has no denominator).
+        The interval method ("wilson", "item_bootstrap", "item_wilson" or
+        "item_bootstrap+item_wilson" when a sampled group mixes both), the
+        metrics whose interval is the item Wilson one, and, per metric, its
+        rate, lower and upper bounds (None when it has no denominator).
     """
     totals = {key: sum(c[key] for c in per_item) for key in per_item[0]}
 
@@ -572,9 +577,11 @@ def _rate_cells(
         return item["n_gradable" if metric == "correct" else "n"]
 
     if decoding == "greedy":
-        return "wilson", {
-            m: _rate(totals[m], denominator(m, totals)) for m in metrics
-        }
+        return (
+            "wilson",
+            [],
+            {m: _rate(totals[m], denominator(m, totals)) for m in metrics},
+        )
     hits = np.array(
         [[c[m] for m in metrics] for c in per_item], dtype=np.float64
     )
@@ -584,14 +591,30 @@ def _rate_cells(
     )
     cis = cluster_cis(hits, trials, seed=seed)
     cells: dict[str, list[float | None]] = {}
+    item_wilson: list[str] = []
     for k, metric in enumerate(metrics):
         n = denominator(metric, totals)
-        cells[metric] = (
-            [None, None, None]
-            if n == 0 or np.isnan(cis[k]).any()
-            else [totals[metric] / n, float(cis[k, 0]), float(cis[k, 1])]
-        )
-    return "item_bootstrap", cells
+        if n == 0 or np.isnan(cis[k]).any():
+            cells[metric] = [None, None, None]
+        elif totals[metric] in (0, n):
+            n_items = int((trials[:, k] > 0).sum())
+            low, high = wilson_ci(n_items * totals[metric] // n, n_items)
+            cells[metric] = [totals[metric] / n, low, high]
+            item_wilson.append(metric)
+        else:
+            cells[metric] = [
+                totals[metric] / n,
+                float(cis[k, 0]),
+                float(cis[k, 1]),
+            ]
+    rated = sum(cells[m][0] is not None for m in metrics)
+    if not item_wilson:
+        method = "item_bootstrap"
+    elif len(item_wilson) == rated:
+        method = "item_wilson"
+    else:
+        method = "item_bootstrap+item_wilson"
+    return method, item_wilson, cells
 
 
 def build_table(
@@ -622,6 +645,7 @@ def build_table(
         "shot_order",
         "decoding",
         "interval",
+        "item_wilson",
         "n",
         "n_gradable",
         *(c for m in METRICS for c in _rate_columns(m)),
@@ -638,7 +662,7 @@ def build_table(
                         _counts(_answers(outcomes[i], decoding))
                         for i in members
                     ]
-                    method, cells = _rate_cells(
+                    method, wilson, cells = _rate_cells(
                         per_item, METRICS, decoding, seed
                     )
                     n = sum(c["n"] for c in per_item)
@@ -651,6 +675,7 @@ def build_table(
                             order,
                             decoding,
                             method,
+                            ";".join(wilson),
                             n,
                             sum(c["n_gradable"] for c in per_item),
                         ]
@@ -891,6 +916,7 @@ def width_table(
         "shot_order",
         "decoding",
         "interval",
+        "item_wilson",
         "tertile",
         "width_lo",
         "width_hi",
@@ -920,7 +946,7 @@ def width_table(
                     per_item = [
                         _counts(_answers(outcomes[i], decoding)) for i in group
                     ]
-                    method, cells = _rate_cells(
+                    method, wilson, cells = _rate_cells(
                         per_item, ("range", "correct"), decoding, seed
                     )
                     rows.append(
@@ -931,6 +957,7 @@ def width_table(
                             order,
                             decoding,
                             method,
+                            ";".join(wilson),
                             k,
                             width(group[0]),
                             width(group[-1]),
