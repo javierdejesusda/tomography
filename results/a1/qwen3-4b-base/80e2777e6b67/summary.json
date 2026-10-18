@@ -1,0 +1,66 @@
+{
+  "_meta": {
+    "experiment": "a1",
+    "config_hash": "80e2777e6b67",
+    "seed": 0,
+    "git_sha": "89ea7cb3bbc7d8419c85f221dde833a7e87e49a1",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A6000)",
+    "platform": "Linux-6.8.0-134-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T09:10:25+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "a1",
+      "model": "qwen3-4b-base",
+      "seed": 0,
+      "sources": [
+        "r1",
+        "r2",
+        "r3",
+        "r5",
+        "r7"
+      ],
+      "extra_runs": [],
+      "depth": 0.5
+    }
+  },
+  "data": {
+    "concepts": [
+      "r1",
+      "r2",
+      "r3",
+      "r5",
+      "r7"
+    ],
+    "layer": 18,
+    "depth": 0.5,
+    "n_seeds": 10,
+    "chance_abs_cosine": 0.015769578262626,
+    "agreement_at_layer": {
+      "r1": 0.4966719710427167,
+      "r2": 0.4064708815014991,
+      "r3": 0.6244192469877083,
+      "r5": 0.9813240962020944,
+      "r7": 0.6850584060595947
+    },
+    "source_runs": {
+      "r1": "705ebc7745d4",
+      "r2": "bb176283725a",
+      "r3": "a6e29d000606",
+      "r5": "d692205ca9bf",
+      "r7": "15d7a0c1017f"
+    }
+  }
+}

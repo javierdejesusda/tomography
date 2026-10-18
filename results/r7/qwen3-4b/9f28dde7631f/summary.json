@@ -1,0 +1,213 @@
+{
+  "_meta": {
+    "experiment": "r7",
+    "config_hash": "9f28dde7631f",
+    "seed": 0,
+    "git_sha": "89ea7cb3bbc7d8419c85f221dde833a7e87e49a1",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A6000)",
+    "platform": "Linux-6.8.0-134-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T08:13:47+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "r7",
+      "model": "qwen3-4b",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "concept": "truthfulness",
+      "ood_subsets": [
+        "cities",
+        "neg_cities",
+        "sp_en_trans",
+        "neg_sp_en_trans",
+        "larger_than",
+        "smaller_than",
+        "cities_cities_conj",
+        "cities_cities_disj",
+        "common_claim_true_false"
+      ]
+    }
+  },
+  "data": {
+    "val_layer": 23,
+    "sets": {
+      "val": {
+        "best_layer": 23,
+        "best_accuracy": 0.9226415094339622,
+        "ci": [
+          0.9188679245283019,
+          0.9245283018867925
+        ],
+        "accuracy_at_val_layer": 0.9226415094339622,
+        "ci_at_val_layer": [
+          0.9188679245283019,
+          0.9245283018867925
+        ],
+        "n_eval_pairs": 53
+      },
+      "test": {
+        "best_layer": 27,
+        "best_accuracy": 0.9474576271186439,
+        "ci": [
+          0.9440677966101694,
+          0.9491525423728813
+        ],
+        "accuracy_at_val_layer": 0.9338983050847458,
+        "ci_at_val_layer": [
+          0.9220338983050848,
+          0.9457627118644067
+        ],
+        "n_eval_pairs": 59
+      },
+      "cities": {
+        "best_layer": 31,
+        "best_accuracy": 1.0,
+        "ci": [
+          1.0,
+          1.0
+        ],
+        "accuracy_at_val_layer": 0.9998663101604277,
+        "ci_at_val_layer": [
+          0.9995989304812835,
+          1.0
+        ],
+        "n_eval_pairs": 748
+      },
+      "neg_cities": {
+        "best_layer": 34,
+        "best_accuracy": 0.9941176470588238,
+        "ci": [
+          0.9935828877005347,
+          0.9946524064171124
+        ],
+        "accuracy_at_val_layer": 0.9905080213903744,
+        "ci_at_val_layer": [
+          0.9885026737967915,
+          0.9921122994652407
+        ],
+        "n_eval_pairs": 748
+      },
+      "sp_en_trans": {
+        "best_layer": 20,
+        "best_accuracy": 1.0,
+        "ci": [
+          1.0,
+          1.0
+        ],
+        "accuracy_at_val_layer": 1.0,
+        "ci_at_val_layer": [
+          1.0,
+          1.0
+        ],
+        "n_eval_pairs": 177
+      },
+      "neg_sp_en_trans": {
+        "best_layer": 32,
+        "best_accuracy": 0.9220338983050848,
+        "ci": [
+          0.9163841807909605,
+          0.927683615819209
+        ],
+        "accuracy_at_val_layer": 0.8920903954802262,
+        "ci_at_val_layer": [
+          0.8847457627118643,
+          0.8994350282485877
+        ],
+        "n_eval_pairs": 177
+      },
+      "larger_than": {
+        "best_layer": 24,
+        "best_accuracy": 1.0,
+        "ci": [
+          1.0,
+          1.0
+        ],
+        "accuracy_at_val_layer": 0.99989898989899,
+        "ci_at_val_layer": [
+          0.9996969696969696,
+          1.0
+        ],
+        "n_eval_pairs": 990
+      },
+      "smaller_than": {
+        "best_layer": 22,
+        "best_accuracy": 1.0,
+        "ci": [
+          1.0,
+          1.0
+        ],
+        "accuracy_at_val_layer": 1.0,
+        "ci_at_val_layer": [
+          1.0,
+          1.0
+        ],
+        "n_eval_pairs": 990
+      },
+      "cities_cities_conj": {
+        "best_layer": 25,
+        "best_accuracy": 0.9901069518716579,
+        "ci": [
+          0.9894385026737968,
+          0.9907754010695186
+        ],
+        "accuracy_at_val_layer": 0.9899732620320855,
+        "ci_at_val_layer": [
+          0.9891711229946523,
+          0.9909124331550803
+        ],
+        "n_eval_pairs": 748
+      },
+      "cities_cities_disj": {
+        "best_layer": 24,
+        "best_accuracy": 0.9435828877005348,
+        "ci": [
+          0.9391711229946523,
+          0.948663101604278
+        ],
+        "accuracy_at_val_layer": 0.9287433155080214,
+        "ci_at_val_layer": [
+          0.9225935828877005,
+          0.9350267379679144
+        ],
+        "n_eval_pairs": 748
+      },
+      "common_claim_true_false": {
+        "best_layer": 24,
+        "best_accuracy": 0.8422022471910113,
+        "ci": [
+          0.838426966292135,
+          0.8456179775280898
+        ],
+        "accuracy_at_val_layer": 0.8393707865168538,
+        "ci_at_val_layer": [
+          0.8349662921348315,
+          0.8439550561797752
+        ],
+        "n_eval_pairs": 2225
+      }
+    },
+    "n_seeds": 10,
+    "n_pairs": 64
+  }
+}
