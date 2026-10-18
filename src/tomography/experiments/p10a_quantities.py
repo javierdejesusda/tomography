@@ -186,7 +186,7 @@ class Config(ExperimentConfig):
         temperature: Sampling temperature.
         max_new_tokens: Generation budget per answer.
         rel_tol: Relative tolerance of the grader around the sourced range.
-        n_hand_check: Rows of the hand-check file.
+        n_hand_check: Rows of each hand-check file.
         batch_size: Prompts per generation call chunk.
         offline: Whether the questions are read from the cache only.
     """
@@ -843,9 +843,11 @@ def hedge_gap_table(
             continue
         for condition, fmt, order, outcome_sets in groups:
             for decoding in DECODINGS:
-                high = _item_rates(outcome_sets, on_range, decoding)
-                low = _item_rates(outcome_sets, on_exact, decoding)
-                gap_lo, gap_hi = bootstrap_gap_ci(high, low, seed=seed)
+                range_rates = _item_rates(outcome_sets, on_range, decoding)
+                exact_rates = _item_rates(outcome_sets, on_exact, decoding)
+                gap_lo, gap_hi = bootstrap_gap_ci(
+                    range_rates, exact_rates, seed=seed
+                )
                 rows.append(
                     [
                         family,
@@ -855,9 +857,9 @@ def hedge_gap_table(
                         decoding,
                         len(on_range),
                         len(on_exact),
-                        float(high.mean()),
-                        float(low.mean()),
-                        float(high.mean() - low.mean()),
+                        float(range_rates.mean()),
+                        float(exact_rates.mean()),
+                        float(range_rates.mean() - exact_rates.mean()),
                         gap_lo,
                         gap_hi,
                     ]
@@ -877,7 +879,8 @@ def forced_in_range_table(
 
     Args:
         items: The questions.
-        results: The outcomes per (condition, format), aligned with items.
+        results: The outcomes per cell (condition, format, order), aligned
+            with items.
         rel_tol: Relative tolerance of the band.
 
     Returns:
@@ -1026,10 +1029,14 @@ def _csv_cell(value: object) -> object:
 
 
 def _write_csv(
-    path: Path, columns: Sequence[str], rows: Sequence[Sequence[Any]]
+    path: Path,
+    columns: Sequence[str],
+    rows: Sequence[Sequence[Any]],
+    *,
+    encoding: str = "utf-8",
 ) -> None:
     """Writes a CSV with unix line ends; None becomes an empty cell."""
-    with path.open("w", encoding="utf-8", newline="") as handle:
+    with path.open("w", encoding=encoding, newline="") as handle:
         writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(columns)
         for row in rows:
@@ -1056,6 +1063,11 @@ def _stem(condition: str, fmt: str, order: str) -> str:
     return "_".join(parts)
 
 
+def _shown(text: str) -> str:
+    """Shows the newlines of a completion as a backslash and n."""
+    return text.replace("\n", "\\n")
+
+
 def hand_check_table(
     items: Sequence[QuantityQuestion],
     results: Results,
@@ -1072,7 +1084,8 @@ def hand_check_table(
 
     Args:
         items: The questions.
-        results: The outcomes per (condition, format), aligned with items.
+        results: The outcomes per cell (condition, format, order), aligned
+            with items.
         n: Largest number of rows.
         seed: Seed of the draw.
 
@@ -1086,13 +1099,7 @@ def hand_check_table(
     strata: dict[tuple[str, str], list[int]] = {}
     for i, item in enumerate(items):
         strata.setdefault((item.family, item.kind), []).append(i)
-    rng = np.random.default_rng(seed)
-    queues = [list(rng.permutation(strata[key])) for key in sorted(strata)]
-    chosen: list[int] = []
-    while len(chosen) < n and any(queues):
-        for queue in queues:
-            if queue and len(chosen) < n:
-                chosen.append(int(queue.pop()))
+    chosen = _stratified(strata, n, np.random.default_rng(seed))
     columns = [
         "uid",
         "wikidata_url",
@@ -1126,13 +1133,133 @@ def hand_check_table(
         for outcomes in results.values():
             greedy = outcomes[i].greedy
             row += [
-                greedy.text.replace("\n", "\\n"),
+                _shown(greedy.text),
                 greedy.form,
                 _value_text(greedy),
                 _grade_text(greedy),
                 "mismatch" if greedy.unit_mismatch else "",
             ]
         rows.append([*row, "", "", ""])
+    return columns, rows
+
+
+def _stratified[T](
+    strata: dict[tuple[str, str], list[T]], n: int, rng: np.random.Generator
+) -> list[T]:
+    """Draws up to n members, one stratum at a time, in seeded random order."""
+    queues = [
+        [strata[key][j] for j in rng.permutation(len(strata[key]))]
+        for key in sorted(strata)
+    ]
+    chosen: list[T] = []
+    while len(chosen) < n and any(queues):
+        for queue in queues:
+            if queue and len(chosen) < n:
+                chosen.append(queue.pop())
+    return chosen
+
+
+def hand_check_samples_table(
+    items: Sequence[QuantityQuestion],
+    results: Results,
+    *,
+    n: int,
+    seed: int,
+) -> tuple[list[str], list[list[Any]]]:
+    """Builds the sampled completions a person checks, one per row.
+
+    The draw is stratified by family and kind like `hand_check_table`. About
+    a quarter of the rows (`n // 4`) go to completions that are most likely
+    misread: no number (form "none"), an abstention, or a unit flag. They are
+    taken from what exists and the other rows come from the remaining
+    completions; when those run out, flagged ones fill the rest. The rows are
+    ordered by item, cell and sample index.
+
+    Args:
+        items: The questions.
+        results: The outcomes per cell, aligned with items.
+        n: Largest number of rows.
+        seed: Seed of the draw.
+
+    Returns:
+        The column names and the rows: the item with its Wikidata URL and
+        gold range, the cell, the sample index, the completion (newlines
+        shown as a backslash and n), its form, value, grade and unit flag,
+        and empty columns for the verdict of the person.
+    """
+    cells = list(results)
+    flagged: dict[tuple[str, str], list[tuple[int, int, int]]] = {}
+    plain: dict[tuple[str, str], list[tuple[int, int, int]]] = {}
+    for i, item in enumerate(items):
+        for c, cell in enumerate(cells):
+            for k, answer in enumerate(results[cell][i].samples):
+                pool = (
+                    flagged
+                    if answer.form in ("none", "abstain")
+                    or answer.unit_mismatch
+                    else plain
+                )
+                pool.setdefault((item.family, item.kind), []).append((i, c, k))
+    rng = np.random.default_rng(seed)
+    chosen = _stratified(flagged, n // 4, rng)
+    chosen += _stratified(plain, n - len(chosen), rng)
+    if len(chosen) < n:
+        left = {
+            key: [m for m in members if m not in chosen]
+            for key, members in flagged.items()
+        }
+        chosen += _stratified(left, n - len(chosen), rng)
+    columns = [
+        "uid",
+        "wikidata_url",
+        "family",
+        "kind",
+        "question",
+        "gold_low",
+        "gold_high",
+        "unit",
+        "condition",
+        "format",
+        "shot_order",
+        "sample",
+        "completion",
+        "form",
+        "value",
+        "grade",
+        "unit_flag",
+        "human_form",
+        "human_correct",
+        "human_unit_mismatch",
+    ]
+    rows: list[list[Any]] = []
+    for i, c, k in sorted(chosen):
+        item = items[i]
+        condition, fmt, order = cells[c]
+        answer = results[cells[c]][i].samples[k]
+        rows.append(
+            [
+                item.uid,
+                f"https://www.wikidata.org/wiki/{item.entity_id}",
+                item.family,
+                item.kind,
+                item.question,
+                item.low,
+                item.high,
+                item.unit,
+                condition,
+                fmt,
+                order,
+                k,
+                _shown(answer.text),
+                answer.form,
+                _value_text(answer),
+                _grade_text(answer),
+                "mismatch" if answer.unit_mismatch else "",
+                "",
+                "",
+                "",
+            ]
+        )
     return columns, rows
 
 
@@ -1160,6 +1287,7 @@ def _summary(
     items: Sequence[QuantityQuestion],
     formats: Sequence[str],
     n_hand_check: int,
+    n_hand_check_samples: int,
 ) -> dict[str, Any]:
     counts: dict[str, dict[str, int]] = {}
     snapshots: dict[str, dict[str, dict[str, list[str]]]] = {}
@@ -1189,6 +1317,7 @@ def _summary(
         "formats": list(formats),
         "shot_orders": list(config.shot_orders) if "fewshot" in formats else [],
         "hand_check_rows": n_hand_check,
+        "hand_check_sample_rows": n_hand_check_samples,
         "config": config.to_dict(),
     }
 
@@ -1266,8 +1395,8 @@ def execute(
     order; the chat format has no shot order.
 
     Writes `table.csv`, `hedge_gap.csv`, `forced_in_range.csv`, `width.csv`,
-    `hand_check.csv`, `items.json` (every parsed answer; the export step
-    leaves it out) and `summary.json`.
+    `hand_check.csv`, `hand_check_samples.csv`, `items.json` (every parsed
+    answer; the export step leaves it out) and `summary.json`.
 
     Args:
         config: The experiment settings.
@@ -1306,9 +1435,23 @@ def execute(
     columns, rows = hand_check_table(
         items, results, n=config.n_hand_check, seed=config.seed
     )
-    _write_csv(run_dir.path / "hand_check.csv", columns, rows)
+    _write_csv(
+        run_dir.path / "hand_check.csv", columns, rows, encoding="utf-8-sig"
+    )
+    sample_columns, sample_rows = hand_check_samples_table(
+        items, results, n=config.n_hand_check, seed=config.seed
+    )
+    _write_csv(
+        run_dir.path / "hand_check_samples.csv",
+        sample_columns,
+        sample_rows,
+        encoding="utf-8-sig",
+    )
     run_dir.write_json("items", _item_records(items, results))
-    run_dir.write_json("summary", _summary(config, items, formats, len(rows)))
+    run_dir.write_json(
+        "summary",
+        _summary(config, items, formats, len(rows), len(sample_rows)),
+    )
 
 
 def run(config: Config, run_dir: RunDir) -> None:

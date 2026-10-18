@@ -32,6 +32,7 @@ from tomography.experiments.p10a_quantities import build_table
 from tomography.experiments.p10a_quantities import cluster_cis
 from tomography.experiments.p10a_quantities import execute
 from tomography.experiments.p10a_quantities import forced_in_range_table
+from tomography.experiments.p10a_quantities import hand_check_samples_table
 from tomography.experiments.p10a_quantities import hand_check_table
 from tomography.experiments.p10a_quantities import hedge_gap_table
 from tomography.experiments.p10a_quantities import plot
@@ -886,7 +887,8 @@ def _post_trained(loaded: LoadedModel) -> LoadedModel:
 
 
 def _csv(run_dir: RunDir, name: str) -> list[dict[str, str]]:
-    with (run_dir.path / name).open(encoding="utf-8", newline="") as handle:
+    path = run_dir.path / name
+    with path.open(encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
 
 
@@ -2067,3 +2069,154 @@ def test_items_json_keeps_whether_each_completion_finished(
     assert {r["truncated_rate"] for r in greedy} == {"1.0"}
     sampled = [r for r in rows if r["decoding"] == "sampled"]
     assert {r["truncated_rate"] for r in sampled} == {"0.0"}
+
+
+def _sampled(
+    n_flagged: int, per_item: int = 4
+) -> tuple[list[QuantityQuestion], Results]:
+    """Items whose samples are plain points except n_flagged abstentions."""
+    items = _pool(("alpha", "beta"), per_side=5)
+    outcomes = []
+    flagged = 0
+    for i, _ in enumerate(items):
+        samples = []
+        for k in range(per_item):
+            form = "point"
+            if flagged < n_flagged and (i + k) % 2 == 0:
+                form = "abstain"
+                flagged += 1
+            samples.append(dataclasses.replace(_answer(form), text=f"c{i}.{k}"))
+        outcomes.append(
+            Outcome(greedy=_answer("point"), samples=tuple(samples))
+        )
+    return items, {("free", "fewshot", "range_last"): outcomes}
+
+
+def _is_flagged(row: list[Any], columns: list[str]) -> bool:
+    record = dict(zip(columns, row, strict=True))
+    return record["form"] in ("none", "abstain") or record["unit_flag"] != ""
+
+
+def test_the_sample_hand_check_has_one_completion_per_row() -> None:
+    items, results = _sampled(n_flagged=6)
+
+    columns, rows = hand_check_samples_table(items, results, n=12, seed=0)
+
+    assert columns == [
+        "uid",
+        "wikidata_url",
+        "family",
+        "kind",
+        "question",
+        "gold_low",
+        "gold_high",
+        "unit",
+        "condition",
+        "format",
+        "shot_order",
+        "sample",
+        "completion",
+        "form",
+        "value",
+        "grade",
+        "unit_flag",
+        "human_form",
+        "human_correct",
+        "human_unit_mismatch",
+    ]
+    assert len(rows) == 12
+    record = dict(zip(columns, rows[0], strict=True))
+    item = next(i for i in items if i.uid == record["uid"])
+    index = items.index(item)
+    sample = results[("free", "fewshot", "range_last")][index].samples[
+        record["sample"]
+    ]
+    assert record["completion"] == sample.text
+    assert record["wikidata_url"].endswith(item.entity_id)
+    assert (record["condition"], record["format"]) == ("free", "fewshot")
+    assert record["shot_order"] == "range_last"
+    assert (record["human_form"], record["human_correct"]) == ("", "")
+
+
+def test_the_sample_hand_check_reserves_a_quarter_for_flagged_answers() -> None:
+    items, results = _sampled(n_flagged=30)
+
+    columns, rows = hand_check_samples_table(items, results, n=12, seed=0)
+
+    assert sum(_is_flagged(r, columns) for r in rows) == 3
+
+
+def test_the_sample_hand_check_takes_what_flagged_answers_exist() -> None:
+    items, results = _sampled(n_flagged=1)
+
+    columns, rows = hand_check_samples_table(items, results, n=12, seed=0)
+
+    assert len(rows) == 12
+    assert sum(_is_flagged(r, columns) for r in rows) == 1
+
+
+def test_the_sample_hand_check_fills_up_from_flagged_when_plain_run_out() -> (
+    None
+):
+    items = _pool(("alpha",), per_side=1)
+    plain = dataclasses.replace(_answer("point"), text="p")
+    flagged = dataclasses.replace(_answer("none"), text="f")
+    outcomes = [
+        Outcome(greedy=plain, samples=(plain, flagged, flagged, flagged))
+        for _ in items
+    ]
+    results: Results = {("free", "fewshot", "range_last"): outcomes}
+
+    columns, rows = hand_check_samples_table(items, results, n=6, seed=0)
+
+    assert len(rows) == 6
+    assert sum(_is_flagged(r, columns) for r in rows) == 4
+
+
+def test_the_sample_hand_check_is_stratified_by_family_and_kind() -> None:
+    items, results = _sampled(n_flagged=0)
+
+    columns, rows = hand_check_samples_table(items, results, n=12, seed=0)
+    records = [dict(zip(columns, r, strict=True)) for r in rows]
+
+    strata = [(r["family"], r["kind"]) for r in records]
+    assert {s: strata.count(s) for s in set(strata)} == {
+        ("alpha", "range"): 3,
+        ("alpha", "exact"): 3,
+        ("beta", "range"): 3,
+        ("beta", "exact"): 3,
+    }
+
+
+def test_the_sample_hand_check_follows_the_seed_and_keeps_item_order() -> None:
+    items, results = _sampled(n_flagged=6)
+
+    first = hand_check_samples_table(items, results, n=12, seed=3)[1]
+    again = hand_check_samples_table(items, results, n=12, seed=3)[1]
+    other = hand_check_samples_table(items, results, n=12, seed=4)[1]
+
+    assert first == again
+    assert first != other
+    positions = [
+        (
+            [i.uid for i in items].index(row[0]),
+            row[11],
+        )
+        for row in first
+    ]
+    assert positions == sorted(positions)
+
+
+def test_the_run_writes_the_sample_hand_check_with_a_bom(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch, n_hand_check=8)
+
+    for name in ("hand_check.csv", "hand_check_samples.csv"):
+        raw = (run_dir.path / name).read_bytes()
+        assert raw.startswith(b"\xef\xbb\xbf")
+        assert not raw.startswith(b"\xef\xbb\xbf\xef\xbb\xbf")
+    rows = _csv(run_dir, "hand_check_samples.csv")
+    assert len(rows) == 8
+    assert {r["sample"] for r in rows} <= {"0", "1", "2", "3"}
+    assert _summary(run_dir)["hand_check_sample_rows"] == 8
