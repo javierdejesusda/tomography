@@ -1,0 +1,76 @@
+{
+  "_meta": {
+    "experiment": "p4",
+    "config_hash": "427a6b2f9da4",
+    "seed": 0,
+    "git_sha": "80baffb81389ae883605431a822b2be27f5cb30e",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-57-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T15:39:26+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p4",
+      "model": "gpt2-xl",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "utility"
+      ],
+      "methods": [
+        "pca_diff",
+        "pca_raw",
+        "mean_diff",
+        "logistic",
+        "kmeans",
+        "random"
+      ],
+      "pairings": [
+        "matched",
+        "label_contrastive",
+        "random"
+      ],
+      "preprocesses": [
+        "center",
+        "unit",
+        "none"
+      ],
+      "n_components": 8,
+      "n_folds": 5,
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "series": [
+      "label_contrastive",
+      "random"
+    ],
+    "xlabel": "Component",
+    "ylabel": "Accuracy",
+    "chance": 0.5,
+    "n_layers": null
+  }
+}

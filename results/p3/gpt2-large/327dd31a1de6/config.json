@@ -1,0 +1,37 @@
+{
+  "experiment": "p3",
+  "model": "gpt2-large",
+  "seed": 0,
+  "n_seeds": 20,
+  "n_pairs": 64,
+  "n_eval_pairs": 256,
+  "method": "logistic",
+  "preprocess": "center",
+  "position": "last",
+  "eval_position": null,
+  "layers": null,
+  "bos": null,
+  "batch_size": 8,
+  "tasks": [
+    "sentiment",
+    "truth",
+    "truth_cities",
+    "truth_common",
+    "utility"
+  ],
+  "sizes": [
+    2,
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    256,
+    512
+  ],
+  "reference_pairs": 2048,
+  "failure_accuracy": 0.6,
+  "saturation_delta": 0.01,
+  "n_boot": 2000
+}

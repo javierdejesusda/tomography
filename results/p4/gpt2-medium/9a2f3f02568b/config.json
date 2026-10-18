@@ -1,0 +1,41 @@
+{
+  "experiment": "p4",
+  "model": "gpt2-medium",
+  "seed": 0,
+  "n_seeds": 10,
+  "n_pairs": 64,
+  "n_eval_pairs": 256,
+  "method": "pca_diff",
+  "preprocess": "center",
+  "position": "last",
+  "eval_position": null,
+  "layers": null,
+  "bos": null,
+  "batch_size": 8,
+  "tasks": [
+    "sentiment",
+    "truth",
+    "utility"
+  ],
+  "methods": [
+    "pca_diff",
+    "pca_raw",
+    "mean_diff",
+    "logistic",
+    "kmeans",
+    "random"
+  ],
+  "pairings": [
+    "matched",
+    "label_contrastive",
+    "random"
+  ],
+  "preprocesses": [
+    "center",
+    "unit",
+    "none"
+  ],
+  "n_components": 8,
+  "n_folds": 5,
+  "n_boot": 2000
+}

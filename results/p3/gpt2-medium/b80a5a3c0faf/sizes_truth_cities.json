@@ -1,0 +1,86 @@
+{
+  "_meta": {
+    "experiment": "p3",
+    "config_hash": "b80a5a3c0faf",
+    "seed": 0,
+    "git_sha": "fb3b5dd71d339258fde47b6c9f6c0bbe58f4bebf",
+    "git_dirty": false,
+    "device": "cpu",
+    "platform": "Linux-7.0.14-22-pve-x86_64-with-glibc2.36",
+    "versions": {
+      "python": "3.12.13",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cpu",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T14:48:52+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p3",
+      "model": "gpt2-medium",
+      "seed": 0,
+      "n_seeds": 20,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "truth_cities",
+        "truth_common",
+        "utility"
+      ],
+      "sizes": [
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128,
+        256,
+        512
+      ],
+      "reference_pairs": 2048,
+      "failure_accuracy": 0.6,
+      "saturation_delta": 0.01,
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "sizes": [
+      2,
+      4,
+      8,
+      16,
+      32,
+      64,
+      128,
+      256
+    ],
+    "splits": [
+      "select",
+      "report"
+    ],
+    "series": [
+      "reader",
+      "random",
+      "shuffled"
+    ],
+    "layer": 23,
+    "target": "truth",
+    "reference_pairs": 452
+  }
+}
