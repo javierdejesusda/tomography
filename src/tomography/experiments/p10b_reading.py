@@ -14,13 +14,21 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
+import numpy as np
+from numpy.typing import NDArray
+
 from tomography.datasets.quantities import DEFAULT_MIN_SITELINKS
 from tomography.datasets.quantities import FAMILIES
+from tomography.datasets.quantities import QuantityQuestion
 from tomography.experiments.base import ExperimentConfig
 from tomography.p9.reading import READING_METHODS
+from tomography.p9.risk import TEXT_ANALYZERS
+from tomography.p9.risk import orient_on_train
+from tomography.p9.risk import text_scores
 
 TEMPLATES: Final = ("plain", "concept")
 ALL_SET: Final = "all"
+BASELINES: Final = ("text_word", "text_char", "length", "popularity")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -128,3 +136,54 @@ def train_sets(families: Sequence[str]) -> dict[str, tuple[str, ...]]:
     if len(chosen) >= 2:
         sets[ALL_SET] = chosen
     return sets
+
+
+def _labels(items: Sequence[QuantityQuestion]) -> NDArray[np.int64]:
+    """Labels the items 1 for a range answer and 0 for an exact one."""
+    return np.array([i.kind == "range" for i in items], dtype=np.int64)
+
+
+def baseline_scores(
+    items: Sequence[QuantityQuestion], families: Sequence[str]
+) -> dict[str, NDArray[np.float64]]:
+    """Scores the items from their surface form, without a model.
+
+    The text classifiers (`tomography.p9.risk.text_scores`) are fitted on the
+    questions of the train split of the given families. Length is the number
+    of characters of the question and popularity is `log10(sitelinks + 1)`.
+    Every score is oriented on the same train items, so a higher value means
+    a range answer whichever way the surface feature points.
+
+    Args:
+        items: The questions to score, of any family and split.
+        families: The families whose train items fit and orient the scores.
+
+    Returns:
+        The score of each item, in order, by name in `BASELINES`.
+
+    Raises:
+        ValueError: If the train items leave one kind out or no text feature.
+    """
+    train = [
+        i
+        for i, item in enumerate(items)
+        if item.split == "train" and item.family in families
+    ]
+    labels = _labels([items[i] for i in train])
+    questions = [item.question for item in items]
+    raw: dict[str, NDArray[np.float64]] = {}
+    for analyzer in TEXT_ANALYZERS:
+        raw[f"text_{analyzer}"] = text_scores(
+            [questions[i] for i in train],
+            labels,
+            questions,
+            analyzer=analyzer,
+        )
+    raw["length"] = np.array([len(q) for q in questions], dtype=np.float64)
+    raw["popularity"] = np.log10(
+        np.array([i.sitelinks for i in items], dtype=np.float64) + 1.0
+    )
+    return {
+        name: orient_on_train(raw[name][train], labels, raw[name])
+        for name in BASELINES
+    }
