@@ -684,7 +684,11 @@ def load_people_heights(
     `LENGTH_UNITS` (converted to centimetres), between `min_cm` and
     `max_cm`, with a Latin-script label that has no digits. A person found
     under several occupations counts once, and a label shared by several
-    people drops all of them. The most linked `n` remain.
+    people drops all of them; the label count is taken before the height band
+    is applied, so a namesake outside the band still drops an in-band person.
+    Labels are compared only within the fetched set: a namesake without a
+    height or below the sitelink floor does not drop anyone. The most linked
+    `n` remain.
 
     Args:
         n: Largest number of items.
@@ -702,8 +706,9 @@ def load_people_heights(
         The people, most linked first, ties by item id number.
 
     Raises:
-        ValueError: If `n` is below 1, `occupations` is empty or `min_cm`
-            is not below `max_cm`.
+        ValueError: If `n` is below 1, `occupations` is empty, `min_cm` is
+            not below `max_cm`, `min_sitelinks` is negative or an
+            occupation is not an item id.
         ChecksumError: If a cached result does not match its digest.
         OfflineCacheMissError: If `offline` is True and a query is not
             cached.

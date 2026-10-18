@@ -1096,7 +1096,8 @@ def test_people_heights_query_each_occupation_once_over_humans(
     _people(fetch, tmp_path)
 
     assert len(fetch.queries) == 2
-    assert all("wd:Q5" in q and "wdt:P106" in q for q in fetch.queries)
+    assert all("  VALUES ?class { wd:Q5 }" in q for q in fetch.queries)
+    assert all("wdt:P106 ?occupation" in q for q in fetch.queries)
     assert all("FILTER(?links >= 50)" in q for q in fetch.queries)
     assert all("psv:P2048" in q and "psn:" not in q for q in fetch.queries)
 
@@ -1107,6 +1108,46 @@ def test_people_heights_convert_centimetres(tmp_path: Path) -> None:
     (item,) = _people(_people_endpoint([row]), tmp_path)
 
     assert item.low == 201.0
+
+
+def test_people_heights_convert_feet_and_inches(tmp_path: Path) -> None:
+    feet = "http://www.wikidata.org/entity/Q3710"
+    inch = "http://www.wikidata.org/entity/Q218593"
+    rows = [
+        _person(1, height=6.5, unit=feet),
+        _person(2, height=78.0, unit=inch),
+    ]
+
+    items = _people(_people_endpoint(rows), tmp_path)
+
+    assert [i.low for i in items] == [198.12, 198.12]
+
+
+def test_people_heights_break_equal_sitelinks_by_numeric_entity_id(
+    tmp_path: Path,
+) -> None:
+    fetch = _people_endpoint(
+        [_person(20, links=150), _person(3, links=150)],
+        [_person(100, links=150), _person(9, links=150)],
+    )
+
+    items = _people(fetch, tmp_path)
+
+    assert [i.entity_id for i in items] == ["Q3", "Q9", "Q20", "Q100"]
+
+
+def test_people_heights_namesake_outside_the_band_still_drops_the_person(
+    tmp_path: Path,
+) -> None:
+    rows = [
+        _person(1, label="Sam Doe", height=1.95),
+        _person(2, label="Sam Doe", height=1.00),
+        _person(3, label="Ann Lee"),
+    ]
+
+    items = _people(_people_endpoint(rows), tmp_path)
+
+    assert [i.entity_id for i in items] == ["Q3"]
 
 
 def test_people_heights_drop_bounded_statements(tmp_path: Path) -> None:
