@@ -1,0 +1,159 @@
+{
+  "_meta": {
+    "experiment": "p4",
+    "config_hash": "607e86d9c7f6",
+    "seed": 0,
+    "git_sha": "80baffb81389ae883605431a822b2be27f5cb30e",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-110-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T15:42:47+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p4",
+      "model": "qwen3-1.7b",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "utility"
+      ],
+      "methods": [
+        "pca_diff",
+        "pca_raw",
+        "mean_diff",
+        "logistic",
+        "kmeans",
+        "random"
+      ],
+      "pairings": [
+        "matched",
+        "label_contrastive",
+        "random"
+      ],
+      "preprocesses": [
+        "center",
+        "unit",
+        "none"
+      ],
+      "n_components": 8,
+      "n_folds": 5,
+      "n_boot": 2000
+    }
+  },
+  "data": [
+    {
+      "task": "sentiment",
+      "pairing": "label_contrastive",
+      "layer": 20,
+      "pc1": 0.5313084112149532,
+      "pc1_lo": 0.5042056074766356,
+      "pc1_hi": 0.5523364485981308,
+      "cv": 0.7116822429906542,
+      "cv_lo": 0.6728971962616822,
+      "cv_hi": 0.7444042056074767,
+      "cv_component": 1,
+      "explained_pc1": 0.32874864366844947
+    },
+    {
+      "task": "sentiment",
+      "pairing": "random",
+      "layer": 20,
+      "pc1": 0.5074766355140186,
+      "pc1_lo": 0.47897196261682246,
+      "pc1_hi": 0.5378504672897196,
+      "cv": 0.6514018691588784,
+      "cv_lo": 0.6055957943925233,
+      "cv_hi": 0.6957943925233645,
+      "cv_component": 1,
+      "explained_pc1": 0.3084027560265378
+    },
+    {
+      "task": "truth",
+      "pairing": "label_contrastive",
+      "layer": 20,
+      "pc1": 0.8694915254237289,
+      "pc1_lo": 0.8440677966101695,
+      "pc1_hi": 0.8932203389830509,
+      "cv": 0.8694915254237289,
+      "cv_lo": 0.8423305084745762,
+      "cv_hi": 0.8932203389830509,
+      "cv_component": 0,
+      "explained_pc1": 0.3001011634742559
+    },
+    {
+      "task": "truth",
+      "pairing": "random",
+      "layer": 20,
+      "pc1": 0.7627118644067796,
+      "pc1_lo": 0.7152118644067796,
+      "pc1_hi": 0.8016949152542374,
+      "cv": 0.8271186440677967,
+      "cv_lo": 0.8050847457627119,
+      "cv_hi": 0.8457627118644065,
+      "cv_component": 0,
+      "explained_pc1": 0.2520797623116466
+    },
+    {
+      "task": "utility",
+      "pairing": "matched",
+      "layer": 20,
+      "pc1": 0.78046875,
+      "pc1_lo": 0.77734375,
+      "pc1_hi": 0.784375,
+      "cv": 0.78046875,
+      "cv_lo": 0.776953125,
+      "cv_hi": 0.784765625,
+      "cv_component": 0,
+      "explained_pc1": 0.3866875174146936
+    },
+    {
+      "task": "utility",
+      "pairing": "label_contrastive",
+      "layer": 20,
+      "pc1": 0.780078125,
+      "pc1_lo": 0.776953125,
+      "pc1_hi": 0.78359375,
+      "cv": 0.780078125,
+      "cv_lo": 0.776953125,
+      "cv_hi": 0.783984375,
+      "cv_component": 0,
+      "explained_pc1": 0.42201387892275777
+    },
+    {
+      "task": "utility",
+      "pairing": "random",
+      "layer": 20,
+      "pc1": 0.77421875,
+      "pc1_lo": 0.77109375,
+      "pc1_hi": 0.77734375,
+      "cv": 0.680078125,
+      "cv_lo": 0.60037109375,
+      "cv_hi": 0.749609375,
+      "cv_component": 0,
+      "explained_pc1": 0.39074871208951295
+    }
+  ]
+}
