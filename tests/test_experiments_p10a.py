@@ -32,6 +32,7 @@ from tomography.experiments.p10a_quantities import build_table
 from tomography.experiments.p10a_quantities import cluster_cis
 from tomography.experiments.p10a_quantities import execute
 from tomography.experiments.p10a_quantities import forced_in_range_table
+from tomography.experiments.p10a_quantities import hand_check_table
 from tomography.experiments.p10a_quantities import hedge_gap_table
 from tomography.experiments.p10a_quantities import plot
 from tomography.experiments.p10a_quantities import run
@@ -1920,3 +1921,78 @@ def test_the_run_files_use_the_config_seed_for_the_intervals(
     widths = _csv(run_dir, "width.csv")
     assert {r["family"] for r in widths} == {"alpha", "beta", "all"}
     assert {r["interval"] for r in widths} >= {"wilson"}
+
+
+def test_forced_in_range_reads_the_greedy_answer_not_the_samples() -> None:
+    items = _pool(("alpha",), per_side=2)
+    outside = _answer("point", value=900.0)
+    outcomes = [
+        Outcome(
+            greedy=_answer("point", value=(item.low + item.high) / 2),
+            samples=(outside, outside),
+        )
+        for item in items
+    ]
+    results: Results = {("forced", "fewshot", "range_last"): outcomes}
+
+    columns, body = forced_in_range_table(items, results, rel_tol=0.05)
+    row = _find(_rows(columns, body), family="alpha", kind="range")
+
+    assert (row["n_point"], row["inside"], row["inside_band"]) == (2, 2, 2)
+
+
+def test_cluster_cis_uses_the_2_5_and_97_5_percentiles() -> None:
+    rng = np.random.default_rng(4)
+    hits = rng.integers(0, 6, size=(9, 1)).astype(float)
+    trials = np.full((9, 1), 5.0)
+
+    drawn = np.random.default_rng(7).integers(0, 9, size=(2000, 9))
+    rates = hits[drawn].sum(axis=1) / trials[drawn].sum(axis=1)
+    expected = np.percentile(rates, [2.5, 97.5], axis=0)
+
+    cis = cluster_cis(hits, trials, seed=7)
+
+    assert cis[0].tolist() == pytest.approx(expected[:, 0].tolist())
+    assert cis[0, 0] < np.percentile(rates, 5) < np.percentile(rates, 95)
+    assert np.percentile(rates, 95) < cis[0, 1]
+
+
+def test_bootstrap_gap_ci_uses_the_2_5_and_97_5_percentiles() -> None:
+    range_rates = np.array([1.0, 1.0, 0.0, 1.0, 0.5, 0.0, 1.0])
+    exact_rates = np.array([0.0, 0.5, 0.0, 1.0, 0.0, 0.0])
+    rng = np.random.default_rng(5)
+    draws = [
+        rates[rng.integers(0, len(rates), size=(2000, len(rates)))].mean(axis=1)
+        for rates in (range_rates, exact_rates)
+    ]
+    gaps = draws[0] - draws[1]
+
+    low, high = bootstrap_gap_ci(range_rates, exact_rates, seed=5)
+
+    assert (low, high) == pytest.approx(tuple(np.percentile(gaps, [2.5, 97.5])))
+    assert low < np.percentile(gaps, 5) < np.percentile(gaps, 95) < high
+
+
+def test_the_relative_width_is_over_the_midpoint() -> None:
+    items = [
+        _item(uid=f"u{k}", low=100.0, high=116.0 + 20.0 * k) for k in range(3)
+    ]
+    outcomes = [_outcome(_answer("range", correct=True))] * 3
+    results: Results = {("free", "fewshot", "range_last"): outcomes}
+
+    columns, body = width_table(items, results, seed=0)
+    first = _find(
+        _rows(columns, body), family="all", decoding="greedy", tertile=1
+    )
+
+    assert first["width_lo"] == first["width_hi"] == pytest.approx(16 / 108)
+
+
+def test_the_hand_check_rows_keep_the_order_of_the_items() -> None:
+    items = _pool(("alpha", "beta"), per_side=3)
+    outcomes = [_outcome(_answer("point")) for _ in items]
+    results: Results = {("free", "fewshot", "range_last"): outcomes}
+
+    _, rows = hand_check_table(items, results, n=12, seed=0)
+
+    assert [row[0] for row in rows] == [item.uid for item in items]
