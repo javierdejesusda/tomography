@@ -1,15 +1,23 @@
 """Tests for the P10a quantity behavior experiment."""
 
+from collections.abc import Callable
+from collections.abc import Sequence
+import csv
 import dataclasses
 import inspect
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
 
+from tomography.cli import load_experiment
+from tomography.control.generate import Completion
 from tomography.datasets.quantities import FAMILIES
 from tomography.datasets.quantities import QuantityQuestion
+from tomography.datasets.sources import OfflineCacheMissError
 from tomography.experiments import p10a_quantities
+from tomography.experiments.base import RunDir
 from tomography.experiments.p10a_quantities import FORCED_INSTRUCTION
 from tomography.experiments.p10a_quantities import FORCED_SHOTS
 from tomography.experiments.p10a_quantities import FREE_SHOTS
@@ -21,8 +29,11 @@ from tomography.experiments.p10a_quantities import Results
 from tomography.experiments.p10a_quantities import bootstrap_gap_ci
 from tomography.experiments.p10a_quantities import build_prompt
 from tomography.experiments.p10a_quantities import build_table
+from tomography.experiments.p10a_quantities import execute
 from tomography.experiments.p10a_quantities import forced_in_range_table
 from tomography.experiments.p10a_quantities import hedge_gap_table
+from tomography.experiments.p10a_quantities import plot
+from tomography.experiments.p10a_quantities import run
 from tomography.experiments.p10a_quantities import score_answer
 from tomography.experiments.p10a_quantities import width_table
 from tomography.experiments.sweep import chat_format_for
@@ -721,3 +732,531 @@ def test_width_covers_range_items_only_and_drops_empty_tertiles() -> None:
     assert {r["tertile"] for r in rows} == {1}
     assert {r["n_items"] for r in rows} == {1}
     assert {r["decoding"] for r in rows} == {"greedy", "sampled"}
+
+
+def _planted(item: QuantityQuestion, forced: bool, greedy: bool, k: int) -> str:
+    """Range items hedge when free; samples alternate with an abstention."""
+    midpoint = (item.low + item.high) / 2
+    if item.kind == "exact":
+        return f" {item.low:g} cm"
+    if forced:
+        return f" {midpoint:g}"
+    return (
+        f" {item.low:g} to {item.high:g} cm" if k % 2 == 0 else " I do not know"
+    )
+
+
+class _Calls:
+    """Replaces `generate` with planted completions and records the calls."""
+
+    def __init__(
+        self,
+        items: list[QuantityQuestion],
+        rule: Callable[[QuantityQuestion, bool, bool, int], str] = _planted,
+    ) -> None:
+        self.items = items
+        self.rule = rule
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        loaded: LoadedModel,
+        prompts: Sequence[str],
+        *,
+        max_new_tokens: int,
+        temperature: float | None = None,
+        num_samples: int = 1,
+        seed: int = 0,
+        batch_size: int = 8,
+        **kwargs: Any,
+    ) -> list[list[Completion]]:
+        self.calls.append(
+            {
+                "prompts": list(prompts),
+                "max_new_tokens": max_new_tokens,
+                "temperature": temperature,
+                "num_samples": num_samples,
+                "seed": seed,
+                "batch_size": batch_size,
+            }
+        )
+        out = []
+        for prompt in prompts:
+            item = next(i for i in self.items if i.question in prompt)
+            forced = "exact number" in prompt
+            out.append(
+                [
+                    Completion(
+                        text=self.rule(item, forced, temperature is None, k),
+                        token_ids=(),
+                        finished=True,
+                    )
+                    for k in range(num_samples)
+                ]
+            )
+        return out
+
+
+def _config(**overrides: Any) -> Config:
+    base = Config(model="tiny", n_samples=4, n_hand_check=8, batch_size=5)
+    return dataclasses.replace(base, **overrides)
+
+
+def _executed(
+    loaded: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    items: list[QuantityQuestion] | None = None,
+    rule: Callable[[QuantityQuestion, bool, bool, int], str] = _planted,
+    **overrides: Any,
+) -> tuple[RunDir, _Calls]:
+    items = items if items is not None else _pool(per_side=6)
+    calls = _Calls(items, rule)
+    monkeypatch.setattr(p10a_quantities, "generate", calls)
+    config = _config(**overrides)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    execute(config, run_dir, loaded, items)
+    return run_dir, calls
+
+
+def _post_trained(loaded: LoadedModel) -> LoadedModel:
+    return dataclasses.replace(loaded, checkpoint=MODELS["qwen3-1.7b"])
+
+
+def _csv(run_dir: RunDir, name: str) -> list[dict[str, str]]:
+    with (run_dir.path / name).open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def test_execute_writes_the_files_of_a_run(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch)
+
+    for name in (
+        "table.csv",
+        "hedge_gap.csv",
+        "forced_in_range.csv",
+        "width.csv",
+        "hand_check.csv",
+        "items.json",
+        "summary.json",
+    ):
+        assert (run_dir.path / name).is_file(), name
+
+
+def test_the_table_holds_the_planted_rates(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch)
+    rows = _csv(run_dir, "table.csv")
+
+    def row(kind: str, condition: str, decoding: str) -> dict[str, str]:
+        (found,) = [
+            r
+            for r in rows
+            if (r["family"], r["kind"], r["condition"], r["format"])
+            == ("all", kind, condition, "fewshot")
+            and r["decoding"] == decoding
+        ]
+        return found
+
+    free = row("range", "free", "greedy")
+    assert (free["n"], free["range"], free["correct"]) == ("12", "12", "12")
+    sampled = row("range", "free", "sampled")
+    assert (sampled["n"], sampled["range"], sampled["abstain"]) == (
+        "48",
+        "24",
+        "24",
+    )
+    assert row("exact", "free", "greedy")["point"] == "12"
+    forced = row("range", "forced", "greedy")
+    assert (forced["point"], forced["range"]) == ("12", "0")
+    assert float(free["range_rate"]) == 1.0
+    assert float(sampled["range_rate"]) == 0.5
+
+
+def test_the_hedge_gap_and_forced_files_follow_the_planted_answers(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch)
+
+    gaps = {
+        (r["condition"], r["decoding"]): float(r["gap"])
+        for r in _csv(run_dir, "hedge_gap.csv")
+        if r["family"] == "all" and r["format"] == "fewshot"
+    }
+    assert gaps == {
+        ("free", "greedy"): 1.0,
+        ("free", "sampled"): 0.5,
+        ("forced", "greedy"): 0.0,
+        ("forced", "sampled"): 0.0,
+    }
+    forced = [
+        r
+        for r in _csv(run_dir, "forced_in_range.csv")
+        if r["family"] == "all" and r["kind"] == "range"
+    ]
+    assert [(r["n_point"], r["inside"]) for r in forced] == [("12", "12")]
+    assert len(_csv(run_dir, "width.csv")) == 2 * 3 * 2
+
+
+def test_generation_runs_greedy_then_sampled_per_cell(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, calls = _executed(
+        tiny_gpt2, tmp_path, monkeypatch, temperature=0.7, max_new_tokens=6
+    )
+
+    greedy, sampled, *rest = calls.calls
+    assert len(rest) == 2
+    assert (greedy["temperature"], greedy["num_samples"]) == (None, 1)
+    assert (sampled["temperature"], sampled["num_samples"]) == (0.7, 4)
+    for call in calls.calls:
+        assert call["max_new_tokens"] == 6
+        assert call["batch_size"] == 5
+        assert len(call["prompts"]) == 24
+    assert len({c["seed"] for c in calls.calls[1::2]}) == 2
+
+
+def test_the_seed_of_the_samples_follows_the_config_seed(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, first = _executed(tiny_gpt2, tmp_path / "a", monkeypatch, seed=1)
+    _, again = _executed(tiny_gpt2, tmp_path / "b", monkeypatch, seed=1)
+    _, other = _executed(tiny_gpt2, tmp_path / "c", monkeypatch, seed=2)
+
+    def seeds(calls: _Calls) -> list[int]:
+        return [c["seed"] for c in calls.calls[1::2]]
+
+    assert seeds(first) == seeds(again)
+    assert seeds(first) != seeds(other)
+
+
+def test_a_base_model_skips_the_chat_format(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, calls = _executed(tiny_qwen3, tmp_path, monkeypatch)
+
+    assert {r["format"] for r in _csv(run_dir, "table.csv")} == {"fewshot"}
+    assert len(calls.calls) == 4
+    assert _summary(run_dir)["formats"] == ["fewshot"]
+
+
+def test_a_post_trained_model_runs_both_formats(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, calls = _executed(_post_trained(tiny_qwen3), tmp_path, monkeypatch)
+
+    assert {r["format"] for r in _csv(run_dir, "table.csv")} == {
+        "fewshot",
+        "chat",
+    }
+    assert len(calls.calls) == 8
+    chat_prompts = [p for c in calls.calls for p in c["prompts"] if "<|im" in p]
+    assert chat_prompts
+    assert all("Question: " in p for p in chat_prompts)
+    assert _summary(run_dir)["formats"] == ["fewshot", "chat"]
+
+
+def test_chat_only_on_a_base_model_raises(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(ValueError, match="no format"):
+        _executed(tiny_qwen3, tmp_path, monkeypatch, formats=("chat",))
+
+
+def test_the_conditions_setting_picks_the_conditions(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, calls = _executed(
+        tiny_gpt2, tmp_path, monkeypatch, conditions=("forced",)
+    )
+
+    assert {r["condition"] for r in _csv(run_dir, "table.csv")} == {"forced"}
+    assert len(calls.calls) == 2
+    assert _csv(run_dir, "hedge_gap.csv")
+
+
+def test_an_unknown_unit_fails_before_any_generation(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    items = [*_pool(per_side=2), _item(uid="x", unit="furlongs")]
+    calls = _Calls(items)
+    monkeypatch.setattr(p10a_quantities, "generate", calls)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match="furlongs"):
+        execute(config, run_dir, tiny_gpt2, items)
+
+    assert calls.calls == []
+
+
+def test_no_questions_raises(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(ValueError, match="no questions"):
+        _executed(tiny_gpt2, tmp_path, monkeypatch, items=[])
+
+
+def test_items_json_keeps_every_parsed_answer(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch)
+    records = run_dir.read_json("items")
+
+    assert isinstance(records, list)
+    assert [r["uid"] for r in records] == [i.uid for i in _pool(per_side=6)]
+    record = next(r for r in records if r["uid"] == "alpha-range-Q1")
+    assert record["entity_id"] == "Q1"
+    assert record["sha256"] == "ab" * 32
+    cell = record["answers"]["free/fewshot"]
+    assert cell["greedy"]["form"] == "range"
+    assert cell["greedy"]["correct"] is True
+    assert cell["greedy"]["unit_mismatch"] is False
+    assert [a["form"] for a in cell["samples"]] == [
+        "range",
+        "abstain",
+        "range",
+        "abstain",
+    ]
+    assert set(record["answers"]) == {
+        "free/fewshot",
+        "forced/fewshot",
+    }
+
+
+def test_the_hand_check_is_stratified_by_family_and_kind(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch, n_hand_check=8)
+    rows = _csv(run_dir, "hand_check.csv")
+
+    strata: dict[tuple[str, str], int] = {}
+    for row in rows:
+        key = (row["family"], row["kind"])
+        strata[key] = strata.get(key, 0) + 1
+    assert strata == {
+        ("alpha", "range"): 2,
+        ("alpha", "exact"): 2,
+        ("beta", "range"): 2,
+        ("beta", "exact"): 2,
+    }
+    assert _summary(run_dir)["hand_check_rows"] == 8
+
+
+def test_the_hand_check_rows_are_traceable_and_blank_for_the_human(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch, n_hand_check=100)
+    rows = _csv(run_dir, "hand_check.csv")
+    row = next(r for r in rows if r["uid"] == "alpha-range-Q3")
+
+    assert len(rows) == 24
+    assert row["wikidata_url"] == "https://www.wikidata.org/wiki/Q1"
+    assert row["question"] == "Q alpha range 3?"
+    assert (row["gold_low"], row["gold_high"]) == ("130.0", "200.0")
+    assert row["unit"] == "centimetres"
+    assert row["free_fewshot_completion"] == " 130 to 200 cm"
+    assert row["free_fewshot_form"] == "range"
+    assert row["free_fewshot_value"] == "130 to 200"
+    assert row["free_fewshot_grade"] == "correct"
+    assert row["forced_fewshot_value"] == "165"
+    for column in ("human_form", "human_correct", "human_unit_mismatch"):
+        assert row[column] == ""
+
+
+def test_the_hand_check_draw_follows_the_seed(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def uids(seed: int, out: str) -> list[str]:
+        run_dir, _ = _executed(
+            tiny_gpt2, tmp_path / out, monkeypatch, n_hand_check=8, seed=seed
+        )
+        return [r["uid"] for r in _csv(run_dir, "hand_check.csv")]
+
+    first = uids(1, "a")
+
+    assert first == uids(1, "b")
+    assert first != uids(2, "c")
+
+
+def test_a_hand_check_completion_keeps_its_newlines_visible(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def rule(item: QuantityQuestion, forced: bool, greedy: bool, k: int) -> str:
+        return " 12\nQ: next?"
+
+    run_dir, _ = _executed(
+        tiny_gpt2, tmp_path, monkeypatch, rule=rule, n_hand_check=100
+    )
+
+    row = _csv(run_dir, "hand_check.csv")[0]
+    assert row["free_fewshot_completion"] == " 12\\nQ: next?"
+    assert row["free_fewshot_form"] == "point"
+
+
+def test_the_summary_records_counts_snapshots_and_the_config(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch)
+    summary = _summary(run_dir)
+
+    assert summary["model"] == "tiny"
+    assert summary["n_items"] == 24
+    assert summary["families"] == ["alpha", "beta"]
+    assert summary["counts"] == {
+        "alpha": {"range": 6, "exact": 6},
+        "beta": {"range": 6, "exact": 6},
+    }
+    assert summary["snapshots"]["alpha"]["range"] == {
+        "retrieved_on": ["2026-10-17"],
+        "sha256": ["ab" * 32],
+    }
+    assert summary["conditions"] == ["free", "forced"]
+    assert summary["config"] == _config().to_dict()
+
+
+def _summary(run_dir: RunDir) -> dict[str, Any]:
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    return summary
+
+
+def test_run_loads_the_questions_then_the_model(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: dict[str, Any] = {}
+    order: list[str] = []
+    items = _pool(per_side=2)
+
+    def fake_load(**kwargs: Any) -> list[QuantityQuestion]:
+        order.append("questions")
+        asked.update(kwargs)
+        return items
+
+    def fake_model(key: str) -> LoadedModel:
+        order.append(f"model {key}")
+        return tiny_gpt2
+
+    monkeypatch.setattr(p10a_quantities, "load_quantities", fake_load)
+    monkeypatch.setattr(p10a_quantities, "load_model", fake_model)
+    monkeypatch.setattr(p10a_quantities, "generate", _Calls(items))
+    config = _config(
+        families=("wingspan", "height"),
+        n_per_side=7,
+        min_sitelinks=9,
+        offline=True,
+        seed=4,
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    run(config, run_dir)
+
+    assert order == ["questions", "model tiny"]
+    assert [f.name for f in asked["families"]] == ["height", "wingspan"]
+    assert {k: v for k, v in asked.items() if k != "families"} == {
+        "n_per_side": 7,
+        "min_sitelinks": 9,
+        "seed": 4,
+        "offline": True,
+    }
+    assert (run_dir.path / "summary.json").is_file()
+
+
+def test_run_loads_every_family_by_default(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: dict[str, Any] = {}
+    items = _pool(per_side=2)
+
+    def fake_load(**kwargs: Any) -> list[QuantityQuestion]:
+        asked.update(kwargs)
+        return items
+
+    monkeypatch.setattr(p10a_quantities, "load_quantities", fake_load)
+    monkeypatch.setattr(p10a_quantities, "load_model", lambda key: tiny_gpt2)
+    monkeypatch.setattr(p10a_quantities, "generate", _Calls(items))
+    config = _config()
+
+    run(config, RunDir.create(config, out_root=tmp_path))
+
+    assert [f.name for f in asked["families"]] == [f.name for f in FAMILIES]
+
+
+def test_an_offline_cache_miss_stops_before_the_model_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_model(key: str) -> LoadedModel:
+        raise AssertionError("the model must not load on a cache miss")
+
+    monkeypatch.setenv("TOMOGRAPHY_CACHE", str(tmp_path / "empty"))
+    monkeypatch.setattr(p10a_quantities, "load_model", no_model)
+    config = _config(offline=True)
+
+    with pytest.raises(OfflineCacheMissError):
+        run(config, RunDir.create(config, out_root=tmp_path / "runs"))
+
+
+def test_the_cli_discovers_the_experiment() -> None:
+    experiment = load_experiment("p10a")
+
+    assert experiment.config_cls is Config
+    assert experiment.run is run
+    assert experiment.plot is plot
+
+
+def test_plot_draws_the_form_shares(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch)
+
+    paths = plot(run_dir, tmp_path / "figs")
+
+    assert sorted(p.name for p in paths) == [
+        "form_shares.pdf",
+        "form_shares.png",
+        "form_shares.svg",
+    ]
+    assert all(p.stat().st_size > 0 for p in paths)
+
+
+def test_plot_falls_back_to_the_chat_format_without_fewshot(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(
+        _post_trained(tiny_qwen3), tmp_path, monkeypatch, formats=("chat",)
+    )
+
+    assert len(plot(run_dir, tmp_path / "figs")) == 3
+
+
+def test_a_real_tiny_run_writes_every_file(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    short = (("Keys?", "88"),)
+    monkeypatch.setattr(p10a_quantities, "FREE_SHOTS", short)
+    monkeypatch.setattr(p10a_quantities, "FORCED_SHOTS", short)
+    config = _config(max_new_tokens=3, n_samples=2)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    execute(config, run_dir, tiny_arch, _pool(per_side=3))
+
+    rows = _csv(run_dir, "table.csv")
+    assert {r["decoding"] for r in rows} == {"greedy", "sampled"}
+    assert len(_csv(run_dir, "hand_check.csv")) == 8
+    assert len(plot(run_dir, tmp_path / "figs")) == 3
+
+
+@pytest.mark.slow
+def test_p10a_on_gpt2_reads_a_small_cached_pool(tmp_path: Path) -> None:
+    config = Config(n_per_side=6, n_samples=2, n_hand_check=12, offline=True)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    try:
+        run(config, run_dir)
+    except OfflineCacheMissError as error:
+        pytest.skip(str(error))
+
+    assert (run_dir.path / "table.csv").is_file()

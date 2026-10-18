@@ -13,7 +13,10 @@ lands inside the sourced range, and a hand-check file for the answer parser.
 """
 
 from collections.abc import Sequence
+import csv
+from dataclasses import asdict
 from dataclasses import dataclass
+from pathlib import Path
 import re
 from typing import Any
 from typing import Final
@@ -21,16 +24,30 @@ from typing import Final
 import numpy as np
 from numpy.typing import NDArray
 
+from tomography.control.generate import Completion
+from tomography.control.generate import generate
 from tomography.datasets.quantities import DEFAULT_MIN_SITELINKS
 from tomography.datasets.quantities import FAMILIES
 from tomography.datasets.quantities import QuantityQuestion
+from tomography.datasets.quantities import load_quantities
 from tomography.experiments.base import ExperimentConfig
+from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
+from tomography.experiments.sweep import chat_format_for
 from tomography.knowledge import few_shot_prompt
+from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.p10.answers import answer_text
 from tomography.p10.answers import grade
 from tomography.p10.answers import parse_answer
 from tomography.reading.metrics import wilson_ci
 from tomography.templates import ChatFormat
+from tomography.viz.style import PX
+from tomography.viz.style import categorical_colors
+from tomography.viz.style import figure_of
+from tomography.viz.style import new_figure
+from tomography.viz.style import save_figure
+from tomography.viz.style import style_context
 
 CONDITIONS: Final = ("free", "forced")
 FORMATS: Final = ("fewshot", "chat")
@@ -756,3 +773,350 @@ def width_table(
                     ]
                 )
     return columns, rows
+
+
+def _csv_cell(value: object) -> object:
+    return "" if value is None else value
+
+
+def _write_csv(
+    path: Path, columns: Sequence[str], rows: Sequence[Sequence[Any]]
+) -> None:
+    """Writes a CSV with unix line ends; None becomes an empty cell."""
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(columns)
+        for row in rows:
+            writer.writerow([_csv_cell(value) for value in row])
+
+
+def _value_text(answer: Answer) -> str:
+    if answer.low is None or answer.high is None:
+        return ""
+    if answer.form == "range":
+        return f"{answer.low:g} to {answer.high:g}"
+    return f"{answer.low:g}"
+
+
+def _grade_text(answer: Answer) -> str:
+    if answer.correct is None:
+        return ""
+    return "correct" if answer.correct else "incorrect"
+
+
+def hand_check_table(
+    items: Sequence[QuantityQuestion],
+    results: Results,
+    *,
+    n: int,
+    seed: int,
+) -> tuple[list[str], list[list[Any]]]:
+    """Builds the rows a person checks the parser and the grader on.
+
+    Items are drawn one at a time from each (family, kind) stratum in turn,
+    each stratum in a seeded random order, until `n` rows are chosen or the
+    items run out, so the strata have equal quotas as far as their sizes
+    allow. The rows keep the order of `items`.
+
+    Args:
+        items: The questions.
+        results: The outcomes per (condition, format), aligned with items.
+        n: Largest number of rows.
+        seed: Seed of the draw.
+
+    Returns:
+        The column names and the rows: the item with its Wikidata URL and
+        gold range, for each cell the greedy completion (newlines shown as
+        a backslash and n), its form, value, grade and unit flag, and empty
+        columns for the verdict of the person.
+    """
+    strata: dict[tuple[str, str], list[int]] = {}
+    for i, item in enumerate(items):
+        strata.setdefault((item.family, item.kind), []).append(i)
+    rng = np.random.default_rng(seed)
+    queues = [list(rng.permutation(strata[key])) for key in sorted(strata)]
+    chosen: list[int] = []
+    while len(chosen) < n and any(queues):
+        for queue in queues:
+            if queue and len(chosen) < n:
+                chosen.append(int(queue.pop()))
+    columns = [
+        "uid",
+        "wikidata_url",
+        "family",
+        "kind",
+        "question",
+        "gold_low",
+        "gold_high",
+        "unit",
+    ]
+    for condition, fmt in results:
+        stem = f"{condition}_{fmt}"
+        columns += [
+            f"{stem}_{field}"
+            for field in ("completion", "form", "value", "grade", "unit_flag")
+        ]
+    columns += ["human_form", "human_correct", "human_unit_mismatch"]
+    rows: list[list[Any]] = []
+    for i in sorted(chosen):
+        item = items[i]
+        row: list[Any] = [
+            item.uid,
+            f"https://www.wikidata.org/wiki/{item.entity_id}",
+            item.family,
+            item.kind,
+            item.question,
+            item.low,
+            item.high,
+            item.unit,
+        ]
+        for outcomes in results.values():
+            greedy = outcomes[i].greedy
+            row += [
+                greedy.text.replace("\n", "\\n"),
+                greedy.form,
+                _value_text(greedy),
+                _grade_text(greedy),
+                "mismatch" if greedy.unit_mismatch else "",
+            ]
+        rows.append([*row, "", "", ""])
+    return columns, rows
+
+
+def _item_records(
+    items: Sequence[QuantityQuestion], results: Results
+) -> list[dict[str, Any]]:
+    """Lists each item with every parsed answer, for the reading study."""
+    return [
+        {
+            **asdict(item),
+            "answers": {
+                f"{condition}/{fmt}": {
+                    "greedy": asdict(outcomes[i].greedy),
+                    "samples": [asdict(a) for a in outcomes[i].samples],
+                }
+                for (condition, fmt), outcomes in results.items()
+            },
+        }
+        for i, item in enumerate(items)
+    ]
+
+
+def _summary(
+    config: Config,
+    items: Sequence[QuantityQuestion],
+    formats: Sequence[str],
+    n_hand_check: int,
+) -> dict[str, Any]:
+    counts: dict[str, dict[str, int]] = {}
+    snapshots: dict[str, dict[str, dict[str, list[str]]]] = {}
+    for item in items:
+        counts.setdefault(item.family, {}).setdefault(item.kind, 0)
+        counts[item.family][item.kind] += 1
+        stamp = snapshots.setdefault(item.family, {}).setdefault(
+            item.kind, {"retrieved_on": [], "sha256": []}
+        )
+        for field, value in (
+            ("retrieved_on", item.retrieved_on),
+            ("sha256", item.sha256),
+        ):
+            if value not in stamp[field]:
+                stamp[field].append(value)
+    for kinds in snapshots.values():
+        for stamp in kinds.values():
+            stamp["retrieved_on"].sort()
+            stamp["sha256"].sort()
+    return {
+        "model": config.model,
+        "n_items": len(items),
+        "families": sorted(counts),
+        "counts": counts,
+        "snapshots": snapshots,
+        "conditions": list(config.conditions),
+        "formats": list(formats),
+        "hand_check_rows": n_hand_check,
+        "config": config.to_dict(),
+    }
+
+
+def _formats_for(
+    config: Config, loaded: LoadedModel
+) -> tuple[list[str], ChatFormat | None]:
+    """Picks the formats to run: chat only for a post-trained model."""
+    chat = chat_format_for(loaded)
+    templated = chat.kind == "template"
+    formats = [f for f in config.formats if f != "chat" or templated]
+    if not formats:
+        raise ValueError(
+            f"no format applies to {config.model!r}: the chat format needs a "
+            "post-trained model and `formats` has no other"
+        )
+    return formats, chat if templated else None
+
+
+def _ask(
+    config: Config,
+    loaded: LoadedModel,
+    items: Sequence[QuantityQuestion],
+    condition: str,
+    fmt: str,
+    chat: ChatFormat | None,
+) -> list[Outcome]:
+    """Gets a greedy and sampled completions of every item in one cell."""
+    prompts = [build_prompt(i.question, condition, fmt, chat) for i in items]
+    greedy = generate(
+        loaded,
+        prompts,
+        max_new_tokens=config.max_new_tokens,
+        batch_size=config.batch_size,
+    )
+    sampled = generate(
+        loaded,
+        prompts,
+        max_new_tokens=config.max_new_tokens,
+        temperature=config.temperature,
+        num_samples=config.n_samples,
+        seed=derive_seed(config.seed, condition, fmt),
+        batch_size=config.batch_size,
+    )
+
+    def read(item: QuantityQuestion, completion: Completion) -> Answer:
+        return score_answer(item, completion.text, fmt, rel_tol=config.rel_tol)
+
+    return [
+        Outcome(
+            greedy=read(item, one[0]),
+            samples=tuple(read(item, c) for c in many),
+        )
+        for item, one, many in zip(items, greedy, sampled, strict=True)
+    ]
+
+
+def execute(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    items: Sequence[QuantityQuestion],
+) -> None:
+    """Asks every question in every condition and format and writes the files.
+
+    Writes `table.csv`, `hedge_gap.csv`, `forced_in_range.csv`, `width.csv`,
+    `hand_check.csv`, `items.json` (every parsed answer; the export step
+    leaves it out) and `summary.json`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+        loaded: The wrapped model.
+        items: The questions.
+
+    Raises:
+        ValueError: If there are no questions, a question has a unit the
+            experiment does not know (checked before any generation), or no
+            format applies to the model.
+    """
+    if not items:
+        raise ValueError("no questions to ask")
+    for unit in {item.unit for item in items}:
+        unit_words(unit)
+    formats, chat = _formats_for(config, loaded)
+    results: Results = {
+        (condition, fmt): _ask(config, loaded, items, condition, fmt, chat)
+        for condition in config.conditions
+        for fmt in formats
+    }
+    for name, (columns, rows) in {
+        "table": build_table(items, results),
+        "hedge_gap": hedge_gap_table(items, results, seed=config.seed),
+        "forced_in_range": forced_in_range_table(
+            items, results, rel_tol=config.rel_tol
+        ),
+        "width": width_table(items, results),
+    }.items():
+        _write_csv(run_dir.path / f"{name}.csv", columns, rows)
+    columns, rows = hand_check_table(
+        items, results, n=config.n_hand_check, seed=config.seed
+    )
+    _write_csv(run_dir.path / "hand_check.csv", columns, rows)
+    run_dir.write_json("items", _item_records(items, results))
+    run_dir.write_json("summary", _summary(config, items, formats, len(rows)))
+
+
+def run(config: Config, run_dir: RunDir) -> None:
+    """Loads the questions and the model, then runs `execute`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+    """
+    families = [
+        f
+        for f in FAMILIES
+        if config.families is None or f.name in config.families
+    ]
+    items = load_quantities(
+        families=families,
+        n_per_side=config.n_per_side,
+        min_sitelinks=config.min_sitelinks,
+        seed=config.seed,
+        offline=config.offline,
+    )
+    execute(config, run_dir, load_model(config.model), items)
+
+
+def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
+    """Draws the share of each answer form by kind and condition.
+
+    The bars are the pooled greedy answers of the few-shot format (the chat
+    format when the run has no few-shot cells), with Wilson 95 percent
+    intervals.
+
+    Args:
+        run_dir: A finished P10a run.
+        out_dir: Folder of the figures.
+
+    Returns:
+        The PDF, PNG and SVG paths.
+    """
+    with (run_dir.path / "table.csv").open(encoding="utf-8", newline="") as f:
+        rows = [
+            r
+            for r in csv.DictReader(f)
+            if r["family"] == POOLED and r["decoding"] == "greedy"
+        ]
+    fmt = "fewshot" if any(r["format"] == "fewshot" for r in rows) else "chat"
+    groups = [
+        r
+        for condition in CONDITIONS
+        for kind in _KINDS[::-1]
+        for r in rows
+        if (r["condition"], r["kind"], r["format"]) == (condition, kind, fmt)
+    ]
+    forms = ("point", "range", "abstain", "none")
+    colors = categorical_colors(len(forms))
+    with style_context():
+        _, axes = new_figure(aspect=0.6)
+        ax = axes[0, 0]
+        for k, (form, color) in enumerate(zip(forms, colors, strict=True)):
+            x = np.arange(len(groups)) + (k - 1.5) * 0.18
+            rate = np.array([float(g[f"{form}_rate"]) for g in groups])
+            low = np.array([float(g[f"{form}_lo"]) for g in groups])
+            high = np.array([float(g[f"{form}_hi"]) for g in groups])
+            ax.errorbar(
+                x,
+                rate,
+                yerr=[rate - low, high - rate],
+                fmt="o",
+                ms=3,
+                color=color,
+                elinewidth=PX,
+                label=form,
+            )
+        ax.set_xticks(
+            np.arange(len(groups)),
+            [f"{g['kind']}\n{g['condition']}" for g in groups],
+        )
+        ax.set_ylim(0, 1)
+        ax.set_ylabel(f"Share of greedy answers ({fmt})")
+        ax.legend(title="Answer form", frameon=False)
+    return save_figure(figure_of(ax), out_dir, "form_shares")
