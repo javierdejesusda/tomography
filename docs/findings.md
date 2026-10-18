@@ -9,7 +9,7 @@ curves files). The derived ones are the R6 text baselines on `gpt2` (see that se
 the runs), the random-direction cosine of A1, the P9d selectivity columns (recomputed from the stored per-item
 slopes), the span of the sizes in decades, the P1 spans, family ranges and transfer ranges (computed from the table
 and matrix files of the P1 runs), the means and ranges over readers of the Qwen3 C1 tables (computed from the
-per-reader rows), the per-layer dose slopes and judge agreements of the Qwen3 C1 pairs (recomputed from the stored per-reader sweep curves), the maxima over layers of the random-direction series of R6, the P1 spans and cosine ranges of the
+per-reader rows), the per-layer dose slopes and judge agreements of the Qwen3 4B C1 pair (recomputed from the stored per-reader sweep curves), the maxima over layers of the random-direction series of R6, the P1 spans and cosine ranges of the
 `gpt2` truth and emotion tasks (computed from the table file), the C2 and P7 curve values (read from the curves
 files), the P7 counts of inverted units by layer on the Qwen3 1.7B and 4B pairs (recomputed from the per-seed curves), the random and shuffled-label values at the selected layer of R4 on Qwen3, the maxima over layers of the R6
 random series on Qwen3, the layer ranges of A1 and the A2 separations on Qwen3 and on the three larger GPT-2 sizes (all computed from the curves files), the
@@ -3538,8 +3538,8 @@ two text rows are those of every column above.
   the shuffled-label series stays at or below 0.237 and 0.243 (chance 0.228). The best-layer reader is above the highest
   random value in every row, by 0.330, 0.049 and 0.097 on the base checkpoint and by 0.265, 0.136 and 0.185 on the
   post-trained one. On the base checkpoint the ARC row (0.049) is as close to the random maximum as the ARC rows of the
-  smaller checkpoints (0.024 to 0.050) and the honesty row (0.097) is just above the 0.035 to 0.083 of the smaller base
-  checkpoints; on the post-trained checkpoint both rows are clearly above it.
+  smaller base checkpoints (0.039 and 0.044) and the honesty row (0.097) is just above the 0.052 and 0.083 of the smaller
+  base checkpoints; on the post-trained checkpoint both rows are clearly above it.
 - **Standard and heuristic.** The standard log-probability MC1 on the test questions is 0.254 [0.195, 0.324] (base) and
   0.318 [0.253, 0.391] (post-trained) and the heuristic is 0.237 [0.180, 0.306] and 0.225 [0.170, 0.293]. On all 817
   questions the runs record 0.248 [0.220, 0.279] and 0.258 [0.229, 0.289] (base) and 0.332 [0.300, 0.365] and 0.237
@@ -3790,7 +3790,7 @@ The same config as the 1.7B runs above (six finders, 10 readers per finder, the 
 - **Reading does not order the finders, and `logistic` steers least.** The test accuracy of the five finders spans 0.703 to 0.787 on the base checkpoint (`mean_diff` highest, `pca_diff` lowest) and 0.794 to 0.807 on the post-trained one (`logistic` lowest). The win rate at 0.3 is highest for `mean_diff` on both checkpoints (0.949 [0.931, 0.963] and 0.969 [0.954, 0.979]) and lowest for `logistic` (0.869 [0.843, 0.892] and 0.855 [0.828, 0.878]). On the base checkpoint `logistic` has the second-highest test accuracy (0.772), so accuracy does not predict its win rate there. The interval of `mean_diff` at 0.3 overlaps those of `pca_raw` and `kmeans` on the base checkpoint and those of `pca_diff`, `pca_raw` and `kmeans` on the post-trained one; it is clear of `pca_diff` (0.911 [0.888, 0.929]) and `logistic` on the base checkpoint and of `logistic` on the post-trained one. The check judge puts `logistic` lowest as well (0.839 [0.811, 0.863] and 0.831 [0.802, 0.856]), but well above the random direction (0.525 and 0.457), unlike the 1.7B post-trained checkpoint, where it was 0.580 [0.544, 0.615] against 0.513 [0.478, 0.549]. Of the four 1.7B and 4B checkpoints, `logistic` has the lowest win rate at 0.3 on three (on the 1.7B base checkpoint `kmeans` and `pca_raw` are lower).
 - **The random direction.** Its test accuracy is 0.618 [0.582, 0.653] and 0.669 [0.621, 0.713], 0.085 to 0.169 below the five finders on the base checkpoint and 0.125 to 0.138 below on the post-trained one. On the base checkpoint its win rate includes 0.5 at 0.1, 0.2 and 0.3 on the primary judge (0.493, 0.528, 0.529) and at 0.3 on the check judge (0.525 [0.490, 0.561]). On the post-trained checkpoint it is above 0.5 at 0.1 (0.543 [0.508, 0.579]), includes 0.5 at 0.2 (0.511 [0.476, 0.547]) and is below 0.5 at 0.3 on both judges (0.460 [0.425, 0.496] and 0.457 [0.422, 0.493]). Those two excursions are small (0.04 from 0.5), have opposite signs and come from one run; in the 1.7B pair the earlier run showed excursions of 0.06 to 0.07 that did not reappear in the later run (above), so they are not read as an effect of the random direction. At 0.3 the finders are above the random win rate by 0.341 (`logistic`) to 0.421 (`mean_diff`) on the base checkpoint and by 0.395 (`logistic`) to 0.509 (`mean_diff`) on the post-trained one.
 - **Judges and empty completions.** The share of swept settings with the same dose sign under both judges is 0.944 on both checkpoints (0.889 and 0.833 on the 1.7B pair). The share of empty completions over all generations is 0 on both.
-- **Against the 1.7B pair.** At the same relative strengths the finders win more at 0.3 on the 4B pair than on the 1.7B pair (base: 0.869 to 0.949 against 0.752 to 0.896; post-trained: 0.855 to 0.969 against 0.743 to 0.921). On the base checkpoint the five finders are spread wider at 4B (test accuracy 0.703 to 0.787 against 0.767 to 0.776), with `pca_diff`, `pca_raw` and `kmeans` below the 1.7B base range with non-overlapping intervals. These are one run per checkpoint of each size, so the differences are not tested against variation between runs.
+- **Against the 1.7B pair.** At the same relative strengths the finders win more at 0.3 on the 4B pair than on the 1.7B pair (base: 0.869 to 0.949 against 0.752 to 0.896; post-trained: 0.855 to 0.969 against 0.743 to 0.921; on the post-trained checkpoint the `pca_diff` intervals overlap, 0.951 [0.933, 0.964] against 0.920 [0.898, 0.937], and the intervals of the other four finders do not). On the base checkpoint the five finders are spread wider at 4B (test accuracy 0.703 to 0.787 against 0.767 to 0.776), with `pca_diff`, `pca_raw` and `kmeans` below the 1.7B base range with non-overlapping intervals. These are one run per checkpoint of each size, so the differences are not tested against variation between runs.
 
 Cost to the text. Unsteered, the neutral text has a perplexity of 15.9 on the base checkpoint and 31.7 on the post-trained one, and the generated text a distinct-1 of 0.217 and 0.175. The tables give the mean over the three steering readers, with the ratio to the unsteered perplexity in parentheses at the largest strength.
 
@@ -3955,14 +3955,15 @@ it is not the depth of the 1.7B runs.
   post-trained checkpoint the diagonals differ: the check judge gives surprise +0.072 where the primary judge gives
   +0.248, and happiness +0.299 where the primary gives +0.159.
 - **Random arms.** The own-emotion change under a random arm is between -0.020 and +0.031 on the base checkpoint and
-  between -0.023 and +0.020 on the post-trained one, and the largest absolute change of any emotion under any random arm
-  and coefficient is 0.091 and 0.052 (the largest of the C2 runs on Qwen3; the 1.7B values are 0.046 and 0.076). On the base checkpoint happiness (+0.351), fear (+0.184), disgust (+0.140) and surprise (+0.122) are above the
+  between -0.023 and +0.020 on the post-trained one, and the largest absolute change of any emotion under any random arm,
+  coefficient and judge is 0.091 and 0.052 (the largest of the C2 runs on Qwen3; the 1.7B values are 0.046 and 0.076). On the base checkpoint happiness (+0.351), fear (+0.184), disgust (+0.140) and surprise (+0.122) are above the
   random maximum; sadness (+0.100) is above it by 0.009 and anger (+0.091, that is 0.0912 against 0.0908) is level with
   it, so those two are not separated from an arbitrary edit of the same size. On the post-trained checkpoint five
   own-emotion changes (+0.084 to +0.248) are above it and disgust (+0.023) is not.
 - **Base against post-trained.** Happiness (+0.351 against +0.159) and disgust (+0.140 against +0.023) are steered more on
-  the base checkpoint, sadness (+0.100 against +0.133) and surprise (+0.122 against +0.248) more on the post-trained one,
-  and anger (+0.091 against +0.084) and fear (+0.184 against +0.178) are within 0.007 of each other. There is no common
+  the base checkpoint, surprise (+0.122 against +0.248) more on the post-trained one,
+  sadness (+0.100 against +0.133) is not separated, the ranges over seeds of the change overlapping ([+0.058, +0.133]
+  and [+0.050, +0.195]), and anger (+0.091 against +0.084) and fear (+0.184 against +0.178) are within 0.007 of each other. There is no common
   sign. Each emotion has one reader per checkpoint and each checkpoint one run, so this is a contrast between two runs.
 - **Off-diagonal.** On the base checkpoint the largest off-diagonal change on the primary judge is a fall of happiness in
   the anger, fear, disgust and surprise rows (-0.061 to -0.075), a rise of happiness in the sadness row (+0.040) and a
@@ -4009,7 +4010,7 @@ readers), against the unsteered text and the mean over the three random arms (wi
   post-trained one, against 1.03, 1.12 and 1.34 and 1.02, 1.10 and 1.31 for the random arms. By the rule of [Sentiment
   steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity at most 1.5 times the unsteered one and mean
   distinct-1 at least 0.15) +0.1 passes on both checkpoints (mean distinct-1 0.305 and 0.239 against 0.319 and 0.249
-  unsteered), as does -0.1 (1.11 and 1.14 times, distinct-1 0.302 and 0.241), and +0.2 does not (distinct-1 0.274 and
+  unsteered), as does -0.1 (1.11 and 1.14 times, distinct-1 0.302 and 0.241), and +0.2 does not (1.74 and 1.69 times the unsteered perplexity, distinct-1 0.274 and
   0.200). At +0.3 every emotion is at 2.56 to 4.75 times the unsteered perplexity on the base checkpoint (distinct-1 from
   0.204 for surprise to 0.272 for happiness) and at 2.36 to 4.78 times on the post-trained one (distinct-1 from 0.115 for
   surprise to 0.173 for sadness; the mean over the six emotions is 0.147, below the cutoff, and three emotions are below
@@ -4199,7 +4200,7 @@ questions, one sample per question at temperature 0.8, relative strength 0.1, st
 and the post-trained one with the question alone in the chat template, so the two columns are not a comparison of the
 models. Each run reads the C2 run of its checkpoint: `c2/qwen3-4b-base/984485501f3e` and `c2/qwen3-4b/1df7c1f9ff70`.
 A share is taken over the non-empty answers. The base checkpoint returned one empty answer unsteered, 15 under the lie
-arm, none under the honesty arm and one under four of the six random arms, so its unsteered share is 473 of 999 and its
+arm, none under the honesty arm and one under three of the six random arms, so its unsteered share is 473 of 999 and its
 lie-arm share 316 of 985; the post-trained checkpoint returned none. The random rows are the mean of the three random directions.
 
 | Quantity                                     | qwen3-4b-base        | qwen3-4b             |
@@ -4233,7 +4234,7 @@ lie-arm share 316 of 985; the post-trained checkpoint returned none. The random 
   share (0.336) and 0.004 and 0.005 below the random arms (0.328 and 0.329), well inside the scale above (a share near
   0.33 has a standard error of about 0.015, a difference about 0.021). The honesty arm is lower (0.299, 0.037 below the
   unsteered share and 0.029 and 0.030 below the random arms, roughly 1.4 standard errors), so the order of the two
-  steered arms is the reverse of the other three checkpoints, where the lie arm is the lowest.
+  steered arms is the reverse of the other five checkpoints, where the lie arm is the lowest.
 - **Flip rate.** 170 of the 473 questions answered correctly are answered wrongly under the lie arm on the base
   checkpoint (0.359 [0.317, 0.404]) and 54 of 336 on the post-trained one (0.161 [0.125, 0.204]). The post-trained
   interval is below the intervals of both 1.7B checkpoints (0.262 [0.218, 0.311] and 0.363 [0.304, 0.426]); the base
@@ -4478,11 +4479,11 @@ and no metric is pooled over them.
   for truth only; for sentiment `mean` is the highest, with overlapping intervals, and for utility `concept` is (0.802
   against 0.781 at `last`).
 - **Random decoy.** At `last` the reader rises by 0.057 for sentiment (0.901 to 0.958, intervals that do not overlap) and
-  moves by -0.003 for truth (1.000 to 0.997) and -0.017 for utility (0.781 to 0.764). At `concept` sentiment moves by
-  -0.039 (0.905 to 0.866), truth by +0.047 (0.936 to 0.983) and utility by -0.022 (0.802 to 0.780). At `mean` no task
+  moves by -0.003 for truth (1.000 to 0.997) and -0.016 for utility (0.781 to 0.764). At `concept` sentiment moves by
+  -0.038 (0.905 to 0.866), truth by +0.047 (0.936 to 0.983) and utility by -0.022 (0.802 to 0.780). At `mean` no task
   moves by more than 0.015.
-- **Against decoy.** At `last` sentiment rises to 0.957 [0.953, 0.961] (+0.056), as under the random decoy, truth is
-  0.983 (-0.017) and utility falls to 0.568 [0.511, 0.627] (-0.213). At `concept` sentiment drops 0.105 (0.800), truth is
+- **Against decoy.** At `last` sentiment rises to 0.957 [0.953, 0.961] (+0.057), as under the random decoy, truth is
+  0.983 (-0.017) and utility falls to 0.568 [0.511, 0.627] (-0.213). At `concept` sentiment drops 0.104 (0.800), truth is
   unchanged (0.936) and utility drops 0.110 (0.692). At `mean` sentiment (0.904) and truth (0.880) are within 0.017 of the
   original with overlapping intervals; utility is 0.647 [0.623, 0.670], a drop of 0.061 with an interval that does not
   overlap the original [0.684, 0.730]. No cell is below chance: the lowest is utility at `last` (0.568), with a lower
@@ -4513,15 +4514,15 @@ and no metric is pooled over them.
 
 - **Position.** On the original prompts the positions `concept` and `mean` read within 0.002 of each other for
   sentiment (0.891, 0.893), but `last` is 0.138 and 0.140 lower (0.753 [0.726, 0.782]; the R1 sentiment reader of this checkpoint
-  is 0.760 at L23, in [LAT reading on Qwen3](#lat-reading-on-qwen3)). Truth spreads by 0.060 (0.968, 0.946, 0.908) and
+  is 0.760 at L23, in [LAT reading on Qwen3](#lat-reading-on-qwen3)). Truth spreads by 0.059 (0.968, 0.946, 0.908) and
   utility by 0.083 (0.785, 0.766, 0.702). `last` is the highest position for truth and utility (for utility within 0.019
   of `concept`) and the lowest for sentiment, as on `qwen3-1.7b`.
 - **Random decoy.** At `last` the reader moves by +0.001 for sentiment (0.753 to 0.754), -0.041 for truth (0.968 to 0.927)
   and -0.041 for utility (0.785 to 0.744). At `concept` sentiment moves by -0.048 (0.891 to 0.843), truth by -0.015 and
-  utility by -0.001. At `mean` no task moves by more than 0.012.
+  utility by -0.001. At `mean` no task moves by more than 0.013.
 - **Against decoy.** At `last` the reader falls on every task: sentiment to 0.710 [0.673, 0.747] (-0.043), truth to 0.808
-  (-0.160) and utility to 0.641 [0.565, 0.720] (-0.144). At `concept` sentiment drops 0.131 (0.760), truth 0.093 (0.853)
-  and utility 0.116 (0.650). At `mean` sentiment (0.903) and truth (0.895) are within 0.013 of the original with
+  (-0.159) and utility to 0.641 [0.565, 0.720] (-0.143). At `concept` sentiment drops 0.131 (0.760), truth 0.093 (0.853)
+  and utility 0.116 (0.650). At `mean` sentiment (0.903) and truth (0.895) are within 0.014 of the original with
   overlapping intervals; utility is 0.622 [0.606, 0.641], a drop of 0.080 with an interval that does not overlap the
   original [0.678, 0.724]. No cell is below chance; the lowest is utility at `mean` (0.622).
 - **Zero-shot.** The model's own answer goes from 0.935, 0.932 and 0.770 to 0.907, 0.881 and 0.699 under the random decoy
@@ -5326,8 +5327,8 @@ than `no_chat_tags` at layer 1, with a validation accuracy of 0.547 to 0.586.
   ([The 4B pair (C1)](#the-4b-pair-c1)). For the five templates that steer at L22 the
   mean slope at L36 is lower (`paper` 0.030 against 0.073, `no_template` 0.318 against 0.622, `neutral_frame` 0.154
   against 0.525, `scaffold_0` 0.528 against 0.766, `concept_swap_0` 0.040 against 0.274), so the last block is not where
-  their slope is largest. Over the four runs of the 1.7B and 4B pairs the steering layer is the last block for 18 of the
-  24 templates. The slope at the steering layer is measured on the prompts that chose that layer and is optimistic.
+  their slope is largest. The steering layer is the last block for 6 of 6 templates on each base checkpoint (1.7B and 4B), for 5 of 6 on
+  `qwen3-1.7b` and for 1 of 6 on `qwen3-4b`. The slope at the steering layer is measured on the prompts that chose that layer and is optimistic.
 - **The `paper` template barely steers on the post-trained checkpoint.** Its mean dose slope is between -0.082 and 0.073
   over the six sweep layers, and its two steering readers differ in sign at four of them (layers 15, 22, 29 and 36); at
   its steering layer (L22) the slopes are -0.094 and 0.239, whose mean is 0.073. Eight of its 12 units are inverted,
@@ -5561,8 +5562,7 @@ the three C4 runs. For those the exported config rewrites the `lorra_run` path (
 the hash of the exported config differs from the stored one; the hash of the unmodified config of the pod run equals
 the directory name. A1 and A2 read the R1, R2, R3, R5 and R7 runs of the
 same checkpoint (the hashes are stored in each A1 and A2 summary and are those below), and each C4 run reads the LR1 run
-of its size. Exporting these runs changed no tracked result. The runs that were cut or never started are not exported
-and are listed under [Pending](#pending).
+of its size. Exporting these runs changed no tracked result. The runs that were cut or never started are not exported; those of the 4B pair were made later, in chains 20 to 24 below.
 
 Config hashes of the chain 17 runs (12 hex digits), the Qwen3 4B pair:
 
