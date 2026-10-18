@@ -13,8 +13,8 @@ that record their code state and library versions; and both architectures behind
 Status: research code under active development. `main` ships the framework described below and the
 experiments listed under [Running experiments](#running-experiments): the reading experiments (R1 to R7 and
 P1 to P5), the steering and control experiments (C1, C2, C4, C5, M1, P7 and the LoRRA adapter LR1), five
-analyses of finished runs (A1, A2, A5, P6 and P8) and P9a to P9d, a study of known versus unknown questions. It
-reports no results.
+analyses of finished runs (A1, A2, A5, P6 and P8), P9a to P9d (a study of known versus unknown questions) and
+P10a and P10b (a study of approximate, range-valued answers). It reports no results.
 
 ## How it fits together
 
@@ -602,6 +602,68 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
   abstention, which the hand check measures. The patterns are not part of the config, so a run with an
   explicit `n_prompts` of 50 reuses the directory of an older run with the same settings.
 
+- `p10a` ([`p10a_quantities.py`](src/tomography/experiments/p10a_quantities.py)): how a model answers a
+  quantity question, with a range or with one value. It fits no reader. The questions come from Wikidata
+  ([`datasets/quantities.py`](src/tomography/datasets/quantities.py)) in three families, `height`, `wingspan`
+  and `duration`. In each, one side has a sourced answer that is a range (the height of a dog breed, the
+  wingspan of a species, the gestation period of a species) and the other a single value (the height of a
+  building, the wingspan of an aircraft model, the length of a film). `n_per_side` (120) items of each kind
+  are kept per family, the most linked first and the same number on both sides, with at least `min_sitelinks`
+  (5) sitelinks (the film side has a floor of 20 in its query). Every question is asked in each cell of
+  `conditions` (`free`, and `forced`, which adds the instruction "Answer each question with one exact
+  number.") and `formats`: `fewshot`, a raw few-shot prompt that every model gets, in the two `shot_orders`
+  `range_last` and `exact_last` (the same list reversed, so only the form of the last example differs), and
+  `chat`, the chat template with no examples, which only a post-trained model runs. Each cell keeps one greedy
+  completion and `n_samples` (5) sampled ones (`temperature` 1.0, `max_new_tokens` 32). The first non-empty
+  line of a completion is read as a point, a range, an abstention or no answer, with flags for an
+  approximation marker, a unit mismatch and a truncated answer, and graded against the sourced range widened
+  by `rel_tol` (0.05). With `people` (on by default), a set of up to 120 well-known people with one exact
+  height (at least 100 sitelinks, a fixed floor that is not a config field) is asked too, as a test-only
+  diagnostic of whether hedging follows the kind of answer or the animacy of the thing asked about; the people
+  get their own rows and no pooled statistic counts them. It writes `table.csv` (the rate of each answer form
+  and of correct answers per family, kind, cell and decoding, with Wilson intervals for the greedy answers and
+  an item bootstrap of 2000 resamples for the sampled ones), `hedge_gap.csv` (the share of range answers on
+  range items minus that on exact items, with a bootstrap interval, and a `both` row that averages the shot
+  orders), `forced_in_range.csv` (how often a forced greedy point lands inside the sourced range, or inside
+  the range widened by `rel_tol`), `width.csv` (the rates by width tertile of the range items),
+  `diagnostic.csv` (the hedge rate of the people next to that of the dog breeds and the buildings of the
+  `height` family, only when the run has them), the hand-check files `hand_check.csv` and
+  `hand_check_samples.csv` for checking the parser and the grader by eye, `items.json` (every parsed answer;
+  `export` leaves it out) and `summary.json` (the counts and, per family and kind, the retrieval dates and
+  digests of the Wikidata snapshots). The plot draws `form_shares`. Other defaults: `n_hand_check` 120 and
+  `batch_size` 8, which is a config field and, because sampling is seeded per chunk of prompts, changes which
+  sampled completions are drawn.
+- `p10b` ([`p10b_reading.py`](src/tomography/experiments/p10b_reading.py)): reading a range against an exact
+  answer from the hidden states, on the questions of `p10a` (the same loader and the same `families`,
+  `n_per_side`, `min_sitelinks`, `people` and `offline` fields). It loads the questions itself and needs no
+  `p10a` run. Each question is rendered by every template of `templates` (`plain`, the bare question, and
+  `concept`, the concept template of the paper with the concept word `concept` ("variability"), wrapped in the
+  chat format of a post-trained model), and its activations at the last token are read at layers 1 to L. A
+  reader is fitted for each template, direction finder of `methods` (`logistic`, `pca_diff`, `mean_diff` and
+  `random`, a Gaussian direction that reads no labels and serves as the control) and train set, on pairs of
+  one range and one exact train item of the same family, and scores the held-out test items of every family
+  and of all of them pooled (AUROC, with a range answer as the positive class). The train sets are each single
+  family, each leave-one-family-out set when there are three or more families, and all families together
+  (`all`), so the transfer across families is read off the matrix of train set by test family. Each reader is
+  drawn `n_seeds` (5) times; the layer is the one with the best mean validation AUROC on the validation items
+  of the train families (the first on ties), so no test item chooses anything, and the intervals use `n_boot`
+  (1000) resamples, over the draws for the curves and over items for the transfer and people rows. Four
+  surface baselines that use no model are fitted on the same train items and scored on the same test items:
+  `text_word` and `text_char` (TF-IDF classifiers on the words and on the characters of the question),
+  `length` (the characters of the question) and `popularity` (log10 of the sitelink count plus one), each
+  oriented on the train items, so that the AUROC of a reader can be read next to them. In every family the
+  range side is a living thing and the exact side an artifact, so with `people` (on by default; it needs the
+  `height` family) a set of well-known people with one exact height is scored too. It is test-only and never
+  trains a reader: a reader of range against exact should call the people exact, and a reader of living
+  against artifact should not. `people.csv` places them between the dog breeds and the buildings of the
+  `height` family, for every reader and every baseline, with `breeds_vs_people` and `people_vs_buildings`
+  (AUROCs with item bootstrap intervals) and `position` (0 when the people score like the buildings, 1 when
+  like the breeds). It writes `curves.csv` (the test AUROC at every layer), `transfer.csv` (at the chosen
+  layer), `baselines.csv`, `people.csv`, `readers.npz` and `readers.json` (the readers of the first draw
+  fitted on the largest train set), `items.json` (every item with the draw-averaged score of those readers)
+  and `summary.json`. The plot draws `curves_<template>` and `transfer_<template>`. Other defaults:
+  `batch_size` 8 (prompts per forward pass).
+
 **P9 methodology.** The `p9a` pool draws its PopQA questions from the 12 relations of `POPQA_RELATIONS`
 ([`datasets/popqa.py`](src/tomography/datasets/popqa.py); `popqa_relations`), the guess control demotes the
 known labels that a constant answer would explain, and a model enters the known versus unknown contrasts
@@ -840,9 +902,9 @@ those fields before pooling runs from the pod and the laptop. Run configs hold P
   commit SHA, or plain files at an https URL, each with a required SHA-256 digest. Digests are checked on
   every read, cache hits included. The cache lives outside the repository, in `$TOMOGRAPHY_CACHE` when set and
   `~/.cache/tomography` otherwise.
-- **Wikidata snapshots.** `load_post_cutoff` and `load_unknowable_detail` query the public Wikidata Query
-  Service. Each response is cached with the query text, the retrieval date and its SHA-256, and a later run
-  reuses that snapshot after checking the digest.
+- **Wikidata snapshots.** `load_post_cutoff`, `load_unknowable_detail`, `load_quantities` and
+  `load_people_heights` query the public Wikidata Query Service. Each response is cached with the query
+  text, the retrieval date and its SHA-256, and a later run reuses that snapshot after checking the digest.
 - **Splits and seeds.** `assign_splits` hashes the example id, so a split does not depend on row order or
   library versions. `derive_seed(base, *keys)` turns a base seed and identifying keys into a 32-bit seed from
   a SHA-256, the same in every process, and `seed_everything` seeds `random`, NumPy and PyTorch. Pairing,
@@ -894,24 +956,24 @@ The GPT-2 cards say MIT, while the upstream `openai/gpt-2` repository carries a 
 
 Datasets and other remote sources, read by the loaders in [`datasets/`](src/tomography/datasets):
 
-| Source              | Hub ID or URL                                            | Revision                   | Used by                              | License as stated                                                                                                                            | Verified at                                              |
-| ------------------- | -------------------------------------------------------- | -------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| Alpaca              | `tatsu-lab/alpaca`                                       | dce01c9                    | `c4`, `c5`, `lr1`                    | CC BY-NC 4.0 (data), research use only; generated with OpenAI `text-davinci-003`, so OpenAI terms may also apply; code repository Apache-2.0 | Hub card; `tatsu-lab/stanford_alpaca` LICENSE            |
-| ARC-Challenge       | `allenai/ai2_arc`                                        | 210d026                    | `r6`                                 | CC-BY-SA-4.0                                                                                                                                 | Hub card                                                 |
-| Emotions statements | RepE repository, `data/emotions/*.json` and replies      | 5455d8a                    | `r4`, `c2`, `c5`, `p1` to `p4`       | MIT (repository)                                                                                                                             | `andyzoujm/representation-engineering` LICENSE           |
-| Facts true/false    | RepE repository, `data/facts/facts_true_false.csv`       | 5455d8a                    | `r5`, `r6`, `r7`, `p5`, `p1` to `p4` | MIT (repository)                                                                                                                             | `andyzoujm/representation-engineering` LICENSE           |
-| ETHICS              | `https://people.eecs.berkeley.edu/~hendrycks/ethics.tar` | SHA-256 40acbf1            | `r2`, `r3`, `m1`, `p1` to `p4`       | MIT (repository)                                                                                                                             | `hendrycks/ethics` LICENSE                               |
-| FalseQA             | `thunlp/FalseQA`, `dataset/test.csv`                     | 9a97299                    | `p9a` (read by `p9b` to `p9d`)       | none stated                                                                                                                                  | GitHub repository: no LICENSE file, no license in README |
-| Geometry of Truth   | `saprmarks/geometry-of-truth`, `datasets/*.csv`          | 5d1c630                    | `r7`, `p5`, `p1` to `p4`             | none stated                                                                                                                                  | GitHub repository: no LICENSE file, no license in README |
-| KUQ                 | `amayuelas/KUQ`                                          | f99b53a                    | `p9a` (read by `p9b` to `p9d`)       | MIT                                                                                                                                          | Hub card                                                 |
-| NQ-Open             | `google-research-datasets/nq_open`                       | 5dd9790                    | `p9a` (read by `p9b` to `p9d`)       | CC-BY-SA-3.0                                                                                                                                 | Hub card                                                 |
-| PopQA               | `akariasai/PopQA`                                        | 098765c                    | `p9a` (read by `p9b` to `p9d`)       | none on the Hub card; the code repository `AlexTMallen/adaptive-retrieval` is MIT                                                            | Hub card; GitHub LICENSE (code only)                     |
-| SST-2               | `stanfordnlp/sst2`                                       | 8d51e7e                    | `r1`, `c1`, `p7`, `p1` to `p4`       | unknown on the Hub card; none on the Stanford SST page                                                                                       | Hub card; `nlp.stanford.edu/sentiment`                   |
-| SyntHal             | `yuetianluNLP/SyntHal`, prompts file                     | c4fe4ce                    | `p9a` (read by `p9b` to `p9d`)       | research and review terms, no permissive license                                                                                             | GitHub README, "Terms" section                           |
-| TriviaQA            | `mandarjoshi/trivia_qa`                                  | 0f7faf3                    | `c5`, `p9a` (read by `p9b` to `p9d`) | unknown on the Hub card; Apache-2.0 on the GitHub repository                                                                                 | Hub card; `mandarjoshi90/triviaqa` LICENSE               |
-| TruthfulQA          | `truthfulqa/truthful_qa`                                 | 741b827                    | `r6`, `c4`                           | Apache-2.0                                                                                                                                   | Hub card                                                 |
-| WikiText-103        | `Salesforce/wikitext`                                    | b08601e                    | `c1`, `c2`, `m1`, `p7`               | CC-BY-SA-3.0 and GFDL                                                                                                                        | Hub card                                                 |
-| Wikidata            | `https://query.wikidata.org/sparql` (SPARQL snapshots)   | retrieval date and SHA-256 | `p9a` (read by `p9b` to `p9d`)       | CC0 (structured data)                                                                                                                        | `wikidata.org/wiki/Wikidata:Licensing`                   |
+| Source              | Hub ID or URL                                            | Revision                   | Used by                                        | License as stated                                                                                                                            | Verified at                                              |
+| ------------------- | -------------------------------------------------------- | -------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Alpaca              | `tatsu-lab/alpaca`                                       | dce01c9                    | `c4`, `c5`, `lr1`                              | CC BY-NC 4.0 (data), research use only; generated with OpenAI `text-davinci-003`, so OpenAI terms may also apply; code repository Apache-2.0 | Hub card; `tatsu-lab/stanford_alpaca` LICENSE            |
+| ARC-Challenge       | `allenai/ai2_arc`                                        | 210d026                    | `r6`                                           | CC-BY-SA-4.0                                                                                                                                 | Hub card                                                 |
+| Emotions statements | RepE repository, `data/emotions/*.json` and replies      | 5455d8a                    | `r4`, `c2`, `c5`, `p1` to `p4`                 | MIT (repository)                                                                                                                             | `andyzoujm/representation-engineering` LICENSE           |
+| Facts true/false    | RepE repository, `data/facts/facts_true_false.csv`       | 5455d8a                    | `r5`, `r6`, `r7`, `p5`, `p1` to `p4`           | MIT (repository)                                                                                                                             | `andyzoujm/representation-engineering` LICENSE           |
+| ETHICS              | `https://people.eecs.berkeley.edu/~hendrycks/ethics.tar` | SHA-256 40acbf1            | `r2`, `r3`, `m1`, `p1` to `p4`                 | MIT (repository)                                                                                                                             | `hendrycks/ethics` LICENSE                               |
+| FalseQA             | `thunlp/FalseQA`, `dataset/test.csv`                     | 9a97299                    | `p9a` (read by `p9b` to `p9d`)                 | none stated                                                                                                                                  | GitHub repository: no LICENSE file, no license in README |
+| Geometry of Truth   | `saprmarks/geometry-of-truth`, `datasets/*.csv`          | 5d1c630                    | `r7`, `p5`, `p1` to `p4`                       | none stated                                                                                                                                  | GitHub repository: no LICENSE file, no license in README |
+| KUQ                 | `amayuelas/KUQ`                                          | f99b53a                    | `p9a` (read by `p9b` to `p9d`)                 | MIT                                                                                                                                          | Hub card                                                 |
+| NQ-Open             | `google-research-datasets/nq_open`                       | 5dd9790                    | `p9a` (read by `p9b` to `p9d`)                 | CC-BY-SA-3.0                                                                                                                                 | Hub card                                                 |
+| PopQA               | `akariasai/PopQA`                                        | 098765c                    | `p9a` (read by `p9b` to `p9d`)                 | none on the Hub card; the code repository `AlexTMallen/adaptive-retrieval` is MIT                                                            | Hub card; GitHub LICENSE (code only)                     |
+| SST-2               | `stanfordnlp/sst2`                                       | 8d51e7e                    | `r1`, `c1`, `p7`, `p1` to `p4`                 | unknown on the Hub card; none on the Stanford SST page                                                                                       | Hub card; `nlp.stanford.edu/sentiment`                   |
+| SyntHal             | `yuetianluNLP/SyntHal`, prompts file                     | c4fe4ce                    | `p9a` (read by `p9b` to `p9d`)                 | research and review terms, no permissive license                                                                                             | GitHub README, "Terms" section                           |
+| TriviaQA            | `mandarjoshi/trivia_qa`                                  | 0f7faf3                    | `c5`, `p9a` (read by `p9b` to `p9d`)           | unknown on the Hub card; Apache-2.0 on the GitHub repository                                                                                 | Hub card; `mandarjoshi90/triviaqa` LICENSE               |
+| TruthfulQA          | `truthfulqa/truthful_qa`                                 | 741b827                    | `r6`, `c4`                                     | Apache-2.0                                                                                                                                   | Hub card                                                 |
+| WikiText-103        | `Salesforce/wikitext`                                    | b08601e                    | `c1`, `c2`, `m1`, `p7`                         | CC-BY-SA-3.0 and GFDL                                                                                                                        | Hub card                                                 |
+| Wikidata            | `https://query.wikidata.org/sparql` (SPARQL snapshots)   | retrieval date and SHA-256 | `p9a` (read by `p9b` to `p9d`), `p10a`, `p10b` | CC0 (structured data)                                                                                                                        | `wikidata.org/wiki/Wikidata:Licensing`                   |
 
 The fictional names of the `p9` pool are generated locally and downloaded from nowhere.
 
@@ -919,7 +981,7 @@ The repository's own license covers its code only. Every model and data source a
 some are non-commercial (Alpaca), share-alike (ARC, NQ-Open, WikiText) or carry no stated license (FalseQA,
 Geometry of Truth); SyntHal limits use to research and review. None is redistributed here; anyone reusing a
 checkpoint or a derived dataset is responsible for its terms. Wikidata content is CC0, so the snapshots the
-`p9` pool caches add no restriction of their own.
+`p9` pool and the `p10` quantity questions cache add no restriction of their own.
 
 ## Repository layout
 
@@ -941,10 +1003,12 @@ src/tomography/
   p9/              pool.py (question pool), guess.py (guess control), probe.py (cutoff probe, label tables),
                    unknowns.py (contrasts), reading.py (reading and surface baselines), signals.py and
                    risk.py (error predictors, risk-coverage), behavior.py (abstention and shift)
+  p10/             answers.py (reading a quantity answer: a point, a range, an abstention or nothing)
   experiments/     base.py (configs, run dirs, seeding), sweep.py, intervals.py, steering.py, effects.py,
                    matrices.py, variants.py, aggregate.py, and one module per experiment: r1 to r7, p1 to
                    p5 (reading), c1, c2, c4, c5, m1, p7 (steering and control), lr1 (LoRRA), a1, a2, a5, p6, p8
-                   (analyses of finished runs) and p9a to p9d (known versus unknown)
+                   (analyses of finished runs), p9a to p9d (known versus unknown) and p10a and p10b
+                   (approximate answers)
   viz/             figure style, layer curves, token scans, matrices and embeddings
   cli.py           the tomography command (also python -m tomography)
 tests/             unit tests, roughly one file per module
