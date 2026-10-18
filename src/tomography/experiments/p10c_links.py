@@ -18,6 +18,7 @@ The inputs `readers.npz` and `items.json` are local only (export drops them),
 so this experiment runs where the full run directories exist.
 """
 
+from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,9 @@ from tomography.datasets.quantities import QuantityQuestion
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.p3_size import spearman
+from tomography.experiments.p10a_quantities import CONDITIONS
+from tomography.experiments.p10a_quantities import FORMATS
 from tomography.experiments.p10b_reading import POOLED
 from tomography.experiments.p10b_reading import TEMPLATES
 from tomography.experiments.sweep import chat_format_for
@@ -63,6 +67,23 @@ KNOWLEDGE_COLUMNS: Final = (
     "rand_lo",
     "rand_hi",
 )
+BEHAVIOR_COLUMNS: Final = (
+    "condition",
+    "format",
+    "decoding",
+    "kind",
+    "test_family",
+    "n",
+    "mean_hedge",
+    "spearman",
+    "lo",
+    "hi",
+    "constant",
+)
+DECODINGS: Final = ("greedy", "sampled")
+KINDS: Final = ("range", "exact")
+MIN_LINKED_ITEMS: Final = 3
+CONSTANT_TOLERANCE: Final = 1e-12
 BAND_PERCENTILES: Final = (2.5, 97.5)
 ALL_ITEMS: Final = "all"
 TEST_ITEMS: Final = "test"
@@ -693,3 +714,186 @@ def knowledge_rows(
                     }
                 )
     return result
+
+
+def hedge_share(
+    answers: Mapping[str, Record], condition: str, fmt: str, decoding: str
+) -> float:
+    """Returns the share of range answers of one item in one condition.
+
+    It is the definition of `_item_rates` in `p10a_quantities`: the share of
+    the answers with the form "range" (the greedy answer for "greedy", the
+    sampled ones for "sampled") in each cell of the condition and format,
+    averaged over the cells, which are the shot orders of the few-shot
+    format.
+
+    Args:
+        answers: The parsed answers of the item by "condition/format/order".
+        condition: "free" or "forced".
+        fmt: "fewshot" or "chat".
+        decoding: One of `DECODINGS`.
+
+    Returns:
+        The mean over the cells of the share of range answers.
+
+    Raises:
+        ValueError: If the item has no cell of the condition and format or a
+            cell has no answer of the decoding.
+    """
+    prefix = f"{condition}/{fmt}/"
+    cells = [cell for key, cell in answers.items() if key.startswith(prefix)]
+    if not cells:
+        raise ValueError(f"no answers for {condition}/{fmt}")
+    shares = []
+    for cell in cells:
+        given = [cell["greedy"]] if decoding == "greedy" else cell["samples"]
+        if not given:
+            raise ValueError(f"no {decoding} answer in {condition}/{fmt}")
+        shares.append(np.mean([a["form"] == "range" for a in given]))
+    return float(np.mean(shares))
+
+
+def _is_constant(values: NDArray[np.float64]) -> bool:
+    """Tells whether the values differ only by rounding."""
+    return bool(
+        np.ptp(values) <= CONSTANT_TOLERANCE * max(1.0, np.abs(values).max())
+    )
+
+
+def _link(
+    scores: NDArray[np.float64],
+    shares: NDArray[np.float64],
+    *,
+    n_boot: int,
+    seed: int,
+) -> tuple[float, float, float, bool]:
+    """Returns the Spearman correlation, its interval and the constant flag."""
+    if _is_constant(scores) or _is_constant(shares):
+        return float("nan"), float("nan"), float("nan"), True
+    draws = np.random.default_rng(seed).integers(
+        0, len(scores), size=(n_boot, len(scores))
+    )
+    values = np.array([spearman(scores[d], shares[d]) for d in draws])
+    values = values[np.isfinite(values)]
+    low, high = (
+        np.percentile(values, BAND_PERCENTILES)
+        if values.size
+        else (np.nan, np.nan)
+    )
+    return spearman(scores, shares), float(low), float(high), False
+
+
+def behavior_rows(
+    p10b: P10bRun, p10a: P10aRun, *, n_boot: int, seed: int
+) -> list[Row]:
+    """Correlates the P10b score with the hedge share within a kind.
+
+    Only the test items of the P10b run that the P10a run also holds enter,
+    since the train items are scored in-sample. Each row is one condition,
+    format, decoding, kind and test family (each family, "pooled" over the
+    families of the kind, and the people as their own row of the kind
+    "exact"). Its Spearman correlation is between the P10b score of the
+    reader and the hedge share of `hedge_share`, within the group, never
+    across the kinds. The interval is an item bootstrap percentile
+    interval. A group whose scores or hedge shares are all equal has no
+    rank correlation, so it gets NaN and `constant` true, and a group of
+    fewer than `MIN_LINKED_ITEMS` items has no row.
+
+    Args:
+        p10b: The P10b run, read with the reader to link.
+        p10a: The P10a run.
+        n_boot: Item bootstrap resamples of every interval.
+        seed: Base seed of the bootstrap.
+
+    Returns:
+        One row of `BEHAVIOR_COLUMNS` per cell and group, in the order of
+        the P10a conditions and formats.
+
+    Raises:
+        ValueError: If a linked item lacks a cell the others have.
+    """
+    members = [
+        (record, p10a.items[record["uid"]])
+        for record in p10b.items
+        if record["split"] == "test" and record["uid"] in p10a.items
+    ]
+    present = {
+        tuple(key.split("/")[:2])
+        for _, other in members
+        for key in other["answers"]
+    }
+    families = list(
+        dict.fromkeys(
+            r["family"] for r, _ in members if r["family"] != PEOPLE_FAMILY
+        )
+    )
+    groups: list[tuple[str, str, list[int]]] = []
+    for kind in KINDS:
+        for family in (*families, POOLED):
+            groups.append(
+                (
+                    kind,
+                    family,
+                    [
+                        n
+                        for n, (r, _) in enumerate(members)
+                        if r["kind"] == kind
+                        and r["family"] != PEOPLE_FAMILY
+                        and family in (POOLED, r["family"])
+                    ],
+                )
+            )
+    groups.append(
+        (
+            "exact",
+            PEOPLE_FAMILY,
+            [
+                n
+                for n, (r, _) in enumerate(members)
+                if r["family"] == PEOPLE_FAMILY
+            ],
+        )
+    )
+    scores = np.array(
+        [r["scores"][p10b.reader] for r, _ in members], dtype=np.float64
+    )
+    rows: list[Row] = []
+    for condition in CONDITIONS:
+        for fmt in FORMATS:
+            if (condition, fmt) not in present:
+                continue
+            for decoding in DECODINGS:
+                shares = np.array(
+                    [
+                        hedge_share(other["answers"], condition, fmt, decoding)
+                        for _, other in members
+                    ],
+                    dtype=np.float64,
+                )
+                for kind, family, picked in groups:
+                    if len(picked) < MIN_LINKED_ITEMS:
+                        continue
+                    rho, low, high, constant = _link(
+                        scores[picked],
+                        shares[picked],
+                        n_boot=n_boot,
+                        seed=derive_seed(
+                            seed, condition, fmt, decoding, kind, family
+                        ),
+                    )
+                    rows.append(
+                        {
+                            "condition": condition,
+                            "format": fmt,
+                            "decoding": decoding,
+                            "kind": kind,
+                            "test_family": family,
+                            "n": len(picked),
+                            "mean_hedge": float(shares[picked].mean()),
+                            "spearman": rho,
+                            "lo": low,
+                            "hi": high,
+                            "constant": constant,
+                        }
+                    )
+    return rows

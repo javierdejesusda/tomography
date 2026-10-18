@@ -17,6 +17,8 @@ from tomography.experiments.base import RunDir
 from tomography.experiments.p9b_reading import Config as P9bConfig
 from tomography.experiments.p10a_quantities import Answer
 from tomography.experiments.p10a_quantities import Config as P10aConfig
+from tomography.experiments.p10a_quantities import Outcome
+from tomography.experiments.p10a_quantities import _item_rates
 from tomography.experiments.p10b_reading import Config as P10bConfig
 from tomography.experiments.p10c_links import Config
 from tomography.experiments.sweep import chat_format_for
@@ -268,18 +270,20 @@ def _write_p9b(
     return run_dir
 
 
-def _answer(form: str) -> dict[str, object]:
-    return dataclasses.asdict(
-        Answer(
-            text="",
-            form=form,
-            low=None,
-            high=None,
-            approximate=False,
-            correct=None,
-            unit_mismatch=False,
-        )
+def _real_answer(form: str) -> Answer:
+    return Answer(
+        text="",
+        form=form,
+        low=None,
+        high=None,
+        approximate=False,
+        correct=None,
+        unit_mismatch=False,
     )
+
+
+def _answer(form: str) -> dict[str, object]:
+    return dataclasses.asdict(_real_answer(form))
 
 
 def _cell(greedy: str, *samples: str) -> dict[str, object]:
@@ -573,13 +577,14 @@ def _range_run(
     signs: NDArray[np.float32] | None = None,
     items: Sequence[dict[str, object]] = (),
     layer: int = 2,
+    reader: str = READERS[0],
 ) -> p10c_links.P10bRun:
     n_layers = directions.shape[0]
     return p10c_links.P10bRun(
         path="p10b",
         config_hash="h10b",
         config={},
-        reader=READERS[0],
+        reader=reader,
         layer=layer,
         layers=tuple(range(1, n_layers + 1)),
         directions=directions,
@@ -1079,3 +1084,344 @@ def test_activations_are_read_at_the_last_token_with_the_p9b_bos(
     assert seen["texts"] == p10c_links.render_questions(
         items, p9b, chat_format_for(tiny_gpt2)
     )
+
+
+def _outcome(greedy: str, *samples: str) -> Outcome:
+    return Outcome(
+        greedy=_real_answer(greedy),
+        samples=tuple(_real_answer(form) for form in samples),
+    )
+
+
+def _serialized(outcome: Outcome) -> dict[str, object]:
+    return {
+        "greedy": dataclasses.asdict(outcome.greedy),
+        "samples": [dataclasses.asdict(a) for a in outcome.samples],
+    }
+
+
+@pytest.mark.parametrize("decoding", ["greedy", "sampled"])
+def test_the_hedge_share_matches_the_item_rates_of_p10a(decoding: str) -> None:
+    first = [
+        _outcome("range", "range", "point", "range", "none"),
+        _outcome("point", "point", "abstain"),
+    ]
+    second = [
+        _outcome("point", "range", "range", "range", "range"),
+        _outcome("range", "point", "point"),
+    ]
+    for member in (0, 1):
+        answers = {
+            "free/fewshot/range_last": _serialized(first[member]),
+            "free/fewshot/exact_last": _serialized(second[member]),
+            "forced/fewshot/range_last": _serialized(
+                _outcome("range", "range")
+            ),
+        }
+
+        share = p10c_links.hedge_share(answers, "free", "fewshot", decoding)
+
+        expected = _item_rates([first, second], [member], decoding)[0]
+        assert share == pytest.approx(expected)
+
+
+def test_an_item_without_the_cell_is_refused() -> None:
+    answers = {
+        "free/fewshot/range_last": _serialized(_outcome("point", "point"))
+    }
+
+    with pytest.raises(ValueError, match="forced/chat"):
+        p10c_links.hedge_share(answers, "forced", "chat", "sampled")
+
+
+N_SAMPLES = 24
+ZERO_PATTERN = (1, 4, 2, 5, 0, 3)
+
+
+def _share_cell(share: float) -> dict[str, object]:
+    ranged = round(share * N_SAMPLES)
+    return {
+        "greedy": _answer("range" if share >= 0.5 else "point"),
+        "samples": [_answer("range")] * ranged
+        + [_answer("point")] * (N_SAMPLES - ranged),
+    }
+
+
+def _position(item: QuantityQuestion) -> int:
+    """Index 0 to 11 of a test item within its kind, over both families."""
+    return int(item.uid[-1]) + (6 if item.family == "wingspan" else 0)
+
+
+Link = Callable[[QuantityQuestion], tuple[float, float]]
+
+
+def _behavior(
+    items: Sequence[QuantityQuestion],
+    link: Link,
+    *,
+    cells: Sequence[str] = CELLS,
+    people: Sequence[QuantityQuestion] = (),
+    outside: Link | None = None,
+    reader: str = READERS[0],
+    per_cell: Callable[[float, str], float] = lambda share, cell: share,
+    **changes: int,
+) -> list[dict[str, object]]:
+    """Runs behavior_rows with link giving (score, hedge share).
+
+    The other reader of the run scores every item the other way round.
+    """
+    records = []
+    answers = {}
+    for item in [*items, *people]:
+        score, share = (
+            link(item)
+            if item.split == "test" or outside is None
+            else outside(item)
+        )
+        records.append(
+            {
+                "uid": item.uid,
+                "family": item.family,
+                "kind": item.kind,
+                "split": item.split,
+                "sitelinks": 1,
+                "scores": {READERS[0]: score, READERS[1]: -score},
+            }
+        )
+        answers[item.uid] = {
+            **dataclasses.asdict(item),
+            "answers": {c: _share_cell(per_cell(share, c)) for c in cells},
+        }
+    p10b = _range_run(
+        np.zeros((3, 4), np.float32), items=records, reader=reader
+    )
+    p10a = p10c_links.P10aRun(
+        path="p10a", config_hash="h", config={}, items=answers, snapshots={}
+    )
+    settings = {"n_boot": 200, "seed": 0, **changes}
+    return p10c_links.behavior_rows(p10b, p10a, **settings)
+
+
+def _monotone(item: QuantityQuestion) -> tuple[float, float]:
+    index = _position(item)
+    return float(index), index / 12.0
+
+
+def _sampled(
+    rows: list[dict[str, object]], **where: object
+) -> dict[str, object]:
+    return _one(rows, decoding="sampled", **where)
+
+
+def _rho(row: dict[str, object]) -> float:
+    return float(row["spearman"])  # type: ignore[arg-type]
+
+
+def test_a_monotone_link_within_each_kind_gives_a_spearman_near_one() -> None:
+    rows = _behavior(_items(), _monotone)
+
+    for kind in ("range", "exact"):
+        for family in ("height", "wingspan", "pooled"):
+            row = _sampled(
+                rows,
+                condition="free",
+                format="fewshot",
+                kind=kind,
+                test_family=family,
+            )
+            assert _rho(row) == pytest.approx(1.0)
+            assert row["constant"] is False
+            assert float(row["lo"]) > 0.5  # type: ignore[arg-type]
+            assert float(row["hi"]) <= 1.0  # type: ignore[arg-type]
+
+
+def test_a_link_only_across_kinds_vanishes_within_a_kind() -> None:
+    def across(item: QuantityQuestion) -> tuple[float, float]:
+        pattern = ZERO_PATTERN[int(item.uid[-1])]
+        if item.kind == "range":
+            return 10.0 + _position(item), 0.5 + pattern / 12.0
+        return float(_position(item)), pattern / 12.0
+
+    rows = _behavior(_items(), across)
+
+    for kind in ("range", "exact"):
+        for family in ("height", "wingspan", "pooled"):
+            row = _sampled(
+                rows,
+                condition="free",
+                format="fewshot",
+                kind=kind,
+                test_family=family,
+            )
+            assert abs(_rho(row)) < 0.1
+            assert float(row["lo"]) < 0.0 < float(row["hi"])  # type: ignore[arg-type]
+    pooled = _sampled(
+        rows,
+        condition="free",
+        format="fewshot",
+        kind="range",
+        test_family="pooled",
+    )
+    assert pooled["n"] == 12
+    assert float(pooled["mean_hedge"]) > 0.5  # type: ignore[arg-type]
+    exact = _sampled(
+        rows,
+        condition="free",
+        format="fewshot",
+        kind="exact",
+        test_family="pooled",
+    )
+    assert float(exact["mean_hedge"]) < 0.5  # type: ignore[arg-type]
+
+
+def test_only_the_test_items_of_the_p10b_run_enter() -> None:
+    def backwards(item: QuantityQuestion) -> tuple[float, float]:
+        score, share = _monotone(item)
+        return score, 1.0 - share
+
+    rows = _behavior(_items(), _monotone, outside=backwards)
+
+    row = _sampled(
+        rows,
+        condition="free",
+        format="fewshot",
+        kind="range",
+        test_family="pooled",
+    )
+    assert row["n"] == 12
+    assert _rho(row) == pytest.approx(1.0)
+    height = _sampled(
+        rows,
+        condition="free",
+        format="fewshot",
+        kind="exact",
+        test_family="height",
+    )
+    assert height["n"] == 6
+
+
+def test_a_constant_hedge_share_gives_nan_and_the_constant_flag() -> None:
+    rows = _behavior(_items(), lambda item: (float(_position(item)), 0.0))
+
+    for row in rows:
+        assert row["constant"] is True
+        assert np.isnan(_rho(row))
+        assert np.isnan(float(row["lo"]))  # type: ignore[arg-type]
+        assert np.isnan(float(row["hi"]))  # type: ignore[arg-type]
+        assert float(row["mean_hedge"]) == 0.0  # type: ignore[arg-type]
+
+
+def test_a_constant_score_is_flagged_as_constant_too() -> None:
+    rows = _behavior(_items(), lambda item: (1.0, _monotone(item)[1]))
+
+    assert all(r["constant"] is True for r in rows)
+    assert all(np.isnan(_rho(r)) for r in rows)
+
+
+def test_the_rows_cover_the_conditions_formats_decodings_and_groups() -> None:
+    rows = _behavior(_items(), _monotone)
+
+    assert tuple(rows[0]) == p10c_links.BEHAVIOR_COLUMNS
+    assert {(r["condition"], r["format"]) for r in rows} == {
+        ("free", "fewshot"),
+        ("forced", "fewshot"),
+    }
+    assert {r["decoding"] for r in rows} == {"greedy", "sampled"}
+    assert len(rows) == 2 * 2 * 2 * 3
+    assert {(r["kind"], r["test_family"]) for r in rows} == {
+        (k, f)
+        for k in ("range", "exact")
+        for f in ("height", "wingspan", "pooled")
+    }
+    assert {r["n"] for r in rows if r["test_family"] == "pooled"} == {12}
+
+
+def test_the_chat_format_gets_rows_when_the_run_has_it() -> None:
+    cells = ("free/chat/none", "free/fewshot/range_last")
+
+    rows = _behavior(_items(), _monotone, cells=cells)
+
+    assert {(r["condition"], r["format"]) for r in rows} == {
+        ("free", "chat"),
+        ("free", "fewshot"),
+    }
+
+
+def test_the_shot_orders_are_averaged_into_one_share() -> None:
+    def opposite_orders(share: float, cell: str) -> float:
+        return share if "range_last" in cell else 11.0 / 12.0 - share
+
+    where = {
+        "condition": "free",
+        "format": "fewshot",
+        "kind": "range",
+        "test_family": "pooled",
+    }
+
+    first_only = _behavior(
+        _items(), _monotone, cells=CELLS[:1], per_cell=opposite_orders
+    )
+    averaged = _behavior(
+        _items(), _monotone, cells=CELLS[:2], per_cell=opposite_orders
+    )
+
+    assert _rho(_sampled(first_only, **where)) == pytest.approx(1.0)
+    row = _sampled(averaged, **where)
+    assert row["constant"] is True
+    assert float(row["mean_hedge"]) == pytest.approx(11.0 / 24.0)  # type: ignore[arg-type]
+
+
+def test_the_score_is_the_one_of_the_chosen_reader() -> None:
+    where = {
+        "condition": "free",
+        "format": "fewshot",
+        "kind": "range",
+        "test_family": "pooled",
+    }
+
+    first = _behavior(_items(), _monotone, reader=READERS[0])
+    second = _behavior(_items(), _monotone, reader=READERS[1])
+
+    assert _rho(_sampled(first, **where)) == pytest.approx(1.0)
+    assert _rho(_sampled(second, **where)) == pytest.approx(-1.0)
+
+
+def test_the_people_get_their_own_row_when_both_runs_have_them() -> None:
+    people = _people(6)
+
+    rows = _behavior(_items(), _monotone, people=people)
+
+    person = _sampled(
+        rows, condition="free", format="fewshot", test_family="person_height"
+    )
+    assert person["kind"] == "exact"
+    assert person["n"] == 6
+    pooled = _sampled(
+        rows,
+        condition="free",
+        format="fewshot",
+        kind="exact",
+        test_family="pooled",
+    )
+    assert pooled["n"] == 12
+
+
+def test_a_family_with_fewer_than_three_items_has_no_row() -> None:
+    items = [
+        i
+        for i in _items()
+        if not (
+            i.family == "wingspan" and i.split == "test" and i.uid[-1] > "1"
+        )
+    ]
+
+    rows = _behavior(items, _monotone)
+
+    assert {r["test_family"] for r in rows} == {"height", "pooled"}
+
+
+def test_the_behavior_rows_repeat_for_one_seed() -> None:
+    first = _behavior(_items(), _monotone, seed=3)
+    again = _behavior(_items(), _monotone, seed=3)
+
+    np.testing.assert_equal(first, again)
