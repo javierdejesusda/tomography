@@ -17,9 +17,11 @@ import textwrap
 import pytest
 
 import tomography.chain as chain_module
+from tomography.chain import THREAD_VARIABLES
 from tomography.chain import ChainSpec
 from tomography.chain import Job
 from tomography.chain import build_command
+from tomography.chain import cpu_quota
 from tomography.chain import dry_run_lines
 from tomography.chain import interrupt_on_sigterm
 from tomography.chain import job_digest
@@ -28,6 +30,7 @@ from tomography.chain import load_spec
 from tomography.chain import make_gpu_queries
 from tomography.chain import read_tail
 from tomography.chain import run_chain
+from tomography.chain import thread_budget
 
 HEADER = """
 [chain]
@@ -439,6 +442,7 @@ def _run(
         gpu_query=gpu or (lambda: None),
         gpu_free_query=lambda: None,
         gpu_util_query=lambda: None,
+        cpu_quota_query=lambda: 4.0,
         **options,
     )
 
@@ -488,11 +492,12 @@ def test_a_clean_chain_logs_each_event_and_returns_zero(
     assert texts[0] == (
         f"CHAIN_START name=c1 jobs=2 python={sys.version.split()[0]}"
     )
-    assert texts[1] == "START a"
-    assert texts[2] == (
+    assert texts[1] == "THREADS per_job=4 cpus=4 slots=1"
+    assert texts[2] == "START a"
+    assert texts[3] == (
         f"END a exit=0 seconds=10 peak_gpu=na last={runs / 'run1'}"
     )
-    assert texts[3] == "START b"
+    assert texts[4] == "START b"
     assert texts[-1] == "CHAIN_DONE failed=0"
     stamp = _events(spec)[0][0]
     assert datetime.fromisoformat(stamp) == datetime.fromtimestamp(
@@ -543,6 +548,148 @@ def test_the_job_environment_is_the_process_env_plus_the_chain_env(
     assert env["TOMOGRAPHY_TEST_INHERITED"] == "yes"
     assert env["HF_HUB_OFFLINE"] == "1"
     assert env["PYTHONUNBUFFERED"] == "1"
+
+
+@pytest.fixture
+def twelve_cpus(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(chain_module, "_visible_cpus", lambda: 12)
+
+
+def test_cpu_quota_reads_the_cgroup_v2_limit(
+    tmp_path: Path, twelve_cpus: None
+) -> None:
+    (tmp_path / "cpu.max").write_text("765000 100000\n", encoding="utf-8")
+
+    assert cpu_quota(tmp_path) == pytest.approx(7.65)
+
+
+def test_cpu_quota_ignores_a_cgroup_v2_max(
+    tmp_path: Path, twelve_cpus: None
+) -> None:
+    (tmp_path / "cpu.max").write_text("max 100000\n", encoding="utf-8")
+
+    assert cpu_quota(tmp_path) == 12.0
+
+
+def _v1(root: Path, quota: str, period: str = "100000") -> None:
+    folder = root / "cpu"
+    folder.mkdir()
+    (folder / "cpu.cfs_quota_us").write_text(quota + "\n", encoding="utf-8")
+    (folder / "cpu.cfs_period_us").write_text(period + "\n", encoding="utf-8")
+
+
+def test_cpu_quota_reads_the_cgroup_v1_limit(
+    tmp_path: Path, twelve_cpus: None
+) -> None:
+    _v1(tmp_path, "250000")
+
+    assert cpu_quota(tmp_path) == pytest.approx(2.5)
+
+
+def test_cpu_quota_ignores_a_cgroup_v1_quota_of_minus_one(
+    tmp_path: Path, twelve_cpus: None
+) -> None:
+    _v1(tmp_path, "-1")
+
+    assert cpu_quota(tmp_path) == 12.0
+
+
+def test_cpu_quota_falls_back_to_the_cpus_when_no_files_exist(
+    tmp_path: Path, twelve_cpus: None
+) -> None:
+    assert cpu_quota(tmp_path) == 12.0
+
+
+def test_cpu_quota_falls_back_on_a_malformed_file(
+    tmp_path: Path, twelve_cpus: None
+) -> None:
+    (tmp_path / "cpu.max").write_text("garbage", encoding="utf-8")
+
+    assert cpu_quota(tmp_path) == 12.0
+
+
+def test_cpu_quota_is_capped_by_the_visible_cpus_for_v2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(chain_module, "_visible_cpus", lambda: 4)
+    (tmp_path / "cpu.max").write_text("1600000 100000\n", encoding="utf-8")
+
+    assert cpu_quota(tmp_path) == 4.0
+
+
+def test_cpu_quota_is_capped_by_the_visible_cpus_for_v1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(chain_module, "_visible_cpus", lambda: 4)
+    _v1(tmp_path, "1600000")
+
+    assert cpu_quota(tmp_path) == 4.0
+
+
+@pytest.mark.parametrize(
+    ("quota", "slots", "expected"),
+    [(7.65, 1, 7), (7.65, 3, 2), (7.65, 2, 3), (0.5, 1, 1), (2.0, 5, 1)],
+)
+def test_thread_budget_splits_the_quota_by_slots(
+    quota: float, slots: int, expected: int
+) -> None:
+    assert thread_budget(quota, slots) == expected
+
+
+def _threaded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    slots: int,
+    host: Mapping[str, str] | None = None,
+    **env: str,
+) -> tuple[ChainSpec, FakeLauncher]:
+    for name in THREAD_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in (host or {}).items():
+        monkeypatch.setenv(name, value)
+    clock, runs = _fresh(tmp_path)
+    spec = dataclasses.replace(
+        _chain(tmp_path, _job("a"), env=env), slots=slots
+    )
+    launcher = FakeLauncher(clock, runs)
+    run_chain(
+        spec,
+        clock=clock,
+        sleep=clock.sleep,
+        launch=launcher,
+        gpu_query=lambda: None,
+        gpu_free_query=lambda: None,
+        gpu_util_query=lambda: None,
+        cpu_quota_query=lambda: 7.65,
+    )
+    return spec, launcher
+
+
+def test_jobs_get_a_thread_budget_from_the_quota_and_slots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec, launcher = _threaded(tmp_path, monkeypatch, slots=3)
+
+    for name in THREAD_VARIABLES:
+        assert launcher.envs[0][name] == "2"
+    assert "THREADS per_job=2 cpus=7.65 slots=3" in _texts(spec)
+
+
+def test_a_thread_variable_that_is_already_set_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, launcher = _threaded(
+        tmp_path,
+        monkeypatch,
+        1,
+        host={"MKL_NUM_THREADS": "9"},
+        OMP_NUM_THREADS="4",
+    )
+    env = launcher.envs[0]
+
+    assert env["OMP_NUM_THREADS"] == "4"
+    assert env["MKL_NUM_THREADS"] == "9"
+    assert env["OPENBLAS_NUM_THREADS"] == "7"
 
 
 def test_a_failure_retries_each_batch_size_in_order(tmp_path: Path) -> None:

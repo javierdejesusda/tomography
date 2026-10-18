@@ -31,6 +31,13 @@ TAIL_BYTES = 64 * 1024
 TERMINATE_SECONDS = 10.0
 STDOUT_LINES = 20
 POSIX = os.name == "posix"
+CGROUP_ROOT = Path("/sys/fs/cgroup")
+THREAD_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
 EXISTING_RUN = re.compile(
     r"run directory already exists: (.+?) \(delete it to rerun\)"
 )
@@ -517,6 +524,74 @@ def make_gpu_queries() -> GpuQueries:
     )
 
 
+def _visible_cpus() -> int:
+    """Returns the CPUs the process may run on, ignoring any cgroup quota."""
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count() or 1
+
+
+def _quota_ratio(quota: str, period: str) -> float | None:
+    """Returns quota over period as CPUs, or None for no or a bad limit."""
+    try:
+        quota_us, period_us = int(quota), int(period)
+    except ValueError:
+        return None
+    if quota_us <= 0 or period_us <= 0:
+        return None
+    return quota_us / period_us
+
+
+def _read_words(path: Path) -> list[str]:
+    """Returns the words of a file, or [] when it cannot be read."""
+    try:
+        return path.read_text(encoding="utf-8").split()
+    except OSError:
+        return []
+
+
+def cpu_quota(root: Path = CGROUP_ROOT) -> float:
+    """Returns the CPUs the container may use.
+
+    A container can see every CPU of its host while a cgroup quota caps its
+    real time, so the quota (cgroup v2 `cpu.max`, then cgroup v1
+    `cpu.cfs_quota_us` over `cpu.cfs_period_us`) is read first. Without a
+    quota the CPUs the process may run on count.
+
+    Args:
+        root: The cgroup mount, which tests point at a temporary folder.
+
+    Returns:
+        The CPU limit, which may be fractional.
+    """
+    words = _read_words(root / "cpu.max")
+    if len(words) == 2:
+        ratio = _quota_ratio(*words)
+        if ratio is not None:
+            return min(ratio, float(_visible_cpus()))
+    v1 = root / "cpu"
+    quota = _read_words(v1 / "cpu.cfs_quota_us")
+    period = _read_words(v1 / "cpu.cfs_period_us")
+    if quota and period:
+        ratio = _quota_ratio(quota[0], period[0])
+        if ratio is not None:
+            return min(ratio, float(_visible_cpus()))
+    return float(_visible_cpus())
+
+
+def thread_budget(cpus: float, slots: int) -> int:
+    """Splits the CPUs among the jobs that may run at once.
+
+    Args:
+        cpus: The CPU limit of the container.
+        slots: The most jobs that run at the same time.
+
+    Returns:
+        The threads one job may use, at least 1.
+    """
+    return max(1, math.floor(cpus / slots))
+
+
 def read_tail(path: Path, size: int = TAIL_BYTES, floor: int = 0) -> str:
     """Reads at most the last `size` bytes of a file as text.
 
@@ -704,6 +779,7 @@ class _Runner:
     ended: set[str] = dataclasses.field(default_factory=set)
     failed: int = 0
     last_start: float | None = None
+    threads: int | None = None
 
     def _stamp(self) -> str:
         return datetime.fromtimestamp(self.clock()).isoformat(
@@ -750,6 +826,9 @@ class _Runner:
             **os.environ,
             **self.spec.env,
         }
+        if self.threads is not None:
+            for variable in THREAD_VARIABLES:
+                env.setdefault(variable, str(self.threads))
         started = self.clock()
         try:
             folder.mkdir(parents=True, exist_ok=True)
@@ -1016,6 +1095,7 @@ def run_chain(
     gpu_query: Callable[[], int | None] | None = None,
     gpu_free_query: Callable[[], int | None] | None = None,
     gpu_util_query: Callable[[], int | None] | None = None,
+    cpu_quota_query: Callable[[], float] = cpu_quota,
 ) -> int:
     """Runs the jobs of a chain, up to `spec.slots` of them at a time.
 
@@ -1049,6 +1129,10 @@ def run_chain(
             only for a HEARTBEAT line, which adds `gpu_util` when it answers.
             Each query that is omitted defaults on its own to the matching
             `nvidia-smi` query, with one lookup of the tool for all of them.
+        cpu_quota_query: Returns the CPUs the container may use. Each job
+            gets that many divided by `spec.slots` (at least 1) as its
+            BLAS and OpenMP thread count, for each of those variables that
+            neither the process environment nor `spec.env` sets.
 
     Returns:
         0 when no job failed, 1 when one did, 130 when interrupted.
@@ -1069,6 +1153,11 @@ def run_chain(
     runner.log(
         f"CHAIN_START name={spec.name} jobs={len(spec.jobs)} "
         f"python={sys.version.split()[0]}"
+    )
+    cpus = cpu_quota_query()
+    runner.threads = thread_budget(cpus, spec.slots)
+    runner.log(
+        f"THREADS per_job={runner.threads} cpus={cpus:g} slots={spec.slots}"
     )
     try:
         with interrupt_on_sigterm():
