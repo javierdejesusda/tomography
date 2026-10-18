@@ -1,5 +1,6 @@
 """Tests for the P10a quantity behavior experiment."""
 
+from collections import Counter
 from collections.abc import Callable
 from collections.abc import Sequence
 import csv
@@ -14,6 +15,7 @@ import pytest
 from tomography.cli import load_experiment
 from tomography.control.generate import Completion
 from tomography.datasets.quantities import FAMILIES
+from tomography.datasets.quantities import PEOPLE_FAMILY
 from tomography.datasets.quantities import QuantityQuestion
 from tomography.datasets.sources import OfflineCacheMissError
 from tomography.experiments import p10a_quantities
@@ -30,6 +32,7 @@ from tomography.experiments.p10a_quantities import bootstrap_gap_ci
 from tomography.experiments.p10a_quantities import build_prompt
 from tomography.experiments.p10a_quantities import build_table
 from tomography.experiments.p10a_quantities import cluster_cis
+from tomography.experiments.p10a_quantities import diagnostic_table
 from tomography.experiments.p10a_quantities import execute
 from tomography.experiments.p10a_quantities import forced_in_range_table
 from tomography.experiments.p10a_quantities import hand_check_samples_table
@@ -45,7 +48,7 @@ from tomography.model import MODELS
 from tomography.model import LoadedModel
 from tomography.reading.metrics import wilson_ci
 
-DEFAULT_HASH = "27a4537a95b3"
+DEFAULT_HASH = "826d4cc1b3e6"
 
 
 def test_config_defaults_and_round_trip() -> None:
@@ -66,6 +69,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.batch_size == 8
     assert config.shot_orders == ("range_last", "exact_last")
     assert config.offline is False
+    assert config.people is True
     assert config.seed == 0
     assert Config.from_dict(config.to_dict()) == config
 
@@ -1221,6 +1225,7 @@ def test_run_loads_the_questions_then_the_model(
         min_sitelinks=9,
         offline=True,
         seed=4,
+        people=False,
     )
     run_dir = RunDir.create(config, out_root=tmp_path)
 
@@ -1250,7 +1255,7 @@ def test_run_loads_every_family_by_default(
     monkeypatch.setattr(p10a_quantities, "load_quantities", fake_load)
     monkeypatch.setattr(p10a_quantities, "load_model", lambda key: tiny_gpt2)
     monkeypatch.setattr(p10a_quantities, "generate", _Calls(items))
-    config = _config()
+    config = _config(people=False)
 
     run(config, RunDir.create(config, out_root=tmp_path))
 
@@ -2226,3 +2231,371 @@ def test_the_run_writes_the_sample_hand_check_with_a_bom(
     assert len(rows) == 8
     assert {r["sample"] for r in rows} <= {"0", "1", "2", "3"}
     assert _summary(run_dir)["hand_check_sample_rows"] == 8
+
+
+def _people_items(n: int = 4) -> list[QuantityQuestion]:
+    return [
+        _item(
+            uid=f"{PEOPLE_FAMILY}-exact-P{i}",
+            family=PEOPLE_FAMILY,
+            kind="exact",
+            entity=f"Person {i}",
+            entity_id=f"P{i}",
+            question=f"How tall is Person {i}, in centimetres?",
+            low=170.0 + i,
+            high=170.0 + i,
+            split="test",
+        )
+        for i in range(n)
+    ]
+
+
+def _group_of(item: QuantityQuestion) -> str:
+    if item.family == PEOPLE_FAMILY:
+        return "people"
+    return "breeds" if item.kind == "range" else "buildings"
+
+
+def _group_results(
+    items: list[QuantityQuestion],
+    shares: dict[str, list[float]],
+    cell: tuple[str, str, str] = ("free", "fewshot", "range_last"),
+) -> Results:
+    """Ten samples per item; the greedy answer hedges at a share of 0.5."""
+    outcomes = []
+    seen = {name: 0 for name in shares}
+    for item in items:
+        group = _group_of(item)
+        share = shares[group][seen[group] % len(shares[group])]
+        seen[group] += 1
+        outcomes.append(
+            Outcome(
+                greedy=_answer("range" if share >= 0.5 else "point"),
+                samples=tuple(
+                    _answer("range" if k < round(10 * share) else "point")
+                    for k in range(10)
+                ),
+            )
+        )
+    return {cell: outcomes}
+
+
+def _without_people(
+    items: list[QuantityQuestion], results: Results
+) -> tuple[list[QuantityQuestion], Results]:
+    keep = [i.family != PEOPLE_FAMILY for i in items]
+    return (
+        [i for i, k in zip(items, keep, strict=True) if k],
+        {
+            cell: [o for o, k in zip(outcomes, keep, strict=True) if k]
+            for cell, outcomes in results.items()
+        },
+    )
+
+
+GROUP_SHARES = {
+    "people": [0.0, 0.0, 0.0, 1.0],
+    "breeds": [1.0, 1.0, 0.0, 1.0],
+    "buildings": [0.0, 0.0, 0.0, 0.0],
+}
+
+
+def _with_people() -> tuple[list[QuantityQuestion], Results]:
+    items = [*_pool(("height", "wingspan")), *_people_items()]
+    return items, _group_results(items, GROUP_SHARES)
+
+
+def _height_and_people() -> list[QuantityQuestion]:
+    return [
+        i for i in _with_people()[0] if i.family in ("height", PEOPLE_FAMILY)
+    ]
+
+
+def test_people_can_be_turned_off_and_round_trip() -> None:
+    config = Config(people=False)
+
+    assert Config.from_dict(config.to_dict()) == config
+
+
+def test_the_table_has_person_rows_and_family_only_pooled_rows() -> None:
+    items, results = _with_people()
+    kept_items, kept_results = _without_people(items, results)
+
+    rows = _rows(*build_table(items, results, seed=2))
+
+    people = [r for r in rows if r["family"] == PEOPLE_FAMILY]
+    assert {r["kind"] for r in people} == {"exact"}
+    assert {r["n"] for r in people if r["decoding"] == "greedy"} == {4}
+    pooled = [r for r in rows if r["family"] == "all"]
+    assert pooled == [
+        r
+        for r in _rows(*build_table(kept_items, kept_results, seed=2))
+        if r["family"] == "all"
+    ]
+
+
+def test_forced_in_range_has_person_rows_and_family_only_pooled_rows() -> None:
+    items, _ = _with_people()
+    cell = ("forced", "fewshot", "range_last")
+    results: Results = {
+        cell: [_outcome(_answer("point", i.low + 1)) for i in items]
+    }
+    kept_items, kept_results = _without_people(items, results)
+
+    rows = _rows(*forced_in_range_table(items, results, rel_tol=0.05))
+
+    people = [r for r in rows if r["family"] == PEOPLE_FAMILY]
+    assert [(r["kind"], r["n_items"]) for r in people] == [("exact", 4)]
+    kept = forced_in_range_table(kept_items, kept_results, rel_tol=0.05)
+    assert [r for r in rows if r["family"] == "all"] == [
+        r for r in _rows(*kept) if r["family"] == "all"
+    ]
+
+
+def test_hedge_gap_and_width_ignore_the_people() -> None:
+    items, results = _with_people()
+    kept_items, kept_results = _without_people(items, results)
+
+    for table in (hedge_gap_table, width_table):
+        with_people = table(items, results, seed=3)
+
+        assert with_people == table(kept_items, kept_results, seed=3)
+        assert PEOPLE_FAMILY not in {row[0] for row in with_people[1]}
+
+
+def test_the_diagnostic_rates_people_breeds_and_buildings() -> None:
+    items = _height_and_people()
+
+    columns, body = diagnostic_table(
+        items, _group_results(items, GROUP_SHARES), seed=0
+    )
+    rows = _rows(columns, body)
+
+    assert len(rows) == 2
+    greedy = _find(rows, decoding="greedy")
+    assert greedy["people_rate"] == pytest.approx(0.25)
+    assert greedy["breeds_rate"] == pytest.approx(0.75)
+    assert greedy["buildings_rate"] == pytest.approx(0.0)
+    assert greedy["people_minus_breeds"] == pytest.approx(-0.5)
+    assert greedy["people_minus_buildings"] == pytest.approx(0.25)
+    assert (greedy["people_lo"], greedy["people_hi"]) == wilson_ci(1, 4)
+    assert (
+        greedy["people_minus_breeds_lo"]
+        < -0.5
+        < greedy["people_minus_breeds_hi"]
+    )
+    assert (
+        greedy["people_minus_buildings_lo"]
+        <= 0.25
+        <= greedy["people_minus_buildings_hi"]
+    )
+    assert (greedy["n_people"], greedy["n_breeds"]) == (4, 4)
+    assert greedy["n_buildings"] == 4
+    assert greedy["people_interval"] == "wilson"
+    sampled = _find(rows, decoding="sampled")
+    assert sampled["people_rate"] == pytest.approx(0.25)
+    assert sampled["people_minus_breeds"] == pytest.approx(-0.5)
+    assert sampled["people_interval"] == "item_bootstrap"
+    assert sampled["buildings_interval"] == "item_wilson"
+    assert sampled["people_lo"] <= 0.25 <= sampled["people_hi"]
+
+
+def test_the_diagnostic_uses_the_gap_bootstrap_with_people_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[list[float], list[float], int]] = []
+
+    def spy(
+        first: np.ndarray, second: np.ndarray, *, seed: int
+    ) -> tuple[float, float]:
+        calls.append((list(first), list(second), seed))
+        return 0.0, 0.0
+
+    monkeypatch.setattr(p10a_quantities, "bootstrap_gap_ci", spy)
+    items = _height_and_people()
+
+    diagnostic_table(items, _group_results(items, GROUP_SHARES), seed=7)
+
+    assert calls[0] == ([0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 0.0, 1.0], 7)
+    assert calls[1] == ([0.0, 0.0, 0.0, 1.0], [0.0] * 4, 7)
+    assert {c[2] for c in calls} == {7}
+
+
+def test_the_diagnostic_has_a_both_row_that_averages_the_shot_orders() -> None:
+    items = _height_and_people()
+    last_range = _group_results(
+        items,
+        {"people": [0.0], "breeds": [1.0], "buildings": [0.0]},
+        ("free", "fewshot", "range_last"),
+    )
+    last_exact = _group_results(
+        items,
+        {"people": [1.0], "breeds": [0.0], "buildings": [0.0]},
+        ("free", "fewshot", "exact_last"),
+    )
+
+    columns, body = diagnostic_table(
+        items, {**last_range, **last_exact}, seed=0
+    )
+    rows = _rows(columns, body)
+
+    assert {r["shot_order"] for r in rows} == {
+        "range_last",
+        "exact_last",
+        "both",
+    }
+    both = _find(rows, shot_order="both", decoding="greedy")
+    assert both["people_rate"] == pytest.approx(0.5)
+    assert both["breeds_rate"] == pytest.approx(0.5)
+    assert both["people_minus_breeds"] == pytest.approx(0.0)
+    assert both["people_minus_buildings"] == pytest.approx(0.5)
+    first = _find(rows, shot_order="range_last", decoding="greedy")
+    assert first["people_minus_breeds"] == pytest.approx(-1.0)
+
+
+def test_the_diagnostic_is_empty_without_people_or_the_height_family() -> None:
+    items, results = _with_people()
+    kept_items, kept_results = _without_people(items, results)
+    other = [i for i in items if i.family in ("wingspan", PEOPLE_FAMILY)]
+
+    assert diagnostic_table(kept_items, kept_results, seed=0)[1] == []
+    assert (
+        diagnostic_table(other, _group_results(other, GROUP_SHARES), seed=0)[1]
+        == []
+    )
+
+
+def _people_pool() -> list[QuantityQuestion]:
+    return [*_pool(("height",), per_side=6), *_people_items(6)]
+
+
+def test_execute_writes_the_diagnostic_with_people(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, calls = _executed(
+        tiny_gpt2, tmp_path, monkeypatch, items=_people_pool()
+    )
+
+    rows = _csv(run_dir, "diagnostic.csv")
+    greedy = _find(rows, condition="free", decoding="greedy")
+    assert float(greedy["people_rate"]) == 0.0
+    assert float(greedy["breeds_rate"]) == 1.0
+    assert float(greedy["people_minus_breeds"]) == -1.0
+    assert len(calls.calls[0]["prompts"]) == 18
+    summary = _summary(run_dir)
+    assert len(summary["diagnostic"]) == len(rows)
+    assert summary["diagnostic"][0]["people_minus_breeds"] is not None
+    assert PEOPLE_FAMILY in summary["families"]
+    table = _csv(run_dir, "table.csv")
+    assert PEOPLE_FAMILY in {r["family"] for r in table}
+
+
+def test_the_diagnostic_is_not_written_when_people_are_off(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(
+        tiny_gpt2, tmp_path, monkeypatch, items=_people_pool(), people=False
+    )
+
+    assert not (run_dir.path / "diagnostic.csv").exists()
+    assert "diagnostic" not in _summary(run_dir)
+
+
+def test_the_diagnostic_is_not_written_without_the_height_family(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    items = [*_pool(("wingspan",), per_side=6), *_people_items(6)]
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch, items=items)
+
+    assert not (run_dir.path / "diagnostic.csv").exists()
+    assert "diagnostic" not in _summary(run_dir)
+
+
+def test_the_hand_check_has_a_person_stratum_and_keeps_its_size(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(
+        tiny_gpt2, tmp_path, monkeypatch, items=_people_pool()
+    )
+
+    for name in ("hand_check.csv", "hand_check_samples.csv"):
+        rows = _csv(run_dir, name)
+        assert len(rows) == 8, name
+        strata = Counter((r["family"], r["kind"]) for r in rows)
+        assert set(strata) == {
+            ("height", "range"),
+            ("height", "exact"),
+            (PEOPLE_FAMILY, "exact"),
+        }, name
+        if name == "hand_check.csv":
+            assert max(strata.values()) - min(strata.values()) <= 1
+
+
+def test_the_plot_survives_person_rows(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(
+        tiny_gpt2, tmp_path, monkeypatch, items=_people_pool()
+    )
+
+    paths = plot(run_dir, tmp_path / "figures")
+
+    assert paths
+    assert all(p.is_file() for p in paths)
+
+
+def _run_with(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    **overrides: Any,
+) -> tuple[list[dict[str, Any]], list[QuantityQuestion]]:
+    people_calls: list[dict[str, Any]] = []
+    executed: list[QuantityQuestion] = []
+    family_items = _pool(("height",), per_side=2)
+
+    def fake_people(**kwargs: Any) -> list[QuantityQuestion]:
+        people_calls.append(kwargs)
+        return _people_items(2)
+
+    def fake_execute(
+        config: Config,
+        run_dir: RunDir,
+        loaded: LoadedModel,
+        items: Sequence[QuantityQuestion],
+    ) -> None:
+        executed.extend(items)
+
+    monkeypatch.setattr(
+        p10a_quantities, "load_quantities", lambda **kw: family_items
+    )
+    monkeypatch.setattr(p10a_quantities, "load_people_heights", fake_people)
+    monkeypatch.setattr(p10a_quantities, "load_model", lambda key: tiny_gpt2)
+    monkeypatch.setattr(p10a_quantities, "execute", fake_execute)
+    config = _config(**overrides)
+
+    run(config, RunDir.create(config, out_root=tmp_path))
+
+    return people_calls, executed
+
+
+def test_run_loads_the_people_with_the_offline_setting(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls, executed = _run_with(tiny_gpt2, tmp_path, monkeypatch, offline=True)
+
+    assert calls == [{"offline": True}]
+    assert [i.family for i in executed] == [
+        *["height"] * 4,
+        PEOPLE_FAMILY,
+        PEOPLE_FAMILY,
+    ]
+
+
+def test_run_skips_the_people_when_they_are_off(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls, executed = _run_with(tiny_gpt2, tmp_path, monkeypatch, people=False)
+
+    assert calls == []
+    assert PEOPLE_FAMILY not in {i.family for i in executed}
