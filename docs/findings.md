@@ -252,7 +252,7 @@ the validation accuracy at that layer are in the rows below it.
 |   validation accuracy    | 0.960                | 0.923                |
 
 - **R1 sentiment.** The base checkpoint reaches 0.905 [0.887, 0.920] and the post-trained one 0.760 [0.727, 0.792], a
-  gap of 0.145 with non-overlapping intervals. The base value equals that of `qwen3-1.7b-base` (0.905) and the
+  gap of 0.146 with non-overlapping intervals. The base value equals that of `qwen3-1.7b-base` (0.905) and the
   post-trained value is the lowest R1 of the six Qwen3 checkpoints (the others are 0.857 to 0.947), so size does not
   order R1 on the post-trained checkpoints (0.857, 0.866, 0.760). R1 has no test split, so both values are optimistic by
   the selection.
@@ -266,7 +266,7 @@ the validation accuracy at that layer are in the rows below it.
   the intervals do not cover, and the test value is below the validation value by 0.084 and 0.046.
 - **R7 truth.** The test accuracy is 0.942 [0.937, 0.947] and 0.934 [0.922, 0.946] at L26 and L23, with validation
   accuracy 0.960 and 0.923. The two values are within 0.01 of each other with overlapping intervals, and equal to the
-  1.7B values (0.934 and 0.937) within 0.008.
+  1.7B values (0.934 and 0.937) within 0.009.
 
 R7 on the out-of-distribution sets:
 
@@ -282,8 +282,11 @@ R7 on the out-of-distribution sets:
 | cities_disj (748)     | 0.960 [0.958, 0.962] | 0.929 [0.923, 0.935] |
 | common_claim (2,225)  | 0.871 [0.870, 0.872] | 0.839 [0.835, 0.844] |
 
-- The four plain sets `cities`, `sp_en_trans`, `larger_than` and `smaller_than` are at 1.000 [1.000, 1.000] on both
-  checkpoints, so all 10 readers scored every pair correctly there. The negated and compound sets are high as well
+- The four plain sets `cities`, `sp_en_trans`, `larger_than` and `smaller_than` round to 1.000 [1.000, 1.000] on
+  both checkpoints. On the base checkpoint all 10 readers scored every pair correctly on all four. On `qwen3-4b`
+  that holds for `sp_en_trans` and `smaller_than` only: `cities` is 0.999866 and `larger_than` 0.999899, one pair
+  scored wrongly by one of the 10 readers in each (1 of 7,480 and 1 of 9,900 reader-pair scores). The negated and
+  compound sets are high as well
   (`neg_cities` 0.998 and 0.991, `cities_conj` 0.992 and 0.990, `cities_disj` 0.960 and 0.929).
 - `neg_sp_en_trans` is the set that fell to or below chance at 1.7B (0.508 base and 0.238 post-trained) and below chance
   on the 0.6B post-trained checkpoint (0.337). At 4B it is 0.988 [0.985, 0.991] on the base checkpoint and 0.892 [0.885,
@@ -1596,8 +1599,10 @@ The unedited row of each size is the standard row of its R6 run (0.173, 0.179 an
   +0.023, a difference of two questions of 173). The cost to the text differs by size: the readers cost more than the
   random arms on `gpt2-large` (3.16 to 3.72 times the unedited perplexity against 1.35) and `gpt2-xl` (5.15 to 6.54
   against 1.08 to 1.39), and less on `gpt2-medium` (1.95 to 2.17 against 2.63 to 2.94).
-- **What is and is not supported.** The only intervals that exclude zero are those of 6 of the 30 readers, among 19
-  arms per size and with no correction for multiple comparisons; no row separates the adapter, `difference`,
+- **What is and is not supported.** The only intervals that exclude zero are those of 3 of the 10 readers on
+  `gpt2-medium`, 3 of the 10 on `gpt2-large` and none on `gpt2-xl`, among the 18 arms per size compared with the unedited
+  model and with no correction
+  for multiple comparisons; no row separates the adapter, `difference`,
   `contrast` or the readers from a random direction of the same norm at a selected coefficient except, in point
   estimate only, the readers of `gpt2-large`. The scoring is not generation, so the distinct-1 and the fluency of
   generated text are not measured. The perplexity column is that of held-out neutral text under the edited model.
@@ -2677,8 +2682,8 @@ stopped, so there is no 4B base column and no pair. The two text rows are those 
 
 - **The TruthfulQA-source reader is the closest to the text baselines of any checkpoint, and is still not separated from
   them.** At the validation layer it reaches 0.741 [0.731, 0.750], above the point estimates of `text_word` 0.676
-  [0.603, 0.742] and `text_char` 0.671 [0.597, 0.736] by 0.065 and 0.070. The value is inside the Wilson interval of
-  `text_word` (upper bound 0.742) and 0.005 above the upper bound of `text_char` (0.736); the best-layer row (0.745 at
+  [0.603, 0.742] and `text_char` 0.671 [0.597, 0.736] by 0.064 and 0.070. The value is inside the Wilson interval of
+  `text_word` (upper bound 0.742) and 0.004 above the upper bound of `text_char` (0.736); the best-layer row (0.745 at
   L22) picks the layer on the test questions, is optimistic, and is above both upper bounds. The two kinds of interval
   are not comparable: the reader's interval is over 15 readers and does not carry the sampling of the 173 questions
   (a width of about 0.14), so this is not a separation. The margin over the text point estimates is the largest in the
@@ -2975,7 +2980,7 @@ Cost to the text. The table gives the perplexity of held-out neutral text under 
 C2 ran on `qwen3-4b` only (run `c2/qwen3-4b/1df7c1f9ff70`, made at `89ea7cb` on a rented GPU pod); `c2-qwen3-4b-base` was
 cut when the chain was stopped, so there is no 4B pair. The config is that of the 1.7B runs above (100 prompts, 2 samples
 per prompt, 3 steering seeds, relative strength +0.3, three random arms). The reading layer is L25 with steering over
-layers 24, 25 and 26 (36 blocks), so it is not the depth of the 1.7B runs (L18 of 28).
+layers 24, 25 and 26 (36 blocks), so it is not the depth of the 1.7B runs (L20 and L18 of 28).
 
 | Emotion   | Primary: none | Primary: +0.3 [range] | Primary: change | Check: none | Check: +0.3 | Check: change | Largest off-diagonal (primary) | Largest off-diagonal (check) | Random arms: own change |
 | --------- | ------------- | --------------------- | --------------- | ----------- | ----------- | ------------- | ------------------------------ | ---------------------------- | ----------------------- |
@@ -3021,8 +3026,10 @@ the readers, against the unsteered text and the mean over the three random arms)
   3.29 times the unsteered one at +0.1, +0.2 and +0.3, against 1.02, 1.10 and 1.31 for the random arms (the 1.7B
   post-trained values are 1.15, 1.72 and 3.40). By the rule of [Sentiment steering on
   Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity at most 1.5 times the unsteered one and mean distinct-1 at
-  least 0.15) only +0.1 passes (mean ratio 1.14, at most 1.44 for one emotion, distinct-1 0.226 or above), and every
-  emotion is at 2.36 to 4.78 times at +0.3, with a distinct-1 below 0.15 for fear, disgust and surprise. The changes in
+  least 0.15) only +0.1 passes on the mean over the six emotions (mean ratio 1.14, at most 1.44 for one emotion,
+  distinct-1 0.226 or above). Per emotion, fear at +0.2 also passes the rule (1.497 times, distinct-1 0.199) and no
+  other emotion does at +0.2. Every emotion is at 2.36 to 4.78 times at +0.3, with a distinct-1 below 0.15 for
+  fear, disgust and surprise. The changes in
   the first table are therefore changes of text that fails the rule at +0.3, and a rise in an emotion score at +0.3 is
   not read as steering that works.
 
@@ -3723,8 +3730,8 @@ Not in this document yet. No dates are promised.
 - P5, persona wording and instruction confounds for honesty, with persona wordings beyond the five pairs of the run.
 - A random-direction arm for C2 and P7 on `gpt2`, a fluency measure (perplexity and distinct-1) for M1, C2 and P7 on
   `gpt2`, and a random-direction arm and the perplexity of neutral text for C4 on `gpt2`. The runs on `gpt2-large` and
-  `gpt2-xl` (M1, C2, P7, C5) and on the Qwen3 1.7B pair (M1, C2, P7, C4, C5) have them; the C4 scoring is not
-  generation, so no C4 run has a distinct-1.
+  `gpt2-xl` (M1, C2, P7, C5), the C4 runs on `gpt2-medium`, `gpt2-large` and `gpt2-xl`, and the runs on the Qwen3
+  1.7B pair (M1, C2, P7, C4, C5) have them; the C4 scoring is not generation, so no C4 run has a distinct-1.
 - Stored but not read in this document: the emotion direction matrix and embedding of the Qwen3 R4 runs, the A1 matrices
   of concept and layer agreement, the emotion gallery of the Qwen3 C5 runs, and the P5 curves over layers and the
   cosine curves between the paper reader and the other readers.
