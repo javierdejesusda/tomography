@@ -1,0 +1,214 @@
+{
+  "_meta": {
+    "experiment": "p9d",
+    "config_hash": "cc4024fe5af1",
+    "seed": 0,
+    "git_sha": "bab5b7594b47ca08b11f78032211d205e953fdfb",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A5000)",
+    "platform": "Linux-6.8.0-134-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T23:13:37+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p9d",
+      "model": "qwen3-4b",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 24,
+      "temperature": null,
+      "top_p": 1.0,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        -0.4,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.4
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "labels_run": "<external>/7bd160f5a7e0",
+      "template": "concept",
+      "n_shots": 15,
+      "direction_type": "obscure_real",
+      "eval_types": [
+        "obscure_real",
+        "fictional_generated",
+        "unknowable_detail",
+        "false_premise"
+      ],
+      "method": "logistic",
+      "preprocess": "center",
+      "n_pairs": 64,
+      "n_random": 3,
+      "min_pairs": 16,
+      "min_eval": 10,
+      "behavior": "auto",
+      "instruction": "Answer the question in a few words. If you do not know the answer, say that you do not know.",
+      "n_hand_check": 100,
+      "n_boot": 1000
+    }
+  },
+  "data": {
+    "mode": "abstention",
+    "template": "concept",
+    "n_items": {
+      "calibration": {
+        "known": 100,
+        "unknown": 100
+      },
+      "obscure_real": {
+        "known": 100,
+        "unknown": 100
+      },
+      "fictional_generated": {
+        "known": 100,
+        "unknown": 100
+      },
+      "unknowable_detail": {
+        "known": 100,
+        "unknown": 60
+      },
+      "false_premise": {
+        "known": 100,
+        "unknown": 83
+      }
+    },
+    "layers": [
+      24
+    ],
+    "layer_source": "validation",
+    "direction": {
+      "type": "obscure_real",
+      "val_auroc": [
+        0.5970628905049677,
+        0.6278210249581754,
+        0.6588522994981051,
+        0.6421651473249342,
+        0.7030753866639353,
+        0.6824319710471508,
+        0.7009713544334051,
+        0.7214483253098433,
+        0.7595855099183993,
+        0.7656842159172386,
+        0.7770109938884906,
+        0.7690344497934378,
+        0.7571955341595821,
+        0.7722779883232613,
+        0.779290006487077,
+        0.7768402813342893,
+        0.7702379733005565,
+        0.7920379664720544,
+        0.8333461367748984,
+        0.8634897060329817,
+        0.8667119054935299,
+        0.8642152343883369,
+        0.8667801905152105,
+        0.8704931885690874,
+        0.856908737068524,
+        0.8605107719621701,
+        0.8594736931953976,
+        0.8610143739970637,
+        0.8566953463757725,
+        0.8616033323090581,
+        0.8629092833486974,
+        0.8632122981324046,
+        0.8622307009457475,
+        0.8596486735634539,
+        0.8555515722626242,
+        0.8584408822424802
+      ]
+    },
+    "coeffs": [
+      -0.4,
+      -0.2,
+      -0.1,
+      0.0,
+      0.1,
+      0.2,
+      0.4
+    ],
+    "types": [
+      "obscure_real",
+      "fictional_generated",
+      "unknowable_detail",
+      "false_premise"
+    ],
+    "skipped": {},
+    "headline": {
+      "group": "obscure_real",
+      "side": "unknown",
+      "metric": "abstention",
+      "lat_slope": -1.2214285714285713,
+      "lat_lo": -1.326190476190476,
+      "lat_hi": -1.119047619047619,
+      "max_abs_random_slope": 0.3238095238095237,
+      "differences": {
+        "random0": [
+          -1.3928571428571426,
+          -1.5572023809523805,
+          -1.2333333333333332
+        ],
+        "random1": [
+          -1.2714285714285714,
+          -1.4023809523809518,
+          -1.1476190476190473
+        ],
+        "random2": [
+          -0.8976190476190474,
+          -1.0285714285714282,
+          -0.7619047619047618
+        ]
+      },
+      "abs_gaps": {
+        "random0": [
+          1.0499999999999998,
+          0.9237499999999997,
+          1.1762499999999998
+        ],
+        "random1": [
+          1.1714285714285713,
+          1.0285119047619047,
+          1.29047619047619
+        ],
+        "random2": [
+          0.8976190476190475,
+          0.7642857142857145,
+          1.0286309523809525
+        ]
+      },
+      "distinguishable": true,
+      "selective": true
+    },
+    "chosen_coeff": -0.4,
+    "chosen_index": 0,
+    "calibration_balanced_range": {
+      "lat0": 0.31499999999999995,
+      "random0": 0.04999999999999993,
+      "random1": 0.06999999999999995,
+      "random2": 0.12
+    },
+    "hand_check_rows": 100
+  }
+}
