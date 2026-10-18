@@ -18,6 +18,7 @@ The inputs `readers.npz` and `items.json` are local only (export drops them),
 so this experiment runs where the full run directories exist.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,16 +28,45 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
+from tomography.activations import collect_activations
 from tomography.datasets.quantities import PEOPLE_FAMILY
+from tomography.datasets.quantities import QuantityQuestion
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.p10b_reading import POOLED
 from tomography.experiments.p10b_reading import TEMPLATES
+from tomography.experiments.sweep import chat_format_for
+from tomography.knowledge import DEFAULT_SHOTS
+from tomography.model import BosMode
+from tomography.model import LoadedModel
 from tomography.p9.reading import READING_METHODS
+from tomography.p9.reading import p9_template
+from tomography.p9.risk import auroc_ci
+from tomography.reading.metrics import auroc
+from tomography.reading.reader import RepReader
+from tomography.templates import ChatFormat
+from tomography.templates import ConceptTemplate
 
 READER_PARTS: Final = 2
 COSINE_COLUMNS: Final = ("p9_type", "layer", "cosine", "band_lo", "band_hi")
+KNOWLEDGE_COLUMNS: Final = (
+    "p9_type",
+    "layer",
+    "items",
+    "test_family",
+    "n_range",
+    "n_exact",
+    "auroc",
+    "lo",
+    "hi",
+    "rand_lo",
+    "rand_hi",
+)
 BAND_PERCENTILES: Final = (2.5, 97.5)
+ALL_ITEMS: Final = "all"
+TEST_ITEMS: Final = "test"
+KNOWLEDGE_CONCEPT: Final = "knowledge"
 
 Row = dict[str, object]
 Record = dict[str, Any]
@@ -497,3 +527,169 @@ def cosine_rows(
                 }
             )
     return rows
+
+
+def render_questions(
+    items: Sequence[QuantityQuestion], p9b: P9bRun, chat: ChatFormat
+) -> list[str]:
+    """Renders each question as the P9b run rendered its questions.
+
+    The template and the number of demonstrations come from the config of
+    the P9b run, and the concept word of a "concept" template is the one P9b
+    used, "knowledge".
+
+    Args:
+        items: The questions.
+        p9b: The P9b run.
+        chat: The chat format that wraps a "concept" prompt.
+
+    Returns:
+        One prompt per question, in order.
+
+    Raises:
+        ValueError: If the template of the P9b run is unknown or not a
+            concept template.
+    """
+    template = p9_template(
+        str(p9b.config["template"]), DEFAULT_SHOTS[: int(p9b.config["n_shots"])]
+    )
+    if not isinstance(template, ConceptTemplate):
+        raise ValueError("P9 templates are concept templates")
+    return [
+        template.render(i.question, KNOWLEDGE_CONCEPT, chat).text for i in items
+    ]
+
+
+def collect_question_activations(
+    loaded: LoadedModel,
+    items: Sequence[QuantityQuestion],
+    p9b: P9bRun,
+    *,
+    layers: Sequence[int],
+    batch_size: int,
+) -> NDArray[np.float32]:
+    """Collects the activations at the last token of each rendered question.
+
+    The prompts and the BOS policy are those of the P9b run, so a P9 reader
+    sees the state it was fitted on.
+
+    Args:
+        loaded: The wrapped model.
+        items: The questions.
+        p9b: The P9b run.
+        layers: The layers to read, as in the P9b run.
+        batch_size: Prompts per forward pass.
+
+    Returns:
+        The activations, shape (K, n, d), one row per question in order.
+    """
+    texts = render_questions(items, p9b, chat_format_for(loaded))
+    found = collect_activations(
+        loaded,
+        texts,
+        layers=layers,
+        position="last",
+        bos=cast(BosMode | None, p9b.config.get("bos")),
+        batch_size=batch_size,
+    )
+    return found.data
+
+
+def _item_groups(
+    items: Sequence[QuantityQuestion], labels: NDArray[np.int64]
+) -> list[tuple[str, str, NDArray[np.int64]]]:
+    """Lists the item set, family and rows of each group with both kinds."""
+    groups: list[tuple[str, str, NDArray[np.int64]]] = []
+    for subset in (ALL_ITEMS, TEST_ITEMS):
+        for family in (*dict.fromkeys(i.family for i in items), POOLED):
+            rows = np.array(
+                [
+                    n
+                    for n, item in enumerate(items)
+                    if (subset == ALL_ITEMS or item.split == "test")
+                    and family in (POOLED, item.family)
+                ],
+                dtype=np.int64,
+            )
+            positives = int(labels[rows].sum())
+            if 0 < positives < len(rows):
+                groups.append((subset, family, rows))
+    return groups
+
+
+def knowledge_rows(
+    data: NDArray[np.float32],
+    items: Sequence[QuantityQuestion],
+    p9b: P9bRun,
+    *,
+    n_boot: int,
+    n_random: int,
+    seed: int,
+) -> list[Row]:
+    """Scores the P10 items with every P9 reader and ranks range over exact.
+
+    The AUROC has the range items as the positive class and the P9 score as
+    stored, so a value below 0.5 means the range items read as less known.
+    No P10 item trained a P9 reader, so the "all" rows use every split; the
+    "test" rows use the test split only. The interval resamples items. The
+    random band holds the 2.5th and 97.5th percentiles of the AUROC of
+    `n_random` random unit directions at the layer, which carry a random
+    sign, so the band is the spread of a reader that was not oriented on
+    these labels. With a strong direction in the activations that spread is
+    wide, so compare an AUROC with the band and never with 0.5.
+
+    Args:
+        data: Activations of the items, shape (K, n, d), at the layers of the
+            P9b run.
+        items: The questions, in the order of `data`.
+        p9b: The P9b run.
+        n_boot: Item bootstrap resamples of every interval.
+        n_random: Random unit directions of every band.
+        seed: Base seed of the bootstrap and of the random directions.
+
+    Returns:
+        One row of `KNOWLEDGE_COLUMNS` per P9 type, layer, item set and test
+        family (each family, then "pooled"). A group without both kinds has
+        no row.
+    """
+    labels = np.array([i.kind == "range" for i in items], dtype=np.int64)
+    groups = _item_groups(items, labels)
+    bands: dict[tuple[int, str, str], tuple[float, float]] = {}
+    for k, layer in enumerate(p9b.layers):
+        rng = np.random.default_rng(derive_seed(seed, "auroc", layer))
+        draws = rng.standard_normal((n_random, data.shape[2]))
+        draws /= np.linalg.norm(draws, axis=1, keepdims=True)
+        for subset, family, rows in groups:
+            projected = data[k][rows].astype(np.float64) @ draws.T
+            low, high = np.percentile(
+                auroc(projected.T, labels[rows]), BAND_PERCENTILES
+            )
+            bands[(layer, subset, family)] = (float(low), float(high))
+    result: list[Row] = []
+    for t, name in enumerate(p9b.types):
+        reader = RepReader.from_arrays(
+            name, p9b.layers, p9b.directions[t], p9b.means[t], p9b.signs[t]
+        )
+        scores = reader.score(data).astype(np.float64)
+        for k, layer in enumerate(p9b.layers):
+            for subset, family, rows in groups:
+                value, low, high = auroc_ci(
+                    scores[k][rows], labels[rows], n_boot=n_boot, seed=seed
+                )
+                n_range = int(labels[rows].sum())
+                result.append(
+                    {
+                        "p9_type": name,
+                        "layer": layer,
+                        "items": subset,
+                        "test_family": family,
+                        "n_range": n_range,
+                        "n_exact": len(rows) - n_range,
+                        "auroc": value,
+                        "lo": low,
+                        "hi": high,
+                        "rand_lo": bands[(layer, subset, family)][0],
+                        "rand_hi": bands[(layer, subset, family)][1],
+                    }
+                )
+    return result

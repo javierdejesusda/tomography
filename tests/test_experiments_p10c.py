@@ -4,6 +4,8 @@ from collections.abc import Callable
 from collections.abc import Sequence
 import dataclasses
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -17,6 +19,11 @@ from tomography.experiments.p10a_quantities import Answer
 from tomography.experiments.p10a_quantities import Config as P10aConfig
 from tomography.experiments.p10b_reading import Config as P10bConfig
 from tomography.experiments.p10c_links import Config
+from tomography.experiments.sweep import chat_format_for
+from tomography.knowledge import DEFAULT_SHOTS
+from tomography.knowledge import few_shot_prompt
+from tomography.model import LoadedModel
+from tomography.templates import ChatFormat
 
 PINNED_HASH = "ff466673e0c1"
 WIDTH = 8
@@ -781,3 +788,294 @@ def test_the_band_holds_about_95_percent_of_random_cosines() -> None:
     )
 
     assert 0.92 < float(inside.mean()) < 0.98
+
+
+KNOWN_WIDTH = 256
+Shift = Callable[[QuantityQuestion], float]
+
+
+def _planted(
+    items: Sequence[QuantityQuestion],
+    shift: Shift,
+    direction: NDArray[np.float64],
+    *,
+    seed: int = 0,
+) -> NDArray[np.float32]:
+    """Noise plus `shift(item)` along `direction`, at every layer."""
+    rng = np.random.default_rng(seed)
+    data = rng.normal(size=(len(LAYERS), len(items), direction.shape[-1]))
+    for n, item in enumerate(items):
+        data[:, n] += shift(item) * direction
+    return data.astype(np.float32)
+
+
+def _range_is_unknown(item: QuantityQuestion) -> float:
+    return -1.5 if item.kind == "range" else 1.5
+
+
+def _range_is_known(item: QuantityQuestion) -> float:
+    return -_range_is_unknown(item)
+
+
+def _plant_direction() -> NDArray[np.float64]:
+    return _random_directions((KNOWN_WIDTH,), 5).astype(np.float64)
+
+
+def _known_pair(
+    plant: NDArray[np.float64],
+    *,
+    signs: NDArray[np.float32] | None = None,
+) -> p10c_links.P9bRun:
+    """Type 0 reads along `plant`, type 1 along an orthogonal direction."""
+    other = _random_directions((KNOWN_WIDTH,), 7).astype(np.float64)
+    other -= plant * float(other @ plant)
+    other /= np.linalg.norm(other)
+    both = np.stack([plant, other]).astype(np.float32)
+    return _known_run(np.stack([both] * len(LAYERS), axis=1), signs)
+
+
+def _rows_of(
+    rows: list[dict[str, object]], **where: object
+) -> list[dict[str, object]]:
+    return [r for r in rows if all(r[k] == v for k, v in where.items())]
+
+
+def _one(rows: list[dict[str, object]], **where: object) -> dict[str, object]:
+    (row,) = _rows_of(rows, **where)
+    return row
+
+
+def _knowledge(
+    data: NDArray[np.float32],
+    items: Sequence[QuantityQuestion],
+    p9b: p10c_links.P9bRun,
+    **changes: int,
+) -> list[dict[str, object]]:
+    settings = {"n_boot": 100, "n_random": 100, "seed": 0, **changes}
+    return p10c_links.knowledge_rows(data, items, p9b, **settings)
+
+
+def _auroc(row: dict[str, object]) -> float:
+    return float(row["auroc"])  # type: ignore[arg-type]
+
+
+def test_range_items_on_the_unknown_side_fall_below_the_random_band() -> None:
+    items = _items()
+    plant = _plant_direction()
+    data = _planted(items, _range_is_unknown, plant)
+
+    rows = _knowledge(data, items, _known_pair(plant))
+
+    for layer in LAYERS:
+        row = _one(
+            rows,
+            p9_type=TYPES[0],
+            layer=layer,
+            items="all",
+            test_family="pooled",
+        )
+        assert _auroc(row) < 0.1
+        assert _auroc(row) < float(row["rand_lo"])  # type: ignore[arg-type]
+
+
+def test_range_items_on_the_known_side_rise_above_the_random_band() -> None:
+    items = _items()
+    plant = _plant_direction()
+    data = _planted(items, _range_is_known, plant)
+
+    rows = _knowledge(data, items, _known_pair(plant))
+
+    for layer in LAYERS:
+        row = _one(
+            rows,
+            p9_type=TYPES[0],
+            layer=layer,
+            items="test",
+            test_family="pooled",
+        )
+        assert _auroc(row) > 0.9
+        assert _auroc(row) > float(row["rand_hi"])  # type: ignore[arg-type]
+
+
+def test_an_orthogonal_plant_stays_inside_the_random_band() -> None:
+    items = _items()
+    pair = _known_pair(_plant_direction())
+    orthogonal = pair.directions[1, 0].astype(np.float64)
+    data = _planted(items, _range_is_unknown, orthogonal)
+
+    rows = _knowledge(data, items, pair)
+
+    for layer in LAYERS:
+        where = {"layer": layer, "items": "all", "test_family": "pooled"}
+        blind = _one(rows, p9_type=TYPES[0], **where)
+        assert float(blind["rand_lo"]) <= _auroc(blind)  # type: ignore[arg-type]
+        assert _auroc(blind) <= float(blind["rand_hi"])  # type: ignore[arg-type]
+        aligned = _one(rows, p9_type=TYPES[1], **where)
+        assert _auroc(aligned) < float(aligned["rand_lo"])  # type: ignore[arg-type]
+
+
+def test_the_stored_sign_of_a_p9_reader_flips_its_auroc() -> None:
+    items = _items()
+    plant = _plant_direction()
+    data = _planted(items, _range_is_unknown, plant)
+    signs = np.ones((2, len(LAYERS)), dtype=np.float32)
+    signs[0, 1] = -1.0
+
+    rows = _knowledge(data, items, _known_pair(plant, signs=signs))
+
+    where = {"p9_type": TYPES[0], "items": "all", "test_family": "pooled"}
+    kept = _auroc(_one(rows, layer=1, **where))
+    flipped = _auroc(_one(rows, layer=2, **where))
+    assert kept < 0.1
+    assert flipped > 0.9
+
+
+def test_knowledge_rows_cover_every_type_layer_set_and_family() -> None:
+    items = _items()
+    plant = _plant_direction()
+    data = _planted(items, _range_is_unknown, plant)
+
+    rows = _knowledge(data, items, _known_pair(plant))
+
+    assert tuple(rows[0]) == p10c_links.KNOWLEDGE_COLUMNS
+    assert len(rows) == 2 * len(LAYERS) * 2 * 3
+    assert {r["items"] for r in rows} == {"all", "test"}
+    assert {r["test_family"] for r in rows} == {"height", "wingspan", "pooled"}
+    counts = {
+        (r["items"], r["test_family"]): (r["n_range"], r["n_exact"])
+        for r in rows
+    }
+    assert counts == {
+        ("all", "height"): (12, 12),
+        ("all", "wingspan"): (12, 12),
+        ("all", "pooled"): (24, 24),
+        ("test", "height"): (6, 6),
+        ("test", "wingspan"): (6, 6),
+        ("test", "pooled"): (12, 12),
+    }
+    for row in rows:
+        assert float(row["lo"]) <= _auroc(row) <= float(row["hi"])  # type: ignore[arg-type]
+        assert float(row["rand_lo"]) < float(row["rand_hi"])  # type: ignore[arg-type]
+
+
+def test_the_random_band_depends_on_the_layer_set_and_family_only() -> None:
+    items = _items()
+    plant = _plant_direction()
+    data = _planted(items, _range_is_unknown, plant)
+
+    rows = _knowledge(data, items, _known_pair(plant))
+
+    bands = {
+        (r["layer"], r["items"], r["test_family"], r["rand_lo"], r["rand_hi"])
+        for r in rows
+    }
+    assert len(bands) == len(LAYERS) * 2 * 3
+
+
+def test_a_group_without_both_kinds_has_no_row() -> None:
+    items = [
+        i
+        for i in _items()
+        if not (i.family == "wingspan" and i.kind == "range")
+    ]
+    plant = _plant_direction()
+    data = _planted(items, _range_is_unknown, plant)
+
+    rows = _knowledge(data, items, _known_pair(plant))
+
+    assert {r["test_family"] for r in rows} == {"height", "pooled"}
+    pooled = _one(
+        rows,
+        p9_type=TYPES[0],
+        layer=1,
+        items="all",
+        test_family="pooled",
+    )
+    assert (pooled["n_range"], pooled["n_exact"]) == (12, 24)
+
+
+def _fewshot_run(n_shots: int, template: str = "fewshot") -> p10c_links.P9bRun:
+    return _known_run(
+        _random_directions((1, 3, 16)),
+        config={"template": template, "n_shots": n_shots, "bos": None},
+    )
+
+
+def test_the_fewshot_prompt_has_the_demonstrations_of_the_p9b_run() -> None:
+    items = _items()[:3]
+
+    for n_shots in (2, 5):
+        texts = p10c_links.render_questions(
+            items, _fewshot_run(n_shots), ChatFormat("plain")
+        )
+
+        for text, item in zip(texts, items, strict=True):
+            first_question, first_answer = DEFAULT_SHOTS[0]
+            assert text.startswith(
+                f"Q: {first_question}\nA: {first_answer}\n\n"
+            )
+            assert text.count("Q: ") == n_shots + 1
+            assert text.endswith(f"Q: {item.question}\nA:")
+            assert text == few_shot_prompt(
+                item.question, DEFAULT_SHOTS[:n_shots]
+            )
+
+
+def test_the_plain_and_concept_templates_follow_the_p9b_run() -> None:
+    items = _items()[:2]
+    chat = ChatFormat("plain")
+
+    plain = p10c_links.render_questions(items, _fewshot_run(3, "plain"), chat)
+    concept = p10c_links.render_questions(
+        items, _fewshot_run(3, "concept"), chat
+    )
+
+    assert plain == [i.question for i in items]
+    for text, item in zip(concept, items, strict=True):
+        assert "knowledge" in text
+        assert item.question in text
+
+
+def test_an_unknown_p9b_template_is_refused() -> None:
+    with pytest.raises(ValueError, match="no such template"):
+        p10c_links.render_questions(
+            _items()[:1],
+            _fewshot_run(3, "no such template"),
+            ChatFormat("plain"),
+        )
+
+
+@pytest.mark.parametrize("bos", [None, "none", "prepend"])
+def test_activations_are_read_at_the_last_token_with_the_p9b_bos(
+    bos: str | None,
+    tiny_gpt2: LoadedModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def spy(loaded: LoadedModel, texts: Sequence[str], **kwargs: Any) -> Any:
+        seen.update(texts=list(texts), **kwargs)
+        return SimpleNamespace(
+            layers=tuple(kwargs["layers"]),
+            data=np.zeros((len(kwargs["layers"]), len(texts), 32), np.float32),
+        )
+
+    monkeypatch.setattr(p10c_links, "collect_activations", spy)
+    items = _items()[:3]
+    p9b = _known_run(
+        _random_directions((1, 3, 32)),
+        config={"template": "fewshot", "n_shots": 2, "bos": bos},
+    )
+
+    data = p10c_links.collect_question_activations(
+        tiny_gpt2, items, p9b, layers=LAYERS, batch_size=4
+    )
+
+    assert data.shape == (3, 3, 32)
+    assert seen["position"] == "last"
+    assert seen["layers"] == LAYERS
+    assert seen["bos"] == bos
+    assert seen["batch_size"] == 4
+    assert seen["texts"] == p10c_links.render_questions(
+        items, p9b, chat_format_for(tiny_gpt2)
+    )
