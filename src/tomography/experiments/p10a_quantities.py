@@ -42,9 +42,9 @@ from tomography.p10.answers import grade
 from tomography.p10.answers import parse_answer
 from tomography.reading.metrics import wilson_ci
 from tomography.templates import ChatFormat
+from tomography.viz.style import COLUMN_WIDTH
 from tomography.viz.style import PX
 from tomography.viz.style import categorical_colors
-from tomography.viz.style import figure_of
 from tomography.viz.style import new_figure
 from tomography.viz.style import save_figure
 from tomography.viz.style import style_context
@@ -53,6 +53,7 @@ CONDITIONS: Final = ("free", "forced")
 FORMATS: Final = ("fewshot", "chat")
 SHOT_ORDERS: Final = ("range_last", "exact_last")
 NO_ORDER: Final = "none"
+BOTH: Final = "both"
 
 FORCED_INSTRUCTION: Final = "Answer each question with one exact number."
 CHAT_INSTRUCTIONS: Final = {
@@ -426,7 +427,7 @@ def score_answer(
 
 @dataclass(frozen=True)
 class Outcome:
-    """What a model answered to one question in one condition and format.
+    """What a model answered to one question in one cell.
 
     Attributes:
         greedy: The greedy completion.
@@ -437,7 +438,7 @@ class Outcome:
     samples: tuple[Answer, ...]
 
 
-Cell = tuple[str, str]
+Cell = tuple[str, str, str]
 Results = dict[Cell, list[Outcome]]
 
 DECODINGS: Final = ("greedy", "sampled")
@@ -527,6 +528,7 @@ def build_table(
         "kind",
         "condition",
         "format",
+        "shot_order",
         "decoding",
         "n",
         "n_gradable",
@@ -538,7 +540,7 @@ def build_table(
             members = _members(items, family, kind)
             if not members:
                 continue
-            for (condition, fmt), outcomes in results.items():
+            for (condition, fmt, order), outcomes in results.items():
                 for decoding in DECODINGS:
                     answers = [
                         a
@@ -552,6 +554,7 @@ def build_table(
                             kind,
                             condition,
                             fmt,
+                            order,
                             decoding,
                             counts["n"],
                             counts["n_gradable"],
@@ -598,13 +601,24 @@ def bootstrap_gap_ci(
 
 
 def _item_rates(
-    outcomes: Sequence[Outcome], members: Sequence[int], decoding: str
+    outcome_sets: Sequence[Sequence[Outcome]],
+    members: Sequence[int],
+    decoding: str,
 ) -> NDArray[np.float64]:
-    """Returns each member's share of range answers."""
+    """Returns each member's share of range answers.
+
+    With several outcome sets (the shot orders) an item's share is the mean
+    of its shares in the sets.
+    """
     return np.array(
         [
             np.mean(
-                [a.form == "range" for a in _answers(outcomes[i], decoding)]
+                [
+                    np.mean(
+                        [a.form == "range" for a in _answers(set_[i], decoding)]
+                    )
+                    for set_ in outcome_sets
+                ]
             )
             for i in members
         ],
@@ -618,12 +632,14 @@ def hedge_gap_table(
     """Builds the gap in range answers between range and exact items.
 
     The gap is the mean over range items of the share of range answers minus
-    the same mean over exact items, per family and pooled, condition, format
-    and decoding. The interval resamples items within each kind.
+    the same mean over exact items, per family and pooled, condition, format,
+    shot order and decoding. The interval resamples items within each kind.
+    When a condition and format ran in several shot orders, an extra "both"
+    row uses for each item the mean of its range share over the orders.
 
     Args:
         items: The questions.
-        results: The outcomes per (condition, format), aligned with items.
+        results: The outcomes per cell, aligned with items.
         seed: Seed of the bootstrap.
 
     Returns:
@@ -634,6 +650,7 @@ def hedge_gap_table(
         "family",
         "condition",
         "format",
+        "shot_order",
         "decoding",
         "n_range_items",
         "n_exact_items",
@@ -643,22 +660,33 @@ def hedge_gap_table(
         "gap_lo",
         "gap_hi",
     ]
+    groups: list[tuple[str, str, str, Sequence[Sequence[Outcome]]]] = [
+        (condition, fmt, order, [outcomes])
+        for (condition, fmt, order), outcomes in results.items()
+    ]
+    for condition, fmt in dict.fromkeys((c, f) for c, f, _ in results):
+        sets = [
+            o for (c, f, _), o in results.items() if (c, f) == (condition, fmt)
+        ]
+        if len(sets) > 1:
+            groups.append((condition, fmt, BOTH, sets))
     rows: list[list[Any]] = []
     for family in _families_of(items):
         on_range = _members(items, family, "range")
         on_exact = _members(items, family, "exact")
         if not (on_range and on_exact):
             continue
-        for (condition, fmt), outcomes in results.items():
+        for condition, fmt, order, outcome_sets in groups:
             for decoding in DECODINGS:
-                high = _item_rates(outcomes, on_range, decoding)
-                low = _item_rates(outcomes, on_exact, decoding)
+                high = _item_rates(outcome_sets, on_range, decoding)
+                low = _item_rates(outcome_sets, on_exact, decoding)
                 gap_lo, gap_hi = bootstrap_gap_ci(high, low, seed=seed)
                 rows.append(
                     [
                         family,
                         condition,
                         fmt,
+                        order,
                         decoding,
                         len(on_range),
                         len(on_exact),
@@ -695,6 +723,7 @@ def forced_in_range_table(
         "family",
         "kind",
         "format",
+        "shot_order",
         "n_items",
         "n_point",
         *_rate_columns("inside"),
@@ -706,7 +735,7 @@ def forced_in_range_table(
             members = _members(items, family, kind)
             if not members:
                 continue
-            for (condition, fmt), outcomes in results.items():
+            for (condition, fmt, order), outcomes in results.items():
                 if condition != "forced":
                     continue
                 points = [
@@ -730,6 +759,7 @@ def forced_in_range_table(
                         family,
                         kind,
                         fmt,
+                        order,
                         len(members),
                         len(points),
                         inside,
@@ -761,6 +791,7 @@ def width_table(
     columns = [
         "condition",
         "format",
+        "shot_order",
         "decoding",
         "tertile",
         "width_lo",
@@ -782,7 +813,7 @@ def width_table(
     for rank, i in enumerate(ordered):
         tertiles[rank * 3 // len(ordered)].append(i)
     rows: list[list[Any]] = []
-    for (condition, fmt), outcomes in results.items():
+    for (condition, fmt, order), outcomes in results.items():
         for decoding in DECODINGS:
             for k, group in enumerate(tertiles, start=1):
                 if not group:
@@ -795,6 +826,7 @@ def width_table(
                     [
                         condition,
                         fmt,
+                        order,
                         decoding,
                         k,
                         width(group[0]),
@@ -840,6 +872,12 @@ def _grade_text(answer: Answer) -> str:
     return "correct" if answer.correct else "incorrect"
 
 
+def _stem(condition: str, fmt: str, order: str) -> str:
+    """Names a cell in a column: the shot order is left out for chat."""
+    parts = [condition, fmt] if order == NO_ORDER else [condition, fmt, order]
+    return "_".join(parts)
+
+
 def hand_check_table(
     items: Sequence[QuantityQuestion],
     results: Results,
@@ -864,7 +902,8 @@ def hand_check_table(
         The column names and the rows: the item with its Wikidata URL and
         gold range, for each cell the greedy completion (newlines shown as
         a backslash and n), its form, value, grade and unit flag, and empty
-        columns for the verdict of the person.
+        columns for the verdict of the person. A cell is named by its
+        condition, format and shot order (no order for chat).
     """
     strata: dict[tuple[str, str], list[int]] = {}
     for i, item in enumerate(items):
@@ -886,8 +925,8 @@ def hand_check_table(
         "gold_high",
         "unit",
     ]
-    for condition, fmt in results:
-        stem = f"{condition}_{fmt}"
+    for condition, fmt, order in results:
+        stem = _stem(condition, fmt, order)
         columns += [
             f"{stem}_{field}"
             for field in ("completion", "form", "value", "grade", "unit_flag")
@@ -927,11 +966,11 @@ def _item_records(
         {
             **asdict(item),
             "answers": {
-                f"{condition}/{fmt}": {
+                f"{condition}/{fmt}/{order}": {
                     "greedy": asdict(outcomes[i].greedy),
                     "samples": [asdict(a) for a in outcomes[i].samples],
                 }
-                for (condition, fmt), outcomes in results.items()
+                for (condition, fmt, order), outcomes in results.items()
             },
         }
         for i, item in enumerate(items)
@@ -970,6 +1009,7 @@ def _summary(
         "snapshots": snapshots,
         "conditions": list(config.conditions),
         "formats": list(formats),
+        "shot_orders": list(config.shot_orders) if "fewshot" in formats else [],
         "hand_check_rows": n_hand_check,
         "config": config.to_dict(),
     }
@@ -994,12 +1034,14 @@ def _ask(
     config: Config,
     loaded: LoadedModel,
     items: Sequence[QuantityQuestion],
-    condition: str,
-    fmt: str,
+    cell: Cell,
     chat: ChatFormat | None,
 ) -> list[Outcome]:
     """Gets a greedy and sampled completions of every item in one cell."""
-    prompts = [build_prompt(i.question, condition, fmt, chat) for i in items]
+    condition, fmt, order = cell
+    prompts = [
+        build_prompt(i.question, condition, fmt, chat, order) for i in items
+    ]
     greedy = generate(
         loaded,
         prompts,
@@ -1012,7 +1054,7 @@ def _ask(
         max_new_tokens=config.max_new_tokens,
         temperature=config.temperature,
         num_samples=config.n_samples,
-        seed=derive_seed(config.seed, condition, fmt),
+        seed=derive_seed(config.seed, *cell),
         batch_size=config.batch_size,
     )
 
@@ -1034,7 +1076,10 @@ def execute(
     loaded: LoadedModel,
     items: Sequence[QuantityQuestion],
 ) -> None:
-    """Asks every question in every condition and format and writes the files.
+    """Asks every question in every cell and writes the files.
+
+    A cell is a condition, a format and, for the few-shot format, a shot
+    order; the chat format has no shot order.
 
     Writes `table.csv`, `hedge_gap.csv`, `forced_in_range.csv`, `width.csv`,
     `hand_check.csv`, `items.json` (every parsed answer; the export step
@@ -1056,10 +1101,14 @@ def execute(
     for unit in {item.unit for item in items}:
         unit_words(unit)
     formats, chat = _formats_for(config, loaded)
-    results: Results = {
-        (condition, fmt): _ask(config, loaded, items, condition, fmt, chat)
+    cells: list[Cell] = [
+        (condition, fmt, order)
         for condition in config.conditions
         for fmt in formats
+        for order in (config.shot_orders if fmt == "fewshot" else (NO_ORDER,))
+    ]
+    results: Results = {
+        cell: _ask(config, loaded, items, cell, chat) for cell in cells
     }
     for name, (columns, rows) in {
         "table": build_table(items, results),
@@ -1100,12 +1149,30 @@ def run(config: Config, run_dir: RunDir) -> None:
     execute(config, run_dir, load_model(config.model), items)
 
 
+def panel_orders(rows: Sequence[dict[str, str]]) -> tuple[str, list[str]]:
+    """Picks the format and the shot orders the plot shows.
+
+    Args:
+        rows: The rows of `table.csv`.
+
+    Returns:
+        The few-shot format when the run has it, else chat, and the shot
+        orders of that format in the order of the table.
+    """
+    fmt = "fewshot" if any(r["format"] == "fewshot" for r in rows) else "chat"
+    orders: list[str] = []
+    for row in rows:
+        if row["format"] == fmt and row["shot_order"] not in orders:
+            orders.append(row["shot_order"])
+    return fmt, orders
+
+
 def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
     """Draws the share of each answer form by kind and condition.
 
-    The bars are the pooled greedy answers of the few-shot format (the chat
-    format when the run has no few-shot cells), with Wilson 95 percent
-    intervals.
+    One panel per shot order shows the pooled greedy answers of the few-shot
+    format (one chat panel when the run has no few-shot cells), with Wilson
+    95 percent intervals.
 
     Args:
         run_dir: A finished P10a run.
@@ -1115,50 +1182,54 @@ def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
         The PDF, PNG and SVG paths.
     """
     with (run_dir.path / "table.csv").open(encoding="utf-8", newline="") as f:
-        rows = [
-            r
-            for r in csv.DictReader(f)
-            if r["family"] == POOLED and r["decoding"] == "greedy"
-        ]
-    fmt = "fewshot" if any(r["format"] == "fewshot" for r in rows) else "chat"
-    groups = [
-        r
-        for condition in CONDITIONS
-        for kind in _KINDS[::-1]
-        for r in rows
-        if (r["condition"], r["kind"], r["format"]) == (condition, kind, fmt)
+        table = list(csv.DictReader(f))
+    fmt, orders = panel_orders(table)
+    rows = [
+        r for r in table if r["family"] == POOLED and r["decoding"] == "greedy"
     ]
     forms = ("point", "range", "abstain", "none")
     colors = categorical_colors(len(forms))
     with style_context():
-        _, axes = new_figure(aspect=0.6)
-        ax = axes[0, 0]
-        for k, (form, color) in enumerate(zip(forms, colors, strict=True)):
-            x = np.arange(len(groups)) + (k - 1.5) * 0.18
-            rate = np.array([float(g[f"{form}_rate"]) for g in groups])
-            low = np.array([float(g[f"{form}_lo"]) for g in groups])
-            high = np.array([float(g[f"{form}_hi"]) for g in groups])
-            ax.errorbar(
-                x,
-                rate,
-                yerr=[rate - low, high - rate],
-                fmt="o",
-                ms=3,
-                color=color,
-                elinewidth=PX,
-                label=form,
-            )
-        ax.set_xticks(
-            np.arange(len(groups)),
-            [f"{g['kind']}\n{g['condition']}" for g in groups],
+        fig, axes = new_figure(
+            1, len(orders), width=COLUMN_WIDTH * len(orders), sharey=True
         )
-        ax.set_ylim(-0.02, 1.02)
-        ax.set_xlabel(f"Kind and condition ({fmt} format)")
-        ax.set_ylabel("Share of greedy answers")
-        ax.legend(
+        for ax, order in zip(axes[0], orders, strict=True):
+            groups = [
+                r
+                for condition in CONDITIONS
+                for kind in _KINDS[::-1]
+                for r in rows
+                if (r["condition"], r["kind"], r["format"], r["shot_order"])
+                == (condition, kind, fmt, order)
+            ]
+            for k, (form, color) in enumerate(zip(forms, colors, strict=True)):
+                x = np.arange(len(groups)) + (k - 1.5) * 0.18
+                rate = np.array([float(g[f"{form}_rate"]) for g in groups])
+                low = np.array([float(g[f"{form}_lo"]) for g in groups])
+                high = np.array([float(g[f"{form}_hi"]) for g in groups])
+                ax.errorbar(
+                    x,
+                    rate,
+                    yerr=[rate - low, high - rate],
+                    fmt="o",
+                    ms=3,
+                    color=color,
+                    elinewidth=PX,
+                    label=form,
+                )
+            ax.set_xticks(
+                np.arange(len(groups)),
+                [f"{g['kind']}\n{g['condition']}" for g in groups],
+            )
+            ax.set_ylim(-0.02, 1.02)
+            ax.set_title(f"{fmt}, {order}" if order != NO_ORDER else fmt)
+        axes[0, 0].set_ylabel("Share of greedy answers")
+        handles, labels = axes[0, 0].get_legend_handles_labels()
+        fig.legend(
+            handles,
+            labels,
             ncol=len(forms),
-            loc="lower center",
-            bbox_to_anchor=(0.5, 1.0),
+            loc="outside upper center",
             frameon=False,
         )
-    return save_figure(figure_of(ax), out_dir, "form_shares")
+    return save_figure(fig, out_dir, "form_shares")

@@ -422,7 +422,7 @@ def _find(rows: list[dict[str, Any]], **keys: Any) -> dict[str, Any]:
 def test_the_table_counts_forms_per_cell_with_wilson_intervals() -> None:
     items = _pool(("alpha",))
     forms = ["point", "range", "range", "abstain", "none", "point", "point"]
-    results: Results = {("free", "fewshot"): []}
+    results: Results = {("free", "fewshot", "range_last"): []}
     for i, item in enumerate(items):
         if item.kind == "range":
             greedy = _answer(
@@ -431,16 +431,17 @@ def test_the_table_counts_forms_per_cell_with_wilson_intervals() -> None:
             )
         else:
             greedy = _answer("point", correct=i % 2 == 0, mismatch=i == 4)
-        results[("free", "fewshot")].append(_outcome(greedy))
+        results[("free", "fewshot", "range_last")].append(_outcome(greedy))
 
     columns, body = build_table(items, results)
     rows = _rows(columns, body)
 
-    assert columns[:7] == [
+    assert columns[:8] == [
         "family",
         "kind",
         "condition",
         "format",
+        "shot_order",
         "decoding",
         "n",
         "n_gradable",
@@ -464,7 +465,7 @@ def test_the_table_has_a_pooled_family_and_both_decodings() -> None:
     items = _pool()
     samples = (_answer("range"), _answer("point"), _answer("range"))
     results: Results = {
-        ("forced", "chat"): [
+        ("forced", "chat", "none"): [
             _outcome(_answer("point", correct=True), *samples) for _ in items
         ]
     }
@@ -487,7 +488,7 @@ def test_the_table_has_a_pooled_family_and_both_decodings() -> None:
 def test_the_table_counts_approximate_answers_of_any_form() -> None:
     items = _pool(("alpha",), per_side=2)
     results: Results = {
-        ("free", "fewshot"): [
+        ("free", "fewshot", "range_last"): [
             _outcome(_answer("range", approximate=True)),
             _outcome(_answer("none", approximate=True)),
             _outcome(_answer("point")),
@@ -507,7 +508,9 @@ def test_the_table_counts_approximate_answers_of_any_form() -> None:
 def test_a_cell_without_gradable_answers_has_no_correct_rate() -> None:
     items = _pool(("alpha",), per_side=1)
     results: Results = {
-        ("free", "fewshot"): [_outcome(_answer("abstain")) for _ in items]
+        ("free", "fewshot", "range_last"): [
+            _outcome(_answer("abstain")) for _ in items
+        ]
     }
 
     columns, body = build_table(items, results)
@@ -536,7 +539,7 @@ def _hedge_results(
         )
         greedy = _answer("range" if share >= 0.5 else "point")
         outcomes.append(Outcome(greedy=greedy, samples=samples))
-    return {("free", "fewshot"): outcomes}
+    return {("free", "fewshot", "range_last"): outcomes}
 
 
 def test_the_hedge_gap_is_the_range_rate_on_range_minus_on_exact_items() -> (
@@ -638,15 +641,19 @@ def test_forced_in_range_counts_greedy_points_inside_the_range() -> None:
         "alpha-exact-Q3": _answer("abstain"),
     }
     results: Results = {
-        ("forced", "fewshot"): [_outcome(greedy[i.uid]) for i in items],
-        ("free", "fewshot"): [_outcome(_answer("point", 1.0)) for _ in items],
+        ("forced", "fewshot", "range_last"): [
+            _outcome(greedy[i.uid]) for i in items
+        ],
+        ("free", "fewshot", "range_last"): [
+            _outcome(_answer("point", 1.0)) for _ in items
+        ],
     }
 
     columns, body = forced_in_range_table(items, results, rel_tol=0.05)
     rows = _rows(columns, body)
 
     assert {r["format"] for r in rows} == {"fewshot"}
-    assert [c for c in columns[:4]] == ["family", "kind", "format", "n_items"]
+    assert columns[:5] == ["family", "kind", "format", "shot_order", "n_items"]
     row = _find(rows, family="alpha", kind="range")
     assert (row["n_items"], row["n_point"]) == (4, 3)
     assert row["inside"] == 2
@@ -667,7 +674,9 @@ def test_forced_in_range_widens_by_the_tolerance_on_both_ends() -> None:
     item = _item(low=100.0, high=200.0)
     values = [94.9, 95.1, 100.0, 200.0, 209.9, 210.1]
     results: Results = {
-        ("forced", "chat"): [_outcome(_answer("point", v)) for v in values]
+        ("forced", "chat", "none"): [
+            _outcome(_answer("point", v)) for v in values
+        ]
     }
 
     columns, body = forced_in_range_table(
@@ -684,7 +693,9 @@ def test_forced_in_range_widens_by_the_tolerance_on_both_ends() -> None:
 def test_forced_in_range_is_empty_without_the_forced_condition() -> None:
     items = _pool(("alpha",))
     results: Results = {
-        ("free", "fewshot"): [_outcome(_answer("point")) for _ in items]
+        ("free", "fewshot", "range_last"): [
+            _outcome(_answer("point")) for _ in items
+        ]
     }
 
     columns, body = forced_in_range_table(items, results, rel_tol=0.05)
@@ -700,14 +711,14 @@ def test_width_tertiles_split_range_items_by_relative_width() -> None:
     ]
     forms = ["range", "point", "range", "range", "point", "point"]
     results: Results = {
-        ("free", "fewshot"): [
+        ("free", "fewshot", "range_last"): [
             _outcome(_answer(f, correct=k % 2 == 0))
             for k, f in enumerate(forms)
         ]
     }
 
     columns, body = width_table(items, results)
-    rows = _rows(columns, [r for r in body if r[2] == "greedy"])
+    rows = [r for r in _rows(columns, body) if r["decoding"] == "greedy"]
 
     assert [r["tertile"] for r in rows] == [1, 2, 3]
     assert [r["n_items"] for r in rows] == [2, 2, 2]
@@ -727,7 +738,7 @@ def test_width_covers_range_items_only_and_drops_empty_tertiles() -> None:
         _item(uid="u1", kind="exact", low=100.0, high=100.0),
     ]
     results: Results = {
-        ("free", "chat"): [_outcome(_answer("range")) for _ in items]
+        ("free", "chat", "none"): [_outcome(_answer("range")) for _ in items]
     }
 
     columns, body = width_table(items, results)
@@ -738,7 +749,12 @@ def test_width_covers_range_items_only_and_drops_empty_tertiles() -> None:
     assert {r["decoding"] for r in rows} == {"greedy", "sampled"}
 
 
-def _planted(item: QuantityQuestion, forced: bool, greedy: bool, k: int) -> str:
+Rule = Callable[[QuantityQuestion, bool, bool, int, str], str]
+
+
+def _planted(
+    item: QuantityQuestion, forced: bool, greedy: bool, k: int, order: str
+) -> str:
     """Range items hedge when free; samples alternate with an abstention."""
     midpoint = (item.low + item.high) / 2
     if item.kind == "exact":
@@ -750,13 +766,22 @@ def _planted(item: QuantityQuestion, forced: bool, greedy: bool, k: int) -> str:
     )
 
 
+def _order_of(prompt: str) -> str:
+    """Tells the shot order of a prompt from the shot before the question."""
+    if "<|im_start|>" in prompt:
+        return "none"
+    shots = prompt.rsplit("\n\nQ: ", 1)[0]
+    last_is_range = shots.endswith(("A: 7.35 to 7.45", "A: 7.4"))
+    return "range_last" if last_is_range else "exact_last"
+
+
 class _Calls:
     """Replaces `generate` with planted completions and records the calls."""
 
     def __init__(
         self,
         items: list[QuantityQuestion],
-        rule: Callable[[QuantityQuestion, bool, bool, int], str] = _planted,
+        rule: Rule = _planted,
     ) -> None:
         self.items = items
         self.rule = rule
@@ -788,10 +813,13 @@ class _Calls:
         for prompt in prompts:
             item = next(i for i in self.items if i.question in prompt)
             forced = "exact number" in prompt
+            order = _order_of(prompt)
             out.append(
                 [
                     Completion(
-                        text=self.rule(item, forced, temperature is None, k),
+                        text=self.rule(
+                            item, forced, temperature is None, k, order
+                        ),
                         token_ids=(),
                         finished=True,
                     )
@@ -802,7 +830,13 @@ class _Calls:
 
 
 def _config(**overrides: Any) -> Config:
-    base = Config(model="tiny", n_samples=4, n_hand_check=8, batch_size=5)
+    base = Config(
+        model="tiny",
+        n_samples=4,
+        n_hand_check=8,
+        batch_size=5,
+        shot_orders=("range_last",),
+    )
     return dataclasses.replace(base, **overrides)
 
 
@@ -812,7 +846,7 @@ def _executed(
     monkeypatch: pytest.MonkeyPatch,
     *,
     items: list[QuantityQuestion] | None = None,
-    rule: Callable[[QuantityQuestion, bool, bool, int], str] = _planted,
+    rule: Rule = _planted,
     **overrides: Any,
 ) -> tuple[RunDir, _Calls]:
     items = items if items is not None else _pool(per_side=6)
@@ -1016,7 +1050,7 @@ def test_items_json_keeps_every_parsed_answer(
     record = next(r for r in records if r["uid"] == "alpha-range-Q1")
     assert record["entity_id"] == "Q1"
     assert record["sha256"] == "ab" * 32
-    cell = record["answers"]["free/fewshot"]
+    cell = record["answers"]["free/fewshot/range_last"]
     assert cell["greedy"]["form"] == "range"
     assert cell["greedy"]["correct"] is True
     assert cell["greedy"]["unit_mismatch"] is False
@@ -1027,8 +1061,8 @@ def test_items_json_keeps_every_parsed_answer(
         "abstain",
     ]
     assert set(record["answers"]) == {
-        "free/fewshot",
-        "forced/fewshot",
+        "free/fewshot/range_last",
+        "forced/fewshot/range_last",
     }
 
 
@@ -1063,11 +1097,11 @@ def test_the_hand_check_rows_are_traceable_and_blank_for_the_human(
     assert row["question"] == "Q alpha range 3?"
     assert (row["gold_low"], row["gold_high"]) == ("130.0", "200.0")
     assert row["unit"] == "centimetres"
-    assert row["free_fewshot_completion"] == " 130 to 200 cm"
-    assert row["free_fewshot_form"] == "range"
-    assert row["free_fewshot_value"] == "130 to 200"
-    assert row["free_fewshot_grade"] == "correct"
-    assert row["forced_fewshot_value"] == "165"
+    assert row["free_fewshot_range_last_completion"] == " 130 to 200 cm"
+    assert row["free_fewshot_range_last_form"] == "range"
+    assert row["free_fewshot_range_last_value"] == "130 to 200"
+    assert row["free_fewshot_range_last_grade"] == "correct"
+    assert row["forced_fewshot_range_last_value"] == "165"
     for column in ("human_form", "human_correct", "human_unit_mismatch"):
         assert row[column] == ""
 
@@ -1090,7 +1124,9 @@ def test_the_hand_check_draw_follows_the_seed(
 def test_a_hand_check_completion_keeps_its_newlines_visible(
     tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def rule(item: QuantityQuestion, forced: bool, greedy: bool, k: int) -> str:
+    def rule(
+        item: QuantityQuestion, forced: bool, greedy: bool, k: int, order: str
+    ) -> str:
         return " 12\nQ: next?"
 
     run_dir, _ = _executed(
@@ -1098,8 +1134,8 @@ def test_a_hand_check_completion_keeps_its_newlines_visible(
     )
 
     row = _csv(run_dir, "hand_check.csv")[0]
-    assert row["free_fewshot_completion"] == " 12\\nQ: next?"
-    assert row["free_fewshot_form"] == "point"
+    assert row["free_fewshot_range_last_completion"] == " 12\\nQ: next?"
+    assert row["free_fewshot_range_last_form"] == "point"
 
 
 def test_the_summary_records_counts_snapshots_and_the_config(
@@ -1328,3 +1364,244 @@ def test_the_chat_prompt_ignores_the_shot_order(
 def test_the_fewshot_prompt_rejects_an_unknown_order() -> None:
     with pytest.raises(ValueError, match="shot order"):
         build_prompt("Q?", "free", "fewshot", None, order="random")
+
+
+ORDERS = ("range_last", "exact_last")
+
+
+def _order_rule(
+    item: QuantityQuestion, forced: bool, greedy: bool, k: int, order: str
+) -> str:
+    """Range items hedge only after a range last shot; exact items never."""
+    if item.kind == "exact" or order == "exact_last":
+        return f" {item.low:g} cm"
+    return f" {item.low:g} to {item.high:g} cm"
+
+
+def _both_orders(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    **overrides: Any,
+) -> tuple[RunDir, _Calls]:
+    return _executed(
+        tiny_gpt2,
+        tmp_path,
+        monkeypatch,
+        rule=_order_rule,
+        shot_orders=ORDERS,
+        **overrides,
+    )
+
+
+def test_every_table_carries_the_shot_order(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _both_orders(tiny_gpt2, tmp_path, monkeypatch)
+
+    for name in ("table", "hedge_gap", "forced_in_range", "width"):
+        rows = _csv(run_dir, f"{name}.csv")
+        assert {r["shot_order"] for r in rows} >= set(ORDERS), name
+
+
+def test_the_table_splits_the_cells_by_shot_order(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, calls = _both_orders(tiny_gpt2, tmp_path, monkeypatch)
+    rows = [
+        r
+        for r in _csv(run_dir, "table.csv")
+        if (r["family"], r["kind"], r["condition"], r["decoding"])
+        == ("all", "range", "free", "greedy")
+    ]
+
+    by_order = {r["shot_order"]: r for r in rows}
+    assert set(by_order) == set(ORDERS)
+    assert by_order["range_last"]["range"] == "12"
+    assert by_order["exact_last"]["range"] == "0"
+    assert by_order["exact_last"]["point"] == "12"
+    assert len(calls.calls) == 8
+    assert len({c["seed"] for c in calls.calls[1::2]}) == 4
+
+
+def test_the_hedge_gap_has_a_both_row_that_averages_the_orders(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _both_orders(tiny_gpt2, tmp_path, monkeypatch)
+    rows = [
+        r
+        for r in _csv(run_dir, "hedge_gap.csv")
+        if (r["family"], r["condition"], r["decoding"])
+        == ("alpha", "free", "greedy")
+    ]
+
+    gaps = {r["shot_order"]: r for r in rows}
+    assert set(gaps) == {"range_last", "exact_last", "both"}
+    assert float(gaps["range_last"]["gap"]) == 1.0
+    assert float(gaps["exact_last"]["gap"]) == 0.0
+    both = gaps["both"]
+    assert float(both["gap"]) == pytest.approx(0.5)
+    assert float(both["range_rate_on_range_items"]) == pytest.approx(0.5)
+    assert float(both["range_rate_on_exact_items"]) == 0.0
+    assert float(both["gap_lo"]) == float(both["gap_hi"]) == 0.5
+
+
+def test_a_both_row_covers_each_family_condition_and_decoding(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _both_orders(tiny_gpt2, tmp_path, monkeypatch)
+    both = [
+        r for r in _csv(run_dir, "hedge_gap.csv") if r["shot_order"] == "both"
+    ]
+
+    assert len(both) == 3 * 2 * 2
+    assert {r["format"] for r in both} == {"fewshot"}
+
+
+def test_one_order_gives_no_both_row(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch)
+
+    orders = {r["shot_order"] for r in _csv(run_dir, "hedge_gap.csv")}
+    assert orders == {"range_last"}
+
+
+def test_the_both_row_resamples_items_with_the_config_seed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seeds: list[int] = []
+
+    def spy(
+        range_rates: np.ndarray, exact_rates: np.ndarray, *, seed: int
+    ) -> tuple[float, float]:
+        seeds.append(seed)
+        return 0.0, 0.0
+
+    monkeypatch.setattr(p10a_quantities, "bootstrap_gap_ci", spy)
+    items = _pool(("alpha",))
+    cells = {
+        ("free", "fewshot", order): [_outcome(_answer("range")) for _ in items]
+        for order in ORDERS
+    }
+
+    columns, body = hedge_gap_table(items, cells, seed=5)
+
+    assert seeds == [5] * 12
+    assert {r["shot_order"] for r in _rows(columns, body)} == {
+        "range_last",
+        "exact_last",
+        "both",
+    }
+
+
+def test_the_chat_cells_have_no_shot_order(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, calls = _executed(
+        _post_trained(tiny_qwen3),
+        tmp_path,
+        monkeypatch,
+        shot_orders=ORDERS,
+    )
+
+    rows = _csv(run_dir, "table.csv")
+    chat = {r["shot_order"] for r in rows if r["format"] == "chat"}
+    few = {r["shot_order"] for r in rows if r["format"] == "fewshot"}
+    assert (chat, few) == ({"none"}, set(ORDERS))
+    assert len(calls.calls) == 12
+    both = [
+        r for r in _csv(run_dir, "hedge_gap.csv") if r["shot_order"] == "both"
+    ]
+    assert {r["format"] for r in both} == {"fewshot"}
+
+
+def test_the_hand_check_has_a_column_set_per_order(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _both_orders(
+        tiny_gpt2, tmp_path, monkeypatch, n_hand_check=100
+    )
+    rows = _csv(run_dir, "hand_check.csv")
+    row = next(r for r in rows if r["uid"] == "alpha-range-Q3")
+
+    for stem in ("free", "forced"):
+        for order in ORDERS:
+            for field in ("completion", "form", "value", "grade", "unit_flag"):
+                assert f"{stem}_fewshot_{order}_{field}" in row
+    assert row["free_fewshot_range_last_form"] == "range"
+    assert row["free_fewshot_exact_last_form"] == "point"
+    assert row["free_fewshot_exact_last_value"] == "130"
+
+
+def test_the_hand_check_names_chat_columns_without_an_order(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(
+        _post_trained(tiny_qwen3), tmp_path, monkeypatch, n_hand_check=100
+    )
+
+    row = _csv(run_dir, "hand_check.csv")[0]
+    assert "free_chat_completion" in row
+    assert "free_chat_none_completion" not in row
+
+
+def test_items_json_keys_the_answers_by_shot_order(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(
+        _post_trained(tiny_qwen3), tmp_path, monkeypatch, shot_orders=ORDERS
+    )
+
+    records = run_dir.read_json("items")
+    assert isinstance(records, list)
+    assert set(records[0]["answers"]) == {
+        f"{condition}/{fmt}/{order}"
+        for condition in ("free", "forced")
+        for fmt, order in [
+            ("fewshot", "range_last"),
+            ("fewshot", "exact_last"),
+            ("chat", "none"),
+        ]
+    }
+
+
+def test_the_summary_lists_the_shot_orders_that_ran(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _both_orders(tiny_qwen3, tmp_path / "a", monkeypatch)
+    chat_only, _ = _executed(
+        _post_trained(tiny_qwen3),
+        tmp_path / "b",
+        monkeypatch,
+        formats=("chat",),
+        shot_orders=ORDERS,
+    )
+
+    assert _summary(run_dir)["shot_orders"] == list(ORDERS)
+    assert _summary(chat_only)["shot_orders"] == []
+
+
+def test_plot_draws_one_panel_per_shot_order(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _both_orders(tiny_gpt2, tmp_path, monkeypatch)
+
+    assert p10a_quantities.panel_orders(_csv(run_dir, "table.csv")) == (
+        "fewshot",
+        ["range_last", "exact_last"],
+    )
+    assert len(plot(run_dir, tmp_path / "figs")) == 3
+
+
+def test_the_plot_panels_fall_back_to_chat_without_fewshot(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(
+        _post_trained(tiny_qwen3), tmp_path, monkeypatch, formats=("chat",)
+    )
+
+    assert p10a_quantities.panel_orders(_csv(run_dir, "table.csv")) == (
+        "chat",
+        ["none"],
+    )
