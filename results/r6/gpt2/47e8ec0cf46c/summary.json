@@ -3,12 +3,12 @@
     "experiment": "r6",
     "config_hash": "47e8ec0cf46c",
     "seed": 0,
-    "git_sha": "a39ae61d1ea0214babb0f234a4fcf0c966c82c08",
+    "git_sha": "bab5b7594b47ca08b11f78032211d205e953fdfb",
     "git_dirty": false,
-    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
-    "platform": "Windows-11-10.0.26200-SP0",
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-57-generic-x86_64-with-glibc2.39",
     "versions": {
-      "python": "3.12.6",
+      "python": "3.12.3",
       "tomography": "0.1.0",
       "torch": "2.14.1+cu130",
       "transformers": "5.19.0",
@@ -19,7 +19,7 @@
       "matplotlib": "3.11.2",
       "plotly": "7.1.0"
     },
-    "started_at": "2026-10-16T20:33:20+00:00",
+    "started_at": "2026-10-18T23:28:00+00:00",
     "finished_at": null,
     "config": {
       "experiment": "r6",
@@ -62,6 +62,18 @@
         "mc1": 0.2864137086903305,
         "lo": 0.25647006589886917,
         "hi": 0.3183564779486973
+      }
+    },
+    "text_baselines": {
+      "text_word": {
+        "mc1": 0.6763005780346821,
+        "lo": 0.6034046663938186,
+        "hi": 0.7415370707236641
+      },
+      "text_char": {
+        "mc1": 0.6705202312138728,
+        "lo": 0.5974421528971253,
+        "hi": 0.7361900190689644
       }
     },
     "lat": {
