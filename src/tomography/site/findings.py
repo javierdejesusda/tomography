@@ -797,8 +797,16 @@ def approximate_answers(store: Store) -> Finding | None:
                     )
         if marks:
             r_rows.append(svg.Row(model, tuple(marks), group=_family(model)))
-    read_values = [0.5, 1.0] + [m.value for r in r_rows for m in r.marks]
-    read_domain, read_ticks = _axis(read_values)
+    read_low = min(
+        0.4, min((m.value for r in r_rows for m in r.marks), default=0.4)
+    )
+    read_low = math.floor(read_low * 10) / 10
+    read_domain = (read_low, 1.0)
+    read_step = 0.2 if 1.0 - read_low > 0.5 else 0.1
+    read_ticks = tuple(
+        round(read_low + i * read_step, 6)
+        for i in range(round((1.0 - read_low) / read_step) + 1)
+    )
     link_figure = _links_figure(store)
     if not b_rows and not r_rows and link_figure is None:
         return None
