@@ -969,3 +969,316 @@ def test_the_wingspan_exact_side_names_the_aircraft_and_drops_missiles() -> (
     assert family.range_side.template == (
         "What is the wingspan of the {entity}, in centimetres?"
     )
+
+
+def test_side_query_restricts_to_the_listed_occupations() -> None:
+    query = quantities.side_query(
+        _side(classes=("Q5",), occupations=("Q3665646", "Q937857")), limit=5
+    )
+
+    assert "VALUES ?occupation { wd:Q3665646 wd:Q937857 }" in query
+    assert "?item wdt:P106 ?occupation" in query
+
+
+def test_side_query_has_no_occupation_filter_by_default() -> None:
+    assert "P106" not in quantities.side_query(_side(), limit=5)
+
+
+def test_side_query_rejects_a_bad_occupation() -> None:
+    with pytest.raises(ValueError, match="item"):
+        quantities.side_query(_side(occupations=("P106",)), limit=5)
+
+
+def test_side_unbounded_only_applies_to_an_exact_side_only() -> None:
+    with pytest.raises(ValueError, match="unbounded_only"):
+        _side(unbounded_only=True)
+
+
+def test_parse_side_unbounded_only_drops_any_bounded_statement() -> None:
+    side = _side(kind="exact", unbounded_only=True, unit="metres", scale=1.0)
+    result = _result(
+        [
+            _row(1, amount=2.0, lower=None, upper=None),
+            _row(2, amount=2.0, lower=1.995, upper=2.005),
+        ]
+    )
+
+    items = quantities.parse_side(
+        result, family="f", side=side, min_sitelinks=1
+    )
+
+    assert [i.entity_id for i in items] == ["Q1"]
+
+
+CENTIMETRE = "http://www.wikidata.org/entity/Q174728"
+HOOPS = "Q3665646"
+FOOTBALL = "Q937857"
+
+
+def _person(
+    number: int,
+    *,
+    height: float = 1.95,
+    links: int = 100,
+    label: str | None = None,
+    **kwargs: object,
+) -> dict[str, str]:
+    return _row(
+        number,
+        label=(
+            "Person " + "".join(chr(97 + int(d)) for d in str(number))
+            if label is None
+            else label
+        ),
+        links=links,
+        amount=height,
+        lower=None,
+        upper=None,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def _people_endpoint(
+    hoops: list[dict[str, str]], football: list[dict[str, str]] | None = None
+) -> _Endpoint:
+    return _Endpoint(
+        {
+            f"wd:{HOOPS}": _body(hoops),
+            f"wd:{FOOTBALL}": _body(football or []),
+        }
+    )
+
+
+def _people(
+    fetch: _Endpoint, tmp_path: Path, **kwargs: object
+) -> list[quantities.QuantityQuestion]:
+    options: dict[str, object] = {
+        "n": 5,
+        "min_sitelinks": 50,
+        "occupations": (HOOPS, FOOTBALL),
+        "cache": tmp_path,
+        "fetch": fetch,
+        "today": lambda: date(2026, 10, 18),
+    }
+    options.update(kwargs)
+    return quantities.load_people_heights(**options)  # type: ignore[arg-type]
+
+
+def test_people_heights_are_exact_test_items_in_centimetres(
+    tmp_path: Path,
+) -> None:
+    items = _people(
+        _people_endpoint([_person(1, height=1.95, label="Ann Lee")]), tmp_path
+    )
+
+    (item,) = items
+    assert item.family == "person_height"
+    assert item.kind == "exact"
+    assert item.split == "test"
+    assert item.low == item.high == 195.0
+    assert item.unit == "centimetres"
+    assert item.entity == "Ann Lee"
+    assert item.question == "How tall is Ann Lee, in centimetres?"
+    assert item.uid == "person_height-exact-Q1"
+    assert item.retrieved_on == "2026-10-18"
+    assert len(item.sha256) == 64
+
+
+def test_people_family_is_not_a_default_family() -> None:
+    assert "person_height" not in {f.name for f in quantities.FAMILIES}
+
+
+def test_people_heights_query_each_occupation_once_over_humans(
+    tmp_path: Path,
+) -> None:
+    fetch = _people_endpoint([_person(1)])
+
+    _people(fetch, tmp_path)
+
+    assert len(fetch.queries) == 2
+    assert all("  VALUES ?class { wd:Q5 }" in q for q in fetch.queries)
+    assert all("wdt:P106 ?occupation" in q for q in fetch.queries)
+    assert all("FILTER(?links >= 50)" in q for q in fetch.queries)
+    assert all("psv:P2048" in q and "psn:" not in q for q in fetch.queries)
+
+
+def test_people_heights_convert_centimetres(tmp_path: Path) -> None:
+    row = _person(1, height=201.0, unit=CENTIMETRE)
+
+    (item,) = _people(_people_endpoint([row]), tmp_path)
+
+    assert item.low == 201.0
+
+
+def test_people_heights_convert_feet_and_inches(tmp_path: Path) -> None:
+    feet = "http://www.wikidata.org/entity/Q3710"
+    inch = "http://www.wikidata.org/entity/Q218593"
+    rows = [
+        _person(1, height=6.5, unit=feet),
+        _person(2, height=78.0, unit=inch),
+    ]
+
+    items = _people(_people_endpoint(rows), tmp_path)
+
+    assert [i.low for i in items] == [198.12, 198.12]
+
+
+def test_people_heights_break_equal_sitelinks_by_numeric_entity_id(
+    tmp_path: Path,
+) -> None:
+    fetch = _people_endpoint(
+        [_person(20, links=150), _person(3, links=150)],
+        [_person(100, links=150), _person(9, links=150)],
+    )
+
+    items = _people(fetch, tmp_path)
+
+    assert [i.entity_id for i in items] == ["Q3", "Q9", "Q20", "Q100"]
+
+
+def test_people_heights_namesake_outside_the_band_still_drops_the_person(
+    tmp_path: Path,
+) -> None:
+    rows = [
+        _person(1, label="Sam Doe", height=1.95),
+        _person(2, label="Sam Doe", height=1.00),
+        _person(3, label="Ann Lee"),
+    ]
+
+    items = _people(_people_endpoint(rows), tmp_path)
+
+    assert [i.entity_id for i in items] == ["Q3"]
+
+
+def test_people_heights_drop_bounded_statements(tmp_path: Path) -> None:
+    bounded = _row(2, amount=1.95, lower=1.94, upper=1.96, links=100)
+
+    items = _people(_people_endpoint([_person(1), bounded]), tmp_path)
+
+    assert [i.entity_id for i in items] == ["Q1"]
+
+
+def test_people_heights_drop_people_with_two_height_statements(
+    tmp_path: Path,
+) -> None:
+    rows = [_person(1), _person(2, statement="a"), _person(2, statement="b")]
+
+    items = _people(_people_endpoint(rows), tmp_path)
+
+    assert [i.entity_id for i in items] == ["Q1"]
+
+
+def test_people_heights_keep_only_the_plausible_band(tmp_path: Path) -> None:
+    rows = [
+        _person(1, height=1.39),
+        _person(2, height=1.40),
+        _person(3, height=2.30),
+        _person(4, height=2.31),
+    ]
+
+    items = _people(_people_endpoint(rows), tmp_path)
+
+    assert sorted(i.entity_id for i in items) == ["Q2", "Q3"]
+
+
+def test_people_heights_band_can_be_changed(tmp_path: Path) -> None:
+    rows = [_person(1, height=1.50), _person(2, height=1.95)]
+
+    items = _people(
+        _people_endpoint(rows), tmp_path, min_cm=170.0, max_cm=200.0
+    )
+
+    assert [i.entity_id for i in items] == ["Q2"]
+
+
+def test_people_heights_drop_labels_with_digits_or_other_scripts(
+    tmp_path: Path,
+) -> None:
+    rows = [
+        _person(1, label="Ann Lee"),
+        _person(2, label="Ann Lee 2nd"),
+        _person(3, label="\u5f20\u4f1f"),
+        _person(4, label="Q4"),
+    ]
+
+    items = _people(_people_endpoint(rows), tmp_path)
+
+    assert [i.entity_id for i in items] == ["Q1"]
+
+
+def test_people_heights_drop_every_person_sharing_a_label(
+    tmp_path: Path,
+) -> None:
+    rows = [
+        _person(1, label="Sam Doe"),
+        _person(2, label="Sam Doe"),
+        _person(3, label="Ann Lee"),
+    ]
+
+    items = _people(_people_endpoint(rows), tmp_path)
+
+    assert [i.entity_id for i in items] == ["Q3"]
+
+
+def test_people_heights_merge_occupations_without_duplicates(
+    tmp_path: Path,
+) -> None:
+    both = _person(1, links=300, label="Ann Lee")
+    fetch = _people_endpoint(
+        [both, _person(2, links=200)], [both, _person(3, links=250)]
+    )
+
+    items = _people(fetch, tmp_path)
+
+    assert [i.entity_id for i in items] == ["Q1", "Q3", "Q2"]
+
+
+def test_people_heights_keep_the_most_linked_n(tmp_path: Path) -> None:
+    rows = [_person(n, links=100 + n) for n in range(1, 9)]
+
+    items = _people(_people_endpoint(rows), tmp_path, n=3)
+
+    assert [i.entity_id for i in items] == ["Q8", "Q7", "Q6"]
+
+
+def test_people_heights_ask_for_eight_times_n_rows(tmp_path: Path) -> None:
+    fetch = _people_endpoint([_person(1)])
+
+    _people(fetch, tmp_path, n=7)
+
+    assert all(q.rstrip().endswith("LIMIT 56") for q in fetch.queries)
+
+
+def test_people_heights_reuse_the_cache_and_work_offline(
+    tmp_path: Path,
+) -> None:
+    fetch = _people_endpoint([_person(1)])
+    first = _people(fetch, tmp_path)
+
+    again = _people(fetch, tmp_path, offline=True)
+
+    assert again == first
+    assert len(fetch.queries) == 2
+
+
+def test_people_heights_offline_miss_propagates(tmp_path: Path) -> None:
+    with pytest.raises(OfflineCacheMissError):
+        _people(_people_endpoint([_person(1)]), tmp_path, offline=True)
+
+
+def test_people_heights_reject_bad_arguments(tmp_path: Path) -> None:
+    fetch = _people_endpoint([_person(1)])
+    with pytest.raises(ValueError, match="n must"):
+        _people(fetch, tmp_path, n=0)
+    with pytest.raises(ValueError, match="occupations"):
+        _people(fetch, tmp_path, occupations=())
+    with pytest.raises(ValueError, match="band"):
+        _people(fetch, tmp_path, min_cm=200.0, max_cm=150.0)
+
+
+def test_people_heights_default_occupations_start_with_basketball() -> None:
+    assert quantities.PEOPLE_OCCUPATIONS[0] == HOOPS
+
+
+def test_people_heights_default_floor_keeps_well_known_people() -> None:
+    assert quantities.PEOPLE_MIN_SITELINKS == 100
