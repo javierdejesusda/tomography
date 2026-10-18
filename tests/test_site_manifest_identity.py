@@ -1,5 +1,5 @@
-import re
 from pathlib import Path
+import re
 
 from tomography.site import manifest as manifest_module
 
