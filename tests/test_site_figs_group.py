@@ -78,3 +78,15 @@ def test_draw_series_leaves_post_trained_markers_open() -> None:
 def test_role_handles_name_the_three_roles() -> None:
     labels = [h.get_label() for h in _group.role_handles()]
     assert labels == ["GPT-2", "Qwen3 base", "Qwen3 post-trained"]
+
+
+def test_clip_ticks_keeps_only_ticks_inside_the_view() -> None:
+    fig = Figure()
+    ax = fig.subplots()
+    ax.plot([0.0, 1.0], [-2.4, 3.9])
+    _group.clip_ticks(ax)
+    low, high = ax.get_ylim()
+    assert all(low <= t <= high for t in ax.get_yticks())
+    assert len(ax.get_yticks()) > 1
+    left, right = ax.get_xlim()
+    assert all(left <= t <= right for t in ax.get_xticks())

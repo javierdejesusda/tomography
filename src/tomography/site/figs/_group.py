@@ -146,6 +146,21 @@ def draw_series(
                 ax.plot([x, x], [lo[m], hi[m]], color=color, lw=0.6, zorder=2)
 
 
+def clip_ticks(ax: Axes) -> None:
+    """Drops ticks that lie outside the current view of both axes.
+
+    Matplotlib keeps labels for ticks beyond the limits, which then count as
+    text outside the figure; fixing the ticks to the visible ones avoids it.
+
+    Args:
+        ax: The axes, with its limits already set.
+    """
+    low, high = ax.get_xlim()
+    ax.set_xticks([t for t in ax.get_xticks() if low <= t <= high])
+    low, high = ax.get_ylim()
+    ax.set_yticks([t for t in ax.get_yticks() if low <= t <= high])
+
+
 def role_handles() -> list[Line2D]:
     """Builds legend handles that explain the three line styles.
 
