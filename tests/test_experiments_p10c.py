@@ -1123,6 +1123,18 @@ def test_knowledge_rows_cover_every_type_layer_set_and_family() -> None:
         assert float(row["rand_lo"]) < float(row["rand_hi"])  # type: ignore[arg-type]
 
 
+def test_the_random_band_is_two_sided_around_one_half_on_noise() -> None:
+    items = _items()
+    data = _planted(items, lambda item: 0.0, _plant_direction())
+
+    rows = _knowledge(data, items, _p9b_pair(_plant_direction()), n_random=2000)
+
+    for row in rows:
+        low, high = float(row["rand_lo"]), float(row["rand_hi"])  # type: ignore[arg-type]
+        assert low < 0.5 < high
+        assert low + high == pytest.approx(1.0, abs=0.06)
+
+
 def test_the_random_band_depends_on_the_layer_set_and_family_only() -> None:
     items = _items()
     plant = _plant_direction()
@@ -1263,12 +1275,12 @@ def _serialized(outcome: Outcome) -> dict[str, object]:
 @pytest.mark.parametrize("decoding", ["greedy", "sampled"])
 def test_the_hedge_share_matches_the_item_rates_of_p10a(decoding: str) -> None:
     first = [
-        _outcome("range", "range", "point", "range", "none"),
-        _outcome("point", "point", "abstain"),
+        _outcome("range", "range", "range", "range", "point"),
+        _outcome("point", "range", "abstain"),
     ]
     second = [
-        _outcome("point", "range", "range", "range", "range"),
-        _outcome("range", "point", "point"),
+        _outcome("point", "point", "point"),
+        _outcome("range", "range", "range", "range", "point", "point"),
     ]
     for member in (0, 1):
         answers = {
