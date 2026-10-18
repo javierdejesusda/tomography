@@ -35,13 +35,14 @@ from tomography.experiments.p10a_quantities import hedge_gap_table
 from tomography.experiments.p10a_quantities import plot
 from tomography.experiments.p10a_quantities import run
 from tomography.experiments.p10a_quantities import score_answer
+from tomography.experiments.p10a_quantities import shots_for
 from tomography.experiments.p10a_quantities import width_table
 from tomography.experiments.sweep import chat_format_for
 from tomography.model import MODELS
 from tomography.model import LoadedModel
 from tomography.reading.metrics import wilson_ci
 
-DEFAULT_HASH = "989620d61461"
+DEFAULT_HASH = "27a4537a95b3"
 
 
 def test_config_defaults_and_round_trip() -> None:
@@ -60,6 +61,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.rel_tol == 0.05
     assert config.n_hand_check == 120
     assert config.batch_size == 8
+    assert config.shot_orders == ("range_last", "exact_last")
     assert config.offline is False
     assert config.seed == 0
     assert Config.from_dict(config.to_dict()) == config
@@ -94,6 +96,9 @@ def test_the_default_config_hash_is_stable() -> None:
         ("formats", ()),
         ("formats", ("fewshot", "fewshot")),
         ("formats", ("zeroshot",)),
+        ("shot_orders", ()),
+        ("shot_orders", ("range_last", "range_last")),
+        ("shot_orders", ("random",)),
     ],
 )
 def test_bad_settings_raise_before_any_work(field: str, value: object) -> None:
@@ -147,22 +152,21 @@ def test_free_shots_mix_exact_and_range_answers() -> None:
 
 def test_forced_shots_replace_each_range_by_one_number_inside_it() -> None:
     for (_, free), (_, forced) in zip(FREE_SHOTS, FORCED_SHOTS, strict=True):
-        assert forced.isdigit()
         if " to " in free:
-            low, high = (int(part) for part in free.split(" to "))
-            assert low <= int(forced) <= high
+            low, high = (float(part) for part in free.split(" to "))
+            assert low <= float(forced) <= high
         else:
             assert forced == free
 
 
-def test_the_forced_range_replacements_are_72_8_and_15() -> None:
+def test_the_forced_range_replacements_are_72_8_and_7_4() -> None:
     replaced = [
         forced
         for (_, free), (_, forced) in zip(FREE_SHOTS, FORCED_SHOTS, strict=True)
         if " to " in free
     ]
 
-    assert replaced == ["72", "8", "15"]
+    assert replaced == ["72", "8", "7.4"]
 
 
 def test_the_free_fewshot_prompt_is_shots_then_the_question() -> None:
@@ -1260,3 +1264,67 @@ def test_p10a_on_gpt2_reads_a_small_cached_pool(tmp_path: Path) -> None:
         pytest.skip(str(error))
 
     assert (run_dir.path / "table.csv").is_file()
+
+
+def test_the_last_range_last_shot_is_the_blood_ph_range() -> None:
+    question, answer = FREE_SHOTS[-1]
+
+    assert question == "What is the normal pH of human blood?"
+    assert answer == "7.35 to 7.45"
+    assert FORCED_SHOTS[-1] == (question, "7.4")
+    assert not any("cat" in q for q, _ in FREE_SHOTS)
+
+
+@pytest.mark.parametrize("condition", ["free", "forced"])
+def test_exact_last_reverses_the_shots_and_keeps_the_alternation(
+    condition: str,
+) -> None:
+    base = shots_for(condition, "range_last")
+    reverse = shots_for(condition, "exact_last")
+
+    assert reverse == tuple(reversed(base))
+    assert base[-1][1] != reverse[-1][1]
+    if condition == "free":
+        forms = ["range" if " to " in a else "point" for _, a in reverse]
+        assert forms == ["range", "point"] * 3
+
+
+def test_range_last_is_the_alternating_list_of_the_constants() -> None:
+    assert shots_for("free", "range_last") == FREE_SHOTS
+    assert shots_for("forced", "range_last") == FORCED_SHOTS
+
+
+def test_an_unknown_shot_order_or_condition_raises() -> None:
+    with pytest.raises(ValueError, match="shot order"):
+        shots_for("free", "random")
+    with pytest.raises(ValueError, match="condition"):
+        shots_for("pressured", "range_last")
+
+
+@pytest.mark.parametrize("condition", ["free", "forced"])
+def test_the_fewshot_prompt_follows_the_shot_order(condition: str) -> None:
+    prompt = build_prompt(
+        "How tall is X?", condition, "fewshot", None, order="exact_last"
+    )
+
+    last_question, last_answer = shots_for(condition, "exact_last")[-1]
+    tail = f"Q: {last_question}\nA: {last_answer}\n\nQ: How tall is X?\nA:"
+    assert prompt.endswith(tail)
+    assert prompt != build_prompt("How tall is X?", condition, "fewshot", None)
+
+
+def test_the_chat_prompt_ignores_the_shot_order(
+    tiny_qwen3: LoadedModel,
+) -> None:
+    chat = chat_format_for(
+        dataclasses.replace(tiny_qwen3, checkpoint=MODELS["qwen3-1.7b"])
+    )
+
+    assert build_prompt(
+        "Q?", "free", "chat", chat, order="exact_last"
+    ) == build_prompt("Q?", "free", "chat", chat, order="range_last")
+
+
+def test_the_fewshot_prompt_rejects_an_unknown_order() -> None:
+    with pytest.raises(ValueError, match="shot order"):
+        build_prompt("Q?", "free", "fewshot", None, order="random")

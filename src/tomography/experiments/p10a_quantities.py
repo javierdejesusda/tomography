@@ -51,6 +51,8 @@ from tomography.viz.style import style_context
 
 CONDITIONS: Final = ("free", "forced")
 FORMATS: Final = ("fewshot", "chat")
+SHOT_ORDERS: Final = ("range_last", "exact_last")
+NO_ORDER: Final = "none"
 
 FORCED_INSTRUCTION: Final = "Answer each question with one exact number."
 CHAT_INSTRUCTIONS: Final = {
@@ -67,7 +69,7 @@ FREE_SHOTS: Final[tuple[tuple[str, str], ...]] = (
     ("How many days are in a leap year?", "366"),
     ("How many hours of sleep does an adult need per night?", "7 to 9"),
     ("In what year did the first crewed Moon landing happen?", "1969"),
-    ("How long does a house cat live, in years?", "12 to 18"),
+    ("What is the normal pH of human blood?", "7.35 to 7.45"),
 )
 FORCED_SHOTS: Final[tuple[tuple[str, str], ...]] = (
     ("How many keys does a standard piano have?", "88"),
@@ -79,7 +81,7 @@ FORCED_SHOTS: Final[tuple[tuple[str, str], ...]] = (
     ("How many days are in a leap year?", "366"),
     ("How many hours of sleep does an adult need per night?", "8"),
     ("In what year did the first crewed Moon landing happen?", "1969"),
-    ("How long does a house cat live, in years?", "15"),
+    ("What is the normal pH of human blood?", "7.4"),
 )
 
 UNIT_WORDS: Final[dict[str, tuple[str, ...]]] = {
@@ -170,6 +172,11 @@ class Config(ExperimentConfig):
         formats: "fewshot" is the raw few-shot prompt every model gets;
             "chat" is the chat template, used only for post-trained models
             and skipped for the others.
+        shot_orders: The orders of the few-shot examples. "range_last" is
+            the alternating list that ends on a range answer; "exact_last"
+            is the same list reversed, so it ends on an exact answer and
+            only the form of the last shot differs. The chat format has no
+            shots.
         n_samples: Sampled completions per question, besides the greedy one.
         temperature: Sampling temperature.
         max_new_tokens: Generation budget per answer.
@@ -186,6 +193,7 @@ class Config(ExperimentConfig):
     min_sitelinks: int = DEFAULT_MIN_SITELINKS
     conditions: tuple[str, ...] = CONDITIONS
     formats: tuple[str, ...] = FORMATS
+    shot_orders: tuple[str, ...] = SHOT_ORDERS
     n_samples: int = 5
     temperature: float = 1.0
     max_new_tokens: int = 32
@@ -199,9 +207,9 @@ class Config(ExperimentConfig):
 
         Raises:
             ValueError: If `families` is empty, repeats a name or names a
-                family the loader does not have, `conditions` or `formats`
-                is empty, repeats a name or holds an unknown one, a count is
-                below its minimum (`n_per_side`, `n_samples`,
+                family the loader does not have, `conditions`, `formats` or
+                `shot_orders` is empty, repeats a name or holds an unknown
+                one, a count is below its minimum (`n_per_side`, `n_samples`,
                 `max_new_tokens` and `batch_size` need 1, `n_hand_check` and
                 `min_sitelinks` need 0), `temperature` is not positive or
                 `rel_tol` is negative.
@@ -210,6 +218,7 @@ class Config(ExperimentConfig):
             _check_names("families", self.families, [f.name for f in FAMILIES])
         _check_names("conditions", self.conditions, CONDITIONS)
         _check_names("formats", self.formats, FORMATS)
+        _check_names("shot_orders", self.shot_orders, SHOT_ORDERS)
         for name in ("n_per_side", "n_samples", "max_new_tokens", "batch_size"):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be at least 1")
@@ -267,8 +276,34 @@ def unit_words(unit: str) -> tuple[str, ...]:
         ) from None
 
 
+def shots_for(condition: str, order: str) -> tuple[tuple[str, str], ...]:
+    """Returns the few-shot examples of a condition in a shot order.
+
+    Args:
+        condition: "free" or "forced".
+        order: "range_last" for the constants' order, "exact_last" for the
+            reverse.
+
+    Returns:
+        The (question, answer) pairs.
+
+    Raises:
+        ValueError: If the condition or the shot order is unknown.
+    """
+    if condition not in CONDITIONS:
+        raise ValueError(f"unknown condition {condition!r}")
+    if order not in SHOT_ORDERS:
+        raise ValueError(f"unknown shot order {order!r}")
+    shots = FREE_SHOTS if condition == "free" else FORCED_SHOTS
+    return shots if order == "range_last" else tuple(reversed(shots))
+
+
 def build_prompt(
-    question: str, condition: str, fmt: str, chat: ChatFormat | None
+    question: str,
+    condition: str,
+    fmt: str,
+    chat: ChatFormat | None,
+    order: str = "range_last",
 ) -> str:
     """Builds the prompt of one question.
 
@@ -277,23 +312,24 @@ def build_prompt(
         condition: "free" or "forced".
         fmt: "fewshot" or "chat".
         chat: The model's chat format; used for "chat" only.
+        order: The shot order of the few-shot format; the chat format has no
+            shots and ignores it.
 
     Returns:
         The few-shot prompt, whose forced version opens with the
         instruction, or the chat turn with the instruction and the question.
 
     Raises:
-        ValueError: If the condition or the format is unknown, or the format
-            is "chat" without a chat format.
+        ValueError: If the condition, the format or the shot order is
+            unknown, or the format is "chat" without a chat format.
     """
     if condition not in CONDITIONS:
         raise ValueError(f"unknown condition {condition!r}")
     if fmt == "fewshot":
+        demos = few_shot_prompt(question, shots_for(condition, order))
         if condition == "free":
-            return few_shot_prompt(question, FREE_SHOTS)
-        return (
-            f"{FORCED_INSTRUCTION}\n\n{few_shot_prompt(question, FORCED_SHOTS)}"
-        )
+            return demos
+        return f"{FORCED_INSTRUCTION}\n\n{demos}"
     if fmt == "chat":
         if chat is None:
             raise ValueError("the chat format needs a chat template")
