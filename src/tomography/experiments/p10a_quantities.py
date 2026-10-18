@@ -11,6 +11,8 @@ range, an abstention or nothing, and writes the rates with intervals (Wilson
 for the greedy answers, an item bootstrap for the sampled ones),
 the gap in hedging between range and exact items, how often a forced point
 lands inside the sourced range, and a hand-check file for the answer parser.
+A test-only set of people with one exact height is asked too, to tell whether
+hedging follows the kind of answer or the animacy of the thing asked about.
 """
 
 from collections.abc import Sequence
@@ -31,7 +33,9 @@ from tomography.control.generate import Completion
 from tomography.control.generate import generate
 from tomography.datasets.quantities import DEFAULT_MIN_SITELINKS
 from tomography.datasets.quantities import FAMILIES
+from tomography.datasets.quantities import PEOPLE_FAMILY
 from tomography.datasets.quantities import QuantityQuestion
+from tomography.datasets.quantities import load_people_heights
 from tomography.datasets.quantities import load_quantities
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
@@ -189,6 +193,9 @@ class Config(ExperimentConfig):
         n_hand_check: Rows of each hand-check file.
         batch_size: Prompts per generation call chunk.
         offline: Whether the questions are read from the cache only.
+        people: Whether to also ask the person-height items; they get their
+            own rows and the hedge diagnostic, and no pooled statistic
+            counts them.
     """
 
     experiment: str = "p10a"
@@ -206,6 +213,7 @@ class Config(ExperimentConfig):
     n_hand_check: int = 120
     batch_size: int = 8
     offline: bool = False
+    people: bool = True
 
     def __post_init__(self) -> None:
         """Checks the settings that would act silently or fail late.
@@ -539,6 +547,7 @@ METRICS: Final = (
     "correct",
 )
 _KINDS: Final = ("range", "exact")
+_HEIGHT: Final = "height"
 
 
 def _answers(outcome: Outcome, decoding: str) -> tuple[Answer, ...]:
@@ -582,11 +591,19 @@ def _families_of(items: Sequence[QuantityQuestion]) -> list[str]:
 def _members(
     items: Sequence[QuantityQuestion], family: str, kind: str
 ) -> list[int]:
-    """Returns the positions of the items of a family and kind."""
+    """Returns the positions of the items of a family and kind.
+
+    The pooled label covers the `FAMILIES` items; the people are their own
+    family only.
+    """
     return [
         i
         for i, item in enumerate(items)
-        if item.kind == kind and family in (item.family, POOLED)
+        if item.kind == kind
+        and (
+            family == item.family
+            or (family == POOLED and item.family != PEOPLE_FAMILY)
+        )
     ]
 
 
@@ -827,6 +844,27 @@ def _item_rates(
     )
 
 
+def _order_groups(
+    results: Results,
+) -> list[tuple[str, str, str, Sequence[Sequence[Outcome]]]]:
+    """Lists the outcome sets of each cell, then of each cell's orders.
+
+    A condition and format that ran in several shot orders get an extra
+    "both" entry holding all its outcome sets.
+    """
+    groups: list[tuple[str, str, str, Sequence[Sequence[Outcome]]]] = [
+        (condition, fmt, order, [outcomes])
+        for (condition, fmt, order), outcomes in results.items()
+    ]
+    for condition, fmt in dict.fromkeys((c, f) for c, f, _ in results):
+        sets = [
+            o for (c, f, _), o in results.items() if (c, f) == (condition, fmt)
+        ]
+        if len(sets) > 1:
+            groups.append((condition, fmt, BOTH, sets))
+    return groups
+
+
 def hedge_gap_table(
     items: Sequence[QuantityQuestion], results: Results, *, seed: int
 ) -> tuple[list[str], list[list[Any]]]:
@@ -861,23 +899,13 @@ def hedge_gap_table(
         "gap_lo",
         "gap_hi",
     ]
-    groups: list[tuple[str, str, str, Sequence[Sequence[Outcome]]]] = [
-        (condition, fmt, order, [outcomes])
-        for (condition, fmt, order), outcomes in results.items()
-    ]
-    for condition, fmt in dict.fromkeys((c, f) for c, f, _ in results):
-        sets = [
-            o for (c, f, _), o in results.items() if (c, f) == (condition, fmt)
-        ]
-        if len(sets) > 1:
-            groups.append((condition, fmt, BOTH, sets))
     rows: list[list[Any]] = []
     for family in _families_of(items):
         on_range = _members(items, family, "range")
         on_exact = _members(items, family, "exact")
         if not (on_range and on_exact):
             continue
-        for condition, fmt, order, outcome_sets in groups:
+        for condition, fmt, order, outcome_sets in _order_groups(results):
             for decoding in DECODINGS:
                 range_rates = _item_rates(outcome_sets, on_range, decoding)
                 exact_rates = _item_rates(outcome_sets, on_exact, decoding)
@@ -900,6 +928,93 @@ def hedge_gap_table(
                         gap_hi,
                     ]
                 )
+    return columns, rows
+
+
+def diagnostic_table(
+    items: Sequence[QuantityQuestion], results: Results, *, seed: int
+) -> tuple[list[str], list[list[Any]]]:
+    """Builds the hedge rate of people against breeds and buildings.
+
+    The hedge rate is the mean over items of the share of range answers, as
+    in `hedge_gap_table`. It is taken on three groups: the people
+    (`person_height`, all exact), the range items of the height family
+    (breeds, living things) and its exact items (buildings, artifacts). The
+    rows are per condition, format, shot order (each and "both") and
+    decoding, with the rate interval of `build_table` for each group: Wilson
+    for one greedy answer per item, an item bootstrap otherwise (also the
+    greedy "both" rows, whose two answers per item are not independent),
+    and the item Wilson interval at a rate of 0 or 1. The two differences,
+    people minus breeds and people minus buildings, get the bootstrap
+    interval of `bootstrap_gap_ci`. People heights are also less familiar to
+    a model than breed heights, so a difference mixes kind with knowledge:
+    the comparison is a diagnostic, not a clean contrast.
+
+    Args:
+        items: The questions.
+        results: The outcomes per cell, aligned with items.
+        seed: Seed of the bootstraps.
+
+    Returns:
+        The column names and the rows; no rows without people or without
+        range and exact items of the height family.
+    """
+    names = ("people", "breeds", "buildings")
+    differences = ("people_minus_breeds", "people_minus_buildings")
+    columns = [
+        "condition",
+        "format",
+        "shot_order",
+        "decoding",
+        *(f"n_{name}" for name in names),
+        *(
+            column
+            for name in names
+            for column in (*_rate_columns(name), f"{name}_interval")
+        ),
+        *(
+            column
+            for name in differences
+            for column in (name, f"{name}_lo", f"{name}_hi")
+        ),
+    ]
+    members = (
+        [i for i, item in enumerate(items) if item.family == PEOPLE_FAMILY],
+        _members(items, _HEIGHT, "range"),
+        _members(items, _HEIGHT, "exact"),
+    )
+    rows: list[list[Any]] = []
+    if not all(members):
+        return columns, rows
+    for condition, fmt, order, outcome_sets in _order_groups(results):
+        for decoding in DECODINGS:
+            single_greedy = decoding == "greedy" and len(outcome_sets) == 1
+            rates = [_item_rates(outcome_sets, m, decoding) for m in members]
+            row: list[Any] = [condition, fmt, order, decoding]
+            row += [len(m) for m in members]
+            for m in members:
+                per_item = [
+                    _counts(
+                        [
+                            a
+                            for outcomes in outcome_sets
+                            for a in _answers(outcomes[i], decoding)
+                        ]
+                    )
+                    for i in m
+                ]
+                method, _, cells = _rate_cells(
+                    per_item,
+                    ("range",),
+                    "greedy" if single_greedy else "sampled",
+                    seed,
+                )
+                row += [sum(c["range"] for c in per_item), *cells["range"]]
+                row.append(method)
+            for other in rates[1:]:
+                low, high = bootstrap_gap_ci(rates[0], other, seed=seed)
+                row += [float(rates[0].mean() - other.mean()), low, high]
+            rows.append(row)
     return columns, rows
 
 
@@ -1431,8 +1546,10 @@ def execute(
     order; the chat format has no shot order.
 
     Writes `table.csv`, `hedge_gap.csv`, `forced_in_range.csv`, `width.csv`,
-    `hand_check.csv`, `hand_check_samples.csv`, `items.json` (every parsed
-    answer; the export step leaves it out) and `summary.json`.
+    `diagnostic.csv` (only when `config.people` is set and the items hold
+    people and the height family), `hand_check.csv`,
+    `hand_check_samples.csv`, `items.json` (every parsed answer; the export
+    step leaves it out) and `summary.json`.
 
     Args:
         config: The experiment settings.
@@ -1459,14 +1576,22 @@ def execute(
     results: Results = {
         cell: _ask(config, loaded, items, cell, chat) for cell in cells
     }
-    for name, (columns, rows) in {
+    tables = {
         "table": build_table(items, results, seed=config.seed),
         "hedge_gap": hedge_gap_table(items, results, seed=config.seed),
         "forced_in_range": forced_in_range_table(
             items, results, rel_tol=config.rel_tol
         ),
         "width": width_table(items, results, seed=config.seed),
-    }.items():
+    }
+    diagnostic = (
+        diagnostic_table(items, results, seed=config.seed)
+        if config.people
+        else ([], [])
+    )
+    if diagnostic[1]:
+        tables["diagnostic"] = diagnostic
+    for name, (columns, rows) in tables.items():
         _write_csv(run_dir.path / f"{name}.csv", columns, rows)
     columns, rows = hand_check_table(
         items, results, n=config.n_hand_check, seed=config.seed
@@ -1484,10 +1609,12 @@ def execute(
         encoding="utf-8-sig",
     )
     run_dir.write_json("items", _item_records(items, results))
-    run_dir.write_json(
-        "summary",
-        _summary(config, items, formats, len(rows), len(sample_rows)),
-    )
+    summary = _summary(config, items, formats, len(rows), len(sample_rows))
+    if diagnostic[1]:
+        summary["diagnostic"] = [
+            dict(zip(diagnostic[0], row, strict=True)) for row in diagnostic[1]
+        ]
+    run_dir.write_json("summary", summary)
 
 
 def run(config: Config, run_dir: RunDir) -> None:
@@ -1509,6 +1636,8 @@ def run(config: Config, run_dir: RunDir) -> None:
         seed=config.seed,
         offline=config.offline,
     )
+    if config.people:
+        items = [*items, *load_people_heights(offline=config.offline)]
     execute(config, run_dir, load_model(config.model), items)
 
 
