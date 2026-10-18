@@ -559,3 +559,225 @@ def test_the_people_are_checked_only_when_both_runs_have_them(
     )
     with pytest.raises(ValueError, match="person_height"):
         p10c_links.check_links(both, None, other)
+
+
+def _range_run(
+    directions: NDArray[np.float32],
+    signs: NDArray[np.float32] | None = None,
+    items: Sequence[dict[str, object]] = (),
+    layer: int = 2,
+) -> p10c_links.P10bRun:
+    n_layers = directions.shape[0]
+    return p10c_links.P10bRun(
+        path="p10b",
+        config_hash="h10b",
+        config={},
+        reader=READERS[0],
+        layer=layer,
+        layers=tuple(range(1, n_layers + 1)),
+        directions=directions,
+        signs=np.ones(n_layers, np.float32) if signs is None else signs,
+        items=tuple(items),
+        snapshots={},
+    )
+
+
+def _known_run(
+    directions: NDArray[np.float32],
+    signs: NDArray[np.float32] | None = None,
+    means: NDArray[np.float32] | None = None,
+    types: Sequence[str] = TYPES,
+    config: dict[str, object] | None = None,
+) -> p10c_links.P9bRun:
+    n_types, n_layers = directions.shape[:2]
+    return p10c_links.P9bRun(
+        path="p9b",
+        config_hash="h9b",
+        config=config or {"template": "fewshot", "n_shots": 3, "bos": None},
+        types=tuple(types[:n_types]),
+        layers=tuple(range(1, n_layers + 1)),
+        directions=directions,
+        means=np.zeros_like(directions) if means is None else means,
+        signs=np.ones((n_types, n_layers), np.float32)
+        if signs is None
+        else signs,
+    )
+
+
+def _random_directions(
+    shape: tuple[int, ...], seed: int = 0
+) -> NDArray[np.float32]:
+    return _unit(np.random.default_rng(seed).normal(size=shape))
+
+
+def _cosines(rows: list[dict[str, object]], p9_type: str) -> dict[int, float]:
+    return {
+        int(r["layer"]): float(r["cosine"])  # type: ignore[arg-type]
+        for r in rows
+        if r["p9_type"] == p9_type
+    }
+
+
+def test_cosine_rows_have_one_row_per_type_and_layer() -> None:
+    range_dir = _random_directions((3, 16), 1)
+    known = _random_directions((2, 3, 16), 2)
+
+    rows = p10c_links.cosine_rows(
+        _range_run(range_dir), _known_run(known), n_random=50, seed=0
+    )
+
+    assert len(rows) == 6
+    assert tuple(rows[0]) == p10c_links.COSINE_COLUMNS
+    assert [(r["p9_type"], r["layer"]) for r in rows] == [
+        (t, k) for t in TYPES for k in (1, 2, 3)
+    ]
+    for row in rows:
+        assert -1.0 <= float(row["cosine"]) <= 1.0  # type: ignore[arg-type]
+
+
+def test_the_same_direction_has_cosine_one_and_the_opposite_minus_one() -> None:
+    range_dir = _random_directions((3, 16), 1)
+    known = _random_directions((2, 3, 16), 2)
+    known[0] = range_dir
+    known[1] = -range_dir
+
+    rows = p10c_links.cosine_rows(
+        _range_run(range_dir), _known_run(known), n_random=50, seed=0
+    )
+
+    assert _cosines(rows, TYPES[0]) == pytest.approx({1: 1.0, 2: 1.0, 3: 1.0})
+    assert _cosines(rows, TYPES[1]) == pytest.approx(
+        {1: -1.0, 2: -1.0, 3: -1.0}
+    )
+
+
+def test_a_sign_flip_of_the_p10b_reader_flips_that_layer() -> None:
+    range_dir = _random_directions((3, 16), 1)
+    known = _random_directions((1, 3, 16), 2)
+    known[0] = range_dir
+    signs = np.array([1.0, -1.0, 1.0], dtype=np.float32)
+
+    rows = p10c_links.cosine_rows(
+        _range_run(range_dir, signs), _known_run(known), n_random=50, seed=0
+    )
+
+    assert _cosines(rows, TYPES[0]) == pytest.approx({1: 1.0, 2: -1.0, 3: 1.0})
+
+
+def test_a_sign_flip_of_the_p9_reader_flips_that_layer_and_type() -> None:
+    range_dir = _random_directions((3, 16), 1)
+    known = np.stack([range_dir, range_dir])
+    signs = np.array([[1.0, 1.0, 1.0], [1.0, -1.0, 1.0]], dtype=np.float32)
+
+    rows = p10c_links.cosine_rows(
+        _range_run(range_dir),
+        _known_run(known, signs),
+        n_random=50,
+        seed=0,
+    )
+
+    assert _cosines(rows, TYPES[0]) == pytest.approx({1: 1.0, 2: 1.0, 3: 1.0})
+    assert _cosines(rows, TYPES[1]) == pytest.approx({1: 1.0, 2: -1.0, 3: 1.0})
+
+
+def test_flipping_both_signs_leaves_the_cosine_unchanged() -> None:
+    range_dir = _random_directions((3, 16), 1)
+    known = np.stack([range_dir])
+    flipped = -np.ones((1, 3), dtype=np.float32)
+
+    rows = p10c_links.cosine_rows(
+        _range_run(range_dir, -np.ones(3, np.float32)),
+        _known_run(known, flipped),
+        n_random=50,
+        seed=0,
+    )
+
+    assert _cosines(rows, TYPES[0]) == pytest.approx({1: 1.0, 2: 1.0, 3: 1.0})
+
+
+def test_the_cosine_ignores_the_norm_of_the_stored_directions() -> None:
+    range_dir = _random_directions((3, 16), 1)
+    known = _random_directions((1, 3, 16), 2)
+    base = p10c_links.cosine_rows(
+        _range_run(range_dir), _known_run(known), n_random=50, seed=0
+    )
+
+    scaled = p10c_links.cosine_rows(
+        _range_run(3.0 * range_dir),
+        _known_run(5.0 * known),
+        n_random=50,
+        seed=0,
+    )
+
+    assert _cosines(scaled, TYPES[0]) == pytest.approx(_cosines(base, TYPES[0]))
+
+
+def test_a_zero_direction_is_refused() -> None:
+    range_dir = _random_directions((3, 16), 1)
+    known = _random_directions((1, 3, 16), 2)
+    known[0, 1] = 0.0
+
+    with pytest.raises(ValueError, match="zero"):
+        p10c_links.cosine_rows(
+            _range_run(range_dir), _known_run(known), n_random=50, seed=0
+        )
+
+
+def test_the_band_brackets_zero_and_is_shared_by_the_types() -> None:
+    range_dir = _random_directions((3, 64), 1)
+    known = _random_directions((2, 3, 64), 2)
+
+    rows = p10c_links.cosine_rows(
+        _range_run(range_dir), _known_run(known), n_random=200, seed=0
+    )
+
+    for row in rows:
+        assert float(row["band_lo"]) < 0.0 < float(row["band_hi"])  # type: ignore[arg-type]
+    for layer in (1, 2, 3):
+        bands = {
+            (r["band_lo"], r["band_hi"]) for r in rows if r["layer"] == layer
+        }
+        assert len(bands) == 1
+
+
+def test_the_band_narrows_as_the_width_grows() -> None:
+    def width(d: int) -> float:
+        rows = p10c_links.cosine_rows(
+            _range_run(_random_directions((2, d), 1)),
+            _known_run(_random_directions((1, 2, d), 2)),
+            n_random=400,
+            seed=0,
+        )
+        return float(rows[0]["band_hi"]) - float(rows[0]["band_lo"])  # type: ignore[arg-type]
+
+    assert width(16) > 2.0 * width(256)
+
+
+def test_the_band_follows_the_seed_and_repeats_for_one_seed() -> None:
+    range_dir = _random_directions((2, 32), 1)
+    known = _random_directions((1, 2, 32), 2)
+
+    def band(seed: int) -> tuple[object, object]:
+        row = p10c_links.cosine_rows(
+            _range_run(range_dir), _known_run(known), n_random=100, seed=seed
+        )[0]
+        return row["band_lo"], row["band_hi"]
+
+    assert band(0) == band(0)
+    assert band(0) != band(1)
+
+
+def test_the_band_holds_about_95_percent_of_random_cosines() -> None:
+    range_dir = _random_directions((2, 32), 1)
+    known = _random_directions((1, 2, 32), 2)
+    row = p10c_links.cosine_rows(
+        _range_run(range_dir), _known_run(known), n_random=400, seed=0
+    )[0]
+    fresh = _random_directions((5000, 32), 99).astype(np.float64)
+    inside = (
+        fresh @ range_dir[0].astype(np.float64) >= float(row["band_lo"])
+    ) & (  # type: ignore[arg-type]
+        fresh @ range_dir[0].astype(np.float64) <= float(row["band_hi"])  # type: ignore[arg-type]
+    )
+
+    assert 0.92 < float(inside.mean()) < 0.98

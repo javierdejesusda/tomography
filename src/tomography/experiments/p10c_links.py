@@ -30,11 +30,15 @@ from numpy.typing import NDArray
 from tomography.datasets.quantities import PEOPLE_FAMILY
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.p10b_reading import TEMPLATES
 from tomography.p9.reading import READING_METHODS
 
 READER_PARTS: Final = 2
+COSINE_COLUMNS: Final = ("p9_type", "layer", "cosine", "band_lo", "band_hi")
+BAND_PERCENTILES: Final = (2.5, 97.5)
 
+Row = dict[str, object]
 Record = dict[str, Any]
 Snapshots = dict[str, dict[str, dict[str, list[str]]]]
 
@@ -398,3 +402,98 @@ def _check_behavior_run(p10b: P10bRun, p10a: P10aRun) -> None:
                     f"the sha256 of the {family}/{kind} snapshot differs "
                     "between the P10a run and the P10b run"
                 )
+
+
+def oriented(
+    directions: NDArray[np.float32], signs: NDArray[np.float32]
+) -> NDArray[np.float64]:
+    """Turns the stored directions into the ones a score is a projection on.
+
+    A reader scores `sign * (h - mean) . direction`, so the direction whose
+    positive side is the positive class is `sign * direction`.
+
+    Args:
+        directions: Stored directions of shape (..., K, d).
+        signs: Stored orientation of shape (..., K).
+
+    Returns:
+        The oriented directions as float64, shape (..., K, d).
+    """
+    return directions.astype(np.float64) * signs.astype(np.float64)[..., None]
+
+
+def _unit_vector(vector: NDArray[np.float64], what: str) -> NDArray[np.float64]:
+    norm = float(np.linalg.norm(vector))
+    if norm == 0.0:
+        raise ValueError(f"{what} is a zero vector")
+    return vector / norm
+
+
+def _cosine_band(
+    direction: NDArray[np.float64], *, n_random: int, seed: int
+) -> tuple[float, float]:
+    """Brackets the cosine of a direction with random unit vectors."""
+    rng = np.random.default_rng(seed)
+    draws = rng.standard_normal((n_random, direction.shape[0]))
+    draws /= np.linalg.norm(draws, axis=1, keepdims=True)
+    low, high = np.percentile(draws @ direction, BAND_PERCENTILES)
+    return float(low), float(high)
+
+
+def cosine_rows(
+    p10b: P10bRun, p9b: P9bRun, *, n_random: int, seed: int
+) -> list[Row]:
+    """Measures the cosine of the range direction to each P9 direction.
+
+    At each layer the cosine is taken between the oriented P10b direction
+    (positive means range) and the oriented direction of a P9 reader
+    (positive means known). The band holds the 2.5th and 97.5th percentiles
+    of the cosine between the P10b direction and `n_random` random unit
+    vectors, seeded per layer. A negative cosine outside the band means the
+    range direction points toward what the P9 reader calls unknown.
+
+    The stored P10b direction is the one of draw 0 fitted on the full train
+    set, not an average over the draws.
+
+    Args:
+        p10b: The P10b run, read with the reader to link.
+        p9b: The P9b run.
+        n_random: Random unit vectors per band.
+        seed: Base seed of the random vectors.
+
+    Returns:
+        One row of `COSINE_COLUMNS` per P9 type and layer, types first.
+
+    Raises:
+        ValueError: If a direction is a zero vector.
+    """
+    range_side = oriented(p10b.directions, p10b.signs)
+    known_side = oriented(p9b.directions, p9b.signs)
+    bands: list[tuple[float, float]] = []
+    units: list[NDArray[np.float64]] = []
+    for k, layer in enumerate(p10b.layers):
+        unit = _unit_vector(
+            range_side[k], f"the P10b direction at layer {layer}"
+        )
+        units.append(unit)
+        bands.append(
+            _cosine_band(
+                unit, n_random=n_random, seed=derive_seed(seed, "cosine", layer)
+            )
+        )
+    rows: list[Row] = []
+    for t, name in enumerate(p9b.types):
+        for k, layer in enumerate(p10b.layers):
+            other = _unit_vector(
+                known_side[t, k], f"the P9 direction of {name} at layer {layer}"
+            )
+            rows.append(
+                {
+                    "p9_type": name,
+                    "layer": layer,
+                    "cosine": float(units[k] @ other),
+                    "band_lo": bands[k][0],
+                    "band_hi": bands[k][1],
+                }
+            )
+    return rows
