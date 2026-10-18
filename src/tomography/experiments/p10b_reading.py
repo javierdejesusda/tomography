@@ -12,21 +12,32 @@ exact calls them exact, a reader of living against artifact calls them range.
 
 from collections.abc import Mapping
 from collections.abc import Sequence
+import csv
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 from typing import Final
 from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
 
+from tomography.activations import collect_activations
 from tomography.datasets.quantities import DEFAULT_MIN_SITELINKS
 from tomography.datasets.quantities import FAMILIES
 from tomography.datasets.quantities import PEOPLE_FAMILY
 from tomography.datasets.quantities import QuantityQuestion
+from tomography.datasets.quantities import load_people_heights
+from tomography.datasets.quantities import load_quantities
 from tomography.experiments.base import ExperimentConfig
+from tomography.experiments.base import RunDir
+from tomography.experiments.sweep import chat_format_for
+from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.p9.reading import READING_METHODS
 from tomography.p9.reading import ItemActivations
 from tomography.p9.reading import draw_seed
+from tomography.p9.reading import p9_template
 from tomography.p9.risk import TEXT_ANALYZERS
 from tomography.p9.risk import auroc_ci
 from tomography.p9.risk import orient_on_train
@@ -37,6 +48,12 @@ from tomography.reading.metrics import auroc
 from tomography.reading.metrics import best_layer
 from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.reader import RepReader
+from tomography.templates import ChatFormat
+from tomography.templates import ConceptTemplate
+from tomography.viz.geometry import plot_matrix
+from tomography.viz.reading import plot_curves
+from tomography.viz.style import save_figure
+from tomography.viz.style import style_context
 
 TEMPLATES: Final = ("plain", "concept")
 ALL_SET: Final = "all"
@@ -44,6 +61,56 @@ BASELINES: Final = ("text_word", "text_char", "length", "popularity")
 POOLED: Final = "pooled"
 
 Row = dict[str, object]
+
+CURVE_COLUMNS: Final = (
+    "template",
+    "method",
+    "train_set",
+    "test_family",
+    "layer",
+    "auroc",
+    "lo",
+    "hi",
+)
+TRANSFER_COLUMNS: Final = (
+    "template",
+    "method",
+    "train_set",
+    "test_family",
+    "layer",
+    "n_range",
+    "n_exact",
+    "auroc",
+    "lo",
+    "hi",
+)
+BASELINE_COLUMNS: Final = (
+    "baseline",
+    "train_set",
+    "test_family",
+    "n_range",
+    "n_exact",
+    "auroc",
+    "lo",
+    "hi",
+)
+PEOPLE_COLUMNS: Final = (
+    "source",
+    "template",
+    "method",
+    "train_set",
+    "layer",
+    "n_breeds",
+    "n_buildings",
+    "n_people",
+    "breeds_vs_people",
+    "breeds_vs_people_lo",
+    "breeds_vs_people_hi",
+    "people_vs_buildings",
+    "people_vs_buildings_lo",
+    "people_vs_buildings_hi",
+    "position",
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -618,3 +685,354 @@ def read_study(
         scores=scores,
         readers=readers,
     )
+
+
+def collect_question_activations(
+    loaded: LoadedModel,
+    items: Sequence[QuantityQuestion],
+    template_name: str,
+    chat: ChatFormat,
+    *,
+    concept: str,
+    batch_size: int,
+) -> ItemActivations:
+    """Collects the activations at the last token of each rendered question.
+
+    Layers 1 to L are read; the embedding output is not.
+
+    Args:
+        loaded: The wrapped model.
+        items: Distinct questions.
+        template_name: "plain" or "concept", see `p9_template`.
+        chat: The chat format that wraps the "concept" prompt.
+        concept: The concept word of the "concept" template.
+        batch_size: Prompts per forward pass.
+
+    Returns:
+        The activations, one row per item in order.
+
+    Raises:
+        ValueError: If the template is unknown or not a concept template.
+    """
+    template = p9_template(template_name)
+    if not isinstance(template, ConceptTemplate):
+        raise ValueError("P10b templates are concept templates")
+    texts = [template.render(i.question, concept, chat).text for i in items]
+    layers = tuple(range(1, loaded.n_layers + 1))
+    found = collect_activations(
+        loaded, texts, layers=layers, position="last", batch_size=batch_size
+    )
+    return ItemActivations(
+        tuple(i.uid for i in items), found.layers, found.data
+    )
+
+
+def _write_csv(path: Path, columns: Sequence[str], rows: Sequence[Row]) -> None:
+    """Writes a CSV with unix line ends; None becomes an empty cell."""
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=columns,
+            lineterminator="\n",
+            extrasaction="raise",
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    with path.open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _stamps(
+    items: Sequence[QuantityQuestion],
+) -> dict[str, dict[str, dict[str, list[str]]]]:
+    snapshots: dict[str, dict[str, dict[str, list[str]]]] = {}
+    for item in items:
+        stamp = snapshots.setdefault(item.family, {}).setdefault(
+            item.kind, {"retrieved_on": [], "sha256": []}
+        )
+        for field, value in (
+            ("retrieved_on", item.retrieved_on),
+            ("sha256", item.sha256),
+        ):
+            if value not in stamp[field]:
+                stamp[field].append(value)
+    for kinds in snapshots.values():
+        for stamp in kinds.values():
+            stamp["retrieved_on"].sort()
+            stamp["sha256"].sort()
+    return snapshots
+
+
+def _counts(
+    items: Sequence[QuantityQuestion],
+) -> dict[str, dict[str, dict[str, int]]]:
+    counts: dict[str, dict[str, dict[str, int]]] = {}
+    for item in items:
+        by_split = counts.setdefault(item.family, {}).setdefault(item.kind, {})
+        by_split[item.split] = by_split.get(item.split, 0) + 1
+    return counts
+
+
+def _pooled_and_held_out(
+    study: Study, names: Sequence[str]
+) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
+    """Reads the pooled AUROC of the full set and the held-out family AUROCs.
+
+    Returns:
+        The pooled test AUROC of each template/method for the full train
+        set, and, for each leave-one-out set, its held-out family and the
+        AUROC of each template/method on it.
+    """
+    full = list(study.sets)[-1]
+
+    def value(train_set: str, test_family: str, name: str) -> float:
+        template, method = name.split("/")
+        row = next(
+            r
+            for r in study.transfer
+            if (r["template"], r["method"], r["train_set"], r["test_family"])
+            == (template, method, train_set, test_family)
+        )
+        return float(cast(float, row["auroc"]))
+
+    pooled = {name: value(full, POOLED, name) for name in names}
+    held_out: dict[str, dict[str, object]] = {}
+    if len(study.families) >= 3:
+        for set_name, members in study.sets.items():
+            if len(members) != len(study.families) - 1:
+                continue
+            (left_out,) = set(study.families) - set(members)
+            held_out[set_name] = {
+                "test_family": left_out,
+                "auroc": {n: value(set_name, left_out, n) for n in names},
+            }
+    return pooled, held_out
+
+
+def _people_summary(
+    study: Study, names: Sequence[str]
+) -> dict[str, dict[str, dict[str, object]]]:
+    if not study.people:
+        return {}
+    full = list(study.sets)[-1]
+    wanted = [full]
+    if len(study.families) >= 3 and "height" in study.families:
+        wanted.append("+".join(f for f in study.families if f != "height"))
+    summary: dict[str, dict[str, dict[str, object]]] = {}
+    for set_name in wanted:
+        summary[set_name] = {}
+        for name in names:
+            template, method = name.split("/")
+            row = next(
+                r
+                for r in study.people
+                if (r["source"], r["template"], r["method"], r["train_set"])
+                == ("reader", template, method, set_name)
+            )
+            summary[set_name][name] = {
+                key: row[key]
+                for key in (
+                    "breeds_vs_people",
+                    "people_vs_buildings",
+                    "position",
+                )
+            }
+    return summary
+
+
+def execute(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    items: Sequence[QuantityQuestion],
+    people: Sequence[QuantityQuestion],
+) -> None:
+    """Reads the questions in every template and writes the results.
+
+    Writes `curves.csv`, `transfer.csv`, `baselines.csv` and, when the
+    people diagnostic ran, `people.csv` (see `read_study`), `readers.npz`
+    and `readers.json` (the readers of the first draw fitted on the largest
+    train set: `directions`, `means` and `signs` of shape (T, K, d) and
+    (T, K), with T indexing the template/method pairs named in the json),
+    `items.json` (every item with the draw-averaged score of those readers at
+    their chosen layer) and `summary.json`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+        loaded: The wrapped model.
+        items: The questions of the families.
+        people: The people items; unused unless `config.people`.
+
+    Raises:
+        ValueError: If there are no questions or a family lacks a kind in a
+            split.
+    """
+    if not items:
+        raise ValueError("no questions to read")
+    everything = [*items, *(people if config.people else [])]
+    chat = chat_format_for(loaded)
+    acts = {
+        name: collect_question_activations(
+            loaded,
+            everything,
+            name,
+            chat,
+            concept=config.concept,
+            batch_size=config.batch_size,
+        )
+        for name in config.templates
+    }
+    study = read_study(config, acts, everything)
+    full = list(study.sets)[-1]
+    names = [f"{t}/{m}" for t in config.templates for m in config.methods]
+    path = run_dir.path
+    _write_csv(path / "curves.csv", CURVE_COLUMNS, study.curves)
+    _write_csv(path / "transfer.csv", TRANSFER_COLUMNS, study.transfer)
+    _write_csv(path / "baselines.csv", BASELINE_COLUMNS, study.baselines)
+    if study.people:
+        _write_csv(path / "people.csv", PEOPLE_COLUMNS, study.people)
+    readers = [study.readers[name] for name in names]
+    run_dir.write_arrays(
+        "readers",
+        directions=np.stack([r.directions for r in readers]),
+        means=np.stack([r.means for r in readers]),
+        signs=np.stack([r.signs for r in readers]),
+        layers=np.asarray(readers[0].layers, dtype=np.int64),
+    )
+    run_dir.write_json("readers", {"readers": names, "train_set": full})
+    run_dir.write_json(
+        "items",
+        [
+            {
+                "uid": item.uid,
+                "family": item.family,
+                "kind": item.kind,
+                "split": item.split,
+                "sitelinks": item.sitelinks,
+                "scores": {
+                    name: float(study.scores[f"{name}/{full}"][n])
+                    for name in names
+                },
+            }
+            for n, item in enumerate(study.items)
+        ],
+    )
+    pooled, held_out = _pooled_and_held_out(study, names)
+    quantities = [i for i in study.items if i.family != PEOPLE_FAMILY]
+    run_dir.write_json(
+        "summary",
+        {
+            "model": config.model,
+            "n_layers": loaded.n_layers,
+            "families": list(study.families),
+            "train_sets": {k: list(v) for k, v in study.sets.items()},
+            "full_train_set": full,
+            "templates": list(config.templates),
+            "methods": list(config.methods),
+            "counts": _counts(quantities),
+            "n_people": len(study.items) - len(quantities),
+            "snapshots": _stamps(study.items),
+            "layers": study.layers,
+            "pooled_all": pooled,
+            "held_out": held_out,
+            "people": _people_summary(study, names),
+            "config": config.to_dict(),
+        },
+    )
+
+
+def run(config: Config, run_dir: RunDir) -> None:
+    """Loads the questions and the model, then runs `execute`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+    """
+    families = [
+        f
+        for f in FAMILIES
+        if config.families is None or f.name in config.families
+    ]
+    items = load_quantities(
+        families=families,
+        n_per_side=config.n_per_side,
+        min_sitelinks=config.min_sitelinks,
+        seed=config.seed,
+        offline=config.offline,
+    )
+    people = (
+        load_people_heights(offline=config.offline) if config.people else []
+    )
+    execute(config, run_dir, load_model(config.model), items, people)
+
+
+def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
+    """Draws the layer curves and the transfer heatmap of each template.
+
+    `curves_<template>` shows the pooled test AUROC against the layer of
+    each method fitted on the full train set, with its seed interval, and
+    `transfer_<template>` the test AUROC of the first of `logistic` or the
+    first method, train set by test family, at the chosen layer.
+
+    Args:
+        run_dir: A finished P10b run.
+        out_dir: Folder of the figures.
+
+    Returns:
+        The PDF, PNG and SVG paths of every figure.
+    """
+    summary = cast(dict[str, Any], run_dir.read_json("summary"))
+    full = summary["full_train_set"]
+    methods = summary["methods"]
+    heat_method = "logistic" if "logistic" in methods else methods[0]
+    curves = _read_csv(run_dir.path / "curves.csv")
+    transfer = _read_csv(run_dir.path / "transfer.csv")
+    tests = [*summary["families"], POOLED]
+    sets = list(summary["train_sets"])
+    paths: list[Path] = []
+    for template in summary["templates"]:
+        series = []
+        for method in methods:
+            rows = [
+                r
+                for r in curves
+                if (r["template"], r["method"], r["train_set"])
+                == (template, method, full)
+                and r["test_family"] == POOLED
+            ]
+            series.append(
+                tuple(
+                    np.array([float(r[column]) for r in rows])
+                    for column in ("layer", "auroc", "lo", "hi")
+                )
+            )
+        with style_context():
+            fig = plot_curves(
+                series,
+                series=methods,
+                ylabel="AUROC (range vs exact), pooled test",
+                chance=0.5,
+                n_layers=summary["n_layers"],
+            )
+        paths += save_figure(fig, out_dir, f"curves_{template}")
+        cells = {
+            (r["train_set"], r["test_family"]): float(r["auroc"])
+            for r in transfer
+            if (r["template"], r["method"]) == (template, heat_method)
+        }
+        values = np.array([[cells[(s, test)] for test in tests] for s in sets])
+        with style_context():
+            fig = plot_matrix(
+                values,
+                rows=sets,
+                cols=tests,
+                title=f"{heat_method}, {template}: test AUROC",
+                vmin=0.0,
+                vmax=1.0,
+            )
+        paths += save_figure(fig, out_dir, f"transfer_{template}")
+    return paths

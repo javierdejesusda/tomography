@@ -2,18 +2,31 @@
 
 from collections.abc import Callable
 from collections.abc import Sequence
+import csv
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 import pytest
 
+from tomography.cli import load_experiment
 from tomography.datasets.quantities import FAMILIES
 from tomography.datasets.quantities import QuantityQuestion
+from tomography.experiments import p10b_reading
+from tomography.experiments.base import RunDir
 from tomography.experiments.p10b_reading import BASELINES
 from tomography.experiments.p10b_reading import Config
 from tomography.experiments.p10b_reading import baseline_scores
+from tomography.experiments.p10b_reading import collect_question_activations
+from tomography.experiments.p10b_reading import execute
+from tomography.experiments.p10b_reading import plot
 from tomography.experiments.p10b_reading import read_study
+from tomography.experiments.p10b_reading import run
 from tomography.experiments.p10b_reading import train_sets
+from tomography.experiments.sweep import chat_format_for
+from tomography.model import LoadedModel
 from tomography.p9.reading import ItemActivations
 from tomography.reading.metrics import auroc
 
@@ -467,3 +480,304 @@ def test_baseline_rows_cover_every_train_set_and_test_family() -> None:
         "hi",
     }
     assert {r["baseline"] for r in study.baselines} == set(BASELINES)
+
+
+def _tiny_items(n_people: int = 6) -> list[QuantityQuestion]:
+    items = [
+        _item(
+            f"{family}-{kind}-{split}{i}",
+            family,
+            kind,
+            f"What is the {family} of the {kind} {split} thing number {i}?",
+            sitelinks=5 + 3 * i,
+            split=split,
+        )
+        for family in ("height", "wingspan", "duration")
+        for kind in ("range", "exact")
+        for split, n in (("train", 6), ("val", 3), ("test", 5))
+        for i in range(n)
+    ]
+    return items + _study_items(n_people=n_people)[-n_people:]
+
+
+def _tiny_config(**changes: object) -> Config:
+    return _config(
+        model="tiny", templates=("plain", "concept"), batch_size=4, **changes
+    )
+
+
+def _executed(loaded: LoadedModel, tmp_path: Path, **changes: object) -> RunDir:
+    config = _tiny_config(**changes)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    items = _tiny_items()
+    execute(
+        config,
+        run_dir,
+        loaded,
+        [i for i in items if i.family != "person_height"],
+        [i for i in items if i.family == "person_height"],
+    )
+    return run_dir
+
+
+def _csv(run_dir: RunDir, name: str) -> list[dict[str, str]]:
+    path = run_dir.path / name
+    with path.open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def test_the_prompts_are_the_bare_question_or_the_concept_template(
+    tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, list[str]] = {}
+
+    def spy(loaded: LoadedModel, texts: Sequence[str], **kwargs: Any) -> Any:
+        seen["texts"] = list(texts)
+        seen["layers"] = list(kwargs["layers"])
+        assert kwargs["position"] == "last"
+        return SimpleNamespace(
+            layers=tuple(kwargs["layers"]),
+            data=np.zeros((len(kwargs["layers"]), len(texts), 32), np.float32),
+        )
+
+    monkeypatch.setattr(p10b_reading, "collect_activations", spy)
+    items = _tiny_items()[:3]
+    chat = chat_format_for(tiny_gpt2)
+
+    plain = collect_question_activations(
+        tiny_gpt2, items, "plain", chat, concept="variability", batch_size=4
+    )
+    assert seen["texts"] == [i.question for i in items]
+    assert plain.uids == tuple(i.uid for i in items)
+    assert plain.layers == (1, 2, 3)
+
+    collect_question_activations(
+        tiny_gpt2, items, "concept", chat, concept="variability", batch_size=4
+    )
+    assert all(
+        "variability" in t and i.question in t
+        for t, i in zip(seen["texts"], items, strict=True)
+    )
+    assert seen["texts"][0] != items[0].question
+
+
+def test_execute_writes_every_file(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _executed(tiny_gpt2, tmp_path)
+
+    for name in (
+        "curves.csv",
+        "transfer.csv",
+        "baselines.csv",
+        "people.csv",
+        "readers.npz",
+        "readers.json",
+        "items.json",
+        "summary.json",
+    ):
+        assert (run_dir.path / name).is_file(), name
+    transfer = _csv(run_dir, "transfer.csv")
+    assert list(transfer[0]) == [
+        "template",
+        "method",
+        "train_set",
+        "test_family",
+        "layer",
+        "n_range",
+        "n_exact",
+        "auroc",
+        "lo",
+        "hi",
+    ]
+    assert len(transfer) == 2 * 4 * 7 * 4
+    assert list(_csv(run_dir, "baselines.csv")[0]) == [
+        "baseline",
+        "train_set",
+        "test_family",
+        "n_range",
+        "n_exact",
+        "auroc",
+        "lo",
+        "hi",
+    ]
+    people = _csv(run_dir, "people.csv")
+    assert {r["source"] for r in people} == {"reader", "baseline"}
+    assert {r["breeds_vs_people"] != "" for r in people} == {True}
+
+
+def test_the_readers_of_the_full_train_set_are_saved(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _executed(tiny_gpt2, tmp_path)
+
+    names = run_dir.read_json("readers")["readers"]  # type: ignore[index]
+    arrays = run_dir.read_arrays("readers")
+
+    assert names == [
+        f"{t}/{m}"
+        for t in ("plain", "concept")
+        for m in ("logistic", "pca_diff", "mean_diff", "random")
+    ]
+    assert arrays["directions"].shape == (8, 3, 32)
+    assert arrays["means"].shape == (8, 3, 32)
+    assert arrays["signs"].shape == (8, 3)
+    assert arrays["layers"].tolist() == [1, 2, 3]
+    assert run_dir.read_json("readers")["train_set"] == "all"  # type: ignore[index]
+
+
+def test_items_hold_the_averaged_score_of_the_full_readers(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _executed(tiny_gpt2, tmp_path)
+
+    records = run_dir.read_json("items")
+    items = _tiny_items()
+
+    assert [r["uid"] for r in records] == [i.uid for i in items]  # type: ignore[index, union-attr]
+    first = records[0]  # type: ignore[index]
+    assert set(first) == {
+        "uid",
+        "family",
+        "kind",
+        "split",
+        "sitelinks",
+        "scores",
+    }
+    assert set(first["scores"]) == {
+        f"{t}/{m}"
+        for t in ("plain", "concept")
+        for m in ("logistic", "pca_diff", "mean_diff", "random")
+    }
+
+
+def test_the_summary_reports_the_counts_the_layers_and_the_diagnostic(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _executed(tiny_gpt2, tmp_path)
+
+    summary = run_dir.read_json("summary")
+    transfer = _csv(run_dir, "transfer.csv")
+
+    assert summary["model"] == "tiny"  # type: ignore[index]
+    assert summary["counts"]["height"] == {  # type: ignore[index]
+        "range": {"train": 6, "val": 3, "test": 5},
+        "exact": {"train": 6, "val": 3, "test": 5},
+    }
+    assert summary["n_people"] == 6  # type: ignore[index]
+    assert set(summary["snapshots"]) == {  # type: ignore[index]
+        "height",
+        "wingspan",
+        "duration",
+        "person_height",
+    }
+    assert summary["snapshots"]["height"]["range"]["sha256"] == ["0" * 64]  # type: ignore[index]
+    assert summary["config"]["model"] == "tiny"  # type: ignore[index]
+    assert summary["layers"]["plain/logistic/all"] in (1, 2, 3)  # type: ignore[index]
+    pooled = next(
+        r
+        for r in transfer
+        if (r["template"], r["method"], r["train_set"], r["test_family"])
+        == ("plain", "logistic", "all", "pooled")
+    )
+    assert summary["pooled_all"]["plain/logistic"] == pytest.approx(  # type: ignore[index]
+        float(pooled["auroc"])
+    )
+    held_out = summary["held_out"]["wingspan+duration"]  # type: ignore[index]
+    assert held_out["test_family"] == "height"
+    assert set(held_out["auroc"]) == set(summary["pooled_all"])  # type: ignore[index]
+    people = summary["people"]  # type: ignore[index]
+    assert set(people) == {"all", "wingspan+duration"}
+    assert set(people["all"]["plain/logistic"]) == {
+        "breeds_vs_people",
+        "people_vs_buildings",
+        "position",
+    }
+
+
+def test_there_is_no_people_file_without_the_people(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _executed(tiny_gpt2, tmp_path, people=False)
+
+    assert not (run_dir.path / "people.csv").exists()
+    assert run_dir.read_json("summary")["people"] == {}  # type: ignore[index]
+    assert len(run_dir.read_json("items")) == len(_tiny_items()) - 6  # type: ignore[arg-type]
+
+
+def test_run_passes_offline_to_both_loaders_and_skips_the_people_off(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    loads: dict[str, dict[str, Any]] = {}
+    sent: dict[str, Any] = {}
+    items = _tiny_items()
+
+    def fake_quantities(**kwargs: Any) -> list[QuantityQuestion]:
+        loads["quantities"] = kwargs
+        return [i for i in items if i.family != "person_height"]
+
+    def fake_people(**kwargs: Any) -> list[QuantityQuestion]:
+        loads["people"] = kwargs
+        return [i for i in items if i.family == "person_height"]
+
+    def fake_execute(*args: Any) -> None:
+        sent["args"] = args
+
+    monkeypatch.setattr(p10b_reading, "load_quantities", fake_quantities)
+    monkeypatch.setattr(p10b_reading, "load_people_heights", fake_people)
+    monkeypatch.setattr(p10b_reading, "load_model", lambda key: key)
+    monkeypatch.setattr(p10b_reading, "execute", fake_execute)
+    config = _tiny_config(
+        families=("wingspan", "height"),
+        n_per_side=7,
+        min_sitelinks=9,
+        offline=True,
+        seed=4,
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    run(config, run_dir)
+
+    quantities = loads["quantities"]
+    assert [f.name for f in quantities["families"]] == ["height", "wingspan"]
+    assert quantities["offline"] is True
+    assert quantities["n_per_side"] == 7
+    assert quantities["min_sitelinks"] == 9
+    assert quantities["seed"] == 4
+    assert loads["people"]["offline"] is True
+    assert sent["args"][2] == "tiny"
+    assert len(sent["args"][4]) == 6
+
+    loads.clear()
+    quiet = _tiny_config(people=False, offline=True)
+    run(quiet, RunDir.create(quiet, out_root=tmp_path))
+    assert "people" not in loads
+    assert sent["args"][4] == []
+
+
+def test_the_experiment_is_registered() -> None:
+    experiment = load_experiment("p10b")
+
+    assert experiment.config_cls is Config
+    assert experiment.run is run
+    assert experiment.plot is plot
+
+
+def test_plot_draws_a_curve_and_a_heatmap_per_template(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _executed(tiny_gpt2, tmp_path)
+
+    paths = plot(run_dir, tmp_path / "figs")
+
+    assert sorted(p.name for p in paths) == sorted(
+        f"{stem}.{ext}"
+        for stem in (
+            "curves_plain",
+            "curves_concept",
+            "transfer_plain",
+            "transfer_concept",
+        )
+        for ext in ("pdf", "png", "svg")
+    )
+    assert all(p.is_file() for p in paths)
