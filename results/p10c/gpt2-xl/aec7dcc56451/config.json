@@ -1,0 +1,13 @@
+{
+  "experiment": "p10c",
+  "model": "gpt2-xl",
+  "seed": 0,
+  "p10b_run": "results/p10b/gpt2-xl/077222ed6502",
+  "knowledge_run": "results/p9b/gpt2-xl/92664dccb7d9",
+  "behavior_run": "results/p10a/gpt2-xl/6d6b168a8749",
+  "reader": "plain/logistic",
+  "n_boot": 1000,
+  "n_random": 200,
+  "batch_size": 8,
+  "offline": true
+}

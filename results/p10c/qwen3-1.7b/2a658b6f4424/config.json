@@ -1,0 +1,13 @@
+{
+  "experiment": "p10c",
+  "model": "qwen3-1.7b",
+  "seed": 0,
+  "p10b_run": "results/p10b/qwen3-1.7b/fd69e18dc1cc",
+  "knowledge_run": "results/p9b/qwen3-1.7b/9641ab8235a9",
+  "behavior_run": "results/p10a/qwen3-1.7b/ed9c40d94e25",
+  "reader": "plain/logistic",
+  "n_boot": 1000,
+  "n_random": 200,
+  "batch_size": 8,
+  "offline": true
+}
