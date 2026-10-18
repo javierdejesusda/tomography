@@ -1,7 +1,7 @@
 # tomography
 
 Representation Engineering (RepE) reimplemented on small open language
-models, with every result checked against controls.
+models, with controls reported next to the results.
 
 RepE ([Zou et al., arXiv:2310.01405](https://arxiv.org/abs/2310.01405);
 [reference code](https://github.com/andyzoujm/representation-engineering))
@@ -19,34 +19,54 @@ Results: [project site](https://javierdejesusda.github.io/tomography/) and
 
 RepE claims are easy to overstate. A direction can score well because the
 text gives the answer away, or because a random direction scores well too.
-Here every reading number sits next to a random direction, a shuffled-label
-control and, where text can leak the label, a text-only baseline. Every
-checkpoint and data file is pinned, so a run can be repeated.
+Here every reading run stores a random-direction and a shuffled-label
+control, and `docs/findings.md` reports them with the numbers. The
+TruthfulQA (R6) and known-versus-unknown (P9) readers are also compared with
+text-only baselines. Every checkpoint and data file is pinned, so a run can
+be repeated.
 
 ## Key results
 
 Each result is one run per model and checkpoint. Intervals and caveats are in
 [`docs/findings.md`](docs/findings.md).
 
-- **Reading scales for some concepts only.** Morality (R3) accuracy rises from
-  0.623 on GPT-2 small to 0.768 on GPT-2 XL and 0.940 on Qwen3 4B, against
-  random directions at 0.52 to 0.63 on those three. Sentiment and honesty transfer do not
-  order by size.
-- **TruthfulQA does not beat text.** A reader scores 0.64 to 0.74 on MC1
-  (R6), but a TF-IDF classifier on the answer texts alone scores 0.676 and
-  0.671.
+- **Reading scales for some concepts only.** Morality (R3) test accuracy
+  rises across the four GPT-2 models, 0.623 (small) to 0.768 (XL), with a
+  random direction at 0.52 on both. Qwen3 4B reads 0.940 (post-trained; base
+  0.917) against a random direction at 0.63 (0.60 base). Qwen3 is a different
+  model family, so this is not a continuation of the GPT-2 trend. Random is
+  the 10-seed mean at the selected layer. Sentiment and honesty transfer do
+  not order by size.
+- **TruthfulQA is not separated from text.** The reader trained on
+  TruthfulQA questions scores 0.644 to 0.741 on MC1 across nine checkpoints
+  (R6, validation-layer rule), against text-only TF-IDF classifiers on the
+  answer texts at 0.676 (word) and 0.671 (character), each with a 95 percent
+  interval about 0.14 wide. The reader's own interval does not include the
+  173 test questions, so no checkpoint is shown to read more than the wording
+  carries.
 - **The paper's PCA finder does not read on GPT-2.** In the reference cell of
   each task `pca_diff` is not above a random direction on any GPT-2 size;
-  supervised finders such as `logistic` are (P4).
-- **Readings depend on wording.** Rewording the prompt moves a fixed
-  sentiment reader by 0.09 (GPT-2) to 0.20 (Qwen3 0.6B) in accuracy (P1).
+  supervised finders such as `logistic` are. On Qwen3 it is above random only
+  on some checkpoints (P4).
+- **Readings depend on the prompt.** Across 16 prompt variants (other
+  wordings, no template, a wrong concept word), the accuracy of a sentiment
+  reader refitted on each variant spans 0.09 on GPT-2 small and 0.20 on both
+  Qwen3 0.6B checkpoints (0.18 on 1.7B post-trained, 0.14 on 1.7B base). The
+  span is the highest minus the lowest of 16 cells (P1).
 - **"Known versus unknown" is a direction, but not a better error
-  predictor.** It separates questions better than subject popularity, yet it
-  predicts errors no better than the model's own answer log-probability
-  (P9).
-- **Steering stays fluent only for small pushes.** At a relative coefficient
-  of 0.1 the text stays fluent; at 0.3 the sentiment score saturates on
-  repetitive text (C1).
+  predictor.** It separates known from unknown PopQA questions better than
+  subject popularity does on most checkpoints (within relation, by 0.05 to
+  0.16), but not on every one (Qwen3 1.7B post-trained with popularity
+  matched, GPT-2 large: level), and GPT-2 small has too few known questions
+  to test. Its error prediction is below the model's own answer
+  log-probability on all models (P9b, P9c).
+- **Steered text is fluent only at small coefficients.** On the four Qwen3
+  checkpoints a relative coefficient of +-0.1 keeps perplexity at most 1.37
+  times the unsteered text and distinct-1 at 0.181 or above (rule chosen in
+  findings: at most 1.5 times, at least 0.15); GPT-2 medium is outside it at
+  1.64 and 1.54 times. At +0.3 perplexity is 3.9 to 32 times the unsteered
+  text and distinct-1 is 0.043 to 0.099, so sentiment scores of 0.74 to 0.98
+  there are scores of repetitive text (C1).
 
 ## Quickstart
 
@@ -129,11 +149,11 @@ uv run tomography chain run chain.toml
 
 [`cloud.py`](src/tomography/cloud.py) rents a RunPod pod, runs a chain on it
 and pulls the results back (`python -m tomography.cloud up|push|setup|start|
-status|pull|down`; read `--help` of each). The API key comes from
-`RUNPOD_API_KEY` only; always pass `--max-hours`.
+status|pull|down|ssh|resume`; read `--help` of each). The API key comes from
+`RUNPOD_API_KEY` only; `up` and `start` require `--max-hours`.
 
 To collect finished runs into a committable tree and redraw every figure
-(figures are not committed; raw `readers*.npz` vectors are not either):
+(figures are not committed; readers, sweeps, per-item files and signals are not exported):
 
 ```bash
 uv run tomography export --out results <folder-with-runs>
@@ -151,6 +171,7 @@ Reproducibility rules:
   compare `meta.json` before pooling runs from different machines.
 - Offline: every loader takes `offline=True`; for weights set
   `HF_HUB_OFFLINE=1`.
+- The reference code is read at commit `5455d8a`.
 
 Deviations from the paper and the statistics behind the intervals are in
 [`docs/methodology.md`](docs/methodology.md).
@@ -164,10 +185,13 @@ src/tomography/
   activations.py  collect_activations
   templates.py    chat formats and the paper's templates
   pairing.py      seeded strategies that turn stimuli into pairs
-  reading/        direction finders, RepReader, metrics
+  reading/        direction finders, reader.py (RepReader), metrics
   control/        steering operators, controllers, generation
   datasets/       pinned sources and one loader per dataset
   judges.py       pinned sentiment and emotion classifiers
+  knowledge.py    known, unknown and uncertain question labels
+  analysis.py     layer-wise PCA and t-SNE maps
+  sae.py          pinned Qwen-Scope SAE decoders
   lorra.py        low-rank representation adaptation
   p9/, p10/       known-versus-unknown and approximate-answer helpers
   experiments/    one module per experiment id, plus shared sweeps
@@ -183,15 +207,16 @@ results/          committed run outputs
 
 ## Data sources and licenses
 
-All downloads are pinned in
-[`datasets/sources.py`](src/tomography/datasets/sources.py) and
-[`model.py`](src/tomography/model.py). Licenses below are those the sources
+All downloads are pinned in the
+[`datasets/`](src/tomography/datasets) package (see
+[`sources.py`](src/tomography/datasets/sources.py)),
+[`model.py`](src/tomography/model.py), `judges.py` and `sae.py`. Licenses below are those the sources
 state; the repository's MIT license covers its code only, and none of these
 files is redistributed here.
 
 | Source | License as stated |
 | --- | --- |
-| GPT-2 checkpoints | MIT (the upstream repository says "Modified MIT") |
+| GPT-2 checkpoints | Modified MIT (the Hub card tag is MIT) |
 | Qwen3 checkpoints | Apache-2.0 |
 | Judge models (sentiment, emotion) | Apache-2.0 or MIT; two state none |
 | Qwen-Scope SAE decoders (`a5`) | Hub tag "other"; `LICENSE` file is Apache-2.0 |
@@ -200,13 +225,20 @@ files is redistributed here.
 | TruthfulQA | Apache-2.0 |
 | KUQ | MIT |
 | Wikidata snapshots | CC0 |
-| ARC, NQ-Open, WikiText-103 | share-alike (CC-BY-SA-3.0, GFDL for WikiText) |
-| Alpaca | CC BY-NC 4.0 (non-commercial) |
+| ARC | CC-BY-SA-4.0 |
+| NQ-Open | CC-BY-SA-3.0 |
+| WikiText-103 | CC-BY-SA-3.0 and GFDL |
+| Alpaca | CC BY-NC 4.0 plus OpenAI terms (non-commercial) |
 | SyntHal | research and review terms only |
 | FalseQA, Geometry of Truth | none stated |
-| PopQA, SST-2, TriviaQA | none on the Hub card; code repositories differ |
+| PopQA | none on the dataset card (code repository: MIT) |
+| TriviaQA | none on the dataset card (code repository: Apache-2.0) |
+| SST-2 | unknown (cite Socher et al., 2013) |
 
-Check each source's terms before reuse. The `PinnedSource` rows and the
+The Qwen-Scope authors ask for a citation of arXiv:2605.11887 and ask that
+interpretability tools are not used to interfere with model capabilities
+or to produce harmful content (`a5` steers nothing). Check each source's
+terms before reuse. The `PinnedSource` rows and the
 `MODELS` entries in the code carry the exact revisions.
 
 ## Development

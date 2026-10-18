@@ -2,8 +2,8 @@
 
 This document lists what this repository does differently from the Representation Engineering paper (Zou et al.,
 [arXiv:2310.01405](https://arxiv.org/abs/2310.01405)), why, and how its numbers are produced. It is a reference for
-readers of the paper, not a tutorial: the [README](../README.md) covers installation, the API and every experiment
-config. It reports no results. Module paths are relative to `src/tomography/`.
+readers of the paper, not a tutorial: the [README](../README.md) covers installation and the experiment ids,
+and each config is in `experiments/<id>_*.py`. It reports no results. Module paths are relative to `src/tomography/`.
 
 Contents:
 
@@ -44,8 +44,8 @@ The registry is `MODELS` in `model.py`; every entry pins a full commit SHA.
 ## Paper mapping
 
 The paper section, appendix or figure each experiment follows, or "extension" when the experiment has no paper
-counterpart. The ids are the arguments of `tomography run`; each config is in `experiments/<id>_*.py` and described
-in the README.
+counterpart. The ids are the arguments of `tomography run`; each config and its docstring are in
+`experiments/<id>_*.py`.
 
 | Id             | What it does                                                           | Paper counterpart                                                                    |
 | -------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -80,7 +80,7 @@ The PCA explained variance is part of `r2` and the t-SNE maps are part of `r4`; 
 ## Pipeline choices and deviations
 
 Each row states what this repository does, how that differs from the paper, and why. Where the reference
-implementation (`andyzoujm/representation-engineering`, pinned at a commit in the README) differs from the paper
+implementation (`andyzoujm/representation-engineering`, pinned at commit `5455d8a`) differs from the paper
 text, the default follows the reference code and the other variant is selectable.
 
 ### Model and prompt
@@ -170,7 +170,8 @@ that resamples whole runs along axis 0, and `wilson_ci` gives intervals for rate
 | `p9d` slopes                                                   | percentile bootstrap                                           | the items, paired across arms                                             |
 
 `a1` uses a t-interval because a percentile bootstrap of so few runs covers less than its level. The `a2` and `a5`
-intervals and nulls are described in their README entries. A `p9b` interval describes how much the fitted reader
+intervals and nulls are described in the docstrings of `experiments/a2_logit_lens.py` and
+`experiments/a5_sae_features.py`. A `p9b` interval describes how much the fitted reader
 varies with its training draw; it does not cover the noise of the test items.
 
 ## Known versus unknown questions (P9)
@@ -282,7 +283,7 @@ word still counts as an abstention; the `hand_check.csv` sample measures this.
   before the run, so the caching allocator does not spill into shared system memory. This is memory safety only and
   does not change the outputs. The caller of the run sets it; it is not in the repository code.
 - **Offline reruns.** Dataset loaders take `offline=True` and read only the cache; for model weights set
-  `HF_HUB_OFFLINE=1`. See [Reproducibility](../README.md#reproducibility).
+  `HF_HUB_OFFLINE=1`. See [Reproduce at scale](../README.md#reproduce-at-scale).
 - **Precision.** float32 for GPT-2 small, medium and large, float16 for `gpt2-xl`, bfloat16 for Qwen3. Activations
   are stored as float32 arrays.
 
@@ -290,4 +291,4 @@ word still counts as an abstention; the `hand_check.csv` sample measures this.
 
 Every dataset, its pinned revision or digest, its license and the experiments that use it are recorded in the
 `PinnedSource` rows under `datasets/`, and the README describes pinning and offline mode in
-[Reproducibility](../README.md#reproducibility). No third-party data is redistributed.
+[Reproduce at scale](../README.md#reproduce-at-scale). No third-party data is redistributed.
