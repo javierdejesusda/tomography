@@ -107,16 +107,21 @@ def _size_text(value: float, _pos: int) -> str:
     return f"{value / 1e6:g}M"
 
 
-def size_axis(ax: Axes, counts: Sequence[float]) -> None:
+def size_axis(
+    ax: Axes,
+    counts: Sequence[float],
+    ticks: Sequence[float] = (1e8, 3e8, 1e9, 3e9),
+) -> None:
     """Sets a logarithmic x axis for parameter counts.
 
     Args:
         ax: The axes.
         counts: The counts that must fit on the axis.
+        ticks: Where to put labelled ticks.
     """
     ax.set_xscale("log")
     ax.set_xlim(min(counts) / 1.6, max(counts) * 1.6)
-    ax.xaxis.set_major_locator(ticker.FixedLocator([1e8, 3e8, 1e9, 3e9]))
+    ax.xaxis.set_major_locator(ticker.FixedLocator(list(ticks)))
     ax.xaxis.set_major_formatter(ticker.FuncFormatter(_size_text))
     ax.xaxis.set_minor_locator(ticker.NullLocator())
     ax.set_xlabel("parameters")

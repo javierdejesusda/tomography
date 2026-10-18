@@ -45,7 +45,7 @@ class Reading:
     @property
     def selectivity(self) -> np.ndarray:
         """The reader minus the random direction of the same run."""
-        return self.reader - self.random
+        return np.asarray(self.reader - self.random)
 
     @property
     def random_at_layer(self) -> float:
