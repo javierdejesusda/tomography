@@ -507,8 +507,8 @@ def _members(
 
 
 def cluster_cis(
-    numer: NDArray[np.float64],
-    denom: NDArray[np.float64],
+    hits: NDArray[np.float64],
+    trials: NDArray[np.float64],
     *,
     n_boot: int = N_BOOT,
     seed: int,
@@ -522,8 +522,8 @@ def cluster_cis(
     out of that metric's interval.
 
     Args:
-        numer: Per-item counts, shape (items, metrics).
-        denom: Per-item denominators, same shape.
+        hits: Per-item counts, shape (items, metrics).
+        trials: Per-item denominators, same shape.
         n_boot: Number of resamples.
         seed: Seed of the resampling.
 
@@ -532,10 +532,10 @@ def cluster_cis(
         (metrics, 2); NaN for a metric no resample could rate.
     """
     rng = np.random.default_rng(seed)
-    n_items = numer.shape[0]
+    n_items = hits.shape[0]
     drawn = rng.integers(0, n_items, size=(n_boot, n_items))
-    top = numer[drawn].sum(axis=1)
-    bottom = denom[drawn].sum(axis=1)
+    top = hits[drawn].sum(axis=1)
+    bottom = trials[drawn].sum(axis=1)
     rates = np.full(top.shape, np.nan)
     np.divide(top, bottom, out=rates, where=bottom > 0)
     with warnings.catch_warnings():
@@ -575,14 +575,14 @@ def _rate_cells(
         return "wilson", {
             m: _rate(totals[m], denominator(m, totals)) for m in metrics
         }
-    numer = np.array(
+    hits = np.array(
         [[c[m] for m in metrics] for c in per_item], dtype=np.float64
     )
-    denom = np.array(
+    trials = np.array(
         [[denominator(m, c) for m in metrics] for c in per_item],
         dtype=np.float64,
     )
-    cis = cluster_cis(numer, denom, seed=seed)
+    cis = cluster_cis(hits, trials, seed=seed)
     cells: dict[str, list[float | None]] = {}
     for k, metric in enumerate(metrics):
         n = denominator(metric, totals)

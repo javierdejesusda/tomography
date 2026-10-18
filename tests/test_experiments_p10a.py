@@ -1634,42 +1634,42 @@ def _clustered(
 
 
 def test_cluster_cis_is_degenerate_for_identical_items() -> None:
-    numer = np.full((6, 1), 3.0)
-    denom = np.full((6, 1), 5.0)
+    hits = np.full((6, 1), 3.0)
+    trials = np.full((6, 1), 5.0)
 
-    cis = cluster_cis(numer, denom, seed=1)
+    cis = cluster_cis(hits, trials, seed=1)
 
     assert cis.shape == (1, 2)
     assert cis[0].tolist() == [0.6, 0.6]
 
 
 def test_cluster_cis_spans_the_items_not_the_samples() -> None:
-    numer = np.array([[10.0], [0.0]])
-    denom = np.array([[10.0], [10.0]])
+    hits = np.array([[10.0], [0.0]])
+    trials = np.array([[10.0], [10.0]])
 
-    low, high = cluster_cis(numer, denom, seed=1)[0]
+    low, high = cluster_cis(hits, trials, seed=1)[0]
 
     assert (low, high) == (0.0, 1.0)
 
 
 def test_cluster_cis_is_seeded_and_resamples_2000_times_by_default() -> None:
     rng = np.random.default_rng(0)
-    numer = rng.integers(0, 6, size=(9, 2)).astype(float)
-    denom = np.full((9, 2), 5.0)
+    hits = rng.integers(0, 6, size=(9, 2)).astype(float)
+    trials = np.full((9, 2), 5.0)
 
-    first = cluster_cis(numer, denom, seed=1)
+    first = cluster_cis(hits, trials, seed=1)
 
-    assert np.array_equal(first, cluster_cis(numer, denom, seed=1))
-    assert not np.array_equal(first, cluster_cis(numer, denom, seed=2))
+    assert np.array_equal(first, cluster_cis(hits, trials, seed=1))
+    assert not np.array_equal(first, cluster_cis(hits, trials, seed=2))
     default = inspect.signature(cluster_cis).parameters["n_boot"].default
     assert default == 2000
 
 
 def test_cluster_cis_skips_resamples_without_a_denominator() -> None:
-    numer = np.array([[1.0, 0.0], [0.0, 0.0]])
-    denom = np.array([[1.0, 0.0], [1.0, 0.0]])
+    hits = np.array([[1.0, 0.0], [0.0, 0.0]])
+    trials = np.array([[1.0, 0.0], [1.0, 0.0]])
 
-    cis = cluster_cis(numer, denom, seed=1)
+    cis = cluster_cis(hits, trials, seed=1)
 
     assert not np.isnan(cis[0]).any()
     assert np.isnan(cis[1]).all()
@@ -1729,9 +1729,9 @@ def test_the_table_forwards_the_seed_to_the_bootstrap(
     seeds: list[int] = []
     real = p10a_quantities.cluster_cis
 
-    def spy(numer: Any, denom: Any, *, seed: int) -> Any:
+    def spy(hits: Any, trials: Any, *, seed: int) -> Any:
         seeds.append(seed)
-        return real(numer, denom, seed=seed)
+        return real(hits, trials, seed=seed)
 
     monkeypatch.setattr(p10a_quantities, "cluster_cis", spy)
     items, results = _clustered([5, 0, 5, 0])
@@ -1801,9 +1801,9 @@ def test_width_forwards_the_seed(monkeypatch: pytest.MonkeyPatch) -> None:
     seeds: list[int] = []
     real = p10a_quantities.cluster_cis
 
-    def spy(numer: Any, denom: Any, *, seed: int) -> Any:
+    def spy(hits: Any, trials: Any, *, seed: int) -> Any:
         seeds.append(seed)
-        return real(numer, denom, seed=seed)
+        return real(hits, trials, seed=seed)
 
     monkeypatch.setattr(p10a_quantities, "cluster_cis", spy)
     items = [_item(uid=f"u{k}", low=100.0, high=110.0 + k) for k in range(3)]
