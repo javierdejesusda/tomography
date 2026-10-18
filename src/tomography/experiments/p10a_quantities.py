@@ -377,6 +377,23 @@ class Answer:
 
 
 _QUANTITY: Final = r"\d[\d,]*(?:\.\d+)?"
+_NUMBER_WORDS: Final = {
+    "a": 1.0,
+    "an": 1.0,
+    "half": 0.5,
+    "twelve": 12.0,
+    "eleven": 11.0,
+    "three": 3.0,
+    "seven": 7.0,
+    "eight": 8.0,
+    "nine": 9.0,
+    "four": 4.0,
+    "five": 5.0,
+    "six": 6.0,
+    "ten": 10.0,
+    "one": 1.0,
+    "two": 2.0,
+}
 _JOINER: Final = re.compile(r"[\s,]*(?:and)?[\s,]*", re.I)
 
 
@@ -388,7 +405,10 @@ def _unit_mismatch(line: str, item: QuantityQuestion, parsed: Parsed) -> bool:
     none of the question's unit words follows the chosen quantity and a
     foreign unit follows some number ("9 months"), or when a foreign unit
     sits in a compound answer, next to another quantity with a unit
-    ("2 hours 22 minutes"). Alternatives joined by "or" are not compound.
+    ("2 hours 22 minutes", "an hour and 22 minutes"), where one of the two
+    is the chosen quantity. The first member may be a number word (a, an,
+    half, one to twelve). Alternatives joined by "or" and restatements in
+    parentheses are not compound.
 
     Args:
         line: The answer line.
@@ -405,25 +425,41 @@ def _unit_mismatch(line: str, item: QuantityQuestion, parsed: Parsed) -> bool:
         re.escape(word) for word in sorted(words, key=len, reverse=True)
     )
     pattern = re.compile(
-        rf"(?P<number>{_QUANTITY})\s*(?P<unit>{alternatives})(?![A-Za-z])",
+        rf"(?:(?P<number>{_QUANTITY})\s*"
+        rf"|(?<![A-Za-z'])(?P<word>{'|'.join(_NUMBER_WORDS)})\s+)"
+        rf"(?P<unit>{alternatives})(?![A-Za-z])",
         re.I,
     )
     text = re.sub(re.escape(item.entity), " ", line, flags=re.I)
     pairs = [
-        (m, float(m["number"].replace(",", "")), m["unit"].lower())
+        (
+            m,
+            float(m["number"].replace(",", ""))
+            if m["number"]
+            else _NUMBER_WORDS[m["word"].lower()],
+            m["unit"].lower(),
+            m["number"] is not None,
+        )
         for m in pattern.finditer(text)
     ]
-    if not any(unit in foreign for _, _, unit in pairs):
-        return False
     chosen = {parsed.low, parsed.high}
-    if not any(unit in own and value in chosen for _, value, unit in pairs):
+    if any(
+        unit in foreign and digits for _, _, unit, digits in pairs
+    ) and not any(
+        unit in own and value in chosen for _, value, unit, _ in pairs
+    ):
         return True
     return any(
         (first_unit in foreign or second_unit in foreign)
+        and (first_value in chosen or second_value in chosen)
+        and second_digits
         and _JOINER.fullmatch(text[first.end() : second.start()]) is not None
-        for (first, _, first_unit), (second, _, second_unit) in (
-            itertools.pairwise(pairs)
-        )
+        for (first, first_value, first_unit, _), (
+            second,
+            second_value,
+            second_unit,
+            second_digits,
+        ) in itertools.pairwise(pairs)
     )
 
 
