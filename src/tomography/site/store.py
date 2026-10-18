@@ -41,7 +41,15 @@ def is_post_trained(model: str) -> bool:
     return model.startswith("qwen3") and not model.endswith("-base")
 
 
-def _rank(model: str) -> tuple[int, str]:
+def model_rank(model: str) -> tuple[int, str]:
+    """Sorts checkpoint keys in paper order, unknown keys last.
+
+    Args:
+        model: Checkpoint key.
+
+    Returns:
+        A sort key.
+    """
     if model in MODEL_ORDER:
         return MODEL_ORDER.index(model), model
     return len(MODEL_ORDER), model
@@ -84,7 +92,7 @@ class Store:
         if not base.is_dir():
             return []
         found = [p.name for p in base.iterdir() if p.is_dir()]
-        return sorted(found, key=_rank)
+        return sorted(found, key=model_rank)
 
     def runs(self, experiment: str, model: str) -> list[Path]:
         """Lists the run directories of one cell, oldest first.
