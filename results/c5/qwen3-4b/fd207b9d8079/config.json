@@ -32,6 +32,6 @@
   "n_pool": 1000,
   "n_show": 4,
   "n_shots": 15,
-  "c2_run": "<external>/1df7c1f9ff70",
+  "c2_run": "results/c2/qwen3-4b/1df7c1f9ff70",
   "n_random": 3
 }
