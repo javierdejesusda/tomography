@@ -1,0 +1,172 @@
+{
+  "_meta": {
+    "experiment": "p7",
+    "config_hash": "d03910535564",
+    "seed": 0,
+    "git_sha": "f4d414d3a41edebf000d90a6b706d766119b1f42",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A4500)",
+    "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T03:47:33+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p7",
+      "model": "gpt2-large",
+      "seed": 0,
+      "n_prompts": 50,
+      "max_new_tokens": 40,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 2,
+      "layers": null,
+      "coeffs": [
+        -0.3,
+        -0.15,
+        0.0,
+        0.15,
+        0.3
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "judge": "sentiment-primary",
+      "judge_check": "sentiment-secondary",
+      "templates": [
+        "paper",
+        "no_template",
+        "no_chat_tags",
+        "neutral_frame",
+        "scaffold_0",
+        "concept_swap_0"
+      ],
+      "formats": [
+        "raw",
+        "chat",
+        "story"
+      ],
+      "n_seeds": 10,
+      "n_steer_seeds": 2,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "min_words": 3,
+      "sweep_layers": null,
+      "truncate_words": 3,
+      "read_threshold": 0.6,
+      "n_boot": 2000,
+      "n_random": 3
+    }
+  },
+  "data": {
+    "columns": [
+      "template",
+      "read_layer",
+      "read_depth",
+      "read_accuracy",
+      "steer_layer",
+      "steer_depth",
+      "steer_slope",
+      "lens_layer",
+      "lens_rho",
+      "n_readable",
+      "n_inverted"
+    ],
+    "rows": [
+      [
+        "paper",
+        35,
+        0.9722222222222222,
+        0.837890625,
+        36,
+        1.0,
+        0.9906256047770148,
+        36,
+        0.8285714285714286,
+        12,
+        0
+      ],
+      [
+        "no_template",
+        28,
+        0.7777777777777778,
+        0.903125,
+        29,
+        0.8055555555555556,
+        0.9234740001892594,
+        36,
+        0.9428571428571428,
+        12,
+        0
+      ],
+      [
+        "no_chat_tags",
+        26,
+        0.7222222222222222,
+        0.930078125,
+        36,
+        1.0,
+        1.0343344864544148,
+        29,
+        0.9428571428571428,
+        12,
+        2
+      ],
+      [
+        "neutral_frame",
+        25,
+        0.6944444444444444,
+        0.853125,
+        36,
+        1.0,
+        0.7765667229138975,
+        36,
+        0.9428571428571428,
+        12,
+        0
+      ],
+      [
+        "scaffold_0",
+        27,
+        0.75,
+        0.91015625,
+        36,
+        1.0,
+        1.0098050340799576,
+        36,
+        0.9428571428571428,
+        12,
+        1
+      ],
+      [
+        "concept_swap_0",
+        26,
+        0.7222222222222222,
+        0.8296875,
+        36,
+        1.0,
+        0.8802282954424543,
+        36,
+        0.8285714285714286,
+        12,
+        0
+      ]
+    ]
+  }
+}

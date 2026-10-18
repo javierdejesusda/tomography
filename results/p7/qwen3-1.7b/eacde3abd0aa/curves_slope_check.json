@@ -1,0 +1,91 @@
+{
+  "_meta": {
+    "experiment": "p7",
+    "config_hash": "eacde3abd0aa",
+    "seed": 0,
+    "git_sha": "f4d414d3a41edebf000d90a6b706d766119b1f42",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A4500)",
+    "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T02:05:13+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p7",
+      "model": "qwen3-1.7b",
+      "seed": 0,
+      "n_prompts": 50,
+      "max_new_tokens": 40,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 2,
+      "layers": null,
+      "coeffs": [
+        -0.3,
+        -0.15,
+        0.0,
+        0.15,
+        0.3
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "judge": "sentiment-primary",
+      "judge_check": "sentiment-secondary",
+      "templates": [
+        "paper",
+        "no_template",
+        "no_chat_tags",
+        "neutral_frame",
+        "scaffold_0",
+        "concept_swap_0"
+      ],
+      "formats": [
+        "raw",
+        "chat",
+        "story"
+      ],
+      "n_seeds": 10,
+      "n_steer_seeds": 2,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "min_words": 3,
+      "sweep_layers": null,
+      "truncate_words": 3,
+      "read_threshold": 0.6,
+      "n_boot": 2000,
+      "n_random": 3
+    }
+  },
+  "data": {
+    "series": [
+      "paper",
+      "no_template",
+      "no_chat_tags",
+      "neutral_frame",
+      "scaffold_0",
+      "concept_swap_0"
+    ],
+    "xlabel": "Layer",
+    "ylabel": "Dose slope (check judge)",
+    "chance": 0.0,
+    "n_layers": 28
+  }
+}

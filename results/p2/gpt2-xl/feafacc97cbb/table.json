@@ -1,0 +1,417 @@
+{
+  "_meta": {
+    "experiment": "p2",
+    "config_hash": "feafacc97cbb",
+    "seed": 0,
+    "git_sha": "f4d414d3a41edebf000d90a6b706d766119b1f42",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A4500)",
+    "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-17T18:50:03+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p2",
+      "model": "gpt2-xl",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "logistic",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "utility"
+      ],
+      "positions": [
+        "last",
+        "concept",
+        "mean"
+      ],
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "zero_shot": true
+    }
+  },
+  "data": [
+    {
+      "task": "sentiment",
+      "position": "last",
+      "condition": "original",
+      "layer": 43,
+      "accuracy": 0.7761682242990654,
+      "lo": 0.7556074766355141,
+      "hi": 0.794392523364486,
+      "change": 0.0
+    },
+    {
+      "task": "sentiment",
+      "position": "last",
+      "condition": "random",
+      "layer": 43,
+      "accuracy": 0.7317757009345794,
+      "lo": 0.7121495327102803,
+      "hi": 0.7518691588785047,
+      "change": -5.719446116797108
+    },
+    {
+      "task": "sentiment",
+      "position": "last",
+      "condition": "against",
+      "layer": 43,
+      "accuracy": 0.7144859813084112,
+      "lo": 0.6915771028037383,
+      "hi": 0.7383294392523364,
+      "change": -7.947019867549663
+    },
+    {
+      "task": "sentiment",
+      "position": "concept",
+      "condition": "original",
+      "layer": 23,
+      "accuracy": 0.8766355140186917,
+      "lo": 0.8602803738317757,
+      "hi": 0.8915887850467289,
+      "change": 0.0
+    },
+    {
+      "task": "sentiment",
+      "position": "concept",
+      "condition": "random",
+      "layer": 23,
+      "accuracy": 0.8901869158878505,
+      "lo": 0.874766355140187,
+      "hi": 0.9037383177570092,
+      "change": 1.5458422174840016
+    },
+    {
+      "task": "sentiment",
+      "position": "concept",
+      "condition": "against",
+      "layer": 23,
+      "accuracy": 0.8714953271028036,
+      "lo": 0.8551401869158879,
+      "hi": 0.8873831775700936,
+      "change": -0.5863539445629194
+    },
+    {
+      "task": "sentiment",
+      "position": "mean",
+      "condition": "original",
+      "layer": 24,
+      "accuracy": 0.8869158878504674,
+      "lo": 0.8719626168224298,
+      "hi": 0.9018691588785046,
+      "change": 0.0
+    },
+    {
+      "task": "sentiment",
+      "position": "mean",
+      "condition": "random",
+      "layer": 24,
+      "accuracy": 0.8920560747663553,
+      "lo": 0.8766355140186916,
+      "hi": 0.9074883177570094,
+      "change": 0.5795574288725043
+    },
+    {
+      "task": "sentiment",
+      "position": "mean",
+      "condition": "against",
+      "layer": 24,
+      "accuracy": 0.8920560747663553,
+      "lo": 0.8766355140186916,
+      "hi": 0.9074883177570094,
+      "change": 0.5795574288725043
+    },
+    {
+      "task": "sentiment",
+      "position": "zero_shot",
+      "condition": "original",
+      "layer": null,
+      "accuracy": 0.5887850467289719,
+      "lo": 0.5233644859813084,
+      "hi": 0.6542056074766355,
+      "change": 0.0
+    },
+    {
+      "task": "sentiment",
+      "position": "zero_shot",
+      "condition": "random",
+      "layer": null,
+      "accuracy": 0.5373831775700935,
+      "lo": 0.4719626168224299,
+      "hi": 0.602803738317757,
+      "change": -8.730158730158722
+    },
+    {
+      "task": "sentiment",
+      "position": "zero_shot",
+      "condition": "against",
+      "layer": null,
+      "accuracy": 0.0,
+      "lo": 0.0,
+      "hi": 0.0,
+      "change": -100.0
+    },
+    {
+      "task": "truth",
+      "position": "last",
+      "condition": "original",
+      "layer": 26,
+      "accuracy": 0.6559322033898305,
+      "lo": 0.6457627118644067,
+      "hi": 0.6661016949152543,
+      "change": 0.0
+    },
+    {
+      "task": "truth",
+      "position": "last",
+      "condition": "random",
+      "layer": 26,
+      "accuracy": 0.6237288135593221,
+      "lo": 0.6033898305084746,
+      "hi": 0.6440677966101694,
+      "change": -4.909560723514202
+    },
+    {
+      "task": "truth",
+      "position": "last",
+      "condition": "against",
+      "layer": 26,
+      "accuracy": 0.6305084745762712,
+      "lo": 0.605084745762712,
+      "hi": 0.6559745762711862,
+      "change": -3.8759689922480516
+    },
+    {
+      "task": "truth",
+      "position": "concept",
+      "condition": "original",
+      "layer": 37,
+      "accuracy": 0.7033898305084746,
+      "lo": 0.6864406779661016,
+      "hi": 0.7203389830508475,
+      "change": 0.0
+    },
+    {
+      "task": "truth",
+      "position": "concept",
+      "condition": "random",
+      "layer": 37,
+      "accuracy": 0.635593220338983,
+      "lo": 0.6220338983050847,
+      "hi": 0.6491525423728813,
+      "change": -9.638554216867476
+    },
+    {
+      "task": "truth",
+      "position": "concept",
+      "condition": "against",
+      "layer": 37,
+      "accuracy": 0.6423728813559322,
+      "lo": 0.6338983050847457,
+      "hi": 0.652542372881356,
+      "change": -8.674698795180728
+    },
+    {
+      "task": "truth",
+      "position": "mean",
+      "condition": "original",
+      "layer": 45,
+      "accuracy": 0.7016949152542373,
+      "lo": 0.6745762711864407,
+      "hi": 0.7271186440677966,
+      "change": 0.0
+    },
+    {
+      "task": "truth",
+      "position": "mean",
+      "condition": "random",
+      "layer": 45,
+      "accuracy": 0.7033898305084745,
+      "lo": 0.6779661016949152,
+      "hi": 0.7254237288135593,
+      "change": 0.24154589371978713
+    },
+    {
+      "task": "truth",
+      "position": "mean",
+      "condition": "against",
+      "layer": 45,
+      "accuracy": 0.7033898305084745,
+      "lo": 0.6779661016949152,
+      "hi": 0.7254237288135593,
+      "change": 0.24154589371978713
+    },
+    {
+      "task": "truth",
+      "position": "zero_shot",
+      "condition": "original",
+      "layer": null,
+      "accuracy": 0.4915254237288136,
+      "lo": 0.3728813559322034,
+      "hi": 0.6101694915254238,
+      "change": 0.0
+    },
+    {
+      "task": "truth",
+      "position": "zero_shot",
+      "condition": "random",
+      "layer": null,
+      "accuracy": 0.4745762711864407,
+      "lo": 0.3559322033898305,
+      "hi": 0.5936440677966078,
+      "change": -3.4482758620689675
+    },
+    {
+      "task": "truth",
+      "position": "zero_shot",
+      "condition": "against",
+      "layer": null,
+      "accuracy": 0.03389830508474576,
+      "lo": 0.0,
+      "hi": 0.0847457627118644,
+      "change": -93.10344827586206
+    },
+    {
+      "task": "utility",
+      "position": "last",
+      "condition": "original",
+      "layer": 33,
+      "accuracy": 0.686328125,
+      "lo": 0.67265625,
+      "hi": 0.69921875,
+      "change": 0.0
+    },
+    {
+      "task": "utility",
+      "position": "last",
+      "condition": "random",
+      "layer": 33,
+      "accuracy": 0.669921875,
+      "lo": 0.65390625,
+      "hi": 0.684375,
+      "change": -2.390438247011946
+    },
+    {
+      "task": "utility",
+      "position": "last",
+      "condition": "against",
+      "layer": 33,
+      "accuracy": 0.228125,
+      "lo": 0.165625,
+      "hi": 0.2973144531249997,
+      "change": -66.76152532726238
+    },
+    {
+      "task": "utility",
+      "position": "concept",
+      "condition": "original",
+      "layer": 29,
+      "accuracy": 0.715625,
+      "lo": 0.704296875,
+      "hi": 0.7296875,
+      "change": 0.0
+    },
+    {
+      "task": "utility",
+      "position": "concept",
+      "condition": "random",
+      "layer": 29,
+      "accuracy": 0.729296875,
+      "lo": 0.715625,
+      "hi": 0.74375,
+      "change": 1.9104803493449782
+    },
+    {
+      "task": "utility",
+      "position": "concept",
+      "condition": "against",
+      "layer": 29,
+      "accuracy": 0.51953125,
+      "lo": 0.48671875,
+      "hi": 0.55390625,
+      "change": -27.401746724890828
+    },
+    {
+      "task": "utility",
+      "position": "mean",
+      "condition": "original",
+      "layer": 23,
+      "accuracy": 0.6734375,
+      "lo": 0.6453125,
+      "hi": 0.7015625,
+      "change": 0.0
+    },
+    {
+      "task": "utility",
+      "position": "mean",
+      "condition": "random",
+      "layer": 23,
+      "accuracy": 0.67578125,
+      "lo": 0.644130859375,
+      "hi": 0.70625,
+      "change": 0.3480278422273749
+    },
+    {
+      "task": "utility",
+      "position": "mean",
+      "condition": "against",
+      "layer": 23,
+      "accuracy": 0.6796875,
+      "lo": 0.647265625,
+      "hi": 0.709765625,
+      "change": 0.9280742459396718
+    },
+    {
+      "task": "utility",
+      "position": "zero_shot",
+      "condition": "original",
+      "layer": null,
+      "accuracy": 0.57421875,
+      "lo": 0.51171875,
+      "hi": 0.6328125,
+      "change": 0.0
+    },
+    {
+      "task": "utility",
+      "position": "zero_shot",
+      "condition": "random",
+      "layer": null,
+      "accuracy": 0.56640625,
+      "lo": 0.5078125,
+      "hi": 0.6250976562499995,
+      "change": -1.3605442176870748
+    },
+    {
+      "task": "utility",
+      "position": "zero_shot",
+      "condition": "against",
+      "layer": null,
+      "accuracy": 0.00390625,
+      "lo": 0.0,
+      "hi": 0.01171875,
+      "change": -99.31972789115646
+    }
+  ]
+}
