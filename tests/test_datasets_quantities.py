@@ -1237,3 +1237,7 @@ def test_people_heights_reject_bad_arguments(tmp_path: Path) -> None:
 
 def test_people_heights_default_occupations_start_with_basketball() -> None:
     assert quantities.PEOPLE_OCCUPATIONS[0] == HOOPS
+
+
+def test_people_heights_default_floor_keeps_well_known_people() -> None:
+    assert quantities.PEOPLE_MIN_SITELINKS == 100
