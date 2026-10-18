@@ -23,13 +23,14 @@ def test_rc_matches_the_neurips_figure_standard() -> None:
     with paper.paper_style():
         rc = mpl.rcParams
         assert rc["font.family"] == ["serif"]
-        assert rc["font.serif"][0] == "STIXGeneral"
-        assert rc["mathtext.fontset"] == "stix"
-        assert rc["xtick.labelsize"] == 7
-        assert rc["ytick.labelsize"] == 7
+        assert rc["font.serif"][0] == "cmr10"
+        assert rc["mathtext.fontset"] == "cm"
+        assert rc["axes.formatter.use_mathtext"] is True
+        assert rc["xtick.labelsize"] == 8
+        assert rc["ytick.labelsize"] == 8
         assert rc["axes.labelsize"] == 8
-        assert rc["axes.titlesize"] == 8
-        assert rc["legend.fontsize"] == 7
+        assert rc["axes.titlesize"] == 9
+        assert rc["legend.fontsize"] == 8
         assert rc["axes.linewidth"] == 0.5
         assert rc["axes.spines.top"] is False
         assert rc["axes.spines.right"] is False
@@ -94,9 +95,8 @@ def test_panel_letter_sits_at_the_top_left_outside_the_axes() -> None:
         fig = Figure(figsize=(2.7, 1.5))
         ax = fig.subplots()
         text = paper.panel_letter(ax, "b")
-    assert text.get_text() == "(b)"
-    assert text.get_fontweight() == "bold"
-    assert text.get_fontsize() == 8.5
+    assert text.get_text() == r"$\mathbf{(b)}$"
+    assert text.get_fontsize() == 9
     assert text.get_position()[1] >= 1.0
 
 
@@ -130,3 +130,26 @@ def test_saved_figure_has_its_natural_size_in_inches() -> None:
 def test_unknown_family_ramp_is_rejected() -> None:
     with pytest.raises(KeyError):
         paper.size_ramp("llama", 2)
+
+
+def test_every_text_artist_resolves_to_a_computer_modern_font() -> None:
+    from matplotlib import font_manager
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.text import Text
+
+    with paper.paper_style():
+        fig = Figure(figsize=(2.7, 1.5))
+        FigureCanvasAgg(fig)
+        ax = fig.subplots()
+        ax.plot([-1, 0, 1], [0.4, 0.6, 0.5], label="series")
+        ax.set_title("GPT-2 small, Qwen3-0.6B-Base")
+        ax.set_xlabel("relative depth")
+        ax.legend()
+        paper.panel_letter(ax, "a")
+        fig.canvas.draw()
+        texts = [t for t in fig.findobj(Text) if t.get_text()]
+        assert texts
+        for text in texts:
+            path = font_manager.findfont(text.get_fontproperties())
+            name = path.replace("\\", "/").rsplit("/", 1)[-1]
+            assert name.startswith("cm"), (text.get_text(), name)

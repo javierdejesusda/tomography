@@ -67,9 +67,13 @@ def test_figure_is_print_width_and_has_one_letter_per_panel(
     fig = figures.render(source)
     assert fig.get_size_inches()[0] == paper.FULL_WIDTH
     letters = [
-        t.get_text() for t in _texts(fig) if t.get_fontweight() == "bold"
+        t.get_text()
+        for t in _texts(fig)
+        if t.get_text().startswith(r"$\mathbf")
     ]
-    expected = [f"({chr(97 + i)})" for i in range(len(source.panels))]
+    expected = [
+        rf"$\mathbf{{({chr(97 + i)})}}$" for i in range(len(source.panels))
+    ]
     assert letters == expected
 
 

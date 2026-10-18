@@ -1,9 +1,10 @@
 """Print-ready figure style for the results site and the paper figures.
 
-One style covers every figure: the serif face of the NeurIPS and ICLR body
-text, 7 to 8.5 pt type, 0.5 pt axes, Okabe-Ito hues in a fixed order, grey
-for random baselines, and a text width of 5.5 in. Rendering is deterministic:
-text is converted to paths and the SVG and PDF headers carry no dates.
+One style covers every figure: the Computer Modern face of the NeurIPS and
+ICLR body text, 8 to 9 pt type, 0.5 pt axes, Okabe-Ito hues in a fixed order,
+grey for random baselines, and a text width of 5.5 in. Rendering is
+deterministic: text is converted to paths and the SVG and PDF headers carry
+no dates.
 """
 
 from collections.abc import Iterator
@@ -28,21 +29,23 @@ RANDOM_BAND = "#d9d9d9"
 CHANCE = "#7f7f7f"
 INK = "#1a1a1a"
 
-TICK = 7
+TICK = 8
 LABEL = 8
-LETTER = 8.5
+TITLE = 9
+LETTER = 9
 
 RAMP_LIGHTNESS = (0.46, 0.2)
 
 RC: dict[str, Any] = {
     "font.family": ["serif"],
-    "font.serif": ["STIXGeneral"],
-    "mathtext.fontset": "stix",
+    "font.serif": ["cmr10"],
+    "mathtext.fontset": "cm",
+    "axes.formatter.use_mathtext": True,
     "font.size": TICK,
     "xtick.labelsize": TICK,
     "ytick.labelsize": TICK,
     "axes.labelsize": LABEL,
-    "axes.titlesize": LABEL,
+    "axes.titlesize": TITLE,
     "axes.titleweight": "normal",
     "axes.titlelocation": "left",
     "legend.fontsize": TICK,
@@ -174,13 +177,12 @@ def panel_letter(ax: Axes, letter: str) -> Annotation:
         The text artist.
     """
     return ax.annotate(
-        f"({letter})",
+        rf"$\mathbf{{({letter})}}$",
         xy=(0.0, 1.0),
         xycoords="axes fraction",
         xytext=(0, 5),
         textcoords="offset points",
         fontsize=LETTER,
-        fontweight="bold",
         ha="right",
         va="bottom",
     )
