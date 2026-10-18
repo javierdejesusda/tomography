@@ -29,6 +29,7 @@ from tomography.experiments.p10a_quantities import Results
 from tomography.experiments.p10a_quantities import bootstrap_gap_ci
 from tomography.experiments.p10a_quantities import build_prompt
 from tomography.experiments.p10a_quantities import build_table
+from tomography.experiments.p10a_quantities import cluster_cis
 from tomography.experiments.p10a_quantities import execute
 from tomography.experiments.p10a_quantities import forced_in_range_table
 from tomography.experiments.p10a_quantities import hedge_gap_table
@@ -433,16 +434,17 @@ def test_the_table_counts_forms_per_cell_with_wilson_intervals() -> None:
             greedy = _answer("point", correct=i % 2 == 0, mismatch=i == 4)
         results[("free", "fewshot", "range_last")].append(_outcome(greedy))
 
-    columns, body = build_table(items, results)
+    columns, body = build_table(items, results, seed=0)
     rows = _rows(columns, body)
 
-    assert columns[:8] == [
+    assert columns[:9] == [
         "family",
         "kind",
         "condition",
         "format",
         "shot_order",
         "decoding",
+        "interval",
         "n",
         "n_gradable",
     ]
@@ -470,7 +472,7 @@ def test_the_table_has_a_pooled_family_and_both_decodings() -> None:
         ]
     }
 
-    columns, body = build_table(items, results)
+    columns, body = build_table(items, results, seed=0)
     rows = _rows(columns, body)
 
     families = {r["family"] for r in rows}
@@ -496,7 +498,7 @@ def test_the_table_counts_approximate_answers_of_any_form() -> None:
         ]
     }
 
-    columns, body = build_table(items, results)
+    columns, body = build_table(items, results, seed=0)
     row = _find(
         _rows(columns, body), family="alpha", kind="range", decoding="greedy"
     )
@@ -513,7 +515,7 @@ def test_a_cell_without_gradable_answers_has_no_correct_rate() -> None:
         ]
     }
 
-    columns, body = build_table(items, results)
+    columns, body = build_table(items, results, seed=0)
     row = _find(
         _rows(columns, body), family="alpha", kind="range", decoding="greedy"
     )
@@ -717,8 +719,12 @@ def test_width_tertiles_split_range_items_by_relative_width() -> None:
         ]
     }
 
-    columns, body = width_table(items, results)
-    rows = [r for r in _rows(columns, body) if r["decoding"] == "greedy"]
+    columns, body = width_table(items, results, seed=0)
+    rows = [
+        r
+        for r in _rows(columns, body)
+        if r["decoding"] == "greedy" and r["family"] == "all"
+    ]
 
     assert [r["tertile"] for r in rows] == [1, 2, 3]
     assert [r["n_items"] for r in rows] == [2, 2, 2]
@@ -741,9 +747,10 @@ def test_width_covers_range_items_only_and_drops_empty_tertiles() -> None:
         ("free", "chat", "none"): [_outcome(_answer("range")) for _ in items]
     }
 
-    columns, body = width_table(items, results)
+    columns, body = width_table(items, results, seed=0)
     rows = _rows(columns, body)
 
+    assert {r["family"] for r in rows} == {"height", "all"}
     assert {r["tertile"] for r in rows} == {1}
     assert {r["n_items"] for r in rows} == {1}
     assert {r["decoding"] for r in rows} == {"greedy", "sampled"}
@@ -937,7 +944,7 @@ def test_the_hedge_gap_and_forced_files_follow_the_planted_answers(
         if r["family"] == "all" and r["kind"] == "range"
     ]
     assert [(r["n_point"], r["inside"]) for r in forced] == [("12", "12")]
-    assert len(_csv(run_dir, "width.csv")) == 2 * 3 * 2
+    assert len(_csv(run_dir, "width.csv")) == 3 * 3 * 2 * 2
 
 
 def test_generation_runs_greedy_then_sampled_per_cell(
@@ -1605,3 +1612,225 @@ def test_the_plot_panels_fall_back_to_chat_without_fewshot(
         "chat",
         ["none"],
     )
+
+
+def _clustered(
+    per_item_ranges: list[int], n_samples: int = 5
+) -> tuple[list[QuantityQuestion], Results]:
+    """Four range items whose samples are all range or all not."""
+    items = _pool(("alpha",), per_side=len(per_item_ranges))
+    outcomes = []
+    for item in items:
+        if item.kind == "exact":
+            outcomes.append(_outcome(_answer("point"), _answer("point")))
+            continue
+        shares = per_item_ranges[int(item.uid[-1])]
+        samples = tuple(
+            _answer("range" if k < shares else "point", correct=True)
+            for k in range(n_samples)
+        )
+        outcomes.append(Outcome(greedy=_answer("range"), samples=samples))
+    return items, {("free", "fewshot", "range_last"): outcomes}
+
+
+def test_cluster_cis_is_degenerate_for_identical_items() -> None:
+    numer = np.full((6, 1), 3.0)
+    denom = np.full((6, 1), 5.0)
+
+    cis = cluster_cis(numer, denom, seed=1)
+
+    assert cis.shape == (1, 2)
+    assert cis[0].tolist() == [0.6, 0.6]
+
+
+def test_cluster_cis_spans_the_items_not_the_samples() -> None:
+    numer = np.array([[10.0], [0.0]])
+    denom = np.array([[10.0], [10.0]])
+
+    low, high = cluster_cis(numer, denom, seed=1)[0]
+
+    assert (low, high) == (0.0, 1.0)
+
+
+def test_cluster_cis_is_seeded_and_resamples_2000_times_by_default() -> None:
+    rng = np.random.default_rng(0)
+    numer = rng.integers(0, 6, size=(9, 2)).astype(float)
+    denom = np.full((9, 2), 5.0)
+
+    first = cluster_cis(numer, denom, seed=1)
+
+    assert np.array_equal(first, cluster_cis(numer, denom, seed=1))
+    assert not np.array_equal(first, cluster_cis(numer, denom, seed=2))
+    default = inspect.signature(cluster_cis).parameters["n_boot"].default
+    assert default == 2000
+
+
+def test_cluster_cis_skips_resamples_without_a_denominator() -> None:
+    numer = np.array([[1.0, 0.0], [0.0, 0.0]])
+    denom = np.array([[1.0, 0.0], [1.0, 0.0]])
+
+    cis = cluster_cis(numer, denom, seed=1)
+
+    assert not np.isnan(cis[0]).any()
+    assert np.isnan(cis[1]).all()
+
+
+def test_the_sampled_rows_use_the_item_bootstrap() -> None:
+    items, results = _clustered([5, 5, 0, 0])
+
+    columns, body = build_table(items, results, seed=3)
+    rows = _rows(columns, body)
+
+    sampled = _find(rows, family="alpha", kind="range", decoding="sampled")
+    assert sampled["interval"] == "item_bootstrap"
+    assert sampled["range_rate"] == 0.5
+    assert (sampled["range_lo"], sampled["range_hi"]) == (0.0, 1.0)
+    assert (sampled["range_lo"], sampled["range_hi"]) != wilson_ci(10, 20)
+    greedy = _find(rows, family="alpha", kind="range", decoding="greedy")
+    assert greedy["interval"] == "wilson"
+    assert (greedy["range_lo"], greedy["range_hi"]) == wilson_ci(4, 4)
+
+
+def test_the_sampled_correct_rate_is_over_the_gradable_samples() -> None:
+    items, results = _clustered([5, 5, 0, 0])
+
+    columns, body = build_table(items, results, seed=3)
+    sampled = _find(
+        _rows(columns, body), family="alpha", kind="range", decoding="sampled"
+    )
+
+    assert (sampled["n"], sampled["n_gradable"]) == (20, 20)
+    assert sampled["correct"] == 20
+    assert sampled["correct_rate"] == 1.0
+    assert sampled["correct_lo"] == sampled["correct_hi"] == 1.0
+
+
+def test_a_sampled_cell_without_gradable_samples_has_no_interval() -> None:
+    items = _pool(("alpha",), per_side=2)
+    results: Results = {
+        ("free", "fewshot", "range_last"): [
+            _outcome(_answer("abstain"), _answer("abstain")) for _ in items
+        ]
+    }
+
+    columns, body = build_table(items, results, seed=0)
+    row = _find(
+        _rows(columns, body), family="alpha", kind="range", decoding="sampled"
+    )
+
+    assert row["correct_rate"] is None
+    assert row["correct_lo"] is None
+    assert row["correct_hi"] is None
+
+
+def test_the_table_forwards_the_seed_to_the_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seeds: list[int] = []
+    real = p10a_quantities.cluster_cis
+
+    def spy(numer: Any, denom: Any, *, seed: int) -> Any:
+        seeds.append(seed)
+        return real(numer, denom, seed=seed)
+
+    monkeypatch.setattr(p10a_quantities, "cluster_cis", spy)
+    items, results = _clustered([5, 0, 5, 0])
+
+    build_table(items, results, seed=11)
+
+    assert seeds == [11] * 4
+
+
+def test_width_sampled_rows_use_the_item_bootstrap() -> None:
+    items = [
+        _item(uid=f"u{k}", low=100.0, high=100.0 + 10 * (k + 1))
+        for k in range(3)
+    ]
+    outcomes = [
+        Outcome(
+            greedy=_answer("range", correct=True),
+            samples=(_answer("point", correct=False),),
+        )
+        for _ in range(3)
+    ]
+    results: Results = {("free", "fewshot", "range_last"): outcomes}
+
+    columns, body = width_table(items, results, seed=1)
+    rows = _rows(columns, body)
+
+    assert {r["interval"] for r in rows if r["decoding"] == "greedy"} == {
+        "wilson"
+    }
+    assert {r["interval"] for r in rows if r["decoding"] == "sampled"} == {
+        "item_bootstrap"
+    }
+
+
+def test_width_cuts_tertiles_within_each_family_and_pooled() -> None:
+    items = [
+        _item(
+            uid=f"{family}-{k}",
+            family=family,
+            low=100.0,
+            high=100.0 + 10 * (k + 1) * scale,
+        )
+        for family, scale in (("alpha", 1.0), ("beta", 10.0))
+        for k in range(6)
+    ]
+    outcomes = [_outcome(_answer("range")) for _ in items]
+    results: Results = {("free", "fewshot", "range_last"): outcomes}
+
+    columns, body = width_table(items, results, seed=0)
+    rows = [r for r in _rows(columns, body) if r["decoding"] == "greedy"]
+
+    for family in ("alpha", "beta", "all"):
+        tertiles = [r for r in rows if r["family"] == family]
+        assert [r["tertile"] for r in tertiles] == [1, 2, 3]
+        assert [r["n_items"] for r in tertiles] == [
+            2 if family != "all" else 4
+        ] * 3
+    alpha = [r for r in rows if r["family"] == "alpha"]
+    pooled = [r for r in rows if r["family"] == "all"]
+    assert alpha[2]["width_hi"] < pooled[2]["width_hi"]
+    assert pooled[0]["width_hi"] <= pooled[1]["width_lo"]
+    beta = [r for r in rows if r["family"] == "beta"]
+    assert beta[0]["width_lo"] > alpha[0]["width_lo"]
+
+
+def test_width_forwards_the_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    seeds: list[int] = []
+    real = p10a_quantities.cluster_cis
+
+    def spy(numer: Any, denom: Any, *, seed: int) -> Any:
+        seeds.append(seed)
+        return real(numer, denom, seed=seed)
+
+    monkeypatch.setattr(p10a_quantities, "cluster_cis", spy)
+    items = [_item(uid=f"u{k}", low=100.0, high=110.0 + k) for k in range(3)]
+    results: Results = {
+        ("free", "fewshot", "range_last"): [
+            _outcome(_answer("range"), _answer("range")) for _ in items
+        ]
+    }
+
+    width_table(items, results, seed=13)
+
+    assert seeds
+    assert set(seeds) == {13}
+
+
+def test_the_run_files_use_the_config_seed_for_the_intervals(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir, _ = _executed(tiny_gpt2, tmp_path, monkeypatch, seed=2)
+    rows = _csv(run_dir, "table.csv")
+
+    assert {r["interval"] for r in rows if r["decoding"] == "greedy"} == {
+        "wilson"
+    }
+    assert {r["interval"] for r in rows if r["decoding"] == "sampled"} == {
+        "item_bootstrap"
+    }
+    widths = _csv(run_dir, "width.csv")
+    assert {r["family"] for r in widths} == {"alpha", "beta", "all"}
+    assert {r["interval"] for r in widths} == {"wilson", "item_bootstrap"}

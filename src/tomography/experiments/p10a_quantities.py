@@ -7,7 +7,8 @@ model for a free answer and for an answer under the instruction to give one
 exact number, in a few-shot format that every model shares and in the chat
 template of post-trained models. For each question it keeps one greedy
 completion and several sampled ones, reads each completion as a point, a
-range, an abstention or nothing, and writes the rates with Wilson intervals,
+range, an abstention or nothing, and writes the rates with intervals (Wilson
+for the greedy answers, an item bootstrap for the sampled ones),
 the gap in hedging between range and exact items, how often a forced point
 lands inside the sourced range, and a hand-check file for the answer parser.
 """
@@ -20,6 +21,7 @@ from pathlib import Path
 import re
 from typing import Any
 from typing import Final
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
@@ -504,20 +506,109 @@ def _members(
     ]
 
 
+def cluster_cis(
+    numer: NDArray[np.float64],
+    denom: NDArray[np.float64],
+    *,
+    n_boot: int = N_BOOT,
+    seed: int,
+) -> NDArray[np.float64]:
+    """Bootstraps 95 percent intervals of rates by resampling items.
+
+    Each item contributes a numerator and a denominator per metric (its
+    count of a form and its number of answers), and an item is resampled
+    with all its answers, so the answers of one item are not treated as
+    independent. A resample whose denominator is zero for a metric is left
+    out of that metric's interval.
+
+    Args:
+        numer: Per-item counts, shape (items, metrics).
+        denom: Per-item denominators, same shape.
+        n_boot: Number of resamples.
+        seed: Seed of the resampling.
+
+    Returns:
+        The 2.5th and 97.5th percentiles of the resampled rates, shape
+        (metrics, 2); NaN for a metric no resample could rate.
+    """
+    rng = np.random.default_rng(seed)
+    n_items = numer.shape[0]
+    drawn = rng.integers(0, n_items, size=(n_boot, n_items))
+    top = numer[drawn].sum(axis=1)
+    bottom = denom[drawn].sum(axis=1)
+    rates = np.full(top.shape, np.nan)
+    np.divide(top, bottom, out=rates, where=bottom > 0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        cis = np.nanpercentile(rates, [2.5, 97.5], axis=0)
+    return np.asarray(cis.T, dtype=np.float64)
+
+
+def _rate_cells(
+    per_item: Sequence[dict[str, int]],
+    metrics: Sequence[str],
+    decoding: str,
+    seed: int,
+) -> tuple[str, dict[str, list[float | None]]]:
+    """Rates and 95 percent intervals of the metrics of one group of items.
+
+    The greedy decoding has one answer per item and gets Wilson intervals;
+    the sampled decoding gets the item bootstrap of `cluster_cis`. The rate
+    of `correct` is over the gradable answers and the others are over all.
+
+    Args:
+        per_item: The `_counts` of each item's answers.
+        metrics: The metrics to rate.
+        decoding: "greedy" or "sampled".
+        seed: Seed of the bootstrap.
+
+    Returns:
+        The interval method ("wilson" or "item_bootstrap") and, per metric,
+        its rate, lower and upper bounds (None when it has no denominator).
+    """
+    totals = {key: sum(c[key] for c in per_item) for key in per_item[0]}
+
+    def denominator(metric: str, item: dict[str, int]) -> int:
+        return item["n_gradable" if metric == "correct" else "n"]
+
+    if decoding == "greedy":
+        return "wilson", {
+            m: _rate(totals[m], denominator(m, totals)) for m in metrics
+        }
+    numer = np.array(
+        [[c[m] for m in metrics] for c in per_item], dtype=np.float64
+    )
+    denom = np.array(
+        [[denominator(m, c) for m in metrics] for c in per_item],
+        dtype=np.float64,
+    )
+    cis = cluster_cis(numer, denom, seed=seed)
+    cells: dict[str, list[float | None]] = {}
+    for k, metric in enumerate(metrics):
+        n = denominator(metric, totals)
+        cells[metric] = (
+            [None, None, None]
+            if n == 0 or np.isnan(cis[k]).any()
+            else [totals[metric] / n, float(cis[k, 0]), float(cis[k, 1])]
+        )
+    return "item_bootstrap", cells
+
+
 def build_table(
-    items: Sequence[QuantityQuestion], results: Results
+    items: Sequence[QuantityQuestion], results: Results, *, seed: int
 ) -> tuple[list[str], list[list[Any]]]:
     """Builds the form and correctness rates per family, kind and cell.
 
     Every row covers the answers of one family (or all of them pooled), one
-    kind, one condition, one format and one decoding. For the sampled
-    decoding a trial is one completion, so the Wilson intervals treat the
-    samples of an item as independent and are narrower than the item-level
-    uncertainty; the hedge gap uses an item bootstrap instead.
+    kind, one cell and one decoding. The `interval` column says how the
+    bounds were made: Wilson for the greedy decoding, and for the sampled
+    decoding an item bootstrap (2000 resamples of the items with all their
+    samples), because the samples of an item are not independent.
 
     Args:
         items: The questions.
-        results: The outcomes per (condition, format), aligned with items.
+        results: The outcomes per cell, aligned with items.
+        seed: Seed of the bootstrap.
 
     Returns:
         The column names and the rows. Rates are over all answers, except
@@ -530,6 +621,7 @@ def build_table(
         "format",
         "shot_order",
         "decoding",
+        "interval",
         "n",
         "n_gradable",
         *(c for m in METRICS for c in _rate_columns(m)),
@@ -542,12 +634,14 @@ def build_table(
                 continue
             for (condition, fmt, order), outcomes in results.items():
                 for decoding in DECODINGS:
-                    answers = [
-                        a
+                    per_item = [
+                        _counts(_answers(outcomes[i], decoding))
                         for i in members
-                        for a in _answers(outcomes[i], decoding)
                     ]
-                    counts = _counts(answers)
+                    method, cells = _rate_cells(
+                        per_item, METRICS, decoding, seed
+                    )
+                    n = sum(c["n"] for c in per_item)
                     rows.append(
                         [
                             family,
@@ -556,16 +650,14 @@ def build_table(
                             fmt,
                             order,
                             decoding,
-                            counts["n"],
-                            counts["n_gradable"],
+                            method,
+                            n,
+                            sum(c["n_gradable"] for c in per_item),
                         ]
                     )
                     for metric in METRICS:
-                        n = counts["n_gradable" if metric == "correct" else "n"]
-                        rows[-1] += [
-                            counts[metric],
-                            *_rate(counts[metric], n),
-                        ]
+                        count = sum(c[metric] for c in per_item)
+                        rows[-1] += [count, *cells[metric]]
     return columns, rows
 
 
@@ -772,27 +864,33 @@ def forced_in_range_table(
 
 
 def width_table(
-    items: Sequence[QuantityQuestion], results: Results
+    items: Sequence[QuantityQuestion], results: Results, *, seed: int
 ) -> tuple[list[str], list[list[Any]]]:
     """Builds range and correct rates by the width tertile of range items.
 
-    The width of a range item is `(high - low) / midpoint`. Range items of
-    all families are ordered by width (ties by uid) and cut into three equal
-    groups; with fewer than three items the empty groups have no row.
+    The width of a range item is `(high - low) / midpoint`. The range items
+    of a family are ordered by width (ties by uid) and cut into three equal
+    groups by rank; the pooled "all" rows cut all range items together with
+    their own tertiles. With fewer than three items the empty groups have no
+    row. Intervals are Wilson for the greedy decoding and an item bootstrap
+    for the sampled one, as in `build_table`.
 
     Args:
         items: The questions.
-        results: The outcomes per (condition, format), aligned with items.
+        results: The outcomes per cell, aligned with items.
+        seed: Seed of the bootstrap.
 
     Returns:
-        The column names and the rows, one per condition, format, decoding
-        and non-empty tertile.
+        The column names and the rows, one per family (and pooled), cell,
+        decoding and non-empty tertile.
     """
     columns = [
+        "family",
         "condition",
         "format",
         "shot_order",
         "decoding",
+        "interval",
         "tertile",
         "width_lo",
         "width_hi",
@@ -802,44 +900,49 @@ def width_table(
         *_rate_columns("range"),
         *_rate_columns("correct"),
     ]
-    members = _members(items, POOLED, "range")
 
     def width(i: int) -> float:
         item = items[i]
         return (item.high - item.low) / ((item.high + item.low) / 2)
 
-    ordered = sorted(members, key=lambda i: (width(i), items[i].uid))
-    tertiles: list[list[int]] = [[], [], []]
-    for rank, i in enumerate(ordered):
-        tertiles[rank * 3 // len(ordered)].append(i)
     rows: list[list[Any]] = []
-    for (condition, fmt, order), outcomes in results.items():
-        for decoding in DECODINGS:
-            for k, group in enumerate(tertiles, start=1):
-                if not group:
-                    continue
-                answers = [
-                    a for i in group for a in _answers(outcomes[i], decoding)
-                ]
-                counts = _counts(answers)
-                rows.append(
-                    [
-                        condition,
-                        fmt,
-                        order,
-                        decoding,
-                        k,
-                        width(group[0]),
-                        width(group[-1]),
-                        len(group),
-                        counts["n"],
-                        counts["n_gradable"],
-                        counts["range"],
-                        *_rate(counts["range"], counts["n"]),
-                        counts["correct"],
-                        *_rate(counts["correct"], counts["n_gradable"]),
+    for family in _families_of(items):
+        members = _members(items, family, "range")
+        ordered = sorted(members, key=lambda i: (width(i), items[i].uid))
+        tertiles: list[list[int]] = [[], [], []]
+        for rank, i in enumerate(ordered):
+            tertiles[rank * 3 // len(ordered)].append(i)
+        for (condition, fmt, order), outcomes in results.items():
+            for decoding in DECODINGS:
+                for k, group in enumerate(tertiles, start=1):
+                    if not group:
+                        continue
+                    per_item = [
+                        _counts(_answers(outcomes[i], decoding)) for i in group
                     ]
-                )
+                    method, cells = _rate_cells(
+                        per_item, ("range", "correct"), decoding, seed
+                    )
+                    rows.append(
+                        [
+                            family,
+                            condition,
+                            fmt,
+                            order,
+                            decoding,
+                            method,
+                            k,
+                            width(group[0]),
+                            width(group[-1]),
+                            len(group),
+                            sum(c["n"] for c in per_item),
+                            sum(c["n_gradable"] for c in per_item),
+                            sum(c["range"] for c in per_item),
+                            *cells["range"],
+                            sum(c["correct"] for c in per_item),
+                            *cells["correct"],
+                        ]
+                    )
     return columns, rows
 
 
@@ -1111,12 +1214,12 @@ def execute(
         cell: _ask(config, loaded, items, cell, chat) for cell in cells
     }
     for name, (columns, rows) in {
-        "table": build_table(items, results),
+        "table": build_table(items, results, seed=config.seed),
         "hedge_gap": hedge_gap_table(items, results, seed=config.seed),
         "forced_in_range": forced_in_range_table(
             items, results, rel_tol=config.rel_tol
         ),
-        "width": width_table(items, results),
+        "width": width_table(items, results, seed=config.seed),
     }.items():
         _write_csv(run_dir.path / f"{name}.csv", columns, rows)
     columns, rows = hand_check_table(
