@@ -33,7 +33,7 @@ def draw(fig: Figure) -> RendererBase:
     """
     canvas = FigureCanvasAgg(fig)
     with paper.paper_style():
-        canvas.draw()
+        canvas.draw()  # type: ignore[no-untyped-call]
     renderer: RendererBase = canvas.get_renderer()  # type: ignore[no-untyped-call]
     return renderer
 
