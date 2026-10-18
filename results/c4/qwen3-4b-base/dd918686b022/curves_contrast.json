@@ -1,0 +1,77 @@
+{
+  "_meta": {
+    "experiment": "c4",
+    "config_hash": "dd918686b022",
+    "seed": 0,
+    "git_sha": "d09822b637f8aafbd25a3a6d91b280b0efa7bc16",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T14:56:24+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "c4",
+      "model": "qwen3-4b-base",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 40,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 2,
+      "layers": null,
+      "coeffs": [
+        -0.2,
+        -0.1,
+        -0.05,
+        0.0,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "n_seeds": 10,
+      "n_pairs": 128,
+      "n_eval_pairs": 128,
+      "alphas": [
+        -0.5,
+        -0.25,
+        0.0,
+        0.25,
+        0.5
+      ],
+      "n_boot": 2000,
+      "n_random": 3,
+      "lorra_run": "results/lr1/qwen3-4b-base/22e472aa6c00"
+    }
+  },
+  "data": {
+    "series": [
+      "selection questions",
+      "test questions"
+    ],
+    "xlabel": "Alpha",
+    "ylabel": "TruthfulQA MC1",
+    "chance": 0.22803468208092484,
+    "n_layers": null
+  }
+}
