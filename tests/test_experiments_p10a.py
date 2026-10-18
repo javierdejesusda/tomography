@@ -1,17 +1,21 @@
 """Tests for the P10a quantity behavior experiment."""
 
 import dataclasses
+from typing import Any
 
 import pytest
 
 from tomography.datasets.quantities import FAMILIES
+from tomography.datasets.quantities import QuantityQuestion
 from tomography.experiments import p10a_quantities
 from tomography.experiments.p10a_quantities import FORCED_INSTRUCTION
 from tomography.experiments.p10a_quantities import FORCED_SHOTS
 from tomography.experiments.p10a_quantities import FREE_SHOTS
 from tomography.experiments.p10a_quantities import UNIT_WORDS
+from tomography.experiments.p10a_quantities import Answer
 from tomography.experiments.p10a_quantities import Config
 from tomography.experiments.p10a_quantities import build_prompt
+from tomography.experiments.p10a_quantities import score_answer
 from tomography.experiments.sweep import chat_format_for
 from tomography.model import MODELS
 from tomography.model import LoadedModel
@@ -184,3 +188,150 @@ def test_an_unknown_condition_or_format_raises() -> None:
         build_prompt("Q?", "pressured", "fewshot", None)
     with pytest.raises(ValueError, match="format"):
         build_prompt("Q?", "free", "zeroshot", None)
+
+
+def _item(**overrides: Any) -> QuantityQuestion:
+    fields: dict[str, Any] = {
+        "uid": "height-range-Q1",
+        "family": "height",
+        "kind": "range",
+        "entity": "Beagle",
+        "entity_id": "Q1",
+        "question": "How tall is a Beagle, in centimetres?",
+        "low": 33.0,
+        "high": 41.0,
+        "unit": "centimetres",
+        "sitelinks": 40,
+        "split": "train",
+        "retrieved_on": "2026-10-17",
+        "sha256": "ab" * 32,
+    }
+    return QuantityQuestion(**{**fields, **overrides})
+
+
+def _score(text: str, fmt: str = "fewshot", **overrides: Any) -> Answer:
+    return score_answer(_item(**overrides), text, fmt, rel_tol=0.05)
+
+
+def test_a_fewshot_answer_is_cut_at_the_first_newline() -> None:
+    text = " 35 cm\nQ: How many keys?\nA: 88"
+
+    answer = _score(text)
+
+    assert (answer.form, answer.low, answer.high) == ("point", 35.0, 35.0)
+    assert answer.text == text
+
+
+def test_a_fewshot_completion_that_starts_a_new_line_is_no_answer() -> None:
+    answer = _score("\nQ: What year was 1969?\nA: 1969")
+
+    assert answer.form == "none"
+    assert answer.correct is None
+
+
+def test_a_chat_answer_reads_its_first_non_empty_line() -> None:
+    answer = _score("\n\n35 to 40 cm\nBeagles are small.", "chat")
+
+    assert (answer.form, answer.low, answer.high) == ("range", 35.0, 40.0)
+
+
+def test_the_entity_digits_are_not_the_answer() -> None:
+    item = {
+        "entity": "Boeing 737-800",
+        "question": "What is the wingspan of the Boeing 737-800, in metres?",
+        "unit": "metres",
+        "low": 35.0,
+        "high": 35.0,
+        "kind": "exact",
+    }
+
+    answer = _score(" The Boeing 737-800 has a wingspan of 35.8.", **item)
+
+    assert (answer.form, answer.low) == ("point", 35.8)
+    assert answer.correct is True
+
+
+def test_the_quantity_followed_by_the_unit_wins() -> None:
+    answer = _score(" 3 dogs weigh 38 cm", unit="centimetres")
+
+    assert answer.low == 38.0
+
+
+@pytest.mark.parametrize(
+    ("text", "form", "correct"),
+    [
+        (" 37", "point", True),
+        (" 30", "point", False),
+        (" 32", "point", True),
+        (" 31", "point", False),
+        (" 20 to 34", "range", True),
+        (" 50 to 60", "range", False),
+        (" I do not know", "abstain", None),
+        (" tall", "none", None),
+    ],
+)
+def test_the_answer_is_graded_against_the_sourced_range(
+    text: str, form: str, correct: bool | None
+) -> None:
+    answer = _score(text)
+
+    assert answer.form == form
+    assert answer.correct is correct
+
+
+def test_the_relative_tolerance_widens_the_range() -> None:
+    item = _item()
+
+    tight = score_answer(item, " 42", "fewshot", rel_tol=0.0)
+    loose = score_answer(item, " 42", "fewshot", rel_tol=0.05)
+
+    assert (tight.correct, loose.correct) == (False, True)
+
+
+def test_an_approximate_marker_is_kept() -> None:
+    assert _score(" about 37 cm").approximate is True
+    assert _score(" 37 cm").approximate is False
+
+
+@pytest.mark.parametrize(
+    ("unit", "text", "flag"),
+    [
+        ("centimetres", " 37 cm", False),
+        ("centimetres", " 37", False),
+        ("centimetres", " 0.37 m", True),
+        ("centimetres", " 14 inches", True),
+        ("centimetres", " 37 centimeters", False),
+        ("metres", " 35.8 m", False),
+        ("metres", " 35.8m", False),
+        ("metres", " 3580 cm", True),
+        ("metres", " 117 feet", True),
+        ("metres", " 0.0358 km", True),
+        ("days", " 63 days", False),
+        ("days", " 9 months", True),
+        ("days", " 2 weeks", True),
+        ("days", " 63", False),
+        ("days", " 2 months or 63 days", False),
+        ("minutes", " 142 min", False),
+        ("minutes", " 142 mins", False),
+        ("minutes", " 2 hours", True),
+        ("minutes", " 2 hours 22 minutes", False),
+        ("minutes", " I do not know", False),
+        ("minutes", " about a century", False),
+    ],
+)
+def test_a_unit_mismatch_needs_a_number_and_a_foreign_unit(
+    unit: str, text: str, flag: bool
+) -> None:
+    assert _score(text, unit=unit).unit_mismatch is flag
+
+
+def test_an_entity_name_that_holds_a_unit_word_is_not_a_mismatch() -> None:
+    film = {"entity": "Days of Heaven", "unit": "minutes"}
+
+    assert _score(" Days of Heaven runs 94", **film).unit_mismatch is False
+    assert _score(" Days of Heaven runs 94 hours", **film).unit_mismatch is True
+
+
+def test_an_unknown_unit_fails_loudly_when_scoring() -> None:
+    with pytest.raises(ValueError, match="furlongs"):
+        _score(" 3", unit="furlongs")

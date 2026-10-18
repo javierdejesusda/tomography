@@ -14,12 +14,17 @@ lands inside the sourced range, and a hand-check file for the answer parser.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+import re
 from typing import Final
 
 from tomography.datasets.quantities import DEFAULT_MIN_SITELINKS
 from tomography.datasets.quantities import FAMILIES
+from tomography.datasets.quantities import QuantityQuestion
 from tomography.experiments.base import ExperimentConfig
 from tomography.knowledge import few_shot_prompt
+from tomography.p10.answers import answer_text
+from tomography.p10.answers import grade
+from tomography.p10.answers import parse_answer
 from tomography.templates import ChatFormat
 
 CONDITIONS: Final = ("free", "forced")
@@ -72,6 +77,61 @@ UNIT_DIMENSIONS: Final = {
     "metres": "length",
     "days": "time",
     "minutes": "time",
+}
+DIMENSION_WORDS: Final[dict[str, tuple[str, ...]]] = {
+    "length": (
+        "millimetres",
+        "millimetre",
+        "millimeters",
+        "millimeter",
+        "mm",
+        "centimetres",
+        "centimetre",
+        "centimeters",
+        "centimeter",
+        "cm",
+        "metres",
+        "metre",
+        "meters",
+        "meter",
+        "m",
+        "kilometres",
+        "kilometre",
+        "kilometers",
+        "kilometer",
+        "km",
+        "inches",
+        "inch",
+        "feet",
+        "foot",
+        "ft",
+        "yards",
+        "yard",
+        "miles",
+        "mile",
+    ),
+    "time": (
+        "seconds",
+        "second",
+        "secs",
+        "sec",
+        "minutes",
+        "minute",
+        "mins",
+        "min",
+        "hours",
+        "hour",
+        "hrs",
+        "hr",
+        "days",
+        "day",
+        "weeks",
+        "week",
+        "months",
+        "month",
+        "years",
+        "year",
+    ),
 }
 
 
@@ -218,3 +278,89 @@ def build_prompt(
         instruction = CHAT_INSTRUCTIONS[condition]
         return chat.render_turn(f"{instruction}\n\nQuestion: {question}")[0]
     raise ValueError(f"unknown format {fmt!r}")
+
+
+def _word_pattern(words: Sequence[str]) -> re.Pattern[str]:
+    """Compiles a pattern for whole words, longest first, ignoring case."""
+    ordered = sorted(words, key=len, reverse=True)
+    alternatives = "|".join(re.escape(word) for word in ordered)
+    return re.compile(rf"(?<![A-Za-z])(?:{alternatives})(?![A-Za-z])", re.I)
+
+
+@dataclass(frozen=True)
+class Answer:
+    """One completion read against a question.
+
+    Attributes:
+        text: The generated text, uncut.
+        form: "point", "range", "abstain" or "none".
+        low: The value, or the lower end of a range; None without one.
+        high: The value, or the upper end of a range; None without one.
+        approximate: Whether the answer marks itself as approximate.
+        correct: Whether the value or range fits the sourced range within the
+            tolerance; None for an abstention or an answer without a value.
+        unit_mismatch: Whether the answer line has a number, none of the
+            question's unit words and a unit word of the same dimension, such
+            as "9 months" for a question in days. Values are not converted.
+    """
+
+    text: str
+    form: str
+    low: float | None
+    high: float | None
+    approximate: bool
+    correct: bool | None
+    unit_mismatch: bool
+
+
+def _unit_mismatch(line: str, item: QuantityQuestion) -> bool:
+    """Whether a line with a number names a foreign unit of the dimension."""
+    own = unit_words(item.unit)
+    foreign = [
+        word
+        for word in DIMENSION_WORDS[UNIT_DIMENSIONS[item.unit]]
+        if word not in own
+    ]
+    text = re.sub(re.escape(item.entity), " ", line, flags=re.I)
+    return bool(
+        re.search(r"\d", text)
+        and not _word_pattern(own).search(text)
+        and _word_pattern(foreign).search(text)
+    )
+
+
+def score_answer(
+    item: QuantityQuestion, text: str, fmt: str, *, rel_tol: float
+) -> Answer:
+    """Reads one completion of a question.
+
+    A few-shot completion is cut at its first newline, because the model
+    goes on to write the next question there. A chat completion is read from
+    its first non-empty line. The entity label is removed before any number
+    is read, and the quantity followed by a unit word wins.
+
+    Args:
+        item: The question the completion answers.
+        text: The generated text.
+        fmt: "fewshot" or "chat".
+        rel_tol: Relative tolerance of the grader.
+
+    Returns:
+        The reading of the completion.
+
+    Raises:
+        ValueError: If the question's unit is not one the experiment knows.
+    """
+    words = unit_words(item.unit)
+    line = text.split("\n", 1)[0] if fmt == "fewshot" else text
+    parsed = parse_answer(line, ignore=(item.entity,), unit_words=words)
+    has_number = parsed.form in ("point", "range")
+    return Answer(
+        text=text,
+        form=parsed.form,
+        low=parsed.low,
+        high=parsed.high,
+        approximate=parsed.approximate,
+        correct=grade(parsed, item.low, item.high, rel_tol=rel_tol),
+        unit_mismatch=has_number and _unit_mismatch(answer_text(line), item),
+    )
