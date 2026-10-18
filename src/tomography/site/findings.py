@@ -615,98 +615,84 @@ def _span(values: Sequence[float]) -> str:
 def _links_figure(store: Store) -> tuple[Figure, list[str]] | None:
     cos_rows: list[svg.Row] = []
     auc_rows: list[svg.Row] = []
-    layer = None
+    layers: set[int] = set()
+    cos_out = auc_out = cells = 0
     for model in store.models("p10c"):
         run = store.latest("p10c", model, "summary.json")
-        if run is None or not (run / "knowledge.csv").is_file():
+        if run is None:
             continue
         summary = store.summary(run)
-        layer = summary["layer"]
-        link = summary["cosine"]["obscure_real"]
+        layers.add(summary["layer"])
         post = is_post_trained(model)
         group = _family(model)
-        cos_rows.append(
-            svg.Row(
-                model,
-                (svg.Mark("cosine", link["cosine"], hollow=post),),
-                (link["band_lo"], link["band_hi"]),
-                group,
-            )
-        )
-        for rec in store.rows(run, "knowledge.csv"):
-            if (
-                rec["p9_type"] == "obscure_real"
-                and rec["layer"] == layer
-                and rec["items"] == "all"
-                and rec["test_family"] == "pooled"
-            ):
-                mark = svg.Mark(
-                    "auroc", rec["auroc"], rec["lo"], rec["hi"], post
+        cos_marks: list[svg.Mark] = []
+        auc_marks: list[svg.Mark] = []
+        cos_band = auc_band = None
+        for name, link in summary["cosine"].items():
+            cos_band = (link["band_lo"], link["band_hi"])
+            cos_marks.append(svg.Mark("cosine", link["cosine"], hollow=post))
+            cos_out += not cos_band[0] <= link["cosine"] <= cos_band[1]
+            cells += 1
+            known = summary["knowledge"][name]
+            auc_band = (known["rand_lo"], known["rand_hi"])
+            auc_marks.append(
+                svg.Mark(
+                    "auroc", known["auroc"], known["lo"], known["hi"], post
                 )
-                band = (rec["rand_lo"], rec["rand_hi"])
-                auc_rows.append(svg.Row(model, (mark,), band, group))
+            )
+            auc_out += known["hi"] < auc_band[0] or known["lo"] > auc_band[1]
+        cos_rows.append(svg.Row(model, tuple(cos_marks), cos_band, group))
+        auc_rows.append(svg.Row(model, tuple(auc_marks), auc_band, group))
     if not cos_rows:
         return None
+    layer = sorted(layers)[0] if len(layers) == 1 else None
     cos_values = [0.0]
     for row in cos_rows:
-        cos_values += [row.marks[0].value, *(row.band or (0.0, 0.0))]
+        cos_values += [m.value for m in row.marks] + list(row.band or ())
     domain, ticks = _axis(cos_values)
-    cos_style = {"cosine": svg.Style("s1", "circle", "Range direction")}
-    auc_style = {"auroc": svg.Style("s1", "circle", "Knowledge reader")}
-    panels = [
+    where = f"layer {layer}" if layer is not None else "the selected layer"
+    panels = (
         svg.DotPanel(
             "links-cosine",
-            "Cosine with the knowledge direction",
+            "Cosine with the P9 directions",
             tuple(cos_rows),
-            cos_style,
+            {"cosine": svg.Style("s1", "circle", "One P9 type")},
             domain,
             ticks,
-            refs=((0.0, "orthogonal"),),
+            refs=((0.0, "Orthogonal"),),
             band_label="random unit vectors (2.5th to 97.5th percentile)",
             fmt="{:.3f}",
+            whiskers=False,
         ),
         svg.DotPanel(
             "links-auroc",
-            "Knowledge reader on range questions",
+            "AUROC of the P9 readers",
             tuple(auc_rows),
-            auc_style,
+            {"auroc": svg.Style("s1", "circle", "One P9 type")},
             (0.0, 1.0),
             (0.0, 0.5, 1.0),
-            refs=((0.5, "chance"),),
+            refs=((0.5, "Chance"),),
             band_label="random directions (95% interval)",
+            whiskers=False,
         ),
-    ]
-    inside_cos = sum(
-        r.band is not None and r.band[0] <= r.marks[0].value <= r.band[1]
-        for r in cos_rows
-    )
-    inside_auc = sum(
-        r.band is not None
-        and r.marks[0].lo is not None
-        and r.marks[0].hi is not None
-        and r.band[0] <= r.marks[0].lo
-        and r.marks[0].hi <= r.band[1]
-        for r in auc_rows
     )
     numbers = [
-        f"At layer {layer}, the cosine between the range direction and the "
-        f"obscure-question direction lies inside the random band on "
-        f"{inside_cos} of {len(cos_rows)} checkpoints, and the AUROC "
-        f"interval lies inside its random band on {inside_auc} of "
-        f"{len(auc_rows)}."
+        f"At {where}, {cos_out} of {cells} cosines between the range "
+        "direction and a P9 direction lie outside the band of random "
+        f"vectors, and {auc_out} of {cells} AUROC intervals lie outside "
+        "the random-direction band."
     ]
     figure = Figure(
-        "The range direction is nearly orthogonal to the knowledge "
-        "direction, and the knowledge reader does not separate range from "
-        "exact questions outside a random band.",
-        tuple(panels),
+        "The range direction is nearly orthogonal to the P9 knowledge "
+        "directions, and no P9 reader separates range from exact questions "
+        "beyond its random band.",
+        panels,
         _keys([("band", "Random directions")]),
-        f"Layer {layer}, the layer P10b selected. (a) Cosine between the "
-        "range direction and the direction of the obscure-question reader. "
-        "(b) AUROC of that reader on the 720 range and exact questions; "
-        "whiskers are item-bootstrap 95% intervals. Grey bands are the "
-        "random-direction control. Open markers are post-trained "
-        "checkpoints.",
+        f"Each dot is one P9 type at {where}, the layer P10b selected. "
+        "(a) Cosine between the range direction and the direction of the "
+        "P9 reader. (b) AUROC of that reader on the 720 range and exact "
+        "questions. Grey bands are the 95% range of the random-direction "
+        "control. Open markers are post-trained checkpoints.",
         columns=2,
     )
     return figure, numbers

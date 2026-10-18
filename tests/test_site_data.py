@@ -576,53 +576,44 @@ def test_finder_comparison_counts_wins_per_family(tmp_path: Path) -> None:
 
 
 def test_links_to_knowledge_use_the_layer_p10b_selected(tmp_path: Path) -> None:
-    def run(model: str, cosine: float, auroc: float) -> None:
+    def run(model: str, cells: dict[str, tuple[float, float]]) -> None:
         summary = {
             "layer": 1,
             "cosine": {
-                "obscure_real": {
+                name: {
                     "contrast": "knowledge",
-                    "cosine": cosine,
+                    "cosine": cos,
                     "band_lo": -0.05,
                     "band_hi": 0.06,
                 }
+                for name, (cos, _) in cells.items()
+            },
+            "knowledge": {
+                name: {
+                    "contrast": "knowledge",
+                    "auroc": auroc,
+                    "lo": auroc - 0.02,
+                    "hi": auroc + 0.02,
+                    "rand_lo": 0.1,
+                    "rand_hi": 0.9,
+                }
+                for name, (_, auroc) in cells.items()
             },
         }
-        rows = [
-            {
-                "p9_type": "obscure_real",
-                "contrast": "knowledge",
-                "layer": layer,
-                "items": "all",
-                "test_family": "pooled",
-                "n_range": 360,
-                "n_exact": 360,
-                "auroc": auroc if layer == 1 else 0.99,
-                "lo": auroc - 0.03,
-                "hi": auroc + 0.03,
-                "rand_lo": 0.1,
-                "rand_hi": 0.9,
-            }
-            for layer in (1, 2)
-        ]
-        write_run(
-            tmp_path,
-            "p10c",
-            model,
-            "a",
-            {"summary.json": summary, "knowledge.csv": rows},
-        )
+        write_run(tmp_path, "p10c", model, "a", {"summary.json": summary})
 
-    run("gpt2", 0.1, 0.45)
-    run("qwen3-4b", 0.01, 0.95)
+    run("gpt2", {"a": (0.1, 0.45), "b": (0.0, 0.05)})
+    run("qwen3-4b", {"a": (-0.01, 0.95)})
     finding = findings.approximate_answers(store_module.Store(tmp_path))
     assert finding is not None
     assert len(finding.figures) == 1
     cosine, auroc = finding.figures[0].panels
     assert [r.label for r in cosine.rows] == ["gpt2", "qwen3-4b"]
+    assert [len(r.marks) for r in cosine.rows] == [2, 1]
     assert cosine.rows[0].marks[0].value == 0.1
     assert cosine.rows[0].band == (-0.05, 0.06)
     assert auroc.rows[0].marks[0].value == 0.45
     assert auroc.rows[0].band == (0.1, 0.9)
-    assert any("1 of 2" in line for line in finding.numbers)
+    assert any("1 of 3 cosines" in line for line in finding.numbers)
+    assert any("2 of 3 AUROC" in line for line in finding.numbers)
     assert not any("yet" in c for c in finding.caveats)
