@@ -15,7 +15,11 @@ lands inside the sourced range, and a hand-check file for the answer parser.
 from collections.abc import Sequence
 from dataclasses import dataclass
 import re
+from typing import Any
 from typing import Final
+
+import numpy as np
+from numpy.typing import NDArray
 
 from tomography.datasets.quantities import DEFAULT_MIN_SITELINKS
 from tomography.datasets.quantities import FAMILIES
@@ -25,6 +29,7 @@ from tomography.knowledge import few_shot_prompt
 from tomography.p10.answers import answer_text
 from tomography.p10.answers import grade
 from tomography.p10.answers import parse_answer
+from tomography.reading.metrics import wilson_ci
 from tomography.templates import ChatFormat
 
 CONDITIONS: Final = ("free", "forced")
@@ -364,3 +369,390 @@ def score_answer(
         correct=grade(parsed, item.low, item.high, rel_tol=rel_tol),
         unit_mismatch=has_number and _unit_mismatch(answer_text(line), item),
     )
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """What a model answered to one question in one condition and format.
+
+    Attributes:
+        greedy: The greedy completion.
+        samples: The sampled completions.
+    """
+
+    greedy: Answer
+    samples: tuple[Answer, ...]
+
+
+Cell = tuple[str, str]
+Results = dict[Cell, list[Outcome]]
+
+DECODINGS: Final = ("greedy", "sampled")
+POOLED: Final = "all"
+N_BOOT: Final = 2000
+METRICS: Final = (
+    "point",
+    "range",
+    "approximate",
+    "abstain",
+    "none",
+    "unit_mismatch",
+    "correct",
+)
+_KINDS: Final = ("range", "exact")
+
+
+def _answers(outcome: Outcome, decoding: str) -> tuple[Answer, ...]:
+    """Returns the answers of one decoding of an outcome."""
+    return (outcome.greedy,) if decoding == "greedy" else outcome.samples
+
+
+def _counts(answers: Sequence[Answer]) -> dict[str, int]:
+    """Counts the forms, flags and correct answers of a set of answers."""
+    return {
+        "n": len(answers),
+        "n_gradable": sum(a.correct is not None for a in answers),
+        "point": sum(a.form == "point" for a in answers),
+        "range": sum(a.form == "range" for a in answers),
+        "abstain": sum(a.form == "abstain" for a in answers),
+        "none": sum(a.form == "none" for a in answers),
+        "approximate": sum(a.approximate for a in answers),
+        "unit_mismatch": sum(a.unit_mismatch for a in answers),
+        "correct": sum(a.correct is True for a in answers),
+    }
+
+
+def _rate(count: int, n: int) -> list[float | None]:
+    """Returns a rate and its Wilson 95 percent interval; None when n is 0."""
+    if n == 0:
+        return [None, None, None]
+    low, high = wilson_ci(count, n)
+    return [count / n, low, high]
+
+
+def _rate_columns(name: str) -> list[str]:
+    return [name, f"{name}_rate", f"{name}_lo", f"{name}_hi"]
+
+
+def _families_of(items: Sequence[QuantityQuestion]) -> list[str]:
+    """Lists the families of the items, sorted, then the pooled label."""
+    return [*sorted({item.family for item in items}), POOLED]
+
+
+def _members(
+    items: Sequence[QuantityQuestion], family: str, kind: str
+) -> list[int]:
+    """Returns the positions of the items of a family and kind."""
+    return [
+        i
+        for i, item in enumerate(items)
+        if item.kind == kind and family in (item.family, POOLED)
+    ]
+
+
+def build_table(
+    items: Sequence[QuantityQuestion], results: Results
+) -> tuple[list[str], list[list[Any]]]:
+    """Builds the form and correctness rates per family, kind and cell.
+
+    Every row covers the answers of one family (or all of them pooled), one
+    kind, one condition, one format and one decoding. For the sampled
+    decoding a trial is one completion, so the Wilson intervals treat the
+    samples of an item as independent and are narrower than the item-level
+    uncertainty; the hedge gap uses an item bootstrap instead.
+
+    Args:
+        items: The questions.
+        results: The outcomes per (condition, format), aligned with items.
+
+    Returns:
+        The column names and the rows. Rates are over all answers, except
+        `correct`, which is over the gradable ones (`n_gradable`).
+    """
+    columns = [
+        "family",
+        "kind",
+        "condition",
+        "format",
+        "decoding",
+        "n",
+        "n_gradable",
+        *(c for m in METRICS for c in _rate_columns(m)),
+    ]
+    rows: list[list[Any]] = []
+    for family in _families_of(items):
+        for kind in _KINDS:
+            members = _members(items, family, kind)
+            if not members:
+                continue
+            for (condition, fmt), outcomes in results.items():
+                for decoding in DECODINGS:
+                    answers = [
+                        a
+                        for i in members
+                        for a in _answers(outcomes[i], decoding)
+                    ]
+                    counts = _counts(answers)
+                    rows.append(
+                        [
+                            family,
+                            kind,
+                            condition,
+                            fmt,
+                            decoding,
+                            counts["n"],
+                            counts["n_gradable"],
+                        ]
+                    )
+                    for metric in METRICS:
+                        n = counts["n_gradable" if metric == "correct" else "n"]
+                        rows[-1] += [
+                            counts[metric],
+                            *_rate(counts[metric], n),
+                        ]
+    return columns, rows
+
+
+def bootstrap_gap_ci(
+    range_rates: NDArray[np.float64],
+    exact_rates: NDArray[np.float64],
+    *,
+    n_boot: int = N_BOOT,
+    seed: int,
+) -> tuple[float, float]:
+    """Bootstraps the 95 percent interval of a difference of mean rates.
+
+    Items are resampled with replacement within each kind.
+
+    Args:
+        range_rates: Per-item rate on the range items.
+        exact_rates: Per-item rate on the exact items.
+        n_boot: Number of resamples.
+        seed: Seed of the resampling.
+
+    Returns:
+        The 2.5th and 97.5th percentiles of the resampled gaps.
+    """
+    rng = np.random.default_rng(seed)
+    drawn = [
+        rates[rng.integers(0, len(rates), size=(n_boot, len(rates)))].mean(
+            axis=1
+        )
+        for rates in (range_rates, exact_rates)
+    ]
+    low, high = np.percentile(drawn[0] - drawn[1], [2.5, 97.5])
+    return float(low), float(high)
+
+
+def _item_rates(
+    outcomes: Sequence[Outcome], members: Sequence[int], decoding: str
+) -> NDArray[np.float64]:
+    """Returns each member's share of range answers."""
+    return np.array(
+        [
+            np.mean(
+                [a.form == "range" for a in _answers(outcomes[i], decoding)]
+            )
+            for i in members
+        ],
+        dtype=np.float64,
+    )
+
+
+def hedge_gap_table(
+    items: Sequence[QuantityQuestion], results: Results, *, seed: int
+) -> tuple[list[str], list[list[Any]]]:
+    """Builds the gap in range answers between range and exact items.
+
+    The gap is the mean over range items of the share of range answers minus
+    the same mean over exact items, per family and pooled, condition, format
+    and decoding. The interval resamples items within each kind.
+
+    Args:
+        items: The questions.
+        results: The outcomes per (condition, format), aligned with items.
+        seed: Seed of the bootstrap.
+
+    Returns:
+        The column names and the rows; a family without items of both kinds
+        has no row.
+    """
+    columns = [
+        "family",
+        "condition",
+        "format",
+        "decoding",
+        "n_range_items",
+        "n_exact_items",
+        "range_rate_on_range_items",
+        "range_rate_on_exact_items",
+        "gap",
+        "gap_lo",
+        "gap_hi",
+    ]
+    rows: list[list[Any]] = []
+    for family in _families_of(items):
+        on_range = _members(items, family, "range")
+        on_exact = _members(items, family, "exact")
+        if not (on_range and on_exact):
+            continue
+        for (condition, fmt), outcomes in results.items():
+            for decoding in DECODINGS:
+                high = _item_rates(outcomes, on_range, decoding)
+                low = _item_rates(outcomes, on_exact, decoding)
+                gap_lo, gap_hi = bootstrap_gap_ci(high, low, seed=seed)
+                rows.append(
+                    [
+                        family,
+                        condition,
+                        fmt,
+                        decoding,
+                        len(on_range),
+                        len(on_exact),
+                        float(high.mean()),
+                        float(low.mean()),
+                        float(high.mean() - low.mean()),
+                        gap_lo,
+                        gap_hi,
+                    ]
+                )
+    return columns, rows
+
+
+def forced_in_range_table(
+    items: Sequence[QuantityQuestion], results: Results, *, rel_tol: float
+) -> tuple[list[str], list[list[Any]]]:
+    """Builds how often a forced greedy point lands in the sourced range.
+
+    Only greedy point answers under the forced condition count. A point is
+    inside when it lies in `[low, high]` and inside the band when it lies in
+    the range widened by `rel_tol`, as the grader does. Exact items are the
+    reference: their range is one value.
+
+    Args:
+        items: The questions.
+        results: The outcomes per (condition, format), aligned with items.
+        rel_tol: Relative tolerance of the band.
+
+    Returns:
+        The column names and the rows, one per family (and pooled), kind and
+        format; no rows without the forced condition.
+    """
+    columns = [
+        "family",
+        "kind",
+        "format",
+        "n_items",
+        "n_point",
+        *_rate_columns("inside"),
+        *_rate_columns("inside_band"),
+    ]
+    rows: list[list[Any]] = []
+    for family in _families_of(items):
+        for kind in _KINDS:
+            members = _members(items, family, kind)
+            if not members:
+                continue
+            for (condition, fmt), outcomes in results.items():
+                if condition != "forced":
+                    continue
+                points = [
+                    (items[i], outcomes[i].greedy.low)
+                    for i in members
+                    if outcomes[i].greedy.form == "point"
+                ]
+                inside = sum(
+                    item.low <= value <= item.high
+                    for item, value in points
+                    if value is not None
+                )
+                band = sum(
+                    value <= item.high * (1 + rel_tol)
+                    and value >= item.low * (1 - rel_tol)
+                    for item, value in points
+                    if value is not None
+                )
+                rows.append(
+                    [
+                        family,
+                        kind,
+                        fmt,
+                        len(members),
+                        len(points),
+                        inside,
+                        *_rate(inside, len(points)),
+                        band,
+                        *_rate(band, len(points)),
+                    ]
+                )
+    return columns, rows
+
+
+def width_table(
+    items: Sequence[QuantityQuestion], results: Results
+) -> tuple[list[str], list[list[Any]]]:
+    """Builds range and correct rates by the width tertile of range items.
+
+    The width of a range item is `(high - low) / midpoint`. Range items of
+    all families are ordered by width (ties by uid) and cut into three equal
+    groups; with fewer than three items the empty groups have no row.
+
+    Args:
+        items: The questions.
+        results: The outcomes per (condition, format), aligned with items.
+
+    Returns:
+        The column names and the rows, one per condition, format, decoding
+        and non-empty tertile.
+    """
+    columns = [
+        "condition",
+        "format",
+        "decoding",
+        "tertile",
+        "width_lo",
+        "width_hi",
+        "n_items",
+        "n",
+        "n_gradable",
+        *_rate_columns("range"),
+        *_rate_columns("correct"),
+    ]
+    members = _members(items, POOLED, "range")
+
+    def width(i: int) -> float:
+        item = items[i]
+        return (item.high - item.low) / ((item.high + item.low) / 2)
+
+    ordered = sorted(members, key=lambda i: (width(i), items[i].uid))
+    tertiles: list[list[int]] = [[], [], []]
+    for rank, i in enumerate(ordered):
+        tertiles[rank * 3 // len(ordered)].append(i)
+    rows: list[list[Any]] = []
+    for (condition, fmt), outcomes in results.items():
+        for decoding in DECODINGS:
+            for k, group in enumerate(tertiles, start=1):
+                if not group:
+                    continue
+                answers = [
+                    a for i in group for a in _answers(outcomes[i], decoding)
+                ]
+                counts = _counts(answers)
+                rows.append(
+                    [
+                        condition,
+                        fmt,
+                        decoding,
+                        k,
+                        width(group[0]),
+                        width(group[-1]),
+                        len(group),
+                        counts["n"],
+                        counts["n_gradable"],
+                        counts["range"],
+                        *_rate(counts["range"], counts["n"]),
+                        counts["correct"],
+                        *_rate(counts["correct"], counts["n_gradable"]),
+                    ]
+                )
+    return columns, rows
