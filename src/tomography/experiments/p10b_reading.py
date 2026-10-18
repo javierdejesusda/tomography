@@ -51,6 +51,7 @@ from tomography.reading.reader import RepReader
 from tomography.templates import ChatFormat
 from tomography.templates import ConceptTemplate
 from tomography.viz.geometry import plot_matrix
+from tomography.viz.reading import curves_from_arrays
 from tomography.viz.reading import plot_curves
 from tomography.viz.style import save_figure
 from tomography.viz.style import style_context
@@ -995,21 +996,25 @@ def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
     sets = list(summary["train_sets"])
     paths: list[Path] = []
     for template in summary["templates"]:
-        series = []
-        for method in methods:
-            rows = [
+        pooled = [
+            [
                 r
                 for r in curves
                 if (r["template"], r["method"], r["train_set"])
                 == (template, method, full)
                 and r["test_family"] == POOLED
             ]
-            series.append(
-                tuple(
-                    np.array([float(r[column]) for r in rows])
-                    for column in ("layer", "auroc", "lo", "hi")
-                )
+            for method in methods
+        ]
+        columns = {
+            column: np.array(
+                [[float(r[column]) for r in rows] for rows in pooled]
             )
+            for column in ("layer", "auroc", "lo", "hi")
+        }
+        series = curves_from_arrays(
+            columns["layer"][0], columns["auroc"], columns["lo"], columns["hi"]
+        )
         with style_context():
             fig = plot_curves(
                 series,
