@@ -759,8 +759,9 @@ Always pass `--max-hours`. A watchdog on the pod stops it at that deadline, or `
 after the chain ends, whichever comes first. A stopped pod keeps `/workspace` but still bills its volume disk
 until `down`.
 
-Hosts give a pod very different CPU shares, and CPU-bound experiments (P1, P3, P4) slow down a lot on a small
-share. `up --min-vcpu 16` asks RunPod for a host that gives the pod at least that many vCPUs per GPU.
+Hosts give a pod very different CPU shares, and experiments with CPU-heavy steps slow down a lot on a small
+share. `up --min-vcpu 16` asks RunPod for a host that gives the pod at least that many vCPUs per GPU; without
+the flag RunPod's default of 2 applies.
 
 A minimal spec. A relative `out` resolves against `/workspace/chains` on the pod, so `../out/chain1` writes to
 `/workspace/out/chain1`:

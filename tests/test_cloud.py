@@ -324,10 +324,25 @@ def test_up_min_vcpu_asks_for_that_many_vcpus_per_gpu(tmp_path: Path) -> None:
     assert body["minVCPUPerGPU"] == 16
 
 
-def test_up_rejects_a_min_vcpu_below_one(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("count", "reason"),
+    [
+        ("0", "must be at least 1"),
+        ("-1", "must be at least 1"),
+        ("abc", "not an integer"),
+        ("1.5", "not an integer"),
+    ],
+)
+def test_up_rejects_a_bad_min_vcpu(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], count: str, reason: str
+) -> None:
     h = up_harness(tmp_path)
-    with pytest.raises(SystemExit):
-        up(h, "--min-vcpu", "0")
+    with pytest.raises(SystemExit) as exc:
+        up(h, "--min-vcpu", count)
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--min-vcpu" in err
+    assert reason in err
     assert h.transport.calls == []
 
 
