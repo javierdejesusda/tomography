@@ -1034,7 +1034,9 @@ def check_items(
 
     Raises:
         ValueError: If the uids differ from those of `items.json` of the
-            P10b run, or an item is in another split.
+            P10b run, an item is in another split, or the sha256 of the
+            snapshots of a family and kind differ from those the P10b run
+            stored.
     """
     rebuilt = {i.uid: i for i in [*items, *people]}
     stored = {r["uid"]: r for r in p10b.items}
@@ -1052,6 +1054,22 @@ def check_items(
                 f"item {uid!r} is in the {item.split} split of the rebuilt "
                 f"questions and in the {stored[uid]['split']} split of the "
                 "P10b run"
+            )
+    digests: dict[tuple[str, str], set[str]] = {}
+    for item in rebuilt.values():
+        digests.setdefault((item.family, item.kind), set()).add(item.sha256)
+    for family, kind in sorted(
+        digests.keys()
+        | {(f, k) for f, kinds in p10b.snapshots.items() for k in kinds}
+    ):
+        found = sorted(digests.get((family, kind), ()))
+        expected = sorted(
+            p10b.snapshots.get(family, {}).get(kind, {}).get("sha256", ())
+        )
+        if found != expected:
+            raise ValueError(
+                f"the sha256 of the {family}/{kind} snapshot differs between "
+                "the rebuilt questions and the P10b run"
             )
 
 

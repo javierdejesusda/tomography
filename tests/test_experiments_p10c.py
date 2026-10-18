@@ -536,6 +536,62 @@ def _linked(
     return p10b, p9b, p10a, items
 
 
+def _stamped_p10b(
+    items: Sequence[QuantityQuestion], people: Sequence[QuantityQuestion]
+) -> p10c_links.P10bRun:
+    scored = [*items, *people]
+    records = [{"uid": i.uid, "split": i.split} for i in scored]
+    return dataclasses.replace(
+        _range_run(_random_directions((3, 4)), items=records),
+        snapshots=_stamps(scored),
+    )
+
+
+def test_rebuilt_items_with_the_stored_snapshots_pass_the_item_check() -> None:
+    items, people = _items(), _people(4)
+
+    p10c_links.check_items(items, people, _stamped_p10b(items, people))
+
+
+@pytest.mark.parametrize(
+    ("family", "kind"),
+    [("height", "exact"), ("wingspan", "range"), ("person_height", "exact")],
+)
+def test_rebuilt_items_from_another_snapshot_are_refused(
+    family: str, kind: str
+) -> None:
+    items, people = _items(), _people(4)
+    p10b = _stamped_p10b(items, people)
+
+    def moved(item: QuantityQuestion) -> QuantityQuestion:
+        if (item.family, item.kind) == (family, kind):
+            return dataclasses.replace(item, sha256="b" * 64)
+        return item
+
+    with pytest.raises(ValueError, match=f"{family}/{kind} snapshot"):
+        p10c_links.check_items(
+            [moved(i) for i in items], [moved(i) for i in people], p10b
+        )
+
+
+def test_a_stored_digest_that_the_rebuilt_items_lack_is_refused() -> None:
+    items, people = _items(), _people(4)
+    p10b = _stamped_p10b(items, people)
+    p10b.snapshots["height"]["exact"]["sha256"] = sorted([SHA, "c" * 64])
+
+    with pytest.raises(ValueError, match="height/exact snapshot"):
+        p10c_links.check_items(items, people, p10b)
+
+
+def test_rebuilt_items_without_a_stored_snapshot_are_refused() -> None:
+    items, people = _items(), _people(4)
+    p10b = _stamped_p10b(items, people)
+    del p10b.snapshots["person_height"]
+
+    with pytest.raises(ValueError, match="person_height/exact snapshot"):
+        p10c_links.check_items(items, people, p10b)
+
+
 def test_matching_runs_pass_the_link_checks(tmp_path: Path) -> None:
     p10b, p9b, p10a, _ = _linked(tmp_path)
 
@@ -2080,6 +2136,21 @@ def test_run_refuses_items_that_differ_from_the_p10b_items_before_the_model(
     config = _config_for(runs)
 
     with pytest.raises(ValueError, match="wingspan-exact-train1"):
+        p10c_links.run(config, _p10c_dir(config, tmp_path))
+
+
+def test_run_refuses_items_from_another_snapshot_before_the_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid(monkeypatch, "load_model")
+    runs = _runs_on_disk(tmp_path)
+    monkeypatch.setattr(p10c_links, "load_quantities", lambda **kw: STALE)
+    monkeypatch.setattr(
+        p10c_links, "load_people_heights", lambda **kw: _people(4)
+    )
+    config = _config_for(runs)
+
+    with pytest.raises(ValueError, match=r"sha256.*rebuilt"):
         p10c_links.run(config, _p10c_dir(config, tmp_path))
 
 
