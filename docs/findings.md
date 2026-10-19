@@ -514,8 +514,7 @@ The tables of this section are read from `p1/gpt2/673af340b77d` (`gpt2`), from t
 truth and emotion tasks for the Qwen3 0.6B pair (`p1/qwen3-0.6b-base/deabd95764d0` and `p1/qwen3-0.6b/027be280838a`,
 made at `bab5b75` on a pod) and from the sentiment-only runs for the Qwen3 1.7B pair (`ef3f8c0d3389` and `f4aa9b57824a`,
 made at `a39ae61` on the laptop GPU); only the sentiment rows of the 0.6B runs are used here. The earlier sentiment-only
-runs of the 0.6B pair (`a540a2497ac4` and `31a6ee65d6ab`, made at `a39ae61`) stay in the repository and gave report
-accuracies within 0.012 of these for every variant; the stored files do not show the cause of the difference.
+runs of the 0.6B pair (`a540a2497ac4` and `31a6ee65d6ab`, made at `a39ae61`) stay in the repository and gave report accuracies within 0.012 of these for every variant (at most 0.0084 on `qwen3-0.6b-base` and 0.0117 on `qwen3-0.6b`); the random series moved by up to 0.029 and 0.035, the interval bounds by up to 0.013, `own_report` by up to 0.013, the cosines by up to 0.009, and the selected own layer of 5 and 4 variants. The stored files do not show the cause of the difference.
 
 Accuracy and its interval are as in the [reading conventions](#reading-conventions): the mean over the 10 readers,
 with a bootstrap interval over the readers that does not include the sampling of the 214 evaluation pairs. `Random` is
@@ -556,9 +555,7 @@ Lowest and highest variant among the 16, with the random series of that variant 
 - **Variants against the paper variant.** Counting the 15 other variants whose interval lies entirely above (below)
   the interval of the paper variant: 2 (0) on `gpt2`, 2 (10) on `qwen3-0.6b-base`, 5 (5) on `qwen3-0.6b`, 3 (6) on
   `qwen3-1.7b-base` and 8 (4) on `qwen3-1.7b`.
-- **Random and shuffled series.** The shuffled series is between 0.472 and 0.521 on all 80 cells. The random series is
-  not at 0.5 on the Qwen3 checkpoints: it is between 0.493 and 0.674 there (0.479 to 0.555 on `gpt2`), highest on
-  `qwen3-1.7b-base` with `paraphrase_1` (0.674). The reader is above the random series of the same cell by at least
+- **Random and shuffled series.** The shuffled series is between 0.480 and 0.511 on the 16 cells of `gpt2`, between 0.472 and 0.521 on the 32 cells of the two base checkpoints and between 0.482 and 0.519 on the 32 cells of the two post-trained ones. The random series is not at 0.5 on the Qwen3 checkpoints: it is between 0.493 and 0.674 on the base ones and between 0.495 and 0.649 on the post-trained ones (0.479 to 0.555 on `gpt2`), highest on `qwen3-1.7b-base` with `paraphrase_1` (0.674). The reader is above the random series of the same cell by at least
   0.204 on every one of the 80 cells (the smallest margin is `gpt2` with `no_template`, 0.753 against 0.549), so no
   variant here reads at the level of a random direction.
 
@@ -765,7 +762,7 @@ at `f4d414d` on the laptop GPU (`p1/qwen3-1.7b-base/62073cecf6d5` and `a45dc5c93
 `7ffb64cce683`, logistic and `pca_diff` in that order). The ten runs of the other five models were made at `80baffb`
 (the two `gpt2-large` runs) and `bab5b75` (the eight others) on rented GPU pods (see [Run identity](#run-identity)); a
 run and its partner differ in the finder only. The `gpt2` logistic run `p1/gpt2/078b9d6482a2` is a re-run of a run of
-the same hash made earlier at `ca2546c`: it was made so that every P1 run is at one commit, and it reproduces the earlier copy in every accuracy and interval, so only the random series (by at most 0.0017) and the cosines (by at most 4e-7) moved. The two Qwen3 1.7B logistic runs differ from the
+the same hash made earlier at `ca2546c`: it reproduces the earlier copy in every accuracy and interval of the table file, so only the random series (by at most 0.0017) and the cosines (by at most 4e-6) moved. The two Qwen3 1.7B logistic runs differ from the
 sentiment-only runs of the tables above (`ef3f8c0d3389` and `f4aa9b57824a`) in the task list only, and they are a
 replication of those runs: none of the cells of the 17 (base) and 16 (post-trained) sentiment rows of the table file
 differs, so their logistic rows below are the rows of the tables above. The logistic runs of the Qwen3 0.6B pair (`p1/qwen3-0.6b-base/deabd95764d0` and `p1/qwen3-0.6b/027be280838a`) are the runs that the tables above read for these models, so their logistic rows below are the rows of the tables above. The rules of the section hold: every variant is read at one layer, the best layer of
@@ -892,9 +889,7 @@ The paper reader and the bare reader scored on each other's items:
   with the `pca_diff` paper reader of 0.008 and 0.000, and the cosine between the bare directions of two draws is -0.104
   and -0.058.
 
-- **Cross-scoring.** The `pca_diff` paper reader scored on bare items reaches 0.898 on the base checkpoint (logistic
-  0.906) and 0.574 on the post-trained one (logistic 0.886); the bare `pca_diff` reader scored on paper items reaches
-  0.510 and 0.541. On the base checkpoint the direction fitted under the paper template reads the bare items at a level
+- **Cross-scoring.** The `pca_diff` paper reader scored on bare items reaches 0.898 on the base checkpoint (random 0.515; logistic 0.906, random 0.518) and 0.574 on the post-trained one (random 0.525; logistic 0.886, random 0.556); the bare `pca_diff` reader scored on paper items reaches 0.510 and 0.541. On the base checkpoint the direction fitted under the paper template reads the bare items at a level
   close to that of the logistic paper reader, while the direction fitted on the bare items is at the level of the random
   series.
 
@@ -1547,7 +1542,7 @@ interval on 2 (`gpt2-medium`, `qwen3-1.7b-base`), inside its interval on 3 (`qwe
 of its cell on all 16 variants of every model, the smallest margin being 0.162 (`paraphrase_0` on `gpt2-medium`). The
 Spearman rank correlations between the 16 accuracies under the two finders are -0.077, 0.632, -0.059, 0.739, 0.115,
 0.647, 0.770 in the order of the tables (gpt2, gpt2-medium, gpt2-large, qwen3-0.6b-base, qwen3-0.6b, qwen3-1.7b-base,
-qwen3-1.7b); no significance is claimed for them. The paper accuracies are 0.512, 0.517, 0.495, 0.665, 0.564, 0.846,
+qwen3-1.7b); no significance is claimed for them. The 16 `pca_diff` accuracies of `gpt2`, `gpt2-medium`, `gpt2-large` and `qwen3-0.6b` are within 0.131, 0.051, 0.157 and 0.165 of 0.5, so their correlations (-0.077, 0.632, -0.059 and 0.115) are not read as agreement in the order of the templates. The paper accuracies are 0.512, 0.517, 0.495, 0.665, 0.564, 0.846,
 0.534 with `pca_diff` and 0.765, 0.742, 0.807, 0.952, 0.860, 0.943, 0.880 with logistic, in the same order.
 
 On the post-trained Qwen3 1.7B checkpoint the failure does not extend to the other tasks. The same finder reads truth
@@ -6697,8 +6692,7 @@ for P1 and 158 s for R6. Seven of the runs are new: P1 on `gpt2-medium` (`ac7c6a
 `820718d9b28a`) and the `pca_diff` run on `gpt2` (`cce69c9048fd`). The other two have the config hash of a committed run
 and replace it: the P1 run of `gpt2` `078b9d6482a2` (sentiment, truth and emotion tasks; the committed copy was made at
 `ca2546c`) and the R6 run of `gpt2` `47e8ec0cf46c` (the committed copy was made at `a39ae61`). The re-run of P1 agrees
-with the committed copy in every accuracy, interval and layer of `summary.json` and `table.json`; only the
-random-direction series (by at most 0.0017) and the cosines (by at most 4e-7) moved, and one printed number changed: the
+with the committed copy in every accuracy, interval and layer of `summary.json` and `table.json`; only the random-direction series (by at most 0.0017) and the cosines (by at most 4e-6) moved, one stored reader accuracy of a curves file moved by 0.0023 (one test item of 44 for one seed, in `curves_emotion_sadness.npz` and its wording copy, at a layer other than the selected one), and one printed number changed: the
 random series of the truth variant `scaffold_1` reads 0.547 instead of 0.546, and with it the smallest margin of a truth
 variant over its random series reads 0.061 instead of 0.063. The re-run of R6 agrees with the committed copy in every
 stored row and layer and adds the two text baselines that the committed copy did not store (`text_word` 0.676 [0.603,
@@ -6706,15 +6700,14 @@ stored row and layer and adds the two text baselines that the committed copy did
 The config hash of each run was recomputed under main by loading its stored `config.json` into the config class of its
 experiment and hashing it, and all nine agree with the directory names. Between `a39ae61` or `ca2546c` and `bab5b75` the
 source files that P1 imports differ only in an option of the fit code that P1 does not use (`refit_at_zero`, off by
-default) and in the 12 lines of `model.py` (two Qwen3 4B entries of the model registry); the source of R6 differs from
-`a39ae61` by the same option and by the code that adds the text baselines. The runs do not say what moved the random series of the `gpt2` run, or the sentiment rows of the 0.6B runs against the sentiment-only runs of `a39ae61` (`a540a2497ac4` and `31a6ee65d6ab`, within 0.012 per variant): the code on the P1 path differs only by the unused option and the registry entries, and device, library build and solver are not separated by the files. Exporting these runs changed no tracked result
+default) and in the 12 lines of `model.py` (two Qwen3 4B entries of the model registry); the source of R6 differs from `a39ae61` by the same option, the 12 lines of `model.py`, and the code that adds the text baselines (with the text analyzer constants of `p9/risk.py`). Three cells of the R6 curve files (`curves_arc.npz` and `curves_honesty.npz`) moved in the `gpt2` re-run, by at most 0.0004 in the mean (one test item in one seed). The runs do not say what moved the random series of the `gpt2` run, or the sentiment rows of the 0.6B runs against the sentiment-only runs of `a39ae61` (`a540a2497ac4` and `31a6ee65d6ab`: report accuracy within 0.012 per variant, the random series by up to 0.035, the interval bounds by up to 0.013, `own_report` by up to 0.013, the cosines by up to 0.009, and the selected own layer of 4 or 5 variants): the code on the P1 path differs only by the unused option and the registry entries, and device, library build and solver are not separated by the files. Exporting these runs changed no tracked result
 apart from the two replaced runs.
 
 Config hashes (12 hex digits), the P1 follow-up:
 
 | Experiment               | gpt2         | gpt2-medium  | gpt2-large   | qwen3-0.6b-base | qwen3-0.6b   | qwen3-1.7b-base | qwen3-1.7b   |
 | ------------------------ | ------------ | ------------ | ------------ | --------------- | ------------ | --------------- | ------------ |
-| P1 (all tasks, logistic) | 078b9d6482a2 | ac7c6af28fc3 | 4920a2c4975e | deabd95764d0    | 027be280838a | ef3f8c0d3389    | f4aa9b57824a |
+| P1 (all tasks, logistic) | 078b9d6482a2 | ac7c6af28fc3 | 4920a2c4975e | deabd95764d0    | 027be280838a | 62073cecf6d5    | f3a2d832c9c4 |
 | P1 (all tasks, pca_diff) | cce69c9048fd | bc97021c8520 | 7e5f079053ef | 61b62dc50aaa    | 820718d9b28a | a45dc5c93f18    | 7ffb64cce683 |
 
 The rows `P1 (sentiment)` and `P1 (all tasks)` of the GPT-2 table below, and the row `P1` of the Qwen3 tables, are the
@@ -6735,7 +6728,7 @@ Config hashes (12 hex digits), GPT-2:
 | A1             | ad6abbba8fd0 | d1eeb0585ca6 | 3ed23ece4e63 | 078a72de1cfb |
 | A2             | be4e34f21b35 | 6c8366625d7a | b6cf80cfb26f | 46d59dbefe95 |
 | P1 (sentiment) | 673af340b77d | not run      | not run      | not run      |
-| P1 (all tasks) | 078b9d6482a2 | not run      | not run      | not run      |
+| P1 (all tasks) | 078b9d6482a2 | ac7c6af28fc3 | 4920a2c4975e | not run      |
 | P2             | ee099a704022 | 733bd2f76315 | 3ea9b00fe28f | feafacc97cbb |
 | P3             | 676c31488397 | b80a5a3c0faf | 327dd31a1de6 | 12ee53fd16fe |
 | P4             | 8c4a73d1e9db | 9a2f3f02568b | f4e8481cbbbf | 427a6b2f9da4 |
@@ -6962,8 +6955,7 @@ not committed; `tomography plot all --out results` redraws them from these files
 
 Not in this document yet. No dates are promised.
 
-- P1 on `gpt2-xl` with both finders and the sentiment, truth and emotion tasks (it ran on the other six models of the P1
-  subsection).
+- P1 on `gpt2-xl` with both finders and the sentiment, truth and emotion tasks (it ran on the seven models of the P1 subsection).
 - P7 on `gpt2-medium` and on the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B and 4B pairs). M1
   and C2 on `gpt2-medium` and the two 0.6B Qwen3 checkpoints (they ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B
   and 4B pairs). C4 and LR1 on the two 0.6B Qwen3 checkpoints (LR1 ran on the four GPT-2 sizes and the 1.7B and 4B pairs, C4 on
