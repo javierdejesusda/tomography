@@ -278,3 +278,22 @@ def test_the_caption_points_to_the_main_figure_and_is_self_contained(
     assert "wholly below 0.5" in text
     for banned in (EM, EN, "_"):
         assert banned not in text
+
+
+def test_the_random_direction_tick_and_its_key_are_visible_at_100_dpi(
+    output: registry.FigureOutput,
+) -> None:
+    ax = next(a for a in output.figure.axes if a.get_gid() == "cities")
+    ticks = [
+        ln for ln in ax.get_lines() if str(ln.get_gid()).startswith("random:")
+    ]
+    assert ticks
+    assert all(t.get_linewidth() >= 1.5 for t in ticks)
+    (legend,) = output.figure.legends
+    (swatch,) = [
+        h
+        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
+        if t.get_text().startswith("random direction")
+    ]
+    assert swatch.get_markeredgewidth() >= 1.5
+    assert swatch.get_color() == ticks[0].get_color()

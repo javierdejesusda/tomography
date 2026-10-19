@@ -24,6 +24,10 @@ from tomography.viz import paper
 HEIGHT = 3.2
 
 
+TICK = paper.ENC["own_probability"]
+TICK_WIDTH = 1.6
+
+
 def _panel_dumbbell(
     ax: Axes,
     rows: dict[str, float],
@@ -56,8 +60,8 @@ def _panel_dumbbell(
         (tick,) = ax.plot(
             [data[model].random[neg]] * 2,
             [y - 0.32, y + 0.32],
-            color=paper.ENC["random_marker"],
-            lw=1.0,
+            color=TICK,
+            lw=TICK_WIDTH,
             zorder=3,
         )
         tick.set_gid(f"random:{plain}:{model}")
@@ -102,7 +106,7 @@ def _legend(fig: Figure) -> None:
         mark("|", ink, ms=truth.SMALL_TICK, mew=1.0),
         mark(truth.DIRECTION, ink, ms=truth.MARKER + 0.6, mfc=ink, mew=0.8),
         mark(truth.DIRECTION, ink, ms=truth.MARKER + 0.6, mfc="white", mew=0.8),
-        mark("|", paper.ENC["random_marker"], ms=6, mew=1.0),
+        mark("|", TICK, ms=7, mew=TICK_WIDTH),
     ]
     fig.legend(
         handles,
@@ -116,7 +120,7 @@ def _legend(fig: Figure) -> None:
         ncol=2,
         frameon=False,
         fontsize=truth.TEXT,
-        columnspacing=1.0,
+        columnspacing=2.5,
         handletextpad=0.4,
     )
 
