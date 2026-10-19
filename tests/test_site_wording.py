@@ -172,13 +172,6 @@ def test_the_caption_quotes_the_spans_the_noise_and_the_bare_numbers(
         "bare_random_max",
     ):
         assert f"{n[name]:.3f}" in text, name
-    below = [m for m in MODELS if _bare(m)["to_paper"] <= _paper(m)["random"]]
-    if below:
-        assert f"on {len(MODELS) - len(below)} of {len(MODELS)}" in text
-        for model in below:
-            assert paper.display_name(model) in text
-    else:
-        assert f"on all {len(MODELS)} checkpoints" in text
     assert "Figure A4" in text
     assert "Table A6" in text
 
@@ -198,9 +191,21 @@ def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.problems(output.figure) == []
 
 
-def test_the_bare_reader_is_compared_with_the_random_direction_per_checkpoint(
+def test_the_bare_claim_is_counted_per_role_without_a_pooled_count(
     output: registry.FigureOutput,
 ) -> None:
-    above = sum(_bare(m)["to_paper"] > _paper(m)["random"] for m in MODELS)
-    assert output.numbers["bare_above"] == above
-    assert above >= len(MODELS) - 1
+    for role in ROLES:
+        group = [m for m in MODELS if _role(m) == role]
+        hits = sum(_bare(m)["to_paper"] > _paper(m)["random"] for m in group)
+        assert output.numbers[f"bare_above_{role}"] == hits
+        assert output.numbers[f"bare_n_{role}"] == len(group)
+        count = output.counts["bare_above"][role]
+        assert (count.hits, count.total) == (hits, len(group))
+    counts = output.counts["bare_above"]
+    assert stats.per_role_text(counts) in output.claim
+    assert f"of {len(MODELS)} checkpoints" not in output.claim
+    for model in MODELS:
+        if _bare(model)["to_paper"] <= _paper(model)["random"]:
+            assert paper.display_name(model) in output.claim
+            assert f"{_bare(model)['to_paper']:.3f}" in output.claim
+            assert f"{_paper(model)['random']:.3f}" in output.claim

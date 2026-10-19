@@ -20,6 +20,7 @@ from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
+from tomography.site.registry import RoleCount
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
@@ -258,9 +259,10 @@ def _numbers(
     ):
         numbers[f"{name}_min"] = min(values)
         numbers[f"{name}_max"] = max(values)
-    numbers["bare_above"] = sum(
-        bare[m]["to_paper"] > base[m]["random"] for m in data
-    )
+    counts = _counts(data)
+    for role, count in counts.items():
+        numbers[f"bare_above_{role}"] = count.hits
+        numbers[f"bare_n_{role}"] = count.total
     numbers["n_checkpoints"] = len(data)
     return numbers
 
@@ -277,6 +279,15 @@ def _span_text(numbers: dict[str, float]) -> str:
     return parts[0] + " checkpoints"
 
 
+def _counts(data: dict[str, list[dict[str, Any]]]) -> dict[str, RoleCount]:
+    flags = {}
+    for model, table in data.items():
+        bare = next(r for r in table if r["variant"] == "bare")
+        base = next(r for r in table if r["variant"] == "paper")
+        flags[model] = bare["to_paper"] > base["random"]
+    return stats.per_role(flags)
+
+
 def _below(
     data: dict[str, list[dict[str, Any]]],
 ) -> list[tuple[str, float, float]]:
@@ -290,14 +301,13 @@ def _below(
 
 
 def _claim(
-    numbers: dict[str, float], below: list[tuple[str, float, float]]
+    numbers: dict[str, float],
+    counts: dict[str, RoleCount],
+    below: list[tuple[str, float, float]],
 ) -> str:
-    n, above = int(numbers["n_checkpoints"]), int(numbers["bare_above"])
-    where = (
-        f"all {n} checkpoints" if above == n else f"{above} of {n} checkpoints"
-    )
     exceptions = "".join(
-        f", but not on {paper.display_name(m)} ({read:.3f} against {rand:.3f})"
+        f"; on {paper.display_name(m)} the bare reader reads {read:.3f} "
+        f"against {rand:.3f} for its random direction"
         for m, read, rand in below
     )
     return (
@@ -305,9 +315,9 @@ def _claim(
         "same concept. A direction fitted on the bare wording has cosine "
         f"{numbers['bare_cos_min']:.3f} to {numbers['bare_cos_max']:.3f} "
         "with the paper direction. It reads the paper wording above a "
-        f"random direction on {where}{exceptions}; across checkpoints it "
-        f"reads at {numbers['bare_to_paper_min']:.3f} to "
-        f"{numbers['bare_to_paper_max']:.3f} and the random direction at "
+        f"random direction on {stats.per_role_text(counts)}{exceptions}; "
+        f"across checkpoints it reads at {numbers['bare_to_paper_min']:.3f} "
+        f"to {numbers['bare_to_paper_max']:.3f} and the random direction at "
         f"{numbers['bare_random_min']:.3f} to "
         f"{numbers['bare_random_max']:.3f}."
     )
@@ -366,6 +376,7 @@ def build(manifest: Manifest) -> FigureOutput:
         noise[m] = stats.expected_range(len(table)) * (p * (1 - p) / n) ** 0.5
     rows = shared.model_rows(models)
     numbers = _numbers(data, noise)
+    counts = _counts(data)
     with paper.paper_style():
         fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
         left, right = fig.subplots(
@@ -378,8 +389,9 @@ def build(manifest: Manifest) -> FigureOutput:
         _legend(fig)
     return FigureOutput(
         fig,
-        _claim(numbers, _below(data)),
+        _claim(numbers, counts, _below(data)),
         _detail(numbers),
         numbers,
         _csv(data),
+        {"bare_above": counts},
     )
