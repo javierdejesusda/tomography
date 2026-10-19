@@ -34,6 +34,7 @@ CLAIM = (
     "all 3 random directions in {count} of {panels} panels."
 )
 FRAME_WIDTH = 1.6
+FRAME_INSET = 0.016
 DETAIL = (
     "Abstention rate on unknown questions (circle) and known questions "
     "(left triangle) against the relative coefficient of the knowledge "
@@ -151,9 +152,9 @@ def build(manifest: Manifest) -> FigureOutput:
                 if passed:
                     ax.add_patch(
                         Rectangle(
-                            (0, 0),
-                            1,
-                            1,
+                            (FRAME_INSET, FRAME_INSET),
+                            1 - 2 * FRAME_INSET,
+                            1 - 2 * FRAME_INSET,
                             transform=ax.transAxes,
                             fill=False,
                             ec=viz_axes.model_style(run.model).color,

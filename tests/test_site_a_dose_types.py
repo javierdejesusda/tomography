@@ -351,3 +351,31 @@ def test_the_caption_reads_without_the_main_figure(
 ) -> None:
     assert "Open markers and dashed lines are post-trained" in output.detail
     assert "The encoding is that of" not in output.detail
+
+
+def test_the_pass_frame_lies_wholly_inside_its_panel(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    fig.canvas.draw()
+    pixels = fig.dpi / 72
+    checked = 0
+    for ax in _panels(output):
+        for frame in ax.patches:
+            if frame.get_gid() != "pass-frame":
+                continue
+            half = frame.get_linewidth() * pixels / 2
+            outer = frame.get_window_extent().expanded(
+                1 + 2 * half / frame.get_window_extent().width,
+                1 + 2 * half / frame.get_window_extent().height,
+            )
+            box = ax.get_window_extent()
+            inside = (
+                outer.x0 >= box.x0 - 0.5,
+                outer.x1 <= box.x1 + 0.5,
+                outer.y0 >= box.y0 - 0.5,
+                outer.y1 <= box.y1 + 0.5,
+            )
+            assert all(inside)
+            checked += 1
+    assert checked == 11
