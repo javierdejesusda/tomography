@@ -400,8 +400,10 @@ def _draw(
     band_max = max(max(r.draws) for r in readers.values())
     ax_c.set_xlabel(
         "people's position\nband: "
-        + f"{band_min:.1f}".replace("-", f"${axes.MINUS}$")
-        + f" to {band_max:.1f}\narrows: clipped"
+        + _rows.number(band_min, 1).replace(axes.MINUS, f"${axes.MINUS}$")
+        + " to "
+        + _rows.number(band_max, 1).replace(axes.MINUS, f"${axes.MINUS}$")
+        + "\narrows: clipped"
     )
     for ax, letter in ((ax_a, "a"), (ax_b, "b"), (ax_c, "c")):
         paper.panel_letter(ax, letter)
@@ -574,9 +576,9 @@ def build(manifest: Manifest) -> FigureOutput:
         gpt2_range=int(numbers["gpt2_range"]),
         gpt2_exact=int(numbers["gpt2_exact"]),
         draws=int(numbers["n_random_draws"]),
-        text=f"{text['auroc']:.3f}",
-        text_lo=f"{text['lo']:.3f}",
-        text_hi=f"{text['hi']:.3f}",
+        text=_rows.number(text["auroc"], 3),
+        text_lo=_rows.number(text["lo"], 3),
+        text_hi=_rows.number(text["hi"], 3),
         above=stats.per_role_text(above),
         overlap=(
             "every interval overlapping the classifier's"
@@ -587,12 +589,12 @@ def build(manifest: Manifest) -> FigureOutput:
         above_random=stats.per_role_text(above_random),
         below_half=stats.per_role_text(below_half),
         above_95=stats.per_role_text(above_95),
-        band_min=f"{numbers['band_min']:.1f}".replace("-", axes.MINUS),
-        band_max=f"{numbers['band_max']:.1f}",
+        band_min=_rows.number(numbers["band_min"], 1),
+        band_max=_rows.number(numbers["band_max"], 1),
         outside=stats.per_role_text(outside),
         sets=len(first.draws),
-        pos_min=f"{min(positions):.3f}",
-        pos_max=f"{max(positions):.3f}",
+        pos_min=_rows.number(min(positions)),
+        pos_max=_rows.number(max(positions)),
     )
     return FigureOutput(
         fig,
