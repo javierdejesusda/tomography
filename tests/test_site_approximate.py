@@ -237,29 +237,7 @@ def test_numbers_are_recomputed_from_the_files(
     assert numbers["position_max"] == pytest.approx(max(positions))
     reader = {m: _cell(m, "logistic") for m in _models("p10b")}
     above = _by_role({m: c["auroc"] > text["auroc"] for m, c in reader.items()})
-    inside = _by_role(
-        {
-            m: _cell(m, "random")["lo"]
-            <= c["auroc"]
-            <= _cell(m, "random")["hi"]
-            for m, c in reader.items()
-        }
-    )
-    outside = _by_role(
-        {
-            m: not (
-                min(r["position"] for r in _people(m, "random"))
-                <= _position(m)
-                <= max(r["position"] for r in _people(m, "random"))
-            )
-            for m in _models("p10b")
-        }
-    )
-    for name, want in (
-        ("above_text", above),
-        ("reader_in_random", inside),
-        ("people_outside_band", outside),
-    ):
+    for name, want in (("above_text", above),):
         for role in stats.ROLES:
             assert numbers[f"{name}_{role}"] == want[role].hits
             got = output.counts[name][role]
@@ -309,9 +287,17 @@ def test_caption_is_the_template_filled_from_the_files(
     above = stats.per_role_text(
         {r: output.counts["above_text"][r] for r in stats.ROLES}
     )
-    outside = stats.per_role_text(
-        {r: output.counts["people_outside_band"][r] for r in stats.ROLES}
+    band = _by_role(
+        {
+            m: not (
+                min(r["position"] for r in _people(m, "random"))
+                <= _position(m)
+                <= max(r["position"] for r in _people(m, "random"))
+            )
+            for m in _models("p10b")
+        }
     )
+    outside = stats.per_role_text(band)
     assert f"The reader is above the classifier's value on {above}" in caption
     assert f"outside the random band on {outside}" in caption
     assert "reaches 0.9" not in caption
@@ -508,3 +494,13 @@ def test_the_grey_random_range_band_is_keyed(
     (legend,) = output.figure.legends
     labels = [t.get_text() for t in legend.get_texts()]
     assert "random range of the position" in labels
+
+
+def test_the_superseded_reader_and_band_counts_are_gone(
+    output: registry.FigureOutput,
+) -> None:
+    assert "reader_in_random" not in output.counts
+    assert "people_outside_band" not in output.counts
+    for role in stats.ROLES:
+        assert f"reader_in_random_{role}" not in output.numbers
+        assert f"people_outside_band_{role}" not in output.numbers

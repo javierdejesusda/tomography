@@ -389,12 +389,6 @@ def build(manifest: Manifest) -> FigureOutput:
     above = stats.per_role(
         {m: r.reader["auroc"] > text["auroc"] for m, r in readers.items()}
     )
-    inside = stats.per_role(
-        {
-            m: r.random["lo"] <= r.reader["auroc"] <= r.random["hi"]
-            for m, r in readers.items()
-        }
-    )
     above_random = stats.per_role(
         {m: r.reader["auroc"] > r.random["hi"] for m, r in readers.items()}
     )
@@ -437,8 +431,6 @@ def build(manifest: Manifest) -> FigureOutput:
     }
     for role in stats.ROLES:
         numbers[f"above_text_{role}"] = float(above[role].hits)
-        numbers[f"reader_in_random_{role}"] = float(inside[role].hits)
-        numbers[f"people_outside_band_{role}"] = float(outside[role].hits)
         numbers[f"reader_above_random_{role}"] = float(above_random[role].hits)
         numbers[f"control_below_half_{role}"] = float(below_half[role].hits)
         numbers[f"control_above_95_{role}"] = float(above_95[role].hits)
@@ -487,10 +479,8 @@ def build(manifest: Manifest) -> FigureOutput:
         _group.csv_text(HEADER, csv_rows),
         {
             "above_text": above,
-            "reader_in_random": inside,
             "reader_above_random": above_random,
             "control_below_half": below_half,
             "control_above_95": above_95,
-            "people_outside_band": outside,
         },
     )
