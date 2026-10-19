@@ -28,8 +28,6 @@ from tomography.site.registry import FigureOutput
 from tomography.viz import axes
 from tomography.viz import paper
 
-MAX_RATIO = 1.5
-MIN_DISTINCT = 0.15
 HEIGHT = 5.0
 COEFFS = (-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3)
 X_LIMIT = 0.33
@@ -149,8 +147,8 @@ class _Model:
 
     def fluent(self, coeff: float) -> bool:
         return (
-            self.ratio[coeff] <= MAX_RATIO
-            and self.distinct[coeff] >= MIN_DISTINCT
+            self.ratio[coeff] <= stats.FLUENT_MAX_RATIO
+            and self.distinct[coeff] >= stats.FLUENT_MIN_DISTINCT
         )
 
 
@@ -478,8 +476,8 @@ def build(manifest: Manifest) -> FigureOutput:
                 va="bottom",
                 ha="right",
             )
-            _limit(grid[1, col], MAX_RATIO)
-            _limit(grid[2, col], MIN_DISTINCT)
+            _limit(grid[1, col], stats.FLUENT_MAX_RATIO)
+            _limit(grid[2, col], stats.FLUENT_MIN_DISTINCT)
             grid[2, col].set_xlabel("relative coefficient")
         grid[0, 0].set_ylabel("judged sentiment")
         grid[1, 0].set_ylabel("neutral-text\nperplexity ratio")
@@ -499,8 +497,8 @@ def build(manifest: Manifest) -> FigureOutput:
             numbers[f"{name}_{role}"] = float(counts[name][role].hits)
     detail = DETAIL.format(
         minus=axes.MINUS,
-        max_ratio=MAX_RATIO,
-        min_distinct=MIN_DISTINCT,
+        max_ratio=stats.FLUENT_MAX_RATIO,
+        min_distinct=stats.FLUENT_MIN_DISTINCT,
         moves_count=stats.per_role_text(counts["moves01"]),
         n_neutral=n_neutral,
         held=stats.per_role_text(counts["fluent01"]),

@@ -11,12 +11,12 @@ from typing import Any
 
 import numpy as np
 
+from tomography.site import cells
 from tomography.site import reading
 from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 from tomography.site.tables import _rows
 from tomography.viz import paper
 
@@ -88,9 +88,9 @@ def _template_sentence(accuracy: list[float], layers: dict[str, int]) -> str:
         parts.append(f"at layer {layer} on {who}")
     low, high = min(accuracy), max(accuracy)
     value = (
-        _cells.num(low)
+        cells.num(low)
         if low == high
-        else f"{_cells.num(low)} to {_cells.num(high)}"
+        else f"{cells.num(low)} to {cells.num(high)}"
     )
     return (
         "Honesty in template is the accuracy on held-out persona prompts, "
@@ -144,18 +144,16 @@ def build(manifest: Manifest) -> TableOutput:
         rows.append(
             [
                 paper.display_name(model),
-                *(_cells.num(v) for v in mc1),
-                _cells.num(_mc1(table, "standard")["mc1"]),
-                _cells.num(block["test_accuracy"]),
+                *(cells.num(v) for v in mc1),
+                cells.num(_mc1(table, "standard")["mc1"]),
+                cells.num(block["test_accuracy"]),
                 str(block["best_layer"]),
-                _cells.num(scored.random),
-                _cells.num(s5["test_accuracy"]),
-                _cells.num(
+                cells.num(scored.random),
+                cells.num(s5["test_accuracy"]),
+                cells.num(
                     _transfer_random(manifest, model, int(s5["best_layer"]))
                 ),
-                _cells.num(
-                    runfiles.summary(run_a1)["agreement_at_layer"]["r5"]
-                ),
+                cells.num(runfiles.summary(run_a1)["agreement_at_layer"]["r5"]),
             ]
         )
     n_models = len(rows)
@@ -168,9 +166,9 @@ def build(manifest: Manifest) -> TableOutput:
     word, char = text["text_word"], text["text_char"]
     blank = [""] * (len(COLUMNS) - 2)
     rows += [
-        ["Words classifier", _cells.num(word["mc1"]), *blank],
-        ["Characters classifier", _cells.num(char["mc1"]), *blank],
-        ["Chance", _cells.num(chance), *blank],
+        ["Words classifier", cells.num(word["mc1"]), *blank],
+        ["Characters classifier", cells.num(char["mc1"]), *blank],
+        ["Chance", cells.num(chance), *blank],
     ]
     claim = (
         "Truthfulness and honesty readings on every checkpoint, with the "
@@ -182,12 +180,12 @@ def build(manifest: Manifest) -> TableOutput:
         "paper's honesty persona prompts, each at the layer chosen on "
         "validation questions, and for the model's own answer "
         f"log-probability; a 95 percent Wilson interval at this size is at "
-        f"most {chr(0x00B1)}{_cells.num(half)} wide. A classifier on the "
+        f"most {chr(0x00B1)}{cells.num(half)} wide. A classifier on the "
         f"question and answer words reaches "
-        f"{_cells.interval(word['mc1'], word['lo'], word['hi'])}, one on the "
+        f"{cells.interval(word['mc1'], word['lo'], word['hi'])}, one on the "
         "characters "
-        f"{_cells.interval(char['mc1'], char['lo'], char['hi'])}, and chance "
-        f"is {_cells.num(chance)}; the last three rows give these baselines, "
+        f"{cells.interval(char['mc1'], char['lo'], char['hi'])}, and chance "
+        f"is {cells.num(chance)}; the last three rows give these baselines, "
         "which apply to each of the four TruthfulQA columns. "
         + _template_sentence(in_acc, in_layer)
         + " In the template the random direction at the same layer reaches "
@@ -218,7 +216,7 @@ def build(manifest: Manifest) -> TableOutput:
         detail,
         COLUMNS,
         rows,
-        _cells.check_align("l" + "r" * 10, len(COLUMNS)),
+        cells.check_align("l" + "r" * 10, len(COLUMNS)),
         [],
         numbers,
         groups=GROUPS,

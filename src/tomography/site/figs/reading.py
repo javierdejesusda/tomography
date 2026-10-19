@@ -15,13 +15,13 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 import numpy as np
 
+from tomography.site import cells
 from tomography.site import params
 from tomography.site import reading
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.site.registry import RoleCount
-from tomography.site.tables import _cells
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
@@ -213,19 +213,19 @@ def _slope_text(numbers: dict[str, float], names: dict[str, str]) -> str:
         hi = numbers[f"slope_{concept}_hi"]
         if lo > 0:
             rising.append(
-                f"{_cells.num(s)} for {concept} "
-                f"({_cells.num(lo)} to {_cells.num(hi)})"
+                f"{cells.num(s)} for {concept} "
+                f"({cells.num(lo)} to {cells.num(hi)})"
             )
         elif hi < 0:
             falling.append(
-                f"{_cells.num(-s)} for {concept} "
-                f"(slope {_cells.num(s)}, {_cells.num(lo)} to "
-                f"{_cells.num(hi)})"
+                f"{cells.num(-s)} for {concept} "
+                f"(slope {cells.num(s)}, {cells.num(lo)} to "
+                f"{cells.num(hi)})"
             )
         else:
             flat.append(
-                f"the {concept} slope ({_cells.num(s)}, {_cells.num(lo)} to "
-                f"{_cells.num(hi)})"
+                f"the {concept} slope ({cells.num(s)}, {cells.num(lo)} to "
+                f"{cells.num(hi)})"
             )
     parts = []
     sizes = int(numbers["n_gpt2"])

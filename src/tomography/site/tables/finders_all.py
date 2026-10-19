@@ -9,13 +9,13 @@ the directions fitted on utility pairs when they steer sentiment.
 
 from typing import Any
 
+from tomography.site import cells
 from tomography.site import finders
 from tomography.site import params
 from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 from tomography.site.tables import _rows
 from tomography.viz import paper
 
@@ -72,19 +72,19 @@ def build(manifest: Manifest) -> TableOutput:
             for model in models:
                 random = _report(manifest, model, task, "random")
                 if method == "random":
-                    row.append(_cells.num(random))
+                    row.append(cells.num(random))
                     continue
                 d, lo, hi = stats.diff_interval(
                     _report(manifest, model, task, method), random, n
                 )
-                row.append(_cells.num(d) + _rows.star(lo, hi))
+                row.append(cells.num(d) + _rows.star(lo, hi))
             rows.append(row)
     starts.append(len(rows))
     for k, method in enumerate(METHODS):
         row = [STEERING if k == 0 else "", params.display(method)]
         for model in models:
             hit = _win(manifest, model, method)
-            row.append(_cells.pm(hit["value"], (hit["hi"] - hit["lo"]) / 2))
+            row.append(cells.pm(hit["value"], (hit["hi"] - hit["lo"]) / 2))
         rows.append(row)
     claim = (
         "Every finder on the report split, as accuracy minus the random "
@@ -97,7 +97,7 @@ def build(manifest: Manifest) -> TableOutput:
         "report pairs that excludes zero. The win rate is the share of "
         "decisive prompt pairs in which the completion steered at +0.3 is "
         "judged more positive than the one steered at "
-        f"{_cells.MINUS}0.3 by the sentiment judge, with the Wilson "
+        f"{cells.MINUS}0.3 by the sentiment judge, with the Wilson "
         "half-width. Three random directions of the same norm are the "
         "reference arm for the win rate; 0.5 is not."
     )

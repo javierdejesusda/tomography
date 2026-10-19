@@ -281,10 +281,8 @@ def test_the_layout_is_frozen_so_two_builds_place_every_axes_alike() -> None:
 def test_the_fluency_rule_in_the_caption_comes_from_the_constants(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tomography.site.figs import steering
-
-    monkeypatch.setattr(steering, "MAX_RATIO", 1.25)
-    monkeypatch.setattr(steering, "MIN_DISTINCT", 0.2)
+    monkeypatch.setattr(stats, "FLUENT_MAX_RATIO", 1.25)
+    monkeypatch.setattr(stats, "FLUENT_MIN_DISTINCT", 0.2)
     detail = registry.build_figure(SPEC, Manifest(RESULTS)).detail
     assert "(perplexity ratio at most 1.25, distinct-1 at least 0.2)" in detail
 

@@ -9,10 +9,10 @@ its bootstrap interval over seeds.
 import json
 from typing import Any
 
+from tomography.site import cells
 from tomography.site import reading
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 
 MEASURES = {
     "r2": "utility",
@@ -39,7 +39,7 @@ def _stored(manifest: Manifest) -> dict[str, dict[str, dict[str, Any]]]:
     for model in manifest.models("p8"):
         run = manifest.run("p8", model)
         assert run is not None
-        for row in _cells.read_table(run / "table.json"):
+        for row in cells.read_table(run / "table.json"):
             found.setdefault(row["tuned"], {})[row["source"]] = row
     return found
 
@@ -61,7 +61,7 @@ def _random(manifest: Manifest, source: str, model: str) -> str:
     """Reads the random direction at the layer Table A3 reports."""
     found = reading.load(manifest, source, model)
     assert found is not None, (source, model)
-    return _cells.num(found.random_at_layer)
+    return cells.num(found.random_at_layer)
 
 
 def _size(tuned: str) -> str:
@@ -91,14 +91,14 @@ def build(manifest: Manifest) -> TableOutput:
                 [
                     name,
                     _size(tuned),
-                    _cells.num(rec["base_accuracy"]),
+                    cells.num(rec["base_accuracy"]),
                     _random(manifest, source, f"{tuned}-base"),
-                    _cells.num(rec["tuned_accuracy"]),
+                    cells.num(rec["tuned_accuracy"]),
                     _random(manifest, source, tuned),
-                    _cells.num(rec["delta"]),
-                    f"[{_cells.num(rec['lo'])}, {_cells.num(rec['hi'])}]",
-                    _cells.num(rec["base_depth"]),
-                    _cells.num(rec["tuned_depth"]),
+                    cells.num(rec["delta"]),
+                    f"[{cells.num(rec['lo'])}, {cells.num(rec['hi'])}]",
+                    cells.num(rec["base_depth"]),
+                    cells.num(rec["tuned_depth"]),
                 ]
             )
     claim = "Stored comparisons of the 0.6B and 1.7B pairs."
@@ -119,7 +119,7 @@ def build(manifest: Manifest) -> TableOutput:
         detail,
         COLUMNS,
         rows,
-        _cells.check_align("llrrrrrrrr", len(COLUMNS)),
+        cells.check_align("llrrrrrrrr", len(COLUMNS)),
         [],
         {
             "below_zero": float(below),

@@ -7,11 +7,11 @@ split, averaged over the draws of training pairs.
 
 import numpy as np
 
+from tomography.site import cells
 from tomography.site import params
 from tomography.site import runfiles
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 from tomography.site.tables import _rows
 from tomography.viz import paper
 
@@ -48,8 +48,8 @@ def build(manifest: Manifest) -> TableOutput:
         for size in SIZES:
             at = accuracy[meta["sizes"].index(size), split, :, :, layer]
             row.append(
-                f"{_cells.num(float(at[reader].mean()))} "
-                f"({_cells.num(float(at[random].mean()))})"
+                f"{cells.num(float(at[reader].mean()))} "
+                f"({cells.num(float(at[random].mean()))})"
             )
         rows.append(row)
     if len(draws) != 1:
@@ -70,7 +70,7 @@ def build(manifest: Manifest) -> TableOutput:
         detail,
         columns,
         rows,
-        _cells.check_align("l" + "r" * len(SIZES), len(columns)),
+        cells.check_align("l" + "r" * len(SIZES), len(columns)),
         [],
         {"draws": float(n_draws), "report_pairs": float(n_report)},
         row_groups=_rows.role_groups(models),

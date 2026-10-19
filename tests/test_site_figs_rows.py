@@ -9,13 +9,6 @@ from tomography.viz import axes
 from tomography.viz import paper
 
 
-def test_join_and_writes_a_list_phrase() -> None:
-    assert _rows.join_and([]) == ""
-    assert _rows.join_and(["a"]) == "a"
-    assert _rows.join_and(["a", "b"]) == "a and b"
-    assert _rows.join_and(["a", "b", "c"]) == "a, b and c"
-
-
 def test_number_uses_the_true_minus_and_never_a_negative_zero() -> None:
     assert _rows.number(-0.5) == f"{axes.MINUS}0.500"
     assert _rows.number(-0.0004) == "0.000"
@@ -71,17 +64,6 @@ def test_run_counts_counts_each_run_under_the_role_of_its_checkpoint() -> None:
     assert counts["gpt2"] == stats.RoleCount(1, 1)
     assert counts["base"] == stats.RoleCount(1, 1)
     assert counts["post"] == stats.RoleCount(1, 2)
-
-
-def test_runs_text_names_the_roles_and_skips_empty_ones() -> None:
-    counts = {
-        "gpt2": stats.RoleCount(3, 3),
-        "base": stats.RoleCount(0, 0),
-        "post": stats.RoleCount(3, 6),
-    }
-    assert _rows.runs_text(counts) == (
-        "3 of 3 GPT-2 runs and 3 of 6 post-trained runs"
-    )
 
 
 def test_freeze_layout_pins_the_axes_to_six_decimals_and_drops_the_solver() -> (

@@ -7,13 +7,13 @@ The main sentiment run chooses its layer on the pairs it is scored on and is
 labelled optimistic; the held-out block is what the main text uses.
 """
 
+from tomography.site import cells
 from tomography.site import params
 from tomography.site import reading
 from tomography.site import runfiles
 from tomography.site import store
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 from tomography.viz import paper
 
 BLOCKS = (
@@ -95,7 +95,7 @@ def build(manifest: Manifest) -> TableOutput:
             found = _score(manifest, concept, model)
             head = [label if k == 0 else "", paper.display_name(model)]
             if found is None:
-                rows.append(head + [_cells.MISSING] * 6)
+                rows.append(head + [cells.MISSING] * 6)
                 continue
             sizes[concept] = found.n
             d, lo, hi = reading.margin(found)
@@ -103,10 +103,10 @@ def build(manifest: Manifest) -> TableOutput:
                 [
                     *head,
                     str(found.layer),
-                    _cells.num(_depth(model, found.layer)),
-                    _cells.num(found.reader),
-                    _cells.num(found.random),
-                    _cells.pm(d, (hi - lo) / 2),
+                    cells.num(_depth(model, found.layer)),
+                    cells.num(found.reader),
+                    cells.num(found.random),
+                    cells.pm(d, (hi - lo) / 2),
                     f"{found.n:,}",
                 ]
             )

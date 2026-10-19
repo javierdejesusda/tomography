@@ -5,11 +5,11 @@ so the page can name experiments by what they test and keep the run codes of
 the repository here.
 """
 
+from tomography.site import cells
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
 
 ELL = chr(0x2113)
-MINUS = chr(0x2212)
 
 ROWS = (
     (
@@ -69,7 +69,7 @@ ROWS = (
     (
         "win rate",
         "Share of decisive prompt pairs in which the completion steered at "
-        f"+c is judged more positive than the one steered at {MINUS}c.",
+        f"+c is judged more positive than the one steered at {cells.MINUS}c.",
     ),
     (
         "role",

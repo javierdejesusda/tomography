@@ -10,11 +10,11 @@ the range of its random control.
 
 from typing import Any
 
+from tomography.site import cells as _cells
 from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 from tomography.site.tables import _rows
 from tomography.viz import paper
 

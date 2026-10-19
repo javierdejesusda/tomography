@@ -12,10 +12,10 @@ import json
 import math
 from typing import Any
 
+from tomography.site import cells
 from tomography.site import runfiles
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 from tomography.site.tables import _rows
 from tomography.viz import paper
 
@@ -23,7 +23,7 @@ COEFF = 0.1
 MAX_RATIO = 1.5
 MIN_DISTINCT = 0.15
 SIGNS = (-COEFF, COEFF)
-SIGN_NAMES = (_cells.MINUS + "0.1", "+0.1")
+SIGN_NAMES = (cells.MINUS + "0.1", "+0.1")
 GROUPS = (
     ("Judged sentiment at relative coefficient", 3, False),
     ("Judged sentiment under an instruction", 2, False),
@@ -48,24 +48,24 @@ def _cells_of(rows: list[dict[str, Any]]) -> list[str]:
     zero_perplexity = _mean(rows, "none", 0.0, "perplexity")
     zero_fluency = _mean(rows, "none", 0.0, "fluency")
     return [
-        _cells.num(_mean(rows, "linear", SIGNS[0], "score")),
-        _cells.num(_mean(rows, "none", 0.0, "score")),
-        _cells.num(_mean(rows, "linear", SIGNS[1], "score")),
-        _cells.num(_mean(rows, "prompting-1", None, "score")),
-        _cells.num(_mean(rows, "prompting+1", None, "score")),
+        cells.num(_mean(rows, "linear", SIGNS[0], "score")),
+        cells.num(_mean(rows, "none", 0.0, "score")),
+        cells.num(_mean(rows, "linear", SIGNS[1], "score")),
+        cells.num(_mean(rows, "prompting-1", None, "score")),
+        cells.num(_mean(rows, "prompting+1", None, "score")),
         *(
-            _cells.num(
+            cells.num(
                 _mean(rows, "linear", c, "perplexity") / zero_perplexity, 2
             )
             for c in SIGNS
         ),
         *(
-            _cells.num(
+            cells.num(
                 math.exp(zero_fluency - _mean(rows, "linear", c, "fluency")), 2
             )
             for c in SIGNS
         ),
-        *(_cells.num(_mean(rows, "linear", c, "distinct_1")) for c in SIGNS),
+        *(cells.num(_mean(rows, "linear", c, "distinct_1")) for c in SIGNS),
     ]
 
 

@@ -6,18 +6,14 @@ from GPT-2 to Qwen3 or from a base to a post-trained model.
 """
 
 from collections.abc import Sequence
-import csv
-import io
-import math
-from typing import Any
 
 from matplotlib.axes import Axes
 
+from tomography.site import cells
 from tomography.site import params
 from tomography.site import store
 
 ROLES = ("GPT-2", "Qwen3 base", "Qwen3 post-trained")
-Z95 = 1.959963984540054
 
 
 def role(model: str) -> str:
@@ -54,48 +50,7 @@ def lines_by_role(models: Sequence[str]) -> dict[str, list[str]]:
     return found
 
 
-def wilson(successes: int, total: int) -> tuple[float, float]:
-    """Computes the 95 percent Wilson score interval of a proportion.
-
-    Args:
-        successes: Number of successes.
-        total: Number of trials.
-
-    Returns:
-        The lower and upper ends.
-
-    Raises:
-        ValueError: If the number of trials is not positive.
-    """
-    if total <= 0:
-        raise ValueError("the number of trials must be positive")
-    p = successes / total
-    z2 = Z95**2
-    centre = (p + z2 / (2 * total)) / (1 + z2 / total)
-    half = (
-        Z95
-        * math.sqrt(p * (1 - p) / total + z2 / (4 * total**2))
-        / (1 + z2 / total)
-    )
-    return max(0.0, centre - half), min(1.0, centre + half)
-
-
-def csv_text(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
-    """Writes rows as CSV text; None becomes an empty field.
-
-    Args:
-        header: Column names.
-        rows: One sequence of cells per row.
-
-    Returns:
-        The CSV document.
-    """
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(header)
-    for row in rows:
-        writer.writerow(["" if cell is None else cell for cell in row])
-    return buffer.getvalue()
+csv_text = cells.csv_text
 
 
 def clip_ticks(ax: Axes) -> None:

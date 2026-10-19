@@ -11,11 +11,11 @@ directions and from known questions.
 
 from typing import Any
 
+from tomography.site import cells
 from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 from tomography.site.tables import _rows
 from tomography.viz import paper
 
@@ -33,7 +33,7 @@ COLUMNS = [
     "Popularity",
     "Words",
     "Characters",
-    f"Direction {_cells.MINUS} popularity",
+    f"Direction {cells.MINUS} popularity",
     "+ direction",
     "+ probe",
     "Distinguishable",
@@ -65,7 +65,7 @@ def _increments(manifest: Manifest, model: str) -> dict[str, dict[str, Any]]:
 def _gain(hit: dict[str, Any] | None) -> str:
     if hit is None:
         return NO_CONTRAST
-    return _cells.interval(hit["diff_vs_confidence"], hit["lo"], hit["hi"])
+    return cells.interval(hit["diff_vs_confidence"], hit["lo"], hit["hi"])
 
 
 def _steering(manifest: Manifest, model: str) -> tuple[int, int, int]:
@@ -111,11 +111,11 @@ def build(manifest: Manifest) -> TableOutput:
             )
             above[model] = lo > 0
             reading = [
-                _cells.num(reader["logistic_within"]),
-                _cells.num(reader["popularity_within"]),
-                _cells.num(reader["text_word_within"]),
-                _cells.num(reader["text_char_within"]),
-                _cells.pm(d, (hi - lo) / 2) + _rows.star(lo, hi),
+                cells.num(reader["logistic_within"]),
+                cells.num(reader["popularity_within"]),
+                cells.num(reader["text_word_within"]),
+                cells.num(reader["text_char_within"]),
+                cells.pm(d, (hi - lo) / 2) + _rows.star(lo, hi),
             ]
         for key, name in (("direction", "lat"), ("probe", "probe")):
             hit = inc.get(f"confidence+{name}")

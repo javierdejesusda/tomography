@@ -7,11 +7,11 @@ amount of the concept, either drawn at random or contradicting the label.
 
 import json
 
+from tomography.site import cells
 from tomography.site import params
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 from tomography.site.tables import _rows
 from tomography.viz import paper
 
@@ -50,13 +50,13 @@ def build(manifest: Manifest) -> TableOutput:
         assert run is not None
         acc = {
             r["condition"]: float(r["accuracy"])
-            for r in _cells.read_table(run / "table.json")
+            for r in cells.read_table(run / "table.json")
             if r["task"] == "sentiment" and r["position"] == "last"
         }
         row = [paper.display_name(model)]
         for cond in CONDITIONS:
             lo, hi = stats.wilson(acc[cond], n)
-            row.append(_cells.pm(acc[cond], (hi - lo) / 2))
+            row.append(cells.pm(acc[cond], (hi - lo) / 2))
         rows.append(row)
         _, _, upper = stats.diff_interval(acc["against"], acc["original"], n)
         lowers[model] = upper < 0
@@ -81,7 +81,7 @@ def build(manifest: Manifest) -> TableOutput:
         detail,
         COLUMNS,
         rows,
-        _cells.check_align("lrrr", len(COLUMNS)),
+        cells.check_align("lrrr", len(COLUMNS)),
         [],
         {"report_pairs": float(n), "chance": _chance(manifest)},
         row_groups=_rows.role_groups(models),
