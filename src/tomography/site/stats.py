@@ -182,6 +182,20 @@ def per_role(flags: Mapping[str, bool]) -> dict[str, RoleCount]:
     return {r: RoleCount(h, t) for r, (h, t) in counts.items()}
 
 
+def join_and(parts: Sequence[str]) -> str:
+    """Joins phrases as a list: `a`, `a and b` or `a, b and c`.
+
+    Args:
+        parts: The phrases.
+
+    Returns:
+        The joined text.
+    """
+    if len(parts) <= 1:
+        return "".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
 def per_role_text(counts: Mapping[str, RoleCount]) -> str:
     """Writes a per-role count as a caption phrase.
 
@@ -197,8 +211,23 @@ def per_role_text(counts: Mapping[str, RoleCount]) -> str:
         for r in ROLES
         if r in counts and counts[r].total
     ]
-    if len(parts) <= 1:
-        text = "".join(parts)
-    else:
-        text = ", ".join(parts[:-1]) + " and " + parts[-1]
-    return f"{text} checkpoints"
+    return f"{join_and(parts)} checkpoints"
+
+
+def runs_text(counts: Mapping[str, RoleCount]) -> str:
+    """Writes a per-role count of runs as a caption phrase.
+
+    Args:
+        counts: Role to its count.
+
+    Returns:
+        Text such as `3 of 3 GPT-2 runs, 3 of 3 Qwen3 base runs and 3 of 6
+        post-trained runs`; roles without runs are omitted.
+    """
+    return join_and(
+        [
+            f"{counts[r].hits} of {counts[r].total} {ROLE_NAMES[r]} runs"
+            for r in ROLES
+            if r in counts and counts[r].total
+        ]
+    )

@@ -5,7 +5,6 @@ checkpoints, open for post-trained ones) and the page's true minus.
 """
 
 from collections.abc import Mapping
-from collections.abc import Sequence
 from typing import Any
 
 from matplotlib.axes import Axes
@@ -80,20 +79,6 @@ def fill(model: str, color: str) -> dict[str, Any]:
     }
 
 
-def join_and(parts: Sequence[str]) -> str:
-    """Joins phrases as a list: `a`, `a and b` or `a, b and c`.
-
-    Args:
-        parts: The phrases.
-
-    Returns:
-        The joined text.
-    """
-    if len(parts) <= 1:
-        return "".join(parts)
-    return ", ".join(parts[:-1]) + " and " + parts[-1]
-
-
 def run_counts(
     flags: Mapping[tuple[str, str], bool],
 ) -> dict[str, stats.RoleCount]:
@@ -112,25 +97,6 @@ def run_counts(
         cell[0] += int(flag)
         cell[1] += 1
     return {r: stats.RoleCount(h, t) for r, (h, t) in counts.items()}
-
-
-def runs_text(counts: Mapping[str, stats.RoleCount]) -> str:
-    """Writes a per-role count of runs as a caption phrase.
-
-    Args:
-        counts: Role to its count.
-
-    Returns:
-        Text such as `3 of 3 GPT-2 runs, 3 of 3 Qwen3 base runs and 3 of 6
-        post-trained runs`; roles without runs are omitted.
-    """
-    return join_and(
-        [
-            f"{counts[r].hits} of {counts[r].total} {stats.ROLE_NAMES[r]} runs"
-            for r in stats.ROLES
-            if r in counts and counts[r].total
-        ]
-    )
 
 
 def dot(

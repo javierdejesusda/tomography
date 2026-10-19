@@ -18,7 +18,6 @@ from tomography.site import content
 from tomography.site import references
 from tomography.site import stats
 from tomography.site.content import Section
-from tomography.site.figs import _rows
 from tomography.site.registry import FigureOutput
 from tomography.site.registry import TableOutput
 
@@ -299,7 +298,7 @@ class Page:
     def quoted_runs(self, address: str) -> str:
         """Writes a per-role count of runs a figure or table computed."""
         output, name = self._output(address)
-        return _rows.runs_text(output.counts[name])
+        return stats.runs_text(output.counts[name])
 
     def text(self, raw: str) -> str:
         """Escapes a paragraph and resolves its references."""

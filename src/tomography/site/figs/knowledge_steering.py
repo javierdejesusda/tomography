@@ -545,8 +545,8 @@ def build(manifest: Manifest) -> FigureOutput:
         numbers[f"distinguishable_{role}"] = float(distinguishable[role].hits)
         numbers[f"selective_{role}"] = float(selective[role].hits)
     claim = CLAIM.format(
-        distinguishable=_rows.runs_text(distinguishable),
-        held=_rows.runs_text(known_ge_unknown),
+        distinguishable=stats.runs_text(distinguishable),
+        held=stats.runs_text(known_ge_unknown),
     )
     return FigureOutput(
         fig,

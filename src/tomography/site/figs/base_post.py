@@ -226,7 +226,7 @@ def _signed(value: float) -> str:
 
 
 def _sizes_text(sizes: list[str]) -> str:
-    return _rows.join_and([s.upper() for s in sizes])
+    return stats.join_and([s.upper() for s in sizes])
 
 
 def _excluding_text(found: list[tuple[str, str, float]]) -> str:
@@ -234,7 +234,7 @@ def _excluding_text(found: list[tuple[str, str, float]]) -> str:
         return "no interval excluding zero"
     names = {key: phrase for key, _, phrase in ROWS}
     parts = [f"{names[r]} on {s.upper()} ({_signed(v)})" for r, s, v in found]
-    return f"an interval excluding zero only for {_rows.join_and(parts)}"
+    return f"an interval excluding zero only for {stats.join_and(parts)}"
 
 
 def _falling_text(knowledge: list[str], steering: list[str]) -> str:

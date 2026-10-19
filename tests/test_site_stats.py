@@ -120,3 +120,21 @@ def test_per_role_text_omits_roles_without_checkpoints() -> None:
     assert stats.per_role_text(counts) == (
         "1 of 4 GPT-2 and 2 of 3 post-trained checkpoints"
     )
+
+
+def test_join_and_writes_a_list_phrase() -> None:
+    assert stats.join_and([]) == ""
+    assert stats.join_and(["a"]) == "a"
+    assert stats.join_and(["a", "b"]) == "a and b"
+    assert stats.join_and(["a", "b", "c"]) == "a, b and c"
+
+
+def test_runs_text_names_the_roles_and_skips_empty_ones() -> None:
+    counts = {
+        "gpt2": stats.RoleCount(3, 3),
+        "base": stats.RoleCount(0, 0),
+        "post": stats.RoleCount(3, 6),
+    }
+    assert stats.runs_text(counts) == (
+        "3 of 3 GPT-2 runs and 3 of 6 post-trained runs"
+    )
