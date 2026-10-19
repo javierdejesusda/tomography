@@ -223,4 +223,7 @@ def test_the_range_reader_layer_is_counted_per_role(
 def test_the_claim_names_the_interval_criterion(
     output: registry.TableOutput,
 ) -> None:
-    assert "above the 95 percent interval of a classifier" in output.claim
+    assert (
+        "above a classifier on the question words, with the interval of the "
+        "difference above zero, on "
+    ) in output.claim

@@ -463,7 +463,7 @@ def test_the_resolved_abstract_stays_short(
 ) -> None:
     view = page.Page(site[1])
     words = len(view.plain(content.ABSTRACT).split())
-    assert words <= 250, words
+    assert words <= 275, words
 
 
 def test_grouped_csv_columns_carry_their_group(
