@@ -225,7 +225,8 @@ INTRODUCTION = Section(
             "Post-training ([[sec:base_post]]).",
             "Held-out sentiment reading is lower after post-training on "
             "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes, and "
-            "[[num:fig:base_post.paired_excluding_zero]] other seed-paired "
+            "[[num:fig:base_post.paired_excluding_zero]] of "
+            "[[num:fig:base_post.paired_total]] other seed-paired "
             "differences exclude zero (0.6B morality, 1.7B utility and 0.6B "
             "honesty); the other readings stay within their intervals "
             "([[fig:base_post]]).",
@@ -659,8 +660,9 @@ RESULTS = Section(
             paragraphs=(
                 "Held-out sentiment reading is lower on "
                 "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes, and "
-                "[[num:fig:base_post.paired_excluding_zero]] other "
-                "seed-paired differences exclude zero.",
+                "[[num:fig:base_post.paired_excluding_zero]] of "
+                "[[num:fig:base_post.paired_total]] other seed-paired "
+                "differences exclude zero.",
                 "[[fig:base_post]] puts every measure of the earlier "
                 "sections side by side as post-trained minus base for the "
                 "three Qwen3 sizes; the stored per-seed comparisons are in "
@@ -693,8 +695,8 @@ DISCUSSION = Section(
         "fluency at larger ones (a perplexity on neutral text above 1.5 "
         "times the unsteered model, or a distinct-1 below 0.15; "
         "[[sec:steering]]), and post-training lowers held-out sentiment "
-        "reading and changes [[num:fig:base_post.paired_excluding_zero]] "
-        "other readings beyond their intervals "
+        "reading and changes [[num:fig:base_post.paired_excluding_zero]] of "
+        "[[num:fig:base_post.paired_total]] other readings beyond their intervals "
         "(0.6B morality, 1.7B utility and 0.6B honesty, in "
         "[[fig:base_post]]), with the rest within them.",
     ),

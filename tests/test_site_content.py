@@ -514,7 +514,9 @@ def test_the_confidence_gain_is_bounded_not_called_nothing() -> None:
 def test_the_paired_differences_are_counted_by_token() -> None:
     for text in (_listed("Post-training"), content.DISCUSSION.paragraphs[0]):
         assert "[[num:fig:base_post.paired_excluding_zero]]" in text
+        assert "[[num:fig:base_post.paired_total]]" in text
         assert "three other" not in text
+    assert "[[num:fig:base_post.paired_total]]" in _opener("base_post")
 
 
 def test_the_three_excluding_differences_are_named() -> None:
