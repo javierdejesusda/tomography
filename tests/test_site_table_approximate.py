@@ -256,3 +256,19 @@ def test_the_claim_range_shares_match_the_figure_numbers() -> None:
     assert numbers["range_post_max"] == 68
     assert numbers["exact_base_max"] == 15
     assert numbers["exact_post_max"] == 0
+
+
+def test_a_zero_maximum_is_not_written_as_at_most_zero() -> None:
+    numbers = registry.build_figure("approximate", Manifest(ROOT)).numbers
+    assert numbers["exact_post_max"] == 0
+    assert numbers["exact_base_max"] > 0
+    claim = output_claim()
+    for role in ("base", "post"):
+        assert f"at most [[num:fig:approximate.exact_{role}_max]]" not in claim
+    assert "the highest share on exact items is" in claim
+    for role in ("base", "post"):
+        assert f"[[num:fig:approximate.exact_{role}_max]] percent" in claim
+
+
+def output_claim() -> str:
+    return registry.build_table("approximate", Manifest(ROOT)).claim
