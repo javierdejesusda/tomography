@@ -39,11 +39,11 @@ APPENDIX_TABLE_KEYS = (
     "assets",
     "finders_all",
     "reading_full",
-    "truth_sets",
-    "base_post",
-    "wordings",
     "sizes",
     "prompts",
+    "wordings",
+    "truth_sets",
+    "base_post",
 )
 
 

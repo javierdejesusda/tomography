@@ -168,12 +168,17 @@ class Page:
 
         for number, section in enumerate(content.BODY, 1):
             visit(section, str(number))
+        figure = table = 0
         for letter, section in zip("ABCD", content.APPENDICES, strict=True):
             self.sections[section.key] = letter
-        for i, key in enumerate(self.doc.appendix, 1):
-            self.figure_number[key] = f"A{i}"
-        for i, key in enumerate(self.doc.appendix_tables, 1):
-            self.table_number[key] = f"A{i}"
+            for item in section.items:
+                kind, _, key = item.partition(":")
+                if kind == "fig" and key in self.doc.appendix:
+                    figure += 1
+                    self.figure_number[key] = f"A{figure}"
+                elif kind == "table" and key in self.doc.appendix_tables:
+                    table += 1
+                    self.table_number[key] = f"A{table}"
 
     def cite(self, keys: str) -> str:
         """Numbers the citations of a token in order of first use."""

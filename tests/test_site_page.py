@@ -460,3 +460,20 @@ def test_the_cite_block_uses_the_exact_paper_key(
     block = full[1][full[1].index('id="cite"') :]
     assert "@misc{tomography," in block
     assert f"{references.PAPER_KEY}," in block
+
+
+def test_table_numbers_increase_in_page_order(
+    full: tuple[page.Document, str],
+) -> None:
+    html = full[1]
+    main = [
+        int(n) for n in re.findall(r'<div class="table" id="table-(\d+)"', html)
+    ]
+    appendix = [
+        int(n)
+        for n in re.findall(r'<div class="table" id="table-A(\d+)"', html)
+    ]
+    assert main == sorted(main) == list(range(1, len(main) + 1))
+    assert appendix == list(range(1, len(appendix) + 1))
+    figures = [int(n) for n in re.findall(r'<figure id="fig-A(\d+)"', html)]
+    assert figures == list(range(1, len(figures) + 1))

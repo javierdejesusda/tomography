@@ -232,7 +232,7 @@ def test_caption_is_the_template_filled_from_the_files(
         "steering win rate fall with an interval below zero on 1.7B only."
     ) in output.detail
     assert "Section 6" in output.detail
-    assert "Table A5" in output.detail
+    assert "[[table:base_post]]" in output.detail
     assert "prompt format" in output.detail
 
 
@@ -289,7 +289,7 @@ def test_rows_are_labelled_and_the_zero_line_is_drawn(
     text = f"{output.claim} {output.detail} {output.csv}"
     assert chr(0x2014) not in text
     assert chr(0x2013) not in text
-    assert "_" not in text
+    assert "_" not in text.replace("[[table:base_post]]", "")
 
 
 def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
