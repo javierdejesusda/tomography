@@ -147,3 +147,14 @@ def test_kwiatkowski_pages_follow_the_acl_anthology_with_a_hyphen() -> None:
     line = references.format_line(entry)
     assert "452-466" in line
     assert not any(ch in line for ch in DASHES)
+
+
+def test_no_reference_line_repeats_its_arxiv_id() -> None:
+    bib = references.parse(BIB.read_text("utf-8"))
+    repeated = []
+    for key, entry in bib.items():
+        text = f"{references.format_line(entry)} {references.link(entry)[0]}"
+        eprint = entry.fields.get("eprint", "")
+        if eprint and text.count(eprint) > 1:
+            repeated.append(key)
+    assert repeated == []
