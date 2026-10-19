@@ -188,10 +188,12 @@ INTRODUCTION = Section(
             "Approximate answers ([[sec:approximate]]).",
             "Qwen3 writes ranges where the sourced answer is a range, but "
             "the range reader is above a classifier on the question words "
-            "on [[count:table:approximate.above_words]], its random control "
-            "reaches [[num:table:approximate.high]] on "
-            "[[count:table:approximate.random_high]], and it places people "
-            "next to breeds ([[fig:approximate]]).",
+            "on [[count:table:approximate.above_words]], lies inside the "
+            "interval of its random control on "
+            "[[count:fig:approximate.reader_in_random]] and places the "
+            "people outside the band of the control on "
+            "[[count:fig:approximate.people_outside_band]] "
+            "([[fig:approximate]]).",
         ),
         (
             "Post-training ([[sec:base_post]]).",

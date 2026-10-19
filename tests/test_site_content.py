@@ -406,7 +406,9 @@ def test_the_approximate_contribution_counts_the_reader_and_the_control() -> (
     text = " ".join(_all_texts())
     assert "is matched by" not in text
     assert "[[count:table:approximate.above_words]]" in text
-    assert "[[count:table:approximate.random_high]]" in text
+    assert "[[count:fig:approximate.reader_in_random]]" in text
+    assert "[[count:fig:approximate.people_outside_band]]" in text
+    assert "random_high" not in text
 
 
 def test_the_negated_set_claim_counts_checkpoints_below_chance() -> None:
