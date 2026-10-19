@@ -404,3 +404,16 @@ def test_the_sentiment_curve_dot_sits_at_the_finder_comparison_layer(
     assert float(row["y"]) == pytest.approx(
         reader[layer - 1] - random[layer - 1]
     )
+
+
+def test_the_read_dots_are_not_clipped_at_the_axes_edge(
+    output: registry.FigureOutput,
+) -> None:
+    dots = [
+        ln
+        for ax in output.figure.axes
+        for ln in ax.get_lines()
+        if (ln.get_gid() or "").startswith("read:")
+    ]
+    assert dots
+    assert all(not d.get_clip_on() for d in dots)

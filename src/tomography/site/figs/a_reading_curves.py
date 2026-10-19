@@ -93,6 +93,7 @@ def _curve_panel(ax: Axes, cells: dict[str, Cell]) -> None:
             mec=paper.INK,
             mew=0.5,
             zorder=4,
+            clip_on=False,
         )
         dot.set_gid(f"read:{model}")
         onset = reading.first_depth_above(cell.curve, MARGIN)

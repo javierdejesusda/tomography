@@ -200,3 +200,26 @@ def test_every_row_has_the_same_axis_style_and_a_visible_chance_line(
         assert all(ln.get_linewidth() >= 0.8 for ln in chance)
     assert len(widths) == 1
     assert widths.pop() >= 0.8
+
+
+def test_markers_at_accuracy_one_are_not_clipped_and_pink_stays_visible(
+    output: registry.FigureOutput,
+) -> None:
+    for ax in output.figure.axes:
+        assert ax.get_ylim()[1] >= 1.02
+        for ln in ax.get_lines():
+            if ln.get_marker() not in ("None", None, ""):
+                assert not ln.get_clip_on()
+        curves = [ln for ln in ax.get_lines() if len(ln.get_xdata()) > 5]
+        black = [
+            ln for ln in curves if ln.get_color() == paper.ENC["direction"]
+        ]
+        pink = [ln for ln in curves if ln.get_color() == paper.ENC["paper"]]
+        assert black
+        assert pink
+        assert min(p.get_zorder() for p in pink) > max(
+            b.get_zorder() for b in black
+        )
+        assert max(p.get_linewidth() for p in pink) < min(
+            b.get_linewidth() for b in black
+        )
