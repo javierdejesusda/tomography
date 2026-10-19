@@ -576,7 +576,6 @@ def test_known_and_unknown_questions_have_a_finding_and_a_subsection() -> None:
         "[[fig:a_knowledge_matrix]]",
     ):
         assert token in text, token
-    assert "by the largest shift of the mean dose curve" in text
     assert "told to give one exact number" in text
 
 
@@ -626,7 +625,7 @@ def test_counts_over_runs_use_the_runs_token() -> None:
     assert "[[runs:fig:knowledge_steering.distinguishable]]" in text
     assert "[[count:fig:knowledge_steering.distinguishable]]" not in text
     assert "[[runs:fig:knowledge_steering.known_ge_unknown]]" in text
-    assert "by the largest shift of the mean dose curve" in text
+    assert "by the largest shift of the mean dose curve" in text.lower()
     assert "known_ge_unknown_" not in text
     assert "knowledge_steering.n_" not in text
 
@@ -906,3 +905,62 @@ def test_the_written_baseline_claims_match_the_computed_counts(
     assert "adds at most a small amount to the confidence of the model" in (
         _opener("known_unknown")
     )
+
+
+def test_the_knowledge_steering_measures_are_in_appendix_g() -> None:
+    from tomography.site.figs import knowledge_steering
+
+    appendix = " ".join(_texts(_section("appendix_knowledge")))
+    assert knowledge_steering.APPENDIX_DETAIL in appendix
+    runin = dict(_section("known_unknown").runin)["Steering."]
+    for gone in ("gap", "1/4", "absolute mean slopes", "95 percent"):
+        assert gone not in runin
+    assert "[[sec:appendix_knowledge]]" in runin
+    assert "[[runs:fig:knowledge_steering.distinguishable]]" in runin
+    assert "[[runs:fig:knowledge_steering.selective]]" in runin
+    assert "[[runs:fig:knowledge_steering.known_ge_unknown]]" in runin
+
+
+def test_the_knowledge_steering_counts_hold_per_role() -> None:
+    steering = registry.build_figure("knowledge_steering", Manifest(ROOT))
+    got = {
+        name: {r: (c.hits, c.total) for r, c in counts.items()}
+        for name, counts in steering.counts.items()
+    }
+    assert got["distinguishable"] == {
+        "gpt2": (3, 3),
+        "base": (3, 3),
+        "post": (3, 6),
+    }
+    assert got["known_ge_unknown"] == {
+        "gpt2": (2, 3),
+        "base": (2, 3),
+        "post": (0, 6),
+    }
+    text = _text()
+    for gone in ("not selective", "false refusal", "4 of 10"):
+        assert gone not in text
+
+
+def test_the_reading_subsection_states_the_words_alone_baseline() -> None:
+    text = " ".join(_texts(_section("reading")))
+    for token in (
+        "[[num:table:reading.word_sentiment]]",
+        "[[num:table:reading.char_sentiment]]",
+        "[[num:table:reading.word_utility]]",
+        "[[num:table:reading.char_utility]]",
+    ):
+        assert token in text, token
+    assert "The words alone read sentiment" in text
+    assert "with an interval above chance" in text
+    assert "do not separate from chance for morality, truth and honesty" in text
+    table = registry.build_table("reading", Manifest(ROOT))
+    for analyzer in ("word", "char"):
+        for concept, above in (
+            ("sentiment", 1.0),
+            ("utility", 1.0),
+            ("morality", 0.0),
+            ("truth", 0.0),
+            ("honesty", 0.0),
+        ):
+            assert table.numbers[f"{analyzer}_{concept}_above"] == above

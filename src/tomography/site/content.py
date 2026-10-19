@@ -18,6 +18,8 @@ detail behind each finding.
 
 import dataclasses
 
+from tomography.site.figs import knowledge_steering
+
 MINUS = chr(0x2212)
 PM = chr(0x00B1)
 ELL = chr(0x2113)
@@ -102,10 +104,9 @@ KEY_FINDINGS = Section(
             "The finder of the paper ([[sec:finders]]).",
             "The leading principal component of paired differences is above "
             "a random direction, with an interval excluding zero, for "
-            "sentiment on [[count:fig:finders.pca_sentiment]], where the "
-            "pairs are unrelated, but for utility, where they are matched, "
-            "on every Qwen3 checkpoint; matching is confounded with the "
-            "concept and the data. Logistic regression is above a random "
+            "sentiment on [[count:fig:finders.pca_sentiment]], but for "
+            "utility on every Qwen3 checkpoint; matching is confounded with "
+            "the concept and the data. Logistic regression is above a random "
             "direction for sentiment on all 10 checkpoints "
             "([[fig:finders]]).",
         ),
@@ -174,16 +175,16 @@ INTRODUCTION = Section(
         "We run the recipe on smaller open models where every step can be "
         "checked: GPT-2 [[cite:radford2019language]] at four sizes and "
         "Qwen3 [[cite:yang2025qwen3]] at three sizes, each as a base and a "
-        "post-trained checkpoint. We do not reproduce the LLaMA-2 numbers of "
-        "the paper. Our readers are logistic regression unless a figure "
-        "names the finder of the paper, because that finder is above a random "
-        "direction by its interval for only some concepts and roles "
-        "([[sec:finders]]). For each question we name the baseline that "
-        "could produce the result without the direction: a random direction "
-        "fitted with the same procedure, a classifier on the text (for "
-        "TruthfulQA, knowledge and approximate answers, where the wording "
-        "can give the label away), the popularity of the subject, or the "
-        "confidence of the model. Three terms recur. The margin is the "
+        "post-trained checkpoint. Our readers are logistic regression "
+        "unless a figure names the finder of the paper, because that finder "
+        "is above a random direction by its interval for only some concepts "
+        "and roles ([[sec:finders]]). For each question we name the "
+        "baseline that could produce the result without the direction: a "
+        "random direction fitted with the same procedure, a classifier on "
+        "the text (for TruthfulQA, knowledge and approximate answers, where "
+        "the wording can give the label away), the popularity of the "
+        "subject, or the confidence of the model. Three terms recur. The "
+        "margin is the "
         "accuracy of a reader minus that of a random direction of the same "
         "run; the relative depth is a layer index divided by the number of "
         "layers; and the relative coefficient is the steering strength in "
@@ -196,8 +197,8 @@ INTRODUCTION = Section(
             "Baseline-relative readings ([[sec:method]]).",
             "Every reading is reported against a random direction fitted "
             "with the same procedure and, where the wording can give the "
-            "label away, against text classifiers, popularity or the "
-            "confidence of the model, with counts per role and never pooled.",
+            "label away, against a text baseline, with counts per role and "
+            "never pooled.",
         ),
         (
             "A test of the finder ([[sec:finders]]).",
@@ -215,9 +216,8 @@ INTRODUCTION = Section(
             "Known and unknown questions ([[sec:known_unknown]]).",
             "A known-against-unknown direction is compared with popularity, "
             "text classifiers and the confidence of the model, its steering "
-            "of abstention with random directions of the same norm, and a "
-            "range direction for approximate answers with a random control "
-            "and a word classifier.",
+            "with random directions of the same norm, and a range direction "
+            "for approximate answers with a random control.",
         ),
         (
             "A page rebuilt from the result files ([[sec:reproducibility]]).",
@@ -310,15 +310,14 @@ METHOD = Section(
                 "accuracy is the share of held-out pairs read correctly, so "
                 "a direction with no information scores 0.5 and no "
                 "threshold is involved.",
-                "The layer chosen on validation, at which a reading is "
-                "reported, is picked on pairs that the reported score does "
-                "not use. The main sentiment run is the exception: it "
-                "chooses its layer on the same 256 SST-2 validation pairs "
-                "it is scored on, so its value is optimistic. We therefore "
-                "report sentiment from the sample-size run at 64 training "
-                "pairs, which chooses the layer on its select split and "
-                "scores a separate report split of 214 pairs, and keep the "
-                "optimistic run in [[table:reading_full]] only.",
+                "The layer chosen on validation is picked on pairs that the "
+                "reported score does not use. The main "
+                "sentiment run is the exception: it chooses its layer on the "
+                "same 256 SST-2 validation pairs it is scored on, so its "
+                "value is optimistic. We therefore report sentiment from the "
+                "sample-size run at 64 training pairs, which scores a "
+                "separate report split of 214 pairs, and keep the optimistic "
+                "run in [[table:reading_full]] only.",
             ),
             items=("fig:method",),
         ),
@@ -330,11 +329,7 @@ METHOD = Section(
                 "XL, and Qwen3 [[cite:yang2025qwen3]] 0.6B, 1.7B and 4B, "
                 "each as the base checkpoint and the post-trained one. A "
                 "post-trained checkpoint is used with its chat template and "
-                "thinking disabled; it differs from its base in "
-                "post-training data, in prompt format and in distillation "
-                "from a larger model, so a difference between the two is a "
-                "difference between these recipes and not an effect of "
-                "instruction tuning alone. Sentiment is read on phrases of "
+                "thinking disabled. Sentiment is read on phrases of "
                 "the Stanford Sentiment Treebank "
                 "[[cite:socher2013recursive]], utility and morality on "
                 "ETHICS [[cite:hendrycks2021aligning]], and truth on the "
@@ -366,10 +361,8 @@ METHOD = Section(
                 "so every reading is reported as its margin over the random "
                 "direction of the same run, not over 0.5; the two share a "
                 "layer except in the finder comparison, which reads each at "
-                "the layer chosen on its own select split. The margin plays "
-                "the role of selectivity in the probing literature "
-                "[[cite:hewitt2019designing]], but its control is a random "
-                "direction, not a control task. Where the wording of an "
+                "the layer chosen on its own select split. Where the wording "
+                "of an "
                 "input can give the label away (TruthfulQA, knowledge "
                 "questions, approximate answers), we add classifiers on the "
                 "words and on the characters of the input, fitted on the "
@@ -474,13 +467,19 @@ RESULTS = Section(
                 "accuracy grows with size for utility and morality, and the "
                 "truth reader on GPT-2 is not separable from its random "
                 "direction at [[num:fig:reading.truth_n]] test pairs. The "
-                "wording study refits the sentiment reader on wordings that "
-                "change the frame, the wording or the concept word of the "
-                "template ([[fig:wording]], [[fig:a_wording]], "
-                "[[table:wordings]]; [[sec:appendix_wording]]). Layer "
-                "curves, every reading with its layer and the sample-size "
-                "runs are in [[sec:appendix_reading]], and the margin over "
-                "every layer by role in [[fig:a_reading_curves]].",
+                "words alone read sentiment "
+                "([[num:table:reading.word_sentiment]] with word n-grams, "
+                "[[num:table:reading.char_sentiment]] with character "
+                "n-grams on the held-out split) and utility "
+                "([[num:table:reading.word_utility]], "
+                "[[num:table:reading.char_utility]]) with an interval above "
+                "chance, and do not separate from chance for morality, "
+                "truth and honesty ([[table:reading]]). The wording study "
+                "refits the sentiment reader on changed templates "
+                "([[fig:wording]], [[fig:a_wording]], [[table:wordings]]; "
+                "[[sec:appendix_wording]]). Layer curves and every reading "
+                "with its layer are in [[sec:appendix_reading]] and "
+                "[[fig:a_reading_curves]].",
             ),
         ),
         Section(
@@ -489,9 +488,8 @@ RESULTS = Section(
             paragraphs=(
                 "A known-against-unknown direction ranks questions above "
                 "their popularity but adds at most a small amount to the "
-                "confidence of the model, moves abstention on some runs "
-                "only, and a range reader for approximate answers is above "
-                "its random control on only some checkpoints.",
+                "confidence of the model, and a range reader is above its "
+                "random control on only some checkpoints.",
             ),
             runin=(
                 (
@@ -525,11 +523,11 @@ RESULTS = Section(
                     "more than each of three random directions of the same "
                     "norm on [[runs:fig:knowledge_steering.distinguishable]], "
                     "and more than on known questions on "
-                    "[[runs:fig:knowledge_steering.selective]] "
-                    "([[fig:knowledge_steering]]). Known questions move at "
-                    "least as much as unknown ones, by the largest shift of "
-                    "the mean dose curve, on "
-                    "[[runs:fig:knowledge_steering.known_ge_unknown]].",
+                    "[[runs:fig:knowledge_steering.selective]]; known "
+                    "questions move at least as much as unknown ones on "
+                    "[[runs:fig:knowledge_steering.known_ge_unknown]] "
+                    "([[fig:knowledge_steering]]; the measures are in "
+                    "[[sec:appendix_knowledge]]).",
                 ),
                 (
                     "Approximate answers.",
@@ -595,11 +593,9 @@ RESULTS = Section(
             ),
             items=("fig:steering",),
             after=(
-                "[[fig:steering]] shows the judged sentiment against the "
-                "relative coefficient and the fluency rule per checkpoint "
-                "and coefficient; the comparison with random directions is "
-                "in [[fig:teaser]] (last row), and [[table:steering]] adds "
-                "the completion perplexity ([[sec:appendix_steering]]).",
+                "The comparison with random directions is in "
+                "[[fig:teaser]] (last row), and [[table:steering]] adds the "
+                "completion perplexity ([[sec:appendix_steering]]).",
             ),
         ),
         Section(
@@ -626,24 +622,18 @@ DISCUSSION = Section(
     "limitations",
     "Discussion and limitations",
     paragraphs=(
-        "Two patterns run through the results. One is that a direction "
-        "reads a concept better than chance far more often than it beats "
-        "the right baseline: orientation on the labels already lifts a "
-        "random direction, the wording of the input often carries the "
-        "label, and the confidence of the model already holds what a "
-        "knowledge direction reads. A reading claim therefore needs its "
-        "random direction and, where the text can carry the label, a text "
-        "baseline; [[fig:teaser]] shows how many of the claims survive "
-        "both. The other is that the finder of the paper is above a random "
-        "direction by its interval on utility, where each pair is one "
-        "scenario in two versions, but on fewer checkpoints for sentiment "
-        "and truth, where the pairs are unrelated; matching is confounded "
-        "with the concept and the data, so we do not read the difference as "
-        "caused by matching. Steering moves the judged sentiment at small "
-        "coefficients and breaks fluency at larger ones (a perplexity on "
-        "neutral text above 1.5 times the unsteered model, or a distinct-1 "
-        "below 0.15; [[sec:steering]]), and post-training lowers held-out "
-        "sentiment reading, with an interval below zero, on "
+        "A direction reads a concept "
+        "better than chance far more often than it beats the right "
+        "baseline: orientation on the labels lifts a random direction, the "
+        "wording of the input often carries the label, and the confidence "
+        "of the model already holds what a knowledge direction reads, so a "
+        "reading claim needs its random direction and, where the text can "
+        "carry the label, a text baseline ([[fig:teaser]]). Steering moves "
+        "the judged sentiment at small coefficients and "
+        "breaks fluency at larger ones (a perplexity on neutral text above "
+        "1.5 times the unsteered model, or a distinct-1 below 0.15; "
+        "[[sec:steering]]), and post-training lowers held-out sentiment "
+        "reading, with an interval below zero, on "
         "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes.",
     ),
     runin=(
@@ -979,6 +969,7 @@ APPENDICES = (
             "([[table:knowledge]]) and every dose curve "
             "([[fig:a_dose_runs]], [[fig:a_dose_types]]) behind "
             "[[fig:knowledge_steering]].",
+            knowledge_steering.APPENDIX_DETAIL,
             "The confidence of the model stacks five output signals, and "
             "only the pooled level of the stack is stored, so the single "
             "probability of the model's own answer token stands for it in "

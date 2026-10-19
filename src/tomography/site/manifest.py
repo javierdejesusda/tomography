@@ -15,6 +15,7 @@ from tomography.site import store
 LATEST = frozenset({"c2", "c4", "c5", "m1", "p7"})
 P1_DEFAULT_METHOD = "logistic"
 P9D_DEFAULT_TEMPLATE = "fewshot"
+MODEL_FREE = "none"
 
 
 class AmbiguousRunError(ValueError):
@@ -87,6 +88,22 @@ class Manifest:
         if not base.is_dir():
             return []
         found = [p.name for p in base.iterdir() if p.is_dir()]
+        return sorted(found, key=store.model_rank)
+
+    def checkpoints(self) -> list[str]:
+        """Lists the checkpoints of every experiment, in paper order.
+
+        Model-free runs (`MODEL_FREE`) are not checkpoints and are skipped.
+
+        Returns:
+            Checkpoint keys found under any experiment.
+        """
+        found = {
+            m
+            for e in self.experiments()
+            for m in self.models(e)
+            if m != MODEL_FREE
+        }
         return sorted(found, key=store.model_rank)
 
     def runs(self, exp: str, model: str) -> list[RunInfo]:
