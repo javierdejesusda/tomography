@@ -55,12 +55,14 @@ DETAIL = (
     "to the one on the characters of the question, without intervals), and "
     "the model's own probability of its first answer token (pentagon), "
     "which is {own_min} to {own_max} against {dir_min} to {dir_max} for the "
-    "direction. The model's own confidence in (c) stacks five output "
+    "direction and {pop_min} to {pop_max} for popularity. The model's own "
+    "confidence in (c) stacks five output "
     "signals, of which this is one, and only the pooled level of the stack "
     "is stored, so the single signal stands for it here. No random "
     "direction is drawn in (a) because its within-relation level is not "
     "stored. (b) The difference between the two AUROCs, direction minus "
-    "popularity, the strongest baseline, with the conservative interval "
+    "popularity, the strongest of popularity and the two text "
+    "classifiers, with the conservative interval "
     "from the two Hanley and McNeil standard errors: the direction is above "
     "popularity on {point} by point estimate, and the interval of the "
     "difference lies above zero on {interval}. (c) Change in the AUROC for "
@@ -516,7 +518,12 @@ def build(manifest: Manifest) -> FigureOutput:
     dir_min, dir_max = _range(
         [float(r["logistic_within"]) for r in contrast.values()]
     )
+    pop_min, pop_max = _range(
+        [float(r["popularity_within"]) for r in contrast.values()]
+    )
     detail = DETAIL.format(
+        pop_min=pop_min,
+        pop_max=pop_max,
         own_min=own_min,
         own_max=own_max,
         dir_min=dir_min,

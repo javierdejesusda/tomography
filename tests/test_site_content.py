@@ -483,7 +483,7 @@ def test_reproducibility_admits_the_lorra_adapter_and_names_no_run_code() -> (
     paragraphs = " ".join(_texts(content.REPRODUCIBILITY))
     assert "no experiment trains a model beyond" not in paragraphs
     assert "LoRRA adapter" in paragraphs
-    assert "each of the 10 checkpoints" in paragraphs
+    assert "all 10 checkpoints" in paragraphs
     assert not RUN_CODE.search(paragraphs)
     assert "seed" in paragraphs
     assert "tomography run" in paragraphs
@@ -506,7 +506,10 @@ def test_method_states_the_draws_positions_and_steering_depths() -> None:
 
 def test_the_approximate_claims_name_the_interval_criterion() -> None:
     text = _text()
-    assert "above the 95 percent interval of a classifier" in text
+    assert (
+        "above a classifier on the question words, with the interval of the "
+        "difference above zero, on "
+    ) in text
     assert "[[count:table:approximate.layer_one]]" in text
 
 
@@ -589,7 +592,7 @@ def _listed(head: str) -> str:
 
 def test_the_steering_claims_are_two_sentences_with_their_thresholds() -> None:
     first, second = content.ABSTRACT_STEERING.split(". ")
-    assert "at most 1.5" not in content.ABSTRACT_STEERING
+    assert content.FLUENCY_RULE in content.ABSTRACT_STEERING
     assert "[[count:fig:steering.moves01]]" in first
     assert "[[count:fig:steering.fluent01]]" in first
     assert "[[count:fig:teaser.steering]]" in second

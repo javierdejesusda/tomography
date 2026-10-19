@@ -28,8 +28,13 @@ FINDINGS_URL = REPO_URL + "/blob/main/docs/findings.md"
 METHODOLOGY_URL = REPO_URL + "/blob/main/docs/methodology.md"
 DATA_URL = REPO_URL + "/tree/main/results"
 
+FLUENCY_RULE = (
+    "neutral-text perplexity ratio at most 1.5 and distinct-1 at least 0.15"
+)
+
 ABSTRACT_FINDER = (
-    "The paper's finder is above a random direction for sentiment on "
+    "The paper's finder is above a random direction by the 95 percent "
+    "interval for sentiment on "
     "[[count:fig:finders.pca_sentiment]] and truth on "
     "[[count:fig:finders.pca_truth]] with unrelated pairs and for utility "
     "on [[count:fig:finders.pca_utility]] with matched pairs; matching is "
@@ -37,8 +42,9 @@ ABSTRACT_FINDER = (
 )
 ABSTRACT_STEERING = (
     "Steering at relative coefficient 0.1 moves sentiment on "
-    "[[count:fig:steering.moves01]] and keeps the fluency rule on "
-    "[[count:fig:steering.fluent01]]. Steering utility at relative "
+    "[[count:fig:steering.moves01]] and keeps the fluency rule ("
+    + FLUENCY_RULE
+    + ") on [[count:fig:steering.fluent01]]. Steering utility at relative "
     "coefficient 0.3 beats every random direction on "
     "[[count:fig:teaser.steering]] and keeps it on "
     "[[count:fig:teaser.steering_fluent]] (GPT-2 small has no fluency "
@@ -53,7 +59,8 @@ ABSTRACT = (
     "and no GPT-2 size. "
     + ABSTRACT_FINDER
     + " The TruthfulQA reader does not beat a words classifier (above "
-    "on [[count:fig:teaser.truthfulqa]]). " + ABSTRACT_STEERING
+    "it by the 95 percent interval on [[count:fig:teaser.truthfulqa]]). "
+    + ABSTRACT_STEERING
 )
 
 
@@ -157,7 +164,10 @@ INTRODUCTION = Section(
             "and a direction fitted "
             "on a bare wording reads the wording of the paper at "
             "[[num:fig:wording.bare_to_paper_min]] to "
-            "[[num:fig:wording.bare_to_paper_max]] with cosine "
+            "[[num:fig:wording.bare_to_paper_max]], against "
+            "[[num:fig:wording.bare_random_min]] to "
+            "[[num:fig:wording.bare_random_max]] for a random direction on the "
+            "same wording, with cosine "
             "[[num:fig:wording.bare_cos_min]] to "
             "[[num:fig:wording.bare_cos_max]] to the direction of the paper "
             "([[fig:wording]]).",
@@ -176,9 +186,9 @@ INTRODUCTION = Section(
             "For sentiment, steering at relative coefficient " + PM + "0.1 "
             "moves the judged sentiment past the unsteered score at both "
             "signs with every vector, for the primary and the second judge, "
-            "on [[count:fig:steering.moves01]], and keeps the fluency rule "
-            "(neutral-text perplexity ratio at most 1.5 and distinct-1 at "
-            "least 0.15) on [[count:fig:steering.fluent01]]. For utility, "
+            "on [[count:fig:steering.moves01]], and keeps the fluency rule ("
+            + FLUENCY_RULE
+            + ") on [[count:fig:steering.fluent01]]. For utility, "
             "steering at relative coefficient 0.3 beats every random "
             "direction of the same norm with every vector on "
             "[[count:fig:teaser.steering]] and keeps the fluency rule on "
@@ -208,8 +218,8 @@ INTRODUCTION = Section(
         (
             "Approximate answers ([[sec:approximate]]).",
             "Qwen3 writes ranges where the sourced answer is a range, but "
-            "the range reader is above the 95 percent interval of a "
-            "classifier on the question words on "
+            "the range reader is above a classifier on the question words, "
+            "with the interval of the difference above zero, on "
             "[[count:table:approximate.above_words]], sits at the lowest "
             "layer on "
             "[[count:table:approximate.layer_one]], is above the "
@@ -223,7 +233,8 @@ INTRODUCTION = Section(
         ),
         (
             "Post-training ([[sec:base_post]]).",
-            "Held-out sentiment reading is lower after post-training on "
+            "Held-out sentiment reading is lower after post-training, with an "
+            "interval below zero, on "
             "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes, and "
             "[[num:fig:base_post.paired_excluding_zero]] of "
             "[[num:fig:base_post.paired_total]] other seed-paired "
@@ -437,7 +448,7 @@ METHOD = Section(
                 "direction, r(" + ELL + ") is the mean residual norm at "
                 "layer " + ELL + " on calibration text and c is the "
                 "relative coefficient. The sentiment steering run uses the "
-                "logistic sentiment direction on each of the 10 "
+                "logistic sentiment direction on all 10 "
                 "checkpoints, with 3 "
                 "steering vectors and the relative coefficients "
                 + MINUS
@@ -592,7 +603,8 @@ RESULTS = Section(
             paragraphs=(
                 "For sentiment, steering at relative coefficient 0.1 moves "
                 "the judged sentiment on [[count:fig:steering.moves01]] and "
-                "keeps the fluency rule on [[count:fig:steering.fluent01]]; "
+                "keeps the fluency rule (" + FLUENCY_RULE + ") on "
+                "[[count:fig:steering.fluent01]]; "
                 "for utility, at relative coefficient 0.3 it beats every "
                 "random direction on [[count:fig:teaser.steering]] and "
                 "keeps the fluency rule on "
@@ -609,9 +621,10 @@ RESULTS = Section(
             "knowledge_reading",
             "Does a direction know what the model knows?",
             paragraphs=(
-                "It ranks questions above their popularity on "
+                "It ranks questions above their popularity, with an interval "
+                "excluding zero, on "
                 "[[count:fig:knowledge_reading.above_pop]], and adds to the "
-                "confidence of the model on "
+                "confidence of the model, with an interval excluding zero, on "
                 "[[count:fig:teaser.knowledge_confidence]].",
                 "[[fig:knowledge_reading]] compares the "
                 "known-against-unknown direction with popularity, text and "
@@ -641,7 +654,8 @@ RESULTS = Section(
             "Are approximate answers read as approximate?",
             paragraphs=(
                 "Not beyond a text classifier. The range reader is above a "
-                "classifier on the question words on "
+                "classifier on the question words, with the interval of the "
+                "difference above zero, on "
                 "[[count:table:approximate.above_words]] and above the 95 "
                 "percent interval of its random control on "
                 "[[count:fig:approximate.reader_above_random]].",
@@ -659,7 +673,8 @@ RESULTS = Section(
             "base_post",
             "What does post-training change?",
             paragraphs=(
-                "Held-out sentiment reading is lower on "
+                "Held-out sentiment reading is lower, with an interval below "
+                "zero, on "
                 "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes, and "
                 "[[num:fig:base_post.paired_excluding_zero]] of "
                 "[[num:fig:base_post.paired_total]] other seed-paired "
@@ -696,7 +711,8 @@ DISCUSSION = Section(
         "fluency at larger ones (a perplexity on neutral text above 1.5 "
         "times the unsteered model, or a distinct-1 below 0.15; "
         "[[sec:steering]]), and post-training lowers held-out sentiment "
-        "reading and changes "
+        "reading, with an interval below zero on "
+        "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes, and changes "
         "[[num:fig:base_post.paired_excluding_zero]] of "
         "[[num:fig:base_post.paired_total]] other readings beyond "
         "their intervals (0.6B morality, 1.7B utility and 0.6B honesty, in "
@@ -719,9 +735,14 @@ LIMITATIONS = Section(
         (
             "Test size.",
             "Truth and honesty are scored on 59 test pairs and TruthfulQA "
-            "on 173 questions, so differences below about 0.15 on truth are "
-            "not resolved; GPT-2 truth readings are inconclusive rather "
-            "than negative. Layers are selected on small validation sets, "
+            "on 173 questions, so differences below about "
+            "[[num:fig:teaser.truth_half_gpt2_min]] to "
+            "[[num:fig:teaser.truth_half_gpt2_max]] on GPT-2 and "
+            "[[num:fig:teaser.truth_half_qwen3_min]] to "
+            "[[num:fig:teaser.truth_half_qwen3_max]] on Qwen3 base and "
+            "post-trained checkpoints are not resolved; GPT-2 truth "
+            "readings are inconclusive rather than negative. Layers are "
+            "selected on small validation sets, "
             "so the chosen layer carries its own uncertainty.",
         ),
         (
@@ -801,7 +822,7 @@ REPRODUCIBILITY = Section(
         "pinned to the revisions in [[table:assets]]. The experiments ran "
         "on a single consumer GPU, on rented single-GPU cloud machines and "
         "on a 16-thread CPU machine. One experiment trains a model beyond "
-        "the readers: a LoRRA adapter fitted on each of the 10 checkpoints "
+        "the readers: a LoRRA adapter fitted on all 10 checkpoints "
         "([[sec:appendix_other]]). "
         "Every experiment is one command, tomography run followed by the "
         "experiment and the checkpoint, with base seed 0 from which the "
