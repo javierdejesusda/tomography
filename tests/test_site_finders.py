@@ -271,7 +271,8 @@ def test_the_interval_counts_for_truth_and_utility_are_per_role(
     truth = _count("truth", "pca_diff", lambda c: c[1] > 0)
     assert truth == {"gpt2": (0, 4), "base": (2, 3), "post": (2, 3)}
     utility = _count("utility", "pca_diff", lambda c: c[1] > 0)
-    assert utility["base"] == (3, 3) and utility["post"] == (3, 3)
+    assert utility["base"] == (3, 3)
+    assert utility["post"] == (3, 3)
 
 
 def test_the_claim_describes_the_pairings_without_a_causal_title(

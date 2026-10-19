@@ -80,7 +80,7 @@ ROWS = (
     Row("truthfulqa", "TruthfulQA, against words", 1, "r6"),
     Row("knowledge", "Knowledge, against popularity", 1, "p9b"),
     Row("knowledge_confidence", "Knowledge, added to confidence", 1, "p9c"),
-    Row("steering", "Steering against random", 2, "m1"),
+    Row("steering", "Steering, utility direction", 2, "m1"),
 )
 BLOCKS = (
     "against a random direction",
@@ -188,23 +188,46 @@ def _confidence(manifest: Manifest, model: str) -> Cell | None:
     )
 
 
+STEER_STRENGTH = 0.3
+MAX_RATIO = 1.5
+MIN_DISTINCT = 0.15
+
+
 def _steering(manifest: Manifest, model: str) -> Cell | None:
     path = manifest.run("m1", model)
     if path is None:
         return None
-    table = [
+    rates: dict[str, list[float]] = {"logistic": [], "random": []}
+    for r in runfiles.rows(path, "table_seeds.json"):
+        if (
+            r["judge"] == "primary"
+            and r["strength"] == STEER_STRENGTH
+            and r["method"] in rates
+        ):
+            rates[str(r["method"])].append(float(r["rate"]))
+    worst = min(rates["logistic"])
+    best = max(rates["random"])
+    return Cell(worst - best, worst - best, worst - best, best, None)
+
+
+def _steering_fluent(manifest: Manifest, model: str) -> bool | None:
+    path = manifest.run("m1", model)
+    if path is None or not (path / "table_effects.json").exists():
+        return None
+    rows = runfiles.rows(path, "table_effects.json")
+    (none,) = [r for r in rows if r["method"] == "none"]
+    cell = [
         r
-        for r in runfiles.rows(path, "table.json")
-        if r["task"] == "manipulation" and r["setting"] == "0.3"
+        for r in rows
+        if r["method"] == "logistic" and r["coeff"] == STEER_STRENGTH
     ]
-    (logistic,) = [r for r in table if r["method"] == "logistic"]
-    (random,) = [r for r in table if r["method"] == "random"]
-    return _from_scores(
-        float(logistic["value"]),
-        float(random["value"]),
-        int(logistic["n"]),
-        int(random["n"]),
+    ratio = (
+        sum(float(r["perplexity"]) for r in cell)
+        / len(cell)
+        / float(none["perplexity"])
     )
+    distinct = sum(float(r["distinct_1"]) for r in cell) / len(cell)
+    return ratio <= MAX_RATIO and distinct >= MIN_DISTINCT
 
 
 def _cell(manifest: Manifest, row: Row, model: str) -> Cell | None:
@@ -384,7 +407,7 @@ def _draw(fig: Figure, found: dict[str, dict[str, Cell]]) -> None:
 
 
 def _numbers(
-    found: dict[str, dict[str, Cell]],
+    found: dict[str, dict[str, Cell]], fluent: dict[str, bool]
 ) -> tuple[dict[str, float], dict[str, dict[str, RoleCount]]]:
     numbers: dict[str, float] = {}
     counts: dict[str, dict[str, RoleCount]] = {}
@@ -400,6 +423,11 @@ def _numbers(
         numbers[f"{row.key}_min"] = min(margins)
         numbers[f"{row.key}_max"] = max(margins)
     numbers["knowledge_confidence_n"] = len(found["knowledge_confidence"])
+    counts["steering_fluent"] = stats.per_role(fluent)
+    for role in stats.ROLES:
+        count = counts["steering_fluent"][role]
+        numbers[f"steering_fluent_{role}_above"] = count.hits
+        numbers[f"steering_fluent_{role}_n"] = count.total
     return numbers, counts
 
 
@@ -448,9 +476,18 @@ def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
         "model's own confidence, with an interval excluding zero, on "
         f"{stats.per_role_text(counts['knowledge_confidence'])}."
     )
+    fluent = counts["steering_fluent"]
     third = (
-        "Steering along a logistic direction beats random directions of the "
-        f"same norm on {stats.per_role_text(counts['steering'])}."
+        "For steering on the utility manipulation task of the paper, a "
+        "checkpoint passes when every logistic steering vector (3 per "
+        "checkpoint) of the utility direction beats every random direction "
+        "of the same norm (3 per checkpoint) on the sentiment judge at "
+        "relative coefficient 0.3, which has chance 0.05: "
+        f"{stats.per_role_text(counts['steering'])}. At that coefficient the "
+        "steered text meets the fluency rule (perplexity at most "
+        f"{MAX_RATIO} times the unsteered text and distinct-1 at least "
+        f"{MIN_DISTINCT}) on {stats.per_role_text(fluent)} "
+        "(GPT-2 small has no fluency measure)."
     )
     return (
         "Where a direction reads and steers a concept, and where it does "
@@ -466,11 +503,14 @@ DETAIL = (
     "Baselines: rows 1 to 5, the random direction of the same run at the "
     "same layer; row 6, the random direction of the finder comparison; "
     "row 7, a word classifier; row 8, the strongest of popularity and two "
-    "text classifiers; row 9, the model's answer probability alone; row 10, "
-    "three random directions (win rate at relative coefficient 0.3). "
-    "Intervals cover the sampling of the test items and treat the two arms "
-    "as independent, which makes them conservative; rows 8 and 9 use the "
-    "Hanley and McNeil approximation and the stored paired bootstrap."
+    "text classifiers; row 9, the model's answer probability alone. Row 10 "
+    "is not an interval: its marker is the lowest win rate of the 3 "
+    "logistic steering vectors minus the highest of the 3 random "
+    "directions, so a marker above zero means every vector beats every "
+    "random direction. Intervals cover the sampling of the test items and "
+    "treat the two arms as independent, which makes them conservative; "
+    "rows 8 and 9 use the Hanley and McNeil approximation and the stored "
+    "paired bootstrap."
 )
 
 
@@ -496,7 +536,12 @@ def build(manifest: Manifest) -> FigureOutput:
         The figure and its caption parts.
     """
     found = _collect(manifest)
-    numbers, counts = _numbers(found)
+    fluent = {
+        m: ok
+        for m in manifest.models("m1")
+        if (ok := _steering_fluent(manifest, m)) is not None
+    }
+    numbers, counts = _numbers(found, fluent)
     with paper.paper_style():
         fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
         _draw(fig, found)
