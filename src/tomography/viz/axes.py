@@ -79,7 +79,7 @@ def model_style(key: str) -> ModelStyle:
         The style.
 
     Raises:
-        KeyError: If the family or size is unknown.
+        ValueError: If the family or size is unknown.
     """
     if key.startswith("gpt2"):
         ramp = paper.size_ramp("gpt2", len(GPT2_SIZES))

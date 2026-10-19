@@ -222,7 +222,7 @@ class Page:
         output, name = self._output(address)
         value = output.numbers[name]
         if float(value).is_integer() and abs(value) >= 1:
-            return f"{int(value):,}"
+            return f"{int(value):,}".replace("-", chr(0x2212))
         return _cells.num(value)
 
     def quoted_count(self, address: str) -> str:
