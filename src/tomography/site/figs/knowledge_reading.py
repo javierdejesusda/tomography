@@ -27,7 +27,7 @@ MARKERS = paper.MEASURE_MARKERS
 Z = stats.Z
 HEADER = ["panel", "model", "series", "value", "lo", "hi"]
 BLOCK_GAP = 0.6
-HEAD_Y = -0.85
+HEAD_Y = -0.95
 TOP = -1.4
 GROUP_X = -0.3
 NARROW = 0.035
@@ -196,6 +196,12 @@ def _row_setup(
                 lw=SEPARATOR_WIDTH,
                 zorder=0,
             )
+    first = -0.5
+    low, high = panels[0].get_ylim()
+    for ax in panels:
+        for line in ax.get_lines():
+            if line.get_color() == paper.ENC["reference"]:
+                line.set_ydata([0.0, (first - low) / (high - low)])
     panels[0].set_yticklabels([_label(m) for m in rows])
     by_role = _group.lines_by_role(list(rows))
     for role, members in by_role.items():
@@ -403,7 +409,7 @@ def _legend(fig: Any) -> None:
         loc="outside upper center",
         ncol=4,
         handlelength=1.2,
-        columnspacing=1.0,
+        columnspacing=1.8,
         fontsize=7,
     )
     legend.get_frame().set_edgecolor("none")
