@@ -203,20 +203,32 @@ def test_the_layer_one_count_is_per_role(
     assert "on 9 checkpoints" not in output.detail
 
 
-def test_the_in_template_random_direction_is_quoted_with_a_pointer(
+def test_the_in_template_random_direction_is_quoted_per_role(
     output: registry.TableOutput,
 ) -> None:
-    randoms = []
+    randoms: dict[str, list[float]] = {r: [] for r in stats.ROLES}
     for model in models("r6"):
         r5 = run("r5", model)
         layer = data(r5, "summary.json")["in_template"]["best_layer"]
         meta = data(r5, "curves.json")
         with np.load(r5 / "curves.npz") as npz:
             mean = np.asarray(npz["mean"], dtype=float)
-        randoms.append(mean[list(meta["series"]).index("random")][layer - 1])
-    assert output.numbers["template_random_min"] == pytest.approx(min(randoms))
-    assert output.numbers["template_random_max"] == pytest.approx(max(randoms))
+        value = mean[list(meta["series"]).index("random")][layer - 1]
+        randoms[stats.role(model)].append(value)
     text = output.detail
-    assert "[[num:table:truth.template_random_min]]" in text
-    assert "[[num:table:truth.template_random_max]]" in text
+    for pooled in ("template_random_min", "template_random_max"):
+        assert pooled not in output.numbers
+        assert pooled not in text
+    for role in stats.ROLES:
+        low = output.numbers[f"template_random_{role}_min"]
+        assert low == pytest.approx(min(randoms[role]))
+        high = output.numbers[f"template_random_{role}_max"]
+        assert high == pytest.approx(max(randoms[role]))
+    for end in ("min", "max"):
+        found = [text.find(f"template_random_{r}_{end}") for r in stats.ROLES]
+        assert min(found) >= 0
+        assert found == sorted(found)
+    assert "(GPT-2)" in text
+    assert "(Qwen3 base)" in text
+    assert "(post-trained)" in text
     assert "[[table:reading_full]]" in text
