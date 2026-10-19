@@ -64,7 +64,8 @@ def test_rows_follow_the_figure_order_with_escaped_templates(
         template = made[name].template
         assert row[0] == str(i)
         assert row[2] == KINDS[made[name].kind]
-        assert row[3] == template.user.replace("\n", "\n"), name
+        assert row[3] == template.user.replace("\n", "\\n"), name
+        assert chr(10) not in row[3], name
     assert output.rows[0][1] == "paper"
     assert output.rows[1][1] == "no template"
     assert [r[1] for r in output.rows if "paraphrase" in r[1]] == [
@@ -95,3 +96,10 @@ def test_no_underscore_or_run_code(output: registry.TableOutput) -> None:
     cells += [output.claim, output.detail, *output.columns]
     flat = [re.sub(r"\[\[.*?\]\]", "", c) for c in cells]
     assert not any("_" in c or "`" in c for c in flat)
+
+
+def test_the_caption_shows_the_two_characters_of_the_line_break_symbol(
+    output: registry.TableOutput,
+) -> None:
+    assert chr(10) not in output.detail
+    assert "symbol " + chr(92) + "n marks a line break" in output.detail
