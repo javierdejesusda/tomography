@@ -329,7 +329,7 @@ def test_the_detail_gives_the_baselines_of_each_panel(
         int(n["exact_post_max"]), int(n["people_post_max"])
     )
     assert (
-        f"Exact items and heights: {base} (Qwen3 base), {post} (post-trained)"
+        f"Exact items, heights: {base} (Qwen3 base), {post} (post-trained)"
     ) in detail
     assert "at most 0" not in detail
     assert "0 and 0" not in detail
@@ -786,3 +786,12 @@ def test_a_share_phrase_says_none_for_a_zero_and_at_most_for_the_rest() -> None:
     assert phrase(0, 0) == "none of either"
     for args in ((15, 3), (15, 0), (0, 4), (0, 0)):
         assert "at most 0" not in phrase(*args)
+
+
+def test_the_detail_names_the_control_interval_as_a_bootstrap_interval(
+    output: registry.FigureOutput,
+) -> None:
+    n = int(output.numbers["n_random_draws"])
+    assert (
+        f"grey bar: bootstrap interval of the mean of {n} random directions"
+    ) in output.detail
