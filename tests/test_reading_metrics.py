@@ -259,6 +259,13 @@ def test_wilson_ci_matches_the_textbook_interval() -> None:
     assert hi == pytest.approx(0.9433, abs=1e-3)
 
 
+def test_wilson_ci_takes_fractional_successes_between_its_neighbours() -> None:
+    low, mid, high = wilson_ci(7, 10), wilson_ci(7.5, 10), wilson_ci(8, 10)
+
+    assert low[0] < mid[0] < high[0]
+    assert low[1] < mid[1] < high[1]
+
+
 def test_wilson_ci_stays_inside_the_unit_interval_at_the_extremes() -> None:
     assert wilson_ci(0, 20)[0] == 0.0
     assert wilson_ci(20, 20)[1] == 1.0
