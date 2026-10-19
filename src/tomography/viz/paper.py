@@ -263,7 +263,7 @@ def panel_title(
         name.set_fontsize(size)
     name.set_transform(
         ax.transAxes
-        + ax.titleOffsetTrans
+        + cast(Any, ax).titleOffsetTrans
         + ScaledTranslation(shift / 72.0, 0.0, root.dpi_scale_trans)
     )
     return mark, name

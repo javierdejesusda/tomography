@@ -200,7 +200,10 @@ def test_every_row_has_one_measure_and_each_block_names_it_once(
 ) -> None:
     panels = _panels(output)
     runs = _runs()
-    rows = [list(zip(panels[i : i + 3], runs[i : i + 3])) for i in (0, 3, 6, 9)]
+    rows = [
+        list(zip(panels[i : i + 3], runs[i : i + 3], strict=True))
+        for i in (0, 3, 6, 9)
+    ]
     for row in rows:
         assert len({_entropy(*run) for _, run in row}) == 1
     names = {True: "entropy shift", False: "abstention rate"}
