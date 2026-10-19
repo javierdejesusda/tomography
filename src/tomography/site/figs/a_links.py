@@ -63,14 +63,14 @@ LAYER_OTHER = (
     "At the layer the plain-template range reader chose on each checkpoint, "
     "every cosine is at most {value} in absolute value."
 )
-LIMITS = {"cosine": (-0.04, 0.95), "auroc": (-0.012, 0.16)}
-TICKS = {"cosine": [0.0, 0.25, 0.5], "auroc": [0.0, 0.05, 0.1]}
+LIMITS = {"cosine": (-0.04, 1.15), "auroc": (-0.012, 0.16)}
+TICKS = {"cosine": [0.0, 0.5], "auroc": [0.0, 0.1]}
 LABELS = {
     "cosine": "cosine outside\nthe random band",
     "auroc": "AUROC outside\nthe random band",
 }
 SEPARATOR_WIDTH = 0.5
-GROUP_X = -0.5
+GROUP_X = -0.68
 
 
 def layer_sentence(layers: Sequence[int], biggest: float) -> str:
