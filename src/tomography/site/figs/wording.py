@@ -12,11 +12,11 @@ from typing import Any
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 from matplotlib.patches import Rectangle
 
 from tomography.site import runfiles
 from tomography.site import stats
+from tomography.site.figs import _rows as rowkit
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.site.registry import RoleCount
@@ -222,12 +222,28 @@ def _legend(fig: Figure) -> None:
         for f in MARKER
     ]
     handles.append(Line2D([], [], color=paper.ENC["paper"], lw=1.4))
-    handles.append(Patch(fc=paper.RANDOM_BAND, ec="none"))
+    handles.append(
+        Line2D([], [], color=paper.RANDOM_BAND, lw=5, solid_capstyle="butt")
+    )
+    handles.append(
+        rowkit.series_handle("GPT-2 and base", paper.ROLE_KEY_MARKER, paper.INK)
+    )
+    handles.append(
+        rowkit.series_handle(
+            "post-trained", paper.ROLE_KEY_MARKER, paper.INK, filled=False
+        )
+    )
     fig.legend(
         handles,
-        [*KIND.values(), "paper wording", "random direction"],
+        [
+            *KIND.values(),
+            "paper wording",
+            "random direction",
+            "GPT-2 and base",
+            "post-trained",
+        ],
         loc="outside upper center",
-        ncol=5,
+        ncol=4,
         frameon=False,
         fontsize=TEXT,
         columnspacing=1.2,
