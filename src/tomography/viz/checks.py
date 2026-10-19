@@ -200,7 +200,8 @@ def _artist_colours(artist: Artist) -> list[str]:
     """Reads the face, edge and line colours that an artist draws."""
     colours: list[object] = []
     if isinstance(artist, Line2D):
-        colours.append(artist.get_color())
+        if artist.get_linestyle() not in ("None", "none", " ", ""):
+            colours.append(artist.get_color())
         if artist.get_marker() not in ("None", None, ""):
             colours += [
                 artist.get_markerfacecolor(),
@@ -246,7 +247,7 @@ def palette_problems(fig: Figure) -> list[str]:
     for artist in fig.findobj(
         lambda a: isinstance(a, Line2D | Patch | Collection)
     ):
-        if id(artist) in seen:
+        if id(artist) in seen or not artist.get_visible():
             continue
         seen.add(id(artist))
         for shade in _artist_colours(artist):

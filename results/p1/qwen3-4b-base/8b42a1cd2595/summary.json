@@ -1,0 +1,133 @@
+{
+  "_meta": {
+    "experiment": "p1",
+    "config_hash": "8b42a1cd2595",
+    "seed": 0,
+    "git_sha": "bab5b7594b47ca08b11f78032211d205e953fdfb",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-57-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-19T00:13:22+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "p1",
+      "model": "qwen3-4b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "emotion"
+      ],
+      "kinds": [
+        "paper",
+        "no_template",
+        "bare",
+        "no_chat_tags",
+        "neutral_frame",
+        "no_trailing_question",
+        "no_trailing_space",
+        "paraphrase",
+        "scaffold",
+        "alternate",
+        "concept_swap",
+        "framing_swap"
+      ]
+    }
+  },
+  "data": {
+    "tasks": [
+      "sentiment",
+      "truth",
+      "emotion_happiness",
+      "emotion_sadness",
+      "emotion_anger",
+      "emotion_fear",
+      "emotion_disgust",
+      "emotion_surprise"
+    ],
+    "layers": {
+      "sentiment": 36,
+      "truth": 23,
+      "emotion_happiness": 24,
+      "emotion_sadness": 31,
+      "emotion_anger": 36,
+      "emotion_fear": 24,
+      "emotion_disgust": 29,
+      "emotion_surprise": 31
+    },
+    "skipped": {
+      "sentiment": {
+        "alternate": "task 'sentiment' has no alternate wording",
+        "framing_swap": "task 'sentiment' has no function framing"
+      },
+      "truth": {
+        "alternate": "task 'truth' has no alternate wording",
+        "framing_swap": "task 'truth' has no function framing"
+      },
+      "emotion_happiness": {},
+      "emotion_sadness": {},
+      "emotion_anger": {},
+      "emotion_fear": {},
+      "emotion_disgust": {},
+      "emotion_surprise": {}
+    },
+    "n_eval_pairs": {
+      "sentiment": {
+        "select": 214,
+        "report": 214
+      },
+      "truth": {
+        "select": 53,
+        "report": 59
+      },
+      "emotion_happiness": {
+        "select": 48,
+        "report": 38
+      },
+      "emotion_sadness": {
+        "select": 39,
+        "report": 44
+      },
+      "emotion_anger": {
+        "select": 41,
+        "report": 45
+      },
+      "emotion_fear": {
+        "select": 41,
+        "report": 53
+      },
+      "emotion_disgust": {
+        "select": 41,
+        "report": 39
+      },
+      "emotion_surprise": {
+        "select": 45,
+        "report": 36
+      }
+    },
+    "method": "pca_diff",
+    "curves_task": "sentiment"
+  }
+}

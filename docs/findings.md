@@ -10,7 +10,7 @@ the runs), the random-direction cosine of A1, the P9d selectivity columns (recom
 slopes), the span of the sizes in decades, the P1 spans, family ranges and transfer ranges (computed from the table
 and matrix files of the P1 runs), the means and ranges over readers of the Qwen3 C1 tables (computed from the
 per-reader rows), the per-layer dose slopes and judge agreements of the Qwen3 4B C1 pair (recomputed from the stored per-reader sweep curves), the maxima over layers of the random-direction series of R6, the P1 spans and cosine ranges of the
-truth and emotion tasks of P1 and the margins, ranks and counts of the P1 follow-up on eight models
+truth and emotion tasks of P1 and the margins, ranks and counts of the P1 follow-up on ten models
 (computed from the table and matrix files), the C2 and P7 curve values (read from the curves
 files), the P7 counts of inverted units by layer on the Qwen3 1.7B and 4B pairs (recomputed from the per-seed curves), the random and shuffled-label values at the selected layer of R4 on Qwen3, the maxima over layers of the R6
 random series on Qwen3, the layer ranges of A1 and the A2 separations on Qwen3 and on the three larger GPT-2 sizes (all computed from the curves files), the
@@ -63,41 +63,49 @@ instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 19. [
   [methodology](methodology.md#intervals-and-what-is-resampled). They describe how much a result moves with the training
   draw. They do not include the sampling of the evaluation pairs, which matters where the test set is small (59 pairs
   for R5 and R7, 36 to 53 per emotion for R4), and they do not include variation between models or runs. Each model has
-  one run per experiment.
-- **R5 is reported as the transfer test only.** The in-template accuracy is 1.0 on every model by construction, because
-  it scores statements inside the persona template the reader was fitted on. It is not a held-out measure and is not
-  reported. The transfer test is exploratory, as in the README and the config docstring of `r5`: it scores plain true
+  one run per experiment. The results site does not show these intervals for readings: it recomputes every reading
+  interval from the test size, a 95 percent Wilson interval for an accuracy and d ± 1.96 sqrt(p1(1 - p1)/n1 + p2(1 -
+  p2)/n2) for a difference between two accuracies on the same items, which treats the arms as independent and is
+  conservative.
+- **R5 is reported as the transfer test only.** The in-template test accuracy is 1.000 at layer 1 on nine models and at
+  layer 2 on `qwen3-4b-base`, because the members of a pair differ in the persona instruction the reader was fitted on;
+  it is not a held-out measure of honesty and is not used as one. The transfer test is exploratory, as in the README and the config docstring of `r5`: it scores plain true
   and false statements at the mean token position (`_TRANSFER_POSITION = "mean"`) with no refit, and the sign of each
-  layer is fixed on the persona pairs, so a below-chance transfer value is not read as an anti-honesty direction.
+  layer is fixed on the persona pairs, so a below-chance transfer value is not read as an anti-honesty direction. The random direction of the transfer test
+  is stored in `curves_transfer.npz` (series `random`) and is given under each R5 row of the tables below.
 - **R7 sets.** Besides the fact test split, R7 scores the out-of-distribution subsets of Geometry of Truth with no
   refit, at the layer chosen on the fact validation split. `neg_` sets negate the statements, `larger_than` and
   `smaller_than` are numeric comparisons, `cities_conj` and `cities_disj` join two city statements.
 
 ## LAT reading on the GPT-2 ladder (R1 to R7)
 
-| Experiment               | gpt2                 | gpt2-medium          | gpt2-large           | gpt2-xl              |
-| ------------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
-| R1 sentiment             | 0.772 [0.758, 0.784] | 0.789 [0.771, 0.804] | 0.838 [0.823, 0.853] | 0.817 [0.808, 0.825] |
-|   selected layer         | L8                   | L20                  | L35                  | L24                  |
-| R2 utility test          | 0.655 [0.644, 0.667] | 0.676 [0.660, 0.691] | 0.680 [0.664, 0.694] | 0.694 [0.684, 0.705] |
-|   selected layer         | L12                  | L15                  | L36                  | L33                  |
-|   validation accuracy    | 0.680                | 0.708                | 0.722                | 0.736                |
-| R3 morality test         | 0.623 [0.601, 0.645] | 0.682 [0.664, 0.697] | 0.727 [0.715, 0.738] | 0.768 [0.759, 0.777] |
-|   selected layer         | L11                  | L20                  | L27                  | L34                  |
-|   validation accuracy    | 0.623                | 0.682                | 0.724                | 0.765                |
-| R5 transfer, exploratory | 0.386 [0.369, 0.403] | 0.598 [0.583, 0.612] | 0.566 [0.556, 0.576] | 0.492 [0.475, 0.510] |
-|   selected layer         | L7                   | L9                   | L16                  | L1                   |
-|   validation accuracy    | 0.519                | 0.474                | 0.591                | 0.508                |
-| R7 truth test            | 0.656 [0.629, 0.681] | 0.573 [0.541, 0.608] | 0.620 [0.592, 0.649] | 0.614 [0.578, 0.646] |
-|   selected layer         | L9                   | L16                  | L18                  | L35                  |
-|   validation accuracy    | 0.640                | 0.634                | 0.643                | 0.674                |
+| Experiment                                      | gpt2                 | gpt2-medium          | gpt2-large           | gpt2-xl              |
+| ----------------------------------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| R1 sentiment (layer chosen on the scored pairs) | 0.772 [0.758, 0.784] | 0.789 [0.771, 0.804] | 0.838 [0.823, 0.853] | 0.817 [0.808, 0.825] |
+|   selected layer                                | L8                   | L20                  | L35                  | L24                  |
+| P3 sentiment, held out, 64 pairs (random)       | 0.758 (0.537)        | 0.754 (0.518)        | 0.805 (0.542)        | 0.800 (0.533)        |
+| R2 utility test                                 | 0.655 [0.644, 0.667] | 0.676 [0.660, 0.691] | 0.680 [0.664, 0.694] | 0.694 [0.684, 0.705] |
+|   selected layer                                | L12                  | L15                  | L36                  | L33                  |
+|   validation accuracy                           | 0.680                | 0.708                | 0.722                | 0.736                |
+| R3 morality test                                | 0.623 [0.601, 0.645] | 0.682 [0.664, 0.697] | 0.727 [0.715, 0.738] | 0.768 [0.759, 0.777] |
+|   selected layer                                | L11                  | L20                  | L27                  | L34                  |
+|   validation accuracy                           | 0.623                | 0.682                | 0.724                | 0.765                |
+| R5 transfer, exploratory                        | 0.386 [0.369, 0.403] | 0.598 [0.583, 0.612] | 0.566 [0.556, 0.576] | 0.492 [0.475, 0.510] |
+|   selected layer                                | L7                   | L9                   | L16                  | L1                   |
+|   validation accuracy                           | 0.519                | 0.474                | 0.591                | 0.508                |
+|   random at the selected layer                  | 0.483                | 0.476                | 0.473                | 0.502                |
+| R7 truth test                                   | 0.656 [0.629, 0.681] | 0.573 [0.541, 0.608] | 0.620 [0.592, 0.649] | 0.614 [0.578, 0.646] |
+|   selected layer                                | L9                   | L16                  | L18                  | L35                  |
+|   validation accuracy                           | 0.640                | 0.634                | 0.643                | 0.674                |
 
 Test accuracy with its interval; the layer and the validation accuracy at that layer are in the rows below it. R4 and R6
 have their own tables below and in the R6 section.
 
 Findings:
 
-- **R1 sentiment.** 0.772 on `gpt2` to 0.838 on `gpt2-large`. `gpt2-xl` (0.817) is not above `gpt2-large`.
+- **R1 sentiment.** 0.772 on `gpt2` to 0.838 on `gpt2-large`. `gpt2-xl` (0.817) is not above `gpt2-large`. The layer is
+  the best one on the same 256 pairs that are scored, so these values are optimistic; the held-out P3 reader at 64 pairs
+  reads 0.754 to 0.805.
 - **R2 utility.** Accuracy rises with size from 0.655 to 0.694, a range of about 0.04. At the selected layer the
   validation accuracy is above the test accuracy by 0.025 to 0.042 on every size, the layer having been chosen on it.
 - **R3 morality.** Accuracy rises at every step, 0.623, 0.682, 0.727, 0.768, and the intervals of neighbouring sizes do
@@ -175,28 +183,31 @@ thinking disabled, so a base against post-trained contrast here is a contrast wi
 tuning in general. It is descriptive; the paired comparison is in
 [Base against post-trained Qwen3 (P8)](#base-against-post-trained-qwen3-p8).
 
-| Experiment               | qwen3-0.6b-base      | qwen3-0.6b           | qwen3-1.7b-base      | qwen3-1.7b           |
-| ------------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
-| R1 sentiment             | 0.947 [0.939, 0.955] | 0.857 [0.837, 0.874] | 0.905 [0.898, 0.912] | 0.866 [0.858, 0.873] |
-|   selected layer         | L19                  | L18                  | L18                  | L18                  |
-| R2 utility test          | 0.744 [0.734, 0.754] | 0.732 [0.717, 0.744] | 0.768 [0.763, 0.774] | 0.756 [0.747, 0.766] |
-|   selected layer         | L23                  | L28                  | L18                  | L28                  |
-|   validation accuracy    | 0.791                | 0.794                | 0.830                | 0.831                |
-| R3 morality test         | 0.793 [0.787, 0.800] | 0.778 [0.762, 0.789] | 0.896 [0.892, 0.900] | 0.892 [0.887, 0.897] |
-|   selected layer         | L24                  | L18                  | L20                  | L18                  |
-|   validation accuracy    | 0.791                | 0.791                | 0.887                | 0.887                |
-| R5 transfer, exploratory | 0.456 [0.444, 0.468] | 0.529 [0.525, 0.534] | 0.778 [0.766, 0.790] | 0.781 [0.746, 0.819] |
-|   selected layer         | L27                  | L21                  | L20                  | L20                  |
-|   validation accuracy    | 0.651                | 0.734                | 0.830                | 0.857                |
-| R7 truth test            | 0.763 [0.749, 0.776] | 0.736 [0.695, 0.776] | 0.934 [0.925, 0.942] | 0.937 [0.924, 0.949] |
-|   selected layer         | L23                  | L18                  | L18                  | L18                  |
-|   validation accuracy    | 0.864                | 0.738                | 0.908                | 0.898                |
+| Experiment                                      | qwen3-0.6b-base      | qwen3-0.6b           | qwen3-1.7b-base      | qwen3-1.7b           |
+| ----------------------------------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| R1 sentiment (layer chosen on the scored pairs) | 0.947 [0.939, 0.955] | 0.857 [0.837, 0.874] | 0.905 [0.898, 0.912] | 0.866 [0.858, 0.873] |
+|   selected layer                                | L19                  | L18                  | L18                  | L18                  |
+| P3 sentiment, held out, 64 pairs (random)       | 0.919 (0.547)        | 0.834 (0.565)        | 0.937 (0.602)        | 0.888 (0.574)        |
+| R2 utility test                                 | 0.744 [0.734, 0.754] | 0.732 [0.717, 0.744] | 0.768 [0.763, 0.774] | 0.756 [0.747, 0.766] |
+|   selected layer                                | L23                  | L28                  | L18                  | L28                  |
+|   validation accuracy                           | 0.791                | 0.794                | 0.830                | 0.831                |
+| R3 morality test                                | 0.793 [0.787, 0.800] | 0.778 [0.762, 0.789] | 0.896 [0.892, 0.900] | 0.892 [0.887, 0.897] |
+|   selected layer                                | L24                  | L18                  | L20                  | L18                  |
+|   validation accuracy                           | 0.791                | 0.791                | 0.887                | 0.887                |
+| R5 transfer, exploratory                        | 0.456 [0.444, 0.468] | 0.529 [0.525, 0.534] | 0.778 [0.766, 0.790] | 0.781 [0.746, 0.819] |
+|   selected layer                                | L27                  | L21                  | L20                  | L20                  |
+|   validation accuracy                           | 0.651                | 0.734                | 0.830                | 0.857                |
+|   random at the selected layer                  | 0.554                | 0.512                | 0.492                | 0.485                |
+| R7 truth test                                   | 0.763 [0.749, 0.776] | 0.736 [0.695, 0.776] | 0.934 [0.925, 0.942] | 0.937 [0.924, 0.949] |
+|   selected layer                                | L23                  | L18                  | L18                  | L18                  |
+|   validation accuracy                           | 0.864                | 0.738                | 0.908                | 0.898                |
 
 Findings:
 
 - **R1 sentiment.** 0.857 to 0.947. On both sizes the base checkpoint is above its post-trained counterpart (0.947 and
   0.857 at 0.6B, 0.905 and 0.866 at 1.7B), with non-overlapping intervals. The 0.6B base checkpoint is above the 1.7B
-  base checkpoint, so size does not order R1 here.
+  base checkpoint, so size does not order R1 here. These values are optimistic (layer chosen on the scored pairs); the
+  held-out P3 reader at 64 pairs gives 0.919 and 0.834 at 0.6B and 0.937 and 0.888 at 1.7B.
 - **R2 utility and R3 morality.** R2 is 0.732 to 0.768 and R3 is 0.778 to 0.896. At 1.7B R3 is 0.896 and 0.892, against
   0.793 and 0.778 at 0.6B. Base and post-trained checkpoints are within 0.02 of each other in both experiments.
 - **R5 honesty transfer.** At 1.7B the transfer test is 0.778 (base) and 0.781 (post-trained), with validation accuracy
@@ -238,28 +249,30 @@ rented GPU pod (see [Run identity](#run-identity)). The post-trained checkpoint 
 disabled and the base checkpoint plain tags, as above. Test accuracy with its interval over the 10 readers; the layer and
 the validation accuracy at that layer are in the rows below it.
 
-| Experiment               | qwen3-4b-base        | qwen3-4b             |
-| ------------------------ | -------------------- | -------------------- |
-| R1 sentiment             | 0.905 [0.887, 0.920] | 0.760 [0.727, 0.792] |
-|   selected layer         | L22                  | L23                  |
-| R2 utility test          | 0.772 [0.756, 0.784] | 0.794 [0.786, 0.801] |
-|   selected layer         | L22                  | L21                  |
-|   validation accuracy    | 0.827                | 0.846                |
-| R3 morality test         | 0.917 [0.912, 0.921] | 0.940 [0.936, 0.943] |
-|   selected layer         | L24                  | L23                  |
-|   validation accuracy    | 0.914                | 0.928                |
-| R5 transfer, exploratory | 0.658 [0.639, 0.676] | 0.758 [0.727, 0.795] |
-|   selected layer         | L36                  | L30                  |
-|   validation accuracy    | 0.742                | 0.804                |
-| R7 truth test            | 0.942 [0.937, 0.947] | 0.934 [0.922, 0.946] |
-|   selected layer         | L26                  | L23                  |
-|   validation accuracy    | 0.960                | 0.923                |
+| Experiment                                      | qwen3-4b-base        | qwen3-4b             |
+| ----------------------------------------------- | -------------------- | -------------------- |
+| R1 sentiment (layer chosen on the scored pairs) | 0.905 [0.887, 0.920] | 0.760 [0.727, 0.792] |
+|   selected layer                                | L22                  | L23                  |
+| P3 sentiment, held out, 64 pairs (random)       | 0.913 (0.570)        | 0.781 (0.523)        |
+| R2 utility test                                 | 0.772 [0.756, 0.784] | 0.794 [0.786, 0.801] |
+|   selected layer                                | L22                  | L21                  |
+|   validation accuracy                           | 0.827                | 0.846                |
+| R3 morality test                                | 0.917 [0.912, 0.921] | 0.940 [0.936, 0.943] |
+|   selected layer                                | L24                  | L23                  |
+|   validation accuracy                           | 0.914                | 0.928                |
+| R5 transfer, exploratory                        | 0.658 [0.639, 0.676] | 0.758 [0.727, 0.795] |
+|   selected layer                                | L36                  | L30                  |
+|   validation accuracy                           | 0.742                | 0.804                |
+|   random at the selected layer                  | 0.531                | 0.505                |
+| R7 truth test                                   | 0.942 [0.937, 0.947] | 0.934 [0.922, 0.946] |
+|   selected layer                                | L26                  | L23                  |
+|   validation accuracy                           | 0.960                | 0.923                |
 
 - **R1 sentiment.** The base checkpoint reaches 0.905 [0.887, 0.920] and the post-trained one 0.760 [0.727, 0.792], a
   gap of 0.146 with non-overlapping intervals. The base value equals that of `qwen3-1.7b-base` (0.905) and the
   post-trained value is the lowest R1 of the six Qwen3 checkpoints (the others are 0.857 to 0.947), so size does not
   order R1 on the post-trained checkpoints (0.857, 0.866, 0.760). R1 has no test split, so both values are optimistic by
-  the selection.
+  the selection. The held-out P3 reader at 64 pairs gives 0.913 and 0.781.
 - **R2 utility and R3 morality.** R2 is 0.772 and 0.794 and R3 is 0.917 and 0.940, above the 1.7B values of both
   experiments (R2 0.768 and 0.756, R3 0.896 and 0.892). At 4B the post-trained checkpoint is above the base one in both
   (by 0.022 and 0.023, intervals not overlapping), the opposite sign from 0.6B and 1.7B, where the base checkpoint is at
@@ -386,7 +399,9 @@ the accuracy on the logarithm of the parameter count, in accuracy per decade of 
 | --------------------------------- | ----- | ----- | ----- | ----- | ------ |
 | Accuracy per decade of parameters | 0.052 | 0.034 | 0.132 | 0.095 | -0.027 |
 
-- The slopes are fitted to four points, one per size, and have no interval. They summarize the tables above and are not
+- The slopes are fitted to four points, one per size; a 95 percent t interval with 2 degrees of freedom is: R2 0.034
+  [0.013, 0.055], R3 0.132 [0.128, 0.136], R5 0.095 [-0.440, 0.630], R7 -0.027 [-0.231, 0.177], R1 0.052 [-0.053, 0.157] (optimistic layer), and
+  the held-out P3 sentiment reader at 64 pairs 0.048 [-0.050, 0.146]. They summarize the tables above and are not
   a test of a scaling law. R3 has the clearest slope (0.132), consistent with its step-by-step rise. R7 is slightly
   negative.
 - **The R5 slope is not a scaling trend.** R5 is 0.386 on `gpt2`, below chance, then 0.598 and 0.566, and 0.492 on
@@ -487,7 +502,7 @@ A2, best layer, separation z with its 95 percent bootstrap interval over the 10 
 
 P1 reads the SST-2 sentiment concept through variants of the prompt template, on `gpt2` and the four Qwen3 checkpoints.
 The tables of this section are for the sentiment task; `gpt2` also has a second run with the truth and emotion tasks,
-reported at the end of the section, where the paper's finder (`pca_diff`) and the truth and emotion tasks on eight models follow. The paper template is `Consider the amount of sentiment in the following:`, the sentence, and `The amount of
+reported at the end of the section, where the paper's finder (`pca_diff`) and the truth and emotion tasks on ten models follow. The paper template is `Consider the amount of sentiment in the following:`, the sentence, and `The amount of
 sentiment is`. Every variant is fitted on the same 10 draws of 64 SST-2 training pairs as the paper variant (logistic
 finder, last token), so a difference between variants belongs to the wording and not to the draw. All are scored on the
 same 214 pairs of the SST-2 validation split (the report half; a disjoint half of 214 pairs is the select half). One
@@ -750,24 +765,24 @@ the paper reader of 0.620, 0.600, 0.318, 0.324, 0.618 and 0.413. The random seri
   consistent with a direction that does not carry the emotion under that framing; this is not tested further here.
   This is one run on 36 to 53 pairs per emotion, and the intervals cover the training draw only.
 
-### The paper's finder and the truth and emotion tasks on eight models (P1)
+### The paper's finder and the truth and emotion tasks on ten models (P1)
 
 The tables above use the logistic finder. The paper reads with the first principal component of the differences between
 pairs of training stimuli (`pca_diff`, centered as in the reference code; see the [methodology](methodology.md)). This
-subsection adds that finder, and the truth and emotion tasks, for eight models: `gpt2`, `gpt2-medium`, `gpt2-large`,
-`gpt2-xl`, `qwen3-0.6b-base`, `qwen3-0.6b`, `qwen3-1.7b-base` and `qwen3-1.7b`. Sixteen runs, a logistic and a
-`pca_diff` run per model, were made with the P1 defaults of their commit (sentiment, truth and the six emotions, 10
-draws of 64 training pairs, up to 256 evaluation pairs per split, batch size 8, last token). The four runs of the Qwen3
-1.7B pair were made at `f4d414d` on the laptop GPU (`p1/qwen3-1.7b-base/62073cecf6d5` and `a45dc5c93f18`,
-`p1/qwen3-1.7b/f3a2d832c9c4` and `7ffb64cce683`, logistic and `pca_diff` in that order). The twelve runs of the other
-six models were made at `80baffb` (the two `gpt2-large` runs) and `bab5b75` (the ten others) on rented GPU pods (see
-[Run identity](#run-identity)); a run and its partner differ in the finder only. The `gpt2` logistic run
-`p1/gpt2/078b9d6482a2` is a re-run of a run of the same hash made earlier at `ca2546c`: it reproduces the earlier copy
-in every accuracy and interval of the table file, so only the random series (by at most 0.0017) and the cosines (by at
-most 4e-6) moved. The two Qwen3 1.7B logistic runs differ from the sentiment-only runs of the tables above
-(`ef3f8c0d3389` and `f4aa9b57824a`) in the task list only, and they are a replication of those runs: none of the cells
-of the 17 (base) and 16 (post-trained) sentiment rows of the table file differs, so their logistic rows below are the
-rows of the tables above. The logistic runs of the Qwen3 0.6B pair (`p1/qwen3-0.6b-base/deabd95764d0` and
+subsection adds that finder, and the truth and emotion tasks, for ten models: `gpt2`, `gpt2-medium`, `gpt2-large`,
+`gpt2-xl`, `qwen3-0.6b-base`, `qwen3-0.6b`, `qwen3-1.7b-base`, `qwen3-1.7b`, `qwen3-4b-base` and `qwen3-4b`. Twenty
+runs, a logistic and a `pca_diff` run per model, were made with the P1 defaults of their commit (sentiment, truth and
+the six emotions, 10 draws of 64 training pairs, up to 256 evaluation pairs per split, batch size 8, last token). The
+four runs of the Qwen3 1.7B pair were made at `f4d414d` on the laptop GPU (`p1/qwen3-1.7b-base/62073cecf6d5` and
+`a45dc5c93f18`, `p1/qwen3-1.7b/f3a2d832c9c4` and `7ffb64cce683`, logistic and `pca_diff` in that order). The sixteen
+runs of the other eight models were made at `80baffb` (the two `gpt2-large` runs) and `bab5b75` (the fourteen others) on
+rented GPU pods (see [Run identity](#run-identity)); a run and its partner differ in the finder only. The `gpt2`
+logistic run `p1/gpt2/078b9d6482a2` is a re-run of a run of the same hash made earlier at `ca2546c`: it reproduces the
+earlier copy in every accuracy and interval of the table file, so only the random series (by at most 0.0017) and the
+cosines (by at most 4e-6) moved. The two Qwen3 1.7B logistic runs differ from the sentiment-only runs of the tables
+above (`ef3f8c0d3389` and `f4aa9b57824a`) in the task list only, and they are a replication of those runs: none of the
+cells of the 17 (base) and 16 (post-trained) sentiment rows of the table file differs, so their logistic rows below are
+the rows of the tables above. The logistic runs of the Qwen3 0.6B pair (`p1/qwen3-0.6b-base/deabd95764d0` and
 `p1/qwen3-0.6b/027be280838a`) are the runs that the tables above read for these models, so their logistic rows below are
 the rows of the tables above. The rules of the section hold: every variant is read at one layer, the best layer of the
 paper reader of the run on the select half, so in a `pca_diff` run it is the layer of the `pca_diff` reader, which is
@@ -775,7 +790,7 @@ not the layer of the logistic reader (the layers are in the first table). The sa
 (`no_trailing_space` on the post-trained Qwen3 checkpoints, and `alternate` and `framing_swap` for sentiment). Intervals
 are as above: 95 percent bootstrap over the 10 readers, not including the sampling of the 214 evaluation pairs. The
 models are separate rows and no metric is pooled over base and post-trained checkpoints. In the paragraphs and bullets
-below, "the base checkpoint" and "the post-trained checkpoint" are `qwen3-1.7b-base` and `qwen3-1.7b`; the other six
+below, "the base checkpoint" and "the post-trained checkpoint" are `qwen3-1.7b-base` and `qwen3-1.7b`; the other eight
 models have a bullet of their own.
 
 Sentiment, the paper variant:
@@ -798,6 +813,10 @@ Sentiment, the paper variant:
 | qwen3-1.7b-base | pca_diff | L19   | 0.846 [0.833, 0.857]          | 0.614  | 0.507    | 0.882       |
 | qwen3-1.7b      | logistic | L18   | 0.880 [0.866, 0.894]          | 0.553  | 0.500    | 0.654       |
 | qwen3-1.7b      | pca_diff | L20   | 0.534 [0.503, 0.562]          | 0.550  | 0.513    | 0.070       |
+| qwen3-4b-base   | logistic | L24   | 0.900 [0.886, 0.913]          | 0.573  | 0.507    | 0.757       |
+| qwen3-4b-base   | pca_diff | L36   | 0.540 [0.503, 0.570]          | 0.505  | 0.497    | 0.261       |
+| qwen3-4b        | logistic | L23   | 0.757 [0.729, 0.793]          | 0.536  | 0.501    | 0.489       |
+| qwen3-4b        | pca_diff | L9    | 0.511 [0.468, 0.555]          | 0.537  | 0.493    | -0.063      |
 
 The `pca_diff` reader of the paper variant is below the logistic reader on both checkpoints, with disjoint intervals:
 0.846 [0.833, 0.857] against 0.943 [0.936, 0.950] on the base checkpoint and 0.534 [0.503, 0.562] against 0.880 [0.866,
@@ -827,6 +846,10 @@ Lowest and highest variant among the 16, with the random series of that variant 
 | qwen3-1.7b-base | pca_diff | neutral_frame 0.509 (0.564)        | paraphrase_2 0.969 (0.698)         | 0.459 |
 | qwen3-1.7b      | logistic | concept_swap_2 0.781 (0.566)       | paraphrase_2 0.964 (0.586)         | 0.183 |
 | qwen3-1.7b      | pca_diff | concept_swap_0 0.498 (0.533)       | no_template 0.597 (0.599)          | 0.100 |
+| qwen3-4b-base   | logistic | neutral_frame 0.726 (0.516)        | paraphrase_2 0.972 (0.663)         | 0.246 |
+| qwen3-4b-base   | pca_diff | no_template 0.482 (0.523)          | paraphrase_2 0.981 (0.621)         | 0.499 |
+| qwen3-4b        | logistic | concept_swap_1 0.712 (0.508)       | paraphrase_2 0.945 (0.543)         | 0.233 |
+| qwen3-4b        | pca_diff | scaffold_1 0.481 (0.540)           | concept_swap_3 0.525 (0.521)       | 0.044 |
 
 - **Spread over variants.** With `pca_diff` the span is 0.459 on the base checkpoint (0.136 with logistic) and 0.100 on
   the post-trained one (0.183 with logistic). On the base checkpoint the three paraphrases (`paraphrase_0` to
@@ -844,11 +867,12 @@ Lowest and highest variant among the 16, with the random series of that variant 
 - **Random and shuffled series.** The shuffled series ranges from 0.479 to 0.521 on the 32 cells of `gpt2`, from 0.469
   to 0.518 on the 32 cells of `gpt2-medium`, from 0.473 to 0.530 on the 32 cells of `gpt2-large`, from 0.479 to 0.521 on
   the 32 cells of `gpt2-xl`, from 0.472 to 0.521 on the 32 cells of `qwen3-0.6b-base`, from 0.481 to 0.517 on the 32
-  cells of `qwen3-0.6b`, from 0.476 to 0.515 on the 32 cells of `qwen3-1.7b-base` and from 0.482 to 0.519 on the 32
-  cells of `qwen3-1.7b` (16 variants, both finders). With logistic the reader is above the random series of its cell on
-  all 16 variants, by at least 0.274 on the base checkpoint and 0.214 on the post-trained one. With `pca_diff` it is
-  not. On the base checkpoint the reader is at or below the random series in 8 of 16 cells (the smallest margin is
-  -0.055, `neutral_frame`) and its interval lies entirely above the random value in 4 cells (`paper`, `paraphrase_0`,
+  cells of `qwen3-0.6b`, from 0.476 to 0.515 on the 32 cells of `qwen3-1.7b-base`, from 0.482 to 0.519 on the 32 cells
+  of `qwen3-1.7b`, from 0.479 to 0.521 on the 32 cells of `qwen3-4b-base` and from 0.470 to 0.523 on the 32 cells of
+  `qwen3-4b` (16 variants, both finders). With logistic the reader is above the random series of its cell on all 16
+  variants, by at least 0.274 on the base checkpoint and 0.214 on the post-trained one. With `pca_diff` it is not. On
+  the base checkpoint the reader is at or below the random series in 8 of 16 cells (the smallest margin is -0.055,
+  `neutral_frame`) and its interval lies entirely above the random value in 4 cells (`paper`, `paraphrase_0`,
   `paraphrase_1`, `paraphrase_2`) and entirely below it in 5. On the post-trained checkpoint the reader is at or below
   the random series in 14 of 16 cells (smallest margin -0.084, `paraphrase_2`), its interval lies entirely below the
   random value in 10 cells and entirely above it in none, and the highest variant, `no_template` (0.597), has a random
@@ -875,6 +899,10 @@ The `bare` variant, the sentence with nothing around it:
 | qwen3-1.7b-base | pca_diff | 0.514         | 0.515  | 0.504    | 0.008             | -0.104           |
 | qwen3-1.7b      | logistic | 0.920         | 0.556  | 0.493    | 0.121             | 0.409            |
 | qwen3-1.7b      | pca_diff | 0.538         | 0.525  | 0.500    | 0.000             | -0.058           |
+| qwen3-4b-base   | logistic | 0.908         | 0.515  | 0.491    | 0.099             | 0.438            |
+| qwen3-4b-base   | pca_diff | 0.526         | 0.507  | 0.482    | 0.014             | 0.066            |
+| qwen3-4b        | logistic | 0.918         | 0.501  | 0.493    | 0.013             | 0.413            |
+| qwen3-4b        | pca_diff | 0.500         | 0.528  | 0.516    | -0.006            | -0.057           |
 
 The paper reader and the bare reader scored on each other's items:
 
@@ -896,6 +924,10 @@ The paper reader and the bare reader scored on each other's items:
 | qwen3-1.7b-base | pca_diff | 0.898                      | 0.510                      |
 | qwen3-1.7b      | logistic | 0.886                      | 0.708                      |
 | qwen3-1.7b      | pca_diff | 0.574                      | 0.541                      |
+| qwen3-4b-base   | logistic | 0.854                      | 0.740                      |
+| qwen3-4b-base   | pca_diff | 0.553                      | 0.535                      |
+| qwen3-4b        | logistic | 0.532                      | 0.475                      |
+| qwen3-4b        | pca_diff | 0.516                      | 0.508                      |
 
 - **Bare accuracy.** The bare `pca_diff` reader is at 0.514 on the base checkpoint (random 0.515) and 0.538 on the
   post-trained one (random 0.525), where the bare logistic readers read at 0.908 and 0.920. Its direction has a cosine
@@ -959,6 +991,18 @@ with the paper reader over the same variants:
 | qwen3-1.7b      | pca_diff | concept_swap (4) | 0.498 to 0.517 | 0.493 to 0.533 | -0.176 to 0.337   |
 | qwen3-1.7b      | pca_diff | paraphrase (3)   | 0.536 to 0.546 | 0.545 to 0.629 | 0.121 to 0.756    |
 | qwen3-1.7b      | pca_diff | scaffold (3)     | 0.528 to 0.550 | 0.554 to 0.605 | -0.113 to 0.154   |
+| qwen3-4b-base   | logistic | concept_swap (4) | 0.734 to 0.921 | 0.505 to 0.567 | 0.346 to 0.560    |
+| qwen3-4b-base   | logistic | paraphrase (3)   | 0.931 to 0.972 | 0.566 to 0.663 | 0.623 to 0.808    |
+| qwen3-4b-base   | logistic | scaffold (3)     | 0.843 to 0.907 | 0.523 to 0.531 | 0.339 to 0.396    |
+| qwen3-4b-base   | pca_diff | concept_swap (4) | 0.500 to 0.510 | 0.493 to 0.510 | -0.028 to 0.073   |
+| qwen3-4b-base   | pca_diff | paraphrase (3)   | 0.544 to 0.981 | 0.572 to 0.621 | 0.102 to 0.533    |
+| qwen3-4b-base   | pca_diff | scaffold (3)     | 0.489 to 0.663 | 0.532 to 0.554 | -0.015 to 0.020   |
+| qwen3-4b        | logistic | concept_swap (4) | 0.712 to 0.800 | 0.491 to 0.520 | 0.463 to 0.503    |
+| qwen3-4b        | logistic | paraphrase (3)   | 0.859 to 0.945 | 0.526 to 0.562 | 0.284 to 0.621    |
+| qwen3-4b        | logistic | scaffold (3)     | 0.856 to 0.916 | 0.503 to 0.567 | 0.252 to 0.323    |
+| qwen3-4b        | pca_diff | concept_swap (4) | 0.508 to 0.525 | 0.521 to 0.534 | 0.633 to 0.665    |
+| qwen3-4b        | pca_diff | paraphrase (3)   | 0.484 to 0.506 | 0.510 to 0.538 | 0.308 to 0.623    |
+| qwen3-4b        | pca_diff | scaffold (3)     | 0.481 to 0.519 | 0.540 to 0.562 | 0.262 to 0.734    |
 
 - **Concept swaps and scaffolds.** With `pca_diff` the four concept swaps read at 0.516 to 0.567 on the base checkpoint
   and 0.498 to 0.517 on the post-trained one (logistic: 0.839 to 0.898 and 0.781 to 0.848), and the three scaffolds at
@@ -994,13 +1038,17 @@ second):
 | qwen3-1.7b-base | pca_diff | 0.748 to 0.963                | 0.510 to 0.929                | 0.515 to 0.733      | 0.480: neutral_frame, scaffold_1         | 0.976: paraphrase_0, no_trailing_question  |
 | qwen3-1.7b      | logistic | 0.762 to 0.943                | 0.708 to 0.890                | 0.509 to 0.620      | 0.591: bare, concept_swap_3              | 0.959: no_trailing_question, paraphrase_2  |
 | qwen3-1.7b      | pca_diff | 0.485 to 0.577                | 0.465 to 0.547                | 0.493 to 0.629      | 0.464: concept_swap_3, bare              | 0.623: no_template, paraphrase_0           |
+| qwen3-4b-base   | logistic | 0.736 to 0.969                | 0.740 to 0.935                | 0.498 to 0.663      | 0.526: bare, concept_swap_1              | 0.971: no_trailing_question, paraphrase_2  |
+| qwen3-4b-base   | pca_diff | 0.519 to 0.758                | 0.485 to 0.816                | 0.493 to 0.621      | 0.478: scaffold_0, no_template           | 0.921: paraphrase_0, paraphrase_2          |
+| qwen3-4b        | logistic | 0.532 to 0.803                | 0.475 to 0.761                | 0.485 to 0.567      | 0.383: bare, concept_swap_3              | 0.933: paraphrase_2, scaffold_0            |
+| qwen3-4b        | pca_diff | 0.506 to 0.527                | 0.482 to 0.525                | 0.508 to 0.569      | 0.466: scaffold_1, no_chat_tags          | 0.555: concept_swap_3, scaffold_1          |
 
 - **Range.** With `pca_diff` the paper reader scored on other variants spans 0.748 to 0.963 on the base checkpoint and
   0.485 to 0.577 on the post-trained one, and the reader of each variant scored on the paper items spans 0.510 to 0.929
   and 0.465 to 0.547. On the base checkpoint the lowest cell of the matrix is below 0.5 (0.480: `neutral_frame` scored
   on `scaffold_1`), and on the post-trained checkpoint the 240 off-diagonal cells lie between 0.464 and 0.623.
 
-The other six models of this subsection, sentiment, with the same quantities for every model. Counts and margins are
+The other eight models of this subsection, sentiment, with the same quantities for every model. Counts and margins are
 over the 16 variants every model has (`no_trailing_space` is left out of them):
 
 - **`gpt2`.** The paper variant reads at 0.765 [0.744, 0.780] with logistic (L8, random 0.497, seed cosine 0.520) and at
@@ -1093,7 +1141,37 @@ over the 16 variants every model has (`no_trailing_space` is left out of them):
   and 0.951 with logistic and between 0.477 and 0.646 with `pca_diff`. The Spearman rank correlation between the 16
   accuracies under the two finders is 0.115.
 
-Every variant of the eight models and both finders, as report accuracy with its interval and the random and the shuffled
+- **`qwen3-4b-base`.** The paper variant reads at 0.900 [0.886, 0.913] with logistic (L24, random 0.573, seed cosine
+  0.757) and at 0.540 [0.503, 0.570] with `pca_diff` (L36, random 0.505, seed cosine 0.261); the random series of the
+  `pca_diff` run lies inside the interval of the reader. The span over the 16 variants is 0.246 with logistic
+  (`neutral_frame` 0.726 to `paraphrase_2` 0.972) and 0.499 with `pca_diff` (`no_template` 0.482 to `paraphrase_2`
+  0.981), and the paper template is the lowest or the highest variant in neither run. The counts of the other variants
+  whose interval lies entirely above (below) the paper interval are 4 (6) with logistic and 3 (2) with `pca_diff`. The
+  logistic reader is above the random series of its cell on 16 of 16 variants (smallest margin 0.210, `neutral_frame`);
+  the `pca_diff` reader on 8 of 16 (smallest margin -0.064, `scaffold_1`), with its interval entirely above the random
+  value in 4 cells and entirely below it in 4. The bare variant reads at 0.908 with logistic (random 0.515) and 0.526
+  with `pca_diff` (random 0.507); the paper reader scored on bare items reaches 0.854 and 0.553, and the bare reader
+  scored on paper items 0.740 and 0.535. The paper reader scored on the other variants spans 0.736 to 0.969 with
+  logistic and 0.519 to 0.758 with `pca_diff`, and the off-diagonal cells of the whole transfer matrix lie between 0.526
+  and 0.971 with logistic and between 0.478 and 0.921 with `pca_diff`. The Spearman rank correlation between the 16
+  accuracies under the two finders is 0.691.
+
+- **`qwen3-4b`.** The paper variant reads at 0.757 [0.729, 0.793] with logistic (L23, random 0.536, seed cosine 0.489)
+  and at 0.511 [0.468, 0.555] with `pca_diff` (L9, random 0.537, seed cosine -0.063); the random series of the
+  `pca_diff` run lies inside the interval of the reader. The span over the 16 variants is 0.233 with logistic
+  (`concept_swap_1` 0.712 to `paraphrase_2` 0.945) and 0.044 with `pca_diff` (`scaffold_1` 0.481 to `concept_swap_3`
+  0.525), and the paper template is the lowest or the highest variant in neither run. The counts of the other variants
+  whose interval lies entirely above (below) the paper interval are 10 (0) with logistic and 0 (0) with `pca_diff`. The
+  logistic reader is above the random series of its cell on 16 of 16 variants (smallest margin 0.204, `concept_swap_1`);
+  the `pca_diff` reader on 2 of 16 (smallest margin -0.077, `neutral_frame`), with its interval entirely above the
+  random value in 0 cells and entirely below it in 7. The bare variant reads at 0.918 with logistic (random 0.501) and
+  0.500 with `pca_diff` (random 0.528); the paper reader scored on bare items reaches 0.532 and 0.516, and the bare
+  reader scored on paper items 0.475 and 0.508. The paper reader scored on the other variants spans 0.532 to 0.803 with
+  logistic and 0.506 to 0.527 with `pca_diff`, and the off-diagonal cells of the whole transfer matrix lie between 0.383
+  and 0.933 with logistic and between 0.466 and 0.555 with `pca_diff`. The Spearman rank correlation between the 16
+  accuracies under the two finders is -0.524.
+
+Every variant of the ten models and both finders, as report accuracy with its interval and the random and the shuffled
 series in parentheses (`not run` marks a kind that was skipped):
 
 `gpt2`:
@@ -1272,7 +1350,51 @@ series in parentheses (`not run` marks a kind that was skipped):
 | concept_swap_2       | 0.781 [0.754, 0.810] (0.566, 0.512)                  | 0.511 [0.479, 0.544] (0.493, 0.488)                  |
 | concept_swap_3       | 0.814 [0.788, 0.838] (0.550, 0.506)                  | 0.517 [0.470, 0.561] (0.528, 0.500)                  |
 
-The same sixteen runs also read the truth statements of the Geometry of Truth split and the six emotions of R4, each
+`qwen3-4b-base`:
+
+| Variant              | logistic: accuracy [95% interval] (random, shuffled) | pca_diff: accuracy [95% interval] (random, shuffled) |
+| -------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
+| paper                | 0.900 [0.886, 0.913] (0.573, 0.507)                  | 0.540 [0.503, 0.570] (0.505, 0.497)                  |
+| no_template          | 0.768 [0.740, 0.794] (0.498, 0.485)                  | 0.482 [0.470, 0.499] (0.523, 0.505)                  |
+| bare                 | 0.908 [0.886, 0.930] (0.515, 0.491)                  | 0.526 [0.488, 0.559] (0.507, 0.482)                  |
+| no_chat_tags         | 0.827 [0.795, 0.854] (0.539, 0.495)                  | 0.503 [0.498, 0.507] (0.561, 0.483)                  |
+| neutral_frame        | 0.726 [0.697, 0.753] (0.516, 0.505)                  | 0.504 [0.498, 0.510] (0.514, 0.511)                  |
+| no_trailing_question | 0.882 [0.850, 0.907] (0.549, 0.491)                  | 0.519 [0.495, 0.540] (0.535, 0.509)                  |
+| no_trailing_space    | 0.854 [0.835, 0.871] (0.529, 0.505)                  | 0.508 [0.491, 0.525] (0.529, 0.507)                  |
+| paraphrase_0         | 0.959 [0.954, 0.963] (0.618, 0.499)                  | 0.721 [0.713, 0.727] (0.589, 0.490)                  |
+| paraphrase_1         | 0.931 [0.924, 0.938] (0.566, 0.521)                  | 0.544 [0.497, 0.585] (0.572, 0.499)                  |
+| paraphrase_2         | 0.972 [0.971, 0.974] (0.663, 0.511)                  | 0.981 [0.979, 0.982] (0.621, 0.514)                  |
+| scaffold_0           | 0.907 [0.892, 0.923] (0.523, 0.509)                  | 0.663 [0.650, 0.673] (0.532, 0.501)                  |
+| scaffold_1           | 0.843 [0.828, 0.859] (0.531, 0.479)                  | 0.489 [0.480, 0.500] (0.554, 0.498)                  |
+| scaffold_2           | 0.899 [0.885, 0.912] (0.529, 0.495)                  | 0.587 [0.533, 0.622] (0.533, 0.491)                  |
+| concept_swap_0       | 0.829 [0.814, 0.843] (0.513, 0.505)                  | 0.507 [0.500, 0.513] (0.510, 0.493)                  |
+| concept_swap_1       | 0.734 [0.712, 0.753] (0.505, 0.491)                  | 0.505 [0.487, 0.522] (0.502, 0.479)                  |
+| concept_swap_2       | 0.921 [0.915, 0.927] (0.533, 0.518)                  | 0.500 [0.483, 0.516] (0.509, 0.507)                  |
+| concept_swap_3       | 0.901 [0.892, 0.911] (0.567, 0.504)                  | 0.510 [0.499, 0.521] (0.493, 0.500)                  |
+
+`qwen3-4b`:
+
+| Variant              | logistic: accuracy [95% interval] (random, shuffled) | pca_diff: accuracy [95% interval] (random, shuffled) |
+| -------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
+| paper                | 0.757 [0.729, 0.793] (0.536, 0.501)                  | 0.511 [0.468, 0.555] (0.537, 0.493)                  |
+| no_template          | 0.896 [0.885, 0.907] (0.510, 0.496)                  | 0.500 [0.484, 0.520] (0.564, 0.503)                  |
+| bare                 | 0.918 [0.906, 0.929] (0.501, 0.493)                  | 0.500 [0.493, 0.510] (0.528, 0.516)                  |
+| no_chat_tags         | 0.775 [0.754, 0.800] (0.485, 0.480)                  | 0.512 [0.500, 0.522] (0.508, 0.470)                  |
+| neutral_frame        | 0.910 [0.903, 0.918] (0.562, 0.499)                  | 0.492 [0.457, 0.527] (0.569, 0.496)                  |
+| no_trailing_question | 0.849 [0.833, 0.863] (0.545, 0.502)                  | 0.515 [0.465, 0.565] (0.558, 0.504)                  |
+| no_trailing_space    | not run                                              | not run                                              |
+| paraphrase_0         | 0.862 [0.832, 0.891] (0.562, 0.497)                  | 0.484 [0.457, 0.518] (0.510, 0.503)                  |
+| paraphrase_1         | 0.859 [0.829, 0.885] (0.526, 0.510)                  | 0.502 [0.461, 0.543] (0.524, 0.481)                  |
+| paraphrase_2         | 0.945 [0.938, 0.952] (0.543, 0.509)                  | 0.506 [0.475, 0.537] (0.538, 0.498)                  |
+| scaffold_0           | 0.916 [0.908, 0.924] (0.567, 0.506)                  | 0.498 [0.470, 0.529] (0.562, 0.501)                  |
+| scaffold_1           | 0.856 [0.831, 0.877] (0.503, 0.476)                  | 0.481 [0.457, 0.513] (0.540, 0.511)                  |
+| scaffold_2           | 0.907 [0.899, 0.915] (0.564, 0.494)                  | 0.519 [0.486, 0.552] (0.546, 0.523)                  |
+| concept_swap_0       | 0.751 [0.731, 0.768] (0.520, 0.483)                  | 0.517 [0.491, 0.541] (0.526, 0.512)                  |
+| concept_swap_1       | 0.712 [0.682, 0.742] (0.508, 0.498)                  | 0.508 [0.500, 0.516] (0.532, 0.489)                  |
+| concept_swap_2       | 0.737 [0.709, 0.761] (0.503, 0.504)                  | 0.520 [0.490, 0.546] (0.534, 0.498)                  |
+| concept_swap_3       | 0.800 [0.785, 0.813] (0.491, 0.510)                  | 0.525 [0.490, 0.556] (0.521, 0.502)                  |
+
+The same twenty runs also read the truth statements of the Geometry of Truth split and the six emotions of R4, each
 emotion against the others, as the second `gpt2` run of the section does. Each task is read at one layer, the best layer
 of the paper reader of the run on the select half, and the report half has the number of pairs in parentheses (59 for
 truth and 36 to 53 for the emotions). Lowest and highest variant over all the variants of the task, including
@@ -1430,11 +1552,50 @@ truth and 36 to 53 for the emotions). Lowest and highest variant over all the va
 | surprise (36)       | logistic | L22   | 0.928 [0.919, 0.936]          | 0.608  | 0.472    | framing_swap 0.656 | paraphrase_1 0.944   | 0.289 |
 | surprise (36)       | pca_diff | L24   | 0.822 [0.808, 0.836]          | 0.539  | 0.483    | paraphrase_0 0.561 | concept_swap_0 0.892 | 0.331 |
 
-The interval of the paper accuracy has zero width (the ten readers give the same accuracy on the test pairs) in 10 of
-the 112 rows (gpt2 logistic disgust; gpt2-xl logistic happiness; gpt2-xl logistic fear; gpt2-xl logistic disgust;
+`qwen3-4b-base`:
+
+| Task (report pairs) | Finder   | Layer | Paper accuracy [95% interval] | Random | Shuffled | Lowest variant       | Highest variant         | Span  |
+| ------------------- | -------- | ----- | ----------------------------- | ------ | -------- | -------------------- | ----------------------- | ----- |
+| truth (59)          | logistic | L23   | 0.998 [0.995, 1.000]          | 0.807  | 0.500    | concept_swap_1 0.864 | paraphrase_1 1.000      | 0.136 |
+| truth (59)          | pca_diff | L23   | 0.992 [0.986, 0.997]          | 0.803  | 0.497    | scaffold_1 0.495     | paraphrase_1 0.997      | 0.502 |
+| happiness (38)      | logistic | L21   | 1.000 [1.000, 1.000]          | 0.587  | 0.487    | scaffold_2 0.845     | paper 1.000             | 0.155 |
+| happiness (38)      | pca_diff | L24   | 0.997 [0.992, 1.000]          | 0.655  | 0.489    | no_template 0.526    | no_trailing_space 1.000 | 0.474 |
+| sadness (44)        | logistic | L24   | 0.977 [0.966, 0.989]          | 0.539  | 0.523    | framing_swap 0.691   | no_trailing_space 1.000 | 0.309 |
+| sadness (44)        | pca_diff | L31   | 0.920 [0.898, 0.943]          | 0.666  | 0.520    | no_template 0.445    | no_trailing_space 0.986 | 0.541 |
+| anger (45)          | logistic | L22   | 0.956 [0.936, 0.973]          | 0.587  | 0.476    | framing_swap 0.493   | alternate_0 1.000       | 0.507 |
+| anger (45)          | pca_diff | L36   | 0.980 [0.969, 0.991]          | 0.618  | 0.478    | neutral_frame 0.624  | paper 0.980             | 0.356 |
+| fear (53)           | logistic | L26   | 0.994 [0.989, 1.000]          | 0.625  | 0.504    | scaffold_1 0.904     | no_chat_tags 1.000      | 0.096 |
+| fear (53)           | pca_diff | L24   | 0.974 [0.960, 0.985]          | 0.613  | 0.509    | alternate_0 0.489    | no_trailing_space 0.992 | 0.504 |
+| disgust (39)        | logistic | L21   | 0.997 [0.992, 1.000]          | 0.633  | 0.472    | framing_swap 0.464   | no_template 1.000       | 0.536 |
+| disgust (39)        | pca_diff | L29   | 0.997 [0.992, 1.000]          | 0.656  | 0.472    | alternate_0 0.646    | no_chat_tags 1.000      | 0.354 |
+| surprise (36)       | logistic | L31   | 0.972 [0.953, 0.989]          | 0.614  | 0.478    | framing_swap 0.681   | scaffold_1 0.978        | 0.297 |
+| surprise (36)       | pca_diff | L31   | 0.878 [0.856, 0.897]          | 0.586  | 0.494    | scaffold_0 0.467     | paraphrase_1 0.886      | 0.419 |
+
+`qwen3-4b`:
+
+| Task (report pairs) | Finder   | Layer | Paper accuracy [95% interval] | Random | Shuffled | Lowest variant       | Highest variant            | Span  |
+| ------------------- | -------- | ----- | ----------------------------- | ------ | -------- | -------------------- | -------------------------- | ----- |
+| truth (59)          | logistic | L23   | 0.969 [0.958, 0.980]          | 0.700  | 0.495    | concept_swap_3 0.908 | no_template 1.000          | 0.092 |
+| truth (59)          | pca_diff | L24   | 0.937 [0.932, 0.946]          | 0.600  | 0.493    | concept_swap_1 0.727 | neutral_frame 0.992        | 0.264 |
+| happiness (38)      | logistic | L24   | 1.000 [1.000, 1.000]          | 0.613  | 0.487    | scaffold_0 0.861     | paper 1.000                | 0.139 |
+| happiness (38)      | pca_diff | L28   | 1.000 [1.000, 1.000]          | 0.639  | 0.487    | scaffold_1 0.676     | paper 1.000                | 0.324 |
+| sadness (44)        | logistic | L35   | 0.952 [0.945, 0.959]          | 0.559  | 0.507    | framing_swap 0.811   | no_trailing_question 0.977 | 0.166 |
+| sadness (44)        | pca_diff | L23   | 0.770 [0.736, 0.800]          | 0.541  | 0.507    | scaffold_2 0.507     | bare 0.907                 | 0.400 |
+| anger (45)          | logistic | L20   | 0.971 [0.960, 0.980]          | 0.620  | 0.473    | framing_swap 0.302   | bare 0.991                 | 0.689 |
+| anger (45)          | pca_diff | L23   | 0.807 [0.784, 0.829]          | 0.580  | 0.464    | scaffold_1 0.493     | bare 0.976                 | 0.482 |
+| fear (53)           | logistic | L26   | 0.981 [0.981, 0.981]          | 0.617  | 0.509    | framing_swap 0.915   | no_trailing_question 1.000 | 0.085 |
+| fear (53)           | pca_diff | L27   | 0.928 [0.925, 0.934]          | 0.651  | 0.517    | scaffold_0 0.640     | concept_swap_1 0.981       | 0.342 |
+| disgust (39)        | logistic | L20   | 1.000 [1.000, 1.000]          | 0.585  | 0.474    | framing_swap 0.805   | paper 1.000                | 0.195 |
+| disgust (39)        | pca_diff | L23   | 0.987 [0.977, 0.997]          | 0.636  | 0.472    | framing_swap 0.756   | paraphrase_1 1.000         | 0.244 |
+| surprise (36)       | logistic | L20   | 0.931 [0.919, 0.942]          | 0.567  | 0.486    | framing_swap 0.422   | neutral_frame 0.961        | 0.539 |
+| surprise (36)       | pca_diff | L30   | 0.761 [0.750, 0.775]          | 0.661  | 0.494    | framing_swap 0.533   | bare 0.875                 | 0.342 |
+
+The interval of the paper accuracy has zero width (the ten readers give the same accuracy on the test pairs) in 15 of
+the 140 rows (gpt2 logistic disgust; gpt2-xl logistic happiness; gpt2-xl logistic fear; gpt2-xl logistic disgust;
 qwen3-0.6b-base logistic happiness; qwen3-0.6b-base logistic fear; qwen3-1.7b-base logistic happiness; qwen3-1.7b-base
-logistic disgust; qwen3-1.7b-base pca_diff happiness; qwen3-1.7b pca_diff happiness); such an interval describes the
-training draw only and does not bound the accuracy on other pairs.
+logistic disgust; qwen3-1.7b-base pca_diff happiness; qwen3-1.7b pca_diff happiness; qwen3-4b-base logistic happiness;
+qwen3-4b logistic happiness; qwen3-4b logistic fear; qwen3-4b logistic disgust; qwen3-4b pca_diff happiness); such an
+interval describes the training draw only and does not bound the accuracy on other pairs.
 
 - **Truth.** The `pca_diff` paper reader reads the truth statements on both checkpoints: 0.947 [0.934, 0.958] on the
   base checkpoint (random 0.646, shuffled 0.490) against 0.969 [0.961, 0.976] with logistic, and 0.864 [0.836, 0.890] on
@@ -1458,7 +1619,7 @@ training draw only and does not bound the accuracy on other pairs.
   (0.534, random 0.550). On the base checkpoint it reads sentiment at 0.846, truth at 0.947 and the emotions at 0.917 to
   1.000. The runs do not say why sentiment fails on the post-trained checkpoint.
 
-The truth and emotion tasks on the other six models, with the layers of the paper readers of the truth task and the
+The truth and emotion tasks on the other eight models, with the layers of the paper readers of the truth task and the
 quantities of the emotions as for the Qwen3 pair:
 
 - **`gpt2`.** The paper reader reads truth at 0.698 [0.681, 0.717] with logistic (L9, random 0.517, shuffled 0.495) and
@@ -1502,6 +1663,20 @@ quantities of the emotions as for the Qwen3 pair:
   0.124 (`no_chat_tags`) and -0.058 (`paraphrase_0`). The paper readers of the six emotions read at 0.898 to 0.998 with
   logistic and 0.836 to 0.979 with `pca_diff`, against random series of 0.542 to 0.676 (both finders together); outside
   `framing_swap` the variants of the six emotions read at 0.831 to 1.000 and 0.464 to 0.989.
+
+- **`qwen3-4b-base`.** The paper reader reads truth at 0.998 [0.995, 1.000] with logistic (L23, random 0.807, shuffled
+  0.500) and at 0.992 [0.986, 0.997] with `pca_diff` (L23, random 0.803, shuffled 0.497). The span across the variants
+  of truth is 0.136 with logistic and 0.502 with `pca_diff`; the smallest margin of a variant over its random series is
+  0.192 (`paper`) and -0.085 (`scaffold_1`). The paper readers of the six emotions read at 0.956 to 1.000 with logistic
+  and 0.878 to 0.997 with `pca_diff`, against random series of 0.539 to 0.666 (both finders together); outside
+  `framing_swap` the variants of the six emotions read at 0.845 to 1.000 and 0.445 to 1.000.
+
+- **`qwen3-4b`.** The paper reader reads truth at 0.969 [0.958, 0.980] with logistic (L23, random 0.700, shuffled 0.495)
+  and at 0.937 [0.932, 0.946] with `pca_diff` (L24, random 0.600, shuffled 0.493). The span across the variants of truth
+  is 0.092 with logistic and 0.264 with `pca_diff`; the smallest margin of a variant over its random series is 0.124
+  (`paraphrase_2`) and 0.141 (`paraphrase_2`). The paper readers of the six emotions read at 0.931 to 1.000 with
+  logistic and 0.761 to 1.000 with `pca_diff`, against random series of 0.541 to 0.661 (both finders together); outside
+  `framing_swap` the variants of the six emotions read at 0.861 to 1.000 and 0.493 to 1.000.
 
 The function framing (`framing_swap`) of each emotion, trained at the response position and scored on its own items:
 
@@ -1603,20 +1778,47 @@ The function framing (`framing_swap`) of each emotion, trained at the response p
 | qwen3-1.7b      | disgust   | pca_diff | 0.808 [0.795, 0.821]                     | 0.510  | 0.482    | 0.093             | 0.962          |
 | qwen3-1.7b      | surprise  | logistic | 0.656 [0.633, 0.681]                     | 0.603  | 0.483    | 0.102             | 0.928          |
 | qwen3-1.7b      | surprise  | pca_diff | 0.622 [0.611, 0.633]                     | 0.489  | 0.494    | 0.126             | 0.822          |
+| qwen3-4b-base   | happiness | logistic | 0.937 [0.924, 0.950]                     | 0.487  | 0.482    | 0.148             | 1.000          |
+| qwen3-4b-base   | happiness | pca_diff | 0.974 [0.974, 0.974]                     | 0.439  | 0.492    | 0.336             | 0.997          |
+| qwen3-4b-base   | sadness   | logistic | 0.691 [0.673, 0.711]                     | 0.534  | 0.518    | 0.105             | 0.977          |
+| qwen3-4b-base   | sadness   | pca_diff | 0.673 [0.659, 0.691]                     | 0.511  | 0.491    | 0.142             | 0.920          |
+| qwen3-4b-base   | anger     | logistic | 0.493 [0.473, 0.518]                     | 0.464  | 0.507    | 0.014             | 0.956          |
+| qwen3-4b-base   | anger     | pca_diff | 0.776 [0.767, 0.784]                     | 0.520  | 0.496    | 0.148             | 0.980          |
+| qwen3-4b-base   | fear      | logistic | 0.923 [0.908, 0.938]                     | 0.609  | 0.511    | 0.172             | 0.994          |
+| qwen3-4b-base   | fear      | pca_diff | 0.892 [0.883, 0.902]                     | 0.521  | 0.511    | 0.181             | 0.974          |
+| qwen3-4b-base   | disgust   | logistic | 0.464 [0.433, 0.500]                     | 0.469  | 0.492    | 0.002             | 0.997          |
+| qwen3-4b-base   | disgust   | pca_diff | 0.872 [0.872, 0.872]                     | 0.549  | 0.474    | 0.314             | 0.997          |
+| qwen3-4b-base   | surprise  | logistic | 0.681 [0.653, 0.703]                     | 0.492  | 0.464    | 0.131             | 0.972          |
+| qwen3-4b-base   | surprise  | pca_diff | 0.722 [0.711, 0.733]                     | 0.492  | 0.494    | 0.132             | 0.878          |
+| qwen3-4b        | happiness | logistic | 0.926 [0.913, 0.939]                     | 0.534  | 0.476    | 0.220             | 1.000          |
+| qwen3-4b        | happiness | pca_diff | 0.947 [0.947, 0.947]                     | 0.550  | 0.482    | 0.298             | 1.000          |
+| qwen3-4b        | sadness   | logistic | 0.811 [0.784, 0.843]                     | 0.518  | 0.507    | 0.157             | 0.952          |
+| qwen3-4b        | sadness   | pca_diff | 0.591 [0.591, 0.591]                     | 0.509  | 0.523    | 0.113             | 0.770          |
+| qwen3-4b        | anger     | logistic | 0.302 [0.267, 0.333]                     | 0.516  | 0.471    | -0.026            | 0.971          |
+| qwen3-4b        | anger     | pca_diff | 0.678 [0.660, 0.700]                     | 0.458  | 0.500    | 0.048             | 0.807          |
+| qwen3-4b        | fear      | logistic | 0.915 [0.900, 0.928]                     | 0.504  | 0.508    | 0.143             | 0.981          |
+| qwen3-4b        | fear      | pca_diff | 0.930 [0.926, 0.936]                     | 0.536  | 0.515    | 0.176             | 0.928          |
+| qwen3-4b        | disgust   | logistic | 0.805 [0.777, 0.833]                     | 0.559  | 0.485    | 0.088             | 1.000          |
+| qwen3-4b        | disgust   | pca_diff | 0.756 [0.749, 0.764]                     | 0.479  | 0.477    | 0.111             | 0.987          |
+| qwen3-4b        | surprise  | logistic | 0.422 [0.403, 0.439]                     | 0.533  | 0.511    | -0.004            | 0.931          |
+| qwen3-4b        | surprise  | pca_diff | 0.533 [0.528, 0.542]                     | 0.433  | 0.483    | 0.122             | 0.761          |
 
-- **The function framing.** It is the lowest variant of the emotion in 53 of the 96 (emotion, run) cells, and its cosine
-  with the paper reader is between -0.334 and 0.593. Its interval lies entirely above the random series of its cell in
-  78 of the 96 cells and entirely below it in 15 (gpt2 logistic sadness; gpt2 pca_diff sadness; gpt2-medium logistic
-  sadness; gpt2-medium logistic anger; gpt2-medium pca_diff sadness; gpt2-large logistic sadness; gpt2-large logistic
-  surprise; gpt2-xl logistic sadness; gpt2-xl pca_diff sadness; qwen3-0.6b-base pca_diff sadness; qwen3-0.6b logistic
-  anger; qwen3-0.6b logistic surprise; qwen3-0.6b pca_diff surprise; qwen3-1.7b-base logistic disgust; qwen3-1.7b
-  pca_diff sadness). It includes 0.5 in 7 (gpt2 logistic anger; gpt2-large pca_diff sadness; gpt2-xl pca_diff surprise;
-  qwen3-0.6b logistic anger; qwen3-1.7b-base logistic disgust; qwen3-1.7b logistic sadness; qwen3-1.7b pca_diff sadness)
-  and lies entirely below 0.5 in 11 (gpt2 logistic sadness; gpt2 pca_diff sadness; gpt2-medium logistic sadness;
-  gpt2-medium logistic anger; gpt2-medium pca_diff sadness; gpt2-large logistic sadness; gpt2-xl logistic sadness;
-  gpt2-xl pca_diff happiness; gpt2-xl pca_diff sadness; qwen3-0.6b logistic surprise; qwen3-0.6b pca_diff surprise). The
-  interval has zero width in 5 (gpt2-xl pca_diff happiness; qwen3-0.6b-base pca_diff happiness; qwen3-0.6b logistic
-  happiness; qwen3-1.7b-base logistic happiness; qwen3-1.7b pca_diff happiness).
+- **The function framing.** It is the lowest variant of the emotion in 64 of the 120 (emotion, run) cells, and its
+  cosine with the paper reader is between -0.334 and 0.593. Its interval lies entirely above the random series of its
+  cell in 99 of the 120 cells and entirely below it in 17 (gpt2 logistic sadness; gpt2 pca_diff sadness; gpt2-medium
+  logistic sadness; gpt2-medium logistic anger; gpt2-medium pca_diff sadness; gpt2-large logistic sadness; gpt2-large
+  logistic surprise; gpt2-xl logistic sadness; gpt2-xl pca_diff sadness; qwen3-0.6b-base pca_diff sadness; qwen3-0.6b
+  logistic anger; qwen3-0.6b logistic surprise; qwen3-0.6b pca_diff surprise; qwen3-1.7b-base logistic disgust;
+  qwen3-1.7b pca_diff sadness; qwen3-4b logistic anger; qwen3-4b logistic surprise). It includes 0.5 in 9 (gpt2 logistic
+  anger; gpt2-large pca_diff sadness; gpt2-xl pca_diff surprise; qwen3-0.6b logistic anger; qwen3-1.7b-base logistic
+  disgust; qwen3-1.7b logistic sadness; qwen3-1.7b pca_diff sadness; qwen3-4b-base logistic anger; qwen3-4b-base
+  logistic disgust) and lies entirely below 0.5 in 13 (gpt2 logistic sadness; gpt2 pca_diff sadness; gpt2-medium
+  logistic sadness; gpt2-medium logistic anger; gpt2-medium pca_diff sadness; gpt2-large logistic sadness; gpt2-xl
+  logistic sadness; gpt2-xl pca_diff happiness; gpt2-xl pca_diff sadness; qwen3-0.6b logistic surprise; qwen3-0.6b
+  pca_diff surprise; qwen3-4b logistic anger; qwen3-4b logistic surprise). The interval has zero width in 9 (gpt2-xl
+  pca_diff happiness; qwen3-0.6b-base pca_diff happiness; qwen3-0.6b logistic happiness; qwen3-1.7b-base logistic
+  happiness; qwen3-1.7b pca_diff happiness; qwen3-4b-base pca_diff happiness; qwen3-4b-base pca_diff disgust; qwen3-4b
+  pca_diff happiness; qwen3-4b pca_diff sadness).
 
 What the added runs show. How much the template matters depends on the finder. With the logistic finder every variant of
 both checkpoints reads above the random series of its cell (by at least 0.214), and the paper template is neither the
@@ -1635,17 +1837,26 @@ with `pca_diff`). The Spearman rank correlation between the 16 accuracies under 
 checkpoint; on the post-trained one it is 0.770, but the 16 `pca_diff` accuracies there are within 0.1 of chance, so
 that value is not read as agreement in the order of the templates. No significance is claimed for either value.
 
-Across the eight models, the `pca_diff` reader of the paper variant has the mean of its random series entirely below its
-interval on 2 (`gpt2-medium`, `qwen3-1.7b-base`), inside its interval on 3 (`qwen3-0.6b-base`, `qwen3-0.6b`,
-`qwen3-1.7b`) and above it on 3 (`gpt2`, `gpt2-large`, `gpt2-xl`). With the logistic finder the reader is above the
-random series of its cell on all 16 variants of every model, the smallest margin being 0.162 (`paraphrase_0` on
-`gpt2-medium`). The Spearman rank correlations between the 16 accuracies under the two finders are -0.077, 0.632,
--0.059, 0.488, 0.739, 0.115, 0.647, 0.770 in the order of the tables (gpt2, gpt2-medium, gpt2-large, gpt2-xl,
-qwen3-0.6b-base, qwen3-0.6b, qwen3-1.7b-base, qwen3-1.7b); no significance is claimed for them. The 16 `pca_diff`
-accuracies of `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` and `qwen3-0.6b` are within 0.131, 0.051, 0.157, 0.185 and
-0.165 of 0.5, so their correlations (-0.077, 0.632, -0.059, 0.488 and 0.115) are not read as agreement in the order of
-the templates. The paper accuracies are 0.512, 0.517, 0.495, 0.507, 0.665, 0.564, 0.846, 0.534 with `pca_diff` and
-0.765, 0.742, 0.807, 0.776, 0.952, 0.860, 0.943, 0.880 with logistic, in the same order.
+Across the ten models, the `pca_diff` reader of the paper variant has the mean of its random series entirely below its
+interval on 2 (`gpt2-medium`, `qwen3-1.7b-base`), inside its interval on 5 (`qwen3-0.6b-base`, `qwen3-0.6b`,
+`qwen3-1.7b`, `qwen3-4b-base`, `qwen3-4b`) and above it on 3 (`gpt2`, `gpt2-large`, `gpt2-xl`). With the logistic finder
+the reader is above the random series of its cell on all 16 variants of every model, the smallest margin being 0.162
+(`paraphrase_0` on `gpt2-medium`). The Spearman rank correlations between the 16 accuracies under the two finders are
+-0.077, 0.632, -0.059, 0.488, 0.739, 0.115, 0.647, 0.770, 0.691, -0.524 in the order of the tables (gpt2, gpt2-medium,
+gpt2-large, gpt2-xl, qwen3-0.6b-base, qwen3-0.6b, qwen3-1.7b-base, qwen3-1.7b, qwen3-4b-base, qwen3-4b); no significance
+is claimed for them. The 16 `pca_diff` accuracies of `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl`, `qwen3-0.6b` and
+`qwen3-4b` are within 0.131, 0.051, 0.157, 0.185, 0.165 and 0.025 of 0.5, so their correlations (-0.077, 0.632, -0.059,
+0.488, 0.115 and -0.524) are not read as agreement in the order of the templates. The paper accuracies are 0.512, 0.517,
+0.495, 0.507, 0.665, 0.564, 0.846, 0.534, 0.540, 0.511 with `pca_diff` and 0.765, 0.742, 0.807, 0.776, 0.952, 0.860,
+0.943, 0.880, 0.900, 0.757 with logistic, in the same order.
+
+On the Qwen3 4B pair the `pca_diff` reader of the paper variant reads sentiment at 0.540 [0.503, 0.570] on the base
+checkpoint (random 0.505) and 0.511 [0.468, 0.555] on the post-trained one (random 0.537), with the random series inside
+both intervals. The same finder reads truth at 0.992 [0.986, 0.997] (random 0.803, shuffled 0.497) on the base
+checkpoint and 0.937 [0.932, 0.946] (random 0.600, shuffled 0.493) on the post-trained one, against 0.998 [0.995, 1.000]
+(random 0.807) and 0.969 [0.958, 0.980] (random 0.700) with logistic, so on this pair the finder is not above a random
+direction on sentiment and is above it on truth, on both checkpoints; the random series of truth is high there, and the
+margins over it are 0.188 and 0.337 with `pca_diff`.
 
 On the post-trained Qwen3 1.7B checkpoint the failure does not extend to the other tasks. The same finder reads truth
 (0.864) and the six emotions (0.822 to 1.000) under the paper template on the post-trained checkpoint, above their
@@ -1946,7 +2157,7 @@ Distinct-1 of the generated text (distinct unigrams over all unigrams; lower mea
 
 Reading the scores next to the cost. A steered score is not read as steering success where the text it scores has
 degenerated, so this section marks where that happens. As a descriptive rule chosen here, and not a threshold of the
-code, a coefficient is called fluent for a checkpoint when the mean perplexity is at most 1.5 times the unsteered one
+code, a coefficient is called fluent for a checkpoint when the mean perplexity of the 200 held-out WikiText-103 passages under the steered model is at most 1.5 times that under the unsteered model
 and the mean distinct-1 is at least 0.15. The coefficients +0.1 and -0.1 are fluent on all four checkpoints
 (perplexity at most 1.37 times the unsteered one, distinct-1 at least 0.181); +0.2, +0.3, -0.2 and -0.3 are not fluent
 on any of them. The rule is applied to the mean over the three steering readers; at -0.1 single readers fall just
@@ -2081,7 +2292,7 @@ Distinct-1 of the generated text:
 | prompting -1 | 0.227                  | 0.174                  |
 | prompting -2 | 0.213                  | 0.159                  |
 
-A coefficient is called fluent by the rule above: the mean perplexity is at most 1.5 times the unsteered one and the mean
+A coefficient is called fluent by the rule above: the mean perplexity of the 200 held-out WikiText-103 passages under the steered model is at most 1.5 times that under the unsteered model and the mean
 distinct-1 is at least 0.15, both over the three steering readers.
 
 - **`qwen3-4b-base`, direction at the fluent coefficients.** +0.1 and -0.1 are fluent (perplexity 18.7 and 18.6 against
@@ -2167,7 +2378,7 @@ M1 reads utility (ETHICS) with six finders and compares them on held-out reading
 `m1/gpt2/4e394ed1a72c`; 10 readers per finder, the first 3 used for steering, 250 prompts, one sample per prompt). The
 steering score is a win rate: the share of (prompt, reader) pairs, 750 per cell, in which the completion steered with +s
 is scored higher by the primary sentiment judge than the completion steered with -s on the same sampling seed, so 0.5
-means no effect. All finders steer at the same control layers (5, 7 and 8), so depth is not a confound. The prompts are
+is no difference between the two signs; the reference for a finder is the random arm (three random directions of the same norm, 0.432 at 0.3 on `gpt2`), not 0.5. All finders steer at the same control layers (5, 7 and 8), so depth is not a confound. The prompts are
 shared by all finders and readers, so the Wilson intervals below are narrower than the variation between prompt draws.
 Test accuracy is on 4,808 pairs, at the layer of each finder (the `correlation` task of the run).
 
@@ -2260,8 +2471,7 @@ the unsteered text and the mean over the three random arms (with the range over 
 
 - **+0.3 is not fluent text.** Averaged over the six emotions the perplexity under the emotion arms is 1.18, 1.98 and
   4.26 times the unsteered one at +0.1, +0.2 and +0.3, against 1.06, 1.27 and 1.72 for the random arms. By the rule of
-  [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity at most 1.5 times the unsteered one and
-  mean distinct-1 at least 0.15) +0.1 passes (1.18 times, mean distinct-1 0.296 against 0.319 unsteered), as does -0.1
+  [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity of the held-out WikiText-103 passages under the steered model at most 1.5 times that under the unsteered model, and mean distinct-1 of the completions at least 0.15) +0.1 passes (1.18 times, mean distinct-1 0.296 against 0.319 unsteered), as does -0.1
   (1.18 times, 0.296), and +0.2 does not (1.98 times, distinct-1 0.232). At +0.3 every emotion is at 3.30 to 5.00 times
   the unsteered perplexity (the random arms are at 1.72), and two emotions are below 0.15 in distinct-1 (fear 0.125 and
   disgust 0.131; the mean over the six emotions is 0.159, just above the cutoff). The changes in the table are therefore
@@ -2353,13 +2563,13 @@ stored. This run has no emotion gallery.
 
 ### The larger GPT-2 sizes (M1, C2, P7, C5)
 
-M1, C2, P7 and C5 also ran on `gpt2-large` and `gpt2-xl` (runs named under each experiment below), all made at `f4d414d` with a clean tree on a rented GPU pod (NVIDIA RTX A4500, torch 2.14.1+cu130, transformers 5.19.0), with the default config of each experiment (batch size 16; C5 with 1,000 questions in the pool, as in the earlier C5 runs). Unlike the `gpt2` runs above, they carry the controls that this section says the earlier runs lack: a random-direction arm (unit directions norm-matched to the steering arm; M1 already had one) and a fluency measure, the perplexity of held-out neutral text under the steered model and the distinct-1 of the generated text, both from `table_effects`. The two sizes are two models: the tables are separate and no metric is pooled over them. To read the cost next to the score, the descriptive rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) is used: a setting is called fluent when its mean perplexity is at most 1.5 times the unsteered one and its mean distinct-1 is at least 0.15. It is a rule chosen for this document and not a threshold of the code. LR1 and C4 also ran on `gpt2-medium`,
+M1, C2, P7 and C5 also ran on `gpt2-large` and `gpt2-xl` (runs named under each experiment below), all made at `f4d414d` with a clean tree on a rented GPU pod (NVIDIA RTX A4500, torch 2.14.1+cu130, transformers 5.19.0), with the default config of each experiment (batch size 16; C5 with 1,000 questions in the pool, as in the earlier C5 runs). Unlike the `gpt2` runs above, they carry the controls that this section says the earlier runs lack: a random-direction arm (unit directions norm-matched to the steering arm; M1 already had one) and a fluency measure, the perplexity of held-out neutral text under the steered model and the distinct-1 of the generated text, both from `table_effects`. The two sizes are two models: the tables are separate and no metric is pooled over them. To read the cost next to the score, the descriptive rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) is used: a setting is called fluent when its mean perplexity of the held-out WikiText-103 passages under the steered model is at most 1.5 times that under the unsteered model and its mean distinct-1 of the completions is at least 0.15. It is a rule chosen for this document and not a threshold of the code. LR1 and C4 also ran on `gpt2-medium`,
 `gpt2-large` and `gpt2-xl`, in chain 17 at `89ea7cb` on an RTX A6000 pod; they are described under their own heading at
 the end of this section. M1 also ran on `gpt2-medium` (run `m1/gpt2-medium/eef91d1dfe8e`, made at `bab5b75` on an RTX 3090 pod); it is reported in its own block after the `gpt2-large` and `gpt2-xl` M1 block.
 
 #### M1 on gpt2-large and gpt2-xl
 
-M1 reads utility (ETHICS) with six finders and compares them on held-out reading, on steering and on erasure, as on `gpt2` (runs `m1/gpt2-large/b4995274d1f8` and `m1/gpt2-xl/3309d5fe55b7`; 10 readers per finder, the first 3 used for steering, 250 prompts, one sample per prompt, relative strengths 0.1, 0.2 and 0.3). The steered layers are 14, 20 and 25 on `gpt2-large` and 19, 26 and 34 on `gpt2-xl`. The win rate is the share of (prompt, reader) pairs, 750 per cell (748 or 749 where a pair was lost), in which the completion steered with +s is scored higher by the primary sentiment judge than the completion steered with -s on the same seed, so 0.5 means no effect. The prompts are shared by all finders and readers, so the Wilson intervals are narrower than the variation between prompt draws. Test accuracy is on 4,808 pairs, at the layer of each finder.
+M1 reads utility (ETHICS) with six finders and compares them on held-out reading, on steering and on erasure, as on `gpt2` (runs `m1/gpt2-large/b4995274d1f8` and `m1/gpt2-xl/3309d5fe55b7`; 10 readers per finder, the first 3 used for steering, 250 prompts, one sample per prompt, relative strengths 0.1, 0.2 and 0.3). The steered layers are 14, 20 and 25 on `gpt2-large` and 19, 26 and 34 on `gpt2-xl`. The win rate is the share of (prompt, reader) pairs, 750 per cell (748 or 749 where a pair was lost), in which the completion steered with +s is scored higher by the primary sentiment judge than the completion steered with -s on the same seed, so 0.5 is no difference between the two signs and the reference for a finder is the random arm, not 0.5. The prompts are shared by all finders and readers, so the Wilson intervals are narrower than the variation between prompt draws. Test accuracy is on 4,808 pairs, at the layer of each finder.
 
 `gpt2-large`:
 
@@ -2449,7 +2659,7 @@ Erasure. Projecting a finder's direction out of the activations and fitting a fr
 M1 on `gpt2-medium` (run `m1/gpt2-medium/eef91d1dfe8e`, made at `bab5b75` on a rented GPU pod; see [Run identity](#run-identity)): the
 same config as the `gpt2-large` and `gpt2-xl` runs above (six finders, 10 readers per finder, the first 3 used for steering
 at layers 10, 13 and 17 of 24, 250 prompts, one sample per prompt, relative strengths 0.1, 0.2 and 0.3, `fluency` on, batch size
-16), and the same win rate (750 (prompt, reader) pairs per cell, 0.5 means no effect). There is one run, so the variation between
+16), and the same win rate (750 (prompt, reader) pairs per cell; the reference is the random arm, 0.547 at 0.3 on `gpt2-medium`, not 0.5). There is one run, so the variation between
 runs is not measured and the Wilson intervals do not include it. Test accuracy is on 4,808 pairs, at the layer of each finder.
 
 | Finder    | Test accuracy        | Layer | Win rate 0.1         | Win rate 0.2         | Win rate 0.3         | Check judge 0.3      |
@@ -2494,8 +2704,7 @@ strength.
 - **The largest strength costs the text, more than on the larger GPT-2 sizes.** At +0.3 the perplexity of the finders is
   2.77 to 4.89 times the unsteered one (the random direction: 2.21) and the distinct-1 is 0.107 to 0.148 (random: 0.179); at
   -0.3 the ratio is 2.84 to 4.19 (random: 2.47) and the distinct-1 0.163 to 0.186 (random: 0.194). On `gpt2-large` and
-  `gpt2-xl` the ratio at +0.3 is 1.35 to 1.68 and 1.34 to 1.56. By the rule above (mean perplexity at most 1.5 times the
-  unsteered one and mean distinct-1 at least 0.15) every finder and the random direction fail at +0.3 and at -0.3, so the win
+  `gpt2-xl` the ratio at +0.3 is 1.35 to 1.68 and 1.34 to 1.56. By the rule above (mean perplexity of the held-out WikiText-103 passages under the steered model at most 1.5 times that under the unsteered model, and mean distinct-1 of the completions at least 0.15) every finder and the random direction fail at +0.3 and at -0.3, so the win
   rates at 0.3 (0.495 to 0.728) are scores of text that fails the rule and are not read as steering that works.
 - **Which strengths pass.** A strength passes for a finder when both +s and -s pass. 0.1 passes for every finder and for
   the random direction (ratios at most 1.14, distinct-1 of at least 0.192). 0.2 passes only for `pca_diff` (1.32 and 1.38
@@ -4080,7 +4289,7 @@ Free condition, pooled over the three families (360 range and 360 exact question
 
 - **An exact question gets a point from the Qwen3 checkpoints.** The greedy range share on the exact questions is 0.000 in 13 of the 15 Qwen3 cells; the other two are the `qwen3-0.6b-base` cells (0.153 [0.119, 0.194] with a range last and 0.019 [0.009, 0.040] with an exact last). The sampled range share on the exact questions is 0.121 and 0.093 for `qwen3-0.6b-base` and at most 0.032 in the other thirteen cells.
 - **A range question gets a range for part of the answers, and for fewer after post-training.** Greedy, the base checkpoints answer 0.989 and 0.989 (0.6B), 0.844 and 0.742 (1.7B) and 0.831 and 0.856 (4B) of the range questions with a range (range last and exact last), and the post-trained ones 0.675 and 0.353, 0.275 and 0.256, and 0.542 and 0.489 in the same two orders, and 0.106, 0.197 and 0.503 in chat. At each size and in each few-shot order the gap of the base checkpoint is above that of the post-trained one with disjoint intervals (6 of 6 comparisons, for example 0.836 [0.797, 0.875] against 0.675 [0.625, 0.720] for the 0.6B pair with a range last). In the two few-shot orders the post-trained share is not ordered by size (lowest for `qwen3-1.7b`); in chat it rises with size (0.106, 0.197, 0.503).
-- **The order of the examples moves the gap of some checkpoints and not of others.** The greedy gap with a range last minus the gap with an exact last is -0.133 (`qwen3-0.6b-base`), +0.322 (`qwen3-0.6b`), +0.103 (`qwen3-1.7b-base`), +0.019 (`qwen3-1.7b`), -0.025 (`qwen3-4b-base`), +0.053 (`qwen3-4b`), -0.519 (`gpt2`), -0.067 (`gpt2-medium`), +0.272 (`gpt2-large`) and +0.031 (`gpt2-xl`). The two gap intervals are disjoint for five of the ten checkpoints (`qwen3-0.6b-base`, `qwen3-0.6b`, `qwen3-1.7b-base`, `gpt2` and `gpt2-large`) and overlap for the other five, so the form of the last example does not move the gap of the 4B pair or of `qwen3-1.7b` (+0.019, 0.275 [0.231, 0.325] against 0.256 [0.211, 0.303]) and does move it for `qwen3-0.6b-base`, `qwen3-0.6b`, `qwen3-1.7b-base` and two of the GPT-2 sizes.
+- **The order of the examples moves the gap of some checkpoints and not of others.** The greedy gap with a range last minus the gap with an exact last is -0.133 (`qwen3-0.6b-base`), +0.322 (`qwen3-0.6b`), +0.103 (`qwen3-1.7b-base`), +0.019 (`qwen3-1.7b`), -0.025 (`qwen3-4b-base`), +0.053 (`qwen3-4b`), -0.519 (`gpt2`), -0.067 (`gpt2-medium`), +0.272 (`gpt2-large`) and +0.031 (`gpt2-xl`). The two gap intervals are disjoint for 2 of 4 GPT-2, 2 of 3 Qwen3 base and 1 of 3 post-trained checkpoints (`qwen3-0.6b-base`, `qwen3-0.6b`, `qwen3-1.7b-base`, `gpt2` and `gpt2-large`) and overlap for the other five, so the form of the last example does not move the gap of the 4B pair or of `qwen3-1.7b` (+0.019, 0.275 [0.231, 0.325] against 0.256 [0.211, 0.303]) and does move it for `qwen3-0.6b-base`, `qwen3-0.6b`, `qwen3-1.7b-base` and two of the GPT-2 sizes.
 - **The chat format hedges with a marker.** The range share of the chat cell is 0.106 [0.078, 0.142], 0.197 [0.159, 0.241] and 0.503 [0.451, 0.554] for the three post-trained checkpoints. In that cell 348 of the 360 greedy answers to the range questions (0.967) and 161 of the 360 to the exact questions (0.447) mark themselves as approximate for `qwen3-0.6b`, 353 (0.981) and 112 (0.311) for `qwen3-1.7b`, and 310 (0.861) and 10 (0.028) for `qwen3-4b`, against at most 1 of 360 greedy answers in any few-shot cell of any checkpoint (the sampled few-shot answers reach 87 of 1,800, for `qwen3-4b-base` on the range questions with an exact last). The range share does not count these.
 - **The GPT-2 checkpoints give ranges on exact questions as well.** `gpt2` answers 0.978 [0.957, 0.989] of the exact questions with a range when the last example is a range and 0.436 [0.386, 0.488] when it is exact (its share on the range questions is 1.000 and 0.978), `gpt2-medium` 0.347 and 0.283, `gpt2-large` 0.022 and 0.000, and `gpt2-xl` 0.003 and 0.006. The greedy gap is 0.022 [0.008, 0.039] and 0.542 [0.486, 0.597] for `gpt2`, 0.628 and 0.694 for `gpt2-medium`, 0.417 and 0.144 for `gpt2-large` and 0.586 and 0.556 for `gpt2-xl`. The files show these numbers and how they depend on the order of the examples; they do not show why a GPT-2 checkpoint answers with a range. For some groups most of their answers are also flagged as being in another unit than the question's (the unit flags in the hand check below).
 - **Sampling.** The sampled range share on the range questions is lower than the greedy one in 19 of the 23 cells, by 0.001 to 0.794. It is higher in the `qwen3-0.6b` chat cell (0.252 [0.226, 0.280] against 0.106) and within 0.026 of the greedy one in the three `qwen3-4b` cells (0.547, 0.515 and 0.517 against 0.542, 0.489 and 0.503).
@@ -4269,7 +4478,7 @@ Train on two families and test on the third, and train on all three and test on 
 
 - **On height, wingspan and the pooled questions the text baselines read 1.000, and so does the logistic reader in 49 of 60 cells.** With height or wingspan held out, and pooled, `text_word` and `text_char` read 1.000 [1.000, 1.000]. The logistic reader reads 1.000 in 49 of those 60 cells (16 of 20 for height, 13 of 20 for wingspan, all 20 pooled), and in none of the 80 cells of this table does its interval lie above that of `text_word`; it lies above that of `text_char` in 6, all on held-out duration.
 - **The random control spans most of the range.** Over its 28 cells (seven train sets by four test sets) the random control of a checkpoint and template has a minimum between 0.011 and 0.838 and a maximum of 1.000 in all 20 pairs of checkpoint and template; it reads 1.000 in 154 of the 560 cells of `transfer.csv`. On the pooled questions it is 0.899 or higher in 18 of the 20 pairs (0.817 to 1.000; the three lowest are 0.817, 0.888 and 0.8996). The reader reads 1.000 there, and its interval lies above that of its random control in 16 of the 20 pooled cells (not above it, in the plain template, for `qwen3-0.6b-base`, `qwen3-1.7b`, `gpt2-medium` and `gpt2-large`), in 15 of 20 for height, 11 of 20 for wingspan and 7 of 20 for duration, and below it in 4 of the 80 cells.
-- **Held-out duration is the one setting where the baselines are below 1.000 and the readers differ from them.** `text_word` reads 0.929 [0.827, 1.000], `text_char` 0.888 [0.786, 0.964], `length` 0.220 [0.075, 0.394] and `popularity` 0.120 [0.000, 0.271]. In the plain template the logistic reader is above the value of `text_word` for one checkpoint only (`gpt2-xl`, 1.000 [1.000, 1.000]), its interval lies below that of `text_word` for five (`qwen3-1.7b-base`, `qwen3-1.7b`, `qwen3-4b-base`, `qwen3-4b` and `gpt2`, 0.199 to 0.659), and the random control of the cell is at or above the reader for five checkpoints. In the concept template the reader is above the value of `text_word` for nine of the ten checkpoints (0.960 to 1.000; `qwen3-4b-base` is at 0.667 [0.495, 0.829]), its interval is above that of `text_char` for five of them (`qwen3-0.6b`, `qwen3-1.7b-base`, `qwen3-1.7b`, `qwen3-4b` and `gpt2-xl`) and always overlaps that of `text_word`, which reaches 1.000, and the random control of the cell is at or above the reader for four checkpoints and 0.900 or higher for seven. Two concept cells have a random control well below the reader: `qwen3-4b` (0.998 [0.989, 1.000] against 0.080 [0.014, 0.164]) and `qwen3-1.7b` (1.000 [1.000, 1.000] against 0.194 [0.087, 0.333]). This setting is where the value of the logistic reader is above the best baseline: in 10 of the 80 cells, all of them held-out duration. The people heights diagnostic for these readers (fitted on height and wingspan, concept template, `people.csv`) places the 120 people above the test buildings (people against buildings 0.9997 to 1.000 for the ten checkpoints) and nearer the breeds (position 0.844 to 0.991), so it does not support a reading of range against exact for them. The plain `gpt2-xl` reader (height and wingspan) places the people at position 0.899, people against buildings 1.000 and breeds against people 0.830, inside the plain random band of -0.201 to 1.044, so it does not support a range reading either.
+- **Held-out duration is the one setting where the baselines are below 1.000 and the readers differ from them.** `text_word` reads 0.929 [0.827, 1.000], `text_char` 0.888 [0.786, 0.964], `length` 0.220 [0.075, 0.394] and `popularity` 0.120 [0.000, 0.271]. In the plain template the logistic reader is above the value of `text_word` for one checkpoint only (`gpt2-xl`, 1.000 [1.000, 1.000]), its interval lies below that of `text_word` for five (`qwen3-1.7b-base`, `qwen3-1.7b`, `qwen3-4b-base`, `qwen3-4b` and `gpt2`, 0.199 to 0.659), and the random control of the cell is at or above the reader for five checkpoints. In the concept template the reader is above the value of `text_word` for 4 of 4 GPT-2, 2 of 3 Qwen3 base and 3 of 3 post-trained checkpoints (0.960 to 1.000; `qwen3-4b-base` is at 0.667 [0.495, 0.829]), its interval is above that of `text_char` for five of them (`qwen3-0.6b`, `qwen3-1.7b-base`, `qwen3-1.7b`, `qwen3-4b` and `gpt2-xl`) and always overlaps that of `text_word`, which reaches 1.000, and the random control of the cell is at or above the reader for four checkpoints and 0.900 or higher for 4 of 4 GPT-2, 2 of 3 Qwen3 base and 1 of 3 post-trained checkpoints. Two concept cells have a random control well below the reader: `qwen3-4b` (0.998 [0.989, 1.000] against 0.080 [0.014, 0.164]) and `qwen3-1.7b` (1.000 [1.000, 1.000] against 0.194 [0.087, 0.333]). This setting is where the value of the logistic reader is above the best baseline: in 10 of the 80 cells, all of them held-out duration. The people heights diagnostic for these readers (fitted on height and wingspan, concept template, `people.csv`) places the 120 people above the test buildings (people against buildings 0.9997 to 1.000 for the ten checkpoints) and nearer the breeds (position 0.844 to 0.991), so it does not support a reading of range against exact for them. The plain `gpt2-xl` reader (height and wingspan) places the people at position 0.899, people against buildings 1.000 and breeds against people 0.830, inside the plain random band of -0.201 to 1.044, so it does not support a range reading either.
 
 Train on one family and test on another, logistic reader, random control and baselines:
 
@@ -4385,8 +4594,8 @@ The other two direction finders on the first four cells, next to the random cont
 | gpt2-xl         | height+wingspan to duration  | 0.996 [0.984, 1.000] | 0.996 [0.984, 1.000] | 0.183 [0.069, 0.326] | 0.982 [0.948, 1.000] | 0.984 [0.951, 1.000] | 0.926 [0.832, 0.993] | text_word 0.929 [0.827, 1.000] |
 | gpt2-xl         | all to the pooled test items | 1.000 [1.000, 1.000] | 1.000 [1.000, 1.000] | 0.900 [0.853, 0.942] | 0.999 [0.995, 1.000] | 0.999 [0.998, 1.000] | 0.948 [0.910, 0.976] | text_word 1.000 [1.000, 1.000] |
 
-- **pca_diff and mean_diff follow the logistic reader on held-out duration.** In the plain template they read 0.187 to 0.996 (pca_diff) and 0.190 to 0.996 (mean_diff) over the ten checkpoints, above the value of `text_word` (0.929) for two of them each, and in the concept template 0.821 to 1.000 and 0.487 to 1.000, above it for eight each (`qwen3-0.6b` is the low mean_diff value, 0.487 [0.307, 0.682], with a logistic reader at 0.991 [0.971, 1.000]).
-- **The same single setting stands out.** Held-out duration in the concept template is where the readers of all three finders are above the value of `text_word` for most checkpoints (nine logistic, eight pca_diff, eight mean_diff of ten). In the other three settings of the table the baselines are at 1.000 and no reader is above them. The random control of the same cell is 0.900 or higher for seven of the ten checkpoints in the concept template, so for those seven a random direction selected the same way also reads high.
+- **pca_diff and mean_diff follow the logistic reader on held-out duration.** In the plain template they read 0.187 to 0.996 (pca_diff) and 0.190 to 0.996 (mean_diff) over the ten checkpoints, above the value of `text_word` (0.929) for 2 of 4 GPT-2 and none of the Qwen3 checkpoints each, and in the concept template 0.821 to 1.000 and 0.487 to 1.000, above it for 3 of 4 GPT-2, 2 of 3 Qwen3 base and 3 of 3 post-trained checkpoints (`pca_diff`) and for 4 of 4, 2 of 3 and 2 of 3 (`mean_diff`) (`qwen3-0.6b` is the low mean_diff value, 0.487 [0.307, 0.682], with a logistic reader at 0.991 [0.971, 1.000]).
+- **The same single setting stands out.** Held-out duration in the concept template is where the readers of all three finders are above the value of `text_word` for most checkpoints (`logistic`: 4 of 4 GPT-2, 2 of 3 Qwen3 base and 3 of 3 post-trained checkpoints; `pca_diff`: 3 of 4, 2 of 3 and 3 of 3; `mean_diff`: 4 of 4, 2 of 3 and 2 of 3). In the other three settings of the table the baselines are at 1.000 and no reader is above them. The random control of the same cell is 0.900 or higher for 4 of 4 GPT-2, 2 of 3 Qwen3 base and 1 of 3 post-trained checkpoints in the concept template, so for those checkpoints a random direction selected the same way also reads high.
 
 Layers and curves. The layer chosen on validation, and the lowest and highest mean test AUROC over all layers (1 to the number of layers of the checkpoint) of the logistic reader and of the random control, in the first four cells:
 
@@ -4650,7 +4859,7 @@ Layer profile of the knowledge link (a layer list of more than five cells is giv
 | gpt2-large      | 540   | 13                | 133               | -0.201 (false_premise, layer 18)       | [-0.050, +0.054] | 13 (layers 20 to 30)      | 0                         |
 | gpt2-xl         | 720   | 118               | 125               | -0.126 (false_premise, layer 26)       | [-0.048, +0.047] | 5 (layers 20, 28, 31, 32) | 0                         |
 
-- **The cosines stay small at every layer.** Over the 4,016 cells of the ten checkpoints the largest absolute cosine is 0.211 (`qwen3-1.7b`, `unknowable_detail`, layer 28); the largest per checkpoint runs from 0.126 (`gpt2-xl`) to 0.211. 1,318 cells (32.8 percent) lie outside their band, 428 above and 890 below (Qwen3 base checkpoints 445 of 1,288, Qwen3 post-trained 443 of 1,288, GPT-2 sizes 430 of 1,440), 1,096 of 3,288 for the `knowledge` contrasts and 222 of 728 for the `unknown_type` ones. For nine of the ten checkpoints more cells lie below the band than above it (`qwen3-1.7b` is the exception, 107 above and 51 below), so in most outside cells the range direction points toward the negative side of the contrast; `qwen3-4b-base` (18 above, 202 below) and `gpt2-large` (13 above, 133 below) are the extremes.
+- **The cosines stay small at every layer.** Over the 4,016 cells of the ten checkpoints the largest absolute cosine is 0.211 (`qwen3-1.7b`, `unknowable_detail`, layer 28); the largest per checkpoint runs from 0.126 (`gpt2-xl`) to 0.211. 1,318 cells (32.8 percent) lie outside their band, 428 above and 890 below (Qwen3 base checkpoints 445 of 1,288, Qwen3 post-trained 443 of 1,288, GPT-2 sizes 430 of 1,440), 1,096 of 3,288 for the `knowledge` contrasts and 222 of 728 for the `unknown_type` ones. For 4 of 4 GPT-2, 3 of 3 Qwen3 base and 2 of 3 post-trained checkpoints more cells lie below the band than above it (`qwen3-1.7b` is the exception, 107 above and 51 below), so in most outside cells the range direction points toward the negative side of the contrast; `qwen3-4b-base` (18 above, 202 below) and `gpt2-large` (13 above, 133 below) are the extremes.
 - **An AUROC interval is outside its random band in 63 of 4,016 cells (27 for the Qwen3 base checkpoints, 13 for the post-trained ones, 23 for the GPT-2 sizes, out of 1,288, 1,288 and 1,440).** In 62 it lies below the band (the range questions score toward the negative side of the contrast more than a random direction does) and in 1 above it (`qwen3-1.7b`, `triviaqa_known`, layer 8: 0.975 [0.964, 0.984] against [0.121, 0.864]). `qwen3-0.6b-base` has 16 of its 392 cells below the band, all in layers 15 to 28, and `gpt2-large` 13 of 540, all in layers 20 to 30; the others have 9, 7, 4, 5 and 5 (`qwen3-0.6b`, `qwen3-1.7b-base`, `qwen3-4b-base`, `gpt2-medium`, `gpt2-xl`), 3 (`qwen3-1.7b`) and none (`qwen3-4b`, `gpt2`). The cells below the band include very low values (0.016 [0.010, 0.023] for `qwen3-0.6b-base` `false_premise` at layer 18, against a band of [0.094, 0.934]). None of the 63 cells is at layer 1.
 - **By family the counts are of the same size.** For the three families taken alone (all questions of the family) the interval lies below the band in 13 (duration), 24 (height) and 51 (wingspan) of 4,016 cells and above it in 7, 1 and 1.
 
@@ -4725,9 +4934,9 @@ Within-kind Spearman correlation between the P10b score and the hedge share, tes
 
 On the Qwen3 checkpoints the greedy range share follows the sourced answer more than the animacy of the subject: an exact question gets a point (the greedy range share on exact questions is 0.000 in 13 of 15 cells), no Qwen3 checkpoint gives a range for a person's height in greedy decoding (0 of 120 in all 15 cells), the instruction to give one number brings the greedy range share on the range questions to 0.014 or less except for `qwen3-0.6b-base` (0.214 and 0.231) and `qwen3-1.7b-base` (0.081 and 0.067), and the forced number lies inside the sourced range more often for range questions than for exact ones (0.033 to 0.336 against 0.006 to 0.144, rising with size; in the 5 percent band the order reverses in three `qwen3-0.6b` cells). Other outputs do not follow the sourced answer alone: the chat approximation marker is more frequent on the people than on the buildings (67 of 120 against 9 for `qwen3-1.7b`, 49 against 41 for `qwen3-0.6b`, 15 against 4 for `qwen3-4b`), as is the sampled range share of the base checkpoints (people minus buildings above 0 in all six cells). The hedge share is not a measure of knowing that an answer is a range. It depends on size, on post-training, on the family (0.983 on the dog breeds for the 4B pair, 0.000 on gestation periods and wingspans for `qwen3-1.7b`) and on the order of the examples (the gap of `qwen3-0.6b` is 0.675 with a range last and 0.353 with an exact last), the chat format hedges with a marker that the range share does not count, and the comparison with the people mixes kind with familiarity. The GPT-2 sizes do not separate the kinds as the sourced answer does (`gpt2` gives a range for 0.978 of the exact questions with a range last and for 0.436 with an exact last), and their forced answers are inside the sourced range for at most 1 of 360 questions of either kind; the files do not say why.
 
-The readers do not separate the kinds beyond the surface baselines and the random control in most cells. The logistic reader reads 1.000 in 49 of the 60 held-out cells on height, wingspan and the pooled questions, where `text_word` and `text_char` read 1.000 and the random control is 0.899 or higher on the pooled questions in 18 of 20 pairs. Held-out duration, where the baselines are lower (0.929 and 0.888), is the one setting where reader values exceed them: the concept-template logistic reader is above their value for nine of ten checkpoints (0.960 to 1.000), with an interval that overlaps that of `text_word`, and the random control is 0.900 or higher in seven of the ten concept cells. In the single-family table 5 of 120 cells, all fitted on duration, have a reader interval above all four baselines and the random control, without a correction for the number of cells. The people heights do not support a range reading for the readers fitted on all three families or on height and wingspan (logistic positions 0.762 to 0.954 for the first, and 0.844 to 0.991 in the concept template for the second, with the people above the test buildings), the pca_diff and mean_diff positions are inside the random band in 34 of 40 cases (of the 13 that are below 0.55, nearer the buildings, 11 are inside it and 2 are below it, both for `gpt2-medium` in the concept template), and for the four readers behind the 5 cells the positions are intermediate (0.319 to 0.529) and inside the band, so the diagnostic neither supports nor excludes a range reading there.
+The readers do not separate the kinds beyond the surface baselines and the random control in most cells. The logistic reader reads 1.000 in 49 of the 60 held-out cells on height, wingspan and the pooled questions, where `text_word` and `text_char` read 1.000 and the random control is 0.899 or higher on the pooled questions in 18 of 20 pairs. Held-out duration, where the baselines are lower (0.929 and 0.888), is the one setting where reader values exceed them: the concept-template logistic reader is above their value for 4 of 4 GPT-2, 2 of 3 Qwen3 base and 3 of 3 post-trained checkpoints (0.960 to 1.000), with an interval that overlaps that of `text_word`, and the random control is 0.900 or higher in 4 of 4 GPT-2, 2 of 3 Qwen3 base and 1 of 3 post-trained concept cells. In the single-family table 5 of 120 cells, all fitted on duration, have a reader interval above all four baselines and the random control, without a correction for the number of cells. The people heights do not support a range reading for the readers fitted on all three families or on height and wingspan (logistic positions 0.762 to 0.954 for the first, and 0.844 to 0.991 in the concept template for the second, with the people above the test buildings), the pca_diff and mean_diff positions are inside the random band in 34 of 40 cases (of the 13 that are below 0.55, nearer the buildings, 11 are inside it and 2 are below it, both for `gpt2-medium` in the concept template), and for the four readers behind the 5 cells the positions are intermediate (0.319 to 0.529) and inside the band, so the diagnostic neither supports nor excludes a range reading there.
 
-P10c links the range direction to the P9 knowledge readers and to the hedging, and its headline values are those of the layer P10b selected (layer 1 for all ten checkpoints). At that layer the cosine between the range direction and the 123 P9 directions is at most 0.132 in absolute value, 29 of the 123 lie outside the band of random vectors, and the AUROC of no P9 reader on the 720 P10 questions has an interval outside its random-direction band (a wide band: at layer 1 its lower bound is 0.030 to 0.150 and its upper bound 0.866 to 0.967). Over all layers the cosines stay at 0.211 or lower and the AUROC interval is outside its band in 63 of 4,016 cells, 62 of them below it and none at layer 1. The three families put the range side on living things and the P9 readers score no people, so the knowledge link does not separate a range-valued answer from a living thing. The within-kind correlation between the P10b score and the hedge share has an interval above 0 in 6 of the 26 free cells of the range questions and below 0 in 1, and for some checkpoints it changes sign with the decoding; for the exact questions it is above 0 in 2 of the 13 defined free cells and below 0 in 4. `gpt2` and `gpt2-medium` hedge on exact questions in the free condition (greedy hedge share 0.700 and 0.293), `gpt2-large` and `gpt2-xl` almost never do (0.007), and none of the four hedges when the prompt asks for one number (greedy 0.000 for both kinds in the forced condition); the files do not say why.
+P10c links the range direction to the P9 knowledge readers and to the hedging, and its headline values are those of the layer P10b selected (layer 1 for all ten checkpoints). At that layer the cosine between the range direction and the 123 P9 directions is at most 0.132 in absolute value, 12 of the 39 GPT-2, 12 of the 42 Qwen3 base and 5 of the 42 post-trained ones lie outside the band of random vectors, and the AUROC of no P9 reader on the 720 P10 questions has an interval outside its random-direction band (a wide band: at layer 1 its lower bound is 0.030 to 0.150 and its upper bound 0.866 to 0.967). Over all layers the cosines stay at 0.211 or lower and the AUROC interval is outside its band in 63 of 4,016 cells, 62 of them below it and none at layer 1. The three families put the range side on living things and the P9 readers score no people, so the knowledge link does not separate a range-valued answer from a living thing. The within-kind correlation between the P10b score and the hedge share has an interval above 0 in 6 of the 26 free cells of the range questions and below 0 in 1, and for some checkpoints it changes sign with the decoding; for the exact questions it is above 0 in 2 of the 13 defined free cells and below 0 in 4. `gpt2` and `gpt2-medium` hedge on exact questions in the free condition (greedy hedge share 0.700 and 0.293), `gpt2-large` and `gpt2-xl` almost never do (0.007), and none of the four hedges when the prompt asks for one number (greedy 0.000 for both kinds in the forced condition); the files do not say why.
 
 ## Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5, LR1)
 
@@ -5052,7 +5261,7 @@ is chosen on the same curve, so the values are optimistic.
 
 ### Six direction finders on utility (M1)
 
-M1 reads utility (ETHICS) with six finders and compares them on held-out reading, on steering and on erasure, as on `gpt2` (runs `m1/qwen3-1.7b-base/e9279a87db07` and `m1/qwen3-1.7b/77752112ddbe`, made at `f4d414d` on a rented GPU pod; 10 readers per finder, the first 3 used for steering, 250 prompts, one sample per prompt, steered at layers 11, 15 and 20). These runs replace `m1/qwen3-1.7b-base/3fe3a8644289` and `m1/qwen3-1.7b/de2cdd3146ac` (made at `a6e2333` on the laptop GPU) as the reported runs; the earlier runs stay tracked. The configs differ in the `fluency` switch only (off in the earlier runs, on here), so these runs add the perplexity and distinct-1 of the steered text. The numbers moved between the two runs of each checkpoint: the test accuracy of a finder by at most 0.002 with the same layers, the win rate of a finder by at most 0.069 (base) and 0.029 (post-trained), and the random direction on the post-trained checkpoint by -0.032, -0.091 and -0.085 at 0.1, 0.2 and 0.3, which is more than the width of the Wilson intervals; those intervals do not include variation between runs. The win rate is the share of (prompt, reader) pairs, 750 per cell (747 to 750 where a pair was lost), in which the completion steered with +s is scored higher by the primary sentiment judge than the completion steered with -s on the same seed, so 0.5 means no effect. The prompts are shared by all finders and readers, so the Wilson intervals are narrower than the variation between prompt draws. Test accuracy is on 4,808 pairs, at the layer of each finder.
+M1 reads utility (ETHICS) with six finders and compares them on held-out reading, on steering and on erasure, as on `gpt2` (runs `m1/qwen3-1.7b-base/e9279a87db07` and `m1/qwen3-1.7b/77752112ddbe`, made at `f4d414d` on a rented GPU pod; 10 readers per finder, the first 3 used for steering, 250 prompts, one sample per prompt, steered at layers 11, 15 and 20). These runs replace `m1/qwen3-1.7b-base/3fe3a8644289` and `m1/qwen3-1.7b/de2cdd3146ac` (made at `a6e2333` on the laptop GPU) as the reported runs; the earlier runs stay tracked. The configs differ in the `fluency` switch only (off in the earlier runs, on here), so these runs add the perplexity and distinct-1 of the steered text. The numbers moved between the two runs of each checkpoint: the test accuracy of a finder by at most 0.002 with the same layers, the win rate of a finder by at most 0.069 (base) and 0.029 (post-trained), and the random direction on the post-trained checkpoint by -0.032, -0.091 and -0.085 at 0.1, 0.2 and 0.3, which is more than the width of the Wilson intervals; those intervals do not include variation between runs. The win rate is the share of (prompt, reader) pairs, 750 per cell (747 to 750 where a pair was lost), in which the completion steered with +s is scored higher by the primary sentiment judge than the completion steered with -s on the same seed, so 0.5 is no difference between the two signs and the reference for a finder is the random arm, not 0.5. The prompts are shared by all finders and readers, so the Wilson intervals are narrower than the variation between prompt draws. Test accuracy is on 4,808 pairs, at the layer of each finder.
 
 `qwen3-1.7b-base`:
 
@@ -5104,7 +5313,7 @@ Cost to the text. Unsteered, the neutral text has a perplexity of 18.6 on the ba
 | kmeans    | 37.3            | 46.2            | 67.6 (2.01x)    | 0.171           | 46.9 (1.39x)    | 0.118           |
 | random    | 34.6            | 38.3            | 46.7 (1.39x)    | 0.160           | 48.0 (1.42x)    | 0.151           |
 
-- **The largest strength costs the text on both checkpoints.** At +0.3 the perplexity of the finders is 1.46 to 1.97 times the unsteered one on the base checkpoint and 1.93 to 2.20 times on the post-trained one (the random direction: 1.29 and 1.39), and the distinct-1 is 0.179 to 0.212 and 0.155 to 0.176. By the rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity at most 1.5 times the unsteered one and mean distinct-1 at least 0.15), only `logistic` (1.46 times, distinct-1 0.195) passes at +0.3 on the base checkpoint and no finder passes on the post-trained one. The win rates of about 0.92 at 0.3 on the post-trained checkpoint (four of the five finders; `logistic` is 0.743) are therefore scores of text that fails the rule, and are not read as steering that works.
+- **The largest strength costs the text on both checkpoints.** At +0.3 the perplexity of the finders is 1.46 to 1.97 times the unsteered one on the base checkpoint and 1.93 to 2.20 times on the post-trained one (the random direction: 1.29 and 1.39), and the distinct-1 is 0.179 to 0.212 and 0.155 to 0.176. By the rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity of the held-out WikiText-103 passages under the steered model at most 1.5 times that under the unsteered model, and mean distinct-1 of the completions at least 0.15), only `logistic` (1.46 times, distinct-1 0.195) passes at +0.3 on the base checkpoint and no finder passes on the post-trained one. The win rates of about 0.92 at 0.3 on the post-trained checkpoint (four of the five finders; `logistic` is 0.743) are therefore scores of text that fails the rule, and are not read as steering that works.
 - **Which strengths pass.** On the base checkpoint 0.1 and 0.2 pass in both directions for every finder (ratios at most 1.05 and 1.25, distinct-1 of at least 0.19); among the passing settings at 0.2 `mean_diff` wins most (0.841 [0.813, 0.866]). On the post-trained checkpoint 0.1 passes for every finder (ratios at most 1.12 in both directions, distinct-1 of at least 0.156), and 0.2 does not: at -0.2 the distinct-1 of the five finders is 0.138 to 0.148, below the cutoff (the mean perplexity ratio of a finder is at most 1.40 at +0.2). At 0.1 the finders win 0.593 (`logistic`) to 0.738 (`pca_diff`), against 0.496 for the random direction. In this run the post-trained checkpoint loses fluency at a smaller relative strength than the base one.
 
 Erasure. Projecting a finder's direction out of the activations and fitting a fresh logistic probe on the stored activations of the control layers gives the probe accuracy before and after in the next tables, and the behavioral gap (the score after the more pleasant scenario of a pair minus after the less pleasant one, 100 pairs) is given for the primary and the check judge. The `none` row is the gap without a projection.
@@ -5191,7 +5400,7 @@ Cost to the text. Unsteered, the neutral text has a perplexity of 15.9 on the ba
 | kmeans    | 35.7            | 42.0            | 51.5 (1.63x)    | 0.159           | 40.0 (1.26x)    | 0.101           |
 | random    | 31.8            | 33.4            | 37.5 (1.18x)    | 0.155           | 41.2 (1.30x)    | 0.155           |
 
-- **The largest strength costs the text on both checkpoints, in different ways.** At +0.3 the perplexity of the finders is 1.44 to 1.68 times the unsteered one on the base checkpoint and 1.59 to 2.47 times on the post-trained one (the random direction: 1.33 and 1.18), and the distinct-1 is 0.169 to 0.185 and 0.145 to 0.163. At -0.3 the ratio is 1.51 to 1.65 on the base checkpoint and 1.10 to 1.29 on the post-trained one, but the post-trained distinct-1 falls to 0.097 to 0.144 (random: 0.155). By the rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity at most 1.5 times the unsteered one and mean distinct-1 at least 0.15), on the base checkpoint `pca_diff` (1.46 times, distinct-1 0.173), `pca_raw` (1.44 times, 0.174) and `kmeans` (1.49 times, 0.169) pass at +0.3 and `mean_diff` (1.53 times) and `logistic` (1.68 times) do not, and all five finders fail at -0.3; on the post-trained checkpoint no finder passes at +0.3 (ratios past 1.5) or at -0.3 (distinct-1 below 0.15). The random direction passes at every setting on both checkpoints. The win rates at 0.3 (0.869 to 0.949 and 0.855 to 0.969) are therefore scores of text that fails the rule in at least one of the two directions, and are not read as steering that works.
+- **The largest strength costs the text on both checkpoints, in different ways.** At +0.3 the perplexity of the finders is 1.44 to 1.68 times the unsteered one on the base checkpoint and 1.59 to 2.47 times on the post-trained one (the random direction: 1.33 and 1.18), and the distinct-1 is 0.169 to 0.185 and 0.145 to 0.163. At -0.3 the ratio is 1.51 to 1.65 on the base checkpoint and 1.10 to 1.29 on the post-trained one, but the post-trained distinct-1 falls to 0.097 to 0.144 (random: 0.155). By the rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity of the held-out WikiText-103 passages under the steered model at most 1.5 times that under the unsteered model, and mean distinct-1 of the completions at least 0.15), on the base checkpoint `pca_diff` (1.46 times, distinct-1 0.173), `pca_raw` (1.44 times, 0.174) and `kmeans` (1.49 times, 0.169) pass at +0.3 and `mean_diff` (1.53 times) and `logistic` (1.68 times) do not, and all five finders fail at -0.3; on the post-trained checkpoint no finder passes at +0.3 (ratios past 1.5) or at -0.3 (distinct-1 below 0.15). The random direction passes at every setting on both checkpoints. The win rates at 0.3 (0.869 to 0.949 and 0.855 to 0.969) are therefore scores of text that fails the rule in at least one of the two directions, and are not read as steering that works.
 - **Which strengths pass.** On the base checkpoint 0.1 and 0.2 pass in both directions for every finder (ratios at most 1.06 and 1.23, distinct-1 of at least 0.192); among the passing settings at 0.2 `kmeans` (0.869 [0.843, 0.892]) and `mean_diff` (0.861 [0.835, 0.884]) win most, with overlapping intervals, and at 0.1 the finders win 0.671 (`logistic`) to 0.735 (`pca_diff`), against 0.493 for the random direction. On the post-trained checkpoint 0.1 passes for every finder (ratios 0.89 to 1.25 over both directions, distinct-1 of at least 0.160) and 0.2 passes for none: `pca_diff` (1.52 times) and `logistic` (1.69 times) fail at +0.2, and at -0.2 the distinct-1 of the other four finders is 0.132 to 0.143 (`logistic` passes there with 0.162). At 0.1 the finders win 0.750 (`logistic`) to 0.817 (`mean_diff`), against 0.543 for the random direction. The boundary is the same as in the 1.7B pair (0.2 on the base checkpoint, 0.1 on the post-trained one).
 
 Erasure. As above, the tables give the probe accuracy before and after projecting a finder's direction out of the activations of the control layers, and the behavioral gap (100 pairs) for the primary and the check judge. The `none` row is the gap without a projection.
@@ -5308,8 +5517,7 @@ the ratio to the unsteered perplexity in parentheses at the largest strength.
 - **The largest strength costs the text on both checkpoints.** At +0.3 the perplexity of the finders is 1.83 to 1.98 times
   the unsteered one on the base checkpoint and 2.05 to 2.40 times on the post-trained one (the random direction: 1.47 and
   1.57), and the distinct-1 is 0.129 to 0.179 and 0.122 to 0.143 (random: 0.171 and 0.128). At -0.3 the ratio is 1.82 to 2.16
-  and 1.71 to 1.99 (random: 1.45 and 1.65). By the rule above (mean perplexity at most 1.5 times the unsteered one and mean
-  distinct-1 at least 0.15), on the base checkpoint every finder fails at +0.3 and at -0.3 (ratios past 1.5) while the random
+  and 1.71 to 1.99 (random: 1.45 and 1.65). By the rule above (mean perplexity of the held-out WikiText-103 passages under the steered model at most 1.5 times that under the unsteered model, and mean distinct-1 of the completions at least 0.15), on the base checkpoint every finder fails at +0.3 and at -0.3 (ratios past 1.5) while the random
   direction passes at both (1.47 and 1.45 times, distinct-1 0.171 and 0.206); on the post-trained checkpoint every finder
   and the random direction fail at +0.3 and -0.3. The unsteered distinct-1 of the post-trained checkpoint (0.160) is only 0.010
   above the threshold, so its distinct-1 half of the rule fails at many small strengths. The win rates at 0.3 (0.508 to
@@ -5428,7 +5636,7 @@ Cost to the text. The table gives the perplexity of held-out neutral text under 
 | disgust (+0.3)        | 118.4 [99.8, 142.9]                     | 3.52          | 0.175 [0.164, 0.181] |
 | surprise (+0.3)       | 104.6 [95.7, 116.9]                     | 3.11          | 0.132 [0.126, 0.138] |
 
-- **+0.3 is not fluent text.** Averaged over the six emotions the perplexity under the emotion arms is 1.11, 1.57 and 3.03 times the unsteered one at +0.1, +0.2 and +0.3 on the base checkpoint and 1.15, 1.72 and 3.40 times on the post-trained one, against 1.03, 1.12 and 1.31 and 1.03, 1.13 and 1.36 for the random arms. By the rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity at most 1.5 times the unsteered one and mean distinct-1 at least 0.15) only +0.1 passes on either checkpoint, and every emotion is at 2.61 to 4.74 times at +0.3 (distinct-1 from 0.132 for surprise to 0.253 for sadness). The changes in the first tables are therefore changes of text that fails the rule at +0.3, and a rise in an emotion score at +0.3 is not read as steering that works. The own-emotion probability at +0.1 is in the curves file of each run and is not tabulated here.
+- **+0.3 is not fluent text.** Averaged over the six emotions the perplexity under the emotion arms is 1.11, 1.57 and 3.03 times the unsteered one at +0.1, +0.2 and +0.3 on the base checkpoint and 1.15, 1.72 and 3.40 times on the post-trained one, against 1.03, 1.12 and 1.31 and 1.03, 1.13 and 1.36 for the random arms. By the rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity of the held-out WikiText-103 passages under the steered model at most 1.5 times that under the unsteered model, and mean distinct-1 of the completions at least 0.15) only +0.1 passes on either checkpoint, and every emotion is at 2.61 to 4.74 times at +0.3 (distinct-1 from 0.132 for surprise to 0.253 for sadness). The changes in the first tables are therefore changes of text that fails the rule at +0.3, and a rise in an emotion score at +0.3 is not read as steering that works. The own-emotion probability at +0.1 is in the curves file of each run and is not tabulated here.
 - **Not stored.** The probabilities are those of a classifier on short completions; the run does not measure whether a human would read them as the emotion.
 
 #### The 4B pair (C2)
@@ -5528,8 +5736,7 @@ readers), against the unsteered text and the mean over the three random arms (wi
 - **+0.3 is not fluent text.** Averaged over the six emotions the perplexity under the emotion arms is 1.13, 1.74 and
   3.86 times the unsteered one at +0.1, +0.2 and +0.3 on the base checkpoint and 1.14, 1.69 and 3.29 times on the
   post-trained one, against 1.03, 1.12 and 1.34 and 1.02, 1.10 and 1.31 for the random arms. By the rule of [Sentiment
-  steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity at most 1.5 times the unsteered one and mean
-  distinct-1 at least 0.15) +0.1 passes on both checkpoints (mean distinct-1 0.305 and 0.239 against 0.319 and 0.249
+  steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity of the held-out WikiText-103 passages under the steered model at most 1.5 times that under the unsteered model, and mean distinct-1 of the completions at least 0.15) +0.1 passes on both checkpoints (mean distinct-1 0.305 and 0.239 against 0.319 and 0.249
   unsteered), as does -0.1 (1.11 and 1.14 times, distinct-1 0.302 and 0.241), and +0.2 does not (1.74 and 1.69 times the unsteered perplexity, distinct-1 0.274 and
   0.200). At +0.3 every emotion is at 2.56 to 4.75 times the unsteered perplexity on the base checkpoint (distinct-1 from
   0.204 for surprise to 0.272 for happiness) and at 2.36 to 4.78 times on the post-trained one (distinct-1 from 0.115 for
@@ -5599,7 +5806,7 @@ Cost to the text. The perplexity of held-out neutral text under the steered mode
 | disgust (+0.3)        | 347.7 [333.9, 357.9]                    | 7.30          | 0.086 [0.080, 0.092] |
 | surprise (+0.3)       | 284.1 [251.3, 310.2]                    | 5.96          | 0.096 [0.088, 0.104] |
 
-- **+0.3 is not fluent text.** Averaged over the six emotions the perplexity under the emotion arms is 1.21, 2.22 and 5.56 times the unsteered one at +0.1, +0.2 and +0.3 on the base checkpoint and 1.29, 2.66 and 7.72 times on the post-trained one, against 1.03, 1.16 and 1.46 and 1.08, 1.33 and 1.88 for the random arms. By the rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity at most 1.5 times the unsteered one and mean distinct-1 at least 0.15) +0.1 passes on both checkpoints (mean distinct-1 0.281 and 0.219 against 0.294 and 0.243 unsteered), as does -0.1 (1.18 and 1.21 times, distinct-1 0.284 and 0.235), and +0.2 does not (2.22 and 2.66 times, distinct-1 0.236 and 0.157). At +0.3 every emotion is at 3.77 to 8.05 times the unsteered perplexity on the base checkpoint (distinct-1 from 0.167 for surprise to 0.246 for sadness, all above 0.15) and at 5.96 to 12.38 times on the post-trained one, where the distinct-1 of all six emotions is below 0.15 (0.029 for fear to 0.137 for anger; the mean over the six is 0.102) and the random arms are at 1.88 times. The fear arm of the post-trained checkpoint (12.38 times, distinct-1 0.029 [0.019, 0.041]) gives the most repetitive text of the four C2 runs of chain 42. The changes in the first tables are therefore changes of text that fails the rule at +0.3, and a rise in an emotion score at +0.3 is not read as steering that works.
+- **+0.3 is not fluent text.** Averaged over the six emotions the perplexity under the emotion arms is 1.21, 2.22 and 5.56 times the unsteered one at +0.1, +0.2 and +0.3 on the base checkpoint and 1.29, 2.66 and 7.72 times on the post-trained one, against 1.03, 1.16 and 1.46 and 1.08, 1.33 and 1.88 for the random arms. By the rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity of the held-out WikiText-103 passages under the steered model at most 1.5 times that under the unsteered model, and mean distinct-1 of the completions at least 0.15) +0.1 passes on both checkpoints (mean distinct-1 0.281 and 0.219 against 0.294 and 0.243 unsteered), as does -0.1 (1.18 and 1.21 times, distinct-1 0.284 and 0.235), and +0.2 does not (2.22 and 2.66 times, distinct-1 0.236 and 0.157). At +0.3 every emotion is at 3.77 to 8.05 times the unsteered perplexity on the base checkpoint (distinct-1 from 0.167 for surprise to 0.246 for sadness, all above 0.15) and at 5.96 to 12.38 times on the post-trained one, where the distinct-1 of all six emotions is below 0.15 (0.029 for fear to 0.137 for anger; the mean over the six is 0.102) and the random arms are at 1.88 times. The fear arm of the post-trained checkpoint (12.38 times, distinct-1 0.029 [0.019, 0.041]) gives the most repetitive text of the four C2 runs of chain 42. The changes in the first tables are therefore changes of text that fails the rule at +0.3, and a rise in an emotion score at +0.3 is not read as steering that works.
 
 ### LoRRA adapter (LR1) and the TruthfulQA control (C4)
 
@@ -6855,7 +7062,7 @@ Each model has one run, and base and post-trained checkpoints are compared cell 
 | qwen3-4b        | 32        | 16    | 2            | 8            | 8       |
 
 - **Sentiment and utility.** The GPT-2 readers need 32 to 64 pairs for sentiment and 64 pairs (256 on `gpt2`) for utility before no draw fails; the Qwen3 readers need 4 to 32 pairs for sentiment (16 on `qwen3-4b-base` and 32 on `qwen3-4b`) and 8 to 16 for utility (8 on both 4B checkpoints). At the largest size the sentiment mean is below the full-data reference on all ten models (by 0.004 to 0.042), and its stored saturation size is 512 on seven of them (`gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl`, `qwen3-0.6b`, `qwen3-1.7b` and `qwen3-4b`), so on those seven the sentiment curve has not flattened by 512 pairs. Utility flattens earlier on Qwen3 (stored saturation size 32 on the 0.6B pair, 8 on the 1.7B pair, 32 on `qwen3-4b-base` and 8 on `qwen3-4b`, and the mean moves by between -0.012 and 0.009 from 64 to 512 pairs) than on the GPT-2 sizes (256 on three and 512 on `gpt2-xl`, with a gain of 0.015 to 0.037 from 64 to 512 pairs).
-- **Truth.** On the four GPT-2 sizes the truth reader has failing draws at every size below 128 pairs; at 128 pairs, the end of the source, the mean is 0.642 (`gpt2`), 0.654, 0.676 and 0.662, within 0.024 of the references (0.644, 0.678, 0.695 and 0.661). On Qwen3 no draw fails from 32 pairs on `qwen3-0.6b-base`, from 64 on `qwen3-0.6b`, from 8 on `qwen3-1.7b`, from 2 on `qwen3-1.7b-base` and `qwen3-4b-base` and from 16 on `qwen3-4b`, and the 128-pair means (0.830, 0.838, 0.932, 0.971, 1.000 and 0.965) are within 0.009 of their references on the first five and 0.035 below the reference of `qwen3-4b` (1.000). On nine of the ten models the truth mean at 128 pairs is within 0.024 of its reference.
+- **Truth.** On the four GPT-2 sizes the truth reader has failing draws at every size below 128 pairs; at 128 pairs, the end of the source, the mean is 0.642 (`gpt2`), 0.654, 0.676 and 0.662, within 0.024 of the references (0.644, 0.678, 0.695 and 0.661). On Qwen3 no draw fails from 32 pairs on `qwen3-0.6b-base`, from 64 on `qwen3-0.6b`, from 8 on `qwen3-1.7b`, from 2 on `qwen3-1.7b-base` and `qwen3-4b-base` and from 16 on `qwen3-4b`, and the 128-pair means (0.830, 0.838, 0.932, 0.971, 1.000 and 0.965) are within 0.009 of their references on the first five and 0.035 below the reference of `qwen3-4b` (1.000). On 9 of the 10 models (4 of 4 GPT-2, 3 of 3 Qwen3 base and 2 of 3 post-trained) the truth mean at 128 pairs is within 0.024 of its reference.
 - **The truth subsets.** `truth_cities` has no failing draw from 2 pairs on both 1.7B and both 4B checkpoints, but it still has a failure rate of 0.30 at 256 pairs on `gpt2-xl`, and on `gpt2-large` it is at chance on the truth target at every size (0.469 to 0.503, reference 0.508). `truth_common` reaches no failing draw only at 256 or 512 pairs on `gpt2-medium`, `gpt2-xl` and the 0.6B pair, never on `gpt2` and `gpt2-large`, at 8 and 16 pairs on the two 1.7B checkpoints and at 8 pairs on both 4B checkpoints.
 - **Base against post-trained.** At 0.6B, 1.7B and 4B the post-trained point value is below the base one in all 9 sentiment cells, all 9 `truth_common` cells and all 8 `truth_cities` cells, and in 6 of 7 (0.6B) and 7 of 7 (1.7B and 4B) truth cells; the intervals over the draws are separate in 8 (0.6B) and 9 (1.7B and 4B) of the 9 sentiment cells, and at 4B in all 33 cells of sentiment, truth, `truth_cities` and `truth_common`. The post-trained 4B truth reader is 0.386 below the base one at 2 pairs and 0.035 below it at 128. On utility the two are level at 0.6B and 1.7B: the differences (post-trained minus base) are between -0.005 and 0.028 and no interval is separate. At 4B the post-trained reader is higher at 2, 4 and 8 pairs (by 0.027, 0.031 and 0.030, with a separate interval only at 8) and lower from 16 pairs on (by 0.005 to 0.016, with no separate interval). The base 1.7B run was made at `c7d8051` on a different card (NVIDIA GeForce RTX 4090) than the post-trained one, as in the P2 comparison above; the two 4B runs were made at the same commit on the same pod card.
 
@@ -7406,10 +7613,10 @@ apart from the two replaced runs.
 
 Config hashes (12 hex digits), the P1 follow-up:
 
-| Experiment               | gpt2         | gpt2-medium  | gpt2-large   | gpt2-xl      | qwen3-0.6b-base | qwen3-0.6b   | qwen3-1.7b-base | qwen3-1.7b   |
-| ------------------------ | ------------ | ------------ | ------------ | ------------ | --------------- | ------------ | --------------- | ------------ |
-| P1 (all tasks, logistic) | 078b9d6482a2 | ac7c6af28fc3 | 4920a2c4975e | 006a40a28414 | deabd95764d0    | 027be280838a | 62073cecf6d5    | f3a2d832c9c4 |
-| P1 (all tasks, pca_diff) | cce69c9048fd | bc97021c8520 | 7e5f079053ef | d11b2daa837b | 61b62dc50aaa    | 820718d9b28a | a45dc5c93f18    | 7ffb64cce683 |
+| Experiment               | gpt2         | gpt2-medium  | gpt2-large   | gpt2-xl      | qwen3-0.6b-base | qwen3-0.6b   | qwen3-1.7b-base | qwen3-1.7b   | qwen3-4b-base | qwen3-4b     |
+| ------------------------ | ------------ | ------------ | ------------ | ------------ | --------------- | ------------ | --------------- | ------------ | ------------- | ------------ |
+| P1 (all tasks, logistic) | 078b9d6482a2 | ac7c6af28fc3 | 4920a2c4975e | 006a40a28414 | deabd95764d0    | 027be280838a | 62073cecf6d5    | f3a2d832c9c4 | b2212ddb4014  | 53dca5b33283 |
+| P1 (all tasks, pca_diff) | cce69c9048fd | bc97021c8520 | 7e5f079053ef | d11b2daa837b | 61b62dc50aaa    | 820718d9b28a | a45dc5c93f18    | 7ffb64cce683 | 8b42a1cd2595  | f9637e84ab19 |
 
 The rows `P1 (sentiment)` and `P1 (all tasks)` of the GPT-2 table below, and the row `P1` of the Qwen3 tables, are the
 sentiment-only runs and the `gpt2` logistic run; the logistic and `pca_diff` runs of every model with all three tasks
@@ -7419,10 +7626,23 @@ Chain 41 (P1 on gpt2-xl): the logistic run `p1/gpt2-xl/006a40a28414` and the `pc
 were made at `bab5b75` with a clean tree on one rented GPU pod (NVIDIA GeForce RTX 3090, torch 2.14.1+cu130,
 transformers 5.19.0, Linux), with the default P1 config of that commit (sentiment, truth and the six emotions, 10 seeds
 of 64 training pairs, 256 evaluation pairs per split, batch size 8, last token; `config.json` of each run); the two
-configs differ in `method` only. The time between `started_at` and `finished_at` of the stored `meta.json` is 2,948 s for the logistic run (2026-10-18 22:00:50 to 22:49:58 UTC) and 2,440 s for the `pca_diff` run (2026-10-18 23:30:38 to 2026-10-19 00:11:18 UTC). The config hash of each run was recomputed under main by loading the config of the pod copy (identical to the
-exported one) into the P1 config class and hashing it, and both agree with the directory names. The source files that P1
+configs differ in `method` only. The time between `started_at` and `finished_at` of the stored `meta.json` is 2,948 s for the logistic run (2026-10-18 22:00:50 to 22:49:58 UTC) and 2,440 s for the `pca_diff` run (2026-10-18 23:30:38 to 2026-10-19 00:11:18 UTC). The config hash of each run was recomputed under main by loading the stored `config.json` into the P1 config class and hashing it, and both agree with the directory names. The source files that P1
 imports are those of main at `bab5b75`: `git diff --stat bab5b75 HEAD -- src` is empty. Exporting these runs changed no
 tracked result.
+
+Chains 43 and 44 (P1 on the Qwen3 4B pair): the logistic runs `p1/qwen3-4b-base/b2212ddb4014` and
+`p1/qwen3-4b/53dca5b33283` (chain 43) and the `pca_diff` runs `p1/qwen3-4b-base/8b42a1cd2595` and
+`p1/qwen3-4b/f9637e84ab19` (chain 44) were made at `bab5b75` with a clean tree on rented GPU pods, with the default P1
+config of that commit (sentiment, truth and the six emotions, 10 seeds of 64 training pairs, 256 evaluation pairs per
+split, batch size 8, last token; `config.json` of each run). The logistic runs ran on an NVIDIA RTX A5000 and the
+`pca_diff` runs on an NVIDIA GeForce RTX 3090 (torch 2.14.1+cu130, transformers 5.19.0, Linux). A logistic run and its
+`pca_diff` partner differ in the config in `method` only. The time between `started_at` and `finished_at` of the stored
+`meta.json` is 4,719 s (2026-10-18 22:00:49 to 23:19:28 UTC) for the logistic run on `qwen3-4b-base` and 4,088 s
+(22:53:49 on 2026-10-18 to 00:01:57 on 2026-10-19) for the one on `qwen3-4b`, and 6,733 s (2026-10-19 00:13:22 to
+02:05:35 UTC) and 6,770 s (00:13:52 to 02:06:42) for the two `pca_diff` runs. The config hash of each run was recomputed
+under main by loading the stored `config.json` into the P1 config class and hashing it, and all four agree with the directory names. The source files that P1 imports are those of main at `bab5b75`: `git
+diff --stat bab5b75 HEAD` over the files of the P1 import closure is empty. Exporting these runs changed no tracked
+result.
 
 Config hashes (12 hex digits), GPT-2:
 
@@ -7718,8 +7938,6 @@ not committed; `tomography plot all --out results` redraws them from these files
 
 Not in this document yet. No dates are promised.
 
-- P1 on the Qwen3 4B pair with both finders and the sentiment, truth and emotion tasks (it ran on the eight models of
-  the P1 subsection).
 - P5, persona wording and instruction confounds for honesty, with persona wordings beyond the five pairs of the run.
 - A random-direction arm for P7 on `gpt2`, a fluency measure (perplexity and distinct-1) for M1 and P7 on
   `gpt2`, and a random-direction arm and the perplexity of neutral text for C4 on `gpt2`. The runs on `gpt2-large` and
