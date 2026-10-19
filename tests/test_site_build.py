@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 import runpy
 import subprocess
+import sys
 
 import pytest
 
@@ -13,6 +14,7 @@ from tomography.site import page
 from tomography.site import references
 from tomography.site import registry
 from tomography.site.manifest import Manifest
+from tomography.viz import checks
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
@@ -26,8 +28,7 @@ MISSING = registry.missing()
 def site(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[Path, page.Document]:
-    if MISSING:
-        pytest.skip(f"figure modules not merged yet: {MISSING}")
+    assert MISSING == []
     out = tmp_path_factory.mktemp("site")
     return out, build_module.build(RESULTS, out)
 
@@ -255,6 +256,7 @@ def test_the_built_page_has_no_dashes_backticks_or_stray_underscores(
     assert not any(d in html for d in DASHES)
     body = re.sub(r"<pre.*?</pre>", "", html, flags=re.S)
     body = re.sub(r"<svg.*?</svg>", "", body, flags=re.S)
+    body = re.sub(r"<table.*?</table>", "", body, flags=re.S)
     text = re.sub(r"<[^>]+>", " ", body)
     text = re.sub(r"doi:\S+", "", text)
     assert "`" not in text
@@ -273,15 +275,62 @@ def test_the_page_names_no_person_beyond_the_cited_authors(html: str) -> None:
         assert "github.com/javierdejesusda" in html[match.start() - 11 :]
 
 
-def test_build_is_byte_identical_twice(
-    site: tuple[Path, page.Document], tmp_path: Path
+def test_build_is_byte_identical_in_two_fresh_processes(
+    tmp_path: Path,
 ) -> None:
-    build_module.build(RESULTS, tmp_path)
+    outs = [tmp_path / "one", tmp_path / "two"]
+    for out in outs:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tomography.site",
+                "build",
+                "--results",
+                str(RESULTS),
+                "--out",
+                str(out),
+            ],
+            check=True,
+            capture_output=True,
+        )
     names = sorted(
-        p.relative_to(tmp_path) for p in tmp_path.rglob("*") if p.is_file()
+        p.relative_to(outs[0]) for p in outs[0].rglob("*") if p.is_file()
     )
     assert names
     for rel in names:
-        assert (site[0] / rel).read_bytes() == (tmp_path / rel).read_bytes(), (
-            rel
-        )
+        assert (outs[0] / rel).read_bytes() == (outs[1] / rel).read_bytes(), rel
+
+
+def test_every_figure_passes_the_palette_font_and_text_guards(
+    site: tuple[Path, page.Document],
+) -> None:
+    doc = site[1]
+    for key, entry in doc.figures.items():
+        assert checks.guard_problems(entry.output.figure) == [], key
+    for key, entry in doc.appendix.items():
+        problems = checks.guard_problems(entry.output.figure, appendix=True)
+        assert problems == [], key
+
+
+def test_the_built_page_has_no_pooled_count_of_ten(html: str) -> None:
+    text = re.sub(r"<[^>]+>", " ", html)
+    assert not re.search(r"\b\d+ of (the )?10\b(?! readers)", text)
+
+
+def test_every_appendix_item_is_cited_from_the_numbered_sections(
+    html: str,
+) -> None:
+    body = html[: html.index('id="references"')]
+    for kind, ids in (
+        (
+            "fig",
+            [f"A{i}" for i in range(1, len(registry.APPENDIX_FIGURES) + 1)],
+        ),
+        (
+            "table",
+            [f"A{i}" for i in range(1, len(registry.APPENDIX_TABLES) + 1)],
+        ),
+    ):
+        for number in ids:
+            assert f'href="#{kind}-{number}"' in body, (kind, number)

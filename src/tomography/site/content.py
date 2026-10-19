@@ -138,7 +138,10 @@ INTRODUCTION = Section(
         (
             "Wording ([[sec:wording]]).",
             "Changing the wording of the template moves a sentiment reader "
-            "by up to [[num:fig:wording.span_max]], and a direction fitted "
+            "by up to [[num:fig:wording.span_gpt2_max]] on GPT-2, "
+            "[[num:fig:wording.span_base_max]] on Qwen3 base and "
+            "[[num:fig:wording.span_post_max]] on post-trained checkpoints, "
+            "and a direction fitted "
             "on a bare wording reads the wording of the paper at "
             "[[num:fig:wording.bare_to_paper_min]] to "
             "[[num:fig:wording.bare_to_paper_max]] with cosine "
@@ -173,8 +176,13 @@ INTRODUCTION = Section(
             "It moves unknown questions more than each of three random "
             "directions on [[count:fig:knowledge_steering.distinguishable]], "
             "and known questions move at least as much as unknown ones on "
-            "[[num:fig:knowledge_steering.known_ge_unknown_models]] "
-            "checkpoints ([[fig:knowledge_steering]]).",
+            "[[num:fig:knowledge_steering.known_ge_unknown_gpt2]] of "
+            "[[num:fig:knowledge_steering.n_gpt2]] GPT-2, "
+            "[[num:fig:knowledge_steering.known_ge_unknown_base]] of "
+            "[[num:fig:knowledge_steering.n_base]] Qwen3 base and "
+            "[[num:fig:knowledge_steering.known_ge_unknown_post]] of "
+            "[[num:fig:knowledge_steering.n_post]] post-trained runs "
+            "([[fig:knowledge_steering]]).",
         ),
         (
             "Approximate answers ([[sec:approximate]]).",
@@ -389,7 +397,8 @@ METHOD = Section(
                 "direction, r(" + ELL + ") is the mean residual norm at "
                 "layer " + ELL + " on calibration text and c is the "
                 "relative coefficient. The sentiment steering run uses the "
-                "logistic sentiment direction on all 10 checkpoints, with 3 "
+                "logistic sentiment direction on each of the 10 "
+                "checkpoints, with 3 "
                 "steering vectors and the relative coefficients "
                 + MINUS
                 + "0.3 to 0.3, and compares steering with a positive or "

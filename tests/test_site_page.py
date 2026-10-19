@@ -129,6 +129,17 @@ def test_inline_svg_ids_are_prefixed_and_the_style_is_kept_once() -> None:
     assert "<style" not in second
 
 
+def test_an_id_repeated_inside_one_svg_is_made_unique() -> None:
+    raw = (
+        b'<svg xmlns="http://www.w3.org/2000/svg"><g id="tile"/>'
+        b'<g id="tile"/><g id="tile"/></svg>'
+    )
+    text = page.inline_svg(raw, "fig-7", True)
+    ids = re.findall(r'id="([^"]+)"', text)
+    assert len(ids) == len(set(ids)) == 3
+    assert ids[0] == "fig-7-tile"
+
+
 def test_an_appendix_figure_is_a_lazy_image_not_inline_svg() -> None:
     doc = _doc(appendix={"a_layers": _figure()})
     figure = page.Page(doc).figure("a_layers")

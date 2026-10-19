@@ -104,7 +104,15 @@ def inline_svg(raw: bytes, prefix: str, keep_style: bool) -> str:
     if not keep_style:
         text = re.sub(r"<style\b.*?</style>\s*", "", text, flags=re.DOTALL)
     head = f"{prefix}-"
-    text = re.sub(r'\bid="([^"]+)"', lambda m: f'id="{head}{m.group(1)}"', text)
+    seen: dict[str, int] = {}
+
+    def unique(match: re.Match[str]) -> str:
+        name = match.group(1)
+        seen[name] = seen.get(name, 0) + 1
+        suffix = "" if seen[name] == 1 else f"-{seen[name]}"
+        return f'id="{head}{name}{suffix}"'
+
+    text = re.sub(r'\bid="([^"]+)"', unique, text)
     text = re.sub(r'(href="#)([^"]+)"', lambda m: f'{m[1]}{head}{m[2]}"', text)
     text = re.sub(
         r"url\(#([^)]+)\)", lambda m: f"url(#{head}{m.group(1)})", text
