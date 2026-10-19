@@ -15,6 +15,8 @@ from scipy import integrate
 from scipy import stats as scipy_stats
 
 Z = 1.959963984540054
+FLUENT_MAX_RATIO = 1.5
+FLUENT_MIN_DISTINCT = 0.15
 ROLES = ("gpt2", "base", "post")
 ROLE_NAMES = {
     "gpt2": "GPT-2",

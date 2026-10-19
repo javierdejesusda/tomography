@@ -203,8 +203,6 @@ def _confidence(manifest: Manifest, model: str) -> Cell | None:
 
 
 STEER_STRENGTH = 0.3
-MAX_RATIO = 1.5
-MIN_DISTINCT = 0.15
 
 
 def _steering(manifest: Manifest, model: str) -> Cell | None:
@@ -241,7 +239,10 @@ def _steering_fluent(manifest: Manifest, model: str) -> bool | None:
         / float(none["perplexity"])
     )
     distinct = sum(float(r["distinct_1"]) for r in cell) / len(cell)
-    return ratio <= MAX_RATIO and distinct >= MIN_DISTINCT
+    return (
+        ratio <= stats.FLUENT_MAX_RATIO
+        and distinct >= stats.FLUENT_MIN_DISTINCT
+    )
 
 
 def _cell(manifest: Manifest, row: Row, model: str) -> Cell | None:
