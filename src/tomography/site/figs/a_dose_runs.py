@@ -126,10 +126,13 @@ def build(manifest: Manifest) -> FigureOutput:
                     color=paper.ENC["random_marker"],
                     lw=KEY_LINE_WIDTH,
                 ),
-                Patch(
-                    facecolor=paper.INK,
-                    alpha=0.4,
-                    lw=0,
+                tuple(
+                    Patch(
+                        facecolor=axes.model_style(model).color,
+                        alpha=0.4,
+                        lw=0,
+                    )
+                    for model in ("gpt2-xl", "qwen3-1.7b")
                 ),
                 Line2D([], [], ls="none"),
             ],
