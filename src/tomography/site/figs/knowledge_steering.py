@@ -7,6 +7,7 @@ unknown and on known questions against the three random directions. Three
 dose panels show the stored curves of three runs.
 """
 
+import itertools
 from typing import Any
 
 from matplotlib import ticker
@@ -24,7 +25,7 @@ from tomography.site.registry import FigureOutput
 from tomography.viz import axes
 from tomography.viz import paper
 
-HEIGHT = 4.4
+HEIGHT = 4.8
 BLOCK_GAP = 0.9
 TAG_KEY = (
     "above n of 3: random directions whose gap interval lies above zero; "
@@ -34,11 +35,11 @@ LABEL_FONT = 7
 HEADER = ["panel", "run", "x", "series", "value", "lo", "hi"]
 ARMS = ("random0", "random1", "random2")
 OFFSETS = {
-    "direction_known": -0.28,
-    "direction_unknown": 0.0,
-    "random0": 0.22,
-    "random1": 0.38,
-    "random2": 0.54,
+    "direction_known": -0.30,
+    "direction_unknown": -0.18,
+    "random0": 0.04,
+    "random1": 0.16,
+    "random2": 0.28,
 }
 EXEMPLARS = (
     ("gpt2-xl", "fewshot"),
@@ -334,6 +335,15 @@ def _forest(
                 )
             low, high = min(low, float(lo)), max(high, float(hi))
             csv_rows.append([letter, run.label, None, series, value, lo, hi])
+    for above, below in itertools.pairwise(positions):
+        if abs(below - above - 1.0) < 1e-6:
+            ax.axhline(
+                (above + below) / 2,
+                color=paper.RANDOM_BAND,
+                lw=paper.REFERENCE_WIDTH,
+                gid="row-rule",
+                zorder=0.5,
+            )
     margin = 0.06 * (high - low)
     ax.set_xlim(low - margin, high + margin)
     ax.set_ylim(positions[-1] + 0.9, -1.1)
@@ -527,7 +537,7 @@ def build(manifest: Manifest) -> FigureOutput:
             ncol=1,
             handlelength=1.6,
             columnspacing=1.2,
-            fontsize=7,
+            fontsize=paper.TICK,
         )
         legend.get_frame().set_edgecolor("none")
 

@@ -1,5 +1,6 @@
 import csv
 import io
+import itertools
 from pathlib import Path
 import re
 import runpy
@@ -20,7 +21,7 @@ _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 _T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
 _L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
 SPEC = "knowledge_steering"
-HEIGHT = 4.4
+HEIGHT = 4.8
 EXEMPLARS = (
     ("gpt2-xl", "fewshot"),
     ("qwen3-4b-base", "fewshot"),
@@ -510,3 +511,84 @@ def test_the_direction_intervals_of_the_dose_panels_are_tinted(
             tinted += 1
     assert tinted == 6
     assert "tint" in output.detail
+
+
+def test_each_row_keeps_its_direction_marks_and_crosses_in_its_own_band(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    for ax in _forests(output).values():
+        ticks = list(ax.get_yticks())
+        crosses = [ln for ln in ax.lines if ln.get_marker() == "x"]
+        dots = [
+            ln
+            for ln in ax.lines
+            if ln.get_marker() not in ("x", "None", "") and ln.get_gid() != "x"
+        ]
+        assert len(crosses) == 3 * len(ticks)
+        offsets = []
+        for ln in [*crosses, *dots]:
+            (y,) = ln.get_ydata()
+            nearest = min(ticks, key=lambda t: abs(t - y))
+            assert abs(y - nearest) <= 0.36, (y, nearest)
+            offsets.append((nearest, round(y - nearest, 3), ln.get_marker()))
+        patterns = {}
+        for tick, off, marker in offsets:
+            patterns.setdefault(tick, set()).add((off, marker))
+        assert len({frozenset(p) for p in patterns.values()}) == 1
+
+
+def test_the_figure_legend_reads_at_the_tick_size(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = [lg for sub in output.figure.subfigs for lg in sub.legends]
+    assert min(t.get_fontsize() for t in legend.get_texts()) >= paper.TICK
+
+
+def test_proximity_groups_each_row_inner_gap_under_0_6_of_the_row_gap(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    for ax in _forests(output).values():
+        ticks = sorted(ax.get_yticks())
+        marks = [
+            ln
+            for ln in ax.lines
+            if ln.get_marker() not in ("None", "") and ln.get_gid() != "x"
+        ]
+        rows: dict[float, list[float]] = {t: [] for t in ticks}
+        for ln in marks:
+            (y,) = ln.get_ydata()
+            rows[min(ticks, key=lambda t: abs(t - y))].append(float(y))
+        for ys in rows.values():
+            ys.sort()
+        for first, second in itertools.pairwise(ticks):
+            inner = max(
+                b - a
+                for ys in (rows[first], rows[second])
+                for a, b in itertools.pairwise(ys)
+            )
+            between = rows[second][0] - rows[first][-1]
+            assert inner / between < 0.6, (first, second, inner, between)
+
+
+def test_a_hairline_sits_between_adjacent_rows_of_a_block_and_nowhere_else(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    for ax in _forests(output).values():
+        ticks = sorted(ax.get_yticks())
+        want = [
+            (a + b) / 2
+            for a, b in itertools.pairwise(ticks)
+            if abs(b - a - 1.0) < 1e-9
+        ]
+        rules = [ln for ln in ax.lines if ln.get_gid() == "row-rule"]
+        got = sorted(float(ln.get_ydata()[0]) for ln in rules)
+        assert got == pytest.approx(want)
+        data = [
+            ln.get_zorder() for ln in ax.lines if ln.get_gid() != "row-rule"
+        ]
+        for ln in rules:
+            assert ln.get_zorder() < min(data)
+            assert ln.get_linewidth() <= 0.5

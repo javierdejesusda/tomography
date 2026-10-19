@@ -42,6 +42,7 @@ LABEL_X = 1.09
 BAR_START = -0.56
 BAR_SLOT = 0.055
 LIMIT_X = -0.675
+LIMIT_LIFT = 2.5
 LABEL_FONT = 7
 KEY_FONT = paper.TICK
 ROLE_TITLES = {
@@ -304,10 +305,11 @@ def _limit(ax: Any, value: float) -> None:
         gid="limit",
         zorder=1,
     )
-    ax.text(
-        LIMIT_X,
-        value,
+    ax.annotate(
         f"limit\n{value:g}",
+        (LIMIT_X, value),
+        xytext=(0, LIMIT_LIFT),
+        textcoords="offset points",
         color=paper.ENC["secondary_text"],
         fontsize=KEY_FONT,
         va="bottom",

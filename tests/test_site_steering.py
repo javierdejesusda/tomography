@@ -663,3 +663,20 @@ def test_limit_labels_keep_clear_of_every_marker(
                     assert not (near_x and near_y), (label.get_text(), x, y)
             checked += 1
     assert checked == 6
+
+
+def test_limit_labels_sit_clear_of_their_reference_lines(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    fig.canvas.draw()
+    gap = 1.9 * fig.dpi / 72
+    checked = 0
+    for ax in fig.axes:
+        lines = [ln for ln in ax.lines if ln.get_gid() == "limit"]
+        for label in (t for t in ax.texts if t.get_text().startswith("limit")):
+            (line,) = lines
+            y = ax.transData.transform((0, line.get_ydata()[0]))[1]
+            assert label.get_window_extent().y0 - y >= gap
+            checked += 1
+    assert checked == 6
