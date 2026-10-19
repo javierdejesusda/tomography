@@ -96,7 +96,7 @@ def _panel(
             item.depth,
             item.reader,
             color=style.color,
-            ls=style.linestyle,
+            ls=paper.LINESTYLES["solid" if style.filled else "post_trained"],
             lw=1.0,
             zorder=3,
         )
