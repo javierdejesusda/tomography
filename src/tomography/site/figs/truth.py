@@ -27,14 +27,22 @@ from tomography.viz import paper
 
 HEIGHT = 3.0
 TEXT_METHODS = ("text_word", "text_char")
+DIRECTION = paper.MEASURE_MARKERS["direction"]
+RANDOM = paper.MEASURE_MARKERS["random"]
+PROBABILITY = paper.MEASURE_MARKERS["answer_probability"]
 READERS = {
-    "truthfulqa_reader": ("truthfulqa", "o", -0.18),
-    "persona_reader": ("honesty", "D", 0.0),
+    "truthfulqa_reader": ("truthfulqa", DIRECTION, -0.18),
+    "persona_reader": ("honesty", DIRECTION, 0.0),
 }
 LOG_PROBABILITY = ("log_probability", 0.18)
 PAIRS = (
-    ("cities", "neg_cities", "^", -0.2),
-    ("sp_en_trans", "neg_sp_en_trans", "s", 0.2),
+    ("cities", "neg_cities", paper.SET_MARKERS["cities"], -0.2),
+    (
+        "sp_en_trans",
+        "neg_sp_en_trans",
+        paper.SET_MARKERS["translations"],
+        0.2,
+    ),
 )
 NEGATED = tuple(neg for _, neg, _, _ in PAIRS)
 XLIM_A = (0.1, 0.85)
@@ -132,6 +140,10 @@ def _model(manifest: Manifest, model: str) -> Model:
     )
 
 
+def _size(marker: str, size: float) -> float:
+    return _rows.STAR_SIZE if marker == paper.CATEGORY_MARKERS[0] else size
+
+
 def _whisker(ax: Axes, y: float, cell: Cell, color: str) -> None:
     ax.plot(
         [cell.lo, cell.hi],
@@ -156,7 +168,7 @@ def _point(
         [y],
         ls="none",
         marker=shape,
-        ms=MARKER,
+        ms=_size(shape, MARKER),
         color=color,
         mfc=color if filled else "white",
         mew=0.8,
@@ -190,7 +202,9 @@ def _panel_a(
     for model, y in rows.items():
         filled = shared.model_style(model).filled
         for name, cell in data[model].reads.items():
-            shape = "P" if name == LOG_PROBABILITY[0] else READERS[name][1]
+            shape = (
+                PROBABILITY if name == LOG_PROBABILITY[0] else READERS[name][1]
+            )
             dodge = (
                 LOG_PROBABILITY[1]
                 if name == LOG_PROBABILITY[0]
@@ -223,7 +237,7 @@ def _panel_b(ax: Axes, rows: dict[str, float], data: dict[str, Model]) -> None:
                 ax,
                 data[model].random[neg],
                 line,
-                "x",
+                RANDOM,
                 paper.ENC["random_marker"],
                 True,
             )
@@ -254,12 +268,19 @@ def _legend(fig: Figure) -> None:
     ink = paper.ENC["direction"]
 
     def mark(shape: str, color: str) -> Line2D:
-        return Line2D([], [], ls="none", marker=shape, ms=MARKER, color=color)
+        return Line2D(
+            [],
+            [],
+            ls="none",
+            marker=shape,
+            ms=_size(shape, MARKER),
+            color=color,
+        )
 
     handles: list[Any] = [
-        mark("o", ink),
-        mark("D", paper.ENC["paper"]),
-        mark("P", paper.ENC["own_probability"]),
+        mark(DIRECTION, ink),
+        mark(DIRECTION, paper.ENC["paper"]),
+        mark(PROBABILITY, paper.ENC["own_probability"]),
         Line2D(
             [],
             [],
@@ -268,12 +289,14 @@ def _legend(fig: Figure) -> None:
             alpha=0.15,
             solid_capstyle="butt",
         ),
-        mark("^", ink),
-        mark("s", ink),
+        mark(paper.SET_MARKERS["cities"], ink),
+        mark(paper.SET_MARKERS["translations"], ink),
         Line2D([], [], color=ink, lw=0.8, marker=">", ms=2.5, markevery=[1]),
-        mark("x", paper.ENC["random_marker"]),
-        _rows.series_handle("GPT-2 and base", "h", paper.INK),
-        _rows.series_handle("post-trained", "h", paper.INK, filled=False),
+        mark(RANDOM, paper.ENC["random_marker"]),
+        _rows.series_handle("GPT-2 and base", paper.ROLE_KEY_MARKER, paper.INK),
+        _rows.series_handle(
+            "post-trained", paper.ROLE_KEY_MARKER, paper.INK, filled=False
+        ),
     ]
     labels = [
         "(a) truth reader",

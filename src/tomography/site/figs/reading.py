@@ -21,6 +21,7 @@ from tomography.site import params
 from tomography.site import reading
 from tomography.site import stats
 from tomography.site import store
+from tomography.site.figs import _rows
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.site.tables import _cells
@@ -40,6 +41,7 @@ MIN_TREND_SIZES = 3
 HALO = 1.6
 TICK = 0.8
 MARKER = 3.5
+DIRECTION = paper.MEASURE_MARKERS["direction"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -105,7 +107,7 @@ def _heat(
             [(cell.at.layer - 0.5) / count],
             [y],
             ls="none",
-            marker="o",
+            marker=DIRECTION,
             ms=2.6,
             mfc="white",
             mec=paper.INK,
@@ -147,7 +149,7 @@ def _size(
             [x],
             [cell.at.random],
             ls="none",
-            marker="x",
+            marker=paper.MEASURE_MARKERS["random"],
             ms=MARKER,
             mew=0.8,
             color=paper.ENC["random_marker"],
@@ -157,7 +159,7 @@ def _size(
             [x],
             [cell.at.reader],
             ls="none",
-            marker="o",
+            marker=DIRECTION,
             ms=MARKER,
             color=style.color,
             mfc=style.color if style.filled else "white",
@@ -350,18 +352,45 @@ def _keys(fig: Figure) -> None:
             [],
             [],
             ls="none",
-            marker="o",
+            marker=DIRECTION,
             ms=2.6,
             mfc="white",
             mec=paper.INK,
             mew=0.6,
         ),
+        Line2D(
+            [],
+            [],
+            ls="none",
+            marker=paper.MEASURE_MARKERS["random"],
+            ms=MARKER,
+            mew=0.8,
+            color=paper.ENC["random_marker"],
+        ),
+        Line2D(
+            [],
+            [],
+            color=paper.INK,
+            ls=paper.LINESTYLES["trend"],
+            lw=paper.TREND_WIDTH,
+        ),
+        _rows.series_handle("GPT-2 and base", paper.ROLE_KEY_MARKER, paper.INK),
+        _rows.series_handle(
+            "post-trained", paper.ROLE_KEY_MARKER, paper.INK, filled=False
+        ),
     ]
     fig.legend(
         handles,
-        ["lowest layer above 0.1", "layer read below"],
+        [
+            "lowest layer above 0.1",
+            "layer read below",
+            "random direction",
+            "GPT-2 trend",
+            "GPT-2 and base",
+            "post-trained",
+        ],
         loc="outside upper right",
-        ncol=2,
+        ncol=3,
         frameon=False,
         fontsize=6.5,
         columnspacing=1.0,
