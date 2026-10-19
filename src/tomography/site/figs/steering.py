@@ -33,11 +33,17 @@ MIN_DISTINCT = 0.15
 HEIGHT = 5.0
 COEFFS = (-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3)
 X_LIMIT = 0.33
+X_ZONE = -0.58
 X_PAD = 4.5
 RATIO_LIMITS = (1.0, 100.0)
 DISTINCT_LIMIT = 0.35
 BAND_ALPHA = 0.15
 LABEL_GAP = 0.12
+LEADER_END = 1.07
+LABEL_X = 1.09
+BAR_START = -0.56
+BAR_SLOT = 0.055
+LIMIT_X = -0.565
 LABEL_FONT = 7
 ROLE_TITLES = {
     "gpt2": "GPT-2",
@@ -45,9 +51,9 @@ ROLE_TITLES = {
     "post": "Qwen3 post-trained",
 }
 GPT2_LABELS = {
-    "gpt2": "small",
-    "gpt2-medium": "medium",
-    "gpt2-large": "large",
+    "gpt2": "S",
+    "gpt2-medium": "M",
+    "gpt2-large": "L",
     "gpt2-xl": "XL",
 }
 HEADER = ["panel", "model", "x", "series", "value", "lo", "hi"]
@@ -55,9 +61,12 @@ DETAIL = (
     "(a) Mean judged sentiment of the completions (positive-class "
     "probability of a sentiment classifier) against the relative "
     "coefficient, one line per checkpoint (lighter for the smaller "
-    "checkpoint, named at the line end), with the range over the 3 "
-    "steering vectors (shaded band) and the score under a positive or "
-    "negative instruction instead of steering (dotted horizontal lines). "
+    "checkpoint, named at the line end: S, M, L and XL for GPT-2), with "
+    "the range over the 3 steering vectors (shaded band) and the score "
+    "under a positive or negative instruction instead of steering (short "
+    "bars left of the curves, one pair per checkpoint in its colour, in "
+    "the order of the labels; the higher bar is the positive "
+    "instruction). "
     "A marker is filled where the fluency rule holds (ratio at most "
     "{max_ratio} and distinct-1 at least {min_distinct}) and open where it "
     "does not, and a segment that touches an open marker is dashed. At "
@@ -170,29 +179,29 @@ def end_label(model: str) -> str:
     return model.removeprefix("qwen3-").removesuffix("-base").upper()
 
 
-def _spread(ys: list[float], gap: float, ceiling: float) -> list[float]:
-    """Moves label heights apart so that neighbours keep a minimum gap.
+def _stack(
+    ys: list[float], gap: float, ceiling: float, floor: float
+) -> list[float]:
+    """Stacks label heights from the top down, keeping the given order.
 
     Args:
-        ys: Wanted heights, in any order.
-        gap: Minimum distance between two heights.
-        ceiling: The highest height a label may take.
+        ys: Wanted heights, listed from the top label to the bottom one.
+        gap: Minimum distance between two neighbours.
+        ceiling: The highest height the top label may take.
+        floor: The lowest height the bottom label may take.
 
     Returns:
-        The heights, in the order of the input: pushed up where they are
-        closer than `gap`, then pulled back down from the ceiling.
+        The heights in the input order, each at most its wanted height and
+        at least `gap` below the label above it, then lifted from the floor
+        where the stack ran past it.
     """
-    order = sorted(range(len(ys)), key=lambda i: ys[i])
-    placed = [ys[i] for i in order]
-    for k in range(1, len(placed)):
-        placed[k] = max(placed[k], placed[k - 1] + gap)
-    placed[-1] = min(placed[-1], ceiling)
+    placed = [min(ys[0], ceiling)]
+    for y in ys[1:]:
+        placed.append(min(y, placed[-1] - gap))
+    placed[-1] = max(placed[-1], floor)
     for k in range(len(placed) - 2, -1, -1):
-        placed[k] = min(placed[k], placed[k + 1] - gap)
-    out = [0.0] * len(ys)
-    for k, i in enumerate(order):
-        out[i] = placed[k]
-    return out
+        placed[k] = max(placed[k], placed[k + 1] + gap)
+    return placed
 
 
 def _series(
@@ -234,35 +243,70 @@ def _series(
             lw=0,
             zorder=2,
         )
-        for score in model.prompting.values():
-            line = ax.axhline(
-                score, color=color, ls=":", lw=0.8, gid="instruction", zorder=2
-            )
-            line.set_alpha(0.9)
 
 
 def _end_labels(ax: Any, members: list[_Model]) -> None:
-    ends = [m.score[COEFFS[-1]] for m in members]
-    for model, y in zip(members, _spread(ends, LABEL_GAP, 0.97), strict=True):
+    """Names the checkpoints at the right of a panel, in size order.
+
+    The names run from the top in size order and move only as far as needed
+    to avoid overlap, each joined by a leader to the end of its line.
+
+    Args:
+        ax: The sentiment panel.
+        members: The checkpoints of the panel.
+    """
+    rows = axes.model_rows([m.key for m in members])
+    ordered = sorted(members, key=lambda m: rows[m.key])
+    ends = [m.score[COEFFS[-1]] for m in ordered]
+    placed = _stack(ends, LABEL_GAP, 0.97, 0.03)
+    transform = ax.get_yaxis_transform()
+    for model, end, y in zip(ordered, ends, placed, strict=True):
         ax.plot(
-            [1.015, 1.075],
-            [y, y],
-            transform=ax.get_yaxis_transform(),
+            [1.0, LEADER_END],
+            [end, y],
+            transform=transform,
             color=axes.model_style(model.key).color,
             lw=paper.DATA_WIDTH,
             clip_on=False,
             gid="label-key",
         )
         ax.text(
-            1.095,
+            LABEL_X,
             y,
             end_label(model.key),
-            transform=ax.get_yaxis_transform(),
+            transform=transform,
             color=paper.INK,
             fontsize=LABEL_FONT,
             va="center",
             ha="left",
         )
+
+
+def _instruction_bars(ax: Any, members: list[_Model]) -> None:
+    """Draws the instruction scores as short bars left of the curves.
+
+    The bars fill a zone between the vertical axis and the first coefficient,
+    one slot per checkpoint in size order, so no reference line crosses a
+    curve and the score reads against the same ticks as the curves.
+
+    Args:
+        ax: The sentiment panel.
+        members: The checkpoints of the panel.
+    """
+    rows = axes.model_rows([m.key for m in members])
+    ordered = sorted(members, key=lambda m: rows[m.key])
+    for slot, model in enumerate(ordered):
+        left = BAR_START + slot * BAR_SLOT
+        for score in model.prompting.values():
+            ax.plot(
+                [left, left + BAR_SLOT * 0.8],
+                [score, score],
+                color=axes.model_style(model.key).color,
+                lw=paper.DATA_WIDTH,
+                solid_capstyle="butt",
+                gid="instruction",
+                zorder=3,
+            )
 
 
 def _limit(ax: Any, value: float) -> None:
@@ -274,20 +318,20 @@ def _limit(ax: Any, value: float) -> None:
         zorder=1,
     )
     ax.text(
-        1.015,
+        LIMIT_X,
         value,
-        f"limit {value:g}",
-        transform=ax.get_yaxis_transform(),
+        f"limit\n{value:g}",
         color=paper.ENC["secondary_text"],
         fontsize=LABEL_FONT,
-        va="center",
+        va="bottom",
         ha="left",
+        linespacing=1.0,
     )
 
 
 def _style_axes(grid: Any) -> None:
     for ax in grid.flat:
-        ax.set_xlim(-X_LIMIT, X_LIMIT)
+        ax.set_xlim(X_ZONE, X_LIMIT)
         ax.xaxis.set_major_locator(ticker.FixedLocator([-0.3, 0.0, 0.3]))
         ax.xaxis.set_major_formatter(axes.minus_formatter())
         ax.tick_params(axis="x", pad=X_PAD)
@@ -330,7 +374,13 @@ def _key(fig: Figure) -> None:
             lw=paper.DATA_WIDTH,
             label="not fluent",
         ),
-        Line2D([], [], color=color, ls=":", lw=0.8, label="instruction score"),
+        Line2D(
+            [],
+            [],
+            color=color,
+            lw=paper.DATA_WIDTH,
+            label="instruction score (bars at left)",
+        ),
     ]
     legend = fig.legend(
         handles=handles,
@@ -433,11 +483,13 @@ def build(manifest: Manifest) -> FigureOutput:
                 _series(grid[2, col], model, model.distinct)
             grid[0, col].set_title(ROLE_TITLES[role], loc="center")
             _end_labels(grid[0, col], members)
+            _instruction_bars(grid[0, col], members)
             count = counts["fluent01"][role]
             grid[0, col].text(
                 0.97,
                 0.04,
-                f"fluent at both\nsigns of 0.1:\n{count.hits} of {count.total}",
+                f"fluent at\nboth signs\nof 0.1:\n{count.hits} of "
+                f"{count.total}",
                 transform=grid[0, col].transAxes,
                 fontsize=LABEL_FONT,
                 color=paper.INK,

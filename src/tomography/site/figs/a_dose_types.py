@@ -1,7 +1,8 @@
-"""Figure A8: Dose curves of the post-trained runs for each question type.
+"""Appendix figure: Dose curves of the post-trained runs by question type.
 
 One row per post-trained run and one column per question type, with the
-encoding of the dose panels of Figure 9. All panels share one vertical range.
+encoding of the dose panels of the main knowledge-steering figure. All
+panels share one vertical range.
 """
 
 from typing import Any
