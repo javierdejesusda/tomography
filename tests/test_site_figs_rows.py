@@ -94,3 +94,24 @@ def test_freeze_layout_pins_the_axes_to_six_decimals_and_drops_the_solver() -> (
         bounds = ax.get_position().bounds
         assert all(abs(v - round(v, 6)) < 1e-12 for v in bounds)
         assert min(bounds[2:]) > 0.1
+
+
+def test_the_hexagon_role_key_is_drawn_larger_than_a_data_marker() -> None:
+    key = _rows.series_handle("a", paper.ROLE_KEY_MARKER, "#123456")
+    data = _rows.series_handle("b", "o", "#123456")
+    assert key.get_markersize() >= 6.0
+    assert key.get_markersize() > data.get_markersize()
+
+
+def test_stars_are_drawn_larger_and_the_category_shapes_are_all_filled() -> (
+    None
+):
+    assert _rows.marker_size("*") > _rows.marker_size("o")
+    assert _rows.marker_size(paper.ROLE_KEY_MARKER) >= 6.0
+    fig = _rows.new_figure(2.0)
+    ax = fig.add_subplot()
+    _rows.dot(ax, "gpt2", 0.0, 0.5, "*", "#123456")
+    (line,) = ax.lines
+    assert line.get_markersize() == _rows.marker_size("*")
+    for marker in paper.CATEGORY_MARKERS:
+        assert marker not in ("1", "2", "3", "4")

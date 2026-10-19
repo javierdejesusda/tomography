@@ -47,7 +47,8 @@ DETAIL = (
     "probability of a sentiment classifier) against the relative "
     "coefficient, one line per checkpoint, with the range over the 3 "
     "steering vectors (band) and the score under a positive or negative "
-    "instruction instead of steering (triangles, right strip). At relative "
+    "instruction instead of steering (right strip; the marker keys which "
+    "instruction). At relative "
     "coefficients {minus}0.1 and +0.1 the mean score moves {moves}. A "
     "checkpoint counts as moving when all 3 steering vectors move the score "
     "past the unsteered value at both signs, on the primary judge and on a "
@@ -168,12 +169,15 @@ def _dose_panel(ax: Any, strip: Any, members: list[_Model], role: str) -> None:
             color=style.color,
             ls=_linestyle(model.key),
             lw=paper.DATA_WIDTH,
-            marker=style.marker,
+            marker=paper.MEASURE_MARKERS["direction"],
             zorder=3,
             **_rows.fill(model.key, style.color),
         )
         x = np.linspace(0.2, 0.8, max(len(members), 2))[k]
-        for arm, marker in (("prompting+1", "^"), ("prompting-1", "v")):
+        for arm, marker in (
+            ("prompting+1", paper.PROMPT_MARKERS["positive"]),
+            ("prompting-1", paper.PROMPT_MARKERS["negative"]),
+        ):
             strip.plot(
                 [x],
                 [model.prompting[arm]],
@@ -286,10 +290,17 @@ def _legend(fig: Figure, models: list[str]) -> None:
                 color=style.color,
                 ls=_linestyle(key),
                 lw=paper.DATA_WIDTH,
-                marker=style.marker,
+                marker=paper.MEASURE_MARKERS["direction"],
                 label=paper.display_name(key),
                 **_rows.fill(key, style.color),
             )
+        )
+    for arm, label in (
+        ("positive", "positive instruction"),
+        ("negative", "negative instruction"),
+    ):
+        handles.append(
+            _rows.series_handle(label, paper.PROMPT_MARKERS[arm], paper.INK)
         )
     legend = fig.legend(
         handles=handles,
