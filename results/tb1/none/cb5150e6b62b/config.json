@@ -1,0 +1,16 @@
+{
+  "experiment": "tb1",
+  "model": "none",
+  "seed": 0,
+  "concepts": [
+    "sentiment",
+    "sentiment_r1",
+    "utility",
+    "morality",
+    "truth",
+    "honesty",
+    "truth_p3",
+    "utility_p3"
+  ],
+  "offline": false
+}

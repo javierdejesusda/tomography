@@ -26,25 +26,26 @@ Contents:
 1. [Reading conventions](#reading-conventions)
 2. [LAT reading on the GPT-2 ladder (R1 to R7)](#lat-reading-on-the-gpt-2-ladder-r1-to-r7)
 3. [LAT reading on Qwen3](#lat-reading-on-qwen3)
-4. [TruthfulQA MC1 against text baselines (R6)](#truthfulqa-mc1-against-text-baselines-r6)
-5. [Scaling across the GPT-2 sizes (P6)](#scaling-across-the-gpt-2-sizes-p6)
-6. [Direction agreement and logit lens on gpt2 (A1, A2)](#direction-agreement-and-logit-lens-on-gpt2-a1-a2)
-7. [Template sensitivity of the sentiment reader (P1)](#template-sensitivity-of-the-sentiment-reader-p1)
-8. [Position, sample size and direction finder on gpt2 (P2, P3,
-P4)](#position-sample-size-and-direction-finder-on-gpt2-p2-p3-p4) 9. [Sentiment steering on the GPT-2 ladder
-(C1)](#sentiment-steering-on-the-gpt-2-ladder-c1) 10. [Sentiment steering on Qwen3
-(C1)](#sentiment-steering-on-qwen3-c1) 11. [Other steering experiments on gpt2 and the larger GPT-2 sizes (M1, C2, P7, LR1, C4,
-C5)](#other-steering-experiments-on-gpt2-and-the-larger-gpt-2-sizes-m1-c2-p7-lr1-c4-c5) 12. [Base against post-trained Qwen3
-(P8)](#base-against-post-trained-qwen3-p8) 13. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
-14. [Approximate answers: range against exact quantities
-(P10)](#approximate-answers-range-against-exact-quantities-p10) 15. [Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5,
-LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 16. [Position
+4. [Text baselines for the readers (TB1)](#text-baselines-for-the-readers-tb1)
+5. [TruthfulQA MC1 against text baselines (R6)](#truthfulqa-mc1-against-text-baselines-r6)
+6. [Scaling across the GPT-2 sizes (P6)](#scaling-across-the-gpt-2-sizes-p6)
+7. [Direction agreement and logit lens on gpt2 (A1, A2)](#direction-agreement-and-logit-lens-on-gpt2-a1-a2)
+8. [Template sensitivity of the sentiment reader (P1)](#template-sensitivity-of-the-sentiment-reader-p1)
+9. [Position, sample size and direction finder on gpt2 (P2, P3,
+P4)](#position-sample-size-and-direction-finder-on-gpt2-p2-p3-p4) 10. [Sentiment steering on the GPT-2 ladder
+(C1)](#sentiment-steering-on-the-gpt-2-ladder-c1) 11. [Sentiment steering on Qwen3
+(C1)](#sentiment-steering-on-qwen3-c1) 12. [Other steering experiments on gpt2 and the larger GPT-2 sizes (M1, C2, P7, LR1, C4,
+C5)](#other-steering-experiments-on-gpt2-and-the-larger-gpt-2-sizes-m1-c2-p7-lr1-c4-c5) 13. [Base against post-trained Qwen3
+(P8)](#base-against-post-trained-qwen3-p8) 14. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
+15. [Approximate answers: range against exact quantities
+(P10)](#approximate-answers-range-against-exact-quantities-p10) 16. [Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5,
+LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 17. [Position
 and stimulus-set size on qwen3-1.7b-base and qwen3-1.7b (P2,
-P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 17. [Stimulus-set size and direction finder
+P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 18. [Stimulus-set size and direction finder
 across the GPT-2 sizes and Qwen3
-(P3, P4)](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) 18. [Persona wording and
-instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 19. [Template steering on the Qwen3 0.6B, 1.7B and 4B pairs
-(P7)](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7) 20. [Run identity](#run-identity) 21. [Pending](#pending)
+(P3, P4)](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) 19. [Persona wording and
+instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 20. [Template steering on the Qwen3 0.6B, 1.7B and 4B pairs
+(P7)](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7) 21. [Run identity](#run-identity) 22. [Pending](#pending)
 
 ## Reading conventions
 
@@ -311,6 +312,55 @@ R7 on the out-of-distribution sets:
 - On the five sets that are below ceiling the base checkpoint is above the post-trained one, with non-overlapping
   intervals (for example `neg_sp_en_trans` 0.988 against 0.892 and `common_claim` 0.871 against 0.839). `common_claim`
   is above the 1.7B values (0.812 and 0.791).
+
+## Text baselines for the readers (TB1)
+
+TB1 asks how much of a reader's accuracy a classifier gets from the surface form of the same statements, with no model.
+For each concept a TF-IDF logistic regression (`tomography.p9.risk.text_scores`) is fitted on the raw training
+statements of the reader and scored on the reader's own test pairs. There are two analyzers: word 1-grams and 2-grams
+seen in at least 2 texts, and character 2-grams to 5-grams inside words seen in at least 3 texts. The classifier sees
+the statement alone, with no template, chat format or question. The accuracy is the share of test pairs in which the
+label-1 member scores higher; ties share the credit, so a constant scorer sits at 0.5. The run is
+`tb1/none/cb5150e6b62b` and loads no model: the statements, the pairs and the seeds do not depend on the checkpoint
+(the chat format changes how a statement is rendered, not which statements are drawn), so there is one value per
+concept and analyzer, not one per checkpoint.
+
+The training sets are those of the reader where the reader has them. R1, R2, R3 and R7 use the reader's own 10 draws of
+64 training pairs, with the same seeds. The `p3` concepts (held-out sentiment, and truth and utility on the report
+splits) use 20 resamples of 64 training pairs, the size the results site reports, with the seeds of the P3 run. The
+honesty baseline cannot use the persona pairs of R5: its two labels mark the same true statement shown under two
+personas, so the texts are identical across the labels. It is fitted on 64 pairs of one true and one false statement of
+the training facts, drawn with the seeds of R5, and scored on the plain true and false transfer pairs that R5 scores.
+
+Each accuracy is the mean over the training sets. The interval is the 95 percent Wilson interval of that mean over the
+test pairs, so it covers the sampling of the test pairs only. It does not cover the variation between training sets;
+the last column gives the lowest and highest accuracy over the training sets for that. The intervals differ in kind
+from the bootstrap intervals over readers of the sections above (see [Reading conventions](#reading-conventions)).
+
+| Concept | Reader run | Test pairs | Training sets | Word n-grams [95% interval] | Character n-grams [95% interval] | Range over training sets (word; character) |
+| ------- | ---------- | ---------: | ------------: | --------------------------- | -------------------------------- | ------------------------------------------ |
+| Sentiment, held out (P3 report split) | `p3` | 214 | 20 | 0.593 [0.526, 0.656] | 0.636 [0.570, 0.698] | 0.530 to 0.675; 0.570 to 0.715 |
+| Sentiment, R1 validation pairs | `r1` | 256 | 10 | 0.589 [0.528, 0.648] | 0.629 [0.569, 0.686] | 0.539 to 0.648; 0.574 to 0.660 |
+| Utility | `r2` | 4,808 | 10 | 0.520 [0.506, 0.534] | 0.525 [0.510, 0.539] | 0.510 to 0.534; 0.501 to 0.544 |
+| Morality | `r3` | 983 | 10 | 0.517 [0.486, 0.548] | 0.527 [0.495, 0.558] | 0.507 to 0.537; 0.508 to 0.547 |
+| Truth | `r7` | 59 | 10 | 0.568 [0.441, 0.686] | 0.524 [0.399, 0.646] | 0.475 to 0.610; 0.458 to 0.610 |
+| Honesty, transfer pairs | `r5` | 59 | 10 | 0.603 [0.476, 0.718] | 0.585 [0.458, 0.702] | 0.492 to 0.729; 0.475 to 0.712 |
+| Truth, P3 report split | `p3` | 59 | 20 | 0.556 [0.430, 0.675] | 0.533 [0.408, 0.654] | 0.475 to 0.678; 0.441 to 0.644 |
+| Utility, P3 report split | `p3` | 256 | 20 | 0.525 [0.464, 0.585] | 0.535 [0.474, 0.595] | 0.457 to 0.598; 0.486 to 0.580 |
+
+- The text alone reads above 0.5, with an interval that excludes 0.5, in sentiment (both analyzers, on the held-out
+  report split and on the R1 validation pairs) and in utility (both analyzers, on the R2 test pairs). The sentiment
+  values are the largest: 0.593 and 0.636 on the report split, 0.589 and 0.629 on R1. The utility values are
+  0.520 and 0.525, close to 0.5 but with 4,808 test pairs.
+- The interval includes 0.5 for morality (983 pairs), truth (59 pairs), honesty (59 pairs) and for truth and utility on
+  the `p3` report splits (59 and 256 pairs). For the three 59-pair rows the intervals are wide (width about 0.25), so
+  these rows do not separate a text signal of a few points from none.
+- The range over training sets is wide where the test set is small: for honesty the word classifier goes from
+  0.492 to 0.729 over the 10 training sets, and for truth the word classifier goes from 0.475 to 0.610.
+- The honesty row is a classifier fitted on the true and false labels of the facts, not on the persona labels of the
+  reader, so it is a baseline for the transfer pairs and not for the persona training. Each row is one run of one
+  configuration; no value here is pooled over concepts.
+- No reader accuracy is compared with these values in this section.
 
 ## TruthfulQA MC1 against text baselines (R6)
 
@@ -7929,6 +7979,13 @@ Config hashes (12 hex digits), chain 41:
 | M1         | eef91d1dfe8e | bf4cc620da8b    | 976e4c4a87e1 |
 
 Other runs: P6 `25ee6de331d4`; P8 `e9f9bc04ba3c`.
+
+TB1: the run `tb1/none/cb5150e6b62b` was made at `e1180c8` (the merge of pull request 202) with a clean tree, on the CPU
+(no model is loaded; the `device` field of its `meta.json` records the detected laptop GPU, which the run does not use,
+and the platform is Windows 11 with Python 3.12.6, scikit-learn 1.9.1 and numpy 2.5.4). The stored `meta.json` gives the
+start and finish times 2026-10-19 18:54:42 to 18:55:07 (UTC). Its config is the default TB1 config, whose hash agrees
+with the directory name. An earlier run of the same code on a CPU box gave the same `table.json` and `summary.json`
+apart from the metadata; it is not committed.
 
 The files of every run named here are committed under `results/<experiment>/<model>/<hash>/`, copied with
 `tomography export`, which keeps the JSON, NPZ and CSV files the plots read and rewrites local paths. The figures are
