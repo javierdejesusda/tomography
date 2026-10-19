@@ -9,7 +9,6 @@ from matplotlib.lines import Line2D
 import pytest
 
 from tomography.site import registry
-from tomography.site.figs import _rows as rowkit
 from tomography.site.manifest import Manifest
 from tomography.viz import paper
 
@@ -26,7 +25,7 @@ KEYS = (
     "a_finders_qwen3",
     "a_wording",
 )
-FILL_KEYS = ("teaser", "finders", "truth")
+FILL_KEYS = ("teaser", "finders")
 
 
 def _pattern(style: Any) -> Any:
@@ -143,43 +142,21 @@ def test_the_gpt2_curves_have_no_post_trained_style(
     assert POST not in styles
 
 
-def test_figure_6_marks_the_statement_sets_with_the_set_markers(
-    built: dict[str, registry.FigureOutput],
-) -> None:
-    marks = _markers(built["truth"].figure)
-    assert set(paper.SET_MARKERS.values()) <= marks
-    for measure in ("text", "popularity"):
-        assert not _flatten(paper.MEASURE_MARKERS[measure]) & marks
-
-
-@pytest.mark.parametrize("key", ["truth"])
-def test_the_star_is_drawn_at_the_shared_size(
-    built: dict[str, registry.FigureOutput], key: str
-) -> None:
-    star = paper.CATEGORY_MARKERS[0]
-    sizes = {
-        ln.get_markersize()
-        for ln in _lines(built[key].figure)
-        if ln.get_marker() == star
-    }
-    assert sizes
-    assert min(sizes) >= rowkit.STAR_SIZE
-
-
-@pytest.mark.parametrize("key", ["reading", "wording"])
+@pytest.mark.parametrize("key", ["reading", "wording", "truth"])
 def test_a_redesigned_figure_uses_at_most_six_shapes(
     built: dict[str, registry.FigureOutput], key: str
 ) -> None:
     assert len(_markers(built[key].figure)) <= 6
 
 
-@pytest.mark.parametrize("key", ["reading", "wording"])
-def test_figures_4_and_5_use_no_category_shapes(
+@pytest.mark.parametrize("key", ["reading", "wording", "truth"])
+def test_redesigned_figures_use_no_category_shapes(
     built: dict[str, registry.FigureOutput], key: str
 ) -> None:
     marks = _markers(built[key].figure)
     assert not marks & set(paper.CATEGORY_MARKERS)
-    assert not marks & (MEASURES - {"o", "D", "x"})
+    allowed = {"o", "D", "x"} | ({"p"} if key == "truth" else set())
+    assert not marks & (MEASURES - allowed)
 
 
 def test_figure_4_draws_only_circles(

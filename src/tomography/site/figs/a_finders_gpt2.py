@@ -1,4 +1,4 @@
-"""Appendix figure: The paper's finder and logistic regression on GPT-2, by layer.
+"""Appendix figure: The paper's finder and logistic regression, GPT-2.
 
 Rows are checkpoints and columns are tasks. Each panel draws report-split
 accuracy at every layer for the paper's finder and for logistic regression,
