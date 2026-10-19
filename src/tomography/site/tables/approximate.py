@@ -145,10 +145,11 @@ def build(manifest: Manifest) -> TableOutput:
         "Qwen3 writes ranges where the sourced answer is a range, but the "
         "range reader is above the 95 percent interval of a classifier "
         "on the question words on "
-        "[[count:table:approximate.above_words]], lies inside the interval "
-        "of its random control on [[count:fig:approximate.reader_in_random]] "
-        "and places the people outside the control's band on "
-        "[[count:fig:approximate.people_outside_band]]."
+        "[[count:table:approximate.above_words]], is above the 95 percent "
+        "interval of its random control on "
+        "[[count:fig:approximate.reader_above_random]]; the control falls "
+        "below 0.5 on [[count:fig:approximate.control_below_half]] and "
+        "above 0.95 on [[count:fig:approximate.control_above_95]]."
     )
     detail = (
         "The three leftmost columns give the percentage of greedy answers "
