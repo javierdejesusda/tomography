@@ -6,6 +6,7 @@ fitted on and a column the wording it is evaluated on.
 """
 
 import json
+import string
 
 from matplotlib.figure import Figure
 import numpy as np
@@ -52,7 +53,7 @@ def build(manifest: Manifest) -> FigureOutput:
     with paper.paper_style():
         fig = Figure(figsize=(paper.FULL_WIDTH, 8.4), layout="constrained")
         grid = fig.add_gridspec((len(models) + 1) // 2, 2)
-        letters = iter("abcdefgh")
+        letters = iter(string.ascii_lowercase)
         for i, model in enumerate(models):
             ax = fig.add_subplot(grid[i // 2, i % 2])
             names, matrix = _matrix(manifest, model)
