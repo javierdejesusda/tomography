@@ -9,6 +9,7 @@ import pytest
 
 from tomography.site import registry
 from tomography.site import stats
+from tomography.site.figs import teaser
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -335,11 +336,34 @@ def test_the_knowledge_row_takes_popularity_as_the_strongest_baseline() -> None:
         assert strongest == r["popularity_within"]
 
 
-def test_the_claim_states_the_per_role_counts_without_pooling(
+def _full(built: registry.FigureOutput) -> str:
+    return " ".join(
+        [built.claim, built.detail, teaser.method_detail(built.counts)]
+    )
+
+
+def test_the_caption_is_at_most_120_words_and_leads_with_the_conclusion(
     built: registry.FigureOutput,
 ) -> None:
     text = f"{built.claim} {built.detail}"
-    assert "better than a random direction on all 10 checkpoints" in text
+    assert len(text.split()) <= 120
+    assert built.claim.startswith("A direction reads utility and morality")
+
+
+def test_the_method_detail_names_the_baselines_and_the_confidence_stack(
+    built: registry.FigureOutput,
+) -> None:
+    text = teaser.method_detail(built.counts)
+    assert "five stacked output signals" in text
+    assert "answer probability alone" not in text
+    assert "Hanley and McNeil" in text
+
+
+def test_the_claim_states_the_per_role_counts_without_pooling(
+    built: registry.FigureOutput,
+) -> None:
+    text = _full(built)
+    assert "above a random direction on all 10 checkpoints" in text
     assert "truth on " + stats.per_role_text(built.counts["truth"]) in text
     assert "Qwen3 checkpoints" not in text
     assert not re.search(r"of 10 checkpoints", text)
@@ -388,7 +412,7 @@ def test_the_legend_names_the_sizes_the_figure_holds(
 def test_the_teaser_caption_has_no_signed_zero(
     built: registry.FigureOutput,
 ) -> None:
-    text = f"{built.claim} {built.detail}"
+    text = _full(built)
     assert "-0.000" not in text
 
 
@@ -423,7 +447,7 @@ def test_the_steering_row_counts_checkpoints_whose_every_vector_wins(
 def test_the_steering_row_names_the_unit_the_judge_and_the_fluency_rule(
     built: registry.FigureOutput,
 ) -> None:
-    text = f"{built.claim} {built.detail}"
+    text = _full(built)
     assert "every logistic steering vector" in text
     assert "utility direction" in text
     assert "sentiment judge" in text
