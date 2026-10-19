@@ -600,3 +600,30 @@ def test_the_finder_claims_are_per_concept_and_not_causal() -> None:
     everything = _text()
     assert "depends on matched" not in everything
     assert "not reliably above a random direction" not in everything
+
+
+RESULT_KEYS = (
+    "finders",
+    "reading",
+    "wording",
+    "truth",
+    "steering",
+    "knowledge_reading",
+    "knowledge_steering",
+    "approximate",
+    "base_post",
+)
+
+
+def test_each_results_subsection_opens_with_its_answer_before_the_figures() -> (
+    None
+):
+    subs = {s.key: s for s in content.RESULTS.subsections}
+    assert tuple(subs) == RESULT_KEYS
+    for key, sub in subs.items():
+        opener, pointer = sub.paragraphs[0], sub.paragraphs[1]
+        assert re.search(r"\[\[(count|runs|num):", opener), key
+        assert "[[fig:" not in opener, key
+        assert "[[table:" not in opener, key
+        assert "[[fig:" in pointer or "[[table:" in pointer, key
+        assert len(re.findall(r"[.;] ", opener)) <= 2, key

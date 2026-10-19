@@ -206,8 +206,8 @@ INTRODUCTION = Section(
             "[[count:fig:knowledge_reading.above_pop]], and adds to the "
             "confidence of the model on "
             "[[count:fig:teaser.knowledge_confidence]], by at most "
-            "[[num:fig:knowledge_reading.dir_inc_hi_max]] at the upper end of its "
-            "interval on any checkpoint "
+            "[[num:fig:knowledge_reading.dir_inc_hi_max]] at the upper "
+            "end of its interval on any checkpoint "
             "([[fig:knowledge_reading]]).",
         ),
         (
@@ -519,6 +519,12 @@ RESULTS = Section(
             "finders",
             "Does the finder of the paper find the concept?",
             paragraphs=(
+                "Not reliably. By the 95 percent interval it is above a "
+                "random direction for sentiment on "
+                "[[count:fig:finders.pca_sentiment]] and for truth on "
+                "[[count:fig:finders.pca_truth]] with unrelated pairs, and "
+                "for utility on [[count:fig:finders.pca_utility]] with "
+                "matched pairs.",
                 "The paper compares finders on utility, where every pair is "
                 "two versions of one scenario. On sentiment and truth our "
                 "pairs are unrelated inputs with opposite labels, the "
@@ -534,6 +540,12 @@ RESULTS = Section(
             "reading",
             "Where and how well is a concept read?",
             paragraphs=(
+                "Utility is read above a random direction on "
+                "[[count:fig:teaser.utility]], morality on "
+                "[[count:fig:teaser.morality]] and truth on "
+                "[[count:fig:teaser.truth]], and sentiment from a relative "
+                "depth of [[num:fig:reading.onset_sentiment_min]] to "
+                "[[num:fig:reading.onset_sentiment_max]].",
                 "[[fig:reading]] maps the margin over every layer and shows "
                 "the held-out accuracy at the chosen layer against model "
                 "size; [[table:reading]] gives the margins, "
@@ -549,6 +561,11 @@ RESULTS = Section(
             "wording",
             "Does the wording of the template matter?",
             paragraphs=(
+                "Yes. It moves a sentiment reader by up to "
+                "[[num:fig:wording.span_gpt2_max]] on GPT-2, "
+                "[[num:fig:wording.span_base_max]] on Qwen3 base and "
+                "[[num:fig:wording.span_post_max]] on post-trained "
+                "checkpoints.",
                 "We refit the sentiment reader on wordings that change the "
                 "frame, the wording or the concept word of the template of "
                 "the paper ([[table:wordings]]) and score each reader on "
@@ -560,6 +577,11 @@ RESULTS = Section(
             "truth",
             "Is truth read beyond the text?",
             paragraphs=(
+                "Mostly not. A TruthfulQA reader stays within the band of "
+                "classifiers that see only the words on "
+                "[[count:fig:truth.tqa_inside]], and on "
+                "[[count:fig:truth.neg_below_half]] at least one negated "
+                "set falls below chance with its interval.",
                 "TruthfulQA can be answered in part from the answer text "
                 "alone, and negation flips the label without changing the "
                 "topic. [[fig:truth]] shows both tests, [[table:truth]] the "
@@ -572,6 +594,13 @@ RESULTS = Section(
             "steering",
             "Does steering change the output without breaking it?",
             paragraphs=(
+                "For sentiment, steering at relative coefficient 0.1 moves "
+                "the judged sentiment on [[count:fig:steering.moves01]] and "
+                "keeps the fluency rule on [[count:fig:steering.fluent01]]; "
+                "for utility, at relative coefficient 0.3 it beats every "
+                "random direction on [[count:fig:teaser.steering]] and "
+                "keeps the fluency rule on "
+                "[[count:fig:teaser.steering_fluent]].",
                 "[[fig:steering]] shows the judged sentiment against the "
                 "relative coefficient and the fluency rule per checkpoint "
                 "and coefficient; [[table:steering]] adds the completion "
@@ -584,6 +613,10 @@ RESULTS = Section(
             "knowledge_reading",
             "Does a direction know what the model knows?",
             paragraphs=(
+                "It ranks questions above their popularity on "
+                "[[count:fig:knowledge_reading.above_pop]], and adds to the "
+                "confidence of the model on "
+                "[[count:fig:teaser.knowledge_confidence]].",
                 "[[fig:knowledge_reading]] compares the "
                 "known-against-unknown direction with popularity, text and "
                 "the confidence of the model; [[table:knowledge]] gives "
@@ -596,6 +629,10 @@ RESULTS = Section(
             "knowledge_steering",
             "Does adding that direction change answers?",
             paragraphs=(
+                "It moves unknown questions more than each random direction "
+                "on [[runs:fig:knowledge_steering.distinguishable]], and "
+                "known questions at least as much as unknown ones on "
+                "[[runs:fig:knowledge_steering.known_ge_unknown]].",
                 "[[fig:knowledge_steering]] gives the slope of each run "
                 "against random directions and known questions; every dose "
                 "curve is in [[fig:a_dose_runs]] and the post-trained runs "
@@ -607,6 +644,11 @@ RESULTS = Section(
             "approximate",
             "Are approximate answers read as approximate?",
             paragraphs=(
+                "Not beyond a text classifier. The range reader is above a "
+                "classifier on the question words on "
+                "[[count:table:approximate.above_words]] and above the 95 "
+                "percent interval of its random control on "
+                "[[count:fig:approximate.reader_above_random]].",
                 "Wikidata gives quantities whose sourced answer is a range "
                 "(the height of a breed) or a single value (the height of a "
                 "building). [[fig:approximate]] shows what the models "
@@ -621,6 +663,10 @@ RESULTS = Section(
             "base_post",
             "What does post-training change?",
             paragraphs=(
+                "Little. Held-out sentiment reading is lower on "
+                "[[num:fig:base_post.sent_below]] of the three Qwen3 sizes, "
+                "and [[num:fig:base_post.paired_excluding_zero]] other "
+                "paired differences exclude zero.",
                 "[[fig:base_post]] puts every measure of the earlier "
                 "sections side by side as post-trained minus base for the "
                 "three Qwen3 sizes; the stored per-seed comparisons are in "
