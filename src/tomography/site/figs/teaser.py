@@ -19,6 +19,7 @@ from tomography.site import params
 from tomography.site import reading
 from tomography.site import runfiles
 from tomography.site import stats
+from tomography.site.figs import _rows
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.site.registry import RoleCount
@@ -31,6 +32,7 @@ LANE = {"gpt2": -0.27, "base": 0.0, "post": 0.27}
 BLOCK_GAP = 0.6
 HEADER = 0.75
 MARKER = 3.5
+DIRECTION = paper.MEASURE_MARKERS["direction"]
 TEXT = 7
 
 
@@ -302,7 +304,7 @@ def _markers(ax: Any, row_y: float, model: str, cell: Cell) -> None:
         [cell.margin],
         [y],
         ls="none",
-        marker="o",
+        marker=DIRECTION,
         ms=MARKER,
         mfc=style.color if style.filled else "white",
         mec=style.color,
@@ -314,17 +316,16 @@ def _markers(ax: Any, row_y: float, model: str, cell: Cell) -> None:
 def _legend(fig: Figure) -> None:
     def dots(ramp: tuple[str, ...]) -> tuple[Line2D, ...]:
         return tuple(
-            Line2D([], [], ls="none", marker="o", ms=MARKER, color=c)
+            Line2D([], [], ls="none", marker=DIRECTION, ms=MARKER, color=c)
             for c in ramp
         )
 
-    black = paper.ENC["direction"]
     handles: list[Any] = [
         dots(paper.ENC["gpt2"]),
         dots(paper.ENC["qwen3"]),
-        Line2D([], [], ls="none", marker="o", ms=MARKER, color=black),
-        Line2D(
-            [], [], ls="none", marker="o", ms=MARKER, mfc="white", mec=black
+        _rows.series_handle("GPT-2 and base", paper.ROLE_KEY_MARKER, paper.INK),
+        _rows.series_handle(
+            "post-trained", paper.ROLE_KEY_MARKER, paper.INK, filled=False
         ),
     ]
     fig.legend(
@@ -332,7 +333,7 @@ def _legend(fig: Figure) -> None:
         [
             "GPT-2 small to XL",
             "Qwen3 0.6B to 4B",
-            "base or GPT-2",
+            "GPT-2 and base",
             "post-trained",
         ],
         handler_map={tuple: HandlerTuple(ndivide=None, pad=0.1)},
