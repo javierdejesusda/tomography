@@ -138,3 +138,12 @@ def test_the_new_entries_exist_with_their_identifiers() -> None:
 def test_no_bibliography_text_has_a_dash_character() -> None:
     text = BIB.read_text("utf-8")
     assert not any(ch in text for ch in DASHES)
+
+
+def test_kwiatkowski_pages_follow_the_acl_anthology_with_a_hyphen() -> None:
+    bib = references.parse(BIB.read_text("utf-8"))
+    entry = bib["kwiatkowski2019natural"]
+    assert entry.fields["pages"] == "452--466"
+    line = references.format_line(entry)
+    assert "452-466" in line
+    assert not any(ch in line for ch in DASHES)
