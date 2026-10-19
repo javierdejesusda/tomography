@@ -227,3 +227,32 @@ def test_the_claim_names_the_interval_criterion(
         "above a classifier on the question words, with the interval of the "
         "difference above zero, on "
     ) in output.claim
+
+
+RANGE_TOKENS = (
+    "[[num:fig:approximate.range_base_min]] to "
+    "[[num:fig:approximate.range_base_max]]",
+    "[[num:fig:approximate.range_post_min]] to "
+    "[[num:fig:approximate.range_post_max]]",
+    "[[num:fig:approximate.exact_base_max]]",
+    "[[num:fig:approximate.exact_post_max]]",
+)
+
+
+def test_the_claim_gives_the_range_shares_per_role(
+    output: registry.TableOutput,
+) -> None:
+    claim = output.claim
+    assert "Qwen3 writes ranges where" not in claim
+    for token in RANGE_TOKENS:
+        assert token in claim, token
+    assert "(base)" in claim
+    assert "(post-trained)" in claim
+
+
+def test_the_claim_range_shares_match_the_figure_numbers() -> None:
+    numbers = registry.build_figure("approximate", Manifest(ROOT)).numbers
+    assert numbers["range_base_min"] == 83
+    assert numbers["range_post_max"] == 68
+    assert numbers["exact_base_max"] == 15
+    assert numbers["exact_post_max"] == 0

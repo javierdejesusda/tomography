@@ -1140,3 +1140,17 @@ def test_the_utility_steering_run_is_not_called_the_finder_comparison() -> None:
     limits = " ".join(_texts(content.DISCUSSION))
     assert "(the utility steering run has three)" in limits
     assert "(the finder comparison has three)" not in limits
+
+
+def test_the_approximate_appendix_gives_the_range_shares_per_role() -> None:
+    text = " ".join(_texts(_section("appendix_approximate")))
+    assert "Qwen3 writes ranges where the sourced answer is a range" not in text
+    for token in (
+        "[[num:fig:approximate.range_base_min]]",
+        "[[num:fig:approximate.range_base_max]]",
+        "[[num:fig:approximate.range_post_min]]",
+        "[[num:fig:approximate.range_post_max]]",
+        "[[num:fig:approximate.exact_base_max]]",
+        "[[num:fig:approximate.exact_post_max]]",
+    ):
+        assert token in text, token
