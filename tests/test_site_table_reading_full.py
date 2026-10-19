@@ -1,106 +1,97 @@
-import json
 from pathlib import Path
+import re
+import runpy
 
-import numpy as np
 import pytest
 
 from tomography.site import registry
 from tomography.site.manifest import Manifest
+from tomography.viz import paper
 
-RESULTS = Path(__file__).resolve().parents[1] / "results"
-SPEC = "reading_full"
-MARGIN = 0.1
-CONCEPTS = ("r1", "r2", "r3", "r7")
+_HERE = Path(__file__).parent
+_R = runpy.run_path(str(_HERE / "_results.py"))
+_M = runpy.run_path(str(_HERE / "_site_math.py"))
+_S = runpy.run_path(str(_HERE / "_site_scores.py"))
+ROOT, models = _R["ROOT"], _R["models"]
+diff, fmt = _M["diff"], _M["fmt"]
+score, n_layers = _S["score"], _S["n_layers"]
+PLUS_MINUS = chr(0x00B1)
+DASHES = (chr(0x2014), chr(0x2013))
+BLOCKS = (
+    (
+        "sentiment_r1",
+        "Sentiment, layer chosen on the scored pairs (optimistic)",
+    ),
+    ("sentiment", "Sentiment, held out"),
+    ("utility", "Utility"),
+    ("morality", "Morality"),
+    ("truth", "Truth"),
+    ("template", "Honesty in template"),
+    ("honesty", "Honesty transfer"),
+)
 
 
 @pytest.fixture(scope="module")
 def output() -> registry.TableOutput:
-    return registry.build_table(SPEC, Manifest(RESULTS))
+    return registry.build_table("reading_full", Manifest(ROOT))
 
 
-def _summary(exp: str, model: str) -> dict:
-    run = Manifest(RESULTS).run(exp, model)
-    assert run is not None
-    return json.loads((run / "summary.json").read_text("utf-8"))["data"]
-
-
-def _selected(exp: str, model: str) -> tuple[int, float, list[float]]:
-    data = _summary(exp, model)
-    if exp == "r7":
-        test = data["sets"]["test"]
-        return (
-            data["val_layer"],
-            test["accuracy_at_val_layer"],
-            test["ci_at_val_layer"],
-        )
-    key = "best_accuracy" if exp == "r1" else "test_accuracy"
-    return data["best_layer"], data[key], data["ci"]
-
-
-def _random(exp: str, model: str, layer: int) -> float:
-    run = Manifest(RESULTS).run(exp, model)
-    assert run is not None
-    with np.load(run / "curves.npz") as npz:
-        return float(npz["mean"][1][layer - 1])
-
-
-def test_columns_and_alignment(output: registry.TableOutput) -> None:
+def test_columns_and_one_group_per_concept(
+    output: registry.TableOutput,
+) -> None:
     assert output.columns == [
         "Concept",
         "Model",
-        "Reader [95% interval]",
-        "Random",
         "Layer",
+        "Relative depth",
+        "Reader",
+        "Random",
+        "Margin",
+        "Test pairs",
     ]
-    assert output.align == "llrrr"
-    assert all(len(row) == 5 for row in output.rows)
+    assert output.align == "llrrrrrr"
+    assert output.row_groups == tuple(10 * i for i in range(7))
+    assert len(output.rows) == 70
+    for i, (_, label) in enumerate(BLOCKS):
+        assert output.rows[10 * i][0] == label
+        assert all(output.rows[10 * i + j][0] == "" for j in range(1, 10))
 
 
-def test_every_model_and_concept_has_a_row_with_the_stored_numbers(
+def test_every_row_matches_a_recomputation(
     output: registry.TableOutput,
 ) -> None:
-    manifest = Manifest(RESULTS)
-    by_cell = {}
-    concept = ""
-    for row in output.rows:
-        concept = row[0] or concept
-        by_cell[(concept, row[1])] = row
-    names = {"r1": "R1", "r2": "R2", "r3": "R3", "r7": "R7"}
-    for exp in CONCEPTS:
-        for model in manifest.models(exp):
-            layer, acc, ci = _selected(exp, model)
-            cell = next(
-                row
-                for (c, m), row in by_cell.items()
-                if c.startswith(names[exp]) and m == _display(model)
-            )
-            assert cell[2] == f"{acc:.3f} [{ci[0]:.3f}, {ci[1]:.3f}]"
-            assert cell[3] == f"{_random(exp, model, layer):.3f}"
-            assert cell[4] == str(layer)
+    names = models("p3")
+    assert len(names) == 10
+    for i, (concept, _) in enumerate(BLOCKS):
+        for j, model in enumerate(names):
+            row = output.rows[10 * i + j]
+            layer, reader, random, n = score(concept, model)
+            d, lo, hi = diff(reader, random, n)
+            half = (hi - lo) / 2
+            assert row[1] == paper.display_name(model)
+            assert row[2] == str(layer)
+            assert row[3] == fmt(layer / n_layers(model))
+            assert row[4] == fmt(reader)
+            assert row[5] == fmt(random)
+            assert row[6] == f"{fmt(d)} {PLUS_MINUS} {fmt(half)}"
+            assert row[7] == f"{n:,}"
 
 
-def _display(model: str) -> str:
-    from tomography.viz import paper
-
-    return paper.display_name(model)
-
-
-def test_r5_is_a_labelled_exploratory_group_without_a_random_value(
+def test_the_caption_flags_the_optimistic_block_and_the_interval_unit(
     output: registry.TableOutput,
 ) -> None:
-    rows = [r for r in output.rows if r[0].startswith("R5")]
-    assert len(rows) == 1
-    assert "exploratory" in rows[0][0]
-    group = output.rows[output.rows.index(rows[0]) :][:10]
-    for row, model in zip(group, Manifest(RESULTS).models("r5"), strict=True):
-        data = _summary("r5", model)
-        low, high = data["ci"]
-        assert row[2] == f"{data['test_accuracy']:.3f} [{low:.3f}, {high:.3f}]"
-        assert row[3] == "n/a"
+    text = output.claim + " " + output.detail
+    assert "optimistic" in text
+    assert "256 SST-2 validation pairs" in text
+    assert "214 pairs" in text
+    assert "resample the readers only" in text
+    assert not any(ch in text for ch in DASHES)
 
 
-def test_no_cell_has_a_dash_character(output: registry.TableOutput) -> None:
-    banned = {chr(0x2014), chr(0x2013)}
-    texts = [output.claim, output.detail, *output.notes]
-    texts += [c for row in output.rows for c in row]
-    assert not any(ch in text for text in texts for ch in banned)
+def test_no_underscore_or_run_code_outside_the_optimistic_label(
+    output: registry.TableOutput,
+) -> None:
+    texts = [output.claim, output.detail, *output.columns]
+    texts += [c for r in output.rows for c in r]
+    assert not any("_" in t or "`" in t for t in texts)
+    assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
