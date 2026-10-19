@@ -109,6 +109,21 @@ MEASURE_MARKERS: dict[str, Any] = {
     "probe": "P",
 }
 ROLE_KEY_MARKER = "h"
+CATEGORY_MARKERS: tuple[str, ...] = ("*", "1", "<", ">")
+VARIANT_MARKERS: dict[str, str] = {
+    "frame": CATEGORY_MARKERS[0],
+    "wording": CATEGORY_MARKERS[1],
+    "concept": CATEGORY_MARKERS[2],
+}
+SET_MARKERS: dict[str, str] = {
+    "cities": CATEGORY_MARKERS[0],
+    "translations": CATEGORY_MARKERS[1],
+}
+ITEM_SET_MARKERS: dict[str, str] = {
+    "range": CATEGORY_MARKERS[0],
+    "exact": CATEGORY_MARKERS[1],
+    "people": CATEGORY_MARKERS[2],
+}
 ENCODING_RULES = """Encoding rules of every figure.
 1. The checkpoint colour ramps (vermilion GPT-2, blue Qwen3) mark checkpoint
    identity only, never a measure.
@@ -120,7 +135,10 @@ ENCODING_RULES = """Encoding rules of every figure.
 3. Filled markers mean GPT-2 and Qwen3 base, open ones post-trained; every
    legend that uses fill carries the hexagon role key (`ROLE_KEY_MARKER`).
 4. Post-trained lines use one style (`LINESTYLES["post_trained"]`) everywhere.
-5. A grey band has one meaning per figure and is keyed in its legend."""
+5. A grey band has one meaning per figure and is keyed in its legend.
+6. A categorical set that is not a measure (prompt variants, statement sets,
+   item sets) uses `CATEGORY_MARKERS`, keyed in its figure, never a measure
+   shape; shapes may repeat across figures because each figure keys them."""
 
 
 def _build_enc() -> dict[str, Any]:

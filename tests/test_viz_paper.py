@@ -222,3 +222,29 @@ def test_the_encoding_rules_are_stated_in_the_module() -> None:
     assert paper.ENCODING_RULES.count("\n") >= 4
     for word in ("identity", "Filled", "open", "hexagon", "band"):
         assert word in paper.ENCODING_RULES
+
+
+def test_category_markers_stay_clear_of_measures_and_the_role_key() -> None:
+    measures = {
+        m
+        for item in paper.MEASURE_MARKERS.values()
+        for m in (item if isinstance(item, tuple) else (item,))
+    }
+    assert len(paper.CATEGORY_MARKERS) == len(set(paper.CATEGORY_MARKERS))
+    assert not measures & set(paper.CATEGORY_MARKERS)
+    assert paper.ROLE_KEY_MARKER not in paper.CATEGORY_MARKERS
+
+
+def test_each_named_category_map_has_distinct_shapes_from_the_tuple() -> None:
+    maps = {
+        "VARIANT_MARKERS": ("frame", "wording", "concept"),
+        "SET_MARKERS": ("cities", "translations"),
+        "ITEM_SET_MARKERS": ("range", "exact", "people"),
+    }
+    for name, keys in maps.items():
+        found = getattr(paper, name)
+        assert tuple(found) == keys
+        assert len(set(found.values())) == len(keys)
+        assert set(found.values()) <= set(paper.CATEGORY_MARKERS)
+    assert "6." in paper.ENCODING_RULES
+    assert "CATEGORY_MARKERS" in paper.ENCODING_RULES
