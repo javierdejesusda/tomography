@@ -11,6 +11,7 @@ from typing import Any
 from matplotlib import ticker
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.layout_engine import ConstrainedLayoutEngine
 from matplotlib.lines import Line2D
 
 from tomography.site import stats
@@ -31,11 +32,10 @@ def new_figure(height: float) -> Figure:
     Returns:
         The figure.
     """
-    fig = Figure(figsize=(paper.FULL_WIDTH, height), layout="constrained")
-    engine = fig.get_layout_engine()
-    assert engine is not None
-    engine.set(w_pad=PAD, h_pad=PAD)
-    return fig
+    return Figure(
+        figsize=(paper.FULL_WIDTH, height),
+        layout=ConstrainedLayoutEngine(w_pad=PAD, h_pad=PAD),
+    )
 
 
 def freeze_layout(fig: Figure) -> None:

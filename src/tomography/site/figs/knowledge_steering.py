@@ -153,7 +153,7 @@ def load_runs(manifest: Manifest) -> list[Run]:
     Returns:
         The runs in checkpoint order.
     """
-    found = []
+    found: list[Run] = []
     for model in manifest.models("p9d"):
         templates = sorted(
             {str(r.config["template"]) for r in manifest.runs("p9d", model)},
@@ -358,9 +358,11 @@ def build(manifest: Manifest) -> FigureOutput:
 
     with paper.paper_style():
         fig = _rows.new_figure(HEIGHT)
-        top, bottom = fig.subfigures(2, 1, height_ratios=[2.3, 1.3], hspace=0.0)
-        ax_a, ax_b = top.subplots(1, 2)
-        doses = bottom.subplots(1, 3)
+        top, bottom = fig.subfigures(
+            2, 1, squeeze=False, height_ratios=[2.3, 1.3], hspace=0.0
+        )[:, 0]
+        ax_a, ax_b = top.subplots(1, 2, squeeze=False)[0]
+        doses = bottom.subplots(1, 3, squeeze=False)[0]
         _forest(ax_a, entropy, "a", csv_rows)
         _forest(ax_b, abstention, "b", csv_rows)
         ax_a.set_xlabel("entropy shift per unit\nrelative coefficient")
