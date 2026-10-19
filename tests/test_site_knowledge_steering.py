@@ -20,7 +20,7 @@ _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 _T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
 _L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
 SPEC = "knowledge_steering"
-HEIGHT = 4.4
+HEIGHT = 4.8
 EXEMPLARS = (
     ("gpt2-xl", "fewshot"),
     ("qwen3-4b-base", "fewshot"),
@@ -510,3 +510,35 @@ def test_the_direction_intervals_of_the_dose_panels_are_tinted(
             tinted += 1
     assert tinted == 6
     assert "tint" in output.detail
+
+
+def test_each_row_keeps_its_direction_marks_and_crosses_in_its_own_band(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    for ax in _forests(output).values():
+        ticks = list(ax.get_yticks())
+        crosses = [ln for ln in ax.lines if ln.get_marker() == "x"]
+        dots = [
+            ln
+            for ln in ax.lines
+            if ln.get_marker() not in ("x", "None", "") and ln.get_gid() != "x"
+        ]
+        assert len(crosses) == 3 * len(ticks)
+        offsets = []
+        for ln in [*crosses, *dots]:
+            (y,) = ln.get_ydata()
+            nearest = min(ticks, key=lambda t: abs(t - y))
+            assert abs(y - nearest) <= 0.36, (y, nearest)
+            offsets.append((nearest, round(y - nearest, 3), ln.get_marker()))
+        patterns = {}
+        for tick, off, marker in offsets:
+            patterns.setdefault(tick, set()).add((off, marker))
+        assert len({frozenset(p) for p in patterns.values()}) == 1
+
+
+def test_the_figure_legend_reads_at_the_tick_size(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = [lg for sub in output.figure.subfigs for lg in sub.legends]
+    assert min(t.get_fontsize() for t in legend.get_texts()) >= paper.TICK
