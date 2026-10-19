@@ -12,6 +12,7 @@ import math
 from typing import Any
 
 from matplotlib import ticker
+from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.patches import Rectangle
@@ -29,12 +30,18 @@ CELL = ("free", "fewshot", "range_last", "greedy")
 TRAIN = "height+wingspan"
 HEIGHT = 3.4
 HEADER = ["panel", "model", "series", "value", "lo", "hi"]
-TOP = -1.0
+TOP = -1.9
+HEAD_Y = -1.3
+WHISKER_Y = -0.75
+BAR_HALF = 0.17
+ARROW = 0.14
+TICK = (0.075, 0.035)
+CEILING = 0.9995
 POSITION_LIMITS = (-0.5, 1.5)
 PANEL_A = (
-    ("range_items", paper.ITEM_SET_MARKERS["range"], -0.28),
-    ("exact_items", paper.ITEM_SET_MARKERS["exact"], 0.0),
-    ("people", paper.ITEM_SET_MARKERS["people"], 0.28),
+    ("range_items", "range\nitems"),
+    ("exact_items", "exact\nitems"),
+    ("people", "people's\nheights"),
 )
 CLAIM = (
     "Qwen3 writes ranges where the sourced answer is a range, but a range "
@@ -42,33 +49,36 @@ CLAIM = (
 )
 DETAIL = (
     "(a) Share of greedy answers written as a range (few-shot, range "
-    "example last) on range items (star), exact items (left triangle) and "
-    "{n_people} people's heights (right triangle), with Wilson intervals "
-    "on the "
-    "item counts: Qwen3 base checkpoints write a range on {base_min} to "
-    "{base_max} percent of the range items and post-trained ones on "
-    "{post_min} to {post_max} percent, on at most {exact} percent of the "
-    "exact items and {heights}, while GPT-2 small writes a range on "
+    "example last) on range items, exact items and {n_people} people's "
+    "heights, each in its own column, with Wilson intervals on the item "
+    "counts; filled circles are GPT-2 and Qwen3 base checkpoints and open "
+    "circles post-trained ones. Qwen3 base checkpoints write a range on "
+    "{base_min} to {base_max} percent of the range items and post-trained "
+    "ones on {post_min} to {post_max} percent, on at most {exact} percent "
+    "of the exact items and {heights}, while GPT-2 small writes a range on "
     "{gpt2_range} percent of the range items and {gpt2_exact} percent of "
     "the exact items. (b) AUROC on held-out durations of a range reader "
     "fitted on heights and wingspans (concept prompt), with its random "
-    "control (grey: the mean score of {draws} random directions oriented on "
-    "the training labels, with the 95 percent bootstrap interval of the "
-    "mean over the draws) and a classifier on the words of the question "
-    "(green, {text}, interval {text_lo} to {text_hi}). The reader is above "
-    "the classifier's value on {above}, {overlap}, and above "
-    "the random control's interval on {above_random}; the control itself "
-    "is below 0.5 on {below_half}, a sign flip between the training and "
-    "the test concepts, and above 0.95 on {above_95}. (c) Where the reader "
-    "places the "
-    "people between the test buildings (0) and the breeds (1), against the "
-    "range of its "
-    "random control over {sets} training sets (grey): at {pos_min} to "
-    "{pos_max}, next to the breeds, so the reader does not separate a "
-    "range-valued answer from a living subject. The position lies outside "
-    "the random band on {outside}, but the random bands span {band_min} to "
-    "{band_max} across checkpoints, far outside 0 to 1 (clipped at the plot "
-    "edges, arrows), so the position cannot separate the reader from random."
+    "control (grey bar: the 95 percent bootstrap interval of the mean over "
+    "the {draws} draws; the control is the mean of {draws} random "
+    "directions oriented on the training labels, and the individual draws "
+    "are not stored) and a classifier on the words of the question (green "
+    "line, {text}, whisker {text_lo} to {text_hi}). A filled circle marks a "
+    "reader above the control's interval, an open circle inside it and an "
+    "open circle with a left tick below it. The reader is above the "
+    "classifier's value on {above}, {overlap}, and above the random "
+    "control's interval on {above_random}; the control itself is below 0.5 "
+    "on {below_half}, a sign flip between the training and the test "
+    "concepts and not a result far below chance, and above 0.95 on "
+    "{above_95}; a control at the ceiling is labelled control at 1.000. "
+    "(c) Where the reader places the people between the test buildings (0) "
+    "and the breeds (1), against the range of its random control over "
+    "{sets} training sets (grey): at {pos_min} to {pos_max}, next to the "
+    "breeds, so the reader does not separate a range-valued answer from a "
+    "living subject. The position lies outside the random band on "
+    "{outside}, but the random bands span {band_min} to {band_max} across "
+    "checkpoints, far outside 0 to 1 (clipped at the plot edges, arrows), "
+    "so the position cannot separate the reader from random."
 )
 
 
@@ -148,7 +158,28 @@ class _Reader:
         self.n_seeds = int(config["n_seeds"])
 
 
-def _band(ax: Any, y: float, lo: float, hi: float, model: str) -> None:
+def _colour(model: str) -> str:
+    """Gives the checkpoint colour of the family ramp."""
+    return str(axes.model_style(model).color)
+
+
+def _clip_arrow(ax: Any, y: float, edge: float, inward: float) -> None:
+    ax.annotate(
+        "",
+        xy=(edge, y),
+        xytext=(edge + inward, y),
+        arrowprops={
+            "arrowstyle": "->",
+            "color": paper.RANDOM_GREY,
+            "lw": paper.WHISKER_WIDTH,
+            "shrinkA": 0,
+            "shrinkB": 0,
+        },
+        annotation_clip=False,
+    )
+
+
+def _band(ax: Any, y: float, lo: float, hi: float) -> None:
     low, high = POSITION_LIMITS
     clipped = (max(lo, low), min(hi, high))
     ax.add_patch(
@@ -161,17 +192,280 @@ def _band(ax: Any, y: float, lo: float, hi: float, model: str) -> None:
             zorder=1,
         )
     )
-    for marker, edge, clip in ((4, low, lo < low), (5, high, hi > high)):
-        if clip:
-            ax.plot(
-                [edge],
-                [y],
-                marker=marker,
-                ls="none",
-                color=paper.ENC["random_marker"],
-                markersize=3.0,
-                zorder=2,
+    if lo < low:
+        _clip_arrow(ax, y, low, ARROW)
+    if hi > high:
+        _clip_arrow(ax, y, high, -ARROW)
+
+
+def _unclip(ax: Any, count: int) -> None:
+    """Lets the last `count` lines of a panel draw past its axes edge."""
+    for line in ax.get_lines()[-count:]:
+        line.set_clip_on(False)
+
+
+def _head(ax: Any, x: float, text: str, ha: str = "center") -> None:
+    ax.text(
+        x,
+        HEAD_Y,
+        text,
+        color=paper.ENC["secondary_text"],
+        fontsize=paper.MIN_TEXT,
+        ha=ha,
+        va="center",
+        linespacing=0.95,
+    )
+
+
+def _state(reader: Any) -> str:
+    if reader.reader["auroc"] > reader.random["hi"]:
+        return "above"
+    if reader.reader["auroc"] < reader.random["lo"]:
+        return "below"
+    return "inside"
+
+
+def _draw_reader(ax: Any, model: str, y: float, reader: "_Reader") -> str:
+    """Draws the control bar and the reader of one row and gives its state."""
+    state = _state(reader)
+    lo, hi = float(reader.random["lo"]), float(reader.random["hi"])
+    mean = float(reader.random["auroc"])
+    bar = Rectangle(
+        (lo, y - BAR_HALF),
+        hi - lo,
+        2 * BAR_HALF,
+        facecolor=paper.RANDOM_GREY,
+        alpha=paper.RANDOM_BAND_ALPHA,
+        edgecolor="none",
+        zorder=1,
+    )
+    bar.set_gid(f"control-{model}")
+    ax.add_patch(bar)
+    ax.plot(
+        [mean, mean],
+        [y - BAR_HALF, y + BAR_HALF],
+        color=paper.RANDOM_GREY,
+        lw=paper.DATA_WIDTH,
+        solid_capstyle="butt",
+        zorder=2,
+    )
+    value = float(reader.reader["auroc"])
+    edge = paper.INK if state == "above" else paper.RANDOM_GREY
+    ax.plot(
+        [reader.reader["lo"], reader.reader["hi"]],
+        [y, y],
+        color=edge,
+        lw=paper.WHISKER_WIDTH,
+        solid_capstyle="butt",
+        zorder=3,
+    )
+    (point,) = ax.plot(
+        [value],
+        [y],
+        marker=paper.MEASURE_MARKERS["direction"],
+        ls="none",
+        color=edge,
+        markerfacecolor=paper.INK if state == "above" else paper.WHITE,
+        markeredgecolor=edge,
+        markeredgewidth=_rows.EDGE_WIDTH,
+        markersize=_rows.MARKER_SIZE,
+        zorder=4,
+    )
+    point.set_gid(f"reader-{model}")
+    point.set_clip_on(False)
+    if state == "below":
+        (tick,) = ax.plot(
+            [value - TICK[0], value - TICK[1]],
+            [y, y],
+            color=paper.RANDOM_GREY,
+            lw=paper.WHISKER_WIDTH,
+            zorder=3,
+        )
+        tick.set_gid(f"below-tick-{model}")
+    if mean >= CEILING:
+        ax.text(
+            min(lo, float(reader.reader["lo"])) - 0.03,
+            y,
+            "control at 1.000",
+            color=paper.ENC["secondary_text"],
+            fontsize=paper.MIN_TEXT,
+            ha="right",
+            va="center",
+        )
+    return state
+
+
+def _percent_axis(ax: Any) -> None:
+    ax.set_xlim(-0.07, 1.07)
+    ax.xaxis.set_major_locator(ticker.FixedLocator([0.0, 0.5, 1.0]))
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+
+
+def _draw(
+    fig: Any,
+    models: list[str],
+    behavior: dict[str, dict[str, dict[str, Any]]],
+    readers: dict[str, "_Reader"],
+    text: dict[str, Any],
+    rows: dict[str, float],
+    csv_rows: list[list[Any]],
+) -> None:
+    grid = fig.add_gridspec(1, 5, width_ratios=[0.62, 0.62, 0.62, 1.4, 1.0])
+    ax_a = fig.add_subplot(grid[0, 0])
+    others = [fig.add_subplot(grid[0, i], sharey=ax_a) for i in range(1, 5)]
+    columns = [ax_a, *others[:2]]
+    ax_b, ax_c = others[2], others[3]
+    for ax, (series, head) in zip(columns, PANEL_A, strict=True):
+        for model in models:
+            cell = behavior[model][series]
+            colour = _colour(model)
+            _rows.dot(
+                ax,
+                model,
+                rows[model],
+                float(cell["value"]),
+                paper.MEASURE_MARKERS["direction"],
+                colour,
+                (float(cell["lo"]), float(cell["hi"])),
             )
+            _unclip(ax, 2)
+            csv_rows.append(
+                ["a", model, series, cell["value"], cell["lo"], cell["hi"]]
+            )
+        _head(ax, 0.5, head)
+        _percent_axis(ax)
+    for model, reader in readers.items():
+        _draw_reader(ax_b, model, rows[model], reader)
+        for series, cell in (
+            ("reader", reader.reader),
+            ("random", reader.random),
+        ):
+            csv_rows.append(
+                ["b", model, series, cell["auroc"], cell["lo"], cell["hi"]]
+            )
+        y = rows[model]
+        _rows.dot(
+            ax_c,
+            model,
+            y,
+            float(reader.position["position"]),
+            paper.MEASURE_MARKERS["direction"],
+            _colour(model),
+        )
+        _band(ax_c, y, min(reader.draws), max(reader.draws))
+        csv_rows.append(
+            ["c", model, "reader", reader.position["position"], None, None]
+        )
+        csv_rows.append(
+            ["c", model, "random", None, min(reader.draws), max(reader.draws)]
+        )
+    csv_rows.append(["b", None, "words", text["auroc"], text["lo"], text["hi"]])
+    line = ax_b.axvline(
+        text["auroc"], color=paper.ENC["text"], lw=paper.DATA_WIDTH, zorder=2
+    )
+    line.set_gid("words-line")
+    (whisker,) = ax_b.plot(
+        [text["lo"], text["hi"]],
+        [WHISKER_Y, WHISKER_Y],
+        color=paper.ENC["text"],
+        lw=paper.WHISKER_WIDTH,
+        solid_capstyle="butt",
+    )
+    whisker.set_gid("words-whisker")
+    _head(ax_b, text["auroc"] - 0.02, "words", "right")
+    _head(ax_b, 0.48, "chance", "right")
+    axes.ref_line(ax_b, 0.5, "x")
+    _rows.row_axis(ax_a, rows, labels=True)
+    for ax in others:
+        _rows.row_axis(ax, rows, labels=False)
+    ax_a.set_ylim(max(rows.values()) + 0.6, TOP)
+    ax_b.set_xlim(-0.03, 1.07)
+    _percent_axis(ax_b)
+    ax_b.set_xlim(-0.03, 1.07)
+    ax_b.set_xlabel("AUROC on held-out\ndurations")
+    columns[1].set_xlabel("share written\nas a range")
+    ax_c.set_xlim(*POSITION_LIMITS)
+    ax_c.xaxis.set_major_locator(ticker.FixedLocator([-0.5, 0.5, 1.5]))
+    ax_c.xaxis.set_major_formatter(axes.minus_formatter())
+    for edge, label in ((0.0, "buildings"), (1.0, "breeds")):
+        axes.ref_line(ax_c, edge, "x")
+        _head(
+            ax_c,
+            edge + (0.05 if edge else -0.05),
+            label,
+            "left" if edge else "right",
+        )
+    band_min = min(min(r.draws) for r in readers.values())
+    band_max = max(max(r.draws) for r in readers.values())
+    ax_c.set_xlabel(
+        "people's position\nband: "
+        + f"{band_min:.1f}".replace("-", f"${axes.MINUS}$")
+        + f" to {band_max:.1f}\narrows: clipped"
+    )
+    for ax, letter in ((ax_a, "a"), (ax_b, "b"), (ax_c, "c")):
+        paper.panel_letter(ax, letter)
+    main = fig.legend(
+        handles=[
+            Patch(
+                facecolor=paper.RANDOM_GREY,
+                alpha=paper.RANDOM_BAND_ALPHA,
+                lw=0,
+                label="random control",
+            ),
+            Line2D(
+                [], [], color=paper.ENC["text"], lw=1.0, label="word classifier"
+            ),
+            _rows.series_handle("GPT-2 and base", "h", paper.INK),
+            _rows.series_handle("post-trained", "h", paper.INK, filled=False),
+        ],
+        loc="outside upper center",
+        ncol=5,
+        handlelength=1.0,
+        columnspacing=1.0,
+        fontsize=7,
+    )
+    main.get_frame().set_edgecolor("none")
+    open_grey: dict[str, Any] = {
+        "ls": "none",
+        "marker": "o",
+        "markerfacecolor": paper.WHITE,
+        "markeredgecolor": paper.RANDOM_GREY,
+        "markeredgewidth": _rows.EDGE_WIDTH,
+        "markersize": _rows.MARKER_SIZE,
+    }
+    states = fig.legend(
+        handles=[
+            _rows.series_handle(
+                "above the control",
+                paper.MEASURE_MARKERS["direction"],
+                paper.INK,
+            ),
+            Line2D([], [], label="inside the control", **open_grey),
+            (
+                Line2D(
+                    [],
+                    [],
+                    color=paper.RANDOM_GREY,
+                    lw=paper.WHISKER_WIDTH,
+                ),
+                Line2D([], [], label="below the control", **open_grey),
+            ),
+        ],
+        handler_map={tuple: HandlerTuple(ndivide=None, pad=0.0)},
+        labels=[
+            "above the control",
+            "inside the control",
+            "below the control",
+        ],
+        title="range reader (circle) against its control",
+        title_fontsize=7,
+        loc="outside lower center",
+        ncol=3,
+        handlelength=1.4,
+        columnspacing=1.2,
+        fontsize=7,
+    )
+    states.get_frame().set_edgecolor("none")
 
 
 def build(manifest: Manifest) -> FigureOutput:
@@ -195,188 +489,7 @@ def build(manifest: Manifest) -> FigureOutput:
 
     with paper.paper_style():
         fig = _rows.new_figure(HEIGHT)
-        grid = fig.add_gridspec(1, 3, width_ratios=[2.1, 1.6, 1.6])
-        ax_a = fig.add_subplot(grid[0, 0])
-        ax_b = fig.add_subplot(grid[0, 1], sharey=ax_a)
-        ax_c = fig.add_subplot(grid[0, 2], sharey=ax_a)
-        for model in models:
-            for series, marker, dodge in PANEL_A:
-                cell = behavior[model][series]
-                _rows.dot(
-                    ax_a,
-                    model,
-                    rows[model] + dodge,
-                    float(cell["value"]),
-                    marker,
-                    paper.INK,
-                    (float(cell["lo"]), float(cell["hi"])),
-                )
-                csv_rows.append(
-                    ["a", model, series, cell["value"], cell["lo"], cell["hi"]]
-                )
-        for model, reader in readers.items():
-            y = rows[model]
-            _rows.dot(
-                ax_b,
-                model,
-                y - 0.15,
-                float(reader.reader["auroc"]),
-                paper.MEASURE_MARKERS["direction"],
-                paper.INK,
-                (float(reader.reader["lo"]), float(reader.reader["hi"])),
-            )
-            ax_b.plot(
-                [reader.random["lo"], reader.random["hi"]],
-                [y + 0.15, y + 0.15],
-                color=paper.ENC["random_marker"],
-                lw=paper.WHISKER_WIDTH,
-                zorder=2,
-            )
-            ax_b.plot(
-                [reader.random["auroc"]],
-                [y + 0.15],
-                marker="x",
-                ls="none",
-                color=paper.ENC["random_marker"],
-                markersize=_rows.MARKER_SIZE,
-                markeredgewidth=0.8,
-                zorder=3,
-            )
-            csv_rows.append(
-                [
-                    "b",
-                    model,
-                    "reader",
-                    reader.reader["auroc"],
-                    reader.reader["lo"],
-                    reader.reader["hi"],
-                ]
-            )
-            csv_rows.append(
-                [
-                    "b",
-                    model,
-                    "random",
-                    reader.random["auroc"],
-                    reader.random["lo"],
-                    reader.random["hi"],
-                ]
-            )
-            _rows.dot(
-                ax_c,
-                model,
-                y,
-                float(reader.position["position"]),
-                paper.MEASURE_MARKERS["direction"],
-                paper.INK,
-            )
-            _band(ax_c, y, min(reader.draws), max(reader.draws), model)
-            csv_rows.append(
-                ["c", model, "reader", reader.position["position"], None, None]
-            )
-            csv_rows.append(
-                [
-                    "c",
-                    model,
-                    "random",
-                    None,
-                    min(reader.draws),
-                    max(reader.draws),
-                ]
-            )
-        csv_rows.append(
-            ["b", None, "words", text["auroc"], text["lo"], text["hi"]]
-        )
-        ax_b.axvspan(
-            text["lo"], text["hi"], color=paper.ENC["text"], alpha=0.15, lw=0
-        )
-        ax_b.axvline(
-            text["auroc"], color=paper.ENC["text"], lw=paper.DATA_WIDTH
-        )
-        ax_b.text(
-            text["auroc"],
-            TOP + 0.4,
-            "words",
-            color=paper.ENC["secondary_text"],
-            fontsize=6.5,
-            ha="center",
-            va="center",
-        )
-        _rows.row_axis(ax_a, rows, labels=True)
-        _rows.row_axis(ax_b, rows, labels=False)
-        _rows.row_axis(ax_c, rows, labels=False)
-        ax_a.set_ylim(max(rows.values()) + 0.6, TOP)
-        ax_a.set_xlim(-0.03, 1.03)
-        axes.unit_axis(ax_a, "x")
-        ax_a.set_xlabel("share written as a range")
-        ax_b.set_xlim(-0.03, 1.03)
-        axes.unit_axis(ax_b, "x")
-        axes.ref_line(ax_b, 0.5, "x")
-        ax_b.set_xlabel("AUROC on held-out\ndurations")
-        ax_c.set_xlim(*POSITION_LIMITS)
-        ax_c.xaxis.set_major_locator(
-            ticker.FixedLocator([-0.5, 0.0, 0.5, 1.0, 1.5])
-        )
-        ax_c.xaxis.set_major_formatter(axes.minus_formatter())
-        for edge, label in ((0.0, "buildings"), (1.0, "breeds")):
-            axes.ref_line(ax_c, edge, "x")
-            ax_c.text(
-                edge,
-                TOP + 0.4,
-                label,
-                color=paper.ENC["secondary_text"],
-                fontsize=6.5,
-                ha="center",
-                va="center",
-            )
-        ax_c.set_xlabel("people's position\n(arrows: band clipped)")
-        for ax, letter in zip((ax_a, ax_b, ax_c), "abc", strict=True):
-            paper.panel_letter(ax, letter)
-        legend = fig.legend(
-            handles=[
-                _rows.series_handle(
-                    "range items", paper.ITEM_SET_MARKERS["range"], paper.INK
-                ),
-                _rows.series_handle(
-                    "exact items", paper.ITEM_SET_MARKERS["exact"], paper.INK
-                ),
-                _rows.series_handle(
-                    "people's heights",
-                    paper.ITEM_SET_MARKERS["people"],
-                    paper.INK,
-                ),
-                _rows.series_handle(
-                    "range reader",
-                    paper.MEASURE_MARKERS["direction"],
-                    paper.INK,
-                ),
-                _rows.series_handle(
-                    "random direction", "x", paper.ENC["random_marker"]
-                ),
-                Patch(
-                    facecolor=paper.RANDOM_BAND,
-                    lw=0,
-                    label="random range of the position",
-                ),
-                Line2D(
-                    [],
-                    [],
-                    color=paper.ENC["text"],
-                    lw=1.0,
-                    label="word classifier",
-                ),
-                _rows.series_handle("GPT-2 and base", "h", paper.INK),
-                _rows.series_handle(
-                    "post-trained", "h", paper.INK, filled=False
-                ),
-            ],
-            loc="outside upper center",
-            ncol=4,
-            handlelength=1.0,
-            columnspacing=1.2,
-            fontsize=7,
-        )
-        legend.get_frame().set_edgecolor("none")
+        _draw(fig, models, behavior, readers, text, rows, csv_rows)
 
     rate = {m: behavior[m]["range_items"]["value"] for m in models}
     exact = {m: behavior[m]["exact_items"]["value"] for m in models}
