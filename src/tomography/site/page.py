@@ -310,13 +310,16 @@ class Page:
             f'<th class="r">{_e(c)}</th>' if a == "r" else f"<th>{_e(c)}</th>"
             for c, a in zip(out.columns, out.align, strict=True)
         )
+        models = out.columns[0] == "Model"
         body = []
         for i, row in enumerate(out.rows):
             cells = "".join(
                 f'<td class="r">{self.text(c)}</td>'
                 if a == "r"
+                else f'<td class="k">{self.text(c)}</td>'
+                if models and j == 0
                 else f"<td>{self.text(c)}</td>"
-                for c, a in zip(row, out.align, strict=True)
+                for j, (c, a) in enumerate(zip(row, out.align, strict=True))
             )
             if out.row_groups is None:
                 grouped = i and row[0] and not out.groups

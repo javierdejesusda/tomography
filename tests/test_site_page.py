@@ -477,3 +477,17 @@ def test_table_numbers_increase_in_page_order(
     assert appendix == list(range(1, len(appendix) + 1))
     figures = [int(n) for n in re.findall(r'<figure id="fig-A(\d+)"', html)]
     assert figures == list(range(1, len(figures) + 1))
+
+
+def test_only_the_model_column_is_kept_on_one_line() -> None:
+    output = registry.TableOutput(
+        "Claim.", "Detail.", ["Model", "B"], [["m", "1"]], "lr", [], {}
+    )
+    doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+    models = page.Page(doc).table("checkpoints")
+    assert '<td class="k">m</td>' in models
+    text = page.Page(_doc(tables={"checkpoints": _table()})).table(
+        "checkpoints"
+    )
+    assert '<td class="k">' not in text
+    assert "<td>x</td>" in text
