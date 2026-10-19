@@ -201,3 +201,24 @@ def test_panel_title_takes_a_smaller_size_for_dense_grids() -> None:
         ax = fig.subplots()
         letter, title = paper.panel_title(ax, "a", "dense", size=6.5)
     assert letter.get_fontsize() == title.get_fontsize() == 6.5
+
+
+def test_one_marker_per_measure_family_and_the_role_key_is_its_own() -> None:
+    markers = list(paper.MEASURE_MARKERS.values())
+    flat = [
+        m
+        for item in markers
+        for m in (item if isinstance(item, tuple) else (item,))
+    ]
+    assert len(flat) == len(set(flat))
+    assert paper.ROLE_KEY_MARKER not in flat
+    assert paper.MEASURE_MARKERS["direction"] == "o"
+    assert paper.MEASURE_MARKERS["random"] == "x"
+    assert paper.MEASURE_MARKERS["paper_finder"] == "D"
+    assert set(paper.MEASURE_MARKERS["text"]) == {"^", "v"}
+
+
+def test_the_encoding_rules_are_stated_in_the_module() -> None:
+    assert paper.ENCODING_RULES.count("\n") >= 4
+    for word in ("identity", "Filled", "open", "hexagon", "band"):
+        assert word in paper.ENCODING_RULES

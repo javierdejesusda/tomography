@@ -309,14 +309,10 @@ def test_caption_is_the_template_filled_from_the_files(
     above = stats.per_role_text(
         {r: output.counts["above_text"][r] for r in stats.ROLES}
     )
-    inside = stats.per_role_text(
-        {r: output.counts["reader_in_random"][r] for r in stats.ROLES}
-    )
     outside = stats.per_role_text(
         {r: output.counts["people_outside_band"][r] for r in stats.ROLES}
     )
     assert f"The reader is above the classifier's value on {above}" in caption
-    assert f"inside the random control's interval on {inside}" in caption
     assert f"outside the random band on {outside}" in caption
     assert "reaches 0.9" not in caption
     assert f"{n['text_word']:.3f}" in caption
@@ -401,3 +397,67 @@ def test_the_reader_is_drawn_with_the_marker_its_legend_key_shows(
     _, ax_b, ax_c = output.figure.axes
     for ax in (ax_b, ax_c):
         assert any(line.get_marker() == reader for line in ax.lines)
+
+
+def test_control_counts_are_per_role_and_use_the_stored_values(
+    output: registry.FigureOutput,
+) -> None:
+    models = _models("p10b")
+    want = {
+        "reader_above_random": {
+            m: _cell(m, "logistic")["auroc"] > _cell(m, "random")["hi"]
+            for m in models
+        },
+        "control_below_half": {
+            m: _cell(m, "random")["auroc"] < 0.5 for m in models
+        },
+        "control_above_95": {
+            m: _cell(m, "random")["auroc"] > 0.95 for m in models
+        },
+    }
+    for name, flags in want.items():
+        counts = _by_role(flags)
+        for role in stats.ROLES:
+            got = output.counts[name][role]
+            assert (got.hits, got.total) == (
+                counts[role].hits,
+                counts[role].total,
+            )
+            assert output.numbers[f"{name}_{role}"] == counts[role].hits
+    draws = [r["position"] for m in models for r in _people(m, "random")]
+    assert output.numbers["band_min"] == pytest.approx(min(draws))
+    assert output.numbers["band_max"] == pytest.approx(max(draws))
+
+
+def test_caption_defines_the_control_interval_and_the_clipped_bands(
+    output: registry.FigureOutput,
+) -> None:
+    n = output.numbers
+    for name in (
+        "reader_above_random",
+        "control_below_half",
+        "control_above_95",
+    ):
+        text = stats.per_role_text(
+            {r: output.counts[name][r] for r in stats.ROLES}
+        )
+        assert text in output.detail
+    assert "95 percent bootstrap interval of the mean over the" in output.detail
+    assert "above the random control's interval" in output.detail
+    assert "below 0.5" in output.detail
+    assert "above 0.95" in output.detail
+    low = f"{n['band_min']:.1f}".replace("-", chr(0x2212))
+    assert (
+        f"the random bands span {low} to {n['band_max']:.1f}" in output.detail
+    )
+    assert "cannot separate the reader from random" in output.detail
+    assert "inside the random control's interval" not in output.detail
+
+
+def test_clipped_bands_are_marked_on_panel_c(
+    output: registry.FigureOutput,
+) -> None:
+    ax_c = output.figure.axes[2]
+    assert any("clipped" in t.get_text() for t in ax_c.texts)
+    markers = {line.get_marker() for line in ax_c.lines}
+    assert {"<", ">"} & markers

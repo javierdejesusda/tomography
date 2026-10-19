@@ -48,7 +48,11 @@ DETAIL = (
     "coefficient, one line per checkpoint, with the range over the 3 "
     "steering vectors (band) and the score under a positive or negative "
     "instruction instead of steering (triangles, right strip). At relative "
-    "coefficients {minus}0.1 and +0.1 the mean score moves {moves}. (d) "
+    "coefficients {minus}0.1 and +0.1 the mean score moves {moves}. A "
+    "checkpoint counts as moving when all 3 steering vectors move the score "
+    "past the unsteered value at both signs, on the primary judge and on a "
+    "second judge (another sentiment classifier): this holds on "
+    "{moves_count}, and the two judges agree on {agree}. (d) "
     "Perplexity of {n_neutral} held-out WikiText-103 passages under the "
     "steered model, as a ratio to the unsteered model (colour and number); "
     "an asterisk marks a distinct-1 of the completions below {min_distinct}, "
@@ -57,8 +61,9 @@ DETAIL = (
     "0.1 on {held}, and at "
     "0.3 or {minus}0.3 on {fails}. This run has no random-direction arm; "
     "the finder comparison steers with three random directions of the same "
-    "norm ([[fig:teaser]], last row). [[table:steering]] adds the perplexity "
-    "of the completions themselves."
+    "norm ([[fig:teaser]], last row). The fluency rule uses the perplexity "
+    "of neutral text and the distinct-1 of the completions, not the "
+    "perplexity of the completions, which [[table:steering]] gives."
 )
 
 
@@ -106,10 +111,30 @@ class _Model:
             self.distinct[coeff] = float(
                 np.mean([r["distinct_1"] for r in cell])
             )
+        self.vectors = [r for r in rows if r["arm"] == "linear"]
+        self.unsteered = none
         self.prompting = {
             arm: float(next(r for r in rows if r["arm"] == arm)["score"])
             for arm in ("prompting+1", "prompting-1")
         }
+
+    def moves(self, column: str) -> bool:
+        """Tells whether every steering vector moves a judge's score.
+
+        Args:
+            column: The judge's score column.
+
+        Returns:
+            Whether, for every vector, the score is above the unsteered one
+            at +0.1 and below it at -0.1.
+        """
+        base = float(self.unsteered[column])
+        return all(
+            sign * (float(r[column]) - base) > 0
+            for r in self.vectors
+            for coeff, sign in ((0.1, 1), (-0.1, -1))
+            if r["coeff"] == coeff
+        )
 
     def fluent(self, coeff: float) -> bool:
         return (
@@ -381,9 +406,17 @@ def build(manifest: Manifest) -> FigureOutput:
     flags03 = {
         m: by_key[m].fluent(0.3) or by_key[m].fluent(-0.3) for m in models
     }
+    primary = {m: by_key[m].moves("score") for m in models}
+    check = {m: by_key[m].moves("score_check") for m in models}
     counts = {
         "fluent01": stats.per_role(flags01),
         "fluent03": stats.per_role(flags03),
+        "moves01": stats.per_role({m: primary[m] and check[m] for m in models}),
+        "moves01_primary": stats.per_role(primary),
+        "moves01_check": stats.per_role(check),
+        "judges_agree": stats.per_role(
+            {m: primary[m] == check[m] for m in models}
+        ),
     }
     numbers: dict[str, float] = {"n_neutral": float(n_neutral)}
     for role in stats.ROLES:
@@ -409,6 +442,8 @@ def build(manifest: Manifest) -> FigureOutput:
         max_ratio=MAX_RATIO,
         min_distinct=MIN_DISTINCT,
         moves=moves,
+        moves_count=stats.per_role_text(counts["moves01"]),
+        agree=stats.per_role_text(counts["judges_agree"]),
         n_neutral=n_neutral,
         held=stats.per_role_text(counts["fluent01"]),
         fails=_hits(flags03),
