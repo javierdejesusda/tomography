@@ -145,7 +145,7 @@ def build(manifest: Manifest) -> TableOutput:
         "by its random control."
     )
     detail = (
-        "The first three columns give the percentage of greedy answers "
+        "The three leftmost columns give the percentage of greedy answers "
         "written as a range on range items, exact items and the heights of "
         "120 people. Reader is the AUROC on held-out durations of a range "
         "reader fitted on heights and wingspans with the concept prompt, "
