@@ -482,3 +482,30 @@ def test_the_heatmaps_are_titled_fitted_and_scored_wording(
         assert label.get_fontsize() >= paper.MIN_TEXT
     for ax in matrices[:-2]:
         assert ax.xaxis.label.get_text() == ""
+
+
+def test_the_zero_clause_is_data_driven() -> None:
+    above = {"gpt2": np.ones((3, 3))}
+    clause = a_wording._zero_clause(above)
+    assert clause == "no cell is at or below zero; "
+    one = {"gpt2": np.ones((3, 3)), "qwen3-4b": np.ones((3, 3))}
+    one["qwen3-4b"][0, 1] = -0.1
+    text = a_wording._zero_clause(one)
+    assert "the 1 cell at or below zero" in text
+    assert "carries a dot; " in text
+    assert "0 cells" not in text
+    assert "  " not in text
+    many = {"qwen3-4b": np.zeros((2, 2))}
+    assert a_wording._zero_clause(many).startswith(
+        "the 4 cells at or below zero (all on "
+    )
+    assert "  " not in a_wording._zero_clause(many)
+
+
+def test_the_current_caption_keeps_its_zero_sentence(
+    output: registry.FigureOutput,
+) -> None:
+    n = int(output.numbers["n_below"])
+    assert n > 0
+    assert f"the {n} cells at or below zero (all on " in output.detail
+    assert ") carry a dot; " in output.detail
