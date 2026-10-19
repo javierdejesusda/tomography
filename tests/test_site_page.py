@@ -158,3 +158,32 @@ def test_cite_and_footnote_tokens_still_resolve() -> None:
         "[[cite:zou2025]]"
     )
     assert 'id="fnref1"' in view.text("x[[fn:a note]]")
+
+
+def _grouped(row_groups: tuple[int, ...] | None) -> str:
+    output = registry.TableOutput(
+        "Claim.",
+        "Detail.",
+        ["A", "B"],
+        [["a", "1"], ["", "2"], ["b", "3"], ["", "4"]],
+        "lr",
+        [],
+        {},
+        row_groups=row_groups,
+    )
+    doc = _doc(tables={"checkpoints": page.TableEntry("checkpoints", output)})
+    return page.Page(doc).table("checkpoints")
+
+
+def test_row_groups_set_the_rows_that_get_a_group_rule() -> None:
+    html = _grouped((0, 2))
+    assert html.count('<tr class="group">') == 1
+    assert '<tr class="group"><td>b</td>' in html
+
+
+def test_a_declared_empty_row_groups_draws_no_group_rule() -> None:
+    assert 'class="group"' not in _grouped(())
+
+
+def test_without_row_groups_a_labelled_row_starts_a_group() -> None:
+    assert _grouped(None).count('<tr class="group">') == 1

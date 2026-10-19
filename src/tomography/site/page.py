@@ -285,7 +285,10 @@ class Page:
                 else f"<td>{_e(c)}</td>"
                 for c, a in zip(row, out.align, strict=True)
             )
-            grouped = i and row[0] and not out.groups
+            if out.row_groups is None:
+                grouped = i and row[0] and not out.groups
+            else:
+                grouped = i in out.row_groups and i > 0
             cls = ' class="group"' if grouped else ""
             body.append(f"<tr{cls}>{cells}</tr>")
         notes = "".join(f"<p>{_e(n)}</p>" for n in out.notes)

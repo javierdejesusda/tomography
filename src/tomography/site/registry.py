@@ -71,6 +71,9 @@ class TableOutput:
         numbers: Name to value for each number the claim quotes.
         groups: Header spans over the columns after the first, as (label,
             number of columns, muted); empty when columns are ungrouped.
+        row_groups: Index of the first row of each row group, which gets a
+            rule above it; empty for none, and None to rule above every row
+            with a label (the earlier behaviour).
         counts: Name to the per-role count the claim quotes.
     """
 
@@ -82,6 +85,7 @@ class TableOutput:
     notes: list[str]
     numbers: dict[str, float]
     groups: tuple[tuple[str, int, bool], ...] = ()
+    row_groups: tuple[int, ...] | None = None
     counts: dict[str, dict[str, RoleCount]] = dataclasses.field(
         default_factory=dict
     )
