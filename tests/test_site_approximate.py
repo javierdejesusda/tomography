@@ -458,7 +458,7 @@ def test_clipped_bands_are_marked_on_panel_c(
     output: registry.FigureOutput,
 ) -> None:
     ax_c = output.figure.axes[2]
-    assert any("clipped" in t.get_text() for t in ax_c.texts)
+    assert "band clipped" in ax_c.get_xlabel()
     markers = {line.get_marker() for line in ax_c.lines}
     assert {"<", ">"} & markers
 

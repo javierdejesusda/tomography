@@ -327,16 +327,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 ha="center",
                 va="center",
             )
-        ax_c.text(
-            POSITION_LIMITS[1],
-            max(rows.values()) + 0.45,
-            "arrows: band clipped",
-            color=paper.ENC["secondary_text"],
-            fontsize=6.5,
-            ha="right",
-            va="center",
-        )
-        ax_c.set_xlabel("people's position between\nbuildings and breeds")
+        ax_c.set_xlabel("people's position\n(arrows: band clipped)")
         for ax, letter in zip((ax_a, ax_b, ax_c), "abc", strict=True):
             paper.panel_letter(ax, letter)
         legend = fig.legend(
