@@ -1,43 +1,57 @@
 """Appendix figure: The range direction against the knowledge directions.
 
-For every checkpoint, the share of question types at each layer whose cosine
-with the range direction, or whose pooled AUROC interval, lies outside the
-band that random directions give, against relative depth.
+For every checkpoint, the share of layer-by-type cells whose cosine with the
+range direction, or whose pooled AUROC interval, lies outside the band that
+random directions give: one dot per checkpoint in role blocks, and a heat
+strip of the cosine share by relative depth.
 """
 
 from collections import defaultdict
 from collections.abc import Sequence
 import csv
 import json
+import math
 from typing import Any
 
 from matplotlib import ticker
 from matplotlib.axes import Axes
-from matplotlib.lines import Line2D
+from matplotlib.collections import QuadMesh
+from matplotlib.colors import Normalize
+import numpy as np
 
 from tomography.site import stats
 from tomography.site.figs import _group
 from tomography.site.figs import _rows
+from tomography.site.figs import knowledge_reading as rows_of
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.viz import axes
 from tomography.viz import paper
 
-HEIGHT = 3.4
+HEIGHT = 3.8
 CHANCE = 0.05
+BINS = 6
+HEAD_Y = -0.95
+TOP = -1.4
 HEADER = ["row", "model", "layer", "depth", "share", "outside", "types"]
 CLAIM = "The range direction against the knowledge directions at every layer."
 DETAIL = (
-    "Share of the question types whose cosine with the range direction lies "
-    "outside the band of random directions (top row) and whose pooled AUROC "
-    "interval lies outside the band of random directions (bottom row), "
-    "against relative depth, one line per checkpoint (dashed: "
-    "post-trained); the dotted line is the share expected for random "
-    "vectors, 0.05. {layer} Over all layers the cosine lies outside its random "
-    "band in {cos_gpt2} of {cells_gpt2} GPT-2 cells, {cos_base} of "
-    "{cells_base} Qwen3 base cells and {cos_post} of {cells_post} "
-    "post-trained cells, and the AUROC interval outside its band in "
-    "{auc_gpt2}, {auc_base} and {auc_post} of the same cells."
+    "Share of the layer-by-type cells whose cosine with the range direction "
+    "lies outside the band of random directions (a) and whose pooled AUROC "
+    "interval lies outside the band of random directions (b), one circle "
+    "per checkpoint in role blocks (filled: GPT-2 and Qwen3 base; open: "
+    "post-trained), with the number of cells printed at the right of each "
+    "row; the dotted line is the share expected for random vectors, 0.05. "
+    "(c) The cosine share by relative depth, in six bins of layers, one row "
+    "per checkpoint, with 0.05 marked on the colour bar. {layer} Over all "
+    "layers the cosine lies outside its random band in {cos_gpt2} of "
+    "{cells_gpt2} GPT-2 cells, {cos_base} of {cells_base} Qwen3 base cells "
+    "and {cos_post} of {cells_post} post-trained cells, and the AUROC "
+    "interval outside its band in {auc_gpt2}, {auc_base} and {auc_post} of "
+    "the same cells. Each share is a count over few question types "
+    "({types_min} to {types_max} per layer), so it moves in steps, and "
+    "adjacent layers share a residual stream, so the cells are not "
+    "independent and 0.05 is only a rough reference."
 )
 LAYER_ONE = (
     "At layer 1, the layer the plain-template range reader chose on every "
@@ -49,6 +63,14 @@ LAYER_OTHER = (
     "At the layer the plain-template range reader chose on each checkpoint, "
     "every cosine is at most {value} in absolute value."
 )
+LIMITS = {"cosine": (-0.04, 0.95), "auroc": (-0.012, 0.16)}
+TICKS = {"cosine": [0.0, 0.25, 0.5], "auroc": [0.0, 0.05, 0.1]}
+LABELS = {
+    "cosine": "cosine outside\nthe random band",
+    "auroc": "AUROC outside\nthe random band",
+}
+SEPARATOR_WIDTH = 0.5
+GROUP_X = -0.5
 
 
 def layer_sentence(layers: Sequence[int], biggest: float) -> str:
@@ -108,25 +130,153 @@ def _tally(
     return tally
 
 
-def _panel(ax: Axes, found: dict[str, list[tuple[int, int, int]]]) -> None:
-    for model, shares in found.items():
-        style = axes.model_style(model)
-        layers = shares[-1][0]
-        ax.plot(
-            [k / layers for k, _, _ in shares],
-            [hits / total for _, hits, total in shares],
-            color=style.color,
-            ls=style.linestyle,
-            lw=paper.DATA_WIDTH,
-            zorder=3,
+def _totals(
+    found: dict[str, list[tuple[int, int, int]]],
+) -> dict[str, tuple[int, int]]:
+    return {
+        m: (sum(h for _, h, _ in c), sum(t for _, _, t in c))
+        for m, c in found.items()
+    }
+
+
+def _bins(cells: list[tuple[int, int, int]]) -> list[float]:
+    layers = cells[-1][0]
+    hits = [0] * BINS
+    total = [0] * BINS
+    for k, h, t in cells:
+        index = min(math.ceil(k / layers * BINS) - 1, BINS - 1)
+        hits[index] += h
+        total[index] += t
+    return [h / t for h, t in zip(hits, total, strict=True)]
+
+
+def _head(ax: Axes, x: float, text: str, ha: str) -> None:
+    ax.text(
+        x,
+        HEAD_Y,
+        text,
+        transform=ax.get_yaxis_transform(),
+        color=paper.ENC["secondary_text"],
+        fontsize=paper.MIN_TEXT,
+        ha=ha,
+        va="center",
+        linespacing=0.95,
+    )
+
+
+def _dots(
+    ax: Axes,
+    row: str,
+    totals: dict[str, tuple[int, int]],
+    rows: dict[str, float],
+) -> None:
+    for model in rows:
+        hits, total = totals[model]
+        _rows.dot(
+            ax,
+            model,
+            rows[model],
+            hits / total,
+            paper.MEASURE_MARKERS["direction"],
+            axes.model_style(model).color,
         )
-    axes.ref_line(ax, CHANCE)
+        ax.text(
+            0.99,
+            rows[model],
+            f"{hits:,} of {total:,}",
+            transform=ax.get_yaxis_transform(),
+            color=paper.ENC["secondary_text"],
+            fontsize=paper.MIN_TEXT,
+            ha="right",
+            va="center",
+        )
+    axes.ref_line(ax, CHANCE, "x")
+    ax.set_xlim(*LIMITS[row])
+    ax.xaxis.set_major_locator(ticker.FixedLocator(TICKS[row]))
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.set_xlabel(LABELS[row])
+    _head(ax, CHANCE + 0.01, "expected for\nrandom vectors", "left")
+
+
+def _heat(
+    ax: Axes,
+    cosine: dict[str, list[tuple[int, int, int]]],
+    rows: dict[str, float],
+) -> tuple[QuadMesh, float]:
+    profile = {m: _bins(c) for m, c in cosine.items()}
+    top = math.ceil(max(max(v) for v in profile.values()) * 10) / 10
+    norm = Normalize(vmin=0.0, vmax=top)
+    edges = np.linspace(0.0, 1.0, BINS + 1)
+    mesh = None
+    for members in _group.lines_by_role(list(rows)).values():
+        ys = [rows[m] for m in members]
+        mesh = ax.pcolormesh(
+            edges,
+            np.array([ys[0] - 0.5] + [y + 0.5 for y in ys]),
+            np.array([profile[m] for m in members]),
+            cmap=axes.SEQUENTIAL,
+            norm=norm,
+            edgecolors="none",
+            zorder=2,
+        )
+    assert mesh is not None
     ax.set_xlim(0.0, 1.0)
-    ax.set_ylim(-0.03, 1.03)
-    ax.xaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
-    ax.xaxis.set_major_formatter(axes.minus_formatter())
-    ax.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
-    ax.yaxis.set_major_formatter(axes.minus_formatter())
+    ax.xaxis.set_major_locator(ticker.FixedLocator([0.0, 0.5, 1.0]))
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.set_xlabel("relative depth")
+    _head(ax, 0.5, "cosine share\nby depth", "center")
+    return mesh, top
+
+
+def _draw(
+    fig: Any,
+    found: dict[str, dict[str, list[tuple[int, int, int]]]],
+    rows: dict[str, float],
+    separators: list[float],
+) -> None:
+    grid = fig.add_gridspec(1, 4, width_ratios=[1.0, 0.9, 1.0, 0.07])
+    ax_a = fig.add_subplot(grid[0, 0])
+    ax_b = fig.add_subplot(grid[0, 1], sharey=ax_a)
+    ax_c = fig.add_subplot(grid[0, 2], sharey=ax_a)
+    cax = fig.add_subplot(grid[0, 3])
+    _dots(ax_a, "cosine", _totals(found["cosine"]), rows)
+    _dots(ax_b, "auroc", _totals(found["auroc"]), rows)
+    mesh, top = _heat(ax_c, found["cosine"], rows)
+    bar = fig.colorbar(mesh, cax=cax)
+    bar.set_ticks([0.0, CHANCE, top])
+    bar.ax.set_yticklabels(["0", "0.05", f"{top:g}"])
+    bar.ax.axhline(CHANCE, color=paper.INK, lw=paper.REFERENCE_WIDTH)
+    bar.outline.set_linewidth(paper.REFERENCE_WIDTH)
+    panels = [ax_a, ax_b, ax_c]
+    for position, ax in enumerate(panels):
+        _rows.row_axis(ax, rows, labels=position == 0)
+        ax.set_ylim(max(rows.values()) + 0.6, TOP)
+        for y in separators:
+            ax.axhline(y, color=paper.RANDOM_BAND, lw=SEPARATOR_WIDTH, zorder=0)
+        paper.panel_letter(ax, "abc"[position])
+    ax_a.set_yticklabels([rows_of.row_label(m) for m in rows])
+    rows_of.draw_group_labels(ax_a, rows, GROUP_X)
+    legend = fig.legend(
+        handles=[
+            _rows.series_handle(
+                "GPT-2 and Qwen3 base",
+                paper.MEASURE_MARKERS["direction"],
+                paper.ENC["reference"],
+            ),
+            _rows.series_handle(
+                "post-trained",
+                paper.MEASURE_MARKERS["direction"],
+                paper.ENC["reference"],
+                filled=False,
+            ),
+        ],
+        loc="outside upper center",
+        ncol=2,
+        handlelength=1.0,
+        columnspacing=1.8,
+        fontsize=7,
+    )
+    legend.get_frame().set_edgecolor("none")
 
 
 def build(manifest: Manifest) -> FigureOutput:
@@ -182,76 +332,16 @@ def build(manifest: Manifest) -> FigureOutput:
                 csv_rows.append(
                     [row, model, k, k / layers, hits / total, hits, total]
                 )
+        for model, (hits, total) in _totals(by_model).items():
+            csv_rows.append(
+                [f"{row}_all", model, None, None, hits / total, hits, total]
+            )
+    rows, separators = rows_of.block_rows(models)
 
     with paper.paper_style():
         fig = _rows.new_figure(HEIGHT)
-        grid = fig.subplots(2, 2, sharex=True, sharey=True)
-        groups = (
-            ("GPT-2", [m for m in models if m.startswith("gpt2")]),
-            ("Qwen3", [m for m in models if not m.startswith("gpt2")]),
-        )
-        tallies = {row: _tally(found[row]) for row in found}
-        for r, row in enumerate(("cosine", "auroc")):
-            for c, (title, members) in enumerate(groups):
-                ax = grid[r][c]
-                _panel(ax, {m: found[row][m] for m in members})
-                roles = ("gpt2",) if c == 0 else ("base", "post")
-                for i, role in enumerate(roles):
-                    hits, total = tallies[row][role]
-                    ax.text(
-                        0.03,
-                        0.95 - 0.1 * i,
-                        f"{stats.ROLE_NAMES[role]}: {hits:,} of {total:,} "
-                        "cells",
-                        transform=ax.transAxes,
-                        fontsize=6.5,
-                        color=paper.ENC["secondary_text"],
-                        ha="left",
-                        va="top",
-                    )
-                paper.panel_title(
-                    ax, "abcd"[2 * r + c], title if r == 0 else ""
-                )
-                if c == 0:
-                    ax.set_ylabel(
-                        "cosine outside band"
-                        if row == "cosine"
-                        else "AUROC outside band"
-                    )
-                if r == 1:
-                    ax.set_xlabel("relative depth")
-        grid[1][1].annotate(
-            "expected for random vectors",
-            xy=(0.85, CHANCE),
-            xytext=(0.97, 0.4),
-            ha="right",
-            fontsize=6.5,
-            color=paper.ENC["secondary_text"],
-            arrowprops={
-                "arrowstyle": "-",
-                "lw": paper.REFERENCE_WIDTH,
-                "color": paper.ENC["reference"],
-            },
-        )
-        legend = fig.legend(
-            handles=[
-                Line2D(
-                    [],
-                    [],
-                    color=axes.model_style(m).color,
-                    ls=axes.model_style(m).linestyle,
-                    lw=paper.DATA_WIDTH,
-                    label=paper.display_name(m),
-                )
-                for m in models
-            ],
-            loc="outside lower center",
-            ncol=5,
-            handlelength=1.0,
-            columnspacing=1.0,
-            fontsize=6.5,
-        )
-        legend.get_frame().set_edgecolor("none")
+        _draw(fig, found, rows, separators)
+        _rows.freeze_layout(fig)
 
     counts: dict[str, dict[str, stats.RoleCount]] = {}
     numbers: dict[str, float] = {"layer1_cos_max": biggest}
@@ -266,7 +356,13 @@ def build(manifest: Manifest) -> FigureOutput:
             numbers[f"cells_{role}"] = float(t)
             values[f"{name}_{role}"] = f"{h:,}"
             values[f"cells_{role}"] = f"{t:,}"
-    detail = DETAIL.format(layer=layer_sentence(chosen, biggest), **values)
+    types = [t for cells in found["cosine"].values() for _, _, t in cells]
+    detail = DETAIL.format(
+        layer=layer_sentence(chosen, biggest),
+        types_min=min(types),
+        types_max=max(types),
+        **values,
+    )
     return FigureOutput(
         fig, CLAIM, detail, numbers, _group.csv_text(HEADER, csv_rows), counts
     )

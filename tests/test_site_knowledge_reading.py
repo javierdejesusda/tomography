@@ -545,3 +545,40 @@ def test_caption_states_the_criteria_and_names_the_own_probability_signal(
     assert "open" in text
     assert "difference between the two AUROCs" in text
     assert "text classifiers" in text
+
+
+def test_zero_lines_stop_below_the_column_headers(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    checks.draw(fig)
+    for ax in fig.axes[1:3]:
+        (head,) = [
+            t
+            for t in ax.texts
+            if t.get_text() in ("difference", "direction" + chr(10) + "added")
+        ]
+        top = head.get_window_extent().y0
+        zero = [
+            ln
+            for ln in ax.get_lines()
+            if ln.get_color() == paper.ENC["reference"]
+        ]
+        assert zero
+        for line in zero:
+            end = ax.transAxes.transform((0.0, max(line.get_ydata())))[1]
+            assert end <= top
+
+
+def test_legend_markers_are_plain_and_well_spaced(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    handles = list(legend.legend_handles)
+    for handle in handles:
+        if handle.get_marker() != "None":
+            assert handle.get_linestyle() == "None"
+    checks.draw(output.figure)
+    boxes = [t.get_window_extent() for t in legend.get_texts()]
+    for left, right in itertools.pairwise(boxes):
+        assert right.x0 - left.x1 >= 14

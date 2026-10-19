@@ -29,7 +29,7 @@ OWN = {
     "a_knowledge_matrix": DIRECTION | TEXT | RANDOM,
     "a_dose_runs": DIRECTION,
     "a_dose_types": DIRECTION,
-    "a_links": set(),
+    "a_links": DIRECTION,
 }
 MEASURES: set[str] = {
     m for v in M.values() for m in ((v,) if isinstance(v, str) else v)

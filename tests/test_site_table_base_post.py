@@ -127,3 +127,12 @@ def test_names_match_figure_rows() -> None:
     assert {
         source: labels[name.split(",")[0]] for source, name in MEASURES.items()
     } == MEASURES
+
+
+def test_caption_does_not_claim_intervals_for_every_pair(
+    output: registry.TableOutput,
+) -> None:
+    text = output.detail
+    assert "shows all three pairs with intervals" not in text
+    assert "seed-paired intervals for the 0.6B and 1.7B pairs" in text
+    assert "conservative interval over the test items" in text
