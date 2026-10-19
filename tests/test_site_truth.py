@@ -243,14 +243,67 @@ def test_the_caption_separates_the_classifier_accuracies_from_their_intervals(
 _L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
 
 
-def test_no_legend_symbol_means_two_things_and_no_role_key_is_drawn(
+def test_no_legend_symbol_means_two_things_and_the_role_key_is_drawn(
     output: registry.FigureOutput,
 ) -> None:
     assert _L["marker_clashes"](output.figure) == []
     labels = [
         t.get_text() for leg in output.figure.legends for t in leg.get_texts()
     ]
-    assert "GPT-2 and base" not in labels
+    assert "GPT-2 and Qwen3 base" in labels
+    assert "post-trained" in labels
+    assert "truth reader" not in labels
+
+
+def test_post_trained_rows_are_open_markers_in_every_panel(
+    output: registry.FigureOutput,
+) -> None:
+    for gid, key in (
+        ("levels", "truthfulqa_reader"),
+        ("levels", "persona_reader"),
+        ("difference", "diff"),
+        ("logprob", "log_probability"),
+    ):
+        ax = _ax(output, gid)
+        for model in MODELS:
+            (dot,) = [
+                ln
+                for ln in _gid(ax, f"{key}:{model}")
+                if ln.get_marker() != "None"
+            ]
+            post = model.startswith("qwen3") and not model.endswith("-base")
+            assert (dot.get_markerfacecolor() == "white") is post, (key, model)
+
+
+def test_the_levels_panel_has_the_dotted_chance_line(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "levels")
+    (chance,) = _gid(ax, "chance")
+    assert chance.get_xdata()[0] == pytest.approx(output.numbers["chance"])
+    (other,) = _gid(_ax(output, "logprob"), "chance")
+    assert chance.get_linestyle() == other.get_linestyle()
+    assert chance.get_color() == paper.ENC["reference"]
+
+
+def test_the_zero_line_is_the_dotted_grey_reference(
+    output: registry.FigureOutput,
+) -> None:
+    (zero,) = _gid(_ax(output, "difference"), "zero")
+    assert zero.get_color() == paper.ENC["reference"]
+    (chance,) = _gid(_ax(output, "logprob"), "chance")
+    assert zero.get_linestyle() == chance.get_linestyle()
+
+
+def test_the_text_lines_sit_in_front_of_the_green_bands(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "levels")
+    for method in ("text_word", "text_char"):
+        (line,) = _gid(ax, f"text:{method}")
+        (band,) = [p for p in ax.patches if p.get_gid() == f"textband:{method}"]
+        assert line.get_zorder() > band.get_zorder()
+        assert line.get_linewidth() >= 1.0
 
 
 def _ax(output: registry.FigureOutput, gid: str) -> Any:
@@ -295,7 +348,7 @@ def test_the_two_text_classifiers_are_separate_green_lines_with_own_bands(
         )
 
 
-def test_the_persona_reader_is_not_pink_and_levels_has_no_chance_line(
+def test_the_persona_reader_is_not_pink(
     output: registry.FigureOutput,
 ) -> None:
     ax = _ax(output, "levels")
@@ -307,7 +360,6 @@ def test_the_persona_reader_is_not_pink_and_levels_has_no_chance_line(
         ]
         assert len(dots) == 1
         assert dots[0].get_color() != paper.ENC["paper"]
-    assert not _gid(ax, "chance")
 
 
 def test_the_log_probability_panel_has_wilson_whiskers_and_the_chance_line(
