@@ -51,13 +51,14 @@ DETAIL = (
     "coefficients {minus}0.1 and +0.1 the mean score moves {moves}. (d) "
     "Perplexity of {n_neutral} held-out WikiText-103 passages under the "
     "steered model, as a ratio to the unsteered model (colour and number); "
-    "an asterisk marks a distinct-1 of the completions below 0.15, and "
-    "framed cells keep the fluency rule (ratio at most 1.5 and distinct-1 "
-    "at least 0.15). The rule holds at both signs of 0.1 on {held}, and at "
+    "an asterisk marks a distinct-1 of the completions below {min_distinct}, "
+    "and framed cells keep the fluency rule (ratio at most {max_ratio} and "
+    "distinct-1 at least {min_distinct}). The rule holds at both signs of "
+    "0.1 on {held}, and at "
     "0.3 or {minus}0.3 on {fails}. This run has no random-direction arm; "
     "the finder comparison steers with three random directions of the same "
-    "norm (Figure 1, last row). Table 6 adds the perplexity of the "
-    "completions themselves."
+    "norm ([[fig:teaser]], last row). [[table:steering]] adds the perplexity "
+    "of the completions themselves."
 )
 
 
@@ -405,6 +406,8 @@ def build(manifest: Manifest) -> FigureOutput:
     )
     detail = DETAIL.format(
         minus=axes.MINUS,
+        max_ratio=MAX_RATIO,
+        min_distinct=MIN_DISTINCT,
         moves=moves,
         n_neutral=n_neutral,
         held=stats.per_role_text(counts["fluent01"]),
