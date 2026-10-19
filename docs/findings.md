@@ -6877,12 +6877,11 @@ for the `pca_diff` run. The P1 code path (the import closure of `p1_templates.py
 each run was recomputed under main by loading its stored `config.json` into the P1 config class and hashing it, and both
 agree with the directory names. Exporting these runs changed no tracked result.
 
-Chain 40 (Community 3090): P1 on gpt2, gpt2-medium and the Qwen3 0.6B pair, R6 on gpt2. The nine runs were made at
-`bab5b75` with a clean tree on one rented GPU pod (Community Cloud NVIDIA GeForce RTX 3090, torch 2.14.1+cu130,
+Chain 40 (RTX 3090): P1 on gpt2, gpt2-medium and the Qwen3 0.6B pair, R6 on gpt2. The nine runs were made at
+`bab5b75` with a clean tree on one rented GPU pod (NVIDIA GeForce RTX 3090, torch 2.14.1+cu130,
 transformers 5.19.0, Linux), with the default config of each experiment on that commit (P1: sentiment, truth and the six
 emotions, 10 seeds of 64 training pairs, 256 evaluation pairs per split, batch size 8, last token, `method=logistic` or
-`pca_diff`; R6: batch size 8; `config.json` of each run). The chain log records exit status 0 for every job and ends
-with `CHAIN_DONE failed=0`; the pod ran two jobs at a time, so the times overlap. The time between `started_at` and
+`pca_diff`; R6: batch size 8; `config.json` of each run). The time between `started_at` and
 `finished_at` of the stored `meta.json` is 589 s (`p1/gpt2/078b9d6482a2`) to 2,008 s (`p1/qwen3-0.6b-base/61b62dc50aaa`)
 for P1 and 158 s for R6. Seven of the runs are new: P1 on `gpt2-medium` (`ac7c6af28fc3` logistic and `bc97021c8520`
 `pca_diff`), on `qwen3-0.6b-base` (`deabd95764d0` and `61b62dc50aaa`), on `qwen3-0.6b` (`027be280838a` and
