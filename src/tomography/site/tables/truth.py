@@ -1,66 +1,97 @@
-"""Table 7: TruthfulQA and honesty.
+"""Table 5: Truthfulness and honesty readings.
 
-One row per model: TruthfulQA MC1 of the validation-layer reader of R6 with
-the standard log-probability row and the two text-only classifiers, and the
-honesty transfer accuracy of R5 with the seed agreement of A1 at the same
-layer.
+One row per checkpoint: TruthfulQA MC1 of three readers and of the model's
+own answer log-probability on the same test questions, the honesty reader on
+held-out persona prompts and on plain true and false statements next to its
+random direction, and the agreement between seeds.
 """
 
+import collections
 from typing import Any
 
+import numpy as np
+
 from tomography.site import runfiles
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
 from tomography.site.tables import _cells
+from tomography.site.tables import _rows
 from tomography.viz import paper
 
-TEXT = ("text_word", "text_char")
+READERS = ("truthfulqa", "arc", "honesty")
 COLUMNS = [
     "Model",
-    "Reader",
-    "Standard",
-    "Text words",
-    "Text chars",
-    "Honesty transfer",
+    "TruthfulQA reader",
+    "ARC reader",
+    "Honesty persona reader",
+    "Answer log-probability",
+    "Accuracy",
+    "Layer",
+    "Accuracy",
+    "Random",
     "Seed agreement",
 ]
-ALIGN = "lrrrrrr"
-DETAIL = (
-    "Reader is the MC1 of the logistic reader at the layer chosen on "
-    "validation, with a 95 percent bootstrap interval that resamples the 15 "
-    "readers; the best-layer rule selects on test and is not used. Standard "
-    "is the log-probability row and Text words and Text chars are the "
-    "text-only classifiers, both with 95 percent Wilson intervals over the "
-    "173 questions, so their widths are not comparable with the reader's. "
-    "Honesty transfer is the accuracy of the R5 persona reader on plain true "
-    "and false statements with no refit, with the bootstrap interval over "
-    "its readers; it is exploratory, with 59 test pairs, and the transfer "
-    "layer is chosen on 53 validation pairs. Seed agreement is the mean "
-    "agreement of the reader directions across seeds at the layer of the "
-    "run."
+GROUPS = (
+    ("TruthfulQA MC1", 4, False),
+    ("Honesty in template", 2, False),
+    ("Honesty transfer", 2, False),
+    ("Seed agreement", 1, False),
 )
 
 
-def _r6(
-    manifest: Manifest, model: str
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
+def _r6(manifest: Manifest, model: str) -> list[dict[str, Any]]:
     run = manifest.run("r6", model)
     assert run is not None
-    rows = _cells.read_table(run / "table.json")
-    reader = next(
+    return runfiles.rows(run, "table.json")
+
+
+def _mc1(rows: list[dict[str, Any]], method: str, source: str = "") -> dict:
+    hit = [
         r
         for r in rows
-        if r["method"] == "lat"
-        and r["layer_rule"] == "validation-layer"
-        and r["source"] == "truthfulqa"
+        if r["method"] == method
+        and (
+            method != "lat"
+            or (r["layer_rule"] == "validation-layer" and r["source"] == source)
+        )
+    ]
+    return hit[0]
+
+
+def _transfer_random(manifest: Manifest, model: str, layer: int) -> float:
+    run = manifest.run("r5", model)
+    assert run is not None
+    series = runfiles.data(run, "curves_transfer.json")["series"]
+    mean = runfiles.arrays(run, "curves_transfer.npz")["mean"]
+    return float(np.asarray(mean)[series.index("random")][layer - 1])
+
+
+def _template_sentence(accuracy: list[float], layers: dict[str, int]) -> str:
+    by_layer: dict[int, list[str]] = collections.defaultdict(list)
+    for model, layer in layers.items():
+        by_layer[layer].append(model)
+    parts = []
+    for layer in sorted(by_layer, key=lambda k: -len(by_layer[k])):
+        names = [paper.display_name(m) for m in by_layer[layer]]
+        who = (
+            f"{len(names)} checkpoints"
+            if len(names) > 3
+            else " and ".join(names)
+        )
+        parts.append(f"at layer {layer} on {who}")
+    low, high = min(accuracy), max(accuracy)
+    value = (
+        _cells.num(low)
+        if low == high
+        else f"{_cells.num(low)} to {_cells.num(high)}"
     )
-    standard = next(r for r in rows if r["method"] == "standard")
-    text = {r["method"]: r for r in rows if r["method"] in TEXT}
-    return reader, standard, text
-
-
-def _cell(row: dict[str, Any]) -> str:
-    return _cells.interval(row["mc1"], row["lo"], row["hi"])
+    return (
+        "Honesty in template is the accuracy on held-out persona prompts, "
+        f"{value} {' and '.join(parts)} because the members of a pair "
+        "differ in the persona instruction; it is not a held-out measure of "
+        "honesty."
+    )
 
 
 def build(manifest: Manifest) -> TableOutput:
@@ -76,75 +107,95 @@ def build(manifest: Manifest) -> TableOutput:
         ValueError: If two runs store different text-only rows.
     """
     models = manifest.models("r6")
-    parts = {m: _r6(manifest, m) for m in models}
+    rows: list[list[str]] = []
+    in_acc: list[float] = []
+    in_layer: dict[str, int] = {}
+    persona: list[float] = []
     text: dict[str, dict[str, Any]] = {}
-    for _, _, found in parts.values():
-        for name, row in found.items():
+    n_test = n_val = 0
+    for model in models:
+        table = _r6(manifest, model)
+        for name in ("text_word", "text_char"):
+            row = _mc1(table, name)
             if name in text and text[name]["mc1"] != row["mc1"]:
                 raise ValueError(f"the {name} row differs between models")
             text[name] = row
-    low = min(r["lo"] for r in text.values())
-    high = max(r["hi"] for r in text.values())
-    rows: list[list[str]] = []
-    accuracy: list[float] = []
-    agreement: list[float] = []
-    for model in models:
-        reader, standard, _ = parts[model]
         run5, run_a1 = manifest.run("r5", model), manifest.run("a1", model)
-        honesty = agree = None
-        if run5 is not None:
-            summary = runfiles.summary(run5)
-            lo, hi = summary["ci"]
-            honesty = _cells.interval(summary["test_accuracy"], lo, hi)
-            accuracy.append(float(summary["test_accuracy"]))
-        if run_a1 is not None:
-            value = float(runfiles.summary(run_a1)["agreement_at_layer"]["r5"])
-            agree = _cells.num(value)
-            agreement.append(value)
+        assert run5 is not None
+        assert run_a1 is not None
+        s5 = runfiles.summary(run5)
+        block = s5["in_template"]
+        in_acc.append(float(block["test_accuracy"]))
+        in_layer[model] = int(block["best_layer"])
+        n_test = int(s5["n_eval_pairs"]["transfer"]["test"])
+        n_val = int(s5["n_eval_pairs"]["transfer"]["val"])
+        mc1 = [_mc1(table, "lat", s)["mc1"] for s in READERS]
+        persona.append(float(mc1[2]))
         rows.append(
             [
                 paper.display_name(model),
-                _cell(reader),
-                _cell(standard),
-                _cell(text["text_word"]),
-                _cell(text["text_char"]),
-                honesty or _cells.MISSING,
-                agree or _cells.MISSING,
+                *(_cells.num(v) for v in mc1),
+                _cells.num(_mc1(table, "standard")["mc1"]),
+                _cells.num(block["test_accuracy"]),
+                str(block["best_layer"]),
+                _cells.num(s5["test_accuracy"]),
+                _cells.num(
+                    _transfer_random(manifest, model, int(s5["best_layer"]))
+                ),
+                _cells.num(
+                    runfiles.summary(run_a1)["agreement_at_layer"]["r5"]
+                ),
             ]
         )
-    numbers = {
-        "models": float(len(models)),
-        "inside_text_interval": float(
-            sum(low <= parts[m][0]["mc1"] <= high for m in models)
-        ),
-        "above_standard": float(
-            sum(parts[m][0]["mc1"] > parts[m][1]["mc1"] for m in models)
-        ),
-        "honesty_min": min(accuracy),
-        "honesty_max": max(accuracy),
-        "agreement_min": min(agreement),
-    }
+    run6 = manifest.run("r6", models[0])
+    assert run6 is not None
+    n_questions = int(runfiles.summary(run6)["n_test"])
+    chance = float(runfiles.data(run6, "curves_truthfulqa.json")["chance"])
+    lo, hi = stats.wilson(0.5, n_questions)
+    half = (hi - lo) / 2
+    word, char = text["text_word"], text["text_char"]
     claim = (
-        "On TruthfulQA the validation-layer reader reaches an MC1 inside the "
-        "interval of the text-only classifiers on "
-        f"{int(numbers['inside_text_interval'])} of {len(models)} models and "
-        f"above the standard log-probability row on "
-        f"{int(numbers['above_standard'])}; honesty transfer accuracy spans "
-        f"{numbers['honesty_min']:.3f} to {numbers['honesty_max']:.3f} while "
-        f"the seed agreement stays at {numbers['agreement_min']:.3f} or more."
+        "Truthfulness and honesty readings on every checkpoint, with the "
+        "baselines of the same questions."
     )
-    notes = [
-        "The text-only rows are model independent: they classify the "
-        "questions from their words and characters. The run of GPT-2 small "
-        "did not store them, so every row shows the value stored by the "
-        "other runs, which agree with each other."
-    ]
+    detail = (
+        f"The first four columns are TruthfulQA MC1 on {n_questions} test "
+        "questions for readers fitted on TruthfulQA, on ARC and on the "
+        "paper's honesty persona prompts, each at the layer chosen on "
+        "validation questions, and for the model's own answer "
+        f"log-probability; a 95 percent Wilson interval at this size is at "
+        f"most {chr(0x00B1)}{_cells.num(half)} wide. A classifier on the "
+        f"question and answer words reaches "
+        f"{_cells.interval(word['mc1'], word['lo'], word['hi'])}, one on the "
+        "characters "
+        f"{_cells.interval(char['mc1'], char['lo'], char['hi'])}, and chance "
+        f"is {_cells.num(chance)}. "
+        + _template_sentence(in_acc, in_layer)
+        + " Honesty transfer scores the honesty reader on plain true and "
+        f"false statements ({n_test} test pairs, layer chosen on {n_val} "
+        "validation pairs) next to the random direction at the same layer. "
+        "Seed agreement is the mean absolute cosine between the honesty "
+        "directions of different seeds at relative depth 0.5, not at the "
+        "transfer layer."
+    )
+    numbers = {
+        "n_questions": float(n_questions),
+        "wilson_half": half,
+        "persona_min": min(persona),
+        "persona_max": max(persona),
+        "in_template_layer1": float(sum(v == 1 for v in in_layer.values())),
+        "text_word": float(word["mc1"]),
+        "text_char": float(char["mc1"]),
+        "chance": chance,
+    }
     return TableOutput(
         claim,
-        DETAIL,
+        detail,
         COLUMNS,
         rows,
-        _cells.check_align(ALIGN, len(COLUMNS)),
-        notes,
+        _cells.check_align("l" + "r" * 9, len(COLUMNS)),
+        [],
         numbers,
+        groups=GROUPS,
+        row_groups=_rows.role_groups(models),
     )
