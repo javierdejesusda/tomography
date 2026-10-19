@@ -3,6 +3,7 @@ from pathlib import Path
 import runpy
 from typing import Any
 
+from matplotlib.text import Text
 import numpy as np
 import pytest
 
@@ -138,8 +139,9 @@ def test_panel_a_rows_hold_the_readers_and_the_log_probability_row(
         standard = _method(model, "standard")
         row = _find(rows, "a", model, "log_probability")
         assert float(row["value"]) == pytest.approx(standard["mc1"])
-        assert float(row["lo"]) == pytest.approx(standard["lo"], abs=1e-9)
-        assert float(row["hi"]) == pytest.approx(standard["hi"], abs=1e-9)
+        lo, hi = stats.wilson(standard["mc1"], _n_questions(model))
+        assert float(row["lo"]) == pytest.approx(lo, abs=1e-9)
+        assert float(row["hi"]) == pytest.approx(hi, abs=1e-9)
 
 
 def test_panel_b_rows_hold_every_set_and_the_random_direction(
@@ -159,7 +161,7 @@ def test_panel_b_rows_hold_every_set_and_the_random_direction(
             assert float(row["value"]) == pytest.approx(
                 _random(model, name), abs=1e-9
             )
-    assert len(rows) == len(MODELS) * (3 + len(SETS) + len(NEGATED))
+    assert len(rows) == len(MODELS) * (4 + len(SETS) + len(NEGATED))
 
 
 def test_numbers_are_recomputed_per_role(
@@ -236,44 +238,6 @@ def test_the_caption_states_the_counts_and_the_numbers(
     assert "_" not in text
 
 
-def test_the_figure_is_two_panels_at_the_planned_size(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    assert len(fig.axes) == 2
-    width, height = fig.get_size_inches()
-    assert width == pytest.approx(paper.FULL_WIDTH)
-    assert height == pytest.approx(3.0)
-
-
-def test_the_text_band_and_chance_lines_are_drawn(
-    output: registry.FigureOutput,
-) -> None:
-    left, right = output.figure.axes
-    lo, hi = _band()
-    spans = [
-        (p.get_x(), p.get_x() + p.get_width())
-        for p in left.patches
-        if abs(p.get_x() - lo) < 1e-9
-    ]
-    polys = [
-        c.get_paths()[0].get_extents()
-        for c in left.collections
-        if c.get_paths()
-    ]
-    drawn = bool(spans) or any(
-        abs(e.x0 - lo) < 1e-9 and abs(e.x1 - hi) < 1e-9 for e in polys
-    )
-    assert drawn
-    n = output.numbers
-    for ax, value in ((left, n["chance"]), (right, 0.5)):
-        assert any(
-            np.allclose(np.asarray(line.get_xdata(), float), value)
-            for line in ax.get_lines()
-            if len(line.get_xdata()) == 2
-        )
-
-
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.guard_problems(output.figure) == []
     assert checks.problems(output.figure) == []
@@ -303,15 +267,14 @@ def test_the_caption_separates_the_classifier_accuracies_from_their_intervals(
 _L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
 
 
-def test_no_legend_symbol_means_two_things_and_the_role_key_is_present(
+def test_no_legend_symbol_means_two_things_and_no_role_key_is_drawn(
     output: registry.FigureOutput,
 ) -> None:
     assert _L["marker_clashes"](output.figure) == []
     labels = [
         t.get_text() for leg in output.figure.legends for t in leg.get_texts()
     ]
-    assert "GPT-2 and base" in labels
-    assert "post-trained" in labels
+    assert "GPT-2 and base" not in labels
 
 
 def test_the_below_random_count_is_labelled_a_point_estimate(
@@ -319,3 +282,157 @@ def test_the_below_random_count_is_labelled_a_point_estimate(
 ) -> None:
     text = output.detail
     assert "below the random direction by point estimate on" in text
+
+
+def _ax(output: registry.FigureOutput, gid: str) -> Any:
+    (ax,) = [a for a in output.figure.axes if a.get_gid() == gid]
+    return ax
+
+
+def _gid(ax: Any, gid: str) -> list[Any]:
+    return [ln for ln in ax.get_lines() if ln.get_gid() == gid]
+
+
+def test_the_layout_is_five_panels_at_the_planned_size(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    assert sorted(a.get_gid() for a in fig.axes) == sorted(
+        ["levels", "difference", "logprob", "cities", "translations"]
+    )
+    width, height = fig.get_size_inches()
+    assert width == pytest.approx(paper.FULL_WIDTH)
+    assert height == pytest.approx(5.4)
+
+
+def test_the_two_text_classifiers_are_separate_green_lines_with_own_bands(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "levels")
+    for method in ("text_word", "text_char"):
+        row = _method(MODELS[0], method)
+        (line,) = _gid(ax, f"text:{method}")
+        assert line.get_xdata()[0] == pytest.approx(row["mc1"])
+        assert line.get_color() == paper.ENC["text"]
+        (band,) = [p for p in ax.patches if p.get_gid() == f"textband:{method}"]
+        assert band.get_x() == pytest.approx(row["lo"])
+        assert band.get_x() + band.get_width() == pytest.approx(row["hi"])
+    union = _band()
+    for p in ax.patches:
+        assert not (
+            p.get_x() == pytest.approx(union[0])
+            and p.get_x() + p.get_width() == pytest.approx(union[1])
+        )
+
+
+def test_the_persona_reader_is_not_pink_and_levels_has_no_chance_line(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "levels")
+    for model in MODELS:
+        dots = [
+            ln
+            for ln in _gid(ax, f"persona_reader:{model}")
+            if ln.get_marker() != "None"
+        ]
+        assert len(dots) == 1
+        assert dots[0].get_color() != paper.ENC["paper"]
+    assert not _gid(ax, "chance")
+
+
+def test_the_log_probability_panel_has_wilson_whiskers_and_the_chance_line(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "logprob")
+    (chance,) = _gid(ax, "chance")
+    assert chance.get_xdata()[0] == pytest.approx(output.numbers["chance"])
+    for model in MODELS:
+        mc1 = _method(model, "standard")["mc1"]
+        lo, hi = stats.wilson(mc1, _n_questions(model))
+        (whisker,) = _gid(ax, f"whisker:log_probability:{model}")
+        assert list(whisker.get_xdata()) == pytest.approx([lo, hi])
+        low, high = ax.get_xlim()
+        assert low <= lo
+        assert hi <= high
+
+
+def test_the_difference_panel_draws_reader_minus_words_with_a_zero_line(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "difference")
+    assert _gid(ax, "zero")
+    excluded = {r: 0 for r in ROLES}
+    for model in MODELS:
+        reader = _lat(model, "truthfulqa")["mc1"]
+        words = max(
+            _method(model, k)["mc1"] for k in ("text_word", "text_char")
+        )
+        d, lo, hi = stats.diff_interval(reader, words, _n_questions(model))
+        (whisker,) = _gid(ax, f"whisker:diff:{model}")
+        assert list(whisker.get_xdata()) == pytest.approx([lo, hi])
+        dots = [
+            ln for ln in _gid(ax, f"diff:{model}") if ln.get_marker() == "o"
+        ]
+        assert dots[0].get_xdata()[0] == pytest.approx(d)
+        excluded[_role(model)] += not (lo <= 0.0 <= hi)
+    for role in ROLES:
+        assert output.numbers[f"diff_excludes_zero_{role}"] == excluded[role]
+        assert output.counts["diff_excludes_zero"][role].hits == excluded[role]
+    assert "1.96" in output.detail
+
+
+def test_each_dumbbell_joins_the_sets_and_fills_the_negated_end_by_state(
+    output: registry.FigureOutput,
+) -> None:
+    for gid, (plain, neg) in (
+        ("cities", ("cities", "neg_cities")),
+        ("translations", ("sp_en_trans", "neg_sp_en_trans")),
+    ):
+        ax = _ax(output, gid)
+        for model in MODELS:
+            acc, _ = _set(model, plain)
+            nacc, nn = _set(model, neg)
+            (bell,) = _gid(ax, f"dumbbell:{plain}:{model}")
+            assert list(bell.get_xdata()) == pytest.approx([acc, nacc])
+            (end,) = _gid(ax, f"neg:{plain}:{model}")
+            filled = end.get_markerfacecolor() != "white"
+            assert filled == (stats.wilson(nacc, nn)[1] < 0.5)
+            (tick,) = _gid(ax, f"random:{plain}:{model}")
+            assert tick.get_xdata()[0] == pytest.approx(_random(model, neg))
+        (chance,) = _gid(ax, "chance")
+        assert chance.get_xdata()[0] == pytest.approx(0.5)
+        (shade,) = [p for p in ax.patches if p.get_gid() == "below_chance"]
+        assert shade.get_x() == pytest.approx(ax.get_xlim()[0])
+        assert shade.get_x() + shade.get_width() == pytest.approx(0.5)
+
+
+def test_no_star_triangle_hexagon_or_cross_is_drawn(
+    output: registry.FigureOutput,
+) -> None:
+    marks = {
+        str(ln.get_marker())
+        for ax in output.figure.axes
+        for ln in ax.get_lines()
+        if str(ln.get_marker()) not in ("None", "")
+    }
+    assert marks <= {"o", "p", "|"}
+    assert marks.isdisjoint(set(paper.CATEGORY_MARKERS) | {"h", "x"})
+
+
+def test_the_text_is_at_least_the_glossary_floor_and_never_bold(
+    output: registry.FigureOutput,
+) -> None:
+    for t in output.figure.findobj(Text):
+        if t.get_visible() and t.get_text():
+            assert t.get_fontsize() >= paper.MIN_TEXT, t.get_text()
+            assert t.get_fontweight() in ("normal", 400), t.get_text()
+
+
+def test_the_caption_notes_the_weak_gpt2_cities_reader_and_the_criterion(
+    output: registry.FigureOutput,
+) -> None:
+    n = output.numbers
+    low = f"{n['gpt2_cities_min']:.2f} to {n['gpt2_cities_max']:.2f}"
+    assert low in output.detail
+    assert "not inversions of a strong reader" in output.detail
+    assert "wholly below 0.5" in output.detail

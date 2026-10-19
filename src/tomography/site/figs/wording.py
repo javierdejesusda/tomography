@@ -72,6 +72,27 @@ def _rows(manifest: Manifest, model: str) -> tuple[list[dict[str, Any]], int]:
     return table, int(summary["n_eval_pairs"][TASK]["report"])
 
 
+def _noise(table: list[dict[str, Any]], pairs: int) -> float:
+    p = sum(r["from_paper"] for r in table) / len(table)
+    return float(
+        stats.expected_range(len(table)) * (p * (1 - p) / pairs) ** 0.5
+    )
+
+
+def noise(manifest: Manifest, model: str) -> float:
+    """Computes the test-pair noise range of the wording strip of a model.
+
+    Args:
+        manifest: The run resolver.
+        model: Checkpoint key with a wording run.
+
+    Returns:
+        The full width of the noise expected from the test pairs alone.
+    """
+    table, pairs = _rows(manifest, model)
+    return _noise(table, pairs)
+
+
 def _name(row: dict[str, Any]) -> str:
     """Names a wording as the table of wordings prints it."""
     base = str(row["kind"]).replace("_", " ")
@@ -550,10 +571,7 @@ def build(manifest: Manifest) -> FigureOutput:
     models = manifest.models("p1")
     loaded = {m: _rows(manifest, m) for m in models}
     data = {m: t for m, (t, _) in loaded.items()}
-    noise = {}
-    for m, (table, n) in loaded.items():
-        p = sum(r["from_paper"] for r in table) / len(table)
-        noise[m] = stats.expected_range(len(table)) * (p * (1 - p) / n) ** 0.5
+    noise = {m: _noise(table, n) for m, (table, n) in loaded.items()}
     rows = shared.model_rows(models)
     numbers = _numbers(data, noise)
     numbers.update(_rank_numbers(data))

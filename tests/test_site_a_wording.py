@@ -1,12 +1,16 @@
 from pathlib import Path
 import runpy
 
+import matplotlib
+import matplotlib.colors
+import matplotlib.text
 import numpy as np
 import pytest
 
 from tomography.site import registry
 from tomography.site import stats
 from tomography.site.figs import a_wording
+from tomography.site.figs import wording
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -49,6 +53,36 @@ def _margin(model: str) -> np.ndarray:
     return values[np.ix_(keep, keep)] - scored[None, :]
 
 
+ORDER = [
+    "qwen3-0.6b-base",
+    "qwen3-0.6b",
+    "qwen3-1.7b-base",
+    "qwen3-1.7b",
+    "qwen3-4b-base",
+    "qwen3-4b",
+    "gpt2",
+    "gpt2-medium",
+    "gpt2-large",
+    "gpt2-xl",
+]
+KINDS = {
+    "paper": "paper",
+    "paraphrase": "paraphrase",
+    "scaffold": "scaffold",
+    "concept_swap": "concept swap",
+}
+
+
+def _noise(model: str) -> float:
+    return wording.noise(Manifest(RESULTS), model)
+
+
+def _kind_labels() -> list[str]:
+    table = data(run("p1", MODELS[0]), "table.json")
+    kind = {r["variant"]: r["kind"] for r in table if r["task"] == "sentiment"}
+    return [KINDS.get(kind[n], "frame") for n in _names()]
+
+
 @pytest.fixture(scope="module")
 def output() -> registry.FigureOutput:
     return registry.build_figure("a_wording", Manifest(RESULTS))
@@ -66,14 +100,15 @@ def test_one_matrix_per_checkpoint_within_the_appendix_budget(
     assert len(output.figure.axes) == len(MODELS) + 1
     width, height = output.figure.get_size_inches()
     assert width == pytest.approx(paper.FULL_WIDTH)
-    assert height <= 8.0 + 1e-9
+    assert height <= 9.5 + 1e-9
 
 
 def test_every_cell_is_the_transfer_accuracy_minus_the_scored_random(
     output: registry.FigureOutput,
 ) -> None:
-    for ax, model in zip(_matrices(output), MODELS, strict=True):
-        shown = np.asarray(ax.images[0].get_array(), dtype=float)
+    for ax, model in zip(_matrices(output), ORDER, strict=True):
+        array = ax.images[0].get_array()
+        shown = np.ma.getdata(array).astype(float)
         assert shown.shape == (len(_names()),) * 2
         assert shown == pytest.approx(_margin(model), abs=1e-9)
         assert ax.images[0].get_clim() == (-0.15, 0.45)
@@ -108,7 +143,8 @@ def test_the_caption_quotes_the_minima_or_the_cells_at_or_below_zero(
     else:
         assert f"at or below zero in {int(n['n_below'])} cells" in text
     assert "[[table:wordings]]" in text
-    assert "purple" in text
+    assert "purple frame" in text
+    assert "stippled" in text
     for bad in (EM, EN, "_"):
         assert bad not in text
 
@@ -138,36 +174,6 @@ def test_both_caption_branches_follow_the_data() -> None:
     assert "Every cell" not in sentence
 
 
-def test_no_text_sits_inside_a_matrix_and_nothing_has_an_underscore(
-    output: registry.FigureOutput,
-) -> None:
-    for ax in _matrices(output):
-        assert all(t.get_text().startswith("$") for t in ax.texts)
-    assert checks.text_problems(output.figure) == []
-
-
-def test_the_diagonal_has_white_dots_and_the_paper_tick_is_purple(
-    output: registry.FigureOutput,
-) -> None:
-    k = len(_names())
-    paper_index = _names().index("paper")
-    for ax in _matrices(output):
-        dots = [
-            ln
-            for ln in ax.get_lines()
-            if len(ln.get_xdata()) == k and ln.get_markerfacecolor() == "white"
-        ]
-        assert len(dots) == 1
-        assert list(dots[0].get_xdata()) == list(range(k))
-        assert list(dots[0].get_ydata()) == list(range(k))
-        labels = [t.get_text() for t in ax.get_xticklabels()]
-        assert labels == [str(i + 1) for i in range(k)]
-        ticks = ax.xaxis.get_major_ticks()
-        for i, tick in enumerate(ticks):
-            colour = tick.tick1line.get_markeredgecolor()
-            assert (colour == paper.ENC["paper"]) == (i == paper_index)
-
-
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.guard_problems(output.figure, appendix=True) == []
     assert checks.problems(output.figure) == []
@@ -179,35 +185,140 @@ def test_the_csv_holds_every_cell(output: registry.FigureOutput) -> None:
     assert head == ["model", "role", "fit", "score", "margin"]
     assert len(lines) - 1 == len(MODELS) * len(_names()) ** 2
     first = dict(zip(head, lines[1].split(","), strict=True))
-    assert first["model"] == MODELS[0]
+    assert first["model"] == ORDER[0]
     assert float(first["margin"]) == pytest.approx(
-        _margin(MODELS[0])[0, 0], abs=1e-6
+        _margin(ORDER[0])[0, 0], abs=1e-6
     )
 
 
-def test_the_colour_scale_is_centred_on_zero_and_shows_negative_margins(
+def _titles(output: registry.FigureOutput) -> list[str]:
+    return [
+        ax.get_title() or ax.get_title(loc="left") for ax in _matrices(output)
+    ]
+
+
+def test_panels_pair_base_and_post_trained_then_the_gpt2_sizes(
     output: registry.FigureOutput,
 ) -> None:
-    lowest = min(float(_margin(m).min()) for m in MODELS)
-    assert lowest < 0
+    axes = _matrices(output)
+    assert _titles(output) == [
+        paper.display_name(m) for m in ORDER
+    ]
+    tops = [round(ax.get_position().y1, 3) for ax in axes]
+    lefts = [round(ax.get_position().x0, 3) for ax in axes]
+    for i in range(0, len(ORDER), 2):
+        assert tops[i] == tops[i + 1]
+        assert lefts[i] < lefts[i + 1]
+
+
+def test_the_map_is_cividis_unreversed_with_the_diagonal_masked_grey(
+    output: registry.FigureOutput,
+) -> None:
     for ax in _matrices(output):
-        norm = ax.images[0].norm
-        assert norm.vcenter == 0
-        assert norm.vmin < lowest
-    (bar,) = [ax for ax in output.figure.axes if not ax.images]
-    ticks = [float(t) for t in bar.get_xticks()]
-    assert min(ticks) < 0
-    assert 0.0 in ticks
+        image = ax.images[0]
+        assert image.cmap.name == "cividis"
+        mask = np.ma.getmaskarray(image.get_array())
+        assert np.array_equal(mask, np.eye(mask.shape[0], dtype=bool))
+        bad = image.cmap.get_bad()
+        assert matplotlib.colors.to_hex(bad) == paper.ENC["random_band"]
 
 
-def test_the_colour_bar_fills_the_empty_slots_and_the_figure_is_compact(
+def test_cells_within_the_noise_are_stippled_and_negative_ones_annotated(
+    output: registry.FigureOutput,
+) -> None:
+    total = 0
+    for ax, model in zip(_matrices(output), ORDER, strict=True):
+        margin = _margin(model)
+        off = ~np.eye(margin.shape[0], dtype=bool)
+        low = (margin <= _noise(model)) & off
+        total += int(low.sum())
+        patches = [p for p in ax.patches if p.get_gid() == "stipple"]
+        assert len(patches) == int(low.sum())
+        assert all(p.get_hatch() for p in patches)
+        labels = [t for t in ax.texts if t.get_gid() == paper.TILE_LABEL]
+        zero = (margin <= 0.0) & off
+        assert len(labels) <= int(zero.sum())
+        assert bool(labels) == bool(zero.any())
+        cells = sorted(
+            (round(t.get_position()[1]), round(t.get_position()[0]))
+            for t in labels
+        )
+        for i, j in cells:
+            assert zero[i, j]
+            assert all(
+                (a, b) == (i, j) or abs(i - a) > 1 or abs(j - b) > 2
+                for a, b in cells
+            )
+        for text in labels:
+            assert text.get_fontsize() >= paper.MIN_TEXT
+    assert output.numbers["n_below_noise"] == total
+
+
+def test_the_paper_row_and_column_are_framed_like_the_paper_wording(
+    output: registry.FigureOutput,
+) -> None:
+    k = len(_names())
+    index = _names().index("paper")
+    for ax in _matrices(output):
+        frames = [
+            p for p in ax.patches if (p.get_gid() or "").startswith("paper_")
+        ]
+        assert sorted(p.get_gid() for p in frames) == ["paper_col", "paper_row"]
+        for p in frames:
+            assert not p.get_fill()
+            assert matplotlib.colors.to_hex(p.get_edgecolor()) == (
+                paper.ENC["paper"].lower()
+            )
+        row = next(p for p in frames if p.get_gid() == "paper_row")
+        assert (row.get_x(), row.get_y()) == (-0.5, index - 0.5)
+        assert (row.get_width(), row.get_height()) == (k, 1)
+        col = next(p for p in frames if p.get_gid() == "paper_col")
+        assert (col.get_x(), col.get_y()) == (index - 0.5, -0.5)
+        assert (col.get_width(), col.get_height()) == (1, k)
+
+
+def test_the_axes_have_thin_kind_separators_and_short_kind_labels(
+    output: registry.FigureOutput,
+) -> None:
+    labels = _kind_labels()
+    runs = [
+        (label, labels.index(label), len(labels) - labels[::-1].index(label))
+        for label in dict.fromkeys(labels)
+    ]
+    bounds = [end for _, _, end in runs[:-1]]
+    for position, ax in enumerate(_matrices(output)):
+        seps = [ln for ln in ax.get_lines() if ln.get_gid() == "separator"]
+        assert len(seps) == 2 * len(bounds)
+        kinds = [t.get_text() for t in ax.texts if t.get_gid() == "kind"]
+        if position % 2 == 0:
+            expected = [lab for lab, a, b in runs if b - a >= 2]
+            assert kinds == expected
+        else:
+            assert kinds == []
+
+
+def test_one_shared_colour_bar_below_the_grid_marks_the_noise(
     output: registry.FigureOutput,
 ) -> None:
     fig = output.figure
     fig.draw_without_rendering()
     matrices = _matrices(output)
     (bar,) = [ax for ax in fig.axes if not ax.images]
-    lowest_row = min(ax.get_position().y0 for ax in matrices)
-    assert bar.get_position().y1 <= max(ax.get_position().y1 for ax in matrices)
-    assert bar.get_position().y0 >= lowest_row - 1e-6
-    assert fig.get_size_inches()[1] <= 7.5
+    assert bar.get_position().y1 <= min(ax.get_position().y0 for ax in matrices)
+    ticks = [ln for ln in bar.get_lines() if ln.get_gid() == "noise_tick"]
+    noise = sorted(_noise(m) for m in MODELS)
+    assert sorted(float(t.get_xdata()[0]) for t in ticks) == pytest.approx(
+        [noise[0], noise[-1]]
+    )
+    assert output.numbers["noise_min"] == pytest.approx(noise[0])
+    assert output.numbers["noise_max"] == pytest.approx(noise[-1])
+    assert fig.get_size_inches()[1] <= 9.5 + 1e-9
+
+
+def test_the_text_is_at_least_the_glossary_floor_and_never_bold(
+    output: registry.FigureOutput,
+) -> None:
+    for t in output.figure.findobj(matplotlib.text.Text):
+        if t.get_visible() and t.get_text():
+            assert t.get_fontsize() >= paper.MIN_TEXT, t.get_text()
+            assert t.get_fontweight() in ("normal", 400), t.get_text()
