@@ -121,7 +121,7 @@ def build(manifest: Manifest) -> FigureOutput:
             )
         ax_b.set_xlim(0.5, 1.02)
         ax_b.xaxis.set_major_locator(ticker.FixedLocator([0.5, 0.75, 1.0]))
-        ax_b.xaxis.set_major_formatter(_rows.tick_formatter())
+        ax_b.xaxis.set_major_formatter(axes.minus_formatter())
         ax_b.set_xlabel("AUROC on own type")
         ax_b.tick_params(axis="y", length=0, labelleft=False)
         ax_b.spines["left"].set_visible(False)

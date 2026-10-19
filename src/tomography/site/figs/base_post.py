@@ -222,7 +222,7 @@ def build(manifest: Manifest) -> FigureOutput:
         ax.xaxis.set_major_locator(
             ticker.FixedLocator([-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3])
         )
-        ax.xaxis.set_major_formatter(_rows.tick_formatter())
+        ax.xaxis.set_major_formatter(axes.minus_formatter())
         ax.set_xlabel("post-trained minus base")
         ax.set_ylim(len(ROWS) - 0.4, -0.6)
         ax.set_yticks(range(len(ROWS)))

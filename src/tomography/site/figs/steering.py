@@ -166,7 +166,7 @@ def _dose_panel(ax: Any, strip: Any, members: list[_Model], role: str) -> None:
     axes.unit_axis(ax, "y")
     ax.set_xlim(-0.33, 0.33)
     ax.xaxis.set_major_locator(ticker.FixedLocator([-0.3, 0.0, 0.3]))
-    ax.xaxis.set_major_formatter(_rows.tick_formatter())
+    ax.xaxis.set_major_formatter(axes.minus_formatter())
     strip.set_xlim(0.0, 1.0)
     strip.set_xticks([])
     strip.tick_params(left=False, labelleft=False)
@@ -224,7 +224,7 @@ def _matrix(
     ax.set_yticks([rows[k] for k in models])
     ax.set_yticklabels([paper.display_name(k) for k in models])
     ax.set_xticks(range(len(COEFFS)))
-    ax.set_xticklabels([_rows.tick_text(c) for c in COEFFS])
+    ax.set_xticklabels([axes.minus_formatter()(c, 0) for c in COEFFS])
     ax.tick_params(length=0, labelsize=TILE_FONT)
     for side in ("left", "bottom"):
         ax.spines[side].set_visible(False)

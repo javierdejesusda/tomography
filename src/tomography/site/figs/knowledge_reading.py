@@ -195,7 +195,7 @@ def build(manifest: Manifest) -> FigureOutput:
         ax_b.xaxis.set_major_locator(
             ticker.FixedLocator([-0.02, 0.0, 0.02, 0.04, 0.06, 0.08])
         )
-        ax_b.xaxis.set_major_formatter(_rows.tick_formatter())
+        ax_b.xaxis.set_major_formatter(axes.minus_formatter())
         axes.ref_line(ax_b, 0.0, "x")
         ax_b.set_xlabel("change in AUROC for\npredicting wrong answers")
         paper.panel_letter(ax_a, "a")

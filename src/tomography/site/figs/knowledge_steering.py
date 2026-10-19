@@ -54,7 +54,9 @@ DETAIL = (
     "the linear slope over the coefficient grid; with 3 random directions a "
     "direction passes by chance with probability 1/4. (c to e) Dose curves "
     "of GPT-2 XL, Qwen3-4B-Base and Qwen3-4B (few-shot prompt) on unknown "
-    "and known questions, against the pooled random directions (grey band); "
+    "and known questions, against the mean over the 3 random directions on "
+    "unknown questions with its 95 percent interval that resamples the "
+    "questions (grey band); "
     "across all runs the largest shift of the mean curve is as large on "
     "known as on unknown questions for {held}, which a slope does not show. "
     "Every run is in Figure A6, and the post-trained runs by question type "
@@ -239,7 +241,7 @@ def _forest(
     ax.tick_params(axis="y", length=0)
     ax.spines["left"].set_visible(False)
     axes.ref_line(ax, 0.0, "x")
-    ax.xaxis.set_major_formatter(_rows.tick_formatter())
+    ax.xaxis.set_major_formatter(axes.minus_formatter())
 
 
 def draw_curves(
@@ -318,8 +320,8 @@ def draw_curves(
             )
     ax.set_xlim(-0.44, 0.44)
     ax.xaxis.set_major_locator(ticker.FixedLocator([-0.4, 0.0, 0.4]))
-    ax.xaxis.set_major_formatter(_rows.tick_formatter())
-    ax.yaxis.set_major_formatter(_rows.tick_formatter())
+    ax.xaxis.set_major_formatter(axes.minus_formatter())
+    ax.yaxis.set_major_formatter(axes.minus_formatter())
     ax.set_xlabel("relative coefficient")
 
 

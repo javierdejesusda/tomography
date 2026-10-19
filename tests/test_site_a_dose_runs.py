@@ -137,7 +137,10 @@ def test_caption_names_the_runs_and_the_grey_band(
         "Dose curves of every knowledge-steering run on unknown and known "
         "questions."
     )
-    assert "pooled random directions (grey band)" in output.detail
+    assert (
+        "the mean over the 3 random directions on unknown questions with "
+        "its 95 percent interval that resamples the questions (grey band)"
+    ) in output.detail
     assert "Figure 9" in output.detail
     assert output.numbers["runs"] == 12
 

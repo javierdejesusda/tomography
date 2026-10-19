@@ -6,19 +6,6 @@ from tomography.viz import axes
 from tomography.viz import paper
 
 
-def test_negative_ticks_are_mathtext_so_the_minus_can_be_drawn() -> None:
-    assert _rows.tick_text(-0.3) == r"$\mathdefault{-0.3}$"
-    assert _rows.tick_text(-1.0) == r"$\mathdefault{-1}$"
-
-
-def test_zero_and_positive_ticks_are_plain_trimmed_numbers() -> None:
-    assert _rows.tick_text(0.0) == "0"
-    assert _rows.tick_text(-0.0) == "0"
-    assert _rows.tick_text(0.25) == "0.25"
-    assert _rows.tick_text(1.0) == "1"
-    assert _rows.tick_formatter()(0.3, 0) == "0.3"
-
-
 def test_join_and_writes_a_list_phrase() -> None:
     assert _rows.join_and([]) == ""
     assert _rows.join_and(["a"]) == "a"

@@ -27,8 +27,9 @@ CLAIM = (
 DETAIL = (
     "Mean outcome on unknown questions (circle) and known questions "
     "(triangle) against the relative coefficient of the knowledge direction, "
-    "with 95 percent intervals that resample the questions, and the pooled "
-    "random directions (grey band) of the same norm. Entropy shift is shown "
+    "with 95 percent intervals that resample the questions, and the mean "
+    "over the 3 random directions on unknown questions with its 95 percent "
+    "interval that resamples the questions (grey band). Entropy shift is shown "
     "for GPT-2 and base checkpoints and abstention rate for post-trained "
     "ones, as in Figure 9; panels in the same unit share their vertical "
     "range. Open markers and dashed lines are post-trained checkpoints."

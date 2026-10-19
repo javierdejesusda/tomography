@@ -308,7 +308,7 @@ def build(manifest: Manifest) -> FigureOutput:
         ax_c.xaxis.set_major_locator(
             ticker.FixedLocator([-0.5, 0.0, 0.5, 1.0, 1.5])
         )
-        ax_c.xaxis.set_major_formatter(_rows.tick_formatter())
+        ax_c.xaxis.set_major_formatter(axes.minus_formatter())
         for edge, label in ((0.0, "buildings"), (1.0, "breeds")):
             axes.ref_line(ax_c, edge, "x")
             ax_c.text(

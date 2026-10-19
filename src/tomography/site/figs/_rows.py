@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
 
-from matplotlib import ticker
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.layout_engine import ConstrainedLayoutEngine
@@ -75,30 +74,6 @@ def fill(model: str, color: str) -> dict[str, Any]:
         "markeredgewidth": EDGE_WIDTH,
         "markersize": MARKER_SIZE,
     }
-
-
-def tick_text(value: float) -> str:
-    """Writes a tick label whose minus the Computer Modern font can draw.
-
-    Args:
-        value: The tick value.
-
-    Returns:
-        The trimmed number, as mathtext when it is negative.
-    """
-    text = f"{round(value, 6):g}"
-    if text in ("-0", "0"):
-        return "0"
-    return rf"$\mathdefault{{{text}}}$" if value < 0 else text
-
-
-def tick_formatter() -> ticker.FuncFormatter:
-    """Builds a tick formatter that uses `tick_text`.
-
-    Returns:
-        The formatter.
-    """
-    return ticker.FuncFormatter(lambda value, _pos: tick_text(value))
 
 
 def join_and(parts: Sequence[str]) -> str:

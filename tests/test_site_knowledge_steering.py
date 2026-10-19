@@ -316,3 +316,12 @@ def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
     with paper.paper_style():
         assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
+
+
+def test_caption_describes_the_grey_band_as_the_mean_of_the_random_arms(
+    output: registry.FigureOutput,
+) -> None:
+    assert (
+        "the mean over the 3 random directions on unknown questions with its "
+        "95 percent interval that resamples the questions (grey band)"
+    ) in output.detail

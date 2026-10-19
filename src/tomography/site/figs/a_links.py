@@ -112,9 +112,9 @@ def _panel(ax: Axes, found: dict[str, list[tuple[int, int, int]]]) -> None:
     ax.set_xlim(0.0, 1.0)
     ax.set_ylim(-0.03, 1.03)
     ax.xaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
-    ax.xaxis.set_major_formatter(_rows.tick_formatter())
+    ax.xaxis.set_major_formatter(axes.minus_formatter())
     ax.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
-    ax.yaxis.set_major_formatter(_rows.tick_formatter())
+    ax.yaxis.set_major_formatter(axes.minus_formatter())
 
 
 def build(manifest: Manifest) -> FigureOutput:
