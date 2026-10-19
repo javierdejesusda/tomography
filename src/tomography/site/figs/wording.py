@@ -1,10 +1,10 @@
-"""Figure 4: Prompt wording and reader transfer.
+"""Figure 5: wording moves a reader, and distant directions read alike.
 
-Panels (a) and (b) are the transfer matrices of sentiment readers on one
-Qwen3 and one GPT-2 checkpoint: the row is the wording a reader was fitted
-on and the column the wording it is evaluated on. Panel (c) shows, for every
-P1 checkpoint, the accuracy of the reader fitted on the paper wording on each
-other wording.
+Panel (a) is a strip per checkpoint: the accuracy of the sentiment reader
+fitted on the paper's wording when it is scored on every other wording, with
+the paper wording and the range of a random direction. Panel (b) is a scatter
+of every direction fitted on another wording by its cosine with the paper
+direction and its accuracy on the paper wording.
 """
 
 import json
@@ -12,183 +12,325 @@ from typing import Any
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.patches import Rectangle
-import numpy as np
 
-from tomography.site import store
+from tomography.site import runfiles
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
-DROPPED = "no_trailing_space"
-MATRIX_MODEL = "qwen3-1.7b-base"
+HEIGHT = 2.8
 TASK = "sentiment"
+MARKER = {"frame": "o", "wording": "s", "concept": "^"}
+DODGE = {"frame": -0.17, "wording": 0.0, "concept": 0.17}
+KIND = {
+    "frame": "frame change",
+    "wording": "wording change",
+    "concept": "concept swap",
+}
+ROLE_TEXT = {
+    "gpt2": "GPT-2",
+    "base": "Qwen3 base",
+    "post": "post-trained",
+}
+SIZE = 3.0
+YLIM = (0.45, 1.0)
+TEXT = 6.5
 
 
-def _table(manifest: Manifest, model: str) -> list[dict[str, Any]]:
-    run = manifest.run("p1", model)
-    if run is None:
+def _rows(manifest: Manifest, model: str) -> tuple[list[dict[str, Any]], int]:
+    path = manifest.run("p1", model)
+    if path is None:
         raise FileNotFoundError(f"results/p1/{model} has no logistic run")
-    rows = json.loads((run / "table.json").read_text("utf-8"))["data"]
-    return [r for r in rows if r["task"] == TASK and r["variant"] != DROPPED]
+    table = [r for r in runfiles.rows(path, "table.json") if r["task"] == TASK]
+    config = json.loads((path / "config.json").read_text("utf-8"))
+    return table, int(config["n_eval_pairs"])
 
 
-def _matrix(manifest: Manifest, model: str) -> tuple[list[str], np.ndarray]:
-    run = manifest.run("p1", model)
-    if run is None:
-        raise FileNotFoundError(f"results/p1/{model} has no logistic run")
-    labels = json.loads((run / f"transfer_{TASK}.json").read_text("utf-8"))[
-        "data"
-    ]
-    with np.load(run / f"transfer_{TASK}.npz") as npz:
-        values = np.asarray(npz["values"], dtype=float)
-    keep = [i for i, v in enumerate(labels["rows"]) if v != DROPPED]
-    names = [labels["rows"][i] for i in keep]
-    return names, values[np.ix_(keep, keep)]
-
-
-def _heat(
-    ax: Axes, manifest: Manifest, model: str, rows: list[list[str]]
-) -> Any:
-    names, matrix = _matrix(manifest, model)
-    image = shared.heatmap(ax, matrix, vmin=0.5, vmax=1.0)
-    n = len(names)
-    start = names.index("paper")
-    for rect in (
-        Rectangle((-0.5, start - 0.5), n, 1, fill=False, ec=paper.SERIES[1]),
-        Rectangle((start - 0.5, -0.5), 1, n, fill=False, ec=paper.SERIES[1]),
-    ):
-        rect.set_linewidth(0.9)
-        rect.set_zorder(4)
-        ax.add_patch(rect)
-    ax.set_xticks([start])
-    ax.set_xticklabels(["paper"])
-    ax.set_yticks([start])
-    ax.set_yticklabels(["paper"])
-    ax.set_xlabel("evaluated on wording")
-    ax.set_ylabel("fitted on wording")
-    ax.set_title(paper.display_name(model), fontsize=paper.TITLE, x=0.12)
-    for i, fit in enumerate(names):
-        for j, ev in enumerate(names):
-            rows.append(
-                [
-                    f"matrix {fit}",
-                    model,
-                    ev,
-                    f"{matrix[i, j]:.6g}",
-                    "",
-                    "",
-                    "",
-                ]
-            )
-    return image
+def _marker(
+    ax: Axes,
+    x: float,
+    y: float,
+    family: str,
+    model: str,
+    *,
+    color: str | None = None,
+    size: float = SIZE,
+    edge: str | None = None,
+) -> None:
+    style = shared.model_style(model)
+    face = color or style.color
+    ax.plot(
+        [x],
+        [y],
+        ls="none",
+        marker=MARKER[family],
+        ms=size,
+        mfc=face if style.filled else "white",
+        mec=edge or face,
+        mew=0.8,
+        zorder=4,
+    )
 
 
 def _strip(
-    ax: Axes, manifest: Manifest, models: list[str], rows: list[list[str]]
-) -> dict[str, float]:
-    spans: list[float] = []
-    cosines: list[float] = []
-    ax.set_xlim(0.45, 1.0)
-    for y, model in enumerate(models):
-        table = _table(manifest, model)
-        style = shared.model_style(model)
+    ax: Axes,
+    rows: dict[str, float],
+    data: dict[str, list[dict[str, Any]]],
+    noise: dict[str, float],
+) -> None:
+    shared.ref_line(ax, 0.5, "x")
+    for model, y in rows.items():
+        table = data[model]
         random = [r["random"] for r in table]
-        ax.barh(
-            y,
-            max(random) - min(random),
-            left=min(random),
-            height=0.7,
-            color=paper.RANDOM_BAND,
-            lw=0,
-            zorder=1,
-        )
-        values = [r for r in table if r["from_paper"] is not None]
-        for r in values:
-            is_paper = r["variant"] == "paper"
-            ax.plot(
-                [r["from_paper"]],
-                [y],
-                ls="none",
-                marker="D" if is_paper else style.marker,
-                ms=4.5 if is_paper else 3.5,
-                mfc=style.color if style.filled or is_paper else "white",
-                mec=paper.INK if is_paper else style.color,
-                mew=0.8,
-                zorder=4 if is_paper else 3,
+        ax.add_patch(
+            Rectangle(
+                (min(random), y - 0.25),
+                max(random) - min(random),
+                0.5,
+                fc=paper.RANDOM_BAND,
+                ec="none",
+                zorder=1.5,
             )
-            rows.append(
-                [
-                    "strip",
+        )
+        for r in table:
+            if r["variant"] == "paper":
+                ax.plot(
+                    [r["from_paper"]] * 2,
+                    [y - 0.4, y + 0.4],
+                    color=paper.ENC["paper"],
+                    lw=1.4,
+                    zorder=5,
+                )
+            else:
+                _marker(
+                    ax,
+                    r["from_paper"],
+                    y + DODGE[r["family"]],
+                    r["family"],
                     model,
-                    r["variant"],
-                    f"{r['from_paper']:.6g}",
-                    "",
-                    "",
-                    f"{r['random']:.6g}",
-                ]
+                    color=paper.ENC["direction"],
+                )
+        values = [r["from_paper"] for r in table]
+        ax.text(
+            1.02,
+            y,
+            f"{max(values) - min(values):.3f}",
+            transform=ax.get_yaxis_transform(),
+            fontsize=TEXT,
+            va="center",
+            color=paper.INK,
+        )
+        ax.text(
+            1.2,
+            y,
+            f"{noise[model]:.3f}",
+            transform=ax.get_yaxis_transform(),
+            fontsize=TEXT,
+            va="center",
+            color=paper.ENC["secondary_text"],
+        )
+    for x, text, color in (
+        (1.02, "span", paper.INK),
+        (1.2, "noise", paper.ENC["secondary_text"]),
+    ):
+        ax.text(
+            x,
+            -0.9,
+            text,
+            transform=ax.get_yaxis_transform(),
+            fontsize=TEXT,
+            va="center",
+            color=color,
+        )
+    ax.set_xlim(*YLIM)
+    shared.unit_axis(ax, "x")
+    ax.set_xlabel("accuracy on the wording scored")
+    ax.set_yticks(list(rows.values()), [paper.display_name(m) for m in rows])
+    ax.set_ylim(max(rows.values()) + 0.7, -1.3)
+    ax.tick_params(axis="y", length=0)
+    ax.spines["left"].set_visible(False)
+
+
+def _scatter(ax: Axes, data: dict[str, list[dict[str, Any]]]) -> None:
+    shared.ref_line(ax, 0.5, "y")
+    labelled = False
+    for model, table in data.items():
+        style = shared.model_style(model)
+        paper_row = next(r for r in table if r["variant"] == "paper")
+        for r in table:
+            if r["variant"] == "paper":
+                continue
+            bare = r["variant"] == "bare"
+            _marker(
+                ax,
+                r["cosine_paper"],
+                r["to_paper"],
+                r["family"],
+                model,
+                size=SIZE * 1.4 if bare else SIZE,
+                edge=paper.INK if bare else None,
             )
-        reach = [r["from_paper"] for r in values]
-        span = max(reach) - min(reach)
-        cos = [r["cosine_paper"] for r in table if r["variant"] != "paper"]
-        spans.append(span)
-        cosines += cos
-        ax.annotate(
-            f"{span:.3f}",
-            xy=(1.03, y),
-            xycoords=("axes fraction", "data"),
-            va="center",
-            ha="left",
-            fontsize=paper.TICK,
+            if bare and not labelled:
+                ax.annotate(
+                    "bare",
+                    (r["cosine_paper"], r["to_paper"]),
+                    xytext=(5, -7),
+                    textcoords="offset points",
+                    fontsize=TEXT,
+                    color=paper.INK,
+                )
+                labelled = True
+        ax.plot(
+            [paper_row["stability"]] * 2,
+            [YLIM[0], YLIM[0] + 0.03],
+            color=style.color,
+            lw=1.2,
+            clip_on=False,
+            zorder=5,
         )
-        ax.annotate(
-            f"{min(cos):.2f} to {max(cos):.2f}",
-            xy=(1.17, y),
-            xycoords=("axes fraction", "data"),
-            va="center",
-            ha="left",
-            fontsize=paper.TICK,
+        ax.plot(
+            [0.0, 0.03],
+            [paper_row["random"]] * 2,
+            color=paper.ENC["random_marker"],
+            lw=1.2,
+            clip_on=False,
+            zorder=5,
         )
-    ax.annotate(
-        "span",
-        xy=(1.03, -0.8),
-        xycoords=("axes fraction", "data"),
-        va="center",
-        ha="left",
-        fontsize=paper.TICK,
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(*YLIM)
+    shared.unit_axis(ax, "x")
+    shared.unit_axis(ax, "y")
+    ax.set_xlabel("cosine with paper direction", fontsize=7)
+    ax.set_ylabel("accuracy on the paper wording")
+
+
+def _legend(fig: Figure) -> None:
+    handles: list[Any] = [
+        Line2D(
+            [],
+            [],
+            ls="none",
+            marker=MARKER[f],
+            ms=SIZE,
+            color=paper.ENC["direction"],
+        )
+        for f in MARKER
+    ]
+    handles.append(Line2D([], [], color=paper.ENC["paper"], lw=1.4))
+    handles.append(Patch(fc=paper.RANDOM_BAND, ec="none"))
+    fig.legend(
+        handles,
+        [*KIND.values(), "paper wording", "random direction"],
+        loc="outside upper center",
+        ncol=5,
+        frameon=False,
+        fontsize=TEXT,
+        columnspacing=1.2,
+        handletextpad=0.4,
     )
-    ax.annotate(
-        "cosine",
-        xy=(1.17, -0.8),
-        xycoords=("axes fraction", "data"),
-        va="center",
-        ha="left",
-        fontsize=paper.TICK,
-    )
-    ax.set_yticks(range(len(models)))
-    ax.set_yticklabels([paper.display_name(m) for m in models])
-    ax.set_ylim(len(models) - 0.5, -1.2)
-    ax.set_xticks([0.5, 0.75, 1.0])
-    ax.set_xticklabels(["0.5", "0.75", "1"])
-    ax.set_xlabel("accuracy of the reader fitted on the paper wording")
-    return {
-        "span_min": min(spans),
-        "span_max": max(spans),
-        "cosine_min": min(cosines),
-        "cosine_max": max(cosines),
+
+
+def _numbers(
+    data: dict[str, list[dict[str, Any]]], noise: dict[str, float]
+) -> dict[str, float]:
+    numbers: dict[str, float] = {}
+    for role in stats.ROLES:
+        spans = [
+            max(r["from_paper"] for r in t) - min(r["from_paper"] for r in t)
+            for m, t in data.items()
+            if stats.role(m) == role
+        ]
+        if spans:
+            numbers[f"span_{role}_min"] = min(spans)
+            numbers[f"span_{role}_max"] = max(spans)
+    numbers["noise_max"] = max(noise.values())
+    bare = {
+        m: next(r for r in t if r["variant"] == "bare") for m, t in data.items()
     }
-
-
-def _claim(n: dict[str, float], count: int) -> str:
-    return (
-        "Changing only the wording of the prompt moves the accuracy of a "
-        "sentiment reader fitted on the paper wording by "
-        f"{n['span_min']:.3f} to {n['span_max']:.3f} between the best and "
-        f"the worst wording on {count} checkpoints, and the directions "
-        "fitted on other wordings have a cosine with the paper direction "
-        f"from {n['cosine_min']:.2f} to {n['cosine_max']:.2f}."
+    base = {
+        m: next(r for r in t if r["variant"] == "paper")
+        for m, t in data.items()
+    }
+    for name, values in (
+        ("bare_cos", [b["cosine_paper"] for b in bare.values()]),
+        ("bare_to_paper", [b["to_paper"] for b in bare.values()]),
+        ("bare_random", [b["random"] for b in base.values()]),
+    ):
+        numbers[f"{name}_min"] = min(values)
+        numbers[f"{name}_max"] = max(values)
+    numbers["bare_above"] = sum(
+        bare[m]["to_paper"] > base[m]["random"] for m in data
     )
+    numbers["n_checkpoints"] = len(data)
+    return numbers
+
+
+def _span_text(numbers: dict[str, float]) -> str:
+    parts = [
+        f"{numbers[f'span_{r}_min']:.3f} to {numbers[f'span_{r}_max']:.3f} "
+        f"on {ROLE_TEXT[r]}"
+        for r in stats.ROLES
+        if f"span_{r}_min" in numbers
+    ]
+    if len(parts) > 1:
+        parts = [", ".join(parts[:-1]) + " and " + parts[-1]]
+    return parts[0] + " checkpoints"
+
+
+def _claim(numbers: dict[str, float]) -> str:
+    n, above = int(numbers["n_checkpoints"]), int(numbers["bare_above"])
+    where = f"all {n}" if above == n else f"{above} of {n}"
+    return (
+        "Wording moves a reader, and nearly orthogonal directions read the "
+        "same concept. A direction fitted on the bare wording has cosine "
+        f"{numbers['bare_cos_min']:.3f} to {numbers['bare_cos_max']:.3f} "
+        "with the paper direction and still reads the paper wording at "
+        f"{numbers['bare_to_paper_min']:.3f} to "
+        f"{numbers['bare_to_paper_max']:.3f}, against a random direction "
+        f"at {numbers['bare_random_min']:.3f} to "
+        f"{numbers['bare_random_max']:.3f}, on {where} checkpoints with "
+        "this run."
+    )
+
+
+def _detail(numbers: dict[str, float]) -> str:
+    return (
+        "(a) Accuracy of the sentiment reader fitted on the paper's wording "
+        "when it is scored on each other wording (shape: kind of change), "
+        "the paper wording (purple tick) and the range of a random "
+        "direction over the wordings (grey); the span between the best and "
+        f"the worst wording is {_span_text(numbers)}, against at most "
+        f"{numbers['noise_max']:.3f} expected from test-pair noise alone "
+        "(right columns). (b) Each direction fitted on another wording, by "
+        "its cosine with the paper direction and its accuracy on the paper "
+        "wording; ticks on the x axis mark how well the paper direction "
+        "agrees with itself across seeds, and grey ticks on the left the "
+        "random direction on the paper wording. Matrices for every pair of "
+        "wordings are in Figure A4 and the wordings in Table A6."
+    )
+
+
+def _csv(
+    data: dict[str, list[dict[str, Any]]],
+) -> str:
+    lines = [
+        "model,role,variant,kind,family,from_paper,to_paper,cosine_paper,"
+        "random,stability"
+    ]
+    for model, table in data.items():
+        for r in table:
+            stability = r["stability"] if r["variant"] == "paper" else ""
+            lines.append(
+                f"{model},{stats.role(model)},{r['variant']},{r['kind']},"
+                f"{r['family']},{r['from_paper']:.10g},{r['to_paper']:.10g},"
+                f"{r['cosine_paper']:.10g},{r['random']:.10g},{stability}"
+            )
+    return "\n".join(lines) + "\n"
 
 
 def build(manifest: Manifest) -> FigureOutput:
@@ -200,60 +342,25 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    models = [m for m in manifest.models("p1") if manifest.run("p1", m)]
-    gpt2 = [m for m in models if m.startswith("gpt2")]
-    second = max(gpt2, key=store.model_rank)
-    rows: list[list[str]] = []
+    models = manifest.models("p1")
+    loaded = {m: _rows(manifest, m) for m in models}
+    data = {m: t for m, (t, _) in loaded.items()}
+    noise = {}
+    for m, (table, n) in loaded.items():
+        p = sum(r["from_paper"] for r in table) / len(table)
+        noise[m] = stats.expected_range(len(table)) * (p * (1 - p) / n) ** 0.5
+    rows = shared.model_rows(models)
+    numbers = _numbers(data, noise)
     with paper.paper_style():
-        fig = Figure(figsize=(paper.FULL_WIDTH, 5.0), layout="constrained")
-        grid = fig.add_gridspec(
-            2, 2, height_ratios=[1.1, 1], width_ratios=[1, 1]
+        fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
+        left, right = fig.subplots(
+            1, 2, gridspec_kw={"width_ratios": [3.0, 2.3]}
         )
-        left = fig.add_subplot(grid[0, 0])
-        right = fig.add_subplot(grid[0, 1])
-        image = _heat(left, manifest, MATRIX_MODEL, rows)
-        _heat(right, manifest, second, rows)
-        right.set_ylabel("")
-        bar = fig.colorbar(
-            image, ax=[left, right], fraction=0.04, pad=0.02, aspect=22
-        )
-        bar.set_ticks([0.5, 0.75, 1.0])
-        bar.set_ticklabels(["0.5", "0.75", "1"])
-        bar.set_label("accuracy")
-        random = [r["random"] for r in _table(manifest, MATRIX_MODEL)]
-        bar.ax.axhspan(
-            min(random),
-            max(random),
-            xmin=0.0,
-            xmax=0.45,
-            color=paper.CHANCE,
-            lw=0,
-        )
-        strip = fig.add_subplot(grid[1, :])
-        numbers = _strip(strip, manifest, models, rows)
-        for ax, letter in zip((left, right, strip), "abc", strict=True):
-            paper.panel_letter(ax, letter)
-    detail = (
-        "(a, b) Accuracy of the sentiment reader fitted on the wording in "
-        "the row and evaluated on the wording in the column, at the layer "
-        "of the paper wording, for two checkpoints (the other checkpoints "
-        "are in the appendix); the diagonal is outlined and the paper row "
-        "and column in orange. The grey bar on the colour scale spans the "
-        f"random-direction accuracy of {paper.display_name(MATRIX_MODEL)} "
-        "over the wordings. (c) For each logistic P1 checkpoint, the "
-        "accuracy of the reader fitted on the paper wording (diamond) on "
-        "each wording (dots); the grey band spans the random-direction "
-        "accuracy over the wordings, span is the largest minus the "
-        "smallest accuracy, and cosine is the range of the cosine between "
-        "the paper direction and the direction fitted on each other "
-        "wording. The wording with no trailing space is dropped because "
-        "the post-trained models do not have it."
-    )
+        _strip(left, rows, data, noise)
+        _scatter(right, data)
+        paper.panel_letter(left, "a")
+        paper.panel_letter(right, "b")
+        _legend(fig)
     return FigureOutput(
-        fig, _claim(numbers, len(models)), detail, numbers, _csv(rows)
+        fig, _claim(numbers), _detail(numbers), numbers, _csv(data)
     )
-
-
-def _csv(rows: list[list[str]]) -> str:
-    header = "panel,model,x,y,lo,hi,baseline"
-    return "\n".join([header, *(",".join(r) for r in rows)]) + "\n"
