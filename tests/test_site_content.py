@@ -437,3 +437,11 @@ def test_the_steering_contribution_names_both_fluency_thresholds() -> None:
     sentence = text[start : start + 220]
     assert "perplexity ratio at most 1.5" in sentence
     assert "distinct-1 at least 0.15" in sentence
+
+
+def test_known_questions_use_the_runs_token_and_name_the_criterion() -> None:
+    text = " ".join(_all_texts())
+    assert "[[runs:fig:knowledge_steering.known_ge_unknown]]" in text
+    assert "by the largest shift of the mean dose curve" in text
+    assert "known_ge_unknown_" not in text
+    assert "knowledge_steering.n_" not in text
