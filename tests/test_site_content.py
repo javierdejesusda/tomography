@@ -731,7 +731,7 @@ def test_the_abstract_is_prose_without_run_counts() -> None:
     assert "confounded with the concept and the data" in abstract
     assert abstract.count("relative coefficient") == 2
     assert "rarely" not in abstract
-    assert "all 10 checkpoints" in abstract
+    assert "all 10" not in abstract
     assert "of the three Qwen3" not in _text()
 
 
@@ -856,7 +856,7 @@ def test_the_written_reading_claims_match_the_computed_counts(
     assert truth["gpt2"].hits == 0
     assert truth["base"].hits == truth["base"].total
     assert truth["post"].hits == truth["post"].total
-    assert "all 10 checkpoints" in content.ABSTRACT
+    assert "all 10" not in content.ABSTRACT
     assert "truth on every Qwen3 checkpoint but no GPT-2" in content.ABSTRACT
     assert "reads utility and morality above its random direction on every" in (
         _opener("reading")
@@ -878,7 +878,8 @@ def test_the_written_finder_claims_match_the_computed_counts(
         )
     assert _all(counts["logistic_sentiment"])
     assert "on every Qwen3 checkpoint" in _findings("The finder")
-    assert "all 10 checkpoints" in _findings("The finder")
+    assert "all 10" not in _findings("The finder")
+    assert "[[count:fig:finders.logistic_sentiment]]" in _findings("The finder")
     assert "above one for sentiment on every checkpoint" in _opener("finders")
 
 
@@ -897,7 +898,9 @@ def test_the_written_steering_and_wording_claims_match_the_counts(
     assert "on only some checkpoints" in opener
     noise = built["wording"].counts["span_above_noise"]
     assert _hits(noise) * 2 > _total(noise)
-    assert "more than the noise of the test pairs on most" in _opener("reading")
+    assert "on every Qwen3 checkpoint and on two of the four GPT-2" in (
+        _opener("reading")
+    )
 
 
 def test_the_written_baseline_claims_match_the_computed_counts(
@@ -1056,3 +1059,84 @@ def test_the_introduction_lists_the_reading_concepts_among_text_baselines() -> (
 ):
     intro = " ".join(_texts(content.INTRODUCTION))
     assert "a classifier on the text (for the readings, TruthfulQA" in intro
+
+
+def _result_texts() -> str:
+    parts = [content.ABSTRACT, content.TLDR]
+    parts += [t for _, t in content.KEY_FINDINGS.listed]
+    for section in content.RESULTS.subsections:
+        parts += _texts(section)
+    parts += _texts(content.DISCUSSION)
+    return " ".join(parts)
+
+
+def test_no_result_says_all_ten_checkpoints() -> None:
+    text = _result_texts()
+    assert "all 10" not in text
+    assert "none of the 10" not in text
+
+
+def test_the_reading_counts_the_same_for_utility_and_morality() -> None:
+    manifest = Manifest(ROOT)
+    teaser = registry.build_figure("teaser", manifest).counts
+    assert teaser["utility"] == teaser["morality"]
+    finding = _findings("Where a concept")
+    assert "[[count:fig:teaser.utility]]" in finding
+    assert "[[count:fig:teaser.truth]]" in finding
+
+
+def test_the_wording_noise_claim_is_counted_per_role() -> None:
+    counts = registry.build_figure("wording", Manifest(ROOT)).counts
+    got = {r: (c.hits, c.total) for r, c in counts["span_above_noise"].items()}
+    assert got["gpt2"][0] < got["gpt2"][1]
+    finding = _findings("Where a concept")
+    assert "[[count:fig:wording.span_above_noise]]" in finding
+    lead = _opener("reading")
+    assert "noise of the test pairs on most" not in lead
+    noise = counts["span_above_noise"]
+    assert noise["base"].hits == noise["base"].total
+    assert noise["gpt2"].hits == 2
+    assert noise["gpt2"].total == 4
+    assert (
+        "on every Qwen3 checkpoint and on two of the four GPT-2 checkpoints"
+    ) in lead
+
+
+def test_the_finder_utility_claim_is_limited_to_qwen3() -> None:
+    finders = registry.build_figure("finders", Manifest(ROOT)).counts
+    assert finders["pca_utility"]["gpt2"].hits == 0
+    assert finders["pca_utility"]["base"].hits == 3
+    assert finders["pca_utility"]["post"].hits == 3
+    assert "for utility on every Qwen3 checkpoint" in content.ABSTRACT
+    assert "for utility on every Qwen3 checkpoint" in _opener("finders")
+
+
+def test_the_knowledge_claim_is_limited_to_qwen3() -> None:
+    counts = registry.build_figure("knowledge_reading", Manifest(ROOT)).counts
+    above = counts["above_best"]
+    assert above["gpt2"].hits == 0
+    assert above["base"].hits > 0
+    phrase = "on most Qwen3 checkpoints"
+    assert phrase in content.ABSTRACT
+    assert phrase in _opener("known_unknown")
+
+
+def test_the_knowledge_denominators_are_explained() -> None:
+    run = " ".join(_texts(_section("known_unknown")))
+    assert "GPT-2 small has no knowledge-direction run" in run
+
+
+def test_the_steering_lead_names_the_sentiment_run() -> None:
+    lead = _opener("steering")
+    assert "the steered sentiment text meets the rule on none" in lead
+    steering = registry.build_figure("steering", Manifest(ROOT))
+    assert all(c.hits == 0 for c in steering.counts["fluent03"].values())
+
+
+def test_the_utility_steering_run_is_not_called_the_finder_comparison() -> None:
+    method = " ".join(t for s in _sections(content.METHOD) for t in _texts(s))
+    assert "the utility steering run steers at 40, 55" in method
+    assert "finder comparison steers" not in method
+    limits = " ".join(_texts(content.DISCUSSION))
+    assert "(the utility steering run has three)" in limits
+    assert "(the finder comparison has three)" not in limits
