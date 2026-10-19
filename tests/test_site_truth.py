@@ -298,3 +298,24 @@ def test_the_caption_separates_the_classifier_accuracies_from_their_intervals(
     assert "at least one negated set" in text
     assert "(b) whiskers" in text or "whiskers in (b)" in text
     assert "two negated sets per checkpoint" not in text
+
+
+_L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
+
+
+def test_no_legend_symbol_means_two_things_and_the_role_key_is_present(
+    output: registry.FigureOutput,
+) -> None:
+    assert _L["marker_clashes"](output.figure) == []
+    labels = [
+        t.get_text() for leg in output.figure.legends for t in leg.get_texts()
+    ]
+    assert "GPT-2 and base" in labels
+    assert "post-trained" in labels
+
+
+def test_the_below_random_count_is_labelled_a_point_estimate(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.detail
+    assert "below the random direction by point estimate on" in text
