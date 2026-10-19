@@ -282,19 +282,37 @@ def _span_text(numbers: dict[str, float]) -> str:
     return parts[0] + " checkpoints"
 
 
-def _claim(numbers: dict[str, float]) -> str:
+def _below(
+    data: dict[str, list[dict[str, Any]]],
+) -> list[tuple[str, float, float]]:
+    found = []
+    for model, table in data.items():
+        bare = next(r for r in table if r["variant"] == "bare")
+        base = next(r for r in table if r["variant"] == "paper")
+        if bare["to_paper"] <= base["random"]:
+            found.append((model, bare["to_paper"], base["random"]))
+    return found
+
+
+def _claim(
+    numbers: dict[str, float], below: list[tuple[str, float, float]]
+) -> str:
     n, above = int(numbers["n_checkpoints"]), int(numbers["bare_above"])
-    where = f"all {n}" if above == n else f"{above} of {n}"
+    where = f"all {n} checkpoints" if above == n else f"{above} of {n} checkpoints"
+    exceptions = "".join(
+        f", but not on {paper.display_name(m)} ({read:.3f} against {rand:.3f})"
+        for m, read, rand in below
+    )
     return (
         "Wording moves a reader, and nearly orthogonal directions read the "
         "same concept. A direction fitted on the bare wording has cosine "
         f"{numbers['bare_cos_min']:.3f} to {numbers['bare_cos_max']:.3f} "
-        "with the paper direction and still reads the paper wording at "
-        f"{numbers['bare_to_paper_min']:.3f} to "
-        f"{numbers['bare_to_paper_max']:.3f}, against a random direction "
-        f"at {numbers['bare_random_min']:.3f} to "
-        f"{numbers['bare_random_max']:.3f}, on {where} checkpoints with "
-        "this run."
+        "with the paper direction. It reads the paper wording above a "
+        f"random direction on {where}{exceptions}; across checkpoints it "
+        f"reads at {numbers['bare_to_paper_min']:.3f} to "
+        f"{numbers['bare_to_paper_max']:.3f} and the random direction at "
+        f"{numbers['bare_random_min']:.3f} to "
+        f"{numbers['bare_random_max']:.3f}."
     )
 
 
@@ -362,5 +380,9 @@ def build(manifest: Manifest) -> FigureOutput:
         paper.panel_letter(right, "b")
         _legend(fig)
     return FigureOutput(
-        fig, _claim(numbers), _detail(numbers), numbers, _csv(data)
+        fig,
+        _claim(numbers, _below(data)),
+        _detail(numbers),
+        numbers,
+        _csv(data),
     )
