@@ -21,6 +21,7 @@ from tomography.viz import axes
 from tomography.viz import paper
 
 HEIGHT = 5.6
+KEY_LINE_WIDTH = 1.8
 COLUMNS = 3
 A7_TAG_KEY = (
     "n of 3: random directions whose gap interval lies above zero; "
@@ -123,11 +124,11 @@ def build(manifest: Manifest) -> FigureOutput:
                     [],
                     [],
                     color=paper.ENC["random_marker"],
-                    lw=paper.DATA_WIDTH,
+                    lw=KEY_LINE_WIDTH,
                 ),
                 Patch(
                     facecolor=paper.INK,
-                    alpha=0.2,
+                    alpha=0.4,
                     lw=0,
                 ),
                 Line2D([], [], ls="none"),

@@ -318,3 +318,22 @@ def test_the_direction_interval_is_tinted_and_named_in_the_key(
     (patch,) = [h for h in legend.legend_handles if isinstance(h, Patch)]
     face = np.asarray(patch.get_facecolor())[:3]
     assert face.max() - face.min() < 0.02
+
+
+def test_the_random_line_and_interval_swatch_in_the_key_are_dark_enough(
+    output: registry.FigureOutput,
+) -> None:
+    from matplotlib.patches import Patch
+
+    (legend,) = output.figure.legends
+    pairs = dict(
+        zip(
+            (t.get_text() for t in legend.get_texts()),
+            legend.legend_handles,
+            strict=True,
+        )
+    )
+    assert pairs["mean of 3 random directions"].get_linewidth() >= 1.5
+    swatch = pairs["interval of the direction (run colour)"]
+    assert isinstance(swatch, Patch)
+    assert swatch.get_alpha() >= 0.35
