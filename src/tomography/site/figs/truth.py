@@ -417,10 +417,7 @@ def _numbers(
     chance: float,
 ) -> dict[str, float]:
     lo, hi = _band(data)
-    persona = [data[m].reads["persona_reader"].value for m in models]
     numbers: dict[str, float] = {
-        "persona_min": min(persona),
-        "persona_max": max(persona),
         "text_lo": lo,
         "text_hi": hi,
         "chance": chance,
@@ -430,6 +427,9 @@ def _numbers(
     }
     for role in stats.ROLES:
         group = [m for m in models if stats.role(m) == role]
+        reads = [data[m].reads["persona_reader"].value for m in group]
+        numbers[f"persona_{role}_min"] = min(reads)
+        numbers[f"persona_{role}_max"] = max(reads)
         numbers[f"tqa_inside_{role}"] = counts["tqa_inside"][role].hits
         numbers[f"tqa_above_words_{role}"] = sum(
             data[m].reads["truthfulqa_reader"].value > data[m].words
@@ -465,6 +465,17 @@ def _numbers(
     return numbers
 
 
+def _persona_text(numbers: dict[str, float]) -> str:
+    return stats.join_and(
+        [
+            f"{numbers[f'persona_{r}_min']:.3f} to "
+            f"{numbers[f'persona_{r}_max']:.3f} on {stats.ROLE_NAMES[r]}"
+            for r in stats.ROLES
+            if f"persona_{r}_min" in numbers
+        ]
+    )
+
+
 def _claim(
     numbers: dict[str, float], counts: dict[str, dict[str, RoleCount]]
 ) -> str:
@@ -475,9 +486,8 @@ def _claim(
         f"{numbers['text_hi']:.3f}; their accuracies are "
         f"{numbers['text_word']:.3f} and {numbers['text_char']:.3f}) on "
         f"{stats.per_role_text(counts['tqa_inside'])}, while the honesty "
-        f"persona reader reaches {numbers['persona_min']:.3f} to "
-        f"{numbers['persona_max']:.3f}, against a chance level of "
-        f"{numbers['chance']:.3f}."
+        f"persona reader reaches {_persona_text(numbers)}, against a chance "
+        f"level of {numbers['chance']:.3f}."
     )
 
 
@@ -492,14 +502,13 @@ def _detail(
         f"{n} questions; each text-only classifier is a green line (the two "
         "nearly coincide) with its own interval as a band; the dotted line "
         f"is the chance level of {numbers['chance']:.3f}. (b) The reader "
-        "minus the more accurate classifier, with the conservative interval "
-        "d plus or minus 1.96 times the square root of p1(1-p1)/n plus "
-        f"p2(1-p2)/n over the same {n} questions; intervals that exclude "
-        f"zero: {stats.per_role_text(counts['diff_excludes_zero'])}. (c) "
-        "The answer log-probability with a Wilson interval, beside the same "
-        "band. Statements with negation, where the reader falls below "
-        "chance, are in "
-        "[[fig:a_truth_cities]]."
+        "minus the more accurate classifier, with the conservative "
+        "1.96-standard-error interval of a difference of two proportions "
+        "over the same "
+        f"{n} questions; intervals that exclude zero: "
+        f"{stats.per_role_text(counts['diff_excludes_zero'])}. (c) The "
+        "answer log-probability with a Wilson interval beside the band. "
+        "Negation statements are in [[fig:a_truth_cities]]."
     )
 
 

@@ -10,6 +10,7 @@ from scipy import stats as scipy_stats
 
 from tomography.site import params
 from tomography.site import registry
+from tomography.site import stats
 from tomography.site.figs import reading as reading_fig
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
@@ -392,7 +393,9 @@ def test_the_claim_counts_each_concept_per_role_from_the_intervals(
             assert output.numbers[f"above_{concept}_{role}"] == hits[role]
             assert output.numbers[f"above_{concept}_{role}_n"] == totals[role]
     text = output.claim
-    assert "all 10 checkpoints" in text
+    assert "all 10 checkpoints" not in text
+    for concept in ("sentiment", "utility", "morality"):
+        assert stats.per_role_text(output.counts[concept]) in text
     assert "truth on 0 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post" in text
 
 

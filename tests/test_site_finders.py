@@ -9,6 +9,7 @@ import pytest
 
 from tomography.site import params
 from tomography.site import registry
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -375,3 +376,11 @@ def test_the_utility_interval_count_is_stated_per_role_not_pooled(
     )
     assert expected in output.claim
     assert "all 6 Qwen3" not in output.claim
+
+
+def test_the_logistic_clause_is_counted_per_role_not_as_all_ten(
+    output: registry.FigureOutput,
+) -> None:
+    assert "all 10 checkpoints" not in output.claim
+    where = stats.per_role_text(output.counts["logistic_sentiment"])
+    assert f"for sentiment on {where}" in output.claim

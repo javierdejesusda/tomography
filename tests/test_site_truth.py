@@ -148,10 +148,15 @@ def test_numbers_are_recomputed_per_role(
     output: registry.FigureOutput,
 ) -> None:
     n = output.numbers
-    persona = [_lat(m, "honesty")["mc1"] for m in MODELS]
     lo, hi = _band()
-    assert n["persona_min"] == pytest.approx(min(persona))
-    assert n["persona_max"] == pytest.approx(max(persona))
+    for role in ROLES:
+        persona = [
+            _lat(m, "honesty")["mc1"] for m in MODELS if _role(m) == role
+        ]
+        assert n[f"persona_{role}_min"] == pytest.approx(min(persona))
+        assert n[f"persona_{role}_max"] == pytest.approx(max(persona))
+    assert "persona_min" not in n
+    assert "persona_max" not in n
     assert n["text_lo"] == pytest.approx(lo)
     assert n["text_hi"] == pytest.approx(hi)
     chance = json.loads(
@@ -198,8 +203,8 @@ def test_the_plan_values_hold_at_the_current_results(
     assert [counts["tqa_inside"][r].hits for r in ROLES] == [4, 2, 3]
     assert [counts["tqa_inside"][r].total for r in ROLES] == [4, 3, 3]
     assert [counts["neg_below_half"][r].hits for r in ROLES] == [3, 0, 2]
-    assert output.numbers["persona_min"] == pytest.approx(0.270, abs=5e-4)
-    assert output.numbers["persona_max"] == pytest.approx(0.575, abs=5e-4)
+    assert output.numbers["persona_gpt2_min"] == pytest.approx(0.270, abs=5e-4)
+    assert output.numbers["persona_post_max"] == pytest.approx(0.575, abs=5e-4)
 
 
 def test_the_caption_states_the_counts_and_the_numbers(
@@ -208,8 +213,14 @@ def test_the_caption_states_the_counts_and_the_numbers(
     text = f"{output.claim} {output.detail}"
     n = output.numbers
     assert stats.per_role_text(output.counts["tqa_inside"]) in text
-    for name in ("persona_min", "persona_max", "text_lo", "text_hi", "chance"):
+    names = ["text_lo", "text_hi", "chance"]
+    for role in ROLES:
+        names += [f"persona_{role}_min", f"persona_{role}_max"]
+    for name in names:
         assert f"{n[name]:.3f}" in text, name
+    for role in ROLES:
+        lo, hi = n[f"persona_{role}_min"], n[f"persona_{role}_max"]
+        assert f"{lo:.3f} to {hi:.3f}" in text
     assert "pooled" not in text
     assert EM not in text
     assert EN not in text

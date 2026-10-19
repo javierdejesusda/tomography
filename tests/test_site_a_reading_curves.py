@@ -13,6 +13,8 @@ from scipy import stats as scipy_stats
 
 from tomography.site import params
 from tomography.site import registry
+from tomography.site import stats
+from tomography.site.figs import a_reading_curves
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -175,20 +177,66 @@ def test_every_depth_cell_is_the_reader_minus_random_curve(
     assert total == len(rows)
 
 
-def test_the_onset_depths_are_recomputed_for_all_forty_cells(
+def _role_depths(concept: str, role: str) -> list[float]:
+    values = [
+        _onset(concept, m)
+        for m in models(CONCEPTS[concept])
+        if _role(m) == role
+    ]
+    return [v for v in values if v is not None]
+
+
+def test_the_onset_depths_are_recomputed_per_role_for_all_forty_cells(
     output: registry.FigureOutput,
 ) -> None:
     cells = 0
     for concept in CONCEPTS:
-        depths = _depths(concept)
-        cells += len(depths)
-        assert output.numbers[f"onset_{concept}_min"] == pytest.approx(
-            min(depths)
-        )
-        assert output.numbers[f"onset_{concept}_max"] == pytest.approx(
-            max(depths)
-        )
+        for role in ("gpt2", "base", "post"):
+            depths = _role_depths(concept, role)
+            cells += len(depths)
+            assert output.numbers[f"onset_{concept}_{role}_min"] == (
+                pytest.approx(min(depths))
+            )
+            assert output.numbers[f"onset_{concept}_{role}_max"] == (
+                pytest.approx(max(depths))
+            )
+        assert f"onset_{concept}_min" not in output.numbers
+        assert f"onset_{concept}_max" not in output.numbers
     assert cells == 40
+
+
+def test_the_caption_gives_every_onset_range_per_role(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.claim
+    for concept in CONCEPTS:
+        for role in ("gpt2", "base", "post"):
+            depths = _role_depths(concept, role)
+            assert f"{min(depths):.3f} to {max(depths):.3f}" in text
+    assert "GPT-2" in text
+    assert "Qwen3 base" in text
+    assert "post-trained" in text
+
+
+def test_no_checkpoint_lacks_an_onset_so_the_caption_does_not_say_it(
+    output: registry.FigureOutput,
+) -> None:
+    assert "not at all" not in output.claim
+    counts = {
+        "gpt2": stats.RoleCount(0, 4),
+        "base": stats.RoleCount(0, 3),
+        "post": stats.RoleCount(0, 3),
+    }
+    assert a_reading_curves._missing_clause(counts) == ""
+    some = {
+        "gpt2": stats.RoleCount(1, 4),
+        "base": stats.RoleCount(0, 3),
+        "post": stats.RoleCount(2, 3),
+    }
+    clause = a_reading_curves._missing_clause(some)
+    assert "1 of 4 GPT-2" in clause
+    assert "2 of 3 post-trained" in clause
+    assert "Qwen3 base" not in clause
 
 
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:

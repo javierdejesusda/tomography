@@ -364,7 +364,14 @@ def test_the_claim_states_the_per_role_counts_without_pooling(
     built: registry.FigureOutput,
 ) -> None:
     text = _full(built)
-    assert "above a random direction on all 10 checkpoints" in text
+    assert "all 10 checkpoints" not in text
+    for concept in ("utility", "morality"):
+        assert stats.per_role_text(built.counts[concept]) in text
+    assert (
+        "above a random direction on "
+        + stats.per_role_text(built.counts["utility"])
+        in text
+    )
     assert "truth on " + stats.per_role_text(built.counts["truth"]) in text
     assert "Qwen3 checkpoints" not in text
     assert not re.search(r"of 10 checkpoints", text)

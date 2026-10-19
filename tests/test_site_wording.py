@@ -109,24 +109,29 @@ def test_spans_are_per_role_and_noise_comes_from_the_expected_range(
             continue
         assert output.numbers[f"span_{role}_min"] == pytest.approx(min(spans))
         assert output.numbers[f"span_{role}_max"] == pytest.approx(max(spans))
-    assert output.numbers["noise_max"] == pytest.approx(
-        max(_noise(m) for m in MODELS)
-    )
+    assert "noise_max" not in output.numbers
     assert output.numbers["n_checkpoints"] == len(MODELS)
 
 
 def test_the_bare_wording_numbers_are_recomputed(
     output: registry.FigureOutput,
 ) -> None:
-    cos = [_bare(m)["cosine_paper"] for m in MODELS]
-    reads = [_bare(m)["to_paper"] for m in MODELS]
-    random = [_paper(m)["random"] for m in MODELS]
-    assert output.numbers["bare_cos_min"] == pytest.approx(min(cos))
-    assert output.numbers["bare_cos_max"] == pytest.approx(max(cos))
-    assert output.numbers["bare_to_paper_min"] == pytest.approx(min(reads))
-    assert output.numbers["bare_to_paper_max"] == pytest.approx(max(reads))
-    assert output.numbers["bare_random_min"] == pytest.approx(min(random))
-    assert output.numbers["bare_random_max"] == pytest.approx(max(random))
+    for role, name, values in _role_series():
+        assert output.numbers[f"{name}_{role}_min"] == pytest.approx(
+            min(values)
+        )
+        assert output.numbers[f"{name}_{role}_max"] == pytest.approx(
+            max(values)
+        )
+    for pooled in (
+        "bare_cos",
+        "bare_to_paper",
+        "bare_random",
+        "paper_rank",
+        "noise",
+    ):
+        assert f"{pooled}_min" not in output.numbers
+        assert f"{pooled}_max" not in output.numbers
 
 
 def test_the_plan_values_hold_for_the_eight_checkpoints_it_checked() -> None:
@@ -156,16 +161,14 @@ def test_the_caption_quotes_the_spans_the_noise_and_the_bare_numbers(
         if f"span_{role}_min" in n:
             assert f"{n[f'span_{role}_min']:.3f}" in text
             assert f"{n[f'span_{role}_max']:.3f}" in text
-    for name in (
-        "noise_max",
-        "bare_cos_min",
-        "bare_cos_max",
-        "bare_to_paper_min",
-        "bare_to_paper_max",
-        "bare_random_min",
-        "bare_random_max",
-    ):
-        assert f"{n[name]:.3f}" in text, name
+    for role, name, values in _role_series():
+        if name == "paper_rank":
+            assert f"{min(values)} to {max(values)}" in text, (role, name)
+        else:
+            assert f"{min(values):.3f} to {max(values):.3f}" in text, (
+                role,
+                name,
+            )
     assert "[[fig:a_wording]]" in text
     assert "[[table:wordings]]" in text
 
@@ -199,9 +202,9 @@ def test_the_dropped_wording_is_absent_and_the_noise_uses_the_report_pairs(
     output: registry.FigureOutput,
 ) -> None:
     assert DROPPED not in output.csv
-    assert output.numbers["noise_max"] == pytest.approx(
-        max(_noise(m) for m in MODELS)
-    )
+    for role in ROLES:
+        noise = [_noise(m) for m in MODELS if _role(m) == role]
+        assert output.numbers[f"noise_{role}_max"] == pytest.approx(max(noise))
     assert {_n_eval(m) for m in MODELS} == {214}
     assert "by point estimate" in output.claim
 
@@ -276,6 +279,20 @@ def _facets(output: registry.FigureOutput) -> dict[str, Any]:
 def _rank(model: str) -> int:
     values = sorted((r["from_paper"] for r in _rows(model)), reverse=True)
     return values.index(_paper(model)["from_paper"]) + 1
+
+
+def _role_series() -> list[tuple[str, str, list[Any]]]:
+    series = []
+    for role in ROLES:
+        group = [m for m in MODELS if _role(m) == role]
+        series += [
+            (role, "bare_cos", [_bare(m)["cosine_paper"] for m in group]),
+            (role, "bare_to_paper", [_bare(m)["to_paper"] for m in group]),
+            (role, "bare_random", [_paper(m)["random"] for m in group]),
+            (role, "paper_rank", [_rank(m) for m in group]),
+            (role, "noise", [_noise(m) for m in group]),
+        ]
+    return series
 
 
 def _table_name(row: dict[str, Any]) -> str:
@@ -394,8 +411,11 @@ def test_the_paper_wording_is_a_diamond_and_the_rank_is_in_the_right_column(
         assert line.get_xdata()[0] == pytest.approx(_paper(model)["from_paper"])
         assert line.get_markersize() > 3.0
     ranked = [_rank(m) for m in MODELS]
-    assert output.numbers["paper_rank_min"] == min(ranked)
-    assert output.numbers["paper_rank_max"] == max(ranked)
+    for role in ROLES:
+        mine = [_rank(m) for m in MODELS if _role(m) == role]
+        assert output.numbers[f"paper_rank_{role}_min"] == min(mine)
+        assert output.numbers[f"paper_rank_{role}_max"] == max(mine)
+    assert ranked
 
 
 def test_the_median_tick_the_noise_band_and_the_random_tick_are_drawn(
@@ -564,10 +584,11 @@ def test_the_caption_states_the_band_the_conservative_noise_and_the_rank(
     assert "median" in text
     assert "names as in [[table:wordings]]" in text
     assert "three lanes" in text
-    assert (
-        f"{int(n['paper_rank_min'])} to {int(n['paper_rank_max'])} of the 16"
-        in output.claim
-    )
+    for role in ROLES:
+        lo = int(n[f"paper_rank_{role}_min"])
+        hi = int(n[f"paper_rank_{role}_max"])
+        assert f"{lo} to {hi}" in output.claim
+    assert "of the 16 wordings" in output.claim
 
 
 def test_the_random_tick_stays_below_the_names_on_the_centre_line(

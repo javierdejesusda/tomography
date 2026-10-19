@@ -96,13 +96,17 @@ def test_ten_checkpoints_are_written_as_all_ten() -> None:
     assert "direction on all 10 checkpoints" in text
 
 
-def test_the_wording_numbers_give_the_random_baseline() -> None:
+def test_the_wording_appendix_counts_per_role_and_points_to_the_ranges() -> (
+    None
+):
     (section,) = [s for s in content.APPENDICES if s.key == "appendix_wording"]
     text = " ".join(_texts(section))
-    assert (
-        "[[num:fig:wording.bare_random_min]] to "
-        "[[num:fig:wording.bare_random_max]]"
-    ) in text
+    assert "[[count:fig:wording.span_above_noise]]" in text
+    assert "[[fig:wording]]" in text
+    for pooled in ("bare_to_paper", "bare_random", "bare_cos"):
+        assert f"wording.{pooled}_min" not in text
+        assert f"wording.{pooled}_max" not in text
+    assert "all 10 checkpoints" not in text
 
 
 def test_the_test_size_limit_is_computed_per_role_not_written_down() -> None:

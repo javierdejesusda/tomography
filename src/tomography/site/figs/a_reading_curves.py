@@ -147,31 +147,66 @@ def _label_column(ax: Axes, models: list[str]) -> None:
 def _numbers(found: dict[str, dict[str, Cell]]) -> dict[str, float]:
     numbers: dict[str, float] = {}
     for concept, _, _ in CONCEPTS:
-        onsets = [
-            d
-            for c in found[concept].values()
-            if (d := reading.first_depth_above(c.curve, MARGIN)) is not None
-        ]
-        if onsets:
-            numbers[f"onset_{concept}_min"] = min(onsets)
-            numbers[f"onset_{concept}_max"] = max(onsets)
+        onsets: dict[str, list[float]] = {r: [] for r in stats.ROLES}
+        for model, cell in found[concept].items():
+            depth = reading.first_depth_above(cell.curve, MARGIN)
+            if depth is not None:
+                onsets[stats.role(model)].append(depth)
+        for role, depths in onsets.items():
+            if depths:
+                numbers[f"onset_{concept}_{role}_min"] = min(depths)
+                numbers[f"onset_{concept}_{role}_max"] = max(depths)
     numbers["truth_n"] = next(iter(found["truth"].values())).at.n
     return numbers
 
 
-def _claim(numbers: dict[str, float], names: dict[str, str]) -> str:
-    spans = [
-        f"{numbers[f'onset_{c}_min']:.3f} to {numbers[f'onset_{c}_max']:.3f} "
-        f"of the depth for {c}"
-        for c in names
-        if f"onset_{c}_min" in numbers
-    ]
+def _missing(found: dict[str, dict[str, Cell]]) -> dict[str, stats.RoleCount]:
+    """Counts the checkpoints with no onset for some concept, per role."""
+    lacking: dict[str, bool] = {}
+    for cells in found.values():
+        for model, cell in cells.items():
+            none = reading.first_depth_above(cell.curve, MARGIN) is None
+            lacking[model] = lacking.get(model, False) or none
+    return stats.per_role(lacking)
+
+
+def _missing_clause(counts: dict[str, stats.RoleCount]) -> str:
+    """Words the cells without an onset, or nothing when there are none.
+
+    Args:
+        counts: Role to its count of checkpoints that lack an onset.
+
+    Returns:
+        A closing clause with the per-role counts, or an empty string.
+    """
+    lacking = {r: c for r, c in counts.items() if c.hits}
+    if not lacking:
+        return ""
     return (
-        "A reader's margin over a random direction reaches 0.1 at "
-        + ", ".join(spans[:-1])
-        + " and "
-        + spans[-1]
-        + ", and later or not at all on some checkpoints."
+        " For some concept the margin never reaches 0.1 on "
+        + stats.per_role_text(lacking)
+        + "."
+    )
+
+
+def _claim(
+    numbers: dict[str, float],
+    names: dict[str, str],
+    missing: dict[str, stats.RoleCount],
+) -> str:
+    parts = []
+    for concept in names:
+        spans = [
+            f"{numbers[f'onset_{concept}_{r}_min']:.3f} to "
+            f"{numbers[f'onset_{concept}_{r}_max']:.3f} "
+            f"on {stats.ROLE_NAMES[r]}"
+            for r in stats.ROLES
+            if f"onset_{concept}_{r}_min" in numbers
+        ]
+        parts.append(f"{concept} {stats.join_and(spans)}")
+    return (
+        "A reader's margin over a random direction reaches 0.1 at a relative "
+        "depth of " + "; ".join(parts) + "." + _missing_clause(missing)
     )
 
 
@@ -294,7 +329,7 @@ def build(manifest: Manifest) -> FigureOutput:
         _key(fig)
     return FigureOutput(
         fig,
-        _claim(numbers, names),
+        _claim(numbers, names, _missing(found)),
         _detail(numbers),
         numbers,
         _csv(found),
