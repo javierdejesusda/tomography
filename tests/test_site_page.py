@@ -190,13 +190,20 @@ def test_num_token_prints_integers_plainly_and_decimals_to_three_places() -> (
     doc = _doc(
         {
             "method": _figure(
-                {"n": 1234.0, "zero": 0.0, "neg": -0.5, "p": 0.12345}
+                {
+                    "n": 1234.0,
+                    "zero": 0.0,
+                    "nzero": -0.0,
+                    "neg": -0.5,
+                    "p": 0.12345,
+                }
             )
         }
     )
     view = page.Page(doc)
     assert view.text("[[num:fig:method.n]]") == "1,234"
-    assert view.text("[[num:fig:method.zero]]") == "0.000"
+    assert view.text("[[num:fig:method.zero]]") == "0"
+    assert view.text("[[num:fig:method.nzero]]") == "0"
     assert view.text("[[num:fig:method.neg]]") == f"{MINUS}0.500"
     assert view.text("[[num:fig:method.p]]") == "0.123"
 

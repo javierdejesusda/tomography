@@ -560,8 +560,8 @@ def test_known_and_unknown_questions_have_a_finding_and_a_subsection() -> None:
     ]
     text = " ".join(_texts(sub))
     for token in (
-        "[[count:fig:knowledge_reading.above_pop]]",
-        "[[num:fig:knowledge_reading.dir_inc_hi_max]]",
+        "[[count:fig:knowledge_reading.above_best]]",
+        "[[num:fig:knowledge_reading.dir_inc_hi_max_gpt2]]",
         "[[runs:fig:knowledge_steering.distinguishable]]",
         "[[runs:fig:knowledge_steering.selective]]",
         "[[runs:fig:knowledge_steering.known_ge_unknown]]",
@@ -588,10 +588,12 @@ def test_the_knowledge_and_approximate_figures_left_the_appendix() -> None:
 def test_the_approximate_appendix_holds_the_people_position_counts() -> None:
     text = " ".join(_texts(_section("appendix_approximate")))
     assert "[[count:fig:approximate.outside]]" in text
-    assert "[[num:fig:approximate.position_min]]" in text
-    assert "[[num:fig:approximate.position_max]]" in text
-    assert "[[num:fig:approximate.band_min]]" in text
-    assert "[[num:fig:approximate.band_max]]" in text
+    for role in ("gpt2", "base", "post"):
+        for name in ("position", "band"):
+            for end in ("min", "max"):
+                assert f"[[num:fig:approximate.{name}_{role}_{end}]]" in text
+    assert "approximate.position_min" not in text
+    assert "approximate.band_min" not in text
 
 
 def test_the_abstention_limit_names_phrase_matching_and_generic_answers() -> (
@@ -608,7 +610,9 @@ def test_the_summary_and_abstract_name_the_knowledge_result() -> None:
     assert "known-against-unknown direction does not beat the model's" in (
         content.TLDR
     )
-    assert "ranks questions above their popularity" in content.ABSTRACT
+    assert "ranks questions above popularity and text classifiers" in (
+        content.ABSTRACT
+    )
     contribution = content.INTRODUCTION.listed[-2]
     assert "[[sec:known_unknown]]" in contribution[0]
     assert "confidence of the model" in contribution[1]
@@ -673,7 +677,8 @@ def test_the_details_the_main_text_dropped_are_in_appendix_b() -> None:
 def test_the_confidence_gain_is_bounded_not_called_nothing() -> None:
     text = _text()
     assert "adds nothing to the confidence" not in text
-    assert "[[num:fig:knowledge_reading.dir_inc_hi_max]]" in text
+    for role in ("gpt2", "base", "post"):
+        assert f"[[num:fig:knowledge_reading.dir_inc_hi_max_{role}]]" in text
     assert "gain_upper_max" not in text
 
 
@@ -964,3 +969,66 @@ def test_the_reading_subsection_states_the_words_alone_baseline() -> None:
             ("honesty", 0.0),
         ):
             assert table.numbers[f"{analyzer}_{concept}_above"] == above
+
+
+POOLED_TOKENS = (
+    "knowledge_reading.dir_inc_cover_all",
+    "knowledge_reading.dir_inc_n",
+    "knowledge_reading.dir_inc_hi_max]]",
+    "knowledge_reading.dir_inc_min]]",
+    "knowledge_reading.dir_inc_max]]",
+    "knowledge_reading.probe_inc_min]]",
+    "knowledge_reading.probe_inc_max]]",
+    "knowledge_reading.above_pop",
+    "reading.onset_sentiment_min",
+    "reading.onset_sentiment_max",
+    "approximate.position_min",
+    "approximate.position_max",
+    "approximate.band_min",
+    "approximate.band_max",
+)
+
+
+def test_no_number_on_the_page_is_pooled_across_roles() -> None:
+    text = _text()
+    for token in POOLED_TOKENS:
+        assert token not in text, token
+
+
+def _roles_in_order(text: str, stem: str) -> bool:
+    found = [text.find(f"{stem}_{role}_") for role in ("gpt2", "base", "post")]
+    return all(i >= 0 for i in found) and found == sorted(found)
+
+
+def test_the_range_numbers_are_quoted_per_role_in_order() -> None:
+    reading = " ".join(_texts(_section("reading")))
+    assert _roles_in_order(reading, "reading.onset_sentiment")
+    appendix = " ".join(_texts(_section("appendix_approximate")))
+    for stem in ("approximate.position", "approximate.band"):
+        assert _roles_in_order(appendix, stem), stem
+    knowledge = " ".join(_texts(_section("appendix_knowledge")))
+    for stem in (
+        "knowledge_reading.probe_inc_min",
+        "knowledge_reading.dir_inc_min",
+        "knowledge_reading.dir_inc_hi_max",
+    ):
+        found = [
+            knowledge.find(f"{stem}_{r}") for r in ("gpt2", "base", "post")
+        ]
+        assert min(found) >= 0, stem
+        assert found == sorted(found), stem
+    run = " ".join(_texts(_section("known_unknown")))
+    assert "[[num:fig:knowledge_reading.dir_inc_hi_max_gpt2]]" in run
+    assert "[[count:fig:knowledge_reading.dir_cover]]" in run
+
+
+def test_the_approximate_appendix_states_the_band_and_the_control_layer() -> (
+    None
+):
+    text = " ".join(_texts(_section("appendix_approximate")))
+    assert (
+        "the range of the random control's position over its "
+        "[[num:fig:approximate.n_band_sets]] training sets"
+    ) in text
+    assert "its own validation layer" in text
+    assert "[[count:fig:approximate.control_other_layer]]" in text

@@ -396,3 +396,49 @@ def test_the_colour_bar_has_a_title_and_labels_the_expected_share(
     assert bar.get_ylabel() == "share of cells\noutside the band"
     labels = [t.get_text() for t in bar.get_yticklabels()]
     assert "0.05 random" in labels
+
+
+def test_a_role_label_clears_the_row_labels(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    ax = _panels(output)[0]
+    labels = [
+        t.get_window_extent() for t in ax.get_yticklabels() if t.get_text()
+    ]
+    roles = [t for t in ax.texts if t.get_rotation() == 90]
+    assert len(roles) == 3
+    left = min(box.x0 for box in labels)
+    for role in roles:
+        assert role.get_window_extent().x1 < left
+
+
+def test_a_count_clears_the_dots_of_every_row(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    for ax in _panels(output)[:2]:
+        counts = [t for t in ax.texts if " of " in t.get_text()]
+        assert len(counts) == 10
+        dots = {round(float(d.get_ydata()[0]), 3): d for d in _dots(ax)}
+        for text in counts:
+            y = round(float(text.get_position()[1]), 3)
+            dot = dots[y].get_window_extent()
+            assert dot.x1 + 2 < text.get_window_extent().x0, text.get_text()
+
+
+def test_the_dot_panel_tick_labels_do_not_crowd(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    for ax in _panels(output)[:2]:
+        boxes = sorted(
+            (
+                t.get_window_extent()
+                for t in ax.get_xticklabels()
+                if t.get_text()
+            ),
+            key=lambda b: b.x0,
+        )
+        for left, right in itertools.pairwise(boxes):
+            assert right.x0 - left.x1 >= 6

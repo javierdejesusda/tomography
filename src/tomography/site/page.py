@@ -287,7 +287,7 @@ class Page:
         """Writes a number a figure or table computed."""
         output, name = self._output(address)
         value = output.numbers[name]
-        if float(value).is_integer() and abs(value) >= 1:
+        if float(value).is_integer():
             return f"{int(value):,}".replace("-", chr(0x2212))
         return _cells.num(value)
 

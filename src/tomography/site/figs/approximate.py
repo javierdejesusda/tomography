@@ -27,6 +27,7 @@ from tomography.viz import axes
 from tomography.viz import paper
 
 CELL = ("free", "fewshot", "range_last", "greedy")
+STATE_MARKER = "h"
 FORCED = ("forced", "fewshot", "range_last", "greedy")
 TRAIN = "height+wingspan"
 HEIGHT = 3.4
@@ -56,15 +57,16 @@ DETAIL = (
     "GPT-2 and Qwen3 base, open circles post-trained. Wilson 95 percent "
     "intervals lie inside the markers, at most {wilson} points wide. Qwen3 "
     "writes a range on at most {exact} percent of the exact items and "
-    "{heights}; GPT-2 small on {gpt2_range} percent of the range items and "
-    "{gpt2_exact} percent of the exact items. (b) AUROC on held-out "
-    "durations of a range reader fitted on heights and wingspans, with its "
+    "{heights}; GPT-2 small on {gpt2_range} and {gpt2_exact} percent. (b) "
+    "AUROC on held-out durations of a range reader fitted on heights and "
+    "wingspans, with its "
     "random control (grey bar: bootstrap interval of the mean of {draws} "
     "random directions) and a classifier on the words (green line "
-    "{text}, whisker {text_lo} to {text_hi}); a filled circle is above the "
-    "control's interval, an open circle inside it, a tick below it. (c) "
-    "Position of the people between buildings (0) and breeds (1) against "
-    "the random band. See [[sec:appendix_approximate]]."
+    "{text}, whisker {text_lo} to {text_hi}); a filled hexagon is above the "
+    "control's interval, an open hexagon inside it, a tick below it. (c) "
+    "People's position between buildings (0) and breeds (1) against the "
+    "random band, the range of the control's position over its {sets} "
+    "training sets. See [[sec:appendix_approximate]]."
 )
 
 
@@ -271,10 +273,10 @@ def _draw_reader(ax: Any, model: str, y: float, reader: "_Reader") -> str:
     (point,) = ax.plot(
         [value],
         [y],
-        marker=paper.MEASURE_MARKERS["direction"],
+        marker=STATE_MARKER,
         ls="none",
         color=edge,
-        markerfacecolor=paper.INK if state == "above" else paper.WHITE,
+        markerfacecolor=paper.INK if state == "above" else "none",
         markeredgecolor=edge,
         markeredgewidth=_rows.EDGE_WIDTH,
         markersize=_rows.MARKER_SIZE,
@@ -446,7 +448,7 @@ def _draw(
     main.get_frame().set_edgecolor("none")
     open_grey: dict[str, Any] = {
         "ls": "none",
-        "marker": "o",
+        "marker": STATE_MARKER,
         "markerfacecolor": paper.WHITE,
         "markeredgecolor": paper.RANDOM_GREY,
         "markeredgewidth": _rows.EDGE_WIDTH,
@@ -454,11 +456,7 @@ def _draw(
     }
     states = fig.legend(
         handles=[
-            _rows.series_handle(
-                "above the control",
-                paper.MEASURE_MARKERS["direction"],
-                paper.INK,
-            ),
+            _rows.series_handle("above the control", STATE_MARKER, paper.INK),
             Line2D([], [], label="inside the control", **open_grey),
             (
                 Line2D(
@@ -530,13 +528,15 @@ def build(manifest: Manifest) -> FigureOutput:
     above_95 = stats.per_role(
         {m: r.random["auroc"] > 0.95 for m, r in readers.items()}
     )
+    other_layer = stats.per_role(
+        {m: r.random["layer"] != r.reader["layer"] for m, r in readers.items()}
+    )
     outside = stats.per_role(
         {
             m: not min(r.draws) <= r.position["position"] <= max(r.draws)
             for m, r in readers.items()
         }
     )
-    positions = [r.position["position"] for r in readers.values()]
     first = next(iter(readers.values()))
     numbers: dict[str, float] = {
         "range_base_min": float(_percent(min(_role_values(True)))),
@@ -550,10 +550,9 @@ def build(manifest: Manifest) -> FigureOutput:
         "text_word": float(text["auroc"]),
         "text_lo": float(text["lo"]),
         "text_hi": float(text["hi"]),
-        "position_min": float(min(positions)),
-        "position_max": float(max(positions)),
         "n_people": float(first.n_people),
         "n_random_draws": float(first.n_seeds),
+        "n_band_sets": float(len(first.draws)),
         "wilson_max_points": float(
             math.ceil(
                 max(
@@ -564,16 +563,22 @@ def build(manifest: Manifest) -> FigureOutput:
                 - 1e-9
             )
         ),
-        "band_min": float(min(min(r.draws) for r in readers.values())),
-        "band_max": float(max(max(r.draws) for r in readers.values())),
     }
     forced = {m: _forced_rate(manifest, m) for m in models}
     for role in stats.ROLES:
+        own = [r for m, r in readers.items() if stats.role(m) == role]
+        place = [r.position["position"] for r in own]
+        draws = [d for r in own for d in r.draws]
+        numbers[f"position_{role}_min"] = float(min(place))
+        numbers[f"position_{role}_max"] = float(max(place))
+        numbers[f"band_{role}_min"] = float(min(draws))
+        numbers[f"band_{role}_max"] = float(max(draws))
         numbers[f"forced_{role}_max"] = float(
             _percent(max(v for m, v in forced.items() if stats.role(m) == role))
         )
         numbers[f"above_text_{role}"] = float(above[role].hits)
         numbers[f"reader_above_random_{role}"] = float(above_random[role].hits)
+        numbers[f"control_other_layer_{role}"] = float(other_layer[role].hits)
         numbers[f"control_below_half_{role}"] = float(below_half[role].hits)
         numbers[f"control_above_95_{role}"] = float(above_95[role].hits)
     heights = (
@@ -597,6 +602,7 @@ def build(manifest: Manifest) -> FigureOutput:
         gpt2_range=int(numbers["gpt2_range"]),
         gpt2_exact=int(numbers["gpt2_exact"]),
         draws=int(numbers["n_random_draws"]),
+        sets=int(numbers["n_band_sets"]),
         text=_rows.number(text["auroc"], 3),
         text_lo=_rows.number(text["lo"], 3),
         text_hi=_rows.number(text["hi"], 3),
@@ -610,6 +616,7 @@ def build(manifest: Manifest) -> FigureOutput:
         {
             "above_text": above,
             "reader_above_random": above_random,
+            "control_other_layer": other_layer,
             "control_below_half": below_half,
             "control_above_95": above_95,
             "outside": outside,
