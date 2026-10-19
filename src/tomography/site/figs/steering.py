@@ -1,22 +1,22 @@
 """Figure 7: Sentiment steering and fluency.
 
-Three dose panels (GPT-2, Qwen3 base, Qwen3 post-trained) draw the judged
-sentiment score of each checkpoint against the relative coefficient of the
-C1 run, with the range over the three steering vectors and the prompting
-scores in a strip. A tile matrix next to them carries the fluency rule of
-every checkpoint and coefficient.
+Three columns (GPT-2, Qwen3 base, Qwen3 post-trained) and three rows share
+one relative-coefficient axis. Row a draws the judged sentiment of each
+checkpoint with the range over the three steering vectors and the score under
+an instruction; rows b and c draw the two inputs of the fluency rule, the
+neutral-text perplexity ratio and the distinct-1 of the completions, each
+against its limit. A marker is filled where a checkpoint keeps the rule at
+that coefficient and open where it does not.
 """
 
 from collections.abc import Sequence
+import itertools
 import json
 from typing import Any
 
-import matplotlib as mpl
 from matplotlib import ticker
-from matplotlib.colors import LogNorm
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.patches import Rectangle
 import numpy as np
 
 from tomography.site import runfiles
@@ -30,41 +30,53 @@ from tomography.viz import paper
 
 MAX_RATIO = 1.5
 MIN_DISTINCT = 0.15
-HEIGHT = 3.6
+HEIGHT = 5.0
 COEFFS = (-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3)
-TILE_FONT = 6.5
-TILE_LIMIT = 32.0
-COLORBAR_TICKS = (1, 1.5, 4, 10, 30)
+X_LIMIT = 0.33
+X_PAD = 4.5
+RATIO_LIMITS = (1.0, 100.0)
+DISTINCT_LIMIT = 0.35
+BAND_ALPHA = 0.15
+LABEL_GAP = 0.12
+LABEL_FONT = 7
 ROLE_TITLES = {
     "gpt2": "GPT-2",
     "base": "Qwen3 base",
     "post": "Qwen3 post-trained",
 }
+GPT2_LABELS = {
+    "gpt2": "small",
+    "gpt2-medium": "medium",
+    "gpt2-large": "large",
+    "gpt2-xl": "XL",
+}
 HEADER = ["panel", "model", "x", "series", "value", "lo", "hi"]
-CMAP = mpl.colormaps["cividis_r"]
 DETAIL = (
-    "(a to c) Mean judged sentiment of the completions (positive-class "
+    "(a) Mean judged sentiment of the completions (positive-class "
     "probability of a sentiment classifier) against the relative "
-    "coefficient, one line per checkpoint, with the range over the 3 "
-    "steering vectors (band) and the score under a positive or negative "
-    "instruction instead of steering (right strip; the marker keys which "
-    "instruction). At relative "
-    "coefficients {minus}0.1 and +0.1 the mean score moves {moves}. A "
-    "checkpoint counts as moving when all 3 steering vectors move the score "
-    "past the unsteered value at both signs, on the primary judge and on a "
-    "second judge (another sentiment classifier): this holds on "
-    "{moves_count}, and the two judges agree on {agree}. (d) "
+    "coefficient, one line per checkpoint (lighter for the smaller "
+    "checkpoint, named at the line end), with the range over the 3 "
+    "steering vectors (shaded band) and the score under a positive or "
+    "negative instruction instead of steering (dotted horizontal lines). "
+    "A marker is filled where the fluency rule holds (ratio at most "
+    "{max_ratio} and distinct-1 at least {min_distinct}) and open where it "
+    "does not, and a segment that touches an open marker is dashed. At "
+    "relative coefficients {minus}0.1 and +0.1 the mean score moves "
+    "{moves}. A checkpoint counts as moving when all 3 steering vectors "
+    "move the score past the unsteered value at both signs, on the primary "
+    "judge and on a second judge (another sentiment classifier): this holds "
+    "on {moves_count}, and the two judges agree on {agree}. (b) "
     "Perplexity of {n_neutral} held-out WikiText-103 passages under the "
-    "steered model, as a ratio to the unsteered model (colour and number); "
-    "an asterisk marks a distinct-1 of the completions below {min_distinct}, "
-    "and framed cells keep the fluency rule (ratio at most {max_ratio} and "
-    "distinct-1 at least {min_distinct}). The rule holds at both signs of "
-    "0.1 on {held}, and at "
-    "0.3 or {minus}0.3 on {fails}. This run has no random-direction arm; "
-    "the finder comparison steers with three random directions of the same "
-    "norm ([[fig:teaser]], last row). The fluency rule uses the perplexity "
-    "of neutral text and the distinct-1 of the completions, not the "
-    "perplexity of the completions, which [[table:steering]] gives."
+    "steered model, as a ratio to the unsteered model on a log axis, with "
+    "its limit of {max_ratio}. (c) Distinct-1 of the completions, which "
+    "fails the rule below {min_distinct} (the second limit). The rule holds "
+    "at both signs of 0.1 on {held}, and at 0.3 or {minus}0.3 on {fails}. "
+    "This run has no random-direction arm; the finder comparison steers with "
+    "three random directions of the same norm ([[fig:teaser]], last row). "
+    "The fluency rule uses the perplexity of neutral text and the distinct-1 "
+    "of the completions, not the perplexity of the completions, which "
+    "[[table:steering]] gives together with the ratios at {minus}0.1 and "
+    "+0.1."
 )
 
 
@@ -144,185 +156,201 @@ class _Model:
         )
 
 
-def _linestyle(model: str) -> Any:
-    if stats.role(model) == "post":
-        return paper.LINESTYLES["post_trained"]
-    return "-"
+def end_label(model: str) -> str:
+    """Names a checkpoint at the end of its line.
+
+    Args:
+        model: Checkpoint key such as `gpt2-xl` or `qwen3-4b-base`.
+
+    Returns:
+        The size: a word for GPT-2 and the parameter count for Qwen3.
+    """
+    if model.startswith("gpt2"):
+        return GPT2_LABELS[model]
+    return model.removeprefix("qwen3-").removesuffix("-base").upper()
 
 
-def _dose_panel(ax: Any, strip: Any, members: list[_Model], role: str) -> None:
-    for k, model in enumerate(members):
-        style = axes.model_style(model.key)
-        xs = list(COEFFS)
+def _spread(ys: list[float], gap: float, ceiling: float) -> list[float]:
+    """Moves label heights apart so that neighbours keep a minimum gap.
+
+    Args:
+        ys: Wanted heights, in any order.
+        gap: Minimum distance between two heights.
+        ceiling: The highest height a label may take.
+
+    Returns:
+        The heights, in the order of the input: pushed up where they are
+        closer than `gap`, then pulled back down from the ceiling.
+    """
+    order = sorted(range(len(ys)), key=lambda i: ys[i])
+    placed = [ys[i] for i in order]
+    for k in range(1, len(placed)):
+        placed[k] = max(placed[k], placed[k - 1] + gap)
+    placed[-1] = min(placed[-1], ceiling)
+    for k in range(len(placed) - 2, -1, -1):
+        placed[k] = min(placed[k], placed[k + 1] - gap)
+    out = [0.0] * len(ys)
+    for k, i in enumerate(order):
+        out[i] = placed[k]
+    return out
+
+
+def _series(
+    ax: Any, model: _Model, values: dict[float, float], top: bool = False
+) -> None:
+    color = axes.model_style(model.key).color
+    for a, b in itertools.pairwise(COEFFS):
+        solid = model.fluent(a) and model.fluent(b)
+        ax.plot(
+            [a, b],
+            [values[a], values[b]],
+            color=color,
+            ls="-" if solid else paper.LINESTYLES["post_trained"],
+            lw=paper.DATA_WIDTH,
+            gid="segment",
+            zorder=3,
+        )
+    for coeff in COEFFS:
+        ax.plot(
+            [coeff],
+            [values[coeff]],
+            ls="none",
+            marker=paper.SHAPES["direction"],
+            color=color,
+            markerfacecolor=color if model.fluent(coeff) else "white",
+            markeredgecolor=color,
+            markeredgewidth=paper.MARKER_EDGE,
+            markersize=paper.MARKER_SIZE,
+            gid="point",
+            zorder=4,
+        )
+    if top:
         ax.fill_between(
-            xs,
-            [model.low[c] for c in xs],
-            [model.high[c] for c in xs],
-            color=style.color,
-            alpha=0.15,
+            list(COEFFS),
+            [model.low[c] for c in COEFFS],
+            [model.high[c] for c in COEFFS],
+            color=color,
+            alpha=BAND_ALPHA,
             lw=0,
             zorder=2,
         )
+        for score in model.prompting.values():
+            line = ax.axhline(
+                score, color=color, ls=":", lw=0.8, gid="instruction", zorder=2
+            )
+            line.set_alpha(0.9)
+
+
+def _end_labels(ax: Any, members: list[_Model]) -> None:
+    ends = [m.score[COEFFS[-1]] for m in members]
+    for model, y in zip(members, _spread(ends, LABEL_GAP, 0.97), strict=True):
         ax.plot(
-            xs,
-            [model.score[c] for c in xs],
-            color=style.color,
-            ls=_linestyle(model.key),
+            [1.015, 1.075],
+            [y, y],
+            transform=ax.get_yaxis_transform(),
+            color=axes.model_style(model.key).color,
             lw=paper.DATA_WIDTH,
-            marker=paper.MEASURE_MARKERS["direction"],
-            zorder=3,
-            **_rows.fill(model.key, style.color),
+            clip_on=False,
+            gid="label-key",
         )
-        x = np.linspace(0.2, 0.8, max(len(members), 2))[k]
-        for arm, marker in (
-            ("prompting+1", paper.PROMPT_MARKERS["positive"]),
-            ("prompting-1", paper.PROMPT_MARKERS["negative"]),
-        ):
-            strip.plot(
-                [x],
-                [model.prompting[arm]],
-                marker=marker,
-                ls="none",
-                color=style.color,
-                zorder=3,
-                **_rows.fill(model.key, style.color),
-            )
-    ax.set_ylim(0.0, 1.0)
-    axes.unit_axis(ax, "y")
-    ax.set_xlim(-0.33, 0.33)
-    ax.xaxis.set_major_locator(ticker.FixedLocator([-0.3, 0.0, 0.3]))
-    ax.xaxis.set_major_formatter(axes.minus_formatter())
-    strip.set_xlim(0.0, 1.0)
-    strip.set_xticks([])
-    strip.tick_params(left=False, labelleft=False)
-    strip.spines["left"].set_visible(False)
-
-
-def _tile_text(model: _Model, coeff: float) -> str:
-    ratio = model.ratio[coeff]
-    text = f"{ratio:.2f}" if ratio < 10 else f"{ratio:.0f}"
-    return text + ("*" if model.distinct[coeff] < MIN_DISTINCT else "")
-
-
-def _matrix(
-    ax: Any, count_ax: Any, by_key: dict[str, _Model], models: list[str]
-) -> Any:
-    rows = axes.model_rows(models)
-    norm = LogNorm(vmin=1.0, vmax=TILE_LIMIT, clip=True)
-    mesh = None
-    for key in models:
-        model = by_key[key]
-        values = np.array([[model.ratio[c] for c in COEFFS]])
-        mesh = ax.pcolormesh(
-            np.arange(len(COEFFS) + 1) - 0.5,
-            [rows[key] - 0.5, rows[key] + 0.5],
-            values,
-            cmap=CMAP,
-            norm=norm,
-            zorder=1,
+        ax.text(
+            1.095,
+            y,
+            end_label(model.key),
+            transform=ax.get_yaxis_transform(),
+            color=paper.INK,
+            fontsize=LABEL_FONT,
+            va="center",
+            ha="left",
         )
-        for col, coeff in enumerate(COEFFS):
-            ax.text(
-                col,
-                rows[key],
-                _tile_text(model, coeff),
-                ha="center",
-                va="center",
-                fontsize=TILE_FONT,
-                color=paper.tile_ink(CMAP(norm(model.ratio[coeff]))),
-                zorder=3,
-                gid=paper.TILE_LABEL,
-            )
-            if model.fluent(coeff):
-                ax.add_patch(
-                    Rectangle(
-                        (col - 0.5, rows[key] - 0.5),
-                        1,
-                        1,
-                        fill=False,
-                        ec=paper.INK,
-                        lw=0.9,
-                        zorder=4,
-                    )
-                )
-    ax.set_xlim(-0.5, len(COEFFS) - 0.5)
-    ax.set_ylim(max(rows.values()) + 0.5, -0.5)
-    ax.set_yticks([rows[k] for k in models])
-    ax.set_yticklabels([paper.display_name(k) for k in models])
-    ax.set_xticks(range(len(COEFFS)))
-    ax.set_xticklabels([axes.minus_formatter()(c, 0) for c in COEFFS])
-    ax.tick_params(length=0, labelsize=TILE_FONT)
-    for side in ("left", "bottom"):
-        ax.spines[side].set_visible(False)
-    count_ax.set_xlim(-0.5, len(COEFFS) - 0.5)
-    count_ax.set_ylim(2.5, -0.5)
-    count_ax.set_yticks(range(3))
-    count_ax.set_yticklabels([ROLE_TITLES[r] for r in stats.ROLES])
-    count_ax.set_xticks([])
-    count_ax.tick_params(length=0, labelsize=TILE_FONT)
-    for spine in count_ax.spines.values():
-        spine.set_visible(False)
-    count_ax.set_xlabel("relative coefficient")
-    for r, role in enumerate(stats.ROLES):
-        members = [by_key[k] for k in models if stats.role(k) == role]
-        for col, coeff in enumerate(COEFFS):
-            hits = sum(m.fluent(coeff) for m in members)
-            count_ax.text(
-                col,
-                r,
-                f"{hits}/{len(members)}",
-                ha="center",
-                va="center",
-                fontsize=TILE_FONT,
-                color=paper.INK,
-            )
-    return mesh
 
 
-def _legend(fig: Figure, models: list[str]) -> None:
-    handles = []
-    for key in models:
-        style = axes.model_style(key)
-        handles.append(
-            Line2D(
-                [],
-                [],
-                color=style.color,
-                ls=_linestyle(key),
-                lw=paper.DATA_WIDTH,
-                marker=paper.MEASURE_MARKERS["direction"],
-                label=paper.display_name(key),
-                **_rows.fill(key, style.color),
-            )
-        )
-    for arm, label in (
-        ("positive", "positive instruction"),
-        ("negative", "negative instruction"),
-    ):
-        handles.append(
-            _rows.series_handle(label, paper.PROMPT_MARKERS[arm], paper.INK)
-        )
+def _limit(ax: Any, value: float) -> None:
+    ax.axhline(
+        value,
+        color=paper.ENC["reference"],
+        lw=0.5,
+        gid="limit",
+        zorder=1,
+    )
+    ax.text(
+        1.015,
+        value,
+        f"limit {value:g}",
+        transform=ax.get_yaxis_transform(),
+        color=paper.ENC["secondary_text"],
+        fontsize=LABEL_FONT,
+        va="center",
+        ha="left",
+    )
+
+
+def _style_axes(grid: Any) -> None:
+    for ax in grid.flat:
+        ax.set_xlim(-X_LIMIT, X_LIMIT)
+        ax.xaxis.set_major_locator(ticker.FixedLocator([-0.3, 0.0, 0.3]))
+        ax.xaxis.set_major_formatter(axes.minus_formatter())
+        ax.tick_params(axis="x", pad=X_PAD)
+    for ax in grid[0]:
+        ax.set_ylim(0.0, 1.0)
+        axes.unit_axis(ax, "y")
+    for ax in grid[1]:
+        ax.set_yscale("log")
+        ax.set_ylim(*RATIO_LIMITS)
+        ax.yaxis.set_major_locator(ticker.FixedLocator([1, 10, 100]))
+        ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%g"))
+        ax.yaxis.set_minor_locator(ticker.NullLocator())
+    for ax in grid[2]:
+        ax.set_ylim(0.0, DISTINCT_LIMIT)
+        ax.yaxis.set_major_locator(ticker.FixedLocator([0.0, 0.1, 0.2, 0.3]))
+        ax.yaxis.set_major_formatter(axes.minus_formatter())
+
+
+def _key(fig: Figure) -> None:
+    color = paper.INK
+    handles = [
+        Line2D(
+            [],
+            [],
+            color=color,
+            marker=paper.SHAPES["direction"],
+            markerfacecolor=color,
+            markersize=paper.MARKER_SIZE,
+            lw=paper.DATA_WIDTH,
+            label="fluent",
+        ),
+        Line2D(
+            [],
+            [],
+            color=color,
+            marker=paper.SHAPES["direction"],
+            markerfacecolor="white",
+            markersize=paper.MARKER_SIZE,
+            ls=paper.LINESTYLES["post_trained"],
+            lw=paper.DATA_WIDTH,
+            label="not fluent",
+        ),
+        Line2D([], [], color=color, ls=":", lw=0.8, label="instruction score"),
+    ]
     legend = fig.legend(
         handles=handles,
         loc="outside upper center",
-        ncol=5,
-        handlelength=1.8,
-        columnspacing=1.0,
-        fontsize=7,
+        ncol=3,
+        handlelength=2.2,
+        columnspacing=1.6,
+        fontsize=LABEL_FONT,
     )
     legend.get_frame().set_edgecolor("none")
 
 
 def _csv(by_key: dict[str, _Model], models: list[str]) -> str:
-    letter = {"gpt2": "a", "base": "b", "post": "c"}
     rows: list[list[Any]] = []
     for key in models:
         model = by_key[key]
-        panel = letter[stats.role(key)]
         for c in COEFFS:
             rows.append(
                 [
-                    panel,
+                    "a",
                     key,
                     c,
                     "score",
@@ -332,14 +360,14 @@ def _csv(by_key: dict[str, _Model], models: list[str]) -> str:
                 ]
             )
         for arm, value in model.prompting.items():
-            rows.append([panel, key, None, arm, value, None, None])
+            rows.append(["a", key, None, arm, value, None, None])
         for c in COEFFS:
-            rows.append(["d", key, c, "ppl_ratio", model.ratio[c], None, None])
+            rows.append(["b", key, c, "ppl_ratio", model.ratio[c], None, None])
             rows.append(
-                ["d", key, c, "distinct_1", model.distinct[c], None, None]
+                ["c", key, c, "distinct_1", model.distinct[c], None, None]
             )
             rows.append(
-                ["d", key, c, "fluent", float(model.fluent(c)), None, None]
+                ["a", key, c, "fluent", float(model.fluent(c)), None, None]
             )
     return _group.csv_text(HEADER, rows)
 
@@ -367,43 +395,6 @@ def build(manifest: Manifest) -> FigureOutput:
     }
     n_neutral = _neutral_passages(manifest, models)
 
-    with paper.paper_style():
-        fig = _rows.new_figure(HEIGHT)
-        outer = fig.add_gridspec(1, 2, width_ratios=[1.55, 2.45])
-        left = outer[0].subgridspec(3, 2, width_ratios=[1.0, 0.25], wspace=0.04)
-        right = outer[1].subgridspec(
-            2, 2, height_ratios=[10, 1.6], width_ratios=[1.0, 0.05]
-        )
-        first = None
-        for i, role in enumerate(stats.ROLES):
-            ax = fig.add_subplot(left[i, 0], sharex=first)
-            first = first or ax
-            strip = fig.add_subplot(left[i, 1], sharey=ax)
-            _dose_panel(ax, strip, [by_key[m] for m in by_role[role]], role)
-            paper.panel_title(ax, "abc"[i], ROLE_TITLES[role])
-            if i < 2:
-                ax.tick_params(labelbottom=False)
-            else:
-                ax.set_xlabel("relative coefficient")
-            if i == 1:
-                ax.set_ylabel("judged sentiment")
-        matrix_ax = fig.add_subplot(right[0, 0])
-        count_ax = fig.add_subplot(right[1, 0])
-        mesh = _matrix(matrix_ax, count_ax, by_key, models)
-        paper.panel_letter(matrix_ax, "d")
-        cax = fig.add_subplot(right[0, 1])
-        bar = fig.colorbar(mesh, cax=cax)
-        bar.set_ticks(list(COLORBAR_TICKS))
-        bar.set_ticklabels([f"{t:g}" for t in COLORBAR_TICKS])
-        bar.ax.minorticks_off()
-        bar.ax.tick_params(labelsize=TILE_FONT, length=2)
-        bar.set_label(
-            "neutral-text perplexity, ratio to unsteered", fontsize=TILE_FONT
-        )
-        bar.outline.set_visible(False)
-        _legend(fig, models)
-        _rows.freeze_layout(fig)
-
     def mean(coeff: float) -> dict[str, float]:
         return {
             r: float(np.mean([by_key[m].score[coeff] for m in by_role[r]]))
@@ -429,6 +420,41 @@ def build(manifest: Manifest) -> FigureOutput:
             {m: primary[m] == check[m] for m in models}
         ),
     }
+
+    with paper.paper_style():
+        fig = _rows.new_figure(HEIGHT)
+        grid = fig.subplots(3, 3, sharex=True, sharey="row")
+        _style_axes(grid)
+        for col, role in enumerate(stats.ROLES):
+            members = [by_key[m] for m in by_role[role]]
+            for model in members:
+                _series(grid[0, col], model, model.score, top=True)
+                _series(grid[1, col], model, model.ratio)
+                _series(grid[2, col], model, model.distinct)
+            grid[0, col].set_title(ROLE_TITLES[role], loc="center")
+            _end_labels(grid[0, col], members)
+            count = counts["fluent01"][role]
+            grid[0, col].text(
+                0.97,
+                0.04,
+                f"fluent at both\nsigns of 0.1:\n{count.hits} of {count.total}",
+                transform=grid[0, col].transAxes,
+                fontsize=LABEL_FONT,
+                color=paper.INK,
+                va="bottom",
+                ha="right",
+            )
+            _limit(grid[1, col], MAX_RATIO)
+            _limit(grid[2, col], MIN_DISTINCT)
+            grid[2, col].set_xlabel("relative coefficient")
+        grid[0, 0].set_ylabel("judged sentiment")
+        grid[1, 0].set_ylabel("neutral-text\nperplexity ratio")
+        grid[2, 0].set_ylabel("distinct-1")
+        for row, letter in enumerate("abc"):
+            paper.panel_letter(grid[row, 0], letter)
+        _key(fig)
+        _rows.freeze_layout(fig)
+
     numbers: dict[str, float] = {"n_neutral": float(n_neutral)}
     for role in stats.ROLES:
         numbers[f"unsteered_{role}"] = unsteered[role]
