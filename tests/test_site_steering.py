@@ -22,6 +22,7 @@ from tomography.viz import paper
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 _T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
+_L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
 SPEC = "steering"
 MAX_RATIO = 1.5
 MIN_DISTINCT = 0.15
@@ -472,3 +473,23 @@ def test_caption_states_the_moves_rule_and_the_fluency_inputs(
     assert "second judge" in output.detail
     assert f"the two judges agree on {agree}" in output.detail
     assert "not the perplexity of the completions" in output.detail
+
+
+def test_markers_do_not_encode_the_checkpoint_and_prompting_has_its_own(
+    output: registry.FigureOutput,
+) -> None:
+    drawn = {
+        ln.get_marker()
+        for ax in output.figure.axes
+        for ln in ax.lines
+        if ln.get_marker() not in ("None", "", None)
+    }
+    direction = paper.MEASURE_MARKERS["direction"]
+    prompts = set(paper.PROMPT_MARKERS.values())
+    assert drawn == {direction} | prompts
+    assert _L["marker_clashes"](output.figure) == []
+    (legend,) = output.figure.legends
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert "positive instruction" in labels
+    assert "negative instruction" in labels
+    assert "triangles" not in output.detail

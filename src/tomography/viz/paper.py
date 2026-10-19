@@ -119,6 +119,10 @@ SET_MARKERS: dict[str, str] = {
     "cities": CATEGORY_MARKERS[0],
     "translations": CATEGORY_MARKERS[1],
 }
+PROMPT_MARKERS: dict[str, str] = {
+    "positive": CATEGORY_MARKERS[3],
+    "negative": CATEGORY_MARKERS[2],
+}
 ITEM_SET_MARKERS: dict[str, str] = {
     "range": CATEGORY_MARKERS[0],
     "exact": CATEGORY_MARKERS[1],

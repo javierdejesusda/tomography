@@ -248,3 +248,10 @@ def test_each_named_category_map_has_distinct_shapes_from_the_tuple() -> None:
         assert set(found.values()) <= set(paper.CATEGORY_MARKERS)
     assert "6." in paper.ENCODING_RULES
     assert "CATEGORY_MARKERS" in paper.ENCODING_RULES
+
+
+def test_prompting_arms_have_their_own_category_shapes() -> None:
+    assert tuple(paper.PROMPT_MARKERS) == ("positive", "negative")
+    values = set(paper.PROMPT_MARKERS.values())
+    assert len(values) == 2
+    assert values <= set(paper.CATEGORY_MARKERS)
