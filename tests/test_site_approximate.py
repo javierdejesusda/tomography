@@ -747,3 +747,22 @@ def test_an_open_state_marker_shows_the_control_bar_through_it(
         (line,) = _by_gid(ax, f"reader-{model}")
         if _state(model) != "above":
             assert line.get_markerfacecolor() == "none", model
+
+
+def test_the_words_label_clears_the_classifier_line_by_a_millimetre(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    checks.draw(fig)
+    ax = fig.axes[3]
+    (label,) = [t for t in ax.texts if t.get_text() == "words"]
+    (chance,) = [t for t in ax.texts if t.get_text() == "chance"]
+    (line,) = _by_gid(ax, "words-line")
+    line_x = ax.transData.transform((line.get_xdata()[0], 0.0))[0]
+    gap = (line_x - label.get_window_extent().x1) * 72 / fig.dpi
+    assert gap >= 2.83, gap
+    assert (
+        getattr(label, "xy", label.get_position())[1]
+        == (chance.get_position()[1])
+    )
+    assert not label.get_window_extent().overlaps(chance.get_window_extent())

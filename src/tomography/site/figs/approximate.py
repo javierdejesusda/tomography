@@ -35,7 +35,7 @@ HEADER = ["panel", "model", "series", "value", "lo", "hi"]
 TOP = -1.9
 HEAD_Y = -1.3
 WHISKER_Y = -0.75
-WORDS_Y = -1.45
+WORDS_OFFSET_PT = 6.0
 BAR_HALF = 0.17
 TICK_HALF = 0.36
 ARROW = 0.14
@@ -378,7 +378,17 @@ def _draw(
         solid_capstyle="butt",
     )
     whisker.set_gid("words-whisker")
-    _head(ax_b, text["auroc"] - 0.02, "words", "right", WORDS_Y)
+    ax_b.annotate(
+        "words",
+        (text["auroc"], HEAD_Y),
+        xytext=(-WORDS_OFFSET_PT, 0),
+        textcoords="offset points",
+        color=paper.ENC["secondary_text"],
+        fontsize=paper.MIN_TEXT,
+        ha="right",
+        va="center",
+        linespacing=0.95,
+    )
     _head(ax_b, 0.48, "chance", "right")
     axes.ref_line(ax_b, 0.5, "x")
     _rows.row_axis(ax_a, rows, labels=True)
