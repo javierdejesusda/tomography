@@ -34,11 +34,11 @@ LABEL_FONT = 7
 HEADER = ["panel", "run", "x", "series", "value", "lo", "hi"]
 ARMS = ("random0", "random1", "random2")
 OFFSETS = {
-    "direction_known": -0.34,
-    "direction_unknown": -0.20,
-    "random0": 0.10,
-    "random1": 0.22,
-    "random2": 0.34,
+    "direction_known": -0.30,
+    "direction_unknown": -0.18,
+    "random0": 0.04,
+    "random1": 0.16,
+    "random2": 0.28,
 }
 EXEMPLARS = (
     ("gpt2-xl", "fewshot"),

@@ -1,5 +1,6 @@
 import csv
 import io
+import itertools
 from pathlib import Path
 import re
 import runpy
@@ -542,3 +543,30 @@ def test_the_figure_legend_reads_at_the_tick_size(
 ) -> None:
     (legend,) = [lg for sub in output.figure.subfigs for lg in sub.legends]
     assert min(t.get_fontsize() for t in legend.get_texts()) >= paper.TICK
+
+
+def test_proximity_groups_each_row_inner_gap_under_0_6_of_the_row_gap(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    for ax in _forests(output).values():
+        ticks = sorted(ax.get_yticks())
+        marks = [
+            ln
+            for ln in ax.lines
+            if ln.get_marker() not in ("None", "") and ln.get_gid() != "x"
+        ]
+        rows: dict[float, list[float]] = {t: [] for t in ticks}
+        for ln in marks:
+            (y,) = ln.get_ydata()
+            rows[min(ticks, key=lambda t: abs(t - y))].append(float(y))
+        for ys in rows.values():
+            ys.sort()
+        for first, second in itertools.pairwise(ticks):
+            inner = max(
+                b - a
+                for ys in (rows[first], rows[second])
+                for a, b in itertools.pairwise(ys)
+            )
+            between = rows[second][0] - rows[first][-1]
+            assert inner / between < 0.6, (first, second, inner, between)
