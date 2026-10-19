@@ -935,23 +935,13 @@ APPENDICES = (
         "Wording",
         paragraphs=(
             "These support the finding that a change of wording moves a "
-            "sentiment reader by more than the noise of the test pairs. "
-            "Wording moves the reader by up to "
-            "[[num:fig:wording.span_gpt2_max]] on GPT-2, "
-            "[[num:fig:wording.span_base_max]] on Qwen3 base and "
-            "[[num:fig:wording.span_post_max]] on post-trained checkpoints "
-            "([[fig:wording]]), and a direction fitted on a bare wording "
-            "reads the wording of the paper at "
-            "[[num:fig:wording.bare_to_paper_min]] to "
-            "[[num:fig:wording.bare_to_paper_max]], against "
-            "[[num:fig:wording.bare_random_min]] to "
-            "[[num:fig:wording.bare_random_max]] for a random direction on "
-            "the same wording, with cosine "
-            "[[num:fig:wording.bare_cos_min]] to "
-            "[[num:fig:wording.bare_cos_max]] to the direction of the "
-            "paper. The transfer between wordings is in "
-            "[[fig:a_wording]] and the wordings themselves in "
-            "[[table:wordings]].",
+            "sentiment reader by more than the noise of the test pairs on "
+            "[[count:fig:wording.span_above_noise]]. The span between the "
+            "best and the worst wording, the bare reader against its random "
+            "direction, the cosines, the rank of the paper wording and the "
+            "noise are given per role in [[fig:wording]]; the transfer "
+            "between wordings is in [[fig:a_wording]] and the wordings "
+            "themselves in [[table:wordings]].",
         ),
         items=("fig:wording", "fig:a_wording", "table:wordings"),
     ),

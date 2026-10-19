@@ -407,7 +407,6 @@ def _numbers(
         if spans:
             numbers[f"span_{role}_min"] = min(spans)
             numbers[f"span_{role}_max"] = max(spans)
-    numbers["noise_max"] = max(noise.values())
     bare = {
         m: next(r for r in t if r["variant"] == "bare") for m, t in data.items()
     }
@@ -415,13 +414,19 @@ def _numbers(
         m: next(r for r in t if r["variant"] == "paper")
         for m, t in data.items()
     }
-    for name, values in (
-        ("bare_cos", [b["cosine_paper"] for b in bare.values()]),
-        ("bare_to_paper", [b["to_paper"] for b in bare.values()]),
-        ("bare_random", [b["random"] for b in base.values()]),
-    ):
-        numbers[f"{name}_min"] = min(values)
-        numbers[f"{name}_max"] = max(values)
+    series = {
+        "bare_cos": {m: b["cosine_paper"] for m, b in bare.items()},
+        "bare_to_paper": {m: b["to_paper"] for m, b in bare.items()},
+        "bare_random": {m: b["random"] for m, b in base.items()},
+        "paper_rank": {m: float(_rank(t)) for m, t in data.items()},
+        "noise": dict(noise),
+    }
+    for name, by_model in series.items():
+        for role in stats.ROLES:
+            values = [v for m, v in by_model.items() if stats.role(m) == role]
+            if values:
+                numbers[f"{name}_{role}_min"] = min(values)
+                numbers[f"{name}_{role}_max"] = max(values)
     counts = _counts(data)
     for role, count in counts.items():
         numbers[f"bare_above_{role}"] = count.hits
@@ -476,9 +481,14 @@ def _below(
     return found
 
 
-def _rank_numbers(data: dict[str, list[dict[str, Any]]]) -> dict[str, float]:
-    ranks = [_rank(table) for table in data.values()]
-    return {"paper_rank_min": min(ranks), "paper_rank_max": max(ranks)}
+def _range_text(numbers: dict[str, float], name: str, digits: int = 3) -> str:
+    parts = [
+        f"{numbers[f'{name}_{r}_min']:.{digits}f} to "
+        f"{numbers[f'{name}_{r}_max']:.{digits}f} on {stats.ROLE_NAMES[r]}"
+        for r in stats.ROLES
+        if f"{name}_{r}_min" in numbers
+    ]
+    return stats.join_and(parts)
 
 
 def _claim(
@@ -499,17 +509,14 @@ def _claim(
         "from test pairs alone), and a direction at a large angle from the "
         "paper direction mostly still reads the paper wording above a "
         "random direction. The paper wording ranks "
-        f"{int(numbers['paper_rank_min'])} to "
-        f"{int(numbers['paper_rank_max'])} of the 16 wordings by accuracy. "
-        "A direction fitted on the bare wording has cosine "
-        f"{numbers['bare_cos_min']:.3f} to {numbers['bare_cos_max']:.3f} "
-        "with the paper direction. It reads the paper wording above a "
+        f"{_range_text(numbers, 'paper_rank', 0)} of the 16 wordings by "
+        "accuracy. A direction fitted on the bare wording has cosine "
+        f"{_range_text(numbers, 'bare_cos')} with the paper direction. "
+        "It reads the paper wording above a "
         "random direction by point estimate on "
         f"{stats.per_role_text(counts)}{exceptions}; "
-        f"across checkpoints it reads at {numbers['bare_to_paper_min']:.3f} "
-        f"to {numbers['bare_to_paper_max']:.3f} and the random direction at "
-        f"{numbers['bare_random_min']:.3f} to "
-        f"{numbers['bare_random_max']:.3f}."
+        f"it reads at {_range_text(numbers, 'bare_to_paper')}, against "
+        f"{_range_text(numbers, 'bare_random')} for the random direction."
     )
 
 
@@ -531,7 +538,7 @@ def _detail(numbers: dict[str, float]) -> str:
         "accuracy, the noise, the span between the best and the worst "
         "wording, the rank of the paper wording among the 16 and a mark "
         f"where the span exceeds the noise; the span is {_span_text(numbers)}"
-        f", against at most {numbers['noise_max']:.3f} expected from "
+        f", against {_range_text(numbers, 'noise')} expected from "
         "test-pair noise alone. (b) For each role, each direction fitted on "
         "another wording, by its cosine with the paper direction and its "
         "accuracy on the paper wording; the diamond at cosine 1 is the paper "
@@ -579,7 +586,6 @@ def build(manifest: Manifest) -> FigureOutput:
         for m, y in shared.model_rows(models).items()
     }
     numbers = _numbers(data, noise)
-    numbers.update(_rank_numbers(data))
     counts = _counts(data)
     spans = _span_counts(data, noise)
     with paper.paper_style():
