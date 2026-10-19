@@ -8,6 +8,8 @@ reader places the people between the test buildings and the breeds against
 the range of its random control.
 """
 
+from typing import Any
+
 from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
@@ -43,7 +45,7 @@ COLUMNS = [
 ]
 
 
-def _in_cell(row: dict) -> bool:
+def _in_cell(row: dict[str, Any]) -> bool:
     return all(row[k] == v for k, v in CELL.items())
 
 
@@ -65,7 +67,7 @@ def _shares(manifest: Manifest, model: str) -> list[str]:
     ]
 
 
-def _transfer(rows: list[dict], method: str) -> dict:
+def _transfer(rows: list[dict[str, Any]], method: str) -> dict[str, Any]:
     (hit,) = [
         r
         for r in rows

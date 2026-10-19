@@ -46,7 +46,9 @@ def _r6(manifest: Manifest, model: str) -> list[dict[str, Any]]:
     return runfiles.rows(run, "table.json")
 
 
-def _mc1(rows: list[dict[str, Any]], method: str, source: str = "") -> dict:
+def _mc1(
+    rows: list[dict[str, Any]], method: str, source: str = ""
+) -> dict[str, Any]:
     hit = [
         r
         for r in rows
