@@ -523,3 +523,14 @@ def test_the_discussion_cites_a_section_for_steering() -> None:
     text = " ".join(_texts(content.DISCUSSION))
     assert "behaves as the paper describes" not in text
     assert "[[sec:steering]]" in text
+
+
+def test_the_abstract_is_prose_built_from_replaceable_finding_sentences() -> (
+    None
+):
+    assert content.ABSTRACT_FINDER in content.ABSTRACT
+    assert content.ABSTRACT_STEERING in content.ABSTRACT
+    assert content.ABSTRACT_FINDER.count("[[count:") == 1
+    assert content.ABSTRACT_STEERING.count("[[count:") == 2
+    assert content.ABSTRACT.count("[[count:") <= 8
+    assert "[[count:fig:teaser.knowledge]]" not in content.ABSTRACT
