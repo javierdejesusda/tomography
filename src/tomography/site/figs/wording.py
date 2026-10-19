@@ -298,7 +298,9 @@ def _claim(
     numbers: dict[str, float], below: list[tuple[str, float, float]]
 ) -> str:
     n, above = int(numbers["n_checkpoints"]), int(numbers["bare_above"])
-    where = f"all {n} checkpoints" if above == n else f"{above} of {n} checkpoints"
+    where = (
+        f"all {n} checkpoints" if above == n else f"{above} of {n} checkpoints"
+    )
     exceptions = "".join(
         f", but not on {paper.display_name(m)} ({read:.3f} against {rand:.3f})"
         for m, read, rand in below
