@@ -22,8 +22,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     build.add_argument("--results", type=Path, default=Path("results"))
     build.add_argument("--out", type=Path, default=Path("_site"))
     args = parser.parse_args(argv)
-    found = build_module.build(args.results, args.out)
-    print(f"built {len(found)} findings into {args.out}")
+    doc = build_module.build(args.results, args.out)
+    print(
+        f"built {len(doc.figures) + len(doc.appendix)} figures and "
+        f"{len(doc.tables)} tables into {args.out}"
+    )
     return 0
 
 
