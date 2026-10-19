@@ -121,8 +121,18 @@ def test_tables_are_booktabs_without_vertical_rules(css: str) -> None:
 
 
 def test_numeric_cells_do_not_wrap_and_use_tabular_figures(css: str) -> None:
-    assert "td.r,\nth.r,\ntd:first-child {\n  white-space: nowrap;\n}" in css
+    assert "td.r,\ntd:first-child {\n  white-space: nowrap;\n}" in css
     assert "font-variant-numeric: tabular-nums" in css
+
+
+def test_table_text_is_compact_but_not_below_the_readable_floor(
+    css: str,
+) -> None:
+    rule = css.split(chr(10) + "table {")[1].split("}")[0]
+    size = float(rule.split("font-size:")[1].split("em")[0])
+    assert 0.78 <= size <= 0.8
+    cells = css.split(chr(10) + "th,\ntd {")[1].split("}")[0]
+    assert "padding: 0.16em 0.25em;" in cells
 
 
 def test_captions_of_figures_and_tables_share_one_rule(css: str) -> None:

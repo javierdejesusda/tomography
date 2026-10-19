@@ -87,7 +87,7 @@ a.ref {
 code,
 pre {
   font-family: "LM Mono", "Latin Modern Mono", "CMU Typewriter Text", monospace;
-  font-size: 0.84em;
+  font-size: 0.78em;
 }
 
 header.title {
@@ -213,7 +213,7 @@ table {
   border-top: 1.5px solid var(--ink);
   border-bottom: 1.5px solid var(--ink);
   border-collapse: collapse;
-  font-size: 0.84em;
+  font-size: 0.78em;
   font-variant-numeric: tabular-nums lining-nums;
 }
 
@@ -242,20 +242,19 @@ tbody tr.group td {
 }
 
 td.r,
-th.r,
 td:first-child {
   white-space: nowrap;
 }
 
 th,
 td {
-  padding: 0.18em 0.5em;
+  padding: 0.16em 0.25em;
   text-align: left;
   vertical-align: baseline;
 }
 
 th {
-  font-weight: 700;
+  font-weight: normal;
 }
 
 .r {
