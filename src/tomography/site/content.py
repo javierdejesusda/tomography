@@ -18,6 +18,8 @@ detail behind each finding.
 
 import dataclasses
 
+from tomography.site.figs import knowledge_steering
+
 MINUS = chr(0x2212)
 PM = chr(0x00B1)
 ELL = chr(0x2113)
@@ -525,11 +527,11 @@ RESULTS = Section(
                     "more than each of three random directions of the same "
                     "norm on [[runs:fig:knowledge_steering.distinguishable]], "
                     "and more than on known questions on "
-                    "[[runs:fig:knowledge_steering.selective]] "
-                    "([[fig:knowledge_steering]]). Known questions move at "
-                    "least as much as unknown ones, by the largest shift of "
-                    "the mean dose curve, on "
-                    "[[runs:fig:knowledge_steering.known_ge_unknown]].",
+                    "[[runs:fig:knowledge_steering.selective]]; known "
+                    "questions move at least as much as unknown ones on "
+                    "[[runs:fig:knowledge_steering.known_ge_unknown]] "
+                    "([[fig:knowledge_steering]]; the measures are in "
+                    "[[sec:appendix_knowledge]]).",
                 ),
                 (
                     "Approximate answers.",
@@ -979,6 +981,7 @@ APPENDICES = (
             "([[table:knowledge]]) and every dose curve "
             "([[fig:a_dose_runs]], [[fig:a_dose_types]]) behind "
             "[[fig:knowledge_steering]].",
+            knowledge_steering.APPENDIX_DETAIL,
             "The confidence of the model stacks five output signals, and "
             "only the pooled level of the stack is stored, so the single "
             "probability of the model's own answer token stands for it in "
