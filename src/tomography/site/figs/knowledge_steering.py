@@ -7,6 +7,7 @@ unknown and on known questions against the three random directions. Three
 dose panels show the stored curves of three runs.
 """
 
+import itertools
 from typing import Any
 
 from matplotlib import ticker
@@ -334,6 +335,15 @@ def _forest(
                 )
             low, high = min(low, float(lo)), max(high, float(hi))
             csv_rows.append([letter, run.label, None, series, value, lo, hi])
+    for above, below in itertools.pairwise(positions):
+        if abs(below - above - 1.0) < 1e-6:
+            ax.axhline(
+                (above + below) / 2,
+                color=paper.RANDOM_BAND,
+                lw=paper.REFERENCE_WIDTH,
+                gid="row-rule",
+                zorder=0.5,
+            )
     margin = 0.06 * (high - low)
     ax.set_xlim(low - margin, high + margin)
     ax.set_ylim(positions[-1] + 0.9, -1.1)

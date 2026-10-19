@@ -570,3 +570,25 @@ def test_proximity_groups_each_row_inner_gap_under_0_6_of_the_row_gap(
             )
             between = rows[second][0] - rows[first][-1]
             assert inner / between < 0.6, (first, second, inner, between)
+
+
+def test_a_hairline_sits_between_adjacent_rows_of_a_block_and_nowhere_else(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    for ax in _forests(output).values():
+        ticks = sorted(ax.get_yticks())
+        want = [
+            (a + b) / 2
+            for a, b in itertools.pairwise(ticks)
+            if abs(b - a - 1.0) < 1e-9
+        ]
+        rules = [ln for ln in ax.lines if ln.get_gid() == "row-rule"]
+        got = sorted(float(ln.get_ydata()[0]) for ln in rules)
+        assert got == pytest.approx(want)
+        data = [
+            ln.get_zorder() for ln in ax.lines if ln.get_gid() != "row-rule"
+        ]
+        for ln in rules:
+            assert ln.get_zorder() < min(data)
+            assert ln.get_linewidth() <= 0.5
