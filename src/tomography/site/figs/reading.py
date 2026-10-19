@@ -161,7 +161,7 @@ def _curve_panel(ax: Axes, cells: dict[str, Cell]) -> None:
             cell.curve.depth, margin, color=colour, lw=LINE, zorder=3
         )
         line.set_gid(f"curve:{model}")
-        index = cell.at.layer - 1
+        index = cell.curve.layer - 1
         (dot,) = ax.plot(
             [cell.curve.depth[index]],
             [margin[index]],
@@ -392,6 +392,11 @@ def _csv(found: dict[str, dict[str, Cell]]) -> str:
                 lines.append(
                     f"depth,{concept},{model},{depth:.10g},{value:.10g},,,"
                 )
+            index = cell.curve.layer - 1
+            lines.append(
+                f"read,{concept},{model},{cell.curve.depth[index]:.10g},"
+                f"{cell.curve.selectivity[index]:.10g},,,"
+            )
             lo, hi = stats.wilson(cell.at.reader, cell.at.n)
             lines.append(
                 f"size,{concept},{model},{params.param_count(model)},"

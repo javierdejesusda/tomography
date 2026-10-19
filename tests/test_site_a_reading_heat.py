@@ -86,3 +86,44 @@ def test_the_onset_key_uses_the_words_of_figure_4(
     (legend,) = output.figure.legends
     texts = [t.get_text() for t in legend.get_texts()]
     assert "onset (earliest layer above 0.1)" in texts
+
+
+@pytest.mark.parametrize("model", ["gpt2-xl", "qwen3-0.6b-base"])
+def test_the_sentiment_circle_sits_at_the_finder_comparison_layer(
+    output: registry.FigureOutput, model: str
+) -> None:
+    data = _RESULTS["data"]
+    run = _RESULTS["run"]
+    rows = data(run("p4", model), "table.json")
+    (row,) = [
+        r
+        for r in rows
+        if r["task"] == "sentiment"
+        and r["method"] == "logistic"
+        and r["pairing"] == "label_contrastive"
+        and r["preprocess"] == "center"
+    ]
+    layer = int(row["layer"])
+    count = len(
+        [
+            ln
+            for ln in output.csv.splitlines()
+            if ln.startswith(f"sentiment,{model},")
+        ]
+    )
+    reads = [
+        ln
+        for ln in output.csv.splitlines()
+        if ln.startswith(f"sentiment,{model},") and ln.endswith(",1")
+    ]
+    assert len(reads) == 1
+    depth = float(reads[0].split(",")[2])
+    assert depth == pytest.approx(layer / count)
+    circles = [
+        ln
+        for ax in output.figure.axes
+        for ln in ax.get_lines()
+        if ln.get_gid() == f"read:sentiment:{model}"
+    ]
+    (circle,) = circles
+    assert circle.get_xdata()[0] == pytest.approx((layer - 0.5) / count)

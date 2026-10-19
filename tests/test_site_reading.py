@@ -52,6 +52,27 @@ def _curves(exp: str, model: str) -> tuple[np.ndarray, np.ndarray]:
     return mean[series.index("reader")], mean[series.index("random")]
 
 
+def _p4_layer(model: str) -> int:
+    """Reads the layer the finder comparison chose, from its table."""
+    rows = data(run("p4", model), "table.json")
+    (row,) = [
+        r
+        for r in rows
+        if r["task"] == "sentiment"
+        and r["method"] == "logistic"
+        and r["pairing"] == "label_contrastive"
+        and r["preprocess"] == "center"
+    ]
+    return int(row["layer"])
+
+
+def _curve_layer(concept: str, model: str) -> int:
+    """Gives the layer at which the curve dot of a concept is drawn."""
+    if concept == "sentiment":
+        return _p4_layer(model)
+    return _read_at(concept, model)[0]
+
+
 def _read_at(concept: str, model: str) -> tuple[int, float, float, int]:
     exp = CONCEPTS[concept]
     path = run(exp if concept != "sentiment" else "p3", model)
@@ -338,7 +359,7 @@ def test_every_curve_panel_has_a_band_a_zero_line_and_a_dot_per_checkpoint(
             assert len(dots) == len(want)
             for ln in dots:
                 model = ln.get_gid().removeprefix("read:")
-                layer, *_ = _read_at(concept, model)
+                layer = _curve_layer(concept, model)
                 reader, random = _curves(exp, model)
                 assert ln.get_xdata()[0] == pytest.approx(layer / len(reader))
                 assert ln.get_ydata()[0] == pytest.approx(
@@ -509,3 +530,29 @@ def test_the_caption_says_where_the_sentiment_size_dot_is_read(
 ) -> None:
     assert "its own layer" in output.detail
     assert "for sentiment" in output.detail.lower()
+
+
+@pytest.mark.parametrize("model", ["gpt2-xl", "qwen3-0.6b-base"])
+def test_the_sentiment_curve_dot_sits_at_the_finder_comparison_layer(
+    output: registry.FigureOutput, model: str
+) -> None:
+    layer = _p4_layer(model)
+    assert layer != _read_at("sentiment", model)[0]
+    role = _role(model)
+    ax = _axes(output, f"curve_{role}_sentiment")[f"curve_{role}_sentiment"]
+    (dot,) = [ln for ln in ax.get_lines() if ln.get_gid() == f"read:{model}"]
+    reader, random = _curves("p4", model)
+    assert dot.get_xdata()[0] == pytest.approx(layer / len(reader))
+    assert dot.get_ydata()[0] == pytest.approx(
+        reader[layer - 1] - random[layer - 1]
+    )
+    rows = [
+        r
+        for r in _records(output, "read")
+        if r["concept"] == "sentiment" and r["model"] == model
+    ]
+    (row,) = rows
+    assert float(row["x"]) == pytest.approx(layer / len(reader))
+    assert float(row["y"]) == pytest.approx(
+        reader[layer - 1] - random[layer - 1]
+    )
