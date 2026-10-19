@@ -166,7 +166,8 @@ def test_the_findings_of_the_plan_hold_at_the_current_results() -> None:
     sentiment = _count("sentiment", "pca_diff", lambda c: c[1] > 0)
     assert sentiment == {"gpt2": (0, 4), "base": (1, 3), "post": (0, 3)}
     point = _count("sentiment", "pca_diff", lambda c: c[0] > 0)
-    assert point["gpt2"][0] == 0 and point["post"][0] == 0
+    assert point["gpt2"][0] == 0
+    assert point["post"][0] == 0
     winner = [
         m
         for m in MODELS
@@ -195,7 +196,8 @@ def test_the_caption_quotes_every_number_and_the_sample_sizes(
     assert "all 10 checkpoints" in text
     assert "Figures A2 and A3" in text
     assert "Table A2" in text
-    assert "random" in text and "of 10 checkpoints" not in text
+    assert "random" in text
+    assert "of 10 checkpoints" not in text
 
 
 def test_the_figure_has_three_panels_with_shared_rows_and_no_heat_map(
