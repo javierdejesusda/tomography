@@ -96,8 +96,8 @@ def _pair(ax: Axes) -> None:
     )
     _text(ax, 0.02, 0.66, "a positive input")
     _text(ax, 0.02, 0.52, "a negative input")
-    ax.plot([0.145], [0.40], marker="^", ms=3.5, color=INK, clip_on=False)
-    _text(ax, 0.0875, 0.35, "last token", ha="center", color=GREY)
+    ax.plot([0.0875], [0.372], marker="^", ms=3.5, color=INK, clip_on=False)
+    _text(ax, 0.0875, 0.345, "last token", ha="center", color=GREY)
 
 
 def _stream(ax: Axes) -> None:
@@ -146,10 +146,10 @@ def _read(ax: Axes) -> None:
         (1.15, 3.2, INK, INK),
         (0.0, 0.5, paper.ENC["random_band"], paper.ENC["reference"]),
     ):
-        inset.fill_between(
-            x, lift, lift + density(gap), fc=face, ec=edge, lw=0.6
-        )
+        inset.fill_between(x, lift, lift + density(gap), fc=face, lw=0)
+        inset.plot(x, lift + density(gap), color=edge, lw=0.6)
         inset.plot(x, lift + density(0.0), color=edge, lw=0.6)
+        inset.plot([x[0], x[-1]], [lift, lift], color=edge, lw=0.6)
     inset.set_xlim(-3.0, 5.0)
     inset.set_ylim(-0.05, 2.25)
     inset.text(-3.0, 1.9, "$v$", fontsize=TEXT, color=INK, va="center")
