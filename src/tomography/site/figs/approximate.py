@@ -51,16 +51,22 @@ DETAIL = (
     "the exact items. (b) AUROC on held-out durations of a range reader "
     "fitted on heights and wingspans (concept prompt), with its random "
     "control (grey: the mean score of {draws} random directions oriented on "
-    "the training labels) and a classifier on the words of the question "
+    "the training labels, with the 95 percent bootstrap interval of the "
+    "mean over the draws) and a classifier on the words of the question "
     "(green, {text}, interval {text_lo} to {text_hi}). The reader is above "
-    "the classifier's value on {above}, {overlap}, and it lies inside the "
-    "random control's interval on {inside}. (c) Where the reader places the "
+    "the classifier's value on {above}, {overlap}, and above "
+    "the random control's interval on {above_random}; the control itself "
+    "is below 0.5 on {below_half}, a sign flip between the training and "
+    "the test concepts, and above 0.95 on {above_95}. (c) Where the reader "
+    "places the "
     "people between the test buildings (0) and the breeds (1), against the "
     "range of its "
     "random control over {sets} training sets (grey): at {pos_min} to "
     "{pos_max}, next to the breeds, so the reader does not separate a "
     "range-valued answer from a living subject. The position lies outside "
-    "the random band on {outside}."
+    "the random band on {outside}, but the random bands span {band_min} to "
+    "{band_max} across checkpoints, far outside 0 to 1 (clipped at the plot "
+    "edges, arrows), so the position cannot separate the reader from random."
 )
 
 
@@ -321,6 +327,15 @@ def build(manifest: Manifest) -> FigureOutput:
                 ha="center",
                 va="center",
             )
+        ax_c.text(
+            POSITION_LIMITS[1],
+            max(rows.values()) + 0.45,
+            "arrows: band clipped",
+            color=paper.ENC["secondary_text"],
+            fontsize=6.5,
+            ha="right",
+            va="center",
+        )
         ax_c.set_xlabel("people's position between\nbuildings and breeds")
         for ax, letter in zip((ax_a, ax_b, ax_c), "abc", strict=True):
             paper.panel_letter(ax, letter)
@@ -370,6 +385,15 @@ def build(manifest: Manifest) -> FigureOutput:
             for m, r in readers.items()
         }
     )
+    above_random = stats.per_role(
+        {m: r.reader["auroc"] > r.random["hi"] for m, r in readers.items()}
+    )
+    below_half = stats.per_role(
+        {m: r.random["auroc"] < 0.5 for m, r in readers.items()}
+    )
+    above_95 = stats.per_role(
+        {m: r.random["auroc"] > 0.95 for m, r in readers.items()}
+    )
     outside = stats.per_role(
         {
             m: not min(r.draws) <= r.position["position"] <= max(r.draws)
@@ -398,11 +422,16 @@ def build(manifest: Manifest) -> FigureOutput:
         "position_max": float(max(positions)),
         "n_people": float(first.n_people),
         "n_random_draws": float(first.n_seeds),
+        "band_min": float(min(min(r.draws) for r in readers.values())),
+        "band_max": float(max(max(r.draws) for r in readers.values())),
     }
     for role in stats.ROLES:
         numbers[f"above_text_{role}"] = float(above[role].hits)
         numbers[f"reader_in_random_{role}"] = float(inside[role].hits)
         numbers[f"people_outside_band_{role}"] = float(outside[role].hits)
+        numbers[f"reader_above_random_{role}"] = float(above_random[role].hits)
+        numbers[f"control_below_half_{role}"] = float(below_half[role].hits)
+        numbers[f"control_above_95_{role}"] = float(above_95[role].hits)
     heights = (
         "on none of the heights"
         if numbers["people_qwen_max"] == 0
@@ -430,7 +459,11 @@ def build(manifest: Manifest) -> FigureOutput:
             else f"{overlapping} of {len(readers)} intervals overlapping "
             "the classifier's"
         ),
-        inside=stats.per_role_text(inside),
+        above_random=stats.per_role_text(above_random),
+        below_half=stats.per_role_text(below_half),
+        above_95=stats.per_role_text(above_95),
+        band_min=f"{numbers['band_min']:.1f}".replace("-", axes.MINUS),
+        band_max=f"{numbers['band_max']:.1f}",
         outside=stats.per_role_text(outside),
         sets=len(first.draws),
         pos_min=f"{min(positions):.3f}",
@@ -445,6 +478,9 @@ def build(manifest: Manifest) -> FigureOutput:
         {
             "above_text": above,
             "reader_in_random": inside,
+            "reader_above_random": above_random,
+            "control_below_half": below_half,
+            "control_above_95": above_95,
             "people_outside_band": outside,
         },
     )
