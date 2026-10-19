@@ -185,21 +185,23 @@ def test_the_csv_holds_every_cell(output: registry.FigureOutput) -> None:
     assert head == ["model", "role", "fit", "score", "margin"]
     assert len(lines) - 1 == len(MODELS) * len(_names()) ** 2
     first = dict(zip(head, lines[1].split(","), strict=True))
-    assert first["model"] == MODELS[0]
+    assert first["model"] == ORDER[0]
     assert float(first["margin"]) == pytest.approx(
-        _margin(MODELS[0])[0, 0], abs=1e-6
+        _margin(ORDER[0])[0, 0], abs=1e-6
     )
 
 
 def _titles(output: registry.FigureOutput) -> list[str]:
-    return [ax.get_title() for ax in _matrices(output)]
+    return [
+        ax.get_title() or ax.get_title(loc="left") for ax in _matrices(output)
+    ]
 
 
 def test_panels_pair_base_and_post_trained_then_the_gpt2_sizes(
     output: registry.FigureOutput,
 ) -> None:
     axes = _matrices(output)
-    assert [ax.get_title() for ax in axes] == [
+    assert _titles(output) == [
         paper.display_name(m) for m in ORDER
     ]
     tops = [round(ax.get_position().y1, 3) for ax in axes]
@@ -235,7 +237,18 @@ def test_cells_within_the_noise_are_stippled_and_negative_ones_annotated(
         assert all(p.get_hatch() for p in patches)
         labels = [t for t in ax.texts if t.get_gid() == paper.TILE_LABEL]
         zero = (margin <= 0.0) & off
-        assert len(labels) == int(zero.sum())
+        assert len(labels) <= int(zero.sum())
+        assert bool(labels) == bool(zero.any())
+        cells = sorted(
+            (round(t.get_position()[1]), round(t.get_position()[0]))
+            for t in labels
+        )
+        for i, j in cells:
+            assert zero[i, j]
+            assert all(
+                (a, b) == (i, j) or abs(i - a) > 1 or abs(j - b) > 2
+                for a, b in cells
+            )
         for text in labels:
             assert text.get_fontsize() >= paper.MIN_TEXT
     assert output.numbers["n_below_noise"] == total

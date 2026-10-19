@@ -154,6 +154,30 @@ def _frame(
     ax.add_patch(patch)
 
 
+def _annotated(matrix: np.ndarray) -> set[tuple[int, int]]:
+    """Picks the cells at or below zero whose labels cannot overlap.
+
+    Args:
+        matrix: The margins of one checkpoint.
+
+    Returns:
+        Cell indices, lowest margin first, none within one row and two
+        columns of another.
+    """
+    k = matrix.shape[0]
+    low = sorted(
+        (matrix[i, j], i, j)
+        for i in range(k)
+        for j in range(k)
+        if i != j and matrix[i, j] <= 0.0
+    )
+    chosen: list[tuple[int, int]] = []
+    for _, i, j in low:
+        if all(abs(i - a) > 1 or abs(j - b) > 2 for a, b in chosen):
+            chosen.append((i, j))
+    return set(chosen)
+
+
 def _draw(
     ax: Axes,
     matrix: np.ndarray,
@@ -169,6 +193,7 @@ def _draw(
     norm = Normalize(vmin=VMIN, vmax=VMAX)
     shown = np.ma.masked_array(matrix, mask=np.eye(k, dtype=bool))
     image = ax.imshow(shown, cmap=cmap, norm=norm, interpolation="nearest")
+    shown_cells = _annotated(matrix)
     for i in range(k):
         for j in range(k):
             if i == j or matrix[i, j] > noise:
@@ -185,7 +210,7 @@ def _draw(
             )
             cell.set_gid("stipple")
             ax.add_patch(cell)
-            if matrix[i, j] > 0.0:
+            if matrix[i, j] > 0.0 or (i, j) not in shown_cells:
                 continue
             text = ax.text(
                 j,
@@ -332,8 +357,8 @@ def build(manifest: Manifest) -> FigureOutput:
         "the grey diagonal, where the fitted and the scored wording are the "
         "same, is not coloured. Cells at or below the noise expected from test "
         "pairs alone for that checkpoint (the noise column of "
-        "[[fig:wording]]) are stippled, and those at or below zero are "
-        "annotated with their margin; "
+        "[[fig:wording]]) are stippled, and the lowest of those at or below "
+        "zero are annotated with their margin; "
         "the white ticks on the colour bar mark that noise range, "
         f"{numbers['noise_min']:.3f} to {numbers['noise_max']:.3f}, and "
         f"{int(numbers['n_below_noise'])} cells "
