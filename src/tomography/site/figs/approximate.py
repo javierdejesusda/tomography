@@ -51,8 +51,10 @@ DETAIL = (
     "(a) Share of greedy answers written as a range (few-shot, range "
     "example last) on range items, exact items and {n_people} people's "
     "heights, each in its own column, with Wilson intervals on the item "
-    "counts; filled circles are GPT-2 and Qwen3 base checkpoints and open "
-    "circles post-trained ones. Qwen3 base checkpoints write a range on "
+    "counts; in (a) and (c) a filled circle is a GPT-2 or Qwen3 base "
+    "checkpoint and an open circle a post-trained one, while in (b) fill "
+    "marks the state against the control instead of the role. Qwen3 base "
+    "checkpoints write a range on "
     "{base_min} to {base_max} percent of the range items and post-trained "
     "ones on {post_min} to {post_max} percent, on at most {exact} percent "
     "of the exact items and {heights}, while GPT-2 small writes a range on "
@@ -295,9 +297,9 @@ def _draw_reader(ax: Any, model: str, y: float, reader: "_Reader") -> str:
     return state
 
 
-def _percent_axis(ax: Any) -> None:
+def _percent_axis(ax: Any, ticks: tuple[float, ...] = (0.0, 1.0)) -> None:
     ax.set_xlim(-0.07, 1.07)
-    ax.xaxis.set_major_locator(ticker.FixedLocator([0.0, 0.5, 1.0]))
+    ax.xaxis.set_major_locator(ticker.FixedLocator(list(ticks)))
     ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{v:g}"))
 
 
@@ -379,8 +381,7 @@ def _draw(
     for ax in others:
         _rows.row_axis(ax, rows, labels=False)
     ax_a.set_ylim(max(rows.values()) + 0.6, TOP)
-    ax_b.set_xlim(-0.03, 1.07)
-    _percent_axis(ax_b)
+    _percent_axis(ax_b, (0.0, 0.5, 1.0))
     ax_b.set_xlim(-0.03, 1.07)
     ax_b.set_xlabel("AUROC on held-out\ndurations")
     columns[1].set_xlabel("share written\nas a range")
@@ -415,11 +416,20 @@ def _draw(
             Line2D(
                 [], [], color=paper.ENC["text"], lw=1.0, label="word classifier"
             ),
-            _rows.series_handle("GPT-2 and base", "h", paper.INK),
-            _rows.series_handle("post-trained", "h", paper.INK, filled=False),
+            _rows.series_handle(
+                "(a, c) GPT-2 and Qwen3 base",
+                "o",
+                paper.ENC["reference"],
+            ),
+            _rows.series_handle(
+                "(a, c) post-trained",
+                "o",
+                paper.ENC["reference"],
+                filled=False,
+            ),
         ],
         loc="outside upper center",
-        ncol=5,
+        ncol=4,
         handlelength=1.0,
         columnspacing=1.0,
         fontsize=7,
@@ -457,7 +467,7 @@ def _draw(
             "inside the control",
             "below the control",
         ],
-        title="range reader (circle) against its control",
+        title="(b) range reader against its control",
         title_fontsize=7,
         loc="outside lower center",
         ncol=3,

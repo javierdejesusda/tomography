@@ -539,8 +539,8 @@ def test_the_legends_have_three_entries_a_role_key_and_a_state_key(
     assert labels == [
         "random control",
         "word classifier",
-        "GPT-2 and base",
-        "post-trained",
+        "(a, c) GPT-2 and Qwen3 base",
+        "(a, c) post-trained",
     ]
     assert [t.get_text() for t in states.get_texts()] == [
         "above the control",
@@ -548,8 +548,8 @@ def test_the_legends_have_three_entries_a_role_key_and_a_state_key(
         "below the control",
     ]
     handles = dict(zip(labels, main.legend_handles, strict=True))
-    assert handles["post-trained"].get_marker() == paper.ROLE_KEY_MARKER
-    assert handles["GPT-2 and base"].get_marker() == paper.ROLE_KEY_MARKER
+    assert handles["(a, c) post-trained"].get_marker() == "o"
+    assert handles["(a, c) GPT-2 and Qwen3 base"].get_marker() == "o"
 
 
 def test_only_glossary_shapes_and_inks_are_drawn(
@@ -596,3 +596,20 @@ def test_caption_states_the_state_rule_the_draws_and_the_people_column(
     assert "each in its own column" in text
     assert "sign flip" in text
     assert "control at 1.000" in text
+
+
+def test_keys_are_scoped_to_their_panels(
+    output: registry.FigureOutput,
+) -> None:
+    _, states = output.figure.legends
+    assert states.get_title().get_text() == (
+        "(b) range reader against its control"
+    )
+    assert "in (b) fill marks the state" in output.detail
+
+
+def test_panel_a_columns_label_only_zero_and_one(
+    output: registry.FigureOutput,
+) -> None:
+    for ax in output.figure.axes[:3]:
+        assert list(ax.get_xticks()) == [0.0, 1.0]

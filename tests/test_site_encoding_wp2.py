@@ -20,7 +20,9 @@ RANDOM = {M["random"]}
 TEXT = set(M["text"])
 OWN = {
     "steering": DIRECTION,
-    "knowledge_reading": DIRECTION | TEXT | {M["popularity"], M["probe"]},
+    "knowledge_reading": DIRECTION
+    | TEXT
+    | {M["popularity"], M["probe"], M["answer_probability"]},
     "knowledge_steering": DIRECTION | RANDOM,
     "approximate": DIRECTION | RANDOM,
     "base_post": DIRECTION,
