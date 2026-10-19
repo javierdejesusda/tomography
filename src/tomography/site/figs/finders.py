@@ -13,11 +13,11 @@ import math
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 
 from tomography.site import finders as loader
 from tomography.site import params
 from tomography.site import stats
+from tomography.site.figs import _rows
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.site.registry import RoleCount
@@ -30,8 +30,14 @@ TITLES = {"sentiment": "Sentiment", "truth": "Truth", "utility": "Utility"}
 FINDERS = ("logistic", "pca_diff")
 DODGE = {"logistic": -0.2, "pca_diff": 0.2}
 STYLE = {
-    "logistic": (paper.ENC["direction"], "o"),
-    "pca_diff": (paper.ENC["paper"], "D"),
+    "logistic": (
+        paper.ENC["direction"],
+        paper.MEASURE_MARKERS["direction"],
+    ),
+    "pca_diff": (
+        paper.ENC["paper"],
+        paper.MEASURE_MARKERS["paper_finder"],
+    ),
 }
 LABELS = {
     "logistic": "logistic regression",
@@ -149,7 +155,7 @@ def _panel(
 
 
 def _legend(fig: Figure) -> None:
-    handles: list[Line2D | Patch] = [
+    handles: list[Line2D] = [
         Line2D(
             [],
             [],
@@ -160,10 +166,25 @@ def _legend(fig: Figure) -> None:
         )
         for f in FINDERS
     ]
-    handles.append(Patch(fc=paper.RANDOM_BAND, ec="none"))
+    handles.append(
+        Line2D([], [], color=paper.RANDOM_BAND, lw=5, solid_capstyle="butt")
+    )
+    handles.append(
+        _rows.series_handle("GPT-2 and base", paper.ROLE_KEY_MARKER, paper.INK)
+    )
+    handles.append(
+        _rows.series_handle(
+            "post-trained", paper.ROLE_KEY_MARKER, paper.INK, filled=False
+        )
+    )
     fig.legend(
         handles,
-        [*(LABELS[f] for f in FINDERS), "random direction, test-pair noise"],
+        [
+            *(LABELS[f] for f in FINDERS),
+            "random direction, test-pair noise",
+            "GPT-2 and base",
+            "post-trained",
+        ],
         loc="outside upper center",
         ncol=3,
         frameon=False,
