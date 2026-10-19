@@ -4407,9 +4407,10 @@ and C5 runs reported below are later runs at `f4d414d` on a rented GPU pod, whic
 reported runs; the earlier runs stay tracked and each section names both. R4, A1 and A2 ran on all six
 checkpoints (the 4B pair in chain 17, at `89ea7cb` on a rented GPU pod) and so did R6 (the `qwen3-4b-base` run of
 chain 17 was cut when the chain was stopped and is not exported; the reported one is from chain 20, at `86c319b`).
-LR1 ran on the 1.7B and 4B pairs, C2, C4 and C5 on the 1.7B and 4B pairs (the `qwen3-4b-base` C2 run and both 4B C5
-runs are from chain 23 and the 4B C4 runs from chain 21, at `d09822b`), and M1 on the 1.7B and 4B pairs (the 4B M1 runs are from chain 22, at `d09822b`). The 4B results follow the 1.7B text
-in a `#### The 4B pair` block of each section. The post-trained checkpoints use the chat
+LR1 and C4 ran on the 0.6B, 1.7B and 4B pairs (the 0.6B runs are from chain 43, at `bab5b75`, and the 4B C4 runs from
+chain 21, at `d09822b`), C2 and C5 on the 1.7B and 4B pairs (the `qwen3-4b-base` C2 run and both 4B C5
+runs are from chain 23), and M1 on the 1.7B and 4B pairs (the 4B M1 runs are from chain 22, at `d09822b`). The 4B results follow the 1.7B text
+in a `#### The 4B pair` block of each section, and the 0.6B results of LR1 and C4 follow those in `#### The 0.6B pair` blocks. The post-trained checkpoints use the chat
 template with thinking disabled and the base checkpoints plain tags, as in [LAT reading on
 Qwen3](#lat-reading-on-qwen3). Base and post-trained checkpoints are different models: every table has one column per
 checkpoint, they are compared within a size, and they are never pooled into one metric. Each checkpoint has one
@@ -5203,6 +5204,99 @@ unedited model.
   perplexity of 20.05 (3.15 times), the three readers with coefficient +0.2 have 12.95 to 14.35 (2.03 to 2.25 times),
   and the random arms 6.73 to 8.81 (1.06 to 1.38 times). On the post-trained checkpoint the ten readers are at 8.23 to
   9.81 (1.03 to 1.23 times), `difference` at -0.05 at 8.99 (1.13 times) and the random arms at 8.01 to 8.39 (1.01 to 1.05
+  times). The scoring is not generation, so the distinct-1 and the completion fluency of the text are not measured.
+
+#### The 0.6B pair (LR1)
+
+LR1 on the 0.6B pair (runs `lr1/qwen3-0.6b-base/03ba155a9fe7` and `lr1/qwen3-0.6b/74d01330d28c`, made at `bab5b75` on a
+rented GPU pod: layers 9, 11, 13, 15 and 17, rank 8, learning rate 3e-4, 70 steps, batch size 16, 696,320 trainable
+parameters, 2,000 training examples and 64 held-out, with the same control prompts). The training loss goes from 43.3 to
+34.4 on the base checkpoint and from 65.0 to 48.9 on the post-trained one. The held-out loss of each layer, before and
+after, and its reduction:
+
+| Layer | qwen3-0.6b-base: before to after | Reduction | qwen3-0.6b: before to after | Reduction |
+| ----- | -------------------------------- | --------- | --------------------------- | --------- |
+| L9    | 3.62 to 2.85                     | 0.211     | 2.68 to 2.25                | 0.162     |
+| L11   | 5.99 to 4.62                     | 0.228     | 5.92 to 4.29                | 0.275     |
+| L13   | 8.58 to 6.86                     | 0.200     | 10.09 to 7.47               | 0.260     |
+| L15   | 10.71 to 8.37                    | 0.218     | 16.72 to 12.29              | 0.265     |
+| L17   | 19.02 to 14.42                   | 0.242     | 31.58 to 23.22              | 0.265     |
+
+The loss grows with the layer, so the layers are compared by the reduction: 0.200 to 0.242 on the base checkpoint (the
+smallest at L13, the largest at L17) and 0.162 to 0.275 on the post-trained one (the smallest at L9, the largest at
+L11), against 0.178 to 0.258 at 1.7B. LR1 has no honesty evaluation; C4 scores these adapters on TruthfulQA below.
+
+#### The 0.6B pair (C4)
+
+C4 on the 0.6B pair (runs `c4/qwen3-0.6b-base/b08c4e236dcf` and `c4/qwen3-0.6b/4d4ff337ade5`, made at `bab5b75` on a
+rented GPU pod, see [Run identity](#run-identity)), which read the LR1 adapter of their checkpoint (the two LR1 runs
+above). The config is that of the 1.7B and 4B runs (10 readers, 3 random arms, 173 test questions, 644 train and
+validation questions, chance line 0.228), with batch size 16, and there is no earlier 0.6B C4 run. The unedited row of
+the base checkpoint (0.237, 41 of 173 questions) is one question above the standard row of R6 (0.231, 40), and that of
+the post-trained checkpoint (0.318, 55) is one below it (0.324, 56). The perplexity column is that of held-out neutral
+text under the edited model; the prompting and `contrast` arms have no steered model, and the readers with coefficient
+0 are the unedited model.
+
+`qwen3-0.6b-base`:
+
+| Arm                  | Test MC1                   | Change from none        | Neutral perplexity |
+| -------------------- | -------------------------- | ----------------------- | ------------------ |
+| none                 | 0.237 [0.180, 0.306]       | 0                       | 8.14               |
+| prompting +1         | 0.243 [0.185, 0.312]       | +0.006 [-0.029, +0.040] | -                  |
+| prompting -1         | 0.243 [0.185, 0.312]       | +0.006 [-0.029, +0.046] | -                  |
+| difference (0.05)    | 0.208 [0.154, 0.275]       | -0.029 [-0.069, +0.006] | 8.93               |
+| contrast (0.25)      | 0.202 [0.149, 0.268]       | -0.035 [-0.075, +0.006] | -                  |
+| LoRRA                | 0.231 [0.175, 0.299]       | -0.006 [-0.052, +0.040] | 8.34               |
+| reading (10 readers) | mean 0.222, 0.197 to 0.237 | -0.040 to +0.000        | 8.14 to 136.42     |
+| random (3 arms)      | mean 0.227, 0.202 to 0.243 | -0.035 to +0.006        | 13.26 to 13.39     |
+
+`qwen3-0.6b`:
+
+| Arm                  | Test MC1                   | Change from none        | Neutral perplexity |
+| -------------------- | -------------------------- | ----------------------- | ------------------ |
+| none                 | 0.318 [0.253, 0.391]       | 0                       | 10.55              |
+| prompting +1         | 0.306 [0.242, 0.379]       | -0.012 [-0.046, +0.023] | -                  |
+| prompting -1         | 0.243 [0.185, 0.312]       | -0.075 [-0.121, -0.029] | -                  |
+| difference (0.05)    | 0.324 [0.258, 0.397]       | +0.006 [-0.023, +0.035] | 12.33              |
+| contrast (0.25)      | 0.376 [0.307, 0.450]       | +0.058 [+0.006, +0.110] | -                  |
+| LoRRA                | 0.364 [0.296, 0.438]       | +0.046 [-0.012, +0.104] | 11.66              |
+| reading (10 readers) | mean 0.310, 0.295 to 0.318 | -0.023 to +0.000        | 10.55 to 12.25     |
+| random (3 arms)      | mean 0.318, 0.318 to 0.318 | +0.000 to +0.000        | 10.78 to 16.32     |
+
+- **Base checkpoint.** The unedited row (0.237 [0.180, 0.306]) has an interval that contains the chance line. The
+  truthful and the untruthful prompt both change MC1 by +0.006 (1 question of 173), with intervals that contain zero, so
+  a changed prompt moves MC1 by the same amount whatever it says. No arm raises MC1: `difference` gives -0.029 [-0.069,
+  +0.006] (5 fewer questions), `contrast` -0.035 [-0.075, +0.006] (6 fewer) and the adapter -0.006 [-0.052, +0.040] (1
+  fewer), all with intervals that contain zero. Two of the ten readers chose coefficient 0 (the unedited model, so their
+  change is 0 by construction), seven chose -0.1 and one chose -0.2, with changes of 2 to 7 questions fewer; the ten
+  readers give -0.040 to +0.000, each with an interval that contains zero. The three random arms give -0.035 to +0.006,
+  each with an interval that contains zero.
+- **Post-trained checkpoint.** The unedited row (0.318 [0.253, 0.391]) has a lower bound above the chance line. The
+  truthful prompt gives -0.012 [-0.046, +0.023] and the untruthful one -0.075 [-0.121, -0.029] (13 questions fewer), so
+  only the second excludes zero and no prompt raises MC1. `contrast` gives +0.058 [+0.006, +0.110] (10 more questions)
+  and reaches 0.376 [0.307, 0.450], the only arm of the table with a change whose interval excludes zero on the positive
+  side (its lower bound is +0.006). The adapter gives +0.046 [-0.012, +0.104] (8 more) and 0.364 [0.296, 0.438], and
+  `difference` +0.006 [-0.023, +0.035] (1 more), both with intervals that contain zero. Nine readers chose -0.05 and one
+  chose 0; the ten readers give -0.023 to +0.000, each interval containing zero or (for one reader) ending at 0.000.
+  The three random arms give 0.318 each, the same as the unedited row.
+- **What is and is not supported.** The untruthful prompt lowers MC1 on the post-trained checkpoint (the interval
+  excludes zero) and `contrast` raises it there by a change whose interval barely excludes zero; on the base checkpoint
+  no arm has a change whose interval excludes zero. This is among the arms of the tables and with no correction for
+  multiple comparisons. The `contrast` gain on the post-trained checkpoint (+0.058) is larger than the change of any
+  random arm (0.000), but its test MC1 interval [0.307, 0.450] overlaps those of the random arms (the highest upper
+  bound is 0.391) and that of the unedited row, and the adapter (+0.046) is not separated from zero. It is one run on one
+  set of 173 questions. The `contrast` coefficient (0.25) and the `difference` coefficient (+0.05) are inside their
+  grids on both checkpoints (the `contrast` grid goes to 0.5 and the coefficient grid to 0.2). On the base checkpoint
+  one reader (-0.2) and all three random arms (-0.2, +0.2 and +0.2) were selected at the edge of the coefficient grid
+  (the other readers chose -0.1 for seven and 0 for two); on the post-trained one a random arm (-0.2) was, the other two
+  random arms chose -0.05 and +0.1, and the readers chose -0.05 for nine and 0 for one.
+- **Cost to the text.** The adapter leaves the perplexity of neutral text near the unedited one on the base
+  checkpoint, 8.34 against 8.14 (1.02 times), and raises it on the post-trained one, 11.66 against 10.55 (1.10 times;
+  1.09 times at 1.7B and 1.15 times at 4B). On the base checkpoint the settings chosen by selection are not all benign:
+  `difference` at +0.05 has a perplexity of 8.93 (1.10 times), the seven readers with coefficient -0.1 have 13.35 to
+  14.08 (1.64 to 1.73 times), the reader with -0.2 has 136.42 (16.75 times), and the random arms 13.26 to 13.39 (1.63
+  to 1.64 times). On the post-trained checkpoint the nine readers with a nonzero coefficient are at 11.74 to 12.25
+  (1.11 to 1.16 times), `difference` at +0.05 at 12.33 (1.17 times) and the random arms at 10.78 to 16.32 (1.02 to 1.55
   times). The scoring is not generation, so the distinct-1 and the completion fluency of the text are not measured.
 
 ### Lie gallery (C5)
@@ -6767,9 +6861,9 @@ Qwen3:
 | C1          | 7ae3e2aa34e2    | 832462b7b04e | 0cd5a36d3408    | a91f950ad9f5 |
 | M1          | not run         | not run      | e9279a87db07    | 77752112ddbe |
 | C2          | not run         | not run      | 4133e19728fa    | 1b87ff98a318 |
-| C4          | not run         | not run      | 7dd49d64a540    | 5ebc35ea3be6 |
+| C4          | b08c4e236dcf    | 4d4ff337ade5 | 7dd49d64a540    | 5ebc35ea3be6 |
 | C5          | not run         | not run      | 3a14e656df3c    | 52057b2ddc30 |
-| LR1         | not run         | not run      | 95a42d94146c    | bf86ed5ccde1 |
+| LR1         | 03ba155a9fe7    | 74d01330d28c | 95a42d94146c    | bf86ed5ccde1 |
 | P9a         | 1d9f881153e4    | 10d95352866e | d5d522bfecd4    | f413efcae268 |
 | P9b         | 34c0ebff50b0    | 975dbcf95759 | 5ca7821318ef    | 9641ab8235a9 |
 | P9c         | 264bf7ca3a01    | 0f8b118c9692 | 0f684b3c4b66    | 7c142334e5fe |
@@ -6945,6 +7039,31 @@ Config hashes (12 hex digits), chain 39:
 | P4          | 346291dfa5d1  | 36371d16b354 |
 | P9d concept | not run       | cc4024fe5af1 |
 
+Chain 43 (Secure A5000): LR1 and C4 on the Qwen3 0.6B pair (4 runs). `lr1/qwen3-0.6b-base/03ba155a9fe7`,
+`lr1/qwen3-0.6b/74d01330d28c`, `c4/qwen3-0.6b-base/b08c4e236dcf` and `c4/qwen3-0.6b/4d4ff337ade5` were made at `bab5b75`
+(the merge of pull request 199, an ancestor of the current main; `git diff --stat bab5b75 HEAD -- src` is empty, so
+their code is that of main) with a clean tree on one rented GPU pod (NVIDIA RTX A5000, torch 2.14.1+cu130, transformers
+5.19.0), with the default config of the experiment and model (`config.json` of each run) and batch size 16, except the
+`lorra_run` field of the C4 runs. The pod config of each C4 run records `lorra_run` as the path of the LR1 run of the
+same checkpoint in the same chain, `/workspace/chains/../out/chain43/lr1/<model>/<hash>`; the export rewrites it to `results/lr1/qwen3-0.6b-base/03ba155a9fe7`
+and `results/lr1/qwen3-0.6b/74d01330d28c`, so the stored `lorra_run` of each C4 run names the committed LR1 run of
+its checkpoint. The time between `started_at` and `finished_at` of the stored `meta.json` is 126 s (base) and 124 s
+(post-trained) for LR1, and 1,225 s (base) and 1,497 s (post-trained) for C4; the pod ran two jobs at a time on
+2026-10-18, alongside the two P1 jobs of the same chain (not part of this change), and the chain log of the launcher,
+which is outside the repository, records exit status 0 for each of the four runs and ends with `CHAIN_DONE failed=0`.
+The config hash of each run was recomputed by loading its original pod `config.json` into the config class of its
+experiment and hashing it, and all four agree with the directory names; the two LR1 configs equal the default LR1
+config of their checkpoint, and the C4 configs differ from the default C4 config only through `lorra_run`. The two LR1
+hashes also reproduce from the committed `config.json`; the exported config of a C4 run hashes differently because of
+the rewritten `lorra_run`, as for the chain 17, 21 and 24 C4 runs. Exporting these runs changed no tracked result.
+
+Config hashes (12 hex digits), chain 43:
+
+| Experiment | qwen3-0.6b-base | qwen3-0.6b   |
+| ---------- | --------------- | ------------ |
+| LR1        | 03ba155a9fe7    | 74d01330d28c |
+| C4         | b08c4e236dcf    | 4d4ff337ade5 |
+
 Other runs: P6 `25ee6de331d4`; P8 `e9f9bc04ba3c`.
 
 The files of every run named here are committed under `results/<experiment>/<model>/<hash>/`, copied with
@@ -6958,14 +7077,13 @@ Not in this document yet. No dates are promised.
 - P1 on `gpt2-xl` with both finders and the sentiment, truth and emotion tasks (it ran on the seven models of the P1 subsection).
 - P7 on `gpt2-medium` and on the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B and 4B pairs). M1
   and C2 on `gpt2-medium` and the two 0.6B Qwen3 checkpoints (they ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B
-  and 4B pairs). C4 and LR1 on the two 0.6B Qwen3 checkpoints (LR1 ran on the four GPT-2 sizes and the 1.7B and 4B pairs, C4 on
-  the four GPT-2 sizes and the 1.7B and 4B pairs). C5 on `gpt2`, `gpt2-medium` and the two 0.6B Qwen3 checkpoints (it ran on `gpt2-large`, `gpt2-xl` and the 1.7B and 4B
+  and 4B pairs). C5 on `gpt2`, `gpt2-medium` and the two 0.6B Qwen3 checkpoints (it ran on `gpt2-large`, `gpt2-xl` and the 1.7B and 4B
   pairs).
 - P5, persona wording and instruction confounds for honesty, with persona wordings beyond the five pairs of the run.
 - A random-direction arm for C2 and P7 on `gpt2`, a fluency measure (perplexity and distinct-1) for M1, C2 and P7 on
   `gpt2`, and a random-direction arm and the perplexity of neutral text for C4 on `gpt2`. The runs on `gpt2-large` and
   `gpt2-xl` (M1, C2, P7, C5), the C4 runs on `gpt2-medium`, `gpt2-large` and `gpt2-xl`, the runs on the Qwen3
-  1.7B pair (M1, C2, P7, C4, C5) and the runs on the Qwen3 4B pair (M1, C2, C4, C5, P7) have them; the C4 scoring is not generation, so no C4 run has a distinct-1.
+  1.7B pair (M1, C2, P7, C4, C5), the runs on the Qwen3 4B pair (M1, C2, C4, C5, P7) and the C4 runs on the Qwen3 0.6B pair have them; the C4 scoring is not generation, so no C4 run has a distinct-1.
 - Stored but not read in this document: the emotion direction matrix and embedding of the Qwen3 R4 runs, the A1 matrices
   of concept and layer agreement, the emotion gallery of the Qwen3 C5 runs, and the P5 curves over layers and the
   cosine curves between the paper reader and the other readers.
