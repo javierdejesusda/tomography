@@ -31,6 +31,8 @@ NEUTRALS: tuple[str, ...] = ("#4d4d4d", "#888888")
 RANDOM_BAND = "#d9d9d9"
 CHANCE = "#7f7f7f"
 INK = "#1a1a1a"
+WHITE = "#ffffff"
+TILE_LABEL = "tile_label"
 
 TICK = 8
 LABEL = 8
@@ -253,6 +255,31 @@ def pdf_bytes(fig: Figure) -> bytes:
             metadata={"CreationDate": None, "Creator": "tomography"},
         )
     return buffer.getvalue()
+
+
+def _luminance(color: Any) -> float:
+    linear = [
+        c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+        for c in mpl.colors.to_rgb(color)
+    ]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def tile_ink(rgba: Any) -> str:
+    """Picks the ink for a number written on a heat-map tile.
+
+    Args:
+        rgba: Any matplotlib colour of the tile, such as a colormap value.
+
+    Returns:
+        `INK` or `WHITE`, whichever has the higher WCAG contrast with the
+        tile. Mark the text with `TILE_LABEL` as its gid so that the palette
+        guard accepts white.
+    """
+    lum = _luminance(rgba)
+    against_white = (1.0 + 0.05) / (lum + 0.05)
+    against_ink = (lum + 0.05) / (_luminance(INK) + 0.05)
+    return WHITE if against_white >= against_ink else INK
 
 
 ENC: dict[str, Any] = _build_enc()

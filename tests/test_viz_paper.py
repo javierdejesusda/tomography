@@ -153,3 +153,24 @@ def test_every_text_artist_resolves_to_a_computer_modern_font() -> None:
             path = font_manager.findfont(text.get_fontproperties())
             name = path.replace("\\", "/").rsplit("/", 1)[-1]
             assert name.startswith("cm"), (text.get_text(), name)
+
+
+def test_tile_ink_is_white_on_dark_cividis_and_ink_on_light() -> None:
+    cmap = mpl.colormaps["cividis"]
+    assert paper.tile_ink(cmap(0.0)) == "#ffffff"
+    assert paper.tile_ink(cmap(1.0)) == paper.INK
+
+
+def test_tile_ink_has_at_least_the_contrast_of_the_other_choice() -> None:
+    cmap = mpl.colormaps["cividis"]
+    for value in [i / 20 for i in range(21)]:
+        rgba = cmap(value)
+        fill = "#" + "".join(f"{round(c * 255):02x}" for c in rgba[:3])
+        chosen = paper.tile_ink(rgba)
+        other = "#ffffff" if chosen == paper.INK else paper.INK
+
+        def ratio(ink: str, fill: str = fill) -> float:
+            hi, lo = sorted((_luminance(ink), _luminance(fill)), reverse=True)
+            return (hi + 0.05) / (lo + 0.05)
+
+        assert ratio(chosen) >= ratio(other) - 1e-6
