@@ -203,7 +203,8 @@ def build(manifest: Manifest) -> FigureOutput:
         "wording, for every checkpoint with a wording run."
     )
     detail = (
-        f"{sentence} Index numbers refer to [[table:wordings]]; the purple tick marks "
+        f"{sentence} Index numbers refer to [[table:wordings]]; the purple "
+        "tick marks "
         "the paper's wording and white dots the diagonal, where the fitted "
         "and the scored wording are the same."
     )

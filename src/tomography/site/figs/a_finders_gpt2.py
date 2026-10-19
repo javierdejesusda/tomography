@@ -3,8 +3,8 @@
 Rows are checkpoints and columns are tasks. Each panel draws report-split
 accuracy at every layer for the paper's finder and for logistic regression,
 the seed interval of a random direction of the same run, and a dot at the
-layer each finder chose on its select split. The Qwen3 finder figure reuses `split` for
-Qwen3.
+layer each finder chose on its select split. The Qwen3 finder figure
+reuses `split` for Qwen3.
 """
 
 from collections.abc import Callable
