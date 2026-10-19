@@ -20,6 +20,7 @@ RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 SPEC = "approximate"
 CELL = ("free", "fewshot", "range_last", "greedy")
+FORCED = ("forced", "fewshot", "range_last", "greedy")
 TRAIN = "height+wingspan"
 HEIGHT = 3.4
 
@@ -264,32 +265,97 @@ def test_percent_values_match_the_plan_at_this_commit(
     assert numbers["people_qwen_max"] == 0
 
 
-def test_caption_is_the_template_filled_from_the_files(
+def _forced(model: str) -> float:
+    (row,) = [
+        r
+        for r in _read("p10a", model, "table.csv")
+        if r["family"] == "all"
+        and r["kind"] == "range"
+        and (r["condition"], r["format"], r["shot_order"], r["decoding"])
+        == FORCED
+    ]
+    return float(row["range_rate"])
+
+
+def test_caption_is_at_most_200_words_and_leads_with_the_conclusion(
+    output: registry.FigureOutput,
+) -> None:
+    caption = f"{output.claim} {output.detail}"
+    assert len(caption.split()) <= 200, len(caption.split())
+    assert output.claim.startswith("Qwen3 writes a range for "), output.claim
+
+
+def test_the_claim_gives_the_range_shares_and_the_control_count_per_role(
     output: registry.FigureOutput,
 ) -> None:
     n = output.numbers
-    caption = f"{output.claim} {output.detail}"
+    above = stats.per_role_text(output.counts["reader_above_random"])
     assert output.claim == (
-        "Qwen3 writes ranges where the sourced answer is a range, but a "
-        "range reader beats its random control only on some checkpoints."
+        f"Qwen3 writes a range for {int(n['range_base_min'])} to "
+        f"{int(n['range_base_max'])} percent of range items (base) and "
+        f"{int(n['range_post_min'])} to {int(n['range_post_max'])} percent "
+        "(post-trained), and a range reader is above the interval of "
+        f"its random control on {above}."
     )
+
+
+def test_the_detail_gives_the_baselines_of_each_panel(
+    output: registry.FigureOutput,
+) -> None:
+    n = output.numbers
+    detail = output.detail
     assert (
-        f"Qwen3 base checkpoints write a range on {int(n['range_base_min'])} "
-        f"to {int(n['range_base_max'])} percent of the range items and "
-        f"post-trained ones on {int(n['range_post_min'])} to "
-        f"{int(n['range_post_max'])} percent, on at most "
-        f"{int(n['exact_qwen_max'])} percent of the exact items and on none "
-        "of the heights"
-    ) in caption
+        f"on at most {int(n['exact_qwen_max'])} percent of the exact items"
+    ) in detail
     assert (
-        f"GPT-2 small writes a range on {int(n['gpt2_range'])} percent of "
-        f"the range items and {int(n['gpt2_exact'])} percent of the exact "
-        "items"
-    ) in caption
-    above = stats.per_role_text(
-        {r: output.counts["above_text"][r] for r in stats.ROLES}
+        f"GPT-2 small on {int(n['gpt2_range'])} percent of the range "
+        f"items and {int(n['gpt2_exact'])} percent of the exact items"
+    ) in detail
+    assert f"{n['text_word']:.3f}" in detail
+    assert f"{n['text_lo']:.3f} to {n['text_hi']:.3f}" in detail
+    assert f"mean of {int(n['n_random_draws'])} random directions" in detail
+    assert "[[sec:appendix_approximate]]" in detail
+    for gone in ("sign flip", "Hanley", "cannot separate"):
+        assert gone not in detail
+
+
+def test_the_wilson_intervals_lie_inside_the_markers_and_the_caption_says_so(
+    output: registry.FigureOutput,
+) -> None:
+    widths = [
+        float(r["hi"]) - float(r["lo"])
+        for r in _rows(output)
+        if r["panel"] == "a"
+    ]
+    widest = max(widths)
+    ax = output.figure.axes[0]
+    output.figure.canvas.draw()
+    points = ax.get_window_extent().width / output.figure.dpi * 72
+    low, high = ax.get_xlim()
+    assert widest / (high - low) * points < paper.MARKER_SIZE
+    assert output.numbers["wilson_max_points"] == math.ceil(widest * 100 - 1e-9)
+    assert (
+        "Wilson 95 percent intervals lie inside the markers, at most "
+        f"{int(output.numbers['wilson_max_points'])} points wide"
+    ) in output.detail
+
+
+def test_the_forced_range_shares_are_exported_per_role(
+    output: registry.FigureOutput,
+) -> None:
+    qwen = [m for m in _models("p10a") if m.startswith("qwen3")]
+    for role, base in (("base", True), ("post", False)):
+        values = [_forced(m) for m in qwen if m.endswith("-base") == base]
+        assert output.numbers[f"forced_{role}_max"] == _percent(max(values))
+    assert output.numbers["forced_gpt2_max"] == _percent(
+        max(_forced(m) for m in _models("p10a") if m.startswith("gpt2"))
     )
-    band = _by_role(
+
+
+def test_the_people_outside_the_random_band_are_counted_per_role(
+    output: registry.FigureOutput,
+) -> None:
+    want = _by_role(
         {
             m: not (
                 min(r["position"] for r in _people(m, "random"))
@@ -299,16 +365,9 @@ def test_caption_is_the_template_filled_from_the_files(
             for m in _models("p10b")
         }
     )
-    outside = stats.per_role_text(band)
-    assert f"The reader is above the classifier's value on {above}" in caption
-    assert f"outside the random band on {outside}" in caption
-    assert "reaches 0.9" not in caption
-    assert f"{n['text_word']:.3f}" in caption
-    assert f"{n['text_lo']:.3f} to {n['text_hi']:.3f}" in caption
-    assert (
-        f"at {n['position_min']:.3f} to {n['position_max']:.3f}, next to the "
-        "breeds"
-    ) in caption
+    for role in stats.ROLES:
+        got = output.counts["outside"][role]
+        assert (got.hits, got.total) == (want[role].hits, want[role].total)
 
 
 def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
@@ -354,31 +413,6 @@ def test_control_counts_are_per_role_and_use_the_stored_values(
     draws = [r["position"] for m in models for r in _people(m, "random")]
     assert output.numbers["band_min"] == pytest.approx(min(draws))
     assert output.numbers["band_max"] == pytest.approx(max(draws))
-
-
-def test_caption_defines_the_control_interval_and_the_clipped_bands(
-    output: registry.FigureOutput,
-) -> None:
-    n = output.numbers
-    for name in (
-        "reader_above_random",
-        "control_below_half",
-        "control_above_95",
-    ):
-        text = stats.per_role_text(
-            {r: output.counts[name][r] for r in stats.ROLES}
-        )
-        assert text in output.detail
-    assert "95 percent bootstrap interval of the mean over the" in output.detail
-    assert "above the random control's interval" in output.detail
-    assert "below 0.5" in output.detail
-    assert "above 0.95" in output.detail
-    low = f"{n['band_min']:.1f}".replace("-", chr(0x2212))
-    assert (
-        f"the random bands span {low} to {n['band_max']:.1f}" in output.detail
-    )
-    assert "cannot separate the reader from random" in output.detail
-    assert "inside the random control's interval" not in output.detail
 
 
 def test_the_superseded_reader_and_band_counts_are_gone(
@@ -584,28 +618,15 @@ def test_only_glossary_shapes_and_inks_are_drawn(
     assert colours <= {mpl_colors.to_hex(c) for c in inks}
 
 
-def test_caption_states_the_state_rule_the_draws_and_the_people_column(
+def test_caption_states_the_state_rule_and_the_roles(
     output: registry.FigureOutput,
 ) -> None:
     text = output.detail
-    assert "A filled circle marks a reader above the control's interval" in text
+    assert "filled circles are GPT-2 and Qwen3 base" in text
+    assert "open circles post-trained" in text
+    assert "a filled circle is above the control's interval" in text
     assert "an open circle inside it" in text
-    assert "left tick below it" in text
-    assert "the individual draws are not stored" in text
-    assert "mean of 5 random directions" in text
-    assert "each in its own column" in text
-    assert "sign flip" in text
-    assert "control at 1.000" in text
-
-
-def test_keys_are_scoped_to_their_panels(
-    output: registry.FigureOutput,
-) -> None:
-    _, states = output.figure.legends
-    assert states.get_title().get_text() == (
-        "(b) range reader against its control"
-    )
-    assert "in (b) fill marks the state" in output.detail
+    assert "a tick below it" in text
 
 
 def test_panel_a_columns_label_only_zero_and_one(
