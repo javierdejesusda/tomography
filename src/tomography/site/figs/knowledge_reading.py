@@ -140,14 +140,22 @@ def _range(values: list[float]) -> tuple[str, str]:
     return _rows.number(min(values)), _rows.number(max(values))
 
 
-def _label(model: str) -> str:
+def row_label(model: str) -> str:
+    """Gives the short row label of a checkpoint inside its role block.
+
+    Args:
+        model: Checkpoint key.
+
+    Returns:
+        The size name: `medium`, `XL`, `0.6B` and so on.
+    """
     name = paper.display_name(model)
     if model.startswith("gpt2"):
         return name.removeprefix("GPT-2 ")
     return name.split("-")[1]
 
 
-def _block_rows(models: list[str]) -> tuple[dict[str, float], list[float]]:
+def block_rows(models: list[str]) -> tuple[dict[str, float], list[float]]:
     """Places checkpoints in role blocks, one row each.
 
     Args:
@@ -181,6 +189,31 @@ def _unit_step(low: float, high: float) -> list[float]:
     return values
 
 
+def draw_group_labels(ax: Any, rows: dict[str, float]) -> None:
+    """Writes the role of each block of rows, rotated, left of the labels.
+
+    Args:
+        ax: The leftmost panel, whose rows are checkpoints.
+        rows: Checkpoint key to row position, from `block_rows`.
+    """
+    by_role = _group.lines_by_role(list(rows))
+    for role, members in by_role.items():
+        centre = sum(rows[m] for m in members) / len(members)
+        ax.text(
+            GROUP_X,
+            centre,
+            GROUPS[role],
+            transform=ax.get_yaxis_transform(),
+            color=paper.ENC["secondary_text"],
+            fontsize=paper.MIN_TEXT,
+            ha="center",
+            va="center",
+            rotation=90,
+            linespacing=0.95,
+            clip_on=False,
+        )
+
+
 def _row_setup(
     panels: list[Any],
     rows: dict[str, float],
@@ -202,23 +235,8 @@ def _row_setup(
         for line in ax.get_lines():
             if line.get_color() == paper.ENC["reference"]:
                 line.set_ydata([0.0, (first - low) / (high - low)])
-    panels[0].set_yticklabels([_label(m) for m in rows])
-    by_role = _group.lines_by_role(list(rows))
-    for role, members in by_role.items():
-        centre = sum(rows[m] for m in members) / len(members)
-        panels[0].text(
-            GROUP_X,
-            centre,
-            GROUPS[role],
-            transform=panels[0].get_yaxis_transform(),
-            color=paper.ENC["secondary_text"],
-            fontsize=paper.MIN_TEXT,
-            ha="center",
-            va="center",
-            rotation=90,
-            linespacing=0.95,
-            clip_on=False,
-        )
+    panels[0].set_yticklabels([row_label(m) for m in rows])
+    draw_group_labels(panels[0], rows)
 
 
 def _head(ax: Any, x: float, text: str) -> None:
@@ -427,7 +445,7 @@ def build(manifest: Manifest) -> FigureOutput:
     contrast = _contrast(manifest)
     increments = _increments(manifest)
     own = _own_probability(manifest)
-    rows, separators = _block_rows(list(contrast))
+    rows, separators = block_rows(list(contrast))
     csv_rows: list[list[Any]] = []
 
     with paper.paper_style():
