@@ -3,6 +3,7 @@
 import csv
 import datetime
 import io
+import logging
 from pathlib import Path
 import re
 import shutil
@@ -13,6 +14,10 @@ from tomography.site import references
 from tomography.site import registry
 from tomography.site.manifest import Manifest
 from tomography.viz import paper
+
+# Matplotlib stamps its subset fonts with a fixed date, which fontTools
+# reports as a warning on every figure; its real errors stay visible.
+logging.getLogger("fontTools.ttLib.tables._h_e_a_d").setLevel(logging.ERROR)
 
 STATIC = Path(__file__).parent / "static"
 BIB = Path(__file__).resolve().parents[3] / "docs" / "references.bib"

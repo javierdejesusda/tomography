@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 import re
 import runpy
@@ -346,3 +347,13 @@ def test_every_appendix_item_is_cited_from_the_numbered_sections(
     ):
         for number in ids:
             assert f'href="#{kind}-{number}"' in body, (kind, number)
+
+
+def test_the_font_timestamp_warning_is_silenced_but_errors_are_not(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    log = logging.getLogger("fontTools.ttLib.tables._h_e_a_d")
+    with caplog.at_level(logging.WARNING):
+        log.warning("'modified' timestamp seems very low")
+        log.error("a real error")
+    assert [r.getMessage() for r in caplog.records] == ["a real error"]
