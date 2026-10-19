@@ -177,7 +177,8 @@ def test_print_rules(css: str) -> None:
     assert "size: letter" in printed
     assert "margin: 1in 1.5in" in printed
     assert "thead {\n    display: table-header-group;" in printed
-    assert "tr {" in printed
+    block = "  figure,\n  pre,\n  tr {\n    break-inside: avoid;\n  }"
+    assert block in printed
     assert ".data {\n    display: none;" in printed
 
 
@@ -310,9 +311,21 @@ def test_the_built_page_lists_only_cited_references(html: str) -> None:
     assert html.index('id="references"') < html.index('id="appendix"')
 
 
+def _bare_handles(text: str) -> list[str]:
+    return [
+        text[m.start() - 11 : m.end()]
+        for m in re.finditer("javierdejesusda", text)
+        if text[m.start() - 11 : m.end()] != "github.com/javierdejesusda"
+    ]
+
+
 def test_the_page_names_no_person_beyond_the_cited_authors(html: str) -> None:
-    for match in re.finditer("javierdejesusda", html):
-        assert "github.com/javierdejesusda" in html[match.start() - 11 :]
+    assert _bare_handles(html) == []
+
+
+def test_a_bare_handle_in_the_text_would_be_caught() -> None:
+    assert _bare_handles("by javierdejesusda in the abstract") != []
+    assert _bare_handles("at github.com/javierdejesusda/tomography") == []
 
 
 def test_build_is_byte_identical_in_two_fresh_processes(
