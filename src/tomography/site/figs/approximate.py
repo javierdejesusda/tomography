@@ -425,7 +425,7 @@ def _draw(
         fontsize=7,
     )
     main.get_frame().set_edgecolor("none")
-    open_grey = {
+    open_grey: dict[str, Any] = {
         "ls": "none",
         "marker": "o",
         "markerfacecolor": paper.WHITE,
