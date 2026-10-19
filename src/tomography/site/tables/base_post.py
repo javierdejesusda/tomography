@@ -1,4 +1,4 @@
-"""Table A5: Stored base against post-trained comparisons.
+"""Table A8: Stored base against post-trained comparisons.
 
 The paired comparisons of the Qwen3 0.6B and 1.7B pairs as the repository
 stores them: for each reading task the accuracy of the base and of the
