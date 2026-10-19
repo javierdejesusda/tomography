@@ -316,7 +316,7 @@ def test_the_perplexity_is_not_called_the_perplexity_of_the_completions(
     output: registry.FigureOutput,
 ) -> None:
     assert "unsteered text" not in output.detail.split("Perplexity of")[0]
-    assert "of the completions themselves" in output.detail
+    assert "not the perplexity of the completions" in output.detail
 
 
 def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
@@ -425,3 +425,50 @@ def test_cross_references_are_tokens_and_not_literal_numbers(
     assert "[[fig:teaser]]" in output.detail
     assert "[[table:steering]]" in output.detail
     assert not re.search(r"\b(Figure|Table) \d", output.detail)
+
+
+def _moves(rows: list[dict[str, Any]], column: str) -> bool:
+    base = float(_none(rows)[column])
+    return all(
+        sign * (float(r[column]) - base) > 0
+        for coeff, sign in ((0.1, 1), (-0.1, -1))
+        for r in _linear(rows, coeff)
+    )
+
+
+def test_moves_counts_need_every_vector_at_both_signs_on_both_judges(
+    output: registry.FigureOutput,
+) -> None:
+    want = {
+        "moves01": lambda r: _moves(r, "score") and _moves(r, "score_check"),
+        "moves01_primary": lambda r: _moves(r, "score"),
+        "moves01_check": lambda r: _moves(r, "score_check"),
+        "judges_agree": lambda r: (
+            _moves(r, "score") == _moves(r, "score_check")
+        ),
+    }
+    for name, rule in want.items():
+        for role, members in _by_role().items():
+            hits = sum(rule(_table(m)) for m in members)
+            count = output.counts[name][role]
+            assert (count.hits, count.total) == (hits, len(members))
+            assert output.numbers[f"{name}_{role}"] == hits
+    assert [
+        output.counts["moves01"][r].hits for r in ("gpt2", "base", "post")
+    ] == [
+        4,
+        3,
+        2,
+    ]
+
+
+def test_caption_states_the_moves_rule_and_the_fluency_inputs(
+    output: registry.FigureOutput,
+) -> None:
+    moves = stats.per_role_text(output.counts["moves01"])
+    agree = stats.per_role_text(output.counts["judges_agree"])
+    assert f"on {moves}" in output.detail
+    assert "all 3 steering vectors" in output.detail
+    assert "second judge" in output.detail
+    assert f"the two judges agree on {agree}" in output.detail
+    assert "not the perplexity of the completions" in output.detail
