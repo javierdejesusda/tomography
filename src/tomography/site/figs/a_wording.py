@@ -118,6 +118,38 @@ def summarize(margins: dict[str, np.ndarray]) -> tuple[dict[str, float], str]:
     )
 
 
+def _below_text(margins: dict[str, np.ndarray]) -> str:
+    """Names the checkpoints that hold cells at or below zero.
+
+    Args:
+        margins: Checkpoint key to its margin matrix.
+
+    Returns:
+        Text such as `(all on Qwen3-4B, lowest -0.12)`, or an empty string
+        when every cell is above zero.
+    """
+    parts = []
+    for model, matrix in margins.items():
+        if (matrix <= 0).any():
+            low = float(matrix.min())
+            shown = (MINUS if low < 0 else "") + f"{abs(low):.2f}"
+            parts.append(f"{paper.display_name(model)}, lowest {shown}")
+    if not parts:
+        return ""
+    return f"(all on {'; '.join(parts)})"
+
+
+def _noise_text(numbers: dict[str, float]) -> str:
+    return stats.join_and(
+        [
+            f"{numbers[f'noise_{r}_min']:.3f} to "
+            f"{numbers[f'noise_{r}_max']:.3f} on {stats.ROLE_NAMES[r]}"
+            for r in stats.ROLES
+            if f"noise_{r}_min" in numbers
+        ]
+    )
+
+
 def _kinds(manifest: Manifest, model: str, names: list[str]) -> list[str]:
     path = manifest.run("p1", model)
     assert path is not None
@@ -265,10 +297,11 @@ def build(manifest: Manifest) -> FigureOutput:
     numbers, sentence = summarize(margins)
     noise = {m: wording.noise(manifest, m) for m in models}
     numbers["min_margin"] = min(numbers[f"min_{m}"] for m in margins)
-    value = numbers["min_margin"]
-    low = (MINUS if value < 0 else "") + f"{abs(value):.2f}"
-    numbers["noise_min"] = min(noise.values())
-    numbers["noise_max"] = max(noise.values())
+    for role in stats.ROLES:
+        group = [v for m, v in noise.items() if stats.role(m) == role]
+        if group:
+            numbers[f"noise_{role}_min"] = min(group)
+            numbers[f"noise_{role}_max"] = max(group)
     numbers["n_below_noise"] = float(
         sum(
             int(
@@ -322,9 +355,13 @@ def build(manifest: Manifest) -> FigureOutput:
         bar.set_ticks(BAR_TICKS)
         bar.ax.tick_params(labelsize=TEXT)
         bar.set_label("accuracy minus random direction", fontsize=TEXT)
-        for edge in (numbers["noise_min"], numbers["noise_max"]):
-            tick = bar.ax.axvline(edge, color="white", lw=1.2, ymax=0.7)
-            tick.set_gid("noise_tick")
+        for role in stats.ROLES:
+            for edge in (
+                numbers[f"noise_{role}_min"],
+                numbers[f"noise_{role}_max"],
+            ):
+                tick = bar.ax.axvline(edge, color="white", lw=1.2, ymax=0.7)
+                tick.set_gid("noise_tick")
     claim = (
         "Accuracy of a reader fitted on one wording (row) and scored on "
         "another (column), minus the random direction on the scored "
@@ -338,10 +375,10 @@ def build(manifest: Manifest) -> FigureOutput:
         "same, is not coloured. Cells at or below the noise expected from test "
         "pairs alone for that checkpoint (the noise column of "
         "[[fig:wording]]) are stippled; the "
-        f"{int(numbers['n_below'])} cells at or below zero (lowest "
-        f"{low}) carry a dot; "
-        "the white ticks on the colour bar mark that noise range, "
-        f"{numbers['noise_min']:.3f} to {numbers['noise_max']:.3f}, and "
+        f"{int(numbers['n_below'])} cells at or below zero "
+        f"{_below_text(margins)} carry a dot; "
+        "the white ticks on the colour bar mark the noise range of each "
+        f"role, {_noise_text(numbers)}, and "
         f"{int(numbers['n_below_noise'])} cells "
         "fall there."
     )

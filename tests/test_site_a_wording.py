@@ -14,6 +14,7 @@ from tomography.site.figs import wording
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
+from tomography.viz.axes import MINUS
 
 _RESULTS = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 data = _RESULTS["data"]
@@ -261,7 +262,8 @@ def test_every_cell_at_or_below_zero_carries_one_dot(
     assert output.numbers["min_margin"] == pytest.approx(low)
     text = output.detail
     shown = chr(0x2212) + f"{abs(low):.2f}" if low < 0 else f"{low:.2f}"
-    assert f"the {total} cells at or below zero (lowest {shown}" in text
+    assert f"the {total} cells at or below zero (all on" in text
+    assert f"lowest {shown}" in text
     assert "carry a dot" in text
     assert "annotated with their margin" not in text
 
@@ -318,12 +320,17 @@ def test_one_shared_colour_bar_below_the_grid_marks_the_noise(
     (bar,) = [ax for ax in fig.axes if not ax.images]
     assert bar.get_position().y1 <= min(ax.get_position().y0 for ax in matrices)
     ticks = [ln for ln in bar.get_lines() if ln.get_gid() == "noise_tick"]
-    noise = sorted(_noise(m) for m in MODELS)
+    edges = []
+    for role in ROLES:
+        mine = [_noise(m) for m in MODELS if _role(m) == role]
+        edges += [min(mine), max(mine)]
+        assert output.numbers[f"noise_{role}_min"] == pytest.approx(min(mine))
+        assert output.numbers[f"noise_{role}_max"] == pytest.approx(max(mine))
     assert sorted(float(t.get_xdata()[0]) for t in ticks) == pytest.approx(
-        [noise[0], noise[-1]]
+        sorted(edges)
     )
-    assert output.numbers["noise_min"] == pytest.approx(noise[0])
-    assert output.numbers["noise_max"] == pytest.approx(noise[-1])
+    assert "noise_min" not in output.numbers
+    assert "noise_max" not in output.numbers
     assert fig.get_size_inches()[1] <= 9.5 + 1e-9
 
 
@@ -351,3 +358,31 @@ def test_index_one_is_labelled_on_both_axes_of_every_matrix(
                 seen[name] += 1
                 assert labels[0].get_text() == "1"
     assert all(seen.values())
+
+
+def test_the_caption_gives_the_noise_range_per_role(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.detail
+    for role in ROLES:
+        mine = [_noise(m) for m in MODELS if _role(m) == role]
+        assert f"{min(mine):.3f} to {max(mine):.3f}" in text
+
+
+def test_the_cells_at_or_below_zero_are_named_by_checkpoint(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.detail
+    below = {
+        m: int((_margin(m) <= 0).sum())
+        for m in MODELS
+        if (_margin(m) <= 0).any()
+    }
+    assert below
+    for model in below:
+        assert paper.display_name(model) in text
+        low = float(_margin(model).min())
+        shown = (MINUS if low < 0 else "") + f"{abs(low):.2f}"
+        assert shown in text
+    assert "lowest" in text
+    assert f"the {int(output.numbers['n_below'])} cells" in text
