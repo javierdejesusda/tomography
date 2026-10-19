@@ -180,11 +180,14 @@ def build(manifest: Manifest) -> FigureOutput:
                     )
         legend = fig.legend(
             handles=[
-                _rows.series_handle("unknown questions", "o", paper.INK),
+                _rows.series_handle(
+                    "unknown questions", "o", paper.INK, filled=False
+                ),
                 _rows.series_handle(
                     "known questions",
                     paper.QUESTION_SET_MARKERS["known"],
                     paper.INK,
+                    filled=False,
                 ),
                 Line2D(
                     [],
