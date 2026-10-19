@@ -63,8 +63,10 @@ def build(manifest: Manifest) -> TableOutput:
         "truth use pairs of unrelated inputs with opposite labels; utility "
         "uses matched scenarios. Each cell is a reader minus a random "
         "direction, not the comparison with the text baselines, which is in "
-        "[[sec:truth]]. Every finder and preprocessing is in "
-        "[[table:finders_all]]."
+        "[[sec:truth]]. This is the finder-comparison run, which draws its "
+        "own random directions, so its random values differ from those of "
+        "[[table:reading]] and [[table:reading_full]]. Every finder and "
+        "preprocessing is in [[table:finders_all]]."
     )
     return TableOutput(
         claim,
