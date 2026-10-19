@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from tomography.site import reading
 from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
@@ -77,7 +78,9 @@ def _template_sentence(accuracy: list[float], layers: dict[str, int]) -> str:
     for layer in sorted(by_layer, key=lambda k: -len(by_layer[k])):
         names = [paper.display_name(m) for m in by_layer[layer]]
         who = (
-            f"{len(names)} checkpoints"
+            stats.per_role_text(
+                stats.per_role({m: v == layer for m, v in layers.items()})
+            )
             if len(names) > 3
             else " and ".join(names)
         )
@@ -113,6 +116,7 @@ def build(manifest: Manifest) -> TableOutput:
     in_acc: list[float] = []
     in_layer: dict[str, int] = {}
     persona: list[float] = []
+    template_random: list[float] = []
     text: dict[str, dict[str, Any]] = {}
     n_test = n_val = 0
     for model in models:
@@ -133,6 +137,9 @@ def build(manifest: Manifest) -> TableOutput:
         n_val = int(s5["n_eval_pairs"]["transfer"]["val"])
         mc1 = [_mc1(table, "lat", s)["mc1"] for s in READERS]
         persona.append(float(mc1[2]))
+        scored = reading.in_template(manifest, model)
+        assert scored is not None
+        template_random.append(scored.random)
         rows.append(
             [
                 paper.display_name(model),
@@ -173,6 +180,10 @@ def build(manifest: Manifest) -> TableOutput:
         f"{_cells.interval(char['mc1'], char['lo'], char['hi'])}, and chance "
         f"is {_cells.num(chance)}. "
         + _template_sentence(in_acc, in_layer)
+        + " In the template the random direction at the same layer reaches "
+        "[[num:table:truth.template_random_min]] to "
+        "[[num:table:truth.template_random_max]] across checkpoints, per "
+        "checkpoint in [[table:reading_full]]."
         + " Honesty transfer scores the honesty reader on plain true and "
         f"false statements ({n_test} test pairs, layer chosen on {n_val} "
         "validation pairs) next to the random direction at the same layer. "
@@ -189,6 +200,8 @@ def build(manifest: Manifest) -> TableOutput:
         "text_word": float(word["mc1"]),
         "text_char": float(char["mc1"]),
         "chance": chance,
+        "template_random_min": min(template_random),
+        "template_random_max": max(template_random),
     }
     return TableOutput(
         claim,

@@ -35,6 +35,8 @@ GENERIC = (
     r"exceeds 0\.1(?!\d)",
     r"(?:within|above) 1\.5 times",
     r"below 0\.15(?!\d)",
+    r"at most 1\.5(?!\d)",
+    r"at least 0\.15(?!\d)",
     r"below 0\.5(?!\d)",
     r"\ball 10\b",
     r"none of the 10\b",
@@ -421,3 +423,17 @@ def test_counts_over_runs_use_the_runs_token() -> None:
     text = " ".join(_all_texts())
     assert "[[runs:fig:knowledge_steering.distinguishable]]" in text
     assert "[[count:fig:knowledge_steering.distinguishable]]" not in text
+
+
+def test_the_abstract_counts_the_confidence_gain_per_role() -> None:
+    assert "[[count:fig:teaser.knowledge_confidence]]" in content.ABSTRACT
+    assert "knowledge_confidence_n" not in content.ABSTRACT
+    assert "any of the" not in content.ABSTRACT
+
+
+def test_the_steering_contribution_names_both_fluency_thresholds() -> None:
+    text = " ".join(_all_texts())
+    start = text.index("keeps the fluency rule")
+    sentence = text[start : start + 220]
+    assert "perplexity ratio at most 1.5" in sentence
+    assert "distinct-1 at least 0.15" in sentence

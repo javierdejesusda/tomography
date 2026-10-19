@@ -46,11 +46,10 @@ ABSTRACT = (
     "is above a classifier on the question and answer words on "
     "[[count:fig:teaser.truthfulqa]], and a direction for questions the "
     "model can answer ranks them above the popularity of their subject on "
-    "[[count:fig:teaser.knowledge]] but adds nothing to the confidence of "
-    "the model on any of the [[num:fig:teaser.knowledge_confidence_n]] "
-    "checkpoints with such a direction. Steering along a sentiment direction "
-    "at relative coefficient 0.1 moves the judged sentiment of completions "
-    "while the steered model stays within 1.5 times the unsteered "
+    "[[count:fig:teaser.knowledge]] but adds to the confidence of the "
+    "model on [[count:fig:teaser.knowledge_confidence]]. Steering along a "
+    "sentiment direction at relative coefficient 0.1 moves the judged "
+    "sentiment of completions while the steered model stays within 1.5 times the unsteered "
     "perplexity on neutral text on [[count:fig:steering.fluent01]], and a "
     "steering direction beats random directions of the same norm on "
     "[[count:fig:teaser.steering]]. Post-training lowers held-out sentiment "
@@ -159,7 +158,8 @@ INTRODUCTION = Section(
         (
             "Steering ([[sec:steering]]).",
             "At relative coefficient " + PM + "0.1 steering moves the "
-            "judged sentiment and keeps the fluency rule on "
+            "judged sentiment and keeps the fluency rule (neutral-text "
+            "perplexity ratio at most 1.5 and distinct-1 at least 0.15) on "
             "[[count:fig:steering.fluent01]]; at " + PM + "0.3 on "
             "[[count:fig:steering.fluent03]] ([[fig:steering]]).",
         ),

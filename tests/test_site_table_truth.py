@@ -2,9 +2,11 @@ from pathlib import Path
 import re
 import runpy
 
+import numpy as np
 import pytest
 
 from tomography.site import registry
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.viz import paper
 
@@ -154,3 +156,36 @@ def test_no_dash_underscore_or_run_code(output: registry.TableOutput) -> None:
     assert not any(ch in t for t in texts for ch in DASHES)
     assert not any("_" in t for t in texts)
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
+
+
+def test_the_layer_one_count_is_per_role(
+    output: registry.TableOutput,
+) -> None:
+    layers = {
+        m: data(run("r5", m), "summary.json")["in_template"]["best_layer"]
+        for m in models("r6")
+    }
+    expected = stats.per_role_text(
+        stats.per_role({m: v == 1 for m, v in layers.items()})
+    )
+    assert f"at layer 1 on {expected}" in output.detail
+    assert "on 9 checkpoints" not in output.detail
+
+
+def test_the_in_template_random_direction_is_quoted_with_a_pointer(
+    output: registry.TableOutput,
+) -> None:
+    randoms = []
+    for model in models("r6"):
+        r5 = run("r5", model)
+        layer = data(r5, "summary.json")["in_template"]["best_layer"]
+        meta = data(r5, "curves.json")
+        with np.load(r5 / "curves.npz") as npz:
+            mean = np.asarray(npz["mean"], dtype=float)
+        randoms.append(mean[list(meta["series"]).index("random")][layer - 1])
+    assert output.numbers["template_random_min"] == pytest.approx(min(randoms))
+    assert output.numbers["template_random_max"] == pytest.approx(max(randoms))
+    text = output.detail
+    assert "[[num:table:truth.template_random_min]]" in text
+    assert "[[num:table:truth.template_random_max]]" in text
+    assert "[[table:reading_full]]" in text
