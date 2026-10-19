@@ -534,3 +534,11 @@ def test_the_abstract_is_prose_built_from_replaceable_finding_sentences() -> (
     assert content.ABSTRACT_STEERING.count("[[count:") == 2
     assert content.ABSTRACT.count("[[count:") <= 8
     assert "[[count:fig:teaser.knowledge]]" not in content.ABSTRACT
+
+
+def test_the_introduction_defines_its_terms_before_the_list_uses_them() -> None:
+    first = " ".join(content.INTRODUCTION.paragraphs)
+    listed = " ".join(h + " " + t for h, t in content.INTRODUCTION.listed)
+    for term in ("margin", "relative depth", "relative coefficient"):
+        assert term in listed
+        assert f"{term} is" in first

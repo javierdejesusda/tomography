@@ -116,8 +116,12 @@ INTRODUCTION = Section(
         "each question we name the baseline that could produce the result "
         "without the direction: a random direction fitted with the same "
         "procedure, a classifier on the text, the popularity of the "
-        "subject, or the confidence of the model. [[fig:teaser]] summarises "
-        "the answers.",
+        "subject, or the confidence of the model. Three terms recur. The "
+        "margin is the accuracy of a reader minus that of a random direction "
+        "of the same run at the same layer; the relative depth is a layer "
+        "index divided by the number of layers; and the relative "
+        "coefficient is the steering strength in units of the mean residual "
+        "norm at the layer. [[fig:teaser]] summarises the answers.",
     ),
     items=("fig:teaser",),
     listed=(
