@@ -143,10 +143,11 @@ def build(manifest: Manifest) -> TableOutput:
         )
     claim = (
         "Qwen3 writes a range on [[num:fig:approximate.range_base_min]] to "
-        "[[num:fig:approximate.range_base_max]] percent of range items and "
-        "at most [[num:fig:approximate.exact_base_max]] percent of exact "
-        "items (base), and on [[num:fig:approximate.range_post_min]] to "
-        "[[num:fig:approximate.range_post_max]] percent and at most "
+        "[[num:fig:approximate.range_base_max]] percent of range items "
+        "(base) and on [[num:fig:approximate.range_post_min]] to "
+        "[[num:fig:approximate.range_post_max]] percent (post-trained); the "
+        "highest share on exact items is "
+        "[[num:fig:approximate.exact_base_max]] percent (base) and "
         "[[num:fig:approximate.exact_post_max]] percent (post-trained), but "
         "the range reader is above a classifier on the question words, with "
         "the interval of the difference above zero, on "

@@ -1154,3 +1154,10 @@ def test_the_approximate_appendix_gives_the_range_shares_per_role() -> None:
         "[[num:fig:approximate.exact_post_max]]",
     ):
         assert token in text, token
+
+
+def test_the_approximate_appendix_does_not_write_at_most_zero() -> None:
+    text = " ".join(_texts(_section("appendix_approximate")))
+    for role in ("base", "post"):
+        assert f"at most [[num:fig:approximate.exact_{role}_max]]" not in text
+    assert "the highest share on exact items is" in text
