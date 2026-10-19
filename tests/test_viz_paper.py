@@ -347,3 +347,12 @@ def test_the_glossary_rules_are_stated_and_the_old_maps_are_deprecated() -> (
 ):
     for word in ("chance", "grey", "plus", "cividis", "7 pt", "deprecated"):
         assert word in paper.ENCODING_RULES
+
+
+def test_rule_four_applies_only_where_role_is_not_given_by_the_layout() -> None:
+    rule = " ".join(
+        paper.ENCODING_RULES.split("\n4. ")[1].split("\n5. ")[0].split()
+    )
+    assert "where role is not given by the panel or row block" in rule
+    assert "dashed segment may carry a state" in rule
+    assert "rule 8" in rule
