@@ -1,82 +1,67 @@
-"""Figure A5: Dose curves of the post-trained P9d runs.
+"""Figure A7: Dose curves of the post-trained runs for each question type.
 
-One row per post-trained run and one column per question set: the abstention
-rate on known and unknown questions against the relative coefficient of the
-knowledge direction (lat) and of random directions of the same norm.
+One row per post-trained run and one column per question type, with the
+encoding of the dose panels of Figure 9. All panels share one vertical range.
 """
 
-import json
-from pathlib import Path
+from typing import Any
 
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-import numpy as np
 
-from tomography.site import store
+from tomography.site import runfiles
+from tomography.site import stats
+from tomography.site.figs import _group
+from tomography.site.figs import _rows
+from tomography.site.figs import knowledge_steering
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.viz import paper
 
-TYPES = (
-    "obscure_real",
-    "fictional_generated",
-    "unknowable_detail",
-    "false_premise",
+HEIGHT = 7.2
+PAD = 0.04
+HEADER = ["panel", "run", "type", "x", "series", "value", "lo", "hi"]
+SERIES = ("lat: known", "lat: unknown", "random: unknown")
+ARMS = ("random0", "random1", "random2")
+CLAIM = (
+    "The direction moves the abstention rate of unknown questions more than "
+    "all 3 random directions in {count} of {panels} panels."
 )
-TEMPLATES = ("fewshot", "concept")
-SERIES = {
-    "lat: known": (paper.SERIES[0], "-"),
-    "lat: unknown": (paper.SERIES[1], "-"),
-    "random: known": (paper.CHANCE, "--"),
-    "random: unknown": ("#444444", ":"),
-}
+DETAIL = (
+    "Abstention rate on unknown questions (circle) and known questions "
+    "(triangle) against the relative coefficient of the knowledge "
+    "direction, for each post-trained run (rows) and question type "
+    "(columns), with 95 percent intervals that resample the questions, and "
+    "the pooled random directions (grey band) of the same norm. A panel "
+    "counts when the interval of the difference in the absolute slope on "
+    "unknown questions between the direction and each of the 3 random "
+    "directions lies above zero. The encoding is that of Figure 9."
+)
 
 
-def _runs(manifest: Manifest) -> list[tuple[str, str, Path]]:
-    found = []
-    for model in manifest.models("p9d"):
-        if not store.is_post_trained(model):
-            continue
-        for template in TEMPLATES:
-            run = manifest.run("p9d", model, template=template)
-            if run is not None:
-                found.append((model, template, run))
-    return found
+def _curves(
+    run: knowledge_steering.Run, kind: str
+) -> tuple[list[str], dict[str, Any]]:
+    names = runfiles.data(run.path, f"curves_{kind}.json")["series"]
+    return names, runfiles.arrays(run.path, f"curves_{kind}.npz")
 
 
-def _panel(
-    ax: Axes,
-    run: Path,
-    kind: str,
-    model: str,
-    rows: list[list[str]],
-) -> bool:
-    meta = json.loads((run / f"curves_{kind}.json").read_text("utf-8"))["data"]
-    with np.load(run / f"curves_{kind}.npz") as npz:
-        x = np.asarray(npz["x"], dtype=float)
-        mean, lo, hi = (np.asarray(npz[k], float) for k in ["mean", "lo", "hi"])
-    names = list(meta["series"])
-    for name, (color, style) in SERIES.items():
-        i = names.index(name)
-        ax.fill_between(x, lo[i], hi[i], color=color, alpha=0.15, lw=0)
-        ax.plot(x, mean[i], color=color, ls=style, lw=1.0, zorder=3)
-        for j, value in enumerate(x):
-            rows.append(
-                [
-                    f"{kind} {name}",
-                    model,
-                    f"{value:.6g}",
-                    f"{mean[i][j]:.6g}",
-                    f"{lo[i][j]:.6g}",
-                    f"{hi[i][j]:.6g}",
-                    "",
-                ]
-            )
-    lat = mean[names.index("lat: unknown")]
-    rand = mean[names.index("random: unknown")]
-    ax.axvline(0.0, color=paper.CHANCE, lw=0.4, zorder=1)
-    return bool(np.ptp(lat) > np.ptp(rand))
+def _moves_more(run: knowledge_steering.Run, kind: str) -> bool:
+    found = [
+        r
+        for r in run.dose
+        if r["type"] == kind
+        and r["metric"] == "abstention"
+        and r["side"] == "unknown"
+        and r["arm"] == "lat0"
+        and r["vs"] in ARMS
+    ]
+    return len(found) == len(ARMS) and all(r["abs_lo"] > 0 for r in found)
+
+
+def _types(run: knowledge_steering.Run) -> list[str]:
+    stems = sorted(p.stem for p in run.path.glob("curves_*.json"))
+    kinds = [s.removeprefix("curves_") for s in stems]
+    return [k for k in kinds if not k.endswith("_entropy")]
 
 
 def build(manifest: Manifest) -> FigureOutput:
@@ -88,62 +73,80 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    runs = _runs(manifest)
-    rows: list[list[str]] = []
-    moved = panels = 0
+    runs = [
+        r
+        for r in knowledge_steering.load_runs(manifest)
+        if stats.role(r.model) == "post"
+    ]
+    kinds = _types(runs[0])
+    low, high = 0.0, 0.0
+    for run in runs:
+        for kind in kinds:
+            names, arrays = _curves(run, kind)
+            for series in SERIES:
+                k = names.index(series)
+                low = min(low, float(arrays["lo"][k].min()))
+                high = max(high, float(arrays["hi"][k].max()))
+    pad = PAD * (high - low)
+    csv_rows: list[list[Any]] = []
+    moved = 0
+
     with paper.paper_style():
-        fig = Figure(
-            figsize=(paper.FULL_WIDTH, 1.25 * len(runs) + 0.7),
-            layout="constrained",
-        )
-        grid = fig.add_gridspec(len(runs), len(TYPES))
-        for r, (model, template, run) in enumerate(runs):
-            for c, kind in enumerate(TYPES):
-                ax = fig.add_subplot(grid[r, c])
-                moved += _panel(ax, run, kind, model, rows)
-                panels += 1
+        fig = _rows.new_figure(HEIGHT)
+        grid = fig.subplots(len(runs), len(kinds), sharey=True, sharex=True)
+        for r, run in enumerate(runs):
+            letter = chr(ord("a") + r)
+            for c, kind in enumerate(kinds):
+                ax = grid[r][c]
+                rows: list[list[Any]] = []
+                knowledge_steering.draw_curves(
+                    ax, run.model, run.label, _curves(run, kind), letter, rows
+                )
+                csv_rows.extend(
+                    [row[0], row[1], kind, *row[2:]] for row in rows
+                )
+                moved += _moves_more(run, kind)
+                ax.set_ylim(low - pad, high + pad)
+                ax.set_xlabel(
+                    "relative coefficient" if r == len(runs) - 1 else ""
+                )
+                if c == 0:
+                    ax.set_ylabel(run.name.replace(", ", "\n"), fontsize=6.5)
+                    paper.panel_letter(ax, letter)
                 if r == 0:
                     ax.set_title(
-                        kind.replace("_", " "), fontsize=paper.TITLE, x=0.05
+                        kind.replace("_", " "), loc="left", fontsize=6.5
                     )
-                if c == 0:
-                    ax.set_ylabel(
-                        f"{paper.display_name(model + ' ' + template)}",
-                        fontsize=paper.LABEL,
-                    )
-                if r == len(runs) - 1:
-                    ax.set_xlabel("relative coefficient")
-                ax.tick_params(labelsize=paper.TICK)
-        handles = [
-            Line2D([], [], color=color, ls=style, lw=1.0)
-            for color, style in SERIES.values()
-        ]
-        fig.legend(
-            handles,
-            list(SERIES),
-            loc="outside upper center",
+        legend = fig.legend(
+            handles=[
+                _rows.series_handle("unknown questions", "o", paper.INK),
+                _rows.series_handle("known questions", "^", paper.INK),
+                Line2D(
+                    [],
+                    [],
+                    color=paper.ENC["random_marker"],
+                    lw=paper.DATA_WIDTH,
+                    label="pooled random directions",
+                ),
+                _rows.series_handle(
+                    "post-trained", "o", paper.INK, filled=False
+                ),
+            ],
+            loc="outside lower center",
             ncol=4,
-            frameon=False,
-            fontsize=paper.TICK,
+            handlelength=1.0,
             columnspacing=1.0,
+            fontsize=6.5,
         )
-    numbers = {"panels": float(panels), "lat_moves_more": float(moved)}
-    claim = (
-        f"In {moved} of {panels} panels the knowledge direction moves the "
-        "abstention rate of unknown questions over the dose range by more "
-        "than random directions of the same norm do."
-    )
-    detail = (
-        "Abstention rate on known and unknown questions against the "
-        "relative coefficient added along the knowledge direction (lat) "
-        "and along random directions of the same norm, for the post-trained "
-        "runs of P9d with the few-shot and the concept template; bands are "
-        "the stored intervals. The measure compares the range of the mean "
-        "curve of unknown questions over the doses."
-    )
-    return FigureOutput(fig, claim, detail, numbers, _csv(rows))
+        legend.get_frame().set_edgecolor("none")
 
-
-def _csv(rows: list[list[str]]) -> str:
-    header = "panel,model,x,y,lo,hi,baseline"
-    return "\n".join([header, *(",".join(r) for r in rows)]) + "\n"
+    panels = len(runs) * len(kinds)
+    numbers = {"panels": float(panels), "moves_more": float(moved)}
+    return FigureOutput(
+        fig,
+        CLAIM.format(count=moved, panels=panels),
+        DETAIL,
+        numbers,
+        _group.csv_text(HEADER, csv_rows),
+        {},
+    )

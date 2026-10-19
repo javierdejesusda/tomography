@@ -1,24 +1,29 @@
-import json
+import csv
+import io
 from pathlib import Path
+import runpy
+from typing import Any
 
 import numpy as np
 import pytest
 
 from tomography.site import registry
-from tomography.site import store
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
+_R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 SPEC = "a_dose_types"
+HEIGHT = 7.2
 TYPES = (
     "obscure_real",
     "fictional_generated",
     "unknowable_detail",
     "false_premise",
 )
-TEMPLATES = ("fewshot", "concept")
+SERIES = ("lat: known", "lat: unknown", "random: unknown")
+ARMS = ("random0", "random1", "random2")
 
 
 @pytest.fixture(scope="module")
@@ -26,57 +31,160 @@ def output() -> registry.FigureOutput:
     return registry.build_figure(SPEC, Manifest(RESULTS))
 
 
-def _runs() -> list[tuple[str, str, Path]]:
-    manifest = Manifest(RESULTS)
+def _rows(output: registry.FigureOutput) -> list[dict[str, str]]:
+    return list(csv.DictReader(io.StringIO(output.csv)))
+
+
+def _post_runs() -> list[tuple[str, str]]:
     found = []
-    for model in manifest.models("p9d"):
-        if not store.is_post_trained(model):
+    for model in _R["models"]("p9d"):
+        if model.startswith("gpt2") or model.endswith("-base"):
             continue
-        for template in TEMPLATES:
-            run = manifest.run("p9d", model, template=template)
-            if run is not None:
-                found.append((model, template, run))
+        templates = sorted(
+            {
+                str(r.config["template"])
+                for r in Manifest(RESULTS).runs("p9d", model)
+            },
+            key=("fewshot", "concept").index,
+        )
+        found.extend((model, t) for t in templates)
     return found
 
 
-def test_a_row_per_post_trained_run_and_a_column_per_type(
+def _path(model: str, template: str) -> Path:
+    path: Path = _R["run"]("p9d", model, template=template)
+    return path
+
+
+def _curves(model: str, template: str, kind: str) -> dict[str, np.ndarray]:
+    path = _path(model, template)
+    names = _R["data"](path, f"curves_{kind}.json")["series"]
+    arrays = _R["npz"](path, f"curves_{kind}.npz")
+    return {
+        "x": arrays["x"],
+        **{
+            f"{stat}:{name}": arrays[stat][i]
+            for i, name in enumerate(names)
+            for stat in ("mean", "lo", "hi")
+        },
+    }
+
+
+def _moves_more(model: str, template: str, kind: str) -> bool:
+    payload = _R["data"](_path(model, template), "table_dose.json")
+    rows: list[dict[str, Any]] = [
+        dict(zip(payload["columns"], r, strict=True)) for r in payload["rows"]
+    ]
+    arms = [
+        r
+        for r in rows
+        if r["type"] == kind
+        and r["metric"] == "abstention"
+        and r["side"] == "unknown"
+        and r["arm"] == "lat0"
+        and r["vs"] in ARMS
+    ]
+    assert len(arms) == len(ARMS)
+    return all(r["abs_lo"] > 0 for r in arms)
+
+
+def _panels(output: registry.FigureOutput) -> list[Any]:
+    return [ax for ax in output.figure.axes if ax.get_label() != "<legend>"]
+
+
+def test_six_post_trained_runs_by_four_question_types(
     output: registry.FigureOutput,
 ) -> None:
-    runs = _runs()
-    assert len(runs) >= 5
-    assert len(output.figure.axes) == len(runs) * len(TYPES)
-    assert output.figure.get_figwidth() == pytest.approx(paper.FULL_WIDTH)
+    runs = _post_runs()
+    assert len(runs) == 6
+    panels = _panels(output)
+    assert len(panels) == len(runs) * len(TYPES)
+    boxes = [ax.get_position() for ax in panels]
+    assert len({round(b.y0, 2) for b in boxes}) == len(runs)
+    assert len({round(b.x0, 2) for b in boxes}) == len(TYPES)
 
 
-def test_every_panel_draws_four_series_with_bands(
+def test_every_panel_draws_the_stored_curves(
     output: registry.FigureOutput,
 ) -> None:
-    for ax in output.figure.axes:
-        assert len(ax.collections) == 4
-        long = [ln for ln in ax.get_lines() if len(ln.get_xdata()) > 2]
-        assert len(long) == 4
-
-
-def test_the_claim_numbers_match_the_stored_curves(
-    output: registry.FigureOutput,
-) -> None:
-    moved = panels = 0
-    for _, _, run in _runs():
+    rows = _rows(output)
+    for letter, run in zip("abcdef", _post_runs(), strict=True):
         for kind in TYPES:
-            with np.load(run / f"curves_{kind}.npz") as npz:
-                mean = np.asarray(npz["mean"], dtype=float)
-            names = json.loads(
-                (run / f"curves_{kind}.json").read_text("utf-8")
-            )["data"]["series"]
-            lat = mean[names.index("lat: unknown")]
-            rand = mean[names.index("random: unknown")]
-            panels += 1
-            moved += np.ptp(lat) > np.ptp(rand)
-    assert output.numbers["panels"] == panels
-    assert output.numbers["lat_moves_more"] == moved
-    assert f"{moved} of {panels}" in output.claim
-    assert output.claim.endswith(".")
+            curves = _curves(*run, kind)
+            for series in SERIES:
+                got = [
+                    r
+                    for r in rows
+                    if r["panel"] == letter
+                    and r["run"] == " ".join(run)
+                    and r["type"] == kind
+                    and r["series"] == series
+                ]
+                assert [float(r["x"]) for r in got] == list(curves["x"])
+                assert [float(r["value"]) for r in got] == pytest.approx(
+                    list(curves[f"mean:{series}"])
+                )
+                assert [float(r["lo"]) for r in got] == pytest.approx(
+                    list(curves[f"lo:{series}"])
+                )
 
 
-def test_no_layout_faults(output: registry.FigureOutput) -> None:
-    assert checks.problems(output.figure) == []
+def test_the_count_is_the_stored_per_arm_interval_criterion(
+    output: registry.FigureOutput,
+) -> None:
+    flags = [_moves_more(*run, kind) for run in _post_runs() for kind in TYPES]
+    assert len(flags) == 24
+    assert sum(flags) == 11
+    assert output.numbers["panels"] == 24
+    assert output.numbers["moves_more"] == 11
+    assert output.claim == (
+        "The direction moves the abstention rate of unknown questions more "
+        "than all 3 random directions in 11 of 24 panels."
+    )
+
+
+def test_all_panels_share_one_vertical_range_that_holds_the_curves(
+    output: registry.FigureOutput,
+) -> None:
+    panels = _panels(output)
+    limits = {ax.get_ylim() for ax in panels}
+    assert len(limits) == 1
+    low, high = limits.pop()
+    for run in _post_runs():
+        for kind in TYPES:
+            curves = _curves(*run, kind)
+            for series in SERIES:
+                assert low <= curves[f"lo:{series}"].min()
+                assert curves[f"hi:{series}"].max() <= high
+
+
+def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
+    fig = output.figure
+    assert tuple(fig.get_size_inches()) == (paper.FULL_WIDTH, HEIGHT)
+    assert fig.get_size_inches()[1] <= 8.0
+    assert checks.guard_problems(fig, appendix=True) == []
+    assert checks.problems(fig) == []
+
+
+def test_one_letter_per_row_and_no_dashes(
+    output: registry.FigureOutput,
+) -> None:
+    letters = [
+        t.get_text()
+        for ax in output.figure.axes
+        for t in ax.texts
+        if t.get_text().startswith(r"$\mathbf")
+    ]
+    assert sorted(letters) == [rf"$\mathbf{{({c})}}$" for c in "abcdef"]
+    text = f"{output.claim} {output.detail} {output.csv}"
+    assert chr(0x2014) not in text
+    assert chr(0x2013) not in text
+    assert "_" not in f"{output.claim} {output.detail}"
+
+
+def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
+    first = registry.build_figure(SPEC, Manifest(RESULTS))
+    second = registry.build_figure(SPEC, Manifest(RESULTS))
+    with paper.paper_style():
+        assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
+        assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)

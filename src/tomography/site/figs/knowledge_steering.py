@@ -66,6 +66,13 @@ class Run:
     """One P9d run and what the figures read from it."""
 
     def __init__(self, manifest: Manifest, model: str, template: str) -> None:
+        """Opens a run.
+
+        Args:
+            manifest: The run resolver.
+            model: Checkpoint key.
+            template: `fewshot` or `concept`.
+        """
         path = manifest.run("p9d", model, template=template)
         assert path is not None
         self.model = model
@@ -77,15 +84,26 @@ class Run:
 
     @property
     def label(self) -> str:
+        """Checkpoint key and template."""
         return f"{self.model} {self.template}"
 
     @property
     def name(self) -> str:
+        """Display name; the template only where it distinguishes runs."""
         if self.entropy:
             return paper.display_name(self.model)
         return paper.display_name(self.label)
 
     def slope(self, side: str, arm: str) -> dict[str, Any]:
+        """The stored slope row of the headline type and metric.
+
+        Args:
+            side: `known` or `unknown`.
+            arm: `lat0` or a random arm.
+
+        Returns:
+            The row with `slope`, `lo` and `hi`.
+        """
         (row,) = [
             r
             for r in self.dose
@@ -98,6 +116,11 @@ class Run:
         return row
 
     def curves(self) -> tuple[list[str], dict[str, np.ndarray]]:
+        """The stored dose curves of the headline type.
+
+        Returns:
+            The series names and the arrays `x`, `mean`, `lo`, `hi`.
+        """
         stem = (
             "curves_obscure_real_entropy"
             if self.entropy
@@ -107,6 +130,14 @@ class Run:
         return names, runfiles.arrays(self.path, f"{stem}.npz")
 
     def largest_shift(self, series: str) -> float:
+        """Largest move of a mean curve away from its value at no push.
+
+        Args:
+            series: A series name of the stored curves.
+
+        Returns:
+            The largest absolute difference.
+        """
         names, arrays = self.curves()
         mean = arrays["mean"][names.index(series)]
         origin = float(mean[int(np.argmin(np.abs(arrays["x"])))])
@@ -211,20 +242,27 @@ def _forest(
     ax.xaxis.set_major_formatter(_rows.tick_formatter())
 
 
-def draw_dose(
-    ax: Axes, run: Run, letter: str, csv_rows: list[list[Any]]
+def draw_curves(
+    ax: Axes,
+    model: str,
+    label: str,
+    curves: tuple[list[str], dict[str, np.ndarray]],
+    letter: str,
+    csv_rows: list[list[Any]],
 ) -> None:
-    """Draws the stored dose curves of one run on a panel.
+    """Draws known, unknown and pooled random dose curves on a panel.
 
     Args:
         ax: The panel.
-        run: The run.
+        model: Checkpoint key, which fixes the fill and the line style.
+        label: Run label written to the data rows.
+        curves: Series names and the stored arrays `x`, `mean`, `lo`, `hi`.
         letter: Panel letter written to the data rows.
         csv_rows: Receives one row per curve point.
     """
-    names, arrays = run.curves()
+    names, arrays = curves
     x = arrays["x"]
-    dashed = stats.role(run.model) == "post"
+    dashed = stats.role(model) == "post"
     style = paper.LINESTYLES["post_trained"] if dashed else "-"
     index = {name: names.index(name) for name in names}
     random = index["random: unknown"]
@@ -262,7 +300,7 @@ def draw_dose(
             lw=paper.DATA_WIDTH,
             marker=marker,
             zorder=3,
-            **_rows.fill(run.model, paper.INK),
+            **_rows.fill(model, paper.INK),
         )
     for series in ("lat: known", "lat: unknown", "random: unknown"):
         k = index[series]
@@ -270,7 +308,7 @@ def draw_dose(
             csv_rows.append(
                 [
                     letter,
-                    run.label,
+                    label,
                     float(x[j]),
                     series,
                     float(value),
@@ -283,6 +321,20 @@ def draw_dose(
     ax.xaxis.set_major_formatter(_rows.tick_formatter())
     ax.yaxis.set_major_formatter(_rows.tick_formatter())
     ax.set_xlabel("relative coefficient")
+
+
+def draw_dose(
+    ax: Axes, run: Run, letter: str, csv_rows: list[list[Any]]
+) -> None:
+    """Draws the stored dose curves of one run on a panel.
+
+    Args:
+        ax: The panel.
+        run: The run.
+        letter: Panel letter written to the data rows.
+        csv_rows: Receives one row per curve point.
+    """
+    draw_curves(ax, run.model, run.label, run.curves(), letter, csv_rows)
     ax.set_ylabel("entropy shift" if run.entropy else "abstention rate")
     ax.set_title(run.name, loc="left")
     if run.entropy:
