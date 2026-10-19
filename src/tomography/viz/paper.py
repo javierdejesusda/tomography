@@ -21,6 +21,8 @@ import matplotlib as mpl
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.text import Annotation
+from matplotlib.text import Text
+from matplotlib.transforms import ScaledTranslation
 
 FULL_WIDTH = 5.5
 HALF_WIDTH = 2.7
@@ -226,13 +228,11 @@ def panel_letter(ax: Axes, letter: str) -> Annotation:
 TITLE_GAP = 4.0
 
 
-def panel_title(
-    ax: Axes, letter: str, title: str
-) -> tuple[Annotation, Annotation]:
-    """Writes a bold panel letter and a left title on one baseline.
+def panel_title(ax: Axes, letter: str, title: str) -> tuple[Annotation, Text]:
+    """Writes a bold panel letter and the left title of a panel on one baseline.
 
-    The title starts `TITLE_GAP` points after the letter, at the size of an
-    ordinary axes title, so the two never touch.
+    The title is the axes title, shifted right so that it starts `TITLE_GAP`
+    points after the letter; layout still reserves its height.
 
     Args:
         ax: The panel.
@@ -242,22 +242,25 @@ def panel_title(
     Returns:
         The letter and the title.
     """
-    lift = mpl.rcParams["axes.titlepad"]
-    size = ax.title.get_fontsize()
-    spot = {
-        "xy": (0.0, 1.0),
-        "xycoords": "axes fraction",
-        "textcoords": "offset points",
-        "fontsize": size,
-        "ha": "left",
-        "va": "baseline",
-    }
-    mark = ax.annotate(rf"$\mathbf{{({letter})}}$", xytext=(0, lift), **spot)
+    mark = ax.annotate(
+        rf"$\mathbf{{({letter})}}$",
+        xy=(0.0, 1.0),
+        xycoords="axes fraction",
+        xytext=(0, mpl.rcParams["axes.titlepad"]),
+        textcoords="offset points",
+        fontsize=ax.title.get_fontsize(),
+        ha="left",
+        va="baseline",
+    )
     root = ax.get_figure(root=True)
     assert root is not None
-    wide = mark.get_window_extent().width
-    shift = wide * 72.0 / root.dpi + TITLE_GAP
-    name = ax.annotate(title, xytext=(shift, lift), **spot)
+    shift = mark.get_window_extent().width * 72.0 / root.dpi + TITLE_GAP
+    name = ax.set_title(title, loc="left")
+    name.set_transform(
+        ax.transAxes
+        + ax.titleOffsetTrans
+        + ScaledTranslation(shift / 72.0, 0.0, root.dpi_scale_trans)
+    )
     return mark, name
 
 

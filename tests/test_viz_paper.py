@@ -186,5 +186,10 @@ def test_panel_title_puts_the_title_after_the_letter_on_one_baseline() -> None:
     assert title.get_text() == "GPT-2"
     assert gap >= 2 * fig.dpi / 72
     assert letter.get_va() == title.get_va() == "baseline"
-    assert letter.xyann[1] == title.xyann[1]
+    assert ax.get_title(loc="left") == "GPT-2"
+    top = ax.transAxes.transform((0.0, 1.0))[1]
+    assert title.get_window_extent().y0 >= top
+    assert title.get_transform().transform(title.get_position())[
+        1
+    ] == pytest.approx(top + 6.0 * fig.dpi / 72)
     assert title.get_fontsize() == ax.title.get_fontsize()
