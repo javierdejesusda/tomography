@@ -9,6 +9,7 @@ its bootstrap interval over seeds.
 import json
 from typing import Any
 
+from tomography.site import reading
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
 from tomography.site.tables import _cells
@@ -23,7 +24,9 @@ COLUMNS = [
     "Measure",
     "Size",
     "Base",
+    "Base random",
     "Post-trained",
+    "Post-trained random",
     "Difference",
     "Interval",
     "Base depth",
@@ -54,6 +57,13 @@ def _chance(manifest: Manifest) -> float:
     return float(levels.pop())
 
 
+def _random(manifest: Manifest, source: str, model: str) -> str:
+    """Reads the random direction at the layer Table A3 reports."""
+    found = reading.load(manifest, source, model)
+    assert found is not None, (source, model)
+    return _cells.num(found.random_at_layer)
+
+
 def _size(tuned: str) -> str:
     return tuned.split("-")[1].upper()
 
@@ -82,7 +92,9 @@ def build(manifest: Manifest) -> TableOutput:
                     name,
                     _size(tuned),
                     _cells.num(rec["base_accuracy"]),
+                    _random(manifest, source, f"{tuned}-base"),
                     _cells.num(rec["tuned_accuracy"]),
+                    _random(manifest, source, tuned),
                     _cells.num(rec["delta"]),
                     f"[{_cells.num(rec['lo'])}, {_cells.num(rec['hi'])}]",
                     _cells.num(rec["base_depth"]),
@@ -95,8 +107,9 @@ def build(manifest: Manifest) -> TableOutput:
         "same stimuli, with a percentile bootstrap interval over the 10 "
         "seeds; each checkpoint is read at its own layer, given as relative "
         "depth. Each accuracy is read from pairs with two balanced classes, "
-        "where chance is [[num:table:base_post.chance]]; no random-direction "
-        "accuracy is stored for these comparisons, so none is shown. "
+        "where chance is [[num:table:base_post.chance]]. Each accuracy has "
+        "the random direction of [[table:reading_full]] next to it, read "
+        "from the same run at the same layer. "
         "[[fig:base_post]] draws the seed-paired intervals for the 0.6B and "
         "1.7B pairs and, for the 4B pair and the measures without seeds, a "
         "conservative interval over the test items."
@@ -106,7 +119,7 @@ def build(manifest: Manifest) -> TableOutput:
         detail,
         COLUMNS,
         rows,
-        _cells.check_align("llrrrrrr", len(COLUMNS)),
+        _cells.check_align("llrrrrrrrr", len(COLUMNS)),
         [],
         {
             "below_zero": float(below),
