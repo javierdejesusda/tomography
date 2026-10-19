@@ -460,3 +460,77 @@ def test_the_cite_block_uses_the_exact_paper_key(
     block = full[1][full[1].index('id="cite"') :]
     assert "@misc{tomography," in block
     assert f"{references.PAPER_KEY}," in block
+
+
+def test_table_numbers_increase_in_page_order(
+    full: tuple[page.Document, str],
+) -> None:
+    html = full[1]
+    main = [
+        int(n) for n in re.findall(r'<div class="table" id="table-(\d+)"', html)
+    ]
+    appendix = [
+        int(n)
+        for n in re.findall(r'<div class="table" id="table-A(\d+)"', html)
+    ]
+    assert main == sorted(main) == list(range(1, len(main) + 1))
+    assert appendix == list(range(1, len(appendix) + 1))
+    figures = [int(n) for n in re.findall(r'<figure id="fig-A(\d+)"', html)]
+    assert figures == list(range(1, len(figures) + 1))
+
+
+def test_only_the_model_column_is_kept_on_one_line() -> None:
+    output = registry.TableOutput(
+        "Claim.", "Detail.", ["Model", "B"], [["m", "1"]], "lr", [], {}
+    )
+    doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+    models = page.Page(doc).table("checkpoints")
+    assert '<td class="k">m</td>' in models
+    text = page.Page(_doc(tables={"checkpoints": _table()})).table(
+        "checkpoints"
+    )
+    assert '<td class="k">' not in text
+    assert "<td>x</td>" in text
+
+
+NBSP = "\u00a0"
+
+
+@pytest.mark.parametrize(
+    ("cell", "expected"),
+    [
+        ("0.065 ± 0.072", f"0.065 ±{NBSP}0.072"),
+        (f"0.011 [{MINUS}0.006, 0.032]", f"0.011 [{MINUS}0.006, 0.032]"),
+        ("0.622 (0.490)", "0.622 (0.490)"),
+        ("1 of 1", f"1{NBSP}of{NBSP}1"),
+        ("no contrast", "no contrast"),
+        ("0.186*", "0.186*"),
+    ],
+)
+def test_a_numeric_cell_breaks_only_between_its_numbers(
+    cell: str, expected: str
+) -> None:
+    assert page.glue(cell) == expected
+
+
+def test_numeric_cells_wrap_through_their_break_points_only() -> None:
+    output = registry.TableOutput(
+        "Claim.", "Detail.", ["A", "B"], [["x", "1 of 3"]], "lr", [], {}
+    )
+    doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+    cell = f'<td class="r">1{NBSP}of{NBSP}3</td>'
+    assert cell in page.Page(doc).table("checkpoints")
+
+
+def test_plain_text_resolves_every_token_type_without_markup() -> None:
+    doc = _doc(
+        {"method": _figure({"n": 3.0})},
+        {"checkpoints": _table()},
+        bib=references.parse(BIB.read_text("utf-8")),
+    )
+    view = page.Page(doc)
+    cell = (
+        "[[table:checkpoints]] and [[fig:method]], "
+        "[[num:fig:method.n]] [[cite:radford2019language]][[fn:note]]"
+    )
+    assert view.plain(cell) == "Table 1 and Figure 1, 3 radford2019language"

@@ -1,4 +1,4 @@
-"""Table A4: Reader accuracy on every truth set.
+"""Table A7: Reader accuracy on every truth set.
 
 One row per checkpoint and one column per truth set of the transfer
 experiment. Each cell is the reader at the layer chosen on validation next to

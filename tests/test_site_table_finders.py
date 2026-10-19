@@ -47,11 +47,13 @@ def test_columns_are_three_per_task_under_header_spans(
         == ["Model"]
         + [
             "Random",
-            "PCA of paired differences (paper)",
-            "Logistic regression",
+            "PCA (paper)",
+            "Logistic",
         ]
         * 3
     )
+    assert "PCA (paper) is the paper's finder" in output.detail
+    assert "Logistic is logistic regression" in output.detail
     assert output.align == "l" + "r" * 9
     assert [g[0] for g in output.groups] == ["Sentiment", "Truth", "Utility"]
     assert [g[1] for g in output.groups] == [3, 3, 3]

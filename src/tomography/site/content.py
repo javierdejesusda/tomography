@@ -152,9 +152,9 @@ INTRODUCTION = Section(
         (
             "Truth beyond the text ([[sec:truth]]).",
             "A TruthfulQA reader stays within the band of classifiers that "
-            "see only the words on [[count:fig:truth.tqa_inside]], and the "
-            "truth reader falls below 0.5 with its interval on "
-            "[[count:fig:truth.neg_below_half]] ([[fig:truth]]).",
+            "see only the words on [[count:fig:truth.tqa_inside]], and on "
+            "[[count:fig:truth.neg_below_half]] at least one negated set "
+            "falls below chance with its interval ([[fig:truth]]).",
         ),
         (
             "Steering ([[sec:steering]]).",
@@ -186,10 +186,12 @@ INTRODUCTION = Section(
         ),
         (
             "Approximate answers ([[sec:approximate]]).",
-            "Qwen3 writes ranges where the sourced answer is a range, but a "
-            "range reader is matched by a classifier on the question words "
-            "and by its random control and places people next to breeds "
-            "([[fig:approximate]]).",
+            "Qwen3 writes ranges where the sourced answer is a range, but "
+            "the range reader is above a classifier on the question words "
+            "on [[count:table:approximate.above_words]], its random control "
+            "reaches [[num:table:approximate.high]] on "
+            "[[count:table:approximate.random_high]], and it places people "
+            "next to breeds ([[fig:approximate]]).",
         ),
         (
             "Post-training ([[sec:base_post]]).",
@@ -597,8 +599,10 @@ DISCUSSION = Section(
         "versions, and is not reliably above a random direction on "
         "unrelated pairs, where logistic regression still is. Steering "
         "behaves as the paper describes at small coefficients and breaks "
-        "fluency at larger ones, and post-training changes few readings "
-        "beyond their intervals at these sizes.",
+        "fluency at larger ones (a perplexity on neutral text above 1.5 "
+        "times the unsteered model, or a distinct-1 below 0.15), and "
+        "post-training changes few readings beyond their intervals at these "
+        "sizes.",
     ),
 )
 

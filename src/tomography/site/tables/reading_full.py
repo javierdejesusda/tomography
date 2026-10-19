@@ -115,8 +115,9 @@ def build(manifest: Manifest) -> TableOutput:
         "random direction."
     )
     detail = (
-        "The first sentiment block chooses the layer on the same "
-        f"{sizes['sentiment_r1']} SST-2 validation pairs it is scored on and "
+        "The sentiment block without a held-out split chooses the layer on "
+        f"the same {sizes['sentiment_r1']} SST-2 validation pairs it is "
+        "scored on and "
         "is optimistic; the held-out block chooses it on the select split of "
         f"the sample-size run and scores {sizes['sentiment']} pairs. "
         "Margins carry conservative 95 percent intervals "

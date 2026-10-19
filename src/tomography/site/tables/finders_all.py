@@ -7,6 +7,8 @@ holds the random direction's accuracy. The last block gives the win rate of
 the directions fitted on utility pairs when they steer sentiment.
 """
 
+from typing import Any
+
 from tomography.site import finders
 from tomography.site import params
 from tomography.site import runfiles
@@ -37,7 +39,7 @@ def _report(manifest: Manifest, model: str, task: str, method: str) -> float:
     return float(hit["report"])
 
 
-def _win(manifest: Manifest, model: str, method: str) -> dict:
+def _win(manifest: Manifest, model: str, method: str) -> dict[str, Any]:
     run = manifest.run("m1", model)
     assert run is not None
     (hit,) = [

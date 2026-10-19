@@ -21,6 +21,8 @@ from tomography.site.registry import TableOutput
 from tomography.site.tables import _cells
 
 TOKEN = re.compile(r"\[\[(.+?)\]\]")
+NBSP = chr(0xA0)
+BREAKS_BEFORE = chr(0xB1) + "[("
 
 
 @dataclasses.dataclass(frozen=True)
@@ -77,6 +79,31 @@ class Document:
         default_factory=dict
     )
     commit: str = ""
+
+
+def glue(cell: str) -> str:
+    """Keeps every number of a numeric cell whole.
+
+    A space stays a break point only before a plus-minus sign or a bracket,
+    where the cell may start a second line, and after a comma inside an
+    interval; every other space next to a digit becomes a no-break space.
+
+    Args:
+        cell: The cell text.
+
+    Returns:
+        The cell with its non-breaking spaces.
+    """
+    out = list(cell)
+    for i, char in enumerate(cell):
+        if char != " " or i == 0 or i == len(cell) - 1:
+            continue
+        before, after = cell[i - 1], cell[i + 1]
+        if after in BREAKS_BEFORE or before == ",":
+            continue
+        if before.isdigit() or after.isdigit() or before in "*)]":
+            out[i] = NBSP
+    return "".join(out)
 
 
 def _e(text: object) -> str:
@@ -168,12 +195,17 @@ class Page:
 
         for number, section in enumerate(content.BODY, 1):
             visit(section, str(number))
+        figure = table = 0
         for letter, section in zip("ABCD", content.APPENDICES, strict=True):
             self.sections[section.key] = letter
-        for i, key in enumerate(self.doc.appendix, 1):
-            self.figure_number[key] = f"A{i}"
-        for i, key in enumerate(self.doc.appendix_tables, 1):
-            self.table_number[key] = f"A{i}"
+            for item in section.items:
+                kind, _, key = item.partition(":")
+                if kind == "fig" and key in self.doc.appendix:
+                    figure += 1
+                    self.figure_number[key] = f"A{figure}"
+                elif kind == "table" and key in self.doc.appendix_tables:
+                    table += 1
+                    self.table_number[key] = f"A{table}"
 
     def cite(self, keys: str) -> str:
         """Numbers the citations of a token in order of first use."""
@@ -257,6 +289,29 @@ class Page:
         out.append(_e(raw[last:]))
         return "".join(out)
 
+    def plain(self, raw: str) -> str:
+        """Resolves the references of a cell to plain text for a data file.
+
+        Args:
+            raw: The cell text with its `[[...]]` tokens.
+
+        Returns:
+            The text with citation keys, numbers and labels written out and
+            no markup; footnotes are dropped.
+        """
+        out, last = [], 0
+        for match in TOKEN.finditer(raw):
+            out.append(raw[last : match.start()])
+            name = match.group(1)
+            if name.startswith("cite:"):
+                out.append(name[5:].replace(",", "; "))
+            elif not name.startswith("fn:"):
+                markup = self.reference(name)
+                out.append(html.unescape(re.sub(r"<[^>]+>", "", markup)))
+            last = match.end()
+        out.append(raw[last:])
+        return "".join(out).replace(NBSP, " ")
+
     def paragraph(self, raw: str) -> str:
         """Renders one paragraph."""
         return f"<p>{self.text(raw)}</p>"
@@ -305,13 +360,16 @@ class Page:
             f'<th class="r">{_e(c)}</th>' if a == "r" else f"<th>{_e(c)}</th>"
             for c, a in zip(out.columns, out.align, strict=True)
         )
+        models = out.columns[0] == "Model"
         body = []
         for i, row in enumerate(out.rows):
             cells = "".join(
-                f'<td class="r">{self.text(c)}</td>'
+                f'<td class="r">{self.text(glue(c))}</td>'
                 if a == "r"
+                else f'<td class="k">{self.text(c)}</td>'
+                if models and j == 0
                 else f"<td>{self.text(c)}</td>"
-                for c, a in zip(row, out.align, strict=True)
+                for j, (c, a) in enumerate(zip(row, out.align, strict=True))
             )
             if out.row_groups is None:
                 grouped = i and row[0] and not out.groups
@@ -472,7 +530,7 @@ def numbers(doc: Document) -> tuple[dict[str, str], dict[str, str]]:
     """Assigns the printed numbers of the figures and tables.
 
     Main items are numbered in order of appearance in the text, appendix items
-    A1, A2 and so on in registry order.
+    A1, A2 and so on in the order the appendix places them.
 
     Args:
         doc: The built figures and tables.

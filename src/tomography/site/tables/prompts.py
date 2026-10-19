@@ -1,4 +1,4 @@
-"""Table A8: Sentiment reading under a decoy sentence.
+"""Table A5: Sentiment reading under a decoy sentence.
 
 One row per checkpoint: the accuracy of the sentiment reader on the original
 prompts and on prompts with a sentence added that states a low or a high

@@ -1,4 +1,4 @@
-"""Table A7: Held-out sentiment accuracy against the training pairs.
+"""Table A4: Held-out sentiment accuracy against the training pairs.
 
 One row per checkpoint and one column per number of training pairs. Each cell
 is the reader next to the random direction at the same layer, on the report

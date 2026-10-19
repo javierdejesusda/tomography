@@ -46,7 +46,9 @@ def _r6(manifest: Manifest, model: str) -> list[dict[str, Any]]:
     return runfiles.rows(run, "table.json")
 
 
-def _mc1(rows: list[dict[str, Any]], method: str, source: str = "") -> dict:
+def _mc1(
+    rows: list[dict[str, Any]], method: str, source: str = ""
+) -> dict[str, Any]:
     hit = [
         r
         for r in rows
@@ -159,7 +161,7 @@ def build(manifest: Manifest) -> TableOutput:
         "baselines of the same questions."
     )
     detail = (
-        f"The first four columns are TruthfulQA MC1 on {n_questions} test "
+        f"The four leftmost columns are TruthfulQA MC1 on {n_questions} test "
         "questions for readers fitted on TruthfulQA, on ARC and on the "
         "paper's honesty persona prompts, each at the layer chosen on "
         "validation questions, and for the model's own answer "

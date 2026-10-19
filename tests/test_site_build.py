@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 import re
 import runpy
@@ -66,11 +67,21 @@ def test_without_history_the_masthead_commit_is_empty(tmp_path: Path) -> None:
     assert build_module.results_commit(tmp_path / "results") == ("", "")
 
 
-def test_csv_files_hold_citation_keys_not_tokens() -> None:
+def test_csv_files_hold_plain_text_not_tokens(
+    site: tuple[Path, page.Document],
+) -> None:
+    view = page.Page(site[1])
     text = build_module._csv_text(
-        ["A", "B"], [["x", "[[cite:radford2019language,yang2025qwen3]]"]]
+        ["A", "B"],
+        [
+            [
+                "x",
+                "[[cite:radford2019language,yang2025qwen3]] [[table:notation]]",
+            ]
+        ],
+        view,
     )
-    assert text == "A,B\nx,radford2019language; yang2025qwen3\n"
+    assert text == "A,B\nx,radford2019language; yang2025qwen3 Table 2\n"
 
 
 def test_results_date_is_the_newest_run_start(tmp_path: Path) -> None:
@@ -121,8 +132,20 @@ def test_tables_are_booktabs_without_vertical_rules(css: str) -> None:
 
 
 def test_numeric_cells_do_not_wrap_and_use_tabular_figures(css: str) -> None:
-    assert "td.r,\nth.r,\ntd:first-child {\n  white-space: nowrap;\n}" in css
+    assert "td.k {\n  white-space: nowrap;\n}" in css
+    assert "td.r," not in css
     assert "font-variant-numeric: tabular-nums" in css
+    assert "td:not(.r) {\n  overflow-wrap: anywhere;\n}" in css
+
+
+def test_table_text_is_compact_but_not_below_the_readable_floor(
+    css: str,
+) -> None:
+    rule = css.split(chr(10) + "table {")[1].split("}")[0]
+    size = float(rule.split("font-size:")[1].split("em")[0])
+    assert 0.78 <= size <= 0.8
+    cells = css.split(chr(10) + "th,\ntd {")[1].split("}")[0]
+    assert "padding: 0.16em 0.25em;" in cells
 
 
 def test_captions_of_figures_and_tables_share_one_rule(css: str) -> None:
@@ -154,7 +177,8 @@ def test_print_rules(css: str) -> None:
     assert "size: letter" in printed
     assert "margin: 1in 1.5in" in printed
     assert "thead {\n    display: table-header-group;" in printed
-    assert "tr {" in printed
+    block = "  figure,\n  pre,\n  tr {\n    break-inside: avoid;\n  }"
+    assert block in printed
     assert ".data {\n    display: none;" in printed
 
 
@@ -245,6 +269,23 @@ def test_the_built_page_resolves_every_token_and_link(html: str) -> None:
     assert [h for h in hrefs if h not in set(ids)] == []
 
 
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        r'<div class="table" id="table-(\d+)"',
+        r'<div class="table" id="table-A(\d+)"',
+        r'<figure id="fig-(\d+)"',
+        r'<figure id="fig-A(\d+)"',
+    ],
+)
+def test_the_built_page_numbers_figures_and_tables_in_page_order(
+    html: str, pattern: str
+) -> None:
+    numbers = [int(n) for n in re.findall(pattern, html)]
+    assert numbers
+    assert numbers == list(range(1, len(numbers) + 1))
+
+
 def test_the_built_page_masthead_matches_the_results_commit(html: str) -> None:
     sha, _ = build_module.results_commit(RESULTS)
     assert f"Results at commit <code>{sha}</code>, built " in html
@@ -270,9 +311,21 @@ def test_the_built_page_lists_only_cited_references(html: str) -> None:
     assert html.index('id="references"') < html.index('id="appendix"')
 
 
+def _bare_handles(text: str) -> list[str]:
+    return [
+        text[m.start() - 11 : m.end()]
+        for m in re.finditer("javierdejesusda", text)
+        if text[m.start() - 11 : m.end()] != "github.com/javierdejesusda"
+    ]
+
+
 def test_the_page_names_no_person_beyond_the_cited_authors(html: str) -> None:
-    for match in re.finditer("javierdejesusda", html):
-        assert "github.com/javierdejesusda" in html[match.start() - 11 :]
+    assert _bare_handles(html) == []
+
+
+def test_a_bare_handle_in_the_text_would_be_caught() -> None:
+    assert _bare_handles("by javierdejesusda in the abstract") != []
+    assert _bare_handles("at github.com/javierdejesusda/tomography") == []
 
 
 def test_build_is_byte_identical_in_two_fresh_processes(
@@ -334,3 +387,13 @@ def test_every_appendix_item_is_cited_from_the_numbered_sections(
     ):
         for number in ids:
             assert f'href="#{kind}-{number}"' in body, (kind, number)
+
+
+def test_the_font_timestamp_warning_is_silenced_but_errors_are_not(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    log = logging.getLogger("fontTools.ttLib.tables._h_e_a_d")
+    with caplog.at_level(logging.WARNING):
+        log.warning("'modified' timestamp seems very low")
+        log.error("a real error")
+    assert [r.getMessage() for r in caplog.records] == ["a real error"]

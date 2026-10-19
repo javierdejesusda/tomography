@@ -76,7 +76,7 @@ def build(manifest: Manifest) -> TableOutput:
     detail = (
         "Parameters include the embeddings, the positional table of GPT-2 and "
         "every norm, and are computed from the stored model configuration. "
-        "Layers are decoder blocks. Revision is the first 12 characters of "
+        "Layers are decoder blocks. Revision is the leading 12 characters of "
         "the pinned commit of the weights on the Hugging Face Hub. "
         "Post-trained Qwen3 checkpoints are used with their chat template and "
         "thinking disabled; they differ from their base checkpoint in "

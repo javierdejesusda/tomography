@@ -39,7 +39,7 @@ def build(manifest: Manifest) -> TableOutput:
         "licenses as stated by their sources."
     )
     detail = (
-        "Revision is the first 12 characters of the pinned commit of the "
+        "Revision is the leading 12 characters of the pinned commit of the "
         "Hugging Face Hub repository or Git repository, or the SHA-256 "
         "digest of the pinned file. Sources without a permissive license are "
         "downloaded at run time and are not redistributed in the repository."
