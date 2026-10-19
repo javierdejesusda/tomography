@@ -260,6 +260,12 @@ def test_known_at_least_unknown_runs_come_from_the_curves(
         assert output.numbers[f"known_ge_unknown_{role}"] == sum(
             stats.role(m) == role for m, _ in held
         )
+    counts = output.counts["known_ge_unknown"]
+    for role in stats.ROLES:
+        assert counts[role].hits == sum(stats.role(m) == role for m, _ in held)
+        assert (
+            counts[role].total == output.counts["distinguishable"][role].total
+        )
     for model, template in held:
         plain = _headline(model, template)["metric"] == "entropy"
         name = paper.display_name(model if plain else f"{model} {template}")

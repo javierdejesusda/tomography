@@ -408,6 +408,9 @@ def build(manifest: Manifest) -> FigureOutput:
         for r in runs
         if r.largest_shift("lat: known") >= r.largest_shift("lat: unknown")
     ]
+    known_ge_unknown = _rows.run_counts(
+        {(r.model, r.label): r in held for r in runs}
+    )
     numbers: dict[str, float] = {}
     for role in stats.ROLES:
         numbers[f"n_{role}"] = float(distinguishable[role].total)
@@ -427,5 +430,9 @@ def build(manifest: Manifest) -> FigureOutput:
         detail,
         numbers,
         _group.csv_text(HEADER, csv_rows),
-        {"distinguishable": distinguishable, "selective": selective},
+        {
+            "distinguishable": distinguishable,
+            "selective": selective,
+            "known_ge_unknown": known_ge_unknown,
+        },
     )
