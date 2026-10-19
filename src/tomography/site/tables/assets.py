@@ -10,8 +10,20 @@ def _cite(keys: tuple[str, ...]) -> str:
     return f"[[cite:{','.join(keys)}]]"
 
 
-def _license(text: str) -> str:
-    return text[:1].upper() + text[1:]
+def _license(text: str, keys: tuple[str, ...] = ()) -> str:
+    """Capitalises a license and marks the reference a license tells to cite.
+
+    Args:
+        text: The license as stated by its source.
+        keys: The citation keys of the asset.
+
+    Returns:
+        The cell text.
+    """
+    text = text[:1].upper() + text[1:]
+    if keys and "(cite " in text:
+        return text.replace(")", f" {_cite(keys)})")
+    return text
 
 
 def build(manifest: Manifest) -> TableOutput:
@@ -47,7 +59,7 @@ def build(manifest: Manifest) -> TableOutput:
                     _cite(a.cite),
                     a.location,
                     a.revision,
-                    _license(a.license),
+                    _license(a.license, a.cite),
                 ]
             )
     claim = (

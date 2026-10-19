@@ -100,6 +100,20 @@ def _template_sentence(accuracy: list[float], layers: dict[str, int]) -> str:
     )
 
 
+def _random_sentence() -> str:
+    """Writes the per-role range tokens of the in-template random direction.
+
+    Returns:
+        The clause that quotes each role on its own.
+    """
+    parts = [
+        f"[[num:table:truth.template_random_{r}_min]] to "
+        f"[[num:table:truth.template_random_{r}_max]] ({stats.ROLE_NAMES[r]})"
+        for r in stats.ROLES
+    ]
+    return stats.join_and(parts)
+
+
 def build(manifest: Manifest) -> TableOutput:
     """Builds the table from the committed results.
 
@@ -116,8 +130,7 @@ def build(manifest: Manifest) -> TableOutput:
     rows: list[list[str]] = []
     in_acc: list[float] = []
     in_layer: dict[str, int] = {}
-    persona: list[float] = []
-    template_random: list[float] = []
+    template_random: dict[str, list[float]] = {r: [] for r in stats.ROLES}
     text: dict[str, dict[str, Any]] = {}
     n_test = n_val = 0
     for model in models:
@@ -137,10 +150,9 @@ def build(manifest: Manifest) -> TableOutput:
         n_test = int(s5["n_eval_pairs"]["transfer"]["test"])
         n_val = int(s5["n_eval_pairs"]["transfer"]["val"])
         mc1 = [_mc1(table, "lat", s)["mc1"] for s in READERS]
-        persona.append(float(mc1[2]))
         scored = reading.in_template(manifest, model)
         assert scored is not None
-        template_random.append(scored.random)
+        template_random[stats.role(model)].append(scored.random)
         rows.append(
             [
                 paper.display_name(model),
@@ -189,9 +201,8 @@ def build(manifest: Manifest) -> TableOutput:
         "which apply to each of the four TruthfulQA columns. "
         + _template_sentence(in_acc, in_layer)
         + " In the template the random direction at the same layer reaches "
-        "[[num:table:truth.template_random_min]] to "
-        "[[num:table:truth.template_random_max]] across checkpoints, per "
-        "checkpoint in [[table:reading_full]]."
+        + _random_sentence()
+        + " across checkpoints, per checkpoint in [[table:reading_full]]."
         + " Honesty transfer scores the honesty reader on plain true and "
         f"false statements ({n_test} test pairs, layer chosen on {n_val} "
         "validation pairs) next to the random direction at the same layer. "
@@ -202,15 +213,14 @@ def build(manifest: Manifest) -> TableOutput:
     numbers = {
         "n_questions": float(n_questions),
         "wilson_half": half,
-        "persona_min": min(persona),
-        "persona_max": max(persona),
         "in_template_layer1": float(sum(v == 1 for v in in_layer.values())),
         "text_word": float(word["mc1"]),
         "text_char": float(char["mc1"]),
         "chance": chance,
-        "template_random_min": min(template_random),
-        "template_random_max": max(template_random),
     }
+    for role, values in template_random.items():
+        numbers[f"template_random_{role}_min"] = min(values)
+        numbers[f"template_random_{role}_max"] = max(values)
     return TableOutput(
         claim,
         detail,

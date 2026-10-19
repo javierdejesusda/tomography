@@ -43,26 +43,27 @@ TLDR = (
     "direction on every checkpoint and truth on every Qwen3 checkpoint; the "
     "finder of the paper is weaker, a truth reader does not beat the words "
     "alone, a known-against-unknown direction does not beat the model's "
-    "confidence, and steering strong enough to beat random directions "
-    "breaks the fluency rule on most checkpoints."
+    "confidence, and utility steering that beats every random direction "
+    "meets the fluency rule on only Qwen3-1.7B-Base."
 )
 
 FRONT_ITEMS = ("fig:teaser",)
 
 ABSTRACT = (
     "We test representation engineering (Zou et al., 2023) on four GPT-2 "
-    "and three Qwen3 sizes, each Qwen3 size as a base and a post-trained "
+    "and three Qwen3 sizes, each as base and post-trained "
     "checkpoint, against random directions and, where the wording leaks the "
     "label, text classifiers. By the 95 percent interval, a logistic "
     "direction reads utility and morality above its random direction on "
-    "all 10 checkpoints and truth on every Qwen3 checkpoint but no GPT-2 "
-    "size. The finder of the paper is above a random direction for "
-    "utility, where the pairs are matched, but on fewer checkpoints for "
-    "sentiment and truth, where they are unrelated; matching is confounded "
-    "with the concept and the data. A TruthfulQA reader is not above a "
-    "classifier on the words alone, and a known-against-unknown direction, "
-    "which ranks questions above popularity and text classifiers, does not "
-    "add to the confidence of the model. Steering at relative "
+    "every checkpoint and truth on every Qwen3 checkpoint but no GPT-2 "
+    "size. The paper's finder is above a random direction for "
+    "utility on every Qwen3 checkpoint, where the pairs are matched, but "
+    "on fewer for sentiment and truth, where they are unrelated; matching "
+    "is confounded with the concept and the data. A TruthfulQA reader is "
+    "not above a classifier on the words alone, and a known-against-unknown "
+    "direction, which ranks questions above popularity and text "
+    "classifiers on most Qwen3 checkpoints, does not add to the confidence "
+    "of the model. Steering at relative "
     "coefficient 0.1 moves judged sentiment on most checkpoints, while "
     "utility steering at relative coefficient 0.3 beats every random "
     "direction on only some. "
@@ -107,16 +108,17 @@ KEY_FINDINGS = Section(
             "sentiment on [[count:fig:finders.pca_sentiment]], but for "
             "utility on every Qwen3 checkpoint; matching is confounded with "
             "the concept and the data. Logistic regression is above a random "
-            "direction for sentiment on all 10 checkpoints "
-            "([[fig:finders]]).",
+            "direction for sentiment on "
+            "[[count:fig:finders.logistic_sentiment]] ([[fig:finders]]).",
         ),
         (
             "Where a concept is read ([[sec:reading]]).",
             "A logistic direction reads utility and morality above its "
-            "random direction on all 10 checkpoints and truth on "
+            "random direction on [[count:fig:teaser.utility]] and truth on "
             "[[count:fig:teaser.truth]]; a change of wording moves a "
             "sentiment reader by more than the noise of the test pairs on "
-            "most checkpoints ([[fig:reading]], [[fig:teaser]]).",
+            "[[count:fig:wording.span_above_noise]] ([[fig:reading]], "
+            "[[fig:teaser]]).",
         ),
         (
             "Known and unknown questions ([[sec:known_unknown]]).",
@@ -382,7 +384,7 @@ METHOD = Section(
             paragraphs=(
                 "Steering adds c r(" + ELL + ") v(" + ELL + ") to the "
                 "residual stream at three consecutive layers (for the "
-                "sentiment run only; the finder comparison steers at 40, 55 "
+                "sentiment run only; the utility steering run steers at 40, 55 "
                 "and 70 percent of the depth), at every position of the "
                 "response, where v("
                 + ELL
@@ -431,8 +433,9 @@ RESULTS = Section(
             "Does the finder of the paper find the concept?",
             paragraphs=(
                 "The finder of the paper is above a random direction by the "
-                "95 percent interval for utility, where the pairs are "
-                "matched, and on fewer checkpoints for sentiment and truth, "
+                "95 percent interval for utility on every Qwen3 checkpoint, "
+                "where the pairs are matched, and on fewer checkpoints for "
+                "sentiment and truth, "
                 "where they are unrelated, while logistic regression is "
                 "above one for sentiment on every checkpoint.",
             ),
@@ -457,8 +460,8 @@ RESULTS = Section(
                 "random direction on every checkpoint and truth on every "
                 "Qwen3 checkpoint but no GPT-2 checkpoint, and a change of "
                 "the wording of the template moves a sentiment reader by "
-                "more than the noise of the test pairs on most "
-                "checkpoints.",
+                "more than the noise of the test pairs on every Qwen3 "
+                "checkpoint and on two of the four GPT-2 checkpoints.",
             ),
             items=("fig:reading", "table:reading"),
             after=(
@@ -496,8 +499,9 @@ RESULTS = Section(
             "Known and unknown questions",
             paragraphs=(
                 "A known-against-unknown direction ranks questions above "
-                "popularity and text classifiers but adds at most a small "
-                "amount to the confidence of the model, and a range reader "
+                "popularity and text classifiers on most Qwen3 checkpoints "
+                "but adds at most a small amount to the confidence of the "
+                "model, and a range reader "
                 "is above its random control on only some checkpoints.",
             ),
             runin=(
@@ -520,7 +524,9 @@ RESULTS = Section(
                     "(post-trained) at its upper end, while a "
                     "probe fitted on the correct and wrong labels has an "
                     "interval above zero on "
-                    "[[count:fig:knowledge_reading.probe_above]]. "
+                    "[[count:fig:knowledge_reading.probe_above]]; GPT-2 small "
+                    "has no knowledge-direction run, so the denominators "
+                    "differ. "
                     "On Qwen3-4B-Base a classifier on the words or "
                     "characters comes within a small margin of the "
                     "direction or beats it on "
@@ -600,8 +606,8 @@ RESULTS = Section(
             paragraphs=(
                 "Steering at relative coefficient 0.1 moves the judged "
                 "sentiment on most checkpoints and keeps the fluency rule on "
-                "most, but at relative coefficient 0.3 the steered text "
-                "meets the rule on none, and utility steering beats every "
+                "most, but at relative coefficient 0.3 the steered sentiment "
+                "text meets the rule on none, and utility steering beats every "
                 "random direction on only some checkpoints.",
             ),
             items=("fig:steering",),
@@ -723,7 +729,7 @@ DISCUSSION = Section(
             "false labels of the facts, not on the persona labels, so it "
             "is a baseline for the transfer pairs only, and its interval "
             "covers test-pair sampling only. The sentiment steering run has no "
-            "random-direction arm (the finder comparison has three), and "
+            "random-direction arm (the utility steering run has three), and "
             "knowledge steering has three random directions per run, so a "
             "single run passes against them by chance with probability "
             "1/4. The page reports many comparisons across 10 checkpoints "
@@ -1042,8 +1048,15 @@ APPENDICES = (
             "[[table:approximate]] gives the values behind "
             "[[fig:approximate]], which shows what the models answer and "
             "what a range reader reads, with the heights of people as a "
-            "diagnostic. Qwen3 writes ranges where the sourced answer is a "
-            "range, but the range reader is above a classifier on the "
+            "diagnostic. Qwen3 base writes a range on "
+            "[[num:fig:approximate.range_base_min]] to "
+            "[[num:fig:approximate.range_base_max]] percent of range items "
+            "and on at most [[num:fig:approximate.exact_base_max]] percent "
+            "of exact items, post-trained on "
+            "[[num:fig:approximate.range_post_min]] to "
+            "[[num:fig:approximate.range_post_max]] percent and at most "
+            "[[num:fig:approximate.exact_post_max]] percent, but the range "
+            "reader is above a classifier on the "
             "question words, with the interval of the difference above "
             "zero, on [[count:table:approximate.above_words]], sits at the "
             "lowest layer on [[count:table:approximate.layer_one]], and "

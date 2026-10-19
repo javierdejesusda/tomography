@@ -184,3 +184,15 @@ def test_every_checkpoint_revision_is_listed(
         assert row[4] == pin.revision[:12], key
         assert row[5].lower() == pin.license.lower(), key
     assert len(output.rows) == len(assets.ASSETS) - 2 + len(assets.CHECKPOINTS)
+
+
+def test_a_license_that_says_to_cite_carries_the_citation_marker(
+    output: registry.TableOutput,
+) -> None:
+    rows = {r[0]: r for r in output.rows}
+    assert rows["SST-2"][5] == (
+        "Unknown (cite Socher et al., 2013 [[cite:socher2013recursive]])"
+    )
+    for row in output.rows:
+        if "(cite " in row[5]:
+            assert "[[cite:" in row[5], row[0]

@@ -7,6 +7,7 @@ strip of the cosine share by relative depth.
 """
 
 from collections import defaultdict
+from collections.abc import Mapping
 from collections.abc import Sequence
 import csv
 import json
@@ -73,17 +74,19 @@ SEPARATOR_WIDTH = 0.5
 GROUP_X = -0.68
 
 
-def layer_sentence(layers: Sequence[int], biggest: float) -> str:
+def layer_sentence(layers: Sequence[int], biggest: Mapping[str, float]) -> str:
     """Writes the caption sentence on the layer the range reader chose.
 
     Args:
         layers: The chosen layer of every checkpoint.
-        biggest: The largest absolute cosine at the chosen layers.
+        biggest: Role to the largest absolute cosine at the chosen layers.
 
     Returns:
         The sentence.
     """
-    value = f"{biggest:.3f}"
+    value = stats.join_and(
+        [f"{biggest[r]:.3f} ({stats.ROLE_NAMES[r]})" for r in stats.ROLES]
+    )
     if set(layers) == {1}:
         return LAYER_ONE.format(value=value)
     return LAYER_OTHER.format(value=value)
@@ -307,7 +310,7 @@ def build(manifest: Manifest) -> FigureOutput:
         "auroc": {},
     }
     chosen: list[int] = []
-    biggest = 0.0
+    biggest = {r: 0.0 for r in stats.ROLES}
     for model in models:
         run = manifest.run("p10c", model)
         assert run is not None
@@ -324,8 +327,9 @@ def build(manifest: Manifest) -> FigureOutput:
             ]
         )
         chosen.append(layer)
-        biggest = max(
-            biggest,
+        role = stats.role(model)
+        biggest[role] = max(
+            biggest[role],
             max(
                 abs(float(r["cosine"]))
                 for r in cosine
@@ -357,7 +361,9 @@ def build(manifest: Manifest) -> FigureOutput:
         _rows.freeze_layout(fig)
 
     counts: dict[str, dict[str, stats.RoleCount]] = {}
-    numbers: dict[str, float] = {"layer1_cos_max": biggest}
+    numbers: dict[str, float] = {
+        f"layer1_cos_max_{role}": biggest[role] for role in stats.ROLES
+    }
     values: dict[str, str] = {}
     for name, row in (("cos", "cosine"), ("auc", "auroc")):
         tally = _tally(found[row])

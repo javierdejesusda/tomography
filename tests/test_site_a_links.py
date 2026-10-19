@@ -115,7 +115,7 @@ def test_layer_one_statement_uses_the_chosen_layer_of_every_checkpoint(
     output: registry.FigureOutput,
 ) -> None:
     layers = []
-    biggest = 0.0
+    biggest = {r: 0.0 for r in stats.ROLES}
     for model in _R["models"]("p10c"):
         layer = int(
             json.loads(
@@ -123,8 +123,9 @@ def test_layer_one_statement_uses_the_chosen_layer_of_every_checkpoint(
             )["data"]["layer"]
         )
         layers.append(layer)
-        biggest = max(
-            biggest,
+        role = stats.role(model)
+        biggest[role] = max(
+            biggest[role],
             max(
                 abs(float(r["cosine"]))
                 for r in _read(model, "cosine.csv")
@@ -132,19 +133,25 @@ def test_layer_one_statement_uses_the_chosen_layer_of_every_checkpoint(
             ),
         )
     assert set(layers) == {1}
-    assert output.numbers["layer1_cos_max"] == pytest.approx(biggest)
+    assert "layer1_cos_max" not in output.numbers
+    for role in stats.ROLES:
+        assert output.numbers[f"layer1_cos_max_{role}"] == pytest.approx(
+            biggest[role]
+        )
     assert (
         "At layer 1, the layer the plain-template range reader chose on every "
         "checkpoint because ties go to the first layer, every cosine is at "
-        f"most {biggest:.3f} in absolute value; these values describe that "
-        "layer and do not locate a link."
+        f"most {biggest['gpt2']:.3f} (GPT-2), {biggest['base']:.3f} (Qwen3 "
+        f"base) and {biggest['post']:.3f} (post-trained) in absolute value; "
+        "these values describe that layer and do not locate a link."
     ) in output.detail
 
 
 def test_other_chosen_layers_get_a_general_sentence() -> None:
-    text = a_links.layer_sentence([1, 3], 0.123)
+    biggest = {"gpt2": 0.123, "base": 0.2, "post": 0.3}
+    text = a_links.layer_sentence([1, 3], biggest)
     assert "layer 1" not in text
-    assert "0.123" in text
+    assert "0.123 (GPT-2), 0.200 (Qwen3 base) and 0.300 (post-trained)" in text
     assert "At the layer the plain-template range reader chose on each" in text
 
 

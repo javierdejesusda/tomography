@@ -4,7 +4,9 @@ import runpy
 
 from tomography.site import content
 from tomography.site import registry
+from tomography.site.figs import teaser as teaser_fig
 from tomography.site.manifest import Manifest
+from tomography.viz import paper
 
 _HERE = Path(__file__).parent
 _R = runpy.run_path(str(_HERE / "_results.py"))
@@ -210,8 +212,20 @@ def test_the_summary_holds_per_role_on_the_data() -> None:
     assert len(tldr.split()) <= 60
     for name in ("truthfulqa", "knowledge_confidence"):
         assert all(c.hits == 0 for c in teaser.counts[name].values()), name
-    assert "breaks the fluency rule on most checkpoints" in tldr
+    models = manifest.models("m1")
+    fluent = [m for m in models if teaser_fig._steering_fluent(manifest, m)]
+    beats = [
+        m
+        for m in models
+        if (cell := teaser_fig._steering(manifest, m)) is not None
+        and cell.margin > 0
+    ]
+    assert len(beats) == 5
+    assert [m for m in fluent if m in beats] == fluent
+    assert [paper.display_name(m) for m in fluent] == ["Qwen3-1.7B-Base"]
+    assert (
+        "utility steering that beats every random direction meets the "
+        "fluency rule on only Qwen3-1.7B-Base"
+    ) in tldr
     for role in roles:
-        fluent = teaser.counts["steering_fluent"][role]
-        assert fluent.hits * 2 < fluent.total, role
         assert steering.counts["fluent03"][role].hits == 0, role
