@@ -1,0 +1,209 @@
+{
+  "_meta": {
+    "experiment": "c2",
+    "config_hash": "1ae093396c5d",
+    "seed": 0,
+    "git_sha": "bab5b7594b47ca08b11f78032211d205e953fdfb",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-94-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T23:05:44+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "c2",
+      "model": "gpt2-medium",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 40,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 2,
+      "layers": null,
+      "coeffs": [
+        -0.3,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.3
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "judge": "emotion-primary",
+      "judge_check": "emotion-secondary",
+      "emotions": [
+        "happiness",
+        "sadness",
+        "anger",
+        "fear",
+        "disgust",
+        "surprise"
+      ],
+      "n_seeds": 10,
+      "n_steer_seeds": 3,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "window": 3,
+      "strength": null,
+      "truncate_words": 4,
+      "n_random": 3
+    }
+  },
+  "data": {
+    "columns": [
+      "steered",
+      "random",
+      "measured",
+      "change",
+      "change_check"
+    ],
+    "rows": [
+      [
+        "random",
+        0,
+        "happiness",
+        -0.0828300253924681,
+        -0.06477160753274802
+      ],
+      [
+        "random",
+        0,
+        "sadness",
+        -0.022731633741641423,
+        -0.0541631051513832
+      ],
+      [
+        "random",
+        0,
+        "anger",
+        -0.04214156979229301,
+        -0.07473851418646518
+      ],
+      [
+        "random",
+        0,
+        "fear",
+        -0.03992453342041699,
+        -0.059815889627207075
+      ],
+      [
+        "random",
+        0,
+        "disgust",
+        -0.012601659136707896,
+        -0.06642417896306142
+      ],
+      [
+        "random",
+        0,
+        "surprise",
+        -0.015653739135595965,
+        -0.005631472931709139
+      ],
+      [
+        "random",
+        1,
+        "happiness",
+        -0.055888628261745926,
+        -0.10793329348147382
+      ],
+      [
+        "random",
+        1,
+        "sadness",
+        -0.012554633092368025,
+        0.005799248961266129
+      ],
+      [
+        "random",
+        1,
+        "anger",
+        -0.013165896820137274,
+        0.013476145553868252
+      ],
+      [
+        "random",
+        1,
+        "fear",
+        0.06769169384118867,
+        0.04808964139083399
+      ],
+      [
+        "random",
+        1,
+        "disgust",
+        -0.02168712215905544,
+        0.01758923709625379
+      ],
+      [
+        "random",
+        1,
+        "surprise",
+        -0.022063053413294252,
+        -0.017145012931432578
+      ],
+      [
+        "random",
+        2,
+        "happiness",
+        -0.07523194433772007,
+        -0.08538409000320824
+      ],
+      [
+        "random",
+        2,
+        "sadness",
+        0.0014648824796313353,
+        -0.0002451050980016578
+      ],
+      [
+        "random",
+        2,
+        "anger",
+        -0.024278949347499294,
+        -0.027750079852994533
+      ],
+      [
+        "random",
+        2,
+        "fear",
+        0.11031811036897124,
+        0.047652060335967694
+      ],
+      [
+        "random",
+        2,
+        "disgust",
+        -0.03154214731737739,
+        -0.021484427346149443
+      ],
+      [
+        "random",
+        2,
+        "surprise",
+        0.020566250245901765,
+        0.022390301644336433
+      ]
+    ]
+  }
+}

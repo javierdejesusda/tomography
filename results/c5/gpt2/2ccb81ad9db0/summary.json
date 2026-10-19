@@ -1,0 +1,99 @@
+{
+  "_meta": {
+    "experiment": "c5",
+    "config_hash": "2ccb81ad9db0",
+    "seed": 0,
+    "git_sha": "bab5b7594b47ca08b11f78032211d205e953fdfb",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-94-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T23:44:44+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "c5",
+      "model": "gpt2",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 24,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        -0.3,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.3
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "n_pairs": 128,
+      "n_eval_pairs": 128,
+      "strength": 0.1,
+      "n_pool": 1000,
+      "n_show": 4,
+      "n_shots": 15,
+      "c2_run": "results/c2/gpt2/f009922c8c55",
+      "n_random": 3
+    }
+  },
+  "data": {
+    "layers": [
+      4,
+      5,
+      6,
+      7,
+      9,
+      10,
+      11,
+      12
+    ],
+    "strength": 0.1,
+    "n_pool": 1000,
+    "correct_none": 0.029,
+    "correct_honest": 0.029,
+    "correct_lie": 0.006,
+    "n_random": 3,
+    "correct_random_plus": 0.02266666666666667,
+    "correct_random_minus": 0.02033333333333333,
+    "n_known": 29,
+    "n_flipped": 26,
+    "flip_rate": 0.896551724137931,
+    "flip_ci": [
+      0.736149189092262,
+      0.9641851086493229
+    ],
+    "emotions": [
+      "happiness",
+      "sadness",
+      "anger",
+      "fear",
+      "disgust",
+      "surprise"
+    ],
+    "emotion_strength": 0.3,
+    "c2_run": "results/c2/gpt2/f009922c8c55"
+  }
+}
