@@ -35,10 +35,11 @@ HEADER = ["panel", "model", "series", "value", "lo", "hi"]
 TOP = -1.9
 HEAD_Y = -1.3
 WHISKER_Y = -0.75
+WORDS_OFFSET_PT = 6.0
 BAR_HALF = 0.17
+TICK_HALF = 0.36
 ARROW = 0.14
 TICK = (0.075, 0.035)
-CEILING = 0.9995
 POSITION_LIMITS = (-0.5, 1.5)
 PANEL_A = (
     ("range_items", "range\nitems"),
@@ -216,10 +217,12 @@ def _unclip(ax: Any, count: int) -> None:
         line.set_clip_on(False)
 
 
-def _head(ax: Any, x: float, text: str, ha: str = "center") -> None:
+def _head(
+    ax: Any, x: float, text: str, ha: str = "center", y: float = HEAD_Y
+) -> None:
     ax.text(
         x,
-        HEAD_Y,
+        y,
         text,
         color=paper.ENC["secondary_text"],
         fontsize=paper.MIN_TEXT,
@@ -249,18 +252,19 @@ def _draw_reader(ax: Any, model: str, y: float, reader: "_Reader") -> str:
         facecolor=paper.RANDOM_GREY,
         alpha=paper.RANDOM_BAND_ALPHA,
         edgecolor="none",
-        zorder=1,
+        zorder=5,
     )
     bar.set_gid(f"control-{model}")
     ax.add_patch(bar)
-    ax.plot(
+    (control_tick,) = ax.plot(
         [mean, mean],
-        [y - BAR_HALF, y + BAR_HALF],
+        [y - TICK_HALF, y + TICK_HALF],
         color=paper.RANDOM_GREY,
         lw=paper.DATA_WIDTH,
         solid_capstyle="butt",
-        zorder=2,
+        zorder=5,
     )
+    control_tick.set_gid(f"control-tick-{model}")
     value = float(reader.reader["auroc"])
     edge = paper.INK if state == "above" else paper.RANDOM_GREY
     ax.plot(
@@ -294,16 +298,6 @@ def _draw_reader(ax: Any, model: str, y: float, reader: "_Reader") -> str:
             zorder=3,
         )
         tick.set_gid(f"below-tick-{model}")
-    if mean >= CEILING:
-        ax.text(
-            min(lo, float(reader.reader["lo"])) - 0.03,
-            y,
-            "control at 1.000",
-            color=paper.ENC["secondary_text"],
-            fontsize=paper.MIN_TEXT,
-            ha="right",
-            va="center",
-        )
     return state
 
 
@@ -384,7 +378,17 @@ def _draw(
         solid_capstyle="butt",
     )
     whisker.set_gid("words-whisker")
-    _head(ax_b, text["auroc"] - 0.02, "words", "right")
+    ax_b.annotate(
+        "words",
+        (text["auroc"], HEAD_Y),
+        xytext=(-WORDS_OFFSET_PT, 0),
+        textcoords="offset points",
+        color=paper.ENC["secondary_text"],
+        fontsize=paper.MIN_TEXT,
+        ha="right",
+        va="center",
+        linespacing=0.95,
+    )
     _head(ax_b, 0.48, "chance", "right")
     axes.ref_line(ax_b, 0.5, "x")
     _rows.row_axis(ax_a, rows, labels=True)
