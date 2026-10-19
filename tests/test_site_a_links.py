@@ -1,11 +1,15 @@
 import csv
 import io
+import itertools
 import json
+import math
 from pathlib import Path
 import runpy
+from typing import Any
 
 import pytest
 
+from tomography.site import params
 from tomography.site import registry
 from tomography.site import stats
 from tomography.site.figs import a_links
@@ -17,7 +21,7 @@ RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 _T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
 SPEC = "a_links"
-HEIGHT = 3.4
+HEIGHT = 3.8
 
 
 @pytest.fixture(scope="module")
@@ -160,49 +164,11 @@ def test_caption_counts_per_role(output: registry.FigureOutput) -> None:
     assert "0.05" in output.detail
 
 
-def test_two_by_two_with_one_line_per_checkpoint(
-    output: registry.FigureOutput,
-) -> None:
-    panels = [ax for ax in output.figure.axes if ax.get_label() != "<legend>"]
-    assert len(panels) == 4
-    models = _R["models"]("p10c")
-    gpt2 = [m for m in models if m.startswith("gpt2")]
-    qwen = [m for m in models if not m.startswith("gpt2")]
-    for ax in panels:
-        assert not ax.images
-        assert not ax.collections
-    for ax, count in zip(panels, (len(gpt2), len(qwen)) * 2, strict=True):
-        long = [ln for ln in ax.get_lines() if len(ln.get_xdata()) > 2]
-        assert len(long) == count
-    dashed = [
-        ln.get_linestyle()
-        for ln in panels[1].get_lines()
-        if len(ln.get_xdata()) > 2
-    ]
-    assert dashed.count("--") == len(qwen) // 2
-
-
 def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
     fig = output.figure
     assert tuple(fig.get_size_inches()) == (paper.FULL_WIDTH, HEIGHT)
     assert checks.guard_problems(fig, appendix=True) == []
     assert checks.problems(fig) == []
-
-
-def test_four_panel_letters_and_no_dashes(
-    output: registry.FigureOutput,
-) -> None:
-    letters = [
-        t.get_text()
-        for ax in output.figure.axes
-        for t in ax.texts
-        if t.get_text().startswith(r"$\mathbf")
-    ]
-    assert sorted(letters) == [rf"$\mathbf{{({c})}}$" for c in "abcd"]
-    text = f"{output.claim} {output.detail} {output.csv}"
-    assert chr(0x2014) not in text
-    assert chr(0x2013) not in text
-    assert "_" not in f"{output.claim} {output.detail}"
 
 
 def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
@@ -213,26 +179,179 @@ def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
 
 
-def test_letters_do_not_touch_their_titles(
-    output: registry.FigureOutput,
-) -> None:
-    gaps = _T["letter_title_gaps"](output.figure)
-    assert len(gaps) == 2
-    assert min(gaps) >= 2.0
+BINS = 6
+GROUPS = ["GPT-2", "Qwen3\nbase", "Qwen3\npost-trained"]
+SHORT = ["small", "medium", "large", "XL"] + ["0.6B", "1.7B", "4B"] * 2
+ROLE_ORDER = ("gpt2", "base", "post")
 
 
-def test_each_panel_prints_the_cell_counts_the_caption_gives(
+def _ordered() -> list[str]:
+    models: list[str] = _R["models"]("p10c")
+    return [
+        m
+        for role in ROLE_ORDER
+        for m in sorted(models, key=params.param_count)
+        if stats.role(m) == role
+    ]
+
+
+def _flags(model: str, which: str) -> list[tuple[int, bool]]:
+    rows = _read(model, "cosine.csv") if which == "cos" else _pooled(model)
+    flag = _cosine_outside if which == "cos" else _auroc_outside
+    return [(int(r["layer"]), bool(flag(r))) for r in rows]
+
+
+def _share(model: str, which: str) -> tuple[int, int]:
+    flags = _flags(model, which)
+    return sum(f for _, f in flags), len(flags)
+
+
+def _panels(output: registry.FigureOutput) -> list[Any]:
+    return [ax for ax in output.figure.axes if ax.get_label() != "<legend>"]
+
+
+def _dots(ax: Any) -> list[Any]:
+    return [ln for ln in ax.get_lines() if ln.get_marker() == "o"]
+
+
+def test_two_dot_panels_and_a_heat_strip_share_the_role_block_rows(
     output: registry.FigureOutput,
 ) -> None:
-    panels = [ax for ax in output.figure.axes if ax.get_label() != "<legend>"]
-    names = {"gpt2": "GPT-2", "base": "Qwen3 base", "post": "post-trained"}
-    groups = (("gpt2",), ("base", "post")) * 2
-    for ax, roles, which in zip(
-        panels, groups, ("cos", "cos", "auc", "auc"), strict=True
-    ):
-        counts = _counts(which)
-        shown = [t.get_text() for t in ax.texts if "cells" in t.get_text()]
-        assert shown == [
-            f"{names[r]}: {counts[r][0]:,} of {counts[r][1]:,} cells"
-            for r in roles
+    ax_a, ax_b, ax_c, bar = _panels(output)
+    for ax in (ax_b, ax_c):
+        assert ax_a.get_shared_y_axes().joined(ax_a, ax)
+    labels = [t.get_text() for t in ax_a.get_yticklabels()]
+    assert labels == SHORT
+    names = [t.get_text() for t in ax_a.texts if t.get_text() in GROUPS]
+    assert names == GROUPS
+    ticks = list(ax_a.get_yticks())
+    gaps = [b - a for a, b in itertools.pairwise(ticks)]
+    assert max(gaps) > 1.0
+    assert bar is not None
+
+
+def test_each_dot_is_the_share_of_cells_outside_the_band_of_its_checkpoint(
+    output: registry.FigureOutput,
+) -> None:
+    ax_a, ax_b = _panels(output)[:2]
+    for ax, which in ((ax_a, "cos"), (ax_b, "auc")):
+        dots = _dots(ax)
+        assert len(dots) == len(_ordered())
+        for model, dot in zip(_ordered(), dots, strict=True):
+            hits, total = _share(model, which)
+            assert dot.get_xdata()[0] == pytest.approx(hits / total)
+            post = stats.role(model) == "post"
+            assert (dot.get_markerfacecolor() == "white") is post
+        assert len(set(dot.get_ydata()[0] for dot in dots)) == len(dots)
+
+
+def test_the_expected_share_is_a_labelled_reference_in_both_dot_panels(
+    output: registry.FigureOutput,
+) -> None:
+    for ax in _panels(output)[:2]:
+        refs = [
+            ln
+            for ln in ax.get_lines()
+            if list(ln.get_xdata()) == [a_links.CHANCE, a_links.CHANCE]
         ]
+        assert refs
+        texts = [t.get_text() for t in ax.texts]
+        assert "expected for\nrandom vectors" in texts
+
+
+def test_cell_counts_are_printed_at_the_right_of_every_row(
+    output: registry.FigureOutput,
+) -> None:
+    ax_a, ax_b = _panels(output)[:2]
+    for ax, which in ((ax_a, "cos"), (ax_b, "auc")):
+        shown = [t.get_text() for t in ax.texts if " of " in t.get_text()]
+        want = []
+        for model in _ordered():
+            hits, total = _share(model, which)
+            want.append(f"{hits:,} of {total:,}")
+        assert shown == want
+
+
+def test_heat_strip_is_the_cosine_share_in_six_depth_bins(
+    output: registry.FigureOutput,
+) -> None:
+    ax_c = _panels(output)[2]
+    meshes = ax_c.collections
+    assert len(meshes) == 3
+    assert not ax_c.images
+    got = []
+    for mesh in meshes:
+        got.extend(mesh.get_array().reshape(-1, BINS).tolist())
+    assert len(got) == len(_ordered())
+    for model, row in zip(_ordered(), got, strict=True):
+        cells = _flags(model, "cos")
+        layers = max(k for k, _ in cells)
+        for b in range(BINS):
+            members = [
+                f
+                for k, f in cells
+                if min(math.ceil(k / layers * BINS) - 1, BINS - 1) == b
+            ]
+            assert row[b] == pytest.approx(sum(members) / len(members))
+
+
+def test_the_colour_bar_marks_the_expected_share(
+    output: registry.FigureOutput,
+) -> None:
+    bar = _panels(output)[3]
+    ticks = [round(float(t), 2) for t in bar.get_yticks()]
+    assert a_links.CHANCE in ticks
+
+
+def test_the_csv_exports_the_per_checkpoint_totals(
+    output: registry.FigureOutput,
+) -> None:
+    rows = _out(output)
+    for panel, which in (("cosine_all", "cos"), ("auroc_all", "auc")):
+        for model in _ordered():
+            (got,) = [
+                r for r in rows if r["row"] == panel and r["model"] == model
+            ]
+            hits, total = _share(model, which)
+            assert int(got["outside"]) == hits
+            assert int(got["types"]) == total
+            assert float(got["share"]) == pytest.approx(hits / total)
+
+
+def test_the_role_key_uses_neutral_circles(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert labels == ["GPT-2 and Qwen3 base", "post-trained"]
+    markers = {h.get_marker() for h in legend.legend_handles}
+    assert markers == {"o"}
+    colours = {h.get_markeredgecolor() for h in legend.legend_handles}
+    assert colours == {paper.ENC["reference"]}
+
+
+def test_caption_warns_about_steps_and_dependent_layers(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.detail
+    assert "moves in steps" in text
+    assert "adjacent layers share a residual stream" in text
+    assert "rough reference" in text
+    assert "six bins" in text
+    assert "At layer 1" in text
+
+
+def test_three_panel_letters_and_no_dashes(
+    output: registry.FigureOutput,
+) -> None:
+    letters = [
+        t.get_text()
+        for ax in output.figure.axes
+        for t in ax.texts
+        if t.get_text().startswith(r"$\mathbf")
+    ]
+    assert sorted(letters) == [rf"$\mathbf{{({c})}}$" for c in "abc"]
+    text = f"{output.claim} {output.detail} {output.csv}"
+    assert chr(0x2014) not in text
+    assert chr(0x2013) not in text
+    assert "_" not in f"{output.claim} {output.detail}"

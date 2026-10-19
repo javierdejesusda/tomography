@@ -189,18 +189,21 @@ def _unit_step(low: float, high: float) -> list[float]:
     return values
 
 
-def draw_group_labels(ax: Any, rows: dict[str, float]) -> None:
+def draw_group_labels(
+    ax: Any, rows: dict[str, float], x: float = GROUP_X
+) -> None:
     """Writes the role of each block of rows, rotated, left of the labels.
 
     Args:
         ax: The leftmost panel, whose rows are checkpoints.
         rows: Checkpoint key to row position, from `block_rows`.
+        x: Horizontal position in axes fractions.
     """
     by_role = _group.lines_by_role(list(rows))
     for role, members in by_role.items():
         centre = sum(rows[m] for m in members) / len(members)
         ax.text(
-            GROUP_X,
+            x,
             centre,
             GROUPS[role],
             transform=ax.get_yaxis_transform(),
