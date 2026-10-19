@@ -37,10 +37,9 @@ def build(manifest: Manifest) -> TableOutput:
         run = manifest.run("p3", model)
         assert run is not None
         meta = runfiles.data(run, "sizes_sentiment.json")
-        accuracy = np.asarray(
-            runfiles.arrays(run, "sizes_sentiment.npz")["accuracy"]
-        )
-        layer = int(meta["layer"]) - 1
+        stored = runfiles.arrays(run, "sizes_sentiment.npz")
+        accuracy = np.asarray(stored["accuracy"])
+        layer = int(np.flatnonzero(stored["layers"] == meta["layer"])[0])
         split = meta["splits"].index("report")
         reader = meta["series"].index("reader")
         random = meta["series"].index("random")
