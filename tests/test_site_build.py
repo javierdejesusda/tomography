@@ -258,6 +258,23 @@ def test_the_built_page_resolves_every_token_and_link(html: str) -> None:
     assert [h for h in hrefs if h not in set(ids)] == []
 
 
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        r'<div class="table" id="table-(\d+)"',
+        r'<div class="table" id="table-A(\d+)"',
+        r'<figure id="fig-(\d+)"',
+        r'<figure id="fig-A(\d+)"',
+    ],
+)
+def test_the_built_page_numbers_figures_and_tables_in_page_order(
+    html: str, pattern: str
+) -> None:
+    numbers = [int(n) for n in re.findall(pattern, html)]
+    assert numbers
+    assert numbers == list(range(1, len(numbers) + 1))
+
+
 def test_the_built_page_masthead_matches_the_results_commit(html: str) -> None:
     sha, _ = build_module.results_commit(RESULTS)
     assert f"Results at commit <code>{sha}</code>, built " in html
