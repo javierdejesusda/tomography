@@ -330,3 +330,18 @@ def test_seed_paired_differences_that_exclude_zero_are_named_and_tokenised(
         "readings most intervals include zero, which is not evidence of no "
         "change."
     )
+
+
+def test_the_paired_total_counts_the_rows_the_exclusion_count_ranges_over(
+    output: registry.FigureOutput,
+) -> None:
+    rows = [
+        r
+        for r in _table("p8", "qwen3-1.7b")
+        if r["source"] in ("r2", "r3", "r5", "r7")
+    ]
+    assert output.numbers["paired_total"] == len(rows) == 8
+    assert (
+        output.numbers["paired_excluding_zero"]
+        <= output.numbers["paired_total"]
+    )

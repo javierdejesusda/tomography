@@ -131,24 +131,41 @@ def _difference(
     return stats.diff_interval(value, _accuracy(manifest, row, base)[0], n)
 
 
-def _paired_excluding(manifest: Manifest) -> list[tuple[str, str]]:
-    """Finds the stored seed-paired differences whose interval excludes zero.
+def _paired_rows(manifest: Manifest) -> list[dict[str, Any]]:
+    """Reads the stored seed-paired differences the figure counts over.
 
     Args:
         manifest: The run resolver.
 
     Returns:
-        (measure name, size such as `0.6B`) in size then measure order.
+        One record per measure and size; held-out sentiment is not stored
+        among them.
     """
-    measures = list(PAIRED.values())
-    found = []
+    found: list[dict[str, Any]] = []
     for model in manifest.models("p8"):
         run = manifest.run("p8", model)
         assert run is not None
-        for row in runfiles.rows(run, "table.json"):
-            if row["source"] in PAIRED and (row["lo"] > 0 or row["hi"] < 0):
-                size = str(row["tuned"]).split("-")[1].upper()
-                found.append((PAIRED[row["source"]], size))
+        found.extend(
+            r for r in runfiles.rows(run, "table.json") if r["source"] in PAIRED
+        )
+    return found
+
+
+def _paired_excluding(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Finds the seed-paired differences whose interval excludes zero.
+
+    Args:
+        rows: The records of `_paired_rows`.
+
+    Returns:
+        (measure name, size such as `0.6B`) in size then measure order.
+    """
+    measures = list(PAIRED.values())
+    found = [
+        (PAIRED[r["source"]], str(r["tuned"]).split("-")[1].upper())
+        for r in rows
+        if r["lo"] > 0 or r["hi"] < 0
+    ]
     return sorted(found, key=lambda f: (float(f[1][:-1]), measures.index(f[0])))
 
 
@@ -288,7 +305,9 @@ def build(manifest: Manifest) -> FigureOutput:
         r: [s for s in sizes if found[(r, s)][2] < 0]
         for r in ("knowledge", "steering")
     }
-    paired = _paired_excluding(manifest)
+    paired_rows = _paired_rows(manifest)
+    paired = _paired_excluding(paired_rows)
+    numbers["paired_total"] = float(len(paired_rows))
     numbers["paired_excluding_zero"] = float(len(paired))
     for name, size in paired:
         numbers[f"paired_{name}_{size.lower().replace('.', '')}"] = 1.0
