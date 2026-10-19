@@ -43,7 +43,8 @@ CLAIM = (
 DETAIL = (
     "(a) Share of greedy answers written as a range (few-shot, range "
     "example last) on range items (star), exact items (left triangle) and "
-    "{n_people} people's heights (right triangle), with Wilson intervals on the "
+    "{n_people} people's heights (right triangle), with Wilson intervals "
+    "on the "
     "item counts: Qwen3 base checkpoints write a range on {base_min} to "
     "{base_max} percent of the range items and post-trained ones on "
     "{post_min} to {post_max} percent, on at most {exact} percent of the "
