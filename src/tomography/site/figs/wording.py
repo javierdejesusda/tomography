@@ -288,7 +288,20 @@ def _numbers(
         numbers[f"bare_above_{role}"] = count.hits
         numbers[f"bare_n_{role}"] = count.total
     numbers["n_checkpoints"] = len(data)
+    for role, count in _span_counts(data, noise).items():
+        numbers[f"span_above_noise_{role}"] = count.hits
+        numbers[f"span_above_noise_n_{role}"] = count.total
     return numbers
+
+
+def _span_counts(
+    data: dict[str, list[dict[str, Any]]], noise: dict[str, float]
+) -> dict[str, RoleCount]:
+    flags = {}
+    for model, table in data.items():
+        values = [r["from_paper"] for r in table]
+        flags[model] = max(values) - min(values) > noise[model]
+    return stats.per_role(flags)
 
 
 def _span_text(numbers: dict[str, float]) -> str:
@@ -328,6 +341,7 @@ def _claim(
     numbers: dict[str, float],
     counts: dict[str, RoleCount],
     below: list[tuple[str, float, float]],
+    spans: dict[str, RoleCount],
 ) -> str:
     exceptions = "".join(
         f"; on {paper.display_name(m)} the bare reader reads {read:.3f} "
@@ -335,7 +349,10 @@ def _claim(
         for m, read, rand in below
     )
     return (
-        "Wording moves a reader, and a direction at a large angle from the "
+        "Wording moves a reader by more than the noise of the test pairs on "
+        f"{stats.per_role_text(spans)} (a point comparison of the span "
+        "between the best and the worst wording with the noise expected "
+        "from test pairs alone), and a direction at a large angle from the "
         "paper direction mostly still reads the paper wording above a "
         "random direction. A direction fitted on the bare wording has cosine "
         f"{numbers['bare_cos_min']:.3f} to {numbers['bare_cos_max']:.3f} "
@@ -406,6 +423,7 @@ def build(manifest: Manifest) -> FigureOutput:
     rows = shared.model_rows(models)
     numbers = _numbers(data, noise)
     counts = _counts(data)
+    spans = _span_counts(data, noise)
     with paper.paper_style():
         fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
         left, right = fig.subplots(
@@ -418,9 +436,9 @@ def build(manifest: Manifest) -> FigureOutput:
         _legend(fig)
     return FigureOutput(
         fig,
-        _claim(numbers, counts, _below(data)),
+        _claim(numbers, counts, _below(data), spans),
         _detail(numbers),
         numbers,
         _csv(data),
-        {"bare_above": counts},
+        {"bare_above": counts, "span_above_noise": spans},
     )
