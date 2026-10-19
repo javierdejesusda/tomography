@@ -208,7 +208,7 @@ def test_caption_is_the_template_filled_from_the_files(
     }
     held = stats.per_role_text(stats.per_role(flags01))
     assert not any(flags03.values())
-    fails = f"none of the {len(_models())} checkpoints"
+    fails = stats.per_role_text(stats.per_role(flags03))
     assert sum(len(v) for v in by_role.values()) == len(_models())
     config = json.loads(
         (_R["run"]("c1", "gpt2") / "config.json").read_text(encoding="utf-8")
