@@ -201,9 +201,7 @@ def test_panels_pair_base_and_post_trained_then_the_gpt2_sizes(
     output: registry.FigureOutput,
 ) -> None:
     axes = _matrices(output)
-    assert _titles(output) == [
-        paper.display_name(m) for m in ORDER
-    ]
+    assert _titles(output) == [paper.display_name(m) for m in ORDER]
     tops = [round(ax.get_position().y1, 3) for ax in axes]
     lefts = [round(ax.get_position().x0, 3) for ax in axes]
     for i in range(0, len(ORDER), 2):
@@ -239,18 +237,13 @@ def test_cells_within_the_noise_are_stippled_and_negative_ones_annotated(
         zero = (margin <= 0.0) & off
         assert len(labels) <= int(zero.sum())
         assert bool(labels) == bool(zero.any())
-        cells = sorted(
-            (round(t.get_position()[1]), round(t.get_position()[0]))
-            for t in labels
-        )
-        for i, j in cells:
-            assert zero[i, j]
-            assert all(
-                (a, b) == (i, j) or abs(i - a) > 1 or abs(j - b) > 2
-                for a, b in cells
-            )
-        for text in labels:
-            assert text.get_fontsize() >= paper.MIN_TEXT
+        output.figure.draw_without_rendering()
+        box = ax.get_window_extent()
+        boxes = [t.get_window_extent() for t in labels]
+        for i, one in enumerate(boxes):
+            assert box.x0 <= one.x0, labels[i].get_text()
+            assert one.x1 <= box.x1, labels[i].get_text()
+            assert not any(one.overlaps(two) for two in boxes[i + 1 :])
     assert output.numbers["n_below_noise"] == total
 
 
@@ -322,3 +315,20 @@ def test_the_text_is_at_least_the_glossary_floor_and_never_bold(
         if t.get_visible() and t.get_text():
             assert t.get_fontsize() >= paper.MIN_TEXT, t.get_text()
             assert t.get_fontweight() in ("normal", 400), t.get_text()
+
+
+def test_labels_use_the_true_minus_and_never_a_signed_zero(
+    output: registry.FigureOutput,
+) -> None:
+    texts = [
+        t.get_text()
+        for ax in _matrices(output)
+        for t in ax.texts
+        if t.get_gid() == paper.TILE_LABEL
+    ]
+    assert texts
+    for text in texts:
+        assert text in ("0.00",) or text.startswith("$" + chr(0x2212)), text
+        assert "-" not in text
+        assert "." in text
+        assert not text.startswith(".")

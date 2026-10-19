@@ -19,14 +19,15 @@ from tomography.site import params
 from tomography.site import reading
 from tomography.site import runfiles
 from tomography.site import stats
-from tomography.site.figs import _rows
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.site.registry import RoleCount
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
-HEIGHT = 3.7
+HEIGHT = 4.3
+STEERING_BLOCK = 2
+SHORT = 2.4
 XLIM = (-0.35, 0.55)
 LANE = {"gpt2": -0.27, "base": 0.0, "post": 0.27}
 BLOCK_GAP = 0.6
@@ -320,13 +321,23 @@ def _legend(fig: Figure) -> None:
             for c in ramp
         )
 
+    def key(filled: bool) -> Line2D:
+        return Line2D(
+            [],
+            [],
+            ls="none",
+            marker=DIRECTION,
+            ms=MARKER,
+            color=paper.INK,
+            mfc=paper.INK if filled else "white",
+            mew=0.8,
+        )
+
     handles: list[Any] = [
         dots(paper.ENC["gpt2"]),
         dots(paper.ENC["qwen3"]),
-        _rows.series_handle("GPT-2 and base", paper.ROLE_KEY_MARKER, paper.INK),
-        _rows.series_handle(
-            "post-trained", paper.ROLE_KEY_MARKER, paper.INK, filled=False
-        ),
+        key(True),
+        key(False),
     ]
     fig.legend(
         handles,
@@ -346,51 +357,38 @@ def _legend(fig: Figure) -> None:
     )
 
 
-def _draw(fig: Figure, found: dict[str, dict[str, Cell]]) -> None:
-    ax = fig.subplots()
-    place = _positions()
-    for row in ROWS:
+def _caption(ax: Any, y: float, text: str, ink: str) -> None:
+    ax.text(
+        1.02,
+        y,
+        text,
+        transform=ax.get_yaxis_transform(),
+        fontsize=TEXT,
+        va="center",
+        ha="left",
+        color=ink,
+        clip_on=False,
+    )
+
+
+def _panel(
+    fig: Figure,
+    ax: Any,
+    rows: tuple[Row, ...],
+    place: dict[str, float],
+    found: dict[str, dict[str, Cell]],
+    top: float,
+) -> None:
+    for row in rows:
         for model, cell in found[row.key].items():
             _markers(ax, place[row.key], model, cell)
         counts = _counts(found[row.key])
         text = " ".join(
             f"{counts[r].hits}/{counts[r].total}" for r in stats.ROLES
         )
-        ax.text(
-            1.02,
-            place[row.key],
-            text,
-            transform=ax.get_yaxis_transform(),
-            fontsize=TEXT,
-            va="center",
-            ha="left",
-            color=paper.INK,
-            clip_on=False,
-        )
-    ax.text(
-        1.02,
-        -0.2,
-        "interval above 0",
-        transform=ax.get_yaxis_transform(),
-        fontsize=TEXT,
-        va="center",
-        ha="left",
-        color=paper.ENC["secondary_text"],
-        clip_on=False,
-    )
-    ax.text(
-        1.02,
-        0.3,
-        "GPT-2 / base / post",
-        transform=ax.get_yaxis_transform(),
-        fontsize=TEXT,
-        va="center",
-        ha="left",
-        color=paper.ENC["secondary_text"],
-        clip_on=False,
-    )
+        _caption(ax, place[row.key], text, paper.INK)
     firsts: dict[int, float] = {}
-    for row in ROWS:
+    for row in rows:
         firsts.setdefault(row.block, place[row.key])
     for block, y in firsts.items():
         ax.text(
@@ -404,11 +402,11 @@ def _draw(fig: Figure, found: dict[str, dict[str, Cell]]) -> None:
             ha="left",
             color=paper.ENC["secondary_text"],
         )
-    ax.set_yticks([place[r.key] for r in ROWS], [r.label for r in ROWS])
+    ax.set_yticks([place[r.key] for r in rows], [r.label for r in rows])
     lift = ScaledTranslation(0, 4.5 / 72, fig.dpi_scale_trans)
     for label in ax.get_yticklabels():
         label.set_transform(label.get_transform() + lift)
-    for row in ROWS:
+    for row in rows:
         note = ax.annotate(
             row.unit,
             xy=(0, place[row.key]),
@@ -421,14 +419,31 @@ def _draw(fig: Figure, found: dict[str, dict[str, Cell]]) -> None:
             color=paper.ENC["secondary_text"],
         )
         note.set_gid("row_unit")
-    ax.set_ylim(max(place.values()) + 0.7, -1.3)
+    ax.set_ylim(max(place[r.key] for r in rows) + 0.7, top)
     ax.set_xlim(*XLIM)
     ax.set_xticks([-0.2, 0.0, 0.2, 0.4])
     ax.xaxis.set_major_formatter(shared.minus_formatter())
-    ax.set_xlabel("margin over the baseline, in the unit under each row")
     shared.ref_line(ax, 0.0, "x")
     ax.tick_params(axis="y", length=0, labelsize=TEXT)
     ax.spines[["top", "right", "left"]].set_visible(False)
+
+
+def _draw(fig: Figure, found: dict[str, dict[str, Cell]]) -> None:
+    place = _positions()
+    upper = tuple(r for r in ROWS if r.block < STEERING_BLOCK)
+    lower = tuple(r for r in ROWS if r.block == STEERING_BLOCK)
+    tall = max(place[r.key] for r in upper) + 0.7 + 1.3
+    grid = fig.add_gridspec(2, 1, height_ratios=[tall, SHORT])
+    ax = fig.add_subplot(grid[0])
+    ax.set_gid("scorecard")
+    _panel(fig, ax, upper, place, found, -1.3)
+    _caption(ax, -0.2, "interval above 0", paper.ENC["secondary_text"])
+    _caption(ax, 0.3, "GPT-2 / base / post", paper.ENC["secondary_text"])
+    ax.set_xlabel("margin over the baseline, in the unit under each row")
+    low = fig.add_subplot(grid[1])
+    low.set_gid("steering")
+    _panel(fig, low, lower, place, found, place[lower[0].key] - 1.1)
+    low.set_xlabel("win rate, lowest steering vector minus highest random")
     _legend(fig)
 
 
@@ -530,8 +545,9 @@ DETAIL = (
     "same layer; row 6, the random direction of the finder comparison; "
     "row 7, a word classifier; row 8, the strongest of popularity and two "
     "text classifiers; row 9, the model's answer probability alone. Row 10 "
-    "is not an interval: its marker is the lowest win rate of the 3 "
-    "logistic steering vectors minus the highest of the 3 random "
+    "is not an interval and no interval is stored for it, so it has its "
+    "own panel below with its own axis: its marker is the lowest win rate "
+    "of the 3 logistic steering vectors minus the highest of the 3 random "
     "directions, so a marker above zero means every vector beats every "
     "random direction. Intervals cover the sampling of the test items and "
     "treat the two arms as independent, which makes them conservative; "
