@@ -11,6 +11,7 @@ in the text comes from a figure or table the builder computed.
 import dataclasses
 import html
 import re
+import string
 
 from tomography.site import content
 from tomography.site import references
@@ -199,10 +200,13 @@ class Page:
             for i, sub in enumerate(section.subsections, 1):
                 visit(sub, f"{label}.{i}")
 
+        visit(Section("front", "", items=content.FRONT_ITEMS), "")
         for number, section in enumerate(content.BODY, 1):
             visit(section, str(number))
         figure = table = 0
-        for letter, section in zip("ABCDE", content.APPENDICES, strict=True):
+        for letter, section in zip(
+            string.ascii_uppercase, content.APPENDICES, strict=False
+        ):
             self.sections[section.key] = letter
             for item in section.items:
                 kind, _, key = item.partition(":")
@@ -457,10 +461,8 @@ class Page:
     def heading(self, section: Section, level: int, number: str) -> str:
         """Renders a numbered heading."""
         tag = f"h{level}"
-        return (
-            f'<{tag} id="{section.key}">{number}&ensp;{_e(section.title)}'
-            f"</{tag}>"
-        )
+        label = f"{number}&ensp;" if number else ""
+        return f'<{tag} id="{section.key}">{label}{_e(section.title)}</{tag}>'
 
     def section(self, section: Section, number: str, level: int = 2) -> str:
         """Renders a section with its subsections."""
@@ -555,7 +557,9 @@ class Page:
     def appendix(self) -> str:
         """Renders the four appendices."""
         parts = ['<section id="appendix">']
-        for letter, section in zip("ABCDE", content.APPENDICES, strict=True):
+        for letter, section in zip(
+            string.ascii_uppercase, content.APPENDICES, strict=False
+        ):
             parts.append(self.section(section, f"Appendix {letter}"))
         parts.append("</section>")
         return "".join(parts)
@@ -563,6 +567,10 @@ class Page:
     def contents(self) -> str:
         """Renders the contents line under the abstract."""
         links = [
+            f'<a href="#{content.KEY_FINDINGS.key}">'
+            f"{_e(content.KEY_FINDINGS.title)}</a>"
+        ]
+        links += [
             f'<a href="#{s.key}">{n}&ensp;{_e(s.title)}</a>'
             for n, s in enumerate(content.BODY, 1)
         ]
@@ -611,8 +619,14 @@ def render_page(doc: Document) -> str:
         The HTML document.
     """
     page = Page(doc)
+    summary = (
+        f'<p class="tldr"><span class="runin">TL;DR.</span> '
+        f"{page.text(content.TLDR)}</p>"
+        + "".join(page.item(item) for item in content.FRONT_ITEMS)
+    )
     abstract = page.paragraph(content.ABSTRACT)
     contents = page.contents()
+    findings = page.section(content.KEY_FINDINGS, "") + page.notes()
     body = page.body()
     masthead = _e(doc.date)
     if doc.commit:
@@ -634,9 +648,10 @@ def render_page(doc: Document) -> str:
         f'<p class="repo"><a href="{content.REPO_URL}">'
         f"{_e(content.REPO_TEXT)}</a></p>"
         f'<p class="date">{masthead}</p></header>'
+        f"{summary}"
         f'<section class="abstract" id="abstract"><h2>Abstract</h2>'
         f"{abstract}</section>"
-        f"{contents}{body}</main>\n"
+        f"{contents}{findings}{body}</main>\n"
         '<footer class="colophon"><p>Set in Latin Modern under the GUST '
         "Font License; the code is released under the MIT license; no "
         "analytics.</p></footer>\n"

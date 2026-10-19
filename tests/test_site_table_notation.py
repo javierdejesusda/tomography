@@ -61,3 +61,13 @@ def test_no_underscore_or_dash_in_the_table() -> None:
     texts = [out.claim, out.detail, *(c for r in out.rows for c in r)]
     assert not any("_" in t for t in texts)
     assert not any(ch in t for t in texts for ch in DASHES)
+
+
+def test_the_margin_has_no_single_layer_claim() -> None:
+    text = " ".join(
+        cell
+        for row in registry.build_table("notation", Manifest(RESULTS)).rows
+        for cell in row
+    )
+    assert "on the same test pairs at the same layer." not in text
+    assert "each at the layer chosen on its own select split" in text

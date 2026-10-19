@@ -50,3 +50,16 @@ def test_workflow_builds_the_site_with_the_package_command() -> None:
     assert "path: _site" in text
     assert "environment:" in text
     assert "github-pages" in text
+
+
+def test_workflow_checks_out_the_history_for_the_masthead_commit() -> None:
+    text = _text()
+    assert "fetch-depth: 0" in text
+
+
+def test_workflow_rebuilds_when_the_references_or_the_viz_rules_change() -> (
+    None
+):
+    text = _text()
+    for path in ("docs/references.bib", "src/tomography/viz/**"):
+        assert f'"{path}"' in text

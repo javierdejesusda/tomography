@@ -535,12 +535,12 @@ def build(manifest: Manifest) -> FigureOutput:
         cover=stats.per_role_text(cover),
         pmin=pmin,
         pmax=pmax,
-        hi_max=f"{float(lat[widest]['hi']):.3f}",
+        hi_max=_rows.number(float(lat[widest]["hi"]), 3),
         hi_model=paper.display_name(widest),
         above=stats.per_role_text(above),
-        g_gain=f"{float(small['diff_vs_confidence']):.3f}",
-        g_lo=f"{float(small['lo']):.3f}",
-        g_hi=f"{float(small['hi']):.3f}",
+        g_gain=_rows.number(float(small["diff_vs_confidence"]), 3),
+        g_lo=_rows.number(float(small["lo"]), 3),
+        g_hi=_rows.number(float(small["hi"]), 3),
     )
     return FigureOutput(
         fig, CLAIM, detail, numbers, _group.csv_text(HEADER, csv_rows), counts

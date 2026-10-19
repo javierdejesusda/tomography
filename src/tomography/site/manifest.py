@@ -90,7 +90,9 @@ class Manifest:
         return sorted(found, key=store.model_rank)
 
     def runs(self, exp: str, model: str) -> list[RunInfo]:
-        """Lists every run directory of a cell, oldest hash name first.
+        """Lists every run directory of a cell, sorted by directory name.
+
+        The directory names are hashes, so the order carries no age.
 
         Args:
             exp: Experiment id.
@@ -111,6 +113,12 @@ class Manifest:
             exp: Experiment id.
             model: Checkpoint key.
             **select: `method` for `p1` and `template` for `p9d`.
+
+        The rule per experiment: `p1` keeps the runs of the selected method
+        (logistic by default) and, if several remain, those with the most
+        tasks; `p9d` keeps the runs of the selected template; the latest run
+        (by start time) is taken for the experiments in `LATEST`; any other
+        cell must hold one run.
 
         Returns:
             The run directory, or None when the cell has no matching run.

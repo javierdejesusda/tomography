@@ -194,3 +194,11 @@ def test_the_largest_upper_bound_of_the_direction_gain_is_a_number(
                 upper.append(r["hi"])
     assert output.numbers["gain_upper_max"] == max(upper)
     assert fmt(max(upper)) == "0.032"
+
+
+def test_the_added_columns_name_the_confidence_not_one_probability(
+    output: registry.TableOutput,
+) -> None:
+    text = output.claim + " " + output.detail
+    assert "answer probability" not in text
+    assert "confidence of the model, which stacks five output signals" in text

@@ -1,4 +1,5 @@
 import importlib
+import importlib.util
 
 from tomography.site import registry
 
@@ -7,45 +8,40 @@ FIGURE_KEYS = (
     "method",
     "finders",
     "reading",
-    "wording",
     "truth",
     "steering",
     "knowledge_reading",
-    "knowledge_steering",
-    "approximate",
     "base_post",
 )
 APPENDIX_FIGURE_KEYS = (
     "a_reading_curves",
     "a_layers",
-    "a_reading_heat",
     "a_finders_gpt2",
     "a_finders_qwen3",
+    "wording",
     "a_wording",
     "a_truth_cities",
     "a_knowledge_matrix",
+    "knowledge_steering",
     "a_dose_runs",
     "a_dose_types",
+    "approximate",
     "a_links",
 )
-TABLE_KEYS = (
-    "checkpoints",
-    "notation",
-    "finders",
-    "reading",
-    "truth",
-    "steering",
-    "knowledge",
-    "approximate",
-)
+TABLE_KEYS = ("checkpoints", "reading")
 APPENDIX_TABLE_KEYS = (
     "assets",
+    "notation",
     "finders_all",
     "reading_full",
     "sizes",
     "prompts",
     "wordings",
+    "truth",
     "truth_sets",
+    "steering",
+    "knowledge",
+    "approximate",
     "base_post",
 )
 
@@ -111,7 +107,6 @@ def test_the_modules_ported_from_the_first_draft_exist() -> None:
         ("figure", "a_links"),
         ("table", "checkpoints"),
         ("table", "reading"),
-        ("table", "finders"),
         ("table", "knowledge"),
         ("table", "approximate"),
         ("table", "steering"),
@@ -124,3 +119,18 @@ def test_the_modules_ported_from_the_first_draft_exist() -> None:
 
 def test_every_registered_module_exists() -> None:
     assert registry.missing() == []
+
+
+def test_the_cut_entries_have_no_module() -> None:
+    for name in (
+        "tomography.site.figs.a_reading_heat",
+        "tomography.site.tables.finders",
+    ):
+        assert importlib.util.find_spec(name) is None
+    assert "finders" not in registry.MAIN_TABLES
+    assert "a_reading_heat" not in registry.APPENDIX_FIGURES
+
+
+def test_the_registry_has_eight_main_figures_and_two_main_tables() -> None:
+    assert len(registry.MAIN_FIGURES) == 8
+    assert len(registry.MAIN_TABLES) == 2

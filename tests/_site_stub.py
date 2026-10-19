@@ -27,8 +27,8 @@ TOKEN = re.compile(r"\[\[(.+?)\]\]")
 
 
 def _texts() -> list[str]:
-    texts = [content.ABSTRACT]
-    sections = [*content.BODY, *content.APPENDICES]
+    texts = [content.ABSTRACT, content.TLDR]
+    sections = [*content.BODY, *content.APPENDICES, content.KEY_FINDINGS]
     while sections:
         section = sections.pop()
         texts += [*section.paragraphs, *section.after]
@@ -107,7 +107,7 @@ def document(commit: str = "abc1234") -> page.Document:
         {k: figure(k) for k in registry.MAIN_FIGURES},
         {k: table(k) for k in registry.MAIN_TABLES},
         {k: figure(k) for k in registry.APPENDIX_FIGURES},
-        f"Results at commit {commit}, built 1 January 2027",
+        f"Results at commit {commit}, committed 1 January 2027",
         references.parse(BIB.read_text(encoding="utf-8")),
         {k: table(k) for k in registry.APPENDIX_TABLES},
         commit,

@@ -5,6 +5,7 @@ import runpy
 import pytest
 
 from tomography.site import registry
+from tomography.site import runfiles
 from tomography.site.manifest import Manifest
 from tomography.viz import paper
 
@@ -72,3 +73,26 @@ def test_no_underscore_or_run_code(output: registry.TableOutput) -> None:
     texts += [c for r in output.rows for c in r]
     assert not any("_" in t or "`" in t for t in texts)
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
+
+
+def test_the_layer_is_looked_up_in_the_layers_array(
+    output: registry.TableOutput, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_data, real_arrays = runfiles.data, runfiles.arrays
+
+    def shifted_data(path: Path, name: str):  # type: ignore[no-untyped-def]
+        out = real_data(path, name)
+        if name == "sizes_sentiment.json":
+            out = {**out, "layer": out["layer"] + 100}
+        return out
+
+    def shifted_arrays(path: Path, name: str):  # type: ignore[no-untyped-def]
+        out = real_arrays(path, name)
+        if name == "sizes_sentiment.npz":
+            out = {**out, "layers": out["layers"] + 100}
+        return out
+
+    monkeypatch.setattr(runfiles, "data", shifted_data)
+    monkeypatch.setattr(runfiles, "arrays", shifted_arrays)
+    shifted = registry.build_table("sizes", Manifest(ROOT))
+    assert shifted.rows == output.rows

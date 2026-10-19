@@ -46,8 +46,9 @@ ROWS = (
     ),
     (
         "margin",
-        "Accuracy of v minus accuracy of u on the same test pairs at the "
-        "same layer.",
+        "Accuracy of v minus accuracy of u on the same test pairs, both at "
+        "the same layer except in the finder comparison, which reads each "
+        "at the layer chosen on its own select split.",
     ),
     ("relative depth", "Layer index divided by the number of layers."),
     (
