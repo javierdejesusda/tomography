@@ -221,8 +221,15 @@ def test_one_marker_per_measure_family_and_the_role_key_is_its_own() -> None:
 
 def test_the_encoding_rules_are_stated_in_the_module() -> None:
     assert paper.ENCODING_RULES.count("\n") >= 4
-    for word in ("identity", "Filled", "open", "hexagon", "band"):
+    for word in ("identity", "Filled", "open", "circle", "band"):
         assert word in paper.ENCODING_RULES
+
+
+def test_rule_three_keys_role_with_circles_not_the_hexagon() -> None:
+    parts = paper.ENCODING_RULES.split("\n3. ")[1].split("\n4. ")
+    rule = " ".join(parts[0].split())
+    assert "CIRCLE" in rule
+    assert "hexagon" not in paper.ENCODING_RULES
 
 
 def test_category_markers_stay_clear_of_measures_and_the_role_key() -> None:

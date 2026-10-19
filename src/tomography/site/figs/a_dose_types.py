@@ -211,12 +211,9 @@ def build(manifest: Manifest) -> FigureOutput:
                     lw=FRAME_WIDTH,
                     label="framed: beyond all 3 random directions",
                 ),
-                _rows.series_handle(
-                    "post-trained", "h", paper.INK, filled=False
-                ),
             ],
             loc="outside lower center",
-            ncol=4,
+            ncol=3,
             handlelength=1.0,
             columnspacing=1.0,
             fontsize=6.5,

@@ -197,3 +197,40 @@ def test_figure_5_draws_circles_a_diamond_and_the_role_free_rows(
         paper.MEASURE_MARKERS["direction"],
         paper.MEASURE_MARKERS["paper_finder"],
     }
+
+
+CIRCLE_KEY_FIGURES = ("knowledge_steering", "a_dose_runs", "a_dose_types")
+
+
+def _key_handles(fig: Figure) -> list[Line2D]:
+    legends = list(fig.legends)
+    for sub in fig.subfigs:
+        legends.extend(sub.legends)
+    return [
+        h
+        for leg in legends
+        for h in leg.legend_handles
+        if isinstance(h, Line2D) and str(h.get_marker()) not in ("None", "")
+    ]
+
+
+@pytest.mark.parametrize("key", CIRCLE_KEY_FIGURES)
+def test_the_role_key_is_a_filled_and_an_open_circle_not_a_hexagon(
+    key: str,
+) -> None:
+    fig = registry.build_figure(key, Manifest(RESULTS)).figure
+    handles = _key_handles(fig)
+    assert paper.ROLE_KEY_MARKER not in {h.get_marker() for h in handles}
+    if key == "a_dose_types":
+        return
+    role = {
+        h.get_label(): h.get_markerfacecolor() == "white"
+        for h in handles
+        if h.get_label() in ("GPT-2 and base", "post-trained")
+    }
+    assert role == {"GPT-2 and base": False, "post-trained": True}
+    assert all(
+        h.get_marker() == "o"
+        for h in handles
+        if h.get_label() in ("GPT-2 and base", "post-trained")
+    )

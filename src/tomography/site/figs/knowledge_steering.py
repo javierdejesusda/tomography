@@ -387,9 +387,6 @@ def build(manifest: Manifest) -> FigureOutput:
         legend = top.legend(
             handles=[
                 _rows.series_handle(
-                    "direction, unknown questions", "o", paper.INK
-                ),
-                _rows.series_handle(
                     "direction, known questions",
                     paper.QUESTION_SET_MARKERS["known"],
                     paper.INK,
@@ -397,9 +394,9 @@ def build(manifest: Manifest) -> FigureOutput:
                 _rows.series_handle(
                     "random direction", "x", paper.ENC["random_marker"]
                 ),
-                _rows.series_handle("GPT-2 and base", "h", paper.INK),
+                _rows.series_handle("GPT-2 and base", "o", paper.INK),
                 _rows.series_handle(
-                    "post-trained", "h", paper.INK, filled=False
+                    "post-trained", "o", paper.INK, filled=False
                 ),
             ],
             loc="outside upper center",

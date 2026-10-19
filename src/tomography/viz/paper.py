@@ -157,8 +157,9 @@ ENCODING_RULES = """Encoding rules of every figure (the glossary).
    triangles, the paper's finder a diamond, and each other baseline
    (popularity, answer probability, supervised probe) its own shape in a
    non-ramp ink.
-3. Filled markers mean GPT-2 and Qwen3 base, open ones post-trained; every
-   legend that uses fill carries the hexagon role key (`ROLE_KEY_MARKER`).
+3. Filled markers mean GPT-2 and Qwen3 base, open ones post-trained; where a
+   legend keys role it uses a filled and an open CIRCLE in a neutral ink,
+   like the data (`ROLE_KEY_MARKER` is retired).
 4. Post-trained lines use one style (`LINESTYLES["post_trained"]`) where role
    is not given by the panel or row block. Where it is, a dashed segment may
    carry a state under rule 8 (Figure 7: not fluent) and the figure key says

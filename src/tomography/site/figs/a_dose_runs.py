@@ -90,7 +90,6 @@ def build(manifest: Manifest) -> FigureOutput:
             ax.set_axis_off()
         legend = fig.legend(
             handles=[
-                _rows.series_handle("unknown questions", "o", paper.INK),
                 _rows.series_handle(
                     "known questions",
                     paper.QUESTION_SET_MARKERS["known"],
@@ -103,9 +102,9 @@ def build(manifest: Manifest) -> FigureOutput:
                     lw=paper.DATA_WIDTH,
                     label="mean of 3 random directions",
                 ),
-                _rows.series_handle("GPT-2 and base", "h", paper.INK),
+                _rows.series_handle("GPT-2 and base", "o", paper.INK),
                 _rows.series_handle(
-                    "post-trained", "h", paper.INK, filled=False
+                    "post-trained", "o", paper.INK, filled=False
                 ),
             ],
             loc="outside lower center",
