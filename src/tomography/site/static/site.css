@@ -246,6 +246,10 @@ td.k {
   white-space: nowrap;
 }
 
+td {
+  overflow-wrap: anywhere;
+}
+
 th,
 td {
   padding: 0.16em 0.25em;
