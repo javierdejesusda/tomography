@@ -2320,7 +2320,7 @@ stored. This run has no emotion gallery.
 
 M1, C2, P7 and C5 also ran on `gpt2-large` and `gpt2-xl` (runs named under each experiment below), all made at `f4d414d` with a clean tree on a rented GPU pod (NVIDIA RTX A4500, torch 2.14.1+cu130, transformers 5.19.0), with the default config of each experiment (batch size 16; C5 with 1,000 questions in the pool, as in the earlier C5 runs). Unlike the `gpt2` runs above, they carry the controls that this section says the earlier runs lack: a random-direction arm (unit directions norm-matched to the steering arm; M1 already had one) and a fluency measure, the perplexity of held-out neutral text under the steered model and the distinct-1 of the generated text, both from `table_effects`. The two sizes are two models: the tables are separate and no metric is pooled over them. To read the cost next to the score, the descriptive rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) is used: a setting is called fluent when its mean perplexity is at most 1.5 times the unsteered one and its mean distinct-1 is at least 0.15. It is a rule chosen for this document and not a threshold of the code. LR1 and C4 also ran on `gpt2-medium`,
 `gpt2-large` and `gpt2-xl`, in chain 17 at `89ea7cb` on an RTX A6000 pod; they are described under their own heading at
-the end of this section.
+the end of this section. M1 also ran on `gpt2-medium` (run `m1/gpt2-medium/eef91d1dfe8e`, made at `bab5b75` on an RTX 3090 pod); it is reported in its own block after the `gpt2-large` and `gpt2-xl` M1 block.
 
 #### M1 on gpt2-large and gpt2-xl
 
@@ -5124,8 +5124,8 @@ or 750 (prompt, reader) pairs and the test accuracy is on 4,808 pairs, at the la
 - **The random direction.** On the base checkpoint its win rate includes 0.5 at every strength on both judges (0.510, 0.509,
   0.477 [0.442, 0.513] and 0.475 [0.439, 0.510] on the check judge at 0.3). On the post-trained checkpoint it includes 0.5 at
   0.1 and 0.2 (0.519, 0.531) and is above it at 0.3 on both judges (0.549 [0.514, 0.585] and, on the check judge, 0.625
-  [0.590, 0.659]); that check-judge value is 0.125 above 0.5 and comes from one run, and the finders are still above it (0.745
-  to 0.891). At 0.3 the finders are above the random win rate by 0.031 (`pca_raw`) to 0.265 (`logistic`) on the base
+  [0.590, 0.659]), with intervals that exclude 0.5; these two values come from one run, the check-judge one is 0.125 above
+  0.5, and the finders are still above it (0.745 to 0.891). At 0.3 the finders are above the random win rate by 0.031 (`pca_raw`) to 0.265 (`logistic`) on the base
   checkpoint and by 0.223 (`logistic`) to 0.377 (`pca_raw`) on the post-trained one.
 - **Judges and empty completions.** The share of swept settings with the same dose sign under both judges is 0.944 on the
   base checkpoint and 1.000 on the post-trained one (0.889 and 0.833 on the 1.7B pair, 0.944 and 0.944 on the 4B pair). The
@@ -5212,8 +5212,9 @@ is the gap without a projection.
 - **The probe is erased for one finder.** The probe accuracy is 0.677 [0.576, 0.758] before the projection on the base
   checkpoint and 0.682 [0.605, 0.742] on the post-trained one. After `mean_diff` it is 0.500 on both, the only interval clear
   of the one before. After `logistic`, `pca_diff`, `pca_raw` and `kmeans` it is 0.631 to 0.657 and 0.609 to 0.667, falls of
-  0.021 to 0.047 and 0.015 to 0.073 whose intervals overlap the ones before. After the random direction it is unchanged. As
-  on the 1.7B and 4B pairs, `logistic` leaves the probe close to its value before.
+  0.021 to 0.047 and 0.015 to 0.073 whose intervals overlap the ones before. After the random direction it is unchanged. The
+  probe falls least after `logistic`: by 0.047 on the base checkpoint and 0.015 on the post-trained one, against 0.000 to 0.030
+  on the 1.7B and 4B checkpoints.
 - **The behavioral gap does not fall.** On the base checkpoint it is 0.247 [0.122, 0.377] without a projection and 0.090 to
   0.191 under the projection of a finder (0.161 [0.098, 0.260] for the random direction, inside that range), every interval
   overlapping the unprojected one, so the lower point values are not specific to the finders; on the check judge it is 0.107
@@ -7405,18 +7406,15 @@ Config hashes (12 hex digits), chain 43:
 | LR1        | 03ba155a9fe7    | 74d01330d28c |
 | C4         | b08c4e236dcf    | 4d4ff337ade5 |
 
-Chain 41: M1 on gpt2-medium and the Qwen3 0.6B pair (3 runs). `m1/gpt2-medium/eef91d1dfe8e`,
+Chain 41 (M1): M1 on gpt2-medium and the Qwen3 0.6B pair (3 runs). `m1/gpt2-medium/eef91d1dfe8e`,
 `m1/qwen3-0.6b-base/bf4cc620da8b` and `m1/qwen3-0.6b/976e4c4a87e1` were made at `bab5b75` (the merge of pull request 199, an
 ancestor of the current main; `git diff --stat bab5b75 HEAD -- src` is empty, so their code is that of main) with a clean
 tree on one rented GPU pod (NVIDIA GeForce RTX 3090, torch 2.14.1+cu130, transformers 5.19.0), with the default M1 config
-of their model (`config.json` of each run) and batch size 16. The time between `started_at` and `finished_at` of the stored
-`meta.json` is 2,485 s (`gpt2-medium`), 2,857 s (`qwen3-0.6b-base`) and 2,847 s (`qwen3-0.6b`); the pod ran two jobs at a
-time on 2026-10-18, alongside the P1 runs of `gpt2-xl` of the same chain (not part of this change), and the chain log of the
-launcher, which is outside the repository, records exit status 0 for each of the three runs and ends with `CHAIN_DONE
-failed=0`. The config hash of each run was recomputed by loading its stored `config.json` (the original pod config and the
-exported one, which agree) into the M1 config class and hashing it, and all three agree with the directory names and with
-the hash of the default M1 config of their model. None of the three replaces a run on main. Exporting these runs changed no
-tracked result.
+of their model (`config.json` of each run). The stored `meta.json` gives these start and finish times on 2026-10-18 (UTC):
+22:01:18 to 22:42:43 for `gpt2-medium` (2,485 s), 22:42:51 to 23:30:28 for `qwen3-0.6b-base` (2,857 s) and 22:50:04 to
+23:37:31 for `qwen3-0.6b` (2,847 s). The config hash of each run was recomputed by loading its stored `config.json` into the
+M1 config class and hashing it, and all three agree with the directory names and with the hash of the default M1 config of
+their model. None of the three replaces a run on main. Exporting these runs changed no tracked result.
 
 Config hashes (12 hex digits), chain 41:
 
