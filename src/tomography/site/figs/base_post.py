@@ -36,9 +36,10 @@ ROWS = (
     ("steering", "steering", "steering win rate"),
 )
 OTHER = ("utility", "morality", "truth", "honesty", "truthfulqa")
+PAIRED = {"r2": "utility", "r3": "morality", "r5": "honesty", "r7": "truth"}
 CLAIM = (
-    "Post-training lowers held-out sentiment reading and leaves most other "
-    "readings within their intervals."
+    "Post-training lowers held-out sentiment reading; on the other readings "
+    "most intervals include zero, which is not evidence of no change."
 )
 DETAIL = (
     "Post-trained minus base checkpoint for each Qwen3 size (0.6B, 1.7B and "
@@ -50,7 +51,9 @@ DETAIL = (
     "is distilled from a larger model, so the contrast is with this recipe "
     "and not with instruction tuning in general ([[sec:limitations]]). The "
     "stored paired comparisons of the 0.6B and 1.7B pairs are in "
-    "[[table:base_post]]."
+    "[[table:base_post]]. An interval that includes zero does not show that "
+    "nothing changed: the seed-paired differences of [[table:base_post]] "
+    "exclude zero for {paired}."
 )
 
 
@@ -126,6 +129,27 @@ def _difference(
         return stats.diff_interval(a["value"], b["value"], a["n"], b["n"])
     value, n = _accuracy(manifest, row, post)
     return stats.diff_interval(value, _accuracy(manifest, row, base)[0], n)
+
+
+def _paired_excluding(manifest: Manifest) -> list[tuple[str, str]]:
+    """Finds the stored seed-paired differences whose interval excludes zero.
+
+    Args:
+        manifest: The run resolver.
+
+    Returns:
+        (measure name, size such as `0.6B`) in size then measure order.
+    """
+    measures = list(PAIRED.values())
+    found = []
+    for model in manifest.models("p8"):
+        run = manifest.run("p8", model)
+        assert run is not None
+        for row in runfiles.rows(run, "table.json"):
+            if row["source"] in PAIRED and (row["lo"] > 0 or row["hi"] < 0):
+                size = str(row["tuned"]).split("-")[1].upper()
+                found.append((PAIRED[row["source"]], size))
+    return sorted(found, key=lambda f: (float(f[1][:-1]), measures.index(f[0])))
 
 
 def _signed(value: float) -> str:
@@ -264,7 +288,12 @@ def build(manifest: Manifest) -> FigureOutput:
         r: [s for s in sizes if found[(r, s)][2] < 0]
         for r in ("knowledge", "steering")
     }
+    paired = _paired_excluding(manifest)
+    numbers["paired_excluding_zero"] = float(len(paired))
+    for name, size in paired:
+        numbers[f"paired_{name}_{size.lower().replace('.', '')}"] = 1.0
     detail = DETAIL.format(
+        paired=_rows.join_and([f"{n} on {s}" for n, s in paired]),
         low=_rows.number(falls[0]),
         high=_rows.number(falls[-1]),
         below=int(numbers["sent_below"]),
