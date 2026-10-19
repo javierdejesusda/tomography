@@ -290,7 +290,7 @@ def _panel_levels(
     )
     band_note.set_gid("band_label")
     ax.set_xlim(*XLIM_A)
-    ax.set_xticks([0.2, 0.4, 0.6, 0.8])
+    ax.set_xticks([0.2, 0.4, 0.6, 0.8, 1.0])
     ax.set_xlabel("MC1 accuracy on TruthfulQA")
     ax.spines["left"].set_visible(False)
 

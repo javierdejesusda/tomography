@@ -549,3 +549,14 @@ def test_the_band_label_sits_right_of_the_band_clear_of_the_line(
 
 def _gid_prefix(ax: Any, prefix: str) -> list[Any]:
     return [ln for ln in ax.get_lines() if str(ln.get_gid()).startswith(prefix)]
+
+
+def test_panel_a_ticks_reach_the_upper_limit(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "levels")
+    ticks = [float(t) for t in ax.get_xticks()]
+    assert ticks[-1] == ax.get_xlim()[1]
+    output.figure.draw_without_rendering()
+    labels = [t.get_text() for t in ax.get_xticklabels()]
+    assert "1.0" in labels[-1]
