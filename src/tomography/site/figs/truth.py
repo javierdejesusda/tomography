@@ -24,7 +24,12 @@ from tomography.site.registry import RoleCount
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
-HEIGHT = 5.4
+HEIGHT = 5.8
+TOP = -2.2
+READER_NAMES = {
+    "truthfulqa_reader": "truth reader",
+    "persona_reader": "persona reader",
+}
 TEXT_METHODS = ("text_word", "text_char")
 TEXT_NAMES = {"text_word": "words", "text_char": "characters"}
 DIRECTION = paper.MEASURE_MARKERS["direction"]
@@ -220,6 +225,33 @@ def _panel_levels(
                 f"{name}:{model}",
                 color=color,
             )
+    top_model = min(rows, key=lambda m: rows[m])
+    top = rows[top_model]
+    for name, (_, _, dodge) in READERS.items():
+        cell = data[top_model].reads[name]
+        note = ax.annotate(
+            READER_NAMES[name],
+            xy=(cell.value, top + dodge),
+            xytext=(0, 4),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=TEXT,
+            color=paper.ENC["secondary_text"],
+        )
+        note.set_gid(f"reader_label:{name}")
+    lo = min(first.text[m].lo for m in TEXT_METHODS)
+    hi = max(first.text[m].hi for m in TEXT_METHODS)
+    band_note = ax.text(
+        (lo + hi) / 2,
+        TOP + 0.15,
+        "words, characters",
+        ha="center",
+        va="top",
+        fontsize=TEXT,
+        color=paper.ENC["secondary_text"],
+    )
+    band_note.set_gid("band_label")
     ax.set_xlim(*XLIM_A)
     ax.set_xticks([0.2, 0.4, 0.6, 0.8])
     ax.set_xlabel("MC1 accuracy on TruthfulQA")
@@ -341,9 +373,11 @@ def _legend(fig: Figure) -> None:
         mark("|", paper.ENC["random_marker"], ms=6, mew=1.0),
     ]
     labels = [
-        "truth reader (a), negated set with interval below 0.5 (b)",
+        "truth reader (a), negated set with\ninterval below 0.5 (d, e)",
         "honesty persona reader",
-        "text-only classifier (line) and its interval (band)",
+        "text-only classifiers on words and\n"
+        "characters (lines), each with its\n"
+        "95 percent interval (band)",
         "answer log-probability",
         "affirmative set",
         "negated set, otherwise",
@@ -357,6 +391,7 @@ def _legend(fig: Figure) -> None:
         frameon=False,
         fontsize=TEXT,
         columnspacing=1.0,
+        labelspacing=0.8,
         handletextpad=0.4,
     )
 
@@ -461,24 +496,25 @@ def _detail(
     gpt2 = counts["tqa_inside"]["gpt2"].total
     return (
         "(a) MC1 accuracy on TruthfulQA of the truth reader (circle) and of "
-        "the honesty persona reader (plus) at the layer chosen on "
+        "the honesty persona reader (dark grey circle) at the layer chosen on "
         f"validation (whiskers are 95 percent Wilson intervals over "
         f"{numbers['n_questions']:.0f} questions); each of the two "
         "classifiers that see only the words is a green line at its "
-        "accuracy with its own interval as a band. The answer "
-        "log-probability is in its own panel with a Wilson interval and the "
-        f"dotted chance level of {numbers['chance']:.3f}. The difference "
-        "panel gives the reader minus the more accurate text-only "
+        "accuracy with its own interval as a band. (c) The answer "
+        "log-probability has its own panel with a Wilson interval and the "
+        f"dotted chance level of {numbers['chance']:.3f}. (b) The "
+        "difference panel gives the reader minus the more accurate text-only "
         "classifier with the conservative interval d plus or minus 1.96 "
         "times the square root of p1(1-p1)/n plus p2(1-p2)/n over the same "
         f"{numbers['n_questions']:.0f} questions; intervals that exclude "
-        f"zero: {stats.per_role_text(counts['diff_excludes_zero'])}. (b) "
-        "Accuracy of the truth reader on statements about cities and on "
-        "Spanish to English translations: a dumbbell from the affirmative "
+        f"zero: {stats.per_role_text(counts['diff_excludes_zero'])}. (d, e) "
+        "Accuracy of the truth reader on statements about cities (d) and on "
+        "Spanish to English translations (e): a dumbbell from the affirmative "
         "set to its negation, filled where the Wilson interval of the "
         "negated set lies wholly below 0.5, with the accuracy of a random "
         "direction on the negated set (grey tick) and the region below "
-        "chance shaded; whiskers in (b) are not drawn, the criterion uses "
+        "chance shaded; whiskers in (d) and (e) are not drawn, the criterion "
+        "uses "
         "95 percent Wilson intervals over the evaluation pairs of each "
         "set. GPT-2 reads affirmative cities at only "
         f"{numbers['gpt2_cities_min']:.2f} to {numbers['gpt2_cities_max']:.2f}"
@@ -554,7 +590,7 @@ def build(manifest: Manifest) -> FigureOutput:
         _panel_dumbbell(panels[4], rows, data, PAIRS[1])
         first, second, third, cities, translations = panels
         for ax in panels:
-            ax.set_ylim(max(rows.values()) + 0.7, -0.7)
+            ax.set_ylim(max(rows.values()) + 0.7, TOP)
         for ax in (first, cities):
             ax.set_yticks(list(rows.values()), names)
         for ax in (second, third, translations):

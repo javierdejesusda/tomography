@@ -21,6 +21,7 @@ from tomography.site import stats
 from tomography.site.figs import wording
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
+from tomography.viz import axes as paper_axes
 from tomography.viz import paper
 
 DROPPED = "no_trailing_space"
@@ -154,6 +155,21 @@ def _frame(
     ax.add_patch(patch)
 
 
+def _signed(value: float) -> str:
+    """Writes a margin with two decimals and a true minus.
+
+    Args:
+        value: The margin.
+
+    Returns:
+        The label; a value that rounds to zero has no sign.
+    """
+    text = f"{value:.2f}"
+    if text in ("-0.00", "0.00"):
+        return "0.00"
+    return f"${paper_axes.MINUS}$" + text[1:] if text[0] == "-" else text
+
+
 def _annotated(matrix: np.ndarray) -> set[tuple[int, int]]:
     """Picks the cells at or below zero whose labels cannot overlap.
 
@@ -161,8 +177,8 @@ def _annotated(matrix: np.ndarray) -> set[tuple[int, int]]:
         matrix: The margins of one checkpoint.
 
     Returns:
-        Cell indices, lowest margin first, none within one row and two
-        columns of another.
+        Cell indices, lowest margin first, none within one row and three
+        columns of another (three, as a label spans about three cells).
     """
     k = matrix.shape[0]
     low = sorted(
@@ -173,7 +189,7 @@ def _annotated(matrix: np.ndarray) -> set[tuple[int, int]]:
     )
     chosen: list[tuple[int, int]] = []
     for _, i, j in low:
-        if all(abs(i - a) > 1 or abs(j - b) > 2 for a, b in chosen):
+        if all(abs(i - a) > 1 or abs(j - b) > 3 for a, b in chosen):
             chosen.append((i, j))
     return set(chosen)
 
@@ -213,9 +229,9 @@ def _draw(
             if matrix[i, j] > 0.0 or (i, j) not in shown_cells:
                 continue
             text = ax.text(
-                j,
+                min(max(j, 1.5), k - 2.5),
                 i,
-                f"{matrix[i, j]:.2f}".replace("0.", ".", 1),
+                _signed(matrix[i, j]),
                 ha="center",
                 va="center",
                 fontsize=TEXT,

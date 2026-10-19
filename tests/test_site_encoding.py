@@ -25,7 +25,6 @@ KEYS = (
     "a_finders_qwen3",
     "a_wording",
 )
-FILL_KEYS = ("teaser", "finders")
 
 
 def _pattern(style: Any) -> Any:
@@ -46,7 +45,7 @@ def _flatten(value: Any) -> set[str]:
 
 
 MEASURES = _flatten(list(paper.MEASURE_MARKERS.values()))
-ALLOWED = MEASURES | set(paper.CATEGORY_MARKERS) | {paper.ROLE_KEY_MARKER}
+ALLOWED = MEASURES | set(paper.CATEGORY_MARKERS)
 
 
 @pytest.fixture(scope="module")
@@ -87,24 +86,6 @@ def test_no_legend_symbol_means_two_things(
     built: dict[str, registry.FigureOutput], key: str
 ) -> None:
     assert _L["marker_clashes"](built[key].figure) == []
-
-
-@pytest.mark.parametrize("key", FILL_KEYS)
-def test_a_legend_that_uses_fill_carries_the_hexagon_role_key(
-    built: dict[str, registry.FigureOutput], key: str
-) -> None:
-    fig = built[key].figure
-    legends = [*fig.legends, *(a.get_legend() for a in fig.axes)]
-    handles = [
-        h
-        for leg in legends
-        if leg is not None
-        for h in leg.legend_handles
-        if isinstance(h, Line2D)
-    ]
-    hexes = [h for h in handles if h.get_marker() == paper.ROLE_KEY_MARKER]
-    fills = {h.get_markerfacecolor() == "white" for h in hexes}
-    assert fills == {True, False}
 
 
 def test_the_paper_finder_is_a_diamond_and_the_logistic_a_circle(

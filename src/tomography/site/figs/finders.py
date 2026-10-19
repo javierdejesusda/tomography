@@ -9,15 +9,16 @@ spread that test-pair noise alone gives for a random direction.
 
 import dataclasses
 import math
+from typing import Any
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
 
 from tomography.site import finders as loader
 from tomography.site import params
 from tomography.site import stats
-from tomography.site.figs import _rows
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.site.registry import RoleCount
@@ -46,6 +47,7 @@ LABELS = {
 XLIM = (-0.30, 0.45)
 BAND_HEIGHT = 0.6
 MARKER = 3.5
+DIRECTION = paper.MEASURE_MARKERS["direction"]
 
 
 def fmt3(value: float) -> str:
@@ -130,8 +132,9 @@ def _panel(
     task: str,
     rows: dict[str, float],
     data: dict[str, dict[tuple[str, str], Point]],
+    tally: list[tuple[int, int]],
 ) -> None:
-    shared.ref_line(ax, 0.0, "x")
+    shared.ref_line(ax, 0.0, "x").set_zorder(2)
     for model, y in rows.items():
         point = data[model][(task, "logistic")]
         half = stats.Z * math.sqrt(
@@ -147,46 +150,55 @@ def _panel(
         )
         for finder in FINDERS:
             _marker(ax, y, model, finder, data[model][(task, finder)])
+    ax.annotate(
+        "above 0: " + " ".join(f"{h}/{t}" for h, t in tally),
+        xy=(0.0, 1.0),
+        xycoords="axes fraction",
+        xytext=(2, 2),
+        textcoords="offset points",
+        ha="left",
+        va="bottom",
+        fontsize=7,
+        color=paper.INK,
+    ).set_gid("counts")
     ax.set_xlim(*XLIM)
     ax.set_xticks([-0.2, 0.0, 0.2, 0.4])
     ax.xaxis.set_major_formatter(shared.minus_formatter())
-    ax.set_title(TITLES[task], fontsize=paper.TITLE, loc="left", x=0.04)
+    ax.set_title(TITLES[task], fontsize=paper.TITLE, loc="left", x=0.04, pad=12)
     ax.spines["left"].set_visible(False)
 
 
 def _legend(fig: Figure) -> None:
-    handles: list[Line2D] = [
-        Line2D(
-            [],
-            [],
-            ls="none",
-            marker=STYLE[f][1],
-            ms=MARKER,
-            color=STYLE[f][0],
+    def pair(finder: str) -> tuple[Line2D, Line2D]:
+        color, shape = STYLE[finder]
+        return (
+            Line2D([], [], ls="none", marker=shape, ms=MARKER, color=color),
+            Line2D(
+                [],
+                [],
+                ls="none",
+                marker=shape,
+                ms=MARKER,
+                color=color,
+                mfc="white",
+                mew=0.8,
+            ),
         )
-        for f in FINDERS
+
+    handles: list[Any] = [
+        *(pair(f) for f in FINDERS),
+        Line2D([], [], color=paper.RANDOM_BAND, lw=5, solid_capstyle="butt"),
     ]
-    handles.append(
-        Line2D([], [], color=paper.RANDOM_BAND, lw=5, solid_capstyle="butt")
-    )
-    handles.append(
-        _rows.series_handle("GPT-2 and base", paper.ROLE_KEY_MARKER, paper.INK)
-    )
-    handles.append(
-        _rows.series_handle(
-            "post-trained", paper.ROLE_KEY_MARKER, paper.INK, filled=False
-        )
-    )
     fig.legend(
         handles,
         [
-            *(LABELS[f] for f in FINDERS),
+            "logistic regression (filled: GPT-2 and base; open: post-trained)",
+            "PCA of paired differences (paper), same fill",
             "random direction, test-pair noise",
-            "GPT-2 and base",
-            "post-trained",
         ],
+        handler_map={tuple: HandlerTuple(ndivide=None, pad=0.1)},
         loc="outside upper center",
-        ncol=3,
+        ncol=1,
         frameon=False,
         fontsize=7,
         columnspacing=1.4,
@@ -311,7 +323,10 @@ DETAIL = (
     "post-trained ones); whiskers are conservative 95 percent intervals for "
     f"the test pairs ({_PAIRS}); the "
     "grey band is the spread that test-pair noise alone gives around the "
-    "random direction. Layer curves of these finders are in "
+    "random direction. The line above each panel counts, for the PCA "
+    "finder of the paper, the checkpoints whose interval lies above zero, "
+    "in the order GPT-2, Qwen3 base, Qwen3 post-trained. Layer curves of "
+    "these finders are in "
     "[[fig:a_finders_gpt2]] and [[fig:a_finders_qwen3]], all six finders in "
     "[[table:finders_all]]."
 )
@@ -352,7 +367,14 @@ def build(manifest: Manifest) -> FigureOutput:
             1, 3, sharey=True, gridspec_kw={"width_ratios": [1.45, 1, 1]}
         )
         for ax, task, letter in zip(axes, TASKS, "abc", strict=True):
-            _panel(ax, task, rows, data)
+            tally = [
+                (
+                    int(numbers[f"pca_{task}_above_{r}"]),
+                    counts[f"pca_{task}"][r].total,
+                )
+                for r in stats.ROLES
+            ]
+            _panel(ax, task, rows, data, tally)
             paper.panel_letter(ax, letter)
         axes[0].set_yticks(
             list(rows.values()), [paper.display_name(m) for m in rows]

@@ -4,6 +4,7 @@ import runpy
 from typing import Any
 
 from matplotlib.image import AxesImage
+from matplotlib.lines import Line2D
 import pytest
 
 from tomography.site import params
@@ -284,3 +285,51 @@ def test_the_claim_describes_the_pairings_without_a_causal_title(
     assert "does not show that matching" in text
     assert "by point estimate only" in text
     assert "for truth on 0 of 4 GPT-2, 2 of 3 Qwen3 base" in text
+
+
+def _panels(output: registry.FigureOutput) -> list[Any]:
+    return list(output.figure.axes)
+
+
+def test_the_zero_reference_is_drawn_in_front_of_the_grey_band(
+    output: registry.FigureOutput,
+) -> None:
+    for ax in _panels(output):
+        (zero,) = [
+            ln
+            for ln in ax.get_lines()
+            if len(ln.get_xdata()) == 2 and ln.get_xdata()[0] == 0.0
+        ]
+        bands = [c.get_zorder() for c in ax.collections]
+        assert bands
+        assert zero.get_zorder() > max(bands)
+
+
+def test_each_panel_counts_the_checkpoints_above_zero_per_role(
+    output: registry.FigureOutput,
+) -> None:
+    for ax, task in zip(_panels(output), TASKS, strict=True):
+        (note,) = [t for t in ax.texts if t.get_gid() == "counts"]
+        total = {r: 0 for r in ROLES}
+        for model in models("p4"):
+            total[_role(model)] += 1
+        hits = [int(output.numbers[f"pca_{task}_above_{r}"]) for r in ROLES]
+        expected = " ".join(
+            f"{h}/{total[r]}" for h, r in zip(hits, ROLES, strict=True)
+        )
+        assert note.get_text().endswith(expected)
+
+
+def test_the_role_key_is_a_filled_and_an_open_circle_in_neutral_ink(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    flat = legend.findobj(Line2D)
+    assert "h" not in {str(h.get_marker()) for h in flat}
+    circles = [
+        h for h in flat if h.get_marker() == "o" and h.get_color() == paper.INK
+    ]
+    assert {h.get_markerfacecolor() == "white" for h in circles} == {
+        True,
+        False,
+    }

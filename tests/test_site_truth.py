@@ -260,7 +260,7 @@ def test_the_caption_separates_the_classifier_accuracies_from_their_intervals(
     assert f"{n['text_word']:.3f}" in text
     assert f"{n['text_char']:.3f}" in text
     assert "at least one negated set" in text
-    assert "(b) whiskers" in text or "whiskers in (b)" in text
+    assert "whiskers in (d) and (e)" in text
     assert "two negated sets per checkpoint" not in text
 
 
@@ -302,7 +302,7 @@ def test_the_layout_is_five_panels_at_the_planned_size(
     )
     width, height = fig.get_size_inches()
     assert width == pytest.approx(paper.FULL_WIDTH)
-    assert height == pytest.approx(5.4)
+    assert height == pytest.approx(5.8)
 
 
 def test_the_two_text_classifiers_are_separate_green_lines_with_own_bands(
@@ -436,3 +436,42 @@ def test_the_caption_notes_the_weak_gpt2_cities_reader_and_the_criterion(
     assert low in output.detail
     assert "not inversions of a strong reader" in output.detail
     assert "wholly below 0.5" in output.detail
+
+
+def test_every_drawn_panel_letter_is_named_in_the_caption_and_vice_versa(
+    output: registry.FigureOutput,
+) -> None:
+    drawn = sorted(
+        t.get_text()[-4]
+        for ax in output.figure.axes
+        for t in ax.texts
+        if t.get_text().startswith(r"$\mathbf{(")
+    )
+    assert drawn == list("abcde")
+    for letter in drawn:
+        assert f"({letter}" in output.detail or f", {letter})" in output.detail
+    assert "(f" not in output.detail
+    assert "plus)" not in output.detail
+    assert "dark grey circle" in output.detail
+
+
+def test_the_legend_names_the_dumbbell_panels_and_pluralises_the_classifiers(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert any("(d, e)" in x for x in labels)
+    assert not any("(b)" in x for x in labels)
+    assert any(
+        x.startswith("text-only classifiers on words and") for x in labels
+    )
+
+
+def test_the_readers_and_the_text_band_are_labelled_directly(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "levels")
+    texts = {t.get_gid(): t.get_text() for t in ax.texts}
+    assert texts["reader_label:truthfulqa_reader"] == "truth reader"
+    assert texts["reader_label:persona_reader"] == "persona reader"
+    assert texts["band_label"] == "words, characters"

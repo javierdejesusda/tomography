@@ -4,6 +4,7 @@ import re
 import runpy
 from typing import Any
 
+from matplotlib.lines import Line2D
 import pytest
 
 from tomography.site import registry
@@ -350,12 +351,12 @@ def test_the_claim_states_the_per_role_counts_without_pooling(
         assert banned not in text
 
 
-def test_figure_is_a_single_5_5_by_3_7_in_axes_with_the_guards_green(
+def test_figure_is_5_5_by_4_3_in_with_two_axes_with_the_guards_green(
     built: registry.FigureOutput,
 ) -> None:
     fig = built.figure
     assert fig.get_size_inches()[0] == pytest.approx(paper.FULL_WIDTH)
-    assert fig.get_size_inches()[1] == pytest.approx(3.7)
+    assert fig.get_size_inches()[1] == pytest.approx(4.3)
     assert checks.guard_problems(fig) == []
     assert checks.problems(fig) == []
 
@@ -441,8 +442,11 @@ def test_the_steering_row_names_the_unit_the_judge_and_the_fluency_rule(
 def test_every_row_names_the_unit_its_margin_is_measured_in(
     built: registry.FigureOutput,
 ) -> None:
-    (ax,) = built.figure.axes
+    ax = _ax(built, "scorecard")
     units = [t for t in ax.texts if t.get_gid() == "row_unit"]
+    units += [
+        t for t in _ax(built, "steering").texts if t.get_gid() == "row_unit"
+    ]
     by_y = sorted(units, key=lambda t: t.xy[1])
     assert [t.get_text() for t in by_y] == [
         "accuracy",
@@ -456,8 +460,43 @@ def test_every_row_names_the_unit_its_margin_is_measured_in(
         "AUROC",
         "win rate",
     ]
-    ticks = [int(y) for y in ax.get_yticks()]
+    ticks = [*ax.get_yticks(), *_ax(built, "steering").get_yticks()]
     assert len(ticks) == len(ROWS)
-    for tick, unit in zip(ax.get_yticks(), by_y, strict=True):
+    for tick, unit in zip(ticks, by_y, strict=True):
         assert unit.xy[1] == pytest.approx(tick)
     assert "unit" in ax.get_xlabel()
+
+
+def _ax(built: registry.FigureOutput, gid: str) -> Any:
+    (ax,) = [a for a in built.figure.axes if a.get_gid() == gid]
+    return ax
+
+
+def test_the_steering_row_has_its_own_panel_and_axis_label(
+    built: registry.FigureOutput,
+) -> None:
+    top, bottom = _ax(built, "scorecard"), _ax(built, "steering")
+    assert bottom.get_position().y1 < top.get_position().y0
+    assert "win rate" in bottom.get_xlabel()
+    assert "unit" in top.get_xlabel()
+    assert len(bottom.get_yticks()) == 1
+    assert len(top.get_yticks()) == len(ROWS) - 1
+    zero = [ln for ln in bottom.get_lines() if ln.get_xdata()[0] == 0.0]
+    assert zero
+    text = f"{built.claim} {built.detail}"
+    assert "no interval is stored" in text
+
+
+def test_the_role_key_is_a_filled_and_an_open_circle_in_neutral_ink(
+    built: registry.FigureOutput,
+) -> None:
+    (legend,) = built.figure.legends
+    flat = legend.findobj(Line2D)
+    assert "h" not in {str(h.get_marker()) for h in flat}
+    circles = [
+        h for h in flat if h.get_marker() == "o" and h.get_color() == paper.INK
+    ]
+    assert {h.get_markerfacecolor() == "white" for h in circles} == {
+        True,
+        False,
+    }
