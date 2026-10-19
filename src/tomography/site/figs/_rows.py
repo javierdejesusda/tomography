@@ -18,6 +18,7 @@ from tomography.viz import axes
 from tomography.viz import paper
 
 PAD = 0.07
+ROLE_KEY_SIZE = 6.5
 MARKER_SIZE = 3.5
 EDGE_WIDTH = 0.8
 
@@ -210,7 +211,9 @@ def series_handle(
         markerfacecolor=color if filled else "white",
         markeredgecolor=color,
         markeredgewidth=EDGE_WIDTH,
-        markersize=MARKER_SIZE,
+        markersize=ROLE_KEY_SIZE
+        if marker == paper.ROLE_KEY_MARKER
+        else MARKER_SIZE,
         label=label,
     )
 

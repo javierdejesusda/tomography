@@ -94,3 +94,10 @@ def test_freeze_layout_pins_the_axes_to_six_decimals_and_drops_the_solver() -> (
         bounds = ax.get_position().bounds
         assert all(abs(v - round(v, 6)) < 1e-12 for v in bounds)
         assert min(bounds[2:]) > 0.1
+
+
+def test_the_hexagon_role_key_is_drawn_larger_than_a_data_marker() -> None:
+    key = _rows.series_handle("a", paper.ROLE_KEY_MARKER, "#123456")
+    data = _rows.series_handle("b", "o", "#123456")
+    assert key.get_markersize() >= 6.0
+    assert key.get_markersize() > data.get_markersize()
