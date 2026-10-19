@@ -97,8 +97,9 @@ def build(manifest: Manifest) -> TableOutput:
         "depth. Each accuracy is read from pairs with two balanced classes, "
         "where chance is [[num:table:base_post.chance]]; no random-direction "
         "accuracy is stored for these comparisons, so none is shown. "
-        "[[fig:base_post]] shows all three pairs with intervals for "
-        "the test items."
+        "[[fig:base_post]] draws the seed-paired intervals for the 0.6B and "
+        "1.7B pairs and, for the 4B pair and the measures without seeds, a "
+        "conservative interval over the test items."
     )
     return TableOutput(
         claim,
