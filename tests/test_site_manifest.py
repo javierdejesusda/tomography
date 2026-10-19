@@ -102,3 +102,13 @@ def test_every_experiment_and_model_of_the_committed_results_resolves() -> None:
             assert found.run(exp, model) is not None, (exp, model)
             count += 1
     assert count > 100
+
+
+def test_the_docstrings_state_the_listing_order_and_the_p1_rule() -> None:
+    from tomography.site.manifest import Manifest
+
+    runs_doc = Manifest.runs.__doc__ or ""
+    run_doc = " ".join((Manifest.run.__doc__ or "").split())
+    assert "oldest" not in runs_doc
+    assert "sorted by directory name" in runs_doc
+    assert "most tasks" in run_doc
