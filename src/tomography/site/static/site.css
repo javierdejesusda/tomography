@@ -329,6 +329,13 @@ footer.colophon {
   td {
     padding: 0.18em 0.35em;
   }
+
+  caption {
+    position: sticky;
+    left: 0;
+    box-sizing: border-box;
+    width: calc(100vw - 32px);
+  }
 }
 
 @media print {

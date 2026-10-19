@@ -166,13 +166,20 @@ def test_citations_are_numbered_by_first_use_and_listed(html: str) -> None:
     assert "Representation Engineering" in html
 
 
-def test_the_reference_list_is_the_cited_entries_in_order(html: str) -> None:
+def test_the_reference_list_follows_the_order_of_first_citation(
+    html: str,
+) -> None:
     bib = references.parse((ROOT / "docs/references.bib").read_text("utf-8"))
     refs = re.search(r'<ol class="refs">(.*?)</ol>', html, flags=re.S)
     assert refs is not None
-    first = references.find(bib, "zou2025")
-    assert refs.group(1).count("<li") == len(re.findall(r"<li ", refs.group(1)))
-    assert references.format_authors(first).split()[1] in refs.group(1)
+    items = re.findall(r"<li [^>]*>(.*?)</li>", refs.group(1), flags=re.S)
+    expected = [
+        references.plain(references.format_line(references.find(bib, key)))
+        for key in ("zou2025", "socher2013", "hendrycks2021")
+    ]
+    for item, want in zip(items, expected, strict=False):
+        assert want.split(".")[0] in item
+    assert len(items) >= 3
 
 
 def test_the_cite_block_gives_bibtex_of_the_repository_and_the_paper(
@@ -218,10 +225,9 @@ def test_assets_are_written_next_to_the_page(built: Path) -> None:
 
 
 def test_the_page_loads_no_remote_assets(html: str) -> None:
-    sources = re.findall(r'(?:src|href)="(https?://[^"]+)"', html)
-    allowed = (content.REPO_URL, "https://arxiv.org", "https://")
-    assert all(s.startswith(allowed) for s in sources)
-    assert '<link rel="stylesheet" href="site.css">' in html
+    assert not re.search(r'src="https?:', html)
+    stylesheets = re.findall(r'<link [^>]*rel="stylesheet"[^>]*>', html)
+    assert stylesheets == ['<link rel="stylesheet" href="site.css">']
     assert "fonts.googleapis" not in html
     assert not re.search(r'(?:src|href)="[^"]*cdn', html)
 
@@ -304,7 +310,11 @@ def test_command_line_build_writes_the_site(
 
 def test_phone_layout_tightens_tables_so_the_caption_is_not_clipped() -> None:
     css = (STATIC / "site.css").read_text("utf-8")
-    phone = css[css.index("@media (max-width: 600px)") : css.index("@media print")]
+    phone = css[
+        css.index("@media (max-width: 600px)") : css.index("@media print")
+    ]
     assert "padding: 0.18em 0.35em" in phone
     assert "font-size: 0.72em" in phone
     assert "padding: 1.4rem 16px 2rem" in phone
+    assert "width: calc(100vw - 32px)" in phone
+    assert "position: sticky" in phone
