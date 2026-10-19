@@ -82,6 +82,10 @@ def _band() -> tuple[float, float]:
     return min(r["lo"] for r in rows), max(r["hi"] for r in rows)
 
 
+def _any_below_half(model: str) -> bool:
+    return any(_below_half(model, name) for name in NEGATED)
+
+
 def _inside(model: str) -> bool:
     lo, hi = _band()
     return lo <= _lat(model, "truthfulqa")["mc1"] <= hi
@@ -181,9 +185,9 @@ def test_numbers_are_recomputed_per_role(
         assert n[f"tqa_above_words_{role}"] == sum(
             _lat(m, "truthfulqa")["mc1"] > words for m in group
         )
-        below = sum(_below_half(m, s) for m in group for s in NEGATED)
+        below = sum(_any_below_half(m) for m in group)
         assert n[f"neg_below_half_{role}"] == below
-        assert n[f"neg_below_half_n_{role}"] == len(group) * len(NEGATED)
+        assert n[f"neg_below_half_n_{role}"] == len(group)
     gpt2 = [m for m in MODELS if _role(m) == "gpt2"]
     assert n["negcities_below_random_gpt2"] == sum(
         _set(m, "neg_cities")[0] < _random(m, "neg_cities") for m in gpt2
@@ -200,8 +204,8 @@ def test_counts_are_per_role(output: registry.FigureOutput) -> None:
         )
         below = output.counts["neg_below_half"][role]
         assert (below.hits, below.total) == (
-            sum(_below_half(m, s) for m in group for s in NEGATED),
-            len(group) * len(NEGATED),
+            sum(_any_below_half(m) for m in group),
+            len(group),
         )
 
 
@@ -212,7 +216,7 @@ def test_the_plan_values_hold_at_the_current_results(
     assert [counts["tqa_inside"][r].hits for r in ROLES] == [4, 2, 3]
     assert [counts["tqa_inside"][r].total for r in ROLES] == [4, 3, 3]
     assert [counts["neg_below_half"][r].hits for r in ROLES] == [3, 0, 2]
-    assert [counts["neg_below_half"][r].total for r in ROLES] == [8, 6, 6]
+    assert [counts["neg_below_half"][r].total for r in ROLES] == [4, 3, 3]
     assert output.numbers["persona_min"] == pytest.approx(0.270, abs=5e-4)
     assert output.numbers["persona_max"] == pytest.approx(0.575, abs=5e-4)
 
@@ -281,3 +285,16 @@ def test_the_claim_does_not_say_negation_breaks_the_reader(
     assert "breaks" not in output.claim
     n = _n_questions(MODELS[0])
     assert f"over {n} questions" in output.detail
+
+
+def test_the_caption_separates_the_classifier_accuracies_from_their_intervals(
+    output: registry.FigureOutput,
+) -> None:
+    text = f"{output.claim} {output.detail}"
+    n = output.numbers
+    assert "intervals" in output.claim
+    assert f"{n['text_word']:.3f}" in text
+    assert f"{n['text_char']:.3f}" in text
+    assert "at least one negated set" in text
+    assert "(b) whiskers" in text or "whiskers in (b)" in text
+    assert "two negated sets per checkpoint" not in text

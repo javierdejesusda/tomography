@@ -296,16 +296,10 @@ def _counts(
 
     band = _band(data)
     tqa = stats.per_role({m: inside(m, band) for m in models})
-    below = {r: [0, 0] for r in stats.ROLES}
-    for m in models:
-        for neg in NEGATED:
-            cell = below[stats.role(m)]
-            cell[0] += int(data[m].sets[neg].hi < 0.5)
-            cell[1] += 1
-    return {
-        "tqa_inside": tqa,
-        "neg_below_half": {r: RoleCount(h, t) for r, (h, t) in below.items()},
-    }
+    below = stats.per_role(
+        {m: any(data[m].sets[n].hi < 0.5 for n in NEGATED) for m in models}
+    )
+    return {"tqa_inside": tqa, "neg_below_half": below}
 
 
 def _band(data: dict[str, Model]) -> tuple[float, float]:
@@ -327,6 +321,8 @@ def _numbers(
         "text_lo": lo,
         "text_hi": hi,
         "chance": chance,
+        "text_word": data[models[0]].text["text_word"].value,
+        "text_char": data[models[0]].text["text_char"].value,
         "n_questions": float(data[models[0]].n_questions),
     }
     for role in stats.ROLES:
@@ -354,9 +350,10 @@ def _claim(
     return (
         "A truth reader does not beat words alone on TruthfulQA, and "
         "negated statements pull it below chance on some checkpoints. Its "
-        "MC1 accuracy lies inside the range of two "
-        f"text-only classifiers ({numbers['text_lo']:.3f} to "
-        f"{numbers['text_hi']:.3f}) on "
+        "MC1 accuracy lies inside the span of the 95 percent intervals of "
+        f"two text-only classifiers ({numbers['text_lo']:.3f} to "
+        f"{numbers['text_hi']:.3f}; their accuracies are "
+        f"{numbers['text_word']:.3f} and {numbers['text_char']:.3f}) on "
         f"{stats.per_role_text(counts['tqa_inside'])}, while the honesty "
         f"persona reader reaches {numbers['persona_min']:.3f} to "
         f"{numbers['persona_max']:.3f}, against a chance level of "
@@ -378,10 +375,12 @@ def _detail(
         "dotted line is chance. (b) Accuracy of the truth reader on "
         "statements about cities and on Spanish to English translations, "
         "each joined by an arrow to its negation, with the accuracy of a "
-        "random direction on the negated set (grey crosses). Negated sets "
-        "whose interval lies below 0.5 are "
-        f"{stats.per_role_text(counts['neg_below_half'])}, two negated sets "
-        "per checkpoint. On negated cities the reader falls below the "
+        "random direction on the negated set (grey crosses); whiskers in "
+        "(b) are 95 percent Wilson intervals over the evaluation pairs of "
+        "each set. Checkpoints with at least one negated set whose "
+        "interval lies below 0.5 are "
+        f"{stats.per_role_text(counts['neg_below_half'])}. On negated "
+        "cities the reader falls below the "
         f"random direction on {int(numbers['negcities_below_random_gpt2'])} "
         f"of {gpt2} GPT-2 sizes."
     )
