@@ -249,13 +249,6 @@ def _numbers(
     return numbers, counts
 
 
-def _where(counts: dict[str, RoleCount]) -> str:
-    total = sum(c.total for c in counts.values())
-    if all(c.hits == c.total for c in counts.values()):
-        return f"all {total} checkpoints"
-    return stats.per_role_text(counts)
-
-
 def _claim(
     models: list[str],
     data: dict[str, dict[tuple[str, str], Point]],
@@ -277,7 +270,7 @@ def _claim(
         f"{cells.num(numbers['pca_utility_gpt2_min'])} to "
         f"{cells.num(numbers['pca_utility_gpt2_max'])}), but matching is "
         "confounded with the concept. Logistic regression is above it for "
-        f"sentiment on {_where(counts['logistic_sentiment'])}."
+        f"sentiment on {stats.per_role_text(counts['logistic_sentiment'])}."
     )
 
 
@@ -288,12 +281,11 @@ _PAIRS = (
 )
 DETAIL = (
     "Each marker is a finder's report-split accuracy minus that of a "
-    "random direction of the same run, at the layer its select split chose "
+    "random direction, at the layer its select split chose "
     "(filled: GPT-2 and Qwen3 base; open: post-trained); whiskers are "
     f"conservative 95 percent intervals over the test pairs ({_PAIRS}); the "
-    "grey band is test-pair noise. The line "
-    "above each panel counts checkpoints where the interval of the "
-    "paper's finder is above zero (GPT-2, Qwen3 base, post-trained). "
+    "grey band is test-pair noise. The line above each panel counts "
+    "checkpoints with the paper finder's interval above zero. "
     "Layer curves: [[fig:a_finders_gpt2]], [[fig:a_finders_qwen3]]; all six "
     "finders: [[table:finders_all]]."
 )

@@ -485,22 +485,15 @@ def _numbers(
 
 
 def _reads(counts: dict[str, RoleCount], concept: str) -> str:
-    total = sum(c.total for c in counts.values())
-    if all(c.hits == c.total for c in counts.values()):
-        return f"{concept} on all {total} checkpoints"
     return f"{concept} on {stats.per_role_text(counts)}"
 
 
 def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
     utility, morality = counts["utility"], counts["morality"]
-    every = all(
-        c.hits == c.total for r in (utility, morality) for c in r.values()
-    )
-    if every:
-        total = sum(c.total for c in utility.values())
+    if utility == morality:
         reads = (
             "A direction reads utility and morality above a random "
-            f"direction on all {total} checkpoints"
+            f"direction on {stats.per_role_text(utility)}"
         )
     else:
         reads = (
@@ -516,17 +509,17 @@ def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
             f"{stats.per_role_text(counts['truthfulqa'])}"
         )
     return (
-        f"{reads} Two comparisons are mostly null: {words}, and the "
+        f"{reads} Two are mostly null: {words}, and the "
         "paper's finder beats a random direction for sentiment on "
         f"{stats.per_role_text(counts['paper_finder'])}."
     )
 
 
 DETAIL = (
-    "Each marker is one checkpoint at its margin over the baseline of its "
-    "row; the right column counts 95 percent intervals above zero. The "
-    "steering marker is the lowest win rate of 3 steering vectors minus the "
-    "highest of 3 random directions; no interval is stored."
+    "Each marker is one checkpoint's margin over its row baseline; the "
+    "right column counts 95 percent intervals above zero. Steering: lowest "
+    "win rate of 3 vectors minus highest of 3 random directions; no "
+    "interval is stored."
 )
 
 

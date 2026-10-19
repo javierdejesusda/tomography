@@ -303,20 +303,12 @@ def _list(items: list[str]) -> str:
 def _claim(
     counts: dict[str, dict[str, RoleCount]], names: dict[str, str]
 ) -> str:
-    full = [
-        c for c in names if all(n.hits == n.total for n in counts[c].values())
-    ]
-    totals = {c: sum(n.total for n in counts[c].values()) for c in names}
-    full = [c for c in full if totals[c] == totals[full[0]]] if full else []
-    parts = []
-    if full:
-        total = totals[full[0]]
-        parts.append(f"{_list(full)} on all {total} checkpoints")
-    parts += [
-        f"{c} on {stats.per_role_text(counts[c])}"
-        for c in names
-        if c not in full
-    ]
+    groups: dict[str, list[str]] = {}
+    for concept in names:
+        groups.setdefault(stats.per_role_text(counts[concept]), []).append(
+            concept
+        )
+    parts = [f"{_list(c)} on {text}" for text, c in groups.items()]
     return (
         "The held-out accuracy of a logistic direction is above that of its "
         "random direction, with an interval excluding zero, for "
@@ -345,7 +337,7 @@ def _detail(
 ) -> str:
     sizes = {c: next(iter(found[c].values())).at.n for c in names}
     return (
-        "Held-out accuracy at the layer read against the checkpoint size "
+        "Held-out accuracy at the layer read against checkpoint size "
         "(S to XL: GPT-2; 0.6B to 4B: Qwen3; filled for GPT-2 and base, "
         "open and shifted right for post-trained), with 95 "
         f"percent Wilson intervals for the test pairs ({sizes['sentiment']:,} "
@@ -355,9 +347,9 @@ def _detail(
         "come from the sample-size run at 64 training pairs, read at its "
         "own layer. "
         "GPT-2 slopes are least-squares over the four sizes against log "
-        "parameters, with a t interval from those four points: "
+        "parameters, with a t interval: "
         + _slope_text(numbers, names)
-        + ". Layer curves and onsets are in [[fig:a_reading_curves]]."
+        + ". Onsets: [[fig:a_reading_curves]]."
     )
 
 
