@@ -695,7 +695,8 @@ DISCUSSION = Section(
         "fluency at larger ones (a perplexity on neutral text above 1.5 "
         "times the unsteered model, or a distinct-1 below 0.15; "
         "[[sec:steering]]), and post-training lowers held-out sentiment "
-        "reading and changes [[num:fig:base_post.paired_excluding_zero]] of "
+        "reading and changes "
+        "[[num:fig:base_post.paired_excluding_zero]] of "
         "[[num:fig:base_post.paired_total]] other readings beyond their intervals "
         "(0.6B morality, 1.7B utility and 0.6B honesty, in "
         "[[fig:base_post]]), with the rest within them.",
