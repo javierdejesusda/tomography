@@ -21,10 +21,13 @@ from tomography.site.registry import FigureOutput
 from tomography.viz import axes
 from tomography.viz import paper
 
-HEIGHT = 2.6
-HEADER = ["panel", "row", "size", "value", "lo", "hi"]
-LIMIT = 0.3
-DODGE = 0.25
+HEIGHT = 4.8
+LABEL_FONT = 7
+LABEL_PAD = 0.07
+HEADER = ["panel", "row", "size", "value", "lo", "hi", "interval"]
+NARROW = 0.15
+WIDE = 0.3
+DODGE = 0.3
 ROWS = (
     ("sentiment", "sentiment, held out", "sentiment"),
     ("utility", "utility", "utility"),
@@ -43,17 +46,22 @@ CLAIM = (
 )
 DETAIL = (
     "Post-trained minus base checkpoint for each Qwen3 size (0.6B, 1.7B and "
-    "4B, light to dark), with conservative 95 percent intervals for the "
-    "test items. Sentiment falls by {low} to {high}, with an interval below "
-    "zero on {below} of 3 sizes; utility, morality, truth, honesty transfer "
-    "and TruthfulQA move by at most {most}, with {excluding}; {falling}. A "
-    "post-trained checkpoint also differs from its base in prompt format and "
-    "is distilled from a larger model, so the contrast is with this recipe "
-    "and not with instruction tuning in general ([[sec:limitations]]). The "
-    "stored paired comparisons of the 0.6B and 1.7B pairs are in "
-    "[[table:base_post]]. An interval that includes zero does not show that "
-    "nothing changed: the seed-paired differences of [[table:base_post]] "
-    "exclude zero for {paired}."
+    "4B, light to dark, in that order within a row). A marker is filled "
+    "where the interval excludes zero and open where it includes zero. A "
+    "solid interval is the seed-paired 95 percent bootstrap interval that "
+    "[[table:base_post]] stores (utility, morality, truth and honesty "
+    "transfer at 0.6B and 1.7B, 10 seeds); a dashed interval is a "
+    "conservative 95 percent interval for the test items, used for 4B and "
+    "for the measures without seeds. The axes differ between the panels: "
+    "(a) shows the rows whose intervals stay within {narrow}, (b) the rows "
+    "with wider intervals, on {wide}. Sentiment falls by {low} to {high}, "
+    "with an interval below zero on {below} of 3 sizes; utility, morality, "
+    "truth, honesty transfer and TruthfulQA move by at most {most}, with "
+    "{excluding}; {falling}. A post-trained checkpoint also differs from "
+    "its base in prompt format and is distilled from a larger model, so the "
+    "contrast is with this recipe and not with instruction tuning in "
+    "general ([[sec:limitations]]). An interval that includes zero does not "
+    "show that nothing changed."
 )
 
 
@@ -151,6 +159,36 @@ def _paired_rows(manifest: Manifest) -> list[dict[str, Any]]:
     return found
 
 
+def _interval(
+    manifest: Manifest,
+    paired: dict[tuple[str, str], dict[str, Any]],
+    row: str,
+    size: str,
+) -> tuple[float, float, float, str]:
+    """Gives a difference with the sharpest interval the results store.
+
+    Args:
+        manifest: The run resolver.
+        paired: The seed-paired records by (measure, size such as `0.6b`).
+        row: The measure key.
+        size: The Qwen3 size such as `0.6b`.
+
+    Returns:
+        The post-trained minus base value, its lower and upper bound, and
+        `paired` or `conservative` for the kind of interval.
+    """
+    stored = paired.get((row, size))
+    if stored is not None:
+        return (
+            float(stored["delta"]),
+            float(stored["lo"]),
+            float(stored["hi"]),
+            "paired",
+        )
+    value, lo, hi = _difference(manifest, row, size)
+    return value, lo, hi, "conservative"
+
+
 def _paired_excluding(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:
     """Finds the seed-paired differences whose interval excludes zero.
 
@@ -204,20 +242,150 @@ def _falling_text(knowledge: list[str], steering: list[str]) -> str:
     return " and ".join(parts)
 
 
-def _marker(size: str, **extra: Any) -> dict[str, Any]:
-    color = axes.model_style(f"qwen3-{size}").color
-    return {
-        "color": color,
-        "marker": paper.MEASURE_MARKERS["direction"],
-        "fillstyle": "left",
-        "markerfacecolor": color,
-        "markerfacecoloralt": "white",
-        "markeredgecolor": color,
+def _excludes_zero(lo: float, hi: float) -> bool:
+    return lo > 0 or hi < 0
+
+
+def _draw_row(
+    ax: Any,
+    y: float,
+    cells: dict[str, tuple[float, float, float, str]],
+    sizes: tuple[str, ...],
+    limit: float,
+    named: bool,
+) -> None:
+    for offset, size in zip((-DODGE, 0.0, DODGE), sizes, strict=True):
+        value, lo, hi, kind = cells[size]
+        color = axes.model_style(f"qwen3-{size}").color
+        ax.plot(
+            [lo, hi],
+            [y + offset] * 2,
+            color=color,
+            ls="-" if kind == "paired" else paper.LINESTYLES["post_trained"],
+            lw=paper.WHISKER_WIDTH,
+            solid_capstyle="butt",
+            gid="whisker",
+            zorder=2,
+        )
+        ax.plot(
+            [value],
+            [y + offset],
+            ls="none",
+            marker=paper.SHAPES["direction"],
+            color=color,
+            markerfacecolor=color if _excludes_zero(lo, hi) else "white",
+            markeredgecolor=color,
+            markeredgewidth=_rows.EDGE_WIDTH,
+            markersize=_rows.MARKER_SIZE,
+            gid="point",
+            zorder=3,
+        )
+        if named:
+            right = hi < 0.6 * limit
+            pad = LABEL_PAD * limit
+            ax.text(
+                hi + pad if right else lo - pad,
+                y + offset,
+                size.upper(),
+                color=paper.INK,
+                fontsize=LABEL_FONT,
+                va="center",
+                ha="left" if right else "right",
+            )
+
+
+def _panel(
+    ax: Any,
+    rows: list[tuple[str, str, str]],
+    found: dict[tuple[str, str], tuple[float, float, float, str]],
+    sizes: tuple[str, ...],
+    limit: float,
+    letter: str,
+    csv_rows: list[list[Any]],
+) -> None:
+    for y, (key, label, _) in enumerate(rows):
+        cells = {size: found[(key, size)] for size in sizes}
+        _draw_row(ax, y, cells, sizes, limit, named=y == 0)
+        for size in sizes:
+            value, lo, hi, kind = cells[size]
+            csv_rows.append([letter, label, size, value, lo, hi, kind])
+    ax.axvline(0.0, color=paper.INK, lw=0.5, gid="zero", zorder=2.5)
+    ax.set_xlim(-limit, limit)
+    step = 0.05 if limit <= NARROW else 0.1
+    count = round(limit / step)
+    ticks = [round(k * step, 2) for k in range(-count, count + 1)]
+    ax.xaxis.set_major_locator(ticker.FixedLocator(ticks))
+    ax.xaxis.set_major_formatter(axes.minus_formatter())
+    ax.set_ylim(len(rows) - 0.4, -1.45)
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels([label for _, label, _ in rows])
+    ax.tick_params(axis="y", length=0)
+    ax.spines["left"].set_visible(False)
+    for text, sign, side in (
+        ("base higher", -1, "right"),
+        ("post-trained higher", 1, "left"),
+    ):
+        ax.text(
+            sign * LABEL_PAD * limit,
+            -1.1,
+            text,
+            color=paper.ENC["secondary_text"],
+            fontsize=LABEL_FONT,
+            va="center",
+            ha=side,
+        )
+
+
+def _key(fig: Any) -> None:
+    ink = paper.INK
+    marker = {
+        "marker": paper.SHAPES["direction"],
+        "markeredgecolor": ink,
         "markeredgewidth": _rows.EDGE_WIDTH,
         "markersize": _rows.MARKER_SIZE,
+        "color": ink,
         "ls": "none",
-        **extra,
     }
+    handles = [
+        Line2D(
+            [],
+            [],
+            markerfacecolor=ink,
+            label="interval excludes zero",
+            **marker,
+        ),
+        Line2D(
+            [],
+            [],
+            markerfacecolor="white",
+            label="interval includes zero",
+            **marker,
+        ),
+        Line2D(
+            [],
+            [],
+            color=ink,
+            lw=paper.WHISKER_WIDTH,
+            label="seed-paired interval",
+        ),
+        Line2D(
+            [],
+            [],
+            color=ink,
+            lw=paper.WHISKER_WIDTH,
+            ls=paper.LINESTYLES["post_trained"],
+            label="conservative interval",
+        ),
+    ]
+    legend = fig.legend(
+        handles=handles,
+        loc="outside upper center",
+        ncol=4,
+        handlelength=1.6,
+        columnspacing=1.0,
+        fontsize=LABEL_FONT,
+    )
+    legend.get_frame().set_edgecolor("none")
 
 
 def build(manifest: Manifest) -> FigureOutput:
@@ -230,89 +398,75 @@ def build(manifest: Manifest) -> FigureOutput:
         The figure and its caption parts.
     """
     sizes = axes.QWEN3_SIZES
+    paired_rows = _paired_rows(manifest)
+    by_measure = {
+        (PAIRED[r["source"]], str(r["tuned"]).split("-")[1]): r
+        for r in paired_rows
+    }
     found = {
-        (key, size): _difference(manifest, key, size)
+        (key, size): _interval(manifest, by_measure, key, size)
         for key, _, _ in ROWS
         for size in sizes
     }
+    narrow = [
+        row
+        for row in ROWS
+        if all(
+            max(abs(found[(row[0], s)][1]), abs(found[(row[0], s)][2]))
+            <= NARROW
+            for s in sizes
+        )
+    ]
+    wide = [row for row in ROWS if row not in narrow]
     csv_rows: list[list[Any]] = []
     numbers: dict[str, float] = {}
+    for key, _, _ in ROWS:
+        for size in sizes:
+            value, lo, hi, _ = found[(key, size)]
+            tag = f"{key}_{size.replace('.', '')}"
+            numbers[tag] = value
+            numbers[f"{tag}_lo"] = lo
+            numbers[f"{tag}_hi"] = hi
 
     with paper.paper_style():
         fig = _rows.new_figure(HEIGHT)
-        ax = fig.add_subplot()
-        for y, (key, label, _) in enumerate(ROWS):
-            for offset, size in zip((-DODGE, 0.0, DODGE), sizes, strict=True):
-                value, lo, hi = found[(key, size)]
-                color = axes.model_style(f"qwen3-{size}").color
-                ax.plot(
-                    [lo, hi],
-                    [y + offset] * 2,
-                    color=color,
-                    lw=paper.WHISKER_WIDTH,
-                    solid_capstyle="butt",
-                    zorder=2,
-                )
-                ax.plot([value], [y + offset], zorder=3, **_marker(size))
-                csv_rows.append(["a", label, size, value, lo, hi])
-                tag = f"{key}_{size.replace('.', '')}"
-                numbers[tag] = value
-                numbers[f"{tag}_lo"] = lo
-                numbers[f"{tag}_hi"] = hi
-        axes.ref_line(ax, 0.0, "x")
-        ax.set_xlim(-LIMIT, LIMIT)
-        ax.xaxis.set_major_locator(
-            ticker.FixedLocator([-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3])
+        top, bottom = fig.subplots(
+            2,
+            1,
+            gridspec_kw={"height_ratios": [len(narrow) + 1.6, len(wide) + 1.6]},
         )
-        ax.xaxis.set_major_formatter(axes.minus_formatter())
-        ax.set_xlabel("post-trained minus base")
-        ax.set_ylim(len(ROWS) - 0.4, -0.6)
-        ax.set_yticks(range(len(ROWS)))
-        ax.set_yticklabels([label for _, label, _ in ROWS])
-        ax.tick_params(axis="y", length=0)
-        ax.spines["left"].set_visible(False)
-        legend = fig.legend(
-            handles=[
-                Line2D(
-                    [],
-                    [],
-                    label=f"Qwen3 {size.upper()}",
-                    **_marker(size),
-                )
-                for size in sizes
-            ],
-            loc="outside upper center",
-            ncol=3,
-            handlelength=1.0,
-            columnspacing=1.2,
-            fontsize=7,
-        )
-        legend.get_frame().set_edgecolor("none")
+        _panel(top, narrow, found, sizes, NARROW, "a", csv_rows)
+        _panel(bottom, wide, found, sizes, WIDE, "b", csv_rows)
+        paper.panel_letter(top, "a")
+        paper.panel_letter(bottom, "b")
+        bottom.set_xlabel("post-trained minus base")
+        _key(fig)
+        _rows.freeze_layout(fig)
 
     sentiment = [found[("sentiment", s)] for s in sizes]
-    numbers["sent_below"] = float(sum(hi < 0 for _, _, hi in sentiment))
+    numbers["sent_below"] = float(sum(hi < 0 for _, _, hi, _ in sentiment))
     moves = [abs(found[(r, s)][0]) for r in OTHER for s in sizes]
     numbers["max_abs_other"] = max(moves)
     excluding = [
         (r, s, found[(r, s)][0])
         for r in OTHER
         for s in sizes
-        if found[(r, s)][1] > 0 or found[(r, s)][2] < 0
+        if _excludes_zero(found[(r, s)][1], found[(r, s)][2])
     ]
     numbers["other_excluding"] = float(len(excluding))
-    falls = sorted(abs(v) for v, _, _ in sentiment)
+    falls = sorted(abs(v) for v, _, _, _ in sentiment)
     below = {
         r: [s for s in sizes if found[(r, s)][2] < 0]
         for r in ("knowledge", "steering")
     }
-    paired_rows = _paired_rows(manifest)
     paired = _paired_excluding(paired_rows)
     numbers["paired_total"] = float(len(paired_rows))
     numbers["paired_excluding_zero"] = float(len(paired))
     for name, size in paired:
         numbers[f"paired_{name}_{size.lower().replace('.', '')}"] = 1.0
     detail = DETAIL.format(
-        paired=_rows.join_and([f"{n} on {s}" for n, s in paired]),
+        narrow=_rows.number(NARROW),
+        wide=f"{axes.MINUS}{_rows.number(WIDE)} to {_rows.number(WIDE)}",
         low=_rows.number(falls[0]),
         high=_rows.number(falls[-1]),
         below=int(numbers["sent_below"]),
