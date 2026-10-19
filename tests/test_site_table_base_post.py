@@ -13,7 +13,6 @@ ROOT, data, models, run = _R["ROOT"], _R["data"], _R["models"], _R["run"]
 fmt = _M["fmt"]
 DASHES = (chr(0x2014), chr(0x2013))
 MEASURES = {
-    "r1": "sentiment (layer chosen on the scored pairs)",
     "r2": "utility",
     "r3": "morality",
     "r7": "truth (transfer sets)",
@@ -49,14 +48,14 @@ def test_columns_and_row_groups(output: registry.TableOutput) -> None:
         "Post-trained depth",
     ]
     assert output.align == "llrrrrrr"
-    assert output.row_groups == (0, 5)
+    assert output.row_groups == (0, 4)
 
 
 def test_rows_equal_the_stored_comparisons(
     output: registry.TableOutput,
 ) -> None:
     stored = _stored()
-    assert len(output.rows) == 10
+    assert len(output.rows) == 8
     expected = []
     for size in SIZES:
         tuned = f"qwen3-{size.lower()}"
@@ -84,12 +83,38 @@ def test_caption_names_the_statistic(output: registry.TableOutput) -> None:
     assert "own layer" in text
     assert "Figure" in text or "[[fig:base_post]]" in text
     assert not any(ch in text for ch in DASHES)
-    assert "_" not in text.replace("[[fig:base_post]]", "")
+    text = text.replace("[[fig:base_post]]", "")
+    assert "_" not in text.replace("[[num:table:base_post.chance]]", "")
+
+
+def test_no_r1_row_and_the_baseline_is_stated(
+    output: registry.TableOutput,
+) -> None:
+    assert not any("scored pairs" in row[0] for row in output.rows)
+    text = output.claim + " " + output.detail
+    assert "no random-direction accuracy is stored" in text
+    assert "[[num:table:base_post.chance]]" in text
+
+
+def test_the_stored_chance_level_is_the_baseline_number(
+    output: registry.TableOutput,
+) -> None:
+    levels = set()
+    for model in models("p8"):
+        for path in run("p8", model).glob("curves_r*_qwen3-*.json"):
+            levels.add(data(run("p8", model), path.name)["chance"])
+    assert levels == {0.5}
+    assert output.numbers["chance"] == 0.5
 
 
 def test_numbers_count_intervals_off_zero(
     output: registry.TableOutput,
 ) -> None:
     rows = _stored()
-    low = sum(r["hi"] < 0 for sizes in rows.values() for r in sizes.values())
+    low = sum(
+        r["hi"] < 0
+        for sizes in rows.values()
+        for source, r in sizes.items()
+        if source in MEASURES
+    )
     assert output.numbers["below_zero"] == low

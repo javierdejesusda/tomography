@@ -6,6 +6,7 @@ post-trained checkpoint, each read at its own layer, and the difference with
 its bootstrap interval over seeds.
 """
 
+import json
 from typing import Any
 
 from tomography.site.manifest import Manifest
@@ -13,7 +14,6 @@ from tomography.site.registry import TableOutput
 from tomography.site.tables import _cells
 
 MEASURES = {
-    "r1": "sentiment (layer chosen on the scored pairs)",
     "r2": "utility",
     "r3": "morality",
     "r7": "truth (transfer sets)",
@@ -39,6 +39,19 @@ def _stored(manifest: Manifest) -> dict[str, dict[str, dict[str, Any]]]:
         for row in _cells.read_table(run / "table.json"):
             found.setdefault(row["tuned"], {})[row["source"]] = row
     return found
+
+
+def _chance(manifest: Manifest) -> float:
+    """Reads the chance level the stored curves of every row agree on."""
+    levels = set()
+    for model in manifest.models("p8"):
+        run = manifest.run("p8", model)
+        assert run is not None
+        for path in run.glob("curves_r*_qwen3-*.json"):
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            levels.add(payload["data"]["chance"])
+    assert len(levels) == 1, levels
+    return float(levels.pop())
 
 
 def _size(tuned: str) -> str:
@@ -81,7 +94,10 @@ def build(manifest: Manifest) -> TableOutput:
         "The difference is post-trained minus base, taken per seed on the "
         "same stimuli, with a percentile bootstrap interval over the 10 "
         "seeds; each checkpoint is read at its own layer, given as relative "
-        "depth. [[fig:base_post]] shows all three pairs with intervals for "
+        "depth. Each accuracy is read from pairs with two balanced classes, "
+        "where chance is [[num:table:base_post.chance]]; no random-direction "
+        "accuracy is stored for these comparisons, so none is shown. "
+        "[[fig:base_post]] shows all three pairs with intervals for "
         "the test items."
     )
     return TableOutput(
@@ -91,6 +107,10 @@ def build(manifest: Manifest) -> TableOutput:
         rows,
         _cells.check_align("llrrrrrr", len(COLUMNS)),
         [],
-        {"below_zero": float(below), "rows": float(len(rows))},
+        {
+            "below_zero": float(below),
+            "rows": float(len(rows)),
+            "chance": _chance(manifest),
+        },
         row_groups=tuple(row_groups),
     )
