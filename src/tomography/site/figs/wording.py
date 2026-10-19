@@ -32,11 +32,6 @@ KIND = {
     "wording": "wording change",
     "concept": "concept swap",
 }
-ROLE_TEXT = {
-    "gpt2": "GPT-2",
-    "base": "Qwen3 base",
-    "post": "post-trained",
-}
 SIZE = 3.0
 YLIM = (0.45, 1.0)
 TEXT = 6.5
@@ -273,7 +268,7 @@ def _numbers(
 def _span_text(numbers: dict[str, float]) -> str:
     parts = [
         f"{numbers[f'span_{r}_min']:.3f} to {numbers[f'span_{r}_max']:.3f} "
-        f"on {ROLE_TEXT[r]}"
+        f"on {stats.ROLE_NAMES[r]}"
         for r in stats.ROLES
         if f"span_{r}_min" in numbers
     ]

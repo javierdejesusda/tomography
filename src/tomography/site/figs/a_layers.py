@@ -156,8 +156,10 @@ def build(manifest: Manifest) -> FigureOutput:
                 ax = fig.add_subplot(grid[r, c])
                 found = {}
                 for model in manifest.models(exp):
+                    if stats.role(model) != group:
+                        continue
                     item = reading.load(manifest, exp, model)
-                    if item is not None and stats.role(model) == group:
+                    if item is not None:
                         found[model] = item
                 _panel(ax, found, title, group, rows)
                 if r == 0:

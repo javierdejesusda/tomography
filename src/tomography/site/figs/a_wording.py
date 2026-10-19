@@ -26,7 +26,6 @@ WIDE_LIMIT = 8
 VMAX = 0.45
 TEXT = 6.0
 DOT = 1.6
-ROLE_NAMES = {"gpt2": "GPT-2", "base": "Qwen3 base", "post": "post-trained"}
 
 
 def _matrix(
@@ -70,7 +69,8 @@ def summarize(margins: dict[str, np.ndarray]) -> tuple[dict[str, float], str]:
             numbers[f"min_{role}_lo"] = min(group)
             numbers[f"min_{role}_hi"] = max(group)
             parts.append(
-                f"{min(group):.3f} to {max(group):.3f} on {ROLE_NAMES[role]}"
+                f"{min(group):.3f} to {max(group):.3f} "
+                f"on {stats.ROLE_NAMES[role]}"
             )
     numbers["n_below"] = float(
         sum(int((m <= 0).sum()) for m in margins.values())
@@ -118,10 +118,10 @@ def _draw(ax: Axes, matrix: np.ndarray, paper_index: int) -> AxesImage:
     ax.tick_params(length=2, pad=1)
     for axis in (ax.xaxis, ax.yaxis):
         tick = axis.get_major_ticks()[paper_index]
-        for line in (tick.tick1line,):
-            line.set_markeredgecolor(paper.ENC["paper"])
-            line.set_markersize(4)
-            line.set_markeredgewidth(1.2)
+        line = tick.tick1line
+        line.set_markeredgecolor(paper.ENC["paper"])
+        line.set_markersize(4)
+        line.set_markeredgewidth(1.2)
     return image
 
 

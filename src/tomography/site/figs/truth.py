@@ -83,9 +83,9 @@ def _random_at(path: Any, name: str, layer: int) -> float:
     series = json.loads((path / f"curves_{name}.json").read_text("utf-8"))[
         "data"
     ]["series"]
-    curves = np.load(path / f"curves_{name}.npz")
-    column = list(curves["x"]).index(layer)
-    return float(curves["mean"][series.index("random"), column])
+    with np.load(path / f"curves_{name}.npz") as curves:
+        column = list(curves["x"]).index(layer)
+        return float(curves["mean"][series.index("random"), column])
 
 
 def _model(manifest: Manifest, model: str) -> Model:
