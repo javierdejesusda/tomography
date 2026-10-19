@@ -578,3 +578,20 @@ def test_the_random_tick_stays_below_the_names_on_the_centre_line(
         tick = _gid_lines(ax, f"random:{model}")[f"random:{model}"]
         assert min(tick.get_ydata()) >= centre + 0.15
         assert max(tick.get_ydata()) <= centre + 0.5
+
+
+def test_the_qwen3_heading_sits_clear_of_the_last_gpt2_row(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _strip(output)
+    (head,) = [
+        t
+        for t in ax.texts
+        if t.get_gid() == "block" and t.get_text().startswith("Qwen3")
+    ]
+    last_gpt2 = max(
+        y
+        for y, label in zip(ax.get_yticks(), ax.get_yticklabels(), strict=True)
+        if label.get_text().startswith("GPT-2")
+    )
+    assert head.get_position()[1] - last_gpt2 >= 1.0
