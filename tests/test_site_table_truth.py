@@ -61,14 +61,15 @@ def test_columns_and_header_spans(output: registry.TableOutput) -> None:
         "Answer log-probability",
         "Accuracy",
         "Layer",
+        "Random",
         "Accuracy",
         "Random",
         "Seed agreement",
     ]
-    assert output.align == "l" + "r" * 9
+    assert output.align == "l" + "r" * 10
     assert [(g[0], g[1]) for g in output.groups] == [
         ("TruthfulQA MC1", 4),
-        ("Honesty in template", 2),
+        ("Honesty in template", 3),
         ("Honesty transfer", 2),
         ("Seed agreement", 1),
     ]
@@ -79,14 +80,37 @@ def test_rows_follow_paper_order_with_a_rule_before_qwen3(
     output: registry.TableOutput,
 ) -> None:
     names = models("r6")
-    assert [r[0] for r in output.rows] == [paper.display_name(m) for m in names]
-    assert output.row_groups == groups(names)
+    n = len(names)
+    assert [r[0] for r in output.rows[:n]] == [
+        paper.display_name(m) for m in names
+    ]
+    assert output.row_groups == (*groups(names), n)
+
+
+def test_baseline_rows_follow_the_checkpoints_with_values_in_the_table(
+    output: registry.TableOutput,
+) -> None:
+    n = len(models("r6"))
+    summary = data(run("r6", "gpt2"), "summary.json")["text_baselines"]
+    chance = data(run("r6", "gpt2"), "curves_truthfulqa.json")["chance"]
+    rows = output.rows[n:]
+    assert [r[0] for r in rows] == [
+        "Words classifier",
+        "Characters classifier",
+        "Chance",
+    ]
+    assert rows[0][1] == fmt(summary["text_word"]["mc1"])
+    assert rows[1][1] == fmt(summary["text_char"]["mc1"])
+    assert rows[2][1] == fmt(chance)
+    assert all(len(r) == len(output.columns) for r in rows)
+    assert all(c == "" for r in rows for c in r[2:])
+    assert "each of the four TruthfulQA columns" in output.detail
 
 
 def test_every_cell_matches_a_recomputation(
     output: registry.TableOutput,
 ) -> None:
-    for row, model in zip(output.rows, models("r6"), strict=True):
+    for row, model in zip(output.rows, models("r6"), strict=False):
         assert row[1] == fmt(_mc1(model, "lat", "truthfulqa"))
         assert row[2] == fmt(_mc1(model, "lat", "arc"))
         assert row[3] == fmt(_mc1(model, "lat", "honesty"))
@@ -95,10 +119,17 @@ def test_every_cell_matches_a_recomputation(
         block = summary["in_template"]
         assert row[5] == fmt(block["test_accuracy"])
         assert row[6] == str(block["best_layer"])
-        assert row[7] == fmt(summary["test_accuracy"])
-        assert row[8] == fmt(_transfer_random(model, summary["best_layer"]))
+        r5 = run("r5", model)
+        meta = data(r5, "curves.json")
+        with np.load(r5 / "curves.npz") as arrays:
+            mean = np.asarray(arrays["mean"], dtype=float)
+        layer = block["best_layer"]
+        series = list(meta["series"]).index("random")
+        assert row[7] == fmt(mean[series][layer - 1])
+        assert row[8] == fmt(summary["test_accuracy"])
+        assert row[9] == fmt(_transfer_random(model, summary["best_layer"]))
         agree = data(run("a1", model), "summary.json")["agreement_at_layer"]
-        assert row[9] == fmt(agree["r5"])
+        assert row[10] == fmt(agree["r5"])
 
 
 def test_the_caption_quotes_the_text_baselines_chance_and_the_wilson_width(
