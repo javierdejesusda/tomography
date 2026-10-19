@@ -144,26 +144,6 @@ def test_panel_a_rows_hold_the_readers_and_the_log_probability_row(
         assert float(row["hi"]) == pytest.approx(hi, abs=1e-9)
 
 
-def test_panel_b_rows_hold_every_set_and_the_random_direction(
-    output: registry.FigureOutput,
-) -> None:
-    rows = _csv_rows(output)
-    for model in MODELS:
-        for name in SETS:
-            acc, n = _set(model, name)
-            row = _find(rows, "b", model, name)
-            assert float(row["value"]) == pytest.approx(acc)
-            lo, hi = stats.wilson(acc, n)
-            assert float(row["lo"]) == pytest.approx(lo, abs=1e-9)
-            assert float(row["hi"]) == pytest.approx(hi, abs=1e-9)
-        for name in NEGATED:
-            row = _find(rows, "b", model, f"random_{name}")
-            assert float(row["value"]) == pytest.approx(
-                _random(model, name), abs=1e-9
-            )
-    assert len(rows) == len(MODELS) * (4 + len(SETS) + len(NEGATED))
-
-
 def test_numbers_are_recomputed_per_role(
     output: registry.FigureOutput,
 ) -> None:
@@ -218,7 +198,6 @@ def test_the_plan_values_hold_at_the_current_results(
     assert [counts["tqa_inside"][r].hits for r in ROLES] == [4, 2, 3]
     assert [counts["tqa_inside"][r].total for r in ROLES] == [4, 3, 3]
     assert [counts["neg_below_half"][r].hits for r in ROLES] == [3, 0, 2]
-    assert [counts["neg_below_half"][r].total for r in ROLES] == [4, 3, 3]
     assert output.numbers["persona_min"] == pytest.approx(0.270, abs=5e-4)
     assert output.numbers["persona_max"] == pytest.approx(0.575, abs=5e-4)
 
@@ -229,13 +208,13 @@ def test_the_caption_states_the_counts_and_the_numbers(
     text = f"{output.claim} {output.detail}"
     n = output.numbers
     assert stats.per_role_text(output.counts["tqa_inside"]) in text
-    assert stats.per_role_text(output.counts["neg_below_half"]) in text
     for name in ("persona_min", "persona_max", "text_lo", "text_hi", "chance"):
         assert f"{n[name]:.3f}" in text, name
     assert "pooled" not in text
     assert EM not in text
     assert EN not in text
-    assert "_" not in text
+    assert "[[fig:a_truth_cities]]" in text
+    assert "_" not in text.replace("a_truth_cities", "")
 
 
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
@@ -259,9 +238,6 @@ def test_the_caption_separates_the_classifier_accuracies_from_their_intervals(
     assert "intervals" in output.claim
     assert f"{n['text_word']:.3f}" in text
     assert f"{n['text_char']:.3f}" in text
-    assert "at least one negated set" in text
-    assert "whiskers in (d) and (e)" in text
-    assert "two negated sets per checkpoint" not in text
 
 
 _L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
@@ -277,13 +253,6 @@ def test_no_legend_symbol_means_two_things_and_no_role_key_is_drawn(
     assert "GPT-2 and base" not in labels
 
 
-def test_the_below_random_count_is_labelled_a_point_estimate(
-    output: registry.FigureOutput,
-) -> None:
-    text = output.detail
-    assert "below the random direction by point estimate on" in text
-
-
 def _ax(output: registry.FigureOutput, gid: str) -> Any:
     (ax,) = [a for a in output.figure.axes if a.get_gid() == gid]
     return ax
@@ -293,16 +262,17 @@ def _gid(ax: Any, gid: str) -> list[Any]:
     return [ln for ln in ax.get_lines() if ln.get_gid() == gid]
 
 
-def test_the_layout_is_five_panels_at_the_planned_size(
+def test_the_layout_is_three_panels_at_the_planned_size(
     output: registry.FigureOutput,
 ) -> None:
     fig = output.figure
     assert sorted(a.get_gid() for a in fig.axes) == sorted(
-        ["levels", "difference", "logprob", "cities", "translations"]
+        ["levels", "difference", "logprob"]
     )
     width, height = fig.get_size_inches()
     assert width == pytest.approx(paper.FULL_WIDTH)
-    assert height == pytest.approx(5.8)
+    assert height == pytest.approx(3.6)
+    assert len(f"{output.claim} {output.detail}".split()) <= 200
 
 
 def test_the_two_text_classifiers_are_separate_green_lines_with_own_bands(
@@ -381,31 +351,6 @@ def test_the_difference_panel_draws_reader_minus_words_with_a_zero_line(
     assert "1.96" in output.detail
 
 
-def test_each_dumbbell_joins_the_sets_and_fills_the_negated_end_by_state(
-    output: registry.FigureOutput,
-) -> None:
-    for gid, (plain, neg) in (
-        ("cities", ("cities", "neg_cities")),
-        ("translations", ("sp_en_trans", "neg_sp_en_trans")),
-    ):
-        ax = _ax(output, gid)
-        for model in MODELS:
-            acc, _ = _set(model, plain)
-            nacc, nn = _set(model, neg)
-            (bell,) = _gid(ax, f"dumbbell:{plain}:{model}")
-            assert list(bell.get_xdata()) == pytest.approx([acc, nacc])
-            (end,) = _gid(ax, f"neg:{plain}:{model}")
-            filled = end.get_markerfacecolor() != "white"
-            assert filled == (stats.wilson(nacc, nn)[1] < 0.5)
-            (tick,) = _gid(ax, f"random:{plain}:{model}")
-            assert tick.get_xdata()[0] == pytest.approx(_random(model, neg))
-        (chance,) = _gid(ax, "chance")
-        assert chance.get_xdata()[0] == pytest.approx(0.5)
-        (shade,) = [p for p in ax.patches if p.get_gid() == "below_chance"]
-        assert shade.get_x() == pytest.approx(ax.get_xlim()[0])
-        assert shade.get_x() + shade.get_width() == pytest.approx(0.5)
-
-
 def test_no_star_triangle_hexagon_or_cross_is_drawn(
     output: registry.FigureOutput,
 ) -> None:
@@ -415,7 +360,7 @@ def test_no_star_triangle_hexagon_or_cross_is_drawn(
         for ln in ax.get_lines()
         if str(ln.get_marker()) not in ("None", "")
     }
-    assert marks <= {"o", "p", "|"}
+    assert marks <= {"o", "p"}
     assert marks.isdisjoint(set(paper.CATEGORY_MARKERS) | {"h", "x"})
 
 
@@ -428,16 +373,6 @@ def test_the_text_is_at_least_the_glossary_floor_and_never_bold(
             assert t.get_fontweight() in ("normal", 400), t.get_text()
 
 
-def test_the_caption_notes_the_weak_gpt2_cities_reader_and_the_criterion(
-    output: registry.FigureOutput,
-) -> None:
-    n = output.numbers
-    low = f"{n['gpt2_cities_min']:.2f} to {n['gpt2_cities_max']:.2f}"
-    assert low in output.detail
-    assert "not inversions of a strong reader" in output.detail
-    assert "wholly below 0.5" in output.detail
-
-
 def test_every_drawn_panel_letter_is_named_in_the_caption_and_vice_versa(
     output: registry.FigureOutput,
 ) -> None:
@@ -447,25 +382,23 @@ def test_every_drawn_panel_letter_is_named_in_the_caption_and_vice_versa(
         for t in ax.texts
         if t.get_text().startswith(r"$\mathbf{(")
     )
-    assert drawn == list("abcde")
+    assert drawn == list("abc")
     for letter in drawn:
-        assert f"({letter}" in output.detail or f", {letter})" in output.detail
-    assert "(f" not in output.detail
+        assert f"({letter})" in output.detail
+    assert "(d)" not in output.detail
+    assert "(e)" not in output.detail
     assert "plus)" not in output.detail
     assert "dark grey circle" in output.detail
     order = [output.detail.index(f"({x})") for x in "abc"]
     assert order == sorted(order)
-    assert output.detail.index("(c)") > output.detail.index("(b)")
-    assert output.detail.index("(d, e)") > output.detail.index("(c)")
 
 
-def test_the_legend_names_the_dumbbell_panels_and_pluralises_the_classifiers(
+def test_the_legend_pluralises_the_classifiers(
     output: registry.FigureOutput,
 ) -> None:
     (legend,) = output.figure.legends
     labels = [t.get_text() for t in legend.get_texts()]
-    assert any("(d, e)" in x for x in labels)
-    assert not any("(b)" in x for x in labels)
+    assert not any("(d, e)" in x for x in labels)
     assert any(
         x.startswith("text-only classifiers on words and") for x in labels
     )
@@ -481,25 +414,11 @@ def test_the_readers_and_the_text_band_are_labelled_directly(
     assert texts["band_label"] == "words, characters"
 
 
-def test_the_dumbbell_panels_share_the_row_limits_of_the_top_panels(
+def test_the_three_panels_share_the_row_limits_with_headroom_for_labels(
     output: registry.FigureOutput,
 ) -> None:
-    levels = _ax(output, "levels").get_ylim()
-    low = levels[0]
-    for gid in ("cities", "translations"):
-        lim = _ax(output, gid).get_ylim()
-        assert lim[0] == pytest.approx(low)
-        assert lim[1] > -1.0
-
-
-def test_the_gpt2_cities_range_has_its_random_direction_beside_it(
-    output: registry.FigureOutput,
-) -> None:
-    gpt2 = [m for m in MODELS if _role(m) == "gpt2"]
-    random = [_random(m, "cities") for m in gpt2]
-    n = output.numbers
-    assert n["gpt2_cities_random_min"] == pytest.approx(min(random))
-    assert n["gpt2_cities_random_max"] == pytest.approx(max(random))
-    low = f"{n['gpt2_cities_min']:.2f} to {n['gpt2_cities_max']:.2f}"
-    rand = f"{min(random):.2f} to {max(random):.2f} for its random direction"
-    assert f"{low}, against {rand}" in output.detail
+    limits = {
+        _ax(output, g).get_ylim() for g in ("levels", "difference", "logprob")
+    }
+    assert len(limits) == 1
+    assert next(iter(limits))[1] < -1.0

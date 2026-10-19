@@ -3,9 +3,6 @@ from pathlib import Path
 import runpy
 from typing import Any
 
-from matplotlib.collections import LineCollection
-from matplotlib.collections import PolyCollection
-from matplotlib.image import AxesImage
 from matplotlib.text import Text
 import numpy as np
 import pytest
@@ -13,6 +10,7 @@ from scipy import stats as scipy_stats
 
 from tomography.site import params
 from tomography.site import registry
+from tomography.site.figs import reading as reading_fig
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -150,31 +148,6 @@ def _records(output: registry.FigureOutput, panel: str) -> list[dict[str, str]]:
     return [r for r in rows if r["panel"] == panel]
 
 
-def test_every_depth_cell_is_the_reader_minus_random_curve(
-    output: registry.FigureOutput,
-) -> None:
-    rows = _records(output, "depth")
-    total = 0
-    for concept, exp in CONCEPTS.items():
-        for model in models(exp):
-            reader, random = _curves(exp, model)
-            mine = [
-                r
-                for r in rows
-                if r["concept"] == concept and r["model"] == model
-            ]
-            assert len(mine) == len(reader)
-            total += len(mine)
-            for i, rec in enumerate(mine):
-                assert float(rec["y"]) == pytest.approx(
-                    reader[i] - random[i], abs=1e-9
-                )
-                assert float(rec["x"]) == pytest.approx(
-                    (i + 1) / len(reader), abs=1e-9
-                )
-    assert total == len(rows)
-
-
 def test_every_size_point_is_recomputed_with_its_wilson_interval(
     output: registry.FigureOutput,
 ) -> None:
@@ -197,22 +170,6 @@ def test_the_sentiment_row_is_the_held_out_value_not_the_r1_value() -> None:
         best = data(run("r1", model), "summary.json")["best_accuracy"]
         differs += abs(acc - best) > 1e-6
     assert differs >= 1
-
-
-def test_the_onset_depths_are_recomputed_for_all_forty_cells(
-    output: registry.FigureOutput,
-) -> None:
-    cells = 0
-    for concept in CONCEPTS:
-        depths = _depths(concept)
-        cells += len(depths)
-        assert output.numbers[f"onset_{concept}_min"] == pytest.approx(
-            min(depths)
-        )
-        assert output.numbers[f"onset_{concept}_max"] == pytest.approx(
-            max(depths)
-        )
-    assert cells == 40
 
 
 def test_the_gpt2_slopes_use_a_t_interval_on_four_points(
@@ -241,18 +198,16 @@ def test_the_plan_values_hold_at_the_current_results() -> None:
     assert round(_slope("truth")[0], 3) == pytest.approx(-0.027)
 
 
-def test_the_caption_quotes_the_onsets_slopes_and_sizes(
+def test_the_caption_quotes_the_slopes_and_sizes(
     output: registry.FigureOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
-    for concept in CONCEPTS:
-        assert f"{output.numbers[f'onset_{concept}_min']:.3f}" in text
-        assert f"{output.numbers[f'onset_{concept}_max']:.3f}" in text
-    assert "0.167" in text
-    assert "214 sentiment pairs" in text
-    assert "4,808 utility, 983 morality and 59 truth pairs" in text
+    assert "214 sentiment, 4,808 utility, 983 morality and 59 truth pairs" in (
+        text
+    )
     assert "per tenfold" in text
     assert "include zero" in text
+    assert "[[fig:a_reading_curves]]" in text
 
 
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
@@ -268,16 +223,6 @@ def test_the_caption_keeps_names_and_grammar_and_avoids_first(
     assert "GPT-2 sizes" in text
     assert "intervals that includes" not in text
     assert "first" not in text.lower()
-
-
-def test_the_truth_onset_is_called_a_crossing_on_its_pair_count(
-    output: registry.FigureOutput,
-) -> None:
-    text = output.detail
-    n = int(output.numbers["truth_n"])
-    assert n == 59
-    assert "earliest layer at which the margin curve crosses 0.1" in text
-    assert f"truth the curve rests on {n} truth pairs" in text
 
 
 ROLE_ROWS = ("gpt2", "base", "post")
@@ -300,108 +245,6 @@ def _axes(output: registry.FigureOutput, prefix: str) -> dict[str, object]:
         for ax in output.figure.axes
         if (ax.get_gid() or "").startswith(prefix)
     }
-
-
-def test_the_heat_maps_and_the_colour_bar_are_gone_and_the_grid_is_four_by_four(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    assert not fig.findobj(AxesImage)
-    width, height = fig.get_size_inches()
-    assert width == pytest.approx(paper.FULL_WIDTH)
-    assert height == pytest.approx(6.0)
-    assert len(_axes(output, "curve_")) == 12
-    assert len(_axes(output, "size_")) == 4
-    assert not [a for a in fig.axes if a.get_label() == "<colorbar>"]
-
-
-def test_each_role_row_holds_only_its_own_checkpoints_never_pooled(
-    output: registry.FigureOutput,
-) -> None:
-    for concept, exp in CONCEPTS.items():
-        for role in ROLE_ROWS:
-            ax = _axes(output, f"curve_{role}_{concept}")[
-                f"curve_{role}_{concept}"
-            ]
-            drawn = {
-                ln.get_gid(): np.asarray(ln.get_ydata())
-                for ln in ax.get_lines()
-                if (ln.get_gid() or "").startswith("curve:")
-            }
-            want = [m for m in models(exp) if _role(m) == role]
-            assert sorted(drawn) == sorted(f"curve:{m}" for m in want)
-            for m in want:
-                reader, random = _curves(exp, m)
-                assert drawn[f"curve:{m}"] == pytest.approx(reader - random)
-                assert ax.get_ylim() == pytest.approx((-0.1, 0.5))
-
-
-def test_every_curve_panel_has_a_band_a_zero_line_and_a_dot_per_checkpoint(
-    output: registry.FigureOutput,
-) -> None:
-    for concept, exp in CONCEPTS.items():
-        for role in ROLE_ROWS:
-            gid = f"curve_{role}_{concept}"
-            ax = _axes(output, gid)[gid]
-            bands = [
-                c
-                for c in ax.collections
-                if isinstance(c, PolyCollection)
-                and c.get_gid() == "random_band"
-            ]
-            assert len(bands) == 1
-            dots = [
-                ln
-                for ln in ax.get_lines()
-                if (ln.get_gid() or "").startswith("read:")
-            ]
-            want = [m for m in models(exp) if _role(m) == role]
-            assert len(dots) == len(want)
-            for ln in dots:
-                model = ln.get_gid().removeprefix("read:")
-                layer = _curve_layer(concept, model)
-                reader, random = _curves(exp, model)
-                assert ln.get_xdata()[0] == pytest.approx(layer / len(reader))
-                assert ln.get_ydata()[0] == pytest.approx(
-                    reader[layer - 1] - random[layer - 1]
-                )
-            zero = [ln for ln in ax.get_lines() if ln.get_gid() == "zero"]
-            assert len(zero) == 1
-
-
-def test_the_onset_is_a_tick_at_the_earliest_layer_above_the_margin(
-    output: registry.FigureOutput,
-) -> None:
-    for concept, exp in CONCEPTS.items():
-        for role in ROLE_ROWS:
-            gid = f"curve_{role}_{concept}"
-            ax = _axes(output, gid)[gid]
-            ticks = [
-                c
-                for c in ax.collections
-                if isinstance(c, LineCollection) and c.get_gid() == "onset"
-            ]
-            want = sorted(
-                d
-                for m in models(exp)
-                if _role(m) == role and (d := _onset(concept, m)) is not None
-            )
-            got = sorted(
-                float(seg[0][0]) for c in ticks for seg in c.get_segments()
-            )
-            assert got == pytest.approx(want)
-
-
-def test_the_end_labels_sit_in_the_label_column_in_size_order(
-    output: registry.FigureOutput,
-) -> None:
-    labels = _axes(output, "labels_")
-    assert sorted(labels) == ["labels_base", "labels_gpt2", "labels_post"]
-    for role, ax in labels.items():
-        texts = [t.get_text() for t in ax.texts if t.get_gid() == "end_label"]
-        assert texts == SIZE_ORDER[role.removeprefix("labels_")]
-    for gid, ax in _axes(output, "curve_").items():
-        assert not [t for t in ax.texts if t.get_gid() == "end_label"], gid
 
 
 def test_the_size_row_has_a_reader_whisker_a_random_tick_and_no_trend_line(
@@ -431,43 +274,18 @@ def test_the_size_row_has_a_reader_whisker_a_random_tick_and_no_trend_line(
         assert ax.get_ylim() == pytest.approx((0.4, 1.0))
 
 
-def test_the_detail_describes_the_curves_the_band_the_onset_and_the_size_row(
+def test_the_detail_describes_the_size_row_and_the_slope_interval(
     output: registry.FigureOutput,
 ) -> None:
     text = output.detail
-    assert "one line per checkpoint" in text
-    assert "grey band" in text
-    assert "95 percent interval over seeds" in text
-    assert "tick on the x axis" in text
-    assert "darker lines are larger checkpoints" in text
-    assert "no fitted line" in text
-    assert "sentiment curves" in text.lower()
-    assert "does not include the sampling error" in text
+    assert "grey tick" in text
+    assert "filled for GPT-2 and base" in text
+    assert "t interval" in text
+    assert "sample-size run" in text
 
 
 def _fig_texts(fig: Any) -> list[Any]:
     return [t for t in fig.findobj(Text) if t.get_visible() and t.get_text()]
-
-
-def test_the_curve_rows_share_one_quantity_label_and_titled_roles(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    (shared,) = [t for t in fig.texts if t.get_gid() == "curve_ylabel"]
-    assert shared.get_text() == "reader minus random accuracy"
-    weights = set()
-    for role, name in (
-        ("gpt2", "GPT-2"),
-        ("base", "Qwen3 base"),
-        ("post", "Qwen3 post-trained"),
-    ):
-        (ax,) = [
-            a for a in fig.axes if a.get_gid() == f"curve_{role}_sentiment"
-        ]
-        assert ax.get_ylabel() == name
-        assert ax.yaxis.label.get_fontsize() >= 8
-        weights.add(ax.yaxis.label.get_fontweight())
-    assert len(weights) == 1
 
 
 def test_the_key_uses_circles_like_the_data_not_hexagons(
@@ -529,30 +347,75 @@ def test_the_caption_says_where_the_sentiment_size_dot_is_read(
     output: registry.FigureOutput,
 ) -> None:
     assert "its own layer" in output.detail
-    assert "for sentiment" in output.detail.lower()
+    assert "sentiment dot" in output.detail.lower()
 
 
-@pytest.mark.parametrize("model", ["gpt2-xl", "qwen3-0.6b-base"])
-def test_the_sentiment_curve_dot_sits_at_the_finder_comparison_layer(
-    output: registry.FigureOutput, model: str
+def test_the_figure_is_one_row_of_four_size_panels_lettered_a_to_d(
+    output: registry.FigureOutput,
 ) -> None:
-    layer = _p4_layer(model)
-    assert layer != _read_at("sentiment", model)[0]
-    role = _role(model)
-    ax = _axes(output, f"curve_{role}_sentiment")[f"curve_{role}_sentiment"]
-    (dot,) = [ln for ln in ax.get_lines() if ln.get_gid() == f"read:{model}"]
-    reader, random = _curves("p4", model)
-    assert dot.get_xdata()[0] == pytest.approx(layer / len(reader))
-    assert dot.get_ydata()[0] == pytest.approx(
-        reader[layer - 1] - random[layer - 1]
+    fig = output.figure
+    width, height = fig.get_size_inches()
+    assert width == pytest.approx(paper.FULL_WIDTH)
+    assert height == pytest.approx(2.9)
+    assert len(_axes(output, "size_")) == 4
+    assert not _axes(output, "curve_")
+    letters = sorted(
+        t.get_text()
+        for ax in fig.axes
+        for t in ax.texts
+        if t.get_text().startswith(r"$\mathbf{(")
     )
-    rows = [
-        r
-        for r in _records(output, "read")
-        if r["concept"] == "sentiment" and r["model"] == model
-    ]
-    (row,) = rows
-    assert float(row["x"]) == pytest.approx(layer / len(reader))
-    assert float(row["y"]) == pytest.approx(
-        reader[layer - 1] - random[layer - 1]
-    )
+    assert [x[-4] for x in letters] == list("abcd")
+
+
+def test_the_caption_is_at_most_200_words(
+    output: registry.FigureOutput,
+) -> None:
+    assert len(f"{output.claim} {output.detail}".split()) <= 200
+
+
+def test_the_claim_counts_each_concept_per_role_from_the_intervals(
+    output: registry.FigureOutput,
+) -> None:
+    for concept, exp in CONCEPTS.items():
+        hits = {r: 0 for r in ROLE_ROWS}
+        totals = {r: 0 for r in ROLE_ROWS}
+        for model in models(exp):
+            _, acc, random, n = _read_at(concept, model)
+            half = Z * math.sqrt(
+                acc * (1 - acc) / n + random * (1 - random) / n
+            )
+            role = _role(model)
+            totals[role] += 1
+            hits[role] += (acc - random - half) > 0
+        for role in ROLE_ROWS:
+            assert output.numbers[f"above_{concept}_{role}"] == hits[role]
+            assert output.numbers[f"above_{concept}_{role}_n"] == totals[role]
+    text = output.claim
+    assert "all 10 checkpoints" in text
+    assert "truth on 0 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post" in text
+
+
+def test_the_onset_numbers_stay_available_to_the_page_text(
+    output: registry.FigureOutput,
+) -> None:
+    assert "onset_sentiment_min" in output.numbers
+    assert output.numbers["truth_n"] == 59
+
+
+def test_a_falling_slope_with_an_interval_below_zero_is_written_as_a_fall() -> (
+    None
+):
+    numbers = {
+        "n_gpt2": 4.0,
+        "slope_truth": -0.2,
+        "slope_truth_lo": -0.3,
+        "slope_truth_hi": -0.1,
+        "slope_utility": 0.1,
+        "slope_utility_lo": 0.05,
+        "slope_utility_hi": 0.15,
+    }
+    text = reading_fig._slope_text(numbers, {"truth": "T", "utility": "U"})
+    assert "rises by" in text
+    assert "falls by" in text
+    assert "includes zero" not in text

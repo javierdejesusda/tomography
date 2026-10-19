@@ -548,9 +548,10 @@ RESULTS = Section(
                 "[[count:fig:teaser.truth]], and sentiment from a relative "
                 "depth of [[num:fig:reading.onset_sentiment_min]] to "
                 "[[num:fig:reading.onset_sentiment_max]].",
-                "[[fig:reading]] plots the margin over every layer by role "
-                "and shows the held-out accuracy at the chosen layer against "
-                "model size; [[table:reading]] gives the margins, "
+                "[[fig:reading]] shows the held-out accuracy at the chosen "
+                "layer against model size, [[fig:a_reading_curves]] the "
+                "margin over every layer by role; [[table:reading]] gives "
+                "the margins, "
                 "[[fig:a_layers]] the raw layer curves, "
                 "[[fig:a_reading_heat]] the margins as heat maps and "
                 "[[table:reading_full]] every reading with its layer. "
@@ -591,9 +592,10 @@ RESULTS = Section(
                 "set falls below chance with its interval.",
                 "TruthfulQA can be answered in part from the answer text "
                 "alone, and negation flips the label without changing the "
-                "topic. [[fig:truth]] shows both tests, [[table:truth]] the "
-                "readers and the honesty transfer, and [[table:truth_sets]] "
-                "all nine Geometry of Truth sets.",
+                "topic. [[fig:truth]] shows the TruthfulQA test and "
+                "[[fig:a_truth_cities]] the negation test, [[table:truth]] "
+                "the readers and the honesty transfer, and "
+                "[[table:truth_sets]] all nine Geometry of Truth sets.",
             ),
             items=("fig:truth", "table:truth"),
         ),
@@ -847,7 +849,9 @@ APPENDICES = (
         "appendix_reading",
         "Reading details",
         paragraphs=(
-            "Layer curves of every reading ([[fig:a_layers]]), their margins "
+            "The reading curves by depth and role "
+            "([[fig:a_reading_curves]]), layer curves of every reading "
+            "([[fig:a_layers]]), their margins "
             "as heat maps ([[fig:a_reading_heat]]), every "
             "finder ([[fig:a_finders_gpt2]], [[fig:a_finders_qwen3]], "
             "[[table:finders_all]]), every reading at its layer "
@@ -855,6 +859,7 @@ APPENDICES = (
             "([[table:sizes]], [[table:prompts]]).",
         ),
         items=(
+            "fig:a_reading_curves",
             "fig:a_layers",
             "fig:a_reading_heat",
             "fig:a_finders_gpt2",
@@ -870,10 +875,16 @@ APPENDICES = (
         "Wording and truth details",
         paragraphs=(
             "The transfer between wordings ([[fig:a_wording]]), the "
-            "wordings themselves ([[table:wordings]]) and the truth reader "
-            "on every Geometry of Truth set ([[table:truth_sets]]).",
+            "wordings themselves ([[table:wordings]]), the truth reader "
+            "on statements with negation ([[fig:a_truth_cities]]) and on "
+            "every Geometry of Truth set ([[table:truth_sets]]).",
         ),
-        items=("fig:a_wording", "table:wordings", "table:truth_sets"),
+        items=(
+            "fig:a_wording",
+            "fig:a_truth_cities",
+            "table:wordings",
+            "table:truth_sets",
+        ),
     ),
     Section(
         "appendix_knowledge",

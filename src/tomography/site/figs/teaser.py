@@ -43,8 +43,10 @@ class Cell:
 
     Attributes:
         margin: Direction minus baseline.
-        lo: Lower end of the 95 percent interval of the margin.
-        hi: Upper end of the 95 percent interval of the margin.
+        lo: Lower end of the 95 percent interval of the margin; equal to
+            the margin on the steering row, which stores no interval.
+        hi: Upper end of the 95 percent interval of the margin; equal to
+            the margin on the steering row.
         baseline: The baseline value the margin is measured from.
         n: Items the margin is read from, or None when the interval is
             stored.
@@ -494,7 +496,7 @@ def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
     if every:
         total = sum(c.total for c in utility.values())
         reads = (
-            "A direction reads utility and morality better than a random "
+            "A direction reads utility and morality above a random "
             f"direction on all {total} checkpoints"
         )
     else:
@@ -502,31 +504,51 @@ def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
             f"A direction reads {_reads(utility, 'utility')} and "
             f"{_reads(morality, 'morality')}"
         )
-    reads += f", and {_reads(counts['truth'], 'truth')}."
-    second = (
-        "Against a stronger baseline: the paper's own finder "
-        "beats a random direction for sentiment on "
-        f"{stats.per_role_text(counts['paper_finder'])}, "
-    )
+    reads += f" and {_reads(counts['truth'], 'truth')}."
     if all(c.hits == 0 for c in counts["truthfulqa"].values()):
-        second += (
-            "the TruthfulQA reader is never above a classifier that sees "
-            "only the words with an interval excluding zero, "
-        )
+        words = "the TruthfulQA reader is never above a words-only classifier"
     else:
-        second += (
-            "the TruthfulQA reader is above a classifier that sees only the "
-            "words with an interval excluding zero on "
-            f"{stats.per_role_text(counts['truthfulqa'])}, "
+        words = (
+            "the TruthfulQA reader is above a words-only classifier on "
+            f"{stats.per_role_text(counts['truthfulqa'])}"
         )
-    second += (
-        "and a direction for questions the model can answer is above the "
-        "model's own confidence, with an interval excluding zero, on "
-        f"{stats.per_role_text(counts['knowledge_confidence'])}."
+    return (
+        f"{reads} Two comparisons are mostly null: {words}, and the "
+        "paper's finder beats a random direction for sentiment on "
+        f"{stats.per_role_text(counts['paper_finder'])}."
     )
+
+
+DETAIL = (
+    "Each marker is one checkpoint at its margin over the baseline of its "
+    "row; the right column counts 95 percent intervals above zero. The "
+    "steering marker is the lowest win rate of 3 steering vectors minus the "
+    "highest of 3 random directions; no interval is stored."
+)
+
+
+def method_detail(counts: dict[str, dict[str, RoleCount]]) -> str:
+    """Writes the method detail that the short caption leaves out.
+
+    The lead places this text in the reading details of the appendix.
+
+    Args:
+        counts: The per-role counts of the figure.
+
+    Returns:
+        The baselines of each row, the steering rule and the interval rule.
+    """
     fluent = counts["steering_fluent"]
-    third = (
-        "For steering on the utility manipulation task of the paper, a "
+    return (
+        "Baselines of each row: rows 1 to 5, the random direction of the "
+        "same run at the same layer; row 6, the random direction of the "
+        "finder comparison; row 7, a word classifier; row 8, the strongest "
+        "of popularity and two text classifiers; row 9, the model's own "
+        "confidence, five stacked output signals. A direction for questions "
+        "the model can answer is above that confidence, with an interval "
+        "excluding zero, on "
+        f"{stats.per_role_text(counts['knowledge_confidence'])}. For "
+        "steering on the utility manipulation task of the paper, a "
         "checkpoint passes when every logistic steering vector (3 per "
         "checkpoint) of the utility direction beats every random direction "
         "of the same norm (3 per checkpoint) on the sentiment judge at "
@@ -534,33 +556,12 @@ def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
         f"{stats.per_role_text(counts['steering'])}. At that coefficient the "
         "steered text meets the fluency rule (perplexity at most "
         f"{MAX_RATIO} times the unsteered text and distinct-1 at least "
-        f"{MIN_DISTINCT}) on {stats.per_role_text(fluent)} "
-        "(GPT-2 small has no fluency measure)."
+        f"{MIN_DISTINCT}) on {stats.per_role_text(fluent)} (GPT-2 small has "
+        "no fluency measure). Intervals cover the sampling of the test "
+        "items and treat the two arms as independent, which makes them "
+        "conservative; rows 8 and 9 use the Hanley and McNeil approximation "
+        "and the stored paired bootstrap."
     )
-    return (
-        "Where a direction reads and steers a concept, and where it does "
-        f"not. {reads} {second} {third}"
-    )
-
-
-DETAIL = (
-    "Each marker is one checkpoint, placed at the margin of a fitted "
-    "direction over the baseline named in its row; lanes separate GPT-2, "
-    "Qwen3 base and Qwen3 post-trained checkpoints, and the right column "
-    "counts the checkpoints whose 95 percent interval lies above zero. "
-    "Baselines: rows 1 to 5, the random direction of the same run at the "
-    "same layer; row 6, the random direction of the finder comparison; "
-    "row 7, a word classifier; row 8, the strongest of popularity and two "
-    "text classifiers; row 9, the model's answer probability alone. Row 10 "
-    "is not an interval and no interval is stored for it, so it has its "
-    "own panel below with its own axis: its marker is the lowest win rate "
-    "of the 3 logistic steering vectors minus the highest of the 3 random "
-    "directions, so a marker above zero means every vector beats every "
-    "random direction. Intervals cover the sampling of the test items and "
-    "treat the two arms as independent, which makes them conservative; "
-    "rows 8 and 9 use the Hanley and McNeil approximation and the stored "
-    "paired bootstrap."
-)
 
 
 def _csv(found: dict[str, dict[str, Cell]]) -> str:
