@@ -298,8 +298,8 @@ def test_caption_is_the_template_filled_from_the_files(
     assert "linear slope" not in output.detail
     assert all(dist[r].hits == dist[r].total for r in ("gpt2", "base"))
     assert dist["post"].hits < dist["post"].total
-    assert "Figure A6" in output.detail
-    assert "Figure A7" in output.detail
+    assert "[[fig:a_dose_runs]]" in output.detail
+    assert "[[fig:a_dose_types]]" in output.detail
     assert "resample the questions" in output.detail
 
 
