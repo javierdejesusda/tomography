@@ -29,7 +29,7 @@ MARKERS = {
 }
 TASK_NAMES = {"sentiment": "Sentiment", "truth": "Truth", "utility": "Utility"}
 MARKER = 3.0
-TEXT = 6.5
+TEXT = paper.MIN_TEXT
 YLIM = (0.4, 1.0)
 
 
@@ -154,7 +154,7 @@ def _legend(fig: Figure, post_trained: bool) -> None:
         ncol=2,
         frameon=False,
         fontsize=TEXT,
-        columnspacing=1.0,
+        columnspacing=2.0,
         handletextpad=0.4,
     )
 
