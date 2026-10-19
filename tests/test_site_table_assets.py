@@ -10,6 +10,7 @@ from tomography.site import assets
 from tomography.site import references
 from tomography.site import registry
 from tomography.site.manifest import Manifest
+from tomography.viz import paper
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
@@ -76,7 +77,17 @@ def test_the_table_lists_every_asset_once_in_order(
         "Revision",
         "License as stated",
     ]
-    assert [r[0] for r in output.rows] == [a.name for a in assets.ASSETS]
+    names = []
+    for a in assets.ASSETS:
+        if a.key in ("gpt2", "qwen3"):
+            names += [
+                paper.display_name(k)
+                for k in assets.CHECKPOINTS
+                if k.startswith(a.key)
+            ]
+        else:
+            names.append(a.name)
+    assert [r[0] for r in output.rows] == names
     assert output.align == "llllll"
 
 
@@ -163,5 +174,13 @@ def test_no_cell_has_a_dash_character_or_an_internal_code(
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", c) for c in cells)
 
 
-def test_the_per_checkpoint_pin_refers_to_the_models_table_by_token() -> None:
-    assert assets.PER_CHECKPOINT == "one per checkpoint, [[table:checkpoints]]"
+def test_every_checkpoint_revision_is_listed(
+    output: registry.TableOutput,
+) -> None:
+    rows = {r[0]: r for r in output.rows}
+    for key, pin in assets.CHECKPOINTS.items():
+        row = rows[paper.display_name(key)]
+        assert row[3] == pin.repo_id, key
+        assert row[4] == pin.revision[:12], key
+        assert row[5].lower() == pin.license.lower(), key
+    assert len(output.rows) == len(assets.ASSETS) - 2 + len(assets.CHECKPOINTS)

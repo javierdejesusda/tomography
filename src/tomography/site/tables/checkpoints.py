@@ -1,13 +1,12 @@
 """Table 1: Models.
 
-Every checkpoint that has a run under `results/`, with its family, role,
-size, the Hub repository and the pinned revision of its weights, and the
-license the Hub card states.
+Every checkpoint that has a run under `results/`, with its role, parameter
+count, layers and hidden size. The Hub repository, the pinned revision and
+the license are in Table A1.
 """
 
 from typing import Any
 
-from tomography.site import assets
 from tomography.site import params
 from tomography.site import store
 from tomography.site.manifest import Manifest
@@ -42,7 +41,6 @@ def build(manifest: Manifest) -> TableOutput:
     counts: list[int] = []
     for model in models:
         config = params.model_config(model)
-        pin = assets.CHECKPOINTS[model]
         count = params.param_count(model)
         counts.append(count)
         gpt2 = not model.startswith("qwen3")
@@ -53,14 +51,10 @@ def build(manifest: Manifest) -> TableOutput:
         rows.append(
             [
                 paper.display_name(model),
-                "GPT-2" if gpt2 else "Qwen3",
                 role,
                 f"{count:,}",
                 str(_layers(config)),
                 str(_width(config)),
-                pin.repo_id,
-                pin.revision[:12],
-                pin.license,
             ]
         )
     numbers = {
@@ -76,8 +70,8 @@ def build(manifest: Manifest) -> TableOutput:
     detail = (
         "Parameters include the embeddings, the positional table of GPT-2 and "
         "every norm, and are computed from the stored model configuration. "
-        "Layers are decoder blocks. Revision is the leading 12 characters of "
-        "the pinned commit of the weights on the Hugging Face Hub. "
+        "Layers are decoder blocks. The Hub repository, the pinned revision "
+        "and the license of each checkpoint are in [[table:assets]]. "
         "Post-trained Qwen3 checkpoints are used with their chat template and "
         "thinking disabled; they differ from their base checkpoint in "
         "post-training data, prompt format and distillation from a larger "
@@ -88,17 +82,13 @@ def build(manifest: Manifest) -> TableOutput:
         detail,
         [
             "Model",
-            "Family",
             "Role",
             "Parameters",
             "Layers",
             "Hidden size",
-            "Hub ID",
-            "Revision",
-            "License",
         ],
         rows,
-        "lllrrrlll",
+        "llrrr",
         [],
         numbers,
         row_groups=(0, sum(not m.startswith("qwen3") for m in models)),

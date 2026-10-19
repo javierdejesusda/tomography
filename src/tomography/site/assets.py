@@ -101,7 +101,8 @@ CHECKPOINTS = {
     ),
 }
 
-PER_CHECKPOINT = "one per checkpoint, [[table:checkpoints]]"
+FAMILIES = ("gpt2", "qwen3")
+PER_CHECKPOINT = "one row per checkpoint"
 
 ASSETS = (
     Asset(
