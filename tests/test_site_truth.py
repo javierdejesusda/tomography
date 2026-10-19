@@ -273,3 +273,11 @@ def test_the_text_band_and_chance_lines_are_drawn(
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.guard_problems(output.figure) == []
     assert checks.problems(output.figure) == []
+
+
+def test_the_claim_does_not_say_negation_breaks_the_reader(
+    output: registry.FigureOutput,
+) -> None:
+    assert "breaks" not in output.claim
+    n = _n_questions(MODELS[0])
+    assert f"over {n} questions" in output.detail

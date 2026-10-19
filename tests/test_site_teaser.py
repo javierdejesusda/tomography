@@ -352,3 +352,20 @@ def test_the_bar_is_registered_and_the_module_builds_from_the_registry() -> (
 ):
     assert "teaser" in registry.MAIN_FIGURES
     assert ("figure", "teaser") not in registry.missing()
+
+
+def test_the_claim_makes_no_blanket_statement_about_stronger_baselines(
+    built: registry.FigureOutput,
+) -> None:
+    assert "rarely" not in built.claim
+    assert not re.search(r"\bfirst\b", f"{built.claim} {built.detail}")
+
+
+def test_the_legend_names_the_sizes_the_figure_holds(
+    built: registry.FigureOutput,
+) -> None:
+    labels = [
+        t.get_text() for leg in built.figure.legends for t in leg.get_texts()
+    ]
+    assert "GPT-2 small to XL" in labels
+    assert "Qwen3 0.6B to 4B" in labels

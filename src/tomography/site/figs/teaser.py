@@ -453,7 +453,7 @@ def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
         )
     reads += f", and {_truth_reads(counts['truth'])}."
     second = (
-        "Against a stronger baseline it rarely wins: the paper's own finder "
+        "Against a stronger baseline: the paper's own finder "
         "beats a random direction for sentiment on "
         f"{stats.per_role_text(counts['paper_finder'])}, "
     )

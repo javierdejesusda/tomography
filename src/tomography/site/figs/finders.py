@@ -250,7 +250,7 @@ def _claim(
     sentiment = counts["pca_sentiment"]
     return (
         "The paper's finder needs matched pairs. On pairs of unrelated "
-        "sentences with opposite labels, the first principal component of "
+        "sentences with opposite labels, the leading principal component of "
         "paired differences is above a random direction, with an interval "
         f"excluding zero, for sentiment on {_where(sentiment)}"
         f"{_winners(models, data, 'sentiment', 'pca_diff')}, and for truth "
@@ -266,12 +266,17 @@ def _claim(
     )
 
 
+_PAIRS = (
+    f"{params.REPORT_PAIRS['sentiment']} sentiment, "
+    f"{params.REPORT_PAIRS['truth']} truth and "
+    f"{params.REPORT_PAIRS['utility']} utility pairs"
+)
 DETAIL = (
     "Each marker is a finder's accuracy on the report split minus that of "
     "a random direction of the same run, each at the layer its select split "
     "chose (filled for GPT-2 and Qwen3 base checkpoints, open for "
     "post-trained ones); whiskers are conservative 95 percent intervals for "
-    "the test pairs (214 sentiment, 59 truth and 256 utility pairs); the "
+    f"the test pairs ({_PAIRS}); the "
     "grey band is the spread that test-pair noise alone gives around the "
     "random direction. Layer curves of these finders are in Figures A2 and "
     "A3, all six finders in Table A2."

@@ -68,6 +68,7 @@ class Model:
         random: Negated set to the accuracy of its random direction.
         text: Text-only classifier name to its cell.
         words: Largest point accuracy of the text-only classifiers.
+        n_questions: Test questions behind the TruthfulQA intervals.
     """
 
     reads: dict[str, Cell]
@@ -75,6 +76,7 @@ class Model:
     random: dict[str, float]
     text: dict[str, Cell]
     words: float
+    n_questions: int
 
 
 def _random_at(path: Any, name: str, layer: int) -> float:
@@ -126,6 +128,7 @@ def _model(manifest: Manifest, model: str) -> Model:
         {name: _random_at(other, name, layer) for name in NEGATED},
         text,
         max(c.value for c in text.values()),
+        n_test,
     )
 
 
@@ -324,6 +327,7 @@ def _numbers(
         "text_lo": lo,
         "text_hi": hi,
         "chance": chance,
+        "n_questions": float(data[models[0]].n_questions),
     }
     for role in stats.ROLES:
         group = [m for m in models if stats.role(m) == role]
@@ -349,7 +353,8 @@ def _claim(
 ) -> str:
     return (
         "A truth reader does not beat words alone on TruthfulQA, and "
-        "negation breaks it. Its MC1 accuracy lies inside the range of two "
+        "negated statements pull it below chance on some checkpoints. Its "
+        "MC1 accuracy lies inside the range of two "
         f"text-only classifiers ({numbers['text_lo']:.3f} to "
         f"{numbers['text_hi']:.3f}) on "
         f"{stats.per_role_text(counts['tqa_inside'])}, while the honesty "
@@ -366,7 +371,8 @@ def _detail(
     return (
         "(a) MC1 accuracy on TruthfulQA of the truth reader and of the "
         "honesty persona reader at the layer chosen on validation (whiskers "
-        "are 95 percent Wilson intervals over 173 questions), of the answer "
+        f"are 95 percent Wilson intervals over {numbers['n_questions']:.0f} "
+        "questions), of the answer "
         "log-probability (its stored interval), and the range of the "
         "intervals of two classifiers that see only the words (green); the "
         "dotted line is chance. (b) Accuracy of the truth reader on "

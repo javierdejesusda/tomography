@@ -6,6 +6,7 @@ from typing import Any
 from matplotlib.image import AxesImage
 import pytest
 
+from tomography.site import params
 from tomography.site import registry
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
@@ -223,3 +224,15 @@ def test_the_figure_has_three_panels_with_shared_rows_and_no_heat_map(
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.guard_problems(output.figure) == []
     assert checks.problems(output.figure) == []
+
+
+def test_the_caption_has_no_first_and_the_pair_counts_come_from_the_runs(
+    output: registry.FigureOutput,
+) -> None:
+    text = f"{output.claim} {output.detail}"
+    assert "first" not in text.lower()
+    pairs = params.REPORT_PAIRS
+    assert (
+        f"{pairs['sentiment']} sentiment, {pairs['truth']} truth and "
+        f"{pairs['utility']} utility pairs"
+    ) in text
