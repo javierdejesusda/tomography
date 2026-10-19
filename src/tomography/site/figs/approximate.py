@@ -31,7 +31,7 @@ HEADER = ["panel", "model", "series", "value", "lo", "hi"]
 TOP = -1.0
 POSITION_LIMITS = (-0.5, 1.5)
 PANEL_A = (
-    ("range_items", "o", -0.28),
+    ("range_items", "*", -0.28),
     ("exact_items", "s", 0.0),
     ("people", "^", 0.28),
 )
@@ -219,7 +219,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 model,
                 y - 0.15,
                 float(reader.reader["auroc"]),
-                "D",
+                paper.MEASURE_MARKERS["direction"],
                 paper.INK,
                 (float(reader.reader["lo"]), float(reader.reader["hi"])),
             )
@@ -265,7 +265,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 model,
                 y,
                 float(reader.position["position"]),
-                "D",
+                paper.MEASURE_MARKERS["direction"],
                 paper.INK,
             )
             _band(ax_c, y, min(reader.draws), max(reader.draws), model)
@@ -341,10 +341,14 @@ def build(manifest: Manifest) -> FigureOutput:
             paper.panel_letter(ax, letter)
         legend = fig.legend(
             handles=[
-                _rows.series_handle("range items", "o", paper.INK),
+                _rows.series_handle("range items", "*", paper.INK),
                 _rows.series_handle("exact items", "s", paper.INK),
                 _rows.series_handle("people's heights", "^", paper.INK),
-                _rows.series_handle("range reader", "D", paper.INK),
+                _rows.series_handle(
+                    "range reader",
+                    paper.MEASURE_MARKERS["direction"],
+                    paper.INK,
+                ),
                 _rows.series_handle(
                     "random direction", "x", paper.ENC["random_marker"]
                 ),
