@@ -7,6 +7,7 @@ share their vertical range.
 
 from typing import Any
 
+from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
 
 from tomography.site import stats
@@ -19,6 +20,10 @@ from tomography.viz import paper
 
 HEIGHT = 5.6
 COLUMNS = 3
+A7_TAG_KEY = (
+    "n of 3: random directions whose gap interval lies above zero; "
+    "smallest one-sided p is 1/4"
+)
 PAD = 0.04
 SERIES = ("lat: known", "lat: unknown", "random: unknown")
 CLAIM = (
@@ -88,7 +93,13 @@ def build(manifest: Manifest) -> FigureOutput:
             letter = chr(ord("a") + i)
             knowledge_steering.draw_dose(ax, run, letter, csv_rows)
             ax.set_ylim(*limits[run.entropy])
-            paper.panel_title(ax, letter, run.name, 6.5)
+            ax.set_title(
+                f"{run.beats} of 3",
+                loc="right",
+                fontsize=paper.MIN_TEXT,
+                color=paper.ENC["secondary_text"],
+            )
+            paper.panel_title(ax, letter, run.name, paper.MIN_TEXT)
             if i // COLUMNS < rows - 1:
                 ax.set_xlabel("")
             first = i % COLUMNS == 0 and (
@@ -98,43 +109,31 @@ def build(manifest: Manifest) -> FigureOutput:
                 ax.set_ylabel("")
             if i % COLUMNS:
                 ax.tick_params(labelleft=False)
-            ax.text(
-                0.97,
-                0.95,
-                f"above {run.beats} of 3 random",
-                transform=ax.transAxes,
-                ha="right",
-                va="top",
-                fontsize=6.5,
-                color=paper.ENC["secondary_text"],
-                gid="tag",
-            )
         for ax in flat[len(runs) :]:
             ax.set_axis_off()
+        keys = knowledge_steering.direction_keys()
         legend = fig.legend(
             handles=[
-                _rows.series_handle(
-                    "known questions",
-                    paper.QUESTION_SET_MARKERS["known"],
-                    paper.INK,
-                ),
+                *keys[0],
                 Line2D(
                     [],
                     [],
                     color=paper.ENC["random_marker"],
                     lw=paper.DATA_WIDTH,
-                    label="mean of 3 random directions",
                 ),
-                _rows.series_handle("GPT-2 and base", "o", paper.INK),
-                _rows.series_handle(
-                    "post-trained", "o", paper.INK, filled=False
-                ),
+                Line2D([], [], ls="none"),
             ],
+            labels=[
+                *keys[1],
+                "mean of 3 random directions",
+                A7_TAG_KEY,
+            ],
+            handler_map={tuple: HandlerTuple(ndivide=None, pad=0.1)},
             loc="outside upper center",
-            ncol=4,
+            ncol=1,
             handlelength=1.0,
             columnspacing=1.0,
-            fontsize=6.5,
+            fontsize=paper.MIN_TEXT,
         )
         legend.get_frame().set_edgecolor("none")
 

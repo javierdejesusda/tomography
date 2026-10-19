@@ -515,7 +515,7 @@ def test_legend_has_four_entries_and_no_role_hexagon(
         str(h.get_marker()) if hasattr(h, "get_marker") else "None"
         for h in legend.legend_handles
     ]
-    assert paper.ROLE_KEY_MARKER not in markers
+    assert "h" not in markers
     assert markers[:2] == ["o", "s"]
     assert markers[3] == paper.MEASURE_MARKERS["answer_probability"]
 

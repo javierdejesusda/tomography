@@ -317,7 +317,8 @@ def _groups(
     ax: Any, rows: list[tuple[str, str, str]], ys: list[int], limit: float
 ) -> None:
     seen: list[str] = []
-    for (key, _, _), y in zip(rows, ys, strict=True):
+    sections = [SECTIONS[key] for key, _, _ in rows]
+    for (key, label, _), y in zip(rows, ys, strict=True):
         section = SECTIONS[key]
         if section in seen:
             continue
@@ -330,6 +331,8 @@ def _groups(
                 zorder=1,
             )
         seen.append(section)
+        if sections.count(section) == 1 and section == label:
+            continue
         ax.text(
             -limit * 0.98,
             y - 0.65,

@@ -117,7 +117,6 @@ MEASURE_MARKERS: dict[str, Any] = {
     "answer_probability": "p",
     "probe": "P",
 }
-ROLE_KEY_MARKER = "h"
 SHAPES: dict[str, str] = {
     "direction": "o",
     "random": "x",
@@ -159,7 +158,7 @@ ENCODING_RULES = """Encoding rules of every figure (the glossary).
    non-ramp ink.
 3. Filled markers mean GPT-2 and Qwen3 base, open ones post-trained; where a
    legend keys role it uses a filled and an open CIRCLE in a neutral ink,
-   like the data (`ROLE_KEY_MARKER` is retired).
+   like the data.
 4. Post-trained lines use one style (`LINESTYLES["post_trained"]`) where role
    is not given by the panel or row block. Where it is, a dashed segment may
    carry a state under rule 8 (Figure 7: not fluent) and the figure key says

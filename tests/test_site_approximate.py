@@ -555,7 +555,7 @@ def test_the_legends_have_three_entries_a_role_key_and_a_state_key(
 def test_only_glossary_shapes_and_inks_are_drawn(
     output: registry.FigureOutput,
 ) -> None:
-    allowed = {"o", paper.ROLE_KEY_MARKER, "None", " ", ""}
+    allowed = {"o", "None", " ", ""}
     fig = output.figure
     drawn = {str(ln.get_marker()) for ax in fig.axes for ln in ax.get_lines()}
     for legend in fig.legends:

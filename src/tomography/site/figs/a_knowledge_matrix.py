@@ -148,7 +148,7 @@ def build(manifest: Manifest) -> FigureOutput:
             image, ax=ax_a, location="top", shrink=0.55, aspect=30, pad=0.02
         )
         bar.set_label("AUROC")
-        bar.ax.tick_params(labelsize=6.5)
+        bar.ax.tick_params(labelsize=paper.MIN_TEXT)
         ax_b.add_patch(
             Rectangle(
                 (-SLACK, -0.5),

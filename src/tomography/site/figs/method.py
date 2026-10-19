@@ -19,7 +19,7 @@ from tomography.viz import paper
 
 WIDTH = 5.5
 HEIGHT = 2.1
-TEXT = 6.5
+TEXT = paper.MIN_TEXT
 TITLE_SIZE = 7.5
 EQUATION_SIZE = 7.5
 ELL = chr(0x2113)

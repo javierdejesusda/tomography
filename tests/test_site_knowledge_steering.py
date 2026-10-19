@@ -19,7 +19,7 @@ _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 _T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
 _L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
 SPEC = "knowledge_steering"
-HEIGHT = 3.9
+HEIGHT = 4.4
 EXEMPLARS = (
     ("gpt2-xl", "fewshot"),
     ("qwen3-4b-base", "fewshot"),
@@ -288,8 +288,10 @@ def test_caption_is_the_template_filled_from_the_files(
         "The direction moves unknown questions more than each of the 3 "
         f"random directions on {_runs_text(dist)}, and more than known "
         f"questions on {_runs_text(sel)}, by the gap between the absolute "
-        "mean slopes over the coefficient grid, whatever the sign; with 3 "
-        "random directions a direction passes by chance with probability at "
+        "mean slopes over the coefficient grid, whatever the sign, counted as "
+        "above when the 95 percent interval of that gap lies above zero; "
+        "with 3 random directions a direction passes by chance with "
+        "probability at "
         "most 1/4."
     ) in output.detail
     assert (
@@ -459,7 +461,7 @@ def test_titles_of_c_to_e_state_what_the_curves_show(
     for ax, run in zip(doses, EXEMPLARS, strict=True):
         curves = _curves(*run)
         held = _shift(curves, "lat: known") >= _shift(curves, "lat: unknown")
-        want = "known moves as much" if held else "known moves less"
+        want = "known moves at least as much" if held else "known moves less"
         assert want in ax.get_title(loc="left")
 
 
@@ -482,3 +484,13 @@ def test_the_caption_leads_with_the_known_question_result(
     output: registry.FigureOutput,
 ) -> None:
     assert output.detail.startswith("On known questions")
+
+
+def test_the_key_and_the_caption_define_the_count_by_the_gap_interval(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = [lg for sub in output.figure.subfigs for lg in sub.legends]
+    keyed = " ".join(t.get_text() for t in legend.get_texts())
+    assert "random directions whose gap interval lies above zero" in keyed
+    assert "interval of that gap lies above zero" in output.detail
+    assert "at least as much as on unknown" in output.detail

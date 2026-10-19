@@ -18,7 +18,6 @@ from tomography.viz import axes
 from tomography.viz import paper
 
 PAD = 0.07
-ROLE_KEY_SIZE = 7.0
 STAR_SIZE = 6.4
 TRIANGLE_SIZE = 5.4
 CATEGORY_EDGE = 0.3
@@ -202,10 +201,8 @@ def marker_size(marker: str) -> float:
         marker: Marker shape.
 
     Returns:
-        The size in points: larger for the star and the role key hexagon.
+        The size in points: larger for the star.
     """
-    if marker == paper.ROLE_KEY_MARKER:
-        return ROLE_KEY_SIZE
     if marker == "*":
         return STAR_SIZE
     if marker in ("<", ">"):

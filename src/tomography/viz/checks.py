@@ -27,8 +27,8 @@ from tomography.viz import paper
 
 TOLERANCE = 0.5
 MARKER_MARGIN = 2.0
-MIN_FONT_MAIN = 6.5
-MIN_FONT_APPENDIX = 6.0
+MIN_FONT_MAIN = paper.MIN_TEXT
+MIN_FONT_APPENDIX = paper.MIN_TEXT
 WHITE = "#ffffff"
 MATHTEXT = re.compile(r"(?<!\\)\$.*?(?<!\\)\$", re.DOTALL)
 
@@ -271,8 +271,8 @@ def font_problems(fig: Figure, appendix: bool = False) -> list[str]:
 
     Args:
         fig: The figure.
-        appendix: Whether the figure is an appendix figure (6 pt minimum
-            instead of 6.5 pt).
+        appendix: Whether the figure is an appendix figure; the minimum is
+            `paper.MIN_TEXT` for every figure.
 
     Returns:
         One message per text artist below the minimum.
