@@ -182,11 +182,10 @@ def _size(
             ),
             fontsize=6.5,
             loc="left",
-            x=0.0,
+            x=0.1,
             color=paper.INK,
         )
     shared.size_axis(ax, counts, ticks=(1e8, 1e9))
-    ax.set_xlabel("")
     ax.set_ylim(0.45, 1.0)
     shared.unit_axis(ax, "y")
 
