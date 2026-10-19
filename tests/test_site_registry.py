@@ -9,8 +9,8 @@ FIGURE_KEYS = (
     "finders",
     "reading",
     "truth",
-    "steering",
     "knowledge_reading",
+    "steering",
     "base_post",
 )
 APPENDIX_FIGURE_KEYS = (

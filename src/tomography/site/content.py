@@ -37,10 +37,11 @@ FLUENCY_RULE = (
 )
 
 TLDR = (
-    "A logistic direction reads utility, morality and, on Qwen3, truth above "
-    "a random direction, but the finder of the paper, text classifiers, "
-    "popularity and the confidence of the model account for much of the "
-    "rest, and steering at a useful strength costs fluency."
+    "A logistic direction reads utility and morality above a random "
+    "direction on every checkpoint and truth on every Qwen3 checkpoint; the "
+    "finder of the paper is weaker, truth and knowledge readers do not beat "
+    "text-only or confidence baselines, and steering strong enough to beat "
+    "random directions breaks the fluency rule on most checkpoints."
 )
 
 FRONT_ITEMS = ("fig:teaser",)
@@ -799,6 +800,27 @@ APPENDICES = (
             "reading at its layer ([[table:reading_full]]) and the "
             "sample-size and decoy runs ([[table:sizes]], "
             "[[table:prompts]]).",
+            "Baselines of each row of [[fig:teaser]]: rows 1 to 5, the "
+            "random direction of the same run at the same layer; row 6, the "
+            "random direction of the finder comparison; row 7, a word "
+            "classifier; row 8, the strongest of popularity and two text "
+            "classifiers; row 9, the model's own confidence, five stacked "
+            "output signals. A direction for questions the model can answer "
+            "is above that confidence, with an interval excluding zero, on "
+            "[[count:fig:teaser.knowledge_confidence]]. For steering on the "
+            "utility manipulation task of the paper, a checkpoint passes "
+            "when every logistic steering vector (3 per checkpoint) of the "
+            "utility direction beats every random direction of the same "
+            "norm (3 per checkpoint) on the sentiment judge at relative "
+            "coefficient 0.3, which has chance 0.05: "
+            "[[count:fig:teaser.steering]]. At that coefficient the steered "
+            "text meets the fluency rule (perplexity at most 1.5 times the "
+            "unsteered text and distinct-1 at least 0.15) on "
+            "[[count:fig:teaser.steering_fluent]] (GPT-2 small has no "
+            "fluency measure). Intervals cover the sampling of the test "
+            "items and treat the two arms as independent, which makes them "
+            "conservative; rows 8 and 9 use the Hanley and McNeil "
+            "approximation and the stored paired bootstrap.",
         ),
         items=(
             "fig:a_reading_curves",
@@ -875,6 +897,26 @@ APPENDICES = (
             "largest shift of the mean dose curve, known questions move at "
             "least as much as unknown ones on "
             "[[runs:fig:knowledge_steering.known_ge_unknown]].",
+            "The confidence of the model stacks five output signals, and "
+            "only the pooled level of the stack is stored, so the single "
+            "probability of the model's own answer token stands for it in "
+            "[[fig:knowledge_reading]]; no random direction is drawn there "
+            "because its within-relation level is not stored. Its intervals "
+            "use the Hanley and McNeil approximation. By point estimate the "
+            "direction is above popularity on "
+            "[[count:fig:knowledge_reading.above_pop_point]]. A supervised "
+            "probe, fitted on the correct and wrong labels of the training "
+            "questions (the direction is not), adds "
+            "[[num:fig:knowledge_reading.probe_inc_min]] to "
+            "[[num:fig:knowledge_reading.probe_inc_max]] to the AUROC for "
+            "predicting wrong answers, with an interval above zero on "
+            "[[count:fig:knowledge_reading.probe_above]], while the "
+            "direction changes it by "
+            "[[num:fig:knowledge_reading.dir_inc_min]] to "
+            "[[num:fig:knowledge_reading.dir_inc_max]]. GPT-2 small has no "
+            "known-against-unknown contrast, so it has no row in the "
+            "figure; its probe adds "
+            "[[num:fig:knowledge_reading.gpt2_small_probe_gain]].",
         ),
         items=(
             "fig:a_knowledge_matrix",

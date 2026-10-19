@@ -41,41 +41,23 @@ GROUPS = {
 DODGE = {"direction": -0.3, "popularity": -0.1, "own": 0.1, "text": 0.3}
 SEPARATOR_WIDTH = 0.5
 CLAIM = (
-    "A known-against-unknown direction ranks questions but adds at most a "
-    "small amount to the model's confidence."
+    "A known-against-unknown direction ranks questions above their "
+    "popularity, with an interval excluding zero, on {interval}, and adds "
+    "at most {hi_max} to the confidence of the model at the upper end of "
+    "its interval."
 )
 DETAIL = (
-    "(a) Within-relation AUROC for separating PopQA questions the model "
-    "answers correctly from those it does not, with the checkpoints in "
-    "three role blocks (filled markers for GPT-2 and Qwen3 base, open "
-    "markers for post-trained): the knowledge direction (circle), the "
-    "popularity of the subject (square, monthly Wikipedia page views), both "
-    "with approximate 95 percent intervals (Hanley and McNeil), the range of "
-    "the two text classifiers (green bar, from the classifier on the words "
-    "to the one on the characters of the question, without intervals), and "
-    "the model's own probability of its first answer token (pentagon), "
-    "which is {own_min} to {own_max} against {dir_min} to {dir_max} for the "
-    "direction and {pop_min} to {pop_max} for popularity. The model's own "
-    "confidence in (c) stacks five output "
-    "signals, of which this is one, and only the pooled level of the stack "
-    "is stored, so the single signal stands for it here. No random "
-    "direction is drawn in (a) because its within-relation level is not "
-    "stored. (b) The difference between the two AUROCs, direction minus "
-    "popularity, the strongest of popularity and the two text "
-    "classifiers, with the conservative interval "
-    "from the two Hanley and McNeil standard errors: the direction is above "
-    "popularity on {point} by point estimate, and the interval of the "
-    "difference lies above zero on {interval}. (c) Change in the AUROC for "
-    "predicting wrong answers when the direction (narrow axis) or a "
-    "supervised probe (wide axis) is added to the model's own confidence, "
-    "with paired 95 percent bootstrap intervals over the test questions: "
-    "the direction changes it by {dmin} to {dmax} with an interval covering "
-    "zero on {cover}, while the probe adds {pmin} to {pmax} with an "
-    "interval above zero on {above}. The largest upper bound of the "
-    "direction's interval is +{hi_max} ({hi_model}). The probe is fitted on "
-    "the correct and wrong labels of the training questions; the direction "
-    "is not. GPT-2 small has no known-against-unknown contrast, so it has no "
-    "row; its probe adds {g_gain} [{g_lo}, {g_hi}]."
+    "(a) Within-relation AUROC on PopQA (open markers: post-trained): "
+    "direction (circle), popularity (square), range of the two text "
+    "classifiers (green bar) and the model's probability of its first "
+    "answer token (pentagon). By "
+    "role, direction against popularity, text and own probability: GPT-2 "
+    "{gpt2}; Qwen3 base {base}; Qwen3 post-trained {post}. (b) Difference "
+    "between the two AUROCs, direction minus the strongest of popularity "
+    "and the two text classifiers, with its conservative interval. (c) "
+    "Change in the AUROC for predicting wrong answers when the direction is "
+    "added to the model's confidence (paired 95 percent bootstrap); the "
+    "interval covers zero on {cover}. See [[sec:appendix_knowledge]]."
 )
 
 
@@ -140,6 +122,44 @@ def _difference(row: dict[str, Any]) -> tuple[float, float, float]:
 
 def _range(values: list[float]) -> tuple[str, str]:
     return _rows.number(min(values)), _rows.number(max(values))
+
+
+def _role_text(
+    members: list[str],
+    contrast: dict[str, dict[str, Any]],
+    own: dict[str, dict[str, Any]],
+) -> str:
+    """Writes the AUROC ranges of one role beside their baselines.
+
+    Args:
+        members: The checkpoints of the role that have a contrast.
+        contrast: The contrast rows by checkpoint.
+        own: The model's own first-token probability rows by checkpoint.
+
+    Returns:
+        The direction range against the popularity, text-classifier and
+        own-probability ranges.
+    """
+
+    def span(values: list[float]) -> str:
+        low, high = _range(values)
+        return f"{low} to {high}"
+
+    return (
+        f"{span([float(contrast[m]['logistic_within']) for m in members])} "
+        "against "
+        f"{span([float(contrast[m]['popularity_within']) for m in members])}"
+        ", "
+        + span(
+            [
+                float(contrast[m][c])
+                for m in members
+                for c in ("text_word_within", "text_char_within")
+            ]
+        )
+        + " and "
+        + span([float(own[m]["auroc_within"]) for m in members])
+    )
 
 
 def row_label(model: str) -> str:
@@ -512,36 +532,15 @@ def build(manifest: Manifest) -> FigureOutput:
         numbers[f"above_pop_point_{role}"] = float(point[role].hits)
         numbers[f"above_pop_{role}"] = float(interval[role].hits)
         numbers[f"probe_above_{role}"] = float(above[role].hits)
-    dmin, dmax = _range(lat_gain)
-    pmin, pmax = _range(probe_gain)
-    own_min, own_max = _range([float(own[m]["auroc_within"]) for m in contrast])
-    dir_min, dir_max = _range(
-        [float(r["logistic_within"]) for r in contrast.values()]
-    )
-    pop_min, pop_max = _range(
-        [float(r["popularity_within"]) for r in contrast.values()]
-    )
-    detail = DETAIL.format(
-        pop_min=pop_min,
-        pop_max=pop_max,
-        own_min=own_min,
-        own_max=own_max,
-        dir_min=dir_min,
-        dir_max=dir_max,
-        point=stats.per_role_text(point),
-        interval=stats.per_role_text(interval),
-        dmin=dmin,
-        dmax=dmax,
-        cover=stats.per_role_text(cover),
-        pmin=pmin,
-        pmax=pmax,
-        hi_max=_rows.number(float(lat[widest]["hi"]), 3),
-        hi_model=paper.display_name(widest),
-        above=stats.per_role_text(above),
-        g_gain=_rows.number(float(small["diff_vs_confidence"]), 3),
-        g_lo=_rows.number(float(small["lo"]), 3),
-        g_hi=_rows.number(float(small["hi"]), 3),
-    )
+    by_role = {
+        role: _role_text(
+            [m for m in contrast if stats.role(m) == role], contrast, own
+        )
+        for role in stats.ROLES
+    }
+    hi_max = _rows.number(float(lat[widest]["hi"]), 3)
+    claim = CLAIM.format(interval=stats.per_role_text(interval), hi_max=hi_max)
+    detail = DETAIL.format(cover=stats.per_role_text(cover), **by_role)
     return FigureOutput(
-        fig, CLAIM, detail, numbers, _group.csv_text(HEADER, csv_rows), counts
+        fig, claim, detail, numbers, _group.csv_text(HEADER, csv_rows), counts
     )

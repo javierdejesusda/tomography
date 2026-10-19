@@ -7,6 +7,7 @@ from typing import Any
 from matplotlib.lines import Line2D
 import pytest
 
+from tomography.site import content
 from tomography.site import registry
 from tomography.site import stats
 from tomography.site.figs import teaser
@@ -337,9 +338,13 @@ def test_the_knowledge_row_takes_popularity_as_the_strongest_baseline() -> None:
 
 
 def _full(built: registry.FigureOutput) -> str:
-    return " ".join(
-        [built.claim, built.detail, teaser.method_detail(built.counts)]
+    (section,) = [s for s in content.APPENDICES if s.key == "appendix_reading"]
+    appendix = re.sub(
+        r"\[\[count:fig:teaser\.(\w+)\]\]",
+        lambda m: stats.per_role_text(built.counts[m.group(1)]),
+        " ".join(section.paragraphs),
     )
+    return " ".join([built.claim, built.detail, appendix])
 
 
 def test_the_caption_is_at_most_120_words_and_leads_with_the_conclusion(
@@ -350,13 +355,8 @@ def test_the_caption_is_at_most_120_words_and_leads_with_the_conclusion(
     assert built.claim.startswith("A direction reads utility and morality")
 
 
-def test_the_method_detail_names_the_baselines_and_the_confidence_stack(
-    built: registry.FigureOutput,
-) -> None:
-    text = teaser.method_detail(built.counts)
-    assert "five stacked output signals" in text
-    assert "answer probability alone" not in text
-    assert "Hanley and McNeil" in text
+def test_the_method_detail_moved_to_the_appendix_text() -> None:
+    assert not hasattr(teaser, "method_detail")
 
 
 def test_the_claim_states_the_per_role_counts_without_pooling(

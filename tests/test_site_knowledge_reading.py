@@ -248,38 +248,53 @@ def test_popularity_is_the_strongest_baseline_where_the_caption_says_so() -> (
         assert row["popularity_within"] > max(row[c] for c in BASELINES), model
 
 
-def test_caption_is_the_template_filled_from_the_files(
+def _role_text(output: registry.FigureOutput, role: str) -> str:
+    def span(series: tuple[str, ...]) -> str:
+        values = [
+            float(r["value"])
+            for r in _rows(output)
+            if r["panel"] == "a"
+            and r["series"] in series
+            and stats.role(r["model"]) == role
+        ]
+        return f"{_fmt(min(values))} to {_fmt(max(values))}"
+
+    return (
+        f"{span(('direction',))} against {span(('popularity',))}, "
+        f"{span(('words', 'characters'))} and "
+        f"{span(('answer_probability',))}"
+    )
+
+
+def _fmt(value: float) -> str:
+    return f"{value:.3f}".replace("-", MINUS)
+
+
+def test_caption_is_at_most_200_words_and_leads_with_the_conclusion(
     output: registry.FigureOutput,
 ) -> None:
-    point = _by_role(
-        _flags(lambda r: r["logistic_within"] > r["popularity_within"])
+    caption = f"{output.claim} {output.detail}"
+    assert len(caption.split()) <= 200, len(caption.split())
+    assert output.claim.startswith(
+        "A known-against-unknown direction ranks questions above their "
+        "popularity, with an interval excluding zero, on "
     )
     interval = _by_role(_flags(lambda r: _diff(r)[1] > 0))
-    lat = [
-        f["confidence+lat"]
-        for f in _increments().values()
-        if "confidence+lat" in f
-    ]
-    probe = [f["confidence+probe"] for f in _increments().values()]
-    diffs = [r["diff_vs_confidence"] for r in lat]
-    gains = [r["diff_vs_confidence"] for r in probe]
+    assert stats.per_role_text(interval) in output.claim
+    hi_max = output.numbers["dir_inc_hi_max"]
+    assert f"adds at most {hi_max:.3f}" in output.claim
+    assert "small amount" not in output.claim
 
-    def signed(value: float) -> str:
-        text = f"{value:.3f}"
-        return text.replace("-", MINUS)
 
-    assert all(c.hits == c.total for c in point.values() if c.total)
-    assert all(r["lo"] <= 0 <= r["hi"] for r in lat)
-    assert all(r["lo"] > 0 for r in probe)
-    caption = f"{output.claim} {output.detail}"
-    assert output.claim == (
-        "A known-against-unknown direction ranks questions but adds at most "
-        "a small amount to the model's confidence."
-    )
-    assert (
-        f"on {stats.per_role_text(point)} by point estimate, and the interval "
-        f"of the difference lies above zero on {stats.per_role_text(interval)}"
-    ) in caption
+def test_caption_gives_every_auroc_beside_its_baselines_per_role(
+    output: registry.FigureOutput,
+) -> None:
+    for label, role in (
+        ("GPT-2", "gpt2"),
+        ("Qwen3 base", "base"),
+        ("Qwen3 post-trained", "post"),
+    ):
+        assert f"{label} {_role_text(output, role)}" in output.detail, role
     cover = _by_role(
         {
             m: f["confidence+lat"]["lo"] <= 0 <= f["confidence+lat"]["hi"]
@@ -287,20 +302,12 @@ def test_caption_is_the_template_filled_from_the_files(
             if "confidence+lat" in f
         }
     )
-    above = _by_role(
-        {m: f["confidence+probe"]["lo"] > 0 for m, f in _increments().items()}
+    assert f"the interval covers zero on {stats.per_role_text(cover)}" in (
+        output.detail
     )
-    assert (
-        f"the direction changes it by {signed(min(diffs))} to "
-        f"{signed(max(diffs))} with an interval covering zero on "
-        f"{stats.per_role_text(cover)}, while the probe adds "
-        f"{signed(min(gains))} to {signed(max(gains))} with an interval "
-        f"above zero on {stats.per_role_text(above)}"
-    ) in caption
-    assert "all 9 checkpoints" not in caption
-    assert "GPT-2 small has no known-against-unknown contrast" in caption
-    assert "monthly Wikipedia page views" in caption
-    assert "Hanley and McNeil" in caption
+    assert "all 9 checkpoints" not in output.detail
+    assert "Hanley and McNeil" not in output.detail
+    assert "[[sec:appendix_knowledge]]" in output.detail
 
 
 def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
@@ -326,7 +333,7 @@ def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
 
 
-def test_the_largest_upper_bound_and_the_probe_labels_are_stated(
+def test_the_largest_upper_bound_is_exported(
     output: registry.FigureOutput,
 ) -> None:
     lat = {
@@ -336,13 +343,6 @@ def test_the_largest_upper_bound_and_the_probe_labels_are_stated(
     }
     model = max(lat, key=lambda m: lat[m]["hi"])
     assert output.numbers["dir_inc_hi_max"] == pytest.approx(lat[model]["hi"])
-    name = paper.display_name(model)
-    assert (
-        f"The largest upper bound of the direction's interval is "
-        f"+{lat[model]['hi']:.3f} ({name})"
-    ) in output.detail
-    assert "fitted on the correct and wrong labels" in output.detail
-    assert "the direction is not" in output.detail
 
 
 MODELS_A = [m for m in _models("p9b") if m in _contrast()]
@@ -485,15 +485,10 @@ def test_panel_c_has_a_narrow_direction_axis_and_a_wide_probe_axis(
     assert len(_points(wide, paper.MEASURE_MARKERS["probe"])) == len(MODELS_A)
 
 
-def test_the_probe_only_gpt2_small_value_is_in_the_caption(
+def test_the_probe_only_gpt2_small_value_is_exported(
     output: registry.FigureOutput,
 ) -> None:
     cell = _increments()["gpt2"]["confidence+probe"]
-    text = (
-        f"{cell['diff_vs_confidence']:.3f} [{cell['lo']:.3f}, {cell['hi']:.3f}]"
-    )
-    assert "GPT-2 small has no known-against-unknown contrast" in output.detail
-    assert text in output.detail
     assert output.numbers["gpt2_small_probe_gain"] == pytest.approx(
         cell["diff_vs_confidence"]
     )
@@ -541,9 +536,8 @@ def test_caption_states_the_criteria_and_names_the_own_probability_signal(
 ) -> None:
     text = output.detail
     assert "first answer token" in text
-    assert "filled" in text
     assert "open" in text
-    assert "difference between the two AUROCs" in text
+    assert "Difference between the two AUROCs" in text
     assert "text classifiers" in text
 
 
