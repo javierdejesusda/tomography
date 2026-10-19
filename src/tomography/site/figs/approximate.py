@@ -27,6 +27,7 @@ from tomography.viz import axes
 from tomography.viz import paper
 
 CELL = ("free", "fewshot", "range_last", "greedy")
+FORCED = ("forced", "fewshot", "range_last", "greedy")
 TRAIN = "height+wingspan"
 HEIGHT = 3.4
 HEADER = ["panel", "model", "series", "value", "lo", "hi"]
@@ -44,43 +45,26 @@ PANEL_A = (
     ("people", "people's\nheights"),
 )
 CLAIM = (
-    "Qwen3 writes ranges where the sourced answer is a range, but a range "
-    "reader beats its random control only on some checkpoints."
+    "Qwen3 writes a range for {base_min} to {base_max} percent of range "
+    "items (base) and {post_min} to {post_max} percent (post-trained), and a "
+    "range reader is above the interval of its random control on "
+    "{above_random}."
 )
 DETAIL = (
-    "(a) Share of greedy answers written as a range (few-shot, range "
-    "example last) on range items, exact items and {n_people} people's "
-    "heights, each in its own column, with Wilson intervals on the item "
-    "counts; in (a) and (c) a filled circle is a GPT-2 or Qwen3 base "
-    "checkpoint and an open circle a post-trained one, while in (b) fill "
-    "marks the state against the control instead of the role. Qwen3 base "
-    "checkpoints write a range on "
-    "{base_min} to {base_max} percent of the range items and post-trained "
-    "ones on {post_min} to {post_max} percent, on at most {exact} percent "
-    "of the exact items and {heights}, while GPT-2 small writes a range on "
-    "{gpt2_range} percent of the range items and {gpt2_exact} percent of "
-    "the exact items. (b) AUROC on held-out durations of a range reader "
-    "fitted on heights and wingspans (concept prompt), with its random "
-    "control (grey bar: the 95 percent bootstrap interval of the mean over "
-    "the {draws} draws; the control is the mean of {draws} random "
-    "directions oriented on the training labels, and the individual draws "
-    "are not stored) and a classifier on the words of the question (green "
-    "line, {text}, whisker {text_lo} to {text_hi}). A filled circle marks a "
-    "reader above the control's interval, an open circle inside it and an "
-    "open circle with a left tick below it. The reader is above the "
-    "classifier's value on {above}, {overlap}, and above the random "
-    "control's interval on {above_random}; the control itself is below 0.5 "
-    "on {below_half}, a sign flip between the training and the test "
-    "concepts and not a result far below chance, and above 0.95 on "
-    "{above_95}; a control at the ceiling is labelled control at 1.000. "
-    "(c) Where the reader places the people between the test buildings (0) "
-    "and the breeds (1), against the range of its random control over "
-    "{sets} training sets (grey): at {pos_min} to {pos_max}, next to the "
-    "breeds, so the reader does not separate a range-valued answer from a "
-    "living subject. The position lies outside the random band on "
-    "{outside}, but the random bands span {band_min} to {band_max} across "
-    "checkpoints, far outside 0 to 1 (clipped at the plot edges, arrows), "
-    "so the position cannot separate the reader from random."
+    "(a) Share of few-shot answers written as a range on range "
+    "items, exact items and {n_people} people's heights; filled circles are "
+    "GPT-2 and Qwen3 base, open circles post-trained. Wilson 95 percent "
+    "intervals lie inside the markers, at most {wilson} points wide. Qwen3 "
+    "writes a range on at most {exact} percent of the exact items and "
+    "{heights}; GPT-2 small on {gpt2_range} percent of the range items and "
+    "{gpt2_exact} percent of the exact items. (b) AUROC on held-out "
+    "durations of a range reader fitted on heights and wingspans, with its "
+    "random control (grey bar: bootstrap interval of the mean of {draws} "
+    "random directions) and a classifier on the words (green line "
+    "{text}, whisker {text_lo} to {text_hi}); a filled circle is above the "
+    "control's interval, an open circle inside it, a tick below it. (c) "
+    "Position of the people between buildings (0) and breeds (1) against "
+    "the random band. See [[sec:appendix_approximate]]."
 )
 
 
@@ -120,6 +104,29 @@ def _behavior(manifest: Manifest, model: str) -> dict[str, dict[str, Any]]:
             "hi": diag["people_hi"],
         },
     }
+
+
+def _forced_rate(manifest: Manifest, model: str) -> float:
+    """Gives the range share when the prompt asks for one exact number.
+
+    Args:
+        manifest: The run resolver.
+        model: Checkpoint key.
+
+    Returns:
+        The range rate of the forced condition in the plotted cell.
+    """
+    run = manifest.run("p10a", model)
+    assert run is not None
+    (row,) = [
+        r
+        for r in runfiles.rows(run, "table.csv")
+        if r["family"] == "all"
+        and r["kind"] == "range"
+        and (r["condition"], r["format"], r["shot_order"], r["decoding"])
+        == FORCED
+    ]
+    return float(row["range_rate"])
 
 
 class _Reader:
@@ -529,10 +536,6 @@ def build(manifest: Manifest) -> FigureOutput:
             for m, r in readers.items()
         }
     )
-    overlapping = sum(
-        r.reader["hi"] >= text["lo"] and r.reader["lo"] <= text["hi"]
-        for r in readers.values()
-    )
     positions = [r.position["position"] for r in readers.values()]
     first = next(iter(readers.values()))
     numbers: dict[str, float] = {
@@ -551,10 +554,24 @@ def build(manifest: Manifest) -> FigureOutput:
         "position_max": float(max(positions)),
         "n_people": float(first.n_people),
         "n_random_draws": float(first.n_seeds),
+        "wilson_max_points": float(
+            math.ceil(
+                max(
+                    (float(c["hi"]) - float(c["lo"])) * 100
+                    for cells in behavior.values()
+                    for c in cells.values()
+                )
+                - 1e-9
+            )
+        ),
         "band_min": float(min(min(r.draws) for r in readers.values())),
         "band_max": float(max(max(r.draws) for r in readers.values())),
     }
+    forced = {m: _forced_rate(manifest, m) for m in models}
     for role in stats.ROLES:
+        numbers[f"forced_{role}_max"] = float(
+            _percent(max(v for m, v in forced.items() if stats.role(m) == role))
+        )
         numbers[f"above_text_{role}"] = float(above[role].hits)
         numbers[f"reader_above_random_{role}"] = float(above_random[role].hits)
         numbers[f"control_below_half_{role}"] = float(below_half[role].hits)
@@ -565,12 +582,16 @@ def build(manifest: Manifest) -> FigureOutput:
         else f"on at most {int(numbers['people_qwen_max'])} percent of the "
         "heights"
     )
-    detail = DETAIL.format(
-        n_people=int(numbers["n_people"]),
+    claim = CLAIM.format(
         base_min=int(numbers["range_base_min"]),
         base_max=int(numbers["range_base_max"]),
         post_min=int(numbers["range_post_min"]),
         post_max=int(numbers["range_post_max"]),
+        above_random=stats.per_role_text(above_random),
+    )
+    detail = DETAIL.format(
+        n_people=int(numbers["n_people"]),
+        wilson=int(numbers["wilson_max_points"]),
         exact=int(numbers["exact_qwen_max"]),
         heights=heights,
         gpt2_range=int(numbers["gpt2_range"]),
@@ -579,26 +600,10 @@ def build(manifest: Manifest) -> FigureOutput:
         text=_rows.number(text["auroc"], 3),
         text_lo=_rows.number(text["lo"], 3),
         text_hi=_rows.number(text["hi"], 3),
-        above=stats.per_role_text(above),
-        overlap=(
-            "every interval overlapping the classifier's"
-            if overlapping == len(readers)
-            else f"{overlapping} of {len(readers)} intervals overlapping "
-            "the classifier's"
-        ),
-        above_random=stats.per_role_text(above_random),
-        below_half=stats.per_role_text(below_half),
-        above_95=stats.per_role_text(above_95),
-        band_min=_rows.number(numbers["band_min"], 1),
-        band_max=_rows.number(numbers["band_max"], 1),
-        outside=stats.per_role_text(outside),
-        sets=len(first.draws),
-        pos_min=_rows.number(min(positions)),
-        pos_max=_rows.number(max(positions)),
     )
     return FigureOutput(
         fig,
-        CLAIM,
+        claim,
         detail,
         numbers,
         _group.csv_text(HEADER, csv_rows),
@@ -607,5 +612,6 @@ def build(manifest: Manifest) -> FigureOutput:
             "reader_above_random": above_random,
             "control_below_half": below_half,
             "control_above_95": above_95,
+            "outside": outside,
         },
     )

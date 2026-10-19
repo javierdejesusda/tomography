@@ -374,3 +374,25 @@ def test_the_reference_line_does_not_cross_its_label(
         line_x = ax.transData.transform((a_links.CHANCE, 0.0))[0]
         box = label.get_window_extent()
         assert box.x0 > line_x or box.x1 < line_x
+
+
+def test_the_heat_strip_names_its_rows(output: registry.FigureOutput) -> None:
+    ax_c = _panels(output)[2]
+    checks.draw(output.figure)
+    shown = [
+        t.get_text()
+        for t in ax_c.get_yticklabels()
+        if t.get_visible() and t.get_text()
+    ]
+    assert shown == SHORT
+    assert ax_c.yaxis.get_tick_params()["labelleft"]
+
+
+def test_the_colour_bar_has_a_title_and_labels_the_expected_share(
+    output: registry.FigureOutput,
+) -> None:
+    bar = _panels(output)[3]
+    checks.draw(output.figure)
+    assert bar.get_ylabel() == "share of cells\noutside the band"
+    labels = [t.get_text() for t in bar.get_yticklabels()]
+    assert "0.05 random" in labels

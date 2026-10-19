@@ -8,8 +8,10 @@ FIGURE_KEYS = (
     "method",
     "finders",
     "reading",
-    "truth",
     "knowledge_reading",
+    "knowledge_steering",
+    "approximate",
+    "truth",
     "steering",
     "base_post",
 )
@@ -22,10 +24,8 @@ APPENDIX_FIGURE_KEYS = (
     "a_wording",
     "a_truth_cities",
     "a_knowledge_matrix",
-    "knowledge_steering",
     "a_dose_runs",
     "a_dose_types",
-    "approximate",
     "a_links",
 )
 TABLE_KEYS = ("checkpoints", "reading")
@@ -131,6 +131,6 @@ def test_the_cut_entries_have_no_module() -> None:
     assert "a_reading_heat" not in registry.APPENDIX_FIGURES
 
 
-def test_the_registry_has_eight_main_figures_and_two_main_tables() -> None:
-    assert len(registry.MAIN_FIGURES) == 8
+def test_the_registry_has_ten_main_figures_and_two_main_tables() -> None:
+    assert len(registry.MAIN_FIGURES) == 10
     assert len(registry.MAIN_TABLES) == 2

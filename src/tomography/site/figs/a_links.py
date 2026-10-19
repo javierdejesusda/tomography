@@ -254,7 +254,8 @@ def _draw(
     mesh, top = _heat(ax_c, found["cosine"], rows)
     bar = fig.colorbar(mesh, cax=cax)
     bar.set_ticks([0.0, CHANCE, top])
-    bar.ax.set_yticklabels(["0", "0.05", f"{top:g}"])
+    bar.ax.set_yticklabels(["0", "0.05 random", f"{top:g}"])
+    bar.set_label("share of cells\noutside the band")
     bar.ax.axhline(CHANCE, color=paper.INK, lw=paper.REFERENCE_WIDTH)
     bar.outline.set_linewidth(paper.REFERENCE_WIDTH)
     panels = [ax_a, ax_b, ax_c]
@@ -265,6 +266,8 @@ def _draw(
             ax.axhline(y, color=paper.RANDOM_BAND, lw=SEPARATOR_WIDTH, zorder=0)
         paper.panel_letter(ax, "abc"[position])
     ax_a.set_yticklabels([rows_of.row_label(m) for m in rows])
+    ax_c.tick_params(axis="y", labelleft=True)
+    ax_c.set_yticklabels([rows_of.row_label(m) for m in rows])
     rows_of.draw_group_labels(ax_a, rows, GROUP_X)
     legend = fig.legend(
         handles=[

@@ -47,7 +47,14 @@ GENERIC = (
     r"(?<![\d.])20 for the held-out",
     r"none of the 10\b",
 )
-RESULT_KEYS = ("finders", "reading", "baselines", "steering", "base_post")
+RESULT_KEYS = (
+    "finders",
+    "reading",
+    "known_unknown",
+    "truth",
+    "steering",
+    "base_post",
+)
 APPENDIX_KEYS = (
     "appendix_assets",
     "appendix_method",
@@ -165,12 +172,12 @@ def test_the_body_sections_are_the_six_of_the_paper_in_order() -> None:
     ]
 
 
-def test_the_page_opens_with_a_summary_the_overview_and_five_findings() -> None:
+def test_the_page_opens_with_a_summary_the_overview_and_six_findings() -> None:
     assert content.FRONT_ITEMS == ("fig:teaser",)
     assert content.TLDR.count(". ") == 0
     assert len(content.TLDR.split()) <= 60
     heads = [h for h, _ in content.KEY_FINDINGS.listed]
-    assert len(heads) == 5
+    assert len(heads) == 6
     for head, text in content.KEY_FINDINGS.listed:
         assert "[[sec:" in head, head
         assert "[[fig:" in text, head
@@ -181,7 +188,7 @@ def test_the_page_opens_with_a_summary_the_overview_and_five_findings() -> None:
 
 def test_the_introduction_ends_with_a_list_of_contributions() -> None:
     listed = content.INTRODUCTION.listed
-    assert len(listed) == 4
+    assert len(listed) == 5
     for head, _ in listed:
         assert "[[sec:" in head, head
     assert content.INTRODUCTION.paragraphs[-1] == "Our contributions are:"
@@ -516,13 +523,96 @@ def test_the_approximate_counts_and_criteria_are_in_the_appendix() -> None:
     assert "is matched by" not in _text()
     assert "[[count:table:approximate.above_words]]" in text
     assert "[[count:table:approximate.layer_one]]" in text
-    assert "[[count:fig:approximate.reader_above_random]]" in text
     assert "[[count:fig:approximate.control_below_half]]" in text
     assert "[[count:fig:approximate.control_above_95]]" in text
     assert "a sign flip between the training and the test concepts" in text
     assert "already separates the test concepts" in text
     for gone in ("reader_in_random", "people_outside_band", "random_high"):
         assert gone not in _text()
+
+
+def _section(key: str) -> content.Section:
+    (found,) = [s for s in ALL if s.key == key]
+    return found
+
+
+def test_known_and_unknown_questions_have_a_finding_and_a_subsection() -> None:
+    heads = [h for h, _ in content.KEY_FINDINGS.listed]
+    assert [h.split(" (")[0] for h in heads][2:5] == [
+        "Known and unknown questions",
+        "Truth",
+        "Steering",
+    ]
+    keys = [s.key for s in content.RESULTS.subsections]
+    assert keys.index("known_unknown") == keys.index("reading") + 1
+    assert keys.index("truth") == keys.index("known_unknown") + 1
+    sub = _section("known_unknown")
+    assert sub.title == "Known and unknown questions"
+    assert sub.items == (
+        "fig:knowledge_reading",
+        "fig:knowledge_steering",
+        "fig:approximate",
+    )
+    assert [h for h, _ in sub.runin] == [
+        "Reading.",
+        "Steering.",
+        "Approximate answers.",
+    ]
+    text = " ".join(_texts(sub))
+    for token in (
+        "[[count:fig:knowledge_reading.above_pop]]",
+        "[[num:fig:knowledge_reading.dir_inc_hi_max]]",
+        "[[runs:fig:knowledge_steering.distinguishable]]",
+        "[[runs:fig:knowledge_steering.selective]]",
+        "[[runs:fig:knowledge_steering.known_ge_unknown]]",
+        "[[num:fig:a_knowledge_matrix.close]]",
+        "[[num:fig:a_knowledge_matrix.types]]",
+        "[[num:fig:approximate.forced_base_max]]",
+        "[[num:fig:approximate.forced_post_max]]",
+        "[[count:fig:approximate.reader_above_random]]",
+        "[[count:table:approximate.above_words]]",
+        "[[sec:appendix_knowledge]]",
+        "[[sec:appendix_approximate]]",
+        "[[fig:a_knowledge_matrix]]",
+    ):
+        assert token in text, token
+    assert "by the largest shift of the mean dose curve" in text
+    assert "told to give one exact number" in text
+
+
+def test_the_knowledge_and_approximate_figures_left_the_appendix() -> None:
+    assert "fig:knowledge_steering" not in _section("appendix_knowledge").items
+    assert "fig:approximate" not in _section("appendix_approximate").items
+    assert "fig:a_links" in _section("appendix_approximate").items
+
+
+def test_the_approximate_appendix_holds_the_people_position_counts() -> None:
+    text = " ".join(_texts(_section("appendix_approximate")))
+    assert "[[count:fig:approximate.outside]]" in text
+    assert "[[num:fig:approximate.position_min]]" in text
+    assert "[[num:fig:approximate.position_max]]" in text
+    assert "[[num:fig:approximate.band_min]]" in text
+    assert "[[num:fig:approximate.band_max]]" in text
+
+
+def test_the_abstention_limit_names_phrase_matching_and_generic_answers() -> (
+    None
+):
+    text = " ".join(h + " " + t for h, t in content.DISCUSSION.runin)
+    assert "phrase matching without human labels" in text
+    assert "a generic answer to an unknowable detail" in text
+    assert "a specific invented one" in text
+    assert "label which a non-abstaining answer is" in text
+
+
+def test_the_summary_and_abstract_name_the_knowledge_result() -> None:
+    assert "known-against-unknown direction does not beat the model's" in (
+        content.TLDR
+    )
+    assert "ranks questions above their popularity" in content.ABSTRACT
+    contribution = content.INTRODUCTION.listed[-2]
+    assert "[[sec:known_unknown]]" in contribution[0]
+    assert "confidence of the model" in contribution[1]
 
 
 def test_the_negated_set_claim_counts_checkpoints_below_chance() -> None:
@@ -675,7 +765,8 @@ def test_each_results_subsection_opens_with_its_answer_before_the_figures() -> (
         assert opener.endswith("."), key
         assert sub.items, key
         assert sub.after, key
-        assert len(" ".join(_texts(sub)).split()) <= 260, key
+        limit = 420 if key == "known_unknown" else 260
+        assert len(" ".join(_texts(sub)).split()) <= limit, key
 
 
 def test_the_results_leads_carry_no_per_role_counts() -> None:
@@ -811,5 +902,7 @@ def test_the_written_baseline_claims_match_the_computed_counts(
     teaser = built["teaser"].counts
     assert _none(teaser["truthfulqa"])
     assert _none(teaser["knowledge_confidence"])
-    assert "not above a classifier on the words alone" in _opener("baselines")
-    assert "does not add to the confidence" in _opener("baselines")
+    assert "not above a classifier on the words alone" in _opener("truth")
+    assert "adds at most a small amount to the confidence of the model" in (
+        _opener("known_unknown")
+    )

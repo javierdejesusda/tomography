@@ -96,8 +96,10 @@ MAIN_FIGURES = (
     "method",
     "finders",
     "reading",
-    "truth",
     "knowledge_reading",
+    "knowledge_steering",
+    "approximate",
+    "truth",
     "steering",
     "base_post",
 )
@@ -110,10 +112,8 @@ APPENDIX_FIGURES = (
     "a_wording",
     "a_truth_cities",
     "a_knowledge_matrix",
-    "knowledge_steering",
     "a_dose_runs",
     "a_dose_types",
-    "approximate",
     "a_links",
 )
 MAIN_TABLES = ("checkpoints", "reading")
