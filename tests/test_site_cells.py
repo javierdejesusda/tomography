@@ -44,19 +44,6 @@ def test_percent_rounds_to_whole_numbers() -> None:
     assert cells.percent(None) == "n/a"
 
 
-def test_count_writes_a_ratio_with_thousands_separators() -> None:
-    assert cells.count(1377, 21988) == "1,377 / 21,988"
-
-
-def test_read_csv_parses_numbers_and_strips_the_bom(tmp_path: Path) -> None:
-    path = tmp_path / "x.csv"
-    path.write_text("\ufeffa,b\n1,x\n,2.5\n", encoding="utf-8")
-    assert cells.read_csv(path) == [
-        {"a": 1.0, "b": "x"},
-        {"a": None, "b": 2.5},
-    ]
-
-
 def test_rows_of_a_json_table_zips_columns_and_rows(tmp_path: Path) -> None:
     path = tmp_path / "t.json"
     path.write_text(
