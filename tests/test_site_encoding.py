@@ -157,38 +157,39 @@ def test_figure_5_draws_circles_a_diamond_and_the_role_free_rows(
     }
 
 
-CIRCLE_KEY_FIGURES = ("knowledge_steering", "a_dose_runs", "a_dose_types")
-
-
-def _key_handles(fig: Figure) -> list[Line2D]:
+def _legend_texts(fig: Figure) -> list[str]:
     legends = list(fig.legends)
     for sub in fig.subfigs:
         legends.extend(sub.legends)
-    return [
-        h
-        for leg in legends
-        for h in leg.legend_handles
-        if isinstance(h, Line2D) and str(h.get_marker()) not in ("None", "")
+    return [t.get_text() for leg in legends for t in leg.get_texts()]
+
+
+def test_the_direction_keys_pair_a_filled_and_an_open_marker() -> None:
+    from tomography.site.figs import knowledge_steering
+
+    handles, labels = knowledge_steering.direction_keys()
+    assert labels == [
+        "direction, unknown questions (filled: GPT-2 and base; open: "
+        "post-trained)",
+        "direction, known questions, same fill",
     ]
+    for pair, marker in zip(
+        handles, ("o", paper.QUESTION_SET_MARKERS["known"]), strict=True
+    ):
+        filled, opened = pair
+        assert filled.get_marker() == opened.get_marker() == marker
+        assert filled.get_markerfacecolor() != "white"
+        assert opened.get_markerfacecolor() == "white"
 
 
-@pytest.mark.parametrize("key", CIRCLE_KEY_FIGURES)
-def test_the_role_key_is_a_filled_and_an_open_circle_not_a_hexagon(
+@pytest.mark.parametrize("key", ["knowledge_steering", "a_dose_runs"])
+def test_the_dose_figures_key_role_inside_the_direction_entries(
     key: str,
 ) -> None:
-    fig = registry.build_figure(key, Manifest(RESULTS)).figure
-    handles = _key_handles(fig)
-    assert "h" not in {h.get_marker() for h in handles}
-    if key == "a_dose_types":
-        return
-    role = {
-        h.get_label(): h.get_markerfacecolor() == "white"
-        for h in handles
-        if h.get_label() in ("GPT-2 and base", "post-trained")
-    }
-    assert role == {"GPT-2 and base": False, "post-trained": True}
-    assert all(
-        h.get_marker() == "o"
-        for h in handles
-        if h.get_label() in ("GPT-2 and base", "post-trained")
+    texts = _legend_texts(registry.build_figure(key, Manifest(RESULTS)).figure)
+    assert "GPT-2 and base" not in texts
+    assert "post-trained" not in texts
+    assert any(
+        t.startswith("direction, unknown questions (filled") for t in texts
     )
+    assert "direction, known questions, same fill" in texts

@@ -255,15 +255,27 @@ def test_rows_are_gpt2_base_and_the_two_post_trained_prompts(
     assert all("concept" in t for t in got[9:])
 
 
-def test_each_panel_carries_the_figure_9_outcome_in_a_corner_tag(
+def test_each_panel_carries_the_figure_9_outcome_on_its_title_line(
     output: registry.FigureOutput,
 ) -> None:
+    checks.draw(output.figure)
     for ax, run in zip(_panels(output), _runs(), strict=True):
-        (tag,) = [t for t in ax.texts if t.get_gid() == "tag"]
-        assert tag.get_text() == f"above {_beats(*run)} of 3 random"
-        x, y = tag.get_position()
-        assert x > 0.5
-        assert y > 0.5
+        tag = ax._right_title
+        assert tag.get_text() == f"{_beats(*run)} of 3"
+        box = tag.get_window_extent()
+        area = ax.get_window_extent()
+        assert box.y0 >= area.y1 - 1
+        left = ax._left_title.get_window_extent()
+        assert left.x1 + 4 < box.x0
+        assert box.x1 <= area.x1 + 1
+
+
+def test_the_key_says_what_the_title_tag_counts(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    keyed = " ".join(t.get_text() for t in legend.get_texts())
+    assert "random directions whose gap interval lies above zero" in keyed
 
 
 def test_the_legend_is_at_the_top_and_inner_y_tick_labels_are_hidden(

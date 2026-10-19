@@ -11,6 +11,7 @@ from typing import Any
 
 from matplotlib import ticker
 from matplotlib.axes import Axes
+from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
 import numpy as np
 
@@ -23,8 +24,12 @@ from tomography.site.registry import FigureOutput
 from tomography.viz import axes
 from tomography.viz import paper
 
-HEIGHT = 3.9
+HEIGHT = 4.4
 BLOCK_GAP = 0.9
+TAG_KEY = (
+    "above n of 3: random directions whose gap interval lies above zero; "
+    "smallest one-sided p is 1/4"
+)
 LABEL_FONT = 7
 HEADER = ["panel", "run", "x", "series", "value", "lo", "hi"]
 ARMS = ("random0", "random1", "random2")
@@ -46,7 +51,7 @@ CLAIM = (
     "consistently on post-trained ones."
 )
 DETAIL = (
-    "On known questions the direction moves the outcome as much as on "
+    "On known questions the direction moves the outcome at least as much as on "
     "unknown questions for {held}, by the largest shift of the mean dose "
     "curve, which a slope does not show. (a) Slope of the next-token entropy "
     "shift per unit relative coefficient on unknown questions (circle) and "
@@ -58,7 +63,8 @@ DETAIL = (
     "unknown questions more than each of the 3 random directions on "
     "{distinguishable}, and more than known questions on {selective}, by "
     "the gap between the absolute mean slopes over the coefficient grid, "
-    "whatever the sign; with 3 random directions a direction passes by "
+    "whatever the sign, counted as above when the 95 percent interval of that "
+    "gap lies above zero; with 3 random directions a direction passes by "
     "chance with probability at most 1/4. The outcome is the entropy shift "
     "for GPT-2 and base checkpoints and the abstention rate for "
     "post-trained ones. (c to e) Dose curves "
@@ -196,6 +202,30 @@ def load_runs(manifest: Manifest) -> list[Run]:
         )
         found.extend(Run(manifest, model, t) for t in templates)
     return found
+
+
+def direction_keys() -> tuple[list[Any], list[str]]:
+    """Builds the key entries of the direction on unknown and known questions.
+
+    Each entry is a filled and an open marker, so one entry carries the role.
+
+    Returns:
+        The handle pairs and their labels.
+    """
+
+    def pair(marker: str) -> tuple[Line2D, Line2D]:
+        return (
+            _rows.series_handle("", marker, paper.INK),
+            _rows.series_handle("", marker, paper.INK, filled=False),
+        )
+
+    handles = [pair("o"), pair(paper.QUESTION_SET_MARKERS["known"])]
+    labels = [
+        "direction, unknown questions (filled: GPT-2 and base; open: "
+        "post-trained)",
+        "direction, known questions, same fill",
+    ]
+    return handles, labels
 
 
 def _layout(runs: list[Run]) -> tuple[list[Run], list[float]]:
@@ -453,9 +483,13 @@ def build(manifest: Manifest) -> FigureOutput:
             run = by_label[" ".join(key)]
             draw_dose(ax, run, letter, csv_rows)
             message = (
-                "known moves as much" if run in held else "known moves less"
+                "known moves at least as much"
+                if run in held
+                else "known moves less"
             )
-            paper.panel_title(ax, letter, f"{run.name}\n{message}")
+            paper.panel_title(
+                ax, letter, f"{run.name}\n{message}", paper.MIN_TEXT
+            )
         low = min(ax.get_ylim()[0] for ax in doses[:2])
         high = max(ax.get_ylim()[1] for ax in doses[:2])
         for ax in doses[:2]:
@@ -464,33 +498,24 @@ def build(manifest: Manifest) -> FigureOutput:
         doses[1].tick_params(labelleft=False)
         paper.panel_letter(ax_a, "a")
         paper.panel_letter(ax_b, "b")
+        keys = direction_keys()
         legend = top.legend(
             handles=[
-                _rows.series_handle(
-                    "direction, known questions",
-                    paper.QUESTION_SET_MARKERS["known"],
-                    paper.INK,
-                ),
+                *keys[0],
                 _rows.series_handle(
                     "random direction", "x", paper.ENC["random_marker"]
-                ),
-                _rows.series_handle("GPT-2 and base", "o", paper.INK),
-                _rows.series_handle(
-                    "post-trained", "o", paper.INK, filled=False
                 ),
                 Line2D(
                     [],
                     [],
                     ls="none",
-                    label=(
-                        "above n of 3: random directions beaten; smallest "
-                        "one-sided p is 1/4"
-                    ),
                 ),
             ],
+            labels=[*keys[1], "random direction", TAG_KEY],
+            handler_map={tuple: HandlerTuple(ndivide=None, pad=0.1)},
             loc="outside upper center",
-            ncol=3,
-            handlelength=1.0,
+            ncol=1,
+            handlelength=1.6,
             columnspacing=1.2,
             fontsize=7,
         )
