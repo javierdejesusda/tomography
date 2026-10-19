@@ -226,9 +226,16 @@ def test_numbers_are_recomputed_from_the_files(
     assert numbers["range_base_max"] == _percent(max(_qwen(rate, True)))
     assert numbers["range_post_min"] == _percent(min(_qwen(rate, False)))
     assert numbers["range_post_max"] == _percent(max(_qwen(rate, False)))
-    qwen = [m for m in models if m.startswith("qwen3")]
-    assert numbers["exact_qwen_max"] == _percent(max(exact[m] for m in qwen))
-    assert numbers["people_qwen_max"] == _percent(max(people[m] for m in qwen))
+    for pooled in ("exact_qwen_max", "people_qwen_max", "wilson_max_points"):
+        assert pooled not in numbers, pooled
+    for role in stats.ROLES:
+        own = [m for m in models if stats.role(m) == role]
+        assert numbers[f"exact_{role}_max"] == _percent(
+            max(exact[m] for m in own)
+        )
+        assert numbers[f"people_{role}_max"] == _percent(
+            max(people[m] for m in own)
+        )
     assert numbers["gpt2_range"] == _percent(rate["gpt2"])
     assert numbers["gpt2_exact"] == _percent(exact["gpt2"])
     text = _text("gpt2")
@@ -269,8 +276,10 @@ def test_percent_values_match_the_plan_at_this_commit(
     numbers = output.numbers
     assert (numbers["range_base_min"], numbers["range_base_max"]) == (83, 99)
     assert (numbers["range_post_min"], numbers["range_post_max"]) == (28, 68)
-    assert numbers["exact_qwen_max"] == 15
-    assert numbers["people_qwen_max"] == 0
+    assert numbers["exact_base_max"] == 15
+    assert numbers["exact_post_max"] == 0
+    assert numbers["people_base_max"] == 0
+    assert numbers["people_post_max"] == 0
 
 
 def _forced(model: str) -> float:
@@ -313,11 +322,14 @@ def test_the_detail_gives_the_baselines_of_each_panel(
     n = output.numbers
     detail = output.detail
     assert (
-        f"on at most {int(n['exact_qwen_max'])} percent of the exact items"
+        f"at most {int(n['exact_base_max'])} and "
+        f"{int(n['people_base_max'])} percent (Qwen3 base), "
+        f"{int(n['exact_post_max'])} and {int(n['people_post_max'])} "
+        "percent (post-trained)"
     ) in detail
     assert (
-        f"GPT-2 small on {int(n['gpt2_range'])} and "
-        f"{int(n['gpt2_exact'])} percent"
+        f"GPT-2 small {int(n['gpt2_range'])} and "
+        f"{int(n['gpt2_exact'])} percent on range and exact items"
     ) in detail
     assert f"{n['text_word']:.3f}" in detail
     assert f"{n['text_lo']:.3f} to {n['text_hi']:.3f}" in detail
@@ -341,10 +353,21 @@ def test_the_wilson_intervals_lie_inside_the_markers_and_the_caption_says_so(
     points = ax.get_window_extent().width / output.figure.dpi * 72
     low, high = ax.get_xlim()
     assert widest / (high - low) * points < paper.MARKER_SIZE
-    assert output.numbers["wilson_max_points"] == math.ceil(widest * 100 - 1e-9)
+    by_role: dict[str, float] = {}
+    for r in _rows(output):
+        if r["panel"] == "a":
+            role = stats.role(r["model"])
+            width = float(r["hi"]) - float(r["lo"])
+            by_role[role] = max(by_role.get(role, 0.0), width)
+    wide = {}
+    for role in stats.ROLES:
+        wide[role] = math.ceil(by_role[role] * 1000 - 1e-9) / 10
+        assert output.numbers[f"wilson_{role}_points"] == wide[role]
+        assert wide[role] >= by_role[role] * 100
     assert (
         "Wilson 95 percent intervals lie inside the markers, at most "
-        f"{int(output.numbers['wilson_max_points'])} points wide"
+        f"{wide['gpt2']:.1f} (GPT-2), {wide['base']:.1f} (Qwen3 base) and "
+        f"{wide['post']:.1f} (post-trained) points wide"
     ) in output.detail
 
 
@@ -641,8 +664,6 @@ def test_caption_states_the_state_rule_and_the_roles(
     output: registry.FigureOutput,
 ) -> None:
     text = output.detail
-    assert "filled circles are GPT-2 and Qwen3 base" in text
-    assert "open circles post-trained" in text
     assert "a filled hexagon is above the control's interval" in text
     assert "an open hexagon inside it" in text
     assert "a tick below it" in text

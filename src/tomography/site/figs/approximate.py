@@ -52,21 +52,22 @@ CLAIM = (
     "{above_random}."
 )
 DETAIL = (
-    "(a) Share of few-shot answers written as a range on range "
-    "items, exact items and {n_people} people's heights; filled circles are "
-    "GPT-2 and Qwen3 base, open circles post-trained. Wilson 95 percent "
-    "intervals lie inside the markers, at most {wilson} points wide. Qwen3 "
-    "writes a range on at most {exact} percent of the exact items and "
-    "{heights}; GPT-2 small on {gpt2_range} and {gpt2_exact} percent. (b) "
-    "AUROC on held-out durations of a range reader fitted on heights and "
-    "wingspans, with its "
-    "random control (grey bar: bootstrap interval of the mean of {draws} "
-    "random directions) and a classifier on the words (green line "
-    "{text}, whisker {text_lo} to {text_hi}); a filled hexagon is above the "
-    "control's interval, an open hexagon inside it, a tick below it. (c) "
-    "People's position between buildings (0) and breeds (1) against the "
-    "random band, the range of the control's position over its {sets} "
-    "training sets. See [[sec:appendix_approximate]]."
+    "(a) Share of few-shot answers written as a range on range items, exact "
+    "items and {n_people} people's heights. "
+    "Wilson 95 percent intervals lie inside the markers, at most "
+    "{wilson_gpt2} (GPT-2), {wilson_base} (Qwen3 base) and {wilson_post} "
+    "(post-trained) points wide. Exact items and heights: at most "
+    "{exact_base} and {people_base} percent (Qwen3 base), {exact_post} and "
+    "{people_post} percent (post-trained); GPT-2 small {gpt2_range} and "
+    "{gpt2_exact} percent on range and exact items. (b) AUROC on held-out "
+    "durations of a range reader fitted on heights and wingspans, with its "
+    "random control (grey bar: bootstrap "
+    "interval of the mean of {draws} random directions) and a classifier on "
+    "the words (green line {text}, whisker {text_lo} to {text_hi}); a filled "
+    "hexagon is above the control's interval, an open hexagon inside it, a "
+    "tick below it. (c) People's position between buildings (0) and breeds "
+    "(1) against the random band, the range of the control's position over "
+    "its {sets} training sets. See [[sec:appendix_approximate]]."
 )
 
 
@@ -535,8 +536,6 @@ def build(manifest: Manifest) -> FigureOutput:
         "range_base_max": float(_percent(max(_role_values(True)))),
         "range_post_min": float(_percent(min(_role_values(False)))),
         "range_post_max": float(_percent(max(_role_values(False)))),
-        "exact_qwen_max": float(_percent(max(exact[m] for m in qwen))),
-        "people_qwen_max": float(_percent(max(people[m] for m in qwen))),
         "gpt2_range": float(_percent(rate["gpt2"])),
         "gpt2_exact": float(_percent(exact["gpt2"])),
         "text_word": float(text["auroc"]),
@@ -545,19 +544,22 @@ def build(manifest: Manifest) -> FigureOutput:
         "n_people": float(first.n_people),
         "n_random_draws": float(first.n_seeds),
         "n_band_sets": float(len(first.draws)),
-        "wilson_max_points": float(
-            math.ceil(
-                max(
-                    (float(c["hi"]) - float(c["lo"])) * 100
-                    for cells in behavior.values()
-                    for c in cells.values()
-                )
-                - 1e-9
-            )
-        ),
     }
     forced = {m: _forced_rate(manifest, m) for m in models}
     for role in stats.ROLES:
+        members = [m for m in models if stats.role(m) == role]
+        numbers[f"exact_{role}_max"] = float(
+            _percent(max(exact[m] for m in members))
+        )
+        numbers[f"people_{role}_max"] = float(
+            _percent(max(people[m] for m in members))
+        )
+        widest = max(
+            float(c["hi"]) - float(c["lo"])
+            for m in members
+            for c in behavior[m].values()
+        )
+        numbers[f"wilson_{role}_points"] = math.ceil(widest * 1000 - 1e-9) / 10
         own = [r for m, r in readers.items() if stats.role(m) == role]
         place = [r.position["position"] for r in own]
         draws = [d for r in own for d in r.draws]
@@ -573,12 +575,6 @@ def build(manifest: Manifest) -> FigureOutput:
         numbers[f"control_other_layer_{role}"] = float(other_layer[role].hits)
         numbers[f"control_below_half_{role}"] = float(below_half[role].hits)
         numbers[f"control_above_95_{role}"] = float(above_95[role].hits)
-    heights = (
-        "on none of the heights"
-        if numbers["people_qwen_max"] == 0
-        else f"on at most {int(numbers['people_qwen_max'])} percent of the "
-        "heights"
-    )
     claim = CLAIM.format(
         base_min=int(numbers["range_base_min"]),
         base_max=int(numbers["range_base_max"]),
@@ -588,9 +584,15 @@ def build(manifest: Manifest) -> FigureOutput:
     )
     detail = DETAIL.format(
         n_people=int(numbers["n_people"]),
-        wilson=int(numbers["wilson_max_points"]),
-        exact=int(numbers["exact_qwen_max"]),
-        heights=heights,
+        **{
+            f"{name}_{role}": int(numbers[f"{name}_{role}_max"])
+            for name in ("exact", "people")
+            for role in ("base", "post")
+        },
+        **{
+            f"wilson_{role}": f"{numbers[f'wilson_{role}_points']:.1f}"
+            for role in stats.ROLES
+        },
         gpt2_range=int(numbers["gpt2_range"]),
         gpt2_exact=int(numbers["gpt2_exact"]),
         draws=int(numbers["n_random_draws"]),
