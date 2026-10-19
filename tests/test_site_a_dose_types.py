@@ -379,3 +379,25 @@ def test_the_pass_frame_lies_wholly_inside_its_panel(
             assert all(inside)
             checked += 1
     assert checked == 11
+
+
+def test_the_pass_frame_is_drawn_behind_the_data_and_row_labels_are_legible(
+    output: registry.FigureOutput,
+) -> None:
+    checked = 0
+    for ax in _panels(output):
+        frames = [p for p in ax.patches if p.get_gid() == "pass-frame"]
+        if not frames:
+            continue
+        data = [ln.get_zorder() for ln in ax.lines if ln.get_marker() != "None"]
+        assert data
+        assert frames[0].get_zorder() < min(data)
+        checked += 1
+    assert checked == 11
+    labels = [
+        ax.yaxis.label.get_fontsize()
+        for ax in _panels(output)
+        if ax.yaxis.label.get_text()
+    ]
+    assert labels
+    assert min(labels) >= paper.TICK

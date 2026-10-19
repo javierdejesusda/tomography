@@ -160,7 +160,7 @@ def build(manifest: Manifest) -> FigureOutput:
                             ec=viz_axes.model_style(run.model).color,
                             lw=FRAME_WIDTH,
                             gid="pass-frame",
-                            zorder=5,
+                            zorder=0.5,
                             clip_on=False,
                         )
                     )
@@ -170,7 +170,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 )
                 if c == 0:
                     ax.set_ylabel(
-                        run.name.replace(", ", "\n"), fontsize=paper.MIN_TEXT
+                        run.name.replace(", ", "\n"), fontsize=paper.TICK
                     )
                     paper.panel_title(
                         ax,
