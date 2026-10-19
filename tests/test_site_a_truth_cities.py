@@ -23,6 +23,7 @@ MODELS = models("r6")
 ROLES = ("gpt2", "base", "post")
 SETS = ("cities", "neg_cities", "sp_en_trans", "neg_sp_en_trans")
 NEGATED = {"neg_cities": "cities", "neg_sp_en_trans": "sp_en_trans"}
+TICK_WIDTH = 1.0
 EM = chr(0x2014)
 EN = chr(0x2013)
 
@@ -280,20 +281,25 @@ def test_the_caption_points_to_the_main_figure_and_is_self_contained(
         assert banned not in text
 
 
-def test_the_random_direction_tick_and_its_key_are_visible_at_100_dpi(
+def test_the_random_direction_tick_is_drawn_once_and_stays_solid(
     output: registry.FigureOutput,
 ) -> None:
-    ax = next(a for a in output.figure.axes if a.get_gid() == "cities")
-    ticks = [
-        ln for ln in ax.get_lines() if str(ln.get_gid()).startswith("random:")
-    ]
-    assert ticks
-    assert all(t.get_linewidth() >= 1.5 for t in ticks)
+    for gid in ("cities", "translations"):
+        ax = next(a for a in output.figure.axes if a.get_gid() == gid)
+        ticks = [
+            ln
+            for ln in ax.get_lines()
+            if str(ln.get_gid()).startswith("random:")
+        ]
+        assert len(ticks) == len(MODELS)
+        for t in ticks:
+            assert t.get_color() == "#6a6a6a"
+            assert t.get_linewidth() == TICK_WIDTH
     (legend,) = output.figure.legends
     (swatch,) = [
         h
         for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
         if t.get_text().startswith("random direction")
     ]
-    assert swatch.get_markeredgewidth() >= 1.5
-    assert swatch.get_color() == ticks[0].get_color()
+    assert swatch.get_color() == "#6a6a6a"
+    assert swatch.get_markeredgewidth() == TICK_WIDTH

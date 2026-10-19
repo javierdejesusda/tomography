@@ -25,7 +25,7 @@ HEIGHT = 3.2
 
 
 TICK = paper.ENC["own_probability"]
-TICK_WIDTH = 1.6
+TICK_WIDTH = 1.0
 
 
 def _panel_dumbbell(
