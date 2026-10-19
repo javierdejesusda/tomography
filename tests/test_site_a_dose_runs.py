@@ -175,3 +175,12 @@ def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
     with paper.paper_style():
         assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
+
+
+def test_legend_names_the_grey_band_as_the_mean_of_the_random_arms(
+    output: registry.FigureOutput,
+) -> None:
+    legend = output.figure.legends[0]
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert "mean of 3 random directions" in labels
+    assert not any("pooled" in label for label in labels)

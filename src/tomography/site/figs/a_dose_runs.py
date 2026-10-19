@@ -90,7 +90,7 @@ def build(manifest: Manifest) -> FigureOutput:
                     [],
                     color=paper.ENC["random_marker"],
                     lw=paper.DATA_WIDTH,
-                    label="pooled random directions",
+                    label="mean of 3 random directions",
                 ),
                 _rows.series_handle("GPT-2 and base", "o", paper.INK),
                 _rows.series_handle(

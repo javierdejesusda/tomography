@@ -197,3 +197,12 @@ def test_caption_describes_the_grey_band_as_the_mean_of_the_random_arms(
         "the mean over the 3 random directions on unknown questions with its "
         "95 percent interval that resamples the questions (grey band)"
     ) in output.detail
+
+
+def test_legend_names_the_grey_band_as_the_mean_of_the_random_arms(
+    output: registry.FigureOutput,
+) -> None:
+    legend = output.figure.legends[0]
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert "mean of 3 random directions" in labels
+    assert not any("pooled" in label for label in labels)
