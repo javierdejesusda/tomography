@@ -112,3 +112,12 @@ def test_the_docstrings_state_the_listing_order_and_the_p1_rule() -> None:
     assert "oldest" not in runs_doc
     assert "sorted by directory name" in runs_doc
     assert "most tasks" in run_doc
+
+
+def test_checkpoints_skip_the_model_free_runs(tmp_path: Path) -> None:
+    _run(tmp_path, "p1", "gpt2", "aaaa")
+    _run(tmp_path, "p1", "qwen3-1.7b", "bbbb")
+    _run(tmp_path, "tb1", "none", "cccc")
+    manifest = manifest_module.Manifest(tmp_path)
+    assert manifest.models("tb1") == ["none"]
+    assert manifest.checkpoints() == ["gpt2", "qwen3-1.7b"]

@@ -33,10 +33,7 @@ def build(manifest: Manifest) -> TableOutput:
     Returns:
         The table and its caption parts.
     """
-    models = sorted(
-        {m for e in manifest.experiments() for m in manifest.models(e)},
-        key=store.model_rank,
-    )
+    models = manifest.checkpoints()
     rows: list[list[str]] = []
     counts: list[int] = []
     for model in models:

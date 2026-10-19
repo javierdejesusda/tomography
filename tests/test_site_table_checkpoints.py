@@ -33,9 +33,7 @@ def test_one_row_per_checkpoint_found_in_the_results(
     output: registry.TableOutput,
 ) -> None:
     manifest = Manifest(RESULTS)
-    models = sorted(
-        {m for e in manifest.experiments() for m in manifest.models(e)}
-    )
+    models = manifest.checkpoints()
     assert len(output.rows) == len(models) == 10
     assert {r[0] for r in output.rows} == {
         paper.display_name(m) for m in models
