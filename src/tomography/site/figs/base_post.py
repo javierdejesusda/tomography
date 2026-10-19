@@ -167,7 +167,7 @@ def _marker(size: str, **extra: Any) -> dict[str, Any]:
     color = axes.model_style(f"qwen3-{size}").color
     return {
         "color": color,
-        "marker": "D",
+        "marker": paper.MEASURE_MARKERS["direction"],
         "fillstyle": "left",
         "markerfacecolor": color,
         "markerfacecoloralt": "white",

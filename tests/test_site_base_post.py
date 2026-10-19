@@ -254,11 +254,15 @@ def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
     assert checks.problems(fig) == []
 
 
-def test_markers_are_left_filled_diamonds_in_the_size_colors(
+def test_markers_are_left_filled_circles_in_the_size_colors(
     output: registry.FigureOutput,
 ) -> None:
     (ax,) = output.figure.axes
-    marked = [line for line in ax.lines if line.get_marker() == "D"]
+    marked = [
+        line
+        for line in ax.lines
+        if line.get_marker() == paper.MEASURE_MARKERS["direction"]
+    ]
     assert len(marked) == 24
     assert {line.get_fillstyle() for line in marked} == {"left"}
     assert len({line.get_color() for line in marked}) == 3
