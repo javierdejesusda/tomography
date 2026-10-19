@@ -4409,7 +4409,7 @@ checkpoints (the 4B pair in chain 17, at `89ea7cb` on a rented GPU pod) and so d
 chain 17 was cut when the chain was stopped and is not exported; the reported one is from chain 20, at `86c319b`).
 LR1 and C4 ran on the 0.6B, 1.7B and 4B pairs (the 0.6B runs are from chain 43, at `bab5b75`, and the 4B C4 runs from
 chain 21, at `d09822b`), C2 and C5 on the 1.7B and 4B pairs (the `qwen3-4b-base` C2 run and both 4B C5
-runs are from chain 23), and M1 on the 1.7B and 4B pairs (the 4B M1 runs are from chain 22, at `d09822b`). The 4B results follow the 1.7B text
+runs are from chain 23, at `d09822b`), and M1 on the 1.7B and 4B pairs (the 4B M1 runs are from chain 22, at `d09822b`). The 4B results follow the 1.7B text
 in a `#### The 4B pair` block of each section, and the 0.6B results of LR1 and C4 follow those in `#### The 0.6B pair` blocks. The post-trained checkpoints use the chat
 template with thinking disabled and the base checkpoints plain tags, as in [LAT reading on
 Qwen3](#lat-reading-on-qwen3). Base and post-trained checkpoints are different models: every table has one column per
@@ -5132,8 +5132,8 @@ and after, and its reduction:
 | L21   | 39.00 to 30.85                 | 0.209     | 52.51 to 41.66            | 0.207     |
 
 The loss grows with the layer, so the layers are compared by the reduction: 0.132 to 0.209 on the base checkpoint (the
-smallest at L11, the largest at L21) and 0.187 to 0.259 on the post-trained one (the largest at L13), against 0.178 to
-0.258 at 1.7B. LR1 has no honesty evaluation; C4 scores these adapters on TruthfulQA below.
+smallest at L11, the largest at L21) and 0.187 to 0.259 on the post-trained one (the largest at L13), against 0.190 to 0.241
+(base) and 0.178 to 0.258 (post-trained) at 1.7B. LR1 has no honesty evaluation; C4 scores these adapters on TruthfulQA below.
 
 #### The 4B pair (C4)
 
@@ -5224,7 +5224,8 @@ after, and its reduction:
 
 The loss grows with the layer, so the layers are compared by the reduction: 0.200 to 0.242 on the base checkpoint (the
 smallest at L13, the largest at L17) and 0.162 to 0.275 on the post-trained one (the smallest at L9, the largest at
-L11), against 0.178 to 0.258 at 1.7B. LR1 has no honesty evaluation; C4 scores these adapters on TruthfulQA below.
+L11), against 0.190 to 0.241 (base) and 0.178 to 0.258
+(post-trained) at 1.7B. LR1 has no honesty evaluation; C4 scores these adapters on TruthfulQA below.
 
 #### The 0.6B pair (C4)
 
@@ -5264,7 +5265,7 @@ text under the edited model; the prompting and `contrast` arms have no steered m
 | random (3 arms)      | mean 0.318, 0.318 to 0.318 | +0.000 to +0.000        | 10.78 to 16.32     |
 
 - **Base checkpoint.** The unedited row (0.237 [0.180, 0.306]) has an interval that contains the chance line. The
-  truthful and the untruthful prompt both change MC1 by +0.006 (1 question of 173), with intervals that contain zero, so
+  truthful and the untruthful prompt both change MC1 by +0.006 (1 question each of 173), with intervals that contain zero, so
   a changed prompt moves MC1 by the same amount whatever it says. No arm raises MC1: `difference` gives -0.029 [-0.069,
   +0.006] (5 fewer questions), `contrast` -0.035 [-0.075, +0.006] (6 fewer) and the adapter -0.006 [-0.052, +0.040] (1
   fewer), all with intervals that contain zero. Two of the ten readers chose coefficient 0 (the unedited model, so their
@@ -7048,14 +7049,14 @@ their code is that of main) with a clean tree on one rented GPU pod (NVIDIA RTX 
 same checkpoint in the same chain, `/workspace/chains/../out/chain43/lr1/<model>/<hash>`; the export rewrites it to `results/lr1/qwen3-0.6b-base/03ba155a9fe7`
 and `results/lr1/qwen3-0.6b/74d01330d28c`, so the stored `lorra_run` of each C4 run names the committed LR1 run of
 its checkpoint. The time between `started_at` and `finished_at` of the stored `meta.json` is 126 s (base) and 124 s
-(post-trained) for LR1, and 1,225 s (base) and 1,497 s (post-trained) for C4; the pod ran two jobs at a time on
-2026-10-18, alongside the two P1 jobs of the same chain (not part of this change), and the chain log of the launcher,
-which is outside the repository, records exit status 0 for each of the four runs and ends with `CHAIN_DONE failed=0`.
+(post-trained) for LR1, and 1,225 s (base) and 1,497 s (post-trained) for C4, and the four runs ran back to back on
+2026-10-18 (LR1 base 22:01:23 to 22:03:29, LR1 post-trained 22:04:13 to 22:06:17, C4 base 22:06:59 to 22:27:24, C4
+post-trained 22:28:04 to 22:53:01 UTC).
 The config hash of each run was recomputed by loading its original pod `config.json` into the config class of its
 experiment and hashing it, and all four agree with the directory names; the two LR1 configs equal the default LR1
 config of their checkpoint, and the C4 configs differ from the default C4 config only through `lorra_run`. The two LR1
 hashes also reproduce from the committed `config.json`; the exported config of a C4 run hashes differently because of
-the rewritten `lorra_run`, as for the chain 17, 21 and 24 C4 runs. Exporting these runs changed no tracked result.
+the rewritten `lorra_run`, as for the chain 14, 17 and 21 C4 runs. Exporting these runs changed no tracked result.
 
 Config hashes (12 hex digits), chain 43:
 
