@@ -90,22 +90,6 @@ def join_and(parts: Sequence[str]) -> str:
     return ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
-def all_or_per_role(counts: Mapping[str, stats.RoleCount]) -> str:
-    """Writes a count as `all N checkpoints` or as its per-role phrase.
-
-    Args:
-        counts: Role to its count.
-
-    Returns:
-        `all 9 checkpoints` when every checkpoint of every role satisfies the
-        statement, else the per-role text.
-    """
-    total = sum(c.total for c in counts.values())
-    if total and all(c.hits == c.total for c in counts.values()):
-        return f"all {total} checkpoints"
-    return stats.per_role_text(counts)
-
-
 def run_counts(
     flags: Mapping[tuple[str, str], bool],
 ) -> dict[str, stats.RoleCount]:

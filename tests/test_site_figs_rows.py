@@ -35,19 +35,6 @@ def test_new_figure_is_page_wide_with_constrained_layout() -> None:
     assert isinstance(fig.get_layout_engine(), ConstrainedLayoutEngine)
 
 
-def test_all_or_per_role_says_all_only_when_every_checkpoint_holds() -> None:
-    every = {
-        "gpt2": stats.RoleCount(3, 3),
-        "base": stats.RoleCount(3, 3),
-        "post": stats.RoleCount(3, 3),
-    }
-    assert _rows.all_or_per_role(every) == "all 9 checkpoints"
-    some = {**every, "post": stats.RoleCount(2, 3)}
-    assert _rows.all_or_per_role(some) == (
-        "3 of 3 GPT-2, 3 of 3 Qwen3 base and 2 of 3 post-trained checkpoints"
-    )
-
-
 def test_series_handle_is_filled_or_open() -> None:
     filled = _rows.series_handle("a", "o", "#123456")
     opened = _rows.series_handle("b", "o", "#123456", filled=False)

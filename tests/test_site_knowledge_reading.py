@@ -275,16 +275,28 @@ def test_caption_is_the_template_filled_from_the_files(
         "to the model's confidence."
     )
     assert (
-        f"on all {len(lat)} checkpoints by point estimate, and the interval "
+        f"on {stats.per_role_text(point)} by point estimate, and the interval "
         f"of the difference lies above zero on {stats.per_role_text(interval)}"
     ) in caption
+    cover = _by_role(
+        {
+            m: f["confidence+lat"]["lo"] <= 0 <= f["confidence+lat"]["hi"]
+            for m, f in _increments().items()
+            if "confidence+lat" in f
+        }
+    )
+    above = _by_role(
+        {m: f["confidence+probe"]["lo"] > 0 for m, f in _increments().items()}
+    )
     assert (
         f"the direction changes it by {signed(min(diffs))} to "
-        f"{signed(max(diffs))} with an interval covering zero on all "
-        f"{len(lat)} checkpoints, while the probe adds {signed(min(gains))} "
-        f"to {signed(max(gains))} with an interval above zero on all "
-        f"{len(probe)}"
+        f"{signed(max(diffs))} with an interval covering zero on "
+        f"{stats.per_role_text(cover)}, while the probe adds "
+        f"{signed(min(gains))} to {signed(max(gains))} with an interval "
+        f"above zero on {stats.per_role_text(above)}"
     ) in caption
+    assert "all 9 checkpoints" not in caption
+    assert "GPT-2 small has no known-against-unknown contrast" in caption
     assert "monthly Wikipedia page views" in caption
     assert "Hanley and McNeil" in caption
 
