@@ -135,3 +135,15 @@ def test_no_run_code_underscore_or_backtick(
     texts = [re.sub(r"\[\[.*?\]\]", "", t) for t in texts]
     assert not any("_" in t or "`" in t for t in texts)
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
+
+
+def test_caption_says_which_columns_are_means_and_which_single_runs(
+    output: registry.TableOutput,
+) -> None:
+    text = output.detail
+    assert "Every value is the mean" not in text
+    assert (
+        "The columns at the two signs of the coefficient are means over" in text
+    )
+    assert "single run" in text
+    assert "column at 0 and the two instruction columns" in text

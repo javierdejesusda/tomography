@@ -4,7 +4,8 @@ One row per checkpoint: the judged sentiment of the completions at both signs
 of the coefficient, unsteered and under an instruction, the perplexity of
 held-out neutral text under the steered model as a ratio to the unsteered
 model, the perplexity of the completions themselves as a ratio, and
-distinct-1. Every value is the mean over the steering vectors of the run.
+distinct-1. The steered columns are means over the steering vectors of the
+run; the unsteered and instruction columns are single runs.
 """
 
 import json
@@ -103,8 +104,9 @@ def build(manifest: Manifest) -> TableOutput:
         "unsteered model; completion perplexity is the perplexity of the "
         "completions themselves as a ratio to that of the unsteered "
         "completions; distinct-1 is the share of distinct tokens in the "
-        "completions. Every value is the mean over the "
-        f"{n_vectors} steering vectors. "
+        "completions. The columns at the two signs of the coefficient are "
+        f"means over the {n_vectors} steering vectors; the column at 0 and "
+        "the two instruction columns are each a single run. "
         f"The fluency rule of [[fig:steering]] uses the neutral-text ratio "
         f"(at most {MAX_RATIO}) and distinct-1 (at least {MIN_DISTINCT})."
     )
