@@ -356,6 +356,7 @@ def _legend(fig: Figure) -> None:
         fontsize=TEXT,
         columnspacing=1.2,
         handletextpad=0.4,
+        handlelength=3.4,
     )
 
 
