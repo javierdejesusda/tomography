@@ -31,7 +31,8 @@ GENERIC = (
     r"WikiText-103",
     r"distinct-1",
     r"(?<![\d.])±0\.[13](?!\d)",
-    r"coefficient 0\.1(?!\d)",
+    r"coefficient 0\.[13](?!\d)",
+    r"above 0\.95(?!\d)",
     r"exceeds 0\.1(?!\d)",
     r"(?:within|above) 1\.5 times",
     r"below 0\.15(?!\d)",
@@ -410,8 +411,13 @@ def test_the_approximate_contribution_counts_the_reader_and_the_control() -> (
     text = " ".join(_all_texts())
     assert "is matched by" not in text
     assert "[[count:table:approximate.above_words]]" in text
-    assert "[[count:fig:approximate.reader_in_random]]" in text
-    assert "[[count:fig:approximate.people_outside_band]]" in text
+    assert "[[count:fig:approximate.reader_above_random]]" in text
+    assert "[[count:fig:approximate.control_below_half]]" in text
+    assert "[[count:fig:approximate.control_above_95]]" in text
+    assert "a sign flip between the training and the test concepts" in text
+    assert "already separates the test concepts" in text
+    assert "reader_in_random" not in text
+    assert "people_outside_band" not in text
     assert "random_high" not in text
 
 
@@ -427,10 +433,16 @@ def test_counts_over_runs_use_the_runs_token() -> None:
     assert "[[count:fig:knowledge_steering.distinguishable]]" not in text
 
 
-def test_the_abstract_counts_the_confidence_gain_per_role() -> None:
-    assert "[[count:fig:teaser.knowledge_confidence]]" in content.ABSTRACT
-    assert "knowledge_confidence_n" not in content.ABSTRACT
-    assert "any of the" not in content.ABSTRACT
+def test_section_one_counts_the_readings_and_the_confidence_gain() -> None:
+    reading = _listed("Where a concept")
+    for token in ("utility", "morality", "truth"):
+        assert f"[[count:fig:teaser.{token}]]" in reading
+    knowing = _listed("Knowing what")
+    assert "[[count:fig:teaser.knowledge_confidence]]" in knowing
+    for text in (content.ABSTRACT, reading, knowing):
+        assert "knowledge_confidence_n" not in text
+        assert "any of the" not in text
+    assert "per role in [[sec:introduction]]" in content.ABSTRACT
 
 
 def test_the_steering_contribution_names_both_fluency_thresholds() -> None:
@@ -496,7 +508,14 @@ def test_the_approximate_claims_name_the_interval_criterion() -> None:
 def test_the_confidence_gain_is_bounded_not_called_nothing() -> None:
     text = _text()
     assert "adds nothing to the confidence" not in text
-    assert "[[num:table:knowledge.gain_upper_max]]" in text
+    assert "[[num:fig:knowledge_reading.dir_inc_hi_max]]" in text
+    assert "gain_upper_max" not in text
+
+
+def test_the_paired_differences_are_counted_by_token() -> None:
+    for text in (content.ABSTRACT, content.DISCUSSION.paragraphs[0]):
+        assert "[[num:fig:base_post.paired_excluding_zero]]" in text
+        assert "three other" not in text
 
 
 def test_the_three_excluding_differences_are_named() -> None:
@@ -530,9 +549,10 @@ def test_the_abstract_is_prose_built_from_replaceable_finding_sentences() -> (
 ):
     assert content.ABSTRACT_FINDER in content.ABSTRACT
     assert content.ABSTRACT_STEERING in content.ABSTRACT
-    assert content.ABSTRACT_FINDER.count("[[count:") == 1
-    assert content.ABSTRACT_STEERING.count("[[count:") == 2
-    assert content.ABSTRACT.count("[[count:") <= 8
+    assert content.ABSTRACT_FINDER.count("[[count:") == 3
+    assert content.ABSTRACT_STEERING.count("[[count:") == 4
+    assert content.ABSTRACT.count("[[count:") == 8
+    assert "[[count:fig:teaser.truthfulqa]]" in content.ABSTRACT
     assert "[[count:fig:teaser.knowledge]]" not in content.ABSTRACT
 
 
@@ -542,3 +562,68 @@ def test_the_introduction_defines_its_terms_before_the_list_uses_them() -> None:
     for term in ("margin", "relative depth", "relative coefficient"):
         assert term in listed
         assert f"{term} is" in first
+
+
+def _listed(head: str) -> str:
+    for h, t in content.INTRODUCTION.listed:
+        if h.startswith(head):
+            return t
+    raise AssertionError(head)
+
+
+def test_the_steering_claims_are_two_sentences_with_their_thresholds() -> None:
+    first, second = content.ABSTRACT_STEERING.split(". ")
+    assert "[[count:fig:steering.moves01]]" in first
+    assert "[[count:fig:steering.fluent01]]" in first
+    assert "[[count:fig:teaser.steering]]" in second
+    assert "[[count:fig:teaser.steering_fluent]]" in second
+    assert "GPT-2 small has no fluency measure" in second
+    for text in (content.ABSTRACT_STEERING, _listed("Steering")):
+        assert "at most 1.5" in text
+        assert "distinct-1 at least 0.15" in text
+    section = _listed("Steering")
+    for token in ("moves01", "fluent01"):
+        assert f"[[count:fig:steering.{token}]]" in section
+    for token in ("steering", "steering_fluent"):
+        assert f"[[count:fig:teaser.{token}]]" in section
+    assert "no fluency measure" in section
+    assert "no checkpoint is fluent" not in _text()
+
+
+def test_the_finder_claims_are_per_concept_and_not_causal() -> None:
+    for text in (content.ABSTRACT_FINDER, _listed("Finders")):
+        for token in ("pca_sentiment", "pca_truth", "pca_utility"):
+            assert f"[[count:fig:finders.{token}]]" in text
+        assert "by point estimate only" in text
+        assert "confounded with the concept and the data" in text
+    assert "[[count:fig:finders.pca_utility_point]]" in _listed("Finders")
+    everything = _text()
+    assert "depends on matched" not in everything
+    assert "not reliably above a random direction" not in everything
+
+
+RESULT_KEYS = (
+    "finders",
+    "reading",
+    "wording",
+    "truth",
+    "steering",
+    "knowledge_reading",
+    "knowledge_steering",
+    "approximate",
+    "base_post",
+)
+
+
+def test_each_results_subsection_opens_with_its_answer_before_the_figures() -> (
+    None
+):
+    subs = {s.key: s for s in content.RESULTS.subsections}
+    assert tuple(subs) == RESULT_KEYS
+    for key, sub in subs.items():
+        opener, pointer = sub.paragraphs[0], sub.paragraphs[1]
+        assert re.search(r"\[\[(count|runs|num):", opener), key
+        assert "[[fig:" not in opener, key
+        assert "[[table:" not in opener, key
+        assert "[[fig:" in pointer or "[[table:" in pointer, key
+        assert len(re.findall(r"[.;] ", opener)) <= 2, key

@@ -201,8 +201,11 @@ def test_the_claim_uses_the_figure_framing_of_the_random_control(
     claim = output.claim
     assert "matched" not in claim
     assert "[[count:table:approximate.above_words]]" in claim
-    assert "[[count:fig:approximate.reader_in_random]]" in claim
-    assert "[[count:fig:approximate.people_outside_band]]" in claim
+    assert "[[count:fig:approximate.reader_above_random]]" in claim
+    assert "[[count:fig:approximate.control_below_half]]" in claim
+    assert "[[count:fig:approximate.control_above_95]]" in claim
+    assert "reader_in_random" not in claim
+    assert "people_outside_band" not in claim
     assert "random_high" not in output.counts
     assert "high" not in output.numbers
 
