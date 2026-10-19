@@ -178,7 +178,7 @@ def test_the_role_key_is_a_filled_and_an_open_circle_not_a_hexagon(
 ) -> None:
     fig = registry.build_figure(key, Manifest(RESULTS)).figure
     handles = _key_handles(fig)
-    assert paper.ROLE_KEY_MARKER not in {h.get_marker() for h in handles}
+    assert "h" not in {h.get_marker() for h in handles}
     if key == "a_dose_types":
         return
     role = {

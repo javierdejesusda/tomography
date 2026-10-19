@@ -212,7 +212,7 @@ def test_one_marker_per_measure_family_and_the_role_key_is_its_own() -> None:
         for m in (item if isinstance(item, tuple) else (item,))
     ]
     assert len(flat) == len(set(flat))
-    assert paper.ROLE_KEY_MARKER not in flat
+    assert "h" not in flat
     assert paper.MEASURE_MARKERS["direction"] == "o"
     assert paper.MEASURE_MARKERS["random"] == "x"
     assert paper.MEASURE_MARKERS["paper_finder"] == "D"
@@ -240,7 +240,7 @@ def test_category_markers_stay_clear_of_measures_and_the_role_key() -> None:
     }
     assert len(paper.CATEGORY_MARKERS) == len(set(paper.CATEGORY_MARKERS))
     assert not measures & set(paper.CATEGORY_MARKERS)
-    assert paper.ROLE_KEY_MARKER not in paper.CATEGORY_MARKERS
+    assert "h" not in paper.CATEGORY_MARKERS
 
 
 def test_each_named_category_map_has_distinct_shapes_from_the_tuple() -> None:
@@ -363,3 +363,7 @@ def test_rule_four_applies_only_where_role_is_not_given_by_the_layout() -> None:
     assert "where role is not given by the panel or row block" in rule
     assert "dashed segment may carry a state" in rule
     assert "rule 8" in rule
+
+
+def test_the_hexagon_role_key_is_gone() -> None:
+    assert not hasattr(paper, "ROLE_KEY_MARKER")
