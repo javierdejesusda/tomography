@@ -416,7 +416,7 @@ def _detail(
     if gpt2_truth and all(lo <= 0 for lo in gpt2_truth):
         tail = (
             f", and on GPT-2 the truth reader is not separable from its "
-            f"random direction at {sizes['truth']} test pairs (Figure 1, "
+            f"random direction at {sizes['truth']} test pairs ([[fig:teaser]], "
             "row 3)"
         )
     return (

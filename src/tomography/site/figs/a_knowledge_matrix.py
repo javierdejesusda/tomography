@@ -1,4 +1,4 @@
-"""Figure A5: Transfer of the knowledge reader between question types.
+"""Figure A6: Transfer of the knowledge reader between question types.
 
 Panel (a) is the AUROC of a reader fitted on one question type and tested on
 another, for the largest base checkpoint. Panel (b) puts the reader on its own

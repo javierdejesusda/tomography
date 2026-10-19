@@ -1,9 +1,9 @@
-"""Figure A2: The paper's finder and logistic regression on GPT-2, by layer.
+"""Figure A3: The paper's finder and logistic regression on GPT-2, by layer.
 
 Rows are checkpoints and columns are tasks. Each panel draws report-split
 accuracy at every layer for the paper's finder and for logistic regression,
 the seed interval of a random direction of the same run, and a dot at the
-layer each finder chose on its select split. Figure A3 reuses `split` for
+layer each finder chose on its select split. The Qwen3 finder figure reuses `split` for
 Qwen3.
 """
 
@@ -214,7 +214,7 @@ def split(
         "Dots mark the layer each finder's select split chose. The grey "
         "band is the 95 percent interval over seeds of the random "
         "direction, with its mean as a thin line, and the dotted line is "
-        "chance. The other finders are in Table A2."
+        "chance. The other finders are in [[table:finders_all]]."
     )
     return FigureOutput(fig, claim, detail, {}, _csv(rows))
 

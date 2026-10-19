@@ -1,6 +1,6 @@
-"""Figure A3: The paper's finder and logistic regression on Qwen3, by layer.
+"""Figure A4: The paper's finder and logistic regression on Qwen3, by layer.
 
-The Qwen3 counterpart of Figure A2: one row per base or post-trained
+The Qwen3 counterpart of the GPT-2 finder figure: one row per base or post-trained
 checkpoint and one column per task.
 """
 

@@ -1,4 +1,4 @@
-"""Figure A8: The range direction against the knowledge directions.
+"""Figure A9: The range direction against the knowledge directions.
 
 For every checkpoint, the share of question types at each layer whose cosine
 with the range direction, or whose pooled AUROC interval, lies outside the

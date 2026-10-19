@@ -1,4 +1,4 @@
-"""Figure A7: Dose curves of the post-trained runs for each question type.
+"""Figure A8: Dose curves of the post-trained runs for each question type.
 
 One row per post-trained run and one column per question type, with the
 encoding of the dose panels of Figure 9. All panels share one vertical range.
