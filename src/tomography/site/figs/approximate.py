@@ -212,7 +212,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 model,
                 y - 0.15,
                 float(reader.reader["auroc"]),
-                "o",
+                "D",
                 paper.INK,
                 (float(reader.reader["lo"]), float(reader.reader["hi"])),
             )
@@ -258,7 +258,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 model,
                 y,
                 float(reader.position["position"]),
-                "o",
+                "D",
                 paper.INK,
             )
             _band(ax_c, y, min(reader.draws), max(reader.draws), model)
@@ -328,7 +328,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 _rows.series_handle("range items", "o", paper.INK),
                 _rows.series_handle("exact items", "s", paper.INK),
                 _rows.series_handle("people's heights", "^", paper.INK),
-                _rows.series_handle("range reader", "o", paper.INK),
+                _rows.series_handle("range reader", "D", paper.INK),
                 _rows.series_handle(
                     "random direction", "x", paper.ENC["random_marker"]
                 ),
@@ -339,9 +339,9 @@ def build(manifest: Manifest) -> FigureOutput:
                     lw=1.0,
                     label="word classifier",
                 ),
-                _rows.series_handle("GPT-2 and base", "o", paper.INK),
+                _rows.series_handle("GPT-2 and base", "h", paper.INK),
                 _rows.series_handle(
-                    "post-trained", "o", paper.INK, filled=False
+                    "post-trained", "h", paper.INK, filled=False
                 ),
             ],
             loc="outside upper center",

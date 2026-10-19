@@ -344,3 +344,36 @@ def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
     with paper.paper_style():
         assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
+
+
+def test_no_two_legend_keys_share_a_marker_and_fill(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    seen: dict[tuple[str, str, str], str] = {}
+    for handle, text in zip(
+        legend.legend_handles, legend.get_texts(), strict=True
+    ):
+        key = (
+            str(handle.get_marker()),
+            str(handle.get_markerfacecolor()),
+            str(handle.get_markeredgecolor()),
+        )
+        if key[0] in ("None", ""):
+            continue
+        assert key not in seen, (seen[key], text.get_text())
+        seen[key] = text.get_text()
+
+
+def test_the_reader_is_drawn_with_the_marker_its_legend_key_shows(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    labels = {
+        t.get_text(): h
+        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
+    }
+    reader = labels["range reader"].get_marker()
+    _, ax_b, ax_c = output.figure.axes
+    for ax in (ax_b, ax_c):
+        assert any(line.get_marker() == reader for line in ax.lines)
