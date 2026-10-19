@@ -194,7 +194,7 @@ def build(
         appendix={k: figure(k) for k in appendix},
         appendix_tables={k: table(k) for k in appendix_tables},
         date=(
-            f"Results at commit {commit}, built {built}"
+            f"Results at commit {commit}, committed {built}"
             if commit
             else results_date(manifest)
         ),

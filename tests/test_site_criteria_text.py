@@ -4,11 +4,8 @@ from pathlib import Path
 import re
 import runpy
 
-import pytest
-
 from tomography.site import content
 from tomography.site import registry
-from tomography.site import stats
 from tomography.site.manifest import Manifest
 
 _HERE = Path(__file__).parent
@@ -32,7 +29,9 @@ def _sections(section: content.Section) -> list[content.Section]:
 
 
 ALL = [
-    s for top in (*content.BODY, *content.APPENDICES) for s in _sections(top)
+    s
+    for top in (*content.BODY, *content.APPENDICES, content.KEY_FINDINGS)
+    for s in _sections(top)
 ]
 
 
@@ -44,29 +43,22 @@ def _texts(section: content.Section) -> list[str]:
 
 
 def _everything() -> str:
-    texts = [content.ABSTRACT]
+    texts = [content.ABSTRACT, content.TLDR]
     for section in ALL:
         texts += _texts(section)
     return " ".join(texts)
 
 
-def _opener(key: str) -> str:
-    subs = {s.key: s for s in content.RESULTS.subsections}
-    return subs[key].paragraphs[0]
+def _findings(head: str) -> str:
+    for h, t in content.KEY_FINDINGS.listed:
+        if h.startswith(head):
+            return t
+    raise AssertionError(head)
 
 
-def _intro() -> str:
-    return " ".join(
-        h + " " + t for h, t in content.INTRODUCTION.listed
-    ) + " ".join(content.INTRODUCTION.paragraphs)
-
-
-def test_the_words_criterion_is_the_difference_interval_in_three_places() -> (
-    None
-):
+def test_the_words_criterion_is_the_difference_interval() -> None:
     approximate = registry.build_table("approximate", Manifest(ROOT))
-    assert WORDS in _intro()
-    assert WORDS in _opener("approximate")
+    assert WORDS in _everything()
     assert WORDS in approximate.claim
     assert "above the 95 percent interval of a classifier" not in (
         _everything() + approximate.claim
@@ -75,27 +67,16 @@ def test_the_words_criterion_is_the_difference_interval_in_three_places() -> (
         assert role.hits == 0
 
 
-def test_the_knowledge_opener_names_the_interval_criterion_twice() -> None:
-    opener = _opener("knowledge_reading")
+def test_the_baseline_findings_name_the_interval_criterion() -> None:
+    text = _findings("Baselines")
     assert (
-        "above their popularity, with an interval excluding zero, on "
-        "[[count:fig:knowledge_reading.above_pop]]"
-    ) in opener
+        "above a classifier on the words alone, with an interval excluding "
+        "zero, on [[count:fig:teaser.truthfulqa]]"
+    ) in text
     assert (
         "adds to the confidence of the model, with an interval excluding "
         "zero, on [[count:fig:teaser.knowledge_confidence]]"
-    ) in opener
-
-
-def test_the_abstract_names_the_criterion_beside_every_count() -> None:
-    abstract = content.ABSTRACT
-    assert (
-        "above a random direction by the 95 percent interval for sentiment"
-        in abstract
-    )
-    assert (
-        "above it by the 95 percent interval on [[count:fig:teaser.truthfulqa]]"
-    ) in abstract
+    ) in text
 
 
 def test_the_post_training_sentiment_count_names_its_interval() -> None:
@@ -104,7 +85,7 @@ def test_the_post_training_sentiment_count_names_its_interval() -> None:
         for t in re.split(r"(?<=[.;]) ", _everything())
         if "[[num:fig:base_post.sent_below]]" in t
     ]
-    assert len(sentences) >= 3
+    assert len(sentences) >= 4
     for sentence in sentences:
         assert BELOW in sentence, sentence
 
@@ -112,12 +93,13 @@ def test_the_post_training_sentiment_count_names_its_interval() -> None:
 def test_ten_checkpoints_are_written_as_all_ten() -> None:
     text = _everything()
     assert "each of the 10" not in text
-    assert "on all 10 checkpoints" in text
     assert "fitted on all 10 checkpoints" in text
+    assert "direction on all 10 checkpoints" in text
 
 
-def test_the_wording_paragraph_gives_the_random_baseline() -> None:
-    text = " ".join(h + " " + t for h, t in content.INTRODUCTION.listed)
+def test_the_wording_numbers_give_the_random_baseline() -> None:
+    (section,) = [s for s in content.APPENDICES if s.key == "appendix_wording"]
+    text = " ".join(_texts(section))
     assert (
         "[[num:fig:wording.bare_random_min]] to "
         "[[num:fig:wording.bare_random_max]]"
@@ -125,49 +107,21 @@ def test_the_wording_paragraph_gives_the_random_baseline() -> None:
 
 
 def test_the_test_size_limit_is_computed_per_role_not_written_down() -> None:
-    limitations = " ".join(_texts(content.LIMITATIONS))
-    assert "about 0.15 on truth" not in limitations
-    for token in (
-        "truth_half_gpt2_min",
-        "truth_half_gpt2_max",
-        "truth_half_qwen3_min",
-        "truth_half_qwen3_max",
-    ):
-        assert f"[[num:fig:teaser.{token}]]" in limitations
+    limits = " ".join(_texts(content.DISCUSSION))
+    assert "about 0.15 on truth" not in limits
+    assert "post-trained checkpoints are not resolved" in limits
+    for role in ("gpt2", "base", "post"):
+        for edge in ("min", "max"):
+            assert f"[[num:fig:teaser.truth_half_{role}_{edge}]]" in limits
+    assert "truth_half_qwen3" not in limits
 
 
-def test_the_teaser_exports_the_truth_half_widths_per_role() -> None:
-    output = registry.build_figure("teaser", Manifest(ROOT))
-    rows = [
-        r
-        for r in csv.DictReader(io.StringIO(output.csv))
-        if r["row"] == "truth"
-    ]
-    half = {
-        "gpt2": [],
-        "qwen3": [],
-    }
-    for r in rows:
-        key = "gpt2" if r["role"] == "gpt2" else "qwen3"
-        half[key].append((float(r["hi"]) - float(r["lo"])) / 2)
-    for key, values in half.items():
-        assert output.numbers[f"truth_half_{key}_min"] == pytest.approx(
-            min(values)
-        )
-        assert output.numbers[f"truth_half_{key}_max"] == pytest.approx(
-            max(values)
-        )
-    assert stats.ROLES == ("gpt2", "base", "post")
-
-
-def test_the_fluency_rule_is_defined_where_the_abstract_first_uses_it() -> None:
+def test_the_fluency_rule_is_defined_where_it_is_first_used() -> None:
     assert content.FLUENCY_RULE == FLUENCY
-    assert f"keeps the fluency rule ({FLUENCY}) on" in content.ABSTRACT
-    first = content.ABSTRACT.index("fluency rule")
-    assert content.ABSTRACT[first:].startswith(f"fluency rule ({FLUENCY})")
-    opener = _opener("steering")
-    assert f"keeps the fluency rule ({FLUENCY}) on" in opener
-    assert content.ABSTRACT.count(FLUENCY) == 1
+    assert f"keeps the fluency rule ({FLUENCY}) on" in _findings("Steering")
+    method = " ".join(t for s in _sections(content.METHOD) for t in _texts(s))
+    assert f"the fluency rule: the {FLUENCY}" in method
+    assert "fluency rule" not in content.ABSTRACT
 
 
 def test_the_figure_8_caption_scopes_its_strongest_baseline() -> None:

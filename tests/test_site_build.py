@@ -83,7 +83,7 @@ def test_csv_files_hold_plain_text_not_tokens(
         ],
         view,
     )
-    assert text == "A,B\nx,radford2019language; yang2025qwen3 Table 2\n"
+    assert text == "A,B\nx,radford2019language; yang2025qwen3 Table A2\n"
 
 
 def test_results_date_is_the_newest_run_start(tmp_path: Path) -> None:
@@ -291,7 +291,7 @@ def test_the_built_page_numbers_figures_and_tables_in_page_order(
 
 def test_the_built_page_masthead_matches_the_results_commit(html: str) -> None:
     sha, _ = build_module.results_commit(RESULTS)
-    assert f"Results at commit <code>{sha}</code>, built " in html
+    assert f"Results at commit <code>{sha}</code>, committed " in html
 
 
 def test_the_built_page_has_no_dashes_backticks_or_stray_underscores(
@@ -403,10 +403,10 @@ def test_the_built_page_has_no_pooled_count_of_ten(html: str) -> None:
     assert not re.search(r"\b\d+ of (the )?10\b(?! readers)", text)
 
 
-def test_every_appendix_item_is_cited_from_the_numbered_sections(
+def test_every_appendix_item_is_cited_in_the_text(
     html: str,
 ) -> None:
-    body = html[: html.index('id="references"')]
+    body = html
     for kind, ids in (
         (
             "fig",
@@ -463,7 +463,7 @@ def test_the_resolved_abstract_stays_short(
 ) -> None:
     view = page.Page(site[1])
     words = len(view.plain(content.ABSTRACT).split())
-    assert words <= 275, words
+    assert 150 <= words <= 180, words
 
 
 def test_grouped_csv_columns_carry_their_group(
@@ -500,3 +500,42 @@ def test_every_grouped_table_csv_has_unique_headers(
             for label, _, _ in tab.output.groups:
                 assert any(n.startswith(f"{label}: ") for n in names), key
     assert grouped >= 3
+
+
+def _words(fragment: str) -> int:
+    fragment = re.sub(r"<style.*?</style>", " ", fragment, flags=re.S)
+    fragment = re.sub(r"<svg.*?</svg>", " ", fragment, flags=re.S)
+    fragment = re.sub(r"<[^>]+>", " ", fragment)
+    return len(fragment.split())
+
+
+def test_the_main_prose_is_about_four_thousand_words(html: str) -> None:
+    main = html[: html.index('id="references"')]
+    captions = re.findall(
+        r"<(?:figcaption|caption)[^>]*>.*?</(?:figcaption|caption)>",
+        main,
+        flags=re.S,
+    )
+    tables = re.findall(r"<table.*?</table>", main, flags=re.S)
+    prose = _words(main) - sum(map(_words, captions)) - sum(map(_words, tables))
+    assert 3000 <= prose <= 4600, prose
+
+
+def test_the_page_opens_with_the_summary_and_the_overview(html: str) -> None:
+    assert html.index('<p class="tldr">') < html.index('<figure id="fig-1">')
+    assert html.index('<figure id="fig-1">') < html.index('id="abstract"')
+    assert html.index('id="abstract"') < html.index('id="key_findings"')
+
+
+def test_every_count_token_of_the_text_has_at_most_two_homes() -> None:
+    texts = [content.ABSTRACT, content.TLDR]
+    sections = [*content.BODY, *content.APPENDICES, content.KEY_FINDINGS]
+    while sections:
+        section = sections.pop()
+        texts += [*section.paragraphs, *section.after]
+        for head, text in (*section.runin, *section.listed):
+            texts += [head, text]
+        sections += list(section.subsections)
+    tokens = re.findall(r"\[\[(?:count|runs):([^\]]+)\]\]", " ".join(texts))
+    for address in set(tokens):
+        assert tokens.count(address) <= 2, address

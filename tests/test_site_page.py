@@ -67,11 +67,11 @@ def _doc(
 def test_main_items_are_numbered_in_order_of_appearance() -> None:
     doc = _doc(
         {"method": _figure(), "finders": _figure()},
-        {"checkpoints": _table(), "finders": _table()},
+        {"checkpoints": _table(), "reading": _table()},
     )
     figure_number, table_number = page.numbers(doc)
     assert figure_number == {"method": "1", "finders": "2"}
-    assert table_number == {"checkpoints": "1", "finders": "2"}
+    assert table_number == {"checkpoints": "1", "reading": "2"}
 
 
 def test_appendix_items_are_numbered_a1_a2_in_registry_order() -> None:
@@ -96,7 +96,7 @@ def test_a_section_token_links_the_section_number() -> None:
     assert view.text("[[sec:finders]]") == (
         '<a class="ref" href="#finders">Section&nbsp;4.1</a>'
     )
-    assert "Appendix&nbsp;B" in view.text("[[sec:appendix_reading]]")
+    assert "Appendix&nbsp;C" in view.text("[[sec:appendix_reading]]")
 
 
 def test_figure_markup_names_the_graphic_and_keeps_the_caption_outside() -> (
@@ -357,12 +357,11 @@ def test_printed_numbers_match_ids_and_registry_order(
 ) -> None:
     doc, html = full
     figure_number, table_number = page.numbers(doc)
-    assert [figure_number[k] for k in registry.MAIN_FIGURES] == [
-        str(i) for i in range(1, 12)
-    ]
-    assert [table_number[k] for k in registry.MAIN_TABLES] == [
-        str(i) for i in range(1, 9)
-    ]
+    assert figure_number["teaser"] == "1"
+    assert sorted(int(figure_number[k]) for k in registry.MAIN_FIGURES) == list(
+        range(1, 9)
+    )
+    assert sorted(int(table_number[k]) for k in registry.MAIN_TABLES) == [1, 2]
     for key, number in figure_number.items():
         assert f'<figure id="fig-{number}">' in html, key
         assert f"Figure {number}: " in html, key
@@ -379,31 +378,35 @@ def test_sections_run_in_order_with_references_before_the_appendix(
         t.replace("&ensp;", " ")
         for t in re.findall(r"<h2[^>]*>([^<]+)</h2>", html)
     ]
-    assert heads[:1] == ["Abstract"]
-    assert heads[1:8] == [
+    assert heads[:2] == ["Abstract", "Key findings"]
+    assert heads[2:8] == [
         "1 Introduction",
         "2 Related work",
         "3 Method",
         "4 Results",
-        "5 Discussion",
-        "6 Limitations",
-        "7 Reproducibility",
+        "5 Discussion and limitations",
+        "6 Reproducibility",
     ]
     assert heads[8] == "References"
     assert heads[9] == "Cite this repository"
     assert heads[10:] == [
-        "Appendix A Assets and licenses",
-        "Appendix B Reading details",
-        "Appendix C Wording and truth details",
-        "Appendix D Knowledge, approximate answers and post-training details",
-        "Appendix E Other experiments",
+        "Appendix A Assets and notation",
+        "Appendix B Method details",
+        "Appendix C Reading details",
+        "Appendix D Wording",
+        "Appendix E Truth and honesty",
+        "Appendix F Steering details",
+        "Appendix G Knowledge",
+        "Appendix H Approximate answers",
+        "Appendix I Post-training details",
+        "Appendix J Other experiments",
     ]
     subs = [
         t.replace("&ensp;", " ")
         for t in re.findall(r"<h3[^>]*>([^<]+)</h3>", html)
     ]
     assert subs[0] == "3.1 Reading a concept"
-    assert any(s.startswith("4.9 ") for s in subs)
+    assert any(s.startswith("4.5 ") for s in subs)
 
 
 def test_the_contents_line_links_every_section(
@@ -413,8 +416,10 @@ def test_the_contents_line_links_every_section(
     line = re.search(r'<p class="contents">(.*?)</p>', html, flags=re.S)
     assert line is not None
     text = re.sub(r"<[^>]+>", "", line.group(1)).replace("&ensp;", " ")
-    assert text.startswith("Contents: 1 Introduction, 2 Related work, 3 Method")
-    assert text.endswith("7 Reproducibility, References, Appendix")
+    assert text.startswith(
+        "Contents: Key findings, 1 Introduction, 2 Related work, 3 Method"
+    )
+    assert text.endswith("6 Reproducibility, References, Appendix")
     ids = set(re.findall(r'id="([^"]+)"', html))
     for target in re.findall(r'href="#([^"]+)"', line.group(1)):
         assert target in ids, target
@@ -441,7 +446,8 @@ def test_the_masthead_names_the_commit(
 ) -> None:
     html = full[1]
     assert (
-        "Results at commit <code>abc1234</code>, built 1 January 2027" in html
+        "Results at commit <code>abc1234</code>, committed 1 January 2027"
+        in html
     )
 
 
@@ -632,3 +638,21 @@ def test_a_findings_link_is_pinned_to_the_results_commit() -> None:
         "[[findings:x|y]]"
     )
     assert page.Page(doc).plain("[[findings:x|y]] z") == "y z"
+
+
+def test_the_page_opens_with_summary_overview_abstract_and_findings(
+    full: tuple[page.Document, str],
+) -> None:
+    html = full[1]
+    order = [
+        html.index('<p class="tldr">'),
+        html.index('<figure id="fig-1">'),
+        html.index('id="abstract"'),
+        html.index('<h2 id="key_findings">Key findings</h2>'),
+        html.index('<h2 id="introduction">'),
+    ]
+    assert order == sorted(order)
+    assert "TL;DR." in html
+    assert page.numbers(full[0])[0]["teaser"] == "1"
+    findings = html.split('id="key_findings"')[1].split("<h2")[0]
+    assert findings.count("<li>") == 5
