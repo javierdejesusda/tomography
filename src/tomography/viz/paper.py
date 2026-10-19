@@ -228,7 +228,9 @@ def panel_letter(ax: Axes, letter: str) -> Annotation:
 TITLE_GAP = 4.0
 
 
-def panel_title(ax: Axes, letter: str, title: str) -> tuple[Annotation, Text]:
+def panel_title(
+    ax: Axes, letter: str, title: str, size: float | None = None
+) -> tuple[Annotation, Text]:
     """Writes a bold panel letter and the left title of a panel on one baseline.
 
     The title is the axes title, shifted right so that it starts `TITLE_GAP`
@@ -238,6 +240,7 @@ def panel_title(ax: Axes, letter: str, title: str) -> tuple[Annotation, Text]:
         ax: The panel.
         letter: The letter without parentheses.
         title: The title; may be empty.
+        size: Font size of both; the axes title size when None.
 
     Returns:
         The letter and the title.
@@ -248,7 +251,7 @@ def panel_title(ax: Axes, letter: str, title: str) -> tuple[Annotation, Text]:
         xycoords="axes fraction",
         xytext=(0, mpl.rcParams["axes.titlepad"]),
         textcoords="offset points",
-        fontsize=ax.title.get_fontsize(),
+        fontsize=size or ax.title.get_fontsize(),
         ha="left",
         va="baseline",
     )
@@ -256,6 +259,8 @@ def panel_title(ax: Axes, letter: str, title: str) -> tuple[Annotation, Text]:
     assert root is not None
     shift = mark.get_window_extent().width * 72.0 / root.dpi + TITLE_GAP
     name = ax.set_title(title, loc="left")
+    if size is not None:
+        name.set_fontsize(size)
     name.set_transform(
         ax.transAxes
         + ax.titleOffsetTrans

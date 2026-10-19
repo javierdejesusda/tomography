@@ -193,3 +193,11 @@ def test_panel_title_puts_the_title_after_the_letter_on_one_baseline() -> None:
         1
     ] == pytest.approx(top + 6.0 * fig.dpi / 72)
     assert title.get_fontsize() == ax.title.get_fontsize()
+
+
+def test_panel_title_takes_a_smaller_size_for_dense_grids() -> None:
+    with paper.paper_style():
+        fig = Figure(figsize=(2.7, 1.5))
+        ax = fig.subplots()
+        letter, title = paper.panel_title(ax, "a", "dense", size=6.5)
+    assert letter.get_fontsize() == title.get_fontsize() == 6.5
