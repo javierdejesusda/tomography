@@ -195,7 +195,17 @@ def _dots(
     ax.xaxis.set_major_locator(ticker.FixedLocator(TICKS[row]))
     ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{v:g}"))
     ax.set_xlabel(LABELS[row])
-    _head(ax, CHANCE + 0.01, "expected for\nrandom vectors", "left")
+    low, high = ax.get_xlim()
+    ax.text(
+        CHANCE + 0.015 * (high - low),
+        HEAD_Y,
+        "expected for\nrandom vectors",
+        color=paper.ENC["secondary_text"],
+        fontsize=paper.MIN_TEXT,
+        ha="left",
+        va="center",
+        linespacing=0.95,
+    )
 
 
 def _heat(
@@ -214,7 +224,7 @@ def _heat(
             edges,
             np.array([ys[0] - 0.5] + [y + 0.5 for y in ys]),
             np.array([profile[m] for m in members]),
-            cmap=axes.SEQUENTIAL,
+            cmap=paper.SEQUENTIAL_CMAP,
             norm=norm,
             edgecolors="none",
             zorder=2,
