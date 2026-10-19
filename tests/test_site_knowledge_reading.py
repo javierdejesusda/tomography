@@ -1,5 +1,6 @@
 import csv
 import io
+import itertools
 import math
 from pathlib import Path
 import runpy
@@ -19,7 +20,7 @@ _L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
 SPEC = "knowledge_reading"
 Z = 1.959963984540054
 MINUS = chr(0x2212)
-HEIGHT = 3.4
+HEIGHT = 4.2
 READER = ("logistic_within", "popularity_within")
 BASELINES = ("text_word_within", "text_char_within")
 
@@ -167,7 +168,7 @@ def test_the_arbiter_difference_for_qwen3_0_6b_base(
     assert (round(d, 3), round(lo, 3), round(hi, 3)) == (0.120, 0.050, 0.189)
 
 
-def test_panel_b_has_the_stored_paired_increments(
+def test_panel_c_has_the_stored_paired_increments(
     output: registry.FigureOutput,
 ) -> None:
     rows = _rows(output)
@@ -179,7 +180,7 @@ def test_panel_b_has_the_stored_paired_increments(
             got = [
                 r
                 for r in rows
-                if r["panel"] == "b"
+                if r["panel"] == "c"
                 and r["model"] == model
                 and r["series"] == series
             ]
@@ -195,7 +196,7 @@ def test_panel_b_has_the_stored_paired_increments(
     assert "gpt2" not in {
         r["model"]
         for r in rows
-        if r["panel"] == "b" and r["series"] == "direction"
+        if r["panel"] == "c" and r["series"] == "direction"
     }
 
 
@@ -309,44 +310,12 @@ def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
     assert checks.problems(fig) == []
 
 
-def test_two_panels_share_the_checkpoint_rows(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    assert len(fig.axes) == 2
-    first, second = fig.axes
-    assert first.get_shared_y_axes().joined(first, second)
-    labels = [t.get_text() for t in first.get_yticklabels()]
-    assert labels == [paper.display_name(m) for m in _models("p9b")]
-
-
-def test_the_gpt2_small_row_says_it_has_no_contrast(
-    output: registry.FigureOutput,
-) -> None:
-    texts = [t.get_text() for t in output.figure.axes[0].texts]
-    assert "no known-against-unknown contrast" in texts
-
-
 def test_dot_plot_rows_have_no_connecting_lines(
     output: registry.FigureOutput,
 ) -> None:
     for ax in output.figure.axes:
         for line in ax.get_lines():
             assert len(line.get_xdata()) <= 2
-
-
-def test_panel_letters_and_dashes(output: registry.FigureOutput) -> None:
-    checks.draw(output.figure)
-    letters = [
-        t.get_text()
-        for ax in output.figure.axes
-        for t in ax.texts
-        if t.get_text().startswith(r"$\mathbf")
-    ]
-    assert sorted(letters) == [r"$\mathbf{(a)}$", r"$\mathbf{(b)}$"]
-    text = f"{output.claim} {output.detail} {output.csv}"
-    assert chr(0x2014) not in text
-    assert chr(0x2013) not in text
 
 
 def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
@@ -376,17 +345,203 @@ def test_the_largest_upper_bound_and_the_probe_labels_are_stated(
     assert "the direction is not" in output.detail
 
 
-def test_the_role_key_is_a_hexagon_and_no_symbol_means_two_things(
+MODELS_A = [m for m in _models("p9b") if m in _contrast()]
+LABELS = ["medium", "large", "XL", "0.6B", "1.7B", "4B", "0.6B", "1.7B", "4B"]
+GROUPS = ["GPT-2", "Qwen3\nbase", "Qwen3\npost-trained"]
+
+
+def _own(model: str) -> dict[str, Any]:
+    (row,) = [
+        r
+        for r in _table("p9c", model)
+        if r["dataset"] == "popqa" and r["predictor"] == "first_token_prob"
+    ]
+    return row
+
+
+def _points(ax: Any, marker: str) -> list[Any]:
+    return [ln for ln in ax.get_lines() if ln.get_marker() == marker]
+
+
+def test_four_axes_share_block_rows_without_the_empty_gpt2_small_row(
+    output: registry.FigureOutput,
+) -> None:
+    axes_ = output.figure.axes
+    assert len(axes_) == 4
+    for ax in axes_[1:]:
+        assert axes_[0].get_shared_y_axes().joined(axes_[0], ax)
+    assert [t.get_text() for t in axes_[0].get_yticklabels()] == LABELS
+    drawn = {r["model"] for r in _rows(output) if r["panel"] != "c"}
+    assert "gpt2" not in drawn
+
+
+def test_rows_sit_in_role_blocks_named_on_the_left(
+    output: registry.FigureOutput,
+) -> None:
+    ax = output.figure.axes[0]
+    names = [t for t in ax.texts if t.get_text() in GROUPS]
+    assert [t.get_text() for t in names] == GROUPS
+    ys = [t.get_position()[1] for t in names]
+    assert ys == sorted(ys)
+    ticks = list(ax.get_yticks())
+    gaps = [b - a for a, b in itertools.pairwise(ticks)]
+    assert sorted(gaps)[-2:] == pytest.approx([max(gaps), max(gaps)])
+    assert max(gaps) > 1.0
+
+
+def test_panel_a_marks_the_answer_probability_level_with_its_interval(
+    output: registry.FigureOutput,
+) -> None:
+    rows = _rows(output)
+    for model in MODELS_A:
+        own = _own(model)
+        (got,) = [
+            r
+            for r in rows
+            if r["panel"] == "a"
+            and r["model"] == model
+            and r["series"] == "answer_probability"
+        ]
+        assert float(got["value"]) == pytest.approx(own["auroc_within"])
+        assert float(got["lo"]) == pytest.approx(own["lo_within"])
+        assert float(got["hi"]) == pytest.approx(own["hi_within"])
+    ax = output.figure.axes[0]
+    marker = paper.MEASURE_MARKERS["answer_probability"]
+    pentagons = _points(ax, marker)
+    assert len(pentagons) == len(MODELS_A)
+    for line in pentagons:
+        assert line.get_color() == paper.ENC["own_probability"]
+
+
+def test_panel_a_draws_one_green_range_for_the_two_text_classifiers(
+    output: registry.FigureOutput,
+) -> None:
+    ax = output.figure.axes[0]
+    green = [
+        ln
+        for ln in ax.get_lines()
+        if ln.get_color() == paper.TEXT_GREEN and ln.get_marker() == "None"
+    ]
+    assert len(green) == len(MODELS_A)
+    for model, line in zip(MODELS_A, green, strict=True):
+        row = _contrast()[model]
+        lo = min(row[c] for c in BASELINES)
+        hi = max(row[c] for c in BASELINES)
+        assert min(line.get_xdata()) == pytest.approx(lo)
+        assert max(line.get_xdata()) == pytest.approx(hi)
+    assert not _points(ax, "^")
+    assert not _points(ax, "v")
+
+
+def test_panel_a_direction_is_a_circle_and_popularity_a_square(
+    output: registry.FigureOutput,
+) -> None:
+    ax = output.figure.axes[0]
+    circles = _points(ax, "o")
+    squares = _points(ax, "s")
+    assert len(circles) == len(squares) == len(MODELS_A)
+    for model, line in zip(MODELS_A, circles, strict=True):
+        post = stats.role(model) == "post"
+        assert (line.get_markerfacecolor() == "white") is post
+    assert {s.get_color() for s in squares} == {paper.ENC["popularity"]}
+
+
+def test_panel_b_is_the_difference_with_its_hanley_mcneil_interval(
+    output: registry.FigureOutput,
+) -> None:
+    rows = _rows(output)
+    for model in MODELS_A:
+        d, lo, hi = _diff(_contrast()[model])
+        (got,) = [
+            r
+            for r in rows
+            if r["panel"] == "b"
+            and r["model"] == model
+            and r["series"] == "difference"
+        ]
+        assert float(got["value"]) == pytest.approx(d)
+        assert float(got["lo"]) == pytest.approx(lo)
+        assert float(got["hi"]) == pytest.approx(hi)
+    ax = output.figure.axes[1]
+    zero = [ln for ln in ax.get_lines() if list(ln.get_xdata()) == [0, 0]]
+    assert zero
+    assert len(_points(ax, "o")) == len(MODELS_A)
+
+
+def test_panel_c_has_a_narrow_direction_axis_and_a_wide_probe_axis(
+    output: registry.FigureOutput,
+) -> None:
+    narrow, wide = output.figure.axes[2:]
+    low, high = narrow.get_xlim()
+    assert (low, high) == (-0.035, 0.035)
+    lat = [
+        f["confidence+lat"]
+        for f in _increments().values()
+        if "confidence+lat" in f
+    ]
+    assert all(low < r["lo"] and r["hi"] < high for r in lat)
+    assert wide.get_xlim() == (0.0, 0.08)
+    assert len(_points(narrow, "o")) == len(MODELS_A)
+    assert len(_points(wide, paper.MEASURE_MARKERS["probe"])) == len(MODELS_A)
+
+
+def test_the_probe_only_gpt2_small_value_is_in_the_caption(
+    output: registry.FigureOutput,
+) -> None:
+    cell = _increments()["gpt2"]["confidence+probe"]
+    text = (
+        f"{cell['diff_vs_confidence']:.3f} [{cell['lo']:.3f}, {cell['hi']:.3f}]"
+    )
+    assert "GPT-2 small has no known-against-unknown contrast" in output.detail
+    assert text in output.detail
+    assert output.numbers["gpt2_small_probe_gain"] == pytest.approx(
+        cell["diff_vs_confidence"]
+    )
+
+
+def test_legend_has_four_entries_and_no_role_hexagon(
     output: registry.FigureOutput,
 ) -> None:
     assert _L["marker_clashes"](output.figure) == []
     (legend,) = output.figure.legends
-    markers = {
-        t.get_text(): h.get_marker()
-        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
-    }
-    assert markers["GPT-2 and base"] == paper.ROLE_KEY_MARKER
-    assert markers["post-trained"] == paper.ROLE_KEY_MARKER
-    assert markers["knowledge direction"] == paper.MEASURE_MARKERS["direction"]
-    assert markers["supervised probe"] == paper.MEASURE_MARKERS["probe"]
-    assert markers["popularity"] == paper.MEASURE_MARKERS["popularity"]
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert labels == [
+        "knowledge direction",
+        "popularity",
+        "text classifiers",
+        "own answer probability",
+    ]
+    markers = [
+        str(h.get_marker()) if hasattr(h, "get_marker") else "None"
+        for h in legend.legend_handles
+    ]
+    assert paper.ROLE_KEY_MARKER not in markers
+    assert markers[:2] == ["o", "s"]
+    assert markers[3] == paper.MEASURE_MARKERS["answer_probability"]
+
+
+def test_three_panel_letters_and_no_dashes(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    letters = [
+        t.get_text()
+        for ax in output.figure.axes
+        for t in ax.texts
+        if t.get_text().startswith(r"$\mathbf")
+    ]
+    assert sorted(letters) == [rf"$\mathbf{{({x})}}$" for x in "abc"]
+    text = f"{output.claim} {output.detail} {output.csv}"
+    assert chr(0x2014) not in text
+    assert chr(0x2013) not in text
+
+
+def test_caption_states_the_criteria_and_names_the_own_probability_signal(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.detail
+    assert "first answer token" in text
+    assert "filled" in text
+    assert "open" in text
+    assert "difference between the two AUROCs" in text
+    assert "text classifiers" in text
