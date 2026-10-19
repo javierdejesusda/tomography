@@ -1,4 +1,5 @@
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 
 from tomography.viz import checks
 from tomography.viz import paper
@@ -136,3 +137,26 @@ def test_guard_problems_runs_the_three_guards() -> None:
     assert any("#ff00ff" in i for i in found)
     assert any("a_b" in i for i in found)
     assert any("font" in i for i in found)
+
+
+def test_a_marker_only_line_does_not_report_its_unused_line_colour() -> None:
+    fig = _plain()
+    fig.axes[0].plot(
+        [0.5],
+        [0.5],
+        ls="none",
+        marker="o",
+        mfc=paper.ENC["gpt2"][0],
+        mec=paper.ENC["gpt2"][0],
+    )
+    assert checks.palette_problems(fig) == []
+
+
+def test_an_invisible_artist_is_not_a_palette_problem() -> None:
+    fig = _plain()
+    line = fig.axes[0].plot([0, 1], [0.1, 0.2], color="#ff00ff")[0]
+    line.set_visible(False)
+    handle = Line2D([], [], color=paper.ENC["direction"])
+    with paper.paper_style():
+        fig.legend([handle], ["x"], frameon=False)
+    assert checks.palette_problems(fig) == []
