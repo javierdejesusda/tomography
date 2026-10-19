@@ -99,6 +99,29 @@ LINESTYLES: dict[str, Any] = {
     "trend": (0, (4, 1.5, 1, 1.5)),
 }
 
+MEASURE_MARKERS: dict[str, Any] = {
+    "direction": "o",
+    "random": "x",
+    "text": ("^", "v"),
+    "paper_finder": "D",
+    "popularity": "s",
+    "answer_probability": "p",
+    "probe": "P",
+}
+ROLE_KEY_MARKER = "h"
+ENCODING_RULES = """Encoding rules of every figure.
+1. The checkpoint colour ramps (vermilion GPT-2, blue Qwen3) mark checkpoint
+   identity only, never a measure.
+2. One marker per measure family, site-wide (`MEASURE_MARKERS`): the direction
+   under test is a circle, a random direction a grey x, text-only classifiers
+   triangles, the paper's finder a diamond, and each other baseline
+   (popularity, answer probability, supervised probe) its own shape in a
+   non-ramp ink.
+3. Filled markers mean GPT-2 and Qwen3 base, open ones post-trained; every
+   legend that uses fill carries the hexagon role key (`ROLE_KEY_MARKER`).
+4. Post-trained lines use one style (`LINESTYLES["post_trained"]`) everywhere.
+5. A grey band has one meaning per figure and is keyed in its legend."""
+
 
 def _build_enc() -> dict[str, Any]:
     """Builds the encoding dictionary after the ramp function exists."""
