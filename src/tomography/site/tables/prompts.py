@@ -72,7 +72,9 @@ def build(manifest: Manifest) -> TableOutput:
         "within-run contrast across prompt variants on the sentiment pairs "
         "of these runs, not the held-out split of [[table:reading]]; no "
         "random direction is stored for these runs, so the only reference "
-        "is chance, [[num:table:prompts.chance]]."
+        "is chance, [[num:table:prompts.chance]]. The random directions of "
+        "[[table:reading_full]] belong to other runs with their own training "
+        "sample and layer, so they are not a baseline for these accuracies."
     )
     return TableOutput(
         claim,

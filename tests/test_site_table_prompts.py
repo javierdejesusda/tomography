@@ -109,3 +109,12 @@ def test_caption_says_what_the_contrast_is_and_where_the_baseline_is(
     assert "no random direction is stored for these runs" in text
     assert "[[num:table:prompts.chance]]" in text
     assert output.numbers["chance"] == 0.5
+
+
+def test_caption_explains_why_table_a3_random_values_do_not_apply(
+    output: registry.TableOutput,
+) -> None:
+    text = output.detail
+    assert "[[table:reading_full]]" in text
+    assert "other runs with their own training sample and layer" in text
+    assert "not a baseline for these accuracies" in text
