@@ -6915,10 +6915,7 @@ Chain 41 (P1 on gpt2-xl): the logistic run `p1/gpt2-xl/006a40a28414` and the `pc
 were made at `bab5b75` with a clean tree on one rented GPU pod (NVIDIA GeForce RTX 3090, torch 2.14.1+cu130,
 transformers 5.19.0, Linux), with the default P1 config of that commit (sentiment, truth and the six emotions, 10 seeds
 of 64 training pairs, 256 evaluation pairs per split, batch size 8, last token; `config.json` of each run); the two
-configs differ in `method` only. The time between `started_at` and `finished_at` of the stored `meta.json` is 2,948 s
-for the logistic run and 2,440 s for the `pca_diff` run; the pod ran M1 jobs of the same chain beside them, so the times
-overlap those of other jobs. The chain log records exit status 0 for each of its five jobs and ends with `CHAIN_DONE
-failed=0`. The config hash of each run was recomputed under main by loading the config of the pod copy (identical to the
+configs differ in `method` only. The time between `started_at` and `finished_at` of the stored `meta.json` is 2,948 s for the logistic run (2026-10-18 22:00:50 to 22:49:58 UTC) and 2,440 s for the `pca_diff` run (2026-10-18 23:30:38 to 2026-10-19 00:11:18 UTC). The config hash of each run was recomputed under main by loading the config of the pod copy (identical to the
 exported one) into the P1 config class and hashing it, and both agree with the directory names. The source files that P1
 imports are those of main at `bab5b75`: `git diff --stat bab5b75 HEAD -- src` is empty. Exporting these runs changed no
 tracked result.
