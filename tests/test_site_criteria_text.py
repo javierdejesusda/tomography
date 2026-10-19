@@ -233,3 +233,13 @@ def test_the_summary_holds_per_role_on_the_data() -> None:
     ) in tldr
     for role in roles:
         assert steering.counts["fluent03"][role].hits == 0, role
+
+
+def test_the_method_names_the_checkpoint_of_the_largest_random_direction() -> (
+    None
+):
+    method = " ".join(t for s in _sections(content.METHOD) for t in _texts(s))
+    assert (
+        "[[num:fig:finders.random_max]], on "
+        "[[label:fig:finders.random_max]], in the finder comparison"
+    ) in method

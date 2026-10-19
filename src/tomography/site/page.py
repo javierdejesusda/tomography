@@ -268,6 +268,8 @@ class Page:
             return _e(self.quoted_count(name[6:]))
         if name.startswith("runs:"):
             return _e(self.quoted_runs(name[5:]))
+        if name.startswith("label:"):
+            return _e(self.quoted_label(name[6:]))
         raise KeyError(name)
 
     def _output(self, address: str) -> tuple[FigureOutput | TableOutput, str]:
@@ -299,6 +301,12 @@ class Page:
         """Writes a per-role count of runs a figure or table computed."""
         output, name = self._output(address)
         return stats.runs_text(output.counts[name])
+
+    def quoted_label(self, address: str) -> str:
+        """Writes a label (such as a checkpoint name) a figure computed."""
+        output, name = self._output(address)
+        assert isinstance(output, FigureOutput)
+        return output.labels[name]
 
     def text(self, raw: str) -> str:
         """Escapes a paragraph and resolves its references."""

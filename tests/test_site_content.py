@@ -226,7 +226,7 @@ def test_every_token_names_a_known_target() -> None:
             elif kind == "cite":
                 for key in rest.split(","):
                     assert key in bib, (token, key)
-            elif kind in ("num", "count", "runs"):
+            elif kind in ("num", "count", "runs", "label"):
                 owner, _, name = rest.partition(":")
                 key, _, field = name.rpartition(".")
                 assert owner in ("fig", "table"), token

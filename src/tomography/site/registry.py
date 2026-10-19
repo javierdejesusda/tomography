@@ -45,6 +45,7 @@ class FigureOutput:
         numbers: Name to value for each number the claim quotes.
         csv: The exact numbers plotted, as CSV text.
         counts: Name to the per-role count the claim quotes.
+        labels: Name to the checkpoint or other label a sentence names.
     """
 
     figure: Figure
@@ -55,6 +56,7 @@ class FigureOutput:
     counts: dict[str, dict[str, RoleCount]] = dataclasses.field(
         default_factory=dict
     )
+    labels: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass(frozen=True)
