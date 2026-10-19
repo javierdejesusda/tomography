@@ -180,3 +180,23 @@ def test_the_caption_matches_the_plan(output: registry.FigureOutput) -> None:
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.guard_problems(output.figure, appendix=True) == []
     assert checks.problems(output.figure) == []
+
+
+def test_every_row_has_the_same_axis_style_and_a_visible_chance_line(
+    output: registry.FigureOutput,
+) -> None:
+    widths = set()
+    for ax in output.figure.axes:
+        for side in ("bottom", "left"):
+            assert ax.spines[side].get_visible()
+            widths.add(ax.spines[side].get_linewidth())
+        chance = [
+            ln
+            for ln in ax.get_lines()
+            if np.allclose(np.asarray(ln.get_ydata(), float), 0.5)
+            and len(ln.get_xdata()) == 2
+        ]
+        assert chance
+        assert all(ln.get_linewidth() >= 0.8 for ln in chance)
+    assert len(widths) == 1
+    assert widths.pop() >= 0.8
