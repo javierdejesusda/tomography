@@ -27,7 +27,6 @@ from tomography.viz import paper
 CELL = ("free", "fewshot", "range_last", "greedy")
 TRAIN = "height+wingspan"
 HEIGHT = 3.4
-HIGH = 0.9
 HEADER = ["panel", "model", "series", "value", "lo", "hi"]
 TOP = -1.0
 POSITION_LIMITS = (-0.5, 1.5)
@@ -38,7 +37,7 @@ PANEL_A = (
 )
 CLAIM = (
     "Qwen3 writes ranges where the sourced answer is a range, but a range "
-    "reader is matched by text and noise."
+    "reader beats its random control only on some checkpoints."
 )
 DETAIL = (
     "(a) Share of greedy answers written as a range (few-shot, range "
@@ -54,12 +53,14 @@ DETAIL = (
     "control (grey: the mean score of {draws} random directions oriented on "
     "the training labels) and a classifier on the words of the question "
     "(green, {text}, interval {text_lo} to {text_hi}). The reader is above "
-    "the classifier's value on {above}, {overlap}, and the random control "
-    "reaches 0.9 on {high}. (c) Where the reader places the people between "
-    "the test buildings (0) and the breeds (1), against the range of its "
+    "the classifier's value on {above}, {overlap}, and it lies inside the "
+    "random control's interval on {inside}. (c) Where the reader places the "
+    "people between the test buildings (0) and the breeds (1), against the "
+    "range of its "
     "random control over {sets} training sets (grey): at {pos_min} to "
     "{pos_max}, next to the breeds, so the reader does not separate a "
-    "range-valued answer from a living subject."
+    "range-valued answer from a living subject. The position lies outside "
+    "the random band on {outside}."
 )
 
 
@@ -363,8 +364,17 @@ def build(manifest: Manifest) -> FigureOutput:
     above = stats.per_role(
         {m: r.reader["auroc"] > text["auroc"] for m, r in readers.items()}
     )
-    high = stats.per_role(
-        {m: r.random["auroc"] >= HIGH for m, r in readers.items()}
+    inside = stats.per_role(
+        {
+            m: r.random["lo"] <= r.reader["auroc"] <= r.random["hi"]
+            for m, r in readers.items()
+        }
+    )
+    outside = stats.per_role(
+        {
+            m: not min(r.draws) <= r.position["position"] <= max(r.draws)
+            for m, r in readers.items()
+        }
     )
     overlapping = sum(
         r.reader["hi"] >= text["lo"] and r.reader["lo"] <= text["hi"]
@@ -391,7 +401,8 @@ def build(manifest: Manifest) -> FigureOutput:
     }
     for role in stats.ROLES:
         numbers[f"above_text_{role}"] = float(above[role].hits)
-        numbers[f"random_high_{role}"] = float(high[role].hits)
+        numbers[f"reader_in_random_{role}"] = float(inside[role].hits)
+        numbers[f"people_outside_band_{role}"] = float(outside[role].hits)
     heights = (
         "on none of the heights"
         if numbers["people_qwen_max"] == 0
@@ -419,7 +430,8 @@ def build(manifest: Manifest) -> FigureOutput:
             else f"{overlapping} of {len(readers)} intervals overlapping "
             "the classifier's"
         ),
-        high=stats.per_role_text(high),
+        inside=stats.per_role_text(inside),
+        outside=stats.per_role_text(outside),
         sets=len(first.draws),
         pos_min=f"{min(positions):.3f}",
         pos_max=f"{max(positions):.3f}",
@@ -430,5 +442,9 @@ def build(manifest: Manifest) -> FigureOutput:
         detail,
         numbers,
         _group.csv_text(HEADER, csv_rows),
-        {"above_text": above, "random_high": high},
+        {
+            "above_text": above,
+            "reader_in_random": inside,
+            "people_outside_band": outside,
+        },
     )

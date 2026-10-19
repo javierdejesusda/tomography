@@ -237,10 +237,29 @@ def test_numbers_are_recomputed_from_the_files(
     assert numbers["position_max"] == pytest.approx(max(positions))
     reader = {m: _cell(m, "logistic") for m in _models("p10b")}
     above = _by_role({m: c["auroc"] > text["auroc"] for m, c in reader.items()})
-    high = _by_role(
-        {m: _cell(m, "random")["auroc"] >= 0.9 for m in _models("p10b")}
+    inside = _by_role(
+        {
+            m: _cell(m, "random")["lo"]
+            <= c["auroc"]
+            <= _cell(m, "random")["hi"]
+            for m, c in reader.items()
+        }
     )
-    for name, want in (("above_text", above), ("random_high", high)):
+    outside = _by_role(
+        {
+            m: not (
+                min(r["position"] for r in _people(m, "random"))
+                <= _position(m)
+                <= max(r["position"] for r in _people(m, "random"))
+            )
+            for m in _models("p10b")
+        }
+    )
+    for name, want in (
+        ("above_text", above),
+        ("reader_in_random", inside),
+        ("people_outside_band", outside),
+    ):
         for role in stats.ROLES:
             assert numbers[f"{name}_{role}"] == want[role].hits
             got = output.counts[name][role]
@@ -272,7 +291,7 @@ def test_caption_is_the_template_filled_from_the_files(
     caption = f"{output.claim} {output.detail}"
     assert output.claim == (
         "Qwen3 writes ranges where the sourced answer is a range, but a "
-        "range reader is matched by text and noise."
+        "range reader beats its random control only on some checkpoints."
     )
     assert (
         f"Qwen3 base checkpoints write a range on {int(n['range_base_min'])} "
@@ -290,11 +309,16 @@ def test_caption_is_the_template_filled_from_the_files(
     above = stats.per_role_text(
         {r: output.counts["above_text"][r] for r in stats.ROLES}
     )
-    high = stats.per_role_text(
-        {r: output.counts["random_high"][r] for r in stats.ROLES}
+    inside = stats.per_role_text(
+        {r: output.counts["reader_in_random"][r] for r in stats.ROLES}
+    )
+    outside = stats.per_role_text(
+        {r: output.counts["people_outside_band"][r] for r in stats.ROLES}
     )
     assert f"The reader is above the classifier's value on {above}" in caption
-    assert f"the random control reaches 0.9 on {high}" in caption
+    assert f"inside the random control's interval on {inside}" in caption
+    assert f"outside the random band on {outside}" in caption
+    assert "reaches 0.9" not in caption
     assert f"{n['text_word']:.3f}" in caption
     assert f"{n['text_lo']:.3f} to {n['text_hi']:.3f}" in caption
     assert (
