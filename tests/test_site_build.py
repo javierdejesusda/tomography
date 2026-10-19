@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from pathlib import Path
 import re
 import runpy
@@ -332,7 +333,7 @@ def test_build_is_byte_identical_in_two_fresh_processes(
     tmp_path: Path,
 ) -> None:
     outs = [tmp_path / "one", tmp_path / "two"]
-    for out in outs:
+    for seed, out in zip(("1", "2"), outs, strict=True):
         subprocess.run(
             [
                 sys.executable,
@@ -346,6 +347,7 @@ def test_build_is_byte_identical_in_two_fresh_processes(
             ],
             check=True,
             capture_output=True,
+            env={**os.environ, "PYTHONHASHSEED": seed},
         )
     names = sorted(
         p.relative_to(outs[0]) for p in outs[0].rglob("*") if p.is_file()
@@ -397,3 +399,17 @@ def test_the_font_timestamp_warning_is_silenced_but_errors_are_not(
         log.warning("'modified' timestamp seems very low")
         log.error("a real error")
     assert [r.getMessage() for r in caplog.records] == ["a real error"]
+
+
+def test_clip_ids_are_numbered_in_order_not_hashed() -> None:
+    svg = (
+        b'<defs><clipPath id="p3b30372de5"/><clipPath id="pe4a55143d0"/>'
+        b'</defs><g clip-path="url(#pe4a55143d0)"/>'
+        b'<use xlink:href="#m1234567890"/>'
+    )
+    out = build_module.stable_clip_ids(svg)
+    assert out == (
+        b'<defs><clipPath id="clip1"/><clipPath id="clip2"/>'
+        b'</defs><g clip-path="url(#clip2)"/>'
+        b'<use xlink:href="#m1234567890"/>'
+    )

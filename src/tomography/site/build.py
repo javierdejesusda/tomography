@@ -37,6 +37,28 @@ MONTHS = (
 )
 
 
+def stable_clip_ids(svg: bytes) -> bytes:
+    """Numbers the hashed clip path ids of an SVG in order of appearance.
+
+    Matplotlib derives them from layout floats whose last digits change
+    between processes, so two builds would otherwise differ.
+
+    Args:
+        svg: The SVG document.
+
+    Returns:
+        The document with `p` plus ten hex digits replaced by `clipN`.
+    """
+    ids: dict[bytes, bytes] = {}
+    for found in re.finditer(rb'id="(p[0-9a-f]{10})"', svg):
+        ids.setdefault(found.group(1), b"clip%d" % (len(ids) + 1))
+    for old, new in ids.items():
+        svg = svg.replace(b'"%b"' % old, b'"%b"' % new).replace(
+            b"#%b)" % old, b"#%b)" % new
+        )
+    return svg
+
+
 def results_date(manifest: Manifest) -> str:
     """Writes the date line from the newest run in the results.
 
@@ -139,7 +161,7 @@ def build(
         return page.FigureEntry(
             key,
             output,
-            paper.svg_bytes(output.figure),
+            stable_clip_ids(paper.svg_bytes(output.figure)),
             paper.pdf_bytes(output.figure),
         )
 
