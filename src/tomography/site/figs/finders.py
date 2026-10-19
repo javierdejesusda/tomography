@@ -243,10 +243,18 @@ def _numbers(
     own = [data[m][("utility", "pca_diff")].margin for m in gpt2]
     numbers["pca_utility_gpt2_min"] = min(own)
     numbers["pca_utility_gpt2_max"] = max(own)
-    numbers["random_max"] = max(
-        data[m][(task, "pca_diff")].random for m in models for task in TASKS
-    )
+    numbers["random_max"] = max(_randoms(models, data))[0]
     return numbers, counts
+
+
+def _randoms(
+    models: list[str], data: dict[str, dict[tuple[str, str], Point]]
+) -> list[tuple[float, str]]:
+    return [
+        (data[m][(task, "pca_diff")].random, m)
+        for m in models
+        for task in TASKS
+    ]
 
 
 def _claim(
@@ -352,4 +360,5 @@ def build(manifest: Manifest) -> FigureOutput:
         numbers,
         _csv(models, data),
         counts,
+        {"random_max": paper.display_name(max(_randoms(models, data))[1])},
     )

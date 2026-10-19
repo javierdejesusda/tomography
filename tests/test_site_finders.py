@@ -384,3 +384,14 @@ def test_the_logistic_clause_is_counted_per_role_not_as_all_ten(
     assert "all 10 checkpoints" not in output.claim
     where = stats.per_role_text(output.counts["logistic_sentiment"])
     assert f"for sentiment on {where}" in output.claim
+
+
+def test_the_largest_random_direction_names_its_checkpoint(
+    output: registry.FigureOutput,
+) -> None:
+    best = max(
+        (c[3], m)
+        for (m, _, finder), c in EXPECTED.items()
+        if finder == "pca_diff"
+    )
+    assert output.labels["random_max"] == paper.display_name(best[1])

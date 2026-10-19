@@ -38,31 +38,34 @@ def _texts() -> list[str]:
     return texts
 
 
-def placeholders() -> tuple[dict, dict]:
-    """Collects the numbers and counts that the text asks for.
+def placeholders() -> tuple[dict, dict, dict]:
+    """Collects the numbers, counts and labels that the text asks for.
 
     Returns:
-        Numbers and counts by address `kind:key`, then field name.
+        Numbers, counts and labels by address `kind:key`, then field name.
     """
     numbers: dict[str, dict[str, float]] = {}
+    labels: dict[str, dict[str, str]] = {}
     counts: dict[str, dict[str, dict[str, stats.RoleCount]]] = {}
     for text in _texts():
         for token in TOKEN.findall(text):
             kind, _, rest = token.partition(":")
-            if kind not in ("num", "count", "runs"):
+            if kind not in ("num", "count", "runs", "label"):
                 continue
             owner, _, name = rest.partition(":")
             key, _, field = name.rpartition(".")
             address = f"{owner}:{key}"
             if kind == "num":
                 numbers.setdefault(address, {})[field] = 3.0
+            elif kind == "label":
+                labels.setdefault(address, {})[field] = "Qwen3-4B"
             else:
                 counts.setdefault(address, {})[field] = {
                     "gpt2": stats.RoleCount(4, 4),
                     "base": stats.RoleCount(2, 3),
                     "post": stats.RoleCount(0, 3),
                 }
-    return numbers, counts
+    return numbers, counts, labels
 
 
 def document(commit: str = "abc1234") -> page.Document:
@@ -74,7 +77,7 @@ def document(commit: str = "abc1234") -> page.Document:
     Returns:
         A document with every main and appendix figure and table.
     """
-    numbers, counts = placeholders()
+    numbers, counts, labels = placeholders()
 
     def figure(key: str) -> page.FigureEntry:
         address = f"fig:{key}"
@@ -85,6 +88,7 @@ def document(commit: str = "abc1234") -> page.Document:
             numbers.get(address, {}),
             "a,b\n1,2\n" if key != "method" else "",
             counts.get(address, {}),
+            labels.get(address, {}),
         )
         return page.FigureEntry(key, out, SVG, b"%PDF-1.4")
 

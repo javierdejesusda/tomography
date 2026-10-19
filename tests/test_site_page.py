@@ -663,3 +663,13 @@ def test_the_page_opens_with_summary_overview_abstract_and_findings(
     assert page.numbers(full[0])[0]["teaser"] == "1"
     findings = html.split('id="key_findings"')[1].split("<h2")[0]
     assert findings.count("<li>") == 6
+
+
+def test_label_token_writes_the_name_a_figure_computed() -> None:
+    output = registry.FigureOutput(
+        Figure(), "C.", "D.", {}, "a,b", labels={"top": "Qwen3-4B"}
+    )
+    entry = page.FigureEntry("x", output, SVG, b"%PDF-1.4")
+    view = page.Page(_doc({"method": entry}))
+    assert view.text("[[label:fig:method.top]]") == "Qwen3-4B"
+    assert view.plain("[[label:fig:method.top]]") == "Qwen3-4B"
