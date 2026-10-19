@@ -130,10 +130,10 @@ def test_layer_one_statement_uses_the_chosen_layer_of_every_checkpoint(
     assert set(layers) == {1}
     assert output.numbers["layer1_cos_max"] == pytest.approx(biggest)
     assert (
-        "At layer 1, the layer the range reader chose on every checkpoint "
-        "because ties go to the first layer, every cosine is at most "
-        f"{biggest:.3f} in absolute value; these values describe that layer "
-        "and do not locate a link."
+        "At layer 1, the layer the plain-template range reader chose on every "
+        "checkpoint because ties go to the first layer, every cosine is at "
+        f"most {biggest:.3f} in absolute value; these values describe that "
+        "layer and do not locate a link."
     ) in output.detail
 
 
@@ -141,7 +141,7 @@ def test_other_chosen_layers_get_a_general_sentence() -> None:
     text = a_links.layer_sentence([1, 3], 0.123)
     assert "layer 1" not in text
     assert "0.123" in text
-    assert "At the layer the range reader chose on each checkpoint" in text
+    assert "At the layer the plain-template range reader chose on each" in text
 
 
 def test_caption_counts_per_role(output: registry.FigureOutput) -> None:
