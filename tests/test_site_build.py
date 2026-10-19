@@ -330,6 +330,33 @@ def test_a_bare_handle_in_the_text_would_be_caught() -> None:
     assert _bare_handles("at github.com/javierdejesusda/tomography") == []
 
 
+def _difference(rel: Path, first: bytes, second: bytes) -> str:
+    """Describes where two builds of one file first differ."""
+    offset = next(
+        (
+            i
+            for i, (x, y) in enumerate(zip(first, second, strict=False))
+            if x != y
+        ),
+        min(len(first), len(second)),
+    )
+    lo = max(0, offset - 100)
+    return (
+        f"{rel} differs at offset {offset}\n"
+        f"one: {first[lo : offset + 100]!r}\n"
+        f"two: {second[lo : offset + 100]!r}"
+    )
+
+
+def test_the_difference_report_names_the_file_offset_and_context() -> None:
+    report = _difference(Path("index.html"), b"abc" * 100, b"abc" * 99 + b"abx")
+    assert "index.html differs at offset 299" in report
+    assert "one: " in report
+    assert "two: " in report
+    assert report.count("abx") == 1
+    assert "differs at offset 3" in _difference(Path("a"), b"abc", b"abcd")
+
+
 def test_build_is_byte_identical_in_two_fresh_processes(
     tmp_path: Path,
 ) -> None:
@@ -355,7 +382,8 @@ def test_build_is_byte_identical_in_two_fresh_processes(
     )
     assert names
     for rel in names:
-        assert (outs[0] / rel).read_bytes() == (outs[1] / rel).read_bytes(), rel
+        first, second = [(out / rel).read_bytes() for out in outs]
+        assert first == second, _difference(rel, first, second)
 
 
 def test_every_figure_passes_the_palette_font_and_text_guards(
@@ -427,3 +455,11 @@ def test_wide_tables_break_out_of_the_text_column_on_large_screens(
     assert ".table.wide {" in block
     assert "margin-left: -6rem;" in block
     assert "margin-right: -6rem;" in block
+
+
+def test_the_resolved_abstract_stays_short(
+    site: tuple[Path, page.Document],
+) -> None:
+    view = page.Page(site[1])
+    words = len(view.plain(content.ABSTRACT).split())
+    assert words <= 260, words

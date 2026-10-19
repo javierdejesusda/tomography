@@ -21,6 +21,7 @@ DASHES = (chr(0x2014), chr(0x2013))
 TOKEN = re.compile(r"\[\[(.+?)\]\]")
 RUN_CODE = re.compile(r"\b[RPMCA][0-9]+[a-d]?\b")
 GENERIC = (
+    r"of 3(?= Qwen3 sizes)",
     r"(?<![\d.])20\d\d(?!\d)",
     r"(?<![\d.])\d\.\dB\b",
     r"(?<![\d.])\dB\b",
@@ -101,11 +102,9 @@ def test_the_title_and_abstract_are_the_planned_ones() -> None:
         "Engineering on GPT-2 and Qwen3"
     )
     assert content.ABSTRACT.startswith(
-        "Representation engineering (Zou et al., 2023) reads a concept"
+        "Representation engineering (Zou et al., 2023) reads and steers"
     )
-    assert content.ABSTRACT.endswith(
-        "Every number is computed from result files in the public repository."
-    )
+    assert content.ABSTRACT.endswith(content.ABSTRACT_STEERING)
 
 
 def test_the_body_sections_are_the_seven_of_the_paper_in_order() -> None:
@@ -442,11 +441,10 @@ def test_section_one_counts_the_readings_and_the_confidence_gain() -> None:
     for text in (content.ABSTRACT, reading, knowing):
         assert "knowledge_confidence_n" not in text
         assert "any of the" not in text
-    assert "per role in [[sec:introduction]]" in content.ABSTRACT
 
 
 def test_the_steering_contribution_names_both_fluency_thresholds() -> None:
-    text = " ".join(_all_texts())
+    text = _listed("Steering")
     start = text.index("keeps the fluency rule")
     sentence = text[start : start + 220]
     assert "perplexity ratio at most 1.5" in sentence
@@ -486,8 +484,9 @@ def test_reproducibility_admits_the_lorra_adapter_and_names_no_run_code() -> (
 
 
 def test_the_text_baseline_is_scoped_in_the_abstract() -> None:
-    assert (
-        "for TruthfulQA, knowledge and approximate answers" in content.ABSTRACT
+    assert "where the wording can leak the label" in content.ABSTRACT
+    assert "for TruthfulQA, knowledge and approximate answers" in " ".join(
+        content.INTRODUCTION.paragraphs
     )
 
 
@@ -513,14 +512,14 @@ def test_the_confidence_gain_is_bounded_not_called_nothing() -> None:
 
 
 def test_the_paired_differences_are_counted_by_token() -> None:
-    for text in (content.ABSTRACT, content.DISCUSSION.paragraphs[0]):
+    for text in (_listed("Post-training"), content.DISCUSSION.paragraphs[0]):
         assert "[[num:fig:base_post.paired_excluding_zero]]" in text
         assert "three other" not in text
 
 
 def test_the_three_excluding_differences_are_named() -> None:
-    abstract = content.ABSTRACT
-    assert "0.6B morality, 1.7B utility and 0.6B honesty" in abstract
+    text = _listed("Post-training")
+    assert "0.6B morality, 1.7B utility and 0.6B honesty" in text
     assert "leaves most other readings" not in _text()
 
 
@@ -553,6 +552,15 @@ def test_the_abstract_is_prose_built_from_replaceable_finding_sentences() -> (
     assert content.ABSTRACT_STEERING.count("[[count:") == 4
     assert content.ABSTRACT.count("[[count:") == 8
     assert "[[count:fig:teaser.truthfulqa]]" in content.ABSTRACT
+    abstract = content.ABSTRACT
+    assert "utility and morality on all 10 checkpoints" in abstract
+    assert "truth on every Qwen3 checkpoint and no GPT-2 size" in abstract
+    assert "by the 95 percent interval" in abstract.lower()
+    assert "rarely win" not in abstract
+    assert "does not beat a words classifier" in abstract
+    assert "of the three Qwen3" not in _text()
+    assert "of 3 Qwen3 sizes" in _listed("Post-training")
+    assert "sent_below" not in content.ABSTRACT
     assert "[[count:fig:teaser.knowledge]]" not in content.ABSTRACT
 
 
@@ -573,14 +581,16 @@ def _listed(head: str) -> str:
 
 def test_the_steering_claims_are_two_sentences_with_their_thresholds() -> None:
     first, second = content.ABSTRACT_STEERING.split(". ")
+    assert "at most 1.5" not in content.ABSTRACT_STEERING
     assert "[[count:fig:steering.moves01]]" in first
     assert "[[count:fig:steering.fluent01]]" in first
     assert "[[count:fig:teaser.steering]]" in second
     assert "[[count:fig:teaser.steering_fluent]]" in second
-    assert "GPT-2 small has no fluency measure" in second
-    for text in (content.ABSTRACT_STEERING, _listed("Steering")):
+    assert "GPT-2 small has no fluency measure" in _listed("Steering")
+    for text in (_listed("Steering"),):
         assert "at most 1.5" in text
         assert "distinct-1 at least 0.15" in text
+        assert "second judge" in text
     section = _listed("Steering")
     for token in ("moves01", "fluent01"):
         assert f"[[count:fig:steering.{token}]]" in section
@@ -594,8 +604,8 @@ def test_the_finder_claims_are_per_concept_and_not_causal() -> None:
     for text in (content.ABSTRACT_FINDER, _listed("Finders")):
         for token in ("pca_sentiment", "pca_truth", "pca_utility"):
             assert f"[[count:fig:finders.{token}]]" in text
-        assert "by point estimate only" in text
         assert "confounded with the concept and the data" in text
+    assert "by point estimate only" in _listed("Finders")
     assert "[[count:fig:finders.pca_utility_point]]" in _listed("Finders")
     everything = _text()
     assert "depends on matched" not in everything
@@ -627,3 +637,26 @@ def test_each_results_subsection_opens_with_its_answer_before_the_figures() -> (
         assert "[[table:" not in opener, key
         assert "[[fig:" in pointer or "[[table:" in pointer, key
         assert len(re.findall(r"[.;] ", opener)) <= 2, key
+
+
+def _opener(key: str) -> str:
+    subs = {s.key: s for s in content.RESULTS.subsections}
+    return subs[key].paragraphs[0]
+
+
+def test_openers_state_the_criterion_and_the_counts_not_a_verdict() -> None:
+    finders = _opener("finders")
+    assert not finders.startswith("Not reliably")
+    for token in ("pca_utility", "pca_truth", "pca_sentiment"):
+        assert f"[[count:fig:finders.{token}]]" in finders
+    assert "by the 95 percent interval" in finders.lower()
+    assert "[[count:fig:finders.pca_utility_point]]" in finders
+    assert "by the 95 percent interval" in _opener("reading").lower()
+    truth = _opener("truth")
+    assert "by point estimate" in truth.lower()
+    assert "[[count:fig:teaser.truthfulqa]]" in truth
+    assert "by the 95 percent interval" in truth
+    post = _opener("base_post")
+    assert not post.startswith("Little")
+    assert "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes" in post
+    assert "[[num:fig:base_post.paired_excluding_zero]]" in post
