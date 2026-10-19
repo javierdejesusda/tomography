@@ -136,7 +136,8 @@ def test_numeric_cells_do_not_wrap_and_use_tabular_figures(css: str) -> None:
     assert "td.k {\n  white-space: nowrap;\n}" in css
     assert "td.r," not in css
     assert "font-variant-numeric: tabular-nums" in css
-    assert "td:not(.r) {\n  overflow-wrap: anywhere;\n}" in css
+    assert "td.id {\n  overflow-wrap: anywhere;\n}" in css
+    assert "td:not(.r)" not in css
 
 
 def test_table_text_is_compact_but_not_below_the_readable_floor(
@@ -273,8 +274,8 @@ def test_the_built_page_resolves_every_token_and_link(html: str) -> None:
 @pytest.mark.parametrize(
     "pattern",
     [
-        r'<div class="table" id="table-(\d+)"',
-        r'<div class="table" id="table-A(\d+)"',
+        r'<div class="table(?: wide)?" id="table-(\d+)"',
+        r'<div class="table(?: wide)?" id="table-A(\d+)"',
         r'<figure id="fig-(\d+)"',
         r'<figure id="fig-A(\d+)"',
     ],
@@ -413,3 +414,16 @@ def test_clip_ids_are_numbered_in_order_not_hashed() -> None:
         b'</defs><g clip-path="url(#clip2)"/>'
         b'<use xlink:href="#m1234567890"/>'
     )
+
+
+def test_each_contents_entry_stays_on_one_line(css: str) -> None:
+    assert ".contents a {\n  white-space: nowrap;\n}" in css
+
+
+def test_wide_tables_break_out_of_the_text_column_on_large_screens(
+    css: str,
+) -> None:
+    block = css.split("@media (min-width: 1000px)")[1].split("\n}\n")[0]
+    assert ".table.wide {" in block
+    assert "margin-left: -6rem;" in block
+    assert "margin-right: -6rem;" in block

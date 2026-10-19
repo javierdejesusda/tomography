@@ -118,3 +118,13 @@ def test_the_caption_says_which_comparison_it_is(
     assert "reader minus a random direction" in text
     assert "not the comparison with the text baselines" in text
     assert "[[sec:truth]]" in text
+
+
+def test_the_caption_says_it_is_the_finder_comparison_run(
+    output: registry.TableOutput,
+) -> None:
+    text = output.detail
+    assert "finder-comparison run" in text
+    assert "own random directions" in text
+    assert "[[table:reading]]" in text
+    assert "[[table:reading_full]]" in text

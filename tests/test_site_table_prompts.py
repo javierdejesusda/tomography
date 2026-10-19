@@ -96,6 +96,7 @@ def test_caption_names_both_decoys_and_the_training_prompts(
 def test_no_underscore_or_run_code(output: registry.TableOutput) -> None:
     texts = [output.claim, output.detail, *output.columns]
     texts += [c for r in output.rows for c in r]
+    texts = [re.sub(r"\[\[.*?\]\]", "", t) for t in texts]
     assert not any("_" in t or "`" in t for t in texts)
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
 
@@ -109,3 +110,12 @@ def test_caption_says_what_the_contrast_is_and_where_the_baseline_is(
     assert "no random direction is stored for these runs" in text
     assert "[[num:table:prompts.chance]]" in text
     assert output.numbers["chance"] == 0.5
+
+
+def test_caption_explains_why_table_a3_random_values_do_not_apply(
+    output: registry.TableOutput,
+) -> None:
+    text = output.detail
+    assert "[[table:reading_full]]" in text
+    assert "other runs with their own training sample and layer" in text
+    assert "not a baseline for these accuracies" in text

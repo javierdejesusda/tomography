@@ -205,3 +205,19 @@ def test_the_claim_uses_the_figure_framing_of_the_random_control(
     assert "[[count:fig:approximate.people_outside_band]]" in claim
     assert "random_high" not in output.counts
     assert "high" not in output.numbers
+
+
+def test_the_range_reader_layer_is_counted_per_role(
+    output: registry.TableOutput,
+) -> None:
+    names = models("p10b")
+    at_one = sum(float(_transfer(m, "logistic")["layer"]) == 1 for m in names)
+    count = output.counts["layer_one"]
+    assert sum(c.hits for c in count.values()) == at_one == 9
+    assert [count[r].total for r in ("gpt2", "base", "post")] == [4, 3, 3]
+
+
+def test_the_claim_names_the_interval_criterion(
+    output: registry.TableOutput,
+) -> None:
+    assert "above the 95 percent interval of a classifier" in output.claim

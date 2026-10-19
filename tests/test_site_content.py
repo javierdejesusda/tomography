@@ -39,6 +39,9 @@ GENERIC = (
     r"at least 0\.15(?!\d)",
     r"below 0\.5(?!\d)",
     r"\ball 10\b",
+    r"(?<![\d.])95 percent(?!\d)",
+    r"(?<![\d.])40, 55 and 70 percent",
+    r"(?<![\d.])20 for the held-out",
     r"none of the 10\b",
 )
 
@@ -232,9 +235,7 @@ def test_no_dashes_backticks_or_underscores_in_prose() -> None:
         assert "_" not in bare, text
 
 
-def test_run_codes_stay_out_of_the_prose_but_the_reproducibility_section() -> (
-    None
-):
+def test_run_codes_stay_out_of_the_prose() -> None:
     kept = [
         t
         for s in ALL
@@ -243,7 +244,7 @@ def test_run_codes_stay_out_of_the_prose_but_the_reproducibility_section() -> (
     ]
     for text in [content.ABSTRACT, content.TITLE, *kept]:
         assert RUN_CODE.search(_bare(text)) is None, text
-    assert RUN_CODE.search("".join(_texts(content.REPRODUCIBILITY)))
+    assert RUN_CODE.search("".join(_texts(content.REPRODUCIBILITY))) is None
 
 
 def test_the_word_first_is_only_the_principal_component() -> None:
@@ -343,6 +344,7 @@ def test_content_design_facts() -> None:
 def test_the_design_digits_of_method_limitations_and_reproducibility() -> None:
     facts = (
         r"scores 0\.5(?!\d)",
+        r"base seed 0",
         r"(?:above|over) 0\.5(?!\d)",
         r"fits 10 readers",
         r"(?:draw of|at) 64 training pairs",
@@ -394,7 +396,7 @@ def test_the_discussion_names_the_fluency_rule_it_says_steering_breaks() -> (
     None
 ):
     text = " ".join(_texts(content.DISCUSSION))
-    sentence = text[text.index("Steering behaves") :].split(". ")[0]
+    sentence = text[text.index("Steering moves") :].split(". ")[0]
     assert "breaks fluency" in sentence
     assert "perplexity" in sentence
     assert "distinct-1" in sentence
@@ -437,3 +439,106 @@ def test_the_steering_contribution_names_both_fluency_thresholds() -> None:
     sentence = text[start : start + 220]
     assert "perplexity ratio at most 1.5" in sentence
     assert "distinct-1 at least 0.15" in sentence
+
+
+def test_known_questions_use_the_runs_token_and_name_the_criterion() -> None:
+    text = " ".join(_all_texts())
+    assert "[[runs:fig:knowledge_steering.known_ge_unknown]]" in text
+    assert "by the largest shift of the mean dose curve" in text
+    assert "known_ge_unknown_" not in text
+    assert "knowledge_steering.n_" not in text
+
+
+def _text() -> str:
+    return " ".join(_all_texts())
+
+
+def test_axbench_is_described_by_what_it_found() -> None:
+    text = _text()
+    assert "difference-in-means is the best concept detector" in text
+    assert "prompting beats every method for steering" in text
+    assert "sparse autoencoders are not competitive on either" in text
+    assert "simple baselines match or beat" not in text
+
+
+def test_reproducibility_admits_the_lorra_adapter_and_names_no_run_code() -> (
+    None
+):
+    paragraphs = " ".join(_texts(content.REPRODUCIBILITY))
+    assert "no experiment trains a model beyond" not in paragraphs
+    assert "LoRRA adapter" in paragraphs
+    assert "each of the 10 checkpoints" in paragraphs
+    assert not RUN_CODE.search(paragraphs)
+    assert "seed" in paragraphs
+    assert "tomography run" in paragraphs
+
+
+def test_the_text_baseline_is_scoped_in_the_abstract() -> None:
+    assert (
+        "for TruthfulQA, knowledge and approximate answers" in content.ABSTRACT
+    )
+
+
+def test_method_states_the_draws_positions_and_steering_depths() -> None:
+    text = _text()
+    assert "20 for the held-out sentiment run" in text
+    assert "response tokens" in text
+    assert "40, 55 and 70 percent of the depth" in text
+    assert "for the sentiment run" in text
+
+
+def test_the_approximate_claims_name_the_interval_criterion() -> None:
+    text = _text()
+    assert "above the 95 percent interval of a classifier" in text
+    assert "[[count:table:approximate.layer_one]]" in text
+
+
+def test_the_confidence_gain_is_bounded_not_called_nothing() -> None:
+    text = _text()
+    assert "adds nothing to the confidence" not in text
+    assert "[[num:table:knowledge.gain_upper_max]]" in text
+
+
+def test_the_three_excluding_differences_are_named() -> None:
+    abstract = content.ABSTRACT
+    assert "0.6B morality, 1.7B utility and 0.6B honesty" in abstract
+    assert "leaves most other readings" not in _text()
+
+
+def test_limitations_cover_the_design_choices_and_stay_ten_items() -> None:
+    items = " ".join(h + " " + t for h, t in content.LIMITATIONS.runin)
+    assert len(content.LIMITATIONS.runin) == 10
+    for phrase in (
+        "one prompt format",
+        "one judge family",
+        "two model families",
+        "small validation sets",
+        "alias string matches",
+        "no hand check",
+    ):
+        assert phrase in items, phrase
+
+
+def test_the_discussion_cites_a_section_for_steering() -> None:
+    text = " ".join(_texts(content.DISCUSSION))
+    assert "behaves as the paper describes" not in text
+    assert "[[sec:steering]]" in text
+
+
+def test_the_abstract_is_prose_built_from_replaceable_finding_sentences() -> (
+    None
+):
+    assert content.ABSTRACT_FINDER in content.ABSTRACT
+    assert content.ABSTRACT_STEERING in content.ABSTRACT
+    assert content.ABSTRACT_FINDER.count("[[count:") == 1
+    assert content.ABSTRACT_STEERING.count("[[count:") == 2
+    assert content.ABSTRACT.count("[[count:") <= 8
+    assert "[[count:fig:teaser.knowledge]]" not in content.ABSTRACT
+
+
+def test_the_introduction_defines_its_terms_before_the_list_uses_them() -> None:
+    first = " ".join(content.INTRODUCTION.paragraphs)
+    listed = " ".join(h + " " + t for h, t in content.INTRODUCTION.listed)
+    for term in ("margin", "relative depth", "relative coefficient"):
+        assert term in listed
+        assert f"{term} is" in first

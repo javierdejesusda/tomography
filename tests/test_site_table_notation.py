@@ -49,12 +49,11 @@ def test_the_win_rate_is_the_positive_against_the_negative_completion() -> None:
     assert "judged more positive" in rows["win rate"]
 
 
-def test_the_run_codes_row_is_the_only_place_with_a_run_code() -> None:
+def test_no_row_spells_out_a_run_code() -> None:
     out = _build()
     code = re.compile(r"\b[RPMCA][0-9]+[a-d]?\b")
     for term, meaning in out.rows:
-        found = code.search(term + " " + meaning)
-        assert bool(found) == (term == "run codes"), term
+        assert code.search(term + " " + meaning) is None, term
 
 
 def test_no_underscore_or_dash_in_the_table() -> None:
