@@ -500,14 +500,14 @@ def _detail(
         f"validation (whiskers are 95 percent Wilson intervals over "
         f"{numbers['n_questions']:.0f} questions); each of the two "
         "classifiers that see only the words is a green line at its "
-        "accuracy with its own interval as a band. (c) The answer "
-        "log-probability has its own panel with a Wilson interval and the "
-        f"dotted chance level of {numbers['chance']:.3f}. (b) The "
+        "accuracy with its own interval as a band. (b) The "
         "difference panel gives the reader minus the more accurate text-only "
         "classifier with the conservative interval d plus or minus 1.96 "
         "times the square root of p1(1-p1)/n plus p2(1-p2)/n over the same "
         f"{numbers['n_questions']:.0f} questions; intervals that exclude "
-        f"zero: {stats.per_role_text(counts['diff_excludes_zero'])}. (d, e) "
+        f"zero: {stats.per_role_text(counts['diff_excludes_zero'])}. (c) The "
+        "answer log-probability has its own panel with a Wilson interval and "
+        f"the dotted chance level of {numbers['chance']:.3f}. (d, e) "
         "Accuracy of the truth reader on statements about cities (d) and on "
         "Spanish to English translations (e): a dumbbell from the affirmative "
         "set to its negation, filled where the Wilson interval of the "
@@ -579,7 +579,10 @@ def build(manifest: Manifest) -> FigureOutput:
         )
         panels: list[Axes] = []
         for slot, gid in slots:
-            ax = fig.add_subplot(slot, sharey=panels[0] if panels else None)
+            share = {1: 0, 2: 0, 4: 3}.get(len(panels))
+            ax = fig.add_subplot(
+                slot, sharey=None if share is None else panels[share]
+            )
             ax.set_gid(gid)
             ax.tick_params(axis="y", length=0)
             panels.append(ax)
@@ -589,8 +592,11 @@ def build(manifest: Manifest) -> FigureOutput:
         _panel_dumbbell(panels[3], rows, data, PAIRS[0])
         _panel_dumbbell(panels[4], rows, data, PAIRS[1])
         first, second, third, cities, translations = panels
-        for ax in panels:
-            ax.set_ylim(max(rows.values()) + 0.7, TOP)
+        bottom_limit = max(rows.values()) + 0.7
+        for ax in (first, second, third):
+            ax.set_ylim(bottom_limit, TOP)
+        for ax in (cities, translations):
+            ax.set_ylim(bottom_limit, -0.7)
         for ax in (first, cities):
             ax.set_yticks(list(rows.values()), names)
         for ax in (second, third, translations):

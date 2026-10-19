@@ -453,6 +453,10 @@ def test_every_drawn_panel_letter_is_named_in_the_caption_and_vice_versa(
     assert "(f" not in output.detail
     assert "plus)" not in output.detail
     assert "dark grey circle" in output.detail
+    order = [output.detail.index(f"({x})") for x in "abc"]
+    assert order == sorted(order)
+    assert output.detail.index("(c)") > output.detail.index("(b)")
+    assert output.detail.index("(d, e)") > output.detail.index("(c)")
 
 
 def test_the_legend_names_the_dumbbell_panels_and_pluralises_the_classifiers(
@@ -475,3 +479,14 @@ def test_the_readers_and_the_text_band_are_labelled_directly(
     assert texts["reader_label:truthfulqa_reader"] == "truth reader"
     assert texts["reader_label:persona_reader"] == "persona reader"
     assert texts["band_label"] == "words, characters"
+
+
+def test_the_dumbbell_panels_share_the_row_limits_of_the_top_panels(
+    output: registry.FigureOutput,
+) -> None:
+    levels = _ax(output, "levels").get_ylim()
+    low = levels[0]
+    for gid in ("cities", "translations"):
+        lim = _ax(output, gid).get_ylim()
+        assert lim[0] == pytest.approx(low)
+        assert lim[1] > -1.0

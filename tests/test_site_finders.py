@@ -317,7 +317,7 @@ def test_each_panel_counts_the_checkpoints_above_zero_per_role(
         expected = " ".join(
             f"{h}/{total[r]}" for h, r in zip(hits, ROLES, strict=True)
         )
-        assert note.get_text().endswith(expected)
+        assert note.get_text() == f"PCA above 0: {expected}"
 
 
 def test_the_role_key_is_a_filled_and_an_open_circle_in_neutral_ink(

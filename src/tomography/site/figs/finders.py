@@ -151,7 +151,7 @@ def _panel(
         for finder in FINDERS:
             _marker(ax, y, model, finder, data[model][(task, finder)])
     ax.annotate(
-        "above 0: " + " ".join(f"{h}/{t}" for h, t in tally),
+        "PCA above 0: " + " ".join(f"{h}/{t}" for h, t in tally),
         xy=(0.0, 1.0),
         xycoords="axes fraction",
         xytext=(2, 2),
