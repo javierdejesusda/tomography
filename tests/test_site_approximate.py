@@ -11,6 +11,7 @@ import pytest
 
 from tomography.site import registry
 from tomography.site import stats
+from tomography.site.figs import approximate
 from tomography.site.manifest import Manifest
 from tomography.viz import axes
 from tomography.viz import checks
@@ -321,12 +322,17 @@ def test_the_detail_gives_the_baselines_of_each_panel(
 ) -> None:
     n = output.numbers
     detail = output.detail
+    base = approximate.share_phrase(
+        int(n["exact_base_max"]), int(n["people_base_max"])
+    )
+    post = approximate.share_phrase(
+        int(n["exact_post_max"]), int(n["people_post_max"])
+    )
     assert (
-        f"at most {int(n['exact_base_max'])} and "
-        f"{int(n['people_base_max'])} percent (Qwen3 base), "
-        f"{int(n['exact_post_max'])} and {int(n['people_post_max'])} "
-        "percent (post-trained)"
+        f"Exact items and heights: {base} (Qwen3 base), {post} (post-trained)"
     ) in detail
+    assert "at most 0" not in detail
+    assert "0 and 0" not in detail
     assert (
         f"GPT-2 small {int(n['gpt2_range'])} and "
         f"{int(n['gpt2_exact'])} percent on range and exact items"
@@ -766,3 +772,17 @@ def test_the_words_label_clears_the_classifier_line_by_a_millimetre(
         == (chance.get_position()[1])
     )
     assert not label.get_window_extent().overlaps(chance.get_window_extent())
+
+
+def test_a_share_phrase_says_none_for_a_zero_and_at_most_for_the_rest() -> None:
+    phrase = approximate.share_phrase
+    assert phrase(15, 3) == "at most 15 and 3 percent"
+    assert phrase(15, 0) == (
+        "at most 15 percent of exact items, none of the heights"
+    )
+    assert phrase(0, 4) == (
+        "none of the exact items, at most 4 percent of the heights"
+    )
+    assert phrase(0, 0) == "none of either"
+    for args in ((15, 3), (15, 0), (0, 4), (0, 0)):
+        assert "at most 0" not in phrase(*args)
