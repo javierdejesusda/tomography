@@ -174,3 +174,17 @@ def test_tile_ink_has_at_least_the_contrast_of_the_other_choice() -> None:
             return (hi + 0.05) / (lo + 0.05)
 
         assert ratio(chosen) >= ratio(other) - 1e-6
+
+
+def test_panel_title_puts_the_title_after_the_letter_on_one_baseline() -> None:
+    with paper.paper_style():
+        fig = Figure(figsize=(2.7, 1.5))
+        ax = fig.subplots()
+        letter, title = paper.panel_title(ax, "a", "GPT-2")
+        gap = title.get_window_extent().x0 - letter.get_window_extent().x1
+    assert letter.get_text() == r"$\mathbf{(a)}$"
+    assert title.get_text() == "GPT-2"
+    assert gap >= 2 * fig.dpi / 72
+    assert letter.get_va() == title.get_va() == "baseline"
+    assert letter.xyann[1] == title.xyann[1]
+    assert title.get_fontsize() == ax.title.get_fontsize()

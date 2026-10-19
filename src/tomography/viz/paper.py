@@ -223,6 +223,44 @@ def panel_letter(ax: Axes, letter: str) -> Annotation:
     )
 
 
+TITLE_GAP = 4.0
+
+
+def panel_title(
+    ax: Axes, letter: str, title: str
+) -> tuple[Annotation, Annotation]:
+    """Writes a bold panel letter and a left title on one baseline.
+
+    The title starts `TITLE_GAP` points after the letter, at the size of an
+    ordinary axes title, so the two never touch.
+
+    Args:
+        ax: The panel.
+        letter: The letter without parentheses.
+        title: The title; may be empty.
+
+    Returns:
+        The letter and the title.
+    """
+    lift = mpl.rcParams["axes.titlepad"]
+    size = ax.title.get_fontsize()
+    spot = {
+        "xy": (0.0, 1.0),
+        "xycoords": "axes fraction",
+        "textcoords": "offset points",
+        "fontsize": size,
+        "ha": "left",
+        "va": "baseline",
+    }
+    mark = ax.annotate(rf"$\mathbf{{({letter})}}$", xytext=(0, lift), **spot)
+    root = ax.get_figure(root=True)
+    assert root is not None
+    wide = mark.get_window_extent().width
+    shift = wide * 72.0 / root.dpi + TITLE_GAP
+    name = ax.annotate(title, xytext=(shift, lift), **spot)
+    return mark, name
+
+
 def svg_bytes(fig: Figure) -> bytes:
     """Renders a figure as deterministic SVG.
 
