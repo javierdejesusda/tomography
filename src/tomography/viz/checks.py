@@ -200,7 +200,8 @@ def _artist_colours(artist: Artist) -> list[str]:
     """Reads the face, edge and line colours that an artist draws."""
     colours: list[object] = []
     if isinstance(artist, Line2D):
-        colours.append(artist.get_color())
+        if artist.get_linestyle() not in ("None", "none", " ", ""):
+            colours.append(artist.get_color())
         if artist.get_marker() not in ("None", None, ""):
             colours += [
                 artist.get_markerfacecolor(),
@@ -227,7 +228,9 @@ def palette_problems(fig: Figure) -> list[str]:
     """Finds colours that are not in the encoding dictionary.
 
     Faces, edges and lines may use a dictionary hue or white; text may use the
-    ink or the secondary grey; heat maps and colour bars are exempt.
+    ink or the secondary grey, and white too on a text artist whose gid is
+    `paper.TILE_LABEL` (a number on a heat-map tile); heat maps and colour
+    bars are exempt.
 
     Args:
         fig: The figure.
@@ -246,7 +249,7 @@ def palette_problems(fig: Figure) -> list[str]:
     for artist in fig.findobj(
         lambda a: isinstance(a, Line2D | Patch | Collection)
     ):
-        if id(artist) in seen:
+        if id(artist) in seen or not artist.get_visible():
             continue
         seen.add(id(artist))
         for shade in _artist_colours(artist):
@@ -255,7 +258,10 @@ def palette_problems(fig: Figure) -> list[str]:
     text_ok = {paper.INK.lower(), paper.ENC["secondary_text"].lower()}
     for text in _visible_texts(fig):
         tint = _hex(text.get_color())
-        if tint is not None and tint not in text_ok:
+        allowed_ink = text_ok
+        if text.get_gid() == paper.TILE_LABEL:
+            allowed_ink = text_ok | {paper.WHITE}
+        if tint is not None and tint not in allowed_ink:
             found.append(f"text colour {tint}: {text.get_text()!r}")
     return found
 

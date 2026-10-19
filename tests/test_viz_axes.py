@@ -1,9 +1,12 @@
+import warnings
+
 from matplotlib.figure import Figure
 import numpy as np
 import pytest
 
 from tomography.site import store
 from tomography.viz import axes as shared
+from tomography.viz import checks
 from tomography.viz import paper
 
 
@@ -120,7 +123,7 @@ def test_unit_axis_sets_the_same_ticks_and_labels_on_any_zero_to_one_axis() -> (
 
 def test_minus_formatter_writes_the_true_minus_and_trims_zeros() -> None:
     fmt = shared.minus_formatter()
-    assert fmt(-0.5, 0) == f"{MINUS}0.5"
+    assert fmt(-0.5, 0) == f"${MINUS}$0.5"
     assert fmt(0.25, 0) == "0.25"
     assert fmt(1.0, 0) == "1"
     assert fmt(100.0, 0) == "100"
@@ -158,3 +161,16 @@ def test_model_rows_only_gap_between_neighbours_that_are_present() -> None:
     assert rows["gpt2"] == 0.0
     assert rows["gpt2-xl"] == 1.0
     assert rows["qwen3-4b"] == pytest.approx(2.6)
+
+
+def test_minus_formatter_labels_draw_without_a_missing_glyph_warning() -> None:
+    with paper.paper_style():
+        fig = Figure(figsize=(2, 1.5))
+        ax = fig.subplots()
+        ax.plot([-0.4, 0.4], [0, 1])
+        ax.xaxis.set_major_formatter(shared.minus_formatter())
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            checks.draw(fig)
+    labels = [t.get_text() for t in ax.get_xticklabels()]
+    assert any(label.startswith(f"${MINUS}$") for label in labels)

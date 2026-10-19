@@ -223,14 +223,15 @@ def minus_formatter() -> ticker.FuncFormatter:
 
     Returns:
         A formatter that writes 0.25 as `0.25`, 1.0 as `1` and a negative
-        number with U+2212; a value that rounds to zero has no sign.
+        number with a true minus set in mathtext (the text font has no
+        U+2212 glyph); a value that rounds to zero has no sign.
     """
 
     def write(value: float, _pos: int) -> str:
         text = f"{round(value, 6):g}"
         if text in ("-0", "0"):
             return "0"
-        return text.replace("-", MINUS)
+        return f"${MINUS}$" + text[1:] if text.startswith("-") else text
 
     return ticker.FuncFormatter(write)
 
