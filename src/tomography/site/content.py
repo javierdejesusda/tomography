@@ -536,10 +536,11 @@ RESULTS = Section(
                 "[[count:fig:teaser.truth]], and sentiment from a relative "
                 "depth of [[num:fig:reading.onset_sentiment_min]] to "
                 "[[num:fig:reading.onset_sentiment_max]].",
-                "[[fig:reading]] maps the margin over every layer and shows "
-                "the held-out accuracy at the chosen layer against model "
-                "size; [[table:reading]] gives the margins, "
-                "[[fig:a_layers]] the raw layer curves and "
+                "[[fig:reading]] plots the margin over every layer by role "
+                "and shows the held-out accuracy at the chosen layer against "
+                "model size; [[table:reading]] gives the margins, "
+                "[[fig:a_layers]] the raw layer curves, "
+                "[[fig:a_reading_heat]] the margins as heat maps and "
                 "[[table:reading_full]] every reading with its layer. "
                 "Sentiment accuracy against the number of training pairs "
                 "and under a misleading sentence is in [[table:sizes]] and "
@@ -819,7 +820,8 @@ APPENDICES = (
         "appendix_reading",
         "Reading details",
         paragraphs=(
-            "Layer curves of every reading ([[fig:a_layers]]), every "
+            "Layer curves of every reading ([[fig:a_layers]]), their margins "
+            "as heat maps ([[fig:a_reading_heat]]), every "
             "finder ([[fig:a_finders_gpt2]], [[fig:a_finders_qwen3]], "
             "[[table:finders_all]]), every reading at its layer "
             "([[table:reading_full]]), and the sample-size and decoy runs "
@@ -827,6 +829,7 @@ APPENDICES = (
         ),
         items=(
             "fig:a_layers",
+            "fig:a_reading_heat",
             "fig:a_finders_gpt2",
             "fig:a_finders_qwen3",
             "table:finders_all",

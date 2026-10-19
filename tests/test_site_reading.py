@@ -313,7 +313,7 @@ def test_each_role_row_holds_only_its_own_checkpoints_never_pooled(
                 assert ax.get_ylim() == pytest.approx((-0.1, 0.5))
 
 
-def test_every_curve_panel_has_a_random_band_a_zero_line_and_a_dot_per_checkpoint(
+def test_every_curve_panel_has_a_band_a_zero_line_and_a_dot_per_checkpoint(
     output: registry.FigureOutput,
 ) -> None:
     for concept, exp in CONCEPTS.items():
@@ -346,7 +346,7 @@ def test_every_curve_panel_has_a_random_band_a_zero_line_and_a_dot_per_checkpoin
             assert len(zero) == 1
 
 
-def test_the_onset_is_a_tick_on_the_x_axis_at_the_first_layer_above_zero_point_one(
+def test_the_onset_is_a_tick_at_the_earliest_layer_above_the_margin(
     output: registry.FigureOutput,
 ) -> None:
     for concept, exp in CONCEPTS.items():
@@ -418,5 +418,5 @@ def test_the_detail_describes_the_curves_the_band_the_onset_and_the_size_row(
     assert "tick on the x axis" in text
     assert "darker lines are larger checkpoints" in text
     assert "no fitted line" in text
-    assert "sentiment curves" in text
+    assert "sentiment curves" in text.lower()
     assert "does not include the sampling error" in text

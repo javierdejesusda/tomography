@@ -17,6 +17,7 @@ FIGURE_KEYS = (
 )
 APPENDIX_FIGURE_KEYS = (
     "a_layers",
+    "a_reading_heat",
     "a_finders_gpt2",
     "a_finders_qwen3",
     "a_wording",
