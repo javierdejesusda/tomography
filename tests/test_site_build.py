@@ -427,3 +427,11 @@ def test_wide_tables_break_out_of_the_text_column_on_large_screens(
     assert ".table.wide {" in block
     assert "margin-left: -6rem;" in block
     assert "margin-right: -6rem;" in block
+
+
+def test_the_resolved_abstract_stays_short(
+    site: tuple[Path, page.Document],
+) -> None:
+    view = page.Page(site[1])
+    words = len(view.plain(content.ABSTRACT).split())
+    assert words <= 260, words

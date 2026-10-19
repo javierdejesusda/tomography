@@ -29,49 +29,31 @@ METHODOLOGY_URL = REPO_URL + "/blob/main/docs/methodology.md"
 DATA_URL = REPO_URL + "/tree/main/results"
 
 ABSTRACT_FINDER = (
-    "The paper's own finder, the first principal component of paired "
-    "differences, is above a random direction by the 95 percent interval "
-    "for sentiment on [[count:fig:finders.pca_sentiment]] and for truth on "
-    "[[count:fig:finders.pca_truth]] with unrelated pairs, and for utility "
-    "on [[count:fig:finders.pca_utility]] with matched pairs (on GPT-2 by "
-    "point estimate only); matching is confounded with the concept and the "
-    "data."
+    "The paper's finder is above it for sentiment on "
+    "[[count:fig:finders.pca_sentiment]] and truth on "
+    "[[count:fig:finders.pca_truth]] with unrelated pairs and for utility "
+    "on [[count:fig:finders.pca_utility]] with matched pairs; matching is "
+    "confounded with the concept and the data."
 )
 ABSTRACT_STEERING = (
-    "For sentiment, steering at relative coefficient 0.1 moves the judged "
-    "sentiment past the unsteered score at both signs with every vector, "
-    "for the primary and the second judge, on "
-    "[[count:fig:steering.moves01]], and keeps the fluency rule "
-    "(perplexity ratio at most 1.5 and distinct-1 at least 0.15) on "
-    "[[count:fig:steering.fluent01]]. For utility, steering at relative "
-    "coefficient 0.3 beats every random direction of the same norm with "
-    "every vector on [[count:fig:teaser.steering]] and keeps the fluency "
-    "rule on [[count:fig:teaser.steering_fluent]] (GPT-2 small has no "
-    "fluency measure)."
+    "Steering sentiment at relative coefficient 0.1 moves "
+    "sentiment on [[count:fig:steering.moves01]] and keeps the fluency rule "
+    "on [[count:fig:steering.fluent01]]. Steering utility at "
+    "coefficient 0.3 beats every random direction on "
+    "[[count:fig:teaser.steering]] and keeps the fluency rule on "
+    "[[count:fig:teaser.steering_fluent]]."
 )
 ABSTRACT = (
-    "Representation engineering (Zou et al., 2023) reads a concept from a "
-    "language model by projecting its activations on one direction and "
-    "steers the model by adding that direction to its residual stream. We "
-    "run the recipe on four GPT-2 sizes and on three Qwen3 sizes, each as a "
-    "base and a post-trained checkpoint, and set every reading beside a "
-    "random direction of the same run and, for TruthfulQA, knowledge and "
-    "approximate answers, where the wording can give the label away, beside "
-    "a classifier that sees only the text. A logistic direction reads "
-    "utility, morality and truth above its random direction on many "
-    "checkpoints, with the counts per role in [[sec:introduction]]. "
+    "Representation engineering (Zou et al., 2023) reads and steers a "
+    "concept with one direction. We test four GPT-2 and three Qwen3 sizes, "
+    "base and post-trained, against a random direction and, where the "
+    "wording can leak the label, a text classifier. "
+    "By the 95 percent interval, a logistic direction reads utility and "
+    "morality on all 10 checkpoints and truth on every Qwen3 checkpoint "
+    "and no GPT-2 size. "
     + ABSTRACT_FINDER
-    + " Against stronger baselines the readings rarely win: a TruthfulQA "
-    "reader is above a classifier on the question and answer words on "
-    "[[count:fig:teaser.truthfulqa]], and a direction for questions the "
-    "model can answer adds little to the confidence of the model. "
-    + ABSTRACT_STEERING
-    + " Post-training lowers held-out sentiment reading on "
-    "[[num:fig:base_post.sent_below]] of the three Qwen3 sizes; "
-    "[[num:fig:base_post.paired_excluding_zero]] other seed-paired "
-    "differences exclude zero (0.6B morality, 1.7B utility and "
-    "0.6B honesty) and the rest lie within their intervals. Every number is "
-    "computed from result files in the public repository."
+    + " The TruthfulQA reader does not beat a words classifier (above it "
+    "on [[count:fig:teaser.truthfulqa]]). " + ABSTRACT_STEERING
 )
 
 
@@ -124,11 +106,12 @@ INTRODUCTION = Section(
         "([[sec:finders]]). For "
         "each question we name the baseline that could produce the result "
         "without the direction: a random direction fitted with the same "
-        "procedure, a classifier on the text, the popularity of the "
-        "subject, or the confidence of the model. Three terms recur. The "
-        "margin is the accuracy of a reader minus that of a random direction "
-        "of the same run at the same layer; the relative depth is a layer "
-        "index divided by the number of layers; and the relative "
+        "procedure, a classifier on the text (for TruthfulQA, knowledge and "
+        "approximate answers, where the wording can give the label away), "
+        "the popularity of the subject, or the confidence of the model. "
+        "Three terms recur. The margin is the accuracy of a reader minus "
+        "that of a random direction of the same run at the same layer; "
+        "the relative depth is a layer index divided by the number of layers; and the relative "
         "coefficient is the steering strength in units of the mean residual "
         "norm at the layer. [[fig:teaser]] summarises the answers.",
     ),
@@ -181,7 +164,9 @@ INTRODUCTION = Section(
         (
             "Truth beyond the text ([[sec:truth]]).",
             "A TruthfulQA reader stays within the band of classifiers that "
-            "see only the words on [[count:fig:truth.tqa_inside]], and on "
+            "see only the words on [[count:fig:truth.tqa_inside]] and is "
+            "above one by the 95 percent interval on "
+            "[[count:fig:teaser.truthfulqa]], and on "
             "[[count:fig:truth.neg_below_half]] at least one negated set "
             "falls below chance with its interval ([[fig:truth]]).",
         ),
@@ -238,8 +223,10 @@ INTRODUCTION = Section(
         (
             "Post-training ([[sec:base_post]]).",
             "Held-out sentiment reading is lower after post-training on "
-            "[[num:fig:base_post.sent_below]] of the three Qwen3 sizes; "
-            "other readings stay within their intervals on most sizes "
+            "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes, and "
+            "[[num:fig:base_post.paired_excluding_zero]] other seed-paired "
+            "differences exclude zero (0.6B morality, 1.7B utility and 0.6B "
+            "honesty); the other readings stay within their intervals "
             "([[fig:base_post]]).",
         ),
     ),
@@ -519,12 +506,13 @@ RESULTS = Section(
             "finders",
             "Does the finder of the paper find the concept?",
             paragraphs=(
-                "Not reliably. By the 95 percent interval it is above a "
-                "random direction for sentiment on "
-                "[[count:fig:finders.pca_sentiment]] and for truth on "
-                "[[count:fig:finders.pca_truth]] with unrelated pairs, and "
-                "for utility on [[count:fig:finders.pca_utility]] with "
-                "matched pairs.",
+                "By the 95 percent interval it is above a random "
+                "direction for utility on [[count:fig:finders.pca_utility]] "
+                "with matched pairs, for truth on "
+                "[[count:fig:finders.pca_truth]] and for sentiment on "
+                "[[count:fig:finders.pca_sentiment]] with unrelated pairs; "
+                "on GPT-2 it is above it for utility by point estimate "
+                "only, on [[count:fig:finders.pca_utility_point]].",
                 "The paper compares finders on utility, where every pair is "
                 "two versions of one scenario. On sentiment and truth our "
                 "pairs are unrelated inputs with opposite labels, the "
@@ -540,7 +528,8 @@ RESULTS = Section(
             "reading",
             "Where and how well is a concept read?",
             paragraphs=(
-                "Utility is read above a random direction on "
+                "By the 95 percent interval of its margin over a random "
+                "direction, a logistic direction reads utility on "
                 "[[count:fig:teaser.utility]], morality on "
                 "[[count:fig:teaser.morality]] and truth on "
                 "[[count:fig:teaser.truth]], and sentiment from a relative "
@@ -577,9 +566,11 @@ RESULTS = Section(
             "truth",
             "Is truth read beyond the text?",
             paragraphs=(
-                "Mostly not. A TruthfulQA reader stays within the band of "
-                "classifiers that see only the words on "
-                "[[count:fig:truth.tqa_inside]], and on "
+                "By point estimate a TruthfulQA reader stays within the band "
+                "of classifiers that see only the words on "
+                "[[count:fig:truth.tqa_inside]], and by the 95 percent "
+                "interval it is above one on "
+                "[[count:fig:teaser.truthfulqa]]; on "
                 "[[count:fig:truth.neg_below_half]] at least one negated "
                 "set falls below chance with its interval.",
                 "TruthfulQA can be answered in part from the answer text "
@@ -663,10 +654,10 @@ RESULTS = Section(
             "base_post",
             "What does post-training change?",
             paragraphs=(
-                "Little. Held-out sentiment reading is lower on "
-                "[[num:fig:base_post.sent_below]] of the three Qwen3 sizes, "
-                "and [[num:fig:base_post.paired_excluding_zero]] other "
-                "paired differences exclude zero.",
+                "Held-out sentiment reading is lower on "
+                "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes, and "
+                "[[num:fig:base_post.paired_excluding_zero]] other "
+                "seed-paired differences exclude zero.",
                 "[[fig:base_post]] puts every measure of the earlier "
                 "sections side by side as post-trained minus base for the "
                 "three Qwen3 sizes; the stored per-seed comparisons are in "
