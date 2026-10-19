@@ -124,10 +124,12 @@ def _legend(fig: Figure) -> None:
 
 
 def _claim(numbers: dict[str, float]) -> str:
+    if numbers["gpt2_pca_over_random_max"] > 0.0:
+        raise ValueError("the PCA finder beats a random direction on GPT-2")
     return (
-        "On every GPT-2 size the paper's PCA finder is at most "
-        f"{numbers['gpt2_pca_over_random_max']:.3f} above a random direction "
-        "for sentiment and truth, where logistic regression is at least "
+        "On every GPT-2 size the paper's PCA finder is no higher than a "
+        "random direction for sentiment and truth, where logistic "
+        "regression is at least "
         f"{numbers['gpt2_logistic_over_random_min']:.3f} above it, while on "
         "Qwen3-1.7B-Base the PCA finder reads all three tasks, at least "
         f"{numbers['qwen_pca_over_random_min']:.3f} above random."

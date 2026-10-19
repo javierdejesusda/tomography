@@ -90,8 +90,12 @@ def test_the_claim_numbers_match_the_stored_tables(
     assert output.numbers["qwen_pca_over_random_min"] == pytest.approx(
         min(qwen)
     )
+    assert output.numbers["gpt2_pca_over_random_max"] <= 0.0
+    assert "no higher than a random direction" in output.claim
+    assert "above a random direction" not in output.claim.split("where")[0]
     for name, value in output.numbers.items():
-        assert f"{value:.3f}" in output.claim, name
+        if name != "gpt2_pca_over_random_max":
+            assert f"{value:.3f}" in output.claim, name
     assert output.claim.endswith(".")
 
 
