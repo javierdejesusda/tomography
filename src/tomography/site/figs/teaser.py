@@ -12,6 +12,7 @@ from typing import Any
 from matplotlib.figure import Figure
 from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
+from matplotlib.transforms import ScaledTranslation
 
 from tomography.site import finders as loader
 from tomography.site import params
@@ -62,25 +63,33 @@ class Row:
         label: Row label.
         block: Index of the block the row belongs to.
         exp: Experiment whose checkpoints the row covers.
+        unit: What the margin of the row is measured in.
     """
 
     key: str
     label: str
     block: int
     exp: str
+    unit: str
 
 
 ROWS = (
-    Row("utility", "Utility", 0, "r2"),
-    Row("morality", "Morality", 0, "r3"),
-    Row("truth", "Truth", 0, "r7"),
-    Row("neg_cities", "Negated cities", 0, "r7"),
-    Row("honesty_transfer", "Honesty, transfer", 0, "r5"),
-    Row("paper_finder", "Paper finder, sentiment", 1, "p4"),
-    Row("truthfulqa", "TruthfulQA, against words", 1, "r6"),
-    Row("knowledge", "Knowledge, against popularity", 1, "p9b"),
-    Row("knowledge_confidence", "Knowledge, added to confidence", 1, "p9c"),
-    Row("steering", "Steering, utility direction", 2, "m1"),
+    Row("utility", "Utility", 0, "r2", "accuracy"),
+    Row("morality", "Morality", 0, "r3", "accuracy"),
+    Row("truth", "Truth", 0, "r7", "accuracy"),
+    Row("neg_cities", "Negated cities", 0, "r7", "accuracy"),
+    Row("honesty_transfer", "Honesty, transfer", 0, "r5", "accuracy"),
+    Row("paper_finder", "Paper finder, sentiment", 1, "p4", "accuracy"),
+    Row("truthfulqa", "TruthfulQA, against words", 1, "r6", "MC1 accuracy"),
+    Row("knowledge", "Knowledge, against popularity", 1, "p9b", "AUROC"),
+    Row(
+        "knowledge_confidence",
+        "Knowledge, added to confidence",
+        1,
+        "p9c",
+        "AUROC",
+    ),
+    Row("steering", "Steering, utility direction", 2, "m1", "win rate"),
 )
 BLOCKS = (
     "against a random direction",
@@ -395,11 +404,27 @@ def _draw(fig: Figure, found: dict[str, dict[str, Cell]]) -> None:
             color=paper.ENC["secondary_text"],
         )
     ax.set_yticks([place[r.key] for r in ROWS], [r.label for r in ROWS])
+    lift = ScaledTranslation(0, 4.5 / 72, fig.dpi_scale_trans)
+    for label in ax.get_yticklabels():
+        label.set_transform(label.get_transform() + lift)
+    for row in ROWS:
+        note = ax.annotate(
+            row.unit,
+            xy=(0, place[row.key]),
+            xycoords=ax.get_yaxis_transform(),
+            xytext=(-3.5, -7.5),
+            textcoords="offset points",
+            fontsize=TEXT,
+            ha="right",
+            va="center",
+            color=paper.ENC["secondary_text"],
+        )
+        note.set_gid("row_unit")
     ax.set_ylim(max(place.values()) + 0.7, -1.3)
     ax.set_xlim(*XLIM)
     ax.set_xticks([-0.2, 0.0, 0.2, 0.4])
     ax.xaxis.set_major_formatter(shared.minus_formatter())
-    ax.set_xlabel("margin of the direction over its baseline")
+    ax.set_xlabel("margin over the baseline, in the unit under each row")
     shared.ref_line(ax, 0.0, "x")
     ax.tick_params(axis="y", length=0, labelsize=TEXT)
     ax.spines[["top", "right", "left"]].set_visible(False)

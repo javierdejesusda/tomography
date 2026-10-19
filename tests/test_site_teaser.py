@@ -436,3 +436,28 @@ def test_the_steering_row_names_the_unit_the_judge_and_the_fluency_rule(
         assert built.numbers[f"steering_fluent_{role}_above"] == sum(known)
         assert built.numbers[f"steering_fluent_{role}_n"] == len(known)
     assert "no checkpoint passes" not in text
+
+
+def test_every_row_names_the_unit_its_margin_is_measured_in(
+    built: registry.FigureOutput,
+) -> None:
+    (ax,) = built.figure.axes
+    units = [t for t in ax.texts if t.get_gid() == "row_unit"]
+    by_y = sorted(units, key=lambda t: t.xy[1])
+    assert [t.get_text() for t in by_y] == [
+        "accuracy",
+        "accuracy",
+        "accuracy",
+        "accuracy",
+        "accuracy",
+        "accuracy",
+        "MC1 accuracy",
+        "AUROC",
+        "AUROC",
+        "win rate",
+    ]
+    ticks = [int(y) for y in ax.get_yticks()]
+    assert len(ticks) == len(ROWS)
+    for tick, unit in zip(ax.get_yticks(), by_y, strict=True):
+        assert unit.xy[1] == pytest.approx(tick)
+    assert "unit" in ax.get_xlabel()
