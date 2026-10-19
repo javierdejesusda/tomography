@@ -7,7 +7,6 @@ of every direction fitted on another wording by its cosine with the paper
 direction and its accuracy on the paper wording.
 """
 
-import json
 from typing import Any
 
 from matplotlib.axes import Axes
@@ -26,6 +25,7 @@ from tomography.viz import paper
 
 HEIGHT = 2.8
 TASK = "sentiment"
+DROPPED = "no_trailing_space"
 MARKER = {"frame": "o", "wording": "s", "concept": "^"}
 DODGE = {"frame": -0.17, "wording": 0.0, "concept": 0.17}
 KIND = {
@@ -42,9 +42,13 @@ def _rows(manifest: Manifest, model: str) -> tuple[list[dict[str, Any]], int]:
     path = manifest.run("p1", model)
     if path is None:
         raise FileNotFoundError(f"results/p1/{model} has no logistic run")
-    table = [r for r in runfiles.rows(path, "table.json") if r["task"] == TASK]
-    config = json.loads((path / "config.json").read_text("utf-8"))
-    return table, int(config["n_eval_pairs"])
+    table = [
+        r
+        for r in runfiles.rows(path, "table.json")
+        if r["task"] == TASK and r["variant"] != DROPPED
+    ]
+    summary = runfiles.data(path, "summary.json")
+    return table, int(summary["n_eval_pairs"][TASK]["report"])
 
 
 def _marker(
@@ -315,7 +319,8 @@ def _claim(
         "same concept. A direction fitted on the bare wording has cosine "
         f"{numbers['bare_cos_min']:.3f} to {numbers['bare_cos_max']:.3f} "
         "with the paper direction. It reads the paper wording above a "
-        f"random direction on {stats.per_role_text(counts)}{exceptions}; "
+        "random direction by point estimate on "
+        f"{stats.per_role_text(counts)}{exceptions}; "
         f"across checkpoints it reads at {numbers['bare_to_paper_min']:.3f} "
         f"to {numbers['bare_to_paper_max']:.3f} and the random direction at "
         f"{numbers['bare_random_min']:.3f} to "
