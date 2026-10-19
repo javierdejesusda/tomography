@@ -65,10 +65,11 @@ DETAIL = (
     "seed-paired 95 percent bootstrap interval that [[table:base_post]] "
     "stores (10 seeds, 0.6B and 1.7B); a dashed interval is a conservative "
     "95 percent interval, used for 4B and the measures without seeds. The "
-    "axes differ between the panels: (a) shows the rows whose intervals stay within {narrow}, (b) the rows with wider "
-    "intervals, on {wide}. A post-trained checkpoint also differs from its "
-    "base in prompt format and distillation, so the contrast is with this "
-    "recipe ([[sec:limitations]])."
+    "axes differ between the panels: (a) shows the rows whose intervals "
+    "stay within {narrow}, (b) the rows with wider intervals, on {wide}. "
+    "A post-trained checkpoint also differs from its base in prompt format "
+    "and distillation, so the contrast is with this recipe "
+    "([[sec:limitations]])."
 )
 
 
