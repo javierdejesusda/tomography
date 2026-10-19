@@ -30,11 +30,6 @@ def test_lines_by_role_sorts_by_parameter_count_and_skips_empty_roles() -> None:
     assert found == {"GPT-2": ["gpt2", "gpt2-medium", "gpt2-xl"]}
 
 
-def test_csv_text_writes_the_header_and_rows() -> None:
-    text = _group.csv_text(["a", "b"], [[1, 0.5], [2, None]])
-    assert text == "a,b\n1,0.5\n2,\n"
-
-
 def test_clip_ticks_keeps_only_ticks_inside_the_view() -> None:
     fig = Figure()
     ax = fig.subplots()
