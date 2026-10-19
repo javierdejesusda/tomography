@@ -47,6 +47,19 @@ BAND_HEIGHT = 0.6
 MARKER = 3.5
 
 
+def fmt3(value: float) -> str:
+    """Writes a number with three decimals and no sign on a rounded zero.
+
+    Args:
+        value: The number.
+
+    Returns:
+        The text, such as `0.000` for minus 1e-16.
+    """
+    text = f"{value:.3f}"
+    return text[1:] if text == "-0.000" else text
+
+
 @dataclasses.dataclass(frozen=True)
 class Point:
     """One finder on one task and checkpoint.
@@ -255,14 +268,14 @@ def _claim(
         f"excluding zero, for sentiment on {_where(sentiment)}"
         f"{_winners(models, data, 'sentiment', 'pca_diff')}, and for truth "
         "its largest margin on a GPT-2 size is "
-        f"{numbers['pca_truth_gpt2_max']:.3f}. Logistic regression is above "
+        f"{fmt3(numbers['pca_truth_gpt2_max'])}. Logistic regression is above "
         "the random direction for sentiment, with an interval excluding "
         f"zero, on {_where(counts['logistic_sentiment'])}. On utility, whose "
         "pairs are matched scenarios, the paper's finder is above the "
         "random direction by point estimate on "
         f"{_where(counts['pca_utility_point'])}, by "
-        f"{numbers['pca_utility_min']:.3f} to "
-        f"{numbers['pca_utility_max']:.3f}."
+        f"{fmt3(numbers['pca_utility_min'])} to "
+        f"{fmt3(numbers['pca_utility_max'])}."
     )
 
 

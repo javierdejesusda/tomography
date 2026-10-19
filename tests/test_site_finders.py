@@ -8,6 +8,7 @@ import pytest
 
 from tomography.site import params
 from tomography.site import registry
+from tomography.site.figs import finders
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -236,3 +237,14 @@ def test_the_caption_has_no_first_and_the_pair_counts_come_from_the_runs(
         f"{pairs['sentiment']} sentiment, {pairs['truth']} truth and "
         f"{pairs['utility']} utility pairs"
     ) in text
+
+
+def test_a_rounded_zero_is_printed_without_a_sign(
+    output: registry.FigureOutput,
+) -> None:
+    text = f"{output.claim} {output.detail}"
+    assert "-0.000" not in text
+    assert chr(0x2212) + "0.000" not in text
+    assert finders.fmt3(-1.1e-16) == "0.000"
+    assert finders.fmt3(-0.0004) == "0.000"
+    assert finders.fmt3(-0.025) == "-0.025"

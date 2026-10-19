@@ -369,3 +369,10 @@ def test_the_legend_names_the_sizes_the_figure_holds(
     ]
     assert "GPT-2 small to XL" in labels
     assert "Qwen3 0.6B to 4B" in labels
+
+
+def test_the_teaser_caption_has_no_signed_zero(
+    built: registry.FigureOutput,
+) -> None:
+    text = f"{built.claim} {built.detail}"
+    assert "-0.000" not in text
