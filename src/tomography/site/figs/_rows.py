@@ -18,12 +18,12 @@ from tomography.viz import axes
 from tomography.viz import paper
 
 PAD = 0.07
-ROLE_KEY_SIZE = 6.5
-STAR_SIZE = 5.0
-TRIANGLE_SIZE = 4.2
+ROLE_KEY_SIZE = 7.0
+STAR_SIZE = 6.4
+TRIANGLE_SIZE = 5.4
 CATEGORY_EDGE = 0.3
-MARKER_SIZE = 3.5
-EDGE_WIDTH = 0.8
+MARKER_SIZE = paper.MARKER_SIZE
+EDGE_WIDTH = paper.MARKER_EDGE
 
 
 def new_figure(height: float) -> Figure:

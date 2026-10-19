@@ -1,4 +1,5 @@
 import io
+import itertools
 
 import matplotlib as mpl
 from matplotlib.figure import Figure
@@ -255,3 +256,87 @@ def test_prompting_arms_have_their_own_category_shapes() -> None:
     values = set(paper.PROMPT_MARKERS.values())
     assert len(values) == 2
     assert values <= set(paper.CATEGORY_MARKERS)
+
+
+def _lightness(color: str) -> float:
+    import colorsys
+
+    rgb = [int(color[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+    return colorsys.rgb_to_hls(*rgb)[1]
+
+
+def test_adjacent_sizes_in_a_ramp_are_clearly_separable() -> None:
+    for family, count in (("gpt2", 4), ("qwen3", 3)):
+        ramp = paper.size_ramp(family, count)
+        lights = [_lightness(c) for c in ramp]
+        steps = [a - b for a, b in itertools.pairwise(lights)]
+        assert min(steps) >= 0.12, (family, steps)
+        assert all(_contrast(c) >= 3.0 for c in ramp)
+
+
+def test_markers_are_large_enough_and_edges_survive_print() -> None:
+    assert 4.5 <= paper.MARKER_SIZE <= 5.0
+    assert 0.8 <= paper.MARKER_EDGE <= 1.0
+
+
+def test_random_is_one_grey_and_text_green_is_reserved() -> None:
+    assert paper.ENC["random_marker"] == paper.RANDOM_GREY
+    assert 0.0 < paper.RANDOM_BAND_ALPHA < 1.0
+    assert paper.TEXT_GREEN == paper.ENC["text"] == "#009E73"
+    others = [
+        v for k, v in paper.ENC.items() if k != "text" and isinstance(v, str)
+    ]
+    assert paper.TEXT_GREEN not in others
+    assert paper.TEXT_GREEN not in paper.ENC["gpt2"] + paper.ENC["qwen3"]
+    for key in ("popularity", "own_probability"):
+        assert _luminance(paper.ENC[key]) < 0.2
+        assert paper.ENC[key] != paper.ENC["random_marker"]
+
+
+def test_at_most_six_shapes_with_one_meaning_each() -> None:
+    assert paper.SHAPES == {
+        "direction": "o",
+        "random": "x",
+        "text": "^",
+        "baseline": "s",
+        "paper_finder": "D",
+        "probe": "P",
+    }
+    assert len(set(paper.SHAPES.values())) == len(paper.SHAPES) <= 6
+
+
+def test_one_sequential_and_one_diverging_map() -> None:
+    import matplotlib as mpl
+
+    assert paper.SEQUENTIAL_CMAP == "cividis"
+    assert mpl.colormaps[paper.SEQUENTIAL_CMAP] is not None
+    diverging = paper.diverging_cmap()
+    assert tuple(diverging(0.5)[:3]) == pytest.approx(
+        (0.9686, 0.9686, 0.9686), abs=0.01
+    )
+    ends = [diverging(0.0), diverging(1.0)]
+    assert abs(_lum_rgba(ends[0]) - _lum_rgba(ends[1])) < 0.35
+    assert _lum_rgba(diverging(0.5)) > _lum_rgba(ends[0])
+
+
+def _lum_rgba(rgba: tuple[float, ...]) -> float:
+    lin = [
+        c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        for c in rgba[:3]
+    ]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def test_type_and_line_rules_are_constants() -> None:
+    assert paper.MIN_TEXT == 7.0
+    assert paper.TEXT_GREY_DARKEST == "#4d4d4d"
+    assert paper.DATA_WIDTH_RANGE == (1.0, 1.25)
+    assert paper.REFERENCE_WIDTH == 0.5
+    assert paper.WHISKER_WIDTH == 0.8
+
+
+def test_the_glossary_rules_are_stated_and_the_old_maps_are_deprecated() -> (
+    None
+):
+    for word in ("chance", "grey", "plus", "cividis", "7 pt", "deprecated"):
+        assert word in paper.ENCODING_RULES

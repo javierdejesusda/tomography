@@ -15,11 +15,11 @@ NON_FAMILY = ("text", "paper", "popularity", "own_probability")
 def test_the_family_ramps_have_the_dictionary_hex_values() -> None:
     assert paper.size_ramp("gpt2", 4) == [
         "#eb6800",
-        "#be5400",
-        "#924100",
-        "#662d00",
+        "#ac4c00",
+        "#6d3000",
+        "#2e1400",
     ]
-    assert paper.size_ramp("qwen3", 3) == ["#0083cc", "#006299", "#004166"]
+    assert paper.size_ramp("qwen3", 3) == ["#0083cc", "#005280", "#002133"]
 
 
 def test_enc_holds_one_value_per_meaning() -> None:
@@ -31,8 +31,8 @@ def test_enc_holds_one_value_per_meaning() -> None:
     assert paper.ENC["reference"] == "#7f7f7f"
     assert paper.ENC["text"] == "#009E73"
     assert paper.ENC["paper"] == "#CC79A7"
-    assert paper.ENC["popularity"] == "#E69F00"
-    assert paper.ENC["own_probability"] == "#56B4E9"
+    assert paper.ENC["popularity"] == "#404040"
+    assert paper.ENC["own_probability"] == "#6a6a6a"
     assert paper.ENC["unused"] == "#F0E442"
     assert paper.ENC["secondary_text"] == "#4d4d4d"
 

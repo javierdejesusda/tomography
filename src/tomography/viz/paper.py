@@ -41,11 +41,20 @@ LABEL = 8
 TITLE = 9
 LETTER = 9
 
-RAMP_LIGHTNESS = {"gpt2": (0.46, 0.2), "qwen3": (0.40, 0.2)}
+RAMP_LIGHTNESS = {"gpt2": (0.46, 0.09), "qwen3": (0.40, 0.10)}
 REFERENCE_WIDTH = 0.5
 TREND_WIDTH = 0.6
 DATA_WIDTH = 1.0
-WHISKER_WIDTH = 0.6
+WHISKER_WIDTH = 0.8
+DATA_WIDTH_RANGE = (1.0, 1.25)
+MIN_TEXT = 7.0
+TEXT_GREY_DARKEST = "#4d4d4d"
+MARKER_SIZE = 4.5
+MARKER_EDGE = 0.9
+RANDOM_GREY = "#888888"
+RANDOM_BAND_ALPHA = 0.35
+TEXT_GREEN = "#009E73"
+SEQUENTIAL_CMAP = "cividis"
 
 RC: dict[str, Any] = {
     "font.family": ["serif"],
@@ -109,6 +118,14 @@ MEASURE_MARKERS: dict[str, Any] = {
     "probe": "P",
 }
 ROLE_KEY_MARKER = "h"
+SHAPES: dict[str, str] = {
+    "direction": "o",
+    "random": "x",
+    "text": "^",
+    "baseline": "s",
+    "paper_finder": "D",
+    "probe": "P",
+}
 CATEGORY_MARKERS: tuple[str, ...] = ("*", "<", ">")
 VARIANT_MARKERS: dict[str, str] = {
     "frame": CATEGORY_MARKERS[0],
@@ -132,7 +149,7 @@ ITEM_SET_MARKERS: dict[str, str] = {
     "exact": CATEGORY_MARKERS[1],
     "people": CATEGORY_MARKERS[2],
 }
-ENCODING_RULES = """Encoding rules of every figure.
+ENCODING_RULES = """Encoding rules of every figure (the glossary).
 1. The checkpoint colour ramps (vermilion GPT-2, blue Qwen3) mark checkpoint
    identity only, never a measure.
 2. One marker per measure family, site-wide (`MEASURE_MARKERS`): the direction
@@ -143,10 +160,33 @@ ENCODING_RULES = """Encoding rules of every figure.
 3. Filled markers mean GPT-2 and Qwen3 base, open ones post-trained; every
    legend that uses fill carries the hexagon role key (`ROLE_KEY_MARKER`).
 4. Post-trained lines use one style (`LINESTYLES["post_trained"]`) everywhere.
-5. A grey band has one meaning per figure and is keyed in its legend.
+5. Random is always one grey (`RANDOM_GREY`); a grey band always means the
+   spread of the random baseline over seeds or draws and is keyed; a dotted
+   line always means chance. Bluish green (`TEXT_GREEN`) is reserved for
+   text-only classifiers; popularity and answer log-probability are dark
+   neutrals; the paper's finder alone is pink.
 6. A categorical set that is not a measure (prompt variants, statement sets,
    item sets) uses `CATEGORY_MARKERS`, keyed in its figure, never a measure
-   shape; shapes may repeat across figures because each figure keys them."""
+   shape; shapes may repeat across figures because each figure keys them.
+7. At most six shapes site-wide (`SHAPES`): circle for the direction or
+   reader under test, x for random, up triangle for a text classifier,
+   square for popularity or another supervised baseline, diamond for the
+   paper's finder, plus for the probe. Categories that are not measures go
+   to position, columns, sub-rows or labels. `CATEGORY_MARKERS`,
+   `VARIANT_MARKERS`, `SET_MARKERS`, `ITEM_SET_MARKERS`,
+   `QUESTION_SET_MARKERS` and `PROMPT_MARKERS` are deprecated and stay only
+   until each figure migrates.
+8. Role: filled markers for GPT-2 and base, open markers in the family
+   colour for post-trained, 4.5 to 5 pt with a 0.9 pt edge; adjacent sizes
+   in a ramp differ by at least 0.12 lightness. Where a figure already
+   carries role by panel or row block, fill may carry a state (fluent,
+   passes) and the figure key says so.
+9. One sequential map (`SEQUENTIAL_CMAP`, cividis, never reversed) and one
+   diverging map (`diverging_cmap()`, purple to neutral to ochre: it avoids
+   the family hues and the reserved green and differs along the blue-yellow
+   axis, so red-green colour-vision deficiency and greyscale keep the sign).
+10. No text under 7 pt (`MIN_TEXT`) and none lighter than #4d4d4d; data
+   lines 1.0 to 1.25 pt, reference lines 0.5 pt, whiskers 0.8 pt."""
 
 
 def _build_enc() -> dict[str, Any]:
@@ -156,12 +196,12 @@ def _build_enc() -> dict[str, Any]:
         "qwen3": tuple(size_ramp("qwen3", 3)),
         "direction": INK,
         "random_band": RANDOM_BAND,
-        "random_marker": "#888888",
+        "random_marker": RANDOM_GREY,
         "reference": CHANCE,
-        "text": "#009E73",
+        "text": TEXT_GREEN,
         "paper": "#CC79A7",
-        "popularity": "#E69F00",
-        "own_probability": "#56B4E9",
+        "popularity": "#404040",
+        "own_probability": "#6a6a6a",
         "unused": "#F0E442",
         "secondary_text": "#4d4d4d",
     }
@@ -221,6 +261,22 @@ def display_name(key: str) -> str:
         variant = "few-shot" if variant == "fewshot" else variant
         return f"{name}, {variant}"
     return name
+
+
+def diverging_cmap() -> mpl.colors.Colormap:
+    """Builds the one diverging map of the site: purple, neutral, ochre.
+
+    The ends avoid the vermilion and blue family hues and the reserved green,
+    both ends sit at similar lightness and differ along the blue-yellow axis,
+    so the map survives red-green colour-vision deficiency and greyscale
+    printing, and the centre is a neutral light grey.
+
+    Returns:
+        The colormap.
+    """
+    return mpl.colors.LinearSegmentedColormap.from_list(
+        "purple_ochre", ["#762a83", "#f7f7f7", "#8c6a1c"]
+    )
 
 
 def size_ramp(family_key: str, count: int) -> list[str]:
