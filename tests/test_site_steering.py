@@ -225,6 +225,8 @@ def test_caption_is_the_template_filled_from_the_files(
     assert f"The fluency rule holds at both signs of 0.1 on {held}" in caption
     assert f"and at 0.3 or {MINUS}0.3 on {fails}." in caption
     assert "no random-direction arm" in caption
+    assert "the utility steering run uses random directions" in caption
+    assert "finder comparison" not in caption
     assert "range over the 3 steering vectors" in caption
     assert output.numbers["n_neutral"] == n_neutral
 
