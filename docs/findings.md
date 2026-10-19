@@ -2153,7 +2153,7 @@ perplexity is 139.3 at +0.2 and 438.0 at +0.3 against 53.6 without steering, and
 and 0.099 across the four sizes. These runs use coefficients of the same relative range (up to 0.3), and nothing in
 their files shows whether the steered text is fluent. No score in this section is called fluent or read as steering that
 works. Only M1 has a random-direction arm; C2, P7, LR1, C4 and C5 do not. M1, C2, P7 and C5 were later run on
-`gpt2-large` and `gpt2-xl` at `f4d414d`, with random-direction arms and the fluency measure; they are reported in
+`gpt2-large` and `gpt2-xl` at `f4d414d`, with random-direction arms and the fluency measure (M1 also on `gpt2-medium`, at `bab5b75`); they are reported in
 [The larger GPT-2 sizes (M1, C2, P7, C5)](#the-larger-gpt-2-sizes-m1-c2-p7-c5), after the `gpt2` runs. LR1 and C4 were
 later run on `gpt2-medium`, `gpt2-large` and `gpt2-xl` (chain 17, `89ea7cb`), C4 with random-direction arms and the
 perplexity of neutral text; they are reported at the end of that section, under
@@ -2408,6 +2408,92 @@ Erasure. Projecting a finder's direction out of the activations and fitting a fr
 
 - **The probe is erased for one finder.** The probe accuracy is 0.643 [0.567, 0.715] before the projection on `gpt2-large` and 0.678 [0.597, 0.736] on `gpt2-xl`. After `mean_diff` it is 0.500, after `logistic` 0.586 and 0.612, after `pca_diff`, `pca_raw` and `kmeans` between 0.636 and 0.659 (`gpt2-large`) and between 0.670 and 0.676 (`gpt2-xl`), and after the random direction it is unchanged.
 - **The behavioral gap does not move.** It is 0.087 [-0.035, 0.203] and 0.104 [-0.030, 0.231] without a projection and between -0.004 and 0.126 (`gpt2-large`) and between 0.110 and 0.185 (`gpt2-xl`) under the projection of each finder or of the random direction, with every interval overlapping the unprojected one. The lowest point value is `logistic` on `gpt2-large` (-0.004, a fall of 0.091 with the interval [-0.107, 0.095]); the random projection gives 0.126. On the check judge the unprojected gaps are 0.185 and 0.120 and the projected ones 0.090 to 0.185 and 0.083 to 0.183. As on `gpt2`, the two operationalizations of erasure disagree: the probe is erased for one finder and the behavioral gap for none.
+
+#### M1 on gpt2-medium
+
+M1 on `gpt2-medium` (run `m1/gpt2-medium/eef91d1dfe8e`, made at `bab5b75` on a rented GPU pod; see [Run identity](#run-identity)): the
+same config as the `gpt2-large` and `gpt2-xl` runs above (six finders, 10 readers per finder, the first 3 used for steering
+at layers 10, 13 and 17 of 24, 250 prompts, one sample per prompt, relative strengths 0.1, 0.2 and 0.3, `fluency` on, batch size
+16), and the same win rate (750 (prompt, reader) pairs per cell, 0.5 means no effect). There is one run, so the variation between
+runs is not measured and the Wilson intervals do not include it. Test accuracy is on 4,808 pairs, at the layer of each finder.
+
+| Finder    | Test accuracy        | Layer | Win rate 0.1         | Win rate 0.2         | Win rate 0.3         | Check judge 0.3      |
+| --------- | -------------------- | ----- | -------------------- | -------------------- | -------------------- | -------------------- |
+| pca_diff  | 0.591 [0.588, 0.595] | L15   | 0.584 [0.548, 0.619] | 0.645 [0.610, 0.679] | 0.728 [0.695, 0.759] | 0.772 [0.741, 0.801] |
+| pca_raw   | 0.611 [0.608, 0.614] | L24   | 0.555 [0.519, 0.590] | 0.597 [0.562, 0.632] | 0.671 [0.636, 0.703] | 0.737 [0.705, 0.768] |
+| mean_diff | 0.641 [0.628, 0.654] | L15   | 0.536 [0.500, 0.571] | 0.525 [0.490, 0.561] | 0.659 [0.624, 0.692] | 0.677 [0.643, 0.710] |
+| logistic  | 0.676 [0.660, 0.691] | L15   | 0.521 [0.486, 0.557] | 0.485 [0.450, 0.521] | 0.495 [0.459, 0.530] | 0.555 [0.519, 0.590] |
+| kmeans    | 0.613 [0.608, 0.617] | L24   | 0.567 [0.531, 0.602] | 0.665 [0.631, 0.698] | 0.728 [0.695, 0.759] | 0.769 [0.738, 0.798] |
+| random    | 0.560 [0.532, 0.583] | L20   | 0.528 [0.492, 0.563] | 0.491 [0.455, 0.526] | 0.547 [0.511, 0.582] | 0.532 [0.496, 0.567] |
+
+- **Reading does not order the finders, and `logistic` does not steer.** The test accuracy of the five finders spans 0.591
+  (`pca_diff`) to 0.676 (`logistic`), 0.031 to 0.116 above the random direction (0.560 [0.532, 0.583]; the `pca_diff`
+  interval [0.588, 0.595] is just above its upper bound). The win rate at 0.3 is highest for `pca_diff` and `kmeans` (0.728
+  [0.695, 0.759] each) and lowest for `logistic`, 0.495 [0.459, 0.530], the finder with the highest test accuracy: its win
+  rate includes 0.5 and is below that of the random direction (0.547 [0.511, 0.582]). The `pca_diff` interval at 0.3
+  overlaps those of `pca_raw` (0.671 [0.636, 0.703]) and `kmeans` and is clear of `mean_diff` (0.659 [0.624, 0.692]) and
+  `logistic`. The check judge gives the same two ends at 0.3 (0.772 for `pca_diff`, 0.769 for `kmeans` and 0.555 [0.519,
+  0.590] for `logistic`). The test accuracy of `logistic` is 0.655, 0.676, 0.680 and 0.694 on `gpt2`, `gpt2-medium`,
+  `gpt2-large` and `gpt2-xl` and its win rate at 0.3 is 0.925, 0.495, 0.540 and 0.649.
+- **The random direction.** Its win rate is 0.528, 0.491 and 0.547 [0.511, 0.582] at 0.1, 0.2 and 0.3: the interval
+  includes 0.5 at 0.1 and 0.2 and lies above it at 0.3 on the primary judge (0.047 from 0.5), while on the check judge at
+  0.3 it includes 0.5 (0.532 [0.496, 0.567]). That excursion has the opposite sign to the one on `gpt2-large` (0.441 [0.406,
+  0.477] at 0.3), comes from one run and is not read as an effect of the random direction. At 0.3 the finders are above the
+  random win rate by 0.112 (`mean_diff`) to 0.181 (`pca_diff` and `kmeans`), and `logistic` is 0.052 below it.
+- **Judges and empty completions.** The share of swept settings with the same dose sign under both judges is 0.889 (0.722
+  on `gpt2-large` and 1.000 on `gpt2-xl`). The share of empty completions over all generations is 0.
+
+Cost to the text. Unsteered, the neutral text has a perplexity of 39.2 and the generated text a distinct-1 of 0.217. The
+table gives the mean over the three steering readers, with the ratio to the unsteered perplexity in parentheses at the largest
+strength.
+
+| Finder    | Perplexity +0.1 | Perplexity +0.2 | Perplexity +0.3 | Distinct-1 +0.3 | Perplexity -0.3 | Distinct-1 -0.3 |
+| --------- | --------------- | --------------- | --------------- | --------------- | --------------- | --------------- |
+| pca_diff  | 41.1            | 51.8            | 108.6 (2.77x)   | 0.148           | 111.3 (2.84x)   | 0.170           |
+| pca_raw   | 41.6            | 57.7            | 161.4 (4.12x)   | 0.107           | 164.2 (4.19x)   | 0.179           |
+| mean_diff | 43.3            | 65.7            | 191.5 (4.89x)   | 0.114           | 155.3 (3.96x)   | 0.174           |
+| logistic  | 44.5            | 69.0            | 190.0 (4.85x)   | 0.138           | 151.0 (3.85x)   | 0.186           |
+| kmeans    | 41.6            | 57.5            | 158.0 (4.03x)   | 0.113           | 162.9 (4.16x)   | 0.163           |
+| random    | 41.5            | 51.8            | 86.5 (2.21x)    | 0.179           | 96.7 (2.47x)    | 0.194           |
+
+- **The largest strength costs the text, more than on the larger GPT-2 sizes.** At +0.3 the perplexity of the finders is
+  2.77 to 4.89 times the unsteered one (the random direction: 2.21) and the distinct-1 is 0.107 to 0.148 (random: 0.179); at
+  -0.3 the ratio is 2.84 to 4.19 (random: 2.47) and the distinct-1 0.163 to 0.186 (random: 0.194). On `gpt2-large` and
+  `gpt2-xl` the ratio at +0.3 is 1.35 to 1.68 and 1.34 to 1.56. By the rule above (mean perplexity at most 1.5 times the
+  unsteered one and mean distinct-1 at least 0.15) every finder and the random direction fail at +0.3 and at -0.3, so the win
+  rates at 0.3 (0.495 to 0.728) are scores of text that fails the rule and are not read as steering that works.
+- **Which strengths pass.** A strength passes for a finder when both +s and -s pass. 0.1 passes for every finder and for
+  the random direction (ratios at most 1.14, distinct-1 of at least 0.192). 0.2 passes only for `pca_diff` (1.32 and 1.38
+  times, distinct-1 0.182 and 0.203) and the random direction (1.32 and 1.37): `pca_raw` (1.47 and 1.55) and `kmeans` (1.47
+  and 1.57) fail at -0.2, and `mean_diff` (1.68 and 1.60) and `logistic` (1.76 and 1.62) fail at both signs. At 0.1 the
+  finders win 0.521 (`logistic`) to 0.584 (`pca_diff`) against 0.528 for the random direction, and each finder's interval
+  overlaps that of the random direction ([0.492, 0.563]); at 0.2 `pca_diff` wins 0.645 [0.610, 0.679] against 0.491 [0.455,
+  0.526].
+
+Erasure. As above, the table gives the probe accuracy before and after projecting a finder's direction out of the activations
+of the control layers (10, 13 and 17), and the behavioral gap (100 pairs) for the primary and the check judge. The `none` row is the
+gap without a projection.
+
+| Finder               | Probe before         | Probe after          | Gap primary            | Gap check              |
+| -------------------- | -------------------- | -------------------- | ---------------------- | ---------------------- |
+| pca_diff             | 0.658 [0.573, 0.711] | 0.667 [0.608, 0.706] | 0.050 [-0.027, 0.110]  | 0.061 [-0.011, 0.141]  |
+| pca_raw              | 0.658 [0.573, 0.711] | 0.658 [0.588, 0.698] | -0.012 [-0.062, 0.027] | 0.025 [-0.002, 0.049]  |
+| mean_diff            | 0.658 [0.573, 0.711] | 0.500 [0.500, 0.500] | 0.047 [0.038, 0.051]   | -0.004 [-0.056, 0.061] |
+| logistic             | 0.658 [0.573, 0.711] | 0.600 [0.521, 0.651] | 0.049 [0.027, 0.085]   | -0.011 [-0.047, 0.022] |
+| kmeans               | 0.658 [0.573, 0.711] | 0.653 [0.587, 0.698] | 0.085 [0.031, 0.113]   | 0.079 [0.048, 0.097]   |
+| random               | 0.658 [0.573, 0.711] | 0.658 [0.573, 0.711] | 0.146 [0.079, 0.227]   | 0.097 [0.024, 0.203]   |
+| none (no projection) |                      |                      | 0.082 [-0.051, 0.211]  | -0.039 [-0.164, 0.080] |
+
+- **The probe is erased for one finder.** The probe accuracy is 0.658 [0.573, 0.711] before the projection. After
+  `mean_diff` it is 0.500, the only interval clear of the one before. After `logistic` it is 0.600 [0.521, 0.651], a fall of
+  0.058 whose interval overlaps the one before; after `pca_diff`, `pca_raw` and `kmeans` it is 0.653 to 0.667, within 0.009 of
+  the value before, and after the random direction it is unchanged.
+- **The behavioral gap does not fall.** On the primary judge it is 0.082 [-0.051, 0.211] without a projection and -0.012 to
+  0.085 under the projection of a finder (0.146 [0.079, 0.227] for the random direction), every interval overlapping the
+  unprojected one; the intervals of `pca_raw` (-0.012 [-0.062, 0.027]) and `mean_diff` (0.047 [0.038, 0.051]) lie below that
+  of the random direction. On the check judge it is -0.039 [-0.164, 0.080] without a projection and -0.011 to 0.079 under one
+  (random: 0.097). The data show no fall of the gap below the unprojected interval. As on `gpt2-large` and `gpt2-xl`, the
+  two operationalizations of erasure disagree: the probe is erased for one finder and the behavioral gap for none.
 
 #### C2 on gpt2-large and gpt2-xl
 
@@ -4511,8 +4597,8 @@ checkpoints (the 4B pair in chain 17, at `89ea7cb` on a rented GPU pod) and so d
 chain 17 was cut when the chain was stopped and is not exported; the reported one is from chain 20, at `86c319b`).
 LR1 and C4 ran on the 0.6B, 1.7B and 4B pairs (the 0.6B runs are from chain 43, at `bab5b75`, and the 4B C4 runs from
 chain 21, at `d09822b`), C2 and C5 on the 1.7B and 4B pairs (the `qwen3-4b-base` C2 run and both 4B C5
-runs are from chain 23, at `d09822b`), and M1 on the 1.7B and 4B pairs (the 4B M1 runs are from chain 22, at `d09822b`). The 4B results follow the 1.7B text
-in a `#### The 4B pair` block of each section, and the 0.6B results of LR1 and C4 follow those in `#### The 0.6B pair` blocks. The post-trained checkpoints use the chat
+runs are from chain 23, at `d09822b`), and M1 on the 0.6B, 1.7B and 4B pairs (the 4B M1 runs are from chain 22, at `d09822b`, and the 0.6B ones from chain 41, at `bab5b75`). The 4B results follow the 1.7B text
+in a `#### The 4B pair` block of each section, and the 0.6B results of LR1 and C4 follow those in `#### The 0.6B pair` blocks, and the 0.6B results of M1 follow the 4B ones in a `#### The 0.6B pair (M1)` block. The post-trained checkpoints use the chat
 template with thinking disabled and the base checkpoints plain tags, as in [LAT reading on
 Qwen3](#lat-reading-on-qwen3). Base and post-trained checkpoints are different models: every table has one column per
 checkpoint, they are compared within a size, and they are never pooled into one metric. Each checkpoint has one
@@ -4992,6 +5078,150 @@ Erasure. As above, the tables give the probe accuracy before and after projectin
 
 - **The probe is erased for one finder.** The probe accuracy is 0.737 [0.621, 0.794] before the projection on the base checkpoint and 0.757 [0.663, 0.816] on the post-trained one. After `mean_diff` it is 0.500 on both, the only interval clear of the one before. After `logistic` it is 0.713 and 0.749, and after `pca_diff`, `pca_raw` and `kmeans` it is 0.671 to 0.676 and 0.634 to 0.643, falls of 0.062 to 0.066 and 0.114 to 0.122 whose intervals overlap the ones before. After the random direction it is unchanged. As on the 1.7B pair, `logistic` leaves the probe close to its value before.
 - **The behavioral gap does not fall.** On the base checkpoint it is 0.025 [-0.102, 0.165] without a projection and 0.037 to 0.091 under the projection of a finder (0.065 for the random direction), every interval overlapping the unprojected one; on the check judge it is 0.043 without a projection and 0.037 to 0.102 under one. On the post-trained checkpoint it is 0.087 [-0.032, 0.207] without a projection and 0.165 to 0.250 under the projection of a finder (0.089 for the random direction), every interval overlapping the unprojected one, and the intervals of four finders (`pca_diff`, `pca_raw`, `mean_diff` and `kmeans`) do not overlap that of the random direction ([0.034, 0.130]); on the check judge it is 0.101 without a projection and 0.109 to 0.195 under one. The data show no fall of the gap under a projection on either checkpoint, and on the post-trained one the point values are above the unprojected one. As on the 1.7B pair, the two operationalizations of erasure disagree: the probe is erased for one finder and the behavioral gap for none.
+
+#### The 0.6B pair (M1)
+
+The same config as the 1.7B and 4B runs above (six finders, 10 readers per finder, the first 3 used for steering, 250
+prompts, one sample per prompt, `fluency` on), on `qwen3-0.6b-base` and `qwen3-0.6b` (runs `m1/qwen3-0.6b-base/bf4cc620da8b`
+and `m1/qwen3-0.6b/976e4c4a87e1`, made in chain 41 at `bab5b75` on a rented GPU pod; see [Run identity](#run-identity)). Both
+are steered at layers 11, 15 and 20 (of 28, as the 1.7B pair). There is one run per checkpoint, so the variation between runs
+that the 1.7B pair showed (above) is not measured here, and the Wilson intervals do not include it. Each win-rate cell has 749
+or 750 (prompt, reader) pairs and the test accuracy is on 4,808 pairs, at the layer of each finder.
+
+`qwen3-0.6b-base`:
+
+| Finder    | Test accuracy        | Layer | Win rate 0.1         | Win rate 0.2         | Win rate 0.3         | Check judge 0.3      |
+| --------- | -------------------- | ----- | -------------------- | -------------------- | -------------------- | -------------------- |
+| pca_diff  | 0.728 [0.718, 0.737] | L25   | 0.637 [0.602, 0.671] | 0.697 [0.663, 0.729] | 0.715 [0.681, 0.746] | 0.761 [0.730, 0.790] |
+| pca_raw   | 0.738 [0.726, 0.748] | L25   | 0.542 [0.506, 0.577] | 0.547 [0.512, 0.583] | 0.508 [0.472, 0.544] | 0.564 [0.528, 0.599] |
+| mean_diff | 0.754 [0.747, 0.760] | L18   | 0.612 [0.577, 0.646] | 0.692 [0.658, 0.724] | 0.711 [0.677, 0.742] | 0.736 [0.703, 0.766] |
+| logistic  | 0.744 [0.734, 0.755] | L23   | 0.598 [0.563, 0.633] | 0.712 [0.679, 0.743] | 0.743 [0.710, 0.773] | 0.687 [0.653, 0.719] |
+| kmeans    | 0.747 [0.739, 0.753] | L25   | 0.529 [0.493, 0.564] | 0.514 [0.478, 0.550] | 0.524 [0.488, 0.560] | 0.577 [0.542, 0.612] |
+| random    | 0.609 [0.583, 0.634] | L26   | 0.510 [0.474, 0.546] | 0.509 [0.473, 0.544] | 0.477 [0.442, 0.513] | 0.475 [0.439, 0.510] |
+
+`qwen3-0.6b`:
+
+| Finder    | Test accuracy        | Layer | Win rate 0.1         | Win rate 0.2         | Win rate 0.3         | Check judge 0.3      |
+| --------- | -------------------- | ----- | -------------------- | -------------------- | -------------------- | -------------------- |
+| pca_diff  | 0.757 [0.754, 0.760] | L23   | 0.711 [0.677, 0.742] | 0.860 [0.833, 0.883] | 0.913 [0.891, 0.931] | 0.877 [0.852, 0.899] |
+| pca_raw   | 0.757 [0.757, 0.759] | L23   | 0.761 [0.730, 0.790] | 0.901 [0.878, 0.921] | 0.927 [0.906, 0.943] | 0.891 [0.866, 0.911] |
+| mean_diff | 0.760 [0.759, 0.762] | L23   | 0.764 [0.732, 0.793] | 0.855 [0.828, 0.878] | 0.907 [0.884, 0.925] | 0.849 [0.822, 0.873] |
+| logistic  | 0.735 [0.721, 0.746] | L28   | 0.632 [0.597, 0.666] | 0.712 [0.679, 0.743] | 0.772 [0.741, 0.801] | 0.745 [0.713, 0.775] |
+| kmeans    | 0.759 [0.758, 0.760] | L23   | 0.719 [0.685, 0.750] | 0.844 [0.816, 0.868] | 0.919 [0.897, 0.936] | 0.869 [0.843, 0.892] |
+| random    | 0.624 [0.584, 0.665] | L24   | 0.519 [0.483, 0.554] | 0.531 [0.495, 0.566] | 0.549 [0.514, 0.585] | 0.625 [0.590, 0.659] |
+
+- **Reading does not order the finders, and the finders that steer least differ by checkpoint.** The test accuracy of the
+  five finders spans 0.728 to 0.754 on the base checkpoint (`mean_diff` highest, `pca_diff` lowest) and 0.735 to 0.760 on the
+  post-trained one (`mean_diff` highest, `logistic` lowest), 0.119 to 0.145 and 0.110 to 0.136 above the random direction
+  (0.609 [0.583, 0.634] and 0.624 [0.584, 0.665]). On the base checkpoint the win rate at 0.3 is highest for `logistic` (0.743
+  [0.710, 0.773]), `pca_diff` (0.715) and `mean_diff` (0.711), whose intervals overlap, and `pca_raw` (0.508 [0.472, 0.544])
+  and `kmeans` (0.524 [0.488, 0.560]) include 0.5 although their test accuracy (0.738 and 0.747) is that of the other three;
+  the check judge puts them at 0.564 [0.528, 0.599] and 0.577 [0.542, 0.612], against 0.687 to 0.761 for the other three. On
+  the post-trained checkpoint four finders win 0.907 to 0.927 at 0.3 with overlapping intervals (`pca_raw` 0.927 [0.906,
+  0.943]) and `logistic` wins 0.772 [0.741, 0.801], clear of the other four, also on the check judge (0.745 [0.713, 0.775]
+  against 0.849 to 0.891). `logistic` has the lowest win rate at 0.3 on the post-trained checkpoint, as on three of the four
+  1.7B and 4B checkpoints, and the highest point value on the base one.
+- **The random direction.** On the base checkpoint its win rate includes 0.5 at every strength on both judges (0.510, 0.509,
+  0.477 [0.442, 0.513] and 0.475 [0.439, 0.510] on the check judge at 0.3). On the post-trained checkpoint it includes 0.5 at
+  0.1 and 0.2 (0.519, 0.531) and is above it at 0.3 on both judges (0.549 [0.514, 0.585] and, on the check judge, 0.625
+  [0.590, 0.659]); that check-judge value is 0.125 above 0.5 and comes from one run, and the finders are still above it (0.745
+  to 0.891). At 0.3 the finders are above the random win rate by 0.031 (`pca_raw`) to 0.265 (`logistic`) on the base
+  checkpoint and by 0.223 (`logistic`) to 0.377 (`pca_raw`) on the post-trained one.
+- **Judges and empty completions.** The share of swept settings with the same dose sign under both judges is 0.944 on the
+  base checkpoint and 1.000 on the post-trained one (0.889 and 0.833 on the 1.7B pair, 0.944 and 0.944 on the 4B pair). The
+  share of empty completions over all generations is 0 on both.
+- **Against the 1.7B pair.** The test accuracy of the base checkpoint (0.728 to 0.754) is below that of the 1.7B base
+  checkpoint (0.767 to 0.776). The win rates at 0.3 are 0.508 to 0.743 on the 0.6B base checkpoint against 0.752 to 0.896 on
+  the 1.7B one, and 0.772 to 0.927 on the 0.6B post-trained checkpoint against 0.743 to 0.921 on the 1.7B one. These are one
+  run per checkpoint of each size, so the differences are not tested against variation between runs.
+
+Cost to the text. Unsteered, the neutral text has a perplexity of 26.9 on the base checkpoint and 47.6 on the post-trained
+one, and the generated text a distinct-1 of 0.210 and 0.160. The tables give the mean over the three steering readers, with
+the ratio to the unsteered perplexity in parentheses at the largest strength.
+
+`qwen3-0.6b-base`:
+
+| Finder    | Perplexity +0.1 | Perplexity +0.2 | Perplexity +0.3 | Distinct-1 +0.3 | Perplexity -0.3 | Distinct-1 -0.3 |
+| --------- | --------------- | --------------- | --------------- | --------------- | --------------- | --------------- |
+| pca_diff  | 28.6            | 34.5            | 49.2 (1.83x)    | 0.144           | 49.0 (1.82x)    | 0.197           |
+| pca_raw   | 28.6            | 34.9            | 51.3 (1.91x)    | 0.135           | 57.9 (2.16x)    | 0.193           |
+| mean_diff | 28.8            | 35.7            | 52.9 (1.97x)    | 0.175           | 57.7 (2.15x)    | 0.170           |
+| logistic  | 28.6            | 34.9            | 50.3 (1.87x)    | 0.179           | 53.7 (2.00x)    | 0.164           |
+| kmeans    | 28.8            | 35.5            | 53.2 (1.98x)    | 0.129           | 57.8 (2.15x)    | 0.188           |
+| random    | 27.9            | 31.3            | 39.5 (1.47x)    | 0.171           | 39.0 (1.45x)    | 0.206           |
+
+`qwen3-0.6b`:
+
+| Finder    | Perplexity +0.1 | Perplexity +0.2 | Perplexity +0.3 | Distinct-1 +0.3 | Perplexity -0.3 | Distinct-1 -0.3 |
+| --------- | --------------- | --------------- | --------------- | --------------- | --------------- | --------------- |
+| pca_diff  | 52.3            | 66.3            | 97.9 (2.05x)    | 0.122           | 87.8 (1.84x)    | 0.128           |
+| pca_raw   | 52.8            | 68.1            | 103.7 (2.18x)   | 0.129           | 81.6 (1.71x)    | 0.126           |
+| mean_diff | 53.4            | 71.1            | 114.1 (2.40x)   | 0.143           | 87.8 (1.84x)    | 0.118           |
+| logistic  | 52.2            | 67.2            | 105.4 (2.21x)   | 0.142           | 94.8 (1.99x)    | 0.119           |
+| kmeans    | 53.6            | 70.3            | 107.9 (2.27x)   | 0.125           | 91.2 (1.91x)    | 0.121           |
+| random    | 49.4            | 56.9            | 74.8 (1.57x)    | 0.128           | 78.7 (1.65x)    | 0.139           |
+
+- **The largest strength costs the text on both checkpoints.** At +0.3 the perplexity of the finders is 1.83 to 1.98 times
+  the unsteered one on the base checkpoint and 2.05 to 2.40 times on the post-trained one (the random direction: 1.47 and
+  1.57), and the distinct-1 is 0.129 to 0.179 and 0.122 to 0.143 (random: 0.171 and 0.128). At -0.3 the ratio is 1.82 to 2.16
+  and 1.71 to 1.99 (random: 1.45 and 1.65). By the rule above (mean perplexity at most 1.5 times the unsteered one and mean
+  distinct-1 at least 0.15), on the base checkpoint every finder fails at +0.3 and at -0.3 (ratios past 1.5) while the random
+  direction passes at both (1.47 and 1.45 times, distinct-1 0.171 and 0.206); on the post-trained checkpoint every finder
+  and the random direction fail at +0.3 and -0.3. The unsteered distinct-1 of the post-trained checkpoint (0.160) is only 0.010
+  above the threshold, so its distinct-1 half of the rule fails at many small strengths. The win rates at 0.3 (0.508 to
+  0.743 and 0.772 to 0.927) are therefore scores of text that fails the rule and are not read as steering that works.
+- **Which strengths pass.** A strength passes for a finder when both +s and -s pass. On the base checkpoint 0.1 and 0.2 pass
+  for every finder and for the random direction (ratios at most 1.34, distinct-1 of at least 0.171); among them at 0.2
+  `logistic` (0.712 [0.679, 0.743]), `pca_diff` (0.697) and `mean_diff` (0.692) win most, against 0.547 (`pca_raw`), 0.514
+  (`kmeans`) and 0.509 for the random direction, and at 0.1 the finders win 0.529 (`kmeans`) to 0.637 (`pca_diff`) against
+  0.510. On the post-trained checkpoint 0.1 passes for every finder and for the random direction (ratios at most 1.13,
+  distinct-1 of at least 0.152) and 0.2 passes for none: `pca_diff` (1.39), `pca_raw` (1.43) and `kmeans` (1.48) have a
+  distinct-1 of 0.140 or 0.141 at +0.2, `mean_diff` (1.49, 0.156) and `logistic` (1.41, 0.155) pass at +0.2 but have a distinct-1
+  of 0.138 and 0.137 at -0.2, and the random direction has 0.146 at +0.2. At 0.1 the finders win 0.632 (`logistic`) to 0.764
+  (`mean_diff`) against 0.519 for the random direction. The boundary is the same as in the 1.7B and 4B pairs (0.2 on the
+  base checkpoint, 0.1 on the post-trained one).
+
+Erasure. As above, the tables give the probe accuracy before and after projecting a finder's direction out of the activations
+of the control layers (11, 15 and 20), and the behavioral gap (100 pairs) for the primary and the check judge. The `none` row
+is the gap without a projection.
+
+`qwen3-0.6b-base`:
+
+| Finder               | Probe before         | Probe after          | Gap primary          | Gap check            |
+| -------------------- | -------------------- | -------------------- | -------------------- | -------------------- |
+| pca_diff             | 0.677 [0.576, 0.758] | 0.637 [0.582, 0.693] | 0.132 [0.108, 0.158] | 0.103 [0.045, 0.158] |
+| pca_raw              | 0.677 [0.576, 0.758] | 0.657 [0.569, 0.730] | 0.118 [0.057, 0.152] | 0.128 [0.120, 0.133] |
+| mean_diff            | 0.677 [0.576, 0.758] | 0.500 [0.500, 0.500] | 0.147 [0.128, 0.160] | 0.141 [0.108, 0.198] |
+| logistic             | 0.677 [0.576, 0.758] | 0.631 [0.519, 0.748] | 0.090 [0.036, 0.141] | 0.124 [0.078, 0.189] |
+| kmeans               | 0.677 [0.576, 0.758] | 0.652 [0.572, 0.742] | 0.191 [0.170, 0.218] | 0.083 [0.032, 0.164] |
+| random               | 0.677 [0.576, 0.758] | 0.677 [0.577, 0.758] | 0.161 [0.098, 0.260] | 0.078 [0.059, 0.113] |
+| none (no projection) |                      |                      | 0.247 [0.122, 0.377] | 0.107 [0.012, 0.205] |
+
+`qwen3-0.6b`:
+
+| Finder               | Probe before         | Probe after          | Gap primary            | Gap check             |
+| -------------------- | -------------------- | -------------------- | ---------------------- | --------------------- |
+| pca_diff             | 0.682 [0.605, 0.742] | 0.637 [0.550, 0.677] | 0.053 [-0.018, 0.098]  | 0.068 [0.033, 0.115]  |
+| pca_raw              | 0.682 [0.605, 0.742] | 0.609 [0.526, 0.670] | 0.077 [-0.030, 0.134]  | 0.033 [-0.008, 0.091] |
+| mean_diff            | 0.682 [0.605, 0.742] | 0.500 [0.500, 0.500] | 0.034 [-0.096, 0.104]  | 0.038 [0.018, 0.063]  |
+| logistic             | 0.682 [0.605, 0.742] | 0.667 [0.575, 0.757] | 0.065 [0.029, 0.089]   | 0.037 [-0.022, 0.088] |
+| kmeans               | 0.682 [0.605, 0.742] | 0.615 [0.525, 0.672] | 0.038 [-0.002, 0.060]  | 0.012 [-0.004, 0.041] |
+| random               | 0.682 [0.605, 0.742] | 0.682 [0.605, 0.742] | 0.077 [0.011, 0.175]   | 0.050 [0.012, 0.083]  |
+| none (no projection) |                      |                      | -0.022 [-0.152, 0.109] | 0.027 [-0.070, 0.129] |
+
+- **The probe is erased for one finder.** The probe accuracy is 0.677 [0.576, 0.758] before the projection on the base
+  checkpoint and 0.682 [0.605, 0.742] on the post-trained one. After `mean_diff` it is 0.500 on both, the only interval clear
+  of the one before. After `logistic`, `pca_diff`, `pca_raw` and `kmeans` it is 0.631 to 0.657 and 0.609 to 0.667, falls of
+  0.021 to 0.047 and 0.015 to 0.073 whose intervals overlap the ones before. After the random direction it is unchanged. As
+  on the 1.7B and 4B pairs, `logistic` leaves the probe close to its value before.
+- **The behavioral gap does not fall.** On the base checkpoint it is 0.247 [0.122, 0.377] without a projection and 0.090 to
+  0.191 under the projection of a finder (0.161 [0.098, 0.260] for the random direction, inside that range), every interval
+  overlapping the unprojected one, so the lower point values are not specific to the finders; on the check judge it is 0.107
+  [0.012, 0.205] without a projection and 0.083 to 0.141 under one. On the post-trained checkpoint it is -0.022 [-0.152,
+  0.109] without a projection and 0.034 to 0.077 under one (0.077 [0.011, 0.175] for the random direction), every interval
+  overlapping the unprojected one; on the check judge it is 0.027 [-0.070, 0.129] without a projection and 0.012 to 0.068
+  under one. The data show no fall of the gap under a projection on either checkpoint. As on the 1.7B and 4B pairs, the two
+  operationalizations of erasure disagree: the probe is erased for one finder and the behavioral gap for none.
 
 ### Emotion steering (C2)
 
@@ -6940,7 +7170,7 @@ Config hashes (12 hex digits), GPT-2:
 | P5             | 80b4ae80a6ca | bd9f565baa76 | 430d434007c9 | 4171a611f734 |
 | P7             | 6c19128c5192 | not run      | d03910535564 | eb67813e769d |
 | C1             | add59c39f574 | 2ed2e53ba7fe | 353f91e1b8dc | de76af1a8a07 |
-| M1             | 4e394ed1a72c | not run      | b4995274d1f8 | 3309d5fe55b7 |
+| M1             | 4e394ed1a72c | eef91d1dfe8e | b4995274d1f8 | 3309d5fe55b7 |
 | C2             | 85c9a670bf17 | not run      | 4741abe01da5 | aefba1c6274e |
 | C4             | 1b571ac45420 | not run      | not run      | not run      |
 | C5             | not run      | not run      | 36f392712827 | 0ad95833261d |
@@ -6970,7 +7200,7 @@ Qwen3:
 | P5          | b6a702e460e9    | fb664c3b4be2 | a4bd463deeca    | 7e5e579d102e |
 | P7          | not run         | not run      | 16a7a9e4facf    | eacde3abd0aa |
 | C1          | 7ae3e2aa34e2    | 832462b7b04e | 0cd5a36d3408    | a91f950ad9f5 |
-| M1          | not run         | not run      | e9279a87db07    | 77752112ddbe |
+| M1          | bf4cc620da8b    | 976e4c4a87e1 | e9279a87db07    | 77752112ddbe |
 | C2          | not run         | not run      | 4133e19728fa    | 1b87ff98a318 |
 | C4          | b08c4e236dcf    | 4d4ff337ade5 | 7dd49d64a540    | 5ebc35ea3be6 |
 | C5          | not run         | not run      | 3a14e656df3c    | 52057b2ddc30 |
@@ -7175,6 +7405,25 @@ Config hashes (12 hex digits), chain 43:
 | LR1        | 03ba155a9fe7    | 74d01330d28c |
 | C4         | b08c4e236dcf    | 4d4ff337ade5 |
 
+Chain 41: M1 on gpt2-medium and the Qwen3 0.6B pair (3 runs). `m1/gpt2-medium/eef91d1dfe8e`,
+`m1/qwen3-0.6b-base/bf4cc620da8b` and `m1/qwen3-0.6b/976e4c4a87e1` were made at `bab5b75` (the merge of pull request 199, an
+ancestor of the current main; `git diff --stat bab5b75 HEAD -- src` is empty, so their code is that of main) with a clean
+tree on one rented GPU pod (NVIDIA GeForce RTX 3090, torch 2.14.1+cu130, transformers 5.19.0), with the default M1 config
+of their model (`config.json` of each run) and batch size 16. The time between `started_at` and `finished_at` of the stored
+`meta.json` is 2,485 s (`gpt2-medium`), 2,857 s (`qwen3-0.6b-base`) and 2,847 s (`qwen3-0.6b`); the pod ran two jobs at a
+time on 2026-10-18, alongside the P1 runs of `gpt2-xl` of the same chain (not part of this change), and the chain log of the
+launcher, which is outside the repository, records exit status 0 for each of the three runs and ends with `CHAIN_DONE
+failed=0`. The config hash of each run was recomputed by loading its stored `config.json` (the original pod config and the
+exported one, which agree) into the M1 config class and hashing it, and all three agree with the directory names and with
+the hash of the default M1 config of their model. None of the three replaces a run on main. Exporting these runs changed no
+tracked result.
+
+Config hashes (12 hex digits), chain 41:
+
+| Experiment | gpt2-medium  | qwen3-0.6b-base | qwen3-0.6b   |
+| ---------- | ------------ | --------------- | ------------ |
+| M1         | eef91d1dfe8e | bf4cc620da8b    | 976e4c4a87e1 |
+
 Other runs: P6 `25ee6de331d4`; P8 `e9f9bc04ba3c`.
 
 The files of every run named here are committed under `results/<experiment>/<model>/<hash>/`, copied with
@@ -7187,14 +7436,14 @@ Not in this document yet. No dates are promised.
 
 - P1 on the Qwen3 4B pair with both finders and the sentiment, truth and emotion tasks (it ran on the eight models of
   the P1 subsection).
-- P7 on `gpt2-medium` and on the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B and 4B pairs). M1
-  and C2 on `gpt2-medium` and the two 0.6B Qwen3 checkpoints (they ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B
-  and 4B pairs). C5 on `gpt2`, `gpt2-medium` and the two 0.6B Qwen3 checkpoints (it ran on `gpt2-large`, `gpt2-xl` and the 1.7B and 4B
+- P7 on `gpt2-medium` and on the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B and 4B pairs). C2
+  on `gpt2-medium` and the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B
+  and 4B pairs; M1 ran on all ten models). C5 on `gpt2`, `gpt2-medium` and the two 0.6B Qwen3 checkpoints (it ran on `gpt2-large`, `gpt2-xl` and the 1.7B and 4B
   pairs).
 - P5, persona wording and instruction confounds for honesty, with persona wordings beyond the five pairs of the run.
 - A random-direction arm for C2 and P7 on `gpt2`, a fluency measure (perplexity and distinct-1) for M1, C2 and P7 on
   `gpt2`, and a random-direction arm and the perplexity of neutral text for C4 on `gpt2`. The runs on `gpt2-large` and
-  `gpt2-xl` (M1, C2, P7, C5), the C4 runs on `gpt2-medium`, `gpt2-large` and `gpt2-xl`, the runs on the Qwen3
+  `gpt2-xl` (M1, C2, P7, C5), the M1 runs on `gpt2-medium` and the Qwen3 0.6B pair, the C4 runs on `gpt2-medium`, `gpt2-large` and `gpt2-xl`, the runs on the Qwen3
   1.7B pair (M1, C2, P7, C4, C5), the runs on the Qwen3 4B pair (M1, C2, C4, C5, P7) and the C4 runs on the Qwen3 0.6B pair have them; the C4 scoring is not generation, so no C4 run has a distinct-1.
 - Stored but not read in this document: the emotion direction matrix and embedding of the Qwen3 R4 runs, the A1 matrices
   of concept and layer agreement, the emotion gallery of the Qwen3 C5 runs, and the P5 curves over layers and the
