@@ -474,7 +474,7 @@ def test_the_readers_and_the_text_band_are_labelled_directly(
     texts = {t.get_gid(): t.get_text() for t in ax.texts}
     assert texts["reader_label:truthfulqa_reader"] == "truth reader"
     assert texts["reader_label:persona_reader"] == "persona reader"
-    assert texts["band_label"] == "words, characters"
+    assert " ".join(texts["band_label"].split()) == "words, characters"
 
 
 def test_the_three_panels_share_the_row_limits_with_headroom_for_labels(
@@ -525,3 +525,27 @@ def test_the_text_baseline_is_drawn_in_the_log_probability_panel(
         (line,) = _gid(ax, f"text:{method}")
         assert line.get_xdata()[0] == pytest.approx(output.numbers[key])
     assert ax.get_xlim()[1] >= output.numbers["text_hi"]
+
+
+def test_the_band_label_sits_right_of_the_band_clear_of_the_line(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "levels")
+    output.figure.draw_without_rendering()
+    (label,) = [t for t in ax.texts if t.get_gid() == "band_label"]
+    box = label.get_window_extent(output.figure.canvas.get_renderer())
+    left, right = ax.transData.inverted().transform([[box.x0, 0], [box.x1, 0]])[
+        :, 0
+    ]
+    bands = [p for p in ax.patches if str(p.get_gid()).startswith("textband")]
+    edge = max(p.get_x() + p.get_width() for p in bands)
+    lines = [ln for ln in _gid_prefix(ax, "text:")]
+    assert left > edge
+    assert right <= ax.get_xlim()[1]
+    for line in lines:
+        assert not left <= float(line.get_xdata()[0]) <= right
+    assert label.get_fontsize() >= paper.MIN_TEXT
+
+
+def _gid_prefix(ax: Any, prefix: str) -> list[Any]:
+    return [ln for ln in ax.get_lines() if str(ln.get_gid()).startswith(prefix)]

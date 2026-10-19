@@ -46,7 +46,8 @@ PAIRS = (
     ("sp_en_trans", "neg_sp_en_trans", "translations"),
 )
 NEGATED = tuple(neg for _, neg, _ in PAIRS)
-XLIM_A = (0.1, 0.85)
+XLIM_A = (0.1, 1.0)
+BAND_NOTE_GAP = 0.012
 XLIM_C = (0.1, 0.8)
 XLIM_D = (-0.3, 0.3)
 XLIM_B = (0.15, 1.04)
@@ -277,13 +278,12 @@ def _panel_levels(
             color=paper.ENC["secondary_text"],
         )
         note.set_gid(f"reader_label:{name}")
-    lo = min(first.text[m].lo for m in TEXT_METHODS)
     hi = max(first.text[m].hi for m in TEXT_METHODS)
     band_note = ax.text(
-        (lo + hi) / 2,
+        hi + BAND_NOTE_GAP,
         TOP + 0.15,
-        "words, characters",
-        ha="center",
+        "words,\ncharacters",
+        ha="left",
         va="top",
         fontsize=TEXT,
         color=paper.ENC["secondary_text"],
