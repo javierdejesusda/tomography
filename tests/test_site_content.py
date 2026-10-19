@@ -168,7 +168,7 @@ def test_every_token_names_a_known_target() -> None:
             elif kind == "cite":
                 for key in rest.split(","):
                     assert key in bib, (token, key)
-            elif kind in ("num", "count"):
+            elif kind in ("num", "count", "runs"):
                 owner, _, name = rest.partition(":")
                 key, _, field = name.rpartition(".")
                 assert owner in ("fig", "table"), token
@@ -413,3 +413,9 @@ def test_the_negated_set_claim_counts_checkpoints_below_chance() -> None:
     text = " ".join(_all_texts())
     assert "at least one negated set falls below chance" in text
     assert "[[count:fig:truth.neg_below_half]]" in text
+
+
+def test_counts_over_runs_use_the_runs_token() -> None:
+    text = " ".join(_all_texts())
+    assert "[[runs:fig:knowledge_steering.distinguishable]]" in text
+    assert "[[count:fig:knowledge_steering.distinguishable]]" not in text

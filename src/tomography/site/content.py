@@ -174,7 +174,7 @@ INTRODUCTION = Section(
         (
             "Steering with that direction ([[sec:knowledge_steering]]).",
             "It moves unknown questions more than each of three random "
-            "directions on [[count:fig:knowledge_steering.distinguishable]], "
+            "directions on [[runs:fig:knowledge_steering.distinguishable]], "
             "and known questions move at least as much as unknown ones on "
             "[[num:fig:knowledge_steering.known_ge_unknown_gpt2]] of "
             "[[num:fig:knowledge_steering.n_gpt2]] GPT-2, "
