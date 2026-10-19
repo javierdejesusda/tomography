@@ -195,7 +195,7 @@ def _legend(fig: Figure) -> None:
 
 def _numbers(
     models: list[str], data: dict[str, dict[tuple[str, str], Point]]
-) -> tuple[dict[str, float], dict[str, dict[str, RoleCount]]]:
+) -> tuple[dict[str, float], dict[str, dict[str, RoleCount]], dict[str, str]]:
     def flags(task: str, finder: str, interval: bool) -> dict[str, bool]:
         return {
             m: (
@@ -243,8 +243,9 @@ def _numbers(
     own = [data[m][("utility", "pca_diff")].margin for m in gpt2]
     numbers["pca_utility_gpt2_min"] = min(own)
     numbers["pca_utility_gpt2_max"] = max(own)
-    numbers["random_max"] = max(_randoms(models, data))[0]
-    return numbers, counts
+    largest, holder = max(_randoms(models, data))
+    numbers["random_max"] = largest
+    return numbers, counts, {"random_max": paper.display_name(holder)}
 
 
 def _randoms(
@@ -327,7 +328,7 @@ def build(manifest: Manifest) -> FigureOutput:
     models = manifest.models("p4")
     data = {m: _points(manifest, m) for m in models}
     rows = shared.model_rows(models)
-    numbers, counts = _numbers(models, data)
+    numbers, counts, labels = _numbers(models, data)
     with paper.paper_style():
         fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
         axes = fig.subplots(
@@ -360,5 +361,5 @@ def build(manifest: Manifest) -> FigureOutput:
         numbers,
         _csv(models, data),
         counts,
-        {"random_max": paper.display_name(max(_randoms(models, data))[1])},
+        labels,
     )
