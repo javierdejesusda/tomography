@@ -1,5 +1,3 @@
-import csv
-import io
 from pathlib import Path
 import re
 import runpy
@@ -128,13 +126,92 @@ def test_the_figure_8_caption_scopes_its_strongest_baseline() -> None:
     output = registry.build_figure("knowledge_reading", Manifest(ROOT))
     assert "popularity, the strongest baseline" not in output.detail
     assert (
-        "popularity, the strongest of popularity and the two text classifiers"
+        "direction minus the strongest of popularity and the two text "
+        "classifiers"
     ) in output.detail
-    pops = [
-        float(r["value"])
-        for r in csv.DictReader(io.StringIO(output.csv))
-        if r["panel"] == "a" and r["series"] == "popularity"
-    ]
+
+
+def _appendix(key: str) -> str:
+    (section,) = [s for s in content.APPENDICES if s.key == key]
+    return " ".join(_texts(section))
+
+
+def test_the_overview_method_detail_is_an_appendix_c_paragraph() -> None:
+    text = _appendix("appendix_reading")
     assert (
-        f"{min(pops):.3f} to {max(pops):.3f} for popularity"
-    ) in output.detail
+        "Baselines of each row of [[fig:teaser]]: rows 1 to 5, the "
+        "random direction" in text
+    )
+    assert "row 7, a word classifier" in text
+    assert "row 8, the strongest of popularity and two text classifiers" in text
+    assert "five stacked output signals" in text
+    assert "[[count:fig:teaser.knowledge_confidence]]" in text
+    assert "[[count:fig:teaser.steering]]" in text
+    assert "[[count:fig:teaser.steering_fluent]]" in text
+    assert "which has chance 0.05" in text
+    assert (
+        f"the fluency rule ({FLUENCY.replace('neutral-text ', '')}" in text
+        or ("the fluency rule" in text)
+    )
+    assert "Hanley and McNeil" in text
+    assert "GPT-2 small has no fluency measure" in text
+    assert "[[fig:teaser]]" in text
+    assert "answer probability alone" not in text
+
+
+def test_the_knowledge_detail_moved_to_appendix_g() -> None:
+    text = _appendix("appendix_knowledge")
+    assert "stacks five output signals" in text
+    assert "[[count:fig:knowledge_reading.above_pop_point]]" in text
+    assert "[[count:fig:knowledge_reading.probe_above]]" in text
+    assert "[[num:fig:knowledge_reading.gpt2_small_probe_gain]]" in text
+    assert "no known-against-unknown contrast" in text
+    assert "fitted on the correct and wrong labels" in text
+    assert "Hanley and McNeil" in text
+
+
+def test_the_summary_holds_per_role_on_the_data() -> None:
+    manifest = Manifest(ROOT)
+    teaser = registry.build_figure("teaser", manifest)
+    finders = registry.build_figure("finders", manifest)
+    steering = registry.build_figure("steering", manifest)
+    roles = ("gpt2", "base", "post")
+    tldr = content.TLDR
+    assert tldr.count(". ") == 0
+    assert (
+        "reads utility and morality above a random direction on every "
+        "checkpoint and truth on every Qwen3 checkpoint"
+    ) in tldr
+    for name in ("utility", "morality"):
+        assert all(c.hits == c.total for c in teaser.counts[name].values()), (
+            name
+        )
+    truth = teaser.counts["truth"]
+    assert truth["gpt2"].hits == 0
+    assert truth["base"].hits == truth["base"].total
+    assert truth["post"].hits == truth["post"].total
+    assert "the finder of the paper is weaker" in tldr
+    pairs = (
+        ("pca_sentiment", "logistic_sentiment"),
+        ("pca_utility", None),
+        ("pca_truth", None),
+    )
+    logistic = {"pca_utility": "utility", "pca_truth": "truth"}
+    for pca, other in pairs:
+        for role in roles:
+            if other:
+                ref = finders.counts[other][role].hits
+            else:
+                ref = teaser.counts[logistic[pca]][role].hits
+            assert finders.counts[pca][role].hits <= ref, (pca, role)
+    assert (
+        "truth and knowledge readers do not beat text-only or confidence "
+        "baselines"
+    ) in tldr
+    for name in ("truthfulqa", "knowledge_confidence"):
+        assert all(c.hits == 0 for c in teaser.counts[name].values()), name
+    assert "breaks the fluency rule on most checkpoints" in tldr
+    for role in roles:
+        fluent = teaser.counts["steering_fluent"][role]
+        assert fluent.hits * 2 < fluent.total, role
+        assert steering.counts["fluent03"][role].hits == 0, role

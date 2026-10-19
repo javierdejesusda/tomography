@@ -528,43 +528,6 @@ DETAIL = (
 )
 
 
-def method_detail(counts: dict[str, dict[str, RoleCount]]) -> str:
-    """Writes the method detail that the short caption leaves out.
-
-    The lead places this text in the reading details of the appendix.
-
-    Args:
-        counts: The per-role counts of the figure.
-
-    Returns:
-        The baselines of each row, the steering rule and the interval rule.
-    """
-    fluent = counts["steering_fluent"]
-    return (
-        "Baselines of each row: rows 1 to 5, the random direction of the "
-        "same run at the same layer; row 6, the random direction of the "
-        "finder comparison; row 7, a word classifier; row 8, the strongest "
-        "of popularity and two text classifiers; row 9, the model's own "
-        "confidence, five stacked output signals. A direction for questions "
-        "the model can answer is above that confidence, with an interval "
-        "excluding zero, on "
-        f"{stats.per_role_text(counts['knowledge_confidence'])}. For "
-        "steering on the utility manipulation task of the paper, a "
-        "checkpoint passes when every logistic steering vector (3 per "
-        "checkpoint) of the utility direction beats every random direction "
-        "of the same norm (3 per checkpoint) on the sentiment judge at "
-        "relative coefficient 0.3, which has chance 0.05: "
-        f"{stats.per_role_text(counts['steering'])}. At that coefficient the "
-        "steered text meets the fluency rule (perplexity at most "
-        f"{MAX_RATIO} times the unsteered text and distinct-1 at least "
-        f"{MIN_DISTINCT}) on {stats.per_role_text(fluent)} (GPT-2 small has "
-        "no fluency measure). Intervals cover the sampling of the test "
-        "items and treat the two arms as independent, which makes them "
-        "conservative; rows 8 and 9 use the Hanley and McNeil approximation "
-        "and the stored paired bootstrap."
-    )
-
-
 def _csv(found: dict[str, dict[str, Cell]]) -> str:
     lines = ["row,model,role,value,lo,hi,baseline,n"]
     for row in ROWS:
