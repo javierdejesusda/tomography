@@ -16,7 +16,7 @@ from tomography.site.tables import _rows
 from tomography.viz import paper
 
 TASK_NAMES = {"sentiment": "Sentiment", "truth": "Truth", "utility": "Utility"}
-HEADERS = ("Random", "PCA of paired differences (paper)", "Logistic regression")
+HEADERS = ("Random", "PCA (paper)", "Logistic")
 
 
 def build(manifest: Manifest) -> TableOutput:
@@ -53,8 +53,10 @@ def build(manifest: Manifest) -> TableOutput:
         "direction, on the report split at the layer the select split chose."
     )
     detail = (
-        "Random is the accuracy of the random direction; the two finder "
-        "columns give the finder's accuracy minus it, with an asterisk where "
+        "Random is the accuracy of the random direction. PCA (paper) is the "
+        "paper's finder, the first principal component of paired differences, "
+        "and Logistic is logistic regression; their columns give the "
+        "finder's accuracy minus it, with an asterisk where "
         "the conservative 95 percent interval for the test pairs "
         f"({sizes['sentiment']} sentiment, {sizes['truth']} truth and "
         f"{sizes['utility']} utility pairs) excludes zero. Sentiment and "
