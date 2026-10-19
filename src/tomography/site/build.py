@@ -116,12 +116,32 @@ def results_commit(results: Path) -> tuple[str, str]:
     return sha, f"{int(day)} {MONTHS[int(month) - 1]} {year}"
 
 
+def _grouped_columns(
+    columns: list[str],
+    groups: tuple[tuple[str, int, bool], ...],
+    view: page.Page,
+) -> list[str]:
+    """Prefixes each column under a header span with the label of the span."""
+    named = list(columns)
+    start = 1
+    for label, span, _ in groups:
+        prefix = view.plain(label)
+        for i in range(start, start + span):
+            if prefix:
+                named[i] = f"{prefix}: {columns[i]}"
+        start += span
+    return named
+
+
 def _csv_text(
-    columns: list[str], rows: list[list[str]], view: page.Page
+    columns: list[str],
+    rows: list[list[str]],
+    view: page.Page,
+    groups: tuple[tuple[str, int, bool], ...] = (),
 ) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(columns)
+    writer.writerow(_grouped_columns(columns, groups, view))
     writer.writerows([[view.plain(c) for c in row] for row in rows])
     return buffer.getvalue()
 
@@ -195,7 +215,12 @@ def build(
             )
     for key, tab in {**doc.tables, **doc.appendix_tables}.items():
         (out / "data" / f"table-{table_number[key]}.csv").write_text(
-            _csv_text(tab.output.columns, tab.output.rows, view),
+            _csv_text(
+                tab.output.columns,
+                tab.output.rows,
+                view,
+                tab.output.groups,
+            ),
             encoding="utf-8",
             newline="\n",
         )
