@@ -163,8 +163,9 @@ def _draw(
     labelled: bool,
 ) -> AxesImage:
     k = matrix.shape[0]
-    cmap = mpl.colormaps[paper.SEQUENTIAL_CMAP].copy()
-    cmap.set_bad(paper.ENC["random_band"])
+    cmap = mpl.colormaps[paper.SEQUENTIAL_CMAP].with_extremes(
+        bad=paper.ENC["random_band"]
+    )
     norm = Normalize(vmin=VMIN, vmax=VMAX)
     shown = np.ma.masked_array(matrix, mask=np.eye(k, dtype=bool))
     image = ax.imshow(shown, cmap=cmap, norm=norm, interpolation="nearest")
