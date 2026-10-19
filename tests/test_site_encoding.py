@@ -9,6 +9,7 @@ from matplotlib.lines import Line2D
 import pytest
 
 from tomography.site import registry
+from tomography.site.figs import _rows as rowkit
 from tomography.site.manifest import Manifest
 from tomography.viz import paper
 
@@ -156,3 +157,17 @@ def test_figure_6_marks_the_statement_sets_with_the_set_markers(
     assert set(paper.SET_MARKERS.values()) <= marks
     for measure in ("text", "popularity"):
         assert not _flatten(paper.MEASURE_MARKERS[measure]) & marks
+
+
+@pytest.mark.parametrize("key", ["wording", "truth"])
+def test_the_star_is_drawn_at_the_shared_size(
+    built: dict[str, registry.FigureOutput], key: str
+) -> None:
+    star = paper.CATEGORY_MARKERS[0]
+    sizes = {
+        ln.get_markersize()
+        for ln in _lines(built[key].figure)
+        if ln.get_marker() == star
+    }
+    assert sizes
+    assert min(sizes) >= rowkit.STAR_SIZE

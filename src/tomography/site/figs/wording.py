@@ -51,6 +51,10 @@ def _rows(manifest: Manifest, model: str) -> tuple[list[dict[str, Any]], int]:
     return table, int(summary["n_eval_pairs"][TASK]["report"])
 
 
+def _size(marker: str, size: float) -> float:
+    return rowkit.STAR_SIZE if marker == paper.CATEGORY_MARKERS[0] else size
+
+
 def _marker(
     ax: Axes,
     x: float,
@@ -69,7 +73,7 @@ def _marker(
         [y],
         ls="none",
         marker=MARKER[family],
-        ms=size,
+        ms=_size(MARKER[family], size),
         mfc=face if style.filled else "white",
         mec=edge or face,
         mew=0.8,
@@ -216,7 +220,7 @@ def _legend(fig: Figure) -> None:
             [],
             ls="none",
             marker=MARKER[f],
-            ms=SIZE,
+            ms=_size(MARKER[f], SIZE),
             color=paper.ENC["direction"],
         )
         for f in MARKER

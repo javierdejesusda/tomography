@@ -140,6 +140,10 @@ def _model(manifest: Manifest, model: str) -> Model:
     )
 
 
+def _size(marker: str, size: float) -> float:
+    return _rows.STAR_SIZE if marker == paper.CATEGORY_MARKERS[0] else size
+
+
 def _whisker(ax: Axes, y: float, cell: Cell, color: str) -> None:
     ax.plot(
         [cell.lo, cell.hi],
@@ -164,7 +168,7 @@ def _point(
         [y],
         ls="none",
         marker=shape,
-        ms=MARKER,
+        ms=_size(shape, MARKER),
         color=color,
         mfc=color if filled else "white",
         mew=0.8,
@@ -264,7 +268,14 @@ def _legend(fig: Figure) -> None:
     ink = paper.ENC["direction"]
 
     def mark(shape: str, color: str) -> Line2D:
-        return Line2D([], [], ls="none", marker=shape, ms=MARKER, color=color)
+        return Line2D(
+            [],
+            [],
+            ls="none",
+            marker=shape,
+            ms=_size(shape, MARKER),
+            color=color,
+        )
 
     handles: list[Any] = [
         mark(DIRECTION, ink),
