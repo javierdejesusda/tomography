@@ -239,7 +239,11 @@ def test_the_figure_has_two_rows_of_four_and_no_model_legend(
     images = fig.findobj(AxesImage)
     assert len(images) == sum(len(models(e)) for e in CONCEPTS.values())
     labels = [t.get_text() for lg in fig.legends for t in lg.get_texts()]
-    assert not any("GPT-2" in x or "Qwen3" in x for x in labels)
+    assert not any("Qwen3" in x or "small" in x for x in labels)
+    assert {x for x in labels if "GPT-2" in x} == {
+        "GPT-2 and base",
+        "GPT-2 trend",
+    }
 
 
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
