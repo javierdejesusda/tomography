@@ -130,7 +130,6 @@ def build(manifest: Manifest) -> TableOutput:
     rows: list[list[str]] = []
     in_acc: list[float] = []
     in_layer: dict[str, int] = {}
-    persona: list[float] = []
     template_random: dict[str, list[float]] = {r: [] for r in stats.ROLES}
     text: dict[str, dict[str, Any]] = {}
     n_test = n_val = 0
@@ -151,7 +150,6 @@ def build(manifest: Manifest) -> TableOutput:
         n_test = int(s5["n_eval_pairs"]["transfer"]["test"])
         n_val = int(s5["n_eval_pairs"]["transfer"]["val"])
         mc1 = [_mc1(table, "lat", s)["mc1"] for s in READERS]
-        persona.append(float(mc1[2]))
         scored = reading.in_template(manifest, model)
         assert scored is not None
         template_random[stats.role(model)].append(scored.random)
@@ -215,8 +213,6 @@ def build(manifest: Manifest) -> TableOutput:
     numbers = {
         "n_questions": float(n_questions),
         "wilson_half": half,
-        "persona_min": min(persona),
-        "persona_max": max(persona),
         "in_template_layer1": float(sum(v == 1 for v in in_layer.values())),
         "text_word": float(word["mc1"]),
         "text_char": float(char["mc1"]),
