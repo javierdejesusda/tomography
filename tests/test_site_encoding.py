@@ -26,7 +26,7 @@ KEYS = (
     "a_finders_qwen3",
     "a_wording",
 )
-FILL_KEYS = ("teaser", "finders", "reading", "truth")
+FILL_KEYS = ("teaser", "finders", "truth")
 
 
 def _pattern(style: Any) -> Any:
@@ -182,11 +182,11 @@ def test_figures_4_and_5_use_no_category_shapes(
     assert not marks & (MEASURES - {"o", "D", "x"})
 
 
-def test_figure_4_draws_only_circles_and_the_role_key(
+def test_figure_4_draws_only_circles(
     built: dict[str, registry.FigureOutput],
 ) -> None:
     marks = _markers(built["reading"].figure)
-    assert marks == {paper.MEASURE_MARKERS["direction"], paper.ROLE_KEY_MARKER}
+    assert marks == {paper.MEASURE_MARKERS["direction"]}
 
 
 def test_figure_5_draws_circles_a_diamond_and_the_role_free_rows(

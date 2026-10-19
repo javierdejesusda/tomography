@@ -78,3 +78,11 @@ def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.guard_problems(fig, appendix=True) == []
     assert checks.problems(fig) == []
     assert fig.get_size_inches()[0] == pytest.approx(paper.FULL_WIDTH)
+
+
+def test_the_onset_key_uses_the_words_of_figure_4(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    texts = [t.get_text() for t in legend.get_texts()]
+    assert "onset (earliest layer above 0.1)" in texts

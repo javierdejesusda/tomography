@@ -24,7 +24,6 @@ from tomography.site import params
 from tomography.site import reading
 from tomography.site import stats
 from tomography.site import store
-from tomography.site.figs import _rows
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.site.tables import _cells
@@ -48,10 +47,12 @@ MIN_TREND_SIZES = 3
 LINE = 1.1
 DOT = 3.2
 MARKER = 3.5
-TEXT = 6.5
+TEXT = paper.MIN_TEXT
+ROLE_LABEL = 8
+CURVE_LABEL_Y = 0.6
 CURVE_YLIM = (-0.1, 0.5)
 CURVE_TICKS = (0.0, 0.2, 0.4)
-SIZE_YLIM = (0.45, 1.0)
+SIZE_YLIM = (0.4, 1.0)
 SIZE_X = {
     "gpt2": 0.0,
     "gpt2-medium": 1.0,
@@ -226,7 +227,6 @@ def _is_post(model: str) -> bool:
 
 
 def _size_panel(ax: Axes, cells: dict[str, Cell]) -> None:
-    shared.ref_line(ax, 0.5, "y")
     for model, cell in cells.items():
         style = shared.model_style(model)
         x = SIZE_X[model.removesuffix("-base")]
@@ -271,6 +271,16 @@ def _size_panel(ax: Axes, cells: dict[str, Cell]) -> None:
         dot.set_gid(f"reader:{model}")
     ax.set_xlim(-0.6, 6.9)
     ax.set_ylim(*SIZE_YLIM)
+    (chance,) = ax.plot(
+        ax.get_xlim(),
+        [0.5, 0.5],
+        color=paper.ENC["reference"],
+        ls=paper.LINESTYLES["reference"],
+        lw=paper.REFERENCE_WIDTH,
+        zorder=1,
+    )
+    chance.set_gid("chance")
+    ax.set_xlim(-0.6, 6.9)
     ax.set_xticks(list(SIZE_X.values()), list(SIZE_TICKS))
     ax.set_yticks([0.5, 0.75, 1.0], ["0.5", "0.75", "1"])
     ax.tick_params(axis="x", length=2, pad=1.5, labelrotation=90)
@@ -414,7 +424,9 @@ def _detail(
         "layer, one line per checkpoint in the panel of its role (rows: "
         "GPT-2, Qwen3 base, Qwen3 post-trained; darker lines are larger "
         "checkpoints, named in the right column of each row). The dot marks "
-        "the layer read in (e to h), chosen on a validation split; the tick "
+        "the layer read, chosen on a validation split (for sentiment the layer "
+        "of the finder comparison; the size dot in (e) is the sample-size run "
+        "at its own layer); the tick "
         "on the x axis marks the onset, the earliest layer at which the "
         "margin curve crosses 0.1, which is not an estimate with an "
         "interval; for truth the curve rests on "
@@ -422,8 +434,9 @@ def _detail(
         "percent interval over seeds of the random direction, drawn around "
         "the zero line and spanning the checkpoints of the panel. Sentiment "
         "curves are the report-split accuracy of the logistic regression of "
-        "the finder comparison, and its size dot below is the held-out "
-        "value of the sample-size run at 64 training pairs. (e to h) "
+        "the finder comparison, and for sentiment the size dot below is the "
+        "held-out value of the sample-size run at 64 training pairs, read at "
+        "its own layer. (e to h) "
         "Held-out accuracy at the layer read against the checkpoint size "
         "(S to XL: GPT-2 small to XL; 0.6, 1.7 and 4: Qwen3 in billions of "
         "parameters; filled for GPT-2 and Qwen3 base checkpoints, open and "
@@ -458,23 +471,28 @@ def _key(fig: Figure) -> None:
         Line2D([], [], ls="none", marker="|", ms=6, mew=1.4, color=ink),
         Line2D([], [], color=paper.RANDOM_BAND, lw=5, solid_capstyle="butt"),
         Line2D([], [], ls="none", marker="_", ms=6, mew=1.2, color=grey),
-        _rows.series_handle("GPT-2 and base", paper.ROLE_KEY_MARKER, ink),
-        _rows.series_handle(
-            "post-trained", paper.ROLE_KEY_MARKER, ink, filled=False
+        Line2D(
+            [],
+            [],
+            ls="none",
+            marker=paper.MEASURE_MARKERS["direction"],
+            ms=MARKER,
+            mfc="white",
+            mec=ink,
+            mew=0.8,
         ),
     ]
     fig.legend(
         handles,
         [
-            "layer read",
+            "layer read (a to d); GPT-2 and Qwen3 base (e to h)",
             "onset (earliest layer above 0.1)",
             "random direction, 95 percent interval",
             "random direction at the layer read",
-            "GPT-2 and base",
-            "post-trained",
+            "post-trained (e to h)",
         ],
         loc="outside upper center",
-        ncol=3,
+        ncol=2,
         frameon=False,
         fontsize=TEXT,
         columnspacing=1.0,
@@ -522,7 +540,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 else:
                     ax.set_xlabel("relative depth")
                 if col == 0:
-                    ax.set_ylabel(role_name, fontsize=7)
+                    ax.set_ylabel(role_name, fontsize=ROLE_LABEL)
                 else:
                     ax.tick_params(labelleft=False)
             label_ax = fig.add_subplot(grid[r, 4])
@@ -537,6 +555,10 @@ def build(manifest: Manifest) -> FigureOutput:
                 ax.set_ylabel("held-out accuracy", fontsize=TEXT)
             else:
                 ax.tick_params(labelleft=False)
+        shared_label = fig.supylabel(
+            "reader minus random accuracy", y=CURVE_LABEL_Y, fontsize=ROLE_LABEL
+        )
+        shared_label.set_gid("curve_ylabel")
         _key(fig)
     return FigureOutput(
         fig,
