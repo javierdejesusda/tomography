@@ -27,9 +27,12 @@ from tomography.viz import paper
 
 HEIGHT = 3.0
 TEXT_METHODS = ("text_word", "text_char")
+DIRECTION = paper.MEASURE_MARKERS["direction"]
+RANDOM = paper.MEASURE_MARKERS["random"]
+PROBABILITY = paper.MEASURE_MARKERS["answer_probability"]
 READERS = {
-    "truthfulqa_reader": ("truthfulqa", "o", -0.18),
-    "persona_reader": ("honesty", "D", 0.0),
+    "truthfulqa_reader": ("truthfulqa", DIRECTION, -0.18),
+    "persona_reader": ("honesty", DIRECTION, 0.0),
 }
 LOG_PROBABILITY = ("log_probability", 0.18)
 PAIRS = (
@@ -190,7 +193,9 @@ def _panel_a(
     for model, y in rows.items():
         filled = shared.model_style(model).filled
         for name, cell in data[model].reads.items():
-            shape = "P" if name == LOG_PROBABILITY[0] else READERS[name][1]
+            shape = (
+                PROBABILITY if name == LOG_PROBABILITY[0] else READERS[name][1]
+            )
             dodge = (
                 LOG_PROBABILITY[1]
                 if name == LOG_PROBABILITY[0]
@@ -223,7 +228,7 @@ def _panel_b(ax: Axes, rows: dict[str, float], data: dict[str, Model]) -> None:
                 ax,
                 data[model].random[neg],
                 line,
-                "x",
+                RANDOM,
                 paper.ENC["random_marker"],
                 True,
             )
@@ -257,9 +262,9 @@ def _legend(fig: Figure) -> None:
         return Line2D([], [], ls="none", marker=shape, ms=MARKER, color=color)
 
     handles: list[Any] = [
-        mark("o", ink),
-        mark("D", paper.ENC["paper"]),
-        mark("P", paper.ENC["own_probability"]),
+        mark(DIRECTION, ink),
+        mark(DIRECTION, paper.ENC["paper"]),
+        mark(PROBABILITY, paper.ENC["own_probability"]),
         Line2D(
             [],
             [],
@@ -271,9 +276,11 @@ def _legend(fig: Figure) -> None:
         mark("^", ink),
         mark("s", ink),
         Line2D([], [], color=ink, lw=0.8, marker=">", ms=2.5, markevery=[1]),
-        mark("x", paper.ENC["random_marker"]),
-        _rows.series_handle("GPT-2 and base", "h", paper.INK),
-        _rows.series_handle("post-trained", "h", paper.INK, filled=False),
+        mark(RANDOM, paper.ENC["random_marker"]),
+        _rows.series_handle("GPT-2 and base", paper.ROLE_KEY_MARKER, paper.INK),
+        _rows.series_handle(
+            "post-trained", paper.ROLE_KEY_MARKER, paper.INK, filled=False
+        ),
     ]
     labels = [
         "(a) truth reader",
