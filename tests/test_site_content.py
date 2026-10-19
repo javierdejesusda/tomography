@@ -508,7 +508,14 @@ def test_the_approximate_claims_name_the_interval_criterion() -> None:
 def test_the_confidence_gain_is_bounded_not_called_nothing() -> None:
     text = _text()
     assert "adds nothing to the confidence" not in text
-    assert "[[num:table:knowledge.gain_upper_max]]" in text
+    assert "[[num:fig:knowledge_reading.dir_inc_hi_max]]" in text
+    assert "gain_upper_max" not in text
+
+
+def test_the_paired_differences_are_counted_by_token() -> None:
+    for text in (content.ABSTRACT, content.DISCUSSION.paragraphs[0]):
+        assert "[[num:fig:base_post.paired_excluding_zero]]" in text
+        assert "three other" not in text
 
 
 def test_the_three_excluding_differences_are_named() -> None:

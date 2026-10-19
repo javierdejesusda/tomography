@@ -67,8 +67,9 @@ ABSTRACT = (
     "model can answer adds little to the confidence of the model. "
     + ABSTRACT_STEERING
     + " Post-training lowers held-out sentiment reading on "
-    "[[num:fig:base_post.sent_below]] of the three Qwen3 sizes; three other "
-    "seed-paired differences exclude zero (0.6B morality, 1.7B utility and "
+    "[[num:fig:base_post.sent_below]] of the three Qwen3 sizes; "
+    "[[num:fig:base_post.paired_excluding_zero]] other seed-paired "
+    "differences exclude zero (0.6B morality, 1.7B utility and "
     "0.6B honesty) and the rest lie within their intervals. Every number is "
     "computed from result files in the public repository."
 )
@@ -205,7 +206,7 @@ INTRODUCTION = Section(
             "[[count:fig:knowledge_reading.above_pop]], and adds to the "
             "confidence of the model on "
             "[[count:fig:teaser.knowledge_confidence]], by at most "
-            "[[num:table:knowledge.gain_upper_max]] at the upper end of its "
+            "[[num:fig:knowledge_reading.dir_inc_hi_max]] at the upper end of its "
             "interval on any checkpoint "
             "([[fig:knowledge_reading]]).",
         ),
@@ -652,7 +653,8 @@ DISCUSSION = Section(
         "fluency at larger ones (a perplexity on neutral text above 1.5 "
         "times the unsteered model, or a distinct-1 below 0.15; "
         "[[sec:steering]]), and post-training lowers held-out sentiment "
-        "reading and changes three other readings beyond their intervals "
+        "reading and changes [[num:fig:base_post.paired_excluding_zero]] "
+        "other readings beyond their intervals "
         "(0.6B morality, 1.7B utility and 0.6B honesty, in "
         "[[fig:base_post]]), with the rest within them.",
     ),
