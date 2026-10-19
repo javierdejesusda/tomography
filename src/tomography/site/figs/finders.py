@@ -252,6 +252,9 @@ def _numbers(
     utility = [data[m][("utility", "pca_diff")].margin for m in models]
     numbers["pca_utility_min"] = min(utility)
     numbers["pca_utility_max"] = max(utility)
+    own = [data[m][("utility", "pca_diff")].margin for m in gpt2]
+    numbers["pca_utility_gpt2_min"] = min(own)
+    numbers["pca_utility_gpt2_max"] = max(own)
     numbers["random_max"] = max(
         data[m][(task, "pca_diff")].random for m in models for task in TASKS
     )
@@ -285,11 +288,7 @@ def _claim(
 ) -> str:
     utility = counts["pca_utility"]
     qwen = {r: c for r, c in utility.items() if r != "gpt2"}
-    if all(c.hits == c.total for c in qwen.values()):
-        total = sum(c.total for c in qwen.values())
-        utility_text = f"all {total} Qwen3 checkpoints by interval"
-    else:
-        utility_text = f"{stats.per_role_text(qwen)} by interval"
+    utility_text = f"{stats.per_role_text(qwen)} by interval"
     return (
         "On unrelated sentences with opposite labels, the leading principal "
         "component of paired differences is above a random direction, with "
@@ -302,8 +301,8 @@ def _claim(
         f"{utility_text}, and on GPT-2 by point estimate only "
         f"({counts['pca_utility_point']['gpt2'].hits} of "
         f"{counts['pca_utility_point']['gpt2'].total} checkpoints, by "
-        f"{fmt3(numbers['pca_utility_min'])} to "
-        f"{fmt3(numbers['pca_utility_max'])} over all ten). Matching is "
+        f"{fmt3(numbers['pca_utility_gpt2_min'])} to "
+        f"{fmt3(numbers['pca_utility_gpt2_max'])}). Matching is "
         "confounded with the concept and the data here, so the figure does "
         "not show that matching causes the difference. Logistic regression "
         "is above the random direction for sentiment, with an interval "
