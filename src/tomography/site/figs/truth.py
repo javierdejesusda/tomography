@@ -36,8 +36,13 @@ READERS = {
 }
 LOG_PROBABILITY = ("log_probability", 0.18)
 PAIRS = (
-    ("cities", "neg_cities", "^", -0.2),
-    ("sp_en_trans", "neg_sp_en_trans", "s", 0.2),
+    ("cities", "neg_cities", paper.SET_MARKERS["cities"], -0.2),
+    (
+        "sp_en_trans",
+        "neg_sp_en_trans",
+        paper.SET_MARKERS["translations"],
+        0.2,
+    ),
 )
 NEGATED = tuple(neg for _, neg, _, _ in PAIRS)
 XLIM_A = (0.1, 0.85)
@@ -273,8 +278,8 @@ def _legend(fig: Figure) -> None:
             alpha=0.15,
             solid_capstyle="butt",
         ),
-        mark("^", ink),
-        mark("s", ink),
+        mark(paper.SET_MARKERS["cities"], ink),
+        mark(paper.SET_MARKERS["translations"], ink),
         Line2D([], [], color=ink, lw=0.8, marker=">", ms=2.5, markevery=[1]),
         mark(RANDOM, paper.ENC["random_marker"]),
         _rows.series_handle("GPT-2 and base", paper.ROLE_KEY_MARKER, paper.INK),

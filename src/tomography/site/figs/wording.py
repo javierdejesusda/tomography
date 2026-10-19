@@ -26,7 +26,7 @@ from tomography.viz import paper
 HEIGHT = 2.8
 TASK = "sentiment"
 DROPPED = "no_trailing_space"
-MARKER = {"frame": "o", "wording": "s", "concept": "^"}
+MARKER = paper.VARIANT_MARKERS
 DODGE = {"frame": -0.17, "wording": 0.0, "concept": 0.17}
 KIND = {
     "frame": "frame change",

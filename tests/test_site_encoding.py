@@ -37,7 +37,6 @@ KNOWN = {
     _pattern(paper.LINESTYLES[k])
     for k in ("solid", "post_trained", "reference", "trend")
 }
-ARROW = ">"
 
 
 def _flatten(value: Any) -> set[str]:
@@ -46,9 +45,8 @@ def _flatten(value: Any) -> set[str]:
     return {m for v in value for m in _flatten(v)}
 
 
-ALLOWED = _flatten(list(paper.MEASURE_MARKERS.values())) | {
-    paper.ROLE_KEY_MARKER
-}
+MEASURES = _flatten(list(paper.MEASURE_MARKERS.values()))
+ALLOWED = MEASURES | set(paper.CATEGORY_MARKERS) | {paper.ROLE_KEY_MARKER}
 
 
 @pytest.fixture(scope="module")
@@ -69,7 +67,7 @@ def _markers(fig: Figure) -> set[str]:
     return {
         str(ln.get_marker())
         for ln in _lines(fig)
-        if str(ln.get_marker()) not in ("None", "", " ", ARROW)
+        if str(ln.get_marker()) not in ("None", "", " ")
     }
 
 
@@ -139,3 +137,22 @@ def test_the_gpt2_curves_have_no_post_trained_style(
     fig = built["a_finders_gpt2"].figure
     styles = {ln._unscaled_dash_pattern for ln in _lines(fig)}
     assert POST not in styles
+
+
+def test_figure_5_marks_the_kind_of_change_with_the_variant_markers(
+    built: dict[str, registry.FigureOutput],
+) -> None:
+    marks = _markers(built["wording"].figure)
+    assert set(paper.VARIANT_MARKERS.values()) <= marks
+    assert marks <= set(paper.VARIANT_MARKERS.values()) | {
+        paper.ROLE_KEY_MARKER
+    }
+
+
+def test_figure_6_marks_the_statement_sets_with_the_set_markers(
+    built: dict[str, registry.FigureOutput],
+) -> None:
+    marks = _markers(built["truth"].figure)
+    assert set(paper.SET_MARKERS.values()) <= marks
+    for measure in ("text", "popularity"):
+        assert not _flatten(paper.MEASURE_MARKERS[measure]) & marks
