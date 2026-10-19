@@ -580,3 +580,40 @@ def test_the_size_key_runs_light_to_dark(output: registry.FigureOutput) -> None:
         (label, axes.model_style(f"qwen3-{label.lower()}").color)
         for label in ("0.6B", "1.7B", "4B")
     ]
+
+
+def _ends_on_a_dash(length: float, pattern: tuple[float, ...]) -> bool:
+    dash, gap = pattern
+    cycles = (length - dash) / (dash + gap)
+    return cycles >= 1 and abs(cycles - round(cycles)) * (dash + gap) < 0.15
+
+
+def test_every_conservative_interval_and_its_key_end_on_a_whole_dash(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    fig.canvas.draw()
+    seen = 0
+    for ax in fig.axes:
+        for ln in ax.lines:
+            if ln.get_gid() != "whisker" or ln.get_linestyle() == "-":
+                continue
+            x0, x1 = ln.get_xdata()
+            px = abs(ax.transData.transform((x1, 0))[0])
+            px -= abs(ax.transData.transform((x0, 0))[0])
+            length = abs(px) * 72 / fig.dpi
+            _, pattern = ln._dash_pattern
+            assert len(pattern) == 2
+            assert _ends_on_a_dash(length, pattern), (length, pattern)
+            seen += 1
+    assert seen == 16
+    (legend,) = fig.legends
+    (handle,) = [
+        h
+        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
+        if t.get_text() == "conservative interval"
+    ]
+    _, pattern = handle._dash_pattern
+    length = legend.handlelength * legend.get_texts()[0].get_fontsize()
+    assert len(pattern) == 2
+    assert _ends_on_a_dash(length, pattern), (length, pattern)

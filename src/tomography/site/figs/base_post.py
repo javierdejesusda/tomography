@@ -51,6 +51,8 @@ SECTIONS = {
 GROUP_GAP = 1
 LABELLED = frozenset({"reading accuracy"})
 CONSERVATIVE_DASH = (0, (6, 3))
+DASH_GAP = 3.0
+MIN_DASHES = 2
 OTHER = ("utility", "morality", "truth", "honesty", "truthfulqa")
 PAIRED = {"r2": "utility", "r3": "morality", "r5": "honesty", "r7": "truth"}
 CLAIM = (
@@ -454,6 +456,49 @@ def _key(fig: Any) -> None:
     legend.get_frame().set_edgecolor("none")
 
 
+def _fit(line: Any, length: float) -> None:
+    """Sets a dash pattern that starts and ends on a whole dash.
+
+    Args:
+        line: The line to restyle.
+        length: Its drawn length in points.
+    """
+    width = line.get_linewidth()
+    gap = DASH_GAP * width
+    nominal = CONSERVATIVE_DASH[1][0] * width
+    count = max(MIN_DASHES, round((length + gap) / (nominal + gap)))
+    dash = (length - (count - 1) * gap) / count
+    line.set_linestyle((0, (dash / width, gap / width)))
+
+
+def _fit_dashes(fig: Any) -> None:
+    """Fits every conservative interval and its key sample to its length.
+
+    A fixed pattern leaves a short stub at the end of a whisker, which
+    reads as a dot after a dash.
+
+    Args:
+        fig: The figure with its layout frozen.
+    """
+    fig.draw_without_rendering()
+    for ax in fig.axes:
+        for line in ax.lines:
+            if line.get_gid() != "whisker" or line.get_linestyle() == "-":
+                continue
+            x0, x1 = line.get_xdata()
+            pixels = abs(
+                ax.transData.transform((x1, 0))[0]
+                - ax.transData.transform((x0, 0))[0]
+            )
+            _fit(line, pixels * 72 / fig.dpi)
+    for legend in fig.legends:
+        for handle, text in zip(
+            legend.legend_handles, legend.get_texts(), strict=True
+        ):
+            if text.get_text() == "conservative interval":
+                _fit(handle, legend.handlelength * text.get_fontsize())
+
+
 def build(manifest: Manifest) -> FigureOutput:
     """Builds the figure from the committed results.
 
@@ -514,6 +559,7 @@ def build(manifest: Manifest) -> FigureOutput:
             ax.set_xlabel("post-trained minus base")
         _key(fig)
         _rows.freeze_layout(fig)
+        _fit_dashes(fig)
 
     sentiment = [found[("sentiment", s)] for s in sizes]
     numbers["sent_below"] = float(sum(hi < 0 for _, _, hi, _ in sentiment))
