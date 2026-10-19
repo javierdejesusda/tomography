@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from tomography.site import registry
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -328,10 +329,12 @@ def test_the_claim_states_the_per_role_counts_without_pooling(
 ) -> None:
     text = f"{built.claim} {built.detail}"
     assert "better than a random direction on all 10 checkpoints" in text
-    assert "all 6 Qwen3 checkpoints but on none of the 4 GPT-2" in text
+    assert "truth on " + stats.per_role_text(built.counts["truth"]) in text
+    assert "Qwen3 checkpoints" not in text
     assert not re.search(r"of 10 checkpoints", text)
     assert "0 of 4 GPT-2, 1 of 3 Qwen3 base and 0 of 3 post-trained" in text
-    assert "on any of 9 checkpoints" in text
+    assert stats.per_role_text(built.counts["knowledge_confidence"]) in text
+    assert "on any of" not in text
     assert "3 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained" in text
     for banned in (chr(0x2014), chr(0x2013)):
         assert banned not in text
