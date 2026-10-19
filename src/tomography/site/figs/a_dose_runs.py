@@ -1,7 +1,8 @@
-"""Figure A6: Dose curves of every knowledge-steering run.
+"""Appendix figure: Dose curves of every knowledge-steering run.
 
 One panel per run on the headline question type, with the encoding of the
-dose panels of Figure 9. Panels in the same unit share their vertical range.
+dose panels of the main knowledge-steering figure. Panels in the same unit
+share their vertical range.
 """
 
 from typing import Any

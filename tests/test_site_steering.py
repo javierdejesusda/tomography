@@ -15,6 +15,7 @@ from tomography.site import registry
 from tomography.site import stats
 from tomography.site.figs import steering
 from tomography.site.manifest import Manifest
+from tomography.viz import axes
 from tomography.viz import checks
 from tomography.viz import paper
 
@@ -447,7 +448,9 @@ def test_the_limits_are_labelled_reference_lines(
             assert len(refs) == 1
             assert list(refs[0].get_ydata()) == [value, value]
             assert refs[0].get_linewidth() == pytest.approx(0.5)
-        assert label in [t.get_text() for t in grid[row][2].texts]
+        for ax in grid[row]:
+            texts = [t.get_text().replace(NEWLINE, " ") for t in ax.texts]
+            assert label in texts
 
 
 def test_a_marker_per_checkpoint_and_coefficient_filled_when_fluent(
@@ -492,24 +495,44 @@ def test_segments_touching_a_non_fluent_point_are_dashed(
             assert len(dashed) == want
 
 
-def test_instruction_scores_are_dotted_reference_lines(
+def test_instruction_scores_are_bars_left_of_the_curves_by_checkpoint_colour(
     output: registry.FigureOutput,
 ) -> None:
     grid = _grid(output)
     roles = _by_role()
     for col, role in enumerate(ORDER):
-        lines = [
-            ln for ln in grid[0][col].lines if ln.get_gid() == "instruction"
-        ]
-        assert all(ln.get_linestyle() == ":" for ln in lines)
-        want = sorted(
-            float(r["score"])
-            for m in roles[role]
-            for r in _table(m)
-            if r["arm"] in ("prompting+1", "prompting-1")
-        )
-        got = sorted(float(ln.get_ydata()[0]) for ln in lines)
-        assert got == pytest.approx(want)
+        ax = grid[0][col]
+        assert not [ln for ln in ax.lines if ln.get_linestyle() == ":"]
+        bars = [ln for ln in ax.lines if ln.get_gid() == "instruction"]
+        first = min(COEFFS) - 0.02
+        assert all(max(ln.get_xdata()) < first for ln in bars)
+        rows = axes.model_rows(roles[role])
+        for model in sorted(roles[role], key=rows.get):
+            own = [
+                ln
+                for ln in bars
+                if ln.get_color() == axes.model_style(model).color
+            ]
+            want = sorted(
+                float(r["score"])
+                for r in _table(model)
+                if r["arm"] in ("prompting+1", "prompting-1")
+            )
+            assert sorted(float(ln.get_ydata()[0]) for ln in own) == (
+                pytest.approx(want)
+            )
+            by_arm = {r["arm"]: r["score"] for r in _table(model)}
+            assert by_arm["prompting+1"] > by_arm["prompting-1"]
+        slots = {}
+        for model in roles[role]:
+            xs = {
+                float(np.mean(ln.get_xdata()))
+                for ln in bars
+                if ln.get_color() == axes.model_style(model).color
+            }
+            assert len(xs) == 1
+            slots[model] = xs.pop()
+        assert sorted(slots, key=slots.get) == sorted(roles[role], key=rows.get)
 
 
 def test_the_range_over_the_vectors_is_a_low_alpha_band_and_no_heat_map(
@@ -540,7 +563,29 @@ def test_checkpoints_are_labelled_at_the_line_ends_and_not_in_a_legend(
             assert steering.end_label(model) in texts
     (legend,) = output.figure.legends
     labels = [t.get_text() for t in legend.get_texts()]
-    assert labels == ["fluent", "not fluent", "instruction score"]
+    assert labels == [
+        "fluent",
+        "not fluent",
+        "instruction score (bars at left)",
+    ]
+
+
+def test_end_labels_keep_size_order_from_top_to_bottom_and_do_not_overlap(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    grid = _grid(output)
+    roles = _by_role()
+    for col, role in enumerate(ORDER):
+        rows = axes.model_rows(roles[role])
+        names = {steering.end_label(m): m for m in roles[role]}
+        found = [t for t in grid[0][col].texts if t.get_text() in names]
+        found.sort(key=lambda t: -t.get_position()[1])
+        got = [names[t.get_text()] for t in found]
+        assert got == sorted(roles[role], key=rows.get)
+        boxes = [t.get_window_extent() for t in found]
+        for upper, lower in itertools.pairwise(boxes):
+            assert upper.y0 >= lower.y1
 
 
 def test_each_column_states_how_many_checkpoints_stay_fluent(
@@ -580,7 +625,7 @@ def test_the_caption_keys_the_drawing_and_has_no_heat_map_panel(
     output: registry.FigureOutput,
 ) -> None:
     detail = output.detail
-    for word in ("filled", "open", "dashed", "dotted", "limit"):
+    for word in ("filled", "open", "dashed", "bars", "limit"):
         assert word in detail
     for letter in "abc":
         assert f"({letter}" in detail
