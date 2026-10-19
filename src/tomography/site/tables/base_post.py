@@ -16,8 +16,8 @@ from tomography.site.tables import _cells
 MEASURES = {
     "r2": "utility",
     "r3": "morality",
-    "r7": "truth (transfer sets)",
-    "r5": "honesty (function template)",
+    "r7": "truth",
+    "r5": "honesty, transfer",
 }
 COLUMNS = [
     "Measure",

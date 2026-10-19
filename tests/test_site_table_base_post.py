@@ -15,8 +15,8 @@ DASHES = (chr(0x2014), chr(0x2013))
 MEASURES = {
     "r2": "utility",
     "r3": "morality",
-    "r7": "truth (transfer sets)",
-    "r5": "honesty (function template)",
+    "r7": "truth",
+    "r5": "honesty, transfer",
 }
 SIZES = ("0.6B", "1.7B")
 
@@ -118,3 +118,12 @@ def test_numbers_count_intervals_off_zero(
         if source in MEASURES
     )
     assert output.numbers["below_zero"] == low
+
+
+def test_names_match_figure_rows() -> None:
+    from tomography.site.figs import base_post as figure
+
+    labels = {key: label for key, label, _ in figure.ROWS}
+    assert {
+        source: labels[name.split(",")[0]] for source, name in MEASURES.items()
+    } == MEASURES
