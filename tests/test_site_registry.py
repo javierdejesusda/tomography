@@ -120,7 +120,6 @@ def test_the_modules_ported_from_the_first_draft_exist() -> None:
 
 
 def test_missing_lists_unbuilt_entries_with_their_module_path() -> None:
-    assert ("figure", "teaser") in registry.missing()
     assert ("table", "notation") in registry.missing()
 
 
