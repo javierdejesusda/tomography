@@ -109,7 +109,7 @@ MEASURE_MARKERS: dict[str, Any] = {
     "probe": "P",
 }
 ROLE_KEY_MARKER = "h"
-CATEGORY_MARKERS: tuple[str, ...] = ("*", "1", "<", ">")
+CATEGORY_MARKERS: tuple[str, ...] = ("*", "<", ">")
 VARIANT_MARKERS: dict[str, str] = {
     "frame": CATEGORY_MARKERS[0],
     "wording": CATEGORY_MARKERS[1],
@@ -120,8 +120,8 @@ SET_MARKERS: dict[str, str] = {
     "translations": CATEGORY_MARKERS[1],
 }
 PROMPT_MARKERS: dict[str, str] = {
-    "positive": CATEGORY_MARKERS[3],
-    "negative": CATEGORY_MARKERS[2],
+    "positive": CATEGORY_MARKERS[2],
+    "negative": CATEGORY_MARKERS[1],
 }
 ITEM_SET_MARKERS: dict[str, str] = {
     "range": CATEGORY_MARKERS[0],
