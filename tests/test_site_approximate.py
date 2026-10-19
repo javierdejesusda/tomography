@@ -236,8 +236,16 @@ def test_numbers_are_recomputed_from_the_files(
     assert numbers["text_lo"] == pytest.approx(text["lo"])
     assert numbers["text_hi"] == pytest.approx(text["hi"])
     positions = [_position(m) for m in _models("p10b")]
-    assert numbers["position_min"] == pytest.approx(min(positions))
-    assert numbers["position_max"] == pytest.approx(max(positions))
+    for pooled in ("position_min", "position_max", "band_min", "band_max"):
+        assert pooled not in numbers, pooled
+    for role in stats.ROLES:
+        own = [
+            p
+            for m, p in zip(_models("p10b"), positions, strict=True)
+            if stats.role(m) == role
+        ]
+        assert numbers[f"position_{role}_min"] == pytest.approx(min(own))
+        assert numbers[f"position_{role}_max"] == pytest.approx(max(own))
     reader = {m: _cell(m, "logistic") for m in _models("p10b")}
     above = _by_role({m: c["auroc"] > text["auroc"] for m, c in reader.items()})
     for name, want in (("above_text", above),):
@@ -308,8 +316,8 @@ def test_the_detail_gives_the_baselines_of_each_panel(
         f"on at most {int(n['exact_qwen_max'])} percent of the exact items"
     ) in detail
     assert (
-        f"GPT-2 small on {int(n['gpt2_range'])} percent of the range "
-        f"items and {int(n['gpt2_exact'])} percent of the exact items"
+        f"GPT-2 small on {int(n['gpt2_range'])} and "
+        f"{int(n['gpt2_exact'])} percent"
     ) in detail
     assert f"{n['text_word']:.3f}" in detail
     assert f"{n['text_lo']:.3f} to {n['text_hi']:.3f}" in detail
@@ -410,9 +418,15 @@ def test_control_counts_are_per_role_and_use_the_stored_values(
                 counts[role].total,
             )
             assert output.numbers[f"{name}_{role}"] == counts[role].hits
-    draws = [r["position"] for m in models for r in _people(m, "random")]
-    assert output.numbers["band_min"] == pytest.approx(min(draws))
-    assert output.numbers["band_max"] == pytest.approx(max(draws))
+    for role in stats.ROLES:
+        draws = [
+            r["position"]
+            for m in models
+            if stats.role(m) == role
+            for r in _people(m, "random")
+        ]
+        assert output.numbers[f"band_{role}_min"] == pytest.approx(min(draws))
+        assert output.numbers[f"band_{role}_max"] == pytest.approx(max(draws))
 
 
 def test_the_superseded_reader_and_band_counts_are_gone(
@@ -501,7 +515,7 @@ def test_panel_b_marker_state_follows_the_interval_rule(
     for model in _models("p10b"):
         (line,) = _by_gid(ax, f"reader-{model}")
         state = _state(model)
-        assert line.get_marker() == paper.MEASURE_MARKERS["direction"]
+        assert line.get_marker() == "h"
         filled = line.get_markerfacecolor() == paper.INK
         assert filled is (state == "above")
         if state != "above":
@@ -556,10 +570,12 @@ def test_panel_c_prints_the_band_limits_beside_the_clipping_arrows(
     output: registry.FigureOutput,
 ) -> None:
     ax_c = output.figure.axes[4]
-    n = output.numbers
-    low = f"{n['band_min']:.1f}".replace("-", chr(0x2212))
+    draws = [
+        r["position"] for m in _models("p10b") for r in _people(m, "random")
+    ]
+    low = f"{min(draws):.1f}".replace("-", chr(0x2212))
     label = ax_c.get_xlabel().replace("$", "")
-    assert f"{low} to {n['band_max']:.1f}" in label
+    assert f"{low} to {max(draws):.1f}" in label
     assert "clipped" in label
     arrows = [t for t in ax_c.texts if t.get_text() == ""]
     assert arrows
@@ -584,12 +600,18 @@ def test_the_legends_have_three_entries_a_role_key_and_a_state_key(
     handles = dict(zip(labels, main.legend_handles, strict=True))
     assert handles["(a, c) post-trained"].get_marker() == "o"
     assert handles["(a, c) GPT-2 and Qwen3 base"].get_marker() == "o"
+    markers = {
+        str(h.get_marker())
+        for h in states.legend_handles
+        if hasattr(h, "get_marker")
+    }
+    assert markers - {"None"} == {"h"}
 
 
 def test_only_glossary_shapes_and_inks_are_drawn(
     output: registry.FigureOutput,
 ) -> None:
-    allowed = {"o", "None", " ", ""}
+    allowed = {"o", "h", "None", " ", ""}
     fig = output.figure
     drawn = {str(ln.get_marker()) for ax in fig.axes for ln in ax.get_lines()}
     for legend in fig.legends:
@@ -624,8 +646,8 @@ def test_caption_states_the_state_rule_and_the_roles(
     text = output.detail
     assert "filled circles are GPT-2 and Qwen3 base" in text
     assert "open circles post-trained" in text
-    assert "a filled circle is above the control's interval" in text
-    assert "an open circle inside it" in text
+    assert "a filled hexagon is above the control's interval" in text
+    assert "an open hexagon inside it" in text
     assert "a tick below it" in text
 
 
@@ -634,3 +656,31 @@ def test_panel_a_columns_label_only_zero_and_one(
 ) -> None:
     for ax in output.figure.axes[:3]:
         assert list(ax.get_xticks()) == [0.0, 1.0]
+
+
+def test_the_random_band_is_stated_as_the_range_over_the_training_sets(
+    output: registry.FigureOutput,
+) -> None:
+    sets = {len(_people(m, "random")) for m in _models("p10b")}
+    assert sets == {7}
+    assert output.numbers["n_band_sets"] == 7
+    assert (
+        "the range of the control's position over its 7 training sets"
+        in output.detail
+    )
+
+
+def test_control_layer_counts_are_per_role(
+    output: registry.FigureOutput,
+) -> None:
+    flags = {
+        m: _cell(m, "random")["layer"] != _cell(m, "logistic")["layer"]
+        for m in _models("p10b")
+    }
+    counts = _by_role(flags)
+    for role in stats.ROLES:
+        got = output.counts["control_other_layer"][role]
+        assert (got.hits, got.total) == (counts[role].hits, counts[role].total)
+        assert output.numbers[f"control_other_layer_{role}"] == (
+            counts[role].hits
+        )
