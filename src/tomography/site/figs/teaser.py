@@ -464,13 +464,14 @@ def _numbers(
         numbers[f"{row.key}_min"] = min(margins)
         numbers[f"{row.key}_max"] = max(margins)
     numbers["knowledge_confidence_n"] = len(found["knowledge_confidence"])
-    half: dict[str, list[float]] = {"gpt2": [], "qwen3": []}
-    for model, cell in found["truth"].items():
-        group = "gpt2" if stats.role(model) == "gpt2" else "qwen3"
-        half[group].append((cell.hi - cell.lo) / 2)
-    for group, widths in half.items():
-        numbers[f"truth_half_{group}_min"] = min(widths)
-        numbers[f"truth_half_{group}_max"] = max(widths)
+    for role in stats.ROLES:
+        widths = [
+            (cell.hi - cell.lo) / 2
+            for model, cell in found["truth"].items()
+            if stats.role(model) == role
+        ]
+        numbers[f"truth_half_{role}_min"] = min(widths)
+        numbers[f"truth_half_{role}_max"] = max(widths)
     counts["steering_fluent"] = stats.per_role(fluent)
     for role in stats.ROLES:
         count = counts["steering_fluent"][role]

@@ -500,3 +500,22 @@ def test_the_role_key_is_a_filled_and_an_open_circle_in_neutral_ink(
         True,
         False,
     }
+
+
+def test_the_teaser_exports_the_truth_half_widths_per_role(
+    built: registry.FigureOutput,
+) -> None:
+    rows = [r for r in _csv(built) if r["row"] == "truth"]
+    half: dict[str, list[float]] = {"gpt2": [], "base": [], "post": []}
+    for r in rows:
+        half[r["role"]].append((float(r["hi"]) - float(r["lo"])) / 2)
+    assert all(half.values())
+    for role, values in half.items():
+        assert built.numbers[f"truth_half_{role}_min"] == pytest.approx(
+            min(values)
+        )
+        assert built.numbers[f"truth_half_{role}_max"] == pytest.approx(
+            max(values)
+        )
+    assert "truth_half_qwen3_min" not in built.numbers
+    assert stats.ROLES == ("gpt2", "base", "post")
