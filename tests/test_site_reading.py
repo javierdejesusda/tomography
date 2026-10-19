@@ -284,3 +284,25 @@ def test_the_size_row_has_a_parameters_label_on_every_panel(
         ax for ax in output.figure.axes if ax.get_xlabel() == "parameters"
     ]
     assert len(labelled) == 4
+
+
+def test_the_detail_explains_the_markers_the_colours_and_the_trend(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.detail
+    assert "filled for GPT-2 and Qwen3 base checkpoints" in text
+    assert "open for post-trained ones" in text
+    assert "colour of a cell is the margin" in text
+    assert "marker colour darkens with size" in text
+    assert "least-squares line through the GPT-2 sizes" in text
+    assert "does not include the sampling error" in text
+
+
+def test_the_truth_onset_is_called_a_crossing_on_its_pair_count(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.detail
+    n = int(output.numbers["truth_n"])
+    assert n == 59
+    assert "earliest layer at which the margin curve crosses 0.1" in text
+    assert f"truth the curve rests on {n} truth pairs" in text

@@ -185,21 +185,31 @@ def _confidence(model: str) -> Cell | None:
     )
 
 
+def _seed_rates(model: str) -> tuple[list[float], list[float]]:
+    rows = _records(run("m1", model), "table_seeds.json")
+    cell = [r for r in rows if r["strength"] == 0.3 and r["judge"] == "primary"]
+    logistic = [r["rate"] for r in cell if r["method"] == "logistic"]
+    random = [r["rate"] for r in cell if r["method"] == "random"]
+    assert len(logistic) == len(random) == 3
+    return logistic, random
+
+
 def _steering(model: str) -> Cell:
-    rows = _records(run("m1", model), "table.json")
+    logistic, random = _seed_rates(model)
+    gap = min(logistic) - max(random)
+    return gap, gap, gap, max(random), 0
 
-    def pick(method: str) -> dict[str, Any]:
-        (found,) = [
-            r
-            for r in rows
-            if r["task"] == "manipulation"
-            and r["setting"] == "0.3"
-            and r["method"] == method
-        ]
-        return found
 
-    a, b = pick("logistic"), pick("random")
-    return _diff(float(a["value"]), float(b["value"]), int(a["n"]), int(b["n"]))
+def _fluent(model: str) -> bool | None:
+    path = run("m1", model) / "table_effects.json"
+    if not path.exists():
+        return None
+    rows = _records(run("m1", model), "table_effects.json")
+    none = next(r for r in rows if r["method"] == "none")
+    cell = [r for r in rows if r["method"] == "logistic" and r["coeff"] == 0.3]
+    ratio = sum(r["perplexity"] for r in cell) / len(cell) / none["perplexity"]
+    distinct = sum(r["distinct_1"] for r in cell) / len(cell)
+    return ratio <= 1.5 and distinct >= 0.15
 
 
 def _expected() -> dict[str, dict[str, Cell]]:
@@ -279,7 +289,7 @@ def test_the_counts_of_checkpoints_above_zero_match_the_plan() -> None:
         "truthfulqa": ((0, 4), (0, 3), (0, 3)),
         "knowledge": ((0, 3), (3, 3), (2, 3)),
         "knowledge_confidence": ((0, 3), (0, 3), (0, 3)),
-        "steering": ((3, 4), (3, 3), (3, 3)),
+        "steering": ((1, 4), (2, 3), (2, 3)),
     }
     for row, per_role in plan.items():
         for role, (hits, total) in zip(ROLES, per_role, strict=True):
@@ -335,7 +345,7 @@ def test_the_claim_states_the_per_role_counts_without_pooling(
     assert "0 of 4 GPT-2, 1 of 3 Qwen3 base and 0 of 3 post-trained" in text
     assert stats.per_role_text(built.counts["knowledge_confidence"]) in text
     assert "on any of" not in text
-    assert "3 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained" in text
+    assert "1 of 4 GPT-2, 2 of 3 Qwen3 base and 2 of 3 post-trained" in text
     for banned in (chr(0x2014), chr(0x2013)):
         assert banned not in text
 
@@ -388,3 +398,66 @@ def test_the_pairing_is_read_from_the_run_summary_not_typed_in() -> None:
     ).read_text("utf-8")
     assert "label_contrastive" not in source
     assert '"matched"' not in source
+
+
+def test_the_steering_row_counts_checkpoints_whose_every_vector_wins(
+    built: registry.FigureOutput,
+) -> None:
+    passed = {
+        m: min(_seed_rates(m)[0]) > max(_seed_rates(m)[1]) for m in models("m1")
+    }
+    assert sorted(m for m, ok in passed.items() if ok) == [
+        "gpt2",
+        "qwen3-1.7b",
+        "qwen3-1.7b-base",
+        "qwen3-4b",
+        "qwen3-4b-base",
+    ]
+    for role in ROLES:
+        mine = [ok for m, ok in passed.items() if _role(m) == role]
+        assert built.numbers[f"steering_{role}_above"] == sum(mine)
+        assert built.numbers[f"steering_{role}_n"] == len(mine)
+
+
+def test_the_steering_row_names_the_unit_the_judge_and_the_fluency_rule(
+    built: registry.FigureOutput,
+) -> None:
+    text = f"{built.claim} {built.detail}"
+    assert "every logistic steering vector" in text
+    assert "utility direction" in text
+    assert "sentiment judge" in text
+    assert "relative coefficient 0.3" in text
+    assert "0.05" in text
+    flags = {m: _fluent(m) for m in models("m1")}
+    for role in ROLES:
+        known = [
+            f for m, f in flags.items() if _role(m) == role and f is not None
+        ]
+        assert built.numbers[f"steering_fluent_{role}_above"] == sum(known)
+        assert built.numbers[f"steering_fluent_{role}_n"] == len(known)
+    assert "no checkpoint passes" not in text
+
+
+def test_every_row_names_the_unit_its_margin_is_measured_in(
+    built: registry.FigureOutput,
+) -> None:
+    (ax,) = built.figure.axes
+    units = [t for t in ax.texts if t.get_gid() == "row_unit"]
+    by_y = sorted(units, key=lambda t: t.xy[1])
+    assert [t.get_text() for t in by_y] == [
+        "accuracy",
+        "accuracy",
+        "accuracy",
+        "accuracy",
+        "accuracy",
+        "accuracy",
+        "MC1 accuracy",
+        "AUROC",
+        "AUROC",
+        "win rate",
+    ]
+    ticks = [int(y) for y in ax.get_yticks()]
+    assert len(ticks) == len(ROWS)
+    for tick, unit in zip(ax.get_yticks(), by_y, strict=True):
+        assert unit.xy[1] == pytest.approx(tick)
+    assert "unit" in ax.get_xlabel()

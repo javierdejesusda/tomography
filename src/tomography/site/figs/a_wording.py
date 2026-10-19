@@ -9,6 +9,7 @@ import math
 import string
 
 from matplotlib.axes import Axes
+from matplotlib.colors import TwoSlopeNorm
 from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
 import numpy as np
@@ -18,12 +19,15 @@ from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.viz import paper
+from tomography.viz import style
 
 DROPPED = "no_trailing_space"
-ROW_HEIGHT = 1.9
+ROW_HEIGHT = 1.85
 MAX_HEIGHT = 8.0
 WIDE_LIMIT = 8
 VMAX = 0.45
+VMIN = -0.15
+BAR_TICKS = [-0.15, 0.0, 0.15, 0.3, 0.45]
 TEXT = 6.0
 DOT = 1.6
 
@@ -97,9 +101,8 @@ def _draw(ax: Axes, matrix: np.ndarray, paper_index: int) -> AxesImage:
     k = matrix.shape[0]
     image = ax.imshow(
         matrix,
-        cmap="cividis",
-        vmin=0.0,
-        vmax=VMAX,
+        cmap=style.diverging_cmap().reversed(),
+        norm=TwoSlopeNorm(vmin=VMIN, vcenter=0.0, vmax=VMAX),
         interpolation="nearest",
     )
     ax.plot(
@@ -174,15 +177,24 @@ def build(manifest: Manifest) -> FigureOutput:
                 ax.tick_params(labelleft=False)
             axes.append(ax)
         assert image is not None
-        bar = fig.colorbar(
-            image,
-            ax=axes,
-            location="top",
-            fraction=0.03,
-            pad=0.02,
-            shrink=0.6,
-        )
-        bar.set_ticks([0.0, 0.15, 0.3, 0.45])
+        empty = rows * cols - len(models)
+        if empty >= 2:
+            slot = grid[rows - 1, cols - empty :].subgridspec(
+                3, 1, height_ratios=[1.0, 0.16, 1.0]
+            )
+            bar = fig.colorbar(
+                image, cax=fig.add_subplot(slot[1]), orientation="horizontal"
+            )
+        else:
+            bar = fig.colorbar(
+                image,
+                ax=axes,
+                location="top",
+                fraction=0.03,
+                pad=0.02,
+                shrink=0.6,
+            )
+        bar.set_ticks(BAR_TICKS)
         bar.ax.tick_params(labelsize=TEXT)
         bar.set_label("accuracy minus random direction", fontsize=TEXT)
     claim = (

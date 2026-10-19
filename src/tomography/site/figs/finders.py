@@ -190,6 +190,8 @@ def _numbers(
         "logistic_sentiment": stats.per_role(
             flags("sentiment", "logistic", True)
         ),
+        "pca_truth": stats.per_role(flags("truth", "pca_diff", True)),
+        "pca_utility": stats.per_role(flags("utility", "pca_diff", True)),
         "pca_utility_point": stats.per_role(
             flags("utility", "pca_diff", False)
         ),
@@ -205,6 +207,8 @@ def _numbers(
         numbers[f"logistic_sentiment_above_{role}"] = counts[
             "logistic_sentiment"
         ][role].hits
+        numbers[f"pca_truth_above_{role}"] = counts["pca_truth"][role].hits
+        numbers[f"pca_utility_above_{role}"] = counts["pca_utility"][role].hits
         numbers[f"pca_utility_point_above_{role}"] = counts[
             "pca_utility_point"
         ][role].hits
@@ -246,22 +250,31 @@ def _claim(
     numbers: dict[str, float],
     counts: dict[str, dict[str, RoleCount]],
 ) -> str:
-    sentiment = counts["pca_sentiment"]
+    utility = counts["pca_utility"]
+    qwen = {r: c for r, c in utility.items() if r != "gpt2"}
+    if all(c.hits == c.total for c in qwen.values()):
+        total = sum(c.total for c in qwen.values())
+        utility_text = f"all {total} Qwen3 checkpoints by interval"
+    else:
+        utility_text = f"{stats.per_role_text(qwen)} by interval"
     return (
-        "The paper's finder needs matched pairs. On pairs of unrelated "
-        "sentences with opposite labels, the leading principal component of "
-        "paired differences is above a random direction, with an interval "
-        f"excluding zero, for sentiment on {_where(sentiment)}"
+        "On unrelated sentences with opposite labels, the leading principal "
+        "component of paired differences is above a random direction, with "
+        "an interval excluding zero, for sentiment on "
+        f"{stats.per_role_text(counts['pca_sentiment'])}"
         f"{_winners(models, data, 'sentiment', 'pca_diff')}, and for truth "
-        "its largest margin on a GPT-2 size is "
-        f"{fmt3(numbers['pca_truth_gpt2_max'])}. Logistic regression is above "
-        "the random direction for sentiment, with an interval excluding "
-        f"zero, on {_where(counts['logistic_sentiment'])}. On utility, whose "
-        "pairs are matched scenarios, the paper's finder is above the "
-        "random direction by point estimate on "
-        f"{_where(counts['pca_utility_point'])}, by "
+        f"on {stats.per_role_text(counts['pca_truth'])}"
+        f"{_winners(models, data, 'truth', 'pca_diff')}. On utility, whose "
+        "pairs are matched scenarios, it is above the random direction on "
+        f"{utility_text}, and on GPT-2 by point estimate only "
+        f"({counts['pca_utility_point']['gpt2'].hits} of "
+        f"{counts['pca_utility_point']['gpt2'].total} checkpoints, by "
         f"{fmt3(numbers['pca_utility_min'])} to "
-        f"{fmt3(numbers['pca_utility_max'])}."
+        f"{fmt3(numbers['pca_utility_max'])} over all ten). Matching is "
+        "confounded with the concept and the data here, so the figure does "
+        "not show that matching causes the difference. Logistic regression "
+        "is above the random direction for sentiment, with an interval "
+        f"excluding zero, on {_where(counts['logistic_sentiment'])}."
     )
 
 

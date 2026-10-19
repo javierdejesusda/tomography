@@ -14,11 +14,11 @@ from typing import Any
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 import numpy as np
 
 from tomography.site import runfiles
 from tomography.site import stats
+from tomography.site.figs import _rows
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.site.registry import RoleCount
@@ -33,7 +33,7 @@ READERS = {
 }
 LOG_PROBABILITY = ("log_probability", 0.18)
 PAIRS = (
-    ("cities", "neg_cities", "o", -0.2),
+    ("cities", "neg_cities", "^", -0.2),
     ("sp_en_trans", "neg_sp_en_trans", "s", 0.2),
 )
 NEGATED = tuple(neg for _, neg, _, _ in PAIRS)
@@ -260,11 +260,20 @@ def _legend(fig: Figure) -> None:
         mark("o", ink),
         mark("D", paper.ENC["paper"]),
         mark("P", paper.ENC["own_probability"]),
-        Patch(fc=paper.ENC["text"], alpha=0.15, ec="none"),
-        mark("o", ink),
+        Line2D(
+            [],
+            [],
+            color=paper.ENC["text"],
+            lw=5,
+            alpha=0.15,
+            solid_capstyle="butt",
+        ),
+        mark("^", ink),
         mark("s", ink),
         Line2D([], [], color=ink, lw=0.8, marker=">", ms=2.5, markevery=[1]),
         mark("x", paper.ENC["random_marker"]),
+        _rows.series_handle("GPT-2 and base", "h", paper.INK),
+        _rows.series_handle("post-trained", "h", paper.INK, filled=False),
     ]
     labels = [
         "(a) truth reader",
@@ -275,6 +284,8 @@ def _legend(fig: Figure) -> None:
         "Spanish to English",
         "to the negated set",
         "random direction, negated",
+        "GPT-2 and base",
+        "post-trained",
     ]
     fig.legend(
         handles,
@@ -380,8 +391,8 @@ def _detail(
         "each set. Checkpoints with at least one negated set whose "
         "interval lies below 0.5 are "
         f"{stats.per_role_text(counts['neg_below_half'])}. On negated "
-        "cities the reader falls below the "
-        f"random direction on {int(numbers['negcities_below_random_gpt2'])} "
+        "cities the reader falls below the random direction by point "
+        f"estimate on {int(numbers['negcities_below_random_gpt2'])} "
         f"of {gpt2} GPT-2 sizes."
     )
 

@@ -301,16 +301,26 @@ def _detail(
         )
     return (
         "(a to d) Reader accuracy minus random-direction accuracy at every "
-        "layer, one row per checkpoint; the black tick marks the lowest layer "
-        "where the margin exceeds 0.1 and the circle the layer read in (e "
-        "to h), chosen on a validation split (sentiment: on the select "
-        "split of the sample-size run). (e to h) Held-out accuracy at that "
-        "layer against the number of parameters, with the random direction "
-        "at the same layer (grey x) and 95 percent Wilson intervals for the "
+        "layer, one row per checkpoint; the colour of a cell is the margin "
+        "(colour bar). The black tick marks the lowest layer where the "
+        "margin exceeds 0.1 and the circle the layer read in (e to h), "
+        "chosen on a validation split (sentiment: on the select split of "
+        "the sample-size run). The onset is the earliest layer at which the "
+        "margin curve crosses 0.1, not an estimate with an interval; for "
+        f"truth the curve rests on {sizes['truth']} truth pairs. "
+        "(e to h) Held-out accuracy at that layer against the number of "
+        "parameters, with the random direction at the same layer (grey x) "
+        "and 95 percent Wilson intervals for the "
         f"test pairs ({sizes['sentiment']:,} sentiment pairs from the "
         f"sample-size run at 64 training pairs, {sizes['utility']:,} "
         f"utility, {sizes['morality']:,} morality and {sizes['truth']:,} "
-        "truth pairs). " + _sentence(_slope_text(numbers, names)) + tail + "."
+        "truth pairs); marker colour darkens with size within a family, "
+        "filled for GPT-2 and Qwen3 base checkpoints and open for "
+        "post-trained ones. The dashed line is the least-squares line "
+        "through the GPT-2 sizes against the logarithm of the parameters; "
+        "its interval is a t interval from the scatter of the GPT-2 points "
+        "and does not include the sampling error of each point's "
+        "accuracy. " + _sentence(_slope_text(numbers, names)) + tail + "."
     )
 
 
