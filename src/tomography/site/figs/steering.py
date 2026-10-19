@@ -71,8 +71,8 @@ DETAIL = (
     "WikiText-103 passages. (c) Distinct-1 of the "
     "completions. The rule uses the perplexity of neutral text, not of the "
     "completions ([[table:steering]] gives the scores, ratios and judge "
-    "agreement). This run has no random-direction arm; the finder "
-    "comparison uses random directions ([[fig:teaser]])."
+    "agreement). It has no random-direction arm; the utility steering run "
+    "uses random directions ([[fig:teaser]])."
 )
 
 
