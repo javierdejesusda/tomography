@@ -2,7 +2,7 @@
 
 Row one is a heat map per concept with a row per checkpoint: the reader's
 accuracy minus that of a random direction of the same run at every layer, with
-the first layer above 0.1 marked and the layer read in row two circled. Row
+the lowest layer above 0.1 marked and the layer read in row two circled. Row
 two is the held-out accuracy at that layer against the number of parameters,
 with the random direction at the same layer and a Wilson interval for the test
 pairs. Sentiment is the held-out value of the sample-size run, not the
@@ -36,7 +36,7 @@ CONCEPTS = (
     ("morality", "Morality", "r3"),
     ("truth", "Truth", "r7"),
 )
-GPT2 = ("gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
+MIN_TREND_SIZES = 3
 HALO = 1.6
 TICK = 0.8
 MARKER = 3.5
@@ -161,8 +161,8 @@ def _size(
             zorder=4,
         )
     slope, lo, hi = trend
-    gpt2 = [m for m in GPT2 if m in cells]
-    if len(gpt2) == 4:
+    gpt2 = [m for m in cells if stats.role(m) == "gpt2"]
+    if len(gpt2) >= MIN_TREND_SIZES:
         logs = np.log10([params.param_count(m) for m in gpt2])
         ys = np.array([cells[m].at.reader for m in gpt2])
         ends = np.array([logs.min(), logs.max()])
@@ -192,8 +192,8 @@ def _size(
 
 
 def _trend(cells: dict[str, Cell]) -> tuple[float, float, float]:
-    gpt2 = [m for m in GPT2 if m in cells]
-    if len(gpt2) < 4:
+    gpt2 = [m for m in cells if stats.role(m) == "gpt2"]
+    if len(gpt2) < MIN_TREND_SIZES:
         return 0.0, 0.0, 0.0
     return stats.ols_slope(
         [float(np.log10(params.param_count(m))) for m in gpt2],
@@ -212,14 +212,22 @@ def _numbers(
             for c in found[concept].values()
             if (d := reading.first_depth_above(c.curve, MARGIN)) is not None
         ]
-        numbers[f"onset_{concept}_min"] = min(onsets)
-        numbers[f"onset_{concept}_max"] = max(onsets)
+        if onsets:
+            numbers[f"onset_{concept}_min"] = min(onsets)
+            numbers[f"onset_{concept}_max"] = max(onsets)
         slope, lo, hi = trends[concept]
         numbers[f"slope_{concept}"] = slope
         numbers[f"slope_{concept}_lo"] = lo
         numbers[f"slope_{concept}_hi"] = hi
+    numbers["n_gpt2"] = float(
+        sum(stats.role(m) == "gpt2" for m in found["truth"])
+    )
     numbers["truth_n"] = next(iter(found["truth"].values())).at.n
     return numbers
+
+
+def _sentence(text: str) -> str:
+    return text[:1].upper() + text[1:]
 
 
 def _slope_text(numbers: dict[str, float], names: dict[str, str]) -> str:
@@ -241,13 +249,15 @@ def _slope_text(numbers: dict[str, float], names: dict[str, str]) -> str:
     parts = []
     if rising:
         parts.append(
-            "across the four GPT-2 sizes accuracy rises by "
+            f"across the {int(numbers['n_gpt2'])} GPT-2 sizes accuracy "
+            "rises by "
             + " and ".join(rising)
             + " per tenfold in parameters (95 percent intervals)"
         )
     if flat:
         verb = "has an interval" if len(flat) == 1 else "have intervals"
-        parts.append(" and ".join(flat) + f" {verb} that includes zero")
+        include = "includes" if len(flat) == 1 else "include"
+        parts.append(" and ".join(flat) + f" {verb} that {include} zero")
     return "; ".join(parts)
 
 
@@ -256,10 +266,11 @@ def _claim(numbers: dict[str, float], names: dict[str, str]) -> str:
         f"{numbers[f'onset_{c}_min']:.3f} to {numbers[f'onset_{c}_max']:.3f} "
         f"of the depth for {c}"
         for c in names
+        if f"onset_{c}_min" in numbers
     ]
     return (
         "Where and how well a concept is read. The margin of the reader "
-        "over a random direction first exceeds 0.1 at "
+        "over a random direction reaches 0.1 at "
         + ", ".join(spans[:-1])
         + " and "
         + spans[-1]
@@ -276,7 +287,7 @@ def _detail(
     gpt2_truth = [
         stats.diff_interval(c.at.reader, c.at.random, c.at.n)[1]
         for m, c in found["truth"].items()
-        if m in GPT2
+        if stats.role(m) == "gpt2"
     ]
     tail = ""
     if gpt2_truth and all(lo <= 0 for lo in gpt2_truth):
@@ -287,7 +298,7 @@ def _detail(
         )
     return (
         "(a to d) Reader accuracy minus random-direction accuracy at every "
-        "layer, one row per checkpoint; the black tick marks the first layer "
+        "layer, one row per checkpoint; the black tick marks the lowest layer "
         "where the margin exceeds 0.1 and the circle the layer read in (e "
         "to h), chosen on a validation split (sentiment: on the select "
         "split of the sample-size run). (e to h) Held-out accuracy at that "
@@ -296,7 +307,7 @@ def _detail(
         f"test pairs ({sizes['sentiment']:,} sentiment pairs from the "
         f"sample-size run at 64 training pairs, {sizes['utility']:,} "
         f"utility, {sizes['morality']:,} morality and {sizes['truth']:,} "
-        "truth pairs). " + _slope_text(numbers, names).capitalize() + tail + "."
+        "truth pairs). " + _sentence(_slope_text(numbers, names)) + tail + "."
     )
 
 
@@ -335,7 +346,7 @@ def _keys(fig: Figure) -> None:
     ]
     fig.legend(
         handles,
-        ["first layer above 0.1", "layer read below"],
+        ["lowest layer above 0.1", "layer read below"],
         loc="outside upper right",
         ncol=2,
         frameon=False,

@@ -223,7 +223,7 @@ def test_the_caption_quotes_the_onsets_slopes_and_sizes(
     assert "214 sentiment pairs" in text
     assert "4,808 utility, 983 morality and 59 truth pairs" in text
     assert "per tenfold" in text
-    assert "includes zero" in text
+    assert "include zero" in text
 
 
 def test_the_figure_has_two_rows_of_four_and_no_model_legend(
@@ -241,3 +241,13 @@ def test_the_figure_has_two_rows_of_four_and_no_model_legend(
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.guard_problems(output.figure) == []
     assert checks.problems(output.figure) == []
+
+
+def test_the_caption_keeps_names_and_grammar_and_avoids_first(
+    output: registry.FigureOutput,
+) -> None:
+    text = f"{output.claim} {output.detail}"
+    assert "gpt-2" not in text
+    assert "GPT-2 sizes" in text
+    assert "intervals that includes" not in text
+    assert "first" not in text.lower()
