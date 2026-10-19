@@ -398,3 +398,12 @@ def test_the_discussion_names_the_fluency_rule_it_says_steering_breaks() -> (
     assert "distinct-1" in sentence
     assert "1.5" in sentence
     assert "0.15" in sentence
+
+
+def test_the_approximate_contribution_counts_the_reader_and_the_control() -> (
+    None
+):
+    text = " ".join(_all_texts())
+    assert "is matched by" not in text
+    assert "[[count:table:approximate.above_words]]" in text
+    assert "[[count:table:approximate.random_high]]" in text

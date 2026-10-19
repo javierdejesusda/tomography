@@ -193,3 +193,21 @@ def test_no_underscore_backtick_or_run_code(
     texts = [re.sub(r"\[\[.*?\]\]", "", t) for t in texts]
     assert not any("_" in t or "`" in t for t in texts)
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
+
+
+def test_the_random_control_is_counted_per_role_not_called_a_match(
+    output: registry.TableOutput,
+) -> None:
+    names = models("p10b")
+    high = {
+        m: float(_transfer(m, "random")["auroc"]) >= output.numbers["high"]
+        for m in names
+    }
+    assert output.numbers["high"] == 0.9
+    count = output.counts["random_high"]
+    assert sum(c.hits for c in count.values()) == sum(high.values())
+    assert [count[r].total for r in ("gpt2", "base", "post")] == [4, 3, 3]
+    claim = output.claim
+    assert "matched" not in claim
+    assert "[[count:table:approximate.above_words]]" in claim
+    assert "[[count:table:approximate.random_high]]" in claim

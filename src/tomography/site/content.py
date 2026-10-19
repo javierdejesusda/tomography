@@ -186,10 +186,12 @@ INTRODUCTION = Section(
         ),
         (
             "Approximate answers ([[sec:approximate]]).",
-            "Qwen3 writes ranges where the sourced answer is a range, but a "
-            "range reader is matched by a classifier on the question words "
-            "and by its random control and places people next to breeds "
-            "([[fig:approximate]]).",
+            "Qwen3 writes ranges where the sourced answer is a range, but "
+            "the range reader is above a classifier on the question words "
+            "on [[count:table:approximate.above_words]], its random control "
+            "reaches [[num:table:approximate.high]] on "
+            "[[count:table:approximate.random_high]], and it places people "
+            "next to breeds ([[fig:approximate]]).",
         ),
         (
             "Post-training ([[sec:base_post]]).",
