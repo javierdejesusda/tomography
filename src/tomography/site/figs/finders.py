@@ -16,6 +16,7 @@ from matplotlib.figure import Figure
 from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
 
+from tomography.site import cells
 from tomography.site import finders as loader
 from tomography.site import params
 from tomography.site import stats
@@ -48,19 +49,6 @@ XLIM = (-0.30, 0.45)
 BAND_HEIGHT = 0.6
 MARKER = 3.5
 DIRECTION = paper.MEASURE_MARKERS["direction"]
-
-
-def fmt3(value: float) -> str:
-    """Writes a number with three decimals and no sign on a rounded zero.
-
-    Args:
-        value: The number.
-
-    Returns:
-        The text, such as `0.000` for minus 1e-16.
-    """
-    text = f"{value:.3f}"
-    return text[1:] if text == "-0.000" else text
 
 
 @dataclasses.dataclass(frozen=True)
@@ -286,8 +274,8 @@ def _claim(
         f"{stats.per_role_text(counts['pca_truth'])}. On utility (matched "
         f"pairs) it is above it on {utility_text} and on GPT-2 by point "
         f"estimate only ({gpt2.hits} of {gpt2.total}, by "
-        f"{fmt3(numbers['pca_utility_gpt2_min'])} to "
-        f"{fmt3(numbers['pca_utility_gpt2_max'])}), but matching is "
+        f"{cells.num(numbers['pca_utility_gpt2_min'])} to "
+        f"{cells.num(numbers['pca_utility_gpt2_max'])}), but matching is "
         "confounded with the concept. Logistic regression is above it for "
         f"sentiment on {_where(counts['logistic_sentiment'])}."
     )

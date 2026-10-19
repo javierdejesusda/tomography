@@ -1,17 +1,21 @@
-"""Cell text and file readers shared by the tables and the page text.
+"""Cell text, CSV text and file readers shared by the tables and figures.
 
 Missing values are written `n/a`. Every number is rounded where it is
 written, never earlier, then signed: a value that rounds to zero has no sign
 and a negative one uses the true minus sign.
 """
 
+from collections.abc import Sequence
 import csv
+import io
 import json
 from pathlib import Path
 from typing import Any
 
+from tomography.viz import axes
+
 MISSING = "n/a"
-MINUS = chr(0x2212)
+MINUS = axes.MINUS
 PLUS_MINUS = chr(0x00B1)
 
 
@@ -88,44 +92,6 @@ def percent(share: float | None) -> str:
     return f"{round(100 * share)}"
 
 
-def count(part: int, total: int) -> str:
-    """Writes `part / total` with thousands separators.
-
-    Args:
-        part: The numerator.
-        total: The denominator.
-
-    Returns:
-        Text such as `1,377 / 21,988`.
-    """
-    return f"{part:,} / {total:,}"
-
-
-def _cell(text: str) -> float | str | None:
-    if text == "":
-        return None
-    try:
-        return float(text)
-    except ValueError:
-        return text
-
-
-def read_csv(path: Path) -> list[dict[str, Any]]:
-    """Reads a result CSV; numbers are parsed and blanks become None.
-
-    Args:
-        path: The file.
-
-    Returns:
-        One dict per row.
-    """
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        return [
-            {k: _cell(v) for k, v in row.items()}
-            for row in csv.DictReader(handle)
-        ]
-
-
 def read_table(path: Path) -> list[dict[str, Any]]:
     """Reads a `table.json`-style result file as records.
 
@@ -161,3 +127,21 @@ def check_align(align: str, columns: int) -> str:
     if len(align) != columns or set(align) - {"l", "r"}:
         raise ValueError(f"bad alignment {align!r} for {columns} columns")
     return align
+
+
+def csv_text(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
+    """Writes rows as CSV text; None becomes an empty field.
+
+    Args:
+        header: Column names.
+        rows: One sequence of cells per row.
+
+    Returns:
+        The CSV document.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(header)
+    for row in rows:
+        writer.writerow(["" if cell is None else cell for cell in row])
+    return buffer.getvalue()

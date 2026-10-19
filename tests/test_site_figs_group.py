@@ -1,5 +1,4 @@
 from matplotlib.figure import Figure
-import pytest
 
 from tomography.site.figs import _group
 
@@ -29,19 +28,6 @@ def test_lines_by_role_never_mix_families_or_roles() -> None:
 def test_lines_by_role_sorts_by_parameter_count_and_skips_empty_roles() -> None:
     found = _group.lines_by_role(["gpt2-xl", "gpt2", "gpt2-medium"])
     assert found == {"GPT-2": ["gpt2", "gpt2-medium", "gpt2-xl"]}
-
-
-def test_wilson_matches_the_closed_form() -> None:
-    lo, hi = _group.wilson(0, 120)
-    assert lo == 0.0
-    assert hi == pytest.approx(0.031019166418703472)
-    lo, hi = _group.wilson(59, 120)
-    assert lo < 59 / 120 < hi
-
-
-def test_wilson_rejects_an_empty_sample() -> None:
-    with pytest.raises(ValueError, match="positive"):
-        _group.wilson(0, 0)
 
 
 def test_csv_text_writes_the_header_and_rows() -> None:

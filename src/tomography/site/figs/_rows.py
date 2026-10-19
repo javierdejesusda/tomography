@@ -13,10 +13,11 @@ from matplotlib.figure import Figure
 from matplotlib.layout_engine import ConstrainedLayoutEngine
 from matplotlib.lines import Line2D
 
+from tomography.site import cells
 from tomography.site import stats
-from tomography.viz import axes
 from tomography.viz import paper
 
+number = cells.num
 PAD = 0.07
 STAR_SIZE = 6.4
 TRIANGLE_SIZE = 5.4
@@ -265,19 +266,3 @@ def series_handle(
             color,
         ),
     )
-
-
-def number(value: float, digits: int = 3) -> str:
-    """Writes a number for a caption with the true minus.
-
-    Args:
-        value: The number.
-        digits: Decimals.
-
-    Returns:
-        The text; a value that rounds to zero has no sign.
-    """
-    text = f"{value:.{digits}f}"
-    if float(text) == 0.0:
-        text = text.lstrip("-")
-    return text.replace("-", axes.MINUS)

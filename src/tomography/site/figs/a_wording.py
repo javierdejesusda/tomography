@@ -22,6 +22,7 @@ from tomography.site.figs import wording
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.viz import paper
+from tomography.viz.axes import MINUS
 
 DROPPED = "no_trailing_space"
 ROW_HEIGHT = 1.9
@@ -265,7 +266,7 @@ def build(manifest: Manifest) -> FigureOutput:
     noise = {m: wording.noise(manifest, m) for m in models}
     numbers["min_margin"] = min(numbers[f"min_{m}"] for m in margins)
     value = numbers["min_margin"]
-    low = (chr(0x2212) if value < 0 else "") + f"{abs(value):.2f}"
+    low = (MINUS if value < 0 else "") + f"{abs(value):.2f}"
     numbers["noise_min"] = min(noise.values())
     numbers["noise_max"] = max(noise.values())
     numbers["n_below_noise"] = float(

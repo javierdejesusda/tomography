@@ -1,14 +1,13 @@
 """Builds the results site into a directory."""
 
-import csv
 import datetime
-import io
 import logging
 from pathlib import Path
 import re
 import shutil
 import subprocess
 
+from tomography.site import cells
 from tomography.site import page
 from tomography.site import references
 from tomography.site import registry
@@ -139,11 +138,10 @@ def _csv_text(
     view: page.Page,
     groups: tuple[tuple[str, int, bool], ...] = (),
 ) -> str:
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(_grouped_columns(columns, groups, view))
-    writer.writerows([[view.plain(c) for c in row] for row in rows])
-    return buffer.getvalue()
+    return cells.csv_text(
+        _grouped_columns(columns, groups, view),
+        [[view.plain(c) for c in row] for row in rows],
+    )
 
 
 def build(

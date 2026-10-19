@@ -6,10 +6,10 @@ text with the stimulus slot.
 """
 
 from tomography.experiments import variants
+from tomography.site import cells
 from tomography.site import runfiles
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 from tomography.templates import ChatFormat
 
 DROPPED = "no_trailing_space"
@@ -78,7 +78,7 @@ def build(manifest: Manifest) -> TableOutput:
         detail,
         COLUMNS,
         rows,
-        _cells.check_align("rlll", len(COLUMNS)),
+        cells.check_align("rlll", len(COLUMNS)),
         [],
         {"wordings": float(len(rows))},
         row_groups=(),

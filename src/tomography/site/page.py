@@ -13,6 +13,7 @@ import html
 import re
 import string
 
+from tomography.site import cells
 from tomography.site import content
 from tomography.site import references
 from tomography.site import stats
@@ -20,7 +21,6 @@ from tomography.site.content import Section
 from tomography.site.figs import _rows
 from tomography.site.registry import FigureOutput
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 
 TOKEN = re.compile(r"\[\[(.+?)\]\]")
 NBSP = chr(0xA0)
@@ -288,8 +288,8 @@ class Page:
         output, name = self._output(address)
         value = output.numbers[name]
         if float(value).is_integer():
-            return f"{int(value):,}".replace("-", chr(0x2212))
-        return _cells.num(value)
+            return f"{int(value):,}".replace("-", cells.MINUS)
+        return cells.num(value)
 
     def quoted_count(self, address: str) -> str:
         """Writes a per-role count a figure or table computed."""

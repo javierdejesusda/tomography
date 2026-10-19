@@ -7,11 +7,11 @@ the random direction at that layer.
 
 import numpy as np
 
+from tomography.site import cells
 from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 from tomography.site.tables import _rows
 from tomography.viz import paper
 
@@ -55,7 +55,7 @@ def build(manifest: Manifest) -> TableOutput:
             _, hi = stats.wilson(reader, int(block["n_eval_pairs"]))
             mark = "*" if hi < 0.5 else ""
             below += bool(mark)
-            row.append(f"{_cells.num(reader)}{mark} ({_cells.num(random)})")
+            row.append(f"{cells.num(reader)}{mark} ({cells.num(random)})")
         rows.append(row)
     claim = "Reader accuracy on every truth set, next to the random direction."
     detail = (
@@ -71,7 +71,7 @@ def build(manifest: Manifest) -> TableOutput:
         detail,
         columns,
         rows,
-        _cells.check_align("l" + "r" * len(SETS), len(columns)),
+        cells.check_align("l" + "r" * len(SETS), len(columns)),
         [],
         {"below_half": float(below)},
         row_groups=_rows.role_groups(models),

@@ -9,6 +9,7 @@ margin over the random direction has a conservative interval above zero.
 
 import json
 
+from tomography.site import cells
 from tomography.site import params
 from tomography.site import reading
 from tomography.site import stats
@@ -16,7 +17,6 @@ from tomography.site import store
 from tomography.site.manifest import MODEL_FREE
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
-from tomography.site.tables import _cells
 from tomography.site.tables import _rows
 from tomography.viz import paper
 
@@ -98,14 +98,14 @@ def build(manifest: Manifest) -> TableOutput:
         for concept, _ in CONCEPTS:
             score = _score(manifest, concept, model)
             if score is None:
-                row += [_cells.MISSING, _cells.MISSING]
+                row += [cells.MISSING, cells.MISSING]
                 continue
             sizes[concept] = score.n
             _, lo, _ = reading.margin(score)
             flags[concept][model] = lo > 0
             row += [
-                _cells.num(score.reader) + ("*" if lo > 0 else ""),
-                _cells.num(score.random),
+                cells.num(score.reader) + ("*" if lo > 0 else ""),
+                cells.num(score.random),
             ]
         rows.append(row)
     numbers = {f"above_{c}": float(sum(flags[c].values())) for c, _ in CONCEPTS}
@@ -121,7 +121,7 @@ def build(manifest: Manifest) -> TableOutput:
         row = [label]
         for concept, _ in CONCEPTS:
             value, lo, hi, *_ = baselines[(concept, analyzer)]
-            row += [_cells.interval(value, lo, hi), ""]
+            row += [cells.interval(value, lo, hi), ""]
             numbers[f"{analyzer}_{concept}"] = value
             numbers[f"{analyzer}_{concept}_lo"] = lo
             numbers[f"{analyzer}_{concept}_hi"] = hi

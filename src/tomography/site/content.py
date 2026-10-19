@@ -18,9 +18,9 @@ detail behind each finding.
 
 import dataclasses
 
+from tomography.site.cells import MINUS
 from tomography.site.figs import knowledge_steering
 
-MINUS = chr(0x2212)
 PM = chr(0x00B1)
 ELL = chr(0x2113)
 
