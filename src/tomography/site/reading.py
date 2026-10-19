@@ -2,7 +2,10 @@
 
 R1, R2, R3 and R7 store a summary with the accuracy at the layer chosen on
 validation data, and a curve of the reader, a random direction and a
-shuffled-label reader over every layer. This module joins them.
+shuffled-label reader over every layer. This module joins them. R5 scores a
+reader fitted on honesty prompts on plain statements, so its curves are the
+transfer curves; the held-out sentiment value comes from the sample-size run
+of P3.
 """
 
 import dataclasses
@@ -11,6 +14,8 @@ from typing import Any
 
 import numpy as np
 
+from tomography.site import params
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 
 ACCURACY_KEY = {"r1": "best_accuracy", "r2": "test_accuracy"}
@@ -65,12 +70,41 @@ def _selected(exp: str, data: dict[str, Any]) -> tuple[int, float, list[float]]:
     return int(data["best_layer"]), float(data[key]), list(data["ci"])
 
 
+@dataclasses.dataclass(frozen=True)
+class Score:
+    """A reader and its random direction at one layer.
+
+    Attributes:
+        layer: The layer, counted from 1.
+        reader: Reader accuracy.
+        random: Accuracy of a random direction at the same layer.
+        n: Number of test pairs both accuracies are read from.
+    """
+
+    layer: int
+    reader: float
+    random: float
+    n: int
+
+
+def margin(score: Score) -> tuple[float, float, float]:
+    """Reader minus random with the conservative interval.
+
+    Args:
+        score: A reader and its random direction.
+
+    Returns:
+        The margin with its lower and upper limits.
+    """
+    return stats.diff_interval(score.reader, score.random, score.n)
+
+
 def load(manifest: Manifest, exp: str, model: str) -> Reading | None:
     """Reads one cell.
 
     Args:
         manifest: The run resolver.
-        exp: `r1`, `r2`, `r3` or `r7`.
+        exp: `r1`, `r2`, `r3`, `r5` or `r7`.
         model: Checkpoint key.
 
     Returns:
@@ -80,10 +114,11 @@ def load(manifest: Manifest, exp: str, model: str) -> Reading | None:
     if run is None:
         return None
     data = json.loads((run / "summary.json").read_text("utf-8"))["data"]
-    meta = json.loads((run / "curves.json").read_text("utf-8"))["data"]
+    stem = "curves_transfer" if exp == "r5" else "curves"
+    meta = json.loads((run / f"{stem}.json").read_text("utf-8"))["data"]
     layer, accuracy, ci = _selected(exp, data)
     count = int(meta["n_layers"])
-    with np.load(run / "curves.npz") as npz:
+    with np.load(run / f"{stem}.npz") as npz:
         mean = np.asarray(npz["mean"], dtype=float)
     series = list(meta["series"])
     return Reading(
@@ -111,3 +146,65 @@ def first_depth_above(found: Reading, margin: float) -> float | None:
     """
     above = np.flatnonzero(found.selectivity > margin)
     return float(found.depth[above[0]]) if above.size else None
+
+
+def in_template(manifest: Manifest, model: str) -> Score | None:
+    """Reads the in-template block of R5.
+
+    The reader is scored on held-out honesty prompts of the template it was
+    fitted on; its random direction is read from the in-template curves at
+    that layer.
+
+    Args:
+        manifest: The run resolver.
+        model: Checkpoint key.
+
+    Returns:
+        The score, or None when the checkpoint has no R5 run.
+    """
+    run = manifest.run("r5", model)
+    if run is None:
+        return None
+    data = json.loads((run / "summary.json").read_text("utf-8"))["data"]
+    block = data["in_template"]
+    meta = json.loads((run / "curves.json").read_text("utf-8"))["data"]
+    layer = int(block["best_layer"])
+    with np.load(run / "curves.npz") as npz:
+        mean = np.asarray(npz["mean"], dtype=float)
+    random = float(mean[list(meta["series"]).index("random")][layer - 1])
+    return Score(
+        layer,
+        float(block["test_accuracy"]),
+        random,
+        int(data["n_eval_pairs"]["in_template"]["test"]),
+    )
+
+
+def heldout_sentiment(manifest: Manifest, model: str) -> Score | None:
+    """Reads held-out sentiment from the sample-size run of P3.
+
+    The layer is chosen on the select split and the accuracy is the mean over
+    resamples on the report split, at 64 training pairs.
+
+    Args:
+        manifest: The run resolver.
+        model: Checkpoint key.
+
+    Returns:
+        The score, or None when the checkpoint has no P3 run.
+    """
+    run = manifest.run("p3", model)
+    if run is None:
+        return None
+    meta = json.loads((run / "sizes_sentiment.json").read_text("utf-8"))
+    layer = int(meta["data"]["layer"])
+    with np.load(run / "sizes_sentiment.npz") as npz:
+        size = int(np.flatnonzero(npz["sizes"] == 64)[0])
+        col = int(np.flatnonzero(npz["layers"] == layer)[0])
+        accuracy = np.asarray(npz["accuracy"], dtype=float)
+    return Score(
+        layer,
+        float(accuracy[size, 1, 0, :, col].mean()),
+        float(accuracy[size, 1, 1, :, col].mean()),
+        params.REPORT_PAIRS["sentiment"],
+    )

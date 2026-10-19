@@ -1,4 +1,6 @@
-"""Parameter counts of the checkpoints, computed from their model configs.
+"""Parameter counts, test sizes and display names of the page.
+
+Parameter counts are computed from the model configs.
 
 `data/model_configs.json` stores the architecture fields of each pinned
 checkpoint exactly as its `config.json` at that revision gives them. Counts
@@ -8,6 +10,8 @@ include the embeddings, the positional table of GPT-2 and every norm.
 import json
 from pathlib import Path
 from typing import Any
+
+from tomography.site.manifest import Manifest
 
 CONFIGS = Path(__file__).parent / "data" / "model_configs.json"
 
@@ -98,3 +102,92 @@ def label(count: float) -> str:
     if count >= 1e9:
         return f"{count / 1e9:.3g}B" if count >= 1e10 else f"{count / 1e9:.2f}B"
     return f"{count / 1e6:.0f}M"
+
+
+REPORT_PAIRS = {"sentiment": 214, "truth": 59, "utility": 256}
+
+DISPLAY = {
+    "gpt2": "GPT-2 small",
+    "gpt2-medium": "GPT-2 medium",
+    "gpt2-large": "GPT-2 large",
+    "gpt2-xl": "GPT-2 XL",
+    "qwen3-0.6b-base": "Qwen3-0.6B-Base",
+    "qwen3-0.6b": "Qwen3-0.6B",
+    "qwen3-1.7b-base": "Qwen3-1.7B-Base",
+    "qwen3-1.7b": "Qwen3-1.7B",
+    "qwen3-4b-base": "Qwen3-4B-Base",
+    "qwen3-4b": "Qwen3-4B",
+    "pca_diff": "PCA of paired differences (paper)",
+    "pca_raw": "PCA of activations",
+    "mean_diff": "mean difference",
+    "logistic": "logistic regression",
+    "kmeans": "k-means",
+    "random": "random direction",
+    "lat": "knowledge direction",
+    "triviaqa": "TriviaQA",
+    "kuq": "KUQ",
+    "synthal": "SyntHal",
+    "falseqa": "FalseQA",
+    "popqa": "PopQA",
+    "nq_open": "NQ-open",
+    "wikidata": "Wikidata",
+    "wikitext103": "WikiText-103",
+    "cities": "cities",
+    "neg_cities": "negated cities",
+    "sp_en_trans": "Spanish to English",
+    "neg_sp_en_trans": "negated Spanish to English",
+    "larger_than": "larger than",
+    "smaller_than": "smaller than",
+    "cities_cities_conj": "cities conjunction",
+    "cities_cities_disj": "cities disjunction",
+    "common_claim_true_false": "common claims",
+}
+
+
+def display(key: str) -> str:
+    """Writes a stored key as the page names it.
+
+    Args:
+        key: A checkpoint, finder, dataset, set or wording key.
+
+    Returns:
+        The display name; an unlisted key has its underscores written as
+        spaces.
+    """
+    return DISPLAY.get(key, key.replace("_", " "))
+
+
+def eval_pairs(
+    manifest: Manifest, exp: str, model: str, which: str | None = None
+) -> int:
+    """Reads the number of test pairs a run stored for its reading.
+
+    Args:
+        manifest: The run resolver.
+        exp: `r2`, `r3`, `r5`, `r6` or `r7`.
+        model: Checkpoint key.
+        which: For `r7` a set name (default the test set), for `r5` either
+            `transfer` (default) or `in_template`.
+
+    Returns:
+        The number of test pairs.
+
+    Raises:
+        FileNotFoundError: If the cell has no run.
+        ValueError: If the experiment stores no such size.
+    """
+    run = manifest.run(exp, model)
+    if run is None:
+        raise FileNotFoundError(f"results/{exp}/{model} has no run")
+    data = json.loads((run / "summary.json").read_text(encoding="utf-8"))[
+        "data"
+    ]
+    if exp in ("r2", "r3"):
+        return int(data["n_eval_pairs"]["test"])
+    if exp == "r7":
+        return int(data["sets"][which or "test"]["n_eval_pairs"])
+    if exp == "r5":
+        return int(data["n_eval_pairs"][which or "transfer"]["test"])
+    if exp == "r6":
+        return int(data["n_test"])
+    raise ValueError(f"no test size for {exp!r}")
