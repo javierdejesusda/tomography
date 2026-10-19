@@ -30,15 +30,24 @@ DATA_URL = REPO_URL + "/tree/main/results"
 
 ABSTRACT_FINDER = (
     "The paper's own finder, the first principal component of paired "
-    "differences, is above a random direction for sentiment on "
-    "[[count:fig:teaser.paper_finder]] when the pairs are not matched."
+    "differences, is above a random direction by the 95 percent interval "
+    "for sentiment on [[count:fig:finders.pca_sentiment]] and for truth on "
+    "[[count:fig:finders.pca_truth]] with unrelated pairs, and for utility "
+    "on [[count:fig:finders.pca_utility]] with matched pairs (on GPT-2 by "
+    "point estimate only); matching is confounded with the concept and the "
+    "data."
 )
 ABSTRACT_STEERING = (
-    "Steering along a sentiment direction at relative coefficient 0.1 "
-    "beats random directions of the same norm on "
-    "[[count:fig:teaser.steering]], and the steered model stays within 1.5 "
-    "times the unsteered perplexity on neutral text on "
-    "[[count:fig:steering.fluent01]]."
+    "For sentiment, steering at relative coefficient 0.1 moves the judged "
+    "sentiment past the unsteered score at both signs with every vector, "
+    "for the primary and the second judge, on "
+    "[[count:fig:steering.moves01]], and keeps the fluency rule "
+    "(perplexity ratio at most 1.5 and distinct-1 at least 0.15) on "
+    "[[count:fig:steering.fluent01]]. For utility, steering at relative "
+    "coefficient 0.3 beats every random direction of the same norm with "
+    "every vector on [[count:fig:teaser.steering]] and keeps the fluency "
+    "rule on [[count:fig:teaser.steering_fluent]] (GPT-2 small has no "
+    "fluency measure)."
 )
 ABSTRACT = (
     "Representation engineering (Zou et al., 2023) reads a concept from a "
@@ -49,15 +58,13 @@ ABSTRACT = (
     "random direction of the same run and, for TruthfulQA, knowledge and "
     "approximate answers, where the wording can give the label away, beside "
     "a classifier that sees only the text. A logistic direction reads "
-    "utility above its random direction on [[count:fig:teaser.utility]], "
-    "morality on [[count:fig:teaser.morality]] and truth on "
-    "[[count:fig:teaser.truth]] at our test size. "
+    "utility, morality and truth above its random direction on many "
+    "checkpoints, with the counts per role in [[sec:introduction]]. "
     + ABSTRACT_FINDER
     + " Against stronger baselines the readings rarely win: a TruthfulQA "
     "reader is above a classifier on the question and answer words on "
     "[[count:fig:teaser.truthfulqa]], and a direction for questions the "
-    "model can answer adds to the confidence of the model on "
-    "[[count:fig:teaser.knowledge_confidence]]. "
+    "model can answer adds little to the confidence of the model. "
     + ABSTRACT_STEERING
     + " Post-training lowers held-out sentiment reading on "
     "[[num:fig:base_post.sent_below]] of the three Qwen3 sizes; three other "
@@ -111,8 +118,9 @@ INTRODUCTION = Section(
         "Qwen3 [[cite:yang2025qwen3]] at three sizes, each as a base and a "
         "post-trained checkpoint. We do not reproduce the LLaMA-2 numbers of "
         "the paper. Our readers are logistic regression unless a figure "
-        "names the finder of the paper, because that finder is not reliably "
-        "above a random direction on unmatched pairs ([[sec:finders]]). For "
+        "names the finder of the paper, because that finder is above a random "
+        "direction by its interval for only some concepts and roles "
+        "([[sec:finders]]). For "
         "each question we name the baseline that could produce the result "
         "without the direction: a random direction fitted with the same "
         "procedure, a classifier on the text, the popularity of the "
@@ -127,16 +135,25 @@ INTRODUCTION = Section(
     listed=(
         (
             "Finders ([[sec:finders]]).",
-            "On pairs of unrelated inputs, the finder of the paper is above "
-            "a random direction for sentiment on "
-            "[[count:fig:finders.pca_sentiment]], while logistic regression "
-            "is on [[count:fig:finders.logistic_sentiment]]; on matched "
-            "utility pairs the finder of the paper is above it on "
-            "[[count:fig:finders.pca_utility_point]] by point estimate "
+            "By the 95 percent interval, the finder of the paper is above a "
+            "random direction for sentiment on "
+            "[[count:fig:finders.pca_sentiment]] and for truth on "
+            "[[count:fig:finders.pca_truth]], both with unrelated pairs, "
+            "while logistic regression is above it for sentiment on "
+            "[[count:fig:finders.logistic_sentiment]]; for utility, with "
+            "matched pairs, the finder is above it on "
+            "[[count:fig:finders.pca_utility]], and on GPT-2 by point "
+            "estimate only, on [[count:fig:finders.pca_utility_point]]. "
+            "Matching is confounded with the concept and the data, so the "
+            "comparison does not show that matching is what matters "
             "([[fig:finders]]).",
         ),
         (
             "Where a concept is read ([[sec:reading]]).",
+            "A logistic direction is above its random direction at our test "
+            "size for utility on [[count:fig:teaser.utility]], for morality "
+            "on [[count:fig:teaser.morality]] and for truth on "
+            "[[count:fig:teaser.truth]]. "
             "The margin over a random direction exceeds 0.1 for sentiment "
             "from a relative depth of [[num:fig:reading.onset_sentiment_min]] "
             "to [[num:fig:reading.onset_sentiment_max]] and later for "
@@ -169,18 +186,25 @@ INTRODUCTION = Section(
         ),
         (
             "Steering ([[sec:steering]]).",
-            "At relative coefficient " + PM + "0.1 steering moves the "
-            "judged sentiment and keeps the fluency rule (neutral-text "
-            "perplexity ratio at most 1.5 and distinct-1 at least 0.15) on "
-            "[[count:fig:steering.fluent01]]; at " + PM + "0.3 on "
-            "[[count:fig:steering.fluent03]] ([[fig:steering]]).",
+            "For sentiment, steering at relative coefficient " + PM + "0.1 "
+            "moves the judged sentiment past the unsteered score at both "
+            "signs with every vector, for the primary and the second judge, "
+            "on [[count:fig:steering.moves01]], and keeps the fluency rule "
+            "(neutral-text perplexity ratio at most 1.5 and distinct-1 at "
+            "least 0.15) on [[count:fig:steering.fluent01]]. For utility, "
+            "steering at relative coefficient 0.3 beats every random "
+            "direction of the same norm with every vector on "
+            "[[count:fig:teaser.steering]] and keeps the fluency rule on "
+            "[[count:fig:teaser.steering_fluent]] (GPT-2 small has no "
+            "fluency measure; [[fig:steering]]).",
         ),
         (
             "Knowing what one knows ([[sec:knowledge_reading]]).",
             "A known-against-unknown direction ranks PopQA questions above "
             "popularity with an interval excluding zero on "
             "[[count:fig:knowledge_reading.above_pop]], and adds to the "
-            "confidence of the model by at most "
+            "confidence of the model on "
+            "[[count:fig:teaser.knowledge_confidence]], by at most "
             "[[num:table:knowledge.gain_upper_max]] at the upper end of its "
             "interval on any checkpoint "
             "([[fig:knowledge_reading]]).",
@@ -618,10 +642,12 @@ DISCUSSION = Section(
         "knowledge direction reads. A reading claim therefore needs its "
         "random direction and, where the text can carry the label, a text "
         "baseline; [[fig:teaser]] shows how many of the claims survive "
-        "both. The other is that the finder of the paper depends on matched "
-        "pairs: it works on utility, where each pair is one scenario in two "
-        "versions, and is not reliably above a random direction on "
-        "unrelated pairs, where logistic regression still is. Steering "
+        "both. The other is that the finder of the paper is above a random "
+        "direction by its interval on utility, where each pair is one "
+        "scenario in two versions, on [[count:fig:finders.pca_utility]], but "
+        "on few checkpoints for sentiment and truth, where the pairs are "
+        "unrelated; matching is confounded with the concept and the data, "
+        "so we do not read the difference as caused by matching. Steering "
         "moves the judged sentiment at small coefficients and breaks "
         "fluency at larger ones (a perplexity on neutral text above 1.5 "
         "times the unsteered model, or a distinct-1 below 0.15; "
