@@ -5,6 +5,7 @@ import runpy
 import numpy as np
 import pytest
 
+from tomography.site import params
 from tomography.site import registry
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
@@ -15,7 +16,7 @@ models = _RESULTS["models"]
 run = _RESULTS["run"]
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
-CONCEPTS = ("r1", "r2", "r3", "r7")
+CONCEPTS = ("p4", "r2", "r3", "r7")
 TITLES = ("sentiment", "utility", "morality", "truth")
 GROUPS = ("gpt2", "base", "post")
 GRID = np.linspace(0.0, 1.0, 101)
@@ -43,12 +44,14 @@ def _group(model: str) -> str:
 
 def _curves(exp: str, model: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     path = run(exp, model)
-    series = json.loads((path / "curves.json").read_text("utf-8"))["data"][
+    stem = "curves_sentiment_methods" if exp == "p4" else "curves"
+    names = ("logistic", "random") if exp == "p4" else ("reader", "random")
+    series = json.loads((path / f"{stem}.json").read_text("utf-8"))["data"][
         "series"
     ]
-    with np.load(path / "curves.npz") as z:
+    with np.load(path / f"{stem}.npz") as z:
         mean = np.asarray(z["mean"], dtype=float)
-    reader, random = mean[series.index("reader")], mean[series.index("random")]
+    reader, random = (mean[series.index(n)] for n in names)
     depth = np.arange(1, len(reader) + 1) / len(reader)
     return depth, reader, random
 
@@ -184,7 +187,9 @@ def test_the_caption_matches_the_plan(output: registry.FigureOutput) -> None:
     assert (
         "against the range of the random directions of the same panel" in text
     )
-    assert "256 SST-2 validation pairs" in text
+    assert "report-split" in text
+    assert f"{params.REPORT_PAIRS['sentiment']} sentiment pairs" in text
+    assert "SST-2 validation" not in text
     assert "shuffled" not in text.lower()
     assert EM not in text
     assert EN not in text

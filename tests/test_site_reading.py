@@ -22,7 +22,7 @@ run = _RESULTS["run"]
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 Z = 1.959963984540054
 CONCEPTS = {
-    "sentiment": "r1",
+    "sentiment": "p4",
     "utility": "r2",
     "morality": "r3",
     "truth": "r7",
@@ -39,6 +39,10 @@ def _wilson(p: float, n: int) -> tuple[float, float]:
 
 def _curves(exp: str, model: str) -> tuple[np.ndarray, np.ndarray]:
     path = run(exp, model)
+    if exp == "p4":
+        series = data(path, "curves_sentiment_methods.json")["series"]
+        mean = npz(path, "curves_sentiment_methods.npz")["mean"]
+        return mean[series.index("logistic")], mean[series.index("random")]
     series = data(path, "curves.json")["series"]
     mean = npz(path, "curves.npz")["mean"]
     return mean[series.index("reader")], mean[series.index("random")]
@@ -201,7 +205,7 @@ def test_the_plan_values_hold_at_the_current_results() -> None:
     assert (
         round(min(_depths("sentiment")), 3),
         round(max(_depths("sentiment")), 3),
-    ) == (0.021, 0.125)
+    ) == (0.021, 0.167)
     assert (
         round(min(_depths("utility")), 3),
         round(max(_depths("utility")), 3),
@@ -219,7 +223,7 @@ def test_the_caption_quotes_the_onsets_slopes_and_sizes(
     for concept in CONCEPTS:
         assert f"{output.numbers[f'onset_{concept}_min']:.3f}" in text
         assert f"{output.numbers[f'onset_{concept}_max']:.3f}" in text
-    assert "0.125" in text
+    assert "0.167" in text
     assert "214 sentiment pairs" in text
     assert "4,808 utility, 983 morality and 59 truth pairs" in text
     assert "per tenfold" in text

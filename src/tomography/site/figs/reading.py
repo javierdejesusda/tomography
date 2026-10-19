@@ -31,7 +31,7 @@ HEIGHT = 4.4
 MARGIN = 0.1
 VMAX = 0.4
 CONCEPTS = (
-    ("sentiment", "Sentiment", "r1"),
+    ("sentiment", "Sentiment", "p4"),
     ("utility", "Utility", "r2"),
     ("morality", "Morality", "r3"),
     ("truth", "Truth", "r7"),
@@ -58,7 +58,11 @@ class Cell:
 def _cells_of(manifest: Manifest, concept: str, exp: str) -> dict[str, Cell]:
     found: dict[str, Cell] = {}
     for model in manifest.models(exp):
-        curve = reading.load(manifest, exp, model)
+        curve = (
+            reading.load_sentiment(manifest, model)
+            if concept == "sentiment"
+            else reading.load(manifest, exp, model)
+        )
         if curve is None:
             continue
         if concept == "sentiment":
