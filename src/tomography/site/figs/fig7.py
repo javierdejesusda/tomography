@@ -15,7 +15,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 import numpy as np
 
-from tomography.site import store as store_module
+from tomography.site import runfiles
 from tomography.site.figs import _group
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
@@ -49,14 +49,12 @@ DETAIL = " ".join(
 )
 
 
-def _tables(
-    manifest: Manifest, store: store_module.Store
-) -> dict[str, list[dict[str, Any]]]:
+def _tables(manifest: Manifest) -> dict[str, list[dict[str, Any]]]:
     found = {}
     for model in manifest.models("c1"):
         run = manifest.run("c1", model)
         assert run is not None
-        found[model] = store.rows(run, "table.json")
+        found[model] = runfiles.rows(run, "table.json")
     return found
 
 
@@ -236,8 +234,7 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    store = store_module.Store(manifest.root)
-    tables = _tables(manifest, store)
+    tables = _tables(manifest)
     curves = {m: _curves(t) for m, t in tables.items()}
     rows_of = {
         "GPT-2": [m for m in tables if m.startswith("gpt2")],

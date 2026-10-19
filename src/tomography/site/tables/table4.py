@@ -9,7 +9,7 @@ over the model confidence from adding the label-free direction or the probe
 
 from typing import Any
 
-from tomography.site import store as store_module
+from tomography.site import runfiles
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
 from tomography.site.tables import _cells
@@ -70,7 +70,6 @@ def build(manifest: Manifest) -> TableOutput:
     Returns:
         The table and its caption parts.
     """
-    store = store_module.Store(manifest.root)
     rows: list[list[str]] = []
     readers: dict[str, dict[str, Any]] = {}
     lat: dict[str, dict[str, Any]] = {}
@@ -79,7 +78,7 @@ def build(manifest: Manifest) -> TableOutput:
     for model in models:
         run = manifest.run("p9a", model)
         assert run is not None
-        known = store.summary(run)["guess"]["n_known"]
+        known = runfiles.summary(run)["guess"]["n_known"]
         found = [
             r
             for r in _records(manifest, "p9b", model, "table.json")

@@ -8,7 +8,7 @@ layer.
 
 from typing import Any
 
-from tomography.site import store as store_module
+from tomography.site import runfiles
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
 from tomography.site.tables import _cells
@@ -75,7 +75,6 @@ def build(manifest: Manifest) -> TableOutput:
     Raises:
         ValueError: If two runs store different text-only rows.
     """
-    store = store_module.Store(manifest.root)
     models = manifest.models("r6")
     parts = {m: _r6(manifest, m) for m in models}
     text: dict[str, dict[str, Any]] = {}
@@ -94,12 +93,12 @@ def build(manifest: Manifest) -> TableOutput:
         run5, run_a1 = manifest.run("r5", model), manifest.run("a1", model)
         honesty = agree = None
         if run5 is not None:
-            summary = store.summary(run5)
+            summary = runfiles.summary(run5)
             lo, hi = summary["ci"]
             honesty = _cells.interval(summary["test_accuracy"], lo, hi)
             accuracy.append(float(summary["test_accuracy"]))
         if run_a1 is not None:
-            value = float(store.summary(run_a1)["agreement_at_layer"]["r5"])
+            value = float(runfiles.summary(run_a1)["agreement_at_layer"]["r5"])
             agree = _cells.num(value)
             agreement.append(value)
         rows.append(

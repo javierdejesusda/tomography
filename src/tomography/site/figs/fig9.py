@@ -16,7 +16,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 from tomography.site import params
-from tomography.site import store as store_module
+from tomography.site import runfiles
 from tomography.site.figs import _group
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
@@ -64,21 +64,19 @@ DETAIL = " ".join(
 )
 
 
-def _table(
-    store: store_module.Store, manifest: Manifest, exp: str, model: str
-) -> list[dict[str, Any]]:
+def _table(manifest: Manifest, exp: str, model: str) -> list[dict[str, Any]]:
     run = manifest.run(exp, model)
     assert run is not None
-    return store.rows(run, "table.json")
+    return runfiles.rows(run, "table.json")
 
 
 def _r6(
-    manifest: Manifest, store: store_module.Store
+    manifest: Manifest,
 ) -> tuple[dict[str, dict[str, dict[str, Any]]], dict[str, dict[str, Any]]]:
     found: dict[str, dict[str, dict[str, Any]]] = {}
     text: dict[str, dict[str, Any]] = {}
     for model in manifest.models("r6"):
-        rows = _table(store, manifest, "r6", model)
+        rows = _table(manifest, "r6", model)
         found[model] = {
             "reader": next(
                 r
@@ -121,8 +119,7 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    store = store_module.Store(manifest.root)
-    r6, text = _r6(manifest, store)
+    r6, text = _r6(manifest)
     r5_models = manifest.models("r5")
     accuracy: dict[str, float] = {}
     agreement: dict[str, float] = {}
@@ -130,16 +127,16 @@ def build(manifest: Manifest) -> FigureOutput:
         run5, run_a1 = manifest.run("r5", model), manifest.run("a1", model)
         if run5 is None or run_a1 is None:
             continue
-        accuracy[model] = float(store.summary(run5)["test_accuracy"])
+        accuracy[model] = float(runfiles.summary(run5)["test_accuracy"])
         agreement[model] = float(
-            store.summary(run_a1)["agreement_at_layer"]["r5"]
+            runfiles.summary(run_a1)["agreement_at_layer"]["r5"]
         )
     r7_models = manifest.models("r7")
     r7: dict[str, dict[str, float]] = {}
     for model in r7_models:
         run = manifest.run("r7", model)
         assert run is not None
-        sets = store.summary(run)["sets"]
+        sets = runfiles.summary(run)["sets"]
         r7[model] = {
             n: float(v["accuracy_at_val_layer"])
             for n, v in sets.items()

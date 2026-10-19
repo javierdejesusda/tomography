@@ -15,7 +15,7 @@ from matplotlib.lines import Line2D
 import numpy as np
 
 from tomography.site import params
-from tomography.site import store as store_module
+from tomography.site import runfiles
 from tomography.site.figs import _group
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
@@ -55,19 +55,21 @@ DETAIL = " ".join(
 )
 
 
-def _runs(
-    manifest: Manifest, store: store_module.Store
-) -> list[dict[str, Any]]:
+def _runs(manifest: Manifest) -> list[dict[str, Any]]:
     found = []
     for model in manifest.models("p9d"):
         templates = sorted(
-            {r.config.get("template") for r in manifest.runs("p9d", model)}
+            {
+                str(r.config["template"])
+                for r in manifest.runs("p9d", model)
+                if r.config.get("template") is not None
+            }
         )
         for template in templates:
             path = manifest.run("p9d", model, template=template)
             if path is None:
                 continue
-            summary = store.summary(path)
+            summary = runfiles.summary(path)
             found.append(
                 {
                     "model": model,
@@ -90,15 +92,13 @@ def _dose_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [*entropy, largest]
 
 
-def _curves(
-    store: store_module.Store, run: dict[str, Any]
-) -> tuple[list[str], dict[str, np.ndarray]]:
+def _curves(run: dict[str, Any]) -> tuple[list[str], dict[str, np.ndarray]]:
     stem = (
         "curves_obscure_real_entropy"
         if run["headline"]["metric"] == "entropy"
         else "curves_obscure_real"
     )
-    names = store.data(run["path"], f"{stem}.json")["series"]
+    names = runfiles.data(run["path"], f"{stem}.json")["series"]
     with np.load(run["path"] / f"{stem}.npz") as arrays:
         return names, {
             k: np.asarray(arrays[k]) for k in ("x", "mean", "lo", "hi")
@@ -227,8 +227,7 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    store = store_module.Store(manifest.root)
-    runs = _runs(manifest, store)
+    runs = _runs(manifest)
     dose = _dose_runs(runs)
     cells = len(dose) + 1
     grid_rows = math.ceil(cells / COLUMNS)
@@ -249,7 +248,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 PANEL_WIDTH,
                 PANEL_HEIGHT,
             )
-            names, curves = _curves(store, run)
+            names, curves = _curves(run)
             rows = _dose_panel(ax, run, names, curves, i + COLUMNS >= len(dose))
             csv_rows.extend([letters[i], *row] for row in rows)
             paper.panel_letter(ax, letters[i])

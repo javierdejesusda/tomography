@@ -55,7 +55,7 @@ def _mean(rows: list[dict[str, Any]], coeff: float, key: str) -> float:
 
 
 def _ratio(rows: list[dict[str, Any]], coeff: float) -> float:
-    return _mean(rows, coeff, "perplexity") / _none(rows)["perplexity"]
+    return float(_mean(rows, coeff, "perplexity") / _none(rows)["perplexity"])
 
 
 def _fluent(rows: list[dict[str, Any]], size: float) -> bool:

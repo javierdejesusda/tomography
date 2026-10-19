@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 import numpy as np
 
 from tomography.site import params
-from tomography.site import store as store_module
+from tomography.site import runfiles
 from tomography.site.figs import _group
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
@@ -69,22 +69,18 @@ DETAIL = " ".join(
 )
 
 
-def _table(
-    store: store_module.Store, manifest: Manifest, exp: str, model: str
-) -> list[dict[str, Any]]:
+def _table(manifest: Manifest, exp: str, model: str) -> list[dict[str, Any]]:
     run = manifest.run(exp, model)
     assert run is not None
-    return store.rows(run, "table.json")
+    return runfiles.rows(run, "table.json")
 
 
-def _reader_rows(
-    manifest: Manifest, store: store_module.Store
-) -> dict[str, dict[str, Any]]:
+def _reader_rows(manifest: Manifest) -> dict[str, dict[str, Any]]:
     found = {}
     for model in manifest.models("p9b"):
         rows = [
             r
-            for r in _table(store, manifest, "p9b", model)
+            for r in _table(manifest, "p9b", model)
             if r["type"] == "obscure_real"
         ]
         if rows:
@@ -92,12 +88,10 @@ def _reader_rows(
     return found
 
 
-def _error_rows(
-    manifest: Manifest, store: store_module.Store
-) -> dict[str, dict[str, dict[str, Any]]]:
+def _error_rows(manifest: Manifest) -> dict[str, dict[str, dict[str, Any]]]:
     found = {}
     for model in manifest.models("p9c"):
-        rows = _table(store, manifest, "p9c", model)
+        rows = _table(manifest, "p9c", model)
         found[model] = {
             r["predictor"]: r for r in rows if r["dataset"] == "popqa"
         }
@@ -164,9 +158,8 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    store = store_module.Store(manifest.root)
-    reader = _reader_rows(manifest, store)
-    errors = _error_rows(manifest, store)
+    reader = _reader_rows(manifest)
+    errors = _error_rows(manifest)
     risk_model = _largest_base(list(errors))
     coverage, curves = _risk_curves(manifest, risk_model)
     csv_rows: list[list[Any]] = []
