@@ -126,7 +126,7 @@ def build(manifest: Manifest) -> FigureOutput:
                     lw=paper.DATA_WIDTH,
                 ),
                 Patch(
-                    facecolor=axes.model_style("qwen3-1.7b").color,
+                    facecolor=paper.INK,
                     alpha=0.2,
                     lw=0,
                 ),
@@ -135,7 +135,7 @@ def build(manifest: Manifest) -> FigureOutput:
             labels=[
                 *keys[1],
                 "mean of 3 random directions",
-                "interval of the direction",
+                "interval of the direction (run colour)",
                 A7_TAG_KEY,
             ],
             handler_map={tuple: HandlerTuple(ndivide=None, pad=0.1)},
