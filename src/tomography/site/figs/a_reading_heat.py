@@ -31,7 +31,7 @@ TITLE_X = 0.14
 
 
 def _heat(
-    ax: Axes, cells: dict[str, Cell], rows: dict[str, float]
+    ax: Axes, concept: str, cells: dict[str, Cell], rows: dict[str, float]
 ) -> AxesImage:
     image = None
     for model, cell in cells.items():
@@ -51,8 +51,8 @@ def _heat(
             x = first - 0.5 / count
             ax.plot([x, x], [y - 0.45, y + 0.45], color="white", lw=HALO)
             ax.plot([x, x], [y - 0.45, y + 0.45], color=paper.INK, lw=TICK)
-        ax.plot(
-            [(cell.at.layer - 0.5) / count],
+        (read,) = ax.plot(
+            [(cell.curve.layer - 0.5) / count],
             [y],
             ls="none",
             marker=paper.MEASURE_MARKERS["direction"],
@@ -61,6 +61,7 @@ def _heat(
             mec=paper.INK,
             mew=0.6,
         )
+        read.set_gid(f"read:{concept}:{model}")
     assert image is not None
     return image
 
@@ -112,7 +113,7 @@ def build(manifest: Manifest) -> FigureOutput:
         for col, (ax, (concept, label, _)) in enumerate(
             zip(axes, CONCEPTS, strict=True)
         ):
-            image = _heat(ax, found[concept], rows)
+            image = _heat(ax, concept, found[concept], rows)
             ax.set_ylim(max(rows.values()) + 0.5, -0.5)
             ax.set_xlim(0.0, 1.0)
             ax.set_title(label, fontsize=paper.TITLE, loc="left", x=TITLE_X)
@@ -153,11 +154,14 @@ def build(manifest: Manifest) -> FigureOutput:
 
 
 def _csv(found: dict[str, dict[str, Cell]]) -> str:
-    lines = ["concept,model,depth,margin"]
+    lines = ["concept,model,depth,margin,read"]
     for concept, _, _ in CONCEPTS:
         for model, cell in found[concept].items():
-            for depth, value in zip(
-                cell.curve.depth, cell.curve.selectivity, strict=True
+            for i, (depth, value) in enumerate(
+                zip(cell.curve.depth, cell.curve.selectivity, strict=True)
             ):
-                lines.append(f"{concept},{model},{depth:.10g},{value:.10g}")
+                lines.append(
+                    f"{concept},{model},{depth:.10g},{value:.10g},"
+                    f"{int(i + 1 == cell.curve.layer)}"
+                )
     return "\n".join(lines) + "\n"
