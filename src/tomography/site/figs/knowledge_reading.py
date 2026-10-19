@@ -41,23 +41,22 @@ GROUPS = {
 DODGE = {"direction": -0.3, "popularity": -0.1, "own": 0.1, "text": 0.3}
 SEPARATOR_WIDTH = 0.5
 CLAIM = (
-    "A known-against-unknown direction ranks questions above their "
-    "popularity, with an interval excluding zero, on {interval}, and adds "
-    "at most {hi_max} to the confidence of the model at the upper end of "
-    "its interval."
+    "A known-against-unknown direction ranks questions above the strongest "
+    "of popularity and the two text classifiers, with an interval excluding "
+    "zero, on {interval}, and adds at most {hi_gpt2} (GPT-2), {hi_base} "
+    "(Qwen3 base) and {hi_post} (post-trained) to the confidence of the "
+    "model at the upper end of its interval."
 )
 DETAIL = (
     "(a) Within-relation AUROC on PopQA (open markers: post-trained): "
     "direction (circle), popularity (square), range of the two text "
-    "classifiers (green bar) and the model's probability of its first "
-    "answer token (pentagon). By "
-    "role, direction against popularity, text and own probability: GPT-2 "
-    "{gpt2}; Qwen3 base {base}; Qwen3 post-trained {post}. (b) Difference "
-    "between the two AUROCs, direction minus the strongest of popularity "
-    "and the two text classifiers, with its conservative interval. (c) "
-    "Change in the AUROC for predicting wrong answers when the direction is "
-    "added to the model's confidence (paired 95 percent bootstrap); the "
-    "interval covers zero on {cover}. See [[sec:appendix_knowledge]]."
+    "classifiers (green bar) and its first answer token probability "
+    "(pentagon). GPT-2 {gpt2}; Qwen3 base {base}; Qwen3 post-trained "
+    "{post}. (b) Difference in AUROC, direction minus the strongest of "
+    "popularity and the two text classifiers, conservative interval. (c) "
+    "Change in AUROC for wrong answers when the direction, or a probe "
+    "fitted on the correct and wrong labels, is added to model confidence; "
+    "the interval covers zero on {cover}. See [[sec:appendix_knowledge]]."
 )
 
 
@@ -111,10 +110,18 @@ def _interval(row: dict[str, Any], column: str) -> tuple[float, float]:
     return max(0.0, value - half), min(1.0, value + half)
 
 
+def _strongest(row: dict[str, Any]) -> float:
+    """Gives the AUROC of the strongest of popularity and the text readers."""
+    return max(
+        float(row[c])
+        for c in ("popularity_within", "text_word_within", "text_char_within")
+    )
+
+
 def _difference(row: dict[str, Any]) -> tuple[float, float, float]:
     return stats.auc_diff_interval(
         float(row["logistic_within"]),
-        float(row["popularity_within"]),
+        _strongest(row),
         int(row["n_positive_test"]),
         int(row["n_negative_test"]),
     )
@@ -373,7 +380,7 @@ def _draw_difference(
     ax.xaxis.set_major_locator(ticker.FixedLocator(_unit_step(low, high)))
     ax.xaxis.set_major_formatter(axes.minus_formatter())
     axes.ref_line(ax, 0.0, "x")
-    ax.set_xlabel("direction minus\npopularity")
+    ax.set_xlabel("direction minus\nstrongest baseline")
     _head(ax, 0.5, "difference")
 
 
@@ -491,7 +498,7 @@ def build(manifest: Manifest) -> FigureOutput:
 
     point = stats.per_role(
         {
-            m: float(r["logistic_within"]) > float(r["popularity_within"])
+            m: float(r["logistic_within"]) > _strongest(r)
             for m, r in contrast.items()
         }
     )
@@ -509,28 +516,31 @@ def build(manifest: Manifest) -> FigureOutput:
     )
     above = stats.per_role({m: float(r["lo"]) > 0.0 for m, r in probe.items()})
     counts = {
-        "above_pop_point": point,
-        "above_pop": interval,
+        "above_best_point": point,
+        "above_best": interval,
         "dir_cover": cover,
         "probe_above": above,
     }
-    lat_gain = [float(r["diff_vs_confidence"]) for r in lat.values()]
-    widest = max(lat, key=lambda m: float(lat[m]["hi"]))
-    probe_gain = [float(r["diff_vs_confidence"]) for r in probe.values()]
-    small = probe["gpt2"]
     numbers: dict[str, float] = {
-        "dir_inc_min": min(lat_gain),
-        "dir_inc_max": max(lat_gain),
-        "dir_inc_n": float(len(lat)),
-        "dir_inc_hi_max": float(lat[widest]["hi"]),
-        "dir_inc_cover_all": float(sum(c.hits for c in cover.values())),
-        "probe_inc_min": min(probe_gain),
-        "probe_inc_max": max(probe_gain),
-        "gpt2_small_probe_gain": float(small["diff_vs_confidence"]),
+        "gpt2_small_probe_gain": float(probe["gpt2"]["diff_vs_confidence"]),
     }
     for role in stats.ROLES:
-        numbers[f"above_pop_point_{role}"] = float(point[role].hits)
-        numbers[f"above_pop_{role}"] = float(interval[role].hits)
+        in_role = [m for m in lat if stats.role(m) == role]
+        gains = [float(lat[m]["diff_vs_confidence"]) for m in in_role]
+        probe_gains = [
+            float(r["diff_vs_confidence"])
+            for m, r in probe.items()
+            if stats.role(m) == role
+        ]
+        numbers[f"dir_inc_min_{role}"] = min(gains)
+        numbers[f"dir_inc_max_{role}"] = max(gains)
+        numbers[f"dir_inc_hi_max_{role}"] = max(
+            float(lat[m]["hi"]) for m in in_role
+        )
+        numbers[f"probe_inc_min_{role}"] = min(probe_gains)
+        numbers[f"probe_inc_max_{role}"] = max(probe_gains)
+        numbers[f"above_best_point_{role}"] = float(point[role].hits)
+        numbers[f"above_best_{role}"] = float(interval[role].hits)
         numbers[f"probe_above_{role}"] = float(above[role].hits)
     by_role = {
         role: _role_text(
@@ -538,8 +548,13 @@ def build(manifest: Manifest) -> FigureOutput:
         )
         for role in stats.ROLES
     }
-    hi_max = _rows.number(float(lat[widest]["hi"]), 3)
-    claim = CLAIM.format(interval=stats.per_role_text(interval), hi_max=hi_max)
+    claim = CLAIM.format(
+        interval=stats.per_role_text(interval),
+        **{
+            f"hi_{role}": _rows.number(numbers[f"dir_inc_hi_max_{role}"], 3)
+            for role in stats.ROLES
+        },
+    )
     detail = DETAIL.format(cover=stats.per_role_text(cover), **by_role)
     return FigureOutput(
         fig, claim, detail, numbers, _group.csv_text(HEADER, csv_rows), counts

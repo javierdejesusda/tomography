@@ -10,6 +10,7 @@ import pytest
 
 from tomography.site import registry
 from tomography.site import stats
+from tomography.site.figs import knowledge_reading
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -211,34 +212,91 @@ def test_counts_are_per_role_and_use_the_interval_criterion(
         {m: f["confidence+probe"]["lo"] > 0 for m, f in _increments().items()}
     )
     for name, want in (
-        ("above_pop_point", point),
-        ("above_pop", interval),
+        ("above_best_point", point),
+        ("above_best", interval),
         ("probe_above", probe),
     ):
         for role in stats.ROLES:
             got = output.counts[name][role]
             assert (got.hits, got.total) == (want[role].hits, want[role].total)
             assert output.numbers[f"{name}_{role}"] == want[role].hits
-    assert output.counts["above_pop"]["gpt2"].total == 3
+    assert output.counts["above_best"]["gpt2"].total == 3
+    assert "above_pop" not in output.counts
 
 
-def test_increment_range_numbers(output: registry.FigureOutput) -> None:
-    lat = [
-        f["confidence+lat"]
-        for f in _increments().values()
-        if "confidence+lat" in f
-    ]
-    probe = [f["confidence+probe"] for f in _increments().values()]
-    diffs = [r["diff_vs_confidence"] for r in lat]
-    assert output.numbers["dir_inc_min"] == pytest.approx(min(diffs))
-    assert output.numbers["dir_inc_max"] == pytest.approx(max(diffs))
-    assert output.numbers["dir_inc_n"] == len(lat)
-    assert output.numbers["dir_inc_cover_all"] == sum(
-        r["lo"] <= 0 <= r["hi"] for r in lat
+POOLED = (
+    "dir_inc_min",
+    "dir_inc_max",
+    "dir_inc_n",
+    "dir_inc_hi_max",
+    "dir_inc_cover_all",
+    "probe_inc_min",
+    "probe_inc_max",
+)
+
+
+def test_increment_numbers_are_per_role_and_none_is_pooled(
+    output: registry.FigureOutput,
+) -> None:
+    for key in POOLED:
+        assert key not in output.numbers, key
+    for role in stats.ROLES:
+        lat = [
+            f["confidence+lat"]
+            for m, f in _increments().items()
+            if "confidence+lat" in f and stats.role(m) == role
+        ]
+        probe = [
+            f["confidence+probe"]
+            for m, f in _increments().items()
+            if stats.role(m) == role
+        ]
+        diffs = [r["diff_vs_confidence"] for r in lat]
+        gains = [r["diff_vs_confidence"] for r in probe]
+        n = output.numbers
+        assert n[f"dir_inc_min_{role}"] == pytest.approx(min(diffs))
+        assert n[f"dir_inc_max_{role}"] == pytest.approx(max(diffs))
+        assert n[f"dir_inc_hi_max_{role}"] == pytest.approx(
+            max(r["hi"] for r in lat)
+        )
+        assert n[f"probe_inc_min_{role}"] == pytest.approx(min(gains))
+        assert n[f"probe_inc_max_{role}"] == pytest.approx(max(gains))
+    cover = output.counts["dir_cover"]
+    assert sum(c.total for c in cover.values()) == 9
+
+
+def test_the_difference_is_taken_against_the_strongest_baseline() -> None:
+    row = {
+        "logistic_within": 0.80,
+        "popularity_within": 0.70,
+        "text_word_within": 0.75,
+        "text_char_within": 0.60,
+        "n_positive_test": 120,
+        "n_negative_test": 130,
+    }
+    got = knowledge_reading._difference(row)
+    want = stats.auc_diff_interval(0.80, 0.75, 120, 130)
+    assert got == pytest.approx(want)
+    row["text_char_within"] = 0.78
+    assert knowledge_reading._difference(row) == pytest.approx(
+        stats.auc_diff_interval(0.80, 0.78, 120, 130)
     )
-    gains = [r["diff_vs_confidence"] for r in probe]
-    assert output.numbers["probe_inc_min"] == pytest.approx(min(gains))
-    assert output.numbers["probe_inc_max"] == pytest.approx(max(gains))
+    row["text_char_within"] = 0.5
+    row["text_word_within"] = 0.5
+    assert knowledge_reading._difference(row) == pytest.approx(
+        stats.auc_diff_interval(0.80, 0.70, 120, 130)
+    )
+
+
+def test_panel_b_names_its_comparator(output: registry.FigureOutput) -> None:
+    ax = output.figure.axes[1]
+    assert ax.get_xlabel() == "direction minus\nstrongest baseline"
+
+
+def test_the_probe_column_is_explained_in_the_caption(
+    output: registry.FigureOutput,
+) -> None:
+    assert "a probe fitted on the correct and wrong labels" in output.detail
 
 
 def test_popularity_is_the_strongest_baseline_where_the_caption_says_so() -> (
@@ -276,13 +334,17 @@ def test_caption_is_at_most_200_words_and_leads_with_the_conclusion(
     caption = f"{output.claim} {output.detail}"
     assert len(caption.split()) <= 200, len(caption.split())
     assert output.claim.startswith(
-        "A known-against-unknown direction ranks questions above their "
-        "popularity, with an interval excluding zero, on "
+        "A known-against-unknown direction ranks questions above the "
+        "strongest of popularity and the two text classifiers, with an "
+        "interval excluding zero, on "
     )
     interval = _by_role(_flags(lambda r: _diff(r)[1] > 0))
     assert stats.per_role_text(interval) in output.claim
-    hi_max = output.numbers["dir_inc_hi_max"]
-    assert f"adds at most {hi_max:.3f}" in output.claim
+    his = [output.numbers[f"dir_inc_hi_max_{r}"] for r in stats.ROLES]
+    assert (
+        f"adds at most {his[0]:.3f} (GPT-2), {his[1]:.3f} (Qwen3 base) and "
+        f"{his[2]:.3f} (post-trained)"
+    ) in output.claim
     assert "small amount" not in output.claim
 
 
@@ -331,18 +393,6 @@ def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
     with paper.paper_style():
         assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
-
-
-def test_the_largest_upper_bound_is_exported(
-    output: registry.FigureOutput,
-) -> None:
-    lat = {
-        m: f["confidence+lat"]
-        for m, f in _increments().items()
-        if "confidence+lat" in f
-    }
-    model = max(lat, key=lambda m: lat[m]["hi"])
-    assert output.numbers["dir_inc_hi_max"] == pytest.approx(lat[model]["hi"])
 
 
 MODELS_A = [m for m in _models("p9b") if m in _contrast()]
@@ -537,7 +587,7 @@ def test_caption_states_the_criteria_and_names_the_own_probability_signal(
     text = output.detail
     assert "first answer token" in text
     assert "open" in text
-    assert "Difference between the two AUROCs" in text
+    assert "Difference in AUROC, direction minus the strongest" in text
     assert "text classifiers" in text
 
 

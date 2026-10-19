@@ -399,8 +399,30 @@ def test_the_claim_counts_each_concept_per_role_from_the_intervals(
 def test_the_onset_numbers_stay_available_to_the_page_text(
     output: registry.FigureOutput,
 ) -> None:
-    assert "onset_sentiment_min" in output.numbers
     assert output.numbers["truth_n"] == 59
+    for concept in CONCEPTS:
+        for pooled in ("min", "max"):
+            assert f"onset_{concept}_{pooled}" not in output.numbers
+    for role in ("gpt2", "base", "post"):
+        members = [
+            m
+            for m in models(CONCEPTS["sentiment"])
+            if (
+                "gpt2"
+                if m.startswith("gpt2")
+                else ("base" if m.endswith("-base") else "post")
+            )
+            == role
+        ]
+        depths = [
+            d for m in members if (d := _onset("sentiment", m)) is not None
+        ]
+        assert output.numbers[f"onset_sentiment_{role}_min"] == (
+            pytest.approx(min(depths))
+        )
+        assert output.numbers[f"onset_sentiment_{role}_max"] == (
+            pytest.approx(max(depths))
+        )
 
 
 def test_a_falling_slope_with_an_interval_below_zero_is_written_as_a_fall() -> (

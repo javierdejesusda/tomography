@@ -255,14 +255,17 @@ def _numbers(
 ) -> dict[str, float]:
     numbers: dict[str, float] = {}
     for concept, _, _ in CONCEPTS:
-        onsets = [
-            d
-            for c in found[concept].values()
-            if (d := reading.first_depth_above(c.curve, MARGIN)) is not None
-        ]
-        if onsets:
-            numbers[f"onset_{concept}_min"] = min(onsets)
-            numbers[f"onset_{concept}_max"] = max(onsets)
+        for role in stats.ROLES:
+            onsets = [
+                d
+                for m, c in found[concept].items()
+                if stats.role(m) == role
+                and (d := reading.first_depth_above(c.curve, MARGIN))
+                is not None
+            ]
+            if onsets:
+                numbers[f"onset_{concept}_{role}_min"] = min(onsets)
+                numbers[f"onset_{concept}_{role}_max"] = max(onsets)
         slope, lo, hi = trends[concept]
         numbers[f"slope_{concept}"] = slope
         numbers[f"slope_{concept}_lo"] = lo

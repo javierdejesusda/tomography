@@ -161,7 +161,7 @@ def test_the_overview_method_detail_is_an_appendix_c_paragraph() -> None:
 def test_the_knowledge_detail_moved_to_appendix_g() -> None:
     text = _appendix("appendix_knowledge")
     assert "stacks five output signals" in text
-    assert "[[count:fig:knowledge_reading.above_pop_point]]" in text
+    assert "[[count:fig:knowledge_reading.above_best_point]]" in text
     assert "[[count:fig:knowledge_reading.probe_above]]" in text
     assert "[[num:fig:knowledge_reading.gpt2_small_probe_gain]]" in text
     assert "no known-against-unknown contrast" in text
