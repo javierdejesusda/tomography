@@ -209,3 +209,12 @@ def test_the_bare_claim_is_counted_per_role_without_a_pooled_count(
             assert paper.display_name(model) in output.claim
             assert f"{_bare(model)['to_paper']:.3f}" in output.claim
             assert f"{_paper(model)['random']:.3f}" in output.claim
+
+
+def test_the_caption_explains_the_marker_colour_and_fill_of_panel_b(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.detail
+    assert "darkens with size" in text
+    assert "filled for GPT-2 and Qwen3 base" in text
+    assert "open for post-trained" in text

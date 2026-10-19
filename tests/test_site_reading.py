@@ -251,3 +251,32 @@ def test_the_caption_keeps_names_and_grammar_and_avoids_first(
     assert "GPT-2 sizes" in text
     assert "intervals that includes" not in text
     assert "first" not in text.lower()
+
+
+def test_the_trend_text_keeps_a_gap_from_the_panel_letter(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    renderer = fig.canvas.get_renderer()
+    checked = 0
+    for ax in fig.axes:
+        trend = ax._left_title
+        if not trend.get_text() or "trend" not in trend.get_text():
+            continue
+        letters = [t for t in ax.texts if t.get_text().startswith("$")]
+        assert letters
+        a = letters[0].get_window_extent(renderer)
+        b = trend.get_window_extent(renderer)
+        gap_pt = (b.x0 - a.x1) * 72 / fig.dpi
+        assert gap_pt >= 2.0, gap_pt
+        checked += 1
+    assert checked >= 1
+
+
+def test_the_size_row_has_a_parameters_label_on_every_panel(
+    output: registry.FigureOutput,
+) -> None:
+    labelled = [
+        ax for ax in output.figure.axes if ax.get_xlabel() == "parameters"
+    ]
+    assert len(labelled) == 4
