@@ -94,15 +94,16 @@ def test_a_heatmap_is_exempt_from_the_palette_rule() -> None:
     assert checks.palette_problems(fig) == []
 
 
-def test_main_figures_need_6_5_pt_and_appendix_figures_6_pt() -> None:
+def test_no_figure_may_carry_text_under_7_pt() -> None:
     fig = _plain()
-    fig.axes[0].text(0.5, 0.5, "small", fontsize=6.2)
+    fig.axes[0].text(0.5, 0.5, "small", fontsize=6.5)
     assert any("small" in i for i in checks.font_problems(fig))
-    assert checks.font_problems(fig, appendix=True) == []
-    fig.axes[0].text(0.2, 0.2, "tiny", fontsize=5.5)
-    assert any("tiny" in i for i in checks.font_problems(fig, appendix=True))
-    assert checks.MIN_FONT_MAIN == 6.5
-    assert checks.MIN_FONT_APPENDIX == 6.0
+    assert any("small" in i for i in checks.font_problems(fig, appendix=True))
+    assert any("small" in i for i in checks.guard_problems(fig))
+    fig.axes[0].text(0.2, 0.2, "fits", fontsize=7.0)
+    assert not any("fits" in i for i in checks.font_problems(fig))
+    assert checks.MIN_FONT_MAIN == paper.MIN_TEXT == 7.0
+    assert checks.MIN_FONT_APPENDIX == paper.MIN_TEXT
 
 
 def test_a_plain_paper_figure_has_no_font_problem() -> None:

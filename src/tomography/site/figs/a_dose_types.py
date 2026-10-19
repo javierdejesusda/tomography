@@ -167,16 +167,20 @@ def build(manifest: Manifest) -> FigureOutput:
                     "relative coefficient" if r == len(runs) - 1 else ""
                 )
                 if c == 0:
-                    ax.set_ylabel(run.name.replace(", ", "\n"), fontsize=6.5)
+                    ax.set_ylabel(
+                        run.name.replace(", ", "\n"), fontsize=paper.MIN_TEXT
+                    )
                     paper.panel_title(
                         ax,
                         letter,
                         kind.replace("_", " ") if r == 0 else "",
-                        6.5,
+                        paper.MIN_TEXT,
                     )
                 elif r == 0:
                     ax.set_title(
-                        kind.replace("_", " "), loc="left", fontsize=6.5
+                        kind.replace("_", " "),
+                        loc="left",
+                        fontsize=paper.MIN_TEXT,
                     )
         legend = fig.legend(
             handles=[
@@ -219,7 +223,7 @@ def build(manifest: Manifest) -> FigureOutput:
             ncol=3,
             handlelength=1.0,
             columnspacing=1.0,
-            fontsize=6.5,
+            fontsize=paper.MIN_TEXT,
         )
         legend.get_frame().set_edgecolor("none")
 
