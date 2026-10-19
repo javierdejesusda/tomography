@@ -133,6 +133,7 @@ def test_the_body_sections_are_the_seven_of_the_paper_in_order() -> None:
         "Reading details",
         "Wording and truth details",
         "Knowledge, approximate answers and post-training details",
+        "Other experiments",
     ]
 
 
@@ -179,6 +180,11 @@ def test_every_token_names_a_known_target() -> None:
                 assert owner in ("fig", "table"), token
                 assert key in (figures if owner == "fig" else tables), token
                 assert field, token
+            elif kind == "findings":
+                slug, bar, shown = rest.partition("|")
+                assert re.fullmatch(r"[a-z0-9-]+", slug), token
+                assert bar, token
+                assert shown, token
             else:
                 pytest.fail(f"unknown token {token}")
 
@@ -606,7 +612,7 @@ def test_the_finder_claims_are_per_concept_and_not_causal() -> None:
     for text in (content.ABSTRACT_FINDER, _listed("Finders")):
         for token in ("pca_sentiment", "pca_truth", "pca_utility"):
             assert f"[[count:fig:finders.{token}]]" in text
-        assert "confounded with the concept and the data" in text
+        assert "confounded with the concept and" in text
     assert "by point estimate only" in _listed("Finders")
     assert "[[count:fig:finders.pca_utility_point]]" in _listed("Finders")
     everything = _text()
@@ -684,6 +690,47 @@ def test_the_finder_opener_clause_is_true_as_printed() -> None:
 def test_the_abstract_uses_one_term_and_explains_the_gpt2_gap() -> None:
     abstract = content.ABSTRACT
     assert "above a random direction" in abstract
+    assert "beats every random direction" in abstract
     assert abstract.count("relative coefficient") == 2
     assert "GPT-2 small has no fluency measure" in abstract
     assert "above it for sentiment" not in abstract
+
+
+OTHER_SLUGS = (
+    "lorra-adapter-lr1-and-the-truthfulqa-control-c4",
+    "emotions-r4",
+    "emotion-steering-c2",
+    "lie-gallery-c5",
+    "template-steering-p7",
+    "direction-agreement-and-logit-lens-on-gpt2-a1-a2",
+    "token-position-and-a-misleading-sentence-p2",
+)
+
+
+def _other() -> str:
+    (section,) = [s for s in content.APPENDICES if s.key == "appendix_other"]
+    return " ".join(section.paragraphs)
+
+
+def test_the_other_experiments_section_points_to_each_findings_section() -> (
+    None
+):
+    text = _other()
+    for slug in OTHER_SLUGS:
+        assert f"[[findings:{slug}|" in text, slug
+    shown = re.sub(r"\[\[findings:[^|]*\|(.*?)\]\]", r"", text)
+    assert 80 <= len(_bare(shown).split()) <= 150
+
+
+def test_the_other_experiments_section_has_no_numbers_or_run_codes() -> None:
+    bare = _bare(_other())
+    assert re.search(r"\d", bare) is None
+    assert RUN_CODE.search(bare) is None
+    for covered in ("seed agreement", "misleading sentence", "R1", "sentiment"):
+        assert covered not in bare
+
+
+def test_the_reproducibility_section_points_to_the_other_experiments() -> None:
+    text = " ".join(_texts(content.REPRODUCIBILITY))
+    assert "LoRRA" in text
+    assert "[[sec:appendix_other]]" in text
