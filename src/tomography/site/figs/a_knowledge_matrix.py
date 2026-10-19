@@ -150,6 +150,7 @@ def build(manifest: Manifest) -> FigureOutput:
         )
         bar.set_label("AUROC")
         bar.ax.tick_params(labelsize=paper.TICK)
+        bar.ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
         ax_b.add_patch(
             Rectangle(
                 (-SLACK, -0.5),
