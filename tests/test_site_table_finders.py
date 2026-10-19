@@ -42,11 +42,16 @@ def _report(model: str, task: str, method: str) -> float:
 def test_columns_are_three_per_task_under_header_spans(
     output: registry.TableOutput,
 ) -> None:
-    assert output.columns == ["Model"] + [
-        "Random",
-        "PCA of paired differences (paper)",
-        "Logistic regression",
-    ] * 3
+    assert (
+        output.columns
+        == ["Model"]
+        + [
+            "Random",
+            "PCA of paired differences (paper)",
+            "Logistic regression",
+        ]
+        * 3
+    )
     assert output.align == "l" + "r" * 9
     assert [g[0] for g in output.groups] == ["Sentiment", "Truth", "Utility"]
     assert [g[1] for g in output.groups] == [3, 3, 3]

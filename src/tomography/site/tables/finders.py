@@ -69,7 +69,10 @@ def build(manifest: Manifest) -> TableOutput:
         rows,
         "l" + "r" * 3 * len(finders.TASKS),
         [],
-        {"starred": float(starred), **{f"n_{t}": float(sizes[t]) for t in sizes}},
+        {
+            "starred": float(starred),
+            **{f"n_{t}": float(sizes[t]) for t in sizes},
+        },
         groups=tuple((TASK_NAMES[t], 3, False) for t in finders.TASKS),
         row_groups=_rows.role_groups(models),
     )
