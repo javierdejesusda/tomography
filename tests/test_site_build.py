@@ -1,3 +1,4 @@
+import csv
 import json
 import logging
 import os
@@ -463,3 +464,39 @@ def test_the_resolved_abstract_stays_short(
     view = page.Page(site[1])
     words = len(view.plain(content.ABSTRACT).split())
     assert words <= 250, words
+
+
+def test_grouped_csv_columns_carry_their_group(
+    site: tuple[Path, page.Document],
+) -> None:
+    view = page.Page(site[1])
+    text = build_module._csv_text(
+        ["Model", "Random", "PCA", "Random"],
+        [["x", "1", "2", "3"]],
+        view,
+        (("Sentiment", 2, False), ("Truth", 1, False)),
+    )
+    assert text.splitlines()[0] == (
+        "Model,Sentiment: Random,Sentiment: PCA,Truth: Random"
+    )
+
+
+def test_every_grouped_table_csv_has_unique_headers(
+    site: tuple[Path, page.Document],
+) -> None:
+    out, doc = site
+    view = page.Page(doc)
+    grouped = 0
+    for key, tab in {**doc.tables, **doc.appendix_tables}.items():
+        header = (
+            (out / "data" / f"table-{view.table_number[key]}.csv")
+            .read_text("utf-8")
+            .splitlines()[0]
+        )
+        names = next(csv.reader([header]))
+        assert len(names) == len(set(names)), (key, names)
+        if tab.output.groups:
+            grouped += 1
+            for label, _, _ in tab.output.groups:
+                assert any(n.startswith(f"{label}: ") for n in names), key
+    assert grouped >= 3

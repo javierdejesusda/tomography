@@ -232,7 +232,7 @@ def format_line(entry: Entry) -> str:
     place = " ".join(p for p in (venue, volume) if p)
     if pages:
         place += f", {pages}" if volume else f", pp. {pages}"
-    if not place and "eprint" in fields:
+    if not place and "eprint" in fields and fields.get("doi"):
         place = f"arXiv:{fields['eprint']}"
     parts = [f"{format_authors(entry)} ({entry.year}).", f"{entry.title}."]
     if place:

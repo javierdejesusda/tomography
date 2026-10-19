@@ -60,7 +60,7 @@ def build(manifest: Manifest) -> TableOutput:
             str(i),
             _wording(by_name[name]),
             CHANGES[by_name[name].kind],
-            by_name[name].template.user.replace("\n", "\n"),
+            by_name[name].template.user.replace("\n", "\\n"),
         ]
         for i, name in enumerate(names, 1)
     ]
@@ -69,7 +69,7 @@ def build(manifest: Manifest) -> TableOutput:
         "Index numbers are those of [[fig:wording]] and [[fig:a_wording]]. "
         "The template is the user text, with the stimulus in place of "
         "{stimulus} and the concept word in place of {concept}, and the "
-        "symbol \n marks a line break. The wording that differs from the "
+        "symbol \\n marks a line break. The wording that differs from the "
         "paper's only in a space token after the assistant tag is left out "
         "of the figures and of this table."
     )
