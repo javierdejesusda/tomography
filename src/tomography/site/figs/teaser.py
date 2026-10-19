@@ -13,6 +13,7 @@ from matplotlib.figure import Figure
 from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
 
+from tomography.site import finders as loader
 from tomography.site import params
 from tomography.site import reading
 from tomography.site import runfiles
@@ -120,25 +121,13 @@ def _neg_cities(manifest: Manifest, model: str) -> Cell | None:
 
 
 def _paper_finder(manifest: Manifest, model: str) -> Cell | None:
-    path = manifest.run("p4", model)
-    if path is None:
+    cells = loader.load(manifest, model)
+    if cells is None:
         return None
-    table = runfiles.rows(path, "table.json")
-
-    def report(method: str) -> float:
-        (found,) = [
-            r
-            for r in table
-            if r["task"] == "sentiment"
-            and r["method"] == method
-            and r["pairing"] == "label_contrastive"
-            and r["preprocess"] == "center"
-        ]
-        return float(found["report"])
-
+    rows = cells["sentiment"].rows
     return _from_scores(
-        report("pca_diff"),
-        report("random"),
+        rows["pca_diff"].report,
+        rows["random"].report,
         params.REPORT_PAIRS["sentiment"],
     )
 
@@ -421,20 +410,6 @@ def _reads(counts: dict[str, RoleCount], concept: str) -> str:
     return f"{concept} on {stats.per_role_text(counts)}"
 
 
-def _truth_reads(counts: dict[str, RoleCount]) -> str:
-    qwen = [counts["base"], counts["post"]]
-    if (
-        all(c.hits == c.total for c in qwen)
-        and counts["gpt2"].hits == 0
-        and counts["gpt2"].total
-    ):
-        return (
-            f"truth on all {sum(c.total for c in qwen)} Qwen3 checkpoints but "
-            f"on none of the {counts['gpt2'].total} GPT-2 sizes"
-        )
-    return _reads(counts, "truth")
-
-
 def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
     utility, morality = counts["utility"], counts["morality"]
     every = all(
@@ -451,7 +426,7 @@ def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
             f"A direction reads {_reads(utility, 'utility')} and "
             f"{_reads(morality, 'morality')}"
         )
-    reads += f", and {_truth_reads(counts['truth'])}."
+    reads += f", and {_reads(counts['truth'], 'truth')}."
     second = (
         "Against a stronger baseline: the paper's own finder "
         "beats a random direction for sentiment on "
@@ -468,18 +443,11 @@ def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
             "words with an interval excluding zero on "
             f"{stats.per_role_text(counts['truthfulqa'])}, "
         )
-    conf = counts["knowledge_confidence"]
-    if all(c.hits == 0 for c in conf.values()):
-        second += (
-            "and a direction for questions the model can answer adds "
-            "nothing to the model's own confidence on any of "
-            f"{sum(c.total for c in conf.values())} checkpoints."
-        )
-    else:
-        second += (
-            "and a direction for questions the model can answer adds to "
-            f"the model's own confidence on {stats.per_role_text(conf)}."
-        )
+    second += (
+        "and a direction for questions the model can answer is above the "
+        "model's own confidence, with an interval excluding zero, on "
+        f"{stats.per_role_text(counts['knowledge_confidence'])}."
+    )
     third = (
         "Steering along a logistic direction beats random directions of the "
         f"same norm on {stats.per_role_text(counts['steering'])}."

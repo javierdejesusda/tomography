@@ -1,4 +1,3 @@
-import json
 import math
 from pathlib import Path
 import runpy
@@ -21,6 +20,7 @@ run = _RESULTS["run"]
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 MODELS = models("p1")
 ROLES = ("gpt2", "base", "post")
+DROPPED = "no_trailing_space"
 
 
 def _role(model: str) -> str:
@@ -31,12 +31,14 @@ def _role(model: str) -> str:
 
 def _rows(model: str) -> list[dict[str, Any]]:
     table = data(run("p1", model), "table.json")
-    return [r for r in table if r["task"] == "sentiment"]
+    return [
+        r for r in table if r["task"] == "sentiment" and r["variant"] != DROPPED
+    ]
 
 
 def _n_eval(model: str) -> int:
-    config = json.loads((run("p1", model) / "config.json").read_text("utf-8"))
-    return int(config["n_eval_pairs"])
+    summary = data(run("p1", model), "summary.json")
+    return int(summary["n_eval_pairs"]["sentiment"]["report"])
 
 
 def _span(model: str) -> float:
@@ -125,16 +127,6 @@ def test_the_bare_wording_numbers_are_recomputed(
 
 
 def test_the_plan_values_hold_for_the_eight_checkpoints_it_checked() -> None:
-    spans = {
-        "gpt2": 0.061,
-        "gpt2-medium": 0.113,
-        "gpt2-large": 0.136,
-        "gpt2-xl": 0.204,
-        "qwen3-0.6b-base": 0.249,
-        "qwen3-0.6b": 0.180,
-        "qwen3-1.7b-base": 0.086,
-        "qwen3-1.7b": 0.181,
-    }
     cos = {
         "gpt2": 0.179,
         "gpt2-medium": 0.279,
@@ -145,8 +137,7 @@ def test_the_plan_values_hold_for_the_eight_checkpoints_it_checked() -> None:
         "qwen3-1.7b-base": 0.137,
         "qwen3-1.7b": 0.121,
     }
-    for model, span in spans.items():
-        assert round(_span(model), 3) == pytest.approx(span)
+    for model in cos:
         assert round(_bare(model)["cosine_paper"], 3) == pytest.approx(
             cos[model]
         )
@@ -218,3 +209,14 @@ def test_the_caption_explains_the_marker_colour_and_fill_of_panel_b(
     assert "darkens with size" in text
     assert "filled for GPT-2 and Qwen3 base" in text
     assert "open for post-trained" in text
+
+
+def test_the_dropped_wording_is_absent_and_the_noise_uses_the_report_pairs(
+    output: registry.FigureOutput,
+) -> None:
+    assert DROPPED not in output.csv
+    assert output.numbers["noise_max"] == pytest.approx(
+        max(_noise(m) for m in MODELS)
+    )
+    assert {_n_eval(m) for m in MODELS} == {214}
+    assert "by point estimate" in output.claim

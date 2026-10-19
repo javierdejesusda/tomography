@@ -187,3 +187,34 @@ def test_margin_is_reader_minus_random_with_the_conservative_interval() -> None:
     want = stats.diff_interval(0.80, 0.55, 214)
     assert (d, lo, hi) == pytest.approx(want)
     assert d == pytest.approx(0.25)
+
+
+def test_the_p4_sentiment_reading_uses_the_report_split_logistic_curves() -> (
+    None
+):
+    for model in models("p4"):
+        found = reading.load_sentiment(MANIFEST, model)
+        assert found is not None
+        path = run("p4", model)
+        meta = data(path, "curves_sentiment_methods.json")
+        mean = npz(path, "curves_sentiment_methods.npz")["mean"]
+        series = list(meta["series"])
+        assert found.n_layers == meta["n_layers"]
+        assert found.reader == pytest.approx(mean[series.index("logistic")])
+        assert found.random == pytest.approx(mean[series.index("random")])
+        table = data(path, "table.json")
+        reference = data(path, "summary.json")["reference"]["sentiment"]
+        (row,) = [
+            r
+            for r in table
+            if r["task"] == "sentiment"
+            and r["method"] == "logistic"
+            and r["pairing"] == reference["pairing"]
+            and r["preprocess"] == "center"
+        ]
+        assert found.layer == row["layer"]
+        assert found.accuracy == pytest.approx(row["report"])
+        assert (found.lo, found.hi) == pytest.approx((row["lo"], row["hi"]))
+        assert found.depth == pytest.approx(
+            np.arange(1, meta["n_layers"] + 1) / meta["n_layers"]
+        )

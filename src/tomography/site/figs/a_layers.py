@@ -11,6 +11,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 import numpy as np
 
+from tomography.site import params
 from tomography.site import reading
 from tomography.site import stats
 from tomography.site.manifest import Manifest
@@ -20,7 +21,7 @@ from tomography.viz import paper
 
 HEIGHT = 6.0
 CONCEPTS = (
-    ("r1", "Sentiment"),
+    ("p4", "Sentiment"),
     ("r2", "Utility"),
     ("r3", "Morality"),
     ("r7", "Truth"),
@@ -158,7 +159,11 @@ def build(manifest: Manifest) -> FigureOutput:
                 for model in manifest.models(exp):
                     if stats.role(model) != group:
                         continue
-                    item = reading.load(manifest, exp, model)
+                    item = (
+                        reading.load_sentiment(manifest, model)
+                        if exp == "p4"
+                        else reading.load(manifest, exp, model)
+                    )
                     if item is not None:
                         found[model] = item
                 _panel(ax, found, title, group, rows)
@@ -177,10 +182,12 @@ def build(manifest: Manifest) -> FigureOutput:
         "(grey)."
     )
     detail = (
-        "Sentiment curves are scored on the 256 SST-2 validation pairs on "
-        "which the sentiment layer is also chosen. Lines are the mean over "
-        "seeds of a logistic regression reader; colour darkens with model "
-        "size within a family, post-trained checkpoints are dashed, labels "
+        "Sentiment curves are the report-split accuracy of the logistic "
+        "regression of the finder comparison on "
+        f"{params.REPORT_PAIRS['sentiment']} sentiment pairs. Lines are the "
+        "mean over seeds of a logistic regression reader; colour darkens "
+        "with model size within a family, post-trained checkpoints are "
+        "dashed, labels "
         "at the right name the size, and the dotted line is chance."
     )
     return FigureOutput(fig, claim, detail, {}, _csv(rows))

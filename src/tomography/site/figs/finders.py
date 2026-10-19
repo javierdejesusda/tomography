@@ -15,8 +15,8 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
+from tomography.site import finders as loader
 from tomography.site import params
-from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
@@ -26,11 +26,6 @@ from tomography.viz import paper
 
 HEIGHT = 3.0
 TASKS = ("sentiment", "truth", "utility")
-PAIRING = {
-    "sentiment": "label_contrastive",
-    "truth": "label_contrastive",
-    "utility": "matched",
-}
 TITLES = {"sentiment": "Sentiment", "truth": "Truth", "utility": "Utility"}
 FINDERS = ("logistic", "pca_diff")
 DODGE = {"logistic": -0.2, "pca_diff": 0.2}
@@ -45,6 +40,19 @@ LABELS = {
 XLIM = (-0.30, 0.45)
 BAND_HEIGHT = 0.6
 MARKER = 3.5
+
+
+def fmt3(value: float) -> str:
+    """Writes a number with three decimals and no sign on a rounded zero.
+
+    Args:
+        value: The number.
+
+    Returns:
+        The text, such as `0.000` for minus 1e-16.
+    """
+    text = f"{value:.3f}"
+    return text[1:] if text == "-0.000" else text
 
 
 @dataclasses.dataclass(frozen=True)
@@ -67,21 +75,12 @@ class Point:
 
 
 def _points(manifest: Manifest, model: str) -> dict[tuple[str, str], Point]:
-    path = manifest.run("p4", model)
-    if path is None:
+    cells = loader.load(manifest, model)
+    if cells is None:
         raise FileNotFoundError(f"results/p4/{model} is missing")
-    table = runfiles.rows(path, "table.json")
 
     def report(task: str, method: str) -> float:
-        (found,) = [
-            r
-            for r in table
-            if r["task"] == task
-            and r["method"] == method
-            and r["pairing"] == PAIRING[task]
-            and r["preprocess"] == "center"
-        ]
-        return float(found["report"])
+        return cells[task].rows[method].report
 
     found: dict[tuple[str, str], Point] = {}
     for task in TASKS:
@@ -255,14 +254,14 @@ def _claim(
         f"excluding zero, for sentiment on {_where(sentiment)}"
         f"{_winners(models, data, 'sentiment', 'pca_diff')}, and for truth "
         "its largest margin on a GPT-2 size is "
-        f"{numbers['pca_truth_gpt2_max']:.3f}. Logistic regression is above "
+        f"{fmt3(numbers['pca_truth_gpt2_max'])}. Logistic regression is above "
         "the random direction for sentiment, with an interval excluding "
         f"zero, on {_where(counts['logistic_sentiment'])}. On utility, whose "
         "pairs are matched scenarios, the paper's finder is above the "
         "random direction by point estimate on "
         f"{_where(counts['pca_utility_point'])}, by "
-        f"{numbers['pca_utility_min']:.3f} to "
-        f"{numbers['pca_utility_max']:.3f}."
+        f"{fmt3(numbers['pca_utility_min'])} to "
+        f"{fmt3(numbers['pca_utility_max'])}."
     )
 
 

@@ -5,7 +5,7 @@ validation data, and a curve of the reader, a random direction and a
 shuffled-label reader over every layer. This module joins them. R5 scores a
 reader fitted on honesty prompts on plain statements, so its curves are the
 transfer curves; the held-out sentiment value comes from the sample-size run
-of P3.
+of P3; `load_sentiment` reads the curves of the P4 logistic reader.
 """
 
 import dataclasses
@@ -14,6 +14,7 @@ from typing import Any
 
 import numpy as np
 
+from tomography.site import finders
 from tomography.site import params
 from tomography.site import stats
 from tomography.site.manifest import Manifest
@@ -207,4 +208,39 @@ def heldout_sentiment(manifest: Manifest, model: str) -> Score | None:
         float(accuracy[size, 1, 0, :, col].mean()),
         float(accuracy[size, 1, 1, :, col].mean()),
         params.REPORT_PAIRS["sentiment"],
+    )
+
+
+def load_sentiment(manifest: Manifest, model: str) -> Reading | None:
+    """Reads sentiment from the report-split curves of the finder comparison.
+
+    The reader is the logistic regression of the reference cell of P4, so the
+    curve is held-out accuracy at every layer and the layer is the one its
+    select split chose. No shuffled-label curve is stored, so `shuffled` is
+    NaN.
+
+    Args:
+        manifest: The run resolver.
+        model: Checkpoint key.
+
+    Returns:
+        The reading, or None when the checkpoint has no P4 run.
+    """
+    cells = finders.load(manifest, model)
+    if cells is None:
+        return None
+    cell = cells["sentiment"]
+    row = cell.rows["logistic"]
+    mean, _, _ = cell.curves["logistic"]
+    random, _, _ = cell.curves["random"]
+    return Reading(
+        layer=row.layer,
+        accuracy=row.report,
+        lo=row.lo,
+        hi=row.hi,
+        n_layers=cell.n_layers,
+        depth=cell.depth,
+        reader=mean,
+        random=random,
+        shuffled=np.full(cell.n_layers, np.nan),
     )
