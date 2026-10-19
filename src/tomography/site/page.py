@@ -13,10 +13,11 @@ import re
 
 from tomography.site import content
 from tomography.site import references
+from tomography.site import stats
 from tomography.site.content import Section
 from tomography.site.registry import FigureOutput
-from tomography.site.registry import Spec
 from tomography.site.registry import TableOutput
+from tomography.site.tables import _cells
 
 TOKEN = re.compile(r"\[\[(.+?)\]\]")
 
@@ -26,14 +27,16 @@ class FigureEntry:
     """A built figure ready for the page.
 
     Attributes:
-        spec: Its registry entry.
+        key: Its registry key.
         output: The figure, caption parts and numbers.
         svg: The rendered SVG document.
+        pdf: The rendered PDF document.
     """
 
-    spec: Spec
+    key: str
     output: FigureOutput
     svg: bytes
+    pdf: bytes
 
 
 @dataclasses.dataclass(frozen=True)
@@ -41,11 +44,11 @@ class TableEntry:
     """A built table ready for the page.
 
     Attributes:
-        spec: Its registry entry.
+        key: Its registry key.
         output: The table and its caption parts.
     """
 
-    spec: Spec
+    key: str
     output: TableOutput
 
 
@@ -95,10 +98,15 @@ def inline_svg(raw: bytes, label: str) -> str:
     )
 
 
-class _Page:
+class Page:
     """State of one render: numbering, citations and footnotes."""
 
     def __init__(self, doc: Document) -> None:
+        """Numbers the items of a document.
+
+        Args:
+            doc: The built figures, tables, date and bibliography.
+        """
         self.doc = doc
         self.sections: dict[str, str] = {}
         self.figure_number: dict[str, str] = {}
@@ -114,8 +122,11 @@ class _Page:
             return True
         return any(self._has(k) for k in keys)
 
-    def _has(self, key: str) -> bool:
-        return key in self.doc.figures or key in self.doc.tables
+    def _has(self, item: str) -> bool:
+        kind, _, key = item.partition(":")
+        if kind == "fig":
+            return key in self.doc.figures
+        return key in self.doc.tables
 
     def _number(self) -> None:
         figure = table = 0
@@ -123,11 +134,12 @@ class _Page:
         def visit(section: Section, label: str) -> None:
             nonlocal figure, table
             self.sections[section.key] = label
-            for key in section.items:
-                if key in self.doc.figures:
+            for item in section.items:
+                kind, _, key = item.partition(":")
+                if kind == "fig" and key in self.doc.figures:
                     figure += 1
                     self.figure_number[key] = str(figure)
-                elif key in self.doc.tables:
+                elif kind == "table" and key in self.doc.tables:
                     table += 1
                     self.table_number[key] = str(table)
             for i, sub in enumerate(section.subsections, 1):
@@ -135,10 +147,10 @@ class _Page:
 
         for number, section in enumerate(self.main_sections(), 1):
             visit(section, str(number))
-        for key, entry in self.doc.appendix.items():
-            self.figure_number[key] = entry.spec.number
-        for key, table_entry in self.doc.appendix_tables.items():
-            self.table_number[key] = table_entry.spec.number
+        for i, key in enumerate(self.doc.appendix, 1):
+            self.figure_number[key] = f"A{i}"
+        for i, key in enumerate(self.doc.appendix_tables, 1):
+            self.table_number[key] = f"A{i}"
         self.sections[content.APPENDIX.key] = "A"
 
     def main_sections(self) -> list[Section]:
@@ -176,17 +188,47 @@ class _Page:
             label = self.sections[key]
             word = "Appendix" if key == content.APPENDIX.key else "Section"
             return f'<a class="ref" href="#{key}">{word}&nbsp;{label}</a>'
-        if name in self.figure_number:
+        if name.startswith("fig:"):
+            number = self.figure_number[name[4:]]
             return (
-                f'<a class="ref" href="#{name}">Figure&nbsp;'
-                f"{self.figure_number[name]}</a>"
+                f'<a class="ref" href="#figure-{number}">Figure&nbsp;'
+                f"{number}</a>"
             )
-        if name in self.table_number:
+        if name.startswith("table:"):
+            number = self.table_number[name[6:]]
             return (
-                f'<a class="ref" href="#{name}">Table&nbsp;'
-                f"{self.table_number[name]}</a>"
+                f'<a class="ref" href="#table-{number}">Table&nbsp;{number}</a>'
             )
+        if name.startswith("num:"):
+            return _e(self.quoted_number(name[4:]))
+        if name.startswith("count:"):
+            return _e(self.quoted_count(name[6:]))
         raise KeyError(name)
+
+    def _output(self, address: str) -> tuple[FigureOutput | TableOutput, str]:
+        """Finds the output of `fig:key.name` or `table:key.name`."""
+        kind, _, rest = address.partition(":")
+        key, _, name = rest.rpartition(".")
+        if kind == "fig":
+            entry = self.doc.figures.get(key) or self.doc.appendix[key]
+            return entry.output, name
+        if kind == "table":
+            found = self.doc.tables.get(key) or self.doc.appendix_tables[key]
+            return found.output, name
+        raise KeyError(address)
+
+    def quoted_number(self, address: str) -> str:
+        """Writes a number a figure or table computed."""
+        output, name = self._output(address)
+        value = output.numbers[name]
+        if float(value).is_integer() and abs(value) >= 1:
+            return f"{int(value):,}"
+        return _cells.num(value)
+
+    def quoted_count(self, address: str) -> str:
+        """Writes a per-role count a figure or table computed."""
+        output, name = self._output(address)
+        return stats.per_role_text(output.counts[name])
 
     def text(self, raw: str) -> str:
         """Escapes a paragraph and resolves its references."""
@@ -205,14 +247,16 @@ class _Page:
     def figure(self, key: str) -> str:
         """Renders a figure with its caption below."""
         entry = self.doc.figures.get(key) or self.doc.appendix[key]
-        label = f"Figure {self.figure_number[key]}"
+        number = self.figure_number[key]
+        label = f"Figure {number}"
         caption = f"{entry.output.claim} {entry.output.detail}".strip()
         return (
-            f'<figure id="{key}">'
+            f'<figure id="figure-{number}">'
             f"{inline_svg(entry.svg, f'{label}: {caption}')}"
             f"<figcaption>{label}: {_e(caption)} "
-            f'<span class="data">(<a href="data/{key}.csv">data</a>, '
-            f'<a href="figures/{key}.pdf">PDF</a>)</span></figcaption>'
+            f'<span class="data">(<a href="data/figure-{number}.csv">data</a>, '
+            f'<a href="figures/figure-{number}.pdf">PDF</a>)</span>'
+            "</figcaption>"
             "</figure>"
         )
 
@@ -220,7 +264,8 @@ class _Page:
         """Renders a booktabs table with its caption above."""
         entry = self.doc.tables.get(key) or self.doc.appendix_tables[key]
         out = entry.output
-        label = f"Table {self.table_number[key]}"
+        number = self.table_number[key]
+        label = f"Table {number}"
         caption = f"{out.claim} {out.detail}".strip()
         groups = "".join(
             f'<th colspan="{span}" class="span{" muted" if muted else ""}">'
@@ -246,18 +291,21 @@ class _Page:
         notes = "".join(f"<p>{_e(n)}</p>" for n in out.notes)
         notes_html = f'<div class="notes">{notes}</div>' if notes else ""
         return (
-            f'<div class="table" id="{key}"><div class="scroll"><table>'
+            f'<div class="table" id="table-{number}">'
+            '<div class="scroll"><table>'
             f"<caption>{label}: {_e(caption)} "
-            f'<span class="data">(<a href="data/{key}.csv">data</a>)</span>'
+            '<span class="data">'
+            f'(<a href="data/table-{number}.csv">data</a>)</span>'
             f"</caption><thead>{groups}<tr>{head}</tr></thead>"
             f"<tbody>{''.join(body)}</tbody></table></div>{notes_html}</div>"
         )
 
-    def item(self, key: str) -> str:
-        """Renders a figure or table by key, or nothing when absent."""
-        if key in self.doc.figures:
+    def item(self, item: str) -> str:
+        """Renders a `fig:key` or `table:key` item, or nothing when absent."""
+        kind, _, key = item.partition(":")
+        if kind == "fig" and key in self.doc.figures:
             return self.figure(key)
-        if key in self.doc.tables:
+        if kind == "table" and key in self.doc.tables:
             return self.table(key)
         return ""
 
@@ -268,7 +316,8 @@ class _Page:
             if not entry.output.numbers:
                 continue
             items.append(
-                f"<li>{_e(entry.output.claim)} ({self.reference(key)})</li>"
+                f"<li>{_e(entry.output.claim)} "
+                f"({self.reference(f'fig:{key}')})</li>"
             )
         if not items:
             return ""
@@ -401,6 +450,22 @@ class _Page:
         return "".join(parts)
 
 
+def numbers(doc: Document) -> tuple[dict[str, str], dict[str, str]]:
+    """Assigns the printed numbers of the figures and tables.
+
+    Main items are numbered in order of appearance in the text, appendix items
+    A1, A2 and so on in registry order.
+
+    Args:
+        doc: The built figures and tables.
+
+    Returns:
+        Figure key to printed number, and table key to printed number.
+    """
+    page = Page(doc)
+    return page.figure_number, page.table_number
+
+
 def render_page(doc: Document) -> str:
     """Renders the whole site as one HTML document.
 
@@ -410,7 +475,7 @@ def render_page(doc: Document) -> str:
     Returns:
         The HTML document.
     """
-    page = _Page(doc)
+    page = Page(doc)
     abstract = page.paragraph(content.ABSTRACT)
     body = page.body()
     return (

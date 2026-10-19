@@ -28,7 +28,9 @@ def test_data_returns_the_payload_of_any_json_file(run: Path) -> None:
 
 
 def test_rows_reads_a_columns_and_rows_table(run: Path) -> None:
-    _write(run / "table.json", {"columns": ["a", "b"], "rows": [[1, 2], [3, 4]]})
+    _write(
+        run / "table.json", {"columns": ["a", "b"], "rows": [[1, 2], [3, 4]]}
+    )
     assert runfiles.rows(run, "table.json") == [
         {"a": 1, "b": 2},
         {"a": 3, "b": 4},

@@ -62,61 +62,67 @@ def _csv_text(columns: list[str], rows: list[list[str]]) -> str:
 def build(
     results: Path,
     out: Path,
-    figures: tuple[registry.Spec, ...] = registry.FIGURES,
-    tables: tuple[registry.Spec, ...] = registry.TABLES,
-    appendix: tuple[registry.Spec, ...] = registry.APPENDIX,
-    appendix_tables: tuple[registry.Spec, ...] = registry.APPENDIX_TABLES,
+    figures: tuple[str, ...] = registry.MAIN_FIGURES,
+    tables: tuple[str, ...] = registry.MAIN_TABLES,
+    appendix: tuple[str, ...] = registry.APPENDIX_FIGURES,
+    appendix_tables: tuple[str, ...] = registry.APPENDIX_TABLES,
 ) -> page.Document:
     """Writes the page, its assets and the files behind every figure.
 
-    Each figure is written as `figures/<key>.svg`, `figures/<key>.pdf` and
-    `data/<key>.csv`, and each table as `data/<key>.csv`. A figure or table
-    that cannot be built stops the build.
+    Files are named by the printed number: each figure is written as
+    `figures/figure-<n>.svg`, `figures/figure-<n>.pdf` and
+    `data/figure-<n>.csv`, and each table as `data/table-<n>.csv`. A figure
+    or table that cannot be built stops the build.
 
     Args:
         results: The committed `results/` directory to read.
         out: Directory to write; created if missing.
-        figures: Main figures in registry order.
-        tables: Tables in registry order.
-        appendix: Appendix figures in registry order.
-        appendix_tables: Appendix tables in registry order.
+        figures: Main figure keys in registry order.
+        tables: Main table keys in registry order.
+        appendix: Appendix figure keys in registry order.
+        appendix_tables: Appendix table keys in registry order.
 
     Returns:
         The document that was rendered.
     """
     manifest = Manifest(results)
-    (out / "figures").mkdir(parents=True, exist_ok=True)
-    (out / "data").mkdir(parents=True, exist_ok=True)
 
-    def figure(spec: registry.Spec) -> page.FigureEntry:
-        output = registry.build_figure(spec, manifest)
-        svg = paper.svg_bytes(output.figure)
-        (out / "figures" / f"{spec.key}.svg").write_bytes(svg)
-        (out / "figures" / f"{spec.key}.pdf").write_bytes(
-            paper.pdf_bytes(output.figure)
+    def figure(key: str) -> page.FigureEntry:
+        output = registry.build_figure(key, manifest)
+        return page.FigureEntry(
+            key,
+            output,
+            paper.svg_bytes(output.figure),
+            paper.pdf_bytes(output.figure),
         )
-        (out / "data" / f"{spec.key}.csv").write_text(
-            output.csv, encoding="utf-8", newline="\n"
-        )
-        return page.FigureEntry(spec, output, svg)
 
-    def table(spec: registry.Spec) -> page.TableEntry:
-        output = registry.build_table(spec, manifest)
-        (out / "data" / f"{spec.key}.csv").write_text(
-            _csv_text(output.columns, output.rows),
-            encoding="utf-8",
-            newline="\n",
-        )
-        return page.TableEntry(spec, output)
+    def table(key: str) -> page.TableEntry:
+        return page.TableEntry(key, registry.build_table(key, manifest))
 
     doc = page.Document(
-        figures={s.key: figure(s) for s in figures},
-        tables={s.key: table(s) for s in tables},
-        appendix={s.key: figure(s) for s in appendix},
-        appendix_tables={s.key: table(s) for s in appendix_tables},
+        figures={k: figure(k) for k in figures},
+        tables={k: table(k) for k in tables},
+        appendix={k: figure(k) for k in appendix},
+        appendix_tables={k: table(k) for k in appendix_tables},
         date=results_date(manifest),
         bib=references.parse(BIB.read_text(encoding="utf-8")),
     )
+    figure_number, table_number = page.numbers(doc)
+    (out / "figures").mkdir(parents=True, exist_ok=True)
+    (out / "data").mkdir(parents=True, exist_ok=True)
+    for key, fig in {**doc.figures, **doc.appendix}.items():
+        name = f"figure-{figure_number[key]}"
+        (out / "figures" / f"{name}.svg").write_bytes(fig.svg)
+        (out / "figures" / f"{name}.pdf").write_bytes(fig.pdf)
+        (out / "data" / f"{name}.csv").write_text(
+            fig.output.csv, encoding="utf-8", newline="\n"
+        )
+    for key, tab in {**doc.tables, **doc.appendix_tables}.items():
+        (out / "data" / f"table-{table_number[key]}.csv").write_text(
+            _csv_text(tab.output.columns, tab.output.rows),
+            encoding="utf-8",
+            newline="\n",
+        )
     (out / "index.html").write_text(
         page.render_page(doc), encoding="utf-8", newline="\n"
     )

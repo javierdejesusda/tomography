@@ -1,11 +1,13 @@
 """The text and structure of the results paper.
 
 Prose is written once here. A paragraph may hold references that the page
-resolves to numbered links: `[[fig3]]` and `[[table2]]` become "Figure 3" and
-"Table 2", `[[sec:reading]]` becomes "Section 3", `[[cite:zou2025]]` becomes
-a numbered citation and `[[fn:text]]` a footnote. No paragraph states a
-result: every number on the page comes from a figure or table caption that
-the builder computed from the committed results.
+resolves: `[[fig:finders]]` and `[[table:reading]]` become numbered links
+such as "Figure 3" and "Table 2", `[[sec:reading]]` becomes "Section 3",
+`[[cite:zou2025]]` a numbered citation, `[[fn:text]]` a footnote,
+`[[num:fig:finders.random_max]]` a number a figure or table computed and
+`[[count:fig:finders.pca_sentiment]]` its per-role count. No paragraph states
+a result in its own words: every number on the page comes from a figure or
+table the builder computed from the committed results.
 """
 
 import dataclasses
@@ -82,7 +84,8 @@ METHOD = Section(
             "pipeline",
             "Reading and steering",
             paragraphs=(
-                "[[fig1]] shows the pipeline. Pairs of stimuli that differ in "
+                "[[fig:method]] shows the pipeline. Pairs of stimuli that "
+                "differ in "
                 "the concept go through the model, and the residual stream "
                 "at one layer and the last token is recorded. A direction is "
                 "fitted by one of three finders: the first principal "
@@ -95,7 +98,7 @@ METHOD = Section(
                 "residual stream while the model writes, with a coefficient "
                 "proportional to the mean residual norm of the layer.",
             ),
-            items=("fig1",),
+            items=("fig:method",),
         ),
         Section(
             "concepts",
@@ -119,14 +122,15 @@ METHOD = Section(
             "checkpoints",
             "Checkpoints",
             paragraphs=(
-                "[[table1]] lists the checkpoints. GPT-2 gives four sizes of "
+                "[[table:checkpoints]] lists the checkpoints. GPT-2 gives four "
+                "sizes of "
                 "one family, and Qwen3 gives three sizes, each as a base and "
                 "a post-trained model, so that size and post-training can be "
                 "compared apart. Layers are placed on one axis by their "
                 "relative depth, the layer index over the number of layers, "
                 "and sizes by the base 10 logarithm of the parameter count.",
             ),
-            items=("table1",),
+            items=("table:checkpoints",),
         ),
         Section(
             "baselines",
@@ -167,34 +171,39 @@ RESULTS = (
         "reading",
         "Reading concepts across layers and sizes",
         paragraphs=(
-            "[[fig2]] reads sentiment, utility, morality and truth with a "
+            "[[fig:reading]] reads sentiment, utility, morality and truth with "
+            "a "
             "logistic reader at every layer of every checkpoint, and "
-            "[[table2]] gives the accuracy at the layer chosen on "
-            "validation data; intervals and layers are in [[tableA1]].",
+            "[[table:reading]] gives the accuracy at the layer chosen on "
+            "validation data; intervals and layers are in "
+            "[[table:reading_full]].",
         ),
-        items=("fig2", "table2"),
+        items=("fig:reading", "table:reading"),
     ),
     Section(
         "finders",
         "Direction finders",
         paragraphs=(
             "The paper finds directions with the first principal component "
-            "of paired differences. [[fig3]] compares it with the difference "
+            "of paired differences. [[fig:finders]] compares it with the "
+            "difference "
             "of means and a logistic regression on three tasks, and "
-            "[[table3]] gives the numbers for every checkpoint with this "
+            "[[table:finders]] gives the numbers for every checkpoint with "
+            "this "
             "experiment.",
         ),
-        items=("fig3", "table3"),
+        items=("fig:finders", "table:finders"),
     ),
     Section(
         "wording",
         "Prompt wording",
         paragraphs=(
             "A reader is fitted and scored on prompts that share one "
-            "template. [[fig4]] changes only the wording of the prompt and "
+            "template. [[fig:wording]] changes only the wording of the prompt "
+            "and "
             "asks how much a reader moves.",
         ),
-        items=("fig4",),
+        items=("fig:wording",),
     ),
     Section(
         "knowledge",
@@ -202,51 +211,60 @@ RESULTS = (
         paragraphs=(
             "A direction for questions the model can answer against "
             "questions it cannot is fitted and compared with popularity and "
-            "with the confidence of the answer ([[fig5]]), and then added to "
+            "with the confidence of the answer ([[fig:knowledge_reading]]), "
+            "and then added to "
             "the residual stream to see whether it changes abstention "
-            "([[fig6]]). [[table4]] gives the numbers.",
+            "([[fig:knowledge_steering]]). [[table:knowledge]] gives the "
+            "numbers.",
         ),
-        items=("fig5", "fig6", "table4"),
+        items=(
+            "fig:knowledge_reading",
+            "fig:knowledge_steering",
+            "table:knowledge",
+        ),
     ),
     Section(
         "steering",
         "Steering and fluency",
         paragraphs=(
-            "[[fig7]] steers sentiment along the reading direction and "
-            "checks whether the text stays fluent. [[table6]] adds the "
+            "[[fig:steering]] steers sentiment along the reading direction and "
+            "checks whether the text stays fluent. [[table:steering]] adds the "
             "other steering experiments.",
         ),
-        items=("fig7", "table6"),
+        items=("fig:steering", "table:steering"),
     ),
     Section(
         "approximate",
         "Approximate answers",
         paragraphs=(
             "Some questions have a range for an answer and some an exact "
-            "value. [[fig8]] asks how often a model answers with a range and "
-            "whether a direction reads the difference, and [[table5]] gives "
+            "value. [[fig:approximate]] asks how often a model answers with a "
+            "range and "
+            "whether a direction reads the difference, and "
+            "[[table:approximate]] gives "
             "the numbers and the link to the knowledge directions.",
         ),
-        items=("fig8", "table5"),
+        items=("fig:approximate", "table:approximate"),
     ),
     Section(
         "limits",
         "Where reading does not beat text or noise",
         paragraphs=(
             "Some readings are matched by a classifier on the text or by a "
-            "random direction. [[fig9]] collects them, and [[table7]] gives "
+            "random direction. [[fig:truth]] collects them, and "
+            "[[table:truth]] gives "
             "the numbers for TruthfulQA [[cite:lin2022]] and for honesty.",
         ),
-        items=("fig9", "table7"),
+        items=("fig:truth", "table:truth"),
     ),
     Section(
         "posttraining",
         "Base against post-trained",
         paragraphs=(
-            "[[table8]] compares each Qwen3 base checkpoint with its "
+            "[[table:base_post]] compares each Qwen3 base checkpoint with its "
             "post-trained counterpart.",
         ),
-        items=("table8",),
+        items=("table:base_post",),
     ),
 )
 
