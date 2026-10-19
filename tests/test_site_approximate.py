@@ -566,17 +566,14 @@ def test_panel_b_names_the_controls_that_sit_at_the_ceiling(
     assert len(labels) == len(ceiling)
 
 
-def test_panel_c_prints_the_band_limits_beside_the_clipping_arrows(
+def test_panel_c_states_no_range_over_all_roles(
     output: registry.FigureOutput,
 ) -> None:
     ax_c = output.figure.axes[4]
-    draws = [
-        r["position"] for m in _models("p10b") for r in _people(m, "random")
-    ]
-    low = f"{min(draws):.1f}".replace("-", chr(0x2212))
-    label = ax_c.get_xlabel().replace("$", "")
-    assert f"{low} to {max(draws):.1f}" in label
+    label = ax_c.get_xlabel()
     assert "clipped" in label
+    assert " to " not in label
+    assert "band:" not in label
     arrows = [t for t in ax_c.texts if t.get_text() == ""]
     assert arrows
 

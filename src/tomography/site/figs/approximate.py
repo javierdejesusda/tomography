@@ -405,15 +405,7 @@ def _draw(
             label,
             "left" if edge else "right",
         )
-    band_min = min(min(r.draws) for r in readers.values())
-    band_max = max(max(r.draws) for r in readers.values())
-    ax_c.set_xlabel(
-        "people's position\nband: "
-        + _rows.number(band_min, 1).replace(axes.MINUS, f"${axes.MINUS}$")
-        + " to "
-        + _rows.number(band_max, 1).replace(axes.MINUS, f"${axes.MINUS}$")
-        + "\narrows: clipped"
-    )
+    ax_c.set_xlabel("people's position\narrows: band clipped")
     for ax, letter in ((ax_a, "a"), (ax_b, "b"), (ax_c, "c")):
         paper.panel_letter(ax, letter)
     main = fig.legend(
