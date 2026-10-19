@@ -1,30 +1,52 @@
-"""Figure A4: P9b transfer matrix with text baselines flagged.
+"""Figure A5: Transfer of the knowledge reader between question types.
 
-The AUROC of a reader fitted on one question type and tested on another,
-for the largest base checkpoint. A test type is starred when a classifier on
-the words or the characters of the questions alone comes within a small
-margin of the reader fitted on that type.
+Panel (a) is the AUROC of a reader fitted on one question type and tested on
+another, for the largest base checkpoint. Panel (b) puts the reader on its own
+type next to classifiers on the words and on the characters of the questions
+and next to a random direction, one row per type.
 """
 
-import json
+from typing import Any
 
-from matplotlib.figure import Figure
-import numpy as np
+from matplotlib import ticker
 
+from tomography.site import runfiles
 from tomography.site import store
+from tomography.site.figs import _group
+from tomography.site.figs import _rows
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
-from tomography.viz import axes as shared
+from tomography.viz import axes
 from tomography.viz import paper
 
+HEIGHT = 3.6
 SLACK = 0.02
-NOTE_SIZE = 4.6
-TICK_SIZE = 5.5
+HEADER = ["panel", "fitted", "tested", "series", "value"]
+SERIES = (
+    ("reader", "o", paper.INK),
+    ("words", "^", paper.ENC["text"]),
+    ("characters", "v", paper.ENC["text"]),
+    ("random", "x", paper.ENC["random_marker"]),
+)
+DETAIL = (
+    "(a) AUROC of a logistic reader fitted on the question type in the row "
+    "and tested on the type in the column, for {model} at its validation "
+    "layer; the diagonal is outlined and the columns carry the numbers of "
+    "the rows. (b) The reader on its own type (black circle) next to a "
+    "classifier on the words of the questions (green triangle up), one on "
+    "the characters (green triangle down) and a random direction (grey "
+    "cross). A high value in a column of (a) does not show that the "
+    "direction reads knowledge where a text classifier comes this close."
+)
 
 
 def _model(manifest: Manifest) -> str:
     bases = [m for m in manifest.models("p9b") if not store.is_post_trained(m)]
     return max(bases, key=store.model_rank)
+
+
+def _name(value: str) -> str:
+    return value.replace("_", " ")
 
 
 def build(manifest: Manifest) -> FigureOutput:
@@ -38,81 +60,100 @@ def build(manifest: Manifest) -> FigureOutput:
     """
     model = _model(manifest)
     run = manifest.run("p9b", model)
-    if run is None:
-        raise FileNotFoundError(f"results/p9b/{model} is missing")
-    meta = json.loads((run / "matrix.json").read_text("utf-8"))["data"]
-    with np.load(run / "matrix.npz") as npz:
-        values = np.asarray(npz["values"], dtype=float)
-    table = json.loads((run / "table.json").read_text("utf-8"))["data"]
-    by_type = {
-        r[0]: dict(zip(table["columns"], r, strict=True)) for r in table["rows"]
-    }
-    names: list[str] = list(meta["cols"])
-    flagged = [
-        max(by_type[t]["text_word"] or 0.0, by_type[t]["text_char"] or 0.0)
-        >= by_type[t]["logistic"] - SLACK
-        for t in names
+    assert run is not None
+    meta = runfiles.data(run, "matrix.json")
+    values = runfiles.arrays(run, "matrix.npz")["values"]
+    table = {r["type"]: r for r in runfiles.rows(run, "table.json")}
+    names: list[str] = list(meta["rows"])
+    own = [float(values[i, i]) for i in range(len(names))]
+    close = [
+        max(table[t]["text_word"] or 0.0, table[t]["text_char"] or 0.0)
+        >= own[i] - SLACK
+        for i, t in enumerate(names)
     ]
-    rows: list[list[str]] = []
+    csv_rows: list[list[Any]] = []
+    for i, fitted in enumerate(names):
+        for j, tested in enumerate(names):
+            csv_rows.append(
+                ["a", fitted, tested, "matrix", float(values[i, j])]
+            )
+    strip = {
+        "reader": own,
+        "words": [table[t]["text_word"] for t in names],
+        "characters": [table[t]["text_char"] for t in names],
+        "random": [table[t]["random"] for t in names],
+    }
+    for series, found in strip.items():
+        for t, value in zip(names, found, strict=True):
+            csv_rows.append(["b", t, "", series, value])
+
     with paper.paper_style():
-        fig = Figure(figsize=(paper.FULL_WIDTH, 5.6), layout="constrained")
-        ax = fig.add_subplot()
-        shared.heatmap(ax, values, vmin=0.5, vmax=1.0)
-        for r, fit in enumerate(meta["rows"]):
-            for c, ev in enumerate(names):
-                ax.text(
-                    c,
-                    r,
-                    f"{values[r, c]:.2f}",
-                    ha="center",
-                    va="center",
-                    fontsize=NOTE_SIZE,
-                    color="white" if values[r, c] > 0.85 else paper.INK,
-                )
-                rows.append(
-                    [
-                        f"matrix {fit}",
-                        model,
-                        ev,
-                        f"{values[r, c]:.6g}",
-                        "",
-                        "",
-                        "",
-                    ]
-                )
-        labels = [
-            t.replace("_", " ") + (" *" if f else "")
-            for t, f in zip(names, flagged, strict=True)
-        ]
-        ax.set_xticks(range(len(names)))
-        ax.set_xticklabels(labels, rotation=90, fontsize=TICK_SIZE)
-        ax.set_yticks(range(len(names)))
-        ax.set_yticklabels(
-            [t.replace("_", " ") for t in meta["rows"]], fontsize=TICK_SIZE
+        fig = _rows.new_figure(HEIGHT)
+        grid = fig.add_gridspec(1, 2, width_ratios=[2.6, 1.0])
+        ax_a = fig.add_subplot(grid[0])
+        ax_b = fig.add_subplot(grid[1], sharey=ax_a)
+        image = axes.heatmap(ax_a, values, vmin=0.5, vmax=1.0)
+        ax_a.set_aspect("auto")
+        ax_a.set_xticks(range(len(names)))
+        ax_a.set_xticklabels([str(k + 1) for k in range(len(names))])
+        ax_a.set_yticks(range(len(names)))
+        ax_a.set_yticklabels(
+            [f"{k + 1} {_name(t)}" for k, t in enumerate(names)]
         )
-        ax.set_xlabel("tested on question type")
-        ax.set_ylabel("fitted on question type")
-        ax.set_title(paper.display_name(model), fontsize=paper.TITLE, x=0.06)
-        paper.panel_letter(ax, "a")
-    numbers = {"flagged": float(sum(flagged)), "types": float(len(names))}
+        ax_a.tick_params(length=0)
+        ax_a.set_xlabel("tested on question type")
+        bar = fig.colorbar(
+            image, ax=ax_a, location="top", shrink=0.55, aspect=30, pad=0.02
+        )
+        bar.set_label("AUROC")
+        bar.ax.tick_params(labelsize=6.5)
+        for series, marker, color in SERIES:
+            ys = list(range(len(names)))
+            ax_b.plot(
+                strip[series],
+                ys,
+                ls="none",
+                marker=marker,
+                color=color,
+                markersize=_rows.MARKER_SIZE,
+                markeredgewidth=_rows.EDGE_WIDTH,
+                zorder=3,
+            )
+        ax_b.set_xlim(0.5, 1.02)
+        ax_b.xaxis.set_major_locator(ticker.FixedLocator([0.5, 0.75, 1.0]))
+        ax_b.xaxis.set_major_formatter(axes.minus_formatter())
+        ax_b.set_xlabel("AUROC on own type")
+        ax_b.tick_params(axis="y", length=0, labelleft=False)
+        ax_b.spines["left"].set_visible(False)
+        ax_b.grid(axis="y", color=paper.RANDOM_BAND, lw=0.4, zorder=0)
+        ax_a.set_ylim(len(names) - 0.5, -0.5)
+        paper.panel_letter(ax_a, "a")
+        paper.panel_letter(ax_b, "b")
+        legend = fig.legend(
+            handles=[
+                _rows.series_handle(label, marker, color)
+                for label, marker, color in SERIES
+            ],
+            loc="outside lower center",
+            ncol=4,
+            handlelength=1.0,
+            columnspacing=1.2,
+            fontsize=7,
+        )
+        legend.get_frame().set_edgecolor("none")
+
+    count = sum(close)
     claim = (
-        f"A classifier on the words or characters alone comes within "
-        f"{SLACK:.3f} of the reader on {sum(flagged)} of {len(names)} "
-        "question types."
+        "A classifier on the words or characters alone comes within "
+        f"{SLACK:.3f} of the reader on {count} of {len(names)} question "
+        "types."
     )
-    detail = (
-        "AUROC of a logistic reader fitted on the question type in the row "
-        "and tested on the type in the column, for "
-        f"{paper.display_name(model)} at its validation layer; the diagonal "
-        "is outlined. A star marks a test type where a classifier on the "
-        "words or on the characters of the questions reaches an AUROC "
-        "within the stated margin of the reader fitted on that type, so a "
-        "high value in that column does not show that the direction reads "
-        "knowledge."
+    numbers = {"close": float(count), "types": float(len(names))}
+    return FigureOutput(
+        fig,
+        claim,
+        DETAIL.format(model=paper.display_name(model)),
+        numbers,
+        _group.csv_text(HEADER, csv_rows),
+        {},
     )
-    return FigureOutput(fig, claim, detail, numbers, _csv(rows))
-
-
-def _csv(rows: list[list[str]]) -> str:
-    header = "panel,model,x,y,lo,hi,baseline"
-    return "\n".join([header, *(",".join(r) for r in rows)]) + "\n"

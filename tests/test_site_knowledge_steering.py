@@ -1,24 +1,27 @@
 import csv
 import io
-import itertools
-import json
 from pathlib import Path
-import re
+import runpy
 from typing import Any
 
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
-from matplotlib.text import Text
 import numpy as np
 import pytest
 
-from tomography.site import params
 from tomography.site import registry
+from tomography.site import stats
 from tomography.site.manifest import Manifest
+from tomography.viz import checks
 from tomography.viz import paper
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
+_R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 SPEC = "knowledge_steering"
+HEIGHT = 3.9
+EXEMPLARS = (
+    ("gpt2-xl", "fewshot"),
+    ("qwen3-4b-base", "fewshot"),
+    ("qwen3-4b", "fewshot"),
+)
 
 
 @pytest.fixture(scope="module")
@@ -30,165 +33,299 @@ def _rows(output: registry.FigureOutput) -> list[dict[str, str]]:
     return list(csv.DictReader(io.StringIO(output.csv)))
 
 
-def _json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))["data"]
-
-
-def _runs() -> list[dict[str, Any]]:
+def _runs() -> list[tuple[str, str]]:
     found = []
-    for run in sorted(RESULTS.glob("p9d/*/*")):
-        summary = _json(run / "summary.json")
-        found.append(
+    for model in _R["models"]("p9d"):
+        templates = sorted(
             {
-                "model": run.parent.name,
-                "template": summary["template"],
-                "path": run,
-                "headline": summary["headline"],
-            }
+                str(r.config["template"])
+                for r in Manifest(RESULTS).runs("p9d", model)
+            },
+            key=("fewshot", "concept").index,
         )
+        found.extend((model, t) for t in templates)
     return found
 
 
-def _has(claim: str, value: float) -> bool:
-    text = str(int(value)) if value == int(value) else f"{value:.3f}"
-    pattern = rf"(?<![\d.]){re.escape(text)}(?![\d])"
-    return re.search(pattern, claim) is not None
+def _path(model: str, template: str) -> Path:
+    path: Path = _R["run"]("p9d", model, template=template)
+    return path
 
 
-def _dose_runs() -> list[dict[str, Any]]:
-    fewshot = [r for r in _runs() if r["template"] == "fewshot"]
-    entropy = [r for r in fewshot if r["headline"]["metric"] == "entropy"]
-    post = [r for r in fewshot if r["headline"]["metric"] == "abstention"]
-    largest = max(post, key=lambda r: params.param_count(r["model"]))
-    return [*entropy, largest]
-
-
-def test_claim_counts_come_from_the_headline_of_every_run(
-    output: registry.FigureOutput,
-) -> None:
-    runs = _runs()
-    distinguishable = sum(bool(r["headline"]["distinguishable"]) for r in runs)
-    selective = sum(bool(r["headline"]["selective"]) for r in runs)
-    post = [
-        r
-        for r in runs
-        if not r["headline"]["distinguishable"]
-        and not r["model"].startswith("gpt2")
-        and not r["model"].endswith("-base")
+def _headline(model: str, template: str) -> dict[str, Any]:
+    head: dict[str, Any] = _R["data"](_path(model, template), "summary.json")[
+        "headline"
     ]
-    expected = {
-        "runs": len(runs),
-        "distinguishable": distinguishable,
-        "selective": selective,
-        "not_distinguishable": len(runs) - distinguishable,
-        "not_distinguishable_post_trained": len(post),
-    }
-    assert output.numbers == pytest.approx(expected)
-    assert all(_has(output.claim, v) for v in expected.values())
+    return head
 
 
-def test_summary_panel_has_one_unit_free_ratio_per_run(
-    output: registry.FigureOutput,
-) -> None:
-    rows = [r for r in _rows(output) if r["panel"] == "h"]
-    runs = _runs()
-    assert len(rows) == len(runs)
-    ratios = sorted(float(r["value"]) for r in rows)
-    expected = sorted(
-        r["headline"]["lat_slope"] / r["headline"]["max_abs_random_slope"]
-        for r in runs
+def _table(model: str, template: str, name: str) -> list[dict[str, Any]]:
+    payload = _R["data"](_path(model, template), name)
+    return [
+        dict(zip(payload["columns"], r, strict=True)) for r in payload["rows"]
+    ]
+
+
+def _label(model: str, template: str) -> str:
+    return f"{model} {template}"
+
+
+def _curves(model: str, template: str) -> dict[str, np.ndarray]:
+    path = _path(model, template)
+    stem = (
+        "curves_obscure_real_entropy"
+        if _headline(model, template)["metric"] == "entropy"
+        else "curves_obscure_real"
     )
-    assert ratios == pytest.approx(expected)
+    names = _R["data"](path, f"{stem}.json")["series"]
+    arrays = _R["npz"](path, f"{stem}.npz")
+    return {
+        "x": arrays["x"],
+        **{
+            f"{kind}:{name}": arrays[kind][i]
+            for i, name in enumerate(names)
+            for kind in ("mean", "lo", "hi")
+        },
+    }
 
 
-def test_dose_panels_hold_the_entropy_runs_and_the_largest_post_trained_run(
+def _shift(curves: dict[str, np.ndarray], series: str) -> float:
+    mean = curves[f"mean:{series}"]
+    origin = float(mean[int(np.argmin(np.abs(curves["x"])))])
+    return float(np.max(np.abs(mean - origin)))
+
+
+def _role_counts(
+    flags: dict[tuple[str, str], bool],
+) -> dict[str, stats.RoleCount]:
+    counts = {r: [0, 0] for r in stats.ROLES}
+    for (model, _), flag in flags.items():
+        cell = counts[stats.role(model)]
+        cell[0] += int(flag)
+        cell[1] += 1
+    return {r: stats.RoleCount(h, t) for r, (h, t) in counts.items()}
+
+
+def _runs_text(counts: dict[str, stats.RoleCount]) -> str:
+    names = {"gpt2": "GPT-2", "base": "Qwen3 base", "post": "post-trained"}
+    parts = [
+        f"{counts[r].hits} of {counts[r].total} {names[r]} runs"
+        for r in stats.ROLES
+        if counts[r].total
+    ]
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def test_there_are_twelve_runs_in_two_units() -> None:
+    runs = _runs()
+    assert len(runs) == 12
+    metrics = [_headline(*r)["metric"] for r in runs]
+    assert metrics.count("entropy") == 6
+    assert metrics.count("abstention") == 6
+
+
+def test_forests_hold_each_unit_on_its_own_axis(
     output: registry.FigureOutput,
 ) -> None:
-    expected = _dose_runs()
-    rows = [r for r in _rows(output) if r["panel"] != "h"]
-    assert {r["run"] for r in rows} == {
-        f"{r['model']} {r['template']}" for r in expected
-    }
-    for run in expected:
-        stem = (
-            "curves_obscure_real_entropy"
-            if run["headline"]["metric"] == "entropy"
-            else "curves_obscure_real"
+    rows = _rows(output)
+    for panel, metric in (("a", "entropy"), ("b", "abstention")):
+        keys = {
+            r["run"] for r in rows if r["panel"] == panel and r["series"] != ""
+        }
+        want = {
+            _label(*run)
+            for run in _runs()
+            if _headline(*run)["metric"] == metric
+        }
+        assert keys == want
+
+
+def test_each_row_has_direction_known_and_the_three_random_arms(
+    output: registry.FigureOutput,
+) -> None:
+    rows = _rows(output)
+    for run in _runs():
+        head = _headline(*run)
+        panel = "a" if head["metric"] == "entropy" else "b"
+        dose = _table(*run, "table_dose.json")
+        got = {
+            r["series"]: r
+            for r in rows
+            if r["panel"] == panel and r["run"] == _label(*run)
+        }
+        assert set(got) == {
+            "direction_unknown",
+            "direction_known",
+            "random0",
+            "random1",
+            "random2",
+        }
+        unknown = got["direction_unknown"]
+        assert float(unknown["value"]) == pytest.approx(head["lat_slope"])
+        assert float(unknown["lo"]) == pytest.approx(head["lat_lo"])
+        assert float(unknown["hi"]) == pytest.approx(head["lat_hi"])
+        known = next(
+            r
+            for r in dose
+            if r["type"] == head["group"]
+            and r["metric"] == head["metric"]
+            and r["side"] == "known"
+            and r["arm"] == "lat0"
+            and r["vs"] == ""
         )
-        names = _json(run["path"] / f"{stem}.json")["series"]
-        with np.load(run["path"] / f"{stem}.npz") as arrays:
-            xs, mean = arrays["x"], arrays["mean"]
-        key = f"{run['model']} {run['template']}"
-        for name in names:
-            got = [r for r in rows if r["run"] == key and r["series"] == name]
-            assert [float(r["x"]) for r in got] == pytest.approx(list(xs))
+        assert float(got["direction_known"]["value"]) == pytest.approx(
+            known["slope"]
+        )
+        for arm in ("random0", "random1", "random2"):
+            want = next(
+                r
+                for r in dose
+                if r["type"] == head["group"]
+                and r["metric"] == head["metric"]
+                and r["side"] == "unknown"
+                and r["arm"] == arm
+                and r["vs"] == ""
+            )
+            assert float(got[arm]["value"]) == pytest.approx(want["slope"])
+            assert float(got[arm]["lo"]) == pytest.approx(want["lo"])
+            assert float(got[arm]["hi"]) == pytest.approx(want["hi"])
+
+
+def test_the_distinguishable_flag_is_the_per_arm_interval_criterion() -> None:
+    for run in _runs():
+        head = _headline(*run)
+        assert head["distinguishable"] == all(
+            v[1] > 0 for v in head["abs_gaps"].values()
+        )
+
+
+def test_dose_panels_draw_the_stored_curves_for_three_runs(
+    output: registry.FigureOutput,
+) -> None:
+    rows = _rows(output)
+    for letter, run in zip("cde", EXEMPLARS, strict=True):
+        curves = _curves(*run)
+        for series in ("lat: known", "lat: unknown", "random: unknown"):
+            got = [
+                r
+                for r in rows
+                if r["panel"] == letter
+                and r["run"] == _label(*run)
+                and r["series"] == series
+            ]
+            assert [float(r["x"]) for r in got] == list(curves["x"])
             assert [float(r["value"]) for r in got] == pytest.approx(
-                list(mean[names.index(name)])
+                list(curves[f"mean:{series}"])
+            )
+            assert [float(r["lo"]) for r in got] == pytest.approx(
+                list(curves[f"lo:{series}"])
             )
 
 
-def test_panels_are_the_dose_runs_then_the_summary(
+def test_counts_are_per_role_over_runs(output: registry.FigureOutput) -> None:
+    runs = _runs()
+    for name, key in (
+        ("distinguishable", "distinguishable"),
+        ("selective", "selective"),
+    ):
+        want = _role_counts({r: bool(_headline(*r)[key]) for r in runs})
+        for role in stats.ROLES:
+            got = output.counts[name][role]
+            assert (got.hits, got.total) == (want[role].hits, want[role].total)
+            assert output.numbers[f"{name}_{role}"] == want[role].hits
+            assert output.numbers[f"n_{role}"] == want[role].total
+    assert output.counts["distinguishable"]["post"].total == 6
+    assert output.counts["distinguishable"]["gpt2"].total == 3
+
+
+def test_known_at_least_unknown_runs_come_from_the_curves(
     output: registry.FigureOutput,
 ) -> None:
-    panels = {r["panel"] for r in _rows(output)}
-    assert panels == {*"abcdefg", "h"}
-
-
-def test_caption_names_the_ratio_and_what_the_bands_resample(
-    output: registry.FigureOutput,
-) -> None:
-    assert "largest" in output.detail
-    assert "resample" in output.detail
-    assert "random" in output.detail
-
-
-def _boxes(fig: Figure) -> list[tuple[str, tuple[float, float, float, float]]]:
-    canvas = FigureCanvasAgg(fig)
-    with paper.paper_style():
-        canvas.draw()
-    renderer = canvas.get_renderer()
-    unique = {id(t): t for t in fig.findobj(Text)}
-    out = []
-    for text in unique.values():
-        if text.get_text() and text.get_visible():
-            box = text.get_window_extent(renderer)
-            out.append((text.get_text(), (box.x0, box.y0, box.x1, box.y1)))
-    return out
-
-
-def test_figure_is_print_width_with_one_letter_per_panel(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    assert fig.get_size_inches()[0] == paper.FULL_WIDTH
-    letters = [t for t, _ in _boxes(fig) if t.startswith(r"$\mathbf")]
-    assert letters == [rf"$\mathbf{{({c})}}$" for c in "abcdefgh"]
-
-
-def test_no_text_overlaps_or_leaves_the_figure(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    boxes = _boxes(fig)
-    width, height = (fig.get_size_inches() * fig.dpi).tolist()
-    for label, (x0, y0, x1, y1) in boxes:
-        assert min(x0, y0) >= -0.5, label
-        assert x1 <= width + 0.5, label
-        assert y1 <= height + 0.5, label
-    for (la, a), (lb, b) in itertools.combinations(boxes, 2):
-        overlap = (
-            a[0] < b[2] - 0.5
-            and b[0] < a[2] - 0.5
-            and a[1] < b[3] - 0.5
-            and b[1] < a[3] - 0.5
+    held = {
+        run
+        for run in _runs()
+        if _shift(_curves(*run), "lat: known")
+        >= _shift(_curves(*run), "lat: unknown")
+    }
+    assert {m for m, _ in held} == {
+        "gpt2-large",
+        "gpt2-xl",
+        "qwen3-0.6b-base",
+        "qwen3-1.7b-base",
+    }
+    assert "known_ge_unknown" not in output.numbers
+    for role in stats.ROLES:
+        assert output.numbers[f"known_ge_unknown_{role}"] == sum(
+            stats.role(m) == role for m, _ in held
         )
-        assert not overlap, (la, lb)
+    for model, template in held:
+        plain = _headline(model, template)["metric"] == "entropy"
+        name = paper.display_name(model if plain else f"{model} {template}")
+        assert name in output.detail
 
 
-def test_svg_and_pdf_bytes_are_the_same_for_the_same_input(
+def test_caption_is_the_template_filled_from_the_files(
     output: registry.FigureOutput,
 ) -> None:
-    again = registry.build_figure(SPEC, Manifest(RESULTS))
+    runs = _runs()
+    dist = _role_counts(
+        {r: bool(_headline(*r)["distinguishable"]) for r in runs}
+    )
+    sel = _role_counts({r: bool(_headline(*r)["selective"]) for r in runs})
+    assert output.claim == (
+        "Adding the knowledge direction moves unknown questions more than "
+        "random directions do on GPT-2 and base checkpoints, and not "
+        "consistently on post-trained ones."
+    )
+    assert (
+        "The direction moves unknown questions more than each of the 3 "
+        f"random directions on {_runs_text(dist)}, and more than known "
+        f"questions on {_runs_text(sel)}, by the linear slope over the "
+        "coefficient grid; with 3 random directions a direction passes by "
+        "chance with probability 1/4."
+    ) in output.detail
+    assert all(dist[r].hits == dist[r].total for r in ("gpt2", "base"))
+    assert dist["post"].hits < dist["post"].total
+    assert "Figure A6" in output.detail
+    assert "Figure A7" in output.detail
+    assert "resample the questions" in output.detail
+
+
+def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
+    fig = output.figure
+    assert tuple(fig.get_size_inches()) == (paper.FULL_WIDTH, HEIGHT)
+    assert checks.guard_problems(fig) == []
+    assert checks.problems(fig) == []
+
+
+def test_five_panel_letters_and_no_dashes(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    letters = [
+        t.get_text()
+        for ax in output.figure.axes
+        for t in ax.texts
+        if t.get_text().startswith(r"$\mathbf")
+    ]
+    assert sorted(letters) == [rf"$\mathbf{{({c})}}$" for c in "abcde"]
+    text = f"{output.claim} {output.detail} {output.csv}"
+    assert chr(0x2014) not in text
+    assert chr(0x2013) not in text
+
+
+def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
+    first = registry.build_figure(SPEC, Manifest(RESULTS))
+    second = registry.build_figure(SPEC, Manifest(RESULTS))
     with paper.paper_style():
-        assert paper.svg_bytes(output.figure) == paper.svg_bytes(again.figure)
-        assert paper.pdf_bytes(output.figure) == paper.pdf_bytes(again.figure)
+        assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
+        assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
+
+
+def test_caption_describes_the_grey_band_as_the_mean_of_the_random_arms(
+    output: registry.FigureOutput,
+) -> None:
+    assert (
+        "the mean over the 3 random directions on unknown questions with its "
+        "95 percent interval that resamples the questions (grey band)"
+    ) in output.detail

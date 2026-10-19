@@ -1,8 +1,11 @@
-import json
+import math
 from pathlib import Path
+import runpy
 
+from matplotlib.image import AxesImage
 import numpy as np
 import pytest
+from scipy import stats as scipy_stats
 
 from tomography.site import params
 from tomography.site import registry
@@ -10,126 +13,241 @@ from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
 
+_RESULTS = runpy.run_path(str(Path(__file__).with_name("_results.py")))
+data = _RESULTS["data"]
+models = _RESULTS["models"]
+npz = _RESULTS["npz"]
+run = _RESULTS["run"]
+
 RESULTS = Path(__file__).resolve().parents[1] / "results"
-SPEC = "reading"
-GPT2 = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
-MARGIN = 0.1
+Z = 1.959963984540054
+CONCEPTS = {
+    "sentiment": "r1",
+    "utility": "r2",
+    "morality": "r3",
+    "truth": "r7",
+}
+GPT2 = ("gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
+
+
+def _wilson(p: float, n: int) -> tuple[float, float]:
+    denom = 1 + Z**2 / n
+    centre = (p + Z**2 / (2 * n)) / denom
+    half = Z * math.sqrt(p * (1 - p) / n + Z**2 / (4 * n**2)) / denom
+    return centre - half, centre + half
+
+
+def _curves(exp: str, model: str) -> tuple[np.ndarray, np.ndarray]:
+    path = run(exp, model)
+    series = data(path, "curves.json")["series"]
+    mean = npz(path, "curves.npz")["mean"]
+    return mean[series.index("reader")], mean[series.index("random")]
+
+
+def _read_at(concept: str, model: str) -> tuple[int, float, float, int]:
+    exp = CONCEPTS[concept]
+    path = run(exp if concept != "sentiment" else "p3", model)
+    if concept == "sentiment":
+        meta = data(path, "sizes_sentiment.json")
+        arrays = npz(path, "sizes_sentiment.npz")
+        k = int(np.flatnonzero(arrays["sizes"] == 64)[0])
+        layer = int(meta["layer"])
+        col = int(np.flatnonzero(arrays["layers"] == layer)[0])
+        acc = arrays["accuracy"]
+        return (
+            layer,
+            float(acc[k, 1, 0, :, col].mean()),
+            float(acc[k, 1, 1, :, col].mean()),
+            214,
+        )
+    summary = data(path, "summary.json")
+    _, random = _curves(exp, model)
+    if concept == "truth":
+        layer = int(summary["val_layer"])
+        test = summary["sets"]["test"]
+        return (
+            layer,
+            float(test["accuracy_at_val_layer"]),
+            float(random[layer - 1]),
+            int(test["n_eval_pairs"]),
+        )
+    layer = int(summary["best_layer"])
+    return (
+        layer,
+        float(summary["test_accuracy"]),
+        float(random[layer - 1]),
+        int(summary["n_eval_pairs"]["test"]),
+    )
+
+
+def _onset(concept: str, model: str) -> float | None:
+    reader, random = _curves(CONCEPTS[concept], model)
+    above = np.flatnonzero(reader - random > 0.1)
+    return float((above[0] + 1) / len(reader)) if above.size else None
+
+
+def _depths(concept: str) -> list[float]:
+    values = [_onset(concept, m) for m in models(CONCEPTS[concept])]
+    return [v for v in values if v is not None]
+
+
+def _slope(concept: str) -> tuple[float, float, float]:
+    x = [math.log10(params.param_count(m)) for m in GPT2]
+    y = [_read_at(concept, m)[1] for m in GPT2]
+    fit = scipy_stats.linregress(x, y)
+    half = float(scipy_stats.t.ppf(0.975, 2)) * float(fit.stderr)
+    return float(fit.slope), fit.slope - half, fit.slope + half
 
 
 @pytest.fixture(scope="module")
 def output() -> registry.FigureOutput:
-    with paper.paper_style():
-        return registry.build_figure(SPEC, Manifest(RESULTS))
+    return registry.build_figure("reading", Manifest(RESULTS))
 
 
-def _curves(exp: str, model: str) -> tuple[np.ndarray, np.ndarray]:
-    run = Manifest(RESULTS).run(exp, model)
-    assert run is not None
-    with np.load(run / "curves.npz") as npz:
-        return np.array(npz["mean"][0]), np.array(npz["mean"][1])
+def _records(output: registry.FigureOutput, panel: str) -> list[dict[str, str]]:
+    lines = output.csv.strip().splitlines()
+    head = lines[0].split(",")
+    assert head == [
+        "panel",
+        "concept",
+        "model",
+        "x",
+        "y",
+        "lo",
+        "hi",
+        "baseline",
+    ]
+    rows = [dict(zip(head, line.split(","), strict=True)) for line in lines[1:]]
+    return [r for r in rows if r["panel"] == panel]
 
 
-def _first_depth(exp: str, model: str) -> float:
-    reader, random = _curves(exp, model)
-    index = int(np.flatnonzero(reader - random > MARGIN)[0])
-    return (index + 1) / len(reader)
-
-
-def _depths(exp: str) -> list[float]:
-    return [_first_depth(exp, m) for m in Manifest(RESULTS).models(exp)]
-
-
-def test_the_figure_is_seven_panels_in_two_rows(
+def test_every_depth_cell_is_the_reader_minus_random_curve(
     output: registry.FigureOutput,
 ) -> None:
-    assert len(output.figure.axes) == 7
-    assert output.figure.get_figwidth() == pytest.approx(paper.FULL_WIDTH)
+    rows = _records(output, "depth")
+    total = 0
+    for concept, exp in CONCEPTS.items():
+        for model in models(exp):
+            reader, random = _curves(exp, model)
+            mine = [
+                r
+                for r in rows
+                if r["concept"] == concept and r["model"] == model
+            ]
+            assert len(mine) == len(reader)
+            total += len(mine)
+            for i, rec in enumerate(mine):
+                assert float(rec["y"]) == pytest.approx(
+                    reader[i] - random[i], abs=1e-9
+                )
+                assert float(rec["x"]) == pytest.approx(
+                    (i + 1) / len(reader), abs=1e-9
+                )
+    assert total == len(rows)
 
 
-def test_every_model_is_drawn_in_every_depth_panel(
+def test_every_size_point_is_recomputed_with_its_wilson_interval(
     output: registry.FigureOutput,
 ) -> None:
-    models = Manifest(RESULTS).models("r1")
-    assert len(models) == 10
-    for ax in output.figure.axes[:3]:
-        assert len(ax.get_lines()) >= len(models)
-        zero = [ln for ln in ax.get_lines() if list(ln.get_ydata()) == [0, 0]]
-        assert zero
+    rows = _records(output, "size")
+    assert len(rows) == sum(len(models(e)) for e in CONCEPTS.values())
+    for rec in rows:
+        _, acc, random, n = _read_at(rec["concept"], rec["model"])
+        lo, hi = _wilson(acc, n)
+        assert float(rec["y"]) == pytest.approx(acc, abs=1e-9)
+        assert float(rec["lo"]) == pytest.approx(lo, abs=1e-9)
+        assert float(rec["hi"]) == pytest.approx(hi, abs=1e-9)
+        assert float(rec["baseline"]) == pytest.approx(random, abs=1e-9)
+        assert float(rec["x"]) == params.param_count(rec["model"])
 
 
-def test_the_size_panels_show_a_random_mark_per_model(
+def test_the_sentiment_row_is_the_held_out_value_not_the_r1_value() -> None:
+    differs = 0
+    for model in models("p3"):
+        _, acc, _, _ = _read_at("sentiment", model)
+        best = data(run("r1", model), "summary.json")["best_accuracy"]
+        differs += abs(acc - best) > 1e-6
+    assert differs >= 1
+
+
+def test_the_onset_depths_are_recomputed_for_all_forty_cells(
     output: registry.FigureOutput,
 ) -> None:
-    for ax in output.figure.axes[3:]:
-        crosses = [ln for ln in ax.get_lines() if ln.get_marker() == "x"]
-        assert sum(len(ln.get_xdata()) for ln in crosses) == 10
-        assert ax.get_xscale() == "log"
-
-
-def test_the_dashed_fit_has_the_slope_stored_by_p6(
-    output: registry.FigureOutput,
-) -> None:
-    stored = json.loads(
-        (RESULTS / "p6" / "gpt2" / "25ee6de331d4" / "summary.json").read_text(
-            "utf-8"
+    cells = 0
+    for concept in CONCEPTS:
+        depths = _depths(concept)
+        cells += len(depths)
+        assert output.numbers[f"onset_{concept}_min"] == pytest.approx(
+            min(depths)
         )
-    )["data"]["accuracy_per_decade"]
-    for ax, exp in zip(
-        output.figure.axes[3:], ["r1", "r2", "r3", "r7"], strict=True
-    ):
-        fits = [ln for ln in ax.get_lines() if ln.get_linestyle() == "--"]
-        assert len(fits) == 1
-        x = np.log10(np.asarray(fits[0].get_xdata(), dtype=float))
-        y = np.asarray(fits[0].get_ydata(), dtype=float)
-        assert np.polyfit(x, y, 1)[0] == pytest.approx(stored[exp])
+        assert output.numbers[f"onset_{concept}_max"] == pytest.approx(
+            max(depths)
+        )
+    assert cells == 40
 
 
-def test_the_claim_numbers_match_a_recomputation_from_the_curves(
+def test_the_gpt2_slopes_use_a_t_interval_on_four_points(
     output: registry.FigureOutput,
 ) -> None:
-    r1, r3, r7 = _depths("r1"), _depths("r3"), _depths("r7")
-    assert output.numbers["r1_depth_max"] == pytest.approx(max(r1))
-    assert output.numbers["r3_depth_min"] == pytest.approx(min(r3))
-    assert output.numbers["r3_depth_max"] == pytest.approx(max(r3))
-    assert output.numbers["r7_depth_min"] == pytest.approx(min(r7))
-    assert output.numbers["r7_depth_max"] == pytest.approx(max(r7))
-    manifest = Manifest(RESULTS)
-    for exp in ("r1", "r3", "r7"):
-        accuracy = []
-        for model in GPT2:
-            run = manifest.run(exp, model)
-            assert run is not None
-            summary = json.loads((run / "summary.json").read_text("utf-8"))
-            data = summary["data"]
-            layer = data["val_layer"] if exp == "r7" else data["best_layer"]
-            reader, _ = _curves(exp, model)
-            accuracy.append(reader[layer - 1])
-        decade = np.log10([params.param_count(m) for m in GPT2])
-        slope = float(np.polyfit(decade, accuracy, 1)[0])
-        assert output.numbers[f"slope_{exp}"] == pytest.approx(slope)
+    for concept in CONCEPTS:
+        slope, lo, hi = _slope(concept)
+        assert output.numbers[f"slope_{concept}"] == pytest.approx(slope)
+        assert output.numbers[f"slope_{concept}_lo"] == pytest.approx(lo)
+        assert output.numbers[f"slope_{concept}_hi"] == pytest.approx(hi)
+    assert output.numbers["truth_n"] == 59
 
 
-def test_every_claim_number_is_written_in_the_claim(
+def test_the_plan_values_hold_at_the_current_results() -> None:
+    assert (
+        round(min(_depths("sentiment")), 3),
+        round(max(_depths("sentiment")), 3),
+    ) == (0.021, 0.125)
+    assert (
+        round(min(_depths("utility")), 3),
+        round(max(_depths("utility")), 3),
+    ) == (0.25, 0.417)
+    assert round(_slope("utility")[0], 3) == 0.034
+    assert round(_slope("morality")[0], 3) == 0.132
+    assert round(_slope("sentiment")[0], 3) == 0.048
+    assert round(_slope("truth")[0], 3) == pytest.approx(-0.027)
+
+
+def test_the_caption_quotes_the_onsets_slopes_and_sizes(
     output: registry.FigureOutput,
 ) -> None:
-    for name, value in output.numbers.items():
-        digits = 3 if name.startswith("slope") else 2
-        assert f"{abs(value):.{digits}f}" in output.claim, name
-    assert output.claim.endswith(".")
-    assert "above GPT-2 on every" not in output.claim
+    text = f"{output.claim} {output.detail}"
+    for concept in CONCEPTS:
+        assert f"{output.numbers[f'onset_{concept}_min']:.3f}" in text
+        assert f"{output.numbers[f'onset_{concept}_max']:.3f}" in text
+    assert "0.125" in text
+    assert "214 sentiment pairs" in text
+    assert "4,808 utility, 983 morality and 59 truth pairs" in text
+    assert "per tenfold" in text
+    assert "include zero" in text
 
 
-def test_the_figure_has_no_layout_faults(
+def test_the_figure_has_two_rows_of_four_and_no_model_legend(
     output: registry.FigureOutput,
 ) -> None:
+    fig = output.figure
+    assert fig.get_size_inches()[0] == pytest.approx(paper.FULL_WIDTH)
+    assert fig.get_size_inches()[1] == pytest.approx(4.4)
+    images = fig.findobj(AxesImage)
+    assert len(images) == sum(len(models(e)) for e in CONCEPTS.values())
+    labels = [t.get_text() for lg in fig.legends for t in lg.get_texts()]
+    assert not any("GPT-2" in x or "Qwen3" in x for x in labels)
+
+
+def test_the_guards_are_green(output: registry.FigureOutput) -> None:
+    assert checks.guard_problems(output.figure) == []
     assert checks.problems(output.figure) == []
 
 
-def test_the_csv_lists_every_plotted_point(
+def test_the_caption_keeps_names_and_grammar_and_avoids_first(
     output: registry.FigureOutput,
 ) -> None:
-    lines = output.csv.strip().splitlines()
-    assert lines[0] == "panel,model,x,y,lo,hi,baseline"
-    models = Manifest(RESULTS).models("r1")
-    points = [ln for ln in lines if ln.startswith("size r1,")]
-    assert len(points) == len(models)
+    text = f"{output.claim} {output.detail}"
+    assert "gpt-2" not in text
+    assert "GPT-2 sizes" in text
+    assert "intervals that includes" not in text
+    assert "first" not in text.lower()

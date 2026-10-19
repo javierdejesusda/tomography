@@ -1,139 +1,302 @@
-"""Figure 3: The paper's PCA finder against supervised finders.
+"""Figure 3: the paper's finder and logistic regression against a random one.
 
-Rows are the three P4 tasks and columns are GPT-2 XL and two Qwen3 base
-models. Each panel draws the report-split accuracy of three finders over
-relative depth against the band of random directions, with a dot at the layer
-each finder selected on its select split.
+Three panels (sentiment, truth and utility) share rows, one per checkpoint.
+Each marker is a finder's report-split accuracy minus that of a random
+direction of the same run, at the layer each chose on its select split, with a
+conservative interval for the test pairs. A grey band around zero is the
+spread that test-pair noise alone gives for a random direction.
 """
+
+import dataclasses
+import math
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-from tomography.site import finders
+from tomography.site import params
+from tomography.site import runfiles
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
+from tomography.site.registry import RoleCount
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
-GPT2 = ("gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
-FIRST = "gpt2-xl"
-QWEN = "qwen3-1.7b-base"
-EXTRA = ("qwen3-4b-base", "qwen3-0.6b-base")
-COLORS = {
-    "pca_diff": paper.INK,
-    "mean_diff": paper.SERIES[2],
-    "logistic": paper.SERIES[3],
+HEIGHT = 3.0
+TASKS = ("sentiment", "truth", "utility")
+PAIRING = {
+    "sentiment": "label_contrastive",
+    "truth": "label_contrastive",
+    "utility": "matched",
+}
+TITLES = {"sentiment": "Sentiment", "truth": "Truth", "utility": "Utility"}
+FINDERS = ("logistic", "pca_diff")
+DODGE = {"logistic": -0.2, "pca_diff": 0.2}
+STYLE = {
+    "logistic": (paper.ENC["direction"], "o"),
+    "pca_diff": (paper.ENC["paper"], "D"),
 }
 LABELS = {
-    "pca_diff": "PCA of differences (paper)",
-    "mean_diff": "mean difference",
     "logistic": "logistic regression",
+    "pca_diff": "PCA of paired differences (paper)",
 }
-TASK_NAMES = {"sentiment": "Sentiment", "truth": "Truth", "utility": "Utility"}
+XLIM = (-0.30, 0.45)
+BAND_HEIGHT = 0.6
+MARKER = 3.5
 
 
-def _columns(manifest: Manifest) -> list[str]:
-    available = manifest.models("p4")
-    extra = next(m for m in EXTRA if m in available)
-    return sorted({FIRST, QWEN, extra}, key=_rank)
+@dataclasses.dataclass(frozen=True)
+class Point:
+    """One finder on one task and checkpoint.
+
+    Attributes:
+        margin: Finder accuracy minus random accuracy.
+        lo: Lower end of the conservative interval of the margin.
+        hi: Upper end of the conservative interval of the margin.
+        random: Accuracy of the random direction.
+        n: Test pairs.
+    """
+
+    margin: float
+    lo: float
+    hi: float
+    random: float
+    n: int
 
 
-def _rank(model: str) -> tuple[int, str]:
-    from tomography.site.store import model_rank
+def _points(manifest: Manifest, model: str) -> dict[tuple[str, str], Point]:
+    path = manifest.run("p4", model)
+    if path is None:
+        raise FileNotFoundError(f"results/p4/{model} is missing")
+    table = runfiles.rows(path, "table.json")
 
-    return model_rank(model)
+    def report(task: str, method: str) -> float:
+        (found,) = [
+            r
+            for r in table
+            if r["task"] == task
+            and r["method"] == method
+            and r["pairing"] == PAIRING[task]
+            and r["preprocess"] == "center"
+        ]
+        return float(found["report"])
+
+    found: dict[tuple[str, str], Point] = {}
+    for task in TASKS:
+        n = params.REPORT_PAIRS[task]
+        random = report(task, "random")
+        for finder in FINDERS:
+            margin, lo, hi = stats.diff_interval(
+                report(task, finder), random, n
+            )
+            found[(task, finder)] = Point(margin, lo, hi, random, n)
+    return found
 
 
-def _margin(
-    data: dict[str, dict[str, finders.Cell]],
-    model: str,
-    task: str,
-    method: str,
-) -> float:
-    rows = data[model][task].rows
-    return round(rows[method].report - rows["random"].report, 6) + 0.0
+def _marker(ax: Axes, y: float, model: str, finder: str, point: Point) -> None:
+    color, shape = STYLE[finder]
+    filled = shared.model_style(model).filled
+    y += DODGE[finder]
+    ax.plot(
+        [point.lo, point.hi],
+        [y, y],
+        color=color,
+        lw=paper.WHISKER_WIDTH,
+        solid_capstyle="butt",
+        zorder=3,
+    )
+    ax.plot(
+        [point.margin],
+        [y],
+        ls="none",
+        marker=shape,
+        ms=MARKER,
+        color=color,
+        mfc=color if filled else "white",
+        mew=0.8,
+        zorder=4,
+    )
 
 
 def _panel(
     ax: Axes,
-    cell: finders.Cell,
-    model: str,
     task: str,
-    rows: list[list[str]],
+    rows: dict[str, float],
+    data: dict[str, dict[tuple[str, str], Point]],
 ) -> None:
-    ax.axhline(0.5, color=paper.CHANCE, lw=0.5, ls=(0, (3, 2)), zorder=1)
-    mean, lo, hi = cell.curves["random"]
-    ax.fill_between(
-        cell.depth, lo, hi, color=paper.RANDOM_BAND, lw=0, zorder=1.5
-    )
-    ax.plot(cell.depth, mean, color=paper.CHANCE, lw=0.7, zorder=2)
-    for method, color in COLORS.items():
-        mean, _, _ = cell.curves[method]
-        ax.plot(cell.depth, mean, color=color, lw=1.0, zorder=3)
-        row = cell.rows[method]
-        ax.plot(
-            [cell.row_depth(method)],
-            [row.report],
-            ls="none",
-            marker="o",
-            ms=3.5,
-            color=color,
-            zorder=4,
+    shared.ref_line(ax, 0.0, "x")
+    for model, y in rows.items():
+        point = data[model][(task, "logistic")]
+        half = stats.Z * math.sqrt(
+            2 * point.random * (1 - point.random) / point.n
         )
-    random_row = cell.rows["random"]
-    for method in (*COLORS, "random"):
-        mean, lo, hi = cell.curves[method]
-        for i, depth in enumerate(cell.depth):
-            rows.append(
-                [
-                    f"{task} {method}",
-                    model,
-                    f"{depth:.6g}",
-                    f"{mean[i]:.6g}",
-                    f"{lo[i]:.6g}",
-                    f"{hi[i]:.6g}",
-                    f"{cell.curves['random'][0][i]:.6g}",
-                ]
-            )
-    del random_row
-    shared.depth_axis(ax)
-    ax.set_ylim(0.4, 1.0)
-    ax.set_yticks([0.5, 0.75, 1.0])
-    ax.set_yticklabels(["0.5", "0.75", "1"])
+        ax.fill_between(
+            [-half, half],
+            y - BAND_HEIGHT / 2,
+            y + BAND_HEIGHT / 2,
+            color=paper.RANDOM_BAND,
+            lw=0,
+            zorder=1.5,
+        )
+        for finder in FINDERS:
+            _marker(ax, y, model, finder, data[model][(task, finder)])
+    ax.set_xlim(*XLIM)
+    ax.set_xticks([-0.2, 0.0, 0.2, 0.4])
+    ax.xaxis.set_major_formatter(shared.minus_formatter())
+    ax.set_title(TITLES[task], fontsize=paper.TITLE, loc="left", x=0.04)
+    ax.spines["left"].set_visible(False)
 
 
 def _legend(fig: Figure) -> None:
     handles: list[Line2D | Patch] = [
-        Line2D([], [], color=c, lw=1.0, marker="o", ms=3.5)
-        for c in COLORS.values()
+        Line2D(
+            [],
+            [],
+            ls="none",
+            marker=STYLE[f][1],
+            ms=MARKER,
+            color=STYLE[f][0],
+        )
+        for f in FINDERS
     ]
     handles.append(Patch(fc=paper.RANDOM_BAND, ec="none"))
-    labels = [*LABELS.values(), "random directions"]
     fig.legend(
         handles,
-        labels,
+        [*(LABELS[f] for f in FINDERS), "random direction, test-pair noise"],
         loc="outside upper center",
-        ncol=4,
+        ncol=3,
         frameon=False,
-        fontsize=paper.TICK,
-        columnspacing=1.2,
-        handlelength=1.6,
+        fontsize=7,
+        columnspacing=1.4,
     )
 
 
-def _claim(numbers: dict[str, float]) -> str:
-    if numbers["gpt2_pca_over_random_max"] > 0.0:
-        raise ValueError("the PCA finder beats a random direction on GPT-2")
+def _numbers(
+    models: list[str], data: dict[str, dict[tuple[str, str], Point]]
+) -> tuple[dict[str, float], dict[str, dict[str, RoleCount]]]:
+    def flags(task: str, finder: str, interval: bool) -> dict[str, bool]:
+        return {
+            m: (
+                data[m][(task, finder)].lo > 0
+                if interval
+                else data[m][(task, finder)].margin > 0
+            )
+            for m in models
+        }
+
+    counts = {
+        "pca_sentiment": stats.per_role(flags("sentiment", "pca_diff", True)),
+        "logistic_sentiment": stats.per_role(
+            flags("sentiment", "logistic", True)
+        ),
+        "pca_utility_point": stats.per_role(
+            flags("utility", "pca_diff", False)
+        ),
+    }
+    numbers: dict[str, float] = {}
+    for role in stats.ROLES:
+        numbers[f"pca_sentiment_above_{role}"] = counts["pca_sentiment"][
+            role
+        ].hits
+        numbers[f"pca_sentiment_point_above_{role}"] = stats.per_role(
+            flags("sentiment", "pca_diff", False)
+        )[role].hits
+        numbers[f"logistic_sentiment_above_{role}"] = counts[
+            "logistic_sentiment"
+        ][role].hits
+        numbers[f"pca_utility_point_above_{role}"] = counts[
+            "pca_utility_point"
+        ][role].hits
+    gpt2 = [m for m in models if stats.role(m) == "gpt2"]
+    numbers["pca_truth_gpt2_max"] = max(
+        data[m][("truth", "pca_diff")].margin for m in gpt2
+    )
+    utility = [data[m][("utility", "pca_diff")].margin for m in models]
+    numbers["pca_utility_min"] = min(utility)
+    numbers["pca_utility_max"] = max(utility)
+    numbers["random_max"] = max(
+        data[m][(task, "pca_diff")].random for m in models for task in TASKS
+    )
+    return numbers, counts
+
+
+def _where(counts: dict[str, RoleCount]) -> str:
+    total = sum(c.total for c in counts.values())
+    if all(c.hits == c.total for c in counts.values()):
+        return f"all {total} checkpoints"
+    return stats.per_role_text(counts)
+
+
+def _winners(
+    models: list[str],
+    data: dict[str, dict[tuple[str, str], Point]],
+    task: str,
+    finder: str,
+) -> str:
+    names = [
+        paper.display_name(m) for m in models if data[m][(task, finder)].lo > 0
+    ]
+    return f" ({', '.join(names)})" if names else ""
+
+
+def _claim(
+    models: list[str],
+    data: dict[str, dict[tuple[str, str], Point]],
+    numbers: dict[str, float],
+    counts: dict[str, dict[str, RoleCount]],
+) -> str:
+    sentiment = counts["pca_sentiment"]
     return (
-        "On every GPT-2 size the paper's PCA finder is no higher than a "
-        "random direction for sentiment and truth, where logistic "
-        "regression is at least "
-        f"{numbers['gpt2_logistic_over_random_min']:.3f} above it, while on "
-        "Qwen3-1.7B-Base the PCA finder reads all three tasks, at least "
-        f"{numbers['qwen_pca_over_random_min']:.3f} above random."
+        "The paper's finder needs matched pairs. On pairs of unrelated "
+        "sentences with opposite labels, the leading principal component of "
+        "paired differences is above a random direction, with an interval "
+        f"excluding zero, for sentiment on {_where(sentiment)}"
+        f"{_winners(models, data, 'sentiment', 'pca_diff')}, and for truth "
+        "its largest margin on a GPT-2 size is "
+        f"{numbers['pca_truth_gpt2_max']:.3f}. Logistic regression is above "
+        "the random direction for sentiment, with an interval excluding "
+        f"zero, on {_where(counts['logistic_sentiment'])}. On utility, whose "
+        "pairs are matched scenarios, the paper's finder is above the "
+        "random direction by point estimate on "
+        f"{_where(counts['pca_utility_point'])}, by "
+        f"{numbers['pca_utility_min']:.3f} to "
+        f"{numbers['pca_utility_max']:.3f}."
     )
+
+
+_PAIRS = (
+    f"{params.REPORT_PAIRS['sentiment']} sentiment, "
+    f"{params.REPORT_PAIRS['truth']} truth and "
+    f"{params.REPORT_PAIRS['utility']} utility pairs"
+)
+DETAIL = (
+    "Each marker is a finder's accuracy on the report split minus that of "
+    "a random direction of the same run, each at the layer its select split "
+    "chose (filled for GPT-2 and Qwen3 base checkpoints, open for "
+    "post-trained ones); whiskers are conservative 95 percent intervals for "
+    f"the test pairs ({_PAIRS}); the "
+    "grey band is the spread that test-pair noise alone gives around the "
+    "random direction. Layer curves of these finders are in Figures A2 and "
+    "A3, all six finders in Table A2."
+)
+
+
+def _csv(
+    models: list[str], data: dict[str, dict[tuple[str, str], Point]]
+) -> str:
+    lines = ["task,model,role,finder,margin,lo,hi,random,n"]
+    for task in TASKS:
+        for model in models:
+            for finder in FINDERS:
+                p = data[model][(task, finder)]
+                lines.append(
+                    f"{task},{model},{stats.role(model)},{finder},"
+                    f"{p.margin:.10g},{p.lo:.10g},{p.hi:.10g},"
+                    f"{p.random:.10g},{p.n}"
+                )
+    return "\n".join(lines) + "\n"
 
 
 def build(manifest: Manifest) -> FigureOutput:
@@ -145,61 +308,33 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    columns = _columns(manifest)
-    data: dict[str, dict[str, finders.Cell]] = {}
-    for model in {*columns, *GPT2, QWEN}:
-        loaded = finders.load(manifest, model)
-        if loaded is None:
-            raise FileNotFoundError(f"results/p4/{model} is missing")
-        data[model] = loaded
-    rows: list[list[str]] = []
+    models = manifest.models("p4")
+    data = {m: _points(manifest, m) for m in models}
+    rows = shared.model_rows(models)
+    numbers, counts = _numbers(models, data)
     with paper.paper_style():
-        fig = Figure(figsize=(paper.FULL_WIDTH, 5.4), layout="constrained")
-        grid = fig.add_gridspec(3, 3)
-        letters = iter("abcdefghi")
-        for r, task in enumerate(finders.TASKS):
-            for c, model in enumerate(columns):
-                ax = fig.add_subplot(grid[r, c])
-                _panel(ax, data[model][task], model, task, rows)
-                paper.panel_letter(ax, next(letters))
-                if r == 0:
-                    ax.set_title(
-                        paper.display_name(model),
-                        fontsize=paper.TITLE,
-                        x=0.06,
-                    )
-                if c == 0:
-                    ax.set_ylabel(f"{TASK_NAMES[task]} accuracy")
-                if r < 2:
-                    ax.set_xlabel("")
+        fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
+        axes = fig.subplots(
+            1, 3, sharey=True, gridspec_kw={"width_ratios": [1.45, 1, 1]}
+        )
+        for ax, task, letter in zip(axes, TASKS, "abc", strict=True):
+            _panel(ax, task, rows, data)
+            paper.panel_letter(ax, letter)
+        axes[0].set_yticks(
+            list(rows.values()), [paper.display_name(m) for m in rows]
+        )
+        axes[0].set_ylim(max(rows.values()) + 0.7, -0.7)
+        for ax in axes:
+            ax.tick_params(axis="y", length=0)
+        fig.supxlabel(
+            "finder accuracy minus random direction", fontsize=paper.LABEL
+        )
         _legend(fig)
-    hard = ("sentiment", "truth")
-    numbers = {
-        "gpt2_pca_over_random_max": max(
-            _margin(data, m, t, "pca_diff") for m in GPT2 for t in hard
-        ),
-        "gpt2_logistic_over_random_min": min(
-            _margin(data, m, t, "logistic") for m in GPT2 for t in hard
-        ),
-        "qwen_pca_over_random_min": min(
-            _margin(data, QWEN, t, "pca_diff") for t in finders.TASKS
-        ),
-    }
-    detail = (
-        "Report-split accuracy of three direction finders over relative "
-        "depth on the pairing the task has (label-contrastive for sentiment "
-        "and truth, matched for utility) with centered activations; dots "
-        "mark each finder's layer chosen on the select split. The grey "
-        "band is the interval over seeds of random directions and the "
-        "grey line its mean; the dashed line is chance. The claim compares "
-        "report-split accuracies at each finder's selected layer. Qwen3 "
-        "4B has no P4 run, so the third column is the 0.6B base model when "
-        "it is missing. The other finders and sizes are in Table 3 and the "
-        "appendix."
+    return FigureOutput(
+        fig,
+        _claim(models, data, numbers, counts),
+        DETAIL,
+        numbers,
+        _csv(models, data),
+        counts,
     )
-    return FigureOutput(fig, _claim(numbers), detail, numbers, _csv(rows))
-
-
-def _csv(rows: list[list[str]]) -> str:
-    header = "panel,model,x,y,lo,hi,baseline"
-    return "\n".join([header, *(",".join(r) for r in rows)]) + "\n"

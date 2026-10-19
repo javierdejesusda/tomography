@@ -1,24 +1,26 @@
 import csv
 import io
-import itertools
-import json
+import math
 from pathlib import Path
-import re
+import runpy
 from typing import Any
 
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
-from matplotlib.text import Text
-import numpy as np
 import pytest
 
 from tomography.site import registry
+from tomography.site import stats
 from tomography.site.manifest import Manifest
+from tomography.viz import checks
 from tomography.viz import paper
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
+_R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 SPEC = "knowledge_reading"
-RISK_MODEL = "qwen3-4b-base"
+Z = 1.959963984540054
+MINUS = chr(0x2212)
+HEIGHT = 3.4
+READER = ("logistic_within", "popularity_within")
+BASELINES = ("text_word_within", "text_char_within")
 
 
 @pytest.fixture(scope="module")
@@ -30,210 +32,313 @@ def _rows(output: registry.FigureOutput) -> list[dict[str, str]]:
     return list(csv.DictReader(io.StringIO(output.csv)))
 
 
-def _table(path: Path) -> list[dict[str, Any]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))["data"]
+def _models(exp: str) -> list[str]:
+    models: list[str] = _R["models"](exp)
+    return models
+
+
+def _table(
+    exp: str, model: str, name: str = "table.json"
+) -> list[dict[str, Any]]:
+    payload = _R["data"](_R["run"](exp, model), name)
     if isinstance(payload, dict):
         return [
-            dict(zip(payload["columns"], row, strict=True))
-            for row in payload["rows"]
+            dict(zip(payload["columns"], r, strict=True))
+            for r in payload["rows"]
         ]
-    return list(payload)
+    rows: list[dict[str, Any]] = payload
+    return rows
 
 
-def _models(experiment: str) -> list[str]:
-    return Manifest(RESULTS).models(experiment)
-
-
-def _run(experiment: str, model: str) -> Path:
-    runs = [p for p in (RESULTS / experiment / model).iterdir() if p.is_dir()]
-    assert len(runs) == 1
-    return runs[0]
-
-
-def _p9b() -> dict[str, dict[str, Any]]:
+def _contrast() -> dict[str, dict[str, Any]]:
     found = {}
     for model in _models("p9b"):
-        rows = [
-            r
-            for r in _table(_run("p9b", model) / "table.json")
-            if r["type"] == "obscure_real"
-        ]
+        rows = [r for r in _table("p9b", model) if r["type"] == "obscure_real"]
         if rows:
             found[model] = rows[0]
     return found
 
 
-def _p9c() -> dict[str, dict[str, dict[str, Any]]]:
-    found = {}
-    for model in _models("p9c"):
-        rows = _table(_run("p9c", model) / "table.json")
-        found[model] = {
-            r["predictor"]: r for r in rows if r["dataset"] == "popqa"
+def _increments() -> dict[str, dict[str, dict[str, Any]]]:
+    return {
+        m: {
+            r["features"]: r
+            for r in _table("p9c", m, "table_incremental.json")
+            if r["dataset"] == "popqa"
         }
-    return found
-
-
-def _has(claim: str, value: float) -> bool:
-    text = str(int(value)) if value == int(value) else f"{value:.3f}"
-    pattern = rf"(?<![\d.]){re.escape(text)}(?![\d])"
-    return re.search(pattern, claim) is not None
-
-
-def test_panel_a_holds_every_model_with_a_known_unknown_contrast(
-    output: registry.FigureOutput,
-) -> None:
-    expected = _p9b()
-    assert "gpt2" not in expected
-    rows = [r for r in _rows(output) if r["panel"] == "a"]
-    for series, column in (
-        ("reader", "logistic_within"),
-        ("popularity", "popularity_within"),
-        ("text_word", "text_word_within"),
-        ("text_char", "text_char_within"),
-    ):
-        got = {
-            r["model"]: float(r["value"]) for r in rows if r["series"] == series
-        }
-        assert got.keys() == expected.keys()
-        for model, row in expected.items():
-            assert got[model] == pytest.approx(row[column])
-
-
-def test_panel_a_draws_no_interval_because_it_resamples_reader_draws(
-    output: registry.FigureOutput,
-) -> None:
-    rows = [r for r in _rows(output) if r["panel"] == "a"]
-    assert all(r["lo"] == "" and r["hi"] == "" for r in rows)
-
-
-def test_panel_b_lists_the_four_predictors_and_leaves_gpt2_without_lat(
-    output: registry.FigureOutput,
-) -> None:
-    expected = _p9c()
-    rows = [r for r in _rows(output) if r["panel"] == "b"]
-    for series in ("answer_logprob", "probe", "lat", "popularity"):
-        got = {r["model"]: r for r in rows if r["series"] == series}
-        want = {m: v[series] for m, v in expected.items() if series in v}
-        assert got.keys() == want.keys()
-        for model, row in want.items():
-            assert float(got[model]["value"]) == pytest.approx(
-                row["auroc_within"]
-            )
-            assert float(got[model]["lo"]) == pytest.approx(row["lo_within"])
-            assert float(got[model]["hi"]) == pytest.approx(row["hi_within"])
-    assert "gpt2" not in {r["model"] for r in rows if r["series"] == "lat"}
-
-
-def test_panel_c_reads_the_risk_coverage_of_one_model(
-    output: registry.FigureOutput,
-) -> None:
-    run = _run("p9c", RISK_MODEL)
-    names = json.loads(
-        (run / "riskcov_popqa_outputs.json").read_text(encoding="utf-8")
-    )["data"]["series"]
-    with np.load(run / "riskcov_popqa_outputs.npz") as arrays:
-        coverage = arrays["x"]
-        risk = arrays["mean"][names.index("answer_logprob")]
-    rows = [
-        r
-        for r in _rows(output)
-        if r["panel"] == "c" and r["series"] == "answer_logprob"
-    ]
-    assert {r["model"] for r in rows} == {RISK_MODEL}
-    assert [float(r["x"]) for r in rows] == pytest.approx(list(coverage))
-    assert [float(r["value"]) for r in rows] == pytest.approx(list(risk))
-    base = _p9c()[RISK_MODEL]["answer_logprob"]
-    chance = [r for r in _rows(output) if r["series"] == "random_order"]
-    assert float(chance[0]["value"]) == pytest.approx(
-        base["n_error"] / base["n"]
-    )
-    assert risk[-1] == pytest.approx(base["n_error"] / base["n"])
-
-
-def test_claim_numbers_are_recomputed_from_the_files(
-    output: registry.FigureOutput,
-) -> None:
-    a, c = _p9b(), _p9c()
-    above_pop = sum(
-        r["logistic_within"] > r["popularity_within"] for r in a.values()
-    )
-    above_text = sum(
-        r["logistic_within"] > max(r["text_word_within"], r["text_char_within"])
-        for r in a.values()
-    )
-    with_lat = {m: v for m, v in c.items() if "lat" in v}
-    gaps = [
-        v["answer_logprob"]["auroc_within"] - v["lat"]["auroc_within"]
-        for v in with_lat.values()
-    ]
-    expected = {
-        "models_reader": len(a),
-        "reader_above_popularity": above_pop,
-        "reader_above_text": above_text,
-        "models_lat": len(with_lat),
-        "lat_below_logprob": sum(g > 0 for g in gaps),
-        "gap_min": min(gaps),
-        "gap_max": max(gaps),
+        for m in _models("p9c")
     }
-    assert output.numbers == pytest.approx(expected)
-    assert all(_has(output.claim, v) for v in expected.values())
-    assert output.claim.endswith(".")
 
 
-def test_caption_says_what_each_interval_resamples(
+def _se(auc: float, n_pos: int, n_neg: int) -> float:
+    q1 = auc / (2 - auc)
+    q2 = 2 * auc * auc / (1 + auc)
+    var = (
+        auc * (1 - auc)
+        + (n_pos - 1) * (q1 - auc * auc)
+        + (n_neg - 1) * (q2 - auc * auc)
+    ) / (n_pos * n_neg)
+    return math.sqrt(var)
+
+
+def _diff(row: dict[str, Any]) -> tuple[float, float, float]:
+    a, b = row["logistic_within"], row["popularity_within"]
+    n_pos, n_neg = row["n_positive_test"], row["n_negative_test"]
+    half = Z * math.sqrt(_se(a, n_pos, n_neg) ** 2 + _se(b, n_pos, n_neg) ** 2)
+    return a - b, a - b - half, a - b + half
+
+
+def _text(phrase: stats.RoleCount | dict[str, stats.RoleCount]) -> str:
+    assert isinstance(phrase, dict)
+    return stats.per_role_text(phrase)
+
+
+def _flags(rule: Any) -> dict[str, bool]:
+    return {m: bool(rule(r)) for m, r in _contrast().items()}
+
+
+def _by_role(flags: dict[str, bool]) -> dict[str, stats.RoleCount]:
+    return stats.per_role(flags)
+
+
+def test_every_checkpoint_with_a_contrast_has_the_four_panel_a_values(
     output: registry.FigureOutput,
 ) -> None:
-    assert "resample" in output.detail
-    assert "risk" in output.detail.lower()
+    rows = _rows(output)
+    contrast = _contrast()
+    assert "gpt2" not in contrast
+    for model, row in contrast.items():
+        for series, column in (
+            ("direction", "logistic_within"),
+            ("popularity", "popularity_within"),
+            ("words", "text_word_within"),
+            ("characters", "text_char_within"),
+        ):
+            (got,) = [
+                r
+                for r in rows
+                if r["panel"] == "a"
+                and r["model"] == model
+                and r["series"] == series
+            ]
+            assert float(got["value"]) == pytest.approx(row[column])
+    assert not [r for r in rows if r["panel"] == "a" and r["model"] == "gpt2"]
 
 
-def _boxes(fig: Figure) -> list[tuple[str, tuple[float, float, float, float]]]:
-    canvas = FigureCanvasAgg(fig)
-    with paper.paper_style():
-        canvas.draw()
-    renderer = canvas.get_renderer()
-    unique = {id(t): t for t in fig.findobj(Text)}
-    out = []
-    for text in unique.values():
-        if text.get_text() and text.get_visible():
-            box = text.get_window_extent(renderer)
-            out.append((text.get_text(), (box.x0, box.y0, box.x1, box.y1)))
-    return out
+def test_direction_and_popularity_carry_hanley_mcneil_intervals(
+    output: registry.FigureOutput,
+) -> None:
+    rows = _rows(output)
+    for model, row in _contrast().items():
+        for series, column in (
+            ("direction", "logistic_within"),
+            ("popularity", "popularity_within"),
+        ):
+            (got,) = [
+                r
+                for r in rows
+                if r["panel"] == "a"
+                and r["model"] == model
+                and r["series"] == series
+            ]
+            value = row[column]
+            half = Z * _se(
+                value, row["n_positive_test"], row["n_negative_test"]
+            )
+            assert float(got["lo"]) == pytest.approx(max(0.0, value - half))
+            assert float(got["hi"]) == pytest.approx(min(1.0, value + half))
+        for series in ("words", "characters"):
+            (got,) = [
+                r
+                for r in rows
+                if r["panel"] == "a"
+                and r["model"] == model
+                and r["series"] == series
+            ]
+            assert got["lo"] == ""
+            assert got["hi"] == ""
 
 
-def test_figure_is_print_width_with_one_letter_per_panel(
+def test_the_arbiter_difference_for_qwen3_0_6b_base(
+    output: registry.FigureOutput,
+) -> None:
+    d, lo, hi = _diff(_contrast()["qwen3-0.6b-base"])
+    assert (round(d, 3), round(lo, 3), round(hi, 3)) == (0.120, 0.050, 0.189)
+
+
+def test_panel_b_has_the_stored_paired_increments(
+    output: registry.FigureOutput,
+) -> None:
+    rows = _rows(output)
+    for model, found in _increments().items():
+        for series, feature in (
+            ("direction", "confidence+lat"),
+            ("probe", "confidence+probe"),
+        ):
+            got = [
+                r
+                for r in rows
+                if r["panel"] == "b"
+                and r["model"] == model
+                and r["series"] == series
+            ]
+            if feature not in found:
+                assert not got
+                continue
+            (cell,) = got
+            assert float(cell["value"]) == pytest.approx(
+                found[feature]["diff_vs_confidence"]
+            )
+            assert float(cell["lo"]) == pytest.approx(found[feature]["lo"])
+            assert float(cell["hi"]) == pytest.approx(found[feature]["hi"])
+    assert "gpt2" not in {
+        r["model"]
+        for r in rows
+        if r["panel"] == "b" and r["series"] == "direction"
+    }
+
+
+def test_counts_are_per_role_and_use_the_interval_criterion(
+    output: registry.FigureOutput,
+) -> None:
+    point = _by_role(
+        _flags(lambda r: r["logistic_within"] > r["popularity_within"])
+    )
+    interval = _by_role(_flags(lambda r: _diff(r)[1] > 0))
+    probe = _by_role(
+        {m: f["confidence+probe"]["lo"] > 0 for m, f in _increments().items()}
+    )
+    for name, want in (
+        ("above_pop_point", point),
+        ("above_pop", interval),
+        ("probe_above", probe),
+    ):
+        for role in stats.ROLES:
+            got = output.counts[name][role]
+            assert (got.hits, got.total) == (want[role].hits, want[role].total)
+            assert output.numbers[f"{name}_{role}"] == want[role].hits
+    assert output.counts["above_pop"]["gpt2"].total == 3
+
+
+def test_increment_range_numbers(output: registry.FigureOutput) -> None:
+    lat = [
+        f["confidence+lat"]
+        for f in _increments().values()
+        if "confidence+lat" in f
+    ]
+    probe = [f["confidence+probe"] for f in _increments().values()]
+    diffs = [r["diff_vs_confidence"] for r in lat]
+    assert output.numbers["dir_inc_min"] == pytest.approx(min(diffs))
+    assert output.numbers["dir_inc_max"] == pytest.approx(max(diffs))
+    assert output.numbers["dir_inc_n"] == len(lat)
+    assert output.numbers["dir_inc_cover_all"] == sum(
+        r["lo"] <= 0 <= r["hi"] for r in lat
+    )
+    gains = [r["diff_vs_confidence"] for r in probe]
+    assert output.numbers["probe_inc_min"] == pytest.approx(min(gains))
+    assert output.numbers["probe_inc_max"] == pytest.approx(max(gains))
+
+
+def test_popularity_is_the_strongest_baseline_where_the_caption_says_so() -> (
+    None
+):
+    for model, row in _contrast().items():
+        assert row["popularity_within"] > max(row[c] for c in BASELINES), model
+
+
+def test_caption_is_the_template_filled_from_the_files(
+    output: registry.FigureOutput,
+) -> None:
+    point = _by_role(
+        _flags(lambda r: r["logistic_within"] > r["popularity_within"])
+    )
+    interval = _by_role(_flags(lambda r: _diff(r)[1] > 0))
+    lat = [
+        f["confidence+lat"]
+        for f in _increments().values()
+        if "confidence+lat" in f
+    ]
+    probe = [f["confidence+probe"] for f in _increments().values()]
+    diffs = [r["diff_vs_confidence"] for r in lat]
+    gains = [r["diff_vs_confidence"] for r in probe]
+
+    def signed(value: float) -> str:
+        text = f"{value:.3f}"
+        return text.replace("-", MINUS)
+
+    assert all(c.hits == c.total for c in point.values() if c.total)
+    assert all(r["lo"] <= 0 <= r["hi"] for r in lat)
+    assert all(r["lo"] > 0 for r in probe)
+    caption = f"{output.claim} {output.detail}"
+    assert output.claim == (
+        "A known-against-unknown direction ranks questions but adds nothing "
+        "to the model's confidence."
+    )
+    assert (
+        f"on all {len(lat)} checkpoints by point estimate, and the interval "
+        f"of the difference lies above zero on {stats.per_role_text(interval)}"
+    ) in caption
+    assert (
+        f"the direction changes it by {signed(min(diffs))} to "
+        f"{signed(max(diffs))} with an interval covering zero on all "
+        f"{len(lat)} checkpoints, while the probe adds {signed(min(gains))} "
+        f"to {signed(max(gains))} with an interval above zero on all "
+        f"{len(probe)}"
+    ) in caption
+    assert "monthly Wikipedia page views" in caption
+    assert "Hanley and McNeil" in caption
+
+
+def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
+    fig = output.figure
+    assert tuple(fig.get_size_inches()) == (paper.FULL_WIDTH, HEIGHT)
+    assert checks.guard_problems(fig) == []
+    assert checks.problems(fig) == []
+
+
+def test_two_panels_share_the_checkpoint_rows(
     output: registry.FigureOutput,
 ) -> None:
     fig = output.figure
-    assert fig.get_size_inches()[0] == paper.FULL_WIDTH
-    letters = [t for t, _ in _boxes(fig) if t.startswith(r"$\mathbf")]
-    assert letters == [rf"$\mathbf{{({c})}}$" for c in "abc"]
+    assert len(fig.axes) == 2
+    first, second = fig.axes
+    assert first.get_shared_y_axes().joined(first, second)
+    labels = [t.get_text() for t in first.get_yticklabels()]
+    assert labels == [paper.display_name(m) for m in _models("p9b")]
 
 
-def test_no_text_overlaps_or_leaves_the_figure(
+def test_the_gpt2_small_row_says_it_has_no_contrast(
     output: registry.FigureOutput,
 ) -> None:
-    fig = output.figure
-    boxes = _boxes(fig)
-    width, height = (fig.get_size_inches() * fig.dpi).tolist()
-    for label, (x0, y0, x1, y1) in boxes:
-        assert min(x0, y0) >= -0.5, label
-        assert x1 <= width + 0.5, label
-        assert y1 <= height + 0.5, label
-    for (la, a), (lb, b) in itertools.combinations(boxes, 2):
-        overlap = (
-            a[0] < b[2] - 0.5
-            and b[0] < a[2] - 0.5
-            and a[1] < b[3] - 0.5
-            and b[1] < a[3] - 0.5
-        )
-        assert not overlap, (la, lb)
+    texts = [t.get_text() for t in output.figure.axes[0].texts]
+    assert "no known-against-unknown contrast" in texts
 
 
-def test_svg_and_pdf_bytes_are_the_same_for_the_same_input(
+def test_dot_plot_rows_have_no_connecting_lines(
     output: registry.FigureOutput,
 ) -> None:
-    again = registry.build_figure(SPEC, Manifest(RESULTS))
+    for ax in output.figure.axes:
+        for line in ax.get_lines():
+            assert len(line.get_xdata()) <= 2
+
+
+def test_panel_letters_and_dashes(output: registry.FigureOutput) -> None:
+    checks.draw(output.figure)
+    letters = [
+        t.get_text()
+        for ax in output.figure.axes
+        for t in ax.texts
+        if t.get_text().startswith(r"$\mathbf")
+    ]
+    assert sorted(letters) == [r"$\mathbf{(a)}$", r"$\mathbf{(b)}$"]
+    text = f"{output.claim} {output.detail} {output.csv}"
+    assert chr(0x2014) not in text
+    assert chr(0x2013) not in text
+
+
+def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
+    first = registry.build_figure(SPEC, Manifest(RESULTS))
+    second = registry.build_figure(SPEC, Manifest(RESULTS))
     with paper.paper_style():
-        assert paper.svg_bytes(output.figure) == paper.svg_bytes(again.figure)
-        assert paper.pdf_bytes(output.figure) == paper.pdf_bytes(again.figure)
+        assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
+        assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)

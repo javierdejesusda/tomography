@@ -1,222 +1,358 @@
-"""Figure 2: Where and how well a concept can be read.
+"""Figure 4: where and how well a concept is read.
 
-Row one shows selectivity (reader accuracy minus a random direction of the
-same run) over relative depth for sentiment, morality and truth. Row two
-shows accuracy at the selected layer against parameter count for the four
-concepts, with the random direction at that layer and the GPT-2 trend that
-P6 reports.
+Row one is a heat map per concept with a row per checkpoint: the reader's
+accuracy minus that of a random direction of the same run at every layer, with
+the lowest layer above 0.1 marked and the layer read in row two circled. Row
+two is the held-out accuracy at that layer against the number of parameters,
+with the random direction at the same layer and a Wilson interval for the test
+pairs. Sentiment is the held-out value of the sample-size run, not the
+optimistic one of the layer-selection run.
 """
 
-import json
-from typing import Any
+import dataclasses
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 import numpy as np
 
 from tomography.site import params
 from tomography.site import reading
+from tomography.site import stats
+from tomography.site import store
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
+from tomography.site.tables import _cells
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
+HEIGHT = 4.4
 MARGIN = 0.1
-GPT2 = ("gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
-DEPTH_PANELS = (("r1", "Sentiment"), ("r3", "Morality"), ("r7", "Truth"))
-SIZE_PANELS = (
-    ("r1", "Sentiment"),
-    ("r2", "Utility"),
-    ("r3", "Morality"),
-    ("r7", "Truth"),
+VMAX = 0.4
+CONCEPTS = (
+    ("sentiment", "Sentiment", "r1"),
+    ("utility", "Utility", "r2"),
+    ("morality", "Morality", "r3"),
+    ("truth", "Truth", "r7"),
 )
-P6 = ("p6", "gpt2")
+MIN_TREND_SIZES = 3
+HALO = 1.6
+TICK = 0.8
+MARKER = 3.5
 
 
-def _slopes(manifest: Manifest) -> dict[str, float]:
-    run = manifest.run(*P6)
-    if run is None:
-        raise FileNotFoundError("results/p6/gpt2 is missing")
-    data = json.loads((run / "summary.json").read_text("utf-8"))["data"]
-    return {k: float(v) for k, v in data["accuracy_per_decade"].items()}
+@dataclasses.dataclass(frozen=True)
+class Cell:
+    """One concept on one checkpoint.
+
+    Attributes:
+        curve: The reading over every layer.
+        at: The reader and the random direction at the layer read.
+    """
+
+    curve: reading.Reading
+    at: reading.Score
 
 
-def _marker_kwargs(model: str) -> dict[str, Any]:
-    style = shared.model_style(model)
-    return {
-        "marker": style.marker,
-        "mfc": style.color if style.filled else "white",
-        "mec": style.color,
-        "color": style.color,
-    }
-
-
-def _depth_panel(
-    ax: Axes, manifest: Manifest, exp: str, rows: list[list[str]]
-) -> list[float]:
-    firsts = []
-    ax.axhline(0.0, color=paper.CHANCE, lw=0.5, zorder=1)
+def _cells_of(manifest: Manifest, concept: str, exp: str) -> dict[str, Cell]:
+    found: dict[str, Cell] = {}
     for model in manifest.models(exp):
-        found = reading.load(manifest, exp, model)
-        if found is None:
+        curve = reading.load(manifest, exp, model)
+        if curve is None:
             continue
-        style = shared.model_style(model)
-        ax.plot(
-            found.depth,
-            found.selectivity,
-            color=style.color,
-            ls=style.linestyle,
-            lw=1.0,
-            zorder=3,
-        )
-        at = found.layer - 1
-        ax.plot(
-            [found.depth[at]],
-            [found.selectivity[at]],
-            ls="none",
-            ms=3.5,
-            zorder=4,
-            **_marker_kwargs(model),
-        )
-        first = reading.first_depth_above(found, MARGIN)
-        if first is not None:
-            firsts.append(first)
-        for depth, value in zip(found.depth, found.selectivity, strict=True):
-            rows.append(
-                [
-                    f"depth {exp}",
-                    model,
-                    f"{depth:.6g}",
-                    f"{value:.6g}",
-                    "",
-                    "",
-                    "0",
-                ]
+        if concept == "sentiment":
+            at = reading.heldout_sentiment(manifest, model)
+        else:
+            at = reading.Score(
+                curve.layer,
+                curve.accuracy,
+                curve.random_at_layer,
+                params.eval_pairs(manifest, exp, model),
             )
-    shared.depth_axis(ax)
-    return firsts
+        if at is not None:
+            found[model] = Cell(curve, at)
+    return found
 
 
-def _size_panel(
-    ax: Axes,
-    manifest: Manifest,
-    exp: str,
-    slope: float,
-    rows: list[list[str]],
-) -> list[float]:
-    ax.axhline(0.5, color=paper.CHANCE, lw=0.5, zorder=1)
-    counts: list[float] = []
-    gpt2: list[tuple[float, float]] = []
-    accuracies: list[float] = []
-    for model in manifest.models(exp):
-        found = reading.load(manifest, exp, model)
-        if found is None:
-            continue
-        count = float(params.param_count(model))
-        counts.append(count)
-        style = shared.model_style(model)
+def _heat(
+    ax: Axes, cells: dict[str, Cell], rows: dict[str, float]
+) -> AxesImage:
+    image = None
+    for model, cell in cells.items():
+        y = rows[model]
+        margin = cell.curve.selectivity
+        image = ax.imshow(
+            margin[None, :],
+            extent=(0.0, 1.0, y + 0.5, y - 0.5),
+            aspect="auto",
+            cmap="cividis",
+            vmin=0.0,
+            vmax=VMAX,
+            interpolation="nearest",
+        )
+        count = cell.curve.n_layers
+        first = reading.first_depth_above(cell.curve, MARGIN)
+        if first is not None:
+            x = first - 0.5 / count
+            ax.plot([x, x], [y - 0.45, y + 0.45], color="white", lw=HALO)
+            ax.plot([x, x], [y - 0.45, y + 0.45], color=paper.INK, lw=TICK)
         ax.plot(
-            [count, count],
-            [found.lo, found.hi],
+            [(cell.at.layer - 0.5) / count],
+            [y],
+            ls="none",
+            marker="o",
+            ms=2.6,
+            mfc="white",
+            mec=paper.INK,
+            mew=0.6,
+        )
+    assert image is not None
+    return image
+
+
+def _math_minus(text: str) -> str:
+    """Sets the true minus of a label in mathtext, which the text font lacks."""
+    return text.replace(_cells.MINUS, f"${_cells.MINUS}$")
+
+
+def _size(
+    ax: Axes, cells: dict[str, Cell], trend: tuple[float, float, float]
+) -> None:
+    counts = [float(params.param_count(m)) for m in cells]
+    shared.ref_line(ax, 0.5, "y")
+    for model, cell in cells.items():
+        style = shared.model_style(model)
+        x = params.param_count(model) * 10 ** shared.role_dodge(model)
+        lo, hi = stats.wilson(cell.at.reader, cell.at.n)
+        ax.plot(
+            [x, x],
+            [cell.at.random, cell.at.reader],
+            color=paper.RANDOM_BAND,
+            lw=1.0,
+            zorder=1.5,
+        )
+        ax.plot(
+            [x, x],
+            [lo, hi],
             color=style.color,
-            lw=0.8,
+            lw=paper.WHISKER_WIDTH,
             zorder=3,
         )
         ax.plot(
-            [count],
-            [found.accuracy],
-            ls="none",
-            ms=4,
-            zorder=4,
-            **_marker_kwargs(model),
-        )
-        ax.plot(
-            [count],
-            [found.random_at_layer],
+            [x],
+            [cell.at.random],
             ls="none",
             marker="x",
-            ms=4,
+            ms=MARKER,
             mew=0.8,
-            color=paper.CHANCE,
+            color=paper.ENC["random_marker"],
             zorder=2,
         )
-        if model in GPT2:
-            gpt2.append((np.log10(count), found.accuracy))
-        accuracies.append(found.accuracy)
-        rows.append(
-            [
-                f"size {exp}",
-                model,
-                f"{count:.0f}",
-                f"{found.accuracy:.6g}",
-                f"{found.lo:.6g}",
-                f"{found.hi:.6g}",
-                f"{found.random_at_layer:.6g}",
-            ]
+        ax.plot(
+            [x],
+            [cell.at.reader],
+            ls="none",
+            marker="o",
+            ms=MARKER,
+            color=style.color,
+            mfc=style.color if style.filled else "white",
+            mew=0.8,
+            zorder=4,
         )
-    x = np.array([g[0] for g in gpt2])
-    y = np.array([g[1] for g in gpt2])
-    line = 10 ** np.array([x.min(), x.max()])
-    fit = y.mean() + slope * (np.array([x.min(), x.max()]) - x.mean())
-    ax.plot(line, fit, color=paper.INK, ls="--", lw=0.8, zorder=2)
+    slope, lo, hi = trend
+    gpt2 = [m for m in cells if stats.role(m) == "gpt2"]
+    if len(gpt2) >= MIN_TREND_SIZES:
+        logs = np.log10([params.param_count(m) for m in gpt2])
+        ys = np.array([cells[m].at.reader for m in gpt2])
+        ends = np.array([logs.min(), logs.max()])
+        ax.plot(
+            10**ends,
+            ys.mean() + slope * (ends - logs.mean()),
+            color=paper.INK,
+            ls=paper.LINESTYLES["trend"],
+            lw=paper.TREND_WIDTH,
+            zorder=2,
+        )
+        ax.set_title(
+            _math_minus(
+                f"GPT-2 trend\n{'+' if slope >= 0 else ''}"
+                f"{_cells.num(slope)} per decade\n"
+                f"[{_cells.num(lo)}, {_cells.num(hi)}]"
+            ),
+            fontsize=6.5,
+            loc="left",
+            x=0.0,
+            color=paper.INK,
+        )
     shared.size_axis(ax, counts, ticks=(1e8, 1e9))
-    ax.set_ylim(0.4, 1.0)
-    ax.set_yticks([0.5, 0.75, 1.0])
-    ax.set_yticklabels(["0.5", "0.75", "1"])
-    return accuracies
+    ax.set_xlabel("")
+    ax.set_ylim(0.45, 1.0)
+    shared.unit_axis(ax, "y")
 
 
-def _legend(fig: Figure, models: list[str]) -> None:
-    handles = []
-    for model in models:
-        style = shared.model_style(model)
-        handles.append(
-            Line2D(
-                [],
-                [],
-                color=style.color,
-                ls=style.linestyle,
-                lw=1.0,
-                ms=4,
-                **{
-                    k: v
-                    for k, v in _marker_kwargs(model).items()
-                    if k != "color"
-                },
-            )
-        )
-    handles.append(
-        Line2D([], [], color=paper.CHANCE, marker="x", ls="none", ms=4, mew=0.8)
+def _trend(cells: dict[str, Cell]) -> tuple[float, float, float]:
+    gpt2 = [m for m in cells if stats.role(m) == "gpt2"]
+    if len(gpt2) < MIN_TREND_SIZES:
+        return 0.0, 0.0, 0.0
+    return stats.ols_slope(
+        [float(np.log10(params.param_count(m))) for m in gpt2],
+        [cells[m].at.reader for m in gpt2],
     )
-    handles.append(Line2D([], [], color=paper.INK, ls="--", lw=0.8))
-    labels = [paper.display_name(m) for m in models]
-    labels += ["random direction", "GPT-2 trend"]
+
+
+def _numbers(
+    found: dict[str, dict[str, Cell]],
+    trends: dict[str, tuple[float, float, float]],
+) -> dict[str, float]:
+    numbers: dict[str, float] = {}
+    for concept, _, _ in CONCEPTS:
+        onsets = [
+            d
+            for c in found[concept].values()
+            if (d := reading.first_depth_above(c.curve, MARGIN)) is not None
+        ]
+        if onsets:
+            numbers[f"onset_{concept}_min"] = min(onsets)
+            numbers[f"onset_{concept}_max"] = max(onsets)
+        slope, lo, hi = trends[concept]
+        numbers[f"slope_{concept}"] = slope
+        numbers[f"slope_{concept}_lo"] = lo
+        numbers[f"slope_{concept}_hi"] = hi
+    numbers["n_gpt2"] = float(
+        sum(stats.role(m) == "gpt2" for m in found["truth"])
+    )
+    numbers["truth_n"] = next(iter(found["truth"].values())).at.n
+    return numbers
+
+
+def _sentence(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
+def _slope_text(numbers: dict[str, float], names: dict[str, str]) -> str:
+    rising, flat = [], []
+    for concept in names:
+        s = numbers[f"slope_{concept}"]
+        lo = numbers[f"slope_{concept}_lo"]
+        hi = numbers[f"slope_{concept}_hi"]
+        if lo > 0:
+            rising.append(
+                f"{_cells.num(s)} for {concept} "
+                f"({_cells.num(lo)} to {_cells.num(hi)})"
+            )
+        else:
+            flat.append(
+                f"the {concept} slope ({_cells.num(s)}, {_cells.num(lo)} to "
+                f"{_cells.num(hi)})"
+            )
+    parts = []
+    if rising:
+        parts.append(
+            f"across the {int(numbers['n_gpt2'])} GPT-2 sizes accuracy "
+            "rises by "
+            + " and ".join(rising)
+            + " per tenfold in parameters (95 percent intervals)"
+        )
+    if flat:
+        verb = "has an interval" if len(flat) == 1 else "have intervals"
+        include = "includes" if len(flat) == 1 else "include"
+        parts.append(" and ".join(flat) + f" {verb} that {include} zero")
+    return "; ".join(parts)
+
+
+def _claim(numbers: dict[str, float], names: dict[str, str]) -> str:
+    spans = [
+        f"{numbers[f'onset_{c}_min']:.3f} to {numbers[f'onset_{c}_max']:.3f} "
+        f"of the depth for {c}"
+        for c in names
+        if f"onset_{c}_min" in numbers
+    ]
+    return (
+        "Where and how well a concept is read. The margin of the reader "
+        "over a random direction reaches 0.1 at "
+        + ", ".join(spans[:-1])
+        + " and "
+        + spans[-1]
+        + "."
+    )
+
+
+def _detail(
+    found: dict[str, dict[str, Cell]],
+    numbers: dict[str, float],
+    names: dict[str, str],
+) -> str:
+    sizes = {c: next(iter(found[c].values())).at.n for c in names}
+    gpt2_truth = [
+        stats.diff_interval(c.at.reader, c.at.random, c.at.n)[1]
+        for m, c in found["truth"].items()
+        if stats.role(m) == "gpt2"
+    ]
+    tail = ""
+    if gpt2_truth and all(lo <= 0 for lo in gpt2_truth):
+        tail = (
+            f", and on GPT-2 the truth reader is not separable from its "
+            f"random direction at {sizes['truth']} test pairs (Figure 1, "
+            "row 3)"
+        )
+    return (
+        "(a to d) Reader accuracy minus random-direction accuracy at every "
+        "layer, one row per checkpoint; the black tick marks the lowest layer "
+        "where the margin exceeds 0.1 and the circle the layer read in (e "
+        "to h), chosen on a validation split (sentiment: on the select "
+        "split of the sample-size run). (e to h) Held-out accuracy at that "
+        "layer against the number of parameters, with the random direction "
+        "at the same layer (grey x) and 95 percent Wilson intervals for the "
+        f"test pairs ({sizes['sentiment']:,} sentiment pairs from the "
+        f"sample-size run at 64 training pairs, {sizes['utility']:,} "
+        f"utility, {sizes['morality']:,} morality and {sizes['truth']:,} "
+        "truth pairs). " + _sentence(_slope_text(numbers, names)) + tail + "."
+    )
+
+
+def _csv(found: dict[str, dict[str, Cell]]) -> str:
+    lines = ["panel,concept,model,x,y,lo,hi,baseline"]
+    for concept, _, _ in CONCEPTS:
+        for model, cell in found[concept].items():
+            for depth, value in zip(
+                cell.curve.depth, cell.curve.selectivity, strict=True
+            ):
+                lines.append(
+                    f"depth,{concept},{model},{depth:.10g},{value:.10g},,,"
+                )
+            lo, hi = stats.wilson(cell.at.reader, cell.at.n)
+            lines.append(
+                f"size,{concept},{model},{params.param_count(model)},"
+                f"{cell.at.reader:.10g},{lo:.10g},{hi:.10g},"
+                f"{cell.at.random:.10g}"
+            )
+    return "\n".join(lines) + "\n"
+
+
+def _keys(fig: Figure) -> None:
+    handles = [
+        Line2D([], [], color=paper.INK, lw=TICK),
+        Line2D(
+            [],
+            [],
+            ls="none",
+            marker="o",
+            ms=2.6,
+            mfc="white",
+            mec=paper.INK,
+            mew=0.6,
+        ),
+    ]
     fig.legend(
         handles,
-        labels,
-        loc="outside upper center",
-        ncol=4,
+        ["lowest layer above 0.1", "layer read below"],
+        loc="outside upper right",
+        ncol=2,
         frameon=False,
-        fontsize=paper.TICK,
-        handlelength=2.0,
-        columnspacing=1.2,
-    )
-
-
-def _claim(numbers: dict[str, float]) -> str:
-    n = numbers
-    trend = n["slope_r7"]
-    fall = "falls" if trend < 0 else "rises"
-    return (
-        "A sentiment reader beats a random direction by more than "
-        f"{MARGIN:.1f} by {n['r1_depth_max']:.2f} of the depth in every "
-        f"model, morality needs {n['r3_depth_min']:.2f} to "
-        f"{n['r3_depth_max']:.2f} and truth {n['r7_depth_min']:.2f} to "
-        f"{n['r7_depth_max']:.2f}; across the GPT-2 sizes accuracy rises by "
-        f"{n['slope_r1']:.3f} per tenfold in parameters for sentiment and "
-        f"{n['slope_r3']:.3f} for morality, and {fall} by "
-        f"{abs(trend):.3f} for truth."
+        fontsize=6.5,
+        columnspacing=1.0,
+        handlelength=1.2,
     )
 
 
@@ -229,59 +365,62 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    slopes = _slopes(manifest)
-    rows: list[list[str]] = []
-    firsts: dict[str, list[float]] = {}
-    models = manifest.models("r1")
-    with paper.paper_style():
-        fig = Figure(figsize=(paper.FULL_WIDTH, 4.9), layout="constrained")
-        grid = fig.add_gridspec(2, 12, height_ratios=[1, 1])
-        letters = iter("abcdefg")
-        top_axes = []
-        for i, (exp, title) in enumerate(DEPTH_PANELS):
-            ax = fig.add_subplot(grid[0, 4 * i : 4 * i + 4])
-            firsts[exp] = _depth_panel(ax, manifest, exp, rows)
-            ax.set_title(title, fontsize=paper.TITLE, x=0.06)
-            paper.panel_letter(ax, next(letters))
-            top_axes.append(ax)
-        top_axes[0].set_ylabel("selectivity")
-        low = min(ax.get_ylim()[0] for ax in top_axes)
-        high = max(ax.get_ylim()[1] for ax in top_axes)
-        for ax in top_axes:
-            ax.set_ylim(low, high)
-        for i, (exp, title) in enumerate(SIZE_PANELS):
-            ax = fig.add_subplot(grid[1, 3 * i : 3 * i + 3])
-            _size_panel(ax, manifest, exp, slopes[exp], rows)
-            ax.set_title(title, fontsize=paper.TITLE, x=0.06)
-            paper.panel_letter(ax, next(letters))
-            if i == 0:
-                ax.set_ylabel("accuracy")
-        _legend(fig, models)
-    numbers = {
-        "r1_depth_max": max(firsts["r1"]),
-        "r3_depth_min": min(firsts["r3"]),
-        "r3_depth_max": max(firsts["r3"]),
-        "r7_depth_min": min(firsts["r7"]),
-        "r7_depth_max": max(firsts["r7"]),
-        "slope_r1": slopes["r1"],
-        "slope_r3": slopes["r3"],
-        "slope_r7": slopes["r7"],
-    }
-    detail = (
-        "Top: selectivity, the reader's accuracy minus a random direction "
-        "of the same run at the same layer, against relative depth (layer "
-        "over layer count); the dot marks the layer chosen on validation "
-        "data and the grey line is zero. "
-        "Bottom: accuracy at that layer against parameter count; whiskers "
-        "are 95 percent intervals, grey crosses the random direction at the "
-        "same layer, the dashed line the least squares trend over the four "
-        "GPT-2 sizes with the slope P6 stores. Filled symbols are GPT-2 and "
-        "Qwen3 base models, open dashed ones post-trained models; the two "
-        "kinds are never pooled."
+    found = {c: _cells_of(manifest, c, exp) for c, _, exp in CONCEPTS}
+    names = {c: label for c, label, _ in CONCEPTS}
+    trends = {c: _trend(found[c]) for c in names}
+    numbers = _numbers(found, trends)
+    models = sorted(
+        {m for cells in found.values() for m in cells}, key=store.model_rank
     )
-    return FigureOutput(fig, _claim(numbers), detail, numbers, _csv(rows))
-
-
-def _csv(rows: list[list[str]]) -> str:
-    header = "panel,model,x,y,lo,hi,baseline"
-    return "\n".join([header, *(",".join(r) for r in rows)]) + "\n"
+    rows = shared.model_rows(models)
+    with paper.paper_style():
+        fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
+        grid = fig.add_gridspec(2, 4, height_ratios=[2.0, 1.35])
+        image = None
+        tops = []
+        for col, (concept, label, _) in enumerate(CONCEPTS):
+            top = fig.add_subplot(grid[0, col])
+            bottom = fig.add_subplot(grid[1, col])
+            tops.append(top)
+            image = _heat(top, found[concept], rows)
+            top.set_ylim(max(rows.values()) + 0.5, -0.5)
+            top.set_xlim(0.0, 1.0)
+            top.set_title(label, fontsize=paper.TITLE, loc="left", x=0.05)
+            top.set_xticks([0.0, 0.5, 1.0], ["0", "0.5", "1"])
+            top.set_xlabel("relative depth")
+            top.tick_params(axis="y", length=0)
+            if col == 0:
+                top.set_yticks(
+                    list(rows.values()),
+                    [paper.display_name(m) for m in rows],
+                    fontsize=6.5,
+                )
+            else:
+                top.set_yticks([])
+            paper.panel_letter(top, "abcd"[col])
+            _size(bottom, found[concept], trends[concept])
+            paper.panel_letter(bottom, "efgh"[col])
+            if col:
+                bottom.tick_params(labelleft=False)
+        assert image is not None
+        bar = fig.colorbar(
+            image,
+            ax=tops[0],
+            orientation="horizontal",
+            location="top",
+            fraction=0.05,
+            pad=0.04,
+            shrink=0.9,
+        )
+        _keys(fig)
+        bar.set_ticks([0.0, 0.1, 0.2, 0.3, 0.4])
+        bar.ax.tick_params(labelsize=6.5)
+        bar.set_label("reader minus random accuracy", fontsize=6.5)
+        bar.outline.set_linewidth(0.4)
+    return FigureOutput(
+        fig,
+        _claim(numbers, names),
+        _detail(found, numbers, names),
+        numbers,
+        _csv(found),
+    )
