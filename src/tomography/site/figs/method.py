@@ -1,89 +1,183 @@
-"""Figure 1: Method schematic.
+"""Figure 2: the recipe, from a pair of inputs to a reading and a steering.
 
-Stimulus pairs go through a model, a direction is found in the residual
-stream, and the same unit direction is used to read a concept and to steer
-with `h' = h + c r v`, where `r` is the mean residual norm at the layer (the
-`relative` coefficient mode). A random unit direction is the baseline of both.
+Five stages from left to right joined by straight arrows: a pair of inputs,
+the residual stream at the last token, a finder that turns activations into a
+unit direction, a pairwise reading, and steering by addition. A random unit
+direction is drawn as the baseline of the reading. The figure reads no results.
 """
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import FancyArrowPatch
 from matplotlib.patches import FancyBboxPatch
+from matplotlib.patches import Rectangle
+import numpy as np
 
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.viz import paper
 
 WIDTH = 5.5
-HEIGHT = 2.5
+HEIGHT = 2.1
+TEXT = 6.5
+TITLE_SIZE = 7.5
+EQUATION_SIZE = 7.5
+ELL = chr(0x2113)
 STEER = r"$h'_\ell = h_\ell + c\,r_\ell\,v_\ell$"
+INK = paper.INK
+GREY = paper.ENC["secondary_text"]
+TITLE_Y = 0.97
+BODY_TOP = 0.74
+ARROWS = ((0.17, 0.20), (0.30, 0.39), (0.595, 0.62), (0.795, 0.82))
 
 
-def _box(
+def _title(ax: Axes, x: float, text: str) -> None:
+    ax.text(
+        x,
+        TITLE_Y,
+        text,
+        ha="left",
+        va="top",
+        fontsize=TITLE_SIZE,
+        color=INK,
+        linespacing=1.2,
+    )
+
+
+def _text(
     ax: Axes,
     x: float,
     y: float,
-    w: float,
-    h: float,
     text: str,
     *,
-    dashed: bool = False,
-    letter: str = "",
+    color: str = INK,
+    ha: str = "left",
+    size: float = TEXT,
 ) -> None:
-    color = paper.CHANCE if dashed else paper.INK
-    ax.add_patch(
-        FancyBboxPatch(
-            (x, y),
-            w,
-            h,
-            boxstyle="round,pad=0,rounding_size=0.012",
-            fc="white",
-            ec=color,
-            lw=0.7,
-            ls="--" if dashed else "-",
-        )
-    )
     ax.text(
-        x + w / 2,
-        y + h / 2,
+        x,
+        y,
         text,
-        ha="center",
-        va="center",
-        fontsize=paper.TICK,
+        ha=ha,
+        va="top",
+        fontsize=size,
         color=color,
-        linespacing=1.35,
+        linespacing=1.3,
     )
-    if letter:
-        ax.text(
-            x,
-            y + h + 0.015,
-            rf"$\mathbf{{({letter})}}$",
-            ha="left",
-            va="bottom",
-            fontsize=paper.LETTER,
-        )
 
 
-def _arrow(
-    ax: Axes,
-    start: tuple[float, float],
-    end: tuple[float, float],
-    *,
-    dashed: bool = False,
-) -> None:
+def _arrow(ax: Axes, x0: float, x1: float, y: float) -> None:
     ax.add_patch(
         FancyArrowPatch(
-            start,
-            end,
+            (x0, y),
+            (x1, y),
             arrowstyle="-|>",
             mutation_scale=7,
             lw=0.7,
-            color=paper.CHANCE if dashed else paper.INK,
-            ls="--" if dashed else "-",
+            color=INK,
             shrinkA=0,
             shrinkB=0,
         )
+    )
+
+
+def _pair(ax: Axes) -> None:
+    _title(ax, 0.01, "pair")
+    ax.add_patch(
+        FancyBboxPatch(
+            (0.01, 0.40),
+            0.155,
+            0.30,
+            boxstyle="round,pad=0,rounding_size=0.012",
+            fc="white",
+            ec=INK,
+            lw=0.6,
+        )
+    )
+    _text(ax, 0.02, 0.66, "a positive input")
+    _text(ax, 0.02, 0.52, "a negative input")
+    ax.plot([0.145], [0.40], marker="^", ms=3.5, color=INK, clip_on=False)
+    _text(ax, 0.0875, 0.35, "last token", ha="center", color=GREY)
+
+
+def _stream(ax: Axes) -> None:
+    _title(ax, 0.205, "residual stream\nat layer $\\ell$")
+    for i in range(5):
+        y = BODY_TOP - 0.10 * (i + 1)
+        ax.add_patch(
+            Rectangle(
+                (0.225, y),
+                0.07,
+                0.10,
+                fc=INK if i == 4 else "white",
+                ec=INK,
+                lw=0.6,
+            )
+        )
+    _text(ax, 0.26, 0.20, "last token", ha="center", color=GREY)
+
+
+def _finder(ax: Axes) -> None:
+    _title(ax, 0.395, "find a unit direction")
+    lines = (
+        (0.66, paper.ENC["paper"], "PCA of paired\ndifferences (paper)"),
+        (0.46, INK, "logistic regression"),
+        (
+            0.30,
+            paper.ENC["random_marker"],
+            "random unit\ndirection $u$\n(baseline)",
+        ),
+    )
+    for y, color, text in lines:
+        ax.plot([0.405], [y - 0.025], ls="none", marker="s", ms=4, color=color)
+        _text(ax, 0.42, y, text)
+
+
+def _read(ax: Axes) -> None:
+    _title(ax, 0.625, "read")
+    inset = ax.inset_axes((0.625, 0.40, 0.165, 0.34))
+    inset.axis("off")
+    x = np.linspace(-3.0, 5.0, 200)
+
+    def density(mean: float) -> np.ndarray:
+        return np.asarray(np.exp(-0.5 * ((x - mean) / 0.6) ** 2))
+
+    for lift, gap, face, edge in (
+        (1.15, 3.2, INK, INK),
+        (0.0, 0.5, paper.ENC["random_band"], paper.ENC["reference"]),
+    ):
+        inset.fill_between(
+            x, lift, lift + density(gap), fc=face, ec=edge, lw=0.6
+        )
+        inset.plot(x, lift + density(0.0), color=edge, lw=0.6)
+    inset.set_xlim(-3.0, 5.0)
+    inset.set_ylim(-0.05, 2.25)
+    inset.text(-3.0, 1.9, "$v$", fontsize=TEXT, color=INK, va="center")
+    inset.text(-3.0, 0.75, "$u$", fontsize=TEXT, color=INK, va="center")
+    _text(
+        ax,
+        0.625,
+        0.34,
+        "a pair is read\ncorrectly when its\npositive member"
+        "\nprojects higher\non $v$",
+    )
+
+
+def _steer(ax: Axes) -> None:
+    _title(ax, 0.825, "steer")
+    _text(ax, 0.825, 0.69, STEER, size=EQUATION_SIZE)
+    _text(
+        ax,
+        0.825,
+        0.57,
+        "$c$: relative\ncoefficient,\n$r_\\ell$: mean residual\n"
+        "norm at layer $\\ell$",
+    )
+    _text(
+        ax,
+        0.825,
+        0.31,
+        "added at the\nresponse positions\nof 3 consecutive\nlayers",
     )
 
 
@@ -103,84 +197,23 @@ def build(manifest: Manifest) -> FigureOutput:
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.axis("off")
-        _box(
-            ax,
-            0.01,
-            0.40,
-            0.19,
-            0.38,
-            "pairs of\ncontrasting\nstimuli",
-            letter="a",
-        )
-        _box(
-            ax,
-            0.26,
-            0.40,
-            0.20,
-            0.38,
-            "residual stream\n$h_\\ell$ at the\nlast token",
-            letter="b",
-        )
-        _box(
-            ax,
-            0.52,
-            0.40,
-            0.21,
-            0.38,
-            "direction $v_\\ell$,\nunit norm; PCA,\nmean difference,\nlogistic",
-            letter="c",
-        )
-        _box(
-            ax,
-            0.79,
-            0.62,
-            0.20,
-            0.30,
-            "read: score $h_\\ell\\cdot v_\\ell$\nagainst a threshold",
-            letter="d",
-        )
-        _box(
-            ax,
-            0.79,
-            0.18,
-            0.20,
-            0.30,
-            "steer:\n" + STEER,
-            letter="e",
-        )
-        _box(
-            ax,
-            0.52,
-            0.04,
-            0.21,
-            0.22,
-            "random unit direction\n(baseline of both)",
-            dashed=True,
-            letter="f",
-        )
-        _arrow(ax, (0.20, 0.59), (0.26, 0.59))
-        _arrow(ax, (0.46, 0.59), (0.52, 0.59))
-        _arrow(ax, (0.73, 0.64), (0.79, 0.77))
-        _arrow(ax, (0.73, 0.54), (0.79, 0.35))
-        _arrow(ax, (0.73, 0.15), (0.79, 0.20), dashed=True)
-        _arrow(ax, (0.73, 0.19), (0.79, 0.68), dashed=True)
-        ax.text(
-            0.89,
-            0.06,
-            "$r_\\ell$: mean residual norm\nat layer $\\ell$; $c$: strength",
-            ha="center",
-            va="center",
-            fontsize=paper.TICK,
-        )
-    claim = (
-        "The same unit direction found in the residual stream of a model is "
-        "used to read a concept and to steer with it, and a random unit "
-        "direction is the baseline of both."
-    )
+        _pair(ax)
+        _stream(ax)
+        _finder(ax)
+        _read(ax)
+        _steer(ax)
+        for x0, x1 in ARROWS:
+            _arrow(ax, x0, x1, 0.55)
+    claim = "The recipe: find a direction, read with it, and steer with it."
     detail = (
-        "Boxes (a) to (c) find the direction; (d) reads it by the score of "
-        "the residual stream along it, and (e) adds it to the residual stream "
-        "with a coefficient proportional to the mean residual norm of the "
-        "layer. The dashed box is the baseline used in every comparison."
+        "A pair of inputs that differ in the concept is passed through the "
+        "model; a finder turns the residual-stream activations of the last "
+        f"token at layer {ELL} into a unit direction v; a pair is read "
+        "correctly when its positive member projects higher on v, so a "
+        "constant score sits at 0.5; steering adds c r v to the residual "
+        "stream. A random unit direction, oriented on the training pairs "
+        "like the reader, is the baseline of the readings, next to "
+        "classifiers that see only the text where the wording can reveal "
+        "the label. The densities in the read stage are illustrative."
     )
     return FigureOutput(fig, claim, detail, {}, "")
