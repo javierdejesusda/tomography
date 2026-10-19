@@ -26,7 +26,7 @@ KEYS = (
     "a_finders_qwen3",
     "a_wording",
 )
-FILL_KEYS = ("teaser", "finders", "reading", "wording", "truth")
+FILL_KEYS = ("teaser", "finders", "reading", "truth")
 
 
 def _pattern(style: Any) -> Any:
@@ -64,11 +64,14 @@ def _lines(fig: Figure) -> list[Line2D]:
     return found
 
 
+SEGMENT_KEYS = {"|", "_"}
+
+
 def _markers(fig: Figure) -> set[str]:
     return {
         str(ln.get_marker())
         for ln in _lines(fig)
-        if str(ln.get_marker()) not in ("None", "", " ")
+        if str(ln.get_marker()) not in ("None", "", " ", *SEGMENT_KEYS)
     }
 
 
@@ -140,16 +143,6 @@ def test_the_gpt2_curves_have_no_post_trained_style(
     assert POST not in styles
 
 
-def test_figure_5_marks_the_kind_of_change_with_the_variant_markers(
-    built: dict[str, registry.FigureOutput],
-) -> None:
-    marks = _markers(built["wording"].figure)
-    assert set(paper.VARIANT_MARKERS.values()) <= marks
-    assert marks <= set(paper.VARIANT_MARKERS.values()) | {
-        paper.ROLE_KEY_MARKER
-    }
-
-
 def test_figure_6_marks_the_statement_sets_with_the_set_markers(
     built: dict[str, registry.FigureOutput],
 ) -> None:
@@ -159,7 +152,7 @@ def test_figure_6_marks_the_statement_sets_with_the_set_markers(
         assert not _flatten(paper.MEASURE_MARKERS[measure]) & marks
 
 
-@pytest.mark.parametrize("key", ["wording", "truth"])
+@pytest.mark.parametrize("key", ["truth"])
 def test_the_star_is_drawn_at_the_shared_size(
     built: dict[str, registry.FigureOutput], key: str
 ) -> None:
@@ -171,3 +164,36 @@ def test_the_star_is_drawn_at_the_shared_size(
     }
     assert sizes
     assert min(sizes) >= rowkit.STAR_SIZE
+
+
+@pytest.mark.parametrize("key", ["reading", "wording"])
+def test_a_redesigned_figure_uses_at_most_six_shapes(
+    built: dict[str, registry.FigureOutput], key: str
+) -> None:
+    assert len(_markers(built[key].figure)) <= 6
+
+
+@pytest.mark.parametrize("key", ["reading", "wording"])
+def test_figures_4_and_5_use_no_category_shapes(
+    built: dict[str, registry.FigureOutput], key: str
+) -> None:
+    marks = _markers(built[key].figure)
+    assert not marks & set(paper.CATEGORY_MARKERS)
+    assert not marks & (MEASURES - {"o", "D", "x"})
+
+
+def test_figure_4_draws_only_circles_and_the_role_key(
+    built: dict[str, registry.FigureOutput],
+) -> None:
+    marks = _markers(built["reading"].figure)
+    assert marks == {paper.MEASURE_MARKERS["direction"], paper.ROLE_KEY_MARKER}
+
+
+def test_figure_5_draws_circles_a_diamond_and_the_role_free_rows(
+    built: dict[str, registry.FigureOutput],
+) -> None:
+    marks = _markers(built["wording"].figure)
+    assert marks == {
+        paper.MEASURE_MARKERS["direction"],
+        paper.MEASURE_MARKERS["paper_finder"],
+    }
