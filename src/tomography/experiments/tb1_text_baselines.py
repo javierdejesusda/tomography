@@ -8,6 +8,10 @@ scored on the reader's own test pairs, one fit per training set of the reader.
 No model is loaded: the statements, the pairs and the seeds do not depend on
 the checkpoint, because the chat format only changes how a statement is
 rendered and never which statements are drawn.
+
+The interval of a baseline covers the sampling of the test pairs only. The
+variation between training sets is not in it; `seed_min` and `seed_max` of the
+table carry it.
 """
 
 from collections.abc import Callable
@@ -74,7 +78,19 @@ COLUMNS: tuple[str, ...] = (
     "seed_min",
     "seed_max",
 )
+# The P3 training size the results site reports (site/reading.py reads the
+# sizes == 64 column).
 P3_TRAIN_PAIRS = 64
+_DATASET: Mapping[str, str] = {
+    "sentiment": "sst2",
+    "sentiment_r1": "sst2",
+    "utility": "ethics_utility",
+    "morality": "ethics_morality",
+    "truth": "facts",
+    "honesty": "facts",
+    "truth_p3": "facts",
+    "utility_p3": "ethics_utility",
+}
 _RAW = ConceptTemplate("raw", "{stimulus}", tagged=False)
 _CHAT = ChatFormat("none")
 
@@ -158,13 +174,18 @@ def _text_set(stimuli: StimulusSet, text_of: Mapping[str, str]) -> TextSet:
     )
 
 
+def _nonempty(
+    concept: str, rows: Sequence[Example], split: str
+) -> list[Example]:
+    if not rows:
+        raise ValueError(f"concept {concept!r} has no examples in {split}")
+    return list(rows)
+
+
 def _part(
     concept: str, examples: Sequence[Example], split: str
 ) -> list[Example]:
-    rows = [e for e in examples if e.split == split]
-    if not rows:
-        raise ValueError(f"concept {concept!r} has no examples in {split}")
-    return rows
+    return _nonempty(concept, [e for e in examples if e.split == split], split)
 
 
 def _pair(
@@ -247,15 +268,16 @@ def _r1(
 ) -> ConceptItems:
     reader = r1_sentiment.Config()
     examples = _dataset(concept, sources, "sst2")
-    train = r1_sentiment.select_examples(
-        examples, split="train", min_words=reader.min_words
+    train, val = (
+        _nonempty(
+            concept,
+            r1_sentiment.select_examples(
+                examples, split=split, min_words=reader.min_words
+            ),
+            split,
+        )
+        for split in ("train", "val")
     )
-    val = r1_sentiment.select_examples(
-        examples, split="val", min_words=reader.min_words
-    )
-    for name, rows in (("train", train), ("val", val)):
-        if not rows:
-            raise ValueError(f"concept {concept!r} has no examples in {name}")
     return _items(
         concept,
         "r1",
@@ -523,17 +545,7 @@ def interval(accuracy: float, n: int) -> tuple[float, float]:
 
 
 def _needed(concepts: Sequence[str]) -> list[str]:
-    needs = {
-        "sentiment": "sst2",
-        "sentiment_r1": "sst2",
-        "utility": "ethics_utility",
-        "morality": "ethics_morality",
-        "truth": "facts",
-        "honesty": "facts",
-        "truth_p3": "facts",
-        "utility_p3": "ethics_utility",
-    }
-    return list(dict.fromkeys(needs[c] for c in concepts))
+    return list(dict.fromkeys(_DATASET[c] for c in concepts))
 
 
 def execute(
