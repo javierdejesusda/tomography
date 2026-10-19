@@ -129,3 +129,32 @@ def test_the_figure_is_5_5_by_2_1_inches(
 
 def test_no_layout_faults(output: registry.FigureOutput) -> None:
     assert checks.problems(output.figure) == []
+
+
+def test_no_marker_sits_on_a_box_outline(
+    output: registry.FigureOutput,
+) -> None:
+    from matplotlib.patches import FancyBboxPatch
+
+    ax = output.figure.axes[0]
+    boxes = [p for p in ax.patches if isinstance(p, FancyBboxPatch)]
+    assert boxes
+    for line in ax.lines:
+        if line.get_marker() in ("None", "", None):
+            continue
+        for x, y in zip(line.get_xdata(), line.get_ydata(), strict=True):
+            for box in boxes:
+                x0, y0 = box.get_x(), box.get_y()
+                x1, y1 = x0 + box.get_width(), y0 + box.get_height()
+                inside = (
+                    x0 - 0.02 <= x <= x1 + 0.02 and y0 - 0.02 <= y <= y1 + 0.02
+                )
+                clear = x0 + 0.02 < x < x1 - 0.02 and y0 + 0.02 < y < y1 - 0.02
+                assert not inside or clear, (x, y)
+
+
+def test_each_density_is_stroked_once(output: registry.FigureOutput) -> None:
+    inset = output.figure.axes[0].child_axes[0]
+    assert inset.collections
+    for fill in inset.collections:
+        assert fill.get_linewidth()[0] == 0

@@ -59,7 +59,9 @@ DETAIL = (
     "same norm on unknown "
     "questions (grey), with 95 percent intervals that resample the "
     "questions. (b) The same for the abstention rate of post-trained "
-    "checkpoints, with a few-shot and a concept prompt. The direction moves "
+    "checkpoints, with a few-shot and a concept prompt. Rows run in "
+    "checkpoint size within each group; GPT-2 small has no run. The "
+    "direction moves "
     "unknown questions more than each of the 3 random directions on "
     "{distinguishable}, and more than known questions on {selective}, by "
     "the gap between the absolute mean slopes over the coefficient grid, "
@@ -229,7 +231,7 @@ def direction_keys() -> tuple[list[Any], list[str]]:
 
 
 def _layout(runs: list[Run]) -> tuple[list[Run], list[float]]:
-    """Orders the rows by block, then by the direction's slope, and places them.
+    """Keeps the rows in checkpoint order within each block and places them.
 
     Args:
         runs: The runs of one forest in checkpoint order.
@@ -243,7 +245,6 @@ def _layout(runs: list[Run]) -> tuple[list[Run], list[float]]:
     ordered: list[Run] = []
     positions: list[float] = []
     for rows in blocks.values():
-        rows.sort(key=lambda r: float(r.head["lat_slope"]))
         for i, run in enumerate(rows):
             if not positions:
                 positions.append(0.0)
@@ -351,6 +352,7 @@ def draw_curves(
     curves: tuple[list[str], dict[str, np.ndarray]],
     letter: str,
     csv_rows: list[list[Any]],
+    tint: str | None = None,
 ) -> None:
     """Draws known, unknown and pooled random dose curves on a panel.
 
@@ -361,6 +363,7 @@ def draw_curves(
         curves: Series names and the stored arrays `x`, `mean`, `lo`, `hi`.
         letter: Panel letter written to the data rows.
         csv_rows: Receives one row per curve point.
+        tint: Colour of the direction intervals; they are a pale ink when None.
     """
     names, arrays = curves
     x = arrays["x"]
@@ -392,8 +395,8 @@ def draw_curves(
             x,
             arrays["lo"][k],
             arrays["hi"][k],
-            color=paper.INK,
-            alpha=0.15,
+            color=tint or paper.INK,
+            alpha=0.2 if tint else 0.15,
             lw=0,
             zorder=2,
         )
@@ -432,7 +435,11 @@ def draw_curves(
 
 
 def draw_dose(
-    ax: Axes, run: Run, letter: str, csv_rows: list[list[Any]]
+    ax: Axes,
+    run: Run,
+    letter: str,
+    csv_rows: list[list[Any]],
+    tint: str | None = None,
 ) -> None:
     """Draws the stored dose curves of one run on a panel.
 
@@ -441,8 +448,9 @@ def draw_dose(
         run: The run.
         letter: Panel letter written to the data rows.
         csv_rows: Receives one row per curve point.
+        tint: Colour of the direction intervals; a pale ink when None.
     """
-    draw_curves(ax, run.model, run.label, run.curves(), letter, csv_rows)
+    draw_curves(ax, run.model, run.label, run.curves(), letter, csv_rows, tint)
     ax.set_ylabel("entropy shift" if run.entropy else "abstention rate")
     if run.entropy:
         axes.ref_line(ax, 0.0)

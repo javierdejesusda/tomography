@@ -38,8 +38,8 @@ LABELS = {
     "truth": "truth",
     "honesty": "honesty, transfer",
     "truthfulqa": "TruthfulQA",
-    "knowledge": "knowledge",
-    "steering": "steering",
+    "knowledge": "knowledge, AUROC",
+    "steering": "steering, win rate",
 }
 OTHER = ("utility", "morality", "truth", "honesty", "truthfulqa")
 
@@ -481,6 +481,9 @@ def test_the_key_names_the_fill_and_the_two_interval_kinds(
         "interval includes zero",
         "seed-paired interval",
         "conservative interval",
+        "0.6B",
+        "1.7B",
+        "4B",
     ]
 
 
@@ -507,14 +510,7 @@ def test_rows_are_grouped_by_section_with_a_label_and_a_separator(
         for row in rows:
             if SECTIONS[row] not in order:
                 order.append(SECTIONS[row])
-        want = [
-            section
-            for section in order
-            if not (
-                [SECTIONS[r] for r in rows].count(section) == 1
-                and section in [LABELS[r] for r in rows]
-            )
-        ]
+        want = [s for s in order if s == "reading accuracy"]
         groups = sorted(
             (t for t in ax.texts if t.get_gid() == "group"),
             key=lambda t: t.get_position()[1],
@@ -532,8 +528,7 @@ def test_rows_are_grouped_by_section_with_a_label_and_a_separator(
             firsts.setdefault(SECTIONS[row], tick)
         for text in groups:
             assert text.get_position()[1] < firsts[text.get_text()] - 0.5
-        assert "knowledge" not in [t.get_text() for t in groups]
-        assert "steering" not in [t.get_text() for t in groups]
+        assert [t.get_text() for t in groups] == want
 
 
 def test_the_caption_has_at_most_200_words_and_leads_with_the_conclusion(
@@ -551,3 +546,37 @@ def test_a_value_that_rounds_to_zero_prints_without_a_sign() -> None:
     assert base_post._signed(-0.0004) == "0.000"
     assert base_post._signed(0.05) == "+0.050"
     assert base_post._signed(-0.05) == f"{minus}0.050"
+
+
+def test_both_panels_carry_the_x_label(output: registry.FigureOutput) -> None:
+    for ax in _panels(output):
+        assert ax.get_xlabel() == "post-trained minus base"
+
+
+def test_the_conservative_dash_is_plain_and_long_enough_to_read(
+    output: registry.FigureOutput,
+) -> None:
+    whiskers = [
+        ln
+        for ax in output.figure.axes
+        for ln in ax.lines
+        if ln.get_gid() == "whisker" and ln.get_linestyle() != "-"
+    ]
+    assert len(whiskers) == 16
+    for ln in whiskers:
+        _, pattern = ln._unscaled_dash_pattern
+        assert len(pattern) == 2
+        assert pattern[0] >= 5.0
+
+
+def test_the_size_key_runs_light_to_dark(output: registry.FigureOutput) -> None:
+    (legend,) = output.figure.legends
+    pairs = [
+        (t.get_text(), h.get_markerfacecolor())
+        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
+        if t.get_text() in ("0.6B", "1.7B", "4B")
+    ]
+    assert pairs == [
+        (label, axes.model_style(f"qwen3-{label.lower()}").color)
+        for label in ("0.6B", "1.7B", "4B")
+    ]

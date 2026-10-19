@@ -241,3 +241,22 @@ def test_the_x_labels_of_b_and_c_are_separate_two_line_labels(
     assert all(chr(10) in t.get_text() for t in labels)
     boxes = [t.get_window_extent() for t in labels]
     assert boxes[0].x1 + 6 < boxes[1].x0
+
+
+def test_the_random_ticks_are_thick_and_wide_enough_to_find(
+    output: registry.FigureOutput,
+) -> None:
+    random_ax = output.figure.axes[2]
+    ticks = [ln for ln in random_ax.lines if ln.get_gid() == "random"]
+    for ln in ticks:
+        assert ln.get_linewidth() >= 2.0
+        x = ln.get_xdata()
+        assert max(x) - min(x) >= 0.08
+    checks.draw(output.figure)
+    sizes = {
+        round(t.get_fontsize(), 1)
+        for ax in output.figure.axes
+        for t in [*ax.get_xticklabels(), *ax.get_yticklabels()]
+        if t.get_text()
+    }
+    assert min(sizes) >= paper.MIN_TEXT

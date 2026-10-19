@@ -399,7 +399,7 @@ def _tick_name(model: str, template: str) -> str:
     return SHORT.get(model, template.replace("fewshot", "few-shot"))
 
 
-def test_rows_have_two_level_labels_sorted_by_the_direction_slope(
+def test_rows_have_two_level_labels_in_checkpoint_order(
     output: registry.FigureOutput,
 ) -> None:
     checks.draw(output.figure)
@@ -410,23 +410,11 @@ def test_rows_have_two_level_labels_sorted_by_the_direction_slope(
             key=lambda t: t.get_position()[1],
         )
         assert [t.get_text() for t in blocks] == BLOCKS[letter]
-        ticks = list(zip(ax.get_yticks(), ax.get_yticklabels(), strict=True))
         metric = "entropy" if letter == "a" else "abstention"
         runs = [r for r in _runs() if _headline(*r)["metric"] == metric]
-        by_name = {}
-        for model, template in runs:
-            by_name.setdefault(_tick_name(model, template), []).append(
-                (model, template)
-            )
-        slopes: list[float] = []
-        for _, label in ticks:
-            found = by_name[label.get_text()]
-            slopes.append(_headline(*found[0])["lat_slope"])
-        assert len(slopes) == len(runs)
-        size = 3 if letter == "a" else 2
-        for start in range(0, len(slopes), size):
-            chunk = slopes[start : start + size]
-            assert chunk == sorted(chunk)
+        want = [_tick_name(model, template) for model, template in runs]
+        got = [t.get_text() for t in ax.get_yticklabels()]
+        assert got == want
 
 
 def test_each_row_says_how_many_random_directions_it_beats(
@@ -494,3 +482,10 @@ def test_the_key_and_the_caption_define_the_count_by_the_gap_interval(
     assert "random directions whose gap interval lies above zero" in keyed
     assert "interval of that gap lies above zero" in output.detail
     assert "at least as much as on unknown" in output.detail
+
+
+def test_the_caption_states_the_row_order_and_the_missing_gpt2_small(
+    output: registry.FigureOutput,
+) -> None:
+    assert "checkpoint size within each group" in output.detail
+    assert "GPT-2 small has no run" in output.detail

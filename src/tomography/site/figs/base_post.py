@@ -35,8 +35,8 @@ ROWS = (
     ("truth", "truth", "truth"),
     ("honesty", "honesty, transfer", "honesty transfer"),
     ("truthfulqa", "TruthfulQA", "TruthfulQA"),
-    ("knowledge", "knowledge", "knowledge AUROC"),
-    ("steering", "steering", "steering win rate"),
+    ("knowledge", "knowledge, AUROC", "knowledge AUROC"),
+    ("steering", "steering, win rate", "steering win rate"),
 )
 SECTIONS = {
     "sentiment": "reading accuracy",
@@ -49,6 +49,8 @@ SECTIONS = {
     "steering": "steering",
 }
 GROUP_GAP = 1
+LABELLED = frozenset({"reading accuracy"})
+CONSERVATIVE_DASH = (0, (6, 3))
 OTHER = ("utility", "morality", "truth", "honesty", "truthfulqa")
 PAIRED = {"r2": "utility", "r3": "morality", "r5": "honesty", "r7": "truth"}
 CLAIM = (
@@ -271,7 +273,7 @@ def _draw_row(
             [lo, hi],
             [y + offset] * 2,
             color=color,
-            ls="-" if kind == "paired" else paper.LINESTYLES["post_trained"],
+            ls="-" if kind == "paired" else CONSERVATIVE_DASH,
             lw=paper.WHISKER_WIDTH,
             solid_capstyle="butt",
             gid="whisker",
@@ -316,8 +318,7 @@ def _groups(
     ax: Any, rows: list[tuple[str, str, str]], ys: list[int], limit: float
 ) -> None:
     seen: list[str] = []
-    sections = [SECTIONS[key] for key, _, _ in rows]
-    for (key, label, _), y in zip(rows, ys, strict=True):
+    for (key, _, _), y in zip(rows, ys, strict=True):
         section = SECTIONS[key]
         if section in seen:
             continue
@@ -330,7 +331,7 @@ def _groups(
                 zorder=1,
             )
         seen.append(section)
-        if sections.count(section) == 1 and section == label:
+        if section not in LABELLED:
             continue
         ax.text(
             -limit * 0.98,
@@ -425,8 +426,21 @@ def _key(fig: Any) -> None:
             [],
             color=ink,
             lw=paper.WHISKER_WIDTH,
-            ls=paper.LINESTYLES["post_trained"],
+            ls=CONSERVATIVE_DASH,
             label="conservative interval",
+        ),
+        *(
+            Line2D(
+                [],
+                [],
+                marker=paper.SHAPES["direction"],
+                markerfacecolor=axes.model_style(f"qwen3-{size}").color,
+                markeredgecolor=axes.model_style(f"qwen3-{size}").color,
+                markersize=_rows.MARKER_SIZE,
+                ls="none",
+                label=size.upper(),
+            )
+            for size in axes.QWEN3_SIZES
         ),
     ]
     legend = fig.legend(
@@ -496,7 +510,8 @@ def build(manifest: Manifest) -> FigureOutput:
         _panel(bottom, wide, found, sizes, WIDE, "b", csv_rows)
         paper.panel_letter(top, "a")
         paper.panel_letter(bottom, "b")
-        bottom.set_xlabel("post-trained minus base")
+        for ax in (top, bottom):
+            ax.set_xlabel("post-trained minus base")
         _key(fig)
         _rows.freeze_layout(fig)
 
