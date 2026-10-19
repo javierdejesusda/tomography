@@ -335,3 +335,8 @@ def test_table_two_has_grouped_headers_with_a_muted_exploratory_group(
     assert len(re.findall(r"<tr", chunk.split("<tbody>")[1])) == 10
     assert 'class="group"' not in chunk
     assert chunk.count('<th class="r">LAT</th>') == 5
+
+
+def test_model_names_in_the_first_column_do_not_wrap() -> None:
+    css = (STATIC / "site.css").read_text("utf-8")
+    assert "td:first-child {\n  white-space: nowrap;\n}" in css

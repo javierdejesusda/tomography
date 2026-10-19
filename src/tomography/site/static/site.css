@@ -240,6 +240,10 @@ tbody tr.group td {
   border-top: 0.06em solid var(--ink);
 }
 
+td:first-child {
+  white-space: nowrap;
+}
+
 th,
 td {
   padding: 0.18em 0.7em;
