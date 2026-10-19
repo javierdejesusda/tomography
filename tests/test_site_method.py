@@ -191,3 +191,10 @@ def test_the_caret_is_a_filled_triangle_with_no_marker_edge(
     ]
     assert len(carets) == 1
     assert carets[0].get_markeredgewidth() == 0
+
+
+def test_the_caption_names_only_what_the_drawing_shows(
+    output: registry.FigureOutput,
+) -> None:
+    assert "classifier" not in output.detail
+    assert "random unit direction" in output.detail

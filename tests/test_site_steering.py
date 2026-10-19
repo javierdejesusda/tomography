@@ -639,3 +639,27 @@ def test_the_key_and_the_limit_labels_read_at_the_tick_size(
         ]
     assert sizes
     assert min(sizes) >= paper.TICK
+
+
+def test_limit_labels_keep_clear_of_every_marker(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    fig.canvas.draw()
+    pad = (paper.MARKER_SIZE / 2 + 1.5) * fig.dpi / 72
+    reach = 14 * fig.dpi / 72
+    checked = 0
+    for ax in fig.axes:
+        labels = [t for t in ax.texts if t.get_text().startswith("limit")]
+        for label in labels:
+            box = label.get_window_extent().expanded(1.0, 1.0)
+            for line in ax.lines:
+                if not line.get_marker() or line.get_marker() == "None":
+                    continue
+                for x, y in zip(*line.get_data(), strict=True):
+                    px, py = ax.transData.transform((x, y))
+                    near_x = box.x0 - pad <= px <= box.x1 + reach
+                    near_y = box.y0 - pad <= py <= box.y1 + pad
+                    assert not (near_x and near_y), (label.get_text(), x, y)
+            checked += 1
+    assert checked == 6

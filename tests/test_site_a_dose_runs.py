@@ -315,9 +315,16 @@ def test_the_direction_interval_is_tinted_and_named_in_the_key(
     labels = [t.get_text() for t in output.figure.legends[0].get_texts()]
     assert "interval of the direction (run colour)" in labels
     (legend,) = output.figure.legends
-    (patch,) = [h for h in legend.legend_handles if isinstance(h, Patch)]
-    face = np.asarray(patch.get_facecolor())[:3]
-    assert face.max() - face.min() < 0.02
+    swatches = [
+        p
+        for p in legend.findobj(Patch)
+        if p.get_alpha()
+        and p.get_facecolor()[3] > 0
+        and p is not legend.get_frame()
+    ]
+    chroma = [np.ptp(np.asarray(p.get_facecolor())[:3]) for p in swatches]
+    assert len(swatches) == 2
+    assert min(chroma) > 0.1
 
 
 def test_the_random_line_and_interval_swatch_in_the_key_are_dark_enough(
@@ -334,6 +341,9 @@ def test_the_random_line_and_interval_swatch_in_the_key_are_dark_enough(
         )
     )
     assert pairs["mean of 3 random directions"].get_linewidth() >= 1.5
-    swatch = pairs["interval of the direction (run colour)"]
-    assert isinstance(swatch, Patch)
-    assert swatch.get_alpha() >= 0.35
+    swatches = [
+        p
+        for p in legend.findobj(Patch)
+        if p.get_alpha() and p is not legend.get_frame()
+    ]
+    assert all(p.get_alpha() >= 0.35 for p in swatches)

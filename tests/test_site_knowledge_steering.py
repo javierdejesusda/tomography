@@ -285,8 +285,10 @@ def test_caption_is_the_template_filled_from_the_files(
     assert output.claim == (
         "Adding the knowledge direction moves unknown questions more than "
         "each of 3 random directions of the same norm on "
-        f"{_runs_text(dist)}, yet known questions move at least as much as "
-        f"unknown ones on {_runs_text(held)}."
+        f"{_runs_text(dist)}, yet by the largest shift of the mean dose "
+        "curve (c to e), which the slopes in (a, b) do not show, known "
+        f"questions move at least as much as unknown ones on "
+        f"{_runs_text(held)}."
     )
     assert "linear slope" not in output.detail
     assert all(dist[r].hits == dist[r].total for r in ("gpt2", "base"))
@@ -348,8 +350,8 @@ def test_caption_describes_the_grey_band_as_the_mean_of_the_random_arms(
     output: registry.FigureOutput,
 ) -> None:
     assert (
-        "the mean over the 3 random directions on unknown questions with its "
-        "95 percent interval that resamples the questions (grey band)"
+        "the mean of the 3 random directions on unknown questions with its "
+        "interval (grey band)"
     ) in output.detail
 
 

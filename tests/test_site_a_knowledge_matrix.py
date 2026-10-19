@@ -221,7 +221,8 @@ def test_the_caption_says_what_the_band_and_the_marks_mean(
     assert "0.020" in detail
     assert "best text classifier" in detail
     assert "filled" in detail
-    assert "grey tick" in detail
+    assert "grey bar" in detail
+    assert "grey tick" not in detail
     assert "(c)" in detail
 
 

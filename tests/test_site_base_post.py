@@ -38,8 +38,8 @@ LABELS = {
     "truth": "truth",
     "honesty": "honesty, transfer",
     "truthfulqa": "TruthfulQA",
-    "knowledge": "knowledge, AUROC",
-    "steering": "steering, win rate",
+    "knowledge": "knowledge",
+    "steering": "steering",
 }
 OTHER = ("utility", "morality", "truth", "honesty", "truthfulqa")
 
@@ -494,8 +494,8 @@ SECTIONS = {
     "truth": "reading accuracy",
     "honesty": "reading accuracy",
     "truthfulqa": "reading accuracy",
-    "knowledge": "knowledge",
-    "steering": "steering",
+    "knowledge": "knowledge AUROC",
+    "steering": "steering win rate",
 }
 
 
@@ -510,7 +510,7 @@ def test_rows_are_grouped_by_section_with_a_label_and_a_separator(
         for row in rows:
             if SECTIONS[row] not in order:
                 order.append(SECTIONS[row])
-        want = [s for s in order if s == "reading accuracy"]
+        want = order
         groups = sorted(
             (t for t in ax.texts if t.get_gid() == "group"),
             key=lambda t: t.get_position()[1],

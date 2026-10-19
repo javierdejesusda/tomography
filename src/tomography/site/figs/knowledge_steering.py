@@ -47,24 +47,24 @@ EXEMPLARS = (
 )
 CLAIM = (
     "Adding the knowledge direction moves unknown questions more than each "
-    "of 3 random directions of the same norm on {distinguishable}, yet "
-    "known questions move at least as much as unknown ones on {held}."
+    "of 3 random directions of the same norm on {distinguishable}, yet by "
+    "the largest shift of the mean dose curve (c to e), which the slopes in "
+    "(a, b) do not show, known questions move at least as much as unknown "
+    "ones on {held}."
 )
 DETAIL = (
-    "(a) Slope of the next-token entropy shift per unit relative "
-    "coefficient on unknown questions (circle) and known questions (left "
-    "triangle) of GPT-2 and base checkpoints, against 3 random directions "
-    "on unknown questions (grey crosses), with 95 percent "
-    "intervals that resample the questions. (b) The same for the abstention "
-    "rate of post-trained checkpoints, with a few-shot and a concept "
-    'prompt; the two outcomes differ and are never pooled. "above n of '
-    '3" counts the random directions that the direction beats. (c to e) '
-    "Dose curves of GPT-2 XL, Qwen3-4B-Base and Qwen3-4B (few-shot prompt) "
-    "against the mean over the 3 random directions on unknown questions "
-    "with its 95 percent interval that resamples the questions (grey "
-    "band) and the direction's interval (tint). Rows run by size; GPT-2 "
-    "small has no run. All runs: [[fig:a_dose_runs]]; by question type: "
-    "[[fig:a_dose_types]]."
+    "(a) Slope of the entropy shift per unit relative coefficient on "
+    "unknown questions (circle) and known questions (left triangle) of "
+    "GPT-2 and base checkpoints, against 3 random directions (grey "
+    "crosses), with 95 percent intervals that resample the questions. (b) "
+    "The same for the abstention rate of post-trained checkpoints "
+    "(few-shot and concept prompt); outcomes are never pooled. "
+    '"above n of 3" counts the random directions beaten. (c to e) Dose '
+    "curves of GPT-2 XL, Qwen3-4B-Base and Qwen3-4B (few-shot) against "
+    "the mean of the 3 random directions on unknown questions with its "
+    "interval (grey band) and the direction's interval (tint). Rows run by "
+    "size; GPT-2 small has no run. All runs: [[fig:a_dose_runs]]; by "
+    "question type: [[fig:a_dose_types]]."
 )
 APPENDIX_DETAIL = (
     "The direction moves unknown questions more than known questions on "
