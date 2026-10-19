@@ -14,14 +14,13 @@ from typing import Any
 
 from tomography.site import cells
 from tomography.site import runfiles
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
 from tomography.site.tables import _rows
 from tomography.viz import paper
 
 COEFF = 0.1
-MAX_RATIO = 1.5
-MIN_DISTINCT = 0.15
 SIGNS = (-COEFF, COEFF)
 SIGN_NAMES = (cells.MINUS + "0.1", "+0.1")
 GROUPS = (
@@ -108,7 +107,8 @@ def build(manifest: Manifest) -> TableOutput:
         f"means over the {n_vectors} steering vectors; the column at 0 and "
         "the two instruction columns are each a single run. "
         f"The fluency rule of [[fig:steering]] uses the neutral-text ratio "
-        f"(at most {MAX_RATIO}) and distinct-1 (at least {MIN_DISTINCT})."
+        f"(at most {stats.FLUENT_MAX_RATIO}) and distinct-1 "
+        f"(at least {stats.FLUENT_MIN_DISTINCT})."
     )
     return TableOutput(
         claim,

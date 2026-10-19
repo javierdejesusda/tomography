@@ -7,6 +7,7 @@ import runpy
 import pytest
 
 from tomography.site import registry
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.viz import paper
 
@@ -147,3 +148,14 @@ def test_caption_says_which_columns_are_means_and_which_single_runs(
     )
     assert "single run" in text
     assert "column at 0 and the two instruction columns" in text
+
+
+def test_the_caption_fluency_rule_comes_from_the_shared_constants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(stats, "FLUENT_MAX_RATIO", 1.25)
+    monkeypatch.setattr(stats, "FLUENT_MIN_DISTINCT", 0.2)
+    out = registry.build_table("steering", Manifest(ROOT))
+    caption = f"{out.claim} {out.detail}"
+    assert "(at most 1.25)" in caption
+    assert "(at least 0.2)" in caption

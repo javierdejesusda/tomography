@@ -61,3 +61,8 @@ def test_unknown_alignment_is_rejected() -> None:
     with pytest.raises(ValueError, match="alignment"):
         cells.check_align("lr", 3)
     assert cells.check_align("lr", 2) == "lr"
+
+
+def test_csv_text_writes_the_header_and_rows() -> None:
+    text = cells.csv_text(["a", "b"], [[1, 0.5], [2, None]])
+    assert text == "a,b\n1,0.5\n2,\n"
