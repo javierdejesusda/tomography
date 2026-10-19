@@ -14,8 +14,9 @@ from tomography.viz import paper
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
+_T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
 SPEC = "a_dose_runs"
-HEIGHT = 4.6
+HEIGHT = 5.6
 SERIES = ("lat: known", "lat: unknown", "random: unknown")
 
 
@@ -39,7 +40,7 @@ def _runs() -> list[tuple[str, str]]:
             key=("fewshot", "concept").index,
         )
         found.extend((model, t) for t in templates)
-    return found
+    return sorted(found, key=lambda run: not _entropy(*run))
 
 
 def _path(model: str, template: str) -> Path:
@@ -77,7 +78,7 @@ def _panels(output: registry.FigureOutput) -> list[Any]:
     return [ax for ax in output.figure.axes if ax.get_label() != "<legend>"]
 
 
-def test_there_is_one_panel_per_run_in_three_rows_of_four(
+def test_there_is_one_panel_per_run_in_four_rows_of_three(
     output: registry.FigureOutput,
 ) -> None:
     runs = _runs()
@@ -87,7 +88,7 @@ def test_there_is_one_panel_per_run_in_three_rows_of_four(
     boxes = [ax.get_position() for ax in panels]
     rows = sorted({round(b.y0, 2) for b in boxes})
     cols = sorted({round(b.x0, 2) for b in boxes})
-    assert (len(rows), len(cols)) == (3, 4)
+    assert (len(rows), len(cols)) == (4, 3)
 
 
 def test_every_panel_draws_the_stored_curves(
@@ -184,3 +185,29 @@ def test_legend_names_the_grey_band_as_the_mean_of_the_random_arms(
     labels = [t.get_text() for t in legend.get_texts()]
     assert "mean of 3 random directions" in labels
     assert not any("pooled" in label for label in labels)
+
+
+def test_letters_do_not_touch_their_titles(
+    output: registry.FigureOutput,
+) -> None:
+    gaps = _T["letter_title_gaps"](output.figure)
+    assert len(gaps) == 12
+    assert min(gaps) >= 2.0
+
+
+def test_every_row_has_one_measure_and_each_block_names_it_once(
+    output: registry.FigureOutput,
+) -> None:
+    panels = _panels(output)
+    runs = _runs()
+    rows = [list(zip(panels[i : i + 3], runs[i : i + 3])) for i in (0, 3, 6, 9)]
+    for row in rows:
+        assert len({_entropy(*run) for _, run in row}) == 1
+    names = {True: "entropy shift", False: "abstention rate"}
+    for block in (rows[:2], rows[2:]):
+        measure = _entropy(*block[0][0][1])
+        labels = [
+            ax.get_ylabel() for row in block for ax, _ in row if ax.get_ylabel()
+        ]
+        assert labels == [names[measure]]
+    assert [_entropy(*run) for run in runs] == [True] * 6 + [False] * 6

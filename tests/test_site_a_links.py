@@ -15,6 +15,7 @@ from tomography.viz import paper
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
+_T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
 SPEC = "a_links"
 HEIGHT = 3.4
 
@@ -210,3 +211,11 @@ def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
     with paper.paper_style():
         assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
+
+
+def test_letters_do_not_touch_their_titles(
+    output: registry.FigureOutput,
+) -> None:
+    gaps = _T["letter_title_gaps"](output.figure)
+    assert len(gaps) == 2
+    assert min(gaps) >= 2.0

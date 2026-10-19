@@ -16,8 +16,8 @@ from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.viz import paper
 
-HEIGHT = 4.6
-COLUMNS = 4
+HEIGHT = 5.6
+COLUMNS = 3
 PAD = 0.04
 SERIES = ("lat: known", "lat: unknown", "random: unknown")
 CLAIM = (
@@ -57,7 +57,9 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    runs = knowledge_steering.load_runs(manifest)
+    runs = sorted(
+        knowledge_steering.load_runs(manifest), key=lambda run: not run.entropy
+    )
     limits = {
         True: _range([r for r in runs if r.entropy]),
         False: _range([r for r in runs if not r.entropy]),
@@ -73,12 +75,14 @@ def build(manifest: Manifest) -> FigureOutput:
             letter = chr(ord("a") + i)
             knowledge_steering.draw_dose(ax, run, letter, csv_rows)
             ax.set_ylim(*limits[run.entropy])
-            ax.set_title(run.name.replace(", ", "\n"), loc="left", fontsize=6.5)
+            paper.panel_title(ax, letter, run.name, 6.5)
             if i // COLUMNS < rows - 1:
                 ax.set_xlabel("")
-            if i % COLUMNS:
+            first = i % COLUMNS == 0 and (
+                i == 0 or runs[i - COLUMNS].entropy != run.entropy
+            )
+            if not first:
                 ax.set_ylabel("")
-            paper.panel_letter(ax, letter)
         for ax in flat[len(runs) :]:
             ax.set_axis_off()
         legend = fig.legend(

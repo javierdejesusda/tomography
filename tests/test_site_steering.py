@@ -21,6 +21,7 @@ from tomography.viz import paper
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
+_T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
 SPEC = "steering"
 MAX_RATIO = 1.5
 MIN_DISTINCT = 0.15
@@ -396,3 +397,11 @@ def test_tiles_use_the_full_colormap_and_the_ink_that_contrasts_most(
             assert text.get_color() == paper.tile_ink(face)
     inks = {t.get_color() for t in labels}
     assert inks == {paper.INK, paper.WHITE}
+
+
+def test_letters_do_not_touch_their_titles(
+    output: registry.FigureOutput,
+) -> None:
+    gaps = _T["letter_title_gaps"](output.figure)
+    assert len(gaps) == 3
+    assert min(gaps) >= 2.0

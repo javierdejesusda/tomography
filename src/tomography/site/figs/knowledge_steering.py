@@ -338,7 +338,6 @@ def draw_dose(
     """
     draw_curves(ax, run.model, run.label, run.curves(), letter, csv_rows)
     ax.set_ylabel("entropy shift" if run.entropy else "abstention rate")
-    ax.set_title(run.name, loc="left")
     if run.entropy:
         axes.ref_line(ax, 0.0)
 
@@ -371,7 +370,7 @@ def build(manifest: Manifest) -> FigureOutput:
         ax_b.set_xlabel("abstention rate per unit\nrelative coefficient")
         for ax, letter, key in zip(doses, "cde", EXEMPLARS, strict=True):
             draw_dose(ax, by_label[" ".join(key)], letter, csv_rows)
-            paper.panel_letter(ax, letter)
+            paper.panel_title(ax, letter, by_label[" ".join(key)].name)
         paper.panel_letter(ax_a, "a")
         paper.panel_letter(ax_b, "b")
         legend = top.legend(

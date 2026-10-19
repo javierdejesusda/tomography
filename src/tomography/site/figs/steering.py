@@ -124,7 +124,6 @@ def _linestyle(model: str) -> Any:
 
 
 def _dose_panel(ax: Any, strip: Any, members: list[_Model], role: str) -> None:
-    ax.set_title(ROLE_TITLES[role], loc="left")
     for k, model in enumerate(members):
         style = axes.model_style(model.key)
         xs = list(COEFFS)
@@ -344,7 +343,7 @@ def build(manifest: Manifest) -> FigureOutput:
             first = first or ax
             strip = fig.add_subplot(left[i, 1], sharey=ax)
             _dose_panel(ax, strip, [by_key[m] for m in by_role[role]], role)
-            paper.panel_letter(ax, "abc"[i])
+            paper.panel_title(ax, "abc"[i], ROLE_TITLES[role])
             if i < 2:
                 ax.tick_params(labelbottom=False)
             else:

@@ -15,6 +15,7 @@ from tomography.viz import paper
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
+_T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
 SPEC = "knowledge_steering"
 HEIGHT = 3.9
 EXEMPLARS = (
@@ -329,3 +330,11 @@ def test_caption_describes_the_grey_band_as_the_mean_of_the_random_arms(
         "the mean over the 3 random directions on unknown questions with its "
         "95 percent interval that resamples the questions (grey band)"
     ) in output.detail
+
+
+def test_letters_do_not_touch_their_titles(
+    output: registry.FigureOutput,
+) -> None:
+    gaps = _T["letter_title_gaps"](output.figure)
+    assert len(gaps) == 3
+    assert min(gaps) >= 2.0
