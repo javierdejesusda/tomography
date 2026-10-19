@@ -416,12 +416,8 @@ def build(manifest: Manifest) -> FigureOutput:
     )
     numbers: dict[str, float] = {}
     for role in stats.ROLES:
-        numbers[f"n_{role}"] = float(distinguishable[role].total)
         numbers[f"distinguishable_{role}"] = float(distinguishable[role].hits)
         numbers[f"selective_{role}"] = float(selective[role].hits)
-        numbers[f"known_ge_unknown_{role}"] = float(
-            sum(stats.role(r.model) == role for r in held)
-        )
     detail = DETAIL.format(
         distinguishable=_rows.runs_text(distinguishable),
         selective=_rows.runs_text(selective),

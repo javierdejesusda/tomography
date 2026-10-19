@@ -235,7 +235,7 @@ def test_counts_are_per_role_over_runs(output: registry.FigureOutput) -> None:
             got = output.counts[name][role]
             assert (got.hits, got.total) == (want[role].hits, want[role].total)
             assert output.numbers[f"{name}_{role}"] == want[role].hits
-            assert output.numbers[f"n_{role}"] == want[role].total
+            assert f"n_{role}" not in output.numbers
     assert output.counts["distinguishable"]["post"].total == 6
     assert output.counts["distinguishable"]["gpt2"].total == 3
 
@@ -257,9 +257,7 @@ def test_known_at_least_unknown_runs_come_from_the_curves(
     }
     assert "known_ge_unknown" not in output.numbers
     for role in stats.ROLES:
-        assert output.numbers[f"known_ge_unknown_{role}"] == sum(
-            stats.role(m) == role for m, _ in held
-        )
+        assert f"known_ge_unknown_{role}" not in output.numbers
     counts = output.counts["known_ge_unknown"]
     for role in stats.ROLES:
         assert counts[role].hits == sum(stats.role(m) == role for m, _ in held)
