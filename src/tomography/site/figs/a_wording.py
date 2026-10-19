@@ -1,4 +1,4 @@
-"""Figure A5: Wording transfer as a margin over a random direction.
+"""Appendix figure: Wording transfer as a margin over a random direction.
 
 One matrix per checkpoint with a wording run. A cell is the accuracy of the
 sentiment reader fitted on the wording of its row and scored on the wording of

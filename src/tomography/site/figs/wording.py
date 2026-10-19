@@ -116,8 +116,8 @@ def _strip_row(
         "random",
         model,
         paper_row["random"],
-        y,
-        0.3,
+        y + 0.32,
+        0.14,
         color=paper.ENC["random_marker"],
         lw=1.0,
     )

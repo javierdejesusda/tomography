@@ -567,3 +567,14 @@ def test_the_caption_states_the_band_the_conservative_noise_and_the_rank(
         f"{int(n['paper_rank_min'])} to {int(n['paper_rank_max'])} of the 16"
         in output.claim
     )
+
+
+def test_the_random_tick_stays_below_the_names_on_the_centre_line(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _strip(output)
+    for model in MODELS:
+        centre = _row_y(ax, model)
+        tick = _gid_lines(ax, f"random:{model}")[f"random:{model}"]
+        assert min(tick.get_ydata()) >= centre + 0.15
+        assert max(tick.get_ydata()) <= centre + 0.5

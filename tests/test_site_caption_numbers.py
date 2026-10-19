@@ -1,11 +1,8 @@
 import ast
-import importlib
 from pathlib import Path
 import re
 
 import pytest
-
-from tomography.site import registry
 
 SITE = Path(__file__).resolve().parents[1] / "src" / "tomography" / "site"
 LITERAL = re.compile(r"\b(Figures?|Tables?)\s+(A\d+|\d+)\b")
@@ -39,14 +36,3 @@ def test_no_caption_writes_a_literal_figure_or_table_number(kind: str) -> None:
                 f"{path.name}: {m.group(0)}" for m in LITERAL.finditer(text)
             )
     assert found == []
-
-
-def test_appendix_module_titles_follow_the_registry_order() -> None:
-    for kind, keys, word in (
-        ("figure", registry.APPENDIX_FIGURES, "Figure"),
-        ("table", registry.APPENDIX_TABLES, "Table"),
-    ):
-        for number, key in enumerate(keys, 1):
-            module = importlib.import_module(registry.module_name(kind, key))
-            doc = module.__doc__ or ""
-            assert doc.startswith(f"{word} A{number}:"), (key, doc[:40])

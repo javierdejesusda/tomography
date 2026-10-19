@@ -1,4 +1,4 @@
-"""Figure A1: Reader accuracy at every layer of every concept and checkpoint.
+"""Appendix figure: Reader accuracy at every layer of every concept and checkpoint.
 
 One panel per concept (row) and family (column). Each checkpoint draws its
 reader over relative depth; one grey band per panel spans the random

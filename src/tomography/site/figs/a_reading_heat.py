@@ -1,4 +1,4 @@
-"""Figure A2: the margin of every reading at every layer, as heat maps.
+"""Appendix figure: the margin of every reading at every layer, as heat maps.
 
 One map per concept with a row per checkpoint: the reader's accuracy minus
 that of a random direction of the same run at every layer, with the earliest
