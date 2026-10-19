@@ -159,7 +159,10 @@ ENCODING_RULES = """Encoding rules of every figure (the glossary).
    non-ramp ink.
 3. Filled markers mean GPT-2 and Qwen3 base, open ones post-trained; every
    legend that uses fill carries the hexagon role key (`ROLE_KEY_MARKER`).
-4. Post-trained lines use one style (`LINESTYLES["post_trained"]`) everywhere.
+4. Post-trained lines use one style (`LINESTYLES["post_trained"]`) where role
+   is not given by the panel or row block. Where it is, a dashed segment may
+   carry a state under rule 8 (Figure 7: not fluent) and the figure key says
+   so.
 5. Random is always one grey (`RANDOM_GREY`); a grey band always means the
    spread of the random baseline over seeds or draws and is keyed; a dotted
    line always means chance. Bluish green (`TEXT_GREEN`) is reserved for

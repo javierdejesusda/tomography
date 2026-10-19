@@ -90,6 +90,13 @@ def _moves_more(model: str, template: str, kind: str) -> bool:
     return all(r["abs_lo"] > 0 for r in arms)
 
 
+def _ordered() -> list[tuple[str, str]]:
+    runs = _post_runs()
+    passes = [sum(_moves_more(*run, kind) for kind in TYPES) for run in runs]
+    order = sorted(range(len(runs)), key=lambda i: -passes[i])
+    return [runs[i] for i in order]
+
+
 def _panels(output: registry.FigureOutput) -> list[Any]:
     return [ax for ax in output.figure.axes if ax.get_label() != "<legend>"]
 
@@ -110,7 +117,7 @@ def test_every_panel_draws_the_stored_curves(
     output: registry.FigureOutput,
 ) -> None:
     rows = _rows(output)
-    for letter, run in zip("abcdef", _post_runs(), strict=True):
+    for letter, run in zip("abcdef", _ordered(), strict=True):
         for kind in TYPES:
             curves = _curves(*run, kind)
             for series in SERIES:
@@ -233,18 +240,94 @@ def test_the_encoding_is_cross_referenced_by_token(
     assert "Figure 9" not in output.detail
 
 
-def test_the_panels_that_pass_are_starred_and_the_bands_are_keyed(
+def _grid(output: registry.FigureOutput) -> list[list[Any]]:
+    panels = sorted(
+        _panels(output),
+        key=lambda a: (-round(a.get_position().y0, 2), a.get_position().x0),
+    )
+    return [panels[i : i + 4] for i in range(0, 24, 4)]
+
+
+def test_passing_panels_are_framed_in_the_run_colour_and_no_star_is_drawn(
     output: registry.FigureOutput,
 ) -> None:
-    starred = [
-        ax
-        for ax in _panels(output)
-        if any(line.get_marker() == "*" for line in ax.lines)
+    from tomography.viz import axes
+
+    grid = _grid(output)
+    framed = 0
+    for row, run in zip(grid, _ordered(), strict=True):
+        color = axes.model_style(run[0]).color
+        for ax, kind in zip(row, sorted(TYPES), strict=True):
+            frames = [p for p in ax.patches if p.get_gid() == "pass-frame"]
+            passed = _moves_more(*run, kind)
+            assert len(frames) == int(passed)
+            if passed:
+                assert frames[0].get_edgecolor()[:3] == pytest.approx(
+                    mpl_rgb(color)
+                )
+                assert frames[0].get_linewidth() >= 1.5
+            framed += passed
+            assert not [ln for ln in ax.lines if ln.get_marker() == "*"]
+    assert framed == output.numbers["moves_more"] == 11
+
+
+def mpl_rgb(color: str) -> tuple[float, float, float]:
+    import matplotlib.colors as mcolors
+
+    return mcolors.to_rgb(color)
+
+
+def test_rows_are_ordered_by_how_many_panels_pass(
+    output: registry.FigureOutput,
+) -> None:
+    counts = [
+        sum(_moves_more(*run, kind) for kind in TYPES) for run in _ordered()
     ]
-    assert len(starred) == output.numbers["moves_more"]
-    assert len(starred) > 0
+    assert counts == sorted(counts, reverse=True)
+    assert counts[0] > counts[-1]
+    runs_by_letter = {r["panel"]: r["run"] for r in _rows(output)}
+    assert [runs_by_letter[c] for c in "abcdef"] == [
+        " ".join(run) for run in _ordered()
+    ]
+
+
+def test_random_is_one_grey_and_the_direction_band_has_the_run_colour(
+    output: registry.FigureOutput,
+) -> None:
+    from matplotlib.collections import PolyCollection
+
+    from tomography.viz import axes
+
+    grid = _grid(output)
+    for row, run in zip(grid, _ordered(), strict=True):
+        color = mpl_rgb(axes.model_style(run[0]).color)
+        for ax in row:
+            bands = [c for c in ax.collections if isinstance(c, PolyCollection)]
+            faces = [tuple(c.get_facecolor()[0][:3]) for c in bands]
+            grey = mpl_rgb(paper.RANDOM_GREY)
+            assert sum(f == pytest.approx(grey) for f in faces) == 1
+            assert sum(f == pytest.approx(color) for f in faces) == 2
+            lines = [
+                ln.get_color()
+                for ln in ax.lines
+                if ln.get_color() in (paper.RANDOM_GREY, paper.RANDOM_BAND)
+            ]
+            assert set(lines) == {paper.RANDOM_GREY}
+
+
+def test_the_caption_says_what_the_frame_and_the_test_are(
+    output: registry.FigureOutput,
+) -> None:
+    detail = output.detail
+    assert "framed" in detail
+    assert "star" not in detail
+    assert "uses each of the 3 random directions" in detail
+    assert "plot shows only their mean" in detail
+    assert "probability at most 1/4" in detail
+    assert "ordered by the number of framed panels" in detail
     (legend,) = output.figure.legends
     labels = [t.get_text() for t in legend.get_texts()]
     assert "interval of the direction" in labels
     assert "interval of the random mean" in labels
-    assert any("beyond all 3 random directions" in label for label in labels)
+    assert any("framed" in label for label in labels)
+    assert not any("star" in label for label in labels)

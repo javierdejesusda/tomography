@@ -12,6 +12,7 @@ import pytest
 from tomography.site import registry
 from tomography.site import stats
 from tomography.site.manifest import Manifest
+from tomography.viz import axes
 from tomography.viz import checks
 from tomography.viz import paper
 
@@ -163,25 +164,6 @@ def _expected(row: str, size: str) -> tuple[float, float, float]:
     )
 
 
-def test_every_row_and_size_is_the_post_trained_minus_the_base_value(
-    output: registry.FigureOutput,
-) -> None:
-    rows = _rows(output)
-    assert len(rows) == 24
-    for row in ROWS:
-        for key, size in SIZES.items():
-            want = _expected(row, size)
-            (got,) = [
-                r for r in rows if r["row"] == LABELS[row] and r["size"] == size
-            ]
-            assert float(got["value"]) == pytest.approx(want[0])
-            assert float(got["lo"]) == pytest.approx(want[1])
-            assert float(got["hi"]) == pytest.approx(want[2])
-            assert output.numbers[f"{row}_{key}"] == pytest.approx(want[0])
-            assert output.numbers[f"{row}_{key}_lo"] == pytest.approx(want[1])
-            assert output.numbers[f"{row}_{key}_hi"] == pytest.approx(want[2])
-
-
 def test_values_match_the_plan_at_this_commit(
     output: registry.FigureOutput,
 ) -> None:
@@ -196,103 +178,12 @@ def test_values_match_the_plan_at_this_commit(
     assert round(n["knowledge_17b_lo"], 3) == -0.111
 
 
-def test_summary_numbers_are_recomputed(output: registry.FigureOutput) -> None:
-    n = output.numbers
-    sentiment = [_expected("sentiment", s) for s in SIZES.values()]
-    assert n["sent_below"] == sum(hi < 0 for _, _, hi in sentiment)
-    moves = [abs(_expected(row, s)[0]) for row in OTHER for s in SIZES.values()]
-    assert n["max_abs_other"] == pytest.approx(max(moves))
-    excluding = [
-        (row, s)
-        for row in OTHER
-        for s in SIZES.values()
-        if _expected(row, s)[1] > 0 or _expected(row, s)[2] < 0
-    ]
-    assert n["other_excluding"] == len(excluding)
-    assert ("utility", "4b") in excluding
-
-
-def test_caption_is_the_template_filled_from_the_files(
-    output: registry.FigureOutput,
-) -> None:
-    n = output.numbers
-    sentiment = sorted(abs(n[f"sentiment_{k}"]) for k in SIZES)
-    assert (
-        "Post-trained minus base checkpoint for each Qwen3 size (0.6B, "
-        "1.7B and 4B, light to dark), with conservative 95 percent "
-        "intervals for the test items. Sentiment falls by "
-        f"{sentiment[0]:.3f} to {sentiment[-1]:.3f}, with an interval "
-        f"below zero on {int(n['sent_below'])} of 3 sizes; "
-        "utility, morality, truth, honesty transfer and TruthfulQA move by "
-        f"at most {n['max_abs_other']:.3f}, with an interval excluding zero "
-        "only for utility on 4B (+0.022); the knowledge AUROC and the "
-        "steering win rate fall with an interval below zero on 1.7B only."
-    ) in output.detail
-    assert "[[sec:limitations]]" in output.detail
-    assert "[[table:base_post]]" in output.detail
-    assert "Section 6" not in output.detail
-    assert "Table A5" not in output.detail
-    assert "prompt format" in output.detail
-
-
-def test_sentiment_falls_on_every_size_and_the_claim_holds(
-    output: registry.FigureOutput,
-) -> None:
-    n = output.numbers
-    assert all(n[f"sentiment_{k}"] < 0 for k in SIZES)
-    assert n["sent_below"] == 2
-
-
-def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
-    fig = output.figure
-    assert tuple(fig.get_size_inches()) == (paper.FULL_WIDTH, HEIGHT)
-    assert checks.guard_problems(fig) == []
-    assert checks.problems(fig) == []
-
-
-def test_markers_are_left_filled_circles_in_the_size_colors(
-    output: registry.FigureOutput,
-) -> None:
-    (ax,) = output.figure.axes
-    marked = [
-        line
-        for line in ax.lines
-        if line.get_marker() == paper.MEASURE_MARKERS["direction"]
-    ]
-    assert len(marked) == 24
-    assert {line.get_fillstyle() for line in marked} == {"left"}
-    assert len({line.get_color() for line in marked}) == 3
-    assert len(ax.patches) == 0
-
-
 def test_no_other_figure_uses_half_filled_markers() -> None:
     manifest = Manifest(RESULTS)
     for key in ("steering", "knowledge_reading", "approximate"):
         fig = registry.build_figure(key, manifest).figure
         for ax in fig.axes:
             assert all(line.get_fillstyle() != "left" for line in ax.lines)
-
-
-def test_rows_are_labelled_and_the_zero_line_is_drawn(
-    output: registry.FigureOutput,
-) -> None:
-    (ax,) = output.figure.axes
-    checks.draw(output.figure)
-    assert [t.get_text() for t in ax.get_yticklabels()] == [
-        "sentiment, held out",
-        "utility",
-        "morality",
-        "truth",
-        "honesty, transfer",
-        "TruthfulQA",
-        "knowledge",
-        "steering",
-    ]
-    assert ax.get_xlim() == (-0.3, 0.3)
-    text = f"{output.claim} {output.detail} {output.csv}"
-    assert chr(0x2014) not in text
-    assert chr(0x2013) not in text
-    assert "_" not in re.sub(r"\[\[[^\]]*\]\]", "", text)
 
 
 def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
@@ -320,11 +211,6 @@ def test_seed_paired_differences_that_exclude_zero_are_named_and_tokenised(
     for name, tuned in found:
         size = tuned.split("-")[1].replace(".", "")
         assert output.numbers[f"paired_{name}_{size}"] == 1
-    assert (
-        "An interval that includes zero does not show that nothing changed: "
-        "the seed-paired differences of [[table:base_post]] exclude zero for "
-        "morality on 0.6B, honesty on 0.6B and utility on 1.7B."
-    ) in output.detail
     assert output.claim == (
         "Post-training lowers held-out sentiment reading; on the other "
         "readings most intervals include zero, which is not evidence of no "
@@ -345,3 +231,254 @@ def test_the_paired_total_counts_the_rows_the_exclusion_count_ranges_over(
         output.numbers["paired_excluding_zero"]
         <= output.numbers["paired_total"]
     )
+
+
+PAIRED_SOURCE = {
+    "utility": "r2",
+    "morality": "r3",
+    "truth": "r7",
+    "honesty": "r5",
+}
+NARROW = 0.15
+WIDE = 0.3
+NEWLINE = chr(10)
+
+
+def _paired(row: str, size: str) -> dict[str, Any] | None:
+    source = PAIRED_SOURCE.get(row)
+    if source is None or size == "4b":
+        return None
+    (found,) = [
+        r
+        for r in _table("p8", "qwen3-1.7b")
+        if r["source"] == source and r["tuned"] == f"qwen3-{size}"
+    ]
+    return found
+
+
+def _final(row: str, size: str) -> tuple[float, float, float]:
+    stored = _paired(row, size)
+    if stored is not None:
+        return float(stored["delta"]), float(stored["lo"]), float(stored["hi"])
+    return _expected(row, size)
+
+
+def _excludes(interval: tuple[float, float, float]) -> bool:
+    return interval[1] > 0 or interval[2] < 0
+
+
+def _panels(output: registry.FigureOutput) -> tuple[Any, Any]:
+    first, second = sorted(
+        output.figure.axes, key=lambda a: -a.get_position().y1
+    )
+    return first, second
+
+
+def test_every_row_and_size_uses_the_paired_interval_where_it_is_stored(
+    output: registry.FigureOutput,
+) -> None:
+    rows = _rows(output)
+    assert len(rows) == 24
+    for row in ROWS:
+        for key, size in SIZES.items():
+            want = _final(row, size)
+            (got,) = [
+                r for r in rows if r["row"] == LABELS[row] and r["size"] == size
+            ]
+            assert float(got["value"]) == pytest.approx(want[0])
+            assert float(got["lo"]) == pytest.approx(want[1])
+            assert float(got["hi"]) == pytest.approx(want[2])
+            kind = "paired" if _paired(row, size) else "conservative"
+            assert got["interval"] == kind
+            assert output.numbers[f"{row}_{key}"] == pytest.approx(want[0])
+            assert output.numbers[f"{row}_{key}_lo"] == pytest.approx(want[1])
+            assert output.numbers[f"{row}_{key}_hi"] == pytest.approx(want[2])
+    assert sum(r["interval"] == "paired" for r in rows) == 8
+
+
+def test_the_paired_point_estimate_matches_the_conservative_one() -> None:
+    for row in PAIRED_SOURCE:
+        for size in ("0.6b", "1.7b"):
+            assert _final(row, size)[0] == pytest.approx(
+                _expected(row, size)[0]
+            )
+
+
+def test_summary_numbers_are_recomputed(output: registry.FigureOutput) -> None:
+    n = output.numbers
+    sentiment = [_final("sentiment", s) for s in SIZES.values()]
+    assert n["sent_below"] == sum(hi < 0 for _, _, hi in sentiment)
+    moves = [abs(_final(row, s)[0]) for row in OTHER for s in SIZES.values()]
+    assert n["max_abs_other"] == pytest.approx(max(moves))
+    excluding = [
+        (row, s)
+        for row in OTHER
+        for s in SIZES.values()
+        if _excludes(_final(row, s))
+    ]
+    assert n["other_excluding"] == len(excluding)
+    assert ("utility", "4b") in excluding
+    assert ("morality", "0.6b") in excluding
+
+
+def test_caption_states_the_intervals_the_axes_and_the_fill(
+    output: registry.FigureOutput,
+) -> None:
+    n = output.numbers
+    sentiment = sorted(abs(n[f"sentiment_{k}"]) for k in SIZES)
+    detail = output.detail
+    assert "seed-paired" in detail
+    assert "conservative" in detail
+    assert "solid" in detail
+    assert "dashed" in detail
+    assert "filled" in detail
+    assert "axes differ" in detail
+    assert (
+        f"Sentiment falls by {sentiment[0]:.3f} to {sentiment[-1]:.3f}, with "
+        f"an interval below zero on {int(n['sent_below'])} of 3 sizes;"
+    ) in detail
+    assert (
+        "an interval excluding zero only for utility on 1.7B "
+        f"({chr(0x2212)}0.012), utility on 4B (+0.022), morality on 0.6B "
+        f"({chr(0x2212)}0.016) and honesty transfer on 0.6B (+0.073)"
+    ) in detail
+    assert "the knowledge AUROC and the steering win rate fall" in detail
+    assert "[[sec:limitations]]" in detail
+    assert "[[table:base_post]]" in detail
+    assert "prompt format" in detail
+    assert "Section 6" not in detail
+    assert "Table A5" not in detail
+
+
+def test_sentiment_falls_on_every_size_and_the_claim_holds(
+    output: registry.FigureOutput,
+) -> None:
+    n = output.numbers
+    assert all(n[f"sentiment_{k}"] < 0 for k in SIZES)
+    assert n["sent_below"] == 2
+
+
+def test_two_panels_split_the_rows_by_how_wide_their_intervals_are(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    assert tuple(fig.get_size_inches()) == (paper.FULL_WIDTH, steering_height())
+    assert checks.guard_problems(fig) == []
+    assert checks.problems(fig) == []
+    narrow, wide = _panels(output)
+    assert narrow.get_xlim() == (-NARROW, NARROW)
+    assert wide.get_xlim() == (-WIDE, WIDE)
+    checks.draw(fig)
+    names = {v: k for k, v in LABELS.items()}
+    narrow_rows = [names[t.get_text()] for t in narrow.get_yticklabels()]
+    wide_rows = [names[t.get_text()] for t in wide.get_yticklabels()]
+    assert sorted(narrow_rows + wide_rows) == sorted(ROWS)
+    for row in narrow_rows:
+        bounds = [b for s in SIZES.values() for b in _final(row, s)[1:]]
+        assert max(abs(b) for b in bounds) <= NARROW
+    for row in wide_rows:
+        bounds = [b for s in SIZES.values() for b in _final(row, s)[1:]]
+        assert max(abs(b) for b in bounds) > NARROW
+    order = {r: i for i, r in enumerate(ROWS)}
+    assert narrow_rows == sorted(narrow_rows, key=order.get)
+    assert wide_rows == sorted(wide_rows, key=order.get)
+    text = f"{output.claim} {output.detail} {output.csv}"
+    assert chr(0x2014) not in text
+    assert chr(0x2013) not in text
+    assert "_" not in re.sub(r"\[\[[^\]]*\]\]", "", text)
+
+
+def steering_height() -> float:
+    from tomography.site.figs import base_post
+
+    return float(base_post.HEIGHT)
+
+
+def test_marker_fill_says_whether_the_interval_excludes_zero(
+    output: registry.FigureOutput,
+) -> None:
+    narrow, wide = _panels(output)
+    marked = [
+        ln
+        for ax in (narrow, wide)
+        for ln in ax.lines
+        if ln.get_gid() == "point"
+    ]
+    assert len(marked) == 24
+    assert {ln.get_marker() for ln in marked} == {paper.SHAPES["direction"]}
+    assert {ln.get_fillstyle() for ln in marked} == {"full"}
+    filled = sum(ln.get_markerfacecolor() != "white" for ln in marked)
+    want = sum(
+        _excludes(_final(row, s)) for row in ROWS for s in SIZES.values()
+    )
+    assert filled == want
+    assert len({ln.get_color() for ln in marked}) == 3
+
+
+def test_paired_whiskers_are_solid_and_conservative_ones_dashed(
+    output: registry.FigureOutput,
+) -> None:
+    whiskers = [
+        ln
+        for ax in output.figure.axes
+        for ln in ax.lines
+        if ln.get_gid() == "whisker"
+    ]
+    assert len(whiskers) == 24
+    dashed = [ln for ln in whiskers if ln.get_linestyle() != "-"]
+    assert len(dashed) == 24 - 8
+
+
+def test_sizes_are_in_fixed_order_and_labelled_on_the_first_row(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    for ax in _panels(output):
+        points = [ln for ln in ax.lines if ln.get_gid() == "point"]
+        by_row: dict[int, list[Any]] = {}
+        for ln in points:
+            y = float(ln.get_ydata()[0])
+            by_row.setdefault(round(y), []).append(ln)
+        for lines in by_row.values():
+            lines.sort(key=lambda ln: float(ln.get_ydata()[0]))
+            colors = [ln.get_color() for ln in lines]
+            assert colors == [
+                axes.model_style(f"qwen3-{s}").color
+                for s in ("0.6b", "1.7b", "4b")
+            ]
+        labels = sorted(
+            t.get_text()
+            for t in ax.texts
+            if t.get_text() in ("0.6B", "1.7B", "4B")
+        )
+        assert labels == ["0.6B", "1.7B", "4B"]
+
+
+def test_zero_line_is_a_solid_half_point_line_between_whiskers_and_markers(
+    output: registry.FigureOutput,
+) -> None:
+    for ax in _panels(output):
+        (zero,) = [ln for ln in ax.lines if ln.get_gid() == "zero"]
+        assert zero.get_linewidth() == pytest.approx(0.5)
+        assert zero.get_linestyle() == "-"
+        assert list(zero.get_xdata()) == [0.0, 0.0]
+        points = [ln for ln in ax.lines if ln.get_gid() == "point"]
+        whiskers = [ln for ln in ax.lines if ln.get_gid() == "whisker"]
+        assert zero.get_zorder() < min(p.get_zorder() for p in points)
+        assert zero.get_zorder() > max(w.get_zorder() for w in whiskers)
+        texts = [t.get_text() for t in ax.texts]
+        assert "base higher" in texts
+        assert "post-trained higher" in texts
+
+
+def test_the_key_names_the_fill_and_the_two_interval_kinds(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert labels == [
+        "interval excludes zero",
+        "interval includes zero",
+        "seed-paired interval",
+        "conservative interval",
+    ]
