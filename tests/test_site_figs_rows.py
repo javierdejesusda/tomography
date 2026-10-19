@@ -1,4 +1,7 @@
 from matplotlib.layout_engine import ConstrainedLayoutEngine
+from matplotlib.markers import MarkerStyle
+import numpy as np
+import pytest
 
 from tomography.site import stats
 from tomography.site.figs import _rows
@@ -115,3 +118,35 @@ def test_stars_are_drawn_larger_and_the_category_shapes_are_all_filled() -> (
     assert line.get_markersize() == _rows.marker_size("*")
     for marker in paper.CATEGORY_MARKERS:
         assert marker not in ("1", "2", "3", "4")
+
+
+def _area(marker: str, size: float) -> float:
+    style = MarkerStyle(marker)
+    path = style.get_path().transformed(style.get_transform())
+    total = 0.0
+    for poly in path.to_polygons(closed_only=True):
+        x, y = poly[:, 0], poly[:, 1]
+        total += 0.5 * abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
+    return float(total * size * size)
+
+
+def test_category_shapes_and_the_circle_have_about_the_same_area() -> None:
+    circle = _area("o", _rows.marker_size("o"))
+    for marker in paper.CATEGORY_MARKERS:
+        ratio = _area(marker, _rows.marker_size(marker)) / circle
+        assert 0.65 <= ratio <= 1.0, (marker, ratio)
+
+
+def test_filled_category_markers_get_a_thin_white_edge() -> None:
+    fig = _rows.new_figure(2.0)
+    ax = fig.add_subplot()
+    _rows.dot(ax, "gpt2", 0.0, 0.5, "<", "#123456")
+    _rows.dot(ax, "qwen3-4b", 1.0, 0.5, "<", "#123456")
+    _rows.dot(ax, "gpt2", 2.0, 0.5, "o", "#123456")
+    filled, opened, circle = ax.lines
+    assert filled.get_markeredgecolor() == "white"
+    assert filled.get_markeredgewidth() == pytest.approx(0.3)
+    assert opened.get_markeredgecolor() == "#123456"
+    assert circle.get_markeredgecolor() == "#123456"
+    key = _rows.series_handle("k", "<", "#123456")
+    assert key.get_markeredgecolor() == "white"

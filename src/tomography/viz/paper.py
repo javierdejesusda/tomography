@@ -119,6 +119,10 @@ SET_MARKERS: dict[str, str] = {
     "cities": CATEGORY_MARKERS[0],
     "translations": CATEGORY_MARKERS[1],
 }
+QUESTION_SET_MARKERS: dict[str, str] = {
+    "unknown": MEASURE_MARKERS["direction"],
+    "known": CATEGORY_MARKERS[1],
+}
 PROMPT_MARKERS: dict[str, str] = {
     "positive": CATEGORY_MARKERS[2],
     "negative": CATEGORY_MARKERS[1],
