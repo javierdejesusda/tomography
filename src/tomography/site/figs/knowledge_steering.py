@@ -1,221 +1,274 @@
-"""Figure 6: Dose response of pushing along the knowledge direction.
+"""Figure 9: Dose response of pushing along the knowledge direction.
 
-Dose panels draw the stored curves of the base and GPT-2 runs (entropy shift)
-and of the largest post-trained run (abstention rate); the last panel gives
-one unit-free ratio per run, the slope of the direction over the largest
-absolute slope of the random arms, from the headline of each run.
+Two forests give the slope of the outcome per unit relative coefficient for
+every run, in its own unit: the entropy shift for GPT-2 and base checkpoints
+and the abstention rate for post-trained ones. Each row shows the direction on
+unknown and on known questions against the three random directions. Three
+dose panels show the stored curves of three runs.
 """
 
-import math
 from typing import Any
 
+from matplotlib import ticker
 from matplotlib.axes import Axes
-from matplotlib.figure import Figure
-from matplotlib.lines import Line2D
 import numpy as np
 
-from tomography.site import params
 from tomography.site import runfiles
+from tomography.site import stats
 from tomography.site.figs import _group
+from tomography.site.figs import _rows
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.viz import axes
 from tomography.viz import paper
 
-COLUMNS = 3
-PANEL_WIDTH = 1.2
-PANEL_HEIGHT = 0.95
-ROW_PITCH = 1.38
-LEFT = 0.62
-SUMMARY_LEFT = 2.0
-ROW_INCHES = 0.15
-ENTROPY_COLOR = paper.SERIES[1]
-ABSTENTION_COLOR = paper.SERIES[0]
+HEIGHT = 3.9
 HEADER = ["panel", "run", "x", "series", "value", "lo", "hi"]
-SERIES = ("lat: unknown", "lat: known", "random: unknown", "random: known")
-DETAIL = " ".join(
-    [
-        "(a to g) Change of the outcome while the direction (colored) or a",
-        "random direction of the same norm (grey) is added at the stored",
-        "layer, against the coefficient relative to the mean residual norm;",
-        "solid lines are unknown questions, dashed lines known questions;",
-        "bands are 95 percent bootstrap intervals that resample the items.",
-        "Base and GPT-2 models show the shift of next-token entropy; the",
-        "largest post-trained run shows the abstention rate. The y axes",
-        "differ between panels. Random is the pooled series of three random",
-        "directions.",
-        "(h) One ratio per run of the {total} runs: the slope of the",
-        "direction on unknown questions over the largest absolute slope of",
-        "the three random arms of the same run, so the unit cancels.",
-        "Whiskers scale the 95 percent bootstrap interval of the direction",
-        "slope, which resamples the items. Filled markers are runs where the",
-        "direction moves the outcome more than every random arm; open",
-        "markers are runs where it does not.",
-    ]
+ARMS = ("random0", "random1", "random2")
+OFFSETS = {
+    "direction_known": -0.28,
+    "direction_unknown": 0.0,
+    "random0": 0.22,
+    "random1": 0.38,
+    "random2": 0.54,
+}
+EXEMPLARS = (
+    ("gpt2-xl", "fewshot"),
+    ("qwen3-4b-base", "fewshot"),
+    ("qwen3-4b", "fewshot"),
+)
+CLAIM = (
+    "Adding the knowledge direction moves unknown questions more than "
+    "random directions do on GPT-2 and base checkpoints, and not "
+    "consistently on post-trained ones."
+)
+DETAIL = (
+    "(a) Slope of the next-token entropy shift per unit relative "
+    "coefficient on unknown questions (circle) and known questions "
+    "(triangle), against 3 random directions of the same norm on unknown "
+    "questions (grey), with 95 percent intervals that resample the "
+    "questions. (b) The same for the abstention rate of post-trained "
+    "checkpoints, with a few-shot and a concept prompt. The direction moves "
+    "unknown questions more than each of the 3 random directions on "
+    "{distinguishable}, and more than known questions on {selective}, by "
+    "the linear slope over the coefficient grid; with 3 random directions a "
+    "direction passes by chance with probability 1/4. (c to e) Dose curves "
+    "of GPT-2 XL, Qwen3-4B-Base and Qwen3-4B (few-shot prompt) on unknown "
+    "and known questions, against the pooled random directions (grey band); "
+    "across all runs the largest shift of the mean curve is as large on "
+    "known as on unknown questions for {held}, which a slope does not show. "
+    "Every run is in Figure A6, and the post-trained runs by question type "
+    "in Figure A7."
 )
 
 
-def _runs(manifest: Manifest) -> list[dict[str, Any]]:
+class _Run:
+    """One P9d run and what the figure reads from it."""
+
+    def __init__(self, manifest: Manifest, model: str, template: str) -> None:
+        path = manifest.run("p9d", model, template=template)
+        assert path is not None
+        self.model = model
+        self.template = template
+        self.path = path
+        self.head: dict[str, Any] = runfiles.summary(path)["headline"]
+        self.entropy = self.head["metric"] == "entropy"
+        self.dose = runfiles.rows(path, "table_dose.json")
+
+    @property
+    def label(self) -> str:
+        return f"{self.model} {self.template}"
+
+    @property
+    def name(self) -> str:
+        if self.entropy:
+            return paper.display_name(self.model)
+        return paper.display_name(self.label)
+
+    def slope(self, side: str, arm: str) -> dict[str, Any]:
+        (row,) = [
+            r
+            for r in self.dose
+            if r["type"] == self.head["group"]
+            and r["metric"] == self.head["metric"]
+            and r["side"] == side
+            and r["arm"] == arm
+            and r["vs"] == ""
+        ]
+        return row
+
+    def curves(self) -> tuple[list[str], dict[str, np.ndarray]]:
+        stem = (
+            "curves_obscure_real_entropy"
+            if self.entropy
+            else "curves_obscure_real"
+        )
+        names = runfiles.data(self.path, f"{stem}.json")["series"]
+        return names, runfiles.arrays(self.path, f"{stem}.npz")
+
+    def largest_shift(self, series: str) -> float:
+        names, arrays = self.curves()
+        mean = arrays["mean"][names.index(series)]
+        origin = float(mean[int(np.argmin(np.abs(arrays["x"])))])
+        return float(np.max(np.abs(mean - origin)))
+
+
+def _runs(manifest: Manifest) -> list[_Run]:
     found = []
     for model in manifest.models("p9d"):
         templates = sorted(
-            {
-                str(r.config["template"])
-                for r in manifest.runs("p9d", model)
-                if r.config.get("template") is not None
-            }
+            {str(r.config["template"]) for r in manifest.runs("p9d", model)},
+            key=lambda t: ("fewshot", "concept").index(t),
         )
-        for template in templates:
-            path = manifest.run("p9d", model, template=template)
-            if path is None:
-                continue
-            summary = runfiles.summary(path)
-            found.append(
-                {
-                    "model": model,
-                    "template": template,
-                    "key": f"{model} {template}",
-                    "path": path,
-                    "headline": summary["headline"],
-                }
-            )
+        found.extend(_Run(manifest, model, t) for t in templates)
     return found
 
 
-def _dose_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    fewshot = [r for r in runs if r["template"] == "fewshot"]
-    entropy = [r for r in fewshot if r["headline"]["metric"] == "entropy"]
-    post = [r for r in fewshot if r["headline"]["metric"] != "entropy"]
-    if not post:
-        return entropy
-    largest = max(post, key=lambda r: params.param_count(r["model"]))
-    return [*entropy, largest]
+def _positions(runs: list[_Run]) -> list[float]:
+    found: list[float] = []
+    for i, run in enumerate(runs):
+        if i == 0:
+            found.append(0.0)
+            continue
+        step = 1.0
+        previous = runs[i - 1]
+        if previous.model.startswith("gpt2") and not run.model.startswith(
+            "gpt2"
+        ):
+            step += axes.GAP_AFTER_GPT2
+        elif previous.model != run.model:
+            step += axes.GAP_BETWEEN_PAIRS
+        found.append(found[-1] + step)
+    return found
 
 
-def _curves(run: dict[str, Any]) -> tuple[list[str], dict[str, np.ndarray]]:
-    stem = (
-        "curves_obscure_real_entropy"
-        if run["headline"]["metric"] == "entropy"
-        else "curves_obscure_real"
-    )
-    names = runfiles.data(run["path"], f"{stem}.json")["series"]
-    with np.load(run["path"] / f"{stem}.npz") as arrays:
-        return names, {
-            k: np.asarray(arrays[k]) for k in ("x", "mean", "lo", "hi")
+def _forest(
+    ax: Axes, runs: list[_Run], letter: str, csv_rows: list[list[Any]]
+) -> None:
+    positions = _positions(runs)
+    low, high = 0.0, 0.0
+    for run, base in zip(runs, positions, strict=True):
+        marks = {
+            "direction_unknown": (
+                run.head["lat_slope"],
+                run.head["lat_lo"],
+                run.head["lat_hi"],
+            ),
         }
-
-
-def _place(
-    fig: Figure, left: float, top: float, width: float, height: float
-) -> Axes:
-    w, h = fig.get_size_inches()
-    return fig.add_axes(
-        (left / w, 1 - (top + height) / h, width / w, height / h)
-    )
-
-
-def _dose_panel(
-    ax: Axes,
-    run: dict[str, Any],
-    names: list[str],
-    curves: dict[str, np.ndarray],
-    bottom: bool,
-) -> list[list[Any]]:
-    color = axes.model_style(run["model"]).color
-    metric = run["headline"]["metric"]
-    rows: list[list[Any]] = []
-    x = curves["x"]
-    for name in SERIES:
-        index = names.index(name)
-        shade = paper.RANDOM_BAND if name.startswith("random") else color
-        line = color if name.startswith("lat") else paper.NEUTRALS[1]
-        style = "--" if name.endswith(": known") else "-"
-        ax.plot(
-            x, curves["mean"][index], color=line, ls=style, lw=1.0, zorder=3
-        )
-        if name.endswith(": unknown"):
-            ax.fill_between(
-                x,
-                curves["lo"][index],
-                curves["hi"][index],
-                color=shade,
-                alpha=0.3 if name.startswith("random") else 0.18,
-                lw=0,
-                zorder=2,
-            )
-        for j, value in enumerate(curves["mean"][index]):
-            rows.append(
-                [
-                    run["key"],
-                    float(x[j]),
-                    name,
+        known = run.slope("known", "lat0")
+        marks["direction_known"] = (known["slope"], known["lo"], known["hi"])
+        for arm in ARMS:
+            row = run.slope("unknown", arm)
+            marks[arm] = (row["slope"], row["lo"], row["hi"])
+        for series, (value, lo, hi) in marks.items():
+            y = base + OFFSETS[series]
+            if series.startswith("random"):
+                ax.plot(
+                    [lo, hi],
+                    [y, y],
+                    color=paper.ENC["random_marker"],
+                    lw=paper.WHISKER_WIDTH,
+                    zorder=2,
+                )
+                ax.plot(
+                    [value],
+                    [y],
+                    marker="x",
+                    ls="none",
+                    color=paper.ENC["random_marker"],
+                    markersize=_rows.MARKER_SIZE,
+                    markeredgewidth=0.8,
+                    zorder=3,
+                )
+            else:
+                _rows.dot(
+                    ax,
+                    run.model,
+                    y,
                     float(value),
-                    float(curves["lo"][index][j]),
-                    float(curves["hi"][index][j]),
+                    "o" if series == "direction_unknown" else "^",
+                    paper.INK,
+                    (float(lo), float(hi)),
+                )
+            low, high = min(low, float(lo)), max(high, float(hi))
+            csv_rows.append([letter, run.label, None, series, value, lo, hi])
+    margin = 0.06 * (high - low)
+    ax.set_xlim(low - margin, high + margin)
+    ax.set_ylim(positions[-1] + 0.9, -0.6)
+    ax.set_yticks(positions)
+    ax.set_yticklabels([r.name for r in runs])
+    ax.tick_params(axis="y", length=0)
+    ax.spines["left"].set_visible(False)
+    axes.ref_line(ax, 0.0, "x")
+    ax.xaxis.set_major_formatter(_rows.tick_formatter())
+
+
+def _dose(ax: Axes, run: _Run, letter: str, csv_rows: list[list[Any]]) -> None:
+    names, arrays = run.curves()
+    x = arrays["x"]
+    dashed = stats.role(run.model) == "post"
+    style = paper.LINESTYLES["post_trained"] if dashed else "-"
+    index = {name: names.index(name) for name in names}
+    random = index["random: unknown"]
+    ax.fill_between(
+        x,
+        arrays["lo"][random],
+        arrays["hi"][random],
+        color=paper.RANDOM_BAND,
+        lw=0,
+        zorder=1,
+    )
+    ax.plot(
+        x,
+        arrays["mean"][random],
+        color=paper.ENC["random_marker"],
+        lw=paper.DATA_WIDTH,
+        zorder=2,
+    )
+    for series, marker in (("lat: known", "^"), ("lat: unknown", "o")):
+        k = index[series]
+        ax.fill_between(
+            x,
+            arrays["lo"][k],
+            arrays["hi"][k],
+            color=paper.INK,
+            alpha=0.15,
+            lw=0,
+            zorder=2,
+        )
+        ax.plot(
+            x,
+            arrays["mean"][k],
+            color=paper.INK,
+            ls=style,
+            lw=paper.DATA_WIDTH,
+            marker=marker,
+            zorder=3,
+            **_rows.fill(run.model, paper.INK),
+        )
+    for series in ("lat: known", "lat: unknown", "random: unknown"):
+        k = index[series]
+        for j, value in enumerate(arrays["mean"][k]):
+            csv_rows.append(
+                [
+                    letter,
+                    run.label,
+                    float(x[j]),
+                    series,
+                    float(value),
+                    float(arrays["lo"][k][j]),
+                    float(arrays["hi"][k][j]),
                 ]
             )
-    ax.set_xticks([-0.4, 0.0, 0.4])
-    ax.set_xticklabels(["-0.4", "0", "0.4"])
     ax.set_xlim(-0.44, 0.44)
-    ax.axhline(0.0, color=paper.CHANCE, lw=0.4, zorder=1)
-    ax.set_ylabel("entropy shift" if metric == "entropy" else "abstention rate")
-    if bottom:
-        ax.set_xlabel("relative coefficient")
-    ax.set_title(
-        paper.display_name(run["model"]), fontsize=8, loc="center", pad=3
-    )
-    _group.clip_ticks(ax)
-    return rows
-
-
-def _summary_panel(ax: Axes, runs: list[dict[str, Any]]) -> list[list[Any]]:
-    rows: list[list[Any]] = []
-    count = len(runs)
-    for i, run in enumerate(runs):
-        head = run["headline"]
-        scale = head["max_abs_random_slope"]
-        ratio = head["lat_slope"] / scale
-        lo, hi = head["lat_lo"] / scale, head["lat_hi"] / scale
-        color = (
-            ENTROPY_COLOR if head["metric"] == "entropy" else ABSTENTION_COLOR
-        )
-        y = count - 1 - i
-        ax.plot([lo, hi], [y, y], color=color, lw=0.7, zorder=2)
-        ax.plot(
-            [ratio],
-            [y],
-            marker="o",
-            ms=3.6,
-            mfc=color if head["distinguishable"] else "white",
-            mec=color,
-            mew=0.9,
-            ls="none",
-            zorder=3,
-        )
-        rows.append([run["key"], None, "slope_ratio", ratio, lo, hi])
-    ax.set_yticks(range(count))
-    ax.set_yticklabels(
-        [paper.display_name(r["key"]) for r in reversed(runs)], fontsize=7
-    )
-    ax.set_ylim(-0.7, count - 0.3)
-    for x in (-1.0, 1.0):
-        ax.axvline(x, color=paper.CHANCE, lw=0.5, ls=(0, (3, 2)), zorder=1)
-    ax.axvline(0.0, color=paper.INK, lw=0.5, zorder=1)
-    ax.set_xlabel("slope of the direction / largest absolute random slope")
-    low = min(r[4] for r in rows)
-    ax.set_xlim(math.floor(low) - 1, max(2.0, max(r[5] for r in rows) + 1))
-    _group.clip_ticks(ax)
-    return rows
-
-
-def _legend_handles() -> list[Line2D]:
-    grey, ink = paper.NEUTRALS[1], paper.INK
-    return [
-        Line2D([], [], color=ink, lw=1.0, label="direction, unknown"),
-        Line2D([], [], color=ink, lw=1.0, ls="--", label="direction, known"),
-        Line2D([], [], color=grey, lw=1.0, label="random, unknown"),
-        Line2D([], [], color=grey, lw=1.0, ls="--", label="random, known"),
-    ]
+    ax.xaxis.set_major_locator(ticker.FixedLocator([-0.4, 0.0, 0.4]))
+    ax.xaxis.set_major_formatter(_rows.tick_formatter())
+    ax.yaxis.set_major_formatter(_rows.tick_formatter())
+    ax.set_xlabel("relative coefficient")
+    ax.set_ylabel("entropy shift" if run.entropy else "abstention rate")
+    ax.set_title(run.name, loc="left")
+    if run.entropy:
+        axes.ref_line(ax, 0.0)
 
 
 def build(manifest: Manifest) -> FigureOutput:
@@ -228,130 +281,75 @@ def build(manifest: Manifest) -> FigureOutput:
         The figure and its caption parts.
     """
     runs = _runs(manifest)
-    dose = _dose_runs(runs)
-    cells = len(dose) + 1
-    grid_rows = math.ceil(cells / COLUMNS)
-    summary_height = len(runs) * ROW_INCHES
-    summary_top = 0.3 + (grid_rows - 1) * ROW_PITCH + PANEL_HEIGHT + 0.6
-    height = summary_top + summary_height + 0.55
-    pitch = (paper.FULL_WIDTH - LEFT - 0.1 - PANEL_WIDTH) / (COLUMNS - 1)
+    by_label = {r.label: r for r in runs}
+    entropy = [r for r in runs if r.entropy]
+    abstention = [r for r in runs if not r.entropy]
+    csv_rows: list[list[Any]] = []
 
     with paper.paper_style():
-        fig = Figure(figsize=(paper.FULL_WIDTH, height))
-        csv_rows: list[list[Any]] = []
-        letters = "abcdefghijklmnopqrstuvwxyz"
-        for i, run in enumerate(dose):
-            ax = _place(
-                fig,
-                LEFT + (i % COLUMNS) * pitch,
-                0.3 + (i // COLUMNS) * ROW_PITCH,
-                PANEL_WIDTH,
-                PANEL_HEIGHT,
-            )
-            names, curves = _curves(run)
-            rows = _dose_panel(ax, run, names, curves, i + COLUMNS >= len(dose))
-            csv_rows.extend([letters[i], *row] for row in rows)
-            paper.panel_letter(ax, letters[i])
-        slot = len(dose)
-        legend_ax = _place(
-            fig,
-            LEFT + (slot % COLUMNS) * pitch,
-            0.3 + (slot // COLUMNS) * ROW_PITCH,
-            PANEL_WIDTH,
-            PANEL_HEIGHT,
-        )
-        legend_ax.axis("off")
-        legend_ax.legend(
-            handles=_legend_handles(),
-            loc="center left",
-            bbox_to_anchor=(0.0, 0.5),
-            borderaxespad=0.0,
-            handlelength=1.8,
-        )
-        summary = _place(
-            fig,
-            SUMMARY_LEFT,
-            summary_top,
-            paper.FULL_WIDTH - SUMMARY_LEFT - 0.15,
-            summary_height,
-        )
-        rows = _summary_panel(summary, runs)
-        csv_rows.extend([letters[len(dose)], *row] for row in rows)
-        paper.panel_letter(summary, letters[len(dose)])
-        summary.legend(
+        fig = _rows.new_figure(HEIGHT)
+        top, bottom = fig.subfigures(2, 1, height_ratios=[2.3, 1.3], hspace=0.0)
+        ax_a, ax_b = top.subplots(1, 2)
+        doses = bottom.subplots(1, 3)
+        _forest(ax_a, entropy, "a", csv_rows)
+        _forest(ax_b, abstention, "b", csv_rows)
+        ax_a.set_xlabel("entropy shift per unit\nrelative coefficient")
+        ax_b.set_xlabel("abstention rate per unit\nrelative coefficient")
+        for ax, letter, key in zip(doses, "cde", EXEMPLARS, strict=True):
+            _dose(ax, by_label[" ".join(key)], letter, csv_rows)
+            paper.panel_letter(ax, letter)
+        paper.panel_letter(ax_a, "a")
+        paper.panel_letter(ax_b, "b")
+        legend = top.legend(
             handles=[
-                Line2D(
-                    [],
-                    [],
-                    ls="none",
-                    marker="o",
-                    ms=3.6,
-                    mfc=ENTROPY_COLOR,
-                    mec=ENTROPY_COLOR,
-                    label="entropy shift",
+                _rows.series_handle(
+                    "direction, unknown questions", "o", paper.INK
                 ),
-                Line2D(
-                    [],
-                    [],
-                    ls="none",
-                    marker="o",
-                    ms=3.6,
-                    mfc=ABSTENTION_COLOR,
-                    mec=ABSTENTION_COLOR,
-                    label="abstention rate",
+                _rows.series_handle(
+                    "direction, known questions", "^", paper.INK
                 ),
-                Line2D(
-                    [],
-                    [],
-                    ls="none",
-                    marker="o",
-                    ms=3.6,
-                    mfc="white",
-                    mec=paper.INK,
-                    label="not distinguishable",
+                _rows.series_handle(
+                    "random direction", "x", paper.ENC["random_marker"]
+                ),
+                _rows.series_handle("GPT-2 and base", "o", paper.INK),
+                _rows.series_handle(
+                    "post-trained", "o", paper.INK, filled=False
                 ),
             ],
-            loc="lower left",
-            bbox_to_anchor=(0.0, 1.03),
+            loc="outside upper center",
             ncol=3,
-            borderaxespad=0.0,
-            columnspacing=1.0,
             handlelength=1.0,
+            columnspacing=1.2,
+            fontsize=7,
         )
+        legend.get_frame().set_edgecolor("none")
 
-    distinguishable = sum(bool(r["headline"]["distinguishable"]) for r in runs)
-    selective = sum(bool(r["headline"]["selective"]) for r in runs)
-    failed_post = sum(
-        1
+    distinguishable = _rows.run_counts(
+        {(r.model, r.label): bool(r.head["distinguishable"]) for r in runs}
+    )
+    selective = _rows.run_counts(
+        {(r.model, r.label): bool(r.head["selective"]) for r in runs}
+    )
+    held = [
+        r
         for r in runs
-        if not r["headline"]["distinguishable"]
-        and _group.role(r["model"]) == "Qwen3 post-trained"
-    )
-    numbers = {
-        "runs": len(runs),
-        "distinguishable": distinguishable,
-        "selective": selective,
-        "not_distinguishable": len(runs) - distinguishable,
-        "not_distinguishable_post_trained": failed_post,
-    }
-    which = (
-        f"the {len(runs) - distinguishable} that it does not are all "
-        "post-trained"
-        if failed_post == len(runs) - distinguishable
-        else f"{failed_post} of the {len(runs) - distinguishable} that it "
-        "does not are post-trained"
-    )
-    claim = (
-        "Adding the known-versus-unknown direction while the model answers "
-        "moves the outcome on unknown questions more than random directions "
-        f"of the same norm in {distinguishable} of {len(runs)} runs "
-        f"({which}), and moves unknown questions more than known ones in "
-        f"{selective} of {len(runs)}."
+        if r.largest_shift("lat: known") >= r.largest_shift("lat: unknown")
+    ]
+    numbers: dict[str, float] = {"known_ge_unknown": float(len(held))}
+    for role in stats.ROLES:
+        numbers[f"n_{role}"] = float(distinguishable[role].total)
+        numbers[f"distinguishable_{role}"] = float(distinguishable[role].hits)
+        numbers[f"selective_{role}"] = float(selective[role].hits)
+    detail = DETAIL.format(
+        distinguishable=_rows.runs_text(distinguishable),
+        selective=_rows.runs_text(selective),
+        held=_rows.join_and([r.name for r in held]),
     )
     return FigureOutput(
         fig,
-        claim,
-        DETAIL.format(total=len(runs)),
-        {k: float(v) for k, v in numbers.items()},
+        CLAIM,
+        detail,
+        numbers,
         _group.csv_text(HEADER, csv_rows),
+        {"distinguishable": distinguishable, "selective": selective},
     )

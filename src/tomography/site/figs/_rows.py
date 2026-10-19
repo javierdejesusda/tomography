@@ -112,6 +112,45 @@ def all_or_per_role(counts: Mapping[str, stats.RoleCount]) -> str:
     return stats.per_role_text(counts)
 
 
+def run_counts(
+    flags: Mapping[tuple[str, str], bool],
+) -> dict[str, stats.RoleCount]:
+    """Counts a per-run statement by the role of the run's checkpoint.
+
+    Args:
+        flags: (checkpoint key, run label) to whether the statement holds;
+            a checkpoint may have more than one run.
+
+    Returns:
+        Role to its count, for every role in `stats.ROLES`.
+    """
+    counts = {r: [0, 0] for r in stats.ROLES}
+    for (model, _label), flag in flags.items():
+        cell = counts[stats.role(model)]
+        cell[0] += int(flag)
+        cell[1] += 1
+    return {r: stats.RoleCount(h, t) for r, (h, t) in counts.items()}
+
+
+def runs_text(counts: Mapping[str, stats.RoleCount]) -> str:
+    """Writes a per-role count of runs as a caption phrase.
+
+    Args:
+        counts: Role to its count.
+
+    Returns:
+        Text such as `3 of 3 GPT-2 runs, 3 of 3 Qwen3 base runs and 3 of 6
+        post-trained runs`; roles without runs are omitted.
+    """
+    return join_and(
+        [
+            f"{counts[r].hits} of {counts[r].total} {stats.ROLE_NAMES[r]} runs"
+            for r in stats.ROLES
+            if r in counts and counts[r].total
+        ]
+    )
+
+
 def dot(
     ax: Axes,
     model: str,

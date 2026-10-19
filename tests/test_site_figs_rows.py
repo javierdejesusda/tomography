@@ -80,3 +80,28 @@ def test_row_axis_puts_the_first_checkpoint_at_the_top() -> None:
         "GPT-2 small",
         "GPT-2 medium",
     ]
+
+
+def test_run_counts_counts_each_run_under_the_role_of_its_checkpoint() -> None:
+    counts = _rows.run_counts(
+        {
+            ("gpt2-xl", "fewshot"): True,
+            ("qwen3-4b-base", "fewshot"): True,
+            ("qwen3-4b", "fewshot"): True,
+            ("qwen3-4b", "concept"): False,
+        }
+    )
+    assert counts["gpt2"] == stats.RoleCount(1, 1)
+    assert counts["base"] == stats.RoleCount(1, 1)
+    assert counts["post"] == stats.RoleCount(1, 2)
+
+
+def test_runs_text_names_the_roles_and_skips_empty_ones() -> None:
+    counts = {
+        "gpt2": stats.RoleCount(3, 3),
+        "base": stats.RoleCount(0, 0),
+        "post": stats.RoleCount(3, 6),
+    }
+    assert _rows.runs_text(counts) == (
+        "3 of 3 GPT-2 runs and 3 of 6 post-trained runs"
+    )
