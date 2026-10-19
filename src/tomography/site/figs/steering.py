@@ -225,7 +225,7 @@ def _matrix(
     ax.set_yticklabels([paper.display_name(k) for k in models])
     ax.set_xticks(range(len(COEFFS)))
     ax.set_xticklabels([_rows.tick_text(c) for c in COEFFS])
-    ax.tick_params(length=0)
+    ax.tick_params(length=0, labelsize=TILE_FONT)
     for side in ("left", "bottom"):
         ax.spines[side].set_visible(False)
     count_ax.set_xlim(-0.5, len(COEFFS) - 0.5)
@@ -233,7 +233,7 @@ def _matrix(
     count_ax.set_yticks(range(3))
     count_ax.set_yticklabels([ROLE_TITLES[r] for r in stats.ROLES])
     count_ax.set_xticks([])
-    count_ax.tick_params(length=0)
+    count_ax.tick_params(length=0, labelsize=TILE_FONT)
     for spine in count_ax.spines.values():
         spine.set_visible(False)
     count_ax.set_xlabel("relative coefficient")
@@ -336,7 +336,7 @@ def build(manifest: Manifest) -> FigureOutput:
 
     with paper.paper_style():
         fig = _rows.new_figure(HEIGHT)
-        outer = fig.add_gridspec(1, 2, width_ratios=[1.45, 2.55])
+        outer = fig.add_gridspec(1, 2, width_ratios=[1.55, 2.45])
         left = outer[0].subgridspec(3, 2, width_ratios=[1.0, 0.25], wspace=0.04)
         right = outer[1].subgridspec(
             2, 2, height_ratios=[10, 1.6], width_ratios=[1.0, 0.05]
