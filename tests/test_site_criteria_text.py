@@ -66,15 +66,14 @@ def test_the_words_criterion_is_the_difference_interval() -> None:
 
 
 def test_the_baseline_findings_name_the_interval_criterion() -> None:
-    text = _findings("Baselines")
     assert (
         "above a classifier on the words alone, with an interval excluding "
         "zero, on [[count:fig:teaser.truthfulqa]]"
-    ) in text
+    ) in _findings("Truth")
     assert (
         "adds to the confidence of the model, with an interval excluding "
         "zero, on [[count:fig:teaser.knowledge_confidence]]"
-    ) in text
+    ) in _findings("Known and unknown")
 
 
 def test_the_post_training_sentiment_count_names_its_interval() -> None:
@@ -205,9 +204,10 @@ def test_the_summary_holds_per_role_on_the_data() -> None:
                 ref = teaser.counts[logistic[pca]][role].hits
             assert finders.counts[pca][role].hits <= ref, (pca, role)
     assert (
-        "truth and knowledge readers do not beat text-only or confidence "
-        "baselines"
+        "a truth reader does not beat the words alone, a known-against-"
+        "unknown direction does not beat the model's confidence"
     ) in tldr
+    assert len(tldr.split()) <= 60
     for name in ("truthfulqa", "knowledge_confidence"):
         assert all(c.hits == 0 for c in teaser.counts[name].values()), name
     assert "breaks the fluency rule on most checkpoints" in tldr

@@ -39,9 +39,10 @@ FLUENCY_RULE = (
 TLDR = (
     "A logistic direction reads utility and morality above a random "
     "direction on every checkpoint and truth on every Qwen3 checkpoint; the "
-    "finder of the paper is weaker, truth and knowledge readers do not beat "
-    "text-only or confidence baselines, and steering strong enough to beat "
-    "random directions breaks the fluency rule on most checkpoints."
+    "finder of the paper is weaker, a truth reader does not beat the words "
+    "alone, a known-against-unknown direction does not beat the model's "
+    "confidence, and steering strong enough to beat random directions "
+    "breaks the fluency rule on most checkpoints."
 )
 
 FRONT_ITEMS = ("fig:teaser",)
@@ -57,8 +58,9 @@ ABSTRACT = (
     "utility, where the pairs are matched, but on fewer checkpoints for "
     "sentiment and truth, where they are unrelated; matching is confounded "
     "with the concept and the data. A TruthfulQA reader is not above a "
-    "classifier on the words alone, and a known-against-unknown direction "
-    "does not add to the confidence of the model. Steering at relative "
+    "classifier on the words alone, and a known-against-unknown direction, "
+    "which ranks questions above their popularity, does not add to the "
+    "confidence of the model. Steering at relative "
     "coefficient 0.1 moves judged sentiment on most checkpoints, while "
     "utility steering at relative coefficient 0.3 beats every random "
     "direction on only some. "
@@ -116,14 +118,24 @@ KEY_FINDINGS = Section(
             "most checkpoints ([[fig:reading]], [[fig:teaser]]).",
         ),
         (
-            "Baselines ([[sec:baselines]]).",
+            "Known and unknown questions ([[sec:known_unknown]]).",
+            "A known-against-unknown direction ranks questions above their "
+            "popularity, with an interval excluding zero, on "
+            "[[count:fig:knowledge_reading.above_pop]], but adds to the "
+            "confidence of the model, with an interval excluding zero, on "
+            "[[count:fig:teaser.knowledge_confidence]]; it moves unknown "
+            "questions more than random directions on "
+            "[[runs:fig:knowledge_steering.distinguishable]], and a range "
+            "reader is above its random control on "
+            "[[count:fig:approximate.reader_above_random]] "
+            "([[fig:knowledge_reading]], [[fig:knowledge_steering]], "
+            "[[fig:approximate]]).",
+        ),
+        (
+            "Truth ([[sec:truth]]).",
             "A TruthfulQA reader is above a classifier on the words alone, "
             "with an interval excluding zero, on "
-            "[[count:fig:teaser.truthfulqa]], and a known-against-unknown "
-            "direction adds to the confidence of the model, with an "
-            "interval excluding zero, on "
-            "[[count:fig:teaser.knowledge_confidence]] "
-            "([[fig:truth]], [[fig:knowledge_reading]]).",
+            "[[count:fig:teaser.truthfulqa]] ([[fig:truth]]).",
         ),
         (
             "Steering ([[sec:steering]]).",
@@ -198,6 +210,14 @@ INTRODUCTION = Section(
             "Four GPT-2 sizes and three Qwen3 sizes, each Qwen3 size as a "
             "base and a post-trained checkpoint, so a difference between "
             "roles is measured, not assumed.",
+        ),
+        (
+            "Known and unknown questions ([[sec:known_unknown]]).",
+            "A known-against-unknown direction is compared with popularity, "
+            "text classifiers and the confidence of the model, its steering "
+            "of abstention with random directions of the same norm, and a "
+            "range direction for approximate answers with a random control "
+            "and a word classifier.",
         ),
         (
             "A page rebuilt from the result files ([[sec:reproducibility]]).",
@@ -464,37 +484,103 @@ RESULTS = Section(
             ),
         ),
         Section(
-            "baselines",
-            "Does a reader beat the baseline that could explain it?",
+            "known_unknown",
+            "Known and unknown questions",
+            paragraphs=(
+                "A known-against-unknown direction ranks questions above "
+                "their popularity but adds at most a small amount to the "
+                "confidence of the model, moves abstention on some runs "
+                "only, and a range reader for approximate answers is above "
+                "its random control on only some checkpoints.",
+            ),
+            runin=(
+                (
+                    "Reading.",
+                    "[[fig:knowledge_reading]] compares the direction with "
+                    "popularity, text and the confidence of the model on "
+                    "PopQA within relation: it ranks questions above their "
+                    "popularity, with an interval excluding zero, on "
+                    "[[count:fig:knowledge_reading.above_pop]], and its "
+                    "increment over the confidence of the model has an "
+                    "interval covering zero on "
+                    "[[num:fig:knowledge_reading.dir_inc_cover_all]] of "
+                    "[[num:fig:knowledge_reading.dir_inc_n]] checkpoints, at "
+                    "most [[num:fig:knowledge_reading.dir_inc_hi_max]] at its "
+                    "upper end, while a probe fitted on the correct and "
+                    "wrong labels adds "
+                    "[[num:fig:knowledge_reading.probe_inc_min]] to "
+                    "[[num:fig:knowledge_reading.probe_inc_max]] to that "
+                    "measure. On Qwen3-4B-Base a classifier on the words or "
+                    "characters comes within a small margin of the "
+                    "direction or beats it on "
+                    "[[num:fig:a_knowledge_matrix.close]] of "
+                    "[[num:fig:a_knowledge_matrix.types]] question types "
+                    "([[fig:a_knowledge_matrix]]).",
+                ),
+                (
+                    "Steering.",
+                    "Adding the direction moves the outcome on unknown "
+                    "questions (the next-token entropy for GPT-2 and base "
+                    "checkpoints, the abstention rate for post-trained ones) "
+                    "more than each of three random directions of the same "
+                    "norm on [[runs:fig:knowledge_steering.distinguishable]], "
+                    "and more than on known questions on "
+                    "[[runs:fig:knowledge_steering.selective]] "
+                    "([[fig:knowledge_steering]]). Known questions move at "
+                    "least as much as unknown ones, by the largest shift of "
+                    "the mean dose curve, on "
+                    "[[runs:fig:knowledge_steering.known_ge_unknown]].",
+                ),
+                (
+                    "Approximate answers.",
+                    "Asked for a quantity whose sourced answer is a range, "
+                    "Qwen3 base checkpoints write a range for "
+                    "[[num:fig:approximate.range_base_min]] to "
+                    "[[num:fig:approximate.range_base_max]] percent of the "
+                    "items and post-trained ones for "
+                    "[[num:fig:approximate.range_post_min]] to "
+                    "[[num:fig:approximate.range_post_max]] percent when the "
+                    "last example of the prompt is a range, and, told to "
+                    "give one exact number, for at most "
+                    "[[num:fig:approximate.forced_base_max]] percent (base) "
+                    "and [[num:fig:approximate.forced_post_max]] percent "
+                    "(post-trained). A range reader fitted on heights and "
+                    "wingspans is above its random control on held-out "
+                    "durations on [[count:fig:approximate.reader_above_random]]"
+                    ", and above a classifier on the question words, with "
+                    "the interval of the difference above zero, on "
+                    "[[count:table:approximate.above_words]] "
+                    "([[fig:approximate]]).",
+                ),
+            ),
+            items=(
+                "fig:knowledge_reading",
+                "fig:knowledge_steering",
+                "fig:approximate",
+            ),
+            after=(
+                "Every dose curve is in [[sec:appendix_knowledge]] and the "
+                "values behind the range reader in "
+                "[[sec:appendix_approximate]].",
+            ),
+        ),
+        Section(
+            "truth",
+            "Does a truth reader beat the words alone?",
             paragraphs=(
                 "A TruthfulQA reader is not above a classifier on the words "
-                "alone, and a known-against-unknown direction ranks "
-                "questions above their popularity but does not add to the "
-                "confidence of the model.",
+                "alone.",
             ),
-            items=("fig:truth", "fig:knowledge_reading"),
+            items=("fig:truth",),
             after=(
                 "TruthfulQA can be answered in part from the answer text "
                 "alone, and negation flips the label without changing the "
                 "topic: [[fig:truth]] pairs the reader with two text "
                 "classifiers, and at least one negated set falls below "
                 "chance with its interval on "
-                "[[count:fig:truth.neg_below_half]] ([[fig:a_truth_cities]]). "
-                "[[fig:knowledge_reading]] "
-                "compares the direction with popularity, text and the "
-                "confidence of the model: it ranks questions above their "
-                "popularity, with an interval excluding zero, on "
-                "[[count:fig:knowledge_reading.above_pop]], and adds to the "
-                "confidence by at most "
-                "[[num:fig:knowledge_reading.dir_inc_hi_max]] at the upper "
-                "end of its interval on any checkpoint. A range reader for "
-                "approximate answers is above a classifier on the question "
-                "words, with the interval of the difference above zero, on "
-                "[[count:table:approximate.above_words]] "
-                "([[fig:approximate]]). The truth readers, the knowledge "
-                "steering and the approximate answers are in "
-                "[[sec:appendix_truth]], [[sec:appendix_knowledge]] and "
-                "[[sec:appendix_approximate]].",
+                "[[count:fig:truth.neg_below_half]] "
+                "([[fig:a_truth_cities]]). The readers and the honesty "
+                "transfer are in [[sec:appendix_truth]].",
             ),
         ),
         Section(
@@ -607,7 +693,10 @@ DISCUSSION = Section(
             "Sentiment is the positive-class probability of a classifier, "
             "the utility steering test is judged by the same sentiment "
             "classifier, which makes one judge family, and abstention is "
-            "detected by phrase matching without human labels.",
+            "detected by phrase matching without human labels, which does "
+            "not separate a generic answer to an unknowable detail from a "
+            "specific invented one, because the runs do not label which a "
+            "non-abstaining answer is.",
         ),
         (
             "Labels and approximate answers.",
@@ -884,19 +973,12 @@ APPENDICES = (
         "appendix_knowledge",
         "Knowledge",
         paragraphs=(
-            "These support the finding that a known-against-unknown "
-            "direction does not add to the confidence of the model: the "
+            "These support the finding on known and unknown questions: the "
             "transfer between question types on Qwen3-4B-Base "
-            "([[fig:a_knowledge_matrix]]), the values of the main figure "
-            "([[table:knowledge]]), the steering with the direction "
-            "([[fig:knowledge_steering]]) and every dose curve "
-            "([[fig:a_dose_runs]], [[fig:a_dose_types]]). Adding the "
-            "direction moves unknown questions more than each of three "
-            "random directions on "
-            "[[runs:fig:knowledge_steering.distinguishable]], and, by the "
-            "largest shift of the mean dose curve, known questions move at "
-            "least as much as unknown ones on "
-            "[[runs:fig:knowledge_steering.known_ge_unknown]].",
+            "([[fig:a_knowledge_matrix]]), the values of the main figures "
+            "([[table:knowledge]]) and every dose curve "
+            "([[fig:a_dose_runs]], [[fig:a_dose_types]]) behind "
+            "[[fig:knowledge_steering]].",
             "The confidence of the model stacks five output signals, and "
             "only the pooled level of the stack is stored, so the single "
             "probability of the model's own answer token stands for it in "
@@ -921,7 +1003,6 @@ APPENDICES = (
         items=(
             "fig:a_knowledge_matrix",
             "table:knowledge",
-            "fig:knowledge_steering",
             "fig:a_dose_runs",
             "fig:a_dose_types",
         ),
@@ -930,28 +1011,36 @@ APPENDICES = (
         "appendix_approximate",
         "Approximate answers",
         paragraphs=(
-            "These support the finding that a range reader is not above a "
-            "classifier on the question words. Wikidata gives quantities "
-            "whose sourced answer is a range (the height of a breed) or a "
-            "single value (the height of a building); [[fig:approximate]] "
-            "shows what the models answer and what a range reader reads, "
-            "with the heights of people as a diagnostic, and "
-            "[[table:approximate]] gives the values. Qwen3 writes ranges "
-            "where the sourced answer is a range, but the range reader is "
-            "above a classifier on the question words, with the interval "
-            "of the difference above zero, on "
-            "[[count:table:approximate.above_words]], sits at the lowest "
-            "layer on [[count:table:approximate.layer_one]], and is above "
-            "the 95 percent interval of its random control on "
-            "[[count:fig:approximate.reader_above_random]]; that control "
-            "falls below 0.5, a sign flip between the training and the "
-            "test concepts, on [[count:fig:approximate.control_below_half]] "
-            "and above 0.95, so the random direction already separates the "
-            "test concepts, on [[count:fig:approximate.control_above_95]]. "
+            "These support the finding on approximate answers. Wikidata "
+            "gives quantities whose sourced answer is a range (the height "
+            "of a breed) or a single value (the height of a building); "
+            "[[table:approximate]] gives the values behind "
+            "[[fig:approximate]], which shows what the models answer and "
+            "what a range reader reads, with the heights of people as a "
+            "diagnostic. Qwen3 writes ranges where the sourced answer is a "
+            "range, but the range reader is above a classifier on the "
+            "question words, with the interval of the difference above "
+            "zero, on [[count:table:approximate.above_words]], sits at the "
+            "lowest layer on [[count:table:approximate.layer_one]], and "
+            "its random control falls below 0.5, a sign flip between the "
+            "training and the test concepts, on "
+            "[[count:fig:approximate.control_below_half]] and above 0.95, "
+            "so the random direction already separates the test concepts, "
+            "on [[count:fig:approximate.control_above_95]]. The control is "
+            "the mean of random directions whose individual draws are not "
+            "stored. The reader places the people at "
+            "[[num:fig:approximate.position_min]] to "
+            "[[num:fig:approximate.position_max]], next to the breeds, so "
+            "it does not separate a range-valued answer from a living "
+            "subject; the position lies outside the random band on "
+            "[[count:fig:approximate.outside]], but the random bands span "
+            "[[num:fig:approximate.band_min]] to "
+            "[[num:fig:approximate.band_max]] across checkpoints, so the "
+            "position cannot separate the reader from random. "
             "[[fig:a_links]] compares the range direction with the "
             "knowledge directions.",
         ),
-        items=("fig:approximate", "fig:a_links", "table:approximate"),
+        items=("fig:a_links", "table:approximate"),
     ),
     Section(
         "appendix_post",

@@ -359,7 +359,7 @@ def test_printed_numbers_match_ids_and_registry_order(
     figure_number, table_number = page.numbers(doc)
     assert figure_number["teaser"] == "1"
     assert sorted(int(figure_number[k]) for k in registry.MAIN_FIGURES) == list(
-        range(1, 9)
+        range(1, 11)
     )
     assert sorted(int(table_number[k]) for k in registry.MAIN_TABLES) == [1, 2]
     for key, number in figure_number.items():
@@ -655,4 +655,4 @@ def test_the_page_opens_with_summary_overview_abstract_and_findings(
     assert "TL;DR." in html
     assert page.numbers(full[0])[0]["teaser"] == "1"
     findings = html.split('id="key_findings"')[1].split("<h2")[0]
-    assert findings.count("<li>") == 5
+    assert findings.count("<li>") == 6
