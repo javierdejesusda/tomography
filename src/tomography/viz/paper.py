@@ -1,5 +1,8 @@
 """Print-ready figure style for the results site and the paper figures.
 
+`ENC` is the encoding dictionary of the page: every hue, fill and line style
+has one meaning, and no figure picks a colour of its own.
+
 One style covers every figure: the Computer Modern face of the NeurIPS and
 ICLR body text, 8 to 9 pt type, 0.5 pt axes, Okabe-Ito hues in a fixed order,
 grey for random baselines, and a text width of 5.5 in. Rendering is
@@ -34,7 +37,11 @@ LABEL = 8
 TITLE = 9
 LETTER = 9
 
-RAMP_LIGHTNESS = (0.46, 0.2)
+RAMP_LIGHTNESS = {"gpt2": (0.46, 0.2), "qwen3": (0.40, 0.2)}
+REFERENCE_WIDTH = 0.5
+TREND_WIDTH = 0.6
+DATA_WIDTH = 1.0
+WHISKER_WIDTH = 0.6
 
 RC: dict[str, Any] = {
     "font.family": ["serif"],
@@ -80,6 +87,32 @@ RC: dict[str, Any] = {
 }
 
 FAMILY_BASE = {"qwen3": SERIES[0], "gpt2": SERIES[1]}
+
+LINESTYLES: dict[str, Any] = {
+    "solid": "-",
+    "post_trained": (0, (3, 2)),
+    "reference": (0, (1, 1.5)),
+    "trend": (0, (4, 1.5, 1, 1.5)),
+}
+
+
+def _build_enc() -> dict[str, Any]:
+    """Builds the encoding dictionary after the ramp function exists."""
+    return {
+        "gpt2": tuple(size_ramp("gpt2", 4)),
+        "qwen3": tuple(size_ramp("qwen3", 3)),
+        "direction": INK,
+        "random_band": RANDOM_BAND,
+        "random_marker": "#888888",
+        "reference": CHANCE,
+        "text": "#009E73",
+        "paper": "#CC79A7",
+        "popularity": "#E69F00",
+        "own_probability": "#56B4E9",
+        "unused": "#F0E442",
+        "secondary_text": "#4d4d4d",
+    }
+
 
 NAMES = {
     "gpt2": "GPT-2 small",
@@ -155,7 +188,7 @@ def size_ramp(family_key: str, count: int) -> list[str]:
         return [base]
     red, green, blue = (int(base[i : i + 2], 16) / 255 for i in (1, 3, 5))
     hue, _, sat = colorsys.rgb_to_hls(red, green, blue)
-    hi, lo = RAMP_LIGHTNESS
+    hi, lo = RAMP_LIGHTNESS[family_key]
     colors = []
     for i in range(count):
         light = hi + (lo - hi) * i / (count - 1)
@@ -220,3 +253,6 @@ def pdf_bytes(fig: Figure) -> bytes:
             metadata={"CreationDate": None, "Creator": "tomography"},
         )
     return buffer.getvalue()
+
+
+ENC: dict[str, Any] = _build_enc()
