@@ -386,14 +386,6 @@ def test_build_is_byte_identical_in_two_fresh_processes(
         assert first == second, _difference(rel, first, second)
 
 
-FONT_PENDING = {
-    "a_layers",
-    "a_reading_heat",
-    "a_finders_gpt2",
-    "a_finders_qwen3",
-}
-
-
 def test_every_figure_passes_the_palette_font_and_text_guards(
     site: tuple[Path, page.Document],
 ) -> None:
@@ -402,8 +394,6 @@ def test_every_figure_passes_the_palette_font_and_text_guards(
         assert checks.guard_problems(entry.output.figure) == [], key
     for key, entry in doc.appendix.items():
         problems = checks.guard_problems(entry.output.figure, appendix=True)
-        if key in FONT_PENDING:
-            problems = [p for p in problems if not p.startswith("font ")]
         assert problems == [], key
 
 

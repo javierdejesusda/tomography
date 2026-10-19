@@ -26,7 +26,7 @@ HEIGHT = 3.2
 VMAX = 0.6
 HALO = 1.6
 TICK = 0.8
-TEXT = 6.5
+TEXT = paper.MIN_TEXT
 TITLE_X = 0.14
 
 
@@ -82,11 +82,11 @@ def _key(fig: Figure) -> None:
     fig.legend(
         handles,
         ["onset (earliest layer above 0.1)", "layer read"],
-        loc="outside upper right",
+        loc="outside upper center",
         ncol=2,
         frameon=False,
         fontsize=TEXT,
-        columnspacing=1.0,
+        columnspacing=3.5,
         handlelength=1.2,
     )
 

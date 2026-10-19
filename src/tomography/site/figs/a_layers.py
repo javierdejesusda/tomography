@@ -42,7 +42,7 @@ XLIM = (0.0, 1.24)
 LABEL_X = 1.02
 LABEL_GAP = 0.07
 YLIM = (0.3, 1.0)
-TEXT = 6.5
+TEXT = paper.MIN_TEXT
 
 
 def _label(model: str) -> str:
