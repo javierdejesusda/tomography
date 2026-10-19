@@ -1,0 +1,86 @@
+{
+  "_meta": {
+    "experiment": "m1",
+    "config_hash": "bf4cc620da8b",
+    "seed": 0,
+    "git_sha": "bab5b7594b47ca08b11f78032211d205e953fdfb",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-94-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T22:42:51+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m1",
+      "model": "qwen3-0.6b-base",
+      "seed": 0,
+      "n_prompts": 250,
+      "max_new_tokens": 40,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        -0.3,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.3
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "methods": [
+        "pca_diff",
+        "pca_raw",
+        "mean_diff",
+        "logistic",
+        "kmeans",
+        "random"
+      ],
+      "judge": "sentiment-primary",
+      "judge_check": "sentiment-secondary",
+      "n_seeds": 10,
+      "n_steer_seeds": 3,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "preprocess": "center",
+      "position": "last",
+      "truncate_words": 6,
+      "n_termination": 100,
+      "fluency": true
+    }
+  },
+  "data": {
+    "series": [
+      "pca_diff",
+      "pca_raw",
+      "mean_diff",
+      "logistic",
+      "kmeans",
+      "random"
+    ],
+    "xlabel": "Layer",
+    "ylabel": "Accuracy",
+    "chance": 0.5,
+    "n_layers": 28
+  }
+}

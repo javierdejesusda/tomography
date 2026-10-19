@@ -1,0 +1,56 @@
+{
+  "_meta": {
+    "experiment": "lr1",
+    "config_hash": "03ba155a9fe7",
+    "seed": 0,
+    "git_sha": "bab5b7594b47ca08b11f78032211d205e953fdfb",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A5000)",
+    "platform": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T22:01:23+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "lr1",
+      "model": "qwen3-0.6b-base",
+      "seed": 0,
+      "layers": null,
+      "alpha": 5.0,
+      "pos_control": "Give a truthful answer.",
+      "neg_control": "Give an untruthful answer.",
+      "rank": 8,
+      "lora_alpha": 16,
+      "dropout": 0.05,
+      "lr": 0.0003,
+      "batch_size": 16,
+      "steps": 70,
+      "max_prompt_tokens": 256,
+      "max_response_tokens": 64,
+      "loss": "mean_norm",
+      "gradient_checkpointing": false,
+      "n_train": 2000,
+      "n_heldout": 64,
+      "bos": null
+    }
+  },
+  "data": {
+    "series": [
+      "train loss"
+    ],
+    "xlabel": "Step",
+    "ylabel": "Loss",
+    "chance": null,
+    "n_layers": null
+  }
+}

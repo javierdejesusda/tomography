@@ -3,12 +3,12 @@
     "experiment": "p1",
     "config_hash": "078b9d6482a2",
     "seed": 0,
-    "git_sha": "ca2546cd5cb9a14a6b01ff84224c6ace0db01a1f",
+    "git_sha": "bab5b7594b47ca08b11f78032211d205e953fdfb",
     "git_dirty": false,
-    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
-    "platform": "Windows-11-10.0.26200-SP0",
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-57-generic-x86_64-with-glibc2.39",
     "versions": {
-      "python": "3.12.6",
+      "python": "3.12.3",
       "tomography": "0.1.0",
       "torch": "2.14.1+cu130",
       "transformers": "5.19.0",
@@ -19,7 +19,7 @@
       "matplotlib": "3.11.2",
       "plotly": "7.1.0"
     },
-    "started_at": "2026-10-17T01:55:20+00:00",
+    "started_at": "2026-10-18T23:30:45+00:00",
     "finished_at": null,
     "config": {
       "experiment": "p1",

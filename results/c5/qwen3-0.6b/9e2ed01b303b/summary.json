@@ -1,0 +1,99 @@
+{
+  "_meta": {
+    "experiment": "c5",
+    "config_hash": "9e2ed01b303b",
+    "seed": 0,
+    "git_sha": "bab5b7594b47ca08b11f78032211d205e953fdfb",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 3090)",
+    "platform": "Linux-6.8.0-94-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-19T00:03:24+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "c5",
+      "model": "qwen3-0.6b",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 24,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        -0.3,
+        -0.2,
+        -0.1,
+        0.0,
+        0.1,
+        0.2,
+        0.3
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "n_pairs": 128,
+      "n_eval_pairs": 128,
+      "strength": 0.1,
+      "n_pool": 1000,
+      "n_show": 4,
+      "n_shots": 15,
+      "c2_run": "results/c2/qwen3-0.6b/9aa16ae5425c",
+      "n_random": 3
+    }
+  },
+  "data": {
+    "layers": [
+      8,
+      11,
+      13,
+      16,
+      19,
+      21,
+      24,
+      26
+    ],
+    "strength": 0.1,
+    "n_pool": 1000,
+    "correct_none": 0.13,
+    "correct_honest": 0.113,
+    "correct_lie": 0.082,
+    "n_random": 3,
+    "correct_random_plus": 0.12533333333333332,
+    "correct_random_minus": 0.12533333333333332,
+    "n_known": 130,
+    "n_flipped": 62,
+    "flip_rate": 0.47692307692307695,
+    "flip_ci": [
+      0.39296542216305513,
+      0.5622054191228417
+    ],
+    "emotions": [
+      "happiness",
+      "sadness",
+      "anger",
+      "fear",
+      "disgust",
+      "surprise"
+    ],
+    "emotion_strength": 0.3,
+    "c2_run": "results/c2/qwen3-0.6b/9aa16ae5425c"
+  }
+}
