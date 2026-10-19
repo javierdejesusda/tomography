@@ -161,3 +161,7 @@ def test_no_cell_has_a_dash_character_or_an_internal_code(
     cells = [c for row in output.rows for c in row]
     assert not any(ch in c for c in cells for ch in DASHES)
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", c) for c in cells)
+
+
+def test_the_per_checkpoint_pin_refers_to_the_models_table_by_token() -> None:
+    assert assets.PER_CHECKPOINT == "one per checkpoint, [[table:checkpoints]]"

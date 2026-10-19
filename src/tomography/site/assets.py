@@ -101,7 +101,7 @@ CHECKPOINTS = {
     ),
 }
 
-PER_CHECKPOINT = "one per checkpoint, Table 1"
+PER_CHECKPOINT = "one per checkpoint, [[table:checkpoints]]"
 
 ASSETS = (
     Asset(
