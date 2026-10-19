@@ -340,3 +340,12 @@ def test_table_two_has_grouped_headers_with_a_muted_exploratory_group(
 def test_model_names_in_the_first_column_do_not_wrap() -> None:
     css = (STATIC / "site.css").read_text("utf-8")
     assert "td:first-child {\n  white-space: nowrap;\n}" in css
+
+
+def test_tables_use_a_footnote_size_font_so_the_wide_table_fits_the_text() -> (
+    None
+):
+    css = (STATIC / "site.css").read_text("utf-8")
+    desktop = css[: css.index("@media (max-width: 600px)")]
+    assert "font-size: 0.84em" in desktop
+    assert "padding: 0.18em 0.5em" in desktop

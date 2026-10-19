@@ -86,7 +86,7 @@ a.ref {
 code,
 pre {
   font-family: "LM Mono", "Latin Modern Mono", "CMU Typewriter Text", monospace;
-  font-size: 0.88em;
+  font-size: 0.84em;
 }
 
 header.title {
@@ -199,7 +199,7 @@ figcaption {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.88em;
+  font-size: 0.84em;
   font-variant-numeric: tabular-nums lining-nums;
 }
 
@@ -246,7 +246,7 @@ td:first-child {
 
 th,
 td {
-  padding: 0.18em 0.7em;
+  padding: 0.18em 0.5em;
   text-align: left;
   vertical-align: baseline;
 }
