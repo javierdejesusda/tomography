@@ -109,3 +109,12 @@ def test_no_dash_run_code_or_underscore_in_the_table(
     assert not any(ch in t for t in texts for ch in DASHES)
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
     assert not any("_" in t for t in texts)
+
+
+def test_the_caption_says_which_comparison_it_is(
+    output: registry.TableOutput,
+) -> None:
+    text = output.detail
+    assert "reader minus a random direction" in text
+    assert "not the comparison with the text baselines" in text
+    assert "[[sec:truth]]" in text

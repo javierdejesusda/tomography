@@ -61,7 +61,9 @@ def build(manifest: Manifest) -> TableOutput:
         f"({sizes['sentiment']} sentiment, {sizes['truth']} truth and "
         f"{sizes['utility']} utility pairs) excludes zero. Sentiment and "
         "truth use pairs of unrelated inputs with opposite labels; utility "
-        "uses matched scenarios. Every finder and preprocessing is in "
+        "uses matched scenarios. Each cell is a reader minus a random "
+        "direction, not the comparison with the text baselines, which is in "
+        "[[sec:truth]]. Every finder and preprocessing is in "
         "[[table:finders_all]]."
     )
     return TableOutput(
