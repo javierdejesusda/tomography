@@ -1,5 +1,4 @@
-"""The figures of the first six slots and of Appendix B and C read the
-encoding table of `viz/paper.py` and carry no local marker or line style."""
+"""Checks that the figures read the encoding table of `viz/paper.py`."""
 
 from pathlib import Path
 import runpy
@@ -125,7 +124,7 @@ def test_the_probability_reader_of_figure_6_uses_the_answer_marker(
     assert paper.MEASURE_MARKERS["paper_finder"] not in marks
 
 
-@pytest.mark.parametrize("key", ("a_layers", "a_finders_qwen3"))
+@pytest.mark.parametrize("key", ["a_layers", "a_finders_qwen3"])
 def test_post_trained_lines_use_the_one_style(
     built: dict[str, registry.FigureOutput], key: str
 ) -> None:
