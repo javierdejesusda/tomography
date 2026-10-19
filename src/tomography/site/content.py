@@ -33,13 +33,13 @@ ABSTRACT_FINDER = (
     "[[count:fig:finders.pca_sentiment]] and truth on "
     "[[count:fig:finders.pca_truth]] with unrelated pairs and for utility "
     "on [[count:fig:finders.pca_utility]] with matched pairs; matching is "
-    "confounded with the concept and the data."
+    "confounded with the concept and data."
 )
 ABSTRACT_STEERING = (
     "Steering at relative coefficient 0.1 moves sentiment on "
     "[[count:fig:steering.moves01]] and keeps the fluency rule on "
     "[[count:fig:steering.fluent01]]. Steering utility at relative "
-    "coefficient 0.3 beats random directions on "
+    "coefficient 0.3 beats every random direction on "
     "[[count:fig:teaser.steering]] and keeps it on "
     "[[count:fig:teaser.steering_fluent]] (GPT-2 small has no fluency "
     "measure)."
@@ -800,7 +800,8 @@ REPRODUCIBILITY = Section(
         "pinned to the revisions in [[table:assets]]. The experiments ran "
         "on a single consumer GPU, on rented single-GPU cloud machines and "
         "on a 16-thread CPU machine. One experiment trains a model beyond "
-        "the readers: a LoRRA adapter fitted on each of the 10 checkpoints. "
+        "the readers: a LoRRA adapter fitted on each of the 10 checkpoints "
+        "([[sec:appendix_other]]). "
         "Every experiment is one command, tomography run followed by the "
         "experiment and the checkpoint, with base seed 0 from which the "
         "seeds of the readers are derived by a hash, so a rerun reproduces "
@@ -866,6 +867,28 @@ APPENDICES = (
             "fig:a_dose_types",
             "fig:a_links",
             "table:base_post",
+        ),
+    ),
+    Section(
+        "appendix_other",
+        "Other experiments",
+        paragraphs=(
+            "Further experiments ran on the same checkpoints and are "
+            "reported in the findings document of the repository at the "
+            "commit named in the masthead. They have no figure or table on "
+            "this page: the [[findings:"
+            "lorra-adapter-lr1-and-the-truthfulqa-control-c4|LoRRA adapter "
+            "and its TruthfulQA control]], [[findings:emotions-r4|emotion "
+            "reading]] and [[findings:emotion-steering-c2|emotion "
+            "steering]], the [[findings:lie-gallery-c5|lie gallery]] with "
+            "honesty and lie steering, [[findings:template-steering-p7|"
+            "template steering]], the [[findings:"
+            "direction-agreement-and-logit-lens-on-gpt2-a1-a2|logit lens]] "
+            "and [[findings:token-position-and-a-misleading-sentence-p2|"
+            "token position]] of the reader. Each link opens the section "
+            "of the findings document that reports the experiment; this "
+            "page makes no claim about what they show. Read them as a "
+            "record of what was run, not as results of this page.",
         ),
     ),
 )

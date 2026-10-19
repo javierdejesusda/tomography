@@ -202,7 +202,7 @@ class Page:
         for number, section in enumerate(content.BODY, 1):
             visit(section, str(number))
         figure = table = 0
-        for letter, section in zip("ABCD", content.APPENDICES, strict=True):
+        for letter, section in zip("ABCDE", content.APPENDICES, strict=True):
             self.sections[section.key] = letter
             for item in section.items:
                 kind, _, key = item.partition(":")
@@ -254,6 +254,11 @@ class Page:
             return (
                 f'<a class="ref" href="#table-{number}">Table&nbsp;{number}</a>'
             )
+        if name.startswith("findings:"):
+            slug, _, text = name[9:].partition("|")
+            commit = self.doc.commit or "main"
+            url = f"{content.REPO_URL}/blob/{commit}/docs/findings.md#{slug}"
+            return f'<a href="{_e(url)}">{_e(text)}</a>'
         if name.startswith("num:"):
             return _e(self.quoted_number(name[4:]))
         if name.startswith("count:"):
@@ -550,7 +555,7 @@ class Page:
     def appendix(self) -> str:
         """Renders the four appendices."""
         parts = ['<section id="appendix">']
-        for letter, section in zip("ABCD", content.APPENDICES, strict=True):
+        for letter, section in zip("ABCDE", content.APPENDICES, strict=True):
             parts.append(self.section(section, f"Appendix {letter}"))
         parts.append("</section>")
         return "".join(parts)

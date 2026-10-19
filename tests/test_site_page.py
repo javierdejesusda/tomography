@@ -1,3 +1,4 @@
+import dataclasses
 from html.parser import HTMLParser
 from pathlib import Path
 import re
@@ -395,6 +396,7 @@ def test_sections_run_in_order_with_references_before_the_appendix(
         "Appendix B Reading details",
         "Appendix C Wording and truth details",
         "Appendix D Knowledge, approximate answers and post-training details",
+        "Appendix E Other experiments",
     ]
     subs = [
         t.replace("&ensp;", " ")
@@ -615,3 +617,18 @@ def test_a_text_table_of_six_columns_is_wide_too() -> None:
     )
     doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
     assert 'class="table wide"' in page.Page(doc).table("checkpoints")
+
+
+def test_a_findings_link_is_pinned_to_the_results_commit() -> None:
+    doc = dataclasses.replace(_doc(), commit="abc1234")
+    html = page.Page(doc).text("[[findings:lie-gallery-c5|the lie gallery]]")
+    assert (
+        '<a href="https://github.com/javierdejesusda/tomography/blob/abc1234/'
+        'docs/findings.md#lie-gallery-c5">the lie gallery</a>'
+    ) in html
+    assert "blob/main" not in html
+    doc = dataclasses.replace(doc, commit="")
+    assert "blob/main/docs/findings.md#x" in page.Page(doc).text(
+        "[[findings:x|y]]"
+    )
+    assert page.Page(doc).plain("[[findings:x|y]] z") == "y z"
