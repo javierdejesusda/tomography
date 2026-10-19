@@ -57,10 +57,9 @@ DETAIL = (
     "items and {n_people} people's heights. "
     "Wilson 95 percent intervals lie inside the markers, at most "
     "{wilson_gpt2} (GPT-2), {wilson_base} (Qwen3 base) and {wilson_post} "
-    "(post-trained) points wide. Exact items and heights: at most "
-    "{exact_base} and {people_base} percent (Qwen3 base), {exact_post} and "
-    "{people_post} percent (post-trained); GPT-2 small {gpt2_range} and "
-    "{gpt2_exact} percent on range and exact items. (b) AUROC on held-out "
+    "(post-trained) points wide. Exact items, heights: {share_base} "
+    "(Qwen3 base), {share_post} (post-trained); GPT-2 small {gpt2_range} and "
+    "{gpt2_exact} percent on range and exact items. (b) AUROC on "
     "durations of a range reader fitted on heights and wingspans, with its "
     "random control (grey bar: bootstrap "
     "interval of the mean of {draws} random directions) and a classifier on "
@@ -70,6 +69,29 @@ DETAIL = (
     "(1) against the random band, the range of the control's position over "
     "its {sets} training sets. See [[sec:appendix_approximate]]."
 )
+
+
+def share_phrase(exact: int, people: int) -> str:
+    """Writes the highest range shares on exact items and on heights.
+
+    A zero is said plainly and never follows "at most".
+
+    Args:
+        exact: The highest percent of exact items answered with a range.
+        people: The highest percent of heights answered with a range.
+
+    Returns:
+        The phrase for one role.
+    """
+    if exact and people:
+        return f"at most {exact} and {people} percent"
+    if exact:
+        return f"at most {exact} percent of exact items, none of the heights"
+    if people:
+        return (
+            f"none of the exact items, at most {people} percent of the heights"
+        )
+    return "none of either"
 
 
 def _percent(value: float) -> int:
@@ -217,12 +239,10 @@ def _unclip(ax: Any, count: int) -> None:
         line.set_clip_on(False)
 
 
-def _head(
-    ax: Any, x: float, text: str, ha: str = "center", y: float = HEAD_Y
-) -> None:
+def _head(ax: Any, x: float, text: str, ha: str = "center") -> None:
     ax.text(
         x,
-        y,
+        HEAD_Y,
         text,
         color=paper.ENC["secondary_text"],
         fontsize=paper.MIN_TEXT,
@@ -589,8 +609,10 @@ def build(manifest: Manifest) -> FigureOutput:
     detail = DETAIL.format(
         n_people=int(numbers["n_people"]),
         **{
-            f"{name}_{role}": int(numbers[f"{name}_{role}_max"])
-            for name in ("exact", "people")
+            f"share_{role}": share_phrase(
+                int(numbers[f"exact_{role}_max"]),
+                int(numbers[f"people_{role}_max"]),
+            )
             for role in ("base", "post")
         },
         **{
