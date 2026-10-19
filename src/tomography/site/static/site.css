@@ -241,12 +241,11 @@ tbody tr.group td {
   border-top: 0.5px solid var(--ink);
 }
 
-td.r,
 td.k {
   white-space: nowrap;
 }
 
-td {
+td:not(.r) {
   overflow-wrap: anywhere;
 }
 

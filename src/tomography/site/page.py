@@ -21,6 +21,8 @@ from tomography.site.registry import TableOutput
 from tomography.site.tables import _cells
 
 TOKEN = re.compile(r"\[\[(.+?)\]\]")
+NBSP = chr(0xA0)
+BREAKS_BEFORE = chr(0xB1) + "[("
 
 
 @dataclasses.dataclass(frozen=True)
@@ -77,6 +79,31 @@ class Document:
         default_factory=dict
     )
     commit: str = ""
+
+
+def glue(cell: str) -> str:
+    """Keeps every number of a numeric cell whole.
+
+    A space stays a break point only before a plus-minus sign or a bracket,
+    where the cell may start a second line, and after a comma inside an
+    interval; every other space next to a digit becomes a no-break space.
+
+    Args:
+        cell: The cell text.
+
+    Returns:
+        The cell with its non-breaking spaces.
+    """
+    out = list(cell)
+    for i, char in enumerate(cell):
+        if char != " " or i == 0 or i == len(cell) - 1:
+            continue
+        before, after = cell[i - 1], cell[i + 1]
+        if after in BREAKS_BEFORE or before == ",":
+            continue
+        if before.isdigit() or after.isdigit() or before in "*)]":
+            out[i] = NBSP
+    return "".join(out)
 
 
 def _e(text: object) -> str:
@@ -314,7 +341,7 @@ class Page:
         body = []
         for i, row in enumerate(out.rows):
             cells = "".join(
-                f'<td class="r">{self.text(c)}</td>'
+                f'<td class="r">{self.text(glue(c))}</td>'
                 if a == "r"
                 else f'<td class="k">{self.text(c)}</td>'
                 if models and j == 0

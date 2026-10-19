@@ -491,3 +491,32 @@ def test_only_the_model_column_is_kept_on_one_line() -> None:
     )
     assert '<td class="k">' not in text
     assert "<td>x</td>" in text
+
+
+NBSP = "\u00a0"
+
+
+@pytest.mark.parametrize(
+    ("cell", "expected"),
+    [
+        ("0.065 ± 0.072", f"0.065 ±{NBSP}0.072"),
+        (f"0.011 [{MINUS}0.006, 0.032]", f"0.011 [{MINUS}0.006, 0.032]"),
+        ("0.622 (0.490)", "0.622 (0.490)"),
+        ("1 of 1", f"1{NBSP}of{NBSP}1"),
+        ("no contrast", "no contrast"),
+        ("0.186*", "0.186*"),
+    ],
+)
+def test_a_numeric_cell_breaks_only_between_its_numbers(
+    cell: str, expected: str
+) -> None:
+    assert page.glue(cell) == expected
+
+
+def test_numeric_cells_wrap_through_their_break_points_only() -> None:
+    output = registry.TableOutput(
+        "Claim.", "Detail.", ["A", "B"], [["x", "1 of 3"]], "lr", [], {}
+    )
+    doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+    cell = f'<td class="r">1{NBSP}of{NBSP}3</td>'
+    assert cell in page.Page(doc).table("checkpoints")
