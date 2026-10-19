@@ -97,8 +97,8 @@ MAIN_FIGURES = (
     "finders",
     "reading",
     "truth",
-    "steering",
     "knowledge_reading",
+    "steering",
     "base_post",
 )
 APPENDIX_FIGURES = (

@@ -260,7 +260,7 @@ def test_every_appendix_section_is_pointed_to_from_the_body() -> None:
     assert "[[table:steering]]" in body
 
 
-def test_the_main_items_are_all_placed_in_the_order_of_the_findings() -> None:
+def test_items_follow_the_registry_order_of_the_main_text() -> None:
     placed = list(content.FRONT_ITEMS) + [
         i
         for top in (content.INTRODUCTION, content.METHOD, content.RESULTS)
@@ -269,9 +269,8 @@ def test_the_main_items_are_all_placed_in_the_order_of_the_findings() -> None:
     ]
     figures = [i[4:] for i in placed if i.startswith("fig:")]
     tables = [i[6:] for i in placed if i.startswith("table:")]
-    assert sorted(figures) == sorted(registry.MAIN_FIGURES)
+    assert figures == list(registry.MAIN_FIGURES)
     assert tables == list(registry.MAIN_TABLES)
-    assert figures[:3] == ["teaser", "method", "finders"]
 
 
 def test_each_appendix_section_opens_with_what_it_holds_and_supports() -> None:
