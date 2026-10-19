@@ -16,6 +16,7 @@ from tomography.viz import paper
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 _T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
+_L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
 SPEC = "knowledge_steering"
 HEIGHT = 3.9
 EXEMPLARS = (
@@ -259,6 +260,12 @@ def test_known_at_least_unknown_runs_come_from_the_curves(
         assert output.numbers[f"known_ge_unknown_{role}"] == sum(
             stats.role(m) == role for m, _ in held
         )
+    counts = output.counts["known_ge_unknown"]
+    for role in stats.ROLES:
+        assert counts[role].hits == sum(stats.role(m) == role for m, _ in held)
+        assert (
+            counts[role].total == output.counts["distinguishable"][role].total
+        )
     for model, template in held:
         plain = _headline(model, template)["metric"] == "entropy"
         name = paper.display_name(model if plain else f"{model} {template}")
@@ -338,3 +345,9 @@ def test_letters_do_not_touch_their_titles(
     gaps = _T["letter_title_gaps"](output.figure)
     assert len(gaps) == 3
     assert min(gaps) >= 2.0
+
+
+def test_no_two_legend_keys_draw_the_same_symbol(
+    output: registry.FigureOutput,
+) -> None:
+    assert _L["marker_clashes"](output.figure) == []

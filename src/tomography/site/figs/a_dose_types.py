@@ -35,7 +35,8 @@ DETAIL = (
     "95 percent interval that resamples the questions (grey band). A panel "
     "counts when the interval of the difference in the absolute slope on "
     "unknown questions between the direction and each of the 3 random "
-    "directions lies above zero. The encoding is that of Figure 9."
+    "directions lies above zero. The encoding is that of "
+    "[[fig:knowledge_steering]]."
 )
 
 
@@ -135,7 +136,7 @@ def build(manifest: Manifest) -> FigureOutput:
                     label="mean of 3 random directions",
                 ),
                 _rows.series_handle(
-                    "post-trained", "o", paper.INK, filled=False
+                    "post-trained", "h", paper.INK, filled=False
                 ),
             ],
             loc="outside lower center",
