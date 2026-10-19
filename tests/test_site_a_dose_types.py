@@ -14,6 +14,7 @@ from tomography.viz import paper
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
+_T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
 SPEC = "a_dose_types"
 HEIGHT = 7.2
 TYPES = (
@@ -206,3 +207,11 @@ def test_legend_names_the_grey_band_as_the_mean_of_the_random_arms(
     labels = [t.get_text() for t in legend.get_texts()]
     assert "mean of 3 random directions" in labels
     assert not any("pooled" in label for label in labels)
+
+
+def test_letters_do_not_touch_their_titles(
+    output: registry.FigureOutput,
+) -> None:
+    gaps = _T["letter_title_gaps"](output.figure)
+    assert len(gaps) == 1
+    assert min(gaps) >= 2.0

@@ -51,7 +51,8 @@ DETAIL = (
     "confidence, with paired 95 percent bootstrap intervals over the test "
     "questions: the direction changes it by {dmin} to {dmax} with an "
     "interval covering zero on {cover}, while the probe adds {pmin} to "
-    "{pmax} with an interval above zero on {above}."
+    "{pmax} with an interval above zero on {above}. GPT-2 small has no "
+    "known-against-unknown contrast, so panel (a) omits it."
 )
 
 
@@ -262,14 +263,14 @@ def build(manifest: Manifest) -> FigureOutput:
     dmin, dmax = _range(lat_gain)
     pmin, pmax = _range(probe_gain)
     detail = DETAIL.format(
-        point=_rows.all_or_per_role(point),
+        point=stats.per_role_text(point),
         interval=stats.per_role_text(interval),
         dmin=dmin,
         dmax=dmax,
-        cover=_rows.all_or_per_role(cover),
+        cover=stats.per_role_text(cover),
         pmin=pmin,
         pmax=pmax,
-        above=_rows.all_or_per_role(above),
+        above=stats.per_role_text(above),
     )
     return FigureOutput(
         fig, CLAIM, detail, numbers, _group.csv_text(HEADER, csv_rows), counts

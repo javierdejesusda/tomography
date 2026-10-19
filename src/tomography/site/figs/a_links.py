@@ -40,14 +40,14 @@ DETAIL = (
     "{auc_gpt2}, {auc_base} and {auc_post} of the same cells."
 )
 LAYER_ONE = (
-    "At layer 1, the layer the range reader chose on every checkpoint "
-    "because ties go to the first layer, every cosine is at most {value} in "
-    "absolute value; these values describe that layer and do not locate a "
-    "link."
+    "At layer 1, the layer the plain-template range reader chose on every "
+    "checkpoint because ties go to the first layer, every cosine is at most "
+    "{value} in absolute value; these values describe that layer and do not "
+    "locate a link."
 )
 LAYER_OTHER = (
-    "At the layer the range reader chose on each checkpoint, every cosine is "
-    "at most {value} in absolute value."
+    "At the layer the plain-template range reader chose on each checkpoint, "
+    "every cosine is at most {value} in absolute value."
 )
 
 
@@ -182,9 +182,9 @@ def build(manifest: Manifest) -> FigureOutput:
             for c, (title, members) in enumerate(groups):
                 ax = grid[r][c]
                 _panel(ax, {m: found[row][m] for m in members})
-                paper.panel_letter(ax, "abcd"[2 * r + c])
-                if r == 0:
-                    ax.set_title(title, loc="left")
+                paper.panel_title(
+                    ax, "abcd"[2 * r + c], title if r == 0 else ""
+                )
                 if c == 0:
                     ax.set_ylabel(
                         "cosine outside band"

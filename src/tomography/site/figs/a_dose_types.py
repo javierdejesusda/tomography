@@ -113,8 +113,13 @@ def build(manifest: Manifest) -> FigureOutput:
                 )
                 if c == 0:
                     ax.set_ylabel(run.name.replace(", ", "\n"), fontsize=6.5)
-                    paper.panel_letter(ax, letter)
-                if r == 0:
+                    paper.panel_title(
+                        ax,
+                        letter,
+                        kind.replace("_", " ") if r == 0 else "",
+                        6.5,
+                    )
+                elif r == 0:
                     ax.set_title(
                         kind.replace("_", " "), loc="left", fontsize=6.5
                     )

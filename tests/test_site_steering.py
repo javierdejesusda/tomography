@@ -21,6 +21,7 @@ from tomography.viz import paper
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
+_T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
 SPEC = "steering"
 MAX_RATIO = 1.5
 MIN_DISTINCT = 0.15
@@ -396,3 +397,31 @@ def test_tiles_use_the_full_colormap_and_the_ink_that_contrasts_most(
             assert text.get_color() == paper.tile_ink(face)
     inks = {t.get_color() for t in labels}
     assert inks == {paper.INK, paper.WHITE}
+
+
+def test_letters_do_not_touch_their_titles(
+    output: registry.FigureOutput,
+) -> None:
+    gaps = _T["letter_title_gaps"](output.figure)
+    assert len(gaps) == 3
+    assert min(gaps) >= 2.0
+
+
+def test_the_fluency_rule_in_the_caption_comes_from_the_constants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tomography.site.figs import steering
+
+    monkeypatch.setattr(steering, "MAX_RATIO", 1.25)
+    monkeypatch.setattr(steering, "MIN_DISTINCT", 0.2)
+    detail = registry.build_figure(SPEC, Manifest(RESULTS)).detail
+    assert "distinct-1 of the completions below 0.2" in detail
+    assert "(ratio at most 1.25 and distinct-1 at least 0.2)" in detail
+
+
+def test_cross_references_are_tokens_and_not_literal_numbers(
+    output: registry.FigureOutput,
+) -> None:
+    assert "[[fig:teaser]]" in output.detail
+    assert "[[table:steering]]" in output.detail
+    assert not re.search(r"\b(Figure|Table) \d", output.detail)

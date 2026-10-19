@@ -48,8 +48,9 @@ DETAIL = (
     "and TruthfulQA move by at most {most}, with {excluding}; {falling}. A "
     "post-trained checkpoint also differs from its base in prompt format and "
     "is distilled from a larger model, so the contrast is with this recipe "
-    "and not with instruction tuning in general (Section 6). The stored "
-    "paired comparisons of the 0.6B and 1.7B pairs are in Table A5."
+    "and not with instruction tuning in general ([[sec:limitations]]). The "
+    "stored paired comparisons of the 0.6B and 1.7B pairs are in "
+    "[[table:base_post]]."
 )
 
 
