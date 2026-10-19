@@ -76,7 +76,7 @@ def test_every_cell_is_the_transfer_accuracy_minus_the_scored_random(
         shown = np.asarray(ax.images[0].get_array(), dtype=float)
         assert shown.shape == (len(_names()),) * 2
         assert shown == pytest.approx(_margin(model), abs=1e-9)
-        assert ax.images[0].get_clim() == (0.0, 0.45)
+        assert ax.images[0].get_clim() == (-0.15, 0.45)
 
 
 def test_the_minima_and_the_below_count_are_recomputed(
@@ -183,3 +183,31 @@ def test_the_csv_holds_every_cell(output: registry.FigureOutput) -> None:
     assert float(first["margin"]) == pytest.approx(
         _margin(MODELS[0])[0, 0], abs=1e-6
     )
+
+
+def test_the_colour_scale_is_centred_on_zero_and_shows_negative_margins(
+    output: registry.FigureOutput,
+) -> None:
+    lowest = min(float(_margin(m).min()) for m in MODELS)
+    assert lowest < 0
+    for ax in _matrices(output):
+        norm = ax.images[0].norm
+        assert norm.vcenter == 0
+        assert norm.vmin < lowest
+    (bar,) = [ax for ax in output.figure.axes if not ax.images]
+    ticks = [float(t) for t in bar.get_xticks()]
+    assert min(ticks) < 0
+    assert 0.0 in ticks
+
+
+def test_the_colour_bar_fills_the_empty_slots_and_the_figure_is_compact(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    fig.draw_without_rendering()
+    matrices = _matrices(output)
+    (bar,) = [ax for ax in fig.axes if not ax.images]
+    lowest_row = min(ax.get_position().y0 for ax in matrices)
+    assert bar.get_position().y1 <= max(ax.get_position().y1 for ax in matrices)
+    assert bar.get_position().y0 >= lowest_row - 1e-6
+    assert fig.get_size_inches()[1] <= 7.5
