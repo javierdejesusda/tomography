@@ -383,6 +383,7 @@ def _key(fig: Figure) -> None:
             mew=0.8,
         ),
         Line2D([], [], ls="none", marker="_", ms=6, mew=1.2, color=grey),
+        Line2D([], [], color=paper.RANDOM_BAND, lw=1.5),
     ]
     fig.legend(
         handles,
@@ -390,9 +391,10 @@ def _key(fig: Figure) -> None:
             "GPT-2 and Qwen3 base",
             "post-trained",
             "random direction at the layer read",
+            "gap from the random direction to the dot",
         ],
         loc="outside upper center",
-        ncol=3,
+        ncol=2,
         frameon=False,
         fontsize=TEXT,
         columnspacing=1.0,

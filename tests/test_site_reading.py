@@ -419,3 +419,11 @@ def test_a_falling_slope_with_an_interval_below_zero_is_written_as_a_fall() -> (
     assert "rises by" in text
     assert "falls by" in text
     assert "includes zero" not in text
+
+
+def test_the_key_names_the_grey_connector_to_the_random_direction(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    texts = [t.get_text() for t in legend.get_texts()]
+    assert any("gap" in x and "random direction" in x for x in texts)
