@@ -198,7 +198,8 @@ def svg_bytes(fig: Figure) -> bytes:
         The SVG document with text as paths and no date.
     """
     buffer = io.BytesIO()
-    fig.savefig(buffer, format="svg", metadata={"Date": None})
+    with paper_style():
+        fig.savefig(buffer, format="svg", metadata={"Date": None})
     return buffer.getvalue()
 
 
@@ -212,9 +213,10 @@ def pdf_bytes(fig: Figure) -> bytes:
         The PDF document with embedded TrueType text and no creation date.
     """
     buffer = io.BytesIO()
-    fig.savefig(
-        buffer,
-        format="pdf",
-        metadata={"CreationDate": None, "Creator": "tomography"},
-    )
+    with paper_style():
+        fig.savefig(
+            buffer,
+            format="pdf",
+            metadata={"CreationDate": None, "Creator": "tomography"},
+        )
     return buffer.getvalue()
