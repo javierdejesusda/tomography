@@ -697,8 +697,8 @@ DISCUSSION = Section(
         "[[sec:steering]]), and post-training lowers held-out sentiment "
         "reading and changes "
         "[[num:fig:base_post.paired_excluding_zero]] of "
-        "[[num:fig:base_post.paired_total]] other readings beyond their intervals "
-        "(0.6B morality, 1.7B utility and 0.6B honesty, in "
+        "[[num:fig:base_post.paired_total]] other readings beyond "
+        "their intervals (0.6B morality, 1.7B utility and 0.6B honesty, in "
         "[[fig:base_post]]), with the rest within them.",
     ),
 )
