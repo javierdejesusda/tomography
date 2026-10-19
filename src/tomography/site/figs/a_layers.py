@@ -38,10 +38,10 @@ GPT2_LABELS = {
     "gpt2-large": "L",
     "gpt2-xl": "XL",
 }
-XLIM = (0.0, 1.24)
-LABEL_X = 1.02
+XLIM = (0.0, 1.27)
+LABEL_X = 1.05
 LABEL_GAP = 0.07
-YLIM = (0.3, 1.0)
+YLIM = (0.42, 1.02)
 TEXT = paper.MIN_TEXT
 
 

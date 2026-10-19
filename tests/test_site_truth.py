@@ -493,3 +493,24 @@ def test_the_truth_reader_label_sits_beside_its_markers(
     assert label.xy[1] == pytest.approx(top.get_ydata()[0])
     assert label.get_va() == "center"
     assert label.xy[0] < top.get_xdata()[0]
+
+
+def test_the_persona_label_stays_clear_of_the_chance_line(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "levels")
+    (label,) = [
+        t for t in ax.texts if t.get_gid() == "reader_label:persona_reader"
+    ]
+    assert label.get_ha() == "left"
+    assert label.xy[0] > output.numbers["chance"]
+
+
+def test_the_text_baseline_is_drawn_in_the_log_probability_panel(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "logprob")
+    for method, key in (("text_word", "text_word"), ("text_char", "text_char")):
+        (line,) = _gid(ax, f"text:{method}")
+        assert line.get_xdata()[0] == pytest.approx(output.numbers[key])
+    assert ax.get_xlim()[1] >= output.numbers["text_hi"]

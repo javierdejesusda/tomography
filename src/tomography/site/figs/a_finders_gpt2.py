@@ -30,8 +30,10 @@ MARKERS = {
 TASK_NAMES = {"sentiment": "Sentiment", "truth": "Truth", "utility": "Utility"}
 MARKER = 3.0
 TEXT = paper.MIN_TEXT
-YLIM = (0.4, 1.0)
+YLIM = (0.4, 1.04)
 CHANCE_WIDTH = 0.8
+PINK_WIDTH = 0.8
+BLACK_WIDTH = 1.4
 SPINE_WIDTH = 0.8
 
 
@@ -77,8 +79,8 @@ def _panel(
             ls=paper.LINESTYLES[
                 "solid" if shared.model_style(model).filled else "post_trained"
             ],
-            lw=1.0,
-            zorder=3,
+            lw=PINK_WIDTH if name == "pca_diff" else BLACK_WIDTH,
+            zorder=3.2 if name == "pca_diff" else 3,
         )
         row = cell.rows[name]
         depth = cell.row_depth(name)
@@ -92,6 +94,7 @@ def _panel(
             mec=paper.INK,
             mew=0.4,
             zorder=4,
+            clip_on=False,
         )
         rows.append(
             [
@@ -182,6 +185,7 @@ def split(
     """
     models = [m for m in manifest.models("p4") if member(m)]
     rows: list[list[str]] = []
+    post_trained = any(not shared.model_style(m).filled for m in models)
     with paper.paper_style():
         fig = Figure(
             figsize=(paper.FULL_WIDTH, height(len(models))),
@@ -208,7 +212,7 @@ def split(
                     ax.set_xlabel("relative depth")
                 else:
                     ax.tick_params(labelbottom=False)
-        _legend(fig, any(not shared.model_style(m).filled for m in models))
+        _legend(fig, post_trained)
     claim = (
         "Report-split accuracy at every layer of the paper's finder "
         f"(purple) and logistic regression (black) on {family}, against the "
@@ -218,7 +222,9 @@ def split(
         "Dots mark the layer each finder's select split chose. The grey "
         "band is the 95 percent interval over seeds of the random "
         "direction, with its mean as a thin line, and the dotted line is "
-        "chance. The other finders are in [[table:finders_all]]."
+        "chance."
+        + (" Post-trained checkpoints are dashed." if post_trained else "")
+        + " The other finders are in [[table:finders_all]]."
     )
     return FigureOutput(fig, claim, detail, {}, _csv(rows))
 

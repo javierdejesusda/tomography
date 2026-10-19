@@ -22,6 +22,7 @@ from tomography.viz import axes as shared
 from tomography.viz import paper
 
 HEIGHT = 3.2
+AFFIRMATIVE_SIZE = 2.6
 
 
 TICK = paper.ENC["own_probability"]
@@ -69,9 +70,10 @@ def _panel_dumbbell(
             ax,
             affirmative.value,
             y,
-            "|",
+            "D",
             f"aff:{plain}:{model}",
-            ms=truth.SMALL_TICK,
+            ms=AFFIRMATIVE_SIZE,
+            zorder=5,
         )
         below = negated.hi < 0.5
         truth.point(
@@ -103,7 +105,7 @@ def _legend(fig: Figure) -> None:
         )
 
     handles = [
-        mark("|", ink, ms=truth.SMALL_TICK, mew=1.0),
+        mark("D", ink, ms=AFFIRMATIVE_SIZE),
         mark(truth.DIRECTION, ink, ms=truth.MARKER + 0.6, mfc=ink, mew=0.8),
         mark(truth.DIRECTION, ink, ms=truth.MARKER + 0.6, mfc="white", mew=0.8),
         mark("|", TICK, ms=7, mew=TICK_WIDTH),
@@ -141,7 +143,7 @@ def _detail(
     return (
         "Accuracy of the truth reader, at the layer chosen on validation, on "
         "statements about cities (a) and on Spanish to English translations "
-        "(b): a dumbbell from the affirmative set (bar) to its negation "
+        "(b): a dumbbell from the affirmative set (diamond) to its negation "
         "(circle, filled where the Wilson interval of the negated set lies "
         "wholly below 0.5), with the accuracy of a random direction on the "
         "negated set as a grey tick and the region below chance shaded. "

@@ -47,7 +47,7 @@ PAIRS = (
 )
 NEGATED = tuple(neg for _, neg, _ in PAIRS)
 XLIM_A = (0.1, 0.85)
-XLIM_C = (0.1, 0.6)
+XLIM_C = (0.1, 0.8)
 XLIM_D = (-0.3, 0.3)
 XLIM_B = (0.15, 1.04)
 MARKER = 3.0
@@ -55,6 +55,7 @@ SMALL_TICK = 6.0
 TEXT = paper.MIN_TEXT
 WIDTHS_TOP = [1.5, 1.1, 1.0]
 BAND_ALPHA = 0.14
+CHANCE_CLEARANCE = 0.012
 
 
 @dataclasses.dataclass(frozen=True)
@@ -193,7 +194,7 @@ def point(
         ms=kw.pop("ms", MARKER),
         color=kw.pop("color", paper.INK),
         mew=0.8,
-        zorder=4,
+        zorder=kw.pop("zorder", 4),
         **kw,
     )
     line.set_gid(gid)
@@ -224,11 +225,7 @@ def _open(model: str) -> dict[str, str]:
     return {"mfc": "white"} if _is_post(model) else {}
 
 
-def _panel_levels(
-    ax: Axes, rows: dict[str, float], data: dict[str, Model], chance: float
-) -> None:
-    first = next(iter(data.values()))
-    chance_line(ax, chance)
+def _text_levels(ax: Axes, first: Model) -> None:
     for method in TEXT_METHODS:
         cell = first.text[method]
         band = ax.axvspan(
@@ -242,6 +239,14 @@ def _panel_levels(
         band.set_gid(f"textband:{method}")
         line = ax.axvline(cell.value, color=paper.ENC["text"], lw=1.2, zorder=2)
         line.set_gid(f"text:{method}")
+
+
+def _panel_levels(
+    ax: Axes, rows: dict[str, float], data: dict[str, Model], chance: float
+) -> None:
+    first = next(iter(data.values()))
+    chance_line(ax, chance)
+    _text_levels(ax, first)
     for model, y in rows.items():
         for name, (_, shape, dodge) in READERS.items():
             cell = data[model].reads[name]
@@ -263,10 +268,10 @@ def _panel_levels(
         beside = name == "truthfulqa_reader"
         note = ax.annotate(
             READER_NAMES[name],
-            xy=(cell.lo if beside else cell.value, top + dodge),
+            xy=(cell.lo if beside else chance + CHANCE_CLEARANCE, top + dodge),
             xytext=(-3, 0) if beside else (0, -4),
             textcoords="offset points",
-            ha="right" if beside else "center",
+            ha="right" if beside else "left",
             va="center" if beside else "top",
             fontsize=TEXT,
             color=paper.ENC["secondary_text"],
@@ -317,6 +322,7 @@ def _panel_logprob(
 ) -> None:
     ax.set_xlim(*XLIM_C)
     chance_line(ax, chance)
+    _text_levels(ax, next(iter(data.values())))
     for model, y in rows.items():
         cell = data[model].reads[LOG_PROBABILITY]
         _whisker(ax, y, cell, f"{LOG_PROBABILITY}:{model}")
@@ -329,7 +335,7 @@ def _panel_logprob(
             color=paper.ENC["own_probability"],
             **_open(model),
         )
-    ax.set_xticks([0.2, 0.4, 0.6])
+    ax.set_xticks([0.2, 0.4, 0.6, 0.8])
     ax.set_xlabel("MC1 accuracy")
     ax.spines["left"].set_visible(False)
 
@@ -490,8 +496,9 @@ def _detail(
         "d plus or minus 1.96 times the square root of p1(1-p1)/n plus "
         f"p2(1-p2)/n over the same {n} questions; intervals that exclude "
         f"zero: {stats.per_role_text(counts['diff_excludes_zero'])}. (c) "
-        "The answer log-probability with a Wilson interval. Statements with "
-        "negation, where the reader falls below chance, are in "
+        "The answer log-probability with a Wilson interval, beside the same "
+        "band. Statements with negation, where the reader falls below "
+        "chance, are in "
         "[[fig:a_truth_cities]]."
     )
 

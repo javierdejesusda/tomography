@@ -303,3 +303,16 @@ def test_the_random_direction_tick_is_drawn_once_and_stays_solid(
     ]
     assert swatch.get_color() == "#6a6a6a"
     assert swatch.get_markeredgewidth() == TICK_WIDTH
+
+
+def test_the_affirmative_mark_is_a_point_drawn_on_top(
+    output: registry.FigureOutput,
+) -> None:
+    for gid, plain in (("cities", "cities"), ("translations", "sp_en_trans")):
+        ax = _ax(output, gid)
+        for model in MODELS:
+            (aff,) = _gid(ax, f"aff:{plain}:{model}")
+            (tick,) = _gid(ax, f"random:{plain}:{model}")
+            (neg,) = _gid(ax, f"neg:{plain}:{model}")
+            assert aff.get_marker() != "|"
+            assert aff.get_zorder() > max(tick.get_zorder(), neg.get_zorder())
