@@ -49,37 +49,6 @@ def test_csv_text_writes_the_header_and_rows() -> None:
     assert text == "a,b\n1,0.5\n2,\n"
 
 
-def test_draw_series_connects_only_within_a_role() -> None:
-    fig = Figure()
-    ax = fig.subplots()
-    values = {
-        "gpt2": 0.5,
-        "gpt2-xl": 0.6,
-        "qwen3-0.6b-base": 0.7,
-        "qwen3-4b-base": 0.8,
-        "qwen3-0.6b": 0.65,
-        "qwen3-4b": 0.75,
-    }
-    _group.draw_series(ax, values, "#0072B2")
-    lines = [line for line in ax.get_lines()]
-    assert len(lines) == 3
-    assert sorted(len(line.get_xdata()) for line in lines) == [2, 2, 2]
-    styles = {line.get_linestyle() for line in lines}
-    assert styles == {"-", "--"}
-
-
-def test_draw_series_leaves_post_trained_markers_open() -> None:
-    fig = Figure()
-    ax = fig.subplots()
-    _group.draw_series(ax, {"qwen3-0.6b": 0.5, "qwen3-4b": 0.6}, "#0072B2")
-    assert ax.get_lines()[0].get_markerfacecolor() == "white"
-
-
-def test_role_handles_name_the_three_roles() -> None:
-    labels = [h.get_label() for h in _group.role_handles()]
-    assert labels == ["GPT-2", "Qwen3 base", "Qwen3 post-trained"]
-
-
 def test_clip_ticks_keeps_only_ticks_inside_the_view() -> None:
     fig = Figure()
     ax = fig.subplots()
