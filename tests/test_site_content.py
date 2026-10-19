@@ -656,8 +656,8 @@ def test_reproducibility_admits_the_lorra_adapter_and_names_no_run_code() -> (
 
 def test_the_text_baseline_is_scoped_in_the_abstract_and_introduction() -> None:
     assert "where the wording leaks the label" in content.ABSTRACT
-    assert "for TruthfulQA, knowledge and approximate answers" in " ".join(
-        content.INTRODUCTION.paragraphs
+    assert "for the readings, TruthfulQA, knowledge and approximate" in (
+        " ".join(content.INTRODUCTION.paragraphs)
     )
 
 
@@ -1032,3 +1032,27 @@ def test_the_approximate_appendix_states_the_band_and_the_control_layer() -> (
     ) in text
     assert "its own validation layer" in text
     assert "[[count:fig:approximate.control_other_layer]]" in text
+
+
+def test_the_page_does_not_say_the_readings_lack_a_text_baseline() -> None:
+    text = _text()
+    assert "have no text-only baseline" not in text
+    limits = " ".join(_texts(content.DISCUSSION))
+    assert "model-free word and character n-gram classifiers" in limits
+    assert "[[table:reading]]" in limits
+    assert "persona labels" in limits
+    assert "test-pair sampling only" in limits
+
+
+def test_the_method_baselines_name_the_words_alone_rows() -> None:
+    method = " ".join(t for s in _sections(content.METHOD) for t in _texts(s))
+    assert "words alone" in method
+    assert "[[table:reading]]" in method
+    assert "sentiment, utility, morality" in method
+
+
+def test_the_introduction_lists_the_reading_concepts_among_text_baselines() -> (
+    None
+):
+    intro = " ".join(_texts(content.INTRODUCTION))
+    assert "a classifier on the text (for the readings, TruthfulQA" in intro
