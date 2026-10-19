@@ -181,7 +181,9 @@ def test_one_letter_per_row_and_no_dashes(
     text = f"{output.claim} {output.detail} {output.csv}"
     assert chr(0x2014) not in text
     assert chr(0x2013) not in text
-    assert "_" not in f"{output.claim} {output.detail}"
+    assert "_" not in f"{output.claim} {output.detail}".replace(
+        "[[fig:knowledge_steering]]", ""
+    )
 
 
 def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
@@ -222,3 +224,10 @@ def test_no_two_legend_keys_draw_the_same_symbol(
     output: registry.FigureOutput,
 ) -> None:
     assert _L["marker_clashes"](output.figure) == []
+
+
+def test_the_encoding_is_cross_referenced_by_token(
+    output: registry.FigureOutput,
+) -> None:
+    assert "[[fig:knowledge_steering]]" in output.detail
+    assert "Figure 9" not in output.detail

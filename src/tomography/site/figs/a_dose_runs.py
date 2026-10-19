@@ -31,8 +31,8 @@ DETAIL = (
     "over the 3 random directions on unknown questions with its 95 percent "
     "interval that resamples the questions (grey band). Entropy shift is shown "
     "for GPT-2 and base checkpoints and abstention rate for post-trained "
-    "ones, as in Figure 9; panels in the same unit share their vertical "
-    "range. Open markers and dashed lines are post-trained checkpoints."
+    "ones, as in [[fig:knowledge_steering]]; panels in the same unit share "
+    "their vertical range. Open markers and dashed lines are post-trained checkpoints."
 )
 
 
