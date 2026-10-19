@@ -35,8 +35,8 @@ ROWS = (
     ("truth", "truth", "truth"),
     ("honesty", "honesty, transfer", "honesty transfer"),
     ("truthfulqa", "TruthfulQA", "TruthfulQA"),
-    ("knowledge", "knowledge, AUROC", "knowledge AUROC"),
-    ("steering", "steering, win rate", "steering win rate"),
+    ("knowledge", "knowledge", "knowledge AUROC"),
+    ("steering", "steering", "steering win rate"),
 )
 SECTIONS = {
     "sentiment": "reading accuracy",
@@ -45,11 +45,10 @@ SECTIONS = {
     "truth": "reading accuracy",
     "honesty": "reading accuracy",
     "truthfulqa": "reading accuracy",
-    "knowledge": "knowledge",
-    "steering": "steering",
+    "knowledge": "knowledge AUROC",
+    "steering": "steering win rate",
 }
 GROUP_GAP = 1
-LABELLED = frozenset({"reading accuracy"})
 CONSERVATIVE_DASH = (0, (6, 3))
 DASH_GAP = 3.0
 MIN_DASHES = 2
@@ -333,8 +332,6 @@ def _groups(
                 zorder=1,
             )
         seen.append(section)
-        if section not in LABELLED:
-            continue
         ax.text(
             -limit * 0.98,
             y - 0.65,
