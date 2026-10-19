@@ -48,6 +48,8 @@ class TableOutput:
         align: `l` or `r` for each column.
         notes: Footer lines under the bottom rule.
         numbers: Name to value for each number the claim quotes.
+        groups: Header spans over the columns after the first, as (label,
+            number of columns, muted); empty when columns are ungrouped.
     """
 
     claim: str
@@ -57,6 +59,7 @@ class TableOutput:
     align: str
     notes: list[str]
     numbers: dict[str, float]
+    groups: tuple[tuple[str, int, bool], ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -90,6 +93,16 @@ def _table(n: int, title: str, *sources: str) -> Spec:
         str(n),
         title,
         f"tomography.site.tables.table{n}",
+        sources,
+    )
+
+
+def _appendix_table(n: int, title: str, *sources: str) -> Spec:
+    return Spec(
+        f"tableA{n}",
+        f"A{n}",
+        title,
+        f"tomography.site.tables.table_a{n}",
         sources,
     )
 
@@ -139,6 +152,18 @@ APPENDIX = (
     _appendix(4, "P9b transfer matrix with text baselines flagged", "p9b"),
     _appendix(5, "Dose curves of the post-trained runs", "p9d"),
     _appendix(6, "P10c cosine and AUROC against the random band", "p10c"),
+)
+
+APPENDIX_TABLES = (
+    _appendix_table(
+        1,
+        "Reading accuracy with intervals and selected layers",
+        "r1",
+        "r2",
+        "r3",
+        "r5",
+        "r7",
+    ),
 )
 
 

@@ -20,12 +20,13 @@ DASHES = (chr(0x2014), chr(0x2013))
 FIGURES = registry.FIGURES[:4]
 TABLES = registry.TABLES[:3]
 APPENDIX = registry.APPENDIX
+APPENDIX_TABLES = registry.APPENDIX_TABLES
 
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
     out = tmp_path_factory.mktemp("site")
-    build_module.build(RESULTS, out, FIGURES, TABLES, APPENDIX)
+    build_module.build(RESULTS, out, FIGURES, TABLES, APPENDIX, APPENDIX_TABLES)
     return out
 
 
@@ -104,8 +105,8 @@ def test_figures_and_tables_are_numbered_in_order_of_appearance(
 ) -> None:
     figures = re.findall(r"<figcaption>Figure (A?\d+): ", html)
     assert figures == ["1", "2", "3", "4", "A1", "A2", "A3", "A4", "A5", "A6"]
-    tables = re.findall(r"<caption>Table (\d+): ", html)
-    assert tables == ["1", "2", "3"]
+    tables = re.findall(r"<caption>Table (A?\d+): ", html)
+    assert tables == ["1", "2", "3", "A1"]
 
 
 def test_a_figure_caption_follows_its_graphic_and_a_table_caption_leads(
@@ -212,7 +213,7 @@ def test_every_figure_and_table_has_a_data_file_and_figures_a_pdf(
         ] == b"%PDF"
         size = (built / "data" / f"{spec.key}.csv").stat().st_size
         assert (size > 0) == (spec.key != "fig1"), spec.key
-    for spec in TABLES:
+    for spec in (*TABLES, *APPENDIX_TABLES):
         header = (built / "data" / f"{spec.key}.csv").read_text("utf-8")
         assert header.splitlines()[0].count(",") >= 2
 
@@ -245,7 +246,7 @@ def test_no_dash_characters_in_the_page_stylesheet_or_text(html: str) -> None:
 def test_every_section_the_page_shows_has_its_items_placed_once(
     html: str,
 ) -> None:
-    for spec in (*FIGURES, *TABLES, *APPENDIX):
+    for spec in (*FIGURES, *TABLES, *APPENDIX, *APPENDIX_TABLES):
         assert html.count(f'id="{spec.key}"') == 1, spec.key
 
 
@@ -278,7 +279,7 @@ def test_a_missing_figure_the_text_refers_to_stops_the_page() -> None:
 
 
 def test_build_is_byte_identical_twice(tmp_path: Path) -> None:
-    specs = (FIGURES, TABLES, APPENDIX)
+    specs = (FIGURES, TABLES, APPENDIX, APPENDIX_TABLES)
     for name in ("one", "two"):
         build_module.build(RESULTS, tmp_path / name, *specs)
     names = sorted(
@@ -318,3 +319,19 @@ def test_phone_layout_tightens_tables_so_the_caption_is_not_clipped() -> None:
     assert "padding: 1.4rem 16px 2rem" in phone
     assert "width: calc(100vw - 32px)" in phone
     assert "position: sticky" in phone
+
+
+def test_table_two_has_grouped_headers_with_a_muted_exploratory_group(
+    html: str,
+) -> None:
+    table = re.search(r"<table><caption>Table 2:.*?</table>", html, re.S)
+    assert table is not None
+    chunk = table.group(0)
+    assert chunk.count('<th colspan="2" class="span">') == 4
+    assert (
+        '<th colspan="2" class="span muted">R5 honesty (exploratory)' in chunk
+    )
+    assert chunk.count("<tbody><tr>") == 1
+    assert len(re.findall(r"<tr", chunk.split("<tbody>")[1])) == 10
+    assert 'class="group"' not in chunk
+    assert chunk.count('<th class="r">LAT</th>') == 5

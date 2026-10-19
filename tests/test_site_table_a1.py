@@ -8,7 +8,7 @@ from tomography.site import registry
 from tomography.site.manifest import Manifest
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
-SPEC = registry.TABLES[1]
+SPEC = registry.APPENDIX_TABLES[0]
 MARGIN = 0.1
 CONCEPTS = ("r1", "r2", "r3", "r7")
 
@@ -97,34 +97,6 @@ def test_r5_is_a_labelled_exploratory_group_without_a_random_value(
         low, high = data["ci"]
         assert row[2] == f"{data['test_accuracy']:.3f} [{low:.3f}, {high:.3f}]"
         assert row[3] == "n/a"
-
-
-def test_the_claim_numbers_match_a_recomputation(
-    output: registry.TableOutput,
-) -> None:
-    manifest = Manifest(RESULTS)
-    margins = []
-    for exp in CONCEPTS:
-        for model in manifest.models(exp):
-            layer, acc, _ = _selected(exp, model)
-            margins.append(acc - _random(exp, model, layer))
-    assert output.numbers["cells"] == len(margins)
-    assert output.numbers["above"] == sum(m > MARGIN for m in margins)
-    assert output.numbers["smallest_margin"] == pytest.approx(min(margins))
-    assert f"{int(output.numbers['above'])} of " in output.claim
-    assert f"{output.numbers['smallest_margin']:.3f}" in output.claim
-    assert output.claim.endswith(".")
-
-
-def test_the_footer_gives_the_p6_slopes(output: registry.TableOutput) -> None:
-    stored = json.loads(
-        (RESULTS / "p6" / "gpt2" / "25ee6de331d4" / "summary.json").read_text(
-            "utf-8"
-        )
-    )["data"]["accuracy_per_decade"]
-    text = " ".join(output.notes)
-    for exp, value in stored.items():
-        assert f"{exp.upper()} {value:.3f}" in text
 
 
 def test_no_cell_has_a_dash_character(output: registry.TableOutput) -> None:

@@ -65,6 +65,7 @@ def build(
     figures: tuple[registry.Spec, ...] = registry.FIGURES,
     tables: tuple[registry.Spec, ...] = registry.TABLES,
     appendix: tuple[registry.Spec, ...] = registry.APPENDIX,
+    appendix_tables: tuple[registry.Spec, ...] = registry.APPENDIX_TABLES,
 ) -> page.Document:
     """Writes the page, its assets and the files behind every figure.
 
@@ -78,6 +79,7 @@ def build(
         figures: Main figures in registry order.
         tables: Tables in registry order.
         appendix: Appendix figures in registry order.
+        appendix_tables: Appendix tables in registry order.
 
     Returns:
         The document that was rendered.
@@ -111,6 +113,7 @@ def build(
         figures={s.key: figure(s) for s in figures},
         tables={s.key: table(s) for s in tables},
         appendix={s.key: figure(s) for s in appendix},
+        appendix_tables={s.key: table(s) for s in appendix_tables},
         date=results_date(manifest),
         bib=references.parse(BIB.read_text(encoding="utf-8")),
     )

@@ -25,7 +25,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     doc = build_module.build(args.results, args.out)
     print(
         f"built {len(doc.figures) + len(doc.appendix)} figures and "
-        f"{len(doc.tables)} tables into {args.out}"
+        f"{len(doc.tables) + len(doc.appendix_tables)} tables into {args.out}"
     )
     return 0
 

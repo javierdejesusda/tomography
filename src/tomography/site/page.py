@@ -57,6 +57,7 @@ class Document:
         figures: Main figures by key, in registry order.
         tables: Tables by key, in registry order.
         appendix: Appendix figures by key, in registry order.
+        appendix_tables: Appendix tables by key, in registry order.
         date: The date line.
         bib: Parsed bibliography.
     """
@@ -66,6 +67,9 @@ class Document:
     appendix: dict[str, FigureEntry]
     date: str
     bib: dict[str, references.Entry]
+    appendix_tables: dict[str, TableEntry] = dataclasses.field(
+        default_factory=dict
+    )
 
 
 def _e(text: object) -> str:
@@ -133,6 +137,8 @@ class _Page:
             visit(section, str(number))
         for key, entry in self.doc.appendix.items():
             self.figure_number[key] = entry.spec.number
+        for key, table_entry in self.doc.appendix_tables.items():
+            self.table_number[key] = table_entry.spec.number
         self.sections[content.APPENDIX.key] = "A"
 
     def main_sections(self) -> list[Section]:
@@ -212,9 +218,16 @@ class _Page:
 
     def table(self, key: str) -> str:
         """Renders a booktabs table with its caption above."""
-        out = self.doc.tables[key].output
+        entry = self.doc.tables.get(key) or self.doc.appendix_tables[key]
+        out = entry.output
         label = f"Table {self.table_number[key]}"
         caption = f"{out.claim} {out.detail}".strip()
+        groups = "".join(
+            f'<th colspan="{span}" class="span{" muted" if muted else ""}">'
+            f"{_e(name)}</th>"
+            for name, span, muted in out.groups
+        )
+        groups = f'<tr class="groups"><th></th>{groups}</tr>' if groups else ""
         head = "".join(
             f'<th class="r">{_e(c)}</th>' if a == "r" else f"<th>{_e(c)}</th>"
             for c, a in zip(out.columns, out.align, strict=True)
@@ -227,7 +240,8 @@ class _Page:
                 else f"<td>{_e(c)}</td>"
                 for c, a in zip(row, out.align, strict=True)
             )
-            cls = ' class="group"' if i and row[0] else ""
+            grouped = i and row[0] and not out.groups
+            cls = ' class="group"' if grouped else ""
             body.append(f"<tr{cls}>{cells}</tr>")
         notes = "".join(f"<p>{_e(n)}</p>" for n in out.notes)
         notes_html = f'<div class="notes">{notes}</div>' if notes else ""
@@ -235,7 +249,7 @@ class _Page:
             f'<div class="table" id="{key}"><div class="scroll"><table>'
             f"<caption>{label}: {_e(caption)} "
             f'<span class="data">(<a href="data/{key}.csv">data</a>)</span>'
-            f"</caption><thead><tr>{head}</tr></thead>"
+            f"</caption><thead>{groups}<tr>{head}</tr></thead>"
             f"<tbody>{''.join(body)}</tbody></table></div>{notes_html}</div>"
         )
 
@@ -361,7 +375,7 @@ class _Page:
 
     def appendix(self) -> str:
         """Renders the appendix with its figures."""
-        if not self.doc.appendix:
+        if not self.doc.appendix and not self.doc.appendix_tables:
             return ""
         section = content.APPENDIX
         parts = [
@@ -369,6 +383,7 @@ class _Page:
         ]
         parts += [self.paragraph(p) for p in section.paragraphs]
         parts += [self.figure(k) for k in self.doc.appendix]
+        parts += [self.table(k) for k in self.doc.appendix_tables]
         return "".join(parts)
 
     def body(self) -> str:

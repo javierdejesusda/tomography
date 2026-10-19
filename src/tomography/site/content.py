@@ -170,7 +170,7 @@ RESULTS = (
             "[[fig2]] reads sentiment, utility, morality and truth with a "
             "logistic reader at every layer of every checkpoint, and "
             "[[table2]] gives the accuracy at the layer chosen on "
-            "validation data.",
+            "validation data; intervals and layers are in [[tableA1]].",
         ),
         items=("fig2", "table2"),
     ),

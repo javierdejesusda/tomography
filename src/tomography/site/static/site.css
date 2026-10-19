@@ -208,6 +208,22 @@ caption {
   padding-bottom: 0.5em;
 }
 
+thead tr.groups th {
+  text-align: center;
+  font-weight: normal;
+  padding-bottom: 0.1em;
+}
+
+thead tr.groups th.span {
+  padding-bottom: 0.35em;
+  background: linear-gradient(var(--ink), var(--ink)) no-repeat
+    calc(0.3em) 100% / calc(100% - 0.6em) 0.06em;
+}
+
+thead tr.groups th.muted {
+  color: #555;
+}
+
 thead tr:first-child th {
   border-top: 0.12em solid var(--ink);
 }
