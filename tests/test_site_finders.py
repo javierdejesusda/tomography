@@ -194,7 +194,13 @@ def test_the_caption_quotes_every_number_and_the_sample_sizes(
 ) -> None:
     text = f"{output.claim} {output.detail}"
     assert "Qwen3-1.7B-Base" in text
-    assert "0.025 to 0.154" in text
+    gpt2 = [
+        EXPECTED[(m, "utility", "pca_diff")][0]
+        for m in MODELS
+        if _role(m) == "gpt2"
+    ]
+    assert f"{min(gpt2):.3f} to {max(gpt2):.3f}" in text
+    assert "0.154" not in text
     assert "214 sentiment, 59 truth and 256 utility pairs" in text
     assert "all 10 checkpoints" in text
     assert "[[fig:a_finders_gpt2]] and [[fig:a_finders_qwen3]]" in text
@@ -333,3 +339,39 @@ def test_the_role_key_is_a_filled_and_an_open_circle_in_neutral_ink(
         True,
         False,
     }
+
+
+def test_the_utility_gpt2_range_comes_from_the_gpt2_rows_only(
+    output: registry.FigureOutput,
+) -> None:
+    gpt2 = [
+        EXPECTED[(m, "utility", "pca_diff")][0]
+        for m in MODELS
+        if _role(m) == "gpt2"
+    ]
+    assert output.numbers["pca_utility_gpt2_min"] == pytest.approx(min(gpt2))
+    assert output.numbers["pca_utility_gpt2_max"] == pytest.approx(max(gpt2))
+    text = f"{output.claim} {output.detail}"
+    assert f"by {min(gpt2):.3f} to {max(gpt2):.3f})" in text
+    assert "over all ten" not in text
+
+
+def test_the_utility_interval_count_is_stated_per_role_not_pooled(
+    output: registry.FigureOutput,
+) -> None:
+    hits = {
+        r: sum(
+            EXPECTED[(m, "utility", "pca_diff")][1] > 0
+            for m in MODELS
+            if _role(m) == r
+        )
+        for r in ROLES
+    }
+    totals = {r: sum(_role(m) == r for m in MODELS) for r in ROLES}
+    expected = (
+        f"on {hits['base']} of {totals['base']} Qwen3 base and "
+        f"{hits['post']} of {totals['post']} post-trained checkpoints "
+        "by interval"
+    )
+    assert expected in output.claim
+    assert "all 6 Qwen3" not in output.claim

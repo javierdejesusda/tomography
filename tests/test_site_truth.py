@@ -490,3 +490,16 @@ def test_the_dumbbell_panels_share_the_row_limits_of_the_top_panels(
         lim = _ax(output, gid).get_ylim()
         assert lim[0] == pytest.approx(low)
         assert lim[1] > -1.0
+
+
+def test_the_gpt2_cities_range_has_its_random_direction_beside_it(
+    output: registry.FigureOutput,
+) -> None:
+    gpt2 = [m for m in MODELS if _role(m) == "gpt2"]
+    random = [_random(m, "cities") for m in gpt2]
+    n = output.numbers
+    assert n["gpt2_cities_random_min"] == pytest.approx(min(random))
+    assert n["gpt2_cities_random_max"] == pytest.approx(max(random))
+    low = f"{n['gpt2_cities_min']:.2f} to {n['gpt2_cities_max']:.2f}"
+    rand = f"{min(random):.2f} to {max(random):.2f} for its random direction"
+    assert f"{low}, against {rand}" in output.detail

@@ -82,6 +82,8 @@ class Model:
         text: Text-only classifier name to its cell.
         words: Largest point accuracy of the text-only classifiers.
         n_questions: Test questions behind the TruthfulQA intervals.
+        affirmative_random: Affirmative set to the accuracy of its random
+            direction at the same layer.
     """
 
     reads: dict[str, Cell]
@@ -90,6 +92,7 @@ class Model:
     text: dict[str, Cell]
     words: float
     n_questions: int
+    affirmative_random: dict[str, float]
 
 
 def _random_at(path: Any, name: str, layer: int) -> float:
@@ -144,6 +147,7 @@ def _model(manifest: Manifest, model: str) -> Model:
         text,
         max(c.value for c in text.values()),
         n_test,
+        {name: _random_at(other, name, layer) for name, _, _ in PAIRS},
     )
 
 
@@ -470,6 +474,13 @@ def _numbers(
     ]
     numbers["gpt2_cities_min"] = min(cities)
     numbers["gpt2_cities_max"] = max(cities)
+    random = [
+        data[m].affirmative_random["cities"]
+        for m in models
+        if stats.role(m) == "gpt2"
+    ]
+    numbers["gpt2_cities_random_min"] = min(random)
+    numbers["gpt2_cities_random_max"] = max(random)
     return numbers
 
 
@@ -518,6 +529,8 @@ def _detail(
         "95 percent Wilson intervals over the evaluation pairs of each "
         "set. GPT-2 reads affirmative cities at only "
         f"{numbers['gpt2_cities_min']:.2f} to {numbers['gpt2_cities_max']:.2f}"
+        f", against {numbers['gpt2_cities_random_min']:.2f} to "
+        f"{numbers['gpt2_cities_random_max']:.2f} for its random direction"
         ", so small excursions there are not inversions of a strong reader. "
         "Checkpoints with at least one negated set whose interval lies "
         f"below 0.5 are {stats.per_role_text(counts['neg_below_half'])}. On "
