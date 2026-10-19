@@ -7,6 +7,7 @@ encoding of the dose panels of Figure 9. All panels share one vertical range.
 from typing import Any
 
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 from tomography.site import runfiles
 from tomography.site import stats
@@ -35,7 +36,7 @@ DETAIL = (
     "95 percent interval that resamples the questions (grey band). A panel "
     "counts when the interval of the difference in the absolute slope on "
     "unknown questions between the direction and each of the 3 random "
-    "directions lies above zero. The encoding is that of "
+    "directions lies above zero, and a star marks it. The encoding is that of "
     "[[fig:knowledge_steering]]."
 )
 
@@ -107,7 +108,19 @@ def build(manifest: Manifest) -> FigureOutput:
                 csv_rows.extend(
                     [row[0], row[1], kind, *row[2:]] for row in rows
                 )
-                moved += _moves_more(run, kind)
+                passed = _moves_more(run, kind)
+                moved += passed
+                if passed:
+                    ax.plot(
+                        [0.92],
+                        [0.88],
+                        transform=ax.transAxes,
+                        marker="*",
+                        ls="none",
+                        color=paper.INK,
+                        markersize=5.0,
+                        zorder=4,
+                    )
                 ax.set_ylim(low - pad, high + pad)
                 ax.set_xlabel(
                     "relative coefficient" if r == len(runs) - 1 else ""
@@ -134,6 +147,26 @@ def build(manifest: Manifest) -> FigureOutput:
                     color=paper.ENC["random_marker"],
                     lw=paper.DATA_WIDTH,
                     label="mean of 3 random directions",
+                ),
+                Patch(
+                    facecolor=paper.INK,
+                    alpha=0.15,
+                    lw=0,
+                    label="interval of the direction",
+                ),
+                Patch(
+                    facecolor=paper.RANDOM_BAND,
+                    lw=0,
+                    label="interval of the random mean",
+                ),
+                Line2D(
+                    [],
+                    [],
+                    marker="*",
+                    ls="none",
+                    color=paper.INK,
+                    markersize=5.0,
+                    label="beyond all 3 random directions",
                 ),
                 _rows.series_handle(
                     "post-trained", "h", paper.INK, filled=False
