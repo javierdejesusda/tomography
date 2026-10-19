@@ -19,7 +19,7 @@ table rows), the fluency means, ratios and counts of cells past the rule and the
 of the runs made at `f4d414d` and of the M1, C2, C5 and P7 runs of the 4B pair (computed from the per-cell rows and the curves files), the P7 counts of inverted
 units on the GPT-2 sizes (recomputed from the per-seed curves), the P10b minima and maxima over layers and the counts of cells in P10a and P10b (computed from the table, hedge gap, forced in range, width, diagnostic, hand check, curves, transfer, baseline and people files), and differences or ranges quoted in the text. The P8 tables are read from the P8 run, which aggregates
 finished runs. Runs are identified by config hash in [Run identity](#run-identity). The document is not
-complete: [Pending](#pending) lists what it does not yet report.
+complete: [Pending](#pending) lists what it does not yet report. The counts of inverted units by layer, the fluency means, ratios and counts of cells past the rule, the random-arm ranges, the counts of emotions above the random maximum and the differences between shares in the chain 42 runs (C2, C5 and P7 on `gpt2`, `gpt2-medium` and the Qwen3 0.6B pair) are computed from the per-seed curves, the per-cell rows and the table files of those runs.
 
 Contents:
 
@@ -43,8 +43,8 @@ and stimulus-set size on qwen3-1.7b-base and qwen3-1.7b (P2,
 P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 17. [Stimulus-set size and direction finder
 across the GPT-2 sizes and Qwen3
 (P3, P4)](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) 18. [Persona wording and
-instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 19. [Template steering on the Qwen3 1.7B and 4B pairs
-(P7)](#template-steering-on-the-qwen3-17b-and-4b-pairs-p7) 20. [Run identity](#run-identity) 21. [Pending](#pending)
+instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 19. [Template steering on the Qwen3 0.6B, 1.7B and 4B pairs
+(P7)](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7) 20. [Run identity](#run-identity) 21. [Pending](#pending)
 
 ## Reading conventions
 
@@ -2159,6 +2159,8 @@ later run on `gpt2-medium`, `gpt2-large` and `gpt2-xl` (chain 17, `89ea7cb`), C4
 perplexity of neutral text; they are reported at the end of that section, under
 [LR1 and C4 on gpt2-medium, gpt2-large and gpt2-xl](#lr1-and-c4-on-gpt2-medium-gpt2-large-and-gpt2-xl).
 
+Chain 42 (`bab5b75`, rented GPU pod) added C2 and C5 on `gpt2` and C2, P7 and C5 on `gpt2-medium`, with random-direction arms and the fluency measure. The statements above hold for the runs they describe: the C2 section below reports the chain 42 run `c2/gpt2/f009922c8c55`, which has a random-direction arm and stores the perplexity and the distinct-1, and the earlier `gpt2` run `c2/gpt2/85c9a670bf17` stays tracked; P7 on `gpt2` still has neither. C5 on `gpt2` and the `gpt2-medium` runs are reported in [C2 on gpt2-medium](#c2-on-gpt2-medium), [P7 on gpt2-medium](#p7-on-gpt2-medium) and [C5 on gpt2 and gpt2-medium](#c5-on-gpt2-and-gpt2-medium), each after the `gpt2-large` and `gpt2-xl` block of the same experiment.
+
 ### Six direction finders on utility (M1)
 
 M1 reads utility (ETHICS) with six finders and compares them on held-out reading, on steering and on erasure (run
@@ -2204,35 +2206,68 @@ erasure disagree: the probe is erased for two finders and the behavioral gap for
 ### Emotion steering (C2)
 
 C2 steers `gpt2` along the logistic reader of each of the six R4 emotions and measures, with the primary emotion
-judge, the probability of every emotion in the completions (run `c2/gpt2/85c9a670bf17`; reading layer L10, steered over
-layers 9, 10 and 11, relative strength +0.3, 100 prompts, 2 samples per prompt, 3 steering seeds). The range is the
-minimum and maximum over the three steering seeds; the change is the own-emotion probability at +0.3 minus the
-unsteered one, read from the change matrix of the run.
+judge, the probability of every emotion in the completions (run `c2/gpt2/f009922c8c55`; reading layer L10, steered over
+layers 9, 10 and 11, relative strength +0.3, 100 prompts, 2 samples per prompt, 3 steering seeds, three random arms). It
+is the reported `gpt2` run of C2 and the run that C5 on `gpt2` reads. It was made in chain 42 at `bab5b75` on a rented
+GPU pod (see [Run identity](#run-identity)). The earlier run `c2/gpt2/85c9a670bf17` (`ca2546c`, laptop GPU) stays
+tracked: its config differs from this one in `n_random` only (absent there, 3 here), so it has no random arm and no
+fluency measure, and its primary hit rate is 0.833 against 1.000 here and its check hit rate 1.000 against 0.833.
+The range is the minimum and maximum over the three steering seeds; the change is the own-emotion probability at +0.3
+minus the unsteered one, read from the change matrix of the run. The last column is the range of the own-emotion change
+under the three random arms (unit directions norm-matched to the steering arm, with the same window, coefficients,
+operator, mode and mask).
 
-| Emotion   | Primary judge: no steering | Primary judge: at +0.3 [range over seeds] | Primary judge: change | Check judge: no steering | Check judge: at +0.3 | Check judge: change | Largest off-diagonal change (primary) |
-| --------- | -------------------------- | ----------------------------------------- | --------------------- | ------------------------ | -------------------- | ------------------- | ------------------------------------- |
-| happiness | 0.126                      | 0.686 [0.593, 0.750]                      | +0.560                | 0.347                    | 0.889                | +0.542              | surprise +0.010                       |
-| sadness   | 0.084                      | 0.403 [0.382, 0.441]                      | +0.319                | 0.166                    | 0.424                | +0.258              | disgust -0.005                        |
-| anger     | 0.056                      | 0.090 [0.077, 0.102]                      | +0.034                | 0.106                    | 0.278                | +0.172              | sadness +0.036                        |
-| fear      | 0.102                      | 0.559 [0.489, 0.683]                      | +0.458                | 0.136                    | 0.166                | +0.030              | anger -0.023                          |
-| disgust   | 0.073                      | 0.313 [0.222, 0.412]                      | +0.240                | 0.141                    | 0.269                | +0.128              | anger +0.027                          |
-| surprise  | 0.094                      | 0.151 [0.141, 0.165]                      | +0.057                | 0.084                    | 0.073                | -0.011              | anger -0.035                          |
+| Emotion   | Primary: none | Primary: +0.3 [range] | Primary: change | Check: none | Check: +0.3 | Check: change | Largest off-diagonal (primary) | Largest off-diagonal (check) | Random arms: own change |
+| --------- | ------------- | --------------------- | --------------- | ----------- | ----------- | ------------- | ------------------------------ | ---------------------------- | ----------------------- |
+| happiness | 0.121         | 0.713 [0.601, 0.776]  | +0.591          | 0.337       | 0.905       | +0.568        | fear -0.081                    | sadness -0.145               | -0.042 to -0.009        |
+| sadness   | 0.102         | 0.421 [0.398, 0.438]  | +0.319          | 0.164       | 0.446       | +0.282        | anger -0.037                   | anger -0.072                 | -0.045 to -0.031        |
+| anger     | 0.066         | 0.089 [0.078, 0.104]  | +0.023          | 0.098       | 0.279       | +0.181        | happiness -0.087               | happiness -0.218             | -0.028 to +0.043        |
+| fear      | 0.095         | 0.534 [0.442, 0.691]  | +0.439          | 0.141       | 0.153       | +0.012        | happiness -0.102               | happiness -0.188             | -0.019 to +0.036        |
+| disgust   | 0.078         | 0.322 [0.266, 0.422]  | +0.244          | 0.124       | 0.259       | +0.135        | happiness -0.090               | happiness -0.262             | -0.023 to +0.016        |
+| surprise  | 0.086         | 0.144 [0.126, 0.153]  | +0.058          | 0.077       | 0.069       | -0.008        | sadness -0.085                 | sadness -0.127               | +0.001 to +0.023        |
 
-- **On the primary judge four of six emotions rise toward their own score.** Happiness (0.126 to 0.686), fear (0.102 to
-  0.559), sadness (0.084 to 0.403) and disgust (0.073 to 0.313) rise, with the range over seeds above the unsteered
-value. Anger (0.056 to 0.090) and surprise (0.094 to 0.151) rise by 0.034 and 0.057 only. The curve of disgust peaks at
-+0.2 (0.411) and falls at +0.3.
+- **On the primary judge four of six emotions rise toward their own score.** Happiness (0.121 to 0.713), fear (0.095 to
+  0.534), sadness (0.102 to 0.421) and disgust (0.078 to 0.322) rise, with the range over seeds above the unsteered
+  value. Anger (0.066 to 0.089) and surprise (0.086 to 0.144) rise by 0.023 and 0.058 only; their ranges over seeds
+  also sit above the unsteered value (0.078 to 0.104 and 0.126 to 0.153) but the changes are below the random maximum
+  (next bullet). The curve of disgust peaks at +0.2 (0.402) and falls at +0.3.
+- **Random arms.** The own-emotion change under a random arm is between -0.045 and +0.043 over the six emotions, and the
+  largest absolute change of any emotion under any random arm, coefficient and judge is 0.129. Happiness (+0.591), fear
+  (+0.439), sadness (+0.319) and disgust (+0.244) are above it; anger (+0.023) and surprise (+0.058) are not, so on the
+  primary judge those two are not separated from an arbitrary edit of the same size.
 - **Hit rate and specificity** (the share of rows of the change matrix whose largest entry is on the diagonal, and the
-  mean diagonal change minus the mean off-diagonal change) are 0.833 and 0.323 on the primary judge and 1.000 and 0.264
-on the check judge. The primary judge misses once, for anger, whose largest change is on sadness (+0.036 against +0.034
-on the diagonal). The check judge's hit for anger is a margin of 0.001 over disgust (+0.172 against +0.171).
-- **The judges disagree on fear and anger.** The diagonal change of fear is +0.458 on the primary judge and +0.030 on
-  the check judge, and the check judge puts anger at +0.172 where the primary judge has +0.034. The correlation between
-  the two judges over the matrix is 0.792. Fear is steered on one judge and not on the other.
-- **Not stored and not controlled.** No perplexity or distinct-1 and no random-direction arm, so the table shows an
-  effect of the emotion vector at +0.3 on a judge, not whether the text is fluent and not how an arbitrary edit of the
-  same size compares. The probabilities are those of a classifier on short completions; the run does not measure whether
-  a human would read them as the emotion.
+  mean diagonal change minus the mean off-diagonal change) are 1.000 and 0.327 on the primary judge and 0.833 and 0.265
+  on the check judge. The check judge misses once, for anger, whose largest entry is on disgust (+0.190 against +0.181
+  on the diagonal).
+- **The judges disagree on fear and anger.** The diagonal change of fear is +0.439 on the primary judge and +0.012 on the
+  check judge, and the check judge puts anger at +0.181 where the primary judge has +0.023. The correlation between the
+  two judges over the matrix is 0.788. Fear is steered on one judge and not on the other.
+
+Cost to the text. The perplexity of held-out neutral text under the steered model and the distinct-1 of the generated
+text at +0.3, as the mean over the three steering readers of each emotion (with the range over the readers), against
+the unsteered text and the mean over the three random arms (with the range over the arms):
+
+| Arm                   | Perplexity [range over arms or readers] | Ratio to none | Distinct-1 [range]   |
+| --------------------- | --------------------------------------- | ------------- | -------------------- |
+| none                  | 53.6                                    | 1.00          | 0.319                |
+| random (3 arms, +0.3) | 92.2 [88.3, 96.9]                       | 1.72          | 0.278 [0.260, 0.291] |
+| happiness (+0.3)      | 207.0 [198.8, 213.9]                    | 3.86          | 0.165 [0.145, 0.189] |
+| sadness (+0.3)        | 176.9 [173.8, 182.6]                    | 3.30          | 0.203 [0.194, 0.215] |
+| anger (+0.3)          | 267.9 [251.5, 283.0]                    | 5.00          | 0.168 [0.161, 0.173] |
+| fear (+0.3)           | 255.8 [243.4, 268.3]                    | 4.77          | 0.125 [0.113, 0.132] |
+| disgust (+0.3)        | 266.3 [258.9, 270.9]                    | 4.97          | 0.131 [0.124, 0.135] |
+| surprise (+0.3)       | 195.2 [182.5, 203.6]                    | 3.64          | 0.166 [0.157, 0.180] |
+
+- **+0.3 is not fluent text.** Averaged over the six emotions the perplexity under the emotion arms is 1.18, 1.98 and
+  4.26 times the unsteered one at +0.1, +0.2 and +0.3, against 1.06, 1.27 and 1.72 for the random arms. By the rule of
+  [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity at most 1.5 times the unsteered one and
+  mean distinct-1 at least 0.15) +0.1 passes (1.18 times, mean distinct-1 0.296 against 0.319 unsteered), as does -0.1
+  (1.18 times, 0.296), and +0.2 does not (1.98 times, distinct-1 0.232). At +0.3 every emotion is at 3.30 to 5.00 times
+  the unsteered perplexity (the random arms are at 1.72), and two emotions are below 0.15 in distinct-1 (fear 0.125 and
+  disgust 0.131; the mean over the six emotions is 0.159, just above the cutoff). The changes in the table are therefore
+  changes of text that fails the rule at +0.3, and a rise in an emotion score at +0.3 is not read as steering that works.
+  The own-emotion probability at +0.1 is in the curves file and is not tabulated here. The probabilities are those of
+  a classifier on short completions; the run does not measure whether a human would read them as the emotion.
 
 ### Template steering (P7)
 
@@ -2556,6 +2591,58 @@ Cost to the text. Averaged over the six emotions and the three readers, the perp
 
 - **The +0.3 column is not fluent text.** At +0.3 every emotion has a perplexity of 2.52 to 4.17 times the unsteered one on `gpt2-large` and 2.28 to 4.11 times on `gpt2-xl` (disgust is the highest on `gpt2-large` and anger on `gpt2-xl`), so by the rule above no change in the first table is the change of fluent text, and none is read as steering that works. On `gpt2-large` +0.1 is the only coefficient that passes on average (+0.2 is 1.66 times); on `gpt2-xl` +0.2 passes on average (1.42 times) with anger (1.53) and fear (1.54) above the cutoff. The own-emotion probability at +0.1 and +0.2 is in the curves file of each run and is not tabulated here.
 
+#### C2 on gpt2-medium
+
+C2 on `gpt2-medium` (run `c2/gpt2-medium/1ae093396c5d`; 24 blocks, reading layer L16, steered over layers 15, 16 and 17, relative strength +0.3, 100 prompts, 2 samples per prompt, 3 steering seeds, three random arms) is one of the chain 42 runs, made at `bab5b75` on a rented GPU pod (see [Run identity](#run-identity)); the design, the columns and the random arms are those of [C2 on gpt2-large and gpt2-xl](#c2-on-gpt2-large-and-gpt2-xl) above. The `gpt2` run of the same chain is `c2/gpt2/f009922c8c55`, in [Emotion steering (C2)](#emotion-steering-c2).
+
+| Emotion   | Primary: none | Primary: +0.3 [range] | Primary: change | Check: none | Check: +0.3 | Check: change | Largest off-diagonal (primary) | Largest off-diagonal (check) | Random arms: own change |
+| --------- | ------------- | --------------------- | --------------- | ----------- | ----------- | ------------- | ------------------------------ | ---------------------------- | ----------------------- |
+| happiness | 0.141         | 0.428 [0.364, 0.481]  | +0.287          | 0.338       | 0.800       | +0.462        | fear -0.077                    | disgust -0.132               | -0.083 to -0.056        |
+| sadness   | 0.079         | 0.250 [0.225, 0.289]  | +0.171          | 0.137       | 0.286       | +0.150        | happiness +0.072               | disgust -0.121               | -0.023 to +0.001        |
+| anger     | 0.084         | 0.068 [0.032, 0.096]  | -0.016          | 0.133       | 0.168       | +0.036        | fear -0.073                    | happiness -0.102             | -0.042 to -0.013        |
+| fear      | 0.097         | 0.297 [0.149, 0.410]  | +0.201          | 0.126       | 0.282       | +0.156        | happiness -0.129               | happiness -0.251             | -0.040 to +0.110        |
+| disgust   | 0.081         | 0.412 [0.362, 0.487]  | +0.330          | 0.154       | 0.531       | +0.377        | happiness -0.126               | anger +0.336                 | -0.032 to -0.013        |
+| surprise  | 0.083         | 0.161 [0.116, 0.227]  | +0.078          | 0.074       | 0.066       | -0.009        | happiness -0.096               | fear -0.103                  | -0.022 to +0.021        |
+
+- **On the primary judge four of six emotions rise toward their own score.** Disgust (+0.330), happiness (+0.287),
+  fear (+0.201) and sadness (+0.171) rise, with the range over seeds above the unsteered value (fear: 0.149 against
+  0.097). Surprise rises by +0.078 (range 0.116 to 0.227, above the unsteered 0.083). Anger falls
+  by 0.016, and the range over seeds (0.032 to 0.096) contains the unsteered value (0.084). The curve of fear peaks at
+  +0.2 (0.316) and falls at +0.3.
+- **Random arms.** The own-emotion change under a random arm is between -0.083 and +0.110 (fear has the widest range,
+  -0.040 to +0.110, and happiness falls under all three random arms, -0.083 to -0.056), and the largest absolute change of
+  any measured emotion under any random arm, coefficient and judge is 0.136, the largest of the four C2 runs of chain
+  42. Happiness (+0.287), sadness (+0.171), fear (+0.201) and disgust (+0.330) are above it; surprise (+0.078) and
+  anger (-0.016) are not.
+- **Hit rate and specificity** are 0.833 and 0.216 on the primary judge and 0.833 and 0.254 on the check judge. Each
+  judge misses once, for anger: on the primary judge the largest entry of the row is sadness (-0.016, the same as the
+  diagonal to four places), on the check judge disgust (+0.039 against +0.036 on the diagonal). The check judge puts
+  anger at +0.036 and disgust at +0.377; on the row of disgust its largest off-diagonal entry is anger (+0.336).
+- **The judges agree more here than on `gpt2`.** The correlation between the two judges over the change matrix is
+  0.869, against 0.788 on `gpt2`. Fear is steered on both judges (+0.201 and +0.156), where on `gpt2` it was steered on
+  one only (+0.439 and +0.012).
+
+Cost to the text. As in [Emotion steering (C2)](#emotion-steering-c2):
+
+| Arm                   | Perplexity [range over arms or readers] | Ratio to none | Distinct-1 [range]   |
+| --------------------- | --------------------------------------- | ------------- | -------------------- |
+| none                  | 39.2                                    | 1.00          | 0.333                |
+| random (3 arms, +0.3) | 71.4 [70.2, 72.1]                       | 1.82          | 0.297 [0.279, 0.321] |
+| happiness (+0.3)      | 214.5 [204.7, 221.0]                    | 5.47          | 0.204 [0.198, 0.207] |
+| sadness (+0.3)        | 216.1 [208.0, 225.8]                    | 5.51          | 0.197 [0.192, 0.205] |
+| anger (+0.3)          | 340.3 [329.3, 357.8]                    | 8.68          | 0.172 [0.160, 0.194] |
+| fear (+0.3)           | 351.5 [275.9, 438.0]                    | 8.97          | 0.158 [0.144, 0.182] |
+| disgust (+0.3)        | 160.6 [150.6, 174.8]                    | 4.10          | 0.215 [0.200, 0.224] |
+| surprise (+0.3)       | 255.2 [221.2, 276.5]                    | 6.51          | 0.174 [0.171, 0.176] |
+
+- **+0.3 is not fluent text.** Averaged over the six emotions the perplexity under the emotion arms is 1.20, 2.24 and
+  6.54 times the unsteered one at +0.1, +0.2 and +0.3, against 1.06, 1.27 and 1.82 for the random arms. By the rule
+  above +0.1 passes (1.20 times, mean distinct-1 0.307 against 0.333 unsteered), as does -0.1 (1.19 times, 0.313), and
+  +0.2 does not (2.24 times, distinct-1 0.251). At +0.3 every emotion is at 4.10 to 8.97 times the unsteered
+  perplexity (the random arms are at 1.82, above 1.5 as well) and the distinct-1 is between 0.158 and 0.215 (mean
+  0.187), above the cutoff for all six. The perplexity cost alone makes +0.3 fail the rule, so the changes in the table
+  are changes of text that fails it, and a rise in an emotion score at +0.3 is not read as steering that works.
+
 #### P7 on gpt2-large and gpt2-xl
 
 P7 extracts the sentiment reader under six templates of P1 and steers with the C1 protocol, as on `gpt2` (runs `p7/gpt2-large/d03910535564` and `p7/gpt2-xl/eb67813e769d`; coefficients -0.3, -0.15, 0, 0.15 and 0.3, 50 prompts, 2 samples per prompt, 2 steering readers per template), over the sweep layers 1, 8, 15, 22, 29 and 36 on `gpt2-large` and 1, 10, 20, 29, 39 and 48 on `gpt2-xl` (the last is the last block of each model). A unit is a template, a sweep layer and a steering reader (72 units); it is readable if the validation accuracy of its reader at that layer is at least 0.6, and inverted if it is readable and its primary dose slope is negative. The runs add three random directions (one reader each, steered at every sweep layer with the same grid) and the fluency measure.
@@ -2593,6 +2680,29 @@ The read accuracy is the best point of the mean reading curve over the 10 reader
 - **Random directions.** The largest absolute dose slope of a random direction at any sweep layer is 0.210 on `gpt2-large` (layer 22, where the six template means are 0.393 to 0.961) and 0.238 on `gpt2-xl` (layer 39, where the six template means are 0.457 to 0.885), against 0.777 to 1.034 and 0.956 to 1.543 for the templates at the steering layer. The inversion on `gpt2-xl` is not an artifact that random directions share: at layer 20 the three random slopes are -0.192 to 0.172, and five of the six template means (-0.393 to -0.260) are below the lowest of them.
 - **Fluency.** On `gpt2-large` the neutral perplexity under steering is at most 1.25 times the unsteered one (34.0) in all 360 cells (288 template cells and 72 random-arm rows), and the lowest distinct-1 is 0.273 (unsteered 0.309), so every cell is fluent. On `gpt2-xl` 9 of the 360 cells (288 template cells and 72 random-arm rows) exceed 1.5 times (1.51 to 1.67; all 9 are template cells), all at layer 48 and coefficient -0.3, and the lowest distinct-1 is 0.155 (unsteered 0.324). The dose slope at the last block of `gpt2-xl` is fitted over a grid that includes those cells.
 
+#### P7 on gpt2-medium
+
+P7 on `gpt2-medium` (run `p7/gpt2-medium/1de9b6b988f4`, made in chain 42 at `bab5b75` on a rented GPU pod; coefficients -0.3, -0.15, 0, 0.15 and 0.3, 50 prompts, 2 samples per prompt, 2 steering readers per template, three random directions with one reader each) has the design of [P7 on gpt2-large and gpt2-xl](#p7-on-gpt2-large-and-gpt2-xl) above. The model has 24 blocks, so the sweep layers are 1, 6, 10, 15, 19 and 24 (24 is the last block). A unit is a template, a sweep layer and a steering reader (72 units); it is readable if the validation accuracy of its reader at that layer is at least 0.6, and inverted if it is readable and its primary dose slope is negative.
+
+| Template       | Read layer | Read accuracy | Steer layer | Dose slope at steer layer | Dose slope, sweep layers 1 to 19 | Readable units | Inverted |
+| -------------- | ---------- | ------------- | ----------- | ------------------------- | -------------------------------- | -------------- | -------- |
+| paper          | L20        | 0.789         | L24         | 1.513                     | -0.105 to 0.980                  | 12             | 2        |
+| no_template    | L21        | 0.811         | L24         | 1.422                     | -0.167 to 1.132                  | 11             | 2        |
+| no_chat_tags   | L17        | 0.907         | L24         | 1.680                     | 0.003 to 1.135                   | 12             | 2        |
+| neutral_frame  | L19        | 0.823         | L24         | 1.482                     | -0.123 to 0.931                  | 12             | 3        |
+| scaffold_0     | L21        | 0.882         | L24         | 1.680                     | -0.051 to 1.266                  | 12             | 3        |
+| concept_swap_0 | L20        | 0.800         | L24         | 1.499                     | -0.065 to 0.991                  | 12             | 3        |
+
+The read accuracy is the best point of the mean reading curve over the 10 readers, so it is optimistic by the selection. The sweep-layer column is the minimum and maximum of the mean dose slope over layers 1, 6, 10, 15 and 19, read from the curves files.
+
+- **Steering layer.** All six templates steer most at the last block (L24), with slopes of 1.422 to 1.680 there, the edge of what was swept and not an interior optimum. The slope is not monotone before it: the mean slope at layer 6 is negative for five templates (-0.167 to -0.051; `no_chat_tags` has 0.187) and it rises from layer 10 on (`paper`: 0.097, -0.105, 0.287, 0.864, 0.980 and 1.513 at layers 1, 6, 10, 15, 19 and 24). The slope at the steering layer is measured on the prompts that chose that layer and is optimistic.
+- **Reading layers.** The reading layer is L17 to L21 and the read accuracy 0.789 to 0.907. The mean absolute gap between the reading depth and the steering depth (layer divided by 24) is 0.181.
+- **Inversion.** 71 of the 72 units are readable (the exception is the first reader of `no_template` at layer 1, with a validation accuracy of 0.598 and a positive slope, 0.125); 15 of the 71 are inverted, a rate of 0.211 [0.132, 0.320] (Wilson interval), against 1 of 72 on `gpt2`, 3 of 72 on `gpt2-large` and 20 of 72 on `gpt2-xl`. The counts by template are 2, 2, 2, 3, 3 and 3, and by layer 4, 9, 2, 0, 0 and 0 at layers 1, 6, 10, 15, 19 and 24, so every inverted unit sits at one of the three shallowest layers. The lowest unit slope is -0.300 (`scaffold_0`, layer 6, reader 1).
+- **Reading and steering.** The Spearman correlation over the 72 units is 0.685 between reading accuracy and dose slope and 0.795 between the logit-lens score and dose slope, and the sign of the slope agrees between the two judges for 0.903 of the units (65 of 72). The sweep layer with the largest logit-lens separation is the steering layer for 1 of 6 templates (`no_chat_tags`); for the other five it is L19. Both the reading accuracy and the slope rise with depth over the sweep, so a rank correlation over units that mixes layers can be driven by depth alone, and the summary does not give the within-layer correlation.
+- **Prompt format.** The mean primary dose slope by steering prompt format (raw, chat and story) is 1.343 to 1.677, 1.345 to 1.565 and 1.387 to 1.711 over the six templates; chat is the lowest of the three formats for five templates.
+- **Random directions.** The largest absolute dose slope of a random direction at any sweep layer is 0.330 (layer 15, where the six template means are 0.452 to 1.083). At the steering layer the three random slopes are -0.252, -0.223 and 0.268, against 1.422 to 1.680 for the templates. The random slopes at layers 1, 6 and 10, where the inverted units sit, range from -0.109 to 0.191, and the inverted units go lower (down to -0.300), so a random direction gives small slopes of either sign, of the same order as the inverted units but not all of them.
+- **Fluency.** The neutral text has a perplexity of 39.2 and a distinct-1 of 0.337 without steering. The cells are 288 template cells and 72 random-arm rows (360 per run); the counts are over the template cells unless stated. 25 template cells have a perplexity above 1.5 times the unsteered one (1.64 to 3.09): all 24 cells of layer 24 at coefficients -0.3 and +0.3 (6 templates, 2 readers, 2 signs) and one at layer 6 and -0.3. 9 cells have a distinct-1 below 0.15 (lowest 0.092, `no_chat_tags` at layer 24, reader 0, -0.3), all at layer 24 and 8 of them at -0.3. The mean over the templates and readers at layer 24 is 2.258 (+0.3) and 2.422 (-0.3) times the unsteered perplexity, against 1.111 to 1.291 and 1.113 to 1.396 at the other layers. The random arms are also affected there: 6 of the 72 random rows (the three random directions at layer 24, at +0.3 and at -0.3) are above 1.5 times (1.67 to 2.20) and none has a distinct-1 below 0.15. The dose slope at the last block, the steering layer of every template, is therefore fitted over a grid that includes cells of text that fails the rule above, as on `gpt2-xl`.
+
 #### C5 on gpt2-large and gpt2-xl
 
 C5 records the share of correct answers on 1,000 TriviaQA questions of the pool, one sample per question at temperature 0.8 with a 15-shot prompt, without steering and under an honesty-steered arm (+0.1) and a lie-steered arm (-0.1) of the same relative strength (runs `c5/gpt2-large/36f392712827` and `c5/gpt2-xl/0ad95833261d`; steered over layers 10, 13, 17, 20, 23, 27, 30 and 34 on `gpt2-large` and 13, 17, 22, 27, 31, 35, 40 and 45 on `gpt2-xl`). The runs add three random arms (unit directions norm-matched to the steering arm, steered at +0.1 and -0.1) and the fluency measure. A flip is a question the plain model answers correctly and the lie arm answers wrongly. `gpt2-xl` has an earlier C5 run, `c5/gpt2-xl/155f0f72bc3f`, with no random arm and no fluency measure and no emotion gallery; it stays tracked, and the `gpt2-xl` column below is the later run, which is the reported one. The two differ in the C2 run they read (none earlier), in `n_random`, in the commit (`ca2546c` earlier) and in the GPU (a laptop GPU earlier).
@@ -2622,6 +2732,38 @@ The random rows are the mean of the three random directions. The perplexity is t
 - **Flip rate.** 45 of the 112 questions answered correctly are answered wrongly under the lie arm on `gpt2-large` (0.402 [0.316, 0.494]) and 70 of 150 on `gpt2-xl` (0.467 [0.389, 0.546]); the earlier `gpt2-xl` run gave 77 of 147 (0.524 [0.443, 0.603]). The intervals overlap. No flip rate is stored for the random arms, so the flip rate is not separated from the effect of a generic perturbation of the model, and the random arms lower the correct share too.
 - **Cost to the text.** The perplexity of neutral text is 1.28 and 1.33 times the unsteered one under the honesty and lie arms on `gpt2-large` and 1.29 and 1.45 times on `gpt2-xl`, against 1.06 to 1.09 and 1.07 to 1.08 for the random arms, so the random arms disturb the model less than the steering arms do at the same relative strength. The distinct-1 cutoff of the rule above (0.15) is not used here: the unsteered answers are already at 0.144 and 0.145, and the steered arms are between 0.121 and 0.155.
 - The run also stores a small gallery of completions (4 unfiltered and up to 4 curated per arm, the curated ones being the first flipped questions) and an emotion gallery read from the C2 run of the same size, which are selections and not evidence for a rate and are not read here.
+
+#### C5 on gpt2 and gpt2-medium
+
+C5 on `gpt2` and `gpt2-medium` (runs `c5/gpt2/2ccb81ad9db0` and `c5/gpt2-medium/a7f2f089ac8b`, made in chain 42 at `bab5b75` on a rented GPU pod) has the design of [C5 on gpt2-large and gpt2-xl](#c5-on-gpt2-large-and-gpt2-xl) above: 1,000 TriviaQA questions of the pool, one sample per question at temperature 0.8 with a 15-shot prompt, without steering and under an honesty-steered arm (+0.1) and a lie-steered arm (-0.1) of the same relative strength, steered over layers 4, 5, 6, 7, 9, 10, 11 and 12 on `gpt2` and 7, 9, 11, 14, 16, 18, 21 and 23 on `gpt2-medium`, with three random arms (steered at +0.1 and -0.1) and the fluency measure. Each run reads the C2 run of its model: `c2/gpt2/f009922c8c55` and `c2/gpt2-medium/1ae093396c5d`. A flip is a question the plain model answers correctly and the lie arm answers wrongly. There is no earlier C5 run on these two models. No row of either run has an empty answer, so every share is over the 1,000 questions.
+
+| Quantity                                     | gpt2                 | gpt2-medium          |
+| -------------------------------------------- | -------------------- | -------------------- |
+| Correct, no steering                         | 0.029                | 0.070                |
+| Correct, honesty-steered                     | 0.029                | 0.058                |
+| Correct, lie-steered                         | 0.006                | 0.031                |
+| Correct, random +0.1 (mean of 3)             | 0.023                | 0.059                |
+| Correct, random -0.1 (mean of 3)             | 0.020                | 0.057                |
+| Answered correctly without steering          | 29                   | 70                   |
+| Of these, answered wrongly under the lie arm | 26                   | 44                   |
+| Flip rate [95% interval]                     | 0.897 [0.736, 0.964] | 0.629 [0.511, 0.732] |
+| Perplexity: none                             | 17.0                 | 12.8                 |
+| Perplexity: honesty-steered                  | 27.7                 | 22.7                 |
+| Perplexity: lie-steered                      | 42.4                 | 27.5                 |
+| Perplexity: random (range of 6)              | 19.4 to 20.5         | 14.9 to 15.9         |
+| Distinct-1: none                             | 0.138                | 0.157                |
+| Distinct-1: honesty-steered                  | 0.130                | 0.135                |
+| Distinct-1: lie-steered                      | 0.127                | 0.179                |
+| Distinct-1: random (range of 6)              | 0.127 to 0.143       | 0.145 to 0.160       |
+
+The random rows are the mean of the three random directions. The perplexity is that of held-out neutral text under the steered model, and the distinct-1 that of the generated answers (about 24 tokens in every arm).
+
+- **The shares are near the floor of the measure.** `gpt2` answers 29 of the 1,000 questions correctly without steering and `gpt2-medium` 70, against 112 and 150 on `gpt2-large` and `gpt2-xl`. A share of 1,000 questions near 0.03 has a binomial standard error of about 0.005 and one near 0.07 of about 0.008, and the shares carry no interval, so differences of 0.01 or less in the table are not read.
+- **`gpt2`: only the lie arm is below the random arms.** The honesty arm (0.029) equals the unsteered share and is 0.006 and 0.009 above the random arms (0.023 and 0.020); the lie arm (0.006) is 0.023 below the unsteered share and 0.017 and 0.014 below the random arms.
+- **`gpt2-medium`: the honesty arm is level with the random arms and the lie arm is not.** The honesty arm (0.058) is 0.012 below the unsteered share (0.070) and within 0.001 of the random arms (0.059 and 0.057), so its drop is not separated from a generic perturbation of the model. The lie arm (0.031) is 0.039 below the unsteered share, 0.027 below the honesty arm and 0.028 and 0.026 below the random arms. The order of the three steered arms is the same as on `gpt2-large` and `gpt2-xl`, where the lie arm is the lowest.
+- **Flip rate.** 26 of the 29 questions answered correctly are answered wrongly under the lie arm on `gpt2` (0.897 [0.736, 0.964]) and 44 of 70 on `gpt2-medium` (0.629 [0.511, 0.732]); the `gpt2-large` and `gpt2-xl` runs gave 45 of 112 (0.402 [0.316, 0.494]) and 70 of 150 (0.467 [0.389, 0.546]). The `gpt2` interval lies above the intervals of the three other sizes, and the `gpt2-medium` one above that of `gpt2-large` and overlapping that of `gpt2-xl`. The sets of known questions differ by model (29, 70, 112 and 150 of 1,000) and the shares are near the floor, so the four rates are not a scaling curve. No flip rate is stored for the random arms, so the flip rate is not separated from the effect of a generic perturbation of the model, and the random arms lower the correct share too (by 0.006 to 0.009 on `gpt2` and 0.011 to 0.013 on `gpt2-medium`).
+- **Cost to the text.** The perplexity of neutral text is 1.63 and 2.49 times the unsteered one under the honesty and lie arms on `gpt2` and 1.78 and 2.15 times on `gpt2-medium`, against 1.14 to 1.20 and 1.16 to 1.24 for the random arms, so the steering arms disturb the text more than the random arms do at the same relative strength, and more than on `gpt2-large` and `gpt2-xl` (1.28 to 1.45 times). The distinct-1 cutoff of the rule above (0.15) is not used here: the unsteered answers are at 0.138 and 0.157, and the steered arms are between 0.127 and 0.179 (the lie arm of `gpt2-medium` has the highest value, 0.179, above the unsteered text).
+- The runs also store a small gallery of completions and an emotion gallery read from the C2 run of the same model, which are selections and not evidence for a rate and are not read here.
 
 #### LR1 and C4 on gpt2-medium, gpt2-large and gpt2-xl
 
@@ -4608,6 +4750,8 @@ sections say. The later M1, C2, C4 and C5 runs carry random-direction arms and s
 under the steered model (and, for M1, C2 and C5, the distinct-1 of the generated text); this is said again under each
 of them.
 
+The 0.6B pair (`qwen3-0.6b-base` and `qwen3-0.6b`) ran C2, C5 and P7 in chain 42 (at `bab5b75`, on a rented GPU pod), with random-direction arms and the perplexity of neutral text and the distinct-1 of the generated text. Their results follow the 4B text in a `#### The 0.6B pair` block of the C2 and C5 sections and in the P7 section ([Template steering on the Qwen3 0.6B, 1.7B and 4B pairs](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7)).
+
 ### Emotions (R4)
 
 One reader per emotion against the others, with the protocol of R4 on the GPT-2 sizes (10 readers, last token, test
@@ -5394,6 +5538,69 @@ readers), against the unsteered text and the mean over the three random arms (wi
   emotion score at +0.3 is not read as steering that works. The own-emotion probability at +0.1 is in the curves file of
   each run and is not tabulated here.
 
+#### The 0.6B pair (C2)
+
+The same config as the runs above (100 prompts, 2 samples per prompt, 3 steering seeds, relative strength +0.3, three random arms), on `qwen3-0.6b-base` and `qwen3-0.6b` (28 blocks; runs `c2/qwen3-0.6b-base/b1606314f58b` and `c2/qwen3-0.6b/9aa16ae5425c`). Both were made in chain 42 at `bab5b75` on a rented GPU pod (see [Run identity](#run-identity)). The base checkpoint reads at L19 and steers over layers 18, 19 and 20, the post-trained one reads at L23 and steers over layers 22, 23 and 24, so the two checkpoints are steered at different depths (19 and 23 of 28), as on the 1.7B pair.
+
+`qwen3-0.6b-base`:
+
+| Emotion   | Primary: none | Primary: +0.3 [range] | Primary: change | Check: none | Check: +0.3 | Check: change | Largest off-diagonal (primary) | Largest off-diagonal (check) | Random arms: own change |
+| --------- | ------------- | --------------------- | --------------- | ----------- | ----------- | ------------- | ------------------------------ | ---------------------------- | ----------------------- |
+| happiness | 0.124         | 0.441 [0.419, 0.458]  | +0.317          | 0.300       | 0.729       | +0.428        | fear -0.073                    | sadness -0.099               | -0.039 to -0.015        |
+| sadness   | 0.072         | 0.290 [0.156, 0.451]  | +0.218          | 0.129       | 0.245       | +0.116        | fear -0.035                    | fear -0.058                  | -0.038 to +0.001        |
+| anger     | 0.043         | 0.149 [0.129, 0.172]  | +0.106          | 0.064       | 0.318       | +0.254        | happiness -0.107               | happiness -0.238             | -0.014 to -0.008        |
+| fear      | 0.085         | 0.208 [0.182, 0.246]  | +0.123          | 0.085       | 0.108       | +0.022        | happiness -0.090               | happiness -0.110             | -0.032 to -0.023        |
+| disgust   | 0.063         | 0.286 [0.279, 0.293]  | +0.223          | 0.088       | 0.265       | +0.177        | happiness -0.100               | happiness -0.239             | -0.029 to -0.009        |
+| surprise  | 0.094         | 0.113 [0.094, 0.127]  | +0.019          | 0.063       | 0.058       | -0.005        | happiness -0.095               | happiness -0.160             | -0.003 to +0.041        |
+
+`qwen3-0.6b`:
+
+| Emotion   | Primary: none | Primary: +0.3 [range] | Primary: change | Check: none | Check: +0.3 | Check: change | Largest off-diagonal (primary) | Largest off-diagonal (check) | Random arms: own change |
+| --------- | ------------- | --------------------- | --------------- | ----------- | ----------- | ------------- | ------------------------------ | ---------------------------- | ----------------------- |
+| happiness | 0.067         | 0.628 [0.568, 0.718]  | +0.561          | 0.245       | 0.874       | +0.630        | sadness -0.043                 | sadness -0.094               | -0.019 to +0.005        |
+| sadness   | 0.056         | 0.178 [0.143, 0.197]  | +0.122          | 0.110       | 0.205       | +0.095        | surprise -0.034                | surprise -0.048              | -0.014 to -0.006        |
+| anger     | 0.034         | 0.203 [0.176, 0.236]  | +0.170          | 0.045       | 0.609       | +0.565        | disgust +0.184                 | disgust +0.550               | -0.013 to +0.007        |
+| fear      | 0.047         | 0.259 [0.196, 0.320]  | +0.213          | 0.062       | 0.054       | -0.008        | surprise +0.044                | happiness -0.156             | -0.016 to -0.003        |
+| disgust   | 0.032         | 0.129 [0.114, 0.148]  | +0.097          | 0.080       | 0.141       | +0.061        | surprise +0.051                | happiness -0.094             | +0.003 to +0.008        |
+| surprise  | 0.117         | 0.322 [0.283, 0.356]  | +0.205          | 0.077       | 0.107       | +0.030        | happiness -0.047               | sadness -0.062               | -0.011 to +0.046        |
+
+- **Primary judge, base: five of six emotions rise toward their own score, surprise does not.** Happiness (+0.317), disgust (+0.223), sadness (+0.218), fear (+0.123) and anger (+0.106) rise with the range over seeds above the unsteered value (sadness is the widest, 0.156 to 0.451, and its lower end is 0.084 above the unsteered 0.072). Surprise rises by +0.019 and its range over seeds (0.094 to 0.127) touches the unsteered value (0.094). The primary hit rate is 1.000 and the specificity 0.197; on the check judge the hit rate is 0.833 (it misses surprise, whose largest entry is on disgust, -0.004 against -0.005 on the diagonal) and the specificity 0.206. The correlation between the judges over the change matrix is 0.847.
+- **Primary judge, post-trained: all six emotions rise toward their own score**, by +0.097 (disgust) to +0.561 (happiness), with the range over seeds above the unsteered value in every row. The primary hit rate is 0.833 and the specificity 0.233: it misses anger, whose largest entry is on disgust (+0.184 against +0.170 on the diagonal). On the check judge the hit rate is 0.667 (it misses fear, where sadness is the largest entry at -0.005 against -0.008, and disgust, where anger is, +0.064 against +0.061) and the specificity 0.242. The correlation between the judges is 0.782, the lowest of the four runs of chain 42. The diagonals differ: the check judge gives anger +0.565 where the primary judge gives +0.170, and fear -0.008 where the primary judge gives +0.213, so fear is steered on one judge and not on the other.
+- **Random arms.** The own-emotion change under a random arm is between -0.039 and +0.041 on the base checkpoint and between -0.019 and +0.046 on the post-trained one, and the largest absolute change of any measured emotion under any random arm, coefficient and judge is 0.076 and 0.050 (the 1.7B and 4B values are between 0.046 and 0.091). On the base checkpoint happiness (+0.317), disgust (+0.223), sadness (+0.218), fear (+0.123) and anger (+0.106) are above the random maximum and surprise (+0.019) is not. On the post-trained checkpoint all six own-emotion changes (+0.097 to +0.561) are above it.
+- **Base against post-trained.** Happiness (+0.317 against +0.561), anger (+0.106 against +0.170) and surprise (+0.019 against +0.205) are steered more on the post-trained checkpoint, with ranges over seeds of the change that do not overlap ([+0.295, +0.334] and [+0.501, +0.651]; [+0.086, +0.129] and [+0.143, +0.202]; [+0.000, +0.034] and [+0.166, +0.239]); disgust (+0.223 against +0.097) is steered more on the base checkpoint (ranges [+0.216, +0.230] and [+0.082, +0.116]); sadness (+0.218 against +0.122) and fear (+0.123 against +0.213) have overlapping ranges ([+0.084, +0.379] and [+0.087, +0.141]; [+0.097, +0.161] and [+0.149, +0.273]). There is no common sign. Each emotion has one reader per checkpoint, at a different depth, and each checkpoint one run, so this is a contrast between two runs.
+- **The +0.3 column is not the peak.** On the base checkpoint the own-emotion probability is higher at +0.2 than at +0.3 for anger (0.155 against 0.149), fear (0.266 against 0.208), disgust (0.302 against 0.286) and surprise (0.127 against 0.113); on the post-trained one it is for fear (0.525 against 0.259, the largest drop) and disgust (0.228 against 0.129). The text at +0.2 does not pass the fluency rule either (below).
+- **Off-diagonal.** On the base checkpoint the largest off-diagonal change on the primary judge is a fall of happiness in the anger, fear, disgust and surprise rows (-0.090 to -0.107) and a fall of fear in the sadness row (-0.035) and in the happiness row (-0.073); on the check judge happiness falls in the same four rows (-0.110 to -0.239) and sadness falls by 0.099 in the happiness row. On the post-trained checkpoint the largest primary entries are a rise of disgust in the anger row (+0.184, more than the diagonal), a rise of surprise in the fear and disgust rows (+0.044 and +0.051), a fall of sadness in the happiness row (-0.043), of surprise in the sadness row (-0.034) and of happiness in the surprise row (-0.047); on the check judge disgust rises by +0.550 in the anger row (the diagonal is +0.565), happiness falls in the fear and disgust rows (-0.156 and -0.094) and sadness falls in the happiness and surprise rows (-0.094 and -0.062).
+
+Cost to the text. The perplexity of held-out neutral text under the steered model and the distinct-1 of the generated text at +0.3, as the mean over the three steering readers of each emotion (with the range over the readers), against the unsteered text and the mean over the three random arms (with the range over the arms).
+
+`qwen3-0.6b-base`:
+
+| Arm                   | Perplexity [range over arms or readers] | Ratio to none | Distinct-1 [range]   |
+| --------------------- | --------------------------------------- | ------------- | -------------------- |
+| none                  | 26.9                                    | 1.00          | 0.294                |
+| random (3 arms, +0.3) | 39.3 [38.5, 40.5]                       | 1.46          | 0.260 [0.245, 0.286] |
+| happiness (+0.3)      | 101.2 [90.5, 108.7]                     | 3.77          | 0.188 [0.186, 0.191] |
+| sadness (+0.3)        | 126.7 [126.4, 127.2]                    | 4.72          | 0.246 [0.224, 0.263] |
+| anger (+0.3)          | 173.2 [138.2, 199.5]                    | 6.45          | 0.176 [0.169, 0.189] |
+| fear (+0.3)           | 139.9 [129.6, 146.9]                    | 5.21          | 0.169 [0.149, 0.186] |
+| disgust (+0.3)        | 216.3 [196.2, 234.3]                    | 8.05          | 0.195 [0.184, 0.207] |
+| surprise (+0.3)       | 139.5 [135.8, 146.4]                    | 5.19          | 0.167 [0.153, 0.178] |
+
+`qwen3-0.6b`:
+
+| Arm                   | Perplexity [range over arms or readers] | Ratio to none | Distinct-1 [range]   |
+| --------------------- | --------------------------------------- | ------------- | -------------------- |
+| none                  | 47.6                                    | 1.00          | 0.243                |
+| random (3 arms, +0.3) | 89.6 [84.7, 97.1]                       | 1.88          | 0.192 [0.171, 0.212] |
+| happiness (+0.3)      | 338.9 [301.2, 389.1]                    | 7.11          | 0.133 [0.121, 0.150] |
+| sadness (+0.3)        | 286.6 [261.3, 335.5]                    | 6.02          | 0.129 [0.118, 0.145] |
+| anger (+0.3)          | 358.8 [331.6, 373.2]                    | 7.53          | 0.137 [0.131, 0.144] |
+| fear (+0.3)           | 589.7 [487.4, 700.6]                    | 12.38         | 0.029 [0.019, 0.041] |
+| disgust (+0.3)        | 347.7 [333.9, 357.9]                    | 7.30          | 0.086 [0.080, 0.092] |
+| surprise (+0.3)       | 284.1 [251.3, 310.2]                    | 5.96          | 0.096 [0.088, 0.104] |
+
+- **+0.3 is not fluent text.** Averaged over the six emotions the perplexity under the emotion arms is 1.21, 2.22 and 5.56 times the unsteered one at +0.1, +0.2 and +0.3 on the base checkpoint and 1.29, 2.66 and 7.72 times on the post-trained one, against 1.03, 1.16 and 1.46 and 1.08, 1.33 and 1.88 for the random arms. By the rule of [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (mean perplexity at most 1.5 times the unsteered one and mean distinct-1 at least 0.15) +0.1 passes on both checkpoints (mean distinct-1 0.281 and 0.219 against 0.294 and 0.243 unsteered), as does -0.1 (1.18 and 1.21 times, distinct-1 0.284 and 0.235), and +0.2 does not (2.22 and 2.66 times, distinct-1 0.236 and 0.157). At +0.3 every emotion is at 3.77 to 8.05 times the unsteered perplexity on the base checkpoint (distinct-1 from 0.167 for surprise to 0.246 for sadness, all above 0.15) and at 5.96 to 12.38 times on the post-trained one, where the distinct-1 of all six emotions is below 0.15 (0.029 for fear to 0.137 for anger; the mean over the six is 0.102) and the random arms are at 1.88 times. The fear arm of the post-trained checkpoint (12.38 times, distinct-1 0.029 [0.019, 0.041]) gives the most repetitive text of the four C2 runs of chain 42. The changes in the first tables are therefore changes of text that fails the rule at +0.3, and a rise in an emotion score at +0.3 is not read as steering that works.
+
 ### LoRRA adapter (LR1) and the TruthfulQA control (C4)
 
 LR1 trains one LoRRA adapter per checkpoint (runs `lr1/qwen3-1.7b-base/95a42d94146c` and
@@ -5721,6 +5928,34 @@ lie-arm share 316 of 985; the post-trained checkpoint returned none. The random 
   shorter answers (19.8 tokens on average against 21.6) and the 15 empty completions.
 - The run also stores a small gallery of completions and the emotion gallery of the C2 run of the same checkpoint, which
   are a selection and are not read here.
+
+#### The 0.6B pair (C5)
+
+The same design on `qwen3-0.6b-base` and `qwen3-0.6b` (28 blocks; runs `c5/qwen3-0.6b-base/91f78e3b39f4` and `c5/qwen3-0.6b/9e2ed01b303b`, made in chain 42 at `bab5b75` on a rented GPU pod; see [Run identity](#run-identity)): 1,000 TriviaQA questions, one sample per question at temperature 0.8, relative strength 0.1, steered over layers 8, 11, 13, 16, 19, 21, 24 and 26, three random arms steered at +0.1 and -0.1. The base checkpoint is prompted with 15 question and answer shots and the post-trained one with the question alone in the chat template, so the two columns are not a comparison of the models. Each run reads the C2 run of its checkpoint: `c2/qwen3-0.6b-base/b1606314f58b` and `c2/qwen3-0.6b/9aa16ae5425c`. No row of either run has an empty answer, so every share is over the 1,000 questions. The random rows are the mean of the three random directions.
+
+| Quantity                                     | qwen3-0.6b-base      | qwen3-0.6b           |
+| -------------------------------------------- | -------------------- | -------------------- |
+| Correct, no steering                         | 0.192                | 0.130                |
+| Correct, honesty-steered                     | 0.153                | 0.113                |
+| Correct, lie-steered                         | 0.137                | 0.082                |
+| Correct, random +0.1 (mean of 3)             | 0.175                | 0.125                |
+| Correct, random -0.1 (mean of 3)             | 0.175                | 0.125                |
+| Answered correctly without steering          | 192                  | 130                  |
+| Of these, answered wrongly under the lie arm | 65                   | 62                   |
+| Flip rate [95% interval]                     | 0.339 [0.275, 0.408] | 0.477 [0.393, 0.562] |
+| Perplexity: none                             | 8.2                  | 10.6                 |
+| Perplexity: honesty-steered                  | 11.0                 | 20.6                 |
+| Perplexity: lie-steered                      | 14.9                 | 19.5                 |
+| Perplexity: random (range of 6)              | 8.9 to 9.1           | 11.5 to 12.0         |
+| Distinct-1: none                             | 0.120                | 0.234                |
+| Distinct-1: honesty-steered                  | 0.109                | 0.214                |
+| Distinct-1: lie-steered                      | 0.156                | 0.196                |
+| Distinct-1: random (range of 6)              | 0.110 to 0.136       | 0.225 to 0.239       |
+
+- **Both steered arms are below the unsteered one on both checkpoints, the lie arm further.** On `qwen3-0.6b-base` the honesty arm is 0.039 below (0.153 against 0.192) and the lie arm 0.055 below (0.137), 0.016 below the honesty arm; the random arms are both 0.175, 0.017 below the unsteered share, so the honesty arm is 0.022 below the random arms and the lie arm 0.038 below them. On `qwen3-0.6b` the honesty arm is 0.017 below (0.113 against 0.130) and the lie arm 0.048 below (0.082), 0.031 below the honesty arm; the random arms are both 0.125, 0.005 below the unsteered share, so the honesty arm is 0.012 below the random arms and the lie arm 0.043 below them. The shares carry no interval; for scale, a share of 1,000 questions near 0.15 has a binomial standard error of about 0.011, and the standard error of a difference of two such shares is about 0.016.
+- **Flip rate.** 65 of the 192 questions answered correctly are answered wrongly under the lie arm on the base checkpoint (0.339 [0.275, 0.408]) and 62 of 130 on the post-trained one (0.477 [0.393, 0.562]). The two intervals overlap (0.393 to 0.408). The base interval overlaps those of `qwen3-1.7b-base` (0.262 [0.218, 0.311]) and `qwen3-4b-base` (0.359 [0.317, 0.404]); the post-trained interval overlaps that of `qwen3-1.7b` (0.363 [0.304, 0.426]) and lies above that of `qwen3-4b` (0.161 [0.125, 0.204]). The sets of known questions differ by model (192 and 130 here), the honesty arm and the random arms have no stored flip rate, and the random arms lower the correct share too (by 0.017 and 0.005), so the flip rate is not separated from the effect of a generic perturbation of the model.
+- **Cost to the text.** The perplexity of neutral text under the honesty and lie arms is 1.35 and 1.83 times the unsteered one on the base checkpoint and 1.95 and 1.85 times on the post-trained one, against 1.10 to 1.12 and 1.09 to 1.14 for the random arms. The lie arm moves the base text the most; on the post-trained checkpoint the two arms move it by the same amount (20.6 and 19.5), more than on the 1.7B and 4B post-trained checkpoints (1.16 and 1.51, 1.23 and 1.21 times). The distinct-1 cutoff of the rule in [Sentiment steering on Qwen3](#sentiment-steering-on-qwen3-c1) (0.15) is not used here: the unsteered answers of the base checkpoint are already at 0.120, and the lie arm of that checkpoint has a higher distinct-1 (0.156) than the unsteered text, with answers of the same length (22.4 tokens on average against 22.3).
+- The runs also store a small gallery of completions and the emotion gallery of the C2 run of the same checkpoint, which are a selection and are not read here.
 
 ## Position and stimulus-set size on qwen3-1.7b-base and qwen3-1.7b (P2, P3)
 
@@ -6843,9 +7078,11 @@ The runs are `p5/gpt2/80b4ae80a6ca`, `p5/qwen3-1.7b-base/a4bd463deeca` and `p5/q
 - Some cells under the unrelated words sit far from 0.5 (`larger_than` on `gpt2`, 0.670 and 0.826, on `gpt2-medium`, 0.796 for `unrelated_1`, on `gpt2-large`, 0.706 for `unrelated_1`, and on `gpt2-xl`, 0.707 and 0.705; `sp_en_trans` on `qwen3-1.7b`, 0.353 and 0.367, on `qwen3-0.6b-base`, 0.344 for `unrelated_1`, and on `qwen3-0.6b`, 0.444 and 0.322; and on the 4B pair, `sp_en_trans` on `qwen3-4b-base`, 0.278 for `unrelated_0` and 0.675 for `unrelated_1`, and on `qwen3-4b`, 0.306 and 0.381, with `neg_cities` on `qwen3-4b-base`, 0.713 for `unrelated_0`, and `cities` on `qwen3-4b`, 0.738 for `unrelated_1`); the runs do not say what those readers read.
 - Each cell is one run of one model at one layer chosen on 53 pairs and scored on small sets, with intervals over the training draw only. The runs do not test persona wordings beyond the five pairs above. The first three runs were made on a cloud GPU (`c7d8051`), the next three on a laptop GPU (`fb3b5dd`), the next two on a rented pod GPU (`f4d414d`) and the 4B pair on another rented pod GPU (`86c319b`), with the same config and the same P5 code.
 
-## Template steering on the Qwen3 1.7B and 4B pairs (P7)
+## Template steering on the Qwen3 0.6B, 1.7B and 4B pairs (P7)
 
 P7 is the protocol of [P7 on gpt2](#template-steering-p7): the sentiment reader is extracted under six templates of P1 and used to steer with the C1 protocol (coefficients -0.3, -0.15, 0, 0.15 and 0.3, 50 prompts, 2 samples per prompt, 2 steering readers per template), over the sweep layers 1, 6, 12, 17, 23 and 28 on the 1.7B pair (28 is the last block; the 4B pair follows at the end of the section). A unit is a template, a sweep layer and a steering reader (72 units). It is readable if the validation accuracy of its reader at that layer is at least 0.6, and inverted if it is readable and its primary dose slope is negative. The reported runs are `p7/qwen3-1.7b-base/16a7a9e4facf` and `p7/qwen3-1.7b/eacde3abd0aa`, both made at `f4d414d` with a clean tree on a rented GPU pod (NVIDIA RTX A4500). They replace `p7/qwen3-1.7b-base/947fef33a7c5` and `p7/qwen3-1.7b/7921f3fe5754` (made at `20650c5` on a laptop GPU, NVIDIA GeForce RTX 4070 Laptop GPU), which stay tracked; the configs differ in `n_random` only (absent earlier, 3 here), so these runs add three random directions (one reader each, steered at every sweep layer with the same grid) and the fluency measure (perplexity of held-out neutral text and distinct-1 of the generated text, from `table_effects`). Base and post-trained are two models: the tables are separate and no metric is pooled over them. The counts of inverted units changed between the two runs of each checkpoint, from 9 to 12 on the base and from 16 to 9 on the post-trained checkpoint, so the ordering of the two checkpoints by inversion rate in the earlier runs (0.125 against 0.222) does not hold in these runs (0.167 against 0.125).
+
+The 0.6B pair (chain 42, `bab5b75`) follows the 4B pair at the end of the section; `gpt2-medium` is in [P7 on gpt2-medium](#p7-on-gpt2-medium).
 
 ### qwen3-1.7b-base
 
@@ -6990,6 +7227,43 @@ than `no_chat_tags` at layer 1, with a validation accuracy of 0.547 to 0.586.
   is higher on the post-trained checkpoint (0.347 against 0.090, intervals that do not overlap) and the two judges agree
   on fewer units (0.750 against 0.917). Each checkpoint has one run, and the runs do not say why the post-trained
   checkpoint steers less under the same protocol.
+
+### The 0.6B pair (P7)
+
+The same protocol ran on `qwen3-0.6b-base` and `qwen3-0.6b` (runs `p7/qwen3-0.6b-base/f18c9174a8d2` and `p7/qwen3-0.6b/6a1b0ec193bd`), both made in chain 42 at `bab5b75` on one rented GPU pod (NVIDIA GeForce RTX 3090) with batch size 16 (see [Run identity](#run-identity)). The config is that of the 1.7B and 4B runs above (50 prompts, 2 samples per prompt, 2 steering readers per template, 3 random directions, the same coefficients and threshold) and differs in the checkpoint only. The model has 28 blocks, so the sweep layers are those of the 1.7B pair: 1, 6, 12, 17, 23 and 28 (28 is the last block). A unit is again a template, a sweep layer and a steering reader (72 units). Base and post-trained are two models: the tables are separate and no metric is pooled over them.
+
+#### qwen3-0.6b-base
+
+| Template       | Read layer | Read accuracy | Steer layer | Dose slope at steer layer | Dose slope, sweep layers 1 to 23 | Readable units | Inverted |
+| -------------- | ---------- | ------------- | ----------- | ------------------------- | -------------------------------- | -------------- | -------- |
+| paper          | L18        | 0.946         | L28         | 1.246                     | -0.015 to 0.691                  | 12             | 3        |
+| no_template    | L26        | 0.907         | L28         | 1.270                     | 0.019 to 1.036                   | 12             | 2        |
+| no_chat_tags   | L18        | 0.951         | L28         | 1.070                     | -0.126 to 0.832                  | 12             | 3        |
+| neutral_frame  | L25        | 0.907         | L28         | 1.327                     | 0.138 to 1.041                   | 12             | 1        |
+| scaffold_0     | L26        | 0.938         | L28         | 1.363                     | -0.020 to 1.080                  | 12             | 2        |
+| concept_swap_0 | L26        | 0.804         | L28         | 1.098                     | -0.114 to 0.682                  | 12             | 2        |
+
+#### qwen3-0.6b
+
+| Template       | Read layer | Read accuracy | Steer layer | Dose slope at steer layer | Dose slope, sweep layers 1 to 23 | Readable units | Inverted |
+| -------------- | ---------- | ------------- | ----------- | ------------------------- | -------------------------------- | -------------- | -------- |
+| paper          | L18        | 0.855         | L28         | 0.885                     | -0.044 to 0.806                  | 12             | 2        |
+| no_template    | L19        | 0.925         | L17         | 0.928                     | -0.133 to 0.928                  | 12             | 3        |
+| no_chat_tags   | L26        | 0.820         | L23         | 0.659                     | 0.037 to 0.659                   | 12             | 2        |
+| neutral_frame  | L19        | 0.930         | L23         | 0.892                     | -0.112 to 0.892                  | 12             | 3        |
+| scaffold_0     | L19        | 0.906         | L17         | 0.942                     | -0.162 to 0.942                  | 12             | 4        |
+| concept_swap_0 | L18        | 0.827         | L23         | 0.457                     | -0.072 to 0.457                  | 12             | 4        |
+
+The read accuracy is the best point of the mean reading curve over the 10 readers, so it is optimistic by the selection. The sweep-layer column is the minimum and maximum of the mean dose slope over layers 1, 6, 12, 17 and 23, read from the curves files; on the post-trained checkpoint it includes the steering layer (L17 or L23) for five templates. Every one of the 72 units is readable on both checkpoints.
+
+- **The steering layer.** On the base checkpoint it is the last block (L28) for all six templates, with slopes of 1.070 to 1.363 there; the slope is not monotone before it (`paper`: -0.015, 0.004, 0.147, 0.242, 0.691 and 1.246 at layers 1, 6, 12, 17, 23 and 28). On the post-trained checkpoint it is L28 for `paper` only (0.885), L17 for `no_template` and `scaffold_0` (0.928 and 0.942) and L23 for `no_chat_tags`, `neutral_frame` and `concept_swap_0` (0.659, 0.892 and 0.457). For those five templates the mean slope at L28 is lower (0.783 against 0.928, 0.845 against 0.942, 0.618 against 0.659, 0.746 against 0.892 and 0.369 against 0.457), so the last block is not where their slope is largest. The steering layer is the last block for 6 of 6 templates on each base checkpoint (0.6B, 1.7B and 4B), for 1 of 6 on `qwen3-0.6b`, 5 of 6 on `qwen3-1.7b` and 1 of 6 on `qwen3-4b`. The slope at the steering layer is measured on the prompts that chose that layer and is optimistic.
+- **Reading layers.** The reading layer is L18 to L26 on both checkpoints, with a read accuracy of 0.804 to 0.951 on the base and 0.820 to 0.930 on the post-trained one. The mean absolute gap between the reading depth and the steering depth (layer divided by 28) is 0.173 on the base and 0.155 on the post-trained checkpoint, against 0.238 and 0.298 on the 1.7B pair and 0.287 and 0.097 on the 4B pair.
+- **Inversion.** On the base checkpoint 13 of the 72 units are inverted, a rate of 0.181 [0.109, 0.285]; on the post-trained checkpoint 18 of 72, a rate of 0.250 [0.164, 0.361] (Wilson intervals, which overlap). The counts by template are 3, 2, 3, 1, 2 and 2 on the base checkpoint and 2, 3, 2, 3, 4 and 4 on the post-trained one; the 1.7B pair has rates of 0.167 and 0.125 and the 4B pair 0.090 and 0.347. On the base checkpoint the inverted units are at layers 1, 6, 12 and 17 (5, 5, 2 and 1 units), none at the two deepest layers; on the post-trained checkpoint 17 of the 18 are at layers 1 and 6 (8 and 9 units) and 1 at layer 17 (`no_chat_tags`, reader 0, a slope of -0.0001), none at layers 12, 23 or 28. The lowest unit slope is -0.307 on the base (`concept_swap_0`, layer 17) and -0.273 on the post-trained checkpoint (`scaffold_0`, layer 1).
+- **Reading and steering.** The Spearman correlation over the 72 units between reading accuracy and dose slope is 0.712 on the base and 0.843 on the post-trained checkpoint, and between the logit-lens score and dose slope 0.808 and 0.802. The sign of the slope agrees between the two judges for 0.861 of the units on the base checkpoint (62 of 72) and 0.889 on the post-trained one (64 of 72). The sweep layer with the largest logit-lens separation is the steering layer for 5 of 6 templates on the base checkpoint (`scaffold_0` has L23 against L28) and for 1 of 6 on the post-trained one (`paper`); for the other five it is L28 while the steering layer is L17 or L23. Both the reading accuracy and the slope vary with depth over the sweep, so a rank correlation over units that mixes layers can be driven by depth alone, and the summary does not give the within-layer correlation.
+- **Prompt format.** The mean primary dose slope by steering prompt format (raw, chat and story) is 1.155 to 1.415, 1.196 to 1.431 and 1.250 to 1.593 over the six templates on the base checkpoint, where chat is the lowest of the three formats for two templates. On the post-trained checkpoint it is 0.301 to 1.324 for raw, 0.270 to 0.865 for chat and 0.697 to 1.292 for story, and chat is the lowest format for all six templates.
+- **Random directions.** The largest absolute dose slope of a random direction at any sweep layer is 0.460 on the base checkpoint (layer 23, where one of the three random directions has -0.460 and the other two 0.033 and -0.004; the six template means there are 0.691 to 1.080) and 0.404 on the post-trained one (layer 28, where the random slopes are 0.404, -0.111 and 0.266 and the template means 0.369 to 0.885). The random arms are three directions with one reader each. On the base checkpoint the random slopes at layers 1, 6, 12 and 17 range from -0.241 to 0.212 and 12 of the 13 inverted units lie in that range (the lowest, -0.307, does not). On the post-trained checkpoint the random slopes at layers 1 and 6, where 17 of the 18 inverted units sit, range from -0.103 to 0.055, and the inverted units go lower (down to -0.273). The steering-layer slopes of the templates (1.070 to 1.363 on the base checkpoint and 0.457 to 0.942 on the post-trained one) are above the largest random magnitude of their checkpoint (0.460 and 0.404).
+- **Fluency.** The cells are 288 template cells and 72 random-arm rows (360 per run); the counts below are over the template cells. On the base checkpoint 10 cells have a neutral-text perplexity above 1.5 times the unsteered one (26.9; 1.51 to 1.71), all at layer 28 (9 at -0.3 and 1 at +0.3), and none has a distinct-1 below 0.15 (lowest 0.188; unsteered 0.329). The mean over the templates and readers at layer 28 is 1.402 (+0.3) and 1.567 (-0.3) times the unsteered perplexity, against 1.054 to 1.247 (+0.3) and 1.055 to 1.246 (-0.3) at the other layers. On the post-trained checkpoint no cell is above 1.5 times (unsteered 47.6) and none has a distinct-1 below 0.15 (lowest 0.182; unsteered 0.262); the mean at layer 28 is 1.336 and 1.350 times, against 1.060 to 1.301 at the other layers. No random-arm row of either checkpoint is above 1.5 times or has a distinct-1 below 0.15. The dose slope at the last block of the base checkpoint is therefore fitted over a grid that includes cells of text that fails the rule above.
+- **Base against post-trained.** The slope at the steering layer is 1.070 to 1.363 on the base checkpoint and 0.457 to 0.942 on the post-trained one, whose steering layer is an interior layer for five of six templates; the post-trained slope by prompt format is lowest for chat in all six templates (0.270 to 0.865, against 1.196 to 1.431 on the base checkpoint). The inversion rates overlap (0.181 against 0.250) and the two judges agree on 0.861 and 0.889 of the units, so the two checkpoints are not separated on either. Each checkpoint has one run, and the runs do not say why the post-trained checkpoint steers less at its steering layer under the same protocol.
 
 ## Run identity
 
@@ -7169,12 +7443,12 @@ Config hashes (12 hex digits), GPT-2:
 | P3             | 676c31488397 | b80a5a3c0faf | 327dd31a1de6 | 12ee53fd16fe |
 | P4             | 8c4a73d1e9db | 9a2f3f02568b | f4e8481cbbbf | 427a6b2f9da4 |
 | P5             | 80b4ae80a6ca | bd9f565baa76 | 430d434007c9 | 4171a611f734 |
-| P7             | 6c19128c5192 | not run      | d03910535564 | eb67813e769d |
+| P7             | 6c19128c5192 | 1de9b6b988f4 | d03910535564 | eb67813e769d |
 | C1             | add59c39f574 | 2ed2e53ba7fe | 353f91e1b8dc | de76af1a8a07 |
 | M1             | 4e394ed1a72c | eef91d1dfe8e | b4995274d1f8 | 3309d5fe55b7 |
-| C2             | 85c9a670bf17 | not run      | 4741abe01da5 | aefba1c6274e |
+| C2             | f009922c8c55 | 1ae093396c5d | 4741abe01da5 | aefba1c6274e |
 | C4             | 1b571ac45420 | not run      | not run      | not run      |
-| C5             | not run      | not run      | 36f392712827 | 0ad95833261d |
+| C5             | 2ccb81ad9db0 | a7f2f089ac8b | 36f392712827 | 0ad95833261d |
 | LR1            | 1e9cd6f56388 | not run      | not run      | not run      |
 | P9a            | 5461200f995c | 4272635aa065 | 59c9bfd59dfd | cc283b36fcae |
 | P9b            | fd3bdc5a4b0d | a5a9c7d7b176 | 7b3fd5d1bfb5 | 92664dccb7d9 |
@@ -7199,12 +7473,12 @@ Qwen3:
 | P3          | 776d454d5ca2    | b38783812e71 | 61baf30a8a59    | 72edcdd9158e |
 | P4          | 3b2677205f7d    | e40fa46cf517 | b772e1cc4db9    | 607e86d9c7f6 |
 | P5          | b6a702e460e9    | fb664c3b4be2 | a4bd463deeca    | 7e5e579d102e |
-| P7          | not run         | not run      | 16a7a9e4facf    | eacde3abd0aa |
+| P7          | f18c9174a8d2    | 6a1b0ec193bd | 16a7a9e4facf    | eacde3abd0aa |
 | C1          | 7ae3e2aa34e2    | 832462b7b04e | 0cd5a36d3408    | a91f950ad9f5 |
 | M1          | bf4cc620da8b    | 976e4c4a87e1 | e9279a87db07    | 77752112ddbe |
-| C2          | not run         | not run      | 4133e19728fa    | 1b87ff98a318 |
+| C2          | b1606314f58b    | 9aa16ae5425c | 4133e19728fa    | 1b87ff98a318 |
 | C4          | b08c4e236dcf    | 4d4ff337ade5 | 7dd49d64a540    | 5ebc35ea3be6 |
-| C5          | not run         | not run      | 3a14e656df3c    | 52057b2ddc30 |
+| C5          | 91f78e3b39f4    | 9e2ed01b303b | 3a14e656df3c    | 52057b2ddc30 |
 | LR1         | 03ba155a9fe7    | 74d01330d28c | 95a42d94146c    | bf86ed5ccde1 |
 | P9a         | 1d9f881153e4    | 10d95352866e | d5d522bfecd4    | f413efcae268 |
 | P9b         | 34c0ebff50b0    | 975dbcf95759 | 5ca7821318ef    | 9641ab8235a9 |
@@ -7381,6 +7655,18 @@ Config hashes (12 hex digits), chain 39:
 | P4          | 346291dfa5d1  | 36371d16b354 |
 | P9d concept | not run       | cc4024fe5af1 |
 
+Chain 42 (Community 3090): P7, C2 and C5 on `gpt2`, `gpt2-medium` and the Qwen3 0.6B pair (11 runs). `c2/gpt2/f009922c8c55`, `c2/gpt2-medium/1ae093396c5d`, `c2/qwen3-0.6b-base/b1606314f58b`, `c2/qwen3-0.6b/9aa16ae5425c`, `c5/gpt2/2ccb81ad9db0`, `c5/gpt2-medium/a7f2f089ac8b`, `c5/qwen3-0.6b-base/91f78e3b39f4`, `c5/qwen3-0.6b/9e2ed01b303b`, `p7/gpt2-medium/1de9b6b988f4`, `p7/qwen3-0.6b-base/f18c9174a8d2` and `p7/qwen3-0.6b/6a1b0ec193bd` were made at `bab5b75` (the merge of pull request 199, an ancestor of the current main; `git diff --stat bab5b75 HEAD -- src` is empty, so their code is that of main) with a clean tree on one rented GPU pod (NVIDIA GeForce RTX 3090, torch 2.14.1+cu130, transformers 5.19.0; the launcher log outside the repository names it a Community Cloud pod), with the default config of each experiment and model on that commit, except that the C5 runs set `n_pool` to 1,000 (the default is 200) and `c2_run`, the C2 run of the same model and chain (part of the config hash). The batch size is 16. The C2, C5 and P7 source files differ from those of the `gpt2-large` and `gpt2-xl` runs of `f4d414d` (`git diff --stat f4d414d bab5b75 -- src` lists changes to `c2_emotion_steering.py`, `c5_gallery.py`, `p7_extraction_steering.py`, `controls.py` and `effects.py`, among others), and `git diff --stat d09822b bab5b75 -- src` and `git diff --stat 86c319b bab5b75 -- src` list only `cloud.py` and `p10c_links.py`, so the code is that of the Qwen3 4B pair runs of chains 23 and 20. The time between `started_at` and `finished_at` of the stored `meta.json` is 549 s (`gpt2`), 980 s (`gpt2-medium`), 1,345 s (`qwen3-0.6b-base`) and 1,417 s (`qwen3-0.6b`) for C2, 310 s, 797 s, 754 s and 405 s in the same order for C5, and 2,334 s (`gpt2-medium`), 3,435 s (`qwen3-0.6b-base`) and 3,162 s (`qwen3-0.6b`) for P7; the pod ran two jobs at a time on 2026-10-18 and 2026-10-19, and the chain log of the launcher, which is outside the repository, starts with `CHAIN_START name=chain42 jobs=11` and ends with `CHAIN_DONE failed=0`, with exit status 0 for every one of the eleven runs. Each C5 run reads the C2 run of the same model and chain (`c2_run` in its config), so the C5 runs of `gpt2`, `gpt2-medium`, `qwen3-0.6b-base` and `qwen3-0.6b` read `c2/gpt2/f009922c8c55`, `c2/gpt2-medium/1ae093396c5d`, `c2/qwen3-0.6b-base/b1606314f58b` and `c2/qwen3-0.6b/9aa16ae5425c`. `c2/gpt2/f009922c8c55` is the reported `gpt2` run of C2 and replaces `c2/gpt2/85c9a670bf17` (made at `ca2546c` on a laptop GPU, NVIDIA GeForce RTX 4070 Laptop GPU), which stays tracked: the two configs differ in `n_random` only (absent earlier, 3 here), so the new run adds the three random arms and the fluency measure (`table_random.json` and `table_effects.json`). The config hash of each run was recomputed under main by loading its `config.json` into the config class of its experiment and hashing it. The pod configs of all eleven runs agree with the directory names (the C5 pod configs name the C2 run as `/workspace/chains/../out/chain42/c2/<model>/<hash>`); the exported `config.json` of the seven C2 and P7 runs hash to their directory names, and the exported `config.json` of the four C5 runs hash differently because the export rewrites `c2_run` to `results/c2/<model>/<hash>`, so the C5 hashes were checked from the pod configs. Exporting these runs changed no tracked result. The scan for local paths and names over the eleven run directories reports only generated text: the gallery text of the `table.json` of the C5 runs of `gpt2`, `qwen3-0.6b-base` and `qwen3-0.6b` contains escaped line breaks that the path pattern matches, as in the tracked C5 runs.
+
+Config hashes (12 hex digits), chain 42:
+
+| Experiment | gpt2         | gpt2-medium  | qwen3-0.6b-base | qwen3-0.6b   |
+| ---------- | ------------ | ------------ | --------------- | ------------ |
+| P7         | not run      | 1de9b6b988f4 | f18c9174a8d2    | 6a1b0ec193bd |
+| C2         | f009922c8c55 | 1ae093396c5d | b1606314f58b    | 9aa16ae5425c |
+| C5         | 2ccb81ad9db0 | a7f2f089ac8b | 91f78e3b39f4    | 9e2ed01b303b |
+
+The earlier C2 run of `gpt2`, `85c9a670bf17`, stays tracked and is no longer the reported run.
+
 Chain 43 (Secure A5000): LR1 and C4 on the Qwen3 0.6B pair (4 runs). `lr1/qwen3-0.6b-base/03ba155a9fe7`,
 `lr1/qwen3-0.6b/74d01330d28c`, `c4/qwen3-0.6b-base/b08c4e236dcf` and `c4/qwen3-0.6b/4d4ff337ade5` were made at `bab5b75`
 (the merge of pull request 199, an ancestor of the current main; `git diff --stat bab5b75 HEAD -- src` is empty, so
@@ -7434,15 +7720,11 @@ Not in this document yet. No dates are promised.
 
 - P1 on the Qwen3 4B pair with both finders and the sentiment, truth and emotion tasks (it ran on the eight models of
   the P1 subsection).
-- P7 on `gpt2-medium` and on the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B and 4B pairs). C2
-  on `gpt2-medium` and the two 0.6B Qwen3 checkpoints (it ran on `gpt2`, `gpt2-large`, `gpt2-xl` and the 1.7B
-  and 4B pairs; M1 ran on all ten models). C5 on `gpt2`, `gpt2-medium` and the two 0.6B Qwen3 checkpoints (it ran on `gpt2-large`, `gpt2-xl` and the 1.7B and 4B
-  pairs).
 - P5, persona wording and instruction confounds for honesty, with persona wordings beyond the five pairs of the run.
-- A random-direction arm for C2 and P7 on `gpt2`, a fluency measure (perplexity and distinct-1) for M1, C2 and P7 on
+- A random-direction arm for P7 on `gpt2`, a fluency measure (perplexity and distinct-1) for M1 and P7 on
   `gpt2`, and a random-direction arm and the perplexity of neutral text for C4 on `gpt2`. The runs on `gpt2-large` and
-  `gpt2-xl` (M1, C2, P7, C5), the M1 runs on `gpt2-medium` and the Qwen3 0.6B pair, the C4 runs on `gpt2-medium`, `gpt2-large` and `gpt2-xl`, the runs on the Qwen3
-  1.7B pair (M1, C2, P7, C4, C5), the runs on the Qwen3 4B pair (M1, C2, C4, C5, P7) and the C4 runs on the Qwen3 0.6B pair have them; the C4 scoring is not generation, so no C4 run has a distinct-1.
+  `gpt2-xl` (M1, C2, P7, C5), the C2 and C5 runs on `gpt2`, the M1, C2, P7 and C5 runs on `gpt2-medium`, the C4 runs on `gpt2-medium`, `gpt2-large` and `gpt2-xl`, the runs on the Qwen3
+  1.7B pair (M1, C2, P7, C4, C5), the runs on the Qwen3 4B pair (M1, C2, C4, C5, P7) and the M1, C2, C4, C5 and P7 runs on the Qwen3 0.6B pair have them; the C4 scoring is not generation, so no C4 run has a distinct-1.
 - Stored but not read in this document: the emotion direction matrix and embedding of the Qwen3 R4 runs, the A1 matrices
   of concept and layer agreement, the emotion gallery of the Qwen3 C5 runs, and the P5 curves over layers and the
   cosine curves between the paper reader and the other readers.
