@@ -15,6 +15,7 @@ from tomography.viz import paper
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 _T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
+_L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
 SPEC = "a_dose_runs"
 HEIGHT = 5.6
 SERIES = ("lat: known", "lat: unknown", "random: unknown")
@@ -214,3 +215,9 @@ def test_every_row_has_one_measure_and_each_block_names_it_once(
         ]
         assert labels == [names[measure]]
     assert [_entropy(*run) for run in runs] == [True] * 6 + [False] * 6
+
+
+def test_no_two_legend_keys_draw_the_same_symbol(
+    output: registry.FigureOutput,
+) -> None:
+    assert _L["marker_clashes"](output.figure) == []

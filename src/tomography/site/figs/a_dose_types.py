@@ -135,7 +135,7 @@ def build(manifest: Manifest) -> FigureOutput:
                     label="mean of 3 random directions",
                 ),
                 _rows.series_handle(
-                    "post-trained", "o", paper.INK, filled=False
+                    "post-trained", "h", paper.INK, filled=False
                 ),
             ],
             loc="outside lower center",

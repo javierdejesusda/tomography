@@ -15,6 +15,7 @@ from tomography.viz import paper
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 _T = runpy.run_path(str(Path(__file__).with_name("_titles.py")))
+_L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
 SPEC = "a_dose_types"
 HEIGHT = 7.2
 TYPES = (
@@ -215,3 +216,9 @@ def test_letters_do_not_touch_their_titles(
     gaps = _T["letter_title_gaps"](output.figure)
     assert len(gaps) == 1
     assert min(gaps) >= 2.0
+
+
+def test_no_two_legend_keys_draw_the_same_symbol(
+    output: registry.FigureOutput,
+) -> None:
+    assert _L["marker_clashes"](output.figure) == []
