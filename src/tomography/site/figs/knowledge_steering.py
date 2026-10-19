@@ -62,8 +62,8 @@ DETAIL = (
     "questions (grey band); "
     "across all runs the largest shift of the mean curve is as large on "
     "known as on unknown questions for {held}, which a slope does not show. "
-    "Every run is in Figure A6, and the post-trained runs by question type "
-    "in Figure A7."
+    "Every run is in [[fig:a_dose_runs]], and the post-trained runs by "
+    "question type in [[fig:a_dose_types]]."
 )
 
 

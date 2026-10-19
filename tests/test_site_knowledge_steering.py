@@ -1,6 +1,7 @@
 import csv
 import io
 from pathlib import Path
+import re
 import runpy
 from typing import Any
 
@@ -298,8 +299,9 @@ def test_caption_is_the_template_filled_from_the_files(
     assert "linear slope" not in output.detail
     assert all(dist[r].hits == dist[r].total for r in ("gpt2", "base"))
     assert dist["post"].hits < dist["post"].total
-    assert "Figure A6" in output.detail
-    assert "Figure A7" in output.detail
+    assert "[[fig:a_dose_runs]]" in output.detail
+    assert "[[fig:a_dose_types]]" in output.detail
+    assert not re.search(r"Figure A?\d", output.detail)
     assert "resample the questions" in output.detail
 
 
@@ -355,3 +357,13 @@ def test_no_two_legend_keys_draw_the_same_symbol(
     output: registry.FigureOutput,
 ) -> None:
     assert _L["marker_clashes"](output.figure) == []
+
+
+def test_appendix_dose_and_link_docstrings_name_no_figure_numbers() -> None:
+    from tomography.site.figs import a_dose_runs
+    from tomography.site.figs import a_dose_types
+    from tomography.site.figs import a_knowledge_matrix
+    from tomography.site.figs import a_links
+
+    for module in (a_dose_runs, a_dose_types, a_knowledge_matrix, a_links):
+        assert not re.search(r"Figure A?\d", module.__doc__ or ""), module
