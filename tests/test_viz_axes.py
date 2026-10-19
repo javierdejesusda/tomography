@@ -2,6 +2,7 @@ from matplotlib.figure import Figure
 import numpy as np
 import pytest
 
+from tomography.site import store
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
@@ -86,3 +87,74 @@ def test_caption_joins_claim_and_detail_with_single_spaces() -> None:
     assert text == "Reading rises with depth. Lines are means."
     with pytest.raises(ValueError, match="period"):
         shared.caption("No period", "x")
+
+
+MINUS = chr(0x2212)
+
+
+def test_unit_axis_sets_the_same_ticks_and_labels_on_any_zero_to_one_axis() -> (
+    None
+):
+    fig = Figure()
+    ax = fig.subplots()
+    ax.plot([0, 1], [0, 1])
+    shared.unit_axis(ax, "x")
+    shared.unit_axis(ax, "y")
+    fig.canvas.draw()  # type: ignore[no-untyped-call]
+    for axis in (ax.xaxis, ax.yaxis):
+        assert [float(t) for t in axis.get_ticklocs()] == [
+            0,
+            0.25,
+            0.5,
+            0.75,
+            1,
+        ]
+        assert [t.get_text() for t in axis.get_ticklabels()] == [
+            "0",
+            "0.25",
+            "0.5",
+            "0.75",
+            "1",
+        ]
+
+
+def test_minus_formatter_writes_the_true_minus_and_trims_zeros() -> None:
+    fmt = shared.minus_formatter()
+    assert fmt(-0.5, 0) == f"{MINUS}0.5"
+    assert fmt(0.25, 0) == "0.25"
+    assert fmt(1.0, 0) == "1"
+    assert fmt(100.0, 0) == "100"
+    assert fmt(-1e-16, 0) == "0"
+    assert fmt(0.0, 0) == "0"
+
+
+def test_role_dodge_moves_base_and_post_trained_apart_in_decades() -> None:
+    assert shared.role_dodge("gpt2-large") == 0.0
+    assert shared.role_dodge("qwen3-1.7b-base") == -0.035
+    assert shared.role_dodge("qwen3-1.7b") == 0.035
+
+
+def test_ref_line_is_a_thin_dotted_grey_line_behind_the_data() -> None:
+    ax = Figure().subplots()
+    line = shared.ref_line(ax, 0.5, "y")
+    assert line.get_color() == "#7f7f7f"
+    assert line.get_linewidth() == 0.5
+    assert line.get_linestyle() == "--"
+    assert line.get_zorder() < 2
+    assert list(line.get_ydata()) == [0.5, 0.5]
+    vertical = shared.ref_line(ax, 3.0, "x")
+    assert list(vertical.get_xdata()) == [3.0, 3.0]
+
+
+def test_model_rows_leave_a_gap_after_gpt2_and_between_qwen3_pairs() -> None:
+    rows = shared.model_rows(list(store.MODEL_ORDER))
+    assert [rows[m] for m in store.MODEL_ORDER] == pytest.approx(
+        [0, 1, 2, 3, 4.6, 5.6, 6.85, 7.85, 9.1, 10.1]
+    )
+
+
+def test_model_rows_only_gap_between_neighbours_that_are_present() -> None:
+    rows = shared.model_rows(["gpt2", "qwen3-4b", "gpt2-xl"])
+    assert rows["gpt2"] == 0.0
+    assert rows["gpt2-xl"] == 1.0
+    assert rows["qwen3-4b"] == pytest.approx(2.6)

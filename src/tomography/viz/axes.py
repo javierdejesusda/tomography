@@ -13,13 +13,20 @@ from matplotlib import ticker
 from matplotlib.axes import Axes
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.image import AxesImage
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 import numpy as np
 
+from tomography.site import store
 from tomography.viz import paper
 
 GPT2_SIZES = ("gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
 QWEN3_SIZES = ("0.6b", "1.7b", "4b")
+MINUS = chr(0x2212)
+UNIT_TICKS = (0.0, 0.25, 0.5, 0.75, 1.0)
+DODGE = 0.035
+GAP_AFTER_GPT2 = 0.6
+GAP_BETWEEN_PAIRS = 0.25
 SEQUENTIAL = LinearSegmentedColormap.from_list(
     "paper_blue", ["#f7fbff", paper.SERIES[0]]
 )
@@ -209,3 +216,101 @@ def caption(claim: str, detail: str) -> str:
     if not claim.endswith("."):
         raise ValueError("a claim is one sentence ending with a period")
     return f"{claim} {detail}".strip()
+
+
+def minus_formatter() -> ticker.FuncFormatter:
+    """Builds a tick formatter with the true minus and trimmed zeros.
+
+    Returns:
+        A formatter that writes 0.25 as `0.25`, 1.0 as `1` and a negative
+        number with U+2212; a value that rounds to zero has no sign.
+    """
+
+    def write(value: float, _pos: int) -> str:
+        text = f"{round(value, 6):g}"
+        if text in ("-0", "0"):
+            return "0"
+        return text.replace("-", MINUS)
+
+    return ticker.FuncFormatter(write)
+
+
+def unit_axis(ax: Axes, which: str) -> None:
+    """Gives a 0 to 1 axis the page's ticks and labels.
+
+    Args:
+        ax: The panel.
+        which: `x` or `y`.
+    """
+    axis = ax.xaxis if which == "x" else ax.yaxis
+    axis.set_major_locator(ticker.FixedLocator(UNIT_TICKS))
+    axis.set_major_formatter(minus_formatter())
+
+
+def role_dodge(model: str) -> float:
+    """Gives the horizontal shift that separates roles on a size axis.
+
+    Args:
+        model: Checkpoint key.
+
+    Returns:
+        Zero for GPT-2, minus 0.035 decades for a Qwen3 base checkpoint and
+        plus 0.035 decades for a post-trained one.
+    """
+    if not model.startswith("qwen3"):
+        return 0.0
+    return -DODGE if model.endswith("-base") else DODGE
+
+
+def ref_line(ax: Axes, value: float, which: str = "y") -> Line2D:
+    """Draws a thin dotted reference line behind the data.
+
+    Args:
+        ax: The panel.
+        value: Where the line sits: chance, zero or a threshold.
+        which: `y` for a horizontal line, `x` for a vertical one.
+
+    Returns:
+        The line.
+    """
+    draw = ax.axhline if which == "y" else ax.axvline
+    line: Line2D = draw(
+        value,
+        color=paper.ENC["reference"],
+        linestyle=paper.LINESTYLES["reference"],
+        linewidth=paper.REFERENCE_WIDTH,
+        zorder=1,
+    )
+    return line
+
+
+def model_rows(models: Sequence[str]) -> dict[str, float]:
+    """Places checkpoints in rows with the page's gaps.
+
+    Rows are one unit apart, with 0.6 extra after the last GPT-2 checkpoint
+    and 0.25 extra between Qwen3 pairs.
+
+    Args:
+        models: Checkpoint keys, in any order.
+
+    Returns:
+        Checkpoint key to its row position, increasing downwards.
+    """
+    ordered = sorted(models, key=store.model_rank)
+    rows: dict[str, float] = {}
+    position = 0.0
+    previous = ""
+    for model in ordered:
+        if previous:
+            position += 1.0
+            if not previous.startswith("qwen3") and model.startswith("qwen3"):
+                position += GAP_AFTER_GPT2
+            elif (
+                previous.startswith("qwen3")
+                and not previous.endswith("-base")
+                and model.endswith("-base")
+            ):
+                position += GAP_BETWEEN_PAIRS
+        rows[model] = position
+        previous = model
+    return rows
