@@ -367,3 +367,118 @@ def test_appendix_dose_and_link_docstrings_name_no_figure_numbers() -> None:
 
     for module in (a_dose_runs, a_dose_types, a_knowledge_matrix, a_links):
         assert not re.search(r"Figure A?\d", module.__doc__ or ""), module
+
+
+SHORT = {
+    "gpt2-medium": "medium",
+    "gpt2-large": "large",
+    "gpt2-xl": "XL",
+    "qwen3-0.6b-base": "0.6B",
+    "qwen3-1.7b-base": "1.7B",
+    "qwen3-4b-base": "4B",
+}
+BLOCKS = {
+    "a": ["GPT-2", "Qwen3 base"],
+    "b": ["Qwen3-0.6B", "Qwen3-1.7B", "Qwen3-4B"],
+}
+
+
+def _forests(output: registry.FigureOutput) -> dict[str, Any]:
+    found = {}
+    for ax in output.figure.axes:
+        groups = [t.get_text() for t in ax.texts if t.get_gid() == "block"]
+        if groups:
+            found["a" if groups[0] == "GPT-2" else "b"] = ax
+    assert set(found) == {"a", "b"}
+    return found
+
+
+def _tick_name(model: str, template: str) -> str:
+    return SHORT.get(model, template.replace("fewshot", "few-shot"))
+
+
+def test_rows_have_two_level_labels_sorted_by_the_direction_slope(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    forests = _forests(output)
+    for letter, ax in forests.items():
+        blocks = sorted(
+            (t for t in ax.texts if t.get_gid() == "block"),
+            key=lambda t: t.get_position()[1],
+        )
+        assert [t.get_text() for t in blocks] == BLOCKS[letter]
+        ticks = list(zip(ax.get_yticks(), ax.get_yticklabels(), strict=True))
+        metric = "entropy" if letter == "a" else "abstention"
+        runs = [r for r in _runs() if _headline(*r)["metric"] == metric]
+        by_name = {}
+        for model, template in runs:
+            by_name.setdefault(_tick_name(model, template), []).append(
+                (model, template)
+            )
+        slopes: list[float] = []
+        for _, label in ticks:
+            found = by_name[label.get_text()]
+            slopes.append(_headline(*found[0])["lat_slope"])
+        assert len(slopes) == len(runs)
+        size = 3 if letter == "a" else 2
+        for start in range(0, len(slopes), size):
+            chunk = slopes[start : start + size]
+            assert chunk == sorted(chunk)
+
+
+def test_each_row_says_how_many_random_directions_it_beats(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    got = []
+    for ax in _forests(output).values():
+        got.extend(t.get_text() for t in ax.texts if t.get_gid() == "above")
+    want = sorted(
+        "above "
+        f"{sum(v[1] > 0 for v in _headline(*r)['abs_gaps'].values())} of 3"
+        for r in _runs()
+    )
+    assert sorted(got) == want
+    (legend,) = [lg for sub in output.figure.subfigs for lg in sub.legends]
+    keyed = " ".join(t.get_text() for t in legend.get_texts())
+    assert "smallest one-sided p" in keyed
+    assert "1/4" in keyed
+
+
+def test_titles_of_c_to_e_state_what_the_curves_show(
+    output: registry.FigureOutput,
+) -> None:
+    doses = [
+        ax
+        for ax in output.figure.axes
+        if ax.get_title(loc="left") and ax not in _forests(output).values()
+    ]
+    doses.sort(key=lambda a: a.get_position().x0)
+    assert len(doses) == 3
+    for ax, run in zip(doses, EXEMPLARS, strict=True):
+        curves = _curves(*run)
+        held = _shift(curves, "lat: known") >= _shift(curves, "lat: unknown")
+        want = "known moves as much" if held else "known moves less"
+        assert want in ax.get_title(loc="left")
+
+
+def test_the_two_entropy_dose_panels_share_one_y_range(
+    output: registry.FigureOutput,
+) -> None:
+    doses = sorted(
+        (
+            ax
+            for ax in output.figure.axes
+            if ax.get_title(loc="left") and ax not in _forests(output).values()
+        ),
+        key=lambda a: a.get_position().x0,
+    )
+    assert doses[0].get_ylim() == doses[1].get_ylim()
+    assert doses[1].get_ylabel() == ""
+
+
+def test_the_caption_leads_with_the_known_question_result(
+    output: registry.FigureOutput,
+) -> None:
+    assert output.detail.startswith("On known questions")

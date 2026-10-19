@@ -482,3 +482,45 @@ def test_the_key_names_the_fill_and_the_two_interval_kinds(
         "seed-paired interval",
         "conservative interval",
     ]
+
+
+SECTIONS = {
+    "sentiment": "reading accuracy",
+    "utility": "reading accuracy",
+    "morality": "reading accuracy",
+    "truth": "reading accuracy",
+    "honesty": "reading accuracy",
+    "truthfulqa": "reading accuracy",
+    "knowledge": "knowledge",
+    "steering": "steering",
+}
+
+
+def test_rows_are_grouped_by_section_with_a_label_and_a_separator(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    names = {v: k for k, v in LABELS.items()}
+    for ax in _panels(output):
+        rows = [names[t.get_text()] for t in ax.get_yticklabels()]
+        want = []
+        for row in rows:
+            if SECTIONS[row] not in want:
+                want.append(SECTIONS[row])
+        groups = sorted(
+            (t for t in ax.texts if t.get_gid() == "group"),
+            key=lambda t: t.get_position()[1],
+        )
+        assert [t.get_text() for t in groups] == want
+        lines = [ln for ln in ax.lines if ln.get_gid() == "separator"]
+        assert len(lines) == len(want) - 1
+        for ln in lines:
+            ys = list(ln.get_ydata())
+            assert ys[0] == ys[1]
+            assert ln.get_linewidth() <= 0.5
+        ticks = list(ax.get_yticks())
+        firsts = {}
+        for tick, row in zip(ticks, rows, strict=True):
+            firsts.setdefault(SECTIONS[row], tick)
+        for text in groups:
+            assert text.get_position()[1] < firsts[text.get_text()] - 0.5

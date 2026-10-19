@@ -11,6 +11,7 @@ from typing import Any
 
 from matplotlib import ticker
 from matplotlib.axes import Axes
+from matplotlib.lines import Line2D
 import numpy as np
 
 from tomography.site import runfiles
@@ -23,6 +24,8 @@ from tomography.viz import axes
 from tomography.viz import paper
 
 HEIGHT = 3.9
+BLOCK_GAP = 0.9
+LABEL_FONT = 7
 HEADER = ["panel", "run", "x", "series", "value", "lo", "hi"]
 ARMS = ("random0", "random1", "random2")
 OFFSETS = {
@@ -43,9 +46,12 @@ CLAIM = (
     "consistently on post-trained ones."
 )
 DETAIL = (
-    "(a) Slope of the next-token entropy shift per unit relative "
-    "coefficient on unknown questions (circle) and known questions "
-    "(left triangle), against 3 random directions of the same norm on unknown "
+    "On known questions the direction moves the outcome as much as on "
+    "unknown questions for {held}, by the largest shift of the mean dose "
+    "curve, which a slope does not show. (a) Slope of the next-token entropy "
+    "shift per unit relative coefficient on unknown questions (circle) and "
+    "known questions (left triangle), against 3 random directions of the "
+    "same norm on unknown "
     "questions (grey), with 95 percent intervals that resample the "
     "questions. (b) The same for the abstention rate of post-trained "
     "checkpoints, with a few-shot and a concept prompt. The direction moves "
@@ -59,9 +65,7 @@ DETAIL = (
     "of GPT-2 XL, Qwen3-4B-Base and Qwen3-4B (few-shot prompt) on unknown "
     "and known questions, against the mean over the 3 random directions on "
     "unknown questions with its 95 percent interval that resamples the "
-    "questions (grey band); "
-    "across all runs the largest shift of the mean curve is as large on "
-    "known as on unknown questions for {held}, which a slope does not show. "
+    "questions (grey band). "
     "Every run is in [[fig:a_dose_runs]], and the post-trained runs by "
     "question type in [[fig:a_dose_types]]."
 )
@@ -98,6 +102,32 @@ class Run:
         if self.entropy:
             return paper.display_name(self.model)
         return paper.display_name(self.label)
+
+    @property
+    def block(self) -> str:
+        """The first row label: the role group, or the checkpoint."""
+        role = stats.role(self.model)
+        if role == "gpt2":
+            return "GPT-2"
+        if role == "base":
+            return "Qwen3 base"
+        return paper.display_name(self.model)
+
+    @property
+    def tick(self) -> str:
+        """The second row label: the checkpoint size or the prompt."""
+        role = stats.role(self.model)
+        name = paper.display_name(self.model)
+        if role == "gpt2":
+            return name.removeprefix("GPT-2 ")
+        if role == "base":
+            return name.removeprefix("Qwen3-").removesuffix("-Base")
+        return "few-shot" if self.template == "fewshot" else self.template
+
+    @property
+    def beats(self) -> int:
+        """How many of the 3 random directions the direction is above."""
+        return sum(v[1] > 0 for v in self.head["abs_gaps"].values())
 
     def slope(self, side: str, arm: str) -> dict[str, Any]:
         """The stored slope row of the headline type and metric.
@@ -168,30 +198,65 @@ def load_runs(manifest: Manifest) -> list[Run]:
     return found
 
 
-def _positions(runs: list[Run]) -> list[float]:
-    found: list[float] = []
-    for i, run in enumerate(runs):
-        if i == 0:
-            found.append(0.0)
-            continue
-        step = 1.0
-        previous = runs[i - 1]
-        if previous.model.startswith("gpt2") and not run.model.startswith(
-            "gpt2"
-        ):
-            step += axes.GAP_AFTER_GPT2
-        elif previous.model != run.model:
-            step += axes.GAP_BETWEEN_PAIRS
-        found.append(found[-1] + step)
-    return found
+def _layout(runs: list[Run]) -> tuple[list[Run], list[float]]:
+    """Orders the rows by block, then by the direction's slope, and places them.
+
+    Args:
+        runs: The runs of one forest in checkpoint order.
+
+    Returns:
+        The runs in drawing order and their row positions.
+    """
+    blocks: dict[str, list[Run]] = {}
+    for run in runs:
+        blocks.setdefault(run.block, []).append(run)
+    ordered: list[Run] = []
+    positions: list[float] = []
+    for rows in blocks.values():
+        rows.sort(key=lambda r: float(r.head["lat_slope"]))
+        for i, run in enumerate(rows):
+            if not positions:
+                positions.append(0.0)
+            else:
+                positions.append(
+                    positions[-1] + 1.0 + (0.0 if i else BLOCK_GAP)
+                )
+            ordered.append(run)
+    return ordered, positions
 
 
 def _forest(
     ax: Axes, runs: list[Run], letter: str, csv_rows: list[list[Any]]
 ) -> None:
-    positions = _positions(runs)
+    runs, positions = _layout(runs)
     low, high = 0.0, 0.0
+    seen: list[str] = []
     for run, base in zip(runs, positions, strict=True):
+        if run.block not in seen:
+            seen.append(run.block)
+            ax.text(
+                0.01,
+                base - 0.75,
+                run.block,
+                transform=ax.get_yaxis_transform(),
+                color=paper.ENC["secondary_text"],
+                fontsize=LABEL_FONT,
+                va="center",
+                ha="left",
+                gid="block",
+            )
+        ax.text(
+            1.02,
+            base + OFFSETS["direction_unknown"],
+            f"above {run.beats} of 3",
+            transform=ax.get_yaxis_transform(),
+            color=paper.ENC["secondary_text"],
+            fontsize=LABEL_FONT,
+            va="center",
+            ha="left",
+            clip_on=False,
+            gid="above",
+        )
         marks = {
             "direction_unknown": (
                 run.head["lat_slope"],
@@ -240,9 +305,9 @@ def _forest(
             csv_rows.append([letter, run.label, None, series, value, lo, hi])
     margin = 0.06 * (high - low)
     ax.set_xlim(low - margin, high + margin)
-    ax.set_ylim(positions[-1] + 0.9, -0.6)
+    ax.set_ylim(positions[-1] + 0.9, -1.1)
     ax.set_yticks(positions)
-    ax.set_yticklabels([r.name for r in runs])
+    ax.set_yticklabels([r.tick for r in runs])
     ax.tick_params(axis="y", length=0)
     ax.spines["left"].set_visible(False)
     axes.ref_line(ax, 0.0, "x")
@@ -367,6 +432,11 @@ def build(manifest: Manifest) -> FigureOutput:
     entropy = [r for r in runs if r.entropy]
     abstention = [r for r in runs if not r.entropy]
     csv_rows: list[list[Any]] = []
+    held = [
+        r
+        for r in runs
+        if r.largest_shift("lat: known") >= r.largest_shift("lat: unknown")
+    ]
 
     with paper.paper_style():
         fig = _rows.new_figure(HEIGHT)
@@ -380,15 +450,22 @@ def build(manifest: Manifest) -> FigureOutput:
         ax_a.set_xlabel("entropy shift per unit\nrelative coefficient")
         ax_b.set_xlabel("abstention rate per unit\nrelative coefficient")
         for ax, letter, key in zip(doses, "cde", EXEMPLARS, strict=True):
-            draw_dose(ax, by_label[" ".join(key)], letter, csv_rows)
-            paper.panel_title(ax, letter, by_label[" ".join(key)].name)
+            run = by_label[" ".join(key)]
+            draw_dose(ax, run, letter, csv_rows)
+            message = (
+                "known moves as much" if run in held else "known moves less"
+            )
+            paper.panel_title(ax, letter, f"{run.name}\n{message}")
+        low = min(ax.get_ylim()[0] for ax in doses[:2])
+        high = max(ax.get_ylim()[1] for ax in doses[:2])
+        for ax in doses[:2]:
+            ax.set_ylim(low, high)
+        doses[1].set_ylabel("")
+        doses[1].tick_params(labelleft=False)
         paper.panel_letter(ax_a, "a")
         paper.panel_letter(ax_b, "b")
         legend = top.legend(
             handles=[
-                _rows.series_handle(
-                    "direction, unknown questions", "o", paper.INK
-                ),
                 _rows.series_handle(
                     "direction, known questions",
                     paper.QUESTION_SET_MARKERS["known"],
@@ -397,9 +474,18 @@ def build(manifest: Manifest) -> FigureOutput:
                 _rows.series_handle(
                     "random direction", "x", paper.ENC["random_marker"]
                 ),
-                _rows.series_handle("GPT-2 and base", "h", paper.INK),
+                _rows.series_handle("GPT-2 and base", "o", paper.INK),
                 _rows.series_handle(
-                    "post-trained", "h", paper.INK, filled=False
+                    "post-trained", "o", paper.INK, filled=False
+                ),
+                Line2D(
+                    [],
+                    [],
+                    ls="none",
+                    label=(
+                        "above n of 3: random directions beaten; smallest "
+                        "one-sided p is 1/4"
+                    ),
                 ),
             ],
             loc="outside upper center",
@@ -416,11 +502,6 @@ def build(manifest: Manifest) -> FigureOutput:
     selective = _rows.run_counts(
         {(r.model, r.label): bool(r.head["selective"]) for r in runs}
     )
-    held = [
-        r
-        for r in runs
-        if r.largest_shift("lat: known") >= r.largest_shift("lat: unknown")
-    ]
     known_ge_unknown = _rows.run_counts(
         {(r.model, r.label): r in held for r in runs}
     )

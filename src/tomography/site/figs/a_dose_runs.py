@@ -33,8 +33,11 @@ DETAIL = (
     "over the 3 random directions on unknown questions with its 95 percent "
     "interval that resamples the questions (grey band). Entropy shift is shown "
     "for GPT-2 and base checkpoints and abstention rate for post-trained "
-    "ones, as in [[fig:knowledge_steering]]; panels in the same unit share "
-    "their vertical range. Open markers and dashed lines are post-trained "
+    "ones, as in [[fig:knowledge_steering]]; rows are GPT-2, Qwen3 base and "
+    "the post-trained few-shot and concept runs, and panels in the same unit "
+    "share their vertical range. The tag in each panel is the outcome of "
+    "[[fig:knowledge_steering]]: the number of the 3 random directions the "
+    "direction is above. Open markers and dashed lines are post-trained "
     "checkpoints."
 )
 
@@ -51,6 +54,15 @@ def _range(runs: list[knowledge_steering.Run]) -> tuple[float, float]:
     return low - pad, high + pad
 
 
+def _row(run: knowledge_steering.Run) -> int:
+    role = stats.role(run.model)
+    if role == "gpt2":
+        return 0
+    if role == "base":
+        return 1
+    return 2 if run.template == "fewshot" else 3
+
+
 def build(manifest: Manifest) -> FigureOutput:
     """Builds the figure from the committed results.
 
@@ -60,9 +72,7 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    runs = sorted(
-        knowledge_steering.load_runs(manifest), key=lambda run: not run.entropy
-    )
+    runs = sorted(knowledge_steering.load_runs(manifest), key=_row)
     limits = {
         True: _range([r for r in runs if r.entropy]),
         False: _range([r for r in runs if not r.entropy]),
@@ -86,11 +96,23 @@ def build(manifest: Manifest) -> FigureOutput:
             )
             if not first:
                 ax.set_ylabel("")
+            if i % COLUMNS:
+                ax.tick_params(labelleft=False)
+            ax.text(
+                0.97,
+                0.95,
+                f"above {run.beats} of 3 random",
+                transform=ax.transAxes,
+                ha="right",
+                va="top",
+                fontsize=6.5,
+                color=paper.ENC["secondary_text"],
+                gid="tag",
+            )
         for ax in flat[len(runs) :]:
             ax.set_axis_off()
         legend = fig.legend(
             handles=[
-                _rows.series_handle("unknown questions", "o", paper.INK),
                 _rows.series_handle(
                     "known questions",
                     paper.QUESTION_SET_MARKERS["known"],
@@ -103,13 +125,13 @@ def build(manifest: Manifest) -> FigureOutput:
                     lw=paper.DATA_WIDTH,
                     label="mean of 3 random directions",
                 ),
-                _rows.series_handle("GPT-2 and base", "h", paper.INK),
+                _rows.series_handle("GPT-2 and base", "o", paper.INK),
                 _rows.series_handle(
-                    "post-trained", "h", paper.INK, filled=False
+                    "post-trained", "o", paper.INK, filled=False
                 ),
             ],
-            loc="outside lower center",
-            ncol=5,
+            loc="outside upper center",
+            ncol=4,
             handlelength=1.0,
             columnspacing=1.0,
             fontsize=6.5,

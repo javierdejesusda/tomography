@@ -331,3 +331,16 @@ def test_the_caption_says_what_the_frame_and_the_test_are(
     assert "interval of the random mean" in labels
     assert any("framed" in label for label in labels)
     assert not any("star" in label for label in labels)
+
+
+def test_the_marker_keys_are_open_like_the_post_trained_data(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    marked = [
+        h
+        for h in legend.legend_handles
+        if hasattr(h, "get_marker") and h.get_marker() not in ("None", "")
+    ]
+    assert len(marked) == 2
+    assert {h.get_markerfacecolor() for h in marked} == {"white"}

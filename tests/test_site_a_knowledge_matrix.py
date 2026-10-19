@@ -67,8 +67,8 @@ def test_the_close_type_count_is_computed_from_the_files(
     assert output.numbers["types"] == len(names)
     assert output.claim == (
         "A classifier on the words or characters alone comes within "
-        f"{SLACK:.3f} of the reader on {len(close)} of {len(names)} "
-        "question types."
+        f"{SLACK:.3f} of the reader or beats it on {len(close)} of "
+        f"{len(names)} question types."
     )
     assert "Qwen3-4B-Base" in output.detail
 
@@ -223,3 +223,21 @@ def test_the_caption_says_what_the_band_and_the_marks_mean(
     assert "filled" in detail
     assert "grey tick" in detail
     assert "(c)" in detail
+
+
+def test_the_x_labels_of_b_and_c_are_separate_two_line_labels(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    checks.draw(fig)
+    labels = [
+        ax.xaxis.get_label()
+        for ax in fig.axes
+        if ax.xaxis.get_label()
+        .get_text()
+        .startswith(("reader minus", "random"))
+    ]
+    assert len(labels) == 2
+    assert all(chr(10) in t.get_text() for t in labels)
+    boxes = [t.get_window_extent() for t in labels]
+    assert boxes[0].x1 + 6 < boxes[1].x0

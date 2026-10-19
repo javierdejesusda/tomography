@@ -41,7 +41,16 @@ def _runs() -> list[tuple[str, str]]:
             key=("fewshot", "concept").index,
         )
         found.extend((model, t) for t in templates)
-    return sorted(found, key=lambda run: not _entropy(*run))
+    return sorted(found, key=_row)
+
+
+def _row(run: tuple[str, str]) -> int:
+    model, template = run
+    if model.startswith("gpt2"):
+        return 0
+    if model.endswith("-base"):
+        return 1
+    return 2 if template == "fewshot" else 3
 
 
 def _path(model: str, template: str) -> Path:
@@ -227,3 +236,45 @@ def test_the_encoding_is_cross_referenced_by_token(
 ) -> None:
     assert "[[fig:knowledge_steering]]" in output.detail
     assert "Figure 9" not in output.detail
+
+
+def _beats(model: str, template: str) -> int:
+    head = _R["data"](_path(model, template), "summary.json")["headline"]
+    return sum(v[1] > 0 for v in head["abs_gaps"].values())
+
+
+def test_rows_are_gpt2_base_and_the_two_post_trained_prompts(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    panels = _panels(output)
+    got = [ax.get_title(loc="left") for ax in panels]
+    assert [t.split(",")[0].split(" ")[0] for t in got[:3]] == ["GPT-2"] * 3
+    assert all("Base" in t for t in got[3:6])
+    assert all("few-shot" in t for t in got[6:9])
+    assert all("concept" in t for t in got[9:])
+
+
+def test_each_panel_carries_the_figure_9_outcome_in_a_corner_tag(
+    output: registry.FigureOutput,
+) -> None:
+    for ax, run in zip(_panels(output), _runs(), strict=True):
+        (tag,) = [t for t in ax.texts if t.get_gid() == "tag"]
+        assert tag.get_text() == f"above {_beats(*run)} of 3 random"
+        x, y = tag.get_position()
+        assert x > 0.5
+        assert y > 0.5
+
+
+def test_the_legend_is_at_the_top_and_inner_y_tick_labels_are_hidden(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    (legend,) = output.figure.legends
+    top = max(ax.get_window_extent().y1 for ax in _panels(output))
+    assert legend.get_window_extent().y0 > top
+    for i, ax in enumerate(_panels(output)):
+        if i % 3:
+            assert not any(
+                tick.label1.get_visible() for tick in ax.yaxis.get_major_ticks()
+            )
