@@ -13,7 +13,6 @@ from typing import Any
 
 import matplotlib as mpl
 from matplotlib import ticker
-from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.colors import LogNorm
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
@@ -42,10 +41,7 @@ ROLE_TITLES = {
     "post": "Qwen3 post-trained",
 }
 HEADER = ["panel", "model", "x", "series", "value", "lo", "hi"]
-CMAP = LinearSegmentedColormap.from_list(
-    "perplexity",
-    [mpl.colormaps["cividis_r"](v) for v in np.linspace(0, 0.5, 64)],
-)
+CMAP = mpl.colormaps["cividis_r"]
 DETAIL = (
     "(a to c) Mean judged sentiment of the completions (positive-class "
     "probability of a sentiment classifier) against the relative "
@@ -204,8 +200,9 @@ def _matrix(
                 ha="center",
                 va="center",
                 fontsize=TILE_FONT,
-                color=paper.INK,
+                color=paper.tile_ink(CMAP(norm(model.ratio[coeff]))),
                 zorder=3,
+                gid=paper.TILE_LABEL,
             )
             if model.fluent(coeff):
                 ax.add_patch(

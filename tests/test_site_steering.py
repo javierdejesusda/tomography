@@ -7,6 +7,8 @@ import re
 import runpy
 from typing import Any
 
+import matplotlib as mpl
+from matplotlib.collections import QuadMesh
 from matplotlib.patches import Rectangle
 import numpy as np
 import pytest
@@ -370,3 +372,27 @@ def test_the_layout_is_frozen_so_two_builds_place_every_axes_alike() -> None:
     assert [ax.get_position().bounds for ax in first.axes] == [
         ax.get_position().bounds for ax in second.axes
     ]
+
+
+def test_tiles_use_the_full_colormap_and_the_ink_that_contrasts_most(
+    output: registry.FigureOutput,
+) -> None:
+    ax = next(
+        a
+        for a in output.figure.axes
+        if any(isinstance(c, QuadMesh) for c in a.collections)
+        and len([c for c in a.collections if isinstance(c, QuadMesh)]) > 2
+    )
+    meshes = [c for c in ax.collections if isinstance(c, QuadMesh)]
+    labels = [t for t in ax.texts if t.get_gid() == paper.TILE_LABEL]
+    assert len(labels) == 7 * (len(meshes))
+    cmap = meshes[0].get_cmap()
+    assert cmap(0.0) == mpl.colormaps["cividis_r"](0.0)
+    assert cmap(1.0) == mpl.colormaps["cividis_r"](1.0)
+    for i, mesh in enumerate(meshes):
+        mesh.update_scalarmappable()
+        for j, face in enumerate(mesh.get_facecolor()):
+            text = labels[7 * i + j]
+            assert text.get_color() == paper.tile_ink(face)
+    inks = {t.get_color() for t in labels}
+    assert inks == {paper.INK, paper.WHITE}
