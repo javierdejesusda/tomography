@@ -20,22 +20,35 @@ from tomography.viz import axes
 from tomography.viz import paper
 
 HEIGHT = 3.4
+MARKERS = paper.MEASURE_MARKERS
 Z = stats.Z
 HEADER = ["panel", "model", "series", "value", "lo", "hi"]
 PANEL_A = (
-    ("direction", "logistic_within", "o", paper.INK, -0.3),
-    ("popularity", "popularity_within", "s", paper.ENC["popularity"], -0.1),
-    ("words", "text_word_within", "^", paper.ENC["text"], 0.1),
-    ("characters", "text_char_within", "v", paper.ENC["text"], 0.3),
+    ("direction", "logistic_within", MARKERS["direction"], paper.INK, -0.3),
+    (
+        "popularity",
+        "popularity_within",
+        MARKERS["popularity"],
+        paper.ENC["popularity"],
+        -0.1,
+    ),
+    ("words", "text_word_within", MARKERS["text"][0], paper.ENC["text"], 0.1),
+    (
+        "characters",
+        "text_char_within",
+        MARKERS["text"][1],
+        paper.ENC["text"],
+        0.3,
+    ),
 )
 PANEL_B = (
-    ("direction", "confidence+lat", "o", -0.2),
-    ("probe", "confidence+probe", "D", 0.2),
+    ("direction", "confidence+lat", MARKERS["direction"], -0.2),
+    ("probe", "confidence+probe", MARKERS["probe"], 0.2),
 )
 NO_CONTRAST = "no known-against-unknown contrast"
 CLAIM = (
-    "A known-against-unknown direction ranks questions but adds nothing to "
-    "the model's confidence."
+    "A known-against-unknown direction ranks questions but adds at most a "
+    "small amount to the model's confidence."
 )
 DETAIL = (
     "(a) AUROC for separating PopQA questions the model answers correctly "
@@ -51,7 +64,10 @@ DETAIL = (
     "confidence, with paired 95 percent bootstrap intervals over the test "
     "questions: the direction changes it by {dmin} to {dmax} with an "
     "interval covering zero on {cover}, while the probe adds {pmin} to "
-    "{pmax} with an interval above zero on {above}. GPT-2 small has no "
+    "{pmax} with an interval above zero on {above}. The largest upper bound "
+    "of the direction's interval is +{hi_max} ({hi_model}). The probe is "
+    "fitted on the correct and wrong labels of the training questions; the "
+    "direction is not. GPT-2 small has no "
     "known-against-unknown contrast, so panel (a) omits it."
 )
 
@@ -203,14 +219,29 @@ def build(manifest: Manifest) -> FigureOutput:
         paper.panel_letter(ax_b, "b")
         legend = fig.legend(
             handles=[
-                _rows.series_handle("knowledge direction", "o", paper.INK),
-                _rows.series_handle("popularity", "s", paper.ENC["popularity"]),
-                _rows.series_handle("words", "^", paper.ENC["text"]),
-                _rows.series_handle("characters", "v", paper.ENC["text"]),
-                _rows.series_handle("supervised probe", "D", paper.INK),
-                _rows.series_handle("GPT-2 and base", "o", paper.INK),
                 _rows.series_handle(
-                    "post-trained", "o", paper.INK, filled=False
+                    "knowledge direction", MARKERS["direction"], paper.INK
+                ),
+                _rows.series_handle(
+                    "popularity", MARKERS["popularity"], paper.ENC["popularity"]
+                ),
+                _rows.series_handle(
+                    "words", MARKERS["text"][0], paper.ENC["text"]
+                ),
+                _rows.series_handle(
+                    "characters", MARKERS["text"][1], paper.ENC["text"]
+                ),
+                _rows.series_handle(
+                    "supervised probe", MARKERS["probe"], paper.INK
+                ),
+                _rows.series_handle(
+                    "GPT-2 and base", paper.ROLE_KEY_MARKER, paper.INK
+                ),
+                _rows.series_handle(
+                    "post-trained",
+                    paper.ROLE_KEY_MARKER,
+                    paper.INK,
+                    filled=False,
                 ),
             ],
             loc="outside upper center",
@@ -247,11 +278,13 @@ def build(manifest: Manifest) -> FigureOutput:
         "probe_above": above,
     }
     lat_gain = [float(r["diff_vs_confidence"]) for r in lat.values()]
+    widest = max(lat, key=lambda m: float(lat[m]["hi"]))
     probe_gain = [float(r["diff_vs_confidence"]) for r in probe.values()]
     numbers: dict[str, float] = {
         "dir_inc_min": min(lat_gain),
         "dir_inc_max": max(lat_gain),
         "dir_inc_n": float(len(lat)),
+        "dir_inc_hi_max": float(lat[widest]["hi"]),
         "dir_inc_cover_all": float(sum(c.hits for c in cover.values())),
         "probe_inc_min": min(probe_gain),
         "probe_inc_max": max(probe_gain),
@@ -270,6 +303,8 @@ def build(manifest: Manifest) -> FigureOutput:
         cover=stats.per_role_text(cover),
         pmin=pmin,
         pmax=pmax,
+        hi_max=f"{float(lat[widest]['hi']):.3f}",
+        hi_model=paper.display_name(widest),
         above=stats.per_role_text(above),
     )
     return FigureOutput(

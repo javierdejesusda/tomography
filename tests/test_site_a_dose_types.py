@@ -231,3 +231,20 @@ def test_the_encoding_is_cross_referenced_by_token(
 ) -> None:
     assert "[[fig:knowledge_steering]]" in output.detail
     assert "Figure 9" not in output.detail
+
+
+def test_the_panels_that_pass_are_starred_and_the_bands_are_keyed(
+    output: registry.FigureOutput,
+) -> None:
+    starred = [
+        ax
+        for ax in _panels(output)
+        if any(line.get_marker() == "*" for line in ax.lines)
+    ]
+    assert len(starred) == output.numbers["moves_more"]
+    assert len(starred) > 0
+    (legend,) = output.figure.legends
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert "interval of the direction" in labels
+    assert "interval of the random mean" in labels
+    assert any("beyond all 3 random directions" in label for label in labels)

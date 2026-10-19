@@ -25,6 +25,8 @@ def marker_clashes(fig: Figure) -> list[tuple[str, str]]:
         for handle, text in zip(
             legend.legend_handles, legend.get_texts(), strict=True
         ):
+            if not hasattr(handle, "get_marker"):
+                continue
             marker = str(handle.get_marker())
             if marker in ("None", ""):
                 continue

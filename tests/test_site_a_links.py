@@ -219,3 +219,20 @@ def test_letters_do_not_touch_their_titles(
     gaps = _T["letter_title_gaps"](output.figure)
     assert len(gaps) == 2
     assert min(gaps) >= 2.0
+
+
+def test_each_panel_prints_the_cell_counts_the_caption_gives(
+    output: registry.FigureOutput,
+) -> None:
+    panels = [ax for ax in output.figure.axes if ax.get_label() != "<legend>"]
+    names = {"gpt2": "GPT-2", "base": "Qwen3 base", "post": "post-trained"}
+    groups = (("gpt2",), ("base", "post")) * 2
+    for ax, roles, which in zip(
+        panels, groups, ("cos", "cos", "auc", "auc"), strict=True
+    ):
+        counts = _counts(which)
+        shown = [t.get_text() for t in ax.texts if "cells" in t.get_text()]
+        assert shown == [
+            f"{names[r]}: {counts[r][0]:,} of {counts[r][1]:,} cells"
+            for r in roles
+        ]

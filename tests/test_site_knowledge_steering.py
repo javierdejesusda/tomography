@@ -288,10 +288,16 @@ def test_caption_is_the_template_filled_from_the_files(
     assert (
         "The direction moves unknown questions more than each of the 3 "
         f"random directions on {_runs_text(dist)}, and more than known "
-        f"questions on {_runs_text(sel)}, by the linear slope over the "
-        "coefficient grid; with 3 random directions a direction passes by "
-        "chance with probability 1/4."
+        f"questions on {_runs_text(sel)}, by the gap between the absolute "
+        "mean slopes over the coefficient grid, whatever the sign; with 3 "
+        "random directions a direction passes by chance with probability at "
+        "most 1/4."
     ) in output.detail
+    assert (
+        "The outcome is the entropy shift for GPT-2 and base checkpoints and "
+        "the abstention rate for post-trained ones."
+    ) in output.detail
+    assert "linear slope" not in output.detail
     assert all(dist[r].hits == dist[r].total for r in ("gpt2", "base"))
     assert dist["post"].hits < dist["post"].total
     assert "Figure A6" in output.detail

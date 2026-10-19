@@ -458,6 +458,21 @@ def test_clipped_bands_are_marked_on_panel_c(
     output: registry.FigureOutput,
 ) -> None:
     ax_c = output.figure.axes[2]
-    assert any("clipped" in t.get_text() for t in ax_c.texts)
+    assert "band clipped" in ax_c.get_xlabel()
     markers = {line.get_marker() for line in ax_c.lines}
     assert {"<", ">"} & markers
+
+
+def test_the_reader_is_the_direction_circle_and_no_symbol_repeats(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    markers = {
+        t.get_text(): h.get_marker()
+        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
+    }
+    assert markers["range reader"] == paper.MEASURE_MARKERS["direction"]
+    assert markers["random direction"] == paper.MEASURE_MARKERS["random"]
+    assert markers["GPT-2 and base"] == paper.ROLE_KEY_MARKER
+    labelled = [m for m in markers.values() if m not in ("None", "")]
+    assert labelled.count("o") == 1

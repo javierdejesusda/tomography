@@ -142,3 +142,20 @@ def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
     with paper.paper_style():
         assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
+
+
+def test_the_reader_is_drawn_above_the_classifier_and_random_markers(
+    output: registry.FigureOutput,
+) -> None:
+    ax_b = output.figure.axes[1]
+    marked = {
+        ln.get_marker(): ln.get_zorder()
+        for ln in ax_b.lines
+        if ln.get_marker() not in ("None", "", None)
+    }
+    reader = marked[paper.MEASURE_MARKERS["direction"]]
+    others = [
+        marked[paper.MEASURE_MARKERS["random"]],
+        *(marked[m] for m in paper.MEASURE_MARKERS["text"]),
+    ]
+    assert all(reader > z for z in others)
