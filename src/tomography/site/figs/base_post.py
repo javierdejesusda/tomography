@@ -21,7 +21,7 @@ from tomography.site.registry import FigureOutput
 from tomography.viz import axes
 from tomography.viz import paper
 
-HEIGHT = 4.8
+HEIGHT = 5.4
 LABEL_FONT = 7
 LABEL_PAD = 0.07
 HEADER = ["panel", "row", "size", "value", "lo", "hi", "interval"]
@@ -38,6 +38,17 @@ ROWS = (
     ("knowledge", "knowledge", "knowledge AUROC"),
     ("steering", "steering", "steering win rate"),
 )
+SECTIONS = {
+    "sentiment": "reading accuracy",
+    "utility": "reading accuracy",
+    "morality": "reading accuracy",
+    "truth": "reading accuracy",
+    "honesty": "reading accuracy",
+    "truthfulqa": "reading accuracy",
+    "knowledge": "knowledge",
+    "steering": "steering",
+}
+GROUP_GAP = 1
 OTHER = ("utility", "morality", "truth", "honesty", "truthfulqa")
 PAIRED = {"r2": "utility", "r3": "morality", "r5": "honesty", "r7": "truth"}
 CLAIM = (
@@ -281,7 +292,7 @@ def _draw_row(
             zorder=3,
         )
         if named:
-            right = hi < 0.6 * limit
+            right = 0 <= hi < 0.6 * limit
             pad = LABEL_PAD * limit
             ax.text(
                 hi + pad if right else lo - pad,
@@ -294,6 +305,43 @@ def _draw_row(
             )
 
 
+def _positions(rows: list[tuple[str, str, str]]) -> list[int]:
+    ys: list[int] = []
+    for i, (key, _, _) in enumerate(rows):
+        gap = i > 0 and SECTIONS[key] != SECTIONS[rows[i - 1][0]]
+        ys.append((ys[-1] + 1 if ys else 0) + (GROUP_GAP if gap else 0))
+    return ys
+
+
+def _groups(
+    ax: Any, rows: list[tuple[str, str, str]], ys: list[int], limit: float
+) -> None:
+    seen: list[str] = []
+    for (key, _, _), y in zip(rows, ys, strict=True):
+        section = SECTIONS[key]
+        if section in seen:
+            continue
+        if seen:
+            ax.axhline(
+                y - 1.0,
+                color=paper.RANDOM_BAND,
+                lw=0.5,
+                gid="separator",
+                zorder=1,
+            )
+        seen.append(section)
+        ax.text(
+            -limit * 0.98,
+            y - 0.65,
+            section,
+            color=paper.ENC["secondary_text"],
+            fontsize=LABEL_FONT,
+            va="center",
+            ha="left",
+            gid="group",
+        )
+
+
 def _panel(
     ax: Any,
     rows: list[tuple[str, str, str]],
@@ -303,12 +351,14 @@ def _panel(
     letter: str,
     csv_rows: list[list[Any]],
 ) -> None:
-    for y, (key, label, _) in enumerate(rows):
+    ys = _positions(rows)
+    for y, (key, label, _) in zip(ys, rows, strict=True):
         cells = {size: found[(key, size)] for size in sizes}
-        _draw_row(ax, y, cells, sizes, limit, named=y == 0)
+        _draw_row(ax, y, cells, sizes, limit, named=y == ys[0])
         for size in sizes:
             value, lo, hi, kind = cells[size]
             csv_rows.append([letter, label, size, value, lo, hi, kind])
+    _groups(ax, rows, ys, limit)
     ax.axvline(0.0, color=paper.INK, lw=0.5, gid="zero", zorder=2.5)
     ax.set_xlim(-limit, limit)
     step = 0.05 if limit <= NARROW else 0.1
@@ -316,8 +366,8 @@ def _panel(
     ticks = [round(k * step, 2) for k in range(-count, count + 1)]
     ax.xaxis.set_major_locator(ticker.FixedLocator(ticks))
     ax.xaxis.set_major_formatter(axes.minus_formatter())
-    ax.set_ylim(len(rows) - 0.4, -1.45)
-    ax.set_yticks(range(len(rows)))
+    ax.set_ylim(ys[-1] + 0.6, -1.45)
+    ax.set_yticks(ys)
     ax.set_yticklabels([label for _, label, _ in rows])
     ax.tick_params(axis="y", length=0)
     ax.spines["left"].set_visible(False)
@@ -433,7 +483,12 @@ def build(manifest: Manifest) -> FigureOutput:
         top, bottom = fig.subplots(
             2,
             1,
-            gridspec_kw={"height_ratios": [len(narrow) + 1.6, len(wide) + 1.6]},
+            gridspec_kw={
+                "height_ratios": [
+                    _positions(narrow)[-1] + 2.6,
+                    _positions(wide)[-1] + 2.6,
+                ]
+            },
         )
         _panel(top, narrow, found, sizes, NARROW, "a", csv_rows)
         _panel(bottom, wide, found, sizes, WIDE, "b", csv_rows)
