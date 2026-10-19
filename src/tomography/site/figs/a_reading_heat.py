@@ -1,4 +1,4 @@
-"""Figure A2: the margin of every reading at every layer, as heat maps.
+"""Appendix figure: the margin of every reading at every layer, as heat maps.
 
 One map per concept with a row per checkpoint: the reader's accuracy minus
 that of a random direction of the same run at every layer, with the earliest
@@ -81,7 +81,7 @@ def _key(fig: Figure) -> None:
     ]
     fig.legend(
         handles,
-        ["lowest layer above 0.1", "layer read"],
+        ["onset (earliest layer above 0.1)", "layer read"],
         loc="outside upper right",
         ncol=2,
         frameon=False,
@@ -145,7 +145,7 @@ def build(manifest: Manifest) -> FigureOutput:
     detail = (
         "The colour of a cell is the margin of the reader over the random "
         "direction of the same run (colour bar, capped at 0.6); the black "
-        "tick marks the lowest layer where the margin exceeds 0.1 and the "
+        "tick marks the earliest layer where the margin exceeds 0.1 and the "
         "circle the layer read. The same curves, by role and with the "
         "random band, are in [[fig:reading]]."
     )

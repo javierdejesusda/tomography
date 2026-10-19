@@ -196,8 +196,8 @@ def test_the_caption_quotes_every_number_and_the_sample_sizes(
     assert "0.025 to 0.154" in text
     assert "214 sentiment, 59 truth and 256 utility pairs" in text
     assert "all 10 checkpoints" in text
-    assert "Figures A2 and A3" in text
-    assert "Table A2" in text
+    assert "[[fig:a_finders_gpt2]] and [[fig:a_finders_qwen3]]" in text
+    assert "[[table:finders_all]]" in text
     assert "random" in text
     assert "of 10 checkpoints" not in text
 

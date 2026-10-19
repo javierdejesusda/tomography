@@ -4,6 +4,7 @@ import runpy
 from typing import Any
 
 from matplotlib.image import AxesImage
+from matplotlib.text import Text
 import numpy as np
 import pytest
 
@@ -164,8 +165,8 @@ def test_the_caption_quotes_the_spans_the_noise_and_the_bare_numbers(
         "bare_random_max",
     ):
         assert f"{n[name]:.3f}" in text, name
-    assert "Figure A4" in text
-    assert "Table A6" in text
+    assert "[[fig:a_wording]]" in text
+    assert "[[table:wordings]]" in text
 
 
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
@@ -242,6 +243,12 @@ def test_the_claim_states_the_span_count_and_does_not_overstate_gpt2(
 
 
 FAMILIES = ("frame", "wording", "concept")
+LANES = {
+    "frame": "frame",
+    "wording": "paraphrase, scaffold",
+    "concept": "concept swap",
+}
+COLUMN_HEADERS = ["paper", "noise", "span", "rank of 16", "above noise"]
 
 
 def _gid_lines(ax: Any, prefix: str) -> dict[str, Any]:
@@ -267,8 +274,33 @@ def _facets(output: registry.FigureOutput) -> dict[str, Any]:
 
 def _rank(model: str) -> int:
     values = sorted((r["from_paper"] for r in _rows(model)), reverse=True)
-    (paper_row,) = [r for r in _rows(model) if r["variant"] == "paper"]
-    return values.index(paper_row["from_paper"]) + 1
+    return values.index(_paper(model)["from_paper"]) + 1
+
+
+def _table_name(row: dict[str, Any]) -> str:
+    base = row["kind"].replace("_", " ")
+    name = row["variant"]
+    if "_" not in name or name == row["kind"]:
+        return base
+    return f"{base} {int(name.rsplit('_', 1)[1]) + 1}"
+
+
+def _row_y(ax: Any, model: str) -> float:
+    return float(
+        _gid_lines(ax, f"paper:{model}")[f"paper:{model}"].get_ydata()[0]
+    )
+
+
+def _side(output: registry.FigureOutput) -> Any:
+    (ax,) = [a for a in output.figure.axes if a.get_gid() == "table"]
+    return ax
+
+
+def _column(ax: Any, gid: str) -> list[Any]:
+    return sorted(
+        (t for t in ax.texts if t.get_gid() == gid),
+        key=lambda t: t.get_position()[1],
+    )
 
 
 def test_the_layout_is_one_strip_over_three_role_facets_and_no_heat_map(
@@ -281,17 +313,22 @@ def test_the_layout_is_one_strip_over_three_role_facets_and_no_heat_map(
     assert height == pytest.approx(6.6)
     assert sorted(_facets(output)) == sorted(ROLES)
     assert len(_facets(output)) == 3
-    assert _strip(output).get_xlim() == pytest.approx((0.45, 1.0))
+    ax = _strip(output)
+    assert ax.get_xlim()[0] == pytest.approx(0.45)
+    assert ax.get_xticks().tolist()[:3] == pytest.approx([0.5, 0.75, 1.0])
 
 
-def test_every_row_has_fifteen_identical_circles_coloured_by_three_families(
+def test_every_row_has_fifteen_identical_ink_circles_in_three_lanes(
     output: registry.FigureOutput,
 ) -> None:
     ax = _strip(output)
-    colours: dict[str, set[Any]] = {f: set() for f in FAMILIES}
+    colours = set()
+    lane_offsets: dict[str, set[float]] = {f: set() for f in FAMILIES}
     for model in MODELS:
         rows = _rows(model)
+        centre = _row_y(ax, model)
         drawn = 0
+        ys = {}
         for family in FAMILIES:
             line = _gid_lines(ax, f"words:{model}:{family}")[
                 f"words:{model}:{family}"
@@ -299,41 +336,65 @@ def test_every_row_has_fifteen_identical_circles_coloured_by_three_families(
             want = sorted(
                 r["from_paper"]
                 for r in rows
-                if r["variant"] != "paper"
-                and {
-                    "frame": "frame",
-                    "wording": "wording",
-                    "concept": "concept",
-                }[r["family"]]
-                == family
+                if r["variant"] != "paper" and r["family"] == family
             )
             assert sorted(line.get_xdata()) == pytest.approx(want)
             assert line.get_marker() == "o"
             assert line.get_markersize() == pytest.approx(3.0)
+            assert len(set(line.get_ydata())) == 1
+            ys[family] = float(line.get_ydata()[0])
+            lane_offsets[family].add(round(ys[family] - centre, 6))
             drawn += len(want)
-            colours[family].add(line.get_markerfacecolor())
+            colours.add(line.get_markerfacecolor())
         assert drawn == 15
-    assert all(len(c) == 1 for c in colours.values())
-    assert len({next(iter(c)) for c in colours.values()}) == 3
+        assert ys["frame"] < ys["wording"] < ys["concept"]
+    assert len(colours) == 1
+    assert all(len(v) == 1 for v in lane_offsets.values())
 
 
-def test_the_paper_wording_is_a_diamond_with_its_rank_beside_it(
+def test_the_lanes_are_named_once_at_the_top_of_the_first_block(
     output: registry.FigureOutput,
 ) -> None:
     ax = _strip(output)
-    ranks = {}
+    lanes = [t for t in ax.texts if t.get_gid() == "lane"]
+    assert [t.get_text() for t in lanes] == list(LANES.values())
+    first = MODELS[0]
+    ys = sorted(float(t.get_position()[1]) for t in lanes)
+    for family, text in zip(FAMILIES, ys, strict=True):
+        line = _gid_lines(ax, f"words:{first}:{family}")[
+            f"words:{first}:{family}"
+        ]
+        assert text == pytest.approx(float(line.get_ydata()[0]))
+
+
+def test_no_colour_key_names_the_wording_families(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    texts = " ".join(t.get_text() for t in legend.get_texts())
+    assert "frame" not in texts
+    assert "concept swap" not in texts
+
+
+def test_the_paper_wording_is_a_diamond_and_the_rank_is_in_the_right_column(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _strip(output)
+    assert not [t for t in ax.texts if (t.get_gid() or "").startswith("rank:")]
+    ranks = _column(_side(output), "rank")
+    assert len(ranks) == len(MODELS)
+    by_row = {round(_row_y(ax, m), 6): m for m in MODELS}
+    for text in ranks:
+        model = by_row[round(float(text.get_position()[1]), 6)]
+        assert text.get_text() == str(_rank(model))
     for model in MODELS:
-        (row,) = [r for r in _rows(model) if r["variant"] == "paper"]
         line = _gid_lines(ax, f"paper:{model}")[f"paper:{model}"]
         assert line.get_marker() == "D"
-        assert line.get_xdata()[0] == pytest.approx(row["from_paper"])
+        assert line.get_xdata()[0] == pytest.approx(_paper(model)["from_paper"])
         assert line.get_markersize() > 3.0
-        (text,) = [t for t in ax.texts if t.get_gid() == f"rank:{model}"]
-        assert text.get_text() == str(_rank(model))
-        ranks[model] = _rank(model)
-    assert output.numbers["paper_rank_min"] == min(ranks.values())
-    assert output.numbers["paper_rank_max"] == max(ranks.values())
-    assert 1 <= min(ranks.values()) <= max(ranks.values()) <= 16
+    ranked = [_rank(m) for m in MODELS]
+    assert output.numbers["paper_rank_min"] == min(ranked)
+    assert output.numbers["paper_rank_max"] == max(ranked)
 
 
 def test_the_median_tick_the_noise_band_and_the_random_tick_are_drawn(
@@ -343,7 +404,7 @@ def test_the_median_tick_the_noise_band_and_the_random_tick_are_drawn(
     for model in MODELS:
         rows = _rows(model)
         values = [r["from_paper"] for r in rows]
-        (row,) = [r for r in rows if r["variant"] == "paper"]
+        row = _paper(model)
         median = _gid_lines(ax, f"median:{model}")[f"median:{model}"]
         assert median.get_xdata()[0] == pytest.approx(float(np.median(values)))
         tick = _gid_lines(ax, f"random:{model}")[f"random:{model}"]
@@ -355,18 +416,57 @@ def test_the_median_tick_the_noise_band_and_the_random_tick_are_drawn(
         )
 
 
-def test_the_right_column_marks_the_checkpoints_whose_span_exceeds_noise(
+def test_the_right_columns_are_paper_noise_span_rank_and_the_mark(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _side(output)
+    heads = [
+        t.get_text().replace("\n", " ")
+        for t in ax.texts
+        if t.get_gid() == "column"
+    ]
+    assert heads == COLUMN_HEADERS
+    for gid, want in (
+        ("paper_acc", sorted(f"{_paper(m)['from_paper']:.3f}" for m in MODELS)),
+        ("noise_value", sorted(f"{_noise(m):.3f}" for m in MODELS)),
+        ("span", sorted(f"{_span(m):.3f}" for m in MODELS)),
+    ):
+        assert (
+            sorted(t.get_text() for t in ax.texts if t.get_gid() == gid) == want
+        )
+    marked = [t for t in ax.texts if t.get_gid() == "above_noise"]
+    assert len(marked) == sum(_span(m) > _noise(m) for m in MODELS) == 8
+
+
+def test_the_extreme_wordings_are_named_on_their_own_row_centre_line(
     output: registry.FigureOutput,
 ) -> None:
     ax = _strip(output)
-    marked = [t for t in ax.texts if t.get_gid() == "above_noise"]
-    want = sum(_span(m) > _noise(m) for m in MODELS)
-    assert len(marked) == want == 8
-    spans = [t for t in ax.texts if t.get_gid() == "span"]
-    assert len(spans) == len(MODELS)
-    assert sorted(t.get_text() for t in spans) == sorted(
-        f"{_span(m):.3f}" for m in MODELS
-    )
+    named = [t for t in ax.texts if t.get_gid() == "named"]
+    expected = 0
+    for model in MODELS:
+        rows = sorted(
+            (r for r in _rows(model) if r["variant"] != "paper"),
+            key=lambda r: r["from_paper"],
+        )
+        centre = _row_y(ax, model)
+        half = _noise(model) / 2
+        paper_acc = _paper(model)["from_paper"]
+        mine = [
+            t for t in named if t.get_position()[1] == pytest.approx(centre)
+        ]
+        for pick, side in ((rows[0], "right"), (rows[-1], "left")):
+            if abs(pick["from_paper"] - paper_acc) <= half:
+                continue
+            expected += 1
+            (text,) = [t for t in mine if t.get_text() == _table_name(pick)]
+            assert text.get_ha() == side
+            x = text.get_position()[0]
+            if side == "right":
+                assert x < rows[0]["from_paper"]
+            else:
+                assert x > rows[-1]["from_paper"]
+    assert len(named) == expected
 
 
 def test_the_rows_keep_the_roles_apart_in_two_headed_blocks(
@@ -383,7 +483,13 @@ def test_the_rows_keep_the_roles_apart_in_two_headed_blocks(
 def test_each_facet_holds_only_its_role_with_the_paper_direction_at_one(
     output: registry.FigureOutput,
 ) -> None:
+    titles = {
+        "gpt2": "GPT-2",
+        "base": "Qwen3 base",
+        "post": "Qwen3 post-trained",
+    }
     for role, ax in _facets(output).items():
+        assert ax.get_title() == titles[role]
         mine = [m for m in MODELS if _role(m) == role]
         drawn = _gid_lines(ax, "cosine:")
         assert sorted(drawn) == sorted(f"cosine:{m}" for m in mine)
@@ -407,6 +513,43 @@ def test_each_facet_holds_only_its_role_with_the_paper_direction_at_one(
         assert ax.get_ylim() == pytest.approx((0.45, 1.0))
 
 
+def test_each_facet_draws_the_random_direction_as_lines_and_one_chance_line(
+    output: registry.FigureOutput,
+) -> None:
+    for role, ax in _facets(output).items():
+        mine = [m for m in MODELS if _role(m) == role]
+        lines = _gid_lines(ax, "random_line:")
+        assert sorted(lines) == sorted(f"random_line:{m}" for m in mine)
+        for model in mine:
+            ln = lines[f"random_line:{model}"]
+            assert list(ln.get_ydata()) == pytest.approx(
+                [_paper(model)["random"]] * 2
+            )
+            assert list(ln.get_xdata()) == pytest.approx(list(ax.get_xlim()))
+        chance = [ln for ln in ax.get_lines() if ln.get_gid() == "chance"]
+        assert len(chance) == 1
+        assert list(chance[0].get_xdata()) == pytest.approx(list(ax.get_xlim()))
+
+
+def test_the_key_names_the_diamond_the_seed_ticks_and_the_random_direction(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    texts = " ".join(t.get_text() for t in legend.get_texts())
+    assert "paper direction" in texts
+    assert "across seeds" in texts
+    assert "random direction" in texts
+
+
+def test_the_text_is_at_least_the_glossary_floor_and_never_bold(
+    output: registry.FigureOutput,
+) -> None:
+    for t in output.figure.findobj(Text):
+        if t.get_visible() and t.get_text():
+            assert t.get_fontsize() >= paper.MIN_TEXT, t.get_text()
+            assert t.get_fontweight() in ("normal", 400), t.get_text()
+
+
 def test_the_caption_states_the_band_the_conservative_noise_and_the_rank(
     output: registry.FigureOutput,
 ) -> None:
@@ -418,7 +561,20 @@ def test_the_caption_states_the_band_the_conservative_noise_and_the_rank(
     assert "excludes fitting noise" in text
     assert "diamond" in text
     assert "median" in text
+    assert "names as in [[table:wordings]]" in text
+    assert "three lanes" in text
     assert (
         f"{int(n['paper_rank_min'])} to {int(n['paper_rank_max'])} of the 16"
         in output.claim
     )
+
+
+def test_the_random_tick_stays_below_the_names_on_the_centre_line(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _strip(output)
+    for model in MODELS:
+        centre = _row_y(ax, model)
+        tick = _gid_lines(ax, f"random:{model}")[f"random:{model}"]
+        assert min(tick.get_ydata()) >= centre + 0.15
+        assert max(tick.get_ydata()) <= centre + 0.5

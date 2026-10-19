@@ -1,4 +1,4 @@
-"""Figure A4: Wording transfer as a margin over a random direction.
+"""Appendix figure: Wording transfer as a margin over a random direction.
 
 One matrix per checkpoint with a wording run. A cell is the accuracy of the
 sentiment reader fitted on the wording of its row and scored on the wording of
@@ -203,7 +203,8 @@ def build(manifest: Manifest) -> FigureOutput:
         "wording, for every checkpoint with a wording run."
     )
     detail = (
-        f"{sentence} Index numbers refer to Table A6; the purple tick marks "
+        f"{sentence} Index numbers refer to [[table:wordings]]; the purple "
+        "tick marks "
         "the paper's wording and white dots the diagonal, where the fitted "
         "and the scored wording are the same."
     )

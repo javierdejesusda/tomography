@@ -107,7 +107,7 @@ def test_the_caption_quotes_the_minima_or_the_cells_at_or_below_zero(
             )
     else:
         assert f"at or below zero in {int(n['n_below'])} cells" in text
-    assert "Table A6" in text
+    assert "[[table:wordings]]" in text
     assert "purple" in text
     for bad in (EM, EN, "_"):
         assert bad not in text

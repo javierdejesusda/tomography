@@ -16,7 +16,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
-from matplotlib.patheffects import withStroke
 
 from tomography.site import runfiles
 from tomography.site import stats
@@ -30,24 +29,34 @@ HEIGHT = 6.6
 TASK = "sentiment"
 DROPPED = "no_trailing_space"
 FAMILIES = ("frame", "wording", "concept")
-KIND = {
-    "frame": "frame change",
-    "wording": "paraphrase or scaffold",
+LANE = {"frame": -0.34, "wording": 0.0, "concept": 0.34}
+LANE_NAMES = {
+    "frame": "frame",
+    "wording": "paraphrase, scaffold",
     "concept": "concept swap",
 }
-COLOR = {
-    "frame": paper.ENC["popularity"],
-    "wording": paper.ENC["unused"],
-    "concept": paper.ENC["own_probability"],
-}
+LANE_X = 0.86
 CIRCLE = 3.0
 DIAMOND = 5.2
 YLIM = (0.45, 1.0)
-TEXT = 6.5
-JITTER = (-0.2, 0.05, 0.25, -0.1, 0.15)
+XLIM = (0.45, 1.16)
+SPLIT = [2.7, 1.75]
+TEXT = paper.MIN_TEXT
+HEAD = 0.95
+NAME_GAP = 0.012
 ROW_RATIOS = [2.7, 1.0]
-OVERFLOW = 0.86
-COLUMNS = (("paper", 1.03), ("span", 1.18), ("above noise", 1.31))
+COLUMNS = (
+    ("paper", 0.0),
+    ("noise", 0.2),
+    ("span", 0.4),
+    ("rank\nof 16", 0.6),
+    ("above\nnoise", 0.8),
+)
+TITLES = {
+    "gpt2": "GPT-2",
+    "base": "Qwen3 base",
+    "post": "Qwen3 post-trained",
+}
 
 
 def _rows(manifest: Manifest, model: str) -> tuple[list[dict[str, Any]], int]:
@@ -63,14 +72,26 @@ def _rows(manifest: Manifest, model: str) -> tuple[list[dict[str, Any]], int]:
     return table, int(summary["n_eval_pairs"][TASK]["report"])
 
 
-def _name(variant: str) -> str:
-    return variant.replace("concept_swap", "swap").replace("_", " ")
+def _name(row: dict[str, Any]) -> str:
+    """Names a wording as the table of wordings prints it."""
+    base = str(row["kind"]).replace("_", " ")
+    name = row["variant"]
+    if "_" not in name or name == row["kind"]:
+        return base
+    return f"{base} {int(name.rsplit('_', 1)[1]) + 1}"
 
 
 def _rank(table: list[dict[str, Any]]) -> int:
     values = sorted((r["from_paper"] for r in table), reverse=True)
     (row,) = [r for r in table if r["variant"] == "paper"]
     return values.index(row["from_paper"]) + 1
+
+
+def _tick(
+    ax: Axes, name: str, model: str, x: float, y: float, half: float, **kw: Any
+) -> None:
+    (tick,) = ax.plot([x, x], [y - half, y + half], zorder=3, **kw)
+    tick.set_gid(f"{name}:{model}")
 
 
 def _strip_row(
@@ -90,28 +111,30 @@ def _strip_row(
     )
     band.set_gid(f"noise:{model}")
     ax.add_patch(band)
-    for name, x, color, lw, half in (
-        ("random", paper_row["random"], paper.ENC["random_marker"], 1.0, 0.3),
-        ("median", median, paper.INK, 1.0, 0.42),
-    ):
-        (tick,) = ax.plot(
-            [x, x], [y - half, y + half], color=color, lw=lw, zorder=3
-        )
-        tick.set_gid(f"{name}:{model}")
+    _tick(
+        ax,
+        "random",
+        model,
+        paper_row["random"],
+        y + 0.32,
+        0.14,
+        color=paper.ENC["random_marker"],
+        lw=1.0,
+    )
+    _tick(ax, "median", model, median, y, 0.42, color=paper.INK, lw=1.0)
     others = sorted(
         (r for r in table if r["variant"] != "paper"),
         key=lambda r: r["from_paper"],
     )
-    offsets = {r["variant"]: JITTER[i % 5] for i, r in enumerate(others)}
     for family in FAMILIES:
         members = [r for r in others if r["family"] == family]
         (line,) = ax.plot(
             [r["from_paper"] for r in members],
-            [y + offsets[r["variant"]] for r in members],
+            [y + LANE[family]] * len(members),
             ls="none",
             marker=paper.MEASURE_MARKERS["direction"],
             ms=CIRCLE,
-            mfc=COLOR[family],
+            mfc=paper.INK,
             mec=paper.INK,
             mew=0.3,
             zorder=4,
@@ -129,37 +152,41 @@ def _strip_row(
         zorder=6,
     )
     diamond.set_gid(f"paper:{model}")
-    rank = ax.text(
-        centre + 0.016,
-        y,
-        str(_rank(table)),
-        fontsize=TEXT,
-        ha="left",
-        va="center",
-        color=paper.INK,
-        zorder=7,
-    )
-    rank.set_path_effects([withStroke(linewidth=1.8, foreground="white")])
-    rank.set_gid(f"rank:{model}")
-    for pick in (others[-1], others[0]):
+    for pick, align, sign in (
+        (others[-1], "left", 1),
+        (others[0], "right", -1),
+    ):
         x = pick["from_paper"]
         if abs(x - centre) <= noise / 2:
             continue
-        right = x < OVERFLOW and pick is others[-1]
         named = ax.text(
-            x + (0.012 if right else -0.012),
-            y if pick is others[0] or right else y - 0.36,
-            _name(pick["variant"]),
+            x + sign * NAME_GAP,
+            y,
+            _name(pick),
             fontsize=TEXT,
-            ha="left" if right else "right",
+            ha=align,
             va="center",
             color=paper.ENC["secondary_text"],
         )
         named.set_gid("named")
 
 
+def _cell(ax: Axes, gid: str, column: int, y: float, text: str) -> None:
+    label = ax.text(
+        COLUMNS[column][1],
+        y,
+        text,
+        transform=ax.get_yaxis_transform(),
+        fontsize=TEXT,
+        va="center",
+        color=paper.INK,
+    )
+    label.set_gid(gid)
+
+
 def _strip(
     ax: Axes,
+    side: Axes,
     rows: dict[str, float],
     data: dict[str, list[dict[str, Any]]],
     noise: dict[str, float],
@@ -170,45 +197,20 @@ def _strip(
         (paper_row,) = [r for r in table if r["variant"] == "paper"]
         values = [r["from_paper"] for r in table]
         span = max(values) - min(values)
-        for gid, x, text, weight in (
-            (
-                "paper_acc",
-                COLUMNS[0][1],
-                f"{paper_row['from_paper']:.3f}",
-                "normal",
-            ),
-            ("span", COLUMNS[1][1], f"{span:.3f}", "normal"),
-        ):
-            label = ax.text(
-                x,
-                y,
-                text,
-                transform=ax.get_yaxis_transform(),
-                fontsize=TEXT,
-                va="center",
-                color=paper.INK,
-                fontweight=weight,
-            )
-            label.set_gid(gid)
+        _cell(side, "paper_acc", 0, y, f"{paper_row['from_paper']:.3f}")
+        _cell(side, "noise_value", 1, y, f"{noise[model]:.3f}")
+        _cell(side, "span", 2, y, f"{span:.3f}")
+        _cell(side, "rank", 3, y, str(_rank(table)))
         if span > noise[model]:
-            mark = ax.text(
-                COLUMNS[2][1],
-                y,
-                "yes",
-                transform=ax.get_yaxis_transform(),
-                fontsize=TEXT,
-                va="center",
-                color=paper.INK,
-                fontweight="bold",
-            )
-            mark.set_gid("above_noise")
+            _cell(side, "above_noise", 4, y, "yes")
+    first = min(rows.values())
     first_qwen = min(y for m, y in rows.items() if m.startswith("qwen3"))
     for text, y in (
-        ("GPT-2", min(rows.values()) - 0.85),
-        ("Qwen3, base then post-trained", first_qwen - 0.85),
+        ("GPT-2", first - HEAD),
+        ("Qwen3, base then post-trained", first_qwen - HEAD),
     ):
         head = ax.text(
-            0.455,
+            XLIM[0] + 0.005,
             y,
             text,
             fontsize=TEXT,
@@ -217,32 +219,64 @@ def _strip(
             color=paper.ENC["secondary_text"],
         )
         head.set_gid("block")
-    for name, x in COLUMNS:
-        ax.text(
-            x,
-            min(rows.values()) - 0.85,
-            name,
-            transform=ax.get_yaxis_transform(),
+    for family in FAMILIES:
+        lane = ax.text(
+            LANE_X,
+            first + LANE[family],
+            LANE_NAMES[family],
             fontsize=TEXT,
             va="center",
             color=paper.ENC["secondary_text"],
         )
-    ax.set_xlim(*YLIM)
-    shared.unit_axis(ax, "x")
+        lane.set_gid("lane")
+    for name, x in COLUMNS:
+        head = side.text(
+            x,
+            first - HEAD,
+            name,
+            transform=side.get_yaxis_transform(),
+            fontsize=TEXT,
+            va="center",
+            color=paper.ENC["secondary_text"],
+        )
+        head.set_gid("column")
+    ax.set_xlim(*XLIM)
+    ax.set_xticks([0.5, 0.75, 1.0], ["0.5", "0.75", "1"])
+    ax.spines["bottom"].set_bounds(0.5, 1.0)
     ax.set_xlabel("accuracy of the reader fitted on the paper wording")
     ax.set_yticks(list(rows.values()), [paper.display_name(m) for m in rows])
-    ax.set_ylim(max(rows.values()) + 0.7, min(rows.values()) - 1.5)
+    ax.set_ylim(max(rows.values()) + 0.7, first - HEAD - 0.4)
     ax.tick_params(axis="y", length=0)
     ax.spines["left"].set_visible(False)
+    side.tick_params(labelleft=False, left=False)
+    side.axis("off")
 
 
 def _facet(ax: Axes, models: list[str], data: dict[str, Any]) -> None:
-    shared.ref_line(ax, 0.5, "y")
+    ax.set_xlim(0.0, 1.05)
+    ax.set_ylim(*YLIM)
+    (chance,) = ax.plot(
+        ax.get_xlim(),
+        [0.5, 0.5],
+        color=paper.ENC["reference"],
+        ls=paper.LINESTYLES["reference"],
+        lw=paper.REFERENCE_WIDTH,
+        zorder=1,
+    )
+    chance.set_gid("chance")
     for model in models:
         style = shared.model_style(model)
         table = data[model]
         (paper_row,) = [r for r in table if r["variant"] == "paper"]
         others = [r for r in table if r["variant"] != "paper"]
+        (random_line,) = ax.plot(
+            ax.get_xlim(),
+            [paper_row["random"]] * 2,
+            color=paper.ENC["random_marker"],
+            lw=0.6,
+            zorder=2,
+        )
+        random_line.set_gid(f"random_line:{model}")
         (line,) = ax.plot(
             [r["cosine_paper"] for r in others],
             [r["to_paper"] for r in others],
@@ -276,22 +310,14 @@ def _facet(ax: Axes, models: list[str], data: dict[str, Any]) -> None:
             clip_on=False,
             zorder=5,
         )
-        ax.plot(
-            [0.0, 0.03],
-            [paper_row["random"]] * 2,
-            color=paper.ENC["random_marker"],
-            lw=1.2,
-            clip_on=False,
-            zorder=5,
-        )
     ax.set_xlim(0.0, 1.05)
-    ax.set_ylim(*YLIM)
     ax.set_xticks([0.0, 0.5, 1.0], ["0", "0.5", "1"])
     ax.set_yticks([0.5, 0.75, 1.0], ["0.5", "0.75", "1"])
 
 
 def _legend(fig: Figure) -> None:
     ink = paper.INK
+    grey = paper.ENC["random_marker"]
     handles: list[Any] = [
         Line2D(
             [],
@@ -299,13 +325,10 @@ def _legend(fig: Figure) -> None:
             ls="none",
             marker=paper.MEASURE_MARKERS["direction"],
             ms=CIRCLE,
-            mfc=COLOR[f],
+            mfc=ink,
             mec=ink,
             mew=0.3,
-        )
-        for f in FAMILIES
-    ]
-    handles.append(
+        ),
         Line2D(
             [],
             [],
@@ -315,36 +338,32 @@ def _legend(fig: Figure) -> None:
             mfc=paper.ENC["paper"],
             mec=ink,
             mew=0.6,
-        )
-    )
-    handles.append(
-        Line2D([], [], ls="none", marker="|", ms=6, mew=1.0, color=ink)
-    )
-    handles.append(
+        ),
+        Line2D([], [], ls="none", marker="|", ms=6, mew=1.0, color=ink),
+        Line2D([], [], ls="none", marker="|", ms=6, mew=1.0, color=grey),
+        Line2D([], [], color=paper.RANDOM_BAND, lw=5, solid_capstyle="butt"),
         Line2D(
             [],
             [],
             ls="none",
             marker="|",
             ms=6,
-            mew=1.0,
-            color=paper.ENC["random_marker"],
-        )
-    )
-    handles.append(
-        Line2D([], [], color=paper.RANDOM_BAND, lw=5, solid_capstyle="butt")
-    )
+            mew=1.6,
+            color=paper.ENC["qwen3"][1],
+        ),
+    ]
     fig.legend(
         handles,
         [
-            *(KIND[f] for f in FAMILIES),
-            "paper wording (rank beside it)",
-            "median of the 16",
+            "15 other wordings",
+            "paper wording, paper direction",
+            "median of the 16 wordings",
             "random direction",
             "test-pair noise",
+            "agreement across seeds, one tick per checkpoint (b)",
         ],
         loc="outside upper center",
-        ncol=4,
+        ncol=2,
         frameon=False,
         fontsize=TEXT,
         columnspacing=1.0,
@@ -476,26 +495,28 @@ def _detail(numbers: dict[str, float]) -> str:
         "(a) One row per checkpoint, base and post-trained checkpoints "
         "kept apart. Accuracy of the sentiment reader fitted on the paper's "
         "wording when it is scored on each of the 15 other wordings: the 15 "
-        "circles are coloured by kind of change (frame change, paraphrase "
-        "or scaffold, concept swap); the diamond is the paper wording with "
-        "its rank among the 16 wordings beside it; the black tick is the "
-        "median of the 16; the thin grey tick is the random direction; the "
-        "best and the worst wording are named unless they fall inside the "
-        "grey band. The band is centred on the paper wording and its full "
-        "width is the noise expected from test pairs alone; it is "
+        "circles of a row sit in three lanes by kind of change (frame "
+        "change, paraphrase or scaffold, concept swap, top to bottom, named "
+        "in the first row); the diamond is the paper wording; the black "
+        "tick is the median of the 16 wordings; the thin grey tick is the "
+        "random direction; the best and the worst wording are named on the "
+        "row unless they fall inside the grey band, with names as in "
+        "[[table:wordings]]. The band is centred on the paper wording and "
+        "its full width is the noise expected from test pairs alone; it is "
         "conservative, because the wordings share the same test pairs, and "
-        "it excludes fitting noise. The span between the best and the "
-        f"worst wording is {_span_text(numbers)}, against at most "
-        f"{numbers['noise_max']:.3f} expected from test-pair noise alone; "
-        "the right columns give the paper accuracy, the span, and a mark "
-        "where the span exceeds the noise. (b) For each role, each "
-        "direction fitted on another wording, by its cosine with the paper "
-        "direction and its accuracy on the paper wording; the diamond at "
-        "cosine 1 is the paper direction itself, ticks on the x axis mark "
-        "how well the paper direction agrees with itself across seeds, and "
-        "grey ticks on the left the random direction on the paper wording; "
-        "colour darkens with size within a family. Matrices for every pair "
-        "of wordings are in Figure A4 and the wordings in Table A6."
+        "it excludes fitting noise. The right columns give the paper "
+        "accuracy, the noise, the span between the best and the worst "
+        "wording, the rank of the paper wording among the 16 and a mark "
+        f"where the span exceeds the noise; the span is {_span_text(numbers)}"
+        f", against at most {numbers['noise_max']:.3f} expected from "
+        "test-pair noise alone. (b) For each role, each direction fitted on "
+        "another wording, by its cosine with the paper direction and its "
+        "accuracy on the paper wording; the diamond at cosine 1 is the paper "
+        "direction itself, ticks on the x axis mark how well the paper "
+        "direction agrees with itself across seeds, and thin grey lines the "
+        "random direction on the paper wording; colour darkens with size "
+        "within a family. Matrices for every pair of wordings are in "
+        "[[fig:a_wording]]."
     )
 
 
@@ -540,22 +561,24 @@ def build(manifest: Manifest) -> FigureOutput:
     spans = _span_counts(data, noise)
     with paper.paper_style():
         fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
-        grid = fig.add_gridspec(2, 3, height_ratios=ROW_RATIOS)
-        strip = fig.add_subplot(grid[0, :])
+        grid = fig.add_gridspec(2, 1, height_ratios=ROW_RATIOS)
+        top = grid[0].subgridspec(1, 2, width_ratios=SPLIT)
+        bottom = grid[1].subgridspec(1, 3)
+        strip = fig.add_subplot(top[0, 0])
         strip.set_gid("wordings")
-        _strip(strip, rows, data, noise)
+        side = fig.add_subplot(top[0, 1], sharey=strip)
+        side.set_gid("table")
+        _strip(strip, side, rows, data, noise)
         paper.panel_letter(strip, "a")
         facets: list[Axes] = []
         for col, role in enumerate(stats.ROLES):
             ax = fig.add_subplot(
-                grid[1, col], sharey=facets[0] if facets else None
+                bottom[0, col], sharey=facets[0] if facets else None
             )
             ax.set_gid(f"cosine_{role}")
             mine = [m for m in models if stats.role(m) == role]
             _facet(ax, mine, data)
-            ax.set_title(
-                stats.ROLE_NAMES[role], fontsize=paper.TITLE, loc="center"
-            )
+            ax.set_title(TITLES[role], fontsize=8, loc="center")
             if role == "base":
                 ax.set_xlabel("cosine with the paper direction")
             if facets:

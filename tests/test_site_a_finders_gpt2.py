@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import re
 import runpy
 
 import numpy as np
@@ -170,10 +171,10 @@ def test_the_caption_matches_the_plan(output: registry.FigureOutput) -> None:
     assert CAPTION_START in text
     assert "against the random direction of the same run (grey)" in text
     assert "select split chose" in text
-    assert "Table A2" in text
+    assert "[[table:finders_all]]" in text
     assert EM not in text
     assert EN not in text
-    assert "_" not in text
+    assert "_" not in re.sub(r"\[\[[^\]]*\]\]", "", text)
 
 
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:

@@ -311,8 +311,9 @@ DETAIL = (
     "post-trained ones); whiskers are conservative 95 percent intervals for "
     f"the test pairs ({_PAIRS}); the "
     "grey band is the spread that test-pair noise alone gives around the "
-    "random direction. Layer curves of these finders are in Figures A2 and "
-    "A3, all six finders in Table A2."
+    "random direction. Layer curves of these finders are in "
+    "[[fig:a_finders_gpt2]] and [[fig:a_finders_qwen3]], all six finders in "
+    "[[table:finders_all]]."
 )
 
 

@@ -1,10 +1,12 @@
 import math
 from pathlib import Path
 import runpy
+from typing import Any
 
 from matplotlib.collections import LineCollection
 from matplotlib.collections import PolyCollection
 from matplotlib.image import AxesImage
+from matplotlib.text import Text
 import numpy as np
 import pytest
 from scipy import stats as scipy_stats
@@ -405,7 +407,7 @@ def test_the_size_row_has_a_reader_whisker_a_random_tick_and_no_trend_line(
         ]
         assert len(randoms) == len(models(exp))
         assert not [ln for ln in ax.get_lines() if ln.get_gid() == "trend"]
-        assert ax.get_ylim() == pytest.approx((0.45, 1.0))
+        assert ax.get_ylim() == pytest.approx((0.4, 1.0))
 
 
 def test_the_detail_describes_the_curves_the_band_the_onset_and_the_size_row(
@@ -420,3 +422,90 @@ def test_the_detail_describes_the_curves_the_band_the_onset_and_the_size_row(
     assert "no fitted line" in text
     assert "sentiment curves" in text.lower()
     assert "does not include the sampling error" in text
+
+
+def _fig_texts(fig: Any) -> list[Any]:
+    return [t for t in fig.findobj(Text) if t.get_visible() and t.get_text()]
+
+
+def test_the_curve_rows_share_one_quantity_label_and_titled_roles(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    (shared,) = [t for t in fig.texts if t.get_gid() == "curve_ylabel"]
+    assert shared.get_text() == "reader minus random accuracy"
+    weights = set()
+    for role, name in (
+        ("gpt2", "GPT-2"),
+        ("base", "Qwen3 base"),
+        ("post", "Qwen3 post-trained"),
+    ):
+        (ax,) = [
+            a for a in fig.axes if a.get_gid() == f"curve_{role}_sentiment"
+        ]
+        assert ax.get_ylabel() == name
+        assert ax.yaxis.label.get_fontsize() >= 8
+        weights.add(ax.yaxis.label.get_fontweight())
+    assert len(weights) == 1
+
+
+def test_the_key_uses_circles_like_the_data_not_hexagons(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    texts = [t.get_text() for t in legend.get_texts()]
+    assert any("GPT-2 and Qwen3 base" in x for x in texts)
+    assert any("post-trained" in x for x in texts)
+    marks = {h.get_marker() for h in legend.legend_handles}
+    assert "h" not in marks
+    assert "o" in marks
+    fills = {
+        h.get_markerfacecolor() == "white"
+        for h in legend.legend_handles
+        if h.get_marker() == "o"
+    }
+    assert fills == {True, False}
+
+
+def test_every_size_panel_has_one_full_width_chance_line(
+    output: registry.FigureOutput,
+) -> None:
+    for concept in CONCEPTS:
+        (ax,) = [
+            a for a in output.figure.axes if a.get_gid() == f"size_{concept}"
+        ]
+        lines = [ln for ln in ax.get_lines() if ln.get_gid() == "chance"]
+        assert len(lines) == 1
+        assert list(lines[0].get_ydata()) == [0.5, 0.5]
+        assert list(lines[0].get_xdata()) == pytest.approx(list(ax.get_xlim()))
+
+
+def test_the_size_axis_holds_every_whisker_end(
+    output: registry.FigureOutput,
+) -> None:
+    for concept in CONCEPTS:
+        (ax,) = [
+            a for a in output.figure.axes if a.get_gid() == f"size_{concept}"
+        ]
+        low, high = ax.get_ylim()
+        for ln in ax.get_lines():
+            if (ln.get_gid() or "").startswith("whisker:"):
+                assert low <= min(ln.get_ydata())
+                assert max(ln.get_ydata()) <= high
+    (ax,) = [a for a in output.figure.axes if a.get_gid() == "size_truth"]
+    assert ax.get_ylim()[0] <= 0.44
+
+
+def test_the_text_is_at_least_the_glossary_floor_and_never_bold(
+    output: registry.FigureOutput,
+) -> None:
+    for t in _fig_texts(output.figure):
+        assert t.get_fontsize() >= paper.MIN_TEXT, t.get_text()
+        assert t.get_fontweight() in ("normal", 400), t.get_text()
+
+
+def test_the_caption_says_where_the_sentiment_size_dot_is_read(
+    output: registry.FigureOutput,
+) -> None:
+    assert "its own layer" in output.detail
+    assert "for sentiment" in output.detail.lower()
