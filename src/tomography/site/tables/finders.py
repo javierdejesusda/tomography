@@ -1,48 +1,22 @@
-"""Table 3: Direction finders.
+"""Table 3: The paper's finder and logistic regression against random.
 
-The reference cell of each P4 task for the random direction, the paper's PCA
-finder and logistic regression, on every checkpoint with a P4 run. The footer
-adds the M1 steering win rates.
+For each checkpoint and task the random direction's report accuracy, and the
+margin of the paper's PCA finder and of logistic regression over it, each at
+the layer its own select split chose. A star marks a margin whose conservative
+interval for the report pairs excludes zero.
 """
 
-import json
-
 from tomography.site import finders
+from tomography.site import params
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
+from tomography.site.tables import _cells
+from tomography.site.tables import _rows
 from tomography.viz import paper
 
-MARGIN = 0.1
-METHODS = ("random", "pca_diff", "logistic")
-M1_METHODS = ("pca_diff", "mean_diff", "logistic", "random")
 TASK_NAMES = {"sentiment": "Sentiment", "truth": "Truth", "utility": "Utility"}
-
-
-def _text(row: finders.Row) -> str:
-    return f"{row.report:.3f} [{row.lo:.3f}, {row.hi:.3f}]"
-
-
-def _m1_note(manifest: Manifest) -> str:
-    parts = []
-    for model in manifest.models("m1"):
-        run = manifest.run("m1", model)
-        if run is None:
-            continue
-        rows = json.loads((run / "table.json").read_text("utf-8"))["data"][
-            "rows"
-        ]
-        wins = {
-            r[0]: float(r[3])
-            for r in rows
-            if r[1] == "manipulation" and r[2] == "0.3"
-        }
-        values = " / ".join(f"{wins[m]:.3f}" for m in M1_METHODS)
-        parts.append(f"{paper.display_name(model)} {values}")
-    return (
-        "M1 steering win rate on utility at strength 0.3 (paper PCA finder / "
-        "mean difference / logistic regression / random direction), where "
-        "0.5 is no effect: " + "; ".join(parts) + "."
-    )
+HEADERS = ("Random", "PCA of paired differences (paper)", "Logistic regression")
 
 
 def build(manifest: Manifest) -> TableOutput:
@@ -54,58 +28,48 @@ def build(manifest: Manifest) -> TableOutput:
     Returns:
         The table and its caption parts.
     """
-    models = manifest.models("p4")
-    loaded = {m: finders.load(manifest, m) for m in models}
+    models = [m for m in manifest.models("p4") if finders.load(manifest, m)]
     rows: list[list[str]] = []
-    at_least = reads = cells = 0
-    for task in finders.TASKS:
-        for i, model in enumerate(models):
-            found = loaded[model]
-            if found is None:
-                continue
+    starred = 0
+    for model in models:
+        found = finders.load(manifest, model)
+        assert found is not None
+        row = [paper.display_name(model)]
+        for task in finders.TASKS:
             cell = found[task].rows
-            rows.append(
-                [
-                    TASK_NAMES[task] if i == 0 else "",
-                    paper.display_name(model),
-                    *(_text(cell[m]) for m in METHODS),
-                ]
-            )
-            cells += 1
-            at_least += cell["logistic"].report >= cell["pca_diff"].report
-            reads += cell["pca_diff"].report - cell["random"].report > MARGIN
-    numbers = {
-        "cells": float(cells),
-        "logistic_at_least_pca": float(at_least),
-        "pca_above_random": float(reads),
-    }
+            random = cell["random"].report
+            row.append(_cells.num(random))
+            for method in ("pca_diff", "logistic"):
+                d, lo, hi = stats.diff_interval(
+                    cell[method].report, random, params.REPORT_PAIRS[task]
+                )
+                mark = _rows.star(lo, hi)
+                starred += bool(mark)
+                row.append(_cells.num(d) + mark)
+        rows.append(row)
+    sizes = params.REPORT_PAIRS
     claim = (
-        "Logistic regression reads at least as well as the paper's PCA "
-        f"finder in {at_least} of {cells} task and model cells, and the PCA "
-        f"finder is more than {MARGIN:.1f} above a random direction in "
-        f"{reads} of {cells}."
+        "The paper's finder and logistic regression against a random "
+        "direction, on the report split at the layer the select split chose."
     )
     detail = (
-        "Report-split accuracy at the layer each finder chose on its select "
-        "split, with the 95 percent interval over seeds, on the reference "
-        "pairing of each task (label-contrastive for sentiment and truth, "
-        "matched for utility) with centered activations. Random is the "
-        "accuracy of a random direction in the same setting. Base and "
-        "post-trained checkpoints are separate rows; there is no P4 run for "
-        "Qwen3 4B."
+        "Random is the accuracy of the random direction; the two finder "
+        "columns give the finder's accuracy minus it, with an asterisk where "
+        "the conservative 95 percent interval for the test pairs "
+        f"({sizes['sentiment']} sentiment, {sizes['truth']} truth and "
+        f"{sizes['utility']} utility pairs) excludes zero. Sentiment and "
+        "truth use pairs of unrelated inputs with opposite labels; utility "
+        "uses matched scenarios. Every finder and preprocessing is in "
+        "[[table:finders_all]]."
     )
     return TableOutput(
         claim,
         detail,
-        [
-            "Task",
-            "Model",
-            "Random",
-            "PCA of differences (paper)",
-            "Logistic regression",
-        ],
+        ["Model", *HEADERS * len(finders.TASKS)],
         rows,
-        "llrrr",
-        [_m1_note(manifest)],
-        numbers,
+        "l" + "r" * 3 * len(finders.TASKS),
+        [],
+        {"starred": float(starred), **{f"n_{t}": float(sizes[t]) for t in sizes}},
+        groups=tuple((TASK_NAMES[t], 3, False) for t in finders.TASKS),
+        row_groups=_rows.role_groups(models),
     )
