@@ -198,3 +198,15 @@ def test_the_caption_matches_the_plan(output: registry.FigureOutput) -> None:
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.guard_problems(output.figure, appendix=True) == []
     assert checks.problems(output.figure) == []
+
+
+def test_the_axes_are_tight_and_the_end_labels_have_room(
+    output: registry.FigureOutput,
+) -> None:
+    for ax in output.figure.axes:
+        low, high = ax.get_ylim()
+        assert 0.4 <= low < 0.5
+        assert high >= 1.0
+        for t in ax.texts:
+            if t.get_gid() != "letter" and t.get_text() in LABELS.values():
+                assert t.get_position()[0] >= 1.04
