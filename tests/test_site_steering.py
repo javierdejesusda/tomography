@@ -197,18 +197,6 @@ def test_score_means_are_taken_within_a_role_only(
 def test_caption_is_the_template_filled_from_the_files(
     output: registry.FigureOutput,
 ) -> None:
-    unsteered, minus, plus = _role_mean(0.0), _role_mean(-0.1), _role_mean(0.1)
-    sentences = []
-    for role, label in (
-        ("gpt2", "on GPT-2"),
-        ("base", "on Qwen3 base"),
-        ("post", "on post-trained checkpoints"),
-    ):
-        sentences.append(
-            f"from {unsteered[role]:.3f} to {minus[role]:.3f} and "
-            f"{plus[role]:.3f} {label}"
-        )
-    moves = f"{sentences[0]}, {sentences[1]} and {sentences[2]}"
     by_role = _by_role()
     flags01 = {
         m: _fluent(_table(m), 0.1) and _fluent(_table(m), -0.1)
@@ -231,13 +219,10 @@ def test_caption_is_the_template_filled_from_the_files(
         "Steering moves the judged sentiment, less on post-trained checkpoints."
     )
     assert (
-        f"At relative coefficients {MINUS}0.1 and +0.1 the mean score moves "
-        f"{moves}."
+        f"Perplexity ratio, steered to unsteered model, on {n_neutral} "
+        "held-out WikiText-103 passages"
     ) in caption
-    assert (
-        f"Perplexity of {n_neutral} held-out WikiText-103 passages" in caption
-    )
-    assert f"The rule holds at both signs of 0.1 on {held}" in caption
+    assert f"The fluency rule holds at both signs of 0.1 on {held}" in caption
     assert f"and at 0.3 or {MINUS}0.3 on {fails}." in caption
     assert "no random-direction arm" in caption
     assert "range over the 3 steering vectors" in caption
@@ -247,8 +232,8 @@ def test_caption_is_the_template_filled_from_the_files(
 def test_the_perplexity_is_not_called_the_perplexity_of_the_completions(
     output: registry.FigureOutput,
 ) -> None:
-    assert "unsteered text" not in output.detail.split("Perplexity of")[0]
-    assert "not the perplexity of the completions" in output.detail
+    assert "unsteered text" not in output.detail
+    assert "not of the completions" in output.detail
 
 
 def test_negative_numbers_use_the_true_minus(
@@ -301,8 +286,7 @@ def test_the_fluency_rule_in_the_caption_comes_from_the_constants(
     monkeypatch.setattr(steering, "MAX_RATIO", 1.25)
     monkeypatch.setattr(steering, "MIN_DISTINCT", 0.2)
     detail = registry.build_figure(SPEC, Manifest(RESULTS)).detail
-    assert "fails the rule below 0.2" in detail
-    assert "(ratio at most 1.25 and distinct-1 at least 0.2)" in detail
+    assert "(perplexity ratio at most 1.25, distinct-1 at least 0.2)" in detail
 
 
 def test_cross_references_are_tokens_and_not_literal_numbers(
@@ -352,12 +336,10 @@ def test_caption_states_the_moves_rule_and_the_fluency_inputs(
     output: registry.FigureOutput,
 ) -> None:
     moves = stats.per_role_text(output.counts["moves01"])
-    agree = stats.per_role_text(output.counts["judges_agree"])
-    assert f"on {moves}" in output.detail
+    assert f"two sentiment judges: {moves}." in output.detail
     assert "all 3 steering vectors" in output.detail
-    assert "second judge" in output.detail
-    assert f"the two judges agree on {agree}" in output.detail
-    assert "not the perplexity of the completions" in output.detail
+    assert "judge agreement" in output.detail
+    assert "not of the completions" in output.detail
 
 
 ORDER = ("gpt2", "base", "post")
@@ -625,9 +607,16 @@ def test_the_caption_keys_the_drawing_and_has_no_heat_map_panel(
     output: registry.FigureOutput,
 ) -> None:
     detail = output.detail
-    for word in ("filled", "open", "dashed", "bars", "limit"):
+    for word in ("Filled", "open", "dashed", "bars", "ratio"):
         assert word in detail
     for letter in "abc":
         assert f"({letter}" in detail
     assert "(d)" not in detail
     assert "[[table:steering]]" in detail
+
+
+def test_the_caption_has_at_most_200_words_and_leads_with_the_conclusion(
+    output: registry.FigureOutput,
+) -> None:
+    assert len(f"{output.claim} {output.detail}".split()) <= 200
+    assert output.detail.startswith("A checkpoint moves when all 3 steering")

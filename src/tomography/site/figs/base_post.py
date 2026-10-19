@@ -56,23 +56,20 @@ CLAIM = (
     "most intervals include zero, which is not evidence of no change."
 )
 DETAIL = (
+    "Sentiment falls by {low} to {high}, with an interval below zero on "
+    "{below} of 3 sizes; utility, morality, truth, honesty transfer and "
+    "TruthfulQA move by at most {most}, with {excluding}; {falling}. "
     "Post-trained minus base checkpoint for each Qwen3 size (0.6B, 1.7B and "
-    "4B, light to dark, in that order within a row). A marker is filled "
-    "where the interval excludes zero and open where it includes zero. A "
-    "solid interval is the seed-paired 95 percent bootstrap interval that "
-    "[[table:base_post]] stores (utility, morality, truth and honesty "
-    "transfer at 0.6B and 1.7B, 10 seeds); a dashed interval is a "
-    "conservative 95 percent interval for the test items, used for 4B and "
-    "for the measures without seeds. The axes differ between the panels: "
-    "(a) shows the rows whose intervals stay within {narrow}, (b) the rows "
-    "with wider intervals, on {wide}. Sentiment falls by {low} to {high}, "
-    "with an interval below zero on {below} of 3 sizes; utility, morality, "
-    "truth, honesty transfer and TruthfulQA move by at most {most}, with "
-    "{excluding}; {falling}. A post-trained checkpoint also differs from "
-    "its base in prompt format and is distilled from a larger model, so the "
-    "contrast is with this recipe and not with instruction tuning in "
-    "general ([[sec:limitations]]). An interval that includes zero does not "
-    "show that nothing changed."
+    "4B, light to dark). A marker is filled where the interval excludes "
+    "zero, open otherwise. A solid interval is the "
+    "seed-paired 95 percent bootstrap interval that [[table:base_post]] "
+    "stores (10 seeds, 0.6B and 1.7B); a dashed interval is a conservative "
+    "95 percent interval, used for 4B and the measures without seeds. The "
+    "axes differ between the panels: (a) shows the rows whose intervals "
+    "stay within {narrow}, (b) the rows with wider intervals, on {wide}. "
+    "A post-trained checkpoint also differs from its base in prompt format "
+    "and distillation, so the contrast is with this recipe "
+    "([[sec:limitations]])."
 )
 
 
@@ -220,6 +217,8 @@ def _paired_excluding(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:
 
 def _signed(value: float) -> str:
     text = _rows.number(value)
+    if float(text.replace(axes.MINUS, "-")) == 0.0:
+        return text
     return text if text.startswith(axes.MINUS) else f"+{text}"
 
 

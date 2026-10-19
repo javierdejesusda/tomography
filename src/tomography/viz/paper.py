@@ -46,11 +46,12 @@ REFERENCE_WIDTH = 0.5
 TREND_WIDTH = 0.6
 DATA_WIDTH = 1.0
 WHISKER_WIDTH = 0.8
-DATA_WIDTH_RANGE = (1.0, 1.25)
+DATA_WIDTH_RANGE = (1.0, 1.5)
 MIN_TEXT = 7.0
 TEXT_GREY_DARKEST = "#4d4d4d"
 MARKER_SIZE = 4.5
 MARKER_EDGE = 0.9
+DENSE_MARKER_RANGE = (3.0, 3.5)
 RANDOM_GREY = "#888888"
 RANDOM_BAND_ALPHA = 0.35
 TEXT_GREEN = "#009E73"
@@ -171,16 +172,19 @@ ENCODING_RULES = """Encoding rules of every figure (the glossary).
 6. A categorical set that is not a measure (prompt variants, statement sets,
    item sets) uses `CATEGORY_MARKERS`, keyed in its figure, never a measure
    shape; shapes may repeat across figures because each figure keys them.
-7. At most six shapes site-wide (`SHAPES`): circle for the direction or
+7. Six measure shapes site-wide (`SHAPES`): circle for the direction or
    reader under test, x for random, up triangle for a text classifier,
    square for popularity or another supervised baseline, diamond for the
-   paper's finder, plus for the probe. Categories that are not measures go
-   to position, columns, sub-rows or labels. `CATEGORY_MARKERS`,
-   `VARIANT_MARKERS`, `SET_MARKERS`, `ITEM_SET_MARKERS`,
-   `QUESTION_SET_MARKERS` and `PROMPT_MARKERS` are deprecated and stay only
-   until each figure migrates.
+   paper's finder, plus for the probe. Two more are named in other maps: the
+   pentagon of the answer-probability reader (`MEASURE_MARKERS`) and the left
+   triangle of known questions (`QUESTION_SET_MARKERS`). Categories that are
+   not measures go to position, columns, sub-rows or labels, or to the
+   category maps (`CATEGORY_MARKERS`, `VARIANT_MARKERS`, `SET_MARKERS`,
+   `ITEM_SET_MARKERS`, `QUESTION_SET_MARKERS`, `PROMPT_MARKERS`), which each
+   figure keys.
 8. Role: filled markers for GPT-2 and base, open markers in the family
-   colour for post-trained, 4.5 to 5 pt with a 0.9 pt edge; adjacent sizes
+   colour for post-trained, 4.5 pt markers (`MARKER_SIZE`, 3.0 to 3.5 pt in
+   dense panels) with a 0.9 pt edge (`MARKER_EDGE`); adjacent sizes
    in a ramp differ by at least 0.08 lightness and the darkest step stays
    at 1.8:1 or more against black. Where a figure already carries role by
    panel or row block, fill may carry a state (fluent, passes) and the
@@ -190,7 +194,7 @@ ENCODING_RULES = """Encoding rules of every figure (the glossary).
    the family hues and the reserved green and differs along the blue-yellow
    axis, so red-green colour-vision deficiency and greyscale keep the sign).
 10. No text under 7 pt (`MIN_TEXT`) and none lighter than #4d4d4d; data
-   lines 1.0 to 1.25 pt, reference lines 0.5 pt, whiskers 0.8 pt."""
+   lines 1.0 to 1.5 pt, reference lines 0.5 pt, whiskers 0.8 pt."""
 
 
 def _build_enc() -> dict[str, Any]:

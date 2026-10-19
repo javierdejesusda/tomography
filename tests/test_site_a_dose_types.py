@@ -344,3 +344,10 @@ def test_the_marker_keys_are_open_like_the_post_trained_data(
     ]
     assert len(marked) == 2
     assert {h.get_markerfacecolor() for h in marked} == {"white"}
+
+
+def test_the_caption_reads_without_the_main_figure(
+    output: registry.FigureOutput,
+) -> None:
+    assert "Open markers and dashed lines are post-trained" in output.detail
+    assert "The encoding is that of" not in output.detail

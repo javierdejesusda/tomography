@@ -11,11 +11,7 @@ import dataclasses
 
 from matplotlib import ticker
 from matplotlib.axes import Axes
-from matplotlib.colors import LinearSegmentedColormap
-from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
-from matplotlib.patches import Rectangle
-import numpy as np
 
 from tomography.site import store
 from tomography.viz import paper
@@ -24,12 +20,8 @@ GPT2_SIZES = ("gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
 QWEN3_SIZES = ("0.6b", "1.7b", "4b")
 MINUS = chr(0x2212)
 UNIT_TICKS = (0.0, 0.25, 0.5, 0.75, 1.0)
-DODGE = 0.035
 GAP_AFTER_GPT2 = 0.6
 GAP_BETWEEN_PAIRS = 0.25
-SEQUENTIAL = LinearSegmentedColormap.from_list(
-    "paper_blue", ["#f7fbff", paper.SERIES[0]]
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -166,40 +158,6 @@ def layer_curve(
     )
 
 
-def heatmap(
-    ax: Axes, matrix: np.ndarray, vmin: float, vmax: float
-) -> AxesImage:
-    """Draws a matrix on a sequential scale with the diagonal outlined.
-
-    No numbers are written in the cells.
-
-    Args:
-        ax: The axes.
-        matrix: Square matrix of values.
-        vmin: Value of the lightest color.
-        vmax: Value of the darkest color.
-
-    Returns:
-        The image, for a color bar.
-    """
-    image = ax.imshow(
-        matrix, cmap=SEQUENTIAL, vmin=vmin, vmax=vmax, interpolation="nearest"
-    )
-    for i in range(min(matrix.shape)):
-        ax.add_patch(
-            Rectangle(
-                (i - 0.5, i - 0.5),
-                1,
-                1,
-                fill=False,
-                ec=paper.INK,
-                lw=0.6,
-                zorder=3,
-            )
-        )
-    return image
-
-
 def caption(claim: str, detail: str) -> str:
     """Builds a caption: the claim sentence, then what is plotted.
 
@@ -246,21 +204,6 @@ def unit_axis(ax: Axes, which: str) -> None:
     axis = ax.xaxis if which == "x" else ax.yaxis
     axis.set_major_locator(ticker.FixedLocator(UNIT_TICKS))
     axis.set_major_formatter(minus_formatter())
-
-
-def role_dodge(model: str) -> float:
-    """Gives the horizontal shift that separates roles on a size axis.
-
-    Args:
-        model: Checkpoint key.
-
-    Returns:
-        Zero for GPT-2, minus 0.035 decades for a Qwen3 base checkpoint and
-        plus 0.035 decades for a post-trained one.
-    """
-    if not model.startswith("qwen3"):
-        return 0.0
-    return -DODGE if model.endswith("-base") else DODGE
 
 
 def ref_line(ax: Axes, value: float, which: str = "y") -> Line2D:

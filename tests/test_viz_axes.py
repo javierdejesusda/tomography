@@ -76,15 +76,6 @@ def test_layer_curve_draws_a_line_and_an_interval() -> None:
     assert len(ax.collections) == 1
 
 
-def test_heatmap_uses_a_sequential_scale_and_outlines_the_diagonal() -> None:
-    with paper.paper_style():
-        ax = Figure().subplots()
-        image = shared.heatmap(ax, np.full((4, 4), 0.8), vmin=0.5, vmax=1.0)
-    assert image.get_clim() == (0.5, 1.0)
-    assert len(ax.patches) == 4
-    assert not ax.texts
-
-
 def test_caption_joins_claim_and_detail_with_single_spaces() -> None:
     text = shared.caption("Reading rises with depth.", "Lines are means.")
     assert text == "Reading rises with depth. Lines are means."
@@ -131,12 +122,6 @@ def test_minus_formatter_writes_the_true_minus_and_trims_zeros() -> None:
     assert fmt(0.0, 0) == "0"
 
 
-def test_role_dodge_moves_base_and_post_trained_apart_in_decades() -> None:
-    assert shared.role_dodge("gpt2-large") == 0.0
-    assert shared.role_dodge("qwen3-1.7b-base") == -0.035
-    assert shared.role_dodge("qwen3-1.7b") == 0.035
-
-
 def test_ref_line_is_a_thin_dotted_grey_line_behind_the_data() -> None:
     ax = Figure().subplots()
     line = shared.ref_line(ax, 0.5, "y")
@@ -174,3 +159,12 @@ def test_minus_formatter_labels_draw_without_a_missing_glyph_warning() -> None:
             checks.draw(fig)
     labels = [t.get_text() for t in ax.get_xticklabels()]
     assert any(label.startswith(f"${MINUS}$") for label in labels)
+
+
+def test_the_dead_helpers_are_gone() -> None:
+    from tomography.site.figs import _group
+
+    for name in ("heatmap", "SEQUENTIAL", "role_dodge", "DODGE"):
+        assert not hasattr(shared, name), name
+    for name in ("draw_series", "role_handles"):
+        assert not hasattr(_group, name), name

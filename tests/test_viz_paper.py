@@ -344,16 +344,18 @@ def _lum_rgba(rgba: tuple[float, ...]) -> float:
 def test_type_and_line_rules_are_constants() -> None:
     assert paper.MIN_TEXT == 7.0
     assert paper.TEXT_GREY_DARKEST == "#4d4d4d"
-    assert paper.DATA_WIDTH_RANGE == (1.0, 1.25)
+    assert paper.DATA_WIDTH_RANGE == (1.0, 1.5)
+    assert paper.DENSE_MARKER_RANGE == (3.0, 3.5)
     assert paper.REFERENCE_WIDTH == 0.5
     assert paper.WHISKER_WIDTH == 0.8
 
 
-def test_the_glossary_rules_are_stated_and_the_old_maps_are_deprecated() -> (
+def test_the_glossary_rules_are_stated_and_no_map_is_called_deprecated() -> (
     None
 ):
-    for word in ("chance", "grey", "plus", "cividis", "7 pt", "deprecated"):
+    for word in ("chance", "grey", "plus", "cividis", "7 pt"):
         assert word in paper.ENCODING_RULES
+    assert "deprecated" not in paper.ENCODING_RULES
 
 
 def test_rule_four_applies_only_where_role_is_not_given_by_the_layout() -> None:
@@ -367,3 +369,18 @@ def test_rule_four_applies_only_where_role_is_not_given_by_the_layout() -> None:
 
 def test_the_hexagon_role_key_is_gone() -> None:
     assert not hasattr(paper, "ROLE_KEY_MARKER")
+
+
+def test_the_rules_state_the_constants_the_figures_use() -> None:
+    rules = " ".join(paper.ENCODING_RULES.split())
+    low, high = paper.DENSE_MARKER_RANGE
+    assert f"{paper.MARKER_SIZE:g} pt markers" in rules
+    assert f"{low:.1f} to {high:.1f} pt in dense panels" in rules
+    assert f"{paper.MARKER_EDGE:g} pt edge" in rules
+    low, high = paper.DATA_WIDTH_RANGE
+    assert f"data lines {low:.1f} to {high:.1f} pt" in rules
+    assert f"whiskers {paper.WHISKER_WIDTH:g} pt" in rules
+    assert paper.MEASURE_MARKERS["answer_probability"] == "p"
+    assert "pentagon" in rules
+    assert paper.QUESTION_SET_MARKERS["known"] == "<"
+    assert "left triangle" in rules

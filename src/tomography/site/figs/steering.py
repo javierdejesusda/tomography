@@ -58,34 +58,22 @@ GPT2_LABELS = {
 }
 HEADER = ["panel", "model", "x", "series", "value", "lo", "hi"]
 DETAIL = (
-    "(a) Mean judged sentiment of the completions (positive-class "
-    "probability of a sentiment classifier) against the relative "
-    "coefficient, one line per checkpoint (lighter for the smaller "
-    "checkpoint, named at the line end: S, M, L and XL for GPT-2), with "
-    "the range over the 3 steering vectors (shaded band) and the score "
-    "under a positive or negative instruction instead of steering (short "
-    "bars left of the curves, one pair per checkpoint in its colour, in "
-    "the order of the labels; the higher bar is the positive "
-    "instruction). "
-    "A marker is filled where the fluency rule holds (ratio at most "
-    "{max_ratio} and distinct-1 at least {min_distinct}) and open where it "
-    "does not, and a segment that touches an open marker is dashed. At "
-    "relative coefficients {minus}0.1 and +0.1 the mean score moves "
-    "{moves}. A checkpoint counts as moving when all 3 steering vectors "
-    "move the score past the unsteered value at both signs, on the primary "
-    "judge and on a second judge (another sentiment classifier): this holds "
-    "on {moves_count}, and the two judges agree on {agree}. (b) "
-    "Perplexity of {n_neutral} held-out WikiText-103 passages under the "
-    "steered model, as a ratio to the unsteered model on a log axis, with "
-    "its limit of {max_ratio}. (c) Distinct-1 of the completions, which "
-    "fails the rule below {min_distinct} (the second limit). The rule holds "
-    "at both signs of 0.1 on {held}, and at 0.3 or {minus}0.3 on {fails}. "
-    "This run has no random-direction arm; the finder comparison steers with "
-    "three random directions of the same norm ([[fig:teaser]], last row). "
-    "The fluency rule uses the perplexity of neutral text and the distinct-1 "
-    "of the completions, not the perplexity of the completions, which "
-    "[[table:steering]] gives together with the ratios at {minus}0.1 and "
-    "+0.1."
+    "A checkpoint moves when all 3 steering vectors move the score past the "
+    "unsteered value at both signs of 0.1 on two sentiment judges: "
+    "{moves_count}. The fluency rule holds at both signs of 0.1 on {held}, "
+    "and at 0.3 or {minus}0.3 on {fails}. (a) Mean judged sentiment against "
+    "the relative coefficient, one line per checkpoint (lighter for the "
+    "smaller one), with the range over the 3 steering vectors (band) and "
+    "the score under a positive or negative instruction (bars at left). "
+    "Filled markers satisfy the fluency rule "
+    "(perplexity ratio at most {max_ratio}, distinct-1 at least "
+    "{min_distinct}); a segment that touches an open marker is dashed. (b) "
+    "Perplexity ratio, steered to unsteered model, on {n_neutral} held-out "
+    "WikiText-103 passages. (c) Distinct-1 of the "
+    "completions. The rule uses the perplexity of neutral text, not of the "
+    "completions ([[table:steering]] gives the scores, ratios and judge "
+    "agreement). This run has no random-direction arm; the finder "
+    "comparison steers with random directions ([[fig:teaser]])."
 )
 
 
@@ -515,24 +503,11 @@ def build(manifest: Manifest) -> FigureOutput:
         numbers[f"n_{role}"] = float(len(by_role[role]))
         for name in counts:
             numbers[f"{name}_{role}"] = float(counts[name][role].hits)
-    moves = _rows.join_and(
-        [
-            f"from {_rows.number(unsteered[r])} to {_rows.number(minus[r])} "
-            f"and {_rows.number(plus[r])} {where}"
-            for r, where in zip(
-                stats.ROLES,
-                ("on GPT-2", "on Qwen3 base", "on post-trained checkpoints"),
-                strict=True,
-            )
-        ]
-    )
     detail = DETAIL.format(
         minus=axes.MINUS,
         max_ratio=MAX_RATIO,
         min_distinct=MIN_DISTINCT,
-        moves=moves,
         moves_count=stats.per_role_text(counts["moves01"]),
-        agree=stats.per_role_text(counts["judges_agree"]),
         n_neutral=n_neutral,
         held=stats.per_role_text(counts["fluent01"]),
         fails=_hits(flags03),

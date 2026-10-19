@@ -534,3 +534,20 @@ def test_rows_are_grouped_by_section_with_a_label_and_a_separator(
             assert text.get_position()[1] < firsts[text.get_text()] - 0.5
         assert "knowledge" not in [t.get_text() for t in groups]
         assert "steering" not in [t.get_text() for t in groups]
+
+
+def test_the_caption_has_at_most_200_words_and_leads_with_the_conclusion(
+    output: registry.FigureOutput,
+) -> None:
+    assert len(f"{output.claim} {output.detail}".split()) <= 200
+    assert output.detail.startswith("Sentiment falls by")
+
+
+def test_a_value_that_rounds_to_zero_prints_without_a_sign() -> None:
+    from tomography.site.figs import base_post
+
+    minus = chr(0x2212)
+    assert base_post._signed(0.0004) == "0.000"
+    assert base_post._signed(-0.0004) == "0.000"
+    assert base_post._signed(0.05) == "+0.050"
+    assert base_post._signed(-0.05) == f"{minus}0.050"
