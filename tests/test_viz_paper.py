@@ -270,8 +270,15 @@ def test_adjacent_sizes_in_a_ramp_are_clearly_separable() -> None:
         ramp = paper.size_ramp(family, count)
         lights = [_lightness(c) for c in ramp]
         steps = [a - b for a, b in itertools.pairwise(lights)]
-        assert min(steps) >= 0.12, (family, steps)
+        assert min(steps) >= 0.08, (family, steps)
         assert all(_contrast(c) >= 3.0 for c in ramp)
+
+
+def test_the_darkest_step_keeps_its_hue_against_black() -> None:
+    for family, count in (("gpt2", 4), ("qwen3", 3)):
+        darkest = paper.size_ramp(family, count)[-1]
+        assert (_luminance(darkest) + 0.05) / 0.05 >= 1.8, family
+        assert _lightness(darkest) >= 0.18, family
 
 
 def test_markers_are_large_enough_and_edges_survive_print() -> None:

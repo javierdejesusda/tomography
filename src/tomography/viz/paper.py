@@ -41,7 +41,7 @@ LABEL = 8
 TITLE = 9
 LETTER = 9
 
-RAMP_LIGHTNESS = {"gpt2": (0.46, 0.09), "qwen3": (0.40, 0.10)}
+RAMP_LIGHTNESS = {"gpt2": (0.47, 0.195), "qwen3": (0.47, 0.195)}
 REFERENCE_WIDTH = 0.5
 TREND_WIDTH = 0.6
 DATA_WIDTH = 1.0
@@ -178,9 +178,10 @@ ENCODING_RULES = """Encoding rules of every figure (the glossary).
    until each figure migrates.
 8. Role: filled markers for GPT-2 and base, open markers in the family
    colour for post-trained, 4.5 to 5 pt with a 0.9 pt edge; adjacent sizes
-   in a ramp differ by at least 0.12 lightness. Where a figure already
-   carries role by panel or row block, fill may carry a state (fluent,
-   passes) and the figure key says so.
+   in a ramp differ by at least 0.08 lightness and the darkest step stays
+   at 1.8:1 or more against black. Where a figure already carries role by
+   panel or row block, fill may carry a state (fluent, passes) and the
+   figure key says so.
 9. One sequential map (`SEQUENTIAL_CMAP`, cividis, never reversed) and one
    diverging map (`diverging_cmap()`, purple to neutral to ochre: it avoids
    the family hues and the reserved green and differs along the blue-yellow
