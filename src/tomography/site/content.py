@@ -172,8 +172,9 @@ INTRODUCTION = Section(
             "Steering with that direction ([[sec:knowledge_steering]]).",
             "It moves unknown questions more than each of three random "
             "directions on [[count:fig:knowledge_steering.distinguishable]], "
-            "and on some checkpoints moves known questions as much "
-            "([[fig:knowledge_steering]]).",
+            "and known questions move at least as much as unknown ones on "
+            "[[num:fig:knowledge_steering.known_ge_unknown_models]] "
+            "checkpoints ([[fig:knowledge_steering]]).",
         ),
         (
             "Approximate answers ([[sec:approximate]]).",
