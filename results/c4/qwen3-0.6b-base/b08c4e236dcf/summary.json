@@ -1,0 +1,117 @@
+{
+  "_meta": {
+    "experiment": "c4",
+    "config_hash": "b08c4e236dcf",
+    "seed": 0,
+    "git_sha": "bab5b7594b47ca08b11f78032211d205e953fdfb",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA RTX A5000)",
+    "platform": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+    "versions": {
+      "python": "3.12.3",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-18T22:06:59+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "c4",
+      "model": "qwen3-0.6b-base",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 40,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 2,
+      "layers": null,
+      "coeffs": [
+        -0.2,
+        -0.1,
+        -0.05,
+        0.0,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "method": "logistic",
+      "n_seeds": 10,
+      "n_pairs": 128,
+      "n_eval_pairs": 128,
+      "alphas": [
+        -0.5,
+        -0.25,
+        0.0,
+        0.25,
+        0.5
+      ],
+      "n_boot": 2000,
+      "n_random": 3,
+      "lorra_run": "results/lr1/qwen3-0.6b-base/03ba155a9fe7"
+    }
+  },
+  "data": {
+    "layers": [
+      8,
+      11,
+      13,
+      16,
+      19,
+      21,
+      24,
+      26
+    ],
+    "n_select": 644,
+    "n_test": 173,
+    "chance": 0.22803468208092484,
+    "reading_val_accuracy": [
+      0.9987716496744872,
+      0.9996683454121115,
+      0.999717479425132,
+      0.9999385824837244,
+      0.9999140154772143,
+      0.9992629898046923,
+      0.9987347991647215,
+      0.9983171600540475
+    ],
+    "coeff_difference": 0.05,
+    "coeff_reading": [
+      0.0,
+      -0.1,
+      -0.1,
+      -0.1,
+      -0.1,
+      -0.1,
+      -0.1,
+      0.0,
+      -0.1,
+      -0.2
+    ],
+    "coeff_random": [
+      -0.2,
+      0.2,
+      0.2
+    ],
+    "alpha_contrast": 0.25,
+    "reading_test_mean": 0.22196531791907517,
+    "reading_test_min": 0.19653179190751446,
+    "reading_test_max": 0.23699421965317918,
+    "random_test_mean": 0.22736030828516376,
+    "random_test_max": 0.24277456647398843,
+    "lorra_run": "results/lr1/qwen3-0.6b-base/03ba155a9fe7"
+  }
+}
