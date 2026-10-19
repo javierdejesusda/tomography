@@ -394,5 +394,7 @@ def test_the_discussion_names_the_fluency_rule_it_says_steering_breaks() -> (
     text = " ".join(_texts(content.DISCUSSION))
     sentence = text[text.index("Steering behaves") :].split(". ")[0]
     assert "breaks fluency" in sentence
-    assert "perplexity" in sentence and "distinct-1" in sentence
-    assert "1.5" in sentence and "0.15" in sentence
+    assert "perplexity" in sentence
+    assert "distinct-1" in sentence
+    assert "1.5" in sentence
+    assert "0.15" in sentence
