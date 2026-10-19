@@ -164,12 +164,12 @@ def bootstrap_ci(
 
 
 def wilson_ci(
-    successes: int, trials: int, *, alpha: float = 0.05
+    successes: float, trials: int, *, alpha: float = 0.05
 ) -> tuple[float, float]:
     """Computes the Wilson score interval of a success rate.
 
     Args:
-        successes: Number of successes.
+        successes: Number of successes; fractional when ties share credit.
         trials: Number of trials, at least 1.
         alpha: One minus the coverage; 0.05 gives a 95% interval.
 
