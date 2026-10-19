@@ -62,8 +62,8 @@ DETAIL = (
 )
 
 
-class _Run:
-    """One P9d run and what the figure reads from it."""
+class Run:
+    """One P9d run and what the figures read from it."""
 
     def __init__(self, manifest: Manifest, model: str, template: str) -> None:
         path = manifest.run("p9d", model, template=template)
@@ -113,18 +113,26 @@ class _Run:
         return float(np.max(np.abs(mean - origin)))
 
 
-def _runs(manifest: Manifest) -> list[_Run]:
+def load_runs(manifest: Manifest) -> list[Run]:
+    """Reads every P9d run, few-shot before concept for each checkpoint.
+
+    Args:
+        manifest: The run resolver.
+
+    Returns:
+        The runs in checkpoint order.
+    """
     found = []
     for model in manifest.models("p9d"):
         templates = sorted(
             {str(r.config["template"]) for r in manifest.runs("p9d", model)},
             key=lambda t: ("fewshot", "concept").index(t),
         )
-        found.extend(_Run(manifest, model, t) for t in templates)
+        found.extend(Run(manifest, model, t) for t in templates)
     return found
 
 
-def _positions(runs: list[_Run]) -> list[float]:
+def _positions(runs: list[Run]) -> list[float]:
     found: list[float] = []
     for i, run in enumerate(runs):
         if i == 0:
@@ -143,7 +151,7 @@ def _positions(runs: list[_Run]) -> list[float]:
 
 
 def _forest(
-    ax: Axes, runs: list[_Run], letter: str, csv_rows: list[list[Any]]
+    ax: Axes, runs: list[Run], letter: str, csv_rows: list[list[Any]]
 ) -> None:
     positions = _positions(runs)
     low, high = 0.0, 0.0
@@ -203,7 +211,17 @@ def _forest(
     ax.xaxis.set_major_formatter(_rows.tick_formatter())
 
 
-def _dose(ax: Axes, run: _Run, letter: str, csv_rows: list[list[Any]]) -> None:
+def draw_dose(
+    ax: Axes, run: Run, letter: str, csv_rows: list[list[Any]]
+) -> None:
+    """Draws the stored dose curves of one run on a panel.
+
+    Args:
+        ax: The panel.
+        run: The run.
+        letter: Panel letter written to the data rows.
+        csv_rows: Receives one row per curve point.
+    """
     names, arrays = run.curves()
     x = arrays["x"]
     dashed = stats.role(run.model) == "post"
@@ -280,7 +298,7 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    runs = _runs(manifest)
+    runs = load_runs(manifest)
     by_label = {r.label: r for r in runs}
     entropy = [r for r in runs if r.entropy]
     abstention = [r for r in runs if not r.entropy]
@@ -296,7 +314,7 @@ def build(manifest: Manifest) -> FigureOutput:
         ax_a.set_xlabel("entropy shift per unit\nrelative coefficient")
         ax_b.set_xlabel("abstention rate per unit\nrelative coefficient")
         for ax, letter, key in zip(doses, "cde", EXEMPLARS, strict=True):
-            _dose(ax, by_label[" ".join(key)], letter, csv_rows)
+            draw_dose(ax, by_label[" ".join(key)], letter, csv_rows)
             paper.panel_letter(ax, letter)
         paper.panel_letter(ax_a, "a")
         paper.panel_letter(ax_b, "b")
