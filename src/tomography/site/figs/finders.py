@@ -15,8 +15,8 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
+from tomography.site import finders as loader
 from tomography.site import params
-from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
@@ -26,11 +26,6 @@ from tomography.viz import paper
 
 HEIGHT = 3.0
 TASKS = ("sentiment", "truth", "utility")
-PAIRING = {
-    "sentiment": "label_contrastive",
-    "truth": "label_contrastive",
-    "utility": "matched",
-}
 TITLES = {"sentiment": "Sentiment", "truth": "Truth", "utility": "Utility"}
 FINDERS = ("logistic", "pca_diff")
 DODGE = {"logistic": -0.2, "pca_diff": 0.2}
@@ -80,21 +75,12 @@ class Point:
 
 
 def _points(manifest: Manifest, model: str) -> dict[tuple[str, str], Point]:
-    path = manifest.run("p4", model)
-    if path is None:
+    cells = loader.load(manifest, model)
+    if cells is None:
         raise FileNotFoundError(f"results/p4/{model} is missing")
-    table = runfiles.rows(path, "table.json")
 
     def report(task: str, method: str) -> float:
-        (found,) = [
-            r
-            for r in table
-            if r["task"] == task
-            and r["method"] == method
-            and r["pairing"] == PAIRING[task]
-            and r["preprocess"] == "center"
-        ]
-        return float(found["report"])
+        return cells[task].rows[method].report
 
     found: dict[tuple[str, str], Point] = {}
     for task in TASKS:

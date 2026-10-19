@@ -13,6 +13,7 @@ from matplotlib.figure import Figure
 from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
 
+from tomography.site import finders as loader
 from tomography.site import params
 from tomography.site import reading
 from tomography.site import runfiles
@@ -120,25 +121,13 @@ def _neg_cities(manifest: Manifest, model: str) -> Cell | None:
 
 
 def _paper_finder(manifest: Manifest, model: str) -> Cell | None:
-    path = manifest.run("p4", model)
-    if path is None:
+    cells = loader.load(manifest, model)
+    if cells is None:
         return None
-    table = runfiles.rows(path, "table.json")
-
-    def report(method: str) -> float:
-        (found,) = [
-            r
-            for r in table
-            if r["task"] == "sentiment"
-            and r["method"] == method
-            and r["pairing"] == "label_contrastive"
-            and r["preprocess"] == "center"
-        ]
-        return float(found["report"])
-
+    rows = cells["sentiment"].rows
     return _from_scores(
-        report("pca_diff"),
-        report("random"),
+        rows["pca_diff"].report,
+        rows["random"].report,
         params.REPORT_PAIRS["sentiment"],
     )
 

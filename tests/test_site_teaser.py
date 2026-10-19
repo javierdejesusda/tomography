@@ -379,3 +379,12 @@ def test_the_teaser_caption_has_no_signed_zero(
 ) -> None:
     text = f"{built.claim} {built.detail}"
     assert "-0.000" not in text
+
+
+def test_the_pairing_is_read_from_the_run_summary_not_typed_in() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src/tomography/site/figs/teaser.py"
+    ).read_text("utf-8")
+    assert "label_contrastive" not in source
+    assert '"matched"' not in source

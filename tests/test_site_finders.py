@@ -248,3 +248,12 @@ def test_a_rounded_zero_is_printed_without_a_sign(
     assert finders.fmt3(-1.1e-16) == "0.000"
     assert finders.fmt3(-0.0004) == "0.000"
     assert finders.fmt3(-0.025) == "-0.025"
+
+
+def test_the_pairing_is_read_from_the_run_summary_not_typed_in() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src/tomography/site/figs/finders.py"
+    ).read_text("utf-8")
+    assert "label_contrastive" not in source
+    assert '"matched"' not in source
