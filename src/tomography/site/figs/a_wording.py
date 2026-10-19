@@ -150,6 +150,72 @@ def _noise_text(numbers: dict[str, float]) -> str:
     )
 
 
+def _noise_rows(ax: Axes, numbers: dict[str, float]) -> None:
+    """Draws the noise range of each role as a labelled row on the bar.
+
+    Args:
+        ax: The colour bar axes.
+        numbers: The figure numbers with `noise_<role>_min` and `_max`.
+    """
+    present = [r for r in stats.ROLES if f"noise_{r}_min" in numbers]
+    for i, role in enumerate(present):
+        centre = 1 - (i + 0.5) / len(present)
+        lo, hi = numbers[f"noise_{role}_min"], numbers[f"noise_{role}_max"]
+        (span,) = ax.plot(
+            [lo, hi],
+            [centre, centre],
+            color="white",
+            lw=0.6,
+            transform=ax.get_xaxis_transform(),
+        )
+        span.set_gid("noise_range")
+        for edge in (lo, hi):
+            tick = ax.axvline(
+                edge,
+                ymin=centre - 0.14,
+                ymax=centre + 0.14,
+                color="white",
+                lw=1.0,
+            )
+            tick.set_gid("noise_tick")
+        label = ax.annotate(
+            stats.ROLE_NAMES[role],
+            xy=(1.0, centre),
+            xycoords="axes fraction",
+            xytext=(4, 0),
+            textcoords="offset points",
+            ha="left",
+            va="center",
+            fontsize=TEXT,
+            color=paper.ENC["secondary_text"],
+            annotation_clip=False,
+        )
+        label.set_gid("noise_role")
+
+
+def _coincide_text(numbers: dict[str, float]) -> str:
+    """Names the noise edges of different roles that share one value.
+
+    Args:
+        numbers: The figure numbers with `noise_<role>_min` and `_max`.
+
+    Returns:
+        A sentence, or an empty string when no two edges coincide.
+    """
+    edges = [
+        (f"{stats.ROLE_NAMES[r]} {edge}", round(numbers[f"noise_{r}_{k}"], 3))
+        for r in stats.ROLES
+        for k, edge in (("min", "minimum"), ("max", "maximum"))
+        if f"noise_{r}_{k}" in numbers
+    ]
+    parts = []
+    for value in sorted({v for _, v in edges}):
+        names = [n for n, v in edges if v == value]
+        if len(names) > 1:
+            parts.append(f"the {stats.join_and(names)} coincide at {value:.3f}")
+    return "; ".join(parts)
+
+
 def _kinds(manifest: Manifest, model: str, names: list[str]) -> list[str]:
     path = manifest.run("p1", model)
     assert path is not None
@@ -342,26 +408,24 @@ def build(manifest: Manifest) -> FigureOutput:
                 ax.tick_params(labelleft=False)
             if i < len(models) - cols:
                 ax.tick_params(labelbottom=False)
+            else:
+                ax.set_xlabel("scored wording", fontsize=paper.LABEL)
             axes.append(ax)
         assert image is not None
         bar = fig.colorbar(
             image,
             ax=axes,
             location="bottom",
-            fraction=0.025,
+            fraction=0.045,
+            aspect=7,
             pad=0.02,
             shrink=0.6,
         )
         bar.set_ticks(BAR_TICKS)
         bar.ax.tick_params(labelsize=TEXT)
         bar.set_label("accuracy minus random direction", fontsize=TEXT)
-        for role in stats.ROLES:
-            for edge in (
-                numbers[f"noise_{role}_min"],
-                numbers[f"noise_{role}_max"],
-            ):
-                tick = bar.ax.axvline(edge, color="white", lw=1.2, ymax=0.7)
-                tick.set_gid("noise_tick")
+        _noise_rows(bar.ax, numbers)
+        fig.supylabel("fitted wording", fontsize=paper.LABEL)
     claim = (
         "Accuracy of a reader fitted on one wording (row) and scored on "
         "another (column), minus the random direction on the scored "
@@ -381,5 +445,6 @@ def build(manifest: Manifest) -> FigureOutput:
         f"role, {_noise_text(numbers)}, and "
         f"{int(numbers['n_below_noise'])} cells "
         "fall there."
+        + (f" On the bar, {c}." if (c := _coincide_text(numbers)) else "")
     )
     return FigureOutput(fig, claim, detail, numbers, _csv(margins, names))

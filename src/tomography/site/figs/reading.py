@@ -346,8 +346,8 @@ def _detail(
         "direction at the same layer as a grey tick; the sentiment dots "
         "come from the sample-size run at 64 training pairs, read at its "
         "own layer. "
-        "GPT-2 slopes are least-squares over the four sizes against log "
-        "parameters, with a t interval: "
+        "GPT-2 slopes (not drawn) are least-squares over four sizes against "
+        "log parameters, with a t interval: "
         + _slope_text(numbers, names)
         + ". Onsets: [[fig:a_reading_curves]]."
     )

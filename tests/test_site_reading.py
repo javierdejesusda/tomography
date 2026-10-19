@@ -452,3 +452,9 @@ def test_the_key_names_the_grey_connector_to_the_random_direction(
     (legend,) = output.figure.legends
     texts = [t.get_text() for t in legend.get_texts()]
     assert any("gap" in x and "random direction" in x for x in texts)
+
+
+def test_the_caption_says_the_slopes_are_not_drawn(
+    output: registry.FigureOutput,
+) -> None:
+    assert "not drawn" in output.detail

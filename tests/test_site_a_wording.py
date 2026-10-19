@@ -1,5 +1,7 @@
+import itertools
 from pathlib import Path
 import runpy
+from typing import Any
 
 import matplotlib
 import matplotlib.colors
@@ -386,3 +388,97 @@ def test_the_cells_at_or_below_zero_are_named_by_checkpoint(
         assert shown in text
     assert "lowest" in text
     assert f"the {int(output.numbers['n_below'])} cells" in text
+
+
+def _bar(output: registry.FigureOutput) -> Any:
+    output.figure.draw_without_rendering()
+    (bar,) = [ax for ax in output.figure.axes if not ax.images]
+    return bar
+
+
+def _extent(artist: Any, output: registry.FigureOutput) -> Any:
+    return artist.get_window_extent(output.figure.canvas.get_renderer())
+
+
+def test_each_role_has_its_own_labelled_row_of_noise_ticks(
+    output: registry.FigureOutput,
+) -> None:
+    bar = _bar(output)
+    labels = [t for t in bar.texts if t.get_gid() == "noise_role"]
+    assert [t.get_text() for t in labels] == [
+        stats.ROLE_NAMES[r] for r in ROLES
+    ]
+    bar_box = _extent(bar, output)
+    boxes = [_extent(t, output) for t in labels]
+    for text, box in zip(labels, boxes, strict=True):
+        assert text.get_fontsize() >= paper.MIN_TEXT
+        assert box.x0 >= bar_box.x1
+    for first, second in itertools.pairwise(boxes):
+        assert first.y0 >= second.y1 or second.y0 >= first.y1
+    ticks = [ln for ln in bar.get_lines() if ln.get_gid() == "noise_tick"]
+    assert len(ticks) == 2 * len(ROLES)
+    for role, label in zip(ROLES, boxes, strict=True):
+        mine = [_noise(m) for m in MODELS if _role(m) == role]
+        for tick in ticks:
+            if float(tick.get_xdata()[0]) in (
+                pytest.approx(min(mine)),
+                pytest.approx(max(mine)),
+            ):
+                box = _extent(tick, output)
+                centre = (box.y0 + box.y1) / 2
+                assert label.y0 <= centre <= label.y1
+
+
+def test_the_caption_says_which_noise_edges_coincide(
+    output: registry.FigureOutput,
+) -> None:
+    edges = []
+    for role in ROLES:
+        mine = [_noise(m) for m in MODELS if _role(m) == role]
+        edges += [
+            (role, "min", round(min(mine), 3)),
+            (role, "max", round(max(mine), 3)),
+        ]
+    shared = {
+        value
+        for _, _, value in edges
+        if len({r for r, _, v in edges if v == value}) > 1
+    }
+    assert shared
+    for value in shared:
+        assert f"coincide at {value:.3f}" in output.detail
+
+
+def test_the_heatmaps_are_titled_fitted_and_scored_wording(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    fig.draw_without_rendering()
+    matrices = _matrices(output)
+    sup = fig._supylabel
+    assert sup is not None
+    assert sup.get_text() == "fitted wording"
+    assert sup.get_fontsize() >= paper.MIN_TEXT
+    box = _extent(sup, output)
+    others = [
+        _extent(t, output)
+        for ax in matrices
+        for t in ax.texts
+        if t.get_gid() == "kind"
+    ]
+    for ax in matrices:
+        others.append(ax.get_window_extent())
+    for other in others:
+        assert (
+            box.x1 <= other.x0
+            or other.x1 <= box.x0
+            or box.y1 <= other.y0
+            or other.y1 <= box.y0
+        )
+    bottom = matrices[-2:]
+    for ax in bottom:
+        label = ax.xaxis.label
+        assert label.get_text() == "scored wording"
+        assert label.get_fontsize() >= paper.MIN_TEXT
+    for ax in matrices[:-2]:
+        assert ax.xaxis.label.get_text() == ""

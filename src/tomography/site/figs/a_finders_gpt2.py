@@ -212,6 +212,7 @@ def split(
                     ax.set_xlabel("relative depth")
                 else:
                     ax.tick_params(labelbottom=False)
+        fig.supylabel("accuracy", fontsize=paper.LABEL)
         _legend(fig, post_trained)
     claim = (
         "Report-split accuracy at every layer of the paper's finder "

@@ -229,3 +229,21 @@ def test_the_caption_says_post_trained_checkpoints_are_dashed(
     output: registry.FigureOutput,
 ) -> None:
     assert "dashed" in f"{output.claim} {output.detail}"
+
+
+def test_the_rows_share_an_accuracy_title_clear_of_the_model_names(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    fig.draw_without_rendering()
+    title = fig._supylabel
+    assert title is not None
+    assert title.get_text() == "accuracy"
+    assert title.get_fontsize() >= paper.MIN_TEXT
+    renderer = fig.canvas.get_renderer()
+    box = title.get_window_extent(renderer)
+    for ax in fig.axes:
+        label = ax.yaxis.label
+        if label.get_text():
+            other = label.get_window_extent(renderer)
+            assert box.x1 <= other.x0 or other.x1 <= box.x0
