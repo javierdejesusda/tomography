@@ -160,3 +160,23 @@ def test_an_invisible_artist_is_not_a_palette_problem() -> None:
     with paper.paper_style():
         fig.legend([handle], ["x"], frameon=False)
     assert checks.palette_problems(fig) == []
+
+
+def test_a_white_tile_label_is_allowed() -> None:
+    fig = _plain()
+    text = fig.axes[0].text(0.5, 0.5, "0.31", color="#ffffff")
+    text.set_gid(paper.TILE_LABEL)
+    assert checks.palette_problems(fig) == []
+
+
+def test_a_white_axis_label_is_still_a_palette_problem() -> None:
+    fig = _plain()
+    fig.axes[0].set_xlabel("depth", color="#ffffff")
+    assert any("#ffffff" in i for i in checks.palette_problems(fig))
+
+
+def test_an_off_palette_tile_label_is_still_a_problem() -> None:
+    fig = _plain()
+    text = fig.axes[0].text(0.5, 0.5, "0.31", color="#cc0000")
+    text.set_gid(paper.TILE_LABEL)
+    assert any("#cc0000" in i for i in checks.palette_problems(fig))
