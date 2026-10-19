@@ -1,23 +1,25 @@
 import csv
 import io
-import itertools
+import json
+import math
 from pathlib import Path
-import re
+import runpy
 from typing import Any
 
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
-from matplotlib.text import Text
 import pytest
 
 from tomography.site import registry
+from tomography.site import stats
 from tomography.site.manifest import Manifest
+from tomography.viz import checks
 from tomography.viz import paper
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
+_R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 SPEC = "approximate"
 CELL = ("free", "fewshot", "range_last", "greedy")
 TRAIN = "height+wingspan"
+HEIGHT = 3.4
 
 
 @pytest.fixture(scope="module")
@@ -29,226 +31,316 @@ def _rows(output: registry.FigureOutput) -> list[dict[str, str]]:
     return list(csv.DictReader(io.StringIO(output.csv)))
 
 
-def _read(path: Path) -> list[dict[str, str]]:
-    with path.open(newline="", encoding="utf-8") as handle:
-        return list(csv.DictReader(handle))
+def _models(exp: str) -> list[str]:
+    models: list[str] = _R["models"](exp)
+    return models
 
 
-def _run(experiment: str, model: str) -> Path:
-    (run,) = [p for p in (RESULTS / experiment / model).iterdir() if p.is_dir()]
-    return run
-
-
-def _models(experiment: str) -> list[str]:
-    return Manifest(RESULTS).models(experiment)
-
-
-def _behavior() -> dict[str, dict[str, Any]]:
-    found = {}
-    for model in _models("p10a"):
-        run = _run("p10a", model)
-        table = {
-            r["kind"]: r
-            for r in _read(run / "table.csv")
-            if r["family"] == "all"
-            and (r["condition"], r["format"], r["shot_order"], r["decoding"])
-            == CELL
-        }
-        (diag,) = [
-            r
-            for r in _read(run / "diagnostic.csv")
-            if (r["condition"], r["format"], r["shot_order"], r["decoding"])
-            == CELL
-        ]
-        found[model] = {
-            "range": table["range"],
-            "exact": table["exact"],
-            "people": diag,
-        }
-    return found
-
-
-def _duration() -> dict[str, dict[str, Any]]:
-    found = {}
-    for model in _models("p10b"):
-        run = _run("p10b", model)
-        cell = [
-            r
-            for r in _read(run / "transfer.csv")
-            if r["template"] == "concept"
-            and r["train_set"] == TRAIN
-            and r["test_family"] == "duration"
-        ]
-        (text,) = [
-            r
-            for r in _read(run / "baselines.csv")
-            if r["baseline"] == "text_word"
-            and r["train_set"] == TRAIN
-            and r["test_family"] == "duration"
-        ]
-        people = [
-            r
-            for r in _read(run / "people.csv")
-            if r["source"] == "reader"
-            and r["template"] == "concept"
-            and r["train_set"] == TRAIN
-        ]
-        found[model] = {
-            "reader": next(r for r in cell if r["method"] == "logistic"),
-            "random": next(r for r in cell if r["method"] == "random"),
-            "text": text,
-            "position": next(r for r in people if r["method"] == "logistic"),
-            "random_position": next(
-                r for r in people if r["method"] == "random"
-            ),
-        }
-    return found
-
-
-def _has(claim: str, value: float) -> bool:
-    text = str(int(value)) if value == int(value) else f"{value:.3f}"
-    pattern = rf"(?<![\d.]){re.escape(text)}(?![\d])"
-    return re.search(pattern, claim) is not None
-
-
-def test_panel_a_takes_wilson_whiskers_from_the_table_csv(
-    output: registry.FigureOutput,
-) -> None:
-    rows = [r for r in _rows(output) if r["panel"] == "a"]
-    for model, parts in _behavior().items():
-        for series, row, prefix in (
-            ("range_items", parts["range"], "range"),
-            ("exact_items", parts["exact"], "range"),
-            ("people", parts["people"], "people"),
-        ):
-            (got,) = [
-                r for r in rows if r["model"] == model and r["series"] == series
-            ]
-            assert float(got["value"]) == pytest.approx(
-                float(row[f"{prefix}_rate"])
-            )
-            assert float(got["lo"]) == pytest.approx(float(row[f"{prefix}_lo"]))
-            assert float(got["hi"]) == pytest.approx(float(row[f"{prefix}_hi"]))
-
-
-def test_panel_b_is_the_held_out_duration_cell_of_the_concept_template(
-    output: registry.FigureOutput,
-) -> None:
-    rows = [r for r in _rows(output) if r["panel"] == "b"]
-    for model, parts in _duration().items():
-        for series, row in (
-            ("reader", parts["reader"]),
-            ("random", parts["random"]),
-            ("text_word", parts["text"]),
-        ):
-            (got,) = [
-                r for r in rows if r["model"] == model and r["series"] == series
-            ]
-            assert float(got["value"]) == pytest.approx(float(row["auroc"]))
-
-
-def test_panel_c_places_the_people_between_buildings_and_breeds(
-    output: registry.FigureOutput,
-) -> None:
-    rows = [r for r in _rows(output) if r["panel"] == "c"]
-    for model, parts in _duration().items():
-        for series, key in (
-            ("position_reader", "position"),
-            ("position_random", "random_position"),
-        ):
-            (got,) = [
-                r for r in rows if r["model"] == model and r["series"] == series
-            ]
-            assert float(got["value"]) == pytest.approx(
-                float(parts[key]["position"])
-            )
-
-
-def test_claim_numbers_are_recomputed_from_the_files(
-    output: registry.FigureOutput,
-) -> None:
-    behavior = _behavior()
-    qwen = [m for m in behavior if not m.startswith("gpt2")]
-    range_rate = [float(behavior[m]["range"]["range_rate"]) for m in qwen]
-    exact_rate = [float(behavior[m]["exact"]["range_rate"]) for m in qwen]
-    people_rate = [float(behavior[m]["people"]["people_rate"]) for m in qwen]
-    duration = _duration()
-    text = float(next(iter(duration.values()))["text"]["auroc"])
-    expected = {
-        "qwen_models": len(qwen),
-        "range_min": round(100 * min(range_rate)),
-        "range_max": round(100 * max(range_rate)),
-        "exact_max": round(100 * max(exact_rate)),
-        "people_max": round(100 * max(people_rate)),
-        "models": len(duration),
-        "reader_above_text": sum(
-            float(d["reader"]["auroc"]) > float(d["text"]["auroc"])
-            for d in duration.values()
-        ),
-        "text_word": text,
-        "random_high": sum(
-            float(d["random"]["auroc"]) >= 0.9 for d in duration.values()
-        ),
-    }
-    assert output.numbers == pytest.approx(expected)
-    assert all(_has(output.claim, v) for v in expected.values())
-
-
-def test_caption_names_the_intervals_and_the_people_diagnostic(
-    output: registry.FigureOutput,
-) -> None:
-    assert "Wilson" in output.detail
-    assert "resample" in output.detail
-    assert "diagnostic" in output.detail
-
-
-def _boxes(fig: Figure) -> list[tuple[str, tuple[float, float, float, float]]]:
-    canvas = FigureCanvasAgg(fig)
-    with paper.paper_style():
-        canvas.draw()
-    renderer = canvas.get_renderer()
-    unique = {id(t): t for t in fig.findobj(Text)}
+def _read(exp: str, model: str, name: str) -> list[dict[str, Any]]:
     out = []
-    for text in unique.values():
-        if text.get_text() and text.get_visible():
-            box = text.get_window_extent(renderer)
-            out.append((text.get_text(), (box.x0, box.y0, box.x1, box.y1)))
+    for row in _R["csv_rows"](_R["run"](exp, model), name):
+        parsed: dict[str, Any] = {}
+        for key, value in row.items():
+            try:
+                parsed[key] = float(value) if value != "" else None
+            except ValueError:
+                parsed[key] = value
+        out.append(parsed)
     return out
 
 
-def test_figure_is_print_width_with_one_letter_per_panel(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    assert fig.get_size_inches()[0] == paper.FULL_WIDTH
-    letters = [t for t, _ in _boxes(fig) if t.startswith(r"$\mathbf")]
-    assert letters == [rf"$\mathbf{{({c})}}$" for c in "abc"]
+def _behavior(model: str) -> dict[str, dict[str, Any]]:
+    table = {
+        r["kind"]: r
+        for r in _read("p10a", model, "table.csv")
+        if r["family"] == "all"
+        and (r["condition"], r["format"], r["shot_order"], r["decoding"])
+        == CELL
+    }
+    (diag,) = [
+        r
+        for r in _read("p10a", model, "diagnostic.csv")
+        if (r["condition"], r["format"], r["shot_order"], r["decoding"]) == CELL
+    ]
+    return {
+        "range_items": {
+            "value": table["range"]["range_rate"],
+            "lo": table["range"]["range_lo"],
+            "hi": table["range"]["range_hi"],
+        },
+        "exact_items": {
+            "value": table["exact"]["range_rate"],
+            "lo": table["exact"]["range_lo"],
+            "hi": table["exact"]["range_hi"],
+        },
+        "people": {
+            "value": diag["people_rate"],
+            "lo": diag["people_lo"],
+            "hi": diag["people_hi"],
+        },
+    }
 
 
-def test_no_text_overlaps_or_leaves_the_figure(
+def _cell(model: str, method: str) -> dict[str, Any]:
+    (row,) = [
+        r
+        for r in _read("p10b", model, "transfer.csv")
+        if r["template"] == "concept"
+        and r["method"] == method
+        and r["train_set"] == TRAIN
+        and r["test_family"] == "duration"
+    ]
+    return row
+
+
+def _text(model: str) -> dict[str, Any]:
+    (row,) = [
+        r
+        for r in _read("p10b", model, "baselines.csv")
+        if r["baseline"] == "text_word"
+        and r["train_set"] == TRAIN
+        and r["test_family"] == "duration"
+    ]
+    return row
+
+
+def _people(model: str, method: str) -> list[dict[str, Any]]:
+    return [
+        r
+        for r in _read("p10b", model, "people.csv")
+        if r["source"] == "reader"
+        and r["template"] == "concept"
+        and r["method"] == method
+    ]
+
+
+def _position(model: str) -> float:
+    (row,) = [r for r in _people(model, "logistic") if r["train_set"] == TRAIN]
+    return float(row["position"])
+
+
+def _percent(value: float) -> int:
+    return math.floor(value * 100 + 0.5 + 1e-9)
+
+
+def _by_role(flags: dict[str, bool]) -> dict[str, stats.RoleCount]:
+    return stats.per_role(flags)
+
+
+def _qwen(rows: dict[str, float], base: bool) -> list[float]:
+    return [
+        v
+        for m, v in rows.items()
+        if m.startswith("qwen3") and m.endswith("-base") == base
+    ]
+
+
+def test_panel_a_has_range_exact_and_people_for_every_checkpoint(
     output: registry.FigureOutput,
 ) -> None:
-    fig = output.figure
-    boxes = _boxes(fig)
-    width, height = (fig.get_size_inches() * fig.dpi).tolist()
-    for label, (x0, y0, x1, y1) in boxes:
-        assert min(x0, y0) >= -0.5, label
-        assert x1 <= width + 0.5, label
-        assert y1 <= height + 0.5, label
-    for (la, a), (lb, b) in itertools.combinations(boxes, 2):
-        overlap = (
-            a[0] < b[2] - 0.5
-            and b[0] < a[2] - 0.5
-            and a[1] < b[3] - 0.5
-            and b[1] < a[3] - 0.5
+    rows = _rows(output)
+    for model in _models("p10a"):
+        want = _behavior(model)
+        for series, cell in want.items():
+            (got,) = [
+                r
+                for r in rows
+                if r["panel"] == "a"
+                and r["model"] == model
+                and r["series"] == series
+            ]
+            assert float(got["value"]) == pytest.approx(cell["value"])
+            assert float(got["lo"]) == pytest.approx(cell["lo"])
+            assert float(got["hi"]) == pytest.approx(cell["hi"])
+
+
+def test_panel_b_has_reader_random_and_one_text_value(
+    output: registry.FigureOutput,
+) -> None:
+    rows = _rows(output)
+    for model in _models("p10b"):
+        for series, method in (("reader", "logistic"), ("random", "random")):
+            (got,) = [
+                r
+                for r in rows
+                if r["panel"] == "b"
+                and r["model"] == model
+                and r["series"] == series
+            ]
+            cell = _cell(model, method)
+            assert float(got["value"]) == pytest.approx(cell["auroc"])
+            assert float(got["lo"]) == pytest.approx(cell["lo"])
+            assert float(got["hi"]) == pytest.approx(cell["hi"])
+    words = [r for r in rows if r["panel"] == "b" and r["series"] == "words"]
+    assert len(words) == 1
+    text = _text("gpt2")
+    assert float(words[0]["value"]) == pytest.approx(text["auroc"])
+    assert float(words[0]["lo"]) == pytest.approx(text["lo"])
+    assert float(words[0]["hi"]) == pytest.approx(text["hi"])
+    for model in _models("p10b"):
+        assert _text(model)["auroc"] == text["auroc"]
+
+
+def test_panel_c_has_the_reader_position_and_the_random_range(
+    output: registry.FigureOutput,
+) -> None:
+    rows = _rows(output)
+    for model in _models("p10b"):
+        (got,) = [
+            r
+            for r in rows
+            if r["panel"] == "c"
+            and r["model"] == model
+            and r["series"] == "reader"
+        ]
+        assert float(got["value"]) == pytest.approx(_position(model))
+        (band,) = [
+            r
+            for r in rows
+            if r["panel"] == "c"
+            and r["model"] == model
+            and r["series"] == "random"
+        ]
+        draws = _people(model, "random")
+        assert len(draws) == 7
+        assert float(band["lo"]) == pytest.approx(
+            min(r["position"] for r in draws)
         )
-        assert not overlap, (la, lb)
+        assert float(band["hi"]) == pytest.approx(
+            max(r["position"] for r in draws)
+        )
 
 
-def test_svg_and_pdf_bytes_are_the_same_for_the_same_input(
+def test_numbers_are_recomputed_from_the_files(
     output: registry.FigureOutput,
 ) -> None:
-    again = registry.build_figure(SPEC, Manifest(RESULTS))
+    models = _models("p10a")
+    rate = {m: _behavior(m)["range_items"]["value"] for m in models}
+    exact = {m: _behavior(m)["exact_items"]["value"] for m in models}
+    people = {m: _behavior(m)["people"]["value"] for m in models}
+    numbers = output.numbers
+    assert numbers["range_base_min"] == _percent(min(_qwen(rate, True)))
+    assert numbers["range_base_max"] == _percent(max(_qwen(rate, True)))
+    assert numbers["range_post_min"] == _percent(min(_qwen(rate, False)))
+    assert numbers["range_post_max"] == _percent(max(_qwen(rate, False)))
+    qwen = [m for m in models if m.startswith("qwen3")]
+    assert numbers["exact_qwen_max"] == _percent(max(exact[m] for m in qwen))
+    assert numbers["people_qwen_max"] == _percent(max(people[m] for m in qwen))
+    assert numbers["gpt2_range"] == _percent(rate["gpt2"])
+    assert numbers["gpt2_exact"] == _percent(exact["gpt2"])
+    text = _text("gpt2")
+    assert numbers["text_word"] == pytest.approx(text["auroc"])
+    assert numbers["text_lo"] == pytest.approx(text["lo"])
+    assert numbers["text_hi"] == pytest.approx(text["hi"])
+    positions = [_position(m) for m in _models("p10b")]
+    assert numbers["position_min"] == pytest.approx(min(positions))
+    assert numbers["position_max"] == pytest.approx(max(positions))
+    reader = {m: _cell(m, "logistic") for m in _models("p10b")}
+    above = _by_role({m: c["auroc"] > text["auroc"] for m, c in reader.items()})
+    high = _by_role(
+        {m: _cell(m, "random")["auroc"] >= 0.9 for m in _models("p10b")}
+    )
+    for name, want in (("above_text", above), ("random_high", high)):
+        for role in stats.ROLES:
+            assert numbers[f"{name}_{role}"] == want[role].hits
+            got = output.counts[name][role]
+            assert (got.hits, got.total) == (want[role].hits, want[role].total)
+    assert all(
+        c["hi"] >= text["lo"] and c["lo"] <= text["hi"] for c in reader.values()
+    )
+    assert numbers["n_people"] == 120
+    config = json.loads(
+        (_R["run"]("p10b", "gpt2") / "config.json").read_text(encoding="utf-8")
+    )
+    assert numbers["n_random_draws"] == config["n_seeds"]
+
+
+def test_percent_values_match_the_plan_at_this_commit(
+    output: registry.FigureOutput,
+) -> None:
+    numbers = output.numbers
+    assert (numbers["range_base_min"], numbers["range_base_max"]) == (83, 99)
+    assert (numbers["range_post_min"], numbers["range_post_max"]) == (28, 68)
+    assert numbers["exact_qwen_max"] == 15
+    assert numbers["people_qwen_max"] == 0
+
+
+def test_caption_is_the_template_filled_from_the_files(
+    output: registry.FigureOutput,
+) -> None:
+    n = output.numbers
+    caption = f"{output.claim} {output.detail}"
+    assert output.claim == (
+        "Qwen3 writes ranges where the sourced answer is a range, but a "
+        "range reader is matched by text and noise."
+    )
+    assert (
+        f"Qwen3 base checkpoints write a range on {int(n['range_base_min'])} "
+        f"to {int(n['range_base_max'])} percent of the range items and "
+        f"post-trained ones on {int(n['range_post_min'])} to "
+        f"{int(n['range_post_max'])} percent, on at most "
+        f"{int(n['exact_qwen_max'])} percent of the exact items and on none "
+        "of the heights"
+    ) in caption
+    assert (
+        f"GPT-2 small writes a range on {int(n['gpt2_range'])} percent of "
+        f"the range items and {int(n['gpt2_exact'])} percent of the exact "
+        "items"
+    ) in caption
+    above = stats.per_role_text(
+        {r: output.counts["above_text"][r] for r in stats.ROLES}
+    )
+    high = stats.per_role_text(
+        {r: output.counts["random_high"][r] for r in stats.ROLES}
+    )
+    assert f"The reader is above the classifier's value on {above}" in caption
+    assert f"the random control reaches 0.9 on {high}" in caption
+    assert f"{n['text_word']:.3f}" in caption
+    assert f"{n['text_lo']:.3f} to {n['text_hi']:.3f}" in caption
+    assert (
+        f"at {n['position_min']:.3f} to {n['position_max']:.3f}, next to the "
+        "breeds"
+    ) in caption
+
+
+def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
+    fig = output.figure
+    assert tuple(fig.get_size_inches()) == (paper.FULL_WIDTH, HEIGHT)
+    assert checks.guard_problems(fig) == []
+    assert checks.problems(fig) == []
+
+
+def test_patches_are_the_text_band_and_the_random_bars_only(
+    output: registry.FigureOutput,
+) -> None:
+    a, b, c = output.figure.axes
+    assert len(a.patches) == 0
+    assert len(b.patches) == 1
+    assert len(c.patches) == len(_models("p10b"))
+
+
+def test_three_panels_share_rows_and_carry_letters(
+    output: registry.FigureOutput,
+) -> None:
+    a, b, c = output.figure.axes
+    assert a.get_shared_y_axes().joined(a, b)
+    assert a.get_shared_y_axes().joined(a, c)
+    checks.draw(output.figure)
+    letters = [
+        t.get_text()
+        for ax in output.figure.axes
+        for t in ax.texts
+        if t.get_text().startswith(r"$\mathbf")
+    ]
+    assert sorted(letters) == [rf"$\mathbf{{({x})}}$" for x in "abc"]
+    text = f"{output.claim} {output.detail} {output.csv}"
+    assert chr(0x2014) not in text
+    assert chr(0x2013) not in text
+
+
+def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
+    first = registry.build_figure(SPEC, Manifest(RESULTS))
+    second = registry.build_figure(SPEC, Manifest(RESULTS))
     with paper.paper_style():
-        assert paper.svg_bytes(output.figure) == paper.svg_bytes(again.figure)
-        assert paper.pdf_bytes(output.figure) == paper.pdf_bytes(again.figure)
+        assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
+        assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
