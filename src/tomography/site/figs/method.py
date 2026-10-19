@@ -89,14 +89,16 @@ def _pair(ax: Axes) -> None:
             0.155,
             0.30,
             boxstyle="round,pad=0,rounding_size=0.012",
-            fc="white",
+            fill=False,
             ec=INK,
             lw=0.6,
         )
     )
     _text(ax, 0.02, 0.66, "a positive input")
     _text(ax, 0.02, 0.52, "a negative input")
-    ax.plot([0.0875], [0.372], marker="^", ms=3.5, color=INK, clip_on=False)
+    ax.plot(
+        [0.0875], [0.372], marker="^", ms=3.5, mew=0, color=INK, clip_on=False
+    )
     _text(ax, 0.0875, 0.345, "last token", ha="center", color=GREY)
 
 
@@ -104,16 +106,10 @@ def _stream(ax: Axes) -> None:
     _title(ax, 0.205, "residual stream\nat layer $\\ell$")
     for i in range(5):
         y = BODY_TOP - 0.10 * (i + 1)
-        ax.add_patch(
-            Rectangle(
-                (0.225, y),
-                0.07,
-                0.10,
-                fc=INK if i == 4 else "white",
-                ec=INK,
-                lw=0.6,
-            )
-        )
+        cell = (0.225, y), 0.07, 0.10
+        if i == 4:
+            ax.add_patch(Rectangle(*cell, fc=INK, ec="none", lw=0))
+        ax.add_patch(Rectangle(*cell, fill=False, ec=INK, lw=0.6))
     _text(ax, 0.26, 0.20, "last token", ha="center", color=GREY)
 
 
@@ -129,7 +125,15 @@ def _finder(ax: Axes) -> None:
         ),
     )
     for y, color, text in lines:
-        ax.plot([0.405], [y - 0.025], ls="none", marker="s", ms=4, color=color)
+        ax.plot(
+            [0.405],
+            [y - 0.025],
+            ls="none",
+            marker="s",
+            ms=4,
+            mew=0,
+            color=color,
+        )
         _text(ax, 0.42, y, text)
 
 
@@ -146,7 +150,9 @@ def _read(ax: Axes) -> None:
         (1.15, 3.2, INK, INK),
         (0.0, 0.5, paper.ENC["random_band"], paper.ENC["reference"]),
     ):
-        inset.fill_between(x, lift, lift + density(gap), fc=face, lw=0)
+        inset.fill_between(
+            x, lift, lift + density(gap), fc=face, ec="none", lw=0
+        )
         inset.plot(x, lift + density(gap), color=edge, lw=0.6)
         inset.plot(x, lift + density(0.0), color=edge, lw=0.6)
         inset.plot([x[0], x[-1]], [lift, lift], color=edge, lw=0.6)

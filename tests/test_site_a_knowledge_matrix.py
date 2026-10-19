@@ -260,3 +260,16 @@ def test_the_random_ticks_are_thick_and_wide_enough_to_find(
         if t.get_text()
     }
     assert min(sizes) >= paper.MIN_TEXT
+
+
+def test_the_colour_bar_ticks_are_plain_text_at_the_tick_size(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    fig.canvas.draw()
+    (bar,) = [ax for ax in fig.axes if ax.get_label() == "<colorbar>"]
+    labels = [t for t in bar.get_xticklabels() if t.get_text()]
+    assert labels
+    for label in labels:
+        assert "$" not in label.get_text()
+        assert label.get_fontsize() >= paper.TICK

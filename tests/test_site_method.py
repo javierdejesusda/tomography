@@ -158,3 +158,36 @@ def test_each_density_is_stroked_once(output: registry.FigureOutput) -> None:
     assert inset.collections
     for fill in inset.collections:
         assert fill.get_linewidth()[0] == 0
+
+
+def test_no_shape_is_filled_and_stroked_in_one_operation(
+    output: registry.FigureOutput,
+) -> None:
+    from matplotlib.collections import PolyCollection
+
+    fig = output.figure
+    for ax in [*fig.axes, *fig.axes[0].child_axes]:
+        for patch in ax.patches:
+            if isinstance(patch, FancyArrowPatch):
+                continue
+            filled = patch.get_fill() and patch.get_facecolor()[3] > 0
+            stroked = patch.get_linewidth() > 0 and patch.get_edgecolor()[3] > 0
+            assert not (filled and stroked), patch
+        for coll in ax.collections:
+            if isinstance(coll, PolyCollection):
+                assert coll.get_edgecolor().shape[0] == 0 or (
+                    coll.get_edgecolor()[0][3] == 0
+                ), coll
+
+
+def test_the_caret_is_a_filled_triangle_with_no_marker_edge(
+    output: registry.FigureOutput,
+) -> None:
+    carets = [
+        ln
+        for ax in output.figure.axes
+        for ln in ax.lines
+        if ln.get_marker() == "^"
+    ]
+    assert len(carets) == 1
+    assert carets[0].get_markeredgewidth() == 0
