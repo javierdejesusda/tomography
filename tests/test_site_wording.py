@@ -230,3 +230,30 @@ def test_the_opening_sentence_agrees_with_the_per_role_counts(
     assert "same concept" not in first
     assert "large angle" in first
     assert "mostly" in first
+
+
+def test_the_span_above_noise_count_follows_the_right_hand_columns(
+    output: registry.FigureOutput,
+) -> None:
+    flags = {m: _span(m) > _noise(m) for m in MODELS}
+    for role in ROLES:
+        mine = [f for m, f in flags.items() if _role(m) == role]
+        count = output.counts["span_above_noise"][role]
+        assert (count.hits, count.total) == (sum(mine), len(mine))
+        assert output.numbers[f"span_above_noise_{role}"] == sum(mine)
+        assert output.numbers[f"span_above_noise_n_{role}"] == len(mine)
+    assert [output.counts["span_above_noise"][r].hits for r in ROLES] == [
+        2,
+        3,
+        3,
+    ]
+
+
+def test_the_claim_states_the_span_count_and_does_not_overstate_gpt2(
+    output: registry.FigureOutput,
+) -> None:
+    first = output.claim.split(". ")[0]
+    counts = output.counts["span_above_noise"]
+    assert "beyond test-pair noise on most checkpoints" not in first
+    assert stats.per_role_text(counts) in output.claim
+    assert "point comparison" in output.claim
