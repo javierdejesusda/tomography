@@ -178,7 +178,7 @@ def build(manifest: Manifest) -> FigureOutput:
         ax_b.set_xlim(-0.05, 0.25)
         ax_b.xaxis.set_major_locator(ticker.FixedLocator([0.0, 0.1, 0.2]))
         ax_b.xaxis.set_major_formatter(axes.minus_formatter())
-        ax_b.set_xlabel("reader minus best text")
+        ax_b.set_xlabel("reader minus\nbest text")
         ax_b.tick_params(axis="y", length=0, labelleft=False)
         ax_b.spines["left"].set_visible(False)
         ax_b.grid(axis="y", color=paper.RANDOM_BAND, lw=0.4, zorder=0)
@@ -195,7 +195,7 @@ def build(manifest: Manifest) -> FigureOutput:
         ax_c.set_xlim(0.5, 0.85)
         ax_c.xaxis.set_major_locator(ticker.FixedLocator([0.5, 0.8]))
         ax_c.xaxis.set_major_formatter(axes.minus_formatter())
-        ax_c.set_xlabel("random")
+        ax_c.set_xlabel("random\nAUROC")
         ax_c.tick_params(axis="y", length=0, labelleft=False)
         ax_c.spines["left"].set_visible(False)
         ax_c.grid(axis="y", color=paper.RANDOM_BAND, lw=0.4, zorder=0)
@@ -247,8 +247,8 @@ def build(manifest: Manifest) -> FigureOutput:
     count = sum(close)
     claim = (
         "A classifier on the words or characters alone comes within "
-        f"{SLACK:.3f} of the reader on {count} of {len(names)} question "
-        "types."
+        f"{SLACK:.3f} of the reader or beats it on {count} of "
+        f"{len(names)} question types."
     )
     numbers = {
         "close": float(count),
