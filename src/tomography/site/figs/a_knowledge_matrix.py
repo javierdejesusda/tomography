@@ -23,10 +23,10 @@ HEIGHT = 3.6
 SLACK = 0.02
 HEADER = ["panel", "fitted", "tested", "series", "value"]
 SERIES = (
-    ("reader", "o", paper.INK),
-    ("words", "^", paper.ENC["text"]),
-    ("characters", "v", paper.ENC["text"]),
-    ("random", "x", paper.ENC["random_marker"]),
+    ("reader", paper.MEASURE_MARKERS["direction"], paper.INK),
+    ("words", paper.MEASURE_MARKERS["text"][0], paper.ENC["text"]),
+    ("characters", paper.MEASURE_MARKERS["text"][1], paper.ENC["text"]),
+    ("random", paper.MEASURE_MARKERS["random"], paper.ENC["random_marker"]),
 )
 DETAIL = (
     "(a) AUROC of a logistic reader fitted on the question type in the row "
@@ -117,7 +117,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 color=color,
                 markersize=_rows.MARKER_SIZE,
                 markeredgewidth=_rows.EDGE_WIDTH,
-                zorder=3,
+                zorder=5 if series == "reader" else 3,
             )
         ax_b.set_xlim(0.5, 1.02)
         ax_b.xaxis.set_major_locator(ticker.FixedLocator([0.5, 0.75, 1.0]))
