@@ -474,3 +474,22 @@ def test_the_three_panels_share_the_row_limits_with_headroom_for_labels(
     }
     assert len(limits) == 1
     assert next(iter(limits))[1] < -1.0
+
+
+def test_the_truth_reader_label_sits_beside_its_markers(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _ax(output, "levels")
+    (label,) = [
+        t for t in ax.texts if t.get_gid() == "reader_label:truthfulqa_reader"
+    ]
+    dots = [
+        ln
+        for model in MODELS
+        for ln in _gid(ax, f"truthfulqa_reader:{model}")
+        if ln.get_marker() != "None"
+    ]
+    top = min(dots, key=lambda ln: ln.get_ydata()[0])
+    assert label.xy[1] == pytest.approx(top.get_ydata()[0])
+    assert label.get_va() == "center"
+    assert label.xy[0] < top.get_xdata()[0]

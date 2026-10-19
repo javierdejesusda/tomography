@@ -44,6 +44,8 @@ SPLIT = [2.7, 1.75]
 TEXT = paper.MIN_TEXT
 HEAD = 0.95
 BLOCK_EXTRA = 0.5
+TICK = paper.ENC["own_probability"]
+TICK_WIDTH = 1.0
 NAME_GAP = 0.012
 ROW_RATIOS = [2.7, 1.0]
 COLUMNS = (
@@ -140,8 +142,8 @@ def _strip_row(
         paper_row["random"],
         y + 0.32,
         0.14,
-        color=paper.ENC["random_marker"],
-        lw=1.0,
+        color=TICK,
+        lw=TICK_WIDTH,
     )
     _tick(ax, "median", model, median, y, 0.42, color=paper.INK, lw=1.0)
     others = sorted(
@@ -294,8 +296,8 @@ def _facet(ax: Axes, models: list[str], data: dict[str, Any]) -> None:
         (random_line,) = ax.plot(
             ax.get_xlim(),
             [paper_row["random"]] * 2,
-            color=paper.ENC["random_marker"],
-            lw=0.6,
+            color=TICK,
+            lw=TICK_WIDTH,
             zorder=2,
         )
         random_line.set_gid(f"random_line:{model}")
@@ -328,7 +330,7 @@ def _facet(ax: Axes, models: list[str], data: dict[str, Any]) -> None:
             [paper_row["stability"]] * 2,
             [YLIM[0], YLIM[0] + 0.03],
             color=style.color,
-            lw=1.2,
+            lw=TICK_WIDTH,
             clip_on=False,
             zorder=5,
         )
@@ -339,7 +341,6 @@ def _facet(ax: Axes, models: list[str], data: dict[str, Any]) -> None:
 
 def _legend(fig: Figure) -> None:
     ink = paper.INK
-    grey = paper.ENC["random_marker"]
     handles: list[Any] = [
         Line2D(
             [],
@@ -362,7 +363,7 @@ def _legend(fig: Figure) -> None:
             mew=0.6,
         ),
         Line2D([], [], ls="none", marker="|", ms=6, mew=1.0, color=ink),
-        Line2D([], [], ls="none", marker="|", ms=6, mew=1.0, color=grey),
+        Line2D([], [], ls="none", marker="|", ms=6, mew=TICK_WIDTH, color=TICK),
         Line2D([], [], color=paper.RANDOM_BAND, lw=5, solid_capstyle="butt"),
         Line2D(
             [],
@@ -370,7 +371,7 @@ def _legend(fig: Figure) -> None:
             ls="none",
             marker="|",
             ms=6,
-            mew=1.6,
+            mew=TICK_WIDTH,
             color=paper.ENC["qwen3"][1],
         ),
     ]

@@ -260,13 +260,14 @@ def _panel_levels(
     top = rows[top_model]
     for name, (_, _, dodge) in READERS.items():
         cell = data[top_model].reads[name]
+        beside = name == "truthfulqa_reader"
         note = ax.annotate(
             READER_NAMES[name],
-            xy=(cell.value, top + dodge),
-            xytext=(0, 4),
+            xy=(cell.lo if beside else cell.value, top + dodge),
+            xytext=(-3, 0) if beside else (0, -4),
             textcoords="offset points",
-            ha="center",
-            va="bottom",
+            ha="right" if beside else "center",
+            va="center" if beside else "top",
             fontsize=TEXT,
             color=paper.ENC["secondary_text"],
         )

@@ -21,6 +21,7 @@ run = _RESULTS["run"]
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 MODELS = models("p1")
+TICK_WIDTH = 1.0
 ROLES = ("gpt2", "base", "post")
 DROPPED = "no_trailing_space"
 
@@ -595,3 +596,31 @@ def test_the_qwen3_heading_sits_clear_of_the_last_gpt2_row(
         if label.get_text().startswith("GPT-2")
     )
     assert head.get_position()[1] - last_gpt2 >= 1.0
+
+
+def test_the_random_marks_and_seed_ticks_are_dark_grey_and_stay_solid(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _strip(output)
+    for model in MODELS:
+        tick = _gid_lines(ax, f"random:{model}")[f"random:{model}"]
+        assert tick.get_color() == "#6a6a6a"
+        assert tick.get_linewidth() == TICK_WIDTH
+    for facet in _facets(output).values():
+        for line in _gid_lines(facet, "random_line:").values():
+            assert line.get_color() == "#6a6a6a"
+            assert line.get_linewidth() == TICK_WIDTH
+    (legend,) = output.figure.legends
+    (random,) = [
+        h
+        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
+        if t.get_text().startswith("random direction")
+    ]
+    assert random.get_color() == "#6a6a6a"
+    assert random.get_markeredgewidth() == TICK_WIDTH
+    (seeds,) = [
+        h
+        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
+        if t.get_text().startswith("agreement across seeds")
+    ]
+    assert seeds.get_markeredgewidth() == TICK_WIDTH
