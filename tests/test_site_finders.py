@@ -257,3 +257,29 @@ def test_the_pairing_is_read_from_the_run_summary_not_typed_in() -> None:
     ).read_text("utf-8")
     assert "label_contrastive" not in source
     assert '"matched"' not in source
+
+
+def test_the_interval_counts_for_truth_and_utility_are_per_role(
+    output: registry.FigureOutput,
+) -> None:
+    for task in ("truth", "utility"):
+        expected = _count(task, "pca_diff", lambda c: c[1] > 0)
+        for role, (hits, total) in expected.items():
+            count = output.counts[f"pca_{task}"][role]
+            assert (count.hits, count.total) == (hits, total)
+            assert output.numbers[f"pca_{task}_above_{role}"] == hits
+    truth = _count("truth", "pca_diff", lambda c: c[1] > 0)
+    assert truth == {"gpt2": (0, 4), "base": (2, 3), "post": (2, 3)}
+    utility = _count("utility", "pca_diff", lambda c: c[1] > 0)
+    assert utility["base"] == (3, 3) and utility["post"] == (3, 3)
+
+
+def test_the_claim_describes_the_pairings_without_a_causal_title(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.claim
+    assert "needs matched pairs" not in text
+    assert "confounded" in text
+    assert "does not show that matching" in text
+    assert "by point estimate only" in text
+    assert "for truth on 0 of 4 GPT-2, 2 of 3 Qwen3 base" in text
