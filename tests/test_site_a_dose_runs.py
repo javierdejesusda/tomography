@@ -290,3 +290,26 @@ def test_the_legend_is_at_the_top_and_inner_y_tick_labels_are_hidden(
             assert not any(
                 tick.label1.get_visible() for tick in ax.yaxis.get_major_ticks()
             )
+
+
+def test_the_direction_interval_is_tinted_and_named_in_the_key(
+    output: registry.FigureOutput,
+) -> None:
+    from matplotlib.collections import PolyCollection
+    import matplotlib.colors as mcolors
+
+    grey = mcolors.to_rgb(paper.RANDOM_GREY)
+    tinted = 0
+    for ax in output.figure.axes:
+        for band in ax.collections:
+            if not isinstance(band, PolyCollection):
+                continue
+            color = np.asarray(band.get_facecolor())[0][:3]
+            if np.allclose(color, mcolors.to_rgb(paper.RANDOM_BAND)):
+                continue
+            assert color.max() - color.min() > 0.1
+            assert not np.allclose(color, grey, atol=0.05)
+            tinted += 1
+    assert tinted == 24
+    labels = [t.get_text() for t in output.figure.legends[0].get_texts()]
+    assert "interval of the direction" in labels

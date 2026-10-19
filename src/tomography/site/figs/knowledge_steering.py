@@ -351,6 +351,7 @@ def draw_curves(
     curves: tuple[list[str], dict[str, np.ndarray]],
     letter: str,
     csv_rows: list[list[Any]],
+    tint: str | None = None,
 ) -> None:
     """Draws known, unknown and pooled random dose curves on a panel.
 
@@ -361,6 +362,7 @@ def draw_curves(
         curves: Series names and the stored arrays `x`, `mean`, `lo`, `hi`.
         letter: Panel letter written to the data rows.
         csv_rows: Receives one row per curve point.
+        tint: Colour of the direction intervals; they are a pale ink when None.
     """
     names, arrays = curves
     x = arrays["x"]
@@ -392,8 +394,8 @@ def draw_curves(
             x,
             arrays["lo"][k],
             arrays["hi"][k],
-            color=paper.INK,
-            alpha=0.15,
+            color=tint or paper.INK,
+            alpha=0.2 if tint else 0.15,
             lw=0,
             zorder=2,
         )
@@ -432,7 +434,11 @@ def draw_curves(
 
 
 def draw_dose(
-    ax: Axes, run: Run, letter: str, csv_rows: list[list[Any]]
+    ax: Axes,
+    run: Run,
+    letter: str,
+    csv_rows: list[list[Any]],
+    tint: str | None = None,
 ) -> None:
     """Draws the stored dose curves of one run on a panel.
 
@@ -441,8 +447,9 @@ def draw_dose(
         run: The run.
         letter: Panel letter written to the data rows.
         csv_rows: Receives one row per curve point.
+        tint: Colour of the direction intervals; a pale ink when None.
     """
-    draw_curves(ax, run.model, run.label, run.curves(), letter, csv_rows)
+    draw_curves(ax, run.model, run.label, run.curves(), letter, csv_rows, tint)
     ax.set_ylabel("entropy shift" if run.entropy else "abstention rate")
     if run.entropy:
         axes.ref_line(ax, 0.0)

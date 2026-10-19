@@ -637,4 +637,5 @@ def test_the_key_and_the_limit_labels_read_at_the_tick_size(
             for text in ax.texts
             if text.get_text().startswith("limit")
         ]
-    assert sizes and min(sizes) >= paper.TICK
+    assert sizes
+    assert min(sizes) >= paper.TICK

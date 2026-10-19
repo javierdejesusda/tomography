@@ -9,6 +9,7 @@ from typing import Any
 
 from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 from tomography.site import stats
 from tomography.site.figs import _group
@@ -16,6 +17,7 @@ from tomography.site.figs import _rows
 from tomography.site.figs import knowledge_steering
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
+from tomography.viz import axes
 from tomography.viz import paper
 
 HEIGHT = 5.6
@@ -91,7 +93,9 @@ def build(manifest: Manifest) -> FigureOutput:
         flat = [ax for line in grid for ax in line]
         for i, (ax, run) in enumerate(zip(flat, runs, strict=False)):
             letter = chr(ord("a") + i)
-            knowledge_steering.draw_dose(ax, run, letter, csv_rows)
+            knowledge_steering.draw_dose(
+                ax, run, letter, csv_rows, axes.model_style(run.model).color
+            )
             ax.set_ylim(*limits[run.entropy])
             ax.set_title(
                 f"{run.beats} of 3",
@@ -121,11 +125,17 @@ def build(manifest: Manifest) -> FigureOutput:
                     color=paper.ENC["random_marker"],
                     lw=paper.DATA_WIDTH,
                 ),
+                Patch(
+                    facecolor=axes.model_style("qwen3-1.7b").color,
+                    alpha=0.2,
+                    lw=0,
+                ),
                 Line2D([], [], ls="none"),
             ],
             labels=[
                 *keys[1],
                 "mean of 3 random directions",
+                "interval of the direction",
                 A7_TAG_KEY,
             ],
             handler_map={tuple: HandlerTuple(ndivide=None, pad=0.1)},
