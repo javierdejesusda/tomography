@@ -369,6 +369,7 @@ def build(manifest: Manifest) -> FigureOutput:
         )
         bar.outline.set_visible(False)
         _legend(fig, models)
+        _rows.freeze_layout(fig)
 
     def mean(coeff: float) -> dict[str, float]:
         return {

@@ -357,3 +357,16 @@ def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
     with paper.paper_style():
         assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
+
+
+def test_the_layout_is_frozen_so_two_builds_place_every_axes_alike() -> None:
+    first = registry.build_figure(SPEC, Manifest(RESULTS)).figure
+    second = registry.build_figure(SPEC, Manifest(RESULTS)).figure
+    for fig in (first, second):
+        for ax in fig.axes:
+            assert all(
+                abs(v - round(v, 6)) < 1e-12 for v in ax.get_position().bounds
+            )
+    assert [ax.get_position().bounds for ax in first.axes] == [
+        ax.get_position().bounds for ax in second.axes
+    ]

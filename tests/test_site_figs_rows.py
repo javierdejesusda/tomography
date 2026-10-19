@@ -105,3 +105,18 @@ def test_runs_text_names_the_roles_and_skips_empty_ones() -> None:
     assert _rows.runs_text(counts) == (
         "3 of 3 GPT-2 runs and 3 of 6 post-trained runs"
     )
+
+
+def test_freeze_layout_pins_the_axes_to_six_decimals_and_drops_the_solver() -> (
+    None
+):
+    fig = _rows.new_figure(2.0)
+    grid = fig.add_gridspec(1, 2, width_ratios=[1.37, 2.11])
+    for cell in grid:
+        fig.add_subplot(cell).set_title("title")
+    _rows.freeze_layout(fig)
+    assert not isinstance(fig.get_layout_engine(), ConstrainedLayoutEngine)
+    for ax in fig.axes:
+        bounds = ax.get_position().bounds
+        assert all(abs(v - round(v, 6)) < 1e-12 for v in bounds)
+        assert min(bounds[2:]) > 0.1

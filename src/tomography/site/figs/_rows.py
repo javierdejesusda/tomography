@@ -38,6 +38,25 @@ def new_figure(height: float) -> Figure:
     return fig
 
 
+def freeze_layout(fig: Figure) -> None:
+    """Pins every axes where constrained layout put it, to six decimals.
+
+    Nested grids can differ in the last bits between two builds, and the ids
+    of the SVG clip paths are hashed from those bits, so two builds of one
+    figure would write different bytes.
+
+    Args:
+        fig: A figure with constrained layout.
+    """
+    fig.draw_without_rendering()
+    for ax in fig.axes:
+        x0, y0, width, height = ax.get_position().bounds
+        ax.set_position(
+            (round(x0, 6), round(y0, 6), round(width, 6), round(height, 6))
+        )
+    fig.set_layout_engine("none")
+
+
 def fill(model: str, color: str) -> dict[str, Any]:
     """Gives the marker face and edge for a checkpoint.
 
