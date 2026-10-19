@@ -46,36 +46,36 @@ EXEMPLARS = (
     ("qwen3-4b", "fewshot"),
 )
 CLAIM = (
-    "Adding the knowledge direction moves unknown questions more than "
-    "random directions do on GPT-2 and base checkpoints, and not "
-    "consistently on post-trained ones."
+    "Adding the knowledge direction moves unknown questions more than each "
+    "of 3 random directions of the same norm on {distinguishable}, yet "
+    "known questions move at least as much as unknown ones on {held}."
 )
 DETAIL = (
-    "On known questions the direction moves the outcome at least as much as on "
-    "unknown questions for {held}, by the largest shift of the mean dose "
-    "curve, which a slope does not show. (a) Slope of the next-token entropy "
-    "shift per unit relative coefficient on unknown questions (circle) and "
-    "known questions (left triangle), against 3 random directions of the "
-    "same norm on unknown "
-    "questions (grey), with 95 percent intervals that resample the "
-    "questions. (b) The same for the abstention rate of post-trained "
-    "checkpoints, with a few-shot and a concept prompt. Rows run in "
-    "checkpoint size within each group; GPT-2 small has no run. The "
-    "direction moves "
-    "unknown questions more than each of the 3 random directions on "
-    "{distinguishable}, and more than known questions on {selective}, by "
-    "the gap between the absolute mean slopes over the coefficient grid, "
-    "whatever the sign, counted as above when the 95 percent interval of that "
-    "gap lies above zero; with 3 random directions a direction passes by "
-    "chance with probability at most 1/4. The outcome is the entropy shift "
-    "for GPT-2 and base checkpoints and the abstention rate for "
-    "post-trained ones. (c to e) Dose curves "
-    "of GPT-2 XL, Qwen3-4B-Base and Qwen3-4B (few-shot prompt) on unknown "
-    "and known questions, against the mean over the 3 random directions on "
-    "unknown questions with its 95 percent interval that resamples the "
-    "questions (grey band). "
-    "Every run is in [[fig:a_dose_runs]], and the post-trained runs by "
-    "question type in [[fig:a_dose_types]]."
+    "(a) Slope of the next-token entropy shift per unit relative "
+    "coefficient on unknown questions (circle) and known questions (left "
+    "triangle) of GPT-2 and base checkpoints, against 3 random directions "
+    "on unknown questions (grey crosses), with 95 percent "
+    "intervals that resample the questions. (b) The same for the abstention "
+    "rate of post-trained checkpoints, with a few-shot and a concept "
+    'prompt; the two outcomes differ and are never pooled. "above n of '
+    '3" counts the random directions that the direction beats. (c to e) '
+    "Dose curves of GPT-2 XL, Qwen3-4B-Base and Qwen3-4B (few-shot prompt) "
+    "against the mean over the 3 random directions on unknown questions "
+    "with its 95 percent interval that resamples the questions (grey "
+    "band) and the direction's interval (tint). Rows run by size; GPT-2 "
+    "small has no run. All runs: [[fig:a_dose_runs]]; by question type: "
+    "[[fig:a_dose_types]]."
+)
+APPENDIX_DETAIL = (
+    "The direction moves unknown questions more than known questions on "
+    "[[runs:fig:knowledge_steering.selective]], by the gap between the "
+    "absolute mean slopes over the coefficient grid, whatever the sign. A "
+    "direction counts as above a random direction when the 95 percent "
+    "interval of that gap lies above zero; with 3 random directions a "
+    "direction passes by chance with probability at most 1/4. By the "
+    "largest shift of the mean dose curve, which a slope does not show, "
+    "known questions move at least as much as unknown ones on "
+    "[[runs:fig:knowledge_steering.known_ge_unknown]]."
 )
 
 
@@ -489,7 +489,9 @@ def build(manifest: Manifest) -> FigureOutput:
         ax_b.set_xlabel("abstention rate per unit\nrelative coefficient")
         for ax, letter, key in zip(doses, "cde", EXEMPLARS, strict=True):
             run = by_label[" ".join(key)]
-            draw_dose(ax, run, letter, csv_rows)
+            draw_dose(
+                ax, run, letter, csv_rows, axes.model_style(run.model).color
+            )
             message = (
                 "known moves at least as much"
                 if run in held
@@ -542,15 +544,14 @@ def build(manifest: Manifest) -> FigureOutput:
     for role in stats.ROLES:
         numbers[f"distinguishable_{role}"] = float(distinguishable[role].hits)
         numbers[f"selective_{role}"] = float(selective[role].hits)
-    detail = DETAIL.format(
+    claim = CLAIM.format(
         distinguishable=_rows.runs_text(distinguishable),
-        selective=_rows.runs_text(selective),
-        held=_rows.join_and([r.name for r in held]),
+        held=_rows.runs_text(known_ge_unknown),
     )
     return FigureOutput(
         fig,
-        CLAIM,
-        detail,
+        claim,
+        DETAIL,
         numbers,
         _group.csv_text(HEADER, csv_rows),
         {
