@@ -21,21 +21,23 @@ DASHES = (chr(0x2014), chr(0x2013))
 TOKEN = re.compile(r"\[\[(.+?)\]\]")
 RUN_CODE = re.compile(r"\b[RPMCA][0-9]+[a-d]?\b")
 GENERIC = (
-    r"20\d\d",
-    r"\d\.\dB",
-    r"\dB\b",
+    r"(?<![\d.])20\d\d(?!\d)",
+    r"(?<![\d.])\d\.\dB\b",
+    r"(?<![\d.])\dB\b",
     r"GPT-2",
     r"Qwen3",
     r"LLaMA-2",
     r"SST-2",
     r"WikiText-103",
-    r"0\.15",
-    r"0\.5",
-    r"0\.1",
-    r"0\.3",
-    r"1\.5",
-    r"64",
-    r"10",
+    r"distinct-1",
+    r"(?<![\d.])±0\.[13](?!\d)",
+    r"coefficient 0\.1(?!\d)",
+    r"exceeds 0\.1(?!\d)",
+    r"(?:within|above) 1\.5 times",
+    r"below 0\.15(?!\d)",
+    r"below 0\.5(?!\d)",
+    r"\ball 10\b",
+    r"none of the 10\b",
 )
 
 
@@ -214,6 +216,10 @@ def test_content_numbers_have_no_stray_digits() -> None:
 def test_the_numbers_test_would_catch_a_pasted_value() -> None:
     assert _digits_left("it reads 0.847 on [[num:fig:a.b]]") != []
     assert _digits_left("GPT-2 at relative coefficient 0.1 in 2023") == []
+    assert _digits_left("it holds on 10 of 10 checkpoints") != []
+    assert _digits_left("a margin of 0.5 on the reader") != []
+    assert _digits_left("a margin of 0.55 below 0.5") != []
+    assert _digits_left("all 10 checkpoints, none of the 10, below 0.5") == []
 
 
 def test_no_dashes_backticks_or_underscores_in_prose() -> None:
@@ -334,6 +340,19 @@ def test_content_design_facts() -> None:
 
 def test_the_design_digits_of_method_limitations_and_reproducibility() -> None:
     facts = (
+        r"scores 0\.5(?!\d)",
+        r"(?:above|over) 0\.5(?!\d)",
+        r"fits 10 readers",
+        r"(?:draw of|at) 64 training pairs",
+        r"(?:each of|across|on) the 10 checkpoints",
+        r"across 10 checkpoints",
+        r"over the 10 readers",
+        r"below about 0\.15(?!\d)",
+        r"coefficients \u22120\.3 to 0\.3",
+        r"at most 1\.5 times",
+        r"at least 0\.15(?!\d)",
+        r"[+\u2212]0\.3(?!\d)",
+        r"not 0\.5(?!\d)",
         r"256",
         r"214",
         r"53",
@@ -367,3 +386,13 @@ def test_sections_are_frozen_dataclasses() -> None:
     assert dataclasses.is_dataclass(content.Section)
     with pytest.raises(dataclasses.FrozenInstanceError):
         content.INTRODUCTION.title = "x"  # type: ignore[misc]
+
+
+def test_the_discussion_names_the_fluency_rule_it_says_steering_breaks() -> (
+    None
+):
+    text = " ".join(_texts(content.DISCUSSION))
+    sentence = text[text.index("Steering behaves") :].split(". ")[0]
+    assert "breaks fluency" in sentence
+    assert "perplexity" in sentence and "distinct-1" in sentence
+    assert "1.5" in sentence and "0.15" in sentence

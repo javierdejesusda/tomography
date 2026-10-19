@@ -597,8 +597,10 @@ DISCUSSION = Section(
         "versions, and is not reliably above a random direction on "
         "unrelated pairs, where logistic regression still is. Steering "
         "behaves as the paper describes at small coefficients and breaks "
-        "fluency at larger ones, and post-training changes few readings "
-        "beyond their intervals at these sizes.",
+        "fluency at larger ones (a perplexity on neutral text above 1.5 "
+        "times the unsteered model, or a distinct-1 below 0.15), and "
+        "post-training changes few readings beyond their intervals at these "
+        "sizes.",
     ),
 )
 
