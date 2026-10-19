@@ -1,20 +1,19 @@
-from collections import Counter
 import csv
 import io
+import itertools
 import json
 from pathlib import Path
 import re
 import runpy
 from typing import Any
 
-import matplotlib as mpl
-from matplotlib.collections import QuadMesh
-from matplotlib.patches import Rectangle
+from matplotlib.collections import PolyCollection
 import numpy as np
 import pytest
 
 from tomography.site import registry
 from tomography.site import stats
+from tomography.site.figs import steering
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -126,28 +125,6 @@ def _texts(output: registry.FigureOutput) -> list[str]:
     ]
 
 
-def test_every_checkpoint_has_a_score_line_and_a_prompting_strip(
-    output: registry.FigureOutput,
-) -> None:
-    rows = _rows(output)
-    for model in _models():
-        got = [
-            r for r in rows if r["model"] == model and r["series"] == "score"
-        ]
-        assert sorted(float(r["x"]) for r in got) == list(COEFFS)
-        for arm in ("prompting+1", "prompting-1"):
-            assert (
-                len(
-                    [
-                        r
-                        for r in rows
-                        if r["model"] == model and r["series"] == arm
-                    ]
-                )
-                == 1
-            )
-
-
 def test_score_lines_are_seed_means_with_the_range_over_the_three_vectors(
     output: registry.FigureOutput,
 ) -> None:
@@ -182,53 +159,6 @@ def test_prompting_triangles_are_the_prompting_scores(
                 r for r in rows if r["model"] == model and r["series"] == arm
             ]
             assert float(got["value"]) == pytest.approx(want["score"])
-
-
-def test_tile_matrix_has_seventy_tiles_with_the_perplexity_ratio(
-    output: registry.FigureOutput,
-) -> None:
-    rows = _rows(output)
-    tiles = [r for r in rows if r["series"] == "ppl_ratio"]
-    assert len(tiles) == 70
-    for row in tiles:
-        table = _table(row["model"])
-        assert float(row["value"]) == pytest.approx(
-            _ratio(table, float(row["x"]))
-        )
-    distinct = [r for r in rows if r["series"] == "distinct_1"]
-    assert len(distinct) == 70
-    for row in distinct:
-        table = _table(row["model"])
-        assert float(row["value"]) == pytest.approx(
-            _distinct(table, float(row["x"]))
-        )
-
-
-def test_tile_labels_show_the_ratio_and_the_distinct_1_asterisk(
-    output: registry.FigureOutput,
-) -> None:
-    want = Counter(_tile(_table(m), c) for m in _models() for c in COEFFS)
-    have = Counter(_texts(output))
-    assert not want - have
-
-
-def test_framed_tiles_are_exactly_those_that_keep_the_fluency_rule(
-    output: registry.FigureOutput,
-) -> None:
-    frames = [
-        p
-        for ax in output.figure.axes
-        for p in ax.patches
-        if isinstance(p, Rectangle)
-        and not p.get_fill()
-        and p.get_linewidth() == pytest.approx(0.9)
-    ]
-    want = sum(_fluent(_table(m), c) for m in _models() for c in COEFFS)
-    assert len(frames) == want
-    rows = _rows(output)
-    flags = [r for r in rows if r["series"] == "fluent"]
-    assert len(flags) == 70
-    assert sum(float(r["value"]) for r in flags) == want
 
 
 def test_fluency_counts_are_per_role(output: registry.FigureOutput) -> None:
@@ -320,20 +250,6 @@ def test_the_perplexity_is_not_called_the_perplexity_of_the_completions(
     assert "not the perplexity of the completions" in output.detail
 
 
-def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
-    fig = output.figure
-    assert tuple(fig.get_size_inches()) == (paper.FULL_WIDTH, 3.6)
-    assert checks.guard_problems(fig) == []
-    assert checks.problems(fig) == []
-
-
-def test_one_panel_letter_each_for_the_four_panels(
-    output: registry.FigureOutput,
-) -> None:
-    letters = [t for t in _texts(output) if t.startswith(r"$\mathbf")]
-    assert sorted(letters) == [rf"$\mathbf{{({c})}}$" for c in "abcd"]
-
-
 def test_negative_numbers_use_the_true_minus(
     output: registry.FigureOutput,
 ) -> None:
@@ -376,38 +292,6 @@ def test_the_layout_is_frozen_so_two_builds_place_every_axes_alike() -> None:
     ]
 
 
-def test_tiles_use_the_full_colormap_and_the_ink_that_contrasts_most(
-    output: registry.FigureOutput,
-) -> None:
-    ax = next(
-        a
-        for a in output.figure.axes
-        if any(isinstance(c, QuadMesh) for c in a.collections)
-        and len([c for c in a.collections if isinstance(c, QuadMesh)]) > 2
-    )
-    meshes = [c for c in ax.collections if isinstance(c, QuadMesh)]
-    labels = [t for t in ax.texts if t.get_gid() == paper.TILE_LABEL]
-    assert len(labels) == 7 * (len(meshes))
-    cmap = meshes[0].get_cmap()
-    assert cmap(0.0) == mpl.colormaps["cividis_r"](0.0)
-    assert cmap(1.0) == mpl.colormaps["cividis_r"](1.0)
-    for i, mesh in enumerate(meshes):
-        mesh.update_scalarmappable()
-        for j, face in enumerate(mesh.get_facecolor()):
-            text = labels[7 * i + j]
-            assert text.get_color() == paper.tile_ink(face)
-    inks = {t.get_color() for t in labels}
-    assert inks == {paper.INK, paper.WHITE}
-
-
-def test_letters_do_not_touch_their_titles(
-    output: registry.FigureOutput,
-) -> None:
-    gaps = _T["letter_title_gaps"](output.figure)
-    assert len(gaps) == 3
-    assert min(gaps) >= 2.0
-
-
 def test_the_fluency_rule_in_the_caption_comes_from_the_constants(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -416,7 +300,7 @@ def test_the_fluency_rule_in_the_caption_comes_from_the_constants(
     monkeypatch.setattr(steering, "MAX_RATIO", 1.25)
     monkeypatch.setattr(steering, "MIN_DISTINCT", 0.2)
     detail = registry.build_figure(SPEC, Manifest(RESULTS)).detail
-    assert "distinct-1 of the completions below 0.2" in detail
+    assert "fails the rule below 0.2" in detail
     assert "(ratio at most 1.25 and distinct-1 at least 0.2)" in detail
 
 
@@ -475,7 +359,211 @@ def test_caption_states_the_moves_rule_and_the_fluency_inputs(
     assert "not the perplexity of the completions" in output.detail
 
 
-def test_markers_do_not_encode_the_checkpoint_and_prompting_has_its_own(
+ORDER = ("gpt2", "base", "post")
+NEWLINE = chr(10)
+
+
+def _grid(output: registry.FigureOutput) -> list[list[Any]]:
+    axs = output.figure.axes
+    assert len(axs) == 9
+    ordered = sorted(
+        axs, key=lambda a: (-round(a.get_position().y1, 3), a.get_position().x0)
+    )
+    return [ordered[0:3], ordered[3:6], ordered[6:9]]
+
+
+def _points(ax: Any) -> list[Any]:
+    return [ln for ln in ax.lines if ln.get_gid() == "point"]
+
+
+def _filled(line: Any) -> bool:
+    return line.get_markerfacecolor() != "white"
+
+
+def _flags(model: str) -> dict[float, bool]:
+    table = _table(model)
+    return {c: _fluent(table, c) for c in COEFFS}
+
+
+def test_the_figure_is_three_columns_by_three_rows(
+    output: registry.FigureOutput,
+) -> None:
+    grid = _grid(output)
+    assert tuple(output.figure.get_size_inches()) == (
+        paper.FULL_WIDTH,
+        steering.HEIGHT,
+    )
+    for row in grid:
+        assert len({round(a.get_position().y0, 3) for a in row}) == 1
+    for col in range(3):
+        lefts = {round(grid[r][col].get_position().x0, 3) for r in range(3)}
+        assert len(lefts) == 1
+    assert [a.get_title() for a in grid[0]] == [
+        "GPT-2",
+        "Qwen3 base",
+        "Qwen3 post-trained",
+    ]
+    assert checks.guard_problems(output.figure) == []
+    assert checks.problems(output.figure) == []
+
+
+def test_axes_are_shared_and_labelled_on_the_outer_panels_only(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    grid = _grid(output)
+    for r, row in enumerate(grid):
+        for c, ax in enumerate(row):
+            assert ax.get_xlim() == grid[2][0].get_xlim()
+            assert ax.get_ylim() == grid[r][0].get_ylim()
+            shown_x = any(t.get_text() for t in ax.get_xticklabels())
+            shown_y = any(t.get_text() for t in ax.get_yticklabels())
+            assert ax.xaxis.get_tick_params()["labelbottom"] == (r == 2)
+            assert ax.yaxis.get_tick_params()["labelleft"] == (c == 0)
+            assert shown_x or r < 2
+            assert shown_y or c > 0
+    left, right = grid[2][0].get_xlim()
+    assert left <= -0.3
+    assert right >= 0.3
+    assert grid[2][0].get_xticks().tolist() == [-0.3, 0.0, 0.3]
+    assert grid[0][0].get_ylim() == (0.0, 1.0)
+    assert grid[1][0].get_yscale() == "log"
+    assert grid[1][0].get_ylim() == (1.0, 100.0)
+    assert grid[2][0].get_yscale() == "linear"
+    assert grid[2][0].get_ylim() == (0.0, 0.35)
+
+
+def test_the_limits_are_labelled_reference_lines(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    grid = _grid(output)
+    for row, value, label in (
+        (1, MAX_RATIO, f"limit {MAX_RATIO:g}"),
+        (2, MIN_DISTINCT, f"limit {MIN_DISTINCT:g}"),
+    ):
+        for ax in grid[row]:
+            refs = [ln for ln in ax.lines if ln.get_gid() == "limit"]
+            assert len(refs) == 1
+            assert list(refs[0].get_ydata()) == [value, value]
+            assert refs[0].get_linewidth() == pytest.approx(0.5)
+        assert label in [t.get_text() for t in grid[row][2].texts]
+
+
+def test_a_marker_per_checkpoint_and_coefficient_filled_when_fluent(
+    output: registry.FigureOutput,
+) -> None:
+    grid = _grid(output)
+    roles = _by_role()
+    for col, role in enumerate(ORDER):
+        for row in range(3):
+            points = _points(grid[row][col])
+            assert len(points) == len(COEFFS) * len(roles[role])
+        want = sum(_flags(m)[c] for m in roles[role] for c in COEFFS)
+        for row in range(3):
+            filled = sum(_filled(p) for p in _points(grid[row][col]))
+            assert filled == want
+    flags = [r for r in _rows(output) if r["series"] == "fluent"]
+    assert len(flags) == 70
+    assert sum(float(r["value"]) for r in flags) == sum(
+        _flags(m)[c] for m in _models() for c in COEFFS
+    )
+
+
+def test_segments_touching_a_non_fluent_point_are_dashed(
+    output: registry.FigureOutput,
+) -> None:
+    grid = _grid(output)
+    roles = _by_role()
+    for col, role in enumerate(ORDER):
+        for row in range(3):
+            segments = [
+                ln for ln in grid[row][col].lines if ln.get_gid() == "segment"
+            ]
+            assert len(segments) == 6 * len(roles[role])
+            dashed = [ln for ln in segments if ln.get_linestyle() != "-"]
+            want = 0
+            for model in roles[role]:
+                flags = _flags(model)
+                want += sum(
+                    not (flags[a] and flags[b])
+                    for a, b in itertools.pairwise(COEFFS)
+                )
+            assert len(dashed) == want
+
+
+def test_instruction_scores_are_dotted_reference_lines(
+    output: registry.FigureOutput,
+) -> None:
+    grid = _grid(output)
+    roles = _by_role()
+    for col, role in enumerate(ORDER):
+        lines = [
+            ln for ln in grid[0][col].lines if ln.get_gid() == "instruction"
+        ]
+        assert all(ln.get_linestyle() == ":" for ln in lines)
+        want = sorted(
+            float(r["score"])
+            for m in roles[role]
+            for r in _table(m)
+            if r["arm"] in ("prompting+1", "prompting-1")
+        )
+        got = sorted(float(ln.get_ydata()[0]) for ln in lines)
+        assert got == pytest.approx(want)
+
+
+def test_the_range_over_the_vectors_is_a_low_alpha_band_and_no_heat_map(
+    output: registry.FigureOutput,
+) -> None:
+    grid = _grid(output)
+    for ax in grid[0]:
+        bands = [c for c in ax.collections if isinstance(c, PolyCollection)]
+        assert bands
+        assert all(c.get_alpha() <= 0.2 for c in bands)
+    assert not [
+        c
+        for ax in output.figure.axes
+        for c in ax.collections
+        if c.__class__.__name__ == "QuadMesh"
+    ]
+
+
+def test_checkpoints_are_labelled_at_the_line_ends_and_not_in_a_legend(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    grid = _grid(output)
+    roles = _by_role()
+    for col, role in enumerate(ORDER):
+        texts = [t.get_text() for t in grid[0][col].texts]
+        for model in roles[role]:
+            assert steering.end_label(model) in texts
+    (legend,) = output.figure.legends
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert labels == ["fluent", "not fluent", "instruction score"]
+
+
+def test_each_column_states_how_many_checkpoints_stay_fluent(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    grid = _grid(output)
+    for col, role in enumerate(ORDER):
+        count = output.counts["fluent01"][role]
+        want = f"fluent at both signs of 0.1: {count.hits} of {count.total}"
+        assert want in [
+            t.get_text().replace(NEWLINE, " ") for t in grid[0][col].texts
+        ]
+
+
+def test_the_three_rows_carry_letters_a_to_c(
+    output: registry.FigureOutput,
+) -> None:
+    letters = [t for t in _texts(output) if t.startswith(r"$\mathbf")]
+    assert sorted(letters) == [rf"$\mathbf{{({c})}}$" for c in "abc"]
+
+
+def test_only_the_direction_circle_is_drawn_as_a_marker(
     output: registry.FigureOutput,
 ) -> None:
     drawn = {
@@ -484,12 +572,17 @@ def test_markers_do_not_encode_the_checkpoint_and_prompting_has_its_own(
         for ln in ax.lines
         if ln.get_marker() not in ("None", "", None)
     }
-    direction = paper.MEASURE_MARKERS["direction"]
-    prompts = set(paper.PROMPT_MARKERS.values())
-    assert drawn == {direction} | prompts
+    assert drawn == {paper.SHAPES["direction"]}
     assert _L["marker_clashes"](output.figure) == []
-    (legend,) = output.figure.legends
-    labels = [t.get_text() for t in legend.get_texts()]
-    assert "positive instruction" in labels
-    assert "negative instruction" in labels
-    assert "triangles" not in output.detail
+
+
+def test_the_caption_keys_the_drawing_and_has_no_heat_map_panel(
+    output: registry.FigureOutput,
+) -> None:
+    detail = output.detail
+    for word in ("filled", "open", "dashed", "dotted", "limit"):
+        assert word in detail
+    for letter in "abc":
+        assert f"({letter}" in detail
+    assert "(d)" not in detail
+    assert "[[table:steering]]" in detail
