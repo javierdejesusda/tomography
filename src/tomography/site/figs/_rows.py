@@ -19,7 +19,9 @@ from tomography.viz import paper
 
 PAD = 0.07
 ROLE_KEY_SIZE = 6.5
-STAR_SIZE = 6.0
+STAR_SIZE = 5.0
+TRIANGLE_SIZE = 4.2
+CATEGORY_EDGE = 0.3
 MARKER_SIZE = 3.5
 EDGE_WIDTH = 0.8
 
@@ -167,7 +169,11 @@ def dot(
         ls="none",
         color=color,
         zorder=3,
-        **{**fill(model, color), "markersize": marker_size(marker)},
+        **_category_edge(
+            marker,
+            {**fill(model, color), "markersize": marker_size(marker)},
+            color,
+        ),
     )
 
 
@@ -202,7 +208,32 @@ def marker_size(marker: str) -> float:
         return ROLE_KEY_SIZE
     if marker == "*":
         return STAR_SIZE
+    if marker in ("<", ">"):
+        return TRIANGLE_SIZE
     return MARKER_SIZE
+
+
+def _category_edge(
+    marker: str, style: dict[str, Any], color: str
+) -> dict[str, Any]:
+    """Gives filled category markers a thin white edge so overlaps separate.
+
+    Args:
+        marker: Marker shape.
+        style: Marker keyword arguments of `Axes.plot`.
+        color: The series color.
+
+    Returns:
+        The keyword arguments, with the white edge when the marker is a
+        filled category shape.
+    """
+    if marker in paper.CATEGORY_MARKERS and style["markerfacecolor"] == color:
+        return {
+            **style,
+            "markeredgecolor": "white",
+            "markeredgewidth": CATEGORY_EDGE,
+        }
+    return style
 
 
 def series_handle(
@@ -225,11 +256,17 @@ def series_handle(
         ls="none",
         marker=marker,
         color=color,
-        markerfacecolor=color if filled else "white",
-        markeredgecolor=color,
-        markeredgewidth=EDGE_WIDTH,
-        markersize=marker_size(marker),
         label=label,
+        **_category_edge(
+            marker,
+            {
+                "markerfacecolor": color if filled else "white",
+                "markeredgecolor": color,
+                "markeredgewidth": EDGE_WIDTH,
+                "markersize": marker_size(marker),
+            },
+            color,
+        ),
     )
 
 
