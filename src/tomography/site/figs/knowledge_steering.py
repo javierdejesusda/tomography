@@ -59,7 +59,9 @@ DETAIL = (
     "same norm on unknown "
     "questions (grey), with 95 percent intervals that resample the "
     "questions. (b) The same for the abstention rate of post-trained "
-    "checkpoints, with a few-shot and a concept prompt. The direction moves "
+    "checkpoints, with a few-shot and a concept prompt. Rows run in "
+    "checkpoint size within each group; GPT-2 small has no run. The "
+    "direction moves "
     "unknown questions more than each of the 3 random directions on "
     "{distinguishable}, and more than known questions on {selective}, by "
     "the gap between the absolute mean slopes over the coefficient grid, "
@@ -229,7 +231,7 @@ def direction_keys() -> tuple[list[Any], list[str]]:
 
 
 def _layout(runs: list[Run]) -> tuple[list[Run], list[float]]:
-    """Orders the rows by block, then by the direction's slope, and places them.
+    """Keeps the rows in checkpoint order within each block and places them.
 
     Args:
         runs: The runs of one forest in checkpoint order.
@@ -243,7 +245,6 @@ def _layout(runs: list[Run]) -> tuple[list[Run], list[float]]:
     ordered: list[Run] = []
     positions: list[float] = []
     for rows in blocks.values():
-        rows.sort(key=lambda r: float(r.head["lat_slope"]))
         for i, run in enumerate(rows):
             if not positions:
                 positions.append(0.0)
