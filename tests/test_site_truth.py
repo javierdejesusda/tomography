@@ -1,260 +1,275 @@
-import csv
-import io
-import itertools
 import json
 from pathlib import Path
-import re
+import runpy
 from typing import Any
 
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
-from matplotlib.text import Text
+import numpy as np
 import pytest
 
-from tomography.site import params
 from tomography.site import registry
+from tomography.site import stats
 from tomography.site.manifest import Manifest
+from tomography.viz import checks
 from tomography.viz import paper
 
+_RESULTS = runpy.run_path(str(Path(__file__).with_name("_results.py")))
+data = _RESULTS["data"]
+models = _RESULTS["models"]
+run = _RESULTS["run"]
+
 RESULTS = Path(__file__).resolve().parents[1] / "results"
-SPEC = "truth"
-NEGATED = ("neg_cities", "neg_sp_en_trans")
-NOT_SETS = ("val", "test")
+MODELS = models("r6")
+ROLES = ("gpt2", "base", "post")
+SETS = ("cities", "neg_cities", "sp_en_trans", "neg_sp_en_trans")
+NEGATED = {"neg_cities": "cities", "neg_sp_en_trans": "sp_en_trans"}
+EM = chr(0x2014)
+EN = chr(0x2013)
+
+
+def _role(model: str) -> str:
+    if not model.startswith("qwen3"):
+        return "gpt2"
+    return "base" if model.endswith("-base") else "post"
+
+
+def _table(model: str) -> list[dict[str, Any]]:
+    table = data(run("r6", model), "table.json")
+    return [dict(zip(table["columns"], r, strict=True)) for r in table["rows"]]
+
+
+def _lat(model: str, source: str) -> dict[str, Any]:
+    (row,) = [
+        r
+        for r in _table(model)
+        if r["method"] == "lat"
+        and r["layer_rule"] == "validation-layer"
+        and r["source"] == source
+    ]
+    return row
+
+
+def _method(model: str, method: str) -> dict[str, Any]:
+    (row,) = [r for r in _table(model) if r["method"] == method]
+    return row
+
+
+def _summary(model: str) -> dict[str, Any]:
+    return data(run("r7", model), "summary.json")
+
+
+def _set(model: str, name: str) -> tuple[float, int]:
+    cell = _summary(model)["sets"][name]
+    return cell["accuracy_at_val_layer"], cell["n_eval_pairs"]
+
+
+def _random(model: str, name: str) -> float:
+    path = run("r7", model)
+    series = json.loads((path / f"curves_{name}.json").read_text("utf-8"))[
+        "data"
+    ]["series"]
+    layer = _summary(model)["val_layer"]
+    z = np.load(path / f"curves_{name}.npz")
+    x = list(z["x"])
+    return float(z["mean"][series.index("random"), x.index(layer)])
+
+
+def _n_questions(model: str) -> int:
+    return int(data(run("r6", model), "summary.json")["n_test"])
+
+
+def _band() -> tuple[float, float]:
+    rows = [_method(MODELS[0], m) for m in ("text_word", "text_char")]
+    return min(r["lo"] for r in rows), max(r["hi"] for r in rows)
+
+
+def _inside(model: str) -> bool:
+    lo, hi = _band()
+    return lo <= _lat(model, "truthfulqa")["mc1"] <= hi
+
+
+def _below_half(model: str, name: str) -> bool:
+    acc, n = _set(model, name)
+    return stats.wilson(acc, n)[1] < 0.5
 
 
 @pytest.fixture(scope="module")
 def output() -> registry.FigureOutput:
-    return registry.build_figure(SPEC, Manifest(RESULTS))
+    return registry.build_figure("truth", Manifest(RESULTS))
 
 
-def _rows(output: registry.FigureOutput) -> list[dict[str, str]]:
-    return list(csv.DictReader(io.StringIO(output.csv)))
+def _csv_rows(output: registry.FigureOutput) -> list[dict[str, str]]:
+    lines = output.csv.strip().splitlines()
+    head = lines[0].split(",")
+    assert head == ["panel", "model", "role", "series", "value", "lo", "hi"]
+    return [dict(zip(head, ln.split(","), strict=True)) for ln in lines[1:]]
 
 
-def _data(experiment: str, model: str, name: str) -> Any:
-    (run,) = [p for p in (RESULTS / experiment / model).iterdir() if p.is_dir()]
-    payload = json.loads((run / name).read_text(encoding="utf-8"))["data"]
-    if isinstance(payload, dict) and "columns" in payload:
-        return [
-            dict(zip(payload["columns"], row, strict=True))
-            for row in payload["rows"]
-        ]
-    return payload
-
-
-def _models(experiment: str) -> list[str]:
-    return Manifest(RESULTS).models(experiment)
-
-
-def _r6() -> dict[str, dict[str, dict[str, Any]]]:
-    found = {}
-    for model in _models("r6"):
-        rows = _data("r6", model, "table.json")
-        found[model] = {
-            "reader": next(
-                r
-                for r in rows
-                if r["method"] == "lat"
-                and r["layer_rule"] == "validation-layer"
-                and r["source"] == "truthfulqa"
-            ),
-            "standard": next(r for r in rows if r["method"] == "standard"),
-        }
-        for text in ("text_word", "text_char"):
-            hit = [r for r in rows if r["method"] == text]
-            if hit:
-                found[model][text] = hit[0]
-    return found
-
-
-def _has(claim: str, value: float) -> bool:
-    text = str(int(value)) if value == int(value) else f"{value:.3f}"
-    pattern = rf"(?<![\d.]){re.escape(text)}(?![\d])"
-    return re.search(pattern, claim) is not None
-
-
-def test_panel_a_uses_the_validation_layer_rows_only(
-    output: registry.FigureOutput,
-) -> None:
-    rows = [r for r in _rows(output) if r["panel"] == "a"]
-    for model, parts in _r6().items():
-        for series in ("reader", "standard"):
-            (got,) = [
-                r for r in rows if r["model"] == model and r["series"] == series
-            ]
-            assert float(got["value"]) == pytest.approx(parts[series]["mc1"])
-        (reader,) = [
-            r for r in rows if r["model"] == model and r["series"] == "reader"
-        ]
-        assert float(reader["lo"]) == pytest.approx(parts["reader"]["lo"])
-        assert float(reader["hi"]) == pytest.approx(parts["reader"]["hi"])
-
-
-def test_panel_a_draws_one_band_for_the_text_baselines(
-    output: registry.FigureOutput,
-) -> None:
-    r6 = _r6()
-    with_text = [m for m, p in r6.items() if "text_word" in p]
-    assert with_text
-    for name in ("text_word", "text_char"):
-        values = {
-            (p[name]["mc1"], p[name]["lo"], p[name]["hi"])
-            for p in r6.values()
-            if name in p
-        }
-        assert len(values) == 1
-    rows = [
+def _find(
+    rows: list[dict[str, str]], panel: str, model: str, series: str
+) -> dict[str, str]:
+    (row,) = [
         r
-        for r in _rows(output)
-        if r["panel"] == "a" and r["series"] in ("text_word", "text_char")
+        for r in rows
+        if r["panel"] == panel and r["model"] == model and r["series"] == series
     ]
-    assert len(rows) == 2
-    word = next(r for r in rows if r["series"] == "text_word")
-    expected = r6[with_text[0]]["text_word"]
-    assert float(word["lo"]) == pytest.approx(expected["lo"])
-    assert float(word["hi"]) == pytest.approx(expected["hi"])
+    return row
 
 
-def test_panel_b_pairs_the_honesty_transfer_with_the_seed_agreement(
+def test_panel_a_rows_hold_the_readers_and_the_log_probability_row(
     output: registry.FigureOutput,
 ) -> None:
-    rows = [r for r in _rows(output) if r["panel"] == "b"]
-    assert {r["model"] for r in rows} == set(_models("r5"))
-    for row in rows:
-        model = row["model"]
-        accuracy = _data("r5", model, "summary.json")["test_accuracy"]
-        agreement = _data("a1", model, "summary.json")["agreement_at_layer"][
-            "r5"
-        ]
-        assert float(row["value"]) == pytest.approx(accuracy)
-        assert float(row["x"]) == pytest.approx(agreement)
+    rows = _csv_rows(output)
+    for model in MODELS:
+        for series, source in (
+            ("truthfulqa_reader", "truthfulqa"),
+            ("persona_reader", "honesty"),
+        ):
+            row = _find(rows, "a", model, series)
+            mc1 = _lat(model, source)["mc1"]
+            assert float(row["value"]) == pytest.approx(mc1)
+            lo, hi = stats.wilson(mc1, _n_questions(model))
+            assert float(row["lo"]) == pytest.approx(lo, abs=1e-9)
+            assert float(row["hi"]) == pytest.approx(hi, abs=1e-9)
+            assert row["role"] == _role(model)
+        standard = _method(model, "standard")
+        row = _find(rows, "a", model, "log_probability")
+        assert float(row["value"]) == pytest.approx(standard["mc1"])
+        assert float(row["lo"]) == pytest.approx(standard["lo"], abs=1e-9)
+        assert float(row["hi"]) == pytest.approx(standard["hi"], abs=1e-9)
 
 
-def test_panel_c_holds_the_nine_out_of_distribution_sets_per_model(
+def test_panel_b_rows_hold_every_set_and_the_random_direction(
     output: registry.FigureOutput,
 ) -> None:
-    rows = [r for r in _rows(output) if r["panel"] == "c"]
-    for model in _models("r7"):
-        sets = _data("r7", model, "summary.json")["sets"]
-        names = [n for n in sets if n not in NOT_SETS]
-        assert len(names) == 9
-        got = {r["x"]: float(r["value"]) for r in rows if r["model"] == model}
-        assert list(got) == names
-        for name in names:
-            assert got[name] == pytest.approx(
-                sets[name]["accuracy_at_val_layer"]
-            )
-
-
-def test_claim_numbers_are_recomputed_from_the_files(
-    output: registry.FigureOutput,
-) -> None:
-    r6 = _r6()
-    band = next(p["text_word"] for p in r6.values() if "text_word" in p)
-    char = next(p["text_char"] for p in r6.values() if "text_char" in p)
-    low, high = min(band["lo"], char["lo"]), max(band["hi"], char["hi"])
-    inside = sum(low <= p["reader"]["mc1"] <= high for p in r6.values())
-    below = 0
-    cells = 0
-    for model in _models("r7"):
-        sets = _data("r7", model, "summary.json")["sets"]
+    rows = _csv_rows(output)
+    for model in MODELS:
+        for name in SETS:
+            acc, n = _set(model, name)
+            row = _find(rows, "b", model, name)
+            assert float(row["value"]) == pytest.approx(acc)
+            lo, hi = stats.wilson(acc, n)
+            assert float(row["lo"]) == pytest.approx(lo, abs=1e-9)
+            assert float(row["hi"]) == pytest.approx(hi, abs=1e-9)
         for name in NEGATED:
-            cells += 1
-            below += sets[name]["accuracy_at_val_layer"] < 0.5
-    accuracy = [
-        _data("r5", m, "summary.json")["test_accuracy"] for m in _models("r5")
-    ]
-    agreement = [
-        _data("a1", m, "summary.json")["agreement_at_layer"]["r5"]
-        for m in _models("r5")
-    ]
-    expected = {
-        "models": len(r6),
-        "inside_text_interval": inside,
-        "negated_cells": cells,
-        "negated_below_chance": below,
-        "honesty_min": min(accuracy),
-        "honesty_max": max(accuracy),
-        "agreement_min": min(agreement),
-    }
-    assert output.numbers == pytest.approx(expected)
-    assert all(_has(output.claim, v) for v in expected.values())
+            row = _find(rows, "b", model, f"random_{name}")
+            assert float(row["value"]) == pytest.approx(
+                _random(model, name), abs=1e-9
+            )
+    assert len(rows) == len(MODELS) * (3 + len(SETS) + len(NEGATED))
 
 
-def test_the_withdrawn_validation_figure_is_never_quoted(
+def test_numbers_are_recomputed_per_role(
     output: registry.FigureOutput,
 ) -> None:
-    text = output.claim + output.detail + output.csv
-    assert "0.718" not in text
-
-
-def test_caption_says_what_the_intervals_resample(
-    output: registry.FigureOutput,
-) -> None:
-    assert "15 readers" in output.detail
-    assert "Wilson" in output.detail
-    assert "exploratory" in output.detail
-
-
-def test_sizes_come_from_the_parameter_counts(
-    output: registry.FigureOutput,
-) -> None:
-    rows = [
-        r
-        for r in _rows(output)
-        if r["panel"] == "a" and r["series"] == "reader"
-    ]
-    for row in rows:
-        assert float(row["x"]) == params.param_count(row["model"])
-
-
-def _boxes(fig: Figure) -> list[tuple[str, tuple[float, float, float, float]]]:
-    canvas = FigureCanvasAgg(fig)
-    with paper.paper_style():
-        canvas.draw()
-    renderer = canvas.get_renderer()
-    unique = {id(t): t for t in fig.findobj(Text)}
-    out = []
-    for text in unique.values():
-        if text.get_text() and text.get_visible():
-            box = text.get_window_extent(renderer)
-            out.append((text.get_text(), (box.x0, box.y0, box.x1, box.y1)))
-    return out
-
-
-def test_figure_is_print_width_with_one_letter_per_panel(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    assert fig.get_size_inches()[0] == paper.FULL_WIDTH
-    letters = [t for t, _ in _boxes(fig) if t.startswith(r"$\mathbf")]
-    assert letters == [rf"$\mathbf{{({c})}}$" for c in "abc"]
-
-
-def test_no_text_overlaps_or_leaves_the_figure(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    boxes = _boxes(fig)
-    width, height = (fig.get_size_inches() * fig.dpi).tolist()
-    for label, (x0, y0, x1, y1) in boxes:
-        assert min(x0, y0) >= -0.5, label
-        assert x1 <= width + 0.5, label
-        assert y1 <= height + 0.5, label
-    for (la, a), (lb, b) in itertools.combinations(boxes, 2):
-        overlap = (
-            a[0] < b[2] - 0.5
-            and b[0] < a[2] - 0.5
-            and a[1] < b[3] - 0.5
-            and b[1] < a[3] - 0.5
+    n = output.numbers
+    persona = [_lat(m, "honesty")["mc1"] for m in MODELS]
+    lo, hi = _band()
+    assert n["persona_min"] == pytest.approx(min(persona))
+    assert n["persona_max"] == pytest.approx(max(persona))
+    assert n["text_lo"] == pytest.approx(lo)
+    assert n["text_hi"] == pytest.approx(hi)
+    chance = json.loads(
+        (run("r6", MODELS[0]) / "curves_truthfulqa.json").read_text("utf-8")
+    )["data"]["chance"]
+    assert n["chance"] == pytest.approx(chance)
+    for role in ROLES:
+        group = [m for m in MODELS if _role(m) == role]
+        assert n[f"tqa_inside_{role}"] == sum(_inside(m) for m in group)
+        words = max(
+            _method(group[0], k)["mc1"] for k in ("text_word", "text_char")
         )
-        assert not overlap, (la, lb)
+        assert n[f"tqa_above_words_{role}"] == sum(
+            _lat(m, "truthfulqa")["mc1"] > words for m in group
+        )
+        below = sum(_below_half(m, s) for m in group for s in NEGATED)
+        assert n[f"neg_below_half_{role}"] == below
+        assert n[f"neg_below_half_n_{role}"] == len(group) * len(NEGATED)
+    gpt2 = [m for m in MODELS if _role(m) == "gpt2"]
+    assert n["negcities_below_random_gpt2"] == sum(
+        _set(m, "neg_cities")[0] < _random(m, "neg_cities") for m in gpt2
+    )
 
 
-def test_svg_and_pdf_bytes_are_the_same_for_the_same_input(
+def test_counts_are_per_role(output: registry.FigureOutput) -> None:
+    for role in ROLES:
+        group = [m for m in MODELS if _role(m) == role]
+        inside = output.counts["tqa_inside"][role]
+        assert (inside.hits, inside.total) == (
+            sum(_inside(m) for m in group),
+            len(group),
+        )
+        below = output.counts["neg_below_half"][role]
+        assert (below.hits, below.total) == (
+            sum(_below_half(m, s) for m in group for s in NEGATED),
+            len(group) * len(NEGATED),
+        )
+
+
+def test_the_plan_values_hold_at_the_current_results(
     output: registry.FigureOutput,
 ) -> None:
-    again = registry.build_figure(SPEC, Manifest(RESULTS))
-    with paper.paper_style():
-        assert paper.svg_bytes(output.figure) == paper.svg_bytes(again.figure)
-        assert paper.pdf_bytes(output.figure) == paper.pdf_bytes(again.figure)
+    counts = output.counts
+    assert [counts["tqa_inside"][r].hits for r in ROLES] == [4, 2, 3]
+    assert [counts["tqa_inside"][r].total for r in ROLES] == [4, 3, 3]
+    assert [counts["neg_below_half"][r].hits for r in ROLES] == [3, 0, 2]
+    assert [counts["neg_below_half"][r].total for r in ROLES] == [8, 6, 6]
+    assert output.numbers["persona_min"] == pytest.approx(0.270, abs=5e-4)
+    assert output.numbers["persona_max"] == pytest.approx(0.575, abs=5e-4)
+
+
+def test_the_caption_states_the_counts_and_the_numbers(
+    output: registry.FigureOutput,
+) -> None:
+    text = f"{output.claim} {output.detail}"
+    n = output.numbers
+    assert stats.per_role_text(output.counts["tqa_inside"]) in text
+    assert stats.per_role_text(output.counts["neg_below_half"]) in text
+    for name in ("persona_min", "persona_max", "text_lo", "text_hi", "chance"):
+        assert f"{n[name]:.3f}" in text, name
+    assert "pooled" not in text
+    assert EM not in text
+    assert EN not in text
+    assert "_" not in text
+
+
+def test_the_figure_is_two_panels_at_the_planned_size(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    assert len(fig.axes) == 2
+    width, height = fig.get_size_inches()
+    assert width == pytest.approx(paper.FULL_WIDTH)
+    assert height == pytest.approx(3.0)
+
+
+def test_the_text_band_and_chance_lines_are_drawn(
+    output: registry.FigureOutput,
+) -> None:
+    left, right = output.figure.axes
+    lo, hi = _band()
+    spans = [
+        (p.get_x(), p.get_x() + p.get_width())
+        for p in left.patches
+        if abs(p.get_x() - lo) < 1e-9
+    ]
+    polys = [
+        c.get_paths()[0].get_extents()
+        for c in left.collections
+        if c.get_paths()
+    ]
+    drawn = bool(spans) or any(
+        abs(e.x0 - lo) < 1e-9 and abs(e.x1 - hi) < 1e-9 for e in polys
+    )
+    assert drawn
+    n = output.numbers
+    for ax, value in ((left, n["chance"]), (right, 0.5)):
+        assert any(
+            np.allclose(np.asarray(line.get_xdata(), float), value)
+            for line in ax.get_lines()
+            if len(line.get_xdata()) == 2
+        )
+
+
+def test_the_guards_are_green(output: registry.FigureOutput) -> None:
+    assert checks.guard_problems(output.figure) == []
+    assert checks.problems(output.figure) == []
