@@ -497,7 +497,8 @@ def test_panel_a_item_sets_use_the_category_markers_and_are_keyed(
     assert keyed["range items"] == sets["range"]
     assert keyed["exact items"] == sets["exact"]
     assert keyed["people's heights"] == sets["people"]
-    assert "(star)" in output.detail
+    assert "range items (star), exact items (left triangle)" in output.detail
+    assert "heights (right triangle)" in output.detail
     assert "circle" not in output.detail.split("(b)")[0]
 
 
