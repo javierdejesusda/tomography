@@ -221,7 +221,7 @@ def test_the_map_is_cividis_unreversed_with_the_diagonal_masked_grey(
         assert matplotlib.colors.to_hex(bad) == paper.ENC["random_band"]
 
 
-def test_cells_within_the_noise_are_stippled_and_negative_ones_annotated(
+def test_cells_within_the_noise_are_stippled(
     output: registry.FigureOutput,
 ) -> None:
     total = 0
@@ -233,18 +233,37 @@ def test_cells_within_the_noise_are_stippled_and_negative_ones_annotated(
         patches = [p for p in ax.patches if p.get_gid() == "stipple"]
         assert len(patches) == int(low.sum())
         assert all(p.get_hatch() for p in patches)
-        labels = [t for t in ax.texts if t.get_gid() == paper.TILE_LABEL]
-        zero = (margin <= 0.0) & off
-        assert len(labels) <= int(zero.sum())
-        assert bool(labels) == bool(zero.any())
-        output.figure.draw_without_rendering()
-        box = ax.get_window_extent()
-        boxes = [t.get_window_extent() for t in labels]
-        for i, one in enumerate(boxes):
-            assert box.x0 <= one.x0, labels[i].get_text()
-            assert one.x1 <= box.x1, labels[i].get_text()
-            assert not any(one.overlaps(two) for two in boxes[i + 1 :])
+        assert not [t for t in ax.texts if t.get_gid() == paper.TILE_LABEL]
     assert output.numbers["n_below_noise"] == total
+
+
+def test_every_cell_at_or_below_zero_carries_one_dot(
+    output: registry.FigureOutput,
+) -> None:
+    total = 0
+    for ax, model in zip(_matrices(output), ORDER, strict=True):
+        margin = _margin(model)
+        off = ~np.eye(margin.shape[0], dtype=bool)
+        zero = np.argwhere((margin <= 0.0) & off)
+        total += len(zero)
+        dots = [ln for ln in ax.get_lines() if ln.get_gid() == "zero_dot"]
+        found = sorted(
+            (round(float(ln.get_ydata()[0])), round(float(ln.get_xdata()[0])))
+            for ln in dots
+        )
+        assert found == sorted((int(i), int(j)) for i, j in zero)
+        for ln in dots:
+            assert ln.get_marker() == "o"
+            assert ln.get_markerfacecolor() == "white"
+            assert ln.get_markeredgecolor() == paper.INK
+    assert output.numbers["n_below"] == total
+    low = min(_margin(m)[~np.eye(16, dtype=bool)].min() for m in ORDER)
+    assert output.numbers["min_margin"] == pytest.approx(low)
+    text = output.detail
+    shown = chr(0x2212) + f"{abs(low):.2f}" if low < 0 else f"{low:.2f}"
+    assert f"the {total} cells at or below zero (lowest {shown}" in text
+    assert "carry a dot" in text
+    assert "annotated with their margin" not in text
 
 
 def test_the_paper_row_and_column_are_framed_like_the_paper_wording(
@@ -315,20 +334,3 @@ def test_the_text_is_at_least_the_glossary_floor_and_never_bold(
         if t.get_visible() and t.get_text():
             assert t.get_fontsize() >= paper.MIN_TEXT, t.get_text()
             assert t.get_fontweight() in ("normal", 400), t.get_text()
-
-
-def test_labels_use_the_true_minus_and_never_a_signed_zero(
-    output: registry.FigureOutput,
-) -> None:
-    texts = [
-        t.get_text()
-        for ax in _matrices(output)
-        for t in ax.texts
-        if t.get_gid() == paper.TILE_LABEL
-    ]
-    assert texts
-    for text in texts:
-        assert text in ("0.00",) or text.startswith("$" + chr(0x2212)), text
-        assert "-" not in text
-        assert "." in text
-        assert not text.startswith(".")

@@ -21,7 +21,6 @@ from tomography.site import stats
 from tomography.site.figs import wording
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
-from tomography.viz import axes as paper_axes
 from tomography.viz import paper
 
 DROPPED = "no_trailing_space"
@@ -155,45 +154,6 @@ def _frame(
     ax.add_patch(patch)
 
 
-def _signed(value: float) -> str:
-    """Writes a margin with two decimals and a true minus.
-
-    Args:
-        value: The margin.
-
-    Returns:
-        The label; a value that rounds to zero has no sign.
-    """
-    text = f"{value:.2f}"
-    if text in ("-0.00", "0.00"):
-        return "0.00"
-    return f"${paper_axes.MINUS}$" + text[1:] if text[0] == "-" else text
-
-
-def _annotated(matrix: np.ndarray) -> set[tuple[int, int]]:
-    """Picks the cells at or below zero whose labels cannot overlap.
-
-    Args:
-        matrix: The margins of one checkpoint.
-
-    Returns:
-        Cell indices, lowest margin first, none within one row and three
-        columns of another (three, as a label spans about three cells).
-    """
-    k = matrix.shape[0]
-    low = sorted(
-        (matrix[i, j], i, j)
-        for i in range(k)
-        for j in range(k)
-        if i != j and matrix[i, j] <= 0.0
-    )
-    chosen: list[tuple[int, int]] = []
-    for _, i, j in low:
-        if all(abs(i - a) > 1 or abs(j - b) > 3 for a, b in chosen):
-            chosen.append((i, j))
-    return set(chosen)
-
-
 def _draw(
     ax: Axes,
     matrix: np.ndarray,
@@ -209,7 +169,6 @@ def _draw(
     norm = Normalize(vmin=VMIN, vmax=VMAX)
     shown = np.ma.masked_array(matrix, mask=np.eye(k, dtype=bool))
     image = ax.imshow(shown, cmap=cmap, norm=norm, interpolation="nearest")
-    shown_cells = _annotated(matrix)
     for i in range(k):
         for j in range(k):
             if i == j or matrix[i, j] > noise:
@@ -226,19 +185,20 @@ def _draw(
             )
             cell.set_gid("stipple")
             ax.add_patch(cell)
-            if matrix[i, j] > 0.0 or (i, j) not in shown_cells:
+            if matrix[i, j] > 0.0:
                 continue
-            text = ax.text(
-                min(max(j, 1.5), k - 2.5),
-                i,
-                _signed(matrix[i, j]),
-                ha="center",
-                va="center",
-                fontsize=TEXT,
-                color=paper.tile_ink(cmap(norm(matrix[i, j]))),
+            (dot,) = ax.plot(
+                [j],
+                [i],
+                ls="none",
+                marker="o",
+                ms=3.4,
+                mfc="white",
+                mec=paper.INK,
+                mew=0.7,
                 zorder=5,
             )
-            text.set_gid(paper.TILE_LABEL)
+            dot.set_gid("zero_dot")
     _frame(ax, (-0.5, paper_index - 0.5), k, 1, "paper_row")
     _frame(ax, (paper_index - 0.5, -0.5), 1, k, "paper_col")
     for _, _, end in groups[:-1]:
@@ -303,6 +263,9 @@ def build(manifest: Manifest) -> FigureOutput:
         margins[model] = _matrix(manifest, model, names)[1]
     numbers, sentence = summarize(margins)
     noise = {m: wording.noise(manifest, m) for m in models}
+    numbers["min_margin"] = min(numbers[f"min_{m}"] for m in margins)
+    value = numbers["min_margin"]
+    low = (chr(0x2212) if value < 0 else "") + f"{abs(value):.2f}"
     numbers["noise_min"] = min(noise.values())
     numbers["noise_max"] = max(noise.values())
     numbers["n_below_noise"] = float(
@@ -373,8 +336,9 @@ def build(manifest: Manifest) -> FigureOutput:
         "the grey diagonal, where the fitted and the scored wording are the "
         "same, is not coloured. Cells at or below the noise expected from test "
         "pairs alone for that checkpoint (the noise column of "
-        "[[fig:wording]]) are stippled, and the lowest of those at or below "
-        "zero are annotated with their margin; "
+        "[[fig:wording]]) are stippled; the "
+        f"{int(numbers['n_below'])} cells at or below zero (lowest "
+        f"{low}) carry a dot; "
         "the white ticks on the colour bar mark that noise range, "
         f"{numbers['noise_min']:.3f} to {numbers['noise_max']:.3f}, and "
         f"{int(numbers['n_below_noise'])} cells "
