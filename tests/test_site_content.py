@@ -31,7 +31,8 @@ GENERIC = (
     r"WikiText-103",
     r"distinct-1",
     r"(?<![\d.])±0\.[13](?!\d)",
-    r"coefficient 0\.1(?!\d)",
+    r"coefficient 0\.[13](?!\d)",
+    r"above 0\.95(?!\d)",
     r"exceeds 0\.1(?!\d)",
     r"(?:within|above) 1\.5 times",
     r"below 0\.15(?!\d)",
@@ -410,8 +411,13 @@ def test_the_approximate_contribution_counts_the_reader_and_the_control() -> (
     text = " ".join(_all_texts())
     assert "is matched by" not in text
     assert "[[count:table:approximate.above_words]]" in text
-    assert "[[count:fig:approximate.reader_in_random]]" in text
-    assert "[[count:fig:approximate.people_outside_band]]" in text
+    assert "[[count:fig:approximate.reader_above_random]]" in text
+    assert "[[count:fig:approximate.control_below_half]]" in text
+    assert "[[count:fig:approximate.control_above_95]]" in text
+    assert "a sign flip between the training and the test concepts" in text
+    assert "already separates the test concepts" in text
+    assert "reader_in_random" not in text
+    assert "people_outside_band" not in text
     assert "random_high" not in text
 
 

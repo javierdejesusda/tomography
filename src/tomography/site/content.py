@@ -201,11 +201,13 @@ INTRODUCTION = Section(
             "classifier on the question words on "
             "[[count:table:approximate.above_words]], sits at the lowest "
             "layer on "
-            "[[count:table:approximate.layer_one]], lies inside the "
-            "interval of its random control on "
-            "[[count:fig:approximate.reader_in_random]] and places the "
-            "people outside the band of the control on "
-            "[[count:fig:approximate.people_outside_band]] "
+            "[[count:table:approximate.layer_one]], is above the "
+            "95 percent interval of its random control on "
+            "[[count:fig:approximate.reader_above_random]]; that control "
+            "falls below 0.5, a sign flip between the training and the test "
+            "concepts, on [[count:fig:approximate.control_below_half]] and "
+            "above 0.95, so the random direction already separates the test "
+            "concepts, on [[count:fig:approximate.control_above_95]] "
             "([[fig:approximate]]).",
         ),
         (
