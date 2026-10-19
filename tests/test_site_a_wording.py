@@ -334,3 +334,20 @@ def test_the_text_is_at_least_the_glossary_floor_and_never_bold(
         if t.get_visible() and t.get_text():
             assert t.get_fontsize() >= paper.MIN_TEXT, t.get_text()
             assert t.get_fontweight() in ("normal", 400), t.get_text()
+
+
+def test_index_one_is_labelled_on_both_axes_of_every_matrix(
+    output: registry.FigureOutput,
+) -> None:
+    seen = {"x": 0, "y": 0}
+    for ax in _matrices(output):
+        assert ax.get_xticks()[0] == 0
+        assert ax.get_yticks()[0] == 0
+        for name, labels in (
+            ("x", ax.get_xticklabels()),
+            ("y", ax.get_yticklabels()),
+        ):
+            if labels:
+                seen[name] += 1
+                assert labels[0].get_text() == "1"
+    assert all(seen.values())

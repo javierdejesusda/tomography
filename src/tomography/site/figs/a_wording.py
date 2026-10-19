@@ -207,7 +207,7 @@ def _draw(
             ax.axvline(end - 0.5, color="white", lw=0.4, zorder=3),
         ):
             line.set_gid("separator")
-    at = [start for _, start, _ in groups[1:]] + [k - 1]
+    at = [0] + [start for _, start, _ in groups[1:] if start > 1] + [k - 1]
     ticks = [str(i + 1) for i in at]
     ax.set_xticks(at, ticks, fontsize=TEXT)
     ax.set_yticks(at, ticks, fontsize=TEXT)

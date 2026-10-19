@@ -347,7 +347,7 @@ def test_the_caption_says_where_the_sentiment_size_dot_is_read(
     output: registry.FigureOutput,
 ) -> None:
     assert "its own layer" in output.detail
-    assert "sentiment dot" in output.detail.lower()
+    assert "sentiment dots" in output.detail.lower()
 
 
 def test_the_figure_is_one_row_of_four_size_panels_lettered_a_to_d(

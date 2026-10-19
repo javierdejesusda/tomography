@@ -1,3 +1,4 @@
+from itertools import pairwise
 import math
 from pathlib import Path
 import re
@@ -543,3 +544,21 @@ def test_the_teaser_exports_the_truth_half_widths_per_role(
         )
     assert "truth_half_qwen3_min" not in built.numbers
     assert stats.ROLES == ("gpt2", "base", "post")
+
+
+def test_the_size_markers_of_the_legend_are_one_and_a_half_diameters_apart(
+    built: registry.FigureOutput,
+) -> None:
+    fig = built.figure
+    fig.canvas.draw()
+    (legend,) = fig.legends
+    sizes = [
+        h
+        for h in legend.findobj(Line2D)
+        if h.get_marker() == "o" and h.get_color() not in (paper.INK, "none")
+    ]
+    assert len(sizes) == 7
+    xs = [float(h.get_xydata()[0][0]) for h in sizes]
+    for group in (xs[:4], xs[4:]):
+        gaps = [b - a for a, b in pairwise(group)]
+        assert min(gaps) >= 1.5 * teaser.MARKER

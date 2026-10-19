@@ -43,6 +43,7 @@ XLIM = (0.45, 1.16)
 SPLIT = [2.7, 1.75]
 TEXT = paper.MIN_TEXT
 HEAD = 0.95
+BLOCK_EXTRA = 0.5
 NAME_GAP = 0.012
 ROW_RATIOS = [2.7, 1.0]
 COLUMNS = (
@@ -387,7 +388,7 @@ def _legend(fig: Figure) -> None:
         ncol=2,
         frameon=False,
         fontsize=TEXT,
-        columnspacing=1.0,
+        columnspacing=2.5,
         handletextpad=0.4,
     )
 
@@ -572,7 +573,10 @@ def build(manifest: Manifest) -> FigureOutput:
     loaded = {m: _rows(manifest, m) for m in models}
     data = {m: t for m, (t, _) in loaded.items()}
     noise = {m: _noise(table, n) for m, (table, n) in loaded.items()}
-    rows = shared.model_rows(models)
+    rows = {
+        m: y + (BLOCK_EXTRA if m.startswith("qwen3") else 0.0)
+        for m, y in shared.model_rows(models).items()
+    }
     numbers = _numbers(data, noise)
     numbers.update(_rank_numbers(data))
     counts = _counts(data)

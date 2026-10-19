@@ -31,6 +31,8 @@ TASK_NAMES = {"sentiment": "Sentiment", "truth": "Truth", "utility": "Utility"}
 MARKER = 3.0
 TEXT = paper.MIN_TEXT
 YLIM = (0.4, 1.0)
+CHANCE_WIDTH = 0.8
+SPINE_WIDTH = 0.8
 
 
 def _panel(
@@ -42,11 +44,13 @@ def _panel(
 ) -> None:
     ax.axhline(
         0.5,
-        color=paper.ENC["reference"],
+        color=paper.INK,
         linestyle=paper.LINESTYLES["reference"],
-        linewidth=paper.REFERENCE_WIDTH,
+        linewidth=CHANCE_WIDTH,
         zorder=1,
     )
+    for side in ("bottom", "left"):
+        ax.spines[side].set_linewidth(SPINE_WIDTH)
     mean, lo, hi = cell.curves["random"]
     ax.fill_between(
         cell.depth, lo, hi, color=paper.RANDOM_BAND, lw=0, zorder=1.5

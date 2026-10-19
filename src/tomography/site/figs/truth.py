@@ -216,10 +216,19 @@ def chance_line(ax: Axes, value: float) -> None:
     line.set_gid("chance")
 
 
+def _is_post(model: str) -> bool:
+    return model.startswith("qwen3") and not model.endswith("-base")
+
+
+def _open(model: str) -> dict[str, str]:
+    return {"mfc": "white"} if _is_post(model) else {}
+
+
 def _panel_levels(
-    ax: Axes, rows: dict[str, float], data: dict[str, Model]
+    ax: Axes, rows: dict[str, float], data: dict[str, Model], chance: float
 ) -> None:
     first = next(iter(data.values()))
+    chance_line(ax, chance)
     for method in TEXT_METHODS:
         cell = first.text[method]
         band = ax.axvspan(
@@ -231,7 +240,7 @@ def _panel_levels(
             zorder=1.5,
         )
         band.set_gid(f"textband:{method}")
-        line = ax.axvline(cell.value, color=paper.ENC["text"], lw=0.8, zorder=2)
+        line = ax.axvline(cell.value, color=paper.ENC["text"], lw=1.2, zorder=2)
         line.set_gid(f"text:{method}")
     for model, y in rows.items():
         for name, (_, shape, dodge) in READERS.items():
@@ -245,6 +254,7 @@ def _panel_levels(
                 shape,
                 f"{name}:{model}",
                 color=color,
+                **_open(model),
             )
     top_model = min(rows, key=lambda m: rows[m])
     top = rows[top_model]
@@ -282,12 +292,19 @@ def _panel_levels(
 def _panel_difference(
     ax: Axes, rows: dict[str, float], data: dict[str, Model]
 ) -> None:
-    zero = ax.axvline(0.0, color=paper.INK, lw=0.6, zorder=1.5, label="zero")
+    zero = ax.axvline(
+        0.0,
+        color=paper.ENC["reference"],
+        ls=paper.LINESTYLES["reference"],
+        lw=paper.REFERENCE_WIDTH,
+        zorder=1.5,
+        label="zero",
+    )
     zero.set_gid("zero")
     for model, y in rows.items():
         cell = _difference(data[model])
         _whisker(ax, y, cell, f"diff:{model}")
-        point(ax, cell.value, y, DIRECTION, f"diff:{model}")
+        point(ax, cell.value, y, DIRECTION, f"diff:{model}", **_open(model))
     ax.set_xlim(*XLIM_D)
     ax.set_xticks([-0.2, 0.0, 0.2])
     ax.set_xlabel("reader minus words")
@@ -309,6 +326,7 @@ def _panel_logprob(
             PROBABILITY,
             f"{LOG_PROBABILITY}:{model}",
             color=paper.ENC["own_probability"],
+            **_open(model),
         )
     ax.set_xticks([0.2, 0.4, 0.6])
     ax.set_xlabel("MC1 accuracy")
@@ -330,18 +348,18 @@ def _legend(fig: Figure) -> None:
         )
 
     handles: list[Any] = [
-        mark(DIRECTION, ink),
-        mark(DIRECTION, PERSONA),
-        Line2D([], [], color=paper.ENC["text"], lw=0.8),
+        Line2D([], [], color=paper.ENC["text"], lw=1.2),
         mark(PROBABILITY, paper.ENC["own_probability"]),
+        mark(DIRECTION, ink, mfc=ink, mew=0.8),
+        mark(DIRECTION, ink, mfc="white", mew=0.8),
     ]
     labels = [
-        "truth reader",
-        "honesty persona reader",
         "text-only classifiers on words and\n"
         "characters (lines), each with its\n"
         "95 percent interval (band)",
         "answer log-probability",
+        "GPT-2 and Qwen3 base",
+        "post-trained",
     ]
     fig.legend(
         handles,
@@ -350,7 +368,7 @@ def _legend(fig: Figure) -> None:
         ncol=2,
         frameon=False,
         fontsize=TEXT,
-        columnspacing=1.0,
+        columnspacing=2.5,
         labelspacing=0.8,
         handletextpad=0.4,
     )
@@ -462,16 +480,16 @@ def _detail(
     n = f"{numbers['n_questions']:.0f}"
     return (
         "(a) MC1 accuracy of the truth reader (circle) and of the honesty "
-        "persona reader (dark grey circle) at the layer chosen on "
-        f"validation, with 95 percent Wilson intervals over {n} questions; "
-        "each text-only classifier is a green line at its accuracy with its "
-        "own interval as a band. (b) The reader minus the more accurate "
-        "classifier, with the conservative interval d plus or minus 1.96 "
-        "times the square root of p1(1-p1)/n plus p2(1-p2)/n over the same "
-        f"{n} questions; intervals that exclude zero: "
-        f"{stats.per_role_text(counts['diff_excludes_zero'])}. (c) The "
-        "answer log-probability with a Wilson interval and the dotted "
-        f"chance level of {numbers['chance']:.3f}. Statements with "
+        "persona reader (dark grey circle; open for post-trained) at the "
+        "layer chosen on validation, with 95 percent Wilson intervals over "
+        f"{n} questions; each text-only classifier is a green line (the two "
+        "nearly coincide) with its own interval as a band; the dotted line "
+        f"is the chance level of {numbers['chance']:.3f}. (b) The reader "
+        "minus the more accurate classifier, with the conservative interval "
+        "d plus or minus 1.96 times the square root of p1(1-p1)/n plus "
+        f"p2(1-p2)/n over the same {n} questions; intervals that exclude "
+        f"zero: {stats.per_role_text(counts['diff_excludes_zero'])}. (c) "
+        "The answer log-probability with a Wilson interval. Statements with "
         "negation, where the reader falls below chance, are in "
         "[[fig:a_truth_cities]]."
     )
@@ -553,7 +571,7 @@ def build(manifest: Manifest) -> FigureOutput:
             ax.tick_params(axis="y", length=0)
             panels.append(ax)
         first, second, third = panels
-        _panel_levels(first, rows, data)
+        _panel_levels(first, rows, data, chance)
         _panel_difference(second, rows, data)
         _panel_logprob(third, rows, data, chance)
         for ax in panels:

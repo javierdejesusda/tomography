@@ -4,7 +4,7 @@ One panel per concept (sentiment, utility, morality, truth). Each shows the
 held-out accuracy at the layer read against the checkpoint size, with a 95
 percent Wilson interval for the test pairs and the accuracy of a random
 direction at the same layer as a grey tick. The layer curves behind the layer
-read are in the appendix figure `a_reading_curves`. The sentiment dot is the
+read are in the appendix figure `a_reading_curves`. The sentiment dots are the
 held-out value of the sample-size run at its own layer.
 """
 
@@ -348,8 +348,9 @@ def _detail(
         f"percent Wilson intervals for the test pairs ({sizes['sentiment']:,} "
         f"sentiment, {sizes['utility']:,} utility, {sizes['morality']:,} "
         f"morality and {sizes['truth']:,} truth pairs) and the random "
-        "direction at the same layer as a grey tick; the sentiment dot is "
-        "the sample-size run at 64 training pairs, read at its own layer. "
+        "direction at the same layer as a grey tick; the sentiment dots "
+        "come from the sample-size run at 64 training pairs, read at its "
+        "own layer. "
         "GPT-2 slopes are least-squares over the four sizes against log "
         "parameters, with a t interval from those four points: "
         + _slope_text(numbers, names)
