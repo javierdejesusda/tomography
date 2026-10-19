@@ -152,9 +152,9 @@ INTRODUCTION = Section(
         (
             "Truth beyond the text ([[sec:truth]]).",
             "A TruthfulQA reader stays within the band of classifiers that "
-            "see only the words on [[count:fig:truth.tqa_inside]], and the "
-            "truth reader falls below 0.5 with its interval on "
-            "[[count:fig:truth.neg_below_half]] ([[fig:truth]]).",
+            "see only the words on [[count:fig:truth.tqa_inside]], and on "
+            "[[count:fig:truth.neg_below_half]] at least one negated set "
+            "falls below chance with its interval ([[fig:truth]]).",
         ),
         (
             "Steering ([[sec:steering]]).",

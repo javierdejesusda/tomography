@@ -407,3 +407,11 @@ def test_the_approximate_contribution_counts_the_reader_and_the_control() -> (
     assert "is matched by" not in text
     assert "[[count:table:approximate.above_words]]" in text
     assert "[[count:table:approximate.random_high]]" in text
+
+
+def test_the_negated_set_claim_counts_checkpoints_with_one_set_below_chance() -> (
+    None
+):
+    text = " ".join(_all_texts())
+    assert "at least one negated set falls below chance" in text
+    assert "[[count:fig:truth.neg_below_half]]" in text
