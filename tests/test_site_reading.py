@@ -2,6 +2,8 @@ import math
 from pathlib import Path
 import runpy
 
+from matplotlib.collections import LineCollection
+from matplotlib.collections import PolyCollection
 from matplotlib.image import AxesImage
 import numpy as np
 import pytest
@@ -230,22 +232,6 @@ def test_the_caption_quotes_the_onsets_slopes_and_sizes(
     assert "include zero" in text
 
 
-def test_the_figure_has_two_rows_of_four_and_no_model_legend(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    assert fig.get_size_inches()[0] == pytest.approx(paper.FULL_WIDTH)
-    assert fig.get_size_inches()[1] == pytest.approx(4.4)
-    images = fig.findobj(AxesImage)
-    assert len(images) == sum(len(models(e)) for e in CONCEPTS.values())
-    labels = [t.get_text() for lg in fig.legends for t in lg.get_texts()]
-    assert not any("Qwen3" in x or "small" in x for x in labels)
-    assert {x for x in labels if "GPT-2" in x} == {
-        "GPT-2 and base",
-        "GPT-2 trend",
-    }
-
-
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.guard_problems(output.figure) == []
     assert checks.problems(output.figure) == []
@@ -261,47 +247,6 @@ def test_the_caption_keeps_names_and_grammar_and_avoids_first(
     assert "first" not in text.lower()
 
 
-def test_the_trend_text_keeps_a_gap_from_the_panel_letter(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    renderer = fig.canvas.get_renderer()
-    checked = 0
-    for ax in fig.axes:
-        trend = ax._left_title
-        if not trend.get_text() or "trend" not in trend.get_text():
-            continue
-        letters = [t for t in ax.texts if t.get_text().startswith("$")]
-        assert letters
-        a = letters[0].get_window_extent(renderer)
-        b = trend.get_window_extent(renderer)
-        gap_pt = (b.x0 - a.x1) * 72 / fig.dpi
-        assert gap_pt >= 2.0, gap_pt
-        checked += 1
-    assert checked >= 1
-
-
-def test_the_size_row_has_a_parameters_label_on_every_panel(
-    output: registry.FigureOutput,
-) -> None:
-    labelled = [
-        ax for ax in output.figure.axes if ax.get_xlabel() == "parameters"
-    ]
-    assert len(labelled) == 4
-
-
-def test_the_detail_explains_the_markers_the_colours_and_the_trend(
-    output: registry.FigureOutput,
-) -> None:
-    text = output.detail
-    assert "filled for GPT-2 and Qwen3 base checkpoints" in text
-    assert "open for post-trained ones" in text
-    assert "colour of a cell is the margin" in text
-    assert "marker colour darkens with size" in text
-    assert "least-squares line through the GPT-2 sizes" in text
-    assert "does not include the sampling error" in text
-
-
 def test_the_truth_onset_is_called_a_crossing_on_its_pair_count(
     output: registry.FigureOutput,
 ) -> None:
@@ -310,3 +255,168 @@ def test_the_truth_onset_is_called_a_crossing_on_its_pair_count(
     assert n == 59
     assert "earliest layer at which the margin curve crosses 0.1" in text
     assert f"truth the curve rests on {n} truth pairs" in text
+
+
+ROLE_ROWS = ("gpt2", "base", "post")
+SIZE_ORDER = {
+    "gpt2": ["S", "M", "L", "XL"],
+    "base": ["0.6B", "1.7B", "4B"],
+    "post": ["0.6B", "1.7B", "4B"],
+}
+
+
+def _role(model: str) -> str:
+    if not model.startswith("qwen3"):
+        return "gpt2"
+    return "base" if model.endswith("-base") else "post"
+
+
+def _axes(output: registry.FigureOutput, prefix: str) -> dict[str, object]:
+    return {
+        ax.get_gid(): ax
+        for ax in output.figure.axes
+        if (ax.get_gid() or "").startswith(prefix)
+    }
+
+
+def test_the_heat_maps_and_the_colour_bar_are_gone_and_the_grid_is_four_by_four(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    assert not fig.findobj(AxesImage)
+    width, height = fig.get_size_inches()
+    assert width == pytest.approx(paper.FULL_WIDTH)
+    assert height == pytest.approx(6.0)
+    assert len(_axes(output, "curve_")) == 12
+    assert len(_axes(output, "size_")) == 4
+    assert not [a for a in fig.axes if a.get_label() == "<colorbar>"]
+
+
+def test_each_role_row_holds_only_its_own_checkpoints_never_pooled(
+    output: registry.FigureOutput,
+) -> None:
+    for concept, exp in CONCEPTS.items():
+        for role in ROLE_ROWS:
+            ax = _axes(output, f"curve_{role}_{concept}")[
+                f"curve_{role}_{concept}"
+            ]
+            drawn = {
+                ln.get_gid(): np.asarray(ln.get_ydata())
+                for ln in ax.get_lines()
+                if (ln.get_gid() or "").startswith("curve:")
+            }
+            want = [m for m in models(exp) if _role(m) == role]
+            assert sorted(drawn) == sorted(f"curve:{m}" for m in want)
+            for m in want:
+                reader, random = _curves(exp, m)
+                assert drawn[f"curve:{m}"] == pytest.approx(reader - random)
+                assert ax.get_ylim() == pytest.approx((-0.1, 0.5))
+
+
+def test_every_curve_panel_has_a_random_band_a_zero_line_and_a_dot_per_checkpoint(
+    output: registry.FigureOutput,
+) -> None:
+    for concept, exp in CONCEPTS.items():
+        for role in ROLE_ROWS:
+            gid = f"curve_{role}_{concept}"
+            ax = _axes(output, gid)[gid]
+            bands = [
+                c
+                for c in ax.collections
+                if isinstance(c, PolyCollection)
+                and c.get_gid() == "random_band"
+            ]
+            assert len(bands) == 1
+            dots = [
+                ln
+                for ln in ax.get_lines()
+                if (ln.get_gid() or "").startswith("read:")
+            ]
+            want = [m for m in models(exp) if _role(m) == role]
+            assert len(dots) == len(want)
+            for ln in dots:
+                model = ln.get_gid().removeprefix("read:")
+                layer, *_ = _read_at(concept, model)
+                reader, random = _curves(exp, model)
+                assert ln.get_xdata()[0] == pytest.approx(layer / len(reader))
+                assert ln.get_ydata()[0] == pytest.approx(
+                    reader[layer - 1] - random[layer - 1]
+                )
+            zero = [ln for ln in ax.get_lines() if ln.get_gid() == "zero"]
+            assert len(zero) == 1
+
+
+def test_the_onset_is_a_tick_on_the_x_axis_at_the_first_layer_above_zero_point_one(
+    output: registry.FigureOutput,
+) -> None:
+    for concept, exp in CONCEPTS.items():
+        for role in ROLE_ROWS:
+            gid = f"curve_{role}_{concept}"
+            ax = _axes(output, gid)[gid]
+            ticks = [
+                c
+                for c in ax.collections
+                if isinstance(c, LineCollection) and c.get_gid() == "onset"
+            ]
+            want = sorted(
+                d
+                for m in models(exp)
+                if _role(m) == role and (d := _onset(concept, m)) is not None
+            )
+            got = sorted(
+                float(seg[0][0]) for c in ticks for seg in c.get_segments()
+            )
+            assert got == pytest.approx(want)
+
+
+def test_the_end_labels_sit_in_the_label_column_in_size_order(
+    output: registry.FigureOutput,
+) -> None:
+    labels = _axes(output, "labels_")
+    assert sorted(labels) == ["labels_base", "labels_gpt2", "labels_post"]
+    for role, ax in labels.items():
+        texts = [t.get_text() for t in ax.texts if t.get_gid() == "end_label"]
+        assert texts == SIZE_ORDER[role.removeprefix("labels_")]
+    for gid, ax in _axes(output, "curve_").items():
+        assert not [t for t in ax.texts if t.get_gid() == "end_label"], gid
+
+
+def test_the_size_row_has_a_reader_whisker_a_random_tick_and_no_trend_line(
+    output: registry.FigureOutput,
+) -> None:
+    for concept, exp in CONCEPTS.items():
+        ax = _axes(output, f"size_{concept}")[f"size_{concept}"]
+        readers = [
+            ln
+            for ln in ax.get_lines()
+            if (ln.get_gid() or "").startswith("reader:")
+        ]
+        assert len(readers) == len(models(exp))
+        for ln in readers:
+            model = ln.get_gid().removeprefix("reader:")
+            _, acc, _, _ = _read_at(concept, model)
+            assert ln.get_ydata()[0] == pytest.approx(acc)
+            filled = _role(model) != "post"
+            assert (ln.get_markerfacecolor() != "white") == filled
+        randoms = [
+            ln
+            for ln in ax.get_lines()
+            if (ln.get_gid() or "").startswith("random:")
+        ]
+        assert len(randoms) == len(models(exp))
+        assert not [ln for ln in ax.get_lines() if ln.get_gid() == "trend"]
+        assert ax.get_ylim() == pytest.approx((0.45, 1.0))
+
+
+def test_the_detail_describes_the_curves_the_band_the_onset_and_the_size_row(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.detail
+    assert "one line per checkpoint" in text
+    assert "grey band" in text
+    assert "95 percent interval over seeds" in text
+    assert "tick on the x axis" in text
+    assert "darker lines are larger checkpoints" in text
+    assert "no fitted line" in text
+    assert "sentiment curves" in text
+    assert "does not include the sampling error" in text

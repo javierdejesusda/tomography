@@ -36,6 +36,9 @@ class Reading:
         reader: Reader accuracy at each layer.
         random: Accuracy of a random direction at each layer.
         shuffled: Accuracy of a shuffled-label reader at each layer.
+        random_lo: Lower end of the stored 95 percent interval over seeds of
+            the random direction at each layer, or None when not stored.
+        random_hi: Upper end of that interval, or None.
     """
 
     layer: int
@@ -47,6 +50,8 @@ class Reading:
     reader: np.ndarray
     random: np.ndarray
     shuffled: np.ndarray
+    random_lo: np.ndarray | None = None
+    random_hi: np.ndarray | None = None
 
     @property
     def selectivity(self) -> np.ndarray:
@@ -121,6 +126,8 @@ def load(manifest: Manifest, exp: str, model: str) -> Reading | None:
     count = int(meta["n_layers"])
     with np.load(run / f"{stem}.npz") as npz:
         mean = np.asarray(npz["mean"], dtype=float)
+        low = np.asarray(npz["lo"], dtype=float)
+        high = np.asarray(npz["hi"], dtype=float)
     series = list(meta["series"])
     return Reading(
         layer=layer,
@@ -132,6 +139,8 @@ def load(manifest: Manifest, exp: str, model: str) -> Reading | None:
         reader=mean[series.index("reader")],
         random=mean[series.index("random")],
         shuffled=mean[series.index("shuffled")],
+        random_lo=low[series.index("random")],
+        random_hi=high[series.index("random")],
     )
 
 
@@ -232,7 +241,7 @@ def load_sentiment(manifest: Manifest, model: str) -> Reading | None:
     cell = cells["sentiment"]
     row = cell.rows["logistic"]
     mean, _, _ = cell.curves["logistic"]
-    random, _, _ = cell.curves["random"]
+    random, random_lo, random_hi = cell.curves["random"]
     return Reading(
         layer=row.layer,
         accuracy=row.report,
@@ -243,4 +252,6 @@ def load_sentiment(manifest: Manifest, model: str) -> Reading | None:
         reader=mean,
         random=random,
         shuffled=np.full(cell.n_layers, np.nan),
+        random_lo=random_lo,
+        random_hi=random_hi,
     )
