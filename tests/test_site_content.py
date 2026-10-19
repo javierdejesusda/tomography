@@ -940,3 +940,27 @@ def test_the_knowledge_steering_counts_hold_per_role() -> None:
     text = _text()
     for gone in ("not selective", "false refusal", "4 of 10"):
         assert gone not in text
+
+
+def test_the_reading_subsection_states_the_words_alone_baseline() -> None:
+    text = " ".join(_texts(_section("reading")))
+    for token in (
+        "[[num:table:reading.word_sentiment]]",
+        "[[num:table:reading.char_sentiment]]",
+        "[[num:table:reading.word_utility]]",
+        "[[num:table:reading.char_utility]]",
+    ):
+        assert token in text, token
+    assert "The words alone read sentiment" in text
+    assert "with an interval above chance" in text
+    assert "do not separate from chance for morality, truth and honesty" in text
+    table = registry.build_table("reading", Manifest(ROOT))
+    for analyzer in ("word", "char"):
+        for concept, above in (
+            ("sentiment", 1.0),
+            ("utility", 1.0),
+            ("morality", 0.0),
+            ("truth", 0.0),
+            ("honesty", 0.0),
+        ):
+            assert table.numbers[f"{analyzer}_{concept}_above"] == above
