@@ -216,10 +216,6 @@ def test_caption_is_the_template_filled_from_the_files(
     output: registry.FigureOutput,
 ) -> None:
     n = output.numbers
-    assert output.claim == (
-        "Post-training lowers held-out sentiment reading and leaves most "
-        "other readings within their intervals."
-    )
     sentiment = sorted(abs(n[f"sentiment_{k}"]) for k in SIZES)
     assert (
         "Post-trained minus base checkpoint for each Qwen3 size (0.6B, "
@@ -254,11 +250,15 @@ def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
     assert checks.problems(fig) == []
 
 
-def test_markers_are_left_filled_diamonds_in_the_size_colors(
+def test_markers_are_left_filled_circles_in_the_size_colors(
     output: registry.FigureOutput,
 ) -> None:
     (ax,) = output.figure.axes
-    marked = [line for line in ax.lines if line.get_marker() == "D"]
+    marked = [
+        line
+        for line in ax.lines
+        if line.get_marker() == paper.MEASURE_MARKERS["direction"]
+    ]
     assert len(marked) == 24
     assert {line.get_fillstyle() for line in marked} == {"left"}
     assert len({line.get_color() for line in marked}) == 3
@@ -301,3 +301,32 @@ def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
     with paper.paper_style():
         assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
+
+
+def test_seed_paired_differences_that_exclude_zero_are_named_and_tokenised(
+    output: registry.FigureOutput,
+) -> None:
+    names = {"r2": "utility", "r3": "morality", "r5": "honesty", "r7": "truth"}
+    found = []
+    for row in _table("p8", "qwen3-1.7b"):
+        if row["source"] in names and (row["lo"] > 0 or row["hi"] < 0):
+            found.append((names[row["source"]], row["tuned"]))
+    assert sorted(found) == [
+        ("honesty", "qwen3-0.6b"),
+        ("morality", "qwen3-0.6b"),
+        ("utility", "qwen3-1.7b"),
+    ]
+    assert output.numbers["paired_excluding_zero"] == 3
+    for name, tuned in found:
+        size = tuned.split("-")[1].replace(".", "")
+        assert output.numbers[f"paired_{name}_{size}"] == 1
+    assert (
+        "An interval that includes zero does not show that nothing changed: "
+        "the seed-paired differences of [[table:base_post]] exclude zero for "
+        "morality on 0.6B, honesty on 0.6B and utility on 1.7B."
+    ) in output.detail
+    assert output.claim == (
+        "Post-training lowers held-out sentiment reading; on the other "
+        "readings most intervals include zero, which is not evidence of no "
+        "change."
+    )

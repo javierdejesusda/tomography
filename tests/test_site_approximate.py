@@ -374,6 +374,8 @@ def test_no_two_legend_keys_share_a_marker_and_fill(
     for handle, text in zip(
         legend.legend_handles, legend.get_texts(), strict=True
     ):
+        if not hasattr(handle, "get_marker"):
+            continue
         key = (
             str(handle.get_marker()),
             str(handle.get_markerfacecolor()),
@@ -458,6 +460,50 @@ def test_clipped_bands_are_marked_on_panel_c(
     output: registry.FigureOutput,
 ) -> None:
     ax_c = output.figure.axes[2]
-    assert any("clipped" in t.get_text() for t in ax_c.texts)
+    assert "band clipped" in ax_c.get_xlabel()
     markers = {line.get_marker() for line in ax_c.lines}
-    assert {"<", ">"} & markers
+    assert {4, 5} & markers
+
+
+def test_the_reader_is_the_direction_circle_and_no_symbol_repeats(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    markers = {
+        t.get_text(): h.get_marker()
+        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
+        if hasattr(h, "get_marker")
+    }
+    assert markers["range reader"] == paper.MEASURE_MARKERS["direction"]
+    assert markers["random direction"] == paper.MEASURE_MARKERS["random"]
+    assert markers["GPT-2 and base"] == paper.ROLE_KEY_MARKER
+    labelled = [m for m in markers.values() if m not in ("None", "")]
+    assert labelled.count("o") == 1
+
+
+def test_panel_a_item_sets_use_the_category_markers_and_are_keyed(
+    output: registry.FigureOutput,
+) -> None:
+    sets = paper.ITEM_SET_MARKERS
+    ax_a = output.figure.axes[0]
+    drawn = {ln.get_marker() for ln in ax_a.lines}
+    assert set(sets.values()) <= drawn
+    (legend,) = output.figure.legends
+    keyed = {
+        t.get_text(): h.get_marker()
+        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
+        if hasattr(h, "get_marker")
+    }
+    assert keyed["range items"] == sets["range"]
+    assert keyed["exact items"] == sets["exact"]
+    assert keyed["people's heights"] == sets["people"]
+    assert "(star)" in output.detail
+    assert "circle" not in output.detail.split("(b)")[0]
+
+
+def test_the_grey_random_range_band_is_keyed(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert "random range of the position" in labels

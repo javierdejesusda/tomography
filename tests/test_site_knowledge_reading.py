@@ -15,6 +15,7 @@ from tomography.viz import paper
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
+_L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
 SPEC = "knowledge_reading"
 Z = 1.959963984540054
 MINUS = chr(0x2212)
@@ -271,8 +272,8 @@ def test_caption_is_the_template_filled_from_the_files(
     assert all(r["lo"] > 0 for r in probe)
     caption = f"{output.claim} {output.detail}"
     assert output.claim == (
-        "A known-against-unknown direction ranks questions but adds nothing "
-        "to the model's confidence."
+        "A known-against-unknown direction ranks questions but adds at most "
+        "a small amount to the model's confidence."
     )
     assert (
         f"on {stats.per_role_text(point)} by point estimate, and the interval "
@@ -354,3 +355,38 @@ def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
     with paper.paper_style():
         assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
+
+
+def test_the_largest_upper_bound_and_the_probe_labels_are_stated(
+    output: registry.FigureOutput,
+) -> None:
+    lat = {
+        m: f["confidence+lat"]
+        for m, f in _increments().items()
+        if "confidence+lat" in f
+    }
+    model = max(lat, key=lambda m: lat[m]["hi"])
+    assert output.numbers["dir_inc_hi_max"] == pytest.approx(lat[model]["hi"])
+    name = paper.display_name(model)
+    assert (
+        f"The largest upper bound of the direction's interval is "
+        f"+{lat[model]['hi']:.3f} ({name})"
+    ) in output.detail
+    assert "fitted on the correct and wrong labels" in output.detail
+    assert "the direction is not" in output.detail
+
+
+def test_the_role_key_is_a_hexagon_and_no_symbol_means_two_things(
+    output: registry.FigureOutput,
+) -> None:
+    assert _L["marker_clashes"](output.figure) == []
+    (legend,) = output.figure.legends
+    markers = {
+        t.get_text(): h.get_marker()
+        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
+    }
+    assert markers["GPT-2 and base"] == paper.ROLE_KEY_MARKER
+    assert markers["post-trained"] == paper.ROLE_KEY_MARKER
+    assert markers["knowledge direction"] == paper.MEASURE_MARKERS["direction"]
+    assert markers["supervised probe"] == paper.MEASURE_MARKERS["probe"]
+    assert markers["popularity"] == paper.MEASURE_MARKERS["popularity"]

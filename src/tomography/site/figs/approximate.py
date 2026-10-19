@@ -13,6 +13,7 @@ from typing import Any
 
 from matplotlib import ticker
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.patches import Rectangle
 
 from tomography.site import runfiles
@@ -31,9 +32,9 @@ HEADER = ["panel", "model", "series", "value", "lo", "hi"]
 TOP = -1.0
 POSITION_LIMITS = (-0.5, 1.5)
 PANEL_A = (
-    ("range_items", "o", -0.28),
-    ("exact_items", "s", 0.0),
-    ("people", "^", 0.28),
+    ("range_items", paper.ITEM_SET_MARKERS["range"], -0.28),
+    ("exact_items", paper.ITEM_SET_MARKERS["exact"], 0.0),
+    ("people", paper.ITEM_SET_MARKERS["people"], 0.28),
 )
 CLAIM = (
     "Qwen3 writes ranges where the sourced answer is a range, but a range "
@@ -41,8 +42,8 @@ CLAIM = (
 )
 DETAIL = (
     "(a) Share of greedy answers written as a range (few-shot, range "
-    "example last) on range items (circle), exact items (square) and "
-    "{n_people} people's heights (triangle), with Wilson intervals on the "
+    "example last) on range items (star), exact items (three-armed mark) and "
+    "{n_people} people's heights (left triangle), with Wilson intervals on the "
     "item counts: Qwen3 base checkpoints write a range on {base_min} to "
     "{base_max} percent of the range items and post-trained ones on "
     "{post_min} to {post_max} percent, on at most {exact} percent of the "
@@ -159,7 +160,7 @@ def _band(ax: Any, y: float, lo: float, hi: float, model: str) -> None:
             zorder=1,
         )
     )
-    for marker, edge, clip in (("<", low, lo < low), (">", high, hi > high)):
+    for marker, edge, clip in ((4, low, lo < low), (5, high, hi > high)):
         if clip:
             ax.plot(
                 [edge],
@@ -219,7 +220,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 model,
                 y - 0.15,
                 float(reader.reader["auroc"]),
-                "D",
+                paper.MEASURE_MARKERS["direction"],
                 paper.INK,
                 (float(reader.reader["lo"]), float(reader.reader["hi"])),
             )
@@ -265,7 +266,7 @@ def build(manifest: Manifest) -> FigureOutput:
                 model,
                 y,
                 float(reader.position["position"]),
-                "D",
+                paper.MEASURE_MARKERS["direction"],
                 paper.INK,
             )
             _band(ax_c, y, min(reader.draws), max(reader.draws), model)
@@ -327,26 +328,34 @@ def build(manifest: Manifest) -> FigureOutput:
                 ha="center",
                 va="center",
             )
-        ax_c.text(
-            POSITION_LIMITS[1],
-            max(rows.values()) + 0.45,
-            "arrows: band clipped",
-            color=paper.ENC["secondary_text"],
-            fontsize=6.5,
-            ha="right",
-            va="center",
-        )
-        ax_c.set_xlabel("people's position between\nbuildings and breeds")
+        ax_c.set_xlabel("people's position\n(arrows: band clipped)")
         for ax, letter in zip((ax_a, ax_b, ax_c), "abc", strict=True):
             paper.panel_letter(ax, letter)
         legend = fig.legend(
             handles=[
-                _rows.series_handle("range items", "o", paper.INK),
-                _rows.series_handle("exact items", "s", paper.INK),
-                _rows.series_handle("people's heights", "^", paper.INK),
-                _rows.series_handle("range reader", "D", paper.INK),
+                _rows.series_handle(
+                    "range items", paper.ITEM_SET_MARKERS["range"], paper.INK
+                ),
+                _rows.series_handle(
+                    "exact items", paper.ITEM_SET_MARKERS["exact"], paper.INK
+                ),
+                _rows.series_handle(
+                    "people's heights",
+                    paper.ITEM_SET_MARKERS["people"],
+                    paper.INK,
+                ),
+                _rows.series_handle(
+                    "range reader",
+                    paper.MEASURE_MARKERS["direction"],
+                    paper.INK,
+                ),
                 _rows.series_handle(
                     "random direction", "x", paper.ENC["random_marker"]
+                ),
+                Patch(
+                    facecolor=paper.RANDOM_BAND,
+                    lw=0,
+                    label="random range of the position",
                 ),
                 Line2D(
                     [],

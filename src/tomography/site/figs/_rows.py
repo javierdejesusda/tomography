@@ -18,6 +18,8 @@ from tomography.viz import axes
 from tomography.viz import paper
 
 PAD = 0.07
+ROLE_KEY_SIZE = 6.5
+STAR_SIZE = 6.0
 MARKER_SIZE = 3.5
 EDGE_WIDTH = 0.8
 
@@ -165,7 +167,7 @@ def dot(
         ls="none",
         color=color,
         zorder=3,
-        **fill(model, color),
+        **{**fill(model, color), "markersize": marker_size(marker)},
     )
 
 
@@ -185,6 +187,22 @@ def row_axis(ax: Axes, rows: Mapping[str, float], labels: bool) -> None:
         ax.tick_params(labelleft=False)
     ax.tick_params(axis="y", length=0)
     ax.spines["left"].set_visible(False)
+
+
+def marker_size(marker: str) -> float:
+    """Gives the size that makes a marker shape legible.
+
+    Args:
+        marker: Marker shape.
+
+    Returns:
+        The size in points: larger for the star and the role key hexagon.
+    """
+    if marker == paper.ROLE_KEY_MARKER:
+        return ROLE_KEY_SIZE
+    if marker == "*":
+        return STAR_SIZE
+    return MARKER_SIZE
 
 
 def series_handle(
@@ -210,7 +228,7 @@ def series_handle(
         markerfacecolor=color if filled else "white",
         markeredgecolor=color,
         markeredgewidth=EDGE_WIDTH,
-        markersize=MARKER_SIZE,
+        markersize=marker_size(marker),
         label=label,
     )
 

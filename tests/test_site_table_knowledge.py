@@ -182,3 +182,15 @@ def test_no_underscore_backtick_or_run_code(
     texts = [re.sub(r"\[\[.*?\]\]", "", t) for t in texts]
     assert not any("_" in t or "`" in t for t in texts)
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
+
+
+def test_the_largest_upper_bound_of_the_direction_gain_is_a_number(
+    output: registry.TableOutput,
+) -> None:
+    upper = []
+    for model in models("p9a"):
+        for r in _table("p9c", model, "table_incremental.json"):
+            if r["dataset"] == "popqa" and r["features"] == "confidence+lat":
+                upper.append(r["hi"])
+    assert output.numbers["gain_upper_max"] == max(upper)
+    assert fmt(max(upper)) == "0.032"

@@ -23,6 +23,11 @@ from tomography.site.tables import _cells
 
 TOKEN = re.compile(r"\[\[(.+?)\]\]")
 NBSP = chr(0xA0)
+WIDE_COLUMNS = 10
+TEXT_COLUMNS = 6
+SPAN_RUN = 3
+SHORT_LABEL = 24
+LONG_WORD = 20
 BREAKS_BEFORE = chr(0xB1) + "[("
 
 
@@ -85,9 +90,9 @@ class Document:
 def glue(cell: str) -> str:
     """Keeps every number of a numeric cell whole.
 
-    A space stays a break point only before a plus-minus sign or a bracket,
-    where the cell may start a second line, and after a comma inside an
-    interval; every other space next to a digit becomes a no-break space.
+    A space stays a break point only before a plus-minus sign, a bracket or
+    a parenthesis, where the cell may start a second line; every other space
+    next to a digit becomes a no-break space, so an interval never splits.
 
     Args:
         cell: The cell text.
@@ -100,7 +105,7 @@ def glue(cell: str) -> str:
         if char != " " or i == 0 or i == len(cell) - 1:
             continue
         before, after = cell[i - 1], cell[i + 1]
-        if after in BREAKS_BEFORE or before == ",":
+        if after in BREAKS_BEFORE:
             continue
         if before.isdigit() or after.isdigit() or before in "*)]":
             out[i] = NBSP
@@ -351,6 +356,49 @@ class Page:
             "</figcaption></figure>"
         )
 
+    def cells(self, row: list[str], align: str) -> str:
+        """Renders the cells of one row.
+
+        Numeric cells wrap only between their numbers, short text cells stay
+        whole, long unbroken identifiers may break, and three or more equal
+        cells without digits in a row become one spanning cell.
+
+        Args:
+            row: The cell texts.
+            align: The alignment letter of each column.
+
+        Returns:
+            The `td` elements.
+        """
+        out = []
+        j = 0
+        while j < len(row):
+            cell, a = row[j], align[j]
+            if a == "r":
+                run = 1
+                while (
+                    j + run < len(row)
+                    and align[j + run] == "r"
+                    and row[j + run] == cell
+                    and not any(c.isdigit() for c in cell)
+                ):
+                    run += 1
+                span = f' colspan="{run}"' if run >= SPAN_RUN else ""
+                out.append(f'<td class="r"{span}>{self.text(glue(cell))}</td>')
+                j += run if run >= SPAN_RUN else 1
+                continue
+            plain = TOKEN.sub("", cell)
+            words = plain.split()
+            if "/" in plain or any(len(w) >= LONG_WORD for w in words):
+                css = ' class="id"'
+            elif len(plain) <= SHORT_LABEL:
+                css = ' class="k"'
+            else:
+                css = ""
+            out.append(f"<td{css}>{self.text(cell)}</td>")
+            j += 1
+        return "".join(out)
+
     def table(self, key: str) -> str:
         """Renders a booktabs table with its caption above."""
         entry = self.doc.tables.get(key) or self.doc.appendix_tables[key]
@@ -358,6 +406,12 @@ class Page:
         number = self.table_number[key]
         name = f"table-{number}"
         caption = f"{out.claim} {out.detail}".strip()
+        text_only = "r" not in out.align and len(out.columns) >= TEXT_COLUMNS
+        wide = (
+            "table wide"
+            if len(out.columns) >= WIDE_COLUMNS or text_only
+            else "table"
+        )
         groups = "".join(
             f'<th colspan="{span}" class="span{" muted" if muted else ""}">'
             f"{_e(label)}</th>"
@@ -368,17 +422,9 @@ class Page:
             f'<th class="r">{_e(c)}</th>' if a == "r" else f"<th>{_e(c)}</th>"
             for c, a in zip(out.columns, out.align, strict=True)
         )
-        models = out.columns[0] == "Model"
         body = []
         for i, row in enumerate(out.rows):
-            cells = "".join(
-                f'<td class="r">{self.text(glue(c))}</td>'
-                if a == "r"
-                else f'<td class="k">{self.text(c)}</td>'
-                if models and j == 0
-                else f"<td>{self.text(c)}</td>"
-                for j, (c, a) in enumerate(zip(row, out.align, strict=True))
-            )
+            cells = self.cells(row, out.align)
             if out.row_groups is None:
                 grouped = i and row[0] and not out.groups
             else:
@@ -388,7 +434,7 @@ class Page:
         notes = "".join(f"<p>{self.text(n)}</p>" for n in out.notes)
         notes_html = f'<div class="notes">{notes}</div>' if notes else ""
         return (
-            f'<div class="table" id="{name}">'
+            f'<div class="{wide}" id="{name}">'
             f'<p class="caption" id="{name}-cap">Table {number}: '
             f"{self.text(caption)} "
             f'<span class="data">(<a href="data/{name}.csv">data</a>)</span>'

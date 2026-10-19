@@ -94,6 +94,7 @@ def build(manifest: Manifest) -> TableOutput:
     select: dict[str, int] = {}
     totals: dict[str, int] = {}
     increments_above = {"direction": 0, "probe": 0}
+    gain_upper: list[float] = []
     for model in models:
         reader = _p9b(manifest, model)
         inc = _increments(manifest, model)
@@ -119,6 +120,8 @@ def build(manifest: Manifest) -> TableOutput:
         for key, name in (("direction", "lat"), ("probe", "probe")):
             hit = inc.get(f"confidence+{name}")
             increments_above[key] += bool(hit and hit["lo"] > 0)
+            if hit and key == "direction":
+                gain_upper.append(float(hit["hi"]))
         found, hits, selective = _steering(manifest, model)
         totals[model] = found
         distinct[model], select[model] = hits, selective
@@ -155,6 +158,7 @@ def build(manifest: Manifest) -> TableOutput:
         "above_popularity": float(sum(above.values())),
         "direction_increment_above": float(increments_above["direction"]),
         "probe_increment_above": float(increments_above["probe"]),
+        "gain_upper_max": max(gain_upper),
     }
     claim = (
         "Within-relation AUROC for PopQA questions the model answers "

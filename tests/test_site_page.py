@@ -305,7 +305,7 @@ def _grouped(row_groups: tuple[int, ...] | None) -> str:
 def test_row_groups_set_the_rows_that_get_a_group_rule() -> None:
     html = _grouped((0, 2))
     assert html.count('<tr class="group">') == 1
-    assert '<tr class="group"><td>b</td>' in html
+    assert '<tr class="group"><td class="k">b</td>' in html
 
 
 def test_a_declared_empty_row_groups_draws_no_group_rule() -> None:
@@ -497,20 +497,6 @@ def test_table_numbers_increase_in_page_order(
     assert figures == list(range(1, len(figures) + 1))
 
 
-def test_only_the_model_column_is_kept_on_one_line() -> None:
-    output = registry.TableOutput(
-        "Claim.", "Detail.", ["Model", "B"], [["m", "1"]], "lr", [], {}
-    )
-    doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
-    models = page.Page(doc).table("checkpoints")
-    assert '<td class="k">m</td>' in models
-    text = page.Page(_doc(tables={"checkpoints": _table()})).table(
-        "checkpoints"
-    )
-    assert '<td class="k">' not in text
-    assert "<td>x</td>" in text
-
-
 NBSP = "\u00a0"
 
 
@@ -518,7 +504,10 @@ NBSP = "\u00a0"
     ("cell", "expected"),
     [
         ("0.065 ± 0.072", f"0.065 ±{NBSP}0.072"),
-        (f"0.011 [{MINUS}0.006, 0.032]", f"0.011 [{MINUS}0.006, 0.032]"),
+        (
+            f"0.011 [{MINUS}0.006, 0.032]",
+            f"0.011 [{MINUS}0.006,{NBSP}0.032]",
+        ),
         ("0.622 (0.490)", "0.622 (0.490)"),
         ("1 of 1", f"1{NBSP}of{NBSP}1"),
         ("no contrast", "no contrast"),
@@ -552,3 +541,77 @@ def test_plain_text_resolves_every_token_type_without_markup() -> None:
         "[[num:fig:method.n]] [[cite:radford2019language]][[fn:note]]"
     )
     assert view.plain(cell) == "Table 1 and Figure 1, 3 radford2019language"
+
+
+def _two_column(rows: list[list[str]], columns: list[str]) -> str:
+    output = registry.TableOutput(
+        "Claim.",
+        "Detail.",
+        columns,
+        rows,
+        "l" + "r" * (len(columns) - 1),
+        [],
+        {},
+    )
+    doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+    return page.Page(doc).table("checkpoints")
+
+
+def test_repeated_text_cells_of_a_row_become_one_spanning_cell() -> None:
+    row = [
+        "m",
+        "no contrast",
+        "no contrast",
+        "no contrast",
+        "0.5",
+        "none",
+        "none",
+    ]
+    html = _two_column([row], ["Model", "a", "b", "c", "d", "e", "f"])
+    assert '<td class="r" colspan="3">no contrast</td>' in html
+    assert html.count("no contrast") == 1
+    assert html.count("none") == 2
+
+
+def test_short_labels_stay_whole_and_long_identifiers_may_break() -> None:
+    long_id = "siebert/sentiment-roberta-large-english"
+    output = registry.TableOutput(
+        "Claim.",
+        "Detail.",
+        ["Finder", "Source"],
+        [["logistic regression", long_id]],
+        "ll",
+        [],
+        {},
+    )
+    doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+    html = page.Page(doc).table("checkpoints")
+    assert '<td class="k">logistic regression</td>' in html
+    assert f'<td class="id">{long_id}</td>' in html
+    assert '<td class="id">Qwen/Qwen3-0.6B</td>' in _hub_cell("Qwen/Qwen3-0.6B")
+    wide = _two_column([["x", "1"]], ["Model", *"abcdefghi"])
+    assert 'class="table wide"' in wide
+    narrow = _two_column([["x", "1"]], ["Model", "a"])
+    assert 'class="table wide"' not in narrow
+
+
+def _hub_cell(text: str) -> str:
+    output = registry.TableOutput(
+        "Claim.", "Detail.", ["Model", "Hub ID"], [["m", text]], "ll", [], {}
+    )
+    doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+    return page.Page(doc).table("checkpoints")
+
+
+def test_a_text_table_of_six_columns_is_wide_too() -> None:
+    output = registry.TableOutput(
+        "Claim.",
+        "Detail.",
+        list("abcdef"),
+        [list("uvwxyz")],
+        "llllll",
+        [],
+        {},
+    )
+    doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+    assert 'class="table wide"' in page.Page(doc).table("checkpoints")

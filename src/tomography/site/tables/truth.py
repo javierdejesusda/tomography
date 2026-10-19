@@ -29,13 +29,14 @@ COLUMNS = [
     "Answer log-probability",
     "Accuracy",
     "Layer",
+    "Random",
     "Accuracy",
     "Random",
     "Seed agreement",
 ]
 GROUPS = (
     ("TruthfulQA MC1", 4, False),
-    ("Honesty in template", 2, False),
+    ("Honesty in template", 3, False),
     ("Honesty transfer", 2, False),
     ("Seed agreement", 1, False),
 )
@@ -147,6 +148,7 @@ def build(manifest: Manifest) -> TableOutput:
                 _cells.num(_mc1(table, "standard")["mc1"]),
                 _cells.num(block["test_accuracy"]),
                 str(block["best_layer"]),
+                _cells.num(scored.random),
                 _cells.num(s5["test_accuracy"]),
                 _cells.num(
                     _transfer_random(manifest, model, int(s5["best_layer"]))
@@ -156,6 +158,7 @@ def build(manifest: Manifest) -> TableOutput:
                 ),
             ]
         )
+    n_models = len(rows)
     run6 = manifest.run("r6", models[0])
     assert run6 is not None
     n_questions = int(runfiles.summary(run6)["n_test"])
@@ -163,6 +166,12 @@ def build(manifest: Manifest) -> TableOutput:
     lo, hi = stats.wilson(0.5, n_questions)
     half = (hi - lo) / 2
     word, char = text["text_word"], text["text_char"]
+    blank = [""] * (len(COLUMNS) - 2)
+    rows += [
+        ["Words classifier", _cells.num(word["mc1"]), *blank],
+        ["Characters classifier", _cells.num(char["mc1"]), *blank],
+        ["Chance", _cells.num(chance), *blank],
+    ]
     claim = (
         "Truthfulness and honesty readings on every checkpoint, with the "
         "baselines of the same questions."
@@ -178,7 +187,8 @@ def build(manifest: Manifest) -> TableOutput:
         f"{_cells.interval(word['mc1'], word['lo'], word['hi'])}, one on the "
         "characters "
         f"{_cells.interval(char['mc1'], char['lo'], char['hi'])}, and chance "
-        f"is {_cells.num(chance)}. "
+        f"is {_cells.num(chance)}; the last three rows give these baselines, "
+        "which apply to each of the four TruthfulQA columns. "
         + _template_sentence(in_acc, in_layer)
         + " In the template the random direction at the same layer reaches "
         "[[num:table:truth.template_random_min]] to "
@@ -208,9 +218,9 @@ def build(manifest: Manifest) -> TableOutput:
         detail,
         COLUMNS,
         rows,
-        _cells.check_align("l" + "r" * 9, len(COLUMNS)),
+        _cells.check_align("l" + "r" * 10, len(COLUMNS)),
         [],
         numbers,
         groups=GROUPS,
-        row_groups=_rows.role_groups(models),
+        row_groups=(*_rows.role_groups(models), n_models),
     )

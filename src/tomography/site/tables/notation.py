@@ -77,9 +77,9 @@ ROWS = (
     ),
     (
         "run codes",
-        "R1 to R7, P1 to P10, M1, C1 and A1 name the experiments in the "
-        "repository and in the data files; the page names experiments by "
-        "what they test.",
+        "The directories of the results folder are named by an experiment "
+        "code, a letter and a number; the page names experiments by what "
+        "they test and the README lists the codes.",
     ),
 )
 

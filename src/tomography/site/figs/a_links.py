@@ -96,6 +96,18 @@ def _shares(
     return [(k, sum(v), len(v)) for k, v in sorted(cells.items())]
 
 
+def _tally(
+    shares: dict[str, list[tuple[int, int, int]]],
+) -> dict[str, list[int]]:
+    tally = {role: [0, 0] for role in stats.ROLES}
+    for model, cells in shares.items():
+        cell = tally[stats.role(model)]
+        for _, hits, total in cells:
+            cell[0] += hits
+            cell[1] += total
+    return tally
+
+
 def _panel(ax: Axes, found: dict[str, list[tuple[int, int, int]]]) -> None:
     for model, shares in found.items():
         style = axes.model_style(model)
@@ -178,10 +190,25 @@ def build(manifest: Manifest) -> FigureOutput:
             ("GPT-2", [m for m in models if m.startswith("gpt2")]),
             ("Qwen3", [m for m in models if not m.startswith("gpt2")]),
         )
+        tallies = {row: _tally(found[row]) for row in found}
         for r, row in enumerate(("cosine", "auroc")):
             for c, (title, members) in enumerate(groups):
                 ax = grid[r][c]
                 _panel(ax, {m: found[row][m] for m in members})
+                roles = ("gpt2",) if c == 0 else ("base", "post")
+                for i, role in enumerate(roles):
+                    hits, total = tallies[row][role]
+                    ax.text(
+                        0.03,
+                        0.95 - 0.1 * i,
+                        f"{stats.ROLE_NAMES[role]}: {hits:,} of {total:,} "
+                        "cells",
+                        transform=ax.transAxes,
+                        fontsize=6.5,
+                        color=paper.ENC["secondary_text"],
+                        ha="left",
+                        va="top",
+                    )
                 paper.panel_title(
                     ax, "abcd"[2 * r + c], title if r == 0 else ""
                 )
@@ -230,12 +257,7 @@ def build(manifest: Manifest) -> FigureOutput:
     numbers: dict[str, float] = {"layer1_cos_max": biggest}
     values: dict[str, str] = {}
     for name, row in (("cos", "cosine"), ("auc", "auroc")):
-        tally = {role: [0, 0] for role in stats.ROLES}
-        for model in models:
-            cell = tally[stats.role(model)]
-            for _, hits, total in found[row][model]:
-                cell[0] += hits
-                cell[1] += total
+        tally = _tally(found[row])
         counts[f"{name}_out"] = {
             role: stats.RoleCount(h, t) for role, (h, t) in tally.items()
         }
