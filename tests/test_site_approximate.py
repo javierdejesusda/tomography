@@ -6,11 +6,13 @@ from pathlib import Path
 import runpy
 from typing import Any
 
+from matplotlib import colors as mpl_colors
 import pytest
 
 from tomography.site import registry
 from tomography.site import stats
 from tomography.site.manifest import Manifest
+from tomography.viz import axes
 from tomography.viz import checks
 from tomography.viz import paper
 
@@ -316,75 +318,12 @@ def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
     assert checks.problems(fig) == []
 
 
-def test_patches_are_the_text_band_and_the_random_bars_only(
-    output: registry.FigureOutput,
-) -> None:
-    a, b, c = output.figure.axes
-    assert len(a.patches) == 0
-    assert len(b.patches) == 1
-    assert len(c.patches) == len(_models("p10b"))
-
-
-def test_three_panels_share_rows_and_carry_letters(
-    output: registry.FigureOutput,
-) -> None:
-    a, b, c = output.figure.axes
-    assert a.get_shared_y_axes().joined(a, b)
-    assert a.get_shared_y_axes().joined(a, c)
-    checks.draw(output.figure)
-    letters = [
-        t.get_text()
-        for ax in output.figure.axes
-        for t in ax.texts
-        if t.get_text().startswith(r"$\mathbf")
-    ]
-    assert sorted(letters) == [rf"$\mathbf{{({x})}}$" for x in "abc"]
-    text = f"{output.claim} {output.detail} {output.csv}"
-    assert chr(0x2014) not in text
-    assert chr(0x2013) not in text
-
-
 def test_svg_and_pdf_bytes_are_the_same_for_the_same_input() -> None:
     first = registry.build_figure(SPEC, Manifest(RESULTS))
     second = registry.build_figure(SPEC, Manifest(RESULTS))
     with paper.paper_style():
         assert paper.svg_bytes(first.figure) == paper.svg_bytes(second.figure)
         assert paper.pdf_bytes(first.figure) == paper.pdf_bytes(second.figure)
-
-
-def test_no_two_legend_keys_share_a_marker_and_fill(
-    output: registry.FigureOutput,
-) -> None:
-    (legend,) = output.figure.legends
-    seen: dict[tuple[str, str, str], str] = {}
-    for handle, text in zip(
-        legend.legend_handles, legend.get_texts(), strict=True
-    ):
-        if not hasattr(handle, "get_marker"):
-            continue
-        key = (
-            str(handle.get_marker()),
-            str(handle.get_markerfacecolor()),
-            str(handle.get_markeredgecolor()),
-        )
-        if key[0] in ("None", ""):
-            continue
-        assert key not in seen, (seen[key], text.get_text())
-        seen[key] = text.get_text()
-
-
-def test_the_reader_is_drawn_with_the_marker_its_legend_key_shows(
-    output: registry.FigureOutput,
-) -> None:
-    (legend,) = output.figure.legends
-    labels = {
-        t.get_text(): h
-        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
-    }
-    reader = labels["range reader"].get_marker()
-    _, ax_b, ax_c = output.figure.axes
-    for ax in (ax_b, ax_c):
-        assert any(line.get_marker() == reader for line in ax.lines)
 
 
 def test_control_counts_are_per_role_and_use_the_stored_values(
@@ -442,60 +381,6 @@ def test_caption_defines_the_control_interval_and_the_clipped_bands(
     assert "inside the random control's interval" not in output.detail
 
 
-def test_clipped_bands_are_marked_on_panel_c(
-    output: registry.FigureOutput,
-) -> None:
-    ax_c = output.figure.axes[2]
-    assert "band clipped" in ax_c.get_xlabel()
-    markers = {line.get_marker() for line in ax_c.lines}
-    assert {4, 5} & markers
-
-
-def test_the_reader_is_the_direction_circle_and_no_symbol_repeats(
-    output: registry.FigureOutput,
-) -> None:
-    (legend,) = output.figure.legends
-    markers = {
-        t.get_text(): h.get_marker()
-        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
-        if hasattr(h, "get_marker")
-    }
-    assert markers["range reader"] == paper.MEASURE_MARKERS["direction"]
-    assert markers["random direction"] == paper.MEASURE_MARKERS["random"]
-    assert markers["GPT-2 and base"] == paper.ROLE_KEY_MARKER
-    labelled = [m for m in markers.values() if m not in ("None", "")]
-    assert labelled.count("o") == 1
-
-
-def test_panel_a_item_sets_use_the_category_markers_and_are_keyed(
-    output: registry.FigureOutput,
-) -> None:
-    sets = paper.ITEM_SET_MARKERS
-    ax_a = output.figure.axes[0]
-    drawn = {ln.get_marker() for ln in ax_a.lines}
-    assert set(sets.values()) <= drawn
-    (legend,) = output.figure.legends
-    keyed = {
-        t.get_text(): h.get_marker()
-        for h, t in zip(legend.legend_handles, legend.get_texts(), strict=True)
-        if hasattr(h, "get_marker")
-    }
-    assert keyed["range items"] == sets["range"]
-    assert keyed["exact items"] == sets["exact"]
-    assert keyed["people's heights"] == sets["people"]
-    assert "range items (star), exact items (left triangle)" in output.detail
-    assert "heights (right triangle)" in output.detail
-    assert "circle" not in output.detail.split("(b)")[0]
-
-
-def test_the_grey_random_range_band_is_keyed(
-    output: registry.FigureOutput,
-) -> None:
-    (legend,) = output.figure.legends
-    labels = [t.get_text() for t in legend.get_texts()]
-    assert "random range of the position" in labels
-
-
 def test_the_superseded_reader_and_band_counts_are_gone(
     output: registry.FigureOutput,
 ) -> None:
@@ -504,3 +389,210 @@ def test_the_superseded_reader_and_band_counts_are_gone(
     for role in stats.ROLES:
         assert f"reader_in_random_{role}" not in output.numbers
         assert f"people_outside_band_{role}" not in output.numbers
+
+
+def _state(model: str) -> str:
+    reader, control = _cell(model, "logistic"), _cell(model, "random")
+    if reader["auroc"] > control["hi"]:
+        return "above"
+    if reader["auroc"] < control["lo"]:
+        return "below"
+    return "inside"
+
+
+def _by_gid(ax: Any, prefix: str) -> list[Any]:
+    return [ln for ln in ax.get_lines() if ln.get_gid() == prefix]
+
+
+def test_five_panels_share_rows_and_carry_three_letters(
+    output: registry.FigureOutput,
+) -> None:
+    axes_ = output.figure.axes
+    assert len(axes_) == 5
+    for ax in axes_[1:]:
+        assert axes_[0].get_shared_y_axes().joined(axes_[0], ax)
+    checks.draw(output.figure)
+    letters = [
+        t.get_text()
+        for ax in axes_
+        for t in ax.texts
+        if t.get_text().startswith(r"$\mathbf")
+    ]
+    assert sorted(letters) == [rf"$\mathbf{{({x})}}$" for x in "abc"]
+    text = f"{output.claim} {output.detail} {output.csv}"
+    assert chr(0x2014) not in text
+    assert chr(0x2013) not in text
+
+
+def test_panel_a_is_three_item_columns_of_whole_circles(
+    output: registry.FigureOutput,
+) -> None:
+    columns = output.figure.axes[:3]
+    heads = [
+        " ".join(t.get_text() for t in ax.texts if "mathbf" not in t.get_text())
+        for ax in columns
+    ]
+    assert [h.replace("\n", " ") for h in heads] == [
+        "range items",
+        "exact items",
+        "people's heights",
+    ]
+    for ax in columns:
+        markers = {str(ln.get_marker()) for ln in ax.get_lines()}
+        assert markers - {"None", " ", ""} <= {"o"}
+        points = [ln for ln in ax.get_lines() if ln.get_marker() == "o"]
+        assert len(points) == len(_models("p10a"))
+        assert not any(ln.get_clip_on() for ln in ax.get_lines())
+        low, high = ax.get_xlim()
+        assert low < 0 < 1 < high
+
+
+def test_panel_a_fill_carries_the_role_in_the_family_colour(
+    output: registry.FigureOutput,
+) -> None:
+    ax = output.figure.axes[0]
+    models = _models("p10a")
+    points = [ln for ln in ax.get_lines() if ln.get_marker() == "o"]
+    for model, line in zip(models, points, strict=True):
+        colour = axes.model_style(model).color
+        post = stats.role(model) == "post"
+        assert line.get_markeredgecolor() == colour
+        assert (line.get_markerfacecolor() == "white") is post
+
+
+def test_panel_b_marker_state_follows_the_interval_rule(
+    output: registry.FigureOutput,
+) -> None:
+    ax = output.figure.axes[3]
+    for model in _models("p10b"):
+        (line,) = _by_gid(ax, f"reader-{model}")
+        state = _state(model)
+        assert line.get_marker() == paper.MEASURE_MARKERS["direction"]
+        filled = line.get_markerfacecolor() == paper.INK
+        assert filled is (state == "above")
+        if state != "above":
+            assert line.get_markeredgecolor() == paper.RANDOM_GREY
+        ticks = _by_gid(ax, f"below-tick-{model}")
+        assert len(ticks) == (1 if state == "below" else 0)
+
+
+def test_panel_b_control_is_a_grey_bar_on_the_readers_row(
+    output: registry.FigureOutput,
+) -> None:
+    ax = output.figure.axes[3]
+    for model in _models("p10b"):
+        control = _cell(model, "random")
+        (bar,) = [p for p in ax.patches if p.get_gid() == f"control-{model}"]
+        assert bar.get_x() == pytest.approx(control["lo"])
+        assert bar.get_x() + bar.get_width() == pytest.approx(control["hi"])
+        (reader,) = _by_gid(ax, f"reader-{model}")
+        y_bar = bar.get_y() + bar.get_height() / 2
+        assert y_bar == pytest.approx(reader.get_ydata()[0])
+
+
+def test_panel_b_words_classifier_is_a_line_and_a_top_whisker_not_a_band(
+    output: registry.FigureOutput,
+) -> None:
+    ax = output.figure.axes[3]
+    text = _text("gpt2")
+    assert all(str(p.get_gid()).startswith("control-") for p in ax.patches)
+    (line,) = _by_gid(ax, "words-line")
+    assert line.get_xdata()[0] == pytest.approx(text["auroc"])
+    assert line.get_color() == paper.TEXT_GREEN
+    (whisker,) = _by_gid(ax, "words-whisker")
+    assert min(whisker.get_xdata()) == pytest.approx(text["lo"])
+    assert max(whisker.get_xdata()) == pytest.approx(text["hi"])
+    assert whisker.get_ydata()[0] < 0
+    names = {t.get_text() for t in ax.texts}
+    assert {"words", "chance"} <= names
+
+
+def test_panel_b_names_the_controls_that_sit_at_the_ceiling(
+    output: registry.FigureOutput,
+) -> None:
+    ax = output.figure.axes[3]
+    ceiling = [
+        m for m in _models("p10b") if _cell(m, "random")["auroc"] >= 0.9995
+    ]
+    labels = [t for t in ax.texts if t.get_text() == "control at 1.000"]
+    assert len(labels) == len(ceiling)
+
+
+def test_panel_c_prints_the_band_limits_beside_the_clipping_arrows(
+    output: registry.FigureOutput,
+) -> None:
+    ax_c = output.figure.axes[4]
+    n = output.numbers
+    low = f"{n['band_min']:.1f}".replace("-", chr(0x2212))
+    label = ax_c.get_xlabel().replace("$", "")
+    assert f"{low} to {n['band_max']:.1f}" in label
+    assert "clipped" in label
+    arrows = [t for t in ax_c.texts if t.get_text() == ""]
+    assert arrows
+
+
+def test_the_legends_have_three_entries_a_role_key_and_a_state_key(
+    output: registry.FigureOutput,
+) -> None:
+    main, states = output.figure.legends
+    labels = [t.get_text() for t in main.get_texts()]
+    assert labels == [
+        "random control",
+        "word classifier",
+        "GPT-2 and base",
+        "post-trained",
+    ]
+    assert [t.get_text() for t in states.get_texts()] == [
+        "above the control",
+        "inside the control",
+        "below the control",
+    ]
+    handles = dict(zip(labels, main.legend_handles, strict=True))
+    assert handles["post-trained"].get_marker() == paper.ROLE_KEY_MARKER
+    assert handles["GPT-2 and base"].get_marker() == paper.ROLE_KEY_MARKER
+
+
+def test_only_glossary_shapes_and_inks_are_drawn(
+    output: registry.FigureOutput,
+) -> None:
+    allowed = {"o", paper.ROLE_KEY_MARKER, "None", " ", ""}
+    fig = output.figure
+    drawn = {str(ln.get_marker()) for ax in fig.axes for ln in ax.get_lines()}
+    for legend in fig.legends:
+        drawn |= {
+            str(h.get_marker())
+            for h in legend.legend_handles
+            if hasattr(h, "get_marker")
+        }
+    assert drawn <= allowed
+    inks = {
+        paper.INK,
+        paper.RANDOM_GREY,
+        paper.RANDOM_BAND,
+        paper.TEXT_GREEN,
+        paper.CHANCE,
+        paper.WHITE,
+        *paper.ENC["gpt2"],
+        *paper.ENC["qwen3"],
+        paper.ENC["secondary_text"],
+    }
+    colours = {
+        mpl_colors.to_hex(ln.get_color())
+        for ax in fig.axes
+        for ln in ax.get_lines()
+    }
+    assert colours <= {mpl_colors.to_hex(c) for c in inks}
+
+
+def test_caption_states_the_state_rule_the_draws_and_the_people_column(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.detail
+    assert "A filled circle marks a reader above the control's interval" in text
+    assert "an open circle inside it" in text
+    assert "left tick below it" in text
+    assert "the individual draws are not stored" in text
+    assert "mean of 5 random directions" in text
+    assert "each in its own column" in text
+    assert "sign flip" in text
+    assert "control at 1.000" in text
