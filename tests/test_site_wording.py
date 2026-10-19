@@ -220,3 +220,13 @@ def test_the_dropped_wording_is_absent_and_the_noise_uses_the_report_pairs(
     )
     assert {_n_eval(m) for m in MODELS} == {214}
     assert "by point estimate" in output.claim
+
+
+def test_the_opening_sentence_agrees_with_the_per_role_counts(
+    output: registry.FigureOutput,
+) -> None:
+    first = output.claim.split(". ")[0]
+    assert "orthogonal" not in output.claim
+    assert "same concept" not in first
+    assert "large angle" in first
+    assert "mostly" in first

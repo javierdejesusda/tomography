@@ -1,4 +1,4 @@
-"""Figure 5: wording moves a reader, and distant directions read alike.
+"""Figure 5: wording moves a reader, and distant directions mostly still read.
 
 Panel (a) is a strip per checkpoint: the accuracy of the sentiment reader
 fitted on the paper's wording when it is scored on every other wording, with
@@ -315,8 +315,9 @@ def _claim(
         for m, read, rand in below
     )
     return (
-        "Wording moves a reader, and nearly orthogonal directions read the "
-        "same concept. A direction fitted on the bare wording has cosine "
+        "Wording moves a reader, and a direction at a large angle from the "
+        "paper direction mostly still reads the paper wording above a "
+        "random direction. A direction fitted on the bare wording has cosine "
         f"{numbers['bare_cos_min']:.3f} to {numbers['bare_cos_max']:.3f} "
         "with the paper direction. It reads the paper wording above a "
         "random direction by point estimate on "
