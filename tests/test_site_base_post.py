@@ -503,17 +503,25 @@ def test_rows_are_grouped_by_section_with_a_label_and_a_separator(
     names = {v: k for k, v in LABELS.items()}
     for ax in _panels(output):
         rows = [names[t.get_text()] for t in ax.get_yticklabels()]
-        want = []
+        order = []
         for row in rows:
-            if SECTIONS[row] not in want:
-                want.append(SECTIONS[row])
+            if SECTIONS[row] not in order:
+                order.append(SECTIONS[row])
+        want = [
+            section
+            for section in order
+            if not (
+                [SECTIONS[r] for r in rows].count(section) == 1
+                and section in [LABELS[r] for r in rows]
+            )
+        ]
         groups = sorted(
             (t for t in ax.texts if t.get_gid() == "group"),
             key=lambda t: t.get_position()[1],
         )
         assert [t.get_text() for t in groups] == want
         lines = [ln for ln in ax.lines if ln.get_gid() == "separator"]
-        assert len(lines) == len(want) - 1
+        assert len(lines) == len(order) - 1
         for ln in lines:
             ys = list(ln.get_ydata())
             assert ys[0] == ys[1]
@@ -524,3 +532,5 @@ def test_rows_are_grouped_by_section_with_a_label_and_a_separator(
             firsts.setdefault(SECTIONS[row], tick)
         for text in groups:
             assert text.get_position()[1] < firsts[text.get_text()] - 0.5
+        assert "knowledge" not in [t.get_text() for t in groups]
+        assert "steering" not in [t.get_text() for t in groups]
