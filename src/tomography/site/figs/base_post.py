@@ -338,7 +338,7 @@ def _panel(
 
 def _key(fig: Any) -> None:
     ink = paper.INK
-    marker = {
+    marker: dict[str, Any] = {
         "marker": paper.SHAPES["direction"],
         "markeredgecolor": ink,
         "markeredgewidth": _rows.EDGE_WIDTH,

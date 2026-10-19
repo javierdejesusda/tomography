@@ -89,7 +89,8 @@ def _recolour(ax: Any, color: str) -> None:
         if not isinstance(band, PolyCollection):
             continue
         if np.allclose(
-            band.get_facecolor()[0][:3], mcolors.to_rgb(paper.RANDOM_BAND)
+            np.asarray(band.get_facecolor())[0][:3],
+            mcolors.to_rgb(paper.RANDOM_BAND),
         ):
             band.set_facecolor(paper.RANDOM_GREY)
             band.set_alpha(paper.RANDOM_BAND_ALPHA)
