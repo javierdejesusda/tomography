@@ -297,6 +297,7 @@ def test_the_direction_interval_is_tinted_and_named_in_the_key(
 ) -> None:
     from matplotlib.collections import PolyCollection
     import matplotlib.colors as mcolors
+    from matplotlib.patches import Patch
 
     grey = mcolors.to_rgb(paper.RANDOM_GREY)
     tinted = 0
@@ -312,4 +313,8 @@ def test_the_direction_interval_is_tinted_and_named_in_the_key(
             tinted += 1
     assert tinted == 24
     labels = [t.get_text() for t in output.figure.legends[0].get_texts()]
-    assert "interval of the direction" in labels
+    assert "interval of the direction (run colour)" in labels
+    (legend,) = output.figure.legends
+    (patch,) = [h for h in legend.legend_handles if isinstance(h, Patch)]
+    face = np.asarray(patch.get_facecolor())[:3]
+    assert face.max() - face.min() < 0.02

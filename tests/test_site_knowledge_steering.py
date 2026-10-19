@@ -10,6 +10,7 @@ import pytest
 
 from tomography.site import registry
 from tomography.site import stats
+from tomography.site.figs import knowledge_steering
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -265,10 +266,6 @@ def test_known_at_least_unknown_runs_come_from_the_curves(
         assert (
             counts[role].total == output.counts["distinguishable"][role].total
         )
-    for model, template in held:
-        plain = _headline(model, template)["metric"] == "entropy"
-        name = paper.display_name(model if plain else f"{model} {template}")
-        assert name in output.detail
 
 
 def test_caption_is_the_template_filled_from_the_files(
@@ -278,26 +275,19 @@ def test_caption_is_the_template_filled_from_the_files(
     dist = _role_counts(
         {r: bool(_headline(*r)["distinguishable"]) for r in runs}
     )
-    sel = _role_counts({r: bool(_headline(*r)["selective"]) for r in runs})
+    held = _role_counts(
+        {
+            r: _shift(_curves(*r), "lat: known")
+            >= _shift(_curves(*r), "lat: unknown")
+            for r in runs
+        }
+    )
     assert output.claim == (
         "Adding the knowledge direction moves unknown questions more than "
-        "random directions do on GPT-2 and base checkpoints, and not "
-        "consistently on post-trained ones."
+        "each of 3 random directions of the same norm on "
+        f"{_runs_text(dist)}, yet known questions move at least as much as "
+        f"unknown ones on {_runs_text(held)}."
     )
-    assert (
-        "The direction moves unknown questions more than each of the 3 "
-        f"random directions on {_runs_text(dist)}, and more than known "
-        f"questions on {_runs_text(sel)}, by the gap between the absolute "
-        "mean slopes over the coefficient grid, whatever the sign, counted as "
-        "above when the 95 percent interval of that gap lies above zero; "
-        "with 3 random directions a direction passes by chance with "
-        "probability at "
-        "most 1/4."
-    ) in output.detail
-    assert (
-        "The outcome is the entropy shift for GPT-2 and base checkpoints and "
-        "the abstention rate for post-trained ones."
-    ) in output.detail
     assert "linear slope" not in output.detail
     assert all(dist[r].hits == dist[r].total for r in ("gpt2", "base"))
     assert dist["post"].hits < dist["post"].total
@@ -305,6 +295,22 @@ def test_caption_is_the_template_filled_from_the_files(
     assert "[[fig:a_dose_types]]" in output.detail
     assert not re.search(r"Figure A?\d", output.detail)
     assert "resample the questions" in output.detail
+    assert "never pooled" in output.detail
+
+
+def test_the_main_caption_has_at_most_200_words(
+    output: registry.FigureOutput,
+) -> None:
+    assert len(f"{output.claim} {output.detail}".split()) <= 200
+
+
+def test_the_appendix_detail_holds_the_selectivity_rule_by_token() -> None:
+    text = knowledge_steering.APPENDIX_DETAIL
+    assert "[[runs:fig:knowledge_steering.selective]]" in text
+    assert "[[runs:fig:knowledge_steering.known_ge_unknown]]" in text
+    assert "interval of that gap lies above zero" in text
+    assert "probability at most 1/4" in text
+    assert not re.search(r"Figure A?\d", text)
 
 
 def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
@@ -468,24 +474,37 @@ def test_the_two_entropy_dose_panels_share_one_y_range(
     assert doses[1].get_ylabel() == ""
 
 
-def test_the_caption_leads_with_the_known_question_result(
-    output: registry.FigureOutput,
-) -> None:
-    assert output.detail.startswith("On known questions")
-
-
 def test_the_key_and_the_caption_define_the_count_by_the_gap_interval(
     output: registry.FigureOutput,
 ) -> None:
     (legend,) = [lg for sub in output.figure.subfigs for lg in sub.legends]
     keyed = " ".join(t.get_text() for t in legend.get_texts())
     assert "random directions whose gap interval lies above zero" in keyed
-    assert "interval of that gap lies above zero" in output.detail
-    assert "at least as much as on unknown" in output.detail
+    assert "above n of 3" in output.detail
 
 
 def test_the_caption_states_the_row_order_and_the_missing_gpt2_small(
     output: registry.FigureOutput,
 ) -> None:
-    assert "checkpoint size within each group" in output.detail
+    assert "Rows run by size" in output.detail
     assert "GPT-2 small has no run" in output.detail
+
+
+def test_the_direction_intervals_of_the_dose_panels_are_tinted(
+    output: registry.FigureOutput,
+) -> None:
+    from matplotlib.collections import PolyCollection
+    import matplotlib.colors as mcolors
+
+    tinted = 0
+    for ax in output.figure.axes:
+        for band in ax.collections:
+            if not isinstance(band, PolyCollection):
+                continue
+            color = np.asarray(band.get_facecolor())[0][:3]
+            if np.allclose(color, mcolors.to_rgb(paper.RANDOM_BAND)):
+                continue
+            assert color.max() - color.min() > 0.1
+            tinted += 1
+    assert tinted == 6
+    assert "tint" in output.detail

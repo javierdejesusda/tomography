@@ -63,18 +63,18 @@ DETAIL = (
     "unsteered value at both signs of 0.1 on two sentiment judges: "
     "{moves_count}. The fluency rule holds at both signs of 0.1 on {held}, "
     "and at 0.3 or {minus}0.3 on {fails}. (a) Mean judged sentiment against "
-    "the relative coefficient, one line per checkpoint (lighter for the "
-    "smaller one), with the range over the 3 steering vectors (band) and "
+    "the relative coefficient, one line per checkpoint, with the range over "
+    "the 3 steering vectors (band) and "
     "the score under a positive or negative instruction (bars at left). "
     "Filled markers satisfy the fluency rule "
     "(perplexity ratio at most {max_ratio}, distinct-1 at least "
-    "{min_distinct}); a segment that touches an open marker is dashed. (b) "
+    "{min_distinct}); a segment touching an open marker is dashed. (b) "
     "Perplexity ratio, steered to unsteered model, on {n_neutral} held-out "
     "WikiText-103 passages. (c) Distinct-1 of the "
     "completions. The rule uses the perplexity of neutral text, not of the "
     "completions ([[table:steering]] gives the scores, ratios and judge "
     "agreement). This run has no random-direction arm; the finder "
-    "comparison steers with random directions ([[fig:teaser]])."
+    "comparison uses random directions ([[fig:teaser]])."
 )
 
 
@@ -411,13 +411,6 @@ def _csv(by_key: dict[str, _Model], models: list[str]) -> str:
     return _group.csv_text(HEADER, rows)
 
 
-def _hits(flags: dict[str, bool]) -> str:
-    counts = stats.per_role(flags)
-    if not any(c.hits for c in counts.values()):
-        return f"none of the {len(flags)} checkpoints"
-    return stats.per_role_text(counts)
-
-
 def build(manifest: Manifest) -> FigureOutput:
     """Builds the figure from the committed results.
 
@@ -511,7 +504,7 @@ def build(manifest: Manifest) -> FigureOutput:
         moves_count=stats.per_role_text(counts["moves01"]),
         n_neutral=n_neutral,
         held=stats.per_role_text(counts["fluent01"]),
-        fails=_hits(flags03),
+        fails=stats.per_role_text(counts["fluent03"]),
     )
     claim = (
         "Steering moves the judged sentiment, less on post-trained checkpoints."
