@@ -8,28 +8,48 @@ its column, minus the accuracy of a random direction on the scored wording.
 import math
 import string
 
+import matplotlib as mpl
 from matplotlib.axes import Axes
-from matplotlib.colors import TwoSlopeNorm
+from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
+from matplotlib.patches import Rectangle
 import numpy as np
 
 from tomography.site import runfiles
 from tomography.site import stats
+from tomography.site.figs import wording
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.viz import paper
-from tomography.viz import style
 
 DROPPED = "no_trailing_space"
-ROW_HEIGHT = 1.85
-MAX_HEIGHT = 8.0
-WIDE_LIMIT = 8
+ROW_HEIGHT = 1.9
+MAX_HEIGHT = 9.5
 VMAX = 0.45
 VMIN = -0.15
 BAR_TICKS = [-0.15, 0.0, 0.15, 0.3, 0.45]
-TEXT = 6.0
-DOT = 1.6
+TEXT = paper.MIN_TEXT
+ORDER = (
+    "qwen3-0.6b-base",
+    "qwen3-0.6b",
+    "qwen3-1.7b-base",
+    "qwen3-1.7b",
+    "qwen3-4b-base",
+    "qwen3-4b",
+    "gpt2",
+    "gpt2-medium",
+    "gpt2-large",
+    "gpt2-xl",
+)
+KIND_LABELS = {
+    "paper": "paper",
+    "paraphrase": "paraphrase",
+    "scaffold": "scaffold",
+    "concept_swap": "concept swap",
+}
+FRAME = "frame"
+STIPPLE = "////"
 
 
 def _matrix(
@@ -97,34 +117,117 @@ def summarize(margins: dict[str, np.ndarray]) -> tuple[dict[str, float], str]:
     )
 
 
-def _draw(ax: Axes, matrix: np.ndarray, paper_index: int) -> AxesImage:
+def _kinds(manifest: Manifest, model: str, names: list[str]) -> list[str]:
+    path = manifest.run("p1", model)
+    assert path is not None
+    kind = {
+        r["variant"]: r["kind"]
+        for r in runfiles.rows(path, "table.json")
+        if r["task"] == "sentiment"
+    }
+    return [KIND_LABELS.get(kind[n], FRAME) for n in names]
+
+
+def _groups(labels: list[str]) -> list[tuple[str, int, int]]:
+    found: list[tuple[str, int, int]] = []
+    for i, label in enumerate(labels):
+        if found and found[-1][0] == label:
+            found[-1] = (label, found[-1][1], i + 1)
+        else:
+            found.append((label, i, i + 1))
+    return found
+
+
+def _frame(
+    ax: Axes, xy: tuple[float, float], w: float, h: float, gid: str
+) -> None:
+    patch = Rectangle(
+        xy,
+        w,
+        h,
+        fill=False,
+        edgecolor=paper.ENC["paper"],
+        lw=0.9,
+        zorder=4,
+    )
+    patch.set_gid(gid)
+    ax.add_patch(patch)
+
+
+def _draw(
+    ax: Axes,
+    matrix: np.ndarray,
+    paper_index: int,
+    groups: list[tuple[str, int, int]],
+    noise: float,
+    labelled: bool,
+) -> AxesImage:
     k = matrix.shape[0]
-    image = ax.imshow(
-        matrix,
-        cmap=style.diverging_cmap().reversed(),
-        norm=TwoSlopeNorm(vmin=VMIN, vcenter=0.0, vmax=VMAX),
-        interpolation="nearest",
-    )
-    ax.plot(
-        range(k),
-        range(k),
-        ls="none",
-        marker="o",
-        ms=DOT,
-        mfc="white",
-        mec="white",
-        zorder=3,
-    )
-    ticks = [str(i + 1) for i in range(k)]
-    ax.set_xticks(range(k), ticks, fontsize=TEXT, rotation=90)
-    ax.set_yticks(range(k), ticks, fontsize=TEXT)
+    cmap = mpl.colormaps[paper.SEQUENTIAL_CMAP].copy()
+    cmap.set_bad(paper.ENC["random_band"])
+    norm = Normalize(vmin=VMIN, vmax=VMAX)
+    shown = np.ma.masked_array(matrix, mask=np.eye(k, dtype=bool))
+    image = ax.imshow(shown, cmap=cmap, norm=norm, interpolation="nearest")
+    for i in range(k):
+        for j in range(k):
+            if i == j or matrix[i, j] > noise:
+                continue
+            cell = Rectangle(
+                (j - 0.5, i - 0.5),
+                1,
+                1,
+                fill=False,
+                hatch=STIPPLE,
+                edgecolor="white",
+                lw=0,
+                zorder=3,
+            )
+            cell.set_gid("stipple")
+            ax.add_patch(cell)
+            if matrix[i, j] > 0.0:
+                continue
+            text = ax.text(
+                j,
+                i,
+                f"{matrix[i, j]:.2f}".replace("0.", ".", 1),
+                ha="center",
+                va="center",
+                fontsize=TEXT,
+                color=paper.tile_ink(cmap(norm(matrix[i, j]))),
+                zorder=5,
+            )
+            text.set_gid(paper.TILE_LABEL)
+    _frame(ax, (-0.5, paper_index - 0.5), k, 1, "paper_row")
+    _frame(ax, (paper_index - 0.5, -0.5), 1, k, "paper_col")
+    for _, _, end in groups[:-1]:
+        for line in (
+            ax.axhline(end - 0.5, color="white", lw=0.4, zorder=3),
+            ax.axvline(end - 0.5, color="white", lw=0.4, zorder=3),
+        ):
+            line.set_gid("separator")
+    at = [start for _, start, _ in groups[1:]] + [k - 1]
+    ticks = [str(i + 1) for i in at]
+    ax.set_xticks(at, ticks, fontsize=TEXT)
+    ax.set_yticks(at, ticks, fontsize=TEXT)
     ax.tick_params(length=2, pad=1)
-    for axis in (ax.xaxis, ax.yaxis):
-        tick = axis.get_major_ticks()[paper_index]
-        line = tick.tick1line
-        line.set_markeredgecolor(paper.ENC["paper"])
-        line.set_markersize(4)
-        line.set_markeredgewidth(1.2)
+    if labelled:
+        for n, (label, start, end) in enumerate(groups):
+            if end - start < 2:
+                continue
+            note = ax.annotate(
+                label,
+                xy=(0.0, (start + end - 1) / 2),
+                xycoords=("axes fraction", "data"),
+                xytext=(-19 - 11 * (n % 3), 0),
+                textcoords="offset points",
+                rotation=90,
+                ha="center",
+                va="center",
+                fontsize=TEXT,
+                color=paper.ENC["secondary_text"],
+                annotation_clip=False,
+            )
+            note.set_gid("kind")
     return image
 
 
@@ -149,13 +252,29 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    models = [m for m in manifest.models("p1") if manifest.run("p1", m)]
+    available = [m for m in manifest.models("p1") if manifest.run("p1", m)]
+    models = [m for m in ORDER if m in available]
+    models += [m for m in available if m not in models]
     names, first = _matrix(manifest, models[0], None)
     margins = {models[0]: first}
     for model in models[1:]:
         margins[model] = _matrix(manifest, model, names)[1]
     numbers, sentence = summarize(margins)
-    cols = 2 if len(models) <= WIDE_LIMIT else 3
+    noise = {m: wording.noise(manifest, m) for m in models}
+    numbers["noise_min"] = min(noise.values())
+    numbers["noise_max"] = max(noise.values())
+    numbers["n_below_noise"] = float(
+        sum(
+            int(
+                (
+                    (margins[m] <= noise[m]) & ~np.eye(len(names), dtype=bool)
+                ).sum()
+            )
+            for m in models
+        )
+    )
+    groups = _groups(_kinds(manifest, models[0], names))
+    cols = 2
     rows = math.ceil(len(models) / cols)
     paper_index = names.index("paper")
     with paper.paper_style():
@@ -168,44 +287,55 @@ def build(manifest: Manifest) -> FigureOutput:
         image = None
         for i, model in enumerate(models):
             ax = fig.add_subplot(grid[i // cols, i % cols])
-            image = _draw(ax, margins[model], paper_index)
+            image = _draw(
+                ax,
+                margins[model],
+                paper_index,
+                groups,
+                noise[model],
+                i % cols == 0,
+            )
             ax.set_title(
                 paper.display_name(model), fontsize=paper.TITLE, x=0.18
             )
             paper.panel_letter(ax, string.ascii_lowercase[i])
             if i % cols:
                 ax.tick_params(labelleft=False)
+            if i < len(models) - cols:
+                ax.tick_params(labelbottom=False)
             axes.append(ax)
         assert image is not None
-        empty = rows * cols - len(models)
-        if empty >= 2:
-            slot = grid[rows - 1, cols - empty :].subgridspec(
-                3, 1, height_ratios=[1.0, 0.16, 1.0]
-            )
-            bar = fig.colorbar(
-                image, cax=fig.add_subplot(slot[1]), orientation="horizontal"
-            )
-        else:
-            bar = fig.colorbar(
-                image,
-                ax=axes,
-                location="top",
-                fraction=0.03,
-                pad=0.02,
-                shrink=0.6,
-            )
+        bar = fig.colorbar(
+            image,
+            ax=axes,
+            location="bottom",
+            fraction=0.025,
+            pad=0.02,
+            shrink=0.6,
+        )
         bar.set_ticks(BAR_TICKS)
         bar.ax.tick_params(labelsize=TEXT)
         bar.set_label("accuracy minus random direction", fontsize=TEXT)
+        for edge in (numbers["noise_min"], numbers["noise_max"]):
+            tick = bar.ax.axvline(edge, color="white", lw=1.2, ymax=0.7)
+            tick.set_gid("noise_tick")
     claim = (
         "Accuracy of a reader fitted on one wording (row) and scored on "
         "another (column), minus the random direction on the scored "
         "wording, for every checkpoint with a wording run."
     )
     detail = (
-        f"{sentence} Index numbers refer to [[table:wordings]]; the purple "
-        "tick marks "
-        "the paper's wording and white dots the diagonal, where the fitted "
-        "and the scored wording are the same."
+        f"{sentence} Index numbers refer to [[table:wordings]], in the order "
+        "of that table, with the kind of change named at the left; the "
+        "purple frame marks the row and the column of the paper's wording and "
+        "the grey diagonal, where the fitted and the scored wording are the "
+        "same, is not coloured. Cells at or below the noise expected from test "
+        "pairs alone for that checkpoint (the noise column of "
+        "[[fig:wording]]) are stippled, and those at or below zero are "
+        "annotated with their margin; "
+        "the white ticks on the colour bar mark that noise range, "
+        f"{numbers['noise_min']:.3f} to {numbers['noise_max']:.3f}, and "
+        f"{int(numbers['n_below_noise'])} cells "
+        "fall there."
     )
     return FigureOutput(fig, claim, detail, numbers, _csv(margins, names))
