@@ -1,95 +1,141 @@
-"""Figure A1: Layer curves of every concept and model.
+"""Figure A1: Reader accuracy at every layer of every concept and checkpoint.
 
-One panel per concept and model family. Each model draws the reader, a
-random direction of the same run and a shuffled-label reader over relative
-depth, in raw accuracy.
+One panel per concept (row) and family (column). Each checkpoint draws its
+reader over relative depth; one grey band per panel spans the random
+directions of the panel's checkpoints.
 """
 
-from collections.abc import Callable
-from typing import Any
+import re
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.lines import Line2D
+import numpy as np
 
 from tomography.site import reading
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
-MARGIN = 0.1
+HEIGHT = 6.0
 CONCEPTS = (
     ("r1", "Sentiment"),
     ("r2", "Utility"),
     ("r3", "Morality"),
     ("r7", "Truth"),
 )
-GROUPS: tuple[tuple[str, Callable[[str], bool]], ...] = (
-    ("GPT-2", lambda m: m.startswith("gpt2")),
-    ("Qwen3 base", lambda m: m.startswith("qwen3") and m.endswith("-base")),
-    (
-        "Qwen3 post-trained",
-        lambda m: m.startswith("qwen3") and not m.endswith("-base"),
-    ),
+GROUPS = (
+    ("gpt2", "GPT-2"),
+    ("base", "Qwen3 base"),
+    ("post", "Qwen3 post-trained"),
 )
+GRID = np.linspace(0.0, 1.0, 101)
+GPT2_LABELS = {
+    "gpt2": "S",
+    "gpt2-medium": "M",
+    "gpt2-large": "L",
+    "gpt2-xl": "XL",
+}
+XLIM = (0.0, 1.24)
+LABEL_X = 1.02
+LABEL_GAP = 0.07
+YLIM = (0.3, 1.0)
+TEXT = 6.5
+
+
+def _label(model: str) -> str:
+    if model in GPT2_LABELS:
+        return GPT2_LABELS[model]
+    match = re.match(r"qwen3-(\d+(?:\.\d+)?)b", model)
+    assert match is not None, model
+    return f"{match.group(1)}B"
+
+
+def _spread(values: list[float]) -> list[float]:
+    """Moves label heights apart so that none is closer than the gap."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    placed = [0.0] * len(values)
+    previous = -np.inf
+    for index in order:
+        previous = max(values[index], previous + LABEL_GAP)
+        placed[index] = previous
+    return placed
 
 
 def _panel(
     ax: Axes,
-    manifest: Manifest,
-    exp: str,
-    models: list[str],
+    found: dict[str, reading.Reading],
+    name: str,
+    group: str,
     rows: list[list[str]],
-) -> list[reading.Reading]:
-    ax.axhline(0.5, color=paper.CHANCE, lw=0.5, ls=(0, (3, 2)), zorder=1)
-    found = []
-    for model in models:
-        item = reading.load(manifest, exp, model)
-        if item is None:
-            continue
-        found.append(item)
-        style = shared.model_style(model)
-        drawn: tuple[tuple[str, Any, dict[str, Any]], ...] = (
-            ("reader", item.reader, {"lw": 1.0, "ls": style.linestyle}),
-            ("random", item.random, {"lw": 0.6, "ls": ":", "alpha": 0.9}),
-            ("shuffled", item.shuffled, {"lw": 0.6, "ls": "-.", "alpha": 0.6}),
+) -> None:
+    ax.axhline(
+        0.5,
+        color=paper.ENC["reference"],
+        linestyle=paper.LINESTYLES["reference"],
+        linewidth=paper.REFERENCE_WIDTH,
+        zorder=1,
+    )
+    panel = f"{name.lower()} {group}"
+    randoms = np.array(
+        [np.interp(GRID, r.depth, r.random) for r in found.values()]
+    )
+    low, high = randoms.min(axis=0), randoms.max(axis=0)
+    ax.fill_between(GRID, low, high, color=paper.RANDOM_BAND, lw=0, zorder=1.5)
+    for series, values in (("band_lo", low), ("band_hi", high)):
+        rows.extend(
+            [panel, name.lower(), group, "", series, f"{x:.6g}", f"{v:.6g}"]
+            for x, v in zip(GRID, values, strict=True)
         )
-        for name, values, kwargs in drawn:
-            ax.plot(item.depth, values, color=style.color, zorder=3, **kwargs)
-            for depth, value in zip(item.depth, values, strict=True):
-                rows.append(
-                    [
-                        f"{exp} {name}",
-                        model,
-                        f"{depth:.6g}",
-                        f"{value:.6g}",
-                        "",
-                        "",
-                        "0.5",
-                    ]
-                )
-    shared.depth_axis(ax)
-    ax.set_ylim(0.3, 1.0)
+    ends = []
+    for model, item in found.items():
+        style = shared.model_style(model)
+        ax.plot(
+            item.depth,
+            item.reader,
+            color=style.color,
+            ls=style.linestyle,
+            lw=1.0,
+            zorder=3,
+        )
+        ends.append(float(item.reader[-1]))
+        for series, values in (
+            ("reader", item.reader),
+            ("random", item.random),
+        ):
+            rows.extend(
+                [
+                    panel,
+                    name.lower(),
+                    group,
+                    model,
+                    series,
+                    f"{x:.6g}",
+                    f"{v:.6g}",
+                ]
+                for x, v in zip(item.depth, values, strict=True)
+            )
+    for model, y in zip(found, _spread(ends), strict=True):
+        ax.text(
+            LABEL_X,
+            y,
+            _label(model),
+            fontsize=TEXT,
+            va="center",
+            color=paper.INK,
+        )
+    ax.set_xlim(*XLIM)
+    ax.set_xticks([0.0, 0.5, 1.0])
+    ax.set_xticklabels(["0", "0.5", "1"])
+    ax.set_ylim(*YLIM)
     ax.set_yticks([0.5, 0.75, 1.0])
     ax.set_yticklabels(["0.5", "0.75", "1"])
-    return found
 
 
-def _legend(fig: Figure) -> None:
-    handles = [
-        Line2D([], [], color=paper.INK, lw=1.0),
-        Line2D([], [], color=paper.INK, lw=0.6, ls=":"),
-        Line2D([], [], color=paper.INK, lw=0.6, ls="-."),
-    ]
-    fig.legend(
-        handles,
-        ["reader", "random direction", "shuffled labels"],
-        loc="outside upper center",
-        ncol=3,
-        frameon=False,
-        fontsize=paper.TICK,
-    )
+def _csv(rows: list[list[str]]) -> str:
+    header = "panel,concept,group,model,series,depth,value"
+    return "\n".join([header, *(",".join(r) for r in rows)]) + "\n"
 
 
 def build(manifest: Manifest) -> FigureOutput:
@@ -102,49 +148,37 @@ def build(manifest: Manifest) -> FigureOutput:
         The figure and its caption parts.
     """
     rows: list[list[str]] = []
-    cells = above = 0
-    worst = 0.0
     with paper.paper_style():
-        fig = Figure(figsize=(paper.FULL_WIDTH, 6.6), layout="constrained")
+        fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
         grid = fig.add_gridspec(len(CONCEPTS), len(GROUPS))
-        letters = iter("abcdefghijkl")
         for r, (exp, title) in enumerate(CONCEPTS):
-            for c, (group, member) in enumerate(GROUPS):
+            for c, (group, group_title) in enumerate(GROUPS):
                 ax = fig.add_subplot(grid[r, c])
-                models = [m for m in manifest.models(exp) if member(m)]
-                for item in _panel(ax, manifest, exp, models, rows):
-                    cells += 1
-                    above += (item.reader[-1] - item.random[-1]) > MARGIN
-                    worst = max(worst, float(abs(item.shuffled - 0.5).max()))
-                paper.panel_letter(ax, next(letters))
+                found = {}
+                for model in manifest.models(exp):
+                    item = reading.load(manifest, exp, model)
+                    if item is not None and stats.role(model) == group:
+                        found[model] = item
+                _panel(ax, found, title, group, rows)
                 if r == 0:
-                    ax.set_title(group, fontsize=paper.TITLE, x=0.12)
+                    ax.set_title(group_title, fontsize=paper.TITLE, x=0.1)
+                if r == len(CONCEPTS) - 1:
+                    ax.set_xlabel("relative depth")
                 if c == 0:
                     ax.set_ylabel(f"{title} accuracy")
-                if r < len(CONCEPTS) - 1:
-                    ax.set_xlabel("")
-        _legend(fig)
-    numbers = {
-        "cells": float(cells),
-        "above_at_last_layer": float(above),
-        "shuffled_max_gap": worst,
-    }
+                    paper.panel_letter(ax, "abcd"[r])
+                else:
+                    ax.tick_params(labelleft=False)
     claim = (
-        f"At the last layer the reader is more than {MARGIN:.1f} above its "
-        f"random direction in {above} of {cells} concept and model cells, and "
-        f"a shuffled-label reader never leaves {worst:.3f} of chance."
+        "Reader accuracy at every layer for every concept and checkpoint, "
+        "against the range of the random directions of the same panel "
+        "(grey)."
     )
     detail = (
-        "Raw accuracy of the reader (solid, dashed for post-trained models), "
-        "of a random direction of the same run (dotted) and of a "
-        "shuffled-label reader (dash-dot) at every layer, against relative "
-        "depth; colors follow model size within a family and the dashed "
-        "line is chance. Readers are logistic regressions on the test pairs "
-        "of each concept, averaged over seeds."
+        "Sentiment curves are scored on the 256 SST-2 validation pairs on "
+        "which the sentiment layer is also chosen. Lines are the mean over "
+        "seeds of a logistic regression reader; colour darkens with model "
+        "size within a family, post-trained checkpoints are dashed, labels "
+        "at the right name the size, and the dotted line is chance."
     )
-    return FigureOutput(fig, claim, detail, numbers, _csv(rows))
-
-
-def _csv(rows: list[list[str]]) -> str:
-    header = "panel,model,x,y,lo,hi,baseline"
-    return "\n".join([header, *(",".join(r) for r in rows)]) + "\n"
+    return FigureOutput(fig, claim, detail, {}, _csv(rows))
