@@ -1,7 +1,8 @@
-"""Cell text and file readers shared by Tables 4 to 8.
+"""Cell text and file readers shared by the tables and the page text.
 
-Missing values are written `n/a`, minus signs are plain hyphens and every
-number is rounded where it is written, never earlier.
+Missing values are written `n/a`. Every number is rounded where it is
+written, never earlier, then signed: a value that rounds to zero has no sign
+and a negative one uses the true minus sign.
 """
 
 import csv
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 MISSING = "n/a"
+MINUS = chr(0x2212)
+PLUS_MINUS = chr(0x00B1)
 
 
 def num(value: float | None, digits: int = 3) -> str:
@@ -24,7 +27,26 @@ def num(value: float | None, digits: int = 3) -> str:
     """
     if value is None:
         return MISSING
-    return f"{value:.{digits}f}"
+    text = f"{abs(value):.{digits}f}"
+    if value < 0 and float(text) != 0.0:
+        return MINUS + text
+    return text
+
+
+def pm(value: float | None, half: float | None, digits: int = 3) -> str:
+    """Writes a value with a symmetric half-width.
+
+    Args:
+        value: The estimate, or None when it is not stored.
+        half: The half-width of the interval.
+        digits: Decimals.
+
+    Returns:
+        Text such as `0.109 ± 0.020`, or `n/a` without a value.
+    """
+    if value is None or half is None:
+        return MISSING
+    return f"{num(value, digits)} {PLUS_MINUS} {num(abs(half), digits)}"
 
 
 def interval(
