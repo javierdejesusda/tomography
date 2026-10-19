@@ -40,7 +40,7 @@ DETAIL = (
     "the band marks a difference of {slack:.3f} either way, a filled marker "
     "is a reader ahead of the band ({ahead} of {types} types) and an open "
     "one is a reader inside it or behind. (c) The AUROC of a random "
-    "direction on the same type, as a grey tick. A high value in a column "
+    "direction on the same type, as a short grey bar. A high value in a column "
     "of (a) does not show that the direction reads knowledge where a text "
     "classifier comes this close."
 )
