@@ -293,6 +293,16 @@ checkpoint key. Fields listed with a default can be changed with `--set KEY=VALU
 - `r7` ([`r7_truth.py`](src/tomography/experiments/r7_truth.py)): truthfulness on fact statements, scored on
   the fact val and test splits and, with no refit, on the out-of-distribution Geometry of Truth subsets
   (`ood_subsets`).
+- `tb1` ([`tb1_text_baselines.py`](src/tomography/experiments/tb1_text_baselines.py)): word and character
+  n-gram baselines (`concepts`) for the readers of sentiment (the held-out report split of `p3` and the
+  validation pairs of `r1`), utility (`r2`), morality (`r3`), truth (`r7`) and honesty (the plain transfer
+  pairs of `r5`), plus the report splits of `p3` for truth and utility. A TF-IDF logistic regression
+  (`tomography.p9.risk.text_scores`) is fitted on the raw training statements of each training set of the
+  reader, with the reader's own seeds and sizes, and scored on the reader's own test pairs; the accuracy is the
+  mean over the training sets, a tie counts half, and the interval is the Wilson 95 percent interval over the
+  test pairs. The items do not depend on the checkpoint, so the run loads no model and its `model` is
+  `none`. The honesty baseline is fitted on the true and false labels of the training facts, because the
+  persona labels of `r5` mark identical statements.
 - `p1` ([`p1_templates.py`](src/tomography/experiments/p1_templates.py)): how much the reading depends on the
   paper's template. Every variant of a task's template (`kinds`) is read with the same seeds and the same
   items as the `paper` variant, which is required, so a difference in accuracy, in direction or in transfer
@@ -1006,7 +1016,7 @@ src/tomography/
   p10/             answers.py (reading a quantity answer: a point, a range, an abstention or nothing)
   experiments/     base.py (configs, run dirs, seeding), sweep.py, intervals.py, steering.py, effects.py,
                    matrices.py, variants.py, aggregate.py, and one module per experiment: r1 to r7, p1 to
-                   p5 (reading), c1, c2, c4, c5, m1, p7 (steering and control), lr1 (LoRRA), a1, a2, a5, p6, p8
+                   p5 (reading), tb1 (text baselines of the readers), c1, c2, c4, c5, m1, p7 (steering and control), lr1 (LoRRA), a1, a2, a5, p6, p8
                    (analyses of finished runs), p9a to p9d (known versus unknown) and p10a and p10b
                    (approximate answers)
   viz/             figure style, layer curves, token scans, matrices and embeddings
