@@ -7626,8 +7626,7 @@ Chain 41 (P1 on gpt2-xl): the logistic run `p1/gpt2-xl/006a40a28414` and the `pc
 were made at `bab5b75` with a clean tree on one rented GPU pod (NVIDIA GeForce RTX 3090, torch 2.14.1+cu130,
 transformers 5.19.0, Linux), with the default P1 config of that commit (sentiment, truth and the six emotions, 10 seeds
 of 64 training pairs, 256 evaluation pairs per split, batch size 8, last token; `config.json` of each run); the two
-configs differ in `method` only. The time between `started_at` and `finished_at` of the stored `meta.json` is 2,948 s for the logistic run (2026-10-18 22:00:50 to 22:49:58 UTC) and 2,440 s for the `pca_diff` run (2026-10-18 23:30:38 to 2026-10-19 00:11:18 UTC). The config hash of each run was recomputed under main by loading the config of the pod copy (identical to the
-exported one) into the P1 config class and hashing it, and both agree with the directory names. The source files that P1
+configs differ in `method` only. The time between `started_at` and `finished_at` of the stored `meta.json` is 2,948 s for the logistic run (2026-10-18 22:00:50 to 22:49:58 UTC) and 2,440 s for the `pca_diff` run (2026-10-18 23:30:38 to 2026-10-19 00:11:18 UTC). The config hash of each run was recomputed under main by loading the stored `config.json` into the P1 config class and hashing it, and both agree with the directory names. The source files that P1
 imports are those of main at `bab5b75`: `git diff --stat bab5b75 HEAD -- src` is empty. Exporting these runs changed no
 tracked result.
 
@@ -7641,8 +7640,7 @@ split, batch size 8, last token; `config.json` of each run). The logistic runs r
 `meta.json` is 4,719 s (2026-10-18 22:00:49 to 23:19:28 UTC) for the logistic run on `qwen3-4b-base` and 4,088 s
 (22:53:49 on 2026-10-18 to 00:01:57 on 2026-10-19) for the one on `qwen3-4b`, and 6,733 s (2026-10-19 00:13:22 to
 02:05:35 UTC) and 6,770 s (00:13:52 to 02:06:42) for the two `pca_diff` runs. The config hash of each run was recomputed
-under main by loading the config of the pod copy (identical to the exported one) into the P1 config class and hashing
-it, and all four agree with the directory names. The source files that P1 imports are those of main at `bab5b75`: `git
+under main by loading the stored `config.json` into the P1 config class and hashing it, and all four agree with the directory names. The source files that P1 imports are those of main at `bab5b75`: `git
 diff --stat bab5b75 HEAD` over the files of the P1 import closure is empty. Exporting these runs changed no tracked
 result.
 
