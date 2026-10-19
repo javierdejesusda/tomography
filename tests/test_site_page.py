@@ -219,9 +219,27 @@ def test_count_token_writes_the_per_role_phrase() -> None:
     )
 
 
+def test_runs_token_writes_the_per_role_phrase_over_runs() -> None:
+    counts = {
+        "dist": {
+            "gpt2": stats.RoleCount(3, 3),
+            "base": stats.RoleCount(3, 3),
+            "post": stats.RoleCount(3, 6),
+        }
+    }
+    doc = _doc({"method": _figure(counts=counts)})
+    view = page.Page(doc)
+    expected = (
+        "3 of 3 GPT-2 runs, 3 of 3 Qwen3 base runs and 3 of 6 post-trained runs"
+    )
+    assert view.text("[[runs:fig:method.dist]]") == expected
+    assert view.plain("[[runs:fig:method.dist]]") == expected
+
+
 @pytest.mark.parametrize(
     "token",
     [
+        "[[runs:fig:method.absent]]",
         "[[fig:absent]]",
         "[[table:absent]]",
         "[[sec:absent]]",

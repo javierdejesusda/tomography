@@ -98,3 +98,14 @@ def test_no_underscore_or_run_code(output: registry.TableOutput) -> None:
     texts += [c for r in output.rows for c in r]
     assert not any("_" in t or "`" in t for t in texts)
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
+
+
+def test_caption_says_what_the_contrast_is_and_where_the_baseline_is(
+    output: registry.TableOutput,
+) -> None:
+    text = output.detail
+    assert "within-run contrast across prompt variants" in text
+    assert "not the held-out split of [[table:reading]]" in text
+    assert "no random direction is stored for these runs" in text
+    assert "[[num:table:prompts.chance]]" in text
+    assert output.numbers["chance"] == 0.5

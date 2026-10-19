@@ -45,9 +45,6 @@ COLUMNS = [
 ]
 
 
-HIGH = 0.9
-
-
 def _in_cell(row: dict[str, Any]) -> bool:
     return all(row[k] == v for k, v in CELL.items())
 
@@ -95,7 +92,6 @@ def build(manifest: Manifest) -> TableOutput:
     rows: list[list[str]] = []
     above: dict[str, bool] = {}
     above_point: dict[str, bool] = {}
-    random_high: dict[str, bool] = {}
     inside: dict[str, bool] = {}
     words_value = 0.0
     for model in models:
@@ -118,7 +114,6 @@ def build(manifest: Manifest) -> TableOutput:
         )
         above[model] = lo > 0
         above_point[model] = d > 0
-        random_high[model] = float(random["auroc"]) >= HIGH
         people = [
             r
             for r in runfiles.rows(run, "people.csv")
@@ -147,9 +142,10 @@ def build(manifest: Manifest) -> TableOutput:
     claim = (
         "Qwen3 writes ranges where the sourced answer is a range, but the "
         "range reader is above a classifier on the question words on "
-        "[[count:table:approximate.above_words]], and its random control "
-        "reaches [[num:table:approximate.high]] on "
-        "[[count:table:approximate.random_high]]."
+        "[[count:table:approximate.above_words]], lies inside the interval "
+        "of its random control on [[count:fig:approximate.reader_in_random]] "
+        "and places the people outside the control's band on "
+        "[[count:fig:approximate.people_outside_band]]."
     )
     detail = (
         "The three leftmost columns give the percentage of greedy answers "
@@ -167,14 +163,12 @@ def build(manifest: Manifest) -> TableOutput:
     )
     numbers = {
         "text_word": words_value,
-        "high": HIGH,
         "inside_band": float(sum(inside.values())),
     }
     counts = {
         "above_words": stats.per_role(above),
         "above_words_point": stats.per_role(above_point),
         "inside_band": stats.per_role(inside),
-        "random_high": stats.per_role(random_high),
     }
     return TableOutput(
         claim,

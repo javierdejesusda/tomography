@@ -49,7 +49,7 @@ def placeholders() -> tuple[dict, dict]:
     for text in _texts():
         for token in TOKEN.findall(text):
             kind, _, rest = token.partition(":")
-            if kind not in ("num", "count"):
+            if kind not in ("num", "count", "runs"):
                 continue
             owner, _, name = rest.partition(":")
             key, _, field = name.rpartition(".")

@@ -35,6 +35,8 @@ GENERIC = (
     r"exceeds 0\.1(?!\d)",
     r"(?:within|above) 1\.5 times",
     r"below 0\.15(?!\d)",
+    r"at most 1\.5(?!\d)",
+    r"at least 0\.15(?!\d)",
     r"below 0\.5(?!\d)",
     r"\ball 10\b",
     r"none of the 10\b",
@@ -168,7 +170,7 @@ def test_every_token_names_a_known_target() -> None:
             elif kind == "cite":
                 for key in rest.split(","):
                     assert key in bib, (token, key)
-            elif kind in ("num", "count"):
+            elif kind in ("num", "count", "runs"):
                 owner, _, name = rest.partition(":")
                 key, _, field = name.rpartition(".")
                 assert owner in ("fig", "table"), token
@@ -406,10 +408,32 @@ def test_the_approximate_contribution_counts_the_reader_and_the_control() -> (
     text = " ".join(_all_texts())
     assert "is matched by" not in text
     assert "[[count:table:approximate.above_words]]" in text
-    assert "[[count:table:approximate.random_high]]" in text
+    assert "[[count:fig:approximate.reader_in_random]]" in text
+    assert "[[count:fig:approximate.people_outside_band]]" in text
+    assert "random_high" not in text
 
 
 def test_the_negated_set_claim_counts_checkpoints_below_chance() -> None:
     text = " ".join(_all_texts())
     assert "at least one negated set falls below chance" in text
     assert "[[count:fig:truth.neg_below_half]]" in text
+
+
+def test_counts_over_runs_use_the_runs_token() -> None:
+    text = " ".join(_all_texts())
+    assert "[[runs:fig:knowledge_steering.distinguishable]]" in text
+    assert "[[count:fig:knowledge_steering.distinguishable]]" not in text
+
+
+def test_the_abstract_counts_the_confidence_gain_per_role() -> None:
+    assert "[[count:fig:teaser.knowledge_confidence]]" in content.ABSTRACT
+    assert "knowledge_confidence_n" not in content.ABSTRACT
+    assert "any of the" not in content.ABSTRACT
+
+
+def test_the_steering_contribution_names_both_fluency_thresholds() -> None:
+    text = " ".join(_all_texts())
+    start = text.index("keeps the fluency rule")
+    sentence = text[start : start + 220]
+    assert "perplexity ratio at most 1.5" in sentence
+    assert "distinct-1 at least 0.15" in sentence
