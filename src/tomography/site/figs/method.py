@@ -218,8 +218,7 @@ def build(manifest: Manifest) -> FigureOutput:
         "correctly when its positive member projects higher on v, so a "
         "constant score sits at 0.5; steering adds c r v to the residual "
         "stream. A random unit direction, oriented on the training pairs "
-        "like the reader, is the baseline of the readings, next to "
-        "classifiers that see only the text where the wording can reveal "
-        "the label. The densities in the read stage are illustrative."
+        "like the reader, is the baseline of the readings. The densities in "
+        "the read stage are illustrative."
     )
     return FigureOutput(fig, claim, detail, {}, "")
