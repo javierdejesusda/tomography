@@ -465,6 +465,7 @@ def build(manifest: Manifest) -> FigureOutput:
         for ax, letter in ((ax_a, "a"), (panels[1], "b"), (panels[2], "c")):
             paper.panel_letter(ax, letter)
         _legend(fig)
+        _rows.freeze_layout(fig)
 
     point = stats.per_role(
         {

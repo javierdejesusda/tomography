@@ -341,6 +341,7 @@ def build(manifest: Manifest) -> FigureOutput:
     with paper.paper_style():
         fig = _rows.new_figure(HEIGHT)
         _draw(fig, found, rows, separators)
+        _rows.freeze_layout(fig)
 
     counts: dict[str, dict[str, stats.RoleCount]] = {}
     numbers: dict[str, float] = {"layer1_cos_max": biggest}
