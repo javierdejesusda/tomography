@@ -92,6 +92,7 @@ def build(manifest: Manifest) -> TableOutput:
     rows: list[list[str]] = []
     above: dict[str, bool] = {}
     above_point: dict[str, bool] = {}
+    layer_one: dict[str, bool] = {}
     inside: dict[str, bool] = {}
     words_value = 0.0
     for model in models:
@@ -114,6 +115,7 @@ def build(manifest: Manifest) -> TableOutput:
         )
         above[model] = lo > 0
         above_point[model] = d > 0
+        layer_one[model] = float(reader["layer"]) == 1
         people = [
             r
             for r in runfiles.rows(run, "people.csv")
@@ -141,7 +143,8 @@ def build(manifest: Manifest) -> TableOutput:
         )
     claim = (
         "Qwen3 writes ranges where the sourced answer is a range, but the "
-        "range reader is above a classifier on the question words on "
+        "range reader is above the 95 percent interval of a classifier "
+        "on the question words on "
         "[[count:table:approximate.above_words]], lies inside the interval "
         "of its random control on [[count:fig:approximate.reader_in_random]] "
         "and places the people outside the control's band on "
@@ -169,6 +172,7 @@ def build(manifest: Manifest) -> TableOutput:
         "above_words": stats.per_role(above),
         "above_words_point": stats.per_role(above_point),
         "inside_band": stats.per_role(inside),
+        "layer_one": stats.per_role(layer_one),
     }
     return TableOutput(
         claim,

@@ -34,8 +34,9 @@ ABSTRACT = (
     "steers the model by adding that direction to its residual stream. We "
     "run the recipe on four GPT-2 sizes and on three Qwen3 sizes, each as a "
     "base and a post-trained checkpoint, and set every reading beside a "
-    "random direction of the same run and, where the wording can give the "
-    "label away, beside a classifier that sees only the text. A logistic "
+    "random direction of the same run and, for TruthfulQA, knowledge and "
+    "approximate answers, where the wording can give the label away, beside "
+    "a classifier that sees only the text. A logistic "
     "direction reads utility above its random direction on "
     "[[count:fig:teaser.utility]], morality on [[count:fig:teaser.morality]] "
     "and truth on [[count:fig:teaser.truth]] at our test size. The paper's "
@@ -54,8 +55,10 @@ ABSTRACT = (
     "[[count:fig:steering.fluent01]], and a steering direction beats "
     "random directions of the same norm on "
     "[[count:fig:teaser.steering]]. Post-training lowers held-out sentiment "
-    "reading on [[num:fig:base_post.sent_below]] of the three Qwen3 sizes "
-    "and leaves most other readings within their intervals. Every number is "
+    "reading on [[num:fig:base_post.sent_below]] of the three Qwen3 sizes; "
+    "three other seed-paired differences exclude zero (0.6B morality, 1.7B "
+    "utility and 0.6B honesty) and the rest lie within their intervals. "
+    "Every number is "
     "computed from result files in the public repository."
 )
 
@@ -168,8 +171,10 @@ INTRODUCTION = Section(
             "Knowing what one knows ([[sec:knowledge_reading]]).",
             "A known-against-unknown direction ranks PopQA questions above "
             "popularity with an interval excluding zero on "
-            "[[count:fig:knowledge_reading.above_pop]], and adds nothing to "
-            "the confidence of the model on any checkpoint "
+            "[[count:fig:knowledge_reading.above_pop]], and adds to the "
+            "confidence of the model by at most "
+            "[[num:table:knowledge.gain_upper_max]] at the upper end of its "
+            "interval on any checkpoint "
             "([[fig:knowledge_reading]]).",
         ),
         (
@@ -184,8 +189,11 @@ INTRODUCTION = Section(
         (
             "Approximate answers ([[sec:approximate]]).",
             "Qwen3 writes ranges where the sourced answer is a range, but "
-            "the range reader is above a classifier on the question words "
-            "on [[count:table:approximate.above_words]], lies inside the "
+            "the range reader is above the 95 percent interval of a "
+            "classifier on the question words on "
+            "[[count:table:approximate.above_words]], sits at the lowest "
+            "layer on "
+            "[[count:table:approximate.layer_one]], lies inside the "
             "interval of its random control on "
             "[[count:fig:approximate.reader_in_random]] and places the "
             "people outside the band of the control on "
@@ -222,8 +230,9 @@ RELATED = Section(
         "paired activations and compares that finder with others on utility "
         "in its Section 5.1; several finders recover a similar sentiment "
         "direction in GPT-2 and Pythia [[cite:tigges2024language]], and on a "
-        "shared benchmark simple baselines match or beat "
-        "representation-based methods for concept detection and steering "
+        "shared benchmark difference-in-means is the best concept detector, "
+        "prompting beats every method for steering (followed by finetuning) "
+        "and sparse autoencoders are not competitive on either "
         "[[cite:wu2025axbench]].",
         "Truth has been read from hidden states with supervised probes "
         "[[cite:azaria2023internal]], with mass-mean probes whose directions "
@@ -288,9 +297,12 @@ METHOD = Section(
                 "and ties count one half; the accuracy is the share of "
                 "held-out pairs read correctly, so a direction with no "
                 "information scores 0.5 and no threshold is involved. A run "
-                "fits 10 readers (15 for TruthfulQA), each on its own draw "
-                "of 64 training pairs, and reports the mean of their "
-                "accuracies. [[fig:method]] shows the pipeline.",
+                "fits 10 readers (15 for TruthfulQA and 20 for the held-out "
+                "sentiment run), each on its own draw of 64 training pairs, "
+                "and reports the mean of their accuracies. The honesty "
+                "readers read the response tokens of the persona prompts "
+                "instead of the last token of the input. "
+                "[[fig:method]] shows the pipeline.",
                 "The layer chosen on validation, at which a reading is "
                 "reported, is picked on "
                 "pairs that the reported score does not use: a validation "
@@ -393,7 +405,10 @@ METHOD = Section(
             "Steering",
             paragraphs=(
                 "Steering adds c r(" + ELL + ") v(" + ELL + ") to the "
-                "residual stream at three consecutive layers, at every "
+                "residual stream at three consecutive layers (for the "
+                "sentiment run only; the finder comparison steers at 40, 55 "
+                "and 70 percent "
+                "of the depth), at every "
                 "position of the response, where v(" + ELL + ") is the unit "
                 "direction, r(" + ELL + ") is the mean residual norm at "
                 "layer " + ELL + " on calibration text and c is the "
@@ -597,11 +612,13 @@ DISCUSSION = Section(
         "pairs: it works on utility, where each pair is one scenario in two "
         "versions, and is not reliably above a random direction on "
         "unrelated pairs, where logistic regression still is. Steering "
-        "behaves as the paper describes at small coefficients and breaks "
+        "moves the judged sentiment at small coefficients and breaks "
         "fluency at larger ones (a perplexity on neutral text above 1.5 "
-        "times the unsteered model, or a distinct-1 below 0.15), and "
-        "post-training changes few readings beyond their intervals at these "
-        "sizes.",
+        "times the unsteered model, or a distinct-1 below 0.15; "
+        "[[sec:steering]]), and post-training lowers held-out sentiment "
+        "reading and changes three other readings beyond their intervals "
+        "(0.6B morality, 1.7B utility and 0.6B honesty, in "
+        "[[fig:base_post]]), with the rest within them.",
     ),
 )
 
@@ -611,16 +628,19 @@ LIMITATIONS = Section(
     runin=(
         (
             "Scale.",
-            "The largest model is Qwen3-4B, and we do not reproduce the "
-            "LLaMA-2 results of the paper; effects that appear only at "
-            "larger scale are outside this study.",
+            "The largest model is Qwen3-4B, we cover two model families, and "
+            "we do not reproduce the LLaMA-2 results of the paper; effects "
+            "that appear only at larger scale are outside this study. Most "
+            "concepts use one prompt format, the template of the paper, "
+            "and the wording study varies it for sentiment only.",
         ),
         (
             "Test size.",
             "Truth and honesty are scored on 59 test pairs and TruthfulQA "
             "on 173 questions, so differences below about 0.15 on truth are "
             "not resolved; GPT-2 truth readings are inconclusive rather "
-            "than negative.",
+            "than negative. Layers are selected on small validation sets, "
+            "so the chosen layer carries its own uncertainty.",
         ),
         (
             "Intervals.",
@@ -647,8 +667,8 @@ LIMITATIONS = Section(
             "Judges.",
             "Sentiment is the positive-class probability of a classifier, "
             "the utility steering test is judged by the same sentiment "
-            "classifier, and abstention is detected by phrase matching "
-            "without human labels.",
+            "classifier, which makes one judge family, and abstention is "
+            "detected by phrase matching without human labels.",
         ),
         (
             "Multiple comparisons.",
@@ -660,8 +680,10 @@ LIMITATIONS = Section(
             "Behavioural labels.",
             "Known and unknown questions are defined by the answers of each "
             "model, so question sets differ between models and an AUROC is "
-            "not a measure of the same questions across models; GPT-2 small "
-            "has too few known questions for a contrast.",
+            "not a measure of the same questions across models; the labels of "
+            "knowledge questions are alias string matches with no hand "
+            "check; GPT-2 small has too few known questions for a "
+            "contrast.",
         ),
         (
             "Approximate answers.",
@@ -696,9 +718,14 @@ REPRODUCIBILITY = Section(
         "configuration hash) and its outputs. Models and datasets are "
         "pinned to the revisions in [[table:assets]]. The experiments ran "
         "on a single consumer GPU, on rented single-GPU cloud machines and "
-        "on a 16-thread CPU machine; no experiment trains a model beyond "
-        "the readers. Run codes such as R2 or P9b name the run "
-        "directories ([[table:notation]]).",
+        "on a 16-thread CPU machine. One experiment trains a model beyond "
+        "the readers: a LoRRA adapter fitted on each of the 10 checkpoints. "
+        "Every experiment is one command, tomography run followed by the "
+        "experiment and the checkpoint, with base seed 0 from which the "
+        "seeds of the readers are derived by a hash, so a rerun reproduces "
+        "its files; the section of the README on running experiments lists "
+        "the command and the options of each ([[table:notation]] explains "
+        "the run codes of the run directories).",
     ),
 )
 
