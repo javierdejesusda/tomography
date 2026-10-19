@@ -253,7 +253,11 @@ def test_known_at_least_unknown_runs_come_from_the_curves(
         "qwen3-0.6b-base",
         "qwen3-1.7b-base",
     }
-    assert output.numbers["known_ge_unknown"] == len(held)
+    assert "known_ge_unknown" not in output.numbers
+    for role in stats.ROLES:
+        assert output.numbers[f"known_ge_unknown_{role}"] == sum(
+            stats.role(m) == role for m, _ in held
+        )
     for model, template in held:
         plain = _headline(model, template)["metric"] == "entropy"
         name = paper.display_name(model if plain else f"{model} {template}")

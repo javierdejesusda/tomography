@@ -409,11 +409,14 @@ def build(manifest: Manifest) -> FigureOutput:
         for r in runs
         if r.largest_shift("lat: known") >= r.largest_shift("lat: unknown")
     ]
-    numbers: dict[str, float] = {"known_ge_unknown": float(len(held))}
+    numbers: dict[str, float] = {}
     for role in stats.ROLES:
         numbers[f"n_{role}"] = float(distinguishable[role].total)
         numbers[f"distinguishable_{role}"] = float(distinguishable[role].hits)
         numbers[f"selective_{role}"] = float(selective[role].hits)
+        numbers[f"known_ge_unknown_{role}"] = float(
+            sum(stats.role(r.model) == role for r in held)
+        )
     detail = DETAIL.format(
         distinguishable=_rows.runs_text(distinguishable),
         selective=_rows.runs_text(selective),
