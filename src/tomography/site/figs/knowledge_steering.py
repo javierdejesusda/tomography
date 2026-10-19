@@ -45,7 +45,7 @@ CLAIM = (
 DETAIL = (
     "(a) Slope of the next-token entropy shift per unit relative "
     "coefficient on unknown questions (circle) and known questions "
-    "(triangle), against 3 random directions of the same norm on unknown "
+    "(left triangle), against 3 random directions of the same norm on unknown "
     "questions (grey), with 95 percent intervals that resample the "
     "questions. (b) The same for the abstention rate of post-trained "
     "checkpoints, with a few-shot and a concept prompt. The direction moves "
@@ -230,7 +230,9 @@ def _forest(
                     run.model,
                     y,
                     float(value),
-                    "o" if series == "direction_unknown" else "^",
+                    paper.QUESTION_SET_MARKERS[
+                        "unknown" if series == "direction_unknown" else "known"
+                    ],
                     paper.INK,
                     (float(lo), float(hi)),
                 )
@@ -286,7 +288,10 @@ def draw_curves(
         lw=paper.DATA_WIDTH,
         zorder=2,
     )
-    for series, marker in (("lat: known", "^"), ("lat: unknown", "o")):
+    for series, marker in (
+        ("lat: known", paper.QUESTION_SET_MARKERS["known"]),
+        ("lat: unknown", paper.QUESTION_SET_MARKERS["unknown"]),
+    ):
         k = index[series]
         ax.fill_between(
             x,
@@ -305,7 +310,10 @@ def draw_curves(
             lw=paper.DATA_WIDTH,
             marker=marker,
             zorder=3,
-            **_rows.fill(model, paper.INK),
+            **{
+                **_rows.fill(model, paper.INK),
+                "markersize": _rows.marker_size(marker),
+            },
         )
     for series in ("lat: known", "lat: unknown", "random: unknown"):
         k = index[series]
@@ -382,7 +390,9 @@ def build(manifest: Manifest) -> FigureOutput:
                     "direction, unknown questions", "o", paper.INK
                 ),
                 _rows.series_handle(
-                    "direction, known questions", "^", paper.INK
+                    "direction, known questions",
+                    paper.QUESTION_SET_MARKERS["known"],
+                    paper.INK,
                 ),
                 _rows.series_handle(
                     "random direction", "x", paper.ENC["random_marker"]

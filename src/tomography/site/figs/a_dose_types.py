@@ -29,7 +29,7 @@ CLAIM = (
 )
 DETAIL = (
     "Abstention rate on unknown questions (circle) and known questions "
-    "(triangle) against the relative coefficient of the knowledge "
+    "(left triangle) against the relative coefficient of the knowledge "
     "direction, for each post-trained run (rows) and question type "
     "(columns), with 95 percent intervals that resample the questions, and "
     "the mean over the 3 random directions on unknown questions with its "
@@ -140,7 +140,11 @@ def build(manifest: Manifest) -> FigureOutput:
         legend = fig.legend(
             handles=[
                 _rows.series_handle("unknown questions", "o", paper.INK),
-                _rows.series_handle("known questions", "^", paper.INK),
+                _rows.series_handle(
+                    "known questions",
+                    paper.QUESTION_SET_MARKERS["known"],
+                    paper.INK,
+                ),
                 Line2D(
                     [],
                     [],

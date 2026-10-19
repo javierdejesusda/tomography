@@ -26,7 +26,8 @@ CLAIM = (
 )
 DETAIL = (
     "Mean outcome on unknown questions (circle) and known questions "
-    "(triangle) against the relative coefficient of the knowledge direction, "
+    "(left triangle) against the relative coefficient of the knowledge "
+    "direction, "
     "with 95 percent intervals that resample the questions, and the mean "
     "over the 3 random directions on unknown questions with its 95 percent "
     "interval that resamples the questions (grey band). Entropy shift is shown "
@@ -89,7 +90,11 @@ def build(manifest: Manifest) -> FigureOutput:
         legend = fig.legend(
             handles=[
                 _rows.series_handle("unknown questions", "o", paper.INK),
-                _rows.series_handle("known questions", "^", paper.INK),
+                _rows.series_handle(
+                    "known questions",
+                    paper.QUESTION_SET_MARKERS["known"],
+                    paper.INK,
+                ),
                 Line2D(
                     [],
                     [],
