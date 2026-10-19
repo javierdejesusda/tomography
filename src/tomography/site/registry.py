@@ -106,6 +106,7 @@ MAIN_FIGURES = (
 )
 APPENDIX_FIGURES = (
     "a_layers",
+    "a_reading_heat",
     "a_finders_gpt2",
     "a_finders_qwen3",
     "a_wording",

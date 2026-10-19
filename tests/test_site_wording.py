@@ -4,6 +4,7 @@ import runpy
 from typing import Any
 
 from matplotlib.image import AxesImage
+import numpy as np
 import pytest
 
 from tomography.site import registry
@@ -167,16 +168,6 @@ def test_the_caption_quotes_the_spans_the_noise_and_the_bare_numbers(
     assert "Table A6" in text
 
 
-def test_the_figure_has_a_strip_and_a_scatter_and_no_heat_map(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    assert len(fig.axes) == 2
-    assert fig.get_size_inches()[0] == pytest.approx(paper.FULL_WIDTH)
-    assert fig.get_size_inches()[1] == pytest.approx(2.8)
-    assert not fig.findobj(AxesImage)
-
-
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.guard_problems(output.figure) == []
     assert checks.problems(output.figure) == []
@@ -200,15 +191,6 @@ def test_the_bare_claim_is_counted_per_role_without_a_pooled_count(
             assert paper.display_name(model) in output.claim
             assert f"{_bare(model)['to_paper']:.3f}" in output.claim
             assert f"{_paper(model)['random']:.3f}" in output.claim
-
-
-def test_the_caption_explains_the_marker_colour_and_fill_of_panel_b(
-    output: registry.FigureOutput,
-) -> None:
-    text = output.detail
-    assert "darkens with size" in text
-    assert "filled for GPT-2 and Qwen3 base" in text
-    assert "open for post-trained" in text
 
 
 def test_the_dropped_wording_is_absent_and_the_noise_uses_the_report_pairs(
@@ -257,3 +239,186 @@ def test_the_claim_states_the_span_count_and_does_not_overstate_gpt2(
     assert "beyond test-pair noise on most checkpoints" not in first
     assert stats.per_role_text(counts) in output.claim
     assert "point comparison" in output.claim
+
+
+FAMILIES = ("frame", "wording", "concept")
+
+
+def _gid_lines(ax: Any, prefix: str) -> dict[str, Any]:
+    return {
+        ln.get_gid(): ln
+        for ln in ax.get_lines()
+        if (ln.get_gid() or "").startswith(prefix)
+    }
+
+
+def _strip(output: registry.FigureOutput) -> Any:
+    (ax,) = [a for a in output.figure.axes if a.get_gid() == "wordings"]
+    return ax
+
+
+def _facets(output: registry.FigureOutput) -> dict[str, Any]:
+    return {
+        a.get_gid().removeprefix("cosine_"): a
+        for a in output.figure.axes
+        if (a.get_gid() or "").startswith("cosine_")
+    }
+
+
+def _rank(model: str) -> int:
+    values = sorted((r["from_paper"] for r in _rows(model)), reverse=True)
+    (paper_row,) = [r for r in _rows(model) if r["variant"] == "paper"]
+    return values.index(paper_row["from_paper"]) + 1
+
+
+def test_the_layout_is_one_strip_over_three_role_facets_and_no_heat_map(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    assert not fig.findobj(AxesImage)
+    width, height = fig.get_size_inches()
+    assert width == pytest.approx(paper.FULL_WIDTH)
+    assert height == pytest.approx(6.6)
+    assert sorted(_facets(output)) == sorted(ROLES)
+    assert len(_facets(output)) == 3
+    assert _strip(output).get_xlim() == pytest.approx((0.45, 1.0))
+
+
+def test_every_row_has_fifteen_identical_circles_coloured_by_three_families(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _strip(output)
+    colours: dict[str, set[Any]] = {f: set() for f in FAMILIES}
+    for model in MODELS:
+        rows = _rows(model)
+        drawn = 0
+        for family in FAMILIES:
+            line = _gid_lines(ax, f"words:{model}:{family}")[
+                f"words:{model}:{family}"
+            ]
+            want = sorted(
+                r["from_paper"]
+                for r in rows
+                if r["variant"] != "paper"
+                and {
+                    "frame": "frame",
+                    "wording": "wording",
+                    "concept": "concept",
+                }[r["family"]]
+                == family
+            )
+            assert sorted(line.get_xdata()) == pytest.approx(want)
+            assert line.get_marker() == "o"
+            assert line.get_markersize() == pytest.approx(3.0)
+            drawn += len(want)
+            colours[family].add(line.get_markerfacecolor())
+        assert drawn == 15
+    assert all(len(c) == 1 for c in colours.values())
+    assert len({next(iter(c)) for c in colours.values()}) == 3
+
+
+def test_the_paper_wording_is_a_diamond_with_its_rank_beside_it(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _strip(output)
+    ranks = {}
+    for model in MODELS:
+        (row,) = [r for r in _rows(model) if r["variant"] == "paper"]
+        line = _gid_lines(ax, f"paper:{model}")[f"paper:{model}"]
+        assert line.get_marker() == "D"
+        assert line.get_xdata()[0] == pytest.approx(row["from_paper"])
+        assert line.get_markersize() > 3.0
+        (text,) = [t for t in ax.texts if t.get_gid() == f"rank:{model}"]
+        assert text.get_text() == str(_rank(model))
+        ranks[model] = _rank(model)
+    assert output.numbers["paper_rank_min"] == min(ranks.values())
+    assert output.numbers["paper_rank_max"] == max(ranks.values())
+    assert 1 <= min(ranks.values()) <= max(ranks.values()) <= 16
+
+
+def test_the_median_tick_the_noise_band_and_the_random_tick_are_drawn(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _strip(output)
+    for model in MODELS:
+        rows = _rows(model)
+        values = [r["from_paper"] for r in rows]
+        (row,) = [r for r in rows if r["variant"] == "paper"]
+        median = _gid_lines(ax, f"median:{model}")[f"median:{model}"]
+        assert median.get_xdata()[0] == pytest.approx(float(np.median(values)))
+        tick = _gid_lines(ax, f"random:{model}")[f"random:{model}"]
+        assert tick.get_xdata()[0] == pytest.approx(row["random"])
+        (band,) = [p for p in ax.patches if p.get_gid() == f"noise:{model}"]
+        assert band.get_width() == pytest.approx(_noise(model))
+        assert band.get_x() + band.get_width() / 2 == pytest.approx(
+            row["from_paper"]
+        )
+
+
+def test_the_right_column_marks_the_checkpoints_whose_span_exceeds_noise(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _strip(output)
+    marked = [t for t in ax.texts if t.get_gid() == "above_noise"]
+    want = sum(_span(m) > _noise(m) for m in MODELS)
+    assert len(marked) == want == 8
+    spans = [t for t in ax.texts if t.get_gid() == "span"]
+    assert len(spans) == len(MODELS)
+    assert sorted(t.get_text() for t in spans) == sorted(
+        f"{_span(m):.3f}" for m in MODELS
+    )
+
+
+def test_the_rows_keep_the_roles_apart_in_two_headed_blocks(
+    output: registry.FigureOutput,
+) -> None:
+    ax = _strip(output)
+    heads = [t.get_text() for t in ax.texts if t.get_gid() == "block"]
+    assert heads == ["GPT-2", "Qwen3, base then post-trained"]
+    labels = [t.get_text() for t in ax.get_yticklabels()]
+    assert len(labels) == len(MODELS)
+    assert len(set(labels)) == len(MODELS)
+
+
+def test_each_facet_holds_only_its_role_with_the_paper_direction_at_one(
+    output: registry.FigureOutput,
+) -> None:
+    for role, ax in _facets(output).items():
+        mine = [m for m in MODELS if _role(m) == role]
+        drawn = _gid_lines(ax, "cosine:")
+        assert sorted(drawn) == sorted(f"cosine:{m}" for m in mine)
+        for model in mine:
+            rows = [r for r in _rows(model) if r["variant"] != "paper"]
+            line = drawn[f"cosine:{model}"]
+            assert sorted(line.get_xdata()) == pytest.approx(
+                sorted(r["cosine_paper"] for r in rows)
+            )
+            assert sorted(line.get_ydata()) == pytest.approx(
+                sorted(r["to_paper"] for r in rows)
+            )
+            (diamond,) = [
+                ln
+                for ln in ax.get_lines()
+                if ln.get_gid() == f"paperdir:{model}"
+            ]
+            assert diamond.get_xdata()[0] == pytest.approx(1.0)
+            assert diamond.get_marker() == "D"
+        assert ax.get_xlim() == pytest.approx((0.0, 1.05))
+        assert ax.get_ylim() == pytest.approx((0.45, 1.0))
+
+
+def test_the_caption_states_the_band_the_conservative_noise_and_the_rank(
+    output: registry.FigureOutput,
+) -> None:
+    text = output.detail
+    n = output.numbers
+    assert "15 circles" in text
+    assert "wordings share the same test pairs" in text
+    assert "conservative" in text
+    assert "excludes fitting noise" in text
+    assert "diamond" in text
+    assert "median" in text
+    assert (
+        f"{int(n['paper_rank_min'])} to {int(n['paper_rank_max'])} of the 16"
+        in output.claim
+    )

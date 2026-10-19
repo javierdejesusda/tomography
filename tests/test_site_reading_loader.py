@@ -218,3 +218,18 @@ def test_the_p4_sentiment_reading_uses_the_report_split_logistic_curves() -> (
         assert found.depth == pytest.approx(
             np.arange(1, meta["n_layers"] + 1) / meta["n_layers"]
         )
+
+
+def test_the_random_band_is_the_stored_interval_of_the_random_series() -> None:
+    manifest = Manifest(RESULTS)
+    _, curves, arrays = _raw("r2", "gpt2")
+    row = list(curves["series"]).index("random")
+    found = reading.load(manifest, "r2", "gpt2")
+    assert found is not None
+    assert found.random_lo == pytest.approx(arrays["lo"][row])
+    assert found.random_hi == pytest.approx(arrays["hi"][row])
+    sentiment = reading.load_sentiment(manifest, "gpt2")
+    assert sentiment is not None
+    assert sentiment.random_lo is not None
+    assert np.all(sentiment.random_lo <= sentiment.random + 1e-9)
+    assert np.all(sentiment.random_hi >= sentiment.random - 1e-9)
