@@ -462,4 +462,4 @@ def test_the_resolved_abstract_stays_short(
 ) -> None:
     view = page.Page(site[1])
     words = len(view.plain(content.ABSTRACT).split())
-    assert words <= 260, words
+    assert words <= 250, words

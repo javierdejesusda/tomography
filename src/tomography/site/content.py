@@ -29,30 +29,30 @@ METHODOLOGY_URL = REPO_URL + "/blob/main/docs/methodology.md"
 DATA_URL = REPO_URL + "/tree/main/results"
 
 ABSTRACT_FINDER = (
-    "The paper's finder is above it for sentiment on "
+    "The paper's finder is above a random direction for sentiment on "
     "[[count:fig:finders.pca_sentiment]] and truth on "
     "[[count:fig:finders.pca_truth]] with unrelated pairs and for utility "
     "on [[count:fig:finders.pca_utility]] with matched pairs; matching is "
     "confounded with the concept and the data."
 )
 ABSTRACT_STEERING = (
-    "Steering sentiment at relative coefficient 0.1 moves "
-    "sentiment on [[count:fig:steering.moves01]] and keeps the fluency rule "
-    "on [[count:fig:steering.fluent01]]. Steering utility at "
-    "coefficient 0.3 beats every random direction on "
-    "[[count:fig:teaser.steering]] and keeps the fluency rule on "
-    "[[count:fig:teaser.steering_fluent]]."
+    "Steering at relative coefficient 0.1 moves sentiment on "
+    "[[count:fig:steering.moves01]] and keeps the fluency rule on "
+    "[[count:fig:steering.fluent01]]. Steering utility at relative "
+    "coefficient 0.3 beats random directions on "
+    "[[count:fig:teaser.steering]] and keeps it on "
+    "[[count:fig:teaser.steering_fluent]] (GPT-2 small has no fluency "
+    "measure)."
 )
 ABSTRACT = (
-    "Representation engineering (Zou et al., 2023) reads and steers a "
-    "concept with one direction. We test four GPT-2 and three Qwen3 sizes, "
-    "base and post-trained, against a random direction and, where the "
-    "wording can leak the label, a text classifier. "
+    "We test representation engineering (Zou et al., 2023) on four GPT-2 "
+    "and three Qwen3 sizes against random "
+    "directions and, where the wording leaks the label, text classifiers. "
     "By the 95 percent interval, a logistic direction reads utility and "
-    "morality on all 10 checkpoints and truth on every Qwen3 checkpoint "
+    "morality on all 10 checkpoints, truth on every Qwen3 checkpoint "
     "and no GPT-2 size. "
     + ABSTRACT_FINDER
-    + " The TruthfulQA reader does not beat a words classifier (above it "
+    + " The TruthfulQA reader does not beat a words classifier (above "
     "on [[count:fig:teaser.truthfulqa]]). " + ABSTRACT_STEERING
 )
 
@@ -512,8 +512,8 @@ RESULTS = Section(
                 "with matched pairs, for truth on "
                 "[[count:fig:finders.pca_truth]] and for sentiment on "
                 "[[count:fig:finders.pca_sentiment]] with unrelated pairs; "
-                "on GPT-2 it is above it for utility by point estimate "
-                "only, on [[count:fig:finders.pca_utility_point]].",
+                "by point estimate it is above it for utility on "
+                "[[count:fig:finders.pca_utility_point]].",
                 "The paper compares finders on utility, where every pair is "
                 "two versions of one scenario. On sentiment and truth our "
                 "pairs are unrelated inputs with opposite labels, the "
@@ -551,7 +551,9 @@ RESULTS = Section(
             "wording",
             "Does the wording of the template matter?",
             paragraphs=(
-                "Yes. It moves a sentiment reader by up to "
+                "Wording moves a sentiment reader by more than the noise of "
+                "the test pairs (a point comparison) on "
+                "[[count:fig:wording.span_above_noise]], by up to "
                 "[[num:fig:wording.span_gpt2_max]] on GPT-2, "
                 "[[num:fig:wording.span_base_max]] on Qwen3 base and "
                 "[[num:fig:wording.span_post_max]] on post-trained "

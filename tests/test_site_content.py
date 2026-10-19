@@ -102,7 +102,7 @@ def test_the_title_and_abstract_are_the_planned_ones() -> None:
         "Engineering on GPT-2 and Qwen3"
     )
     assert content.ABSTRACT.startswith(
-        "Representation engineering (Zou et al., 2023) reads and steers"
+        "We test representation engineering (Zou et al., 2023) on four GPT-2"
     )
     assert content.ABSTRACT.endswith(content.ABSTRACT_STEERING)
 
@@ -484,7 +484,7 @@ def test_reproducibility_admits_the_lorra_adapter_and_names_no_run_code() -> (
 
 
 def test_the_text_baseline_is_scoped_in_the_abstract() -> None:
-    assert "where the wording can leak the label" in content.ABSTRACT
+    assert "where the wording leaks the label" in content.ABSTRACT
     assert "for TruthfulQA, knowledge and approximate answers" in " ".join(
         content.INTRODUCTION.paragraphs
     )
@@ -660,3 +660,28 @@ def test_openers_state_the_criterion_and_the_counts_not_a_verdict() -> None:
     assert not post.startswith("Little")
     assert "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes" in post
     assert "[[num:fig:base_post.paired_excluding_zero]]" in post
+
+
+def test_the_wording_opener_leads_with_the_noise_count() -> None:
+    opener = _opener("wording")
+    assert opener.startswith("Wording moves a sentiment reader by more than")
+    assert "[[count:fig:wording.span_above_noise]]" in opener
+    assert "point comparison" in opener
+    assert not opener.startswith("Yes")
+
+
+def test_the_finder_opener_clause_is_true_as_printed() -> None:
+    opener = _opener("finders")
+    assert "on GPT-2 it is above" not in opener
+    assert (
+        "by point estimate it is above it for utility on "
+        "[[count:fig:finders.pca_utility_point]]"
+    ) in opener
+
+
+def test_the_abstract_uses_one_term_and_explains_the_gpt2_gap() -> None:
+    abstract = content.ABSTRACT
+    assert "above a random direction" in abstract
+    assert abstract.count("relative coefficient") == 2
+    assert "GPT-2 small has no fluency measure" in abstract
+    assert "above it for sentiment" not in abstract
