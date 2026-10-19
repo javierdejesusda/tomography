@@ -12,11 +12,11 @@ from typing import Any
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 from matplotlib.patches import Rectangle
 
 from tomography.site import runfiles
 from tomography.site import stats
+from tomography.site.figs import _rows as rowkit
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
 from tomography.site.registry import RoleCount
@@ -26,7 +26,7 @@ from tomography.viz import paper
 HEIGHT = 2.8
 TASK = "sentiment"
 DROPPED = "no_trailing_space"
-MARKER = {"frame": "o", "wording": "s", "concept": "^"}
+MARKER = paper.VARIANT_MARKERS
 DODGE = {"frame": -0.17, "wording": 0.0, "concept": 0.17}
 KIND = {
     "frame": "frame change",
@@ -51,6 +51,10 @@ def _rows(manifest: Manifest, model: str) -> tuple[list[dict[str, Any]], int]:
     return table, int(summary["n_eval_pairs"][TASK]["report"])
 
 
+def _size(marker: str, size: float) -> float:
+    return rowkit.STAR_SIZE if marker == paper.CATEGORY_MARKERS[0] else size
+
+
 def _marker(
     ax: Axes,
     x: float,
@@ -69,7 +73,7 @@ def _marker(
         [y],
         ls="none",
         marker=MARKER[family],
-        ms=size,
+        ms=_size(MARKER[family], size),
         mfc=face if style.filled else "white",
         mec=edge or face,
         mew=0.8,
@@ -216,18 +220,34 @@ def _legend(fig: Figure) -> None:
             [],
             ls="none",
             marker=MARKER[f],
-            ms=SIZE,
+            ms=_size(MARKER[f], SIZE),
             color=paper.ENC["direction"],
         )
         for f in MARKER
     ]
     handles.append(Line2D([], [], color=paper.ENC["paper"], lw=1.4))
-    handles.append(Patch(fc=paper.RANDOM_BAND, ec="none"))
+    handles.append(
+        Line2D([], [], color=paper.RANDOM_BAND, lw=5, solid_capstyle="butt")
+    )
+    handles.append(
+        rowkit.series_handle("GPT-2 and base", paper.ROLE_KEY_MARKER, paper.INK)
+    )
+    handles.append(
+        rowkit.series_handle(
+            "post-trained", paper.ROLE_KEY_MARKER, paper.INK, filled=False
+        )
+    )
     fig.legend(
         handles,
-        [*KIND.values(), "paper wording", "random direction"],
+        [
+            *KIND.values(),
+            "paper wording",
+            "random direction",
+            "GPT-2 and base",
+            "post-trained",
+        ],
         loc="outside upper center",
-        ncol=5,
+        ncol=4,
         frameon=False,
         fontsize=TEXT,
         columnspacing=1.2,

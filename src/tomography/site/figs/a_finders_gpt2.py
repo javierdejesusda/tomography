@@ -12,17 +12,21 @@ from collections.abc import Callable
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 
 from tomography.site import finders
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
+from tomography.viz import axes as shared
 from tomography.viz import paper
 
 HEIGHT = 4.6
 FINDERS = ("pca_diff", "logistic")
 COLORS = {"pca_diff": paper.ENC["paper"], "logistic": paper.ENC["direction"]}
+MARKERS = {
+    "pca_diff": paper.MEASURE_MARKERS["paper_finder"],
+    "logistic": paper.MEASURE_MARKERS["direction"],
+}
 TASK_NAMES = {"sentiment": "Sentiment", "truth": "Truth", "utility": "Utility"}
 MARKER = 3.0
 TEXT = 6.5
@@ -62,14 +66,23 @@ def _panel(
         )
     for name in FINDERS:
         values = cell.curves[name][0]
-        ax.plot(cell.depth, values, color=COLORS[name], lw=1.0, zorder=3)
+        ax.plot(
+            cell.depth,
+            values,
+            color=COLORS[name],
+            ls=paper.LINESTYLES[
+                "solid" if shared.model_style(model).filled else "post_trained"
+            ],
+            lw=1.0,
+            zorder=3,
+        )
         row = cell.rows[name]
         depth = cell.row_depth(name)
         ax.plot(
             [depth],
             [row.report],
             ls="none",
-            marker="o",
+            marker=MARKERS[name],
             ms=MARKER,
             color=COLORS[name],
             mec=paper.INK,
@@ -95,32 +108,50 @@ def _panel(
     ax.set_yticklabels(["0.5", "1"])
 
 
-def _legend(fig: Figure) -> None:
+def _legend(fig: Figure, post_trained: bool) -> None:
     handles = [
-        Line2D([], [], color=COLORS["pca_diff"], lw=1.0),
-        Line2D([], [], color=COLORS["logistic"], lw=1.0),
-        Patch(fc=paper.RANDOM_BAND, ec="none"),
         Line2D(
             [],
             [],
-            ls="none",
-            marker="o",
+            color=COLORS[name],
+            lw=1.0,
+            marker=MARKERS[name],
             ms=MARKER,
-            color=paper.ENC["reference"],
             mec=paper.INK,
             mew=0.4,
-        ),
+        )
+        for name in FINDERS
     ]
+    handles.append(
+        Line2D(
+            [],
+            [],
+            color=paper.RANDOM_BAND,
+            lw=5,
+            solid_capstyle="butt",
+        )
+    )
+    labels = [
+        "paper's finder",
+        "logistic regression",
+        "random direction (95 percent interval over seeds)",
+    ]
+    if post_trained:
+        handles.append(
+            Line2D(
+                [],
+                [],
+                color=paper.INK,
+                lw=1.0,
+                ls=paper.LINESTYLES["post_trained"],
+            )
+        )
+        labels.append("post-trained")
     fig.legend(
         handles,
-        [
-            "paper's finder",
-            "logistic regression",
-            "random direction",
-            "layer chosen on the select split",
-        ],
+        labels,
         loc="outside upper center",
-        ncol=4,
+        ncol=2,
         frameon=False,
         fontsize=TEXT,
         columnspacing=1.0,
@@ -173,7 +204,7 @@ def split(
                     ax.set_xlabel("relative depth")
                 else:
                     ax.tick_params(labelbottom=False)
-        _legend(fig)
+        _legend(fig, any(not shared.model_style(m).filled for m in models))
     claim = (
         "Report-split accuracy at every layer of the paper's finder "
         f"(purple) and logistic regression (black) on {family}, against the "
