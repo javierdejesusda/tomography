@@ -45,6 +45,7 @@ BAR_START = -0.56
 BAR_SLOT = 0.055
 LIMIT_X = -0.565
 LABEL_FONT = 7
+KEY_FONT = paper.TICK
 ROLE_TITLES = {
     "gpt2": "GPT-2",
     "base": "Qwen3 base",
@@ -310,7 +311,7 @@ def _limit(ax: Any, value: float) -> None:
         value,
         f"limit\n{value:g}",
         color=paper.ENC["secondary_text"],
-        fontsize=LABEL_FONT,
+        fontsize=KEY_FONT,
         va="bottom",
         ha="left",
         linespacing=1.0,
@@ -376,7 +377,7 @@ def _key(fig: Figure) -> None:
         ncol=3,
         handlelength=2.2,
         columnspacing=1.6,
-        fontsize=LABEL_FONT,
+        fontsize=KEY_FONT,
     )
     legend.get_frame().set_edgecolor("none")
 

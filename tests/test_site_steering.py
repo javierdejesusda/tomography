@@ -620,3 +620,21 @@ def test_the_caption_has_at_most_200_words_and_leads_with_the_conclusion(
 ) -> None:
     assert len(f"{output.claim} {output.detail}".split()) <= 200
     assert output.detail.startswith("A checkpoint moves when all 3 steering")
+
+
+def test_the_key_and_the_limit_labels_read_at_the_tick_size(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    sizes = [
+        text.get_fontsize()
+        for legend in fig.legends
+        for text in legend.get_texts()
+    ]
+    for ax in fig.axes:
+        sizes += [
+            text.get_fontsize()
+            for text in ax.texts
+            if text.get_text().startswith("limit")
+        ]
+    assert sizes and min(sizes) >= paper.TICK
