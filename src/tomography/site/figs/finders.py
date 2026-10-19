@@ -268,18 +268,6 @@ def _where(counts: dict[str, RoleCount]) -> str:
     return stats.per_role_text(counts)
 
 
-def _winners(
-    models: list[str],
-    data: dict[str, dict[tuple[str, str], Point]],
-    task: str,
-    finder: str,
-) -> str:
-    names = [
-        paper.display_name(m) for m in models if data[m][(task, finder)].lo > 0
-    ]
-    return f" ({', '.join(names)})" if names else ""
-
-
 def _claim(
     models: list[str],
     data: dict[str, dict[tuple[str, str], Point]],
@@ -289,24 +277,19 @@ def _claim(
     utility = counts["pca_utility"]
     qwen = {r: c for r, c in utility.items() if r != "gpt2"}
     utility_text = f"{stats.per_role_text(qwen)} by interval"
+    gpt2 = counts["pca_utility_point"]["gpt2"]
     return (
         "On unrelated sentences with opposite labels, the leading principal "
         "component of paired differences is above a random direction, with "
         "an interval excluding zero, for sentiment on "
-        f"{stats.per_role_text(counts['pca_sentiment'])}"
-        f"{_winners(models, data, 'sentiment', 'pca_diff')}, and for truth "
-        f"on {stats.per_role_text(counts['pca_truth'])}"
-        f"{_winners(models, data, 'truth', 'pca_diff')}. On utility, whose "
-        "pairs are matched scenarios, it is above the random direction on "
-        f"{utility_text}, and on GPT-2 by point estimate only "
-        f"({counts['pca_utility_point']['gpt2'].hits} of "
-        f"{counts['pca_utility_point']['gpt2'].total} checkpoints, by "
+        f"{stats.per_role_text(counts['pca_sentiment'])} and for truth on "
+        f"{stats.per_role_text(counts['pca_truth'])}. On utility (matched "
+        f"pairs) it is above it on {utility_text} and on GPT-2 by point "
+        f"estimate only ({gpt2.hits} of {gpt2.total}, by "
         f"{fmt3(numbers['pca_utility_gpt2_min'])} to "
-        f"{fmt3(numbers['pca_utility_gpt2_max'])}). Matching is "
-        "confounded with the concept and the data here, so the figure does "
-        "not show that matching causes the difference. Logistic regression "
-        "is above the random direction for sentiment, with an interval "
-        f"excluding zero, on {_where(counts['logistic_sentiment'])}."
+        f"{fmt3(numbers['pca_utility_gpt2_max'])}), but matching is "
+        "confounded with the concept. Logistic regression is above it for "
+        f"sentiment on {_where(counts['logistic_sentiment'])}."
     )
 
 
@@ -316,18 +299,15 @@ _PAIRS = (
     f"{params.REPORT_PAIRS['utility']} utility pairs"
 )
 DETAIL = (
-    "Each marker is a finder's accuracy on the report split minus that of "
-    "a random direction of the same run, each at the layer its select split "
-    "chose (filled for GPT-2 and Qwen3 base checkpoints, open for "
-    "post-trained ones); whiskers are conservative 95 percent intervals for "
-    f"the test pairs ({_PAIRS}); the "
-    "grey band is the spread that test-pair noise alone gives around the "
-    "random direction. The line above each panel counts, for the PCA "
-    "finder of the paper, the checkpoints whose interval lies above zero, "
-    "in the order GPT-2, Qwen3 base, Qwen3 post-trained. Layer curves of "
-    "these finders are in "
-    "[[fig:a_finders_gpt2]] and [[fig:a_finders_qwen3]], all six finders in "
-    "[[table:finders_all]]."
+    "Each marker is a finder's report-split accuracy minus that of a "
+    "random direction of the same run, at the layer its select split chose "
+    "(filled: GPT-2 and Qwen3 base; open: post-trained); whiskers are "
+    f"conservative 95 percent intervals over the test pairs ({_PAIRS}); the "
+    "grey band is test-pair noise. The line "
+    "above each panel counts checkpoints where the interval of the "
+    "paper's finder is above zero (GPT-2, Qwen3 base, post-trained). "
+    "Layer curves: [[fig:a_finders_gpt2]], [[fig:a_finders_qwen3]]; all six "
+    "finders: [[table:finders_all]]."
 )
 
 

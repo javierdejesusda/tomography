@@ -193,7 +193,6 @@ def test_the_caption_quotes_every_number_and_the_sample_sizes(
     output: registry.FigureOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
-    assert "Qwen3-1.7B-Base" in text
     gpt2 = [
         EXPECTED[(m, "utility", "pca_diff")][0]
         for m in MODELS
@@ -202,11 +201,17 @@ def test_the_caption_quotes_every_number_and_the_sample_sizes(
     assert f"{min(gpt2):.3f} to {max(gpt2):.3f}" in text
     assert "0.154" not in text
     assert "214 sentiment, 59 truth and 256 utility pairs" in text
-    assert "all 10 checkpoints" in text
-    assert "[[fig:a_finders_gpt2]] and [[fig:a_finders_qwen3]]" in text
+    assert "[[fig:a_finders_gpt2]], [[fig:a_finders_qwen3]]" in text
     assert "[[table:finders_all]]" in text
     assert "random" in text
     assert "of 10 checkpoints" not in text
+
+
+def test_the_caption_has_at_most_200_words(
+    output: registry.FigureOutput,
+) -> None:
+    text = f"{output.claim} {output.detail}"
+    assert len(text.split()) <= 200
 
 
 def test_the_figure_has_three_panels_with_shared_rows_and_no_heat_map(
@@ -288,7 +293,6 @@ def test_the_claim_describes_the_pairings_without_a_causal_title(
     text = output.claim
     assert "needs matched pairs" not in text
     assert "confounded" in text
-    assert "does not show that matching" in text
     assert "by point estimate only" in text
     assert "for truth on 0 of 4 GPT-2, 2 of 3 Qwen3 base" in text
 
