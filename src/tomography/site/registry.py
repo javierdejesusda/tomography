@@ -105,11 +105,13 @@ MAIN_FIGURES = (
     "base_post",
 )
 APPENDIX_FIGURES = (
+    "a_reading_curves",
     "a_layers",
     "a_reading_heat",
     "a_finders_gpt2",
     "a_finders_qwen3",
     "a_wording",
+    "a_truth_cities",
     "a_knowledge_matrix",
     "a_dose_runs",
     "a_dose_types",

@@ -1,10 +1,11 @@
-"""Figure 6: where reading truth does not beat text or negation.
+"""Figure 6: a truth reader does not beat words alone on TruthfulQA.
 
 Panel (a) puts the MC1 accuracy of the truth reader and of the honesty
-persona reader on TruthfulQA beside two classifiers that see only the words,
-their difference with a conservative interval, and the answer log-probability
-with its chance level. Panel (b) has a dumbbell per checkpoint from the
-accuracy on each affirmative statement set to its negation.
+persona reader on TruthfulQA beside two classifiers that see only the words.
+Panel (b) is their difference with a conservative interval, and panel (c) the
+answer log-probability with its chance level. The statement sets with
+negation, where the reader falls below chance, are in the appendix figure
+`a_truth_cities`, which reuses the loaders of this module.
 """
 
 import dataclasses
@@ -24,7 +25,7 @@ from tomography.site.registry import RoleCount
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
-HEIGHT = 5.8
+HEIGHT = 3.6
 TOP = -2.2
 READER_NAMES = {
     "truthfulqa_reader": "truth reader",
@@ -171,9 +172,19 @@ def _whisker(
     line.set_gid(f"whisker:{gid}")
 
 
-def _point(
+def point(
     ax: Axes, x: float, y: float, shape: str, gid: str, **kw: Any
 ) -> None:
+    """Draws one marker with a gid.
+
+    Args:
+        ax: The panel.
+        x: Horizontal position.
+        y: Vertical position.
+        shape: Marker shape.
+        gid: Artist id.
+        **kw: Further `Axes.plot` keywords; `ms` and `color` have defaults.
+    """
     (line,) = ax.plot(
         [x],
         [y],
@@ -188,7 +199,13 @@ def _point(
     line.set_gid(gid)
 
 
-def _chance_line(ax: Axes, value: float) -> None:
+def chance_line(ax: Axes, value: float) -> None:
+    """Draws the dotted vertical chance line.
+
+    Args:
+        ax: The panel.
+        value: Where the line sits.
+    """
     line = ax.axvline(
         value,
         color=paper.ENC["reference"],
@@ -221,7 +238,7 @@ def _panel_levels(
             cell = data[model].reads[name]
             color = PERSONA if name == "persona_reader" else paper.INK
             _whisker(ax, y + dodge, cell, f"{name}:{model}", color)
-            _point(
+            point(
                 ax,
                 cell.value,
                 y + dodge,
@@ -270,7 +287,7 @@ def _panel_difference(
     for model, y in rows.items():
         cell = _difference(data[model])
         _whisker(ax, y, cell, f"diff:{model}")
-        _point(ax, cell.value, y, DIRECTION, f"diff:{model}")
+        point(ax, cell.value, y, DIRECTION, f"diff:{model}")
     ax.set_xlim(*XLIM_D)
     ax.set_xticks([-0.2, 0.0, 0.2])
     ax.set_xlabel("reader minus words")
@@ -281,11 +298,11 @@ def _panel_logprob(
     ax: Axes, rows: dict[str, float], data: dict[str, Model], chance: float
 ) -> None:
     ax.set_xlim(*XLIM_C)
-    _chance_line(ax, chance)
+    chance_line(ax, chance)
     for model, y in rows.items():
         cell = data[model].reads[LOG_PROBABILITY]
         _whisker(ax, y, cell, f"{LOG_PROBABILITY}:{model}")
-        _point(
+        point(
             ax,
             cell.value,
             y,
@@ -295,61 +312,6 @@ def _panel_logprob(
         )
     ax.set_xticks([0.2, 0.4, 0.6])
     ax.set_xlabel("MC1 accuracy")
-    ax.spines["left"].set_visible(False)
-
-
-def _panel_dumbbell(
-    ax: Axes,
-    rows: dict[str, float],
-    data: dict[str, Model],
-    pair: tuple[str, str, str],
-) -> None:
-    plain, neg, _ = pair
-    ax.set_xlim(*XLIM_B)
-    shade = ax.axvspan(
-        XLIM_B[0], 0.5, color=paper.RANDOM_BAND, alpha=0.5, lw=0, zorder=0.5
-    )
-    shade.set_gid("below_chance")
-    _chance_line(ax, 0.5)
-    for model, y in rows.items():
-        affirmative = data[model].sets[plain]
-        negated = data[model].sets[neg]
-        (bell,) = ax.plot(
-            [affirmative.value, negated.value],
-            [y, y],
-            color=paper.INK,
-            lw=0.8,
-            zorder=2,
-        )
-        bell.set_gid(f"dumbbell:{plain}:{model}")
-        (tick,) = ax.plot(
-            [data[model].random[neg]] * 2,
-            [y - 0.32, y + 0.32],
-            color=paper.ENC["random_marker"],
-            lw=1.0,
-            zorder=3,
-        )
-        tick.set_gid(f"random:{plain}:{model}")
-        _point(
-            ax,
-            affirmative.value,
-            y,
-            "|",
-            f"aff:{plain}:{model}",
-            ms=SMALL_TICK,
-        )
-        below = negated.hi < 0.5
-        _point(
-            ax,
-            negated.value,
-            y,
-            DIRECTION,
-            f"neg:{plain}:{model}",
-            ms=MARKER + 0.6,
-            mfc=paper.INK if below else "white",
-        )
-    ax.set_xticks([0.25, 0.5, 0.75, 1.0], ["0.25", "0.5", "0.75", "1"])
-    ax.set_xlabel("accuracy, validation layer")
     ax.spines["left"].set_visible(False)
 
 
@@ -372,20 +334,14 @@ def _legend(fig: Figure) -> None:
         mark(DIRECTION, PERSONA),
         Line2D([], [], color=paper.ENC["text"], lw=0.8),
         mark(PROBABILITY, paper.ENC["own_probability"]),
-        mark("|", ink, ms=SMALL_TICK, mew=1.0),
-        mark(DIRECTION, ink, ms=MARKER + 0.6, mfc="white", mew=0.8),
-        mark("|", paper.ENC["random_marker"], ms=6, mew=1.0),
     ]
     labels = [
-        "truth reader (a), negated set with\ninterval below 0.5 (d, e)",
+        "truth reader",
         "honesty persona reader",
         "text-only classifiers on words and\n"
         "characters (lines), each with its\n"
         "95 percent interval (band)",
         "answer log-probability",
-        "affirmative set",
-        "negated set, otherwise",
-        "random direction, negated set",
     ]
     fig.legend(
         handles,
@@ -488,10 +444,9 @@ def _claim(
     numbers: dict[str, float], counts: dict[str, dict[str, RoleCount]]
 ) -> str:
     return (
-        "A truth reader does not beat words alone on TruthfulQA, and "
-        "negated statements pull it below chance on some checkpoints. Its "
-        "MC1 accuracy lies inside the span of the 95 percent intervals of "
-        f"two text-only classifiers ({numbers['text_lo']:.3f} to "
+        "A truth reader does not beat words alone on TruthfulQA: its MC1 "
+        "accuracy lies inside the span of the 95 percent intervals of two "
+        f"text-only classifiers ({numbers['text_lo']:.3f} to "
         f"{numbers['text_hi']:.3f}; their accuracies are "
         f"{numbers['text_word']:.3f} and {numbers['text_char']:.3f}) on "
         f"{stats.per_role_text(counts['tqa_inside'])}, while the honesty "
@@ -504,39 +459,21 @@ def _claim(
 def _detail(
     numbers: dict[str, float], counts: dict[str, dict[str, RoleCount]]
 ) -> str:
-    gpt2 = counts["tqa_inside"]["gpt2"].total
+    n = f"{numbers['n_questions']:.0f}"
     return (
-        "(a) MC1 accuracy on TruthfulQA of the truth reader (circle) and of "
-        "the honesty persona reader (dark grey circle) at the layer chosen on "
-        f"validation (whiskers are 95 percent Wilson intervals over "
-        f"{numbers['n_questions']:.0f} questions); each of the two "
-        "classifiers that see only the words is a green line at its "
-        "accuracy with its own interval as a band. (b) The "
-        "difference panel gives the reader minus the more accurate text-only "
-        "classifier with the conservative interval d plus or minus 1.96 "
+        "(a) MC1 accuracy of the truth reader (circle) and of the honesty "
+        "persona reader (dark grey circle) at the layer chosen on "
+        f"validation, with 95 percent Wilson intervals over {n} questions; "
+        "each text-only classifier is a green line at its accuracy with its "
+        "own interval as a band. (b) The reader minus the more accurate "
+        "classifier, with the conservative interval d plus or minus 1.96 "
         "times the square root of p1(1-p1)/n plus p2(1-p2)/n over the same "
-        f"{numbers['n_questions']:.0f} questions; intervals that exclude "
-        f"zero: {stats.per_role_text(counts['diff_excludes_zero'])}. (c) The "
-        "answer log-probability has its own panel with a Wilson interval and "
-        f"the dotted chance level of {numbers['chance']:.3f}. (d, e) "
-        "Accuracy of the truth reader on statements about cities (d) and on "
-        "Spanish to English translations (e): a dumbbell from the affirmative "
-        "set to its negation, filled where the Wilson interval of the "
-        "negated set lies wholly below 0.5, with the accuracy of a random "
-        "direction on the negated set (grey tick) and the region below "
-        "chance shaded; whiskers in (d) and (e) are not drawn, the criterion "
-        "uses "
-        "95 percent Wilson intervals over the evaluation pairs of each "
-        "set. GPT-2 reads affirmative cities at only "
-        f"{numbers['gpt2_cities_min']:.2f} to {numbers['gpt2_cities_max']:.2f}"
-        f", against {numbers['gpt2_cities_random_min']:.2f} to "
-        f"{numbers['gpt2_cities_random_max']:.2f} for its random direction"
-        ", so small excursions there are not inversions of a strong reader. "
-        "Checkpoints with at least one negated set whose interval lies "
-        f"below 0.5 are {stats.per_role_text(counts['neg_below_half'])}. On "
-        "negated cities the reader falls below the random direction by "
-        f"point estimate on {int(numbers['negcities_below_random_gpt2'])} "
-        f"of {gpt2} GPT-2 sizes."
+        f"{n} questions; intervals that exclude zero: "
+        f"{stats.per_role_text(counts['diff_excludes_zero'])}. (c) The "
+        "answer log-probability with a Wilson interval and the dotted "
+        f"chance level of {numbers['chance']:.3f}. Statements with "
+        "negation, where the reader falls below chance, are in "
+        "[[fig:a_truth_cities]]."
     )
 
 
@@ -553,11 +490,41 @@ def _csv(models: list[str], data: dict[str, Model]) -> str:
         for series, cell in data[model].reads.items():
             add("a", model, series, cell)
         add("a", model, "difference", _difference(data[model]))
-        for series, cell in data[model].sets.items():
-            add("b", model, series, cell)
-        for series, value in data[model].random.items():
-            add("b", model, f"random_{series}", Cell(value, value, value))
     return "\n".join(lines) + "\n"
+
+
+def summarize(
+    models: list[str], data: dict[str, Model], chance: float
+) -> tuple[dict[str, float], dict[str, dict[str, RoleCount]]]:
+    """Computes the numbers and the per-role counts of the truth figures.
+
+    Args:
+        models: Checkpoint keys.
+        data: Their data.
+        chance: The TruthfulQA chance level.
+
+    Returns:
+        The numbers and the counts.
+    """
+    counts = _counts(models, data)
+    return _numbers(models, data, counts, chance), counts
+
+
+def load(manifest: Manifest) -> tuple[list[str], dict[str, Model], float]:
+    """Loads the checkpoints of the truth figures.
+
+    Args:
+        manifest: The run resolver.
+
+    Returns:
+        The checkpoint keys, their data and the TruthfulQA chance level.
+    """
+    models = manifest.models("r6")
+    data = {m: _model(manifest, m) for m in models}
+    path = manifest.run("r6", models[0])
+    assert path is not None
+    chance = float(runfiles.data(path, "curves_truthfulqa.json")["chance"])
+    return models, data, chance
 
 
 def build(manifest: Manifest) -> FigureOutput:
@@ -569,59 +536,37 @@ def build(manifest: Manifest) -> FigureOutput:
     Returns:
         The figure and its caption parts.
     """
-    models = manifest.models("r6")
-    data = {m: _model(manifest, m) for m in models}
-    path = manifest.run("r6", models[0])
-    assert path is not None
-    chance = float(runfiles.data(path, "curves_truthfulqa.json")["chance"])
+    models, data, chance = load(manifest)
     counts = _counts(models, data)
     numbers = _numbers(models, data, counts, chance)
     rows = shared.model_rows(models)
     names = [paper.display_name(m) for m in rows]
     with paper.paper_style():
         fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
-        grid = fig.add_gridspec(2, 1)
-        top = grid[0].subgridspec(1, 3, width_ratios=WIDTHS_TOP)
-        bottom = grid[1].subgridspec(1, 2)
-        slots = (
-            (top[0, 0], "levels"),
-            (top[0, 1], "difference"),
-            (top[0, 2], "logprob"),
-            (bottom[0, 0], "cities"),
-            (bottom[0, 1], "translations"),
-        )
+        grid = fig.add_gridspec(1, 3, width_ratios=WIDTHS_TOP)
         panels: list[Axes] = []
-        for slot, gid in slots:
-            share = {1: 0, 2: 0, 4: 3}.get(len(panels))
+        for col, gid in enumerate(("levels", "difference", "logprob")):
             ax = fig.add_subplot(
-                slot, sharey=None if share is None else panels[share]
+                grid[0, col], sharey=panels[0] if panels else None
             )
             ax.set_gid(gid)
             ax.tick_params(axis="y", length=0)
             panels.append(ax)
-        _panel_levels(panels[0], rows, data)
-        _panel_difference(panels[1], rows, data)
-        _panel_logprob(panels[2], rows, data, chance)
-        _panel_dumbbell(panels[3], rows, data, PAIRS[0])
-        _panel_dumbbell(panels[4], rows, data, PAIRS[1])
-        first, second, third, cities, translations = panels
-        bottom_limit = max(rows.values()) + 0.7
-        for ax in (first, second, third):
-            ax.set_ylim(bottom_limit, TOP)
-        for ax in (cities, translations):
-            ax.set_ylim(bottom_limit, -0.7)
-        for ax in (first, cities):
-            ax.set_yticks(list(rows.values()), names)
-        for ax in (second, third, translations):
+        first, second, third = panels
+        _panel_levels(first, rows, data)
+        _panel_difference(second, rows, data)
+        _panel_logprob(third, rows, data, chance)
+        for ax in panels:
+            ax.set_ylim(max(rows.values()) + 0.7, TOP)
+        first.set_yticks(list(rows.values()), names)
+        for ax in (second, third):
             ax.tick_params(labelleft=False)
-        for ax, letter in zip(panels, "abcde", strict=True):
+        for ax, letter in zip(panels, "abc", strict=True):
             paper.panel_letter(ax, letter)
         for ax, title in (
             (first, "truth reader and text"),
             (second, "difference"),
             (third, "log-probability"),
-            (cities, "cities"),
-            (translations, "Spanish to English"),
         ):
             ax.set_title(title, fontsize=8, loc="center")
         _legend(fig)
