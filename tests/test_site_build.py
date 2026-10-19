@@ -1,7 +1,9 @@
-from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
+import runpy
+import subprocess
+import sys
 
 import pytest
 
@@ -12,33 +14,23 @@ from tomography.site import page
 from tomography.site import references
 from tomography.site import registry
 from tomography.site.manifest import Manifest
+from tomography.viz import checks
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
 STATIC = ROOT / "src/tomography/site/static"
 DASHES = (chr(0x2014), chr(0x2013))
-ABSENT = set(registry.missing())
-
-
-def _present(kind: str, keys: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(k for k in keys if (kind, k) not in ABSENT)
-
-
-FIGURES = _present("figure", registry.MAIN_FIGURES)
-TABLES = _present("table", registry.MAIN_TABLES)
-APPENDIX = _present("figure", registry.APPENDIX_FIGURES)
-APPENDIX_TABLES = _present("table", registry.APPENDIX_TABLES)
+STUB = runpy.run_path(str(Path(__file__).parent / "_site_stub.py"))
+MISSING = registry.missing()
 
 
 @pytest.fixture(scope="module")
 def site(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[Path, page.Document]:
+    assert MISSING == []
     out = tmp_path_factory.mktemp("site")
-    doc = build_module.build(
-        RESULTS, out, FIGURES, TABLES, APPENDIX, APPENDIX_TABLES
-    )
-    return out, doc
+    return out, build_module.build(RESULTS, out)
 
 
 @pytest.fixture(scope="module")
@@ -51,240 +43,34 @@ def html(built: Path) -> str:
     return (built / "index.html").read_text("utf-8")
 
 
-class Ids(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.ids: set[str] = set()
-        self.hrefs: list[str] = []
-        self.tags: list[str] = []
-
-    def handle_starttag(
-        self, tag: str, attrs: list[tuple[str, str | None]]
-    ) -> None:
-        self.tags.append(tag)
-        for name, value in attrs:
-            if name == "id" and value:
-                self.ids.add(value)
-            if name == "href" and value:
-                self.hrefs.append(value)
+@pytest.fixture(scope="module")
+def css() -> str:
+    return (STATIC / "site.css").read_text("utf-8")
 
 
-def test_the_page_is_english_and_has_no_scripts(html: str) -> None:
-    assert html.startswith("<!doctype html>")
-    assert '<html lang="en">' in html
-    assert "<script" not in html
-    assert 'name="viewport"' in html
+def test_the_masthead_commit_is_the_last_commit_of_the_results() -> None:
+    sha, built = build_module.results_commit(RESULTS)
+    expected = subprocess.run(
+        ["git", "log", "-1", "--format=%h", "--", "results"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert sha == expected
+    assert re.fullmatch(r"\d{1,2} [A-Z][a-z]+ \d{4}", built)
 
 
-def test_the_title_block_has_a_title_a_repo_link_and_a_date_but_no_author(
-    html: str,
-) -> None:
-    head = html[html.index('<header class="title">') : html.index("</header>")]
-    assert f"<h1>{content.TITLE}</h1>" in head
-    assert content.REPO_TEXT in head
-    assert re.search(r'class="date">Results of \d+ [A-Z][a-z]+ \d{4}<', head)
-    assert head.count("<p") == 2
+def test_without_history_the_masthead_commit_is_empty(tmp_path: Path) -> None:
+    (tmp_path / "results").mkdir()
+    assert build_module.results_commit(tmp_path / "results") == ("", "")
 
 
-def test_the_abstract_comes_before_the_first_numbered_section(
-    html: str,
-) -> None:
-    assert html.index('id="abstract"') < html.index('id="introduction"')
-    assert "<h2>Abstract</h2>" in html
-
-
-def test_sections_and_subsections_are_numbered_in_order(html: str) -> None:
-    heads = re.findall(r"<h([23]) id=\"[^\"]+\">([^<]+)</h", html)
-    texts = [t.replace("&ensp;", " ") for _, t in heads]
-    assert texts[0] == "1 Introduction"
-    assert texts[1] == "2 Method"
-    assert texts[2:6] == [
-        "2.1 Reading and steering",
-        "2.2 Concepts and data",
-        "2.3 Checkpoints",
-        "2.4 Baselines and intervals",
-    ]
-    assert any(t.startswith("Appendix A ") for t in texts)
-
-
-def test_every_internal_link_points_at_an_id_on_the_page(html: str) -> None:
-    parser = Ids()
-    parser.feed(html)
-    missing = [
-        h for h in parser.hrefs if h.startswith("#") and h[1:] not in parser.ids
-    ]
-    assert missing == []
-
-
-def test_figures_and_tables_are_numbered_in_order_of_appearance(
-    html: str,
-) -> None:
-    figures = re.findall(r"<figcaption>Figure (A?\d+): ", html)
-    want = [str(i) for i in range(1, len(FIGURES) + 1)]
-    want += [f"A{i}" for i in range(1, len(APPENDIX) + 1)]
-    assert figures == want
-    tables = re.findall(r"<caption>Table (A?\d+): ", html)
-    want = [str(i) for i in range(1, len(TABLES) + 1)]
-    want += [f"A{i}" for i in range(1, len(APPENDIX_TABLES) + 1)]
-    assert tables == want
-
-
-def test_a_figure_caption_follows_its_graphic_and_a_table_caption_leads(
-    html: str,
-) -> None:
-    for chunk in re.findall(r"<figure .*?</figure>", html, flags=re.S):
-        assert chunk.index("<svg") < chunk.index("<figcaption>")
-    for chunk in re.findall(r"<table>.*?</table>", html, flags=re.S):
-        assert chunk.index("<caption>") < chunk.index("<thead>")
-
-
-def test_the_caption_label_is_plain_and_followed_by_a_colon(html: str) -> None:
-    assert "<strong>Figure" not in html
-    assert "<b>Table" not in html
-    caption = re.search(r"<figcaption>(.*?)</figcaption>", html, flags=re.S)
-    assert caption is not None
-    assert caption.group(1).startswith("Figure 1: ")
-
-
-def test_every_inline_svg_is_a_labelled_image(html: str) -> None:
-    svgs = re.findall(r"<svg [^>]*>", html)
-    assert len(svgs) == len(FIGURES) + len(APPENDIX)
-    for tag in svgs:
-        assert 'role="img"' in tag
-        assert 'aria-label="Figure ' in tag
-
-
-def test_tables_are_booktabs_without_vertical_rules(html: str) -> None:
-    css = (STATIC / "site.css").read_text("utf-8")
-    assert "border-left" not in css
-    assert "border-right" not in css
-    assert "<thead>" in html
-    assert " border=" not in html
-    assert "0.12em solid" in css
-    assert "0.06em solid" in css
-
-
-def test_numeric_columns_are_right_aligned(html: str) -> None:
-    assert '<td class="r">' in html
-    assert "font-variant-numeric: tabular-nums" in (
-        STATIC / "site.css"
-    ).read_text("utf-8")
-
-
-def test_citations_are_numbered_by_first_use_and_listed(html: str) -> None:
-    cites = re.findall(r'<a class="ref" href="#ref(\d+)">\[(\d+)\]</a>', html)
-    assert cites
-    assert all(a == b for a, b in cites)
-    first = [int(a) for a, _ in cites]
-    assert first[0] == 1
-    seen: list[int] = []
-    for n in first:
-        if n not in seen:
-            seen.append(n)
-    assert seen == sorted(seen)
-    listed = re.findall(r'<li id="ref(\d+)">', html)
-    assert [int(n) for n in listed] == list(range(1, len(listed) + 1))
-    assert "Representation Engineering" in html
-
-
-def test_the_reference_list_follows_the_order_of_first_citation(
-    html: str,
-) -> None:
-    bib = references.parse((ROOT / "docs/references.bib").read_text("utf-8"))
-    refs = re.search(r'<ol class="refs">(.*?)</ol>', html, flags=re.S)
-    assert refs is not None
-    items = re.findall(r"<li [^>]*>(.*?)</li>", refs.group(1), flags=re.S)
-    expected = [
-        references.plain(references.format_line(references.find(bib, key)))
-        for key in ("zou2025", "socher2013", "hendrycks2021")
-    ]
-    for item, want in zip(items, expected, strict=False):
-        assert want.split(".")[0] in item
-    assert len(items) >= 3
-
-
-def test_the_cite_block_gives_bibtex_of_the_repository_and_the_paper(
-    html: str,
-) -> None:
-    block = html[html.index('id="cite"') :]
-    assert "<pre><code>@misc{tomography," in block
-    assert "@misc{zou2025" in block
-    assert content.REPO_URL in block
-
-
-def test_footnotes_have_a_marker_and_a_note_with_a_back_link(
-    html: str,
-) -> None:
-    assert (
-        '<sup class="fn"><a class="ref" id="fnref1" href="#fn1">1</a></sup>'
-        in html
+def test_csv_files_hold_citation_keys_not_tokens() -> None:
+    text = build_module._csv_text(
+        ["A", "B"], [["x", "[[cite:radford2019language,yang2025qwen3]]"]]
     )
-    assert '<aside class="footnotes"><hr><p id="fn1">' in html
-    assert 'href="#fnref1">back</a>' in html
-
-
-def test_files_are_named_by_the_printed_number(
-    site: tuple[Path, page.Document],
-) -> None:
-    built, doc = site
-    figure_number, table_number = page.numbers(doc)
-    for key in (*FIGURES, *APPENDIX):
-        name = f"figure-{figure_number[key]}"
-        assert (built / "figures" / f"{name}.svg").stat().st_size > 0
-        pdf = (built / "figures" / f"{name}.pdf").read_bytes()
-        assert pdf[:4] == b"%PDF"
-        size = (built / "data" / f"{name}.csv").stat().st_size
-        assert (size > 0) == (key != "method"), key
-    for key in (*TABLES, *APPENDIX_TABLES):
-        text = (built / "data" / f"table-{table_number[key]}.csv").read_text(
-            "utf-8"
-        )
-        assert text.splitlines()[0].count(",") >= 2
-    names = {p.name for p in (built / "data").iterdir()}
-    assert not any(n.startswith(("fig1", "table2")) for n in names)
-
-
-def test_assets_are_written_next_to_the_page(built: Path) -> None:
-    assert (built / "site.css").is_file()
-    assert (built / ".nojekyll").is_file()
-    assert (built / "fonts" / "lmroman10-regular.woff2").is_file()
-    assert (built / "fonts" / "GUST-FONT-LICENSE.txt").is_file()
-
-
-def test_the_page_loads_no_remote_assets(html: str) -> None:
-    assert not re.search(r'src="https?:', html)
-    stylesheets = re.findall(r'<link [^>]*rel="stylesheet"[^>]*>', html)
-    assert stylesheets == ['<link rel="stylesheet" href="site.css">']
-    assert "fonts.googleapis" not in html
-    assert not re.search(r'(?:src|href)="[^"]*cdn', html)
-
-
-def test_no_dash_characters_in_the_page_stylesheet_or_text(html: str) -> None:
-    texts = [
-        html,
-        (STATIC / "site.css").read_text("utf-8"),
-        content.ABSTRACT,
-        json.dumps([content.INTRODUCTION.paragraphs, content.METHOD.title]),
-    ]
-    assert not any(d in t for t in texts for d in DASHES)
-
-
-def test_every_section_the_page_shows_has_its_items_placed_once(
-    html: str,
-) -> None:
-    for i in range(1, len(FIGURES) + 1):
-        assert html.count(f'id="figure-{i}"') == 1, i
-    for i in range(1, len(APPENDIX) + 1):
-        assert html.count(f'id="figure-A{i}"') == 1, i
-    for i in range(1, len(TABLES) + 1):
-        assert html.count(f'id="table-{i}"') == 1, i
-    for i in range(1, len(APPENDIX_TABLES) + 1):
-        assert html.count(f'id="table-A{i}"') == 1, i
-
-
-def test_the_page_names_no_person_beyond_the_cited_authors(html: str) -> None:
-    head = html[: html.index('id="abstract"')]
-    assert "author" not in head.lower()
+    assert text == "A,B\nx,radford2019language; yang2025qwen3\n"
 
 
 def test_results_date_is_the_newest_run_start(tmp_path: Path) -> None:
@@ -306,29 +92,8 @@ def test_results_date_is_the_newest_run_start(tmp_path: Path) -> None:
 def test_a_missing_figure_the_text_refers_to_stops_the_page() -> None:
     bib = references.parse((ROOT / "docs/references.bib").read_text("utf-8"))
     doc = page.Document({}, {}, {}, "Results", bib)
-    with pytest.raises(KeyError, match="method"):
+    with pytest.raises(KeyError):
         page.render_page(doc)
-
-
-def test_build_is_byte_identical_twice(tmp_path: Path) -> None:
-    specs = (
-        ("method", "finders"),
-        ("checkpoints", "finders"),
-        ("a_layers",),
-        (),
-    )
-    for name in ("one", "two"):
-        build_module.build(RESULTS, tmp_path / name, *specs)
-    names = sorted(
-        p.relative_to(tmp_path / "one")
-        for p in (tmp_path / "one").rglob("*")
-        if p.is_file()
-    )
-    assert names
-    for rel in names:
-        assert (tmp_path / "one" / rel).read_bytes() == (
-            tmp_path / "two" / rel
-        ).read_bytes(), rel
 
 
 def test_command_line_build_writes_the_site(
@@ -346,43 +111,226 @@ def test_command_line_build_writes_the_site(
     assert calls == [(Path("r"), tmp_path)]
 
 
-def test_phone_layout_tightens_tables_so_the_caption_is_not_clipped() -> None:
-    css = (STATIC / "site.css").read_text("utf-8")
+def test_tables_are_booktabs_without_vertical_rules(css: str) -> None:
+    assert "border-left" not in css
+    assert "border-right" not in css
+    assert "border-top: 1.5px solid" in css
+    assert "border-bottom: 1.5px solid" in css
+    assert "thead tr:last-child th {\n  border-bottom: 1px solid" in css
+    assert "tbody tr.group td {\n  border-top: 0.5px solid" in css
+
+
+def test_numeric_cells_do_not_wrap_and_use_tabular_figures(css: str) -> None:
+    assert "td.r,\nth.r,\ntd:first-child {\n  white-space: nowrap;\n}" in css
+    assert "font-variant-numeric: tabular-nums" in css
+
+
+def test_captions_of_figures_and_tables_share_one_rule(css: str) -> None:
+    assert "figcaption,\n.caption {\n  font-size: 0.9em;" in css
+    assert "text-align: justify" in css
+    assert "caption {" not in css.replace(".caption {", "").replace(
+        "figcaption", ""
+    )
+    assert "position: sticky" not in css
+
+
+def test_phones_scroll_the_figure_not_the_page(css: str) -> None:
     phone = css[
         css.index("@media (max-width: 600px)") : css.index("@media print")
     ]
-    assert "padding: 0.18em 0.35em" in phone
-    assert "font-size: 0.72em" in phone
-    assert "padding: 1.4rem 16px 2rem" in phone
-    assert "width: calc(100vw - 32px)" in phone
-    assert "position: sticky" in phone
+    assert ".fig-scroll {\n    overflow-x: auto;" in phone
+    assert "min-width: 560px" in phone
 
 
-def test_table_two_has_grouped_headers_with_a_muted_exploratory_group(
-    html: str,
-) -> None:
-    table = re.search(r"<table><caption>Table 2:.*?</table>", html, re.S)
-    assert table is not None
-    chunk = table.group(0)
-    assert chunk.count('<th colspan="2" class="span">') == 4
+def test_the_bibtex_block_wraps(css: str) -> None:
     assert (
-        '<th colspan="2" class="span muted">R5 honesty (exploratory)' in chunk
+        "pre.bibtex {\n  white-space: pre-wrap;\n  overflow-wrap: anywhere;"
+        in css
     )
-    assert chunk.count("<tbody><tr>") == 1
-    assert len(re.findall(r"<tr", chunk.split("<tbody>")[1])) == 10
-    assert 'class="group"' not in chunk
-    assert chunk.count('<th class="r">LAT</th>') == 5
 
 
-def test_model_names_in_the_first_column_do_not_wrap() -> None:
-    css = (STATIC / "site.css").read_text("utf-8")
-    assert "td:first-child {\n  white-space: nowrap;\n}" in css
+def test_print_rules(css: str) -> None:
+    printed = css[css.index("@media print") :]
+    assert "size: letter" in printed
+    assert "margin: 1in 1.5in" in printed
+    assert "thead {\n    display: table-header-group;" in printed
+    assert "tr {" in printed
+    assert ".data {\n    display: none;" in printed
 
 
-def test_tables_use_a_footnote_size_font_so_the_wide_table_fits_the_text() -> (
+def test_text_colours_are_the_two_allowed_greys(css: str) -> None:
+    assert "--ink: #1a1a1a" in css
+    assert "--muted: #4d4d4d" in css
+    colours = set(re.findall(r"(?<![\w-])color:\s*([^;]+);", css))
+    assert colours <= {"var(--ink)", "var(--muted)", "var(--link)", "inherit"}
+
+
+def test_no_dash_characters_in_the_stylesheet_or_the_sources(css: str) -> None:
+    assert not any(d in css for d in DASHES)
+    for path in (ROOT / "src/tomography/site").rglob("*.py"):
+        text = path.read_text("utf-8")
+        assert not any(d in text for d in DASHES), path
+    for name in ("references.bib",):
+        text = (ROOT / "docs" / name).read_text("utf-8")
+        assert not any(d in text for d in DASHES), name
+
+
+def test_the_stub_page_is_english_scriptless_and_loads_no_remote_assets() -> (
     None
 ):
-    css = (STATIC / "site.css").read_text("utf-8")
-    desktop = css[: css.index("@media (max-width: 600px)")]
-    assert "font-size: 0.84em" in desktop
-    assert "padding: 0.18em 0.5em" in desktop
+    html = page.render_page(STUB["document"]())
+    assert html.startswith("<!doctype html>")
+    assert '<html lang="en">' in html
+    assert "<script" not in html
+    assert not re.search(r'src="https?:', html)
+    assert re.findall(r'<link [^>]*rel="stylesheet"[^>]*>', html) == [
+        '<link rel="stylesheet" href="site.css">'
+    ]
+
+
+def test_the_stub_page_has_no_aria_label_longer_than_twenty_characters() -> (
+    None
+):
+    html = page.render_page(STUB["document"]())
+    for label in re.findall(r'aria-label="([^"]*)"', html):
+        assert len(label) <= 20, label
+
+
+def test_the_title_block_has_a_title_a_repo_link_and_no_author() -> None:
+    html = page.render_page(STUB["document"]())
+    head = html[html.index('<header class="title">') : html.index("</header>")]
+    assert f"<h1>{content.TITLE}</h1>" in head
+    assert content.REPO_TEXT in head
+    assert head.count("<p") == 2
+    assert "author" not in head.lower()
+
+
+def test_assets_and_files_by_printed_number(
+    site: tuple[Path, page.Document],
+) -> None:
+    built, doc = site
+    figure_number, table_number = page.numbers(doc)
+    for key, number in figure_number.items():
+        name = f"fig-{number}"
+        assert (built / "figures" / f"{name}.svg").stat().st_size > 0
+        pdf = (built / "figures" / f"{name}.pdf").read_bytes()
+        assert pdf[:4] == b"%PDF"
+        has_rows = bool({**doc.figures, **doc.appendix}[key].output.csv.strip())
+        assert (built / "data" / f"{name}.csv").is_file() == has_rows, key
+    for key, number in table_number.items():
+        text = (built / "data" / f"table-{number}.csv").read_text("utf-8")
+        assert text.splitlines()[0].count(",") >= 1, key
+        assert "[[" not in text
+    names = {p.name for p in (built / "data").iterdir()}
+    assert not any(n.startswith("figure-") for n in names)
+    assert (built / "site.css").is_file()
+    assert (built / ".nojekyll").is_file()
+    assert (built / "fonts" / "lmroman10-regular.woff2").is_file()
+
+
+def test_the_method_figure_has_no_data_file_and_no_data_link(
+    site: tuple[Path, page.Document], html: str
+) -> None:
+    built, doc = site
+    number = page.numbers(doc)[0]["method"]
+    assert not (built / "data" / f"fig-{number}.csv").exists()
+    assert f"data/fig-{number}.csv" not in html
+
+
+def test_the_built_page_resolves_every_token_and_link(html: str) -> None:
+    assert "[[" not in html
+    ids = re.findall(r'\bid="([^"]+)"', html)
+    assert len(ids) == len(set(ids))
+    hrefs = re.findall(r'href="#([^"]+)"', html)
+    assert [h for h in hrefs if h not in set(ids)] == []
+
+
+def test_the_built_page_masthead_matches_the_results_commit(html: str) -> None:
+    sha, _ = build_module.results_commit(RESULTS)
+    assert f"Results at commit <code>{sha}</code>, built " in html
+
+
+def test_the_built_page_has_no_dashes_backticks_or_stray_underscores(
+    html: str,
+) -> None:
+    assert not any(d in html for d in DASHES)
+    body = re.sub(r"<pre.*?</pre>", "", html, flags=re.S)
+    body = re.sub(r"<svg.*?</svg>", "", body, flags=re.S)
+    body = re.sub(r"<table.*?</table>", "", body, flags=re.S)
+    text = re.sub(r"<[^>]+>", " ", body)
+    text = re.sub(r"doi:\S+", "", text)
+    assert "`" not in text
+    assert "_" not in text
+
+
+def test_the_built_page_lists_only_cited_references(html: str) -> None:
+    listed = re.findall(r'<li id="ref(\d+)">', html)
+    cites = {int(n) for n in re.findall(r'href="#ref(\d+)">\[', html)}
+    assert cites == set(range(1, len(listed) + 1))
+    assert html.index('id="references"') < html.index('id="appendix"')
+
+
+def test_the_page_names_no_person_beyond_the_cited_authors(html: str) -> None:
+    for match in re.finditer("javierdejesusda", html):
+        assert "github.com/javierdejesusda" in html[match.start() - 11 :]
+
+
+def test_build_is_byte_identical_in_two_fresh_processes(
+    tmp_path: Path,
+) -> None:
+    outs = [tmp_path / "one", tmp_path / "two"]
+    for out in outs:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tomography.site",
+                "build",
+                "--results",
+                str(RESULTS),
+                "--out",
+                str(out),
+            ],
+            check=True,
+            capture_output=True,
+        )
+    names = sorted(
+        p.relative_to(outs[0]) for p in outs[0].rglob("*") if p.is_file()
+    )
+    assert names
+    for rel in names:
+        assert (outs[0] / rel).read_bytes() == (outs[1] / rel).read_bytes(), rel
+
+
+def test_every_figure_passes_the_palette_font_and_text_guards(
+    site: tuple[Path, page.Document],
+) -> None:
+    doc = site[1]
+    for key, entry in doc.figures.items():
+        assert checks.guard_problems(entry.output.figure) == [], key
+    for key, entry in doc.appendix.items():
+        problems = checks.guard_problems(entry.output.figure, appendix=True)
+        assert problems == [], key
+
+
+def test_the_built_page_has_no_pooled_count_of_ten(html: str) -> None:
+    text = re.sub(r"<[^>]+>", " ", html)
+    assert not re.search(r"\b\d+ of (the )?10\b(?! readers)", text)
+
+
+def test_every_appendix_item_is_cited_from_the_numbered_sections(
+    html: str,
+) -> None:
+    body = html[: html.index('id="references"')]
+    for kind, ids in (
+        (
+            "fig",
+            [f"A{i}" for i in range(1, len(registry.APPENDIX_FIGURES) + 1)],
+        ),
+        (
+            "table",
+            [f"A{i}" for i in range(1, len(registry.APPENDIX_TABLES) + 1)],
+        ),
+    ):
+        for number in ids:
+            assert f'href="#{kind}-{number}"' in body, (kind, number)

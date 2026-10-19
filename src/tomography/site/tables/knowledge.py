@@ -1,64 +1,81 @@
-"""Table 4: Knowledge directions.
+"""Table 7: Knowing what one knows.
 
-One row per model: the guess-controlled count of known questions (P9a), the
-within-relation AUROC of the known-versus-unknown reader against popularity
-and two text-only classifiers (P9b), and the gain in error-prediction AUROC
-over the model confidence from adding the label-free direction or the probe
-(P9c).
+One row per checkpoint: the within-relation AUROC of the knowledge direction
+for separating known from unknown PopQA questions next to the subject's
+popularity and two text classifiers, the difference from popularity with its
+Hanley and McNeil half-width, the change in the AUROC for predicting wrong
+answers when the direction or a supervised probe is added to the model's own
+confidence, and how many steering runs distinguish the direction from random
+directions and from known questions.
 """
 
 from typing import Any
 
 from tomography.site import runfiles
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
 from tomography.site.tables import _cells
+from tomography.site.tables import _rows
 from tomography.viz import paper
 
+NO_CONTRAST = "no contrast"
+NO_RUN = "none"
+GROUPS = (
+    ("Within-relation AUROC", 4, False),
+    ("Difference", 1, False),
+    ("Added to the model's confidence", 2, False),
+    ("Steering runs", 2, False),
+)
 COLUMNS = [
     "Model",
-    "Known questions",
-    "Test known / unknown",
-    "Reader",
+    "Direction",
     "Popularity",
-    "Text words",
-    "Text chars",
-    "Confidence + lat",
-    "Confidence + probe",
+    "Words",
+    "Characters",
+    f"Direction {_cells.MINUS} popularity",
+    "+ direction",
+    "+ probe",
+    "Distinguishable",
+    "Selective",
 ]
-ALIGN = "lrrrrrrrr"
-DETAIL = (
-    "One row per model; each model is labeled on its own behavior, so the "
-    "question sets differ between rows. Known questions are counted after "
-    "the guess control (P9a). Reader, Popularity, Text words and Text chars "
-    "are the within-relation AUROC of separating known from unknown PopQA "
-    "questions on the test questions (P9b, `obscure_real`); the stored "
-    "interval of the reader resamples the five reader draws, not the test "
-    "questions, so none is shown. The last two columns are the change in "
-    "AUROC for predicting wrong PopQA answers when the label-free direction "
-    "(lat) or the supervised probe is added to the model confidence, with a "
-    "95 percent bootstrap interval that resamples the test questions (P9c). "
-    "A model without a known-versus-unknown contrast has no reader and no "
-    "lat."
-)
 
 
-def _records(
-    manifest: Manifest, exp: str, model: str, name: str
-) -> list[dict[str, Any]]:
-    run = manifest.run(exp, model)
+def _p9b(manifest: Manifest, model: str) -> dict[str, Any] | None:
+    run = manifest.run("p9b", model)
     assert run is not None
-    return _cells.read_table(run / name)
+    found = [
+        r
+        for r in runfiles.rows(run, "table.json")
+        if r["type"] == "obscure_real"
+    ]
+    return found[0] if found else None
+
+
+def _increments(manifest: Manifest, model: str) -> dict[str, dict[str, Any]]:
+    run = manifest.run("p9c", model)
+    assert run is not None
+    return {
+        r["features"]: r
+        for r in runfiles.rows(run, "table_incremental.json")
+        if r["dataset"] == "popqa"
+    }
 
 
 def _gain(hit: dict[str, Any] | None) -> str:
     if hit is None:
-        return _cells.MISSING
+        return NO_CONTRAST
     return _cells.interval(hit["diff_vs_confidence"], hit["lo"], hit["hi"])
 
 
-def _field(row: dict[str, Any] | None, name: str) -> str:
-    return _cells.num(row[name] if row else None)
+def _steering(manifest: Manifest, model: str) -> tuple[int, int, int]:
+    runs = manifest.runs("p9d", model)
+    hits = selective = 0
+    for info in runs:
+        head = runfiles.summary(info.path)["headline"]
+        hits += bool(head["distinguishable"])
+        selective += bool(head["selective"])
+    return len(runs), hits, selective
 
 
 def build(manifest: Manifest) -> TableOutput:
@@ -70,93 +87,103 @@ def build(manifest: Manifest) -> TableOutput:
     Returns:
         The table and its caption parts.
     """
-    rows: list[list[str]] = []
-    readers: dict[str, dict[str, Any]] = {}
-    lat: dict[str, dict[str, Any]] = {}
-    probe: dict[str, dict[str, Any]] = {}
     models = manifest.models("p9a")
+    rows: list[list[str]] = []
+    above: dict[str, bool] = {}
+    distinct: dict[str, int] = {}
+    select: dict[str, int] = {}
+    totals: dict[str, int] = {}
+    increments_above = {"direction": 0, "probe": 0}
     for model in models:
-        run = manifest.run("p9a", model)
-        assert run is not None
-        known = runfiles.summary(run)["guess"]["n_known"]
-        found = [
-            r
-            for r in _records(manifest, "p9b", model, "table.json")
-            if r["type"] == "obscure_real"
-        ]
-        reader = found[0] if found else None
-        if reader:
-            readers[model] = reader
-        increments = {
-            r["features"]: r
-            for r in _records(manifest, "p9c", model, "table_incremental.json")
-            if r["dataset"] == "popqa"
-        }
-        if "confidence+lat" in increments:
-            lat[model] = increments["confidence+lat"]
-        if "confidence+probe" in increments:
-            probe[model] = increments["confidence+probe"]
-
-        pair = (
-            _cells.count(reader["n_positive_test"], reader["n_negative_test"])
-            if reader
-            else _cells.MISSING
+        reader = _p9b(manifest, model)
+        inc = _increments(manifest, model)
+        if reader is None:
+            reading = [NO_CONTRAST] * 5
+        else:
+            n_pos = int(reader["n_positive_test"])
+            n_neg = int(reader["n_negative_test"])
+            d, lo, hi = stats.auc_diff_interval(
+                reader["logistic_within"],
+                reader["popularity_within"],
+                n_pos,
+                n_neg,
+            )
+            above[model] = lo > 0
+            reading = [
+                _cells.num(reader["logistic_within"]),
+                _cells.num(reader["popularity_within"]),
+                _cells.num(reader["text_word_within"]),
+                _cells.num(reader["text_char_within"]),
+                _cells.pm(d, (hi - lo) / 2) + _rows.star(lo, hi),
+            ]
+        for key, name in (("direction", "lat"), ("probe", "probe")):
+            hit = inc.get(f"confidence+{name}")
+            increments_above[key] += bool(hit and hit["lo"] > 0)
+        found, hits, selective = _steering(manifest, model)
+        totals[model] = found
+        distinct[model], select[model] = hits, selective
+        steer = (
+            [f"{hits} of {found}", f"{selective} of {found}"]
+            if found
+            else [NO_RUN, NO_RUN]
         )
         rows.append(
             [
                 paper.display_name(model),
-                f"{known:,}",
-                pair,
-                _field(reader, "logistic_within"),
-                _field(reader, "popularity_within"),
-                _field(reader, "text_word_within"),
-                _field(reader, "text_char_within"),
-                _gain(lat.get(model)),
-                _gain(probe.get(model)),
+                *reading,
+                _gain(inc.get("confidence+lat")),
+                _gain(inc.get("confidence+probe")),
+                *steer,
             ]
         )
+
+    def by_role(values: dict[str, int]) -> dict[str, stats.RoleCount]:
+        out = {r: [0, 0] for r in stats.ROLES}
+        for model, value in values.items():
+            cell = out[stats.role(model)]
+            cell[0] += value
+            cell[1] += totals[model]
+        return {r: stats.RoleCount(h, t) for r, (h, t) in out.items()}
+
+    counts = {
+        "above_popularity": stats.per_role(above),
+        "distinguishable": by_role(distinct),
+        "selective": by_role(select),
+    }
     numbers = {
-        "models": float(len(models)),
-        "with_contrast": float(len(readers)),
-        "reader_above_popularity": float(
-            sum(
-                r["logistic_within"] > r["popularity_within"]
-                for r in readers.values()
-            )
-        ),
-        "reader_above_text": float(
-            sum(
-                r["logistic_within"]
-                > max(r["text_word_within"], r["text_char_within"])
-                for r in readers.values()
-            )
-        ),
-        "models_with_lat": float(len(lat)),
-        "lat_above_zero": float(sum(v["lo"] > 0 for v in lat.values())),
-        "probe_above_zero": float(sum(v["lo"] > 0 for v in probe.values())),
+        "with_contrast": float(len(above)),
+        "above_popularity": float(sum(above.values())),
+        "direction_increment_above": float(increments_above["direction"]),
+        "probe_increment_above": float(increments_above["probe"]),
     }
     claim = (
-        f"Of the {len(models)} models, {len(readers)} have a "
-        "known-versus-unknown contrast, and there the reader's "
-        "within-relation AUROC exceeds popularity on "
-        f"{int(numbers['reader_above_popularity'])} and both text baselines "
-        f"on {int(numbers['reader_above_text'])}; adding the probe to the "
-        "model confidence raises the error AUROC with an interval above zero "
-        f"on {int(numbers['probe_above_zero'])} of {len(models)} models, "
-        "against "
-        f"{int(numbers['lat_above_zero'])} of {len(lat)} for the "
-        "label-free direction."
+        "Within-relation AUROC for PopQA questions the model answers "
+        "correctly against those it does not, for the knowledge direction, "
+        "the popularity of the subject and classifiers on the words and the "
+        "characters of the question."
     )
-    notes = [
-        "The text-only classifiers use only the words or characters of the "
-        "question; popularity is the PopQA popularity of the subject."
-    ]
+    detail = (
+        "Popularity is the monthly Wikipedia page views of the subject "
+        "[[cite:mallen2023when]]; the difference from popularity carries the "
+        "Hanley and McNeil half-width [[cite:hanley1982meaning]], with an "
+        "asterisk where it excludes zero. The added columns give the change "
+        "in AUROC for predicting wrong PopQA answers when the direction or a "
+        "supervised probe is added to the model's answer probability, with "
+        "the stored paired bootstrap interval over the test questions. The "
+        "steering columns count the runs whose direction moves unknown "
+        "questions more than each of 3 random directions (distinguishable) "
+        "and more than known questions (selective). GPT-2 small has too few "
+        "known questions for a contrast."
+    )
     return TableOutput(
         claim,
-        DETAIL,
+        detail,
         COLUMNS,
         rows,
-        _cells.check_align(ALIGN, len(COLUMNS)),
-        notes,
+        "l" + "r" * 9,
+        [],
         numbers,
+        groups=GROUPS,
+        row_groups=_rows.role_groups(models),
+        counts=counts,
     )

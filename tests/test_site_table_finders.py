@@ -1,119 +1,109 @@
-import json
 from pathlib import Path
+import re
+import runpy
 
 import pytest
 
+from tomography.site import params
 from tomography.site import registry
 from tomography.site.manifest import Manifest
 from tomography.viz import paper
 
-RESULTS = Path(__file__).resolve().parents[1] / "results"
-SPEC = "finders"
+_HERE = Path(__file__).parent
+_R = runpy.run_path(str(_HERE / "_results.py"))
+_M = runpy.run_path(str(_HERE / "_site_math.py"))
+ROOT, data, models, run = _R["ROOT"], _R["data"], _R["models"], _R["run"]
+diff, excludes_zero = _M["diff"], _M["excludes_zero"]
+fmt, groups = _M["fmt"], _M["groups"]
+
 TASKS = ("sentiment", "truth", "utility")
+METHODS = ("random", "pca_diff", "logistic")
+DASHES = (chr(0x2014), chr(0x2013))
 
 
 @pytest.fixture(scope="module")
 def output() -> registry.TableOutput:
-    return registry.build_table(SPEC, Manifest(RESULTS))
+    return registry.build_table("finders", Manifest(ROOT))
 
 
-def _cell(model: str, task: str, method: str) -> dict:
-    run = Manifest(RESULTS).run("p4", model)
-    assert run is not None
-    data = json.loads((run / "summary.json").read_text("utf-8"))["data"]
-    pairing = data["reference"][task]["pairing"]
-    table = json.loads((run / "table.json").read_text("utf-8"))["data"]
+def _report(model: str, task: str, method: str) -> float:
+    path = run("p4", model)
+    pairing = data(path, "summary.json")["reference"][task]["pairing"]
     hits = [
         r
-        for r in table
+        for r in data(path, "table.json")
         if (r["task"], r["method"], r["pairing"], r["preprocess"])
         == (task, method, pairing, "center")
     ]
     assert len(hits) == 1
-    return hits[0]
+    return float(hits[0]["report"])
 
 
-def _text(row: dict) -> str:
-    return f"{row['report']:.3f} [{row['lo']:.3f}, {row['hi']:.3f}]"
-
-
-def test_columns(output: registry.TableOutput) -> None:
-    assert output.columns == [
-        "Task",
-        "Model",
-        "Random",
-        "PCA of differences (paper)",
-        "Logistic regression",
-    ]
-    assert output.align == "llrrr"
-
-
-def test_every_p4_model_has_a_row_per_task_with_the_stored_cells(
+def test_columns_are_three_per_task_under_header_spans(
     output: registry.TableOutput,
 ) -> None:
-    models = Manifest(RESULTS).models("p4")
-    assert len(output.rows) == 3 * len(models)
-    expected = []
-    for task in TASKS:
-        for model in models:
-            expected.append(
-                [
-                    _text(_cell(model, task, "random")),
-                    _text(_cell(model, task, "pca_diff")),
-                    _text(_cell(model, task, "logistic")),
-                ]
-            )
-    assert [r[2:] for r in output.rows] == expected
-    assert [r[1] for r in output.rows[: len(models)]] == [
-        paper.display_name(m) for m in models
-    ]
-
-
-def test_the_claim_numbers_match_a_recomputation(
-    output: registry.TableOutput,
-) -> None:
-    models = Manifest(RESULTS).models("p4")
-    cells = [(m, t) for t in TASKS for m in models]
-    logistic_wins = sum(
-        _cell(m, t, "logistic")["report"] >= _cell(m, t, "pca_diff")["report"]
-        for m, t in cells
-    )
-    pca_reads = sum(
-        _cell(m, t, "pca_diff")["report"] - _cell(m, t, "random")["report"]
-        > 0.1
-        for m, t in cells
-    )
-    assert output.numbers["cells"] == len(cells)
-    assert output.numbers["logistic_at_least_pca"] == logistic_wins
-    assert output.numbers["pca_above_random"] == pca_reads
-    assert f"{logistic_wins} of {len(cells)}" in output.claim
-    assert f"{pca_reads} of {len(cells)}" in output.claim
-    assert output.claim.endswith(".")
-
-
-def test_the_footer_gives_the_m1_win_rates_of_every_m1_model(
-    output: registry.TableOutput,
-) -> None:
-    manifest = Manifest(RESULTS)
-    text = " ".join(output.notes)
-    for model in manifest.models("m1"):
-        run = manifest.run("m1", model)
-        assert run is not None
-        rows = json.loads((run / "table.json").read_text("utf-8"))["data"][
-            "rows"
+    assert (
+        output.columns
+        == ["Model"]
+        + [
+            "Random",
+            "PCA of paired differences (paper)",
+            "Logistic regression",
         ]
-        wins = {
-            r[0]: r[3] for r in rows if r[1] == "manipulation" and r[2] == "0.3"
-        }
-        part = " / ".join(
-            f"{wins[m]:.3f}"
-            for m in ("pca_diff", "mean_diff", "logistic", "random")
-        )
-        assert f"{paper.display_name(model)} {part}" in text, model
+        * 3
+    )
+    assert output.align == "l" + "r" * 9
+    assert [g[0] for g in output.groups] == ["Sentiment", "Truth", "Utility"]
+    assert [g[1] for g in output.groups] == [3, 3, 3]
+    assert not any(g[2] for g in output.groups)
 
 
-def test_no_dash_characters(output: registry.TableOutput) -> None:
-    banned = {chr(0x2014), chr(0x2013)}
-    texts = [output.claim, output.detail, *output.notes]
-    texts += [c for row in output.rows for c in row]
-    assert not any(ch in t for t in texts for ch in banned)
+def test_one_row_per_checkpoint_with_a_rule_between_gpt2_and_qwen3(
+    output: registry.TableOutput,
+) -> None:
+    names = models("p4")
+    assert [r[0] for r in output.rows] == [paper.display_name(m) for m in names]
+    assert output.row_groups == groups(names)
+
+
+def test_every_cell_is_the_random_accuracy_or_the_margin_with_a_star(
+    output: registry.TableOutput,
+) -> None:
+    names = models("p4")
+    stars = 0
+    for row, model in zip(output.rows, names, strict=True):
+        for i, task in enumerate(TASKS):
+            n = params.REPORT_PAIRS[task]
+            rand = _report(model, task, "random")
+            cells = row[1 + 3 * i : 4 + 3 * i]
+            assert cells[0] == fmt(rand)
+            for method, cell in zip(METHODS[1:], cells[1:], strict=True):
+                d, lo, hi = diff(_report(model, task, method), rand, n)
+                star = "*" if excludes_zero(lo, hi) else ""
+                stars += bool(star)
+                assert cell == fmt(d) + star
+    assert output.numbers["starred"] == stars
+
+
+def test_the_caption_names_the_test_sizes_and_points_to_the_appendix(
+    output: registry.TableOutput,
+) -> None:
+    text = output.claim + " " + output.detail
+    for n in (214, 59, 256):
+        assert str(n) in text
+    assert "random direction" in text
+    assert "asterisk" in text
+    assert "matched scenarios" in text
+    assert "Table A2" in text or "[[table:finders_all]]" in text
+
+
+def test_no_dash_run_code_or_underscore_in_the_table(
+    output: registry.TableOutput,
+) -> None:
+    texts = [output.claim, output.detail, *output.columns]
+    texts += [c for r in output.rows for c in r]
+    texts += [g[0] for g in output.groups]
+    texts = [re.sub(r"\[\[.*?\]\]", "", t) for t in texts]
+    assert not any(ch in t for t in texts for ch in DASHES)
+    assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
+    assert not any("_" in t for t in texts)

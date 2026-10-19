@@ -1,166 +1,184 @@
+import glob
+import json
 from pathlib import Path
 import re
-from typing import Any
+import runpy
 
 import pytest
 
 from tomography.site import registry
 from tomography.site.manifest import Manifest
-from tomography.site.tables import _cells
 from tomography.viz import paper
 
-RESULTS = Path(__file__).resolve().parents[1] / "results"
-SPEC = "knowledge"
+_HERE = Path(__file__).parent
+_R = runpy.run_path(str(_HERE / "_results.py"))
+_M = runpy.run_path(str(_HERE / "_site_math.py"))
+ROOT, data, models, run = _R["ROOT"], _R["data"], _R["models"], _R["run"]
+fmt, groups = _M["fmt"], _M["groups"]
+MINUS = chr(0x2212)
+PLUS_MINUS = chr(0x00B1)
+DASHES = (chr(0x2014), chr(0x2013))
+Z = 1.959963984540054
+NO_CONTRAST = "no contrast"
 
 
 @pytest.fixture(scope="module")
 def output() -> registry.TableOutput:
-    return registry.build_table(SPEC, Manifest(RESULTS))
+    return registry.build_table("knowledge", Manifest(ROOT))
 
 
-def _run(experiment: str, model: str) -> Path:
-    (run,) = [p for p in (RESULTS / experiment / model).iterdir() if p.is_dir()]
-    return run
+def _table(exp: str, model: str, name: str) -> list[dict]:
+    table = data(run(exp, model), name)
+    return [dict(zip(table["columns"], r, strict=True)) for r in table["rows"]]
 
 
-def _models() -> list[str]:
-    return Manifest(RESULTS).models("p9a")
+def _hm_se(a: float, n_pos: int, n_neg: int) -> float:
+    q1, q2 = a / (2 - a), 2 * a * a / (1 + a)
+    var = (
+        a * (1 - a) + (n_pos - 1) * (q1 - a * a) + (n_neg - 1) * (q2 - a * a)
+    ) / (n_pos * n_neg)
+    return var**0.5
 
 
-def _json(path: Path) -> Any:
-    import json
+def _steering(model: str) -> tuple[int, int, int]:
+    found = hits = selective = 0
+    for path in glob.glob(str(ROOT / "p9d" / model / "*")):
+        head = json.loads(Path(path, "summary.json").read_text("utf-8"))[
+            "data"
+        ]["headline"]
+        found += 1
+        hits += bool(head["distinguishable"])
+        selective += bool(head["selective"])
+    return found, hits, selective
 
-    return json.loads(path.read_text(encoding="utf-8"))["data"]
 
-
-def _reader(model: str) -> dict[str, Any] | None:
-    rows = _cells.read_table(_run("p9b", model) / "table.json")
-    hit = [r for r in rows if r["type"] == "obscure_real"]
-    return hit[0] if hit else None
-
-
-def _increment(model: str, features: str) -> dict[str, Any] | None:
-    rows = _cells.read_table(_run("p9c", model) / "table_incremental.json")
-    hit = [
-        r for r in rows if r["dataset"] == "popqa" and r["features"] == features
+def test_columns_and_header_spans(output: registry.TableOutput) -> None:
+    assert output.columns == [
+        "Model",
+        "Direction",
+        "Popularity",
+        "Words",
+        "Characters",
+        f"Direction {MINUS} popularity",
+        "+ direction",
+        "+ probe",
+        "Distinguishable",
+        "Selective",
     ]
-    return hit[0] if hit else None
-
-
-def _has(claim: str, value: float) -> bool:
-    text = str(int(value)) if value == int(value) else f"{value:.3f}"
-    pattern = rf"(?<![\d.]){re.escape(text)}(?![\d])"
-    return re.search(pattern, claim) is not None
-
-
-def test_there_is_one_row_per_model_with_a_p9a_run(
-    output: registry.TableOutput,
-) -> None:
-    assert [r[0] for r in output.rows] == [
-        paper.display_name(m) for m in _models()
+    assert [(g[0], g[1]) for g in output.groups] == [
+        ("Within-relation AUROC", 4),
+        ("Difference", 1),
+        ("Added to the model's confidence", 2),
+        ("Steering runs", 2),
     ]
-    assert all(len(r) == len(output.columns) for r in output.rows)
-    assert len(output.align) == len(output.columns)
+    assert output.align == "l" + "r" * 9
 
 
-def test_known_questions_come_from_the_guess_controlled_count(
+def test_rows_in_paper_order_with_a_gpt2_qwen3_rule(
     output: registry.TableOutput,
 ) -> None:
-    column = output.columns.index("Known questions")
-    for model, row in zip(_models(), output.rows, strict=True):
-        known = _json(_run("p9a", model) / "summary.json")["guess"]["n_known"]
-        assert row[column] == f"{known:,}"
+    names = models("p9a")
+    assert [r[0] for r in output.rows] == [paper.display_name(m) for m in names]
+    assert output.row_groups == groups(names)
 
 
-def test_reader_and_baseline_cells_are_the_within_relation_auroc(
+def test_reading_cells_match_a_recomputation(
     output: registry.TableOutput,
 ) -> None:
-    for model, row in zip(_models(), output.rows, strict=True):
-        found = _reader(model)
-        for name, key in (
-            ("Reader", "logistic_within"),
-            ("Popularity", "popularity_within"),
-            ("Text words", "text_word_within"),
-            ("Text chars", "text_char_within"),
-        ):
-            cell = row[output.columns.index(name)]
-            want = found[key] if found else None
-            assert cell == _cells.num(want)
-        pair = row[output.columns.index("Test known / unknown")]
-        if found:
-            assert pair == _cells.count(
-                found["n_positive_test"], found["n_negative_test"]
+    for row, model in zip(output.rows, models("p9a"), strict=True):
+        found = [
+            r
+            for r in _table("p9b", model, "table.json")
+            if r["type"] == "obscure_real"
+        ]
+        if not found:
+            assert row[1:6] == [NO_CONTRAST] * 5, model
+            continue
+        r = found[0]
+        assert row[1] == fmt(r["logistic_within"])
+        assert row[2] == fmt(r["popularity_within"])
+        assert row[3] == fmt(r["text_word_within"])
+        assert row[4] == fmt(r["text_char_within"])
+        n_pos, n_neg = r["n_positive_test"], r["n_negative_test"]
+        d = r["logistic_within"] - r["popularity_within"]
+        half = (
+            Z
+            * (
+                _hm_se(r["logistic_within"], n_pos, n_neg) ** 2
+                + _hm_se(r["popularity_within"], n_pos, n_neg) ** 2
             )
+            ** 0.5
+        )
+        star = "*" if d - half > 0 or d + half < 0 else ""
+        assert row[5] == f"{fmt(d)} {PLUS_MINUS} {fmt(half)}{star}"
+
+
+def test_increment_cells_carry_the_stored_paired_interval(
+    output: registry.TableOutput,
+) -> None:
+    for row, model in zip(output.rows, models("p9a"), strict=True):
+        inc = {
+            r["features"]: r
+            for r in _table("p9c", model, "table_incremental.json")
+            if r["dataset"] == "popqa"
+        }
+
+        def cell(key: str, inc: dict = inc) -> str:
+            r = inc[key]
+            d, lo, hi = r["diff_vs_confidence"], r["lo"], r["hi"]
+            return f"{fmt(d)} [{fmt(lo)}, {fmt(hi)}]"
+
+        if "confidence+lat" in inc:
+            assert row[6] == cell("confidence+lat")
         else:
-            assert pair == "n/a"
+            assert row[6] == NO_CONTRAST
+        assert row[7] == cell("confidence+probe")
 
 
-def test_increment_cells_carry_their_bootstrap_interval(
+def test_steering_columns_count_runs_per_checkpoint(
     output: registry.TableOutput,
 ) -> None:
-    for model, row in zip(_models(), output.rows, strict=True):
-        for name, features in (
-            ("Confidence + lat", "confidence+lat"),
-            ("Confidence + probe", "confidence+probe"),
-        ):
-            hit = _increment(model, features)
-            want = (
-                _cells.interval(hit["diff_vs_confidence"], hit["lo"], hit["hi"])
-                if hit
-                else "n/a"
-            )
-            assert row[output.columns.index(name)] == want
+    for row, model in zip(output.rows, models("p9a"), strict=True):
+        found, hits, selective = _steering(model)
+        if not found:
+            assert row[8:] == ["none", "none"]
+        else:
+            assert row[8] == f"{hits} of {found}"
+            assert row[9] == f"{selective} of {found}"
+    count = output.counts["distinguishable"]
+    assert [count[r].total for r in ("gpt2", "base", "post")] == [3, 3, 6]
+    assert [count[r].hits for r in ("gpt2", "base", "post")] == [3, 3, 3]
+    count = output.counts["selective"]
+    assert [count[r].hits for r in ("gpt2", "base", "post")] == [3, 3, 4]
 
 
-def test_claim_numbers_are_recomputed_from_the_files(
+def test_counts_of_the_direction_above_popularity_are_per_role(
     output: registry.TableOutput,
 ) -> None:
-    models = _models()
-    readers = {m: _reader(m) for m in models if _reader(m)}
-    lat = {m: _increment(m, "confidence+lat") for m in models}
-    probe = {m: _increment(m, "confidence+probe") for m in models}
-    expected = {
-        "models": len(models),
-        "with_contrast": len(readers),
-        "reader_above_popularity": sum(
-            r["logistic_within"] > r["popularity_within"]
-            for r in readers.values()
-        ),
-        "reader_above_text": sum(
-            r["logistic_within"]
-            > max(r["text_word_within"], r["text_char_within"])
-            for r in readers.values()
-        ),
-        "models_with_lat": sum(v is not None for v in lat.values()),
-        "lat_above_zero": sum(
-            v is not None and v["lo"] > 0 for v in lat.values()
-        ),
-        "probe_above_zero": sum(
-            v is not None and v["lo"] > 0 for v in probe.values()
-        ),
-    }
-    assert output.numbers == pytest.approx(expected)
-    assert all(_has(output.claim, v) for v in expected.values())
-    assert output.claim.endswith(".")
+    count = output.counts["above_popularity"]
+    assert [count[r].total for r in ("gpt2", "base", "post")] == [3, 3, 3]
+    assert count["gpt2"].hits == 0
 
 
-def test_detail_says_why_the_reader_has_no_interval(
+def test_the_caption_defines_popularity_and_the_missing_contrast(
     output: registry.TableOutput,
 ) -> None:
-    assert "reader draws" in output.detail
-    assert "resample" in output.detail
+    text = output.claim + " " + output.detail
+    assert "monthly Wikipedia page views" in text
+    assert "[[cite:mallen2023when]]" in text
+    assert "Hanley and McNeil" in text
+    assert "paired bootstrap" in text
+    assert "GPT-2 small has too few known questions" in text
+    assert "3 random directions" in text
+    assert not any(ch in text for ch in DASHES)
 
 
-def test_no_cell_uses_a_dash_character(output: registry.TableOutput) -> None:
-    text = " ".join(
-        [output.claim, output.detail, *output.columns, *output.notes]
-        + [c for row in output.rows for c in row]
-    )
-    assert "\u2014" not in text
-    assert "\u2013" not in text
-
-
-def test_build_is_deterministic() -> None:
-    first = registry.build_table(SPEC, Manifest(RESULTS))
-    second = registry.build_table(SPEC, Manifest(RESULTS))
-    assert first == second
+def test_no_underscore_backtick_or_run_code(
+    output: registry.TableOutput,
+) -> None:
+    texts = [output.claim, output.detail, *output.columns]
+    texts += [c for r in output.rows for c in r]
+    texts += [g[0] for g in output.groups]
+    texts = [re.sub(r"\[\[.*?\]\]", "", t) for t in texts]
+    assert not any("_" in t or "`" in t for t in texts)
+    assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)

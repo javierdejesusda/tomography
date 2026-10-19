@@ -1,7 +1,5 @@
 import importlib
 
-import pytest
-
 from tomography.site import registry
 
 FIGURE_KEYS = (
@@ -119,13 +117,5 @@ def test_the_modules_ported_from_the_first_draft_exist() -> None:
     assert ported.isdisjoint(registry.missing())
 
 
-def test_missing_lists_unbuilt_entries_with_their_module_path() -> None:
-    assert ("table", "notation") in registry.missing()
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="the figure and table modules of WP1, WP2 and WP3 are not merged",
-)
 def test_every_registered_module_exists() -> None:
     assert registry.missing() == []

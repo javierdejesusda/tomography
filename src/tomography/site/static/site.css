@@ -35,7 +35,8 @@
 }
 
 :root {
-  --ink: #000;
+  --ink: #1a1a1a;
+  --muted: #4d4d4d;
   --paper: #fff;
   --link: #1a3c8c;
 }
@@ -148,14 +149,20 @@ h3 {
   font-weight: 700;
 }
 
-ol.findings {
+ol.contributions {
   margin: 0.5em 0;
   padding-left: 1.8em;
   text-align: justify;
 }
 
-ol.findings li {
+ol.contributions li {
   margin: 0.3em 0;
+}
+
+.contents {
+  margin: 1.2em 0 0;
+  font-size: 0.9em;
+  text-align: center;
 }
 
 figure {
@@ -164,7 +171,8 @@ figure {
   break-inside: avoid;
 }
 
-figure svg {
+.fig-scroll svg,
+.fig-scroll img {
   display: block;
   width: 100%;
   height: auto;
@@ -172,7 +180,7 @@ figure svg {
 }
 
 figcaption,
-caption {
+.caption {
   font-size: 0.9em;
   line-height: 1.35;
   text-align: justify;
@@ -196,16 +204,17 @@ figcaption {
   overflow-x: auto;
 }
 
+.table .caption {
+  margin: 0 0 0.5em;
+}
+
 table {
   width: 100%;
+  border-top: 1.5px solid var(--ink);
+  border-bottom: 1.5px solid var(--ink);
   border-collapse: collapse;
   font-size: 0.84em;
   font-variant-numeric: tabular-nums lining-nums;
-}
-
-caption {
-  caption-side: top;
-  padding-bottom: 0.5em;
 }
 
 thead tr.groups th {
@@ -221,25 +230,19 @@ thead tr.groups th.span {
 }
 
 thead tr.groups th.muted {
-  color: #555;
-}
-
-thead tr:first-child th {
-  border-top: 0.12em solid var(--ink);
+  color: var(--muted);
 }
 
 thead tr:last-child th {
-  border-bottom: 0.06em solid var(--ink);
-}
-
-tbody tr:last-child td {
-  border-bottom: 0.12em solid var(--ink);
+  border-bottom: 1px solid var(--ink);
 }
 
 tbody tr.group td {
-  border-top: 0.06em solid var(--ink);
+  border-top: 0.5px solid var(--ink);
 }
 
+td.r,
+th.r,
 td:first-child {
   white-space: nowrap;
 }
@@ -305,6 +308,11 @@ aside.footnotes p {
   text-align: left;
 }
 
+pre.bibtex {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 pre {
   margin: 0.6em 0;
   padding: 0;
@@ -326,8 +334,8 @@ footer.colophon {
 
   p,
   figcaption,
-  caption,
-  ol.findings {
+  .caption,
+  ol.contributions {
     text-align: left;
     hyphens: manual;
   }
@@ -350,18 +358,20 @@ footer.colophon {
     padding: 0.18em 0.35em;
   }
 
-  caption {
-    position: sticky;
-    left: 0;
-    box-sizing: border-box;
-    width: calc(100vw - 32px);
+  .fig-scroll {
+    overflow-x: auto;
+  }
+
+  .fig-scroll svg,
+  .fig-scroll img {
+    min-width: 560px;
   }
 }
 
 @media print {
   @page {
     size: letter;
-    margin: 1in;
+    margin: 1in 1.5in;
   }
 
   html {
@@ -377,8 +387,15 @@ footer.colophon {
     padding: 0;
   }
 
+  .table {
+    break-inside: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
   figure,
-  .table,
   pre,
   tr {
     break-inside: avoid;

@@ -1,27 +1,72 @@
-"""Table A1: Reading accuracy with intervals and selected layers.
+"""Table A3: Every reading at its reported layer.
 
-One block per concept; each row is a checkpoint with the reader's accuracy
-and its 95 percent interval at the layer chosen on validation data, the
-random direction of the same run at that layer, and that layer. Table 2 of
-the main text shows the same accuracies in a wide form.
+One block per concept with a row per checkpoint: the layer, its relative
+depth, the reader, the random direction of the same run at that layer, the
+margin with its conservative interval for the test pairs, and the test size.
+The main sentiment run chooses its layer on the pairs it is scored on and is
+labelled optimistic; the held-out block is what the main text uses.
 """
 
+from tomography.site import params
 from tomography.site import reading
+from tomography.site import runfiles
+from tomography.site import store
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
+from tomography.site.tables import _cells
 from tomography.viz import paper
 
 BLOCKS = (
-    ("r1", "R1 sentiment"),
-    ("r2", "R2 utility"),
-    ("r3", "R3 morality"),
-    ("r7", "R7 truth"),
+    (
+        "sentiment_r1",
+        "Sentiment, layer chosen on the scored pairs (optimistic)",
+    ),
+    ("sentiment", "Sentiment, held out"),
+    ("utility", "Utility"),
+    ("morality", "Morality"),
+    ("truth", "Truth"),
+    ("template", "Honesty in template"),
+    ("honesty", "Honesty transfer"),
 )
-EXPLORATORY = ("r5", "R5 honesty transfer (exploratory)")
+EXPERIMENT = {
+    "sentiment_r1": "r1",
+    "sentiment": "p3",
+    "utility": "r2",
+    "morality": "r3",
+    "truth": "r7",
+    "template": "r5",
+    "honesty": "r5",
+}
 
 
-def _interval(found: reading.Reading) -> str:
-    return f"{found.accuracy:.3f} [{found.lo:.3f}, {found.hi:.3f}]"
+def _score(
+    manifest: Manifest, concept: str, model: str
+) -> reading.Score | None:
+    if concept == "sentiment":
+        return reading.heldout_sentiment(manifest, model)
+    if concept == "template":
+        return reading.in_template(manifest, model)
+    if concept == "sentiment_r1":
+        found = reading.load(manifest, "r1", model)
+        run = manifest.run("r1", model)
+        if found is None or run is None:
+            return None
+        n = int(runfiles.summary(run)["n_eval_pairs"])
+        return reading.Score(
+            found.layer, found.accuracy, found.random_at_layer, n
+        )
+    exp = EXPERIMENT[concept]
+    found = reading.load(manifest, exp, model)
+    if found is None:
+        return None
+    n = params.eval_pairs(manifest, exp, model)
+    return reading.Score(found.layer, found.accuracy, found.random_at_layer, n)
+
+
+def _depth(model: str, layer: int) -> float:
+    config = params.model_config(model)
+    count = config.get("n_layer") or config["num_hidden_layers"]
+    return layer / int(count)
 
 
 def build(manifest: Manifest) -> TableOutput:
@@ -33,42 +78,69 @@ def build(manifest: Manifest) -> TableOutput:
     Returns:
         The table and its caption parts.
     """
+    models = sorted(
+        {
+            m
+            for e in ("p3", "r1", "r2", "r3", "r5", "r7")
+            for m in manifest.models(e)
+        },
+        key=store.model_rank,
+    )
     rows: list[list[str]] = []
-    for exp, title in (*BLOCKS, EXPLORATORY):
-        first = True
-        for model in manifest.models(exp):
-            found = reading.load(manifest, exp, model)
+    sizes: dict[str, int] = {}
+    starts: list[int] = []
+    for concept, label in BLOCKS:
+        starts.append(len(rows))
+        for k, model in enumerate(models):
+            found = _score(manifest, concept, model)
+            head = [label if k == 0 else "", paper.display_name(model)]
             if found is None:
+                rows.append(head + [_cells.MISSING] * 6)
                 continue
-            random = "n/a" if exp == "r5" else f"{found.random_at_layer:.3f}"
+            sizes[concept] = found.n
+            d, lo, hi = reading.margin(found)
             rows.append(
                 [
-                    title if first else "",
-                    paper.display_name(model),
-                    _interval(found),
-                    random,
+                    *head,
                     str(found.layer),
+                    _cells.num(_depth(model, found.layer)),
+                    _cells.num(found.reader),
+                    _cells.num(found.random),
+                    _cells.pm(d, (hi - lo) / 2),
+                    f"{found.n:,}",
                 ]
             )
-            first = False
     claim = (
-        "Accuracy of the reader with its 95 percent interval, the random "
-        "direction of the same run and the selected layer, for every "
-        "concept and checkpoint of Table 2."
+        "Every reading at its reported layer, with its margin over the "
+        "random direction."
     )
     detail = (
-        "Accuracy is read at the layer chosen on validation data, on the "
-        "test pairs; intervals are 95 percent intervals over the evaluation "
-        "pairs. Random is the accuracy of a random direction of the same "
-        "run at the same layer. R5 is exploratory and has no random "
-        "direction at its layer."
+        "The first sentiment block chooses the layer on the same "
+        f"{sizes['sentiment_r1']} SST-2 validation pairs it is scored on and "
+        "is optimistic; the held-out block chooses it on the select split of "
+        f"the sample-size run and scores {sizes['sentiment']} pairs. "
+        "Margins carry conservative 95 percent intervals "
+        "for the test pairs; the intervals stored with the runs resample the "
+        "readers only and are in the data files. Honesty in template is "
+        "scored on held-out persona prompts and honesty transfer on plain "
+        "true and false statements."
     )
     return TableOutput(
         claim,
         detail,
-        ["Concept", "Model", "Reader [95% interval]", "Random", "Layer"],
+        [
+            "Concept",
+            "Model",
+            "Layer",
+            "Relative depth",
+            "Reader",
+            "Random",
+            "Margin",
+            "Test pairs",
+        ],
         rows,
-        "llrrr",
+        "llrrrrrr",
         [],
-        {},
+        {"blocks": float(len(BLOCKS))},
+        row_groups=tuple(starts),
     )

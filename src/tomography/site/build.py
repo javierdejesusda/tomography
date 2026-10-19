@@ -4,7 +4,9 @@ import csv
 import datetime
 import io
 from pathlib import Path
+import re
 import shutil
+import subprocess
 
 from tomography.site import page
 from tomography.site import references
@@ -51,11 +53,55 @@ def results_date(manifest: Manifest) -> str:
     return f"Results of {day.day} {MONTHS[day.month - 1]} {day.year}"
 
 
+def results_commit(results: Path) -> tuple[str, str]:
+    """Finds the commit that last changed the results.
+
+    Args:
+        results: The committed `results/` directory.
+
+    Returns:
+        The short commit hash and its date as `19 October 2026`, or two
+        empty strings when git or the history is not available.
+    """
+    try:
+        done = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(results.parent),
+                "log",
+                "-1",
+                "--format=%h %cs",
+                "--",
+                results.name,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "", ""
+    found = re.fullmatch(r"(\w+) (\d{4})-(\d{2})-(\d{2})", done.stdout.strip())
+    if not found:
+        return "", ""
+    sha, year, month, day = found.groups()
+    return sha, f"{int(day)} {MONTHS[int(month) - 1]} {year}"
+
+
+def _plain(cell: str) -> str:
+    return re.sub(
+        r"\[\[cite:([^\]]+)\]\]",
+        lambda m: m.group(1).replace(",", "; "),
+        cell,
+    )
+
+
 def _csv_text(columns: list[str], rows: list[list[str]]) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(columns)
-    writer.writerows(rows)
+    writer.writerows([[_plain(c) for c in row] for row in rows])
     return buffer.getvalue()
 
 
@@ -70,9 +116,10 @@ def build(
     """Writes the page, its assets and the files behind every figure.
 
     Files are named by the printed number: each figure is written as
-    `figures/figure-<n>.svg`, `figures/figure-<n>.pdf` and
-    `data/figure-<n>.csv`, and each table as `data/table-<n>.csv`. A figure
-    or table that cannot be built stops the build.
+    `figures/fig-<n>.svg`, `figures/fig-<n>.pdf` and `data/fig-<n>.csv`
+    (only when the figure has rows), and each table as
+    `data/table-<n>.csv`. A figure or table that cannot be built stops the
+    build.
 
     Args:
         results: The committed `results/` directory to read.
@@ -86,6 +133,7 @@ def build(
         The document that was rendered.
     """
     manifest = Manifest(results)
+    commit, built = results_commit(results)
 
     def figure(key: str) -> page.FigureEntry:
         output = registry.build_figure(key, manifest)
@@ -104,19 +152,25 @@ def build(
         tables={k: table(k) for k in tables},
         appendix={k: figure(k) for k in appendix},
         appendix_tables={k: table(k) for k in appendix_tables},
-        date=results_date(manifest),
+        date=(
+            f"Results at commit {commit}, built {built}"
+            if commit
+            else results_date(manifest)
+        ),
         bib=references.parse(BIB.read_text(encoding="utf-8")),
+        commit=commit,
     )
     figure_number, table_number = page.numbers(doc)
     (out / "figures").mkdir(parents=True, exist_ok=True)
     (out / "data").mkdir(parents=True, exist_ok=True)
     for key, fig in {**doc.figures, **doc.appendix}.items():
-        name = f"figure-{figure_number[key]}"
+        name = f"fig-{figure_number[key]}"
         (out / "figures" / f"{name}.svg").write_bytes(fig.svg)
         (out / "figures" / f"{name}.pdf").write_bytes(fig.pdf)
-        (out / "data" / f"{name}.csv").write_text(
-            fig.output.csv, encoding="utf-8", newline="\n"
-        )
+        if fig.output.csv.strip():
+            (out / "data" / f"{name}.csv").write_text(
+                fig.output.csv, encoding="utf-8", newline="\n"
+            )
     for key, tab in {**doc.tables, **doc.appendix_tables}.items():
         (out / "data" / f"table-{table_number[key]}.csv").write_text(
             _csv_text(tab.output.columns, tab.output.rows),

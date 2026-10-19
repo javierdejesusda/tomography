@@ -1,135 +1,159 @@
-import json
 from pathlib import Path
+import re
+import runpy
 
 import numpy as np
 import pytest
 
 from tomography.site import registry
-from tomography.site import store
 from tomography.site.manifest import Manifest
 from tomography.viz import paper
 
-RESULTS = Path(__file__).resolve().parents[1] / "results"
-SPEC = "reading"
-MARGIN = 0.1
-CONCEPTS = ("r1", "r2", "r3", "r7")
-ALL = (*CONCEPTS, "r5")
+_HERE = Path(__file__).parent
+_R = runpy.run_path(str(_HERE / "_results.py"))
+_M = runpy.run_path(str(_HERE / "_site_math.py"))
+ROOT, data, models, npz, run = (
+    _R["ROOT"],
+    _R["data"],
+    _R["models"],
+    _R["npz"],
+    _R["run"],
+)
+diff, excludes_zero = _M["diff"], _M["excludes_zero"]
+fmt, groups = _M["fmt"], _M["groups"]
+
+DASHES = (chr(0x2014), chr(0x2013))
+CONCEPTS = ("sentiment", "utility", "morality", "truth", "honesty")
+SENTIMENT_PAIRS = 214
 
 
 @pytest.fixture(scope="module")
 def output() -> registry.TableOutput:
-    return registry.build_table(SPEC, Manifest(RESULTS))
+    return registry.build_table("reading", Manifest(ROOT))
 
 
-def _summary(exp: str, model: str) -> dict:
-    run = Manifest(RESULTS).run(exp, model)
-    assert run is not None
-    return json.loads((run / "summary.json").read_text("utf-8"))["data"]
+def _random_at(path: Path, stem: str, layer: int) -> float:
+    series = data(path, f"{stem}.json")["series"]
+    mean = npz(path, f"{stem}.npz")["mean"]
+    return float(mean[series.index("random")][layer - 1])
 
 
-def _selected(exp: str, model: str) -> tuple[int, float]:
-    data = _summary(exp, model)
+def _score(concept: str, model: str) -> tuple[float, float, int]:
+    if concept == "sentiment":
+        path = run("p3", model)
+        meta = data(path, "sizes_sentiment.json")
+        arrays = npz(path, "sizes_sentiment.npz")
+        k = int(np.flatnonzero(arrays["sizes"] == 64)[0])
+        col = int(np.flatnonzero(arrays["layers"] == meta["layer"])[0])
+        acc = arrays["accuracy"]
+        return (
+            float(acc[k, 1, 0, :, col].mean()),
+            float(acc[k, 1, 1, :, col].mean()),
+            SENTIMENT_PAIRS,
+        )
+    exp = {"utility": "r2", "morality": "r3", "truth": "r7", "honesty": "r5"}[
+        concept
+    ]
+    path = run(exp, model)
+    summary = data(path, "summary.json")
     if exp == "r7":
-        test = data["sets"]["test"]
-        return data["val_layer"], test["accuracy_at_val_layer"]
-    key = "best_accuracy" if exp == "r1" else "test_accuracy"
-    return data["best_layer"], data[key]
+        layer = summary["val_layer"]
+        reader = summary["sets"]["test"]["accuracy_at_val_layer"]
+        n = summary["sets"]["test"]["n_eval_pairs"]
+    elif exp == "r5":
+        layer = summary["best_layer"]
+        reader = summary["test_accuracy"]
+        n = summary["n_eval_pairs"]["transfer"]["test"]
+    else:
+        layer = summary["best_layer"]
+        reader = summary["test_accuracy"]
+        n = summary["n_eval_pairs"]["test"]
+    stem = "curves_transfer" if exp == "r5" else "curves"
+    return float(reader), _random_at(path, stem, layer), int(n)
 
 
-def _random(exp: str, model: str, layer: int) -> float:
-    run = Manifest(RESULTS).run(exp, model)
-    assert run is not None
-    with np.load(run / "curves.npz") as npz:
-        return float(npz["mean"][1][layer - 1])
-
-
-def test_the_table_is_wide_with_a_pair_of_columns_per_concept(
+def test_columns_are_a_reader_and_random_pair_per_concept(
     output: registry.TableOutput,
 ) -> None:
-    assert output.columns == ["Model"] + ["LAT", "Rand."] * 5
-    assert output.align == "l" + "rr" * 5
+    assert output.columns == ["Model"] + ["Reader", "Random"] * 5
+    assert output.align == "l" + "r" * 10
     assert [g[0] for g in output.groups] == [
-        "R1 sentiment",
-        "R2 utility",
-        "R3 morality",
-        "R7 truth",
-        "R5 honesty (exploratory)",
+        "Sentiment (held out)",
+        "Utility",
+        "Morality",
+        "Truth",
+        "Honesty (transfer)",
     ]
     assert [g[1] for g in output.groups] == [2] * 5
-    assert [g[2] for g in output.groups] == [False] * 4 + [True]
-    assert all(len(row) == 11 for row in output.rows)
+    assert not any(g[2] for g in output.groups)
 
 
-def test_there_is_one_row_per_model_in_paper_order(
+def test_one_row_per_checkpoint_split_between_gpt2_and_qwen3(
     output: registry.TableOutput,
 ) -> None:
-    models = {m for e in ALL for m in Manifest(RESULTS).models(e)}
-    expected = [
-        paper.display_name(m) for m in sorted(models, key=store.model_rank)
-    ]
-    assert [r[0] for r in output.rows] == expected
-    assert len(expected) == 10
+    names = models("p3")
+    assert len(names) == 10
+    assert [r[0] for r in output.rows] == [paper.display_name(m) for m in names]
+    assert output.row_groups == groups(names)
 
 
-def test_every_cell_holds_the_stored_accuracy_and_random_value(
+def test_every_cell_matches_a_recomputation_and_the_stars_agree(
     output: registry.TableOutput,
 ) -> None:
-    manifest = Manifest(RESULTS)
-    rows = {r[0]: r for r in output.rows}
-    for i, exp in enumerate(ALL):
-        have = set(manifest.models(exp))
-        for model in {m for e in ALL for m in manifest.models(e)}:
-            row = rows[paper.display_name(model)]
-            reader, random = row[1 + 2 * i], row[2 + 2 * i]
-            if model not in have:
-                assert (reader, random) == ("n/a", "n/a")
-                continue
-            layer, acc = _selected(exp, model)
-            assert reader == f"{acc:.3f}"
-            if exp == "r5":
-                assert random == "n/a"
-            else:
-                assert random == f"{_random(exp, model, layer):.3f}"
+    names = models("p3")
+    stars = {c: 0 for c in CONCEPTS}
+    for row, model in zip(output.rows, names, strict=True):
+        for i, concept in enumerate(CONCEPTS):
+            reader, random, n = _score(concept, model)
+            lo = diff(reader, random, n)[1]
+            star = "*" if lo > 0 else ""
+            stars[concept] += bool(star)
+            assert row[1 + 2 * i] == fmt(reader) + star, (model, concept)
+            assert row[2 + 2 * i] == fmt(random), (model, concept)
+    for concept in CONCEPTS:
+        assert output.numbers[f"above_{concept}"] == stars[concept]
 
 
-def test_the_caption_points_to_the_appendix_for_intervals_and_layers(
+def test_sentiment_is_the_held_out_value_not_the_r1_layer_value(
     output: registry.TableOutput,
 ) -> None:
-    assert "Table A1" in output.detail
-    assert "interval" in output.detail
-    assert "exploratory" in output.detail
+    differs = 0
+    for row, model in zip(output.rows, models("p3"), strict=True):
+        best = data(run("r1", model), "summary.json")["best_accuracy"]
+        differs += row[1].rstrip("*") != fmt(best)
+    assert differs >= 1
 
 
-def test_the_claim_numbers_match_a_recomputation(
+def test_no_cell_reads_not_available_and_no_header_is_a_run_code(
     output: registry.TableOutput,
 ) -> None:
-    manifest = Manifest(RESULTS)
-    margins = []
-    for exp in CONCEPTS:
-        for model in manifest.models(exp):
-            layer, acc = _selected(exp, model)
-            margins.append(acc - _random(exp, model, layer))
-    assert output.numbers["cells"] == len(margins)
-    assert output.numbers["above"] == sum(m > MARGIN for m in margins)
-    assert output.numbers["smallest_margin"] == pytest.approx(min(margins))
-    assert f"{int(output.numbers['above'])} of " in output.claim
-    assert f"{output.numbers['smallest_margin']:.3f}" in output.claim
+    cells = [c for r in output.rows for c in r]
+    assert "n/a" not in cells
+    heads = [*output.columns, *(g[0] for g in output.groups)]
+    assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", h) for h in heads)
+    assert not any("LAT" in h for h in heads)
 
 
-def test_the_footer_gives_the_p6_slopes(output: registry.TableOutput) -> None:
-    run = Manifest(RESULTS).run("p6", "gpt2")
-    assert run is not None
-    stored = json.loads((run / "summary.json").read_text("utf-8"))["data"][
-        "accuracy_per_decade"
-    ]
-    text = " ".join(output.notes)
-    for exp, value in stored.items():
-        assert f"{exp.upper()} {value:.3f}" in text
+def test_the_counts_are_per_role(output: registry.TableOutput) -> None:
+    for concept in CONCEPTS:
+        count = output.counts[f"above_{concept}"]
+        total = sum(c.total for c in count.values())
+        hits = sum(c.hits for c in count.values())
+        assert total == 10
+        assert hits == output.numbers[f"above_{concept}"]
+        assert (count["gpt2"].total, count["base"].total) == (4, 3)
 
 
-def test_no_cell_has_a_dash_character(output: registry.TableOutput) -> None:
-    banned = {chr(0x2014), chr(0x2013)}
-    texts = [output.claim, output.detail, *output.notes]
-    texts += [c for row in output.rows for c in row]
-    texts += [g[0] for g in output.groups]
-    assert not any(ch in text for text in texts for ch in banned)
+def test_the_caption_names_every_test_size_and_the_honesty_direction(
+    output: registry.TableOutput,
+) -> None:
+    text = output.claim + " " + output.detail
+    for concept in ("utility", "morality"):
+        n = _score(concept, "gpt2")[2]
+        assert f"{n:,}" in text
+    assert "214 sentiment pairs" in text
+    assert "59 truth" in text or "59 plain true and false statements" in text
+    assert "fitted on the paper's honesty persona prompts" in text
+    assert "no refit" in text
+    assert "[[table:reading_full]]" in text
+    assert not any(ch in text for ch in DASHES)

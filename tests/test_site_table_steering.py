@@ -1,176 +1,137 @@
+import json
+import math
 from pathlib import Path
 import re
-from typing import Any
+import runpy
 
-import numpy as np
 import pytest
 
 from tomography.site import registry
 from tomography.site.manifest import Manifest
-from tomography.site.tables import _cells
 from tomography.viz import paper
 
-RESULTS = Path(__file__).resolve().parents[1] / "results"
-SPEC = "steering"
-MAX_RATIO = 1.5
-MIN_DISTINCT = 0.15
+_HERE = Path(__file__).parent
+_R = runpy.run_path(str(_HERE / "_results.py"))
+_M = runpy.run_path(str(_HERE / "_site_math.py"))
+ROOT, data, models, run = _R["ROOT"], _R["data"], _R["models"], _R["run"]
+fmt, groups = _M["fmt"], _M["groups"]
+MINUS = chr(0x2212)
+DASHES = (chr(0x2014), chr(0x2013))
 
 
 @pytest.fixture(scope="module")
 def output() -> registry.TableOutput:
-    return registry.build_table(SPEC, Manifest(RESULTS))
+    return registry.build_table("steering", Manifest(ROOT))
 
 
-def _run(experiment: str, model: str) -> Path:
-    (run,) = [p for p in (RESULTS / experiment / model).iterdir() if p.is_dir()]
-    return run
+def _rows(model: str) -> list[dict]:
+    table = data(run("c1", model), "table.json")
+    return [dict(zip(table["columns"], r, strict=True)) for r in table["rows"]]
 
 
-def _models() -> list[str]:
-    return Manifest(RESULTS).models("c1")
-
-
-def _c1(model: str) -> list[dict[str, Any]]:
-    return _cells.read_table(_run("c1", model) / "table.json")
-
-
-def _none(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    (row,) = [r for r in rows if r["arm"] == "none"]
-    return row
-
-
-def _mean(rows: list[dict[str, Any]], coeff: float, key: str) -> float:
-    cell = [
-        r[key] for r in rows if r["arm"] == "linear" and r["coeff"] == coeff
-    ]
-    assert len(cell) == 3
-    return float(np.mean(cell))
-
-
-def _triple(rows: list[dict[str, Any]], coeff: float) -> str:
-    ratio = _mean(rows, coeff, "perplexity") / _none(rows)["perplexity"]
-    return (
-        f"{_mean(rows, coeff, 'score'):.2f} / {ratio:.2f} / "
-        f"{_mean(rows, coeff, 'distinct_1'):.2f}"
-    )
-
-
-def _fluent(rows: list[dict[str, Any]], size: float) -> bool:
-    for coeff in (size, -size):
-        ratio = _mean(rows, coeff, "perplexity") / _none(rows)["perplexity"]
-        if ratio > MAX_RATIO or _mean(rows, coeff, "distinct_1") < MIN_DISTINCT:
-            return False
-    return True
-
-
-def _m1(model: str) -> dict[str, dict[str, Any]]:
-    run = Manifest(RESULTS).run("m1", model)
-    if run is None:
-        return {}
-    rows = _cells.read_table(run / "table.json")
-    return {
-        r["method"]: r
+def _mean(rows: list[dict], arm: str, coeff: float | None, key: str) -> float:
+    hit = [
+        r
         for r in rows
-        if r["task"] == "manipulation" and r["setting"] == "0.3"
-    }
-
-
-def _has(claim: str, value: float) -> bool:
-    text = str(int(value)) if value == int(value) else f"{value:.3f}"
-    pattern = rf"(?<![\d.]){re.escape(text)}(?![\d])"
-    return re.search(pattern, claim) is not None
-
-
-def test_there_is_one_row_per_c1_model(output: registry.TableOutput) -> None:
-    assert [r[0] for r in output.rows] == [
-        paper.display_name(m) for m in _models()
+        if r["arm"] == arm and (coeff is None or r["coeff"] == coeff)
     ]
-    assert all(len(r) == len(output.columns) for r in output.rows)
-    assert len(output.align) == len(output.columns)
+    assert hit
+    return sum(r[key] for r in hit) / len(hit)
 
 
-def test_steering_cells_hold_score_ratio_and_distinct_1(
+def _expected(model: str) -> list[str]:
+    rows = _rows(model)
+    score = [_mean(rows, "linear", c, "score") for c in (-0.1, 0.1)]
+    zero = _mean(rows, "none", 0.0, "score")
+    out = [fmt(score[0]), fmt(zero), fmt(score[1])]
+    out += [
+        fmt(_mean(rows, "prompting-1", None, "score")),
+        fmt(_mean(rows, "prompting+1", None, "score")),
+    ]
+    p0 = _mean(rows, "none", 0.0, "perplexity")
+    out += [
+        fmt(_mean(rows, "linear", c, "perplexity") / p0, 2) for c in (-0.1, 0.1)
+    ]
+    f0 = _mean(rows, "none", 0.0, "fluency")
+    out += [
+        fmt(math.exp(f0 - _mean(rows, "linear", c, "fluency")), 2)
+        for c in (-0.1, 0.1)
+    ]
+    out += [fmt(_mean(rows, "linear", c, "distinct_1")) for c in (-0.1, 0.1)]
+    return out
+
+
+def test_columns_and_header_spans(output: registry.TableOutput) -> None:
+    assert output.columns == [
+        "Model",
+        f"{MINUS}0.1",
+        "0",
+        "+0.1",
+        "Negative",
+        "Positive",
+        f"{MINUS}0.1",
+        "+0.1",
+        f"{MINUS}0.1",
+        "+0.1",
+        f"{MINUS}0.1",
+        "+0.1",
+    ]
+    assert [(g[0], g[1]) for g in output.groups] == [
+        ("Judged sentiment at relative coefficient", 3),
+        ("Judged sentiment under an instruction", 2),
+        ("Neutral-text perplexity ratio", 2),
+        ("Completion perplexity ratio", 2),
+        ("Distinct-1", 2),
+    ]
+    assert output.align == "l" + "r" * 11
+
+
+def test_ten_rows_split_between_gpt2_and_qwen3(
     output: registry.TableOutput,
 ) -> None:
-    for model, row in zip(_models(), output.rows, strict=True):
-        rows = _c1(model)
-        none = _none(rows)
-        assert row[output.columns.index("Unsteered")] == (
-            f"{none['score']:.2f} / 1.00 / {none['distinct_1']:.2f}"
-        )
-        for name, coeff in (("-0.1", -0.1), ("+0.1", 0.1), ("+0.3", 0.3)):
-            assert row[output.columns.index(name)] == _triple(rows, coeff)
-        (prompt,) = [r for r in rows if r["arm"] == "prompting+1"]
-        assert row[output.columns.index("Prompting +1")] == (
-            f"{prompt['score']:.2f} / n/a / {prompt['distinct_1']:.2f}"
-        )
+    names = models("c1")
+    assert len(names) == 10
+    assert [r[0] for r in output.rows] == [paper.display_name(m) for m in names]
+    assert output.row_groups == groups(names)
 
 
-def test_m1_columns_show_the_random_arm_where_it_is_stored(
+def test_all_110_cells_match_a_recomputation(
     output: registry.TableOutput,
 ) -> None:
-    for model, row in zip(_models(), output.rows, strict=True):
-        arms = _m1(model)
-        for name, method in (
-            ("M1 random", "random"),
-            ("M1 mean_diff", "mean_diff"),
-        ):
-            hit = arms.get(method)
-            want = (
-                _cells.interval(hit["value"], hit["lo"], hit["hi"], 2)
-                if hit
-                else "n/a"
-            )
-            assert row[output.columns.index(name)] == want
+    for row, model in zip(output.rows, models("c1"), strict=True):
+        assert row[1:] == _expected(model), model
+    assert sum(len(r) - 1 for r in output.rows) == 110
 
 
-def test_claim_numbers_are_recomputed_from_the_files(
+def test_the_caption_defines_each_column_and_the_fluency_rule(
     output: registry.TableOutput,
 ) -> None:
-    models = _models()
-    tables = {m: _c1(m) for m in models}
-    arms = {m: _m1(m) for m in models if _m1(m)}
-    expected = {
-        "models": len(models),
-        "score_unsteered": float(
-            np.mean([_none(t)["score"] for t in tables.values()])
-        ),
-        "score_minus": float(
-            np.mean([_mean(t, -0.1, "score") for t in tables.values()])
-        ),
-        "score_plus": float(
-            np.mean([_mean(t, 0.1, "score") for t in tables.values()])
-        ),
-        "fluent_at_0.1": sum(_fluent(t, 0.1) for t in tables.values()),
-        "fluent_at_0.3": sum(_fluent(t, 0.3) for t in tables.values()),
-        "m1_models": len(arms),
-        "m1_random_max": max(a["random"]["value"] for a in arms.values()),
-        "m1_mean_diff_min": min(a["mean_diff"]["value"] for a in arms.values()),
-    }
-    assert output.numbers == pytest.approx(expected)
-    assert all(_has(output.claim, v) for v in expected.values())
-    assert output.claim.endswith(".")
+    text = output.claim + " " + output.detail
+    assert "SiEBERT" in text
+    assert "200 held-out WikiText-103 passages" in text
+    assert "at most 1.5" in text
+    assert "at least 0.15" in text
+    assert "distinct-1" in text
+    assert "[[fig:steering]]" in text
+    assert "DistilBERT" in text
+    assert not any(ch in text for ch in DASHES)
 
 
-def test_notes_say_that_c1_has_no_random_arm(
+def test_the_neutral_passage_count_comes_from_the_run_config(
     output: registry.TableOutput,
 ) -> None:
-    text = " ".join(output.notes) + output.detail
-    assert "no random-direction arm" in text
-    assert "1.5" in text
-    assert "0.15" in text
+    config = run("c1", "gpt2") / "config.json"
+    n_neutral = json.loads(config.read_text("utf-8"))["n_neutral"]
+    assert f"{n_neutral} held-out WikiText-103 passages" in output.detail
+    assert output.numbers["n_neutral"] == n_neutral
 
 
-def test_no_cell_uses_a_dash_character(output: registry.TableOutput) -> None:
-    text = " ".join(
-        [output.claim, output.detail, *output.columns, *output.notes]
-        + [c for row in output.rows for c in row]
-    )
-    assert chr(0x2014) not in text
-    assert chr(0x2013) not in text
-
-
-def test_build_is_deterministic() -> None:
-    first = registry.build_table(SPEC, Manifest(RESULTS))
-    second = registry.build_table(SPEC, Manifest(RESULTS))
-    assert first == second
+def test_no_run_code_underscore_or_backtick(
+    output: registry.TableOutput,
+) -> None:
+    texts = [output.claim, output.detail, *output.columns]
+    texts += [c for r in output.rows for c in r]
+    texts += [g[0] for g in output.groups]
+    texts = [re.sub(r"\[\[.*?\]\]", "", t) for t in texts]
+    assert not any("_" in t or "`" in t for t in texts)
+    assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
