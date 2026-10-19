@@ -473,7 +473,7 @@ def test_the_readers_and_the_text_band_are_labelled_directly(
     ax = _ax(output, "levels")
     texts = {t.get_gid(): t.get_text() for t in ax.texts}
     assert texts["reader_label:truthfulqa_reader"] == "truth reader"
-    assert texts["reader_label:persona_reader"] == "persona reader"
+    assert "reader_label:persona_reader" not in texts
     assert " ".join(texts["band_label"].split()) == "words, characters"
 
 
@@ -506,15 +506,19 @@ def test_the_truth_reader_label_sits_beside_its_markers(
     assert label.xy[0] < top.get_xdata()[0]
 
 
-def test_the_persona_label_stays_clear_of_the_chance_line(
+def test_the_persona_reader_is_named_in_the_legend_not_beside_the_rows(
     output: registry.FigureOutput,
 ) -> None:
     ax = _ax(output, "levels")
-    (label,) = [
+    assert not [
         t for t in ax.texts if t.get_gid() == "reader_label:persona_reader"
     ]
-    assert label.get_ha() == "left"
-    assert label.xy[0] > output.numbers["chance"]
+    (legend,) = output.figure.legends
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert "honesty persona reader" in labels
+    handle = legend.legend_handles[labels.index("honesty persona reader")]
+    assert handle.get_markerfacecolor() == handle.get_color()
+    assert handle.get_color() != paper.INK
 
 
 def test_the_text_baseline_is_drawn_in_the_log_probability_panel(
@@ -560,3 +564,65 @@ def test_panel_a_ticks_reach_the_upper_limit(
     output.figure.draw_without_rendering()
     labels = [t.get_text() for t in ax.get_xticklabels()]
     assert "1.0" in labels[-1]
+
+
+MM = 72 / 25.4
+
+
+def _marks(ax: Any) -> list[Any]:
+    return [
+        ln
+        for ln in ax.get_lines()
+        if ln.get_gid() and not str(ln.get_gid()).startswith("textband")
+    ]
+
+
+def _gap_pt(a: Any, b: Any, dpi: float) -> float:
+    dx = max(a.x0 - b.x1, b.x0 - a.x1, 0.0)
+    dy = max(a.y0 - b.y1, b.y0 - a.y1, 0.0)
+    return float(np.hypot(dx, dy)) * 72 / dpi
+
+
+def test_reader_labels_keep_a_millimetre_from_every_mark(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    fig.draw_without_rendering()
+    renderer = fig.canvas.get_renderer()
+    ax = _ax(output, "levels")
+    labels = [
+        t for t in ax.texts if str(t.get_gid()).startswith("reader_label")
+    ]
+    assert len(labels) == 1
+    for label in labels:
+        box = label.get_window_extent(renderer)
+        for mark in _marks(ax):
+            gap = _gap_pt(box, mark.get_window_extent(renderer), fig.dpi)
+            assert gap >= 1 * MM - 0.05, (label.get_text(), mark.get_gid())
+
+
+def test_the_chance_line_is_labelled_clear_of_text_and_marks(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    fig.draw_without_rendering()
+    renderer = fig.canvas.get_renderer()
+    for gid in ("levels", "logprob"):
+        ax = _ax(output, gid)
+        (label,) = [t for t in ax.texts if t.get_gid() == "chance_label"]
+        assert label.get_text() == "chance"
+        assert label.get_fontsize() >= paper.MIN_TEXT
+        box = label.get_window_extent(renderer)
+        inside = ax.get_window_extent(renderer)
+        assert inside.x0 <= box.x0
+        assert box.x1 <= inside.x1
+        assert box.y1 <= inside.y1
+        for other in ax.texts:
+            if other is not label:
+                far = _gap_pt(box, other.get_window_extent(renderer), fig.dpi)
+                assert far >= 1.0, (gid, other.get_text())
+        for mark in _marks(ax):
+            if mark.get_gid() == "chance":
+                continue
+            gap = _gap_pt(box, mark.get_window_extent(renderer), fig.dpi)
+            assert gap >= 1.0, (gid, mark.get_gid())

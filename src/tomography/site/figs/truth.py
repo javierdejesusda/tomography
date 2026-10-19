@@ -29,7 +29,7 @@ HEIGHT = 3.6
 TOP = -2.2
 READER_NAMES = {
     "truthfulqa_reader": "truth reader",
-    "persona_reader": "persona reader",
+    "persona_reader": "honesty persona reader",
 }
 TEXT_METHODS = ("text_word", "text_char")
 TEXT_NAMES = {"text_word": "words", "text_char": "characters"}
@@ -56,7 +56,6 @@ SMALL_TICK = 6.0
 TEXT = paper.MIN_TEXT
 WIDTHS_TOP = [1.5, 1.1, 1.0]
 BAND_ALPHA = 0.14
-CHANCE_CLEARANCE = 0.012
 
 
 @dataclasses.dataclass(frozen=True)
@@ -218,6 +217,20 @@ def chance_line(ax: Axes, value: float) -> None:
     line.set_gid("chance")
 
 
+def _chance_label(ax: Axes, value: float) -> None:
+    label = ax.annotate(
+        "chance",
+        xy=(value, TOP + 0.15),
+        xytext=(4, 0),
+        textcoords="offset points",
+        ha="left",
+        va="top",
+        fontsize=TEXT,
+        color=paper.ENC["secondary_text"],
+    )
+    label.set_gid("chance_label")
+
+
 def _is_post(model: str) -> bool:
     return model.startswith("qwen3") and not model.endswith("-base")
 
@@ -247,6 +260,7 @@ def _panel_levels(
 ) -> None:
     first = next(iter(data.values()))
     chance_line(ax, chance)
+    _chance_label(ax, chance)
     _text_levels(ax, first)
     for model, y in rows.items():
         for name, (_, shape, dodge) in READERS.items():
@@ -264,20 +278,19 @@ def _panel_levels(
             )
     top_model = min(rows, key=lambda m: rows[m])
     top = rows[top_model]
-    for name, (_, _, dodge) in READERS.items():
-        cell = data[top_model].reads[name]
-        beside = name == "truthfulqa_reader"
-        note = ax.annotate(
-            READER_NAMES[name],
-            xy=(cell.lo if beside else chance + CHANCE_CLEARANCE, top + dodge),
-            xytext=(-3, 0) if beside else (0, -4),
-            textcoords="offset points",
-            ha="right" if beside else "left",
-            va="center" if beside else "top",
-            fontsize=TEXT,
-            color=paper.ENC["secondary_text"],
-        )
-        note.set_gid(f"reader_label:{name}")
+    name = "truthfulqa_reader"
+    cell = data[top_model].reads[name]
+    note = ax.annotate(
+        READER_NAMES[name],
+        xy=(cell.lo, top + READERS[name][2]),
+        xytext=(-4, 4),
+        textcoords="offset points",
+        ha="right",
+        va="center",
+        fontsize=TEXT,
+        color=paper.ENC["secondary_text"],
+    )
+    note.set_gid(f"reader_label:{name}")
     hi = max(first.text[m].hi for m in TEXT_METHODS)
     band_note = ax.text(
         hi + BAND_NOTE_GAP,
@@ -322,6 +335,7 @@ def _panel_logprob(
 ) -> None:
     ax.set_xlim(*XLIM_C)
     chance_line(ax, chance)
+    _chance_label(ax, chance)
     _text_levels(ax, next(iter(data.values())))
     for model, y in rows.items():
         cell = data[model].reads[LOG_PROBABILITY]
@@ -357,6 +371,7 @@ def _legend(fig: Figure) -> None:
     handles: list[Any] = [
         Line2D([], [], color=paper.ENC["text"], lw=1.2),
         mark(PROBABILITY, paper.ENC["own_probability"]),
+        mark(DIRECTION, PERSONA, mfc=PERSONA, mew=0.8),
         mark(DIRECTION, ink, mfc=ink, mew=0.8),
         mark(DIRECTION, ink, mfc="white", mew=0.8),
     ]
@@ -365,6 +380,7 @@ def _legend(fig: Figure) -> None:
         "characters (lines), each with its\n"
         "95 percent interval (band)",
         "answer log-probability",
+        READER_NAMES["persona_reader"],
         "GPT-2 and Qwen3 base",
         "post-trained",
     ]
