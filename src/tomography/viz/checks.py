@@ -7,11 +7,18 @@ markers that sit on a tick label.
 """
 
 import itertools
+import re
 
+from matplotlib.artist import Artist
 from matplotlib.axes import Axes
 from matplotlib.backend_bases import RendererBase
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.collections import Collection
+from matplotlib.collections import QuadMesh
+import matplotlib.colors as mcolors
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.text import Text
 from matplotlib.transforms import Bbox
 import numpy as np
@@ -20,6 +27,10 @@ from tomography.viz import paper
 
 TOLERANCE = 0.5
 MARKER_MARGIN = 2.0
+MIN_FONT_MAIN = 6.5
+MIN_FONT_APPENDIX = 6.0
+WHITE = "#ffffff"
+MATHTEXT = re.compile(r"(?<!\\)\$.*?(?<!\\)\$", re.DOTALL)
 
 
 def draw(fig: Figure) -> RendererBase:
@@ -89,7 +100,7 @@ def _overlap(a: Bbox, b: Bbox) -> bool:
     )
 
 
-def text_problems(fig: Figure, renderer: RendererBase) -> list[str]:
+def overlap_problems(fig: Figure, renderer: RendererBase) -> list[str]:
     """Finds overlapping text and text outside the figure.
 
     Args:
@@ -156,4 +167,150 @@ def problems(fig: Figure) -> list[str]:
         Messages for all faults; empty when the figure is clean.
     """
     renderer = draw(fig)
-    return [*text_problems(fig, renderer), *marker_problems(fig, renderer)]
+    return [*overlap_problems(fig, renderer), *marker_problems(fig, renderer)]
+
+
+def _visible_texts(fig: Figure) -> list[Text]:
+    """Lists the drawn, non-empty text artists of a figure once each."""
+    draw(fig)
+    hidden = {id(t) for ax in fig.axes for t in _unused_tick_labels(ax)}
+    unique = {id(t): t for t in fig.findobj(Text) if id(t) not in hidden}
+    return [t for t in unique.values() if t.get_text() and t.get_visible()]
+
+
+def _allowed_colours() -> set[str]:
+    allowed = {WHITE}
+    for value in paper.ENC.values():
+        allowed.update(
+            c.lower() for c in ([value] if isinstance(value, str) else value)
+        )
+    allowed.discard(paper.ENC["secondary_text"].lower())
+    return allowed
+
+
+def _hex(color: object) -> str | None:
+    """Writes a colour as lower-case hex, or None when it is transparent."""
+    red, green, blue, alpha = mcolors.to_rgba(color)  # type: ignore[arg-type]
+    if alpha == 0.0:
+        return None
+    return mcolors.to_hex((red, green, blue)).lower()
+
+
+def _artist_colours(artist: Artist) -> list[str]:
+    """Reads the face, edge and line colours that an artist draws."""
+    colours: list[object] = []
+    if isinstance(artist, Line2D):
+        colours.append(artist.get_color())
+        if artist.get_marker() not in ("None", None, ""):
+            colours += [
+                artist.get_markerfacecolor(),
+                artist.get_markeredgecolor(),
+            ]
+    elif isinstance(artist, QuadMesh):
+        return []
+    elif isinstance(artist, Collection):
+        colours += list(artist.get_facecolor()) + list(artist.get_edgecolor())
+    elif isinstance(artist, Patch):
+        if artist.get_fill():
+            colours.append(artist.get_facecolor())
+        if artist.get_linewidth() > 0:
+            colours.append(artist.get_edgecolor())
+    found = []
+    for colour in colours:
+        text = _hex(colour)
+        if text is not None:
+            found.append(text)
+    return found
+
+
+def palette_problems(fig: Figure) -> list[str]:
+    """Finds colours that are not in the encoding dictionary.
+
+    Faces, edges and lines may use a dictionary hue or white; text may use the
+    ink or the secondary grey; heat maps and colour bars are exempt.
+
+    Args:
+        fig: The figure.
+
+    Returns:
+        One message per colour not allowed.
+    """
+    allowed = _allowed_colours()
+    found = []
+    seen = {
+        id(tick.gridline)
+        for ax in fig.axes
+        for axis in (ax.xaxis, ax.yaxis)
+        for tick in axis.get_major_ticks() + axis.get_minor_ticks()
+    }
+    for artist in fig.findobj(
+        lambda a: isinstance(a, Line2D | Patch | Collection)
+    ):
+        if id(artist) in seen:
+            continue
+        seen.add(id(artist))
+        for shade in _artist_colours(artist):
+            if shade not in allowed:
+                found.append(f"colour {shade} on {type(artist).__name__}")
+    text_ok = {paper.INK.lower(), paper.ENC["secondary_text"].lower()}
+    for text in _visible_texts(fig):
+        tint = _hex(text.get_color())
+        if tint is not None and tint not in text_ok:
+            found.append(f"text colour {tint}: {text.get_text()!r}")
+    return found
+
+
+def font_problems(fig: Figure, appendix: bool = False) -> list[str]:
+    """Finds text smaller than the minimum size.
+
+    Args:
+        fig: The figure.
+        appendix: Whether the figure is an appendix figure (6 pt minimum
+            instead of 6.5 pt).
+
+    Returns:
+        One message per text artist below the minimum.
+    """
+    minimum = MIN_FONT_APPENDIX if appendix else MIN_FONT_MAIN
+    return [
+        f"font {float(t.get_fontsize()):g} pt below {minimum:g} pt: "
+        f"{t.get_text()!r}"
+        for t in _visible_texts(fig)
+        if float(t.get_fontsize()) < minimum
+    ]
+
+
+def text_problems(fig: Figure) -> list[str]:
+    """Finds underscores written outside mathtext.
+
+    The cm font draws an underscore as a dot accent, and an underscore in
+    reader-facing text is a raw identifier.
+
+    Args:
+        fig: The figure.
+
+    Returns:
+        One message per text artist that contains an underscore.
+    """
+    return [
+        f"underscore in text: {t.get_text()!r}"
+        for t in _visible_texts(fig)
+        if "_" in MATHTEXT.sub("", t.get_text())
+    ]
+
+
+def guard_problems(fig: Figure, appendix: bool = False) -> list[str]:
+    """Runs the palette, font and underscore guards.
+
+    Args:
+        fig: The figure.
+        appendix: Whether the figure is an appendix figure.
+
+    Returns:
+        Messages for all faults; empty when the figure passes.
+    """
+    return [
+        *palette_problems(fig),
+        *font_problems(fig, appendix),
+        *text_problems(fig),
+    ]
