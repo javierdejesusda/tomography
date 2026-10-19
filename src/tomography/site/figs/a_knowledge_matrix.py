@@ -28,6 +28,7 @@ SLACK = 0.02
 HEADER = ["panel", "fitted", "tested", "series", "value"]
 CMAP = mpl.colormaps[paper.SEQUENTIAL_CMAP]
 NUMBER_BELOW = 0.8
+TICK_WIDTH = 2.4
 NUMBER_FONT = paper.MIN_TEXT
 DETAIL = (
     "(a) AUROC of a logistic reader fitted on the question type in the row "
@@ -148,7 +149,7 @@ def build(manifest: Manifest) -> FigureOutput:
             image, ax=ax_a, location="top", shrink=0.55, aspect=30, pad=0.02
         )
         bar.set_label("AUROC")
-        bar.ax.tick_params(labelsize=paper.MIN_TEXT)
+        bar.ax.tick_params(labelsize=paper.TICK)
         ax_b.add_patch(
             Rectangle(
                 (-SLACK, -0.5),
@@ -184,10 +185,10 @@ def build(manifest: Manifest) -> FigureOutput:
         ax_b.grid(axis="y", color=paper.RANDOM_BAND, lw=0.4, zorder=0)
         for i, value in enumerate(strip["random"]):
             ax_c.plot(
-                [value - 0.03, value + 0.03],
+                [value - 0.045, value + 0.045],
                 [i, i],
                 color=paper.RANDOM_GREY,
-                lw=paper.DATA_WIDTH,
+                lw=TICK_WIDTH,
                 solid_capstyle="butt",
                 gid="random",
                 zorder=3,
@@ -231,7 +232,7 @@ def build(manifest: Manifest) -> FigureOutput:
                     [],
                     [],
                     color=paper.RANDOM_GREY,
-                    lw=paper.DATA_WIDTH,
+                    lw=TICK_WIDTH,
                     label="random direction",
                 ),
             ],
