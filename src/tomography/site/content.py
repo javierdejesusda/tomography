@@ -3,7 +3,7 @@
 Prose is written once here. A paragraph may hold references that the page
 resolves: `[[fig:finders]]` and `[[table:reading]]` become numbered links
 such as "Figure 3" and "Table 2", `[[sec:reading]]` becomes "Section 3",
-`[[cite:zou2025]]` a numbered citation, `[[fn:text]]` a footnote,
+`[[cite:zou2025representationengineeringtopdownapproach]]` a numbered citation, `[[fn:text]]` a footnote,
 `[[num:fig:finders.random_max]]` a number a figure or table computed and
 `[[count:fig:finders.pca_sentiment]]` its per-role count. No paragraph states
 a result in its own words: every number on the page comes from a figure or
@@ -20,7 +20,7 @@ METHODOLOGY_URL = REPO_URL + "/blob/main/docs/methodology.md"
 DATA_URL = REPO_URL + "/tree/main/results"
 
 ABSTRACT = (
-    "Representation engineering [[cite:zou2025]] treats a concept such as "
+    "Representation engineering [[cite:zou2025representationengineeringtopdownapproach]] treats a concept such as "
     "honesty, morality or an emotion as a direction in the activations of a "
     "language model: the concept can be read by projecting activations on "
     "the direction, and the model can be steered by adding it back while it "
@@ -60,7 +60,7 @@ INTRODUCTION = Section(
     "introduction",
     "Introduction",
     paragraphs=(
-        "The central claim of representation engineering [[cite:zou2025]] is "
+        "The central claim of representation engineering [[cite:zou2025representationengineeringtopdownapproach]] is "
         "that a concept lives in a language model as a direction: a vector "
         "in the residual stream whose projection reads the concept and whose "
         "addition steers the text. We test it with the recipe of the paper "
@@ -105,14 +105,14 @@ METHOD = Section(
             "Concepts and data",
             paragraphs=(
                 "Sentiment is read on phrases of the Stanford Sentiment "
-                "Treebank [[cite:socher2013]], and utility and morality on "
-                "the ETHICS dataset [[cite:hendrycks2021]]. Truth is read on "
+                "Treebank [[cite:socher2013recursive]], and utility and morality on "
+                "the ETHICS dataset [[cite:hendrycks2021aligning]]. Truth is read on "
                 "true and false statements, honesty on prompts with persona "
                 "wording, and knowledge on questions that the model can or "
-                "cannot answer, some of them from PopQA [[cite:mallen2023]]. "
+                "cannot answer, some of them from PopQA [[cite:mallen2023when]]. "
                 "Fitting a direction on activations to read a concept is "
                 "probing; an unsupervised variant for truth is "
-                "[[cite:burns2023]]. Adding a direction to the residual "
+                "[[cite:burns2023discovering]]. Adding a direction to the residual "
                 "stream follows activation addition "
                 "[[cite:turner2023steering]] "
                 "and inference-time intervention [[cite:li2023inference]].",
@@ -253,7 +253,7 @@ RESULTS = (
             "Some readings are matched by a classifier on the text or by a "
             "random direction. [[fig:truth]] collects them, and "
             "[[table:truth]] gives "
-            "the numbers for TruthfulQA [[cite:lin2022]] and for honesty.",
+            "the numbers for TruthfulQA [[cite:lin2022truthfulqa]] and for honesty.",
         ),
         items=("fig:truth", "table:truth"),
     ),

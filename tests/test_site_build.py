@@ -196,7 +196,11 @@ def test_the_reference_list_follows_the_order_of_first_citation(
     items = re.findall(r"<li [^>]*>(.*?)</li>", refs.group(1), flags=re.S)
     expected = [
         references.plain(references.format_line(references.find(bib, key)))
-        for key in ("zou2025", "socher2013", "hendrycks2021")
+        for key in (
+            references.PAPER_KEY,
+            "socher2013recursive",
+            "hendrycks2021aligning",
+        )
     ]
     for item, want in zip(items, expected, strict=False):
         assert want.split(".")[0] in item
@@ -208,7 +212,7 @@ def test_the_cite_block_gives_bibtex_of_the_repository_and_the_paper(
 ) -> None:
     block = html[html.index('id="cite"') :]
     assert "<pre><code>@misc{tomography," in block
-    assert "@misc{zou2025" in block
+    assert "@misc{zou2025representationengineering" in block
     assert content.REPO_URL in block
 
 

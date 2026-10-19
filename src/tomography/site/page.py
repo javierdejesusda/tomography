@@ -408,7 +408,7 @@ class Page:
 
     def cite_block(self) -> str:
         """Renders the BibTeX of this repository and of the original paper."""
-        paper = references.find(self.doc.bib, "zou2025")
+        paper = references.find(self.doc.bib, references.PAPER_KEY)
         year = self.doc.date[-4:] if self.doc.date[-4:].isdigit() else ""
         own = (
             "@misc{tomography,\n"

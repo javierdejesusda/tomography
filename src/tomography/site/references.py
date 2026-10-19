@@ -1,24 +1,30 @@
 """Reads the repository bibliography for the numbered reference list.
 
-`docs/references.bib` holds the entries; the page cites a few of them by key
-prefix, lists them in order of first citation and prints the BibTeX of the
+`docs/references.bib` holds the entries; the page cites them by exact key,
+lists the cited ones in order of first citation and prints the BibTeX of the
 paper that the repository reimplements.
 """
 
 import dataclasses
 import re
 from typing import Final
+import unicodedata
 
-CITED: Final = (
-    "zou2025",
-    "socher2013",
-    "hendrycks2021",
-    "lin2022",
-    "burns2023",
-    "turner2023steering",
-    "li2023inference",
-    "mallen2023",
-)
+PAPER_KEY: Final = "zou2025representationengineeringtopdownapproach"
+MAX_AUTHORS: Final = 10
+ACCENTS: Final = {
+    "`": chr(0x300),
+    "'": chr(0x301),
+    "^": chr(0x302),
+    "~": chr(0x303),
+    '"': chr(0x308),
+    "=": chr(0x304),
+    ".": chr(0x307),
+    "u": chr(0x306),
+    "v": chr(0x30C),
+    "c": chr(0x327),
+    "H": chr(0x30B),
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -53,6 +59,11 @@ class Entry:
         return self.fields.get("year", "")
 
 
+def _accent(match: re.Match[str]) -> str:
+    letter = match.group(2) or match.group(3)
+    return unicodedata.normalize("NFC", letter + ACCENTS[match.group(1)])
+
+
 def plain(text: str) -> str:
     """Removes BibTeX markup from a field value.
 
@@ -60,9 +71,14 @@ def plain(text: str) -> str:
         text: A field value with braces and accent commands.
 
     Returns:
-        Plain text with accents dropped and whitespace collapsed.
+        Plain text with LaTeX accents turned into Unicode letters, page
+        ranges with a hyphen and whitespace collapsed.
     """
-    text = re.sub(r"\\[`'^\"~cvu]\s*\{?([A-Za-z])\}?", r"\1", text)
+    text = re.sub(
+        r"\\([`'^\"~=.uvcH])\s*(?:\{\\?([A-Za-z])\}|\\?([A-Za-z]))",
+        _accent,
+        text,
+    )
     text = text.replace("{", "").replace("}", "").replace("\\&", "&")
     text = text.replace("--", "-")
     return re.sub(r"\s+", " ", text).strip()
@@ -118,23 +134,20 @@ def parse(text: str) -> dict[str, Entry]:
     return entries
 
 
-def find(entries: dict[str, Entry], prefix: str) -> Entry:
-    """Looks an entry up by the start of its key.
+def find(entries: dict[str, Entry], key: str) -> Entry:
+    """Looks an entry up by its exact key.
 
     Args:
         entries: Parsed entries.
-        prefix: Start of the citation key.
+        key: The citation key.
 
     Returns:
-        The first entry whose key starts with the prefix.
+        The entry.
 
     Raises:
-        KeyError: If no key starts with the prefix.
+        KeyError: If there is no entry with that key.
     """
-    for key, entry in entries.items():
-        if key.startswith(prefix):
-            return entry
-    raise KeyError(prefix)
+    return entries[key]
 
 
 def _initials(given: str) -> str:
@@ -159,15 +172,40 @@ def format_authors(entry: Entry) -> str:
         entry: The entry.
 
     Returns:
-        The first author, followed by et al. when there are several.
+        All authors when there are at most ten, otherwise the first ten
+        followed by et al.
     """
     names = [
         n for n in re.split(r"\s+and\s+", entry.fields.get("author", "")) if n
     ]
-    if not names:
+    cut = len(names) > MAX_AUTHORS
+    people = [_author(n) for n in names[:MAX_AUTHORS]]
+    if not people:
         return ""
-    first = _author(names[0])
-    return f"{first} et al." if len(names) > 1 else first
+    if cut:
+        return ", ".join(people) + " et al."
+    if len(people) == 1:
+        return people[0]
+    return ", ".join(people[:-1]) + " and " + people[-1]
+
+
+def link(entry: Entry) -> tuple[str, str]:
+    """Names the link of an entry by its DOI or its arXiv id.
+
+    Args:
+        entry: The entry.
+
+    Returns:
+        Link text and address; the DOI is preferred, and both are empty for
+        an entry with neither.
+    """
+    doi = entry.fields.get("doi", "")
+    if doi:
+        return f"doi:{doi}", f"https://doi.org/{doi}"
+    eprint = entry.fields.get("eprint", "")
+    if eprint:
+        return f"arXiv:{eprint}", f"https://arxiv.org/abs/{eprint}"
+    return "", ""
 
 
 def format_line(entry: Entry) -> str:
@@ -177,17 +215,26 @@ def format_line(entry: Entry) -> str:
         entry: The entry.
 
     Returns:
-        Authors, year, title and venue.
+        Authors, year, title and venue with volume, number and pages.
     """
+    fields = entry.fields
     venue = plain(
-        entry.fields.get("booktitle")
-        or entry.fields.get("journal")
-        or entry.fields.get("howpublished")
+        fields.get("booktitle")
+        or fields.get("journal")
+        or fields.get("institution")
+        or fields.get("howpublished")
         or ""
     )
-    if not venue and "eprint" in entry.fields:
-        venue = f"arXiv:{entry.fields['eprint']}"
+    volume = plain(fields.get("volume", ""))
+    if volume and fields.get("number"):
+        volume += f"({plain(fields['number'])})"
+    pages = plain(fields.get("pages", ""))
+    place = " ".join(p for p in (venue, volume) if p)
+    if pages:
+        place += f", {pages}" if volume else f", pp. {pages}"
+    if not place and "eprint" in fields:
+        place = f"arXiv:{fields['eprint']}"
     parts = [f"{format_authors(entry)} ({entry.year}).", f"{entry.title}."]
-    if venue:
-        parts.append(f"{venue}.")
+    if place:
+        parts.append(f"{place}.")
     return " ".join(p for p in parts if p.strip())
