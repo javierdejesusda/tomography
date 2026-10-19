@@ -410,12 +410,10 @@ def test_the_paper_wording_is_a_diamond_and_the_rank_is_in_the_right_column(
         assert line.get_marker() == "D"
         assert line.get_xdata()[0] == pytest.approx(_paper(model)["from_paper"])
         assert line.get_markersize() > 3.0
-    ranked = [_rank(m) for m in MODELS]
     for role in ROLES:
         mine = [_rank(m) for m in MODELS if _role(m) == role]
         assert output.numbers[f"paper_rank_{role}_min"] == min(mine)
         assert output.numbers[f"paper_rank_{role}_max"] == max(mine)
-    assert ranked
 
 
 def test_the_median_tick_the_noise_band_and_the_random_tick_are_drawn(
