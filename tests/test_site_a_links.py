@@ -355,3 +355,22 @@ def test_three_panel_letters_and_no_dashes(
     assert chr(0x2014) not in text
     assert chr(0x2013) not in text
     assert "_" not in f"{output.claim} {output.detail}"
+
+
+def test_the_heat_strip_and_its_bar_use_the_glossary_sequential_map(
+    output: registry.FigureOutput,
+) -> None:
+    ax_c = _panels(output)[2]
+    for mesh in ax_c.collections:
+        assert mesh.get_cmap().name == paper.SEQUENTIAL_CMAP
+
+
+def test_the_reference_line_does_not_cross_its_label(
+    output: registry.FigureOutput,
+) -> None:
+    checks.draw(output.figure)
+    for ax in _panels(output)[:2]:
+        (label,) = [t for t in ax.texts if "expected" in t.get_text()]
+        line_x = ax.transData.transform((a_links.CHANCE, 0.0))[0]
+        box = label.get_window_extent()
+        assert box.x0 > line_x or box.x1 < line_x
