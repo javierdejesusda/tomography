@@ -684,3 +684,13 @@ def test_control_layer_counts_are_per_role(
         assert output.numbers[f"control_other_layer_{role}"] == (
             counts[role].hits
         )
+
+
+def test_an_open_state_marker_shows_the_control_bar_through_it(
+    output: registry.FigureOutput,
+) -> None:
+    ax = output.figure.axes[3]
+    for model in _models("p10b"):
+        (line,) = _by_gid(ax, f"reader-{model}")
+        if _state(model) != "above":
+            assert line.get_markerfacecolor() == "none", model

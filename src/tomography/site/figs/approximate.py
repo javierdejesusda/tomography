@@ -276,7 +276,7 @@ def _draw_reader(ax: Any, model: str, y: float, reader: "_Reader") -> str:
         marker=STATE_MARKER,
         ls="none",
         color=edge,
-        markerfacecolor=paper.INK if state == "above" else paper.WHITE,
+        markerfacecolor=paper.INK if state == "above" else "none",
         markeredgecolor=edge,
         markeredgewidth=_rows.EDGE_WIDTH,
         markersize=_rows.MARKER_SIZE,
