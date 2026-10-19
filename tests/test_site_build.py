@@ -67,11 +67,21 @@ def test_without_history_the_masthead_commit_is_empty(tmp_path: Path) -> None:
     assert build_module.results_commit(tmp_path / "results") == ("", "")
 
 
-def test_csv_files_hold_citation_keys_not_tokens() -> None:
+def test_csv_files_hold_plain_text_not_tokens(
+    site: tuple[Path, page.Document],
+) -> None:
+    view = page.Page(site[1])
     text = build_module._csv_text(
-        ["A", "B"], [["x", "[[cite:radford2019language,yang2025qwen3]]"]]
+        ["A", "B"],
+        [
+            [
+                "x",
+                "[[cite:radford2019language,yang2025qwen3]] [[table:notation]]",
+            ]
+        ],
+        view,
     )
-    assert text == "A,B\nx,radford2019language; yang2025qwen3\n"
+    assert text == "A,B\nx,radford2019language; yang2025qwen3 Table 2\n"
 
 
 def test_results_date_is_the_newest_run_start(tmp_path: Path) -> None:

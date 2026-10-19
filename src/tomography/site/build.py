@@ -94,19 +94,13 @@ def results_commit(results: Path) -> tuple[str, str]:
     return sha, f"{int(day)} {MONTHS[int(month) - 1]} {year}"
 
 
-def _plain(cell: str) -> str:
-    return re.sub(
-        r"\[\[cite:([^\]]+)\]\]",
-        lambda m: m.group(1).replace(",", "; "),
-        cell,
-    )
-
-
-def _csv_text(columns: list[str], rows: list[list[str]]) -> str:
+def _csv_text(
+    columns: list[str], rows: list[list[str]], view: page.Page
+) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(columns)
-    writer.writerows([[_plain(c) for c in row] for row in rows])
+    writer.writerows([[view.plain(c) for c in row] for row in rows])
     return buffer.getvalue()
 
 
@@ -165,7 +159,8 @@ def build(
         bib=references.parse(BIB.read_text(encoding="utf-8")),
         commit=commit,
     )
-    figure_number, table_number = page.numbers(doc)
+    view = page.Page(doc)
+    figure_number, table_number = view.figure_number, view.table_number
     (out / "figures").mkdir(parents=True, exist_ok=True)
     (out / "data").mkdir(parents=True, exist_ok=True)
     for key, fig in {**doc.figures, **doc.appendix}.items():
@@ -178,7 +173,7 @@ def build(
             )
     for key, tab in {**doc.tables, **doc.appendix_tables}.items():
         (out / "data" / f"table-{table_number[key]}.csv").write_text(
-            _csv_text(tab.output.columns, tab.output.rows),
+            _csv_text(tab.output.columns, tab.output.rows, view),
             encoding="utf-8",
             newline="\n",
         )

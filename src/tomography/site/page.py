@@ -289,6 +289,29 @@ class Page:
         out.append(_e(raw[last:]))
         return "".join(out)
 
+    def plain(self, raw: str) -> str:
+        """Resolves the references of a cell to plain text for a data file.
+
+        Args:
+            raw: The cell text with its `[[...]]` tokens.
+
+        Returns:
+            The text with citation keys, numbers and labels written out and
+            no markup; footnotes are dropped.
+        """
+        out, last = [], 0
+        for match in TOKEN.finditer(raw):
+            out.append(raw[last : match.start()])
+            name = match.group(1)
+            if name.startswith("cite:"):
+                out.append(name[5:].replace(",", "; "))
+            elif not name.startswith("fn:"):
+                markup = self.reference(name)
+                out.append(html.unescape(re.sub(r"<[^>]+>", "", markup)))
+            last = match.end()
+        out.append(raw[last:])
+        return "".join(out).replace(NBSP, " ")
+
     def paragraph(self, raw: str) -> str:
         """Renders one paragraph."""
         return f"<p>{self.text(raw)}</p>"
@@ -507,7 +530,7 @@ def numbers(doc: Document) -> tuple[dict[str, str], dict[str, str]]:
     """Assigns the printed numbers of the figures and tables.
 
     Main items are numbered in order of appearance in the text, appendix items
-    A1, A2 and so on in registry order.
+    A1, A2 and so on in the order the appendix places them.
 
     Args:
         doc: The built figures and tables.

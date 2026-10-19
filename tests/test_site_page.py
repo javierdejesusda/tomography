@@ -520,3 +520,17 @@ def test_numeric_cells_wrap_through_their_break_points_only() -> None:
     doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
     cell = f'<td class="r">1{NBSP}of{NBSP}3</td>'
     assert cell in page.Page(doc).table("checkpoints")
+
+
+def test_plain_text_resolves_every_token_type_without_markup() -> None:
+    doc = _doc(
+        {"method": _figure({"n": 3.0})},
+        {"checkpoints": _table()},
+        bib=references.parse(BIB.read_text("utf-8")),
+    )
+    view = page.Page(doc)
+    cell = (
+        "[[table:checkpoints]] and [[fig:method]], "
+        "[[num:fig:method.n]] [[cite:radford2019language]][[fn:note]]"
+    )
+    assert view.plain(cell) == "Table 1 and Figure 1, 3 radford2019language"
