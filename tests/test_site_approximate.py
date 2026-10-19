@@ -578,15 +578,50 @@ def test_panel_b_words_classifier_is_a_line_and_a_top_whisker_not_a_band(
     assert {"words", "chance"} <= names
 
 
-def test_panel_b_names_the_controls_that_sit_at_the_ceiling(
+def test_panel_b_draws_every_control_above_its_marker(
     output: registry.FigureOutput,
 ) -> None:
     ax = output.figure.axes[3]
-    ceiling = [
-        m for m in _models("p10b") if _cell(m, "random")["auroc"] >= 0.9995
-    ]
-    labels = [t for t in ax.texts if t.get_text() == "control at 1.000"]
-    assert len(labels) == len(ceiling)
+    for model in _models("p10b"):
+        (marker,) = _by_gid(ax, f"reader-{model}")
+        (bar,) = [p for p in ax.patches if p.get_gid() == f"control-{model}"]
+        (tick,) = _by_gid(ax, f"control-tick-{model}")
+        assert bar.get_zorder() > marker.get_zorder(), model
+        assert tick.get_zorder() > marker.get_zorder(), model
+
+
+def test_panel_b_control_tick_stands_out_of_the_marker(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    checks.draw(fig)
+    ax = fig.axes[3]
+    radius = _rows_marker_radius(fig)
+    for model in _models("p10b"):
+        (tick,) = _by_gid(ax, f"control-tick-{model}")
+        box = tick.get_window_extent()
+        assert box.height / 2 > radius, model
+
+
+def _rows_marker_radius(fig: Any) -> float:
+    from tomography.site.figs import _rows
+
+    return _rows.MARKER_SIZE / 2 * fig.dpi / 72
+
+
+def test_panel_b_has_no_ceiling_annotation_and_a_clear_words_label(
+    output: registry.FigureOutput,
+) -> None:
+    fig = output.figure
+    checks.draw(fig)
+    ax = fig.axes[3]
+    assert not [t for t in ax.texts if "control at" in t.get_text()]
+    (label,) = [t for t in ax.texts if t.get_text() == "words"]
+    box = label.get_window_extent()
+    (whisker,) = _by_gid(ax, "words-whisker")
+    wbox = whisker.get_window_extent()
+    apart = box.y0 - wbox.y1 >= 2 or wbox.y0 - box.y1 >= 2
+    assert apart or box.x1 + 2 <= wbox.x0 or wbox.x1 + 2 <= box.x0
 
 
 def test_panel_c_states_no_range_over_all_roles(
