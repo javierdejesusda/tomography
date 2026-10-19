@@ -47,8 +47,9 @@ DETAIL = (
     "directions lies above zero. The test uses each of the 3 random "
     "directions, while the plot shows only their mean, so a panel can look "
     "closer to the grey band than its test is; with 3 random directions a "
-    "direction passes by chance with probability at most 1/4. The encoding "
-    "is that of [[fig:knowledge_steering]]."
+    "direction passes by chance with probability at most 1/4. Open markers "
+    "and dashed lines are post-trained checkpoints; the main view of these "
+    "runs is [[fig:knowledge_steering]]."
 )
 
 
