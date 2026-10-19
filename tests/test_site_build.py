@@ -300,3 +300,11 @@ def test_command_line_build_writes_the_site(
     code = cli.main(["build", "--results", "r", "--out", str(tmp_path)])
     assert code == 0
     assert calls == [(Path("r"), tmp_path)]
+
+
+def test_phone_layout_tightens_tables_so_the_caption_is_not_clipped() -> None:
+    css = (STATIC / "site.css").read_text("utf-8")
+    phone = css[css.index("@media (max-width: 600px)") : css.index("@media print")]
+    assert "padding: 0.18em 0.35em" in phone
+    assert "font-size: 0.72em" in phone
+    assert "padding: 1.4rem 16px 2rem" in phone

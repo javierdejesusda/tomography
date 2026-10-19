@@ -322,7 +322,12 @@ footer.colophon {
   }
 
   table {
-    font-size: 0.8em;
+    font-size: 0.72em;
+  }
+
+  th,
+  td {
+    padding: 0.18em 0.35em;
   }
 }
 
