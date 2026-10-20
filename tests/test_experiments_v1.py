@@ -41,10 +41,12 @@ from tomography.experiments.v1_knowledge_views import prepare
 from tomography.experiments.v1_knowledge_views import published_views
 from tomography.experiments.v1_knowledge_views import refit_methods
 from tomography.experiments.v1_knowledge_views import refit_shuffled
+from tomography.experiments.v1_knowledge_views import residual_axis
 from tomography.experiments.v1_knowledge_views import run
 from tomography.experiments.v1_knowledge_views import run_plan
 from tomography.experiments.v1_knowledge_views import select_items
 from tomography.experiments.v1_knowledge_views import shuffled_draw
+from tomography.experiments.v1_knowledge_views import supervised_views
 from tomography.experiments.v1_knowledge_views import train_draws
 from tomography.experiments.v1_knowledge_views import view_layers
 from tomography.export import ExportError
@@ -1879,6 +1881,11 @@ def test_execute_writes_the_pca_views_of_each_panel(
         "view_layers",
         *(f"coordinates_{panel}" for panel in sidecar["panels"]),
         *(f"ratios_{panel}" for panel in sidecar["panels"]),
+        *(
+            f"supervised_{name}"
+            for entry in sidecar["panels"].values()
+            for name in entry["types"]
+        ),
     }
 
 
@@ -1906,3 +1913,128 @@ def test_displayed_uids_are_those_the_published_views_show(
     views = published_views(read.committed, read.acts, read.pools, cap=3)
 
     assert displayed_uids(read.pools, cap=3) == views.uids
+
+
+def _orthogonal_columns(n: int, k: int, seed: int) -> np.ndarray:
+    """Centered columns that are orthonormal, so every variance is planted."""
+    rng = np.random.default_rng(seed)
+    centered = rng.standard_normal((n, k))
+    centered -= centered.mean(axis=0)
+    q, _ = np.linalg.qr(centered)
+    return q
+
+
+def test_residual_axis_is_the_top_component_once_the_direction_is_removed() -> (
+    None
+):
+    q = _orthogonal_columns(20, 3, seed=0)
+    h = np.zeros((20, 5))
+    h[:, 0] = 10.0 * q[:, 0]
+    h[:, 1] = 3.0 * q[:, 1]
+    h[:, 2] = 1.0 * q[:, 2]
+    direction = np.eye(5)[0]
+
+    y = residual_axis(h, direction)
+
+    assert y.dtype == np.float32
+    np.testing.assert_allclose(y, 3.0 * q[:, 1], atol=1e-5)
+
+
+def test_residual_axis_does_not_see_the_component_along_the_direction() -> None:
+    rng = np.random.default_rng(1)
+    h = rng.standard_normal((30, 6))
+    direction = rng.standard_normal(6)
+    shifted = h + np.outer(rng.standard_normal(30) * 50.0, direction)
+
+    np.testing.assert_allclose(
+        residual_axis(shifted, direction),
+        residual_axis(h, direction),
+        atol=1e-4,
+    )
+    np.testing.assert_allclose(
+        residual_axis(h, 7.0 * direction),
+        residual_axis(h, direction),
+        atol=1e-5,
+    )
+
+
+def _shown_contrasts(read: Read) -> dict[str, tuple[str, ...]]:
+    return panel_contrasts(read.pools)
+
+
+def test_supervised_views_set_the_published_projection_against_the_rest(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    committed = read.committed
+    panels = _two_panels(read)
+    shown = _shown_contrasts(read)
+    layers = view_layers(committed, tiny_arch.n_layers)
+
+    arrays = supervised_views(committed, read.acts, layers, panels, shown)
+
+    assert set(arrays) == {
+        f"supervised_{name}" for names in shown.values() for name in names
+    }
+    index = {uid: row for row, uid in enumerate(read.acts.uids)}
+    for panel, names in shown.items():
+        rows = [index[uid] for uid in panels[panel]]
+        for name in names:
+            t = list(committed.types).index(name)
+            view = arrays[f"supervised_{name}"]
+            assert view.shape == (3, len(rows), 2)
+            assert view.dtype == np.float32
+            for v, layer in enumerate(layers):
+                k = committed.layers.index(layer)
+                reader = RepReader.from_arrays(
+                    committed.config.methods[0],
+                    [layer],
+                    committed.directions[t, [k]],
+                    committed.means[t, [k]],
+                    committed.signs[t, [k]],
+                )
+                h = read.acts.data[k][rows]
+                np.testing.assert_array_equal(
+                    view[v, :, 0], reader.score(h[None])[0]
+                )
+                np.testing.assert_array_equal(
+                    view[v, :, 1], residual_axis(h, reader.directions[0])
+                )
+
+
+def test_supervised_x_is_the_projection_the_run_publishes(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    committed = read.committed
+    panels = _two_panels(read)
+    shown = _shown_contrasts(read)
+    layers = view_layers(committed, tiny_arch.n_layers)
+    arrays = supervised_views(committed, read.acts, layers, panels, shown)
+    own = displayed_uids(read.pools, cap=4)
+    published = published_views(committed, read.acts, read.pools, cap=4)
+
+    for panel, names in shown.items():
+        for name in names:
+            uids = [*own[name]["positive"], *own[name]["negative"]]
+            places = [panels[panel].index(uid) for uid in uids]
+            chosen = arrays[f"supervised_{name}"][1, places, 0]
+            np.testing.assert_allclose(
+                chosen, published.projections[f"projection_{name}"], rtol=1e-5
+            )
+
+
+def test_execute_writes_the_supervised_view_of_each_shown_contrast(
+    default_run: RunDir,
+) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+
+    arrays = default_run.read_arrays("pca2d")
+
+    for entry in sidecar["panels"].values():
+        for name in entry["types"]:
+            view = arrays[f"supervised_{name}"]
+            assert view.shape == (3, len(entry["uids"]), 2)
+            assert view.dtype == np.float32
+    assert "supervised_obscure_real_pop" not in arrays

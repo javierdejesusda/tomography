@@ -804,6 +804,91 @@ def pca_views(
     return arrays
 
 
+def residual_axis(
+    h: NDArray[Any], direction: NDArray[Any]
+) -> NDArray[np.float32]:
+    """Scores rows on their top principal component off a direction.
+
+    The rows are centered, the part of each along `direction` is taken
+    away, and the rows that are left are projected on their leading
+    component. What a reader finds along `direction` is therefore not in the
+    score, and the score cannot be explained by it.
+
+    Args:
+        h: Activations of shape (n, d).
+        direction: A vector of shape (d,), not zero; its scale is ignored.
+
+    Returns:
+        The coordinate of each row on the leading component of the rest,
+        shape (n,), signed as `tomography.analysis.pca_coordinates` does.
+
+    Raises:
+        ValueError: If nothing but the direction varies across the rows.
+    """
+    rows = np.asarray(h, dtype=np.float64)
+    rows = rows - rows.mean(axis=0)
+    unit = np.asarray(direction, dtype=np.float64)
+    unit = unit / np.linalg.norm(unit)
+    rows -= np.outer(rows @ unit, unit)
+    coordinates, _ = pca_coordinates(rows[None])
+    return coordinates[0, :, 0]
+
+
+def supervised_views(
+    reading: CommittedReading,
+    acts: ItemActivations,
+    layers: Sequence[int],
+    panels: Mapping[str, Sequence[str]],
+    contrasts: Mapping[str, Sequence[str]],
+) -> dict[str, NDArray[np.float32]]:
+    """Sets the published reader of each contrast against the rest.
+
+    For every contrast a panel shows, the x axis is the score of the items
+    of the panel on the published reader of the contrast, the y axis the
+    leading component of the same items once the direction of that reader
+    is taken out (see `residual_axis`). All the items of the panel are
+    placed, also those that belong to other contrasts of it.
+
+    Args:
+        reading: The committed P9b run, which holds the published readers.
+        acts: The activations of at least the items of the panels.
+        layers: The layers to draw, see `view_layers`.
+        panels: The uids each panel shows, see `panel_union`.
+        contrasts: The contrasts each panel shows, see `panel_contrasts`.
+
+    Returns:
+        For each shown contrast, `supervised_<contrast>` of shape (V, n, 2)
+        float32 with x then y, in the order of the uids of its panel.
+
+    Raises:
+        ValueError: If a panel item has no activations, or the items of a
+            panel vary along the direction alone.
+    """
+    ks = [acts.layers.index(layer) for layer in layers]
+    reader_ks = [reading.layers.index(layer) for layer in layers]
+    arrays: dict[str, NDArray[np.float32]] = {}
+    for panel, names in contrasts.items():
+        h = acts.data[np.ix_(ks, _rows(acts, panels[panel]))]
+        for name in names:
+            t = reading.types.index(name)
+            reader = RepReader.from_arrays(
+                reading.config.methods[0],
+                layers,
+                reading.directions[t, reader_ks],
+                reading.means[t, reader_ks],
+                reading.signs[t, reader_ks],
+            )
+            x = reader.score(h)
+            y = np.stack(
+                [
+                    residual_axis(h[v], reader.directions[v])
+                    for v in range(len(ks))
+                ]
+            )
+            arrays[f"supervised_{name}"] = np.stack([x, y], axis=-1)
+    return arrays
+
+
 @dataclass(frozen=True, eq=False)
 class Plan:
     """What a run needs before it touches the model.
@@ -883,13 +968,14 @@ def run_plan(
     displayed items of each side (at most `MAX_DISPLAYED`, by ascending
     SHA-256 of the uid; no question text) and, for each panel of the figures,
     its contrasts and the uids of the items it shows (see `panel_union`).
-    Writes `pca2d.npz`: the 2D views of each panel (see `pca_views`). Writes
-    `summary`: the layer, the number of items extracted, the dtype of this run
-    (`extraction_dtype`, that of the loaded model) and the one the P9b run was
-    extracted in (`reading_run_dtype`, the registry default of the model,
-    since that run loaded it with no dtype; None for a model outside the
-    registry), the layers and panels of the views, the comparison with the
-    committed AUROC
+    Writes `pca2d.npz`: the 2D views of each panel (see `pca_views`) and
+    the supervised view of each shown contrast (see `supervised_views`).
+    Writes `summary`: the layer, the number of items extracted, the dtype of
+    this run (`extraction_dtype`, that of the loaded model) and the one the
+    P9b run was extracted in (`reading_run_dtype`, the registry default of
+    the model, since that run loaded it with no dtype; None for a model
+    outside the registry), the layers and panels of the views, the
+    comparison with the committed AUROC
     (`reproduction`, see `compare_auroc`) and with the committed surface
     controls (`surface`, see `compare_surface`). A difference is reported,
     never raised.
@@ -927,12 +1013,16 @@ def run_plan(
         for panel, shown in panel_contrasts(pools).items()
     }
     layers = view_layers(reading, loaded.n_layers)
+    panel_uids = {name: panel["uids"] for name, panel in panels.items()}
     run_dir.write_arrays(
         "pca2d",
-        **pca_views(
+        **pca_views(acts, layers, panel_uids),
+        **supervised_views(
+            reading,
             acts,
             layers,
-            {name: panel["uids"] for name, panel in panels.items()},
+            panel_uids,
+            {name: panel["types"] for name, panel in panels.items()},
         ),
     )
     run_dir.write_arrays(
