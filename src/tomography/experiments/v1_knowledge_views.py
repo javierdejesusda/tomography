@@ -73,6 +73,7 @@ READING_FILES = (
 TOLERANCE = 0.02
 SURFACE_TOLERANCE = 1e-9
 MAX_DISPLAYED = 300
+REST_ENERGY = 1e-12
 SHOWN_ENTITY = ("obscure_real", "fictional_generated")
 COUNT_COLUMNS = (
     "n_positive_train",
@@ -834,13 +835,21 @@ def residual_axis(
         shape (n,), signed as `tomography.analysis.pca_coordinates` does.
 
     Raises:
-        ValueError: If nothing but the direction varies across the rows.
+        ValueError: If `direction` is zero, or nothing but the direction
+            varies across the rows: what is left of them holds less than
+            `REST_ENERGY` of their centered energy.
     """
     rows = np.asarray(h, dtype=np.float64)
     rows = rows - rows.mean(axis=0)
     unit = np.asarray(direction, dtype=np.float64)
-    unit = unit / np.linalg.norm(unit)
+    norm = np.linalg.norm(unit)
+    if norm == 0.0:
+        raise ValueError("the direction is zero")
+    unit = unit / norm
+    centered = float(np.sum(rows**2))
     rows -= np.outer(rows @ unit, unit)
+    if float(np.sum(rows**2)) <= REST_ENERGY * centered:
+        raise ValueError("the rows vary along the direction alone")
     coordinates, _ = pca_coordinates(rows[None])
     return coordinates[0, :, 0]
 

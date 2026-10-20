@@ -1958,6 +1958,25 @@ def test_residual_axis_does_not_see_the_component_along_the_direction() -> None:
     )
 
 
+def test_residual_axis_refuses_rows_that_vary_along_the_direction_alone() -> (
+    None
+):
+    rng = np.random.default_rng(2)
+    t = rng.standard_normal(12)
+    direction = rng.standard_normal(6)
+    rows = np.outer(t, direction) + 5.0
+
+    with pytest.raises(ValueError, match="direction alone"):
+        residual_axis(rows, direction)
+
+
+def test_residual_axis_refuses_a_zero_direction() -> None:
+    rows = np.random.default_rng(3).standard_normal((10, 4))
+
+    with pytest.raises(ValueError, match="zero"):
+        residual_axis(rows, np.zeros(4))
+
+
 def _shown_contrasts(read: Read) -> dict[str, tuple[str, ...]]:
     return panel_contrasts(read.pools)
 
