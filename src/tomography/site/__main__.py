@@ -1,4 +1,8 @@
-"""Command line entry: `python -m tomography.site build --out _site`."""
+"""Command line entry.
+
+`python -m tomography.site build --out _site` builds the site and
+`python -m tomography.site pdf --site _site` prints it to a PDF.
+"""
 
 import argparse
 from collections.abc import Sequence
@@ -9,7 +13,7 @@ from tomography.site import pdf
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Runs the site builder.
+    """Runs the site builder or prints the built site to a PDF.
 
     Args:
         argv: Arguments; defaults to `sys.argv[1:]`.

@@ -165,7 +165,7 @@ class Page:
         """Numbers the items of a document.
 
         Args:
-            doc: The built figures, tables, date and bibliography.
+            doc: The built figures, tables, year and bibliography.
         """
         self.doc = doc
         self.sections: dict[str, str] = {}
