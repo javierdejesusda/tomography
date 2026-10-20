@@ -40,7 +40,6 @@ WORDS_OFFSET_PT = 6.0
 BAR_HALF = 0.17
 TICK_HALF = 0.36
 ARROW = 0.14
-TICK = (0.075, 0.035)
 POSITION_LIMITS = (-0.5, 1.5)
 PANEL_A = (
     ("range_items", "range\nitems"),
