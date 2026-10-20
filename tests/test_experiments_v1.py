@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 import torch
 
+from tomography.analysis import pca_coordinates
 from tomography.cli import load_experiment
 from tomography.experiments import p9b_reading
 from tomography.experiments.base import RunDir
@@ -29,10 +30,12 @@ from tomography.experiments.v1_knowledge_views import check_reading
 from tomography.experiments.v1_knowledge_views import compare_auroc
 from tomography.experiments.v1_knowledge_views import compare_surface
 from tomography.experiments.v1_knowledge_views import displayed_items
+from tomography.experiments.v1_knowledge_views import displayed_uids
 from tomography.experiments.v1_knowledge_views import execute
 from tomography.experiments.v1_knowledge_views import load_reading
 from tomography.experiments.v1_knowledge_views import panel_contrasts
 from tomography.experiments.v1_knowledge_views import panel_union
+from tomography.experiments.v1_knowledge_views import pca_views
 from tomography.experiments.v1_knowledge_views import plot
 from tomography.experiments.v1_knowledge_views import prepare
 from tomography.experiments.v1_knowledge_views import published_views
@@ -43,6 +46,7 @@ from tomography.experiments.v1_knowledge_views import run_plan
 from tomography.experiments.v1_knowledge_views import select_items
 from tomography.experiments.v1_knowledge_views import shuffled_draw
 from tomography.experiments.v1_knowledge_views import train_draws
+from tomography.experiments.v1_knowledge_views import view_layers
 from tomography.export import ExportError
 from tomography.export import export_runs
 from tomography.export import is_exported
@@ -1155,6 +1159,7 @@ def test_execute_writes_the_files_of_a_run(default_run: RunDir) -> None:
     assert names == [
         "config.json",
         "meta.json",
+        "pca2d.npz",
         "projections.json",
         "projections.npz",
         "summary.json",
@@ -1210,6 +1215,7 @@ def test_the_summary_records_the_run(
         "n_items",
         "extraction_dtype",
         "reading_run_dtype",
+        "views",
         "reproduction",
         "surface",
         "surface_equal",
@@ -1627,7 +1633,12 @@ def fixed_machine(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_every_file_of_a_run_passes_the_export(
     default_run: RunDir, tmp_path: Path
 ) -> None:
-    for name in ("projections.npz", "projections.json", "summary.json"):
+    for name in (
+        "projections.npz",
+        "projections.json",
+        "pca2d.npz",
+        "summary.json",
+    ):
         assert is_exported(name), name
     source = _finished_copy(default_run, tmp_path)
 
@@ -1641,6 +1652,7 @@ def test_every_file_of_a_run_passes_the_export(
     assert copied == [
         "config.json",
         "meta.json",
+        "pca2d.npz",
         "projections.json",
         "projections.npz",
         "summary.json",
@@ -1759,3 +1771,138 @@ def test_the_sidecar_lists_the_panels_and_the_items_they_show(
     for panel in panels.values():
         assert panel["uids"] == panel_union(panel["types"], sidecar["uids"])
         assert len(set(panel["uids"])) == len(panel["uids"])
+
+
+def test_the_views_are_drawn_at_layer_one_the_chosen_layer_and_the_last(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+
+    assert view_layers(committed, tiny_arch.n_layers) == (
+        1,
+        committed.layer,
+        tiny_arch.n_layers,
+    )
+    early = dataclasses.replace(committed, layer=1)
+    assert view_layers(early, tiny_arch.n_layers) == (1, 1, tiny_arch.n_layers)
+
+
+def _two_panels(read: Read) -> dict[str, list[str]]:
+    shown = displayed_uids(read.pools, cap=4)
+    return {
+        panel: panel_union(types, shown)
+        for panel, types in panel_contrasts(read.pools).items()
+    }
+
+
+def test_pca_views_fit_each_panel_on_its_own_items(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    panels = _two_panels(read)
+    layers = view_layers(read.committed, tiny_arch.n_layers)
+
+    arrays = pca_views(read.acts, layers, panels)
+
+    assert set(arrays) == {
+        "view_layers",
+        *(f"coordinates_{panel}" for panel in panels),
+        *(f"ratios_{panel}" for panel in panels),
+    }
+    assert arrays["view_layers"].tolist() == list(layers)
+    assert arrays["view_layers"].dtype == np.int64
+    for panel, uids in panels.items():
+        coordinates = arrays[f"coordinates_{panel}"]
+        assert coordinates.shape == (3, len(uids), 2)
+        assert coordinates.dtype == np.float32
+        assert arrays[f"ratios_{panel}"].shape == (3, 2)
+        index = {uid: row for row, uid in enumerate(read.acts.uids)}
+        rows = [index[uid] for uid in uids]
+        ks = [read.acts.layers.index(layer) for layer in layers]
+        want, ratios = pca_coordinates(read.acts.data[np.ix_(ks, rows)])
+        np.testing.assert_array_equal(coordinates, want)
+        np.testing.assert_array_equal(arrays[f"ratios_{panel}"], ratios)
+
+
+def test_pca_views_ignore_the_items_a_panel_does_not_show(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    panels = _two_panels(read)
+    layers = view_layers(read.committed, tiny_arch.n_layers)
+    shown = {uid for uids in panels.values() for uid in uids}
+    hidden = next(
+        row for row, uid in enumerate(read.acts.uids) if uid not in shown
+    )
+    data = read.acts.data.copy()
+    data[:, hidden] += 100.0
+    moved = ItemActivations(read.acts.uids, read.acts.layers, data)
+
+    before = pca_views(read.acts, layers, panels)
+    after = pca_views(moved, layers, panels)
+
+    for key in before:
+        np.testing.assert_array_equal(before[key], after[key], err_msg=key)
+
+
+def test_pca_views_refuse_an_item_without_activations(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    layers = view_layers(read.committed, tiny_arch.n_layers)
+
+    with pytest.raises(ValueError, match="no activations for 'ghost:1'"):
+        pca_views(read.acts, layers, {"entity": ["ghost:1"]})
+
+
+def test_execute_writes_the_pca_views_of_each_panel(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    default_run: RunDir,
+) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+    committed = load_reading(inputs.reading.path, model="tiny")
+
+    arrays = default_run.read_arrays("pca2d")
+
+    assert arrays["view_layers"].tolist() == [
+        1,
+        committed.layer,
+        tiny_arch.n_layers,
+    ]
+    for panel, entry in sidecar["panels"].items():
+        n = len(entry["uids"])
+        assert arrays[f"coordinates_{panel}"].shape == (3, n, 2)
+        assert arrays[f"ratios_{panel}"].shape == (3, 2)
+    assert set(arrays) == {
+        "view_layers",
+        *(f"coordinates_{panel}" for panel in sidecar["panels"]),
+        *(f"ratios_{panel}" for panel in sidecar["panels"]),
+    }
+
+
+def test_the_summary_names_the_views_and_the_items_they_show(
+    tiny_arch: LoadedModel, inputs: Inputs, default_run: RunDir
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+
+    views = _summary(default_run)["views"]
+
+    assert views["layers"] == [1, committed.layer, tiny_arch.n_layers]
+    assert views["panels"] == {
+        panel: {"types": entry["types"], "n_items": len(entry["uids"])}
+        for panel, entry in sidecar["panels"].items()
+    }
+
+
+def test_displayed_uids_are_those_the_published_views_show(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+
+    views = published_views(read.committed, read.acts, read.pools, cap=3)
+
+    assert displayed_uids(read.pools, cap=3) == views.uids

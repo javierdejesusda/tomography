@@ -23,6 +23,7 @@ import numpy as np
 from numpy.typing import NDArray
 import torch
 
+from tomography.analysis import pca_coordinates
 from tomography.experiments import p9b_reading
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
@@ -514,6 +515,36 @@ def displayed_items(
     )[:cap]
 
 
+def displayed_uids(
+    pools: Mapping[str, TypePool], *, cap: int = MAX_DISPLAYED
+) -> dict[str, dict[str, list[str]]]:
+    """Names the items a figure draws for each side of each contrast.
+
+    Only the test items are drawn, because the readers were fitted on the
+    others.
+
+    Args:
+        pools: The usable contrasts.
+        cap: The most items per side of a contrast.
+
+    Returns:
+        For each contrast, the uids of the `positive` and the `negative`
+        side, see `displayed_items`.
+    """
+    shown: dict[str, dict[str, list[str]]] = {}
+    for name, pool in pools.items():
+        positive, negative = pool.split("test")
+        shown[name] = {
+            "positive": [
+                i.example.uid for i in displayed_items(positive, cap=cap)
+            ],
+            "negative": [
+                i.example.uid for i in displayed_items(negative, cap=cap)
+            ],
+        }
+    return shown
+
+
 def panel_contrasts(names: Iterable[str]) -> dict[str, tuple[str, ...]]:
     """Groups the contrasts a figure shows into its panels.
 
@@ -695,28 +726,82 @@ def published_views(
     k = reading.layers.index(reading.layer)
     aurocs = np.zeros((len(pools), len(reading.layers)))
     projections: dict[str, NDArray[np.float32]] = {}
-    uids: dict[str, dict[str, list[str]]] = {}
+    uids = displayed_uids(pools, cap=cap)
     for t, (name, pool) in enumerate(pools.items()):
         scores, labels = type_scores(reading.readers[t], acts, pool, "test")
         aurocs[t] = auroc(scores, labels)
         positive, negative = pool.split("test")
-        shown = {
-            "positive": displayed_items(positive, cap=cap),
-            "negative": displayed_items(negative, cap=cap),
-        }
         column = {
             item.example.uid: j for j, item in enumerate([*positive, *negative])
         }
-        order = [
-            column[item.example.uid]
-            for item in (*shown["positive"], *shown["negative"])
-        ]
+        order = [column[uid] for side in uids[name].values() for uid in side]
         projections[f"projection_{name}"] = scores[k, order]
-        uids[name] = {
-            side: [item.example.uid for item in items]
-            for side, items in shown.items()
-        }
     return PublishedViews(aurocs, projections, uids)
+
+
+def view_layers(
+    reading: CommittedReading, n_layers: int
+) -> tuple[int, int, int]:
+    """Names the layers the 2D views are drawn at.
+
+    Layer 0 is left out: at the last token of the few-shot prompt it is one
+    token embedding for every question. Layer 1 shows what the model has
+    done with a question before it has read much of it.
+
+    Args:
+        reading: The committed P9b run.
+        n_layers: The number of layers of the model, L.
+
+    Returns:
+        Layer 1, the layer the P9b run chose and the last layer. They are
+        not told apart when the run chose one of the others.
+    """
+    return (1, reading.layer, n_layers)
+
+
+def _rows(acts: ItemActivations, uids: Sequence[str]) -> NDArray[np.int64]:
+    index = {uid: row for row, uid in enumerate(acts.uids)}
+    for uid in uids:
+        if uid not in index:
+            raise ValueError(f"no activations for {uid!r}")
+    return np.array([index[uid] for uid in uids], dtype=np.int64)
+
+
+def pca_views(
+    acts: ItemActivations,
+    layers: Sequence[int],
+    panels: Mapping[str, Sequence[str]],
+) -> dict[str, NDArray[Any]]:
+    """Projects the items of each panel on their two leading components.
+
+    The components are fitted at every layer on the items the panel shows
+    and on no other, so the view is what a reader of the figure could
+    compute from the points on it.
+
+    Args:
+        acts: The activations of at least the items of the panels.
+        layers: The layers to draw, see `view_layers`.
+        panels: The uids each panel shows, see `panel_union`.
+
+    Returns:
+        `view_layers` (V,), and for each panel `coordinates_<panel>` (V, n, 2)
+        float32 in the order of its uids and `ratios_<panel>` (V, 2) float64,
+        the share of the variance of the layer on each component.
+
+    Raises:
+        ValueError: If a panel item has no activations, or a layer of a
+            panel has no variance (see `tomography.analysis.pca_coordinates`).
+    """
+    ks = [acts.layers.index(layer) for layer in layers]
+    arrays: dict[str, NDArray[Any]] = {
+        "view_layers": np.asarray(layers, dtype=np.int64)
+    }
+    for panel, uids in panels.items():
+        rows = _rows(acts, uids)
+        coordinates, ratios = pca_coordinates(acts.data[np.ix_(ks, rows)])
+        arrays[f"coordinates_{panel}"] = coordinates
+        arrays[f"ratios_{panel}"] = ratios
+    return arrays
 
 
 @dataclass(frozen=True, eq=False)
@@ -798,11 +883,13 @@ def run_plan(
     displayed items of each side (at most `MAX_DISPLAYED`, by ascending
     SHA-256 of the uid; no question text) and, for each panel of the figures,
     its contrasts and the uids of the items it shows (see `panel_union`).
-    Writes `summary`: the layer, the number of items extracted, the dtype of
-    this run (`extraction_dtype`, that of the loaded model) and the one the
-    P9b run was extracted in (`reading_run_dtype`, the registry default of
-    the model, since that run loaded it with no dtype; None for a model
-    outside the registry), the comparison with the committed AUROC
+    Writes `pca2d.npz`: the 2D views of each panel (see `pca_views`). Writes
+    `summary`: the layer, the number of items extracted, the dtype of this run
+    (`extraction_dtype`, that of the loaded model) and the one the P9b run was
+    extracted in (`reading_run_dtype`, the registry default of the model,
+    since that run loaded it with no dtype; None for a model outside the
+    registry), the layers and panels of the views, the comparison with the
+    committed AUROC
     (`reproduction`, see `compare_auroc`) and with the committed surface
     controls (`surface`, see `compare_surface`). A difference is reported,
     never raised.
@@ -839,6 +926,15 @@ def run_plan(
         panel: {"types": list(shown), "uids": panel_union(shown, views.uids)}
         for panel, shown in panel_contrasts(pools).items()
     }
+    layers = view_layers(reading, loaded.n_layers)
+    run_dir.write_arrays(
+        "pca2d",
+        **pca_views(
+            acts,
+            layers,
+            {name: panel["uids"] for name, panel in panels.items()},
+        ),
+    )
     run_dir.write_arrays(
         "projections",
         layers=np.asarray(reading.layers, dtype=np.int64),
@@ -869,6 +965,16 @@ def run_plan(
             "n_items": {"train": splits["train"], "test": splits["test"]},
             "extraction_dtype": str(loaded.dtype).removeprefix("torch."),
             "reading_run_dtype": registered.dtype if registered else None,
+            "views": {
+                "layers": list(layers),
+                "panels": {
+                    name: {
+                        "types": panel["types"],
+                        "n_items": len(panel["uids"]),
+                    }
+                    for name, panel in panels.items()
+                },
+            },
             "reproduction": compare_auroc(
                 test,
                 reading.test,
