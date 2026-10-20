@@ -19,6 +19,9 @@ from pathlib import Path
 from typing import Any
 from typing import cast
 
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 import numpy as np
 from numpy.typing import NDArray
 from sklearn.decomposition import TruncatedSVD
@@ -53,6 +56,8 @@ from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import panel_of
 from tomography.reading.metrics import auroc
 from tomography.reading.reader import RepReader
+from tomography.viz import style
+from tomography.viz.geometry import POINT_SIZE
 
 READING_FILES = (
     "summary.json",
@@ -1230,14 +1235,130 @@ def run(config: Config, run_dir: RunDir) -> None:
     run_plan(config, run_dir, loaded, plan, reading)
 
 
+def _side_of(uid: str, sides: Sequence[Mapping[str, list[str]]]) -> int:
+    if any(uid in side["negative"] for side in sides):
+        return 1
+    if any(uid in side["positive"] for side in sides):
+        return 0
+    return -1
+
+
+def _scatter(ax: Axes, points: NDArray[Any], sides: NDArray[np.int64]) -> None:
+    look = {
+        -1: (style.INK_MUTED, "o", 0.4),
+        0: (style.CATEGORICAL[0], "o", 1.0),
+        1: (style.CATEGORICAL[1], "s", 1.0),
+    }
+    for code, (color, marker, alpha) in look.items():
+        chosen = points[sides == code]
+        ax.scatter(
+            chosen[:, 0],
+            chosen[:, 1],
+            s=POINT_SIZE,
+            color=color,
+            marker=marker,
+            alpha=alpha,
+            edgecolors=style.SURFACE,
+            linewidths=0.4,
+            rasterized=True,
+        )
+
+
+def panel_figure(
+    panel: str,
+    sidecar: Mapping[str, Any],
+    pca: Mapping[str, NDArray[Any]],
+    text: Mapping[str, NDArray[Any]],
+) -> Figure:
+    """Draws the views of one panel, a check of the run and not a final figure.
+
+    There is a row for each layer of the 2D views and a last row for the
+    text-only view. The first column places every item of the panel on its two
+    leading components (on the two components of the words in the last row).
+    The other columns, one for each contrast of the panel, set the published
+    reader of the contrast against the leading component of the rest; the
+    text row has none. A point has one color and shape on the positive side
+    of a contrast, another on the negative side, and is gray where the
+    contrast does not show it. In the first column an item takes the
+    negative side if any contrast puts it there.
+
+    Args:
+        panel: The panel to draw.
+        sidecar: The `projections.json` of the run.
+        pca: The arrays of `pca2d.npz`.
+        text: The arrays of `text2d.npz`.
+
+    Returns:
+        The figure.
+    """
+    entry = sidecar["panels"][panel]
+    types: list[str] = entry["types"]
+    layers: list[int] = pca["view_layers"].tolist()
+    shown = sidecar["uids"]
+    every = np.array(
+        [
+            _side_of(uid, [shown[name] for name in types])
+            for uid in entry["uids"]
+        ]
+    )
+    own = {
+        name: np.array([_side_of(uid, [shown[name]]) for uid in entry["uids"]])
+        for name in types
+    }
+    rows, columns = len(layers) + 1, 1 + len(types)
+    with style.style_context():
+        fig, axes = style.new_figure(
+            rows, columns, width=max(style.TEXT_WIDTH, 1.8 * columns)
+        )
+        for v, layer in enumerate(layers):
+            _scatter(axes[v, 0], pca[f"coordinates_{panel}"][v], every)
+            axes[v, 0].set_ylabel(f"layer {layer}")
+            for c, name in enumerate(types, start=1):
+                _scatter(axes[v, c], pca[f"supervised_{name}"][v], own[name])
+        _scatter(axes[-1, 0], text[f"coordinates_{panel}"], every)
+        axes[-1, 0].set_ylabel("words only")
+        for ax in axes[-1, 1:]:
+            ax.set_visible(False)
+        axes[0, 0].set_title("two leading components")
+        for c, name in enumerate(types, start=1):
+            axes[0, c].set_title(name)
+        keys = [
+            Line2D(
+                [], [], linestyle="", marker=marker, color=color, label=label
+            )
+            for color, marker, label in (
+                (style.CATEGORICAL[0], "o", "positive side"),
+                (style.CATEGORICAL[1], "s", "negative side"),
+                (style.INK_MUTED, "o", "not in the contrast"),
+            )
+        ]
+        fig.legend(handles=keys, loc="outside upper center", ncols=len(keys))
+    return fig
+
+
 def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
-    """Draws nothing yet: the views of a run come with its 2D outputs.
+    """Draws a check figure of the views of each panel of a run.
 
     Args:
         run_dir: A finished V1 run.
         out_dir: Folder of the figures.
 
     Returns:
-        An empty list.
+        The PNG of each panel, `views_<panel>.png`, in the order of the
+        panels.
+
+    Raises:
+        FileNotFoundError: If the run has no views.
     """
-    return []
+    sidecar = cast(dict[str, Any], run_dir.read_json("projections"))
+    pca = run_dir.read_arrays("pca2d")
+    text = run_dir.read_arrays("text2d")
+    paths: list[Path] = []
+    for panel in sidecar["panels"]:
+        paths += style.save_figure(
+            panel_figure(panel, sidecar, pca, text),
+            out_dir,
+            f"views_{panel}",
+            formats=("png",),
+        )
+    return paths

@@ -35,6 +35,7 @@ from tomography.experiments.v1_knowledge_views import displayed_uids
 from tomography.experiments.v1_knowledge_views import execute
 from tomography.experiments.v1_knowledge_views import load_reading
 from tomography.experiments.v1_knowledge_views import panel_contrasts
+from tomography.experiments.v1_knowledge_views import panel_figure
 from tomography.experiments.v1_knowledge_views import panel_union
 from tomography.experiments.v1_knowledge_views import pca_views
 from tomography.experiments.v1_knowledge_views import plot
@@ -165,13 +166,6 @@ def test_the_cli_discovers_the_experiment() -> None:
     assert experiment.config_cls is Config
     assert experiment.run is run
     assert experiment.plot is plot
-
-
-def test_plot_draws_nothing_before_the_views_exist(tmp_path: Path) -> None:
-    config = Config(labels_run="runs/p9a", reading_run="runs/p9b")
-    run_dir = RunDir.create(config, out_root=tmp_path)
-
-    assert plot(run_dir, tmp_path / "figures") == []
 
 
 def test_load_reading_returns_the_committed_numbers(
@@ -2190,3 +2184,93 @@ def test_a_text_view_that_cannot_be_fitted_fails_before_the_forward_pass(
 
     with pytest.raises(ValueError, match="no text view"):
         _execute(tiny_arch, tmp_path, inputs)
+
+
+def test_plot_needs_the_views_of_a_run(tmp_path: Path) -> None:
+    config = Config(labels_run="runs/p9a", reading_run="runs/p9b")
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(FileNotFoundError):
+        plot(run_dir, tmp_path / "figures")
+
+
+def test_plot_writes_one_check_figure_per_panel(
+    default_run: RunDir, tmp_path: Path
+) -> None:
+    paths = plot(default_run, tmp_path / "figures")
+
+    names = ["views_entity.png", "views_question.png", "views_unknown.png"]
+    assert [path.name for path in paths] == names
+    assert sorted(p.name for p in (tmp_path / "figures").iterdir()) == names
+    for path in paths:
+        assert path.read_bytes().startswith(b"\x89PNG")
+
+
+def test_plot_is_deterministic(default_run: RunDir, tmp_path: Path) -> None:
+    first = plot(default_run, tmp_path / "a")
+    second = plot(default_run, tmp_path / "b")
+
+    assert len(first) == len(second) == 3
+    for one, two in zip(first, second, strict=True):
+        assert one.read_bytes() == two.read_bytes(), one.name
+
+
+def _points(ax: Any) -> list[int]:
+    return [len(collection.get_offsets()) for collection in ax.collections]
+
+
+def test_a_panel_figure_has_a_row_per_view_layer_and_one_for_the_text(
+    default_run: RunDir,
+) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+    entry = sidecar["panels"]["question"]
+    n = len(entry["uids"])
+
+    figure = panel_figure(
+        "question",
+        sidecar,
+        default_run.read_arrays("pca2d"),
+        default_run.read_arrays("text2d"),
+    )
+
+    visible = [ax for ax in figure.axes if ax.get_visible()]
+    assert len(visible) == 3 * (1 + len(entry["types"])) + 1
+    for ax in visible:
+        assert sum(_points(ax)) == n
+
+
+def test_a_panel_figure_colours_the_items_by_their_side(
+    default_run: RunDir,
+) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+    entry = sidecar["panels"]["entity"]
+    first = entry["types"][0]
+    own = sidecar["uids"][first]
+    positive = {
+        u for name in entry["types"] for u in sidecar["uids"][name]["positive"]
+    }
+    negative = {
+        u for name in entry["types"] for u in sidecar["uids"][name]["negative"]
+    }
+
+    figure = panel_figure(
+        "entity",
+        sidecar,
+        default_run.read_arrays("pca2d"),
+        default_run.read_arrays("text2d"),
+    )
+
+    unsupervised, supervised = figure.axes[0], figure.axes[1]
+    assert _points(unsupervised) == [
+        0,
+        len(positive - negative),
+        len(negative),
+    ]
+    n = len(entry["uids"])
+    assert _points(supervised) == [
+        n - len(own["positive"]) - len(own["negative"]),
+        len(own["positive"]),
+        len(own["negative"]),
+    ]
