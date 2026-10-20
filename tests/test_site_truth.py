@@ -549,9 +549,6 @@ def test_panel_a_ticks_reach_the_upper_limit(
     assert "1.0" in labels[-1]
 
 
-MM = 72 / 25.4
-
-
 def _marks(ax: Any) -> list[Any]:
     return [
         ln
