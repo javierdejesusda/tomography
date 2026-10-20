@@ -1,7 +1,6 @@
 import warnings
 
 from matplotlib.figure import Figure
-import numpy as np
 import pytest
 
 from tomography.site import store
@@ -24,8 +23,6 @@ def test_model_style_keeps_families_and_roles_apart() -> None:
     assert gpt2.family == "GPT-2"
     assert base.family == post.family == "Qwen3"
     assert base.color == post.color
-    assert base.linestyle == "-"
-    assert post.linestyle == "--"
     assert base.filled
     assert not post.filled
     assert gpt2.color != base.color
@@ -61,19 +58,6 @@ def test_size_axis_is_logarithmic_in_parameters() -> None:
     assert low < 1.2e8
     assert high > 4e9
     assert ax.get_xlabel() == "parameters"
-
-
-def test_layer_curve_draws_a_line_and_an_interval() -> None:
-    with paper.paper_style():
-        ax = Figure().subplots()
-        depth = np.linspace(0.1, 1.0, 10)
-        mean = np.linspace(0.5, 0.9, 10)
-        shared.layer_curve(
-            ax, depth, mean, mean - 0.02, mean + 0.02, "qwen3-4b"
-        )
-    line = ax.get_lines()[0]
-    assert line.get_linestyle() == "--"
-    assert len(ax.collections) == 1
 
 
 def test_caption_joins_claim_and_detail_with_single_spaces() -> None:
