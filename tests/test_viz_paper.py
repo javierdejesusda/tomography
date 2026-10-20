@@ -384,3 +384,12 @@ def test_the_rules_state_the_constants_the_figures_use() -> None:
     assert "pentagon" in rules
     assert paper.QUESTION_SET_MARKERS["known"] == "<"
     assert "left triangle" in rules
+
+
+def test_the_dotted_line_rule_covers_zero_as_well_as_chance() -> None:
+    rule = " ".join(
+        paper.ENCODING_RULES.split("\n5. ")[1].split("\n6. ")[0].split()
+    )
+    assert "chance" in rule
+    assert "zero" in rule
+    assert "always means chance" not in rule
