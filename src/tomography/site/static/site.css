@@ -368,7 +368,7 @@ footer.colophon {
   text-align: center;
 }
 
-@media (max-width: 600px) {
+@media screen and (max-width: 600px) {
   main {
     padding: 1.4rem 16px 2rem;
   }
@@ -430,6 +430,19 @@ footer.colophon {
 
   .table {
     break-inside: auto;
+  }
+
+  .table .scroll {
+    overflow: visible;
+  }
+
+  .table.wide table {
+    font-size: 0.68em;
+  }
+
+  .table.wide th,
+  .table.wide td {
+    padding: 0.18em 0.12em;
   }
 
   thead {

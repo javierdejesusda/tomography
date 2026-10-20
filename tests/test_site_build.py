@@ -160,10 +160,30 @@ def test_captions_of_figures_and_tables_share_one_rule(css: str) -> None:
 
 def test_phones_scroll_the_figure_not_the_page(css: str) -> None:
     phone = css[
-        css.index("@media (max-width: 600px)") : css.index("@media print")
+        css.index("@media screen and (max-width: 600px)") : css.index(
+            "@media print"
+        )
     ]
     assert ".fig-scroll {\n    overflow-x: auto;" in phone
     assert "min-width: 560px" in phone
+
+
+def test_paper_never_gets_the_phone_layout(css: str) -> None:
+    assert "@media (max-width: 600px)" not in css
+    assert css.count("max-width: 600px") == 1
+
+
+def test_printed_tables_have_no_scroll_box_and_wide_ones_are_set_smaller(
+    css: str,
+) -> None:
+    printed = css[css.index("@media print") :].split("\n}\n", 1)[0]
+    assert ".table .scroll {\n    overflow: visible;" in printed
+    assert "margin-left: -" not in printed
+    assert ".table.wide table {\n    font-size: 0.68em;" in printed
+    assert (
+        ".table.wide th,\n  .table.wide td {\n    padding: 0.18em 0.12em;"
+        in printed
+    )
 
 
 def test_the_bibtex_block_wraps(css: str) -> None:
