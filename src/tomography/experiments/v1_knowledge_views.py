@@ -774,6 +774,18 @@ def view_layers(
 
 
 def _rows(acts: ItemActivations, uids: Sequence[str]) -> NDArray[np.int64]:
+    """Finds the row of each item among the activations.
+
+    Args:
+        acts: The activations.
+        uids: The items to find, in the order wanted.
+
+    Returns:
+        The row of each uid in `acts`, shape (len(uids),).
+
+    Raises:
+        ValueError: If an item has no activations.
+    """
     index = {uid: row for row, uid in enumerate(acts.uids)}
     for uid in uids:
         if uid not in index:
@@ -1263,15 +1275,40 @@ def run(config: Config, run_dir: RunDir) -> None:
     run_plan(config, run_dir, loaded, plan, reading)
 
 
-def _side_of(uid: str, sides: Sequence[Mapping[str, list[str]]]) -> int:
-    if any(uid in side["negative"] for side in sides):
-        return 1
-    if any(uid in side["positive"] for side in sides):
-        return 0
-    return -1
+def _sides_of(
+    uids: Sequence[str], sides: Sequence[Mapping[str, Sequence[str]]]
+) -> NDArray[np.int64]:
+    """Tells on which side of some contrasts each item lies.
+
+    Args:
+        uids: The items to place.
+        sides: The uids of the positive and the negative side of each
+            contrast, as the `projections.json` of a run holds them.
+
+    Returns:
+        For each item, 1 if any contrast puts it on its negative side, else
+        0 if any puts it on its positive side, else -1.
+    """
+    negative = {uid for side in sides for uid in side["negative"]}
+    positive = {uid for side in sides for uid in side["positive"]}
+    return np.array(
+        [
+            1 if uid in negative else 0 if uid in positive else -1
+            for uid in uids
+        ],
+        dtype=np.int64,
+    )
 
 
 def _scatter(ax: Axes, points: NDArray[Any], sides: NDArray[np.int64]) -> None:
+    """Draws the points of a panel in one color and shape for each side.
+
+    Args:
+        ax: The axes to draw on.
+        points: Coordinates of shape (n, 2).
+        sides: The side of each point, see `_sides_of`: 0 positive, 1
+            negative, -1 not in the contrast, drawn gray.
+    """
     look = {
         -1: (style.INK_MUTED, "o", 0.4),
         0: (style.CATEGORICAL[0], "o", 1.0),
@@ -1324,16 +1361,8 @@ def panel_figure(
     types: list[str] = entry["types"]
     layers: list[int] = pca["view_layers"].tolist()
     shown = sidecar["uids"]
-    every = np.array(
-        [
-            _side_of(uid, [shown[name] for name in types])
-            for uid in entry["uids"]
-        ]
-    )
-    own = {
-        name: np.array([_side_of(uid, [shown[name]]) for uid in entry["uids"]])
-        for name in types
-    }
+    every = _sides_of(entry["uids"], [shown[name] for name in types])
+    own = {name: _sides_of(entry["uids"], [shown[name]]) for name in types}
     rows, columns = len(layers) + 1, 1 + len(types)
     with style.style_context():
         fig, axes = style.new_figure(
