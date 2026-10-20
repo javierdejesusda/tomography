@@ -12,61 +12,63 @@ generates. This repository runs that recipe on ten checkpoints: GPT-2 small,
 medium, large and XL, and Qwen3 0.6B, 1.7B and 4B (base and post-trained).
 It is independent research code, not the authors' code.
 
-Results: [project site](https://javierdejesusda.github.io/tomography/) and
-[`docs/findings.md`](docs/findings.md).
+Results and full write-up: the
+[project site](https://javierdejesusda.github.io/tomography/), rebuilt from the
+committed results, and [`docs/findings.md`](docs/findings.md).
 
 ## Why it matters
 
-RepE claims are easy to overstate. A direction can score well because the
-text gives the answer away, or because a random direction scores well too.
-Here every reading run stores a random-direction and a shuffled-label
-control, and `docs/findings.md` reports them with the numbers. The
-TruthfulQA (R6) and known-versus-unknown (P9) readers are also compared with
-text-only baselines. Every checkpoint and data file is pinned, so a run can
-be repeated.
+RepE claims are easy to overstate. A direction can score well because the text
+gives the answer away, or because a random direction scores well too. Here
+every reading run stores a random-direction and a shuffled-label control, and
+`docs/findings.md` reports them with the numbers. The readers of sentiment,
+utility, morality, truth and honesty are compared with text-only baselines
+(word and character n-grams, TB1), as are the TruthfulQA (R6) and
+known-versus-unknown (P9) readers. Every checkpoint and data file is pinned, so
+a run can be repeated.
 
 ## Key results
 
-Each result is one run per model and checkpoint. Intervals and caveats are in
-[`docs/findings.md`](docs/findings.md).
+Each result is one run per checkpoint. Counts are per role (GPT-2, Qwen3 base,
+Qwen3 post-trained) and never pooled; "above" means that the 95 percent
+interval of the difference excludes zero. The [project
+site](https://javierdejesusda.github.io/tomography/) has the full write-up and
+[`docs/findings.md`](docs/findings.md) the tables.
 
-- **Reading scales for some concepts only.** Morality (R3) test accuracy
-  rises across the four GPT-2 models, 0.623 (small) to 0.768 (XL), with a
-  random direction at 0.52 on both. Qwen3 4B reads 0.940 (post-trained; base
-  0.917) against a random direction at 0.63 (0.60 base). Qwen3 is a different
-  model family, so this is not a continuation of the GPT-2 trend. Random is
-  the 10-seed mean at the selected layer. Sentiment and honesty transfer do
-  not order by size.
-- **TruthfulQA is not separated from text.** The reader trained on
-  TruthfulQA questions scores 0.644 to 0.741 on MC1 across nine checkpoints
-  (R6, validation-layer rule), against text-only TF-IDF classifiers on the
-  answer texts at 0.676 (word) and 0.671 (character), each with a 95 percent
-  interval about 0.14 wide. The reader's own interval does not include the
-  173 test questions, so no checkpoint is shown to read more than the wording
-  carries.
-- **The paper's PCA finder does not read on GPT-2.** In the reference cell of
-  each task `pca_diff` is not above a random direction on any GPT-2 size;
-  supervised finders such as `logistic` are. On Qwen3 it is above random only
-  on some checkpoints (P4).
-- **Readings depend on the prompt.** Across 16 prompt variants (other
-  wordings, no template, a wrong concept word), the accuracy of a sentiment
-  reader refitted on each variant spans 0.09 on GPT-2 small and 0.20 on both
-  Qwen3 0.6B checkpoints (0.18 on 1.7B post-trained, 0.14 on 1.7B base). The
-  span is the highest minus the lowest of 16 cells (P1).
-- **"Known versus unknown" is a direction, but not a better error
-  predictor.** It separates known from unknown PopQA questions better than
-  subject popularity does on most checkpoints (within relation, by 0.05 to
-  0.16), but not on every one (Qwen3 1.7B post-trained with popularity
-  matched, GPT-2 large: level), and GPT-2 small has too few known questions
-  to test. Its error prediction is below the model's own answer
-  log-probability on all models (P9b, P9c).
-- **Steered text is fluent only at small coefficients.** On the four Qwen3
-  checkpoints a relative coefficient of +-0.1 keeps perplexity at most 1.37
-  times the unsteered text and distinct-1 at 0.181 or above (rule chosen in
-  findings: at most 1.5 times, at least 0.15); GPT-2 medium is outside it at
-  1.64 and 1.54 times. At +0.3 perplexity is 3.9 to 32 times the unsteered
-  text and distinct-1 is 0.043 to 0.099, so sentiment scores of 0.74 to 0.98
-  there are scores of repetitive text (C1).
+- **The paper's PCA finder is weaker than logistic regression.** For sentiment
+  `pca_diff` is above a random direction on 0 of 4 GPT-2, 1 of 3 Qwen3 base and
+  0 of 3 post-trained checkpoints, but for utility on every Qwen3 checkpoint,
+  where matching is confounded with the concept and the data. Logistic
+  regression is above a random direction for sentiment on 4 of 4, 3 of 3 and 3
+  of 3 (P4).
+- **Utility and morality are read everywhere, truth only on Qwen3.** A logistic
+  direction is above its random direction for utility and morality on 4 of 4
+  GPT-2, 3 of 3 base and 3 of 3 post-trained checkpoints, and for truth on 0 of
+  4, 3 of 3 and 3 of 3. Morality accuracy rises across GPT-2 from 0.623 (small,
+  random 0.516) to 0.768 (XL, random 0.517); Qwen3-4B reads 0.940 against a
+  random 0.626 (post-trained) and 0.917 against 0.598 (base). Words alone (word
+  and character n-grams) score 0.520 and 0.525 on utility and 0.517 and 0.527
+  on morality. Changing the template wording moves a sentiment reader by more
+  than test-pair noise on 2 of 4, 3 of 3 and 3 of 3 (R1 to R7, P1).
+- **"Known versus unknown" is a direction, not a better error predictor.** It
+  ranks PopQA questions above popularity and the text classifiers on 0 of 3
+  GPT-2, 3 of 3 base and 2 of 3 post-trained checkpoints, but adds to the
+  model's own confidence on 0 of 3, 0 of 3 and 0 of 3 (P9b, P9c). A range
+  direction is above its random control on 0 of 4, 2 of 3 and 2 of 3 (P10b).
+- **A truth reader does not beat the words alone.** On TruthfulQA MC1 (173 test
+  questions) the reader is not above the better text classifier, 0.676 (word)
+  and 0.671 (character) with chance at 0.228, on any checkpoint: 0 of 4 GPT-2,
+  0 of 3 base and 0 of 3 post-trained intervals exclude zero (R6).
+- **Steering moves sentiment at small coefficients and breaks fluency at larger
+  ones.** At relative coefficient 0.1, steering moves judged sentiment on 4 of
+  4, 3 of 3 and 2 of 3, and keeps the fluency rule (neutral-text perplexity
+  ratio at most 1.5 and distinct-1 at least 0.15) on 3 of 4, 3 of 3 and 3 of 3
+  (C1). Utility steering at 0.3 beats every random direction on 1 of 4, 2 of 3
+  and 2 of 3, but its text keeps the fluency rule on 0 of 3 GPT-2, 1 of 3 base
+  and 0 of 3 post-trained checkpoints (GPT-2 small has no fluency measure; M1).
+- **Post-training lowers held-out sentiment reading** on 2 of 3 Qwen3 sizes,
+  with an interval below zero (P3 held-out split), and 3 of 8 other seed-paired
+  differences exclude zero (P8).
 
 ## Quickstart
 
@@ -104,8 +106,8 @@ example of an experiment is
 
 ## Experiments
 
-Every id is the argument of `tomography run`. Coverage varies: the full list of
-models per experiment, with run identities, is in
+Every id is the argument of `tomography run`. Coverage is read from the committed
+`results/` tree; the models per experiment, with run identities, are in
 [`docs/findings.md`](docs/findings.md#run-identity).
 
 | Id | Question | Models |
@@ -115,28 +117,28 @@ models per experiment, with run identities, is in
 | `r3` | Does one read morality (ETHICS commonsense)? | all 10 |
 | `r4` | Does one read six emotions, one against the rest? | all 10 |
 | `r5` | Does an honesty direction from personas transfer to plain statements? (exploratory) | all 10 |
-| `r6` | Does a reader beat text-only baselines on TruthfulQA MC1? | 9 |
+| `r6` | Does a reader beat text-only baselines on TruthfulQA MC1? | all 10 |
 | `r7` | Does one read truth on facts and on Geometry of Truth sets? | all 10 |
-| `p1` | How much does prompt wording move a sentiment reader? | GPT-2, Qwen3 0.6B and 1.7B |
-| `p2` | How do token position and a misleading sentence matter? | 8 |
-| `p3` | How does training-set size matter? | 8 |
-| `p4` | Which direction finder, pairing and preprocessing work best? | 8 |
-| `p5` | Do persona wording and instructions confound the reading? | 8 |
-| `p6` | How does accuracy change per decade of parameters? | GPT-2 sizes |
-| `p7` | Does the extraction template change steering? | 5 |
-| `p8` | Base against post-trained checkpoints | 0.6B and 1.7B pairs |
-| `c1` | Does steering move sentiment, and does the text stay fluent? | 8 |
-| `c2` | Does steering move emotions? | 6 |
-| `c4` | Does steering or a LoRRA adapter improve TruthfulQA? | 6 |
-| `c5` | Can steering produce lies on TriviaQA? | 4 |
-| `m1` | How do six finders compare on reading, steering and erasure? | 5 |
-| `lr1` | Train one LoRRA adapter on Alpaca: loss curve and held-out loss | 8 |
+| `tb1` | How much of a reader's accuracy do word and character n-gram classifiers reach with no model? | none (one run) |
+| `p1` | How much does prompt wording move a sentiment reader? | all 10 |
+| `p2` | How do token position and a misleading sentence matter? | all 10 |
+| `p3` | How does training-set size matter? | all 10 |
+| `p4` | Which direction finder, pairing and preprocessing work best? | all 10 |
+| `p5` | Do persona wording and instructions confound the reading? | all 10 |
+| `p6` | How does accuracy change per decade of parameters? | the 4 GPT-2 sizes (one run) |
+| `p7` | Does the extraction template change steering? | all 10 |
+| `p8` | Base against post-trained checkpoints | the 0.6B and 1.7B pairs (one run) |
+| `c1` | Does steering move sentiment, and does the text pass the fluency rule? | all 10 |
+| `c2` | Does steering move emotions? | all 10 |
+| `c4` | Does steering or a LoRRA adapter improve TruthfulQA? | all 10 |
+| `c5` | Can steering produce lies on TriviaQA? | all 10 |
+| `m1` | How do six finders compare on reading, steering and erasure? | all 10 |
+| `lr1` | Train one LoRRA adapter on Alpaca: loss curve and held-out loss | all 10 |
 | `a1` | How much do directions from different seeds agree? | all 10 |
 | `a2` | What does the logit lens show for a direction? | all 10 |
 | `a5` | Do directions align with Qwen-Scope SAE features? | code only |
-| `p9a` to `p9d` | Label questions known, unknown or uncertain, read that direction, use it to predict errors, steer along it | 10, 10, 10, 9 |
-| `p10a`, `p10b` | Do models answer approximate quantities with ranges, and can a reader tell? | all 10 |
-| `p10c` | Does the range direction link to knowledge and hedging? | code only |
+| `p9a` to `p9d` | Label questions known, unknown or uncertain, read that direction, use it to predict errors, steer along it | all 10, all 10, all 10, 9 (not GPT-2 small) |
+| `p10a`, `p10b`, `p10c` | Do models answer approximate quantities with ranges, can a reader tell, and does the range direction link to knowledge and hedging? | all 10 |
 
 ## Reproduce at scale
 
@@ -194,8 +196,9 @@ src/tomography/
   sae.py          pinned Qwen-Scope SAE decoders
   lorra.py        low-rank representation adaptation
   p9/, p10/       known-versus-unknown and approximate-answer helpers
-  experiments/    one module per experiment id, plus shared sweeps
-  viz/            figure style and plots
+  experiments/    one module per experiment id (including tb1, the text
+                  baselines), plus shared sweeps
+  viz/            figure style, reading curves and geometry plots
   chain.py        chain runner
   cloud.py        RunPod helper
   export.py       run export
