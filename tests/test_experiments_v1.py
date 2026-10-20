@@ -303,6 +303,86 @@ def test_train_draws_are_the_draws_of_the_reading(inputs: Inputs) -> None:
     assert any(first != second for first, second in held)
 
 
+# Taken from `fit_type_reader` before it was split in two: the number of train
+# items, a digest of their uids in order and the first pair, by contrast and
+# draw, for the planted pool and the settings of the tiny P9b run.
+PRE_SPLIT_DRAWS = {
+    ("fictional_synthal", 0): (32, "fbbb5612ff70", ("synthal:21", "popqa:96")),
+    ("fictional_synthal", 1): (32, "8d1b700cccb2", ("synthal:45", "popqa:132")),
+    ("fictional_generated", 0): (
+        32,
+        "09f1b28f0bdd",
+        ("generated:21", "popqa:96"),
+    ),
+    ("fictional_generated", 1): (
+        32,
+        "cc4750317a62",
+        ("generated:45", "popqa:132"),
+    ),
+    ("obscure_real", 0): (30, "588accbb9e21", ("popqa:135", "popqa:120")),
+    ("obscure_real", 1): (30, "588accbb9e21", ("popqa:135", "popqa:132")),
+    ("obscure_real_pop", 0): (26, "2dc1f4820469", ("popqa:75", "popqa:102")),
+    ("obscure_real_pop", 1): (26, "16054c398e2d", ("popqa:141", "popqa:0")),
+    ("post_cutoff", 0): (32, "d1c3309a9f01", ("award-real:20", "award-post:6")),
+    ("post_cutoff", 1): (
+        32,
+        "7ade9b0d8965",
+        ("award-real:37", "award-post:11"),
+    ),
+    ("triviaqa_known", 0): (32, "e92d663864e3", ("triviaqa:46", "triviaqa:45")),
+    ("triviaqa_known", 1): (32, "72ab35b6205c", ("triviaqa:50", "triviaqa:7")),
+    ("unknowable_detail", 0): (32, "f52fb8e8cde4", ("detail:7", "nq_open:16")),
+    ("unknowable_detail", 1): (32, "c94342f4cf40", ("detail:7", "triviaqa:42")),
+    ("false_premise", 0): (32, "853da9720344", ("falseqa:7", "nq_open:16")),
+    ("false_premise", 1): (32, "9fe2b4fe41d4", ("falseqa:7", "triviaqa:42")),
+    ("kuq_future_unknown", 0): (
+        32,
+        "dfa780958d2b",
+        ("kuq-future:7", "nq_open:16"),
+    ),
+    ("kuq_future_unknown", 1): (
+        32,
+        "b0144373cbda",
+        ("kuq-future:7", "triviaqa:42"),
+    ),
+    ("real_vs_synthal", 0): (32, "98ddd719c2cc", ("popqa:81", "synthal:27")),
+    ("real_vs_synthal", 1): (32, "0d7952c92ee5", ("popqa:147", "synthal:45")),
+    ("real_vs_generated", 0): (
+        32,
+        "a976ee6d4091",
+        ("popqa:81", "generated:27"),
+    ),
+    ("real_vs_generated", 1): (
+        32,
+        "91b23b5c4b8b",
+        ("popqa:147", "generated:45"),
+    ),
+}
+
+
+def _digest(uids: list[str]) -> str:
+    return hashlib.sha256("\n".join(uids).encode()).hexdigest()[:12]
+
+
+def test_train_draws_are_those_the_fit_of_the_p9b_run_drew(
+    inputs: Inputs,
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pools = _pools(committed)
+
+    draws = train_draws(pools, committed.config)
+
+    assert {name for name, _ in PRE_SPLIT_DRAWS} == set(USABLE)
+    for (name, s), (count, digest, first) in PRE_SPLIT_DRAWS.items():
+        draw = draws[name][s]
+        uids = [i.example.uid for i in draw.items]
+        assert len(uids) == count, (name, s)
+        assert _digest(uids) == digest, (name, s)
+        assert draw.pairs is not None
+        pair = (uids[draw.pairs[0, 0]], uids[draw.pairs[0, 1]])
+        assert pair == first, (name, s)
+
+
 def test_the_selection_is_the_test_items_and_the_train_items_of_the_draws(
     inputs: Inputs,
 ) -> None:
