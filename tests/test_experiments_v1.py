@@ -1,36 +1,46 @@
 """Tests for the knowledge views experiment."""
 
 import dataclasses
+import getpass
 import hashlib
 import json
 from pathlib import Path
 import runpy
 import shutil
+import socket
 from typing import Any
 
 import numpy as np
 import pytest
+import torch
 
 from tomography.cli import load_experiment
 from tomography.experiments import p9b_reading
 from tomography.experiments.base import RunDir
 from tomography.experiments.sweep import chat_format_for
+import tomography.experiments.v1_knowledge_views as v1_module
 from tomography.experiments.v1_knowledge_views import CommittedReading
 from tomography.experiments.v1_knowledge_views import Config
 from tomography.experiments.v1_knowledge_views import check_reading
 from tomography.experiments.v1_knowledge_views import compare_auroc
 from tomography.experiments.v1_knowledge_views import compare_surface
 from tomography.experiments.v1_knowledge_views import displayed_items
+from tomography.experiments.v1_knowledge_views import execute
 from tomography.experiments.v1_knowledge_views import load_reading
 from tomography.experiments.v1_knowledge_views import plot
+from tomography.experiments.v1_knowledge_views import published_views
 from tomography.experiments.v1_knowledge_views import refit_methods
 from tomography.experiments.v1_knowledge_views import refit_shuffled
 from tomography.experiments.v1_knowledge_views import run
 from tomography.experiments.v1_knowledge_views import select_items
 from tomography.experiments.v1_knowledge_views import shuffled_draw
 from tomography.experiments.v1_knowledge_views import train_draws
+from tomography.export import ExportError
+from tomography.export import export_runs
+from tomography.export import is_exported
 from tomography.knowledge import DEFAULT_SHOTS
 from tomography.model import LoadedModel
+from tomography.p9.reading import READING_METHODS
 from tomography.p9.reading import SURFACE_BASELINES
 from tomography.p9.reading import ItemActivations
 from tomography.p9.reading import collect_item_activations
@@ -38,7 +48,9 @@ from tomography.p9.reading import draw_seed
 from tomography.p9.reading import draw_train
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
+from tomography.p9.reading import type_auroc
 from tomography.p9.unknowns import TypePool
+from tomography.reading.reader import RepReader
 
 PINNED_HASH = "3257d1220951"
 # The planted pool and the labels run of the P9b tests are the inputs here.
@@ -235,6 +247,16 @@ def test_load_reading_refuses_a_protocol_it_cannot_reproduce(
     _edit_json(path / "config.json", **change)
 
     with pytest.raises(ValueError, match=match):
+        load_reading(path, model="tiny")
+
+
+def test_load_reading_refuses_a_run_whose_draws_are_not_those_of_its_config(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    path = _copy(inputs.reading, tmp_path)
+    _edit_json(path / "config.json", n_seeds=3)
+
+    with pytest.raises(ValueError, match="draws"):
         load_reading(path, model="tiny")
 
 
@@ -623,3 +645,587 @@ def test_compare_surface_flags_a_baseline_that_moved(inputs: Inputs) -> None:
         ("obscure_real", "text_word"),
         ("false_premise", "popularity"),
     ]
+
+
+def test_published_views_score_the_displayed_items_on_the_published_reader(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    committed = read.committed
+    k = committed.layers.index(committed.layer)
+
+    views = published_views(committed, read.acts, read.pools, cap=3)
+
+    assert views.auroc.shape == (len(USABLE), tiny_arch.n_layers)
+    assert list(views.projections) == [f"projection_{n}" for n in USABLE]
+    assert list(views.uids) == USABLE
+    for t, (name, pool) in enumerate(read.pools.items()):
+        reader = RepReader.from_arrays(
+            committed.config.methods[0],
+            committed.layers,
+            committed.directions[t],
+            committed.means[t],
+            committed.signs[t],
+        )
+        np.testing.assert_array_equal(
+            views.auroc[t], type_auroc(reader, read.acts, pool, "test")
+        )
+        positive, negative = pool.split("test")
+        shown = {
+            "positive": displayed_items(positive, cap=3),
+            "negative": displayed_items(negative, cap=3),
+        }
+        assert views.uids[name] == {
+            side: [i.example.uid for i in items]
+            for side, items in shown.items()
+        }
+        rows = read.acts.rows([*shown["positive"], *shown["negative"]])
+        want = reader.score(read.acts.data[:, rows])[k]
+        projection = views.projections[f"projection_{name}"]
+        assert projection.dtype == np.float32
+        np.testing.assert_array_equal(projection, want)
+
+
+def test_published_views_cap_each_side_not_the_contrast(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+
+    views = published_views(read.committed, read.acts, read.pools, cap=2)
+
+    for name, sides in views.uids.items():
+        assert len(sides["positive"]) == 2, name
+        assert len(sides["negative"]) == 2, name
+        assert views.projections[f"projection_{name}"].shape == (4,)
+
+
+class Captured:
+    """The call `execute` makes to collect the activations."""
+
+    def __init__(self) -> None:
+        self.kwargs: dict[str, Any] = {}
+        self.items: list[Any] = []
+        self.args: tuple[Any, ...] = ()
+        self.acts: ItemActivations | None = None
+
+
+def _capture(monkeypatch: pytest.MonkeyPatch) -> Captured:
+    captured = Captured()
+
+    def spy(
+        loaded: LoadedModel, items: Any, *args: Any, **kwargs: Any
+    ) -> ItemActivations:
+        captured.items = list(items)
+        captured.args = args
+        captured.kwargs = kwargs
+        captured.acts = collect_item_activations(loaded, items, *args, **kwargs)
+        return captured.acts
+
+    monkeypatch.setattr(v1_module, "collect_item_activations", spy)
+    return captured
+
+
+def _config(inputs: Inputs, **overrides: Any) -> Config:
+    base = Config(
+        model="tiny",
+        labels_run=str(inputs.labels.path),
+        reading_run=str(inputs.reading.path),
+        batch_size=16,
+    )
+    return dataclasses.replace(base, **overrides)
+
+
+def _execute(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    inputs: Inputs,
+    *,
+    reading: CommittedReading | None = None,
+    items: Any = None,
+    **overrides: Any,
+) -> RunDir:
+    config = _config(inputs, **overrides)
+    run_dir = RunDir.create(config, out_root=tmp_path / "v1")
+    execute(
+        config,
+        run_dir,
+        tiny_arch,
+        _items() if items is None else items,
+        known_contrasts=True,
+        reading=reading or load_reading(inputs.reading.path, model="tiny"),
+    )
+    return run_dir
+
+
+_DEFAULT_RUNS: dict[str, RunDir] = {}
+
+
+@pytest.fixture
+def default_run(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> RunDir:
+    """One V1 run per architecture with the default settings."""
+    key = type(tiny_arch.model).__name__
+    if key not in _DEFAULT_RUNS:
+        out = tmp_path_factory.mktemp(f"v1-run-{key}")
+        _DEFAULT_RUNS[key] = _execute(tiny_arch, out, inputs)
+    return _DEFAULT_RUNS[key]
+
+
+def _summary(run_dir: RunDir) -> dict[str, Any]:
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    return summary
+
+
+def test_execute_writes_the_files_of_a_run(default_run: RunDir) -> None:
+    names = sorted(p.name for p in default_run.path.iterdir() if p.is_file())
+
+    assert names == [
+        "config.json",
+        "meta.json",
+        "projections.json",
+        "projections.npz",
+        "summary.json",
+    ]
+
+
+def test_the_arrays_have_the_documented_shapes(
+    tiny_arch: LoadedModel, default_run: RunDir
+) -> None:
+    n_types, n_layers = len(USABLE), tiny_arch.n_layers
+
+    arrays = default_run.read_arrays("projections")
+
+    assert set(arrays) == {
+        "layers",
+        "test",
+        "shuffled",
+        "published",
+        *(f"projection_{name}" for name in USABLE),
+    }
+    assert arrays["layers"].tolist() == list(range(1, n_layers + 1))
+    assert arrays["layers"].dtype == np.int64
+    assert arrays["test"].shape == (4, n_types, 2, n_layers)
+    assert arrays["shuffled"].shape == (n_types, 2, n_layers)
+    assert arrays["published"].shape == (n_types, n_layers)
+    for name in ("test", "shuffled", "published"):
+        assert arrays[name].dtype == np.float64
+        assert arrays[name].min() >= 0.0
+        assert arrays[name].max() <= 1.0
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+    assert sidecar["types"] == USABLE
+    assert sidecar["methods"] == list(READING_METHODS)
+    assert sidecar["max_per_side"] == 300
+    for name in USABLE:
+        sides = sidecar["uids"][name]
+        shown = len(sides["positive"]) + len(sides["negative"])
+        assert arrays[f"projection_{name}"].shape == (shown,)
+
+
+def test_the_summary_records_the_run(
+    tiny_arch: LoadedModel, inputs: Inputs, default_run: RunDir
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+
+    summary = _summary(default_run)
+
+    assert set(summary) == {
+        "layer",
+        "template",
+        "methods",
+        "types",
+        "n_items",
+        "reproduction",
+        "surface",
+        "surface_equal",
+    }
+    assert summary["layer"] == committed.layer
+    assert summary["template"] == "fewshot"
+    assert summary["methods"] == list(READING_METHODS)
+    assert summary["types"] == USABLE
+    pools = _pools(committed)
+    selected = select_items(pools, train_draws(pools, committed.config))
+    assert summary["n_items"] == {
+        "train": sum(i.example.split == "train" for i in selected),
+        "test": sum(i.example.split == "test" for i in selected),
+    }
+    assert set(summary["reproduction"]) == {
+        "tolerance",
+        "within_tolerance",
+        "max_abs_diff",
+        "mean_diff_at_layer",
+    }
+    assert list(summary["surface"]) == USABLE
+    assert summary["surface_equal"] is True
+
+
+def test_the_recomputed_auroc_is_the_committed_one_on_the_same_activations(
+    inputs: Inputs, default_run: RunDir
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+
+    test = default_run.read_arrays("projections")["test"]
+
+    np.testing.assert_array_equal(test, committed.test)
+    reproduction = _summary(default_run)["reproduction"]
+    assert reproduction["within_tolerance"] is True
+    assert reproduction["tolerance"] == 0.02
+    assert set(reproduction["max_abs_diff"].values()) == {0.0}
+
+
+def test_the_extraction_reads_every_layer_of_the_selected_items(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture(monkeypatch)
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pools = _pools(committed)
+
+    _execute(tiny_arch, tmp_path, inputs, batch_size=4)
+
+    selected = select_items(pools, train_draws(pools, committed.config))
+    assert [i.example.uid for i in captured.items] == [
+        i.example.uid for i in selected
+    ]
+    template, chat = captured.args
+    assert template == p9_template("fewshot", DEFAULT_SHOTS[:2])
+    assert chat.kind == chat_format_for(tiny_arch).kind
+    assert captured.kwargs == {
+        "layers": tuple(range(tiny_arch.n_layers + 1)),
+        "bos": committed.config.bos,
+        "batch_size": 4,
+        "share_prefix": True,
+    }
+
+
+def test_the_published_reader_and_its_projections_are_written(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture(monkeypatch)
+    committed = load_reading(inputs.reading.path, model="tiny")
+
+    run_dir = _execute(tiny_arch, tmp_path, inputs)
+
+    assert captured.acts is not None
+    reads = ItemActivations(
+        captured.acts.uids, captured.acts.layers[1:], captured.acts.data[1:]
+    )
+    views = published_views(committed, reads, _pools(committed))
+    arrays = run_dir.read_arrays("projections")
+    np.testing.assert_array_equal(arrays["published"], views.auroc)
+    for key, projection in views.projections.items():
+        np.testing.assert_array_equal(arrays[key], projection)
+    sidecar = run_dir.read_json("projections")
+    assert isinstance(sidecar, dict)
+    assert sidecar["uids"] == views.uids
+
+
+def test_the_shuffled_control_is_written_beside_the_methods(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture(monkeypatch)
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pools = _pools(committed)
+
+    run_dir = _execute(tiny_arch, tmp_path, inputs, seed=3)
+
+    assert captured.acts is not None
+    reads = ItemActivations(
+        captured.acts.uids, captured.acts.layers[1:], captured.acts.data[1:]
+    )
+    want = refit_shuffled(
+        reads,
+        pools,
+        train_draws(pools, committed.config),
+        committed.config,
+        seed=3,
+    )
+    np.testing.assert_array_equal(
+        run_dir.read_arrays("projections")["shuffled"], want
+    )
+
+
+def test_the_surface_baselines_are_recorded_beside_the_committed_ones(
+    inputs: Inputs, default_run: RunDir
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+
+    surface = _summary(default_run)["surface"]
+
+    assert surface == compare_surface(_pools(committed), committed)
+
+
+def test_a_difference_beyond_the_tolerance_is_reported_not_hidden(
+    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    moved = dataclasses.replace(committed, test=committed.test - 0.125)
+
+    run_dir = _execute(tiny_arch, tmp_path, inputs, reading=moved)
+
+    reproduction = _summary(run_dir)["reproduction"]
+    assert reproduction["within_tolerance"] is False
+    assert reproduction["max_abs_diff"]["mean_at_layer"] > 0.02
+    assert reproduction["max_abs_diff"]["mean_all_layers"] > 0.02
+
+
+def test_a_surface_baseline_that_moved_is_reported_not_hidden(
+    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    table = {name: dict(row) for name, row in committed.table.items()}
+    table["obscure_real"]["text_char"] += 0.05
+    moved = dataclasses.replace(committed, table=table)
+
+    run_dir = _execute(tiny_arch, tmp_path, inputs, reading=moved)
+
+    summary = _summary(run_dir)
+    assert summary["surface_equal"] is False
+    assert summary["surface"]["obscure_real"]["text_char"]["equal"] is False
+
+
+def test_execute_is_deterministic(
+    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
+) -> None:
+    first = _execute(tiny_arch, tmp_path / "a", inputs)
+    second = _execute(tiny_arch, tmp_path / "b", inputs)
+
+    one, two = (
+        first.read_arrays("projections"),
+        second.read_arrays("projections"),
+    )
+    assert one.keys() == two.keys()
+    for key in one:
+        np.testing.assert_array_equal(one[key], two[key], err_msg=key)
+    assert first.read_json("projections") == second.read_json("projections")
+    assert first.read_json("summary") == second.read_json("summary")
+
+
+def test_the_uids_hold_no_question_text(default_run: RunDir) -> None:
+    text = (default_run.path / "projections.json").read_text("utf-8")
+
+    assert "Who is" not in text
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+    known = {i.example.uid for i in _items()}
+    for sides in sidecar["uids"].values():
+        assert set(sides["positive"]) | set(sides["negative"]) <= known
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [({"batch_size": 0}, "batch_size")],
+    ids=["batch_size"],
+)
+def test_a_setting_that_cannot_work_fails_before_the_forward_pass(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, Any],
+    match: str,
+) -> None:
+    def never(*args: Any, **kwargs: Any) -> ItemActivations:
+        raise AssertionError("the forward pass must not start")
+
+    monkeypatch.setattr(v1_module, "collect_item_activations", never)
+
+    with pytest.raises(ValueError, match=match):
+        _execute(tiny_arch, tmp_path, inputs, **overrides)
+
+
+def test_labels_that_differ_from_the_reading_fail_before_the_forward_pass(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def never(*args: Any, **kwargs: Any) -> ItemActivations:
+        raise AssertionError("the forward pass must not start")
+
+    monkeypatch.setattr(v1_module, "collect_item_activations", never)
+    items = [i for i in _items() if not i.example.uid.startswith("falseqa")]
+
+    with pytest.raises(ValueError, match="contrasts"):
+        _execute(tiny_arch, tmp_path, inputs, items=items)
+
+
+def test_a_baseline_that_cannot_work_fails_before_the_forward_pass(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def never(*args: Any, **kwargs: Any) -> ItemActivations:
+        raise AssertionError("the forward pass must not start")
+
+    def broken(pool: Any) -> dict[str, float | None]:
+        raise ValueError("no baseline")
+
+    monkeypatch.setattr(v1_module, "collect_item_activations", never)
+    monkeypatch.setattr(v1_module, "surface_baselines", broken)
+
+    with pytest.raises(ValueError, match="no baseline"):
+        _execute(tiny_arch, tmp_path, inputs)
+
+
+def test_run_reads_both_runs_and_loads_the_model_on_the_cpu_in_float32(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_load(name: str, **kwargs: Any) -> LoadedModel:
+        asked.append((name, kwargs))
+        return tiny_arch
+
+    monkeypatch.setattr(v1_module, "load_model", fake_load)
+    config = _config(inputs)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    run(config, run_dir)
+
+    assert asked == [("tiny", {"device": "cpu", "dtype": torch.float32})]
+    assert _summary(run_dir)["types"] == USABLE
+    assert (run_dir.path / "projections.npz").is_file()
+
+
+def _never_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
+    def never(*args: Any, **kwargs: Any) -> LoadedModel:
+        raise AssertionError("the model must not load first")
+
+    monkeypatch.setattr(v1_module, "load_model", never)
+
+
+def test_run_refuses_an_unfinished_labels_run(
+    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _never_loaded(monkeypatch)
+    path = _copy(inputs.labels, tmp_path / "labels")
+    _edit_json(path / "meta.json", finished_at=None)
+    config = dataclasses.replace(_config(inputs), labels_run=str(path))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match="not a finished run"):
+        run(config, run_dir)
+
+
+def test_run_refuses_an_unfinished_reading_run(
+    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _never_loaded(monkeypatch)
+    path = _copy(inputs.reading, tmp_path / "reading")
+    _edit_json(path / "meta.json", finished_at=None)
+    config = dataclasses.replace(_config(inputs), reading_run=str(path))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match="not a finished run"):
+        run(config, run_dir)
+
+
+def test_run_refuses_a_reading_run_of_another_model(
+    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _never_loaded(monkeypatch)
+    path = _copy(inputs.reading, tmp_path / "reading")
+    _edit_json(path / "config.json", model="gpt2")
+    config = dataclasses.replace(_config(inputs), reading_run=str(path))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match=r"'gpt2'.*'tiny'"):
+        run(config, run_dir)
+
+
+def test_run_refuses_a_reading_run_without_its_arrays(
+    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _never_loaded(monkeypatch)
+    path = _copy(inputs.reading, tmp_path / "reading")
+    (path / "transfer.npz").unlink()
+    config = dataclasses.replace(_config(inputs), reading_run=str(path))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match=r"transfer\.npz"):
+        run(config, run_dir)
+
+
+def _finished_copy(run_dir: RunDir, tmp_path: Path) -> Path:
+    """Copies a run and stamps it finished, as the command line does."""
+    target = tmp_path / "run"
+    shutil.copytree(run_dir.path, target)
+    RunDir.open(target).finalize()
+    return target
+
+
+@pytest.fixture
+def fixed_machine(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(getpass, "getuser", lambda: "tester-user")
+    monkeypatch.setattr(socket, "gethostname", lambda: "testhost-box.lan")
+
+
+@pytest.mark.usefixtures("fixed_machine")
+def test_every_file_of_a_run_passes_the_export(
+    default_run: RunDir, tmp_path: Path
+) -> None:
+    for name in ("projections.npz", "projections.json", "summary.json"):
+        assert is_exported(name), name
+    source = _finished_copy(default_run, tmp_path)
+
+    report = export_runs([source], tmp_path / "dest")
+
+    (exported,) = report.exported
+    assert exported.status == "copied"
+    copied = sorted(
+        p.name for p in (tmp_path / "dest" / exported.key).iterdir()
+    )
+    assert copied == [
+        "config.json",
+        "meta.json",
+        "projections.json",
+        "projections.npz",
+        "summary.json",
+    ]
+
+
+@pytest.mark.usefixtures("fixed_machine")
+def test_the_export_refuses_a_uid_that_names_the_machine(
+    default_run: RunDir, tmp_path: Path
+) -> None:
+    source = _finished_copy(default_run, tmp_path)
+    document = json.loads((source / "projections.json").read_text("utf-8"))
+    sides = document["data"]["uids"][USABLE[0]]
+    sides["positive"][0] = "popqa:tester-user-7"
+    (source / "projections.json").write_text(json.dumps(document), "utf-8")
+
+    with pytest.raises(ExportError, match=r"projections\.json"):
+        export_runs([source], tmp_path / "dest")
+
+    assert not (tmp_path / "dest").exists()
+
+
+@pytest.mark.usefixtures("fixed_machine")
+def test_the_export_refuses_a_uid_array_that_names_a_private_path(
+    default_run: RunDir, tmp_path: Path
+) -> None:
+    source = _finished_copy(default_run, tmp_path)
+    arrays = default_run.read_arrays("projections")
+    RunDir.open(source).write_arrays(
+        "projections", uids=np.array(["popqa:1", "D:\\private\\x"]), **arrays
+    )
+
+    with pytest.raises(ExportError, match=r"projections\.npz"):
+        export_runs([source], tmp_path / "dest")
