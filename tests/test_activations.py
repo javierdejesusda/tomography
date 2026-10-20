@@ -38,6 +38,17 @@ SPANS = [
 ]
 TOLERANCE = {"rtol": 1e-4, "atol": 1e-3}
 
+SHOTS = DEFAULT_SHOTS[:2]
+QUESTIONS = [
+    "Is the dog lazy?",
+    "She felt happy, then sad.",
+    "Pick a number between 0 and 9.",
+    "The model reads the stream",
+    "A short text?",
+]
+PROMPTS = [few_shot_prompt(question, SHOTS) for question in QUESTIONS]
+ANSWER_LINE = 3
+
 
 def overlapping(lm: LoadedModel, text: str, span: tuple[int, int]) -> list[int]:
     """Token indices of `text` (no BOS) overlapping `span`, by offsets."""
@@ -334,8 +345,11 @@ def test_invalid_arguments_raise(tiny_gpt2: LoadedModel) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "share_prefix", [False, True], ids=["default", "shared-prefix"]
+)
 def test_collection_skips_the_lm_head_and_leaves_no_hooks(
-    tiny_arch: LoadedModel,
+    tiny_arch: LoadedModel, share_prefix: bool
 ) -> None:
     lm = tiny_arch
 
@@ -344,23 +358,11 @@ def test_collection_skips_the_lm_head_and_leaves_no_hooks(
 
     handle = lm.model.get_output_embeddings().register_forward_hook(refuse)
     try:
-        collect_activations(lm, TEXTS)
+        collect_activations(lm, PROMPTS, share_prefix=share_prefix)
     finally:
         handle.remove()
 
     assert hook_count(lm) == 0
-
-
-SHOTS = DEFAULT_SHOTS[:2]
-QUESTIONS = [
-    "Is the dog lazy?",
-    "She felt happy, then sad.",
-    "Pick a number between 0 and 9.",
-    "The model reads the stream",
-    "A short text?",
-]
-PROMPTS = [few_shot_prompt(question, SHOTS) for question in QUESTIONS]
-ANSWER_LINE = 3
 
 
 def common_prefix(
@@ -376,10 +378,10 @@ def common_prefix(
     return shared
 
 
-def decoder_calls(
-    lm: LoadedModel, run: Callable[[], object]
-) -> list[tuple[int, ...]]:
-    """Shapes of the `input_ids` of every decoder call made by `run`."""
+def decoder_calls[T](
+    lm: LoadedModel, run: Callable[[], T]
+) -> tuple[T, list[tuple[int, ...]]]:
+    """Result of `run` and the `input_ids` shapes of its decoder calls."""
     calls: list[tuple[int, ...]] = []
 
     def record(
@@ -391,10 +393,10 @@ def decoder_calls(
 
     handle = lm.decoder.register_forward_pre_hook(record, with_kwargs=True)
     try:
-        run()
+        result = run()
     finally:
         handle.remove()
-    return calls
+    return result, calls
 
 
 def assert_same_rows(got: Activations, expected: Activations) -> None:
@@ -407,40 +409,48 @@ def assert_same_rows(got: Activations, expected: Activations) -> None:
         )
 
 
+def assert_cached_matches_plain(
+    lm: LoadedModel, texts: list[str], **kwargs: Any
+) -> tuple[Activations, list[tuple[int, ...]]]:
+    """Checks the shared-prefix collection against the default path.
+
+    Returns:
+        The shared-prefix activations and the shapes of the decoder calls
+        that collected them.
+    """
+    plain = collect_activations(lm, texts, **kwargs)
+    cached, calls = decoder_calls(
+        lm, lambda: collect_activations(lm, texts, share_prefix=True, **kwargs)
+    )
+    np.testing.assert_allclose(cached.data, plain.data, **TOLERANCE)
+    assert_same_rows(cached, plain)
+    return cached, calls
+
+
 @pytest.mark.parametrize("bos", ["prepend", "none"])
 @pytest.mark.parametrize("batch_size", [1, 2, 8], ids=["b1", "b2", "b8"])
 def test_shared_prefix_collection_equals_the_uncached_path(
     tiny_arch: LoadedModel, bos: BosMode, batch_size: int
 ) -> None:
-    lm = tiny_arch
-
-    plain = collect_activations(lm, PROMPTS, bos=bos, batch_size=batch_size)
-    cached = collect_activations(
-        lm, PROMPTS, bos=bos, batch_size=batch_size, share_prefix=True
+    assert_cached_matches_plain(
+        tiny_arch, PROMPTS, bos=bos, batch_size=batch_size
     )
-
-    np.testing.assert_allclose(cached.data, plain.data, **TOLERANCE)
-    assert_same_rows(cached, plain)
 
 
 @pytest.mark.parametrize("position", ["response", "concept", "mean"])
 def test_shared_prefix_reads_span_positions_in_full_prompt_coordinates(
     tiny_arch: LoadedModel, position: str
 ) -> None:
-    lm = tiny_arch
     spans = [(len(prompt) - ANSWER_LINE, len(prompt)) for prompt in PROMPTS]
-    kwargs: dict[str, Any] = {
-        "position": position,
-        "response_spans": spans,
-        "concept_spans": spans,
-        "batch_size": 2,
-    }
 
-    plain = collect_activations(lm, PROMPTS, **kwargs)
-    cached = collect_activations(lm, PROMPTS, share_prefix=True, **kwargs)
-
-    np.testing.assert_allclose(cached.data, plain.data, **TOLERANCE)
-    assert_same_rows(cached, plain)
+    assert_cached_matches_plain(
+        tiny_arch,
+        PROMPTS,
+        position=position,
+        response_spans=spans,
+        concept_spans=spans,
+        batch_size=2,
+    )
 
 
 def test_shared_prefix_runs_the_prefix_once_and_then_only_suffix_tokens(
@@ -450,7 +460,7 @@ def test_shared_prefix_runs_the_prefix_once_and_then_only_suffix_tokens(
     lengths = lm.encode(PROMPTS).lengths
     shared = common_prefix(lm, PROMPTS, None)
 
-    calls = decoder_calls(
+    _, calls = decoder_calls(
         lm,
         lambda: collect_activations(
             lm, PROMPTS, batch_size=2, share_prefix=True
@@ -466,16 +476,16 @@ def test_shared_prefix_runs_the_prefix_once_and_then_only_suffix_tokens(
     ]
 
 
+@pytest.mark.parametrize("bos", ["prepend", "none"])
 @pytest.mark.parametrize("batch_size", [1, 2, 3, 8], ids=str)
 def test_shared_prefix_length_is_the_token_level_prefix_for_any_batch_size(
-    tiny_arch: LoadedModel, batch_size: int
+    tiny_arch: LoadedModel, bos: BosMode, batch_size: int
 ) -> None:
     lm = tiny_arch
 
-    for bos in ("prepend", "none"):
-        assert _shared_prefix_length(
-            lm, PROMPTS, bos=bos, batch_size=batch_size
-        ) == common_prefix(lm, PROMPTS, bos)
+    assert _shared_prefix_length(
+        lm, PROMPTS, bos=bos, batch_size=batch_size
+    ) == common_prefix(lm, PROMPTS, bos)
 
 
 def test_a_prompt_that_differs_early_shortens_the_shared_prefix(
@@ -487,12 +497,10 @@ def test_a_prompt_that_differs_early_shortens_the_shared_prefix(
 
     wide = _shared_prefix_length(lm, PROMPTS, bos=None, batch_size=2)
     narrow = _shared_prefix_length(lm, texts, bos=None, batch_size=2)
-    plain = collect_activations(lm, texts, batch_size=2)
-    cached = collect_activations(lm, texts, batch_size=2, share_prefix=True)
+    assert_cached_matches_plain(lm, texts, batch_size=2)
 
     assert 0 < narrow < wide
     assert narrow == common_prefix(lm, texts, None)
-    np.testing.assert_allclose(cached.data, plain.data, **TOLERANCE)
 
 
 def test_prompts_that_differ_only_in_the_last_token_share_all_the_rest(
@@ -502,13 +510,11 @@ def test_prompts_that_differ_only_in_the_last_token_share_all_the_rest(
     texts = [PROMPTS[0] + "x", PROMPTS[0] + "y"]
     length = lm.encode(texts[:1]).lengths[0]
 
-    plain = collect_activations(lm, texts)
-    cached = collect_activations(lm, texts, share_prefix=True)
+    cached, _ = assert_cached_matches_plain(lm, texts)
 
     assert (
         _shared_prefix_length(lm, texts, bos=None, batch_size=8) == length - 1
     )
-    np.testing.assert_allclose(cached.data, plain.data, **TOLERANCE)
     assert not np.allclose(cached.data[:, 0], cached.data[:, 1])
 
 
@@ -527,56 +533,51 @@ def test_a_prompt_inside_the_common_prefix_keeps_one_suffix_token(
     lm = tiny_arch
     shortest = min(lm.encode([text]).lengths[0] for text in texts)
 
-    plain = collect_activations(lm, texts)
-    cached = collect_activations(lm, texts, share_prefix=True)
+    assert_cached_matches_plain(lm, texts)
 
     assert _shared_prefix_length(lm, texts, bos=None, batch_size=8) == (
         shortest - 1
     )
-    np.testing.assert_allclose(cached.data, plain.data, **TOLERANCE)
-    assert_same_rows(cached, plain)
 
 
 @pytest.mark.parametrize("bos", ["prepend", "none"])
-def test_without_shared_content_the_uncached_path_runs(
-    tiny_arch: LoadedModel, bos: BosMode
+@pytest.mark.parametrize(
+    ("texts", "kwargs"),
+    [
+        (QUESTIONS[:3], {}),
+        (
+            PROMPTS,
+            {"position": "response", "response_spans": [(0, 5)] * len(PROMPTS)},
+        ),
+    ],
+    ids=["no-shared-content", "span-at-the-start"],
+)
+def test_without_a_shareable_prefix_the_uncached_path_runs(
+    tiny_arch: LoadedModel,
+    texts: list[str],
+    kwargs: dict[str, Any],
+    bos: BosMode,
 ) -> None:
     lm = tiny_arch
-    texts = [QUESTIONS[0], QUESTIONS[1], QUESTIONS[2]]
 
-    plain = collect_activations(lm, texts, bos=bos)
-    calls = decoder_calls(
+    plain = collect_activations(lm, texts, bos=bos, **kwargs)
+    cached, calls = decoder_calls(
         lm,
-        lambda: collect_activations(lm, texts, bos=bos, share_prefix=True),
+        lambda: collect_activations(
+            lm, texts, bos=bos, share_prefix=True, **kwargs
+        ),
     )
-    cached = collect_activations(lm, texts, bos=bos, share_prefix=True)
 
-    shared = _shared_prefix_length(lm, texts, bos=bos, batch_size=8)
+    shared = _shared_prefix_length(
+        lm,
+        texts,
+        bos=bos,
+        batch_size=8,
+        position=kwargs.get("position", "last"),
+        spans=kwargs.get("response_spans"),
+    )
     assert shared == (1 if bos == "prepend" else 0)
-    assert calls == [(3, max(lm.encode(texts, bos=bos).lengths))]
-    np.testing.assert_array_equal(cached.data, plain.data)
-
-
-@pytest.mark.parametrize("bos", ["prepend", "none"])
-def test_a_span_at_the_start_leaves_nothing_to_share(
-    tiny_arch: LoadedModel, bos: BosMode
-) -> None:
-    lm = tiny_arch
-    spans: list[tuple[int, int] | None] = [(0, 5)] * len(PROMPTS)
-    kwargs: dict[str, Any] = {
-        "position": "response",
-        "response_spans": spans,
-        "bos": bos,
-    }
-
-    plain = collect_activations(lm, PROMPTS, **kwargs)
-    calls = decoder_calls(
-        lm,
-        lambda: collect_activations(lm, PROMPTS, share_prefix=True, **kwargs),
-    )
-    cached = collect_activations(lm, PROMPTS, share_prefix=True, **kwargs)
-
-    assert len(calls) == 1
+    assert calls == [(len(texts), max(lm.encode(texts, bos=bos).lengths))]
     np.testing.assert_array_equal(cached.data, plain.data)
     assert_same_rows(cached, plain)
 
@@ -589,41 +590,14 @@ def test_the_shared_prefix_stops_at_the_earliest_read_token(
     head = "".join(f"Q: {q}\nA: {a}\n\n" for q, a in SHOTS)
     texts = [f"{head}The sky is blue.", f"{head}The sky is green."]
     spans: list[tuple[int, int] | None] = [(len(head), len(t)) for t in texts]
-    kwargs: dict[str, Any] = {
-        "position": position,
-        "response_spans": spans,
-        "batch_size": 1,
-    }
     first_read = overlapping(lm, texts[0], spans[0])[0] + bos_shift(lm)
 
-    plain = collect_activations(lm, texts, **kwargs)
-    calls = decoder_calls(
-        lm,
-        lambda: collect_activations(lm, texts, share_prefix=True, **kwargs),
+    _, calls = assert_cached_matches_plain(
+        lm, texts, position=position, response_spans=spans, batch_size=1
     )
-    cached = collect_activations(lm, texts, share_prefix=True, **kwargs)
 
     assert calls[0] == (1, first_read)
     assert common_prefix(lm, texts, None) > first_read
-    np.testing.assert_allclose(cached.data, plain.data, **TOLERANCE)
-    assert_same_rows(cached, plain)
-
-
-def test_shared_prefix_collection_skips_the_lm_head_and_leaves_no_hooks(
-    tiny_arch: LoadedModel,
-) -> None:
-    lm = tiny_arch
-
-    def refuse(*args: object) -> None:
-        raise AssertionError("the LM head must not run")
-
-    handle = lm.model.get_output_embeddings().register_forward_hook(refuse)
-    try:
-        collect_activations(lm, PROMPTS, share_prefix=True)
-    finally:
-        handle.remove()
-
-    assert hook_count(lm) == 0
 
 
 def make_activations(counts: list[int]) -> Activations:
@@ -759,13 +733,10 @@ def test_real_few_shot_prompts_share_the_demonstrations_by_token(
     demo_ids = lm.tokenizer(demos, add_special_tokens=False)["input_ids"]
 
     shared = _shared_prefix_length(lm, prompts, bos=None, batch_size=2)
-    plain = collect_activations(lm, prompts, batch_size=2)
-    cached = collect_activations(lm, prompts, batch_size=2, share_prefix=True)
+    assert_cached_matches_plain(lm, prompts, batch_size=2)
 
     assert shared == common_prefix(lm, prompts, None)
     assert shared >= len(demo_ids)
     if lm.spec.model_type == "gpt2":
         full = lm.encode(prompts[:1], bos="none").input_ids[0].tolist()
         assert full[: len(demo_ids)] != demo_ids
-    np.testing.assert_allclose(cached.data, plain.data, **TOLERANCE)
-    assert_same_rows(cached, plain)
