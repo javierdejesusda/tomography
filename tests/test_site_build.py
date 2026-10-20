@@ -180,8 +180,7 @@ def test_printed_tables_have_no_scroll_box_and_wide_ones_are_set_smaller(
     assert ".table .scroll {\n    overflow: visible;" in printed
     assert "margin-left: -" not in printed
     assert (
-        ".table.wide table {\n    width: 98%;\n    margin: 0 auto;"
-        in printed
+        ".table.wide table {\n    width: 98%;\n    margin: 0 auto;" in printed
     )
     assert "font-size: 0.68em;" in printed
     assert (
