@@ -467,13 +467,15 @@ def test_the_legend_pluralises_the_classifiers(
     )
 
 
-def test_the_readers_and_the_text_band_are_labelled_directly(
+def test_the_title_names_the_truth_reader_and_no_row_carries_a_label(
     output: registry.FigureOutput,
 ) -> None:
     ax = _ax(output, "levels")
+    assert ax.get_title() == "truth reader and text"
+    assert not [
+        t for t in ax.texts if str(t.get_gid()).startswith("reader_label")
+    ]
     texts = {t.get_gid(): t.get_text() for t in ax.texts}
-    assert texts["reader_label:truthfulqa_reader"] == "truth reader"
-    assert "reader_label:persona_reader" not in texts
     assert " ".join(texts["band_label"].split()) == "words, characters"
 
 
@@ -485,25 +487,6 @@ def test_the_three_panels_share_the_row_limits_with_headroom_for_labels(
     }
     assert len(limits) == 1
     assert next(iter(limits))[1] < -1.0
-
-
-def test_the_truth_reader_label_sits_beside_its_markers(
-    output: registry.FigureOutput,
-) -> None:
-    ax = _ax(output, "levels")
-    (label,) = [
-        t for t in ax.texts if t.get_gid() == "reader_label:truthfulqa_reader"
-    ]
-    dots = [
-        ln
-        for model in MODELS
-        for ln in _gid(ax, f"truthfulqa_reader:{model}")
-        if ln.get_marker() != "None"
-    ]
-    top = min(dots, key=lambda ln: ln.get_ydata()[0])
-    assert label.xy[1] == pytest.approx(top.get_ydata()[0])
-    assert label.get_va() == "center"
-    assert label.xy[0] < top.get_xdata()[0]
 
 
 def test_the_persona_reader_is_named_in_the_legend_not_beside_the_rows(
@@ -581,24 +564,6 @@ def _gap_pt(a: Any, b: Any, dpi: float) -> float:
     dx = max(a.x0 - b.x1, b.x0 - a.x1, 0.0)
     dy = max(a.y0 - b.y1, b.y0 - a.y1, 0.0)
     return float(np.hypot(dx, dy)) * 72 / dpi
-
-
-def test_reader_labels_keep_a_millimetre_from_every_mark(
-    output: registry.FigureOutput,
-) -> None:
-    fig = output.figure
-    fig.draw_without_rendering()
-    renderer = fig.canvas.get_renderer()
-    ax = _ax(output, "levels")
-    labels = [
-        t for t in ax.texts if str(t.get_gid()).startswith("reader_label")
-    ]
-    assert len(labels) == 1
-    for label in labels:
-        box = label.get_window_extent(renderer)
-        for mark in _marks(ax):
-            gap = _gap_pt(box, mark.get_window_extent(renderer), fig.dpi)
-            assert gap >= 1 * MM - 0.05, (label.get_text(), mark.get_gid())
 
 
 def test_the_chance_line_is_labelled_clear_of_text_and_marks(

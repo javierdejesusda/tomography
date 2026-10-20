@@ -27,10 +27,7 @@ from tomography.viz import paper
 
 HEIGHT = 3.6
 TOP = -2.2
-READER_NAMES = {
-    "truthfulqa_reader": "truth reader",
-    "persona_reader": "honesty persona reader",
-}
+PERSONA_NAME = "honesty persona reader"
 TEXT_METHODS = ("text_word", "text_char")
 TEXT_NAMES = {"text_word": "words", "text_char": "characters"}
 DIRECTION = paper.MEASURE_MARKERS["direction"]
@@ -276,21 +273,6 @@ def _panel_levels(
                 color=color,
                 **_open(model),
             )
-    top_model = min(rows, key=lambda m: rows[m])
-    top = rows[top_model]
-    name = "truthfulqa_reader"
-    cell = data[top_model].reads[name]
-    note = ax.annotate(
-        READER_NAMES[name],
-        xy=(cell.lo, top + READERS[name][2]),
-        xytext=(-4, 4),
-        textcoords="offset points",
-        ha="right",
-        va="center",
-        fontsize=TEXT,
-        color=paper.ENC["secondary_text"],
-    )
-    note.set_gid(f"reader_label:{name}")
     hi = max(first.text[m].hi for m in TEXT_METHODS)
     band_note = ax.text(
         hi + BAND_NOTE_GAP,
@@ -380,7 +362,7 @@ def _legend(fig: Figure) -> None:
         "characters (lines), each with its\n"
         "95 percent interval (band)",
         "answer log-probability",
-        READER_NAMES["persona_reader"],
+        PERSONA_NAME,
         "GPT-2 and Qwen3 base",
         "post-trained",
     ]
