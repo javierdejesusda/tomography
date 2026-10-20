@@ -53,8 +53,10 @@ site](https://javierdejesusda.github.io/tomography/) has the full write-up and
 - **"Known versus unknown" is a direction, not a better error predictor.** It
   ranks PopQA questions above popularity and the text classifiers on 0 of 3
   GPT-2, 3 of 3 base and 2 of 3 post-trained checkpoints, but adds to the
-  model's own confidence on 0 of 3, 0 of 3 and 0 of 3 (P9b, P9c). A range
-  direction is above its random control on 0 of 4, 2 of 3 and 2 of 3 (P10b).
+  model's own confidence on 0 of 3, 0 of 3 and 0 of 3 (P9b, P9c). GPT-2 small
+  has no such direction: its labels hold no known versus unknown contrast
+  (P9a). A range direction is above its random control on 0 of 4, 2 of 3 and
+  2 of 3 (P10b).
 - **A truth reader does not beat the words alone.** On TruthfulQA MC1 (173 test
   questions) the reader is not above the better text classifier, 0.676 (word)
   and 0.671 (character) with chance at 0.228, on any checkpoint: 0 of 4 GPT-2,
@@ -137,7 +139,7 @@ Every id is the argument of `tomography run`. Coverage is read from the committe
 | `a1` | How much do directions from different seeds agree? | all 10 |
 | `a2` | What does the logit lens show for a direction? | all 10 |
 | `a5` | Do directions align with Qwen-Scope SAE features? | code only |
-| `p9a` to `p9d` | Label questions known, unknown or uncertain, read that direction, use it to predict errors, steer along it | all 10, all 10, all 10, 9 (not GPT-2 small) |
+| `p9a` to `p9d` | Label questions known, unknown or uncertain, read that direction, use it to predict errors, steer along it | `p9a` to `p9c` all 10 (GPT-2 small has no direction), `p9d` 9 |
 | `p10a`, `p10b`, `p10c` | Do models answer approximate quantities with ranges, can a reader tell, and does the range direction link to knowledge and hedging? | all 10 |
 
 ## Reproduce at scale
@@ -152,7 +154,7 @@ uv run tomography chain run chain.toml
 [`cloud.py`](src/tomography/cloud.py) rents a RunPod pod, runs a chain on it
 and pulls the results back (`python -m tomography.cloud up|push|setup|start|
 status|pull|down|ssh|resume`; read `--help` of each). The API key comes from
-`RUNPOD_API_KEY` only; `up` and `start` require `--max-hours`.
+`RUNPOD_API_KEY` only; `start` and `resume` require `--max-hours`.
 
 To collect finished runs into a committable tree and redraw every figure
 (figures are not committed; readers, sweeps, per-item files and signals are not exported):
@@ -198,6 +200,7 @@ src/tomography/
   p9/, p10/       known-versus-unknown and approximate-answer helpers
   experiments/    one module per experiment id (including tb1, the text
                   baselines), plus shared sweeps
+  site/           results site builder (`python -m tomography.site`)
   viz/            figure style, reading curves and geometry plots
   chain.py        chain runner
   cloud.py        RunPod helper
