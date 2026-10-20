@@ -849,7 +849,7 @@ def test_the_state_sentence_follows_the_states_that_occur() -> None:
     sentence = approximate.state_sentence(["above", "inside"])
     assert "below" not in sentence
     assert STATE_PHRASES["above"] in sentence
-    assert STATE_PHRASES["below"] in approximate.state_sentence(["below"])
+    assert "a left arrow below" in approximate.state_sentence(["below"])
 
 
 def test_the_detail_names_the_control_tick_as_the_mean(
@@ -886,3 +886,18 @@ def test_the_detail_names_the_control_interval_as_a_bootstrap_interval(
     n = int(output.numbers["n_random_draws"])
     assert "bootstrap interval" in output.detail
     assert f"mean of {n} random directions" in output.detail
+
+
+def test_the_state_sentence_names_the_control_in_its_first_phrase() -> None:
+    sentence = approximate.state_sentence({"inside", "below"})
+    first = sentence.split(", ")[0]
+    assert "the control's interval" in first
+    assert approximate.state_sentence(
+        {"above", "inside", "below"}
+    ) == ", ".join(
+        [
+            "a filled hexagon is above the control's interval",
+            "an open hexagon inside it",
+            "a left arrow below it",
+        ]
+    )
