@@ -957,6 +957,36 @@ def test_the_recomputed_auroc_is_the_committed_one_on_the_same_activations(
     assert set(reproduction["max_abs_diff"].values()) == {0.0}
 
 
+def test_the_verdict_looks_at_the_column_of_the_chosen_layer(
+    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    assert committed.layers == (1, 2, 3)
+    chosen = dataclasses.replace(committed, layer=2)
+    at = chosen.layers.index(2)
+
+    def reproduction(column: int | None, name: str) -> dict[str, Any]:
+        test = committed.test.copy()
+        if column is not None:
+            test[..., column] -= 0.125
+        reading = dataclasses.replace(chosen, test=test)
+        run_dir = _execute(tiny_arch, tmp_path / name, inputs, reading=reading)
+        return _summary(run_dir)["reproduction"]
+
+    baseline = reproduction(None, "none")
+    assert baseline["within_tolerance"] is True
+    assert set(baseline["max_abs_diff"].values()) == {0.0}
+    moved = reproduction(at, "chosen")
+    assert moved["within_tolerance"] is False
+    for by_method in moved["mean_diff_at_layer"].values():
+        assert by_method == pytest.approx(dict.fromkeys(by_method, 0.125))
+    for column in (0, 2):
+        other = reproduction(column, f"other{column}")
+        assert other["within_tolerance"] is True
+        assert other["mean_diff_at_layer"] == baseline["mean_diff_at_layer"]
+        assert other["max_abs_diff"]["mean_all_layers"] == pytest.approx(0.125)
+
+
 def test_the_random_finder_of_the_run_is_the_one_of_the_p9b_run(
     inputs: Inputs, default_run: RunDir
 ) -> None:
