@@ -14,7 +14,10 @@ It is independent research code, not the authors' code.
 
 Results and full write-up: the
 [project site](https://javierdejesusda.github.io/tomography/), rebuilt from the
-committed results, and [`docs/findings.md`](docs/findings.md).
+committed results, and [`docs/findings.md`](docs/findings.md). The site's View
+PDF button opens the whole page as a PDF, rebuilt with every deploy;
+[`docs/tomography-results.pdf`](docs/tomography-results.pdf) is a snapshot copy
+that can lag behind the site.
 
 ## Why it matters
 

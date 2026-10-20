@@ -1,2 +1,3 @@
 # Run files are committed byte for byte, so a later export can compare them.
 results/** -text
+*.pdf binary
