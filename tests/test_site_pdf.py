@@ -18,12 +18,14 @@ class FakeBrowser:
     def __init__(self, output: bytes | None = b"%PDF-1.7\nbody") -> None:
         self.output = output
         self.commands: list[list[str]] = []
+        self.kwargs: dict[str, object] = {}
         self.printed = ""
 
     def __call__(
         self, command: list[str], **kwargs: object
     ) -> subprocess.CompletedProcess[bytes]:
         self.commands.append(command)
+        self.kwargs = kwargs
         uri = command[-1]
         self.printed = Path(uri.removeprefix("file:///")).read_text("utf-8")
         target = next(a for a in command if a.startswith("--print-to-pdf="))
@@ -60,6 +62,24 @@ def test_the_browser_prints_the_copy_headless_without_header_or_footer(
     assert uri.startswith("file:///")
     assert uri.endswith("/" + pdf.PRINT_NAME)
     assert Path(uri.removeprefix("file:///")).parent == site
+
+
+def test_the_browser_output_reaches_the_log(site: Path) -> None:
+    fake = FakeBrowser()
+    pdf.print_page(site, "chrome-bin", run=fake)
+    assert "capture_output" not in fake.kwargs
+    assert fake.kwargs["check"] is True
+
+
+def test_the_output_path_is_absolute_for_a_relative_site(
+    site: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(site.parent)
+    fake = FakeBrowser()
+    out = pdf.print_page(Path(site.name), "chrome-bin", run=fake)
+    flag = next(a for a in fake.commands[0] if a.startswith("--print-to-pdf="))
+    assert Path(flag.removeprefix("--print-to-pdf=")).is_absolute()
+    assert out.read_bytes().startswith(b"%PDF")
 
 
 def test_the_print_copy_loads_every_image_and_the_page_is_untouched(

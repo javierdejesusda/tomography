@@ -68,11 +68,10 @@ def print_page(
                 "--headless",
                 "--no-pdf-header-footer",
                 f"--virtual-time-budget={VIRTUAL_TIME_BUDGET_MS}",
-                f"--print-to-pdf={target}",
+                f"--print-to-pdf={target.resolve()}",
                 copy.resolve().as_uri(),
             ],
             check=True,
-            capture_output=True,
             timeout=TIMEOUT_SECONDS,
         )
     finally:
