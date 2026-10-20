@@ -88,9 +88,9 @@ def pca_coordinates(
 ) -> tuple[NDArray[np.float32], NDArray[np.float64]]:
     """Projects the rows of every layer on their two leading components.
 
-    Each layer is centered and decomposed on its own in float64 with a full
-    SVD, so the result is deterministic and the whole stack is never cast at
-    once. The sign of each component is fixed so that its largest-magnitude
+    Each layer is centered and decomposed on its own in float64 with an exact
+    thin SVD, so the result is deterministic and the whole stack is never cast
+    at once. The sign of each component is fixed so that its largest-magnitude
     loading is positive, as for the fitted directions.
 
     Args:
