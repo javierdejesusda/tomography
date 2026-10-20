@@ -241,7 +241,7 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
 
 
 def check_reading(
-    reading: CommittedReading, pools: Mapping[str, TypePool], n_layers: int
+    reading: CommittedReading, pools: Mapping[str, TypePool]
 ) -> None:
     """Checks that the contrasts rebuilt from the labels are those of the run.
 
@@ -252,22 +252,21 @@ def check_reading(
     Args:
         reading: The committed P9b run.
         pools: The usable contrasts rebuilt from the P9a labels.
-        n_layers: The number of layers of the model, L.
 
     Raises:
         ValueError: If the contrasts differ, a contrast holds other counts
             than the table of the run, or the run did not read the layers
-            1..L.
+            1..L in order.
     """
     if tuple(pools) != reading.types:
         raise ValueError(
             f"the labels give the contrasts {list(pools)}, the P9b run read "
             f"{list(reading.types)}"
         )
-    if reading.layers != tuple(range(1, n_layers + 1)):
+    if reading.layers != tuple(range(1, len(reading.layers) + 1)):
         raise ValueError(
-            f"the P9b run read the layers {list(reading.layers)}, this model "
-            f"has the layers 1..{n_layers}"
+            f"the P9b run read the layers {list(reading.layers)}, not 1..L "
+            "in order"
         )
     for name, pool in pools.items():
         held = [
@@ -282,6 +281,53 @@ def check_reading(
                 f"{name}: the labels hold {held} items per side of the "
                 f"train and test splits, the P9b table {written}"
             )
+
+
+def check_labels_run(config: Config, reading: CommittedReading) -> None:
+    """Checks that the P9b run was read from the labels this run reads.
+
+    The two paths are compared as directories, resolved from the working
+    directory, so a relative and an absolute spelling of one run agree.
+
+    Args:
+        config: The experiment settings.
+        reading: The committed P9b run.
+
+    Raises:
+        ValueError: If the P9a run the P9b run recorded is not `labels_run`.
+    """
+    recorded = reading.config.labels_run
+    if Path(recorded).resolve() != Path(config.labels_run).resolve():
+        raise ValueError(
+            f"the P9b run was read from the labels in {recorded!r}, this run "
+            f"reads the labels in {config.labels_run!r}"
+        )
+
+
+def check_model(reading: CommittedReading, loaded: LoadedModel) -> None:
+    """Checks that the model has the layers and the width of the readers.
+
+    It is the one check that needs the model, so it is the first thing done
+    once the model is loaded and before anything runs through it.
+
+    Args:
+        reading: The committed P9b run.
+        loaded: The wrapped model.
+
+    Raises:
+        ValueError: If the model has another number of layers than the run
+            read, or another width than its readers.
+    """
+    if loaded.n_layers != len(reading.layers):
+        raise ValueError(
+            f"the P9b run read {len(reading.layers)} layers, this model has "
+            f"{loaded.n_layers}"
+        )
+    if loaded.d_model != reading.directions.shape[-1]:
+        raise ValueError(
+            f"the readers of the P9b run have the width "
+            f"{reading.directions.shape[-1]}, this model has {loaded.d_model}"
+        )
 
 
 def train_draws(
@@ -624,24 +670,74 @@ def published_views(
     return PublishedViews(aurocs, projections, uids)
 
 
-def execute(
+@dataclass(frozen=True, eq=False)
+class Plan:
+    """What a run needs before it touches the model.
+
+    Attributes:
+        pools: The usable contrasts rebuilt from the labels.
+        draws: The draws of each contrast, see `train_draws`.
+        selected: The questions to run through the model, see
+            `select_items`.
+        surface: The recomputed surface controls beside the committed ones,
+            see `compare_surface`.
+    """
+
+    pools: dict[str, TypePool]
+    draws: dict[str, list[TrainDraw]]
+    selected: list[LabeledItem]
+    surface: dict[str, dict[str, dict[str, Any]]]
+
+
+def prepare(
     config: Config,
-    run_dir: RunDir,
-    loaded: LoadedModel,
     items: Sequence[LabeledItem],
     *,
     known_contrasts: bool,
     reading: CommittedReading,
+) -> Plan:
+    """Checks every input and lists the questions to extract, with no model.
+
+    Args:
+        config: The experiment settings.
+        items: The labeled questions of the P9a run.
+        known_contrasts: The P9a gate of the labels.
+        reading: The committed P9b run, see `load_reading`.
+
+    Returns:
+        The plan of the run.
+
+    Raises:
+        ValueError: If `batch_size` is below 1, the P9b run was read from
+            other labels (see `check_labels_run`), the contrasts rebuilt from
+            the labels differ from those of the run (see `check_reading`) or
+            a surface control cannot be computed.
+    """
+    if config.batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+    check_labels_run(config, reading)
+    pools, _ = p9b_reading.usable_pools(reading.config, items, known_contrasts)
+    check_reading(reading, pools)
+    surface = compare_surface(pools, reading)
+    draws = train_draws(pools, reading.config)
+    return Plan(pools, draws, select_items(pools, draws), surface)
+
+
+def run_plan(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    plan: Plan,
+    reading: CommittedReading,
 ) -> None:
     """Extracts the activations of a P9b run and checks its numbers on them.
 
-    Rebuilds the contrasts of the run from the labels, runs the test items
-    and the train items of the committed draws through the model once, at
-    the layers 1..L the P9b run read and with the shared few-shot prefix, then
-    refits and rescores the committed draws of every method. The layers stay
-    in the order and at the positions of the P9b run, because the random
-    finder draws its direction from the position of a layer. The layer to
-    compare at is the one the P9b run chose.
+    Runs the test items and the train items of the committed draws through
+    the model once, at the layers 1..L the P9b run read and with the shared
+    few-shot prefix, then refits and rescores the committed draws of every
+    method. The layers stay in the order and at the positions of the P9b run,
+    because the random finder draws its direction from the position of a
+    layer. The layer to compare at is the one the P9b run chose.
 
     Writes `projections.npz`: `layers` (K,), `test` (M, T, S, K) the test
     AUROC of each method, contrast, draw and layer refitted here, `shuffled`
@@ -661,24 +757,16 @@ def execute(
         config: The experiment settings.
         run_dir: The run to write into.
         loaded: The wrapped model.
-        items: The labeled questions of the P9a run.
-        known_contrasts: The P9a gate of the labels.
+        plan: The checked inputs, see `prepare`.
         reading: The committed P9b run, see `load_reading`.
 
     Raises:
-        ValueError: If `batch_size` is below 1, the contrasts rebuilt from
-            the labels differ from those of the run (see `check_reading`) or
-            a surface control cannot be computed. Nothing runs through the
-            model before these.
+        ValueError: If the model does not fit the readers of the run (see
+            `check_model`). Nothing runs through the model before that.
     """
-    if config.batch_size < 1:
-        raise ValueError("batch_size must be at least 1")
+    check_model(reading, loaded)
     protocol = reading.config
-    pools, _ = p9b_reading.usable_pools(protocol, items, known_contrasts)
-    check_reading(reading, pools, loaded.n_layers)
-    surface = compare_surface(pools, reading)
-    draws = train_draws(pools, protocol)
-    selected = select_items(pools, draws)
+    pools, draws, selected = plan.pools, plan.draws, plan.selected
     template = p9_template(protocol.template, DEFAULT_SHOTS[: protocol.n_shots])
     acts = collect_item_activations(
         loaded,
@@ -726,18 +814,51 @@ def execute(
                 protocol.methods,
                 reading.types,
             ),
-            "surface": surface,
+            "surface": plan.surface,
             "surface_equal": all(
                 entry["equal"]
-                for by_control in surface.values()
+                for by_control in plan.surface.values()
                 for entry in by_control.values()
             ),
         },
     )
 
 
+def execute(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    items: Sequence[LabeledItem],
+    *,
+    known_contrasts: bool,
+    reading: CommittedReading,
+) -> None:
+    """Checks the inputs, then extracts and writes a run (see `run_plan`).
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+        loaded: The wrapped model.
+        items: The labeled questions of the P9a run.
+        known_contrasts: The P9a gate of the labels.
+        reading: The committed P9b run, see `load_reading`.
+
+    Raises:
+        ValueError: If an input is refused (see `prepare`) or the model does
+            not fit the readers (see `check_model`). Nothing runs through the
+            model before these.
+    """
+    plan = prepare(
+        config, items, known_contrasts=known_contrasts, reading=reading
+    )
+    run_plan(config, run_dir, loaded, plan, reading)
+
+
 def run(config: Config, run_dir: RunDir) -> None:
-    """Loads the labels, the P9b run and the model on the CPU, then runs it.
+    """Loads the labels and the P9b run, checks them, then loads the model.
+
+    Every input is checked before the model is loaded, apart from the one
+    check that needs the model (see `check_model`), which comes right after.
 
     Args:
         config: The experiment settings.
@@ -745,18 +866,19 @@ def run(config: Config, run_dir: RunDir) -> None:
 
     Raises:
         ValueError: If either run is unfinished, of another model, or the
-            P9b run lacks a file (see `load_labeled` and `load_reading`).
+            P9b run lacks a file (see `load_labeled` and `load_reading`), or
+            an input is refused (see `prepare`).
     """
     items, labels = load_labeled(config.labels_run, model=config.model)
     reading = load_reading(config.reading_run, model=config.model)
-    execute(
+    plan = prepare(
         config,
-        run_dir,
-        load_model(config.model, device="cpu", dtype=torch.float32),
         items,
         known_contrasts=bool(labels["known_contrasts"]),
         reading=reading,
     )
+    loaded = load_model(config.model, device="cpu", dtype=torch.float32)
+    run_plan(config, run_dir, loaded, plan, reading)
 
 
 def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:

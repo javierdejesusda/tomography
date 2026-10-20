@@ -22,6 +22,9 @@ import tomography.experiments.v1_knowledge_views as v1_module
 from tomography.experiments.v1_knowledge_views import COUNT_COLUMNS
 from tomography.experiments.v1_knowledge_views import CommittedReading
 from tomography.experiments.v1_knowledge_views import Config
+from tomography.experiments.v1_knowledge_views import Plan
+from tomography.experiments.v1_knowledge_views import check_labels_run
+from tomography.experiments.v1_knowledge_views import check_model
 from tomography.experiments.v1_knowledge_views import check_reading
 from tomography.experiments.v1_knowledge_views import compare_auroc
 from tomography.experiments.v1_knowledge_views import compare_surface
@@ -29,10 +32,12 @@ from tomography.experiments.v1_knowledge_views import displayed_items
 from tomography.experiments.v1_knowledge_views import execute
 from tomography.experiments.v1_knowledge_views import load_reading
 from tomography.experiments.v1_knowledge_views import plot
+from tomography.experiments.v1_knowledge_views import prepare
 from tomography.experiments.v1_knowledge_views import published_views
 from tomography.experiments.v1_knowledge_views import refit_methods
 from tomography.experiments.v1_knowledge_views import refit_shuffled
 from tomography.experiments.v1_knowledge_views import run
+from tomography.experiments.v1_knowledge_views import run_plan
 from tomography.experiments.v1_knowledge_views import select_items
 from tomography.experiments.v1_knowledge_views import shuffled_draw
 from tomography.experiments.v1_knowledge_views import train_draws
@@ -536,7 +541,7 @@ def test_check_reading_accepts_the_pools_the_run_was_read_from(
 ) -> None:
     committed = load_reading(inputs.reading.path, model="tiny")
 
-    check_reading(committed, _pools(committed), tiny_arch.n_layers)
+    check_reading(committed, _pools(committed))
 
 
 def test_check_reading_refuses_other_contrasts(
@@ -547,7 +552,7 @@ def test_check_reading_refuses_other_contrasts(
     del pools["false_premise"]
 
     with pytest.raises(ValueError, match=r"contrasts.*false_premise"):
-        check_reading(committed, pools, tiny_arch.n_layers)
+        check_reading(committed, pools)
 
 
 def test_check_reading_refuses_other_item_counts(
@@ -562,16 +567,197 @@ def test_check_reading_refuses_other_item_counts(
     )
 
     with pytest.raises(ValueError, match="unknowable_detail"):
-        check_reading(committed, pools, tiny_arch.n_layers)
+        check_reading(committed, pools)
 
 
-def test_check_reading_refuses_a_model_of_another_depth(
+def test_check_reading_refuses_layers_that_do_not_start_at_one(
+    inputs: Inputs,
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    skipped = dataclasses.replace(committed, layers=(2, 3, 4))
+
+    with pytest.raises(ValueError, match="layers"):
+        check_reading(skipped, _pools(committed))
+
+
+def test_check_model_accepts_the_model_the_run_was_read_with(
     tiny_arch: LoadedModel, inputs: Inputs
 ) -> None:
     committed = load_reading(inputs.reading.path, model="tiny")
 
+    check_model(committed, tiny_arch)
+
+
+def test_check_model_refuses_a_model_of_another_depth(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    shallow = dataclasses.replace(committed, layers=committed.layers[:2])
+
     with pytest.raises(ValueError, match="layers"):
-        check_reading(committed, _pools(committed), tiny_arch.n_layers + 1)
+        check_model(shallow, tiny_arch)
+
+
+def test_check_model_refuses_a_model_of_another_width(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    narrow = dataclasses.replace(
+        committed, directions=committed.directions[..., :8]
+    )
+
+    with pytest.raises(ValueError, match="width"):
+        check_model(narrow, tiny_arch)
+
+
+def test_check_labels_run_compares_the_directories_not_the_spellings(
+    inputs: Inputs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    monkeypatch.chdir(inputs.labels.path.parent)
+    recorded = dataclasses.replace(
+        committed.config, labels_run=inputs.labels.path.name
+    )
+    relative = dataclasses.replace(committed, config=recorded)
+
+    check_labels_run(_config(inputs), relative)
+    check_labels_run(
+        dataclasses.replace(
+            _config(inputs), labels_run=inputs.labels.path.name
+        ),
+        committed,
+    )
+
+
+def test_check_labels_run_refuses_other_labels(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    elsewhere = dataclasses.replace(
+        committed.config, labels_run=str(tmp_path / "other" / "p9a")
+    )
+    moved = dataclasses.replace(committed, config=elsewhere)
+
+    with pytest.raises(ValueError, match=r"labels.*other"):
+        check_labels_run(_config(inputs), moved)
+
+
+def test_prepare_lists_the_questions_without_the_model(
+    inputs: Inputs,
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pools = _pools(committed)
+    draws = train_draws(pools, committed.config)
+
+    plan = prepare(
+        _config(inputs), _items(), known_contrasts=True, reading=committed
+    )
+
+    assert isinstance(plan, Plan)
+    assert list(plan.pools) == USABLE
+    assert [i.example.uid for i in plan.selected] == [
+        i.example.uid for i in select_items(pools, draws)
+    ]
+    assert plan.surface == compare_surface(pools, committed)
+    assert list(plan.draws) == USABLE
+
+
+def _set_table_cell(path: Path, name: str, column: str, value: Any) -> None:
+    document = json.loads((path / "table.json").read_text("utf-8"))
+    table = document["data"]
+    at = table["columns"].index(column)
+    for row in table["rows"]:
+        if row[0] == name:
+            row[at] = value
+    (path / "table.json").write_text(json.dumps(document), "utf-8")
+
+
+def test_run_refuses_a_reading_run_read_from_other_labels_before_the_model(
+    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _never_loaded(monkeypatch)
+    path = _copy(inputs.reading, tmp_path / "reading")
+    _edit_json(path / "config.json", labels_run=str(tmp_path / "other" / "p9a"))
+    config = dataclasses.replace(_config(inputs), reading_run=str(path))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match=r"labels.*other"):
+        run(config, run_dir)
+
+
+def test_execute_refuses_a_reading_run_read_from_other_labels(
+    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    elsewhere = dataclasses.replace(
+        committed.config, labels_run=str(tmp_path / "other" / "p9a")
+    )
+    moved = dataclasses.replace(committed, config=elsewhere)
+
+    with pytest.raises(ValueError, match=r"labels.*other"):
+        _execute(tiny_arch, tmp_path, inputs, reading=moved)
+
+
+def test_run_refuses_a_batch_size_before_the_model(
+    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _never_loaded(monkeypatch)
+    config = _config(inputs, batch_size=0)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match="batch_size"):
+        run(config, run_dir)
+
+
+def test_run_refuses_labels_that_differ_from_the_reading_before_the_model(
+    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _never_loaded(monkeypatch)
+    path = _copy(inputs.reading, tmp_path / "reading")
+    _set_table_cell(path, "unknowable_detail", "n_positive_test", 999)
+    config = dataclasses.replace(_config(inputs), reading_run=str(path))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match="unknowable_detail"):
+        run(config, run_dir)
+
+
+def test_run_computes_the_surface_controls_before_the_model(
+    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _never_loaded(monkeypatch)
+
+    def broken(pool: Any) -> dict[str, float | None]:
+        raise ValueError("no control")
+
+    monkeypatch.setattr(v1_module, "surface_baselines", broken)
+    config = _config(inputs)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match="no control"):
+        run(config, run_dir)
+
+
+def test_the_forward_pass_waits_for_the_check_of_the_model(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def never(*args: Any, **kwargs: Any) -> ItemActivations:
+        raise AssertionError("the forward pass must not start")
+
+    monkeypatch.setattr(v1_module, "collect_item_activations", never)
+    committed = load_reading(inputs.reading.path, model="tiny")
+    plan = prepare(
+        _config(inputs), _items(), known_contrasts=True, reading=committed
+    )
+    shallow = dataclasses.replace(committed, layers=committed.layers[:2])
+    config = _config(inputs)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match="layers"):
+        run_plan(config, run_dir, tiny_arch, plan, shallow)
 
 
 @dataclasses.dataclass(frozen=True)
