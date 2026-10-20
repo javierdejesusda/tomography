@@ -1,13 +1,16 @@
 """Residual-stream activations at chosen token positions, as numpy arrays."""
 
 from collections.abc import Sequence
+import copy
 from dataclasses import dataclass
 from typing import Any
 from typing import Literal
+from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
 import torch
+from transformers import Cache
 
 from tomography.hooks import capture_residuals
 from tomography.model import BosMode
@@ -191,6 +194,118 @@ def _check_arguments(
         raise ValueError(f"{name} has {len(spans)} entries for {n_texts} texts")
 
 
+def _shared_prefix_length(
+    loaded: LoadedModel,
+    texts: Sequence[str],
+    *,
+    bos: BosMode | None,
+    batch_size: int,
+    position: PositionStrategy = "last",
+    spans: Sequence[Span | None] | None = None,
+) -> int:
+    """Returns the length of the token prefix common to all texts.
+
+    The split is on token ids, never on text: BPE merges across a text-level
+    boundary (GPT-2 encodes a blank line as one token at the end of a string
+    but as two newline tokens before "Q"), so the tokens of a prefix text are
+    not always the first tokens of the full text. The length counts a
+    prepended BOS and stops at the earliest token any text reads, so every
+    read token is computed (for `last` that leaves each text at least its
+    last token).
+
+    Args:
+        loaded: The wrapped model.
+        texts: The stimuli.
+        bos: BOS policy for `LoadedModel.encode`.
+        batch_size: Texts encoded per call.
+        position: The strategy that selects the read tokens.
+        spans: The character ranges `position` needs, if any.
+
+    Returns:
+        The number of leading model input tokens all texts share, capped at
+        the earliest read token; 0 when they share none.
+
+    Raises:
+        ValueError: If a span is missing or overlaps no token (the error
+            names the stimulus).
+    """
+    reference = loaded.encode(texts[:1], bos=bos).input_ids[0]
+    shared = len(reference)
+    for first in range(0, len(texts), batch_size):
+        batch = loaded.encode(texts[first : first + batch_size], bos=bos)
+        width = min(len(reference), batch.input_ids.shape[1])
+        differs = batch.input_ids[:, :width] != reference[:width]
+        mismatch = torch.where(
+            differs.any(dim=1), differs.int().argmax(dim=1), width
+        )
+        earliest = min(
+            _select_tokens(position, first + row, batch, row, spans)[0]
+            for row in range(len(batch.lengths))
+        )
+        shared = min(shared, int(mismatch.min()), earliest)
+    return shared
+
+
+def _build_prefix(
+    loaded: LoadedModel, text: str, bos: BosMode | None, length: int
+) -> Cache | None:
+    """Caches the first `length` model input tokens of a stimulus.
+
+    Args:
+        loaded: The wrapped model.
+        text: A stimulus; the prefix is common to all of them.
+        bos: BOS policy for `LoadedModel.encode`.
+        length: The shared prefix length, from `_shared_prefix_length`.
+
+    Returns:
+        The key/value cache of the prefix at batch size 1, or None when the
+        texts share nothing but a prepended BOS, so the default path runs.
+    """
+    batch = loaded.encode([text], bos=bos, padding_side="right")
+    if length <= int(batch.has_bos):
+        return None
+    with torch.inference_mode():
+        output = loaded.decoder(
+            input_ids=batch.input_ids[:, :length].to(loaded.device),
+            attention_mask=batch.attention_mask[:, :length].to(loaded.device),
+            position_ids=batch.position_ids[:, :length].to(loaded.device),
+            use_cache=True,
+        )
+    return cast(Cache, output.past_key_values)
+
+
+def _run_decoder(
+    loaded: LoadedModel,
+    batch: EncodedBatch,
+    prefix: Cache | None,
+    skipped: int,
+) -> None:
+    """Runs the decoder over a batch, or over its suffixes after the prefix.
+
+    The suffixes continue a copy of the cached prefix: a forward extends a
+    cache in place, so every batch gets its own. The mask spans prefix plus
+    suffix and the positions are the full-prompt ones.
+
+    Args:
+        loaded: The wrapped model.
+        batch: The full-prompt batch, right padded.
+        prefix: The cached prefix, or None to run every token.
+        skipped: The prefix length in tokens, 0 without a prefix.
+    """
+    device = loaded.device
+    cache = None
+    if prefix is not None:
+        cache = copy.deepcopy(prefix)
+        cache.batch_repeat_interleave(len(batch.lengths))
+    loaded.decoder(
+        input_ids=batch.input_ids[:, skipped:].to(device),
+        attention_mask=batch.attention_mask.to(device),
+        position_ids=batch.position_ids[:, skipped:].to(device),
+        past_key_values=cache,
+        use_cache=cache is not None,
+    )
+
+
 def _collect_batch(
     loaded: LoadedModel,
     texts: Sequence[str],
@@ -199,31 +314,29 @@ def _collect_batch(
     position: PositionStrategy,
     spans: Sequence[Span | None] | None,
     bos: BosMode | None,
+    prefix: Cache | None,
 ) -> tuple[torch.Tensor, list[tuple[int, int, int, int]]]:
     """Runs one batch; returns `(K, rows, d)` data and per-row metadata.
 
-    The metadata tuples are `(stimulus, rank, token, token_id)`.
+    The metadata tuples are `(stimulus, rank, token, token_id)`, with the
+    token index in the full prompt even when a cached prefix is skipped.
     """
     batch = loaded.encode(texts, bos=bos, padding_side="right")
     selections = [
         _select_tokens(position, first + row, batch, row, spans)
         for row in range(len(texts))
     ]
+    skipped = 0 if prefix is None else prefix.get_seq_length()
     rows = torch.tensor(
         [row for row, tokens in enumerate(selections) for _ in tokens],
         device=loaded.device,
     )
     cols = torch.tensor(
-        [token for tokens in selections for token in tokens],
+        [token - skipped for tokens in selections for token in tokens],
         device=loaded.device,
     )
     with torch.inference_mode(), capture_residuals(loaded, layers) as captured:
-        loaded.decoder(
-            input_ids=batch.input_ids.to(loaded.device),
-            attention_mask=batch.attention_mask.to(loaded.device),
-            position_ids=batch.position_ids.to(loaded.device),
-            use_cache=False,
-        )
+        _run_decoder(loaded, batch, prefix, skipped)
         gathered = torch.stack(
             [captured[layer][rows, cols].float() for layer in layers]
         )
@@ -258,6 +371,7 @@ def collect_activations(
     concept_spans: Sequence[Span | None] | None = None,
     bos: BosMode | None = None,
     batch_size: int = 8,
+    share_prefix: bool = False,
 ) -> Activations:
     """Collects residual-stream activations for a list of texts.
 
@@ -279,6 +393,16 @@ def collect_activations(
         bos: BOS policy for `LoadedModel.encode`; None uses the model's
             default.
         batch_size: Texts per forward pass.
+        share_prefix: Compute the key/value cache of the token prefix common
+            to all texts once and run only the remaining tokens of each
+            text, which saves the repeated demonstrations of a few-shot
+            prompt. The prefix ends at the earliest token any text reads, so
+            an early span shrinks the saving, and texts that share nothing
+            but a prepended BOS run the default path. In float32 the rows
+            equal those of the default path within the tolerance above; in
+            half precision they differ by more, as batch sizes already do.
+            The suffix forward keeps the key/value tensors of the whole
+            batch alive, so peak memory is higher than the default path.
 
     Returns:
         The activations, rows stimulus-major then in token order.
@@ -293,6 +417,17 @@ def collect_activations(
     selected = list(range(loaded.n_layers + 1) if layers is None else layers)
     if not selected:
         raise ValueError("layers is empty")
+    prefix = None
+    if share_prefix:
+        length = _shared_prefix_length(
+            loaded,
+            texts,
+            bos=bos,
+            batch_size=batch_size,
+            position=position,
+            spans=spans,
+        )
+        prefix = _build_prefix(loaded, texts[0], bos, length)
     chunks: list[torch.Tensor] = []
     metadata: list[tuple[int, int, int, int]] = []
     for first in range(0, len(texts), batch_size):
@@ -304,6 +439,7 @@ def collect_activations(
             position,
             spans,
             bos,
+            prefix,
         )
         chunks.append(chunk)
         metadata += rows
