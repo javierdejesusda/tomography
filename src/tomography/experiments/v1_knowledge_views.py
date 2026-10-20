@@ -21,6 +21,8 @@ from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
+from sklearn.decomposition import TruncatedSVD
+from sklearn.feature_extraction.text import TfidfVectorizer
 import torch
 
 from tomography.analysis import pca_coordinates
@@ -889,6 +891,74 @@ def supervised_views(
     return arrays
 
 
+def text_view(
+    texts: Sequence[str], *, seed: int
+) -> tuple[NDArray[np.float32], NDArray[np.float64]]:
+    """Places questions by their words alone, the text-only control of a view.
+
+    The features are TF-IDF weights of the word 1-grams and 2-grams seen in
+    at least 2 of the texts, as in the text classifier of the P9b table. A
+    truncated SVD keeps the two leading components.
+
+    Args:
+        texts: The questions of a panel.
+        seed: Seeds the randomized SVD.
+
+    Returns:
+        The coordinates of shape (n, 2) float32 and the share of the
+        variance of the features each component keeps, shape (2,) float64.
+
+    Raises:
+        ValueError: If the texts share too few words to give two components.
+    """
+    vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=2, lowercase=True)
+    features = vectorizer.fit_transform(texts)
+    svd = TruncatedSVD(n_components=2, random_state=seed)
+    coordinates = svd.fit_transform(features)
+    return (
+        np.asarray(coordinates, dtype=np.float32),
+        np.asarray(svd.explained_variance_ratio_, dtype=np.float64),
+    )
+
+
+def text_views(
+    questions: Mapping[str, str],
+    panels: Mapping[str, Sequence[str]],
+    *,
+    seed: int,
+) -> dict[str, NDArray[Any]]:
+    """Fits the text-only view of each panel on the questions it shows.
+
+    The text is read here and goes no further: the arrays hold coordinates
+    only.
+
+    Args:
+        questions: The text of each question by uid.
+        panels: The uids each panel shows, see `panel_union`.
+        seed: The seed of the run; each panel derives its own.
+
+    Returns:
+        For each panel, `coordinates_<panel>` (n, 2) float32 and
+        `ratios_<panel>` (2,) float64, in the order of its uids.
+
+    Raises:
+        ValueError: If a panel item has no question, or a panel gives no
+            view (see `text_view`).
+    """
+    arrays: dict[str, NDArray[Any]] = {}
+    for panel, uids in panels.items():
+        for uid in uids:
+            if uid not in questions:
+                raise ValueError(f"no question for {uid!r}")
+        coordinates, ratios = text_view(
+            [questions[uid] for uid in uids],
+            seed=derive_seed(seed, "text", panel),
+        )
+        arrays[f"coordinates_{panel}"] = coordinates
+        arrays[f"ratios_{panel}"] = ratios
+    return arrays
+
+
 @dataclass(frozen=True, eq=False)
 class Plan:
     """What a run needs before it touches the model.
@@ -900,12 +970,17 @@ class Plan:
             `select_items`.
         surface: The recomputed surface controls beside the committed ones,
             see `compare_surface`.
+        panels: The contrasts and the uids of the items each panel of the
+            figures shows, see `panel_union`.
+        text: The text-only view of each panel, see `text_views`.
     """
 
     pools: dict[str, TypePool]
     draws: dict[str, list[TrainDraw]]
     selected: list[LabeledItem]
     surface: dict[str, dict[str, dict[str, Any]]]
+    panels: dict[str, dict[str, Any]]
+    text: dict[str, NDArray[Any]]
 
 
 def prepare(
@@ -929,8 +1004,9 @@ def prepare(
     Raises:
         ValueError: If `batch_size` is below 1, the P9b run was read from
             other labels (see `check_labels_run`), the contrasts rebuilt from
-            the labels differ from those of the run (see `check_reading`) or
-            a surface control cannot be computed.
+            the labels differ from those of the run (see `check_reading`), a
+            surface control cannot be computed or a text view cannot be
+            fitted (see `text_view`).
     """
     if config.batch_size < 1:
         raise ValueError("batch_size must be at least 1")
@@ -939,7 +1015,22 @@ def prepare(
     check_reading(reading, pools)
     surface = compare_surface(pools, reading)
     draws = train_draws(pools, reading.config)
-    return Plan(pools, draws, select_items(pools, draws), surface)
+    shown = displayed_uids(pools)
+    panels = {
+        panel: {"types": list(types), "uids": panel_union(types, shown)}
+        for panel, types in panel_contrasts(pools).items()
+    }
+    questions = {
+        item.example.uid: item.example.question
+        for pool in pools.values()
+        for item in (*pool.positive, *pool.negative)
+    }
+    text = text_views(
+        questions,
+        {name: panel["uids"] for name, panel in panels.items()},
+        seed=config.seed,
+    )
+    return Plan(pools, draws, select_items(pools, draws), surface, panels, text)
 
 
 def run_plan(
@@ -970,6 +1061,8 @@ def run_plan(
     its contrasts and the uids of the items it shows (see `panel_union`).
     Writes `pca2d.npz`: the 2D views of each panel (see `pca_views`) and
     the supervised view of each shown contrast (see `supervised_views`).
+    Writes `text2d.npz`: the text-only view of each panel (see
+    `text_views`); the questions are read to make it and are not stored.
     Writes `summary`: the layer, the number of items extracted, the dtype of
     this run (`extraction_dtype`, that of the loaded model) and the one the
     P9b run was extracted in (`reading_run_dtype`, the registry default of
@@ -994,6 +1087,8 @@ def run_plan(
     check_model(reading, loaded)
     protocol = reading.config
     pools, draws, selected = plan.pools, plan.draws, plan.selected
+    panels = plan.panels
+    panel_uids = {name: panel["uids"] for name, panel in panels.items()}
     template = p9_template(protocol.template, DEFAULT_SHOTS[: protocol.n_shots])
     acts = collect_item_activations(
         loaded,
@@ -1008,12 +1103,7 @@ def run_plan(
     test = refit_methods(acts, pools, draws, protocol)
     shuffled = refit_shuffled(acts, pools, draws, protocol, seed=config.seed)
     views = published_views(reading, acts, pools)
-    panels = {
-        panel: {"types": list(shown), "uids": panel_union(shown, views.uids)}
-        for panel, shown in panel_contrasts(pools).items()
-    }
     layers = view_layers(reading, loaded.n_layers)
-    panel_uids = {name: panel["uids"] for name, panel in panels.items()}
     run_dir.write_arrays(
         "pca2d",
         **pca_views(acts, layers, panel_uids),
@@ -1025,6 +1115,7 @@ def run_plan(
             {name: panel["types"] for name, panel in panels.items()},
         ),
     )
+    run_dir.write_arrays("text2d", **plan.text)
     run_dir.write_arrays(
         "projections",
         layers=np.asarray(reading.layers, dtype=np.int64),

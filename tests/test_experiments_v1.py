@@ -18,6 +18,7 @@ from tomography.analysis import pca_coordinates
 from tomography.cli import load_experiment
 from tomography.experiments import p9b_reading
 from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.sweep import chat_format_for
 import tomography.experiments.v1_knowledge_views as v1_module
 from tomography.experiments.v1_knowledge_views import COUNT_COLUMNS
@@ -47,6 +48,8 @@ from tomography.experiments.v1_knowledge_views import run_plan
 from tomography.experiments.v1_knowledge_views import select_items
 from tomography.experiments.v1_knowledge_views import shuffled_draw
 from tomography.experiments.v1_knowledge_views import supervised_views
+from tomography.experiments.v1_knowledge_views import text_view
+from tomography.experiments.v1_knowledge_views import text_views
 from tomography.experiments.v1_knowledge_views import train_draws
 from tomography.experiments.v1_knowledge_views import view_layers
 from tomography.export import ExportError
@@ -1165,6 +1168,7 @@ def test_execute_writes_the_files_of_a_run(default_run: RunDir) -> None:
         "projections.json",
         "projections.npz",
         "summary.json",
+        "text2d.npz",
     ]
 
 
@@ -1456,13 +1460,13 @@ def test_execute_is_deterministic(
     first = _execute(tiny_arch, tmp_path / "a", inputs)
     second = _execute(tiny_arch, tmp_path / "b", inputs)
 
-    one, two = (
-        first.read_arrays("projections"),
-        second.read_arrays("projections"),
-    )
-    assert one.keys() == two.keys()
-    for key in one:
-        np.testing.assert_array_equal(one[key], two[key], err_msg=key)
+    for name in ("projections", "pca2d", "text2d"):
+        one, two = first.read_arrays(name), second.read_arrays(name)
+        assert one.keys() == two.keys(), name
+        for key in one:
+            np.testing.assert_array_equal(
+                one[key], two[key], err_msg=f"{name}.{key}"
+            )
     assert first.read_json("projections") == second.read_json("projections")
     assert first.read_json("summary") == second.read_json("summary")
 
@@ -1639,6 +1643,7 @@ def test_every_file_of_a_run_passes_the_export(
         "projections.npz",
         "projections.json",
         "pca2d.npz",
+        "text2d.npz",
         "summary.json",
     ):
         assert is_exported(name), name
@@ -1658,6 +1663,7 @@ def test_every_file_of_a_run_passes_the_export(
         "projections.json",
         "projections.npz",
         "summary.json",
+        "text2d.npz",
     ]
 
 
@@ -2038,3 +2044,149 @@ def test_execute_writes_the_supervised_view_of_each_shown_contrast(
             assert view.shape == (3, len(entry["uids"]), 2)
             assert view.dtype == np.float32
     assert "supervised_obscure_real_pop" not in arrays
+
+
+def test_text_view_separates_questions_that_share_no_words() -> None:
+    first = [f"alpha beta gamma delta {i}" for i in range(8)]
+    second = [f"red green blue yellow {i}" for i in range(8)]
+
+    coordinates, ratios = text_view([*first, *second], seed=0)
+
+    assert coordinates.shape == (16, 2)
+    assert coordinates.dtype == np.float32
+    assert ratios.shape == (2,)
+    assert ratios.dtype == np.float64
+    assert (ratios > 0.0).all()
+    assert ratios.sum() <= 1.0 + 1e-9
+    top = coordinates[:, 0]
+    assert np.sign(top[:8]).tolist() == [np.sign(top[0])] * 8
+    assert np.sign(top[8:]).tolist() == [-np.sign(top[0])] * 8
+
+
+WORDS = ("river", "mountain", "harbor", "forest", "valley", "island")
+
+
+def _sentence(i: int) -> str:
+    return f"who found the {WORDS[i % 6]} near the {WORDS[(i * 5 + 1) % 6]}"
+
+
+def test_text_view_is_deterministic_for_a_seed() -> None:
+    texts = [_sentence(i) for i in range(30)]
+
+    one = text_view(texts, seed=7)
+    two = text_view(texts, seed=7)
+
+    np.testing.assert_array_equal(one[0], two[0])
+    np.testing.assert_array_equal(one[1], two[1])
+
+
+def test_text_views_use_the_questions_of_the_items_a_panel_shows() -> None:
+    questions = {f"q:{i}": _sentence(i) for i in range(30)}
+    panels = {
+        "entity": ["q:3", "q:1", "q:7", "q:12", "q:20", "q:25"],
+        "unknown": ["q:0", "q:5", "q:9", "q:2", "q:8"],
+    }
+
+    arrays = text_views(questions, panels, seed=4)
+
+    assert set(arrays) == {
+        "coordinates_entity",
+        "ratios_entity",
+        "coordinates_unknown",
+        "ratios_unknown",
+    }
+    for panel, uids in panels.items():
+        coordinates, ratios = text_view(
+            [questions[uid] for uid in uids], seed=derive_seed(4, "text", panel)
+        )
+        np.testing.assert_array_equal(
+            arrays[f"coordinates_{panel}"], coordinates
+        )
+        np.testing.assert_array_equal(arrays[f"ratios_{panel}"], ratios)
+
+
+def test_text_views_refuse_an_item_without_a_question() -> None:
+    with pytest.raises(ValueError, match="no question for 'ghost:1'"):
+        text_views({"q:1": "a b"}, {"entity": ["q:1", "ghost:1"]}, seed=0)
+
+
+def test_execute_writes_the_text_view_of_each_panel(
+    tiny_arch: LoadedModel, inputs: Inputs, default_run: RunDir
+) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pools = _pools(committed)
+    questions = {
+        i.example.uid: i.example.question
+        for pool in pools.values()
+        for i in (*pool.positive, *pool.negative)
+    }
+
+    arrays = default_run.read_arrays("text2d")
+
+    assert set(arrays) == {
+        *(f"coordinates_{panel}" for panel in sidecar["panels"]),
+        *(f"ratios_{panel}" for panel in sidecar["panels"]),
+    }
+    want = text_views(
+        questions,
+        {name: entry["uids"] for name, entry in sidecar["panels"].items()},
+        seed=0,
+    )
+    for key, value in want.items():
+        np.testing.assert_array_equal(arrays[key], value, err_msg=key)
+    for panel, entry in sidecar["panels"].items():
+        assert arrays[f"coordinates_{panel}"].shape == (len(entry["uids"]), 2)
+        assert arrays[f"ratios_{panel}"].shape == (2,)
+
+
+def test_the_seed_of_the_run_reaches_the_text_view(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seeds: list[int] = []
+    original = v1_module.text_view
+
+    def spy(texts: Any, *, seed: int) -> Any:
+        seeds.append(seed)
+        return original(texts, seed=seed)
+
+    monkeypatch.setattr(v1_module, "text_view", spy)
+
+    _execute(tiny_arch, tmp_path, inputs, seed=3)
+
+    assert seeds == [
+        derive_seed(3, "text", p) for p in ("entity", "question", "unknown")
+    ]
+
+
+def test_no_file_of_a_run_holds_a_question(default_run: RunDir) -> None:
+    questions = [i.example.question.encode() for i in _items()]
+
+    for path in default_run.path.iterdir():
+        content = path.read_bytes()
+        for question in questions[:50]:
+            assert question not in content, path.name
+        assert b"Who is" not in content, path.name
+
+
+def test_a_text_view_that_cannot_be_fitted_fails_before_the_forward_pass(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def never(*args: Any, **kwargs: Any) -> ItemActivations:
+        raise AssertionError("the forward pass must not start")
+
+    def broken(texts: Any, *, seed: int) -> Any:
+        raise ValueError("no text view")
+
+    monkeypatch.setattr(v1_module, "collect_item_activations", never)
+    monkeypatch.setattr(v1_module, "text_view", broken)
+
+    with pytest.raises(ValueError, match="no text view"):
+        _execute(tiny_arch, tmp_path, inputs)
