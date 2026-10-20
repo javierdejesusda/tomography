@@ -73,6 +73,12 @@ def _score(concept: str, model: str) -> tuple[float, float, int]:
     return float(reader), _random_at(path, stem, layer), int(n)
 
 
+def test_the_row_labels_may_wrap_on_paper(
+    output: registry.TableOutput,
+) -> None:
+    assert output.wrap_labels is True
+
+
 def test_columns_are_a_reader_and_random_pair_per_concept(
     output: registry.TableOutput,
 ) -> None:

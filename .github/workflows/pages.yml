@@ -11,14 +11,23 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "results/**"
+      - "src/tomography/site/**"
+      - "src/tomography/viz/**"
+      - "docs/references.bib"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -45,12 +54,16 @@ jobs:
       - name: Build the site
         run: uv run python -m tomography.site build --out _site
 
+      - name: Print the page to PDF
+        run: uv run python -m tomography.site pdf --site _site
+
       - name: Upload the site
         uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10

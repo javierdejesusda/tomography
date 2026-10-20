@@ -14,6 +14,7 @@ from tomography.site import __main__ as cli
 from tomography.site import build as build_module
 from tomography.site import content
 from tomography.site import page
+from tomography.site import pdf
 from tomography.site import references
 from tomography.site import registry
 from tomography.site.manifest import Manifest
@@ -51,7 +52,7 @@ def css() -> str:
     return (STATIC / "site.css").read_text("utf-8")
 
 
-def test_the_masthead_commit_is_the_last_commit_of_the_results() -> None:
+def test_the_results_commit_is_the_last_commit_of_the_results() -> None:
     sha, built = build_module.results_commit(RESULTS)
     expected = subprocess.run(
         ["git", "log", "-1", "--format=%h", "--", "results"],
@@ -64,7 +65,7 @@ def test_the_masthead_commit_is_the_last_commit_of_the_results() -> None:
     assert re.fullmatch(r"\d{1,2} [A-Z][a-z]+ \d{4}", built)
 
 
-def test_without_history_the_masthead_commit_is_empty(tmp_path: Path) -> None:
+def test_without_history_the_results_commit_is_empty(tmp_path: Path) -> None:
     (tmp_path / "results").mkdir()
     assert build_module.results_commit(tmp_path / "results") == ("", "")
 
@@ -86,7 +87,7 @@ def test_csv_files_hold_plain_text_not_tokens(
     assert text == "A,B\nx,radford2019language; yang2025qwen3 Table A2\n"
 
 
-def test_results_date_is_the_newest_run_start(tmp_path: Path) -> None:
+def test_the_year_is_the_newest_run_start_year(tmp_path: Path) -> None:
     for digest, started in (
         ("a", "2026-10-01T10:00:00+00:00"),
         ("b", "2026-10-17T23:00:00+00:00"),
@@ -95,16 +96,13 @@ def test_results_date_is_the_newest_run_start(tmp_path: Path) -> None:
         run.mkdir(parents=True)
         (run / "meta.json").write_text(json.dumps({"started_at": started}))
         (run / "config.json").write_text("{}")
-    assert (
-        build_module.results_date(Manifest(tmp_path))
-        == "Results of 17 October 2026"
-    )
-    assert build_module.results_date(Manifest(tmp_path / "none")) == "Results"
+    assert build_module.newest_run_year(Manifest(tmp_path)) == "2026"
+    assert build_module.newest_run_year(Manifest(tmp_path / "none")) == ""
 
 
 def test_a_missing_figure_the_text_refers_to_stops_the_page() -> None:
     bib = references.parse((ROOT / "docs/references.bib").read_text("utf-8"))
-    doc = page.Document({}, {}, {}, "Results", bib)
+    doc = page.Document({}, {}, {}, "", bib)
     with pytest.raises(KeyError):
         page.render_page(doc)
 
@@ -116,7 +114,7 @@ def test_command_line_build_writes_the_site(
 
     def fake(results: Path, out: Path) -> page.Document:
         calls.append((results, out))
-        return page.Document({}, {}, {}, "Results", {})
+        return page.Document({}, {}, {}, "", {})
 
     monkeypatch.setattr(build_module, "build", fake)
     code = cli.main(["build", "--results", "r", "--out", str(tmp_path)])
@@ -162,10 +160,72 @@ def test_captions_of_figures_and_tables_share_one_rule(css: str) -> None:
 
 def test_phones_scroll_the_figure_not_the_page(css: str) -> None:
     phone = css[
-        css.index("@media (max-width: 600px)") : css.index("@media print")
+        css.index("@media screen and (max-width: 600px)") : css.index(
+            "@media print"
+        )
     ]
     assert ".fig-scroll {\n    overflow-x: auto;" in phone
     assert "min-width: 560px" in phone
+
+
+def test_paper_never_gets_the_phone_layout(css: str) -> None:
+    assert "@media (max-width: 600px)" not in css
+    assert css.count("max-width: 600px") == 1
+
+
+def _print_block(css: str) -> str:
+    return css[css.index("@media print") :].split("\n}\n", 1)[0]
+
+
+def test_printed_tables_have_no_scroll_box_and_wide_ones_are_set_smaller(
+    css: str,
+) -> None:
+    printed = _print_block(css)
+    assert ".table .scroll {\n    overflow: visible;\n  }" in printed
+    assert "margin-left: -" not in printed
+    assert (
+        ".table.wide table {\n"
+        "    width: 98%;\n"
+        "    margin: 0 auto;\n"
+        "    font-size: 0.68em;\n"
+        "  }"
+    ) in printed
+    assert (
+        ".table.wide th,\n  .table.wide td {\n    padding: 0.18em 0.2em;\n  }"
+    ) in printed
+
+
+def test_flagged_tables_let_their_printed_row_labels_wrap(css: str) -> None:
+    printed = _print_block(css)
+    assert (
+        ".table.wrap-labels td.k {\n    white-space: normal;\n  }"
+    ) in printed
+    assert "#table-" not in css
+
+
+def test_a_printed_figure_shrinks_to_one_page_instead_of_splitting(
+    css: str,
+) -> None:
+    printed = _print_block(css)
+    assert (
+        "  figure {\n"
+        "    display: flex;\n"
+        "    flex-direction: column;\n"
+        "    max-height: 840px;\n"
+        "  }"
+    ) in printed
+    assert (
+        "  figure .fig-scroll {\n    display: flex;\n    min-height: 0;\n  }"
+    ) in printed
+    assert (
+        "  figure .fig-scroll img {\n"
+        "    width: auto;\n"
+        "    max-width: 100%;\n"
+        "    max-height: 100%;\n"
+        "    object-fit: contain;\n"
+        "  }"
+    ) in printed
+    assert "figure,\n  pre,\n  tr {\n    break-inside: avoid;" in printed
 
 
 def test_the_bibtex_block_wraps(css: str) -> None:
@@ -175,6 +235,20 @@ def test_the_bibtex_block_wraps(css: str) -> None:
     )
 
 
+def test_the_pdf_button_is_a_quiet_outlined_link(css: str) -> None:
+    block = css[css.index(".pdf-button {") :].split("}", 1)[0]
+    assert "border: 1px solid var(--ink)" in block
+    assert "border-radius: 3px" in block
+    assert "padding: 0.3em 0.9em" in block
+    assert "box-shadow" not in block
+    assert "background:" not in block
+    assert "transition: background-color" in block
+    assert "text-decoration: none" in block
+    assert ".pdf-button:hover {" in css
+    assert ".pdf-button:focus-visible {" in css
+    assert "outline: 2px solid var(--ink)" in css
+
+
 def test_print_rules(css: str) -> None:
     printed = css[css.index("@media print") :]
     assert "size: letter" in printed
@@ -182,7 +256,7 @@ def test_print_rules(css: str) -> None:
     assert "thead {\n    display: table-header-group;" in printed
     block = "  figure,\n  pre,\n  tr {\n    break-inside: avoid;\n  }"
     assert block in printed
-    assert ".data {\n    display: none;" in printed
+    assert ".data,\n  .pdf {\n    display: none;" in printed
 
 
 def test_text_colours_are_the_two_allowed_greys(css: str) -> None:
@@ -289,9 +363,32 @@ def test_the_built_page_numbers_figures_and_tables_in_page_order(
     assert numbers == list(range(1, len(numbers) + 1))
 
 
-def test_the_built_page_masthead_matches_the_results_commit(html: str) -> None:
+def test_the_built_masthead_links_the_pdf_and_names_no_commit(
+    html: str,
+) -> None:
+    assert "Results at commit" not in html
+    assert 'class="date"' not in html
+    assert (
+        f'<p class="pdf"><a class="pdf-button" href="{pdf.NAME}" '
+        'target="_blank" rel="noopener">View PDF</a></p></header>'
+    ) in html
+
+
+def test_the_built_page_text_names_no_commit_or_masthead(html: str) -> None:
     sha, _ = build_module.results_commit(RESULTS)
-    assert f"Results at commit <code>{sha}</code>, committed " in html
+    text = re.sub(
+        r"<[^>]+>", " ", re.sub(r"<svg.*?</svg>", "", html, flags=re.S)
+    )
+    assert "masthead" not in text
+    assert sha not in text
+
+
+def test_the_built_cite_block_year_is_the_results_commit_year(
+    site: tuple[Path, page.Document], html: str
+) -> None:
+    _, built = build_module.results_commit(RESULTS)
+    assert site[1].year == built[-4:]
+    assert f"year = {{{built[-4:]}}}," in html
 
 
 def test_the_built_page_has_no_dashes_backticks_or_stray_underscores(

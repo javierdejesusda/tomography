@@ -107,7 +107,7 @@ h1 {
 }
 
 .repo,
-.date {
+.pdf {
   margin: 0.6em 0 0;
   text-align: center;
 }
@@ -117,8 +117,39 @@ h1 {
   font-size: 0.9em;
 }
 
-.date {
+.pdf {
   font-size: 0.9em;
+}
+
+.pdf-button {
+  position: relative;
+  display: inline-block;
+  padding: 0.3em 0.9em;
+  border: 1px solid var(--ink);
+  border-radius: 3px;
+  text-decoration: none;
+  transition: background-color 150ms ease-out;
+}
+
+.pdf-button::after {
+  content: "";
+  position: absolute;
+  inset: -0.4em -0.3em;
+}
+
+.pdf-button:hover {
+  background-color: #efefef;
+}
+
+.pdf-button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pdf-button {
+    transition: none;
+  }
 }
 
 .tldr {
@@ -337,7 +368,7 @@ footer.colophon {
   text-align: center;
 }
 
-@media (max-width: 600px) {
+@media screen and (max-width: 600px) {
   main {
     padding: 1.4rem 16px 2rem;
   }
@@ -401,6 +432,25 @@ footer.colophon {
     break-inside: auto;
   }
 
+  .table .scroll {
+    overflow: visible;
+  }
+
+  .table.wide table {
+    width: 98%;
+    margin: 0 auto;
+    font-size: 0.68em;
+  }
+
+  .table.wide th,
+  .table.wide td {
+    padding: 0.18em 0.2em;
+  }
+
+  .table.wrap-labels td.k {
+    white-space: normal;
+  }
+
   thead {
     display: table-header-group;
   }
@@ -409,6 +459,24 @@ footer.colophon {
   pre,
   tr {
     break-inside: avoid;
+  }
+
+  figure {
+    display: flex;
+    flex-direction: column;
+    max-height: 840px;
+  }
+
+  figure .fig-scroll {
+    display: flex;
+    min-height: 0;
+  }
+
+  figure .fig-scroll img {
+    width: auto;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
   }
 
   h2,
@@ -420,7 +488,8 @@ footer.colophon {
     text-decoration: none;
   }
 
-  .data {
+  .data,
+  .pdf {
     display: none;
   }
 }

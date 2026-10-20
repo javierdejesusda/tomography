@@ -58,7 +58,7 @@ def _doc(
         figures or {},
         tables or {},
         appendix or {},
-        "Results",
+        "",
         bib or {},
         appendix_tables or {},
     )
@@ -448,14 +448,46 @@ def test_only_cited_references_are_listed_in_order_of_first_citation(
     assert "(2023). Representation Engineering" in html
 
 
-def test_the_masthead_names_the_commit(
+def test_the_masthead_links_the_pdf_instead_of_naming_the_commit(
     full: tuple[page.Document, str],
 ) -> None:
     html = full[1]
+    assert "Results at commit" not in html
+    assert 'class="date"' not in html
     assert (
-        "Results at commit <code>abc1234</code>, committed 1 January 2027"
-        in html
-    )
+        '<p class="pdf"><a class="pdf-button" href="tomography-results.pdf" '
+        'target="_blank" rel="noopener">View PDF</a></p></header>'
+    ) in html
+    assert "year = {2027}," in html
+
+
+def _visible_text(html: str) -> str:
+    body = re.sub(r"<svg.*?</svg>", "", html, flags=re.S)
+    return re.sub(r"<[^>]+>", " ", body)
+
+
+def test_no_commit_or_masthead_is_named_in_the_page_text(
+    full: tuple[page.Document, str],
+) -> None:
+    text = _visible_text(full[1])
+    assert "masthead" not in text
+    assert "Results at commit" not in text
+    assert "abc1234" not in text
+    assert "blob/abc1234/" in full[1]
+
+
+def test_the_reproducibility_and_appendix_sentences_name_no_commit(
+    full: tuple[page.Document, str],
+) -> None:
+    text = " ".join(_visible_text(full[1]).split())
+    assert (
+        "from the result files in the results directory of the repository; "
+        "each figure and table links the data file it draws"
+    ) in text
+    assert (
+        "Links to the findings document open it at the commit of these results."
+    ) in text
+    assert "reported in the findings document of the repository. They" in text
 
 
 def test_appendix_figures_are_lazy_images_and_main_figures_inline(
@@ -608,6 +640,26 @@ def test_short_labels_stay_whole_and_long_identifiers_may_break() -> None:
     assert 'class="table wide"' in wide
     narrow = _two_column([["x", "1"]], ["Model", "a"])
     assert 'class="table wide"' not in narrow
+
+
+def test_a_table_that_may_wrap_its_labels_on_paper_gets_a_class() -> None:
+    def render(wrap_labels: bool) -> str:
+        output = registry.TableOutput(
+            "Claim.",
+            "Detail.",
+            ["Model", *"abcdefghi"],
+            [["x", *"123456789"]],
+            "l" + "r" * 9,
+            [],
+            {},
+            wrap_labels=wrap_labels,
+        )
+        doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+        return page.Page(doc).table("checkpoints")
+
+    assert 'class="table wide wrap-labels"' in render(True)
+    assert "wrap-labels" not in render(False)
+    assert 'class="table wide"' in render(False)
 
 
 def _hub_cell(text: str) -> str:
