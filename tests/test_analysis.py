@@ -259,15 +259,10 @@ def test_pca_coordinates_of_a_hand_computed_case() -> None:
 def test_pca_coordinates_agree_with_the_variance_helper_and_scikit_learn() -> (
     None
 ):
-    h = np.random.default_rng(11).standard_normal((2, 15, 6)) * [
-        4,
-        2,
-        1,
-        1,
-        1,
-        1,
-    ]
+    s = np.array([4.0, 2.0, 1.0, 1.0, 1.0, 1.0])
+    h = _planted(s, n=15, d=6)
     coordinates, ratios = pca_coordinates(h)
+    np.testing.assert_allclose(ratios, [s[:2] ** 2 / np.sum(s**2)] * 2)
     np.testing.assert_allclose(
         ratios, pca_explained_variance(h, n_components=2), atol=1e-12
     )
@@ -284,9 +279,7 @@ def test_pca_coordinates_make_the_largest_loading_positive() -> None:
     for k, rows in enumerate(h):
         centered = rows - rows.mean(axis=0)
         for component in range(2):
-            loading = np.linalg.lstsq(
-                centered, coordinates[k, :, component].astype(np.float64)
-            )[0]
+            loading = centered.T @ coordinates[k, :, component]
             assert loading[np.argmax(np.abs(loading))] > 0
 
 
