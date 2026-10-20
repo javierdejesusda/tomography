@@ -186,6 +186,21 @@ def test_printed_tables_have_no_scroll_box_and_wide_ones_are_set_smaller(
     )
 
 
+def test_a_printed_figure_shrinks_to_one_page_instead_of_splitting(
+    css: str,
+) -> None:
+    printed = css[css.index("@media print") :].split("\n}\n", 1)[0]
+    assert (
+        "  figure {\n    display: flex;\n    flex-direction: column;" in printed
+    )
+    assert "max-height: 840px;" in printed
+    assert "figure .fig-scroll {\n    display: flex;" in printed
+    assert "justify-content: center;" in printed
+    assert "figure .fig-scroll img {\n    width: auto;" in printed
+    assert "max-height: 100%;" in printed
+    assert "figure,\n  pre,\n  tr {\n    break-inside: avoid;" in printed
+
+
 def test_the_bibtex_block_wraps(css: str) -> None:
     assert (
         "pre.bibtex {\n  white-space: pre-wrap;\n  overflow-wrap: anywhere;"
