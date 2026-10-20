@@ -1,11 +1,11 @@
 """V1: the activations behind the knowledge readers of P9b.
 
 P9b reports how well a direction separates known from unknown questions. This
-experiment keeps the hidden states of the same questions on the CPU, so the
-readers can be seen and not only scored. The inputs are two finished runs of
-the model: the P9a labels and the P9b reading. Run it with
-`CUDA_VISIBLE_DEVICES` set to the empty string, so that `meta.json` records
-the CPU the numbers came from.
+experiment keeps the hidden states of the same questions, so the readers can
+be seen and not only scored. The inputs are two finished runs of the model:
+the P9a labels and the P9b reading. The model loads in float32 on the default
+device, because the shared few-shot prefix matches the uncached activations
+only in float32; `meta.json` records the device the numbers came from.
 """
 
 from collections import Counter
@@ -877,7 +877,7 @@ def run(config: Config, run_dir: RunDir) -> None:
         known_contrasts=bool(labels["known_contrasts"]),
         reading=reading,
     )
-    loaded = load_model(config.model, device="cpu", dtype=torch.float32)
+    loaded = load_model(config.model, dtype=torch.float32)
     run_plan(config, run_dir, loaded, plan, reading)
 
 

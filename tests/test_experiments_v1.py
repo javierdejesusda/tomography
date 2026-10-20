@@ -1504,7 +1504,7 @@ def test_a_control_that_cannot_work_fails_before_the_forward_pass(
         _execute(tiny_arch, tmp_path, inputs)
 
 
-def test_run_reads_both_runs_and_loads_the_model_on_the_cpu_in_float32(
+def test_run_loads_the_model_in_float32_on_the_default_device(
     tiny_arch: LoadedModel,
     inputs: Inputs,
     tmp_path: Path,
@@ -1522,7 +1522,7 @@ def test_run_reads_both_runs_and_loads_the_model_on_the_cpu_in_float32(
 
     run(config, run_dir)
 
-    assert asked == [("tiny", {"device": "cpu", "dtype": torch.float32})]
+    assert asked == [("tiny", {"dtype": torch.float32})]
     assert _summary(run_dir)["types"] == USABLE
     assert (run_dir.path / "projections.npz").is_file()
 
