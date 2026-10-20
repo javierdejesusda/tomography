@@ -829,11 +829,27 @@ def test_a_below_state_is_not_a_horizontal_segment() -> None:
             assert line.get_gid() is None or "below" not in line.get_gid()
 
 
+def test_a_below_arrow_sits_left_of_its_hexagon_without_touching_it(
+    output: registry.FigureOutput,
+) -> None:
+    ax = output.figure.axes[3]
+    below = [m for m in _models("p10b") if _state(m) == "below"]
+    assert below
+    for model in below:
+        (mark,) = _by_gid(ax, f"below-mark-{model}")
+        (point,) = _by_gid(ax, f"reader-{model}")
+        assert mark.get_color() == paper.RANDOM_GREY
+        assert mark.get_ydata()[0] == point.get_ydata()[0]
+        arrow = mark.get_window_extent()
+        hexagon = point.get_window_extent()
+        assert arrow.x1 <= hexagon.x0, model
+
+
 def test_the_state_sentence_follows_the_states_that_occur() -> None:
     sentence = approximate.state_sentence(["above", "inside"])
     assert "below" not in sentence
     assert STATE_PHRASES["above"] in sentence
-    assert STATE_PHRASES["below"] in approximate.state_sentence(["below"])
+    assert "a left arrow below" in approximate.state_sentence(["below"])
 
 
 def test_the_detail_names_the_control_tick_as_the_mean(
@@ -870,3 +886,18 @@ def test_the_detail_names_the_control_interval_as_a_bootstrap_interval(
     n = int(output.numbers["n_random_draws"])
     assert "bootstrap interval" in output.detail
     assert f"mean of {n} random directions" in output.detail
+
+
+def test_the_state_sentence_names_the_control_in_its_first_phrase() -> None:
+    sentence = approximate.state_sentence({"inside", "below"})
+    first = sentence.split(", ")[0]
+    assert "the control's interval" in first
+    assert approximate.state_sentence(
+        {"above", "inside", "below"}
+    ) == ", ".join(
+        [
+            "a filled hexagon is above the control's interval",
+            "an open hexagon inside it",
+            "a left arrow below it",
+        ]
+    )

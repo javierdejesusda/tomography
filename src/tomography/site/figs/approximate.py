@@ -40,7 +40,6 @@ WORDS_OFFSET_PT = 6.0
 BAR_HALF = 0.17
 TICK_HALF = 0.36
 ARROW = 0.14
-TICK = (0.075, 0.035)
 POSITION_LIMITS = (-0.5, 1.5)
 PANEL_A = (
     ("range_items", "range\nitems"),
@@ -93,9 +92,14 @@ def state_sentence(states: Collection[str]) -> str:
         states: The states drawn in panel (b).
 
     Returns:
-        The clause, in the order above, inside, below.
+        The clause, in the order above, inside, below. The first phrase
+        always names the control's interval, which the later ones refer to
+        as "it".
     """
-    return ", ".join(STATE_PHRASES[s] for s in STATE_ORDER if s in states)
+    phrases = [STATE_PHRASES[s] for s in STATE_ORDER if s in states]
+    if phrases and not phrases[0].endswith("interval"):
+        phrases[0] = phrases[0].removesuffix(" it") + " the control's interval"
+    return ", ".join(phrases)
 
 
 def share_phrase(exact: int, people: int) -> str:

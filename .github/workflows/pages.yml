@@ -40,7 +40,7 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install the package
-        run: uv sync --locked --no-dev --no-group cu130
+        run: uv sync --locked --no-dev --no-group cu130 --group cpu
 
       - name: Build the site
         run: uv run python -m tomography.site build --out _site

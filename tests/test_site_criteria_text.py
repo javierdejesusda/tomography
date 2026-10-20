@@ -1,9 +1,13 @@
+import importlib
 from pathlib import Path
 import re
 import runpy
 
+import pytest
+
 from tomography.site import content
 from tomography.site import registry
+from tomography.site import stats
 from tomography.site.figs import teaser as teaser_fig
 from tomography.site.manifest import Manifest
 from tomography.viz import paper
@@ -243,3 +247,23 @@ def test_the_method_names_the_checkpoint_of_the_largest_random_direction() -> (
         "[[num:fig:finders.random_max]], on "
         "[[label:fig:finders.random_max]], in the finder comparison"
     ) in method
+
+
+def test_fluency_thresholds_in_the_text_come_from_the_stats_constants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(stats, "FLUENT_MAX_RATIO", 2.5)
+    monkeypatch.setattr(stats, "FLUENT_MIN_DISTINCT", 0.35)
+    try:
+        reloaded = importlib.reload(content)
+        text = repr((reloaded.FLUENCY_RULE, reloaded.BODY, reloaded.APPENDICES))
+        assert (
+            "at most 2.5 and distinct-1 at least 0.35" in reloaded.FLUENCY_RULE
+        )
+        assert text.count("2.5") >= 4
+        assert text.count("0.35") >= 4
+        assert "1.5" not in text
+        assert "0.15" not in text
+    finally:
+        monkeypatch.undo()
+        importlib.reload(content)

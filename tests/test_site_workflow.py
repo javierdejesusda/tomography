@@ -63,3 +63,11 @@ def test_workflow_rebuilds_when_the_references_or_the_viz_rules_change() -> (
     text = _text()
     for path in ("docs/references.bib", "src/tomography/viz/**"):
         assert f'"{path}"' in text
+
+
+def test_workflow_installs_the_cpu_torch_group_not_the_cuda_one() -> None:
+    lines = [ln for ln in _text().splitlines() if "uv sync" in ln]
+    assert lines
+    for line in lines:
+        assert "--group cpu" in line
+        assert "--group cu130" not in line

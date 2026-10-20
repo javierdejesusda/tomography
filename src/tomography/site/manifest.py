@@ -76,7 +76,9 @@ class Manifest:
         return sorted(p.name for p in self.root.iterdir() if p.is_dir())
 
     def models(self, exp: str) -> list[str]:
-        """Lists the models with at least one run, in paper order.
+        """Lists the model directories of an experiment, in paper order.
+
+        Every subdirectory counts, whether or not it holds a run.
 
         Args:
             exp: Experiment id.
@@ -126,16 +128,16 @@ class Manifest:
     def run(self, exp: str, model: str, **select: str) -> Path | None:
         """Resolves the run directory of a cell.
 
-        Args:
-            exp: Experiment id.
-            model: Checkpoint key.
-            **select: `method` for `p1` and `template` for `p9d`.
-
         The rule per experiment: `p1` keeps the runs of the selected method
         (logistic by default) and, if several remain, those with the most
         tasks; `p9d` keeps the runs of the selected template; the latest run
         (by start time) is taken for the experiments in `LATEST`; any other
         cell must hold one run.
+
+        Args:
+            exp: Experiment id.
+            model: Checkpoint key.
+            **select: `method` for `p1` and `template` for `p9d`.
 
         Returns:
             The run directory, or None when the cell has no matching run.

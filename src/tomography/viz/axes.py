@@ -31,14 +31,12 @@ class ModelStyle:
     Attributes:
         family: `GPT-2` or `Qwen3`.
         color: Hex color, one hue per family and darker for larger sizes.
-        linestyle: Solid for base and GPT-2, dashed for post-trained.
         filled: Filled markers for base and GPT-2, open for post-trained.
         marker: Matplotlib marker; circle for GPT-2, square for Qwen3.
     """
 
     family: str
     color: str
-    linestyle: str
     filled: bool
     marker: str
 
@@ -75,14 +73,13 @@ def model_style(key: str) -> ModelStyle:
     """
     if key.startswith("gpt2"):
         ramp = paper.size_ramp("gpt2", len(GPT2_SIZES))
-        return ModelStyle("GPT-2", ramp[GPT2_SIZES.index(key)], "-", True, "o")
+        return ModelStyle("GPT-2", ramp[GPT2_SIZES.index(key)], True, "o")
     size = key.removeprefix("qwen3-").removesuffix("-base")
     ramp = paper.size_ramp("qwen3", len(QWEN3_SIZES))
     post = not key.endswith("-base")
     return ModelStyle(
         "Qwen3",
         ramp[QWEN3_SIZES.index(size)],
-        "--" if post else "-",
         not post,
         "s",
     )
@@ -124,38 +121,6 @@ def size_axis(
     ax.xaxis.set_major_formatter(ticker.FuncFormatter(_size_text))
     ax.xaxis.set_minor_locator(ticker.NullLocator())
     ax.set_xlabel("parameters")
-
-
-def layer_curve(
-    ax: Axes,
-    depth: Sequence[float],
-    mean: Sequence[float],
-    lo: Sequence[float],
-    hi: Sequence[float],
-    model: str,
-) -> None:
-    """Draws one model's curve over relative depth with its interval band.
-
-    Args:
-        ax: The axes.
-        depth: Relative depth of each point.
-        mean: Value at each depth.
-        lo: Lower end of the interval.
-        hi: Upper end of the interval.
-        model: Checkpoint key, which fixes color and line style.
-    """
-    style = model_style(model)
-    ax.plot(
-        depth,
-        mean,
-        color=style.color,
-        ls=style.linestyle,
-        lw=1.0,
-        zorder=3,
-    )
-    ax.fill_between(
-        depth, lo, hi, color=style.color, alpha=0.18, lw=0, zorder=2
-    )
 
 
 def caption(claim: str, detail: str) -> str:

@@ -166,7 +166,8 @@ ENCODING_RULES = """Encoding rules of every figure (the glossary).
    so.
 5. Random is always one grey (`RANDOM_GREY`); a grey band always means the
    spread of the random baseline over seeds or draws and is keyed; a dotted
-   line always means chance. Bluish green (`TEXT_GREEN`) is reserved for
+   line marks a reference level, chance or zero, and the caption or axis
+   says which. Bluish green (`TEXT_GREEN`) is reserved for
    text-only classifiers; popularity and answer log-probability are dark
    neutrals; the paper's finder alone is pink.
 6. A categorical set that is not a measure (prompt variants, statement sets,
