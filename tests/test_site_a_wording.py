@@ -486,20 +486,20 @@ def test_the_heatmaps_are_titled_fitted_and_scored_wording(
 
 def test_the_zero_clause_is_data_driven() -> None:
     above = {"gpt2": np.ones((3, 3))}
-    clause = a_wording._zero_clause(above)
+    clause = a_wording._zero_clause(above, 0)
     assert clause == "no cell is at or below zero; "
     one = {"gpt2": np.ones((3, 3)), "qwen3-4b": np.ones((3, 3))}
     one["qwen3-4b"][0, 1] = -0.1
-    text = a_wording._zero_clause(one)
+    text = a_wording._zero_clause(one, 1)
     assert "the 1 cell at or below zero" in text
     assert "carries a dot; " in text
     assert "0 cells" not in text
     assert "  " not in text
     many = {"qwen3-4b": np.zeros((2, 2))}
-    assert a_wording._zero_clause(many).startswith(
+    assert a_wording._zero_clause(many, 4).startswith(
         "the 4 cells at or below zero (all on "
     )
-    assert "  " not in a_wording._zero_clause(many)
+    assert "  " not in a_wording._zero_clause(many, 4)
 
 
 def test_the_current_caption_keeps_its_zero_sentence(

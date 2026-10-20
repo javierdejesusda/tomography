@@ -150,18 +150,18 @@ def _noise_text(numbers: dict[str, float]) -> str:
     )
 
 
-def _zero_clause(margins: dict[str, np.ndarray]) -> str:
+def _zero_clause(margins: dict[str, np.ndarray], n: int) -> str:
     """Words the cells at or below zero, which carry a dot.
 
     Args:
         margins: Checkpoint key to its margin matrix.
+        n: The count of cells at or below zero, `numbers["n_below"]`.
 
     Returns:
         A clause ending in a semicolon and a space: the count of such cells
         with the checkpoints that hold them, or a statement that there are
         none.
     """
-    n = sum(int((m <= 0).sum()) for m in margins.values())
     if n == 0:
         return "no cell is at or below zero; "
     where = _below_text(margins)
@@ -459,7 +459,7 @@ def build(manifest: Manifest) -> FigureOutput:
         "same, is not coloured. Cells at or below the noise expected from test "
         "pairs alone for that checkpoint (the noise column of "
         "[[fig:wording]]) are stippled; "
-        f"{_zero_clause(margins)}"
+        f"{_zero_clause(margins, int(numbers['n_below']))}"
         "the white ticks on the colour bar mark the noise range of each "
         f"role, {_noise_text(numbers)}, and "
         f"{int(numbers['n_below_noise'])} cells "
