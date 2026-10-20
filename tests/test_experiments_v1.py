@@ -31,6 +31,8 @@ from tomography.experiments.v1_knowledge_views import compare_surface
 from tomography.experiments.v1_knowledge_views import displayed_items
 from tomography.experiments.v1_knowledge_views import execute
 from tomography.experiments.v1_knowledge_views import load_reading
+from tomography.experiments.v1_knowledge_views import panel_contrasts
+from tomography.experiments.v1_knowledge_views import panel_union
 from tomography.experiments.v1_knowledge_views import plot
 from tomography.experiments.v1_knowledge_views import prepare
 from tomography.experiments.v1_knowledge_views import published_views
@@ -1673,3 +1675,87 @@ def test_the_export_refuses_a_uid_array_that_names_a_private_path(
 
     with pytest.raises(ExportError, match=r"projections\.npz"):
         export_runs([source], tmp_path / "dest")
+
+
+def test_panel_contrasts_group_the_shown_contrasts_by_panel() -> None:
+    names = [
+        "fictional_synthal",
+        "fictional_generated",
+        "obscure_real",
+        "obscure_real_pop",
+        "post_cutoff",
+        "triviaqa_known",
+        "unknowable_detail",
+        "false_premise",
+        "kuq_future_unknown",
+        "kuq_false_assumption",
+        "real_vs_synthal",
+        "real_vs_generated",
+        "pre_vs_post_cutoff",
+    ]
+
+    panels = panel_contrasts(names)
+
+    assert list(panels) == ["entity", "question", "unknown"]
+    assert panels["entity"] == ("fictional_generated", "obscure_real")
+    assert panels["question"] == (
+        "unknowable_detail",
+        "false_premise",
+        "kuq_future_unknown",
+        "kuq_false_assumption",
+    )
+    assert panels["unknown"] == (
+        "real_vs_synthal",
+        "real_vs_generated",
+        "pre_vs_post_cutoff",
+    )
+
+
+def test_a_panel_without_a_usable_contrast_is_absent() -> None:
+    assert list(panel_contrasts(["real_vs_generated", "post_cutoff"])) == [
+        "unknown"
+    ]
+    assert panel_contrasts(["obscure_real_pop", "triviaqa_known"]) == {}
+    assert panel_contrasts([]) == {}
+
+
+def test_a_panel_shows_each_item_once_in_the_order_of_its_contrasts() -> None:
+    uids = {
+        "a": {"positive": ["k1", "k2"], "negative": ["u1", "u2"]},
+        "b": {"positive": ["k2", "k3"], "negative": ["u3", "u1"]},
+        "c": {"positive": ["z"], "negative": ["y"]},
+    }
+
+    assert panel_union(("a", "b"), uids) == [
+        "k1",
+        "k2",
+        "u1",
+        "u2",
+        "k3",
+        "u3",
+    ]
+    assert panel_union(("c",), uids) == ["z", "y"]
+
+
+def test_the_sidecar_lists_the_panels_and_the_items_they_show(
+    default_run: RunDir,
+) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+
+    panels = sidecar["panels"]
+
+    assert list(panels) == ["entity", "question", "unknown"]
+    assert panels["entity"]["types"] == ["fictional_generated", "obscure_real"]
+    assert panels["question"]["types"] == [
+        "unknowable_detail",
+        "false_premise",
+        "kuq_future_unknown",
+    ]
+    assert panels["unknown"]["types"] == [
+        "real_vs_synthal",
+        "real_vs_generated",
+    ]
+    for panel in panels.values():
+        assert panel["uids"] == panel_union(panel["types"], sidecar["uids"])
+        assert len(set(panel["uids"])) == len(panel["uids"])

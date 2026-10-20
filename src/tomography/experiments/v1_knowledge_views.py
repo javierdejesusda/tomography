@@ -9,6 +9,7 @@ only in float32; `meta.json` records the device the numbers came from.
 """
 
 from collections import Counter
+from collections.abc import Iterable
 from collections.abc import Mapping
 from collections.abc import Sequence
 import dataclasses
@@ -46,6 +47,7 @@ from tomography.p9.reading import surface_baselines
 from tomography.p9.reading import type_auroc
 from tomography.p9.reading import type_scores
 from tomography.p9.unknowns import TypePool
+from tomography.p9.unknowns import panel_of
 from tomography.reading.metrics import auroc
 from tomography.reading.reader import RepReader
 
@@ -60,6 +62,7 @@ READING_FILES = (
 TOLERANCE = 0.02
 SURFACE_TOLERANCE = 1e-9
 MAX_DISPLAYED = 300
+SHOWN_ENTITY = ("obscure_real", "fictional_generated")
 COUNT_COLUMNS = (
     "n_positive_train",
     "n_negative_train",
@@ -511,6 +514,51 @@ def displayed_items(
     )[:cap]
 
 
+def panel_contrasts(names: Iterable[str]) -> dict[str, tuple[str, ...]]:
+    """Groups the contrasts a figure shows into its panels.
+
+    The entity panel shows the two contrasts of `SHOWN_ENTITY`, the question
+    panel every question contrast and the unknown panel every unknown-type
+    one. The other entity contrasts are scored in the tables but not drawn.
+
+    Args:
+        names: The usable contrasts, in the order of the pools.
+
+    Returns:
+        The contrasts of each panel in the order given, panels in the order
+        entity, question, unknown; a panel without a usable contrast is left
+        out.
+    """
+    panels: dict[str, list[str]] = {"entity": [], "question": [], "unknown": []}
+    for name in names:
+        panel = panel_of(name)
+        if panel != "entity" or name in SHOWN_ENTITY:
+            panels[panel].append(name)
+    return {panel: tuple(shown) for panel, shown in panels.items() if shown}
+
+
+def panel_union(
+    contrasts: Iterable[str], uids: Mapping[str, Mapping[str, list[str]]]
+) -> list[str]:
+    """Lists the items a panel shows, each once.
+
+    Args:
+        contrasts: The contrasts of the panel, see `panel_contrasts`.
+        uids: The displayed uids of each side of each contrast, see
+            `PublishedViews`.
+
+    Returns:
+        The uids of the contrasts in order, the positive side before the
+        negative one, keeping the first place of an item that several
+        contrasts show.
+    """
+    shown: dict[str, None] = {}
+    for name in contrasts:
+        for side in ("positive", "negative"):
+            shown.update(dict.fromkeys(uids[name][side]))
+    return list(shown)
+
+
 def compare_auroc(
     recomputed: NDArray[np.float64],
     committed: NDArray[np.float64],
@@ -746,14 +794,15 @@ def run_plan(
     inside the strata, `published` (T, K) the test AUROC of the published
     all-pairs reader of each contrast, and `projection_<contrast>` the scores
     of the displayed items on that reader at the chosen layer. Writes
-    `projections.json`: the contrasts, the methods and the uids of the
+    `projections.json`: the contrasts, the methods, the uids of the
     displayed items of each side (at most `MAX_DISPLAYED`, by ascending
-    SHA-256 of the uid; no question text). Writes `summary`: the layer, the
-    number of items extracted, the dtype of this run (`extraction_dtype`, that
-    of the loaded model) and the one the P9b run was extracted in
-    (`reading_run_dtype`, the registry default of the model, since that run
-    loaded it with no dtype; None for a model outside the registry), the
-    comparison with the committed AUROC
+    SHA-256 of the uid; no question text) and, for each panel of the figures,
+    its contrasts and the uids of the items it shows (see `panel_union`).
+    Writes `summary`: the layer, the number of items extracted, the dtype of
+    this run (`extraction_dtype`, that of the loaded model) and the one the
+    P9b run was extracted in (`reading_run_dtype`, the registry default of
+    the model, since that run loaded it with no dtype; None for a model
+    outside the registry), the comparison with the committed AUROC
     (`reproduction`, see `compare_auroc`) and with the committed surface
     controls (`surface`, see `compare_surface`). A difference is reported,
     never raised.
@@ -786,6 +835,10 @@ def run_plan(
     test = refit_methods(acts, pools, draws, protocol)
     shuffled = refit_shuffled(acts, pools, draws, protocol, seed=config.seed)
     views = published_views(reading, acts, pools)
+    panels = {
+        panel: {"types": list(shown), "uids": panel_union(shown, views.uids)}
+        for panel, shown in panel_contrasts(pools).items()
+    }
     run_dir.write_arrays(
         "projections",
         layers=np.asarray(reading.layers, dtype=np.int64),
@@ -801,6 +854,7 @@ def run_plan(
             "methods": list(protocol.methods),
             "max_per_side": MAX_DISPLAYED,
             "uids": views.uids,
+            "panels": panels,
         },
     )
     splits = Counter(item.example.split for item in selected)
