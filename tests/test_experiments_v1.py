@@ -699,14 +699,14 @@ def test_published_views_cap_each_side_not_the_contrast(
         assert views.projections[f"projection_{name}"].shape == (4,)
 
 
+@dataclasses.dataclass
 class Captured:
     """The call `execute` makes to collect the activations."""
 
-    def __init__(self) -> None:
-        self.kwargs: dict[str, Any] = {}
-        self.items: list[Any] = []
-        self.args: tuple[Any, ...] = ()
-        self.acts: ItemActivations | None = None
+    items: list[Any] = dataclasses.field(default_factory=list)
+    args: tuple[Any, ...] = ()
+    kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
+    acts: ItemActivations | None = None
 
 
 def _capture(monkeypatch: pytest.MonkeyPatch) -> Captured:

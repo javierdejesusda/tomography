@@ -3,7 +3,9 @@
 P9b reports how well a direction separates known from unknown questions. This
 experiment keeps the hidden states of the same questions on the CPU, so the
 readers can be seen and not only scored. The inputs are two finished runs of
-the model: the P9a labels and the P9b reading.
+the model: the P9a labels and the P9b reading. Run it with
+`CUDA_VISIBLE_DEVICES` set to the empty string, so that `meta.json` records
+the CPU the numbers came from.
 """
 
 from collections import Counter
@@ -611,9 +613,8 @@ def execute(
     Rebuilds the contrasts of the run from the labels, runs the test items
     and the train items of the committed draws through the model once, at
     every layer 0..L with the shared few-shot prefix, then refits and rescores
-    the committed draws of every method. The layer is the one the P9b run
-    chose; layer 0 is the one token embedding of the prompt end and is not
-    read in this part.
+    the committed draws of every method at the layers 1..L the P9b run read.
+    The layer to compare at is the one the P9b run chose.
 
     Writes `projections.npz`: `layers` (K,), `test` (M, T, S, K) the test
     AUROC of each method, contrast, draw and layer refitted here, `shuffled`
@@ -664,14 +665,13 @@ def execute(
     )
     reads = ItemActivations(acts.uids, acts.layers[1:], acts.data[1:])
     test = refit_methods(reads, pools, draws, protocol)
+    shuffled = refit_shuffled(reads, pools, draws, protocol, seed=config.seed)
     views = published_views(reading, reads, pools)
     run_dir.write_arrays(
         "projections",
         layers=np.asarray(reading.layers, dtype=np.int64),
         test=test,
-        shuffled=refit_shuffled(
-            reads, pools, draws, protocol, seed=config.seed
-        ),
+        shuffled=shuffled,
         published=views.auroc,
         **views.projections,
     )
