@@ -19,6 +19,7 @@ from tomography.experiments import p9b_reading
 from tomography.experiments.base import RunDir
 from tomography.experiments.sweep import chat_format_for
 import tomography.experiments.v1_knowledge_views as v1_module
+from tomography.experiments.v1_knowledge_views import COUNT_COLUMNS
 from tomography.experiments.v1_knowledge_views import CommittedReading
 from tomography.experiments.v1_knowledge_views import Config
 from tomography.experiments.v1_knowledge_views import check_reading
@@ -270,6 +271,105 @@ def test_load_reading_refuses_arrays_that_disagree_on_the_contrasts(
 
     with pytest.raises(ValueError, match="contrasts"):
         load_reading(path, model="tiny")
+
+
+def _drop_table_column(path: Path, column: str) -> None:
+    document = json.loads((path / "table.json").read_text("utf-8"))
+    table = document["data"]
+    at = table["columns"].index(column)
+    del table["columns"][at]
+    for row in table["rows"]:
+        del row[at]
+    (path / "table.json").write_text(json.dumps(document), "utf-8")
+
+
+@pytest.mark.parametrize(
+    "column", [*COUNT_COLUMNS, *SURFACE_BASELINES], ids=str
+)
+def test_load_reading_names_a_column_the_table_lacks(
+    inputs: Inputs, tmp_path: Path, column: str
+) -> None:
+    path = _copy(inputs.reading, tmp_path)
+    _drop_table_column(path, column)
+
+    with pytest.raises(ValueError, match=rf"table\.json.*'{column}'"):
+        load_reading(path, model="tiny")
+
+
+def _rewrite_readers(path: Path, **changes: np.ndarray) -> None:
+    run_dir = RunDir.open(path)
+    arrays = run_dir.read_arrays("readers")
+    for key, change in changes.items():
+        arrays[key] = change
+    run_dir.write_arrays("readers", **arrays)
+
+
+@pytest.mark.parametrize(
+    ("key", "at", "value", "match"),
+    [
+        ("directions", (2, 1, slice(None)), 0.0, "zero vector"),
+        ("directions", (0, 0, 3), np.nan, "finite"),
+        ("directions", (0, 0, 3), np.inf, "finite"),
+        ("means", (1, 2, 5), np.nan, "finite"),
+        ("signs", (3, 1), 0.5, "signs"),
+        ("signs", (3, 1), np.nan, "finite"),
+    ],
+    ids=[
+        "zero-direction",
+        "nan-direction",
+        "inf-direction",
+        "nan-mean",
+        "half-sign",
+        "nan-sign",
+    ],
+)
+def test_load_reading_refuses_readers_it_cannot_score_with(
+    inputs: Inputs,
+    tmp_path: Path,
+    key: str,
+    at: tuple[Any, ...],
+    value: float,
+    match: str,
+) -> None:
+    path = _copy(inputs.reading, tmp_path)
+    array = RunDir.open(path).read_arrays("readers")[key].copy()
+    array[at] = value
+    _rewrite_readers(path, **{key: array})
+
+    with pytest.raises(ValueError, match=match):
+        load_reading(path, model="tiny")
+
+
+def test_load_reading_names_the_contrast_of_a_reader_it_refuses(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    path = _copy(inputs.reading, tmp_path)
+    directions = RunDir.open(path).read_arrays("readers")["directions"].copy()
+    directions[4, 0] = 0.0
+    _rewrite_readers(path, directions=directions)
+
+    with pytest.raises(ValueError, match=USABLE[4]):
+        load_reading(path, model="tiny")
+
+
+def test_load_reading_holds_the_published_reader_of_each_contrast(
+    inputs: Inputs,
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+
+    assert len(committed.readers) == len(USABLE)
+    for t, reader in enumerate(committed.readers):
+        want = RepReader.from_arrays(
+            committed.config.methods[0],
+            committed.layers,
+            committed.directions[t],
+            committed.means[t],
+            committed.signs[t],
+        )
+        assert reader.layers == committed.layers
+        np.testing.assert_array_equal(reader.directions, want.directions)
+        np.testing.assert_array_equal(reader.means, want.means)
+        np.testing.assert_array_equal(reader.signs, want.signs)
 
 
 def _pools(committed: CommittedReading) -> dict[str, TypePool]:

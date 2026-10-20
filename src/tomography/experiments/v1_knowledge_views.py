@@ -108,6 +108,9 @@ class CommittedReading:
             fitted by the headline method.
         means: Shape (T, K, d): the vectors subtracted before projecting.
         signs: Shape (T, K): the orientation of each layer.
+        readers: The published reader of each contrast, built from the three
+            arrays above when the run is loaded, so one that cannot score
+            is refused before any model work.
     """
 
     config: p9b_reading.Config
@@ -119,6 +122,7 @@ class CommittedReading:
     directions: NDArray[np.float32]
     means: NDArray[np.float32]
     signs: NDArray[np.float32]
+    readers: tuple[RepReader, ...]
 
 
 def load_reading(path: str | Path, *, model: str) -> CommittedReading:
@@ -136,7 +140,10 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
             a file is missing (an export drops `transfer.npz` and
             `readers.npz`), the run read a template other than "fewshot" or
             methods other than `READING_METHODS`, or its files disagree on
-            the contrasts, the methods or the layers.
+            the contrasts, the methods or the layers, `table.json` lacks a
+            column the checks read, or a published reader cannot score: a
+            value that is not finite, a zero direction or a sign that is not
+            -1 or +1.
     """
     run_dir = RunDir.open(path)
     if run_dir.meta.get("finished_at") is None:
@@ -195,6 +202,30 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
     }
     if tuple(rows) != types:
         raise ValueError(f"{path}: table.json disagrees on the contrasts")
+    for column in (*COUNT_COLUMNS, *SURFACE_BASELINES):
+        if column not in table["columns"]:
+            raise ValueError(f"{path}: table.json has no column {column!r}")
+    for key in ("directions", "means", "signs"):
+        if not np.isfinite(readers[key]).all():
+            raise ValueError(
+                f"{path}: readers.npz holds a {key} that is not finite"
+            )
+    published = []
+    for t, name in enumerate(types):
+        try:
+            published.append(
+                RepReader.from_arrays(
+                    config.methods[0],
+                    layers,
+                    readers["directions"][t],
+                    readers["means"][t],
+                    readers["signs"][t],
+                )
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"{path}: the reader of {name}: {error}"
+            ) from error
     return CommittedReading(
         config=config,
         layer=int(summary["layer"]),
@@ -205,6 +236,7 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
         directions=readers["directions"],
         means=readers["means"],
         signs=readers["signs"],
+        readers=tuple(published),
     )
 
 
@@ -570,14 +602,7 @@ def published_views(
     projections: dict[str, NDArray[np.float32]] = {}
     uids: dict[str, dict[str, list[str]]] = {}
     for t, (name, pool) in enumerate(pools.items()):
-        reader = RepReader.from_arrays(
-            reading.config.methods[0],
-            reading.layers,
-            reading.directions[t],
-            reading.means[t],
-            reading.signs[t],
-        )
-        scores, labels = type_scores(reader, acts, pool, "test")
+        scores, labels = type_scores(reading.readers[t], acts, pool, "test")
         aurocs[t] = auroc(scores, labels)
         positive, negative = pool.split("test")
         shown = {
