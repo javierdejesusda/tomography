@@ -758,10 +758,11 @@ REPRODUCIBILITY = Section(
     "Reproducibility",
     paragraphs=(
         "Every number on this page is computed when the page is built, "
-        "from the result files in the results directory of the repository "
-        "at the commit in the masthead; each figure and table links the "
-        "data file it draws, and the tests of the site recompute every "
-        "number in a caption from the result files. Each run directory "
+        "from the result files in the results directory of the repository; "
+        "each figure and table links the data file it draws, and the "
+        "tests of the site recompute every number in a caption from the "
+        "result files. Links to the findings document open it at the "
+        "commit of these results. Each run directory "
         "holds its configuration, its run identity (code commit and "
         "configuration hash) and its outputs. Models and datasets are "
         "pinned to the revisions in [[table:assets]]. The experiments ran "
@@ -1122,9 +1123,8 @@ APPENDICES = (
         "Other experiments",
         paragraphs=(
             "Further experiments ran on the same checkpoints and are "
-            "reported in the findings document of the repository at the "
-            "commit named in the masthead. They have no figure or table on "
-            "this page: the [[findings:"
+            "reported in the findings document of the repository. They "
+            "have no figure or table on this page: the [[findings:"
             "lorra-adapter-lr1-and-the-truthfulqa-control-c4|LoRRA adapter "
             "and its TruthfulQA control]], [[findings:emotions-r4|emotion "
             "reading]] and [[findings:emotion-steering-c2|emotion "

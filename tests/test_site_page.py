@@ -461,6 +461,35 @@ def test_the_masthead_links_the_pdf_instead_of_naming_the_commit(
     assert "year = {2027}," in html
 
 
+def _visible_text(html: str) -> str:
+    body = re.sub(r"<svg.*?</svg>", "", html, flags=re.S)
+    return re.sub(r"<[^>]+>", " ", body)
+
+
+def test_no_commit_or_masthead_is_named_in_the_page_text(
+    full: tuple[page.Document, str],
+) -> None:
+    text = _visible_text(full[1])
+    assert "masthead" not in text
+    assert "Results at commit" not in text
+    assert "abc1234" not in text
+    assert "blob/abc1234/" in full[1]
+
+
+def test_the_reproducibility_and_appendix_sentences_name_no_commit(
+    full: tuple[page.Document, str],
+) -> None:
+    text = " ".join(_visible_text(full[1]).split())
+    assert (
+        "from the result files in the results directory of the repository; "
+        "each figure and table links the data file it draws"
+    ) in text
+    assert (
+        "Links to the findings document open it at the commit of these results."
+    ) in text
+    assert "reported in the findings document of the repository. They" in text
+
+
 def test_appendix_figures_are_lazy_images_and_main_figures_inline(
     full: tuple[page.Document, str],
 ) -> None:

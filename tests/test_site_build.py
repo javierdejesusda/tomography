@@ -312,6 +312,15 @@ def test_the_built_masthead_links_the_pdf_and_names_no_commit(
     ) in html
 
 
+def test_the_built_page_text_names_no_commit_or_masthead(html: str) -> None:
+    sha, _ = build_module.results_commit(RESULTS)
+    text = re.sub(
+        r"<[^>]+>", " ", re.sub(r"<svg.*?</svg>", "", html, flags=re.S)
+    )
+    assert "masthead" not in text
+    assert sha not in text
+
+
 def test_the_built_cite_block_year_is_the_results_commit_year(
     site: tuple[Path, page.Document], html: str
 ) -> None:
