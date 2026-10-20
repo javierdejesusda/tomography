@@ -1,5 +1,7 @@
 from pathlib import Path
 import subprocess
+from urllib import parse
+from urllib import request
 
 import pytest
 
@@ -27,7 +29,8 @@ class FakeBrowser:
         self.commands.append(command)
         self.kwargs = kwargs
         uri = command[-1]
-        self.printed = Path(uri.removeprefix("file:///")).read_text("utf-8")
+        copy = Path(request.url2pathname(parse.urlparse(uri).path))
+        self.printed = copy.read_text("utf-8")
         target = next(a for a in command if a.startswith("--print-to-pdf="))
         if self.output is not None:
             Path(target.removeprefix("--print-to-pdf=")).write_bytes(
@@ -56,12 +59,9 @@ def test_the_browser_prints_the_copy_headless_without_header_or_footer(
     assert command[0] == "chrome-bin"
     assert "--headless" in command
     assert "--no-pdf-header-footer" in command
-    assert f"--print-to-pdf={site / pdf.NAME}" in command
+    assert f"--print-to-pdf={(site / pdf.NAME).resolve()}" in command
     assert any(a.startswith("--virtual-time-budget=") for a in command)
-    uri = command[-1]
-    assert uri.startswith("file:///")
-    assert uri.endswith("/" + pdf.PRINT_NAME)
-    assert Path(uri.removeprefix("file:///")).parent == site
+    assert command[-1] == (site / pdf.PRINT_NAME).resolve().as_uri()
 
 
 def test_the_browser_output_reaches_the_log(site: Path) -> None:
