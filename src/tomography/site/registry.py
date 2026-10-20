@@ -77,6 +77,8 @@ class TableOutput:
             rule above it; empty for none, and None to rule above every row
             with a label (the earlier behaviour).
         counts: Name to the per-role count the claim quotes.
+        wrap_labels: Whether the row labels may wrap on paper, for a table
+            that is too wide for the printed page otherwise.
     """
 
     claim: str
@@ -91,6 +93,7 @@ class TableOutput:
     counts: dict[str, dict[str, RoleCount]] = dataclasses.field(
         default_factory=dict
     )
+    wrap_labels: bool = False
 
 
 MAIN_FIGURES = (

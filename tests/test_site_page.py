@@ -642,6 +642,26 @@ def test_short_labels_stay_whole_and_long_identifiers_may_break() -> None:
     assert 'class="table wide"' not in narrow
 
 
+def test_a_table_that_may_wrap_its_labels_on_paper_gets_a_class() -> None:
+    def render(wrap_labels: bool) -> str:
+        output = registry.TableOutput(
+            "Claim.",
+            "Detail.",
+            ["Model", *"abcdefghi"],
+            [["x", *"123456789"]],
+            "l" + "r" * 9,
+            [],
+            {},
+            wrap_labels=wrap_labels,
+        )
+        doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+        return page.Page(doc).table("checkpoints")
+
+    assert 'class="table wide wrap-labels"' in render(True)
+    assert "wrap-labels" not in render(False)
+    assert 'class="table wide"' in render(False)
+
+
 def _hub_cell(text: str) -> str:
     output = registry.TableOutput(
         "Claim.", "Detail.", ["Model", "Hub ID"], [["m", text]], "ll", [], {}

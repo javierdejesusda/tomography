@@ -424,11 +424,13 @@ class Page:
         name = f"table-{number}"
         caption = f"{out.claim} {out.detail}".strip()
         text_only = "r" not in out.align and len(out.columns) >= TEXT_COLUMNS
-        wide = (
+        classes = (
             "table wide"
             if len(out.columns) >= WIDE_COLUMNS or text_only
             else "table"
         )
+        if out.wrap_labels:
+            classes += " wrap-labels"
         groups = "".join(
             f'<th colspan="{span}" class="span{" muted" if muted else ""}">'
             f"{_e(label)}</th>"
@@ -451,7 +453,7 @@ class Page:
         notes = "".join(f"<p>{self.text(n)}</p>" for n in out.notes)
         notes_html = f'<div class="notes">{notes}</div>' if notes else ""
         return (
-            f'<div class="{wide}" id="{name}">'
+            f'<div class="{classes}" id="{name}">'
             f'<p class="caption" id="{name}-cap">Table {number}: '
             f"{self.text(caption)} "
             f'<span class="data">(<a href="data/{name}.csv">data</a>)</span>'

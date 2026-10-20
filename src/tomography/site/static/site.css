@@ -447,7 +447,7 @@ footer.colophon {
     padding: 0.18em 0.2em;
   }
 
-  #table-2 td.k {
+  .table.wrap-labels td.k {
     white-space: normal;
   }
 

@@ -172,4 +172,5 @@ def build(manifest: Manifest) -> TableOutput:
         groups=tuple((title, 2, False) for _, title in CONCEPTS),
         row_groups=(*_rows.role_groups(models), len(models)),
         counts=counts,
+        wrap_labels=True,
     )

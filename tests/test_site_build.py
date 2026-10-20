@@ -195,9 +195,12 @@ def test_printed_tables_have_no_scroll_box_and_wide_ones_are_set_smaller(
     ) in printed
 
 
-def test_only_table_2_lets_its_printed_row_labels_wrap(css: str) -> None:
+def test_flagged_tables_let_their_printed_row_labels_wrap(css: str) -> None:
     printed = _print_block(css)
-    assert "#table-2 td.k {\n    white-space: normal;\n  }" in printed
+    assert (
+        ".table.wrap-labels td.k {\n    white-space: normal;\n  }"
+    ) in printed
+    assert "#table-" not in css
 
 
 def test_a_printed_figure_shrinks_to_one_page_instead_of_splitting(
