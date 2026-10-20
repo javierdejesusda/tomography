@@ -612,9 +612,11 @@ def execute(
 
     Rebuilds the contrasts of the run from the labels, runs the test items
     and the train items of the committed draws through the model once, at
-    every layer 0..L with the shared few-shot prefix, then refits and rescores
-    the committed draws of every method at the layers 1..L the P9b run read.
-    The layer to compare at is the one the P9b run chose.
+    the layers 1..L the P9b run read and with the shared few-shot prefix, then
+    refits and rescores the committed draws of every method. The layers stay
+    in the order and at the positions of the P9b run, because the random
+    finder draws its direction from the position of a layer. The layer to
+    compare at is the one the P9b run chose.
 
     Writes `projections.npz`: `layers` (K,), `test` (M, T, S, K) the test
     AUROC of each method, contrast, draw and layer refitted here, `shuffled`
@@ -658,15 +660,14 @@ def execute(
         selected,
         template,
         chat_format_for(loaded),
-        layers=tuple(range(loaded.n_layers + 1)),
+        layers=reading.layers,
         bos=protocol.bos,
         batch_size=config.batch_size,
         share_prefix=True,
     )
-    reads = ItemActivations(acts.uids, acts.layers[1:], acts.data[1:])
-    test = refit_methods(reads, pools, draws, protocol)
-    shuffled = refit_shuffled(reads, pools, draws, protocol, seed=config.seed)
-    views = published_views(reading, reads, pools)
+    test = refit_methods(acts, pools, draws, protocol)
+    shuffled = refit_shuffled(acts, pools, draws, protocol, seed=config.seed)
+    views = published_views(reading, acts, pools)
     run_dir.write_arrays(
         "projections",
         layers=np.asarray(reading.layers, dtype=np.int64),

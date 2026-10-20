@@ -957,7 +957,38 @@ def test_the_recomputed_auroc_is_the_committed_one_on_the_same_activations(
     assert set(reproduction["max_abs_diff"].values()) == {0.0}
 
 
-def test_the_extraction_reads_every_layer_of_the_selected_items(
+def test_the_random_finder_of_the_run_is_the_one_of_the_p9b_run(
+    inputs: Inputs, default_run: RunDir
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    m = READING_METHODS.index("random")
+
+    random = default_run.read_arrays("projections")["test"][m]
+
+    np.testing.assert_array_equal(random, committed.test[m])
+    assert not np.allclose(random, 0.5)
+
+
+def test_the_random_finder_draws_by_position_in_the_layer_axis(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    committed = read.committed
+    draws = train_draws(read.pools, committed.config)
+    later = ItemActivations(
+        read.acts.uids, read.acts.layers[1:], read.acts.data[1:]
+    )
+    m = READING_METHODS.index("random")
+
+    aligned = refit_methods(read.acts, read.pools, draws, committed.config)
+    shifted = refit_methods(later, read.pools, draws, committed.config)
+
+    np.testing.assert_array_equal(aligned[m], committed.test[m])
+    assert not np.array_equal(shifted[m], committed.test[m][..., 1:])
+    np.testing.assert_array_equal(shifted[0], committed.test[0][..., 1:])
+
+
+def test_the_extraction_reads_layers_one_to_the_last_of_the_selected_items(
     tiny_arch: LoadedModel,
     inputs: Inputs,
     tmp_path: Path,
@@ -977,7 +1008,7 @@ def test_the_extraction_reads_every_layer_of_the_selected_items(
     assert template == p9_template("fewshot", DEFAULT_SHOTS[:2])
     assert chat.kind == chat_format_for(tiny_arch).kind
     assert captured.kwargs == {
-        "layers": tuple(range(tiny_arch.n_layers + 1)),
+        "layers": tuple(range(1, tiny_arch.n_layers + 1)),
         "bos": committed.config.bos,
         "batch_size": 4,
         "share_prefix": True,
@@ -996,9 +1027,7 @@ def test_the_published_reader_and_its_projections_are_written(
     run_dir = _execute(tiny_arch, tmp_path, inputs)
 
     assert captured.acts is not None
-    reads = ItemActivations(
-        captured.acts.uids, captured.acts.layers[1:], captured.acts.data[1:]
-    )
+    reads = captured.acts
     views = published_views(committed, reads, _pools(committed))
     arrays = run_dir.read_arrays("projections")
     np.testing.assert_array_equal(arrays["published"], views.auroc)
@@ -1022,9 +1051,7 @@ def test_the_shuffled_control_is_written_beside_the_methods(
     run_dir = _execute(tiny_arch, tmp_path, inputs, seed=3)
 
     assert captured.acts is not None
-    reads = ItemActivations(
-        captured.acts.uids, captured.acts.layers[1:], captured.acts.data[1:]
-    )
+    reads = captured.acts
     want = refit_shuffled(
         reads,
         pools,
