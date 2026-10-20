@@ -490,7 +490,7 @@ def _same(recomputed: float | None, committed: float | None) -> bool:
 def compare_surface(
     pools: Mapping[str, TypePool], reading: CommittedReading
 ) -> dict[str, dict[str, dict[str, Any]]]:
-    """Recomputes the surface baselines and sets them beside the committed ones.
+    """Recomputes the surface controls and sets them beside the committed ones.
 
     They need no model, so a difference points at the labels or the library
     versions, not at the activations.
@@ -508,14 +508,14 @@ def compare_surface(
     for name, pool in pools.items():
         recomputed = surface_baselines(pool)
         report[name] = {
-            baseline: {
-                "recomputed": recomputed[baseline],
-                "committed": reading.table[name][baseline],
+            control: {
+                "recomputed": recomputed[control],
+                "committed": reading.table[name][control],
                 "equal": _same(
-                    recomputed[baseline], reading.table[name][baseline]
+                    recomputed[control], reading.table[name][control]
                 ),
             }
-            for baseline in SURFACE_BASELINES
+            for control in SURFACE_BASELINES
         }
     return report
 
@@ -627,7 +627,7 @@ def execute(
     SHA-256 of the uid; no question text). Writes `summary`: the layer, the
     number of items extracted, the comparison with the committed AUROC
     (`reproduction`, see `compare_auroc`) and with the committed surface
-    baselines (`surface`, see `compare_surface`). A difference is reported,
+    controls (`surface`, see `compare_surface`). A difference is reported,
     never raised.
 
     Args:
@@ -641,7 +641,7 @@ def execute(
     Raises:
         ValueError: If `batch_size` is below 1, the contrasts rebuilt from
             the labels differ from those of the run (see `check_reading`) or
-            a surface baseline cannot be computed. Nothing runs through the
+            a surface control cannot be computed. Nothing runs through the
             model before these.
     """
     if config.batch_size < 1:
@@ -703,8 +703,8 @@ def execute(
             "surface": surface,
             "surface_equal": all(
                 entry["equal"]
-                for by_baseline in surface.values()
-                for entry in by_baseline.values()
+                for by_control in surface.values()
+                for entry in by_control.values()
             ),
         },
     )

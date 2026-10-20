@@ -603,7 +603,7 @@ def test_compare_auroc_looks_at_the_chosen_layer_for_the_flag() -> None:
     assert report["max_abs_diff"]["draw_all_layers"] == 0.25
 
 
-def test_compare_surface_matches_the_committed_baselines(
+def test_compare_surface_matches_the_committed_controls(
     inputs: Inputs,
 ) -> None:
     committed = load_reading(inputs.reading.path, model="tiny")
@@ -612,11 +612,11 @@ def test_compare_surface_matches_the_committed_baselines(
     report = compare_surface(pools, committed)
 
     assert list(report) == USABLE
-    for name, by_baseline in report.items():
-        assert list(by_baseline) == list(SURFACE_BASELINES)
-        for baseline, entry in by_baseline.items():
-            assert entry["equal"] is True, (name, baseline)
-            assert entry["committed"] == committed.table[name][baseline]
+    for name, by_control in report.items():
+        assert list(by_control) == list(SURFACE_BASELINES)
+        for control, entry in by_control.items():
+            assert entry["equal"] is True, (name, control)
+            assert entry["committed"] == committed.table[name][control]
     assert report["obscure_real"]["popularity"]["recomputed"] is not None
     assert report["false_premise"]["popularity"] == {
         "recomputed": None,
@@ -625,7 +625,7 @@ def test_compare_surface_matches_the_committed_baselines(
     }
 
 
-def test_compare_surface_flags_a_baseline_that_moved(inputs: Inputs) -> None:
+def test_compare_surface_flags_a_control_that_moved(inputs: Inputs) -> None:
     committed = load_reading(inputs.reading.path, model="tiny")
     pools = _pools(committed)
     table = {name: dict(row) for name, row in committed.table.items()}
@@ -636,9 +636,9 @@ def test_compare_surface_flags_a_baseline_that_moved(inputs: Inputs) -> None:
     report = compare_surface(pools, moved)
 
     unequal = [
-        (name, baseline)
-        for name, by_baseline in report.items()
-        for baseline, entry in by_baseline.items()
+        (name, control)
+        for name, by_control in report.items()
+        for control, entry in by_control.items()
         if not entry["equal"]
     ]
     assert unequal == [
@@ -957,7 +957,7 @@ def test_the_shuffled_control_is_written_beside_the_methods(
     )
 
 
-def test_the_surface_baselines_are_recorded_beside_the_committed_ones(
+def test_the_surface_controls_are_recorded_beside_the_committed_ones(
     inputs: Inputs, default_run: RunDir
 ) -> None:
     committed = load_reading(inputs.reading.path, model="tiny")
@@ -981,7 +981,7 @@ def test_a_difference_beyond_the_tolerance_is_reported_not_hidden(
     assert reproduction["max_abs_diff"]["mean_all_layers"] > 0.02
 
 
-def test_a_surface_baseline_that_moved_is_reported_not_hidden(
+def test_a_surface_control_that_moved_is_reported_not_hidden(
     tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
 ) -> None:
     committed = load_reading(inputs.reading.path, model="tiny")
@@ -1062,7 +1062,7 @@ def test_labels_that_differ_from_the_reading_fail_before_the_forward_pass(
         _execute(tiny_arch, tmp_path, inputs, items=items)
 
 
-def test_a_baseline_that_cannot_work_fails_before_the_forward_pass(
+def test_a_control_that_cannot_work_fails_before_the_forward_pass(
     tiny_arch: LoadedModel,
     inputs: Inputs,
     tmp_path: Path,
@@ -1072,12 +1072,12 @@ def test_a_baseline_that_cannot_work_fails_before_the_forward_pass(
         raise AssertionError("the forward pass must not start")
 
     def broken(pool: Any) -> dict[str, float | None]:
-        raise ValueError("no baseline")
+        raise ValueError("no control")
 
     monkeypatch.setattr(v1_module, "collect_item_activations", never)
     monkeypatch.setattr(v1_module, "surface_baselines", broken)
 
-    with pytest.raises(ValueError, match="no baseline"):
+    with pytest.raises(ValueError, match="no control"):
         _execute(tiny_arch, tmp_path, inputs)
 
 
