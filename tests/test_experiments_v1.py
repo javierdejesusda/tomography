@@ -11,6 +11,7 @@ import shutil
 import socket
 from typing import Any
 
+from matplotlib.text import Text
 import numpy as np
 import pytest
 import torch
@@ -2281,13 +2282,42 @@ def test_the_seed_of_the_run_reaches_the_text_view(
 
 
 def test_no_file_of_a_run_holds_a_question(default_run: RunDir) -> None:
-    questions = [i.example.question.encode() for i in _items()]
+    questions = [i.example.question for i in _items()]
 
     for path in default_run.path.iterdir():
         content = path.read_bytes()
-        for question in questions[:50]:
-            assert question not in content, path.name
-        assert b"Who is" not in content, path.name
+        for question in questions:
+            for encoding in ("utf-8", "utf-32-le"):
+                assert question.encode(encoding) not in content, path.name
+
+
+@pytest.mark.parametrize("name", ["pca2d", "text2d", "projections"])
+def test_no_array_of_a_run_holds_text(default_run: RunDir, name: str) -> None:
+    arrays = default_run.read_arrays(name)
+
+    assert arrays
+    for key, array in arrays.items():
+        assert array.dtype.kind in "biuf", f"{name}[{key}] is {array.dtype}"
+
+
+def test_no_text_of_a_figure_holds_a_question(default_run: RunDir) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+    pca = default_run.read_arrays("pca2d")
+    text = default_run.read_arrays("text2d")
+    questions = [i.example.question for i in _items()]
+
+    for panel in sidecar["panels"]:
+        figure = panel_figure(panel, sidecar, pca, text)
+        figure.canvas.draw()
+        seen = [artist.get_text() for artist in figure.findobj(Text)]
+        assert "two leading components" in seen
+        assert "words only (LSA)" in seen
+        assert "positive side" in seen
+        assert any(label.strip().lstrip("-").isdigit() for label in seen)
+        for label in seen:
+            for question in questions:
+                assert question not in label, panel
 
 
 def test_a_text_view_that_cannot_be_fitted_fails_before_the_forward_pass(
