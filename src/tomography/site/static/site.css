@@ -33,6 +33,24 @@
   font-style: normal;
   font-display: swap;
 }
+/*
+ * U+2113 (the layer symbol) is missing from the Latin Modern Roman files, so
+ * it comes from a one-glyph subset of Latin Modern Math 1.959 (GUST Font
+ * License; renamed file, as the license asks for modified fonts). Source:
+ * https://www.gust.org.pl/projects/e-foundry/lm-math/download/latinmodern-math-1959.zip
+ * otf/latinmodern-math.otf, sha256
+ * 6075562b771f8b82f0c179e363389684f2dd09de30038269e2628e504bd7be0f.
+ * pyftsubset (fonttools 4.67.0) latinmodern-math.otf --unicodes=U+2113
+ * --flavor=woff2 --layout-features= --no-hinting --drop-tables+=DSIG
+ */
+@font-face {
+  font-family: "LM Math ell";
+  src: url("fonts/latinmodern-math-ell.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+2113;
+}
 
 :root {
   --ink: #1a1a1a;
@@ -51,7 +69,7 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: "LM Roman", "Latin Modern Roman", "CMU Serif", "Computer Modern", serif;
+  font-family: "LM Math ell", "LM Roman", "Latin Modern Roman", "CMU Serif", "Computer Modern", serif;
   line-height: 1.45;
   font-kerning: normal;
   font-variant-ligatures: common-ligatures;

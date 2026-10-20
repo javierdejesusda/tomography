@@ -23,6 +23,9 @@ SHA256 = {
     "lmmono10-regular.woff2": (
         "654a1ade8aa4d3494cedb82da87eb8976cf4d42774d74f5d4296667862b76c48"
     ),
+    "latinmodern-math-ell.woff2": (
+        "5e82ac0d28f8588e8cd49e15747c82e1889597f7c471323c231662e10ec39c7c"
+    ),
     "GUST-FONT-LICENSE.txt": (
         "49ea6cb9257bbee0a3979c48a774cd221550ac1c20c95549efe45fc99cc18050"
     ),
@@ -52,6 +55,15 @@ def test_the_gust_license_text_ships_with_the_fonts() -> None:
 def test_every_font_the_stylesheet_names_exists() -> None:
     css = (STATIC / "site.css").read_text("utf-8")
     urls = re.findall(r'url\("(fonts/[^"]+)"\)', css)
-    assert len(urls) == 5
+    assert len(urls) == 6
     for url in urls:
         assert (STATIC / url).is_file(), url
+
+
+def test_the_layer_symbol_comes_from_a_latin_modern_math_subset() -> None:
+    css = (STATIC / "site.css").read_text("utf-8")
+    face = css[css.index('font-family: "LM Math ell"') :].split("}", 1)[0]
+    assert 'url("fonts/latinmodern-math-ell.woff2")' in face
+    assert "unicode-range: U+2113;" in face
+    assert "font-weight: 100 900;" in face
+    assert 'font-family: "LM Math ell", "LM Roman", "Latin Modern Roman"' in css
