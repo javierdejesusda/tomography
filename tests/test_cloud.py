@@ -299,7 +299,6 @@ def test_up_posts_the_community_pod_request(tmp_path: Path) -> None:
         "volumeInGb": 50,
         "volumeMountPath": "/workspace",
         "ports": ["22/tcp"],
-        "allowedCudaVersions": ["13.0"],
         "supportPublicIp": True,
         "interruptible": False,
         "env": {"PUBLIC_KEY": PUBLIC_KEY},
@@ -322,6 +321,13 @@ def test_up_min_vcpu_asks_for_that_many_vcpus_per_gpu(tmp_path: Path) -> None:
     assert up(h, "--min-vcpu", "16") == 0
     body = json.loads(h.transport.calls[0][3] or b"")
     assert body["minVCPUPerGPU"] == 16
+
+
+def test_up_asks_for_the_given_cuda_versions(tmp_path: Path) -> None:
+    h = up_harness(tmp_path)
+    assert up(h, "--cuda-version", "13.0", "--cuda-version", "12.8") == 0
+    body = json.loads(h.transport.calls[0][3] or b"")
+    assert body["allowedCudaVersions"] == ["13.0", "12.8"]
 
 
 @pytest.mark.parametrize(
