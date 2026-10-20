@@ -7,6 +7,8 @@ import runpy
 from typing import Any
 
 from matplotlib import colors as mpl_colors
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 import pytest
 
 from tomography.site import registry
@@ -549,8 +551,9 @@ def test_panel_b_marker_state_follows_the_interval_rule(
         assert filled is (state == "above")
         if state != "above":
             assert line.get_markeredgecolor() == paper.RANDOM_GREY
-        ticks = _by_gid(ax, f"below-tick-{model}")
-        assert len(ticks) == (1 if state == "below" else 0)
+        marks = _by_gid(ax, f"below-mark-{model}")
+        assert len(marks) == (1 if state == "below" else 0)
+        assert not _by_gid(ax, f"below-tick-{model}")
 
 
 def test_panel_b_control_is_a_grey_bar_on_the_readers_row(
@@ -654,9 +657,7 @@ def test_the_legends_have_three_entries_a_role_key_and_a_state_key(
         "(a, c) post-trained",
     ]
     assert [t.get_text() for t in states.get_texts()] == [
-        "above the control",
-        "inside the control",
-        "below the control",
+        STATE_LABELS[s] for s in _occurring()
     ]
     handles = dict(zip(labels, main.legend_handles, strict=True))
     assert handles["(a, c) post-trained"].get_marker() == "o"
@@ -666,13 +667,13 @@ def test_the_legends_have_three_entries_a_role_key_and_a_state_key(
         for h in states.legend_handles
         if hasattr(h, "get_marker")
     }
-    assert markers - {"None"} == {"h"}
+    assert markers - {"None"} == {"h", approximate.BELOW_MARKER}
 
 
 def test_only_glossary_shapes_and_inks_are_drawn(
     output: registry.FigureOutput,
 ) -> None:
-    allowed = {"o", "h", "None", " ", ""}
+    allowed = {"o", "h", approximate.BELOW_MARKER, "None", " ", ""}
     fig = output.figure
     drawn = {str(ln.get_marker()) for ax in fig.axes for ln in ax.get_lines()}
     for legend in fig.legends:
@@ -705,9 +706,10 @@ def test_caption_states_the_state_rule_and_the_roles(
     output: registry.FigureOutput,
 ) -> None:
     text = output.detail
-    assert "a filled hexagon is above the control's interval" in text
-    assert "an open hexagon inside it" in text
-    assert "a tick below it" in text
+    occurring = _occurring()
+    for state, phrase in STATE_PHRASES.items():
+        assert (phrase in text) is (state in occurring), state
+    assert "a tick below it" not in text
 
 
 def test_panel_a_columns_label_only_zero_and_one(
@@ -788,10 +790,83 @@ def test_a_share_phrase_says_none_for_a_zero_and_at_most_for_the_rest() -> None:
         assert "at most 0" not in phrase(*args)
 
 
-def test_the_detail_names_the_control_interval_as_a_bootstrap_interval(
+def _occurring() -> list[str]:
+    found = {_state(m) for m in _models("p10b")}
+    return [s for s in ("above", "inside", "below") if s in found]
+
+
+STATE_LABELS = {
+    "above": "above the control",
+    "inside": "inside the control",
+    "below": "below the control",
+}
+STATE_PHRASES = {
+    "above": "a filled hexagon is above the control's interval",
+    "inside": "an open hexagon inside it",
+    "below": "a left arrow below it",
+}
+
+
+class _Fake:
+    def __init__(self, auroc: float) -> None:
+        self.reader = {"auroc": auroc, "lo": auroc - 0.02, "hi": auroc + 0.02}
+        self.random = {"auroc": 0.8, "lo": 0.7, "hi": 0.9}
+
+
+def test_a_below_state_is_not_a_horizontal_segment() -> None:
+    from matplotlib.figure import Figure
+
+    ax = Figure().subplots()
+    state = approximate._draw_reader(ax, "m", 1.0, _Fake(0.3))
+    assert state == "below"
+    (mark,) = _by_gid(ax, "below-mark-m")
+    assert len(mark.get_xdata()) == 1
+    assert mark.get_marker() not in ("None", "", " ")
+    for line in ax.get_lines():
+        if len(line.get_xdata()) == 2 and line.get_gid() not in (
+            "control-tick-m",
+        ):
+            assert line.get_gid() is None or "below" not in line.get_gid()
+
+
+def test_the_state_sentence_follows_the_states_that_occur() -> None:
+    sentence = approximate.state_sentence(["above", "inside"])
+    assert "below" not in sentence
+    assert STATE_PHRASES["above"] in sentence
+    assert STATE_PHRASES["below"] in approximate.state_sentence(["below"])
+
+
+def test_the_detail_names_the_control_tick_as_the_mean(
     output: registry.FigureOutput,
 ) -> None:
     n = int(output.numbers["n_random_draws"])
     assert (
-        f"grey bar: bootstrap interval of the mean of {n} random directions"
+        f"grey bar and tick: bootstrap interval and mean of {n} random "
+        "directions"
     ) in output.detail
+
+
+def test_the_control_legend_handle_shows_a_bar_and_a_tick(
+    output: registry.FigureOutput,
+) -> None:
+    main = output.figure.legends[0]
+    checks.draw(output.figure)
+    assert next(t.get_text() for t in main.get_texts()) == "random control"
+    ticks = [ln for ln in main.findobj(Line2D) if ln.get_marker() == "|"]
+    assert len(ticks) == 1
+    bars = [
+        p
+        for p in main.findobj(Patch)
+        if mpl_colors.to_hex(p.get_facecolor()[:3])
+        == mpl_colors.to_hex(paper.RANDOM_GREY)
+    ]
+    assert len(bars) == 1
+    assert bars[0].get_window_extent().x1 > ticks[0].get_window_extent().x0
+
+
+def test_the_detail_names_the_control_interval_as_a_bootstrap_interval(
+    output: registry.FigureOutput,
+) -> None:
+    n = int(output.numbers["n_random_draws"])
+    assert "bootstrap interval" in output.detail
+    assert f"mean of {n} random directions" in output.detail

@@ -7,6 +7,7 @@ P10b, fitted on height and wingspan, with its random control and the text-word
 classifier. The three panels share the checkpoint rows.
 """
 
+from collections.abc import Collection
 import json
 import math
 from typing import Any
@@ -61,14 +62,40 @@ DETAIL = (
     "(Qwen3 base), {share_post} (post-trained); GPT-2 small {gpt2_range} and "
     "{gpt2_exact} percent on range and exact items. (b) AUROC on "
     "durations of a range reader fitted on heights and wingspans, with its "
-    "random control (grey bar: bootstrap "
-    "interval of the mean of {draws} random directions) and a classifier on "
-    "the words (green line {text}, whisker {text_lo} to {text_hi}); a filled "
-    "hexagon is above the control's interval, an open hexagon inside it, a "
-    "tick below it. (c) People's position between buildings (0) and breeds "
+    "random control (grey bar and tick: bootstrap interval and mean of "
+    "{draws} random directions) and a word "
+    "classifier (green line {text}, whisker {text_lo} to {text_hi}); "
+    "{states}. (c) People's position between buildings (0) and breeds "
     "(1) against the random band, the range of the control's position over "
     "its {sets} training sets. See [[sec:appendix_approximate]]."
 )
+
+
+STATE_ORDER = ("above", "inside", "below")
+STATE_LABELS = {
+    "above": "above the control",
+    "inside": "inside the control",
+    "below": "below the control",
+}
+STATE_PHRASES = {
+    "above": "a filled hexagon is above the control's interval",
+    "inside": "an open hexagon inside it",
+    "below": "a left arrow below it",
+}
+BELOW_MARKER = r"$\leftarrow$"
+BELOW_OFFSET = 0.075
+
+
+def state_sentence(states: Collection[str]) -> str:
+    """Writes the caption clause that names the states which occur.
+
+    Args:
+        states: The states drawn in panel (b).
+
+    Returns:
+        The clause, in the order above, inside, below.
+    """
+    return ", ".join(STATE_PHRASES[s] for s in STATE_ORDER if s in states)
 
 
 def share_phrase(exact: int, people: int) -> str:
@@ -310,14 +337,16 @@ def _draw_reader(ax: Any, model: str, y: float, reader: "_Reader") -> str:
     point.set_gid(f"reader-{model}")
     point.set_clip_on(False)
     if state == "below":
-        (tick,) = ax.plot(
-            [value - TICK[0], value - TICK[1]],
-            [y, y],
+        (mark,) = ax.plot(
+            [value - BELOW_OFFSET],
+            [y],
+            marker=BELOW_MARKER,
+            ls="none",
             color=paper.RANDOM_GREY,
-            lw=paper.WHISKER_WIDTH,
+            markersize=_rows.MARKER_SIZE,
             zorder=3,
         )
-        tick.set_gid(f"below-tick-{model}")
+        mark.set_gid(f"below-mark-{model}")
     return state
 
 
@@ -435,11 +464,21 @@ def _draw(
         paper.panel_letter(ax, letter)
     main = fig.legend(
         handles=[
-            Patch(
-                facecolor=paper.RANDOM_GREY,
-                alpha=paper.RANDOM_BAND_ALPHA,
-                lw=0,
-                label="random control",
+            (
+                Patch(
+                    facecolor=paper.RANDOM_GREY,
+                    alpha=paper.RANDOM_BAND_ALPHA,
+                    lw=0,
+                ),
+                Line2D(
+                    [],
+                    [],
+                    ls="none",
+                    marker="|",
+                    color=paper.RANDOM_GREY,
+                    markersize=_rows.MARKER_SIZE,
+                    markeredgewidth=paper.DATA_WIDTH,
+                ),
             ),
             Line2D(
                 [], [], color=paper.ENC["text"], lw=1.0, label="word classifier"
@@ -456,6 +495,13 @@ def _draw(
                 filled=False,
             ),
         ],
+        labels=[
+            "random control",
+            "word classifier",
+            "(a, c) GPT-2 and Qwen3 base",
+            "(a, c) post-trained",
+        ],
+        handler_map={tuple: HandlerTuple(ndivide=None, pad=0.0)},
         loc="outside upper center",
         ncol=4,
         handlelength=1.0,
@@ -471,30 +517,33 @@ def _draw(
         "markeredgewidth": _rows.EDGE_WIDTH,
         "markersize": _rows.MARKER_SIZE,
     }
-    states = fig.legend(
-        handles=[
-            _rows.series_handle("above the control", STATE_MARKER, paper.INK),
-            Line2D([], [], label="inside the control", **open_grey),
-            (
-                Line2D(
-                    [],
-                    [],
-                    color=paper.RANDOM_GREY,
-                    lw=paper.WHISKER_WIDTH,
-                ),
-                Line2D([], [], label="below the control", **open_grey),
+    handles: dict[str, Any] = {
+        "above": _rows.series_handle(
+            STATE_LABELS["above"], STATE_MARKER, paper.INK
+        ),
+        "inside": Line2D([], [], **open_grey),
+        "below": (
+            Line2D(
+                [],
+                [],
+                ls="none",
+                marker=BELOW_MARKER,
+                color=paper.RANDOM_GREY,
+                markersize=_rows.MARKER_SIZE,
             ),
-        ],
+            Line2D([], [], **open_grey),
+        ),
+    }
+    occurring = {_state(r) for r in readers.values()}
+    shown = [k for k in STATE_ORDER if k in occurring]
+    states = fig.legend(
+        handles=[handles[k] for k in shown],
         handler_map={tuple: HandlerTuple(ndivide=None, pad=0.0)},
-        labels=[
-            "above the control",
-            "inside the control",
-            "below the control",
-        ],
+        labels=[STATE_LABELS[k] for k in shown],
         title="(b) range reader against its control",
         title_fontsize=7,
         loc="outside lower center",
-        ncol=3,
+        ncol=len(shown),
         handlelength=1.4,
         columnspacing=1.2,
         fontsize=7,
@@ -607,6 +656,7 @@ def build(manifest: Manifest) -> FigureOutput:
         above_random=stats.per_role_text(above_random),
     )
     detail = DETAIL.format(
+        states=state_sentence({_state(r) for r in readers.values()}),
         n_people=int(numbers["n_people"]),
         **{
             f"share_{role}": share_phrase(
