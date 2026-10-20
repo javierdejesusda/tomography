@@ -30,7 +30,20 @@ def test_workflow_uses_minimal_permissions_and_a_concurrency_group() -> None:
     assert "pages: write" in deploy
     assert "id-token: write" in deploy
     assert "concurrency:" in text
-    assert "cancel-in-progress: false" in text
+    assert (
+        "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in text
+    )
+
+
+def test_pull_requests_use_their_own_group_and_only_they_cancel() -> None:
+    text = _text()
+    group = re.search(r"concurrency:\s+group: (.+)", text)
+    assert group
+    expr = group.group(1)
+    assert "github.event_name == 'pull_request'" in expr
+    assert "pages-pr-{0}" in expr
+    assert expr.rstrip().endswith("|| 'pages' }}")
+    assert "cancel-in-progress: false" not in text
 
 
 def test_workflow_pins_every_action_and_uses_the_pages_actions() -> None:
@@ -52,7 +65,7 @@ def test_workflow_builds_the_site_with_the_package_command() -> None:
     assert "github-pages" in text
 
 
-def test_workflow_checks_out_the_history_for_the_masthead_commit() -> None:
+def test_workflow_checks_out_the_history_for_the_results_commit() -> None:
     text = _text()
     assert "fetch-depth: 0" in text
 
