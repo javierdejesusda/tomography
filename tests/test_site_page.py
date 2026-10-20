@@ -642,6 +642,26 @@ def test_short_labels_stay_whole_and_long_identifiers_may_break() -> None:
     assert 'class="table wide"' not in narrow
 
 
+def test_a_figure_that_keeps_its_size_on_paper_gets_a_class() -> None:
+    def render(full_size_print: bool) -> str:
+        output = registry.FigureOutput(
+            Figure(),
+            "Claim.",
+            "Detail.",
+            {},
+            "a,b\n1,2\n",
+            full_size_print=full_size_print,
+        )
+        entry = page.FigureEntry("x", output, SVG, b"%PDF-1.4")
+        return page.Page(_doc({"method": entry})).figure("method")
+
+    assert '<figure id="fig-1" class="full-size-print">' in render(True)
+    assert '<figure id="fig-1">' in render(False)
+    assert registry.FigureOutput(
+        Figure(), "c", "d", {}, ""
+    ).full_size_print is (False)
+
+
 def test_a_table_that_may_wrap_its_labels_on_paper_gets_a_class() -> None:
     def render(wrap_labels: bool) -> str:
         output = registry.TableOutput(

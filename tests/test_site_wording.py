@@ -643,3 +643,9 @@ def test_the_random_marks_and_seed_ticks_are_dark_grey_and_stay_solid(
         if t.get_text().startswith("agreement across seeds")
     ]
     assert seeds.get_markeredgewidth() == TICK_WIDTH
+
+
+def test_the_long_caption_figure_keeps_its_graphic_size_on_paper(
+    output: registry.FigureOutput,
+) -> None:
+    assert output.full_size_print is True

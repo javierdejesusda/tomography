@@ -479,6 +479,23 @@ footer.colophon {
     object-fit: contain;
   }
 
+  figure.full-size-print {
+    display: block;
+    max-height: none;
+    break-inside: auto;
+  }
+
+  figure.full-size-print .fig-scroll {
+    display: block;
+    break-inside: avoid;
+    break-after: avoid;
+  }
+
+  figure.full-size-print .fig-scroll img {
+    width: 100%;
+    max-height: none;
+  }
+
   h2,
   h3 {
     break-after: avoid;

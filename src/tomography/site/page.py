@@ -366,8 +366,11 @@ class Page:
         if entry.output.csv.strip():
             links.append(f'<a href="data/{name}.csv">data</a>')
         links.append(f'<a href="figures/{name}.pdf">PDF</a>')
+        flag = (
+            ' class="full-size-print"' if entry.output.full_size_print else ""
+        )
         return (
-            f'<figure id="{name}"><div class="fig-scroll">{graphic}</div>'
+            f'<figure id="{name}"{flag}><div class="fig-scroll">{graphic}</div>'
             f'<figcaption id="{name}-cap">{label}: {self.text(caption)} '
             f'<span class="data">({", ".join(links)})</span>'
             "</figcaption></figure>"

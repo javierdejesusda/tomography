@@ -624,4 +624,5 @@ def build(manifest: Manifest) -> FigureOutput:
         numbers,
         _csv(data),
         {"bare_above": counts, "span_above_noise": spans},
+        full_size_print=True,
     )

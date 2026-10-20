@@ -231,6 +231,33 @@ def test_a_printed_figure_shrinks_to_one_page_instead_of_splitting(
     assert "figure,\n  pre,\n  tr {\n    break-inside: avoid;" in printed
 
 
+def test_a_flagged_figure_prints_its_graphic_whole_and_lets_the_caption_run_on(
+    css: str,
+) -> None:
+    printed = _print_block(css)
+    assert (
+        "  figure.full-size-print {\n"
+        "    display: block;\n"
+        "    max-height: none;\n"
+        "    break-inside: auto;\n"
+        "  }"
+    ) in printed
+    assert (
+        "  figure.full-size-print .fig-scroll {\n"
+        "    display: block;\n"
+        "    break-inside: avoid;\n"
+        "    break-after: avoid;\n"
+        "  }"
+    ) in printed
+    assert (
+        "  figure.full-size-print .fig-scroll img {\n"
+        "    width: 100%;\n"
+        "    max-height: none;\n"
+        "  }"
+    ) in printed
+    assert "#fig-" not in css
+
+
 def test_the_bibtex_block_wraps(css: str) -> None:
     assert (
         "pre.bibtex {\n  white-space: pre-wrap;\n  overflow-wrap: anywhere;"
