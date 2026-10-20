@@ -83,6 +83,55 @@ def pca_explained_variance(
     return ratios
 
 
+def pca_coordinates(
+    h: FloatArray,
+) -> tuple[NDArray[np.float32], NDArray[np.float64]]:
+    """Projects the rows of every layer on their two leading components.
+
+    Each layer is centered and decomposed on its own in float64 with a full
+    SVD, so the result is deterministic and the whole stack is never cast at
+    once. The sign of each component is fixed so that its largest-magnitude
+    loading is positive, as for the fitted directions.
+
+    Args:
+        h: Activations of shape (K, n, d): layer, row, feature.
+
+    Returns:
+        The coordinates, shape (K, n, 2) float32, and the explained-variance
+        ratios of the two components over the total variance of the layer
+        (as in `pca_explained_variance`), shape (K, 2) float64.
+
+    Raises:
+        ValueError: If `h` is not 3-D, has fewer than 2 rows or 2 features,
+            or a layer is not finite or has no variance.
+    """
+    stack = np.asarray(h)
+    if stack.ndim != 3:
+        raise ValueError(f"h must have shape (K, n, d), got {stack.shape}")
+    if min(stack.shape[1:]) < 2:
+        raise ValueError(
+            "2 components need at least 2 rows and 2 features, got "
+            f"{stack.shape[1]} rows and {stack.shape[2]} features"
+        )
+    coordinates = np.empty((stack.shape[0], stack.shape[1], 2), np.float32)
+    ratios = np.empty((stack.shape[0], 2))
+    for k, layer in enumerate(stack):
+        rows = np.array(layer, dtype=np.float64)
+        if not np.isfinite(rows).all():
+            raise ValueError(f"layer {k} is not finite")
+        rows -= rows.mean(axis=0)
+        scores, singular, loadings = np.linalg.svd(rows, full_matrices=False)
+        squared = singular**2
+        if squared.sum() <= 0.0:
+            raise ValueError(f"layer {k} has no variance")
+        leading = loadings[:2]
+        peak = leading[np.arange(2), np.abs(leading).argmax(axis=1)]
+        signs = np.where(peak < 0, -1.0, 1.0)
+        coordinates[k] = scores[:, :2] * singular[:2] * signs
+        ratios[k] = squared[:2] / squared.sum()
+    return coordinates, ratios
+
+
 def tsne_embed(
     h: FloatArray, *, perplexity: float = 30.0, seed: int = 0
 ) -> NDArray[np.float32]:

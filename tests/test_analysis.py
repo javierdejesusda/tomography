@@ -1,12 +1,14 @@
-"""Tests for the layer analyses: PCA variance and t-SNE."""
+"""Tests for the layer analyses: PCA variance, PCA coordinates and t-SNE."""
 
 from collections.abc import Callable
 import itertools
+import tracemalloc
 from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 import pytest
+from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 
 from tomography import analysis
@@ -18,6 +20,7 @@ from tomography.analysis import dictionary_directions
 from tomography.analysis import layer_cosines
 from tomography.analysis import lens_logits
 from tomography.analysis import mean_direction
+from tomography.analysis import pca_coordinates
 from tomography.analysis import pca_explained_variance
 from tomography.analysis import pole_separation
 from tomography.analysis import seed_agreement
@@ -227,6 +230,112 @@ def test_tsne_rejects_bad_h() -> None:
     bad[0, 0, 0] = np.nan
     with pytest.raises(ValueError, match="finite"):
         tsne_embed(bad, perplexity=5.0)
+
+
+def test_pca_coordinates_shape_dtype_and_determinism() -> None:
+    h = np.random.default_rng(10).standard_normal((3, 12, 6))
+    coordinates, ratios = pca_coordinates(h)
+    assert coordinates.shape == (3, 12, 2)
+    assert coordinates.dtype == np.float32
+    assert ratios.shape == (3, 2)
+    again_coordinates, again_ratios = pca_coordinates(h)
+    np.testing.assert_array_equal(coordinates, again_coordinates)
+    np.testing.assert_array_equal(ratios, again_ratios)
+
+
+def test_pca_coordinates_of_a_hand_computed_case() -> None:
+    # Centered rows (+-1, 0) and (0, +-2) have X^T X = diag(2, 8): the first
+    # component is the y axis (8 of 10) and the second the x axis (2 of 10).
+    h = np.array([[[1.0, 0.0], [-1.0, 0.0], [0.0, 2.0], [0.0, -2.0]]]) + 7.0
+    coordinates, ratios = pca_coordinates(h)
+    np.testing.assert_allclose(
+        coordinates[0],
+        [[0.0, 1.0], [0.0, -1.0], [2.0, 0.0], [-2.0, 0.0]],
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(ratios[0], [0.8, 0.2], atol=1e-12)
+
+
+def test_pca_coordinates_agree_with_the_variance_helper_and_scikit_learn() -> (
+    None
+):
+    h = np.random.default_rng(11).standard_normal((2, 15, 6)) * [
+        4,
+        2,
+        1,
+        1,
+        1,
+        1,
+    ]
+    coordinates, ratios = pca_coordinates(h)
+    np.testing.assert_allclose(
+        ratios, pca_explained_variance(h, n_components=2), atol=1e-12
+    )
+    for k, rows in enumerate(h):
+        expected = PCA(n_components=2, svd_solver="full").fit_transform(rows)
+        np.testing.assert_allclose(
+            np.abs(coordinates[k]), np.abs(expected), atol=1e-5
+        )
+
+
+def test_pca_coordinates_make_the_largest_loading_positive() -> None:
+    h = np.random.default_rng(12).standard_normal((4, 30, 5)) + 3.0
+    coordinates, _ = pca_coordinates(h)
+    for k, rows in enumerate(h):
+        centered = rows - rows.mean(axis=0)
+        for component in range(2):
+            loading = np.linalg.lstsq(
+                centered, coordinates[k, :, component].astype(np.float64)
+            )[0]
+            assert loading[np.argmax(np.abs(loading))] > 0
+
+
+def test_pca_coordinates_treat_layers_independently() -> None:
+    first = np.random.default_rng(13).standard_normal((12, 6))
+    second = np.random.default_rng(14).standard_normal((12, 6))
+    alone_coordinates, alone_ratios = pca_coordinates(first[None])
+    stacked_coordinates, stacked_ratios = pca_coordinates(
+        np.stack([first, second])
+    )
+    np.testing.assert_array_equal(alone_coordinates[0], stacked_coordinates[0])
+    np.testing.assert_array_equal(alone_ratios[0], stacked_ratios[0])
+
+
+def test_pca_coordinates_leave_the_input_untouched() -> None:
+    h = np.random.default_rng(15).standard_normal((2, 12, 6)) + 5.0
+    before = h.copy()
+    pca_coordinates(h)
+    np.testing.assert_array_equal(h, before)
+
+
+def test_pca_coordinates_never_cast_the_whole_stack() -> None:
+    h = np.random.default_rng(16).standard_normal((40, 100, 50))
+    h32 = h.astype(np.float32)
+    del h
+    whole = h32.size * 8
+    tracemalloc.start()
+    try:
+        pca_coordinates(h32)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < whole / 4
+
+
+@pytest.mark.parametrize(
+    ("h", "match"),
+    [
+        (np.ones((6, 3)), "shape"),
+        (np.full((1, 6, 3), np.nan), "finite"),
+        (np.ones((2, 6, 3)), "variance"),
+        (np.random.default_rng(0).standard_normal((1, 6, 1)), "components"),
+        (np.random.default_rng(0).standard_normal((1, 1, 6)), "components"),
+    ],
+    ids=["two-d", "nan", "constant", "one-feature", "one-row"],
+)
+def test_pca_coordinates_reject_bad_input(h: Any, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        pca_coordinates(h)
 
 
 def _runs(n: int = 4, k: int = 3, d: int = 6, seed: int = 0) -> Any:
