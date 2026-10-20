@@ -1,0 +1,225 @@
+"""Shared axes, styles and captions for the paper figures.
+
+Layer axes use relative depth (layer over layer count) and size axes use the
+log of the parameter count, so every figure reads the same way. Base and
+post-trained checkpoints are drawn apart: filled markers and solid lines for
+GPT-2 and the base models, open markers and dashed lines for post-trained.
+"""
+
+from collections.abc import Sequence
+import dataclasses
+
+from matplotlib import ticker
+from matplotlib.axes import Axes
+from matplotlib.lines import Line2D
+
+from tomography.site import store
+from tomography.viz import paper
+
+GPT2_SIZES = ("gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl")
+QWEN3_SIZES = ("0.6b", "1.7b", "4b")
+MINUS = chr(0x2212)
+UNIT_TICKS = (0.0, 0.25, 0.5, 0.75, 1.0)
+GAP_AFTER_GPT2 = 0.6
+GAP_BETWEEN_PAIRS = 0.25
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelStyle:
+    """How one checkpoint is drawn.
+
+    Attributes:
+        family: `GPT-2` or `Qwen3`.
+        color: Hex color, one hue per family and darker for larger sizes.
+        filled: Filled markers for base and GPT-2, open for post-trained.
+        marker: Matplotlib marker; circle for GPT-2, square for Qwen3.
+    """
+
+    family: str
+    color: str
+    filled: bool
+    marker: str
+
+
+def relative_depth(layers: Sequence[float], count: int) -> list[float]:
+    """Converts layer indices to relative depth.
+
+    Args:
+        layers: Layer indices, 1 to `count`.
+        count: Number of layers of the model.
+
+    Returns:
+        Layer divided by the layer count.
+
+    Raises:
+        ValueError: If the layer count is not positive.
+    """
+    if count <= 0:
+        raise ValueError("layer count must be positive")
+    return [layer / count for layer in layers]
+
+
+def model_style(key: str) -> ModelStyle:
+    """Gives the fixed look of a checkpoint.
+
+    Args:
+        key: Checkpoint key such as `gpt2-xl` or `qwen3-4b-base`.
+
+    Returns:
+        The style.
+
+    Raises:
+        ValueError: If the family or size is unknown.
+    """
+    if key.startswith("gpt2"):
+        ramp = paper.size_ramp("gpt2", len(GPT2_SIZES))
+        return ModelStyle("GPT-2", ramp[GPT2_SIZES.index(key)], True, "o")
+    size = key.removeprefix("qwen3-").removesuffix("-base")
+    ramp = paper.size_ramp("qwen3", len(QWEN3_SIZES))
+    post = not key.endswith("-base")
+    return ModelStyle(
+        "Qwen3",
+        ramp[QWEN3_SIZES.index(size)],
+        not post,
+        "s",
+    )
+
+
+def depth_axis(ax: Axes) -> None:
+    """Sets an x axis for relative depth from 0 to 1.
+
+    Args:
+        ax: The axes.
+    """
+    ax.set_xlim(0.0, 1.0)
+    ax.set_xticks([0.0, 0.25, 0.5, 0.75, 1.0])
+    ax.set_xticklabels(["0", "0.25", "0.5", "0.75", "1"])
+    ax.set_xlabel("relative depth")
+
+
+def _size_text(value: float, _pos: int) -> str:
+    if value >= 1e9:
+        return f"{value / 1e9:g}B"
+    return f"{value / 1e6:g}M"
+
+
+def size_axis(
+    ax: Axes,
+    counts: Sequence[float],
+    ticks: Sequence[float] = (1e8, 3e8, 1e9, 3e9),
+) -> None:
+    """Sets a logarithmic x axis for parameter counts.
+
+    Args:
+        ax: The axes.
+        counts: The counts that must fit on the axis.
+        ticks: Where to put labelled ticks.
+    """
+    ax.set_xscale("log")
+    ax.set_xlim(min(counts) / 1.6, max(counts) * 1.6)
+    ax.xaxis.set_major_locator(ticker.FixedLocator(list(ticks)))
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(_size_text))
+    ax.xaxis.set_minor_locator(ticker.NullLocator())
+    ax.set_xlabel("parameters")
+
+
+def caption(claim: str, detail: str) -> str:
+    """Builds a caption: the claim sentence, then what is plotted.
+
+    Args:
+        claim: One sentence with the finding; it must end with a period.
+        detail: What is plotted, baselines and what each interval covers.
+
+    Returns:
+        The caption text.
+
+    Raises:
+        ValueError: If the claim does not end with a period.
+    """
+    if not claim.endswith("."):
+        raise ValueError("a claim is one sentence ending with a period")
+    return f"{claim} {detail}".strip()
+
+
+def minus_formatter() -> ticker.FuncFormatter:
+    """Builds a tick formatter with the true minus and trimmed zeros.
+
+    Returns:
+        A formatter that writes 0.25 as `0.25`, 1.0 as `1` and a negative
+        number with a true minus set in mathtext (the text font has no
+        U+2212 glyph); a value that rounds to zero has no sign.
+    """
+
+    def write(value: float, _pos: int) -> str:
+        text = f"{round(value, 6):g}"
+        if text in ("-0", "0"):
+            return "0"
+        return f"${MINUS}$" + text[1:] if text.startswith("-") else text
+
+    return ticker.FuncFormatter(write)
+
+
+def unit_axis(ax: Axes, which: str) -> None:
+    """Gives a 0 to 1 axis the page's ticks and labels.
+
+    Args:
+        ax: The panel.
+        which: `x` or `y`.
+    """
+    axis = ax.xaxis if which == "x" else ax.yaxis
+    axis.set_major_locator(ticker.FixedLocator(UNIT_TICKS))
+    axis.set_major_formatter(minus_formatter())
+
+
+def ref_line(ax: Axes, value: float, which: str = "y") -> Line2D:
+    """Draws a thin dotted reference line behind the data.
+
+    Args:
+        ax: The panel.
+        value: Where the line sits: chance, zero or a threshold.
+        which: `y` for a horizontal line, `x` for a vertical one.
+
+    Returns:
+        The line.
+    """
+    draw = ax.axhline if which == "y" else ax.axvline
+    line: Line2D = draw(
+        value,
+        color=paper.ENC["reference"],
+        linestyle=paper.LINESTYLES["reference"],
+        linewidth=paper.REFERENCE_WIDTH,
+        zorder=1,
+    )
+    return line
+
+
+def model_rows(models: Sequence[str]) -> dict[str, float]:
+    """Places checkpoints in rows with the page's gaps.
+
+    Rows are one unit apart, with 0.6 extra after the last GPT-2 checkpoint
+    and 0.25 extra between Qwen3 pairs.
+
+    Args:
+        models: Checkpoint keys, in any order.
+
+    Returns:
+        Checkpoint key to its row position, increasing downwards.
+    """
+    ordered = sorted(models, key=store.model_rank)
+    rows: dict[str, float] = {}
+    position = 0.0
+    previous = ""
+    for model in ordered:
+        if previous:
+            position += 1.0
+            if not previous.startswith("qwen3") and model.startswith("qwen3"):
+                position += GAP_AFTER_GPT2
+            elif (
+                previous.startswith("qwen3")
+                and not previous.endswith("-base")
+                and model.endswith("-base")
+            ):
+                position += GAP_BETWEEN_PAIRS
+        rows[model] = position
+        previous = model
+    return rows

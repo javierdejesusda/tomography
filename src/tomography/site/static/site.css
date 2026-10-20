@@ -1,0 +1,433 @@
+@font-face {
+  font-family: "LM Roman";
+  src: url("fonts/lmroman10-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "LM Roman";
+  src: url("fonts/lmroman10-bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "LM Roman";
+  src: url("fonts/lmroman10-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "LM Roman";
+  src: url("fonts/lmroman10-bolditalic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "LM Mono";
+  src: url("fonts/lmmono10-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --ink: #1a1a1a;
+  --muted: #4d4d4d;
+  --paper: #fff;
+  --link: #1a3c8c;
+}
+
+html {
+  font-size: 18px;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "LM Roman", "Latin Modern Roman", "CMU Serif", "Computer Modern", serif;
+  line-height: 1.45;
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures;
+  text-rendering: optimizeLegibility;
+  overflow-wrap: break-word;
+}
+
+main {
+  max-width: 80ch;
+  margin: 0 auto;
+  padding: 2.2rem 1rem 3rem;
+}
+
+p {
+  margin: 0.55em 0;
+  text-align: justify;
+  hyphens: auto;
+  text-indent: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+a.ref {
+  color: var(--link);
+  text-decoration: none;
+}
+
+code,
+pre {
+  font-family: "LM Mono", "Latin Modern Mono", "CMU Typewriter Text", monospace;
+  font-size: 0.78em;
+}
+
+header.title {
+  margin-bottom: 1.4em;
+}
+
+h1 {
+  margin: 0;
+  padding: 0.55em 0 0.45em;
+  border-top: 4px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  font-size: 1.73em;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  hyphens: manual;
+}
+
+.repo,
+.date {
+  margin: 0.6em 0 0;
+  text-align: center;
+}
+
+.repo {
+  font-family: "LM Mono", "Latin Modern Mono", monospace;
+  font-size: 0.9em;
+}
+
+.date {
+  font-size: 0.9em;
+}
+
+.tldr {
+  margin: 1.2em 0 0;
+}
+
+.abstract h2 {
+  margin: 1.6em 0 0.4em;
+  font-size: 1.2em;
+  text-align: center;
+}
+
+.abstract p {
+  margin-left: 2.5em;
+  margin-right: 2.5em;
+}
+
+h2 {
+  margin: 1.6em 0 0.5em;
+  font-size: 1.2em;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+h3 {
+  margin: 1.2em 0 0.4em;
+  font-size: 1em;
+  font-weight: 700;
+}
+
+.runin {
+  font-weight: 700;
+}
+
+ol.contributions {
+  margin: 0.5em 0;
+  padding-left: 1.8em;
+  text-align: justify;
+}
+
+ol.contributions li {
+  margin: 0.3em 0;
+}
+
+.contents {
+  margin: 1.2em 0 0;
+  font-size: 0.9em;
+  text-align: center;
+}
+
+.contents a {
+  white-space: nowrap;
+}
+
+figure {
+  margin: 1.3em 0;
+  text-align: center;
+  break-inside: avoid;
+}
+
+.fig-scroll svg,
+.fig-scroll img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+figcaption,
+.caption {
+  font-size: 0.9em;
+  line-height: 1.35;
+  text-align: justify;
+  hyphens: auto;
+}
+
+figcaption {
+  margin-top: 0.6em;
+}
+
+.data {
+  white-space: nowrap;
+}
+
+.table {
+  margin: 1.3em 0;
+  break-inside: avoid;
+}
+
+.table .scroll {
+  overflow-x: auto;
+}
+
+.table .caption {
+  margin: 0 0 0.5em;
+}
+
+table {
+  width: 100%;
+  border-top: 1.5px solid var(--ink);
+  border-bottom: 1.5px solid var(--ink);
+  border-collapse: collapse;
+  font-size: 0.78em;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+thead tr.groups th {
+  text-align: center;
+  font-weight: normal;
+  padding-bottom: 0.1em;
+}
+
+thead tr.groups th.span {
+  padding-bottom: 0.35em;
+  background: linear-gradient(var(--ink), var(--ink)) no-repeat
+    calc(0.3em) 100% / calc(100% - 0.6em) 0.06em;
+}
+
+thead tr.groups th.muted {
+  color: var(--muted);
+}
+
+thead tr:last-child th {
+  border-bottom: 1px solid var(--ink);
+}
+
+tbody tr.group td {
+  border-top: 0.5px solid var(--ink);
+}
+
+td.k {
+  white-space: nowrap;
+}
+
+td.id {
+  overflow-wrap: anywhere;
+}
+
+th,
+td {
+  padding: 0.16em 0.25em;
+  text-align: left;
+  vertical-align: baseline;
+}
+
+th {
+  font-weight: normal;
+}
+
+.r {
+  text-align: right;
+}
+
+.notes {
+  margin: 0.5em 0 0;
+  font-size: 0.82em;
+  line-height: 1.35;
+}
+
+.notes p {
+  margin: 0.2em 0;
+}
+
+sup.fn {
+  font-size: 0.7em;
+  line-height: 0;
+}
+
+aside.footnotes {
+  margin-top: 1.4em;
+  font-size: 0.85em;
+  line-height: 1.35;
+}
+
+aside.footnotes hr {
+  width: 33%;
+  margin: 0 0 0.4em;
+  border: 0;
+  border-top: 1px solid var(--ink);
+}
+
+aside.footnotes p {
+  margin: 0.2em 0;
+}
+
+.refs {
+  margin: 0.4em 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9em;
+}
+
+.refs li {
+  margin: 0.25em 0;
+  padding-left: 2.2em;
+  text-indent: -2.2em;
+  text-align: left;
+}
+
+pre.bibtex {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+pre {
+  margin: 0.6em 0;
+  padding: 0;
+  overflow-x: auto;
+  line-height: 1.35;
+  white-space: pre;
+}
+
+footer.colophon {
+  margin-top: 2.4em;
+  font-size: 0.85em;
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  main {
+    padding: 1.4rem 16px 2rem;
+  }
+
+  p,
+  figcaption,
+  .caption,
+  ol.contributions {
+    text-align: left;
+    hyphens: manual;
+  }
+
+  h1 {
+    font-size: 1.5em;
+  }
+
+  .abstract p {
+    margin-left: 1em;
+    margin-right: 1em;
+  }
+
+  table {
+    font-size: 0.72em;
+  }
+
+  th,
+  td {
+    padding: 0.18em 0.35em;
+  }
+
+  .fig-scroll {
+    overflow-x: auto;
+  }
+
+  .fig-scroll svg,
+  .fig-scroll img {
+    min-width: 560px;
+  }
+}
+
+@media print {
+  @page {
+    size: letter;
+    margin: 1in 1.5in;
+  }
+
+  html {
+    font-size: 10pt;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  main {
+    max-width: none;
+    padding: 0;
+  }
+
+  .table {
+    break-inside: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  figure,
+  pre,
+  tr {
+    break-inside: avoid;
+  }
+
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+
+  a {
+    text-decoration: none;
+  }
+
+  .data {
+    display: none;
+  }
+}
+
+@media (min-width: 1000px) {
+  .table.wide {
+    margin-left: -6rem;
+    margin-right: -6rem;
+  }
+}

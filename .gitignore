@@ -31,3 +31,6 @@ Thumbs.db
 
 # Generated figures of the results tree
 results/**/figures/
+
+# Site build output
+_site/
