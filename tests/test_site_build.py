@@ -215,10 +215,7 @@ def test_a_printed_figure_shrinks_to_one_page_instead_of_splitting(
         "  }"
     ) in printed
     assert (
-        "  figure .fig-scroll {\n"
-        "    display: flex;\n"
-        "    min-height: 0;\n"
-        "  }"
+        "  figure .fig-scroll {\n    display: flex;\n    min-height: 0;\n  }"
     ) in printed
     assert (
         "  figure .fig-scroll img {\n"
