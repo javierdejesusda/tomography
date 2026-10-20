@@ -2,10 +2,13 @@
 
 P9b reports how well a direction separates known from unknown questions. This
 experiment keeps the hidden states of the same questions, so the readers can
-be seen and not only scored. The inputs are two finished runs of the model:
-the P9a labels and the P9b reading. The model loads in float32 on the default
-device, because the shared few-shot prefix matches the uncached activations
-only in float32; `meta.json` records the device the numbers came from.
+be seen and not only scored: the 2D views of the questions the figures show,
+each beside a text-only view of the same questions, and the published reader of
+each contrast against the rest of the hidden state. The inputs are two
+finished runs of the model: the P9a labels and the P9b reading. The model loads
+in float32 on the default device, because the shared few-shot prefix matches
+the uncached activations only in float32; `meta.json` records the device the
+numbers came from.
 """
 
 from collections import Counter
@@ -85,7 +88,8 @@ class Config(ExperimentConfig):
 
     Everything else is read from the P9b run, so the questions, the draws and
     the template are those of its committed numbers. The seed of this run only
-    mixes into the permutations of the shuffled-label control.
+    mixes into the permutations of the shuffled-label control and into the
+    randomized SVD of the text-only views.
 
     Attributes:
         labels_run: Path of a finished P9a run of the same model.
