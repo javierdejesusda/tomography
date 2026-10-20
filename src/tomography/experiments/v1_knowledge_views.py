@@ -511,7 +511,7 @@ def refit_shuffled(
 
 
 def displayed_items(
-    items: Sequence[LabeledItem], *, cap: int = MAX_DISPLAYED
+    items: Sequence[LabeledItem], *, cap: int
 ) -> list[LabeledItem]:
     """Picks the items a figure draws, whoever looks at the run.
 
@@ -530,7 +530,7 @@ def displayed_items(
 
 
 def displayed_uids(
-    pools: Mapping[str, TypePool], *, cap: int = MAX_DISPLAYED
+    pools: Mapping[str, TypePool], *, cap: int
 ) -> dict[str, dict[str, list[str]]]:
     """Names the items a figure draws for each side of each contrast.
 
@@ -716,7 +716,7 @@ def published_views(
     acts: ItemActivations,
     pools: Mapping[str, TypePool],
     *,
-    cap: int = MAX_DISPLAYED,
+    cap: int,
 ) -> PublishedViews:
     """Scores the test items on the published reader of each contrast.
 
@@ -1060,7 +1060,7 @@ def prepare(
     check_reading(reading, pools)
     surface = compare_surface(pools, reading)
     draws = train_draws(pools, reading.config)
-    shown = displayed_uids(pools)
+    shown = displayed_uids(pools, cap=MAX_DISPLAYED)
     panels = {
         panel: {"types": list(types), "uids": panel_union(types, shown)}
         for panel, types in panel_contrasts(pools).items()
@@ -1148,7 +1148,7 @@ def run_plan(
     )
     test = refit_methods(acts, pools, draws, protocol)
     shuffled = refit_shuffled(acts, pools, draws, protocol, seed=config.seed)
-    views = published_views(reading, acts, pools)
+    views = published_views(reading, acts, pools, cap=MAX_DISPLAYED)
     layers = view_layers(reading, loaded.n_layers)
     run_dir.write_arrays(
         "pca2d",

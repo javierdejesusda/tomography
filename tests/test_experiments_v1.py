@@ -23,6 +23,7 @@ from tomography.experiments.base import derive_seed
 from tomography.experiments.sweep import chat_format_for
 import tomography.experiments.v1_knowledge_views as v1_module
 from tomography.experiments.v1_knowledge_views import COUNT_COLUMNS
+from tomography.experiments.v1_knowledge_views import MAX_DISPLAYED
 from tomography.experiments.v1_knowledge_views import CommittedReading
 from tomography.experiments.v1_knowledge_views import Config
 from tomography.experiments.v1_knowledge_views import Plan
@@ -1406,7 +1407,9 @@ def test_the_published_reader_and_its_projections_are_written(
 
     assert captured.acts is not None
     reads = captured.acts
-    views = published_views(committed, reads, _pools(committed))
+    views = published_views(
+        committed, reads, _pools(committed), cap=MAX_DISPLAYED
+    )
     arrays = run_dir.read_arrays("projections")
     np.testing.assert_array_equal(arrays["published"], views.auroc)
     for key, projection in views.projections.items():
@@ -1928,6 +1931,47 @@ def test_execute_writes_the_pca_views_of_each_panel(
             for name in entry["types"]
         ),
     }
+
+
+def test_a_small_cap_limits_every_view_of_a_run(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cap = 3
+    monkeypatch.setattr(v1_module, "MAX_DISPLAYED", cap)
+    pools = _pools(load_reading(inputs.reading.path, model="tiny"))
+    want = {}
+    for name, pool in pools.items():
+        positive, negative = pool.split("test")
+        want[name] = {
+            "positive": [
+                i.example.uid for i in displayed_items(positive, cap=cap)
+            ],
+            "negative": [
+                i.example.uid for i in displayed_items(negative, cap=cap)
+            ],
+        }
+
+    run_dir = _execute(tiny_arch, tmp_path, inputs)
+
+    sidecar = run_dir.read_json("projections")
+    assert isinstance(sidecar, dict)
+    assert sidecar["max_per_side"] == cap
+    assert sidecar["uids"] == want
+    assert any(len(side) == cap for by in want.values() for side in by.values())
+    arrays = run_dir.read_arrays("projections")
+    for name, by in want.items():
+        shown = len(by["positive"]) + len(by["negative"])
+        assert arrays[f"projection_{name}"].shape == (shown,)
+    pca = run_dir.read_arrays("pca2d")
+    text = run_dir.read_arrays("text2d")
+    for panel, entry in sidecar["panels"].items():
+        assert entry["uids"] == panel_union(entry["types"], want)
+        n = len(entry["uids"])
+        assert pca[f"coordinates_{panel}"].shape[1] == n
+        assert text[f"coordinates_{panel}"].shape[0] == n
 
 
 @CHOSEN_LAYERS
