@@ -213,6 +213,8 @@ def _shared_prefix_length(
     *,
     bos: BosMode | None,
     batch_size: int,
+    position: PositionStrategy = "last",
+    spans: Sequence[Span | None] | None = None,
 ) -> int:
     """Returns the length of the token prefix common to all texts.
 
@@ -220,18 +222,25 @@ def _shared_prefix_length(
     boundary (GPT-2 encodes a blank line as one token at the end of a string
     but as two newline tokens before "Q"), so the tokens of a prefix text are
     not always the first tokens of the full text. The length counts a
-    prepended BOS and leaves every text at least one suffix token, so the
-    last token is always computed.
+    prepended BOS and stops at the earliest token any text reads, so every
+    read token is computed (for `last` that leaves each text at least its
+    last token).
 
     Args:
         loaded: The wrapped model.
         texts: The stimuli.
         bos: BOS policy for `LoadedModel.encode`.
         batch_size: Texts encoded per call.
+        position: The strategy that selects the read tokens.
+        spans: The character ranges `position` needs, if any.
 
     Returns:
         The number of leading model input tokens all texts share, capped at
-        the shortest text minus one; 0 when they share none.
+        the earliest read token; 0 when they share none.
+
+    Raises:
+        ValueError: If a span is missing or overlaps no token (the error
+            names the stimulus).
     """
     reference = loaded.encode(texts[:1], bos=bos).input_ids[0]
     shared = len(reference)
@@ -242,23 +251,51 @@ def _shared_prefix_length(
         mismatch = torch.where(
             differs.any(dim=1), differs.int().argmax(dim=1), width
         )
-        shared = min(shared, int(mismatch.min()), min(batch.lengths) - 1)
+        earliest = min(
+            _select_tokens(position, first + row, batch, row, spans)[0]
+            for row in range(len(batch.lengths))
+        )
+        shared = min(shared, int(mismatch.min()), earliest)
     return shared
 
 
 def _build_prefix(
     loaded: LoadedModel,
     texts: Sequence[str],
+    position: PositionStrategy,
+    spans: Sequence[Span | None] | None,
     bos: BosMode | None,
     batch_size: int,
 ) -> _SharedPrefix | None:
-    """Caches the common token prefix of `texts`; None if they share none."""
+    """Caches the common token prefix of `texts`.
+
+    Args:
+        loaded: The wrapped model.
+        texts: The stimuli.
+        position: The strategy that selects the read tokens.
+        spans: The character ranges `position` needs, if any.
+        bos: BOS policy for `LoadedModel.encode`.
+        batch_size: Texts encoded per call.
+
+    Returns:
+        The prefix and its cache, or None when the texts share nothing but
+        a prepended BOS, so the default path runs.
+
+    Raises:
+        ValueError: If a span is missing or overlaps no token (the error
+            names the stimulus).
+    """
     length = _shared_prefix_length(
-        loaded, texts, bos=bos, batch_size=batch_size
+        loaded,
+        texts,
+        bos=bos,
+        batch_size=batch_size,
+        position=position,
+        spans=spans,
     )
-    if length == 0:
-        return None
     batch = loaded.encode(texts[:1], bos=bos, padding_side="right")
+    if length <= int(batch.has_bos):
+        return None
     with torch.inference_mode():
         output = loaded.decoder(
             input_ids=batch.input_ids[:, :length].to(loaded.device),
@@ -274,8 +311,13 @@ def _run_decoder(
 ) -> None:
     """Runs the decoder over a batch, or over its suffixes after the prefix.
 
-    The suffixes continue the cached prefix: the mask spans prefix plus
-    suffix and the positions are the full-prompt ones.
+    The suffixes continue a copy of the cached prefix: the mask spans prefix
+    plus suffix and the positions are the full-prompt ones.
+
+    Args:
+        loaded: The wrapped model.
+        batch: The full-prompt batch, right padded.
+        prefix: The cached prefix, or None to run every token.
     """
     device = loaded.device
     if prefix is None:
@@ -318,12 +360,6 @@ def _collect_batch(
         for row in range(len(texts))
     ]
     skipped = 0 if prefix is None else prefix.length
-    for row, tokens in enumerate(selections):
-        if tokens[0] < skipped:
-            raise ValueError(
-                f"stimulus {first + row}: token {tokens[0]} lies inside the "
-                f"shared prefix of {skipped} tokens, which is not recomputed"
-            )
     rows = torch.tensor(
         [row for row, tokens in enumerate(selections) for _ in tokens],
         device=loaded.device,
@@ -393,10 +429,13 @@ def collect_activations(
         share_prefix: Compute the key/value cache of the token prefix common
             to all texts once and run only the remaining tokens of each
             text, which saves the repeated demonstrations of a few-shot
-            prompt. The rows equal those of the default path within the
-            tolerance above. Texts that share no token fall back to the
-            default path. The prefix tokens are not recomputed, so no read
-            position may fall inside them.
+            prompt. The prefix ends at the earliest token any text reads, so
+            an early span shrinks the saving, and texts that share nothing
+            but a prepended BOS run the default path. In float32 the rows
+            equal those of the default path within the tolerance above; in
+            half precision they differ by more, as batch sizes already do.
+            The suffix forward keeps the key/value tensors of the whole
+            batch alive, so peak memory is higher than the default path.
 
     Returns:
         The activations, rows stimulus-major then in token order.
@@ -404,8 +443,7 @@ def collect_activations(
     Raises:
         ValueError: If the arguments are inconsistent, a layer is outside
             0..L, a span is missing, or a span overlaps no token (the error
-            names the stimulus), or `share_prefix` is set and a read
-            position falls inside the shared prefix.
+            names the stimulus).
     """
     spans = concept_spans if position == "concept" else response_spans
     _check_arguments(len(texts), position, spans, batch_size)
@@ -413,7 +451,9 @@ def collect_activations(
     if not selected:
         raise ValueError("layers is empty")
     prefix = (
-        _build_prefix(loaded, texts, bos, batch_size) if share_prefix else None
+        _build_prefix(loaded, texts, position, spans, bos, batch_size)
+        if share_prefix
+        else None
     )
     chunks: list[torch.Tensor] = []
     metadata: list[tuple[int, int, int, int]] = []

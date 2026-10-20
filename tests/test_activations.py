@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import Any
 
-import huggingface_hub
+from huggingface_hub import snapshot_download
 import numpy as np
 import pytest
 import torch
@@ -537,37 +537,76 @@ def test_a_prompt_inside_the_common_prefix_keeps_one_suffix_token(
     assert_same_rows(cached, plain)
 
 
-def test_without_a_shared_prefix_the_uncached_path_runs(
-    tiny_arch: LoadedModel,
+@pytest.mark.parametrize("bos", ["prepend", "none"])
+def test_without_shared_content_the_uncached_path_runs(
+    tiny_arch: LoadedModel, bos: BosMode
 ) -> None:
     lm = tiny_arch
     texts = [QUESTIONS[0], QUESTIONS[1], QUESTIONS[2]]
 
-    plain = collect_activations(lm, texts, bos="none")
+    plain = collect_activations(lm, texts, bos=bos)
     calls = decoder_calls(
         lm,
-        lambda: collect_activations(lm, texts, bos="none", share_prefix=True),
+        lambda: collect_activations(lm, texts, bos=bos, share_prefix=True),
     )
-    cached = collect_activations(lm, texts, bos="none", share_prefix=True)
+    cached = collect_activations(lm, texts, bos=bos, share_prefix=True)
 
-    assert _shared_prefix_length(lm, texts, bos="none", batch_size=8) == 0
-    assert calls == [(3, max(lm.encode(texts, bos="none").lengths))]
+    shared = _shared_prefix_length(lm, texts, bos=bos, batch_size=8)
+    assert shared == (1 if bos == "prepend" else 0)
+    assert calls == [(3, max(lm.encode(texts, bos=bos).lengths))]
     np.testing.assert_array_equal(cached.data, plain.data)
 
 
-def test_a_position_inside_the_shared_prefix_is_refused(
-    tiny_arch: LoadedModel,
+@pytest.mark.parametrize("bos", ["prepend", "none"])
+def test_a_span_at_the_start_leaves_nothing_to_share(
+    tiny_arch: LoadedModel, bos: BosMode
 ) -> None:
+    lm = tiny_arch
     spans: list[tuple[int, int] | None] = [(0, 5)] * len(PROMPTS)
+    kwargs: dict[str, Any] = {
+        "position": "response",
+        "response_spans": spans,
+        "bos": bos,
+    }
 
-    with pytest.raises(ValueError, match=r"stimulus 0.*shared prefix"):
-        collect_activations(
-            tiny_arch,
-            PROMPTS,
-            position="response",
-            response_spans=spans,
-            share_prefix=True,
-        )
+    plain = collect_activations(lm, PROMPTS, **kwargs)
+    calls = decoder_calls(
+        lm,
+        lambda: collect_activations(lm, PROMPTS, share_prefix=True, **kwargs),
+    )
+    cached = collect_activations(lm, PROMPTS, share_prefix=True, **kwargs)
+
+    assert len(calls) == 1
+    np.testing.assert_array_equal(cached.data, plain.data)
+    assert_same_rows(cached, plain)
+
+
+@pytest.mark.parametrize("position", ["response", "mean"])
+def test_the_shared_prefix_stops_at_the_earliest_read_token(
+    tiny_arch: LoadedModel, position: str
+) -> None:
+    lm = tiny_arch
+    head = "".join(f"Q: {q}\nA: {a}\n\n" for q, a in SHOTS)
+    texts = [f"{head}The sky is blue.", f"{head}The sky is green."]
+    spans: list[tuple[int, int] | None] = [(len(head), len(t)) for t in texts]
+    kwargs: dict[str, Any] = {
+        "position": position,
+        "response_spans": spans,
+        "batch_size": 1,
+    }
+    first_read = overlapping(lm, texts[0], spans[0])[0] + bos_shift(lm)
+
+    plain = collect_activations(lm, texts, **kwargs)
+    calls = decoder_calls(
+        lm,
+        lambda: collect_activations(lm, texts, share_prefix=True, **kwargs),
+    )
+    cached = collect_activations(lm, texts, share_prefix=True, **kwargs)
+
+    assert calls[0] == (1, first_read)
+    assert common_prefix(lm, texts, None) > first_read
+    np.testing.assert_allclose(cached.data, plain.data, **TOLERANCE)
+    assert_same_rows(cached, plain)
 
 
 def test_shared_prefix_collection_skips_the_lm_head_and_leaves_no_hooks(
@@ -699,11 +738,14 @@ REAL_QUESTIONS = [
 @pytest.fixture(scope="module", params=["gpt2", "qwen3-0.6b-base"])
 def real_cached(request: pytest.FixtureRequest) -> LoadedModel:
     checkpoint = MODELS[request.param]
-    cached = huggingface_hub.try_to_load_from_cache(
-        checkpoint.repo_id, "config.json", revision=checkpoint.revision
-    )
-    if not isinstance(cached, str):
-        pytest.skip(f"{request.param} weights are not in the local cache")
+    try:
+        snapshot_download(
+            checkpoint.repo_id,
+            revision=checkpoint.revision,
+            local_files_only=True,
+        )
+    except FileNotFoundError as error:
+        pytest.skip(f"{request.param} is not in the local cache: {error}")
     return load_model(request.param, device="cpu", dtype=torch.float32)
 
 
