@@ -555,6 +555,10 @@ NBSP = "\u00a0"
             f"0.011 [{MINUS}0.006, 0.032]",
             f"0.011 [{MINUS}0.006,{NBSP}0.032]",
         ),
+        (
+            f"[{MINUS}0.031, {MINUS}0.004]",
+            f"[{MINUS}0.031,{NBSP}{MINUS}0.004]",
+        ),
         ("0.622 (0.490)", "0.622 (0.490)"),
         ("1 of 1", f"1{NBSP}of{NBSP}1"),
         ("no contrast", "no contrast"),

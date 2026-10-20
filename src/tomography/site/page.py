@@ -93,7 +93,8 @@ def glue(cell: str) -> str:
 
     A space stays a break point only before a plus-minus sign, a bracket or
     a parenthesis, where the cell may start a second line; every other space
-    next to a digit becomes a no-break space, so an interval never splits.
+    next to a digit or a minus sign becomes a no-break space, so an interval
+    never splits.
 
     Args:
         cell: The cell text.
@@ -108,7 +109,12 @@ def glue(cell: str) -> str:
         before, after = cell[i - 1], cell[i + 1]
         if after in BREAKS_BEFORE:
             continue
-        if before.isdigit() or after.isdigit() or before in "*)]":
+        if (
+            before.isdigit()
+            or after.isdigit()
+            or before in "*)]"
+            or after == cells.MINUS
+        ):
             out[i] = NBSP
     return "".join(out)
 
