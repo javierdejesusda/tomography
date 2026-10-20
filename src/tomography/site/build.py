@@ -58,15 +58,15 @@ def stable_clip_ids(svg: bytes) -> bytes:
     return svg
 
 
-def results_date(manifest: Manifest) -> str:
-    """Writes the date line from the newest run in the results.
+def newest_run_year(manifest: Manifest) -> str:
+    """Finds the year of the newest run in the results.
 
     Args:
         manifest: The run resolver.
 
     Returns:
-        Text such as `Results of 19 October 2026`, or `Results` when no run
-        stores a start time.
+        The start year of the newest run, such as `2026`, or an empty string
+        when no run stores a start time.
     """
     newest = ""
     for exp in manifest.experiments():
@@ -74,9 +74,8 @@ def results_date(manifest: Manifest) -> str:
             for run in manifest.runs(exp, model):
                 newest = max(newest, run.started_at)
     if not newest:
-        return "Results"
-    day = datetime.datetime.fromisoformat(newest).date()
-    return f"Results of {day.day} {MONTHS[day.month - 1]} {day.year}"
+        return ""
+    return str(datetime.datetime.fromisoformat(newest).year)
 
 
 def results_commit(results: Path) -> tuple[str, str]:
@@ -191,11 +190,7 @@ def build(
         tables={k: table(k) for k in tables},
         appendix={k: figure(k) for k in appendix},
         appendix_tables={k: table(k) for k in appendix_tables},
-        date=(
-            f"Results at commit {commit}, committed {built}"
-            if commit
-            else results_date(manifest)
-        ),
+        year=built[-4:] if commit else newest_run_year(manifest),
         bib=references.parse(BIB.read_text(encoding="utf-8")),
         commit=commit,
     )

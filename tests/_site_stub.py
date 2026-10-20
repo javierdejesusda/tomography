@@ -72,7 +72,7 @@ def document(commit: str = "abc1234") -> page.Document:
     """Builds the stub document.
 
     Args:
-        commit: The commit shown in the masthead.
+        commit: The results commit that findings links are pinned to.
 
     Returns:
         A document with every main and appendix figure and table.
@@ -111,7 +111,7 @@ def document(commit: str = "abc1234") -> page.Document:
         {k: figure(k) for k in registry.MAIN_FIGURES},
         {k: table(k) for k in registry.MAIN_TABLES},
         {k: figure(k) for k in registry.APPENDIX_FIGURES},
-        f"Results at commit {commit}, committed 1 January 2027",
+        "2027",
         references.parse(BIB.read_text(encoding="utf-8")),
         {k: table(k) for k in registry.APPENDIX_TABLES},
         commit,

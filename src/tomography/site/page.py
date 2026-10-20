@@ -15,6 +15,7 @@ import string
 
 from tomography.site import cells
 from tomography.site import content
+from tomography.site import pdf
 from tomography.site import references
 from tomography.site import stats
 from tomography.site.content import Section
@@ -70,16 +71,16 @@ class Document:
         tables: Tables by key, in registry order.
         appendix: Appendix figures by key, in registry order.
         appendix_tables: Appendix tables by key, in registry order.
-        date: The masthead line.
+        year: The year of the results, for the citation.
         bib: Parsed bibliography.
-        commit: The short commit of the results, shown as code in the
-            masthead when the line names it.
+        commit: The short commit of the results that findings links are
+            pinned to.
     """
 
     figures: dict[str, FigureEntry]
     tables: dict[str, TableEntry]
     appendix: dict[str, FigureEntry]
-    date: str
+    year: str
     bib: dict[str, references.Entry]
     appendix_tables: dict[str, TableEntry] = dataclasses.field(
         default_factory=dict
@@ -544,12 +545,11 @@ class Page:
     def cite_block(self) -> str:
         """Renders the BibTeX of this repository and of the original paper."""
         paper = references.find(self.doc.bib, references.PAPER_KEY)
-        year = self.doc.date[-4:] if self.doc.date[-4:].isdigit() else ""
         own = (
             "@misc{tomography,\n"
             f"  title = {{{content.TITLE}}},\n"
             f"  howpublished = {{\\url{{{content.REPO_URL}}}}},\n"
-            f"  year = {{{year}}},\n"
+            f"  year = {{{self.doc.year}}},\n"
             "}"
         )
         return (
@@ -620,7 +620,7 @@ def render_page(doc: Document) -> str:
     """Renders the whole site as one HTML document.
 
     Args:
-        doc: The built figures, tables, date and bibliography.
+        doc: The built figures, tables, year and bibliography.
 
     Returns:
         The HTML document.
@@ -635,11 +635,6 @@ def render_page(doc: Document) -> str:
     contents = page.contents()
     findings = page.section(content.KEY_FINDINGS, "") + page.notes()
     body = page.body()
-    masthead = _e(doc.date)
-    if doc.commit:
-        masthead = masthead.replace(
-            _e(doc.commit), f"<code>{_e(doc.commit)}</code>", 1
-        )
     return (
         "<!doctype html>\n"
         '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
@@ -654,7 +649,8 @@ def render_page(doc: Document) -> str:
         f"<h1>{_e(content.TITLE)}</h1>"
         f'<p class="repo"><a href="{content.REPO_URL}">'
         f"{_e(content.REPO_TEXT)}</a></p>"
-        f'<p class="date">{masthead}</p></header>'
+        f'<p class="pdf"><a href="{pdf.NAME}" download>'
+        "Download this page as a PDF</a></p></header>"
         f"{summary}"
         f'<section class="abstract" id="abstract"><h2>Abstract</h2>'
         f"{abstract}</section>"

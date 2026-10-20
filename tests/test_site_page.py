@@ -58,7 +58,7 @@ def _doc(
         figures or {},
         tables or {},
         appendix or {},
-        "Results",
+        "",
         bib or {},
         appendix_tables or {},
     )
@@ -448,14 +448,17 @@ def test_only_cited_references_are_listed_in_order_of_first_citation(
     assert "(2023). Representation Engineering" in html
 
 
-def test_the_masthead_names_the_commit(
+def test_the_masthead_links_the_pdf_instead_of_naming_the_commit(
     full: tuple[page.Document, str],
 ) -> None:
     html = full[1]
+    assert "Results at commit" not in html
+    assert 'class="date"' not in html
     assert (
-        "Results at commit <code>abc1234</code>, committed 1 January 2027"
-        in html
-    )
+        '<p class="pdf"><a href="tomography-results.pdf" download>'
+        "Download this page as a PDF</a></p></header>"
+    ) in html
+    assert "year = {2027}," in html
 
 
 def test_appendix_figures_are_lazy_images_and_main_figures_inline(
