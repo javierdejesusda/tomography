@@ -5,6 +5,7 @@ import copy
 from dataclasses import dataclass
 from typing import Any
 from typing import Literal
+from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -132,20 +133,6 @@ class Activations:
         return np.concatenate(blocks, axis=0)
 
 
-@dataclass(frozen=True, eq=False)
-class _SharedPrefix:
-    """The key/value cache of the token prefix common to all stimuli.
-
-    Attributes:
-        length: Prefix length in model input tokens, BOS included.
-        cache: The cache of the prefix at batch size 1. A forward extends a
-            cache in place, so every batch runs on its own copy.
-    """
-
-    length: int
-    cache: Cache
-
-
 def _overlapping_tokens(
     offsets: tuple[tuple[int, int], ...], length: int, span: Span
 ) -> list[int]:
@@ -260,40 +247,21 @@ def _shared_prefix_length(
 
 
 def _build_prefix(
-    loaded: LoadedModel,
-    texts: Sequence[str],
-    position: PositionStrategy,
-    spans: Sequence[Span | None] | None,
-    bos: BosMode | None,
-    batch_size: int,
-) -> _SharedPrefix | None:
-    """Caches the common token prefix of `texts`.
+    loaded: LoadedModel, text: str, bos: BosMode | None, length: int
+) -> Cache | None:
+    """Caches the first `length` model input tokens of a stimulus.
 
     Args:
         loaded: The wrapped model.
-        texts: The stimuli.
-        position: The strategy that selects the read tokens.
-        spans: The character ranges `position` needs, if any.
+        text: A stimulus; the prefix is common to all of them.
         bos: BOS policy for `LoadedModel.encode`.
-        batch_size: Texts encoded per call.
+        length: The shared prefix length, from `_shared_prefix_length`.
 
     Returns:
-        The prefix and its cache, or None when the texts share nothing but
-        a prepended BOS, so the default path runs.
-
-    Raises:
-        ValueError: If a span is missing or overlaps no token (the error
-            names the stimulus).
+        The key/value cache of the prefix at batch size 1, or None when the
+        texts share nothing but a prepended BOS, so the default path runs.
     """
-    length = _shared_prefix_length(
-        loaded,
-        texts,
-        bos=bos,
-        batch_size=batch_size,
-        position=position,
-        spans=spans,
-    )
-    batch = loaded.encode(texts[:1], bos=bos, padding_side="right")
+    batch = loaded.encode([text], bos=bos, padding_side="right")
     if length <= int(batch.has_bos):
         return None
     with torch.inference_mode():
@@ -303,39 +271,38 @@ def _build_prefix(
             position_ids=batch.position_ids[:, :length].to(loaded.device),
             use_cache=True,
         )
-    return _SharedPrefix(length=length, cache=output.past_key_values)
+    return cast(Cache, output.past_key_values)
 
 
 def _run_decoder(
-    loaded: LoadedModel, batch: EncodedBatch, prefix: _SharedPrefix | None
+    loaded: LoadedModel,
+    batch: EncodedBatch,
+    prefix: Cache | None,
+    skipped: int,
 ) -> None:
     """Runs the decoder over a batch, or over its suffixes after the prefix.
 
-    The suffixes continue a copy of the cached prefix: the mask spans prefix
-    plus suffix and the positions are the full-prompt ones.
+    The suffixes continue a copy of the cached prefix: a forward extends a
+    cache in place, so every batch gets its own. The mask spans prefix plus
+    suffix and the positions are the full-prompt ones.
 
     Args:
         loaded: The wrapped model.
         batch: The full-prompt batch, right padded.
         prefix: The cached prefix, or None to run every token.
+        skipped: The prefix length in tokens, 0 without a prefix.
     """
     device = loaded.device
-    if prefix is None:
-        loaded.decoder(
-            input_ids=batch.input_ids.to(device),
-            attention_mask=batch.attention_mask.to(device),
-            position_ids=batch.position_ids.to(device),
-            use_cache=False,
-        )
-        return
-    cache = copy.deepcopy(prefix.cache)
-    cache.batch_repeat_interleave(len(batch.lengths))
+    cache = None
+    if prefix is not None:
+        cache = copy.deepcopy(prefix)
+        cache.batch_repeat_interleave(len(batch.lengths))
     loaded.decoder(
-        input_ids=batch.input_ids[:, prefix.length :].to(device),
+        input_ids=batch.input_ids[:, skipped:].to(device),
         attention_mask=batch.attention_mask.to(device),
-        position_ids=batch.position_ids[:, prefix.length :].to(device),
+        position_ids=batch.position_ids[:, skipped:].to(device),
         past_key_values=cache,
-        use_cache=True,
+        use_cache=cache is not None,
     )
 
 
@@ -347,7 +314,7 @@ def _collect_batch(
     position: PositionStrategy,
     spans: Sequence[Span | None] | None,
     bos: BosMode | None,
-    prefix: _SharedPrefix | None,
+    prefix: Cache | None,
 ) -> tuple[torch.Tensor, list[tuple[int, int, int, int]]]:
     """Runs one batch; returns `(K, rows, d)` data and per-row metadata.
 
@@ -359,7 +326,7 @@ def _collect_batch(
         _select_tokens(position, first + row, batch, row, spans)
         for row in range(len(texts))
     ]
-    skipped = 0 if prefix is None else prefix.length
+    skipped = 0 if prefix is None else prefix.get_seq_length()
     rows = torch.tensor(
         [row for row, tokens in enumerate(selections) for _ in tokens],
         device=loaded.device,
@@ -369,7 +336,7 @@ def _collect_batch(
         device=loaded.device,
     )
     with torch.inference_mode(), capture_residuals(loaded, layers) as captured:
-        _run_decoder(loaded, batch, prefix)
+        _run_decoder(loaded, batch, prefix, skipped)
         gathered = torch.stack(
             [captured[layer][rows, cols].float() for layer in layers]
         )
@@ -450,11 +417,17 @@ def collect_activations(
     selected = list(range(loaded.n_layers + 1) if layers is None else layers)
     if not selected:
         raise ValueError("layers is empty")
-    prefix = (
-        _build_prefix(loaded, texts, position, spans, bos, batch_size)
-        if share_prefix
-        else None
-    )
+    prefix = None
+    if share_prefix:
+        length = _shared_prefix_length(
+            loaded,
+            texts,
+            bos=bos,
+            batch_size=batch_size,
+            position=position,
+            spans=spans,
+        )
+        prefix = _build_prefix(loaded, texts[0], bos, length)
     chunks: list[torch.Tensor] = []
     metadata: list[tuple[int, int, int, int]] = []
     for first in range(0, len(texts), batch_size):
