@@ -6,10 +6,12 @@ such as "Figure 3" and "Table 4", `[[sec:finders]]` becomes "Section 4.1",
 `[[cite:zou2025representationengineeringtopdownapproach]]` a numbered
 citation, `[[fn:text]]` a footnote, `[[num:fig:finders.random_max]]` a number
 a figure or table computed and `[[count:fig:finders.pca_sentiment]]` its
-per-role count. No paragraph states a result in its own words: every number
-on the page comes from a figure or table the builder computed from the
-committed results, except the design facts of the method, the limitations
-and the reproducibility section, which tests compare with the run files.
+per-role count. Only the one-sentence summary and the abstract state findings
+in their own words, with no numbers; they summarize the computed findings and
+tests pin each claim. Every number on the page comes from a figure or table
+the builder computed from the committed results, except the design facts of
+the method, the limitations and the reproducibility section, which tests
+compare with the run files.
 
 The page opens with a one-sentence summary, the overview figure, the
 abstract and the key findings; the body follows, and the appendix holds the
