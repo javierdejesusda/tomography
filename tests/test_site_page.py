@@ -456,7 +456,7 @@ def test_the_masthead_links_the_pdf_instead_of_naming_the_commit(
     assert 'class="date"' not in html
     assert (
         '<p class="pdf"><a class="pdf-button" href="tomography-results.pdf" '
-        "download>Download PDF</a></p></header>"
+        'target="_blank" rel="noopener">View PDF</a></p></header>'
     ) in html
     assert "year = {2027}," in html
 

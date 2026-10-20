@@ -308,7 +308,7 @@ def test_the_built_masthead_links_the_pdf_and_names_no_commit(
     assert 'class="date"' not in html
     assert (
         f'<p class="pdf"><a class="pdf-button" href="{pdf.NAME}" '
-        "download>Download PDF</a></p></header>"
+        'target="_blank" rel="noopener">View PDF</a></p></header>'
     ) in html
 
 
