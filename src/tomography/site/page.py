@@ -649,8 +649,8 @@ def render_page(doc: Document) -> str:
         f"<h1>{_e(content.TITLE)}</h1>"
         f'<p class="repo"><a href="{content.REPO_URL}">'
         f"{_e(content.REPO_TEXT)}</a></p>"
-        f'<p class="pdf"><a href="{pdf.NAME}" download>'
-        "Download this page as a PDF</a></p></header>"
+        f'<p class="pdf"><a class="pdf-button" href="{pdf.NAME}" '
+        "download>Download PDF</a></p></header>"
         f"{summary}"
         f'<section class="abstract" id="abstract"><h2>Abstract</h2>'
         f"{abstract}</section>"

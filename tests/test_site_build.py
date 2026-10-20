@@ -173,6 +173,20 @@ def test_the_bibtex_block_wraps(css: str) -> None:
     )
 
 
+def test_the_pdf_button_is_a_quiet_outlined_link(css: str) -> None:
+    block = css[css.index(".pdf-button {") :].split("}", 1)[0]
+    assert "border: 1px solid var(--ink)" in block
+    assert "border-radius: 3px" in block
+    assert "padding: 0.3em 0.9em" in block
+    assert "box-shadow" not in block
+    assert "background:" not in block
+    assert "transition: background-color" in block
+    assert "text-decoration: none" in block
+    assert ".pdf-button:hover {" in css
+    assert ".pdf-button:focus-visible {" in css
+    assert "outline: 2px solid var(--ink)" in css
+
+
 def test_print_rules(css: str) -> None:
     printed = css[css.index("@media print") :]
     assert "size: letter" in printed
@@ -293,8 +307,8 @@ def test_the_built_masthead_links_the_pdf_and_names_no_commit(
     assert "Results at commit" not in html
     assert 'class="date"' not in html
     assert (
-        f'<p class="pdf"><a href="{pdf.NAME}" download>'
-        "Download this page as a PDF</a></p></header>"
+        f'<p class="pdf"><a class="pdf-button" href="{pdf.NAME}" '
+        "download>Download PDF</a></p></header>"
     ) in html
 
 
