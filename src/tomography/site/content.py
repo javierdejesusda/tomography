@@ -20,6 +20,8 @@ import dataclasses
 
 from tomography.site.cells import MINUS
 from tomography.site.figs import knowledge_steering
+from tomography.site.stats import FLUENT_MAX_RATIO
+from tomography.site.stats import FLUENT_MIN_DISTINCT
 
 PM = chr(0x00B1)
 ELL = chr(0x2113)
@@ -34,8 +36,13 @@ FINDINGS_URL = REPO_URL + "/blob/main/docs/findings.md"
 METHODOLOGY_URL = REPO_URL + "/blob/main/docs/methodology.md"
 DATA_URL = REPO_URL + "/tree/main/results"
 
+MAX_RATIO = f"{FLUENT_MAX_RATIO:g}"
+MIN_DISTINCT = f"{FLUENT_MIN_DISTINCT:g}"
 FLUENCY_RULE = (
-    "neutral-text perplexity ratio at most 1.5 and distinct-1 at least 0.15"
+    "neutral-text perplexity ratio at most "
+    + MAX_RATIO
+    + " and distinct-1 at least "
+    + MIN_DISTINCT
 )
 
 TLDR = (
@@ -650,7 +657,10 @@ DISCUSSION = Section(
         "carry the label, a text baseline ([[fig:teaser]]). Steering moves "
         "the judged sentiment at small coefficients and "
         "breaks fluency at larger ones (a perplexity on neutral text above "
-        "1.5 times the unsteered model, or a distinct-1 below 0.15; "
+        + MAX_RATIO
+        + " times the unsteered model, or a distinct-1 below "
+        + MIN_DISTINCT
+        + "; "
         "[[sec:steering]]), and post-training lowers held-out sentiment "
         "reading, with an interval below zero, on "
         "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes.",
@@ -847,9 +857,13 @@ APPENDICES = (
                 "and compares steering with a positive or negative "
                 "instruction. Steered text is fluent only when the "
                 "perplexity of 200 held-out WikiText-103 passages under "
-                "the steered model is at most 1.5 times that under the "
+                "the steered model is at most "
+                + MAX_RATIO
+                + " times that under the "
                 "unsteered model and the distinct-1 of the completions is "
-                "at least 0.15. [[table:steering]] also gives the "
+                "at least "
+                + MIN_DISTINCT
+                + ". [[table:steering]] also gives the "
                 "perplexity of the completions themselves under the "
                 "unsteered model. The steering comparison of finders "
                 "follows the manipulation test of the paper on ETHICS "
@@ -917,8 +931,10 @@ APPENDICES = (
             "norm (3 per checkpoint) on the sentiment judge at relative "
             "coefficient 0.3, which has chance 0.05: "
             "[[count:fig:teaser.steering]]. At that coefficient the steered "
-            "text meets the fluency rule (perplexity at most 1.5 times the "
-            "unsteered text and distinct-1 at least 0.15) on "
+            "text meets the fluency rule (perplexity at most "
+            + MAX_RATIO
+            + " times the "
+            "unsteered text and distinct-1 at least " + MIN_DISTINCT + ") on "
             "[[count:fig:teaser.steering_fluent]] (GPT-2 small has no "
             "fluency measure). Intervals cover the sampling of the test "
             "items and treat the two arms as independent, which makes them "
