@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from tomography.site import build as build_module
+from tomography.site import pdf
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -21,7 +22,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     build = commands.add_parser("build", help="build the static site")
     build.add_argument("--results", type=Path, default=Path("results"))
     build.add_argument("--out", type=Path, default=Path("_site"))
+    printer = commands.add_parser("pdf", help="print the built site to a PDF")
+    printer.add_argument("--site", type=Path, default=Path("_site"))
+    printer.add_argument("--browser", default=None)
     args = parser.parse_args(argv)
+    if args.command == "pdf":
+        browser = args.browser or pdf.find_browser()
+        out = pdf.print_page(args.site, browser)
+        print(f"wrote {out} ({out.stat().st_size // 1024} KiB)")
+        return 0
     doc = build_module.build(args.results, args.out)
     print(
         f"built {len(doc.figures) + len(doc.appendix)} figures and "

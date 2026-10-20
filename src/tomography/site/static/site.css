@@ -420,7 +420,8 @@ footer.colophon {
     text-decoration: none;
   }
 
-  .data {
+  .data,
+  .pdf {
     display: none;
   }
 }

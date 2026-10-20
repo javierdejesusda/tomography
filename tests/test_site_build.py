@@ -180,7 +180,7 @@ def test_print_rules(css: str) -> None:
     assert "thead {\n    display: table-header-group;" in printed
     block = "  figure,\n  pre,\n  tr {\n    break-inside: avoid;\n  }"
     assert block in printed
-    assert ".data {\n    display: none;" in printed
+    assert ".data,\n  .pdf {\n    display: none;" in printed
 
 
 def test_text_colours_are_the_two_allowed_greys(css: str) -> None:

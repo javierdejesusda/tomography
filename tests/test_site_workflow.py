@@ -71,3 +71,23 @@ def test_workflow_installs_the_cpu_torch_group_not_the_cuda_one() -> None:
     for line in lines:
         assert "--group cpu" in line
         assert "--group cu130" not in line
+
+
+def test_workflow_prints_the_pdf_between_the_build_and_the_upload() -> None:
+    text = _text()
+    command = "python -m tomography.site pdf --site _site"
+    assert command in text
+    assert (
+        text.index("tomography.site build")
+        < text.index(command)
+        < text.index("upload-pages-artifact")
+    )
+
+
+def test_workflow_checks_pull_requests_but_deploys_only_from_main() -> None:
+    text = _text()
+    on_block = text.split("permissions:", 1)[0]
+    assert "pull_request:" in on_block
+    assert on_block.count('"src/tomography/site/**"') == 2
+    deploy = text.split("  deploy:", 1)[1]
+    assert "github.event_name != 'pull_request'" in deploy.split("steps:")[0]
