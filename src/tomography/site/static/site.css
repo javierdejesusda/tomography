@@ -469,8 +469,6 @@ footer.colophon {
 
   figure .fig-scroll {
     display: flex;
-    flex: 0 1 auto;
-    justify-content: center;
     min-height: 0;
   }
 
@@ -478,7 +476,6 @@ footer.colophon {
     width: auto;
     max-width: 100%;
     max-height: 100%;
-    min-height: 0;
     object-fit: contain;
   }
 

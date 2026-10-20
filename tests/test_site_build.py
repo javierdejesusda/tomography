@@ -217,8 +217,6 @@ def test_a_printed_figure_shrinks_to_one_page_instead_of_splitting(
     assert (
         "  figure .fig-scroll {\n"
         "    display: flex;\n"
-        "    flex: 0 1 auto;\n"
-        "    justify-content: center;\n"
         "    min-height: 0;\n"
         "  }"
     ) in printed
@@ -227,7 +225,6 @@ def test_a_printed_figure_shrinks_to_one_page_instead_of_splitting(
         "    width: auto;\n"
         "    max-width: 100%;\n"
         "    max-height: 100%;\n"
-        "    min-height: 0;\n"
         "    object-fit: contain;\n"
         "  }"
     ) in printed
