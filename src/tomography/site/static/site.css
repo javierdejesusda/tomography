@@ -437,12 +437,18 @@ footer.colophon {
   }
 
   .table.wide table {
+    width: 98%;
+    margin: 0 auto;
     font-size: 0.68em;
   }
 
   .table.wide th,
   .table.wide td {
-    padding: 0.18em 0.12em;
+    padding: 0.18em 0.2em;
+  }
+
+  #table-2 td.k {
+    white-space: normal;
   }
 
   thead {

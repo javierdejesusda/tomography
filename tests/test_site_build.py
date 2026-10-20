@@ -179,11 +179,16 @@ def test_printed_tables_have_no_scroll_box_and_wide_ones_are_set_smaller(
     printed = css[css.index("@media print") :].split("\n}\n", 1)[0]
     assert ".table .scroll {\n    overflow: visible;" in printed
     assert "margin-left: -" not in printed
-    assert ".table.wide table {\n    font-size: 0.68em;" in printed
     assert (
-        ".table.wide th,\n  .table.wide td {\n    padding: 0.18em 0.12em;"
+        ".table.wide table {\n    width: 98%;\n    margin: 0 auto;"
         in printed
     )
+    assert "font-size: 0.68em;" in printed
+    assert (
+        ".table.wide th,\n  .table.wide td {\n    padding: 0.18em 0.2em;"
+        in printed
+    )
+    assert "#table-2 td.k {\n    white-space: normal;" in printed
 
 
 def test_a_printed_figure_shrinks_to_one_page_instead_of_splitting(
