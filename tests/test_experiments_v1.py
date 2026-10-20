@@ -2340,3 +2340,68 @@ def test_the_text_row_says_that_it_is_lsa_not_pca(default_run: RunDir) -> None:
     labels = [ax.get_ylabel() for ax in figure.axes if ax.get_visible()]
     assert labels.count("words only (LSA)") == 1
     assert "words only" not in labels
+
+
+def _drawn_views() -> tuple[
+    dict[str, Any], dict[str, np.ndarray], dict[str, np.ndarray]
+]:
+    """Planted views of one panel whose items sit on different sides."""
+    uids = [f"u{i}" for i in range(6)]
+    sidecar = {
+        "uids": {
+            "a": {"positive": ["u0", "u1"], "negative": ["u2"]},
+            "b": {"positive": ["u2", "u5"], "negative": ["u3", "u4"]},
+        },
+        "panels": {"p": {"types": ["a", "b"], "uids": uids}},
+    }
+    rng = np.random.default_rng(0)
+
+    def planted(*shape: int) -> np.ndarray:
+        return rng.standard_normal(shape).astype(np.float32)
+
+    pca = {
+        "view_layers": np.array([1, 2, 3]),
+        "coordinates_p": planted(3, 6, 2),
+        "supervised_a": planted(3, 6, 2),
+        "supervised_b": planted(3, 6, 2),
+    }
+    return sidecar, pca, {"coordinates_p": planted(6, 2)}
+
+
+def _assert_sides(
+    ax: Any, points: np.ndarray, codes: list[int], where: str
+) -> None:
+    """Checks the points of each group of an axes against the planted ones."""
+    drawn = [np.asarray(c.get_offsets()) for c in ax.collections]
+    assert len(drawn) == 3, where
+    for offsets, code in zip(drawn, (-1, 0, 1), strict=True):
+        want = points[np.array(codes) == code]
+        assert offsets.shape == want.shape, f"{where}, group {code}"
+        np.testing.assert_allclose(offsets, want, err_msg=f"{where} {code}")
+
+
+def test_a_panel_figure_draws_the_stored_coordinates_by_side() -> None:
+    sidecar, pca, text = _drawn_views()
+    both = [0, 0, 1, 1, 1, 0]
+    only_a = [0, 0, 1, -1, -1, -1]
+    only_b = [-1, -1, 0, 1, 1, 0]
+
+    figure = panel_figure("p", sidecar, pca, text)
+
+    axes = np.array(figure.axes).reshape(4, 3)
+    for v in range(3):
+        _assert_sides(axes[v, 0], pca["coordinates_p"][v], both, f"all {v}")
+        _assert_sides(axes[v, 1], pca["supervised_a"][v], only_a, f"a {v}")
+        _assert_sides(axes[v, 2], pca["supervised_b"][v], only_b, f"b {v}")
+    _assert_sides(axes[3, 0], text["coordinates_p"], both, "words")
+    assert [ax.get_ylabel() for ax in axes[:, 0]] == [
+        "layer 1",
+        "layer 2",
+        "layer 3",
+        "words only (LSA)",
+    ]
+    assert [ax.get_title() for ax in axes[0]] == [
+        "two leading components",
+        "a",
+        "b",
+    ]
