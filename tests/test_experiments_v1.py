@@ -2076,6 +2076,21 @@ def test_text_view_separates_questions_that_share_no_words() -> None:
     assert np.sign(top[8:]).tolist() == [-np.sign(top[0])] * 8
 
 
+@pytest.mark.parametrize(
+    "texts",
+    [
+        ["alpha beta gamma"] * 6,
+        [f"alpha beta rare{i}" for i in range(6)],
+    ],
+    ids=["identical", "differ_only_by_words_seen_once"],
+)
+def test_text_view_refuses_texts_with_a_single_component(
+    texts: list[str],
+) -> None:
+    with pytest.raises(ValueError, match="two components"):
+        text_view(texts, seed=0)
+
+
 WORDS = ("river", "mountain", "harbor", "forest", "valley", "island")
 
 

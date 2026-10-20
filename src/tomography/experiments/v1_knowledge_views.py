@@ -74,6 +74,7 @@ TOLERANCE = 0.02
 SURFACE_TOLERANCE = 1e-9
 MAX_DISPLAYED = 300
 REST_ENERGY = 1e-12
+MIN_SECOND_COMPONENT = 1e-9
 SHOWN_ENTITY = ("obscure_real", "fictional_generated")
 COUNT_COLUMNS = (
     "n_positive_train",
@@ -927,12 +928,19 @@ def text_view(
         variance of the features each component keeps, shape (2,) float64.
 
     Raises:
-        ValueError: If the texts share too few words to give two components.
+        ValueError: If the texts share too few words to give two components:
+            fewer than two features are left, or the second singular value
+            is below `MIN_SECOND_COMPONENT` of the first, as when the
+            questions differ only by words that occur once.
     """
     vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=2, lowercase=True)
     features = vectorizer.fit_transform(texts)
     svd = TruncatedSVD(n_components=2, random_state=seed)
-    coordinates = svd.fit_transform(features)
+    with np.errstate(invalid="ignore"):
+        coordinates = svd.fit_transform(features)
+    first, second = svd.singular_values_
+    if second <= MIN_SECOND_COMPONENT * first:
+        raise ValueError("the texts do not give two components")
     return (
         np.asarray(coordinates, dtype=np.float32),
         np.asarray(svd.explained_variance_ratio_, dtype=np.float64),
