@@ -1,6 +1,7 @@
 """Tests for the knowledge views experiment."""
 
 import dataclasses
+import hashlib
 import json
 from pathlib import Path
 import runpy
@@ -13,17 +14,30 @@ import pytest
 from tomography.cli import load_experiment
 from tomography.experiments import p9b_reading
 from tomography.experiments.base import RunDir
+from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.v1_knowledge_views import CommittedReading
 from tomography.experiments.v1_knowledge_views import Config
 from tomography.experiments.v1_knowledge_views import check_reading
+from tomography.experiments.v1_knowledge_views import compare_auroc
+from tomography.experiments.v1_knowledge_views import compare_surface
+from tomography.experiments.v1_knowledge_views import displayed_items
 from tomography.experiments.v1_knowledge_views import load_reading
 from tomography.experiments.v1_knowledge_views import plot
+from tomography.experiments.v1_knowledge_views import refit_methods
+from tomography.experiments.v1_knowledge_views import refit_shuffled
 from tomography.experiments.v1_knowledge_views import run
 from tomography.experiments.v1_knowledge_views import select_items
+from tomography.experiments.v1_knowledge_views import shuffled_draw
 from tomography.experiments.v1_knowledge_views import train_draws
+from tomography.knowledge import DEFAULT_SHOTS
 from tomography.model import LoadedModel
+from tomography.p9.reading import SURFACE_BASELINES
+from tomography.p9.reading import ItemActivations
+from tomography.p9.reading import collect_item_activations
 from tomography.p9.reading import draw_seed
 from tomography.p9.reading import draw_train
+from tomography.p9.reading import p9_template
+from tomography.p9.reading import reading_cube
 from tomography.p9.unknowns import TypePool
 
 PINNED_HASH = "3257d1220951"
@@ -356,3 +370,256 @@ def test_check_reading_refuses_a_model_of_another_depth(
 
     with pytest.raises(ValueError, match="layers"):
         check_reading(committed, _pools(committed), tiny_arch.n_layers + 1)
+
+
+@dataclasses.dataclass(frozen=True)
+class Read:
+    """The committed run, its contrasts and the activations behind them."""
+
+    committed: CommittedReading
+    pools: dict[str, TypePool]
+    acts: ItemActivations
+
+
+def _read(tiny_arch: LoadedModel, inputs: Inputs) -> Read:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pools = _pools(committed)
+    union = {
+        i.example.uid: i
+        for pool in pools.values()
+        for i in (*pool.positive, *pool.negative)
+    }
+    acts = collect_item_activations(
+        tiny_arch,
+        list(union.values()),
+        p9_template("fewshot", DEFAULT_SHOTS[: committed.config.n_shots]),
+        chat_format_for(tiny_arch),
+        layers=committed.layers,
+        bos=committed.config.bos,
+        batch_size=16,
+    )
+    return Read(committed, pools, acts)
+
+
+def test_refit_methods_repeats_the_cube_of_the_reading(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    protocol = read.committed.config
+    cube = reading_cube(
+        read.acts,
+        read.pools,
+        methods=protocol.methods,
+        preprocess=protocol.preprocess,
+        n_seeds=protocol.n_seeds,
+        n_pairs=protocol.n_pairs,
+        seed=protocol.seed,
+    )
+
+    test = refit_methods(
+        read.acts, read.pools, train_draws(read.pools, protocol), protocol
+    )
+
+    assert test.shape == (4, len(USABLE), 2, tiny_arch.n_layers)
+    np.testing.assert_array_equal(test, cube.test)
+
+
+def test_refit_methods_needs_only_the_selected_items(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    protocol = read.committed.config
+    draws = train_draws(read.pools, protocol)
+    selected = select_items(read.pools, draws)
+    rows = read.acts.rows(selected)
+    partial = ItemActivations(
+        tuple(i.example.uid for i in selected),
+        read.acts.layers,
+        read.acts.data[:, rows],
+    )
+
+    test = refit_methods(partial, read.pools, draws, protocol)
+
+    np.testing.assert_array_equal(
+        test, refit_methods(read.acts, read.pools, draws, protocol)
+    )
+
+
+def _planted(pool: TypePool) -> tuple[dict[str, TypePool], ItemActivations]:
+    """Noise with one direction shifted on the positive side of a contrast."""
+    items = [*pool.positive, *pool.negative]
+    rng = np.random.default_rng(1)
+    data = rng.standard_normal((3, len(items), 32)).astype(np.float32)
+    direction = rng.standard_normal(32).astype(np.float32)
+    direction /= np.linalg.norm(direction)
+    data[1:, : len(pool.positive)] += 6.0 * direction
+    uids = tuple(i.example.uid for i in items)
+    return {pool.name: pool}, ItemActivations(uids, (1, 2, 3), data)
+
+
+def test_shuffled_labels_read_nothing_where_the_true_labels_read_a_signal(
+    inputs: Inputs,
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pools, acts = _planted(_pools(committed)["obscure_real"])
+    protocol = dataclasses.replace(committed.config, n_seeds=4, n_pairs=32)
+    draws = train_draws(pools, protocol)
+
+    true = refit_methods(acts, pools, draws, protocol)[0, 0]
+    shuffled = refit_shuffled(acts, pools, draws, protocol, seed=0)[0]
+
+    assert true[:, 1:].min() > 0.9
+    assert shuffled.shape == true.shape
+    assert abs(shuffled[:, 1:].mean() - 0.5) < 0.15
+
+
+def test_refit_shuffled_is_deterministic_and_follows_the_seed(
+    inputs: Inputs,
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pools, acts = _planted(_pools(committed)["obscure_real"])
+    protocol = committed.config
+    draws = train_draws(pools, protocol)
+
+    one = refit_shuffled(acts, pools, draws, protocol, seed=0)
+    again = refit_shuffled(acts, pools, draws, protocol, seed=0)
+    other = refit_shuffled(acts, pools, draws, protocol, seed=1)
+
+    np.testing.assert_array_equal(one, again)
+    assert not np.array_equal(one, other)
+
+
+def test_shuffled_draw_permutes_the_labels_inside_each_stratum(
+    inputs: Inputs,
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pool = _pools(committed)["obscure_real_pop"]
+    draw = draw_train(pool, n_pairs=16, seed=3)
+
+    shuffled = shuffled_draw(draw, seed=5)
+
+    assert shuffled.pairs is None
+    assert shuffled.items == draw.items
+    np.testing.assert_array_equal(shuffled.strata, draw.strata)
+    assert not np.array_equal(shuffled.labels, draw.labels)
+    for code in np.unique(draw.strata):
+        inside = draw.strata == code
+        assert sorted(shuffled.labels[inside]) == sorted(draw.labels[inside])
+    again = shuffled_draw(draw, seed=5)
+    np.testing.assert_array_equal(shuffled.labels, again.labels)
+    other = shuffled_draw(draw, seed=6)
+    assert not np.array_equal(shuffled.labels, other.labels)
+
+
+def _hash(uid: str) -> str:
+    return hashlib.sha256(uid.encode()).hexdigest()
+
+
+def test_displayed_items_are_the_first_by_the_hash_of_the_uid() -> None:
+    items = _items()[:40]
+
+    shown = displayed_items(items, cap=7)
+
+    want = sorted(items, key=lambda i: _hash(i.example.uid))[:7]
+    assert [i.example.uid for i in shown] == [i.example.uid for i in want]
+
+
+def test_displayed_items_keep_a_short_side_whole() -> None:
+    items = _items()[:5]
+
+    shown = displayed_items(items, cap=300)
+
+    assert sorted(i.example.uid for i in shown) == sorted(
+        i.example.uid for i in items
+    )
+    assert displayed_items([], cap=300) == []
+
+
+def test_compare_auroc_reports_the_largest_differences() -> None:
+    committed = np.full((2, 2, 2, 3), 0.5)
+    recomputed = committed.copy()
+    recomputed[0, 1, 0, 1] += 0.0625
+    recomputed[1, 0, 1, 2] += 0.03125
+
+    report = compare_auroc(recomputed, committed, 1, ("a", "b"), ("x", "y"))
+
+    assert report["tolerance"] == 0.02
+    assert report["within_tolerance"] is False
+    assert report["max_abs_diff"] == {
+        "draw_at_layer": 0.0625,
+        "mean_at_layer": 0.03125,
+        "draw_all_layers": 0.0625,
+        "mean_all_layers": 0.03125,
+    }
+    assert report["mean_diff_at_layer"] == {
+        "x": {"a": 0.0, "b": 0.0},
+        "y": {"a": 0.03125, "b": 0.0},
+    }
+
+
+def test_compare_auroc_passes_a_mean_difference_inside_the_tolerance() -> None:
+    committed = np.full((1, 1, 2, 2), 0.5)
+    recomputed = committed.copy()
+    recomputed[0, 0, 0, 0] += 0.03125
+
+    report = compare_auroc(recomputed, committed, 0, ("a",), ("x",))
+
+    assert report["within_tolerance"] is True
+    assert report["max_abs_diff"]["draw_at_layer"] == 0.03125
+    assert report["max_abs_diff"]["mean_at_layer"] == 0.015625
+
+
+def test_compare_auroc_looks_at_the_chosen_layer_for_the_flag() -> None:
+    committed = np.full((1, 1, 1, 3), 0.5)
+    recomputed = committed.copy()
+    recomputed[0, 0, 0, 2] += 0.25
+
+    report = compare_auroc(recomputed, committed, 0, ("a",), ("x",))
+
+    assert report["within_tolerance"] is True
+    assert report["max_abs_diff"]["draw_at_layer"] == 0.0
+    assert report["max_abs_diff"]["draw_all_layers"] == 0.25
+
+
+def test_compare_surface_matches_the_committed_baselines(
+    inputs: Inputs,
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pools = _pools(committed)
+
+    report = compare_surface(pools, committed)
+
+    assert list(report) == USABLE
+    for name, by_baseline in report.items():
+        assert list(by_baseline) == list(SURFACE_BASELINES)
+        for baseline, entry in by_baseline.items():
+            assert entry["equal"] is True, (name, baseline)
+            assert entry["committed"] == committed.table[name][baseline]
+    assert report["obscure_real"]["popularity"]["recomputed"] is not None
+    assert report["false_premise"]["popularity"] == {
+        "recomputed": None,
+        "committed": None,
+        "equal": True,
+    }
+
+
+def test_compare_surface_flags_a_baseline_that_moved(inputs: Inputs) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pools = _pools(committed)
+    table = {name: dict(row) for name, row in committed.table.items()}
+    table["obscure_real"]["text_word"] += 0.01
+    table["false_premise"]["popularity"] = 0.7
+    moved = dataclasses.replace(committed, table=table)
+
+    report = compare_surface(pools, moved)
+
+    unequal = [
+        (name, baseline)
+        for name, by_baseline in report.items()
+        for baseline, entry in by_baseline.items()
+        if not entry["equal"]
+    ]
+    assert unequal == [
+        ("obscure_real", "text_word"),
+        ("false_premise", "popularity"),
+    ]

@@ -7,7 +7,10 @@ the model: the P9a labels and the P9b reading.
 """
 
 from collections.abc import Mapping
+from collections.abc import Sequence
+import dataclasses
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import Any
 from typing import cast
@@ -18,11 +21,17 @@ from numpy.typing import NDArray
 from tomography.experiments import p9b_reading
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.p9.pool import LabeledItem
 from tomography.p9.reading import READING_METHODS
+from tomography.p9.reading import SURFACE_BASELINES
+from tomography.p9.reading import ItemActivations
 from tomography.p9.reading import TrainDraw
 from tomography.p9.reading import draw_seed
 from tomography.p9.reading import draw_train
+from tomography.p9.reading import fit_draw
+from tomography.p9.reading import surface_baselines
+from tomography.p9.reading import type_auroc
 from tomography.p9.unknowns import TypePool
 
 READING_FILES = (
@@ -33,6 +42,9 @@ READING_FILES = (
     "readers.npz",
     "readers.json",
 )
+TOLERANCE = 0.02
+SURFACE_TOLERANCE = 1e-9
+MAX_DISPLAYED = 300
 COUNT_COLUMNS = (
     "n_positive_train",
     "n_negative_train",
@@ -280,6 +292,216 @@ def select_items(
             ):
                 selected.setdefault(item.example.uid, item)
     return list(selected.values())
+
+
+def shuffled_draw(draw: TrainDraw, *, seed: int) -> TrainDraw:
+    """Permutes the labels of a draw inside each of its strata.
+
+    Every stratum keeps its number of items on each side, so the control
+    differs from the reader only in which item carries which label. The
+    pairs are dropped, because they no longer join the two sides.
+
+    Args:
+        draw: The items and labels of a fit.
+        seed: Seeds the permutations.
+
+    Returns:
+        The draw with permuted labels and no pairs.
+    """
+    rng = np.random.default_rng(seed)
+    labels = draw.labels.copy()
+    for code in np.unique(draw.strata):
+        inside = np.flatnonzero(draw.strata == code)
+        labels[inside] = rng.permutation(labels[inside])
+    return dataclasses.replace(draw, labels=labels, pairs=None)
+
+
+def refit_methods(
+    acts: ItemActivations,
+    pools: Mapping[str, TypePool],
+    draws: Mapping[str, list[TrainDraw]],
+    protocol: p9b_reading.Config,
+) -> NDArray[np.float64]:
+    """Fits every method on every draw and scores it on the test items.
+
+    This is the fit of `tomography.p9.reading.reading_cube`, on the items of
+    the draws instead of every train item.
+
+    Args:
+        acts: The activations of the test items and of the items of `draws`.
+        pools: The usable contrasts.
+        draws: The draws of each contrast, see `train_draws`.
+        protocol: The settings of the P9b run: the methods, the preprocessing
+            and the seed.
+
+    Returns:
+        Shape (M, T, S, K): the test AUROC of each method, contrast, draw and
+        layer of `acts`.
+    """
+    test = np.zeros(
+        (len(protocol.methods), len(pools), protocol.n_seeds, len(acts.layers))
+    )
+    for t, (name, pool) in enumerate(pools.items()):
+        for s, draw in enumerate(draws[name]):
+            for m, method in enumerate(protocol.methods):
+                reader = fit_draw(
+                    acts,
+                    draw,
+                    method=method,
+                    preprocess=protocol.preprocess,
+                    seed=draw_seed(protocol.seed, s),
+                )
+                test[m, t, s] = type_auroc(reader, acts, pool, "test")
+    return test
+
+
+def refit_shuffled(
+    acts: ItemActivations,
+    pools: Mapping[str, TypePool],
+    draws: Mapping[str, list[TrainDraw]],
+    protocol: p9b_reading.Config,
+    *,
+    seed: int,
+) -> NDArray[np.float64]:
+    """Fits the headline method on shuffled labels, the control of the reader.
+
+    Each fit uses the items of a draw with their labels permuted inside the
+    strata, with a seed derived from the seed of the draw and of the
+    contrast. A reader that follows what the labels mean falls to chance.
+
+    Args:
+        acts: The activations of the test items and of the items of `draws`.
+        pools: The usable contrasts.
+        draws: The draws of each contrast, see `train_draws`.
+        protocol: The settings of the P9b run.
+        seed: The seed of the control, mixed into every permutation.
+
+    Returns:
+        Shape (T, S, K): the test AUROC of each contrast, draw and layer.
+    """
+    test = np.zeros((len(pools), protocol.n_seeds, len(acts.layers)))
+    for t, (name, pool) in enumerate(pools.items()):
+        for s, draw in enumerate(draws[name]):
+            draw_state = draw_seed(protocol.seed, s)
+            reader = fit_draw(
+                acts,
+                shuffled_draw(
+                    draw,
+                    seed=derive_seed(draw_state, "shuffled", name, seed),
+                ),
+                method=protocol.methods[0],
+                preprocess=protocol.preprocess,
+                seed=draw_state,
+            )
+            test[t, s] = type_auroc(reader, acts, pool, "test")
+    return test
+
+
+def displayed_items(
+    items: Sequence[LabeledItem], *, cap: int = MAX_DISPLAYED
+) -> list[LabeledItem]:
+    """Picks the items a figure draws, whoever looks at the run.
+
+    Args:
+        items: One side of one contrast.
+        cap: The most items to keep.
+
+    Returns:
+        The first `cap` items by ascending SHA-256 of the uid, so the choice
+        depends on the uids only; all of them when there are fewer.
+    """
+    return sorted(
+        items,
+        key=lambda item: hashlib.sha256(item.example.uid.encode()).hexdigest(),
+    )[:cap]
+
+
+def compare_auroc(
+    recomputed: NDArray[np.float64],
+    committed: NDArray[np.float64],
+    k: int,
+    methods: Sequence[str],
+    types: Sequence[str],
+) -> dict[str, Any]:
+    """Measures how far the recomputed AUROC is from the committed one.
+
+    The run reproduces the numbers of the P9b run when the mean over the
+    draws, at its chosen layer, differs by at most `TOLERANCE` for every
+    contrast and method. A miss is reported, not raised.
+
+    Args:
+        recomputed: Shape (M, T, S, K): the test AUROC refitted here.
+        committed: The same axes, from `transfer.npz`.
+        k: Position of the chosen layer on the last axis.
+        methods: The method of each entry of the first axis.
+        types: The contrast of each entry of the second axis.
+
+    Returns:
+        The `tolerance`, whether the run is `within_tolerance`, the largest
+        absolute difference (`max_abs_diff`) of a draw and of the mean over
+        the draws, at the chosen layer and over all layers, and the
+        difference of the means at the chosen layer for each contrast and
+        method (`mean_diff_at_layer`).
+    """
+    draw_diff = np.abs(recomputed - committed)
+    mean_diff = np.abs(recomputed.mean(axis=2) - committed.mean(axis=2))
+    at_layer = float(mean_diff[..., k].max())
+    return {
+        "tolerance": TOLERANCE,
+        "within_tolerance": at_layer <= TOLERANCE,
+        "max_abs_diff": {
+            "draw_at_layer": float(draw_diff[..., k].max()),
+            "mean_at_layer": at_layer,
+            "draw_all_layers": float(draw_diff.max()),
+            "mean_all_layers": float(mean_diff.max()),
+        },
+        "mean_diff_at_layer": {
+            type_name: {
+                method: float(mean_diff[m, t, k])
+                for m, method in enumerate(methods)
+            }
+            for t, type_name in enumerate(types)
+        },
+    }
+
+
+def _same(recomputed: float | None, committed: float | None) -> bool:
+    if recomputed is None or committed is None:
+        return recomputed is None and committed is None
+    return abs(recomputed - committed) <= SURFACE_TOLERANCE
+
+
+def compare_surface(
+    pools: Mapping[str, TypePool], reading: CommittedReading
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Recomputes the surface baselines and sets them beside the committed ones.
+
+    They need no model, so a difference points at the labels or the library
+    versions, not at the activations.
+
+    Args:
+        pools: The usable contrasts.
+        reading: The committed P9b run.
+
+    Returns:
+        For each contrast and each of `SURFACE_BASELINES`, the `recomputed`
+        and the `committed` value (None where a contrast has none) and
+        whether they are `equal` within `SURFACE_TOLERANCE`.
+    """
+    report: dict[str, dict[str, dict[str, Any]]] = {}
+    for name, pool in pools.items():
+        recomputed = surface_baselines(pool)
+        report[name] = {
+            baseline: {
+                "recomputed": recomputed[baseline],
+                "committed": reading.table[name][baseline],
+                "equal": _same(
+                    recomputed[baseline], reading.table[name][baseline]
+                ),
+            }
+            for baseline in SURFACE_BASELINES
+        }
+    return report
 
 
 def run(config: Config, run_dir: RunDir) -> None:
