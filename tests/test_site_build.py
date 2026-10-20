@@ -173,35 +173,61 @@ def test_paper_never_gets_the_phone_layout(css: str) -> None:
     assert css.count("max-width: 600px") == 1
 
 
+def _print_block(css: str) -> str:
+    return css[css.index("@media print") :].split("\n}\n", 1)[0]
+
+
 def test_printed_tables_have_no_scroll_box_and_wide_ones_are_set_smaller(
     css: str,
 ) -> None:
-    printed = css[css.index("@media print") :].split("\n}\n", 1)[0]
-    assert ".table .scroll {\n    overflow: visible;" in printed
+    printed = _print_block(css)
+    assert ".table .scroll {\n    overflow: visible;\n  }" in printed
     assert "margin-left: -" not in printed
     assert (
-        ".table.wide table {\n    width: 98%;\n    margin: 0 auto;" in printed
-    )
-    assert "font-size: 0.68em;" in printed
+        ".table.wide table {\n"
+        "    width: 98%;\n"
+        "    margin: 0 auto;\n"
+        "    font-size: 0.68em;\n"
+        "  }"
+    ) in printed
     assert (
-        ".table.wide th,\n  .table.wide td {\n    padding: 0.18em 0.2em;"
-        in printed
-    )
-    assert "#table-2 td.k {\n    white-space: normal;" in printed
+        ".table.wide th,\n  .table.wide td {\n    padding: 0.18em 0.2em;\n  }"
+    ) in printed
+
+
+def test_only_table_2_lets_its_printed_row_labels_wrap(css: str) -> None:
+    printed = _print_block(css)
+    assert "#table-2 td.k {\n    white-space: normal;\n  }" in printed
 
 
 def test_a_printed_figure_shrinks_to_one_page_instead_of_splitting(
     css: str,
 ) -> None:
-    printed = css[css.index("@media print") :].split("\n}\n", 1)[0]
+    printed = _print_block(css)
     assert (
-        "  figure {\n    display: flex;\n    flex-direction: column;" in printed
-    )
-    assert "max-height: 840px;" in printed
-    assert "figure .fig-scroll {\n    display: flex;" in printed
-    assert "justify-content: center;" in printed
-    assert "figure .fig-scroll img {\n    width: auto;" in printed
-    assert "max-height: 100%;" in printed
+        "  figure {\n"
+        "    display: flex;\n"
+        "    flex-direction: column;\n"
+        "    max-height: 840px;\n"
+        "  }"
+    ) in printed
+    assert (
+        "  figure .fig-scroll {\n"
+        "    display: flex;\n"
+        "    flex: 0 1 auto;\n"
+        "    justify-content: center;\n"
+        "    min-height: 0;\n"
+        "  }"
+    ) in printed
+    assert (
+        "  figure .fig-scroll img {\n"
+        "    width: auto;\n"
+        "    max-width: 100%;\n"
+        "    max-height: 100%;\n"
+        "    min-height: 0;\n"
+        "    object-fit: contain;\n"
+        "  }"
+    ) in printed
     assert "figure,\n  pre,\n  tr {\n    break-inside: avoid;" in printed
 
 
