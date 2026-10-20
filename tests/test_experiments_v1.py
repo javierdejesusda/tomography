@@ -2186,6 +2186,22 @@ def test_a_text_view_that_cannot_be_fitted_fails_before_the_forward_pass(
         _execute(tiny_arch, tmp_path, inputs)
 
 
+def test_run_fits_the_text_views_before_the_model(
+    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _never_loaded(monkeypatch)
+
+    def broken(texts: Any, *, seed: int) -> Any:
+        raise ValueError("no text view")
+
+    monkeypatch.setattr(v1_module, "text_view", broken)
+    config = _config(inputs)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match="no text view"):
+        run(config, run_dir)
+
+
 def test_plot_needs_the_views_of_a_run(tmp_path: Path) -> None:
     config = Config(labels_run="runs/p9a", reading_run="runs/p9b")
     run_dir = RunDir.create(config, out_root=tmp_path)
