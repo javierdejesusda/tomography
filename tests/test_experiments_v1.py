@@ -2324,3 +2324,19 @@ def test_a_panel_figure_colours_the_items_by_their_side(
         len(own["positive"]),
         len(own["negative"]),
     ]
+
+
+def test_the_text_row_says_that_it_is_lsa_not_pca(default_run: RunDir) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+
+    figure = panel_figure(
+        "entity",
+        sidecar,
+        default_run.read_arrays("pca2d"),
+        default_run.read_arrays("text2d"),
+    )
+
+    labels = [ax.get_ylabel() for ax in figure.axes if ax.get_visible()]
+    assert labels.count("words only (LSA)") == 1
+    assert "words only" not in labels

@@ -91,7 +91,8 @@ class Config(ExperimentConfig):
     Everything else is read from the P9b run, so the questions, the draws and
     the template are those of its committed numbers. The seed of this run only
     mixes into the permutations of the shuffled-label control and into the
-    randomized SVD of the text-only views.
+    randomized SVD of the text-only views, which are an LSA on uncentered
+    TF-IDF and not a PCA.
 
     Attributes:
         labels_run: Path of a finished P9a run of the same model.
@@ -917,7 +918,10 @@ def text_view(
 
     The features are TF-IDF weights of the word 1-grams and 2-grams seen in
     at least 2 of the texts, as in the text classifier of the P9b table. A
-    truncated SVD keeps the two leading components.
+    truncated SVD keeps the two leading components. This is latent semantic
+    analysis (LSA) on uncentered features, not a PCA: the first component
+    mostly follows the mean of the features, and the shares of variance it
+    returns are not comparable with the ratios of `pca_views`.
 
     Args:
         texts: The questions of a panel.
@@ -925,7 +929,8 @@ def text_view(
 
     Returns:
         The coordinates of shape (n, 2) float32 and the share of the
-        variance of the features each component keeps, shape (2,) float64.
+        variance of the features each LSA component keeps, shape (2,)
+        float64.
 
     Raises:
         ValueError: If the texts share too few words to give two components:
@@ -956,7 +961,8 @@ def text_views(
     """Fits the text-only view of each panel on the questions it shows.
 
     The text is read here and goes no further: the arrays hold coordinates
-    only.
+    only. The views are LSA on uncentered TF-IDF (see `text_view`), so the
+    `ratios_<panel>` are not PCA ratios.
 
     Args:
         questions: The text of each question by uid.
@@ -1088,7 +1094,8 @@ def run_plan(
     Writes `pca2d.npz`: the 2D views of each panel (see `pca_views`) and
     the supervised view of each shown contrast (see `supervised_views`).
     Writes `text2d.npz`: the text-only view of each panel (see
-    `text_views`); the questions are read to make it and are not stored.
+    `text_views`), an LSA on uncentered TF-IDF whose ratios are not PCA
+    ratios; the questions are read to make it and are not stored.
     Writes `summary`: the layer, the number of items extracted, the dtype of
     this run (`extraction_dtype`, that of the loaded model) and the one the
     P9b run was extracted in (`reading_run_dtype`, the registry default of
@@ -1295,13 +1302,14 @@ def panel_figure(
 
     There is a row for each layer of the 2D views and a last row for the
     text-only view. The first column places every item of the panel on its two
-    leading components (on the two components of the words in the last row).
-    The other columns, one for each contrast of the panel, set the published
-    reader of the contrast against the leading component of the rest; the
-    text row has none. A point has one color and shape on the positive side
-    of a contrast, another on the negative side, and is gray where the
-    contrast does not show it. In the first column an item takes the
-    negative side if any contrast puts it there.
+    leading components (on the two LSA components of the words in the last
+    row, which are not principal components). The other columns, one for each
+    contrast of the panel, set the published reader of the contrast against
+    the leading component of the rest; the text row has none. A point has one
+    color and shape on the positive side of a contrast, another on the
+    negative side, and is gray where the contrast does not show it. In the
+    first column an item takes the negative side if any contrast puts it
+    there.
 
     Args:
         panel: The panel to draw.
@@ -1337,7 +1345,7 @@ def panel_figure(
             for c, name in enumerate(types, start=1):
                 _scatter(axes[v, c], pca[f"supervised_{name}"][v], own[name])
         _scatter(axes[-1, 0], text[f"coordinates_{panel}"], every)
-        axes[-1, 0].set_ylabel("words only")
+        axes[-1, 0].set_ylabel("words only (LSA)")
         for ax in axes[-1, 1:]:
             ax.set_visible(False)
         axes[0, 0].set_title("two leading components")
