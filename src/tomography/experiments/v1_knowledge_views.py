@@ -753,24 +753,25 @@ def published_views(
     return PublishedViews(aurocs, projections, uids)
 
 
-def view_layers(
-    reading: CommittedReading, n_layers: int
-) -> tuple[int, int, int]:
+def view_layers(reading: CommittedReading, n_layers: int) -> tuple[int, ...]:
     """Names the layers the 2D views are drawn at.
 
-    Layer 0 is left out: at the last token of the few-shot prompt it is one
-    token embedding for every question. Layer 1 shows what the model has
-    done with a question before it has read much of it.
+    Layer 0 is left out: every prompt ends in the same token, so layer 0 at
+    the last position is the embedding of that token and nothing of the
+    question. For GPT-2 it is the token embedding plus the position
+    embedding, so it varies only with the length of the prompt. Layer 1 shows
+    what the model has done with a question before it has read much of it.
 
     Args:
         reading: The committed P9b run.
         n_layers: The number of layers of the model, L.
 
     Returns:
-        Layer 1, the layer the P9b run chose and the last layer. They are
-        not told apart when the run chose one of the others.
+        Layer 1, the layer the P9b run chose and the last layer, in that
+        order and each once: a run that chose layer 1 or the last layer
+        gets two views and not three.
     """
-    return (1, reading.layer, n_layers)
+    return tuple(dict.fromkeys((1, reading.layer, n_layers)))
 
 
 def _rows(acts: ItemActivations, uids: Sequence[str]) -> NDArray[np.int64]:
