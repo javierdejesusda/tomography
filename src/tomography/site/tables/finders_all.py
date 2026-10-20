@@ -110,4 +110,5 @@ def build(manifest: Manifest) -> TableOutput:
         [],
         {"models": float(len(models))},
         row_groups=tuple(starts),
+        compact_print=True,
     )

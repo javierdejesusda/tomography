@@ -93,7 +93,8 @@ def glue(cell: str) -> str:
 
     A space stays a break point only before a plus-minus sign, a bracket or
     a parenthesis, where the cell may start a second line; every other space
-    next to a digit becomes a no-break space, so an interval never splits.
+    next to a digit or a minus sign becomes a no-break space, so an interval
+    never splits.
 
     Args:
         cell: The cell text.
@@ -108,7 +109,12 @@ def glue(cell: str) -> str:
         before, after = cell[i - 1], cell[i + 1]
         if after in BREAKS_BEFORE:
             continue
-        if before.isdigit() or after.isdigit() or before in "*)]":
+        if (
+            before.isdigit()
+            or after.isdigit()
+            or before in "*)]"
+            or after == cells.MINUS
+        ):
             out[i] = NBSP
     return "".join(out)
 
@@ -366,8 +372,11 @@ class Page:
         if entry.output.csv.strip():
             links.append(f'<a href="data/{name}.csv">data</a>')
         links.append(f'<a href="figures/{name}.pdf">PDF</a>')
+        flag = (
+            ' class="full-size-print"' if entry.output.full_size_print else ""
+        )
         return (
-            f'<figure id="{name}"><div class="fig-scroll">{graphic}</div>'
+            f'<figure id="{name}"{flag}><div class="fig-scroll">{graphic}</div>'
             f'<figcaption id="{name}-cap">{label}: {self.text(caption)} '
             f'<span class="data">({", ".join(links)})</span>'
             "</figcaption></figure>"
@@ -431,6 +440,8 @@ class Page:
         )
         if out.wrap_labels:
             classes += " wrap-labels"
+        if out.compact_print:
+            classes += " compact-print"
         groups = "".join(
             f'<th colspan="{span}" class="span{" muted" if muted else ""}">'
             f"{_e(label)}</th>"

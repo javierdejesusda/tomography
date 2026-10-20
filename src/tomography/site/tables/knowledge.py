@@ -191,4 +191,5 @@ def build(manifest: Manifest) -> TableOutput:
         groups=GROUPS,
         row_groups=_rows.role_groups(models),
         counts=counts,
+        compact_print=True,
     )

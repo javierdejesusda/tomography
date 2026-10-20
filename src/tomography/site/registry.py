@@ -46,6 +46,9 @@ class FigureOutput:
         csv: The exact numbers plotted, as CSV text.
         counts: Name to the per-role count the claim quotes.
         labels: Name to the checkpoint or other label a sentence names.
+        full_size_print: Whether the graphic keeps its full size on paper and
+            the caption may run onto the next page, for a figure whose
+            caption is too tall to share a page with a full size graphic.
     """
 
     figure: Figure
@@ -57,6 +60,7 @@ class FigureOutput:
         default_factory=dict
     )
     labels: dict[str, str] = dataclasses.field(default_factory=dict)
+    full_size_print: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -79,6 +83,9 @@ class TableOutput:
         counts: Name to the per-role count the claim quotes.
         wrap_labels: Whether the row labels may wrap on paper, for a table
             that is too wide for the printed page otherwise.
+        compact_print: Whether the table prints in a smaller type with
+            tighter cells, for a table that overflows the printed page at
+            the ordinary table size.
     """
 
     claim: str
@@ -94,6 +101,7 @@ class TableOutput:
         default_factory=dict
     )
     wrap_labels: bool = False
+    compact_print: bool = False
 
 
 MAIN_FIGURES = (

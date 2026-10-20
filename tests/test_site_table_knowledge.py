@@ -202,3 +202,9 @@ def test_the_added_columns_name_the_confidence_not_one_probability(
     text = output.claim + " " + output.detail
     assert "answer probability" not in text
     assert "confidence of the model, which stacks five output signals" in text
+
+
+def test_the_table_prints_compact_because_it_overflows_at_the_normal_size(
+    output: registry.TableOutput,
+) -> None:
+    assert output.compact_print is True

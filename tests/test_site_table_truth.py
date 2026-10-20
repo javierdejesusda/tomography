@@ -232,3 +232,9 @@ def test_the_in_template_random_direction_is_quoted_per_role(
     assert "(Qwen3 base)" in text
     assert "(post-trained)" in text
     assert "[[table:reading_full]]" in text
+
+
+def test_the_table_prints_compact_because_it_overflows_at_the_normal_size(
+    output: registry.TableOutput,
+) -> None:
+    assert output.compact_print is True

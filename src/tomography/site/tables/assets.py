@@ -88,4 +88,5 @@ def build(manifest: Manifest) -> TableOutput:
         [],
         {"assets": float(len(rows))},
         row_groups=(),
+        compact_print=True,
     )
