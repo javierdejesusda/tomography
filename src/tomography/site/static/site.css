@@ -436,14 +436,14 @@ footer.colophon {
     overflow: visible;
   }
 
-  .table.wide table {
+  .table.compact-print table {
     width: 98%;
     margin: 0 auto;
     font-size: 0.68em;
   }
 
-  .table.wide th,
-  .table.wide td {
+  .table.compact-print th,
+  .table.compact-print td {
     padding: 0.18em 0.2em;
   }
 

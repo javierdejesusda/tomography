@@ -177,22 +177,25 @@ def _print_block(css: str) -> str:
     return css[css.index("@media print") :].split("\n}\n", 1)[0]
 
 
-def test_printed_tables_have_no_scroll_box_and_wide_ones_are_set_smaller(
+def test_printed_tables_have_no_scroll_box_and_only_flagged_ones_are_compact(
     css: str,
 ) -> None:
     printed = _print_block(css)
     assert ".table .scroll {\n    overflow: visible;\n  }" in printed
     assert "margin-left: -" not in printed
     assert (
-        ".table.wide table {\n"
+        ".table.compact-print table {\n"
         "    width: 98%;\n"
         "    margin: 0 auto;\n"
         "    font-size: 0.68em;\n"
         "  }"
     ) in printed
     assert (
-        ".table.wide th,\n  .table.wide td {\n    padding: 0.18em 0.2em;\n  }"
+        ".table.compact-print th,\n  .table.compact-print td {\n"
+        "    padding: 0.18em 0.2em;\n  }"
     ) in printed
+    assert ".table.wide table" not in printed
+    assert ".table.wide th" not in printed
 
 
 def test_flagged_tables_let_their_printed_row_labels_wrap(css: str) -> None:
@@ -349,8 +352,8 @@ def test_the_built_page_resolves_every_token_and_link(html: str) -> None:
 @pytest.mark.parametrize(
     "pattern",
     [
-        r'<div class="table(?: wide)?" id="table-(\d+)"',
-        r'<div class="table(?: wide)?" id="table-A(\d+)"',
+        r'<div class="table[a-z -]*" id="table-(\d+)"',
+        r'<div class="table[a-z -]*" id="table-A(\d+)"',
         r'<figure id="fig-(\d+)"',
         r'<figure id="fig-A(\d+)"',
     ],

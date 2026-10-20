@@ -118,3 +118,9 @@ def test_no_underscore_backtick_or_run_code(
     texts = [re.sub(r"\[\[.*?\]\]", "", t) for t in texts]
     assert not any("_" in t or "`" in t for t in texts)
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
+
+
+def test_the_table_prints_compact_because_it_overflows_at_the_normal_size(
+    output: registry.TableOutput,
+) -> None:
+    assert output.compact_print is True

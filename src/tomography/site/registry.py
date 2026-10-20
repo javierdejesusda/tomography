@@ -79,6 +79,9 @@ class TableOutput:
         counts: Name to the per-role count the claim quotes.
         wrap_labels: Whether the row labels may wrap on paper, for a table
             that is too wide for the printed page otherwise.
+        compact_print: Whether the table prints in a smaller type with
+            tighter cells, for a table that overflows the printed page at
+            the ordinary table size.
     """
 
     claim: str
@@ -94,6 +97,7 @@ class TableOutput:
         default_factory=dict
     )
     wrap_labels: bool = False
+    compact_print: bool = False
 
 
 MAIN_FIGURES = (

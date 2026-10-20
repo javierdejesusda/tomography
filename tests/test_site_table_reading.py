@@ -249,3 +249,9 @@ def test_the_caption_defines_the_baseline_rows(
     assert "true and false labels of the facts" in text
     assert "baseline for the transfer pairs only" in text
     assert not any(ch in text for ch in DASHES)
+
+
+def test_the_table_prints_compact_because_it_overflows_at_the_normal_size(
+    output: registry.TableOutput,
+) -> None:
+    assert output.compact_print is True

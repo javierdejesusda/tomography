@@ -231,4 +231,5 @@ def build(manifest: Manifest) -> TableOutput:
         numbers,
         groups=GROUPS,
         row_groups=(*_rows.role_groups(models), n_models),
+        compact_print=True,
     )

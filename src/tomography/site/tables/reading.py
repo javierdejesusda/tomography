@@ -173,4 +173,5 @@ def build(manifest: Manifest) -> TableOutput:
         row_groups=(*_rows.role_groups(models), len(models)),
         counts=counts,
         wrap_labels=True,
+        compact_print=True,
     )

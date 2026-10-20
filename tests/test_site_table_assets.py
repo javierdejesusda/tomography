@@ -196,3 +196,9 @@ def test_a_license_that_says_to_cite_carries_the_citation_marker(
     for row in output.rows:
         if "(cite " in row[5]:
             assert "[[cite:" in row[5], row[0]
+
+
+def test_the_text_table_prints_compact_so_its_hub_ids_do_not_wrap_tall(
+    output: registry.TableOutput,
+) -> None:
+    assert output.compact_print is True

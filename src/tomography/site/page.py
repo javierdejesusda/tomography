@@ -431,6 +431,8 @@ class Page:
         )
         if out.wrap_labels:
             classes += " wrap-labels"
+        if out.compact_print:
+            classes += " compact-print"
         groups = "".join(
             f'<th colspan="{span}" class="span{" muted" if muted else ""}">'
             f"{_e(label)}</th>"
