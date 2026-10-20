@@ -103,7 +103,10 @@ def pca_coordinates(
 
     Raises:
         ValueError: If `h` is not 3-D, has fewer than 2 rows or 2 features,
-            or a layer is not finite or has no variance.
+            or a layer is not finite or has no variance. A layer has none
+            when its centered variance is within float64 rounding of its
+            uncentered energy, so a constant layer raises however large its
+            offset.
     """
     stack = np.asarray(h)
     if stack.ndim != 3:
@@ -119,10 +122,11 @@ def pca_coordinates(
         rows = np.array(layer, dtype=np.float64)
         if not np.isfinite(rows).all():
             raise ValueError(f"layer {k} is not finite")
+        energy = float(np.linalg.norm(rows)) ** 2
         rows -= rows.mean(axis=0)
         scores, singular, loadings = np.linalg.svd(rows, full_matrices=False)
         squared = singular**2
-        if squared.sum() <= 0.0:
+        if squared.sum() <= np.finfo(np.float64).eps * energy:
             raise ValueError(f"layer {k} has no variance")
         leading = loadings[:2]
         peak = leading[np.arange(2), np.abs(leading).argmax(axis=1)]

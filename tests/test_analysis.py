@@ -308,6 +308,16 @@ def test_pca_coordinates_leave_the_input_untouched() -> None:
     np.testing.assert_array_equal(h, before)
 
 
+def test_pca_coordinates_keep_a_small_variance_on_a_large_offset() -> None:
+    noise = np.random.default_rng(17).standard_normal((1, 20, 4))
+    h = 1000.0 + 1e-3 * noise
+    coordinates, ratios = pca_coordinates(h)
+    assert np.abs(coordinates).max() > 1e-4
+    np.testing.assert_allclose(
+        ratios, pca_explained_variance(h, n_components=2), atol=1e-12
+    )
+
+
 def test_pca_coordinates_never_cast_the_whole_stack() -> None:
     h = np.random.default_rng(16).standard_normal((40, 100, 50))
     h32 = h.astype(np.float32)
@@ -328,10 +338,20 @@ def test_pca_coordinates_never_cast_the_whole_stack() -> None:
         (np.ones((6, 3)), "shape"),
         (np.full((1, 6, 3), np.nan), "finite"),
         (np.ones((2, 6, 3)), "variance"),
+        (np.full((1, 7, 3), 0.1), "variance"),
+        (np.full((1, 7, 3), 0.1, dtype=np.float32), "variance"),
         (np.random.default_rng(0).standard_normal((1, 6, 1)), "components"),
         (np.random.default_rng(0).standard_normal((1, 1, 6)), "components"),
     ],
-    ids=["two-d", "nan", "constant", "one-feature", "one-row"],
+    ids=[
+        "two-d",
+        "nan",
+        "constant",
+        "constant-float64",
+        "constant-float32",
+        "one-feature",
+        "one-row",
+    ],
 )
 def test_pca_coordinates_reject_bad_input(h: Any, match: str) -> None:
     with pytest.raises(ValueError, match=match):
