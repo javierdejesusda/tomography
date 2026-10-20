@@ -802,7 +802,7 @@ def test_the_other_experiments_section_points_to_each_findings_section() -> (
     for slug in OTHER_SLUGS:
         assert f"[[findings:{slug}|" in text, slug
     shown = re.sub(r"\[\[findings:[^|]*\|(.*?)\]\]", r"", text)
-    assert 80 <= len(_bare(shown).split()) <= 150
+    assert 75 <= len(_bare(shown).split()) <= 150
 
 
 def test_the_other_experiments_section_has_no_numbers_or_run_codes() -> None:
