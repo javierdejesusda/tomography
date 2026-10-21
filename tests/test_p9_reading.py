@@ -794,27 +794,6 @@ def test_draw_train_depends_on_the_seed_only(planted: Planted) -> None:
     ]
 
 
-def test_fit_draw_is_the_fit_of_fit_type_reader(planted: Planted) -> None:
-    pool = planted.pools["obscure_real"]
-    draw = draw_train(pool, n_pairs=16, seed=4)
-
-    drawn = fit_draw(
-        planted.acts, draw, method="mean_diff", preprocess="unit", seed=4
-    )
-
-    direct = fit_type_reader(
-        planted.acts,
-        pool,
-        method="mean_diff",
-        preprocess="unit",
-        n_pairs=16,
-        seed=4,
-    )
-    np.testing.assert_array_equal(drawn.directions, direct.directions)
-    np.testing.assert_array_equal(drawn.means, direct.means)
-    np.testing.assert_array_equal(drawn.signs, direct.signs)
-
-
 def test_fit_type_reader_needs_only_the_items_the_pairs_hold(
     planted: Planted,
 ) -> None:

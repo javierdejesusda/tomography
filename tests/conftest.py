@@ -3,11 +3,14 @@
 Every model has 3 layers and d_model 32 with random weights from a fixed
 seed, and every tokenizer is a byte-level BPE trained on an inline corpus, so
 the default suite never touches the network. Other test modules reuse these
-fixtures, so their names and shapes are stable.
+fixtures, so their names and shapes are stable. `fixed_machine` names the user
+and the host that an export must not leak.
 """
 
 from collections.abc import Callable
 import functools
+import getpass
+import socket
 
 import pytest
 from tokenizers import Tokenizer
@@ -152,3 +155,10 @@ def tiny_qwen3() -> LoadedModel:
 @pytest.fixture(params=sorted(ARCHS), ids=sorted(ARCHS))
 def tiny_arch(request: pytest.FixtureRequest) -> LoadedModel:
     return TINY_BUILDERS[request.param]()
+
+
+@pytest.fixture
+def fixed_machine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Names the user and the host that the export checks must refuse."""
+    monkeypatch.setattr(getpass, "getuser", lambda: "tester-user")
+    monkeypatch.setattr(socket, "gethostname", lambda: "testhost-box.lan")

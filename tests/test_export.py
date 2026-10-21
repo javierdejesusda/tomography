@@ -1,11 +1,9 @@
 """Tests for the export of finished runs into a results tree."""
 
 import dataclasses
-import getpass
 import io
 import json
 from pathlib import Path
-import socket
 import sys
 
 import numpy as np
@@ -21,6 +19,8 @@ from tomography.export import RunInfo
 from tomography.export import export_runs
 from tomography.export import is_exported
 
+pytestmark = pytest.mark.usefixtures("fixed_machine")
+
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class _Config(ExperimentConfig):
@@ -29,12 +29,6 @@ class _Config(ExperimentConfig):
     tag: str = "x"
     source: str | None = None
     sources: tuple[str, ...] = ()
-
-
-@pytest.fixture(autouse=True)
-def _fixed_machine(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(getpass, "getuser", lambda: "tester-user")
-    monkeypatch.setattr(socket, "gethostname", lambda: "testhost-box.lan")
 
 
 def _user_config(dest: Path, tag: str) -> Path:
