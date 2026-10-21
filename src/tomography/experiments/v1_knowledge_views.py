@@ -33,6 +33,8 @@ import torch
 
 from tomography.analysis import pca_coordinates
 from tomography.experiments import p9b_reading
+from tomography.experiments.aggregate import open_finished
+from tomography.experiments.aggregate import read_table
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
@@ -164,20 +166,9 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
             value that is not finite, a zero direction or a sign that is not
             -1 or +1.
     """
-    run_dir = RunDir.open(path)
-    if run_dir.meta.get("finished_at") is None:
-        raise ValueError(f"{path} is not a finished run")
-    if run_dir.meta.get("experiment") != "p9b":
-        raise ValueError(f"{path} is not a P9b run")
-    found = run_dir.config.get("model")
-    if found != model:
-        raise ValueError(f"{path} is a run of {found!r}, not of {model!r}")
-    for name in READING_FILES:
-        if not (run_dir.path / name).is_file():
-            raise ValueError(
-                f"{path} has no {name}: read the full run directory, not an "
-                "export"
-            )
+    run_dir = open_finished(
+        path, model=model, files=READING_FILES, experiment="p9b"
+    )
     config = p9b_reading.Config.from_dict(run_dir.config)
     if config.template != "fewshot":
         raise ValueError(
@@ -190,7 +181,7 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
     summary = cast(dict[str, Any], run_dir.read_json("summary"))
     sidecar = cast(dict[str, Any], run_dir.read_json("transfer"))
     stored = cast(dict[str, Any], run_dir.read_json("readers"))
-    table = cast(dict[str, Any], run_dir.read_json("table"))
+    table = read_table(run_dir, "table")
     types = tuple(summary["types"])
     if tuple(sidecar["types"]) != types or tuple(stored["types"]) != types:
         raise ValueError(f"{path}: the files disagree on the contrasts")
@@ -215,14 +206,11 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
             f"{path}: the arrays do not fit {len(types)} contrasts, "
             f"{config.n_seeds} draws and {len(layers)} layers"
         )
-    rows = {
-        row[0]: dict(zip(table["columns"], row, strict=True))
-        for row in table["rows"]
-    }
+    rows = {row["type"]: row for row in table}
     if tuple(rows) != types:
         raise ValueError(f"{path}: table.json disagrees on the contrasts")
     for column in (*COUNT_COLUMNS, *SURFACE_BASELINES):
-        if column not in table["columns"]:
+        if any(column not in row for row in table):
             raise ValueError(f"{path}: table.json has no column {column!r}")
     for key in ("directions", "means", "signs"):
         if not np.isfinite(readers[key]).all():

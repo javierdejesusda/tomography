@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 import dataclasses
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -18,6 +19,7 @@ from tomography.experiments.aggregate import depth_layer
 from tomography.experiments.aggregate import finished_run
 from tomography.experiments.aggregate import gather_readers
 from tomography.experiments.aggregate import label_stem
+from tomography.experiments.aggregate import open_finished
 from tomography.experiments.aggregate import oriented
 from tomography.experiments.aggregate import out_root_of
 from tomography.experiments.aggregate import read_curves
@@ -77,6 +79,43 @@ def test_finished_run_rejects_an_unfinished_run(tmp_path: Path) -> None:
     run_dir = _run(tmp_path, "r1", finished=False)
     with pytest.raises(ValueError, match="is not a finished run"):
         finished_run(run_dir.path)
+
+
+def test_open_finished_opens_a_finished_run_that_holds_the_files(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run(tmp_path, "r1")
+    run_dir.write_json("summary", {})
+
+    opened = open_finished(
+        run_dir.path, model=MODEL, files=["summary.json"], experiment="r1"
+    )
+
+    assert opened.path == run_dir.path
+    assert open_finished(run_dir.path, model=MODEL, files=[]).path == (
+        run_dir.path
+    )
+
+
+@pytest.mark.parametrize(
+    ("finished", "asked", "match"),
+    [
+        (False, {}, "is not a finished run"),
+        (True, {"model": "other"}, "a run of 'tiny', not of 'other'"),
+        (True, {"experiment": "p9b"}, "experiment 'r1', not 'p9b'"),
+        (True, {"files": ["readers.npz"]}, "no readers.npz: read the full run"),
+    ],
+    ids=["unfinished", "model", "experiment", "file"],
+)
+def test_open_finished_refuses_a_run_that_cannot_feed_a_study(
+    tmp_path: Path, finished: bool, asked: dict[str, Any], match: str
+) -> None:
+    run_dir = _run(tmp_path, "r1", finished=finished)
+    run_dir.write_json("summary", {})
+    settings: dict[str, Any] = {"model": MODEL, "files": ["summary.json"]}
+
+    with pytest.raises(ValueError, match=match):
+        open_finished(run_dir.path, **(settings | asked))
 
 
 def test_default_run_finds_the_default_config_run(tmp_path: Path) -> None:

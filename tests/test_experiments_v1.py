@@ -219,7 +219,7 @@ def test_load_reading_returns_the_committed_numbers(
     ("name", "change", "match"),
     [
         ("meta.json", {"finished_at": None}, "not a finished run"),
-        ("meta.json", {"experiment": "p9c"}, "not a P9b run"),
+        ("meta.json", {"experiment": "p9c"}, "'p9c', not 'p9b'"),
         ("config.json", {"template": "plain"}, "template"),
         ("config.json", {"methods": ["pca_diff", "logistic"]}, "methods"),
         ("config.json", {"n_seeds": 3}, "draws"),
