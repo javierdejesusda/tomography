@@ -64,8 +64,7 @@ ABSTRACT = (
     "checkpoint, against random-direction controls and, where the wording "
     "leaks the label, text-classifier controls. By the 95 percent interval, a "
     "logistic direction reads utility and morality above its random direction "
-    "on "
-    "every checkpoint and truth on every Qwen3 checkpoint but no GPT-2 "
+    "on every checkpoint and truth on every Qwen3 checkpoint but no GPT-2 "
     "size. The paper's finder is above a random direction for "
     "utility on every Qwen3 checkpoint, where the pairs are matched, but "
     "on fewer for sentiment and truth, where they are unrelated; matching "
@@ -201,11 +200,11 @@ INTRODUCTION = Section(
         "built from published signals such as P(True) "
         "[[cite:kadavath2022language]] ([[sec:controls_method]]). Three "
         "terms recur. The margin is the accuracy of a reader minus that of a "
-        "random direction of the same "
-        "run; the relative depth is a layer index divided by the number of "
-        "layers; and the relative coefficient is the steering strength in "
-        "units of the mean residual norm at the layer. [[fig:teaser]] "
-        "summarises the answers.",
+        "random direction of the same run; the relative depth is a layer "
+        "index divided by the number of layers; and the relative "
+        "coefficient is the steering strength in units of the mean "
+        "residual norm at the layer. [[fig:teaser]] summarises the "
+        "answers.",
         "Our contributions are:",
     ),
     listed=(
@@ -252,8 +251,8 @@ RELATED = Section(
         "probe can succeed because it learns the task rather than reads it, "
         "which control tasks are built to expose [[cite:hewitt2019designing]]"
         "; our controls are a random direction and, where the wording can "
-        "give the label away, a classifier on the text alone. Representation "
-        "engineering "
+        "give the label away, a classifier on the text alone. "
+        "Representation engineering "
         "[[cite:zou2025representationengineeringtopdownapproach]] reads a "
         "concept with the first principal component of differences between "
         "paired activations and compares that finder with others on utility "
