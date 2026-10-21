@@ -84,6 +84,13 @@ COUNT_COLUMNS = (
     "n_positive_test",
     "n_negative_test",
 )
+# How the check figure draws each side, see `_sides_of`: the code, color,
+# marker, alpha and legend label, in the order the points are drawn.
+SIDES = (
+    (-1, style.INK_MUTED, "o", 0.4, "not in the contrast"),
+    (0, style.CATEGORICAL[0], "o", 1.0, "positive side"),
+    (1, style.CATEGORICAL[1], "s", 1.0, "negative side"),
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -559,10 +566,10 @@ def panel_contrasts(names: Iterable[str]) -> dict[str, tuple[str, ...]]:
 
     Returns:
         The contrasts of each panel in the order given, panels in the order
-        entity, question, unknown; a panel without a usable contrast is left
-        out.
+        of `tomography.experiments.p9b_reading.PANELS`; a panel without a
+        usable contrast is left out.
     """
-    panels: dict[str, list[str]] = {"entity": [], "question": [], "unknown": []}
+    panels: dict[str, list[str]] = {panel: [] for panel in p9b_reading.PANELS}
     for name in names:
         panel = panel_of(name)
         if panel != "entity" or name in SHOWN_ENTITY:
@@ -741,7 +748,7 @@ def published_views(
     return PublishedViews(aurocs, projections, uids)
 
 
-def view_layers(reading: CommittedReading, n_layers: int) -> tuple[int, ...]:
+def view_layers(layer: int, n_layers: int) -> tuple[int, ...]:
     """Names the layers the 2D views are drawn at.
 
     Layer 0 is left out: every prompt ends in the same token, so layer 0 at
@@ -751,15 +758,15 @@ def view_layers(reading: CommittedReading, n_layers: int) -> tuple[int, ...]:
     what the model has done with a question before it has read much of it.
 
     Args:
-        reading: The committed P9b run.
+        layer: The layer the P9b run chose.
         n_layers: The number of layers of the model, L.
 
     Returns:
-        Layer 1, the layer the P9b run chose and the last layer, in that
-        order and each once: a run that chose layer 1 or the last layer
-        gets two views and not three.
+        Layer 1, the chosen layer and the last layer, in that order and each
+        once: a run that chose layer 1 or the last layer gets two views and
+        not three.
     """
-    return tuple(dict.fromkeys((1, reading.layer, n_layers)))
+    return tuple(dict.fromkeys((1, layer, n_layers)))
 
 
 def pca_views(
@@ -1117,7 +1124,7 @@ def run_plan(
     test = refit_methods(acts, pools, draws, protocol)
     shuffled = refit_shuffled(acts, pools, draws, protocol, seed=config.seed)
     views = published_views(reading, acts, pools, cap=MAX_DISPLAYED)
-    layers = view_layers(reading, loaded.n_layers)
+    layers = view_layers(reading.layer, loaded.n_layers)
     run_dir.write_arrays(
         "pca2d",
         **pca_views(acts, layers, panel_uids),
@@ -1278,12 +1285,7 @@ def _scatter(ax: Axes, points: NDArray[Any], sides: NDArray[np.int64]) -> None:
         sides: The side of each point, see `_sides_of`: 0 positive, 1
             negative, -1 not in the contrast, drawn gray.
     """
-    look = {
-        -1: (style.INK_MUTED, "o", 0.4),
-        0: (style.CATEGORICAL[0], "o", 1.0),
-        1: (style.CATEGORICAL[1], "s", 1.0),
-    }
-    for code, (color, marker, alpha) in look.items():
+    for code, color, marker, alpha, _ in SIDES:
         chosen = points[sides == code]
         ax.scatter(
             chosen[:, 0],
@@ -1349,15 +1351,12 @@ def panel_figure(
         axes[0, 0].set_title("two leading components")
         for c, name in enumerate(types, start=1):
             axes[0, c].set_title(name)
+        # The legend names the two sides before the items outside them.
         keys = [
             Line2D(
                 [], [], linestyle="", marker=marker, color=color, label=label
             )
-            for color, marker, label in (
-                (style.CATEGORICAL[0], "o", "positive side"),
-                (style.CATEGORICAL[1], "s", "negative side"),
-                (style.INK_MUTED, "o", "not in the contrast"),
-            )
+            for _, color, marker, _, label in (*SIDES[1:], SIDES[0])
         ]
         fig.legend(handles=keys, loc="outside upper center", ncols=len(keys))
     return fig

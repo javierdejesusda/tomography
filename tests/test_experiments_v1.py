@@ -1548,14 +1548,9 @@ CHOSEN_LAYERS = pytest.mark.parametrize(
     ids=["middle", "first", "last", "only"],
 )
 def test_the_views_are_drawn_at_layer_one_the_chosen_layer_and_the_last(
-    committed: CommittedReading,
-    chosen: int,
-    n_layers: int,
-    want: tuple[int, ...],
+    chosen: int, n_layers: int, want: tuple[int, ...]
 ) -> None:
-    reading = dataclasses.replace(committed, layer=chosen)
-
-    assert view_layers(reading, n_layers) == want
+    assert view_layers(chosen, n_layers) == want
 
 
 def _two_panels(read: Read) -> dict[str, list[str]]:
@@ -1571,7 +1566,7 @@ def test_pca_views_fit_each_panel_on_its_own_items(
 ) -> None:
     read = _read(tiny_arch, inputs, layer=2)
     panels = _two_panels(read)
-    layers = view_layers(read.committed, tiny_arch.n_layers)
+    layers = view_layers(read.committed.layer, tiny_arch.n_layers)
 
     arrays = pca_views(read.acts, layers, panels)
 
@@ -1600,7 +1595,7 @@ def test_pca_views_ignore_the_items_a_panel_does_not_show(
 ) -> None:
     read = _read(tiny_arch, inputs, layer=2)
     panels = _two_panels(read)
-    layers = view_layers(read.committed, tiny_arch.n_layers)
+    layers = view_layers(read.committed.layer, tiny_arch.n_layers)
     shown = {uid for uids in panels.values() for uid in uids}
     hidden = next(
         row for row, uid in enumerate(read.acts.uids) if uid not in shown
@@ -1620,7 +1615,7 @@ def test_pca_views_refuse_an_item_without_activations(
     tiny_arch: LoadedModel, inputs: Inputs
 ) -> None:
     read = _read(tiny_arch, inputs)
-    layers = view_layers(read.committed, tiny_arch.n_layers)
+    layers = view_layers(read.committed.layer, tiny_arch.n_layers)
 
     with pytest.raises(ValueError, match="no activations for 'ghost:1'"):
         pca_views(read.acts, layers, {"entity": ["ghost:1"]})
@@ -1787,7 +1782,7 @@ def test_supervised_views_set_the_published_projection_against_the_rest(
     committed = read.committed
     panels = _two_panels(read)
     shown = panel_contrasts(read.pools)
-    layers = view_layers(committed, tiny_arch.n_layers)
+    layers = view_layers(committed.layer, tiny_arch.n_layers)
 
     arrays = supervised_views(committed, read.acts, layers, panels, shown)
 
@@ -1827,7 +1822,7 @@ def test_supervised_x_is_the_projection_the_run_publishes(
     committed = read.committed
     panels = _two_panels(read)
     shown = panel_contrasts(read.pools)
-    layers = view_layers(committed, tiny_arch.n_layers)
+    layers = view_layers(committed.layer, tiny_arch.n_layers)
     arrays = supervised_views(committed, read.acts, layers, panels, shown)
     at = layers.index(committed.layer)
     own = displayed_uids(read.pools, cap=4)
