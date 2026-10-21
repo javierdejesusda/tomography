@@ -585,7 +585,7 @@ def panel_union(
     Args:
         contrasts: The contrasts of the panel, see `panel_contrasts`.
         uids: The displayed uids of each side of each contrast, see
-            `PublishedViews`.
+            `displayed_uids`.
 
     Returns:
         The uids of the contrasts in order, the positive side before the
@@ -597,6 +597,19 @@ def panel_union(
         for side in ("positive", "negative"):
             shown.update(dict.fromkeys(uids[name][side]))
     return list(shown)
+
+
+@dataclass(frozen=True)
+class Panel:
+    """One panel of the figures.
+
+    Attributes:
+        types: The contrasts it shows, see `panel_contrasts`.
+        uids: The items it places, each once, see `panel_union`.
+    """
+
+    types: tuple[str, ...]
+    uids: tuple[str, ...]
 
 
 def compare_auroc(
@@ -697,37 +710,34 @@ class PublishedViews:
         projections: The scores of the displayed items on the published
             reader at the chosen layer, float32, by `projection_<contrast>`.
             The displayed items of the positive side come first, then those
-            of the negative side, as in `uids`.
-        uids: The uids of the displayed items of each side, by contrast.
+            of the negative side.
     """
 
     auroc: NDArray[np.float64]
     projections: dict[str, NDArray[np.float32]]
-    uids: dict[str, dict[str, list[str]]]
 
 
 def published_views(
     reading: CommittedReading,
     acts: ItemActivations,
     pools: Mapping[str, TypePool],
-    *,
-    cap: int,
+    shown: Mapping[str, Mapping[str, list[str]]],
 ) -> PublishedViews:
     """Scores the test items on the published reader of each contrast.
 
     The readers are the all-pairs ones of `readers.npz`, not refitted. Every
-    test item counts in the AUROC; at most `cap` per side are kept for the
+    test item counts in the AUROC; only the displayed ones are kept for the
     projections.
 
     Args:
         reading: The committed P9b run.
         acts: The activations of the test items, over the layers of the run.
         pools: The usable contrasts.
-        cap: The most displayed items per side of a contrast.
+        shown: The displayed uids of each side of each contrast, see
+            `displayed_uids`.
 
     Returns:
-        The AUROC per layer, the projections at the layer the run chose and
-        the uids of the displayed items.
+        The AUROC per layer and the projections at the layer the run chose.
 
     Raises:
         ValueError: If a test item has no activations.
@@ -735,7 +745,6 @@ def published_views(
     k = reading.layers.index(reading.layer)
     aurocs = np.zeros((len(pools), len(reading.layers)))
     projections: dict[str, NDArray[np.float32]] = {}
-    uids = displayed_uids(pools, cap=cap)
     for t, (name, pool) in enumerate(pools.items()):
         scores, labels = type_scores(reading.readers[t], acts, pool, "test")
         aurocs[t] = auroc(scores, labels)
@@ -743,9 +752,9 @@ def published_views(
         column = {
             item.example.uid: j for j, item in enumerate([*positive, *negative])
         }
-        order = [column[uid] for side in uids[name].values() for uid in side]
+        order = [column[uid] for side in shown[name].values() for uid in side]
         projections[f"projection_{name}"] = scores[k, order]
-    return PublishedViews(aurocs, projections, uids)
+    return PublishedViews(aurocs, projections)
 
 
 def view_layers(layer: int, n_layers: int) -> tuple[int, ...]:
@@ -848,8 +857,7 @@ def supervised_views(
     reading: CommittedReading,
     acts: ItemActivations,
     layers: Sequence[int],
-    panels: Mapping[str, Sequence[str]],
-    contrasts: Mapping[str, Sequence[str]],
+    panels: Mapping[str, Panel],
 ) -> dict[str, NDArray[np.float32]]:
     """Sets the published reader of each contrast against the rest.
 
@@ -863,8 +871,7 @@ def supervised_views(
         reading: The committed P9b run, which holds the published readers.
         acts: The activations of at least the items of the panels.
         layers: The layers to draw, see `view_layers`.
-        panels: The uids each panel shows, see `panel_union`.
-        contrasts: The contrasts each panel shows, see `panel_contrasts`.
+        panels: The panels of the figures, see `Panel`.
 
     Returns:
         For each shown contrast, `supervised_<contrast>` of shape (V, n, 2)
@@ -877,9 +884,9 @@ def supervised_views(
     ks = [acts.layers.index(layer) for layer in layers]
     reader_ks = [reading.layers.index(layer) for layer in layers]
     arrays: dict[str, NDArray[np.float32]] = {}
-    for panel, names in contrasts.items():
-        h = acts.data[np.ix_(ks, acts.rows_of(panels[panel]))]
-        for name in names:
+    for panel in panels.values():
+        h = acts.data[np.ix_(ks, acts.rows_of(panel.uids))]
+        for name in panel.types:
             t = reading.types.index(name)
             reader = RepReader.from_arrays(
                 reading.config.methods[0],
@@ -990,8 +997,9 @@ class Plan:
             `select_items`.
         surface: The recomputed surface controls beside the committed ones,
             see `compare_surface`.
-        panels: The contrasts and the uids of the items each panel of the
-            figures shows, see `panel_union`.
+        shown: The uids of the displayed items of each side of each
+            contrast, at most `MAX_DISPLAYED`, see `displayed_uids`.
+        panels: The panels of the figures, see `Panel`.
         text: The text-only view of each panel, see `text_views`.
     """
 
@@ -999,7 +1007,8 @@ class Plan:
     draws: dict[str, list[TrainDraw]]
     selected: list[LabeledItem]
     surface: dict[str, dict[str, dict[str, Any]]]
-    panels: dict[str, dict[str, Any]]
+    shown: dict[str, dict[str, list[str]]]
+    panels: dict[str, Panel]
     text: dict[str, NDArray[Any]]
 
 
@@ -1037,8 +1046,8 @@ def prepare(
     draws = train_draws(pools, reading.config)
     shown = displayed_uids(pools, cap=MAX_DISPLAYED)
     panels = {
-        panel: {"types": list(types), "uids": panel_union(types, shown)}
-        for panel, types in panel_contrasts(pools).items()
+        name: Panel(types, tuple(panel_union(types, shown)))
+        for name, types in panel_contrasts(pools).items()
     }
     questions = {
         item.example.uid: item.example.question
@@ -1047,10 +1056,18 @@ def prepare(
     }
     text = text_views(
         questions,
-        {name: panel["uids"] for name, panel in panels.items()},
+        {name: panel.uids for name, panel in panels.items()},
         seed=config.seed,
     )
-    return Plan(pools, draws, select_items(pools, draws), surface, panels, text)
+    return Plan(
+        pools,
+        draws,
+        select_items(pools, draws),
+        surface,
+        shown,
+        panels,
+        text,
+    )
 
 
 def run_plan(
@@ -1108,8 +1125,6 @@ def run_plan(
     check_model(reading, loaded)
     protocol = reading.config
     pools, draws, selected = plan.pools, plan.draws, plan.selected
-    panels = plan.panels
-    panel_uids = {name: panel["uids"] for name, panel in panels.items()}
     template = p9_template(protocol.template, DEFAULT_SHOTS[: protocol.n_shots])
     acts = collect_item_activations(
         loaded,
@@ -1123,18 +1138,16 @@ def run_plan(
     )
     test = refit_methods(acts, pools, draws, protocol)
     shuffled = refit_shuffled(acts, pools, draws, protocol, seed=config.seed)
-    views = published_views(reading, acts, pools, cap=MAX_DISPLAYED)
+    views = published_views(reading, acts, pools, plan.shown)
     layers = view_layers(reading.layer, loaded.n_layers)
     run_dir.write_arrays(
         "pca2d",
-        **pca_views(acts, layers, panel_uids),
-        **supervised_views(
-            reading,
+        **pca_views(
             acts,
             layers,
-            panel_uids,
-            {name: panel["types"] for name, panel in panels.items()},
+            {name: panel.uids for name, panel in plan.panels.items()},
         ),
+        **supervised_views(reading, acts, layers, plan.panels),
     )
     run_dir.write_arrays("text2d", **plan.text)
     run_dir.write_arrays(
@@ -1151,8 +1164,11 @@ def run_plan(
             "types": list(pools),
             "methods": list(protocol.methods),
             "max_per_side": MAX_DISPLAYED,
-            "uids": views.uids,
-            "panels": panels,
+            "uids": plan.shown,
+            "panels": {
+                name: dataclasses.asdict(panel)
+                for name, panel in plan.panels.items()
+            },
         },
     )
     splits = Counter(item.example.split for item in selected)
@@ -1170,11 +1186,8 @@ def run_plan(
             "views": {
                 "layers": list(layers),
                 "panels": {
-                    name: {
-                        "types": panel["types"],
-                        "n_items": len(panel["uids"]),
-                    }
-                    for name, panel in panels.items()
+                    name: {"types": panel.types, "n_items": len(panel.uids)}
+                    for name, panel in plan.panels.items()
                 },
             },
             "reproduction": compare_auroc(

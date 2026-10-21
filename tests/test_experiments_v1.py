@@ -27,6 +27,7 @@ from tomography.experiments.v1_knowledge_views import MAX_DISPLAYED
 from tomography.experiments.v1_knowledge_views import READING_FILES
 from tomography.experiments.v1_knowledge_views import CommittedReading
 from tomography.experiments.v1_knowledge_views import Config
+from tomography.experiments.v1_knowledge_views import Panel
 from tomography.experiments.v1_knowledge_views import Plan
 from tomography.experiments.v1_knowledge_views import check_labels_run
 from tomography.experiments.v1_knowledge_views import check_model
@@ -870,11 +871,12 @@ def test_published_views_score_the_displayed_items_on_the_published_reader(
     committed = read.committed
     k = committed.layers.index(committed.layer)
 
-    views = published_views(committed, read.acts, read.pools, cap=3)
+    shown = displayed_uids(read.pools, cap=3)
+
+    views = published_views(committed, read.acts, read.pools, shown)
 
     assert views.auroc.shape == (len(USABLE), tiny_arch.n_layers)
     assert list(views.projections) == [f"projection_{n}" for n in USABLE]
-    assert list(views.uids) == USABLE
     for t, (name, pool) in enumerate(read.pools.items()):
         reader = RepReader.from_arrays(
             committed.config.methods[0],
@@ -886,33 +888,33 @@ def test_published_views_score_the_displayed_items_on_the_published_reader(
         np.testing.assert_array_equal(
             views.auroc[t], type_auroc(reader, read.acts, pool, "test")
         )
-        positive, negative = pool.split("test")
-        shown = {
-            "positive": displayed_items(positive, cap=3),
-            "negative": displayed_items(negative, cap=3),
-        }
-        assert views.uids[name] == {
-            side: [i.example.uid for i in items]
-            for side, items in shown.items()
-        }
-        rows = read.acts.rows([*shown["positive"], *shown["negative"]])
+        rows = read.acts.rows_of(
+            [*shown[name]["positive"], *shown[name]["negative"]]
+        )
         want = reader.score(read.acts.data[:, rows])[k]
         projection = views.projections[f"projection_{name}"]
         assert projection.dtype == np.float32
         np.testing.assert_array_equal(projection, want)
 
 
-def test_published_views_cap_each_side_not_the_contrast(
-    tiny_arch: LoadedModel, inputs: Inputs
+def test_displayed_uids_cap_each_side_of_the_test_items(
+    pools: dict[str, TypePool],
 ) -> None:
-    read = _read(tiny_arch, inputs)
+    shown = displayed_uids(pools, cap=2)
 
-    views = published_views(read.committed, read.acts, read.pools, cap=2)
-
-    for name, sides in views.uids.items():
-        assert len(sides["positive"]) == 2, name
-        assert len(sides["negative"]) == 2, name
-        assert views.projections[f"projection_{name}"].shape == (4,)
+    assert list(shown) == USABLE
+    for name, pool in pools.items():
+        positive, negative = pool.split("test")
+        assert shown[name] == {
+            "positive": [
+                i.example.uid for i in displayed_items(positive, cap=2)
+            ],
+            "negative": [
+                i.example.uid for i in displayed_items(negative, cap=2)
+            ],
+        }
+        assert len(shown[name]["positive"]) == 2, name
+        assert len(shown[name]["negative"]) == 2, name
 
 
 @dataclasses.dataclass
@@ -1264,13 +1266,14 @@ def test_the_published_reader_and_its_projections_are_written(
 
     assert captured.acts is not None
     reads = captured.acts
-    views = published_views(committed, reads, pools, cap=MAX_DISPLAYED)
+    shown = displayed_uids(pools, cap=MAX_DISPLAYED)
+    views = published_views(committed, reads, pools, shown)
     arrays = run_dir.read_arrays("projections")
     np.testing.assert_array_equal(arrays["published"], views.auroc)
     for key, projection in views.projections.items():
         np.testing.assert_array_equal(arrays[key], projection)
     sidecar = _sidecar(run_dir)
-    assert sidecar["uids"] == views.uids
+    assert sidecar["uids"] == shown
 
 
 def test_the_shuffled_control_is_written_beside_the_methods(
@@ -1553,19 +1556,23 @@ def test_the_views_are_drawn_at_layer_one_the_chosen_layer_and_the_last(
     assert view_layers(chosen, n_layers) == want
 
 
-def _two_panels(read: Read) -> dict[str, list[str]]:
+def _two_panels(read: Read) -> dict[str, Panel]:
     shown = displayed_uids(read.pools, cap=4)
     return {
-        panel: panel_union(types, shown)
+        panel: Panel(types, tuple(panel_union(types, shown)))
         for panel, types in panel_contrasts(read.pools).items()
     }
+
+
+def _panel_uids(read: Read) -> dict[str, tuple[str, ...]]:
+    return {name: panel.uids for name, panel in _two_panels(read).items()}
 
 
 def test_pca_views_fit_each_panel_on_its_own_items(
     tiny_arch: LoadedModel, inputs: Inputs
 ) -> None:
     read = _read(tiny_arch, inputs, layer=2)
-    panels = _two_panels(read)
+    panels = _panel_uids(read)
     layers = view_layers(read.committed.layer, tiny_arch.n_layers)
 
     arrays = pca_views(read.acts, layers, panels)
@@ -1594,7 +1601,7 @@ def test_pca_views_ignore_the_items_a_panel_does_not_show(
     tiny_arch: LoadedModel, inputs: Inputs
 ) -> None:
     read = _read(tiny_arch, inputs, layer=2)
-    panels = _two_panels(read)
+    panels = _panel_uids(read)
     layers = view_layers(read.committed.layer, tiny_arch.n_layers)
     shown = {uid for uids in panels.values() for uid in uids}
     hidden = next(
@@ -1703,16 +1710,6 @@ def test_the_summary_names_the_views_and_the_items_they_show(
     }
 
 
-def test_displayed_uids_are_those_the_published_views_show(
-    tiny_arch: LoadedModel, inputs: Inputs
-) -> None:
-    read = _read(tiny_arch, inputs)
-
-    views = published_views(read.committed, read.acts, read.pools, cap=3)
-
-    assert displayed_uids(read.pools, cap=3) == views.uids
-
-
 def _orthogonal_columns(n: int, k: int, seed: int) -> np.ndarray:
     """Centered columns that are orthonormal, so every variance is planted."""
     rng = np.random.default_rng(seed)
@@ -1781,18 +1778,19 @@ def test_supervised_views_set_the_published_projection_against_the_rest(
     read = _read(tiny_arch, inputs, layer=2)
     committed = read.committed
     panels = _two_panels(read)
-    shown = panel_contrasts(read.pools)
     layers = view_layers(committed.layer, tiny_arch.n_layers)
 
-    arrays = supervised_views(committed, read.acts, layers, panels, shown)
+    arrays = supervised_views(committed, read.acts, layers, panels)
 
     assert set(arrays) == {
-        f"supervised_{name}" for names in shown.values() for name in names
+        f"supervised_{name}"
+        for panel in panels.values()
+        for name in panel.types
     }
     index = {uid: row for row, uid in enumerate(read.acts.uids)}
-    for panel, names in shown.items():
-        rows = [index[uid] for uid in panels[panel]]
-        for name in names:
+    for panel in panels.values():
+        rows = [index[uid] for uid in panel.uids]
+        for name in panel.types:
             t = list(committed.types).index(name)
             view = arrays[f"supervised_{name}"]
             assert view.shape == (3, len(rows), 2)
@@ -1821,17 +1819,16 @@ def test_supervised_x_is_the_projection_the_run_publishes(
     read = _read(tiny_arch, inputs, layer=2)
     committed = read.committed
     panels = _two_panels(read)
-    shown = panel_contrasts(read.pools)
     layers = view_layers(committed.layer, tiny_arch.n_layers)
-    arrays = supervised_views(committed, read.acts, layers, panels, shown)
+    arrays = supervised_views(committed, read.acts, layers, panels)
     at = layers.index(committed.layer)
     own = displayed_uids(read.pools, cap=4)
-    published = published_views(committed, read.acts, read.pools, cap=4)
+    published = published_views(committed, read.acts, read.pools, own)
 
-    for panel, names in shown.items():
-        for name in names:
+    for panel in panels.values():
+        for name in panel.types:
             uids = [*own[name]["positive"], *own[name]["negative"]]
-            places = [panels[panel].index(uid) for uid in uids]
+            places = [panel.uids.index(uid) for uid in uids]
             chosen = arrays[f"supervised_{name}"][at, places, 0]
             np.testing.assert_allclose(
                 chosen, published.projections[f"projection_{name}"], rtol=1e-5
