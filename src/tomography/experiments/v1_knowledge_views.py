@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 import dataclasses
 from dataclasses import dataclass
+import gc
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -1093,7 +1094,9 @@ def run_plan(
     Args:
         config: The experiment settings.
         run_dir: The run to write into.
-        loaded: The wrapped model.
+        loaded: The wrapped model. Its reference is dropped once the
+            activations are extracted, so the refits and the views do not
+            hold the model when the caller holds no other reference.
         plan: The checked inputs, see `prepare`.
         reading: The committed P9b run, see `load_reading`.
 
@@ -1115,10 +1118,15 @@ def run_plan(
         batch_size=config.batch_size,
         share_prefix=True,
     )
+    n_layers, dtype = loaded.n_layers, loaded.dtype
+    del loaded
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     test = refit_methods(acts, pools, draws, protocol)
     shuffled = refit_shuffled(acts, pools, draws, protocol, seed=config.seed)
     views = published_views(reading, acts, pools, plan.shown)
-    layers = view_layers(reading.layer, loaded.n_layers)
+    layers = view_layers(reading.layer, n_layers)
     run_dir.write_arrays(
         "pca2d",
         **pca_views(
@@ -1160,7 +1168,7 @@ def run_plan(
             "methods": list(protocol.methods),
             "types": list(pools),
             "n_items": {"train": splits["train"], "test": splits["test"]},
-            "extraction_dtype": str(loaded.dtype).removeprefix("torch."),
+            "extraction_dtype": str(dtype).removeprefix("torch."),
             "reading_run_dtype": registered.dtype if registered else None,
             "views": {
                 "layers": list(layers),
@@ -1239,8 +1247,15 @@ def run(config: Config, run_dir: RunDir) -> None:
         known_contrasts=bool(labels["known_contrasts"]),
         reading=reading,
     )
-    loaded = load_model(config.model, dtype=torch.float32)
-    run_plan(config, run_dir, loaded, plan, reading)
+    # Not bound to a name here, so run_plan holds the one reference and the
+    # model is freed once the activations are extracted.
+    run_plan(
+        config,
+        run_dir,
+        load_model(config.model, dtype=torch.float32),
+        plan,
+        reading,
+    )
 
 
 def _sides_of(

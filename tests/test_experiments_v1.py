@@ -1,6 +1,7 @@
 """Tests for the knowledge views experiment."""
 
 from collections.abc import Callable
+import copy
 import dataclasses
 import hashlib
 import json
@@ -8,6 +9,7 @@ from pathlib import Path
 import runpy
 import shutil
 from typing import Any
+import weakref
 
 from matplotlib.figure import Figure
 from matplotlib.text import Text
@@ -1366,6 +1368,36 @@ def test_run_loads_the_model_in_float32_on_the_default_device(
     assert asked == [("tiny", {"dtype": torch.float32})]
     assert _summary(run_dir)["types"] == USABLE
     assert (run_dir.path / "projections.npz").is_file()
+
+
+def test_run_lets_the_model_go_before_the_refits(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    models: list[weakref.ref[torch.nn.Module]] = []
+    alive: list[bool] = []
+    refit = v1_module.refit_methods
+
+    def fake_load(name: str, **kwargs: Any) -> LoadedModel:
+        fresh = copy.deepcopy(tiny_arch)
+        models.append(weakref.ref(fresh.model))
+        return fresh
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        alive.append(models[0]() is not None)
+        return refit(*args, **kwargs)
+
+    monkeypatch.setattr(v1_module, "load_model", fake_load)
+    monkeypatch.setattr(v1_module, "refit_methods", spy)
+    config = _config(inputs)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    run(config, run_dir)
+
+    assert alive == [False]
+    assert _summary(run_dir)["extraction_dtype"] == "float32"
 
 
 def test_run_refuses_an_unfinished_labels_run(
