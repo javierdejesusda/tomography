@@ -42,12 +42,13 @@ class Cell:
     """One checkpoint on one row.
 
     Attributes:
-        margin: Direction minus baseline.
+        margin: Direction minus the comparison value.
         lo: Lower end of the 95 percent interval of the margin; equal to
             the margin on the steering row, which stores no interval.
         hi: Upper end of the 95 percent interval of the margin; equal to
             the margin on the steering row.
-        baseline: The baseline value the margin is measured from.
+        comparison: The value of the control or baseline the margin is
+            measured from.
         n: Items the margin is read from, or None when the interval is
             stored.
     """
@@ -55,7 +56,7 @@ class Cell:
     margin: float
     lo: float
     hi: float
-    baseline: float
+    comparison: float
     n: int | None
 
 
@@ -104,10 +105,10 @@ BLOCKS = (
 
 
 def _from_scores(
-    accuracy: float, baseline: float, n: int, n_baseline: int | None = None
+    accuracy: float, comparison: float, n: int, n_comparison: int | None = None
 ) -> Cell:
-    margin, lo, hi = stats.diff_interval(accuracy, baseline, n, n_baseline)
-    return Cell(margin, lo, hi, baseline, n)
+    margin, lo, hi = stats.diff_interval(accuracy, comparison, n, n_comparison)
+    return Cell(margin, lo, hi, comparison, n)
 
 
 def _read(manifest: Manifest, exp: str, model: str) -> Cell | None:
@@ -527,13 +528,13 @@ DETAIL = (
 
 
 def _csv(found: dict[str, dict[str, Cell]]) -> str:
-    lines = ["row,model,role,value,lo,hi,baseline,n"]
+    lines = ["row,model,role,value,lo,hi,comparison,n"]
     for row in ROWS:
         for model, c in found[row.key].items():
             n = "" if c.n is None else str(c.n)
             lines.append(
                 f"{row.key},{model},{stats.role(model)},{c.margin:.10g},"
-                f"{c.lo:.10g},{c.hi:.10g},{c.baseline:.10g},{n}"
+                f"{c.lo:.10g},{c.hi:.10g},{c.comparison:.10g},{n}"
             )
     return "\n".join(lines) + "\n"
 

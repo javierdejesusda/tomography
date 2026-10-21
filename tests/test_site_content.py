@@ -1069,7 +1069,10 @@ def test_the_introduction_separates_controls_from_published_baselines() -> None:
     assert "we name its controls" in intro
     assert "The baselines are published methods:" in intro
     assert "logistic regression, mass-mean probes" in intro
-    assert "for knowledge, the output confidence of the model" in intro
+    assert (
+        "for knowledge, model confidence built from published signals such as "
+        "P(True) [[cite:kadavath2022language]]"
+    ) in intro
     assert "[[sec:controls_method]]" in intro
     listed = dict(content.INTRODUCTION.listed)
     assert "Readings against controls ([[sec:method]])." in listed

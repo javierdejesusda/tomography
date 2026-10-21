@@ -254,7 +254,7 @@ def _csv(output: registry.FigureOutput) -> list[dict[str, str]]:
         "value",
         "lo",
         "hi",
-        "baseline",
+        "comparison",
         "n",
     ]
     return [dict(zip(head, line.split(","), strict=True)) for line in lines[1:]]
@@ -270,7 +270,7 @@ def test_every_plotted_value_equals_an_independent_recomputation(
         assert float(rec["value"]) == pytest.approx(value, abs=1e-9)
         assert float(rec["lo"]) == pytest.approx(lo, abs=1e-9)
         assert float(rec["hi"]) == pytest.approx(hi, abs=1e-9)
-        assert float(rec["baseline"]) == pytest.approx(base, abs=1e-9)
+        assert float(rec["comparison"]) == pytest.approx(base, abs=1e-9)
         assert rec["role"] == _role(rec["model"])
 
 

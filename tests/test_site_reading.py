@@ -143,7 +143,7 @@ def _records(output: registry.FigureOutput, panel: str) -> list[dict[str, str]]:
         "y",
         "lo",
         "hi",
-        "baseline",
+        "comparison",
     ]
     rows = [dict(zip(head, line.split(","), strict=True)) for line in lines[1:]]
     return [r for r in rows if r["panel"] == panel]
@@ -160,7 +160,7 @@ def test_every_size_point_is_recomputed_with_its_wilson_interval(
         assert float(rec["y"]) == pytest.approx(acc, abs=1e-9)
         assert float(rec["lo"]) == pytest.approx(lo, abs=1e-9)
         assert float(rec["hi"]) == pytest.approx(hi, abs=1e-9)
-        assert float(rec["baseline"]) == pytest.approx(random, abs=1e-9)
+        assert float(rec["comparison"]) == pytest.approx(random, abs=1e-9)
         assert float(rec["x"]) == params.param_count(rec["model"])
 
 

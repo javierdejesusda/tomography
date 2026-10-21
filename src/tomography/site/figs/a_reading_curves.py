@@ -211,7 +211,7 @@ def _claim(
 
 
 def _csv(found: dict[str, dict[str, Cell]]) -> str:
-    lines = ["panel,concept,model,x,y,lo,hi,baseline"]
+    lines = ["panel,concept,model,x,y,lo,hi,comparison"]
     for concept, _, _ in CONCEPTS:
         for model, cell in found[concept].items():
             for depth, value in zip(

@@ -146,7 +146,7 @@ def _records(output: registry.FigureOutput, panel: str) -> list[dict[str, str]]:
         "y",
         "lo",
         "hi",
-        "baseline",
+        "comparison",
     ]
     rows = [dict(zip(head, line.split(","), strict=True)) for line in lines[1:]]
     return [r for r in rows if r["panel"] == panel]
