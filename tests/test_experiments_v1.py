@@ -204,11 +204,9 @@ def test_load_reading_returns_the_committed_numbers(
     np.testing.assert_array_equal(committed.test, transfer["test"])
     n_types, n_layers = len(USABLE), tiny_arch.n_layers
     assert committed.test.shape == (4, n_types, 2, n_layers)
-    readers = reading.read_arrays("readers")
-    assert committed.directions.shape == (n_types, n_layers, tiny_arch.d_model)
-    np.testing.assert_array_equal(committed.directions, readers["directions"])
-    np.testing.assert_array_equal(committed.means, readers["means"])
-    np.testing.assert_array_equal(committed.signs, readers["signs"])
+    assert len(committed.readers) == n_types
+    for reader in committed.readers:
+        assert reader.directions.shape == (n_layers, tiny_arch.d_model)
     table = reading.read_json("table")
     assert isinstance(table, dict)
     assert list(committed.table) == USABLE
@@ -349,16 +347,18 @@ def test_load_reading_names_the_contrast_of_a_reader_it_refuses(
 
 
 def test_load_reading_holds_the_published_reader_of_each_contrast(
-    committed: CommittedReading,
+    committed: CommittedReading, inputs: Inputs
 ) -> None:
+    readers = inputs.reading.read_arrays("readers")
+
     assert len(committed.readers) == len(USABLE)
     for t, reader in enumerate(committed.readers):
         want = RepReader.from_arrays(
             committed.config.methods[0],
             committed.layers,
-            committed.directions[t],
-            committed.means[t],
-            committed.signs[t],
+            readers["directions"][t],
+            readers["means"][t],
+            readers["signs"][t],
         )
         assert reader.layers == committed.layers
         np.testing.assert_array_equal(reader.directions, want.directions)
@@ -458,7 +458,13 @@ def test_check_model_accepts_the_model_the_run_was_read_with(
     [
         (lambda c: dataclasses.replace(c, layers=c.layers[:2]), "layers"),
         (
-            lambda c: dataclasses.replace(c, directions=c.directions[..., :8]),
+            lambda c: dataclasses.replace(
+                c,
+                readers=tuple(
+                    dataclasses.replace(r, directions=r.directions[:, :8])
+                    for r in c.readers
+                ),
+            ),
             "width",
         ),
     ],
@@ -879,13 +885,7 @@ def test_published_views_score_the_displayed_items_on_the_published_reader(
     assert views.auroc.shape == (len(USABLE), tiny_arch.n_layers)
     assert list(views.projections) == [f"projection_{n}" for n in USABLE]
     for t, (name, pool) in enumerate(read.pools.items()):
-        reader = RepReader.from_arrays(
-            committed.config.methods[0],
-            committed.layers,
-            committed.directions[t],
-            committed.means[t],
-            committed.signs[t],
-        )
+        reader = committed.readers[t]
         np.testing.assert_array_equal(
             views.auroc[t], type_auroc(reader, read.acts, pool, "test")
         )
@@ -1792,25 +1792,17 @@ def test_supervised_views_set_the_published_projection_against_the_rest(
     for panel in panels.values():
         rows = [index[uid] for uid in panel.uids]
         for name in panel.types:
-            t = list(committed.types).index(name)
+            reader = committed.readers[committed.types.index(name)]
+            scores = reader.score(read.acts.data[:, rows])
             view = arrays[f"supervised_{name}"]
             assert view.shape == (3, len(rows), 2)
             assert view.dtype == np.float32
             for v, layer in enumerate(layers):
                 k = committed.layers.index(layer)
-                reader = RepReader.from_arrays(
-                    committed.config.methods[0],
-                    [layer],
-                    committed.directions[t, [k]],
-                    committed.means[t, [k]],
-                    committed.signs[t, [k]],
-                )
                 h = read.acts.data[k][rows]
+                np.testing.assert_array_equal(view[v, :, 0], scores[k])
                 np.testing.assert_array_equal(
-                    view[v, :, 0], reader.score(h[None])[0]
-                )
-                np.testing.assert_array_equal(
-                    view[v, :, 1], residual_axis(h, reader.directions[0])
+                    view[v, :, 1], residual_axis(h, reader.directions[k])
                 )
 
 

@@ -128,17 +128,14 @@ class CommittedReading:
         layer: The layer the run chose, where its numbers are compared.
         types: The contrasts, in the order of the arrays below.
         layers: Layer index of each entry of the last axis of `test` and of
-            the second axis of the readers.
+            the layers of the readers.
         test: Shape (M, T, S, K): the test AUROC of each method, contrast,
             draw and layer, from `transfer.npz`.
         table: The row of each contrast in `table.json`, by column name.
-        directions: Shape (T, K, d): the all-pairs reader of each contrast,
-            fitted by the headline method.
-        means: Shape (T, K, d): the vectors subtracted before projecting.
-        signs: Shape (T, K): the orientation of each layer.
-        readers: The published reader of each contrast, built from the three
-            arrays above when the run is loaded, so one that cannot score
-            is refused before any model work.
+        readers: The published reader of each contrast, the all-pairs one
+            the headline method fitted, built from `readers.npz` when the
+            run is loaded, so one that cannot score is refused before any
+            model work.
     """
 
     config: p9b_reading.Config
@@ -147,9 +144,6 @@ class CommittedReading:
     layers: tuple[int, ...]
     test: NDArray[np.float64]
     table: dict[str, dict[str, Any]]
-    directions: NDArray[np.float32]
-    means: NDArray[np.float32]
-    signs: NDArray[np.float32]
     readers: tuple[RepReader, ...]
 
 
@@ -247,9 +241,6 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
         layers=layers,
         test=test,
         table=rows,
-        directions=readers["directions"],
-        means=readers["means"],
-        signs=readers["signs"],
         readers=tuple(published),
     )
 
@@ -337,10 +328,11 @@ def check_model(reading: CommittedReading, loaded: LoadedModel) -> None:
             f"the P9b run read {len(reading.layers)} layers, this model has "
             f"{loaded.n_layers}"
         )
-    if loaded.d_model != reading.directions.shape[-1]:
+    width = reading.readers[0].directions.shape[-1]
+    if loaded.d_model != width:
         raise ValueError(
-            f"the readers of the P9b run have the width "
-            f"{reading.directions.shape[-1]}, this model has {loaded.d_model}"
+            f"the readers of the P9b run have the width {width}, this model "
+            f"has {loaded.d_model}"
         )
 
 
@@ -864,7 +856,8 @@ def supervised_views(
 
     Args:
         reading: The committed P9b run, which holds the published readers.
-        acts: The activations of at least the items of the panels.
+        acts: The activations of at least the items of the panels, over the
+            layers of the run.
         layers: The layers to draw, see `view_layers`.
         panels: The panels of the figures, see `Panel`.
 
@@ -876,26 +869,15 @@ def supervised_views(
         ValueError: If a panel item has no activations, or the items of a
             panel vary along the direction alone.
     """
-    ks = [acts.layers.index(layer) for layer in layers]
-    reader_ks = [reading.layers.index(layer) for layer in layers]
+    ks = [reading.layers.index(layer) for layer in layers]
     arrays: dict[str, NDArray[np.float32]] = {}
     for panel in panels.values():
-        h = acts.data[np.ix_(ks, acts.rows_of(panel.uids))]
+        h = acts.data[:, acts.rows_of(panel.uids)]
         for name in panel.types:
-            t = reading.types.index(name)
-            reader = RepReader.from_arrays(
-                reading.config.methods[0],
-                layers,
-                reading.directions[t, reader_ks],
-                reading.means[t, reader_ks],
-                reading.signs[t, reader_ks],
-            )
-            x = reader.score(h)
+            reader = reading.readers[reading.types.index(name)]
+            x = reader.score(h)[ks]
             y = np.stack(
-                [
-                    residual_axis(h[v], reader.directions[v])
-                    for v in range(len(ks))
-                ]
+                [residual_axis(h[k], reader.directions[k]) for k in ks]
             )
             arrays[f"supervised_{name}"] = np.stack([x, y], axis=-1)
     return arrays
