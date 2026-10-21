@@ -45,6 +45,7 @@ from tomography.export import ExportError
 from tomography.export import export_runs
 from tomography.export import is_exported
 from tomography.knowledge import DEFAULT_SHOTS
+from tomography.model import MODELS
 from tomography.model import LoadedModel
 from tomography.p9.reading import READING_METHODS
 from tomography.p9.reading import SURFACE_BASELINES
@@ -1205,11 +1206,15 @@ def test_the_summary_records_the_run(
         "methods",
         "types",
         "n_items",
+        "extraction_dtype",
+        "reading_run_dtype",
         "reproduction",
         "surface",
         "surface_equal",
     }
     assert summary["layer"] == committed.layer
+    assert summary["extraction_dtype"] == "float32"
+    assert summary["reading_run_dtype"] is None
     assert summary["template"] == "fewshot"
     assert summary["methods"] == list(READING_METHODS)
     assert summary["types"] == USABLE
@@ -1227,6 +1232,22 @@ def test_the_summary_records_the_run(
     }
     assert list(summary["surface"]) == USABLE
     assert summary["surface_equal"] is True
+
+
+def test_the_summary_names_the_dtype_of_this_run_and_of_the_reading_run(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = dataclasses.replace(MODELS["gpt2"], key="tiny", dtype="bfloat16")
+    monkeypatch.setattr(v1_module, "MODELS", {"tiny": spec})
+    half = dataclasses.replace(tiny_arch, dtype=torch.float16)
+
+    summary = _summary(_execute(half, tmp_path, inputs))
+
+    assert summary["extraction_dtype"] == "float16"
+    assert summary["reading_run_dtype"] == "bfloat16"
 
 
 def test_the_recomputed_auroc_is_the_committed_one_on_the_same_activations(

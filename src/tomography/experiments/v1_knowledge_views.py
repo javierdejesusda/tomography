@@ -29,6 +29,7 @@ from tomography.experiments.base import derive_seed
 from tomography.experiments.p9a_labels import load_labeled
 from tomography.experiments.sweep import chat_format_for
 from tomography.knowledge import DEFAULT_SHOTS
+from tomography.model import MODELS
 from tomography.model import LoadedModel
 from tomography.model import load_model
 from tomography.p9.pool import LabeledItem
@@ -748,7 +749,11 @@ def run_plan(
     `projections.json`: the contrasts, the methods and the uids of the
     displayed items of each side (at most `MAX_DISPLAYED`, by ascending
     SHA-256 of the uid; no question text). Writes `summary`: the layer, the
-    number of items extracted, the comparison with the committed AUROC
+    number of items extracted, the dtype of this run (`extraction_dtype`, that
+    of the loaded model) and the one the P9b run was extracted in
+    (`reading_run_dtype`, the registry default of the model, since that run
+    loaded it with no dtype; None for a model outside the registry), the
+    comparison with the committed AUROC
     (`reproduction`, see `compare_auroc`) and with the committed surface
     controls (`surface`, see `compare_surface`). A difference is reported,
     never raised.
@@ -799,6 +804,7 @@ def run_plan(
         },
     )
     splits = Counter(item.example.split for item in selected)
+    registered = MODELS.get(config.model)
     run_dir.write_json(
         "summary",
         {
@@ -807,6 +813,8 @@ def run_plan(
             "methods": list(protocol.methods),
             "types": list(pools),
             "n_items": {"train": splits["train"], "test": splits["test"]},
+            "extraction_dtype": str(loaded.dtype).removeprefix("torch."),
+            "reading_run_dtype": registered.dtype if registered else None,
             "reproduction": compare_auroc(
                 test,
                 reading.test,
