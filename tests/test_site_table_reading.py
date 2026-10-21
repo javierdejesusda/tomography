@@ -239,7 +239,7 @@ def test_the_baseline_numbers_and_the_interval_flags(
     assert above == {"sentiment", "utility"}
 
 
-def test_the_caption_defines_the_baseline_rows(
+def test_the_caption_defines_the_text_control_rows(
     output: registry.TableOutput,
 ) -> None:
     text = output.detail
@@ -247,7 +247,8 @@ def test_the_caption_defines_the_baseline_rows(
     assert "20 for the held-out sentiment split and 10 for the others" in text
     assert "sampling of the test pairs only" in text
     assert "true and false labels of the facts" in text
-    assert "baseline for the transfer pairs only" in text
+    assert "control for the transfer pairs only" in text
+    assert "The honesty control is a classifier" in text
     assert not any(ch in text for ch in DASHES)
 
 

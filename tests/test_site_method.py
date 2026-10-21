@@ -110,13 +110,14 @@ def test_the_schematic_has_no_rows_and_no_numbers(
     assert not any(ch.isdigit() for ch in output.claim)
 
 
-def test_the_caption_describes_the_pairwise_read_and_the_baseline(
+def test_the_caption_describes_the_pairwise_read_and_the_control(
     output: registry.FigureOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
     assert "positive member projects higher" in text
     assert "constant score sits at 0.5" in text
     assert "oriented on the training pairs" in text
+    assert "is the control of the readings" in text
     assert "illustrative" in text
 
 

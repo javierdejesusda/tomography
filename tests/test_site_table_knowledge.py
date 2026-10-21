@@ -202,6 +202,10 @@ def test_the_added_columns_name_the_confidence_not_one_probability(
     text = output.claim + " " + output.detail
     assert "answer probability" not in text
     assert "confidence of the model, which stacks five output signals" in text
+    assert "P(True) [[cite:kadavath2022language]]" in text
+    assert "the baseline of these columns" in text
+    assert "a supervised logistic-regression probe" in text
+    assert "[[cite:alain2016understanding]]" in text
 
 
 def test_the_table_prints_compact_because_it_overflows_at_the_normal_size(

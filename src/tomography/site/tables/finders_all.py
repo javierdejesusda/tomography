@@ -99,7 +99,11 @@ def build(manifest: Manifest) -> TableOutput:
         "judged more positive than the one steered at "
         f"{cells.MINUS}0.3 by the sentiment judge, with the Wilson "
         "half-width. Three random directions of the same norm are the "
-        "reference arm for the win rate; 0.5 is not."
+        "reference arm for the win rate; 0.5 is not. Mean difference is the "
+        "mass-mean probe [[cite:marks2024geometry]] without whitening and "
+        "logistic regression the linear probe [[cite:alain2016understanding]]; "
+        "both are published baselines for the finder of the paper. The random "
+        "direction is the control."
     )
     return TableOutput(
         claim,

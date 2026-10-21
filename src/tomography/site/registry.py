@@ -41,7 +41,7 @@ class FigureOutput:
         figure: The matplotlib figure, 5.5 in wide.
         claim: One sentence with the finding; every number in it is in
             `numbers`.
-        detail: What is plotted, baselines, and what each interval covers.
+        detail: What is plotted, controls, and what each interval covers.
         numbers: Name to value for each number the claim quotes.
         csv: The exact numbers plotted, as CSV text.
         counts: Name to the per-role count the claim quotes.
@@ -69,7 +69,7 @@ class TableOutput:
 
     Attributes:
         claim: One sentence saying what the table shows.
-        detail: Columns, intervals, baselines and sources.
+        detail: Columns, intervals, controls and sources.
         columns: Column headers.
         rows: Cell text, one list per row.
         align: `l` or `r` for each column.

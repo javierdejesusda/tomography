@@ -204,6 +204,9 @@ def test_the_caption_quotes_every_number_and_the_sample_sizes(
     assert "[[fig:a_finders_gpt2]], [[fig:a_finders_qwen3]]" in text
     assert "[[table:finders_all]]" in text
     assert "random" in text
+    assert "Logistic regression [[cite:alain2016understanding]] is above" in (
+        text
+    )
     assert "of 10 checkpoints" not in text
 
 
@@ -395,3 +398,16 @@ def test_the_largest_random_direction_names_its_checkpoint(
         if finder == "pca_diff"
     )
     assert output.labels["random_max"] == paper.display_name(best[1])
+
+
+def test_the_legend_names_the_published_baseline_and_the_random_control(
+    output: registry.FigureOutput,
+) -> None:
+    (legend,) = output.figure.legends
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert labels == [
+        "logistic regression, published baseline (filled: GPT-2 and base; "
+        "open: post-trained)",
+        "PCA of paired differences (paper), same fill",
+        "random control, test-pair noise",
+    ]

@@ -3,7 +3,7 @@
 Five stages from left to right joined by straight arrows: a pair of inputs,
 the residual stream at the last token, a finder that turns activations into a
 unit direction, a pairwise reading, and steering by addition. A random unit
-direction is drawn as the baseline of the reading. The figure reads no results.
+direction is drawn as the control of the reading. The figure reads no results.
 """
 
 from matplotlib.axes import Axes
@@ -121,7 +121,7 @@ def _finder(ax: Axes) -> None:
         (
             0.30,
             paper.ENC["random_marker"],
-            "random unit\ndirection $u$\n(baseline)",
+            "random unit\ndirection $u$\n(control)",
         ),
     )
     for y, color, text in lines:
@@ -218,7 +218,7 @@ def build(manifest: Manifest) -> FigureOutput:
         "correctly when its positive member projects higher on v, so a "
         "constant score sits at 0.5; steering adds c r v to the residual "
         "stream. A random unit direction, oriented on the training pairs "
-        "like the reader, is the baseline of the readings. The densities in "
+        "like the reader, is the control of the readings. The densities in "
         "the read stage are illustrative."
     )
     return FigureOutput(fig, claim, detail, {}, "")

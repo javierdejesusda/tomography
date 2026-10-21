@@ -101,7 +101,7 @@ def test_no_underscore_or_run_code(output: registry.TableOutput) -> None:
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
 
 
-def test_caption_says_what_the_contrast_is_and_where_the_baseline_is(
+def test_caption_says_what_the_contrast_is_and_where_the_reference_is(
     output: registry.TableOutput,
 ) -> None:
     text = output.detail
@@ -118,4 +118,4 @@ def test_caption_explains_why_table_a3_random_values_do_not_apply(
     text = output.detail
     assert "[[table:reading_full]]" in text
     assert "other runs with their own training sample and layer" in text
-    assert "not a baseline for these accuracies" in text
+    assert "not a control for these accuracies" in text

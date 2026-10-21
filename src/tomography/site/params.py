@@ -119,7 +119,7 @@ DISPLAY = {
     "qwen3-4b": "Qwen3-4B",
     "pca_diff": "PCA of paired differences (paper)",
     "pca_raw": "PCA of activations",
-    "mean_diff": "mean difference",
+    "mean_diff": "mean difference (mass-mean probe)",
     "logistic": "logistic regression",
     "kmeans": "k-means",
     "random": "random direction",

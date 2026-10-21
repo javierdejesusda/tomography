@@ -61,9 +61,10 @@ FRONT_ITEMS = ("fig:teaser",)
 ABSTRACT = (
     "We test representation engineering (Zou et al., 2023) on four GPT-2 "
     "and three Qwen3 sizes, each as base and post-trained "
-    "checkpoint, against random directions and, where the wording leaks the "
-    "label, text classifiers. By the 95 percent interval, a logistic "
-    "direction reads utility and morality above its random direction on "
+    "checkpoint, against random-direction controls and, where the wording "
+    "leaks the label, text-classifier controls. By the 95 percent interval, a "
+    "logistic direction reads utility and morality above its random direction "
+    "on "
     "every checkpoint and truth on every Qwen3 checkpoint but no GPT-2 "
     "size. The paper's finder is above a random direction for "
     "utility on every Qwen3 checkpoint, where the pairs are matched, but "
@@ -190,14 +191,16 @@ INTRODUCTION = Section(
         "post-trained checkpoint. Our readers are logistic regression "
         "unless a figure names the finder of the paper, because that finder "
         "is above a random direction by its interval for only some concepts "
-        "and roles ([[sec:finders]]). For each question we name the "
-        "baseline that could produce the result without the direction: a "
-        "random direction fitted with the same procedure, a classifier on "
-        "the text (for the readings, TruthfulQA, knowledge and approximate "
-        "answers, where the wording can give the label away), the "
-        "popularity of the subject, or the confidence of the model. Three "
-        "terms recur. The margin is the "
-        "accuracy of a reader minus that of a random direction of the same "
+        "and roles ([[sec:finders]]). For each question we name its "
+        "controls, which use no direction fitted for the concept: a random "
+        "direction oriented like the reader, a classifier on the text (for "
+        "the readings, TruthfulQA, knowledge and approximate answers, where "
+        "the wording can give the label away) and the popularity of the "
+        "subject. The baselines are published methods: logistic "
+        "regression, mass-mean probes and, for knowledge, the output "
+        "confidence of the model ([[sec:controls_method]]). Three terms "
+        "recur. The margin is the accuracy of a reader minus that of a "
+        "random direction of the same "
         "run; the relative depth is a layer index divided by the number of "
         "layers; and the relative coefficient is the steering strength in "
         "units of the mean residual norm at the layer. [[fig:teaser]] "
@@ -206,17 +209,17 @@ INTRODUCTION = Section(
     ),
     listed=(
         (
-            "Baseline-relative readings ([[sec:method]]).",
+            "Readings against controls ([[sec:method]]).",
             "Every reading is reported against a random direction fitted "
             "with the same procedure and, where the wording can give the "
-            "label away, against a text baseline, with counts per role and "
+            "label away, against a text control, with counts per role and "
             "never pooled.",
         ),
         (
             "A test of the finder ([[sec:finders]]).",
-            "The finder of the paper is compared with logistic regression "
-            "on matched pairs (utility) and on unrelated pairs (sentiment "
-            "and truth).",
+            "The finder of the paper is compared with the logistic-"
+            "regression baseline on matched pairs (utility) and on unrelated "
+            "pairs (sentiment and truth).",
         ),
         (
             "Two families, base and post-trained ([[sec:base_post]]).",
@@ -247,9 +250,9 @@ RELATED = Section(
         "probing [[cite:alain2016understanding,belinkov2022probing]]. A "
         "probe can succeed because it learns the task rather than reads it, "
         "which control tasks are built to expose [[cite:hewitt2019designing]]"
-        "; our control is a random direction fitted with the same "
-        "orientation rule and, where the wording can give the label away, a "
-        "classifier on the text alone. Representation engineering "
+        "; our controls are a random direction and, where the wording can "
+        "give the label away, a classifier on the text alone. Representation "
+        "engineering "
         "[[cite:zou2025representationengineeringtopdownapproach]] reads a "
         "concept with the first principal component of differences between "
         "paired activations and compares that finder with others on utility "
@@ -352,16 +355,16 @@ METHOD = Section(
                 "[[cite:marks2024geometry]]. TruthfulQA "
                 "[[cite:lin2022truthfulqa]], PopQA [[cite:mallen2023when]] "
                 "and Wikidata quantities [[cite:vrandecic2014wikidata]] give "
-                "the question sets of the baselines, the knowledge "
-                "directions and the approximate answers; generated text is "
+                "the questions of the TruthfulQA, knowledge and "
+                "approximate-answer readings; generated text is "
                 "scored by the positive-class probability of SiEBERT "
                 "[[cite:hartmann2023more]]. Datasets, judges and revisions "
                 "are in [[table:assets]].",
             ),
         ),
         Section(
-            "baselines_method",
-            "Baselines",
+            "controls_method",
+            "Controls and baselines",
             paragraphs=(
                 "Every reading run also scores random unit directions u("
                 + ELL
@@ -383,10 +386,15 @@ METHOD = Section(
                 "words and on the characters of the input, fitted on the "
                 "same training items without the model ([[table:reading]] "
                 "gives them as words alone); for knowledge we "
-                "add the popularity of the subject, its monthly Wikipedia "
-                "page views, and the confidence of the model, which stacks "
-                "five output signals. The steering comparisons use three "
-                "random directions of the same norm.",
+                "add the popularity of the subject. The steering comparisons "
+                "use three random directions of the same norm.",
+                "Beside the finder of the paper we run logistic regression, "
+                "a linear probe [[cite:alain2016understanding]], and the "
+                "mean difference, the mass-mean probe "
+                "[[cite:marks2024geometry]] ([[table:finders_all]]); for "
+                "knowledge the baseline is the confidence of the model, which "
+                "stacks five output signals, among them P(True) "
+                "[[cite:kadavath2022language]].",
             ),
         ),
         Section(
@@ -654,11 +662,11 @@ DISCUSSION = Section(
     paragraphs=(
         "A direction reads a concept "
         "better than chance far more often than it beats the right "
-        "baseline: orientation on the labels lifts a random direction, the "
+        "comparison: orientation on the labels lifts a random direction, the "
         "wording of the input often carries the label, and the confidence "
         "of the model already holds what a knowledge direction reads, so a "
         "reading claim needs its random direction and, where the text can "
-        "carry the label, a text baseline ([[fig:teaser]]). Steering moves "
+        "carry the label, a text control ([[fig:teaser]]). Steering moves "
         "the judged sentiment at small coefficients and "
         "breaks fluency at larger ones (a perplexity on neutral text above "
         + MAX_RATIO
@@ -739,9 +747,9 @@ DISCUSSION = Section(
             "The readings are compared with model-free word and character "
             "n-gram classifiers from a separate run ([[table:reading]]), "
             "which see only the text, not the activations at the layer of "
-            "the reader; the honesty baseline is fitted on the true and "
+            "the reader; the honesty control is fitted on the true and "
             "false labels of the facts, not on the persona labels, so it "
-            "is a baseline for the transfer pairs only, and its interval "
+            "is a control for the transfer pairs only, and its interval "
             "covers test-pair sampling only. The sentiment steering run has no "
             "random-direction arm (the utility steering run has three), and "
             "knowledge steering has three random directions per run, so a "
@@ -798,7 +806,7 @@ APPENDICES = (
         paragraphs=(
             "These are the design details that the method summarises; they "
             "support every result of the paper, because each one is "
-            "reported against a baseline built the same way.",
+            "reported against a control built the same way.",
         ),
         runin=(
             (
@@ -848,10 +856,16 @@ APPENDICES = (
                 "[[cite:merity2017pointer]].",
             ),
             (
-                "Baselines.",
-                "The popularity of the subject is its monthly Wikipedia "
-                "page views [[cite:mallen2023when]]. The confidence of the "
-                "model stacks five output signals, and only the pooled "
+                "Controls and baselines.",
+                "The popularity of the subject, a control, is its monthly "
+                "Wikipedia page views [[cite:mallen2023when]]. The "
+                "confidence of the model, a baseline, stacks five output "
+                "signals: the probability of the most likely next token "
+                "after the prompt, the negative entropy of that distribution, "
+                "the mean log-probability of the answer tokens, the share of "
+                "sampled answers that equal the greedy answer, and P(True) "
+                "[[cite:kadavath2022language]], the probability the model "
+                "assigns to its own answer being correct. Only the pooled "
                 "level of the stack is stored.",
             ),
             (
@@ -922,13 +936,16 @@ APPENDICES = (
             "reading at its layer ([[table:reading_full]]) and the "
             "sample-size and decoy runs ([[table:sizes]], "
             "[[table:prompts]]).",
-            "Baselines of each row of [[fig:teaser]]: rows 1 to 5, the "
+            "Comparisons of each row of [[fig:teaser]]: rows 1 to 5, the "
             "random direction of the same run at the same layer; row 6, the "
             "random direction of the finder comparison; row 7, a word "
             "classifier; row 8, the strongest of popularity and two text "
             "classifiers; row 9, the model's own confidence, five stacked "
-            "output signals. A direction for questions the model can answer "
-            "is above that confidence, with an interval excluding zero, on "
+            "output signals. Rows 1 to 8 are controls and row 9 is a "
+            "baseline, the confidence of the model, whose five signals "
+            "include P(True) [[cite:kadavath2022language]]. A direction for "
+            "questions the model can answer is above that confidence, with "
+            "an interval excluding zero, on "
             "[[count:fig:teaser.knowledge_confidence]]. For steering on the "
             "utility manipulation task of the paper, a checkpoint passes "
             "when every logistic steering vector (3 per checkpoint) of the "

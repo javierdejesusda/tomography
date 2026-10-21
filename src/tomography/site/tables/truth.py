@@ -184,7 +184,7 @@ def build(manifest: Manifest) -> TableOutput:
     ]
     claim = (
         "Truthfulness and honesty readings on every checkpoint, with the "
-        "baselines of the same questions."
+        "text controls of the same questions."
     )
     detail = (
         f"The four leftmost columns are TruthfulQA MC1 on {n_questions} test "
@@ -197,7 +197,7 @@ def build(manifest: Manifest) -> TableOutput:
         f"{cells.interval(word['mc1'], word['lo'], word['hi'])}, one on the "
         "characters "
         f"{cells.interval(char['mc1'], char['lo'], char['hi'])}, and chance "
-        f"is {cells.num(chance)}; the last three rows give these baselines, "
+        f"is {cells.num(chance)}; the last three rows give these controls, "
         "which apply to each of the four TruthfulQA columns. "
         + _template_sentence(in_acc, in_layer)
         + " In the template the random direction at the same layer reaches "

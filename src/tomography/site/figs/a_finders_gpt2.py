@@ -225,6 +225,9 @@ def split(
         "direction, with its mean as a thin line, and the dotted line is "
         "chance."
         + (" Post-trained checkpoints are dashed." if post_trained else "")
+        + " Logistic regression is a linear probe "
+        "[[cite:alain2016understanding]] and the published baseline for the "
+        "finder of the paper."
         + " The other finders are in [[table:finders_all]]."
     )
     return FigureOutput(fig, claim, detail, {}, _csv(rows))

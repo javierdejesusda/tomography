@@ -35,8 +35,9 @@ ROWS = (
     (
         "finder",
         "Method that turns training pairs into a direction: PCA of paired "
-        "differences (the paper's), PCA of activations, mean difference, "
-        "logistic regression or k-means.",
+        "differences (the paper's), PCA of activations, mean difference "
+        "(the mass-mean probe), logistic regression (a linear probe) or "
+        "k-means.",
     ),
     (
         "accuracy",

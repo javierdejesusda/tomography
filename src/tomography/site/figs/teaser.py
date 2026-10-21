@@ -1,7 +1,7 @@
 """Figure 1: the scorecard of what a direction reads and steers.
 
 One dot plot with a row per test. Each marker is a checkpoint, placed at the
-margin of a fitted direction over the baseline named in its row; lanes
+margin of a fitted direction over the control or baseline of its row; lanes
 separate GPT-2, Qwen3 base and Qwen3 post-trained checkpoints, and a column
 on the right counts the checkpoints whose interval lies above zero.
 """
@@ -98,7 +98,7 @@ ROWS = (
 )
 BLOCKS = (
     "against a random direction",
-    "against a stronger baseline",
+    "against a stronger control or baseline",
     "steering",
 )
 
@@ -443,7 +443,10 @@ def _draw(fig: Figure, found: dict[str, dict[str, Cell]]) -> None:
     _panel(fig, ax, upper, place, found, -1.3)
     _caption(ax, -0.2, "interval above 0", paper.ENC["secondary_text"])
     _caption(ax, 0.3, "GPT-2 / base / post", paper.ENC["secondary_text"])
-    ax.set_xlabel("margin over the baseline, in the unit under each row")
+    ax.set_xlabel(
+        "margin over the control or baseline of its row, "
+        "in the unit under each row"
+    )
     low = fig.add_subplot(grid[1])
     low.set_gid("steering")
     _panel(fig, low, lower, place, found, place[lower[0].key] - 1.1)
@@ -516,9 +519,9 @@ def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
 
 
 DETAIL = (
-    "Each marker is one checkpoint's margin over its row baseline; the "
-    "right column counts 95 percent intervals above zero. Steering: lowest "
-    "win rate of 3 vectors minus highest of 3 random directions; no "
+    "Markers are checkpoint margins over the row's control or baseline; "
+    "the right column counts 95 percent intervals above zero. Steering: "
+    "lowest win rate of 3 vectors minus highest of 3 random directions; no "
     "interval is stored."
 )
 

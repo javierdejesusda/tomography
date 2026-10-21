@@ -654,7 +654,7 @@ def render_page(doc: Document) -> str:
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{_e(content.TITLE)}</title>\n"
         '<meta name="description" content="Representation engineering '
-        "reproduced on GPT-2 and Qwen3, with a random-direction baseline "
+        "reproduced on GPT-2 and Qwen3, with a random-direction control "
         'for every reading.">\n'
         '<link rel="icon" href="data:,">\n'
         '<link rel="stylesheet" href="site.css">\n</head>\n<body>\n'

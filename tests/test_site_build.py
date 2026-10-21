@@ -1,4 +1,5 @@
 import csv
+from html import unescape
 import json
 import logging
 import os
@@ -8,6 +9,7 @@ import runpy
 import subprocess
 import sys
 
+from matplotlib.text import Text
 import pytest
 
 from tomography.site import __main__ as cli
@@ -528,6 +530,120 @@ def test_every_figure_passes_the_palette_font_and_text_guards(
 def test_the_built_page_has_no_pooled_count_of_ten(html: str) -> None:
     text = re.sub(r"<[^>]+>", " ", html)
     assert not re.search(r"\b\d+ of (the )?10\b(?! readers)", text)
+
+
+BASELINE = re.compile(r"\bbaselines?\b", re.I)
+BOTH_KINDS = re.compile(r"\bcontrols? (?:and|or) baselines?\b", re.I)
+CONTROL_TERMS = re.compile(
+    r"\b(?:random|shuffled|text|words?|characters?|popularity|length)\b",
+    re.I,
+)
+PUBLISHED_METHOD = re.compile(
+    r"\bpublished\b|\bmass-mean\b|\blogistic[- ]regression\b|P\(True\)|"
+    r"\bconfidence of the model\b|\bmodel confidence\b",
+    re.I,
+)
+
+
+def _clauses(text: str) -> list[str]:
+    parts = re.split(r"(?<!\bal)[.;:?!](?=\s)|\n", text)
+    return [" ".join(p.split()) for p in parts if p.strip()]
+
+
+def _vocabulary_problems(texts: list[str]) -> list[str]:
+    """Finds the clauses that misuse the word baseline.
+
+    A clause that says baseline must not name a random direction, shuffled
+    labels, the text, the words or the popularity, which are controls, and
+    must name a published method. Naming both kinds side by side, as in a
+    heading, is not a use of the word.
+
+    Args:
+        texts: Prose, captions, table cells and figure labels.
+
+    Returns:
+        One line per clause that breaks the rule.
+    """
+    problems = []
+    for text in texts:
+        for clause in _clauses(text):
+            rest = BOTH_KINDS.sub("", clause)
+            if not BASELINE.search(rest):
+                continue
+            if CONTROL_TERMS.search(rest):
+                problems.append(f"control called a baseline: {clause}")
+            elif not PUBLISHED_METHOD.search(rest):
+                problems.append(f"baseline without a method: {clause}")
+    return problems
+
+
+def _prose_texts(html: str, doc: page.Document) -> list[str]:
+    body = re.sub(
+        r'<section id="references">.*?</section>', " ", html, flags=re.S
+    )
+    body = re.sub(r"<(style|svg|pre)\b.*?</\1>", " ", body, flags=re.S)
+    body = re.sub(r"</(?:p|li|h\d|figcaption|caption|tr|td|th)>", "\n", body)
+    texts = [unescape(re.sub(r"<[^>]+>", " ", body))]
+    meta = re.findall(r'<meta name="description" content="([^"]*)"', html)
+    texts += [unescape(m) for m in meta]
+    for entry in [*doc.figures.values(), *doc.appendix.values()]:
+        texts += [
+            t.get_text().replace("\n", " ")
+            for t in entry.output.figure.findobj(Text)
+        ]
+    return texts
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "A random unit direction is the baseline of the readings.",
+        "Every reading is reported against a text baseline.",
+        "The honesty baseline is fitted on the true and false labels.",
+        "direction minus the strongest baseline",
+        "popularity, the strongest baseline of the question",
+        "it is a baseline for the transfer pairs only",
+        "TruthfulQA [28] gives the question sets of the baselines.",
+        "The honesty baseline is a logistic classifier on the labels.",
+        "The honesty baseline has a 95 percent confidence interval.",
+    ],
+)
+def test_the_vocabulary_guard_catches_a_control_called_a_baseline(
+    text: str,
+) -> None:
+    assert _vocabulary_problems([text]) != []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Controls and baselines",
+        "margin over the control or baseline of its row",
+        "A control is a random direction fitted with the same procedure.",
+        "The mass-mean probe is a published baseline for the paper finder.",
+        "The confidence of the model is the baseline for knowledge.",
+        "Logistic regression [12] is a baseline. Random ones are controls.",
+        "Zou et al. [1] propose a finder. The baseline is a published probe.",
+    ],
+)
+def test_the_vocabulary_guard_passes_a_published_baseline(text: str) -> None:
+    assert _vocabulary_problems([text]) == []
+
+
+def test_the_prose_scan_reaches_the_description_and_the_figure_labels(
+    html: str, site: tuple[Path, page.Document]
+) -> None:
+    texts = _prose_texts(html, site[1])
+    assert any(
+        t.startswith("Representation engineering reproduced") for t in texts
+    )
+    assert any(t == "random control, test-pair noise" for t in texts)
+
+
+def test_no_control_is_called_a_baseline_anywhere_on_the_page(
+    html: str, site: tuple[Path, page.Document]
+) -> None:
+    assert _vocabulary_problems(_prose_texts(html, site[1])) == []
 
 
 def test_every_appendix_item_is_cited_in_the_text(

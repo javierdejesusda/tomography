@@ -74,7 +74,7 @@ def build(manifest: Manifest) -> TableOutput:
         "random direction is stored for these runs, so the only reference "
         "is chance, [[num:table:prompts.chance]]. The random directions of "
         "[[table:reading_full]] belong to other runs with their own training "
-        "sample and layer, so they are not a baseline for these accuracies."
+        "sample and layer, so they are not a control for these accuracies."
     )
     return TableOutput(
         claim,

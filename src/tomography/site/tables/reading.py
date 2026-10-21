@@ -29,14 +29,14 @@ CONCEPTS = (
 )
 
 
-BASELINES = (
+CONTROLS = (
     ("Words alone (word n-grams)", "word"),
     ("Words alone (character n-grams)", "char"),
 )
 
 
-def _baselines(manifest: Manifest) -> dict[tuple[str, str], list[float]]:
-    """Reads the model-free text baselines of the reading concepts.
+def _controls(manifest: Manifest) -> dict[tuple[str, str], list[float]]:
+    """Reads the model-free text controls of the reading concepts.
 
     Args:
         manifest: The run resolver.
@@ -46,7 +46,7 @@ def _baselines(manifest: Manifest) -> dict[tuple[str, str], list[float]]:
         number of test pairs and the number of training sets.
 
     Raises:
-        FileNotFoundError: If the baselines have no run.
+        FileNotFoundError: If the controls have no run.
     """
     run = manifest.run("tb1", MODEL_FREE)
     if run is None:
@@ -111,16 +111,16 @@ def build(manifest: Manifest) -> TableOutput:
     numbers = {f"above_{c}": float(sum(flags[c].values())) for c, _ in CONCEPTS}
     numbers |= {f"n_{c}": float(sizes[c]) for c, _ in CONCEPTS}
     counts = {f"above_{c}": stats.per_role(flags[c]) for c, _ in CONCEPTS}
-    baselines = _baselines(manifest)
+    controls = _controls(manifest)
     for concept, _ in CONCEPTS:
-        for label, analyzer in BASELINES:
-            n = baselines[(concept, analyzer)][3]
+        for label, analyzer in CONTROLS:
+            n = controls[(concept, analyzer)][3]
             if int(n) != sizes[concept]:
                 raise ValueError(f"{label} uses {int(n)} pairs for {concept}")
-    for label, analyzer in BASELINES:
+    for label, analyzer in CONTROLS:
         row = [label]
         for concept, _ in CONCEPTS:
-            value, lo, hi, *_ = baselines[(concept, analyzer)]
+            value, lo, hi, *_ = controls[(concept, analyzer)]
             row += [cells.interval(value, lo, hi), ""]
             numbers[f"{analyzer}_{concept}"] = value
             numbers[f"{analyzer}_{concept}_lo"] = lo
@@ -128,14 +128,14 @@ def build(manifest: Manifest) -> TableOutput:
             numbers[f"{analyzer}_{concept}_above"] = float(lo > 0.5)
         rows.append(row)
     seeds = {
-        concept: {int(baselines[(concept, a)][4]) for _, a in BASELINES}
+        concept: {int(controls[(concept, a)][4]) for _, a in CONTROLS}
         for concept, _ in CONCEPTS
     }
     others = {
         n for c, found in seeds.items() if c != "sentiment" for n in found
     }
     if len(seeds["sentiment"]) != 1 or len(others) != 1:
-        raise ValueError("the baselines differ in their training sets")
+        raise ValueError("the controls differ in their training sets")
     claim = (
         "Reader accuracy at the layer chosen on validation, next to the "
         "random direction of the same run at that layer."
@@ -157,9 +157,9 @@ def build(manifest: Manifest) -> TableOutput:
         f"split and {next(iter(others))} for the others) and its interval "
         "covers the sampling of the test pairs only, not the spread over "
         "training sets. The "
-        "honesty baseline is a classifier fitted on the true and false "
+        "honesty control is a classifier fitted on the true and false "
         "labels of the facts, not on the persona labels of the reader, so "
-        "it is a baseline for the transfer pairs only."
+        "it is a control for the transfer pairs only."
     )
     return TableOutput(
         claim,
