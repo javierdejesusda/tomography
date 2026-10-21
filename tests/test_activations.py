@@ -1,4 +1,5 @@
 from collections.abc import Callable
+import dataclasses
 from typing import Any
 
 from huggingface_hub import snapshot_download
@@ -425,6 +426,20 @@ def assert_cached_matches_plain(
     np.testing.assert_allclose(cached.data, plain.data, **TOLERANCE)
     assert_same_rows(cached, plain)
     return cached, calls
+
+
+@pytest.mark.parametrize(
+    "dtype", [torch.float16, torch.bfloat16], ids=["float16", "bfloat16"]
+)
+def test_the_shared_prefix_is_refused_outside_float32(
+    tiny_gpt2: LoadedModel, dtype: torch.dtype
+) -> None:
+    half = dataclasses.replace(tiny_gpt2, dtype=dtype)
+
+    with pytest.raises(ValueError, match="float32"):
+        collect_activations(half, PROMPTS, share_prefix=True)
+
+    assert collect_activations(half, PROMPTS).n_stimuli == len(PROMPTS)
 
 
 @pytest.mark.parametrize("bos", ["prepend", "none"])

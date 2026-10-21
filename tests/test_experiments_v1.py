@@ -1131,12 +1131,20 @@ def test_the_summary_names_the_dtype_of_this_run_and_of_the_reading_run(
 ) -> None:
     spec = dataclasses.replace(MODELS["gpt2"], key="tiny", dtype="bfloat16")
     monkeypatch.setattr(v1_module, "MODELS", {"tiny": spec})
+
+    summary = _summary(_execute(tiny_arch, tmp_path, inputs))
+
+    assert summary["extraction_dtype"] == "float32"
+    assert summary["reading_run_dtype"] == "bfloat16"
+
+
+def test_the_shared_prefix_refuses_a_half_precision_model(
+    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
+) -> None:
     half = dataclasses.replace(tiny_arch, dtype=torch.float16)
 
-    summary = _summary(_execute(half, tmp_path, inputs))
-
-    assert summary["extraction_dtype"] == "float16"
-    assert summary["reading_run_dtype"] == "bfloat16"
+    with pytest.raises(ValueError, match="float32"):
+        _execute(half, tmp_path, inputs)
 
 
 def test_the_recomputed_auroc_is_the_committed_one_on_the_same_activations(
