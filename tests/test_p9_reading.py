@@ -39,6 +39,7 @@ from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
 from tomography.p9.reading import relation_groups
 from tomography.p9.reading import render_items
+from tomography.p9.reading import split_activations
 from tomography.p9.reading import surface_baselines
 from tomography.p9.reading import type_auroc
 from tomography.p9.reading import type_scores
@@ -875,6 +876,22 @@ def test_type_scores_hold_the_scores_and_labels_the_auroc_ranks(
     np.testing.assert_array_equal(
         auroc(scores, labels), type_auroc(reader, planted.acts, pool, "test")
     )
+
+
+def test_split_activations_hold_the_rows_type_scores_scores(
+    planted: Planted,
+) -> None:
+    pool = planted.pools["obscure_real"]
+    reader = fit_type_reader(planted.acts, pool, n_pairs=16, seed=1)
+    positive, negative = pool.split("test")
+
+    h, labels = split_activations(planted.acts, pool, "test")
+
+    rows = planted.acts.rows([*positive, *negative])
+    np.testing.assert_array_equal(h, planted.acts.data[:, rows])
+    scores, want = type_scores(reader, planted.acts, pool, "test")
+    np.testing.assert_array_equal(labels, want)
+    np.testing.assert_array_equal(reader.score(h), scores)
 
 
 def test_type_auroc_ranks_the_positive_side_on_one_split(

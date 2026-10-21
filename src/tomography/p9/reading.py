@@ -483,6 +483,30 @@ def fit_type_reader(
     return fit_draw(acts, draw, method=method, preprocess=preprocess)
 
 
+def split_activations(
+    acts: ItemActivations, pool: TypePool, split: Split
+) -> tuple[NDArray[np.float32], NDArray[np.int64]]:
+    """Gathers the activations of the items of one split of a contrast.
+
+    Several readers can be scored on the one array, without gathering the
+    rows again for each of them.
+
+    Args:
+        acts: The activations of at least the items of the split.
+        pool: One contrast.
+        split: "train", "val" or "test".
+
+    Returns:
+        The activations of shape (K, n, d), and the labels of shape (n,), in
+        the order `type_scores` scores them.
+
+    Raises:
+        ValueError: If an item has no activations.
+    """
+    rows, labels = _split_arrays(acts, pool, split)
+    return acts.data[:, rows], labels
+
+
 def type_scores(
     reader: RepReader, acts: ItemActivations, pool: TypePool, split: Split
 ) -> tuple[NDArray[np.float32], NDArray[np.int64]]:
@@ -502,8 +526,8 @@ def type_scores(
     Raises:
         ValueError: If an item has no activations.
     """
-    rows, labels = _split_arrays(acts, pool, split)
-    return reader.score(acts.data[:, rows]), labels
+    h, labels = split_activations(acts, pool, split)
+    return reader.score(h), labels
 
 
 def type_auroc(

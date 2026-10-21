@@ -53,8 +53,8 @@ from tomography.p9.reading import draw_seed
 from tomography.p9.reading import draw_train
 from tomography.p9.reading import fit_draw
 from tomography.p9.reading import p9_template
+from tomography.p9.reading import split_activations
 from tomography.p9.reading import surface_baselines
-from tomography.p9.reading import type_auroc
 from tomography.p9.reading import type_scores
 from tomography.p9.risk import word_vectorizer
 from tomography.p9.unknowns import TypePool
@@ -443,12 +443,13 @@ def refit_methods(
         (len(protocol.methods), len(pools), protocol.n_seeds, len(acts.layers))
     )
     for t, (name, pool) in enumerate(pools.items()):
+        h, labels = split_activations(acts, pool, "test")
         for s, draw in enumerate(draws[name]):
             for m, method in enumerate(protocol.methods):
                 reader = fit_draw(
                     acts, draw, method=method, preprocess=protocol.preprocess
                 )
-                test[m, t, s] = type_auroc(reader, acts, pool, "test")
+                test[m, t, s] = auroc(reader.score(h), labels)
     return test
 
 
@@ -478,6 +479,7 @@ def refit_shuffled(
     """
     test = np.zeros((len(pools), protocol.n_seeds, len(acts.layers)))
     for t, (name, pool) in enumerate(pools.items()):
+        h, labels = split_activations(acts, pool, "test")
         for s, draw in enumerate(draws[name]):
             reader = fit_draw(
                 acts,
@@ -488,7 +490,7 @@ def refit_shuffled(
                 method=protocol.methods[0],
                 preprocess=protocol.preprocess,
             )
-            test[t, s] = type_auroc(reader, acts, pool, "test")
+            test[t, s] = auroc(reader.score(h), labels)
     return test
 
 
