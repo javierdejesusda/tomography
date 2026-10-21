@@ -646,6 +646,57 @@ def test_no_control_is_called_a_baseline_anywhere_on_the_page(
     assert _vocabulary_problems(_prose_texts(html, site[1])) == []
 
 
+def _header_problems(headers: dict[str, str]) -> list[str]:
+    """Finds the figure data columns named after a baseline.
+
+    One column holds the values of rows of different kinds, controls and
+    published baselines, so no column name can call them all a baseline.
+
+    Args:
+        headers: The first line of the data file of each figure, by key.
+
+    Returns:
+        One line per header that has a column named after a baseline.
+    """
+    return [
+        f"{key}: {header}"
+        for key, header in headers.items()
+        if any("baseline" in c.lower() for c in next(csv.reader([header])))
+    ]
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "row,model,role,value,lo,hi,baseline,n",
+        "panel,concept,model,x,y,lo,hi,baselines",
+        "panel,concept,Baseline value,x",
+    ],
+)
+def test_the_header_guard_catches_a_column_named_after_a_baseline(
+    header: str,
+) -> None:
+    assert _header_problems({"fig": header}) != []
+
+
+def test_the_header_guard_passes_a_neutral_column() -> None:
+    header = "row,model,role,value,lo,hi,comparison,n"
+    assert _header_problems({"fig": header}) == []
+
+
+def test_no_figure_data_file_names_a_column_after_a_baseline(
+    site: tuple[Path, page.Document],
+) -> None:
+    figures = {**site[1].figures, **site[1].appendix}
+    headers = {
+        key: entry.output.csv.splitlines()[0]
+        for key, entry in figures.items()
+        if entry.output.csv.strip()
+    }
+    assert len(headers) >= 10
+    assert _header_problems(headers) == []
+
+
 def test_every_appendix_item_is_cited_in_the_text(
     html: str,
 ) -> None:
