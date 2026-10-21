@@ -171,6 +171,10 @@ def test_the_caption_matches_the_plan(output: registry.FigureOutput) -> None:
     assert CAPTION_START in text
     assert "against the random direction of the same run (grey)" in text
     assert "select split chose" in text
+    assert (
+        "Logistic regression is a linear probe [[cite:alain2016understanding]] "
+        "and the published baseline for the finder of the paper."
+    ) in text
     assert "[[table:finders_all]]" in text
     assert EM not in text
     assert EN not in text

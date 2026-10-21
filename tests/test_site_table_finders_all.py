@@ -107,6 +107,12 @@ def test_the_caption_names_the_win_rate_and_the_random_reference(
     assert "decisive prompt pairs" in text
     assert "Three random directions of the same norm" in text
     assert "0.5 is not" in text
+    assert (
+        "Mean difference is the mass-mean probe [[cite:marks2024geometry]] "
+        "without whitening and logistic regression the linear probe "
+        "[[cite:alain2016understanding]]; both are published baselines for "
+        "the finder of the paper. The random direction is the control."
+    ) in text
     assert not any(ch in text for ch in DASHES)
 
 
