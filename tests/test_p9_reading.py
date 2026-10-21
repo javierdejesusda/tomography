@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from collections.abc import Sequence
 import dataclasses
+import hashlib
 from typing import Any
 
 import numpy as np
@@ -46,6 +47,7 @@ from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import relation_of
 from tomography.p9.unknowns import stratum_name
 from tomography.p9.unknowns import type_pools
+from tomography.reading.directions import Method
 from tomography.reading.metrics import auroc
 from tomography.reading.reader import RepReader
 from tomography.templates import PAPER_TEMPLATES
@@ -2089,3 +2091,112 @@ def test_reading_cube_within_arrays_match_a_per_relation_oracle(
                     assert held[m, 0, s, k] == pytest.approx(
                         total / pairs, abs=1e-12
                     )
+
+
+# Taken from the fit that preceded the split into `draw_train` and `fit_draw`,
+# on this fixture: the number of train items, a digest of their uids in order
+# and the first pairs, by contrast and seed.
+PRE_SPLIT_DRAWS = {
+    ("obscure_real", 4): (
+        32,
+        "426552e26eae",
+        [
+            ("popqa:402", "popqa:426"),
+            ("popqa:100", "popqa:307"),
+            ("popqa:11", "popqa:437"),
+        ],
+    ),
+    ("obscure_real", 5): (
+        32,
+        "bce0af3996bb",
+        [
+            ("popqa:275", "popqa:359"),
+            ("popqa:376", "popqa:292"),
+            ("popqa:718", "popqa:88"),
+        ],
+    ),
+    ("obscure_real_pop", 4): (
+        32,
+        "acad56475012",
+        [
+            ("popqa:621", "popqa:660"),
+            ("popqa:459", "popqa:9"),
+            ("popqa:272", "popqa:302"),
+        ],
+    ),
+    ("obscure_real_pop", 5): (
+        32,
+        "36a1a6d5bb50",
+        [
+            ("popqa:688", "popqa:157"),
+            ("popqa:323", "popqa:620"),
+            ("popqa:303", "popqa:165"),
+        ],
+    ),
+    ("unknowable_detail", 4): (
+        32,
+        "effa2e552fd2",
+        [
+            ("wikidata:detail:6", "triviaqa:209"),
+            ("wikidata:detail:63", "triviaqa:127"),
+            ("nq_open:156", "wikidata:detail:103"),
+        ],
+    ),
+    ("unknowable_detail", 5): (
+        32,
+        "6fedd25c9caa",
+        [
+            ("wikidata:detail:177", "nq_open:195"),
+            ("wikidata:detail:132", "nq_open:272"),
+            ("wikidata:detail:111", "triviaqa:199"),
+        ],
+    ),
+}
+
+
+# The sum of the directions and of the means and the signs of the reader of each
+# method, from the same fit, with 16 pairs and seed 4.
+PRE_SPLIT_READERS = {
+    ("obscure_real", "logistic"): (-0.51105, 28.9746, [1.0, -1.0, 1.0]),
+    ("obscure_real", "pca_diff"): (0.94213, 9.7139, [-1.0, -1.0, -1.0]),
+    ("obscure_real", "mean_diff"): (-0.51879, 28.9746, [1.0, -1.0, 1.0]),
+    ("obscure_real", "random"): (1.87111, 28.9746, [1.0, 1.0, 1.0]),
+    ("unknowable_detail", "logistic"): (0.75258, -8.0474, [-1.0, -1.0, 1.0]),
+    ("unknowable_detail", "pca_diff"): (-2.4015, -11.9654, [1.0, 1.0, 1.0]),
+    ("unknowable_detail", "mean_diff"): (-0.3081, -8.0474, [-1.0, 1.0, 1.0]),
+    ("unknowable_detail", "random"): (1.87111, -8.0474, [-1.0, -1.0, 1.0]),
+}
+
+
+def _digest(uids: Sequence[str]) -> str:
+    return hashlib.sha256("\n".join(uids).encode()).hexdigest()[:12]
+
+
+@pytest.mark.parametrize(("name", "seed"), list(PRE_SPLIT_DRAWS))
+def test_draw_train_draws_what_the_fit_before_the_split_drew(
+    planted: Planted, name: str, seed: int
+) -> None:
+    count, digest, first = PRE_SPLIT_DRAWS[name, seed]
+
+    draw = draw_train(planted.pools[name], n_pairs=16, seed=seed)
+
+    uids = [i.example.uid for i in draw.items]
+    assert len(uids) == count
+    assert _digest(uids) == digest
+    assert draw.pairs is not None
+    assert [(uids[a], uids[b]) for a, b in draw.pairs[:3]] == first
+
+
+@pytest.mark.parametrize(("name", "method"), list(PRE_SPLIT_READERS))
+def test_fit_type_reader_gives_the_numbers_of_the_fit_before_the_split(
+    planted: Planted, name: str, method: Method
+) -> None:
+    total, centers, signs = PRE_SPLIT_READERS[name, method]
+
+    reader = fit_type_reader(
+        planted.acts, planted.pools[name], method=method, n_pairs=16, seed=4
+    )
+
+    assert float(reader.directions.sum()) == pytest.approx(total, abs=5e-3)
+    assert float(reader.means.sum()) == pytest.approx(centers, abs=1e-2)
+    assert reader.signs.tolist() == signs

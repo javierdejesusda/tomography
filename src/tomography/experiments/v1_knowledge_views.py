@@ -1,11 +1,14 @@
 """V1: the activations behind the knowledge readers of P9b.
 
 P9b reports how well a direction separates known from unknown questions. This
-experiment keeps the hidden states of the same questions on the CPU, so the
-readers can be seen and not only scored. The inputs are two finished runs of
-the model: the P9a labels and the P9b reading.
+experiment keeps the hidden states of the same questions, so the readers can
+be seen and not only scored. The inputs are two finished runs of the model:
+the P9a labels and the P9b reading. The model loads in float32 on the default
+device, because the shared few-shot prefix matches the uncached activations
+only in float32; `meta.json` records the device the numbers came from.
 """
 
+from collections import Counter
 from collections.abc import Mapping
 from collections.abc import Sequence
 import dataclasses
@@ -17,22 +20,34 @@ from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
+import torch
 
 from tomography.experiments import p9b_reading
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.p9a_labels import load_labeled
+from tomography.experiments.sweep import chat_format_for
+from tomography.knowledge import DEFAULT_SHOTS
+from tomography.model import MODELS
+from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.p9.pool import LabeledItem
 from tomography.p9.reading import READING_METHODS
 from tomography.p9.reading import SURFACE_BASELINES
 from tomography.p9.reading import ItemActivations
 from tomography.p9.reading import TrainDraw
+from tomography.p9.reading import collect_item_activations
 from tomography.p9.reading import draw_seed
 from tomography.p9.reading import draw_train
 from tomography.p9.reading import fit_draw
+from tomography.p9.reading import p9_template
 from tomography.p9.reading import surface_baselines
 from tomography.p9.reading import type_auroc
+from tomography.p9.reading import type_scores
 from tomography.p9.unknowns import TypePool
+from tomography.reading.metrics import auroc
+from tomography.reading.reader import RepReader
 
 READING_FILES = (
     "summary.json",
@@ -58,7 +73,8 @@ class Config(ExperimentConfig):
     """V1 settings: the runs to follow and the cost of one forward pass.
 
     Everything else is read from the P9b run, so the questions, the draws and
-    the template are those of its committed numbers.
+    the template are those of its committed numbers. The seed of this run only
+    mixes into the permutations of the shuffled-label control.
 
     Attributes:
         labels_run: Path of a finished P9a run of the same model.
@@ -93,6 +109,9 @@ class CommittedReading:
             fitted by the headline method.
         means: Shape (T, K, d): the vectors subtracted before projecting.
         signs: Shape (T, K): the orientation of each layer.
+        readers: The published reader of each contrast, built from the three
+            arrays above when the run is loaded, so one that cannot score
+            is refused before any model work.
     """
 
     config: p9b_reading.Config
@@ -104,6 +123,7 @@ class CommittedReading:
     directions: NDArray[np.float32]
     means: NDArray[np.float32]
     signs: NDArray[np.float32]
+    readers: tuple[RepReader, ...]
 
 
 def load_reading(path: str | Path, *, model: str) -> CommittedReading:
@@ -121,7 +141,10 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
             a file is missing (an export drops `transfer.npz` and
             `readers.npz`), the run read a template other than "fewshot" or
             methods other than `READING_METHODS`, or its files disagree on
-            the contrasts, the methods or the layers.
+            the contrasts, the methods or the layers, `table.json` lacks a
+            column the checks read, or a published reader cannot score: a
+            value that is not finite, a zero direction or a sign that is not
+            -1 or +1.
     """
     run_dir = RunDir.open(path)
     if run_dir.meta.get("finished_at") is None:
@@ -163,15 +186,16 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
     if (
         tuple(int(layer) for layer in readers["layers"]) != layers
         or test.shape[0] != len(config.methods)
-        or (test.shape[1], test.shape[3]) != shape
+        or (test.shape[1], test.shape[2], test.shape[3])
+        != (len(types), config.n_seeds, len(layers))
         or readers["directions"].shape[:2] != shape
         or readers["means"].shape != readers["directions"].shape
         or readers["signs"].shape != shape
         or summary["layer"] not in layers
     ):
         raise ValueError(
-            f"{path}: the arrays do not fit {len(types)} contrasts and "
-            f"{len(layers)} layers"
+            f"{path}: the arrays do not fit {len(types)} contrasts, "
+            f"{config.n_seeds} draws and {len(layers)} layers"
         )
     rows = {
         row[0]: dict(zip(table["columns"], row, strict=True))
@@ -179,6 +203,30 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
     }
     if tuple(rows) != types:
         raise ValueError(f"{path}: table.json disagrees on the contrasts")
+    for column in (*COUNT_COLUMNS, *SURFACE_BASELINES):
+        if column not in table["columns"]:
+            raise ValueError(f"{path}: table.json has no column {column!r}")
+    for key in ("directions", "means", "signs"):
+        if not np.isfinite(readers[key]).all():
+            raise ValueError(
+                f"{path}: readers.npz holds a {key} that is not finite"
+            )
+    published = []
+    for t, name in enumerate(types):
+        try:
+            published.append(
+                RepReader.from_arrays(
+                    config.methods[0],
+                    layers,
+                    readers["directions"][t],
+                    readers["means"][t],
+                    readers["signs"][t],
+                )
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"{path}: the reader of {name}: {error}"
+            ) from error
     return CommittedReading(
         config=config,
         layer=int(summary["layer"]),
@@ -189,11 +237,12 @@ def load_reading(path: str | Path, *, model: str) -> CommittedReading:
         directions=readers["directions"],
         means=readers["means"],
         signs=readers["signs"],
+        readers=tuple(published),
     )
 
 
 def check_reading(
-    reading: CommittedReading, pools: Mapping[str, TypePool], n_layers: int
+    reading: CommittedReading, pools: Mapping[str, TypePool]
 ) -> None:
     """Checks that the contrasts rebuilt from the labels are those of the run.
 
@@ -204,22 +253,21 @@ def check_reading(
     Args:
         reading: The committed P9b run.
         pools: The usable contrasts rebuilt from the P9a labels.
-        n_layers: The number of layers of the model, L.
 
     Raises:
         ValueError: If the contrasts differ, a contrast holds other counts
             than the table of the run, or the run did not read the layers
-            1..L.
+            1..L in order.
     """
     if tuple(pools) != reading.types:
         raise ValueError(
             f"the labels give the contrasts {list(pools)}, the P9b run read "
             f"{list(reading.types)}"
         )
-    if reading.layers != tuple(range(1, n_layers + 1)):
+    if reading.layers != tuple(range(1, len(reading.layers) + 1)):
         raise ValueError(
-            f"the P9b run read the layers {list(reading.layers)}, this model "
-            f"has the layers 1..{n_layers}"
+            f"the P9b run read the layers {list(reading.layers)}, not 1..L "
+            "in order"
         )
     for name, pool in pools.items():
         held = [
@@ -234,6 +282,53 @@ def check_reading(
                 f"{name}: the labels hold {held} items per side of the "
                 f"train and test splits, the P9b table {written}"
             )
+
+
+def check_labels_run(config: Config, reading: CommittedReading) -> None:
+    """Checks that the P9b run was read from the labels this run reads.
+
+    The two paths are compared as directories, resolved from the working
+    directory, so a relative and an absolute spelling of one run agree.
+
+    Args:
+        config: The experiment settings.
+        reading: The committed P9b run.
+
+    Raises:
+        ValueError: If the P9a run the P9b run recorded is not `labels_run`.
+    """
+    recorded = reading.config.labels_run
+    if Path(recorded).resolve() != Path(config.labels_run).resolve():
+        raise ValueError(
+            f"the P9b run was read from the labels in {recorded!r}, this run "
+            f"reads the labels in {config.labels_run!r}"
+        )
+
+
+def check_model(reading: CommittedReading, loaded: LoadedModel) -> None:
+    """Checks that the model has the layers and the width of the readers.
+
+    It is the one check that needs the model, so it is the first thing done
+    once the model is loaded and before anything runs through it.
+
+    Args:
+        reading: The committed P9b run.
+        loaded: The wrapped model.
+
+    Raises:
+        ValueError: If the model has another number of layers than the run
+            read, or another width than its readers.
+    """
+    if loaded.n_layers != len(reading.layers):
+        raise ValueError(
+            f"the P9b run read {len(reading.layers)} layers, this model has "
+            f"{loaded.n_layers}"
+        )
+    if loaded.d_model != reading.directions.shape[-1]:
+        raise ValueError(
+            f"the readers of the P9b run have the width "
+            f"{reading.directions.shape[-1]}, this model has {loaded.d_model}"
+        )
 
 
 def train_draws(
@@ -474,7 +569,7 @@ def _same(recomputed: float | None, committed: float | None) -> bool:
 def compare_surface(
     pools: Mapping[str, TypePool], reading: CommittedReading
 ) -> dict[str, dict[str, dict[str, Any]]]:
-    """Recomputes the surface baselines and sets them beside the committed ones.
+    """Recomputes the surface controls and sets them beside the committed ones.
 
     They need no model, so a difference points at the labels or the library
     versions, not at the activations.
@@ -492,29 +587,306 @@ def compare_surface(
     for name, pool in pools.items():
         recomputed = surface_baselines(pool)
         report[name] = {
-            baseline: {
-                "recomputed": recomputed[baseline],
-                "committed": reading.table[name][baseline],
+            control: {
+                "recomputed": recomputed[control],
+                "committed": reading.table[name][control],
                 "equal": _same(
-                    recomputed[baseline], reading.table[name][baseline]
+                    recomputed[control], reading.table[name][control]
                 ),
             }
-            for baseline in SURFACE_BASELINES
+            for control in SURFACE_BASELINES
         }
     return report
 
 
+@dataclass(frozen=True, eq=False)
+class PublishedViews:
+    """What the published readers give on the test items of each contrast.
+
+    Attributes:
+        auroc: Shape (T, K): the test AUROC of the published reader of each
+            contrast at each layer.
+        projections: The scores of the displayed items on the published
+            reader at the chosen layer, float32, by `projection_<contrast>`.
+            The displayed items of the positive side come first, then those
+            of the negative side, as in `uids`.
+        uids: The uids of the displayed items of each side, by contrast.
+    """
+
+    auroc: NDArray[np.float64]
+    projections: dict[str, NDArray[np.float32]]
+    uids: dict[str, dict[str, list[str]]]
+
+
+def published_views(
+    reading: CommittedReading,
+    acts: ItemActivations,
+    pools: Mapping[str, TypePool],
+    *,
+    cap: int = MAX_DISPLAYED,
+) -> PublishedViews:
+    """Scores the test items on the published reader of each contrast.
+
+    The readers are the all-pairs ones of `readers.npz`, not refitted. Every
+    test item counts in the AUROC; at most `cap` per side are kept for the
+    projections.
+
+    Args:
+        reading: The committed P9b run.
+        acts: The activations of the test items, over the layers of the run.
+        pools: The usable contrasts.
+        cap: The most displayed items per side of a contrast.
+
+    Returns:
+        The AUROC per layer, the projections at the layer the run chose and
+        the uids of the displayed items.
+
+    Raises:
+        ValueError: If a test item has no activations.
+    """
+    k = reading.layers.index(reading.layer)
+    aurocs = np.zeros((len(pools), len(reading.layers)))
+    projections: dict[str, NDArray[np.float32]] = {}
+    uids: dict[str, dict[str, list[str]]] = {}
+    for t, (name, pool) in enumerate(pools.items()):
+        scores, labels = type_scores(reading.readers[t], acts, pool, "test")
+        aurocs[t] = auroc(scores, labels)
+        positive, negative = pool.split("test")
+        shown = {
+            "positive": displayed_items(positive, cap=cap),
+            "negative": displayed_items(negative, cap=cap),
+        }
+        column = {
+            item.example.uid: j for j, item in enumerate([*positive, *negative])
+        }
+        order = [
+            column[item.example.uid]
+            for item in (*shown["positive"], *shown["negative"])
+        ]
+        projections[f"projection_{name}"] = scores[k, order]
+        uids[name] = {
+            side: [item.example.uid for item in items]
+            for side, items in shown.items()
+        }
+    return PublishedViews(aurocs, projections, uids)
+
+
+@dataclass(frozen=True, eq=False)
+class Plan:
+    """What a run needs before it touches the model.
+
+    Attributes:
+        pools: The usable contrasts rebuilt from the labels.
+        draws: The draws of each contrast, see `train_draws`.
+        selected: The questions to run through the model, see
+            `select_items`.
+        surface: The recomputed surface controls beside the committed ones,
+            see `compare_surface`.
+    """
+
+    pools: dict[str, TypePool]
+    draws: dict[str, list[TrainDraw]]
+    selected: list[LabeledItem]
+    surface: dict[str, dict[str, dict[str, Any]]]
+
+
+def prepare(
+    config: Config,
+    items: Sequence[LabeledItem],
+    *,
+    known_contrasts: bool,
+    reading: CommittedReading,
+) -> Plan:
+    """Checks every input and lists the questions to extract, with no model.
+
+    Args:
+        config: The experiment settings.
+        items: The labeled questions of the P9a run.
+        known_contrasts: The P9a gate of the labels.
+        reading: The committed P9b run, see `load_reading`.
+
+    Returns:
+        The plan of the run.
+
+    Raises:
+        ValueError: If `batch_size` is below 1, the P9b run was read from
+            other labels (see `check_labels_run`), the contrasts rebuilt from
+            the labels differ from those of the run (see `check_reading`) or
+            a surface control cannot be computed.
+    """
+    if config.batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+    check_labels_run(config, reading)
+    pools, _ = p9b_reading.usable_pools(reading.config, items, known_contrasts)
+    check_reading(reading, pools)
+    surface = compare_surface(pools, reading)
+    draws = train_draws(pools, reading.config)
+    return Plan(pools, draws, select_items(pools, draws), surface)
+
+
+def run_plan(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    plan: Plan,
+    reading: CommittedReading,
+) -> None:
+    """Extracts the activations of a P9b run and checks its numbers on them.
+
+    Runs the test items and the train items of the committed draws through
+    the model once, at the layers 1..L the P9b run read and with the shared
+    few-shot prefix, then refits and rescores the committed draws of every
+    method. The layers stay in the order and at the positions of the P9b run,
+    because the random finder draws its direction from the position of a
+    layer. The layer to compare at is the one the P9b run chose.
+
+    Writes `projections.npz`: `layers` (K,), `test` (M, T, S, K) the test
+    AUROC of each method, contrast, draw and layer refitted here, `shuffled`
+    (T, S, K) the control of the headline method refitted on labels permuted
+    inside the strata, `published` (T, K) the test AUROC of the published
+    all-pairs reader of each contrast, and `projection_<contrast>` the scores
+    of the displayed items on that reader at the chosen layer. Writes
+    `projections.json`: the contrasts, the methods and the uids of the
+    displayed items of each side (at most `MAX_DISPLAYED`, by ascending
+    SHA-256 of the uid; no question text). Writes `summary`: the layer, the
+    number of items extracted, the dtype of this run (`extraction_dtype`, that
+    of the loaded model) and the one the P9b run was extracted in
+    (`reading_run_dtype`, the registry default of the model, since that run
+    loaded it with no dtype; None for a model outside the registry), the
+    comparison with the committed AUROC
+    (`reproduction`, see `compare_auroc`) and with the committed surface
+    controls (`surface`, see `compare_surface`). A difference is reported,
+    never raised.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+        loaded: The wrapped model.
+        plan: The checked inputs, see `prepare`.
+        reading: The committed P9b run, see `load_reading`.
+
+    Raises:
+        ValueError: If the model does not fit the readers of the run (see
+            `check_model`). Nothing runs through the model before that.
+    """
+    check_model(reading, loaded)
+    protocol = reading.config
+    pools, draws, selected = plan.pools, plan.draws, plan.selected
+    template = p9_template(protocol.template, DEFAULT_SHOTS[: protocol.n_shots])
+    acts = collect_item_activations(
+        loaded,
+        selected,
+        template,
+        chat_format_for(loaded),
+        layers=reading.layers,
+        bos=protocol.bos,
+        batch_size=config.batch_size,
+        share_prefix=True,
+    )
+    test = refit_methods(acts, pools, draws, protocol)
+    shuffled = refit_shuffled(acts, pools, draws, protocol, seed=config.seed)
+    views = published_views(reading, acts, pools)
+    run_dir.write_arrays(
+        "projections",
+        layers=np.asarray(reading.layers, dtype=np.int64),
+        test=test,
+        shuffled=shuffled,
+        published=views.auroc,
+        **views.projections,
+    )
+    run_dir.write_json(
+        "projections",
+        {
+            "types": list(pools),
+            "methods": list(protocol.methods),
+            "max_per_side": MAX_DISPLAYED,
+            "uids": views.uids,
+        },
+    )
+    splits = Counter(item.example.split for item in selected)
+    registered = MODELS.get(config.model)
+    run_dir.write_json(
+        "summary",
+        {
+            "layer": reading.layer,
+            "template": protocol.template,
+            "methods": list(protocol.methods),
+            "types": list(pools),
+            "n_items": {"train": splits["train"], "test": splits["test"]},
+            "extraction_dtype": str(loaded.dtype).removeprefix("torch."),
+            "reading_run_dtype": registered.dtype if registered else None,
+            "reproduction": compare_auroc(
+                test,
+                reading.test,
+                reading.layers.index(reading.layer),
+                protocol.methods,
+                reading.types,
+            ),
+            "surface": plan.surface,
+            "surface_equal": all(
+                entry["equal"]
+                for by_control in plan.surface.values()
+                for entry in by_control.values()
+            ),
+        },
+    )
+
+
+def execute(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    items: Sequence[LabeledItem],
+    *,
+    known_contrasts: bool,
+    reading: CommittedReading,
+) -> None:
+    """Checks the inputs, then extracts and writes a run (see `run_plan`).
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+        loaded: The wrapped model.
+        items: The labeled questions of the P9a run.
+        known_contrasts: The P9a gate of the labels.
+        reading: The committed P9b run, see `load_reading`.
+
+    Raises:
+        ValueError: If an input is refused (see `prepare`) or the model does
+            not fit the readers (see `check_model`). Nothing runs through the
+            model before these.
+    """
+    plan = prepare(
+        config, items, known_contrasts=known_contrasts, reading=reading
+    )
+    run_plan(config, run_dir, loaded, plan, reading)
+
+
 def run(config: Config, run_dir: RunDir) -> None:
-    """Runs the experiment.
+    """Loads the labels and the P9b run, checks them, then loads the model.
+
+    Every input is checked before the model is loaded, apart from the one
+    check that needs the model (see `check_model`), which comes right after.
 
     Args:
         config: The experiment settings.
         run_dir: The run to write into.
 
     Raises:
-        NotImplementedError: Always, until the run is written.
+        ValueError: If either run is unfinished, of another model, or the
+            P9b run lacks a file (see `load_labeled` and `load_reading`), or
+            an input is refused (see `prepare`).
     """
-    raise NotImplementedError
+    items, labels = load_labeled(config.labels_run, model=config.model)
+    reading = load_reading(config.reading_run, model=config.model)
+    plan = prepare(
+        config,
+        items,
+        known_contrasts=bool(labels["known_contrasts"]),
+        reading=reading,
+    )
+    loaded = load_model(config.model, dtype=torch.float32)
+    run_plan(config, run_dir, loaded, plan, reading)
 
 
 def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
