@@ -153,7 +153,8 @@ def test_the_overview_method_detail_is_an_appendix_c_paragraph() -> None:
     )
     assert "row 7, a word classifier" in text
     assert "row 8, the strongest of popularity and two text classifiers" in text
-    assert "Rows 1 to 8 are controls" in text
+    assert "row 10, steering against random directions of the same norm" in text
+    assert "Rows 1 to 8 and row 10 are controls" in text
     assert "row 9 is a baseline, the confidence of the model" in text
     assert "five stacked output signals" in text
     assert "P(True) [[cite:kadavath2022language]]" in text
