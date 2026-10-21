@@ -148,11 +148,25 @@ class ItemActivations:
         Raises:
             ValueError: If an item has no row; names the first one.
         """
+        return self.rows_of([item.example.uid for item in items])
+
+    def rows_of(self, uids: Sequence[str]) -> NDArray[np.int64]:
+        """Finds the row of each question by its uid.
+
+        Args:
+            uids: Questions whose activations were collected.
+
+        Returns:
+            The row of each uid, in order, as int64.
+
+        Raises:
+            ValueError: If a uid has no row; names the first one.
+        """
         index = {uid: row for row, uid in enumerate(self.uids)}
-        for item in items:
-            if item.example.uid not in index:
-                raise ValueError(f"no activations for {item.example.uid!r}")
-        return np.array([index[i.example.uid] for i in items], dtype=np.int64)
+        for uid in uids:
+            if uid not in index:
+                raise ValueError(f"no activations for {uid!r}")
+        return np.array([index[uid] for uid in uids], dtype=np.int64)
 
 
 def collect_item_activations(

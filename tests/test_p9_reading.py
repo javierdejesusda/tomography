@@ -342,6 +342,25 @@ def test_item_activations_rows_name_the_first_missing_uid() -> None:
         acts.rows([_labeled("a"), _labeled("x-1"), _labeled("x-2")])
 
 
+def test_item_activations_rows_of_follow_the_uids() -> None:
+    acts = ItemActivations(
+        ("a", "b", "c"), (1,), np.zeros((1, 3, 4), dtype=np.float32)
+    )
+
+    rows = acts.rows_of(["c", "a"])
+
+    assert rows.tolist() == [2, 0]
+    assert rows.dtype == np.int64
+    assert acts.rows_of([]).tolist() == []
+
+
+def test_item_activations_rows_of_name_the_first_missing_uid() -> None:
+    acts = ItemActivations(("a",), (1,), np.zeros((1, 1, 4), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="'x-1'"):
+        acts.rows_of(["a", "x-1", "x-2"])
+
+
 def _small_items() -> list[LabeledItem]:
     return [
         _labeled("alpha", "known"),

@@ -774,26 +774,6 @@ def view_layers(reading: CommittedReading, n_layers: int) -> tuple[int, ...]:
     return tuple(dict.fromkeys((1, reading.layer, n_layers)))
 
 
-def _rows(acts: ItemActivations, uids: Sequence[str]) -> NDArray[np.int64]:
-    """Finds the row of each item among the activations.
-
-    Args:
-        acts: The activations.
-        uids: The items to find, in the order wanted.
-
-    Returns:
-        The row of each uid in `acts`, shape (len(uids),).
-
-    Raises:
-        ValueError: If an item has no activations.
-    """
-    index = {uid: row for row, uid in enumerate(acts.uids)}
-    for uid in uids:
-        if uid not in index:
-            raise ValueError(f"no activations for {uid!r}")
-    return np.array([index[uid] for uid in uids], dtype=np.int64)
-
-
 def pca_views(
     acts: ItemActivations,
     layers: Sequence[int],
@@ -824,7 +804,7 @@ def pca_views(
         "view_layers": np.asarray(layers, dtype=np.int64)
     }
     for panel, uids in panels.items():
-        rows = _rows(acts, uids)
+        rows = acts.rows_of(uids)
         coordinates, ratios = pca_coordinates(acts.data[np.ix_(ks, rows)])
         arrays[f"coordinates_{panel}"] = coordinates
         arrays[f"ratios_{panel}"] = ratios
@@ -903,7 +883,7 @@ def supervised_views(
     reader_ks = [reading.layers.index(layer) for layer in layers]
     arrays: dict[str, NDArray[np.float32]] = {}
     for panel, names in contrasts.items():
-        h = acts.data[np.ix_(ks, _rows(acts, panels[panel]))]
+        h = acts.data[np.ix_(ks, acts.rows_of(panels[panel]))]
         for name in names:
             t = reading.types.index(name)
             reader = RepReader.from_arrays(
