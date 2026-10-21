@@ -2150,20 +2150,22 @@ def test_execute_writes_the_supervised_view_of_each_shown_contrast(
 
 
 def test_text_view_separates_questions_that_share_no_words() -> None:
+    # Groups of unequal size give unequal singular values; equal groups would
+    # leave any rotation of the two components a valid answer.
     first = [f"alpha beta gamma delta {i}" for i in range(8)]
-    second = [f"red green blue yellow {i}" for i in range(8)]
+    second = [f"red green blue yellow {i}" for i in range(4)]
 
     coordinates, ratios = text_view([*first, *second], seed=0)
 
-    assert coordinates.shape == (16, 2)
+    assert coordinates.shape == (12, 2)
     assert coordinates.dtype == np.float32
     assert ratios.shape == (2,)
     assert ratios.dtype == np.float64
     assert (ratios > 0.0).all()
     assert ratios.sum() <= 1.0 + 1e-9
-    top = coordinates[:, 0]
-    assert np.sign(top[:8]).tolist() == [np.sign(top[0])] * 8
-    assert np.sign(top[8:]).tolist() == [-np.sign(top[0])] * 8
+    size = np.abs(coordinates)
+    np.testing.assert_allclose(size[:8], [[1.0, 0.0]] * 8, atol=1e-5)
+    np.testing.assert_allclose(size[8:], [[0.0, 1.0]] * 4, atol=1e-5)
 
 
 @pytest.mark.parametrize(
