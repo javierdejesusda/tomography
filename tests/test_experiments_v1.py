@@ -1,5 +1,6 @@
 """Tests for the knowledge views experiment."""
 
+from collections.abc import Callable
 import dataclasses
 import getpass
 import hashlib
@@ -10,6 +11,7 @@ import shutil
 import socket
 from typing import Any
 
+from matplotlib.text import Text
 import numpy as np
 import pytest
 import torch
@@ -18,9 +20,11 @@ from tomography.analysis import pca_coordinates
 from tomography.cli import load_experiment
 from tomography.experiments import p9b_reading
 from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.sweep import chat_format_for
 import tomography.experiments.v1_knowledge_views as v1_module
 from tomography.experiments.v1_knowledge_views import COUNT_COLUMNS
+from tomography.experiments.v1_knowledge_views import MAX_DISPLAYED
 from tomography.experiments.v1_knowledge_views import CommittedReading
 from tomography.experiments.v1_knowledge_views import Config
 from tomography.experiments.v1_knowledge_views import Plan
@@ -34,6 +38,7 @@ from tomography.experiments.v1_knowledge_views import displayed_uids
 from tomography.experiments.v1_knowledge_views import execute
 from tomography.experiments.v1_knowledge_views import load_reading
 from tomography.experiments.v1_knowledge_views import panel_contrasts
+from tomography.experiments.v1_knowledge_views import panel_figure
 from tomography.experiments.v1_knowledge_views import panel_union
 from tomography.experiments.v1_knowledge_views import pca_views
 from tomography.experiments.v1_knowledge_views import plot
@@ -47,6 +52,8 @@ from tomography.experiments.v1_knowledge_views import run_plan
 from tomography.experiments.v1_knowledge_views import select_items
 from tomography.experiments.v1_knowledge_views import shuffled_draw
 from tomography.experiments.v1_knowledge_views import supervised_views
+from tomography.experiments.v1_knowledge_views import text_view
+from tomography.experiments.v1_knowledge_views import text_views
 from tomography.experiments.v1_knowledge_views import train_draws
 from tomography.experiments.v1_knowledge_views import view_layers
 from tomography.export import ExportError
@@ -162,13 +169,6 @@ def test_the_cli_discovers_the_experiment() -> None:
     assert experiment.config_cls is Config
     assert experiment.run is run
     assert experiment.plot is plot
-
-
-def test_plot_draws_nothing_before_the_views_exist(tmp_path: Path) -> None:
-    config = Config(labels_run="runs/p9a", reading_run="runs/p9b")
-    run_dir = RunDir.create(config, out_root=tmp_path)
-
-    assert plot(run_dir, tmp_path / "figures") == []
 
 
 def test_load_reading_returns_the_committed_numbers(
@@ -778,8 +778,12 @@ class Read:
     acts: ItemActivations
 
 
-def _read(tiny_arch: LoadedModel, inputs: Inputs) -> Read:
+def _read(
+    tiny_arch: LoadedModel, inputs: Inputs, *, layer: int | None = None
+) -> Read:
     committed = load_reading(inputs.reading.path, model="tiny")
+    if layer is not None:
+        committed = dataclasses.replace(committed, layer=layer)
     pools = _pools(committed)
     union = {
         i.example.uid: i
@@ -1149,6 +1153,32 @@ def default_run(
     return _DEFAULT_RUNS[key]
 
 
+_LAYER_RUNS: dict[tuple[str, int], RunDir] = {}
+
+
+@pytest.fixture
+def run_at(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Callable[[int], RunDir]:
+    """V1 runs per architecture whose P9b run chose a given layer."""
+    key = type(tiny_arch.model).__name__
+
+    def build(layer: int) -> RunDir:
+        if (key, layer) not in _LAYER_RUNS:
+            out = tmp_path_factory.mktemp(f"v1-layer{layer}-{key}")
+            reading = dataclasses.replace(
+                load_reading(inputs.reading.path, model="tiny"), layer=layer
+            )
+            _LAYER_RUNS[(key, layer)] = _execute(
+                tiny_arch, out, inputs, reading=reading
+            )
+        return _LAYER_RUNS[(key, layer)]
+
+    return build
+
+
 def _summary(run_dir: RunDir) -> dict[str, Any]:
     summary = run_dir.read_json("summary")
     assert isinstance(summary, dict)
@@ -1165,6 +1195,7 @@ def test_execute_writes_the_files_of_a_run(default_run: RunDir) -> None:
         "projections.json",
         "projections.npz",
         "summary.json",
+        "text2d.npz",
     ]
 
 
@@ -1351,6 +1382,8 @@ def test_the_extraction_reads_layers_one_to_the_last_of_the_selected_items(
     assert [i.example.uid for i in captured.items] == [
         i.example.uid for i in selected
     ]
+    assert captured.acts is not None
+    assert tuple(captured.acts.layers) == committed.layers
     template, chat = captured.args
     assert template == p9_template("fewshot", DEFAULT_SHOTS[:2])
     assert chat.kind == chat_format_for(tiny_arch).kind
@@ -1375,7 +1408,9 @@ def test_the_published_reader_and_its_projections_are_written(
 
     assert captured.acts is not None
     reads = captured.acts
-    views = published_views(committed, reads, _pools(committed))
+    views = published_views(
+        committed, reads, _pools(committed), cap=MAX_DISPLAYED
+    )
     arrays = run_dir.read_arrays("projections")
     np.testing.assert_array_equal(arrays["published"], views.auroc)
     for key, projection in views.projections.items():
@@ -1456,13 +1491,13 @@ def test_execute_is_deterministic(
     first = _execute(tiny_arch, tmp_path / "a", inputs)
     second = _execute(tiny_arch, tmp_path / "b", inputs)
 
-    one, two = (
-        first.read_arrays("projections"),
-        second.read_arrays("projections"),
-    )
-    assert one.keys() == two.keys()
-    for key in one:
-        np.testing.assert_array_equal(one[key], two[key], err_msg=key)
+    for name in ("projections", "pca2d", "text2d"):
+        one, two = first.read_arrays(name), second.read_arrays(name)
+        assert one.keys() == two.keys(), name
+        for key in one:
+            np.testing.assert_array_equal(
+                one[key], two[key], err_msg=f"{name}.{key}"
+            )
     assert first.read_json("projections") == second.read_json("projections")
     assert first.read_json("summary") == second.read_json("summary")
 
@@ -1639,6 +1674,7 @@ def test_every_file_of_a_run_passes_the_export(
         "projections.npz",
         "projections.json",
         "pca2d.npz",
+        "text2d.npz",
         "summary.json",
     ):
         assert is_exported(name), name
@@ -1658,6 +1694,7 @@ def test_every_file_of_a_run_passes_the_export(
         "projections.json",
         "projections.npz",
         "summary.json",
+        "text2d.npz",
     ]
 
 
@@ -1775,18 +1812,31 @@ def test_the_sidecar_lists_the_panels_and_the_items_they_show(
         assert len(set(panel["uids"])) == len(panel["uids"])
 
 
+CHOSEN_LAYERS = pytest.mark.parametrize(
+    ("chosen", "shown"),
+    [(1, [1, 3]), (2, [1, 2, 3]), (3, [1, 3])],
+    ids=["first", "middle", "last"],
+)
+
+
+@pytest.mark.parametrize(
+    ("chosen", "n_layers", "want"),
+    [
+        (2, 3, (1, 2, 3)),
+        (1, 3, (1, 3)),
+        (3, 3, (1, 3)),
+        (1, 1, (1,)),
+    ],
+    ids=["middle", "first", "last", "only"],
+)
 def test_the_views_are_drawn_at_layer_one_the_chosen_layer_and_the_last(
-    tiny_arch: LoadedModel, inputs: Inputs
+    inputs: Inputs, chosen: int, n_layers: int, want: tuple[int, ...]
 ) -> None:
     committed = load_reading(inputs.reading.path, model="tiny")
 
-    assert view_layers(committed, tiny_arch.n_layers) == (
-        1,
-        committed.layer,
-        tiny_arch.n_layers,
-    )
-    early = dataclasses.replace(committed, layer=1)
-    assert view_layers(early, tiny_arch.n_layers) == (1, 1, tiny_arch.n_layers)
+    reading = dataclasses.replace(committed, layer=chosen)
+
+    assert view_layers(reading, n_layers) == want
 
 
 def _two_panels(read: Read) -> dict[str, list[str]]:
@@ -1800,7 +1850,7 @@ def _two_panels(read: Read) -> dict[str, list[str]]:
 def test_pca_views_fit_each_panel_on_its_own_items(
     tiny_arch: LoadedModel, inputs: Inputs
 ) -> None:
-    read = _read(tiny_arch, inputs)
+    read = _read(tiny_arch, inputs, layer=2)
     panels = _two_panels(read)
     layers = view_layers(read.committed, tiny_arch.n_layers)
 
@@ -1829,7 +1879,7 @@ def test_pca_views_fit_each_panel_on_its_own_items(
 def test_pca_views_ignore_the_items_a_panel_does_not_show(
     tiny_arch: LoadedModel, inputs: Inputs
 ) -> None:
-    read = _read(tiny_arch, inputs)
+    read = _read(tiny_arch, inputs, layer=2)
     panels = _two_panels(read)
     layers = view_layers(read.committed, tiny_arch.n_layers)
     shown = {uid for uids in panels.values() for uid in uids}
@@ -1857,26 +1907,21 @@ def test_pca_views_refuse_an_item_without_activations(
         pca_views(read.acts, layers, {"entity": ["ghost:1"]})
 
 
+@CHOSEN_LAYERS
 def test_execute_writes_the_pca_views_of_each_panel(
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    default_run: RunDir,
+    run_at: Callable[[int], RunDir], chosen: int, shown: list[int]
 ) -> None:
-    sidecar = default_run.read_json("projections")
+    run_dir = run_at(chosen)
+    sidecar = run_dir.read_json("projections")
     assert isinstance(sidecar, dict)
-    committed = load_reading(inputs.reading.path, model="tiny")
 
-    arrays = default_run.read_arrays("pca2d")
+    arrays = run_dir.read_arrays("pca2d")
 
-    assert arrays["view_layers"].tolist() == [
-        1,
-        committed.layer,
-        tiny_arch.n_layers,
-    ]
+    assert arrays["view_layers"].tolist() == shown
     for panel, entry in sidecar["panels"].items():
         n = len(entry["uids"])
-        assert arrays[f"coordinates_{panel}"].shape == (3, n, 2)
-        assert arrays[f"ratios_{panel}"].shape == (3, 2)
+        assert arrays[f"coordinates_{panel}"].shape == (len(shown), n, 2)
+        assert arrays[f"ratios_{panel}"].shape == (len(shown), 2)
     assert set(arrays) == {
         "view_layers",
         *(f"coordinates_{panel}" for panel in sidecar["panels"]),
@@ -1889,16 +1934,58 @@ def test_execute_writes_the_pca_views_of_each_panel(
     }
 
 
-def test_the_summary_names_the_views_and_the_items_they_show(
-    tiny_arch: LoadedModel, inputs: Inputs, default_run: RunDir
+def test_a_small_cap_limits_every_view_of_a_run(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    committed = load_reading(inputs.reading.path, model="tiny")
-    sidecar = default_run.read_json("projections")
+    cap = 3
+    monkeypatch.setattr(v1_module, "MAX_DISPLAYED", cap)
+    pools = _pools(load_reading(inputs.reading.path, model="tiny"))
+    want = {}
+    for name, pool in pools.items():
+        positive, negative = pool.split("test")
+        want[name] = {
+            "positive": [
+                i.example.uid for i in displayed_items(positive, cap=cap)
+            ],
+            "negative": [
+                i.example.uid for i in displayed_items(negative, cap=cap)
+            ],
+        }
+
+    run_dir = _execute(tiny_arch, tmp_path, inputs)
+
+    sidecar = run_dir.read_json("projections")
+    assert isinstance(sidecar, dict)
+    assert sidecar["max_per_side"] == cap
+    assert sidecar["uids"] == want
+    assert any(len(side) == cap for by in want.values() for side in by.values())
+    arrays = run_dir.read_arrays("projections")
+    for name, by in want.items():
+        shown = len(by["positive"]) + len(by["negative"])
+        assert arrays[f"projection_{name}"].shape == (shown,)
+    pca = run_dir.read_arrays("pca2d")
+    text = run_dir.read_arrays("text2d")
+    for panel, entry in sidecar["panels"].items():
+        assert entry["uids"] == panel_union(entry["types"], want)
+        n = len(entry["uids"])
+        assert pca[f"coordinates_{panel}"].shape[1] == n
+        assert text[f"coordinates_{panel}"].shape[0] == n
+
+
+@CHOSEN_LAYERS
+def test_the_summary_names_the_views_and_the_items_they_show(
+    run_at: Callable[[int], RunDir], chosen: int, shown: list[int]
+) -> None:
+    run_dir = run_at(chosen)
+    sidecar = run_dir.read_json("projections")
     assert isinstance(sidecar, dict)
 
-    views = _summary(default_run)["views"]
+    views = _summary(run_dir)["views"]
 
-    assert views["layers"] == [1, committed.layer, tiny_arch.n_layers]
+    assert views["layers"] == shown
     assert views["panels"] == {
         panel: {"types": entry["types"], "n_items": len(entry["uids"])}
         for panel, entry in sidecar["panels"].items()
@@ -1958,6 +2045,25 @@ def test_residual_axis_does_not_see_the_component_along_the_direction() -> None:
     )
 
 
+def test_residual_axis_refuses_rows_that_vary_along_the_direction_alone() -> (
+    None
+):
+    rng = np.random.default_rng(2)
+    t = rng.standard_normal(12)
+    direction = rng.standard_normal(6)
+    rows = np.outer(t, direction) + 5.0
+
+    with pytest.raises(ValueError, match="direction alone"):
+        residual_axis(rows, direction)
+
+
+def test_residual_axis_refuses_a_zero_direction() -> None:
+    rows = np.random.default_rng(3).standard_normal((10, 4))
+
+    with pytest.raises(ValueError, match="zero"):
+        residual_axis(rows, np.zeros(4))
+
+
 def _shown_contrasts(read: Read) -> dict[str, tuple[str, ...]]:
     return panel_contrasts(read.pools)
 
@@ -1965,7 +2071,7 @@ def _shown_contrasts(read: Read) -> dict[str, tuple[str, ...]]:
 def test_supervised_views_set_the_published_projection_against_the_rest(
     tiny_arch: LoadedModel, inputs: Inputs
 ) -> None:
-    read = _read(tiny_arch, inputs)
+    read = _read(tiny_arch, inputs, layer=2)
     committed = read.committed
     panels = _two_panels(read)
     shown = _shown_contrasts(read)
@@ -2005,12 +2111,13 @@ def test_supervised_views_set_the_published_projection_against_the_rest(
 def test_supervised_x_is_the_projection_the_run_publishes(
     tiny_arch: LoadedModel, inputs: Inputs
 ) -> None:
-    read = _read(tiny_arch, inputs)
+    read = _read(tiny_arch, inputs, layer=2)
     committed = read.committed
     panels = _two_panels(read)
     shown = _shown_contrasts(read)
     layers = view_layers(committed, tiny_arch.n_layers)
     arrays = supervised_views(committed, read.acts, layers, panels, shown)
+    at = layers.index(committed.layer)
     own = displayed_uids(read.pools, cap=4)
     published = published_views(committed, read.acts, read.pools, cap=4)
 
@@ -2018,23 +2125,410 @@ def test_supervised_x_is_the_projection_the_run_publishes(
         for name in names:
             uids = [*own[name]["positive"], *own[name]["negative"]]
             places = [panels[panel].index(uid) for uid in uids]
-            chosen = arrays[f"supervised_{name}"][1, places, 0]
+            chosen = arrays[f"supervised_{name}"][at, places, 0]
             np.testing.assert_allclose(
                 chosen, published.projections[f"projection_{name}"], rtol=1e-5
             )
 
 
+@CHOSEN_LAYERS
 def test_execute_writes_the_supervised_view_of_each_shown_contrast(
-    default_run: RunDir,
+    run_at: Callable[[int], RunDir], chosen: int, shown: list[int]
 ) -> None:
-    sidecar = default_run.read_json("projections")
+    run_dir = run_at(chosen)
+    sidecar = run_dir.read_json("projections")
     assert isinstance(sidecar, dict)
 
-    arrays = default_run.read_arrays("pca2d")
+    arrays = run_dir.read_arrays("pca2d")
 
     for entry in sidecar["panels"].values():
         for name in entry["types"]:
             view = arrays[f"supervised_{name}"]
-            assert view.shape == (3, len(entry["uids"]), 2)
+            assert view.shape == (len(shown), len(entry["uids"]), 2)
             assert view.dtype == np.float32
     assert "supervised_obscure_real_pop" not in arrays
+
+
+def test_text_view_separates_questions_that_share_no_words() -> None:
+    # Groups of unequal size give unequal singular values; equal groups would
+    # leave any rotation of the two components a valid answer.
+    first = [f"alpha beta gamma delta {i}" for i in range(8)]
+    second = [f"red green blue yellow {i}" for i in range(4)]
+
+    coordinates, ratios = text_view([*first, *second], seed=0)
+
+    assert coordinates.shape == (12, 2)
+    assert coordinates.dtype == np.float32
+    assert ratios.shape == (2,)
+    assert ratios.dtype == np.float64
+    assert (ratios > 0.0).all()
+    assert ratios.sum() <= 1.0 + 1e-9
+    size = np.abs(coordinates)
+    np.testing.assert_allclose(size[:8], [[1.0, 0.0]] * 8, atol=1e-5)
+    np.testing.assert_allclose(size[8:], [[0.0, 1.0]] * 4, atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "texts",
+    [
+        ["alpha beta gamma"] * 6,
+        [f"alpha beta rare{i}" for i in range(6)],
+    ],
+    ids=["identical", "differ_only_by_words_seen_once"],
+)
+def test_text_view_refuses_texts_with_a_single_component(
+    texts: list[str],
+) -> None:
+    with pytest.raises(ValueError, match="two components"):
+        text_view(texts, seed=0)
+
+
+WORDS = ("river", "mountain", "harbor", "forest", "valley", "island")
+
+
+def _sentence(i: int) -> str:
+    return f"who found the {WORDS[i % 6]} near the {WORDS[(i * 5 + 1) % 6]}"
+
+
+def test_text_view_is_deterministic_for_a_seed() -> None:
+    texts = [_sentence(i) for i in range(30)]
+
+    one = text_view(texts, seed=7)
+    two = text_view(texts, seed=7)
+
+    np.testing.assert_array_equal(one[0], two[0])
+    np.testing.assert_array_equal(one[1], two[1])
+
+
+def test_text_views_use_the_questions_of_the_items_a_panel_shows() -> None:
+    questions = {f"q:{i}": _sentence(i) for i in range(30)}
+    panels = {
+        "entity": ["q:3", "q:1", "q:7", "q:12", "q:20", "q:25"],
+        "unknown": ["q:0", "q:5", "q:9", "q:2", "q:8"],
+    }
+
+    arrays = text_views(questions, panels, seed=4)
+
+    assert set(arrays) == {
+        "coordinates_entity",
+        "ratios_entity",
+        "coordinates_unknown",
+        "ratios_unknown",
+    }
+    for panel, uids in panels.items():
+        coordinates, ratios = text_view(
+            [questions[uid] for uid in uids], seed=derive_seed(4, "text", panel)
+        )
+        np.testing.assert_array_equal(
+            arrays[f"coordinates_{panel}"], coordinates
+        )
+        np.testing.assert_array_equal(arrays[f"ratios_{panel}"], ratios)
+
+
+def test_text_views_refuse_an_item_without_a_question() -> None:
+    with pytest.raises(ValueError, match="no question for 'ghost:1'"):
+        text_views({"q:1": "a b"}, {"entity": ["q:1", "ghost:1"]}, seed=0)
+
+
+def test_execute_writes_the_text_view_of_each_panel(
+    tiny_arch: LoadedModel, inputs: Inputs, default_run: RunDir
+) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+    committed = load_reading(inputs.reading.path, model="tiny")
+    pools = _pools(committed)
+    questions = {
+        i.example.uid: i.example.question
+        for pool in pools.values()
+        for i in (*pool.positive, *pool.negative)
+    }
+
+    arrays = default_run.read_arrays("text2d")
+
+    assert set(arrays) == {
+        *(f"coordinates_{panel}" for panel in sidecar["panels"]),
+        *(f"ratios_{panel}" for panel in sidecar["panels"]),
+    }
+    want = text_views(
+        questions,
+        {name: entry["uids"] for name, entry in sidecar["panels"].items()},
+        seed=0,
+    )
+    for key, value in want.items():
+        np.testing.assert_array_equal(arrays[key], value, err_msg=key)
+    for panel, entry in sidecar["panels"].items():
+        assert arrays[f"coordinates_{panel}"].shape == (len(entry["uids"]), 2)
+        assert arrays[f"ratios_{panel}"].shape == (2,)
+
+
+def test_the_seed_of_the_run_reaches_the_text_view(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seeds: list[int] = []
+    original = v1_module.text_view
+
+    def spy(texts: Any, *, seed: int) -> Any:
+        seeds.append(seed)
+        return original(texts, seed=seed)
+
+    monkeypatch.setattr(v1_module, "text_view", spy)
+
+    _execute(tiny_arch, tmp_path, inputs, seed=3)
+
+    assert seeds == [
+        derive_seed(3, "text", p) for p in ("entity", "question", "unknown")
+    ]
+
+
+def test_no_file_of_a_run_holds_a_question(default_run: RunDir) -> None:
+    questions = [i.example.question for i in _items()]
+
+    for path in default_run.path.iterdir():
+        content = path.read_bytes()
+        for question in questions:
+            for encoding in ("utf-8", "utf-32-le"):
+                assert question.encode(encoding) not in content, path.name
+
+
+@pytest.mark.parametrize("name", ["pca2d", "text2d", "projections"])
+def test_no_array_of_a_run_holds_text(default_run: RunDir, name: str) -> None:
+    arrays = default_run.read_arrays(name)
+
+    assert arrays
+    for key, array in arrays.items():
+        assert array.dtype.kind in "biuf", f"{name}[{key}] is {array.dtype}"
+
+
+def test_no_text_of_a_figure_holds_a_question(default_run: RunDir) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+    pca = default_run.read_arrays("pca2d")
+    text = default_run.read_arrays("text2d")
+    questions = [i.example.question for i in _items()]
+
+    for panel in sidecar["panels"]:
+        figure = panel_figure(panel, sidecar, pca, text)
+        figure.canvas.draw()
+        seen = [artist.get_text() for artist in figure.findobj(Text)]
+        assert "two leading components" in seen
+        assert "words only (LSA)" in seen
+        assert "positive side" in seen
+        assert any(label.strip().lstrip("-").isdigit() for label in seen)
+        for label in seen:
+            for question in questions:
+                assert question not in label, panel
+
+
+def test_a_text_view_that_cannot_be_fitted_fails_before_the_forward_pass(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def never(*args: Any, **kwargs: Any) -> ItemActivations:
+        raise AssertionError("the forward pass must not start")
+
+    def broken(texts: Any, *, seed: int) -> Any:
+        raise ValueError("no text view")
+
+    monkeypatch.setattr(v1_module, "collect_item_activations", never)
+    monkeypatch.setattr(v1_module, "text_view", broken)
+
+    with pytest.raises(ValueError, match="no text view"):
+        _execute(tiny_arch, tmp_path, inputs)
+
+
+def test_run_fits_the_text_views_before_the_model(
+    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _never_loaded(monkeypatch)
+
+    def broken(texts: Any, *, seed: int) -> Any:
+        raise ValueError("no text view")
+
+    monkeypatch.setattr(v1_module, "text_view", broken)
+    config = _config(inputs)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(ValueError, match="no text view"):
+        run(config, run_dir)
+
+
+def test_plot_needs_the_views_of_a_run(tmp_path: Path) -> None:
+    config = Config(labels_run="runs/p9a", reading_run="runs/p9b")
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    with pytest.raises(FileNotFoundError):
+        plot(run_dir, tmp_path / "figures")
+
+
+def test_plot_writes_one_check_figure_per_panel(
+    default_run: RunDir, tmp_path: Path
+) -> None:
+    paths = plot(default_run, tmp_path / "figures")
+
+    names = ["views_entity.png", "views_question.png", "views_unknown.png"]
+    assert [path.name for path in paths] == names
+    assert sorted(p.name for p in (tmp_path / "figures").iterdir()) == names
+    for path in paths:
+        assert path.read_bytes().startswith(b"\x89PNG")
+
+
+def test_plot_is_deterministic(default_run: RunDir, tmp_path: Path) -> None:
+    first = plot(default_run, tmp_path / "a")
+    second = plot(default_run, tmp_path / "b")
+
+    assert len(first) == len(second) == 3
+    for one, two in zip(first, second, strict=True):
+        assert one.read_bytes() == two.read_bytes(), one.name
+
+
+def _points(ax: Any) -> list[int]:
+    return [len(collection.get_offsets()) for collection in ax.collections]
+
+
+@CHOSEN_LAYERS
+def test_a_panel_figure_has_a_row_per_view_layer_and_one_for_the_text(
+    run_at: Callable[[int], RunDir], chosen: int, shown: list[int]
+) -> None:
+    run_dir = run_at(chosen)
+    sidecar = run_dir.read_json("projections")
+    assert isinstance(sidecar, dict)
+    entry = sidecar["panels"]["question"]
+    n = len(entry["uids"])
+
+    figure = panel_figure(
+        "question",
+        sidecar,
+        run_dir.read_arrays("pca2d"),
+        run_dir.read_arrays("text2d"),
+    )
+
+    visible = [ax for ax in figure.axes if ax.get_visible()]
+    assert len(visible) == len(shown) * (1 + len(entry["types"])) + 1
+    assert [ax.get_ylabel() for ax in visible if ax.get_ylabel()] == [
+        *(f"layer {layer}" for layer in shown),
+        "words only (LSA)",
+    ]
+    for ax in visible:
+        assert sum(_points(ax)) == n
+
+
+def test_a_panel_figure_colours_the_items_by_their_side(
+    default_run: RunDir,
+) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+    entry = sidecar["panels"]["entity"]
+    first = entry["types"][0]
+    own = sidecar["uids"][first]
+    positive = {
+        u for name in entry["types"] for u in sidecar["uids"][name]["positive"]
+    }
+    negative = {
+        u for name in entry["types"] for u in sidecar["uids"][name]["negative"]
+    }
+
+    figure = panel_figure(
+        "entity",
+        sidecar,
+        default_run.read_arrays("pca2d"),
+        default_run.read_arrays("text2d"),
+    )
+
+    unsupervised, supervised = figure.axes[0], figure.axes[1]
+    assert _points(unsupervised) == [
+        0,
+        len(positive - negative),
+        len(negative),
+    ]
+    n = len(entry["uids"])
+    assert _points(supervised) == [
+        n - len(own["positive"]) - len(own["negative"]),
+        len(own["positive"]),
+        len(own["negative"]),
+    ]
+
+
+def test_the_text_row_says_that_it_is_lsa_not_pca(default_run: RunDir) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+
+    figure = panel_figure(
+        "entity",
+        sidecar,
+        default_run.read_arrays("pca2d"),
+        default_run.read_arrays("text2d"),
+    )
+
+    labels = [ax.get_ylabel() for ax in figure.axes if ax.get_visible()]
+    assert labels.count("words only (LSA)") == 1
+    assert "words only" not in labels
+
+
+def _drawn_views() -> tuple[
+    dict[str, Any], dict[str, np.ndarray], dict[str, np.ndarray]
+]:
+    """Planted views of one panel whose items sit on different sides."""
+    uids = [f"u{i}" for i in range(6)]
+    sidecar = {
+        "uids": {
+            "a": {"positive": ["u0", "u1"], "negative": ["u2"]},
+            "b": {"positive": ["u2", "u5"], "negative": ["u3", "u4"]},
+        },
+        "panels": {"p": {"types": ["a", "b"], "uids": uids}},
+    }
+    rng = np.random.default_rng(0)
+
+    def planted(*shape: int) -> np.ndarray:
+        return rng.standard_normal(shape).astype(np.float32)
+
+    pca = {
+        "view_layers": np.array([1, 2, 3]),
+        "coordinates_p": planted(3, 6, 2),
+        "supervised_a": planted(3, 6, 2),
+        "supervised_b": planted(3, 6, 2),
+    }
+    return sidecar, pca, {"coordinates_p": planted(6, 2)}
+
+
+def _assert_sides(
+    ax: Any, points: np.ndarray, codes: list[int], where: str
+) -> None:
+    """Checks the points of each group of an axes against the planted ones."""
+    drawn = [np.asarray(c.get_offsets()) for c in ax.collections]
+    assert len(drawn) == 3, where
+    for offsets, code in zip(drawn, (-1, 0, 1), strict=True):
+        want = points[np.array(codes) == code]
+        assert offsets.shape == want.shape, f"{where}, group {code}"
+        np.testing.assert_allclose(offsets, want, err_msg=f"{where} {code}")
+
+
+def test_a_panel_figure_draws_the_stored_coordinates_by_side() -> None:
+    sidecar, pca, text = _drawn_views()
+    both = [0, 0, 1, 1, 1, 0]
+    only_a = [0, 0, 1, -1, -1, -1]
+    only_b = [-1, -1, 0, 1, 1, 0]
+
+    figure = panel_figure("p", sidecar, pca, text)
+
+    axes = np.array(figure.axes).reshape(4, 3)
+    for v in range(3):
+        _assert_sides(axes[v, 0], pca["coordinates_p"][v], both, f"all {v}")
+        _assert_sides(axes[v, 1], pca["supervised_a"][v], only_a, f"a {v}")
+        _assert_sides(axes[v, 2], pca["supervised_b"][v], only_b, f"b {v}")
+    _assert_sides(axes[3, 0], text["coordinates_p"], both, "words")
+    assert [ax.get_ylabel() for ax in axes[:, 0]] == [
+        "layer 1",
+        "layer 2",
+        "layer 3",
+        "words only (LSA)",
+    ]
+    assert [ax.get_title() for ax in axes[0]] == [
+        "two leading components",
+        "a",
+        "b",
+    ]

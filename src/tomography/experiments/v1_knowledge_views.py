@@ -2,10 +2,13 @@
 
 P9b reports how well a direction separates known from unknown questions. This
 experiment keeps the hidden states of the same questions, so the readers can
-be seen and not only scored. The inputs are two finished runs of the model:
-the P9a labels and the P9b reading. The model loads in float32 on the default
-device, because the shared few-shot prefix matches the uncached activations
-only in float32; `meta.json` records the device the numbers came from.
+be seen and not only scored: the 2D views of the questions the figures show,
+each beside a text-only view of the same questions, and the published reader of
+each contrast against the rest of the hidden state. The inputs are two
+finished runs of the model: the P9a labels and the P9b reading. The model loads
+in float32 on the default device, because the shared few-shot prefix matches
+the uncached activations only in float32; `meta.json` records the device the
+numbers came from.
 """
 
 from collections import Counter
@@ -19,8 +22,13 @@ from pathlib import Path
 from typing import Any
 from typing import cast
 
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 import numpy as np
 from numpy.typing import NDArray
+from sklearn.decomposition import TruncatedSVD
+from sklearn.feature_extraction.text import TfidfVectorizer
 import torch
 
 from tomography.analysis import pca_coordinates
@@ -51,6 +59,8 @@ from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import panel_of
 from tomography.reading.metrics import auroc
 from tomography.reading.reader import RepReader
+from tomography.viz import style
+from tomography.viz.geometry import POINT_SIZE
 
 READING_FILES = (
     "summary.json",
@@ -63,6 +73,8 @@ READING_FILES = (
 TOLERANCE = 0.02
 SURFACE_TOLERANCE = 1e-9
 MAX_DISPLAYED = 300
+REST_ENERGY = 1e-12
+MIN_SECOND_COMPONENT = 1e-9
 SHOWN_ENTITY = ("obscure_real", "fictional_generated")
 COUNT_COLUMNS = (
     "n_positive_train",
@@ -78,7 +90,9 @@ class Config(ExperimentConfig):
 
     Everything else is read from the P9b run, so the questions, the draws and
     the template are those of its committed numbers. The seed of this run only
-    mixes into the permutations of the shuffled-label control.
+    mixes into the permutations of the shuffled-label control and into the
+    randomized SVD of the text-only views, which are an LSA on uncentered
+    TF-IDF and not a PCA.
 
     Attributes:
         labels_run: Path of a finished P9a run of the same model.
@@ -497,7 +511,7 @@ def refit_shuffled(
 
 
 def displayed_items(
-    items: Sequence[LabeledItem], *, cap: int = MAX_DISPLAYED
+    items: Sequence[LabeledItem], *, cap: int
 ) -> list[LabeledItem]:
     """Picks the items a figure draws, whoever looks at the run.
 
@@ -516,7 +530,7 @@ def displayed_items(
 
 
 def displayed_uids(
-    pools: Mapping[str, TypePool], *, cap: int = MAX_DISPLAYED
+    pools: Mapping[str, TypePool], *, cap: int
 ) -> dict[str, dict[str, list[str]]]:
     """Names the items a figure draws for each side of each contrast.
 
@@ -702,7 +716,7 @@ def published_views(
     acts: ItemActivations,
     pools: Mapping[str, TypePool],
     *,
-    cap: int = MAX_DISPLAYED,
+    cap: int,
 ) -> PublishedViews:
     """Scores the test items on the published reader of each contrast.
 
@@ -739,27 +753,40 @@ def published_views(
     return PublishedViews(aurocs, projections, uids)
 
 
-def view_layers(
-    reading: CommittedReading, n_layers: int
-) -> tuple[int, int, int]:
+def view_layers(reading: CommittedReading, n_layers: int) -> tuple[int, ...]:
     """Names the layers the 2D views are drawn at.
 
-    Layer 0 is left out: at the last token of the few-shot prompt it is one
-    token embedding for every question. Layer 1 shows what the model has
-    done with a question before it has read much of it.
+    Layer 0 is left out: every prompt ends in the same token, so layer 0 at
+    the last position is the embedding of that token and nothing of the
+    question. For GPT-2 it is the token embedding plus the position
+    embedding, so it varies only with the length of the prompt. Layer 1 shows
+    what the model has done with a question before it has read much of it.
 
     Args:
         reading: The committed P9b run.
         n_layers: The number of layers of the model, L.
 
     Returns:
-        Layer 1, the layer the P9b run chose and the last layer. They are
-        not told apart when the run chose one of the others.
+        Layer 1, the layer the P9b run chose and the last layer, in that
+        order and each once: a run that chose layer 1 or the last layer
+        gets two views and not three.
     """
-    return (1, reading.layer, n_layers)
+    return tuple(dict.fromkeys((1, reading.layer, n_layers)))
 
 
 def _rows(acts: ItemActivations, uids: Sequence[str]) -> NDArray[np.int64]:
+    """Finds the row of each item among the activations.
+
+    Args:
+        acts: The activations.
+        uids: The items to find, in the order wanted.
+
+    Returns:
+        The row of each uid in `acts`, shape (len(uids),).
+
+    Raises:
+        ValueError: If an item has no activations.
+    """
     index = {uid: row for row, uid in enumerate(acts.uids)}
     for uid in uids:
         if uid not in index:
@@ -823,13 +850,21 @@ def residual_axis(
         shape (n,), signed as `tomography.analysis.pca_coordinates` does.
 
     Raises:
-        ValueError: If nothing but the direction varies across the rows.
+        ValueError: If `direction` is zero, or nothing but the direction
+            varies across the rows: what is left of them holds less than
+            `REST_ENERGY` of their centered energy.
     """
     rows = np.asarray(h, dtype=np.float64)
     rows = rows - rows.mean(axis=0)
     unit = np.asarray(direction, dtype=np.float64)
-    unit = unit / np.linalg.norm(unit)
+    norm = np.linalg.norm(unit)
+    if norm == 0.0:
+        raise ValueError("the direction is zero")
+    unit = unit / norm
+    centered = float(np.sum(rows**2))
     rows -= np.outer(rows @ unit, unit)
+    if float(np.sum(rows**2)) <= REST_ENERGY * centered:
+        raise ValueError("the rows vary along the direction alone")
     coordinates, _ = pca_coordinates(rows[None])
     return coordinates[0, :, 0]
 
@@ -889,6 +924,86 @@ def supervised_views(
     return arrays
 
 
+def text_view(
+    texts: Sequence[str], *, seed: int
+) -> tuple[NDArray[np.float32], NDArray[np.float64]]:
+    """Places questions by their words alone, the text-only control of a view.
+
+    The features are TF-IDF weights of the word 1-grams and 2-grams seen in
+    at least 2 of the texts, as in the text classifier of the P9b table. A
+    truncated SVD keeps the two leading components. This is latent semantic
+    analysis (LSA) on uncentered features, not a PCA: the first component
+    mostly follows the mean of the features, and the shares of variance it
+    returns are not comparable with the ratios of `pca_views`.
+
+    Args:
+        texts: The questions of a panel.
+        seed: Seeds the randomized SVD.
+
+    Returns:
+        The coordinates of shape (n, 2) float32 and the share of the
+        variance of the features each LSA component keeps, shape (2,)
+        float64.
+
+    Raises:
+        ValueError: If the texts share too few words to give two components:
+            fewer than two features are left, or the second singular value
+            is below `MIN_SECOND_COMPONENT` of the first, as when the
+            questions differ only by words that occur once.
+    """
+    vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=2, lowercase=True)
+    features = vectorizer.fit_transform(texts)
+    svd = TruncatedSVD(n_components=2, random_state=seed)
+    with np.errstate(invalid="ignore"):
+        coordinates = svd.fit_transform(features)
+    first, second = svd.singular_values_
+    if second <= MIN_SECOND_COMPONENT * first:
+        raise ValueError("the texts do not give two components")
+    return (
+        np.asarray(coordinates, dtype=np.float32),
+        np.asarray(svd.explained_variance_ratio_, dtype=np.float64),
+    )
+
+
+def text_views(
+    questions: Mapping[str, str],
+    panels: Mapping[str, Sequence[str]],
+    *,
+    seed: int,
+) -> dict[str, NDArray[Any]]:
+    """Fits the text-only view of each panel on the questions it shows.
+
+    The text is read here and goes no further: the arrays hold coordinates
+    only. The views are LSA on uncentered TF-IDF (see `text_view`), so the
+    `ratios_<panel>` are not PCA ratios.
+
+    Args:
+        questions: The text of each question by uid.
+        panels: The uids each panel shows, see `panel_union`.
+        seed: The seed of the run; each panel derives its own.
+
+    Returns:
+        For each panel, `coordinates_<panel>` (n, 2) float32 and
+        `ratios_<panel>` (2,) float64, in the order of its uids.
+
+    Raises:
+        ValueError: If a panel item has no question, or a panel gives no
+            view (see `text_view`).
+    """
+    arrays: dict[str, NDArray[Any]] = {}
+    for panel, uids in panels.items():
+        for uid in uids:
+            if uid not in questions:
+                raise ValueError(f"no question for {uid!r}")
+        coordinates, ratios = text_view(
+            [questions[uid] for uid in uids],
+            seed=derive_seed(seed, "text", panel),
+        )
+        arrays[f"coordinates_{panel}"] = coordinates
+        arrays[f"ratios_{panel}"] = ratios
+    return arrays
+
+
 @dataclass(frozen=True, eq=False)
 class Plan:
     """What a run needs before it touches the model.
@@ -900,12 +1015,17 @@ class Plan:
             `select_items`.
         surface: The recomputed surface controls beside the committed ones,
             see `compare_surface`.
+        panels: The contrasts and the uids of the items each panel of the
+            figures shows, see `panel_union`.
+        text: The text-only view of each panel, see `text_views`.
     """
 
     pools: dict[str, TypePool]
     draws: dict[str, list[TrainDraw]]
     selected: list[LabeledItem]
     surface: dict[str, dict[str, dict[str, Any]]]
+    panels: dict[str, dict[str, Any]]
+    text: dict[str, NDArray[Any]]
 
 
 def prepare(
@@ -929,8 +1049,9 @@ def prepare(
     Raises:
         ValueError: If `batch_size` is below 1, the P9b run was read from
             other labels (see `check_labels_run`), the contrasts rebuilt from
-            the labels differ from those of the run (see `check_reading`) or
-            a surface control cannot be computed.
+            the labels differ from those of the run (see `check_reading`), a
+            surface control cannot be computed or a text view cannot be
+            fitted (see `text_view`).
     """
     if config.batch_size < 1:
         raise ValueError("batch_size must be at least 1")
@@ -939,7 +1060,22 @@ def prepare(
     check_reading(reading, pools)
     surface = compare_surface(pools, reading)
     draws = train_draws(pools, reading.config)
-    return Plan(pools, draws, select_items(pools, draws), surface)
+    shown = displayed_uids(pools, cap=MAX_DISPLAYED)
+    panels = {
+        panel: {"types": list(types), "uids": panel_union(types, shown)}
+        for panel, types in panel_contrasts(pools).items()
+    }
+    questions = {
+        item.example.uid: item.example.question
+        for pool in pools.values()
+        for item in (*pool.positive, *pool.negative)
+    }
+    text = text_views(
+        questions,
+        {name: panel["uids"] for name, panel in panels.items()},
+        seed=config.seed,
+    )
+    return Plan(pools, draws, select_items(pools, draws), surface, panels, text)
 
 
 def run_plan(
@@ -970,6 +1106,9 @@ def run_plan(
     its contrasts and the uids of the items it shows (see `panel_union`).
     Writes `pca2d.npz`: the 2D views of each panel (see `pca_views`) and
     the supervised view of each shown contrast (see `supervised_views`).
+    Writes `text2d.npz`: the text-only view of each panel (see
+    `text_views`), an LSA on uncentered TF-IDF whose ratios are not PCA
+    ratios; the questions are read to make it and are not stored.
     Writes `summary`: the layer, the number of items extracted, the dtype of
     this run (`extraction_dtype`, that of the loaded model) and the one the
     P9b run was extracted in (`reading_run_dtype`, the registry default of
@@ -994,6 +1133,8 @@ def run_plan(
     check_model(reading, loaded)
     protocol = reading.config
     pools, draws, selected = plan.pools, plan.draws, plan.selected
+    panels = plan.panels
+    panel_uids = {name: panel["uids"] for name, panel in panels.items()}
     template = p9_template(protocol.template, DEFAULT_SHOTS[: protocol.n_shots])
     acts = collect_item_activations(
         loaded,
@@ -1007,13 +1148,8 @@ def run_plan(
     )
     test = refit_methods(acts, pools, draws, protocol)
     shuffled = refit_shuffled(acts, pools, draws, protocol, seed=config.seed)
-    views = published_views(reading, acts, pools)
-    panels = {
-        panel: {"types": list(shown), "uids": panel_union(shown, views.uids)}
-        for panel, shown in panel_contrasts(pools).items()
-    }
+    views = published_views(reading, acts, pools, cap=MAX_DISPLAYED)
     layers = view_layers(reading, loaded.n_layers)
-    panel_uids = {name: panel["uids"] for name, panel in panels.items()}
     run_dir.write_arrays(
         "pca2d",
         **pca_views(acts, layers, panel_uids),
@@ -1025,6 +1161,7 @@ def run_plan(
             {name: panel["types"] for name, panel in panels.items()},
         ),
     )
+    run_dir.write_arrays("text2d", **plan.text)
     run_dir.write_arrays(
         "projections",
         layers=np.asarray(reading.layers, dtype=np.int64),
@@ -1139,14 +1276,148 @@ def run(config: Config, run_dir: RunDir) -> None:
     run_plan(config, run_dir, loaded, plan, reading)
 
 
+def _sides_of(
+    uids: Sequence[str], sides: Sequence[Mapping[str, Sequence[str]]]
+) -> NDArray[np.int64]:
+    """Tells on which side of some contrasts each item lies.
+
+    Args:
+        uids: The items to place.
+        sides: The uids of the positive and the negative side of each
+            contrast, as the `projections.json` of a run holds them.
+
+    Returns:
+        For each item, 1 if any contrast puts it on its negative side, else
+        0 if any puts it on its positive side, else -1.
+    """
+    negative = {uid for side in sides for uid in side["negative"]}
+    positive = {uid for side in sides for uid in side["positive"]}
+    return np.array(
+        [
+            1 if uid in negative else 0 if uid in positive else -1
+            for uid in uids
+        ],
+        dtype=np.int64,
+    )
+
+
+def _scatter(ax: Axes, points: NDArray[Any], sides: NDArray[np.int64]) -> None:
+    """Draws the points of a panel in one color and shape for each side.
+
+    Args:
+        ax: The axes to draw on.
+        points: Coordinates of shape (n, 2).
+        sides: The side of each point, see `_sides_of`: 0 positive, 1
+            negative, -1 not in the contrast, drawn gray.
+    """
+    look = {
+        -1: (style.INK_MUTED, "o", 0.4),
+        0: (style.CATEGORICAL[0], "o", 1.0),
+        1: (style.CATEGORICAL[1], "s", 1.0),
+    }
+    for code, (color, marker, alpha) in look.items():
+        chosen = points[sides == code]
+        ax.scatter(
+            chosen[:, 0],
+            chosen[:, 1],
+            s=POINT_SIZE,
+            color=color,
+            marker=marker,
+            alpha=alpha,
+            edgecolors=style.SURFACE,
+            linewidths=0.4,
+            rasterized=True,
+        )
+
+
+def panel_figure(
+    panel: str,
+    sidecar: Mapping[str, Any],
+    pca: Mapping[str, NDArray[Any]],
+    text: Mapping[str, NDArray[Any]],
+) -> Figure:
+    """Draws the views of one panel, a check of the run and not a final figure.
+
+    There is a row for each layer of the 2D views and a last row for the
+    text-only view. The first column places every item of the panel on its two
+    leading components (on the two LSA components of the words in the last
+    row, which are not principal components). The other columns, one for each
+    contrast of the panel, set the published reader of the contrast against
+    the leading component of the rest; the text row has none. A point has one
+    color and shape on the positive side of a contrast, another on the
+    negative side, and is gray where the contrast does not show it. In the
+    first column an item takes the negative side if any contrast puts it
+    there.
+
+    Args:
+        panel: The panel to draw.
+        sidecar: The `projections.json` of the run.
+        pca: The arrays of `pca2d.npz`.
+        text: The arrays of `text2d.npz`.
+
+    Returns:
+        The figure.
+    """
+    entry = sidecar["panels"][panel]
+    types: list[str] = entry["types"]
+    layers: list[int] = pca["view_layers"].tolist()
+    shown = sidecar["uids"]
+    every = _sides_of(entry["uids"], [shown[name] for name in types])
+    own = {name: _sides_of(entry["uids"], [shown[name]]) for name in types}
+    rows, columns = len(layers) + 1, 1 + len(types)
+    with style.style_context():
+        fig, axes = style.new_figure(
+            rows, columns, width=max(style.TEXT_WIDTH, 1.8 * columns)
+        )
+        for v, layer in enumerate(layers):
+            _scatter(axes[v, 0], pca[f"coordinates_{panel}"][v], every)
+            axes[v, 0].set_ylabel(f"layer {layer}")
+            for c, name in enumerate(types, start=1):
+                _scatter(axes[v, c], pca[f"supervised_{name}"][v], own[name])
+        _scatter(axes[-1, 0], text[f"coordinates_{panel}"], every)
+        axes[-1, 0].set_ylabel("words only (LSA)")
+        for ax in axes[-1, 1:]:
+            ax.set_visible(False)
+        axes[0, 0].set_title("two leading components")
+        for c, name in enumerate(types, start=1):
+            axes[0, c].set_title(name)
+        keys = [
+            Line2D(
+                [], [], linestyle="", marker=marker, color=color, label=label
+            )
+            for color, marker, label in (
+                (style.CATEGORICAL[0], "o", "positive side"),
+                (style.CATEGORICAL[1], "s", "negative side"),
+                (style.INK_MUTED, "o", "not in the contrast"),
+            )
+        ]
+        fig.legend(handles=keys, loc="outside upper center", ncols=len(keys))
+    return fig
+
+
 def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
-    """Draws nothing yet: the views of a run come with its 2D outputs.
+    """Draws a check figure of the views of each panel of a run.
 
     Args:
         run_dir: A finished V1 run.
         out_dir: Folder of the figures.
 
     Returns:
-        An empty list.
+        The PNG of each panel, `views_<panel>.png`, in the order of the
+        panels.
+
+    Raises:
+        FileNotFoundError: If the run has no views.
     """
-    return []
+    sidecar = cast(dict[str, Any], run_dir.read_json("projections"))
+    pca = run_dir.read_arrays("pca2d")
+    text = run_dir.read_arrays("text2d")
+    paths: list[Path] = []
+    for panel in sidecar["panels"]:
+        paths += style.save_figure(
+            panel_figure(panel, sidecar, pca, text),
+            out_dir,
+            f"views_{panel}",
+            formats=("png",),
+        )
+    return paths
