@@ -148,11 +148,25 @@ class ItemActivations:
         Raises:
             ValueError: If an item has no row; names the first one.
         """
+        return self.rows_of([item.example.uid for item in items])
+
+    def rows_of(self, uids: Sequence[str]) -> NDArray[np.int64]:
+        """Finds the row of each question by its uid.
+
+        Args:
+            uids: Questions whose activations were collected.
+
+        Returns:
+            The row of each uid, in order, as int64.
+
+        Raises:
+            ValueError: If a uid has no row; names the first one.
+        """
         index = {uid: row for row, uid in enumerate(self.uids)}
-        for item in items:
-            if item.example.uid not in index:
-                raise ValueError(f"no activations for {item.example.uid!r}")
-        return np.array([index[i.example.uid] for i in items], dtype=np.int64)
+        for uid in uids:
+            if uid not in index:
+                raise ValueError(f"no activations for {uid!r}")
+        return np.array([index[uid] for uid in uids], dtype=np.int64)
 
 
 def collect_item_activations(
@@ -350,12 +364,15 @@ class TrainDraw:
         pairs: Shape (m, 2): rows of `items`, one item of each side per pair.
             None for a draw whose labels no longer agree with the pairs, such
             as one with shuffled labels, which `fit_draw` then fits unpaired.
+        seed: The seed the pairs were drawn with, which `fit_draw` also
+            seeds the stochastic finders with.
     """
 
     items: tuple[LabeledItem, ...]
     labels: NDArray[np.int64]
     strata: NDArray[np.int64]
     pairs: NDArray[np.int64] | None
+    seed: int
 
 
 def draw_train(pool: TypePool, *, n_pairs: int | None, seed: int) -> TrainDraw:
@@ -389,6 +406,7 @@ def draw_train(pool: TypePool, *, n_pairs: int | None, seed: int) -> TrainDraw:
         labels=labels[used],
         strata=codes[used],
         pairs=np.searchsorted(used, pairs),
+        seed=seed,
     )
 
 
@@ -398,20 +416,18 @@ def fit_draw(
     *,
     method: Method = "logistic",
     preprocess: Preprocess = "center",
-    seed: int = 0,
 ) -> RepReader:
     """Fits a reader on the items of a draw.
 
     A higher score means the positive side for every method: the reader
     orients each layer on the labels, inside the pairs when the draw has
-    them.
+    them. The seed of the draw seeds the stochastic finders.
 
     Args:
         acts: The activations of at least the items of the draw.
-        draw: The items, labels and pairs to fit on.
+        draw: The items, labels, pairs and seed to fit on.
         method: The direction finder.
         preprocess: Vector preparation, see `fit_direction`.
-        seed: Seeds the stochastic finders.
 
     Returns:
         The reader, one direction per layer of `acts`.
@@ -428,7 +444,7 @@ def fit_draw(
         pairs=draw.pairs,
         groups=draw.pairs,
         preprocess=preprocess,
-        seed=seed,
+        seed=draw.seed,
     )
 
 
@@ -464,7 +480,31 @@ def fit_type_reader(
         ValueError: If no pair can be formed or an item has no activations.
     """
     draw = draw_train(pool, n_pairs=n_pairs, seed=seed)
-    return fit_draw(acts, draw, method=method, preprocess=preprocess, seed=seed)
+    return fit_draw(acts, draw, method=method, preprocess=preprocess)
+
+
+def split_activations(
+    acts: ItemActivations, pool: TypePool, split: Split
+) -> tuple[NDArray[np.float32], NDArray[np.int64]]:
+    """Gathers the activations of the items of one split of a contrast.
+
+    Several readers can be scored on the one array, without gathering the
+    rows again for each of them.
+
+    Args:
+        acts: The activations of at least the items of the split.
+        pool: One contrast.
+        split: "train", "val" or "test".
+
+    Returns:
+        The activations of shape (K, n, d), and the labels of shape (n,), in
+        the order `type_scores` scores them.
+
+    Raises:
+        ValueError: If an item has no activations.
+    """
+    rows, labels = _split_arrays(acts, pool, split)
+    return acts.data[:, rows], labels
 
 
 def type_scores(
@@ -486,8 +526,8 @@ def type_scores(
     Raises:
         ValueError: If an item has no activations.
     """
-    rows, labels = _split_arrays(acts, pool, split)
-    return reader.score(acts.data[:, rows]), labels
+    h, labels = split_activations(acts, pool, split)
+    return reader.score(h), labels
 
 
 def type_auroc(

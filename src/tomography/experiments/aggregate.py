@@ -120,6 +120,47 @@ def finished_run(path: str | Path) -> RunDir:
     return run_dir
 
 
+def open_finished(
+    path: str | Path,
+    *,
+    model: str,
+    files: Sequence[str],
+    experiment: str | None = None,
+) -> RunDir:
+    """Opens a finished run and checks that it can feed a study of `model`.
+
+    Args:
+        path: The run directory.
+        model: The model the caller is about to read.
+        files: The files of the run that the caller reads.
+        experiment: The experiment the run must come from; None takes any.
+
+    Returns:
+        The run directory.
+
+    Raises:
+        ValueError: If `path` is not a finished run (see `finished_run`), it
+            is a run of another experiment or of another model, or one of
+            `files` is missing (an export drops the arrays and the items).
+    """
+    run_dir = finished_run(path)
+    found = run_dir.meta.get("experiment")
+    if experiment is not None and found != experiment:
+        raise ValueError(
+            f"{path} is a run of the experiment {found!r}, not {experiment!r}"
+        )
+    found = run_dir.config.get("model")
+    if found != model:
+        raise ValueError(f"{path} is a run of {found!r}, not of {model!r}")
+    missing = [name for name in files if not (run_dir.path / name).is_file()]
+    if missing:
+        raise ValueError(
+            f"{path} has no {missing[0]}: read the full run directory, not an "
+            "export"
+        )
+    return run_dir
+
+
 def default_run(out_root: str | Path, experiment: str, model: str) -> RunDir:
     """Opens the finished run of an experiment's default config on a model.
 

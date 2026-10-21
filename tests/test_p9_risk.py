@@ -27,6 +27,7 @@ from tomography.p9.risk import risk_band
 from tomography.p9.risk import risk_coverage
 from tomography.p9.risk import stack_scores
 from tomography.p9.risk import text_scores
+from tomography.p9.risk import word_vectorizer
 from tomography.reading.metrics import auroc
 
 GRID = tuple(range(5, 101, 5))
@@ -490,6 +491,18 @@ def test_text_scores_auroc_uses_the_documented_settings(
     assert seen["classifier"]["C"] == 10
     assert seen["classifier"]["max_iter"] == 2000
     assert seen["classifier"]["class_weight"] == "balanced"
+
+
+def test_word_vectorizer_holds_the_word_features_of_the_text_baseline() -> None:
+    vectorizer = word_vectorizer()
+
+    assert isinstance(vectorizer, TfidfVectorizer)
+    params = vectorizer.get_params()
+    assert params["analyzer"] == "word"
+    assert params["ngram_range"] == (1, 2)
+    assert params["min_df"] == 2
+    assert params["lowercase"] is True
+    assert word_vectorizer() is not vectorizer
 
 
 @ANALYZERS

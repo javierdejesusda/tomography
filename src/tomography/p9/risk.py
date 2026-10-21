@@ -473,6 +473,16 @@ TextAnalyzer = Literal["word", "char"]
 TEXT_ANALYZERS: tuple[TextAnalyzer, ...] = ("word", "char")
 
 
+def word_vectorizer() -> TfidfVectorizer:
+    """Returns the unfitted word features of the text-only classifier.
+
+    Returns:
+        TF-IDF weights of the lowercased word 1-grams and 2-grams seen in at
+        least 2 texts.
+    """
+    return TfidfVectorizer(ngram_range=(1, 2), min_df=2, lowercase=True)
+
+
 def text_scores(
     train_texts: Sequence[str],
     train_labels: NDArray[np.int64],
@@ -503,9 +513,7 @@ def text_scores(
             texts leave no feature.
     """
     if analyzer == "word":
-        vectorizer = TfidfVectorizer(
-            ngram_range=(1, 2), min_df=2, lowercase=True
-        )
+        vectorizer = word_vectorizer()
     elif analyzer == "char":
         vectorizer = TfidfVectorizer(
             analyzer="char_wb", ngram_range=(2, 5), min_df=3, lowercase=True

@@ -398,22 +398,27 @@ def collect_activations(
             text, which saves the repeated demonstrations of a few-shot
             prompt. The prefix ends at the earliest token any text reads, so
             an early span shrinks the saving, and texts that share nothing
-            but a prepended BOS run the default path. In float32 the rows
-            equal those of the default path within the tolerance above; in
-            half precision they differ by more, as batch sizes already do.
-            The suffix forward keeps the key/value tensors of the whole
-            batch alive, so peak memory is higher than the default path.
+            but a prepended BOS run the default path. It needs a float32
+            model, where the rows equal those of the default path within the
+            tolerance above; in half precision they differ by more. The
+            suffix forward keeps the key/value tensors of the whole batch
+            alive, so peak memory is higher than the default path.
 
     Returns:
         The activations, rows stimulus-major then in token order.
 
     Raises:
-        ValueError: If the arguments are inconsistent, a layer is outside
-            0..L, a span is missing, or a span overlaps no token (the error
-            names the stimulus).
+        ValueError: If the arguments are inconsistent, `share_prefix` is set
+            for a model that is not float32, a layer is outside 0..L, a span
+            is missing, or a span overlaps no token (the error names the
+            stimulus).
     """
     spans = concept_spans if position == "concept" else response_spans
     _check_arguments(len(texts), position, spans, batch_size)
+    if share_prefix and loaded.dtype != torch.float32:
+        raise ValueError(
+            f"share_prefix needs a float32 model, got {loaded.dtype}"
+        )
     selected = list(range(loaded.n_layers + 1) if layers is None else layers)
     if not selected:
         raise ValueError("layers is empty")

@@ -41,6 +41,7 @@ from tomography.datasets.quantities import PEOPLE_FAMILY
 from tomography.datasets.quantities import QuantityQuestion
 from tomography.datasets.quantities import load_people_heights
 from tomography.datasets.quantities import load_quantities
+from tomography.experiments.aggregate import open_finished
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
@@ -272,37 +273,6 @@ class P10aRun:
     snapshots: Snapshots
 
 
-def _open_finished(path: str | Path, *, model: str, files: list[str]) -> RunDir:
-    """Opens a run and checks that it can feed a study of `model`.
-
-    Args:
-        path: The run directory.
-        model: The model the caller is about to link.
-        files: The files of the run that the caller reads.
-
-    Returns:
-        The run directory.
-
-    Raises:
-        ValueError: If the directory is not a run, the run is not finished,
-            it is a run of another model or one of `files` is missing (an
-            export drops the arrays and the items).
-    """
-    run_dir = RunDir.open(path)
-    if run_dir.meta.get("finished_at") is None:
-        raise ValueError(f"{path} is not a finished run")
-    found = run_dir.config.get("model")
-    if found != model:
-        raise ValueError(f"{path} is a run of {found!r}, not of {model!r}")
-    missing = [name for name in files if not (run_dir.path / name).is_file()]
-    if missing:
-        raise ValueError(
-            f"{path} has no {missing[0]}: link a full run directory, not an "
-            "export"
-        )
-    return run_dir
-
-
 def load_p10b(path: str | Path, *, model: str, reader: str) -> P10bRun:
     """Reads a finished P10b run.
 
@@ -315,10 +285,11 @@ def load_p10b(path: str | Path, *, model: str, reader: str) -> P10bRun:
         The run contents.
 
     Raises:
-        ValueError: If the run cannot be linked (see `_open_finished`), it
-            has no such reader or an item has no score of the reader.
+        ValueError: If the run cannot be linked (see
+            `tomography.experiments.aggregate.open_finished`), it has no
+            such reader or an item has no score of the reader.
     """
-    run_dir = _open_finished(
+    run_dir = open_finished(
         path,
         model=model,
         files=["readers.npz", "readers.json", "items.json", "summary.json"],
@@ -368,11 +339,12 @@ def load_p9b(path: str | Path, *, model: str) -> P9bRun:
         The run contents.
 
     Raises:
-        ValueError: If the run cannot be linked (see `_open_finished`), its
-            summary gives no kind of contrast to a type or a kind that is not
-            in `CONTRASTS`, or its arrays disagree with its types and layers.
+        ValueError: If the run cannot be linked (see
+            `tomography.experiments.aggregate.open_finished`), its summary
+            gives no kind of contrast to a type or a kind that is not in
+            `CONTRASTS`, or its arrays disagree with its types and layers.
     """
-    run_dir = _open_finished(
+    run_dir = open_finished(
         path,
         model=model,
         files=["readers.npz", "readers.json", "summary.json"],
@@ -428,9 +400,10 @@ def load_p10a(path: str | Path, *, model: str) -> P10aRun:
         The run contents.
 
     Raises:
-        ValueError: If the run cannot be linked (see `_open_finished`).
+        ValueError: If the run cannot be linked (see
+            `tomography.experiments.aggregate.open_finished`).
     """
-    run_dir = _open_finished(
+    run_dir = open_finished(
         path, model=model, files=["items.json", "summary.json"]
     )
     records = cast(list[Record], run_dir.read_json("items"))

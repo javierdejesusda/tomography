@@ -39,6 +39,7 @@ from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
 from tomography.p9.reading import relation_groups
 from tomography.p9.reading import render_items
+from tomography.p9.reading import split_activations
 from tomography.p9.reading import surface_baselines
 from tomography.p9.reading import type_auroc
 from tomography.p9.reading import type_scores
@@ -340,6 +341,25 @@ def test_item_activations_rows_name_the_first_missing_uid() -> None:
 
     with pytest.raises(ValueError, match="x-1"):
         acts.rows([_labeled("a"), _labeled("x-1"), _labeled("x-2")])
+
+
+def test_item_activations_rows_of_follow_the_uids() -> None:
+    acts = ItemActivations(
+        ("a", "b", "c"), (1,), np.zeros((1, 3, 4), dtype=np.float32)
+    )
+
+    rows = acts.rows_of(["c", "a"])
+
+    assert rows.tolist() == [2, 0]
+    assert rows.dtype == np.int64
+    assert acts.rows_of([]).tolist() == []
+
+
+def test_item_activations_rows_of_name_the_first_missing_uid() -> None:
+    acts = ItemActivations(("a",), (1,), np.zeros((1, 1, 4), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="'x-1'"):
+        acts.rows_of(["a", "x-1", "x-2"])
 
 
 def _small_items() -> list[LabeledItem]:
@@ -812,6 +832,19 @@ def test_fit_type_reader_needs_only_the_items_the_pairs_hold(
     np.testing.assert_array_equal(reader.directions, full.directions)
 
 
+def test_fit_draw_seeds_the_fit_with_the_seed_of_the_draw(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _spy_fit(monkeypatch)
+    draw = draw_train(planted.pools["obscure_real"], n_pairs=16, seed=4)
+
+    fit_draw(planted.acts, draw, method="random")
+
+    assert draw.seed == 4
+    (call,) = calls
+    assert call["seed"] == 4
+
+
 def test_fit_draw_without_pairs_orients_on_the_labels(
     planted: Planted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -819,7 +852,7 @@ def test_fit_draw_without_pairs_orients_on_the_labels(
     draw = draw_train(planted.pools["obscure_real"], n_pairs=16, seed=4)
     flipped = dataclasses.replace(draw, labels=1 - draw.labels, pairs=None)
 
-    reader = fit_draw(planted.acts, flipped, seed=4)
+    reader = fit_draw(planted.acts, flipped)
 
     (call,) = calls
     assert call["pairs"] is None
@@ -843,6 +876,22 @@ def test_type_scores_hold_the_scores_and_labels_the_auroc_ranks(
     np.testing.assert_array_equal(
         auroc(scores, labels), type_auroc(reader, planted.acts, pool, "test")
     )
+
+
+def test_split_activations_hold_the_rows_type_scores_scores(
+    planted: Planted,
+) -> None:
+    pool = planted.pools["obscure_real"]
+    reader = fit_type_reader(planted.acts, pool, n_pairs=16, seed=1)
+    positive, negative = pool.split("test")
+
+    h, labels = split_activations(planted.acts, pool, "test")
+
+    rows = planted.acts.rows([*positive, *negative])
+    np.testing.assert_array_equal(h, planted.acts.data[:, rows])
+    scores, want = type_scores(reader, planted.acts, pool, "test")
+    np.testing.assert_array_equal(labels, want)
+    np.testing.assert_array_equal(reader.score(h), scores)
 
 
 def test_type_auroc_ranks_the_positive_side_on_one_split(

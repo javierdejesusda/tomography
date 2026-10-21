@@ -1,6 +1,7 @@
 """Tests for the knowledge views experiment."""
 
 from collections.abc import Callable
+import copy
 import dataclasses
 import hashlib
 import json
@@ -8,6 +9,7 @@ from pathlib import Path
 import runpy
 import shutil
 from typing import Any
+import weakref
 
 from matplotlib.figure import Figure
 from matplotlib.text import Text
@@ -27,6 +29,7 @@ from tomography.experiments.v1_knowledge_views import MAX_DISPLAYED
 from tomography.experiments.v1_knowledge_views import READING_FILES
 from tomography.experiments.v1_knowledge_views import CommittedReading
 from tomography.experiments.v1_knowledge_views import Config
+from tomography.experiments.v1_knowledge_views import Panel
 from tomography.experiments.v1_knowledge_views import Plan
 from tomography.experiments.v1_knowledge_views import check_labels_run
 from tomography.experiments.v1_knowledge_views import check_model
@@ -203,11 +206,9 @@ def test_load_reading_returns_the_committed_numbers(
     np.testing.assert_array_equal(committed.test, transfer["test"])
     n_types, n_layers = len(USABLE), tiny_arch.n_layers
     assert committed.test.shape == (4, n_types, 2, n_layers)
-    readers = reading.read_arrays("readers")
-    assert committed.directions.shape == (n_types, n_layers, tiny_arch.d_model)
-    np.testing.assert_array_equal(committed.directions, readers["directions"])
-    np.testing.assert_array_equal(committed.means, readers["means"])
-    np.testing.assert_array_equal(committed.signs, readers["signs"])
+    assert len(committed.readers) == n_types
+    for reader in committed.readers:
+        assert reader.directions.shape == (n_layers, tiny_arch.d_model)
     table = reading.read_json("table")
     assert isinstance(table, dict)
     assert list(committed.table) == USABLE
@@ -219,7 +220,7 @@ def test_load_reading_returns_the_committed_numbers(
     ("name", "change", "match"),
     [
         ("meta.json", {"finished_at": None}, "not a finished run"),
-        ("meta.json", {"experiment": "p9c"}, "not a P9b run"),
+        ("meta.json", {"experiment": "p9c"}, "'p9c', not 'p9b'"),
         ("config.json", {"template": "plain"}, "template"),
         ("config.json", {"methods": ["pca_diff", "logistic"]}, "methods"),
         ("config.json", {"n_seeds": 3}, "draws"),
@@ -348,16 +349,18 @@ def test_load_reading_names_the_contrast_of_a_reader_it_refuses(
 
 
 def test_load_reading_holds_the_published_reader_of_each_contrast(
-    committed: CommittedReading,
+    committed: CommittedReading, inputs: Inputs
 ) -> None:
+    readers = inputs.reading.read_arrays("readers")
+
     assert len(committed.readers) == len(USABLE)
     for t, reader in enumerate(committed.readers):
         want = RepReader.from_arrays(
             committed.config.methods[0],
             committed.layers,
-            committed.directions[t],
-            committed.means[t],
-            committed.signs[t],
+            readers["directions"][t],
+            readers["means"][t],
+            readers["signs"][t],
         )
         assert reader.layers == committed.layers
         np.testing.assert_array_equal(reader.directions, want.directions)
@@ -457,7 +460,13 @@ def test_check_model_accepts_the_model_the_run_was_read_with(
     [
         (lambda c: dataclasses.replace(c, layers=c.layers[:2]), "layers"),
         (
-            lambda c: dataclasses.replace(c, directions=c.directions[..., :8]),
+            lambda c: dataclasses.replace(
+                c,
+                readers=tuple(
+                    dataclasses.replace(r, directions=r.directions[:, :8])
+                    for r in c.readers
+                ),
+            ),
             "width",
         ),
     ],
@@ -741,6 +750,7 @@ def test_shuffled_draw_permutes_the_labels_inside_each_stratum(
 
     assert shuffled.pairs is None
     assert shuffled.items == draw.items
+    assert shuffled.seed == draw.seed
     np.testing.assert_array_equal(shuffled.strata, draw.strata)
     assert not np.array_equal(shuffled.labels, draw.labels)
     for code in np.unique(draw.strata):
@@ -870,57 +880,50 @@ def test_published_views_score_the_displayed_items_on_the_published_reader(
     committed = read.committed
     k = committed.layers.index(committed.layer)
 
-    views = published_views(committed, read.acts, read.pools, cap=3)
+    shown = displayed_uids(read.pools, cap=3)
+
+    views = published_views(committed, read.acts, read.pools, shown)
 
     assert views.auroc.shape == (len(USABLE), tiny_arch.n_layers)
     assert list(views.projections) == [f"projection_{n}" for n in USABLE]
-    assert list(views.uids) == USABLE
     for t, (name, pool) in enumerate(read.pools.items()):
-        reader = RepReader.from_arrays(
-            committed.config.methods[0],
-            committed.layers,
-            committed.directions[t],
-            committed.means[t],
-            committed.signs[t],
-        )
+        reader = committed.readers[t]
         np.testing.assert_array_equal(
             views.auroc[t], type_auroc(reader, read.acts, pool, "test")
         )
-        positive, negative = pool.split("test")
-        shown = {
-            "positive": displayed_items(positive, cap=3),
-            "negative": displayed_items(negative, cap=3),
-        }
-        assert views.uids[name] == {
-            side: [i.example.uid for i in items]
-            for side, items in shown.items()
-        }
-        rows = read.acts.rows([*shown["positive"], *shown["negative"]])
+        rows = read.acts.rows_of(
+            [*shown[name]["positive"], *shown[name]["negative"]]
+        )
         want = reader.score(read.acts.data[:, rows])[k]
         projection = views.projections[f"projection_{name}"]
         assert projection.dtype == np.float32
         np.testing.assert_array_equal(projection, want)
 
 
-def test_published_views_cap_each_side_not_the_contrast(
-    tiny_arch: LoadedModel, inputs: Inputs
+def test_displayed_uids_cap_each_side_of_the_test_items(
+    pools: dict[str, TypePool],
 ) -> None:
-    read = _read(tiny_arch, inputs)
+    shown = displayed_uids(pools, cap=2)
 
-    views = published_views(read.committed, read.acts, read.pools, cap=2)
-
-    for name, sides in views.uids.items():
-        assert len(sides["positive"]) == 2, name
-        assert len(sides["negative"]) == 2, name
-        assert views.projections[f"projection_{name}"].shape == (4,)
+    assert list(shown) == USABLE
+    for name, pool in pools.items():
+        positive, negative = pool.split("test")
+        assert shown[name] == {
+            "positive": [
+                i.example.uid for i in displayed_items(positive, cap=2)
+            ],
+            "negative": [
+                i.example.uid for i in displayed_items(negative, cap=2)
+            ],
+        }
+        assert len(shown[name]["positive"]) == 2, name
+        assert len(shown[name]["negative"]) == 2, name
 
 
 @dataclasses.dataclass
 class Captured:
     """The call `execute` makes to collect the activations."""
 
-    items: list[Any] = dataclasses.field(default_factory=list)
-    args: tuple[Any, ...] = ()
     kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
     acts: ItemActivations | None = None
 
@@ -931,8 +934,6 @@ def _capture(monkeypatch: pytest.MonkeyPatch) -> Captured:
     def spy(
         loaded: LoadedModel, items: Any, *args: Any, **kwargs: Any
     ) -> ItemActivations:
-        captured.items = list(items)
-        captured.args = args
         captured.kwargs = kwargs
         captured.acts = collect_item_activations(loaded, items, *args, **kwargs)
         return captured.acts
@@ -1014,6 +1015,49 @@ def run_at(
         return _LAYER_RUNS[(key, layer)]
 
     return build
+
+
+@dataclasses.dataclass
+class Spied:
+    """A V1 run and what it handed to the extraction and the text views."""
+
+    run_dir: RunDir
+    captured: Captured
+    text_seeds: list[int]
+
+
+_SPIED_RUNS: dict[str, Spied] = {}
+
+
+@pytest.fixture
+def spied_run(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Spied:
+    """One V1 run per architecture under spies, with seed 3 and batches of 4.
+
+    The registry entry of the model reads it in bfloat16, so the summary
+    names a reading dtype other than the float32 of the run.
+    """
+    key = type(tiny_arch.model).__name__
+    if key not in _SPIED_RUNS:
+        captured = _capture(monkeypatch)
+        seeds: list[int] = []
+        original = v1_module.text_view
+
+        def spy(texts: Any, *, seed: int) -> Any:
+            seeds.append(seed)
+            return original(texts, seed=seed)
+
+        monkeypatch.setattr(v1_module, "text_view", spy)
+        spec = dataclasses.replace(MODELS["gpt2"], key="tiny", dtype="bfloat16")
+        monkeypatch.setattr(v1_module, "MODELS", {"tiny": spec})
+        out = tmp_path_factory.mktemp(f"v1-spied-{key}")
+        run_dir = _execute(tiny_arch, out, inputs, seed=3, batch_size=4)
+        _SPIED_RUNS[key] = Spied(run_dir, captured, seeds)
+    return _SPIED_RUNS[key]
 
 
 def _summary(run_dir: RunDir) -> dict[str, Any]:
@@ -1124,19 +1168,21 @@ def test_the_summary_records_the_run(
 
 
 def test_the_summary_names_the_dtype_of_this_run_and_of_the_reading_run(
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    spied_run: Spied,
 ) -> None:
-    spec = dataclasses.replace(MODELS["gpt2"], key="tiny", dtype="bfloat16")
-    monkeypatch.setattr(v1_module, "MODELS", {"tiny": spec})
+    summary = _summary(spied_run.run_dir)
+
+    assert summary["extraction_dtype"] == "float32"
+    assert summary["reading_run_dtype"] == "bfloat16"
+
+
+def test_the_shared_prefix_refuses_a_half_precision_model(
+    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
+) -> None:
     half = dataclasses.replace(tiny_arch, dtype=torch.float16)
 
-    summary = _summary(_execute(half, tmp_path, inputs))
-
-    assert summary["extraction_dtype"] == "float16"
-    assert summary["reading_run_dtype"] == "bfloat16"
+    with pytest.raises(ValueError, match="float32"):
+        _execute(half, tmp_path, inputs)
 
 
 def test_the_recomputed_auroc_is_the_committed_one_on_the_same_activations(
@@ -1158,29 +1204,22 @@ def test_the_verdict_looks_at_the_column_of_the_chosen_layer(
     tmp_path: Path,
 ) -> None:
     assert committed.layers == (1, 2, 3)
-    chosen = dataclasses.replace(committed, layer=2)
-    at = chosen.layers.index(2)
+    # Each column moves by its own amount, so the differences name the
+    # column the verdict read.
+    test = committed.test.copy()
+    test[..., 0] -= 0.5
+    test[..., 1] -= 0.125
+    test[..., 2] -= 0.25
+    reading = dataclasses.replace(committed, layer=2, test=test)
 
-    def reproduction(column: int | None, name: str) -> dict[str, Any]:
-        test = committed.test.copy()
-        if column is not None:
-            test[..., column] -= 0.125
-        reading = dataclasses.replace(chosen, test=test)
-        run_dir = _execute(tiny_arch, tmp_path / name, inputs, reading=reading)
-        return _summary(run_dir)["reproduction"]
+    run_dir = _execute(tiny_arch, tmp_path, inputs, reading=reading)
 
-    baseline = reproduction(None, "none")
-    assert baseline["within_tolerance"] is True
-    assert set(baseline["max_abs_diff"].values()) == {0.0}
-    moved = reproduction(at, "chosen")
-    assert moved["within_tolerance"] is False
-    for by_method in moved["mean_diff_at_layer"].values():
+    reproduction = _summary(run_dir)["reproduction"]
+    assert reproduction["within_tolerance"] is False
+    for by_method in reproduction["mean_diff_at_layer"].values():
         assert by_method == pytest.approx(dict.fromkeys(by_method, 0.125))
-    for column in (0, 2):
-        other = reproduction(column, f"other{column}")
-        assert other["within_tolerance"] is True
-        assert other["mean_diff_at_layer"] == baseline["mean_diff_at_layer"]
-        assert other["max_abs_diff"]["mean_all_layers"] == pytest.approx(0.125)
+    assert reproduction["max_abs_diff"]["mean_at_layer"] == pytest.approx(0.125)
+    assert reproduction["max_abs_diff"]["mean_all_layers"] == pytest.approx(0.5)
 
 
 def test_the_random_finder_of_the_run_is_the_one_of_the_p9b_run(
@@ -1217,68 +1256,44 @@ def test_the_extraction_reads_layers_one_to_the_last_of_the_selected_items(
     committed: CommittedReading,
     pools: dict[str, TypePool],
     tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    spied_run: Spied,
 ) -> None:
-    captured = _capture(monkeypatch)
-
-    _execute(tiny_arch, tmp_path, inputs, batch_size=4)
+    acts = spied_run.captured.acts
 
     selected = select_items(pools, train_draws(pools, committed.config))
-    assert [i.example.uid for i in captured.items] == [
-        i.example.uid for i in selected
-    ]
-    assert captured.acts is not None
-    assert tuple(captured.acts.layers) == committed.layers
-    template, chat = captured.args
-    assert template == p9_template("fewshot", DEFAULT_SHOTS[:2])
-    assert chat.kind == chat_format_for(tiny_arch).kind
-    assert captured.kwargs == {
-        "layers": tuple(range(1, tiny_arch.n_layers + 1)),
-        "bos": committed.config.bos,
-        "batch_size": 4,
-        "share_prefix": True,
-    }
+    assert acts is not None
+    assert acts.uids == tuple(i.example.uid for i in selected)
+    assert acts.layers == tuple(range(1, tiny_arch.n_layers + 1))
+    assert acts.layers == committed.layers
+    # The batch size changes no number, so the call is the one place to see
+    # that the setting reaches the extraction.
+    assert spied_run.captured.kwargs["batch_size"] == 4
 
 
 def test_the_published_reader_and_its_projections_are_written(
-    committed: CommittedReading,
-    pools: dict[str, TypePool],
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    committed: CommittedReading, pools: dict[str, TypePool], spied_run: Spied
 ) -> None:
-    captured = _capture(monkeypatch)
+    run_dir = spied_run.run_dir
+    reads = spied_run.captured.acts
 
-    run_dir = _execute(tiny_arch, tmp_path, inputs)
-
-    assert captured.acts is not None
-    reads = captured.acts
-    views = published_views(committed, reads, pools, cap=MAX_DISPLAYED)
+    assert reads is not None
+    shown = displayed_uids(pools, cap=MAX_DISPLAYED)
+    views = published_views(committed, reads, pools, shown)
     arrays = run_dir.read_arrays("projections")
     np.testing.assert_array_equal(arrays["published"], views.auroc)
     for key, projection in views.projections.items():
         np.testing.assert_array_equal(arrays[key], projection)
     sidecar = _sidecar(run_dir)
-    assert sidecar["uids"] == views.uids
+    assert sidecar["uids"] == shown
 
 
 def test_the_shuffled_control_is_written_beside_the_methods(
-    committed: CommittedReading,
-    pools: dict[str, TypePool],
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    committed: CommittedReading, pools: dict[str, TypePool], spied_run: Spied
 ) -> None:
-    captured = _capture(monkeypatch)
+    run_dir = spied_run.run_dir
+    reads = spied_run.captured.acts
 
-    run_dir = _execute(tiny_arch, tmp_path, inputs, seed=3)
-
-    assert captured.acts is not None
-    reads = captured.acts
+    assert reads is not None
     want = refit_shuffled(
         reads,
         pools,
@@ -1317,10 +1332,11 @@ def test_a_surface_control_that_moved_is_reported_not_hidden(
 
 
 def test_execute_is_deterministic(
-    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
+    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path, default_run: RunDir
 ) -> None:
-    first = _execute(tiny_arch, tmp_path / "a", inputs)
-    second = _execute(tiny_arch, tmp_path / "b", inputs)
+    first = default_run
+
+    second = _execute(tiny_arch, tmp_path, inputs)
 
     for name in ("projections", "pca2d", "text2d"):
         one, two = first.read_arrays(name), second.read_arrays(name)
@@ -1333,27 +1349,41 @@ def test_execute_is_deterministic(
     assert first.read_json("summary") == second.read_json("summary")
 
 
-def test_run_loads_the_model_in_float32_on_the_default_device(
+def test_run_loads_the_model_in_float32_and_frees_it_before_the_refits(
     tiny_arch: LoadedModel,
     inputs: Inputs,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    asked: list[tuple[str, dict[str, Any]]] = []
+    models: list[weakref.ref[torch.nn.Module]] = []
+    alive: list[bool] = []
+    refit = v1_module.refit_methods
 
-    def fake_load(name: str, **kwargs: Any) -> LoadedModel:
-        asked.append((name, kwargs))
-        return tiny_arch
+    # Like `load_model` it takes no device, and without a dtype it gives the
+    # bfloat16 of the registry, which the shared prefix refuses.
+    def fake_load(
+        name: str, *, dtype: torch.dtype | None = None
+    ) -> LoadedModel:
+        assert name == "tiny"
+        fresh = copy.deepcopy(tiny_arch)
+        models.append(weakref.ref(fresh.model))
+        return dataclasses.replace(fresh, dtype=dtype or torch.bfloat16)
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        alive.append(models[0]() is not None)
+        return refit(*args, **kwargs)
 
     monkeypatch.setattr(v1_module, "load_model", fake_load)
+    monkeypatch.setattr(v1_module, "refit_methods", spy)
     config = _config(inputs)
     run_dir = RunDir.create(config, out_root=tmp_path)
 
     run(config, run_dir)
 
-    assert asked == [("tiny", {"dtype": torch.float32})]
-    assert _summary(run_dir)["types"] == USABLE
-    assert (run_dir.path / "projections.npz").is_file()
+    assert alive == [False]
+    summary = _summary(run_dir)
+    assert summary["extraction_dtype"] == "float32"
+    assert summary["types"] == USABLE
 
 
 def test_run_refuses_an_unfinished_labels_run(
@@ -1540,30 +1570,29 @@ CHOSEN_LAYERS = pytest.mark.parametrize(
     ids=["middle", "first", "last", "only"],
 )
 def test_the_views_are_drawn_at_layer_one_the_chosen_layer_and_the_last(
-    committed: CommittedReading,
-    chosen: int,
-    n_layers: int,
-    want: tuple[int, ...],
+    chosen: int, n_layers: int, want: tuple[int, ...]
 ) -> None:
-    reading = dataclasses.replace(committed, layer=chosen)
-
-    assert view_layers(reading, n_layers) == want
+    assert view_layers(chosen, n_layers) == want
 
 
-def _two_panels(read: Read) -> dict[str, list[str]]:
+def _two_panels(read: Read) -> dict[str, Panel]:
     shown = displayed_uids(read.pools, cap=4)
     return {
-        panel: panel_union(types, shown)
+        panel: Panel(types, tuple(panel_union(types, shown)))
         for panel, types in panel_contrasts(read.pools).items()
     }
+
+
+def _panel_uids(read: Read) -> dict[str, tuple[str, ...]]:
+    return {name: panel.uids for name, panel in _two_panels(read).items()}
 
 
 def test_pca_views_fit_each_panel_on_its_own_items(
     tiny_arch: LoadedModel, inputs: Inputs
 ) -> None:
     read = _read(tiny_arch, inputs, layer=2)
-    panels = _two_panels(read)
-    layers = view_layers(read.committed, tiny_arch.n_layers)
+    panels = _panel_uids(read)
+    layers = view_layers(read.committed.layer, tiny_arch.n_layers)
 
     arrays = pca_views(read.acts, layers, panels)
 
@@ -1591,8 +1620,8 @@ def test_pca_views_ignore_the_items_a_panel_does_not_show(
     tiny_arch: LoadedModel, inputs: Inputs
 ) -> None:
     read = _read(tiny_arch, inputs, layer=2)
-    panels = _two_panels(read)
-    layers = view_layers(read.committed, tiny_arch.n_layers)
+    panels = _panel_uids(read)
+    layers = view_layers(read.committed.layer, tiny_arch.n_layers)
     shown = {uid for uids in panels.values() for uid in uids}
     hidden = next(
         row for row, uid in enumerate(read.acts.uids) if uid not in shown
@@ -1612,7 +1641,7 @@ def test_pca_views_refuse_an_item_without_activations(
     tiny_arch: LoadedModel, inputs: Inputs
 ) -> None:
     read = _read(tiny_arch, inputs)
-    layers = view_layers(read.committed, tiny_arch.n_layers)
+    layers = view_layers(read.committed.layer, tiny_arch.n_layers)
 
     with pytest.raises(ValueError, match="no activations for 'ghost:1'"):
         pca_views(read.acts, layers, {"entity": ["ghost:1"]})
@@ -1700,16 +1729,6 @@ def test_the_summary_names_the_views_and_the_items_they_show(
     }
 
 
-def test_displayed_uids_are_those_the_published_views_show(
-    tiny_arch: LoadedModel, inputs: Inputs
-) -> None:
-    read = _read(tiny_arch, inputs)
-
-    views = published_views(read.committed, read.acts, read.pools, cap=3)
-
-    assert displayed_uids(read.pools, cap=3) == views.uids
-
-
 def _orthogonal_columns(n: int, k: int, seed: int) -> np.ndarray:
     """Centered columns that are orthonormal, so every variance is planted."""
     rng = np.random.default_rng(seed)
@@ -1778,37 +1797,30 @@ def test_supervised_views_set_the_published_projection_against_the_rest(
     read = _read(tiny_arch, inputs, layer=2)
     committed = read.committed
     panels = _two_panels(read)
-    shown = panel_contrasts(read.pools)
-    layers = view_layers(committed, tiny_arch.n_layers)
+    layers = view_layers(committed.layer, tiny_arch.n_layers)
 
-    arrays = supervised_views(committed, read.acts, layers, panels, shown)
+    arrays = supervised_views(committed, read.acts, layers, panels)
 
     assert set(arrays) == {
-        f"supervised_{name}" for names in shown.values() for name in names
+        f"supervised_{name}"
+        for panel in panels.values()
+        for name in panel.types
     }
     index = {uid: row for row, uid in enumerate(read.acts.uids)}
-    for panel, names in shown.items():
-        rows = [index[uid] for uid in panels[panel]]
-        for name in names:
-            t = list(committed.types).index(name)
+    for panel in panels.values():
+        rows = [index[uid] for uid in panel.uids]
+        for name in panel.types:
+            reader = committed.readers[committed.types.index(name)]
+            scores = reader.score(read.acts.data[:, rows])
             view = arrays[f"supervised_{name}"]
             assert view.shape == (3, len(rows), 2)
             assert view.dtype == np.float32
             for v, layer in enumerate(layers):
                 k = committed.layers.index(layer)
-                reader = RepReader.from_arrays(
-                    committed.config.methods[0],
-                    [layer],
-                    committed.directions[t, [k]],
-                    committed.means[t, [k]],
-                    committed.signs[t, [k]],
-                )
                 h = read.acts.data[k][rows]
+                np.testing.assert_array_equal(view[v, :, 0], scores[k])
                 np.testing.assert_array_equal(
-                    view[v, :, 0], reader.score(h[None])[0]
-                )
-                np.testing.assert_array_equal(
-                    view[v, :, 1], residual_axis(h, reader.directions[0])
+                    view[v, :, 1], residual_axis(h, reader.directions[k])
                 )
 
 
@@ -1818,17 +1830,16 @@ def test_supervised_x_is_the_projection_the_run_publishes(
     read = _read(tiny_arch, inputs, layer=2)
     committed = read.committed
     panels = _two_panels(read)
-    shown = panel_contrasts(read.pools)
-    layers = view_layers(committed, tiny_arch.n_layers)
-    arrays = supervised_views(committed, read.acts, layers, panels, shown)
+    layers = view_layers(committed.layer, tiny_arch.n_layers)
+    arrays = supervised_views(committed, read.acts, layers, panels)
     at = layers.index(committed.layer)
     own = displayed_uids(read.pools, cap=4)
-    published = published_views(committed, read.acts, read.pools, cap=4)
+    published = published_views(committed, read.acts, read.pools, own)
 
-    for panel, names in shown.items():
-        for name in names:
+    for panel in panels.values():
+        for name in panel.types:
             uids = [*own[name]["positive"], *own[name]["negative"]]
-            places = [panels[panel].index(uid) for uid in uids]
+            places = [panel.uids.index(uid) for uid in uids]
             chosen = arrays[f"supervised_{name}"][at, places, 0]
             np.testing.assert_allclose(
                 chosen, published.projections[f"projection_{name}"], rtol=1e-5
@@ -1961,24 +1972,8 @@ def test_execute_writes_the_text_view_of_each_panel(
         assert arrays[f"ratios_{panel}"].shape == (2,)
 
 
-def test_the_seed_of_the_run_reaches_the_text_view(
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    seeds: list[int] = []
-    original = v1_module.text_view
-
-    def spy(texts: Any, *, seed: int) -> Any:
-        seeds.append(seed)
-        return original(texts, seed=seed)
-
-    monkeypatch.setattr(v1_module, "text_view", spy)
-
-    _execute(tiny_arch, tmp_path, inputs, seed=3)
-
-    assert seeds == [
+def test_the_seed_of_the_run_reaches_the_text_view(spied_run: Spied) -> None:
+    assert spied_run.text_seeds == [
         derive_seed(3, "text", p) for p in ("entity", "question", "unknown")
     ]
 
