@@ -28,7 +28,6 @@ from matplotlib.lines import Line2D
 import numpy as np
 from numpy.typing import NDArray
 from sklearn.decomposition import TruncatedSVD
-from sklearn.feature_extraction.text import TfidfVectorizer
 import torch
 
 from tomography.analysis import pca_coordinates
@@ -57,6 +56,7 @@ from tomography.p9.reading import p9_template
 from tomography.p9.reading import surface_baselines
 from tomography.p9.reading import type_auroc
 from tomography.p9.reading import type_scores
+from tomography.p9.risk import word_vectorizer
 from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import panel_of
 from tomography.reading.metrics import auroc
@@ -897,9 +897,10 @@ def text_view(
 ) -> tuple[NDArray[np.float32], NDArray[np.float64]]:
     """Places questions by their words alone, the text-only control of a view.
 
-    The features are TF-IDF weights of the word 1-grams and 2-grams seen in
-    at least 2 of the texts, as in the text classifier of the P9b table. A
-    truncated SVD keeps the two leading components. This is latent semantic
+    The features are those of the text classifier of the P9b table (see
+    `tomography.p9.risk.word_vectorizer`): TF-IDF weights of the word
+    1-grams and 2-grams seen in at least 2 of the texts. A truncated SVD
+    keeps the two leading components. This is latent semantic
     analysis (LSA) on uncentered features, not a PCA: the first component
     mostly follows the mean of the features, and the shares of variance it
     returns are not comparable with the ratios of `pca_views`.
@@ -919,8 +920,7 @@ def text_view(
             is below `MIN_SECOND_COMPONENT` of the first, as when the
             questions differ only by words that occur once.
     """
-    vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=2, lowercase=True)
-    features = vectorizer.fit_transform(texts)
+    features = word_vectorizer().fit_transform(texts)
     svd = TruncatedSVD(n_components=2, random_state=seed)
     with np.errstate(invalid="ignore"):
         coordinates = svd.fit_transform(features)
