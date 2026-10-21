@@ -26,10 +26,13 @@ from tomography.p9.reading import TEMPLATE_NAMES
 from tomography.p9.reading import WITHIN_BASELINES
 from tomography.p9.reading import ItemActivations
 from tomography.p9.reading import ReadingCube
+from tomography.p9.reading import TrainDraw
 from tomography.p9.reading import check_pool
 from tomography.p9.reading import choose_layer
 from tomography.p9.reading import collect_item_activations
 from tomography.p9.reading import draw_seed
+from tomography.p9.reading import draw_train
+from tomography.p9.reading import fit_draw
 from tomography.p9.reading import fit_type_reader
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
@@ -37,6 +40,7 @@ from tomography.p9.reading import relation_groups
 from tomography.p9.reading import render_items
 from tomography.p9.reading import surface_baselines
 from tomography.p9.reading import type_auroc
+from tomography.p9.reading import type_scores
 from tomography.p9.reading import within_relation_pairs
 from tomography.p9.unknowns import TypePool
 from tomography.p9.unknowns import relation_of
@@ -428,7 +432,33 @@ def test_collect_item_activations_forwards_the_reading_settings(
         "position": "last",
         "bos": "none",
         "batch_size": 2,
+        "share_prefix": False,
     }
+
+
+def test_collect_item_activations_shares_the_prefix_when_asked(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, Any] = {}
+    real = reading_module.collect_activations
+
+    def spy(loaded: LoadedModel, texts: Sequence[str], **kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return real(loaded, texts, **kwargs)
+
+    monkeypatch.setattr(reading_module, "collect_activations", spy)
+    args = (
+        tiny_arch,
+        _small_items(),
+        p9_template("fewshot", DEFAULT_SHOTS[:2]),
+        ChatFormat("plain"),
+    )
+
+    shared = collect_item_activations(*args, layers=(1, 2), share_prefix=True)
+
+    assert seen["share_prefix"] is True
+    plain = collect_item_activations(*args, layers=(1, 2))
+    np.testing.assert_allclose(shared.data, plain.data, rtol=1e-4, atol=1e-3)
 
 
 def _pool_of(
@@ -716,6 +746,122 @@ def test_fit_type_reader_is_reproducible_and_depends_on_the_seed(
 
     np.testing.assert_array_equal(one.directions, again.directions)
     assert not np.array_equal(one.directions, other.directions)
+
+
+def test_draw_train_holds_the_train_items_the_pairs_use(
+    planted: Planted,
+) -> None:
+    pool = planted.pools["obscure_real_pop"]
+    positive, negative = pool.split("train")
+    sides = {i.example.uid: 1 for i in positive}
+    sides |= {i.example.uid: 0 for i in negative}
+
+    draw = draw_train(pool, n_pairs=16, seed=4)
+
+    assert isinstance(draw, TrainDraw)
+    assert draw.pairs is not None
+    assert draw.pairs.shape == (16, 2)
+    assert sorted(draw.pairs.ravel().tolist()) == list(range(len(draw.items)))
+    assert len(draw.items) == 32
+    uids = [i.example.uid for i in draw.items]
+    assert draw.labels.tolist() == [sides[u] for u in uids]
+    assert draw.labels.dtype == np.int64
+    names = [stratum_name(i, pool.strata) for i in draw.items]
+    assert len(draw.strata) == len(uids)
+    assert len(set(zip(names, draw.strata.tolist(), strict=True))) == len(
+        set(names)
+    )
+    for first, second in draw.pairs:
+        assert draw.labels[first] != draw.labels[second]
+        assert draw.strata[first] == draw.strata[second]
+
+
+def test_draw_train_depends_on_the_seed_only(planted: Planted) -> None:
+    pool = planted.pools["obscure_real"]
+
+    one = draw_train(pool, n_pairs=16, seed=4)
+    again = draw_train(pool, n_pairs=16, seed=4)
+    other = draw_train(pool, n_pairs=16, seed=5)
+
+    assert [i.example.uid for i in one.items] == [
+        i.example.uid for i in again.items
+    ]
+    np.testing.assert_array_equal(one.pairs, again.pairs)
+    assert [i.example.uid for i in one.items] != [
+        i.example.uid for i in other.items
+    ]
+
+
+def test_fit_draw_is_the_fit_of_fit_type_reader(planted: Planted) -> None:
+    pool = planted.pools["obscure_real"]
+    draw = draw_train(pool, n_pairs=16, seed=4)
+
+    drawn = fit_draw(
+        planted.acts, draw, method="mean_diff", preprocess="unit", seed=4
+    )
+
+    direct = fit_type_reader(
+        planted.acts,
+        pool,
+        method="mean_diff",
+        preprocess="unit",
+        n_pairs=16,
+        seed=4,
+    )
+    np.testing.assert_array_equal(drawn.directions, direct.directions)
+    np.testing.assert_array_equal(drawn.means, direct.means)
+    np.testing.assert_array_equal(drawn.signs, direct.signs)
+
+
+def test_fit_type_reader_needs_only_the_items_the_pairs_hold(
+    planted: Planted,
+) -> None:
+    pool = planted.pools["obscure_real"]
+    draw = draw_train(pool, n_pairs=16, seed=4)
+    held = planted.acts.rows(draw.items)
+    partial = ItemActivations(
+        tuple(i.example.uid for i in draw.items),
+        planted.acts.layers,
+        planted.acts.data[:, held],
+    )
+
+    reader = fit_type_reader(partial, pool, n_pairs=16, seed=4)
+
+    full = fit_type_reader(planted.acts, pool, n_pairs=16, seed=4)
+    np.testing.assert_array_equal(reader.directions, full.directions)
+
+
+def test_fit_draw_without_pairs_orients_on_the_labels(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _spy_fit(monkeypatch)
+    draw = draw_train(planted.pools["obscure_real"], n_pairs=16, seed=4)
+    flipped = dataclasses.replace(draw, labels=1 - draw.labels, pairs=None)
+
+    reader = fit_draw(planted.acts, flipped, seed=4)
+
+    (call,) = calls
+    assert call["pairs"] is None
+    assert call["groups"] is None
+    np.testing.assert_array_equal(call["labels"], 1 - draw.labels)
+    assert reader.layers == LAYERS
+
+
+def test_type_scores_hold_the_scores_and_labels_the_auroc_ranks(
+    planted: Planted,
+) -> None:
+    pool = planted.pools["obscure_real"]
+    reader = fit_type_reader(planted.acts, pool, n_pairs=16, seed=1)
+    positive, negative = pool.split("test")
+
+    scores, labels = type_scores(reader, planted.acts, pool, "test")
+
+    assert scores.shape == (len(LAYERS), len(positive) + len(negative))
+    assert labels.tolist() == [1] * len(positive) + [0] * len(negative)
+    assert labels.dtype == np.int64
+    np.testing.assert_array_equal(
+        auroc(scores, labels), type_auroc(reader, planted.acts, pool, "test")
+    )
 
 
 def test_type_auroc_ranks_the_positive_side_on_one_split(

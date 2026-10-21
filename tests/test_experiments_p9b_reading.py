@@ -20,6 +20,7 @@ from tomography.experiments.p9b_reading import Config
 from tomography.experiments.p9b_reading import execute
 from tomography.experiments.p9b_reading import plot
 from tomography.experiments.p9b_reading import run
+from tomography.experiments.p9b_reading import usable_pools
 from tomography.knowledge import DEFAULT_SHOTS
 from tomography.knowledge import ItemLabel
 from tomography.knowledge import Label
@@ -327,6 +328,15 @@ def test_config_rejects_a_method_outside_the_literal() -> None:
 
     with pytest.raises(ValueError, match="methods"):
         Config.from_dict(data)
+
+
+def test_usable_pools_splits_the_contrasts_into_usable_and_skipped() -> None:
+    config = Config(labels_run="runs/p9a", min_pairs=8, min_eval=5)
+
+    usable, skipped = usable_pools(config, _items(), True)
+
+    assert list(usable) == USABLE
+    assert list(skipped) == SKIPPED
 
 
 def test_the_cli_discovers_the_experiment() -> None:

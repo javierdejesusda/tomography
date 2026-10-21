@@ -101,9 +101,25 @@ class Config(ExperimentConfig):
     batch_size: int = 8
 
 
-def _usable_pools(
+def usable_pools(
     config: Config, items: Sequence[LabeledItem], known_contrasts: bool
 ) -> tuple[dict[str, TypePool], dict[str, str]]:
+    """Builds the contrasts of a labeled pool and keeps those that can be read.
+
+    Args:
+        config: The settings that choose and check the contrasts: `types`,
+            `min_pairs` and `min_eval`.
+        items: The labeled questions of the P9a run.
+        known_contrasts: The P9a gate: whether the contrasts that need a
+            known side may be read.
+
+    Returns:
+        The usable contrasts by name, and the reason of each skipped one.
+
+    Raises:
+        ValueError: If `config.types` names a contrast that does not exist
+            (or one the gate excludes), or no contrast is usable.
+    """
     pools = type_pools(items, knowledge=known_contrasts)
     if config.types is not None:
         missing = [name for name in config.types if name not in pools]
@@ -293,7 +309,7 @@ def execute(
         if not ok:
             raise ValueError(message)
     template = p9_template(config.template, DEFAULT_SHOTS[: config.n_shots])
-    usable, skipped = _usable_pools(config, items, known_contrasts)
+    usable, skipped = usable_pools(config, items, known_contrasts)
     baselines = {name: surface_baselines(pool) for name, pool in usable.items()}
     layers = (
         tuple(range(1, loaded.n_layers + 1))

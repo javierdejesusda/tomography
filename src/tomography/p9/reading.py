@@ -165,6 +165,7 @@ def collect_item_activations(
     concept: str = "knowledge",
     bos: BosMode | None = None,
     batch_size: int = 8,
+    share_prefix: bool = False,
 ) -> ItemActivations:
     """Collects the activations at the last token of each rendered question.
 
@@ -177,6 +178,8 @@ def collect_item_activations(
         concept: The concept word of the template.
         bos: BOS policy; None uses the model's default.
         batch_size: Prompts per forward pass.
+        share_prefix: Run the demonstrations of a few-shot prompt once, see
+            `tomography.activations.collect_activations`.
 
     Returns:
         The activations, one row per item in order.
@@ -192,6 +195,7 @@ def collect_item_activations(
         position="last",
         bos=bos,
         batch_size=batch_size,
+        share_prefix=share_prefix,
     )
     return ItemActivations(
         tuple(i.example.uid for i in items), acts.layers, acts.data
@@ -334,6 +338,100 @@ def within_relation_pairs(pool: TypePool, split: Split) -> int | None:
     return _pair_count(_split_labels(pool, split), groups)
 
 
+@dataclass(frozen=True, eq=False)
+class TrainDraw:
+    """The train items one reader is fitted on and how they are paired.
+
+    Attributes:
+        items: The train items the pairs hold, in the order of the pool.
+        labels: Shape (n,): 1 for the positive side, else 0.
+        strata: Shape (n,): the code of the stratum of each item; two items
+            share a code exactly when they share a stratum.
+        pairs: Shape (m, 2): rows of `items`, one item of each side per pair.
+            None for a draw whose labels no longer agree with the pairs, such
+            as one with shuffled labels, which `fit_draw` then fits unpaired.
+    """
+
+    items: tuple[LabeledItem, ...]
+    labels: NDArray[np.int64]
+    strata: NDArray[np.int64]
+    pairs: NDArray[np.int64] | None
+
+
+def draw_train(pool: TypePool, *, n_pairs: int | None, seed: int) -> TrainDraw:
+    """Draws the train items a reader of one contrast is fitted on.
+
+    The train items are paired, one from each side and never across two
+    strata, in a random order from `seed`; the first `n_pairs` pairs are
+    kept and the draw holds the items they hold. It needs no activations, so
+    the questions to run through the model can be listed before it does.
+
+    Args:
+        pool: One contrast.
+        n_pairs: Pairs to keep; None keeps all of them.
+        seed: Seeds the pairing.
+
+    Returns:
+        The draw.
+
+    Raises:
+        ValueError: If no pair can be formed.
+    """
+    positive, negative = pool.split("train")
+    train = [*positive, *negative]
+    labels = _split_labels(pool, "train")
+    names = [stratum_name(i, pool.strata) for i in train]
+    codes = np.unique(names, return_inverse=True)[1].astype(np.int64)
+    pairs = label_contrastive_pairs(labels, seed=seed, strata=codes)[:n_pairs]
+    used = np.unique(pairs)
+    return TrainDraw(
+        items=tuple(train[row] for row in used),
+        labels=labels[used],
+        strata=codes[used],
+        pairs=np.searchsorted(used, pairs),
+    )
+
+
+def fit_draw(
+    acts: ItemActivations,
+    draw: TrainDraw,
+    *,
+    method: Method = "logistic",
+    preprocess: Preprocess = "center",
+    seed: int = 0,
+) -> RepReader:
+    """Fits a reader on the items of a draw.
+
+    A higher score means the positive side for every method: the reader
+    orients each layer on the labels, inside the pairs when the draw has
+    them.
+
+    Args:
+        acts: The activations of at least the items of the draw.
+        draw: The items, labels and pairs to fit on.
+        method: The direction finder.
+        preprocess: Vector preparation, see `fit_direction`.
+        seed: Seeds the stochastic finders.
+
+    Returns:
+        The reader, one direction per layer of `acts`.
+
+    Raises:
+        ValueError: If an item has no activations or the sign cannot be set.
+    """
+    rows = acts.rows(draw.items)
+    return RepReader.fit(
+        method,
+        acts.data[:, rows],
+        acts.layers,
+        labels=draw.labels,
+        pairs=draw.pairs,
+        groups=draw.pairs,
+        preprocess=preprocess,
+        seed=seed,
+    )
+
+
 def fit_type_reader(
     acts: ItemActivations,
     pool: TypePool,
@@ -347,12 +445,12 @@ def fit_type_reader(
 
     The train items are paired, one from each side and never across two
     strata, in a random order from `seed`; the first `n_pairs` pairs are
-    kept and the fit uses the items they hold. A higher score means the
-    positive side for every method: the reader orients each layer on the
-    labels.
+    kept and the fit uses the items they hold (see `draw_train`). A higher
+    score means the positive side for every method: the reader orients each
+    layer on the labels.
 
     Args:
-        acts: The activations of at least the train items of the pool.
+        acts: The activations of at least the train items the pairs hold.
         pool: One contrast.
         method: The direction finder.
         preprocess: Vector preparation, see `fit_direction`.
@@ -365,23 +463,31 @@ def fit_type_reader(
     Raises:
         ValueError: If no pair can be formed or an item has no activations.
     """
-    positive, negative = pool.split("train")
-    rows, labels = _split_arrays(acts, pool, "train")
-    names = [stratum_name(i, pool.strata) for i in (*positive, *negative)]
-    codes = np.unique(names, return_inverse=True)[1].astype(np.int64)
-    pairs = label_contrastive_pairs(labels, seed=seed, strata=codes)[:n_pairs]
-    used = np.unique(pairs)
-    local = np.searchsorted(used, pairs)
-    return RepReader.fit(
-        method,
-        acts.data[:, rows[used]],
-        acts.layers,
-        labels=labels[used],
-        pairs=local,
-        groups=local,
-        preprocess=preprocess,
-        seed=seed,
-    )
+    draw = draw_train(pool, n_pairs=n_pairs, seed=seed)
+    return fit_draw(acts, draw, method=method, preprocess=preprocess, seed=seed)
+
+
+def type_scores(
+    reader: RepReader, acts: ItemActivations, pool: TypePool, split: Split
+) -> tuple[NDArray[np.float32], NDArray[np.int64]]:
+    """Scores a reader on the items of one split of a contrast.
+
+    Args:
+        reader: A fitted reader over the layers of `acts`.
+        acts: The activations of at least the items of the split.
+        pool: One contrast; need not be the one the reader was fitted on.
+        split: "train", "val" or "test".
+
+    Returns:
+        The scores of shape (K, n), and the labels of shape (n,): the
+        positive items of the split come first, then the negative ones, and
+        a positive item has label 1.
+
+    Raises:
+        ValueError: If an item has no activations.
+    """
+    rows, labels = _split_arrays(acts, pool, split)
+    return reader.score(acts.data[:, rows]), labels
 
 
 def type_auroc(
@@ -405,8 +511,7 @@ def type_auroc(
     Raises:
         ValueError: If a side of the split is empty.
     """
-    rows, labels = _split_arrays(acts, pool, split)
-    return auroc(reader.score(acts.data[:, rows]), labels)
+    return auroc(*type_scores(reader, acts, pool, split))
 
 
 def surface_baselines(pool: TypePool) -> dict[str, float | None]:
