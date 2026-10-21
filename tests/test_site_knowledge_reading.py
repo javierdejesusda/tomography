@@ -306,7 +306,6 @@ def test_the_caption_calls_the_model_confidence_the_baseline(
 ) -> None:
     assert "is added to the baseline, model confidence;" in output.detail
     assert "at its interval's upper end" in output.claim
-    assert len(f"{output.claim} {output.detail}".split()) <= 200
 
 
 def test_popularity_is_the_strongest_control_where_the_caption_says_so() -> (

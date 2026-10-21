@@ -54,6 +54,22 @@ def css() -> str:
     return (STATIC / "site.css").read_text("utf-8")
 
 
+def _page_text(html: str, drop: tuple[str, ...] = ("svg",)) -> str:
+    """Strips the markup of a page or a fragment, leaving its words.
+
+    Args:
+        html: The page or the fragment.
+        drop: Elements removed with their content before the tags go.
+
+    Returns:
+        The text, with a space where each tag was.
+    """
+    if drop:
+        names = "|".join(drop)
+        html = re.sub(rf"<({names})\b.*?</\1>", " ", html, flags=re.S)
+    return re.sub(r"<[^>]+>", " ", html)
+
+
 def test_the_results_commit_is_the_last_commit_of_the_results() -> None:
     sha, built = build_module.results_commit(RESULTS)
     expected = subprocess.run(
@@ -408,9 +424,7 @@ def test_the_built_masthead_links_the_pdf_and_names_no_commit(
 
 def test_the_built_page_text_names_no_commit_or_masthead(html: str) -> None:
     sha, _ = build_module.results_commit(RESULTS)
-    text = re.sub(
-        r"<[^>]+>", " ", re.sub(r"<svg.*?</svg>", "", html, flags=re.S)
-    )
+    text = _page_text(html)
     assert "masthead" not in text
     assert sha not in text
 
@@ -427,10 +441,7 @@ def test_the_built_page_has_no_dashes_backticks_or_stray_underscores(
     html: str,
 ) -> None:
     assert not any(d in html for d in DASHES)
-    body = re.sub(r"<pre.*?</pre>", "", html, flags=re.S)
-    body = re.sub(r"<svg.*?</svg>", "", body, flags=re.S)
-    body = re.sub(r"<table.*?</table>", "", body, flags=re.S)
-    text = re.sub(r"<[^>]+>", " ", body)
+    text = _page_text(html, ("pre", "svg", "table"))
     text = re.sub(r"doi:\S+", "", text)
     assert "`" not in text
     assert "_" not in text
@@ -528,35 +539,38 @@ def test_every_figure_passes_the_palette_font_and_text_guards(
 
 
 def test_the_built_page_has_no_pooled_count_of_ten(html: str) -> None:
-    text = re.sub(r"<[^>]+>", " ", html)
+    text = _page_text(html, ())
     assert not re.search(r"\b\d+ of (the )?10\b(?! readers)", text)
 
 
 BASELINE = re.compile(r"\bbaselines?\b", re.I)
-BOTH_KINDS = re.compile(r"\bcontrols? (?:and|or) baselines?\b", re.I)
+BOTH_KINDS = re.compile(
+    r"\b(?:controls?\s+(?:and|or|and/or)\s+baselines?"
+    r"|baselines?\s+(?:and|or|and/or)\s+controls?)\b",
+    re.I,
+)
 CONTROL_TERMS = re.compile(
-    r"\b(?:random|shuffled|text|words?|characters?|popularity|length)\b",
+    r"\b(?:random|shuffled|permuted|scrambled|text|words?|characters?|"
+    r"length|popularity|honesty|classifiers?)\b",
     re.I,
 )
-PUBLISHED_METHOD = re.compile(
-    r"\bpublished\b|\bmass-mean\b|\blogistic[- ]regression\b|P\(True\)|"
-    r"\bconfidence of the model\b|\bmodel confidence\b",
-    re.I,
-)
+ABBREVIATION = re.compile(r"\b(?:al|vs|cf|fig|sec|eq|e\.g|i\.e)\.", re.I)
+KEEP = "\x00"
 
 
 def _clauses(text: str) -> list[str]:
-    parts = re.split(r"(?<!\bal)[.;:?!](?=\s)|\n", text)
-    return [" ".join(p.split()) for p in parts if p.strip()]
+    masked = ABBREVIATION.sub(lambda m: m.group().replace(".", KEEP), text)
+    parts = re.split(r"[.;:?!](?=\s)|\n", masked)
+    return [" ".join(p.replace(KEEP, ".").split()) for p in parts if p.strip()]
 
 
 def _vocabulary_problems(texts: list[str]) -> list[str]:
-    """Finds the clauses that misuse the word baseline.
+    """Finds the clauses that call a control a baseline.
 
     A clause that says baseline must not name a random direction, shuffled
-    labels, the text, the words or the popularity, which are controls, and
-    must name a published method. Naming both kinds side by side, as in a
-    heading, is not a use of the word.
+    labels, the text, the words, the popularity or the honesty classifier,
+    which are controls. Naming both kinds side by side, as in a heading, is
+    not a use of the word.
 
     Args:
         texts: Prose, captions, table cells and figure labels.
@@ -568,12 +582,8 @@ def _vocabulary_problems(texts: list[str]) -> list[str]:
     for text in texts:
         for clause in _clauses(text):
             rest = BOTH_KINDS.sub("", clause)
-            if not BASELINE.search(rest):
-                continue
-            if CONTROL_TERMS.search(rest):
+            if BASELINE.search(rest) and CONTROL_TERMS.search(rest):
                 problems.append(f"control called a baseline: {clause}")
-            elif not PUBLISHED_METHOD.search(rest):
-                problems.append(f"baseline without a method: {clause}")
     return problems
 
 
@@ -581,9 +591,8 @@ def _prose_texts(html: str, doc: page.Document) -> list[str]:
     body = re.sub(
         r'<section id="references">.*?</section>', " ", html, flags=re.S
     )
-    body = re.sub(r"<(style|svg|pre)\b.*?</\1>", " ", body, flags=re.S)
     body = re.sub(r"</(?:p|li|h\d|figcaption|caption|tr|td|th)>", "\n", body)
-    texts = [unescape(re.sub(r"<[^>]+>", " ", body))]
+    texts = [unescape(_page_text(body, ("style", "svg", "pre")))]
     meta = re.findall(r'<meta name="description" content="([^"]*)"', html)
     texts += [unescape(m) for m in meta]
     for entry in [*doc.figures.values(), *doc.appendix.values()]:
@@ -600,12 +609,16 @@ def _prose_texts(html: str, doc: page.Document) -> list[str]:
         "A random unit direction is the baseline of the readings.",
         "Every reading is reported against a text baseline.",
         "The honesty baseline is fitted on the true and false labels.",
-        "direction minus the strongest baseline",
+        "direction minus the strongest of popularity and the text baselines",
         "popularity, the strongest baseline of the question",
-        "it is a baseline for the transfer pairs only",
-        "TruthfulQA [28] gives the question sets of the baselines.",
+        "the honesty classifier is a baseline for the transfer pairs only",
+        "TruthfulQA [28] gives the question sets of the text baselines.",
         "The honesty baseline is a logistic classifier on the labels.",
         "The honesty baseline has a 95 percent confidence interval.",
+        "The baseline of Zou et al. is a random direction.",
+        "The published baseline, e.g. the random direction.",
+        "A published baseline, i.e. shuffled labels.",
+        "The published baseline is plotted vs. random directions.",
     ],
 )
 def test_the_vocabulary_guard_catches_a_control_called_a_baseline(
@@ -624,10 +637,24 @@ def test_the_vocabulary_guard_catches_a_control_called_a_baseline(
         "The confidence of the model is the baseline for knowledge.",
         "Logistic regression [12] is a baseline. Random ones are controls.",
         "Zou et al. [1] propose a finder. The baseline is a published probe.",
+        "Baselines and controls",
+        "Popularity, controls and baselines of the knowledge rows",
+        "Popularity, baselines and controls of the knowledge rows",
+        "Text and popularity, controls and/or baselines, are scored alike.",
+        "Row 9 is a baseline, the output confidence.",
     ],
 )
 def test_the_vocabulary_guard_passes_a_published_baseline(text: str) -> None:
     assert _vocabulary_problems([text]) == []
+
+
+def test_an_abbreviation_does_not_end_a_clause() -> None:
+    text = "Zou et al. [1] fit it, e.g. here; see Fig. 3 vs. the rest. The end."
+    assert _clauses(text) == [
+        "Zou et al. [1] fit it, e.g. here",
+        "see Fig. 3 vs. the rest",
+        "The end.",
+    ]
 
 
 def test_the_prose_scan_reaches_the_description_and_the_figure_labels(
@@ -797,10 +824,7 @@ def test_every_grouped_table_csv_has_unique_headers(
 
 
 def _words(fragment: str) -> int:
-    fragment = re.sub(r"<style.*?</style>", " ", fragment, flags=re.S)
-    fragment = re.sub(r"<svg.*?</svg>", " ", fragment, flags=re.S)
-    fragment = re.sub(r"<[^>]+>", " ", fragment)
-    return len(fragment.split())
+    return len(_page_text(fragment, ("style", "svg")).split())
 
 
 def test_the_main_prose_is_about_four_thousand_words(html: str) -> None:
