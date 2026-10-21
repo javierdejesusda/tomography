@@ -157,9 +157,9 @@ def build(manifest: Manifest) -> TableOutput:
         f"split and {next(iter(others))} for the others) and its interval "
         "covers the sampling of the test pairs only, not the spread over "
         "training sets. In the honesty column the words alone are the "
-        "honesty control: a classifier fitted on the true and false "
-        "labels of the facts, not on the persona labels of the reader, so "
-        "it is a control for the transfer pairs only."
+        "honesty control, fitted on the true and false labels of the "
+        "facts, not on the persona labels of the reader, so they are a "
+        "control for the transfer pairs only."
     )
     return TableOutput(
         claim,

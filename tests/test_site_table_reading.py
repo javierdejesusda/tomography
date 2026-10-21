@@ -249,8 +249,8 @@ def test_the_caption_defines_the_text_control_rows(
     assert "true and false labels of the facts" in text
     assert "control for the transfer pairs only" in text
     assert (
-        "In the honesty column the words alone are the honesty control: a "
-        "classifier fitted on the true and false labels of the facts"
+        "In the honesty column the words alone are the honesty control, "
+        "fitted on the true and false labels of the facts"
     ) in text
     assert len(f"{output.claim} {text}".split()) <= 200
     assert not any(ch in text for ch in DASHES)
