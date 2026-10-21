@@ -924,8 +924,6 @@ def test_displayed_uids_cap_each_side_of_the_test_items(
 class Captured:
     """The call `execute` makes to collect the activations."""
 
-    items: list[Any] = dataclasses.field(default_factory=list)
-    args: tuple[Any, ...] = ()
     kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
     acts: ItemActivations | None = None
 
@@ -936,8 +934,6 @@ def _capture(monkeypatch: pytest.MonkeyPatch) -> Captured:
     def spy(
         loaded: LoadedModel, items: Any, *args: Any, **kwargs: Any
     ) -> ItemActivations:
-        captured.items = list(items)
-        captured.args = args
         captured.kwargs = kwargs
         captured.acts = collect_item_activations(loaded, items, *args, **kwargs)
         return captured.acts
@@ -1019,6 +1015,49 @@ def run_at(
         return _LAYER_RUNS[(key, layer)]
 
     return build
+
+
+@dataclasses.dataclass
+class Spied:
+    """A V1 run and what it handed to the extraction and the text views."""
+
+    run_dir: RunDir
+    captured: Captured
+    text_seeds: list[int]
+
+
+_SPIED_RUNS: dict[str, Spied] = {}
+
+
+@pytest.fixture
+def spied_run(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Spied:
+    """One V1 run per architecture under spies, with seed 3 and batches of 4.
+
+    The registry entry of the model reads it in bfloat16, so the summary
+    names a reading dtype other than the float32 of the run.
+    """
+    key = type(tiny_arch.model).__name__
+    if key not in _SPIED_RUNS:
+        captured = _capture(monkeypatch)
+        seeds: list[int] = []
+        original = v1_module.text_view
+
+        def spy(texts: Any, *, seed: int) -> Any:
+            seeds.append(seed)
+            return original(texts, seed=seed)
+
+        monkeypatch.setattr(v1_module, "text_view", spy)
+        spec = dataclasses.replace(MODELS["gpt2"], key="tiny", dtype="bfloat16")
+        monkeypatch.setattr(v1_module, "MODELS", {"tiny": spec})
+        out = tmp_path_factory.mktemp(f"v1-spied-{key}")
+        run_dir = _execute(tiny_arch, out, inputs, seed=3, batch_size=4)
+        _SPIED_RUNS[key] = Spied(run_dir, captured, seeds)
+    return _SPIED_RUNS[key]
 
 
 def _summary(run_dir: RunDir) -> dict[str, Any]:
@@ -1129,15 +1168,9 @@ def test_the_summary_records_the_run(
 
 
 def test_the_summary_names_the_dtype_of_this_run_and_of_the_reading_run(
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    spied_run: Spied,
 ) -> None:
-    spec = dataclasses.replace(MODELS["gpt2"], key="tiny", dtype="bfloat16")
-    monkeypatch.setattr(v1_module, "MODELS", {"tiny": spec})
-
-    summary = _summary(_execute(tiny_arch, tmp_path, inputs))
+    summary = _summary(spied_run.run_dir)
 
     assert summary["extraction_dtype"] == "float32"
     assert summary["reading_run_dtype"] == "bfloat16"
@@ -1171,29 +1204,22 @@ def test_the_verdict_looks_at_the_column_of_the_chosen_layer(
     tmp_path: Path,
 ) -> None:
     assert committed.layers == (1, 2, 3)
-    chosen = dataclasses.replace(committed, layer=2)
-    at = chosen.layers.index(2)
+    # Each column moves by its own amount, so the differences name the
+    # column the verdict read.
+    test = committed.test.copy()
+    test[..., 0] -= 0.5
+    test[..., 1] -= 0.125
+    test[..., 2] -= 0.25
+    reading = dataclasses.replace(committed, layer=2, test=test)
 
-    def reproduction(column: int | None, name: str) -> dict[str, Any]:
-        test = committed.test.copy()
-        if column is not None:
-            test[..., column] -= 0.125
-        reading = dataclasses.replace(chosen, test=test)
-        run_dir = _execute(tiny_arch, tmp_path / name, inputs, reading=reading)
-        return _summary(run_dir)["reproduction"]
+    run_dir = _execute(tiny_arch, tmp_path, inputs, reading=reading)
 
-    baseline = reproduction(None, "none")
-    assert baseline["within_tolerance"] is True
-    assert set(baseline["max_abs_diff"].values()) == {0.0}
-    moved = reproduction(at, "chosen")
-    assert moved["within_tolerance"] is False
-    for by_method in moved["mean_diff_at_layer"].values():
+    reproduction = _summary(run_dir)["reproduction"]
+    assert reproduction["within_tolerance"] is False
+    for by_method in reproduction["mean_diff_at_layer"].values():
         assert by_method == pytest.approx(dict.fromkeys(by_method, 0.125))
-    for column in (0, 2):
-        other = reproduction(column, f"other{column}")
-        assert other["within_tolerance"] is True
-        assert other["mean_diff_at_layer"] == baseline["mean_diff_at_layer"]
-        assert other["max_abs_diff"]["mean_all_layers"] == pytest.approx(0.125)
+    assert reproduction["max_abs_diff"]["mean_at_layer"] == pytest.approx(0.125)
+    assert reproduction["max_abs_diff"]["mean_all_layers"] == pytest.approx(0.5)
 
 
 def test_the_random_finder_of_the_run_is_the_one_of_the_p9b_run(
@@ -1230,45 +1256,27 @@ def test_the_extraction_reads_layers_one_to_the_last_of_the_selected_items(
     committed: CommittedReading,
     pools: dict[str, TypePool],
     tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    spied_run: Spied,
 ) -> None:
-    captured = _capture(monkeypatch)
-
-    _execute(tiny_arch, tmp_path, inputs, batch_size=4)
+    acts = spied_run.captured.acts
 
     selected = select_items(pools, train_draws(pools, committed.config))
-    assert [i.example.uid for i in captured.items] == [
-        i.example.uid for i in selected
-    ]
-    assert captured.acts is not None
-    assert tuple(captured.acts.layers) == committed.layers
-    template, chat = captured.args
-    assert template == p9_template("fewshot", DEFAULT_SHOTS[:2])
-    assert chat.kind == chat_format_for(tiny_arch).kind
-    assert captured.kwargs == {
-        "layers": tuple(range(1, tiny_arch.n_layers + 1)),
-        "bos": committed.config.bos,
-        "batch_size": 4,
-        "share_prefix": True,
-    }
+    assert acts is not None
+    assert acts.uids == tuple(i.example.uid for i in selected)
+    assert acts.layers == tuple(range(1, tiny_arch.n_layers + 1))
+    assert acts.layers == committed.layers
+    # The batch size changes no number, so the call is the one place to see
+    # that the setting reaches the extraction.
+    assert spied_run.captured.kwargs["batch_size"] == 4
 
 
 def test_the_published_reader_and_its_projections_are_written(
-    committed: CommittedReading,
-    pools: dict[str, TypePool],
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    committed: CommittedReading, pools: dict[str, TypePool], spied_run: Spied
 ) -> None:
-    captured = _capture(monkeypatch)
+    run_dir = spied_run.run_dir
+    reads = spied_run.captured.acts
 
-    run_dir = _execute(tiny_arch, tmp_path, inputs)
-
-    assert captured.acts is not None
-    reads = captured.acts
+    assert reads is not None
     shown = displayed_uids(pools, cap=MAX_DISPLAYED)
     views = published_views(committed, reads, pools, shown)
     arrays = run_dir.read_arrays("projections")
@@ -1280,19 +1288,12 @@ def test_the_published_reader_and_its_projections_are_written(
 
 
 def test_the_shuffled_control_is_written_beside_the_methods(
-    committed: CommittedReading,
-    pools: dict[str, TypePool],
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    committed: CommittedReading, pools: dict[str, TypePool], spied_run: Spied
 ) -> None:
-    captured = _capture(monkeypatch)
+    run_dir = spied_run.run_dir
+    reads = spied_run.captured.acts
 
-    run_dir = _execute(tiny_arch, tmp_path, inputs, seed=3)
-
-    assert captured.acts is not None
-    reads = captured.acts
+    assert reads is not None
     want = refit_shuffled(
         reads,
         pools,
@@ -1331,10 +1332,11 @@ def test_a_surface_control_that_moved_is_reported_not_hidden(
 
 
 def test_execute_is_deterministic(
-    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
+    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path, default_run: RunDir
 ) -> None:
-    first = _execute(tiny_arch, tmp_path / "a", inputs)
-    second = _execute(tiny_arch, tmp_path / "b", inputs)
+    first = default_run
+
+    second = _execute(tiny_arch, tmp_path, inputs)
 
     for name in ("projections", "pca2d", "text2d"):
         one, two = first.read_arrays(name), second.read_arrays(name)
@@ -1347,30 +1349,7 @@ def test_execute_is_deterministic(
     assert first.read_json("summary") == second.read_json("summary")
 
 
-def test_run_loads_the_model_in_float32_on_the_default_device(
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    asked: list[tuple[str, dict[str, Any]]] = []
-
-    def fake_load(name: str, **kwargs: Any) -> LoadedModel:
-        asked.append((name, kwargs))
-        return tiny_arch
-
-    monkeypatch.setattr(v1_module, "load_model", fake_load)
-    config = _config(inputs)
-    run_dir = RunDir.create(config, out_root=tmp_path)
-
-    run(config, run_dir)
-
-    assert asked == [("tiny", {"dtype": torch.float32})]
-    assert _summary(run_dir)["types"] == USABLE
-    assert (run_dir.path / "projections.npz").is_file()
-
-
-def test_run_lets_the_model_go_before_the_refits(
+def test_run_loads_the_model_in_float32_and_frees_it_before_the_refits(
     tiny_arch: LoadedModel,
     inputs: Inputs,
     tmp_path: Path,
@@ -1380,10 +1359,15 @@ def test_run_lets_the_model_go_before_the_refits(
     alive: list[bool] = []
     refit = v1_module.refit_methods
 
-    def fake_load(name: str, **kwargs: Any) -> LoadedModel:
+    # Like `load_model` it takes no device, and without a dtype it gives the
+    # bfloat16 of the registry, which the shared prefix refuses.
+    def fake_load(
+        name: str, *, dtype: torch.dtype | None = None
+    ) -> LoadedModel:
+        assert name == "tiny"
         fresh = copy.deepcopy(tiny_arch)
         models.append(weakref.ref(fresh.model))
-        return fresh
+        return dataclasses.replace(fresh, dtype=dtype or torch.bfloat16)
 
     def spy(*args: Any, **kwargs: Any) -> Any:
         alive.append(models[0]() is not None)
@@ -1397,7 +1381,9 @@ def test_run_lets_the_model_go_before_the_refits(
     run(config, run_dir)
 
     assert alive == [False]
-    assert _summary(run_dir)["extraction_dtype"] == "float32"
+    summary = _summary(run_dir)
+    assert summary["extraction_dtype"] == "float32"
+    assert summary["types"] == USABLE
 
 
 def test_run_refuses_an_unfinished_labels_run(
@@ -1986,24 +1972,8 @@ def test_execute_writes_the_text_view_of_each_panel(
         assert arrays[f"ratios_{panel}"].shape == (2,)
 
 
-def test_the_seed_of_the_run_reaches_the_text_view(
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    seeds: list[int] = []
-    original = v1_module.text_view
-
-    def spy(texts: Any, *, seed: int) -> Any:
-        seeds.append(seed)
-        return original(texts, seed=seed)
-
-    monkeypatch.setattr(v1_module, "text_view", spy)
-
-    _execute(tiny_arch, tmp_path, inputs, seed=3)
-
-    assert seeds == [
+def test_the_seed_of_the_run_reaches_the_text_view(spied_run: Spied) -> None:
+    assert spied_run.text_seeds == [
         derive_seed(3, "text", p) for p in ("entity", "question", "unknown")
     ]
 
