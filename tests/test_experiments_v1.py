@@ -2,13 +2,11 @@
 
 from collections.abc import Callable
 import dataclasses
-import getpass
 import hashlib
 import json
 from pathlib import Path
 import runpy
 import shutil
-import socket
 from typing import Any
 
 from matplotlib.text import Text
@@ -76,11 +74,9 @@ from tomography.reading.reader import RepReader
 
 PINNED_HASH = "3257d1220951"
 # The planted pool and the labels run of the P9b tests are the inputs here.
-_P9B = runpy.run_path(
-    str(Path(__file__).with_name("test_experiments_p9b_reading.py"))
-)
-_items = _P9B["_items"]
-_labels_run = _P9B["_labels_run"]
+_P9B = runpy.run_path(str(Path(__file__).with_name("_p9b_inputs.py")))
+_items = _P9B["items"]
+_labels_run = _P9B["labels_run"]
 USABLE: list[str] = _P9B["USABLE"]
 
 
@@ -1658,12 +1654,6 @@ def _finished_copy(run_dir: RunDir, tmp_path: Path) -> Path:
     shutil.copytree(run_dir.path, target)
     RunDir.open(target).finalize()
     return target
-
-
-@pytest.fixture
-def fixed_machine(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(getpass, "getuser", lambda: "tester-user")
-    monkeypatch.setattr(socket, "gethostname", lambda: "testhost-box.lan")
 
 
 @pytest.mark.usefixtures("fixed_machine")
