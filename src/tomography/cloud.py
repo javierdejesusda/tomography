@@ -702,6 +702,10 @@ def _bring_up(
 def cmd_up(args: argparse.Namespace, deps: Deps) -> int:
     """Creates a pod and waits until ssh works and it can stop itself.
 
+    Any host CUDA version is accepted unless `--cuda-version` lists the ones
+    to allow, since a pinned list stops matching stock once hosts update.
+    `setup` still refuses a driver older than `MIN_DRIVER_MAJOR`.
+
     Args:
         args: Parsed command line.
         deps: Side effects.
@@ -724,12 +728,13 @@ def cmd_up(args: argparse.Namespace, deps: Deps) -> int:
         "containerDiskInGb": args.disk_gb,
         "volumeMountPath": "/workspace",
         "ports": ["22/tcp"],
-        "allowedCudaVersions": ["13.0"],
         "interruptible": False,
         "env": {"PUBLIC_KEY": public_key.strip()},
     }
     if args.min_vcpu is not None:
         body["minVCPUPerGPU"] = args.min_vcpu
+    if args.cuda_versions:
+        body["allowedCudaVersions"] = args.cuda_versions
     if args.volume_id:
         body["networkVolumeId"] = args.volume_id
     else:
@@ -1409,6 +1414,7 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--volume-gb", type=int, default=50)
     up.add_argument("--disk-gb", type=int, default=30)
     up.add_argument("--min-vcpu", type=_min_vcpu)
+    up.add_argument("--cuda-version", dest="cuda_versions", action="append")
     up.add_argument("--public-key", type=Path, default=DEFAULT_PUBLIC_KEY)
     up.add_argument("--name", default="tomography")
     up.add_argument("--max-hours", type=_max_hours, required=True)
