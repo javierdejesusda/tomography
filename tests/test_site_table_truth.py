@@ -87,7 +87,7 @@ def test_rows_follow_paper_order_with_a_rule_before_qwen3(
     assert output.row_groups == (*groups(names), n)
 
 
-def test_baseline_rows_follow_the_checkpoints_with_values_in_the_table(
+def test_control_rows_follow_the_checkpoints_with_values_in_the_table(
     output: registry.TableOutput,
 ) -> None:
     n = len(models("r6"))
@@ -132,7 +132,7 @@ def test_every_cell_matches_a_recomputation(
         assert row[10] == fmt(agree["r5"])
 
 
-def test_the_caption_quotes_the_text_baselines_chance_and_the_wilson_width(
+def test_the_caption_quotes_the_text_controls_chance_and_the_wilson_width(
     output: registry.TableOutput,
 ) -> None:
     summary = data(run("r6", "gpt2"), "summary.json")
@@ -148,6 +148,9 @@ def test_the_caption_quotes_the_text_baselines_chance_and_the_wilson_width(
     assert f"\u00b1{fmt((hi - lo) / 2)}" in text
     assert f"{n} test questions" in text
     assert "0.718" not in text
+    assert "with the text controls of the same questions" in text
+    assert "the last three rows give these controls" in text
+    assert "baseline" not in text
 
 
 def test_the_in_template_sentence_names_the_checkpoints_by_layer(

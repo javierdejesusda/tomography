@@ -324,7 +324,7 @@ def test_counts_and_numbers_expose_all_thirty_role_counts(
     assert built.numbers["knowledge_confidence_n"] == 9
 
 
-def test_the_knowledge_row_takes_popularity_as_the_strongest_baseline() -> None:
+def test_the_knowledge_row_takes_popularity_as_the_strongest_control() -> None:
     for model in EXPECTED["knowledge"]:
         r = next(
             x
@@ -400,11 +400,26 @@ def test_the_bar_is_registered_and_the_module_builds_from_the_registry() -> (
     assert ("figure", "teaser") not in registry.missing()
 
 
-def test_the_claim_makes_no_blanket_statement_about_stronger_baselines(
+def test_the_claim_makes_no_blanket_statement_about_stronger_controls(
     built: registry.FigureOutput,
 ) -> None:
     assert "rarely" not in built.claim
     assert not re.search(r"\bfirst\b", f"{built.claim} {built.detail}")
+
+
+def test_the_scorecard_names_controls_and_the_confidence_baseline(
+    built: registry.FigureOutput,
+) -> None:
+    ax = _ax(built, "scorecard")
+    blocks = [t.get_text() for t in ax.texts]
+    assert "against a stronger control or baseline" in blocks
+    assert ax.get_xlabel() == (
+        "margin over the control or baseline of its row, "
+        "in the unit under each row"
+    )
+    assert "checkpoint margins over the row's control or baseline;" in (
+        built.detail
+    )
 
 
 def test_the_legend_names_the_sizes_the_figure_holds(

@@ -1,7 +1,7 @@
 """Figure 8: A knowledge direction against popularity and confidence.
 
 Panel (a) reads the within-relation AUROC of the known-against-unknown reader
-of P9b with its baselines and the model's own answer probability, panel (b)
+of P9b with its controls and the model's own answer probability, panel (b)
 the paired difference between the direction and popularity, panel (c) the
 paired change in the AUROC for predicting wrong answers of P9c when the
 direction or a supervised probe is added to the model's own confidence. All
@@ -45,7 +45,7 @@ CLAIM = (
     "of popularity and the two text classifiers, with an interval excluding "
     "zero, on {interval}, and adds at most {hi_gpt2} (GPT-2), {hi_base} "
     "(Qwen3 base) and {hi_post} (post-trained) to the confidence of the "
-    "model at the upper end of its interval."
+    "model at its interval's upper end."
 )
 DETAIL = (
     "(a) Within-relation AUROC on PopQA (open markers: post-trained): "
@@ -54,9 +54,10 @@ DETAIL = (
     "(pentagon). GPT-2 {gpt2}; Qwen3 base {base}; Qwen3 post-trained "
     "{post}. (b) Difference in AUROC, direction minus the strongest of "
     "popularity and the two text classifiers, conservative interval. (c) "
-    "Change in AUROC for wrong answers when the direction, or a probe "
-    "fitted on the correct and wrong labels, is added to model confidence; "
-    "the interval covers zero on {cover}. See [[sec:appendix_knowledge]]."
+    "Change in AUROC for wrong answers when the direction, or a "
+    "logistic-regression probe fitted on the correct and wrong labels, is "
+    "added to the baseline, model confidence; the interval covers zero on "
+    "{cover}. See [[sec:appendix_knowledge]]."
 )
 
 
@@ -136,7 +137,7 @@ def _role_text(
     contrast: dict[str, dict[str, Any]],
     own: dict[str, dict[str, Any]],
 ) -> str:
-    """Writes the AUROC ranges of one role beside their baselines.
+    """Writes the AUROC ranges of one role beside their controls.
 
     Args:
         members: The checkpoints of the role that have a contrast.
@@ -380,7 +381,7 @@ def _draw_difference(
     ax.xaxis.set_major_locator(ticker.FixedLocator(_unit_step(low, high)))
     ax.xaxis.set_major_formatter(axes.minus_formatter())
     axes.ref_line(ax, 0.0, "x")
-    ax.set_xlabel("direction minus\nstrongest baseline")
+    ax.set_xlabel("direction minus\nstrongest control")
     _head(ax, 0.5, "difference")
 
 

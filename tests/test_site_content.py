@@ -654,8 +654,10 @@ def test_reproducibility_admits_the_lorra_adapter_and_names_no_run_code() -> (
     assert "tomography run" in paragraphs
 
 
-def test_the_text_baseline_is_scoped_in_the_abstract_and_introduction() -> None:
+def test_the_text_control_is_scoped_in_the_abstract_and_introduction() -> None:
     assert "where the wording leaks the label" in content.ABSTRACT
+    assert "random-direction controls" in content.ABSTRACT
+    assert "text-classifier controls" in content.ABSTRACT
     assert "for the readings, TruthfulQA, knowledge and approximate" in (
         " ".join(content.INTRODUCTION.paragraphs)
     )
@@ -1037,9 +1039,10 @@ def test_the_approximate_appendix_states_the_band_and_the_control_layer() -> (
     assert "[[count:fig:approximate.control_other_layer]]" in text
 
 
-def test_the_page_does_not_say_the_readings_lack_a_text_baseline() -> None:
+def test_the_page_does_not_say_the_readings_lack_a_text_control() -> None:
     text = _text()
     assert "have no text-only baseline" not in text
+    assert "have no text-only control" not in text
     limits = " ".join(_texts(content.DISCUSSION))
     assert "model-free word and character n-gram classifiers" in limits
     assert "[[table:reading]]" in limits
@@ -1047,18 +1050,75 @@ def test_the_page_does_not_say_the_readings_lack_a_text_baseline() -> None:
     assert "test-pair sampling only" in limits
 
 
-def test_the_method_baselines_name_the_words_alone_rows() -> None:
+def test_the_method_controls_name_the_words_alone_rows() -> None:
     method = " ".join(t for s in _sections(content.METHOD) for t in _texts(s))
     assert "words alone" in method
     assert "[[table:reading]]" in method
     assert "sentiment, utility, morality" in method
 
 
-def test_the_introduction_lists_the_reading_concepts_among_text_baselines() -> (
+def test_the_introduction_lists_the_reading_concepts_among_text_controls() -> (
     None
 ):
     intro = " ".join(_texts(content.INTRODUCTION))
     assert "a classifier on the text (for the readings, TruthfulQA" in intro
+
+
+def test_the_introduction_separates_controls_from_published_baselines() -> None:
+    intro = " ".join(_texts(content.INTRODUCTION))
+    assert "we name its controls" in intro
+    assert "The baselines are published methods:" in intro
+    assert "logistic regression, mass-mean probes" in intro
+    assert "for knowledge, the output confidence of the model" in intro
+    assert "[[sec:controls_method]]" in intro
+    listed = dict(content.INTRODUCTION.listed)
+    assert "Readings against controls ([[sec:method]])." in listed
+    assert (
+        "a text control"
+        in listed["Readings against controls ([[sec:method]])."]
+    )
+
+
+def test_the_method_names_the_published_baselines_it_runs() -> None:
+    section = _section("controls_method")
+    assert section.title == "Controls and baselines"
+    text = " ".join(_texts(section))
+    for key in (
+        "alain2016understanding",
+        "marks2024geometry",
+        "kadavath2022language",
+    ):
+        assert f"[[cite:{key}]]" in text, key
+    assert "mass-mean probe" in text
+    assert "P(True)" in text
+    assert "[[table:finders_all]]" in text
+    assert (
+        "the confidence of the model, which stacks five output signals" in text
+    )
+
+
+def test_the_discussion_calls_the_honesty_classifier_a_control() -> None:
+    limits = " ".join(_texts(content.DISCUSSION))
+    assert (
+        "the honesty control is fitted on the true and false labels" in limits
+    )
+    assert "so it is a control for the transfer pairs only" in limits
+    lead = content.DISCUSSION.paragraphs[0]
+    assert "than it beats the right comparison" in lead
+    assert "a text control ([[fig:teaser]])" in lead
+
+
+def test_appendix_b_separates_the_controls_from_the_confidence_baseline() -> (
+    None
+):
+    runin = dict(_section("appendix_method").runin)
+    assert "Baselines." not in runin
+    text = runin["Controls and baselines."]
+    assert "The popularity of the subject, a control," in text
+    assert "The confidence of the model, a baseline," in text
+    assert "P(True) [[cite:kadavath2022language]]" in text
+    intro = _section("appendix_method").paragraphs[0]
+    assert "reported against a control built the same way" in intro
 
 
 def _result_texts() -> str:

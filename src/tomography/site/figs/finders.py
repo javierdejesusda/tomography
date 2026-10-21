@@ -180,9 +180,10 @@ def _legend(fig: Figure) -> None:
     fig.legend(
         handles,
         [
-            "logistic regression (filled: GPT-2 and base; open: post-trained)",
+            "logistic regression, published baseline (filled: GPT-2 and "
+            "base; open: post-trained)",
             "PCA of paired differences (paper), same fill",
-            "random direction, test-pair noise",
+            "random control, test-pair noise",
         ],
         handler_map={tuple: HandlerTuple(ndivide=None, pad=0.1)},
         loc="outside upper center",
@@ -278,7 +279,8 @@ def _claim(
         f"estimate only ({gpt2.hits} of {gpt2.total}, by "
         f"{cells.num(numbers['pca_utility_gpt2_min'])} to "
         f"{cells.num(numbers['pca_utility_gpt2_max'])}), but matching is "
-        "confounded with the concept. Logistic regression is above it for "
+        "confounded with the concept. Logistic regression "
+        "[[cite:alain2016understanding]] is above it for "
         f"sentiment on {stats.per_role_text(counts['logistic_sentiment'])}."
     )
 

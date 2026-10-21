@@ -71,7 +71,7 @@ def test_the_words_criterion_is_the_difference_interval() -> None:
         assert role.hits == 0
 
 
-def test_the_baseline_findings_name_the_interval_criterion() -> None:
+def test_the_comparison_findings_name_the_interval_criterion() -> None:
     assert (
         "above a classifier on the words alone, with an interval excluding "
         "zero, on [[count:fig:teaser.truthfulqa]]"
@@ -131,7 +131,7 @@ def test_the_fluency_rule_is_defined_where_it_is_first_used() -> None:
     assert "fluency rule" not in content.ABSTRACT
 
 
-def test_the_figure_8_caption_scopes_its_strongest_baseline() -> None:
+def test_the_figure_8_caption_scopes_its_strongest_control() -> None:
     output = registry.build_figure("knowledge_reading", Manifest(ROOT))
     assert "popularity, the strongest baseline" not in output.detail
     assert (
@@ -148,12 +148,15 @@ def _appendix(key: str) -> str:
 def test_the_overview_method_detail_is_an_appendix_c_paragraph() -> None:
     text = _appendix("appendix_reading")
     assert (
-        "Baselines of each row of [[fig:teaser]]: rows 1 to 5, the "
+        "Comparisons of each row of [[fig:teaser]]: rows 1 to 5, the "
         "random direction" in text
     )
     assert "row 7, a word classifier" in text
     assert "row 8, the strongest of popularity and two text classifiers" in text
+    assert "Rows 1 to 8 are controls" in text
+    assert "row 9 is a baseline, the confidence of the model" in text
     assert "five stacked output signals" in text
+    assert "P(True) [[cite:kadavath2022language]]" in text
     assert "[[count:fig:teaser.knowledge_confidence]]" in text
     assert "[[count:fig:teaser.steering]]" in text
     assert "[[count:fig:teaser.steering_fluent]]" in text

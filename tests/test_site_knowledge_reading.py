@@ -23,7 +23,7 @@ Z = 1.959963984540054
 MINUS = chr(0x2212)
 HEIGHT = 4.2
 READER = ("logistic_within", "popularity_within")
-BASELINES = ("text_word_within", "text_char_within")
+TEXT_CONTROLS = ("text_word_within", "text_char_within")
 
 
 @pytest.fixture(scope="module")
@@ -265,7 +265,7 @@ def test_increment_numbers_are_per_role_and_none_is_pooled(
     assert sum(c.total for c in cover.values()) == 9
 
 
-def test_the_difference_is_taken_against_the_strongest_baseline() -> None:
+def test_the_difference_is_taken_against_the_strongest_control() -> None:
     row = {
         "logistic_within": 0.80,
         "popularity_within": 0.70,
@@ -290,20 +290,32 @@ def test_the_difference_is_taken_against_the_strongest_baseline() -> None:
 
 def test_panel_b_names_its_comparator(output: registry.FigureOutput) -> None:
     ax = output.figure.axes[1]
-    assert ax.get_xlabel() == "direction minus\nstrongest baseline"
+    assert ax.get_xlabel() == "direction minus\nstrongest control"
 
 
 def test_the_probe_column_is_explained_in_the_caption(
     output: registry.FigureOutput,
 ) -> None:
-    assert "a probe fitted on the correct and wrong labels" in output.detail
+    assert (
+        "a logistic-regression probe fitted on the correct and wrong labels"
+    ) in output.detail
 
 
-def test_popularity_is_the_strongest_baseline_where_the_caption_says_so() -> (
+def test_the_caption_calls_the_model_confidence_the_baseline(
+    output: registry.FigureOutput,
+) -> None:
+    assert "is added to the baseline, model confidence;" in output.detail
+    assert "at its interval's upper end" in output.claim
+    assert len(f"{output.claim} {output.detail}".split()) <= 200
+
+
+def test_popularity_is_the_strongest_control_where_the_caption_says_so() -> (
     None
 ):
     for model, row in _contrast().items():
-        assert row["popularity_within"] > max(row[c] for c in BASELINES), model
+        assert row["popularity_within"] > max(row[c] for c in TEXT_CONTROLS), (
+            model
+        )
 
 
 def _role_text(output: registry.FigureOutput, role: str) -> str:
@@ -348,7 +360,7 @@ def test_caption_is_at_most_200_words_and_leads_with_the_conclusion(
     assert "small amount" not in output.claim
 
 
-def test_caption_gives_every_auroc_beside_its_baselines_per_role(
+def test_caption_gives_every_auroc_beside_its_controls_per_role(
     output: registry.FigureOutput,
 ) -> None:
     for label, role in (
@@ -475,8 +487,8 @@ def test_panel_a_draws_one_green_range_for_the_two_text_classifiers(
     assert len(green) == len(MODELS_A)
     for model, line in zip(MODELS_A, green, strict=True):
         row = _contrast()[model]
-        lo = min(row[c] for c in BASELINES)
-        hi = max(row[c] for c in BASELINES)
+        lo = min(row[c] for c in TEXT_CONTROLS)
+        hi = max(row[c] for c in TEXT_CONTROLS)
         assert min(line.get_xdata()) == pytest.approx(lo)
         assert max(line.get_xdata()) == pytest.approx(hi)
     assert not _points(ax, "^")
