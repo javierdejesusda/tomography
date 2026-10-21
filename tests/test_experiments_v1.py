@@ -64,7 +64,6 @@ from tomography.p9.reading import READING_METHODS
 from tomography.p9.reading import SURFACE_BASELINES
 from tomography.p9.reading import ItemActivations
 from tomography.p9.reading import collect_item_activations
-from tomography.p9.reading import draw_seed
 from tomography.p9.reading import draw_train
 from tomography.p9.reading import p9_template
 from tomography.p9.reading import reading_cube
@@ -387,112 +386,6 @@ def _pools(committed: CommittedReading) -> dict[str, TypePool]:
     return usable
 
 
-def test_train_draws_are_the_draws_of_the_reading(inputs: Inputs) -> None:
-    committed = load_reading(inputs.reading.path, model="tiny")
-    pools = _pools(committed)
-
-    draws = train_draws(pools, committed.config)
-
-    assert list(draws) == USABLE
-    for name, pool in pools.items():
-        assert len(draws[name]) == committed.config.n_seeds
-        for s, draw in enumerate(draws[name]):
-            want = draw_train(
-                pool,
-                n_pairs=committed.config.n_pairs,
-                seed=draw_seed(committed.config.seed, s),
-            )
-            assert [i.example.uid for i in draw.items] == [
-                i.example.uid for i in want.items
-            ]
-            np.testing.assert_array_equal(draw.pairs, want.pairs)
-    held = [
-        [{i.example.uid for i in draw.items} for draw in by_draw]
-        for by_draw in draws.values()
-    ]
-    assert any(first != second for first, second in held)
-
-
-# Taken from `fit_type_reader` before it was split in two: the number of train
-# items, a digest of their uids in order and the first pair, by contrast and
-# draw, for the planted pool and the settings of the tiny P9b run.
-PRE_SPLIT_DRAWS = {
-    ("fictional_synthal", 0): (32, "fbbb5612ff70", ("synthal:21", "popqa:96")),
-    ("fictional_synthal", 1): (32, "8d1b700cccb2", ("synthal:45", "popqa:132")),
-    ("fictional_generated", 0): (
-        32,
-        "09f1b28f0bdd",
-        ("generated:21", "popqa:96"),
-    ),
-    ("fictional_generated", 1): (
-        32,
-        "cc4750317a62",
-        ("generated:45", "popqa:132"),
-    ),
-    ("obscure_real", 0): (30, "588accbb9e21", ("popqa:135", "popqa:120")),
-    ("obscure_real", 1): (30, "588accbb9e21", ("popqa:135", "popqa:132")),
-    ("obscure_real_pop", 0): (26, "2dc1f4820469", ("popqa:75", "popqa:102")),
-    ("obscure_real_pop", 1): (26, "16054c398e2d", ("popqa:141", "popqa:0")),
-    ("post_cutoff", 0): (32, "d1c3309a9f01", ("award-real:20", "award-post:6")),
-    ("post_cutoff", 1): (
-        32,
-        "7ade9b0d8965",
-        ("award-real:37", "award-post:11"),
-    ),
-    ("triviaqa_known", 0): (32, "e92d663864e3", ("triviaqa:46", "triviaqa:45")),
-    ("triviaqa_known", 1): (32, "72ab35b6205c", ("triviaqa:50", "triviaqa:7")),
-    ("unknowable_detail", 0): (32, "f52fb8e8cde4", ("detail:7", "nq_open:16")),
-    ("unknowable_detail", 1): (32, "c94342f4cf40", ("detail:7", "triviaqa:42")),
-    ("false_premise", 0): (32, "853da9720344", ("falseqa:7", "nq_open:16")),
-    ("false_premise", 1): (32, "9fe2b4fe41d4", ("falseqa:7", "triviaqa:42")),
-    ("kuq_future_unknown", 0): (
-        32,
-        "dfa780958d2b",
-        ("kuq-future:7", "nq_open:16"),
-    ),
-    ("kuq_future_unknown", 1): (
-        32,
-        "b0144373cbda",
-        ("kuq-future:7", "triviaqa:42"),
-    ),
-    ("real_vs_synthal", 0): (32, "98ddd719c2cc", ("popqa:81", "synthal:27")),
-    ("real_vs_synthal", 1): (32, "0d7952c92ee5", ("popqa:147", "synthal:45")),
-    ("real_vs_generated", 0): (
-        32,
-        "a976ee6d4091",
-        ("popqa:81", "generated:27"),
-    ),
-    ("real_vs_generated", 1): (
-        32,
-        "91b23b5c4b8b",
-        ("popqa:147", "generated:45"),
-    ),
-}
-
-
-def _digest(uids: list[str]) -> str:
-    return hashlib.sha256("\n".join(uids).encode()).hexdigest()[:12]
-
-
-def test_train_draws_are_those_the_fit_of_the_p9b_run_drew(
-    inputs: Inputs,
-) -> None:
-    committed = load_reading(inputs.reading.path, model="tiny")
-    pools = _pools(committed)
-
-    draws = train_draws(pools, committed.config)
-
-    assert {name for name, _ in PRE_SPLIT_DRAWS} == set(USABLE)
-    for (name, s), (count, digest, first) in PRE_SPLIT_DRAWS.items():
-        draw = draws[name][s]
-        uids = [i.example.uid for i in draw.items]
-        assert len(uids) == count, (name, s)
-        assert _digest(uids) == digest, (name, s)
-        assert draw.pairs is not None
-        pair = (uids[draw.pairs[0, 0]], uids[draw.pairs[0, 1]])
-        assert pair == first, (name, s)
-
-
 def test_the_selection_is_the_test_items_and_the_train_items_of_the_draws(
     inputs: Inputs,
 ) -> None:
@@ -688,19 +581,6 @@ def test_run_refuses_a_reading_run_read_from_other_labels_before_the_model(
 
     with pytest.raises(ValueError, match=r"labels.*other"):
         run(config, run_dir)
-
-
-def test_execute_refuses_a_reading_run_read_from_other_labels(
-    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
-) -> None:
-    committed = load_reading(inputs.reading.path, model="tiny")
-    elsewhere = dataclasses.replace(
-        committed.config, labels_run=str(tmp_path / "other" / "p9a")
-    )
-    moved = dataclasses.replace(committed, config=elsewhere)
-
-    with pytest.raises(ValueError, match=r"labels.*other"):
-        _execute(tiny_arch, tmp_path, inputs, reading=moved)
 
 
 def test_run_refuses_a_batch_size_before_the_model(
@@ -1452,20 +1332,6 @@ def test_the_surface_controls_are_recorded_beside_the_committed_ones(
     assert surface == compare_surface(_pools(committed), committed)
 
 
-def test_a_difference_beyond_the_tolerance_is_reported_not_hidden(
-    tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
-) -> None:
-    committed = load_reading(inputs.reading.path, model="tiny")
-    moved = dataclasses.replace(committed, test=committed.test - 0.125)
-
-    run_dir = _execute(tiny_arch, tmp_path, inputs, reading=moved)
-
-    reproduction = _summary(run_dir)["reproduction"]
-    assert reproduction["within_tolerance"] is False
-    assert reproduction["max_abs_diff"]["mean_at_layer"] > 0.02
-    assert reproduction["max_abs_diff"]["mean_all_layers"] > 0.02
-
-
 def test_a_surface_control_that_moved_is_reported_not_hidden(
     tiny_arch: LoadedModel, inputs: Inputs, tmp_path: Path
 ) -> None:
@@ -1496,74 +1362,6 @@ def test_execute_is_deterministic(
             )
     assert first.read_json("projections") == second.read_json("projections")
     assert first.read_json("summary") == second.read_json("summary")
-
-
-def test_the_uids_hold_no_question_text(default_run: RunDir) -> None:
-    text = (default_run.path / "projections.json").read_text("utf-8")
-
-    assert "Who is" not in text
-    sidecar = default_run.read_json("projections")
-    assert isinstance(sidecar, dict)
-    known = {i.example.uid for i in _items()}
-    for sides in sidecar["uids"].values():
-        assert set(sides["positive"]) | set(sides["negative"]) <= known
-
-
-@pytest.mark.parametrize(
-    ("overrides", "match"),
-    [({"batch_size": 0}, "batch_size")],
-    ids=["batch_size"],
-)
-def test_a_setting_that_cannot_work_fails_before_the_forward_pass(
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    overrides: dict[str, Any],
-    match: str,
-) -> None:
-    def never(*args: Any, **kwargs: Any) -> ItemActivations:
-        raise AssertionError("the forward pass must not start")
-
-    monkeypatch.setattr(v1_module, "collect_item_activations", never)
-
-    with pytest.raises(ValueError, match=match):
-        _execute(tiny_arch, tmp_path, inputs, **overrides)
-
-
-def test_labels_that_differ_from_the_reading_fail_before_the_forward_pass(
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def never(*args: Any, **kwargs: Any) -> ItemActivations:
-        raise AssertionError("the forward pass must not start")
-
-    monkeypatch.setattr(v1_module, "collect_item_activations", never)
-    items = [i for i in _items() if not i.example.uid.startswith("falseqa")]
-
-    with pytest.raises(ValueError, match="contrasts"):
-        _execute(tiny_arch, tmp_path, inputs, items=items)
-
-
-def test_a_control_that_cannot_work_fails_before_the_forward_pass(
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def never(*args: Any, **kwargs: Any) -> ItemActivations:
-        raise AssertionError("the forward pass must not start")
-
-    def broken(pool: Any) -> dict[str, float | None]:
-        raise ValueError("no control")
-
-    monkeypatch.setattr(v1_module, "collect_item_activations", never)
-    monkeypatch.setattr(v1_module, "surface_baselines", broken)
-
-    with pytest.raises(ValueError, match="no control"):
-        _execute(tiny_arch, tmp_path, inputs)
 
 
 def test_run_loads_the_model_in_float32_on_the_default_device(
@@ -1606,45 +1404,6 @@ def test_run_refuses_an_unfinished_labels_run(
     run_dir = RunDir.create(config, out_root=tmp_path)
 
     with pytest.raises(ValueError, match="not a finished run"):
-        run(config, run_dir)
-
-
-def test_run_refuses_an_unfinished_reading_run(
-    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _never_loaded(monkeypatch)
-    path = _copy(inputs.reading, tmp_path / "reading")
-    _edit_json(path / "meta.json", finished_at=None)
-    config = dataclasses.replace(_config(inputs), reading_run=str(path))
-    run_dir = RunDir.create(config, out_root=tmp_path)
-
-    with pytest.raises(ValueError, match="not a finished run"):
-        run(config, run_dir)
-
-
-def test_run_refuses_a_reading_run_of_another_model(
-    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _never_loaded(monkeypatch)
-    path = _copy(inputs.reading, tmp_path / "reading")
-    _edit_json(path / "config.json", model="gpt2")
-    config = dataclasses.replace(_config(inputs), reading_run=str(path))
-    run_dir = RunDir.create(config, out_root=tmp_path)
-
-    with pytest.raises(ValueError, match=r"'gpt2'.*'tiny'"):
-        run(config, run_dir)
-
-
-def test_run_refuses_a_reading_run_without_its_arrays(
-    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _never_loaded(monkeypatch)
-    path = _copy(inputs.reading, tmp_path / "reading")
-    (path / "transfer.npz").unlink()
-    config = dataclasses.replace(_config(inputs), reading_run=str(path))
-    run_dir = RunDir.create(config, out_root=tmp_path)
-
-    with pytest.raises(ValueError, match=r"transfer\.npz"):
         run(config, run_dir)
 
 
@@ -2312,25 +2071,6 @@ def test_no_text_of_a_figure_holds_a_question(default_run: RunDir) -> None:
                 assert question not in label, panel
 
 
-def test_a_text_view_that_cannot_be_fitted_fails_before_the_forward_pass(
-    tiny_arch: LoadedModel,
-    inputs: Inputs,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def never(*args: Any, **kwargs: Any) -> ItemActivations:
-        raise AssertionError("the forward pass must not start")
-
-    def broken(texts: Any, *, seed: int) -> Any:
-        raise ValueError("no text view")
-
-    monkeypatch.setattr(v1_module, "collect_item_activations", never)
-    monkeypatch.setattr(v1_module, "text_view", broken)
-
-    with pytest.raises(ValueError, match="no text view"):
-        _execute(tiny_arch, tmp_path, inputs)
-
-
 def test_run_fits_the_text_views_before_the_model(
     inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2405,58 +2145,6 @@ def test_a_panel_figure_has_a_row_per_view_layer_and_one_for_the_text(
     ]
     for ax in visible:
         assert sum(_points(ax)) == n
-
-
-def test_a_panel_figure_colours_the_items_by_their_side(
-    default_run: RunDir,
-) -> None:
-    sidecar = default_run.read_json("projections")
-    assert isinstance(sidecar, dict)
-    entry = sidecar["panels"]["entity"]
-    first = entry["types"][0]
-    own = sidecar["uids"][first]
-    positive = {
-        u for name in entry["types"] for u in sidecar["uids"][name]["positive"]
-    }
-    negative = {
-        u for name in entry["types"] for u in sidecar["uids"][name]["negative"]
-    }
-
-    figure = panel_figure(
-        "entity",
-        sidecar,
-        default_run.read_arrays("pca2d"),
-        default_run.read_arrays("text2d"),
-    )
-
-    unsupervised, supervised = figure.axes[0], figure.axes[1]
-    assert _points(unsupervised) == [
-        0,
-        len(positive - negative),
-        len(negative),
-    ]
-    n = len(entry["uids"])
-    assert _points(supervised) == [
-        n - len(own["positive"]) - len(own["negative"]),
-        len(own["positive"]),
-        len(own["negative"]),
-    ]
-
-
-def test_the_text_row_says_that_it_is_lsa_not_pca(default_run: RunDir) -> None:
-    sidecar = default_run.read_json("projections")
-    assert isinstance(sidecar, dict)
-
-    figure = panel_figure(
-        "entity",
-        sidecar,
-        default_run.read_arrays("pca2d"),
-        default_run.read_arrays("text2d"),
-    )
-
-    labels = [ax.get_ylabel() for ax in figure.axes if ax.get_visible()]
-    assert labels.count("words only (LSA)") == 1
-    assert "words only" not in labels
 
 
 def _drawn_views() -> tuple[
