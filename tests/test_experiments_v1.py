@@ -742,6 +742,7 @@ def test_shuffled_draw_permutes_the_labels_inside_each_stratum(
 
     assert shuffled.pairs is None
     assert shuffled.items == draw.items
+    assert shuffled.seed == draw.seed
     np.testing.assert_array_equal(shuffled.strata, draw.strata)
     assert not np.array_equal(shuffled.labels, draw.labels)
     for code in np.unique(draw.strata):

@@ -414,7 +414,8 @@ def shuffled_draw(draw: TrainDraw, *, seed: int) -> TrainDraw:
         seed: Seeds the permutations.
 
     Returns:
-        The draw with permuted labels and no pairs.
+        The draw with permuted labels and no pairs, under the seed of the
+        fit.
     """
     rng = np.random.default_rng(seed)
     labels = draw.labels.copy()
@@ -453,11 +454,7 @@ def refit_methods(
         for s, draw in enumerate(draws[name]):
             for m, method in enumerate(protocol.methods):
                 reader = fit_draw(
-                    acts,
-                    draw,
-                    method=method,
-                    preprocess=protocol.preprocess,
-                    seed=draw_seed(protocol.seed, s),
+                    acts, draw, method=method, preprocess=protocol.preprocess
                 )
                 test[m, t, s] = type_auroc(reader, acts, pool, "test")
     return test
@@ -490,16 +487,14 @@ def refit_shuffled(
     test = np.zeros((len(pools), protocol.n_seeds, len(acts.layers)))
     for t, (name, pool) in enumerate(pools.items()):
         for s, draw in enumerate(draws[name]):
-            draw_state = draw_seed(protocol.seed, s)
             reader = fit_draw(
                 acts,
                 shuffled_draw(
                     draw,
-                    seed=derive_seed(draw_state, "shuffled", name, seed),
+                    seed=derive_seed(draw.seed, "shuffled", name, seed),
                 ),
                 method=protocol.methods[0],
                 preprocess=protocol.preprocess,
-                seed=draw_state,
             )
             test[t, s] = type_auroc(reader, acts, pool, "test")
     return test

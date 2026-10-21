@@ -831,6 +831,19 @@ def test_fit_type_reader_needs_only_the_items_the_pairs_hold(
     np.testing.assert_array_equal(reader.directions, full.directions)
 
 
+def test_fit_draw_seeds_the_fit_with_the_seed_of_the_draw(
+    planted: Planted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _spy_fit(monkeypatch)
+    draw = draw_train(planted.pools["obscure_real"], n_pairs=16, seed=4)
+
+    fit_draw(planted.acts, draw, method="random")
+
+    assert draw.seed == 4
+    (call,) = calls
+    assert call["seed"] == 4
+
+
 def test_fit_draw_without_pairs_orients_on_the_labels(
     planted: Planted, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -838,7 +851,7 @@ def test_fit_draw_without_pairs_orients_on_the_labels(
     draw = draw_train(planted.pools["obscure_real"], n_pairs=16, seed=4)
     flipped = dataclasses.replace(draw, labels=1 - draw.labels, pairs=None)
 
-    reader = fit_draw(planted.acts, flipped, seed=4)
+    reader = fit_draw(planted.acts, flipped)
 
     (call,) = calls
     assert call["pairs"] is None
