@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 import torch
 
+from tomography.analysis import pca_coordinates
 from tomography.cli import load_experiment
 from tomography.experiments import p9b_reading
 from tomography.experiments.base import RunDir
@@ -29,18 +30,25 @@ from tomography.experiments.v1_knowledge_views import check_reading
 from tomography.experiments.v1_knowledge_views import compare_auroc
 from tomography.experiments.v1_knowledge_views import compare_surface
 from tomography.experiments.v1_knowledge_views import displayed_items
+from tomography.experiments.v1_knowledge_views import displayed_uids
 from tomography.experiments.v1_knowledge_views import execute
 from tomography.experiments.v1_knowledge_views import load_reading
+from tomography.experiments.v1_knowledge_views import panel_contrasts
+from tomography.experiments.v1_knowledge_views import panel_union
+from tomography.experiments.v1_knowledge_views import pca_views
 from tomography.experiments.v1_knowledge_views import plot
 from tomography.experiments.v1_knowledge_views import prepare
 from tomography.experiments.v1_knowledge_views import published_views
 from tomography.experiments.v1_knowledge_views import refit_methods
 from tomography.experiments.v1_knowledge_views import refit_shuffled
+from tomography.experiments.v1_knowledge_views import residual_axis
 from tomography.experiments.v1_knowledge_views import run
 from tomography.experiments.v1_knowledge_views import run_plan
 from tomography.experiments.v1_knowledge_views import select_items
 from tomography.experiments.v1_knowledge_views import shuffled_draw
+from tomography.experiments.v1_knowledge_views import supervised_views
 from tomography.experiments.v1_knowledge_views import train_draws
+from tomography.experiments.v1_knowledge_views import view_layers
 from tomography.export import ExportError
 from tomography.export import export_runs
 from tomography.export import is_exported
@@ -1153,6 +1161,7 @@ def test_execute_writes_the_files_of_a_run(default_run: RunDir) -> None:
     assert names == [
         "config.json",
         "meta.json",
+        "pca2d.npz",
         "projections.json",
         "projections.npz",
         "summary.json",
@@ -1208,6 +1217,7 @@ def test_the_summary_records_the_run(
         "n_items",
         "extraction_dtype",
         "reading_run_dtype",
+        "views",
         "reproduction",
         "surface",
         "surface_equal",
@@ -1625,7 +1635,12 @@ def fixed_machine(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_every_file_of_a_run_passes_the_export(
     default_run: RunDir, tmp_path: Path
 ) -> None:
-    for name in ("projections.npz", "projections.json", "summary.json"):
+    for name in (
+        "projections.npz",
+        "projections.json",
+        "pca2d.npz",
+        "summary.json",
+    ):
         assert is_exported(name), name
     source = _finished_copy(default_run, tmp_path)
 
@@ -1639,6 +1654,7 @@ def test_every_file_of_a_run_passes_the_export(
     assert copied == [
         "config.json",
         "meta.json",
+        "pca2d.npz",
         "projections.json",
         "projections.npz",
         "summary.json",
@@ -1673,3 +1689,352 @@ def test_the_export_refuses_a_uid_array_that_names_a_private_path(
 
     with pytest.raises(ExportError, match=r"projections\.npz"):
         export_runs([source], tmp_path / "dest")
+
+
+def test_panel_contrasts_group_the_shown_contrasts_by_panel() -> None:
+    names = [
+        "fictional_synthal",
+        "fictional_generated",
+        "obscure_real",
+        "obscure_real_pop",
+        "post_cutoff",
+        "triviaqa_known",
+        "unknowable_detail",
+        "false_premise",
+        "kuq_future_unknown",
+        "kuq_false_assumption",
+        "real_vs_synthal",
+        "real_vs_generated",
+        "pre_vs_post_cutoff",
+    ]
+
+    panels = panel_contrasts(names)
+
+    assert list(panels) == ["entity", "question", "unknown"]
+    assert panels["entity"] == ("fictional_generated", "obscure_real")
+    assert panels["question"] == (
+        "unknowable_detail",
+        "false_premise",
+        "kuq_future_unknown",
+        "kuq_false_assumption",
+    )
+    assert panels["unknown"] == (
+        "real_vs_synthal",
+        "real_vs_generated",
+        "pre_vs_post_cutoff",
+    )
+
+
+def test_a_panel_without_a_usable_contrast_is_absent() -> None:
+    assert list(panel_contrasts(["real_vs_generated", "post_cutoff"])) == [
+        "unknown"
+    ]
+    assert panel_contrasts(["obscure_real_pop", "triviaqa_known"]) == {}
+    assert panel_contrasts([]) == {}
+
+
+def test_a_panel_shows_each_item_once_in_the_order_of_its_contrasts() -> None:
+    uids = {
+        "a": {"positive": ["k1", "k2"], "negative": ["u1", "u2"]},
+        "b": {"positive": ["k2", "k3"], "negative": ["u3", "u1"]},
+        "c": {"positive": ["z"], "negative": ["y"]},
+    }
+
+    assert panel_union(("a", "b"), uids) == [
+        "k1",
+        "k2",
+        "u1",
+        "u2",
+        "k3",
+        "u3",
+    ]
+    assert panel_union(("c",), uids) == ["z", "y"]
+
+
+def test_the_sidecar_lists_the_panels_and_the_items_they_show(
+    default_run: RunDir,
+) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+
+    panels = sidecar["panels"]
+
+    assert list(panels) == ["entity", "question", "unknown"]
+    assert panels["entity"]["types"] == ["fictional_generated", "obscure_real"]
+    assert panels["question"]["types"] == [
+        "unknowable_detail",
+        "false_premise",
+        "kuq_future_unknown",
+    ]
+    assert panels["unknown"]["types"] == [
+        "real_vs_synthal",
+        "real_vs_generated",
+    ]
+    for panel in panels.values():
+        assert panel["uids"] == panel_union(panel["types"], sidecar["uids"])
+        assert len(set(panel["uids"])) == len(panel["uids"])
+
+
+def test_the_views_are_drawn_at_layer_one_the_chosen_layer_and_the_last(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+
+    assert view_layers(committed, tiny_arch.n_layers) == (
+        1,
+        committed.layer,
+        tiny_arch.n_layers,
+    )
+    early = dataclasses.replace(committed, layer=1)
+    assert view_layers(early, tiny_arch.n_layers) == (1, 1, tiny_arch.n_layers)
+
+
+def _two_panels(read: Read) -> dict[str, list[str]]:
+    shown = displayed_uids(read.pools, cap=4)
+    return {
+        panel: panel_union(types, shown)
+        for panel, types in panel_contrasts(read.pools).items()
+    }
+
+
+def test_pca_views_fit_each_panel_on_its_own_items(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    panels = _two_panels(read)
+    layers = view_layers(read.committed, tiny_arch.n_layers)
+
+    arrays = pca_views(read.acts, layers, panels)
+
+    assert set(arrays) == {
+        "view_layers",
+        *(f"coordinates_{panel}" for panel in panels),
+        *(f"ratios_{panel}" for panel in panels),
+    }
+    assert arrays["view_layers"].tolist() == list(layers)
+    assert arrays["view_layers"].dtype == np.int64
+    for panel, uids in panels.items():
+        coordinates = arrays[f"coordinates_{panel}"]
+        assert coordinates.shape == (3, len(uids), 2)
+        assert coordinates.dtype == np.float32
+        assert arrays[f"ratios_{panel}"].shape == (3, 2)
+        index = {uid: row for row, uid in enumerate(read.acts.uids)}
+        rows = [index[uid] for uid in uids]
+        ks = [read.acts.layers.index(layer) for layer in layers]
+        want, ratios = pca_coordinates(read.acts.data[np.ix_(ks, rows)])
+        np.testing.assert_array_equal(coordinates, want)
+        np.testing.assert_array_equal(arrays[f"ratios_{panel}"], ratios)
+
+
+def test_pca_views_ignore_the_items_a_panel_does_not_show(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    panels = _two_panels(read)
+    layers = view_layers(read.committed, tiny_arch.n_layers)
+    shown = {uid for uids in panels.values() for uid in uids}
+    hidden = next(
+        row for row, uid in enumerate(read.acts.uids) if uid not in shown
+    )
+    data = read.acts.data.copy()
+    data[:, hidden] += 100.0
+    moved = ItemActivations(read.acts.uids, read.acts.layers, data)
+
+    before = pca_views(read.acts, layers, panels)
+    after = pca_views(moved, layers, panels)
+
+    for key in before:
+        np.testing.assert_array_equal(before[key], after[key], err_msg=key)
+
+
+def test_pca_views_refuse_an_item_without_activations(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    layers = view_layers(read.committed, tiny_arch.n_layers)
+
+    with pytest.raises(ValueError, match="no activations for 'ghost:1'"):
+        pca_views(read.acts, layers, {"entity": ["ghost:1"]})
+
+
+def test_execute_writes_the_pca_views_of_each_panel(
+    tiny_arch: LoadedModel,
+    inputs: Inputs,
+    default_run: RunDir,
+) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+    committed = load_reading(inputs.reading.path, model="tiny")
+
+    arrays = default_run.read_arrays("pca2d")
+
+    assert arrays["view_layers"].tolist() == [
+        1,
+        committed.layer,
+        tiny_arch.n_layers,
+    ]
+    for panel, entry in sidecar["panels"].items():
+        n = len(entry["uids"])
+        assert arrays[f"coordinates_{panel}"].shape == (3, n, 2)
+        assert arrays[f"ratios_{panel}"].shape == (3, 2)
+    assert set(arrays) == {
+        "view_layers",
+        *(f"coordinates_{panel}" for panel in sidecar["panels"]),
+        *(f"ratios_{panel}" for panel in sidecar["panels"]),
+        *(
+            f"supervised_{name}"
+            for entry in sidecar["panels"].values()
+            for name in entry["types"]
+        ),
+    }
+
+
+def test_the_summary_names_the_views_and_the_items_they_show(
+    tiny_arch: LoadedModel, inputs: Inputs, default_run: RunDir
+) -> None:
+    committed = load_reading(inputs.reading.path, model="tiny")
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+
+    views = _summary(default_run)["views"]
+
+    assert views["layers"] == [1, committed.layer, tiny_arch.n_layers]
+    assert views["panels"] == {
+        panel: {"types": entry["types"], "n_items": len(entry["uids"])}
+        for panel, entry in sidecar["panels"].items()
+    }
+
+
+def test_displayed_uids_are_those_the_published_views_show(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+
+    views = published_views(read.committed, read.acts, read.pools, cap=3)
+
+    assert displayed_uids(read.pools, cap=3) == views.uids
+
+
+def _orthogonal_columns(n: int, k: int, seed: int) -> np.ndarray:
+    """Centered columns that are orthonormal, so every variance is planted."""
+    rng = np.random.default_rng(seed)
+    centered = rng.standard_normal((n, k))
+    centered -= centered.mean(axis=0)
+    q, _ = np.linalg.qr(centered)
+    return q
+
+
+def test_residual_axis_is_the_top_component_once_the_direction_is_removed() -> (
+    None
+):
+    q = _orthogonal_columns(20, 3, seed=0)
+    h = np.zeros((20, 5))
+    h[:, 0] = 10.0 * q[:, 0]
+    h[:, 1] = 3.0 * q[:, 1]
+    h[:, 2] = 1.0 * q[:, 2]
+    direction = np.eye(5)[0]
+
+    y = residual_axis(h, direction)
+
+    assert y.dtype == np.float32
+    np.testing.assert_allclose(y, 3.0 * q[:, 1], atol=1e-5)
+
+
+def test_residual_axis_does_not_see_the_component_along_the_direction() -> None:
+    rng = np.random.default_rng(1)
+    h = rng.standard_normal((30, 6))
+    direction = rng.standard_normal(6)
+    shifted = h + np.outer(rng.standard_normal(30) * 50.0, direction)
+
+    np.testing.assert_allclose(
+        residual_axis(shifted, direction),
+        residual_axis(h, direction),
+        atol=1e-4,
+    )
+    np.testing.assert_allclose(
+        residual_axis(h, 7.0 * direction),
+        residual_axis(h, direction),
+        atol=1e-5,
+    )
+
+
+def _shown_contrasts(read: Read) -> dict[str, tuple[str, ...]]:
+    return panel_contrasts(read.pools)
+
+
+def test_supervised_views_set_the_published_projection_against_the_rest(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    committed = read.committed
+    panels = _two_panels(read)
+    shown = _shown_contrasts(read)
+    layers = view_layers(committed, tiny_arch.n_layers)
+
+    arrays = supervised_views(committed, read.acts, layers, panels, shown)
+
+    assert set(arrays) == {
+        f"supervised_{name}" for names in shown.values() for name in names
+    }
+    index = {uid: row for row, uid in enumerate(read.acts.uids)}
+    for panel, names in shown.items():
+        rows = [index[uid] for uid in panels[panel]]
+        for name in names:
+            t = list(committed.types).index(name)
+            view = arrays[f"supervised_{name}"]
+            assert view.shape == (3, len(rows), 2)
+            assert view.dtype == np.float32
+            for v, layer in enumerate(layers):
+                k = committed.layers.index(layer)
+                reader = RepReader.from_arrays(
+                    committed.config.methods[0],
+                    [layer],
+                    committed.directions[t, [k]],
+                    committed.means[t, [k]],
+                    committed.signs[t, [k]],
+                )
+                h = read.acts.data[k][rows]
+                np.testing.assert_array_equal(
+                    view[v, :, 0], reader.score(h[None])[0]
+                )
+                np.testing.assert_array_equal(
+                    view[v, :, 1], residual_axis(h, reader.directions[0])
+                )
+
+
+def test_supervised_x_is_the_projection_the_run_publishes(
+    tiny_arch: LoadedModel, inputs: Inputs
+) -> None:
+    read = _read(tiny_arch, inputs)
+    committed = read.committed
+    panels = _two_panels(read)
+    shown = _shown_contrasts(read)
+    layers = view_layers(committed, tiny_arch.n_layers)
+    arrays = supervised_views(committed, read.acts, layers, panels, shown)
+    own = displayed_uids(read.pools, cap=4)
+    published = published_views(committed, read.acts, read.pools, cap=4)
+
+    for panel, names in shown.items():
+        for name in names:
+            uids = [*own[name]["positive"], *own[name]["negative"]]
+            places = [panels[panel].index(uid) for uid in uids]
+            chosen = arrays[f"supervised_{name}"][1, places, 0]
+            np.testing.assert_allclose(
+                chosen, published.projections[f"projection_{name}"], rtol=1e-5
+            )
+
+
+def test_execute_writes_the_supervised_view_of_each_shown_contrast(
+    default_run: RunDir,
+) -> None:
+    sidecar = default_run.read_json("projections")
+    assert isinstance(sidecar, dict)
+
+    arrays = default_run.read_arrays("pca2d")
+
+    for entry in sidecar["panels"].values():
+        for name in entry["types"]:
+            view = arrays[f"supervised_{name}"]
+            assert view.shape == (3, len(entry["uids"]), 2)
+            assert view.dtype == np.float32
+    assert "supervised_obscure_real_pop" not in arrays

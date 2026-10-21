@@ -9,6 +9,7 @@ only in float32; `meta.json` records the device the numbers came from.
 """
 
 from collections import Counter
+from collections.abc import Iterable
 from collections.abc import Mapping
 from collections.abc import Sequence
 import dataclasses
@@ -22,6 +23,7 @@ import numpy as np
 from numpy.typing import NDArray
 import torch
 
+from tomography.analysis import pca_coordinates
 from tomography.experiments import p9b_reading
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
@@ -46,6 +48,7 @@ from tomography.p9.reading import surface_baselines
 from tomography.p9.reading import type_auroc
 from tomography.p9.reading import type_scores
 from tomography.p9.unknowns import TypePool
+from tomography.p9.unknowns import panel_of
 from tomography.reading.metrics import auroc
 from tomography.reading.reader import RepReader
 
@@ -60,6 +63,7 @@ READING_FILES = (
 TOLERANCE = 0.02
 SURFACE_TOLERANCE = 1e-9
 MAX_DISPLAYED = 300
+SHOWN_ENTITY = ("obscure_real", "fictional_generated")
 COUNT_COLUMNS = (
     "n_positive_train",
     "n_negative_train",
@@ -511,6 +515,81 @@ def displayed_items(
     )[:cap]
 
 
+def displayed_uids(
+    pools: Mapping[str, TypePool], *, cap: int = MAX_DISPLAYED
+) -> dict[str, dict[str, list[str]]]:
+    """Names the items a figure draws for each side of each contrast.
+
+    Only the test items are drawn, because the readers were fitted on the
+    others.
+
+    Args:
+        pools: The usable contrasts.
+        cap: The most items per side of a contrast.
+
+    Returns:
+        For each contrast, the uids of the `positive` and the `negative`
+        side, see `displayed_items`.
+    """
+    shown: dict[str, dict[str, list[str]]] = {}
+    for name, pool in pools.items():
+        positive, negative = pool.split("test")
+        shown[name] = {
+            "positive": [
+                i.example.uid for i in displayed_items(positive, cap=cap)
+            ],
+            "negative": [
+                i.example.uid for i in displayed_items(negative, cap=cap)
+            ],
+        }
+    return shown
+
+
+def panel_contrasts(names: Iterable[str]) -> dict[str, tuple[str, ...]]:
+    """Groups the contrasts a figure shows into its panels.
+
+    The entity panel shows the two contrasts of `SHOWN_ENTITY`, the question
+    panel every question contrast and the unknown panel every unknown-type
+    one. The other entity contrasts are scored in the tables but not drawn.
+
+    Args:
+        names: The usable contrasts, in the order of the pools.
+
+    Returns:
+        The contrasts of each panel in the order given, panels in the order
+        entity, question, unknown; a panel without a usable contrast is left
+        out.
+    """
+    panels: dict[str, list[str]] = {"entity": [], "question": [], "unknown": []}
+    for name in names:
+        panel = panel_of(name)
+        if panel != "entity" or name in SHOWN_ENTITY:
+            panels[panel].append(name)
+    return {panel: tuple(shown) for panel, shown in panels.items() if shown}
+
+
+def panel_union(
+    contrasts: Iterable[str], uids: Mapping[str, Mapping[str, list[str]]]
+) -> list[str]:
+    """Lists the items a panel shows, each once.
+
+    Args:
+        contrasts: The contrasts of the panel, see `panel_contrasts`.
+        uids: The displayed uids of each side of each contrast, see
+            `PublishedViews`.
+
+    Returns:
+        The uids of the contrasts in order, the positive side before the
+        negative one, keeping the first place of an item that several
+        contrasts show.
+    """
+    shown: dict[str, None] = {}
+    for name in contrasts:
+        for side in ("positive", "negative"):
+            shown.update(dict.fromkeys(uids[name][side]))
+    return list(shown)
+
+
 def compare_auroc(
     recomputed: NDArray[np.float64],
     committed: NDArray[np.float64],
@@ -647,28 +726,167 @@ def published_views(
     k = reading.layers.index(reading.layer)
     aurocs = np.zeros((len(pools), len(reading.layers)))
     projections: dict[str, NDArray[np.float32]] = {}
-    uids: dict[str, dict[str, list[str]]] = {}
+    uids = displayed_uids(pools, cap=cap)
     for t, (name, pool) in enumerate(pools.items()):
         scores, labels = type_scores(reading.readers[t], acts, pool, "test")
         aurocs[t] = auroc(scores, labels)
         positive, negative = pool.split("test")
-        shown = {
-            "positive": displayed_items(positive, cap=cap),
-            "negative": displayed_items(negative, cap=cap),
-        }
         column = {
             item.example.uid: j for j, item in enumerate([*positive, *negative])
         }
-        order = [
-            column[item.example.uid]
-            for item in (*shown["positive"], *shown["negative"])
-        ]
+        order = [column[uid] for side in uids[name].values() for uid in side]
         projections[f"projection_{name}"] = scores[k, order]
-        uids[name] = {
-            side: [item.example.uid for item in items]
-            for side, items in shown.items()
-        }
     return PublishedViews(aurocs, projections, uids)
+
+
+def view_layers(
+    reading: CommittedReading, n_layers: int
+) -> tuple[int, int, int]:
+    """Names the layers the 2D views are drawn at.
+
+    Layer 0 is left out: at the last token of the few-shot prompt it is one
+    token embedding for every question. Layer 1 shows what the model has
+    done with a question before it has read much of it.
+
+    Args:
+        reading: The committed P9b run.
+        n_layers: The number of layers of the model, L.
+
+    Returns:
+        Layer 1, the layer the P9b run chose and the last layer. They are
+        not told apart when the run chose one of the others.
+    """
+    return (1, reading.layer, n_layers)
+
+
+def _rows(acts: ItemActivations, uids: Sequence[str]) -> NDArray[np.int64]:
+    index = {uid: row for row, uid in enumerate(acts.uids)}
+    for uid in uids:
+        if uid not in index:
+            raise ValueError(f"no activations for {uid!r}")
+    return np.array([index[uid] for uid in uids], dtype=np.int64)
+
+
+def pca_views(
+    acts: ItemActivations,
+    layers: Sequence[int],
+    panels: Mapping[str, Sequence[str]],
+) -> dict[str, NDArray[Any]]:
+    """Projects the items of each panel on their two leading components.
+
+    The components are fitted at every layer on the items the panel shows
+    and on no other, so the view is what a reader of the figure could
+    compute from the points on it.
+
+    Args:
+        acts: The activations of at least the items of the panels.
+        layers: The layers to draw, see `view_layers`.
+        panels: The uids each panel shows, see `panel_union`.
+
+    Returns:
+        `view_layers` (V,), and for each panel `coordinates_<panel>` (V, n, 2)
+        float32 in the order of its uids and `ratios_<panel>` (V, 2) float64,
+        the share of the variance of the layer on each component.
+
+    Raises:
+        ValueError: If a panel item has no activations, or a layer of a
+            panel has no variance (see `tomography.analysis.pca_coordinates`).
+    """
+    ks = [acts.layers.index(layer) for layer in layers]
+    arrays: dict[str, NDArray[Any]] = {
+        "view_layers": np.asarray(layers, dtype=np.int64)
+    }
+    for panel, uids in panels.items():
+        rows = _rows(acts, uids)
+        coordinates, ratios = pca_coordinates(acts.data[np.ix_(ks, rows)])
+        arrays[f"coordinates_{panel}"] = coordinates
+        arrays[f"ratios_{panel}"] = ratios
+    return arrays
+
+
+def residual_axis(
+    h: NDArray[Any], direction: NDArray[Any]
+) -> NDArray[np.float32]:
+    """Scores rows on their top principal component off a direction.
+
+    The rows are centered, the part of each along `direction` is taken
+    away, and the rows that are left are projected on their leading
+    component. What a reader finds along `direction` is therefore not in the
+    score, and the score cannot be explained by it.
+
+    Args:
+        h: Activations of shape (n, d).
+        direction: A vector of shape (d,), not zero; its scale is ignored.
+
+    Returns:
+        The coordinate of each row on the leading component of the rest,
+        shape (n,), signed as `tomography.analysis.pca_coordinates` does.
+
+    Raises:
+        ValueError: If nothing but the direction varies across the rows.
+    """
+    rows = np.asarray(h, dtype=np.float64)
+    rows = rows - rows.mean(axis=0)
+    unit = np.asarray(direction, dtype=np.float64)
+    unit = unit / np.linalg.norm(unit)
+    rows -= np.outer(rows @ unit, unit)
+    coordinates, _ = pca_coordinates(rows[None])
+    return coordinates[0, :, 0]
+
+
+def supervised_views(
+    reading: CommittedReading,
+    acts: ItemActivations,
+    layers: Sequence[int],
+    panels: Mapping[str, Sequence[str]],
+    contrasts: Mapping[str, Sequence[str]],
+) -> dict[str, NDArray[np.float32]]:
+    """Sets the published reader of each contrast against the rest.
+
+    For every contrast a panel shows, the x axis is the score of the items
+    of the panel on the published reader of the contrast, the y axis the
+    leading component of the same items once the direction of that reader
+    is taken out (see `residual_axis`). All the items of the panel are
+    placed, also those that belong to other contrasts of it.
+
+    Args:
+        reading: The committed P9b run, which holds the published readers.
+        acts: The activations of at least the items of the panels.
+        layers: The layers to draw, see `view_layers`.
+        panels: The uids each panel shows, see `panel_union`.
+        contrasts: The contrasts each panel shows, see `panel_contrasts`.
+
+    Returns:
+        For each shown contrast, `supervised_<contrast>` of shape (V, n, 2)
+        float32 with x then y, in the order of the uids of its panel.
+
+    Raises:
+        ValueError: If a panel item has no activations, or the items of a
+            panel vary along the direction alone.
+    """
+    ks = [acts.layers.index(layer) for layer in layers]
+    reader_ks = [reading.layers.index(layer) for layer in layers]
+    arrays: dict[str, NDArray[np.float32]] = {}
+    for panel, names in contrasts.items():
+        h = acts.data[np.ix_(ks, _rows(acts, panels[panel]))]
+        for name in names:
+            t = reading.types.index(name)
+            reader = RepReader.from_arrays(
+                reading.config.methods[0],
+                layers,
+                reading.directions[t, reader_ks],
+                reading.means[t, reader_ks],
+                reading.signs[t, reader_ks],
+            )
+            x = reader.score(h)
+            y = np.stack(
+                [
+                    residual_axis(h[v], reader.directions[v])
+                    for v in range(len(ks))
+                ]
+            )
+            arrays[f"supervised_{name}"] = np.stack([x, y], axis=-1)
+    return arrays
 
 
 @dataclass(frozen=True, eq=False)
@@ -746,13 +964,17 @@ def run_plan(
     inside the strata, `published` (T, K) the test AUROC of the published
     all-pairs reader of each contrast, and `projection_<contrast>` the scores
     of the displayed items on that reader at the chosen layer. Writes
-    `projections.json`: the contrasts, the methods and the uids of the
+    `projections.json`: the contrasts, the methods, the uids of the
     displayed items of each side (at most `MAX_DISPLAYED`, by ascending
-    SHA-256 of the uid; no question text). Writes `summary`: the layer, the
-    number of items extracted, the dtype of this run (`extraction_dtype`, that
-    of the loaded model) and the one the P9b run was extracted in
-    (`reading_run_dtype`, the registry default of the model, since that run
-    loaded it with no dtype; None for a model outside the registry), the
+    SHA-256 of the uid; no question text) and, for each panel of the figures,
+    its contrasts and the uids of the items it shows (see `panel_union`).
+    Writes `pca2d.npz`: the 2D views of each panel (see `pca_views`) and
+    the supervised view of each shown contrast (see `supervised_views`).
+    Writes `summary`: the layer, the number of items extracted, the dtype of
+    this run (`extraction_dtype`, that of the loaded model) and the one the
+    P9b run was extracted in (`reading_run_dtype`, the registry default of
+    the model, since that run loaded it with no dtype; None for a model
+    outside the registry), the layers and panels of the views, the
     comparison with the committed AUROC
     (`reproduction`, see `compare_auroc`) and with the committed surface
     controls (`surface`, see `compare_surface`). A difference is reported,
@@ -786,6 +1008,23 @@ def run_plan(
     test = refit_methods(acts, pools, draws, protocol)
     shuffled = refit_shuffled(acts, pools, draws, protocol, seed=config.seed)
     views = published_views(reading, acts, pools)
+    panels = {
+        panel: {"types": list(shown), "uids": panel_union(shown, views.uids)}
+        for panel, shown in panel_contrasts(pools).items()
+    }
+    layers = view_layers(reading, loaded.n_layers)
+    panel_uids = {name: panel["uids"] for name, panel in panels.items()}
+    run_dir.write_arrays(
+        "pca2d",
+        **pca_views(acts, layers, panel_uids),
+        **supervised_views(
+            reading,
+            acts,
+            layers,
+            panel_uids,
+            {name: panel["types"] for name, panel in panels.items()},
+        ),
+    )
     run_dir.write_arrays(
         "projections",
         layers=np.asarray(reading.layers, dtype=np.int64),
@@ -801,6 +1040,7 @@ def run_plan(
             "methods": list(protocol.methods),
             "max_per_side": MAX_DISPLAYED,
             "uids": views.uids,
+            "panels": panels,
         },
     )
     splits = Counter(item.example.split for item in selected)
@@ -815,6 +1055,16 @@ def run_plan(
             "n_items": {"train": splits["train"], "test": splits["test"]},
             "extraction_dtype": str(loaded.dtype).removeprefix("torch."),
             "reading_run_dtype": registered.dtype if registered else None,
+            "views": {
+                "layers": list(layers),
+                "panels": {
+                    name: {
+                        "types": panel["types"],
+                        "n_items": len(panel["uids"]),
+                    }
+                    for name, panel in panels.items()
+                },
+            },
             "reproduction": compare_auroc(
                 test,
                 reading.test,
