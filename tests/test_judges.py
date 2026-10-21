@@ -1,3 +1,5 @@
+import functools
+import itertools
 import math
 import os
 import re
@@ -623,6 +625,18 @@ CARDIFF_LABELS = dict(
         ]
     )
 )
+NLI_ID2LABEL = {0: "CONTRADICTION", 1: "NEUTRAL", 2: "ENTAILMENT"}
+NLI_SHUFFLED_ID2LABEL = {0: "neutral", 1: "entailment", 2: "contradiction"}
+NLI_PREMISES, NLI_HYPOTHESES = (
+    list(column)
+    for column in zip(*itertools.product(CORPUS, repeat=2), strict=True)
+)
+NLI_ORDERS = pytest.mark.parametrize(
+    ("nli_scorer", "columns"),
+    [(NLI_ID2LABEL, [0, 1, 2]), (NLI_SHUFFLED_ID2LABEL, [2, 0, 1])],
+    ids=["mnli_order", "shuffled_order"],
+    indirect=["nli_scorer"],
+)
 JUDGE_TEXTS = [
     "the movie was wonderful and moving",
     "the food was cold and the service was slow",
@@ -666,10 +680,12 @@ def reference_logits(
     model: BertForSequenceClassification,
     tokenizer: PreTrainedTokenizerFast,
     texts: list[str],
+    text_pairs: list[str] | None = None,
 ) -> torch.Tensor:
     rows = []
-    for text in texts:
-        batch = tokenizer(text, return_tensors="pt")
+    pairs = [None] * len(texts) if text_pairs is None else text_pairs
+    for text, pair in zip(texts, pairs, strict=True):
+        batch = tokenizer(text, pair, return_tensors="pt")
         with torch.no_grad():
             rows.append(model(**batch).logits[0].double())
     return torch.stack(rows)
@@ -868,6 +884,16 @@ def test_judge_rejects_a_non_positive_batch_size(
         judge.score(JUDGE_TEXTS, batch_size=0)
 
 
+def test_judge_checks_the_batch_size_before_looking_up_labels(
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    judge = make_judge("sentiment-primary", SENTIMENT_LABELS, judge_tokenizer)
+    judge.model.config.id2label = {0: "LABEL_0", 1: "LABEL_1"}
+
+    with pytest.raises(ValueError, match="batch_size"):
+        judge.score(JUDGE_TEXTS, batch_size=0)
+
+
 def test_load_judge_rejects_an_unknown_key_before_any_download(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -883,20 +909,153 @@ def test_load_judge_rejects_an_unknown_key_before_any_download(
 
 
 @pytest.fixture
-def fake_hub(
-    monkeypatch: pytest.MonkeyPatch,
+def nli_scorer(
+    request: pytest.FixtureRequest, judge_tokenizer: PreTrainedTokenizerFast
+) -> judges.NliScorer:
+    id2label = getattr(request, "param", NLI_ID2LABEL)
+    model = tiny_classifier(id2label, len(judge_tokenizer))
+    return judges.NliScorer(judges.NLI, model, judge_tokenizer)
+
+
+def test_the_nli_checkpoint_is_pinned_to_a_commit() -> None:
+    assert judges.NLI.repo_id == "microsoft/deberta-large-mnli"
+    assert judges.NLI.revision == "7296194b9009373def4f7c5dad292651e4b5cf4e"
+    assert judges.NLI.license == "mit"
+
+
+@NLI_ORDERS
+def test_nli_probabilities_follow_the_label_names_of_the_checkpoint(
+    nli_scorer: judges.NliScorer,
+    columns: list[int],
     judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    logits = reference_logits(
+        nli_scorer.model, judge_tokenizer, NLI_PREMISES, NLI_HYPOTHESES
+    )
+    expected = torch.softmax(logits, dim=-1)[:, columns]
+
+    got = nli_scorer.probabilities(NLI_PREMISES, NLI_HYPOTHESES, batch_size=3)
+
+    assert got.shape == (len(NLI_PREMISES), 3)
+    assert got.dtype == np.float32
+    assert got == pytest.approx(expected.numpy(), abs=1e-5)
+    assert got.sum(axis=1) == pytest.approx(1.0, abs=1e-5)
+
+
+def test_nli_reads_the_premise_before_the_hypothesis(
+    nli_scorer: judges.NliScorer,
+) -> None:
+    forward = nli_scorer.probabilities(NLI_PREMISES, NLI_HYPOTHESES)
+    backward = nli_scorer.probabilities(NLI_HYPOTHESES, NLI_PREMISES)
+
+    assert not np.allclose(forward, backward, atol=1e-3)
+
+
+@NLI_ORDERS
+def test_nli_entails_when_entailment_is_the_most_likely_class(
+    nli_scorer: judges.NliScorer,
+    columns: list[int],
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    logits = reference_logits(
+        nli_scorer.model, judge_tokenizer, NLI_PREMISES, NLI_HYPOTHESES
+    )
+    expected = logits.argmax(dim=-1) == columns[2]
+
+    got = nli_scorer.entails(NLI_PREMISES, NLI_HYPOTHESES, batch_size=2)
+
+    assert got.dtype == np.bool_
+    assert got.tolist() == expected.tolist()
+    assert 0 < got.sum() < len(got)
+
+
+def test_nli_scores_do_not_depend_on_the_batch_size(
+    nli_scorer: judges.NliScorer,
+) -> None:
+    one = nli_scorer.probabilities(NLI_PREMISES, NLI_HYPOTHESES, batch_size=1)
+    some = nli_scorer.probabilities(NLI_PREMISES, NLI_HYPOTHESES, batch_size=3)
+    many = nli_scorer.probabilities(NLI_PREMISES, NLI_HYPOTHESES, batch_size=64)
+
+    assert some == pytest.approx(one, abs=1e-5)
+    assert many == pytest.approx(one, abs=1e-5)
+    singly = nli_scorer.entails(NLI_PREMISES, NLI_HYPOTHESES, batch_size=1)
+    together = nli_scorer.entails(NLI_PREMISES, NLI_HYPOTHESES, batch_size=64)
+    assert singly.tolist() == together.tolist()
+
+
+def test_nli_scores_repeat_exactly(nli_scorer: judges.NliScorer) -> None:
+    first = nli_scorer.probabilities(NLI_PREMISES, NLI_HYPOTHESES, batch_size=3)
+    second = nli_scorer.probabilities(
+        NLI_PREMISES, NLI_HYPOTHESES, batch_size=3
+    )
+
+    assert np.array_equal(first, second)
+
+
+def test_nli_truncates_a_pair_to_max_length(
+    nli_scorer: judges.NliScorer,
+) -> None:
+    words = CORPUS[2].split()
+    hypothesis = "the cat"
+
+    truncated = nli_scorer.probabilities(
+        [" ".join(words)], [hypothesis], max_length=4
+    )
+    prefix = nli_scorer.probabilities([" ".join(words[:2])], [hypothesis])
+
+    assert truncated == pytest.approx(prefix, abs=1e-6)
+
+
+def test_nli_scores_no_pairs_as_empty_arrays(
+    nli_scorer: judges.NliScorer,
+) -> None:
+    probabilities = nli_scorer.probabilities([], [])
+    entails = nli_scorer.entails([], [])
+
+    assert probabilities.shape == (0, 3)
+    assert probabilities.dtype == np.float32
+    assert entails.shape == (0,)
+    assert entails.dtype == np.bool_
+
+
+def test_nli_rejects_premises_and_hypotheses_of_different_lengths(
+    nli_scorer: judges.NliScorer,
+) -> None:
+    with pytest.raises(ValueError, match="same length"):
+        nli_scorer.probabilities(NLI_PREMISES, NLI_HYPOTHESES[:-1])
+    with pytest.raises(ValueError, match="same length"):
+        nli_scorer.entails(NLI_PREMISES[:-1], NLI_HYPOTHESES)
+
+
+@pytest.mark.parametrize("missing", judges.NLI_LABELS)
+def test_nli_rejects_a_model_without_the_three_classes(
+    judge_tokenizer: PreTrainedTokenizerFast, missing: str
+) -> None:
+    broken = {
+        index: "LABEL" if name == missing else name.upper()
+        for index, name in enumerate(judges.NLI_LABELS)
+    }
+    model = tiny_classifier(broken, len(judge_tokenizer))
+
+    with pytest.raises(ValueError, match=missing):
+        judges.NliScorer(judges.NLI, model, judge_tokenizer)
+
+
+def install_fake_hub(
+    monkeypatch: pytest.MonkeyPatch,
+    tokenizer: PreTrainedTokenizerFast,
+    id2label: dict[int, str],
 ) -> dict[str, object]:
     """Replaces the Hub loaders with tiny stand-ins that record their calls."""
     monkeypatch.setenv("DISABLE_SAFETENSORS_CONVERSION", "0")
     monkeypatch.delenv("DISABLE_SAFETENSORS_CONVERSION")
     monkeypatch.setattr(hub_constants, "HF_HUB_DISABLE_SYMLINKS_WARNING", False)
     seen: dict[str, object] = {}
-    model = tiny_classifier(SENTIMENT_LABELS, len(judge_tokenizer))
+    model = tiny_classifier(id2label, len(tokenizer))
 
     def fake_tokenizer(repo_id: str, **kwargs: str) -> object:
         seen["tokenizer"] = (repo_id, kwargs)
-        return judge_tokenizer
+        return tokenizer
 
     def fake_model(repo_id: str, **kwargs: str) -> object:
         seen["model"] = (repo_id, kwargs)
@@ -915,31 +1074,51 @@ def fake_hub(
     return seen
 
 
-def test_load_judge_pins_the_revision_and_disables_safetensors_conversion(
-    fake_hub: dict[str, object],
-) -> None:
-    judge = judges.load_judge("sentiment-primary", device="cpu")
+LOADERS = {
+    "judge": (
+        functools.partial(judges.load_judge, "sentiment-primary"),
+        judges.JUDGES["sentiment-primary"],
+        SENTIMENT_LABELS,
+    ),
+    "nli": (judges.load_nli, judges.NLI, NLI_ID2LABEL),
+}
 
-    spec = judges.JUDGES["sentiment-primary"]
+
+@pytest.mark.parametrize("kind", LOADERS)
+def test_load_pins_the_revision_and_disables_safetensors_conversion(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+    judge_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    load, spec, id2label = LOADERS[kind]
+    seen = install_fake_hub(monkeypatch, judge_tokenizer, id2label)
+
+    loaded = load(device="cpu")
+
     expected = (spec.repo_id, {"revision": spec.revision})
-    assert fake_hub["tokenizer"] == expected
-    assert fake_hub["model"] == expected
-    assert fake_hub["conversion"] == "1"
-    assert fake_hub["symlinks"] is True
-    assert judge.spec is spec
-    assert judge.model.device == torch.device("cpu")
-    assert not judge.model.training
+    assert seen["tokenizer"] == expected
+    assert seen["model"] == expected
+    assert seen["conversion"] == "1"
+    assert seen["symlinks"] is True
+    assert loaded.spec is spec
+    assert loaded.model.device == torch.device("cpu")
+    assert not loaded.model.training
 
 
-def test_load_judge_falls_back_to_the_cpu_without_cuda(
-    fake_hub: dict[str, object], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("kind", LOADERS)
+def test_load_falls_back_to_the_cpu_without_cuda(
+    kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+    judge_tokenizer: PreTrainedTokenizerFast,
 ) -> None:
+    load, _, id2label = LOADERS[kind]
+    seen = install_fake_hub(monkeypatch, judge_tokenizer, id2label)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
 
-    judge = judges.load_judge("sentiment-secondary")
+    loaded = load()
 
-    assert judge.model.device.type == "cpu"
-    assert fake_hub["model"] is not None
+    assert loaded.model.device.type == "cpu"
+    assert seen["model"] is not None
 
 
 def test_sentiment_accuracy_thresholds_the_positive_probability() -> None:
@@ -1153,3 +1332,31 @@ def test_pinned_emotion_judges_name_the_clear_emotion(
     assert scores.shape == (len(judges.EMOTIONS), len(judges.EMOTIONS))
     assert ((scores >= 0.0) & (scores <= 1.0)).all()
     assert scores.argmax(axis=1).tolist() == list(range(len(judges.EMOTIONS)))
+
+
+NLI_REAL_PAIRS = [
+    ("A soccer game with several men.", "Some men are playing a sport."),
+    ("The shop is closed on Sundays.", "The shop is open every Sunday."),
+    ("The shop is closed on Sundays.", "The shop is closed on Sundays."),
+]
+
+
+@pytest.mark.network
+def test_pinned_nli_model_separates_obvious_pairs() -> None:
+    scorer = judges.load_nli(device="cpu")
+    premises = [premise for premise, _ in NLI_REAL_PAIRS]
+    hypotheses = [hypothesis for _, hypothesis in NLI_REAL_PAIRS]
+
+    probabilities = scorer.probabilities(premises, hypotheses, batch_size=3)
+    singly = scorer.probabilities(premises, hypotheses, batch_size=1)
+
+    contradiction = judges.NLI_LABELS.index("contradiction")
+    entailment = judges.NLI_LABELS.index("entailment")
+    assert scorer.model.dtype == torch.float32
+    assert probabilities.argmax(axis=1).tolist() == [
+        entailment,
+        contradiction,
+        entailment,
+    ]
+    assert scorer.entails(premises, hypotheses).tolist() == [True, False, True]
+    assert singly == pytest.approx(probabilities, abs=1e-4)

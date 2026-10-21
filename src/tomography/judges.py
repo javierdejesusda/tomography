@@ -1,9 +1,10 @@
 """Judges and language-model scoring helpers.
 
 The module holds the text judges (pinned sentiment and emotion classifiers
-with validation and agreement helpers) and the language-model helpers used for
-side-effect and multiple-choice scoring: perplexity, sequence log-probability,
-MC1 accuracy and the verbalized heuristic baseline.
+with validation and agreement helpers), the pinned entailment scorer for text
+pairs, and the language-model helpers used for side-effect and multiple-choice
+scoring: perplexity, sequence log-probability, MC1 accuracy and the verbalized
+heuristic baseline.
 
 Tokenization for the language-model helpers follows the policy of
 `LoadedModel.encode`: no special tokens are added by the tokenizer, sequences
@@ -385,6 +386,68 @@ def _label_columns(model: PreTrainedModel, labels: Sequence[str]) -> list[int]:
     return [by_name[label.lower()] for label in labels]
 
 
+def _class_probabilities(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    texts: Sequence[str],
+    text_pairs: Sequence[str] | None,
+    *,
+    head: Head,
+    labels: Sequence[str],
+    batch_size: int,
+    max_length: int,
+) -> NDArray[np.float32]:
+    """Runs a sequence classifier in batches and reads some of its classes.
+
+    Args:
+        model: A sequence classification model in eval mode.
+        tokenizer: The tokenizer that matches the model.
+        texts: The texts, or the first text of each pair.
+        text_pairs: The second text of each pair, or None to score single
+            texts. It has the length of `texts`.
+        head: How logits become probabilities.
+        labels: Model labels to return, in output order.
+        batch_size: Texts per forward pass.
+        max_length: Longest tokenized input, special tokens included.
+
+    Returns:
+        Probabilities of shape `(len(texts), len(labels))`, float32.
+
+    Raises:
+        ValueError: If `batch_size` is below 1, `text_pairs` differs in length
+            from `texts`, or the model lacks one of `labels`.
+    """
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be at least 1, got {batch_size}")
+    if text_pairs is not None and len(text_pairs) != len(texts):
+        raise ValueError(
+            "texts and text_pairs must have the same length, got "
+            f"{len(texts)} and {len(text_pairs)}"
+        )
+    columns = _label_columns(model, labels)
+    chunks: list[NDArray[np.float32]] = []
+    with torch.no_grad():
+        for start in range(0, len(texts), batch_size):
+            stop = start + batch_size
+            batch = tokenizer(
+                list(texts[start:stop]),
+                None if text_pairs is None else list(text_pairs[start:stop]),
+                padding=True,
+                truncation=True,
+                max_length=max_length,
+                return_tensors="pt",
+            ).to(model.device)
+            logits = model(**batch).logits.float()
+            if head == "softmax":
+                probabilities = logits.softmax(dim=-1)
+            else:
+                probabilities = logits.sigmoid()
+            chunks.append(probabilities[:, columns].cpu().numpy())
+    if chunks:
+        return np.concatenate(chunks)
+    return np.zeros((0, len(columns)), dtype=np.float32)
+
+
 @dataclass(frozen=True, eq=False)
 class Judge:
     """A sequence classifier that scores texts for one attribute.
@@ -434,29 +497,15 @@ class Judge:
         Raises:
             ValueError: If `batch_size` is below 1.
         """
-        if batch_size < 1:
-            raise ValueError(f"batch_size must be at least 1, got {batch_size}")
-        columns = _label_columns(self.model, self.spec.labels)
-        chunks: list[NDArray[np.float32]] = []
-        with torch.no_grad():
-            for start in range(0, len(texts), batch_size):
-                batch = self.tokenizer(
-                    list(texts[start : start + batch_size]),
-                    padding=True,
-                    truncation=True,
-                    max_length=max_length,
-                    return_tensors="pt",
-                ).to(self.model.device)
-                logits = self.model(**batch).logits.float()
-                if self.spec.head == "softmax":
-                    probabilities = logits.softmax(dim=-1)
-                else:
-                    probabilities = logits.sigmoid()
-                chunks.append(probabilities[:, columns].cpu().numpy())
-        scores = (
-            np.concatenate(chunks)
-            if chunks
-            else np.zeros((0, len(columns)), dtype=np.float32)
+        scores = _class_probabilities(
+            self.model,
+            self.tokenizer,
+            texts,
+            None,
+            head=self.spec.head,
+            labels=self.spec.labels,
+            batch_size=batch_size,
+            max_length=max_length,
         )
         if self.spec.attribute == "sentiment":
             return np.ascontiguousarray(scores[:, 0])
@@ -484,17 +533,169 @@ def load_judge(key: str, *, device: str | torch.device | None = None) -> Judge:
     spec = JUDGES.get(key)
     if spec is None:
         raise ValueError(f"unknown judge {key!r}; choose from {sorted(JUDGES)}")
+    model, tokenizer = _load_classifier(spec.repo_id, spec.revision, device)
+    return Judge(spec, model, tokenizer)
+
+
+def _load_classifier(
+    repo_id: str, revision: str, device: str | torch.device | None
+) -> tuple[PreTrainedModel, PreTrainedTokenizerBase]:
+    """Loads a pinned sequence classifier and its tokenizer in eval mode."""
     hub_constants.HF_HUB_DISABLE_SYMLINKS_WARNING = True
     os.environ.setdefault("DISABLE_SAFETENSORS_CONVERSION", "1")
-    tokenizer = AutoTokenizer.from_pretrained(
-        spec.repo_id, revision=spec.revision
-    )
+    tokenizer = AutoTokenizer.from_pretrained(repo_id, revision=revision)
     model = AutoModelForSequenceClassification.from_pretrained(
-        spec.repo_id, revision=spec.revision
+        repo_id, revision=revision
     )
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    return Judge(spec, model.to(device).eval(), tokenizer)
+    return model.to(device).eval(), tokenizer
+
+
+NLI_LABELS = ("contradiction", "neutral", "entailment")
+
+
+@dataclass(frozen=True)
+class NliSpec:
+    """One pinned natural language inference checkpoint.
+
+    Attributes:
+        repo_id: Hugging Face repository of the checkpoint.
+        revision: Full commit SHA of the checkpoint.
+        license: License declared by the checkpoint repository.
+    """
+
+    repo_id: str
+    revision: str
+    license: str
+
+
+# DeBERTa-large MNLI is the entailment model of Kuhn et al. (2023), whose code
+# loads it, and the one the text of Farquhar et al. (2024) names. The
+# reference code of Farquhar et al. runs microsoft/deberta-v2-xlarge-mnli
+# instead, whose tokenizer needs sentencepiece, which this stack does not
+# install. Both checkpoints decide entailment the same way: the most likely of
+# the three classes, with no threshold.
+NLI = NliSpec(
+    repo_id="microsoft/deberta-large-mnli",
+    revision="7296194b9009373def4f7c5dad292651e4b5cf4e",
+    license="mit",
+)
+
+
+@dataclass(frozen=True, eq=False)
+class NliScorer:
+    """A sequence classifier that scores a premise against a hypothesis.
+
+    Attributes:
+        spec: The pinned checkpoint description.
+        model: A sequence classification model in eval mode whose labels
+            include `NLI_LABELS`.
+        tokenizer: The tokenizer that matches the model.
+    """
+
+    spec: NliSpec
+    model: PreTrainedModel
+    tokenizer: PreTrainedTokenizerBase
+
+    def __post_init__(self) -> None:
+        """Checks that the model exposes the three inference classes.
+
+        Raises:
+            ValueError: If a class of `NLI_LABELS` is missing from the model.
+        """
+        _label_columns(self.model, NLI_LABELS)
+
+    def probabilities(
+        self,
+        premises: Sequence[str],
+        hypotheses: Sequence[str],
+        *,
+        batch_size: int = 32,
+        max_length: int = 512,
+    ) -> NDArray[np.float32]:
+        """Scores each premise against its hypothesis.
+
+        Each pair is tokenized as a text pair with the classifier's own
+        special tokens, padded per batch and truncated to `max_length`. The
+        classes are found by name in the checkpoint's `id2label`, so the
+        columns follow `NLI_LABELS` whatever order the checkpoint uses.
+
+        Args:
+            premises: The premises.
+            hypotheses: The hypotheses, one per premise.
+            batch_size: Pairs per forward pass.
+            max_length: Longest tokenized pair, special tokens included.
+
+        Returns:
+            Class probabilities of shape `(n, 3)` in `NLI_LABELS` order
+            (contradiction, neutral, entailment). Always float32.
+
+        Raises:
+            ValueError: If `premises` and `hypotheses` differ in length, or
+                `batch_size` is below 1.
+        """
+        return _class_probabilities(
+            self.model,
+            self.tokenizer,
+            premises,
+            hypotheses,
+            head="softmax",
+            labels=NLI_LABELS,
+            batch_size=batch_size,
+            max_length=max_length,
+        )
+
+    def entails(
+        self,
+        premises: Sequence[str],
+        hypotheses: Sequence[str],
+        *,
+        batch_size: int = 32,
+        max_length: int = 512,
+    ) -> NDArray[np.bool_]:
+        """Tells whether each premise entails its hypothesis.
+
+        A premise entails a hypothesis when entailment is the most likely of
+        the three classes, with no probability threshold, as in the reference
+        code of semantic entropy.
+
+        Args:
+            premises: The premises.
+            hypotheses: The hypotheses, one per premise.
+            batch_size: Pairs per forward pass.
+            max_length: Longest tokenized pair, special tokens included.
+
+        Returns:
+            A boolean array of shape `(n,)`.
+
+        Raises:
+            ValueError: If `premises` and `hypotheses` differ in length, or
+                `batch_size` is below 1.
+        """
+        probabilities = self.probabilities(
+            premises, hypotheses, batch_size=batch_size, max_length=max_length
+        )
+        entailment = NLI_LABELS.index("entailment")
+        verdicts: NDArray[np.bool_] = probabilities.argmax(axis=1) == entailment
+        return verdicts
+
+
+def load_nli(*, device: str | torch.device | None = None) -> NliScorer:
+    """Loads the pinned entailment model from the Hugging Face Hub.
+
+    The revision is the pinned commit SHA, and automatic safetensors
+    conversion is disabled as in `load_judge`.
+
+    Args:
+        device: Where to place the model. None picks CUDA when available,
+            else the CPU.
+
+    Returns:
+        The scorer, with its model in eval mode.
+    """
+    model, tokenizer = _load_classifier(NLI.repo_id, NLI.revision, device)
+    return NliScorer(NLI, model, tokenizer)
 
 
 def hard_labels(
