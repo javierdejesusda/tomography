@@ -195,7 +195,7 @@ src/tomography/
   reading/        direction finders, reader.py (RepReader), metrics
   control/        steering operators, controllers, generation
   datasets/       pinned sources and one loader per dataset
-  judges.py       pinned sentiment and emotion classifiers
+  judges.py       pinned sentiment, emotion and entailment classifiers
   knowledge.py    known, unknown and uncertain question labels
   analysis.py     layer-wise PCA and t-SNE maps
   sae.py          pinned Qwen-Scope SAE decoders
@@ -228,6 +228,7 @@ files is redistributed here.
 | GPT-2 checkpoints | Modified MIT (the Hub card tag is MIT) |
 | Qwen3 checkpoints | Apache-2.0 |
 | Judge models (sentiment, emotion) | Apache-2.0 or MIT; two state none |
+| Entailment model (DeBERTa-large MNLI) | MIT |
 | Qwen-Scope SAE decoders (`a5`) | Hub tag "other"; `LICENSE` file is Apache-2.0 |
 | RepE statements (facts, emotions) | MIT |
 | ETHICS | MIT |

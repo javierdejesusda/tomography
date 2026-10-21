@@ -103,7 +103,11 @@ markers = [
     "slow: needs a local GPU (CUDA torch, real GPT-2 or Qwen3 weights)",
     "network: downloads datasets or model weights from the Hub",
 ]
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # transformers' DeBERTa modeling code calls torch.jit.script at import.
+    "ignore:`torch.jit.script` is deprecated:FutureWarning",
+]
 strict_config = true
 strict_markers = true
 strict_parametrization_ids = true
