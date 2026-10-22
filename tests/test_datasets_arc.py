@@ -51,6 +51,14 @@ SERVED = {
 }
 
 
+def parsed(files: dict[str, str]) -> list[ChoiceExample]:
+    return [
+        item
+        for source_split, file in files.items()
+        for item in parse_arc(SERVED[file], source_split=source_split)  # type: ignore[arg-type]
+    ]
+
+
 def test_source_pins_the_hub_revision() -> None:
     assert SOURCE.name == "arc"
     assert SOURCE.kind == "hub"
@@ -181,11 +189,7 @@ def test_load_default_equals_the_parsed_challenge_files(
 ) -> None:
     items = load_arc(cache=tmp_path, offline=True)
 
-    assert items == [
-        item
-        for source_split, file in FILES.items()
-        for item in parse_arc(SERVED[file], source_split=source_split)  # type: ignore[arg-type]
-    ]
+    assert items == parsed(FILES)
 
 
 def test_load_reads_the_easy_files_for_arc_easy(
@@ -197,11 +201,7 @@ def test_load_reads_the_easy_files_for_arc_easy(
     assert all(c["source"] is EASY_SOURCE for c in served)
     assert all(c["cache"] == tmp_path for c in served)
     assert all(c["offline"] is True for c in served)
-    assert items == [
-        item
-        for source_split, file in EASY_FILES.items()
-        for item in parse_arc(SERVED[file], source_split=source_split)  # type: ignore[arg-type]
-    ]
+    assert items == parsed(EASY_FILES)
 
 
 @pytest.mark.network

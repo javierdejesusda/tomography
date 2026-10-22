@@ -88,6 +88,7 @@ def fingerprint(stimuli: StimulusSet) -> tuple[object, ...]:
 
 
 EIGHT = [Ex(f"u{i}", f"t{i}", int(i < 4)) for i in range(8)]
+GROUPED = grouped([4, 3, 4])
 EXISTING_MODES = {
     "label_contrastive": (
         {"examples": EIGHT, "template": TINY, "n_pairs": 3, "seed": 11},
@@ -142,9 +143,9 @@ EXISTING_MODES = {
     ),
     "by_group": (
         {
-            "examples": grouped([4, 3, 4])[0],
+            "examples": GROUPED[0],
             "template": TINY,
-            "group_ids": grouped([4, 3, 4])[1],
+            "group_ids": GROUPED[1],
             "seed": 15,
         },
         (
@@ -169,12 +170,9 @@ EXISTING_MODES = {
 @pytest.mark.parametrize("pairing", list(EXISTING_MODES))
 def test_existing_pairing_modes_keep_their_output(pairing: str) -> None:
     arguments, expected = EXISTING_MODES[pairing]
-    arguments = dict(arguments)
 
     stimuli = build_stimulus_set(
-        arguments.pop("examples"),  # type: ignore[arg-type]
-        arguments.pop("template"),  # type: ignore[arg-type]
-        ChatFormat("none"),
+        chat=ChatFormat("none"),
         pairing=pairing,  # type: ignore[arg-type]
         **arguments,  # type: ignore[arg-type]
     )

@@ -7,6 +7,7 @@ and test.
 
 from collections.abc import Iterable
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from typing import Literal
@@ -34,17 +35,14 @@ SOURCE = PinnedSource(
     license="CC-BY-SA-4.0",
     sha256={},
 )
-EASY_SOURCE = PinnedSource(
+EASY_SOURCE = replace(
+    SOURCE,
     name="arc_easy",
-    kind="hub",
-    location="allenai/ai2_arc",
-    revision="210d026faf9955653af8916fad021475a3f00453",
     files=(
         "ARC-Easy/train-00000-of-00001.parquet",
         "ARC-Easy/validation-00000-of-00001.parquet",
         "ARC-Easy/test-00000-of-00001.parquet",
     ),
-    license="CC-BY-SA-4.0",
     sha256={},
 )
 

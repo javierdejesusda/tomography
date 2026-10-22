@@ -500,22 +500,21 @@ def _within_group_plan(
             f"got {n_pairs}"
         )
     labels, members = _members(examples, group_ids, "within_group")
+    width = max(map(len, members.values()))
+    groups = np.full((len(members), width), -1, dtype=np.int64)
     blocks = []
-    rows = []
     start = 0
-    for indices in members.values():
+    for row, indices in enumerate(members.values()):
         block = np.array(indices, dtype=np.int64)
-        is_member = np.ones(len(block), dtype=bool)
         if len(block) % 2:
             block = np.append(block, rng.choice(block[labels[block] == 0]))
-            is_member = np.append(is_member, False)
         shuffle = rng.permutation(len(block))
         blocks.append(block[shuffle])
-        rows.append(start + np.flatnonzero(is_member[shuffle]))
+        # The pad sits last in the block, so members are the shuffled
+        # positions below the group's size.
+        is_member = shuffle < len(indices)
+        groups[row, : len(indices)] = start + np.flatnonzero(is_member)
         start += len(block)
-    groups = np.full((len(rows), max(map(len, rows))), -1, dtype=np.int64)
-    for row, positions in enumerate(rows):
-        groups[row, : len(positions)] = positions
     order, pairs = _contiguous(np.concatenate(blocks).reshape(-1, 2))
     return _Plan(order, labels[order], pairs, groups)
 
