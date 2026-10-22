@@ -787,6 +787,106 @@ def test_continuation_logprob_rejects_unscorable_inputs(
         )
 
 
+def encode_pair(
+    tokenizer: PreTrainedTokenizerFast, context: str, continuation: str
+) -> tuple[list[int], list[int]]:
+    """`BaseLM._encode_pair` of lm-evaluation-harness at f2e3950."""
+    n_spaces = len(context) - len(context.rstrip())
+    if n_spaces > 0:
+        continuation = context[-n_spaces:] + continuation
+        context = context[:-n_spaces]
+    whole_enc = tokenizer.encode(
+        context + continuation, add_special_tokens=False
+    )
+    context_enc = tokenizer.encode(context, add_special_tokens=False)
+    return context_enc, whole_enc[len(context_enc) :]
+
+
+HARNESS_CONTEXTS = [
+    QA_PROMPTS[0],
+    "Question: How many legs does a cat have?\nAnswer:",
+    "Which is red?\n(A) the sea\n(B) a rose\nAnswer:",
+]
+HARNESS_CHOICES = ["", "good", "the lazy dog", "(B) a rose", "4", "it's 42."]
+HARNESS_PAIRS = [
+    (context, " " + choice)
+    for context in HARNESS_CONTEXTS
+    for choice in HARNESS_CHOICES
+]
+NEWLINE_PAIR = ("Answer:", "\nyes")
+QWEN3_SPLIT = (
+    r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}"
+    r"| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
+)
+
+
+def separate_ids(
+    tokenizer: PreTrainedTokenizerFast, pairs: list[tuple[str, str]]
+) -> list[tuple[list[int], list[int]]]:
+    return [
+        (token_ids(tokenizer, context), token_ids(tokenizer, continuation))
+        for context, continuation in pairs
+    ]
+
+
+def test_continuation_logprob_scores_the_harness_tokens_of_space_led_choices(
+    tiny_arch: LoadedModel,
+) -> None:
+    tokenizer = tiny_arch.tokenizer
+    trailing_space = encode_pair(tokenizer, "Answer: ", "good")
+    assert trailing_space != separate_ids(tokenizer, [("Answer: ", "good")])[0]
+    harness = [encode_pair(tokenizer, *pair) for pair in HARNESS_PAIRS]
+    assert harness == separate_ids(tokenizer, HARNESS_PAIRS)
+    expected = [
+        sum(
+            reference_logprobs(tiny_arch.model, context + continuation)[
+                len(context) - 1 :
+            ]
+        )
+        for context, continuation in harness
+    ]
+
+    got = judges.continuation_logprob(
+        tiny_arch.model,
+        tokenizer,
+        [context for context, _ in HARNESS_PAIRS],
+        [continuation for _, continuation in HARNESS_PAIRS],
+    )
+
+    np.testing.assert_allclose(got, expected, rtol=SCORER_RTOL)
+
+
+@pytest.fixture(scope="module")
+def qwen3_style_tokenizer() -> PreTrainedTokenizerFast:
+    """A byte-level BPE split like Qwen3, with every in-piece pair merged."""
+    backend = tokenizers.Tokenizer(models.BPE())
+    backend.pre_tokenizer = pre_tokenizers.Sequence(
+        [
+            pre_tokenizers.Split(tokenizers.Regex(QWEN3_SPLIT), "isolated"),
+            pre_tokenizers.ByteLevel(add_prefix_space=False, use_regex=False),
+        ]
+    )
+    backend.decoder = decoders.ByteLevel()
+    trainer = trainers.BpeTrainer(
+        vocab_size=5000, initial_alphabet=pre_tokenizers.ByteLevel.alphabet()
+    )
+    texts = [context + text for context, text in [*HARNESS_PAIRS, NEWLINE_PAIR]]
+    backend.train_from_iterator(CORPUS + texts, trainer)
+    return PreTrainedTokenizerFast(tokenizer_object=backend)
+
+
+def test_qwen3_style_splitting_gives_the_harness_tokens_only_after_a_space(
+    qwen3_style_tokenizer: PreTrainedTokenizerFast,
+) -> None:
+    tokenizer = qwen3_style_tokenizer
+
+    harness = [encode_pair(tokenizer, *pair) for pair in HARNESS_PAIRS]
+    newline = encode_pair(tokenizer, *NEWLINE_PAIR)
+
+    assert harness == separate_ids(tokenizer, HARNESS_PAIRS)
+    assert newline != separate_ids(tokenizer, [NEWLINE_PAIR])[0]
+
+
 def test_mc1_accuracy_counts_questions_whose_best_choice_is_correct() -> None:
     scores = [[0.1, 0.9], [0.8, 0.2], [0.3, 0.7]]
 

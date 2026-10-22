@@ -271,10 +271,15 @@ def continuation_logprob(
 
     Scores match `sequence_logprob` up to float32 rounding, and at that level
     they also depend on where the shared prefix splits a context, hence on the
-    other contexts of the call. For a prompt that does not end in whitespace
-    and a continuation that starts with a space, such as `" " + choice`, the
-    GPT-2 and Qwen3 pre-tokenizers break at the join, so the tokens equal
-    those of the joint encoding that lm-evaluation-harness uses.
+    other contexts of the call. The prompt and continuation tokens equal
+    those that lm-evaluation-harness scores (its `_encode_pair` encoding of
+    the joined text) when the prompt is not empty and does not end in
+    whitespace, the continuation starts with a space, such as `" " + choice`,
+    and the tokenizer is a byte-level BPE whose pre-tokenizer never joins a
+    space to the text before it, as for GPT-2 and Qwen3. The harness puts no
+    `bos_id` before such a prompt. A continuation that starts with a newline
+    can differ: the Qwen3 pre-tokenizer joins a newline to the punctuation
+    before it.
 
     Args:
         model: A causal language model in eval mode.
