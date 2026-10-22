@@ -1,6 +1,8 @@
+import collections
 from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -8,6 +10,8 @@ import pytest
 from tomography.datasets.stimulus import StimulusSet
 from tomography.datasets.stimulus import build_stimulus_set
 from tomography.pairing import persona_pairs
+from tomography.reading.metrics import group_accuracy
+from tomography.reading.reader import RepReader
 from tomography.templates import PAPER_TEMPLATES
 from tomography.templates import ChatFormat
 from tomography.templates import ConceptTemplate
@@ -42,6 +46,13 @@ PERSONAS = FunctionTemplate(
     pos_personas=("an honest", "a truthful", "a candid"),
     neg_personas=("an untruthful", "a deceitful", "a lying"),
 )
+TINY = ConceptTemplate("tiny", "{stimulus}")
+TINY_PERSONAS = FunctionTemplate(
+    "tiny_personas",
+    "{persona}",
+    pos_personas=("p0", "p1", "p2"),
+    neg_personas=("n0", "n1", "n2"),
+)
 
 
 def labeled(n: int, positives: int) -> list[Ex]:
@@ -54,6 +65,121 @@ def span_text(stimuli: StimulusSet, index: int) -> str:
     span = stimuli.response_spans[index]
     assert span is not None
     return stimuli.texts[index][span[0] : span[1]]
+
+
+def grouped(sizes: list[int]) -> tuple[list[Ex], list[str]]:
+    examples: list[Ex] = []
+    group_ids: list[str] = []
+    for g, size in enumerate(sizes):
+        for c in range(size):
+            examples.append(Ex(f"g{g}:{c}", f"a{g}{c}", int(c == g % size)))
+            group_ids.append(f"g{g}")
+    return examples, group_ids
+
+
+def fingerprint(stimuli: StimulusSet) -> tuple[object, ...]:
+    return (
+        stimuli.texts,
+        stimuli.uids,
+        stimuli.labels.tolist(),
+        stimuli.pairs.tolist(),
+        stimuli.groups.tolist(),
+    )
+
+
+EIGHT = [Ex(f"u{i}", f"t{i}", int(i < 4)) for i in range(8)]
+EXISTING_MODES = {
+    "label_contrastive": (
+        {"examples": EIGHT, "template": TINY, "n_pairs": 3, "seed": 11},
+        (
+            ("t0", "t7", "t1", "t5", "t3", "t6"),
+            ("u0", "u7", "u1", "u5", "u3", "u6"),
+            [1, 0, 1, 0, 1, 0],
+            [[0, 1], [2, 3], [4, 5]],
+            [[0, 1], [2, 3], [4, 5]],
+        ),
+    ),
+    "random": (
+        {"examples": EIGHT, "template": TINY, "n_pairs": 3, "seed": 12},
+        (
+            ("t2", "t6", "t3", "t5", "t1", "t7"),
+            ("u2", "u6", "u3", "u5", "u1", "u7"),
+            [1, 0, 1, 0, 1, 0],
+            [[0, 1], [2, 3], [4, 5]],
+            [[5, 2], [4, 1], [0, 3]],
+        ),
+    ),
+    "one_vs_rest": (
+        {
+            "examples": [Ex(f"u{i}", f"t{i}", i % 3) for i in range(9)],
+            "template": TINY,
+            "target_class": 2,
+            "n_pairs": 3,
+            "seed": 13,
+        },
+        (
+            ("t6", "t8", "t2", "t0", "t5", "t7"),
+            ("u6", "u8", "u2", "u0", "u5", "u7"),
+            [0, 1, 1, 0, 1, 0],
+            [[0, 1], [2, 3], [4, 5]],
+            [[0, 1], [2, 3], [4, 5]],
+        ),
+    ),
+    "persona": (
+        {
+            "examples": EIGHT[:4],
+            "template": TINY_PERSONAS,
+            "n_pairs": 3,
+            "seed": 14,
+        },
+        (
+            ("p1 t0", "n1 t0", "p0 t3", "n2 t3", "p2 t2", "n1 t2"),
+            ("u0", "u0", "u3", "u3", "u2", "u2"),
+            [1, 0, 1, 0, 1, 0],
+            [[0, 1], [3, 2], [4, 5]],
+            [[0, 1], [3, 2], [4, 5]],
+        ),
+    ),
+    "by_group": (
+        {
+            "examples": grouped([4, 3, 4])[0],
+            "template": TINY,
+            "group_ids": grouped([4, 3, 4])[1],
+            "seed": 15,
+        },
+        (
+            (
+                *("a00", "a01", "a02", "a03"),
+                *("a20", "a21", "a22", "a23"),
+                *("a10", "a11", "a12"),
+            ),
+            (
+                *("g0:0", "g0:1", "g0:2", "g0:3"),
+                *("g2:0", "g2:1", "g2:2", "g2:3"),
+                *("g1:0", "g1:1", "g1:2"),
+            ),
+            [1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0],
+            [[0, 3], [6, 7], [9, 8]],
+            [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, -1]],
+        ),
+    ),
+}
+
+
+@pytest.mark.parametrize("pairing", list(EXISTING_MODES))
+def test_existing_pairing_modes_keep_their_output(pairing: str) -> None:
+    arguments, expected = EXISTING_MODES[pairing]
+    arguments = dict(arguments)
+
+    stimuli = build_stimulus_set(
+        arguments.pop("examples"),  # type: ignore[arg-type]
+        arguments.pop("template"),  # type: ignore[arg-type]
+        ChatFormat("none"),
+        pairing=pairing,  # type: ignore[arg-type]
+        **arguments,  # type: ignore[arg-type]
+    )
+
+    assert fingerprint(stimuli) == expected
 
 
 def test_label_contrastive_set_has_pair_major_layout() -> None:
@@ -575,6 +701,145 @@ def test_by_group_needs_group_ids_of_the_right_length() -> None:
             pairing="by_group",
             group_ids=group_ids[:-1],
         )
+
+
+def within_group(
+    examples: list[Ex], group_ids: list[str] | None, **kwargs: int
+) -> StimulusSet:
+    return build_stimulus_set(
+        examples,
+        TINY,
+        ChatFormat("none"),
+        pairing="within_group",
+        group_ids=group_ids,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def test_within_group_pairs_consecutive_members_of_each_shuffled_group() -> (
+    None
+):
+    examples, group_ids = grouped([4, 4, 4])
+    by_uid = {e.uid: e for e in examples}
+
+    stimuli = within_group(examples, group_ids, seed=3)
+
+    group_of = [uid.split(":")[0] for uid in stimuli.uids]
+    np.testing.assert_array_equal(stimuli.pairs, np.arange(12).reshape(6, 2))
+    assert all(group_of[a] == group_of[b] for a, b in stimuli.pairs)
+    assert collections.Counter(group_of[a] for a, _ in stimuli.pairs) == {
+        "g0": 2,
+        "g1": 2,
+        "g2": 2,
+    }
+    assert sorted(stimuli.uids) == sorted(by_uid)
+    assert group_of[::4] == ["g0", "g1", "g2"]
+    assert stimuli.texts == tuple(by_uid[uid].text for uid in stimuli.uids)
+    assert stimuli.labels.tolist() == [by_uid[u].label for u in stimuli.uids]
+    assert stimuli.groups.shape == (3, 4)
+    assert sorted(stimuli.groups.ravel().tolist()) == list(range(12))
+    for row in stimuli.groups:
+        assert len({group_of[i] for i in row}) == 1
+        assert stimuli.labels[row].sum() == 1
+
+
+def test_within_group_is_deterministic_and_seed_dependent() -> None:
+    examples, group_ids = grouped([4] * 6)
+
+    first = within_group(examples, group_ids, seed=5)
+
+    assert fingerprint(first) == fingerprint(
+        within_group(examples, group_ids, seed=5)
+    )
+    assert first.uids != within_group(examples, group_ids, seed=6).uids
+
+
+def test_within_group_pairs_ignore_the_labels() -> None:
+    examples, group_ids = grouped([4, 4, 4])
+    moved = [replace(e, label=int(e.uid.endswith(":3"))) for e in examples]
+
+    original = within_group(examples, group_ids, seed=8)
+    relabeled = within_group(moved, group_ids, seed=8)
+
+    assert relabeled.uids == original.uids
+    np.testing.assert_array_equal(relabeled.pairs, original.pairs)
+
+
+def test_within_group_pads_an_odd_group_with_a_copy_left_out_of_its_group() -> (
+    None
+):
+    examples, group_ids = grouped([5, 4])
+    by_uid = {e.uid: e for e in examples}
+
+    stimuli = within_group(examples, group_ids, seed=0)
+
+    assert len(stimuli.texts) == 10
+    assert len(stimuli.pairs) == 5
+    assert stimuli.groups.shape == (2, 5)
+    row = [int(i) for i in stimuli.groups[0]]
+    assert sorted(stimuli.uids[i] for i in row) == [f"g0:{c}" for c in range(5)]
+    (pad,) = set(range(6)) - set(row)
+    assert by_uid[stimuli.uids[pad]].label == 0
+    assert stimuli.labels[pad] == 0
+    assert stimuli.texts[pad] == by_uid[stimuli.uids[pad]].text
+    assert stimuli.groups[1].tolist() == [6, 7, 8, 9, -1]
+    assert collections.Counter(
+        stimuli.uids[i].split(":")[0] for i in stimuli.pairs.ravel()
+    ) == {"g0": 6, "g1": 4}
+
+
+def test_within_group_pad_never_copies_the_gold_member() -> None:
+    examples, group_ids = grouped([5])
+
+    for seed in range(100):
+        stimuli = within_group(examples, group_ids, seed=seed)
+
+        (pad,) = set(range(6)) - set(stimuli.groups[0].tolist())
+        assert stimuli.uids[pad] != "g0:0"
+
+
+def test_within_group_rejects_n_pairs() -> None:
+    examples, group_ids = grouped([4, 4])
+
+    with pytest.raises(ValueError, match="n_pairs"):
+        within_group(examples, group_ids, n_pairs=1)
+
+
+def test_within_group_needs_group_ids_and_one_positive_per_group() -> None:
+    examples, group_ids = grouped([4, 4])
+    two_positives = [
+        replace(e, label=1) if e.uid == "g1:0" else e for e in examples
+    ]
+
+    with pytest.raises(ValueError, match="within_group pairing needs"):
+        within_group(examples, None)
+    with pytest.raises(ValueError, match="g1"):
+        within_group(two_positives, group_ids)
+
+
+def test_within_group_reading_turns_gold_at_the_minimum_into_sign_minus() -> (
+    None
+):
+    examples, group_ids = grouped([4] * 6)
+    stimuli = within_group(examples, group_ids, seed=0)
+    h = np.random.default_rng(0).normal(scale=0.01, size=(1, 24, 3))
+    h[0, :, 0] -= 5.0 * stimuli.labels
+
+    reader = RepReader.fit(
+        "pca_diff",
+        h,
+        [0],
+        labels=stimuli.labels,
+        pairs=stimuli.pairs,
+        groups=stimuli.groups,
+    )
+
+    assert reader.signs.tolist() == [-1.0]
+    raw = reader.raw_score(h)[0]
+    for row in stimuli.groups:
+        assert stimuli.labels[row[np.argmin(raw[row])]] == 1
+    accuracy = group_accuracy(reader.score(h), stimuli.groups, stimuli.labels)
+    assert accuracy.tolist() == [1.0]
 
 
 def test_missing_question_raises_naming_the_example() -> None:

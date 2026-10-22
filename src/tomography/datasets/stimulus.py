@@ -28,7 +28,12 @@ from tomography.templates import Template
 Span = tuple[int, int]
 IntArray = NDArray[np.int64]
 PairingMode = Literal[
-    "random", "label_contrastive", "persona", "one_vs_rest", "by_group"
+    "random",
+    "label_contrastive",
+    "persona",
+    "one_vs_rest",
+    "by_group",
+    "within_group",
 ]
 
 
@@ -116,7 +121,7 @@ def build_stimulus_set(
     concept and persona templates. ``groups`` equals ``pairs`` for the
     label-contrastive, persona and one-vs-rest modes, holds the label matches
     among the same stimuli for ``random``, and has all members of each group
-    for ``by_group``.
+    for ``by_group`` and ``within_group``.
 
     Args:
         examples: Source examples. Split them by source before calling, so
@@ -129,14 +134,19 @@ def build_stimulus_set(
             class, ``persona`` the two poles of a statement, and ``by_group``
             takes the examples that share a ``group_ids`` entry as one group
             (one label-1 member among the rest) and pairs its label-1 member
-            with one seeded label-0 member.
+            with one seeded label-0 member. ``within_group`` takes the same
+            groups and pairs consecutive members of each seeded shuffle of a
+            group, the reference's unsupervised pairing (see
+            ``_within_group_plan``).
         concept: The concept word for a ``{concept}`` slot.
         target_class: The class that is label 1 for ``one_vs_rest``.
-        group_ids: One group id per example, required for ``by_group``.
+        group_ids: One group id per example, required for ``by_group`` and
+            ``within_group``.
         strata: One stratum name per example (``label_contrastive`` only);
             pairs never cross strata.
         n_pairs: Number of pairs (statements for persona, groups for
-            ``by_group``). ``None`` takes as many as the mode allows.
+            ``by_group``). ``None`` takes as many as the mode allows;
+            ``within_group`` pairs every group and accepts only ``None``.
         seed: Seed for every random choice.
 
     Returns:
@@ -171,6 +181,8 @@ def build_stimulus_set(
         plan = _persona_plan(examples, template, n_pairs, rng)
     elif pairing == "by_group":
         plan = _group_plan(examples, group_ids, n_pairs, rng)
+    elif pairing == "within_group":
+        plan = _within_group_plan(examples, group_ids, n_pairs, rng)
     elif pairing == "one_vs_rest":
         plan = _one_vs_rest_plan(examples, target_class, n_pairs, rng)
     elif pairing == "random":
@@ -425,21 +437,7 @@ def _group_plan(
             label is not binary, a group lacks exactly one label-1 member or
             any label-0 member, or ``n_pairs`` exceeds the groups available.
     """
-    if group_ids is None or len(group_ids) != len(examples):
-        raise ValueError(
-            "by_group pairing needs one group_ids entry per example"
-        )
-    labels = _binary_labels(examples)
-    members: dict[str, list[int]] = {}
-    for index, group in enumerate(group_ids):
-        members.setdefault(group, []).append(index)
-    for group, indices in members.items():
-        positives = int(labels[indices].sum())
-        if positives != 1 or positives == len(indices):
-            raise ValueError(
-                f"group {group!r} needs exactly one label-1 member and at "
-                "least one label-0 member"
-            )
+    labels, members = _members(examples, group_ids, "by_group")
     keys = list(members)
     size = _count(n_pairs, len(keys), "groups")
     chosen = rng.permutation(len(keys))[:size]
@@ -458,6 +456,107 @@ def _group_plan(
         )
         start += len(block)
     return _Plan(order, labels[order], pairs, groups)
+
+
+def _within_group_plan(
+    examples: Sequence[ExampleLike],
+    group_ids: Sequence[str] | None,
+    n_pairs: int | None,
+    rng: np.random.Generator,
+) -> _Plan:
+    """Plans the reference's unsupervised pairs inside each group.
+
+    The reference (representation-engineering ``repe_eval``) shuffles the
+    choices of each training question and differences consecutive stimuli,
+    so its pairs stay inside one question, include wrong-versus-wrong pairs
+    and never read the labels. Here every group is shuffled with the seed
+    and its consecutive members are paired. A group with an odd number of
+    members first gets a copy of one seeded label-0 member, as the
+    reference pads its 5-choice CommonsenseQA questions to six. The copy is
+    paired like any member but is left out of the group's row, so the row
+    keeps exactly one label-1 member for orientation. Unlike the reference,
+    which draws the pad from all choices, the copy is never the label-1
+    member.
+
+    Args:
+        examples: Source examples with binary labels.
+        group_ids: One group id per example; groups keep their order of
+            first appearance.
+        n_pairs: Must be None: every group is paired.
+        rng: Generator for the pads and the shuffles.
+
+    Returns:
+        A plan whose groups hold the members of each group, padded with -1,
+        and whose pairs are consecutive stimuli of one shuffled group.
+
+    Raises:
+        ValueError: If ``n_pairs`` is given, ``group_ids`` is missing or has
+            the wrong length, a label is not binary, or a group lacks
+            exactly one label-1 member or any label-0 member.
+    """
+    if n_pairs is not None:
+        raise ValueError(
+            "within_group pairing pairs every group; n_pairs must be None, "
+            f"got {n_pairs}"
+        )
+    labels, members = _members(examples, group_ids, "within_group")
+    blocks = []
+    rows = []
+    start = 0
+    for indices in members.values():
+        block = np.array(indices, dtype=np.int64)
+        is_member = np.ones(len(block), dtype=bool)
+        if len(block) % 2:
+            block = np.append(block, rng.choice(block[labels[block] == 0]))
+            is_member = np.append(is_member, False)
+        shuffle = rng.permutation(len(block))
+        blocks.append(block[shuffle])
+        rows.append(start + np.flatnonzero(is_member[shuffle]))
+        start += len(block)
+    groups = np.full((len(rows), max(map(len, rows))), -1, dtype=np.int64)
+    for row, positions in enumerate(rows):
+        groups[row, : len(positions)] = positions
+    order, pairs = _contiguous(np.concatenate(blocks).reshape(-1, 2))
+    return _Plan(order, labels[order], pairs, groups)
+
+
+def _members(
+    examples: Sequence[ExampleLike],
+    group_ids: Sequence[str] | None,
+    pairing: PairingMode,
+) -> tuple[IntArray, dict[str, list[int]]]:
+    """Validates the groups of a group-wise mode and lists their members.
+
+    Args:
+        examples: Source examples with binary labels.
+        group_ids: One group id per example.
+        pairing: The mode, named in the error messages.
+
+    Returns:
+        The binary labels and the example indices of each group, groups in
+        order of first appearance and members in input order.
+
+    Raises:
+        ValueError: If ``group_ids`` is missing or has the wrong length, a
+            label is not binary, or a group lacks exactly one label-1 member
+            or any label-0 member.
+    """
+    if group_ids is None or len(group_ids) != len(examples):
+        raise ValueError(
+            f"{pairing} pairing needs one group_ids entry per example"
+        )
+    labels = _binary_labels(examples)
+    members: dict[str, list[int]] = {}
+    for index, group in enumerate(group_ids):
+        members.setdefault(group, []).append(index)
+    for group, indices in members.items():
+        positives = int(labels[indices].sum())
+        if positives != 1 or positives == len(indices):
+            raise ValueError(
+                f"group {group!r} needs exactly one label-1 member and at "
+                "least one label-0 member"
+            )
+    return labels, members
 
 
 def _child_seed(rng: np.random.Generator) -> int:
