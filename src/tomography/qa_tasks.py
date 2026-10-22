@@ -301,17 +301,35 @@ def race_item(passage: RacePassage) -> ChoiceExample:
     return replace(passage.last, question=question)
 
 
-def fewshot_context(
+@dataclass(frozen=True)
+class HarnessPrompt:
+    """One harness request: a context and the continuation of each choice.
+
+    The harness's `_encode_pair` moves whitespace at the end of a context to
+    the front of the continuation before it tokenizes; the builders below
+    apply that move, so `context` never ends in whitespace.
+
+    Attributes:
+        context: The prompt the continuations are scored after.
+        continuations: For each choice in choice order, the whitespace moved
+            from the end of the context, a space and the choice.
+    """
+
+    context: str
+    continuations: tuple[str, ...]
+
+
+def fewshot_prompt(
     task: FewShotTask, item: ChoiceExample, shots: Sequence[ChoiceExample]
-) -> str:
+) -> HarnessPrompt:
     """Writes the harness prompt of an item after solved examples.
 
     As the harness's `fewshot_context` does, each shot is its query followed
-    by the continuation of its gold answer, and the shots and the item's
-    query are joined by blank lines. The query is the question stem for
-    obqa, and for ARC "Question: " and the question, a newline and
-    "Answer:". The harness has no CommonsenseQA task at f2e3950; csqa takes
-    the ARC query with the answer text, not lettered options.
+    by a space and its gold answer, and the shots and the item's query are
+    joined by blank lines. The query is the question stem for obqa, and for
+    ARC "Question: " and the question, a newline and "Answer:". The harness
+    has no CommonsenseQA task at f2e3950; csqa takes the ARC query with the
+    answer text, not lettered options.
 
     Args:
         task: The task the item belongs to.
@@ -320,25 +338,25 @@ def fewshot_context(
             training questions of `task_splits`; empty for zero-shot.
 
     Returns:
-        The context that each of `continuations(item)` is scored after.
+        The item's `HarnessPrompt`.
 
     Raises:
         ValueError: If `task` has no few-shot prompt: RACE goes through
-            `race_context` and TruthfulQA through `tqa_context`.
+            `race_prompt` and TruthfulQA through `tqa_prompt`.
     """
     if task not in get_args(FewShotTask):
         raise ValueError(
-            f"fewshot_context takes one of {get_args(FewShotTask)}, got "
-            f"{task!r}; RACE goes through race_context and TruthfulQA "
-            "through tqa_context"
+            f"fewshot_prompt takes one of {get_args(FewShotTask)}, got "
+            f"{task!r}; RACE goes through race_prompt and TruthfulQA "
+            "through tqa_prompt"
         )
     solved = [
-        _query(task, shot) + continuations(shot)[shot.correct] for shot in shots
+        f"{_query(task, shot)} {shot.choices[shot.correct]}" for shot in shots
     ]
-    return "\n\n".join([*solved, _query(task, item)])
+    return _prompt("\n\n".join([*solved, _query(task, item)]), item)
 
 
-def race_context(passage: RacePassage) -> str:
+def race_prompt(passage: RacePassage) -> HarnessPrompt:
     """Writes the harness's zero-shot RACE prompt of a passage.
 
     The GPT-3 format of the harness's RACE task: "Article: " and the article
@@ -353,8 +371,7 @@ def race_context(passage: RacePassage) -> str:
         passage: A RACE passage.
 
     Returns:
-        The context that each of `continuations(passage.last)` is scored
-        after.
+        The `HarnessPrompt` of the passage's last question.
     """
     context = f"Article: {passage.article}\n\n"
     for question, answer in passage.earlier:
@@ -362,35 +379,23 @@ def race_context(passage: RacePassage) -> str:
             context += f"{question[-5:]}{answer}\n"
         else:
             context += f"Question: {question}\nAnswer: {answer}\n"
-    return context + passage.last.question
+    return _prompt(context + passage.last.question, passage.last)
 
 
-def tqa_context(item: ChoiceExample) -> str:
+def tqa_prompt(item: ChoiceExample) -> HarnessPrompt:
     """Writes the harness's zero-shot TruthfulQA MC1 prompt of a question.
 
-    MC1 credits the question when its gold answer scores highest, the acc
-    of `harness_credit`.
+    The context is `TQA_PROMPT`, a blank line, "Q: " and the question, a
+    newline and "A:". MC1 credits the question when its gold answer scores
+    highest, the acc of `harness_credit`.
 
     Args:
         item: A question of `load_truthfulqa`.
 
     Returns:
-        `TQA_PROMPT`, a blank line, "Q: " and the question, a newline and
-        "A:".
+        The item's `HarnessPrompt`.
     """
-    return f"{TQA_PROMPT}\n\nQ: {item.question}\nA:"
-
-
-def continuations(item: ChoiceExample) -> list[str]:
-    """Writes the continuation the harness scores for each choice.
-
-    Args:
-        item: A question.
-
-    Returns:
-        A space followed by each choice, in choice order.
-    """
-    return [f" {choice}" for choice in item.choices]
+    return _prompt(f"{TQA_PROMPT}\n\nQ: {item.question}\nA:", item)
 
 
 def harness_credit(
@@ -406,7 +411,7 @@ def harness_credit(
 
     Args:
         loglikelihoods: The summed log-likelihood of each continuation of
-            `continuations(item)`, in choice order.
+            the item's `HarnessPrompt`, in choice order.
         item: The question.
 
     Returns:
@@ -431,6 +436,17 @@ def harness_credit(
         labels,
     )
     return float(acc), float(acc_norm)
+
+
+def _prompt(context: str, item: ChoiceExample) -> HarnessPrompt:
+    """Pairs a context with a space and each choice of the item.
+
+    Whitespace at the end of the context moves to the front of every
+    continuation, as the harness's `_encode_pair` does before it tokenizes.
+    """
+    kept = context.rstrip()
+    moved = context[len(kept) :]
+    return HarnessPrompt(kept, tuple(f"{moved} {c}" for c in item.choices))
 
 
 def _query(task: FewShotTask, item: ChoiceExample) -> str:

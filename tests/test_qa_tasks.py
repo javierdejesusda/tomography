@@ -10,15 +10,15 @@ from tomography.qa_tasks import SHOTS
 from tomography.qa_tasks import TEMPLATES
 from tomography.qa_tasks import TQA_PRIMERS
 from tomography.qa_tasks import TQA_PROMPT
-from tomography.qa_tasks import continuations
-from tomography.qa_tasks import fewshot_context
+from tomography.qa_tasks import HarnessPrompt
+from tomography.qa_tasks import fewshot_prompt
 from tomography.qa_tasks import harness_credit
 from tomography.qa_tasks import lat_item
-from tomography.qa_tasks import race_context
 from tomography.qa_tasks import race_item
+from tomography.qa_tasks import race_prompt
 from tomography.qa_tasks import race_splits
 from tomography.qa_tasks import task_splits
-from tomography.qa_tasks import tqa_context
+from tomography.qa_tasks import tqa_prompt
 from tomography.templates import ChatFormat
 
 OBQA = (
@@ -327,41 +327,57 @@ WATER = ChoiceExample("t1", "Water boils at", ("100 C", "0 C"), 0, "test")
 
 
 @pytest.mark.parametrize("task", ["arc_easy", "arc_challenge", "csqa"])
-def test_fewshot_context_writes_shots_then_the_query_like_the_harness(
+def test_fewshot_prompt_writes_shots_then_the_query_like_the_harness(
     task: str,
 ) -> None:
-    context = fewshot_context(task, WATER, [SUM, SKY])  # type: ignore[arg-type]
+    prompt = fewshot_prompt(task, WATER, [SUM, SKY])  # type: ignore[arg-type]
 
-    assert context == (
+    assert prompt == HarnessPrompt(
         "Question: What is 1 + 1?\nAnswer: 2\n\n"
         "Question: What color is the sky?\nAnswer: blue\n\n"
-        "Question: Water boils at\nAnswer:"
+        "Question: Water boils at\nAnswer:",
+        (" 100 C", " 0 C"),
     )
 
 
 def test_obqa_queries_are_the_bare_stem() -> None:
-    assert fewshot_context("obqa", WATER, [SUM, SKY]) == (
-        "What is 1 + 1? 2\n\nWhat color is the sky? blue\n\nWater boils at"
+    prompt = fewshot_prompt("obqa", WATER, [SUM, SKY])
+
+    assert prompt == HarnessPrompt(
+        "What is 1 + 1? 2\n\nWhat color is the sky? blue\n\nWater boils at",
+        (" 100 C", " 0 C"),
     )
 
 
-def test_fewshot_context_without_shots_is_the_query() -> None:
-    context = fewshot_context("arc_challenge", WATER, [])
+def test_fewshot_prompt_without_shots_is_the_query() -> None:
+    prompt = fewshot_prompt("arc_challenge", WATER, [])
 
-    assert context == "Question: Water boils at\nAnswer:"
+    assert prompt.context == "Question: Water boils at\nAnswer:"
+
+
+def test_fewshot_prompt_moves_trailing_whitespace_to_the_continuations() -> (
+    None
+):
+    item = ChoiceExample("t2", "Ice melts at \n", ("0 C", "9 C"), 0, "test")
+
+    prompt = fewshot_prompt("obqa", item, [SUM])
+
+    assert prompt == HarnessPrompt(
+        "What is 1 + 1? 2\n\nIce melts at", (" \n 0 C", " \n 9 C")
+    )
 
 
 @pytest.mark.parametrize(
-    ("task", "builder"), [("race", "race_context"), ("tqa", "tqa_context")]
+    ("task", "builder"), [("race", "race_prompt"), ("tqa", "tqa_prompt")]
 )
-def test_fewshot_context_sends_zero_shot_tasks_to_their_context(
+def test_fewshot_prompt_sends_zero_shot_tasks_to_their_builder(
     task: str, builder: str
 ) -> None:
-    with pytest.raises(ValueError, match=builder):
-        fewshot_context(task, WATER, [])  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match=rf"got '{task}'; .*{builder}"):
+        fewshot_prompt(task, WATER, [])  # type: ignore[arg-type]
 
 
-def test_race_context_is_the_gpt3_zero_shot_prompt() -> None:
+def test_race_prompt_is_the_gpt3_zero_shot_prompt() -> None:
     last = ChoiceExample(
         "race-high1.txt",
         "Tom is  _  .",
@@ -372,25 +388,34 @@ def test_race_context_is_the_gpt3_zero_shot_prompt() -> None:
     earlier = (("Who ran?", "Tom"), ("The race was  _  .", "long"))
     passage = RacePassage("Tom ran.\nHe won.", last, earlier)
 
-    assert race_context(passage) == (
+    assert race_prompt(passage) == HarnessPrompt(
         "Article: Tom ran.\nHe won.\n\n"
         "Question: Who ran?\nAnswer: Tom\n"
         " _  .long\n"
-        "Tom is  _  ."
+        "Tom is  _  .",
+        (" fast", " slow", " old", " sad"),
     )
 
 
-def test_tqa_context_puts_the_question_after_the_qa_prompt() -> None:
+def test_race_prompt_moves_trailing_whitespace_to_the_continuations() -> None:
+    last = ChoiceExample("race-high2.txt", "Why?  ", tuple("abcd"), 0, "test")
+
+    prompt = race_prompt(RacePassage("Art.", last, ()))
+
+    assert prompt == HarnessPrompt(
+        "Article: Art.\n\nWhy?", ("   a", "   b", "   c", "   d")
+    )
+
+
+def test_tqa_prompt_puts_the_question_after_the_qa_prompt() -> None:
     item = ChoiceExample(
         "truthfulqa-0", "Is it flat?", ("No.", "Yes."), 0, "test"
     )
 
     assert TQA_PROMPT == QA_PROMPT
-    assert tqa_context(item) == QA_PROMPT + "\n\nQ: Is it flat?\nA:"
-
-
-def test_continuations_put_a_space_before_each_choice() -> None:
-    assert continuations(WATER) == [" 100 C", " 0 C"]
+    assert tqa_prompt(item) == HarnessPrompt(
+        QA_PROMPT + "\n\nQ: Is it flat?\nA:", (" No.", " Yes.")
+    )
 
 
 def test_harness_credit_normalizes_by_the_characters_of_the_choice() -> None:
