@@ -7,8 +7,8 @@ correlated AUROCs; McNemar's exact test for two classifiers' outcomes; and
 Holm's correction over a declared family of such tests. The thresholded
 metrics (accuracy, precision, recall and F1, and the true positive rate at a
 fixed false positive rate) take their threshold from validation scores, and
-so do the two layer choices: the best validation layer and an ensemble of
-the top k.
+the two layer choices, the best validation layer and an ensemble of the top
+k, rank the layers by a validation metric.
 """
 
 from collections.abc import Iterator
@@ -156,16 +156,19 @@ def paired_auroc_diff(
     with replacement, and keeps every row of a drawn cluster: rows that share
     an item (the members of a pair, the answers of a question) are never
     treated as independent. Clusters are drawn by position in increasing id
-    order, so with one row per cluster the resamples are those of the item
-    bootstrap `tomography.p9.risk.auroc_diff_ci` with the same seed. A
-    resample that holds a single class has no AUROC and is skipped.
+    order, so with one row per cluster and ids increasing along the rows,
+    the resamples are those of the item bootstrap
+    `tomography.p9.risk.auroc_diff_ci` with the same seed and `n_boot`. A
+    resample that holds a single class has no AUROC and is skipped. A single
+    cluster gives a zero-width interval.
 
     Args:
-        a: Scores of the first scorer, shape (n,).
+        a: Scores of the first scorer, shape (n,); higher should mean
+            label 1.
         b: Scores of the second scorer on the same rows, shape (n,).
         labels: Binary labels of shape (n,), both classes present.
-        clusters: Integer cluster id of each row, shape (n,), for example
-            the item or the group the row belongs to.
+        clusters: Integer cluster id of each row, shape (n,): the item the
+            row belongs to, such as its pair or question.
         n_boot: Number of resamples drawn.
         alpha: One minus the coverage; 0.05 gives a 95% interval.
         seed: Seed of the resampling.
@@ -175,9 +178,10 @@ def paired_auroc_diff(
         differences and the number of resamples kept.
 
     Raises:
-        ValueError: If the shapes disagree, a class is missing, a score is
-            not finite, the clusters are not integers, `n_boot` or `alpha`
-            is out of range, or no resample holds both classes.
+        ValueError: If the shapes disagree, a label is not 0 or 1, a class
+            is missing, a score is not finite, the clusters are not
+            integers, `n_boot` or `alpha` is out of range, or no resample
+            holds both classes.
     """
     _check_resampling(n_boot, alpha)
     pair = _paired_rows(a, b, clusters)
@@ -211,7 +215,8 @@ def paired_accuracy_diff(
     row per decision: per stimulus for accuracy at a threshold, or per group
     with the group's credit for pair and multiple-choice accuracy.
     Resampling follows `paired_auroc_diff`, and the accuracy of a resample
-    pools the rows of its clusters, so a larger cluster weighs more.
+    pools the rows of its clusters, so a larger cluster weighs more. A
+    single cluster gives a zero-width interval.
 
     Args:
         correct_a: Credit of the first scorer on each row, in [0, 1], shape
@@ -256,10 +261,11 @@ def delong_test(
     from midranks (Sun and Xu, 2014). The test treats rows as independent:
     for rows that share an item, use `paired_auroc_diff`. A zero standard
     error gives z = 0 and p = 1 when the AUROCs are equal, and an infinite z
-    with p = 0 otherwise.
+    with p = 0 otherwise, as R's pROC does.
 
     Args:
-        a: Scores of the first scorer, shape (n,).
+        a: Scores of the first scorer, shape (n,); higher should mean
+            label 1.
         b: Scores of the second scorer on the same rows, shape (n,).
         labels: Binary labels of shape (n,), with at least two rows of each
             class.
@@ -269,8 +275,8 @@ def delong_test(
         two-sided normal p value.
 
     Raises:
-        ValueError: If the shapes disagree, a score is not finite, or a
-            class has fewer than two rows.
+        ValueError: If the shapes disagree, a label is not 0 or 1, a score
+            is not finite, or a class has fewer than two rows.
     """
     pair = _pair(a, b)
     labels = np.asarray(labels)
@@ -309,7 +315,8 @@ def delong_test(
 
 
 def mcnemar_test(
-    correct_a: NDArray[np.bool_], correct_b: NDArray[np.bool_]
+    correct_a: NDArray[np.bool_] | NDArray[np.integer[Any]],
+    correct_b: NDArray[np.bool_] | NDArray[np.integer[Any]],
 ) -> McNemarResult:
     """McNemar's test for two classifiers judged on the same items.
 
@@ -523,8 +530,9 @@ def best_validation_layer(
         The chosen layer with its validation and test scores.
 
     Raises:
-        ValueError: If the shapes disagree, `val_metric` holds NaN, a layer
-            repeats, or a score is not finite.
+        ValueError: If the shapes disagree, a split has no stimulus,
+            `val_metric` holds NaN, a layer repeats, or a score is not
+            finite.
     """
     metric = _layer_metric(val_metric, layers)
     val = _per_layer(val_scores, "val_scores", len(layers))
@@ -547,8 +555,9 @@ def top_k_layers(
     The layers are the k highest entries of `val_metric`, ties going to the
     earlier entry, so the first is the one `best_validation_layer` reads.
     The scores of each chosen layer, validation and test alike, are
-    standardized with that layer's validation mean and standard deviation,
-    so no test information enters, and the ensemble score of a stimulus is
+    standardized with that layer's validation mean and population standard
+    deviation, so no test information enters, and the ensemble score of a
+    stimulus is
     their mean over the chosen layers. Standardizing keeps a layer with
     larger scores from dominating the mean. The ensemble averages scores,
     not per-layer metrics.
@@ -568,9 +577,10 @@ def top_k_layers(
         scores.
 
     Raises:
-        ValueError: If the shapes disagree, `val_metric` holds NaN, a layer
-            repeats, a score is not finite, `k` is out of range, or a chosen
-            layer has constant validation scores.
+        ValueError: If the shapes disagree, a split has no stimulus,
+            `val_metric` holds NaN, a layer repeats, a score is not finite,
+            `k` is out of range, or a chosen layer has constant validation
+            scores.
     """
     metric = _layer_metric(val_metric, layers)
     val = _per_layer(val_scores, "val_scores", len(layers))
@@ -581,10 +591,12 @@ def top_k_layers(
             f"got {k}"
         )
     chosen = np.argsort(-metric, kind="stable")[:k]
+    # A constant row can have a computed deviation of about 1e-17 instead of
+    # 0, so constancy is tested on the range.
+    if (np.ptp(val[chosen], axis=1) == 0.0).any():
+        raise ValueError("a chosen layer has constant validation scores")
     mean = val[chosen].mean(axis=1, keepdims=True)
     std = val[chosen].std(axis=1, keepdims=True)
-    if (std == 0.0).any():
-        raise ValueError("a chosen layer has constant validation scores")
     return LayerChoice(
         tuple(int(layers[i]) for i in chosen),
         ((val[chosen] - mean) / std).mean(axis=0),
@@ -644,6 +656,8 @@ def _per_layer(
         raise ValueError(
             f"{name} must have shape ({n_layers}, n), got {values.shape}"
         )
+    if values.shape[1] == 0:
+        raise ValueError(f"{name} needs a stimulus")
     if not np.isfinite(values).all():
         raise ValueError(f"{name} must be finite")
     return values

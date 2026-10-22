@@ -32,9 +32,11 @@ def test_paired_auroc_diff_with_one_row_per_cluster_is_item_bootstrap() -> None:
     a = labels + rng.standard_normal(40)
     b = 0.5 * labels + rng.standard_normal(40)
 
-    result = paired_auroc_diff(a, b, labels, np.arange(40), n_boot=500, seed=3)
+    result = paired_auroc_diff(
+        a, b, labels, np.arange(40), n_boot=500, alpha=0.1, seed=3
+    )
 
-    expected = auroc_diff_ci(a, b, labels, n_boot=500, seed=3)
+    expected = auroc_diff_ci(a, b, labels, n_boot=500, alpha=0.1, seed=3)
     assert (result.difference, result.lower, result.upper) == expected
     assert result.n_resamples == 500
 
@@ -273,9 +275,11 @@ def test_delong_test_without_variance_rejects_only_a_real_difference() -> None:
 
     same = delong_test(perfect, perfect, labels)
     apart = delong_test(perfect, np.full(4, 0.5), labels)
+    reversed_apart = delong_test(np.full(4, 0.5), perfect, labels)
 
     assert same == (0.0, 0.0, 0.0, 1.0)
     assert apart == (0.5, 0.0, math.inf, 0.0)
+    assert reversed_apart == (-0.5, 0.0, -math.inf, 0.0)
 
 
 @pytest.mark.parametrize(
@@ -379,16 +383,19 @@ def test_mcnemar_test_rejects_malformed_input(
             [0.03, 0.06, 0.06, 0.02],
             [True, False, False, True],
         ),
+        # 0.6 times 2 is 1.2, capped at 1.
         (
-            [0.5, 0.02, 0.02, 0.9],
+            [0.6, 0.02, 0.02, 0.9],
             0.1,
             [1.0, 0.08, 0.08, 1.0],
             [False, True, True, False],
         ),
         ([0.03], 0.05, [0.03], [True]),
         ([0.2, 0.3], 0.05, [0.4, 0.4], [False, False]),
+        # 0.025 times 2 is exactly 0.05, which is rejected at alpha 0.05.
+        ([0.04, 0.025], 0.05, [0.05, 0.05], [True, True]),
     ],
-    ids=["hand-example", "ties-and-cap", "single", "none-rejected"],
+    ids=["hand-example", "ties-and-cap", "single", "none-rejected", "at-alpha"],
 )
 def test_holm_correction_matches_the_hand_computed_step_down(
     p_values: list[float],
@@ -482,10 +489,11 @@ def test_threshold_metrics_without_positive_calls_have_zero_precision() -> None:
     result = threshold_metrics(
         np.array([0.0, 1.0]),
         np.array([0, 1]),
-        np.array([0.1, 0.2, 0.3]),
+        np.array([0.1, 0.2, 0.5]),
         np.array([0, 1, 1]),
     )
 
+    # The test score 0.5 equals the threshold, so it is called negative.
     assert result == (0.5, 1 / 3, 0.0, 0.0, 0.0)
 
 
@@ -633,6 +641,47 @@ def test_top_k_layers_average_scores_standardized_on_validation() -> None:
     np.testing.assert_allclose(choice.test_scores, [1.0, 0.5, -1.0])
 
 
+@pytest.mark.parametrize(
+    ("k", "layers", "test_scores"),
+    [
+        (1, (8,), [0.0, 3.0, -2.0]),
+        # Layer 4 is standardized with mean 6 and deviation 1.
+        (3, (8, 12, 4), [-4 / 3, -5 / 3, -8 / 3]),
+    ],
+    ids=["one-layer", "every-layer"],
+)
+def test_top_k_layers_take_one_to_every_layer(
+    k: int, layers: tuple[int, ...], test_scores: list[float]
+) -> None:
+    val_metric = np.array([0.6, 0.9, 0.8])
+    val_scores = np.array([[5.0, 7.0], [1.0, 3.0], [10.0, 30.0]])
+    all_test_scores = np.array(
+        [[0.0, 0.0, 0.0], [2.0, 5.0, 0.0], [40.0, 0.0, 20.0]]
+    )
+
+    choice = top_k_layers(
+        val_metric, [4, 8, 12], val_scores, all_test_scores, k=k
+    )
+
+    assert choice.layers == layers
+    np.testing.assert_allclose(choice.val_scores, [-1.0, 1.0])
+    np.testing.assert_allclose(choice.test_scores, test_scores)
+
+
+def test_top_k_layers_average_five_layers_by_default() -> None:
+    rng = np.random.default_rng(10)
+    val_metric = np.array([0.5, 0.8, 0.7, 0.8, 0.6, 0.75])
+
+    choice = top_k_layers(
+        val_metric,
+        range(6),
+        rng.standard_normal((6, 20)),
+        rng.standard_normal((6, 15)),
+    )
+
+    assert choice.layers == (1, 3, 5, 2, 4)
+
+
 def test_top_k_layers_ignore_the_scale_of_each_layer() -> None:
     rng = np.random.default_rng(9)
     val_scores = rng.standard_normal((6, 20))
@@ -686,6 +735,8 @@ def _layer_inputs(override: dict[str, list[Any]]) -> list[Any]:
         ({"val_scores": [[5.0, 7.0], [1.0, 3.0]]}, "val_scores"),
         ({"test_scores": [0.0, 2.0, 40.0]}, "test_scores"),
         ({"test_scores": [[0.0], [np.inf], [40.0]]}, "finite"),
+        ({"val_scores": [[], [], []]}, "val_scores needs a stimulus"),
+        ({"test_scores": [[], [], []]}, "test_scores needs a stimulus"),
     ],
     ids=[
         "layers-length",
@@ -694,6 +745,8 @@ def _layer_inputs(override: dict[str, list[Any]]) -> list[Any]:
         "val-rows",
         "test-vector",
         "infinite-score",
+        "no-val-stimulus",
+        "no-test-stimulus",
     ],
 )
 def test_layer_choices_reject_malformed_input(
@@ -711,8 +764,11 @@ def test_layer_choices_reject_malformed_input(
         (0, LAYER_INPUTS["val_scores"], "k must be"),
         (4, LAYER_INPUTS["val_scores"], "k must be"),
         (2, [[5.0, 7.0], [3.0, 3.0], [10.0, 30.0]], "constant"),
+        # The mean of three 0.1 is rounded above 0.1, so the computed
+        # standard deviation of this constant layer is about 1e-17, not 0.
+        (2, [[5.0, 7.0, 6.0], [0.1, 0.1, 0.1], [10.0, 30.0, 20.0]], "constant"),
     ],
-    ids=["no-layer", "more-than-layers", "constant-layer"],
+    ids=["no-layer", "more-than-layers", "constant-layer", "rounded-constant"],
 )
 def test_top_k_layers_rejects_bad_k_and_constant_layers(
     k: int, val_scores: list[list[float]], message: str
