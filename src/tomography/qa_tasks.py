@@ -198,7 +198,8 @@ def task_splits(
 
     Raises:
         ValueError: If `task` is not a task with multiple-choice items, such
-            as "race", whose passages go through `race_splits`.
+            as "race", whose passages go through `race_splits`, or fewer
+            than k train questions are there to draw from.
     """
     if task not in get_args(ChoiceTask):
         raise ValueError(
@@ -214,6 +215,10 @@ def task_splits(
     pool = train
     if task in ("arc_easy", "arc_challenge"):
         pool = tuple(item for item in train if len(item.choices) == 4)
+    if len(pool) < SHOTS[task]:
+        raise ValueError(
+            f"{task} draws {SHOTS[task]} training questions from {len(pool)}"
+        )
     drawn = _shuffled_head(pool, SHOTS[task], seed)
     if task == "csqa":
         uids = {item.uid for item in drawn}

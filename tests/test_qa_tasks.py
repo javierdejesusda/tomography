@@ -211,8 +211,9 @@ def test_training_draw_is_the_head_of_the_seeded_shuffle(task: str) -> None:
 
 
 def test_arc_draws_training_questions_from_its_four_choice_rows() -> None:
-    train = questions("train", 40, sizes=(4, 3, 4, 5))
+    train = questions("train", 60, sizes=(4, 3, 4, 5))
     four = [q for q in train if len(q.choices) == 4]
+    assert len(four) == 30
 
     for seed in range(5):
         splits = task_splits("arc_easy", train, seed=seed)
@@ -274,6 +275,21 @@ def test_tqa_reads_the_primers_and_tests_every_item() -> None:
 def test_task_splits_sends_race_to_race_splits() -> None:
     with pytest.raises(ValueError, match="race_splits"):
         task_splits("race", questions("train", 9), seed=0)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("task", "k"), [("obqa", 5), ("csqa", 7), ("arc_challenge", 25)]
+)
+def test_task_splits_needs_k_training_questions(task: str, k: int) -> None:
+    held_out = [*questions("val", 2), *questions("test", 2)]
+
+    splits = task_splits(task, [*questions("train", k), *held_out], seed=0)  # type: ignore[arg-type]
+
+    assert len(splits.train) == k
+    with pytest.raises(
+        ValueError, match=rf"{task} draws {k} training questions from {k - 1}"
+    ):
+        task_splits(task, [*questions("train", k - 1), *held_out], seed=0)  # type: ignore[arg-type]
 
 
 def test_race_draws_training_passages_with_a_seeded_random_sample() -> None:
