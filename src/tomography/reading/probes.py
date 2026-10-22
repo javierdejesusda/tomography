@@ -1,20 +1,28 @@
 """Readers beyond one oriented direction per layer.
 
 `RepReader` holds one direction per layer. The readers here keep a
-direction only where the scorer is linear: LDA is a `RepReader`, and the
-MLP reader has none. All of them satisfy `Reader`.
+direction only where the scorer is linear: LDA is a `RepReader`, the
+attention reader exports its value heads as one, and the MLP reader has
+none. All of them satisfy `Reader`.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import replace
 from typing import Protocol
 from typing import runtime_checkable
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.optimize import minimize
 from sklearn.covariance import ledoit_wolf_shrinkage
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.neural_network import MLPClassifier
+import torch
+from torch.nn.functional import binary_cross_entropy_with_logits
 
+from tomography.activations import Activations
 from tomography.reading.directions import FloatArray
 from tomography.reading.reader import RepReader
 from tomography.reading.reader import _layer_seed
@@ -230,6 +238,228 @@ def fit_mlp(
     )
 
 
+@dataclass(frozen=True, eq=False)
+class AttentionReader:
+    """Linear readers that pool the tokens of a stimulus with attention.
+
+    A cell is one token row of a stimulus at one layer. A cell x of layer k
+    has the attention logit `queries[k] @ x + offsets[k]` and the value
+    `values[k] @ x + biases[k]`, and a stimulus scores the mean of its
+    cells' values weighted by the softmax of their logits. The softmax runs
+    over the tokens of each layer, which gives one score row per layer, or
+    over the cells of all layers at once in a joint reader, which gives one
+    row. With zero queries the weights are uniform over the tokens of each
+    layer, so a per-layer score is the value head applied to the mean of
+    the stimulus's tokens, and a joint reader with equal offsets averages
+    those scores over its layers. The parameters are in activation units.
+
+    Attributes:
+        layers: Layer indices, in the order of the first axis of the input.
+        joint: One softmax over the cells of all layers instead of one per
+            layer.
+        queries: Query vectors of shape (K, d).
+        offsets: Logit offsets of shape (K,); they move weight between
+            layers, so only a joint reader depends on them.
+        values: Value heads of shape (K, d).
+        biases: Value biases of shape (K,).
+        signs: Orientation of each value head as a direction, shape (K,),
+            each -1 or +1, see `rep_reader`.
+    """
+
+    layers: tuple[int, ...]
+    joint: bool
+    queries: NDArray[np.float64]
+    offsets: NDArray[np.float64]
+    values: NDArray[np.float64]
+    biases: NDArray[np.float64]
+    signs: NDArray[np.float32]
+
+    @property
+    def method(self) -> str:
+        """`attention`, or `attention_joint` for a joint reader."""
+        return "attention_joint" if self.joint else "attention"
+
+    def score(self, acts: Activations) -> NDArray[np.float32]:
+        """Scores every stimulus with its attention-weighted values.
+
+        Args:
+            acts: Token rows of the layers in `layers`, such as those of
+                the `response` position.
+
+        Returns:
+            Scores of shape (K, n_stimuli), or (1, n_stimuli) for a joint
+            reader.
+
+        Raises:
+            ValueError: If `acts` holds other layers or another width, or a
+                stimulus has no rows.
+        """
+        if acts.layers != self.layers:
+            raise ValueError(
+                f"acts must hold the layers {self.layers}, got {acts.layers}"
+            )
+        width = self.queries.shape[1]
+        if acts.data.shape[2] != width:
+            raise ValueError(
+                f"acts must have width {width}, got {acts.data.shape[2]}"
+            )
+        stimulus = _row_stimulus(acts)
+        logits = np.empty((len(self.layers), stimulus.shape[0]))
+        heads = np.empty_like(logits)
+        for k, layer_rows in enumerate(acts.data):
+            rows = layer_rows.astype(np.float64)
+            logits[k] = rows @ self.queries[k] + self.offsets[k]
+            heads[k] = rows @ self.values[k] + self.biases[k]
+        pooled = _pool(
+            torch.from_numpy(logits),
+            torch.from_numpy(heads),
+            torch.tensor(stimulus),
+            acts.n_stimuli,
+            joint=self.joint,
+        )
+        return pooled.numpy().astype(np.float32)
+
+    def rep_reader(self) -> RepReader:
+        """Exports the value heads as a reader that can steer.
+
+        The direction of layer k is `values[k]`, and its mean is the point
+        on that direction where the value is zero, so the raw score of a
+        token is its value divided by the norm of the head. The signs are
+        `signs`, which `fit_attention` sets with the rule of
+        `RepReader.fit`.
+
+        Returns:
+            The reader, named like this one.
+
+        Raises:
+            ValueError: If a value head is zero.
+        """
+        squares = np.square(self.values).sum(axis=1, keepdims=True)
+        if not squares.all():
+            raise ValueError("a value head is zero, so it has no direction")
+        means = -self.biases[:, None] * self.values / squares
+        return RepReader.from_arrays(
+            self.method, self.layers, self.values, means, self.signs
+        )
+
+
+def fit_attention(
+    acts: Activations,
+    *,
+    labels: NDArray[np.int64],
+    pairs: NDArray[np.int64] | None = None,
+    groups: NDArray[np.int64] | None = None,
+    c: float = 1.0,
+    joint: bool = False,
+    tol: float = 1e-4,
+    max_iter: int = 1000,
+) -> AttentionReader:
+    """Fits attention-pooled linear readers on the token rows of stimuli.
+
+    The loss is the logistic loss of the stimulus scores plus an L2 penalty
+    on the queries and the value heads, weighted as in scikit-learn's
+    `LogisticRegression`: `c` times the summed loss plus half the squared
+    weights. As in the logistic finder, each layer's rows are first centered
+    on their mean and divided by their root mean square norm, so `c` means
+    the same in both, and with one token per stimulus the value head is
+    that finder's regression. The queries and value heads start at zero, so
+    the fit starts from mean pooling, and full-batch L-BFGS minimizes the
+    loss in float64 on the CPU with scikit-learn's settings. The fit draws
+    no random numbers, so it needs no seed. A per-layer reader fits each
+    layer alone; a joint reader fits one softmax over the cells of all the
+    layers, with one query and one value head per layer and one shared
+    bias, and holds the rows of all those layers in float64. The value
+    heads are oriented over the token rows the way the sweep orients a
+    `RepReader.fit` reader of `response` rows: the labels repeat on every
+    row of a stimulus, and `Activations.row_groups` maps the pairs and the
+    groups to rows.
+
+    Args:
+        acts: Token rows of the layers to read, such as those of the
+            `response` position.
+        labels: Binary labels of shape (n_stimuli,), 1 for the positive
+            pole.
+        pairs: Stimulus pairs of shape (m, 2) that orient the value heads.
+        groups: Stimulus groups that orient the value heads, see `orient`.
+        c: The inverse L2 strength, scikit-learn's `C`: smaller values
+            regularize more.
+        joint: Fit one reader over the cells of all layers, which scores
+            one row, instead of one reader per layer.
+        tol: Gradient tolerance of L-BFGS, scikit-learn's `tol`.
+        max_iter: Iteration cap of L-BFGS; a fit that stops before
+            converging warns with `ConvergenceWarning`.
+
+    Returns:
+        The reader.
+
+    Raises:
+        ValueError: If the labels do not have one binary entry per stimulus
+            with both classes, `c` is not positive, a stimulus has no rows,
+            `acts` is not finite, a layer's rows are all equal, a value head
+            is zero, or the orientation inputs are malformed (members of a
+            group need equal row counts).
+    """
+    _check_labels(labels, acts.n_stimuli)
+    if not c > 0.0:
+        raise ValueError(f"c must be positive, got {c}")
+    stimulus = torch.tensor(_row_stimulus(acts))
+    targets = torch.tensor(labels, dtype=torch.float64)
+    n_layers, _, width = acts.data.shape
+    blocks = (
+        [slice(0, n_layers)]
+        if joint
+        else [slice(k, k + 1) for k in range(n_layers)]
+    )
+    queries = np.empty((n_layers, width))
+    values = np.empty((n_layers, width))
+    biases = np.empty(n_layers)
+    offsets = np.empty(n_layers)
+    for block in blocks:
+        rows = acts.data[block].astype(np.float64)
+        if not np.isfinite(rows).all():
+            raise ValueError("acts must be finite")
+        centers = rows.mean(axis=1)
+        rows -= centers[:, None]
+        scales = np.sqrt(np.square(rows).sum(axis=(1, 2)) / rows.shape[1])
+        if not scales.all():
+            layer = acts.layers[block][int(np.argmin(scales))]
+            raise ValueError(f"the rows of layer {layer} have no variance")
+        rows /= scales[:, None, None]
+        scaled_queries, scaled_values, bias = _fit_cells(
+            torch.from_numpy(rows), stimulus, targets, c, tol, max_iter
+        )
+        queries[block] = scaled_queries / scales[:, None]
+        values[block] = scaled_values / scales[:, None]
+        offsets[block] = -(queries[block] * centers).sum(axis=1)
+        biases[block] = bias - (values[block] * centers).sum(axis=1)
+    reader = AttentionReader(
+        layers=tuple(int(layer) for layer in acts.layers),
+        joint=joint,
+        queries=queries,
+        offsets=offsets,
+        values=values,
+        biases=biases,
+        signs=np.ones(n_layers, dtype=np.float32),
+    )
+    oriented = orient(
+        reader.rep_reader(),
+        acts.data,
+        labels=acts.row_values(labels),
+        pairs=None if pairs is None else acts.row_groups(pairs),
+        groups=None if groups is None else acts.row_groups(groups),
+    )
+    return replace(reader, signs=oriented.signs)
+
+
+def _check_labels(labels: NDArray[np.int64], n: int) -> None:
+    if labels.shape != (n,):
+        raise ValueError(f"labels must have shape ({n},), got {labels.shape}")
+    if not np.isin(labels, (0, 1)).all():
+        raise ValueError("labels must be 0 or 1")
+    if (labels == 1).all() or not (labels == 1).any():
+        raise ValueError("labels must contain both classes")
+
+
 def _checked_stack(
     h: FloatArray, layers: Sequence[int], labels: NDArray[np.int64]
 ) -> NDArray[np.float64]:
@@ -240,14 +470,7 @@ def _checked_stack(
         raise ValueError(
             f"layers has {len(layers)} entries for {stack.shape[0]} layers"
         )
-    if labels.shape != (stack.shape[1],):
-        raise ValueError(
-            f"labels must have shape ({stack.shape[1]},), got {labels.shape}"
-        )
-    if not np.isin(labels, (0, 1)).all():
-        raise ValueError("labels must be 0 or 1")
-    if (labels == 1).all() or not (labels == 1).any():
-        raise ValueError("labels must contain both classes")
+    _check_labels(labels, stack.shape[1])
     if not np.isfinite(stack).all():
         raise ValueError("h must be finite")
     return stack
@@ -294,3 +517,88 @@ def _logits(
         hidden = np.maximum(hidden @ weights + bias, 0.0)
     output = hidden @ model.coefs_[-1] + model.intercepts_[-1]
     return np.asarray(output[:, 0], dtype=np.float64)
+
+
+def _row_stimulus(acts: Activations) -> NDArray[np.int64]:
+    counts = np.bincount(acts.row_stimulus, minlength=acts.n_stimuli)
+    if not counts.all():
+        raise ValueError(f"stimulus {int(np.argmin(counts))} has no rows")
+    return np.asarray(acts.row_stimulus, dtype=np.int64)
+
+
+def _pool(
+    logits: torch.Tensor,
+    values: torch.Tensor,
+    stimulus: torch.Tensor,
+    n_stimuli: int,
+    *,
+    joint: bool,
+) -> torch.Tensor:
+    if joint:
+        stimulus = stimulus.repeat(logits.shape[0])
+        logits = logits.reshape(1, -1)
+        values = values.reshape(1, -1)
+    index = stimulus.expand_as(logits)
+    shape = (logits.shape[0], n_stimuli)
+    # Subtracting each stimulus's largest logit leaves its softmax unchanged
+    # and keeps the exponentials from overflowing.
+    peaks = logits.new_full(shape, -torch.inf).scatter_reduce(
+        1, index, logits.detach(), "amax"
+    )
+    weights = torch.exp(logits - peaks.gather(1, index))
+    total = logits.new_zeros(shape).scatter_add(1, index, weights)
+    pooled = logits.new_zeros(shape).scatter_add(1, index, weights * values)
+    return pooled / total
+
+
+def _fit_cells(
+    rows: torch.Tensor,
+    stimulus: torch.Tensor,
+    targets: torch.Tensor,
+    c: float,
+    tol: float,
+    max_iter: int,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], float]:
+    n_layers, _, width = rows.shape
+    size = n_layers * width
+    strength = 1.0 / (c * targets.shape[0])
+
+    def objective(
+        theta: NDArray[np.float64],
+    ) -> tuple[float, NDArray[np.float64]]:
+        params = torch.tensor(theta, requires_grad=True)
+        queries = params[:size].view(n_layers, width)
+        values = params[size:-1].view(n_layers, width)
+        logits = torch.einsum("krd,kd->kr", rows, queries)
+        heads = torch.einsum("krd,kd->kr", rows, values) + params[-1]
+        scores = _pool(logits, heads, stimulus, targets.shape[0], joint=True)
+        penalty = queries.square().sum() + values.square().sum()
+        loss = binary_cross_entropy_with_logits(scores[0], targets)
+        loss = loss + 0.5 * strength * penalty
+        (gradient,) = torch.autograd.grad(loss, params)
+        return float(loss.detach()), gradient.numpy()
+
+    result = minimize(
+        objective,
+        np.zeros(2 * size + 1),
+        method="L-BFGS-B",
+        jac=True,
+        options={
+            "maxiter": max_iter,
+            "maxls": 50,
+            "gtol": tol,
+            "ftol": 64 * np.finfo(np.float64).eps,
+        },
+    )
+    if result.status != 0:
+        warnings.warn(
+            f"the attention reader did not converge: {result.message}",
+            ConvergenceWarning,
+            stacklevel=3,
+        )
+    theta = np.asarray(result.x, dtype=np.float64)
+    return (
+        theta[:size].reshape(n_layers, width),
+        theta[size:-1].reshape(n_layers, width),
+        float(theta[-1]),
+    )

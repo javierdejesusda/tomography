@@ -1,13 +1,22 @@
+from collections.abc import Sequence
+from dataclasses import replace
+
 import numpy as np
 from numpy.typing import NDArray
 import pytest
 from scipy.special import expit
 from sklearn.covariance import ledoit_wolf_shrinkage
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.linear_model import LogisticRegression
 
+from tomography.activations import Activations
 from tomography.reading.directions import FloatArray
 from tomography.reading.directions import fit_direction
+from tomography.reading.metrics import auroc
+from tomography.reading.probes import AttentionReader
 from tomography.reading.probes import Reader
+from tomography.reading.probes import fit_attention
 from tomography.reading.probes import fit_lda
 from tomography.reading.probes import fit_mlp
 from tomography.reading.reader import RepReader
@@ -216,3 +225,330 @@ def test_joint_mlp_reader_scores_the_concatenated_layers() -> None:
     np.testing.assert_allclose(
         expit(scores[0]), model.predict_proba(inputs)[:, 1], rtol=1e-5
     )
+
+
+def token_rows(
+    data: NDArray[np.float64], counts: Sequence[int], layers: Sequence[int]
+) -> Activations:
+    """Wraps rows as `response` activations, `counts[i]` for stimulus i."""
+    rank = np.concatenate([np.arange(count) for count in counts])
+    return Activations(
+        data=data.astype(np.float32),
+        layers=tuple(layers),
+        position="response",
+        row_stimulus=np.repeat(np.arange(len(counts)), counts),
+        row_rank=rank,
+        row_token=rank,
+        row_token_id=np.zeros_like(rank),
+        n_stimuli=len(counts),
+    )
+
+
+def reference_weights(
+    acts: Activations, reader: AttentionReader
+) -> NDArray[np.float64]:
+    """Softmax weight of every cell, computed stimulus by stimulus."""
+    rows = acts.data.astype(np.float64)
+    logits = np.einsum("krd,kd->kr", rows, reader.queries)
+    logits += reader.offsets[:, None]
+    weights = np.zeros_like(logits)
+    for i in range(acts.n_stimuli):
+        cells = acts.row_stimulus == i
+        block = logits[:, cells]
+        if reader.joint:
+            raw = np.exp(block - block.max())
+            weights[:, cells] = raw / raw.sum()
+        else:
+            raw = np.exp(block - block.max(axis=1, keepdims=True))
+            weights[:, cells] = raw / raw.sum(axis=1, keepdims=True)
+    return weights
+
+
+def reference_scores(
+    acts: Activations, reader: AttentionReader
+) -> NDArray[np.float64]:
+    """The softmax-weighted values of each stimulus, one at a time."""
+    rows = acts.data.astype(np.float64)
+    values = np.einsum("krd,kd->kr", rows, reader.values)
+    values += reader.biases[:, None]
+    weighted = reference_weights(acts, reader) * values
+    if reader.joint:
+        weighted = weighted.sum(axis=0, keepdims=True)
+    return np.stack(
+        [
+            weighted[:, acts.row_stimulus == i].sum(axis=1)
+            for i in range(acts.n_stimuli)
+        ],
+        axis=1,
+    )
+
+
+def hand_reader(
+    rng: np.random.Generator, queries: NDArray[np.float64]
+) -> AttentionReader:
+    """A per-layer reader on layers 2 and 5 with random value heads."""
+    return AttentionReader(
+        layers=(2, 5),
+        joint=False,
+        queries=queries,
+        offsets=np.array([0.5, -1.0]),
+        values=rng.standard_normal((2, 6)),
+        biases=rng.standard_normal(2),
+        signs=np.ones(2, dtype=np.float32),
+    )
+
+
+def test_attention_reader_with_a_zero_query_scores_the_mean_pooled_tokens() -> (
+    None
+):
+    rng = np.random.default_rng(11)
+    counts = [3, 1, 4, 2, 5]
+    acts = token_rows(4.0 * rng.standard_normal((2, 15, 6)), counts, [2, 5])
+    reader = hand_reader(rng, np.zeros((2, 6)))
+
+    scores = reader.score(acts)
+    joint = replace(reader, joint=True, offsets=np.zeros(2)).score(acts)
+
+    pooled = np.stack(
+        [
+            acts.data[:, acts.row_stimulus == i].astype(np.float64).mean(1)
+            for i in range(len(counts))
+        ],
+        axis=1,
+    )
+    linear = np.einsum("knd,kd->kn", pooled, reader.values)
+    linear += reader.biases[:, None]
+    assert scores.dtype == np.float32
+    assert scores.shape == (2, 5)
+    np.testing.assert_allclose(scores, linear, rtol=1e-6, atol=1e-6)
+    assert joint.dtype == np.float32
+    assert joint.shape == (1, 5)
+    np.testing.assert_allclose(
+        joint, linear.mean(axis=0, keepdims=True), rtol=1e-6, atol=1e-6
+    )
+
+
+def test_attention_reader_softmaxes_over_the_cells_of_each_stimulus() -> None:
+    rng = np.random.default_rng(12)
+    acts = token_rows(rng.standard_normal((2, 15, 6)), [3, 1, 4, 2, 5], [2, 5])
+    reader = hand_reader(rng, rng.standard_normal((2, 6)))
+    joint = replace(reader, joint=True)
+
+    scores = reader.score(acts)
+    joint_scores = joint.score(acts)
+
+    scorer: Reader[Activations] = reader
+    moved = np.array([3.0, -2.0])
+    assert isinstance(reader, Reader)
+    assert scorer.method == "attention"
+    assert joint.method == "attention_joint"
+    assert scorer.layers == (2, 5)
+    np.testing.assert_allclose(
+        scores, reference_scores(acts, reader), rtol=1e-6, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        joint_scores, reference_scores(acts, joint), rtol=1e-6, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        replace(reader, offsets=moved).score(acts), scores, rtol=1e-6
+    )
+    assert not np.allclose(
+        replace(joint, offsets=moved).score(acts), joint_scores
+    )
+    with pytest.raises(ValueError, match="layers"):
+        reader.score(replace(acts, layers=(2, 6)))
+    with pytest.raises(ValueError, match="width"):
+        reader.score(replace(acts, data=acts.data[:, :, :5]))
+
+
+def test_attention_reader_on_one_token_per_stimulus_is_the_logistic_fit() -> (
+    None
+):
+    h, labels = correlated_classes(n=60, d=8, seed=13)
+    acts = token_rows(h, [1] * 60, [3, 7])
+
+    reader = fit_attention(acts, labels=labels, c=0.5, tol=1e-10)
+
+    assert reader.method == "attention"
+    assert reader.layers == (3, 7)
+    np.testing.assert_allclose(reader.queries, 0.0, atol=1e-12)
+    for k in range(2):
+        rows = h[k].astype(np.float64)
+        center = rows.mean(axis=0)
+        scale = np.linalg.norm(rows - center) / np.sqrt(len(rows))
+        model = LogisticRegression(C=0.5, tol=1e-10, max_iter=10000)
+        model.fit((rows - center) / scale, labels)
+        weights = model.coef_[0] / scale
+        bias = model.intercept_[0] - weights @ center
+        np.testing.assert_allclose(reader.values[k], weights, rtol=1e-5)
+        np.testing.assert_allclose(reader.biases[k], bias, rtol=1e-5)
+        np.testing.assert_allclose(
+            reader.score(acts)[k], rows @ weights + bias, rtol=1e-5, atol=1e-5
+        )
+
+
+def planted_tokens(
+    n: int, seed: int, n_layers: int = 1
+) -> tuple[Activations, NDArray[np.int64], NDArray[np.int64]]:
+    """Five tokens per stimulus, of which one carries the label.
+
+    On layer 0, feature 0 marks one token of each stimulus and feature 1
+    holds the label there. Feature 1 is loud noise on every other token and
+    on every other layer, so the mean of a stimulus's tokens hides the
+    label. Returns the activations, the labels and the planted rows.
+    """
+    rng = np.random.default_rng(seed)
+    tokens = 5
+    labels = (np.arange(n) % 2).astype(np.int64)
+    data = rng.standard_normal((n_layers, n * tokens, 4))
+    data[:, :, 1] *= 3.0
+    planted = np.arange(n) * tokens + rng.integers(tokens, size=n)
+    data[0, planted, 0] += 4.0
+    data[0, planted, 1] = 2.0 * (2 * labels - 1) + rng.standard_normal(n)
+    acts = token_rows(data, [tokens] * n, range(n_layers))
+    return acts, labels, planted
+
+
+def mean_pooled(acts: Activations) -> NDArray[np.float64]:
+    """The mean of each stimulus's rows on the first layer."""
+    counts = np.bincount(acts.row_stimulus).astype(np.float64)
+    sums = np.zeros((acts.n_stimuli, acts.data.shape[2]))
+    np.add.at(sums, acts.row_stimulus, acts.data[0].astype(np.float64))
+    return sums / counts[:, None]
+
+
+def test_attention_reader_reads_a_planted_token_that_the_mean_hides() -> None:
+    acts, labels, _ = planted_tokens(n=200, seed=14)
+    test, test_labels, test_planted = planted_tokens(n=200, seed=15)
+
+    reader = fit_attention(acts, labels=labels)
+
+    again = fit_attention(acts, labels=labels)
+    baseline = LogisticRegression().fit(mean_pooled(acts), labels)
+    mean_scores = baseline.decision_function(mean_pooled(test))
+    weights = reference_weights(test, reader)[0, test_planted]
+    scores = reader.score(test)
+    for name in ("queries", "offsets", "values", "biases", "signs"):
+        np.testing.assert_array_equal(
+            getattr(reader, name), getattr(again, name)
+        )
+    assert scores.shape == (1, 200)
+    assert weights.mean() > 0.6
+    assert auroc(scores[0], test_labels) > 0.95
+    assert auroc(mean_scores, test_labels) < 0.8
+
+
+def test_joint_attention_reader_pools_the_cells_of_all_layers() -> None:
+    acts, labels, _ = planted_tokens(n=200, seed=16, n_layers=2)
+    test, test_labels, planted = planted_tokens(n=200, seed=17, n_layers=2)
+
+    reader = fit_attention(acts, labels=labels, joint=True)
+
+    weights = reference_weights(test, reader)
+    scores = reader.score(test)
+    assert reader.method == "attention_joint"
+    assert reader.layers == (0, 1)
+    assert scores.dtype == np.float32
+    assert scores.shape == (1, 200)
+    assert weights[0, planted].mean() > 0.6
+    assert auroc(scores[0], test_labels) > 0.95
+
+
+def test_attention_fit_ignores_the_location_and_scale_of_each_layer() -> None:
+    acts, labels, _ = planted_tokens(n=200, seed=16, n_layers=2)
+    test, _, _ = planted_tokens(n=200, seed=17, n_layers=2)
+    shift = 10.0 * np.random.default_rng(22).standard_normal((2, 1, 4))
+    scale = np.array([0.5, 20.0])[:, None, None]
+
+    def moved(rows: Activations) -> Activations:
+        data = rows.data.astype(np.float64) * scale + shift
+        return replace(rows, data=data.astype(np.float32))
+
+    reader = fit_attention(acts, labels=labels, joint=True, tol=1e-8)
+    other = fit_attention(moved(acts), labels=labels, joint=True, tol=1e-8)
+
+    np.testing.assert_allclose(
+        other.score(moved(test)), reader.score(test), rtol=1e-3, atol=1e-3
+    )
+
+
+def test_attention_reader_exports_its_oriented_value_heads() -> None:
+    acts, labels, _ = planted_tokens(n=60, seed=18, n_layers=2)
+    pairs = np.arange(60).reshape(30, 2)
+
+    reader = fit_attention(acts, labels=labels, pairs=pairs)
+    exported = reader.rep_reader()
+
+    expected = orient(
+        exported,
+        acts.data,
+        labels=acts.row_values(labels),
+        pairs=acts.row_groups(pairs),
+    )
+    norms = np.linalg.norm(reader.values, axis=1)
+    rows = acts.data.astype(np.float64)
+    heads = np.einsum("krd,kd->kr", rows, reader.values)
+    assert isinstance(exported, RepReader)
+    assert exported.method == "attention"
+    assert exported.layers == (0, 1)
+    np.testing.assert_array_equal(reader.signs, expected.signs)
+    np.testing.assert_array_equal(exported.signs, expected.signs)
+    np.testing.assert_allclose(
+        exported.directions, reader.values / norms[:, None], atol=1e-6
+    )
+    np.testing.assert_allclose(
+        exported.raw_score(acts.data) * norms[:, None],
+        heads + reader.biases[:, None],
+        rtol=1e-4,
+        atol=1e-4,
+    )
+
+
+def rows_of(counts: Sequence[int], seed: int) -> Activations:
+    """Random rows on layers 0 and 1, `counts[i]` for stimulus i."""
+    data = np.random.default_rng(seed).standard_normal((2, sum(counts), 4))
+    return token_rows(data, counts, [0, 1])
+
+
+def filled_rows(value: float) -> Activations:
+    """Two rows per stimulus for six stimuli, every entry equal to `value`."""
+    return replace(rows_of([2] * 6, seed=20), data=np.full((2, 12, 4), value))
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"labels": np.zeros(6, dtype=np.int64)}, "both classes"),
+        ({"labels": np.zeros(5, dtype=np.int64)}, "labels"),
+        ({"c": 0.0}, "c must be positive"),
+        ({"acts": rows_of([2, 0, 3, 1, 2, 2], seed=19)}, "stimulus 1"),
+        ({"acts": filled_rows(1.0)}, "variance"),
+        ({"acts": filled_rows(np.nan)}, "finite"),
+    ],
+    ids=[
+        "one-class",
+        "label-count",
+        "no-penalty",
+        "no-rows",
+        "constant",
+        "not-finite",
+    ],
+)
+def test_fit_attention_rejects_inconsistent_inputs(
+    change: dict[str, object], message: str
+) -> None:
+    arguments: dict[str, object] = {
+        "acts": rows_of([2, 1, 3, 1, 2, 2], seed=21),
+        "labels": np.array([0, 1, 0, 1, 0, 1]),
+        **change,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        fit_attention(**arguments)  # type: ignore[arg-type]
+
+
+def test_fit_attention_warns_when_it_stops_before_converging() -> None:
+    acts, labels, _ = planted_tokens(n=60, seed=23)
+
+    with pytest.warns(ConvergenceWarning, match="did not converge"):
+        fit_attention(acts, labels=labels, max_iter=1)
