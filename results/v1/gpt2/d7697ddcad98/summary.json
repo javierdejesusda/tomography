@@ -1,0 +1,155 @@
+{
+  "_meta": {
+    "experiment": "v1",
+    "config_hash": "d7697ddcad98",
+    "seed": 0,
+    "git_sha": "6f5c4e545420a43801b375b2e2995dd51f2566d4",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-21T05:31:14+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "v1",
+      "model": "gpt2",
+      "seed": 0,
+      "labels_run": "results/p9a/gpt2/5461200f995c",
+      "reading_run": "results/p9b/gpt2/fd3bdc5a4b0d",
+      "batch_size": 32
+    }
+  },
+  "data": {
+    "layer": 4,
+    "template": "fewshot",
+    "methods": [
+      "logistic",
+      "pca_diff",
+      "mean_diff",
+      "random"
+    ],
+    "types": [
+      "real_vs_synthal",
+      "real_vs_generated",
+      "pre_vs_post_cutoff"
+    ],
+    "n_items": {
+      "train": 1255,
+      "test": 3555
+    },
+    "extraction_dtype": "float32",
+    "reading_run_dtype": "float32",
+    "views": {
+      "layers": [
+        1,
+        4,
+        12
+      ],
+      "panels": {
+        "unknown": {
+          "types": [
+            "real_vs_synthal",
+            "real_vs_generated",
+            "pre_vs_post_cutoff"
+          ],
+          "n_items": 1049
+        }
+      }
+    },
+    "reproduction": {
+      "tolerance": 0.02,
+      "within_tolerance": true,
+      "max_abs_diff": {
+        "draw_at_layer": 2.398369109002374e-05,
+        "mean_at_layer": 4.796738218071361e-06,
+        "draw_all_layers": 4.79673821801585e-05,
+        "mean_all_layers": 4.796738218071361e-06
+      },
+      "mean_diff_at_layer": {
+        "real_vs_synthal": {
+          "logistic": 0.0,
+          "pca_diff": 4.796738218071361e-06,
+          "mean_diff": 0.0,
+          "random": 4.796738217960339e-06
+        },
+        "real_vs_generated": {
+          "logistic": 7.254104017473395e-08,
+          "pca_diff": 1.4508208019403668e-06,
+          "mean_diff": 3.6270520042958054e-07,
+          "random": 4.352462404932922e-07
+        },
+        "pre_vs_post_cutoff": {
+          "logistic": 0.0,
+          "pca_diff": 0.0,
+          "mean_diff": 0.0,
+          "random": 0.0
+        }
+      }
+    },
+    "surface": {
+      "real_vs_synthal": {
+        "text_word": {
+          "recomputed": 0.7992565055762082,
+          "committed": 0.7992565055762082,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "real_vs_generated": {
+        "text_word": {
+          "recomputed": 0.9474811937353558,
+          "committed": 0.9474811937353558,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9980221685418526,
+          "committed": 0.9980221685418526,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "pre_vs_post_cutoff": {
+        "text_word": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      }
+    },
+    "surface_equal": true
+  }
+}

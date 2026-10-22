@@ -1,0 +1,8 @@
+{
+  "experiment": "v1",
+  "model": "qwen3-1.7b",
+  "seed": 0,
+  "labels_run": "results/p9a/qwen3-1.7b/f413efcae268",
+  "reading_run": "results/p9b/qwen3-1.7b/9641ab8235a9",
+  "batch_size": 1
+}
