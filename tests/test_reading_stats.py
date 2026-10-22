@@ -625,32 +625,18 @@ def test_best_validation_layer_takes_the_first_maximum() -> None:
     np.testing.assert_array_equal(choice.test_scores, [-2.0, -3.0])
 
 
-def test_top_k_layers_average_scores_standardized_on_validation() -> None:
-    val_metric = np.array([0.6, 0.9, 0.8])
-    val_scores = np.array([[5.0, 7.0], [1.0, 3.0], [10.0, 30.0]])
-    test_scores = np.array(
-        [[0.0, 0.0, 0.0], [2.0, 5.0, 0.0], [40.0, 0.0, 20.0]]
-    )
-
-    choice = top_k_layers(val_metric, [4, 8, 12], val_scores, test_scores, k=2)
-
-    # Layer 8 is standardized with mean 2 and deviation 1, layer 12 with
-    # mean 20 and deviation 10.
-    assert choice.layers == (8, 12)
-    np.testing.assert_allclose(choice.val_scores, [-1.0, 1.0])
-    np.testing.assert_allclose(choice.test_scores, [1.0, 0.5, -1.0])
-
-
+# Layers 4, 8 and 12 are standardized with validation means 6, 2 and 20 and
+# deviations 1, 1 and 10.
 @pytest.mark.parametrize(
     ("k", "layers", "test_scores"),
     [
         (1, (8,), [0.0, 3.0, -2.0]),
-        # Layer 4 is standardized with mean 6 and deviation 1.
+        (2, (8, 12), [1.0, 0.5, -1.0]),
         (3, (8, 12, 4), [-4 / 3, -5 / 3, -8 / 3]),
     ],
-    ids=["one-layer", "every-layer"],
+    ids=["one-layer", "two-layers", "every-layer"],
 )
-def test_top_k_layers_take_one_to_every_layer(
+def test_top_k_layers_average_scores_standardized_on_validation(
     k: int, layers: tuple[int, ...], test_scores: list[float]
 ) -> None:
     val_metric = np.array([0.6, 0.9, 0.8])

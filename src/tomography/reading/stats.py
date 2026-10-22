@@ -184,11 +184,11 @@ def paired_auroc_diff(
             holds both classes.
     """
     _check_resampling(n_boot, alpha)
-    pair = _paired_rows(a, b, clusters)
+    pair, ids = _paired_rows(a, b, clusters)
     labels = np.asarray(labels)
     point = auroc(pair, labels)
     diffs: list[float] = []
-    for rows in _resampled_rows(clusters, n_boot, seed):
+    for rows in _resampled_rows(ids, n_boot, seed):
         drawn = labels[rows]
         if drawn.min() == drawn.max():
             continue
@@ -237,11 +237,11 @@ def paired_accuracy_diff(
             `alpha` is out of range.
     """
     _check_resampling(n_boot, alpha)
-    pair = _paired_rows(correct_a, correct_b, clusters)
+    pair, ids = _paired_rows(correct_a, correct_b, clusters)
     if not ((pair >= 0.0) & (pair <= 1.0)).all():
         raise ValueError("credit must lie in [0, 1]")
     diffs: list[float] = []
-    for rows in _resampled_rows(clusters, n_boot, seed):
+    for rows in _resampled_rows(ids, n_boot, seed):
         values = pair[:, rows].mean(axis=1)
         diffs.append(float(values[0] - values[1]))
     return _summary(pair.mean(axis=1), diffs, alpha)
@@ -591,15 +591,16 @@ def top_k_layers(
             f"got {k}"
         )
     chosen = np.argsort(-metric, kind="stable")[:k]
+    picked = val[chosen]
     # A constant row can have a computed deviation of about 1e-17 instead of
     # 0, so constancy is tested on the range.
-    if (np.ptp(val[chosen], axis=1) == 0.0).any():
+    if (np.ptp(picked, axis=1) == 0.0).any():
         raise ValueError("a chosen layer has constant validation scores")
-    mean = val[chosen].mean(axis=1, keepdims=True)
-    std = val[chosen].std(axis=1, keepdims=True)
+    mean = picked.mean(axis=1, keepdims=True)
+    std = picked.std(axis=1, keepdims=True)
     return LayerChoice(
         tuple(int(layers[i]) for i in chosen),
-        ((val[chosen] - mean) / std).mean(axis=0),
+        ((picked - mean) / std).mean(axis=0),
         ((test[chosen] - mean) / std).mean(axis=0),
     )
 
@@ -711,7 +712,7 @@ def _pair(a: NDArray[Any], b: NDArray[Any]) -> NDArray[np.float64]:
 
 def _paired_rows(
     a: NDArray[Any], b: NDArray[Any], clusters: NDArray[np.int64]
-) -> NDArray[np.float64]:
+) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
     pair = _pair(a, b)
     ids = np.asarray(clusters)
     if ids.shape != pair.shape[1:]:
@@ -720,7 +721,7 @@ def _paired_rows(
         )
     if not np.issubdtype(ids.dtype, np.integer):
         raise ValueError(f"clusters must be integers, got {ids.dtype}")
-    return pair
+    return pair, ids
 
 
 def _summary(
