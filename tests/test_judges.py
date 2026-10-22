@@ -453,7 +453,7 @@ def test_sequence_logprob_returns_float32_for_a_bfloat16_model(
     assert np.isfinite(got).all()
 
 
-@pytest.mark.parametrize(
+UNSCORABLE_INPUTS = pytest.mark.parametrize(
     ("prompts", "continuations", "bos", "message"),
     [
         (["a"], ["b", "c"], True, "same length"),
@@ -462,6 +462,9 @@ def test_sequence_logprob_returns_float32_for_a_bfloat16_model(
     ],
     ids=["length-mismatch", "empty-continuation", "empty-prompt-without-bos"],
 )
+
+
+@UNSCORABLE_INPUTS
 def test_sequence_logprob_rejects_unscorable_inputs(
     gpt2: GPT2LMHeadModel,
     tokenizer: PreTrainedTokenizerFast,
@@ -584,7 +587,7 @@ INPUT_SETS = {
 }
 
 
-@pytest.mark.parametrize("inputs", sorted(INPUT_SETS), ids=sorted(INPUT_SETS))
+@pytest.mark.parametrize("inputs", sorted(INPUT_SETS))
 @pytest.mark.parametrize("use_bos", [True, False], ids=["bos", "no-bos"])
 def test_continuation_logprob_matches_sequence_logprob(
     tiny_arch: LoadedModel, inputs: str, use_bos: bool
@@ -759,15 +762,7 @@ def test_continuation_logprob_of_nothing_is_an_empty_float32_array(
     assert got.dtype == np.float32
 
 
-@pytest.mark.parametrize(
-    ("prompts", "continuations", "bos", "message"),
-    [
-        (["a"], ["b", "c"], True, "same length"),
-        (["a b"], [""], True, "continuation 0"),
-        (["a b", ""], [" c", " d"], False, "prompt 1"),
-    ],
-    ids=["length-mismatch", "empty-continuation", "empty-prompt-without-bos"],
-)
+@UNSCORABLE_INPUTS
 def test_continuation_logprob_rejects_unscorable_inputs(
     gpt2: GPT2LMHeadModel,
     tokenizer: PreTrainedTokenizerFast,

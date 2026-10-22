@@ -85,16 +85,29 @@ def _next_token_logprobs(
             for row, sequence in enumerate(chunk):
                 length = len(sequence)
                 targets = input_ids[row, 1:length].to(model.device)
-                picked = (
-                    logits[row, : length - 1]
-                    .float()
-                    .log_softmax(-1)
-                    .gather(-1, targets[:, None])
-                    .squeeze(-1)
+                results[indices[row]] = _target_logprobs(
+                    logits[row, : length - 1], targets
                 )
-                results[indices[row]] = picked.cpu().numpy()
             del logits
     return results
+
+
+def _target_logprobs(
+    logits: torch.Tensor, targets: torch.Tensor
+) -> NDArray[np.float32]:
+    """Returns the float32 log-probability of each target under its logits.
+
+    Args:
+        logits: Logits of shape `(positions, vocab)`.
+        targets: One token id per position, on the device of `logits`.
+
+    Returns:
+        A float32 array of shape `(positions,)` on the host.
+    """
+    picked = (
+        logits.float().log_softmax(-1).gather(-1, targets[:, None]).squeeze(-1)
+    )
+    return picked.cpu().numpy()
 
 
 def perplexity(
@@ -301,8 +314,8 @@ def continuation_logprob(
         return np.zeros(0, dtype=np.float32)
     pairs = _tokenize_pairs(tokenizer, prompts, continuations, bos_id)
     groups: dict[tuple[int, ...], list[int]] = {}
-    for index, pair in enumerate(pairs):
-        groups.setdefault(tuple(pair[0]), []).append(index)
+    for index, (context_ids, _) in enumerate(pairs):
+        groups.setdefault(tuple(context_ids), []).append(index)
     contexts = list(groups)
     # The cache stops one token short of each context: every continuation pass
     # starts with the last context token, whose logits predict the first
@@ -312,25 +325,20 @@ def continuation_logprob(
     cache = DynamicCache(config=model.config)
     with torch.no_grad():
         _extend_cache(model, cache, contexts[0][:common])
-        for context in contexts:
+        for context, indices in groups.items():
             _extend_cache(model, cache, context[common:-1])
-            for index in groups[context]:
+            for index in indices:
                 continuation = pairs[index][1]
                 logits = _cached_logits(
                     model,
                     cache,
                     [context[-1], *continuation[:-1]],
-                    len(continuation),
+                    keep_logits=True,
                 )
                 targets = torch.tensor(continuation, device=logits.device)
-                picked = (
-                    logits[0]
-                    .float()
-                    .log_softmax(-1)
-                    .gather(-1, targets[:, None])
-                    .squeeze(-1)
+                scores[index] = _target_logprobs(logits[0], targets).sum(
+                    dtype=np.float32
                 )
-                scores[index] = picked.cpu().numpy().sum(dtype=np.float32)
                 _truncate_cache(cache, len(context) - 1)
             _truncate_cache(cache, common)
     return scores
@@ -349,7 +357,7 @@ def _cached_logits(
     model: PreTrainedModel,
     cache: DynamicCache,
     ids: Sequence[int],
-    keep: int | torch.Tensor,
+    keep_logits: bool,
 ) -> torch.Tensor:
     """Runs tokens after the cached ones and extends the cache in place.
 
@@ -357,15 +365,21 @@ def _cached_logits(
         model: A causal language model in eval mode.
         cache: The cache of the tokens before `ids`, extended by `ids`.
         ids: Token ids to run, at the positions right after the cache.
-        keep: Positions whose logits are computed, passed to the model as
-            `logits_to_keep`: the last `keep` positions for an int, the
-            listed positions for a tensor.
+        keep_logits: Whether the LM head runs on the positions of `ids`;
+            when False it runs on none.
 
     Returns:
-        The logits of the kept positions, shape `(1, kept, vocab)`.
+        The logits of shape `(1, len(ids), vocab)`, or `(1, 0, vocab)` when
+        `keep_logits` is False.
     """
     start = cache.get_seq_length()
     end = start + len(ids)
+    # An empty index keeps no position; logits_to_keep=0 would keep all.
+    keep = (
+        len(ids)
+        if keep_logits
+        else torch.zeros(0, dtype=torch.long, device=model.device)
+    )
     logits: torch.Tensor = model(
         input_ids=torch.tensor([ids], device=model.device),
         attention_mask=torch.ones(
@@ -383,9 +397,7 @@ def _extend_cache(
     model: PreTrainedModel, cache: DynamicCache, ids: Sequence[int]
 ) -> None:
     if ids:
-        # An empty index keeps no position; logits_to_keep=0 would keep all.
-        no_position = torch.zeros(0, dtype=torch.long, device=model.device)
-        _cached_logits(model, cache, ids, no_position)
+        _cached_logits(model, cache, ids, keep_logits=False)
 
 
 def _truncate_cache(cache: DynamicCache, length: int) -> None:
