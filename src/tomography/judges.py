@@ -28,6 +28,7 @@ from numpy.typing import NDArray
 import torch
 from transformers import AutoModelForSequenceClassification
 from transformers import AutoTokenizer
+from transformers import DynamicCache
 from transformers import PreTrainedModel
 from transformers import PreTrainedTokenizerBase
 
@@ -186,31 +187,206 @@ def sequence_logprob(
         raise ValueError(f"batch_size must be at least 1, got {batch_size}")
     if not prompts:
         return np.zeros(0, dtype=np.float32)
+    pairs = _tokenize_pairs(tokenizer, prompts, continuations, bos_id)
+    scored = _next_token_logprobs(
+        model,
+        [context + continuation for context, continuation in pairs],
+        batch_size,
+    )
+    return np.array(
+        [
+            values[len(context) - 1 :].sum(dtype=np.float32)
+            for values, (context, _) in zip(scored, pairs, strict=True)
+        ],
+        dtype=np.float32,
+    )
+
+
+def _tokenize_pairs(
+    tokenizer: PreTrainedTokenizerBase,
+    prompts: Sequence[str],
+    continuations: Sequence[str],
+    bos_id: int | None,
+) -> list[tuple[list[int], list[int]]]:
+    """Tokenizes prompt and continuation pairs for scoring.
+
+    Args:
+        tokenizer: The tokenizer that matches the model.
+        prompts: One prompt per pair.
+        continuations: One continuation per pair, same length as `prompts`.
+        bos_id: Token id that starts every context, or None.
+
+    Returns:
+        One `(context_ids, continuation_ids)` pair per input pair. The context
+        is `bos_id` (when given) followed by the prompt tokens; prompt and
+        continuation are tokenized separately.
+
+    Raises:
+        ValueError: If a continuation has no tokens, or a prompt has no tokens
+            and no `bos_id` is given.
+    """
     prefix = [] if bos_id is None else [bos_id]
-    sequences: list[list[int]] = []
-    starts: list[int] = []
-    pairs = zip(
+    pairs: list[tuple[list[int], list[int]]] = []
+    tokenized = zip(
         _tokenize(tokenizer, prompts),
         _tokenize(tokenizer, continuations),
         strict=True,
     )
-    for index, (prompt_ids, continuation_ids) in enumerate(pairs):
+    for index, (prompt_ids, continuation_ids) in enumerate(tokenized):
         if not continuation_ids:
             raise ValueError(f"continuation {index} has no tokens")
         if not prefix and not prompt_ids:
             raise ValueError(
                 f"prompt {index} has no tokens and no bos_id was given"
             )
-        sequences.append(prefix + prompt_ids + continuation_ids)
-        starts.append(len(prefix) + len(prompt_ids) - 1)
-    scored = _next_token_logprobs(model, sequences, batch_size)
-    return np.array(
-        [
-            values[start:].sum(dtype=np.float32)
-            for values, start in zip(scored, starts, strict=True)
-        ],
-        dtype=np.float32,
-    )
+        pairs.append((prefix + prompt_ids, continuation_ids))
+    return pairs
+
+
+def continuation_logprob(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    prompts: Sequence[str],
+    continuations: Sequence[str],
+    *,
+    bos_id: int | None = None,
+) -> NDArray[np.float32]:
+    """Scores continuations given prompts, with logits only where needed.
+
+    Pairs are tokenized and scored as in `sequence_logprob`: prompt and
+    continuation are tokenized separately and joined after `bos_id` (when
+    given), and the score is the float32 sum of the log-probabilities of the
+    continuation tokens. Each sequence runs alone and the LM head sees only
+    the positions that predict a continuation token, so the logits of a pair
+    take `len(continuation) * vocab` floats however long the prompt is.
+
+    Contexts (`bos_id` plus the prompt tokens) share a key-value cache: the
+    longest token prefix common to all contexts runs once, each distinct
+    context runs once for all of its continuations, and the cache is cropped
+    back after every continuation, so a score does not depend on the other
+    continuations of its context or on their order. Passing every choice of
+    every question in one call shares a few-shot context across questions.
+    Hooks see each sequence in chunks: the shared prefix, the rest of the
+    context but its last token, then that token with the continuation.
+
+    Scores match `sequence_logprob` up to float32 rounding, and at that level
+    they also depend on where the shared prefix splits a context, hence on the
+    other contexts of the call. For a prompt that does not end in whitespace
+    and a continuation that starts with a space, such as `" " + choice`, the
+    GPT-2 and Qwen3 pre-tokenizers break at the join, so the tokens equal
+    those of the joint encoding that lm-evaluation-harness uses.
+
+    Args:
+        model: A causal language model in eval mode.
+        tokenizer: The tokenizer that matches the model.
+        prompts: One prompt per pair.
+        continuations: One continuation per pair, same length as `prompts`.
+        bos_id: Token id prepended to every sequence, or None.
+
+    Returns:
+        A float32 array of shape `(len(prompts),)`.
+
+    Raises:
+        ValueError: If the inputs differ in length, a continuation has no
+            tokens, or a prompt has no tokens and no `bos_id` is given.
+    """
+    if len(prompts) != len(continuations):
+        raise ValueError("prompts and continuations must have the same length")
+    if not prompts:
+        return np.zeros(0, dtype=np.float32)
+    pairs = _tokenize_pairs(tokenizer, prompts, continuations, bos_id)
+    groups: dict[tuple[int, ...], list[int]] = {}
+    for index, pair in enumerate(pairs):
+        groups.setdefault(tuple(pair[0]), []).append(index)
+    contexts = list(groups)
+    # The cache stops one token short of each context: every continuation pass
+    # starts with the last context token, whose logits predict the first
+    # continuation token, even when the whole context is shared.
+    common = max(_shared_prefix_length(contexts) - 1, 0)
+    scores = np.zeros(len(pairs), dtype=np.float32)
+    cache = DynamicCache(config=model.config)
+    with torch.no_grad():
+        _extend_cache(model, cache, contexts[0][:common])
+        for context in contexts:
+            _extend_cache(model, cache, context[common:-1])
+            for index in groups[context]:
+                continuation = pairs[index][1]
+                logits = _cached_logits(
+                    model,
+                    cache,
+                    [context[-1], *continuation[:-1]],
+                    len(continuation),
+                )
+                targets = torch.tensor(continuation, device=logits.device)
+                picked = (
+                    logits[0]
+                    .float()
+                    .log_softmax(-1)
+                    .gather(-1, targets[:, None])
+                    .squeeze(-1)
+                )
+                scores[index] = picked.cpu().numpy().sum(dtype=np.float32)
+                _truncate_cache(cache, len(context) - 1)
+            _truncate_cache(cache, common)
+    return scores
+
+
+def _shared_prefix_length(rows: Sequence[Sequence[int]]) -> int:
+    length = 0
+    for column in zip(*rows, strict=False):
+        if len(set(column)) > 1:
+            break
+        length += 1
+    return length
+
+
+def _cached_logits(
+    model: PreTrainedModel,
+    cache: DynamicCache,
+    ids: Sequence[int],
+    keep: int | torch.Tensor,
+) -> torch.Tensor:
+    """Runs tokens after the cached ones and extends the cache in place.
+
+    Args:
+        model: A causal language model in eval mode.
+        cache: The cache of the tokens before `ids`, extended by `ids`.
+        ids: Token ids to run, at the positions right after the cache.
+        keep: Positions whose logits are computed, passed to the model as
+            `logits_to_keep`: the last `keep` positions for an int, the
+            listed positions for a tensor.
+
+    Returns:
+        The logits of the kept positions, shape `(1, kept, vocab)`.
+    """
+    start = cache.get_seq_length()
+    end = start + len(ids)
+    logits: torch.Tensor = model(
+        input_ids=torch.tensor([ids], device=model.device),
+        attention_mask=torch.ones(
+            (1, end), dtype=torch.long, device=model.device
+        ),
+        position_ids=torch.arange(start, end, device=model.device)[None],
+        past_key_values=cache,
+        use_cache=True,
+        logits_to_keep=keep,
+    ).logits
+    return logits
+
+
+def _extend_cache(
+    model: PreTrainedModel, cache: DynamicCache, ids: Sequence[int]
+) -> None:
+    if ids:
+        # An empty index keeps no position; logits_to_keep=0 would keep all.
+        no_position = torch.zeros(0, dtype=torch.long, device=model.device)
+        _cached_logits(model, cache, ids, no_position)
+
+
+def _truncate_cache(cache: DynamicCache, length: int) -> None:
+    extra = cache.get_seq_length() - length
+    if extra > 0:
+        cache.crop(-extra)
 
 
 def mc1_accuracy(

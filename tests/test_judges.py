@@ -565,6 +565,228 @@ def test_sequence_logprob_keeps_its_default_arithmetic_bit_for_bit(
     np.testing.assert_array_equal(got.view(np.uint32), expected.view(np.uint32))
 
 
+FEW_SHOT = (
+    "Question: Is the movie good?\nAnswer: yes\n\n"
+    "Question: Is the fox quick?\nAnswer: yes\n\n"
+)
+QUESTIONS = ["Is the dog lazy?", "Are honest answers true?"]
+CHOICES = [" good", " no", " the lazy dog"]
+QA_PROMPTS = [
+    f"{FEW_SHOT}Question: {question}\nAnswer:"
+    for question in QUESTIONS
+    for _ in CHOICES
+]
+QA_CONTINUATIONS = CHOICES * len(QUESTIONS)
+SCORER_RTOL = 1e-6
+INPUT_SETS = {
+    "few-shot": (QA_PROMPTS, QA_CONTINUATIONS),
+    "unrelated": (PROMPTS, CONTINUATIONS),
+}
+
+
+@pytest.mark.parametrize("inputs", sorted(INPUT_SETS), ids=sorted(INPUT_SETS))
+@pytest.mark.parametrize("use_bos", [True, False], ids=["bos", "no-bos"])
+def test_continuation_logprob_matches_sequence_logprob(
+    tiny_arch: LoadedModel, inputs: str, use_bos: bool
+) -> None:
+    prompts, continuations = INPUT_SETS[inputs]
+    bos = tiny_arch.bos_id if use_bos else None
+    expected = judges.sequence_logprob(
+        tiny_arch.model,
+        tiny_arch.tokenizer,
+        prompts,
+        continuations,
+        batch_size=1,
+        bos_id=bos,
+    )
+
+    got = judges.continuation_logprob(
+        tiny_arch.model, tiny_arch.tokenizer, prompts, continuations, bos_id=bos
+    )
+
+    assert got.shape == (len(prompts),)
+    assert got.dtype == np.float32
+    np.testing.assert_allclose(got, expected, rtol=SCORER_RTOL)
+
+
+def test_continuation_logprob_scores_one_token_and_longer_continuations(
+    tiny_arch: LoadedModel,
+) -> None:
+    choices = [" " + text for text in ("", "good", "the lazy dog")]
+    lengths = [
+        len(token_ids(tiny_arch.tokenizer, choice)) for choice in choices
+    ]
+    assert lengths[:2] == [1, 1]
+    assert lengths[2] > 1
+    expected = [
+        reference_continuation_logprob(
+            tiny_arch.model, tiny_arch.tokenizer, QA_PROMPTS[0], choice, None
+        )
+        for choice in choices
+    ]
+
+    got = judges.continuation_logprob(
+        tiny_arch.model, tiny_arch.tokenizer, QA_PROMPTS[:1] * 3, choices
+    )
+
+    np.testing.assert_allclose(got, expected, rtol=SCORER_RTOL)
+
+
+def test_continuation_logprob_scores_the_first_token_after_a_lone_bos(
+    tiny_arch: LoadedModel,
+) -> None:
+    bos = tiny_arch.bos_id
+    expected = reference_continuation_logprob(
+        tiny_arch.model, tiny_arch.tokenizer, "", " the lazy dog", bos
+    )
+
+    got = judges.continuation_logprob(
+        tiny_arch.model,
+        tiny_arch.tokenizer,
+        [""],
+        [" the lazy dog"],
+        bos_id=bos,
+    )
+
+    np.testing.assert_allclose(got, [expected], rtol=SCORER_RTOL)
+
+
+def test_continuation_logprob_sends_only_continuation_positions_to_the_head(
+    tiny_arch: LoadedModel,
+) -> None:
+    projected: list[int] = []
+
+    def record(_module: torch.nn.Module, args: tuple[torch.Tensor]) -> None:
+        projected.append(args[0].shape[:-1].numel())
+
+    head = tiny_arch.model.get_output_embeddings()
+    handle = head.register_forward_pre_hook(record)
+    try:
+        judges.continuation_logprob(
+            tiny_arch.model, tiny_arch.tokenizer, QA_PROMPTS, QA_CONTINUATIONS
+        )
+    finally:
+        handle.remove()
+
+    lengths = [len(token_ids(tiny_arch.tokenizer, c)) for c in QA_CONTINUATIONS]
+    assert sorted(count for count in projected if count) == sorted(lengths)
+
+
+def shared_prefix_length(rows: list[list[int]]) -> int:
+    length = 0
+    for column in zip(*rows, strict=False):
+        if len(set(column)) > 1:
+            break
+        length += 1
+    return length
+
+
+def test_continuation_logprob_runs_a_shared_prefix_once(
+    tiny_arch: LoadedModel,
+) -> None:
+    starts: list[int] = []
+    fed: list[int] = []
+
+    def record(
+        _module: torch.nn.Module,
+        _args: tuple[object, ...],
+        kwargs: dict[str, torch.Tensor],
+    ) -> None:
+        starts.append(int(kwargs["position_ids"][0, 0]))
+        fed.append(kwargs["input_ids"].shape[1])
+
+    handle = tiny_arch.model.register_forward_pre_hook(record, with_kwargs=True)
+    try:
+        judges.continuation_logprob(
+            tiny_arch.model, tiny_arch.tokenizer, QA_PROMPTS, QA_CONTINUATIONS
+        )
+    finally:
+        handle.remove()
+
+    contexts = [token_ids(tiny_arch.tokenizer, p) for p in QA_PROMPTS]
+    distinct = [list(c) for c in dict.fromkeys(map(tuple, contexts))]
+    shared = shared_prefix_length(distinct)
+    prefix_once = shared - 1
+    each_question_once = sum(len(c) - shared for c in distinct)
+    each_choice_once = sum(
+        len(token_ids(tiny_arch.tokenizer, c)) for c in QA_CONTINUATIONS
+    )
+    assert len(distinct) == len(QUESTIONS)
+    assert starts.count(0) == 1
+    assert sum(fed) == prefix_once + each_question_once + each_choice_once
+
+
+def test_continuation_logprob_restores_the_shared_prefix_after_each_choice(
+    tiny_arch: LoadedModel,
+) -> None:
+    model, tokenizer = tiny_arch.model, tiny_arch.tokenizer
+    question = QA_PROMPTS[:1]
+    alone = np.array(
+        [
+            judges.continuation_logprob(model, tokenizer, question, [choice])[0]
+            for choice in CHOICES
+        ]
+    )
+    order = [5, 0, 3, 1, 4, 2]
+
+    choices = judges.continuation_logprob(
+        model, tokenizer, question * 3, CHOICES
+    )
+    reversed_choices = judges.continuation_logprob(
+        model, tokenizer, question * 3, CHOICES[::-1]
+    )
+    together = judges.continuation_logprob(
+        model, tokenizer, QA_PROMPTS, QA_CONTINUATIONS
+    )
+    shuffled = judges.continuation_logprob(
+        model,
+        tokenizer,
+        [QA_PROMPTS[i] for i in order],
+        [QA_CONTINUATIONS[i] for i in order],
+    )
+
+    np.testing.assert_array_equal(choices, alone)
+    np.testing.assert_array_equal(reversed_choices, alone[::-1])
+    np.testing.assert_array_equal(shuffled, together[order])
+
+
+def test_continuation_logprob_of_nothing_is_an_empty_float32_array(
+    gpt2: GPT2LMHeadModel, tokenizer: PreTrainedTokenizerFast
+) -> None:
+    got = judges.continuation_logprob(gpt2, tokenizer, [], [])
+
+    assert got.shape == (0,)
+    assert got.dtype == np.float32
+
+
+@pytest.mark.parametrize(
+    ("prompts", "continuations", "bos", "message"),
+    [
+        (["a"], ["b", "c"], True, "same length"),
+        (["a b"], [""], True, "continuation 0"),
+        (["a b", ""], [" c", " d"], False, "prompt 1"),
+    ],
+    ids=["length-mismatch", "empty-continuation", "empty-prompt-without-bos"],
+)
+def test_continuation_logprob_rejects_unscorable_inputs(
+    gpt2: GPT2LMHeadModel,
+    tokenizer: PreTrainedTokenizerFast,
+    bos_id: int,
+    prompts: list[str],
+    continuations: list[str],
+    bos: bool,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        judges.continuation_logprob(
+            gpt2,
+            tokenizer,
+            prompts,
+            continuations,
+            bos_id=bos_id if bos else None,
+        )
+
+
 def test_mc1_accuracy_counts_questions_whose_best_choice_is_correct() -> None:
     scores = [[0.1, 0.9], [0.8, 0.2], [0.3, 0.7]]
 
