@@ -22,6 +22,7 @@ from transformers import GPT2LMHeadModel
 from transformers import PreTrainedTokenizerFast
 
 from tomography import judges
+from tomography.model import LoadedModel
 
 BOS_TOKEN = "<|endoftext|>"
 CORPUS = [
@@ -486,6 +487,82 @@ def test_sequence_logprob_rejects_a_non_positive_batch_size(
 ) -> None:
     with pytest.raises(ValueError, match="batch_size"):
         judges.sequence_logprob(gpt2, tokenizer, ["a b"], [" c"], batch_size=0)
+
+
+def frozen_sequence_logprob(
+    loaded: LoadedModel,
+    prompts: list[str],
+    continuations: list[str],
+    *,
+    batch_size: int,
+    bos_id: int | None,
+) -> np.ndarray:
+    """Replays the arithmetic of sequence_logprob one step at a time.
+
+    Separate tokenization, longest-first right-padded batches with explicit
+    position ids, a float32 log-softmax over the whole vocabulary and a
+    float32 sum over the continuation positions.
+    """
+    prefix = [] if bos_id is None else [bos_id]
+    sequences: list[list[int]] = []
+    starts: list[int] = []
+    for prompt, continuation in zip(prompts, continuations, strict=True):
+        context = prefix + token_ids(loaded.tokenizer, prompt)
+        sequences.append(context + token_ids(loaded.tokenizer, continuation))
+        starts.append(len(context) - 1)
+    scores = np.zeros(len(sequences), dtype=np.float32)
+    order = sorted(range(len(sequences)), key=lambda i: -len(sequences[i]))
+    with torch.no_grad():
+        for first in range(0, len(order), batch_size):
+            rows = order[first : first + batch_size]
+            width = len(sequences[rows[0]])
+            input_ids = torch.zeros((len(rows), width), dtype=torch.long)
+            mask = torch.zeros((len(rows), width), dtype=torch.long)
+            for row, index in enumerate(rows):
+                length = len(sequences[index])
+                input_ids[row, :length] = torch.tensor(sequences[index])
+                mask[row, :length] = 1
+            logits = loaded.model(
+                input_ids=input_ids,
+                attention_mask=mask,
+                position_ids=(mask.cumsum(dim=-1) - 1).clamp(min=0),
+                use_cache=False,
+            ).logits
+            for row, index in enumerate(rows):
+                length = len(sequences[index])
+                picked = (
+                    logits[row, : length - 1]
+                    .float()
+                    .log_softmax(-1)
+                    .gather(-1, input_ids[row, 1:length, None])
+                    .squeeze(-1)
+                    .numpy()
+                )
+                scores[index] = picked[starts[index] :].sum(dtype=np.float32)
+    return scores
+
+
+@pytest.mark.parametrize("batch_size", [1, 3], ids=["b1", "b3"])
+@pytest.mark.parametrize("use_bos", [True, False], ids=["bos", "no-bos"])
+def test_sequence_logprob_keeps_its_default_arithmetic_bit_for_bit(
+    tiny_arch: LoadedModel, batch_size: int, use_bos: bool
+) -> None:
+    bos = tiny_arch.bos_id if use_bos else None
+    expected = frozen_sequence_logprob(
+        tiny_arch, PROMPTS, CONTINUATIONS, batch_size=batch_size, bos_id=bos
+    )
+
+    got = judges.sequence_logprob(
+        tiny_arch.model,
+        tiny_arch.tokenizer,
+        PROMPTS,
+        CONTINUATIONS,
+        batch_size=batch_size,
+        bos_id=bos,
+    )
+
+    assert got.dtype == np.float32
+    np.testing.assert_array_equal(got.view(np.uint32), expected.view(np.uint32))
 
 
 def test_mc1_accuracy_counts_questions_whose_best_choice_is_correct() -> None:
