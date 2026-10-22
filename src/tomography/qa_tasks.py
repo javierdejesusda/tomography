@@ -26,6 +26,7 @@ from tomography.templates import ConceptTemplate
 Task = Literal["obqa", "csqa", "arc_easy", "arc_challenge", "race", "tqa"]
 ChoiceTask = Literal["obqa", "csqa", "arc_easy", "arc_challenge", "tqa"]
 FewShotTask = Literal["obqa", "csqa", "arc_easy", "arc_challenge"]
+_ARC_TASKS = ("arc_easy", "arc_challenge")
 
 # Training questions per seed, which are also the few-shot examples: the
 # stimulus counts of Figure 7, and the 6 primer pairs for TruthfulQA.
@@ -150,7 +151,7 @@ TQA_PROMPT = (
 
 
 @dataclass(frozen=True)
-class TaskSplits[T]:
+class QaSplits[T]:
     """A task's questions in their three roles for one seed.
 
     Attributes:
@@ -165,9 +166,9 @@ class TaskSplits[T]:
     test: tuple[T, ...]
 
 
-def task_splits(
+def choice_splits(
     task: ChoiceTask, items: Sequence[ChoiceExample], *, seed: int
-) -> TaskSplits[ChoiceExample]:
+) -> QaSplits[ChoiceExample]:
     """Assigns a task's questions to the three roles, as the reference does.
 
     The training draw is the reference's `Dataset.shuffle(seed)` followed
@@ -203,17 +204,17 @@ def task_splits(
     """
     if task not in get_args(ChoiceTask):
         raise ValueError(
-            f"task_splits takes one of {get_args(ChoiceTask)}, got {task!r}; "
-            "RACE passages go through race_splits"
+            f"choice_splits takes one of {get_args(ChoiceTask)}, got "
+            f"{task!r}; RACE passages go through race_splits"
         )
     if task == "tqa":
-        return TaskSplits(TQA_PRIMERS, TQA_PRIMERS, tuple(items))
+        return QaSplits(TQA_PRIMERS, TQA_PRIMERS, tuple(items))
     train, val, test = (
         tuple(item for item in items if item.split == split)
         for split in ("train", "val", "test")
     )
     pool = train
-    if task in ("arc_easy", "arc_challenge"):
+    if task in _ARC_TASKS:
         pool = tuple(item for item in train if len(item.choices) == 4)
     if len(pool) < SHOTS[task]:
         raise ValueError(
@@ -225,13 +226,13 @@ def task_splits(
         layer = tuple(
             item for item in train[: len(val)] if item.uid not in uids
         )
-        return TaskSplits(drawn, layer, val)
-    return TaskSplits(drawn, val, test)
+        return QaSplits(drawn, layer, val)
+    return QaSplits(drawn, val, test)
 
 
 def race_splits(
     passages: Sequence[RacePassage], *, seed: int
-) -> TaskSplits[RacePassage]:
+) -> QaSplits[RacePassage]:
     """Assigns RACE passages to the three roles, as the reference does.
 
     The reference seeds Python's `random` and draws the training passages
@@ -251,7 +252,7 @@ def race_splits(
         for split in ("train", "val", "test")
     )
     drawn = tuple(random.Random(seed).sample(train, SHOTS["race"]))
-    return TaskSplits(drawn, val, test)
+    return QaSplits(drawn, val, test)
 
 
 def lat_item(task: ChoiceTask, item: ChoiceExample) -> ChoiceExample:
@@ -276,7 +277,7 @@ def lat_item(task: ChoiceTask, item: ChoiceExample) -> ChoiceExample:
             f"lat_item takes one of {get_args(ChoiceTask)}, got {task!r}; "
             "RACE passages go through race_item"
         )
-    if task not in ("arc_easy", "arc_challenge"):
+    if task not in _ARC_TASKS:
         return item
     return replace(
         item, choices=tuple(c.removesuffix(".") for c in item.choices)
@@ -335,7 +336,7 @@ def fewshot_prompt(
         task: The task the item belongs to.
         item: The question to score.
         shots: The solved examples in prompt order, such as the seed's
-            training questions of `task_splits`; empty for zero-shot.
+            training questions of `choice_splits`; empty for zero-shot.
 
     Returns:
         The item's `HarnessPrompt`.

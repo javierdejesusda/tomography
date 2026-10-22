@@ -11,13 +11,13 @@ from tomography.qa_tasks import TEMPLATES
 from tomography.qa_tasks import TQA_PRIMERS
 from tomography.qa_tasks import TQA_PROMPT
 from tomography.qa_tasks import HarnessPrompt
+from tomography.qa_tasks import choice_splits
 from tomography.qa_tasks import fewshot_prompt
 from tomography.qa_tasks import harness_credit
 from tomography.qa_tasks import lat_item
 from tomography.qa_tasks import race_item
 from tomography.qa_tasks import race_prompt
 from tomography.qa_tasks import race_splits
-from tomography.qa_tasks import task_splits
 from tomography.qa_tasks import tqa_prompt
 from tomography.templates import ChatFormat
 
@@ -204,7 +204,7 @@ def test_training_draw_is_the_head_of_the_seeded_shuffle(task: str) -> None:
     items = [*train, *questions("val", 4), *questions("test", 4)]
 
     for seed in range(5):
-        splits = task_splits(task, items, seed=seed)  # type: ignore[arg-type]
+        splits = choice_splits(task, items, seed=seed)  # type: ignore[arg-type]
 
         order = np.random.default_rng(seed).permutation(30)[: SHOTS[task]]  # type: ignore[index]
         assert splits.train == tuple(train[i] for i in order)
@@ -216,7 +216,7 @@ def test_arc_draws_training_questions_from_its_four_choice_rows() -> None:
     assert len(four) == 30
 
     for seed in range(5):
-        splits = task_splits("arc_easy", train, seed=seed)
+        splits = choice_splits("arc_easy", train, seed=seed)
 
         order = np.random.default_rng(seed).permutation(len(four))[:25]
         assert splits.train == tuple(four[i] for i in order)
@@ -229,7 +229,7 @@ def test_arc_validation_and_test_keep_their_three_and_five_choice_rows() -> (
     test = questions("test", 9, sizes=(5, 4, 3))
     items = [*questions("train", 30), *val, *test]
 
-    splits = task_splits("arc_challenge", items, seed=0)
+    splits = choice_splits("arc_challenge", items, seed=0)
 
     assert splits.layer == tuple(val)
     assert splits.test == tuple(test)
@@ -239,7 +239,9 @@ def test_arc_validation_and_test_keep_their_three_and_five_choice_rows() -> (
 def test_obqa_picks_the_layer_on_validation_and_tests_on_test() -> None:
     val, test = questions("val", 4), questions("test", 3)
 
-    splits = task_splits("obqa", [*questions("train", 9), *val, *test], seed=2)
+    splits = choice_splits(
+        "obqa", [*questions("train", 9), *val, *test], seed=2
+    )
 
     assert (splits.layer, splits.test) == (tuple(val), tuple(test))
 
@@ -249,7 +251,7 @@ def test_csqa_layer_rows_drop_the_training_questions_without_backfill() -> None:
     counts = []
 
     for seed in range(10):
-        splits = task_splits("csqa", [*train, *val], seed=seed)
+        splits = choice_splits("csqa", [*train, *val], seed=seed)
 
         drawn = {q.uid for q in splits.train}
         assert splits.layer == tuple(q for q in train[:8] if q.uid not in drawn)
@@ -265,31 +267,31 @@ def test_tqa_reads_the_primers_and_tests_every_item() -> None:
         *questions("test", 2),
     ]
 
-    splits = task_splits("tqa", items, seed=4)
+    splits = choice_splits("tqa", items, seed=4)
 
     assert splits.train == TQA_PRIMERS
     assert splits.layer == TQA_PRIMERS
     assert splits.test == tuple(items)
 
 
-def test_task_splits_sends_race_to_race_splits() -> None:
+def test_choice_splits_sends_race_to_race_splits() -> None:
     with pytest.raises(ValueError, match="race_splits"):
-        task_splits("race", questions("train", 9), seed=0)  # type: ignore[arg-type]
+        choice_splits("race", questions("train", 9), seed=0)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
     ("task", "k"), [("obqa", 5), ("csqa", 7), ("arc_challenge", 25)]
 )
-def test_task_splits_needs_k_training_questions(task: str, k: int) -> None:
+def test_choice_splits_needs_k_training_questions(task: str, k: int) -> None:
     held_out = [*questions("val", 2), *questions("test", 2)]
 
-    splits = task_splits(task, [*questions("train", k), *held_out], seed=0)  # type: ignore[arg-type]
+    splits = choice_splits(task, [*questions("train", k), *held_out], seed=0)  # type: ignore[arg-type]
 
     assert len(splits.train) == k
     with pytest.raises(
         ValueError, match=rf"{task} draws {k} training questions from {k - 1}"
     ):
-        task_splits(task, [*questions("train", k - 1), *held_out], seed=0)  # type: ignore[arg-type]
+        choice_splits(task, [*questions("train", k - 1), *held_out], seed=0)  # type: ignore[arg-type]
 
 
 def test_race_draws_training_passages_with_a_seeded_random_sample() -> None:
