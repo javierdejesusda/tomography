@@ -362,6 +362,22 @@ def test_orient_rejects_inconsistent_inputs(
         orient(reader, **arguments)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("bad", [2, -1])
+def test_orient_rejects_labels_that_fit_rejects(bad: int) -> None:
+    h, labels, _ = orientation_case("class-means")
+    reader = RepReader.fit("random", h, [0, 1, 2, 3], labels=labels, seed=3)
+    wrong = labels.copy()
+    wrong[0] = bad
+
+    with pytest.raises(ValueError, match="labels must be 0 or 1"):
+        RepReader.fit("random", h, [0, 1, 2, 3], labels=wrong, seed=3)
+    with pytest.raises(ValueError, match="labels must be 0 or 1"):
+        orient(reader, h, labels=wrong)
+    np.testing.assert_array_equal(
+        orient(reader, h, labels=labels).signs, reader.signs
+    )
+
+
 def test_random_directions_differ_across_layers_but_follow_the_seed() -> None:
     rng = np.random.default_rng(1)
     h = np.tile(rng.standard_normal((1, 12, 8)), (3, 1, 1)).astype(np.float32)

@@ -470,15 +470,15 @@ def _shrunk_mass_mean(
     positive_mean = rows[positive].mean(axis=0)
     negative_mean = rows[~positive].mean(axis=0)
     centered = rows - np.where(positive[:, None], positive_mean, negative_mean)
+    _, singular, basis = np.linalg.svd(centered, full_matrices=False)
+    variances = singular**2 / rows.shape[0]
+    if not variances.any():
+        raise ValueError("the rows have no within-class variance")
     if shrinkage is None:
         shrinkage = float(ledoit_wolf_shrinkage(centered, assume_centered=True))
     if not 0.0 < shrinkage <= 1.0:
         raise ValueError(f"shrinkage must be in (0, 1], got {shrinkage}")
-    _, singular, basis = np.linalg.svd(centered, full_matrices=False)
-    variances = singular**2 / rows.shape[0]
     ridge = shrinkage * variances.sum() / rows.shape[1]
-    if ridge == 0.0:
-        raise ValueError("the rows have no within-class variance")
     gap = positive_mean - negative_mean
     inside = basis @ gap
     shrunk = (1.0 - shrinkage) * variances + ridge

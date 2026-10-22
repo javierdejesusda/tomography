@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 from tomography.reading.directions import FloatArray
 from tomography.reading.directions import Method
 from tomography.reading.directions import Preprocess
+from tomography.reading.directions import _check_labels
 from tomography.reading.directions import fit_direction
 from tomography.reading.metrics import GroupIndex
 from tomography.reading.metrics import parse_groups
@@ -272,16 +273,12 @@ def orient(
         A copy of the reader with the new signs.
 
     Raises:
-        ValueError: If the shapes disagree, a group does not have exactly
-            one label-1 member, the pairs are malformed, or the sign cannot
-            be set because a class is missing.
+        ValueError: If the shapes disagree, a label is not 0 or 1, a group
+            does not have exactly one label-1 member, the pairs are
+            malformed, or the sign cannot be set because a class is missing.
     """
     projections = reader._project(h)
-    if labels.shape != (projections.shape[1],):
-        raise ValueError(
-            f"labels must have shape ({projections.shape[1]},), "
-            f"got {labels.shape}"
-        )
+    _check_labels(labels, projections.shape[1])
     index = _orientation_groups(pairs, groups, labels)
     return replace(reader, signs=_orientation(projections, labels, index))
 

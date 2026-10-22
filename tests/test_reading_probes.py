@@ -154,6 +154,17 @@ def test_lda_rejects_inconsistent_inputs(
         fit_lda(**arguments)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("shrinkage", [None, 0.5], ids=["default", "given"])
+def test_lda_rejects_rows_without_within_class_variance(
+    shrinkage: float | None,
+) -> None:
+    labels = (np.arange(10) % 2).astype(np.int64)
+    h = np.tile(np.eye(2, 4)[labels], (2, 1, 1)).astype(np.float32)
+
+    with pytest.raises(ValueError, match="no within-class variance"):
+        fit_lda(h, [0, 1], labels=labels, shrinkage=shrinkage)
+
+
 def standardized(
     h: NDArray[np.float32], reference: NDArray[np.float32]
 ) -> NDArray[np.float64]:
