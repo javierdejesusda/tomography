@@ -1,15 +1,29 @@
+from collections.abc import Callable
+import functools
 import math
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 import pytest
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import balanced_accuracy_score
+from sklearn.metrics import f1_score
+from sklearn.metrics import precision_score
+from sklearn.metrics import recall_score
 
 from tomography.p9.risk import auroc_diff_ci
+from tomography.reading.metrics import best_layer
+from tomography.reading.stats import LayerChoice
+from tomography.reading.stats import best_validation_layer
 from tomography.reading.stats import delong_test
 from tomography.reading.stats import holm_correction
 from tomography.reading.stats import mcnemar_test
 from tomography.reading.stats import paired_accuracy_diff
 from tomography.reading.stats import paired_auroc_diff
+from tomography.reading.stats import threshold_metrics
+from tomography.reading.stats import top_k_layers
+from tomography.reading.stats import tpr_at_fpr
 
 
 def test_paired_auroc_diff_with_one_row_per_cluster_is_item_bootstrap() -> None:
@@ -414,3 +428,294 @@ def test_holm_correction_rejects_malformed_input(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         holm_correction(p_values, alpha=alpha)
+
+
+def test_threshold_metrics_match_the_hand_computed_example() -> None:
+    val_scores = np.array([0.1, 0.4, 0.35, 0.8])
+    val_labels = np.array([0, 0, 1, 1])
+    test_scores = np.array(
+        [0.9, 0.5, 0.3, 0.6, 0.2, 0.1, 0.05, 0.15, 0.22, 0.0]
+    )
+    test_labels = np.array([1, 1, 1, 0, 1, 1, 0, 0, 0, 0])
+
+    result = threshold_metrics(val_scores, val_labels, test_scores, test_labels)
+
+    # On validation, the splits 0.1 | 0.35 and 0.4 | 0.8 both reach a
+    # balanced accuracy of 3/4; the first is kept, at its midpoint. On test
+    # the rule gives 3 true positives, 1 false positive, 2 false negatives
+    # and 4 true negatives.
+    assert result.threshold == pytest.approx(0.225)
+    assert result.accuracy == pytest.approx(7 / 10)
+    assert result.precision == pytest.approx(3 / 4)
+    assert result.recall == pytest.approx(3 / 5)
+    assert result.f1 == pytest.approx(2 / 3)
+
+
+def test_threshold_metrics_maximize_validation_balanced_accuracy() -> None:
+    rng = np.random.default_rng(7)
+    val_labels = rng.integers(0, 2, size=80)
+    val_scores = np.round(val_labels + rng.standard_normal(80), 1)
+    test_labels = rng.integers(0, 2, size=60)
+    test_scores = test_labels + rng.standard_normal(60)
+
+    result = threshold_metrics(val_scores, val_labels, test_scores, test_labels)
+
+    def balanced(threshold: float) -> float:
+        called = (val_scores > threshold).astype(np.int64)
+        return float(balanced_accuracy_score(val_labels, called))
+
+    best = max(balanced(t) for t in np.r_[-np.inf, np.unique(val_scores)])
+    below = val_scores[val_scores < result.threshold].max()
+    above = val_scores[val_scores > result.threshold].min()
+    called = (test_scores > result.threshold).astype(np.int64)
+    assert balanced(result.threshold) == pytest.approx(best)
+    assert result.threshold == pytest.approx((below + above) / 2)
+    assert result.accuracy == pytest.approx(accuracy_score(test_labels, called))
+    assert result.precision == pytest.approx(
+        precision_score(test_labels, called)
+    )
+    assert result.recall == pytest.approx(recall_score(test_labels, called))
+    assert result.f1 == pytest.approx(f1_score(test_labels, called))
+
+
+def test_threshold_metrics_without_positive_calls_have_zero_precision() -> None:
+    result = threshold_metrics(
+        np.array([0.0, 1.0]),
+        np.array([0, 1]),
+        np.array([0.1, 0.2, 0.3]),
+        np.array([0, 1, 1]),
+    )
+
+    assert result == (0.5, 1 / 3, 0.0, 0.0, 0.0)
+
+
+def test_threshold_metrics_call_every_row_positive_for_an_inverted_scorer() -> (
+    None
+):
+    result = threshold_metrics(
+        np.array([0.9, 0.8, 0.2, 0.1]),
+        np.array([0, 0, 1, 1]),
+        np.array([0.5, 0.1, 0.7]),
+        np.array([1, 0, 1]),
+    )
+
+    assert result == (-math.inf, 2 / 3, 2 / 3, 1.0, 0.8)
+
+
+SPLITS = {
+    "val_scores": [0.1, 0.9, 0.2, 0.8],
+    "val_labels": [0, 1, 0, 1],
+    "test_scores": [0.3, 0.7, 0.6],
+    "test_labels": [0, 1, 1],
+}
+MALFORMED_SPLITS = [
+    ({"val_labels": [0, 1, 0]}, "same length"),
+    ({"test_scores": [0.3, 0.7]}, "same length"),
+    ({"test_labels": [1, 1, 1]}, "both classes"),
+    ({"val_labels": [0, 2, 0, 1]}, "0 or 1"),
+    ({"val_scores": [0.1, np.nan, 0.2, 0.8]}, "finite"),
+    ({"test_scores": [0.3, np.inf, 0.6]}, "finite"),
+]
+MALFORMED_IDS = [
+    "val-length",
+    "test-length",
+    "test-one-class",
+    "not-binary",
+    "nan-val-score",
+    "infinite-test-score",
+]
+
+
+def _splits(override: dict[str, list[float]]) -> list[NDArray[np.generic]]:
+    arguments = {**SPLITS, **override}
+    return [np.array(arguments[name]) for name in SPLITS]
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [*MALFORMED_SPLITS, ({"val_labels": [1, 1, 1, 1]}, "both classes")],
+    ids=[*MALFORMED_IDS, "val-one-class"],
+)
+def test_threshold_metrics_rejects_malformed_input(
+    override: dict[str, list[float]], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        threshold_metrics(*_splits(override))  # type: ignore[arg-type]
+
+
+def test_tpr_at_fpr_sets_the_threshold_on_the_validation_negatives() -> None:
+    val_scores = np.r_[np.arange(256.0), 300.0, 100.0]
+    val_labels = np.r_[np.zeros(256, dtype=np.int64), 1, 1]
+    test_scores = np.array([254.0, 260.0, 253.0, 100.0, 255.0, 10.0, 20.0])
+    test_labels = np.array([1, 1, 1, 1, 0, 0, 0])
+
+    result = tpr_at_fpr(val_scores, val_labels, test_scores, test_labels)
+
+    # 1% of 256 negatives lets 2 of them above the threshold, which is the
+    # third highest negative, 253; a score equal to it is called negative.
+    assert result == (2 / 4, 1 / 3, 253.0, 2)
+
+
+@pytest.mark.parametrize(
+    ("negatives", "max_fpr", "threshold", "negatives_above"),
+    [
+        ([5.0, 5.0, 5.0, 1.0, 2.0], 0.4, 5.0, 0),
+        (np.arange(50.0), 0.01, 49.0, 0),
+        (np.arange(100.0), 0.29, 70.0, 29),
+    ],
+    ids=["tie-at-threshold", "too-few-negatives", "decimal-rate"],
+)
+def test_tpr_at_fpr_lets_at_most_the_allowed_negatives_through(
+    negatives: list[float],
+    max_fpr: float,
+    threshold: float,
+    negatives_above: int,
+) -> None:
+    val_scores = np.array(negatives)
+
+    result = tpr_at_fpr(
+        val_scores,
+        np.zeros(val_scores.shape[0], dtype=np.int64),
+        np.array([-1.0, 1000.0]),
+        np.array([0, 1]),
+        max_fpr=max_fpr,
+    )
+
+    assert result == (1.0, 0.0, threshold, negatives_above)
+
+
+@pytest.mark.parametrize(
+    ("override", "kwargs", "message"),
+    [
+        *[(override, {}, message) for override, message in MALFORMED_SPLITS],
+        ({"val_labels": [1, 1, 1, 1]}, {}, "negative"),
+        ({}, {"max_fpr": 0.0}, "max_fpr"),
+        ({}, {"max_fpr": 1.0}, "max_fpr"),
+    ],
+    ids=[*MALFORMED_IDS, "no-val-negative", "fpr-zero", "fpr-one"],
+)
+def test_tpr_at_fpr_rejects_malformed_input(
+    override: dict[str, list[float]],
+    kwargs: dict[str, float],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        tpr_at_fpr(*_splits(override), **kwargs)  # type: ignore[arg-type]
+
+
+def test_best_validation_layer_takes_the_first_maximum() -> None:
+    val_metric = np.array([0.6, 0.9, 0.9, 0.7])
+    layers = [3, 6, 9, 12]
+    val_scores = np.arange(12.0).reshape(4, 3)
+    test_scores = -np.arange(8.0).reshape(4, 2)
+
+    choice = best_validation_layer(val_metric, layers, val_scores, test_scores)
+
+    assert choice.layers == (best_layer(val_metric, layers),)
+    assert choice.layers == (6,)
+    np.testing.assert_array_equal(choice.val_scores, [3.0, 4.0, 5.0])
+    np.testing.assert_array_equal(choice.test_scores, [-2.0, -3.0])
+
+
+def test_top_k_layers_average_scores_standardized_on_validation() -> None:
+    val_metric = np.array([0.6, 0.9, 0.8])
+    val_scores = np.array([[5.0, 7.0], [1.0, 3.0], [10.0, 30.0]])
+    test_scores = np.array(
+        [[0.0, 0.0, 0.0], [2.0, 5.0, 0.0], [40.0, 0.0, 20.0]]
+    )
+
+    choice = top_k_layers(val_metric, [4, 8, 12], val_scores, test_scores, k=2)
+
+    # Layer 8 is standardized with mean 2 and deviation 1, layer 12 with
+    # mean 20 and deviation 10.
+    assert choice.layers == (8, 12)
+    np.testing.assert_allclose(choice.val_scores, [-1.0, 1.0])
+    np.testing.assert_allclose(choice.test_scores, [1.0, 0.5, -1.0])
+
+
+def test_top_k_layers_ignore_the_scale_of_each_layer() -> None:
+    rng = np.random.default_rng(9)
+    val_scores = rng.standard_normal((6, 20))
+    test_scores = rng.standard_normal((6, 15))
+    val_metric = np.array([0.5, 0.8, 0.7, 0.8, 0.6, 0.75])
+    scale = np.array([[1.0], [1000.0], [0.01], [1.0], [5.0], [3.0]])
+
+    plain = top_k_layers(val_metric, range(6), val_scores, test_scores, k=3)
+    scaled = top_k_layers(
+        val_metric,
+        range(6),
+        scale * val_scores + 7.0,
+        scale * test_scores + 7.0,
+        k=3,
+    )
+
+    assert plain.layers == scaled.layers == (1, 3, 5)
+    np.testing.assert_allclose(scaled.val_scores, plain.val_scores)
+    np.testing.assert_allclose(scaled.test_scores, plain.test_scores)
+
+
+LAYER_INPUTS: dict[str, list[Any]] = {
+    "val_metric": [0.6, 0.9, 0.8],
+    "layers": [4, 8, 12],
+    "val_scores": [[5.0, 7.0], [1.0, 3.0], [10.0, 30.0]],
+    "test_scores": [[0.0], [2.0], [40.0]],
+}
+
+
+def _layer_inputs(override: dict[str, list[Any]]) -> list[Any]:
+    arguments = {**LAYER_INPUTS, **override}
+    return [
+        np.array(arguments["val_metric"]),
+        arguments["layers"],
+        np.array(arguments["val_scores"]),
+        np.array(arguments["test_scores"]),
+    ]
+
+
+@pytest.mark.parametrize(
+    "choose",
+    [best_validation_layer, functools.partial(top_k_layers, k=2)],
+    ids=["best", "top-k"],
+)
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"layers": [4, 8]}, "one entry per layer"),
+        ({"val_metric": [0.6, np.nan, 0.8]}, "NaN"),
+        ({"layers": [4, 4, 12]}, "distinct"),
+        ({"val_scores": [[5.0, 7.0], [1.0, 3.0]]}, "val_scores"),
+        ({"test_scores": [0.0, 2.0, 40.0]}, "test_scores"),
+        ({"test_scores": [[0.0], [np.inf], [40.0]]}, "finite"),
+    ],
+    ids=[
+        "layers-length",
+        "nan-metric",
+        "repeated-layer",
+        "val-rows",
+        "test-vector",
+        "infinite-score",
+    ],
+)
+def test_layer_choices_reject_malformed_input(
+    choose: Callable[..., LayerChoice],
+    override: dict[str, list[Any]],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        choose(*_layer_inputs(override))
+
+
+@pytest.mark.parametrize(
+    ("k", "val_scores", "message"),
+    [
+        (0, LAYER_INPUTS["val_scores"], "k must be"),
+        (4, LAYER_INPUTS["val_scores"], "k must be"),
+        (2, [[5.0, 7.0], [3.0, 3.0], [10.0, 30.0]], "constant"),
+    ],
+    ids=["no-layer", "more-than-layers", "constant-layer"],
+)
+def test_top_k_layers_rejects_bad_k_and_constant_layers(
+    k: int, val_scores: list[list[float]], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        top_k_layers(*_layer_inputs({"val_scores": val_scores}), k=k)

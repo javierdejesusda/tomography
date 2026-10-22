@@ -1,13 +1,18 @@
-"""Paired comparisons of readers scored on the same rows.
+"""Paired comparisons, threshold metrics and layer choices for readers.
 
 Two readers evaluated on the same items are compared through the difference
 of their metrics: a bootstrap that resamples whole clusters of rows, so rows
 of one item are never treated as independent; DeLong's test for two
 correlated AUROCs; McNemar's exact test for two classifiers' outcomes; and
-Holm's correction over a declared family of such tests.
+Holm's correction over a declared family of such tests. The thresholded
+metrics (accuracy, precision, recall and F1, and the true positive rate at a
+fixed false positive rate) take their threshold from validation scores, and
+so do the two layer choices: the best validation layer and an ensemble of
+the top k.
 """
 
 from collections.abc import Iterator
+from collections.abc import Sequence
 import math
 from typing import Any
 from typing import NamedTuple
@@ -20,6 +25,7 @@ from scipy.stats import rankdata
 
 from tomography.reading.metrics import FloatArray
 from tomography.reading.metrics import auroc
+from tomography.reading.metrics import best_layer
 
 NO_RESAMPLE = "no resample holds both classes"
 
@@ -80,6 +86,57 @@ class HolmResult(NamedTuple):
 
     adjusted: NDArray[np.float64]
     reject: NDArray[np.bool_]
+
+
+class ThresholdMetrics(NamedTuple):
+    """Test metrics of a scorer at a threshold chosen on validation.
+
+    Attributes:
+        threshold: Scores above it are called positive.
+        accuracy: Share of test rows called correctly.
+        precision: Share of positive calls that are positives.
+        recall: Share of positives called positive.
+        f1: Harmonic mean of precision and recall.
+    """
+
+    threshold: float
+    accuracy: float
+    precision: float
+    recall: float
+    f1: float
+
+
+class TprAtFpr(NamedTuple):
+    """Test rates at a threshold set on the validation negatives.
+
+    Attributes:
+        true_positive_rate: Share of test positives scoring above the
+            threshold.
+        false_positive_rate: Share of test negatives scoring above the
+            threshold.
+        threshold: Scores above it are called positive.
+        negatives_above: Validation negatives scoring above the threshold,
+            the tail the threshold rests on.
+    """
+
+    true_positive_rate: float
+    false_positive_rate: float
+    threshold: float
+    negatives_above: int
+
+
+class LayerChoice(NamedTuple):
+    """Per-stimulus scores read at the chosen layers.
+
+    Attributes:
+        layers: The chosen layer indices, best validation metric first.
+        val_scores: Validation score of each stimulus, shape (n_val,).
+        test_scores: Test score of each stimulus, shape (n_test,).
+    """
+
+    layers: tuple[int, ...]
+    val_scores: NDArray[np.float64]
+    test_scores: NDArray[np.float64]
 
 
 def paired_auroc_diff(
@@ -329,6 +386,289 @@ def holm_correction(p_values: FloatArray, *, alpha: float = 0.05) -> HolmResult:
     adjusted = np.empty(n_tests)
     adjusted[order] = np.maximum.accumulate(scaled)
     return HolmResult(adjusted, adjusted <= alpha)
+
+
+def threshold_metrics(
+    val_scores: FloatArray,
+    val_labels: NDArray[np.int64],
+    test_scores: FloatArray,
+    test_labels: NDArray[np.int64],
+) -> ThresholdMetrics:
+    """Classifies test rows at a threshold chosen on validation scores.
+
+    A score above the threshold is called positive. The threshold maximizes
+    the validation balanced accuracy, the mean of the true positive and true
+    negative rates, which weighs both classes equally whatever their
+    balance. It equals (1 + J) / 2 for Youden's J, the true positive rate
+    minus the false positive rate, so the rule also maximizes J. The
+    candidates split the sorted distinct validation scores, and the
+    threshold is the midpoint of the two scores either side of the best
+    split, or minus infinity when calling every validation row positive is
+    best. Ties go to the lowest threshold. Precision is 0 when no test row
+    is called positive, as with scikit-learn's `zero_division=0`.
+
+    Args:
+        val_scores: Validation scores, shape (n_val,).
+        val_labels: Validation labels of 0 and 1, shape (n_val,), both
+            classes present.
+        test_scores: Test scores, shape (n_test,).
+        test_labels: Test labels of 0 and 1, shape (n_test,), both classes
+            present.
+
+    Returns:
+        The threshold and the test accuracy, precision, recall and F1.
+
+    Raises:
+        ValueError: If a split's scores and labels differ in length, a label
+            is not 0 or 1, a score is not finite, or a split misses a class.
+    """
+    val, val_positive = _labelled(val_scores, val_labels, "validation")
+    _check_both_classes(val_positive, "validation")
+    test, test_positive = _labelled(test_scores, test_labels, "test")
+    _check_both_classes(test_positive, "test")
+    threshold = _balanced_threshold(val, val_positive)
+    called = test > threshold
+    tp = int((called & test_positive).sum())
+    fp = int((called & ~test_positive).sum())
+    fn = int((~called & test_positive).sum())
+    return ThresholdMetrics(
+        threshold,
+        float((called == test_positive).mean()),
+        tp / (tp + fp) if tp + fp else 0.0,
+        tp / (tp + fn),
+        2 * tp / (2 * tp + fp + fn),
+    )
+
+
+def tpr_at_fpr(
+    val_scores: FloatArray,
+    val_labels: NDArray[np.int64],
+    test_scores: FloatArray,
+    test_labels: NDArray[np.int64],
+    *,
+    max_fpr: float = 0.01,
+) -> TprAtFpr:
+    """True positive rate on test at a false positive rate set on validation.
+
+    Only the validation negatives set the threshold. With n of them, k is
+    the largest count with k / n <= `max_fpr`, and the threshold is the
+    (k + 1)-th highest negative score. A score above the threshold is called
+    positive, so at most k validation negatives are (fewer when scores tie
+    at the threshold) and the validation false positive rate never exceeds
+    `max_fpr`. The threshold rests on few items: at 1%, 256 negatives allow
+    2 and fewer than 100 allow none, making the threshold the highest
+    negative; `negatives_above` reports that tail.
+
+    Args:
+        val_scores: Validation scores, shape (n_val,).
+        val_labels: Validation labels of 0 and 1, shape (n_val,), with at
+            least one negative.
+        test_scores: Test scores, shape (n_test,).
+        test_labels: Test labels of 0 and 1, shape (n_test,), both classes
+            present.
+        max_fpr: The false positive rate allowed on validation, in (0, 1).
+
+    Returns:
+        The test true and false positive rates, the threshold and the number
+        of validation negatives above it.
+
+    Raises:
+        ValueError: If a split's scores and labels differ in length, a label
+            is not 0 or 1, a score is not finite, validation has no
+            negative, test misses a class, or `max_fpr` is not in (0, 1).
+    """
+    if not 0.0 < max_fpr < 1.0:
+        raise ValueError(f"max_fpr must be in (0, 1), got {max_fpr}")
+    val, val_positive = _labelled(val_scores, val_labels, "validation")
+    if val_positive.all():
+        raise ValueError("validation labels must contain a negative")
+    test, test_positive = _labelled(test_scores, test_labels, "test")
+    _check_both_classes(test_positive, "test")
+    negatives = np.sort(val[~val_positive])[::-1]
+    n_negative = negatives.shape[0]
+    rates = np.arange(n_negative + 1) / n_negative
+    allowed = int(np.searchsorted(rates, max_fpr, side="right")) - 1
+    threshold = float(negatives[allowed])
+    called = test > threshold
+    return TprAtFpr(
+        float(called[test_positive].mean()),
+        float(called[~test_positive].mean()),
+        threshold,
+        int((negatives > threshold).sum()),
+    )
+
+
+def best_validation_layer(
+    val_metric: FloatArray,
+    layers: Sequence[int],
+    val_scores: FloatArray,
+    test_scores: FloatArray,
+) -> LayerChoice:
+    """Reads the scores of the layer with the best validation metric.
+
+    The layer is the first maximum of `val_metric`, as chosen by
+    `tomography.reading.metrics.best_layer`. Its raw scores are returned: a
+    single layer needs no standardization.
+
+    Args:
+        val_metric: Validation metric of each layer, shape (K,); higher is
+            better, for example pair accuracy or AUROC.
+        layers: The distinct layer index of each entry of `val_metric`.
+        val_scores: Validation score of each stimulus per layer, shape
+            (K, n_val).
+        test_scores: Test score of each stimulus per layer, shape
+            (K, n_test).
+
+    Returns:
+        The chosen layer with its validation and test scores.
+
+    Raises:
+        ValueError: If the shapes disagree, `val_metric` holds NaN, a layer
+            repeats, or a score is not finite.
+    """
+    metric = _layer_metric(val_metric, layers)
+    val = _per_layer(val_scores, "val_scores", len(layers))
+    test = _per_layer(test_scores, "test_scores", len(layers))
+    layer = best_layer(metric, layers)
+    position = list(layers).index(layer)
+    return LayerChoice((layer,), val[position], test[position])
+
+
+def top_k_layers(
+    val_metric: FloatArray,
+    layers: Sequence[int],
+    val_scores: FloatArray,
+    test_scores: FloatArray,
+    *,
+    k: int = 5,
+) -> LayerChoice:
+    """Averages the standardized scores of the k best validation layers.
+
+    The layers are the k highest entries of `val_metric`, ties going to the
+    earlier entry, so the first is the one `best_validation_layer` reads.
+    The scores of each chosen layer, validation and test alike, are
+    standardized with that layer's validation mean and standard deviation,
+    so no test information enters, and the ensemble score of a stimulus is
+    their mean over the chosen layers. Standardizing keeps a layer with
+    larger scores from dominating the mean. The ensemble averages scores,
+    not per-layer metrics.
+
+    Args:
+        val_metric: Validation metric of each layer, shape (K,); higher is
+            better, for example pair accuracy or AUROC.
+        layers: The distinct layer index of each entry of `val_metric`.
+        val_scores: Validation score of each stimulus per layer, shape
+            (K, n_val).
+        test_scores: Test score of each stimulus per layer, shape
+            (K, n_test).
+        k: Number of layers averaged, between 1 and K.
+
+    Returns:
+        The chosen layers, best first, with the ensemble validation and test
+        scores.
+
+    Raises:
+        ValueError: If the shapes disagree, `val_metric` holds NaN, a layer
+            repeats, a score is not finite, `k` is out of range, or a chosen
+            layer has constant validation scores.
+    """
+    metric = _layer_metric(val_metric, layers)
+    val = _per_layer(val_scores, "val_scores", len(layers))
+    test = _per_layer(test_scores, "test_scores", len(layers))
+    if not 1 <= k <= len(layers):
+        raise ValueError(
+            f"k must be between 1 and the number of layers ({len(layers)}), "
+            f"got {k}"
+        )
+    chosen = np.argsort(-metric, kind="stable")[:k]
+    mean = val[chosen].mean(axis=1, keepdims=True)
+    std = val[chosen].std(axis=1, keepdims=True)
+    if (std == 0.0).any():
+        raise ValueError("a chosen layer has constant validation scores")
+    return LayerChoice(
+        tuple(int(layers[i]) for i in chosen),
+        ((val[chosen] - mean) / std).mean(axis=0),
+        ((test[chosen] - mean) / std).mean(axis=0),
+    )
+
+
+def _balanced_threshold(
+    scores: NDArray[np.float64], positive: NDArray[np.bool_]
+) -> float:
+    values, inverse = np.unique(scores, return_inverse=True)
+    n_positive = int(positive.sum())
+    n_negative = positive.shape[0] - n_positive
+    positive_counts = np.bincount(inverse[positive], minlength=values.shape[0])
+    negative_counts = np.bincount(inverse[~positive], minlength=values.shape[0])
+    # Split k calls the k lowest distinct scores negative. Calling every score
+    # negative is left out: it ties with calling every score positive (k = 0).
+    # The balanced accuracy times 2 * n_positive * n_negative is an integer,
+    # so ties are exact and go to the lowest threshold.
+    positives_above = n_positive - (
+        np.cumsum(positive_counts) - positive_counts
+    )
+    negatives_below = np.cumsum(negative_counts) - negative_counts
+    split = int(
+        np.argmax(positives_above * n_negative + negatives_below * n_positive)
+    )
+    if split == 0:
+        return -math.inf
+    return float((values[split - 1] + values[split]) / 2)
+
+
+def _layer_metric(
+    val_metric: FloatArray, layers: Sequence[int]
+) -> NDArray[np.float64]:
+    metric = np.asarray(val_metric, dtype=np.float64)
+    if (
+        metric.ndim != 1
+        or metric.shape[0] == 0
+        or metric.shape[0] != len(layers)
+    ):
+        raise ValueError(
+            "val_metric must be a non-empty vector with one entry per layer, "
+            f"got shape {metric.shape} for {len(layers)} layers"
+        )
+    if np.isnan(metric).any():
+        raise ValueError("val_metric must not contain NaN")
+    if len(set(layers)) != len(layers):
+        raise ValueError("layers must be distinct")
+    return metric
+
+
+def _per_layer(
+    scores: FloatArray, name: str, n_layers: int
+) -> NDArray[np.float64]:
+    values = np.asarray(scores, dtype=np.float64)
+    if values.ndim != 2 or values.shape[0] != n_layers:
+        raise ValueError(
+            f"{name} must have shape ({n_layers}, n), got {values.shape}"
+        )
+    if not np.isfinite(values).all():
+        raise ValueError(f"{name} must be finite")
+    return values
+
+
+def _labelled(
+    scores: FloatArray, labels: NDArray[np.int64], split: str
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    values = np.asarray(scores, dtype=np.float64)
+    marks = np.asarray(labels)
+    if values.ndim != 1 or values.shape != marks.shape:
+        raise ValueError(
+            f"{split} scores and labels must be vectors of the same length, "
+            f"got {values.shape} and {marks.shape}"
+        )
+    if not np.isin(marks, (0, 1)).all():
+        raise ValueError(f"{split} labels must be 0 or 1")
+    if not np.isfinite(values).all():
+        raise ValueError(f"{split} scores must be finite")
+    return values, marks == 1
+
+
+def _check_both_classes(positive: NDArray[np.bool_], split: str) -> None:
+    if positive.all() or not positive.any():
+        raise ValueError(f"{split} labels must contain both classes")
 
 
 def _check_resampling(n_boot: int, alpha: float) -> None:
