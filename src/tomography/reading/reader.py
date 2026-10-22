@@ -258,12 +258,7 @@ def orient(
     """Sets each layer's sign with the rule of `RepReader.fit`.
 
     For readers built from directions that `RepReader.fit` does not find,
-    such as LDA or a learned value head. Within each group, the sign is
-    positive when the label-1 member holds the highest projection more
-    often than the lowest, negative in the opposite case, and positive on a
-    tie. The groups are `groups`, else the `pairs` whose members differ in
-    label. Without either, the sign makes the mean projection of the
-    label-1 rows exceed that of the label-0 rows.
+    such as LDA or a learned value head.
 
     Args:
         reader: The reader to orient; its signs are ignored.

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -323,12 +324,8 @@ def test_orient_sets_the_signs_that_fit_sets(source: str) -> None:
     fitted = RepReader.fit(
         "random", h, [0, 1, 2, 3], labels=labels, seed=3, **orientation
     )
-    unsigned = RepReader(
-        method="hand",
-        layers=fitted.layers,
-        directions=fitted.directions,
-        means=fitted.means,
-        signs=np.ones(4, dtype=np.float32),
+    unsigned = replace(
+        fitted, method="hand", signs=np.ones(4, dtype=np.float32)
     )
 
     oriented = orient(unsigned, h, labels=labels, **orientation)

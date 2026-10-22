@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import replace
+from functools import partial
 
 import numpy as np
 from numpy.typing import NDArray
@@ -50,9 +51,8 @@ def class_centered(
 ) -> NDArray[np.float64]:
     rows = h.astype(np.float64)
     for value in (0, 1):
-        rows[:, labels == value] -= rows[:, labels == value].mean(axis=1)[
-            :, None
-        ]
+        members = labels == value
+        rows[:, members] -= rows[:, members].mean(axis=1, keepdims=True)
     return rows
 
 
@@ -168,17 +168,15 @@ def test_mlp_reader_scores_each_layer_with_its_own_seeded_mlp() -> None:
     h, labels = correlated_classes(n=60, d=8, seed=8)
     test, _ = correlated_classes(n=20, d=8, seed=9)
 
-    reader = fit_mlp(
-        h, [3, 7], labels=labels, hidden_sizes=(16, 8), alpha=0.1, seed=4
+    fit = partial(
+        fit_mlp, h, [3, 7], labels=labels, hidden_sizes=(16, 8), alpha=0.1
     )
 
+    reader = fit(seed=4)
+
     scores = reader.score(test)
-    again = fit_mlp(
-        h, [3, 7], labels=labels, hidden_sizes=(16, 8), alpha=0.1, seed=4
-    )
-    other = fit_mlp(
-        h, [3, 7], labels=labels, hidden_sizes=(16, 8), alpha=0.1, seed=5
-    )
+    again = fit(seed=4)
+    other = fit(seed=5)
     assert isinstance(reader, Reader)
     assert reader.method == "mlp"
     assert reader.layers == (3, 7)
@@ -244,6 +242,17 @@ def token_rows(
     )
 
 
+def mean_pooled(acts: Activations) -> NDArray[np.float64]:
+    """The mean of each stimulus's rows, of shape (K, n_stimuli, d)."""
+    return np.stack(
+        [
+            acts.data[:, acts.row_stimulus == i].astype(np.float64).mean(1)
+            for i in range(acts.n_stimuli)
+        ],
+        axis=1,
+    )
+
+
 def reference_weights(
     acts: Activations, reader: AttentionReader
 ) -> NDArray[np.float64]:
@@ -302,21 +311,14 @@ def test_attention_reader_with_a_zero_query_scores_the_mean_pooled_tokens() -> (
     None
 ):
     rng = np.random.default_rng(11)
-    counts = [3, 1, 4, 2, 5]
-    acts = token_rows(4.0 * rng.standard_normal((2, 15, 6)), counts, [2, 5])
+    data = 4.0 * rng.standard_normal((2, 15, 6))
+    acts = token_rows(data, [3, 1, 4, 2, 5], [2, 5])
     reader = hand_reader(rng, np.zeros((2, 6)))
 
     scores = reader.score(acts)
     joint = replace(reader, joint=True, offsets=np.zeros(2)).score(acts)
 
-    pooled = np.stack(
-        [
-            acts.data[:, acts.row_stimulus == i].astype(np.float64).mean(1)
-            for i in range(len(counts))
-        ],
-        axis=1,
-    )
-    linear = np.einsum("knd,kd->kn", pooled, reader.values)
+    linear = np.einsum("knd,kd->kn", mean_pooled(acts), reader.values)
     linear += reader.biases[:, None]
     assert scores.dtype == np.float32
     assert scores.shape == (2, 5)
@@ -409,14 +411,6 @@ def planted_tokens(
     return acts, labels, planted
 
 
-def mean_pooled(acts: Activations) -> NDArray[np.float64]:
-    """The mean of each stimulus's rows on the first layer."""
-    counts = np.bincount(acts.row_stimulus).astype(np.float64)
-    sums = np.zeros((acts.n_stimuli, acts.data.shape[2]))
-    np.add.at(sums, acts.row_stimulus, acts.data[0].astype(np.float64))
-    return sums / counts[:, None]
-
-
 def test_attention_reader_reads_a_planted_token_that_the_mean_hides() -> None:
     acts, labels, _ = planted_tokens(n=200, seed=14)
     test, test_labels, test_planted = planted_tokens(n=200, seed=15)
@@ -424,8 +418,8 @@ def test_attention_reader_reads_a_planted_token_that_the_mean_hides() -> None:
     reader = fit_attention(acts, labels=labels)
 
     again = fit_attention(acts, labels=labels)
-    baseline = LogisticRegression().fit(mean_pooled(acts), labels)
-    mean_scores = baseline.decision_function(mean_pooled(test))
+    baseline = LogisticRegression().fit(mean_pooled(acts)[0], labels)
+    mean_scores = baseline.decision_function(mean_pooled(test)[0])
     weights = reference_weights(test, reader)[0, test_planted]
     scores = reader.score(test)
     for name in ("queries", "offsets", "values", "biases", "signs"):

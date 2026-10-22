@@ -24,6 +24,7 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 
 from tomography.activations import Activations
 from tomography.reading.directions import FloatArray
+from tomography.reading.directions import _check_labels
 from tomography.reading.reader import RepReader
 from tomography.reading.reader import _layer_seed
 from tomography.reading.reader import orient
@@ -101,8 +102,6 @@ def fit_lda(
             are malformed.
     """
     stack = _checked_stack(h, layers, labels)
-    if shrinkage is not None:
-        _check_shrinkage(shrinkage)
     positive = labels == 1
     vectors = np.stack(
         [_shrunk_mass_mean(rows, positive, shrinkage) for rows in stack]
@@ -121,20 +120,25 @@ class MLPReader:
     reader has no direction, so it cannot steer.
 
     Attributes:
-        method: `mlp` for one MLP per layer, `mlp_joint` for one MLP on the
-            layers concatenated feature-wise.
         layers: Layer indices, in the order of the first axis of the input.
+        joint: One MLP on the layers concatenated feature-wise instead of
+            one MLP per layer.
         models: The fitted classifiers: one per layer, or one in total.
         centers: Training means of shape (K, d).
         scales: Training standard deviations of shape (K, d), 1 for a
             constant feature.
     """
 
-    method: str
     layers: tuple[int, ...]
+    joint: bool
     models: tuple[MLPClassifier, ...]
     centers: NDArray[np.float64]
     scales: NDArray[np.float64]
+
+    @property
+    def method(self) -> str:
+        """`mlp`, or `mlp_joint` for a joint reader."""
+        return "mlp_joint" if self.joint else "mlp"
 
     def score(self, h: FloatArray) -> NDArray[np.float32]:
         """Scores activations with the fitted perceptrons.
@@ -155,14 +159,11 @@ class MLPReader:
             raise ValueError(
                 f"h must have shape ({n_layers}, n, {width}), got {stack.shape}"
             )
-        inputs = (stack - self.centers[:, None]) / self.scales[:, None]
-        if len(self.models) == n_layers:
-            logits = [
-                _logits(model, rows)
-                for model, rows in zip(self.models, inputs, strict=True)
-            ]
-        else:
-            logits = [_logits(self.models[0], np.concatenate(inputs, axis=1))]
+        blocks = _mlp_inputs(stack, self.centers, self.scales, self.joint)
+        logits = [
+            _logits(model, rows)
+            for model, rows in zip(self.models, blocks, strict=True)
+        ]
         return np.stack(logits).astype(np.float32)
 
 
@@ -211,13 +212,10 @@ def fit_mlp(
     centers = stack.mean(axis=1)
     deviations = stack.std(axis=1)
     scales = np.where(deviations > 0.0, deviations, 1.0)
-    inputs = (stack - centers[:, None]) / scales[:, None]
-    if joint:
-        blocks = [np.concatenate(inputs, axis=1)]
-        seeds = [seed]
-    else:
-        blocks = list(inputs)
-        seeds = [_layer_seed(seed, k) for k in range(len(blocks))]
+    blocks = _mlp_inputs(stack, centers, scales, joint)
+    seeds = (
+        [seed] if joint else [_layer_seed(seed, k) for k in range(len(blocks))]
+    )
     models = tuple(
         MLPClassifier(
             hidden_layer_sizes=tuple(hidden_sizes),
@@ -230,8 +228,8 @@ def fit_mlp(
         for block, block_seed in zip(blocks, seeds, strict=True)
     )
     return MLPReader(
-        method="mlp_joint" if joint else "mlp",
         layers=tuple(int(layer) for layer in layers),
+        joint=joint,
         models=models,
         centers=centers,
         scales=scales,
@@ -303,19 +301,23 @@ class AttentionReader:
             raise ValueError(
                 f"acts must have width {width}, got {acts.data.shape[2]}"
             )
-        stimulus = _row_stimulus(acts)
+        stimulus = torch.tensor(_row_stimulus(acts))
         logits = np.empty((len(self.layers), stimulus.shape[0]))
         heads = np.empty_like(logits)
         for k, layer_rows in enumerate(acts.data):
             rows = layer_rows.astype(np.float64)
             logits[k] = rows @ self.queries[k] + self.offsets[k]
             heads[k] = rows @ self.values[k] + self.biases[k]
-        pooled = _pool(
-            torch.from_numpy(logits),
-            torch.from_numpy(heads),
-            torch.tensor(stimulus),
-            acts.n_stimuli,
-            joint=self.joint,
+        pooled = torch.stack(
+            [
+                _pool(
+                    torch.from_numpy(logits[block]),
+                    torch.from_numpy(heads[block]),
+                    stimulus,
+                    acts.n_stimuli,
+                )
+                for block in _blocks(len(self.layers), self.joint)
+            ]
         )
         return pooled.numpy().astype(np.float32)
 
@@ -365,11 +367,9 @@ def fit_attention(
     that finder's regression. The queries and value heads start at zero, so
     the fit starts from mean pooling, and full-batch L-BFGS minimizes the
     loss in float64 on the CPU with scikit-learn's settings. The fit draws
-    no random numbers, so it needs no seed. A per-layer reader fits each
-    layer alone; a joint reader fits one softmax over the cells of all the
-    layers, with one query and one value head per layer and one shared
-    bias, and holds the rows of all those layers in float64. The value
-    heads are oriented over the token rows the way the sweep orients a
+    no random numbers, so it needs no seed. A joint reader shares one value
+    bias across its layers and holds the rows of all of them in float64. The
+    value heads are oriented over the token rows the way the sweep orients a
     `RepReader.fit` reader of `response` rows: the labels repeat on every
     row of a stimulus, and `Activations.row_groups` maps the pairs and the
     groups to rows.
@@ -399,39 +399,28 @@ def fit_attention(
             is zero, or the orientation inputs are malformed (members of a
             group need equal row counts).
     """
-    _check_labels(labels, acts.n_stimuli)
+    _check_classes(labels, acts.n_stimuli)
     if not c > 0.0:
         raise ValueError(f"c must be positive, got {c}")
     stimulus = torch.tensor(_row_stimulus(acts))
     targets = torch.tensor(labels, dtype=torch.float64)
     n_layers, _, width = acts.data.shape
-    blocks = (
-        [slice(0, n_layers)]
-        if joint
-        else [slice(k, k + 1) for k in range(n_layers)]
-    )
     queries = np.empty((n_layers, width))
     values = np.empty((n_layers, width))
     biases = np.empty(n_layers)
     offsets = np.empty(n_layers)
-    for block in blocks:
-        rows = acts.data[block].astype(np.float64)
-        if not np.isfinite(rows).all():
-            raise ValueError("acts must be finite")
-        centers = rows.mean(axis=1)
-        rows -= centers[:, None]
-        scales = np.sqrt(np.square(rows).sum(axis=(1, 2)) / rows.shape[1])
-        if not scales.all():
-            layer = acts.layers[block][int(np.argmin(scales))]
-            raise ValueError(f"the rows of layer {layer} have no variance")
-        rows /= scales[:, None, None]
-        scaled_queries, scaled_values, bias = _fit_cells(
-            torch.from_numpy(rows), stimulus, targets, c, tol, max_iter
+    for block in _blocks(n_layers, joint):
+        queries[block], offsets[block], values[block], biases[block] = (
+            _fit_block(
+                acts.data[block],
+                acts.layers[block],
+                stimulus,
+                targets,
+                c,
+                tol,
+                max_iter,
+            )
         )
-        queries[block] = scaled_queries / scales[:, None]
-        values[block] = scaled_values / scales[:, None]
-        offsets[block] = -(queries[block] * centers).sum(axis=1)
-        biases[block] = bias - (values[block] * centers).sum(axis=1)
     reader = AttentionReader(
         layers=tuple(int(layer) for layer in acts.layers),
         joint=joint,
@@ -451,11 +440,8 @@ def fit_attention(
     return replace(reader, signs=oriented.signs)
 
 
-def _check_labels(labels: NDArray[np.int64], n: int) -> None:
-    if labels.shape != (n,):
-        raise ValueError(f"labels must have shape ({n},), got {labels.shape}")
-    if not np.isin(labels, (0, 1)).all():
-        raise ValueError("labels must be 0 or 1")
+def _check_classes(labels: NDArray[np.int64], n: int) -> None:
+    _check_labels(labels, n)
     if (labels == 1).all() or not (labels == 1).any():
         raise ValueError("labels must contain both classes")
 
@@ -470,15 +456,10 @@ def _checked_stack(
         raise ValueError(
             f"layers has {len(layers)} entries for {stack.shape[0]} layers"
         )
-    _check_labels(labels, stack.shape[1])
+    _check_classes(labels, stack.shape[1])
     if not np.isfinite(stack).all():
         raise ValueError("h must be finite")
     return stack
-
-
-def _check_shrinkage(shrinkage: float) -> None:
-    if not 0.0 < shrinkage <= 1.0:
-        raise ValueError(f"shrinkage must be in (0, 1], got {shrinkage}")
 
 
 def _shrunk_mass_mean(
@@ -491,7 +472,8 @@ def _shrunk_mass_mean(
     centered = rows - np.where(positive[:, None], positive_mean, negative_mean)
     if shrinkage is None:
         shrinkage = float(ledoit_wolf_shrinkage(centered, assume_centered=True))
-        _check_shrinkage(shrinkage)
+    if not 0.0 < shrinkage <= 1.0:
+        raise ValueError(f"shrinkage must be in (0, 1], got {shrinkage}")
     _, singular, basis = np.linalg.svd(centered, full_matrices=False)
     variances = singular**2 / rows.shape[0]
     ridge = shrinkage * variances.sum() / rows.shape[1]
@@ -503,6 +485,16 @@ def _shrunk_mass_mean(
     # Off the row space of the centered rows, S is the ridge times identity.
     direction = basis.T @ (inside / shrunk) + (gap - basis.T @ inside) / ridge
     return np.asarray(direction, dtype=np.float64)
+
+
+def _mlp_inputs(
+    stack: NDArray[np.float64],
+    centers: NDArray[np.float64],
+    scales: NDArray[np.float64],
+    joint: bool,
+) -> list[NDArray[np.float64]]:
+    inputs = (stack - centers[:, None]) / scales[:, None]
+    return [np.concatenate(inputs, axis=1)] if joint else list(inputs)
 
 
 def _logits(
@@ -526,54 +518,78 @@ def _row_stimulus(acts: Activations) -> NDArray[np.int64]:
     return np.asarray(acts.row_stimulus, dtype=np.int64)
 
 
+def _blocks(n_layers: int, joint: bool) -> list[slice]:
+    # The layers that share one softmax: all of them, or each one alone.
+    if joint:
+        return [slice(0, n_layers)]
+    return [slice(k, k + 1) for k in range(n_layers)]
+
+
 def _pool(
     logits: torch.Tensor,
     values: torch.Tensor,
     stimulus: torch.Tensor,
     n_stimuli: int,
-    *,
-    joint: bool,
 ) -> torch.Tensor:
-    if joint:
-        stimulus = stimulus.repeat(logits.shape[0])
-        logits = logits.reshape(1, -1)
-        values = values.reshape(1, -1)
-    index = stimulus.expand_as(logits)
-    shape = (logits.shape[0], n_stimuli)
+    # Pools the cells of shape (layers, rows) into one score per stimulus.
+    cells = stimulus.repeat(logits.shape[0])
+    logits = logits.reshape(-1)
+    values = values.reshape(-1)
     # Subtracting each stimulus's largest logit leaves its softmax unchanged
     # and keeps the exponentials from overflowing.
-    peaks = logits.new_full(shape, -torch.inf).scatter_reduce(
-        1, index, logits.detach(), "amax"
+    peaks = logits.new_full((n_stimuli,), -torch.inf).scatter_reduce(
+        0, cells, logits.detach(), "amax"
     )
-    weights = torch.exp(logits - peaks.gather(1, index))
-    total = logits.new_zeros(shape).scatter_add(1, index, weights)
-    pooled = logits.new_zeros(shape).scatter_add(1, index, weights * values)
+    weights = torch.exp(logits - peaks[cells])
+    total = logits.new_zeros(n_stimuli).scatter_add(0, cells, weights)
+    pooled = logits.new_zeros(n_stimuli).scatter_add(0, cells, weights * values)
     return pooled / total
 
 
-def _fit_cells(
-    rows: torch.Tensor,
+def _fit_block(
+    data: NDArray[np.float32],
+    layers: tuple[int, ...],
     stimulus: torch.Tensor,
     targets: torch.Tensor,
     c: float,
     tol: float,
     max_iter: int,
-) -> tuple[NDArray[np.float64], NDArray[np.float64], float]:
+) -> tuple[NDArray[np.float64], ...]:
+    # Fits the layers of one softmax on scaled rows and returns their
+    # queries, offsets, value heads and biases in activation units.
+    rows = data.astype(np.float64)
+    if not np.isfinite(rows).all():
+        raise ValueError("acts must be finite")
+    centers = rows.mean(axis=1)
+    rows -= centers[:, None]
+    squares = np.array([np.square(layer).sum() for layer in rows])
+    scales = np.sqrt(squares / rows.shape[1])
+    if not scales.all():
+        layer = layers[int(np.argmin(scales))]
+        raise ValueError(f"the rows of layer {layer} have no variance")
+    rows /= scales[:, None, None]
+    scaled = torch.from_numpy(rows)
     n_layers, _, width = rows.shape
     size = n_layers * width
     strength = 1.0 / (c * targets.shape[0])
+
+    def split(
+        params: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        queries = params[:size].view(n_layers, width)
+        values = params[size:-1].view(n_layers, width)
+        return queries, values, params[-1]
 
     def objective(
         theta: NDArray[np.float64],
     ) -> tuple[float, NDArray[np.float64]]:
         params = torch.tensor(theta, requires_grad=True)
-        queries = params[:size].view(n_layers, width)
-        values = params[size:-1].view(n_layers, width)
-        logits = torch.einsum("krd,kd->kr", rows, queries)
-        heads = torch.einsum("krd,kd->kr", rows, values) + params[-1]
-        scores = _pool(logits, heads, stimulus, targets.shape[0], joint=True)
+        queries, values, bias = split(params)
+        logits = torch.einsum("krd,kd->kr", scaled, queries)
+        heads = torch.einsum("krd,kd->kr", scaled, values) + bias
+        scores = _pool(logits, heads, stimulus, targets.shape[0])
         penalty = queries.square().sum() + values.square().sum()
-        loss = binary_cross_entropy_with_logits(scores[0], targets)
+        loss = binary_cross_entropy_with_logits(scores, targets)
         loss = loss + 0.5 * strength * penalty
         (gradient,) = torch.autograd.grad(loss, params)
         return float(loss.detach()), gradient.numpy()
@@ -596,9 +612,9 @@ def _fit_cells(
             ConvergenceWarning,
             stacklevel=3,
         )
-    theta = np.asarray(result.x, dtype=np.float64)
-    return (
-        theta[:size].reshape(n_layers, width),
-        theta[size:-1].reshape(n_layers, width),
-        float(theta[-1]),
-    )
+    fitted = split(torch.tensor(result.x, dtype=torch.float64))
+    queries = fitted[0].numpy() / scales[:, None]
+    values = fitted[1].numpy() / scales[:, None]
+    offsets = -(queries * centers).sum(axis=1)
+    biases = float(fitted[2]) - (values * centers).sum(axis=1)
+    return queries, offsets, values, biases

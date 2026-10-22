@@ -88,8 +88,7 @@ def fit_direction(
             finds no signal is an error.
         c: Only for `logistic`. The inverse L2 strength of the regression
             on the scaled rows, scikit-learn's `C`: smaller values
-            regularize more. The default 1 is the value of every earlier
-            run.
+            regularize more.
 
     Returns:
         The unit direction, the mean it was centered on and the raw norm.
