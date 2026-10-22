@@ -53,6 +53,7 @@ def fit_direction(
     preprocess: Preprocess = "center",
     seed: int = 0,
     refit_at_zero: bool = False,
+    c: float = 1.0,
 ) -> FitResult:
     """Fits one direction to the activations of one layer.
 
@@ -85,6 +86,10 @@ def fit_direction(
             under its tolerance, repeat the fit with a tighter one instead
             of failing with a zero norm. Off by default, so a fit that
             finds no signal is an error.
+        c: Only for `logistic`. The inverse L2 strength of the regression
+            on the scaled rows, scikit-learn's `C`: smaller values
+            regularize more. The default 1 is the value of every earlier
+            run.
 
     Returns:
         The unit direction, the mean it was centered on and the raw norm.
@@ -115,7 +120,9 @@ def fit_direction(
         if method == "mean_diff":
             direction = _class_difference(fitted, positive)
         else:
-            direction = _logistic_coefficients(fitted, positive, refit_at_zero)
+            direction = _logistic_coefficients(
+                fitted, positive, refit_at_zero, c
+            )
     elif method == "kmeans":
         direction = _centroid_difference(fitted, seed)
     elif method == "random":
@@ -181,14 +188,15 @@ def _logistic_coefficients(
     rows: NDArray[np.float64],
     positive: NDArray[np.bool_],
     refit_at_zero: bool,
+    c: float,
 ) -> NDArray[np.float64]:
     scale = float(np.linalg.norm(rows) / np.sqrt(rows.shape[0]))
     if scale == 0.0:
         raise ValueError("the fitted direction has zero norm")
     scaled = rows / scale
-    model = LogisticRegression(max_iter=1000).fit(scaled, positive)
+    model = LogisticRegression(C=c, max_iter=1000).fit(scaled, positive)
     if refit_at_zero and not model.coef_.any():
-        model = LogisticRegression(max_iter=1000, tol=_FAINT_TOL).fit(
+        model = LogisticRegression(C=c, max_iter=1000, tol=_FAINT_TOL).fit(
             scaled, positive
         )
     return np.asarray(model.coef_[0], dtype=np.float64) / scale

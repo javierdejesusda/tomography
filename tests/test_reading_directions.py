@@ -3,6 +3,7 @@ from typing import NamedTuple
 import numpy as np
 from numpy.typing import NDArray
 import pytest
+from sklearn.linear_model import LogisticRegression
 
 from tomography.reading.directions import Method
 from tomography.reading.directions import fit_direction
@@ -299,6 +300,64 @@ def faint_signal() -> tuple[NDArray[np.float64], NDArray[np.int64]]:
     h -= np.outer(sign, sign @ h / (sign @ sign))
     h[:, 0] += 1e-4 * sign
     return h, labels
+
+
+def logistic_reference(
+    h: NDArray[np.floating],
+    labels: NDArray[np.int64],
+    c: float,
+    tol: float = 1e-4,
+) -> tuple[NDArray[np.float32], float]:
+    """The documented logistic fit: L2 regression on centered, scaled rows.
+
+    Returns:
+        The unit direction with its largest coordinate positive, as float32,
+        and the norm of the coefficients in activation units.
+    """
+    h64 = np.asarray(h, dtype=np.float64)
+    rows = h64 - h64.mean(axis=0)
+    scale = float(np.linalg.norm(rows) / np.sqrt(rows.shape[0]))
+    model = LogisticRegression(C=c, max_iter=1000, tol=tol)
+    vector = model.fit(rows / scale, labels == 1).coef_[0] / scale
+    raw_norm = float(np.linalg.norm(vector))
+    unit = vector / raw_norm
+    if unit[np.argmax(np.abs(unit))] < 0:
+        unit = -unit
+    return unit.astype(np.float32), raw_norm
+
+
+def test_logistic_default_keeps_the_unit_inverse_l2_strength() -> None:
+    h, labels, _ = make_blobs(120, seed=17)
+    direction, raw_norm = logistic_reference(h, labels, c=1.0)
+
+    fit = fit_direction("logistic", h, labels=labels)
+
+    np.testing.assert_array_equal(fit.direction, direction)
+    assert fit.raw_norm == raw_norm
+
+
+@pytest.mark.parametrize("c", [0.01, 100.0])
+def test_logistic_c_is_the_inverse_l2_strength_of_the_regression(
+    c: float,
+) -> None:
+    h, labels, _ = make_blobs(120, seed=17)
+    direction, raw_norm = logistic_reference(h, labels, c)
+
+    fit = fit_direction("logistic", h, labels=labels, c=c)
+
+    default = fit_direction("logistic", h, labels=labels)
+    np.testing.assert_array_equal(fit.direction, direction)
+    assert fit.raw_norm == raw_norm
+    assert not np.allclose(fit.direction, default.direction)
+
+
+def test_logistic_refit_at_zero_keeps_the_given_c() -> None:
+    h, labels = faint_signal()
+    direction, _ = logistic_reference(h, labels, c=0.5, tol=1e-10)
+
+    fit = fit_direction("logistic", h, labels=labels, refit_at_zero=True, c=0.5)
+
+    np.testing.assert_allclose(fit.direction, direction, atol=1e-6)
 
 
 def test_logistic_finds_a_faint_signal_when_asked_to_refit() -> None:
