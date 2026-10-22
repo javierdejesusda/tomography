@@ -307,12 +307,15 @@ class HarnessPrompt:
     """One harness request: a context and the continuation of each choice.
 
     The harness's `_encode_pair` moves whitespace at the end of a context to
-    the front of the continuation before it tokenizes; the builders below
-    apply that move, so `context` never ends in whitespace.
+    the front of the continuation before it tokenizes. The builders below
+    move trailing spaces the same way and reject any other trailing
+    whitespace, so `context` never ends in whitespace and every
+    continuation starts with a space: the case where scoring the context
+    and the continuation separately gives the harness's tokens.
 
     Attributes:
         context: The prompt the continuations are scored after.
-        continuations: For each choice in choice order, the whitespace moved
+        continuations: For each choice in choice order, the spaces moved
             from the end of the context, a space and the choice.
     """
 
@@ -342,8 +345,9 @@ def fewshot_prompt(
         The item's `HarnessPrompt`.
 
     Raises:
-        ValueError: If `task` has no few-shot prompt: RACE goes through
-            `race_prompt` and TruthfulQA through `tqa_prompt`.
+        ValueError: If `task` has no few-shot prompt (RACE goes through
+            `race_prompt` and TruthfulQA through `tqa_prompt`), or the
+            context ends in whitespace other than spaces.
     """
     if task not in get_args(FewShotTask):
         raise ValueError(
@@ -354,7 +358,7 @@ def fewshot_prompt(
     solved = [
         f"{_query(task, shot)} {shot.choices[shot.correct]}" for shot in shots
     ]
-    return _prompt("\n\n".join([*solved, _query(task, item)]), item)
+    return _prompt(task, "\n\n".join([*solved, _query(task, item)]), item)
 
 
 def race_prompt(passage: RacePassage) -> HarnessPrompt:
@@ -373,6 +377,10 @@ def race_prompt(passage: RacePassage) -> HarnessPrompt:
 
     Returns:
         The `HarnessPrompt` of the passage's last question.
+
+    Raises:
+        ValueError: If the last question ends in whitespace other than
+            spaces.
     """
     context = f"Article: {passage.article}\n\n"
     for question, answer in passage.earlier:
@@ -380,7 +388,7 @@ def race_prompt(passage: RacePassage) -> HarnessPrompt:
             context += f"{question[-5:]}{answer}\n"
         else:
             context += f"Question: {question}\nAnswer: {answer}\n"
-    return _prompt(context + passage.last.question, passage.last)
+    return _prompt("race", context + passage.last.question, passage.last)
 
 
 def tqa_prompt(item: ChoiceExample) -> HarnessPrompt:
@@ -396,7 +404,7 @@ def tqa_prompt(item: ChoiceExample) -> HarnessPrompt:
     Returns:
         The item's `HarnessPrompt`.
     """
-    return _prompt(f"{TQA_PROMPT}\n\nQ: {item.question}\nA:", item)
+    return _prompt("tqa", f"{TQA_PROMPT}\n\nQ: {item.question}\nA:", item)
 
 
 def harness_credit(
@@ -439,14 +447,25 @@ def harness_credit(
     return float(acc), float(acc_norm)
 
 
-def _prompt(context: str, item: ChoiceExample) -> HarnessPrompt:
+def _prompt(task: Task, context: str, item: ChoiceExample) -> HarnessPrompt:
     """Pairs a context with a space and each choice of the item.
 
-    Whitespace at the end of the context moves to the front of every
-    continuation, as the harness's `_encode_pair` does before it tokenizes.
+    Spaces at the end of the context move to the front of every
+    continuation, as the harness's `_encode_pair` does before it tokenizes,
+    so every continuation still starts with a space.
+
+    Raises:
+        ValueError: If the context ends in whitespace other than spaces,
+            such as a newline, which the scorer cannot match to the harness
+            (the joint encoding can merge it into the previous token).
     """
     kept = context.rstrip()
     moved = context[len(kept) :]
+    if moved.strip(" "):
+        raise ValueError(
+            f"{task} {item.uid}: the context ends in {moved!r}; only spaces "
+            "can move to the continuations"
+        )
     return HarnessPrompt(kept, tuple(f"{moved} {c}" for c in item.choices))
 
 

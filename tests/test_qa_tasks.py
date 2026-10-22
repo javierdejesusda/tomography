@@ -357,15 +357,37 @@ def test_fewshot_prompt_without_shots_is_the_query() -> None:
     assert prompt.context == "Question: Water boils at\nAnswer:"
 
 
-def test_fewshot_prompt_moves_trailing_whitespace_to_the_continuations() -> (
-    None
-):
-    item = ChoiceExample("t2", "Ice melts at \n", ("0 C", "9 C"), 0, "test")
+def test_fewshot_prompt_moves_trailing_spaces_to_the_continuations() -> None:
+    item = ChoiceExample("t2", "Ice melts at  ", ("0 C", "9 C"), 0, "test")
 
     prompt = fewshot_prompt("obqa", item, [SUM])
 
     assert prompt == HarnessPrompt(
-        "What is 1 + 1? 2\n\nIce melts at", (" \n 0 C", " \n 9 C")
+        "What is 1 + 1? 2\n\nIce melts at", ("   0 C", "   9 C")
+    )
+
+
+@pytest.mark.parametrize("tail", ["\n", " \n", "\t", "  \r\n"])
+def test_fewshot_prompt_rejects_a_context_ending_in_other_whitespace(
+    tail: str,
+) -> None:
+    item = ChoiceExample("t2", f"Ice melts at{tail}", ("0 C", "9 C"), 0, "test")
+
+    with pytest.raises(ValueError, match=r"obqa t2: the context ends in"):
+        fewshot_prompt("obqa", item, [SUM])
+
+
+@pytest.mark.parametrize("task", ["arc_easy", "arc_challenge", "csqa"])
+@pytest.mark.parametrize("tail", ["  ", "\n"])
+def test_question_whitespace_stays_inside_the_answer_query(
+    task: str, tail: str
+) -> None:
+    item = ChoiceExample("t3", f"Ice melts at{tail}", ("0 C", "9 C"), 0, "test")
+
+    prompt = fewshot_prompt(task, item, [])  # type: ignore[arg-type]
+
+    assert prompt == HarnessPrompt(
+        f"Question: Ice melts at{tail}\nAnswer:", (" 0 C", " 9 C")
     )
 
 
@@ -399,7 +421,7 @@ def test_race_prompt_is_the_gpt3_zero_shot_prompt() -> None:
     )
 
 
-def test_race_prompt_moves_trailing_whitespace_to_the_continuations() -> None:
+def test_race_prompt_moves_trailing_spaces_to_the_continuations() -> None:
     last = ChoiceExample("race-high2.txt", "Why?  ", tuple("abcd"), 0, "test")
 
     prompt = race_prompt(RacePassage("Art.", last, ()))
@@ -407,6 +429,15 @@ def test_race_prompt_moves_trailing_whitespace_to_the_continuations() -> None:
     assert prompt == HarnessPrompt(
         "Article: Art.\n\nWhy?", ("   a", "   b", "   c", "   d")
     )
+
+
+def test_race_prompt_rejects_a_last_question_ending_in_a_newline() -> None:
+    last = ChoiceExample("race-high3.txt", "Why?\n", tuple("abcd"), 0, "test")
+
+    with pytest.raises(
+        ValueError, match=r"race race-high3\.txt: the context ends in"
+    ):
+        race_prompt(RacePassage("Art.", last, ()))
 
 
 def test_tqa_prompt_puts_the_question_after_the_qa_prompt() -> None:
