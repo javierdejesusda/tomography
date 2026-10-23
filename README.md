@@ -138,6 +138,7 @@ Every id is the argument of `tomography run`. Coverage is read from the committe
 | `c4` | Does steering or a LoRRA adapter improve TruthfulQA? | all 10 |
 | `c5` | Can steering produce lies on TriviaQA? | all 10 |
 | `m1` | How do six finders compare on reading, steering and erasure? | all 10 |
+| `m2` | Which reader wins when scorer, readout and layer rule are compared on the same features, also under a misleading sentence and new wordings? | code only |
 | `lr1` | Train one LoRRA adapter on Alpaca: loss curve and held-out loss | all 10 |
 | `a1` | How much do directions from different seeds agree? | all 10 |
 | `a2` | What does the logit lens show for a direction? | all 10 |

@@ -213,7 +213,9 @@ readout by layer rule, so a gain of pooling is never credited to nonlinearity.
   of `shifts` (default `paraphrase`).
 - Controls: the text-only classifier on the raw texts (`p9.risk.text_scores`, word n-grams), a random direction at
   every readout, and every scorer refitted on training labels shuffled within their pairs (`shuffled` series), which
-  runs the whole procedure, tuning included.
+  runs the whole procedure, tuning included. The text-only classifier reads the raw stimulus texts, so its scores are
+  the same under every condition by design: it measures how much the stimulus content alone gives away, as `tb1`
+  does, and the decoy and template conditions are measured on the readers.
 - Statistics: each cell's metrics are means over the 10 seeds with seed intervals. Comparisons use the seed
   ensemble: each seed's scores are standardized with their select mean and standard deviation and averaged over the
   seeds. Against each baseline (`logistic/last` and `mean_diff/last` by default, at the same layer rule, or `top_k`
