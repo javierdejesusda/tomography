@@ -478,7 +478,14 @@ def _token_pass(
     wanted: Sequence[PositionStrategy],
     config: Config,
 ) -> dict[PositionStrategy, Activations]:
-    """Reads the tokens of some spans batch by batch and reduces them."""
+    """Reads the tokens of some spans batch by batch and reduces them.
+
+    A missing span is named by its stimulus index in `texts`; any other
+    error of a batch is prefixed with the index its batch starts at.
+    """
+    for index, span in enumerate(spans):
+        if span is None:
+            raise ValueError(f"stimulus {index} has no span for {wanted[0]!r}")
     layers = _read_layers(config, loaded)
     kept = [
         k
@@ -488,15 +495,20 @@ def _token_pass(
     parts: dict[PositionStrategy, list[Activations]] = {p: [] for p in wanted}
     for first in range(0, len(texts), config.batch_size):
         batch = slice(first, first + config.batch_size)
-        rows = collect_activations(
-            loaded,
-            texts[batch],
-            layers=layers,
-            position="response",
-            response_spans=spans[batch],
-            bos=config.bos,
-            batch_size=config.batch_size,
-        )
+        try:
+            rows = collect_activations(
+                loaded,
+                texts[batch],
+                layers=layers,
+                position="response",
+                response_spans=spans[batch],
+                bos=config.bos,
+                batch_size=config.batch_size,
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"in the batch that starts at stimulus {first}: {error}"
+            ) from error
         for position in wanted:
             parts[position].append(
                 _subset(rows, kept)
@@ -553,7 +565,10 @@ def _concatenate(parts: Sequence[Activations]) -> Activations:
         layers=parts[0].layers,
         position=parts[0].position,
         row_stimulus=np.concatenate(
-            [p.row_stimulus + o for p, o in zip(parts, offsets, strict=False)]
+            [
+                part.row_stimulus + offset
+                for part, offset in zip(parts, offsets[:-1], strict=True)
+            ]
         ),
         row_rank=np.concatenate([part.row_rank for part in parts]),
         row_token=np.concatenate([part.row_token for part in parts]),
@@ -1394,6 +1409,10 @@ def _check(config: Config) -> tuple[str, ...]:
         )
     if config.top_k < 1:
         raise ValueError(f"top_k must be at least 1, got {config.top_k}")
+    if config.batch_size < 1:
+        raise ValueError(
+            f"batch_size must be at least 1, got {config.batch_size}"
+        )
     if config.token_layers == ():
         raise ValueError(
             "token_layers must name at least one layer, or be None to keep "
@@ -1556,10 +1575,10 @@ def run(config: Config, run_dir: RunDir) -> None:
 
     Raises:
         ValueError: If there is no task, scorer, readout or layer rule, a
-            grid is empty or not positive, `top_k` is below 1, a baseline is
-            not a cell of the run, or a task is unknown, not binary or has
-            no scorer or readout left to read (all checked before the model
-            is loaded).
+            grid is empty or not positive, `top_k` or `batch_size` is below
+            1, `token_layers` is empty, a baseline is not a cell of the run,
+            or a task is unknown, not binary or has no scorer or readout
+            left to read (all checked before the model is loaded).
     """
     sources: list[TaskSource] = list(
         dict.fromkeys(

@@ -396,6 +396,7 @@ def _refused(
         ({"mlp_alpha": (0.1, 0.0)}, "mlp_alpha must hold positive values"),
         ({"top_k": 0}, "top_k must be at least 1"),
         ({"token_layers": ()}, "token_layers must name at least one layer"),
+        ({"batch_size": 0}, "batch_size must be at least 1, got 0"),
         (
             {"logistic_c": (1.0, 0.1)},
             "logistic_c must run from the strongest penalty",
@@ -943,6 +944,39 @@ def test_read_positions_runs_only_the_passes_it_needs(
 
     assert list(read) == ["max", "mean"]
     assert len(texts) == len(stimuli.texts)
+
+
+def test_read_positions_names_the_stimulus_without_a_span(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    stimuli = _truth_stimuli(tiny_gpt2)
+    spans = list(stimuli.concept_spans)
+    spans[5] = None
+    broken = dataclasses.replace(stimuli, concept_spans=tuple(spans))
+
+    with pytest.raises(
+        ValueError, match=r"^stimulus 5 has no span for 'concept_mean'$"
+    ):
+        read_positions(
+            tiny_gpt2, broken, ("concept_mean",), _config(batch_size=2)
+        )
+
+
+def test_read_positions_names_the_batch_of_a_span_without_tokens(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    stimuli = _truth_stimuli(tiny_gpt2)
+    spans = list(stimuli.response_spans)
+    end = len(stimuli.texts[5])
+    spans[5] = (end + 1, end + 2)
+    broken = dataclasses.replace(stimuli, response_spans=tuple(spans))
+
+    with pytest.raises(
+        ValueError,
+        match=r"^in the batch that starts at stimulus 4: stimulus 1: the "
+        r"span .* overlaps no token$",
+    ):
+        read_positions(tiny_gpt2, broken, ("mean",), _config(batch_size=2))
 
 
 def test_token_layers_keep_the_token_rows_of_those_layers_only(
