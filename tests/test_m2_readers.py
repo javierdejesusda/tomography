@@ -34,6 +34,7 @@ from tomography.experiments.m2_readers import applies
 from tomography.experiments.m2_readers import cells
 from tomography.experiments.m2_readers import execute
 from tomography.experiments.m2_readers import plot
+from tomography.experiments.m2_readers import read_top_k
 from tomography.experiments.m2_readers import run
 from tomography.experiments.m2_readers import token_score_max
 from tomography.experiments.m2_readers import tune_per_layer
@@ -44,8 +45,9 @@ from tomography.reading.stats import delong_test
 from tomography.reading.stats import holm_correction
 from tomography.reading.stats import paired_auroc_diff
 from tomography.reading.stats import threshold_metrics
+from tomography.reading.stats import top_k_layers
 
-DEFAULT_HASH = "e8285f696f8c"
+DEFAULT_HASH = "8c300e948f6c"
 
 
 def test_the_factorial_names_its_scorers_readouts_and_rules() -> None:
@@ -84,14 +86,15 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.experiment == "m2"
     assert config.n_eval_pairs == 256
     assert config.tasks == ("sentiment", "truth", "utility")
-    assert config.scorers == SCORERS
+    assert config.scorers == ("pca_diff", "mean_diff", "logistic", "lda", "mlp")
     assert config.readouts == READOUTS
     assert config.layer_rules == LAYER_RULES
     assert config.top_k == 5
     assert config.decoys == ("random", "against")
     assert config.shifts == ("paraphrase",)
     assert config.controls == CONTROLS
-    assert len(config.logistic_c) == len(config.mlp_alpha)
+    assert config.logistic_c == (0.01, 0.1, 1.0, 10.0)
+    assert config.mlp_alpha == (0.1, 0.01, 0.001, 0.0001)
     assert config.baselines == ("logistic/last", "mean_diff/last")
     assert Config.from_dict(config.to_dict()) == config
 
@@ -216,6 +219,39 @@ def test_tuning_keeps_the_first_best_grid_value_of_each_layer() -> None:
     np.testing.assert_array_equal(tune_per_layer(metrics), [1, 0, 0])
 
 
+def test_read_top_k_skips_layers_whose_select_scores_are_constant() -> None:
+    metric = np.array([0.9, 0.5, 0.8, 0.7])
+    val = np.array(
+        [[1.0, 1.0, 1.0], [0.0, 1.0, 2.0], [3.0, 1.0, 2.0], [1.0, 5.0, 0.0]]
+    )
+    test = np.arange(8.0).reshape(4, 2)
+
+    choice = read_top_k(metric, [1, 2, 3, 4], val, test, k=2)
+
+    expected = top_k_layers(metric[1:], [2, 3, 4], val[1:], test[1:], k=2)
+    assert choice.layers == (3, 4)
+    np.testing.assert_array_equal(choice.test_scores, expected.test_scores)
+
+
+def test_read_top_k_reads_fewer_layers_when_few_vary() -> None:
+    metric = np.array([0.9, 0.5])
+    val = np.array([[1.0, 1.0], [0.0, 2.0]])
+
+    choice = read_top_k(metric, [1, 2], val, np.ones((2, 3)), k=2)
+
+    assert choice.layers == (2,)
+
+
+def test_read_top_k_falls_back_to_the_best_layer_when_none_varies() -> None:
+    val = np.ones((2, 3))
+    test = np.array([[1.0, 2.0], [3.0, 4.0]])
+
+    choice = read_top_k(np.array([0.5, 0.6]), [1, 2], val, test, k=2)
+
+    assert choice.layers == (2,)
+    np.testing.assert_array_equal(choice.test_scores, [3.0, 4.0])
+
+
 def _sentiment(per_class: int = 12) -> list[Example]:
     words = {1: ("good", "fine", "great"), 0: ("bad", "poor", "dull")}
     return [
@@ -265,8 +301,9 @@ def _config(**overrides: Any) -> Config:
         n_pairs=4,
         n_eval_pairs=3,
         top_k=2,
+        scorers=SCORERS,
         logistic_c=(0.1, 10.0),
-        mlp_alpha=(0.01, 1.0),
+        mlp_alpha=(1.0, 0.01),
         mlp_hidden=(4,),
         n_boot=50,
     )
@@ -298,6 +335,18 @@ def _refused(
         ({"logistic_c": ()}, "at least one entry in logistic_c"),
         ({"mlp_alpha": (0.1, 0.0)}, "mlp_alpha must hold positive values"),
         ({"top_k": 0}, "top_k must be at least 1"),
+        (
+            {"logistic_c": (1.0, 0.1)},
+            "logistic_c must run from the strongest penalty",
+        ),
+        (
+            {"mlp_alpha": (0.01, 1.0)},
+            "mlp_alpha must run from the strongest penalty",
+        ),
+        (
+            {"layer_rules": ("best", "joint")},
+            "the joint rule needs top_k",
+        ),
         (
             {"baselines": ("lda/last",), "scorers": ("logistic",)},
             "baseline 'lda/last' is not a cell of the run",
@@ -622,3 +671,34 @@ def test_plot_draws_the_auroc_matrix_of_every_task(
     paths = plot(finished, tmp_path)
     names = {p.name for p in paths}
     assert {"auroc_sentiment.png", "auroc_utility.pdf"} <= names
+
+
+def test_the_layer_rules_of_a_cell_share_its_per_layer_fits(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(
+        tasks=("utility",),
+        scorers=("mlp",),
+        readouts=("last",),
+        layer_rules=("best", "top_k"),
+        controls=(),
+        decoys=(),
+        baselines=(),
+        top_k=1,
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    _quiet_execute(config, run_dir, tiny_gpt2)
+    arrays = run_dir.read_arrays("scores_utility")
+    sidecar = cast(dict[str, Any], run_dir.read_json("scores_utility"))
+    best = sidecar["entries"].index("mlp/last/best/reader")
+    top = sidecar["entries"].index("mlp/last/top_k/reader")
+    assert (
+        sidecar["layers"]["mlp/last/best/reader"]
+        == (sidecar["layers"]["mlp/last/top_k/reader"])
+    )
+    select = arrays["select"][best]
+    mean = select.mean(axis=-1)[:, None, None]
+    std = select.std(axis=-1)[:, None, None]
+    np.testing.assert_allclose(
+        arrays["report"][top], (arrays["report"][best] - mean) / std
+    )

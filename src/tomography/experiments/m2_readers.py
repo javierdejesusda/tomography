@@ -78,6 +78,7 @@ from tomography.reading.probes import fit_ttpd
 from tomography.reading.reader import RepReader
 from tomography.reading.reader import _layer_seed
 from tomography.reading.reader import orient
+from tomography.reading.stats import LayerChoice
 from tomography.reading.stats import best_validation_layer
 from tomography.reading.stats import delong_test
 from tomography.reading.stats import holm_correction
@@ -168,12 +169,16 @@ class Config(ReadingConfig):
 
     Attributes:
         tasks: Keys of `READING_TASKS`; the task must be binary.
-        scorers: The scorers to compare, from `SCORERS`.
+        scorers: The scorers to compare, from `SCORERS`. `ttpd` is not a
+            default: without polarity labels, which no reading task has, it
+            scores as `mean_diff` does (both are the class-mean difference
+            of the centered rows).
         readouts: The readouts every scorer reads, from `READOUTS`; the
             concept readouts are skipped for a task without a concept slot
             or word, and `attention` is read by the logistic scorer only.
         layer_rules: From `LAYER_RULES`; `joint` applies to the MLP on the
-            one-row readouts and to the attention readout.
+            one-row readouts and to the attention readout, and needs
+            `top_k`, the rule of its baseline.
         top_k: Layers averaged by `top_k` and fitted jointly by `joint`, at
             most the number of layers read.
         decoys: The kinds of P2's misleading sentence to evaluate.
@@ -181,9 +186,11 @@ class Config(ReadingConfig):
             kind that does not apply to a task is skipped.
         controls: The controls to add, from `CONTROLS`.
         logistic_c: The grid of the logistic scorer's inverse L2 strength,
-            for the one-row, per-token and attention readouts alike.
-        mlp_alpha: The grid of the MLP's L2 strength, as many values as
-            `logistic_c` so both scorers get the same tuning budget.
+            for the one-row, per-token and attention readouts alike, in
+            increasing order, so a tie keeps the strongest penalty.
+        mlp_alpha: The grid of the MLP's L2 strength, in decreasing order
+            for the same reason, as many values as `logistic_c` so both
+            scorers get the same tuning budget.
         mlp_hidden: Hidden units of the MLP.
         baselines: The cells every other cell is compared with, as
             `<scorer>/<readout>`.
@@ -195,7 +202,13 @@ class Config(ReadingConfig):
     model: str = "gpt2"
     n_eval_pairs: int | None = 256
     tasks: tuple[str, ...] = ("sentiment", "truth", "utility")
-    scorers: tuple[Scorer, ...] = SCORERS
+    scorers: tuple[Scorer, ...] = (
+        "pca_diff",
+        "mean_diff",
+        "logistic",
+        "lda",
+        "mlp",
+    )
     readouts: tuple[Readout, ...] = READOUTS
     layer_rules: tuple[LayerRule, ...] = LAYER_RULES
     top_k: int = 5
@@ -203,7 +216,7 @@ class Config(ReadingConfig):
     shifts: tuple[VariantKind, ...] = ("paraphrase",)
     controls: tuple[Control, ...] = CONTROLS
     logistic_c: tuple[float, ...] = (0.01, 0.1, 1.0, 10.0)
-    mlp_alpha: tuple[float, ...] = (0.0001, 0.001, 0.01, 0.1)
+    mlp_alpha: tuple[float, ...] = (0.1, 0.01, 0.001, 0.0001)
     mlp_hidden: tuple[int, ...] = (64,)
     baselines: tuple[str, ...] = ("logistic/last", "mean_diff/last")
     n_boot: int = 2000
@@ -328,6 +341,46 @@ def tune_per_layer(
         list the grid from the strongest penalty so ties keep it.
     """
     return np.asarray(np.argmax(metrics, axis=0), dtype=np.int64)
+
+
+def read_top_k(
+    val_metric: NDArray[np.float64],
+    layers: Sequence[int],
+    val_scores: NDArray[np.float64],
+    test_scores: NDArray[np.float64],
+    *,
+    k: int,
+) -> LayerChoice:
+    """Applies `top_k_layers` to the layers whose select scores vary.
+
+    A layer whose scorer gives every select item the same score, such as an
+    MLP its penalty flattened, cannot be standardized, so it is left out
+    and fewer than k layers are read when fewer vary. When none varies, the
+    best layer is read as `best_validation_layer` reads it.
+
+    Args:
+        val_metric: Validation metric of each layer, shape (K,).
+        layers: The layer index of each entry of `val_metric`.
+        val_scores: Validation scores per layer, shape (K, n_val).
+        test_scores: Test scores per layer, shape (K, n_test).
+        k: The most layers averaged, at least 1.
+
+    Returns:
+        The layers read, best first, with their validation and test scores.
+    """
+    varies = np.ptp(val_scores, axis=1) > 0.0
+    if not varies.any():
+        return best_validation_layer(
+            val_metric, layers, val_scores, test_scores
+        )
+    kept = np.flatnonzero(varies)
+    return top_k_layers(
+        val_metric[kept],
+        [layers[int(i)] for i in kept],
+        val_scores[kept],
+        test_scores[kept],
+        k=min(k, kept.size),
+    )
 
 
 ScoreFn = Callable[[Activations], NDArray[np.float64]]
@@ -511,20 +564,24 @@ def _evaluate(
 
 def _seed_choices(
     config: Config,
-    cell: Cell,
+    scorer: str,
+    readout: str,
+    rules: Sequence[str],
     train: Prepared,
     select: Prepared,
     report: Sequence[Prepared],
     labels: NDArray[np.int64],
     seed: int,
-) -> _Choice:
-    """Fits one seed of a cell, tunes it per layer and applies its rule."""
-    grid = _grid(config, cell.scorer)
+) -> list[_Choice]:
+    """Fits one seed per layer, tunes it, then applies each layer rule.
+
+    The rules share the tuned per-layer fits, so two rules of a cell differ
+    only in how they read the layers.
+    """
+    grid = _grid(config, scorer)
     tried = [
         _evaluate(
-            _fit(
-                config, cell.scorer, cell.readout, train, labels, g, seed, False
-            ),
+            _fit(config, scorer, readout, train, labels, g, seed, False),
             select,
             report,
         )
@@ -537,30 +594,44 @@ def _seed_choices(
     metric = np.stack([m for _, _, m in tried])[best, at]
     layers = train[1].layers
     k = min(config.top_k, len(layers))
-    if cell.layer_rule == "best":
-        choices = [
+    choices = []
+    for rule in rules:
+        if rule == "joint":
+            choices.append(
+                _joint_choice(
+                    config,
+                    scorer,
+                    readout,
+                    train,
+                    select,
+                    report,
+                    labels,
+                    seed,
+                    metric,
+                    k,
+                )
+            )
+            continue
+        read = [
             best_validation_layer(metric, layers, val, test[m])
+            if rule == "best"
+            else read_top_k(metric, layers, val, test[m], k=k)
             for m in range(test.shape[0])
         ]
-    elif cell.layer_rule == "top_k":
-        choices = [
-            top_k_layers(metric, layers, val, test[m], k=k)
-            for m in range(test.shape[0])
-        ]
-    else:
-        return _joint_choice(
-            config, cell, train, select, report, labels, seed, metric, k
+        choices.append(
+            _Choice(
+                tuple(int(layer) for layer in read[0].layers),
+                read[0].val_scores,
+                np.stack([choice.test_scores for choice in read]),
+            )
         )
-    return _Choice(
-        tuple(int(layer) for layer in choices[0].layers),
-        choices[0].val_scores,
-        np.stack([choice.test_scores for choice in choices]),
-    )
+    return choices
 
 
 def _joint_choice(
     config: Config,
-    cell: Cell,
+    scorer: str,
+    readout: str,
     train: Prepared,
     select: Prepared,
     report: Sequence[Prepared],
@@ -579,8 +650,8 @@ def _joint_choice(
         _evaluate(
             _fit(
                 config,
-                cell.scorer,
-                cell.readout,
+                scorer,
+                readout,
                 sub_train,
                 labels,
                 g,
@@ -590,7 +661,7 @@ def _joint_choice(
             sub_select,
             sub_report,
         )
-        for g in _grid(config, cell.scorer)
+        for g in _grid(config, scorer)
     ]
     chosen = int(np.argmax([float(m[0]) for _, _, m in tried]))
     val, test, _ = tried[chosen]
@@ -642,18 +713,27 @@ def _text_choices(splits: _Splits) -> list[_Choice]:
 
 
 def _cell_entries(
-    config: Config, task: ReadingTask, splits: _Splits, cell: Cell
+    config: Config,
+    task: ReadingTask,
+    splits: _Splits,
+    scorer: str,
+    readout: str,
+    rules: Sequence[str],
 ) -> list[_Entry]:
-    """Fits every seed of a cell, and of its shuffled-label refit."""
-    position = POSITION_OF[cast(Readout, cell.readout)]
+    """Fits every seed of a scorer on a readout, and its shuffled refit.
+
+    Returns one entry per series and layer rule; the fits of a seed are
+    shared by the rules and seeded by the scorer and readout alone.
+    """
+    position = POSITION_OF[cast(Readout, readout)]
     select = splits.select[position]
     report = [splits.report[position][c] for c in splits.conditions]
     series = ["reader"]
-    if "shuffled" in config.controls and cell.scorer != "random":
+    if "shuffled" in config.controls and scorer != "random":
         series.append("shuffled")
     entries = []
     for name in series:
-        choices = []
+        per_seed = []
         for i, train in enumerate(splits.train[position]):
             stimuli = train[0]
             labels = (
@@ -665,18 +745,26 @@ def _cell_entries(
                     seed=derive_seed(config.seed, "shuffled", task.name, i),
                 )
             )
-            choices.append(
+            seed = derive_seed(
+                config.seed, "fit", task.name, scorer, readout, i
+            )
+            per_seed.append(
                 _seed_choices(
                     config,
-                    cell,
+                    scorer,
+                    readout,
+                    rules,
                     train,
                     select,
                     report,
                     labels,
-                    derive_seed(config.seed, "fit", task.name, cell.name, i),
+                    seed,
                 )
             )
-        entries.append(_Entry(cell, name, choices))
+        entries += [
+            _Entry(Cell(scorer, readout, rule), name, [c[r] for c in per_seed])
+            for r, rule in enumerate(rules)
+        ]
     return entries
 
 
@@ -1033,6 +1121,20 @@ def _check(config: Config) -> tuple[str, ...]:
     ):
         if not all(value > 0.0 for value in grid):
             raise ValueError(f"{field} must hold positive values, got {grid}")
+    for field, grid, ordered in (
+        ("logistic_c", config.logistic_c, np.diff(config.logistic_c) > 0),
+        ("mlp_alpha", config.mlp_alpha, np.diff(config.mlp_alpha) < 0),
+    ):
+        if not ordered.all():
+            raise ValueError(
+                f"{field} must run from the strongest penalty to the "
+                f"weakest, without repeats, got {grid}"
+            )
+    if "joint" in config.layer_rules and "top_k" not in config.layer_rules:
+        raise ValueError(
+            "the joint rule needs top_k: its cells are compared with the "
+            "top_k baseline"
+        )
     if config.top_k < 1:
         raise ValueError(f"top_k must be at least 1, got {config.top_k}")
     for baseline in config.baselines:
@@ -1108,12 +1210,20 @@ def execute(
         splits, shift_skips = _prepare_task(
             config, loaded, task, readouts, examples
         )
-        entries: list[_Entry] = []
+        rules: dict[tuple[str, str], list[str]] = {}
         for cell in cells(config, readouts):
-            if cell.scorer == "text":
-                entries.append(_Entry(cell, "reader", _text_choices(splits)))
+            rules.setdefault((cell.scorer, cell.readout), []).append(
+                cell.layer_rule
+            )
+        entries: list[_Entry] = []
+        for (scorer, readout), cell_rules in rules.items():
+            if scorer == "text":
+                text = Cell(scorer, readout, "none")
+                entries.append(_Entry(text, "reader", _text_choices(splits)))
             else:
-                entries += _cell_entries(config, task, splits, cell)
+                entries += _cell_entries(
+                    config, task, splits, scorer, readout, cell_rules
+                )
         task_rows = [
             row
             for e in entries
