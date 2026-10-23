@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.special import expit
 import torch
 
 from tomography.reading.directions import FloatArray
@@ -45,7 +46,8 @@ class CCSProbe:
         biases: Probe biases, shape (K,).
         first_means: Training mean of the first pair members, (K, d).
         second_means: Training mean of the second pair members, (K, d).
-        losses: The CCS loss of the restart kept per layer, shape (K,).
+        losses: The CCS loss of the returned probe on the training pairs,
+            per layer, shape (K,).
     """
 
     reader: RepReader
@@ -147,6 +149,8 @@ def fit_ccs(
     if np.intersect1d(pairs[:, 0], pairs[:, 1]).size:
         raise ValueError("a row cannot be both a first and a second member")
     _check_labels(labels, stack.shape[1])
+    if (labels == 1).all() or not (labels == 1).any():
+        raise ValueError("labels must contain both classes")
     first_rows = stack[:, pairs[:, 0]]
     second_rows = stack[:, pairs[:, 1]]
     first_means = first_rows.mean(axis=1)
@@ -173,13 +177,20 @@ def fit_ccs(
     shifted[:, pairs[:, 1]] -= (second_means - centers)[:, None]
     reader = orient(unsigned, shifted, labels=labels, pairs=pairs)
     signs = reader.signs.astype(np.float64)
+    weights = signs[:, None] * weights
+    biases = signs * biases
+    first = _probabilities(first_rows, first_means, weights, biases)
+    second = _probabilities(second_rows, second_means, weights, biases)
+    # The confidence term changes when the sign flips, so the loss is
+    # measured again on the oriented probe.
+    losses = (first + second - 1.0) ** 2 + np.minimum(first, second) ** 2
     return CCSProbe(
         reader=reader,
-        weights=signs[:, None] * weights,
-        biases=signs * biases,
+        weights=weights,
+        biases=biases,
         first_means=first_means,
         second_means=second_means,
-        losses=np.array([fit[2] for fit in fits]),
+        losses=losses.mean(axis=1),
     )
 
 
@@ -244,7 +255,7 @@ def _probabilities(
     biases: NDArray[np.float64],
 ) -> NDArray[np.float64]:
     logits = np.einsum("knd,kd->kn", rows - means[:, None], weights)
-    return np.asarray(1.0 / (1.0 + np.exp(-(logits + biases[:, None]))))
+    return np.asarray(expit(logits + biases[:, None]))
 
 
 def _checked_activations(h: FloatArray, n_layers: int) -> NDArray[np.float64]:
@@ -265,6 +276,8 @@ def _check_pairs(
 ) -> None:
     if pairs.ndim != 2 or pairs.shape[1] != 2:
         raise ValueError(f"pairs must have shape (m, 2), got {pairs.shape}")
+    if pairs.dtype.kind not in "iu":
+        raise ValueError(f"pairs must hold integer indices, got {pairs.dtype}")
     if pairs.shape[0] < minimum:
         raise ValueError(f"CCS needs at least {minimum} pairs")
     if pairs.min() < 0 or pairs.max() >= n_rows:

@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 import pytest
 from scipy.special import expit
 
+from tomography.reading import ccs
 from tomography.reading.ccs import CCSProbe
 from tomography.reading.ccs import fit_ccs
 from tomography.reading.reader import RepReader
@@ -223,27 +224,20 @@ def test_ccs_is_deterministic_for_a_seed() -> None:
     )
 
 
-def test_more_restarts_never_raise_the_kept_loss() -> None:
+def test_more_restarts_never_raise_the_unsupervised_loss() -> None:
     data = make_contrast_pairs(40, d=24, seed=7, signal=0.3)
+    rows = data.h[0].astype(np.float64)
+    first = rows[data.pairs[:, 0]] - rows[data.pairs[:, 0]].mean(axis=0)
+    second = rows[data.pairs[:, 1]] - rows[data.pairs[:, 1]].mean(axis=0)
 
-    one = fit_ccs(
-        data.h,
-        [0],
-        pairs=data.pairs,
-        labels=data.labels,
-        restarts=1,
-        epochs=200,
-    )
-    five = fit_ccs(
-        data.h,
-        [0],
-        pairs=data.pairs,
-        labels=data.labels,
-        restarts=5,
-        epochs=200,
-    )
+    losses = [
+        ccs._fit_layer(first, second, restarts=r, epochs=200, lr=0.01, seed=4)[
+            2
+        ]
+        for r in (1, 5)
+    ]
 
-    assert five.losses[0] <= one.losses[0]
+    assert losses[1] <= losses[0]
 
 
 @pytest.mark.parametrize(
@@ -318,3 +312,66 @@ def test_pair_probabilities_reject_activations_of_another_width() -> None:
 
     with pytest.raises(ValueError, match="width 3"):
         probe.pair_probabilities(np.zeros((1, 4, 5)), data.pairs[:2])
+
+
+@pytest.mark.parametrize("flip", [False, True])
+def test_ccs_losses_belong_to_the_oriented_probe(flip: bool) -> None:
+    data = make_contrast_pairs(60, seed=9, n_layers=2, signal=1.0)
+    labels = 1 - data.labels if flip else data.labels
+
+    probe = fit_ccs(data.h, [0, 1], pairs=data.pairs, labels=labels, **FAST)
+
+    np.testing.assert_allclose(
+        probe.losses, ccs_loss(probe, data.h, data.pairs), atol=1e-9
+    )
+
+
+def test_ccs_checks_both_label_classes_before_training(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = make_contrast_pairs(10, d=3)
+
+    def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("trained before validating the labels")
+
+    monkeypatch.setattr(ccs, "_fit_layer", never)
+
+    with pytest.raises(ValueError, match="both classes"):
+        fit_ccs(
+            data.h,
+            [0],
+            pairs=data.pairs,
+            labels=np.ones_like(data.labels),
+            **FAST,
+        )
+
+
+def test_pair_probabilities_saturate_without_overflow() -> None:
+    probe = CCSProbe(
+        reader=RepReader.from_arrays(
+            "ccs", [0], np.array([[1.0]]), np.zeros((1, 1))
+        ),
+        weights=np.array([[1000.0]]),
+        biases=np.array([0.0]),
+        first_means=np.zeros((1, 1)),
+        second_means=np.zeros((1, 1)),
+        losses=np.array([0.0]),
+    )
+    h = np.array([[[-5.0], [5.0]]], dtype=np.float32)
+
+    probability = probe.pair_probabilities(h, np.array([[0, 1]]))
+
+    assert probability[0, 0] == 0.0
+
+
+def test_ccs_rejects_pairs_that_are_not_integers() -> None:
+    data = make_contrast_pairs(4, d=3)
+
+    with pytest.raises(ValueError, match="integer"):
+        fit_ccs(
+            data.h,
+            [0],
+            pairs=data.pairs.astype(np.float64),
+            labels=data.labels,
+            **FAST,
+        )
