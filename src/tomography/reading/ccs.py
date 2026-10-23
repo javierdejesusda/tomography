@@ -11,6 +11,7 @@ The probe has a bias and two set means, which a `RepReader` cannot hold, so
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import replace
 
 import numpy as np
 from numpy.typing import NDArray
@@ -18,7 +19,7 @@ from scipy.special import expit
 import torch
 
 from tomography.reading.directions import FloatArray
-from tomography.reading.directions import _check_labels
+from tomography.reading.probes import _checked_stack
 from tomography.reading.reader import RepReader
 from tomography.reading.reader import _layer_seed
 from tomography.reading.reader import orient
@@ -82,11 +83,8 @@ class CCSProbe:
                 f"h must have width {self.weights.shape[1]}, "
                 f"got {stack.shape[2]}"
             )
-        first = _probabilities(
-            stack[:, pairs[:, 0]], self.first_means, self.weights, self.biases
-        )
-        second = _probabilities(
-            stack[:, pairs[:, 1]], self.second_means, self.weights, self.biases
+        first, second = _member_probabilities(
+            stack[:, pairs[:, 0]], stack[:, pairs[:, 1]], self
         )
         return (0.5 * (first + 1.0 - second)).astype(np.float32)
 
@@ -144,13 +142,10 @@ def fit_ccs(
         raise ValueError(f"epochs must be at least 1, got {epochs}")
     if not lr > 0.0:
         raise ValueError(f"lr must be positive, got {lr}")
-    stack = _checked_activations(h, len(layers))
+    stack = _checked_stack(h, layers, labels)
     _check_pairs(pairs, stack.shape[1], minimum=2)
     if np.intersect1d(pairs[:, 0], pairs[:, 1]).size:
         raise ValueError("a row cannot be both a first and a second member")
-    _check_labels(labels, stack.shape[1])
-    if (labels == 1).all() or not (labels == 1).any():
-        raise ValueError("labels must contain both classes")
     first_rows = stack[:, pairs[:, 0]]
     second_rows = stack[:, pairs[:, 1]]
     first_means = first_rows.mean(axis=1)
@@ -172,26 +167,34 @@ def fit_ccs(
     unsigned = RepReader.from_arrays("ccs", layers, weights, centers)
     # Shifting each set onto the common centre makes the reader's pair
     # comparison the probe's own, so the orientation reads CCS predictions.
-    shifted = stack.copy()
-    shifted[:, pairs[:, 0]] -= (first_means - centers)[:, None]
-    shifted[:, pairs[:, 1]] -= (second_means - centers)[:, None]
-    reader = orient(unsigned, shifted, labels=labels, pairs=pairs)
+    m = pairs.shape[0]
+    shifted = np.concatenate(
+        [
+            first_rows - (first_means - centers)[:, None],
+            second_rows - (second_means - centers)[:, None],
+        ],
+        axis=1,
+    )
+    reader = orient(
+        unsigned,
+        shifted,
+        labels=np.concatenate([labels[pairs[:, 0]], labels[pairs[:, 1]]]),
+        pairs=np.stack([np.arange(m), m + np.arange(m)], axis=1),
+    )
     signs = reader.signs.astype(np.float64)
-    weights = signs[:, None] * weights
-    biases = signs * biases
-    first = _probabilities(first_rows, first_means, weights, biases)
-    second = _probabilities(second_rows, second_means, weights, biases)
-    # The confidence term changes when the sign flips, so the loss is
-    # measured again on the oriented probe.
-    losses = (first + second - 1.0) ** 2 + np.minimum(first, second) ** 2
-    return CCSProbe(
+    probe = CCSProbe(
         reader=reader,
-        weights=weights,
-        biases=biases,
+        weights=signs[:, None] * weights,
+        biases=signs * biases,
         first_means=first_means,
         second_means=second_means,
-        losses=losses.mean(axis=1),
+        losses=np.zeros(len(fits)),
     )
+    # The confidence term changes when the sign flips, so the loss is
+    # measured again on the oriented probe.
+    first, second = _member_probabilities(first_rows, second_rows, probe)
+    losses = (first + second - 1.0) ** 2 + np.minimum(first, second) ** 2
+    return replace(probe, losses=losses.mean(axis=1))
 
 
 def _fit_layer(
@@ -212,9 +215,7 @@ def _fit_layer(
     second_t = torch.from_numpy(second / scale)
     best: tuple[NDArray[np.float64], float, float] | None = None
     for restart in range(restarts):
-        generator = torch.Generator().manual_seed(
-            int(np.random.SeedSequence([seed, restart]).generate_state(1)[0])
-        )
+        generator = torch.Generator().manual_seed(_layer_seed(seed, restart))
         weight = torch.randn(
             first.shape[1], dtype=torch.float64, generator=generator
         )
@@ -248,14 +249,22 @@ def _ccs_loss(
     return (consistency + confidence).mean()
 
 
-def _probabilities(
-    rows: NDArray[np.float64],
-    means: NDArray[np.float64],
-    weights: NDArray[np.float64],
-    biases: NDArray[np.float64],
-) -> NDArray[np.float64]:
-    logits = np.einsum("knd,kd->kn", rows - means[:, None], weights)
-    return np.asarray(expit(logits + biases[:, None]))
+def _member_probabilities(
+    first_rows: NDArray[np.float64],
+    second_rows: NDArray[np.float64],
+    probe: CCSProbe,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    def probabilities(
+        rows: NDArray[np.float64], means: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
+        centred = rows - means[:, None]
+        logits = np.einsum("knd,kd->kn", centred, probe.weights)
+        return np.asarray(expit(logits + probe.biases[:, None]))
+
+    return (
+        probabilities(first_rows, probe.first_means),
+        probabilities(second_rows, probe.second_means),
+    )
 
 
 def _checked_activations(h: FloatArray, n_layers: int) -> NDArray[np.float64]:

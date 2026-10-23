@@ -91,18 +91,7 @@ def test_pca_diff_is_the_top_singular_vector_of_centered_differences() -> None:
     assert fit.raw_norm == pytest.approx(1.0)
 
 
-@pytest.mark.parametrize(
-    "method",
-    [
-        "pca_diff",
-        "pca_raw",
-        "mean_diff",
-        "logistic",
-        "kmeans",
-        "random",
-        "whitened_mean_diff",
-    ],
-)
+@pytest.mark.parametrize("method", get_args(Method))
 def test_direction_is_unit_float32_with_largest_coordinate_positive(
     method: Method,
 ) -> None:
@@ -532,17 +521,16 @@ def shrunk_whitened(
 ) -> NDArray[np.float64]:
     """Computes the whitened mass-mean direction from its definition."""
     positive = labels == 1
-    gap = h[positive].mean(axis=0) - h[~positive].mean(axis=0)
-    centered = h.copy()
-    centered[positive] -= h[positive].mean(axis=0)
-    centered[~positive] -= h[~positive].mean(axis=0)
+    m1 = h[positive].mean(axis=0)
+    m0 = h[~positive].mean(axis=0)
+    centered = h - np.where(positive[:, None], m1, m0)
     covariance = centered.T @ centered / h.shape[0]
     weight = ledoit_wolf_shrinkage(centered, assume_centered=True)
     d = h.shape[1]
     shrunk = (1.0 - weight) * covariance + weight * np.trace(
         covariance
     ) / d * np.eye(d)
-    return np.linalg.solve(shrunk, gap)
+    return np.linalg.solve(shrunk, m1 - m0)
 
 
 @pytest.mark.parametrize(("n", "d"), [(40, 3), (20, 50)], ids=["n>d", "d>n"])

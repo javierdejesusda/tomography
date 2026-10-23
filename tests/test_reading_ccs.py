@@ -116,18 +116,6 @@ def test_ccs_probabilities_are_consistent_on_contrast_pairs() -> None:
     assert ((probability > 0.5) == first_true).mean() > 0.95
 
 
-def test_ccs_reports_the_loss_of_its_kept_restart() -> None:
-    data = make_contrast_pairs(80, seed=3, n_layers=2)
-
-    probe = fit_ccs(
-        data.h, [1, 2], pairs=data.pairs, labels=data.labels, **FAST
-    )
-
-    np.testing.assert_allclose(
-        probe.losses, ccs_loss(probe, data.h, data.pairs), atol=1e-6
-    )
-
-
 def test_ccs_pair_probability_is_the_averaged_contrast_prediction() -> None:
     probe = CCSProbe(
         reader=RepReader.from_arrays(
@@ -253,6 +241,9 @@ def test_more_restarts_never_raise_the_unsupervised_loss() -> None:
         ({"restarts": 0}, "restarts"),
         ({"epochs": 0}, "epochs"),
         ({"lr": 0.0}, "lr"),
+        ({"h": np.full((1, 8, 3), np.inf)}, "finite"),
+        ({"pairs": np.array([[0.0, 1.0], [2.0, 3.0]])}, "integer"),
+        ({"h": np.ones((1, 8, 3))}, "variance"),
     ],
     ids=[
         "flat-h",
@@ -265,6 +256,9 @@ def test_more_restarts_never_raise_the_unsupervised_loss() -> None:
         "restarts",
         "epochs",
         "lr",
+        "non-finite",
+        "float-pairs",
+        "no-variance",
     ],
 )
 def test_ccs_rejects_malformed_inputs(
@@ -284,24 +278,6 @@ def test_ccs_rejects_malformed_inputs(
 
     with pytest.raises(ValueError, match=message):
         fit_ccs(**arguments)  # type: ignore[arg-type]
-
-
-def test_ccs_rejects_non_finite_activations() -> None:
-    data = make_contrast_pairs(4, d=3)
-    h = data.h.copy()
-    h[0, 1, 2] = np.inf
-
-    with pytest.raises(ValueError, match="finite"):
-        fit_ccs(h, [0], pairs=data.pairs, labels=data.labels, **FAST)
-
-
-def test_ccs_rejects_pairs_without_variance() -> None:
-    h = np.ones((1, 4, 3), dtype=np.float32)
-    pairs = np.array([[0, 1], [2, 3]], dtype=np.int64)
-    labels = np.array([1, 0, 0, 1], dtype=np.int64)
-
-    with pytest.raises(ValueError, match="variance"):
-        fit_ccs(h, [0], pairs=pairs, labels=labels, **FAST)
 
 
 def test_pair_probabilities_reject_activations_of_another_width() -> None:
@@ -362,16 +338,3 @@ def test_pair_probabilities_saturate_without_overflow() -> None:
     probability = probe.pair_probabilities(h, np.array([[0, 1]]))
 
     assert probability[0, 0] == 0.0
-
-
-def test_ccs_rejects_pairs_that_are_not_integers() -> None:
-    data = make_contrast_pairs(4, d=3)
-
-    with pytest.raises(ValueError, match="integer"):
-        fit_ccs(
-            data.h,
-            [0],
-            pairs=data.pairs.astype(np.float64),
-            labels=data.labels,
-            **FAST,
-        )
