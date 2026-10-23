@@ -94,8 +94,12 @@ def test_eigenscore_rejects_bad_input(
         eigenscore(z, alpha=alpha)
 
 
-def test_the_layer_is_the_middle_of_the_stack(tiny_arch: LoadedModel) -> None:
-    assert eigen_layer(tiny_arch) == tiny_arch.n_layers // 2
+def test_the_layer_is_half_the_hidden_states_as_in_the_reference(
+    tiny_arch: LoadedModel,
+) -> None:
+    # The reference takes int(len(hidden_states) / 2) over L + 1 states.
+    assert tiny_arch.n_layers == 3
+    assert eigen_layer(tiny_arch) == 2
 
 
 def test_scores_use_the_answer_activations_at_the_middle_layer(
@@ -148,8 +152,9 @@ def test_identical_answers_give_the_rank_one_score(
 ) -> None:
     scores = eigenscores(tiny_arch, PROMPTS[:1], [("Paris",) * 4])
 
-    z = answer_activations(tiny_arch, PROMPTS[:1], ["Paris"], layers=[1])[0, 0]
-    assert eigen_layer(tiny_arch) == 1
+    layer = eigen_layer(tiny_arch)
+    z = answer_activations(tiny_arch, PROMPTS[:1], ["Paris"], layers=[layer])
+    z = z[0, 0]
     assert scores[0] == pytest.approx(_rank_one(z, 4), rel=1e-4, abs=1e-4)
 
 

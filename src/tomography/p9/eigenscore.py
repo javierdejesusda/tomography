@@ -7,13 +7,15 @@ samples. A higher score means more divergent answers, so a more likely
 hallucination; it is not oriented like `tomography.p9.signals`.
 
 The module follows the released code (D2I-ai/eigenscore at commit ea8062a4,
-`getEigenIndicator_v0`) where it differs from the paper: each embedding is
-centred over its own features and the covariance is divided by d - 1, which
-the paper's Eq. 4 does not do. The logarithm is natural, as in the paper; the
-code takes log10, which only rescales the score. Feature clipping (paper
-Section 3.2) is not in the code and is not applied. The embedding is read by
-running the prompt, a space and the stored sample, so the token is the last
-token of the sample text rather than the last one before a stop token.
+`getEigenIndicator_v0`) where it differs from the paper. Both centre each
+embedding over its own features (the paper's `Z^T J_d Z` with
+`J_d = I_d - (1/d) 1 1^T`); the code also divides by d - 1, which Eq. 4 does
+not, so `alpha` sits on a different eigenvalue scale. The logarithm is
+natural, as in the paper; the code takes log10, which only rescales the
+score. Feature clipping (paper Section 3.2) is not in the code and is not
+applied. The embedding is read by running the prompt, a space and the stored
+sample, so the token is the last token of the sample text rather than the
+last one before a stop token.
 """
 
 from collections.abc import Sequence
@@ -69,10 +71,12 @@ def eigenscore(
 
 
 def eigen_layer(loaded: LoadedModel) -> int:
-    """Returns the middle layer, `int(L / 2)` as in the reference.
+    """Returns the middle layer as the reference chooses it.
 
-    Layer l is the residual stream after l blocks, which is
-    `hidden_states[l]` of the Hugging Face models the reference reads.
+    The reference takes `int(len(hidden_states) / 2)` over the L + 1 hidden
+    states of a Hugging Face model (the embedding output, then one per
+    block), so the layer is `(L + 1) // 2`: L / 2 for an even L. Layer l is
+    the residual stream after l blocks, which is `hidden_states[l]`.
 
     Args:
         loaded: The wrapped model.
@@ -80,7 +84,7 @@ def eigen_layer(loaded: LoadedModel) -> int:
     Returns:
         The layer index.
     """
-    return loaded.n_layers // 2
+    return (loaded.n_layers + 1) // 2
 
 
 def eigenscores(

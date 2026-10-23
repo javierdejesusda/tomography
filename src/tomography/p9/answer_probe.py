@@ -6,10 +6,13 @@ on validation items. The reference code locates a short "exact answer" span
 inside a long generation; P9 answers are already short (cut at the first
 newline), so the whole stored answer is the span, no extraction model runs
 and no item is dropped. The reference reads the MLP output of a layer; this
-module reads the residual stream, as every other P9 reader does. The
-classifier is the P9c `probe` (`RepReader.fit` with the `logistic` finder),
-fitted on the train items and oriented so that a higher score means a more
-likely correct answer.
+module reads the residual stream, as every other P9 reader does. The answer
+is re-tokenized from the stored text (cut at the first newline and
+stripped), so the read token is the last token of that text, which can
+differ from the token the model emitted (for example a period for an
+emitted period-and-newline token). The classifier is the P9c `probe`
+(`RepReader.fit` with the `logistic` finder), fitted on the train items and
+oriented so that a higher score means a more likely correct answer.
 """
 
 from collections.abc import Sequence
@@ -78,11 +81,12 @@ def answer_activations(
 
     Returns:
         Array of shape (K, n, d_model), K = `len(layers)`; the rows of an
-        empty answer are NaN.
+        empty answer are NaN, and only those.
 
     Raises:
-        ValueError: If there is not one answer per prompt, or the arguments
-            of `collect_activations` are inconsistent.
+        ValueError: If there is not one answer per prompt, the arguments of
+            `collect_activations` are inconsistent, or a non-empty answer
+            has non-finite activations.
     """
     texts, spans = answer_texts(prompts, answers)
     out = np.full(
@@ -100,6 +104,8 @@ def answer_activations(
             batch_size=batch_size,
             share_prefix=share_prefix,
         )
+        if not np.isfinite(acts.data).all():
+            raise ValueError("a non-empty answer has non-finite activations")
         out[:, keep] = acts.data
     return out
 
@@ -113,7 +119,9 @@ class AnswerProbe:
         val_auroc: Validation AUROC of the probe at every candidate layer,
             in the order of the layers given to `fit_answer_probe`.
         scores: Score of every item at `layer`, higher for a more likely
-            correct answer; NaN for an item without activations.
+            correct answer; NaN for an item without activations. The train
+            items are scored in sample and the validation items chose the
+            layer, so only the other items give an unbiased AUROC.
     """
 
     layer: int
@@ -149,8 +157,9 @@ def fit_answer_probe(
         The probe and its scores.
 
     Raises:
-        ValueError: If the shapes disagree, the masks overlap, or the usable
-            train or validation items do not hold both outcomes.
+        ValueError: If the shapes disagree, a mask is not boolean, the masks
+            overlap, or the usable train or validation items do not hold
+            both outcomes.
     """
     if h.ndim != 3:
         raise ValueError(f"h must have shape (K, n, d), got {h.shape}")
@@ -161,6 +170,8 @@ def fit_answer_probe(
     n = h.shape[1]
     if correct.shape != (n,):
         raise ValueError(f"need one label per item ({n}), got {correct.shape}")
+    if train.dtype != np.bool_ or val.dtype != np.bool_:
+        raise ValueError("train and val must be boolean masks")
     if train.shape != (n,) or val.shape != (n,):
         raise ValueError(f"train and val need one entry per item ({n})")
     if (train & val).any():
@@ -176,9 +187,6 @@ def fit_answer_probe(
     )
     layer = best_layer(val_auroc, layers)
     k = list(layers).index(layer)
-    probe = RepReader.fit(
-        "logistic", h[k : k + 1, fit_rows], (layer,), labels=correct[fit_rows]
-    )
     scores = np.full(n, np.nan)
-    scores[usable] = probe.score(h[k : k + 1, usable])[0]
+    scores[usable] = reader.score(h[:, usable])[k]
     return AnswerProbe(layer, val_auroc, scores)

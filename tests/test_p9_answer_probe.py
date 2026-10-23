@@ -4,8 +4,10 @@ import numpy as np
 from numpy.typing import NDArray
 import pytest
 
+from tomography.activations import Activations
 from tomography.activations import collect_activations
 from tomography.model import LoadedModel
+from tomography.p9 import answer_probe
 from tomography.p9.answer_probe import answer_activations
 from tomography.p9.answer_probe import answer_texts
 from tomography.p9.answer_probe import fit_answer_probe
@@ -241,6 +243,43 @@ def test_the_probe_rejects_inconsistent_arguments(
             train=arguments["train"],  # type: ignore[arg-type]
             val=arguments["val"],  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.parametrize("mask", ["train", "val"])
+def test_the_probe_rejects_masks_that_are_not_boolean(mask: str) -> None:
+    h, correct = _planted()
+    train, val = _masks(len(correct))
+    masks = {"train": train, "val": val}
+    masks[mask] = masks[mask].astype(np.int64)
+
+    with pytest.raises(ValueError, match="boolean"):
+        fit_answer_probe(h, (0, 1, 2), correct, **masks)
+
+
+def test_the_scores_come_from_the_probe_of_the_reported_curve() -> None:
+    h, correct = _planted(seed=6)
+    train, val = _masks(len(correct))
+
+    probe = fit_answer_probe(h, (0, 1, 2), correct, train=train, val=val)
+
+    k = (0, 1, 2).index(probe.layer)
+    assert auroc(probe.scores[val], correct[val]) == probe.val_auroc[k]
+
+
+def test_non_finite_activations_of_an_answer_raise(
+    tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = answer_probe.collect_activations
+
+    def overflowing(*args: object, **kwargs: object) -> Activations:
+        acts = real(*args, **kwargs)  # type: ignore[arg-type]
+        acts.data[0, 0, 0] = np.nan
+        return acts
+
+    monkeypatch.setattr(answer_probe, "collect_activations", overflowing)
+
+    with pytest.raises(ValueError, match="non-finite activations"):
+        answer_activations(tiny_gpt2, PROMPTS, ANSWERS, layers=[1])
 
 
 def test_the_probe_needs_both_outcomes_in_validation() -> None:

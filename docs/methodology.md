@@ -278,8 +278,9 @@ word still counts as an abstention; the `hand_check.csv` sample measures this.
 
 ### Published detection baselines
 
-These baselines predict, per question, whether the greedy answer is correct, beside the `p9c` signals. Each states
-where it departs from its published recipe.
+These baselines predict, per question, whether the greedy answer is correct. They are implemented as functions but
+not yet run: no experiment reports them, and the `b1` experiment that will put them beside the `p9c` signals is
+pending. Each states where it departs from its published recipe.
 
 - Exact-answer-token probe (`p9/answer_probe.py`; Orgad et al. 2025, `orgad2025llms`): a logistic-regression probe
   on the residual stream at the last token of the greedy answer, read from the prompt, a space and the answer. It is
@@ -287,13 +288,17 @@ where it departs from its published recipe.
   highest validation AUROC is kept. Deviations: the whole stored answer is the exact-answer span, so no extraction
   model runs and no item is dropped (the reference extracts a span from a long generation and drops items without
   one); the residual stream is read instead of the MLP output; the layer is chosen automatically on the validation
-  split instead of by hand from a heatmap. An empty answer has no token to read and gets no score.
+  split instead of by hand from a heatmap; the answer is re-tokenized from the stored text (cut at the first newline
+  and stripped), so the read token can differ from the emitted one (for example `.` for an emitted `.\n`). An empty
+  answer has no token to read and gets no score. Train items are scored in sample, so an AUROC uses only the items
+  outside the train and validation splits.
 - EigenScore (`p9/eigenscore.py`; Chen et al. 2024, `chen2024inside`): the mean natural log eigenvalue of the
   K x K covariance of the sampled answers' embeddings plus `alpha` I (`alpha` 1e-3). An embedding is the residual
-  stream at the last token of the sample, read from the prompt, a space and the sample, at layer `int(L / 2)`. Higher
-  means more divergent samples. The covariance follows the released code: each embedding is centred over its own
-  features and the product is divided by d - 1, which the paper's Eq. 4 does not do, so `alpha` sits on a different
-  eigenvalue scale. Because of that centring, identical samples keep one eigenvalue `K var(z)` and do not score
+  stream at the last token of the sample, read from the prompt, a space and the sample, at layer `(L + 1) // 2` (the
+  released code takes half of the L + 1 hidden states; L / 2 for every model here). Higher means more divergent
+  samples. Paper and code both centre each embedding over its own features (`Z^T J_d Z`); the released code also
+  divides by d - 1, which the paper's Eq. 4 does not, so `alpha` sits on a different eigenvalue scale. The code is
+  followed. Because of the centring, identical samples keep one eigenvalue `K var(z)` and do not score
   `ln(alpha)`. Deviations: K = 5 stored P9a samples at temperature 1.0 (the paper uses 10 at temperature 0.5 with top-p
   0.99); no feature clipping (it is not in the released code); the last token of the stored sample text instead of
   the last token before a stop token; correctness by the P9 rule. Empty samples are dropped and a question with fewer
