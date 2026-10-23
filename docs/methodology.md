@@ -288,6 +288,16 @@ where it departs from its published recipe.
   model runs and no item is dropped (the reference extracts a span from a long generation and drops items without
   one); the residual stream is read instead of the MLP output; the layer is chosen automatically on the validation
   split instead of by hand from a heatmap. An empty answer has no token to read and gets no score.
+- EigenScore (`p9/eigenscore.py`; Chen et al. 2024, `chen2024inside`): the mean natural log eigenvalue of the
+  K x K covariance of the sampled answers' embeddings plus `alpha` I (`alpha` 1e-3). An embedding is the residual
+  stream at the last token of the sample, read from the prompt, a space and the sample, at layer `int(L / 2)`. Higher
+  means more divergent samples. The covariance follows the released code: each embedding is centred over its own
+  features and the product is divided by d - 1, which the paper's Eq. 4 does not do, so `alpha` sits on a different
+  eigenvalue scale. Because of that centring, identical samples keep one eigenvalue `K var(z)` and do not score
+  `ln(alpha)`. Deviations: K = 5 stored P9a samples at temperature 1.0 (the paper uses 10 at temperature 0.5 with top-p
+  0.99); no feature clipping (it is not in the released code); the last token of the stored sample text instead of
+  the last token before a stop token; correctness by the P9 rule. Empty samples are dropped and a question with fewer
+  than 2 non-empty samples gets no score.
 
 ## Run settings of the GPU runs
 
