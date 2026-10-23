@@ -36,6 +36,8 @@ import torch
 
 from tomography.activations import Activations
 from tomography.activations import PositionStrategy
+from tomography.activations import Span
+from tomography.activations import collect_activations
 from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments.base import RunDir
@@ -58,7 +60,6 @@ from tomography.experiments.variants import eval_pairs
 from tomography.experiments.variants import eval_seed
 from tomography.experiments.variants import expand_tasks
 from tomography.experiments.variants import load_sources
-from tomography.experiments.variants import prepare
 from tomography.experiments.variants import target_of
 from tomography.experiments.variants import task_examples
 from tomography.experiments.variants import task_set
@@ -118,6 +119,8 @@ POSITION_OF: Mapping[Readout, PositionStrategy] = {
     "attention": "response",
 }
 CONCEPT_READOUTS: tuple[Readout, ...] = ("concept", "concept_mean")
+STIMULUS_POSITIONS: tuple[PositionStrategy, ...] = ("mean", "max", "response")
+CONCEPT_POSITIONS: tuple[PositionStrategy, ...] = ("concept", "concept_mean")
 POLARITY_TASKS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         "truth_polarity": (
@@ -192,6 +195,10 @@ class Config(ReadingConfig):
         readouts: The readouts every scorer reads, from `READOUTS`; the
             concept readouts are skipped for a task without a concept slot
             or word, and `attention` is read by the logistic scorer only.
+        token_layers: The layers whose token rows `token_score_max` and
+            `attention` read, among the layers read; None keeps every
+            layer. The token rows take most of a run's memory, so a large
+            model keeps a few layers here.
         layer_rules: From `LAYER_RULES`; `joint` applies to the MLP on the
             one-row readouts and to the attention readout, and needs
             `top_k`, the rule of its baseline.
@@ -220,6 +227,7 @@ class Config(ReadingConfig):
     tasks: tuple[str, ...] = ("sentiment", "truth", "truth_polarity", "utility")
     scorers: tuple[Scorer, ...] = SCORERS
     readouts: tuple[Readout, ...] = READOUTS
+    token_layers: tuple[int, ...] | None = None
     layer_rules: tuple[LayerRule, ...] = LAYER_RULES
     top_k: int = 5
     decoys: tuple[Decoy, ...] = ("random", "against")
@@ -407,6 +415,150 @@ def read_top_k(
         val_scores[kept],
         test_scores[kept],
         k=min(k, kept.size),
+    )
+
+
+def read_positions(
+    loaded: LoadedModel,
+    stimuli: StimulusSet,
+    positions: Sequence[PositionStrategy],
+    config: Config,
+) -> dict[PositionStrategy, Activations]:
+    """Reads some positions with at most three passes over the stimuli.
+
+    `mean`, `max` and `response` come from one pass over the stimulus
+    tokens and `concept` and `concept_mean` from one over the concept
+    tokens, each reduced batch by batch, so the token rows of every layer
+    are held for one batch at a time. The pooled rows equal those that
+    `prepare` reads at each position, the means within float32 rounding.
+    The `response` rows keep the layers of `config.token_layers` only.
+
+    Args:
+        loaded: The wrapped model.
+        stimuli: The stimuli, with the spans the positions need.
+        positions: The positions to read.
+        config: Supplies the layers (None means 1 to L, as `prepare`
+            reads them), `token_layers`, the BOS policy and the batch size.
+
+    Returns:
+        The activations of each position, in the order of `positions`.
+    """
+    layers = _read_layers(config, loaded)
+    read: dict[PositionStrategy, Activations] = {}
+    if "last" in positions:
+        read["last"] = collect_activations(
+            loaded,
+            stimuli.texts,
+            layers=layers,
+            position="last",
+            bos=config.bos,
+            batch_size=config.batch_size,
+        )
+    for group, spans in (
+        (STIMULUS_POSITIONS, stimuli.response_spans),
+        (CONCEPT_POSITIONS, stimuli.concept_spans),
+    ):
+        wanted = [p for p in positions if p in group]
+        if wanted:
+            read |= _token_pass(loaded, stimuli.texts, spans, wanted, config)
+    return {p: read[p] for p in positions}
+
+
+def _read_layers(config: Config, loaded: LoadedModel) -> tuple[int, ...]:
+    """The layers a run reads: `config.layers`, or 1 to L as `prepare`."""
+    if config.layers is None:
+        return tuple(range(1, loaded.n_layers + 1))
+    return config.layers
+
+
+def _token_pass(
+    loaded: LoadedModel,
+    texts: Sequence[str],
+    spans: Sequence[Span | None],
+    wanted: Sequence[PositionStrategy],
+    config: Config,
+) -> dict[PositionStrategy, Activations]:
+    """Reads the tokens of some spans batch by batch and reduces them."""
+    layers = _read_layers(config, loaded)
+    kept = [
+        k
+        for k, layer in enumerate(layers)
+        if config.token_layers is None or layer in config.token_layers
+    ]
+    parts: dict[PositionStrategy, list[Activations]] = {p: [] for p in wanted}
+    for first in range(0, len(texts), config.batch_size):
+        batch = slice(first, first + config.batch_size)
+        rows = collect_activations(
+            loaded,
+            texts[batch],
+            layers=layers,
+            position="response",
+            response_spans=spans[batch],
+            bos=config.bos,
+            batch_size=config.batch_size,
+        )
+        for position in wanted:
+            parts[position].append(
+                _subset(rows, kept)
+                if position == "response"
+                else _reduce(rows, position)
+            )
+    return {p: _concatenate(parts[p]) for p in wanted}
+
+
+def _reduce(rows: Activations, position: PositionStrategy) -> Activations:
+    """Pools the token rows of each stimulus as `position` reads them.
+
+    `concept` is the last token, `max` the feature-wise maximum and `mean`
+    and `concept_mean` the mean, with the metadata `collect_activations`
+    gives those positions.
+    """
+    n = rows.n_stimuli
+    counts = np.bincount(rows.row_stimulus, minlength=n)
+    starts = np.cumsum(counts) - counts
+    if position == "concept":
+        last = starts + counts - 1
+        return Activations(
+            data=rows.data[:, last],
+            layers=rows.layers,
+            position=position,
+            row_stimulus=np.arange(n, dtype=np.int64),
+            row_rank=np.zeros(n, dtype=np.int64),
+            row_token=rows.row_token[last],
+            row_token_id=rows.row_token_id[last],
+            n_stimuli=n,
+        )
+    if position == "max":
+        data = np.maximum.reduceat(rows.data, starts, axis=1)
+    else:
+        data = np.add.reduceat(rows.data, starts, axis=1)
+        data /= counts.astype(np.float32)[None, :, None]
+    return Activations(
+        data=data,
+        layers=rows.layers,
+        position=position,
+        row_stimulus=np.arange(n, dtype=np.int64),
+        row_rank=np.zeros(n, dtype=np.int64),
+        row_token=np.full(n, -1, dtype=np.int64),
+        row_token_id=np.full(n, -1, dtype=np.int64),
+        n_stimuli=n,
+    )
+
+
+def _concatenate(parts: Sequence[Activations]) -> Activations:
+    """Joins the activations of consecutive batches of stimuli."""
+    offsets = np.cumsum([0] + [part.n_stimuli for part in parts])
+    return Activations(
+        data=np.concatenate([part.data for part in parts], axis=1),
+        layers=parts[0].layers,
+        position=parts[0].position,
+        row_stimulus=np.concatenate(
+            [p.row_stimulus + o for p, o in zip(parts, offsets, strict=False)]
+        ),
+        row_rank=np.concatenate([part.row_rank for part in parts]),
+        row_token=np.concatenate([part.row_token for part in parts]),
+        row_token_id=np.concatenate([part.row_token_id for part in parts]),
+        n_stimuli=int(offsets[-1]),
     )
 
 
@@ -1129,19 +1281,19 @@ def _prepare_task(
             for s in train_sets
         ]
 
-    def acts(stimuli: StimulusSet, position: PositionStrategy) -> Activations:
-        return prepare(loaded, stimuli, position, config)[1]
-
+    train = [read_positions(loaded, s, positions, config) for s in train_sets]
+    report = [
+        read_positions(loaded, s, positions, config)
+        for s in report_sets.values()
+    ]
     return (
         _Splits(
             train_items=train_sets,
             select_items=select_set,
             report_items=report_sets,
-            train={p: [acts(s, p) for s in train_sets] for p in positions},
-            select={p: acts(select_set, p) for p in positions},
-            report={
-                p: [acts(s, p) for s in report_sets.values()] for p in positions
-            },
+            train={p: [a[p] for a in train] for p in positions},
+            select=read_positions(loaded, select_set, positions, config),
+            report={p: [a[p] for a in report] for p in positions},
             texts=texts,
             polarities=polarities,
         ),
@@ -1242,6 +1394,11 @@ def _check(config: Config) -> tuple[str, ...]:
         )
     if config.top_k < 1:
         raise ValueError(f"top_k must be at least 1, got {config.top_k}")
+    if config.token_layers == ():
+        raise ValueError(
+            "token_layers must name at least one layer, or be None to keep "
+            "every layer"
+        )
     for baseline in config.baselines:
         scorer, _, readout = baseline.partition("/")
         if scorer not in config.scorers or readout not in config.readouts:
@@ -1267,6 +1424,58 @@ def _check(config: Config) -> tuple[str, ...]:
                 "readouts need a concept slot or word"
             )
     return tasks
+
+
+def _run_task(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    name: str,
+    examples: Mapping[str, Sequence[Example]],
+) -> tuple[list[list[Any]], list[list[Any]], dict[str, Any]]:
+    """Runs the factorial on one task and writes its files.
+
+    The task's activations are released on return, before the next task
+    is read.
+
+    Returns:
+        The table rows, the comparison rows, and the task's `conditions`,
+        `skipped` and `n_eval_pairs` entries of the summary.
+    """
+    task = _task(name)
+    scorers, readouts, skipped = _readable(task, config)
+    splits, shift_skips = _prepare_task(
+        config, loaded, task, readouts, examples
+    )
+    rules: dict[tuple[str, str], list[str]] = {}
+    for cell in cells(config, readouts, scorers=scorers):
+        rules.setdefault((cell.scorer, cell.readout), []).append(
+            cell.layer_rule
+        )
+    entries: list[_Entry] = []
+    for (scorer, readout), cell_rules in rules.items():
+        if scorer == "text":
+            text = Cell(scorer, readout, "none")
+            entries.append(_Entry(text, "reader", _text_choices(splits)))
+        else:
+            entries += _cell_entries(
+                config, task, splits, scorer, readout, cell_rules
+            )
+    entry_rows = [_metric_rows(config, task, splits, e) for e in entries]
+    comparisons = _comparison_rows(config, task, splits, entries)
+    _write_task(run_dir, task, splits, entries, entry_rows)
+    return (
+        [row for block in entry_rows for row in block],
+        comparisons,
+        {
+            "conditions": splits.conditions,
+            "skipped": {**skipped, **shift_skips},
+            "n_eval_pairs": {
+                "select": int(splits.select_items.groups.shape[0]),
+                "report": int(splits.report_items["original"].groups.shape[0]),
+            },
+        },
+    )
 
 
 def execute(
@@ -1295,14 +1504,21 @@ def execute(
         examples: The examples of each source, by source name.
 
     Raises:
-        ValueError: If the config is refused (see `run`) or a source is
-            missing (both checked before any model call).
+        ValueError: If the config is refused (see `run`), a source is
+            missing, or `token_layers` holds a layer that is not read (all
+            checked before any model call).
     """
     tasks = _check(config)
     for name in tasks:
         task = _task(name)
         task_examples(task, examples)
         task_examples(target_of(task), examples)
+    layers = _read_layers(config, loaded)
+    if set(config.token_layers or ()) - set(layers):
+        raise ValueError(
+            f"token_layers {config.token_layers} must be among the layers "
+            f"read {layers}"
+        )
     rows: list[list[Any]] = []
     comparisons: list[list[Any]] = []
     summary: dict[str, Any] = {
@@ -1316,35 +1532,13 @@ def execute(
         ),
     }
     for name in tasks:
-        task = _task(name)
-        scorers, readouts, skipped = _readable(task, config)
-        splits, shift_skips = _prepare_task(
-            config, loaded, task, readouts, _task_examples(name, examples)
+        task_rows, task_comparisons, parts = _run_task(
+            config, run_dir, loaded, name, _task_examples(name, examples)
         )
-        rules: dict[tuple[str, str], list[str]] = {}
-        for cell in cells(config, readouts, scorers=scorers):
-            rules.setdefault((cell.scorer, cell.readout), []).append(
-                cell.layer_rule
-            )
-        entries: list[_Entry] = []
-        for (scorer, readout), cell_rules in rules.items():
-            if scorer == "text":
-                text = Cell(scorer, readout, "none")
-                entries.append(_Entry(text, "reader", _text_choices(splits)))
-            else:
-                entries += _cell_entries(
-                    config, task, splits, scorer, readout, cell_rules
-                )
-        entry_rows = [_metric_rows(config, task, splits, e) for e in entries]
-        rows += [row for block in entry_rows for row in block]
-        comparisons += _comparison_rows(config, task, splits, entries)
-        _write_task(run_dir, task, splits, entries, entry_rows)
-        summary["conditions"][name] = splits.conditions
-        summary["skipped"][name] = {**skipped, **shift_skips}
-        summary["n_eval_pairs"][name] = {
-            "select": int(splits.select_items.groups.shape[0]),
-            "report": int(splits.report_items["original"].groups.shape[0]),
-        }
+        rows += task_rows
+        comparisons += task_comparisons
+        for key, value in parts.items():
+            summary[key][name] = value
     run_dir.write_json("table", {"columns": list(COLUMNS), "rows": rows})
     run_dir.write_json(
         "comparisons",

@@ -197,6 +197,12 @@ readout by layer rule, so a gain of pooling is never credited to nonlinearity.
   is fitted on every token row with its stimulus's label, the max aggregation of recent probe work) and
   `attention` (the attention-pooled logistic reader, read by the logistic scorer only). The concept readouts are
   skipped for a task without a concept slot or word.
+- Extraction: one pass over the stimulus tokens gives `mean`, `max` and the token rows of the per-token readouts, one
+  pass over the concept tokens gives `concept` and `concept_mean`, and one pass reads `last`. Each pass is reduced
+  batch by batch, so the token rows of every layer are held for one batch at a time, and the pooled rows equal those
+  of a pass per position (the means within float32 rounding of their sums). `token_layers` keeps the token rows at
+  those layers only, so the per-token readouts choose among them while the one-row readouts keep every layer read. A
+  task's activations are released before the next task is read.
 - Layer rules: `best` (the best select layer), `top_k` (the mean of the select-standardized scores of the `top_k`
   best select layers, among those whose select scores vary) and `joint` (one MLP or one attention reader fitted on
   the layers `top_k` reads, together). The rules of a scorer and readout share the same per-layer fits and seeds.

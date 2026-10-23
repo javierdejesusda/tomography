@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from typing import cast
 import warnings
+import weakref
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,9 +16,11 @@ from sklearn.exceptions import ConvergenceWarning
 import torch
 
 from tomography.activations import Activations
+from tomography.activations import collect_activations
 from tomography.cli import _parse_override
 from tomography.cli import load_experiment
 from tomography.datasets.records import Example
+from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import m2_readers
 from tomography.experiments import p2_positions
 from tomography.experiments.base import RunDir
@@ -36,11 +39,16 @@ from tomography.experiments.m2_readers import cells
 from tomography.experiments.m2_readers import execute
 from tomography.experiments.m2_readers import plot
 from tomography.experiments.m2_readers import polarity
+from tomography.experiments.m2_readers import read_positions
 from tomography.experiments.m2_readers import read_top_k
 from tomography.experiments.m2_readers import run
 from tomography.experiments.m2_readers import token_score_max
 from tomography.experiments.m2_readers import tune_per_layer
+from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.variants import READING_TASKS
+from tomography.experiments.variants import prepare
 from tomography.experiments.variants import task_set
+from tomography.experiments.variants import template_variants
 from tomography.model import LoadedModel
 from tomography.reading.metrics import auroc
 from tomography.reading.metrics import group_accuracy
@@ -50,7 +58,7 @@ from tomography.reading.stats import paired_auroc_diff
 from tomography.reading.stats import threshold_metrics
 from tomography.reading.stats import top_k_layers
 
-DEFAULT_HASH = "cf7121373014"
+DEFAULT_HASH = "bb7e525e2aad"
 
 
 def test_the_factorial_names_its_scorers_readouts_and_rules() -> None:
@@ -91,6 +99,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.tasks == ("sentiment", "truth", "truth_polarity", "utility")
     assert config.scorers == SCORERS
     assert config.readouts == READOUTS
+    assert config.token_layers is None
     assert config.layer_rules == LAYER_RULES
     assert config.top_k == 5
     assert config.decoys == ("random", "against")
@@ -118,16 +127,18 @@ def test_set_accepts_the_new_position_strategies(position: str) -> None:
     assert config.position == position
 
 
-def test_set_reads_readouts_and_scorers_as_tuples() -> None:
+def test_set_reads_readouts_scorers_and_token_layers_as_tuples() -> None:
     data = dict(
         [
             _parse_override(Config, 'readouts=["max", "token_score_max"]'),
             _parse_override(Config, 'scorers=["ttpd"]'),
+            _parse_override(Config, "token_layers=[7, 14]"),
         ]
     )
     config = Config.from_dict(data)
     assert config.readouts == ("max", "token_score_max")
     assert config.scorers == ("ttpd",)
+    assert config.token_layers == (7, 14)
 
 
 def test_attention_is_read_by_the_logistic_scorer_only() -> None:
@@ -384,6 +395,7 @@ def _refused(
         ({"logistic_c": ()}, "at least one entry in logistic_c"),
         ({"mlp_alpha": (0.1, 0.0)}, "mlp_alpha must hold positive values"),
         ({"top_k": 0}, "top_k must be at least 1"),
+        ({"token_layers": ()}, "token_layers must name at least one layer"),
         (
             {"logistic_c": (1.0, 0.1)},
             "logistic_c must run from the strongest penalty",
@@ -865,3 +877,163 @@ def test_ttpd_is_skipped_with_its_reason_on_a_task_without_polarity(
     assert ("sentiment", "ttpd") not in scorers
     assert ("sentiment", "mean_diff") in scorers
     assert ("truth_polarity", "ttpd") in scorers
+
+
+POSITIONS = ("last", "concept", "concept_mean", "mean", "max", "response")
+
+
+def _truth_stimuli(loaded: LoadedModel) -> StimulusSet:
+    """Stimuli whose concept, truthfulness, spans more than one token."""
+    task = READING_TASKS["truth_cities"]
+    chat = chat_format_for(loaded)
+    paper = template_variants(task, chat, kinds=("paper",))[0][0]
+    rows = [e for e in _statements() if e.meta["subset"] != "larger_than"]
+    return task_set(task, paper, rows, n_pairs=4, seed=0)
+
+
+def test_read_positions_derives_every_readout_from_three_passes(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(batch_size=3)
+    stimuli = _truth_stimuli(tiny_arch)
+    texts: list[str] = []
+
+    def counting(loaded: LoadedModel, batch: Any, **kw: Any) -> Activations:
+        texts.extend(batch)
+        return collect_activations(loaded, batch, **kw)
+
+    monkeypatch.setattr(m2_readers, "collect_activations", counting)
+    read = read_positions(tiny_arch, stimuli, POSITIONS, config)
+
+    assert len(texts) == 3 * len(stimuli.texts)
+    assert list(read) == list(POSITIONS)
+    for position in POSITIONS:
+        expected = prepare(tiny_arch, stimuli, position, config)[1]
+        got = read[position]
+        assert got.position == position
+        assert got.layers == expected.layers
+        assert got.n_stimuli == expected.n_stimuli
+        assert got.data.dtype == np.float32
+        for field in ("row_stimulus", "row_rank", "row_token", "row_token_id"):
+            np.testing.assert_array_equal(
+                getattr(got, field), getattr(expected, field)
+            )
+        if position in ("mean", "concept_mean"):
+            # The two sums round apart by float32 steps of the row scale.
+            scale = float(np.abs(expected.data).max())
+            np.testing.assert_allclose(
+                got.data, expected.data, rtol=1e-5, atol=1e-6 * scale
+            )
+        else:
+            np.testing.assert_array_equal(got.data, expected.data)
+
+
+def test_read_positions_runs_only_the_passes_it_needs(
+    tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stimuli = _truth_stimuli(tiny_gpt2)
+    texts: list[str] = []
+
+    def counting(loaded: LoadedModel, batch: Any, **kw: Any) -> Activations:
+        texts.extend(batch)
+        return collect_activations(loaded, batch, **kw)
+
+    monkeypatch.setattr(m2_readers, "collect_activations", counting)
+    read = read_positions(tiny_gpt2, stimuli, ("max", "mean"), _config())
+
+    assert list(read) == ["max", "mean"]
+    assert len(texts) == len(stimuli.texts)
+
+
+def test_token_layers_keep_the_token_rows_of_those_layers_only(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    stimuli = _truth_stimuli(tiny_gpt2)
+    positions = ("mean", "response")
+
+    full = read_positions(tiny_gpt2, stimuli, positions, _config())
+    kept = read_positions(
+        tiny_gpt2, stimuli, positions, _config(token_layers=(3, 2))
+    )
+
+    assert full["response"].layers == (1, 2, 3)
+    assert kept["response"].layers == (2, 3)
+    np.testing.assert_array_equal(
+        kept["response"].data, full["response"].data[1:]
+    )
+    np.testing.assert_array_equal(
+        kept["response"].row_token, full["response"].row_token
+    )
+    assert kept["mean"].layers == (1, 2, 3)
+    np.testing.assert_array_equal(kept["mean"].data, full["mean"].data)
+
+
+def test_token_layers_must_be_layers_the_run_reads(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(token_layers=(2, 4))
+    with pytest.raises(
+        ValueError,
+        match=r"token_layers \(2, 4\) must be among the layers read "
+        r"\(1, 2, 3\)",
+    ):
+        execute(
+            config,
+            RunDir.create(config, out_root=tmp_path),
+            tiny_gpt2,
+            _sources(),
+        )
+
+
+def test_the_token_readouts_read_the_token_layers_only(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(
+        tasks=("utility",),
+        scorers=("logistic",),
+        readouts=("last", "token_score_max", "attention"),
+        token_layers=(2, 3),
+        controls=(),
+        decoys=(),
+        baselines=(),
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    _quiet_execute(config, run_dir, tiny_gpt2)
+    sidecar = cast(dict[str, Any], run_dir.read_json("scores_utility"))
+
+    for entry, per_seed in sidecar["layers"].items():
+        readout, rule = entry.split("/")[1:3]
+        for layers in per_seed:
+            if readout == "last":
+                assert set(layers) <= {1, 2, 3}
+            elif rule == "best":
+                assert layers in ([2], [3])
+            else:
+                assert sorted(layers) == [2, 3]
+
+
+def test_a_task_releases_its_activations_before_the_next_is_read(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held: list[weakref.ref[Any]] = []
+    prepare_task = m2_readers._prepare_task
+
+    def tracking(*args: Any, **kwargs: Any) -> Any:
+        assert all(ref() is None for ref in held)
+        splits, skipped = prepare_task(*args, **kwargs)
+        held.append(weakref.ref(splits))
+        return splits, skipped
+
+    monkeypatch.setattr(m2_readers, "_prepare_task", tracking)
+    config = _config(
+        scorers=("mean_diff",),
+        readouts=("last",),
+        layer_rules=("best",),
+        controls=(),
+        decoys=(),
+        shifts=(),
+        baselines=(),
+    )
+    _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
+
+    assert len(held) == 2
