@@ -18,7 +18,13 @@ from sklearn.linear_model import LogisticRegression
 
 FloatArray = NDArray[np.floating[Any]]
 Method = Literal[
-    "pca_diff", "pca_raw", "mean_diff", "logistic", "kmeans", "random"
+    "pca_diff",
+    "pca_raw",
+    "mean_diff",
+    "logistic",
+    "kmeans",
+    "random",
+    "whitened_mean_diff",
 ]
 Preprocess = Literal["center", "unit", "none"]
 
@@ -68,6 +74,11 @@ def fit_direction(
             coefficients of an L2-regularized logistic regression; both need
             `labels`. The regression runs on rows divided by one global
             scalar, so the penalty does not depend on the activation scale.
+            `whitened_mean_diff` is the whitened (IID) mass-mean probe of
+            Marks and Tegmark (2024), `S^-1 (m1 - m0)`, with S the pooled
+            within-class covariance shrunk toward a scaled identity by the
+            Ledoit-Wolf weight, as the LDA reader computes it; it needs
+            `labels`.
             `kmeans` is the centroid difference of a two-cluster K-means and
             `random` a Gaussian draw from `seed`; neither reads labels.
         h: Activations of shape (n, d).
@@ -110,7 +121,11 @@ def fit_direction(
     max_abs = float(np.abs(vectors).max())
     mean = vectors.mean(axis=0)
     fitted = vectors if preprocess == "none" else vectors - mean
-    if method == "mean_diff" or method == "logistic":
+    if (
+        method == "mean_diff"
+        or method == "logistic"
+        or method == "whitened_mean_diff"
+    ):
         if labels is None:
             raise ValueError(f"{method} needs labels")
         positive = labels == 1
@@ -118,6 +133,8 @@ def fit_direction(
             raise ValueError("labels must contain both classes")
         if method == "mean_diff":
             direction = _class_difference(fitted, positive)
+        elif method == "whitened_mean_diff":
+            direction = _whitened_class_difference(fitted, positive)
         else:
             direction = _logistic_coefficients(
                 fitted, positive, refit_at_zero, c
@@ -181,6 +198,15 @@ def _class_difference(
     rows: NDArray[np.float64], positive: NDArray[np.bool_]
 ) -> NDArray[np.float64]:
     return rows[positive].mean(axis=0) - rows[~positive].mean(axis=0)
+
+
+def _whitened_class_difference(
+    rows: NDArray[np.float64], positive: NDArray[np.bool_]
+) -> NDArray[np.float64]:
+    # Imported here because `probes` imports this module through `reader`.
+    from tomography.reading.probes import _shrunk_mass_mean
+
+    return _shrunk_mass_mean(rows, positive, None)
 
 
 def _logistic_coefficients(

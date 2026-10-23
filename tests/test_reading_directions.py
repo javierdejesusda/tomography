@@ -1,12 +1,16 @@
 from typing import NamedTuple
+from typing import get_args
 
 import numpy as np
 from numpy.typing import NDArray
 import pytest
+from sklearn.covariance import ledoit_wolf_shrinkage
 from sklearn.linear_model import LogisticRegression
 
 from tomography.reading.directions import Method
 from tomography.reading.directions import fit_direction
+from tomography.reading.probes import fit_lda
+from tomography.reading.reader import RepReader
 
 
 class Planted(NamedTuple):
@@ -87,10 +91,7 @@ def test_pca_diff_is_the_top_singular_vector_of_centered_differences() -> None:
     assert fit.raw_norm == pytest.approx(1.0)
 
 
-@pytest.mark.parametrize(
-    "method",
-    ["pca_diff", "pca_raw", "mean_diff", "logistic", "kmeans", "random"],
-)
+@pytest.mark.parametrize("method", get_args(Method))
 def test_direction_is_unit_float32_with_largest_coordinate_positive(
     method: Method,
 ) -> None:
@@ -376,7 +377,7 @@ def test_logistic_stopping_at_zero_is_an_error_by_default() -> None:
 
 
 @pytest.mark.parametrize(
-    "method", ["mean_diff", "logistic"], ids=["mean_diff", "logistic"]
+    "method", ["mean_diff", "logistic", "whitened_mean_diff"]
 )
 def test_label_methods_need_labels_with_both_classes(method: Method) -> None:
     h, labels, _ = make_blobs(20, seed=13)
@@ -486,3 +487,109 @@ def test_pca_diff_rejects_all_zero_differences_without_centering() -> None:
 
     with pytest.raises(ValueError, match="zero norm"):
         fit_direction("pca_diff", h, pairs=pairs, preprocess="none")
+
+
+EXISTING_OUTPUTS = {
+    "pca_diff": (1.0, (0.361783, -0.358209, 0.110725)),
+    "pca_raw": (1.0, (-0.239756, 0.50275, -0.003768)),
+    "mean_diff": (6.028448, (0.350341, -0.350752, 0.109746)),
+    "logistic": (0.32469, (0.268659, -0.31856, 0.138309)),
+    "kmeans": (7.223809, (-0.054189, 0.405207, 0.123954)),
+    "random": (5.137795, (-0.067263, -0.159916, -0.064315)),
+}
+
+
+@pytest.mark.parametrize("method", list(EXISTING_OUTPUTS))
+def test_existing_finders_keep_their_outputs(method: Method) -> None:
+    data = make_planted(40, seed=3)
+    raw_norm, head = EXISTING_OUTPUTS[method]
+
+    fit = fit_direction(
+        method, data.h, labels=data.labels, pairs=data.pairs, seed=1
+    )
+
+    assert fit.raw_norm == pytest.approx(raw_norm, abs=1e-5)
+    np.testing.assert_allclose(fit.direction[:3], head, atol=1e-5)
+
+
+def test_existing_methods_keep_their_order() -> None:
+    assert get_args(Method)[: len(EXISTING_OUTPUTS)] == tuple(EXISTING_OUTPUTS)
+
+
+def shrunk_whitened(
+    h: NDArray[np.float64], labels: NDArray[np.int64]
+) -> NDArray[np.float64]:
+    """Computes the whitened mass-mean direction from its definition."""
+    positive = labels == 1
+    m1 = h[positive].mean(axis=0)
+    m0 = h[~positive].mean(axis=0)
+    centered = h - np.where(positive[:, None], m1, m0)
+    covariance = centered.T @ centered / h.shape[0]
+    weight = ledoit_wolf_shrinkage(centered, assume_centered=True)
+    d = h.shape[1]
+    shrunk = (1.0 - weight) * covariance + weight * np.trace(
+        covariance
+    ) / d * np.eye(d)
+    return np.linalg.solve(shrunk, m1 - m0)
+
+
+@pytest.mark.parametrize(("n", "d"), [(40, 3), (20, 50)], ids=["n>d", "d>n"])
+def test_whitened_mean_diff_matches_a_hand_computed_shrunk_solve(
+    n: int, d: int
+) -> None:
+    rng = np.random.default_rng(31)
+    labels = (np.arange(n) % 2).astype(np.int64)
+    h = rng.standard_normal((n, d)) @ rng.standard_normal((d, d))
+    h[labels == 1] += 1.5
+    expected = shrunk_whitened(h, labels)
+
+    fit = fit_direction("whitened_mean_diff", h, labels=labels)
+
+    assert abs_cosine(fit.direction, expected) == pytest.approx(1.0, abs=1e-6)
+    assert fit.raw_norm == pytest.approx(np.linalg.norm(expected), rel=1e-6)
+    np.testing.assert_allclose(fit.mean, h.mean(axis=0), atol=1e-5)
+
+
+def test_whitened_mean_diff_recovers_the_bayes_direction() -> None:
+    rng = np.random.default_rng(32)
+    d = 16
+    scales = np.ones(d)
+    scales[0] = 8.0
+    basis = np.linalg.qr(rng.standard_normal((d, d)))[0]
+    covariance = basis @ np.diag(scales**2) @ basis.T
+    gap = basis[:, 0] + 0.5 * basis[:, 1]
+    labels = (np.arange(4000) % 2).astype(np.int64)
+    noise = rng.standard_normal((4000, d)) * scales @ basis.T
+    h = noise + np.where(labels[:, None] == 1, gap / 2, -gap / 2)
+    bayes = np.linalg.solve(covariance, gap)
+
+    whitened = fit_direction("whitened_mean_diff", h, labels=labels)
+    mass_mean = fit_direction("mean_diff", h, labels=labels)
+
+    assert abs_cosine(whitened.direction, bayes) > 0.95
+    assert abs_cosine(mass_mean.direction, bayes) < 0.5
+
+
+def test_whitened_mean_diff_is_the_lda_reader_direction() -> None:
+    data = make_planted(30, seed=33)
+    h = np.stack([data.h, 2.0 * data.h + 1.0])
+
+    reader = RepReader.fit(
+        "whitened_mean_diff", h, [0, 1], labels=data.labels, pairs=data.pairs
+    )
+    lda = fit_lda(h, [0, 1], labels=data.labels, pairs=data.pairs)
+
+    for k in range(2):
+        assert abs_cosine(reader.directions[k], lda.directions[k]) == (
+            pytest.approx(1.0, abs=1e-6)
+        )
+    np.testing.assert_allclose(reader.means, lda.means, atol=1e-4)
+    np.testing.assert_array_equal(reader.score(h) > 0, lda.score(h) > 0)
+
+
+def test_whitened_mean_diff_without_within_class_variance_is_an_error() -> None:
+    h = np.array([[1.0, 2.0], [1.0, 2.0], [0.0, 0.0], [0.0, 0.0]])
+    labels = np.array([1, 1, 0, 0], dtype=np.int64)
+
+    with pytest.raises(ValueError, match="within-class variance"):
+        fit_direction("whitened_mean_diff", h, labels=labels)
