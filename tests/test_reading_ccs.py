@@ -338,3 +338,20 @@ def test_pair_probabilities_saturate_without_overflow() -> None:
     probability = probe.pair_probabilities(h, np.array([[0, 1]]))
 
     assert probability[0, 0] == 0.0
+
+
+def test_ccs_needs_both_classes_among_the_pair_members(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rng = np.random.default_rng(12)
+    h = rng.standard_normal((1, 6, 3)).astype(np.float32)
+    pairs = np.array([[0, 1], [2, 3]], dtype=np.int64)
+    labels = np.array([1, 1, 1, 1, 0, 0], dtype=np.int64)
+
+    def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("trained before validating the labels")
+
+    monkeypatch.setattr(ccs, "_fit_layer", never)
+
+    with pytest.raises(ValueError, match=r"pair members.*both classes"):
+        fit_ccs(h, [0], pairs=pairs, labels=labels, **FAST)

@@ -133,8 +133,9 @@ def fit_ccs(
 
     Raises:
         ValueError: If the inputs are malformed, a hyperparameter is not
-            positive, a row is both a first and a second member, or a
-            layer has no variance within the sets.
+            positive, a row is both a first and a second member, the pair
+            members' labels lack a class, or a layer has no variance
+            within the sets.
     """
     if restarts < 1:
         raise ValueError(f"restarts must be at least 1, got {restarts}")
@@ -146,6 +147,9 @@ def fit_ccs(
     _check_pairs(pairs, stack.shape[1], minimum=2)
     if np.intersect1d(pairs[:, 0], pairs[:, 1]).size:
         raise ValueError("a row cannot be both a first and a second member")
+    member_labels = labels[pairs]
+    if (member_labels == 1).all() or not (member_labels == 1).any():
+        raise ValueError("the labels of the pair members need both classes")
     first_rows = stack[:, pairs[:, 0]]
     second_rows = stack[:, pairs[:, 1]]
     first_means = first_rows.mean(axis=1)
