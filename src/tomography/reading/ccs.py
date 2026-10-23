@@ -31,10 +31,16 @@ class CCSProbe:
     `sigmoid(weights[k] . (x - set_mean[k]) + biases[k])`, with the set
     mean of the first or second pair members.
 
+    Score CCS accuracy with `pair_probabilities`, not with `reader`: the
+    reader drops the per-set centring, so when the two sets have different
+    means (a statement set and a negation set) its pair comparisons are
+    shifted by that offset and do not match the probe's predictions.
+
     Attributes:
         reader: The direction of `weights` per layer, centred on the mean
             of both set means, named `ccs`. Its scores compare rows on one
-            linear scale without the bias and the per-set centring.
+            linear scale without the bias and the per-set centring; use it
+            to steer or to score rows of sets that share a mean.
         weights: Probe weights in activation units, shape (K, d).
         biases: Probe biases, shape (K,).
         first_means: Training mean of the first pair members, (K, d).
@@ -122,7 +128,8 @@ def fit_ccs(
         seed: Base seed; layer k and restart r draw from (seed, k, r).
 
     Returns:
-        The oriented probe.
+        The oriented probe. Score its accuracy with
+        `CCSProbe.pair_probabilities`, not with its reader.
 
     Raises:
         ValueError: If the inputs are malformed, a hyperparameter is not
