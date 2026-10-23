@@ -103,11 +103,15 @@ def fit_ccs(
     """Fits a CCS probe per layer and orients it on the training labels.
 
     Each set of pair members is centred on its own training mean, and both
-    are divided by one scalar, the mean norm of the centred rows (the paper
-    divides each set by its own; a shared scalar keeps one linear map for
-    both sets). The probe starts from a random unit weight vector and a
-    zero bias and is trained full batch with AdamW (the paper's learning
-    rate 0.01 by default, weight decay 0.01 as in its code) on the loss
+    are divided by one scalar so the centred rows have an average norm of
+    sqrt(d), about unit scale per feature. The paper (Appendix G.1) also
+    divides "by the average norm of {phi(x_i+)} times sqrt(d)", per set,
+    a phrase that leaves the target norm ambiguous, and calls this "less
+    essential than mean normalization"; its code does not scale by
+    default. A shared scalar keeps one linear map for both sets. The probe
+    starts from a random unit weight vector and a zero bias and is trained
+    full batch with AdamW (the paper's learning rate 0.01 by default,
+    weight decay 0.01 as in its code) on the loss
     `mean((p(x+) - (1 - p(x-)))^2 + min(p(x+), p(x-))^2)`; of `restarts`
     runs the one with the lowest final loss is kept. The loss does not fix
     the sign, so the labels orient the reader with the rule of
@@ -210,9 +214,9 @@ def _fit_layer(
     lr: float,
     seed: int,
 ) -> tuple[NDArray[np.float64], float, float]:
-    scale = float(
-        np.linalg.norm(np.concatenate([first, second]), axis=1).mean()
-    )
+    # Rows of average norm sqrt(d) put each feature near unit scale.
+    norm = np.linalg.norm(np.concatenate([first, second]), axis=1).mean()
+    scale = float(norm / np.sqrt(first.shape[1]))
     if scale == 0.0:
         raise ValueError("the pair members have no variance within the sets")
     first_t = torch.from_numpy(first / scale)

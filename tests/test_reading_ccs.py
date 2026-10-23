@@ -4,6 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 import pytest
 from scipy.special import expit
+import torch
 
 from tomography.reading import ccs
 from tomography.reading.ccs import CCSProbe
@@ -338,6 +339,40 @@ def test_pair_probabilities_saturate_without_overflow() -> None:
     probability = probe.pair_probabilities(h, np.array([[0, 1]]))
 
     assert probability[0, 0] == 0.0
+
+
+def test_ccs_trains_on_rows_of_average_norm_sqrt_d(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = make_contrast_pairs(30, d=9, seed=10)
+    seen: list[tuple[torch.Tensor, torch.Tensor]] = []
+    real = ccs._ccs_loss
+
+    def spy(
+        first: torch.Tensor,
+        second: torch.Tensor,
+        weight: torch.Tensor,
+        bias: torch.Tensor,
+    ) -> torch.Tensor:
+        seen.append((first, second))
+        return real(first, second, weight, bias)
+
+    monkeypatch.setattr(ccs, "_ccs_loss", spy)
+
+    fit_ccs(
+        100.0 * data.h,
+        [0],
+        pairs=data.pairs,
+        labels=data.labels,
+        restarts=1,
+        epochs=1,
+    )
+
+    first, second = seen[0]
+    rows = torch.cat([first, second]).numpy()
+    assert np.linalg.norm(rows, axis=1).mean() == pytest.approx(3.0)
+    np.testing.assert_allclose(first.numpy().mean(axis=0), 0.0, atol=1e-12)
+    np.testing.assert_allclose(second.numpy().mean(axis=0), 0.0, atol=1e-12)
 
 
 def test_ccs_needs_both_classes_among_the_pair_members(
