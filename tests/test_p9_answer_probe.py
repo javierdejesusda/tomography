@@ -37,9 +37,15 @@ def _planted(
     return h.astype(np.float32), correct
 
 
-def _masks(n: int) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
-    index = np.arange(n)
-    return index % 3 == 0, index % 3 == 1
+def _data(
+    signal_layer: int = 1, seed: int = 0
+) -> tuple[
+    NDArray[np.float32], NDArray[np.int64], NDArray[np.bool_], NDArray[np.bool_]
+]:
+    """Planted activations with train and val masks over thirds of the items."""
+    h, correct = _planted(signal_layer=signal_layer, seed=seed)
+    index = np.arange(len(correct))
+    return h, correct, index % 3 == 0, index % 3 == 1
 
 
 def test_answer_texts_append_a_space_and_span_the_answer() -> None:
@@ -133,8 +139,7 @@ def test_the_shared_prefix_matches_the_default_path(
 
 
 def test_the_probe_picks_the_planted_layer_on_validation() -> None:
-    h, correct = _planted(signal_layer=1)
-    train, val = _masks(len(correct))
+    h, correct, train, val = _data(signal_layer=1)
 
     probe = fit_answer_probe(h, (4, 7, 9), correct, train=train, val=val)
 
@@ -147,8 +152,7 @@ def test_the_probe_picks_the_planted_layer_on_validation() -> None:
 
 
 def test_the_probe_is_the_p9c_logistic_probe_at_the_chosen_layer() -> None:
-    h, correct = _planted(signal_layer=2, seed=1)
-    train, val = _masks(len(correct))
+    h, correct, train, val = _data(signal_layer=2, seed=1)
 
     probe = fit_answer_probe(h, (1, 2, 3), correct, train=train, val=val)
 
@@ -160,8 +164,7 @@ def test_the_probe_is_the_p9c_logistic_probe_at_the_chosen_layer() -> None:
 
 
 def test_the_validation_curve_is_the_auroc_of_the_train_fit() -> None:
-    h, correct = _planted(seed=2)
-    train, val = _masks(len(correct))
+    h, correct, train, val = _data(seed=2)
 
     probe = fit_answer_probe(h, (0, 1, 2), correct, train=train, val=val)
 
@@ -173,8 +176,7 @@ def test_the_validation_curve_is_the_auroc_of_the_train_fit() -> None:
 
 
 def test_scores_are_oriented_so_that_higher_means_correct() -> None:
-    h, correct = _planted(seed=3)
-    train, val = _masks(len(correct))
+    h, correct, train, val = _data(seed=3)
 
     probe = fit_answer_probe(h, (0, 1, 2), correct, train=train, val=val)
 
@@ -182,8 +184,7 @@ def test_scores_are_oriented_so_that_higher_means_correct() -> None:
 
 
 def test_the_probe_is_deterministic() -> None:
-    h, correct = _planted(seed=4)
-    train, val = _masks(len(correct))
+    h, correct, train, val = _data(seed=4)
 
     first = fit_answer_probe(h, (0, 1, 2), correct, train=train, val=val)
     second = fit_answer_probe(h, (0, 1, 2), correct, train=train, val=val)
@@ -193,8 +194,7 @@ def test_the_probe_is_deterministic() -> None:
 
 
 def test_nan_rows_are_left_out_of_the_fit_and_scored_nan() -> None:
-    h, correct = _planted(seed=5)
-    train, val = _masks(len(correct))
+    h, correct, train, val = _data(seed=5)
     missing = np.arange(len(correct)) % 10 == 0
     with_nan = h.copy()
     with_nan[:, missing] = np.nan
@@ -220,13 +220,14 @@ def test_nan_rows_are_left_out_of_the_fit_and_scored_nan() -> None:
         ({"correct": np.zeros(5, dtype=np.int64)}, "one label per item"),
         ({"train": np.zeros(5, dtype=bool)}, "one entry per item"),
         ({"val": np.ones(240, dtype=bool)}, "train and val overlap"),
+        ({"train": np.zeros(240, dtype=np.int64)}, "boolean"),
+        ({"val": np.zeros(240, dtype=np.int64)}, "boolean"),
     ],
 )
 def test_the_probe_rejects_inconsistent_arguments(
     change: dict[str, object], message: str
 ) -> None:
-    h, correct = _planted()
-    train, val = _masks(len(correct))
+    h, correct, train, val = _data()
     arguments: dict[str, object] = {
         "layers": (0, 1, 2),
         "correct": correct,
@@ -236,29 +237,11 @@ def test_the_probe_rejects_inconsistent_arguments(
     arguments.update(change)
 
     with pytest.raises(ValueError, match=message):
-        fit_answer_probe(
-            h,
-            arguments["layers"],  # type: ignore[arg-type]
-            arguments["correct"],  # type: ignore[arg-type]
-            train=arguments["train"],  # type: ignore[arg-type]
-            val=arguments["val"],  # type: ignore[arg-type]
-        )
-
-
-@pytest.mark.parametrize("mask", ["train", "val"])
-def test_the_probe_rejects_masks_that_are_not_boolean(mask: str) -> None:
-    h, correct = _planted()
-    train, val = _masks(len(correct))
-    masks = {"train": train, "val": val}
-    masks[mask] = masks[mask].astype(np.int64)
-
-    with pytest.raises(ValueError, match="boolean"):
-        fit_answer_probe(h, (0, 1, 2), correct, **masks)
+        fit_answer_probe(h, **arguments)  # type: ignore[arg-type]
 
 
 def test_the_scores_come_from_the_probe_of_the_reported_curve() -> None:
-    h, correct = _planted(seed=6)
-    train, val = _masks(len(correct))
+    h, correct, train, val = _data(seed=6)
 
     probe = fit_answer_probe(h, (0, 1, 2), correct, train=train, val=val)
 
@@ -283,8 +266,7 @@ def test_non_finite_activations_of_an_answer_raise(
 
 
 def test_the_probe_needs_both_outcomes_in_validation() -> None:
-    h, correct = _planted()
-    train, val = _masks(len(correct))
+    h, correct, train, val = _data()
     correct = correct.copy()
     correct[val] = 1
 

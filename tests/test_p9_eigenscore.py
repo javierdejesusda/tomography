@@ -1,5 +1,6 @@
 """Tests of EigenScore (`tomography.p9.eigenscore`)."""
 
+from collections.abc import Sequence
 import math
 
 import numpy as np
@@ -18,6 +19,15 @@ SAMPLES = [
     ("1990", "", "1991"),
 ]
 SHOTS = "Q: what is a cat?\nA: an animal\n\nQ: what is a car?\nA: a vehicle\n\n"
+
+
+def _embed(
+    loaded: LoadedModel, prompt: str, samples: Sequence[str], layer: int
+) -> np.ndarray:
+    """The (K, d) answer embeddings of one prompt's samples."""
+    return answer_activations(
+        loaded, [prompt] * len(samples), list(samples), layers=[layer]
+    )[0]
 
 
 def test_eigenscore_matches_a_hand_computed_covariance() -> None:
@@ -109,12 +119,7 @@ def test_scores_use_the_answer_activations_at_the_middle_layer(
 
     layer = eigen_layer(tiny_arch)
     for i in range(2):
-        z = answer_activations(
-            tiny_arch,
-            [PROMPTS[i]] * 3,
-            list(SAMPLES[i]),
-            layers=[layer],
-        )[0]
+        z = _embed(tiny_arch, PROMPTS[i], SAMPLES[i], layer)
         assert scores[i] == pytest.approx(eigenscore(z), rel=1e-4, abs=1e-4)
 
 
@@ -123,9 +128,7 @@ def test_an_explicit_layer_and_alpha_are_used(tiny_arch: LoadedModel) -> None:
         tiny_arch, PROMPTS[:1], SAMPLES[:1], layer=0, alpha=0.1
     )
 
-    z = answer_activations(
-        tiny_arch, [PROMPTS[0]] * 3, list(SAMPLES[0]), layers=[0]
-    )[0]
+    z = _embed(tiny_arch, PROMPTS[0], SAMPLES[0], 0)
     assert scores[0] == pytest.approx(
         eigenscore(z, alpha=0.1), rel=1e-4, abs=1e-4
     )
@@ -152,9 +155,7 @@ def test_identical_answers_give_the_rank_one_score(
 ) -> None:
     scores = eigenscores(tiny_arch, PROMPTS[:1], [("Paris",) * 4])
 
-    layer = eigen_layer(tiny_arch)
-    z = answer_activations(tiny_arch, PROMPTS[:1], ["Paris"], layers=[layer])
-    z = z[0, 0]
+    z = _embed(tiny_arch, PROMPTS[0], ["Paris"], eigen_layer(tiny_arch))[0]
     assert scores[0] == pytest.approx(_rank_one(z, 4), rel=1e-4, abs=1e-4)
 
 

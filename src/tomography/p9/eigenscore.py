@@ -19,6 +19,7 @@ last one before a stop token.
 """
 
 from collections.abc import Sequence
+import itertools
 
 import numpy as np
 from numpy.typing import NDArray
@@ -126,21 +127,19 @@ def eigenscores(
     if len(samples) != len(prompts):
         raise ValueError("need one sample set per prompt")
     read = eigen_layer(loaded) if layer is None else layer
-    owner = [i for i, group in enumerate(samples) for _ in group]
+    kept = [[s for s in group if s] for group in samples]
     h = answer_activations(
         loaded,
-        [prompts[i] for i in owner],
-        [s for group in samples for s in group],
+        [p for p, group in zip(prompts, kept, strict=True) for _ in group],
+        [s for group in kept for s in group],
         layers=[read],
         bos=bos,
         batch_size=batch_size,
         share_prefix=share_prefix,
     )[0]
-    owners = np.array(owner, dtype=np.int64)
-    usable = ~np.isnan(h).any(axis=1)
+    bounds = np.cumsum([0, *(len(group) for group in kept)])
     scores = np.full(len(prompts), np.nan)
-    for i in range(len(prompts)):
-        rows = h[(owners == i) & usable]
-        if len(rows) >= 2:
-            scores[i] = eigenscore(rows, alpha=alpha)
+    for i, (start, end) in enumerate(itertools.pairwise(bounds)):
+        if end - start >= 2:
+            scores[i] = eigenscore(h[start:end], alpha=alpha)
     return scores

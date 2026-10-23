@@ -89,24 +89,29 @@ def answer_activations(
             has non-finite activations.
     """
     texts, spans = answer_texts(prompts, answers)
+    keep = [i for i, a in enumerate(answers) if a]
+    if not keep:
+        return np.full(
+            (len(layers), len(texts), loaded.d_model), np.nan, dtype=np.float32
+        )
+    data = collect_activations(
+        loaded,
+        [texts[i] for i in keep],
+        layers=layers,
+        position="concept",
+        concept_spans=[spans[i] for i in keep],
+        bos=bos,
+        batch_size=batch_size,
+        share_prefix=share_prefix,
+    ).data
+    if not all(np.isfinite(layer).all() for layer in data):
+        raise ValueError("a non-empty answer has non-finite activations")
+    if len(keep) == len(texts):
+        return data
     out = np.full(
         (len(layers), len(texts), loaded.d_model), np.nan, dtype=np.float32
     )
-    keep = [i for i, a in enumerate(answers) if a]
-    if keep:
-        acts = collect_activations(
-            loaded,
-            [texts[i] for i in keep],
-            layers=layers,
-            position="concept",
-            concept_spans=[spans[i] for i in keep],
-            bos=bos,
-            batch_size=batch_size,
-            share_prefix=share_prefix,
-        )
-        if not np.isfinite(acts.data).all():
-            raise ValueError("a non-empty answer has non-finite activations")
-        out[:, keep] = acts.data
+    out[:, keep] = data
     return out
 
 
@@ -176,17 +181,18 @@ def fit_answer_probe(
         raise ValueError(f"train and val need one entry per item ({n})")
     if (train & val).any():
         raise ValueError("train and val overlap")
-    usable = ~np.isnan(h).any(axis=(0, 2))
+    usable = np.ones(n, dtype=bool)
+    for layer_h in h:
+        usable &= ~np.isnan(layer_h).any(axis=1)
     fit_rows = train & usable
-    val_rows = val & usable
     reader = RepReader.fit(
         "logistic", h[:, fit_rows], layers, labels=correct[fit_rows]
     )
+    usable_scores = reader.score(h[:, usable])
     val_auroc = auroc(
-        reader.score(h[:, val_rows]).astype(np.float64), correct[val_rows]
+        usable_scores[:, val[usable]].astype(np.float64), correct[val & usable]
     )
     layer = best_layer(val_auroc, layers)
-    k = list(layers).index(layer)
     scores = np.full(n, np.nan)
-    scores[usable] = reader.score(h[:, usable])[k]
+    scores[usable] = usable_scores[list(layers).index(layer)]
     return AnswerProbe(layer, val_auroc, scores)
