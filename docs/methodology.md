@@ -276,6 +276,19 @@ The headline cell is the unknown side of the `direction_type` contrast; every ot
 correction for multiple comparisons. The abstention patterns are phrase matches, so a title that contains a pattern
 word still counts as an abstention; the `hand_check.csv` sample measures this.
 
+### Published detection baselines
+
+These baselines predict, per question, whether the greedy answer is correct, beside the `p9c` signals. Each states
+where it departs from its published recipe.
+
+- Exact-answer-token probe (`p9/answer_probe.py`; Orgad et al. 2025, `orgad2025llms`): a logistic-regression probe
+  on the residual stream at the last token of the greedy answer, read from the prompt, a space and the answer. It is
+  fitted like the `p9c` `probe` (the `logistic` finder on the train items) at every layer, and the layer with the
+  highest validation AUROC is kept. Deviations: the whole stored answer is the exact-answer span, so no extraction
+  model runs and no item is dropped (the reference extracts a span from a long generation and drops items without
+  one); the residual stream is read instead of the MLP output; the layer is chosen automatically on the validation
+  split instead of by hand from a heatmap. An empty answer has no token to read and gets no score.
+
 ## Run settings of the GPU runs
 
 - **Batch size is part of the run.** Sampling in `p9a` is seeded per chunk of prompts, so `batch_size` changes every
