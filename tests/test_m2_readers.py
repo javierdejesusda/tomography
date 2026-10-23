@@ -25,6 +25,7 @@ from tomography.experiments.m2_readers import COLUMNS
 from tomography.experiments.m2_readers import COMPARISON_COLUMNS
 from tomography.experiments.m2_readers import CONTROLS
 from tomography.experiments.m2_readers import LAYER_RULES
+from tomography.experiments.m2_readers import POLARITY_TASKS
 from tomography.experiments.m2_readers import POSITION_OF
 from tomography.experiments.m2_readers import READOUTS
 from tomography.experiments.m2_readers import SCORERS
@@ -34,10 +35,12 @@ from tomography.experiments.m2_readers import applies
 from tomography.experiments.m2_readers import cells
 from tomography.experiments.m2_readers import execute
 from tomography.experiments.m2_readers import plot
+from tomography.experiments.m2_readers import polarity
 from tomography.experiments.m2_readers import read_top_k
 from tomography.experiments.m2_readers import run
 from tomography.experiments.m2_readers import token_score_max
 from tomography.experiments.m2_readers import tune_per_layer
+from tomography.experiments.variants import task_set
 from tomography.model import LoadedModel
 from tomography.reading.metrics import auroc
 from tomography.reading.metrics import group_accuracy
@@ -47,7 +50,7 @@ from tomography.reading.stats import paired_auroc_diff
 from tomography.reading.stats import threshold_metrics
 from tomography.reading.stats import top_k_layers
 
-DEFAULT_HASH = "8c300e948f6c"
+DEFAULT_HASH = "cf7121373014"
 
 
 def test_the_factorial_names_its_scorers_readouts_and_rules() -> None:
@@ -85,8 +88,8 @@ def test_config_defaults_and_round_trip() -> None:
     config = Config()
     assert config.experiment == "m2"
     assert config.n_eval_pairs == 256
-    assert config.tasks == ("sentiment", "truth", "utility")
-    assert config.scorers == ("pca_diff", "mean_diff", "logistic", "lda", "mlp")
+    assert config.tasks == ("sentiment", "truth", "truth_polarity", "utility")
+    assert config.scorers == SCORERS
     assert config.readouts == READOUTS
     assert config.layer_rules == LAYER_RULES
     assert config.top_k == 5
@@ -171,6 +174,27 @@ def test_cells_leave_out_the_controls_that_are_not_asked_for() -> None:
         Cell("lda", "mean", "best"),
         Cell("lda", "mean", "top_k"),
     ]
+
+
+def test_cells_list_only_the_scorers_a_task_can_read() -> None:
+    config = Config(scorers=("lda", "ttpd"), readouts=("mean",), controls=())
+
+    assert cells(config, config.readouts, scorers=("lda",)) == [
+        Cell("lda", "mean", "best"),
+        Cell("lda", "mean", "top_k"),
+    ]
+
+
+def test_polarity_is_read_from_the_subset_name() -> None:
+    subsets = POLARITY_TASKS["truth_polarity"]
+
+    signs = [
+        polarity(Example(f"got-{s}-0", "x", 1, "train", {"subset": s}))
+        for s in subsets
+    ]
+
+    assert subsets == ("cities", "neg_cities", "sp_en_trans", "neg_sp_en_trans")
+    assert signs == [1, -1, 1, -1]
 
 
 def _token_rows(counts: Sequence[int]) -> Activations:
@@ -289,8 +313,33 @@ def _utility(pairs: int = 8) -> list[Example]:
     return rows
 
 
+def _statements(per_class: int = 6) -> list[Example]:
+    """Geometry of Truth rows of the polarity task, and of another subset."""
+    rows = []
+    for subset in (*POLARITY_TASKS["truth_polarity"], "larger_than"):
+        negated = "not " if subset.startswith("neg_") else ""
+        noun = subset.split("_")[-1]
+        for split in ("train", "val", "test"):
+            for label, value in ((0, "wet"), (1, "dry")):
+                for i in range(per_class):
+                    rows.append(
+                        Example(
+                            f"got-{subset}-{split}-{label}-{i}",
+                            f"the {noun} {i} is {negated}{value}",
+                            label,
+                            split,
+                            {"subset": subset},
+                        )
+                    )
+    return rows
+
+
 def _sources() -> dict[str, list[Example]]:
-    return {"sst2": _sentiment(), "ethics_utility": _utility()}
+    return {
+        "sst2": _sentiment(),
+        "ethics_utility": _utility(),
+        "geometry_of_truth": _statements(),
+    }
 
 
 def _config(**overrides: Any) -> Config:
@@ -352,6 +401,10 @@ def _refused(
             "baseline 'lda/last' is not a cell of the run",
         ),
         ({"baselines": ("mean_diff/attention",)}, "not a valid cell"),
+        (
+            {"tasks": ("sentiment",), "scorers": ("ttpd",), "baselines": ()},
+            "task 'sentiment' has no scorer left to read",
+        ),
     ],
 )
 def test_a_bad_config_is_refused_before_any_model_call(
@@ -397,6 +450,26 @@ def test_run_loads_the_model_in_float32(
     with pytest.raises(LoadedError):
         run(config, RunDir.create(config, out_root=tmp_path))
     assert calls == [("tiny", {"dtype": torch.float32})]
+
+
+def test_run_loads_the_sources_of_every_task(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[list[str]] = []
+
+    class LoadedError(Exception):
+        pass
+
+    def record(sources: list[str]) -> None:
+        calls.append(list(sources))
+        raise LoadedError
+
+    monkeypatch.setattr(m2_readers, "load_model", lambda *a, **k: None)
+    monkeypatch.setattr(m2_readers, "load_sources", record)
+    config = _config(tasks=("sentiment", "truth_polarity"))
+    with pytest.raises(LoadedError):
+        run(config, RunDir.create(config, out_root=tmp_path))
+    assert calls == [["sst2", "geometry_of_truth"]]
 
 
 def _quiet_execute(
@@ -486,7 +559,8 @@ def test_every_cell_has_a_row_per_condition_and_series(
 ) -> None:
     rows = _table(finished)
     sentiment = [r for r in rows if r["task"] == "sentiment"]
-    listed = cells(_config(), READOUTS)
+    scorers = [s for s in SCORERS if s != "ttpd"]
+    listed = cells(_config(), READOUTS, scorers=scorers)
     expected = {
         (c.scorer, c.readout, c.layer_rule, series, condition)
         for c in listed
@@ -615,7 +689,7 @@ def test_comparisons_test_each_cell_against_a_baseline_on_the_ensemble(
         (c.scorer, c.readout)
         for c in cells(_config(), READOUTS)
         if c.layer_rule == "best" and c.scorer in SCORERS
-    } - {("logistic", "last")}
+    } - {("logistic", "last")} - {("ttpd", r) for r in READOUTS}
     base = ensemble("logistic/last/best/reader")[2]
     groups = arrays["report_groups"]
     clusters = np.empty(labels.shape[0], dtype=np.int64)
@@ -702,3 +776,92 @@ def test_the_layer_rules_of_a_cell_share_its_per_layer_fits(
     np.testing.assert_allclose(
         arrays["report"][top], (arrays["report"][best] - mean) / std
     )
+
+
+@pytest.fixture(scope="module")
+def polar_runs() -> dict[str, tuple[RunDir, dict[str, set[str]]]]:
+    return {}
+
+
+@pytest.fixture
+def polar(
+    polar_runs: dict[str, tuple[RunDir, dict[str, set[str]]]],
+    tiny_gpt2: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[RunDir, dict[str, set[str]]]:
+    """A run of TTPD on the polarity task and on sentiment, at one layer."""
+    if "run" not in polar_runs:
+        subsets: dict[str, set[str]] = {}
+
+        def recording(task: Any, variant: Any, rows: Any, **kw: Any) -> Any:
+            subsets.setdefault(task.name, set()).update(
+                e.meta.get("subset", "") for e in rows
+            )
+            return task_set(task, variant, rows, **kw)
+
+        monkeypatch.setattr(m2_readers, "task_set", recording)
+        config = _config(
+            tasks=("sentiment", "truth_polarity"),
+            scorers=("mean_diff", "ttpd"),
+            readouts=("last", "token_score_max"),
+            layer_rules=("best",),
+            layers=(1,),
+            controls=("shuffled",),
+            decoys=(),
+            shifts=(),
+            baselines=("mean_diff/last",),
+            n_pairs=8,
+        )
+        run_dir = RunDir.create(config, out_root=tmp_path_factory.mktemp("m2"))
+        _quiet_execute(config, run_dir, tiny_gpt2)
+        polar_runs["run"] = (run_dir, subsets)
+    return polar_runs["run"]
+
+
+def test_the_polarity_task_reads_only_its_four_subsets(
+    polar: tuple[RunDir, dict[str, set[str]]],
+) -> None:
+    _, subsets = polar
+
+    assert subsets["truth_polarity"] == set(POLARITY_TASKS["truth_polarity"])
+
+
+def test_ttpd_reads_the_polarity_task_apart_from_mean_diff(
+    polar: tuple[RunDir, dict[str, set[str]]],
+) -> None:
+    run_dir, _ = polar
+    arrays = run_dir.read_arrays("scores_truth_polarity")
+    sidecar = cast(dict[str, Any], run_dir.read_json("scores_truth_polarity"))
+    entries = sidecar["entries"]
+    for readout in ("last", "token_score_max"):
+        for series in ("reader", "shuffled"):
+            ttpd = arrays["select"][
+                entries.index(f"ttpd/{readout}/best/{series}")
+            ]
+            dom = arrays["select"][
+                entries.index(f"mean_diff/{readout}/best/{series}")
+            ]
+            for seed in range(ttpd.shape[0]):
+                corr = np.corrcoef(ttpd[seed], dom[seed])[0, 1]
+                # Without polarity both read the class-mean difference, so
+                # their scores would be one affine map apart (|corr| = 1).
+                assert abs(corr) < 1.0 - 1e-5, (readout, series, seed)
+
+
+def test_ttpd_is_skipped_with_its_reason_on_a_task_without_polarity(
+    polar: tuple[RunDir, dict[str, set[str]]],
+) -> None:
+    run_dir, _ = polar
+    summary = cast(dict[str, Any], run_dir.read_json("summary"))
+    rows = _table(run_dir)
+
+    assert summary["skipped"]["sentiment"]["ttpd"] == (
+        "task 'sentiment' has no polarity labels: ttpd needs affirmative "
+        "and negated statements"
+    )
+    assert "ttpd" not in summary["skipped"]["truth_polarity"]
+    scorers = {(r["task"], r["scorer"]) for r in rows}
+    assert ("sentiment", "ttpd") not in scorers
+    assert ("sentiment", "mean_diff") in scorers
+    assert ("truth_polarity", "ttpd") in scorers

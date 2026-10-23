@@ -1,11 +1,12 @@
 """M2: readers compared on the same features, readouts and layer rules.
 
 A factorial of scorer by readout by layer rule. Every scorer (LAT,
-difference of means, tuned logistic regression, LDA, TTPD and an MLP with
-matched tuning) reads every readout (the last token, the concept token, the
-mean of the concept tokens, the mean of the stimulus tokens, their
-feature-wise maximum, and the maximum over the stimulus tokens of a reader's
-per-token score), and the logistic scorer also reads the stimulus tokens
+difference of means, tuned logistic regression, LDA, TTPD on the tasks with
+polarity labels, and an MLP with matched tuning) reads every readout (the
+last token, the concept token, the mean of the concept tokens, the mean of
+the stimulus tokens, their feature-wise maximum, and the maximum over the
+stimulus tokens of a reader's per-token score), and the logistic scorer
+also reads the stimulus tokens
 through learned attention. Each cell is reported at two layer rules, the
 best validation layer and the standardized mean of the top k validation
 layers, and the MLP and attention cells also at a joint fit over those k
@@ -22,6 +23,7 @@ from collections.abc import Sequence
 import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 from typing import Literal
 from typing import NamedTuple
@@ -49,6 +51,7 @@ from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.sweep import shuffle_within_groups
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import ReadingTask
+from tomography.experiments.variants import TaskSource
 from tomography.experiments.variants import Variant
 from tomography.experiments.variants import VariantKind
 from tomography.experiments.variants import eval_pairs
@@ -59,7 +62,6 @@ from tomography.experiments.variants import prepare
 from tomography.experiments.variants import target_of
 from tomography.experiments.variants import task_examples
 from tomography.experiments.variants import task_set
-from tomography.experiments.variants import task_sources
 from tomography.experiments.variants import task_splits
 from tomography.experiments.variants import template_variants
 from tomography.model import LoadedModel
@@ -116,6 +118,17 @@ POSITION_OF: Mapping[Readout, PositionStrategy] = {
     "attention": "response",
 }
 CONCEPT_READOUTS: tuple[Readout, ...] = ("concept", "concept_mean")
+POLARITY_TASKS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "truth_polarity": (
+            "cities",
+            "neg_cities",
+            "sp_en_trans",
+            "neg_sp_en_trans",
+        )
+    }
+)
+NEGATED_PREFIX = "neg_"
 JOINT_BASELINE_RULE: LayerRule = "top_k"
 COLUMNS: tuple[str, ...] = (
     "task",
@@ -170,11 +183,12 @@ class Config(ReadingConfig):
     scorers and readouts replace them.
 
     Attributes:
-        tasks: Keys of `READING_TASKS`; the task must be binary.
-        scorers: The scorers to compare, from `SCORERS`. `ttpd` is not a
-            default: without polarity labels, which no reading task has, it
-            scores as `mean_diff` does (both are the class-mean difference
-            of the centered rows).
+        tasks: Keys of `READING_TASKS`, which must be binary, or of
+            `POLARITY_TASKS`.
+        scorers: The scorers to compare, from `SCORERS`. `ttpd` reads the
+            polarity tasks only: without polarity labels it scores as
+            `mean_diff` does (both are the class-mean difference of the
+            centered rows), so it is skipped elsewhere.
         readouts: The readouts every scorer reads, from `READOUTS`; the
             concept readouts are skipped for a task without a concept slot
             or word, and `attention` is read by the logistic scorer only.
@@ -203,14 +217,8 @@ class Config(ReadingConfig):
     experiment: str = "m2"
     model: str = "gpt2"
     n_eval_pairs: int | None = 256
-    tasks: tuple[str, ...] = ("sentiment", "truth", "utility")
-    scorers: tuple[Scorer, ...] = (
-        "pca_diff",
-        "mean_diff",
-        "logistic",
-        "lda",
-        "mlp",
-    )
+    tasks: tuple[str, ...] = ("sentiment", "truth", "truth_polarity", "utility")
+    scorers: tuple[Scorer, ...] = SCORERS
     readouts: tuple[Readout, ...] = READOUTS
     layer_rules: tuple[LayerRule, ...] = LAYER_RULES
     top_k: int = 5
@@ -267,12 +275,19 @@ def applies(scorer: str, readout: str, layer_rule: str) -> bool:
     return True
 
 
-def cells(config: Config, readouts: Sequence[str]) -> list[Cell]:
+def cells(
+    config: Config,
+    readouts: Sequence[str],
+    *,
+    scorers: Sequence[str] | None = None,
+) -> list[Cell]:
     """Lists the fitted cells and the controls of a run, in table order.
 
     Args:
         config: The experiment settings.
         readouts: The readouts the task can read.
+        scorers: The scorers the task can read; None means
+            `config.scorers`.
 
     Returns:
         The scorer cells, then the random direction at every non-joint rule
@@ -281,7 +296,7 @@ def cells(config: Config, readouts: Sequence[str]) -> list[Cell]:
     """
     rows = [
         Cell(scorer, readout, rule)
-        for scorer in config.scorers
+        for scorer in (config.scorers if scorers is None else scorers)
         for readout in readouts
         for rule in config.layer_rules
         if applies(scorer, readout, rule)
@@ -296,6 +311,18 @@ def cells(config: Config, readouts: Sequence[str]) -> list[Cell]:
     if "text" in config.controls:
         rows.append(Cell("text", "text", "none"))
     return rows
+
+
+def polarity(example: Example) -> int:
+    """Reads the polarity of a statement from its Geometry of Truth subset.
+
+    Args:
+        example: A statement with `meta["subset"]`.
+
+    Returns:
+        -1 for a negated subset, named `neg_<name>`, and +1 otherwise.
+    """
+    return -1 if str(example.meta["subset"]).startswith(NEGATED_PREFIX) else 1
 
 
 def token_score_max(
@@ -400,6 +427,8 @@ class _Splits:
         report: Per position, the activations of each condition's report
             items, in the order of `report_items`.
         texts: The raw text of every example, by uid.
+        polarities: The polarity of each seed's training stimuli, for a
+            polarity task; None otherwise.
     """
 
     train_items: list[StimulusSet]
@@ -409,6 +438,7 @@ class _Splits:
     select: dict[PositionStrategy, Activations]
     report: dict[PositionStrategy, list[Activations]]
     texts: dict[str, str]
+    polarities: list[NDArray[np.int64]] | None
 
     @property
     def conditions(self) -> list[str]:
@@ -460,6 +490,7 @@ def _row_reader(
     hyper: float | None,
     seed: int,
     joint: bool,
+    polarities: NDArray[np.int64] | None,
 ) -> RepReader | MLPReader:
     """Fits a scorer on one row per stimulus (or per token) at each layer."""
     if scorer == "mlp":
@@ -499,7 +530,14 @@ def _row_reader(
     if scorer == "lda":
         return fit_lda(h, layers, labels=labels, pairs=pairs, groups=groups)
     if scorer == "ttpd":
-        return fit_ttpd(h, layers, labels=labels, pairs=pairs, groups=groups)
+        return fit_ttpd(
+            h,
+            layers,
+            labels=labels,
+            polarities=polarities,
+            pairs=pairs,
+            groups=groups,
+        )
     return RepReader.fit(
         cast(Method, scorer),
         h,
@@ -522,6 +560,7 @@ def _fit(
     hyper: float | None,
     seed: int,
     joint: bool,
+    polarities: NDArray[np.int64] | None,
 ) -> ScoreFn:
     """Fits one scorer on a readout and returns its stimulus scorer."""
     if readout == "attention":
@@ -540,6 +579,7 @@ def _fit(
             hyper,
             seed,
             joint,
+            polarities,
         )
         return lambda acts: rows.score(acts.data)
     tokens = _row_reader(
@@ -553,6 +593,7 @@ def _fit(
         hyper,
         seed,
         joint,
+        None if polarities is None else act.row_values(polarities),
     )
     return lambda acts: token_score_max(tokens.score(acts.data), acts)
 
@@ -602,6 +643,7 @@ def _tuned(
             value,
             seed,
             at is not None,
+            None if splits.polarities is None else splits.polarities[i],
         )
         for value in _grid(config, scorer)
     ]
@@ -942,14 +984,75 @@ def _group_wins(
     )
 
 
+def _task(name: str) -> ReadingTask:
+    """Returns a task of `READING_TASKS` or of `POLARITY_TASKS`.
+
+    A polarity task reads truth as `truth_cities` does, from the
+    statements of its subsets, and is evaluated on its own select and
+    report items.
+    """
+    if name not in POLARITY_TASKS:
+        return READING_TASKS[name]
+    return dataclasses.replace(
+        READING_TASKS["truth_cities"], name=name, subset=None, target=None
+    )
+
+
+def _expand(names: Sequence[str]) -> tuple[str, ...]:
+    """Expands the task names as `expand_tasks` does, polarity tasks kept."""
+    return tuple(
+        dict.fromkeys(
+            item
+            for name in names
+            for item in (
+                (name,) if name in POLARITY_TASKS else expand_tasks((name,))
+            )
+        )
+    )
+
+
+def _task_examples(
+    name: str, examples: Mapping[str, Sequence[Example]]
+) -> Mapping[str, Sequence[Example]]:
+    """Keeps, for a polarity task, only the statements of its subsets."""
+    source = _task(name).source
+    if name not in POLARITY_TASKS or source not in examples:
+        return examples
+    kept = [
+        e
+        for e in examples[source]
+        if e.meta.get("subset") in POLARITY_TASKS[name]
+    ]
+    return {**examples, source: kept}
+
+
 def _readable(
-    task: ReadingTask, readouts: Sequence[Readout]
-) -> tuple[list[Readout], dict[str, str]]:
-    """Drops the concept readouts of a task that has no concept token."""
+    task: ReadingTask, config: Config
+) -> tuple[list[Scorer], list[Readout], dict[str, str]]:
+    """Drops the scorers and readouts a task cannot read, with the reason.
+
+    TTPD needs polarity labels, and the concept readouts a concept token.
+    """
+    scorers = [
+        s for s in config.scorers if s != "ttpd" or task.name in POLARITY_TASKS
+    ]
     has_concept = task.concept is not None or task.word is not None
-    kept = [r for r in readouts if r not in CONCEPT_READOUTS or has_concept]
-    reason = f"task {task.name!r} has no concept slot or word"
-    return kept, {r: reason for r in readouts if r not in kept}
+    readouts = [
+        r for r in config.readouts if r not in CONCEPT_READOUTS or has_concept
+    ]
+    no_polarity = (
+        f"task {task.name!r} has no polarity labels: ttpd needs affirmative "
+        "and negated statements"
+    )
+    no_concept = f"task {task.name!r} has no concept slot or word"
+    return (
+        scorers,
+        readouts,
+        {
+            **{s: no_polarity for s in config.scorers if s not in scorers},
+            **{r: no_concept for r in config.readouts if r not in readouts},
+        },
+    )
 
 
 def _prepare_task(
@@ -1018,6 +1121,13 @@ def _prepare_task(
             *task_examples(target_of(task), examples),
         )
     }
+    polarities = None
+    if task.name in POLARITY_TASKS:
+        sign = {e.uid: polarity(e) for e in splits.train}
+        polarities = [
+            np.array([sign[uid] for uid in s.uids], dtype=np.int64)
+            for s in train_sets
+        ]
 
     def acts(stimuli: StimulusSet, position: PositionStrategy) -> Activations:
         return prepare(loaded, stimuli, position, config)[1]
@@ -1033,6 +1143,7 @@ def _prepare_task(
                 p: [acts(s, p) for s in report_sets.values()] for p in positions
             },
             texts=texts,
+            polarities=polarities,
         ),
         {f"shift:{kind}": reason for kind, reason in skipped.items()},
     )
@@ -1097,7 +1208,7 @@ def _write_task(
 
 def _check(config: Config) -> tuple[str, ...]:
     """Checks what the config alone settles and expands its tasks."""
-    tasks = expand_tasks(config.tasks)
+    tasks = _expand(config.tasks)
     if not tasks:
         raise ValueError("m2 needs at least one task")
     for field, values in (
@@ -1141,10 +1252,16 @@ def _check(config: Config) -> tuple[str, ...]:
         if not applies(scorer, readout, "best"):
             raise ValueError(f"baseline {baseline!r} is not a valid cell")
     for name in tasks:
-        task = READING_TASKS[name]
+        task = _task(name)
         if task.pairing == "one_vs_rest":
             raise ValueError(f"m2 reads binary tasks only, not {name!r}")
-        if not _readable(task, config.readouts)[0]:
+        scorers, readouts, _ = _readable(task, config)
+        if not scorers:
+            raise ValueError(
+                f"task {name!r} has no scorer left to read: ttpd needs a "
+                "task with polarity labels"
+            )
+        if not readouts:
             raise ValueError(
                 f"task {name!r} has no readout left to read: its concept "
                 "readouts need a concept slot or word"
@@ -1183,7 +1300,7 @@ def execute(
     """
     tasks = _check(config)
     for name in tasks:
-        task = READING_TASKS[name]
+        task = _task(name)
         task_examples(task, examples)
         task_examples(target_of(task), examples)
     rows: list[list[Any]] = []
@@ -1199,13 +1316,13 @@ def execute(
         ),
     }
     for name in tasks:
-        task = READING_TASKS[name]
-        readouts, skipped = _readable(task, config.readouts)
+        task = _task(name)
+        scorers, readouts, skipped = _readable(task, config)
         splits, shift_skips = _prepare_task(
-            config, loaded, task, readouts, examples
+            config, loaded, task, readouts, _task_examples(name, examples)
         )
         rules: dict[tuple[str, str], list[str]] = {}
-        for cell in cells(config, readouts):
+        for cell in cells(config, readouts, scorers=scorers):
             rules.setdefault((cell.scorer, cell.readout), []).append(
                 cell.layer_rule
             )
@@ -1247,11 +1364,16 @@ def run(config: Config, run_dir: RunDir) -> None:
         ValueError: If there is no task, scorer, readout or layer rule, a
             grid is empty or not positive, `top_k` is below 1, a baseline is
             not a cell of the run, or a task is unknown, not binary or has
-            no readout left to read (all checked before the model is
-            loaded).
+            no scorer or readout left to read (all checked before the model
+            is loaded).
     """
-    _check(config)
-    sources = task_sources(config.tasks)
+    sources: list[TaskSource] = list(
+        dict.fromkeys(
+            source
+            for name in _check(config)
+            for source in (_task(name).source, target_of(_task(name)).source)
+        )
+    )
     execute(
         config,
         run_dir,
