@@ -107,6 +107,7 @@ text, the default follows the reference code and the other variant is selectable
 | Held-out splits                             | The reference code evaluates honesty and emotions on strings that also occur in training.                                                                                      | Splits are assigned by hashing the source statement or scenario id before any truncation or pairing, so no source appears in two splits.                                              | `datasets/records.py` (`assign_splits`)  |
 | Finders and stimuli the reference omits     | The reference ships only the PCA, cluster-mean and random finders, and no utility or morality code.                                                                           | The logistic and K-means finders follow the paper text, and `pca_raw` is an added variant. Utility and morality stimuli are built from the paper's templates and ETHICS. The prompt difference is a control contrast of `c4` (`control/contrast.py`), not a reading finder. | `reading/directions.py`, `datasets/ethics.py` |
 | Readers beyond one direction per layer      | The paper reads with one direction per layer. Three readers behind a common interface (`Reader`) go beyond it: LDA, the mass-mean direction under a within-class covariance shrunk toward a scaled identity (Ledoit-Wolf weight by default); MLPs on standardized activations, one per layer or one on concatenated layers, fitted with L-BFGS; and an attention-pooled linear reader on the token rows of the `response` position: a softmax over the tokens of a stimulus, or over the (token, layer) cells of several layers, weights a linear value head; its query starts at zero, which is mean pooling, and L-BFGS minimizes the L2 logistic loss of the logistic finder in float64. | Readers are compared on the same features. LDA stays linear, so it is a `RepReader` that can steer, oriented by the rule of `RepReader.fit`; the attention reader, as in EleutherAI's attention probes, tests whether choosing tokens beats a fixed position or the mean, and exports its value heads as such a reader; the MLP has no direction and tests whether a nonlinear reader adds anything. | `reading/probes.py`                      |
+| TTPD                                        | Not in the paper. TTPD (truth and polarity directions) fits a general truth direction by least squares on the centered rows, a polarity direction by an unpenalized logistic regression, and an unpenalized logistic regression on the two projections, as in its reference code. One topic, so the rows are centered on their mean. | It is the published structured linear reader that beats logistic regression out of distribution on lies. Its score is linear, so it is a `RepReader`; without polarity labels (none of the reading tasks has negated statements) it is the least-squares truth direction. | `reading/probes.py` (`fit_ttpd`)         |
 
 ### Stimuli and data
 
@@ -170,11 +171,44 @@ that resamples whole runs along axis 0, and `wilson_ci` gives intervals for rate
 | `p9c` AUROC (`lo`, `hi`)                                       | percentile bootstrap                                           | the test items                                                            |
 | `p9c` within-relation AUROC                                    | percentile bootstrap                                           | the items, resampled inside each relation at its size                     |
 | `p9d` slopes                                                   | percentile bootstrap                                           | the items, paired across arms                                             |
+| `m2` cell metrics (`pair_lo`, `pair_hi`, `auroc_lo`, `auroc_hi`) | percentile bootstrap                                         | the seeds (independent training sets)                                     |
+| `m2` comparisons                                               | paired percentile bootstrap; DeLong; exact McNemar; Holm       | the report pairs (clusters), on the seed ensemble                         |
 
 `a1` uses a t-interval because a percentile bootstrap of so few runs covers less than its level. The `a2` and `a5`
 intervals and nulls are described in the docstrings of `experiments/a2_logit_lens.py` and
 `experiments/a5_sae_features.py`. A `p9b` interval describes how much the fitted reader
 varies with its training draw; it does not cover the noise of the test items.
+
+## Reader comparison (M2)
+
+`m2` (`experiments/m2_readers.py`) compares readers on the same features and items, as a factorial of scorer by
+readout by layer rule, so a gain of pooling is never credited to nonlinearity.
+
+- Scorers: LAT (`pca_diff`), difference of means (`mean_diff`), logistic regression with its `C` tuned, LDA, TTPD and
+  an MLP whose `alpha` is tuned on a grid of the same size (matched tuning).
+- Readouts: `last`, `concept`, `concept_mean`, `mean` (the stimulus mean), `max` (the feature-wise maximum of the
+  stimulus tokens), `token_score_max` (the maximum over the stimulus tokens of a scorer's per-token score; the scorer
+  is fitted on every token row with its stimulus's label, the max aggregation of recent probe work) and
+  `attention` (the attention-pooled logistic reader, read by the logistic scorer only). The concept readouts are
+  skipped for a task without a concept slot or word.
+- Layer rules: `best` (the best select layer), `top_k` (the mean of the select-standardized scores of the `top_k`
+  best select layers) and `joint` (one MLP or one attention reader fitted on those layers together).
+- Every choice uses the select items of the original prompts only: the penalty per layer (first best on the grid),
+  the layer rule (by pair accuracy) and the threshold of accuracy, precision, recall, F1 and the true positive rate at
+  `max_fpr`. The report items are the same for every cell and condition.
+- Conditions: the original prompts, P2's misleading sentence (`random`, `against`) and the held-out template wordings
+  of `shifts` (default `paraphrase`).
+- Controls: the text-only classifier on the raw texts (`p9.risk.text_scores`, word n-grams), a random direction at
+  every readout, and every scorer refitted on training labels shuffled within their pairs (`shuffled` series), which
+  runs the whole procedure, tuning included.
+- Statistics: each cell's metrics are means over the 10 seeds with seed intervals. Comparisons use the seed
+  ensemble: each seed's scores are standardized with their select mean and standard deviation and averaged over the
+  seeds. Against each baseline (`logistic/last` and `mean_diff/last` by default, at the same layer rule, or `top_k`
+  for a `joint` cell) the report AUROC difference gets a paired bootstrap that resamples whole pairs, the pair
+  accuracy difference one that resamples pairs, DeLong's test (rows treated as independent) and the exact McNemar
+  test on pair outcomes. A Holm family is one task, condition, layer rule and baseline, separately for the DeLong
+  and McNemar p values. All statistics come from `reading/stats.py`.
+- Runs load the model in float32.
 
 ## Known versus unknown questions (P9)
 
