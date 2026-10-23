@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import replace
 from functools import partial
+import tracemalloc
 
 import numpy as np
 from numpy.typing import NDArray
@@ -206,6 +207,30 @@ def test_mlp_reader_scores_each_layer_with_its_own_seeded_mlp() -> None:
         np.testing.assert_allclose(expit(scores[k]), probability, rtol=1e-5)
     with pytest.raises(ValueError, match="shape"):
         reader.score(test[:1])
+
+
+def test_mlp_reader_scores_one_layer_at_a_time() -> None:
+    h, labels = correlated_classes(n=40, d=32, seed=8)
+    reader = fit_mlp(
+        np.repeat(h, 16, axis=0),
+        list(range(32)),
+        labels=labels,
+        hidden_sizes=(4,),
+        alpha=1.0,
+    )
+    test = np.random.default_rng(9).normal(size=(32, 2000, 32))
+    test = test.astype(np.float32)
+
+    tracemalloc.start()
+    try:
+        scores = reader.score(test)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+    assert scores.shape == (32, 2000)
+    # A float64 copy of the whole stack alone takes twice its bytes.
+    assert peak < test.nbytes / 2
 
 
 def test_joint_mlp_reader_scores_the_concatenated_layers() -> None:

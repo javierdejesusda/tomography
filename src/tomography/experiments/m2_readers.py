@@ -503,7 +503,7 @@ def _token_pass(
                 if position == "response"
                 else _reduce(rows, position)
             )
-    return {p: _concatenate(parts[p]) for p in wanted}
+    return {p: _concatenate(parts.pop(p)) for p in wanted}
 
 
 def _reduce(rows: Activations, position: PositionStrategy) -> Activations:

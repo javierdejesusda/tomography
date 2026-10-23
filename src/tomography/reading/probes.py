@@ -6,6 +6,7 @@ the attention reader exports its value heads as one, and the MLP reader
 has none. All of them satisfy `Reader`.
 """
 
+from collections.abc import Iterable
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace
@@ -233,13 +234,25 @@ class MLPReader:
             ValueError: If `h` does not have shape (K, n, d).
         """
         n_layers, width = self.centers.shape
-        stack = np.asarray(h, dtype=np.float64)
+        stack = np.asarray(h)
         expected = (n_layers, width)
         if stack.ndim != 3 or (stack.shape[0], stack.shape[2]) != expected:
             raise ValueError(
                 f"h must have shape ({n_layers}, n, {width}), got {stack.shape}"
             )
-        blocks = _mlp_inputs(stack, self.centers, self.scales, self.joint)
+        blocks: Iterable[NDArray[np.float64]]
+        if self.joint:
+            blocks = _mlp_inputs(
+                stack.astype(np.float64), self.centers, self.scales, True
+            )
+        else:
+            # One layer at a time, so a single layer is copied to float64.
+            blocks = (
+                (layer.astype(np.float64) - center) / scale
+                for layer, center, scale in zip(
+                    stack, self.centers, self.scales, strict=True
+                )
+            )
         logits = [
             _logits(model, rows)
             for model, rows in zip(self.models, blocks, strict=True)
