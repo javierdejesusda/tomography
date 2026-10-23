@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 from typing import Literal
 from typing import cast
+from typing import get_args
 
 import numpy as np
 from numpy.typing import NDArray
@@ -17,8 +18,14 @@ from tomography.model import BosMode
 from tomography.model import EncodedBatch
 from tomography.model import LoadedModel
 
-PositionStrategy = Literal["last", "response", "concept", "mean"]
+PositionStrategy = Literal[
+    "last", "response", "concept", "mean", "concept_mean", "max"
+]
 Span = tuple[int, int]
+
+_POSITIONS = get_args(PositionStrategy)
+_CONCEPT_POSITIONS = ("concept", "concept_mean")
+_POOLED_POSITIONS = ("mean", "concept_mean", "max")
 
 
 @dataclass(frozen=True, eq=False)
@@ -26,8 +33,8 @@ class Activations:
     """Activations of a set of stimuli, one row per read token position.
 
     Rows are ordered stimulus-major, then by token. `last`, `concept` and
-    `mean` give one row per stimulus; `response` gives one row per token of
-    the marked span.
+    the pooled positions `mean`, `concept_mean` and `max` give one row per
+    stimulus; `response` gives one row per token of the marked span.
 
     Attributes:
         data: `(n_layers_sel, n_rows, d_model)` float32, layer-major.
@@ -37,9 +44,9 @@ class Activations:
         row_rank: `(n_rows,)` 0-based rank among the rows of the same
             stimulus.
         row_token: `(n_rows,)` token index in the model input (BOS is 0
-            when prepended); -1 for `mean`.
-        row_token_id: `(n_rows,)` vocabulary id of that token; -1 for
-            `mean`.
+            when prepended); -1 for the pooled positions.
+        row_token_id: `(n_rows,)` vocabulary id of that token; -1 for the
+            pooled positions.
         n_stimuli: Number of input texts.
     """
 
@@ -183,11 +190,13 @@ def _check_arguments(
         raise ValueError("texts is empty")
     if batch_size < 1:
         raise ValueError(f"batch_size must be at least 1, got {batch_size}")
-    if position not in ("last", "response", "concept", "mean"):
+    if position not in _POSITIONS:
         raise ValueError(f"unknown position {position!r}")
     if position == "last":
         return
-    name = "concept_spans" if position == "concept" else "response_spans"
+    name = (
+        "concept_spans" if position in _CONCEPT_POSITIONS else "response_spans"
+    )
     if spans is None:
         raise ValueError(f"position {position!r} needs {name}")
     if len(spans) != n_texts:
@@ -340,19 +349,25 @@ def _collect_batch(
         gathered = torch.stack(
             [captured[layer][rows, cols].float() for layer in layers]
         )
-        if position == "mean":
-            sums = torch.zeros(
+        if position in _POOLED_POSITIONS:
+            pooled = torch.zeros(
                 len(layers),
                 len(texts),
                 gathered.shape[-1],
                 device=gathered.device,
             )
-            sums.index_add_(1, rows, gathered)
-            counts = torch.bincount(rows, minlength=len(texts))
-            gathered = sums / counts.view(1, -1, 1)
+            if position == "max":
+                index = rows.view(1, -1, 1).expand_as(gathered)
+                gathered = pooled.scatter_reduce_(
+                    1, index, gathered, "amax", include_self=False
+                )
+            else:
+                pooled.index_add_(1, rows, gathered)
+                counts = torch.bincount(rows, minlength=len(texts))
+                gathered = pooled / counts.view(1, -1, 1)
     metadata: list[tuple[int, int, int, int]] = []
     for row, tokens in enumerate(selections):
-        if position == "mean":
+        if position in _POOLED_POSITIONS:
             metadata.append((first + row, 0, -1, -1))
             continue
         ids = batch.input_ids[row, tokens].tolist()
@@ -385,11 +400,16 @@ def collect_activations(
         layers: Layer indices in 0..L; None means all of them.
         position: `last` reads the last real token, `response` every token
             overlapping `response_spans[i]`, `concept` the last token
-            overlapping `concept_spans[i]`, `mean` one row averaging the
-            response tokens.
-        response_spans: Half-open character ranges, required for `response`
-            and `mean`.
-        concept_spans: Half-open character ranges, required for `concept`.
+            overlapping `concept_spans[i]`. The pooled positions give one
+            row reduced on the model's device: `mean` averages the
+            response tokens, `max` takes their feature-wise maximum and
+            `concept_mean` averages every token overlapping
+            `concept_spans[i]`, so it equals `concept` for a one-token
+            concept.
+        response_spans: Half-open character ranges, required for
+            `response`, `mean` and `max`.
+        concept_spans: Half-open character ranges, required for `concept`
+            and `concept_mean`.
         bos: BOS policy for `LoadedModel.encode`; None uses the model's
             default.
         batch_size: Texts per forward pass.
@@ -413,7 +433,7 @@ def collect_activations(
             is missing, or a span overlaps no token (the error names the
             stimulus).
     """
-    spans = concept_spans if position == "concept" else response_spans
+    spans = concept_spans if position in _CONCEPT_POSITIONS else response_spans
     _check_arguments(len(texts), position, spans, batch_size)
     if share_prefix and loaded.dtype != torch.float32:
         raise ValueError(

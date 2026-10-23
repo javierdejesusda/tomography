@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 from tomography.reading.directions import FloatArray
 from tomography.reading.directions import Method
 from tomography.reading.directions import Preprocess
+from tomography.reading.directions import _check_labels
 from tomography.reading.directions import fit_direction
 from tomography.reading.metrics import GroupIndex
 from tomography.reading.metrics import parse_groups
@@ -245,6 +246,41 @@ class RepReader:
             centered = h[k].astype(np.float64) - self.means[k]
             scores[k] = centered @ self.directions[k].astype(np.float64)
         return scores
+
+
+def orient(
+    reader: RepReader,
+    h: FloatArray,
+    *,
+    labels: NDArray[np.int64],
+    pairs: NDArray[np.int64] | None = None,
+    groups: NDArray[np.int64] | None = None,
+) -> RepReader:
+    """Sets each layer's sign with the rule of `RepReader.fit`.
+
+    For readers built from directions that `RepReader.fit` does not find,
+    such as LDA or a learned value head.
+
+    Args:
+        reader: The reader to orient; its signs are ignored.
+        h: Activations of shape (K, n, d) that orient the reader.
+        labels: Binary labels of shape (n,), 1 for the positive pole.
+        pairs: Row index pairs of shape (m, 2).
+        groups: Row groups of shape (g, k) with exactly one label-1 member
+            each, padded with -1.
+
+    Returns:
+        A copy of the reader with the new signs.
+
+    Raises:
+        ValueError: If the shapes disagree, a label is not 0 or 1, a group
+            does not have exactly one label-1 member, the pairs are
+            malformed, or the sign cannot be set because a class is missing.
+    """
+    projections = reader._project(h)
+    _check_labels(labels, projections.shape[1])
+    index = _orientation_groups(pairs, groups, labels)
+    return replace(reader, signs=_orientation(projections, labels, index))
 
 
 def _checked_arrays(
