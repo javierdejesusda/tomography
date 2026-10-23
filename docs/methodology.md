@@ -195,7 +195,7 @@ readout by layer rule, so a gain of pooling is never credited to nonlinearity.
   skipped for a task without a concept slot or word.
 - Layer rules: `best` (the best select layer), `top_k` (the mean of the select-standardized scores of the `top_k`
   best select layers, among those whose select scores vary) and `joint` (one MLP or one attention reader fitted on
-  the `top_k` best layers together). The rules of a scorer and readout share the same per-layer fits and seeds.
+  the layers `top_k` reads, together). The rules of a scorer and readout share the same per-layer fits and seeds.
 - Every choice uses the select items of the original prompts only: the penalty per layer (first best on the grid),
   the layer rule (by pair accuracy) and the threshold of accuracy, precision, recall, F1 and the true positive rate at
   `max_fpr`. The report items are the same for every cell and condition.

@@ -158,23 +158,24 @@ def fit_ttpd(
             are malformed.
     """
     stack = _checked_stack(h, layers, labels)
-    if polarities is not None:
-        _check_polarities(polarities, stack.shape[1])
     truth = 2.0 * labels - 1.0
-    design = (
-        truth[:, None]
-        if polarities is None
-        else np.stack([truth, truth * polarities], axis=1)
-    )
+    if polarities is None:
+        centers = stack.mean(axis=1)
+        vectors = [
+            np.linalg.lstsq(truth[:, None], rows - center, rcond=None)[0][0]
+            for rows, center in zip(stack, centers, strict=True)
+        ]
+        reader = RepReader.from_arrays(
+            "ttpd", layers, np.stack(vectors), centers
+        )
+        return orient(reader, h, labels=labels, pairs=pairs, groups=groups)
+    _check_polarities(polarities, stack.shape[1])
+    design = np.stack([truth, truth * polarities], axis=1)
     vectors = []
     means = []
     for rows in stack:
         center = rows.mean(axis=0)
         general = np.linalg.lstsq(design, rows - center, rcond=None)[0][0]
-        if polarities is None:
-            vectors.append(general)
-            means.append(center)
-            continue
         polar = _unpenalized_logistic(rows, polarities == 1).coef_[0]
         projected = np.stack([rows @ general, rows @ polar], axis=1)
         final = _unpenalized_logistic(projected, labels == 1)

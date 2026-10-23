@@ -44,7 +44,6 @@ from tomography.experiments.p2_positions import Decoy
 from tomography.experiments.p2_positions import _mark_word
 from tomography.experiments.p2_positions import misleading_template
 from tomography.experiments.p2_positions import with_decoys
-from tomography.experiments.sweep import Prepared
 from tomography.experiments.sweep import ReadingConfig
 from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.sweep import shuffle_within_groups
@@ -71,6 +70,8 @@ from tomography.reading.directions import fit_direction
 from tomography.reading.metrics import auroc
 from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import group_accuracy
+from tomography.reading.probes import MLPReader
+from tomography.reading.probes import _row_stimulus
 from tomography.reading.probes import fit_attention
 from tomography.reading.probes import fit_lda
 from tomography.reading.probes import fit_mlp
@@ -115,6 +116,7 @@ POSITION_OF: Mapping[Readout, PositionStrategy] = {
     "attention": "response",
 }
 CONCEPT_READOUTS: tuple[Readout, ...] = ("concept", "concept_mean")
+JOINT_BASELINE_RULE: LayerRule = "top_k"
 COLUMNS: tuple[str, ...] = (
     "task",
     "condition",
@@ -289,7 +291,7 @@ def cells(config: Config, readouts: Sequence[str]) -> list[Cell]:
             Cell("random", readout, rule)
             for readout in readouts
             for rule in config.layer_rules
-            if readout != "attention" and rule != "joint"
+            if applies("random", readout, rule)
         ]
     if "text" in config.controls:
         rows.append(Cell("text", "text", "none"))
@@ -318,12 +320,10 @@ def token_score_max(
             f"expected scores of shape (K, {acts.row_stimulus.shape[0]}), "
             f"got {values.shape}"
         )
-    counts = np.bincount(acts.row_stimulus, minlength=acts.n_stimuli)
-    if not counts.all():
-        raise ValueError(f"stimulus {int(np.argmin(counts))} has no rows")
+    stimulus = _row_stimulus(acts)
     pooled = np.full((values.shape[0], acts.n_stimuli), -np.inf)
     for k in range(values.shape[0]):
-        np.maximum.at(pooled[k], acts.row_stimulus, values[k])
+        np.maximum.at(pooled[k], stimulus, values[k])
     return pooled
 
 
@@ -383,26 +383,37 @@ def read_top_k(
     )
 
 
-ScoreFn = Callable[[Activations], NDArray[np.float64]]
+ScoreFn = Callable[[Activations], NDArray[np.floating[Any]]]
 
 
 @dataclass(frozen=True)
 class _Splits:
-    """The prepared items of one task.
+    """The items of one task and their activations at each position.
 
     Attributes:
-        train: Per position, one prepared training set per seed.
-        select: Per position, the select items of the original prompts.
-        report: Per position, the report items of each condition.
-        conditions: The condition names, `original` first.
+        train_items: The training stimuli of each seed.
+        select_items: The select stimuli, on the original prompts.
+        report_items: The report stimuli of each condition, `original`
+            first.
+        train: Per position, the activations of each seed's training set.
+        select: Per position, the activations of the select items.
+        report: Per position, the activations of each condition's report
+            items, in the order of `report_items`.
         texts: The raw text of every example, by uid.
     """
 
-    train: dict[PositionStrategy, list[Prepared]]
-    select: dict[PositionStrategy, Prepared]
-    report: dict[PositionStrategy, dict[str, Prepared]]
-    conditions: list[str]
+    train_items: list[StimulusSet]
+    select_items: StimulusSet
+    report_items: dict[str, StimulusSet]
+    train: dict[PositionStrategy, list[Activations]]
+    select: dict[PositionStrategy, Activations]
+    report: dict[PositionStrategy, list[Activations]]
     texts: dict[str, str]
+
+    @property
+    def conditions(self) -> list[str]:
+        """The condition names, `original` first."""
+        return list(self.report_items)
 
 
 @dataclass(frozen=True)
@@ -428,16 +439,17 @@ def _grid(config: Config, scorer: str) -> tuple[float | None, ...]:
     return (None,)
 
 
-def _subset(act: Activations, at: Sequence[int]) -> Activations:
-    index = list(at)
+def _subset(act: Activations, at: Sequence[int] | None) -> Activations:
+    if at is None:
+        return act
     return dataclasses.replace(
         act,
-        data=act.data[index],
-        layers=tuple(act.layers[i] for i in index),
+        data=act.data[list(at)],
+        layers=tuple(act.layers[i] for i in at),
     )
 
 
-def _row_scorer(
+def _row_reader(
     config: Config,
     scorer: str,
     h: NDArray[np.float32],
@@ -448,10 +460,10 @@ def _row_scorer(
     hyper: float | None,
     seed: int,
     joint: bool,
-) -> Callable[[NDArray[np.float32]], NDArray[np.float64]]:
+) -> RepReader | MLPReader:
     """Fits a scorer on one row per stimulus (or per token) at each layer."""
     if scorer == "mlp":
-        mlp = fit_mlp(
+        return fit_mlp(
             h,
             layers,
             labels=labels,
@@ -460,8 +472,6 @@ def _row_scorer(
             seed=seed,
             joint=joint,
         )
-        return lambda data: mlp.score(data).astype(np.float64)
-    reader: RepReader
     if scorer == "logistic":
         fits = [
             fit_direction(
@@ -474,7 +484,7 @@ def _row_scorer(
             )
             for k in range(h.shape[0])
         ]
-        reader = orient(
+        return orient(
             RepReader.from_arrays(
                 "logistic",
                 layers,
@@ -486,80 +496,127 @@ def _row_scorer(
             pairs=pairs,
             groups=groups,
         )
-    elif scorer == "lda":
-        reader = fit_lda(h, layers, labels=labels, pairs=pairs, groups=groups)
-    elif scorer == "ttpd":
-        reader = fit_ttpd(h, layers, labels=labels, pairs=pairs, groups=groups)
-    else:
-        reader = RepReader.fit(
-            cast(Method, scorer),
-            h,
-            layers,
-            labels=labels,
-            pairs=pairs,
-            groups=groups,
-            preprocess=config.preprocess,
-            seed=seed,
-        )
-    return lambda data: reader.score(data).astype(np.float64)
+    if scorer == "lda":
+        return fit_lda(h, layers, labels=labels, pairs=pairs, groups=groups)
+    if scorer == "ttpd":
+        return fit_ttpd(h, layers, labels=labels, pairs=pairs, groups=groups)
+    return RepReader.fit(
+        cast(Method, scorer),
+        h,
+        layers,
+        labels=labels,
+        pairs=pairs,
+        groups=groups,
+        preprocess=config.preprocess,
+        seed=seed,
+    )
 
 
 def _fit(
     config: Config,
     scorer: str,
     readout: str,
-    train: Prepared,
+    act: Activations,
+    items: StimulusSet,
     labels: NDArray[np.int64],
     hyper: float | None,
     seed: int,
     joint: bool,
 ) -> ScoreFn:
     """Fits one scorer on a readout and returns its stimulus scorer."""
-    stimuli, act = train
     if readout == "attention":
-        attention = fit_attention(
+        return fit_attention(
             act, labels=labels, c=cast(float, hyper), joint=joint
-        )
-        return lambda acts: attention.score(acts).astype(np.float64)
-    if readout == "token_score_max":
-        score = _row_scorer(
+        ).score
+    if readout != "token_score_max":
+        rows = _row_reader(
             config,
             scorer,
             act.data,
             act.layers,
-            act.row_values(labels),
-            act.row_groups(stimuli.pairs, ragged="truncate"),
-            act.row_groups(stimuli.groups, ragged="truncate"),
+            labels,
+            items.pairs,
+            items.groups,
             hyper,
             seed,
             joint,
         )
-        return lambda acts: token_score_max(score(acts.data), acts)
-    rows = _row_scorer(
+        return lambda acts: rows.score(acts.data)
+    tokens = _row_reader(
         config,
         scorer,
         act.data,
         act.layers,
-        labels,
-        stimuli.pairs,
-        stimuli.groups,
+        act.row_values(labels),
+        act.row_groups(items.pairs, ragged="truncate"),
+        act.row_groups(items.groups, ragged="truncate"),
         hyper,
         seed,
         joint,
     )
-    return lambda acts: rows(acts.data)
+    return lambda acts: token_score_max(tokens.score(acts.data), acts)
 
 
-def _evaluate(
-    fn: ScoreFn,
-    select: Prepared,
-    report: Sequence[Prepared],
+def _tuned(
+    config: Config,
+    scorer: str,
+    readout: str,
+    splits: _Splits,
+    i: int,
+    labels: NDArray[np.int64],
+    seed: int,
+    at: Sequence[int] | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Scores the select and report items and the select pair accuracy."""
-    stimuli, act = select
-    scores = fn(act)
-    metric = group_accuracy(scores, stimuli.groups, stimuli.labels)
-    return scores, np.stack([fn(a) for _, a in report]), metric
+    """Fits seed i at every grid value and keeps the best one per layer.
+
+    The grid value of each layer is the first best on the select pair
+    accuracy, and only the report items of the values kept are scored.
+
+    Args:
+        config: The experiment settings.
+        scorer: The scorer.
+        readout: The readout.
+        splits: The task's items and activations.
+        i: The seed, the index of the training set.
+        labels: The training labels, real or shuffled.
+        seed: Seed of the fits.
+        at: Fit one joint reader on these layer positions; None fits the
+            layers one by one.
+
+    Returns:
+        The select scores (K, n_select), the report scores (K, M, n_report)
+        and the select pair accuracy (K,) of the kept grid values, with
+        K = 1 for a joint reader.
+    """
+    position = POSITION_OF[cast(Readout, readout)]
+    train = _subset(splits.train[position][i], at)
+    select = _subset(splits.select[position], at)
+    fits = [
+        _fit(
+            config,
+            scorer,
+            readout,
+            train,
+            splits.train_items[i],
+            labels,
+            value,
+            seed,
+            at is not None,
+        )
+        for value in _grid(config, scorer)
+    ]
+    val = np.stack([fn(select) for fn in fits]).astype(np.float64)
+    items = splits.select_items
+    metric = group_accuracy(val, items.groups, items.labels)
+    best = tune_per_layer(metric)
+    layers = np.arange(best.shape[0])
+    n_report = splits.report_items["original"].labels.shape[0]
+    test = np.empty((best.shape[0], len(splits.conditions), n_report))
+    for value in np.unique(best):
+        kept = best == value
+        scores = [fits[value](_subset(a, at)) for a in splits.report[position]]
+        test[kept] = np.stack(scores, axis=1)[kept]
+    return val[best, layers], test, metric[best, layers]
 
 
 def _seed_choices(
@@ -567,105 +624,42 @@ def _seed_choices(
     scorer: str,
     readout: str,
     rules: Sequence[str],
-    train: Prepared,
-    select: Prepared,
-    report: Sequence[Prepared],
+    splits: _Splits,
+    i: int,
     labels: NDArray[np.int64],
     seed: int,
 ) -> list[_Choice]:
     """Fits one seed per layer, tunes it, then applies each layer rule.
 
     The rules share the tuned per-layer fits, so two rules of a cell differ
-    only in how they read the layers.
+    only in how they read the layers. A rule reads the report items of all
+    conditions at once: it standardizes them, if at all, with select
+    statistics only, so each condition is read as it would be alone.
     """
-    grid = _grid(config, scorer)
-    tried = [
-        _evaluate(
-            _fit(config, scorer, readout, train, labels, g, seed, False),
-            select,
-            report,
-        )
-        for g in grid
-    ]
-    best = tune_per_layer(np.stack([metric for _, _, metric in tried]))
-    at = np.arange(best.shape[0])
-    val = np.stack([s for s, _, _ in tried])[best, at]
-    test = np.stack([r for _, r, _ in tried])[best, :, at].transpose(1, 0, 2)
-    metric = np.stack([m for _, _, m in tried])[best, at]
-    layers = train[1].layers
+    val, test, metric = _tuned(config, scorer, readout, splits, i, labels, seed)
+    layers = splits.train[POSITION_OF[cast(Readout, readout)]][i].layers
     k = min(config.top_k, len(layers))
+    flat = test.reshape(test.shape[0], -1)
     choices = []
     for rule in rules:
+        if rule == "best":
+            read = best_validation_layer(metric, layers, val, flat)
+        else:
+            read = read_top_k(metric, layers, val, flat, k=k)
+        chosen = tuple(int(layer) for layer in read.layers)
         if rule == "joint":
+            at = [layers.index(layer) for layer in chosen]
+            joint = _tuned(config, scorer, readout, splits, i, labels, seed, at)
+            choices.append(_Choice(chosen, joint[0][0], joint[1][0]))
+        else:
             choices.append(
-                _joint_choice(
-                    config,
-                    scorer,
-                    readout,
-                    train,
-                    select,
-                    report,
-                    labels,
-                    seed,
-                    metric,
-                    k,
+                _Choice(
+                    chosen,
+                    read.val_scores,
+                    read.test_scores.reshape(test.shape[1:]),
                 )
             )
-            continue
-        read = [
-            best_validation_layer(metric, layers, val, test[m])
-            if rule == "best"
-            else read_top_k(metric, layers, val, test[m], k=k)
-            for m in range(test.shape[0])
-        ]
-        choices.append(
-            _Choice(
-                tuple(int(layer) for layer in read[0].layers),
-                read[0].val_scores,
-                np.stack([choice.test_scores for choice in read]),
-            )
-        )
     return choices
-
-
-def _joint_choice(
-    config: Config,
-    scorer: str,
-    readout: str,
-    train: Prepared,
-    select: Prepared,
-    report: Sequence[Prepared],
-    labels: NDArray[np.int64],
-    seed: int,
-    metric: NDArray[np.float64],
-    k: int,
-) -> _Choice:
-    """Fits one reader over the top k validation layers, tuned on select."""
-    at = [int(i) for i in np.argsort(-metric, kind="stable")[:k]]
-    stimuli, act = train
-    sub_train = (stimuli, _subset(act, at))
-    sub_select = (select[0], _subset(select[1], at))
-    sub_report = [(s, _subset(a, at)) for s, a in report]
-    tried = [
-        _evaluate(
-            _fit(
-                config,
-                scorer,
-                readout,
-                sub_train,
-                labels,
-                g,
-                seed,
-                True,
-            ),
-            sub_select,
-            sub_report,
-        )
-        for g in _grid(config, scorer)
-    ]
-    chosen = int(np.argmax([float(m[0]) for _, _, m in tried]))
-    val, test, _ = tried[chosen]
-    return _Choice(sub_train[1].layers, val[0], test[:, 0])
 
 
 def _clusters(groups: NDArray[np.int64], n: int) -> NDArray[np.int64]:
@@ -688,27 +682,20 @@ def _text_choices(splits: _Splits) -> list[_Choice]:
     The raw text of an item is the same in every condition, so the report
     scores repeat across conditions.
     """
-    position = next(iter(splits.train))
-    select = splits.select[position][0]
-    report = splits.report[position]["original"][0]
+    select = splits.select_items
+    report = splits.report_items["original"]
     items = [*select.uids, *report.uids]
     rows = []
-    for stimuli, _ in splits.train[position]:
+    for stimuli in splits.train_items:
         scores = text_scores(
             [splits.texts[uid] for uid in stimuli.uids],
             stimuli.labels,
             [splits.texts[uid] for uid in items],
             analyzer="word",
         )
-        rows.append(
-            _Choice(
-                (),
-                scores[: len(select.uids)],
-                np.tile(
-                    scores[len(select.uids) :], (len(splits.conditions), 1)
-                ),
-            )
-        )
+        cut = len(select.uids)
+        report_scores = np.tile(scores[cut:], (len(splits.conditions), 1))
+        rows.append(_Choice((), scores[:cut], report_scores))
     return rows
 
 
@@ -725,17 +712,13 @@ def _cell_entries(
     Returns one entry per series and layer rule; the fits of a seed are
     shared by the rules and seeded by the scorer and readout alone.
     """
-    position = POSITION_OF[cast(Readout, readout)]
-    select = splits.select[position]
-    report = [splits.report[position][c] for c in splits.conditions]
     series = ["reader"]
     if "shuffled" in config.controls and scorer != "random":
         series.append("shuffled")
     entries = []
     for name in series:
         per_seed = []
-        for i, train in enumerate(splits.train[position]):
-            stimuli = train[0]
+        for i, stimuli in enumerate(splits.train_items):
             labels = (
                 stimuli.labels
                 if name == "reader"
@@ -750,15 +733,7 @@ def _cell_entries(
             )
             per_seed.append(
                 _seed_choices(
-                    config,
-                    scorer,
-                    readout,
-                    rules,
-                    train,
-                    select,
-                    report,
-                    labels,
-                    seed,
+                    config, scorer, readout, rules, splits, i, labels, seed
                 )
             )
         entries += [
@@ -768,6 +743,33 @@ def _cell_entries(
     return entries
 
 
+def _seed_metrics(
+    config: Config,
+    choice: _Choice,
+    m: int,
+    select: StimulusSet,
+    items: StimulusSet,
+) -> list[float]:
+    """Pair accuracy, AUROC, the thresholded metrics and the TPR of a seed."""
+    scores = choice.report[m]
+    thresholded = threshold_metrics(
+        choice.select, select.labels, scores, items.labels
+    )
+    detection = tpr_at_fpr(
+        choice.select,
+        select.labels,
+        scores,
+        items.labels,
+        max_fpr=config.max_fpr,
+    )
+    return [
+        float(group_accuracy(scores, items.groups, items.labels)),
+        float(auroc(scores, items.labels)),
+        *thresholded[1:],
+        detection.true_positive_rate,
+    ]
+
+
 def _metric_rows(
     config: Config,
     task: ReadingTask,
@@ -775,40 +777,16 @@ def _metric_rows(
     entry: _Entry,
 ) -> list[list[Any]]:
     """Builds the table rows of one entry, one per condition."""
-    position = next(iter(splits.report))
-    select = splits.select[position][0]
     rows = []
     for m, condition in enumerate(splits.conditions):
-        items = splits.report[position][condition][0]
-        pair = np.array(
+        items = splits.report_items[condition]
+        values = np.array(
             [
-                float(group_accuracy(c.report[m], items.groups, items.labels))
+                _seed_metrics(config, c, m, splits.select_items, items)
                 for c in entry.choices
             ]
         )
-        area = np.array(
-            [float(auroc(c.report[m], items.labels)) for c in entry.choices]
-        )
-        thresholded = np.array(
-            [
-                threshold_metrics(
-                    c.select, select.labels, c.report[m], items.labels
-                )[1:]
-                for c in entry.choices
-            ]
-        )
-        detection = np.array(
-            [
-                tpr_at_fpr(
-                    c.select,
-                    select.labels,
-                    c.report[m],
-                    items.labels,
-                    max_fpr=config.max_fpr,
-                ).true_positive_rate
-                for c in entry.choices
-            ]
-        )
+        pair, area = values[:, 0], values[:, 1]
         pair_lo, pair_hi = bootstrap_ci(pair, seed=config.seed)
         auroc_lo, auroc_hi = bootstrap_ci(area, seed=config.seed)
         rows.append(
@@ -824,8 +802,7 @@ def _metric_rows(
                 float(area.mean()),
                 float(auroc_lo),
                 float(auroc_hi),
-                *(float(v) for v in thresholded.mean(axis=0)),
-                float(detection.mean()),
+                *(float(v) for v in values[:, 2:].mean(axis=0)),
                 len(entry.choices),
             ]
         )
@@ -858,80 +835,98 @@ def _comparison_rows(
     correction runs over its DeLong p values and, separately, its McNemar p
     values.
     """
-    position = next(iter(splits.report))
-    readers = {
+    ensembles = {
         e.cell: _ensemble(e.choices)
         for e in entries
         if e.series == "reader" and e.cell.scorer in SCORERS
+    }
+    wins = {
+        (cell, m): _group_wins(scores[m], splits.report_items[condition])
+        for cell, scores in ensembles.items()
+        for m, condition in enumerate(splits.conditions)
     }
     rows: list[list[Any]] = []
     for baseline in config.baselines:
         scorer, readout = baseline.split("/")
         for rule in config.layer_rules:
-            base_rule = rule if applies(scorer, readout, rule) else "top_k"
+            base_rule = (
+                rule if applies(scorer, readout, rule) else JOINT_BASELINE_RULE
+            )
             base = Cell(scorer, readout, base_rule)
-            if base not in readers:
+            family = [
+                c for c in ensembles if c.layer_rule == rule and c != base
+            ]
+            if base not in ensembles or not family:
                 continue
-            family = [c for c in readers if c.layer_rule == rule and c != base]
             for m, condition in enumerate(splits.conditions):
-                items = splits.report[position][condition][0]
+                items = splits.report_items[condition]
                 clusters = _clusters(items.groups, items.labels.shape[0])
-                block = []
+                b = ensembles[base][m]
+                tests = []
                 for cell in family:
-                    a = readers[cell][m]
-                    b = readers[base][m]
-                    area = paired_auroc_diff(
-                        a,
-                        b,
-                        items.labels,
-                        clusters,
-                        n_boot=config.n_boot,
-                        seed=config.seed,
+                    a = ensembles[cell][m]
+                    tests.append(
+                        (
+                            cell,
+                            paired_auroc_diff(
+                                a,
+                                b,
+                                items.labels,
+                                clusters,
+                                n_boot=config.n_boot,
+                                seed=config.seed,
+                            ),
+                            paired_accuracy_diff(
+                                wins[cell, m],
+                                wins[base, m],
+                                np.arange(items.groups.shape[0]),
+                                n_boot=config.n_boot,
+                                seed=config.seed,
+                            ),
+                            delong_test(a, b, items.labels),
+                            mcnemar_test(
+                                wins[cell, m] == 1.0, wins[base, m] == 1.0
+                            ),
+                        )
                     )
-                    wins_a = _group_wins(a, items)
-                    wins_b = _group_wins(b, items)
-                    pair = paired_accuracy_diff(
-                        wins_a,
-                        wins_b,
-                        np.arange(wins_a.shape[0]),
-                        n_boot=config.n_boot,
-                        seed=config.seed,
+                delong_holm = holm_correction(
+                    np.array([t[3].p_value for t in tests])
+                ).adjusted
+                mcnemar_holm = holm_correction(
+                    np.array([t[4].p_value for t in tests])
+                ).adjusted
+                rows += [
+                    [
+                        task.name,
+                        condition,
+                        rule,
+                        baseline,
+                        base_rule,
+                        cell.scorer,
+                        cell.readout,
+                        area.difference,
+                        area.lower,
+                        area.upper,
+                        pair.difference,
+                        pair.lower,
+                        pair.upper,
+                        delong.p_value,
+                        float(delong_p),
+                        mcnemar.p_value,
+                        float(mcnemar_p),
+                        mcnemar.a_only,
+                        mcnemar.b_only,
+                    ]
+                    for (
+                        cell,
+                        area,
+                        pair,
+                        delong,
+                        mcnemar,
+                    ), delong_p, mcnemar_p in zip(
+                        tests, delong_holm, mcnemar_holm, strict=True
                     )
-                    delong = delong_test(a, b, items.labels)
-                    mcnemar = mcnemar_test(wins_a == 1.0, wins_b == 1.0)
-                    block.append(
-                        [
-                            task.name,
-                            condition,
-                            rule,
-                            baseline,
-                            base_rule,
-                            cell.scorer,
-                            cell.readout,
-                            area.difference,
-                            area.lower,
-                            area.upper,
-                            pair.difference,
-                            pair.lower,
-                            pair.upper,
-                            delong.p_value,
-                            None,
-                            mcnemar.p_value,
-                            None,
-                            mcnemar.a_only,
-                            mcnemar.b_only,
-                        ]
-                    )
-                if not block:
-                    continue
-                for test in ("delong", "mcnemar"):
-                    raw = COMPARISON_COLUMNS.index(f"{test}_p")
-                    holm = holm_correction(
-                        np.array([row[raw] for row in block])
-                    )
-                    for row, adjusted in zip(block, holm.adjusted, strict=True):
-                        row[raw + 1] = float(adjusted)
-                rows += block
+                ]
     return rows
 
 
@@ -1023,23 +1018,20 @@ def _prepare_task(
             *task_examples(target_of(task), examples),
         )
     }
+
+    def acts(stimuli: StimulusSet, position: PositionStrategy) -> Activations:
+        return prepare(loaded, stimuli, position, config)[1]
+
     return (
         _Splits(
-            train={
-                p: [prepare(loaded, s, p, config) for s in train_sets]
-                for p in positions
-            },
-            select={
-                p: prepare(loaded, select_set, p, config) for p in positions
-            },
+            train_items=train_sets,
+            select_items=select_set,
+            report_items=report_sets,
+            train={p: [acts(s, p) for s in train_sets] for p in positions},
+            select={p: acts(select_set, p) for p in positions},
             report={
-                p: {
-                    name: prepare(loaded, s, p, config)
-                    for name, s in report_sets.items()
-                }
-                for p in positions
+                p: [acts(s, p) for s in report_sets.values()] for p in positions
             },
-            conditions=list(report_sets),
             texts=texts,
         ),
         {f"shift:{kind}": reason for kind, reason in skipped.items()},
@@ -1051,12 +1043,14 @@ def _write_task(
     task: ReadingTask,
     splits: _Splits,
     entries: Sequence[_Entry],
-    rows: Sequence[Sequence[Any]],
+    rows: Sequence[Sequence[Sequence[Any]]],
 ) -> None:
-    """Writes the per-seed scores of every entry and the AUROC matrix."""
-    position = next(iter(splits.report))
-    select = splits.select[position][0]
-    report = splits.report[position]["original"][0]
+    """Writes the per-seed scores of every entry and the AUROC matrix.
+
+    `rows` holds the table rows of each entry, one per condition.
+    """
+    select = splits.select_items
+    report = splits.report_items["original"]
     names = [f"{e.cell.name}/{e.series}" for e in entries]
     run_dir.write_arrays(
         f"scores_{task.name}",
@@ -1082,20 +1076,20 @@ def _write_task(
             },
         },
     )
-    readers = [e for e in entries if e.series == "reader"]
     at = COLUMNS.index("auroc")
-    value = {(r[2], r[3], r[4], r[5], r[1]): r[at] for r in rows}
+    readers = [
+        (e, entry_rows)
+        for e, entry_rows in zip(entries, rows, strict=True)
+        if e.series == "reader"
+    ]
     write_matrix(
         run_dir,
         f"auroc_{task.name}",
         np.array(
-            [
-                [value[(*e.cell, "reader", c)] for c in splits.conditions]
-                for e in readers
-            ],
+            [[row[at] for row in entry_rows] for _, entry_rows in readers],
             dtype=np.float64,
         ),
-        rows=[e.cell.name for e in readers],
+        rows=[e.cell.name for e, _ in readers],
         cols=splits.conditions,
         title=f"{task.name}: report AUROC of each cell (mean over seeds)",
     )
@@ -1110,30 +1104,30 @@ def _check(config: Config) -> tuple[str, ...]:
         ("scorers", config.scorers),
         ("readouts", config.readouts),
         ("layer_rules", config.layer_rules),
-        ("logistic_c", config.logistic_c),
-        ("mlp_alpha", config.mlp_alpha),
     ):
         if not values:
             raise ValueError(f"m2 needs at least one entry in {field}")
-    for field, grid in (
-        ("logistic_c", config.logistic_c),
-        ("mlp_alpha", config.mlp_alpha),
+    # The logistic grid is of C, an inverse strength, so it increases.
+    for field, grid, step in (
+        ("logistic_c", config.logistic_c, 1.0),
+        ("mlp_alpha", config.mlp_alpha, -1.0),
     ):
+        if not grid:
+            raise ValueError(f"m2 needs at least one entry in {field}")
         if not all(value > 0.0 for value in grid):
             raise ValueError(f"{field} must hold positive values, got {grid}")
-    for field, grid, ordered in (
-        ("logistic_c", config.logistic_c, np.diff(config.logistic_c) > 0),
-        ("mlp_alpha", config.mlp_alpha, np.diff(config.mlp_alpha) < 0),
-    ):
-        if not ordered.all():
+        if not (step * np.diff(grid) > 0.0).all():
             raise ValueError(
                 f"{field} must run from the strongest penalty to the "
                 f"weakest, without repeats, got {grid}"
             )
-    if "joint" in config.layer_rules and "top_k" not in config.layer_rules:
+    if (
+        "joint" in config.layer_rules
+        and JOINT_BASELINE_RULE not in config.layer_rules
+    ):
         raise ValueError(
-            "the joint rule needs top_k: its cells are compared with the "
-            "top_k baseline"
+            f"the joint rule needs {JOINT_BASELINE_RULE}: its cells are "
+            f"compared with the {JOINT_BASELINE_RULE} baseline"
         )
     if config.top_k < 1:
         raise ValueError(f"top_k must be at least 1, got {config.top_k}")
@@ -1224,22 +1218,15 @@ def execute(
                 entries += _cell_entries(
                     config, task, splits, scorer, readout, cell_rules
                 )
-        task_rows = [
-            row
-            for e in entries
-            for row in _metric_rows(config, task, splits, e)
-        ]
-        rows += task_rows
+        entry_rows = [_metric_rows(config, task, splits, e) for e in entries]
+        rows += [row for block in entry_rows for row in block]
         comparisons += _comparison_rows(config, task, splits, entries)
-        _write_task(run_dir, task, splits, entries, task_rows)
-        position = next(iter(splits.report))
+        _write_task(run_dir, task, splits, entries, entry_rows)
         summary["conditions"][name] = splits.conditions
         summary["skipped"][name] = {**skipped, **shift_skips}
         summary["n_eval_pairs"][name] = {
-            "select": int(splits.select[position][0].groups.shape[0]),
-            "report": int(
-                splits.report[position]["original"][0].groups.shape[0]
-            ),
+            "select": int(splits.select_items.groups.shape[0]),
+            "report": int(splits.report_items["original"].groups.shape[0]),
         }
     run_dir.write_json("table", {"columns": list(COLUMNS), "rows": rows})
     run_dir.write_json(
