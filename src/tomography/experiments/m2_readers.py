@@ -131,7 +131,6 @@ POLARITY_TASKS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         )
     }
 )
-NEGATED_PREFIX = "neg_"
 JOINT_BASELINE_RULE: LayerRule = "top_k"
 COLUMNS: tuple[str, ...] = (
     "task",
@@ -330,7 +329,7 @@ def polarity(example: Example) -> int:
     Returns:
         -1 for a negated subset, named `neg_<name>`, and +1 otherwise.
     """
-    return -1 if str(example.meta["subset"]).startswith(NEGATED_PREFIX) else 1
+    return -1 if str(example.meta["subset"]).startswith("neg_") else 1
 
 
 def token_score_max(
@@ -460,7 +459,9 @@ def read_positions(
     ):
         wanted = [p for p in positions if p in group]
         if wanted:
-            read |= _token_pass(loaded, stimuli.texts, spans, wanted, config)
+            read |= _token_pass(
+                loaded, stimuli.texts, spans, wanted, layers, config
+            )
     return {p: read[p] for p in positions}
 
 
@@ -476,6 +477,7 @@ def _token_pass(
     texts: Sequence[str],
     spans: Sequence[Span | None],
     wanted: Sequence[PositionStrategy],
+    layers: tuple[int, ...],
     config: Config,
 ) -> dict[PositionStrategy, Activations]:
     """Reads the tokens of some spans batch by batch and reduces them.
@@ -486,12 +488,13 @@ def _token_pass(
     for index, span in enumerate(spans):
         if span is None:
             raise ValueError(f"stimulus {index} has no span for {wanted[0]!r}")
-    layers = _read_layers(config, loaded)
-    kept = [
-        k
-        for k, layer in enumerate(layers)
-        if config.token_layers is None or layer in config.token_layers
-    ]
+    kept = (
+        None
+        if config.token_layers is None
+        else [
+            k for k, layer in enumerate(layers) if layer in config.token_layers
+        ]
+    )
     parts: dict[PositionStrategy, list[Activations]] = {p: [] for p in wanted}
     for first in range(0, len(texts), config.batch_size):
         batch = slice(first, first + config.batch_size)
@@ -528,19 +531,13 @@ def _reduce(rows: Activations, position: PositionStrategy) -> Activations:
     n = rows.n_stimuli
     counts = np.bincount(rows.row_stimulus, minlength=n)
     starts = np.cumsum(counts) - counts
+    token = np.full(n, -1, dtype=np.int64)
+    token_id = np.full(n, -1, dtype=np.int64)
     if position == "concept":
         last = starts + counts - 1
-        return Activations(
-            data=rows.data[:, last],
-            layers=rows.layers,
-            position=position,
-            row_stimulus=np.arange(n, dtype=np.int64),
-            row_rank=np.zeros(n, dtype=np.int64),
-            row_token=rows.row_token[last],
-            row_token_id=rows.row_token_id[last],
-            n_stimuli=n,
-        )
-    if position == "max":
+        data = rows.data[:, last]
+        token, token_id = rows.row_token[last], rows.row_token_id[last]
+    elif position == "max":
         data = np.maximum.reduceat(rows.data, starts, axis=1)
     else:
         data = np.add.reduceat(rows.data, starts, axis=1)
@@ -551,8 +548,8 @@ def _reduce(rows: Activations, position: PositionStrategy) -> Activations:
         position=position,
         row_stimulus=np.arange(n, dtype=np.int64),
         row_rank=np.zeros(n, dtype=np.int64),
-        row_token=np.full(n, -1, dtype=np.int64),
-        row_token_id=np.full(n, -1, dtype=np.int64),
+        row_token=token,
+        row_token_id=token_id,
         n_stimuli=n,
     )
 
@@ -862,10 +859,11 @@ def _seed_choices(
             choices.append(_Choice(chosen, joint[0][0], joint[1][0]))
         else:
             choices.append(
+                # Copies, so a view does not keep every layer's scores.
                 _Choice(
                     chosen,
-                    read.val_scores,
-                    read.test_scores.reshape(test.shape[1:]),
+                    read.val_scores.copy(),
+                    read.test_scores.reshape(test.shape[1:]).copy(),
                 )
             )
     return choices
@@ -1183,7 +1181,7 @@ def _task_examples(
 ) -> Mapping[str, Sequence[Example]]:
     """Keeps, for a polarity task, only the statements of its subsets."""
     source = _task(name).source
-    if name not in POLARITY_TASKS or source not in examples:
+    if name not in POLARITY_TASKS:
         return examples
     kept = [
         e
@@ -1580,11 +1578,12 @@ def run(config: Config, run_dir: RunDir) -> None:
             or a task is unknown, not binary or has no scorer or readout
             left to read (all checked before the model is loaded).
     """
+    tasks = map(_task, _check(config))
     sources: list[TaskSource] = list(
         dict.fromkeys(
             source
-            for name in _check(config)
-            for source in (_task(name).source, target_of(_task(name)).source)
+            for task in tasks
+            for source in (task.source, target_of(task).source)
         )
     )
     execute(

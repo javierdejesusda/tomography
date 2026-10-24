@@ -892,11 +892,8 @@ def _truth_stimuli(loaded: LoadedModel) -> StimulusSet:
     return task_set(task, paper, rows, n_pairs=4, seed=0)
 
 
-def test_read_positions_derives_every_readout_from_three_passes(
-    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config = _config(batch_size=3)
-    stimuli = _truth_stimuli(tiny_arch)
+def _count_texts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Records every text `read_positions` sends through the model."""
     texts: list[str] = []
 
     def counting(loaded: LoadedModel, batch: Any, **kw: Any) -> Activations:
@@ -904,6 +901,15 @@ def test_read_positions_derives_every_readout_from_three_passes(
         return collect_activations(loaded, batch, **kw)
 
     monkeypatch.setattr(m2_readers, "collect_activations", counting)
+    return texts
+
+
+def test_read_positions_derives_every_readout_from_three_passes(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(batch_size=3)
+    stimuli = _truth_stimuli(tiny_arch)
+    texts = _count_texts(monkeypatch)
     read = read_positions(tiny_arch, stimuli, POSITIONS, config)
 
     assert len(texts) == 3 * len(stimuli.texts)
@@ -933,13 +939,7 @@ def test_read_positions_runs_only_the_passes_it_needs(
     tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     stimuli = _truth_stimuli(tiny_gpt2)
-    texts: list[str] = []
-
-    def counting(loaded: LoadedModel, batch: Any, **kw: Any) -> Activations:
-        texts.extend(batch)
-        return collect_activations(loaded, batch, **kw)
-
-    monkeypatch.setattr(m2_readers, "collect_activations", counting)
+    texts = _count_texts(monkeypatch)
     read = read_positions(tiny_gpt2, stimuli, ("max", "mean"), _config())
 
     assert list(read) == ["max", "mean"]

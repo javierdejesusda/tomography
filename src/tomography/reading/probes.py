@@ -240,19 +240,7 @@ class MLPReader:
             raise ValueError(
                 f"h must have shape ({n_layers}, n, {width}), got {stack.shape}"
             )
-        blocks: Iterable[NDArray[np.float64]]
-        if self.joint:
-            blocks = _mlp_inputs(
-                stack.astype(np.float64), self.centers, self.scales, True
-            )
-        else:
-            # One layer at a time, so a single layer is copied to float64.
-            blocks = (
-                (layer.astype(np.float64) - center) / scale
-                for layer, center, scale in zip(
-                    stack, self.centers, self.scales, strict=True
-                )
-            )
+        blocks = _mlp_inputs(stack, self.centers, self.scales, self.joint)
         logits = [
             _logits(model, rows)
             for model, rows in zip(self.models, blocks, strict=True)
@@ -307,7 +295,9 @@ def fit_mlp(
     scales = np.where(deviations > 0.0, deviations, 1.0)
     blocks = _mlp_inputs(stack, centers, scales, joint)
     seeds = (
-        [seed] if joint else [_layer_seed(seed, k) for k in range(len(blocks))]
+        [seed]
+        if joint
+        else [_layer_seed(seed, k) for k in range(stack.shape[0])]
     )
     models = tuple(
         MLPClassifier(
@@ -601,13 +591,32 @@ def _shrunk_mass_mean(
 
 
 def _mlp_inputs(
-    stack: NDArray[np.float64],
+    stack: FloatArray,
     centers: NDArray[np.float64],
     scales: NDArray[np.float64],
     joint: bool,
-) -> list[NDArray[np.float64]]:
-    inputs = (stack - centers[:, None]) / scales[:, None]
-    return [np.concatenate(inputs, axis=1)] if joint else list(inputs)
+) -> Iterable[NDArray[np.float64]]:
+    """Standardizes each layer in float64, one layer at a time.
+
+    Returns one block per layer, made when it is read, so a single layer is
+    copied at a time; or one block of all layers side by side when joint.
+    """
+    blocks = (
+        _standardized(layer, center, scale)
+        for layer, center, scale in zip(stack, centers, scales, strict=True)
+    )
+    return [np.concatenate(list(blocks), axis=1)] if joint else blocks
+
+
+def _standardized(
+    layer: FloatArray,
+    center: NDArray[np.float64],
+    scale: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    rows = np.array(layer, dtype=np.float64)
+    rows -= center
+    rows /= scale
+    return rows
 
 
 def _logits(
