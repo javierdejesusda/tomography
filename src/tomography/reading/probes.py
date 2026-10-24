@@ -1,11 +1,12 @@
 """Readers beyond one oriented direction per layer.
 
 `RepReader` holds one direction per layer. The readers here keep a
-direction only where the scorer is linear: LDA is a `RepReader`, the
-attention reader exports its value heads as one, and the MLP reader has
-none. All of them satisfy `Reader`.
+direction only where the scorer is linear: LDA and TTPD are `RepReader`s,
+the attention reader exports its value heads as one, and the MLP reader
+has none. All of them satisfy `Reader`.
 """
 
+from collections.abc import Iterable
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace
@@ -18,6 +19,7 @@ from numpy.typing import NDArray
 from scipy.optimize import minimize
 from sklearn.covariance import ledoit_wolf_shrinkage
 from sklearn.exceptions import ConvergenceWarning
+from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 import torch
 from torch.nn.functional import binary_cross_entropy_with_logits
@@ -110,6 +112,85 @@ def fit_lda(
     return orient(reader, h, labels=labels, pairs=pairs, groups=groups)
 
 
+def fit_ttpd(
+    h: FloatArray,
+    layers: Sequence[int],
+    *,
+    labels: NDArray[np.int64],
+    polarities: NDArray[np.int64] | None = None,
+    pairs: NDArray[np.int64] | None = None,
+    groups: NDArray[np.int64] | None = None,
+) -> RepReader:
+    """Fits TTPD per layer: a general truth direction plus polarity.
+
+    The reference method (Training of Truth and Polarity Direction) models a
+    centered activation as `t g + t p q`, with t = +1 for label 1 and -1
+    for label 0, p = +1 for an affirmative and -1 for a negated statement.
+    The general truth direction g is the least-squares solution of that
+    model; a logistic regression without penalty on the rows finds the
+    polarity direction, and a second one, on the projections onto both,
+    gives the score. The rows are centered on their mean, the case of one
+    topic. That score is linear in the activation, so the reader is the
+    `RepReader` whose direction is the combination of g and the polarity
+    direction, with the mean placed where the regression's decision is
+    zero; a score is the decision divided by the norm of that direction.
+    Without polarities the model keeps only `t g`, and a regression on one
+    projection is monotone in it, so the reader is g on the centered rows.
+    Either way the signs follow the rule of `RepReader.fit` (see `orient`).
+    As in the reference code, a regression on separable rows stops at its
+    iteration cap without a warning, at the direction reached there.
+
+    Args:
+        h: Activations of shape (K, n, d), K = `len(layers)`.
+        layers: Layer index of each slice of `h`.
+        labels: Binary labels of shape (n,), 1 for true statements.
+        polarities: +1 (affirmative) or -1 (negated) per row, both present;
+            None when every statement has the same polarity.
+        pairs: Row index pairs of shape (m, 2) that orient the layers.
+        groups: Row groups that orient the layers, see `orient`.
+
+    Returns:
+        The reader, named `ttpd`.
+
+    Raises:
+        ValueError: If the shapes disagree, the labels are not binary with
+            both classes, `h` is not finite, the polarities are not one
+            -1 or +1 per row with both present, or the orientation inputs
+            are malformed.
+    """
+    stack = _checked_stack(h, layers, labels)
+    truth = 2.0 * labels - 1.0
+    if polarities is None:
+        centers = stack.mean(axis=1)
+        vectors = [
+            np.linalg.lstsq(truth[:, None], rows - center, rcond=None)[0][0]
+            for rows, center in zip(stack, centers, strict=True)
+        ]
+        reader = RepReader.from_arrays(
+            "ttpd", layers, np.stack(vectors), centers
+        )
+        return orient(reader, h, labels=labels, pairs=pairs, groups=groups)
+    _check_polarities(polarities, stack.shape[1])
+    design = np.stack([truth, truth * polarities], axis=1)
+    vectors = []
+    means = []
+    for rows in stack:
+        center = rows.mean(axis=0)
+        general = np.linalg.lstsq(design, rows - center, rcond=None)[0][0]
+        polar = _unpenalized_logistic(rows, polarities == 1).coef_[0]
+        projected = np.stack([rows @ general, rows @ polar], axis=1)
+        final = _unpenalized_logistic(projected, labels == 1)
+        direction = final.coef_[0] @ np.stack([general, polar])
+        vectors.append(direction)
+        means.append(
+            -final.intercept_[0] * direction / np.square(direction).sum()
+        )
+    reader = RepReader.from_arrays(
+        "ttpd", layers, np.stack(vectors), np.stack(means)
+    )
+    return orient(reader, h, labels=labels, pairs=pairs, groups=groups)
+
+
 @dataclass(frozen=True, eq=False)
 class MLPReader:
     """Multilayer perceptrons that score standardized activations.
@@ -153,7 +234,7 @@ class MLPReader:
             ValueError: If `h` does not have shape (K, n, d).
         """
         n_layers, width = self.centers.shape
-        stack = np.asarray(h, dtype=np.float64)
+        stack = np.asarray(h)
         expected = (n_layers, width)
         if stack.ndim != 3 or (stack.shape[0], stack.shape[2]) != expected:
             raise ValueError(
@@ -214,7 +295,9 @@ def fit_mlp(
     scales = np.where(deviations > 0.0, deviations, 1.0)
     blocks = _mlp_inputs(stack, centers, scales, joint)
     seeds = (
-        [seed] if joint else [_layer_seed(seed, k) for k in range(len(blocks))]
+        [seed]
+        if joint
+        else [_layer_seed(seed, k) for k in range(stack.shape[0])]
     )
     models = tuple(
         MLPClassifier(
@@ -462,6 +545,26 @@ def _checked_stack(
     return stack
 
 
+def _check_polarities(polarities: NDArray[np.int64], n: int) -> None:
+    values = np.asarray(polarities)
+    if values.shape != (n,):
+        raise ValueError(
+            f"expected one polarity per row ({n}), got shape {values.shape}"
+        )
+    if not np.isin(values, (-1, 1)).all():
+        raise ValueError("polarities must be -1 or +1")
+    if (values == 1).all() or (values == -1).all():
+        raise ValueError("polarities must contain both polarities")
+
+
+def _unpenalized_logistic(
+    rows: NDArray[np.float64], positive: NDArray[np.bool_]
+) -> LogisticRegression:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        return LogisticRegression(C=np.inf).fit(rows, positive)
+
+
 def _shrunk_mass_mean(
     rows: NDArray[np.float64],
     positive: NDArray[np.bool_],
@@ -488,13 +591,32 @@ def _shrunk_mass_mean(
 
 
 def _mlp_inputs(
-    stack: NDArray[np.float64],
+    stack: FloatArray,
     centers: NDArray[np.float64],
     scales: NDArray[np.float64],
     joint: bool,
-) -> list[NDArray[np.float64]]:
-    inputs = (stack - centers[:, None]) / scales[:, None]
-    return [np.concatenate(inputs, axis=1)] if joint else list(inputs)
+) -> Iterable[NDArray[np.float64]]:
+    """Standardizes each layer in float64, one layer at a time.
+
+    Returns one block per layer, made when it is read, so a single layer is
+    copied at a time; or one block of all layers side by side when joint.
+    """
+    blocks = (
+        _standardized(layer, center, scale)
+        for layer, center, scale in zip(stack, centers, scales, strict=True)
+    )
+    return [np.concatenate(list(blocks), axis=1)] if joint else blocks
+
+
+def _standardized(
+    layer: FloatArray,
+    center: NDArray[np.float64],
+    scale: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    rows = np.array(layer, dtype=np.float64)
+    rows -= center
+    rows /= scale
+    return rows
 
 
 def _logits(

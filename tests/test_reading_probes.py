@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import replace
 from functools import partial
+import tracemalloc
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,6 +21,7 @@ from tomography.reading.probes import Reader
 from tomography.reading.probes import fit_attention
 from tomography.reading.probes import fit_lda
 from tomography.reading.probes import fit_mlp
+from tomography.reading.probes import fit_ttpd
 from tomography.reading.reader import RepReader
 from tomography.reading.reader import _layer_seed
 from tomography.reading.reader import orient
@@ -205,6 +207,30 @@ def test_mlp_reader_scores_each_layer_with_its_own_seeded_mlp() -> None:
         np.testing.assert_allclose(expit(scores[k]), probability, rtol=1e-5)
     with pytest.raises(ValueError, match="shape"):
         reader.score(test[:1])
+
+
+def test_mlp_reader_scores_one_layer_at_a_time() -> None:
+    h, labels = correlated_classes(n=40, d=32, seed=8)
+    reader = fit_mlp(
+        np.repeat(h, 16, axis=0),
+        list(range(32)),
+        labels=labels,
+        hidden_sizes=(4,),
+        alpha=1.0,
+    )
+    test = np.random.default_rng(9).normal(size=(32, 2000, 32))
+    test = test.astype(np.float32)
+
+    tracemalloc.start()
+    try:
+        scores = reader.score(test)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+    assert scores.shape == (32, 2000)
+    # A float64 copy of the whole stack alone takes twice its bytes.
+    assert peak < test.nbytes / 2
 
 
 def test_joint_mlp_reader_scores_the_concatenated_layers() -> None:
@@ -557,3 +583,104 @@ def test_fit_attention_warns_when_it_stops_before_converging() -> None:
 
     with pytest.warns(ConvergenceWarning, match="did not converge"):
         fit_attention(acts, labels=labels, max_iter=1)
+
+
+def truth_and_polarity(
+    n: int, d: int, seed: int
+) -> tuple[NDArray[np.float32], NDArray[np.int64], NDArray[np.int64]]:
+    """Two layers where negation flips a polarity-dependent truth axis.
+
+    A statement with truth t (+1 or -1) and polarity p (+1 affirmative, -1
+    negated) sits at `mu + t g + t p q` plus noise, the model of the
+    reference paper; rows alternate labels 0 and 1 and the second half is
+    negated.
+    """
+    rng = np.random.default_rng(seed)
+    labels = (np.arange(n) % 2).astype(np.int64)
+    polarities = np.where(np.arange(n) < n // 2, 1, -1).astype(np.int64)
+    truth = 2.0 * labels - 1.0
+    general, polar = rng.standard_normal((2, 2, 1, d))
+    noise = 1.5 * rng.standard_normal((2, n, d))
+    rows = (
+        3.0
+        + truth[:, None] * general
+        + (truth * polarities)[:, None] * polar
+        + noise
+    )
+    return rows.astype(np.float32), labels, polarities
+
+
+def test_ttpd_without_polarities_reads_the_least_squares_truth_direction() -> (
+    None
+):
+    h, labels = correlated_classes(n=60, d=8, seed=31)
+    pairs = np.arange(60, dtype=np.int64).reshape(30, 2)
+
+    reader = fit_ttpd(h, [3, 7], labels=labels, pairs=pairs)
+
+    assert isinstance(reader, RepReader)
+    assert reader.method == "ttpd"
+    assert reader.layers == (3, 7)
+    truth = (2.0 * labels - 1.0)[:, None]
+    for k in range(2):
+        rows = h[k].astype(np.float64)
+        centered = rows - rows.mean(axis=0)
+        expected = np.linalg.lstsq(truth, centered, rcond=None)[0][0]
+        oriented = reader.signs[k] * reader.directions[k]
+        np.testing.assert_allclose(oriented, unit(expected), atol=1e-6)
+        np.testing.assert_allclose(
+            reader.means[k], rows.mean(axis=0), rtol=1e-6
+        )
+    scores = reader.score(h)
+    assert (scores[:, labels == 1].mean(axis=1) > 0).all()
+
+
+def test_ttpd_with_polarities_scores_the_logistic_fit_on_two_projections() -> (
+    None
+):
+    h, labels, polarities = truth_and_polarity(n=200, d=6, seed=33)
+
+    reader = fit_ttpd(h, [2, 5], labels=labels, polarities=polarities)
+
+    truth = 2.0 * labels - 1.0
+    design = np.stack([truth, truth * polarities], axis=1)
+    for k in range(2):
+        rows = h[k].astype(np.float64)
+        centered = rows - rows.mean(axis=0)
+        general = np.linalg.lstsq(design, centered, rcond=None)[0][0]
+        polar = LogisticRegression(C=np.inf).fit(rows, polarities == 1).coef_[0]
+        projected = np.stack([rows @ general, rows @ polar], axis=1)
+        final = LogisticRegression(C=np.inf).fit(projected, labels)
+        weights = final.coef_[0]
+        direction = weights[0] * general + weights[1] * polar
+        decision = final.decision_function(projected)
+        np.testing.assert_allclose(
+            reader.score(h)[k] * np.linalg.norm(direction),
+            decision,
+            rtol=1e-4,
+            atol=1e-4,
+        )
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"polarities": np.array([1, -1, 1])}, "one polarity per row"),
+        ({"polarities": np.array([1, 0, 1, -1, 1, -1])}, r"-1 or \+1"),
+        ({"polarities": np.ones(6, dtype=np.int64)}, "both polarities"),
+        ({"labels": np.zeros(6, dtype=np.int64)}, "both classes"),
+        ({"layers": [1]}, "layers has 1 entries"),
+    ],
+)
+def test_fit_ttpd_rejects_inconsistent_inputs(
+    change: dict[str, object], message: str
+) -> None:
+    arguments: dict[str, object] = {
+        "h": np.random.default_rng(37).standard_normal((2, 6, 3)),
+        "layers": [0, 1],
+        "labels": np.array([0, 1, 0, 1, 0, 1]),
+        **change,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        fit_ttpd(**arguments)  # type: ignore[arg-type]
