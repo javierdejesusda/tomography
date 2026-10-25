@@ -153,6 +153,11 @@ COLUMNS: tuple[str, ...] = (
     "tpr_at_fpr",
     "n_seeds",
 )
+SHUFFLED_ONLY = (
+    "the shuffled control series only: no reader, random direction or "
+    "text-only cells, no comparisons and no AUROC matrix; its rows pair "
+    "with the shuffled rows of the full run of the same other settings"
+)
 COMPARISON_COLUMNS: tuple[str, ...] = (
     "task",
     "condition",
@@ -207,6 +212,12 @@ class Config(ReadingConfig):
         shifts: Template variant kinds evaluated as held-out wordings; a
             kind that does not apply to a task is skipped.
         controls: The controls to add, from `CONTROLS`.
+        reader_series: False fits the `shuffled` series alone, which needs
+            `shuffled` in `controls`: no reader fits, random direction or
+            text-only classifier, so no comparisons and no AUROC matrix.
+            Its seeds do not depend on the other series, so its rows equal
+            the shuffled rows of a full run of the same other settings, at
+            about half the cost.
         logistic_c: The grid of the logistic scorer's inverse L2 strength,
             for the one-row, per-token and attention readouts alike, in
             increasing order, so a tie keeps the strongest penalty.
@@ -232,6 +243,7 @@ class Config(ReadingConfig):
     decoys: tuple[Decoy, ...] = ("random", "against")
     shifts: tuple[VariantKind, ...] = ("paraphrase",)
     controls: tuple[Control, ...] = CONTROLS
+    reader_series: bool = True
     logistic_c: tuple[float, ...] = (0.01, 0.1, 1.0, 10.0)
     mlp_alpha: tuple[float, ...] = (0.1, 0.01, 0.001, 0.0001)
     mlp_hidden: tuple[int, ...] = (64,)
@@ -299,7 +311,8 @@ def cells(
     Returns:
         The scorer cells, then the random direction at every non-joint rule
         of every readout but attention, then the text-only classifier, the
-        controls only when `config.controls` asks for them.
+        controls only when `config.controls` asks for them and the run fits
+        the reader series.
     """
     rows = [
         Cell(scorer, readout, rule)
@@ -308,6 +321,8 @@ def cells(
         for rule in config.layer_rules
         if applies(scorer, readout, rule)
     ]
+    if not config.reader_series:
+        return rows
     if "random" in config.controls:
         rows += [
             Cell("random", readout, rule)
@@ -941,7 +956,7 @@ def _cell_entries(
     Returns one entry per series and layer rule; the fits of a seed are
     shared by the rules and seeded by the scorer and readout alone.
     """
-    series = ["reader"]
+    series = ["reader"] if config.reader_series else []
     if "shuffled" in config.controls and scorer != "random":
         series.append("shuffled")
     entries = []
@@ -1363,6 +1378,7 @@ def _write_task(
     `rows` holds the table rows of each entry, one per condition.
     `entry_select_labels` holds the select labels each seed of an entry was
     tuned and thresholded on: the real ones, or a `shuffled` series' own.
+    A run without reader entries writes no matrix.
     """
     select = splits.select_items
     report = splits.report_items["original"]
@@ -1401,6 +1417,8 @@ def _write_task(
         for e, entry_rows in zip(entries, rows, strict=True)
         if e.series == "reader"
     ]
+    if not readers:
+        return
     write_matrix(
         run_dir,
         f"auroc_{task.name}",
@@ -1459,7 +1477,13 @@ def _check(config: Config) -> tuple[str, ...]:
             "token_layers must name at least one layer, or be None to keep "
             "every layer"
         )
-    for baseline in config.baselines:
+    if not config.reader_series and "shuffled" not in config.controls:
+        raise ValueError(
+            "reader_series=False runs the shuffled series alone and needs "
+            f"'shuffled' in controls, got {config.controls}"
+        )
+    # A shuffled-only run has no reader cells to compare with a baseline.
+    for baseline in config.baselines if config.reader_series else ():
         scorer, _, readout = baseline.partition("/")
         if scorer not in config.scorers or readout not in config.readouts:
             raise ValueError(
@@ -1522,7 +1546,11 @@ def _run_task(
                 config, task, splits, scorer, readout, cell_rules
             )
     entry_rows = [_metric_rows(config, task, splits, e) for e in entries]
-    comparisons = _comparison_rows(config, task, splits, entries)
+    comparisons = (
+        _comparison_rows(config, task, splits, entries)
+        if config.reader_series
+        else []
+    )
     _write_task(run_dir, task, splits, entries, entry_rows)
     return (
         [row for block in entry_rows for row in block],
@@ -1555,7 +1583,9 @@ def execute(
     and `auroc_<task>` (the AUROC matrix of the cells by condition); and
     `table.json` (metrics per cell, series and condition, mean over seeds
     with seed intervals), `comparisons.json` (paired comparisons with each
-    baseline on the seed ensemble) and `summary.json`.
+    baseline on the seed ensemble) and `summary.json`. A run with
+    `reader_series` False writes neither the matrices nor the comparisons,
+    and its summary says it holds the shuffled series only.
 
     Args:
         config: The experiment settings.
@@ -1591,6 +1621,9 @@ def execute(
             "DeLong and, separately, the McNemar p values of its cells"
         ),
     }
+    if not config.reader_series:
+        del summary["families"]
+        summary["series"] = SHUFFLED_ONLY
     for name in tasks:
         task_rows, task_comparisons, parts = _run_task(
             config, run_dir, loaded, name, _task_examples(name, examples)
@@ -1600,10 +1633,11 @@ def execute(
         for key, value in parts.items():
             summary[key][name] = value
     run_dir.write_json("table", {"columns": list(COLUMNS), "rows": rows})
-    run_dir.write_json(
-        "comparisons",
-        {"columns": list(COMPARISON_COLUMNS), "rows": comparisons},
-    )
+    if config.reader_series:
+        run_dir.write_json(
+            "comparisons",
+            {"columns": list(COMPARISON_COLUMNS), "rows": comparisons},
+        )
     run_dir.write_json("summary", summary)
 
 
@@ -1618,7 +1652,8 @@ def run(config: Config, run_dir: RunDir) -> None:
         ValueError: If there is no task, scorer, readout or layer rule, a
             grid is empty or not positive, `top_k` or `batch_size` is below
             1, `token_layers` is empty, a baseline is not a cell of the run,
-            or a task is unknown, not binary or has no scorer or readout
+            `reader_series` is False without the `shuffled` control, or a
+            task is unknown, not binary or has no scorer or readout
             left to read (all checked before the model is loaded).
     """
     tasks = map(_task, _check(config))
@@ -1645,10 +1680,13 @@ def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
         out_dir: Folder of the figures.
 
     Returns:
-        The PDF, PNG and SVG paths.
+        The PDF, PNG and SVG paths; none for a shuffled-only run, which
+        has no matrix.
     """
     summary = cast(dict[str, Any], run_dir.read_json("summary"))
     paths: list[Path] = []
+    if summary.get("series") == SHUFFLED_ONLY:
+        return paths
     for task in summary["tasks"]:
         paths += plot_matrix_file(
             run_dir, out_dir, stem=f"auroc_{task}", vmin=0.0, vmax=1.0

@@ -61,7 +61,7 @@ from tomography.reading.stats import threshold_metrics
 from tomography.reading.stats import top_k_layers
 from tomography.reading.stats import tpr_at_fpr
 
-DEFAULT_HASH = "bb7e525e2aad"
+DEFAULT_HASH = "3c82fe936345"
 
 
 def test_the_factorial_names_its_scorers_readouts_and_rules() -> None:
@@ -1157,3 +1157,118 @@ def test_the_shuffled_series_tunes_and_thresholds_on_shuffled_labels(
         assert len(calls) == len(expected)
         for labels, want in zip(calls, expected, strict=True):
             assert np.array_equal(labels, want)
+
+
+SHUFFLED_ONLY_STATEMENT = (
+    "the shuffled control series only: no reader, random direction or "
+    "text-only cells, no comparisons and no AUROC matrix; its rows pair "
+    "with the shuffled rows of the full run of the same other settings"
+)
+
+
+@pytest.fixture
+def shuffled_only(
+    runs: dict[str, RunDir],
+    tiny_gpt2: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> RunDir:
+    if "shuffled_only" not in runs:
+        monkeypatch.setattr(p2_positions, "DECOY_LINE", "Hint {{question}}.\n")
+        config = _config(reader_series=False)
+        run_dir = RunDir.create(config, out_root=tmp_path_factory.mktemp("m2"))
+        _quiet_execute(config, run_dir, tiny_gpt2)
+        runs["shuffled_only"] = run_dir
+    return runs["shuffled_only"]
+
+
+def test_set_reads_reader_series_as_a_bool() -> None:
+    key, value = _parse_override(Config, "reader_series=false")
+    assert Config.from_dict({key: value}).reader_series is False
+    assert Config().reader_series is True
+
+
+def test_a_shuffled_only_run_needs_the_shuffled_control(
+    tmp_path: Path,
+) -> None:
+    config = _config(reader_series=False, controls=("text", "random"))
+    with pytest.raises(
+        ValueError,
+        match=r"reader_series=False runs the shuffled series alone and "
+        r"needs 'shuffled' in controls, got \('text', 'random'\)",
+    ):
+        _refused(config, tmp_path)
+
+
+def test_a_shuffled_only_run_does_not_check_the_baselines(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class LoadedError(Exception):
+        pass
+
+    def loaded(*args: Any, **kwargs: Any) -> None:
+        raise LoadedError
+
+    monkeypatch.setattr(m2_readers, "load_sources", lambda sources: {})
+    monkeypatch.setattr(m2_readers, "load_model", loaded)
+    shuffled = _config(
+        reader_series=False, scorers=("logistic",), baselines=("lda/last",)
+    )
+    with pytest.raises(LoadedError):
+        run(shuffled, RunDir.create(shuffled, out_root=tmp_path))
+    full = dataclasses.replace(shuffled, reader_series=True)
+    with pytest.raises(ValueError, match="baseline 'lda/last' is not a cell"):
+        run(full, RunDir.create(full, out_root=tmp_path))
+
+
+def test_a_shuffled_only_run_lists_no_control_cells() -> None:
+    full = cells(_config(), ("last",), scorers=("mean_diff",))
+    assert Cell("random", "last", "best") in full
+    assert Cell("text", "text", "none") in full
+    assert cells(
+        _config(reader_series=False), ("last",), scorers=("mean_diff",)
+    ) == [c for c in full if c.scorer == "mean_diff"]
+
+
+def test_a_shuffled_only_run_holds_the_shuffled_rows_of_the_full_run(
+    finished: RunDir, shuffled_only: RunDir
+) -> None:
+    rows = _table(shuffled_only)
+    assert rows
+    assert {r["series"] for r in rows} == {"shuffled"}
+    assert {r["scorer"] for r in rows} <= set(SCORERS)
+    assert rows == [r for r in _table(finished) if r["series"] == "shuffled"]
+    for task in ("sentiment", "utility"):
+        names = cast(dict[str, Any], shuffled_only.read_json(f"scores_{task}"))[
+            "entries"
+        ]
+        full_meta = cast(dict[str, Any], finished.read_json(f"scores_{task}"))
+        kept = [
+            full_meta["entries"].index(name)
+            for name in full_meta["entries"]
+            if name.endswith("/shuffled")
+        ]
+        assert names == [full_meta["entries"][i] for i in kept]
+        got = shuffled_only.read_arrays(f"scores_{task}")
+        want = finished.read_arrays(f"scores_{task}")
+        assert set(got) == set(want)
+        for key in ("select", "report", "entry_select_labels"):
+            assert np.array_equal(got[key], want[key][kept])
+        for key in set(want) - {"select", "report", "entry_select_labels"}:
+            assert np.array_equal(got[key], want[key])
+
+
+def test_a_shuffled_only_run_skips_the_comparisons_and_the_matrices(
+    finished: RunDir, shuffled_only: RunDir, tmp_path: Path
+) -> None:
+    names = {p.stem for p in shuffled_only.path.iterdir()}
+    assert {"table", "summary", "scores_sentiment", "scores_utility"} <= names
+    assert not {"comparisons", "auroc_sentiment", "auroc_utility"} & names
+    summary = cast(dict[str, Any], shuffled_only.read_json("summary"))
+    full = cast(dict[str, Any], finished.read_json("summary"))
+    assert summary["series"] == SHUFFLED_ONLY_STATEMENT
+    assert "families" not in summary
+    assert {k: v for k, v in summary.items() if k != "series"} == {
+        k: v for k, v in full.items() if k != "families"
+    }
+    assert plot(shuffled_only, tmp_path) == []
