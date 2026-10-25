@@ -1100,58 +1100,21 @@ def test_a_task_releases_its_activations_before_the_next_is_read(
     assert len(held) == 2
 
 
-def test_the_shuffled_series_tunes_and_picks_layers_on_shuffled_labels(
+def test_the_shuffled_series_tunes_and_thresholds_on_shuffled_labels(
     tiny_gpt2: LoadedModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tuned: list[tuple[NDArray[np.int64], NDArray[np.int64]]] = []
+    thresholds: list[NDArray[np.int64]] = []
+    detections: list[NDArray[np.int64]] = []
 
-    def recording(scores: Any, groups: Any, labels: Any) -> Any:
+    def tuning(scores: Any, groups: Any, labels: Any) -> Any:
         # Tuning scores every grid value and layer at once; the report
         # metrics score one vector.
         if np.ndim(scores) >= 2:
             tuned.append((np.array(groups), np.array(labels)))
         return group_accuracy(scores, groups, labels)
-
-    monkeypatch.setattr(m2_readers, "group_accuracy", recording)
-    config = _config(
-        tasks=("sentiment",),
-        scorers=("mean_diff",),
-        readouts=("last",),
-        layer_rules=("best",),
-        layers=(1, 2),
-        controls=("shuffled",),
-        decoys=(),
-        shifts=(),
-        baselines=("mean_diff/last",),
-    )
-    _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
-
-    # The reader series runs first, one tuning per seed, on the real labels;
-    # then each shuffled seed on its own shuffle of the select labels.
-    real_groups, real = tuned[0]
-    expected = [real] * config.n_seeds + [
-        shuffle_within_groups(
-            real,
-            real_groups,
-            seed=derive_seed(config.seed, "shuffled-select", "sentiment", i),
-        )
-        for i in range(config.n_seeds)
-    ]
-    assert len(tuned) == len(expected)
-    for (groups, labels), want in zip(tuned, expected, strict=True):
-        assert np.array_equal(groups, real_groups)
-        assert np.array_equal(labels, want)
-
-
-def test_the_shuffled_series_sets_its_thresholds_on_shuffled_labels(
-    tiny_gpt2: LoadedModel,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    thresholds: list[NDArray[np.int64]] = []
-    detections: list[NDArray[np.int64]] = []
 
     def thresholding(select: Any, labels: Any, *args: Any) -> Any:
         thresholds.append(np.array(labels))
@@ -1161,6 +1124,7 @@ def test_the_shuffled_series_sets_its_thresholds_on_shuffled_labels(
         detections.append(np.array(labels))
         return tpr_at_fpr(select, labels, *args, **kw)
 
+    monkeypatch.setattr(m2_readers, "group_accuracy", tuning)
     monkeypatch.setattr(m2_readers, "threshold_metrics", thresholding)
     monkeypatch.setattr(m2_readers, "tpr_at_fpr", detecting)
     config = _config(
@@ -1176,9 +1140,20 @@ def test_the_shuffled_series_sets_its_thresholds_on_shuffled_labels(
     )
     _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
 
-    # One original condition: the reader seeds, then the shuffled seeds.
-    for calls in (thresholds, detections):
-        assert len(calls) == 2 * config.n_seeds
-        real = calls[0]
-        assert all(np.array_equal(c, real) for c in calls[: config.n_seeds])
-        assert not any(np.array_equal(c, real) for c in calls[config.n_seeds :])
+    # The reader series runs first, one seed after another, on the real
+    # labels; then each shuffled seed on its own shuffle of the select
+    # labels. The original prompts are the only condition.
+    real_groups, real = tuned[0]
+    expected = [real] * config.n_seeds + [
+        shuffle_within_groups(
+            real,
+            real_groups,
+            seed=derive_seed(config.seed, "shuffled-select", "sentiment", i),
+        )
+        for i in range(config.n_seeds)
+    ]
+    assert all(np.array_equal(groups, real_groups) for groups, _ in tuned)
+    for calls in ([labels for _, labels in tuned], thresholds, detections):
+        assert len(calls) == len(expected)
+        for labels, want in zip(calls, expected, strict=True):
+            assert np.array_equal(labels, want)

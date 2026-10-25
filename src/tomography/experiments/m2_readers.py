@@ -947,8 +947,8 @@ def _cell_entries(
     entries = []
     for name in series:
         per_seed = []
+        select = splits.select_items
         for i, stimuli in enumerate(splits.train_items):
-            select = splits.select_items
             if name == "reader":
                 labels, select_labels = stimuli.labels, select.labels
             else:
