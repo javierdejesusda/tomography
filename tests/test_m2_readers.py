@@ -24,6 +24,7 @@ from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import m2_readers
 from tomography.experiments import p2_positions
 from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.m2_readers import COLUMNS
 from tomography.experiments.m2_readers import COMPARISON_COLUMNS
 from tomography.experiments.m2_readers import CONTROLS
@@ -45,6 +46,7 @@ from tomography.experiments.m2_readers import run
 from tomography.experiments.m2_readers import token_score_max
 from tomography.experiments.m2_readers import tune_per_layer
 from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.sweep import shuffle_within_groups
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import prepare
 from tomography.experiments.variants import task_set
@@ -643,14 +645,21 @@ def test_the_scores_store_the_select_labels_each_seed_was_tuned_on(
     sidecar = cast(dict[str, Any], finished.read_json("scores_sentiment"))
     stored = arrays["entry_select_labels"]
     real = arrays["select_labels"]
+    shuffled = [
+        shuffle_within_groups(
+            real,
+            arrays["select_groups"],
+            seed=derive_seed(0, "shuffled-select", "sentiment", i),
+        )
+        for i in range(stored.shape[1])
+    ]
     assert sidecar["axes"]["entry_select_labels"] == ["entry", "seed", "item"]
     assert stored.shape == arrays["select"].shape
     for e, entry in enumerate(sidecar["entries"]):
-        same = [np.array_equal(seed, real) for seed in stored[e]]
-        if entry.endswith("/shuffled"):
-            assert not any(same), entry
-        else:
-            assert all(same), entry
+        n_seeds = stored.shape[1]
+        expected = shuffled if entry.endswith("/shuffled") else [real] * n_seeds
+        for seed, labels in zip(stored[e], expected, strict=True):
+            assert np.array_equal(seed, labels), entry
 
 
 def test_every_cell_scores_the_same_report_items(finished: RunDir) -> None:
@@ -1119,17 +1128,21 @@ def test_the_shuffled_series_tunes_and_picks_layers_on_shuffled_labels(
     )
     _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
 
-    # The reader series runs first, one tuning per seed, on the real labels.
+    # The reader series runs first, one tuning per seed, on the real labels;
+    # then each shuffled seed on its own shuffle of the select labels.
     real_groups, real = tuned[0]
-    reader = tuned[: config.n_seeds]
-    shuffled = tuned[config.n_seeds :]
-    assert len(shuffled) == config.n_seeds
-    assert all(np.array_equal(labels, real) for _, labels in reader)
-    assert not any(np.array_equal(labels, real) for _, labels in shuffled)
-    for groups, labels in shuffled:
+    expected = [real] * config.n_seeds + [
+        shuffle_within_groups(
+            real,
+            real_groups,
+            seed=derive_seed(config.seed, "shuffled-select", "sentiment", i),
+        )
+        for i in range(config.n_seeds)
+    ]
+    assert len(tuned) == len(expected)
+    for (groups, labels), want in zip(tuned, expected, strict=True):
         assert np.array_equal(groups, real_groups)
-        members = [g[g >= 0] for g in groups]
-        assert all(labels[m].sum() == 1 for m in members)
+        assert np.array_equal(labels, want)
 
 
 def test_the_shuffled_series_sets_its_thresholds_on_shuffled_labels(
