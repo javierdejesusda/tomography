@@ -618,11 +618,14 @@ class _Choice:
         layers: The layers read, best first.
         select: Scores of the select items, shape (n_select,).
         report: Scores of the report items per condition, (M, n_report).
+        select_labels: The select labels that set the thresholds: the real
+            ones, or the shuffled ones of the `shuffled` series.
     """
 
     layers: tuple[int, ...]
     select: NDArray[np.float64]
     report: NDArray[np.float64]
+    select_labels: NDArray[np.int64]
 
 
 def _grid(config: Config, scorer: str) -> tuple[float | None, ...]:
@@ -769,6 +772,7 @@ def _tuned(
     splits: _Splits,
     i: int,
     labels: NDArray[np.int64],
+    select_labels: NDArray[np.int64],
     seed: int,
     at: Sequence[int] | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
@@ -784,6 +788,8 @@ def _tuned(
         splits: The task's items and activations.
         i: The seed, the index of the training set.
         labels: The training labels, real or shuffled.
+        select_labels: The select labels that tune the grid, real or
+            shuffled.
         seed: Seed of the fits.
         at: Fit one joint reader on these layer positions; None fits the
             layers one by one.
@@ -812,8 +818,7 @@ def _tuned(
         for value in _grid(config, scorer)
     ]
     val = np.stack([fn(select) for fn in fits]).astype(np.float64)
-    items = splits.select_items
-    metric = group_accuracy(val, items.groups, items.labels)
+    metric = group_accuracy(val, splits.select_items.groups, select_labels)
     best = tune_per_layer(metric)
     layers = np.arange(best.shape[0])
     n_report = splits.report_items["original"].labels.shape[0]
@@ -833,6 +838,7 @@ def _seed_choices(
     splits: _Splits,
     i: int,
     labels: NDArray[np.int64],
+    select_labels: NDArray[np.int64],
     seed: int,
 ) -> list[_Choice]:
     """Fits one seed per layer, tunes it, then applies each layer rule.
@@ -840,9 +846,12 @@ def _seed_choices(
     The rules share the tuned per-layer fits, so two rules of a cell differ
     only in how they read the layers. A rule reads the report items of all
     conditions at once: it standardizes them, if at all, with select
-    statistics only, so each condition is read as it would be alone.
+    statistics only, so each condition is read as it would be alone. The
+    grid, the layers and the thresholds are chosen on `select_labels`.
     """
-    val, test, metric = _tuned(config, scorer, readout, splits, i, labels, seed)
+    val, test, metric = _tuned(
+        config, scorer, readout, splits, i, labels, select_labels, seed
+    )
     layers = splits.train[POSITION_OF[cast(Readout, readout)]][i].layers
     k = min(config.top_k, len(layers))
     flat = test.reshape(test.shape[0], -1)
@@ -855,8 +864,20 @@ def _seed_choices(
         chosen = tuple(int(layer) for layer in read.layers)
         if rule == "joint":
             at = [layers.index(layer) for layer in chosen]
-            joint = _tuned(config, scorer, readout, splits, i, labels, seed, at)
-            choices.append(_Choice(chosen, joint[0][0], joint[1][0]))
+            joint = _tuned(
+                config,
+                scorer,
+                readout,
+                splits,
+                i,
+                labels,
+                select_labels,
+                seed,
+                at,
+            )
+            choices.append(
+                _Choice(chosen, joint[0][0], joint[1][0], select_labels)
+            )
         else:
             choices.append(
                 # Copies, so a view does not keep every layer's scores.
@@ -864,6 +885,7 @@ def _seed_choices(
                     chosen,
                     read.val_scores.copy(),
                     read.test_scores.reshape(test.shape[1:]).copy(),
+                    select_labels,
                 )
             )
     return choices
@@ -902,7 +924,7 @@ def _text_choices(splits: _Splits) -> list[_Choice]:
         )
         cut = len(select.uids)
         report_scores = np.tile(scores[cut:], (len(splits.conditions), 1))
-        rows.append(_Choice((), scores[:cut], report_scores))
+        rows.append(_Choice((), scores[:cut], report_scores, select.labels))
     return rows
 
 
@@ -926,21 +948,36 @@ def _cell_entries(
     for name in series:
         per_seed = []
         for i, stimuli in enumerate(splits.train_items):
-            labels = (
-                stimuli.labels
-                if name == "reader"
-                else shuffle_within_groups(
+            select = splits.select_items
+            if name == "reader":
+                labels, select_labels = stimuli.labels, select.labels
+            else:
+                labels = shuffle_within_groups(
                     stimuli.labels,
                     stimuli.groups,
                     seed=derive_seed(config.seed, "shuffled", task.name, i),
                 )
-            )
+                select_labels = shuffle_within_groups(
+                    select.labels,
+                    select.groups,
+                    seed=derive_seed(
+                        config.seed, "shuffled-select", task.name, i
+                    ),
+                )
             seed = derive_seed(
                 config.seed, "fit", task.name, scorer, readout, i
             )
             per_seed.append(
                 _seed_choices(
-                    config, scorer, readout, rules, splits, i, labels, seed
+                    config,
+                    scorer,
+                    readout,
+                    rules,
+                    splits,
+                    i,
+                    labels,
+                    select_labels,
+                    seed,
                 )
             )
         entries += [
@@ -954,17 +991,20 @@ def _seed_metrics(
     config: Config,
     choice: _Choice,
     m: int,
-    select: StimulusSet,
     items: StimulusSet,
 ) -> list[float]:
-    """Pair accuracy, AUROC, the thresholded metrics and the TPR of a seed."""
+    """Pair accuracy, AUROC, the thresholded metrics and the TPR of a seed.
+
+    The thresholds come from the select scores and the choice's select
+    labels.
+    """
     scores = choice.report[m]
     thresholded = threshold_metrics(
-        choice.select, select.labels, scores, items.labels
+        choice.select, choice.select_labels, scores, items.labels
     )
     detection = tpr_at_fpr(
         choice.select,
-        select.labels,
+        choice.select_labels,
         scores,
         items.labels,
         max_fpr=config.max_fpr,
@@ -988,10 +1028,7 @@ def _metric_rows(
     for m, condition in enumerate(splits.conditions):
         items = splits.report_items[condition]
         values = np.array(
-            [
-                _seed_metrics(config, c, m, splits.select_items, items)
-                for c in entry.choices
-            ]
+            [_seed_metrics(config, c, m, items) for c in entry.choices]
         )
         pair, area = values[:, 0], values[:, 1]
         pair_lo, pair_hi = bootstrap_ci(pair, seed=config.seed)
@@ -1324,6 +1361,8 @@ def _write_task(
     """Writes the per-seed scores of every entry and the AUROC matrix.
 
     `rows` holds the table rows of each entry, one per condition.
+    `entry_select_labels` holds the select labels each seed of an entry was
+    tuned and thresholded on: the real ones, or a `shuffled` series' own.
     """
     select = splits.select_items
     report = splits.report_items["original"]
@@ -1333,6 +1372,9 @@ def _write_task(
         select=np.stack([[c.select for c in e.choices] for e in entries]),
         report=np.stack([[c.report for c in e.choices] for e in entries]),
         select_labels=select.labels,
+        entry_select_labels=np.stack(
+            [[c.select_labels for c in e.choices] for e in entries]
+        ),
         select_groups=select.groups,
         report_labels=report.labels,
         report_groups=report.groups,
@@ -1344,6 +1386,7 @@ def _write_task(
             "conditions": splits.conditions,
             "axes": {
                 "select": ["entry", "seed", "item"],
+                "entry_select_labels": ["entry", "seed", "item"],
                 "report": ["entry", "seed", "condition", "item"],
             },
             "layers": {
