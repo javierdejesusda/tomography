@@ -221,6 +221,11 @@ readout by layer rule, so a gain of pooling is never credited to nonlinearity.
   and can read well above 0.5. The text-only classifier reads the raw stimulus texts, so its scores are the same
   under every condition by design: it measures how much the stimulus content alone gives away, as `tb1`
   does, and the decoy and template conditions are measured on the readers.
+- Shuffled series alone: `--set reader_series=false` (which needs `shuffled` in `controls`) fits only the `shuffled`
+  series, at about half the cost of a full run: no reader fits, random direction or text-only classifier, so no
+  comparisons and no AUROC matrix, and the summary says the run holds the shuffled series only. Its seeds do not
+  depend on the other series, so its rows and per-seed scores equal the shuffled ones of the full run of the same
+  other settings, and pair with that run's reader rows.
 - Statistics: each cell's metrics are means over the 10 seeds with seed intervals. Comparisons use the seed
   ensemble: each seed's scores are standardized with their select mean and standard deviation and averaged over the
   seeds. Against each baseline (`logistic/last` and `mean_diff/last` by default, at the same layer rule, or `top_k`
