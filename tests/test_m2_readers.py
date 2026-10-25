@@ -24,6 +24,7 @@ from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import m2_readers
 from tomography.experiments import p2_positions
 from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.m2_readers import COLUMNS
 from tomography.experiments.m2_readers import COMPARISON_COLUMNS
 from tomography.experiments.m2_readers import CONTROLS
@@ -45,6 +46,7 @@ from tomography.experiments.m2_readers import run
 from tomography.experiments.m2_readers import token_score_max
 from tomography.experiments.m2_readers import tune_per_layer
 from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.sweep import shuffle_within_groups
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import prepare
 from tomography.experiments.variants import task_set
@@ -57,6 +59,7 @@ from tomography.reading.stats import holm_correction
 from tomography.reading.stats import paired_auroc_diff
 from tomography.reading.stats import threshold_metrics
 from tomography.reading.stats import top_k_layers
+from tomography.reading.stats import tpr_at_fpr
 
 DEFAULT_HASH = "bb7e525e2aad"
 
@@ -623,7 +626,7 @@ def test_the_metrics_come_from_the_stored_per_seed_scores(
             f1 = [
                 threshold_metrics(
                     arrays["select"][e, i],
-                    arrays["select_labels"],
+                    arrays["entry_select_labels"][e, i],
                     report[i],
                     labels,
                 ).f1
@@ -633,6 +636,30 @@ def test_the_metrics_come_from_the_stored_per_seed_scores(
             assert row["pair_lo"] <= row["pair_accuracy"] <= row["pair_hi"]
             assert 0.0 <= row["tpr_at_fpr"] <= 1.0
             assert row["n_seeds"] == 2
+
+
+def test_the_scores_store_the_select_labels_each_seed_was_tuned_on(
+    finished: RunDir,
+) -> None:
+    arrays = finished.read_arrays("scores_sentiment")
+    sidecar = cast(dict[str, Any], finished.read_json("scores_sentiment"))
+    stored = arrays["entry_select_labels"]
+    real = arrays["select_labels"]
+    shuffled = [
+        shuffle_within_groups(
+            real,
+            arrays["select_groups"],
+            seed=derive_seed(0, "shuffled-select", "sentiment", i),
+        )
+        for i in range(stored.shape[1])
+    ]
+    assert sidecar["axes"]["entry_select_labels"] == ["entry", "seed", "item"]
+    assert stored.shape == arrays["select"].shape
+    for e, entry in enumerate(sidecar["entries"]):
+        n_seeds = stored.shape[1]
+        expected = shuffled if entry.endswith("/shuffled") else [real] * n_seeds
+        for seed, labels in zip(stored[e], expected, strict=True):
+            assert np.array_equal(seed, labels), entry
 
 
 def test_every_cell_scores_the_same_report_items(finished: RunDir) -> None:
@@ -1071,3 +1098,62 @@ def test_a_task_releases_its_activations_before_the_next_is_read(
     _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
 
     assert len(held) == 2
+
+
+def test_the_shuffled_series_tunes_and_thresholds_on_shuffled_labels(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tuned: list[tuple[NDArray[np.int64], NDArray[np.int64]]] = []
+    thresholds: list[NDArray[np.int64]] = []
+    detections: list[NDArray[np.int64]] = []
+
+    def tuning(scores: Any, groups: Any, labels: Any) -> Any:
+        # Tuning scores every grid value and layer at once; the report
+        # metrics score one vector.
+        if np.ndim(scores) >= 2:
+            tuned.append((np.array(groups), np.array(labels)))
+        return group_accuracy(scores, groups, labels)
+
+    def thresholding(select: Any, labels: Any, *args: Any) -> Any:
+        thresholds.append(np.array(labels))
+        return threshold_metrics(select, labels, *args)
+
+    def detecting(select: Any, labels: Any, *args: Any, **kw: Any) -> Any:
+        detections.append(np.array(labels))
+        return tpr_at_fpr(select, labels, *args, **kw)
+
+    monkeypatch.setattr(m2_readers, "group_accuracy", tuning)
+    monkeypatch.setattr(m2_readers, "threshold_metrics", thresholding)
+    monkeypatch.setattr(m2_readers, "tpr_at_fpr", detecting)
+    config = _config(
+        tasks=("sentiment",),
+        scorers=("mean_diff",),
+        readouts=("last",),
+        layer_rules=("best",),
+        layers=(1, 2),
+        controls=("shuffled",),
+        decoys=(),
+        shifts=(),
+        baselines=("mean_diff/last",),
+    )
+    _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
+
+    # The reader series runs first, one seed after another, on the real
+    # labels; then each shuffled seed on its own shuffle of the select
+    # labels. The original prompts are the only condition.
+    real_groups, real = tuned[0]
+    expected = [real] * config.n_seeds + [
+        shuffle_within_groups(
+            real,
+            real_groups,
+            seed=derive_seed(config.seed, "shuffled-select", "sentiment", i),
+        )
+        for i in range(config.n_seeds)
+    ]
+    assert all(np.array_equal(groups, real_groups) for groups, _ in tuned)
+    for calls in ([labels for _, labels in tuned], thresholds, detections):
+        assert len(calls) == len(expected)
+        for labels, want in zip(calls, expected, strict=True):
+            assert np.array_equal(labels, want)
