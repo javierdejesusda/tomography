@@ -58,7 +58,11 @@ PERSONA_PAIRS: Mapping[str, tuple[str, str]] = MappingProxyType(
 )
 CONTROLS: tuple[str, ...] = ("instruction_only", "fact_only", "random_label")
 CONDITIONS: tuple[str, ...] = (*PERSONA_PAIRS, *CONTROLS)
-LABEL_METHODS: tuple[Method, ...] = ("mean_diff", "logistic")
+LABEL_METHODS: tuple[Method, ...] = (
+    "mean_diff",
+    "logistic",
+    "whitened_mean_diff",
+)
 GOT_SUBSETS: tuple[str, ...] = (
     "cities",
     "neg_cities",

@@ -25,6 +25,7 @@ from tomography.model import wrap_model
 TEXT = "USER: Is the movie good? ASSISTANT: Yes, the movie is very good."
 RESPONSE = (TEXT.index("Yes"), len(TEXT))
 CONCEPT = (TEXT.index("the movie"), TEXT.index("the movie") + len("the movie"))
+WORD = (TEXT.index("movie"), TEXT.index("movie") + len("movie"))
 TEXTS = [
     TEXT,
     "The quick brown fox jumps over the lazy dog.",
@@ -36,6 +37,12 @@ SPANS = [
     (TEXTS[1].index("jumps"), len(TEXTS[1])),
     (TEXTS[2].index("Yes"), len(TEXTS[2])),
     (TEXTS[3].index("happy"), len(TEXTS[3])),
+]
+CONCEPT_SPANS = [
+    CONCEPT,
+    (TEXTS[1].index("brown"), TEXTS[1].index("brown") + len("brown fox")),
+    (TEXTS[2].index("short"), TEXTS[2].index("short") + len("short")),
+    (TEXTS[3].index("felt"), TEXTS[3].index("felt") + len("felt")),
 ]
 TOLERANCE = {"rtol": 1e-4, "atol": 1e-3}
 
@@ -270,6 +277,116 @@ def test_mean_position_averages_the_response_tokens(
         )
 
 
+def test_concept_mean_position_averages_every_concept_token(
+    tiny_arch: LoadedModel,
+) -> None:
+    lm = tiny_arch
+    texts = [TEXT, TEXT]
+    spans = [CONCEPT, WORD]
+
+    pooled = collect_activations(
+        lm,
+        texts,
+        position="concept_mean",
+        concept_spans=spans,
+        response_spans=[RESPONSE, RESPONSE],
+    )
+
+    span_mean = collect_activations(
+        lm, texts, position="mean", response_spans=spans
+    )
+    concept = collect_activations(
+        lm, texts, position="concept", concept_spans=spans
+    )
+    assert len(overlapping(lm, TEXT, CONCEPT)) >= 2
+    assert len(overlapping(lm, TEXT, WORD)) == 1
+    assert pooled.position == "concept_mean"
+    assert pooled.data.dtype == np.float32
+    assert pooled.data.shape == (lm.n_layers + 1, 2, lm.d_model)
+    assert pooled.row_stimulus.tolist() == [0, 1]
+    assert pooled.row_rank.tolist() == [0, 0]
+    assert pooled.row_token.tolist() == [-1, -1]
+    assert pooled.row_token_id.tolist() == [-1, -1]
+    np.testing.assert_array_equal(pooled.data, span_mean.data)
+    np.testing.assert_array_equal(pooled.data[:, 1], concept.data[:, 1])
+    assert not np.allclose(pooled.data[:, 0], concept.data[:, 0])
+
+
+def test_max_position_takes_the_featurewise_maximum_of_the_mean_tokens(
+    tiny_arch: LoadedModel,
+) -> None:
+    lm = tiny_arch
+    rows = collect_activations(
+        lm, TEXTS, position="response", response_spans=SPANS
+    )
+
+    peak = collect_activations(
+        lm,
+        TEXTS,
+        position="max",
+        response_spans=SPANS,
+        concept_spans=CONCEPT_SPANS,
+    )
+
+    assert peak.position == "max"
+    assert peak.data.dtype == np.float32
+    assert peak.data.shape == (lm.n_layers + 1, len(TEXTS), lm.d_model)
+    assert peak.row_stimulus.tolist() == [0, 1, 2, 3]
+    assert peak.row_rank.tolist() == [0, 0, 0, 0]
+    assert peak.row_token.tolist() == [-1] * 4
+    assert peak.row_token_id.tolist() == [-1] * 4
+    for i in range(len(TEXTS)):
+        selected = rows.row_stimulus == i
+        assert selected.sum() >= 2
+        np.testing.assert_array_equal(
+            peak.data[:, i], rows.data[:, selected].max(axis=1)
+        )
+
+
+@pytest.mark.parametrize("position", ["last", "response", "concept", "mean"])
+def test_each_existing_position_reads_only_its_own_spans(
+    tiny_arch: LoadedModel, position: str
+) -> None:
+    lm = tiny_arch
+    shift = bos_shift(lm)
+
+    act = collect_activations(
+        lm,
+        TEXTS,
+        position=position,  # type: ignore[arg-type]
+        response_spans=SPANS,
+        concept_spans=CONCEPT_SPANS,
+        batch_size=3,
+    )
+
+    assert act.position == position
+    assert act.data.dtype == np.float32
+    for i, text in enumerate(TEXTS):
+        response = [t + shift for t in overlapping(lm, text, SPANS[i])]
+        concept = [t + shift for t in overlapping(lm, text, CONCEPT_SPANS[i])]
+        last = len(overlapping(lm, text, (0, len(text)))) - 1 + shift
+        tokens = {
+            "last": [last],
+            "response": response,
+            "concept": concept[-1:],
+            "mean": response,
+        }[position]
+        rows = act.row_stimulus == i
+        reference = stream(lm, text)[:, tokens]
+        if position == "mean":
+            assert act.row_token[rows].tolist() == [-1]
+            np.testing.assert_allclose(
+                act.data[:, rows],
+                reference.mean(axis=1, keepdims=True),
+                **TOLERANCE,
+            )
+        else:
+            assert act.row_token[rows].tolist() == tokens
+            np.testing.assert_allclose(
+                act.data[:, rows], reference, **TOLERANCE
+            )
+
+
 def test_bos_none_shifts_every_token_index_by_one(
     tiny_gpt2: LoadedModel,
 ) -> None:
@@ -279,7 +396,9 @@ def test_bos_none_shifts_every_token_index_by_one(
     np.testing.assert_array_equal(with_bos.row_token, without.row_token + 1)
 
 
-@pytest.mark.parametrize("position", ["last", "response", "mean"])
+@pytest.mark.parametrize(
+    "position", ["last", "response", "mean", "concept_mean", "max"]
+)
 def test_a_bfloat16_model_still_yields_float32_rows(
     tiny_gpt2: LoadedModel, position: str
 ) -> None:
@@ -290,6 +409,7 @@ def test_a_bfloat16_model_still_yields_float32_rows(
         TEXTS,
         position=position,  # type: ignore[arg-type]
         response_spans=SPANS,
+        concept_spans=CONCEPT_SPANS,
     )
 
     assert half.dtype == torch.bfloat16
@@ -303,6 +423,8 @@ def test_a_bfloat16_model_still_yields_float32_rows(
         ("response", "response_spans"),
         ("mean", "response_spans"),
         ("concept", "concept_spans"),
+        ("concept_mean", "concept_spans"),
+        ("max", "response_spans"),
     ],
 )
 def test_a_position_that_needs_spans_rejects_a_missing_argument(
@@ -452,7 +574,9 @@ def test_shared_prefix_collection_equals_the_uncached_path(
     )
 
 
-@pytest.mark.parametrize("position", ["response", "concept", "mean"])
+@pytest.mark.parametrize(
+    "position", ["response", "concept", "mean", "concept_mean", "max"]
+)
 def test_shared_prefix_reads_span_positions_in_full_prompt_coordinates(
     tiny_arch: LoadedModel, position: str
 ) -> None:

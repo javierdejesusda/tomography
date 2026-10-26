@@ -1,0 +1,8 @@
+{
+  "experiment": "v1",
+  "model": "gpt2-medium",
+  "seed": 0,
+  "labels_run": "results/p9a/gpt2-medium/4272635aa065",
+  "reading_run": "results/p9b/gpt2-medium/a5a9c7d7b176",
+  "batch_size": 32
+}

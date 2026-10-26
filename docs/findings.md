@@ -17,7 +17,7 @@ random series on Qwen3, the layer ranges of A1 and the A2 separations on Qwen3 a
 C2 values on Qwen3 (read from the curves and table files), the C4 reader means and ranges on Qwen3 and on the GPT-2 sizes (computed from the
 table rows), the fluency means, ratios and counts of cells past the rule and the random-arm ranges
 of the runs made at `f4d414d` and of the M1, C2, C5 and P7 runs of the 4B pair (computed from the per-cell rows and the curves files), the P7 counts of inverted
-units on the GPT-2 sizes (recomputed from the per-seed curves), the P10b minima and maxima over layers and the counts of cells in P10a and P10b (computed from the table, hedge gap, forced in range, width, diagnostic, hand check, curves, transfer, baseline and people files), and differences or ranges quoted in the text. The P8 tables are read from the P8 run, which aggregates
+units on the GPT-2 sizes (recomputed from the per-seed curves), the P10b minima and maxima over layers and the counts of cells in P10a and P10b (computed from the table, hedge gap, forced in range, width, diagnostic, hand check, curves, transfer, baseline and people files), the V1 means, ranges and counts over draws and cells (computed from `projections.npz` of the V1 runs), the largest V1 reproduction differences, the sums of a recomputed and a committed AUROC and the counts of cells beyond the tolerance (computed from `summary.json` of the V1 runs, and from `projections.npz` and the `per_seed` arrays of the P9b curves files where they are taken per draw or per method), the sums and ranges of the V1 variance shares (computed from `pca2d.npz` and `text2d.npz`), and differences or ranges quoted in the text. The P8 tables are read from the P8 run, which aggregates
 finished runs. Runs are identified by config hash in [Run identity](#run-identity). The document is not
 complete: [Pending](#pending) lists what it does not yet report. The counts of inverted units by layer, the fluency means, ratios and counts of cells past the rule, the random-arm ranges, the counts of emotions above the random maximum and the differences between shares in the chain 42 runs (C2, C5 and P7 on `gpt2`, `gpt2-medium` and the Qwen3 0.6B pair) are computed from the per-seed curves, the per-cell rows and the table files of those runs.
 
@@ -3258,12 +3258,14 @@ slope rows of the 0.6B pair carry the caveats above.
 P9 asks whether a direction in the residual stream separates the questions a model answers from the questions it
 cannot answer, and what adding that direction does. P9a labels each question from the behavior of the model, P9b reads
 the known against unknown direction, P9c predicts the errors of the model and P9d adds the direction to the model
-while it answers. The definitions, the guess control and the statistics are in the
+while it answers; V1, at the end of the section, stores the scores of the questions on the P9b readers and 2D views
+of the hidden states behind them, so that the readers can be seen. The definitions, the guess control and the
+statistics are in the
 [methodology](methodology.md#known-versus-unknown-questions-p9).
 
 The runs reported here use the current label schema (12 PopQA relations, the guess control) and are those of the four
-GPT-2 sizes and of the Qwen3 0.6B, 1.7B and 4B checkpoints. P9a, P9b and P9c cover all ten models, and P9d ran on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the six Qwen3
-checkpoints (base and post-trained). The 4B pair was run last, on a rented GPU pod, and has its own subsection under P9b, P9c and P9d. `gpt2` is the one model whose label gate
+GPT-2 sizes and of the Qwen3 0.6B, 1.7B and 4B checkpoints. P9a, P9b and P9c cover all ten models, P9d ran on `gpt2-medium`, `gpt2-large`, `gpt2-xl` and the six Qwen3
+checkpoints (base and post-trained), and V1 ran on the eight checkpoints up to 1.7B. The 4B pair was run last, on a rented GPU pod, and has its own subsection under P9b, P9c and P9d. `gpt2` is the one model whose label gate
 closes (70 known questions after the guess control, below the 100 the gate asks for), so it has no known against
 unknown contrast: its P9b run reads only the contrasts between kinds of unknown questions, its P9c run has no label-free
 `lat` predictor, and P9d did not run on it. Questions are labeled from the behavior
@@ -4288,6 +4290,362 @@ Post-trained 4B checkpoint, both templates: abstention on the `obscure_real` ite
 - **Size.** The entropy slopes of the base checkpoints (-4.099, -5.882 and -5.226 at 0.6B, 1.7B and 4B) are in the units of each model's own entropy and are not compared across models. The validation AUROC of the direction at the steered layer is 0.934, 0.966 and 0.961 on the base checkpoints, 0.922, 0.943 and 0.913 on the post-trained `fewshot` ones and 0.795, 0.869 and 0.870 on the post-trained `concept` ones, so it rises from 0.6B to 1.7B in all three series, falls from 1.7B to 4B in two of them (0.966 to 0.961 and 0.943 to 0.913) and is level in the `concept` series (0.869 to 0.870).
 - **Template.** On `qwen3-4b` the `concept` direction moves abstention more than the `fewshot` one: the slope on the unknown `obscure_real` items is -1.221 [-1.326, -1.119] against -0.648 [-0.779, -0.517] and the selectivity gap is 0.843 [0.683, 0.991] against 0.436 [0.279, 0.598], with a lower validation AUROC (0.870 at L24 against 0.913 at L29). At the end of the grid the `concept` run raises abstention on the unknown questions by +0.61 and the false refusals on the known ones by +0.26, against +0.26 and +0.14 for `fewshot`. At 1.7B the `concept` slope is also larger than the `fewshot` one (-1.112 against 0.040), and at 0.6B neither run is distinguishable. The two 4B runs differ in the steered layer, the direction and the prompt format (the `concept` template is read in the chat format), so this is a contrast between two runs and not a test of the wording.
 - **What this does and does not show.** On the headline outcome the direction moves abstention (post-trained, `fewshot` or `concept`) or entropy (base) more than a random direction of the same norm does, at 4B on both checkpoints and with both templates, and at 1.7B on the base checkpoint and with the `concept` template (the 1.7B post-trained `fewshot` run is not distinguishable). It is not shown to be a control of what the model knows: the known items move too (false refusals +0.14 with `fewshot` and +0.26 with `concept`), two of the three random arms also move abstention on `qwen3-4b` in each run, the effect is largest at the end of the grid, and the abstention indicator is a phrase match whose errors were not measured. The runs are one per cell, and base and post-trained results answer different questions.
+
+### Activation views of the P9b readers (V1)
+
+V1 shows the P9b readers instead of only scoring them. It runs the questions of the P9b numbers through the model
+again, refits the five committed draws of the four P9b methods, scores the published P9b reader of every contrast, and
+stores the projections of the shown questions on that reader, their coordinates on 2D views of the hidden states at up
+to three layers and the controls of those views; the hidden states themselves are not stored. It reads two finished
+runs of the same
+checkpoint, the P9a labels and the P9b reading of [Run identity](#run-identity), and takes the questions, the draws and
+their seeds, the template and the layer from the P9b run; its own seed enters only the shuffled-label control and the
+words-only view. There is one run per checkpoint on the eight checkpoints up to 1.7B (`v1/<model>/<hash>`, listed in
+[Run identity](#run-identity)); the Qwen3 4B pair is not run yet ([Pending](#pending)). The code is
+`v1_knowledge_views.py`.
+
+#### What a V1 run stores
+
+- **Extraction.** The model is loaded in float32 (`extraction_dtype` of each summary) on the laptop GPU (`device` in
+  each `meta.json`). The questions
+  are every test question of the P9b contrasts and every train question of the five committed draws: 4,810 on
+  `gpt2` (1,255 train and 3,555 test) to 7,585 on `qwen3-1.7b` (3,564 and 4,021), from `n_items` of each summary. There
+  is no validation question, because the layer is the one P9b chose. The prompts are those of P9b (the 15-shot
+  `fewshot` template), read at the last token at every layer 1 to L. Their few-shot prefix is the same for every
+  question, so its key and value cache is computed once and only the rest of each prompt runs through the model; the
+  code allows this only in float32, where the tests pin it to the uncached path within a relative tolerance of 1e-4 and
+  an absolute one of 1e-3.
+- **Refit of the committed draws.** V1 rebuilds the contrasts from the P9a labels and checks that they are those of the
+  P9b run, with the same counts on each side of the train and test splits. A draw of 64 pairs depends only on the
+  questions of its contrast and its seed, not on the activations, so the five committed draws are drawn again exactly.
+  The four P9b methods (`logistic`, `pca_diff`, `mean_diff` and the random direction) are fitted on each draw with the
+  P9b preprocessing (`center`) and scored on the test questions at every layer (`test` in `projections.npz`).
+- **Published reader.** The published reader of a contrast is the `logistic` reader that P9b fitted on all the train
+  pairs of the contrast and stored in `readers.npz`, a file the export drops. V1 scores the test questions on it at
+  every layer without refitting it (`published`) and keeps the scores of the shown questions at the P9b layer
+  (`projection_<contrast>`). The P9b run stores no AUROC for this reader, so nothing committed is compared with it.
+- **Controls.** The random direction is the P9b `random` finder with the seeds of the committed draws: a Gaussian
+  direction drawn from the seed of the draw and the layer, with the sign that puts the positive side higher in more of
+  the train pairs of the draw. The shuffled-label control refits the `logistic` reader on the train questions of each
+  draw with their labels permuted inside each stratum, with a seed derived from the seed of the draw, and scores the
+  same test questions (`shuffled`); every stratum keeps its count on each side, and the fit is unpaired because the
+  permuted labels no longer join the two sides of a pair. The surface controls `text_word`, `text_char` and
+  `popularity` are recomputed from the questions and equal the committed values of the P9b table on every contrast of
+  the eight checkpoints (`surface_equal` of each summary). The words-only view below is the text control of the 2D
+  views.
+- **Views.** The 2D views are drawn at layer 1, the P9b layer and the last layer L, so at two layers where the P9b
+  layer is the last one (L24 on `gpt2-medium`, L36 on `gpt2-large`). Layer 0 is left out: every prompt ends in the same
+  token, so at the last position layer 0 is the embedding of that token (plus, on GPT-2, the embedding of its position,
+  which varies only with the length of the prompt). The questions shown are test questions only, at most 300 on each
+  side of a contrast, the first 300 by ascending SHA-256 of the uid (all of them where a side has fewer, such as the 46
+  known questions of `obscure_real` on `gpt2-medium`). They are grouped in three panels: entity (`fictional_generated`
+  and `obscure_real`; the other entity contrasts are scored but not drawn), question (`unknowable_detail`,
+  `false_premise` and the six `kuq_*` contrasts) and unknown (`real_vs_synthal`, `real_vs_generated` and, where it is
+  read, `pre_vs_post_cutoff`). `gpt2` has the unknown panel only and `gpt2-medium` has no question panel, because of
+  the contrasts their P9b runs read. A panel places each of its questions once, 388 to 1,049 questions (`views` of each
+  summary). At each layer the principal-component view places them on the two leading components of their hidden
+  states, fitted on these questions only (`coordinates_<panel>` of `pca2d.npz`, with the explained-variance ratios in
+  `ratios_<panel>`). For each contrast of the panel the supervised view has as x the score on the published reader of
+  the contrast and as y the leading principal component of the same hidden states once the direction of that reader is
+  taken out of them (`supervised_<contrast>`). The words-only view places the same questions by the TF-IDF weights of
+  their word 1-grams and 2-grams, the features of `text_word`, reduced to two components by a truncated SVD
+  (`text2d.npz`). That is latent semantic analysis (LSA) on uncentered features, not a principal-component analysis,
+  so its ratios are not comparable with those of `pca2d.npz`.
+- **Files.** `projections.npz` holds `test` (method by contrast by draw by layer), `shuffled` (contrast by draw by
+  layer), `published` (contrast by layer) and the projections; `projections.json` the contrasts, the methods, the uids
+  of the shown questions of each side and the questions of each panel; `summary.json` the layer, the counts, both
+  dtypes, the views, the reproduction check (`reproduction`) and the recomputed surface controls (`surface`). No
+  question text and no hidden state is stored.
+
+#### Reproduction of the P9b numbers
+
+The check was fixed before the runs. For every contrast and method, the mean over the five draws of the test AUROC at
+the P9b layer, refitted on the V1 activations, is set against the same mean in the P9b run, with a tolerance of 0.02
+(`reproduction` of each summary; a miss is recorded, not raised). The committed AUROC of each draw is also in the
+committed `curves_<contrast>.npz` files of the P9b run (`per_seed`), and recomputing the check from those files gives
+the stored values. P9b loaded each model in the default dtype of the model registry, which its `meta.json` does not
+record; V1 stores that dtype as `reading_run_dtype` and its own as `extraction_dtype`. The table gives the largest
+difference of a draw mean at the P9b layer, for the three fitted readers and for the random direction apart:
+
+| Model             | P9b layer | P9b run dtype | V1 dtype | Fitted readers (method, contrast)                      | Random direction (contrast)    | Within 0.02 |
+| ----------------- | --------- | ------------- | -------- | ------------------------------------------------------ | ------------------------------ | ----------- |
+| `gpt2`            | L4        | float32       | float32  | 4.8e-6 (`pca_diff`, `real_vs_synthal`)                 | 4.8e-6 (`real_vs_synthal`)     | yes         |
+| `gpt2-medium`     | L24       | float32       | float32  | 2.5e-6 (`logistic` and `pca_diff`, `obscure_real_pop`) | 2.8e-6 (`fictional_generated`) | yes         |
+| `gpt2-large`      | L36       | float32       | float32  | 1.1e-7 (`pca_diff`, `real_vs_generated`)               | 3.0e-7 (`real_vs_generated`)   | yes         |
+| `gpt2-xl`         | L32       | float16       | float32  | 5.0e-4 (`pca_diff`, `obscure_real_pop`)                | 1.1e-3 (`pre_vs_post_cutoff`)  | yes         |
+| `qwen3-0.6b-base` | L27       | bfloat16      | float32  | 9.0e-4 (`mean_diff`, `kuq_ambiguous`)                  | 1.3e-2 (`triviaqa_known`)      | yes         |
+| `qwen3-0.6b`      | L27       | bfloat16      | float32  | 1.6e-3 (`pca_diff`, `real_vs_synthal`)                 | 3.3e-3 (`kuq_future_unknown`)  | yes         |
+| `qwen3-1.7b-base` | L21       | bfloat16      | float32  | 1.3e-3 (`pca_diff`, `obscure_real_pop`)                | 1.3e-3 (`real_vs_generated`)   | yes         |
+| `qwen3-1.7b`      | L25       | bfloat16      | float32  | 1.6e-3 (`pca_diff`, `real_vs_synthal`)                 | 3.5e-2 (`kuq_controversial`)   | no          |
+
+- **Seven of the eight runs reproduce the P9b numbers within 0.02; `qwen3-1.7b` does not.** On `qwen3-1.7b` (run
+  `v1/qwen3-1.7b/419275ac7e0d`) every fitted reader repeats its committed mean of draws within 0.002 (the largest
+  difference is 1.6e-3), but the random direction is 0.0354 away on `kuq_controversial` (0.606 against the committed
+  0.642), beyond the tolerance, 0.0200 on `kuq_unsolved_problem` (0.01996, inside it) and 0.0127 on
+  `real_vs_generated`. The run records `within_tolerance` as false, and the check does not pass on this checkpoint.
+- **In each of these three cells one draw of five carries the difference.** The other four draws are within 0.003 of
+  their committed values; the fifth is 0.180, 0.100 and 0.063 away, and its recomputed and committed AUROCs add up to
+  0.997, 1.000 and 1.001. Two AUROCs that add up to 1 are what one direction gives when it is scored with the opposite
+  sign. The sign of a random direction is set on the train pairs of its draw, so it depends on the activations; the P9b
+  run stores no reader of a single draw, so whether that sign changed was not compared. `qwen3-0.6b-base` shows the
+  same pattern inside the tolerance: its random direction is 0.0129 away on `triviaqa_known`, carried by one draw that
+  is 0.069 away and whose two AUROCs add up to 1.003.
+- **The size of the differences follows the dtype of the P9b run.** On the three GPT-2 sizes that P9b read in float32
+  the largest difference is 4.8e-6 or less, for the fitted readers and the random direction alike; on `gpt2-xl`, read in
+  float16, it is 5.0e-4 for the fitted readers and 1.1e-3 for the random direction; on the four Qwen3 checkpoints, read
+  in bfloat16, 9.0e-4 to 1.6e-3 for the fitted readers and 1.3e-3 to 3.5e-2 for the random direction. This is a
+  pattern over eight runs, not a test of its cause. The one difference beyond the tolerance is in a control, the random
+  direction, and not in the readers: on every checkpoint the fitted readers repeat the committed numbers within 0.002
+  at the P9b layer. Its cause was not measured.
+
+The check also reports four maxima per checkpoint: the largest difference of a draw mean and of a single draw, at the
+P9b layer and over every layer 1 to L. The table gives them for the three fitted readers and for the random direction
+apart, computed from `projections.npz` and the `per_seed` arrays; the larger of the two values of a checkpoint is the
+stored `max_abs_diff` of its summary (`mean_at_layer`, `draw_at_layer`, `mean_all_layers` and `draw_all_layers`):
+
+| Model             | Methods          | Mean, P9b layer | Draw, P9b layer | Mean, all layers | Draw, all layers |
+| ----------------- | ---------------- | --------------- | --------------- | ---------------- | ---------------- |
+| `gpt2`            | fitted readers   | 4.8e-6          | 2.4e-5          | 4.8e-6           | 2.4e-5           |
+| `gpt2`            | random direction | 4.8e-6          | 2.4e-5          | 4.8e-6           | 4.8e-5           |
+| `gpt2-medium`     | fitted readers   | 2.5e-6          | 1.2e-5          | 1.3e-5           | 2.5e-5           |
+| `gpt2-medium`     | random direction | 2.8e-6          | 1.4e-5          | 2.1e-4           | 1.1e-3           |
+| `gpt2-large`      | fitted readers   | 1.1e-7          | 3.8e-7          | 6.3e-6           | 2.5e-5           |
+| `gpt2-large`      | random direction | 3.0e-7          | 7.5e-7          | 2.2e-4           | 1.1e-3           |
+| `gpt2-xl`         | fitted readers   | 5.0e-4          | 1.4e-3          | 1.2e-1           | 5.8e-1           |
+| `gpt2-xl`         | random direction | 1.1e-3          | 3.3e-3          | 1.3e-1           | 6.6e-1           |
+| `qwen3-0.6b-base` | fitted readers   | 9.0e-4          | 2.7e-3          | 8.6e-2           | 4.9e-1           |
+| `qwen3-0.6b-base` | random direction | 1.3e-2          | 6.9e-2          | 2.8e-1           | 8.1e-1           |
+| `qwen3-0.6b`      | fitted readers   | 1.6e-3          | 7.4e-3          | 8.4e-2           | 4.1e-1           |
+| `qwen3-0.6b`      | random direction | 3.3e-3          | 1.0e-2          | 1.7e-1           | 6.8e-1           |
+| `qwen3-1.7b-base` | fitted readers   | 1.3e-3          | 3.0e-3          | 3.8e-2           | 1.8e-1           |
+| `qwen3-1.7b-base` | random direction | 1.3e-3          | 5.7e-3          | 1.8e-1           | 6.7e-1           |
+| `qwen3-1.7b`      | fitted readers   | 1.6e-3          | 8.8e-3          | 8.3e-2           | 4.2e-1           |
+| `qwen3-1.7b`      | random direction | 3.5e-2          | 1.8e-1          | 1.1e-1           | 5.6e-1           |
+
+- **Means over all layers.** The tolerance applies at the P9b layer only. Over every layer 1 to L the largest
+  difference of a draw mean is 2.2e-4 or less on the float32 GPT-2 sizes and 0.112 to 0.277 on the five float16 and
+  bfloat16 checkpoints; for the fitted readers alone it is 1.3e-5 or less and 0.038 to 0.117, in every case a
+  `pca_diff` reader at a layer other than the P9b layer. At the other layers of those five checkpoints the committed
+  numbers are not all reproduced within 0.02, and no V1 AUROC at those layers is quoted here.
+- **Single draws.** On the float32 GPT-2 sizes no single draw differs by more than 1.1e-3 at any layer. On the five
+  float16 and bfloat16 checkpoints the largest difference of a single draw over all layers is 0.559 to 0.808 for the
+  random direction and 0.184 to 0.584 for the fitted readers (a `pca_diff` reader in every case), and 340 cells (a
+  method, contrast, draw and layer) differ by more than 0.02: 207 of the random direction, 60 of `pca_diff`, 49 of
+  `mean_diff` and 24 of `logistic`. In 214 of them the recomputed and committed AUROCs add up to within 0.02 of 1, the
+  pattern of one direction scored with the opposite sign: 184 of the random direction, 28 of `pca_diff`, 2 of
+  `mean_diff` and none of `logistic`. Each of the ten single-draw maxima over all layers of these five checkpoints fits
+  the pattern (sums 0.992 to 1.004), and so do 151 of the 153 cells that differ by more than 0.1; the two that do not
+  are 0.289 (random direction, `kuq_unsolved_problem` on `qwen3-0.6b`, layer 2, 0.368 against 0.657) and 0.115
+  (`pca_diff`, `obscure_real_pop` on `qwen3-1.7b-base`, layer 22, 0.788 against 0.903). When both AUROCs are near 0.5
+  the sum does not tell a sign change from a small difference, and 62 of the 214 have a committed AUROC within 0.05 of
+  0.5, the two of `mean_diff` among them. Four of the 340 cells are at the P9b layer, the random-direction draws named
+  above (one on `qwen3-0.6b-base`, three on `qwen3-1.7b`), and all four fit the pattern. The sign of a single draw was
+  not compared, since the P9b run stores no reader of a single draw, and the cause of the 126 cells that do not fit
+  the pattern was not measured. The tolerance applies to the draw means at the P9b layer, so these maxima change no
+  verdict.
+
+#### Separations at the P9b layer, beside the controls
+
+Every value below is a test AUROC at the P9b layer over all the test questions of the contrast, so the rows compare
+with the pooled P9b tables above and not with the within-relation headline, which V1 does not recompute. `Published
+reader` is the published reader scored on the V1 activations; `Logistic, mean of draws` is the mean over the five
+refitted draws, the estimate of the `Reader` column of the pooled P9b tables; the random direction and the shuffled
+labels give the mean over the five draws and, in parentheses, the lowest and the highest draw; `text_word` and
+`text_char` are the recomputed surface controls. `popularity`, defined on `obscure_real` and `obscure_real_pop` only,
+is in the pooled P9b tables and is recomputed equal. Each row is one checkpoint: base and post-trained checkpoints
+have their own rows and are never pooled, and each checkpoint is labeled on its own behavior, so the rows of a pair do
+not hold the same questions. There are 95 cells (a checkpoint and a contrast).
+
+The GPT-2 sizes:
+
+| Model         | Contrast               | Published reader | Logistic, mean of draws | Random direction, mean (range) | Shuffled labels, mean (range) | text_word | text_char |
+| ------------- | ---------------------- | ---------------- | ----------------------- | ------------------------------ | ----------------------------- | --------- | --------- |
+| `gpt2`        | `real_vs_synthal`      | 0.977            | 0.939                   | 0.634 (0.564 to 0.758)         | 0.460 (0.315 to 0.699)        | 0.799     | 1.000     |
+| `gpt2`        | `real_vs_generated`    | 0.989            | 0.959                   | 0.695 (0.565 to 0.818)         | 0.460 (0.307 to 0.735)        | 0.947     | 0.998     |
+| `gpt2`        | `pre_vs_post_cutoff`   | 0.998            | 0.995                   | 0.697 (0.543 to 0.783)         | 0.469 (0.014 to 0.975)        | 1.000     | 1.000     |
+| `gpt2-medium` | `fictional_generated`  | 0.897            | 0.903                   | 0.628 (0.177 to 0.965)         | 0.461 (0.159 to 0.824)        | 0.972     | 0.981     |
+| `gpt2-medium` | `obscure_real`         | 0.887            | 0.858                   | 0.758 (0.632 to 0.931)         | 0.457 (0.280 to 0.705)        | 0.945     | 0.929     |
+| `gpt2-medium` | `obscure_real_pop`     | 0.902            | 0.850                   | 0.758 (0.632 to 0.931)         | 0.401 (0.224 to 0.593)        | 0.945     | 0.929     |
+| `gpt2-medium` | `real_vs_synthal`      | 0.967            | 0.937                   | 0.563 (0.446 to 0.621)         | 0.530 (0.148 to 0.772)        | 0.799     | 1.000     |
+| `gpt2-medium` | `real_vs_generated`    | 0.984            | 0.937                   | 0.629 (0.556 to 0.688)         | 0.497 (0.180 to 0.906)        | 0.949     | 0.998     |
+| `gpt2-medium` | `pre_vs_post_cutoff`   | 0.927            | 0.953                   | 0.673 (0.557 to 0.799)         | 0.368 (0.010 to 0.816)        | 1.000     | 1.000     |
+| `gpt2-large`  | `fictional_generated`  | 0.972            | 0.970                   | 0.606 (0.166 to 0.939)         | 0.509 (0.172 to 0.807)        | 0.974     | 0.989     |
+| `gpt2-large`  | `obscure_real`         | 0.921            | 0.928                   | 0.702 (0.311 to 0.843)         | 0.375 (0.104 to 0.662)        | 0.924     | 0.930     |
+| `gpt2-large`  | `obscure_real_pop`     | 0.935            | 0.937                   | 0.702 (0.311 to 0.843)         | 0.339 (0.187 to 0.598)        | 0.924     | 0.930     |
+| `gpt2-large`  | `triviaqa_known`       | 0.870            | 0.869                   | 0.553 (0.399 to 0.651)         | 0.431 (0.173 to 0.761)        | 0.761     | 0.743     |
+| `gpt2-large`  | `unknowable_detail`    | 1.000            | 1.000                   | 0.614 (0.483 to 0.926)         | 0.365 (0.032 to 0.941)        | 1.000     | 1.000     |
+| `gpt2-large`  | `false_premise`        | 0.957            | 0.961                   | 0.552 (0.453 to 0.702)         | 0.520 (0.184 to 0.762)        | 0.975     | 0.955     |
+| `gpt2-large`  | `kuq_ambiguous`        | 0.952            | 0.960                   | 0.573 (0.473 to 0.735)         | 0.457 (0.134 to 0.751)        | 0.842     | 0.925     |
+| `gpt2-large`  | `kuq_controversial`    | 0.978            | 0.977                   | 0.615 (0.374 to 0.828)         | 0.211 (0.075 to 0.391)        | 0.901     | 0.927     |
+| `gpt2-large`  | `kuq_counterfactual`   | 0.996            | 0.997                   | 0.609 (0.478 to 0.717)         | 0.299 (0.106 to 0.537)        | 0.998     | 1.000     |
+| `gpt2-large`  | `kuq_false_assumption` | 0.966            | 0.963                   | 0.627 (0.477 to 0.821)         | 0.593 (0.489 to 0.807)        | 0.980     | 0.960     |
+| `gpt2-large`  | `kuq_future_unknown`   | 0.979            | 0.978                   | 0.641 (0.532 to 0.727)         | 0.450 (0.281 to 0.953)        | 0.997     | 1.000     |
+| `gpt2-large`  | `kuq_unsolved_problem` | 0.988            | 0.985                   | 0.617 (0.467 to 0.781)         | 0.468 (0.010 to 0.777)        | 0.951     | 0.967     |
+| `gpt2-large`  | `real_vs_synthal`      | 0.982            | 0.959                   | 0.571 (0.397 to 0.768)         | 0.474 (0.200 to 0.797)        | 0.795     | 1.000     |
+| `gpt2-large`  | `real_vs_generated`    | 0.990            | 0.952                   | 0.580 (0.460 to 0.753)         | 0.461 (0.153 to 0.776)        | 0.950     | 0.998     |
+| `gpt2-large`  | `pre_vs_post_cutoff`   | 0.971            | 0.974                   | 0.582 (0.487 to 0.746)         | 0.393 (0.032 to 0.824)        | 1.000     | 1.000     |
+| `gpt2-xl`     | `fictional_generated`  | 0.998            | 0.997                   | 0.595 (0.287 to 0.918)         | 0.393 (0.112 to 0.921)        | 0.969     | 0.991     |
+| `gpt2-xl`     | `obscure_real`         | 0.943            | 0.929                   | 0.490 (0.307 to 0.785)         | 0.576 (0.448 to 0.709)        | 0.880     | 0.884     |
+| `gpt2-xl`     | `obscure_real_pop`     | 0.959            | 0.935                   | 0.477 (0.307 to 0.785)         | 0.573 (0.437 to 0.770)        | 0.880     | 0.884     |
+| `gpt2-xl`     | `triviaqa_known`       | 0.910            | 0.905                   | 0.533 (0.462 to 0.643)         | 0.591 (0.333 to 0.707)        | 0.779     | 0.787     |
+| `gpt2-xl`     | `unknowable_detail`    | 1.000            | 1.000                   | 0.711 (0.595 to 0.810)         | 0.466 (0.191 to 0.993)        | 1.000     | 1.000     |
+| `gpt2-xl`     | `false_premise`        | 0.974            | 0.964                   | 0.552 (0.400 to 0.710)         | 0.567 (0.477 to 0.678)        | 0.980     | 0.973     |
+| `gpt2-xl`     | `kuq_ambiguous`        | 0.986            | 0.979                   | 0.689 (0.588 to 0.818)         | 0.498 (0.239 to 0.690)        | 0.814     | 0.909     |
+| `gpt2-xl`     | `kuq_controversial`    | 0.979            | 0.982                   | 0.812 (0.642 to 0.946)         | 0.626 (0.344 to 0.769)        | 0.942     | 0.961     |
+| `gpt2-xl`     | `kuq_counterfactual`   | 0.999            | 0.999                   | 0.766 (0.498 to 0.980)         | 0.499 (0.230 to 0.730)        | 0.999     | 0.999     |
+| `gpt2-xl`     | `kuq_false_assumption` | 0.985            | 0.985                   | 0.771 (0.493 to 0.942)         | 0.610 (0.329 to 0.890)        | 0.958     | 0.967     |
+| `gpt2-xl`     | `kuq_future_unknown`   | 1.000            | 1.000                   | 0.774 (0.597 to 0.937)         | 0.592 (0.271 to 0.860)        | 0.992     | 0.990     |
+| `gpt2-xl`     | `kuq_unsolved_problem` | 0.995            | 0.994                   | 0.692 (0.405 to 0.971)         | 0.529 (0.103 to 0.896)        | 0.950     | 0.956     |
+| `gpt2-xl`     | `real_vs_synthal`      | 0.984            | 0.959                   | 0.603 (0.477 to 0.782)         | 0.451 (0.269 to 0.812)        | 0.778     | 1.000     |
+| `gpt2-xl`     | `real_vs_generated`    | 0.992            | 0.970                   | 0.583 (0.496 to 0.746)         | 0.448 (0.172 to 0.888)        | 0.949     | 0.998     |
+| `gpt2-xl`     | `pre_vs_post_cutoff`   | 0.997            | 0.997                   | 0.558 (0.428 to 0.755)         | 0.432 (0.003 to 0.990)        | 1.000     | 1.000     |
+
+The Qwen3 0.6B pair:
+
+| Model             | Contrast               | Published reader | Logistic, mean of draws | Random direction, mean (range) | Shuffled labels, mean (range) | text_word | text_char |
+| ----------------- | ---------------------- | ---------------- | ----------------------- | ------------------------------ | ----------------------------- | --------- | --------- |
+| `qwen3-0.6b-base` | `fictional_generated`  | 0.986            | 0.985                   | 0.669 (0.452 to 0.802)         | 0.435 (0.113 to 0.761)        | 0.969     | 0.991     |
+| `qwen3-0.6b-base` | `obscure_real`         | 0.959            | 0.947                   | 0.681 (0.547 to 0.859)         | 0.616 (0.456 to 0.754)        | 0.944     | 0.941     |
+| `qwen3-0.6b-base` | `obscure_real_pop`     | 0.965            | 0.948                   | 0.681 (0.547 to 0.859)         | 0.599 (0.183 to 0.755)        | 0.944     | 0.941     |
+| `qwen3-0.6b-base` | `triviaqa_known`       | 0.905            | 0.905                   | 0.540 (0.355 to 0.649)         | 0.574 (0.444 to 0.728)        | 0.774     | 0.727     |
+| `qwen3-0.6b-base` | `unknowable_detail`    | 1.000            | 1.000                   | 0.670 (0.463 to 0.793)         | 0.468 (0.160 to 0.879)        | 1.000     | 1.000     |
+| `qwen3-0.6b-base` | `false_premise`        | 0.959            | 0.951                   | 0.643 (0.508 to 0.709)         | 0.561 (0.452 to 0.721)        | 0.978     | 0.973     |
+| `qwen3-0.6b-base` | `kuq_ambiguous`        | 0.991            | 0.987                   | 0.568 (0.368 to 0.774)         | 0.431 (0.187 to 0.553)        | 0.852     | 0.882     |
+| `qwen3-0.6b-base` | `kuq_controversial`    | 0.986            | 0.985                   | 0.703 (0.504 to 0.799)         | 0.685 (0.347 to 0.912)        | 0.969     | 0.980     |
+| `qwen3-0.6b-base` | `kuq_counterfactual`   | 0.996            | 0.995                   | 0.647 (0.536 to 0.735)         | 0.637 (0.390 to 0.779)        | 1.000     | 1.000     |
+| `qwen3-0.6b-base` | `kuq_false_assumption` | 0.992            | 0.991                   | 0.686 (0.571 to 0.763)         | 0.647 (0.371 to 0.768)        | 0.976     | 0.985     |
+| `qwen3-0.6b-base` | `kuq_future_unknown`   | 1.000            | 0.999                   | 0.655 (0.473 to 0.756)         | 0.556 (0.267 to 0.934)        | 0.997     | 0.993     |
+| `qwen3-0.6b-base` | `kuq_unsolved_problem` | 0.992            | 0.986                   | 0.661 (0.522 to 0.777)         | 0.533 (0.083 to 0.818)        | 0.949     | 0.943     |
+| `qwen3-0.6b-base` | `real_vs_synthal`      | 0.981            | 0.972                   | 0.502 (0.342 to 0.749)         | 0.453 (0.193 to 0.746)        | 0.777     | 1.000     |
+| `qwen3-0.6b-base` | `real_vs_generated`    | 0.989            | 0.962                   | 0.689 (0.624 to 0.764)         | 0.387 (0.238 to 0.656)        | 0.950     | 0.999     |
+| `qwen3-0.6b`      | `fictional_generated`  | 0.983            | 0.982                   | 0.626 (0.413 to 0.728)         | 0.522 (0.391 to 0.688)        | 0.958     | 0.984     |
+| `qwen3-0.6b`      | `obscure_real`         | 0.949            | 0.926                   | 0.572 (0.244 to 0.744)         | 0.588 (0.272 to 0.782)        | 0.905     | 0.903     |
+| `qwen3-0.6b`      | `obscure_real_pop`     | 0.887            | 0.885                   | 0.577 (0.256 to 0.756)         | 0.433 (0.242 to 0.767)        | 0.905     | 0.903     |
+| `qwen3-0.6b`      | `triviaqa_known`       | 0.874            | 0.876                   | 0.590 (0.535 to 0.642)         | 0.508 (0.360 to 0.727)        | 0.750     | 0.711     |
+| `qwen3-0.6b`      | `unknowable_detail`    | 1.000            | 1.000                   | 0.670 (0.585 to 0.806)         | 0.484 (0.085 to 0.869)        | 1.000     | 1.000     |
+| `qwen3-0.6b`      | `false_premise`        | 0.948            | 0.946                   | 0.585 (0.415 to 0.780)         | 0.562 (0.311 to 0.728)        | 0.978     | 0.988     |
+| `qwen3-0.6b`      | `kuq_ambiguous`        | 0.990            | 0.988                   | 0.630 (0.482 to 0.707)         | 0.446 (0.263 to 0.588)        | 0.862     | 0.923     |
+| `qwen3-0.6b`      | `kuq_controversial`    | 0.986            | 0.988                   | 0.689 (0.484 to 0.817)         | 0.725 (0.578 to 0.904)        | 0.947     | 0.978     |
+| `qwen3-0.6b`      | `kuq_counterfactual`   | 0.996            | 0.996                   | 0.628 (0.499 to 0.842)         | 0.448 (0.099 to 0.701)        | 1.000     | 1.000     |
+| `qwen3-0.6b`      | `kuq_false_assumption` | 0.983            | 0.984                   | 0.658 (0.488 to 0.829)         | 0.640 (0.191 to 0.905)        | 0.974     | 0.964     |
+| `qwen3-0.6b`      | `kuq_future_unknown`   | 1.000            | 1.000                   | 0.702 (0.649 to 0.825)         | 0.538 (0.229 to 0.830)        | 0.994     | 0.992     |
+| `qwen3-0.6b`      | `kuq_unsolved_problem` | 0.992            | 0.992                   | 0.621 (0.484 to 0.828)         | 0.556 (0.098 to 0.878)        | 0.953     | 0.955     |
+| `qwen3-0.6b`      | `real_vs_synthal`      | 0.983            | 0.974                   | 0.511 (0.394 to 0.619)         | 0.564 (0.252 to 0.779)        | 0.787     | 1.000     |
+| `qwen3-0.6b`      | `real_vs_generated`    | 0.988            | 0.960                   | 0.678 (0.524 to 0.784)         | 0.639 (0.162 to 0.913)        | 0.949     | 0.999     |
+
+The Qwen3 1.7B pair:
+
+| Model             | Contrast               | Published reader | Logistic, mean of draws | Random direction, mean (range) | Shuffled labels, mean (range) | text_word | text_char |
+| ----------------- | ---------------------- | ---------------- | ----------------------- | ------------------------------ | ----------------------------- | --------- | --------- |
+| `qwen3-1.7b-base` | `fictional_generated`  | 1.000            | 1.000                   | 0.711 (0.542 to 0.860)         | 0.518 (0.134 to 0.970)        | 0.964     | 0.995     |
+| `qwen3-1.7b-base` | `obscure_real`         | 0.966            | 0.961                   | 0.647 (0.553 to 0.740)         | 0.723 (0.512 to 0.871)        | 0.873     | 0.873     |
+| `qwen3-1.7b-base` | `obscure_real_pop`     | 0.975            | 0.970                   | 0.521 (0.363 to 0.740)         | 0.545 (0.112 to 0.704)        | 0.873     | 0.873     |
+| `qwen3-1.7b-base` | `triviaqa_known`       | 0.904            | 0.884                   | 0.487 (0.357 to 0.599)         | 0.499 (0.415 to 0.562)        | 0.693     | 0.671     |
+| `qwen3-1.7b-base` | `unknowable_detail`    | 1.000            | 1.000                   | 0.705 (0.576 to 0.877)         | 0.522 (0.235 to 0.878)        | 1.000     | 1.000     |
+| `qwen3-1.7b-base` | `false_premise`        | 0.981            | 0.974                   | 0.627 (0.549 to 0.706)         | 0.606 (0.405 to 0.809)        | 0.977     | 0.975     |
+| `qwen3-1.7b-base` | `kuq_ambiguous`        | 0.997            | 0.996                   | 0.626 (0.543 to 0.668)         | 0.505 (0.280 to 0.746)        | 0.878     | 0.918     |
+| `qwen3-1.7b-base` | `kuq_controversial`    | 0.994            | 0.993                   | 0.675 (0.557 to 0.816)         | 0.649 (0.220 to 0.892)        | 0.975     | 0.987     |
+| `qwen3-1.7b-base` | `kuq_counterfactual`   | 0.999            | 1.000                   | 0.623 (0.515 to 0.839)         | 0.426 (0.264 to 0.670)        | 1.000     | 1.000     |
+| `qwen3-1.7b-base` | `kuq_false_assumption` | 0.995            | 0.993                   | 0.608 (0.465 to 0.702)         | 0.569 (0.256 to 0.875)        | 0.978     | 0.991     |
+| `qwen3-1.7b-base` | `kuq_future_unknown`   | 1.000            | 1.000                   | 0.635 (0.404 to 0.796)         | 0.597 (0.281 to 0.856)        | 0.992     | 0.986     |
+| `qwen3-1.7b-base` | `kuq_unsolved_problem` | 0.994            | 0.992                   | 0.597 (0.487 to 0.738)         | 0.479 (0.162 to 0.792)        | 0.953     | 0.967     |
+| `qwen3-1.7b-base` | `real_vs_synthal`      | 0.988            | 0.981                   | 0.595 (0.518 to 0.700)         | 0.416 (0.198 to 0.819)        | 0.763     | 1.000     |
+| `qwen3-1.7b-base` | `real_vs_generated`    | 0.994            | 0.982                   | 0.615 (0.394 to 0.752)         | 0.393 (0.171 to 0.596)        | 0.951     | 0.998     |
+| `qwen3-1.7b`      | `fictional_generated`  | 0.997            | 0.993                   | 0.751 (0.654 to 0.810)         | 0.541 (0.087 to 0.984)        | 0.963     | 0.994     |
+| `qwen3-1.7b`      | `obscure_real`         | 0.925            | 0.927                   | 0.529 (0.282 to 0.659)         | 0.450 (0.240 to 0.844)        | 0.867     | 0.885     |
+| `qwen3-1.7b`      | `obscure_real_pop`     | 0.926            | 0.918                   | 0.616 (0.524 to 0.718)         | 0.447 (0.212 to 0.657)        | 0.867     | 0.885     |
+| `qwen3-1.7b`      | `triviaqa_known`       | 0.858            | 0.839                   | 0.545 (0.445 to 0.598)         | 0.539 (0.296 to 0.696)        | 0.664     | 0.588     |
+| `qwen3-1.7b`      | `unknowable_detail`    | 1.000            | 1.000                   | 0.696 (0.548 to 0.876)         | 0.577 (0.201 to 0.843)        | 1.000     | 1.000     |
+| `qwen3-1.7b`      | `false_premise`        | 0.959            | 0.951                   | 0.646 (0.529 to 0.803)         | 0.576 (0.449 to 0.646)        | 0.974     | 0.967     |
+| `qwen3-1.7b`      | `kuq_ambiguous`        | 0.996            | 0.996                   | 0.620 (0.509 to 0.748)         | 0.497 (0.376 to 0.653)        | 0.876     | 0.903     |
+| `qwen3-1.7b`      | `kuq_controversial`    | 0.984            | 0.983                   | 0.606 (0.408 to 0.706)         | 0.597 (0.188 to 0.900)        | 0.971     | 0.985     |
+| `qwen3-1.7b`      | `kuq_counterfactual`   | 0.993            | 0.993                   | 0.552 (0.437 to 0.736)         | 0.501 (0.241 to 0.779)        | 1.000     | 1.000     |
+| `qwen3-1.7b`      | `kuq_false_assumption` | 0.981            | 0.980                   | 0.590 (0.407 to 0.726)         | 0.585 (0.218 to 0.894)        | 0.964     | 0.980     |
+| `qwen3-1.7b`      | `kuq_future_unknown`   | 1.000            | 0.999                   | 0.601 (0.456 to 0.749)         | 0.569 (0.317 to 0.770)        | 0.990     | 0.981     |
+| `qwen3-1.7b`      | `kuq_unsolved_problem` | 0.987            | 0.981                   | 0.603 (0.450 to 0.714)         | 0.516 (0.142 to 0.919)        | 0.953     | 0.961     |
+| `qwen3-1.7b`      | `real_vs_synthal`      | 0.980            | 0.973                   | 0.631 (0.590 to 0.690)         | 0.438 (0.139 to 0.640)        | 0.766     | 1.000     |
+| `qwen3-1.7b`      | `real_vs_generated`    | 0.988            | 0.960                   | 0.660 (0.532 to 0.786)         | 0.349 (0.147 to 0.613)        | 0.950     | 0.999     |
+
+- **Against the surface controls.** The means of draws repeat the pooled P9b readers within 0.002, so the comparison
+  with the surface controls is that of the pooled P9b tables. On every checkpoint that reads them, the mean of draws is
+  above the better of `text_word` and `text_char` on `triviaqa_known` (by 0.108 to 0.191), `kuq_ambiguous` (0.035 to
+  0.105) and `kuq_unsolved_problem` (0.018 to 0.038). On no checkpoint is it above the better control on the contrasts
+  between kinds of unknown questions (`real_vs_synthal`, `real_vs_generated`, `pre_vs_post_cutoff`), on
+  `unknowable_detail` (1.000 for the reader and both controls) or on `false_premise`, and on `kuq_counterfactual` it is
+  at most 0.0071 from it. On the other contrasts the margin depends on the checkpoint: on `obscure_real` it runs from
+  0.087 below the better control (`gpt2-medium`) to 0.088 above it (`qwen3-1.7b-base`). The published reader splits the
+  contrasts the same way, except that it is 0.004 above the better control on `false_premise` of `qwen3-1.7b-base`.
+- **The published reader.** It reads 0.858 to 1.000, from 0.026 below to 0.052 above the mean of the draws of its cell,
+  and is below that mean in 16 of the 95 cells. The largest difference above is 0.902 against 0.850 (`obscure_real_pop`
+  on `gpt2-medium`) and the largest below is 0.927 against 0.953 (`pre_vs_post_cutoff` on `gpt2-medium`, 47 against 20
+  test questions). It is one reader fitted on all the train pairs and not on 64, so it is not the same estimate as the
+  mean of the draws, and it has no range.
+- **The random direction.** Its mean over the five draws runs from 0.477 to 0.812 and is above 0.5 in 92 of the 95
+  cells, so a direction drawn at random and oriented on the train pairs alone reads above 0.5 on average; its single
+  draws run from 0.166 to 0.980. On the entity contrasts of `gpt2-medium` its highest draw is above both readers: 0.965
+  on `fictional_generated` (mean of draws 0.903, published reader 0.897) and 0.931 on `obscure_real` and
+  `obscure_real_pop` (0.858 and 0.850, published reader 0.887 and 0.902). In the other 92 cells both readers are above
+  the highest random draw.
+- **The shuffled labels.** The control moves widely from draw to draw. Its single draws run from 0.003
+  (`pre_vs_post_cutoff` on `gpt2-xl`, 46 against 20 test questions) to 0.993 (`unknowable_detail` on `gpt2-xl`), with a
+  draw above 0.9 in 16 of the 95 cells and below 0.1 in 12; a single draw that far from 0.5 is not read as a signal
+  by itself. Its means over the five draws run from 0.211 to 0.725, and 4 of the 95 means are outside 0.3 to 0.7:
+  `kuq_controversial` on `gpt2-large` (0.211, draws 0.075 to 0.391, 11 against 46 test questions),
+  `kuq_counterfactual` on `gpt2-large` (0.299, draws 0.106 to 0.537, 11 against 43), `kuq_controversial` on
+  `qwen3-0.6b` (0.725, draws 0.578 to 0.904, 24 against 46) and `obscure_real` on `qwen3-1.7b-base` (0.723, draws
+  0.512 to 0.871, 118 against 1,611). None of the four is carried by one draw: all five draws are on the same side of
+  0.5 in three of them, and four of the five in `kuq_counterfactual` on `gpt2-large`. Why these four means sit away
+  from 0.5 was not measured. No shuffled draw reaches the mean of draws of the reader in its cell; the closest are
+  0.990 against 0.997 (`pre_vs_post_cutoff` on `gpt2-xl`), 0.993 against 1.000 (`unknowable_detail` on `gpt2-xl`) and
+  0.984 against 0.993 (`fictional_generated` on `qwen3-1.7b`). In each of the 16 cells with a shuffled draw above 0.9
+  the better surface control is at 0.961 or above.
+- **What this does not show.** V1 measures the P9b readers again on float32 activations and adds two controls (the
+  shuffled labels and the words-only view); it is not a new test of what the readers read. A range is over five draws
+  and is not an interval, the published reader is one fit with nothing committed to compare with, and each value comes
+  from one run per checkpoint on that checkpoint's own questions.
+
+#### The 2D views
+
+The views are stored for figures, which this document does not draw (the check figures of V1, `views_<panel>.png`, are
+not committed). The files give how much of the variance of the shown questions each view keeps. The table gives the
+share of the variance of a panel's questions on its first and second principal components (first / second) at each
+view layer and, for the words-only view, the share of the variance of the TF-IDF features on its two LSA components:
+
+| Model             | Panel    | Questions | Layer 1       | P9b layer          | Last layer         | Words only (LSA) |
+| ----------------- | -------- | --------- | ------------- | ------------------ | ------------------ | ---------------- |
+| `gpt2`            | unknown  | 1,049     | 0.308 / 0.100 | L4: 0.260 / 0.164  | L12: 0.276 / 0.175 | 0.064 / 0.116    |
+| `gpt2-medium`     | entity   | 646       | 0.294 / 0.165 | L24: 0.278 / 0.173 | the P9b layer      | 0.035 / 0.123    |
+| `gpt2-medium`     | unknown  | 1,039     | 0.318 / 0.142 | L24: 0.229 / 0.179 | the P9b layer      | 0.067 / 0.111    |
+| `gpt2-large`      | entity   | 655       | 0.227 / 0.174 | L36: 0.326 / 0.095 | the P9b layer      | 0.032 / 0.131    |
+| `gpt2-large`      | question | 388       | 0.168 / 0.160 | L36: 0.106 / 0.078 | the P9b layer      | 0.021 / 0.033    |
+| `gpt2-large`      | unknown  | 1,041     | 0.208 / 0.112 | L36: 0.266 / 0.124 | the P9b layer      | 0.066 / 0.112    |
+| `gpt2-xl`         | entity   | 678       | 0.161 / 0.135 | L32: 0.353 / 0.101 | L48: 0.410 / 0.114 | 0.031 / 0.138    |
+| `gpt2-xl`         | question | 398       | 0.182 / 0.133 | L32: 0.157 / 0.083 | L48: 0.402 / 0.061 | 0.019 / 0.032    |
+| `gpt2-xl`         | unknown  | 1,041     | 0.170 / 0.107 | L32: 0.284 / 0.111 | L48: 0.362 / 0.134 | 0.068 / 0.110    |
+| `qwen3-0.6b-base` | entity   | 687       | 0.261 / 0.156 | L27: 0.233 / 0.122 | L28: 0.328 / 0.124 | 0.034 / 0.147    |
+| `qwen3-0.6b-base` | question | 416       | 0.356 / 0.178 | L27: 0.104 / 0.069 | L28: 0.133 / 0.082 | 0.017 / 0.031    |
+| `qwen3-0.6b-base` | unknown  | 944       | 0.254 / 0.141 | L27: 0.246 / 0.124 | L28: 0.256 / 0.128 | 0.068 / 0.118    |
+| `qwen3-0.6b`      | entity   | 672       | 0.251 / 0.156 | L27: 0.223 / 0.107 | L28: 0.350 / 0.108 | 0.030 / 0.138    |
+| `qwen3-0.6b`      | question | 401       | 0.264 / 0.228 | L27: 0.111 / 0.075 | L28: 0.157 / 0.090 | 0.019 / 0.032    |
+| `qwen3-0.6b`      | unknown  | 960       | 0.267 / 0.135 | L27: 0.228 / 0.134 | L28: 0.264 / 0.143 | 0.066 / 0.120    |
+| `qwen3-1.7b-base` | entity   | 718       | 0.243 / 0.168 | L21: 0.264 / 0.133 | L28: 0.406 / 0.082 | 0.038 / 0.146    |
+| `qwen3-1.7b-base` | question | 453       | 0.411 / 0.149 | L21: 0.133 / 0.056 | L28: 0.166 / 0.085 | 0.016 / 0.031    |
+| `qwen3-1.7b-base` | unknown  | 939       | 0.271 / 0.124 | L21: 0.245 / 0.128 | L28: 0.274 / 0.127 | 0.065 / 0.116    |
+| `qwen3-1.7b`      | entity   | 722       | 0.270 / 0.174 | L25: 0.189 / 0.144 | L28: 0.464 / 0.074 | 0.043 / 0.143    |
+| `qwen3-1.7b`      | question | 446       | 0.345 / 0.197 | L25: 0.106 / 0.074 | L28: 0.340 / 0.050 | 0.016 / 0.031    |
+| `qwen3-1.7b`      | unknown  | 950       | 0.300 / 0.127 | L25: 0.198 / 0.097 | L28: 0.396 / 0.105 | 0.065 / 0.118    |
+
+- **At the P9b layer the two leading components keep less than half of the variance of every panel**: 0.173 (question
+  panel of `qwen3-0.6b-base`) to 0.455 (entity panel of `gpt2-xl`) for the two shares together. At that layer the
+  question panel keeps the least on each of the six checkpoints that have one (0.173 to 0.240), and it also does at
+  the last layer; at layer 1 it keeps the most on five of the six (all but `gpt2-large`). At the other view layers the
+  two components keep up to 0.560 (question panel of `qwen3-1.7b-base` at layer 1).
+- **The words-only view keeps 0.047 to 0.186 of the variance of the TF-IDF features on its two components**, and its
+  first component keeps less than the second in every panel (0.016 to 0.068 against 0.031 to 0.147): a truncated SVD
+  orders its components by singular value, not by the share of variance they keep.
+- **A share is not a separation.** It says how much of the variance of the shown questions a view keeps, not whether
+  the two sides of a contrast part in it; the separation of the sides is what the AUROCs above measure, on every test
+  question and not only on the shown ones.
 
 ## Approximate answers: range against exact quantities (P10)
 
@@ -7987,6 +8345,39 @@ start and finish times 2026-10-19 18:54:42 to 18:55:07 (UTC). Its config is the 
 with the directory name. An earlier run of the same code on a CPU box gave the same `table.json` and `summary.json`
 apart from the metadata; it is not committed.
 
+V1: the eight runs `v1/gpt2/d7697ddcad98`, `v1/gpt2-medium/e44777651653`, `v1/gpt2-large/a36b45b17074`,
+`v1/gpt2-xl/2ea40465f683`, `v1/qwen3-0.6b-base/5fd563aa2627`, `v1/qwen3-0.6b/c0fb57b3c812`,
+`v1/qwen3-1.7b-base/12dda15d9d38` and `v1/qwen3-1.7b/419275ac7e0d` were made at `6f5c4e5` (the merge of pull request
+219) with a clean tree on the laptop GPU (the `device` field of each `meta.json` records
+`cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)`; torch 2.14.1+cu130, transformers 5.19.0, Windows 11, Python 3.12.6),
+with the model in float32 and seed 0. Each config names the P9a labels run and the P9b reading run it reads, the runs
+of the same checkpoint named above, and a batch size (`batch_size`, the number of prompts per forward pass): 32 on
+`gpt2` and `gpt2-medium`, 16 on `gpt2-large` and the Qwen3 0.6B pair, and 1 on `gpt2-xl` and the Qwen3 1.7B pair. The
+runs read local copies of those P9a and P9b runs that still hold the files the export drops and V1 needs: `items.json`
+of the P9a run, and `transfer.npz` and `readers.npz` of the P9b run. The stored `meta.json` gives these start and
+finish times (UTC): on 2026-10-21, 05:31:14 to 05:31:34 for `gpt2` (20 s), 05:31:43 to 05:32:41 for `gpt2-medium`
+(58 s), 05:32:50 to 05:34:56 for `gpt2-large` (126 s), 05:35:06 to 05:36:51 for `qwen3-0.6b-base` (105 s), 05:37:00 to
+05:38:46 for `qwen3-0.6b` (106 s), 05:38:55 to 05:47:00 for `gpt2-xl` (485 s) and 05:47:08 to 05:54:42 for
+`qwen3-1.7b-base` (454 s), and on 2026-10-22, 20:11:47 to 20:19:54 for `qwen3-1.7b` (487 s). The `qwen3-1.7b` run was
+made on 2026-10-22 from the same commit after a first attempt was interrupted before finishing; that partial run was
+discarded and is not exported. The config hash of each run was recomputed by loading its committed `config.json` into
+the V1 config class and hashing it, and all eight agree with the directory names. The committed `per_seed` arrays of
+the P9b curves files give the same reproduction check as the stored `reproduction` field of each summary. Exporting
+these runs changed no tracked result.
+
+Config hashes (12 hex digits), V1:
+
+| Checkpoint      | V1           | Batch size | P9a run read | P9b run read |
+| --------------- | ------------ | ---------- | ------------ | ------------ |
+| gpt2            | d7697ddcad98 | 32         | 5461200f995c | fd3bdc5a4b0d |
+| gpt2-medium     | e44777651653 | 32         | 4272635aa065 | a5a9c7d7b176 |
+| gpt2-large      | a36b45b17074 | 16         | 59c9bfd59dfd | 7b3fd5d1bfb5 |
+| gpt2-xl         | 2ea40465f683 | 1          | cc283b36fcae | 92664dccb7d9 |
+| qwen3-0.6b-base | 5fd563aa2627 | 16         | 1d9f881153e4 | 34c0ebff50b0 |
+| qwen3-0.6b      | c0fb57b3c812 | 16         | 10d95352866e | 975dbcf95759 |
+| qwen3-1.7b-base | 12dda15d9d38 | 1          | d5d522bfecd4 | 5ca7821318ef |
+| qwen3-1.7b      | 419275ac7e0d | 1          | f413efcae268 | 9641ab8235a9 |
+
 The files of every run named here are committed under `results/<experiment>/<model>/<hash>/`, copied with
 `tomography export`, which keeps the JSON, NPZ and CSV files the plots read and rewrites local paths. The figures are
 not committed; `tomography plot all --out results` redraws them from these files.
@@ -8006,6 +8397,8 @@ Not in this document yet. No dates are promised.
 - P9: a hand check of the abstention indicator of P9d (the stored samples carry no human labels), an item-level
   interval for the P9b AUROC (only the interval over the pair draws is stored), and a within-relation increment of
   the probe over the output confidence in P9c (only the pooled increment is stored).
+- V1 on the Qwen3 4B pair: not run yet. V1 loads the model in float32, and the 4B checkpoints in float32 need more GPU
+  memory than the laptop GPU has.
 - P10: a hand check of the answer parser (the `human_*` columns of `hand_check.csv` and `hand_check_samples.csv` are empty in every P10a run), and P10d (steering toward hedging); P10d has not run. The animacy and wording confound is controlled by the people heights for the height family only, with no control of the same kind for gestation periods and wingspans, and P10 ran on one set of questions and one seed.
 - A5, reading directions against Qwen-Scope SAE decoders.
 

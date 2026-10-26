@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -8,6 +9,7 @@ import pytest
 from tomography.reading.directions import Method
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.reader import RepReader
+from tomography.reading.reader import orient
 
 
 def small_reader() -> RepReader:
@@ -247,6 +249,133 @@ def test_fit_stores_the_arrays_of_each_layer() -> None:
         reader.means, h.astype(np.float64).mean(axis=1), atol=1e-5
     )
     np.testing.assert_allclose(np.linalg.norm(reader.directions, axis=1), 1.0)
+
+
+Orientation = dict[str, NDArray[np.int64]]
+
+
+def orientation_case(
+    source: str,
+) -> tuple[NDArray[np.float32], NDArray[np.int64], Orientation]:
+    """Four layers of random rows with labels and one orientation source.
+
+    The groups have one label-1 member each; half of the pairs share a
+    label, so only the other half orient.
+    """
+    rng = np.random.default_rng(31)
+    h = rng.standard_normal((4, 24, 6)).astype(np.float32)
+    if source == "groups":
+        labels = (np.arange(24) % 3 == 1).astype(np.int64)
+        return h, labels, {"groups": np.arange(24).reshape(8, 3)}
+    labels = rng.permutation(np.tile([0, 1], 12)).astype(np.int64)
+    if source == "pairs":
+        return h, labels, {"pairs": np.arange(24).reshape(12, 2)}
+    return h, labels, {}
+
+
+def reference_signs(
+    projections: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    orientation: Orientation,
+) -> list[float]:
+    """The sign rule of `RepReader.fit`, written out group by group."""
+    if "pairs" in orientation:
+        pairs = orientation["pairs"]
+        groups = pairs[labels[pairs[:, 0]] != labels[pairs[:, 1]]]
+    else:
+        groups = orientation.get("groups")
+    signs = []
+    for row in projections:
+        if groups is None:
+            gap = row[labels == 1].mean() - row[labels == 0].mean()
+            signs.append(-1.0 if gap < 0 else 1.0)
+            continue
+        top = bottom = 0
+        for group in groups:
+            own = row[group[labels[group] == 1][0]]
+            top += own == row[group].max()
+            bottom += own == row[group].min()
+        signs.append(-1.0 if top < bottom else 1.0)
+    return signs
+
+
+@pytest.mark.parametrize("source", ["groups", "pairs", "class-means"])
+def test_fit_signs_follow_the_reference_rule_on_every_layer(
+    source: str,
+) -> None:
+    h, labels, orientation = orientation_case(source)
+
+    reader = RepReader.fit(
+        "random", h, [0, 1, 2, 3], labels=labels, seed=3, **orientation
+    )
+
+    centered = h.astype(np.float64) - reader.means[:, None].astype(np.float64)
+    projections = np.einsum(
+        "knd,kd->kn", centered, reader.directions.astype(np.float64)
+    )
+    expected = reference_signs(projections, labels, orientation)
+    assert set(expected) == {-1.0, 1.0}
+    np.testing.assert_array_equal(reader.signs, expected)
+
+
+@pytest.mark.parametrize("source", ["groups", "pairs", "class-means"])
+def test_orient_sets_the_signs_that_fit_sets(source: str) -> None:
+    h, labels, orientation = orientation_case(source)
+    fitted = RepReader.fit(
+        "random", h, [0, 1, 2, 3], labels=labels, seed=3, **orientation
+    )
+    unsigned = replace(
+        fitted, method="hand", signs=np.ones(4, dtype=np.float32)
+    )
+
+    oriented = orient(unsigned, h, labels=labels, **orientation)
+
+    assert set(fitted.signs.tolist()) == {-1.0, 1.0}
+    assert oriented.signs.dtype == np.float32
+    np.testing.assert_array_equal(oriented.signs, fitted.signs)
+    assert oriented.method == "hand"
+    assert oriented.layers == fitted.layers
+    np.testing.assert_array_equal(oriented.directions, fitted.directions)
+    np.testing.assert_array_equal(oriented.means, fitted.means)
+    np.testing.assert_array_equal(unsigned.signs, np.ones(4))
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"labels": np.zeros(23, dtype=np.int64)}, "labels"),
+        ({"h": np.zeros((4, 24, 5), dtype=np.float32)}, "shape"),
+        ({"groups": np.array([[0, 2, 3]])}, "exactly one"),
+        ({"pairs": np.array([[0, 99]])}, "pairs"),
+        ({"labels": np.zeros(24, dtype=np.int64)}, "both classes"),
+    ],
+    ids=["label-count", "width", "group", "pairs", "one-class"],
+)
+def test_orient_rejects_inconsistent_inputs(
+    change: dict[str, NDArray[np.generic]], message: str
+) -> None:
+    h, labels, _ = orientation_case("groups")
+    reader = RepReader.fit("random", h, [0, 1, 2, 3], labels=labels)
+    arguments = {"h": h, "labels": labels, **change}
+
+    with pytest.raises(ValueError, match=message):
+        orient(reader, **arguments)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("bad", [2, -1])
+def test_orient_rejects_labels_that_fit_rejects(bad: int) -> None:
+    h, labels, _ = orientation_case("class-means")
+    reader = RepReader.fit("random", h, [0, 1, 2, 3], labels=labels, seed=3)
+    wrong = labels.copy()
+    wrong[0] = bad
+
+    with pytest.raises(ValueError, match="labels must be 0 or 1"):
+        RepReader.fit("random", h, [0, 1, 2, 3], labels=wrong, seed=3)
+    with pytest.raises(ValueError, match="labels must be 0 or 1"):
+        orient(reader, h, labels=wrong)
+    np.testing.assert_array_equal(
+        orient(reader, h, labels=labels).signs, reader.signs
+    )
 
 
 def test_random_directions_differ_across_layers_but_follow_the_seed() -> None:

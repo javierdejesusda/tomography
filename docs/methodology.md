@@ -100,11 +100,16 @@ text, the default follows the reference code and the other variant is selectable
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
 | Raw final-layer residual                    | Layer `L` is the output of the last block before the final norm. The Hugging Face `hidden_states[L]` is taken after the final norm (`ln_f` for GPT-2, `norm` for Qwen3).        | One definition of "residual stream at layer l" for every layer, so reads and edits act on the same quantity. Layer 0 is the embedding output.                                          | `hooks.py`, `activations.py`             |
 | Single-pass response positions              | The paper's Eq. 2 truncates the response token by token and runs the model on each prefix. The `response` position reads every token of the marked span from one forward pass. | Under causal attention the activation at a token does not depend on later tokens, so the two agree up to numerics, at a fraction of the cost.                                          | `activations.py`                         |
+| Pooled positions                            | The paper reads single token positions. The pooled positions reduce a span to one row: `mean` averages the response tokens, `max` takes their feature-wise maximum, and `concept_mean` averages the tokens of the concept span, so it equals `concept` for a one-token concept. | Recent probing work reports that probes pooled over tokens (mean, max or attention) often read better than the last token, so readers can be compared across these readouts. The reduction runs on the model's device, so a pooled row costs the memory of one token. | `activations.py`                         |
 | `logistic` as the default finder            | The paper reads with PCA on pair differences (`pca_diff`). `r1` to `r7`, `p1`, `p2`, `p3` and `p5` default to `logistic`; `p4` keeps `pca_diff` as its reference cell.         | On GPT-2 the paper's `pca_diff` stays near chance on unmatched SST-2 pairs and weak on matched ETHICS pairs. `pca_diff` remains selectable (`--set method=pca_diff`) and is the paper-faithful series. | `experiments/sweep.py` (`ReadingConfig`) |
 | `pca_diff` preprocessing                    | The paper says the differences are normalized (`unit`). The reference code subtracts the mean (`center`) and does not normalize.                                              | `center` is the default, as in the reference code; `unit` and `none` are options and `p4` compares them.                                                                              | `reading/directions.py`                  |
 | Deterministic PCA                           | The reference code uses scikit-learn's randomized solver without a seed.                                                                                                      | A full SVD is used, so a direction is a function of its inputs.                                                                                                                       | `reading/directions.py`                  |
 | Held-out splits                             | The reference code evaluates honesty and emotions on strings that also occur in training.                                                                                      | Splits are assigned by hashing the source statement or scenario id before any truncation or pairing, so no source appears in two splits.                                              | `datasets/records.py` (`assign_splits`)  |
 | Finders and stimuli the reference omits     | The reference ships only the PCA, cluster-mean and random finders, and no utility or morality code.                                                                           | The logistic and K-means finders follow the paper text, and `pca_raw` is an added variant. Utility and morality stimuli are built from the paper's templates and ETHICS. The prompt difference is a control contrast of `c4` (`control/contrast.py`), not a reading finder. | `reading/directions.py`, `datasets/ethics.py` |
+| Whitened mass-mean finder                   | Marks and Tegmark (2024) invert the pooled within-class covariance with a pseudo-inverse at an absolute tolerance of 1e-3. `whitened_mean_diff` shrinks that covariance toward a scaled identity with the Ledoit-Wolf weight instead and solves `S^-1 (m1 - m0)`, the LDA reader's direction. The reference also centres each dataset on its mean over all rows, validation rows included; here the means and the covariance come from the training rows only, which changes the reader's mean, not its direction. | With GPT-2 and Qwen3 widths the covariance is singular whenever the training rows are fewer than the width, and an absolute tolerance does not scale with the activations, whose scale in GPT-2 and Qwen3 need not match that of the reference model; shrinkage keeps every direction and needs no tuned constant. | `reading/directions.py`                  |
+| CCS                                         | Burns et al. (2023) centre each contrast set on the mean of the set being evaluated and pick the sign with the test labels (the larger of the accuracy and one minus it); their Appendix G.1 also divides each set "by the average norm of {phi(x_i+)} times sqrt(d)", a phrase that leaves the target norm ambiguous and that they call "less essential than mean normalization", and their code does not scale by default. `fit_ccs` centres each set on its training mean and reuses it for every later pair, divides both by one shared scalar so the centred training rows have an average norm of sqrt(d) (about unit scale per feature), keeps the restart of lowest loss out of 10 (1000 full-batch AdamW epochs, learning rate 0.01 as in the paper, 0.001 in both reference repositories) and orients the probe on the training labels with the rule of `RepReader.fit` applied to the set-centred rows, as Marks and Tegmark (2024) do. | Training means score a single pair without its test set. Features at about unit scale keep the fixed learning rate and the unit-norm initial weights on the same footing at every width, where rows of norm 1 would shrink each feature by sqrt(d); on synthetic pairs this lowered the final loss with the same accuracy. A shared scalar keeps one linear probe for both sets, and the test labels never choose the sign. The probe's bias and its two set means do not fit a `RepReader`, so `CCSProbe` keeps them for its own pair prediction and exports the direction as a reader centred on the mean of the two set means; that reader ignores the per-set centring. | `reading/ccs.py`                         |
+| Readers beyond one direction per layer      | The paper reads with one direction per layer. Three readers behind a common interface (`Reader`) go beyond it: LDA, the mass-mean direction under a within-class covariance shrunk toward a scaled identity (Ledoit-Wolf weight by default); MLPs on standardized activations, one per layer or one on concatenated layers, fitted with L-BFGS; and an attention-pooled linear reader on the token rows of the `response` position: a softmax over the tokens of a stimulus, or over the (token, layer) cells of several layers, weights a linear value head; its query starts at zero, which is mean pooling, and L-BFGS minimizes the L2 logistic loss of the logistic finder in float64. | Readers are compared on the same features. LDA stays linear, so it is a `RepReader` that can steer, oriented by the rule of `RepReader.fit`; the attention reader, as in EleutherAI's attention probes, tests whether choosing tokens beats a fixed position or the mean, and exports its value heads as such a reader; the MLP has no direction and tests whether a nonlinear reader adds anything. | `reading/probes.py`                      |
+| TTPD                                        | Not in the paper. TTPD (truth and polarity directions) fits a general truth direction by least squares on the centered rows, a polarity direction by an unpenalized logistic regression, and an unpenalized logistic regression on the two projections, as in its reference code. One topic, so the rows are centered on their mean. | It is the published structured linear reader that beats logistic regression out of distribution on lies. Its score is linear, so it is a `RepReader`; without polarity labels it is the least-squares truth direction, so `m2` reads it on its polarity task only. | `reading/probes.py` (`fit_ttpd`)         |
 
 ### Stimuli and data
 
@@ -168,11 +173,67 @@ that resamples whole runs along axis 0, and `wilson_ci` gives intervals for rate
 | `p9c` AUROC (`lo`, `hi`)                                       | percentile bootstrap                                           | the test items                                                            |
 | `p9c` within-relation AUROC                                    | percentile bootstrap                                           | the items, resampled inside each relation at its size                     |
 | `p9d` slopes                                                   | percentile bootstrap                                           | the items, paired across arms                                             |
+| `m2` cell metrics (`pair_lo`, `pair_hi`, `auroc_lo`, `auroc_hi`) | percentile bootstrap                                         | the seeds (independent training sets)                                     |
+| `m2` comparisons                                               | paired percentile bootstrap; DeLong; exact McNemar; Holm       | the report pairs (clusters), on the seed ensemble                         |
 
 `a1` uses a t-interval because a percentile bootstrap of so few runs covers less than its level. The `a2` and `a5`
 intervals and nulls are described in the docstrings of `experiments/a2_logit_lens.py` and
 `experiments/a5_sae_features.py`. A `p9b` interval describes how much the fitted reader
 varies with its training draw; it does not cover the noise of the test items.
+
+## Reader comparison (M2)
+
+`m2` (`experiments/m2_readers.py`) compares readers on the same features and items, as a factorial of scorer by
+readout by layer rule, so a gain of pooling is never credited to nonlinearity.
+
+- Scorers: LAT (`pca_diff`), difference of means (`mean_diff`), logistic regression with its `C` tuned, LDA and an
+  MLP whose `alpha` is tuned on a grid of the same size (matched tuning), both grids listed from the strongest
+  penalty so a tie keeps it, and TTPD (`ttpd`). TTPD reads the polarity tasks only and is skipped elsewhere with its
+  reason in `summary.json`: without polarity labels it scores as difference of means does.
+- Tasks: binary reading tasks (`sentiment`, `truth` and `utility` by default) and the polarity task `truth_polarity`,
+  the Geometry of Truth statements of `cities`, `neg_cities`, `sp_en_trans` and `neg_sp_en_trans`. It reads truth as
+  `truth_cities` reads one subset, with the loader's splits, and is evaluated on its own `val` and `test` statements.
+  A statement's polarity is -1 in a `neg_` subset and +1 otherwise.
+- Readouts: `last`, `concept`, `concept_mean`, `mean` (the stimulus mean), `max` (the feature-wise maximum of the
+  stimulus tokens), `token_score_max` (the maximum over the stimulus tokens of a scorer's per-token score; the scorer
+  is fitted on every token row with its stimulus's label, the max aggregation of recent probe work) and
+  `attention` (the attention-pooled logistic reader, read by the logistic scorer only). The concept readouts are
+  skipped for a task without a concept slot or word.
+- Extraction: one pass over the stimulus tokens gives `mean`, `max` and the token rows of the per-token readouts, one
+  pass over the concept tokens gives `concept` and `concept_mean`, and one pass reads `last`. Each pass is reduced
+  batch by batch, so the token rows of every layer are held for one batch at a time, and the pooled rows equal those
+  of a pass per position (the means within float32 rounding of their sums). `token_layers` keeps the token rows at
+  those layers only, so the per-token readouts choose among them while the one-row readouts keep every layer read. A
+  task's activations are released before the next task is read.
+- Layer rules: `best` (the best select layer), `top_k` (the mean of the select-standardized scores of the `top_k`
+  best select layers, among those whose select scores vary) and `joint` (one MLP or one attention reader fitted on
+  the layers `top_k` reads, together). The rules of a scorer and readout share the same per-layer fits and seeds.
+- Every choice uses the select items of the original prompts only: the penalty per layer (first best on the grid),
+  the layer rule (by pair accuracy) and the threshold of accuracy, precision, recall, F1 and the true positive rate at
+  `max_fpr`. The report items are the same for every cell and condition.
+- Conditions: the original prompts, P2's misleading sentence (`random`, `against`) and the held-out template wordings
+  of `shifts` (default `paraphrase`).
+- Controls: the text-only classifier on the raw texts (`p9.risk.text_scores`, word n-grams), a random direction at
+  every readout, and every scorer refitted on training labels shuffled within their pairs (`shuffled` series), which
+  runs the whole procedure on shuffled labels: the select labels are shuffled within their pairs too, so the penalty,
+  the layer rule and the thresholds are chosen on them, and only the report metrics use the real labels. The random
+  direction is oriented and its layer chosen on the real labels, so it measures an untrained direction, not chance,
+  and can read well above 0.5. The text-only classifier reads the raw stimulus texts, so its scores are the same
+  under every condition by design: it measures how much the stimulus content alone gives away, as `tb1`
+  does, and the decoy and template conditions are measured on the readers.
+- Shuffled series alone: `--set reader_series=false` (which needs `shuffled` in `controls`) fits only the `shuffled`
+  series, at about half the cost of a full run: no reader fits, random direction or text-only classifier, so no
+  comparisons and no AUROC matrix, and the summary says the run holds the shuffled series only. Its seeds do not
+  depend on the other series, so its rows and per-seed scores equal the shuffled ones of the full run of the same
+  other settings, and pair with that run's reader rows.
+- Statistics: each cell's metrics are means over the 10 seeds with seed intervals. Comparisons use the seed
+  ensemble: each seed's scores are standardized with their select mean and standard deviation and averaged over the
+  seeds. Against each baseline (`logistic/last` and `mean_diff/last` by default, at the same layer rule, or `top_k`
+  for a `joint` cell) the report AUROC difference gets a paired bootstrap that resamples whole pairs, the pair
+  accuracy difference one that resamples pairs, DeLong's test (rows treated as independent) and the exact McNemar
+  test on pair outcomes. A Holm family is one task, condition, layer rule and baseline, separately for the DeLong
+  and McNemar p values. All statistics come from `reading/stats.py`.
+- Runs load the model in float32.
 
 ## Known versus unknown questions (P9)
 
@@ -273,6 +334,34 @@ known-side items, so their gaps are correlated.
 The headline cell is the unknown side of the `direction_type` contrast; every other cell is descriptive, with no
 correction for multiple comparisons. The abstention patterns are phrase matches, so a title that contains a pattern
 word still counts as an abstention; the `hand_check.csv` sample measures this.
+
+### Published detection baselines
+
+These baselines predict, per question, whether the greedy answer is correct. They are implemented as functions but
+not yet run: no experiment reports them, and the `b1` experiment that will put them beside the `p9c` signals is
+pending. Each states where it departs from its published recipe.
+
+- Exact-answer-token probe (`p9/answer_probe.py`; Orgad et al. 2025, `orgad2025llms`): a logistic-regression probe
+  on the residual stream at the last token of the greedy answer, read from the prompt, a space and the answer. It is
+  fitted like the `p9c` `probe` (the `logistic` finder on the train items) at every layer, and the layer with the
+  highest validation AUROC is kept. Deviations: the whole stored answer is the exact-answer span, so no extraction
+  model runs and no item is dropped (the reference extracts a span from a long generation and drops items without
+  one); the residual stream is read instead of the MLP output; the layer is chosen automatically on the validation
+  split instead of by hand from a heatmap; the answer is re-tokenized from the stored text (cut at the first newline
+  and stripped), so the read token can differ from the emitted one (for example `.` for an emitted `.\n`). An empty
+  answer has no token to read and gets no score. Train items are scored in sample, so an AUROC uses only the items
+  outside the train and validation splits.
+- EigenScore (`p9/eigenscore.py`; Chen et al. 2024, `chen2024inside`): the mean natural log eigenvalue of the
+  K x K covariance of the sampled answers' embeddings plus `alpha` I (`alpha` 1e-3). An embedding is the residual
+  stream at the last token of the sample, read from the prompt, a space and the sample, at layer `(L + 1) // 2` (the
+  released code takes half of the L + 1 hidden states; L / 2 for every model here). Higher means more divergent
+  samples. Paper and code both centre each embedding over its own features (`Z^T J_d Z`); the released code also
+  divides by d - 1, which the paper's Eq. 4 does not, so `alpha` sits on a different eigenvalue scale. The code is
+  followed. Because of the centring, identical samples keep one eigenvalue `K var(z)` and do not score
+  `ln(alpha)`. Deviations: K = 5 stored P9a samples at temperature 1.0 (the paper uses 10 at temperature 0.5 with top-p
+  0.99); no feature clipping (it is not in the released code); the last token of the stored sample text instead of
+  the last token before a stop token; correctness by the P9 rule. Empty samples are dropped and a question with fewer
+  than 2 non-empty samples gets no score.
 
 ## Run settings of the GPU runs
 

@@ -58,7 +58,7 @@ WORDS = {
 }
 
 
-LABEL_FITTING_METHODS = ("mean_diff", "logistic")
+LABEL_FITTING_METHODS = ("mean_diff", "logistic", "whitened_mean_diff")
 LABEL_FREE_METHODS = tuple(
     m for m in get_args(Method) if m not in LABEL_FITTING_METHODS
 )
@@ -1046,6 +1046,23 @@ def test_the_skipped_condition_has_no_point_in_the_scatter(
     labels = {line.get_label() for line in ax.lines}
     assert "paper" in labels
     assert "random_label" not in labels
+
+
+def test_random_label_runs_under_the_whitened_mass_mean(
+    tiny_arch: LoadedModel, tmp_path: Path
+) -> None:
+    run_dir = _execute(
+        tiny_arch,
+        tmp_path,
+        method="whitened_mean_diff",
+        conditions=("paper", "random_label"),
+    )
+
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["skipped"] == {}
+    assert summary["conditions"] == ["paper", "random_label"]
+    assert (run_dir.path / "readers_random_label.npz").is_file()
 
 
 @pytest.mark.parametrize("n_pairs", [8, 7])

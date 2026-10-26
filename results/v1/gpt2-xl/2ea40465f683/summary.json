@@ -1,0 +1,463 @@
+{
+  "_meta": {
+    "experiment": "v1",
+    "config_hash": "2ea40465f683",
+    "seed": 0,
+    "git_sha": "6f5c4e545420a43801b375b2e2995dd51f2566d4",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-21T05:38:55+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "v1",
+      "model": "gpt2-xl",
+      "seed": 0,
+      "labels_run": "results/p9a/gpt2-xl/cc283b36fcae",
+      "reading_run": "results/p9b/gpt2-xl/92664dccb7d9",
+      "batch_size": 1
+    }
+  },
+  "data": {
+    "layer": 32,
+    "template": "fewshot",
+    "methods": [
+      "logistic",
+      "pca_diff",
+      "mean_diff",
+      "random"
+    ],
+    "types": [
+      "fictional_generated",
+      "obscure_real",
+      "obscure_real_pop",
+      "triviaqa_known",
+      "unknowable_detail",
+      "false_premise",
+      "kuq_ambiguous",
+      "kuq_controversial",
+      "kuq_counterfactual",
+      "kuq_false_assumption",
+      "kuq_future_unknown",
+      "kuq_unsolved_problem",
+      "real_vs_synthal",
+      "real_vs_generated",
+      "pre_vs_post_cutoff"
+    ],
+    "n_items": {
+      "train": 3318,
+      "test": 4065
+    },
+    "extraction_dtype": "float32",
+    "reading_run_dtype": "float16",
+    "views": {
+      "layers": [
+        1,
+        32,
+        48
+      ],
+      "panels": {
+        "entity": {
+          "types": [
+            "fictional_generated",
+            "obscure_real"
+          ],
+          "n_items": 678
+        },
+        "question": {
+          "types": [
+            "unknowable_detail",
+            "false_premise",
+            "kuq_ambiguous",
+            "kuq_controversial",
+            "kuq_counterfactual",
+            "kuq_false_assumption",
+            "kuq_future_unknown",
+            "kuq_unsolved_problem"
+          ],
+          "n_items": 398
+        },
+        "unknown": {
+          "types": [
+            "real_vs_synthal",
+            "real_vs_generated",
+            "pre_vs_post_cutoff"
+          ],
+          "n_items": 1041
+        }
+      }
+    },
+    "reproduction": {
+      "tolerance": 0.02,
+      "within_tolerance": true,
+      "max_abs_diff": {
+        "draw_at_layer": 0.003260869565217428,
+        "mean_at_layer": 0.0010869565217392907,
+        "draw_all_layers": 0.6602151987891323,
+        "mean_all_layers": 0.13204229045842125
+      },
+      "mean_diff_at_layer": {
+        "fictional_generated": {
+          "logistic": 5.027652086542211e-06,
+          "pca_diff": 1.6758840288844112e-06,
+          "mean_diff": 6.703536115426623e-06,
+          "random": 8.211831741256059e-05
+        },
+        "obscure_real": {
+          "logistic": 2.0980383341639985e-05,
+          "pca_diff": 7.942573693586752e-05,
+          "mean_diff": 4.9453760733619845e-05,
+          "random": 2.8473377392090882e-05
+        },
+        "obscure_real_pop": {
+          "logistic": 4.0462167872901134e-05,
+          "pca_diff": 0.000499033403767446,
+          "mean_diff": 8.991592860496667e-06,
+          "random": 6.44397488348547e-05
+        },
+        "triviaqa_known": {
+          "logistic": 8.288437629488943e-05,
+          "pca_diff": 0.0,
+          "mean_diff": 8.288437629511147e-05,
+          "random": 0.0002486531288852234
+        },
+        "unknowable_detail": {
+          "logistic": 0.0,
+          "pca_diff": 0.0,
+          "mean_diff": 0.0,
+          "random": 0.0004761904761905189
+        },
+        "false_premise": {
+          "logistic": 0.0,
+          "pca_diff": 2.220446049250313e-16,
+          "mean_diff": 0.00011474469305794432,
+          "random": 0.0001147446930578333
+        },
+        "kuq_ambiguous": {
+          "logistic": 0.0,
+          "pca_diff": 0.0,
+          "mean_diff": 0.0002801120448179262,
+          "random": 0.0005602240896358524
+        },
+        "kuq_controversial": {
+          "logistic": 0.0,
+          "pca_diff": 0.0,
+          "mean_diff": 0.0,
+          "random": 0.0
+        },
+        "kuq_counterfactual": {
+          "logistic": 0.0,
+          "pca_diff": 0.0,
+          "mean_diff": 0.0,
+          "random": 0.0
+        },
+        "kuq_false_assumption": {
+          "logistic": 0.0,
+          "pca_diff": 0.0,
+          "mean_diff": 0.0,
+          "random": 0.0
+        },
+        "kuq_future_unknown": {
+          "logistic": 0.0,
+          "pca_diff": 0.00027210884353745524,
+          "mean_diff": 0.0,
+          "random": 0.00027210884353745524
+        },
+        "kuq_unsolved_problem": {
+          "logistic": 0.0,
+          "pca_diff": 0.0,
+          "mean_diff": 0.0,
+          "random": 0.0
+        },
+        "real_vs_synthal": {
+          "logistic": 9.701673538642375e-06,
+          "pca_diff": 4.850836769343392e-05,
+          "mean_diff": 8.246422507873774e-05,
+          "random": 1.4552510308019073e-05
+        },
+        "real_vs_generated": {
+          "logistic": 1.0772280858550864e-05,
+          "pca_diff": 7.5253167702848955e-06,
+          "mean_diff": 7.639915502455352e-06,
+          "random": 3.055966200982141e-06
+        },
+        "pre_vs_post_cutoff": {
+          "logistic": 0.0,
+          "pca_diff": 0.0,
+          "mean_diff": 0.0,
+          "random": 0.0010869565217392907
+        }
+      }
+    },
+    "surface": {
+      "fictional_generated": {
+        "text_word": {
+          "recomputed": 0.9686693480811128,
+          "committed": 0.9686693480811128,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9907658790011731,
+          "committed": 0.9907658790011731,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "obscure_real": {
+        "text_word": {
+          "recomputed": 0.8804567729173223,
+          "committed": 0.8804567729173223,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.8837012393412159,
+          "committed": 0.8837012393412159,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": 0.8722894094022089,
+          "committed": 0.8722894094022089,
+          "equal": true
+        }
+      },
+      "obscure_real_pop": {
+        "text_word": {
+          "recomputed": 0.8804567729173223,
+          "committed": 0.8804567729173223,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.8837012393412159,
+          "committed": 0.8837012393412159,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": 0.8722894094022089,
+          "committed": 0.8722894094022089,
+          "equal": true
+        }
+      },
+      "triviaqa_known": {
+        "text_word": {
+          "recomputed": 0.7791131371736427,
+          "committed": 0.7791131371736427,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.7874015748031497,
+          "committed": 0.7874015748031497,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "unknowable_detail": {
+        "text_word": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "false_premise": {
+        "text_word": {
+          "recomputed": 0.9799196787148594,
+          "committed": 0.9799196787148594,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9730349971313826,
+          "committed": 0.9730349971313826,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_ambiguous": {
+        "text_word": {
+          "recomputed": 0.8137254901960784,
+          "committed": 0.8137254901960784,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9089635854341737,
+          "committed": 0.9089635854341737,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_controversial": {
+        "text_word": {
+          "recomputed": 0.9420289855072463,
+          "committed": 0.9420289855072463,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9606625258799172,
+          "committed": 0.9606625258799172,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_counterfactual": {
+        "text_word": {
+          "recomputed": 0.9988925802879292,
+          "committed": 0.9988925802879292,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9988925802879292,
+          "committed": 0.9988925802879292,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_false_assumption": {
+        "text_word": {
+          "recomputed": 0.9583333333333334,
+          "committed": 0.9583333333333334,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9672619047619048,
+          "committed": 0.9672619047619048,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_future_unknown": {
+        "text_word": {
+          "recomputed": 0.9918367346938776,
+          "committed": 0.9918367346938776,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9904761904761905,
+          "committed": 0.9904761904761905,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_unsolved_problem": {
+        "text_word": {
+          "recomputed": 0.9496753246753247,
+          "committed": 0.9496753246753247,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9556277056277056,
+          "committed": 0.9556277056277056,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "real_vs_synthal": {
+        "text_word": {
+          "recomputed": 0.7783895221925782,
+          "committed": 0.7783895221925782,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "real_vs_generated": {
+        "text_word": {
+          "recomputed": 0.948646588968726,
+          "committed": 0.948646588968726,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9979284369114878,
+          "committed": 0.9979284369114878,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "pre_vs_post_cutoff": {
+        "text_word": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      }
+    },
+    "surface_equal": true
+  }
+}

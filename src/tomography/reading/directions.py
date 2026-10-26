@@ -18,7 +18,13 @@ from sklearn.linear_model import LogisticRegression
 
 FloatArray = NDArray[np.floating[Any]]
 Method = Literal[
-    "pca_diff", "pca_raw", "mean_diff", "logistic", "kmeans", "random"
+    "pca_diff",
+    "pca_raw",
+    "mean_diff",
+    "logistic",
+    "kmeans",
+    "random",
+    "whitened_mean_diff",
 ]
 Preprocess = Literal["center", "unit", "none"]
 
@@ -53,6 +59,7 @@ def fit_direction(
     preprocess: Preprocess = "center",
     seed: int = 0,
     refit_at_zero: bool = False,
+    c: float = 1.0,
 ) -> FitResult:
     """Fits one direction to the activations of one layer.
 
@@ -67,6 +74,11 @@ def fit_direction(
             coefficients of an L2-regularized logistic regression; both need
             `labels`. The regression runs on rows divided by one global
             scalar, so the penalty does not depend on the activation scale.
+            `whitened_mean_diff` is the whitened (IID) mass-mean probe of
+            Marks and Tegmark (2024), `S^-1 (m1 - m0)`, with S the pooled
+            within-class covariance shrunk toward a scaled identity by the
+            Ledoit-Wolf weight, as the LDA reader computes it; it needs
+            `labels`.
             `kmeans` is the centroid difference of a two-cluster K-means and
             `random` a Gaussian draw from `seed`; neither reads labels.
         h: Activations of shape (n, d).
@@ -85,6 +97,9 @@ def fit_direction(
             under its tolerance, repeat the fit with a tighter one instead
             of failing with a zero norm. Off by default, so a fit that
             finds no signal is an error.
+        c: Only for `logistic`. The inverse L2 strength of the regression
+            on the scaled rows, scikit-learn's `C`: smaller values
+            regularize more.
 
     Returns:
         The unit direction, the mean it was centered on and the raw norm.
@@ -106,7 +121,11 @@ def fit_direction(
     max_abs = float(np.abs(vectors).max())
     mean = vectors.mean(axis=0)
     fitted = vectors if preprocess == "none" else vectors - mean
-    if method == "mean_diff" or method == "logistic":
+    if (
+        method == "mean_diff"
+        or method == "logistic"
+        or method == "whitened_mean_diff"
+    ):
         if labels is None:
             raise ValueError(f"{method} needs labels")
         positive = labels == 1
@@ -114,8 +133,12 @@ def fit_direction(
             raise ValueError("labels must contain both classes")
         if method == "mean_diff":
             direction = _class_difference(fitted, positive)
+        elif method == "whitened_mean_diff":
+            direction = _whitened_class_difference(fitted, positive)
         else:
-            direction = _logistic_coefficients(fitted, positive, refit_at_zero)
+            direction = _logistic_coefficients(
+                fitted, positive, refit_at_zero, c
+            )
     elif method == "kmeans":
         direction = _centroid_difference(fitted, seed)
     elif method == "random":
@@ -177,18 +200,28 @@ def _class_difference(
     return rows[positive].mean(axis=0) - rows[~positive].mean(axis=0)
 
 
+def _whitened_class_difference(
+    rows: NDArray[np.float64], positive: NDArray[np.bool_]
+) -> NDArray[np.float64]:
+    # Imported here because `probes` imports this module through `reader`.
+    from tomography.reading.probes import _shrunk_mass_mean
+
+    return _shrunk_mass_mean(rows, positive, None)
+
+
 def _logistic_coefficients(
     rows: NDArray[np.float64],
     positive: NDArray[np.bool_],
     refit_at_zero: bool,
+    c: float,
 ) -> NDArray[np.float64]:
     scale = float(np.linalg.norm(rows) / np.sqrt(rows.shape[0]))
     if scale == 0.0:
         raise ValueError("the fitted direction has zero norm")
     scaled = rows / scale
-    model = LogisticRegression(max_iter=1000).fit(scaled, positive)
+    model = LogisticRegression(C=c, max_iter=1000).fit(scaled, positive)
     if refit_at_zero and not model.coef_.any():
-        model = LogisticRegression(max_iter=1000, tol=_FAINT_TOL).fit(
+        model = LogisticRegression(C=c, max_iter=1000, tol=_FAINT_TOL).fit(
             scaled, positive
         )
     return np.asarray(model.coef_[0], dtype=np.float64) / scale

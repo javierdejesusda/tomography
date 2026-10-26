@@ -1,0 +1,438 @@
+{
+  "_meta": {
+    "experiment": "v1",
+    "config_hash": "12dda15d9d38",
+    "seed": 0,
+    "git_sha": "6f5c4e545420a43801b375b2e2995dd51f2566d4",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-21T05:47:08+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "v1",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "labels_run": "results/p9a/qwen3-1.7b-base/d5d522bfecd4",
+      "reading_run": "results/p9b/qwen3-1.7b-base/5ca7821318ef",
+      "batch_size": 1
+    }
+  },
+  "data": {
+    "layer": 21,
+    "template": "fewshot",
+    "methods": [
+      "logistic",
+      "pca_diff",
+      "mean_diff",
+      "random"
+    ],
+    "types": [
+      "fictional_generated",
+      "obscure_real",
+      "obscure_real_pop",
+      "triviaqa_known",
+      "unknowable_detail",
+      "false_premise",
+      "kuq_ambiguous",
+      "kuq_controversial",
+      "kuq_counterfactual",
+      "kuq_false_assumption",
+      "kuq_future_unknown",
+      "kuq_unsolved_problem",
+      "real_vs_synthal",
+      "real_vs_generated"
+    ],
+    "n_items": {
+      "train": 3499,
+      "test": 3964
+    },
+    "extraction_dtype": "float32",
+    "reading_run_dtype": "bfloat16",
+    "views": {
+      "layers": [
+        1,
+        21,
+        28
+      ],
+      "panels": {
+        "entity": {
+          "types": [
+            "fictional_generated",
+            "obscure_real"
+          ],
+          "n_items": 718
+        },
+        "question": {
+          "types": [
+            "unknowable_detail",
+            "false_premise",
+            "kuq_ambiguous",
+            "kuq_controversial",
+            "kuq_counterfactual",
+            "kuq_false_assumption",
+            "kuq_future_unknown",
+            "kuq_unsolved_problem"
+          ],
+          "n_items": 453
+        },
+        "unknown": {
+          "types": [
+            "real_vs_synthal",
+            "real_vs_generated"
+          ],
+          "n_items": 939
+        }
+      }
+    },
+    "reproduction": {
+      "tolerance": 0.02,
+      "within_tolerance": true,
+      "max_abs_diff": {
+        "draw_at_layer": 0.0056707592925754335,
+        "mean_at_layer": 0.0013498300876390035,
+        "draw_all_layers": 0.673168576208061,
+        "mean_all_layers": 0.17621542572778248
+      },
+      "mean_diff_at_layer": {
+        "fictional_generated": {
+          "logistic": 6.629394736279437e-06,
+          "pca_diff": 0.0,
+          "mean_diff": 2.220446049250313e-16,
+          "random": 0.00013369279384800592
+        },
+        "obscure_real": {
+          "logistic": 9.679218087532693e-05,
+          "pca_diff": 9.153173626230693e-05,
+          "mean_diff": 7.469831350137568e-05,
+          "random": 0.0005923260633988736
+        },
+        "obscure_real_pop": {
+          "logistic": 7.68024913466725e-05,
+          "pca_diff": 0.0013498300876390035,
+          "mean_diff": 0.00021357405127875317,
+          "random": 0.0009921198539700748
+        },
+        "triviaqa_known": {
+          "logistic": 0.00043010752688188436,
+          "pca_diff": 0.00031280547409584525,
+          "mean_diff": 0.00011730205278581707,
+          "random": 0.00035190615835778427
+        },
+        "unknowable_detail": {
+          "logistic": 0.0,
+          "pca_diff": 0.0,
+          "mean_diff": 0.0,
+          "random": 0.001315789473684159
+        },
+        "false_premise": {
+          "logistic": 0.00015852885225109414,
+          "pca_diff": 6.341154090050427e-05,
+          "mean_diff": 1.1102230246251565e-16,
+          "random": 0.0005072923272034791
+        },
+        "kuq_ambiguous": {
+          "logistic": 0.0,
+          "pca_diff": 7.739938080497666e-05,
+          "mean_diff": 7.739938080497666e-05,
+          "random": 7.739938080497666e-05
+        },
+        "kuq_controversial": {
+          "logistic": 0.0001144164759724342,
+          "pca_diff": 0.0001144164759724342,
+          "mean_diff": 0.0001144164759724342,
+          "random": 0.00017162471395881784
+        },
+        "kuq_counterfactual": {
+          "logistic": 6.119951040373106e-05,
+          "pca_diff": 6.11995104039531e-05,
+          "mean_diff": 0.0,
+          "random": 0.0004895960832314028
+        },
+        "kuq_false_assumption": {
+          "logistic": 0.0,
+          "pca_diff": 0.0,
+          "mean_diff": 8.223684210539872e-05,
+          "random": 0.0003289473684211508
+        },
+        "kuq_future_unknown": {
+          "logistic": 0.0,
+          "pca_diff": 0.0,
+          "mean_diff": 0.0,
+          "random": 0.0003759398496241406
+        },
+        "kuq_unsolved_problem": {
+          "logistic": 5.980861244014868e-05,
+          "pca_diff": 0.0004186602870813738,
+          "mean_diff": 0.00029904306220096544,
+          "random": 0.0012559808612441214
+        },
+        "real_vs_synthal": {
+          "logistic": 1.7052721330124143e-05,
+          "pca_diff": 0.00014779025152744651,
+          "mean_diff": 9.663208753729613e-05,
+          "random": 0.0002898962626118884
+        },
+        "real_vs_generated": {
+          "logistic": 3.536637378132035e-05,
+          "pca_diff": 0.0003790757317886362,
+          "mean_diff": 0.00017076212512256994,
+          "random": 0.0013204929926831088
+        }
+      }
+    },
+    "surface": {
+      "fictional_generated": {
+        "text_word": {
+          "recomputed": 0.9637040638189733,
+          "committed": 0.9637040638189733,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9946191412724018,
+          "committed": 0.9946191412724018,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "obscure_real": {
+        "text_word": {
+          "recomputed": 0.8725920314785006,
+          "committed": 0.8725920314785006,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.8729129185998801,
+          "committed": 0.8729129185998801,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": 0.8654983219181686,
+          "committed": 0.8654983219181686,
+          "equal": true
+        }
+      },
+      "obscure_real_pop": {
+        "text_word": {
+          "recomputed": 0.8725920314785006,
+          "committed": 0.8725920314785006,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.8729129185998801,
+          "committed": 0.8729129185998801,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": 0.8654983219181686,
+          "committed": 0.8654983219181686,
+          "equal": true
+        }
+      },
+      "triviaqa_known": {
+        "text_word": {
+          "recomputed": 0.6928641251221896,
+          "committed": 0.6928641251221896,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.6713587487781036,
+          "committed": 0.6713587487781036,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "unknowable_detail": {
+        "text_word": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "false_premise": {
+        "text_word": {
+          "recomputed": 0.9766962587190868,
+          "committed": 0.9766962587190868,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9752694990488269,
+          "committed": 0.9752694990488269,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_ambiguous": {
+        "text_word": {
+          "recomputed": 0.878482972136223,
+          "committed": 0.878482972136223,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9175696594427245,
+          "committed": 0.9175696594427245,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_controversial": {
+        "text_word": {
+          "recomputed": 0.9751144164759725,
+          "committed": 0.9751144164759725,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9874141876430206,
+          "committed": 0.9874141876430206,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_counterfactual": {
+        "text_word": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_false_assumption": {
+        "text_word": {
+          "recomputed": 0.977796052631579,
+          "committed": 0.977796052631579,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.990953947368421,
+          "committed": 0.990953947368421,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_future_unknown": {
+        "text_word": {
+          "recomputed": 0.9917293233082707,
+          "committed": 0.9917293233082707,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9860902255639098,
+          "committed": 0.9860902255639098,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "kuq_unsolved_problem": {
+        "text_word": {
+          "recomputed": 0.9533492822966507,
+          "committed": 0.9533492822966507,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9674043062200957,
+          "committed": 0.9674043062200957,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "real_vs_synthal": {
+        "text_word": {
+          "recomputed": 0.7631377007247406,
+          "committed": 0.7631377007247406,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 1.0,
+          "committed": 1.0,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      },
+      "real_vs_generated": {
+        "text_word": {
+          "recomputed": 0.9512124110883698,
+          "committed": 0.9512124110883698,
+          "equal": true
+        },
+        "text_char": {
+          "recomputed": 0.9984445269929599,
+          "committed": 0.9984445269929599,
+          "equal": true
+        },
+        "popularity": {
+          "recomputed": null,
+          "committed": null,
+          "equal": true
+        }
+      }
+    },
+    "surface_equal": true
+  }
+}
