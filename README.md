@@ -124,6 +124,7 @@ Every id is the argument of `tomography run`. Coverage is read from the committe
 | `r5` | Does an honesty direction from personas transfer to plain statements? (exploratory) | all 10 |
 | `r6` | Does a reader beat text-only baselines on TruthfulQA MC1? | all 10 |
 | `r7` | Does one read truth on facts and on Geometry of Truth sets? | all 10 |
+| `r8` | Does LAT beat few-shot prompting with the same examples on the RepE QA tasks (Figure 7, Table 9) and TruthfulQA MC1? | code only |
 | `tb1` | How much of a reader's accuracy do word and character n-gram classifiers reach with no model? | none (one run) |
 | `p1` | How much does prompt wording move a sentiment reader? | all 10 |
 | `p2` | How do token position and a misleading sentence matter? | all 10 |

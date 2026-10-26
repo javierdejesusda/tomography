@@ -11,9 +11,11 @@ Contents:
 2. [Paper mapping](#paper-mapping)
 3. [Pipeline choices and deviations](#pipeline-choices-and-deviations)
 4. [Statistics](#statistics)
-5. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
-6. [Run settings of the GPU runs](#run-settings-of-the-gpu-runs)
-7. [Data sources](#data-sources)
+5. [Reader comparison (M2)](#reader-comparison-m2)
+6. [LAT against few-shot prompting (R8)](#lat-against-few-shot-prompting-r8)
+7. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
+8. [Run settings of the GPU runs](#run-settings-of-the-gpu-runs)
+9. [Data sources](#data-sources)
 
 ## Scope and models
 
@@ -56,6 +58,7 @@ counterpart. The ids are the arguments of `tomography run`; each config and its 
 | `r5`           | Honesty function with persona prompts                                  | Sec. 4.3, App. D.1.2, Figs. 8 and 9                                                  |
 | `r6`           | TruthfulQA MC1: standard, heuristic, text-only and LAT                 | Sec. 4.1, Table 1, Table 8                                                           |
 | `r7`           | Truthfulness on true and false facts, plus out-of-distribution sets    | Sec. 4.1 and 4.2; the out-of-distribution truth sets are an extension                |
+| `r8`           | LAT against few-shot prompting on five QA tasks and TruthfulQA MC1     | Fig. 7 and Table 9 (QA tasks), Table 1 (TruthfulQA MC1); see [R8](#lat-against-few-shot-prompting-r8) |
 | `m1`           | Six direction finders: correlation, manipulation, termination          | Sec. 5.1.1, Fig. 12                                                                  |
 | `c1`           | Sentiment steering: sweep, operators, side effects                     | Extension (uses the Sec. 3.2.1 operators and adds a prompting baseline arm)          |
 | `c2`           | Emotion steering, steered emotion against measured emotion             | Sec. 6.1.2                                                                           |
@@ -175,6 +178,7 @@ that resamples whole runs along axis 0, and `wilson_ci` gives intervals for rate
 | `p9d` slopes                                                   | percentile bootstrap                                           | the items, paired across arms                                             |
 | `m2` cell metrics (`pair_lo`, `pair_hi`, `auroc_lo`, `auroc_hi`) | percentile bootstrap                                         | the seeds (independent training sets)                                     |
 | `m2` comparisons                                               | paired percentile bootstrap; DeLong; exact McNemar; Holm       | the report pairs (clusters), on the seed ensemble                         |
+| `r8` task accuracies                                           | percentile bootstrap; Wilson interval for a single run         | the seeds; the test questions of a zero-shot or single-seed run           |
 
 `a1` uses a t-interval because a percentile bootstrap of so few runs covers less than its level. The `a2` and `a5`
 intervals and nulls are described in the docstrings of `experiments/a2_logit_lens.py` and
@@ -234,6 +238,66 @@ readout by layer rule, so a gain of pooling is never credited to nonlinearity.
   test on pair outcomes. A Holm family is one task, condition, layer rule and baseline, separately for the DeLong
   and McNemar p values. All statistics come from `reading/stats.py`.
 - Runs load the model in float32.
+
+## LAT against few-shot prompting (R8)
+
+`r8` (`experiments/r8_qa_correctness.py`) replicates the QA protocol of Fig. 7 and Table 9 on one checkpoint:
+LAT against few-shot prompting on OpenBookQA, CommonsenseQA, ARC-Easy, ARC-Challenge and RACE, plus TruthfulQA MC1
+(Table 1). The templates, splits, shot counts and prompts are those of `qa_tasks.py`.
+
+- LAT: the reference code's templates as plain text with no chat wrapper, one stimulus per choice, read at the last
+  token. Each seed's training questions (`qa_tasks.SHOTS`: 5 for OpenBookQA, 7 for CommonsenseQA, 25 for ARC, 3 for
+  RACE, the 6 TruthfulQA primers) are paired inside each question without labels (`within_group`), the direction
+  is `pca_diff` on centered differences (`preprocess="unit"` is the App. C.1 variant) and its sign follows the
+  reference rule (`RepReader.fit`); another `method` changes the finder, and the finders that fit on labels
+  (`mean_diff`, `logistic`) then use the k shots' gold choices. Accuracy is the share of questions whose correct
+  choice scores highest, ties sharing credit. Seed `i` draws with `seed + i`, so the default seeds are the
+  reference's 0 to 9.
+- Layer rules, each giving the layer a seed is tested at: `reference` (the best accuracy on the labeled
+  layer-selection questions, the reference's validation split), `k-shot` (the best accuracy on the seed's own
+  training questions, so no labeled example beyond the k shots is used) and `test-oracle` (one layer for every
+  seed, the best mean test accuracy: an upper bound, not a protocol). Ties go to the deeper layer, as the
+  reference's scan from the last layer does. Training accuracy often reaches 1.0 at many layers, so the `k-shot`
+  rule then takes the deepest of them. CommonsenseQA's layer-selection questions depend on the seed (the training
+  questions it did not draw); they are read once for the union of the seeds and each seed counts its own. On
+  TruthfulQA the layer-selection questions are the 6 training primers, as in the reference, so the `reference` and
+  `k-shot` rules score the same questions and pick the same layers there (unless `n_eval_pairs` keeps fewer than
+  6); both are still reported, with their own rows.
+- Few-shot: the lm-evaluation-harness prompt format (`fewshot_prompt`), with each seed's own k training questions as
+  the examples, so the shots are those its LAT reader was fitted on (the Fig. 7 caption: "Using the same few-shot
+  examples"). The first `n_fewshot_seeds` seeds are scored, all by default. RACE and TruthfulQA are zero-shot
+  (`race_prompt`, `tqa_prompt`) and run once; TruthfulQA MC1 is its `acc`. A run reports `acc` (the summed
+  log-likelihood) and `acc_norm` (per character), ties sharing credit. The harness reports `acc` only for RACE and
+  TruthfulQA MC1, so the `acc_norm` average of `figure7` takes RACE's `acc` and the `acc_norm` of the other four
+  tasks; the `acc` average takes every task's `acc`. Table 9 imports its few-shot numbers from other evaluations, so
+  this baseline is measured here, not taken from the paper.
+- Call grouping: one `judges.continuation_logprob` call scores every (question, choice) pair of a seed and task
+  (one call per task for a zero-shot task). The call runs the token prefix shared by all its contexts once (the
+  k-shot block), reuses its key-value cache for every question, and computes logits only at the continuation
+  positions. Its scores depend on the grouping at float32 rounding level, because the shared prefix moves with the
+  other contexts of the call (up to 2.1e-05 on `gpt2`), so the grouping is fixed at one call per seed and task. No
+  BOS is prepended, as in the harness.
+- BOS: `bos="none"`, where the Qwen3 base models default to a prepended separator. The templates are plain text for
+  every checkpoint and the Qwen3 tokenizer adds no BOS, so the base and post-trained checkpoints read the same
+  tokens the reference code would. A config with another `bos` is refused, because the few-shot scorer never
+  prepends one; `layers`, when set, must be strictly increasing.
+- Memory: runs load the model in float32. The LAT reads run the decoder without the LM head, and the few-shot scorer
+  never computes full-vocabulary logits over a whole prompt. `race_batch_size` (1 by default) sets the batch of the
+  RACE stimuli, of up to about 1,110 tokens with Qwen3's tokenizer; the 25-shot ARC contexts reach about 1,220
+  tokens and the scorer runs each sequence alone. A task's activations are released before the next task is read.
+  Within a task, the training sets and the test split are read first and released before the layer-selection split
+  is read, so the host holds one evaluation split at a time: for Qwen3-1.7B (float32, 28 layers, about 229 KB per
+  stimulus) the largest, ARC-Easy's test split of about 9.5k stimuli, takes about 2.2 GB, and about twice that for a
+  moment while its batches are joined.
+- Smoke runs: `n_eval_pairs` keeps that many questions of the layer-selection and of the test split; None keeps them
+  all. `n_pairs` is not used.
+- Outputs: each task writes `curves_<task>` (test accuracy per seed and layer of the reader and the random and
+  shuffled controls), `lat_<task>` (the reader's accuracy on its training and layer-selection questions),
+  `fewshot_<task>` (the log-likelihood of every test choice per few-shot seed) and last `task_<task>` (its table rows
+  and summary). The run then writes `table.json` (one row per task, method, layer rule, metric and seed) and
+  `summary.json`, whose `figure7` entry is Table 9's average row over the Fig. 7 tasks of the run, the data of the
+  Fig. 7 bars. There is no resume: an interrupted run keeps the files of the tasks it finished, and the others can
+  run with `--set tasks=[...]`, which is a new config and run directory.
 
 ## Known versus unknown questions (P9)
 
