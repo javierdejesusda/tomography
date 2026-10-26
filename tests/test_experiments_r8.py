@@ -505,6 +505,26 @@ def test_a_task_releases_its_activations_before_the_next_is_read(
     assert {name for name, _ in held} == {"obqa", "race"}
 
 
+def test_the_layer_split_is_read_after_the_train_and_test_activations_go(
+    qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held: list[tuple[str, weakref.ref[Activations]]] = []
+    collect = r8_qa_correctness.stimulus_activations
+
+    def tracking(loaded: LoadedModel, stimuli: StimulusSet, **kw: Any) -> Any:
+        split = stimuli.uids[0].split("-")[1]
+        if split == "val":
+            assert all(ref() is None for _, ref in held)
+        act = collect(loaded, stimuli, **kw)
+        held.append((split, weakref.ref(act)))
+        return act
+
+    monkeypatch.setattr(r8_qa_correctness, "stimulus_activations", tracking)
+    _run(_config(tasks=("obqa",)), qwen3, tmp_path)
+
+    assert [split for split, _ in held] == ["train", "train", "test", "val"]
+
+
 def test_race_stimuli_are_read_at_the_race_batch_size(
     qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

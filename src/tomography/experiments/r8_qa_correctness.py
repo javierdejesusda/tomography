@@ -519,6 +519,7 @@ def _run_task(
         ylabel="Test accuracy",
         chance=chance,
         n_layers=loaded.n_layers,
+        seed=derive_seed(config.seed, "curves", task),
     )
     run_dir.write_arrays(
         f"lat_{task}",

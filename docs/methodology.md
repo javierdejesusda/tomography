@@ -249,8 +249,10 @@ LAT against few-shot prompting on OpenBookQA, CommonsenseQA, ARC-Easy, ARC-Chall
   token. Each seed's training questions (`qa_tasks.SHOTS`: 5 for OpenBookQA, 7 for CommonsenseQA, 25 for ARC, 3 for
   RACE, the 6 TruthfulQA primers) are paired inside each question without labels (`within_group`), the direction
   is `pca_diff` on centered differences (`preprocess="unit"` is the App. C.1 variant) and its sign follows the
-  reference rule (`RepReader.fit`). Accuracy is the share of questions whose correct choice scores highest, ties
-  sharing credit. Seed `i` draws with `seed + i`, so the default seeds are the reference's 0 to 9.
+  reference rule (`RepReader.fit`); another `method` changes the finder, and the finders that fit on labels
+  (`mean_diff`, `logistic`) then use the k shots' gold choices. Accuracy is the share of questions whose correct
+  choice scores highest, ties sharing credit. Seed `i` draws with `seed + i`, so the default seeds are the
+  reference's 0 to 9.
 - Layer rules, each giving the layer a seed is tested at: `reference` (the best accuracy on the labeled
   layer-selection questions, the reference's validation split), `k-shot` (the best accuracy on the seed's own
   training questions, so no labeled example beyond the k shots is used) and `test-oracle` (one layer for every
@@ -282,9 +284,11 @@ LAT against few-shot prompting on OpenBookQA, CommonsenseQA, ARC-Easy, ARC-Chall
 - Memory: runs load the model in float32. The LAT reads run the decoder without the LM head, and the few-shot scorer
   never computes full-vocabulary logits over a whole prompt. `race_batch_size` (1 by default) sets the batch of the
   RACE stimuli, of up to about 1,110 tokens with Qwen3's tokenizer; the 25-shot ARC contexts reach about 1,220
-  tokens and the scorer runs each sequence alone. A task's activations are released before the next task is read;
-  while a task runs they take about 3 GB of host memory for Qwen3-1.7B on CommonsenseQA or ARC-Easy (float32, 28
-  layers, every stimulus of the 10 training sets, the layer-selection and the test split).
+  tokens and the scorer runs each sequence alone. A task's activations are released before the next task is read.
+  Within a task, the training sets and the test split are read first and released before the layer-selection split
+  is read, so the host holds one evaluation split at a time: for Qwen3-1.7B (float32, 28 layers, about 229 KB per
+  stimulus) the largest, ARC-Easy's test split of about 9.5k stimuli, takes about 2.2 GB, and about twice that for a
+  moment while its batches are joined.
 - Smoke runs: `n_eval_pairs` keeps that many questions of the layer-selection and of the test split; None keeps them
   all. `n_pairs` is not used.
 - Outputs: each task writes `curves_<task>` (test accuracy per seed and layer of the reader and the random and
