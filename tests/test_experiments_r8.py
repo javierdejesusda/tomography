@@ -687,13 +687,8 @@ def test_one_scorer_call_per_seed_and_task_with_that_seeds_shots(
     assert _task_file(run_dir, "race")["summary"]["few_shot"]["shots"] == 0
 
 
-def test_planted_loglikelihoods_give_the_expected_acc_and_acc_norm(
-    qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Gold choices always score highest, so acc is 1; per character only
-    # the test question with the longest gold text wins, so acc_norm is 1/3.
-    items = cast(list[ChoiceExample], _data()["obqa"])
-    gold = {item.choices[item.correct] for item in items}
+def _plant_gold(monkeypatch: pytest.MonkeyPatch, gold: set[str]) -> None:
+    """Makes the few-shot scorer give the gold choices -2.0, the rest -2.5."""
 
     def planted(
         model: Any, tokenizer: Any, prompts: Any, continuations: Any, **kw: Any
@@ -704,6 +699,17 @@ def test_planted_loglikelihoods_give_the_expected_acc_and_acc_norm(
         )
 
     monkeypatch.setattr(r8_qa_correctness, "continuation_logprob", planted)
+
+
+def test_planted_loglikelihoods_give_the_expected_acc_and_acc_norm(
+    qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Gold choices always score highest, so acc is 1; per character only
+    # the test question with the longest gold text wins, so acc_norm is 1/3.
+    items = cast(list[ChoiceExample], _data()["obqa"])
+    gold = {item.choices[item.correct] for item in items}
+
+    _plant_gold(monkeypatch, gold)
     run_dir = _run(_config(tasks=("obqa",)), qwen3, tmp_path)
 
     rows = [row for row in _rows(run_dir) if row["method"] == "few-shot"]
@@ -781,15 +787,7 @@ def test_the_acc_norm_average_takes_race_at_acc_its_only_harness_metric(
         ]
     }
 
-    def planted(
-        model: Any, tokenizer: Any, prompts: Any, continuations: Any, **kw: Any
-    ) -> NDArray[np.float32]:
-        return np.array(
-            [-2.0 if c.strip() in gold else -2.5 for c in continuations],
-            dtype=np.float32,
-        )
-
-    monkeypatch.setattr(r8_qa_correctness, "continuation_logprob", planted)
+    _plant_gold(monkeypatch, gold)
     run_dir = _run(_config(tasks=("race", "obqa")), qwen3, tmp_path)
 
     summary = cast(dict[str, Any], run_dir.read_json("summary"))

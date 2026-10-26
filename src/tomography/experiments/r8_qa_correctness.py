@@ -141,7 +141,7 @@ class _Lat:
             (N, K).
         test: The test accuracy of every `SERIES`, shape (3, N, K).
         n_select: The number of layer-selection questions of each seed.
-        test_uids: The test questions, in source order.
+        test_rows: The test rows read, in source order.
     """
 
     layers: tuple[int, ...]
@@ -149,7 +149,7 @@ class _Lat:
     select: NDArray[np.float64]
     test: NDArray[np.float64]
     n_select: list[int]
-    test_uids: list[str]
+    test_rows: list[QaRow]
 
 
 def _check(config: Config) -> None:
@@ -261,10 +261,10 @@ def _lat(
     """Fits a reader per seed and scores it on every split of the task.
 
     The training questions of each seed are paired inside each question
-    (`within_group`). The layer-selection and test questions are read once
-    for all seeds; CommonsenseQA's layer-selection questions depend on the
-    seed, so they are read for the union of the seeds and each seed counts
-    its own.
+    (`within_group`). The test and then the layer-selection questions are
+    read once for all seeds; CommonsenseQA's layer-selection questions
+    depend on the seed, so they are read for the union of the seeds and
+    each seed counts its own.
     """
     layers = (
         tuple(range(1, loaded.n_layers + 1))
@@ -310,8 +310,6 @@ def _lat(
         )
         for i, split in enumerate(splits)
     ]
-    pool = {_question(row).uid: row for s in splits for row in s.layer}
-    select = evaluation(list(pool.values()), "layer")
     test = evaluation(splits[0].test, "test")
     result = sweep_from_activations(
         train,
@@ -320,20 +318,26 @@ def _lat(
         preprocess=config.preprocess,
         seed=derive_seed(config.seed, task),
     )
+    train_accuracy = np.stack(
+        [
+            _accuracy(reader, prepared)
+            for reader, prepared in zip(result.readers, train, strict=True)
+        ]
+    )
+    tested = set(_group_questions(test[0]))
+    # The layer-selection questions are read last, after the training and
+    # test activations are released, so the host never holds all three.
+    del train, test
+    pool = {_question(row).uid: row for s in splits for row in s.layer}
+    select = evaluation(list(pool.values()), "layer")
     selected = set(_group_questions(select[0]))
     kept = [
         {_question(row).uid for row in split.layer} & selected
         for split in splits
     ]
-    tested = set(_group_questions(test[0]))
     return _Lat(
         layers=tuple(layers),
-        train=np.stack(
-            [
-                _accuracy(reader, prepared)
-                for reader, prepared in zip(result.readers, train, strict=True)
-            ]
-        ),
+        train=train_accuracy,
         select=np.stack(
             [
                 _accuracy(reader, select, keep)
@@ -342,10 +346,8 @@ def _lat(
         ),
         test=result.per_seed("test"),
         n_select=[len(keep) for keep in kept],
-        test_uids=[
-            _question(row).uid
-            for row in splits[0].test
-            if _question(row).uid in tested
+        test_rows=[
+            row for row in splits[0].test if _question(row).uid in tested
         ],
     )
 
@@ -421,9 +423,7 @@ def _few_shot(
     """
     runs: list[tuple[int | None, Sequence[QaRow]]] = [(None, ())]
     if task in FEW_SHOT_TASKS:
-        n = config.n_seeds
-        if config.n_fewshot_seeds is not None:
-            n = config.n_fewshot_seeds
+        n = config.n_fewshot_seeds or config.n_seeds
         runs = [(config.seed + i, splits[i].train) for i in range(n)]
     loglik = []
     for _, shots in runs:
@@ -506,10 +506,10 @@ def _run_task(
     seeds = [config.seed + i for i in range(config.n_seeds)]
     splits = [_splits(task, rows, seed) for seed in seeds]
     lat = _lat(config, loaded, task, splits)
-    tested = set(lat.test_uids)
-    test_rows = [row for row in splits[0].test if _question(row).uid in tested]
-    n_test = len(test_rows)
-    chance = float(np.mean([1 / len(_question(r).choices) for r in test_rows]))
+    test_rows = lat.test_rows
+    items = [_question(row) for row in test_rows]
+    n_test = len(items)
+    chance = float(np.mean([1 / len(item.choices) for item in items]))
     write_curves(
         run_dir,
         lat.test,
@@ -547,7 +547,6 @@ def _run_task(
             "layers": chosen,
         }
     fewshot_seeds, loglik = _few_shot(config, loaded, task, splits, test_rows)
-    items = [_question(row) for row in test_rows]
     run_dir.write_arrays(
         f"fewshot_{task}",
         loglik=loglik,
@@ -577,7 +576,7 @@ def _run_task(
             "layer": lat.n_select,
             "test": n_test,
         },
-        "test_uids": lat.test_uids,
+        "test_uids": [item.uid for item in items],
         "chance": chance,
         "lat": lat_summary,
         "few_shot": few_shot,
