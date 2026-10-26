@@ -1,10 +1,13 @@
-"""ARC-Challenge multiple-choice science questions (Clark et al., 2018).
+"""ARC multiple-choice science questions (Clark et al., 2018).
 
-The three source splits are kept: train, validation (as `val`) and test.
+Two configurations share one pinned revision: ARC-Challenge, the default,
+and ARC-Easy. The three source splits are kept: train, validation (as `val`)
+and test.
 """
 
 from collections.abc import Iterable
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from typing import Literal
@@ -17,6 +20,7 @@ from tomography.datasets.sources import PinnedSource
 from tomography.datasets.sources import fetch
 
 SourceSplit = Literal["train", "validation", "test"]
+Config = Literal["ARC-Challenge", "ARC-Easy"]
 
 SOURCE = PinnedSource(
     name="arc",
@@ -31,10 +35,22 @@ SOURCE = PinnedSource(
     license="CC-BY-SA-4.0",
     sha256={},
 )
-
-_FILES: Mapping[SourceSplit, str] = dict(
-    zip(("train", "validation", "test"), SOURCE.files, strict=True)
+EASY_SOURCE = replace(
+    SOURCE,
+    name="arc_easy",
+    files=(
+        "ARC-Easy/train-00000-of-00001.parquet",
+        "ARC-Easy/validation-00000-of-00001.parquet",
+        "ARC-Easy/test-00000-of-00001.parquet",
+    ),
+    sha256={},
 )
+
+_SOURCES: Mapping[Config, PinnedSource] = {
+    "ARC-Challenge": SOURCE,
+    "ARC-Easy": EASY_SOURCE,
+}
+_SOURCE_SPLITS: tuple[SourceSplit, ...] = ("train", "validation", "test")
 _SPLITS: Mapping[SourceSplit, Split] = {
     "train": "train",
     "validation": "val",
@@ -84,21 +100,26 @@ def parse_arc(
 
 
 def load_arc(
-    *, cache: Path | None = None, offline: bool = False
+    *,
+    config: Config = "ARC-Challenge",
+    cache: Path | None = None,
+    offline: bool = False,
 ) -> list[ChoiceExample]:
-    """Loads ARC-Challenge, all three source splits.
+    """Loads one ARC configuration, all three source splits.
 
     Args:
+        config: "ARC-Challenge" (`SOURCE`) or "ARC-Easy" (`EASY_SOURCE`).
         cache: Cache directory; defaults to `sources.cache_dir()`.
         offline: If True, read only from the cache.
 
     Returns:
-        The items of `parse_arc` for the train, validation and test files in
-        that order.
+        The items of `parse_arc` for the configuration's train, validation
+        and test files in that order.
     """
+    source = _SOURCES[config]
     items: list[ChoiceExample] = []
-    for source_split, file in _FILES.items():
-        path = fetch(SOURCE, file=file, cache=cache, offline=offline)
+    for source_split, file in zip(_SOURCE_SPLITS, source.files, strict=True):
+        path = fetch(source, file=file, cache=cache, offline=offline)
         rows = pq.read_table(path).to_pylist()
         items.extend(parse_arc(rows, source_split=source_split))
     return items

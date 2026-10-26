@@ -6,6 +6,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from tomography.datasets import arc
+from tomography.datasets.arc import EASY_SOURCE
 from tomography.datasets.arc import SOURCE
 from tomography.datasets.arc import load_arc
 from tomography.datasets.arc import parse_arc
@@ -15,6 +16,11 @@ FILES = {
     "train": "ARC-Challenge/train-00000-of-00001.parquet",
     "validation": "ARC-Challenge/validation-00000-of-00001.parquet",
     "test": "ARC-Challenge/test-00000-of-00001.parquet",
+}
+EASY_FILES = {
+    "train": "ARC-Easy/train-00000-of-00001.parquet",
+    "validation": "ARC-Easy/validation-00000-of-00001.parquet",
+    "test": "ARC-Easy/test-00000-of-00001.parquet",
 }
 
 
@@ -34,6 +40,23 @@ def _row(
 
 LETTERED = _row("Mercury_1", ["a", "b", "c", "d"], ["A", "B", "C", "D"], "C")
 NUMBERED = _row("MCAS_2", ["w", "x", "y", "z"], ["1", "2", "3", "4"], "4")
+EASY = _row("Mercury_7", ["p", "q", "r"], ["A", "B", "C"], "B")
+SERVED = {
+    FILES["train"]: [LETTERED, NUMBERED],
+    FILES["validation"]: [LETTERED],
+    FILES["test"]: [],
+    EASY_FILES["train"]: [EASY],
+    EASY_FILES["validation"]: [],
+    EASY_FILES["test"]: [NUMBERED],
+}
+
+
+def parsed(files: dict[str, str]) -> list[ChoiceExample]:
+    return [
+        item
+        for source_split, file in files.items()
+        for item in parse_arc(SERVED[file], source_split=source_split)  # type: ignore[arg-type]
+    ]
 
 
 def test_source_pins_the_hub_revision() -> None:
@@ -42,6 +65,15 @@ def test_source_pins_the_hub_revision() -> None:
     assert SOURCE.location == "allenai/ai2_arc"
     assert SOURCE.revision == "210d026faf9955653af8916fad021475a3f00453"
     assert SOURCE.files == tuple(FILES.values())
+
+
+def test_easy_source_pins_the_same_revision_with_the_easy_files() -> None:
+    assert EASY_SOURCE.name == "arc_easy"
+    assert EASY_SOURCE.kind == "hub"
+    assert EASY_SOURCE.location == SOURCE.location
+    assert EASY_SOURCE.revision == SOURCE.revision
+    assert EASY_SOURCE.files == tuple(EASY_FILES.values())
+    assert EASY_SOURCE.license == SOURCE.license
 
 
 def test_parse_points_correct_at_the_answer_key() -> None:
@@ -105,10 +137,9 @@ def test_parse_rejects_choices_and_labels_of_different_length() -> None:
 def served(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> list[dict[str, object]]:
-    rows = {"train": [LETTERED, NUMBERED], "validation": [LETTERED], "test": []}
     paths = {}
-    for name, split_rows in rows.items():
-        path = tmp_path / f"{name}.parquet"
+    for index, (file, split_rows) in enumerate(SERVED.items()):
+        path = tmp_path / f"{index}.parquet"
         schema = pa.schema(
             [
                 ("id", pa.string()),
@@ -126,7 +157,7 @@ def served(
             ]
         )
         pq.write_table(pa.Table.from_pylist(split_rows, schema=schema), path)
-        paths[FILES[name]] = path
+        paths[file] = path
     calls: list[dict[str, object]] = []
 
     def fake_fetch(source: object, *, file: str, **kwargs: object) -> Path:
@@ -151,6 +182,36 @@ def test_load_reads_train_validation_then_test(
         ("arc-MCAS_2", "train"),
         ("arc-Mercury_1", "val"),
     ]
+
+
+def test_load_default_equals_the_parsed_challenge_files(
+    served: list[dict[str, object]], tmp_path: Path
+) -> None:
+    items = load_arc(cache=tmp_path, offline=True)
+
+    assert items == parsed(FILES)
+
+
+def test_load_reads_the_easy_files_for_arc_easy(
+    served: list[dict[str, object]], tmp_path: Path
+) -> None:
+    items = load_arc(config="ARC-Easy", cache=tmp_path, offline=True)
+
+    assert [c["file"] for c in served] == list(EASY_FILES.values())
+    assert all(c["source"] is EASY_SOURCE for c in served)
+    assert all(c["cache"] == tmp_path for c in served)
+    assert all(c["offline"] is True for c in served)
+    assert items == parsed(EASY_FILES)
+
+
+@pytest.mark.network
+def test_load_reads_the_pinned_easy_revision() -> None:
+    items = load_arc(config="ARC-Easy")
+
+    by_split = collections.Counter(i.split for i in items)
+    assert by_split == {"train": 2_251, "val": 570, "test": 2_376}
+    assert len({i.uid for i in items}) == len(items)
+    assert {len(i.choices) for i in items} == {3, 4, 5}
 
 
 @pytest.mark.network
