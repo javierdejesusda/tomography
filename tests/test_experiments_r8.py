@@ -226,6 +226,10 @@ def test_a_config_rejects_an_unknown_task_name() -> None:
         ({"batch_size": 0}, "batch_size"),
         ({"race_batch_size": 0}, "race_batch_size"),
         ({"n_eval_pairs": 0}, "n_eval_pairs"),
+        ({"bos": "prepend"}, "bos"),
+        ({"bos": None}, "bos"),
+        ({"layers": (2, 1)}, "layers"),
+        ({"layers": (1, 1)}, "layers"),
     ],
 )
 def test_a_bad_config_is_refused_before_any_model_call(
@@ -750,7 +754,9 @@ def test_the_summary_averages_the_figure7_tasks_like_table9(
         assert figure7["few_shot"][metric] == pytest.approx(
             np.mean(
                 [
-                    tasks[t]["few_shot"][metric]["accuracy"]
+                    tasks[t]["few_shot"]["acc" if t == "race" else metric][
+                        "accuracy"
+                    ]
                     for t in FIGURE7_TASKS
                 ]
             )
@@ -758,6 +764,40 @@ def test_the_summary_averages_the_figure7_tasks_like_table9(
     assert tasks == {
         task: _task_file(finished, task)["summary"] for task in TASKS
     }
+
+
+def test_the_acc_norm_average_takes_race_at_acc_its_only_harness_metric(
+    qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Gold choices always score highest, so acc is 1 everywhere; per
+    # character a longer distractor wins both RACE test questions, so RACE's
+    # acc_norm is 0, and OBQA's is 1/3.
+    data = _data()
+    gold = {
+        item.choices[item.correct]
+        for item in [
+            *cast(list[ChoiceExample], data["obqa"]),
+            *(p.last for p in cast(list[RacePassage], data["race"])),
+        ]
+    }
+
+    def planted(
+        model: Any, tokenizer: Any, prompts: Any, continuations: Any, **kw: Any
+    ) -> NDArray[np.float32]:
+        return np.array(
+            [-2.0 if c.strip() in gold else -2.5 for c in continuations],
+            dtype=np.float32,
+        )
+
+    monkeypatch.setattr(r8_qa_correctness, "continuation_logprob", planted)
+    run_dir = _run(_config(tasks=("race", "obqa")), qwen3, tmp_path)
+
+    summary = cast(dict[str, Any], run_dir.read_json("summary"))
+    race = summary["tasks"]["race"]["few_shot"]
+    assert (race["acc"]["accuracy"], race["acc_norm"]["accuracy"]) == (1, 0)
+    assert summary["figure7"]["few_shot"] == pytest.approx(
+        {"acc": 1.0, "acc_norm": (1.0 + 1 / 3) / 2}
+    )
 
 
 def _loaders(

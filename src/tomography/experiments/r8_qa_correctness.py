@@ -23,6 +23,7 @@ keeps fewer than 6); both are still reported.
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 from typing import cast
@@ -88,6 +89,9 @@ FIGURE7_TASKS: tuple[Task, ...] = (
 )
 FEW_SHOT_TASKS: tuple[FewShotTask, ...] = get_args(FewShotTask)
 METRICS = ("acc", "acc_norm")
+# The tasks whose only harness metric is acc; Figure 7's acc_norm average
+# takes their acc.
+ACC_ONLY_TASKS: tuple[Task, ...] = ("race", "tqa")
 COLUMNS = ("task", "method", "rule", "metric", "seed", "layer", "accuracy")
 
 QaRow = ChoiceExample | RacePassage
@@ -102,10 +106,11 @@ class Config(ReadingConfig):
     token. `n_pairs` is not used: the training questions of a seed are the
     stimulus counts of Figure 7 (`qa_tasks.SHOTS`). `n_eval_pairs` keeps that
     many questions of each evaluation split, layer selection and test, for a
-    smoke run; None keeps them all, as the protocol does. `bos` is "none":
-    the code templates are plain text for every checkpoint and the Qwen3
-    tokenizer adds no BOS, so base and post-trained checkpoints read the
-    same tokens.
+    smoke run; None keeps them all, as the protocol does. `bos` must be
+    "none": the code templates are plain text for every checkpoint and the
+    Qwen3 tokenizer adds no BOS, so base and post-trained checkpoints read
+    the same tokens, and the few-shot scorer never prepends one, as the
+    harness does not. `layers`, when set, must be strictly increasing.
 
     Attributes:
         tasks: The tasks to run, in run order.
@@ -170,6 +175,14 @@ def _check(config: Config) -> None:
             f"n_fewshot_seeds must be None or between 1 and n_seeds="
             f"{config.n_seeds}, got {fewshot}"
         )
+    if config.bos != "none":
+        raise ValueError(
+            f'bos must be "none", as the few-shot scorer reads no BOS, '
+            f"got {config.bos!r}"
+        )
+    layers = config.layers
+    if layers is not None and any(a >= b for a, b in pairwise(layers)):
+        raise ValueError(f"layers must be strictly increasing, got {layers}")
 
 
 def _question(row: QaRow) -> ChoiceExample:
@@ -449,17 +462,29 @@ def _credits(
 
 
 def _figure7(summary: Mapping[str, Any]) -> dict[str, Any]:
-    """Table 9's average row over the Figure 7 tasks of the run."""
+    """Table 9's average row over the Figure 7 tasks of the run.
+
+    The few-shot acc_norm average takes RACE's acc, its only harness metric.
+    """
     tasks = [task for task in FIGURE7_TASKS if task in summary]
 
-    def average(method: str, key: str) -> float | None:
-        values = [summary[task][method][key]["accuracy"] for task in tasks]
+    def average(method: str, keys: Mapping[str, str]) -> float | None:
+        values = [summary[t][method][keys[t]]["accuracy"] for t in tasks]
         return float(np.mean(values)) if values else None
 
     return {
         "tasks": tasks,
-        "lat": {rule: average("lat", rule) for rule in LAYER_RULES},
-        "few_shot": {metric: average("few_shot", metric) for metric in METRICS},
+        "lat": {
+            rule: average("lat", dict.fromkeys(tasks, rule))
+            for rule in LAYER_RULES
+        },
+        "few_shot": {
+            metric: average(
+                "few_shot",
+                {t: "acc" if t in ACC_ONLY_TASKS else metric for t in tasks},
+            )
+            for metric in METRICS
+        },
     }
 
 

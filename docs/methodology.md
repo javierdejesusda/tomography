@@ -265,8 +265,10 @@ LAT against few-shot prompting on OpenBookQA, CommonsenseQA, ARC-Easy, ARC-Chall
   the examples, so the shots are those its LAT reader was fitted on (the Fig. 7 caption: "Using the same few-shot
   examples"). The first `n_fewshot_seeds` seeds are scored, all by default. RACE and TruthfulQA are zero-shot
   (`race_prompt`, `tqa_prompt`) and run once; TruthfulQA MC1 is its `acc`. A run reports `acc` (the summed
-  log-likelihood) and `acc_norm` (per character), ties sharing credit. Table 9 imports its few-shot numbers from
-  other evaluations, so this baseline is measured here, not taken from the paper.
+  log-likelihood) and `acc_norm` (per character), ties sharing credit. The harness reports `acc` only for RACE and
+  TruthfulQA MC1, so the `acc_norm` average of `figure7` takes RACE's `acc` and the `acc_norm` of the other four
+  tasks; the `acc` average takes every task's `acc`. Table 9 imports its few-shot numbers from other evaluations, so
+  this baseline is measured here, not taken from the paper.
 - Call grouping: one `judges.continuation_logprob` call scores every (question, choice) pair of a seed and task
   (one call per task for a zero-shot task). The call runs the token prefix shared by all its contexts once (the
   k-shot block), reuses its key-value cache for every question, and computes logits only at the continuation
@@ -275,7 +277,8 @@ LAT against few-shot prompting on OpenBookQA, CommonsenseQA, ARC-Easy, ARC-Chall
   BOS is prepended, as in the harness.
 - BOS: `bos="none"`, where the Qwen3 base models default to a prepended separator. The templates are plain text for
   every checkpoint and the Qwen3 tokenizer adds no BOS, so the base and post-trained checkpoints read the same
-  tokens the reference code would.
+  tokens the reference code would. A config with another `bos` is refused, because the few-shot scorer never
+  prepends one; `layers`, when set, must be strictly increasing.
 - Memory: runs load the model in float32. The LAT reads run the decoder without the LM head, and the few-shot scorer
   never computes full-vocabulary logits over a whole prompt. `race_batch_size` (1 by default) sets the batch of the
   RACE stimuli, of up to about 1,110 tokens with Qwen3's tokenizer; the 25-shot ARC contexts reach about 1,220
