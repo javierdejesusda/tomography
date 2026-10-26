@@ -297,6 +297,30 @@ def test_the_csqa_layer_split_drops_each_seeds_training_questions(
     assert counts == {"train": SHOTS["csqa"], "layer": expected, "test": 4}
 
 
+def test_tqa_keeps_both_rules_although_they_read_the_same_primers(
+    finished: RunDir,
+) -> None:
+    rows = _rows(finished)
+    lat = _task_file(finished, "tqa")["summary"]["lat"]
+
+    def layers(rule: str) -> list[tuple[int, float]]:
+        return [
+            (row["layer"], row["accuracy"])
+            for row in rows
+            if (row["task"], row["method"], row["rule"]) == ("tqa", "lat", rule)
+        ]
+
+    assert len(layers("reference")) == len(layers("k-shot")) == 2
+    assert layers("reference") == layers("k-shot")
+    for key in ("accuracy", "layers"):
+        assert lat["reference"][key] == lat["k-shot"][key]
+    assert _task_file(finished, "tqa")["summary"]["n_questions"] == {
+        "train": 6,
+        "layer": [6, 6],
+        "test": 4,
+    }
+
+
 def _planted(
     signal: Mapping[str, Sequence[float]],
     by_question: Mapping[str, Sequence[float]] | None = None,

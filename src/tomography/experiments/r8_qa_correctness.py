@@ -14,7 +14,10 @@ the reference sign rule. Three rules pick the layer each seed is tested at:
 example beyond the few-shot ones is used) and "test-oracle" (one layer for
 every seed, the best mean test accuracy; an upper bound, not a protocol).
 Ties go to the deeper layer, as the reference's scan from the last layer
-does.
+does. On TruthfulQA the layer-selection questions are the 6 training
+primers, as in the reference, so the "reference" and "k-shot" rules score
+the same questions and pick the same layers there (unless `n_eval_pairs`
+keeps fewer than 6); both are still reported.
 """
 
 from collections.abc import Mapping

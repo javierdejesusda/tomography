@@ -257,7 +257,10 @@ LAT against few-shot prompting on OpenBookQA, CommonsenseQA, ARC-Easy, ARC-Chall
   seed, the best mean test accuracy: an upper bound, not a protocol). Ties go to the deeper layer, as the
   reference's scan from the last layer does. Training accuracy often reaches 1.0 at many layers, so the `k-shot`
   rule then takes the deepest of them. CommonsenseQA's layer-selection questions depend on the seed (the training
-  questions it did not draw); they are read once for the union of the seeds and each seed counts its own.
+  questions it did not draw); they are read once for the union of the seeds and each seed counts its own. On
+  TruthfulQA the layer-selection questions are the 6 training primers, as in the reference, so the `reference` and
+  `k-shot` rules score the same questions and pick the same layers there (unless `n_eval_pairs` keeps fewer than
+  6); both are still reported, with their own rows.
 - Few-shot: the lm-evaluation-harness prompt format (`fewshot_prompt`), with each seed's own k training questions as
   the examples, so the shots are those its LAT reader was fitted on (the Fig. 7 caption: "Using the same few-shot
   examples"). The first `n_fewshot_seeds` seeds are scored, all by default. RACE and TruthfulQA are zero-shot
