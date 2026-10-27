@@ -38,6 +38,7 @@ _EXCLUDED_NAMES = (
     "trials*",
     "transfer.npz",
     "signals*.npz",
+    "scores_*.npz",
 )
 _DRIVE_START = r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]"
 _UNC_START = r"(?<![\\\w])\\\\[^\\/\s]+[\\/]"
@@ -145,7 +146,8 @@ def is_exported(relative: str) -> bool:
 
     Returns:
         True for the JSON, NPZ and CSV files that plots and docs read; False
-        for figures, logs and the raw vectors, trials and item files.
+        for figures, logs and the raw vectors, trials, per-item scores and
+        item files.
     """
     parts = relative.split("/")
     if "figures" in parts[:-1]:
