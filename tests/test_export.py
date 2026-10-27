@@ -85,6 +85,7 @@ def _data(run_dir: Path, name: str) -> object:
         "hand_check.csv",
         "transfer_sentiment.npz",
         "transfer_sentiment.json",
+        "scores_sentiment.json",
     ],
 )
 def test_is_exported_keeps_the_files_the_plots_and_docs_need(
@@ -105,6 +106,8 @@ def test_is_exported_keeps_the_files_the_plots_and_docs_need(
         "trials_sweep.npz",
         "transfer.npz",
         "signals_popqa.npz",
+        "scores_sentiment.npz",
+        "scores_truth_polarity.npz",
         "figures/curves.png",
         "figures/table.json",
         "run.log",

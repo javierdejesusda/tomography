@@ -162,7 +162,7 @@ status|pull|down|ssh|resume`; read `--help` of each). The API key comes from
 `RUNPOD_API_KEY` only; `start` and `resume` require `--max-hours`.
 
 To collect finished runs into a committable tree and redraw every figure
-(figures are not committed; readers, sweeps, per-item files and signals are not exported):
+(figures are not committed; readers, sweeps, per-item files, per-item scores and signals are not exported):
 
 ```bash
 uv run tomography export --out results <folder-with-runs>
