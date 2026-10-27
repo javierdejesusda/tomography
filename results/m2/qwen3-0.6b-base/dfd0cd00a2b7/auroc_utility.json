@@ -1,0 +1,202 @@
+{
+  "_meta": {
+    "experiment": "m2",
+    "config_hash": "dfd0cd00a2b7",
+    "seed": 0,
+    "git_sha": "0a5f3ccd8b952b86fc0098e5928c52718b87ab69",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-24T16:09:16+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m2",
+      "model": "qwen3-0.6b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "truth_polarity",
+        "utility"
+      ],
+      "scorers": [
+        "pca_diff",
+        "mean_diff",
+        "logistic",
+        "lda",
+        "ttpd",
+        "mlp"
+      ],
+      "readouts": [
+        "last",
+        "concept",
+        "concept_mean",
+        "mean",
+        "max",
+        "token_score_max",
+        "attention"
+      ],
+      "token_layers": [
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ],
+      "layer_rules": [
+        "best",
+        "top_k",
+        "joint"
+      ],
+      "top_k": 5,
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "shifts": [
+        "paraphrase"
+      ],
+      "controls": [
+        "text",
+        "random",
+        "shuffled"
+      ],
+      "logistic_c": [
+        0.01,
+        0.1,
+        1.0,
+        10.0
+      ],
+      "mlp_alpha": [
+        0.1,
+        0.01,
+        0.001,
+        0.0001
+      ],
+      "mlp_hidden": [
+        64
+      ],
+      "baselines": [
+        "logistic/last",
+        "mean_diff/last"
+      ],
+      "n_boot": 2000,
+      "max_fpr": 0.01
+    }
+  },
+  "data": {
+    "rows": [
+      "pca_diff/last/best",
+      "pca_diff/last/top_k",
+      "pca_diff/concept/best",
+      "pca_diff/concept/top_k",
+      "pca_diff/concept_mean/best",
+      "pca_diff/concept_mean/top_k",
+      "pca_diff/mean/best",
+      "pca_diff/mean/top_k",
+      "pca_diff/max/best",
+      "pca_diff/max/top_k",
+      "pca_diff/token_score_max/best",
+      "pca_diff/token_score_max/top_k",
+      "mean_diff/last/best",
+      "mean_diff/last/top_k",
+      "mean_diff/concept/best",
+      "mean_diff/concept/top_k",
+      "mean_diff/concept_mean/best",
+      "mean_diff/concept_mean/top_k",
+      "mean_diff/mean/best",
+      "mean_diff/mean/top_k",
+      "mean_diff/max/best",
+      "mean_diff/max/top_k",
+      "mean_diff/token_score_max/best",
+      "mean_diff/token_score_max/top_k",
+      "logistic/last/best",
+      "logistic/last/top_k",
+      "logistic/concept/best",
+      "logistic/concept/top_k",
+      "logistic/concept_mean/best",
+      "logistic/concept_mean/top_k",
+      "logistic/mean/best",
+      "logistic/mean/top_k",
+      "logistic/max/best",
+      "logistic/max/top_k",
+      "logistic/token_score_max/best",
+      "logistic/token_score_max/top_k",
+      "logistic/attention/best",
+      "logistic/attention/top_k",
+      "logistic/attention/joint",
+      "lda/last/best",
+      "lda/last/top_k",
+      "lda/concept/best",
+      "lda/concept/top_k",
+      "lda/concept_mean/best",
+      "lda/concept_mean/top_k",
+      "lda/mean/best",
+      "lda/mean/top_k",
+      "lda/max/best",
+      "lda/max/top_k",
+      "lda/token_score_max/best",
+      "lda/token_score_max/top_k",
+      "mlp/last/best",
+      "mlp/last/top_k",
+      "mlp/last/joint",
+      "mlp/concept/best",
+      "mlp/concept/top_k",
+      "mlp/concept/joint",
+      "mlp/concept_mean/best",
+      "mlp/concept_mean/top_k",
+      "mlp/concept_mean/joint",
+      "mlp/mean/best",
+      "mlp/mean/top_k",
+      "mlp/mean/joint",
+      "mlp/max/best",
+      "mlp/max/top_k",
+      "mlp/max/joint",
+      "mlp/token_score_max/best",
+      "mlp/token_score_max/top_k",
+      "random/last/best",
+      "random/last/top_k",
+      "random/concept/best",
+      "random/concept/top_k",
+      "random/concept_mean/best",
+      "random/concept_mean/top_k",
+      "random/mean/best",
+      "random/mean/top_k",
+      "random/max/best",
+      "random/max/top_k",
+      "random/token_score_max/best",
+      "random/token_score_max/top_k",
+      "text/text/none"
+    ],
+    "cols": [
+      "original",
+      "random",
+      "against"
+    ],
+    "title": "utility: report AUROC of each cell (mean over seeds)"
+  }
+}

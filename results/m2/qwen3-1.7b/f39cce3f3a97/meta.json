@@ -1,0 +1,23 @@
+{
+  "experiment": "m2",
+  "config_hash": "f39cce3f3a97",
+  "seed": 0,
+  "git_sha": "ebfa1f216911d6d434b1fdcd3143ed91ceb9c6a9",
+  "git_dirty": false,
+  "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "versions": {
+    "python": "3.12.6",
+    "tomography": "0.1.0",
+    "torch": "2.14.1+cu130",
+    "transformers": "5.19.0",
+    "numpy": "2.5.4",
+    "scikit-learn": "1.9.1",
+    "datasets": "5.1.0",
+    "peft": "0.21.2",
+    "matplotlib": "3.11.2",
+    "plotly": "7.1.0"
+  },
+  "started_at": "2026-10-25T19:13:49+00:00",
+  "finished_at": "2026-10-26T05:02:33+00:00"
+}

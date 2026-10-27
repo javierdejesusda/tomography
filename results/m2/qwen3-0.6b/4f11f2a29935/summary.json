@@ -1,0 +1,182 @@
+{
+  "_meta": {
+    "experiment": "m2",
+    "config_hash": "4f11f2a29935",
+    "seed": 0,
+    "git_sha": "0a5f3ccd8b952b86fc0098e5928c52718b87ab69",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-24T22:06:57+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m2",
+      "model": "qwen3-0.6b",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "truth_polarity",
+        "utility"
+      ],
+      "scorers": [
+        "pca_diff",
+        "mean_diff",
+        "logistic",
+        "lda",
+        "ttpd",
+        "mlp"
+      ],
+      "readouts": [
+        "last",
+        "concept",
+        "concept_mean",
+        "mean",
+        "max",
+        "token_score_max",
+        "attention"
+      ],
+      "token_layers": [
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ],
+      "layer_rules": [
+        "best",
+        "top_k",
+        "joint"
+      ],
+      "top_k": 5,
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "shifts": [
+        "paraphrase"
+      ],
+      "controls": [
+        "text",
+        "random",
+        "shuffled"
+      ],
+      "logistic_c": [
+        0.01,
+        0.1,
+        1.0,
+        10.0
+      ],
+      "mlp_alpha": [
+        0.1,
+        0.01,
+        0.001,
+        0.0001
+      ],
+      "mlp_hidden": [
+        64
+      ],
+      "baselines": [
+        "logistic/last",
+        "mean_diff/last"
+      ],
+      "n_boot": 2000,
+      "max_fpr": 0.01
+    }
+  },
+  "data": {
+    "tasks": [
+      "sentiment",
+      "truth",
+      "truth_polarity",
+      "utility"
+    ],
+    "conditions": {
+      "sentiment": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "truth": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "truth_polarity": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "utility": [
+        "original",
+        "random",
+        "against"
+      ]
+    },
+    "skipped": {
+      "sentiment": {
+        "ttpd": "task 'sentiment' has no polarity labels: ttpd needs affirmative and negated statements"
+      },
+      "truth": {
+        "ttpd": "task 'truth' has no polarity labels: ttpd needs affirmative and negated statements"
+      },
+      "truth_polarity": {},
+      "utility": {
+        "ttpd": "task 'utility' has no polarity labels: ttpd needs affirmative and negated statements",
+        "shift:paraphrase": "no paraphrase for template 'utility'"
+      }
+    },
+    "n_eval_pairs": {
+      "sentiment": {
+        "select": 214,
+        "report": 214
+      },
+      "truth": {
+        "select": 53,
+        "report": 59
+      },
+      "truth_polarity": {
+        "select": 256,
+        "report": 256
+      },
+      "utility": {
+        "select": 256,
+        "report": 256
+      }
+    },
+    "families": "one per task, condition, layer rule and baseline; Holm over the DeLong and, separately, the McNemar p values of its cells"
+  }
+}

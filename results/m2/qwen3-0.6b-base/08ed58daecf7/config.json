@@ -1,0 +1,87 @@
+{
+  "experiment": "m2",
+  "model": "qwen3-0.6b-base",
+  "seed": 0,
+  "n_seeds": 10,
+  "n_pairs": 64,
+  "n_eval_pairs": 256,
+  "method": "pca_diff",
+  "preprocess": "center",
+  "position": "last",
+  "eval_position": null,
+  "layers": null,
+  "bos": null,
+  "batch_size": 8,
+  "tasks": [
+    "sentiment",
+    "truth",
+    "truth_polarity",
+    "utility"
+  ],
+  "scorers": [
+    "pca_diff",
+    "mean_diff",
+    "logistic",
+    "lda",
+    "ttpd",
+    "mlp"
+  ],
+  "readouts": [
+    "last",
+    "concept",
+    "concept_mean",
+    "mean",
+    "max",
+    "token_score_max",
+    "attention"
+  ],
+  "token_layers": [
+    4,
+    8,
+    12,
+    16,
+    20,
+    24,
+    28
+  ],
+  "layer_rules": [
+    "best",
+    "top_k",
+    "joint"
+  ],
+  "top_k": 5,
+  "decoys": [
+    "random",
+    "against"
+  ],
+  "shifts": [
+    "paraphrase"
+  ],
+  "controls": [
+    "text",
+    "random",
+    "shuffled"
+  ],
+  "reader_series": false,
+  "logistic_c": [
+    0.01,
+    0.1,
+    1.0,
+    10.0
+  ],
+  "mlp_alpha": [
+    0.1,
+    0.01,
+    0.001,
+    0.0001
+  ],
+  "mlp_hidden": [
+    64
+  ],
+  "baselines": [
+    "logistic/last",
+    "mean_diff/last"
+  ],
+  "n_boot": 2000,
+  "max_fpr": 0.01
+}
