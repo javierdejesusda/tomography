@@ -15,6 +15,7 @@ from tomography.site import store
 LATEST = frozenset({"c2", "c4", "c5", "m1", "p7"})
 P1_DEFAULT_METHOD = "logistic"
 P9D_DEFAULT_TEMPLATE = "fewshot"
+R8_DEFAULT_TASK = "obqa"
 MODEL_FREE = "none"
 
 
@@ -130,14 +131,18 @@ class Manifest:
 
         The rule per experiment: `p1` keeps the runs of the selected method
         (logistic by default) and, if several remain, those with the most
-        tasks; `p9d` keeps the runs of the selected template; the latest run
-        (by start time) is taken for the experiments in `LATEST`; any other
-        cell must hold one run.
+        tasks; `p9d` keeps the runs of the selected template; `m2` skips the
+        shuffled-only runs (`reader_series` false), which only supplement a
+        full run; `r8` keeps the run of the selected task (OpenBookQA by
+        default), since it runs one task per run; the latest run (by start
+        time) is taken for the experiments in `LATEST`; any other cell must
+        hold one run.
 
         Args:
             exp: Experiment id.
             model: Checkpoint key.
-            **select: `method` for `p1` and `template` for `p9d`.
+            **select: `method` for `p1`, `template` for `p9d` and `task`
+                for `r8`.
 
         Returns:
             The run directory, or None when the cell has no matching run.
@@ -157,6 +162,11 @@ class Manifest:
         elif exp == "p9d":
             template = select.get("template", P9D_DEFAULT_TEMPLATE)
             runs = [r for r in runs if r.config.get("template") == template]
+        elif exp == "m2":
+            runs = [r for r in runs if r.config.get("reader_series", True)]
+        elif exp == "r8":
+            task = select.get("task", R8_DEFAULT_TASK)
+            runs = [r for r in runs if r.config.get("tasks") == [task]]
         elif exp in LATEST and len(runs) > 1:
             runs = [max(runs, key=lambda r: r.started_at)]
         if not runs:
