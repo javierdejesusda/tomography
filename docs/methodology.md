@@ -256,7 +256,8 @@ LAT against few-shot prompting on OpenBookQA, CommonsenseQA, ARC-Easy, ARC-Chall
 - Layer rules, each giving the layer a seed is tested at: `reference` (the best accuracy on the labeled
   layer-selection questions, the reference's validation split), `k-shot` (the best accuracy on the seed's own
   training questions, so no labeled example beyond the k shots is used) and `test-oracle` (one layer for every
-  seed, the best mean test accuracy: an upper bound, not a protocol). Ties go to the deeper layer, as the
+  seed, the best mean test accuracy: an upper bound for one layer shared by every seed, not for a layer chosen per
+  seed, and not a protocol). Ties go to the deeper layer, as the
   reference's scan from the last layer does. Training accuracy often reaches 1.0 at many layers, so the `k-shot`
   rule then takes the deepest of them. CommonsenseQA's layer-selection questions depend on the seed (the training
   questions it did not draw); they are read once for the union of the seeds and each seed counts its own. On

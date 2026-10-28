@@ -19,7 +19,7 @@ table rows), the fluency means, ratios and counts of cells past the rule and the
 of the runs made at `f4d414d` and of the M1, C2, C5 and P7 runs of the 4B pair (computed from the per-cell rows and the curves files), the P7 counts of inverted
 units on the GPT-2 sizes (recomputed from the per-seed curves), the P10b minima and maxima over layers and the counts of cells in P10a and P10b (computed from the table, hedge gap, forced in range, width, diagnostic, hand check, curves, transfer, baseline and people files), the V1 means, ranges and counts over draws and cells (computed from `projections.npz` of the V1 runs), the largest V1 reproduction differences, the sums of a recomputed and a committed AUROC and the counts of cells beyond the tolerance (computed from `summary.json` of the V1 runs, and from `projections.npz` and the `per_seed` arrays of the P9b curves files where they are taken per draw or per method), the sums and ranges of the V1 variance shares (computed from `pca2d.npz` and `text2d.npz`), and differences or ranges quoted in the text. The P8 tables are read from the P8 run, which aggregates
 finished runs. Runs are identified by config hash in [Run identity](#run-identity). The document is not
-complete: [Pending](#pending) lists what it does not yet report. The counts of inverted units by layer, the fluency means, ratios and counts of cells past the rule, the random-arm ranges, the counts of emotions above the random maximum and the differences between shares in the chain 42 runs (C2, C5 and P7 on `gpt2`, `gpt2-medium` and the Qwen3 0.6B pair) are computed from the per-seed curves, the per-cell rows and the table files of those runs.
+complete: [Pending](#pending) lists what it does not yet report. The counts of inverted units by layer, the fluency means, ratios and counts of cells past the rule, the random-arm ranges, the counts of emotions above the random maximum and the differences between shares in the chain 42 runs (C2, C5 and P7 on `gpt2`, `gpt2-medium` and the Qwen3 0.6B pair) are computed from the per-seed curves, the per-cell rows and the table files of those runs. The R8 per-seed oracle, Table 9 average rows, per-layer curve values, maxima over layers of the reader, random and shuffled series, and the TruthfulQA per-question comparison are computed from the `summary.json`, `curves_<task>.npz` and `fewshot_tqa.npz` files of the R8 runs.
 
 Contents:
 
@@ -45,7 +45,8 @@ P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 18. 
 across the GPT-2 sizes and Qwen3
 (P3, P4)](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) 19. [Persona wording and
 instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 20. [Template steering on the Qwen3 0.6B, 1.7B and 4B pairs
-(P7)](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7) 21. [Run identity](#run-identity) 22. [Pending](#pending)
+(P7)](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7) 21. [LAT against few-shot prompting on the QA tasks
+(R8)](#lat-against-few-shot-prompting-on-the-qa-tasks-r8) 22. [Run identity](#run-identity) 23. [Pending](#pending)
 
 ## Reading conventions
 
@@ -7880,6 +7881,118 @@ The read accuracy is the best point of the mean reading curve over the 10 reader
 - **Fluency.** The cells are 288 template cells and 72 random-arm rows (360 per run); the counts below are over the template cells. On the base checkpoint 10 cells have a neutral-text perplexity above 1.5 times the unsteered one (26.9; 1.51 to 1.71), all at layer 28 (9 at -0.3 and 1 at +0.3), and none has a distinct-1 below 0.15 (lowest 0.188; unsteered 0.329). The mean over the templates and readers at layer 28 is 1.402 (+0.3) and 1.567 (-0.3) times the unsteered perplexity, against 1.054 to 1.247 (+0.3) and 1.055 to 1.246 (-0.3) at the other layers. On the post-trained checkpoint no cell is above 1.5 times (unsteered 47.6) and none has a distinct-1 below 0.15 (lowest 0.182; unsteered 0.262); the mean at layer 28 is 1.336 and 1.350 times, against 1.060 to 1.301 at the other layers. No random-arm row of either checkpoint is above 1.5 times or has a distinct-1 below 0.15. The dose slope at the last block of the base checkpoint is therefore fitted over a grid that includes cells of text that fails the rule above.
 - **Base against post-trained.** The slope at the steering layer is 1.070 to 1.363 on the base checkpoint and 0.457 to 0.942 on the post-trained one, whose steering layer is an interior layer for five of six templates; the post-trained slope by prompt format is lowest for chat in all six templates (0.270 to 0.865, against 1.196 to 1.431 on the base checkpoint). The inversion rates overlap (0.181 against 0.250) and the two judges agree on 0.861 and 0.889 of the units, so the two checkpoints are not separated on either. Each checkpoint has one run, and the runs do not say why the post-trained checkpoint steers less at its steering layer under the same protocol.
 
+## LAT against few-shot prompting on the QA tasks (R8)
+
+R8 repeats the protocol of Figure 7 and Table 9 of the RepE paper on the Qwen3 0.6B and 1.7B pairs: LAT against few-shot prompting with the same examples on OpenBookQA, CommonsenseQA, ARC-Easy, ARC-Challenge and RACE, plus TruthfulQA MC1. The protocol is in the [methodology](methodology.md#lat-against-few-shot-prompting-r8). Each checkpoint has one run per task, 24 runs in all ([Run identity](#run-identity)). Each of 10 seeds draws its own training questions (the stimulus counts of Figure 7: 5 for OpenBookQA, 7 for CommonsenseQA, 25 for each ARC set and 3 for RACE; on TruthfulQA every seed trains on the same 6 primers, and the seed only draws the order of the two answers in each pair, which changes the centered differences, so the TruthfulQA LAT intervals measure that order alone), fits one `pca_diff` direction per layer on unlabeled pairs inside each question, orients it with the reference sign rule, and is tested at the layer one of three rules gives it:
+
+- `reference`: the layer of the seed's best accuracy on the labeled layer-selection questions (299 to 1,221 per task; the 6 primers on TruthfulQA).
+- `k-shot`: the layer of the seed's best accuracy on its own training questions, so no labeled question beyond the k shots is used.
+- `test-oracle`: one layer shared by all 10 seeds, the layer of the best mean test accuracy over the seeds.
+
+Ties go to the deeper layer. The few-shot baseline scores the harness prompt with each seed's own training questions as the shots, the questions its reader was fitted on; on RACE and TruthfulQA it is zero-shot and runs once. `acc` compares the summed log-likelihoods of the choices and `acc_norm` the log-likelihoods per character; the harness reports only `acc` for RACE and TruthfulQA MC1 (MC1 is `acc`), and the runs store both. The four checkpoints read the same test questions:
+
+| Task           | Training questions per seed | Layer-selection questions | Test questions | Chance |
+| -------------- | --------------------------- | ------------------------- | -------------- | ------ |
+| OpenBookQA     | 5                           | 500                       | 500            | 0.250  |
+| CommonsenseQA  | 7                           | 1,219 to 1,221            | 1,221          | 0.200  |
+| ARC-Easy       | 25                          | 570                       | 2,376          | 0.250  |
+| ARC-Challenge  | 25                          | 299                       | 1,172          | 0.250  |
+| RACE           | 3                           | 1,021                     | 1,045          | 0.250  |
+| TruthfulQA MC1 | 6 (the primers)             | 6 (the same primers)      | 817            | 0.226  |
+
+CommonsenseQA's layer-selection questions are the first 1,221 questions of its training split without the seed's own training questions among them, so their number depends on the seed, and its test questions are its validation split (`qa_tasks.choice_splits`). A RACE question is the last question of a passage. Chance is the mean over the test questions of one over the number of choices.
+
+### Results per checkpoint
+
+A LAT cell is the mean test accuracy of the 10 seeds, each at the layer its rule gives it, with the 95 percent percentile bootstrap interval over the seeds; the test-oracle cell also gives its layer. As in [Reading conventions](#reading-conventions), the interval describes the training draw and not the sampling of the test questions. A few-shot cell of OpenBookQA, CommonsenseQA and the ARC sets is the mean over the 10 seeds' shot sets with the same kind of interval. The rows marked zero-shot have a zero-shot few-shot baseline (one run, with a 95 percent Wilson interval over the test questions, not comparable in width with the intervals over seeds); their LAT readers still fit on 3 passages (RACE) and the 6 primers (TruthfulQA). The per-seed oracle is computed here from the reader series of `curves_<task>.npz` (`per_seed[0]`, seeds by layers): the mean over the seeds of each seed's best test accuracy over the 28 layers. It has no interval. Every other value is read from the `summary.json` of the task's run.
+
+`qwen3-0.6b-base`:
+
+| Task                       | LAT reference        | LAT k-shot           | LAT test-oracle          | Per-seed oracle | Few-shot acc         | Few-shot acc_norm    |
+| -------------------------- | -------------------- | -------------------- | ------------------------ | --------------- | -------------------- | -------------------- |
+| OpenBookQA                 | 0.398 [0.368, 0.424] | 0.336 [0.304, 0.371] | 0.368 [0.344, 0.392] L23 | 0.407           | 0.265 [0.259, 0.270] | 0.359 [0.355, 0.364] |
+| CommonsenseQA              | 0.543 [0.540, 0.547] | 0.401 [0.326, 0.466] | 0.545 [0.541, 0.549] L20 | 0.546           | 0.571 [0.566, 0.575] | 0.594 [0.589, 0.600] |
+| ARC-Easy                   | 0.802 [0.801, 0.804] | 0.781 [0.767, 0.793] | 0.802 [0.801, 0.804] L18 | 0.802           | 0.739 [0.737, 0.743] | 0.743 [0.739, 0.747] |
+| ARC-Challenge              | 0.526 [0.497, 0.550] | 0.481 [0.413, 0.538] | 0.528 [0.497, 0.551] L18 | 0.532           | 0.411 [0.407, 0.415] | 0.452 [0.450, 0.454] |
+| RACE (zero-shot)           | 0.443 [0.406, 0.477] | 0.317 [0.273, 0.364] | 0.440 [0.396, 0.478] L18 | 0.449           | 0.351 [0.323, 0.381] | 0.371 [0.343, 0.401] |
+| TruthfulQA MC1 (zero-shot) | 0.435 [0.407, 0.473] | 0.435 [0.407, 0.470] | 0.547 [0.540, 0.557] L15 | 0.561           | 0.294 [0.264, 0.326] | 0.327 [0.296, 0.360] |
+
+`qwen3-0.6b`:
+
+| Task                       | LAT reference        | LAT k-shot           | LAT test-oracle          | Per-seed oracle | Few-shot acc         | Few-shot acc_norm    |
+| -------------------------- | -------------------- | -------------------- | ------------------------ | --------------- | -------------------- | -------------------- |
+| OpenBookQA                 | 0.332 [0.312, 0.351] | 0.277 [0.243, 0.299] | 0.302 [0.281, 0.322] L23 | 0.339           | 0.253 [0.250, 0.256] | 0.335 [0.330, 0.340] |
+| CommonsenseQA              | 0.283 [0.258, 0.311] | 0.197 [0.178, 0.217] | 0.255 [0.222, 0.293] L21 | 0.284           | 0.507 [0.498, 0.516] | 0.544 [0.537, 0.550] |
+| ARC-Easy                   | 0.366 [0.324, 0.405] | 0.317 [0.274, 0.365] | 0.349 [0.303, 0.396] L26 | 0.369           | 0.712 [0.709, 0.715] | 0.703 [0.699, 0.707] |
+| ARC-Challenge              | 0.297 [0.285, 0.310] | 0.284 [0.269, 0.299] | 0.295 [0.281, 0.308] L23 | 0.310           | 0.373 [0.369, 0.377] | 0.400 [0.397, 0.404] |
+| RACE (zero-shot)           | 0.362 [0.326, 0.395] | 0.300 [0.277, 0.327] | 0.344 [0.311, 0.376] L18 | 0.368           | 0.340 [0.312, 0.369] | 0.363 [0.334, 0.392] |
+| TruthfulQA MC1 (zero-shot) | 0.438 [0.432, 0.446] | 0.438 [0.432, 0.445] | 0.512 [0.509, 0.515] L21 | 0.515           | 0.268 [0.239, 0.299] | 0.295 [0.265, 0.327] |
+
+`qwen3-1.7b-base`:
+
+| Task                       | LAT reference        | LAT k-shot           | LAT test-oracle          | Per-seed oracle | Few-shot acc         | Few-shot acc_norm    |
+| -------------------------- | -------------------- | -------------------- | ------------------------ | --------------- | -------------------- | -------------------- |
+| OpenBookQA                 | 0.589 [0.538, 0.625] | 0.467 [0.368, 0.561] | 0.580 [0.517, 0.624] L20 | 0.593           | 0.329 [0.324, 0.335] | 0.415 [0.407, 0.421] |
+| CommonsenseQA              | 0.671 [0.669, 0.672] | 0.657 [0.654, 0.660] | 0.671 [0.670, 0.673] L20 | 0.672           | 0.664 [0.659, 0.669] | 0.677 [0.673, 0.682] |
+| ARC-Easy                   | 0.899 [0.899, 0.900] | 0.890 [0.887, 0.893] | 0.902 [0.901, 0.902] L18 | 0.902           | 0.814 [0.812, 0.816] | 0.819 [0.817, 0.822] |
+| ARC-Challenge              | 0.699 [0.697, 0.701] | 0.692 [0.684, 0.698] | 0.703 [0.702, 0.705] L19 | 0.705           | 0.517 [0.512, 0.522] | 0.550 [0.546, 0.555] |
+| RACE (zero-shot)           | 0.630 [0.625, 0.636] | 0.554 [0.479, 0.604] | 0.632 [0.624, 0.638] L21 | 0.637           | 0.400 [0.371, 0.430] | 0.432 [0.402, 0.462] |
+| TruthfulQA MC1 (zero-shot) | 0.403 [0.384, 0.428] | 0.403 [0.383, 0.428] | 0.583 [0.553, 0.612] L16 | 0.587           | 0.326 [0.294, 0.358] | 0.341 [0.310, 0.375] |
+
+`qwen3-1.7b`:
+
+| Task                       | LAT reference        | LAT k-shot           | LAT test-oracle          | Per-seed oracle | Few-shot acc         | Few-shot acc_norm    |
+| -------------------------- | -------------------- | -------------------- | ------------------------ | --------------- | -------------------- | -------------------- |
+| OpenBookQA                 | 0.542 [0.474, 0.592] | 0.408 [0.327, 0.492] | 0.514 [0.420, 0.591] L19 | 0.544           | 0.308 [0.302, 0.313] | 0.389 [0.383, 0.395] |
+| CommonsenseQA              | 0.625 [0.617, 0.632] | 0.566 [0.464, 0.623] | 0.624 [0.620, 0.629] L20 | 0.630           | 0.635 [0.627, 0.642] | 0.646 [0.643, 0.649] |
+| ARC-Easy                   | 0.864 [0.863, 0.865] | 0.856 [0.849, 0.863] | 0.865 [0.864, 0.865] L20 | 0.865           | 0.797 [0.795, 0.799] | 0.794 [0.792, 0.797] |
+| ARC-Challenge              | 0.636 [0.596, 0.662] | 0.605 [0.516, 0.657] | 0.621 [0.560, 0.666] L21 | 0.643           | 0.496 [0.491, 0.500] | 0.526 [0.523, 0.529] |
+| RACE (zero-shot)           | 0.660 [0.650, 0.666] | 0.626 [0.612, 0.638] | 0.662 [0.651, 0.668] L20 | 0.663           | 0.367 [0.338, 0.396] | 0.385 [0.356, 0.415] |
+| TruthfulQA MC1 (zero-shot) | 0.404 [0.363, 0.451] | 0.404 [0.362, 0.450] | 0.414 [0.407, 0.422] L14 | 0.462           | 0.294 [0.264, 0.326] | 0.327 [0.296, 0.360] |
+
+### The Table 9 average row
+
+Each run's own `figure7` entry covers its one task only, so the average row of a checkpoint was built by merging the task entries of the five Figure 7 runs (RACE, CommonsenseQA, OpenBookQA, ARC-Challenge and ARC-Easy) into one summary and calling `r8_qa_correctness._figure7` on it, the function a run of all five tasks calls. It is the plain mean of the five task means, with no interval. The few-shot `acc_norm` average takes RACE's `acc`, its only harness metric, as the methodology states.
+
+| Checkpoint      | LAT reference | LAT k-shot | LAT test-oracle | Few-shot acc | Few-shot acc_norm (RACE acc) |
+| --------------- | ------------- | ---------- | --------------- | ------------ | ---------------------------- |
+| qwen3-0.6b-base | 0.543         | 0.463      | 0.537           | 0.467        | 0.500                        |
+| qwen3-0.6b      | 0.328         | 0.275      | 0.309           | 0.437        | 0.464                        |
+| qwen3-1.7b-base | 0.698         | 0.652      | 0.698           | 0.545        | 0.572                        |
+| qwen3-1.7b      | 0.665         | 0.612      | 0.657           | 0.520        | 0.544                        |
+
+- **Reference rule.** The LAT average is above the few-shot `acc_norm` average on three checkpoints (0.543 against 0.500 on `qwen3-0.6b-base`, 0.698 against 0.572 on `qwen3-1.7b-base`, 0.665 against 0.544 on `qwen3-1.7b`) and below it on `qwen3-0.6b` (0.328 against 0.464).
+- **k-shot rule.** With no labeled question beyond the shots the few-shot prompt shows, the LAT average is above the few-shot `acc_norm` average on the 1.7B pair (0.652 against 0.572 and 0.612 against 0.544) and below it on the 0.6B pair (0.463 against 0.500 and 0.275 against 0.464).
+- **Test-oracle rule.** 0.537, 0.309, 0.698 and 0.657 in the order of the table, on the same side of the few-shot `acc_norm` average as the reference rule on every checkpoint.
+
+### The reference rule above the test-oracle rule
+
+In 11 of the 24 cells the reference mean is above the test-oracle mean: OpenBookQA (0.398 against 0.368) and RACE (0.443 against 0.440) on `qwen3-0.6b-base`; OpenBookQA (0.332 against 0.302), CommonsenseQA (0.283 against 0.255), ARC-Easy (0.366 against 0.349), ARC-Challenge (0.297 against 0.295) and RACE (0.362 against 0.344) on `qwen3-0.6b`; OpenBookQA (0.589 against 0.580) on `qwen3-1.7b-base`; and OpenBookQA (0.542 against 0.514), CommonsenseQA (0.625 against 0.624) and ARC-Challenge (0.636 against 0.621) on `qwen3-1.7b`. This follows from how the code picks the layers (`_rule_layers`): `test-oracle` is one layer, the deepest layer of the best mean test accuracy over the seeds, given to all 10 seeds, while `reference` gives each seed its own layer from that seed's layer-selection accuracy. A seed's best test layer need not be the shared one, so when the layer-selection questions send each seed close to its own best test layer, the mean over seeds can exceed the best shared layer. Test-oracle bounds the rules that test every seed at one shared layer, not the per-seed rules. The per-seed oracle bounds every rule that picks one layer per seed, and the reference and k-shot means are at or below it in all 24 cells.
+
+### TruthfulQA MC1
+
+The layer-selection questions of TruthfulQA are the 6 primers, the same questions every seed trains on, so the reference and k-shot rules pick the same layer as each other for each seed on all four checkpoints and their means are equal (0.435, 0.438, 0.403 and 0.404 for `qwen3-0.6b-base`, `qwen3-0.6b`, `qwen3-1.7b-base` and `qwen3-1.7b`). Their intervals differ in the third decimal because each rule's bootstrap draws its own seed. The test-oracle rule, which picks its layer on the 817 test questions, gives 0.547 (L15), 0.512 (L21), 0.583 (L16) and 0.414 (L14) in the same order, so the gap between the six-primer rules and the test-oracle rule is largest on `qwen3-1.7b-base` and smallest on `qwen3-1.7b`; the per-seed oracle is 0.561, 0.515, 0.587 and 0.462. On `qwen3-1.7b` the six-primer rule puts the 10 seeds at layers from 1 to 28. The zero-shot MC1 (`acc`) is 0.294, 0.268, 0.326 and 0.294, below the LAT reference mean on every checkpoint. The zero-shot values of `qwen3-0.6b-base` and `qwen3-1.7b` are equal in both metrics (240 and 267 of the 817 questions for `acc` and `acc_norm`), while the per-question `acc` credit of the two checkpoints differs on 126 questions, so only the totals coincide.
+
+### qwen3-0.6b
+
+On the post-trained 0.6B checkpoint the LAT reference mean is below the few-shot `acc_norm` mean on OpenBookQA (0.332 against 0.335, with overlapping intervals), CommonsenseQA (0.283 against 0.544), ARC-Easy (0.366 against 0.703) and ARC-Challenge (0.297 against 0.400), and above the zero-shot `acc` on RACE (0.362 against 0.340) and TruthfulQA (0.438 against 0.268). Under the k-shot rule CommonsenseQA is at 0.197 [0.178, 0.217] against a chance of 0.200, and OpenBookQA, ARC-Challenge and RACE are at 0.277, 0.284 and 0.300 against 0.250.
+
+- **Per-layer curves.** The highest test accuracy of any seed at any layer is 0.366 (OpenBookQA), 0.362 (CommonsenseQA), 0.465 (ARC-Easy), 0.332 (ARC-Challenge), 0.448 (RACE) and 0.525 (TruthfulQA). On ARC-Easy the mean over seeds is 0.235 to 0.267 at layers 1 to 21, 0.311 to 0.349 at layers 22 to 27 and 0.247 at layer 28, and each seed's best layer gives it 0.285 to 0.465. On `qwen3-0.6b-base` the mean on the same task is 0.238 to 0.257 at layers 1 to 15, 0.350 and 0.376 at layers 16 and 17, 0.802 at layer 18 and 0.582 to 0.783 at layers 19 to 28, and each seed's best layer gives it 0.798 to 0.805.
+- **Random directions.** The highest mean over layers of the reader is within 0.025 of that of the random direction on four tasks: 0.302 against 0.298 (OpenBookQA), 0.255 against 0.230 (CommonsenseQA), 0.349 against 0.335 (ARC-Easy) and 0.295 against 0.281 (ARC-Challenge); it is 0.344 against 0.304 on RACE and 0.512 against 0.348 on TruthfulQA. On the other three checkpoints the closest pair is OpenBookQA on `qwen3-0.6b-base`, 0.368 against 0.328.
+- **Why the reader is weak (diagnostic run, not committed).** A diagnostic run outside the committed results, on ARC-Easy only for the two 0.6B checkpoints (the 10 training sets of the run, 300 of its test questions and 200 layer-selection questions, float32, the same activation code), found no pipeline cause: a tokenizer check, also not stored, shows that the four Qwen3 checkpoints tokenize the 300 test prompts to the same ids, which end in a lone space token; the read position is the last token before the padding; and on 40 test questions (159 stimuli) batch sizes 1 and 8 give the same activations up to a relative difference of 1.1e-5 per row (2.3e-6 on `qwen3-0.6b`). On its 300 questions it reproduced the stored curves: best mean over seeds 0.35 at layer 26 on `qwen3-0.6b` and 0.82 at layer 18 on `qwen3-0.6b-base`, against the stored 0.349 and 0.802 on all 2,376. At layers 18 to 27, a supervised mean-difference direction fitted on the 200 layer-selection questions reads 0.54 to 0.67 on `qwen3-0.6b` against 0.77 to 0.82 on `qwen3-0.6b-base`, and the first principal component of the within-question differences, the direction `pca_diff` takes, has an absolute cosine with that supervised direction (mean over the 10 seeds) of 0.05 to 0.32 on `qwen3-0.6b` against 0.88 to 0.96 on the base checkpoint. On `qwen3-0.6b` correctness is weaker at the read token and is not the largest source of variance between the choices of a question, so the unsupervised direction points elsewhere. A further run with no stored output read the same supervised direction averaged over the answer tokens: at layers 15 and 16 it gave 0.75 to 0.76 on `qwen3-0.6b` against 0.82 to 0.83 on the base checkpoint. An unsupervised direction missing a signal that a supervised reader finds is not new in this document: on sentiment in P1, `pca_diff` falls well short of logistic regression on several Qwen3 checkpoints, base ones included (`qwen3-0.6b-base` 0.665 against 0.952, `qwen3-0.6b` 0.564 against 0.860, `qwen3-1.7b` 0.534 against 0.880, `qwen3-4b-base` 0.540 against 0.900), so there the gap is not specific to the post-trained checkpoints. These diagnostic numbers are not in `results/`; a committed run is listed under [Pending](#pending).
+
+### Controls
+
+The random series is a random unit direction per seed oriented by the same sign rule on the seed's training questions, and the shuffled series scores the reader against labels shuffled within each question. The mean of the shuffled series over the seeds is at most 0.2674 at any layer of the 24 cells. The random direction is above chance on several tasks: its highest mean over layers is 0.556 on ARC-Easy for `qwen3-0.6b-base` and 0.706 for `qwen3-1.7b-base`, against a chance of 0.250. The reader's highest mean over layers is above the random direction's in all 24 cells; the margins on `qwen3-0.6b` are given above.
+
+### What the four checkpoints show together
+
+- **Per task.** On `qwen3-0.6b-base`, `qwen3-1.7b-base` and `qwen3-1.7b` the LAT reference mean is above the few-shot `acc_norm` mean (the zero-shot `acc` on RACE and TruthfulQA) on OpenBookQA, ARC-Easy, ARC-Challenge, RACE and TruthfulQA, and below it on CommonsenseQA (0.543 against 0.594, 0.671 against 0.677 and 0.625 against 0.646). On `qwen3-0.6b` it is below on four of the six tasks (see the `qwen3-0.6b` subsection above). The few-shot mean lies inside the reference interval in two cells, both on `qwen3-0.6b` (OpenBookQA and RACE).
+- **Per task under the k-shot rule.** On the 1.7B pair the k-shot mean is above the few-shot `acc_norm` mean on every task except CommonsenseQA (0.657 against 0.677 and 0.566 against 0.646). On `qwen3-0.6b-base` it is above on ARC-Easy (0.781 against 0.743), ARC-Challenge (0.481 against 0.452) and TruthfulQA (0.435 against 0.294) and below on OpenBookQA (0.336 against 0.359), CommonsenseQA (0.401 against 0.594) and RACE (0.317 against 0.351). On `qwen3-0.6b` it is below on every task except TruthfulQA (0.438 against 0.268). The k-shot intervals are up to 0.193 wide (OpenBookQA on `qwen3-1.7b-base`), and the few-shot mean lies inside the k-shot interval in six cells: OpenBookQA, ARC-Challenge and RACE on `qwen3-0.6b-base`, OpenBookQA on `qwen3-1.7b-base`, and OpenBookQA and ARC-Challenge on `qwen3-1.7b`.
+- **Average.** With the reference rule the Table 9 average puts LAT above few-shot on three of the four checkpoints, and with the k-shot rule on the 1.7B pair only. Those cases go in the direction the RepE paper reports (LAT above few-shot); `qwen3-0.6b` under every rule and `qwen3-0.6b-base` under the k-shot rule go the other way.
+- **Base against post-trained and size.** On both sizes the post-trained checkpoint is below the base one on every LAT rule and on both few-shot metrics of the average row (reference 0.543 against 0.328 on the 0.6B pair and 0.698 against 0.665 on the 1.7B pair; few-shot `acc_norm` 0.500 against 0.464 and 0.572 against 0.544). The 1.7B checkpoint is above the 0.6B checkpoint of the same kind on every column of the average row.
+- **What the runs do not show.** Each checkpoint has one run per task, the intervals over seeds do not include the sampling of the test questions, and the reference rule uses up to 1,221 labeled layer-selection questions that the few-shot baseline does not see; the k-shot rule is the comparison with the same labeled data.
+
 ## Run identity
 
 All reading runs (R1 to R7) except the R4 and R6 runs of `gpt2-medium`, `gpt2-large` and `gpt2-xl` (made at `ca2546c`,
@@ -8378,6 +8491,19 @@ Config hashes (12 hex digits), V1:
 | qwen3-1.7b-base | 12dda15d9d38 | 1          | d5d522bfecd4 | 5ca7821318ef |
 | qwen3-1.7b      | 419275ac7e0d | 1          | f413efcae268 | 9641ab8235a9 |
 
+R8: the 24 runs, one task per run and six per checkpoint of the Qwen3 0.6B and 1.7B pairs, were made with a clean tree on the laptop GPU with 8 GB of memory (the `device` field of each `meta.json` records `cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)`; torch 2.14.1+cu130, transformers 5.19.0, Windows 11, Python 3.12.6), with the model in float32, the only dtype `r8_qa_correctness.run` loads. Twenty runs were made at `8304522` (the merge of pull request 229). The four `qwen3-1.7b` runs of ARC-Easy, ARC-Challenge, RACE and TruthfulQA were made at `3f6fa80`, a later commit on main; `git diff --stat 8304522 3f6fa80 -- src` lists only `src/tomography/export.py`, so the R8 code is the same. The runs ran one at a time, checkpoint by checkpoint in the order of the table below and in the task order OpenBookQA, CommonsenseQA, ARC-Easy, ARC-Challenge, RACE, TruthfulQA, from 2026-10-26 23:49:17 to 2026-10-27 20:19:16 (UTC, the `started_at` of the first and the `finished_at` of the last `meta.json`). Every config is the default R8 config of its model with `tasks` set to the run's one task: 10 seeds from seed 0, full splits (`n_eval_pairs` null), `pca_diff` with centering (`preprocess` `center`), the last token, `bos` `none`, all 28 layers (`layers` null), the few-shot baseline on all 10 seeds (`n_fewshot_seeds` null), batch size 8 and RACE batch size 1. The config hash of each run was recomputed by loading its `config.json` into the R8 config class and hashing it, and all 24 agree with the directory names and with the hash of that default config.
+
+Config hashes (12 hex digits), R8:
+
+| Task           | qwen3-0.6b-base | qwen3-0.6b   | qwen3-1.7b-base | qwen3-1.7b   |
+| -------------- | --------------- | ------------ | --------------- | ------------ |
+| OpenBookQA     | 5473e33db546    | 449e0042949b | 1a456c9d0a9d    | 7f05c1122fe4 |
+| CommonsenseQA  | 80b31d0f99dc    | f0290eed5310 | e1758954d739    | 69cfca068b8d |
+| ARC-Easy       | ea593c9ffa36    | 27d545bd43a5 | da8c5b391b4a    | 13f237200b2d |
+| ARC-Challenge  | a649569625f8    | 716f03ef1460 | f16a3322ea9e    | e113b550fcd4 |
+| RACE           | 86fadf41a013    | e2c1b3a8a35f | 361a170b0f6c    | 8f58d8cb8cbc |
+| TruthfulQA MC1 | 3dda124b0523    | 784bd1614227 | 554063a3321b    | ee92d1df8a61 |
+
 The files of every run named here are committed under `results/<experiment>/<model>/<hash>/`, copied with
 `tomography export`, which keeps the JSON, NPZ and CSV files the plots read and rewrites local paths. The figures are
 not committed; `tomography plot all --out results` redraws them from these files.
@@ -8401,4 +8527,5 @@ Not in this document yet. No dates are promised.
   memory than the laptop GPU has.
 - P10: a hand check of the answer parser (the `human_*` columns of `hand_check.csv` and `hand_check_samples.csv` are empty in every P10a run), and P10d (steering toward hedging); P10d has not run. The animacy and wording confound is controlled by the people heights for the height family only, with no control of the same kind for gestation periods and wingspans, and P10 ran on one set of questions and one seed.
 - A5, reading directions against Qwen-Scope SAE decoders.
+- R8 on the four GPT-2 sizes and the Qwen3 4B pair: not run. A committed diagnostic of the weak `qwen3-0.6b` reader (supervised directions on the same activations, the alignment of the first principal component with them, and reading at the answer tokens): only an uncommitted ARC-Easy run so far. Stored but not read in this document for the 24 R8 runs: the per-seed and per-layer accuracies on the training and layer-selection questions (`lat_<task>.npz`), the per-seed few-shot log-likelihoods of every test choice (`fewshot_<task>.npz`; only the TruthfulQA files of `qwen3-0.6b-base` and `qwen3-1.7b` are read, for the per-question comparison), the per-layer intervals of the curves files, and the random and shuffled series beyond their highest mean over layers.
 
