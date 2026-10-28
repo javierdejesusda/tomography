@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
 FINDINGS = ROOT / "docs" / "findings.md"
 HASH = re.compile(r"^[0-9a-f]{12}$")
+SKIPPED = ("pca_diff", "sentiment", "concept", "shuffled-only")
 
 
 def _identity_section() -> list[str]:
@@ -23,8 +24,8 @@ def reported() -> dict[tuple[str, str], set[str]]:
 
     Returns:
         Map from (experiment id, model key) to the reported hashes. Rows of
-        the P1 pca_diff and sentiment-only runs and the P9d concept template
-        are not the default run and are left out.
+        the P1 pca_diff and sentiment-only runs, the P9d concept template and
+        the M2 shuffled-only runs are not the default run and are left out.
     """
     found: dict[tuple[str, str], set[str]] = {}
     models: list[str] = []
@@ -40,7 +41,7 @@ def reported() -> dict[tuple[str, str], set[str]]:
             continue
         label = cells[0].lower()
         exp = label.split()[0]
-        if "pca_diff" in label or "sentiment" in label or "concept" in label:
+        if any(word in label for word in SKIPPED):
             continue
         for model, cell in zip(models, cells[1:], strict=False):
             if HASH.match(cell):
@@ -71,6 +72,12 @@ def test_the_reported_hashes_are_parsed_from_the_run_identity_tables() -> None:
     table = reported()
     assert table[("r1", "gpt2")] == {"bd4438c46cef"}
     assert table[("c5", "gpt2-xl")] == {"0ad95833261d"}
+
+
+def test_the_m2_shuffled_only_runs_are_not_reported_runs() -> None:
+    table = reported()
+    assert table[("m2", "qwen3-0.6b-base")] == {"dfd0cd00a2b7"}
+    assert table[("m2", "qwen3-1.7b")] == {"f39cce3f3a97"}
 
 
 def test_the_selected_run_is_the_one_run_identity_names() -> None:

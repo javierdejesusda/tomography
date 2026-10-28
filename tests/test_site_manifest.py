@@ -84,6 +84,28 @@ def test_p9d_is_selected_by_template(tmp_path: Path) -> None:
     assert found.run("p9d", "qwen3-1.7b", template="concept") == con
 
 
+def test_m2_skips_the_shuffled_only_runs(tmp_path: Path) -> None:
+    full = _run(tmp_path, "m2", "qwen3-0.6b", "f1")
+    _run(tmp_path, "m2", "qwen3-0.6b", "s1", reader_series=False)
+    assert manifest_module.Manifest(tmp_path).run("m2", "qwen3-0.6b") == full
+
+
+def test_m2_with_two_full_runs_is_ambiguous(tmp_path: Path) -> None:
+    _run(tmp_path, "m2", "qwen3-0.6b", "f1")
+    _run(tmp_path, "m2", "qwen3-0.6b", "f2", reader_series=True)
+    with pytest.raises(manifest_module.AmbiguousRunError, match="f1, f2"):
+        manifest_module.Manifest(tmp_path).run("m2", "qwen3-0.6b")
+
+
+def test_r8_is_selected_by_task(tmp_path: Path) -> None:
+    obqa = _run(tmp_path, "r8", "qwen3-1.7b", "o1", tasks=["obqa"])
+    race = _run(tmp_path, "r8", "qwen3-1.7b", "r1", tasks=["race"])
+    found = manifest_module.Manifest(tmp_path)
+    assert found.run("r8", "qwen3-1.7b") == obqa
+    assert found.run("r8", "qwen3-1.7b", task="race") == race
+    assert found.run("r8", "qwen3-1.7b", task="tqa") is None
+
+
 def test_rerun_experiments_take_the_latest_started_run(tmp_path: Path) -> None:
     _run(
         tmp_path, "m1", "qwen3-1.7b", "old", started="2026-10-17T10:00:00+00:00"
