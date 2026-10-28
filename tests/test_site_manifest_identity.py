@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
 FINDINGS = ROOT / "docs" / "findings.md"
 HASH = re.compile(r"^[0-9a-f]{12}$")
+SKIPPED = ("pca_diff", "sentiment", "concept", "shuffled-only")
 
 
 def _identity_section() -> list[str]:
@@ -40,8 +41,7 @@ def reported() -> dict[tuple[str, str], set[str]]:
             continue
         label = cells[0].lower()
         exp = label.split()[0]
-        skipped = ("pca_diff", "sentiment", "concept", "shuffled-only")
-        if any(word in label for word in skipped):
+        if any(word in label for word in SKIPPED):
             continue
         for model, cell in zip(models, cells[1:], strict=False):
             if HASH.match(cell):

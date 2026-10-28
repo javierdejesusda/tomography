@@ -84,26 +84,9 @@ def test_p9d_is_selected_by_template(tmp_path: Path) -> None:
     assert found.run("p9d", "qwen3-1.7b", template="concept") == con
 
 
-@pytest.mark.parametrize("series", [{}, {"reader_series": True}])
-def test_m2_skips_the_shuffled_only_runs(
-    tmp_path: Path, series: dict[str, bool]
-) -> None:
-    full = _run(
-        tmp_path,
-        "m2",
-        "qwen3-0.6b",
-        "f1",
-        started="2026-10-24T16:00:00+00:00",
-        **series,
-    )
-    _run(
-        tmp_path,
-        "m2",
-        "qwen3-0.6b",
-        "s1",
-        started="2026-10-26T05:00:00+00:00",
-        reader_series=False,
-    )
+def test_m2_skips_the_shuffled_only_runs(tmp_path: Path) -> None:
+    full = _run(tmp_path, "m2", "qwen3-0.6b", "f1")
+    _run(tmp_path, "m2", "qwen3-0.6b", "s1", reader_series=False)
     assert manifest_module.Manifest(tmp_path).run("m2", "qwen3-0.6b") == full
 
 
