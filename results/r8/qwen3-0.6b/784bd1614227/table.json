@@ -1,0 +1,346 @@
+{
+  "_meta": {
+    "experiment": "r8",
+    "config_hash": "784bd1614227",
+    "seed": 0,
+    "git_sha": "8304522ee9dc55a476353eba43858cde88d920d7",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-27T05:26:37+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "r8",
+      "model": "qwen3-0.6b",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": "none",
+      "batch_size": 8,
+      "tasks": [
+        "tqa"
+      ],
+      "n_fewshot_seeds": null,
+      "race_batch_size": 1
+    }
+  },
+  "data": {
+    "columns": [
+      "task",
+      "method",
+      "rule",
+      "metric",
+      "seed",
+      "layer",
+      "accuracy"
+    ],
+    "rows": [
+      [
+        "tqa",
+        "lat",
+        "reference",
+        "acc",
+        0,
+        28,
+        0.4357405140758874
+      ],
+      [
+        "tqa",
+        "lat",
+        "reference",
+        "acc",
+        1,
+        28,
+        0.43084455324357407
+      ],
+      [
+        "tqa",
+        "lat",
+        "reference",
+        "acc",
+        2,
+        28,
+        0.43451652386780903
+      ],
+      [
+        "tqa",
+        "lat",
+        "reference",
+        "acc",
+        3,
+        28,
+        0.4320685434516524
+      ],
+      [
+        "tqa",
+        "lat",
+        "reference",
+        "acc",
+        4,
+        28,
+        0.4369645042839657
+      ],
+      [
+        "tqa",
+        "lat",
+        "reference",
+        "acc",
+        5,
+        7,
+        0.45532435740514077
+      ],
+      [
+        "tqa",
+        "lat",
+        "reference",
+        "acc",
+        6,
+        28,
+        0.4638922888616891
+      ],
+      [
+        "tqa",
+        "lat",
+        "reference",
+        "acc",
+        7,
+        28,
+        0.42962056303549573
+      ],
+      [
+        "tqa",
+        "lat",
+        "reference",
+        "acc",
+        8,
+        28,
+        0.43084455324357407
+      ],
+      [
+        "tqa",
+        "lat",
+        "reference",
+        "acc",
+        9,
+        28,
+        0.43084455324357407
+      ],
+      [
+        "tqa",
+        "lat",
+        "k-shot",
+        "acc",
+        0,
+        28,
+        0.4357405140758874
+      ],
+      [
+        "tqa",
+        "lat",
+        "k-shot",
+        "acc",
+        1,
+        28,
+        0.43084455324357407
+      ],
+      [
+        "tqa",
+        "lat",
+        "k-shot",
+        "acc",
+        2,
+        28,
+        0.43451652386780903
+      ],
+      [
+        "tqa",
+        "lat",
+        "k-shot",
+        "acc",
+        3,
+        28,
+        0.4320685434516524
+      ],
+      [
+        "tqa",
+        "lat",
+        "k-shot",
+        "acc",
+        4,
+        28,
+        0.4369645042839657
+      ],
+      [
+        "tqa",
+        "lat",
+        "k-shot",
+        "acc",
+        5,
+        7,
+        0.45532435740514077
+      ],
+      [
+        "tqa",
+        "lat",
+        "k-shot",
+        "acc",
+        6,
+        28,
+        0.4638922888616891
+      ],
+      [
+        "tqa",
+        "lat",
+        "k-shot",
+        "acc",
+        7,
+        28,
+        0.42962056303549573
+      ],
+      [
+        "tqa",
+        "lat",
+        "k-shot",
+        "acc",
+        8,
+        28,
+        0.43084455324357407
+      ],
+      [
+        "tqa",
+        "lat",
+        "k-shot",
+        "acc",
+        9,
+        28,
+        0.43084455324357407
+      ],
+      [
+        "tqa",
+        "lat",
+        "test-oracle",
+        "acc",
+        0,
+        21,
+        0.5189718482252142
+      ],
+      [
+        "tqa",
+        "lat",
+        "test-oracle",
+        "acc",
+        1,
+        21,
+        0.5104039167686658
+      ],
+      [
+        "tqa",
+        "lat",
+        "test-oracle",
+        "acc",
+        2,
+        21,
+        0.5091799265605875
+      ],
+      [
+        "tqa",
+        "lat",
+        "test-oracle",
+        "acc",
+        3,
+        21,
+        0.5104039167686658
+      ],
+      [
+        "tqa",
+        "lat",
+        "test-oracle",
+        "acc",
+        4,
+        21,
+        0.5165238678090576
+      ],
+      [
+        "tqa",
+        "lat",
+        "test-oracle",
+        "acc",
+        5,
+        21,
+        0.5091799265605875
+      ],
+      [
+        "tqa",
+        "lat",
+        "test-oracle",
+        "acc",
+        6,
+        21,
+        0.5018359853121175
+      ],
+      [
+        "tqa",
+        "lat",
+        "test-oracle",
+        "acc",
+        7,
+        21,
+        0.5201958384332925
+      ],
+      [
+        "tqa",
+        "lat",
+        "test-oracle",
+        "acc",
+        8,
+        21,
+        0.5128518971848225
+      ],
+      [
+        "tqa",
+        "lat",
+        "test-oracle",
+        "acc",
+        9,
+        21,
+        0.5128518971848225
+      ],
+      [
+        "tqa",
+        "few-shot",
+        null,
+        "acc",
+        null,
+        null,
+        0.26805385556915545
+      ],
+      [
+        "tqa",
+        "few-shot",
+        null,
+        "acc_norm",
+        null,
+        null,
+        0.29498164014687883
+      ]
+    ]
+  }
+}

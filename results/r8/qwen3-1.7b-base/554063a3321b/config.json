@@ -1,0 +1,20 @@
+{
+  "experiment": "r8",
+  "model": "qwen3-1.7b-base",
+  "seed": 0,
+  "n_seeds": 10,
+  "n_pairs": 64,
+  "n_eval_pairs": null,
+  "method": "pca_diff",
+  "preprocess": "center",
+  "position": "last",
+  "eval_position": null,
+  "layers": null,
+  "bos": "none",
+  "batch_size": 8,
+  "tasks": [
+    "tqa"
+  ],
+  "n_fewshot_seeds": null,
+  "race_batch_size": 1
+}
