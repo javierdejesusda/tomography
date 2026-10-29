@@ -56,6 +56,7 @@ LAYERS = (1, 2, 3)
 N_SHOTS = 2
 P9C_BOOT = 60
 MIXED = ("other", "gold", "gold", "gold", "gold")
+BLANK = ("", " ", "", "", "")
 H_MIXED = -(0.2 * math.log(0.2) + 0.8 * math.log(0.8))
 
 
@@ -70,7 +71,7 @@ def _item(
     if correct:
         greedy, samples = "gold", ("gold",) * 5
     elif i % 17 == 2:
-        greedy, samples = "", ()
+        greedy, samples = "", BLANK if i % 34 == 19 else ()
     elif i % 3 == 0:
         greedy, samples = "other", ("other",) * 5
     else:
@@ -673,15 +674,19 @@ def test_semantic_entropy_is_the_negated_entropy_of_the_answer_clusters(
 
     for dataset in DATASETS:
         test = _test_items(dataset)
+        missing = [i.label.samples in ((), BLANK) for i in test]
         expected = np.array(
-            [-H_MIXED if i.label.samples in (MIXED, ()) else 0.0 for i in test]
+            [-H_MIXED if i.label.samples == MIXED else 0.0 for i in test]
         )
+        expected[missing] = -H_MIXED
         signals = default_run.read_arrays(f"signals_{dataset}")
 
         np.testing.assert_allclose(signals["semantic_entropy"], expected)
-        n_empty = sum(not i.label.samples for i in test)
-        assert n_empty > 0
-        assert _row(rows, dataset, "semantic_entropy")["n_filled"] == n_empty
+        assert any(missing)
+        assert _row(rows, dataset, "semantic_entropy")["n_filled"] == sum(
+            missing
+        )
+    assert any(i.label.samples == BLANK for i in _test_items("triviaqa"))
 
 
 def test_the_entailment_verdicts_set_the_clusters(
@@ -764,6 +769,15 @@ def test_a_higher_baseline_score_means_a_more_likely_correct_answer(
     signals = default_run.read_arrays("signals_popqa")
 
     assert auroc(signals["semantic_entropy"], signals["correct"]) > 0.5
+
+
+def test_eigenscore_ranks_the_consistent_samples_of_correct_answers_higher(
+    default_run: RunDir,
+) -> None:
+    for dataset in DATASETS:
+        signals = default_run.read_arrays(f"signals_{dataset}")
+
+        assert auroc(signals["eigenscore"], signals["correct"]) > 0.5
 
 
 def test_the_paired_table_holds_every_baseline_against_every_reference(

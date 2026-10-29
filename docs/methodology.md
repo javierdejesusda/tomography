@@ -494,7 +494,8 @@ The `b1` protocol:
   every layer the `p9c` run read, and its layer is chosen per dataset on the validation items (the paper also
   chooses per dataset). Semantic entropy and EigenScore keep their papers' sign and are negated; they fit nothing,
   so only the test items are scored and no sign is set on train. A missing score (an empty greedy answer for the
-  probe, a question without samples for semantic entropy, fewer than 2 non-empty samples for EigenScore) takes the
+  probe; a question with no non-empty sample for semantic entropy, which would otherwise read all-blank samples as
+  one confident cluster; fewer than 2 non-empty samples for EigenScore) takes the
   lowest finite score of the train items (probe) or of the test items (the other two), the least confident case,
   as in `p9c`. `n_filled` counts the missing scores among the items a baseline scored: every item of the dataset
   for the probe (as `p9c` counts its signals), the test items for the other two.

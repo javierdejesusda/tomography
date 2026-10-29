@@ -224,7 +224,7 @@ def _semantic_entropy(
     entropy = np.array(
         [
             semantic_entropy(i.example.question, i.label.samples, entails)
-            if i.label.samples
+            if any(s.strip() for s in i.label.samples)
             else np.nan
             for i in items
         ]
