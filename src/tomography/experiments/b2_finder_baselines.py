@@ -450,9 +450,11 @@ def score_dataset(config: Config, data: Dataset) -> Scores:
 
     The finders and the random and shuffled controls are the series of the
     shared reading sweep (`sweep_from_activations`), the controls those of
-    LAT; CCS is fitted on the contrast pairs of each training part and
-    scored from its pair probabilities, never from its reader; the
-    text-only controls are TB1's classifiers on the raw texts.
+    LAT; when the logistic solver stops at its all-zero start, it refits
+    with a tighter tolerance, as in P4 (`refit_at_zero`). CCS is fitted on
+    the contrast pairs of each training part and scored from its pair
+    probabilities, never from its reader; the text-only controls are TB1's
+    classifiers on the raw texts.
 
     Args:
         config: The experiment settings.
@@ -470,7 +472,7 @@ def score_dataset(config: Config, data: Dataset) -> Scores:
     test: dict[str, NDArray[np.float64]] = {}
     for finder in FINDERS:
         sweep = sweep_from_activations(
-            train, evals, method=finder, seed=config.seed
+            train, evals, method=finder, seed=config.seed, refit_at_zero=True
         )
         for split, out in (("val", val), ("test", test)):
             reader, random, shuffled = sweep.per_seed(split)
