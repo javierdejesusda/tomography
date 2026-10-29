@@ -37,6 +37,7 @@ from tomography.experiments.m3_matrix import select_cells
 from tomography.experiments.m3_matrix import stimulus_token_set
 from tomography.experiments.p2_positions import misleading_template
 from tomography.experiments.p2_positions import with_decoys
+from tomography.experiments.p3_size import spearman
 from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.sweep import shuffle_within_groups
 from tomography.experiments.variants import READING_TASKS
@@ -46,6 +47,7 @@ from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.reading.metrics import auroc
 from tomography.reading.metrics import group_accuracy
+from tomography.reading.probes import AttentionReader
 from tomography.reading.probes import CellMaxReader
 from tomography.reading.probes import fit_attention
 from tomography.reading.probes import fit_cell_max
@@ -1059,16 +1061,20 @@ def test_streamed_scores_equal_whole_set_scores(
         batch_size=batch_size,
         decoy=True,
     )
-    expected = [
-        reader.score(
-            select_cells(
-                cells, segments, cell_set, _set_layers(config, cell_set)
-            )
-        )[0]
-        for cell_set, reader in readers
-    ]
-    assert streamed.dtype == np.float64
-    np.testing.assert_array_equal(streamed, np.array(expected))
+    for k, (cell_set, reader) in enumerate(readers):
+        acts = select_cells(
+            cells, segments, cell_set, _set_layers(config, cell_set)
+        )
+        np.testing.assert_array_equal(streamed.scores[k], reader.score(acts)[0])
+        np.testing.assert_allclose(
+            streamed.shares[k], _shares(reader, acts, segments, cell_set)
+        )
+        np.testing.assert_array_equal(
+            streamed.cells[k],
+            np.bincount(acts.row_stimulus) * len(acts.layers),
+        )
+    assert streamed.scores.dtype == np.float64
+    assert streamed.shares.shape == (len(readers), len(report.texts), 4)
 
 
 def test_stream_scores_name_the_batch_of_a_text_without_its_decoy_line(
@@ -1087,18 +1093,14 @@ def test_stream_scores_name_the_batch_of_a_text_without_its_decoy_line(
         m3_matrix.stream_scores(tiny_gpt2, broken, readers, config, decoy=True)
 
 
-class _Recorded:
-    """A reader that records the scores it gives."""
+@dataclasses.dataclass(frozen=True, eq=False)
+class _Recorded(CellMaxReader):
+    """A cell max reader that records the scores it gives."""
 
-    def __init__(self, reader: Any) -> None:
-        self.reader = reader
-        self.outputs: list[NDArray[np.float32]] = []
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.reader, name)
+    outputs: list[NDArray[np.float32]] = dataclasses.field(default_factory=list)
 
     def score(self, acts: Activations) -> NDArray[np.float32]:
-        scores = cast(NDArray[np.float32], self.reader.score(acts))
+        scores = super().score(acts)
         self.outputs.append(scores)
         return scores
 
@@ -1111,7 +1113,11 @@ def test_the_grid_value_is_the_first_best_on_select(
     fit = fit_cell_max
 
     def recording(acts: Activations, **kwargs: Any) -> _Recorded:
-        fitted.append((kwargs["c"], _Recorded(fit(acts, **kwargs))))
+        reader = fit(acts, **kwargs)
+        fields = {
+            f.name: getattr(reader, f.name) for f in dataclasses.fields(reader)
+        }
+        fitted.append((kwargs["c"], _Recorded(**fields)))
         return fitted[-1][1]
 
     def tuning(scores: Any, groups: Any, labels: Any) -> NDArray[np.float64]:
@@ -1148,6 +1154,8 @@ def test_the_grid_value_is_the_first_best_on_select(
         kept = readers[1].outputs
         assert np.array_equal(arrays["select"][e, i], kept[0][0])
         assert np.array_equal(arrays["report"][e, i, 0], kept[1][0])
+    heads = run_dir.read_arrays("cellheads_utility")
+    assert heads["logistic_cellmax_prompt_reader_c"].tolist() == [1.0] * 2
 
 
 def _ensemble(select: NDArray[Any], report: NDArray[Any]) -> NDArray[Any]:
@@ -1371,3 +1379,343 @@ def test_the_random_cell_reader_takes_the_sign_that_ranks_labels_best() -> None:
     area = float(auroc(reader.score(acts)[0], labels))
     assert area > float(auroc(_flipped(reader).score(acts)[0], labels))
     np.testing.assert_array_equal(inverted.values, -reader.values)
+
+
+def _shares(
+    reader: Any,
+    acts: Activations,
+    segments: NDArray[np.int8],
+    cell_set: CellSet,
+) -> NDArray[np.float64]:
+    """Each stimulus's reader weight per segment, from `cell_weights`."""
+    codes = [SEGMENTS.index(s) for s in SET_SEGMENTS[cell_set]]
+    kept = segments[np.isin(segments, codes)]
+    weights = m3_matrix.cell_weights(reader, acts).sum(axis=0)
+    shares = np.zeros((acts.n_stimuli, len(SEGMENTS)))
+    np.add.at(shares, (acts.row_stimulus, kept), weights)
+    return shares
+
+
+def _cell_values(
+    acts: Activations, heads: NDArray[np.float64], biases: NDArray[np.float64]
+) -> NDArray[Any]:
+    rows = acts.data.astype(np.float64)
+    return cast(
+        NDArray[Any], np.einsum("krd,kd->kr", rows, heads) + biases[:, None]
+    )
+
+
+def _per_stimulus(
+    acts: Activations, values: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    totals = np.zeros(acts.n_stimuli)
+    np.add.at(
+        totals, np.tile(acts.row_stimulus, values.shape[0]), values.ravel()
+    )
+    return totals
+
+
+def test_cell_weights_put_a_cell_max_reader_on_its_highest_cell() -> None:
+    acts, labels = _random_cells()
+    # Stimulus 0's two rows tie at every layer, so they share its weight.
+    acts.data[:, 1] = acts.data[:, 0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        reader = fit_cell_max(acts, labels=labels)
+
+    weights = m3_matrix.cell_weights(reader, acts)
+
+    values = _cell_values(acts, reader.values, reader.biases)
+    assert weights.shape == values.shape
+    for s in range(acts.n_stimuli):
+        rows = acts.row_stimulus == s
+        w, v = weights[:, rows], values[:, rows]
+        top = v == v.max()
+        np.testing.assert_allclose(w[top], 1.0 / top.sum())
+        assert (w[~top] == 0.0).all()
+    assert (weights[:, :2].max(axis=1) == [0.5, 0.5]).any()
+    np.testing.assert_allclose(
+        _per_stimulus(acts, weights * values),
+        reader.score(acts)[0],
+        rtol=1e-6,
+    )
+
+
+def test_cell_weights_of_a_joint_attention_reader_are_its_softmax() -> None:
+    acts, labels = _random_cells()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        reader = fit_attention(acts, labels=labels, joint=True)
+
+    weights = m3_matrix.cell_weights(reader, acts)
+
+    logits = _cell_values(acts, reader.queries, reader.offsets)
+    for s in range(acts.n_stimuli):
+        rows = acts.row_stimulus == s
+        exp = np.exp(logits[:, rows] - logits[:, rows].max())
+        np.testing.assert_allclose(weights[:, rows], exp / exp.sum())
+    heads = _cell_values(acts, reader.values, reader.biases)
+    np.testing.assert_allclose(
+        _per_stimulus(acts, weights * heads),
+        reader.score(acts)[0],
+        rtol=1e-5,
+    )
+
+
+def test_the_diagnostics_share_each_reader_among_the_segments(
+    finished: RunDir,
+) -> None:
+    names = {p.name for p in finished.path.iterdir()}
+    assert {"diagnostics.json", "cellheads_sentiment.npz"} <= names
+    payload = cast(dict[str, Any], finished.read_json("diagnostics"))
+    assert payload["columns"] == list(m3_matrix.DIAGNOSTIC_COLUMNS)
+    summary = cast(dict[str, Any], finished.read_json("summary"))
+    assert "prefix" in summary["diagnostics"]
+    rows = [
+        r for r in _table(finished, "diagnostics") if r["task"] == "sentiment"
+    ]
+    cells = [
+        (scorer, f"{pooling}_{cell_set}", series)
+        for cell_set in CELL_SETS
+        for pooling in m3_matrix.POOLINGS
+        for scorer, series in (
+            ("logistic", "reader"),
+            ("logistic", "shuffled"),
+            *((("random", "reader"),) if pooling == "cellmax" else ()),
+        )
+    ]
+    assert sorted(
+        (r["scorer"], r["readout"], r["series"], r["condition"]) for r in rows
+    ) == sorted(
+        (*cell, condition)
+        for cell in cells
+        for condition in SENTIMENT_CONDITIONS
+    )
+    by_cell = {}
+    for row in rows:
+        shares = [row[segment] for segment in SEGMENTS]
+        assert sum(shares) == pytest.approx(1.0)
+        assert min(shares) >= 0.0
+        cell_set = row["readout"].split("_")[1]
+        if cell_set in ("stimulus", "final"):
+            assert row[cell_set] == pytest.approx(1.0)
+        if row["condition"] not in ("random", "against"):
+            assert row["decoy"] == 0.0
+        by_cell[row["readout"], row["series"], row["condition"]] = row
+    for (readout, series, condition), row in by_cell.items():
+        if readout.endswith("_upper"):
+            prompt = by_cell[
+                readout.replace("_upper", "_prompt"), series, condition
+            ]
+            # The prompt set reads layers 1 and 3, the upper set layer 3.
+            assert 2 * row["cells"] == pytest.approx(prompt["cells"])
+
+
+@pytest.fixture
+def captured(
+    runs: dict[str, Any],
+    tiny_gpt2: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[RunDir, Any]:
+    if "captured" not in runs:
+        items = _capture_items(monkeypatch)
+        config = _captured_config()
+        run_dir = RunDir.create(config, out_root=tmp_path_factory.mktemp("m3"))
+        _quiet_execute(config, run_dir, tiny_gpt2)
+        runs["captured"] = (run_dir, items[0])
+    return cast(tuple[RunDir, Any], runs["captured"])
+
+
+def _captured_config() -> m3_matrix.Config:
+    return _config(tasks=("utility",), cell_sets=("prompt", "upper"))
+
+
+def test_the_cell_count_correlation_is_taken_within_each_label(
+    captured: tuple[RunDir, Any], tiny_gpt2: LoadedModel
+) -> None:
+    run_dir, splits = captured
+    config = _captured_config()
+    arrays = run_dir.read_arrays("scores_utility")
+    e = _entries(run_dir, "utility").index(
+        "logistic/cellmax_prompt/joint/reader"
+    )
+    rows = {
+        r["condition"]: r
+        for r in _table(run_dir, "diagnostics")
+        if (r["scorer"], r["readout"], r["series"])
+        == ("logistic", "cellmax_prompt", "reader")
+    }
+    defined = 0
+    for m, condition in enumerate(splits.conditions):
+        cells, _ = prompt_cells(
+            tiny_gpt2,
+            splits.report_items[condition],
+            config.cell_layers,
+            bos=None,
+            batch_size=config.batch_size,
+            decoy=condition in config.decoys,
+        )
+        counts = np.bincount(cells.row_stimulus) * len(config.cell_layers)
+        labels = splits.report_items[condition].labels
+        rhos = [
+            spearman(
+                counts[labels == label].astype(np.float64),
+                arrays["report"][e, i, m][labels == label],
+            )
+            for i in range(config.n_seeds)
+            for label in (0, 1)
+        ]
+        finite = [rho for rho in rhos if np.isfinite(rho)]
+        assert rows[condition]["cells"] == pytest.approx(counts.mean())
+        if finite:
+            defined += 1
+            assert rows[condition]["cells_rho"] == pytest.approx(
+                np.mean(finite)
+            )
+        else:
+            assert rows[condition]["cells_rho"] is None
+    assert defined > 0
+
+
+def _kept_reader(heads: Any, key: str, i: int, layers: tuple[int, ...]) -> Any:
+    """Draw i's kept reader of a key of `cellheads_<task>`."""
+    fields = {
+        name: heads[f"{key}_{name}"][i]
+        for name in ("values", "biases", "signs")
+    }
+    if f"{key}_queries" in heads:
+        return AttentionReader(
+            layers=layers,
+            joint=True,
+            queries=heads[f"{key}_queries"][i],
+            offsets=heads[f"{key}_offsets"][i],
+            **fields,
+        )
+    return CellMaxReader(layers=layers, **fields)
+
+
+def test_the_kept_heads_reproduce_the_select_scores(
+    captured: tuple[RunDir, Any], tiny_gpt2: LoadedModel
+) -> None:
+    run_dir, splits = captured
+    config = _captured_config()
+    heads = run_dir.read_arrays("cellheads_utility")
+    sidecar = cast(dict[str, Any], run_dir.read_json("cellheads_utility"))
+    arrays = run_dir.read_arrays("scores_utility")
+    entries = _entries(run_dir, "utility")
+    cells, segments = prompt_cells(
+        tiny_gpt2,
+        splits.select_items,
+        config.cell_layers,
+        bos=None,
+        batch_size=config.batch_size,
+        decoy=False,
+    )
+    listed = []
+    for key, entry in sidecar["entries"].items():
+        listed.append(entry["entry"])
+        cell_set = cast(CellSet, entry["entry"].split("/")[1].split("_")[1])
+        acts = select_cells(
+            cells, segments, cell_set, _set_layers(config, cell_set)
+        )
+        assert entry["layers"] == list(acts.layers)
+        e = entries.index(entry["entry"])
+        for i in range(config.n_seeds):
+            reader = _kept_reader(heads, key, i, acts.layers)
+            np.testing.assert_array_equal(
+                reader.score(acts)[0], arrays["select"][e, i]
+            )
+        if entry["entry"].startswith("random/"):
+            assert f"{key}_c" not in heads
+        else:
+            assert set(heads[f"{key}_c"]) <= set(config.logistic_c)
+    assert sorted(listed) == sorted(e for e in entries if "/joint/" in e)
+
+
+def test_the_segment_shares_are_the_kept_readers_mean_weights(
+    captured: tuple[RunDir, Any], tiny_gpt2: LoadedModel
+) -> None:
+    run_dir, splits = captured
+    config = _captured_config()
+    heads = run_dir.read_arrays("cellheads_utility")
+    sidecar = cast(dict[str, Any], run_dir.read_json("cellheads_utility"))
+    rows = {
+        (r["scorer"], r["readout"], r["series"], r["condition"]): r
+        for r in _table(run_dir, "diagnostics")
+    }
+    for condition in splits.conditions:
+        cells, segments = prompt_cells(
+            tiny_gpt2,
+            splits.report_items[condition],
+            config.cell_layers,
+            bos=None,
+            batch_size=config.batch_size,
+            decoy=condition in config.decoys,
+        )
+        for key, entry in sidecar["entries"].items():
+            scorer, readout, _, series = entry["entry"].split("/")
+            cell_set = cast(CellSet, readout.split("_")[1])
+            acts = select_cells(
+                cells, segments, cell_set, _set_layers(config, cell_set)
+            )
+            shares = np.mean(
+                [
+                    _shares(
+                        _kept_reader(heads, key, i, acts.layers),
+                        acts,
+                        segments,
+                        cell_set,
+                    )
+                    for i in range(config.n_seeds)
+                ],
+                axis=(0, 1),
+            )
+            row = rows[scorer, readout, series, condition]
+            np.testing.assert_allclose(
+                [row[segment] for segment in SEGMENTS], shares, atol=1e-12
+            )
+
+
+def test_the_summary_counts_fits_seconds_and_convergence_warnings(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def planting(fit: Any, *, planted: bool) -> Any:
+        def fitting(acts: Activations, **kwargs: Any) -> Any:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", ConvergenceWarning)
+                reader = fit(acts, **kwargs)
+            if planted:
+                warnings.warn("planted", ConvergenceWarning, stacklevel=2)
+            return reader
+
+        return fitting
+
+    monkeypatch.setattr(
+        m3_matrix, "fit_cell_max", planting(fit_cell_max, planted=True)
+    )
+    monkeypatch.setattr(
+        m3_matrix, "fit_attention", planting(fit_attention, planted=False)
+    )
+    config = _config(tasks=("utility",), cell_sets=("prompt",), decoys=())
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    with warnings.catch_warnings(record=True) as shown:
+        warnings.simplefilter("always")
+        m3_matrix.execute(config, run_dir, tiny_gpt2, _sources())
+
+    summary = cast(dict[str, Any], run_dir.read_json("summary"))
+    fits = summary["fits"]["utility"]
+    n = config.n_seeds * len(config.logistic_c)
+    assert set(fits) == {
+        f"logistic/{pooling}_prompt/joint/{series}"
+        for pooling in m3_matrix.POOLINGS
+        for series in ("reader", "shuffled")
+    }
+    for name, stats in fits.items():
+        assert stats["fits"] == n
+        assert stats["seconds"] > 0.0
+        expected = n if "cellmax" in name else 0
+        assert stats["convergence_warnings"] == expected
+    # The counted warnings still reach the caller.
+    planted = [w for w in shown if str(w.message) == "planted"]
+    assert len(planted) == 2 * n

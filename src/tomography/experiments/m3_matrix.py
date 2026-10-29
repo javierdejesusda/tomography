@@ -20,7 +20,9 @@ head per layer trained through the pooling of a cell set's cells: one
 softmax over all of them (`cellattn`) or their maximum (`cellmax`), as a
 joint reader. Every reader scores the report items of every condition and
 is compared with the one-row baselines, next to M2's controls and a random
-cell max reader.
+cell max reader. Per condition, the diagnostics share each cell reader's
+weight (`cell_weights`) among the segments and set its score against the
+number of cells of a text, since the cell max rises with that number.
 """
 
 from collections.abc import Callable
@@ -30,14 +32,17 @@ import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import time
 from types import MappingProxyType
 from typing import Any
 from typing import Literal
 from typing import NamedTuple
 from typing import get_args
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
+from sklearn.exceptions import ConvergenceWarning
 import torch
 
 from tomography.activations import Activations
@@ -51,6 +56,7 @@ from tomography.experiments import m2_readers
 from tomography.experiments import p2_positions
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.p3_size import spearman
 from tomography.experiments.sweep import shuffle_within_groups
 from tomography.experiments.variants import ReadingTask
 from tomography.experiments.variants import TaskSource
@@ -93,7 +99,31 @@ FAMILIES = (
     "compared with each baseline's top_k rule and, in a family of their own, "
     "its best rule"
 )
+DIAGNOSTIC_COLUMNS = (
+    "task",
+    "condition",
+    "scorer",
+    "readout",
+    "series",
+    *SEGMENTS,
+    "cells",
+    "cells_rho",
+)
+DIAGNOSTICS = (
+    "one row per task, condition and cell reader; each segment column is the "
+    "share of a report text's reader weight on the cells of that segment "
+    "(cellmax: its highest cell, ties split; cellattn: its attention mass), "
+    "averaged over the texts and draws; cells is a text's mean number of "
+    "cells in the reader's set, and cells_rho the Spearman correlation of "
+    "that number with the score within each label, averaged over the labels "
+    "and draws where it is defined (null if none is), since the cell max "
+    "rises with the number of cells; a prefix share can still be "
+    "decoy-driven, as utility's Scenario: tag follows the misleading line"
+)
 CellReader = AttentionReader | CellMaxReader
+# Shown warnings, so that a fit warning shown again keeps the "default"
+# action's once per location.
+_SHOWN: dict[Any, Any] = {}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -336,8 +366,7 @@ def select_cells(
     missing = [layer for layer in layers if layer not in cells.layers]
     if missing:
         raise ValueError(f"layers {missing} were not read, only {cells.layers}")
-    codes = [SEGMENTS.index(segment) for segment in SET_SEGMENTS[cell_set]]
-    keep = np.flatnonzero(np.isin(segments, codes))
+    keep = np.flatnonzero(_in_set(segments, cell_set))
     at = [k for k, layer in enumerate(cells.layers) if layer in layers]
     stimulus = cells.row_stimulus[keep]
     counts = np.bincount(stimulus, minlength=cells.n_stimuli)
@@ -356,6 +385,14 @@ def select_cells(
         row_token=cells.row_token[keep],
         row_token_id=cells.row_token_id[keep],
         n_stimuli=cells.n_stimuli,
+    )
+
+
+def _in_set(segments: NDArray[np.int8], cell_set: CellSet) -> NDArray[np.bool_]:
+    """Whether each row's segment is one of the cell set's."""
+    return np.isin(
+        segments,
+        [SEGMENTS.index(segment) for segment in SET_SEGMENTS[cell_set]],
     )
 
 
@@ -410,6 +447,62 @@ def random_cell_max(
     return readers[int(np.argmax(areas))]
 
 
+def cell_weights(reader: CellReader, acts: Activations) -> NDArray[np.float64]:
+    """The weight of each cell in its stimulus's score.
+
+    A cell max reader puts all of a stimulus's weight on its highest cell,
+    split evenly among tied cells; a joint attention reader spreads it by
+    the softmax of the cells' logits. Either way a stimulus scores the sum
+    of its cells' values times their weights, and its weights sum to 1.
+
+    Args:
+        reader: A cell max reader or a joint attention reader.
+        acts: Cells of the reader's layers.
+
+    Returns:
+        The weights, shape (K, n_rows), in the layout of `acts.data`.
+    """
+    heads, offsets = (
+        (reader.values, reader.biases)
+        if isinstance(reader, CellMaxReader)
+        else (reader.queries, reader.offsets)
+    )
+    # The reader's own float64 arithmetic, so the highest cell is its own.
+    logits = np.stack(
+        [
+            rows.astype(np.float64) @ heads[k] + offsets[k]
+            for k, rows in enumerate(acts.data)
+        ]
+    ).ravel()
+    stimulus = np.tile(acts.row_stimulus, len(acts.layers))
+    top = np.full(acts.n_stimuli, -np.inf)
+    np.maximum.at(top, stimulus, logits)
+    if isinstance(reader, CellMaxReader):
+        weights = (logits == top[stimulus]).astype(np.float64)
+    else:
+        weights = np.exp(logits - top[stimulus])
+    totals = np.bincount(stimulus, weights, minlength=acts.n_stimuli)
+    shares = np.asarray(weights / totals[stimulus], dtype=np.float64)
+    return shares.reshape(len(acts.layers), -1)
+
+
+class Streamed(NamedTuple):
+    """What `stream_scores` keeps of each reader on each stimulus.
+
+    Attributes:
+        scores: The scores, shape (n_readers, n_stimuli).
+        shares: The share of each stimulus's weight (see `cell_weights`) on
+            the cells of each segment of `SEGMENTS`, shape (n_readers,
+            n_stimuli, len(SEGMENTS)).
+        cells: The number of cells each reader reads of each stimulus,
+            shape (n_readers, n_stimuli).
+    """
+
+    scores: NDArray[np.float64]
+    shares: NDArray[np.float64]
+    cells: NDArray[np.int64]
+
+
 def stream_scores(
     loaded: LoadedModel,
     stimuli: StimulusSet,
@@ -417,13 +510,13 @@ def stream_scores(
     config: Config,
     *,
     decoy: bool,
-) -> NDArray[np.float64]:
+) -> Streamed:
     """Scores stimuli with cell readers, reading their cells batch by batch.
 
     Each batch of `config.batch_size` texts is read once by `prompt_cells`
     at `cell_layers`, every reader scores the cells of its set, and the
-    cells are released before the next batch is read, so only the scores
-    are held.
+    cells are released before the next batch is read, so only the scores,
+    the segment shares and the cell counts are held.
 
     Args:
         loaded: The wrapped model.
@@ -434,24 +527,32 @@ def stream_scores(
         decoy: Whether the texts carry P2's misleading line.
 
     Returns:
-        The score of each reader and stimulus, shape (n_readers, n_stimuli).
+        The scores, segment shares and cell counts of each reader and
+        stimulus.
 
     Raises:
         ValueError: If a batch is refused by `prompt_cells`, `select_cells`
             or a reader; the error names the stimulus the batch starts at.
     """
-    scores = np.empty((len(readers), len(stimuli.texts)))
-    for first in range(0, len(stimuli.texts), config.batch_size):
+    n_readers, n_stimuli = len(readers), len(stimuli.texts)
+    streamed = Streamed(
+        np.empty((n_readers, n_stimuli)),
+        np.empty((n_readers, n_stimuli, len(SEGMENTS))),
+        np.empty((n_readers, n_stimuli), dtype=np.int64),
+    )
+    for first in range(0, n_stimuli, config.batch_size):
         rows = slice(first, first + config.batch_size)
         try:
-            scores[:, rows] = _batch_scores(
+            batch = _batch_scores(
                 loaded, _rows(stimuli, rows), readers, config, decoy=decoy
             )
         except ValueError as error:
             raise ValueError(
                 f"in the batch that starts at stimulus {first}: {error}"
             ) from error
-    return scores
+        for whole, part in zip(streamed, batch, strict=True):
+            whole[:, rows] = part
+    return streamed
 
 
 def _batch_scores(
@@ -461,7 +562,7 @@ def _batch_scores(
     config: Config,
     *,
     decoy: bool,
-) -> NDArray[np.float64]:
+) -> Streamed:
     """Scores one batch; its cells are released on return."""
     cells, segments = prompt_cells(
         loaded,
@@ -472,14 +573,29 @@ def _batch_scores(
         decoy=decoy,
     )
     kept = {
-        cell_set: select_cells(
-            cells, segments, cell_set, _set_layers(config, cell_set)
+        cell_set: (
+            select_cells(
+                cells, segments, cell_set, _set_layers(config, cell_set)
+            ),
+            segments[_in_set(segments, cell_set)],
         )
         for cell_set in dict.fromkeys(cell_set for cell_set, _ in readers)
     }
-    return np.array(
-        [reader.score(kept[cell_set])[0] for cell_set, reader in readers],
-        dtype=np.float64,
+    n_stimuli, n_segments = len(stimuli.texts), len(SEGMENTS)
+    scores, shares, counts = [], [], []
+    for cell_set, reader in readers:
+        acts, kept_segments = kept[cell_set]
+        scores.append(reader.score(acts)[0])
+        shares.append(
+            np.bincount(
+                acts.row_stimulus * n_segments + kept_segments,
+                cell_weights(reader, acts).sum(axis=0),
+                minlength=n_stimuli * n_segments,
+            ).reshape(n_stimuli, n_segments)
+        )
+        counts.append(np.bincount(acts.row_stimulus) * len(acts.layers))
+    return Streamed(
+        np.array(scores, dtype=np.float64), np.array(shares), np.array(counts)
     )
 
 
@@ -510,6 +626,8 @@ class _Fit(NamedTuple):
         cell_set: The set the readers read.
         readers: One reader per grid value.
         select_labels: The select labels that tune and threshold them.
+        seconds: The time the fits took; 0 for the random control.
+        convergence_warnings: The `ConvergenceWarning`s the fits raised.
     """
 
     cell: m2_readers.Cell
@@ -517,6 +635,8 @@ class _Fit(NamedTuple):
     cell_set: CellSet
     readers: list[CellReader]
     select_labels: NDArray[np.int64]
+    seconds: float = 0.0
+    convergence_warnings: int = 0
 
 
 def _fit_cells(
@@ -526,6 +646,38 @@ def _fit_cells(
     if pooling == "cellattn":
         return fit_attention(train, labels=labels, c=c, joint=True)
     return fit_cell_max(train, labels=labels, c=c)
+
+
+def _grid_fits(
+    pooling: Pooling,
+    train: Activations,
+    labels: NDArray[np.int64],
+    grid: Sequence[float],
+) -> tuple[list[CellReader], float, int]:
+    """Fits a reader per grid value, timing the fits and counting warnings.
+
+    Every `ConvergenceWarning` is counted, then shown again under the
+    caller's filters.
+
+    Returns:
+        The readers, the seconds the fits took, and the number of
+        `ConvergenceWarning`s they raised.
+    """
+    start = time.perf_counter()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ConvergenceWarning)
+        readers = [_fit_cells(pooling, train, labels, c) for c in grid]
+    seconds = time.perf_counter() - start
+    for shown in caught:
+        warnings.warn_explicit(
+            shown.message,
+            shown.category,
+            shown.filename,
+            shown.lineno,
+            registry=_SHOWN,
+        )
+    counted = sum(issubclass(w.category, ConvergenceWarning) for w in caught)
+    return readers, seconds, counted
 
 
 def _shuffled(
@@ -599,17 +751,24 @@ def _set_fits(
     The random control draws its heads with the seed M2 would give a
     `random` scorer on the readout `cellmax_<set>`.
     """
-    fits = [
-        _Fit(
-            m2_readers.Cell("logistic", f"{pooling}_{cell_set}", "joint"),
-            name,
-            cell_set,
-            [_fit_cells(pooling, train, labels, c) for c in config.logistic_c],
-            select_labels,
-        )
-        for pooling in config.poolings
-        for name, labels, select_labels in series
-    ]
+    fits = []
+    for pooling in config.poolings:
+        cell = m2_readers.Cell("logistic", f"{pooling}_{cell_set}", "joint")
+        for name, labels, select_labels in series:
+            readers, seconds, caught = _grid_fits(
+                pooling, train, labels, config.logistic_c
+            )
+            fits.append(
+                _Fit(
+                    cell,
+                    name,
+                    cell_set,
+                    readers,
+                    select_labels,
+                    seconds,
+                    caught,
+                )
+            )
     if "random" in config.controls and "cellmax" in config.poolings:
         readout = f"cellmax_{cell_set}"
         seed = derive_seed(config.seed, "fit", task.name, "random", readout, i)
@@ -629,12 +788,30 @@ def _set_fits(
     return fits
 
 
-def _matrix_entries(
+class _CellPhase(NamedTuple):
+    """What the cell phase gives of one task.
+
+    Attributes:
+        entries: The entries of the cell readers and the random control.
+        diagnostics: The task's rows of `diagnostics.json`.
+        fits: The task's `fits` entry of the summary.
+        heads: The arrays of `cellheads_<task>.npz`.
+        sidecar: The JSON sidecar of those arrays.
+    """
+
+    entries: list[m2_readers._Entry]
+    diagnostics: list[list[Any]]
+    fits: dict[str, dict[str, float]]
+    heads: dict[str, NDArray[Any]]
+    sidecar: dict[str, Any]
+
+
+def _cell_phase(
     config: Config,
     loaded: LoadedModel,
     task: ReadingTask,
     items: m2_readers._Splits,
-) -> list[m2_readers._Entry]:
+) -> _CellPhase:
     """Fits, tunes and scores the cell readers and their random control.
 
     Every draw is fitted first. The select items are then streamed once
@@ -655,42 +832,165 @@ def _matrix_entries(
         [(fit.cell_set, reader) for fit in fits for reader in fit.readers],
         config,
         decoy=False,
-    )
+    ).scores
     sizes = np.cumsum([len(fit.readers) for fit in fits])[:-1]
-    kept: list[tuple[CellSet, CellReader]] = []
+    best: list[int] = []
     vals = []
     for fit, val in zip(fits, np.split(scored, sizes), strict=True):
         metric = group_accuracy(val[:, None], select.groups, fit.select_labels)
-        best = int(m2_readers.tune_per_layer(metric)[0])
-        kept.append((fit.cell_set, fit.readers[best]))
-        vals.append(val[best])
-    report = np.stack(
-        [
-            stream_scores(
-                loaded,
-                items.report_items[condition],
-                kept,
-                config,
-                decoy=condition in config.decoys,
-            )
-            for condition in items.conditions
-        ],
-        axis=1,
-    )
-    choices: dict[tuple[m2_readers.Cell, str], list[m2_readers._Choice]] = {}
-    for fit, val, scores in zip(fits, vals, report, strict=True):
-        choices.setdefault((fit.cell, fit.series), []).append(
-            m2_readers._Choice(
-                _set_layers(config, fit.cell_set),
-                val,
-                scores,
-                fit.select_labels,
-            )
-        )
-    return [
-        m2_readers._Entry(cell, series, per_seed)
-        for (cell, series), per_seed in choices.items()
+        best.append(int(m2_readers.tune_per_layer(metric)[0]))
+        vals.append(val[best[-1]])
+    kept = [
+        (fit.cell_set, fit.readers[b])
+        for fit, b in zip(fits, best, strict=True)
     ]
+    streamed = [
+        stream_scores(
+            loaded,
+            items.report_items[condition],
+            kept,
+            config,
+            decoy=condition in config.decoys,
+        )
+        for condition in items.conditions
+    ]
+    report = Streamed(
+        *(np.stack(parts, axis=1) for parts in zip(*streamed, strict=True))
+    )
+    groups: dict[tuple[m2_readers.Cell, str], list[int]] = {}
+    for j, fit in enumerate(fits):
+        groups.setdefault((fit.cell, fit.series), []).append(j)
+    entries = [
+        m2_readers._Entry(
+            cell,
+            series,
+            [
+                m2_readers._Choice(
+                    _set_layers(config, fits[j].cell_set),
+                    vals[j],
+                    report.scores[j],
+                    fits[j].select_labels,
+                )
+                for j in draws
+            ],
+        )
+        for (cell, series), draws in groups.items()
+    ]
+    fit_counts = {
+        f"{cell.name}/{series}": {
+            "fits": sum(len(fits[j].readers) for j in draws),
+            "seconds": sum(fits[j].seconds for j in draws),
+            "convergence_warnings": sum(
+                fits[j].convergence_warnings for j in draws
+            ),
+        }
+        for (cell, series), draws in groups.items()
+        if cell.scorer == "logistic"
+    }
+    return _CellPhase(
+        entries,
+        _diagnostic_rows(task, items, groups, report),
+        fit_counts,
+        *_heads(config, fits, best, groups),
+    )
+
+
+def _diagnostic_rows(
+    task: ReadingTask,
+    items: m2_readers._Splits,
+    groups: Mapping[tuple[m2_readers.Cell, str], Sequence[int]],
+    report: Streamed,
+) -> list[list[Any]]:
+    """The segment shares and cell counts of each cell reader and condition.
+
+    Args:
+        task: The task.
+        items: Its items.
+        groups: The fits of each cell and series, one per draw.
+        report: The report items of each fit, stacked by condition on the
+            second axis.
+
+    Returns:
+        Rows of `DIAGNOSTIC_COLUMNS`.
+    """
+    rows: list[list[Any]] = []
+    for (cell, series), draws in groups.items():
+        for m, condition in enumerate(items.conditions):
+            labels = items.report_items[condition].labels
+            rhos = [
+                spearman(
+                    report.cells[j, m][labels == label].astype(np.float64),
+                    report.scores[j, m][labels == label],
+                )
+                for j in draws
+                for label in (0, 1)
+            ]
+            finite = [rho for rho in rhos if np.isfinite(rho)]
+            rows.append(
+                [
+                    task.name,
+                    condition,
+                    cell.scorer,
+                    cell.readout,
+                    series,
+                    *report.shares[list(draws), m].mean(axis=(0, 1)).tolist(),
+                    float(report.cells[draws[0], m].mean()),
+                    float(np.mean(finite)) if finite else None,
+                ]
+            )
+    return rows
+
+
+def _heads(
+    config: Config,
+    fits: Sequence[_Fit],
+    best: Sequence[int],
+    groups: Mapping[tuple[m2_readers.Cell, str], Sequence[int]],
+) -> tuple[dict[str, NDArray[Any]], dict[str, Any]]:
+    """The kept readers' parameters, stacked over the draws.
+
+    Args:
+        config: Supplies the grid of `logistic_c`.
+        fits: Every fit of the task.
+        best: The grid value each fit kept.
+        groups: The fits of each cell and series, one per draw.
+
+    Returns:
+        The arrays, keyed `<scorer>_<readout>_<series>_<field>`, and their
+        sidecar, which names the entry and the layers of each key.
+    """
+    arrays: dict[str, NDArray[Any]] = {}
+    listed: dict[str, Any] = {}
+    for (cell, series), draws in groups.items():
+        key = f"{cell.scorer}_{cell.readout}_{series}"
+        readers = [fits[j].readers[best[j]] for j in draws]
+        fields = ["values", "biases", "signs"]
+        if isinstance(readers[0], AttentionReader):
+            fields += ["queries", "offsets"]
+        for field in fields:
+            arrays[f"{key}_{field}"] = np.stack(
+                [getattr(reader, field) for reader in readers]
+            )
+        if cell.scorer == "logistic":
+            arrays[f"{key}_c"] = np.array(
+                [config.logistic_c[best[j]] for j in draws]
+            )
+        listed[key] = {
+            "entry": f"{cell.name}/{series}",
+            "layers": list(readers[0].layers),
+        }
+    sidecar = {
+        "entries": listed,
+        "axes": {
+            "values": ["seed", "layer", "feature"],
+            "queries": ["seed", "layer", "feature"],
+            "biases": ["seed", "layer"],
+            "offsets": ["seed", "layer"],
+            "signs": ["seed", "layer"],
+            "c": ["seed"],
+        },
+    }
+    return arrays, sidecar
 
 
 def _row_entries(
@@ -867,14 +1167,15 @@ def _run_task(
     loaded: LoadedModel,
     name: str,
     examples: Mapping[str, Sequence[Example]],
-) -> tuple[list[list[Any]], list[list[Any]], dict[str, Any]]:
+) -> tuple[list[list[Any]], list[list[Any]], list[list[Any]], dict[str, Any]]:
     """Runs both phases on one task and writes its files.
 
     The one-row activations are released before the cell phase reads.
 
     Returns:
-        The table rows, the comparison rows, and the task's `conditions`,
-        `skipped` and `n_eval_pairs` entries of the summary.
+        The table rows, the comparison rows, the diagnostic rows, and the
+        task's `conditions`, `skipped`, `n_eval_pairs` and `fits` entries
+        of the summary.
     """
     task = m2_readers._task(name)
     scorers, readouts, skipped = m2_readers._readable(task, config)
@@ -883,14 +1184,18 @@ def _run_task(
     )
     for readout in RELABELLED:
         entries += _relabelled(config, loaded, task, items, scorers, readout)
-    entries += _matrix_entries(config, loaded, task, items)
+    cells = _cell_phase(config, loaded, task, items)
+    entries += cells.entries
     entry_rows = [
         m2_readers._metric_rows(config, task, items, e) for e in entries
     ]
     m2_readers._write_task(run_dir, task, items, entries, entry_rows)
+    run_dir.write_arrays(f"cellheads_{task.name}", **cells.heads)
+    run_dir.write_json(f"cellheads_{task.name}", cells.sidecar)
     return (
         [row for block in entry_rows for row in block],
         _comparisons(config, task, items, entries),
+        cells.diagnostics,
         {
             "conditions": items.conditions,
             "skipped": {**skipped, **shift_skips},
@@ -898,6 +1203,7 @@ def _run_task(
                 "select": int(items.select_items.groups.shape[0]),
                 "report": int(items.report_items["original"].groups.shape[0]),
             },
+            "fits": cells.fits,
         },
     )
 
@@ -919,7 +1225,10 @@ def execute(
     draw, the first best grid value; and streams each condition's report
     items once through the kept readers. Writes M2's files: per task
     `scores_<task>` and `auroc_<task>`, and `table.json`,
-    `comparisons.json` and `summary.json`.
+    `comparisons.json` and `summary.json`; and per task the kept readers'
+    parameters in `cellheads_<task>`, and `diagnostics.json` (see
+    `DIAGNOSTICS`). The summary also counts, per task and fitted cell
+    reader, the fits, their seconds and their `ConvergenceWarning`s.
 
     Args:
         config: The experiment settings.
@@ -945,15 +1254,18 @@ def execute(
         )
     rows: list[list[Any]] = []
     comparisons: list[list[Any]] = []
+    diagnostics: list[list[Any]] = []
     summary: dict[str, Any] = {
         "tasks": list(tasks),
         "conditions": {},
         "skipped": {},
         "n_eval_pairs": {},
+        "fits": {},
         "families": FAMILIES,
+        "diagnostics": DIAGNOSTICS,
     }
     for name in tasks:
-        task_rows, task_comparisons, parts = _run_task(
+        task_rows, task_comparisons, task_diagnostics, parts = _run_task(
             config,
             run_dir,
             loaded,
@@ -962,6 +1274,7 @@ def execute(
         )
         rows += task_rows
         comparisons += task_comparisons
+        diagnostics += task_diagnostics
         for key, value in parts.items():
             summary[key][name] = value
     run_dir.write_json(
@@ -970,6 +1283,10 @@ def execute(
     run_dir.write_json(
         "comparisons",
         {"columns": list(m2_readers.COMPARISON_COLUMNS), "rows": comparisons},
+    )
+    run_dir.write_json(
+        "diagnostics",
+        {"columns": list(DIAGNOSTIC_COLUMNS), "rows": diagnostics},
     )
     run_dir.write_json("summary", summary)
 
