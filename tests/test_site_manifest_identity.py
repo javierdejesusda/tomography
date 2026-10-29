@@ -7,7 +7,21 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
 FINDINGS = ROOT / "docs" / "findings.md"
 HASH = re.compile(r"^[0-9a-f]{12}$")
-SKIPPED = ("pca_diff", "sentiment", "concept", "shuffled-only")
+# The sentiment-only P1 runs (superseded by the all-task runs) and the M2
+# shuffled-only runs (which only supplement a full run) stay committed, but no
+# selection of `Manifest.run` picks them.
+UNSELECTED = frozenset({"P1", "P1 (sentiment)", "M2 shuffled-only run"})
+# A row label left out of this map names the default run of its experiment, so
+# its check calls `Manifest.run` with no selection and pins that default.
+SELECTIONS: dict[str, dict[str, str]] = {
+    "P1 (all tasks, pca_diff)": {"method": "pca_diff"},
+    "P9d concept": {"template": "concept"},
+    "R8 CommonsenseQA": {"task": "csqa"},
+    "R8 ARC-Easy": {"task": "arc_easy"},
+    "R8 ARC-Challenge": {"task": "arc_challenge"},
+    "R8 RACE": {"task": "race"},
+    "R8 TruthfulQA MC1": {"task": "tqa"},
+}
 
 
 def _identity_section() -> list[str]:
@@ -19,15 +33,14 @@ def _identity_section() -> list[str]:
     return lines[start:end]
 
 
-def reported() -> dict[tuple[str, str], set[str]]:
-    """Reads the hashes the Run identity tables name per experiment and model.
+def reported() -> list[tuple[str, str, str]]:
+    """Reads the runs the Run identity tables name, one per table cell.
 
     Returns:
-        Map from (experiment id, model key) to the reported hashes. Rows of
-        the P1 pca_diff and sentiment-only runs, the P9d concept template and
-        the M2 shuffled-only runs are not the default run and are left out.
+        (row label, model key, hash) for every hash cell, except the cells of
+        the rows in `UNSELECTED`.
     """
-    found: dict[tuple[str, str], set[str]] = {}
+    found: list[tuple[str, str, str]] = []
     models: list[str] = []
     for line in _identity_section():
         if not line.startswith("|"):
@@ -37,63 +50,47 @@ def reported() -> dict[tuple[str, str], set[str]]:
         if cells[0] == "Experiment":
             models = cells[1:]
             continue
-        if not models or set(cells[0]) <= {"-", " "}:
-            continue
-        label = cells[0].lower()
-        exp = label.split()[0]
-        if any(word in label for word in SKIPPED):
+        label = cells[0]
+        if not models or set(label) <= {"-", " "} or label in UNSELECTED:
             continue
         for model, cell in zip(models, cells[1:], strict=False):
             if HASH.match(cell):
-                found.setdefault((exp, model), set()).add(cell)
+                found.append((label, model, cell))
     return found
-
-
-def _p1_all_task_cells(
-    table: dict[tuple[str, str], set[str]],
-) -> dict[tuple[str, str], set[str]]:
-    """Keeps the all-task logistic cells of P1 where a follow-up names them."""
-    follow_up: dict[tuple[str, str], set[str]] = {}
-    models: list[str] = []
-    for line in _identity_section():
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if cells[0] == "Experiment":
-            models = cells[1:]
-        elif (
-            cells[0].startswith("P1 (all tasks") and "pca_diff" not in cells[0]
-        ):
-            for model, cell in zip(models, cells[1:], strict=False):
-                if HASH.match(cell):
-                    follow_up[("p1", model)] = {cell}
-    return {**table, **follow_up}
 
 
 def test_the_reported_hashes_are_parsed_from_the_run_identity_tables() -> None:
     table = reported()
-    assert table[("r1", "gpt2")] == {"bd4438c46cef"}
-    assert table[("c5", "gpt2-xl")] == {"0ad95833261d"}
+    assert ("R1", "gpt2", "bd4438c46cef") in table
+    assert ("C5", "gpt2-xl", "0ad95833261d") in table
 
 
 def test_the_m2_shuffled_only_runs_are_not_reported_runs() -> None:
-    table = reported()
-    assert table[("m2", "qwen3-0.6b-base")] == {"dfd0cd00a2b7"}
-    assert table[("m2", "qwen3-1.7b")] == {"f39cce3f3a97"}
+    m2 = [(m, run) for label, m, run in reported() if label.startswith("M2")]
+    assert m2 == [
+        ("qwen3-0.6b-base", "dfd0cd00a2b7"),
+        ("qwen3-0.6b", "4f11f2a29935"),
+        ("qwen3-1.7b-base", "84a62d2075b6"),
+        ("qwen3-1.7b", "f39cce3f3a97"),
+    ]
 
 
-def test_the_selected_run_is_the_one_run_identity_names() -> None:
-    table = _p1_all_task_cells(reported())
+def test_each_row_names_the_run_its_selection_picks() -> None:
     found = manifest_module.Manifest(RESULTS)
     problems = []
+    named_default = set()
+    for label, model, named in reported():
+        exp = label.split()[0].lower()
+        select = SELECTIONS.get(label, {})
+        if not select:
+            named_default.add((exp, model))
+        chosen = found.run(exp, model, **select)
+        if chosen is None or chosen.name != named:
+            got = chosen.name if chosen else None
+            problems.append(f"{label}/{model}: selected {got}, named {named}")
     for exp in found.experiments():
         for model in found.models(exp):
-            hashes = [p.name for p in (RESULTS / exp / model).iterdir()]
-            if len(hashes) < 2:
-                continue
-            chosen = found.run(exp, model)
-            named = table.get((exp, model))
-            if named is None:
+            several = len(found.runs(exp, model)) > 1
+            if several and (exp, model) not in named_default:
                 problems.append(f"{exp}/{model}: no Run identity entry")
-            elif chosen is None or chosen.name not in named:
-                got = chosen.name if chosen else None
-                problems.append(f"{exp}/{model}: selected {got}, named {named}")
     assert problems == []
