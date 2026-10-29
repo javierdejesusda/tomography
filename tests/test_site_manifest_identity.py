@@ -6,7 +6,7 @@ from tomography.site import manifest as manifest_module
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
 FINDINGS = ROOT / "docs" / "findings.md"
-HASH = re.compile(r"^[0-9a-f]{12}$")
+HASH = re.compile(r"[0-9a-f]{12}\b")
 # The sentiment-only P1 runs (superseded by the all-task runs) and the M2
 # shuffled-only runs (which only supplement a full run) stay committed, but no
 # selection of `Manifest.run` picks them.
@@ -37,8 +37,9 @@ def reported() -> list[tuple[str, str, str]]:
     """Reads the runs the Run identity tables name, one per table cell.
 
     Returns:
-        (row label, model key, hash) for every hash cell, except the cells of
-        the rows in `UNSELECTED`.
+        (row label, model key, hash) for every cell that starts with a hash,
+        such as "94faa23c130d (batch size 4)", except the cells of the rows in
+        `UNSELECTED`.
     """
     found: list[tuple[str, str, str]] = []
     models: list[str] = []
@@ -53,9 +54,9 @@ def reported() -> list[tuple[str, str, str]]:
         label = cells[0]
         if not models or set(label) <= {"-", " "} or label in UNSELECTED:
             continue
-        for model, cell in zip(models, cells[1:], strict=False):
-            if HASH.match(cell):
-                found.append((label, model, cell))
+        for model, cell in zip(models, cells[1:], strict=True):
+            if run := HASH.match(cell):
+                found.append((label, model, run.group()))
     return found
 
 
@@ -63,6 +64,10 @@ def test_the_reported_hashes_are_parsed_from_the_run_identity_tables() -> None:
     table = reported()
     assert ("R1", "gpt2", "bd4438c46cef") in table
     assert ("C5", "gpt2-xl", "0ad95833261d") in table
+
+
+def test_a_cell_is_read_by_its_leading_hash_past_a_note() -> None:
+    assert ("P10a", "qwen3-4b-base", "94faa23c130d") in reported()
 
 
 def test_the_m2_shuffled_only_runs_are_not_reported_runs() -> None:
