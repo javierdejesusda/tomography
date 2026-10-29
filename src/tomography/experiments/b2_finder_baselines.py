@@ -23,6 +23,7 @@ with "positive" and once with "negative".
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
@@ -30,21 +31,30 @@ import numpy as np
 from numpy.typing import NDArray
 
 from tomography.activations import Activations
+from tomography.activations import collect_activations
+from tomography.datasets.geometry_of_truth import load_geometry_of_truth
 from tomography.datasets.records import Example
+from tomography.datasets.sst2 import load_sst2
 from tomography.datasets.stimulus import StimulusSet
 from tomography.datasets.stimulus import build_stimulus_set
 from tomography.experiments import r1_sentiment
 from tomography.experiments import r7_truth
 from tomography.experiments.base import ExperimentConfig
+from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.sweep import SERIES
+from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.sweep import plot_curves_file
 from tomography.experiments.sweep import sweep_from_activations
+from tomography.experiments.sweep import write_curves
 from tomography.experiments.tb1_text_baselines import _text_set
 from tomography.experiments.tb1_text_baselines import interval
 from tomography.experiments.tb1_text_baselines import seed_accuracy
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import task_splits
 from tomography.model import BosMode
+from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.p9.risk import TEXT_ANALYZERS
 from tomography.reading.ccs import CCSProbe
 from tomography.reading.ccs import fit_ccs
@@ -570,3 +580,165 @@ def table_rows(
             ]
         )
     return rows
+
+
+def prepare_dataset(
+    config: Config,
+    name: str,
+    items: Items,
+    loaded: LoadedModel,
+    chat: ChatFormat,
+) -> Dataset:
+    """Reads the last-token activations of every part of a dataset.
+
+    Args:
+        config: The experiment settings.
+        name: A name from `DATASETS`.
+        items: Its stimuli, from `dataset_items`.
+        loaded: The wrapped model.
+        chat: The chat format the items were rendered with.
+
+    Returns:
+        The dataset; for sentiment the contrast rows are the activations of
+        `completion_texts`, for truth the parts' own rows.
+    """
+    layers = (
+        tuple(range(1, loaded.n_layers + 1))
+        if config.layers is None
+        else config.layers
+    )
+
+    def collect(texts: Sequence[str]) -> Activations:
+        return collect_activations(
+            loaded,
+            texts,
+            layers=layers,
+            position="last",
+            bos=config.bos,
+            batch_size=config.batch_size,
+        )
+
+    def part(stimuli: StimulusSet) -> Part:
+        act = collect(stimuli.texts)
+        if name == "sentiment":
+            texts = completion_texts(stimuli, items.text_of, chat)
+            return Part(
+                stimuli, act, completion_contrast(stimuli, collect(texts))
+            )
+        return Part(stimuli, act, pair_contrast(stimuli, act))
+
+    return Dataset(
+        name,
+        tuple(part(stimuli) for stimuli in items.train),
+        part(items.val),
+        part(items.test),
+        items.text_of,
+    )
+
+
+def execute(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    sentiment: Sequence[Example],
+    truth_sets: Sequence[Example],
+) -> None:
+    """Scores every finder and control on every dataset.
+
+    The items of all datasets are built before any forward pass. Writes
+    `table.json` (one row per dataset and series, see `COLUMNS`),
+    `curves_<dataset>_<val|test>` per dataset (the `LAYER_SERIES` accuracy
+    per seed and layer) and `summary.json` (the pair counts and the mean
+    CCS training loss at its validation layer per dataset, and the kind of
+    every series).
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+        loaded: The wrapped model.
+        sentiment: SST-2 examples; may be empty without `sentiment`.
+        truth_sets: Geometry of Truth examples; may be empty without a
+            truth dataset.
+
+    Raises:
+        ValueError: If a dataset lacks examples or pairs.
+    """
+    chat = chat_format_for(loaded)
+    items = {
+        name: dataset_items(config, name, chat, sentiment, truth_sets)
+        for name in config.datasets
+    }
+    rows: list[list[Any]] = []
+    datasets: dict[str, dict[str, Any]] = {}
+    for name, parts in items.items():
+        scores = score_dataset(
+            config, prepare_dataset(config, name, parts, loaded, chat)
+        )
+        for split, accuracy in (("val", scores.val), ("test", scores.test)):
+            write_curves(
+                run_dir,
+                np.stack([accuracy[series] for series in LAYER_SERIES]),
+                scores.layers,
+                series=LAYER_SERIES,
+                stem=f"curves_{name}_{split}",
+                chance=0.5,
+                n_layers=loaded.n_layers,
+                n_boot=config.n_boot,
+                seed=config.seed,
+            )
+        n_test = int(parts.test.groups.shape[0])
+        own = table_rows(name, scores, n_test, config)
+        rows += own
+        ccs_layer = own[LAYER_SERIES.index("ccs")][COLUMNS.index("val_layer")]
+        losses = scores.ccs_losses[:, scores.layers.index(ccs_layer)]
+        datasets[name] = {
+            "n_train_pairs": int(parts.train[0].groups.shape[0]),
+            "n_val_pairs": int(parts.val.groups.shape[0]),
+            "n_test_pairs": n_test,
+            "ccs_loss": float(losses.mean()),
+        }
+    run_dir.write_json("table", {"columns": list(COLUMNS), "rows": rows})
+    run_dir.write_json(
+        "summary", {"datasets": datasets, "kinds": dict(KIND_OF)}
+    )
+
+
+def run(config: Config, run_dir: RunDir) -> None:
+    """Loads the model and the datasets it reads, then runs `execute`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+    """
+    subsets = [
+        subset
+        for name in config.datasets
+        if name in NEGATIONS
+        for subset in (name, NEGATIONS[name])
+    ]
+    loaded = load_model(config.model)
+    execute(
+        config,
+        run_dir,
+        loaded,
+        load_sst2() if "sentiment" in config.datasets else [],
+        load_geometry_of_truth(subsets=subsets) if subsets else [],
+    )
+
+
+def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
+    """Draws the B2 layer curves of every dataset and held-out split.
+
+    Args:
+        run_dir: A finished B2 run.
+        out_dir: Folder of the figures.
+
+    Returns:
+        The PDF, PNG and SVG paths of every `curves_*` file, sorted by stem.
+    """
+    stems = sorted(p.stem for p in run_dir.path.glob("curves_*.npz"))
+    return [
+        path
+        for stem in stems
+        for path in plot_curves_file(run_dir, out_dir, stem=stem)
+    ]

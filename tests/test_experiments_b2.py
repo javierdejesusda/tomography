@@ -1,6 +1,7 @@
 """Tests for the B2 finder baselines experiment."""
 
 import dataclasses
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -8,6 +9,8 @@ from numpy.typing import NDArray
 import pytest
 
 from tomography.activations import Activations
+from tomography.activations import collect_activations
+from tomography.cli import load_experiment
 from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import b2_finder_baselines as b2
@@ -15,13 +18,18 @@ from tomography.experiments import r1_sentiment
 from tomography.experiments.b2_finder_baselines import Config
 from tomography.experiments.b2_finder_baselines import completion_texts
 from tomography.experiments.b2_finder_baselines import dataset_items
+from tomography.experiments.b2_finder_baselines import plot
+from tomography.experiments.b2_finder_baselines import run
+from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.sweep import sweep_from_activations
 from tomography.experiments.tb1_text_baselines import TextSet
 from tomography.experiments.tb1_text_baselines import interval
 from tomography.experiments.tb1_text_baselines import seed_accuracy
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import task_splits
+from tomography.model import LoadedModel
 from tomography.reading.ccs import CCSProbe
 from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import group_accuracy
@@ -447,3 +455,261 @@ def test_lat_is_the_reader_published_finders_baselines_the_rest_controls() -> (
     rows = b2.table_rows("cities", _planted_scores(), 40, _config())
 
     assert {row[1]: row[2] for row in rows} == expected
+
+
+def test_the_cli_discovers_the_experiment() -> None:
+    experiment = load_experiment("b2")
+    assert experiment.config_cls is Config
+    assert experiment.run is run
+    assert experiment.plot is plot
+
+
+def test_ccs_reads_the_completions_for_sentiment_and_the_stimuli_for_truth(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    config = _config()
+    chat = chat_format_for(tiny_gpt2)
+    layers = list(range(1, tiny_gpt2.n_layers + 1))
+
+    def acts(texts: list[str]) -> NDArray[np.float32]:
+        return collect_activations(
+            tiny_gpt2, texts, layers=layers, batch_size=config.batch_size
+        ).data
+
+    for name, sentiment, truth in (
+        ("sentiment", _sentiment(), []),
+        ("cities", [], _truth_sets()),
+    ):
+        items = dataset_items(config, name, chat, sentiment, truth)
+
+        data = b2.prepare_dataset(config, name, items, tiny_gpt2, chat)
+
+        assert len(data.train) == config.n_seeds
+        for part, stimuli in zip(
+            (*data.train, data.val, data.test),
+            (*items.train, items.val, items.test),
+            strict=True,
+        ):
+            assert part.stimuli is stimuli
+            assert part.act.layers == tuple(layers)
+            np.testing.assert_allclose(
+                part.act.data, acts(list(stimuli.texts)), rtol=1e-5, atol=1e-5
+            )
+            if name == "sentiment":
+                texts = completion_texts(stimuli, items.text_of, chat)
+                np.testing.assert_allclose(
+                    part.contrast.h, acts(texts), rtol=1e-5, atol=1e-5
+                )
+                n = stimuli.labels.shape[0]
+                assert part.contrast.pairs.tolist() == [
+                    [2 * j, 2 * j + 1] for j in range(n)
+                ]
+                np.testing.assert_array_equal(
+                    part.contrast.labels[0::2], stimuli.labels
+                )
+            else:
+                assert part.contrast.h is part.act.data
+                np.testing.assert_array_equal(
+                    part.contrast.pairs, stimuli.groups
+                )
+        assert data.text_of == items.text_of
+
+
+def _rows(run_dir: RunDir) -> list[dict[str, Any]]:
+    table = run_dir.read_json("table")
+    assert isinstance(table, dict)
+    assert table["columns"] == list(b2.COLUMNS)
+    return [dict(zip(b2.COLUMNS, row, strict=True)) for row in table["rows"]]
+
+
+def test_execute_writes_the_table_curves_and_summary(
+    tiny_arch: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probes: list[CCSProbe] = []
+    fit_ccs = b2.fit_ccs
+
+    def spy(*args: Any, **kwargs: Any) -> CCSProbe:
+        probes.append(fit_ccs(*args, **kwargs))
+        return probes[-1]
+
+    monkeypatch.setattr(b2, "fit_ccs", spy)
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    b2.execute(config, run_dir, tiny_arch, _sentiment(), _truth_sets())
+
+    rows = _rows(run_dir)
+    names = (*b2.LAYER_SERIES, *b2.TEXT_CONTROLS)
+    assert [(r["dataset"], r["method"]) for r in rows] == [
+        (d, s) for d in config.datasets for s in names
+    ]
+    layers = list(range(1, tiny_arch.n_layers + 1))
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["kinds"] == dict(b2.KIND_OF)
+    assert list(summary["datasets"]) == list(config.datasets)
+    for d, name in enumerate(config.datasets):
+        curves = {}
+        for split in ("val", "test"):
+            stem = f"curves_{name}_{split}"
+            curves[split] = run_dir.read_arrays(stem)
+            assert curves[split]["x"].tolist() == layers
+            assert curves[split]["per_seed"].shape == (
+                len(b2.LAYER_SERIES),
+                config.n_seeds,
+                len(layers),
+            )
+            sidecar = run_dir.read_json(stem)
+            assert isinstance(sidecar, dict)
+            assert sidecar["series"] == list(b2.LAYER_SERIES)
+            assert sidecar["chance"] == 0.5
+            assert sidecar["n_layers"] == tiny_arch.n_layers
+        own = [r for r in rows if r["dataset"] == name]
+        for s, row in enumerate(own[: len(b2.LAYER_SERIES)]):
+            at = int(np.argmax(curves["val"]["mean"][s]))
+            assert row["val_layer"] == layers[at]
+            assert row["accuracy"] == pytest.approx(
+                curves["test"]["mean"][s, at]
+            )
+        items = dataset_items(
+            config,
+            name,
+            chat_format_for(tiny_arch),
+            _sentiment(),
+            _truth_sets(),
+        )
+        n_test = int(items.test.groups.shape[0])
+        assert {row["n_test_pairs"] for row in own} == {n_test}
+        ccs_at = layers.index(own[b2.LAYER_SERIES.index("ccs")]["val_layer"])
+        seeds = probes[d * config.n_seeds : (d + 1) * config.n_seeds]
+        assert summary["datasets"][name] == {
+            "n_train_pairs": config.n_pairs,
+            "n_val_pairs": int(items.val.groups.shape[0]),
+            "n_test_pairs": n_test,
+            "ccs_loss": pytest.approx(
+                np.mean([p.losses[ccs_at] for p in seeds])
+            ),
+        }
+    assert len(probes) == len(config.datasets) * config.n_seeds
+
+
+def test_execute_forwards_the_reading_settings(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def spy(loaded: LoadedModel, texts: Any, **kwargs: Any) -> Activations:
+        calls.append(kwargs)
+        return collect_activations(loaded, texts, **kwargs)
+
+    monkeypatch.setattr(b2, "collect_activations", spy)
+    config = _config(layers=(1,), n_eval_pairs=3, bos="never", batch_size=5)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    b2.execute(config, run_dir, tiny_gpt2, _sentiment(), _truth_sets())
+
+    assert calls
+    for kwargs in calls:
+        assert kwargs == {
+            "layers": (1,),
+            "position": "last",
+            "bos": "never",
+            "batch_size": 5,
+        }
+    assert {row["n_test_pairs"] for row in _rows(run_dir)} == {3}
+    for name in config.datasets:
+        assert run_dir.read_arrays(f"curves_{name}_test")["x"].tolist() == [1]
+
+
+def test_execute_is_deterministic(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config()
+    first = RunDir.create(config, out_root=tmp_path / "a")
+    second = RunDir.create(config, out_root=tmp_path / "b")
+
+    for run_dir in (first, second):
+        b2.execute(config, run_dir, tiny_gpt2, _sentiment(), _truth_sets())
+
+    assert _rows(first) == _rows(second)
+    for name in config.datasets:
+        a = first.read_arrays(f"curves_{name}_test")
+        b = second.read_arrays(f"curves_{name}_test")
+        for key in a:
+            np.testing.assert_array_equal(a[key], b[key])
+
+
+def test_plot_writes_three_formats_per_curves_file(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config()
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    b2.execute(config, run_dir, tiny_gpt2, _sentiment(), _truth_sets())
+
+    paths = plot(run_dir, tmp_path / "figs")
+
+    stems = [
+        f"curves_{name}_{split}"
+        for name in sorted(config.datasets)
+        for split in ("test", "val")
+    ]
+    assert sorted(p.name for p in paths) == [
+        f"{stem}.{ext}" for stem in stems for ext in ("pdf", "png", "svg")
+    ]
+    assert all(p.stat().st_size > 0 for p in paths)
+
+
+@pytest.mark.parametrize(
+    ("datasets", "subsets", "sst2"),
+    [
+        (("sentiment", "cities"), [("cities", "neg_cities")], True),
+        (
+            ("larger_than", "cities"),
+            [("larger_than", "smaller_than", "cities", "neg_cities")],
+            False,
+        ),
+        (("sentiment",), [], True),
+    ],
+)
+def test_run_loads_the_model_and_only_the_data_it_reads(
+    datasets: tuple[str, ...],
+    subsets: list[tuple[str, ...]],
+    sst2: bool,
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[str] = []
+    seen: list[tuple[str, ...]] = []
+    sst2_loads: list[bool] = []
+
+    def fake_load_model(key: str) -> LoadedModel:
+        asked.append(key)
+        return tiny_gpt2
+
+    def fake_load_sst2() -> list[Example]:
+        sst2_loads.append(True)
+        return _sentiment()
+
+    def fake_load_truth(*, subsets: tuple[str, ...]) -> list[Example]:
+        seen.append(tuple(subsets))
+        return _truth_sets(
+            (("cities", "neg_cities"), ("larger_than", "smaller_than"))
+        )
+
+    monkeypatch.setattr(b2, "load_model", fake_load_model)
+    monkeypatch.setattr(b2, "load_sst2", fake_load_sst2)
+    monkeypatch.setattr(b2, "load_geometry_of_truth", fake_load_truth)
+    config = _config(datasets=datasets, n_seeds=1)
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    run(config, run_dir)
+
+    assert asked == ["tiny"]
+    assert seen == subsets
+    assert sst2_loads == ([True] if sst2 else [])
+    assert {row["dataset"] for row in _rows(run_dir)} == set(datasets)
