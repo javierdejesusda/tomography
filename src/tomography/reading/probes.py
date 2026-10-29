@@ -508,9 +508,10 @@ class CellMaxReader:
     A cell is one token row of a stimulus at one layer. A cell x of layer k
     has the value `values[k] @ x + biases[k]`, and a stimulus scores the
     largest value among its cells of all layers, which gives one score row.
-    The maximum depends neither on the order nor on the number of the
-    cells, so stimuli of any length score alike. The parameters are in
-    activation units.
+    The maximum ignores the order of the cells, so stimuli of any length
+    need no padding or mask, but it rises with their number: stimuli with
+    more cells tend to score higher. The parameters are in activation
+    units.
 
     Attributes:
         layers: Layer indices, in the order of the first axis of the input.
