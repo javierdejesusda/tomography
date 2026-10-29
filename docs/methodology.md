@@ -241,6 +241,50 @@ readout by layer rule, so a gain of pooling is never credited to nonlinearity.
   and McNemar p values. All statistics come from `reading/stats.py`.
 - Runs load the model in float32.
 
+## Published finder baselines (B2)
+
+`b2` (`experiments/b2_finder_baselines.py`) puts published direction finders beside LAT (`pca_diff`, the method
+under study) on truth and sentiment: the same training items, layers, layer rule and test pairs for every series. It
+has not been run yet.
+
+- Baselines: the mass-mean probe (`mean_diff`) and the whitened (IID) mass-mean probe (`whitened_mean_diff`) of
+  Marks and Tegmark (2024, `marks2024geometry`), the logistic-regression probe (`logistic`, scikit-learn `C` 1.0;
+  Alain and Bengio 2016, `alain2016understanding`) and CCS (`reading/ccs.py`; Burns et al. 2023,
+  `burns2023discovering`). Their departures from the published recipes are in the CCS and whitened mass-mean rows
+  of the deviations table above.
+- Controls: `random` (a random unit direction with the same orientation rule) and `shuffled` (the LAT reader scored
+  against labels shuffled within each pair), the series of the shared sweep, and `text_word` and `text_char`, the
+  word and character n-gram classifiers of `tb1` fitted on the raw training texts of each seed. The `kind` column
+  of `table.json` says `reader`, `baseline` or `control` for every row.
+- Truth: three Geometry of Truth sets, each statement paired with the row of the same index in its negated set
+  (`cities` with `neg_cities`, `larger_than` with `smaller_than`, `sp_en_trans` with `neg_sp_en_trans`), the
+  contrast pairs of Marks and Tegmark. The labels must flip in every row, or the run stops. A pair is a group of two
+  with exactly one true member and takes the loader's split of its statement, so a negation follows its statement
+  into train, validation or test. The stimuli use R7's template and concept word.
+- Sentiment: SST-2 with R1's template, training examples and seeds, so the training sets are R1's. SST-2 has no
+  labelled test split, so the validation sentences are halved by the seeded draw `task_splits` makes for the reading
+  task `sentiment`: one half chooses the layer, the other is the test set. Each half keeps the sentences of at least
+  3 words, as R1's validation set does.
+- Sizes: 10 training sets (`n_seeds`) of 64 pairs (`n_pairs`), as in R1 and R7, and every validation and test pair
+  a split allows. TruthfulQA MC1 is not read.
+- CCS contrast pairs: for truth, the statement and its negation, both through R7's template. Sentiment has no
+  negation rows, so each text goes into one prompt in the form of Burns et al., `Consider the following example:
+  ''' <text> '''` then a line `Between negative and positive, the sentiment of this example is`, completed after
+  the assistant tag once with `positive` and once with `negative`; Burns et al. average 8 to 13 prompts, here there
+  is one. So on sentiment CCS reads its own prompts while the other finders read R1's, on the same test pairs. The
+  layer is chosen on validation like every series, not the last or a fixed layer of the references.
+- CCS scoring: accuracy comes from `CCSProbe.pair_probabilities`, never from the probe's exported reader, which
+  drops the per-set centring and so shifts every comparison between a statement set and a negation set with
+  different means. A stimulus scores the probability that it is true: the pair probability for a statement or a
+  sentiment text, its complement for a negation, and the group accuracy reads those scores.
+- Layer rule and metric: every layer series takes the layer with the best mean validation group accuracy over the
+  seeds on its own validation curve (the first one on ties), and reports the mean test group accuracy of the seeds
+  at that layer; the text-only controls read no layer. Each row carries a Wilson 95 percent interval over the test
+  pairs (`wilson_lo`, `wilson_hi`, as `tb1`) and a percentile bootstrap over the seeds (`boot_lo`, `boot_hi`): the
+  first covers the sampling of the test pairs, the second the variation between training sets.
+- Outputs: `table.json`, `curves_<dataset>_val` and `curves_<dataset>_test` (the accuracy of every layer series per
+  seed and layer), and `summary.json` (the pair counts and the mean CCS training loss at its validation layer).
+
 ## LAT against few-shot prompting (R8)
 
 `r8` (`experiments/r8_qa_correctness.py`) replicates the QA protocol of Fig. 7 and Table 9 on one checkpoint:
