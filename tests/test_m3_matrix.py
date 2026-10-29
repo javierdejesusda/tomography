@@ -1,24 +1,31 @@
 """Tests for M3: readers trained through an aggregation over prompt cells."""
 
+from collections import Counter
 import dataclasses
+from pathlib import Path
 from typing import Any
 from typing import cast
 import warnings
+import weakref
 
 import numpy as np
 from numpy.typing import NDArray
 import pytest
 from sklearn.exceptions import ConvergenceWarning
+import torch
 
 from tomography.activations import Activations
 from tomography.activations import Span
 from tomography.activations import collect_activations
 from tomography.cli import _parse_override
+from tomography.cli import load_experiment
 from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import m2_readers
 from tomography.experiments import m3_matrix
 from tomography.experiments import p2_positions
+from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
 from tomography.experiments.m2_readers import read_positions
 from tomography.experiments.m3_matrix import CELL_SETS
 from tomography.experiments.m3_matrix import SEGMENTS
@@ -31,15 +38,20 @@ from tomography.experiments.m3_matrix import stimulus_token_set
 from tomography.experiments.p2_positions import misleading_template
 from tomography.experiments.p2_positions import with_decoys
 from tomography.experiments.sweep import chat_format_for
+from tomography.experiments.sweep import shuffle_within_groups
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import task_set
 from tomography.experiments.variants import template_variants
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.reading.metrics import auroc
+from tomography.reading.metrics import group_accuracy
 from tomography.reading.probes import CellMaxReader
 from tomography.reading.probes import fit_attention
 from tomography.reading.probes import fit_cell_max
+from tomography.reading.stats import delong_test
+from tomography.reading.stats import holm_correction
+from tomography.reading.stats import paired_auroc_diff
 
 DEFAULT_HASH = "fdb1d8d7ccf3"
 M2_DEFAULT_HASH = "3c82fe936345"
@@ -478,6 +490,16 @@ def test_prompt_cells_name_a_misleading_text_without_its_decoy_line(
 
 
 ONE_ROW_READOUTS = ("last", "concept", "mean", "max")
+RELABELLED_READOUTS = ("stimulus_token", "prompt_max")
+SENTIMENT_CONDITIONS = [
+    "original",
+    "random",
+    "against",
+    "paraphrase_0",
+    "paraphrase_1",
+    "paraphrase_2",
+]
+UTILITY_CONDITIONS = ["original", "random", "against"]
 
 
 def test_config_defaults_and_round_trip() -> None:
@@ -510,6 +532,10 @@ def test_the_default_config_hash_is_stable() -> None:
     assert m2_readers.Config().config_hash() == M2_DEFAULT_HASH
 
 
+def test_m3_is_discovered_by_the_cli() -> None:
+    assert load_experiment("m3").config_cls is m3_matrix.Config
+
+
 def test_set_reads_the_cell_settings_as_tuples() -> None:
     config_cls = m3_matrix.Config
     data = dict(
@@ -525,6 +551,44 @@ def test_set_reads_the_cell_settings_as_tuples() -> None:
     assert config.poolings == ("cellmax",)
     assert config.cell_layers == (2, 4)
     assert config.upper_layers == (4,)
+
+
+def _sentiment_rows(per_class: int = 12) -> list[Example]:
+    words = {1: ("good", "fine", "great"), 0: ("bad", "poor", "dull")}
+    return [
+        Example(
+            f"sst2-{split}-{label}-{i}",
+            f"a {words[label][i % 3]} one {i}",
+            label,
+            split,
+        )
+        for split in ("train", "val")
+        for label in (0, 1)
+        for i in range(per_class)
+    ]
+
+
+def _utility_rows(pairs: int = 8) -> list[Example]:
+    words = {
+        1: ("sun", "gift", "joy", "fun"),
+        0: ("rain", "loss", "pain", "fear"),
+    }
+    return [
+        Example(
+            f"ethics-{split}-{i}:{suffix}",
+            f"a {words[label][i % 4]} day {i}",
+            label,
+            split,
+            {"pair": f"ethics-{split}-{i}"},
+        )
+        for split in ("train", "val", "test")
+        for i in range(pairs)
+        for suffix, label in (("a", 1), ("b", 0))
+    ]
+
+
+def _sources() -> dict[str, list[Example]]:
+    return {"sst2": _sentiment_rows(), "ethics_utility": _utility_rows()}
 
 
 def _config(**overrides: Any) -> m3_matrix.Config:
@@ -543,6 +607,408 @@ def _config(**overrides: Any) -> m3_matrix.Config:
         n_boot=50,
     )
     return dataclasses.replace(base, **overrides)
+
+
+def _refused(config: m3_matrix.Config, tmp_path: Path) -> None:
+    m3_matrix.execute(
+        config,
+        RunDir.create(config, out_root=tmp_path),
+        cast(Any, None),
+        _sources(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"poolings": ("cellsum",)},
+            r"^unknown pooling 'cellsum', expected one of "
+            r"\('cellattn', 'cellmax'\)$",
+        ),
+        ({"poolings": ()}, r"^m3 needs at least one entry in poolings$"),
+        (
+            {"cell_sets": ("prompt", "nope")},
+            r"^unknown cell set 'nope', expected one of "
+            r"\('prompt', 'stimulus', 'final', 'upper'\)$",
+        ),
+        ({"cell_sets": ()}, r"^m3 needs at least one entry in cell_sets$"),
+        ({"cell_layers": ()}, r"^m3 needs at least one entry in cell_layers$"),
+        (
+            {"cell_layers": (1, 4), "upper_layers": (4,)},
+            r"^cell_layers \(1, 4\) must be among the layers read "
+            r"\(1, 2, 3\)$",
+        ),
+        (
+            {"upper_layers": (2,)},
+            r"^upper_layers must name layers of cell_layers \(1, 3\), "
+            r"got \(2,\)$",
+        ),
+        (
+            {"upper_layers": ()},
+            r"^upper_layers must name layers of cell_layers \(1, 3\), "
+            r"got \(\)$",
+        ),
+        (
+            {"baselines": ("lda/last",)},
+            r"^baseline 'lda/last' is not a cell of the run",
+        ),
+        (
+            {"baselines": ("logistic/cellmax_prompt",)},
+            r"^baseline 'logistic/cellmax_prompt' is not a cell of the run",
+        ),
+        (
+            {"readouts": ("last", "token_score_max"), "baselines": ()},
+            r"^m3 reads no token readouts, the cell readers replace them: "
+            r"got \('token_score_max',\)$",
+        ),
+        (
+            {"readouts": ("attention", "last"), "baselines": ()},
+            r"^m3 reads no token readouts, the cell readers replace them: "
+            r"got \('attention',\)$",
+        ),
+        (
+            {"reader_series": False},
+            r"^m3 fits the reader series, so reader_series must be True$",
+        ),
+        ({"top_k": 0}, r"^top_k must be at least 1"),
+    ],
+)
+def test_a_bad_config_is_refused_before_any_model_call(
+    overrides: dict[str, Any], message: str, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _refused(_config(**overrides), tmp_path)
+
+
+def test_the_relabelled_readouts_can_be_baselines(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class LoadedError(Exception):
+        pass
+
+    def loaded(*args: Any, **kwargs: Any) -> None:
+        raise LoadedError
+
+    monkeypatch.setattr(m3_matrix, "load_sources", lambda sources: {})
+    monkeypatch.setattr(m3_matrix, "load_model", loaded)
+    config = _config(
+        baselines=("logistic/stimulus_token", "mean_diff/prompt_max")
+    )
+    with pytest.raises(LoadedError):
+        m3_matrix.run(config, RunDir.create(config, out_root=tmp_path))
+
+
+def test_run_refuses_a_bad_config_before_loading_the_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def no_load(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("the model was loaded")
+
+    monkeypatch.setattr(m3_matrix, "load_model", no_load)
+    config = _config(poolings=("cellsum",))
+    with pytest.raises(ValueError, match="unknown pooling"):
+        m3_matrix.run(config, RunDir.create(config, out_root=tmp_path))
+
+
+def test_run_loads_the_model_in_float32(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+
+    class LoadedError(Exception):
+        pass
+
+    def record(key: str, **kwargs: Any) -> None:
+        calls.append((key, kwargs))
+        raise LoadedError
+
+    monkeypatch.setattr(m3_matrix, "load_sources", lambda sources: {})
+    monkeypatch.setattr(m3_matrix, "load_model", record)
+    config = _config()
+    with pytest.raises(LoadedError):
+        m3_matrix.run(config, RunDir.create(config, out_root=tmp_path))
+    assert calls == [("tiny", {"dtype": torch.float32})]
+
+
+def test_run_loads_the_sources_of_every_task(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[list[str]] = []
+
+    class LoadedError(Exception):
+        pass
+
+    def record(sources: list[str]) -> None:
+        calls.append(list(sources))
+        raise LoadedError
+
+    monkeypatch.setattr(m3_matrix, "load_model", lambda *a, **k: None)
+    monkeypatch.setattr(m3_matrix, "load_sources", record)
+    config = _config()
+    with pytest.raises(LoadedError):
+        m3_matrix.run(config, RunDir.create(config, out_root=tmp_path))
+    assert calls == [["sst2", "ethics_utility"]]
+
+
+def _quiet_execute(
+    config: m3_matrix.Config, run_dir: RunDir, loaded: LoadedModel
+) -> None:
+    # Fits on the tiny model's handful of rows can stop on an L-BFGS line
+    # search; the warning is expected there and not under test.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        m3_matrix.execute(config, run_dir, loaded, _sources())
+
+
+@pytest.fixture(scope="module")
+def runs() -> dict[str, RunDir]:
+    return {}
+
+
+@pytest.fixture
+def finished(
+    runs: dict[str, RunDir],
+    tiny_gpt2: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> RunDir:
+    if "run" not in runs:
+        config = _config()
+        run_dir = RunDir.create(config, out_root=tmp_path_factory.mktemp("m3"))
+        _quiet_execute(config, run_dir, tiny_gpt2)
+        runs["run"] = run_dir
+    return runs["run"]
+
+
+def _table(run_dir: RunDir, name: str = "table") -> list[dict[str, Any]]:
+    payload = cast(dict[str, Any], run_dir.read_json(name))
+    return [
+        dict(zip(payload["columns"], row, strict=True))
+        for row in payload["rows"]
+    ]
+
+
+def _entries(run_dir: RunDir, task: str) -> list[str]:
+    sidecar = cast(dict[str, Any], run_dir.read_json(f"scores_{task}"))
+    return cast(list[str], sidecar["entries"])
+
+
+def test_a_run_writes_the_table_the_comparisons_and_the_scores(
+    finished: RunDir,
+) -> None:
+    names = {p.name for p in finished.path.iterdir()}
+    for stem in ("table", "comparisons", "summary"):
+        assert f"{stem}.json" in names
+    for task in ("sentiment", "utility"):
+        assert {f"scores_{task}.npz", f"auroc_{task}.npz"} <= names
+    table = cast(dict[str, Any], finished.read_json("table"))
+    assert table["columns"] == list(m2_readers.COLUMNS)
+    comparisons = cast(dict[str, Any], finished.read_json("comparisons"))
+    assert comparisons["columns"] == list(m2_readers.COMPARISON_COLUMNS)
+    summary = cast(dict[str, Any], finished.read_json("summary"))
+    assert summary["tasks"] == ["sentiment", "utility"]
+    assert summary["conditions"] == {
+        "sentiment": SENTIMENT_CONDITIONS,
+        "utility": UTILITY_CONDITIONS,
+    }
+    assert summary["n_eval_pairs"]["utility"] == {"select": 3, "report": 3}
+    assert "best rule" in summary["families"]
+
+
+def test_every_cell_has_a_row_per_condition_and_series(
+    finished: RunDir,
+) -> None:
+    readouts = (*ONE_ROW_READOUTS, *RELABELLED_READOUTS)
+    fitted = [
+        (scorer, readout, rule)
+        for scorer in ("logistic", "mean_diff")
+        for readout in readouts
+        for rule in ("best", "top_k")
+    ]
+    fitted += [
+        ("logistic", f"{pooling}_{cell_set}", "joint")
+        for cell_set in CELL_SETS
+        for pooling in ("cellattn", "cellmax")
+    ]
+    controls = [
+        ("random", readout, rule)
+        for readout in readouts
+        for rule in ("best", "top_k")
+    ]
+    controls += [("random", f"cellmax_{s}", "joint") for s in CELL_SETS]
+    controls.append(("text", "text", "none"))
+    for task, conditions in (
+        ("sentiment", SENTIMENT_CONDITIONS),
+        ("utility", UTILITY_CONDITIONS),
+    ):
+        expected = {
+            (*cell, series, condition)
+            for cell in fitted
+            for series in ("reader", "shuffled")
+            for condition in conditions
+        } | {
+            (*cell, "reader", condition)
+            for cell in controls
+            for condition in conditions
+        }
+        got = [
+            (
+                r["scorer"],
+                r["readout"],
+                r["layer_rule"],
+                r["series"],
+                r["condition"],
+            )
+            for r in _table(finished)
+            if r["task"] == task
+        ]
+        assert len(got) == len(set(got))
+        assert set(got) == expected
+
+
+def test_every_cell_scores_the_same_report_items(finished: RunDir) -> None:
+    arrays = finished.read_arrays("scores_sentiment")
+    sidecar = cast(dict[str, Any], finished.read_json("scores_sentiment"))
+    n_entries = len(sidecar["entries"])
+
+    assert "logistic/cellmax_upper/joint/shuffled" in sidecar["entries"]
+    assert arrays["report"].shape == (n_entries, 2, 6, 6)
+    assert arrays["select"].shape == (n_entries, 2, 6)
+    assert np.isfinite(arrays["report"]).all()
+    layers = sidecar["layers"]
+    assert layers["logistic/cellattn_prompt/joint/reader"] == [[1, 3]] * 2
+    assert layers["logistic/cellmax_upper/joint/shuffled"] == [[3]] * 2
+    assert layers["random/cellmax_final/joint/reader"] == [[1, 3]] * 2
+
+
+def _capture_items(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """Records the items `_prepare_task` renders for each task."""
+    captured: list[Any] = []
+    prepare = m2_readers._prepare_task
+
+    def capturing(*args: Any, **kwargs: Any) -> Any:
+        splits, skipped = prepare(*args, **kwargs)
+        captured.append(splits)
+        return splits, skipped
+
+    monkeypatch.setattr(m2_readers, "_prepare_task", capturing)
+    return captured
+
+
+def _recording(
+    monkeypatch: pytest.MonkeyPatch, name: str, calls: list[dict[str, Any]]
+) -> None:
+    """Records the keyword arguments of every call of an m3 fit."""
+    fit = getattr(m3_matrix, name)
+
+    def recording(acts: Activations, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return fit(acts, **kwargs)
+
+    monkeypatch.setattr(m3_matrix, name, recording)
+
+
+def test_shuffled_cell_readers_tune_and_threshold_on_shuffled_labels(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tuned: list[NDArray[np.int64]] = []
+    fits: list[dict[str, Any]] = []
+    tuning = group_accuracy
+
+    def recording(scores: Any, groups: Any, labels: Any) -> Any:
+        tuned.append(np.array(labels))
+        return tuning(scores, groups, labels)
+
+    monkeypatch.setattr(m3_matrix, "group_accuracy", recording)
+    _recording(monkeypatch, "fit_attention", fits)
+    captured = _capture_items(monkeypatch)
+    config = _config(
+        tasks=("sentiment",),
+        scorers=("mean_diff",),
+        readouts=("last",),
+        cell_sets=("prompt",),
+        poolings=("cellattn",),
+        controls=("shuffled",),
+        decoys=(),
+        shifts=(),
+        baselines=("mean_diff/last",),
+        logistic_c=(1.0,),
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    _quiet_execute(config, run_dir, tiny_gpt2)
+
+    train, select = captured[0].train_items, captured[0].select_items
+    shuffled = [
+        (
+            shuffle_within_groups(
+                train[i].labels,
+                train[i].groups,
+                seed=derive_seed(config.seed, "shuffled", "sentiment", i),
+            ),
+            shuffle_within_groups(
+                select.labels,
+                select.groups,
+                seed=derive_seed(
+                    config.seed, "shuffled-select", "sentiment", i
+                ),
+            ),
+        )
+        for i in range(config.n_seeds)
+    ]
+    # Each draw fits the reader series, then the shuffled one.
+    expected = [
+        pair
+        for i, (labels, select_labels) in enumerate(shuffled)
+        for pair in (
+            (train[i].labels, select.labels),
+            (labels, select_labels),
+        )
+    ]
+    assert len(fits) == len(tuned) == len(expected)
+    for fit, tune, (labels, select_labels) in zip(
+        fits, tuned, expected, strict=True
+    ):
+        assert fit["joint"] is True
+        assert np.array_equal(fit["labels"], labels)
+        assert np.array_equal(tune, select_labels)
+    for _, select_labels in shuffled:
+        assert (select_labels[select.groups].sum(axis=1) == 1).all()
+    arrays = run_dir.read_arrays("scores_sentiment")
+    e = _entries(run_dir, "sentiment").index(
+        "logistic/cellattn_prompt/joint/shuffled"
+    )
+    for i, (_, select_labels) in enumerate(shuffled):
+        assert np.array_equal(
+            arrays["entry_select_labels"][e, i], select_labels
+        )
+
+
+def test_the_replica_rows_equal_the_rows_of_m2(
+    finished: RunDir, tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config()
+    shared = {
+        field.name: getattr(config, field.name)
+        for field in dataclasses.fields(m2_readers.Config)
+    }
+    m2_config = m2_readers.Config(
+        **{
+            **shared,
+            "experiment": "m2",
+            "baselines": ("logistic/last", "mean_diff/last"),
+        }
+    )
+    run_dir = RunDir.create(m2_config, out_root=tmp_path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        m2_readers.execute(m2_config, run_dir, tiny_gpt2, _sources())
+
+    replicas = [
+        r
+        for r in _table(finished)
+        if r["readout"] in (*ONE_ROW_READOUTS, "text")
+    ]
+    assert replicas == _table(run_dir)
 
 
 def _set_layers(config: m3_matrix.Config, cell_set: CellSet) -> tuple[int, ...]:
@@ -619,6 +1085,235 @@ def test_stream_scores_name_the_batch_of_a_text_without_its_decoy_line(
         r"decoy line right before the line of its stimulus$",
     ):
         m3_matrix.stream_scores(tiny_gpt2, broken, readers, config, decoy=True)
+
+
+class _Recorded:
+    """A reader that records the scores it gives."""
+
+    def __init__(self, reader: Any) -> None:
+        self.reader = reader
+        self.outputs: list[NDArray[np.float32]] = []
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.reader, name)
+
+    def score(self, acts: Activations) -> NDArray[np.float32]:
+        scores = cast(NDArray[np.float32], self.reader.score(acts))
+        self.outputs.append(scores)
+        return scores
+
+
+def test_the_grid_value_is_the_first_best_on_select(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fitted: list[tuple[float, _Recorded]] = []
+    tuned: list[tuple[int, ...]] = []
+    fit = fit_cell_max
+
+    def recording(acts: Activations, **kwargs: Any) -> _Recorded:
+        fitted.append((kwargs["c"], _Recorded(fit(acts, **kwargs))))
+        return fitted[-1][1]
+
+    def tuning(scores: Any, groups: Any, labels: Any) -> NDArray[np.float64]:
+        tuned.append(np.shape(scores))
+        # The second and third grid values tie; the second is kept.
+        return np.array([[0.4], [0.9], [0.9]])
+
+    monkeypatch.setattr(m3_matrix, "fit_cell_max", recording)
+    monkeypatch.setattr(m3_matrix, "group_accuracy", tuning)
+    config = _config(
+        tasks=("utility",),
+        scorers=("logistic",),
+        readouts=("last",),
+        cell_sets=("prompt",),
+        poolings=("cellmax",),
+        controls=(),
+        decoys=(),
+        baselines=("logistic/last",),
+        logistic_c=(0.1, 1.0, 10.0),
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    _quiet_execute(config, run_dir, tiny_gpt2)
+
+    arrays = run_dir.read_arrays("scores_utility")
+    e = _entries(run_dir, "utility").index(
+        "logistic/cellmax_prompt/joint/reader"
+    )
+    assert [c for c, _ in fitted] == [0.1, 1.0, 10.0] * config.n_seeds
+    assert tuned == [(3, 1, 6)] * config.n_seeds
+    for i in range(config.n_seeds):
+        readers = [reader for _, reader in fitted[3 * i : 3 * i + 3]]
+        # Only the kept reader scores the report items.
+        assert [len(r.outputs) for r in readers] == [1, 2, 1]
+        kept = readers[1].outputs
+        assert np.array_equal(arrays["select"][e, i], kept[0][0])
+        assert np.array_equal(arrays["report"][e, i, 0], kept[1][0])
+
+
+def _ensemble(select: NDArray[Any], report: NDArray[Any]) -> NDArray[Any]:
+    mean = select.mean(axis=-1, keepdims=True)
+    std = select.std(axis=-1, keepdims=True)
+    return ((report - mean[:, None]) / std[:, None]).mean(axis=0)
+
+
+def test_joint_cells_are_compared_with_each_baseline_at_top_k_and_best(
+    finished: RunDir,
+) -> None:
+    config = _config()
+    rows = [
+        r for r in _table(finished, "comparisons") if r["layer_rule"] == "joint"
+    ]
+    joint = [
+        ("logistic", f"{pooling}_{cell_set}")
+        for cell_set in CELL_SETS
+        for pooling in m3_matrix.POOLINGS
+    ]
+    for task, conditions in (
+        ("sentiment", SENTIMENT_CONDITIONS),
+        ("utility", UTILITY_CONDITIONS),
+    ):
+        got = [
+            (
+                r["condition"],
+                r["baseline"],
+                r["baseline_rule"],
+                r["scorer"],
+                r["readout"],
+            )
+            for r in rows
+            if r["task"] == task
+        ]
+        assert sorted(got) == sorted(
+            (condition, baseline, rule, *cell)
+            for condition in conditions
+            for baseline in config.baselines
+            for rule in ("top_k", "best")
+            for cell in joint
+        )
+
+    arrays = finished.read_arrays("scores_sentiment")
+    entries = _entries(finished, "sentiment")
+    labels = arrays["report_labels"]
+    clusters = np.empty(labels.shape[0], dtype=np.int64)
+    for g, members in enumerate(arrays["report_groups"]):
+        clusters[members] = g
+
+    def ensemble(name: str) -> NDArray[Any]:
+        e = entries.index(name)
+        against = SENTIMENT_CONDITIONS.index("against")
+        ensembled = _ensemble(arrays["select"][e], arrays["report"][e])
+        return cast(NDArray[Any], ensembled[against])
+
+    family = [
+        r
+        for r in rows
+        if r["task"] == "sentiment"
+        and r["condition"] == "against"
+        and r["baseline"] == "logistic/stimulus_token"
+        and r["baseline_rule"] == "best"
+    ]
+    base = ensemble("logistic/stimulus_token/best/reader")
+    for row in family:
+        cell = ensemble(f"logistic/{row['readout']}/joint/reader")
+        diff = paired_auroc_diff(
+            cell, base, labels, clusters, n_boot=50, seed=config.seed
+        )
+        assert row["auroc_diff"] == pytest.approx(diff.difference)
+        assert row["auroc_lo"] == pytest.approx(diff.lower)
+        assert row["delong_p"] == pytest.approx(
+            delong_test(cell, base, labels).p_value
+        )
+    for column in ("delong", "mcnemar"):
+        holm = holm_correction(np.array([r[f"{column}_p"] for r in family]))
+        np.testing.assert_allclose(
+            [r[f"{column}_holm"] for r in family], holm.adjusted
+        )
+
+
+def _counting(
+    monkeypatch: pytest.MonkeyPatch, module: Any, read: Counter[str]
+) -> None:
+    """Counts every text a module sends through the model."""
+
+    def counting(loaded: LoadedModel, texts: Any, **kw: Any) -> Activations:
+        read.update(texts)
+        return collect_activations(loaded, texts, **kw)
+
+    monkeypatch.setattr(module, "collect_activations", counting)
+
+
+def test_each_text_is_read_once_per_pass(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    one_row: Counter[str] = Counter()
+    cells: Counter[str] = Counter()
+    _counting(monkeypatch, m2_readers, one_row)
+    _counting(monkeypatch, m3_matrix, cells)
+    captured = _capture_items(monkeypatch)
+    config = _config(tasks=("sentiment",), cell_sets=("prompt", "final"))
+    _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
+
+    splits = captured[0]
+    texts = Counter(
+        text
+        for items in (
+            *splits.train_items,
+            splits.select_items,
+            *splits.report_items.values(),
+        )
+        for text in items.texts
+    )
+    assert cells == texts
+    # The last token, the stimulus tokens, the concept tokens, then the
+    # stimulus token and the prompt maximum.
+    assert one_row == Counter({text: 5 * n for text, n in texts.items()})
+
+
+def test_cells_are_released_before_the_next_are_read(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    one_row: list[weakref.ref[Activations]] = []
+    held: list[weakref.ref[Activations]] = []
+    read = m2_readers.read_positions
+    extract = m3_matrix.prompt_cells
+
+    def reading(*args: Any, **kwargs: Any) -> Any:
+        positions = read(*args, **kwargs)
+        one_row.extend(weakref.ref(acts) for acts in positions.values())
+        return positions
+
+    def extracting(*args: Any, **kwargs: Any) -> Any:
+        assert all(ref() is None for ref in one_row)
+        assert all(ref() is None for ref in held)
+        cells, segments = extract(*args, **kwargs)
+        held.append(weakref.ref(cells))
+        return cells, segments
+
+    monkeypatch.setattr(m2_readers, "read_positions", reading)
+    monkeypatch.setattr(m3_matrix, "prompt_cells", extracting)
+    config = _config(tasks=("utility",), cell_sets=("prompt", "upper"))
+    _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
+
+    # Two draws, the select items in one batch, then one batch per condition.
+    assert len(held) == 2 + 1 + 3
+
+
+def test_a_rerun_writes_the_same_table(
+    finished: RunDir, tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    config = _config(tasks=("utility",))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+    _quiet_execute(config, run_dir, tiny_gpt2)
+
+    first = [r for r in _table(finished) if r["task"] == "utility"]
+    assert _table(run_dir) == first
+
+
+def test_plot_draws_the_auroc_matrix_of_every_task(
+    finished: RunDir, tmp_path: Path
+) -> None:
+    names = {p.name for p in m3_matrix.plot(finished, tmp_path)}
+    assert {"auroc_sentiment.png", "auroc_utility.pdf"} <= names
 
 
 def _random_cells(seed: int = 0) -> tuple[Activations, NDArray[np.int64]]:

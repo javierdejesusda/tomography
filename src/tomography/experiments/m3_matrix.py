@@ -12,36 +12,62 @@ misleading line, in the misleading conditions only), `stimulus` (the
 `stimulus` and `final` one each. `stimulus_token_set` and `prompt_max_set`
 give the spans through which M2's `concept` and `max` positions read the
 last stimulus token and the feature-wise maximum over the prompt.
-`stream_scores` scores stimuli with cell readers batch by batch, and
-`random_cell_max` draws the random control of the cell max reader.
+
+The experiment runs M2's protocol on M2's items. Its one-row phase fits
+M2's scorers on M2's one-row readouts and on `stimulus_token` and
+`prompt_max`, with M2's helpers. Its cell phase fits, per draw, a logistic
+head per layer trained through the pooling of a cell set's cells: one
+softmax over all of them (`cellattn`) or their maximum (`cellmax`), as a
+joint reader. Every reader scores the report items of every condition and
+is compared with the one-row baselines, next to M2's controls and a random
+cell max reader.
 """
 
+from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
 import dataclasses
 from dataclasses import dataclass
+from pathlib import Path
 import re
 from types import MappingProxyType
+from typing import Any
 from typing import Literal
+from typing import NamedTuple
 from typing import get_args
 
 import numpy as np
 from numpy.typing import NDArray
+import torch
 
 from tomography.activations import Activations
+from tomography.activations import PositionStrategy
 from tomography.activations import Span
 from tomography.activations import _overlapping_tokens
 from tomography.activations import collect_activations
+from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import m2_readers
 from tomography.experiments import p2_positions
+from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
+from tomography.experiments.sweep import shuffle_within_groups
+from tomography.experiments.variants import ReadingTask
+from tomography.experiments.variants import TaskSource
+from tomography.experiments.variants import load_sources
+from tomography.experiments.variants import target_of
+from tomography.experiments.variants import task_examples
 from tomography.model import BosMode
 from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.reading.metrics import auroc
+from tomography.reading.metrics import group_accuracy
 from tomography.reading.probes import AttentionReader
 from tomography.reading.probes import CellMaxReader
 from tomography.reading.probes import _scaled_cells
 from tomography.reading.probes import _unscaled
+from tomography.reading.probes import fit_attention
+from tomography.reading.probes import fit_cell_max
 
 Segment = Literal["prefix", "decoy", "stimulus", "final"]
 CellSet = Literal["prompt", "stimulus", "final", "upper"]
@@ -56,6 +82,16 @@ SET_SEGMENTS: Mapping[CellSet, tuple[Segment, ...]] = MappingProxyType(
         "final": ("final",),
         "upper": SEGMENTS,
     }
+)
+TOKEN_READOUTS: tuple[m2_readers.Readout, ...] = (
+    "token_score_max",
+    "attention",
+)
+FAMILIES = (
+    "one per task, condition, layer rule and baseline; Holm over the DeLong "
+    "and, separately, the McNemar p values of its cells; the joint cells are "
+    "compared with each baseline's top_k rule and, in a family of their own, "
+    "its best rule"
 )
 CellReader = AttentionReader | CellMaxReader
 
@@ -323,6 +359,16 @@ def select_cells(
     )
 
 
+RELABELLED: Mapping[
+    str, tuple[Callable[[StimulusSet], StimulusSet], PositionStrategy]
+] = MappingProxyType(
+    {
+        "stimulus_token": (stimulus_token_set, "concept"),
+        "prompt_max": (prompt_max_set, "max"),
+    }
+)
+
+
 def random_cell_max(
     acts: Activations, labels: NDArray[np.int64], *, seed: int
 ) -> CellMaxReader:
@@ -453,3 +499,519 @@ def _rows(stimuli: StimulusSet, rows: slice) -> StimulusSet:
 def _set_layers(config: Config, cell_set: CellSet) -> tuple[int, ...]:
     """The layers a cell set reads."""
     return config.upper_layers if cell_set == "upper" else config.cell_layers
+
+
+class _Fit(NamedTuple):
+    """The readers one draw fits for one cell and series.
+
+    Attributes:
+        cell: The cell, `<scorer>/<pooling>_<set>/joint`.
+        series: `reader`, or `shuffled` for a refit on shuffled labels.
+        cell_set: The set the readers read.
+        readers: One reader per grid value.
+        select_labels: The select labels that tune and threshold them.
+    """
+
+    cell: m2_readers.Cell
+    series: str
+    cell_set: CellSet
+    readers: list[CellReader]
+    select_labels: NDArray[np.int64]
+
+
+def _fit_cells(
+    pooling: Pooling, train: Activations, labels: NDArray[np.int64], c: float
+) -> CellReader:
+    """Fits a joint reader through the pooling of the training cells."""
+    if pooling == "cellattn":
+        return fit_attention(train, labels=labels, c=c, joint=True)
+    return fit_cell_max(train, labels=labels, c=c)
+
+
+def _shuffled(
+    config: Config,
+    task: ReadingTask,
+    items: m2_readers._Splits,
+    i: int,
+) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    """M2's shuffles of draw i's training and select labels.
+
+    They are the shuffles of M2's `_cell_entries`, within the training and
+    the select groups, so every cell of a draw shares them.
+    """
+    stimuli, select = items.train_items[i], items.select_items
+    return (
+        shuffle_within_groups(
+            stimuli.labels,
+            stimuli.groups,
+            seed=derive_seed(config.seed, "shuffled", task.name, i),
+        ),
+        shuffle_within_groups(
+            select.labels,
+            select.groups,
+            seed=derive_seed(config.seed, "shuffled-select", task.name, i),
+        ),
+    )
+
+
+def _draw_fits(
+    config: Config,
+    loaded: LoadedModel,
+    task: ReadingTask,
+    items: m2_readers._Splits,
+    i: int,
+) -> list[_Fit]:
+    """Fits every cell reader of draw i; its cells are released on return."""
+    stimuli = items.train_items[i]
+    cells, segments = prompt_cells(
+        loaded,
+        stimuli,
+        config.cell_layers,
+        bos=config.bos,
+        batch_size=config.batch_size,
+        decoy=False,
+    )
+    series = [("reader", stimuli.labels, items.select_items.labels)]
+    if "shuffled" in config.controls:
+        series.append(("shuffled", *_shuffled(config, task, items, i)))
+    fits: list[_Fit] = []
+    for cell_set in config.cell_sets:
+        train = select_cells(
+            cells, segments, cell_set, _set_layers(config, cell_set)
+        )
+        fits += _set_fits(config, task, items, i, train, cell_set, series)
+        # `select_cells` copies, so one set's copy is freed before the next.
+        del train
+    return fits
+
+
+def _set_fits(
+    config: Config,
+    task: ReadingTask,
+    items: m2_readers._Splits,
+    i: int,
+    train: Activations,
+    cell_set: CellSet,
+    series: Sequence[tuple[str, NDArray[np.int64], NDArray[np.int64]]],
+) -> list[_Fit]:
+    """Fits the readers of one cell set at every grid value, and the control.
+
+    The random control draws its heads with the seed M2 would give a
+    `random` scorer on the readout `cellmax_<set>`.
+    """
+    fits = [
+        _Fit(
+            m2_readers.Cell("logistic", f"{pooling}_{cell_set}", "joint"),
+            name,
+            cell_set,
+            [_fit_cells(pooling, train, labels, c) for c in config.logistic_c],
+            select_labels,
+        )
+        for pooling in config.poolings
+        for name, labels, select_labels in series
+    ]
+    if "random" in config.controls and "cellmax" in config.poolings:
+        readout = f"cellmax_{cell_set}"
+        seed = derive_seed(config.seed, "fit", task.name, "random", readout, i)
+        fits.append(
+            _Fit(
+                m2_readers.Cell("random", readout, "joint"),
+                "reader",
+                cell_set,
+                [
+                    random_cell_max(
+                        train, items.train_items[i].labels, seed=seed
+                    )
+                ],
+                items.select_items.labels,
+            )
+        )
+    return fits
+
+
+def _matrix_entries(
+    config: Config,
+    loaded: LoadedModel,
+    task: ReadingTask,
+    items: m2_readers._Splits,
+) -> list[m2_readers._Entry]:
+    """Fits, tunes and scores the cell readers and their random control.
+
+    Every draw is fitted first. The select items are then streamed once
+    through every reader; each draw keeps the first best grid value on the
+    select pair accuracy, as M2's `_tuned` does with one layer; and the
+    report items of each condition are streamed once through the kept
+    readers.
+    """
+    fits = [
+        fit
+        for i in range(len(items.train_items))
+        for fit in _draw_fits(config, loaded, task, items, i)
+    ]
+    select = items.select_items
+    scored = stream_scores(
+        loaded,
+        select,
+        [(fit.cell_set, reader) for fit in fits for reader in fit.readers],
+        config,
+        decoy=False,
+    )
+    sizes = np.cumsum([len(fit.readers) for fit in fits])[:-1]
+    kept: list[tuple[CellSet, CellReader]] = []
+    vals = []
+    for fit, val in zip(fits, np.split(scored, sizes), strict=True):
+        metric = group_accuracy(val[:, None], select.groups, fit.select_labels)
+        best = int(m2_readers.tune_per_layer(metric)[0])
+        kept.append((fit.cell_set, fit.readers[best]))
+        vals.append(val[best])
+    report = np.stack(
+        [
+            stream_scores(
+                loaded,
+                items.report_items[condition],
+                kept,
+                config,
+                decoy=condition in config.decoys,
+            )
+            for condition in items.conditions
+        ],
+        axis=1,
+    )
+    choices: dict[tuple[m2_readers.Cell, str], list[m2_readers._Choice]] = {}
+    for fit, val, scores in zip(fits, vals, report, strict=True):
+        choices.setdefault((fit.cell, fit.series), []).append(
+            m2_readers._Choice(
+                _set_layers(config, fit.cell_set),
+                val,
+                scores,
+                fit.select_labels,
+            )
+        )
+    return [
+        m2_readers._Entry(cell, series, per_seed)
+        for (cell, series), per_seed in choices.items()
+    ]
+
+
+def _row_entries(
+    config: Config,
+    task: ReadingTask,
+    splits: m2_readers._Splits,
+    listed: Sequence[m2_readers.Cell],
+) -> list[m2_readers._Entry]:
+    """Fits one-row cells and controls as M2's `_run_task` does."""
+    rules: dict[tuple[str, str], list[str]] = {}
+    for cell in listed:
+        rules.setdefault((cell.scorer, cell.readout), []).append(
+            cell.layer_rule
+        )
+    entries: list[m2_readers._Entry] = []
+    for (scorer, readout), cell_rules in rules.items():
+        if scorer == "text":
+            text = m2_readers.Cell(scorer, readout, "none")
+            choices = m2_readers._text_choices(splits)
+            entries.append(m2_readers._Entry(text, "reader", choices))
+        else:
+            entries += m2_readers._cell_entries(
+                config, task, splits, scorer, readout, cell_rules
+            )
+    return entries
+
+
+def _replicas(
+    config: Config,
+    loaded: LoadedModel,
+    task: ReadingTask,
+    scorers: Sequence[str],
+    readouts: Sequence[m2_readers.Readout],
+    examples: Mapping[str, Sequence[Example]],
+) -> tuple[list[m2_readers._Entry], m2_readers._Splits, dict[str, str]]:
+    """Fits M2's one-row cells on M2's items and releases their activations.
+
+    Returns:
+        The entries, the items without their activations, and the reasons
+        of the skipped template shifts.
+    """
+    splits, skipped = m2_readers._prepare_task(
+        config, loaded, task, readouts, examples
+    )
+    listed = m2_readers.cells(config, readouts, scorers=scorers)
+    entries = _row_entries(config, task, splits, listed)
+    items = dataclasses.replace(splits, train={}, select={}, report={})
+    return entries, items, skipped
+
+
+def _relabelled(
+    config: Config,
+    loaded: LoadedModel,
+    task: ReadingTask,
+    items: m2_readers._Splits,
+    scorers: Sequence[str],
+    readout: str,
+) -> list[m2_readers._Entry]:
+    """Fits a relabelled readout and its random control on its own pass.
+
+    The readout is M2's `concept` or `max` position over other spans, so
+    M2's helpers fit it under that readout's key, with its seeds, and the
+    entries are relabelled. Its activations are released on return.
+    """
+    mark, position = RELABELLED[readout]
+
+    def read(stimuli: StimulusSet) -> Activations:
+        return m2_readers.read_positions(
+            loaded, mark(stimuli), (position,), config
+        )[position]
+
+    splits = dataclasses.replace(
+        items,
+        train={position: [read(s) for s in items.train_items]},
+        select={position: read(items.select_items)},
+        report={position: [read(s) for s in items.report_items.values()]},
+    )
+    listed = [
+        cell
+        for cell in m2_readers.cells(config, [position], scorers=scorers)
+        if cell.scorer != "text"
+    ]
+    return [
+        entry._replace(cell=entry.cell._replace(readout=readout))
+        for entry in _row_entries(config, task, splits, listed)
+    ]
+
+
+def _comparisons(
+    config: Config,
+    task: ReadingTask,
+    items: m2_readers._Splits,
+    entries: Sequence[m2_readers._Entry],
+) -> list[list[Any]]:
+    """M2's comparisons, plus the joint cells against each baseline's best.
+
+    M2 compares the joint cells with each baseline's `top_k` rule. Each
+    baseline's `best` cell is also compared with the joint cells, in a Holm
+    family of their own, by handing M2's `_comparison_rows` the joint cells
+    relabelled `best`; their rows keep the rule `joint`.
+    """
+    rows = m2_readers._comparison_rows(config, task, items, entries)
+    joint = [
+        entry._replace(cell=entry.cell._replace(layer_rule="best"))
+        for entry in entries
+        if entry.cell.layer_rule == "joint"
+    ]
+    for baseline in config.baselines:
+        scorer, readout = baseline.split("/")
+        base = m2_readers.Cell(scorer, readout, "best")
+        family = [entry for entry in entries if entry.cell == base] + joint
+        best = dataclasses.replace(
+            config, baselines=(baseline,), layer_rules=("best",)
+        )
+        rows += [
+            [*row[:2], "joint", *row[3:]]
+            for row in m2_readers._comparison_rows(best, task, items, family)
+        ]
+    return rows
+
+
+def _check(config: Config) -> tuple[str, ...]:
+    """Checks what the config alone settles and expands its tasks.
+
+    M2's checks run first, with M2's messages, all but its baseline check,
+    which m3 widens to the relabelled readouts.
+    """
+    tasks = m2_readers._check(dataclasses.replace(config, baselines=()))
+    if not config.reader_series:
+        raise ValueError(
+            "m3 fits the reader series, so reader_series must be True"
+        )
+    token = tuple(r for r in config.readouts if r in TOKEN_READOUTS)
+    if token:
+        raise ValueError(
+            "m3 reads no token readouts, the cell readers replace them: "
+            f"got {token}"
+        )
+    for field, values, known, noun in (
+        ("cell_sets", config.cell_sets, CELL_SETS, "cell set"),
+        ("poolings", config.poolings, POOLINGS, "pooling"),
+    ):
+        if not values:
+            raise ValueError(f"m3 needs at least one entry in {field}")
+        for value in values:
+            if value not in known:
+                raise ValueError(
+                    f"unknown {noun} {value!r}, expected one of {known}"
+                )
+    if not config.cell_layers:
+        raise ValueError("m3 needs at least one entry in cell_layers")
+    if not config.upper_layers or not set(config.upper_layers) <= set(
+        config.cell_layers
+    ):
+        raise ValueError(
+            f"upper_layers must name layers of cell_layers "
+            f"{config.cell_layers}, got {config.upper_layers}"
+        )
+    readouts = (*config.readouts, *RELABELLED)
+    for baseline in config.baselines:
+        scorer, _, readout = baseline.partition("/")
+        if scorer not in config.scorers or readout not in readouts:
+            raise ValueError(
+                f"baseline {baseline!r} is not a cell of the run: give "
+                "<scorer>/<readout> from the configured scorers and the "
+                f"one-row readouts {readouts}"
+            )
+    return tasks
+
+
+def _run_task(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    name: str,
+    examples: Mapping[str, Sequence[Example]],
+) -> tuple[list[list[Any]], list[list[Any]], dict[str, Any]]:
+    """Runs both phases on one task and writes its files.
+
+    The one-row activations are released before the cell phase reads.
+
+    Returns:
+        The table rows, the comparison rows, and the task's `conditions`,
+        `skipped` and `n_eval_pairs` entries of the summary.
+    """
+    task = m2_readers._task(name)
+    scorers, readouts, skipped = m2_readers._readable(task, config)
+    entries, items, shift_skips = _replicas(
+        config, loaded, task, scorers, readouts, examples
+    )
+    for readout in RELABELLED:
+        entries += _relabelled(config, loaded, task, items, scorers, readout)
+    entries += _matrix_entries(config, loaded, task, items)
+    entry_rows = [
+        m2_readers._metric_rows(config, task, items, e) for e in entries
+    ]
+    m2_readers._write_task(run_dir, task, items, entries, entry_rows)
+    return (
+        [row for block in entry_rows for row in block],
+        _comparisons(config, task, items, entries),
+        {
+            "conditions": items.conditions,
+            "skipped": {**skipped, **shift_skips},
+            "n_eval_pairs": {
+                "select": int(items.select_items.groups.shape[0]),
+                "report": int(items.report_items["original"].groups.shape[0]),
+            },
+        },
+    )
+
+
+def execute(
+    config: Config,
+    run_dir: RunDir,
+    loaded: LoadedModel,
+    examples: Mapping[str, Sequence[Example]],
+) -> None:
+    """Runs the one-row and the cell phase on every task.
+
+    The one-row phase is M2's on M2's items: per task and seed, every
+    one-row cell is fitted on the training items of the paper template,
+    tuned and given its layer rule and thresholds on the select items of
+    the original prompts. The cell phase then reads each draw's training
+    cells once, fits every cell reader at every grid value and releases
+    them; streams the select items once through every reader and keeps, per
+    draw, the first best grid value; and streams each condition's report
+    items once through the kept readers. Writes M2's files: per task
+    `scores_<task>` and `auroc_<task>`, and `table.json`,
+    `comparisons.json` and `summary.json`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+        loaded: The wrapped model, in float32 for a real run.
+        examples: The examples of each source, by source name.
+
+    Raises:
+        ValueError: If the config is refused (see `run`), a source is
+            missing, or `cell_layers` holds a layer that is not read (all
+            checked before any model call).
+    """
+    tasks = _check(config)
+    for name in tasks:
+        task = m2_readers._task(name)
+        task_examples(task, examples)
+        task_examples(target_of(task), examples)
+    layers = m2_readers._read_layers(config, loaded)
+    if not set(config.cell_layers) <= set(layers):
+        raise ValueError(
+            f"cell_layers {config.cell_layers} must be among the layers "
+            f"read {layers}"
+        )
+    rows: list[list[Any]] = []
+    comparisons: list[list[Any]] = []
+    summary: dict[str, Any] = {
+        "tasks": list(tasks),
+        "conditions": {},
+        "skipped": {},
+        "n_eval_pairs": {},
+        "families": FAMILIES,
+    }
+    for name in tasks:
+        task_rows, task_comparisons, parts = _run_task(
+            config,
+            run_dir,
+            loaded,
+            name,
+            m2_readers._task_examples(name, examples),
+        )
+        rows += task_rows
+        comparisons += task_comparisons
+        for key, value in parts.items():
+            summary[key][name] = value
+    run_dir.write_json(
+        "table", {"columns": list(m2_readers.COLUMNS), "rows": rows}
+    )
+    run_dir.write_json(
+        "comparisons",
+        {"columns": list(m2_readers.COMPARISON_COLUMNS), "rows": comparisons},
+    )
+    run_dir.write_json("summary", summary)
+
+
+def run(config: Config, run_dir: RunDir) -> None:
+    """Loads the model in float32 and the datasets, then runs `execute`.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+
+    Raises:
+        ValueError: If M2 refuses the config, `reader_series` is False, a
+            readout is a token readout, a cell set or pooling is unknown or
+            none is given, `cell_layers` is empty, `upper_layers` is empty
+            or not among `cell_layers`, or a baseline is not a one-row cell
+            of the run (all checked before the model is loaded).
+    """
+    tasks = map(m2_readers._task, _check(config))
+    sources: list[TaskSource] = list(
+        dict.fromkeys(
+            source
+            for task in tasks
+            for source in (task.source, target_of(task).source)
+        )
+    )
+    execute(
+        config,
+        run_dir,
+        load_model(config.model, dtype=torch.float32),
+        load_sources(sources),
+    )
+
+
+def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
+    """Draws the AUROC matrix of every task, as M2's `plot` does.
+
+    Args:
+        run_dir: A finished M3 run.
+        out_dir: Folder of the figures.
+
+    Returns:
+        The PDF, PNG and SVG paths.
+    """
+    return m2_readers.plot(run_dir, out_dir)
