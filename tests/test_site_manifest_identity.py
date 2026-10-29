@@ -86,16 +86,15 @@ def test_each_row_names_the_run_its_selection_picks() -> None:
     named_default = set()
     for label, model, named in reported():
         exp = label.split()[0].lower()
-        select = SELECTIONS.get(label, {})
-        if not select:
+        if label not in SELECTIONS:
             named_default.add((exp, model))
-        chosen = found.run(exp, model, **select)
-        if chosen is None or chosen.name != named:
-            got = chosen.name if chosen else None
+        chosen = found.run(exp, model, **SELECTIONS.get(label, {}))
+        got = chosen.name if chosen else None
+        if got != named:
             problems.append(f"{label}/{model}: selected {got}, named {named}")
     for exp in found.experiments():
         for model in found.models(exp):
-            several = len(found.runs(exp, model)) > 1
-            if several and (exp, model) not in named_default:
+            unnamed = (exp, model) not in named_default
+            if unnamed and len(found.runs(exp, model)) > 1:
                 problems.append(f"{exp}/{model}: no Run identity entry")
     assert problems == []
