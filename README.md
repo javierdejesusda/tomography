@@ -146,6 +146,7 @@ Every id is the argument of `tomography run`. Coverage is read from the committe
 | `a2` | What does the logit lens show for a direction? | all 10 |
 | `a5` | Do directions align with Qwen-Scope SAE features? | code only |
 | `p9a` to `p9d` | Label questions known, unknown or uncertain, read that direction, use it to predict errors, steer along it | `p9a` to `p9c` all 10 (GPT-2 small has no direction), `p9d` 9 |
+| `b1` | Do published error detectors (exact-answer-token probe, semantic entropy, EigenScore) beat the `p9c` signals on the same test items? | code only |
 | `p10a`, `p10b`, `p10c` | Do models answer approximate quantities with ranges, can a reader tell, and does the range direction link to knowledge and hedging? | all 10 |
 
 ## Reproduce at scale
