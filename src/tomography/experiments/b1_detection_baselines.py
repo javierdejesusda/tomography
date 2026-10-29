@@ -28,6 +28,7 @@ import numpy as np
 from numpy.typing import NDArray
 import torch
 
+from tomography.experiments.aggregate import open_finished
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.p9a_labels import load_labeled
@@ -160,6 +161,7 @@ class _Inputs:
     loaded: LoadedModel
     dataset: _Dataset
     prompts: list[str]
+    entails: Entailer | None
 
     @property
     def test_items(self) -> list[LabeledItem]:
@@ -213,9 +215,11 @@ def _answer_probe(
 
 
 def _semantic_entropy(
-    inputs: _Inputs, entails: Entailer, notes: dict[str, Any]
+    inputs: _Inputs, notes: dict[str, Any]
 ) -> tuple[NDArray[np.float64], int]:
     """Negated discrete semantic entropy of the stored samples."""
+    entails = inputs.entails
+    assert entails is not None, "checked by execute"
     items = inputs.test_items
     entropy = np.array(
         [
@@ -248,19 +252,18 @@ def _eigenscore(
     return _filled(-eigen)
 
 
-def _score_dataset(
-    inputs: _Inputs, entails: Entailer | None, notes: dict[str, Any]
-) -> _Scores:
+_SCORERS = {
+    "answer_probe": _answer_probe,
+    "semantic_entropy": _semantic_entropy,
+    "eigenscore": _eigenscore,
+}
+
+
+def _score_dataset(inputs: _Inputs, notes: dict[str, Any]) -> _Scores:
     scores = _Scores({}, {}, {})
     for name in inputs.config.baselines:
         start = time.perf_counter()
-        if name == "answer_probe":
-            values, n_filled = _answer_probe(inputs, notes)
-        elif name == "semantic_entropy":
-            assert entails is not None, "checked by execute"
-            values, n_filled = _semantic_entropy(inputs, entails, notes)
-        else:
-            values, n_filled = _eigenscore(inputs, notes)
+        values, n_filled = _SCORERS[name](inputs, notes)
         scores.test[name] = values
         scores.n_filled[name] = n_filled
         scores.seconds[name] = time.perf_counter() - start
@@ -297,11 +300,11 @@ def _table_rows(
 
 
 def _paired_rows(
-    config: Config,
     p9c: P9cConfig,
     dataset: _Dataset,
     scores: _Scores,
     stored: Mapping[str, NDArray[Any]],
+    references: Sequence[str],
 ) -> list[list[object]]:
     correct = stored["correct"]
     return [
@@ -318,8 +321,7 @@ def _paired_rows(
             ),
         ]
         for name, values in scores.test.items()
-        for reference in config.references
-        if reference in stored
+        for reference in references
     ]
 
 
@@ -339,10 +341,12 @@ def execute(
     relational dataset, the test relations) that the P9c run stored must
     equal the ones made here. Writes `table` (the P9c rows of each dataset,
     copied, then one row per baseline in the P9c columns; `n_filled` counts
-    the missing scores among the items the baseline scored), `table_paired`
-    (the AUROC of every baseline minus that of every reference the P9c run
-    stored, with a paired bootstrap interval over the test items),
-    `signals_<dataset>` (the filled and oriented test scores of the
+    the missing scores among the items the baseline scored: every item of
+    the dataset for the probe, as P9c counts, and the test items for the
+    other two), `table_paired` (the AUROC of every baseline minus that of
+    every reference the P9c run stored, with a paired bootstrap interval
+    over the test items), `signals_<dataset>` (the filled and oriented test
+    scores of the
     baselines and the outcomes) and `summary` (the inputs, the layer and the
     validation AUROC per layer of the probe, the EigenScore layer, the
     entailment pairs judged, the references the P9c run lacks and the
@@ -399,17 +403,18 @@ def execute(
             few_shot_prompt(i.example.question, shots) for i in dataset.items
         ]
         scores = _score_dataset(
-            _Inputs(config, p9c, loaded, dataset, prompts), entails, notes
+            _Inputs(config, p9c, loaded, dataset, prompts, entails), notes
         )
-        table += [r for r in p9c_table["rows"] if r[0] == dataset.name]
-        table += _table_rows(p9c, dataset, scores)
-        paired += _paired_rows(
-            config, p9c, dataset, scores, stored[dataset.name]
-        )
-        seconds[dataset.name] = scores.seconds
         absent = [r for r in config.references if r not in stored[dataset.name]]
         if absent:
             missing[dataset.name] = absent
+        present = [r for r in config.references if r not in absent]
+        table += [r for r in p9c_table["rows"] if r[0] == dataset.name]
+        table += _table_rows(p9c, dataset, scores)
+        paired += _paired_rows(
+            p9c, dataset, scores, stored[dataset.name], present
+        )
+        seconds[dataset.name] = scores.seconds
         run_dir.write_arrays(
             f"signals_{dataset.name}",
             **scores.test,
@@ -453,15 +458,9 @@ def run(config: Config, run_dir: RunDir) -> None:
             not a finished run of that model.
     """
     _check_config(config)
-    reliability = RunDir.open(config.reliability_run)
-    if reliability.meta.get("finished_at") is None:
-        raise ValueError(f"{config.reliability_run} is not a finished run")
-    p9c_model = reliability.config.get("model")
-    if p9c_model != config.model:
-        raise ValueError(
-            f"{config.reliability_run} is a P9c run of {p9c_model!r}, not "
-            f"{config.model!r}"
-        )
+    reliability = open_finished(
+        config.reliability_run, model=config.model, files=()
+    )
     items, _ = load_labeled(
         reliability.config["labels_run"], model=config.model
     )

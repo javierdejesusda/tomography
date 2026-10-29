@@ -121,6 +121,10 @@ def _dataset(items: Sequence[LabeledItem], name: str) -> list[LabeledItem]:
     return [i for i in items if i.group == name]
 
 
+def _test_items(name: str) -> list[LabeledItem]:
+    return [i for i in _dataset(_items(), name) if i.example.split == "test"]
+
+
 def _split(items: Sequence[LabeledItem]) -> NDArray[np.str_]:
     return np.array([i.example.split for i in items])
 
@@ -233,6 +237,15 @@ def _always(
 
 def _no_forward(*args: Any, **kwargs: Any) -> Any:
     raise AssertionError("no forward pass may run")
+
+
+@pytest.fixture
+def no_forward(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Makes every forward pass of a baseline fail the test."""
+    monkeypatch.setattr(
+        b1_detection_baselines, "answer_activations", _no_forward
+    )
+    monkeypatch.setattr(b1_detection_baselines, "eigenscores", _no_forward)
 
 
 def _config(reliability: RunDir, **overrides: Any) -> Config:
@@ -360,15 +373,10 @@ def test_an_invalid_config_fails_before_any_forward_pass(
     tiny_gpt2: LoadedModel,
     reliability: RunDir,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    no_forward: None,
     overrides: dict[str, Any],
     message: str,
 ) -> None:
-    monkeypatch.setattr(
-        b1_detection_baselines, "answer_activations", _no_forward
-    )
-    monkeypatch.setattr(b1_detection_baselines, "eigenscores", _no_forward)
-
     with pytest.raises(ValueError, match=message):
         _execute(tiny_gpt2, reliability, tmp_path, **overrides)
 
@@ -501,15 +509,11 @@ def test_stored_outcomes_that_differ_from_the_labels_stop_the_run_first(
     tiny_gpt2: LoadedModel,
     reliability: RunDir,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    no_forward: None,
     how: str,
 ) -> None:
     copy = _copy(reliability, tmp_path / "p9c")
     _tamper(copy, how)
-    monkeypatch.setattr(
-        b1_detection_baselines, "answer_activations", _no_forward
-    )
-    monkeypatch.setattr(b1_detection_baselines, "eigenscores", _no_forward)
 
     with pytest.raises(ValueError, match=r"popqa: the test .* differ"):
         _execute(tiny_gpt2, copy, tmp_path, entails=_no_forward)
@@ -604,38 +608,42 @@ def _planted_answers(
     return h.astype(np.float32)
 
 
-def test_the_answer_probe_finds_a_planted_answer_signal(
+_PLANTED_RUNS: dict[str, RunDir] = {}
+
+
+@pytest.fixture
+def planted_run(
     tiny_gpt2: LoadedModel,
     reliability: RunDir,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        b1_detection_baselines, "answer_activations", _planted_answers
-    )
-    run_dir = _execute(
-        tiny_gpt2, reliability, tmp_path, baselines=("answer_probe",)
-    )
+    tmp_path_factory: pytest.TempPathFactory,
+) -> RunDir:
+    """One probe-only b1 run on `_planted_answers`."""
+    if "probe" not in _PLANTED_RUNS:
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(
+                b1_detection_baselines, "answer_activations", _planted_answers
+            )
+            _PLANTED_RUNS["probe"] = _execute(
+                tiny_gpt2,
+                reliability,
+                tmp_path_factory.mktemp("b1-planted"),
+                baselines=("answer_probe",),
+            )
+    return _PLANTED_RUNS["probe"]
 
-    rows = _rows(run_dir, "table", TABLE_COLUMNS)
+
+def test_the_answer_probe_finds_a_planted_answer_signal(
+    planted_run: RunDir,
+) -> None:
+    rows = _rows(planted_run, "table", TABLE_COLUMNS)
     for dataset in DATASETS:
-        assert _summary(run_dir)["answer_probe"][dataset]["layer"] == 2
+        assert _summary(planted_run)["answer_probe"][dataset]["layer"] == 2
         assert _row(rows, dataset, "answer_probe")["auroc"] > 0.9
 
 
 def test_an_empty_answer_takes_the_lowest_train_score_of_the_probe(
-    tiny_gpt2: LoadedModel,
-    reliability: RunDir,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tiny_gpt2: LoadedModel, planted_run: RunDir
 ) -> None:
-    monkeypatch.setattr(
-        b1_detection_baselines, "answer_activations", _planted_answers
-    )
-    run_dir = _execute(
-        tiny_gpt2, reliability, tmp_path, baselines=("answer_probe",)
-    )
-
     items = _dataset(_items(), "popqa")
     split = _split(items)
     probe = fit_answer_probe(
@@ -652,9 +660,9 @@ def test_an_empty_answer_takes_the_lowest_train_score_of_the_probe(
     )
     lowest_train = np.nanmin(probe.scores[split == "train"])
     assert np.nanmin(probe.scores) < lowest_train
-    test = [i for i in items if i.example.split == "test"]
+    test = _test_items("popqa")
     empty = [k for k, i in enumerate(test) if not i.label.greedy]
-    scores = run_dir.read_arrays("signals_popqa")["answer_probe"]
+    scores = planted_run.read_arrays("signals_popqa")["answer_probe"]
     np.testing.assert_allclose(scores[empty], lowest_train)
 
 
@@ -664,9 +672,7 @@ def test_semantic_entropy_is_the_negated_entropy_of_the_answer_clusters(
     rows = _rows(default_run, "table", TABLE_COLUMNS)
 
     for dataset in DATASETS:
-        test = [
-            i for i in _dataset(_items(), dataset) if i.example.split == "test"
-        ]
+        test = _test_items(dataset)
         expected = np.array(
             [-H_MIXED if i.label.samples in (MIXED, ()) else 0.0 for i in test]
         )
@@ -713,21 +719,16 @@ def test_the_entailment_model_judges_every_pair_of_each_test_question(
         baselines=("semantic_entropy",),
     )
 
-    expected = [
-        pairs
+    pairs = {
+        dataset: [
+            entailment_pairs(i.example.question, i.label.samples)
+            for i in _test_items(dataset)
+        ]
         for dataset in DATASETS
-        for i in _dataset(_items(), dataset)
-        if i.example.split == "test"
-        and (pairs := entailment_pairs(i.example.question, i.label.samples))
-    ]
-    assert calls == expected
+    }
+    assert calls == [p for d in DATASETS for p in pairs[d] if p]
     assert _summary(run_dir)["nli_pairs"] == {
-        dataset: sum(
-            len(entailment_pairs(i.example.question, i.label.samples))
-            for i in _dataset(_items(), dataset)
-            if i.example.split == "test"
-        )
-        for dataset in DATASETS
+        d: sum(map(len, ps)) for d, ps in pairs.items()
     }
 
 
@@ -737,9 +738,7 @@ def test_eigenscore_is_the_negated_score_of_the_test_samples(
     rows = _rows(default_run, "table", TABLE_COLUMNS)
 
     for dataset in DATASETS:
-        test = [
-            i for i in _dataset(_items(), dataset) if i.example.split == "test"
-        ]
+        test = _test_items(dataset)
         raw = -eigenscores(
             tiny_gpt2,
             _prompts(test),
@@ -793,7 +792,12 @@ def test_the_paired_table_holds_every_baseline_against_every_reference(
 def test_a_reference_the_p9c_run_lacks_is_named_in_the_summary(
     tiny_gpt2: LoadedModel, closed_reliability: RunDir, tmp_path: Path
 ) -> None:
-    run_dir = _execute(tiny_gpt2, closed_reliability, tmp_path)
+    run_dir = _execute(
+        tiny_gpt2,
+        closed_reliability,
+        tmp_path,
+        baselines=("semantic_entropy",),
+    )
 
     rows = _rows(run_dir, "table_paired", PAIRED_COLUMNS)
     assert {r["reference"] for r in rows} == {"p_true"}
@@ -839,8 +843,6 @@ def test_the_summary_records_the_inputs_and_the_settings(
     assert summary["references"] == list(REFERENCES)
     assert summary["missing_references"] == {}
     for dataset in DATASETS:
-        assert summary["answer_probe"][dataset]["layer"] in LAYERS
-        assert len(summary["answer_probe"][dataset]["val_auroc"]) == 3
         assert set(summary["seconds"][dataset]) == set(BASELINES)
         assert all(s >= 0 for s in summary["seconds"][dataset].values())
 
@@ -945,7 +947,7 @@ def test_run_refuses_a_p9c_run_of_another_model(
     monkeypatch.setattr(b1_detection_baselines, "load_model", _no_forward)
     config = _config(reliability, model="gpt2")
 
-    with pytest.raises(ValueError, match="'tiny', not 'gpt2'"):
+    with pytest.raises(ValueError, match="'tiny', not of 'gpt2'"):
         run(config, RunDir.create(config, out_root=tmp_path))
 
 

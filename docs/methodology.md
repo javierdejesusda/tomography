@@ -452,7 +452,8 @@ The `b1` protocol:
   so only the test items are scored and no sign is set on train. A missing score (an empty greedy answer for the
   probe, a question without samples for semantic entropy, fewer than 2 non-empty samples for EigenScore) takes the
   lowest finite score of the train items (probe) or of the test items (the other two), the least confident case,
-  as in `p9c`. `n_filled` counts the missing scores among the items a baseline scored.
+  as in `p9c`. `n_filled` counts the missing scores among the items a baseline scored: every item of the dataset
+  for the probe (as `p9c` counts its signals), the test items for the other two.
 - Metrics: the `p9c` test metric with the `n_boot` and `seed` of the `p9c` run: AUROC with its interval, AURC and,
   for PopQA, the within-relation AUROC. `table` holds the `p9c` rows of each dataset, copied, then one row per
   baseline; `table_paired` holds the AUROC of every baseline minus that of each reference (`lat` and `p_true` by
