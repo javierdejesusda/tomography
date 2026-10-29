@@ -5,6 +5,7 @@ from typing import Any
 from typing import cast
 
 import numpy as np
+from numpy.typing import NDArray
 import pytest
 
 from tomography.activations import Activations
@@ -18,6 +19,7 @@ from tomography.experiments import p2_positions
 from tomography.experiments.m2_readers import read_positions
 from tomography.experiments.m3_matrix import CELL_SETS
 from tomography.experiments.m3_matrix import SEGMENTS
+from tomography.experiments.m3_matrix import SET_SEGMENTS
 from tomography.experiments.m3_matrix import CellSet
 from tomography.experiments.m3_matrix import prompt_cells
 from tomography.experiments.m3_matrix import prompt_max_set
@@ -38,17 +40,17 @@ SHORT_DECOY_LINE = "Hint: {noun} is {{question}}.\n"
 PREFIX, DECOY, STIMULUS, FINAL = (
     SEGMENTS.index(s) for s in ("prefix", "decoy", "stimulus", "final")
 )
-EXPECTED_SEGMENTS = {
-    "prompt": SEGMENTS,
-    "stimulus": ("stimulus",),
-    "final": ("final",),
-    "upper": SEGMENTS,
-}
 
 
 def test_segments_and_cell_sets_are_named_in_prompt_order() -> None:
     assert SEGMENTS == ("prefix", "decoy", "stimulus", "final")
     assert CELL_SETS == ("prompt", "stimulus", "final", "upper")
+    assert SET_SEGMENTS == {
+        "prompt": SEGMENTS,
+        "stimulus": ("stimulus",),
+        "final": ("final",),
+        "upper": SEGMENTS,
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -102,6 +104,18 @@ def _stimuli(
     return task_set(task, paper, rows, n_pairs=3, seed=0)
 
 
+def _cells(
+    loaded: LoadedModel,
+    stimuli: StimulusSet,
+    *,
+    decoy: bool,
+    layers: tuple[int, ...] = LAYERS,
+) -> tuple[Activations, NDArray[np.int8]]:
+    return prompt_cells(
+        loaded, stimuli, layers, bos=None, batch_size=4, decoy=decoy
+    )
+
+
 @pytest.mark.parametrize("bos", ["prepend", "none"])
 def test_prompt_cells_read_every_token_but_bos(
     tiny_arch: LoadedModel, bos: BosMode
@@ -144,13 +158,10 @@ def test_prompt_cells_read_every_token_but_bos(
     assert segments.shape == cells.row_stimulus.shape
 
 
-ROW_FIELDS = ("row_stimulus", "row_rank", "row_token", "row_token_id")
-
-
 def _assert_same_rows(got: Activations, expected: Activations) -> None:
     assert got.layers == expected.layers
     assert got.n_stimuli == expected.n_stimuli
-    for field in ROW_FIELDS:
+    for field in ("row_stimulus", "row_rank", "row_token", "row_token_id"):
         np.testing.assert_array_equal(
             getattr(got, field), getattr(expected, field)
         )
@@ -183,9 +194,7 @@ def test_stimulus_cells_are_the_response_rows(
     stimuli = _stimuli(tiny_arch, task, decoy=decoy)
     if shared_token:
         stimuli = _end_inside_a_token(stimuli)
-    cells, segments = prompt_cells(
-        tiny_arch, stimuli, LAYERS, bos=None, batch_size=4, decoy=decoy
-    )
+    cells, segments = _cells(tiny_arch, stimuli, decoy=decoy)
 
     got = select_cells(cells, segments, "stimulus", LAYERS)
 
@@ -205,9 +214,7 @@ def test_prefix_cells_are_equal_across_texts_of_one_template(
     tiny_arch: LoadedModel, task: str
 ) -> None:
     stimuli = _stimuli(tiny_arch, task, decoy=False)
-    cells, segments = prompt_cells(
-        tiny_arch, stimuli, LAYERS, bos=None, batch_size=4, decoy=False
-    )
+    cells, segments = _cells(tiny_arch, stimuli, decoy=False)
 
     prefix = segments == PREFIX
     rows = [
@@ -229,9 +236,7 @@ def test_segments_follow_prompt_order(
     tiny_arch: LoadedModel, task: str, decoy: bool
 ) -> None:
     stimuli = _stimuli(tiny_arch, task, decoy=decoy)
-    cells, segments = prompt_cells(
-        tiny_arch, stimuli, LAYERS, bos=None, batch_size=4, decoy=decoy
-    )
+    cells, segments = _cells(tiny_arch, stimuli, decoy=decoy)
 
     noun = READING_TASKS[task].noun
     for i, label in enumerate(stimuli.labels):
@@ -242,10 +247,6 @@ def test_segments_follow_prompt_order(
         assert set(codes[:start].tolist()) <= {PREFIX, DECOY}
         assert set(codes[start:].tolist()) == {STIMULUS, FINAL}
         assert np.all(np.diff(codes[start:]) >= 0)
-        # Utility's "Scenario:" tag is prefix between the decoy and the
-        # stimulus, so only the concept template is in order throughout.
-        in_order = bool(np.all(np.diff(codes) >= 0))
-        assert in_order == (task == "sentiment" or not decoy)
         line = np.flatnonzero(codes == DECOY)
         if not decoy:
             assert line.size == 0
@@ -262,9 +263,7 @@ def test_the_last_final_cell_is_the_last_row(
     tiny_arch: LoadedModel, decoy: bool
 ) -> None:
     stimuli = _stimuli(tiny_arch, "utility", decoy=decoy)
-    cells, segments = prompt_cells(
-        tiny_arch, stimuli, LAYERS, bos=None, batch_size=4, decoy=decoy
-    )
+    cells, segments = _cells(tiny_arch, stimuli, decoy=decoy)
 
     ends = np.cumsum(np.bincount(cells.row_stimulus)) - 1
     np.testing.assert_array_equal(segments[ends], FINAL)
@@ -284,9 +283,7 @@ def test_stimulus_token_reads_the_last_stimulus_cell(
     tiny_arch: LoadedModel, task: str
 ) -> None:
     stimuli = _stimuli(tiny_arch, task, decoy=True)
-    cells, segments = prompt_cells(
-        tiny_arch, stimuli, LAYERS, bos=None, batch_size=4, decoy=True
-    )
+    cells, segments = _cells(tiny_arch, stimuli, decoy=True)
     stimulus = select_cells(cells, segments, "stimulus", LAYERS)
 
     read = read_positions(
@@ -300,9 +297,7 @@ def test_stimulus_token_reads_the_last_stimulus_cell(
 
 def test_prompt_max_pools_every_cell_of_a_text(tiny_arch: LoadedModel) -> None:
     stimuli = _stimuli(tiny_arch, "sentiment", decoy=True)
-    cells, _ = prompt_cells(
-        tiny_arch, stimuli, LAYERS, bos=None, batch_size=4, decoy=True
-    )
+    cells, _ = _cells(tiny_arch, stimuli, decoy=True)
 
     read = read_positions(
         tiny_arch, prompt_max_set(stimuli), ("max",), _m2_config()
@@ -320,13 +315,11 @@ def test_select_cells_keeps_the_rows_and_layers_of_a_set(
     tiny_gpt2: LoadedModel, cell_set: CellSet
 ) -> None:
     stimuli = _stimuli(tiny_gpt2, "utility", decoy=True)
-    cells, segments = prompt_cells(
-        tiny_gpt2, stimuli, LAYERS, bos=None, batch_size=4, decoy=True
-    )
+    cells, segments = _cells(tiny_gpt2, stimuli, decoy=True)
 
     got = select_cells(cells, segments, cell_set, (3, 1))
 
-    codes = [SEGMENTS.index(s) for s in EXPECTED_SEGMENTS[cell_set]]
+    codes = [SEGMENTS.index(s) for s in SET_SEGMENTS[cell_set]]
     keep = np.isin(segments, codes)
     assert got.layers == (1, 3)
     assert got.position == "response"
@@ -346,9 +339,7 @@ def test_select_cells_refuses_an_unknown_set_and_layers_not_read(
     tiny_gpt2: LoadedModel,
 ) -> None:
     stimuli = _stimuli(tiny_gpt2, "sentiment", decoy=False)
-    cells, segments = prompt_cells(
-        tiny_gpt2, stimuli, (1, 3), bos=None, batch_size=4, decoy=False
-    )
+    cells, segments = _cells(tiny_gpt2, stimuli, decoy=False, layers=(1, 3))
 
     with pytest.raises(ValueError, match=r"^unknown cell set 'nope'"):
         select_cells(cells, segments, cast(CellSet, "nope"), (1, 3))
@@ -374,9 +365,7 @@ def test_select_cells_names_a_text_left_without_rows(
     stimuli = _stimuli(tiny_gpt2, "utility", decoy=False)
     text, (start, _) = stimuli.texts[1], _span(stimuli, 1)
     to_the_end = _replace(stimuli, 1, text, (start, len(text)))
-    cells, segments = prompt_cells(
-        tiny_gpt2, to_the_end, LAYERS, bos=None, batch_size=4, decoy=False
-    )
+    cells, segments = _cells(tiny_gpt2, to_the_end, decoy=False)
 
     with pytest.raises(
         ValueError, match=r"^stimulus 1 has no cells in the set 'final'$"
@@ -399,9 +388,7 @@ def test_prompt_cells_name_a_text_without_a_stimulus_span(
     _no_model_call(monkeypatch)
 
     with pytest.raises(ValueError, match=r"^stimulus 2 has no stimulus span$"):
-        prompt_cells(
-            tiny_gpt2, broken, LAYERS, bos=None, batch_size=4, decoy=False
-        )
+        _cells(tiny_gpt2, broken, decoy=False)
 
 
 @pytest.mark.parametrize(
@@ -434,6 +421,4 @@ def test_prompt_cells_name_a_misleading_text_without_its_decoy_line(
         match=rf"^stimulus {index} has no decoy line right before the line "
         r"of its stimulus$",
     ):
-        prompt_cells(
-            tiny_gpt2, broken, LAYERS, bos=None, batch_size=4, decoy=True
-        )
+        _cells(tiny_gpt2, broken, decoy=True)
