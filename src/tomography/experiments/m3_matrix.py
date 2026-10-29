@@ -17,6 +17,7 @@ last stimulus token and the feature-wise maximum over the prompt.
 from collections.abc import Mapping
 from collections.abc import Sequence
 import dataclasses
+import re
 from types import MappingProxyType
 from typing import Literal
 from typing import get_args
@@ -198,18 +199,21 @@ def _token_segments(
 def _decoy_line(text: str, stimulus_start: int) -> Span | None:
     """Finds the line `misleading_template` puts right before the stimulus.
 
-    The line runs from the text of `p2_positions.DECOY_LINE` before its
-    first slot to the start of the line that holds the stimulus.
+    The line is `p2_positions.DECOY_LINE` with any text on one line in its
+    slots, and it ends where the line that holds the stimulus starts; a
+    chat tag may precede it on its line.
 
     Returns:
-        Its character span, or None when the line before the stimulus line
-        does not hold it.
+        Its character span, or None when the text right before the stimulus
+        line is not that line.
     """
     end = text.rfind("\n", 0, stimulus_start) + 1
-    start = text.rfind(p2_positions.DECOY_LINE.partition("{")[0], 0, end)
-    if start < 0 or "\n" in text[start : end - 1]:
-        return None
-    return start, end
+    pattern = "".join(
+        ".+?" if part.startswith("{") else re.escape(part)
+        for part in re.split(r"(\{+\w+\}+)", p2_positions.DECOY_LINE)
+    )
+    found = re.search(rf"{pattern}\Z", text[:end])
+    return None if found is None else (found.start(), end)
 
 
 def select_cells(

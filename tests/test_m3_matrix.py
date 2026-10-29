@@ -404,23 +404,29 @@ def test_prompt_cells_name_a_text_without_a_stimulus_span(
         )
 
 
-@pytest.mark.parametrize("case", ["missing", "not_before_the_stimulus"])
+@pytest.mark.parametrize(
+    ("index", "replacement"),
+    [(1, ""), (3, "{line}it is so.\n"), (4, "Hint: none\n")],
+    ids=["missing", "not_before_the_stimulus", "altered"],
+)
 def test_prompt_cells_name_a_misleading_text_without_its_decoy_line(
-    tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch, case: str
+    tiny_gpt2: LoadedModel,
+    monkeypatch: pytest.MonkeyPatch,
+    index: int,
+    replacement: str,
 ) -> None:
     misleading = _stimuli(tiny_gpt2, "utility", decoy=True)
-    if case == "missing":
-        original = _stimuli(tiny_gpt2, "utility", decoy=False)
-        index = 1
-        broken = _replace(
-            misleading, 1, original.texts[1], original.response_spans[1]
-        )
-    else:
-        index = 3
-        text, (start, end) = misleading.texts[3], _span(misleading, 3)
-        line = text.rfind("\n", 0, start) + 1
-        moved = text[:line] + "x\n" + text[line:]
-        broken = _replace(misleading, 3, moved, (start + 2, end + 2))
+    text, (start, end) = misleading.texts[index], _span(misleading, index)
+    line_end = text.rfind("\n", 0, start) + 1
+    line_start = text.rfind("\n", 0, line_end - 1) + 1
+    new = replacement.format(line=text[line_start:line_end])
+    shift = len(new) - (line_end - line_start)
+    broken = _replace(
+        misleading,
+        index,
+        text[:line_start] + new + text[line_end:],
+        (start + shift, end + shift),
+    )
     _no_model_call(monkeypatch)
 
     with pytest.raises(
