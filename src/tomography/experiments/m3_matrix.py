@@ -121,9 +121,6 @@ DIAGNOSTICS = (
     "decoy-driven, as utility's Scenario: tag follows the misleading line"
 )
 CellReader = AttentionReader | CellMaxReader
-# Shown warnings, so that a fit warning shown again keeps the "default"
-# action's once per location.
-_SHOWN: dict[Any, Any] = {}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -429,7 +426,7 @@ def random_cell_max(
         ValueError: If `acts` is not finite, a layer's rows are all equal,
             or the labels lack a class.
     """
-    _, centers, scales = _scaled_cells(acts.data, acts.layers)
+    centers, scales = _scaled_cells(acts.data, acts.layers)[1:]
     heads = np.random.default_rng(seed).standard_normal(
         (len(acts.layers), acts.data.shape[2])
     )
@@ -461,29 +458,37 @@ def cell_weights(reader: CellReader, acts: Activations) -> NDArray[np.float64]:
 
     Returns:
         The weights, shape (K, n_rows), in the layout of `acts.data`.
+
+    Raises:
+        ValueError: If the reader is a per-layer attention reader, or a
+            stimulus has no rows.
     """
-    heads, offsets = (
-        (reader.values, reader.biases)
-        if isinstance(reader, CellMaxReader)
-        else (reader.queries, reader.offsets)
-    )
+    if isinstance(reader, CellMaxReader):
+        heads, offsets = reader.values, reader.biases
+    elif reader.joint:
+        heads, offsets = reader.queries, reader.offsets
+    else:
+        raise ValueError(
+            "cell_weights needs a cell max or a joint attention reader, got "
+            "a per-layer attention reader"
+        )
     # The reader's own float64 arithmetic, so the highest cell is its own.
     logits = np.stack(
         [
             rows.astype(np.float64) @ heads[k] + offsets[k]
             for k, rows in enumerate(acts.data)
         ]
-    ).ravel()
-    stimulus = np.tile(acts.row_stimulus, len(acts.layers))
-    top = np.full(acts.n_stimuli, -np.inf)
-    np.maximum.at(top, stimulus, logits)
+    )
+    stimulus = acts.row_stimulus
+    top = m2_readers.token_score_max(logits, acts).max(axis=0)[stimulus]
     if isinstance(reader, CellMaxReader):
-        weights = (logits == top[stimulus]).astype(np.float64)
+        weights = (logits == top).astype(np.float64)
     else:
-        weights = np.exp(logits - top[stimulus])
-    totals = np.bincount(stimulus, weights, minlength=acts.n_stimuli)
-    shares = np.asarray(weights / totals[stimulus], dtype=np.float64)
-    return shares.reshape(len(acts.layers), -1)
+        weights = np.exp(logits - top)
+    totals = np.bincount(
+        stimulus, weights.sum(axis=0), minlength=acts.n_stimuli
+    )
+    return np.asarray(weights / totals[stimulus], dtype=np.float64)
 
 
 class Streamed(NamedTuple):
@@ -534,25 +539,22 @@ def stream_scores(
         ValueError: If a batch is refused by `prompt_cells`, `select_cells`
             or a reader; the error names the stimulus the batch starts at.
     """
-    n_readers, n_stimuli = len(readers), len(stimuli.texts)
-    streamed = Streamed(
-        np.empty((n_readers, n_stimuli)),
-        np.empty((n_readers, n_stimuli, len(SEGMENTS))),
-        np.empty((n_readers, n_stimuli), dtype=np.int64),
-    )
-    for first in range(0, n_stimuli, config.batch_size):
+    batches = []
+    for first in range(0, len(stimuli.texts), config.batch_size):
         rows = slice(first, first + config.batch_size)
         try:
-            batch = _batch_scores(
-                loaded, _rows(stimuli, rows), readers, config, decoy=decoy
+            batches.append(
+                _batch_scores(
+                    loaded, _rows(stimuli, rows), readers, config, decoy=decoy
+                )
             )
         except ValueError as error:
             raise ValueError(
                 f"in the batch that starts at stimulus {first}: {error}"
             ) from error
-        for whole, part in zip(streamed, batch, strict=True):
-            whole[:, rows] = part
-    return streamed
+    return Streamed(
+        *(np.concatenate(parts, axis=1) for parts in zip(*batches, strict=True))
+    )
 
 
 def _batch_scores(
@@ -657,7 +659,8 @@ def _grid_fits(
     """Fits a reader per grid value, timing the fits and counting warnings.
 
     Every `ConvergenceWarning` is counted, then shown again under the
-    caller's filters.
+    caller's filters; under the `default` action a warning repeated over
+    the grid shows once.
 
     Returns:
         The readers, the seconds the fits took, and the number of
@@ -668,13 +671,16 @@ def _grid_fits(
         warnings.simplefilter("always", ConvergenceWarning)
         readers = [_fit_cells(pooling, train, labels, c) for c in grid]
     seconds = time.perf_counter() - start
+    # One registry per grid: every `catch_warnings` clears the registries,
+    # so a longer-lived one would not dedupe across grids either.
+    registry: dict[Any, Any] = {}
     for shown in caught:
         warnings.warn_explicit(
             shown.message,
             shown.category,
             shown.filename,
             shown.lineno,
-            registry=_SHOWN,
+            registry=registry,
         )
     counted = sum(issubclass(w.category, ConvergenceWarning) for w in caught)
     return readers, seconds, counted
@@ -727,14 +733,18 @@ def _draw_fits(
     if "shuffled" in config.controls:
         series.append(("shuffled", *_shuffled(config, task, items, i)))
     fits: list[_Fit] = []
-    for cell_set in config.cell_sets:
+    # `select_cells` copies, so each set's copy is freed before the next,
+    # and the cells once the last set is copied.
+    *sets, last = config.cell_sets
+    for cell_set in sets:
         train = select_cells(
             cells, segments, cell_set, _set_layers(config, cell_set)
         )
         fits += _set_fits(config, task, items, i, train, cell_set, series)
-        # `select_cells` copies, so one set's copy is freed before the next.
         del train
-    return fits
+    train = select_cells(cells, segments, last, _set_layers(config, last))
+    del cells, segments
+    return fits + _set_fits(config, task, items, i, train, last, series)
 
 
 def _set_fits(
@@ -836,14 +846,13 @@ def _cell_phase(
     sizes = np.cumsum([len(fit.readers) for fit in fits])[:-1]
     best: list[int] = []
     vals = []
+    kept: list[tuple[CellSet, CellReader]] = []
     for fit, val in zip(fits, np.split(scored, sizes), strict=True):
         metric = group_accuracy(val[:, None], select.groups, fit.select_labels)
-        best.append(int(m2_readers.tune_per_layer(metric)[0]))
-        vals.append(val[best[-1]])
-    kept = [
-        (fit.cell_set, fit.readers[b])
-        for fit, b in zip(fits, best, strict=True)
-    ]
+        b = int(m2_readers.tune_per_layer(metric)[0])
+        best.append(b)
+        vals.append(val[b])
+        kept.append((fit.cell_set, fit.readers[b]))
     streamed = [
         stream_scores(
             loaded,
@@ -1093,6 +1102,7 @@ def _comparisons(
     relabelled `best`; their rows keep the rule `joint`.
     """
     rows = m2_readers._comparison_rows(config, task, items, entries)
+    rule = m2_readers.COMPARISON_COLUMNS.index("layer_rule")
     joint = [
         entry._replace(cell=entry.cell._replace(layer_rule="best"))
         for entry in entries
@@ -1105,10 +1115,9 @@ def _comparisons(
         best = dataclasses.replace(
             config, baselines=(baseline,), layer_rules=("best",)
         )
-        rows += [
-            [*row[:2], "joint", *row[3:]]
-            for row in m2_readers._comparison_rows(best, task, items, family)
-        ]
+        for row in m2_readers._comparison_rows(best, task, items, family):
+            row[rule] = "joint"
+            rows.append(row)
     return rows
 
 

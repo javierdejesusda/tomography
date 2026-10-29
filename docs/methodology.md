@@ -248,12 +248,12 @@ a cell being one token at one layer, reads better than M2's one-row readouts. It
 (its config shares M2's defaults) and has not been run yet.
 
 - Cells and segments: `prompt_cells` reads every token but BOS (whose state is the same for every text) at
-  `cell_layers` (default 4, 8, ..., 28, M2's `token_layers`) and gives each token a segment: `prefix` (every token
-  before the stimulus outside the decoy line: the chat tag, the instruction and a tag such as utility's `Scenario:`),
-  `decoy` (P2's misleading line, matched as a whole line against `p2_positions.DECOY_LINE`, in the misleading
-  conditions only), `stimulus` (the stimulus slot, M2's `response` rows) and `final` (from the stimulus end to the
-  text end, where `last` and `concept` read). A token joins the segment its characters overlap, the stimulus winning
-  ties.
+  `cell_layers` (default 4, 8, ..., 28, the `token_layers` of the M2 runs) and gives each token a segment: `prefix`
+  (every token before the stimulus outside the decoy line: the chat tag, the instruction and a tag such as
+  utility's `Scenario:`), `decoy` (P2's misleading line, matched as a whole line against `p2_positions.DECOY_LINE`,
+  in the misleading conditions only), `stimulus` (the stimulus slot, M2's `response` rows) and `final` (from the
+  stimulus end to the text end, where `last` and `concept` read). A token joins the segment its characters overlap,
+  the stimulus winning ties.
 - Cell sets: `prompt` (every segment at `cell_layers`), `stimulus`, `final`, and `upper` (every segment at
   `upper_layers`, default 16, 20, 24, 28). The default `cell_sets` is `prompt` (stage 1). Stage 2 (`stimulus`,
   `final`, `upper`, selected with `--set cell_sets=...`) runs only if a `cellattn_prompt`, `cellmax_prompt` or

@@ -683,21 +683,22 @@ def test_a_bad_config_is_refused_before_any_model_call(
         _refused(_config(**overrides), tmp_path)
 
 
+class _LoadedError(Exception):
+    """Stops `run` where it loads the model or the sources."""
+
+
 def test_the_relabelled_readouts_can_be_baselines(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    class LoadedError(Exception):
-        pass
-
     def loaded(*args: Any, **kwargs: Any) -> None:
-        raise LoadedError
+        raise _LoadedError
 
     monkeypatch.setattr(m3_matrix, "load_sources", lambda sources: {})
     monkeypatch.setattr(m3_matrix, "load_model", loaded)
     config = _config(
         baselines=("logistic/stimulus_token", "mean_diff/prompt_max")
     )
-    with pytest.raises(LoadedError):
+    with pytest.raises(_LoadedError):
         m3_matrix.run(config, RunDir.create(config, out_root=tmp_path))
 
 
@@ -718,17 +719,14 @@ def test_run_loads_the_model_in_float32(
 ) -> None:
     calls: list[tuple[Any, ...]] = []
 
-    class LoadedError(Exception):
-        pass
-
     def record(key: str, **kwargs: Any) -> None:
         calls.append((key, kwargs))
-        raise LoadedError
+        raise _LoadedError
 
     monkeypatch.setattr(m3_matrix, "load_sources", lambda sources: {})
     monkeypatch.setattr(m3_matrix, "load_model", record)
     config = _config()
-    with pytest.raises(LoadedError):
+    with pytest.raises(_LoadedError):
         m3_matrix.run(config, RunDir.create(config, out_root=tmp_path))
     assert calls == [("tiny", {"dtype": torch.float32})]
 
@@ -738,17 +736,14 @@ def test_run_loads_the_sources_of_every_task(
 ) -> None:
     calls: list[list[str]] = []
 
-    class LoadedError(Exception):
-        pass
-
     def record(sources: list[str]) -> None:
         calls.append(list(sources))
-        raise LoadedError
+        raise _LoadedError
 
     monkeypatch.setattr(m3_matrix, "load_model", lambda *a, **k: None)
     monkeypatch.setattr(m3_matrix, "load_sources", record)
     config = _config()
-    with pytest.raises(LoadedError):
+    with pytest.raises(_LoadedError):
         m3_matrix.run(config, RunDir.create(config, out_root=tmp_path))
     assert calls == [["sst2", "ethics_utility"]]
 
@@ -1013,8 +1008,52 @@ def test_the_replica_rows_equal_the_rows_of_m2(
     assert replicas == _table(run_dir)
 
 
-def _set_layers(config: m3_matrix.Config, cell_set: CellSet) -> tuple[int, ...]:
-    return config.upper_layers if cell_set == "upper" else config.cell_layers
+def test_every_shuffled_series_shares_the_select_shuffles_of_m2(
+    finished: RunDir,
+) -> None:
+    for task in ("sentiment", "utility"):
+        arrays = finished.read_arrays(f"scores_{task}")
+        names = _entries(finished, task)
+        shuffled = [n for n in names if n.endswith("/shuffled")]
+        assert "logistic/last/best/shuffled" in shuffled
+        assert "logistic/cellmax_prompt/joint/shuffled" in shuffled
+        labels = arrays["entry_select_labels"]
+        reference = labels[names.index("logistic/last/best/shuffled")]
+        assert not np.array_equal(
+            reference, labels[names.index("logistic/last/best/reader")]
+        )
+        for name in shuffled:
+            np.testing.assert_array_equal(labels[names.index(name)], reference)
+
+
+def _run_cells(
+    loaded: LoadedModel,
+    stimuli: StimulusSet,
+    config: m3_matrix.Config,
+    *,
+    decoy: bool,
+) -> tuple[Activations, NDArray[np.int8]]:
+    """The cells a run with `config` reads of some stimuli."""
+    return prompt_cells(
+        loaded,
+        stimuli,
+        config.cell_layers,
+        bos=None,
+        batch_size=config.batch_size,
+        decoy=decoy,
+    )
+
+
+def _set_cells(
+    cells: Activations,
+    segments: NDArray[np.int8],
+    config: m3_matrix.Config,
+    cell_set: CellSet,
+) -> Activations:
+    """The cells of one set, at the layers a run with `config` gives it."""
+    return select_cells(
+        cells, segments, cell_set, m3_matrix._set_layers(config, cell_set)
+    )
 
 
 def _fitted_readers(
@@ -1028,9 +1067,7 @@ def _fitted_readers(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
         for cell_set in ("prompt", "upper", "final"):
-            acts = select_cells(
-                cells, segments, cell_set, _set_layers(config, cell_set)
-            )
+            acts = _set_cells(cells, segments, config, cell_set)
             readers += [
                 (
                     cell_set,
@@ -1053,18 +1090,9 @@ def test_streamed_scores_equal_whole_set_scores(
         tiny_arch, report, readers, config, decoy=True
     )
 
-    cells, segments = prompt_cells(
-        tiny_arch,
-        report,
-        config.cell_layers,
-        bos=None,
-        batch_size=batch_size,
-        decoy=True,
-    )
+    cells, segments = _run_cells(tiny_arch, report, config, decoy=True)
     for k, (cell_set, reader) in enumerate(readers):
-        acts = select_cells(
-            cells, segments, cell_set, _set_layers(config, cell_set)
-        )
+        acts = _set_cells(cells, segments, config, cell_set)
         np.testing.assert_array_equal(streamed.scores[k], reader.score(acts)[0])
         np.testing.assert_allclose(
             streamed.shares[k], _shares(reader, acts, segments, cell_set)
@@ -1462,6 +1490,16 @@ def test_cell_weights_of_a_joint_attention_reader_are_its_softmax() -> None:
     )
 
 
+def test_cell_weights_refuse_a_per_layer_attention_reader() -> None:
+    acts, labels = _random_cells()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        reader = fit_attention(acts, labels=labels, joint=False)
+
+    with pytest.raises(ValueError, match="joint attention reader"):
+        m3_matrix.cell_weights(reader, acts)
+
+
 def test_the_diagnostics_share_each_reader_among_the_segments(
     finished: RunDir,
 ) -> None:
@@ -1548,12 +1586,10 @@ def test_the_cell_count_correlation_is_taken_within_each_label(
     }
     defined = 0
     for m, condition in enumerate(splits.conditions):
-        cells, _ = prompt_cells(
+        cells, _ = _run_cells(
             tiny_gpt2,
             splits.report_items[condition],
-            config.cell_layers,
-            bos=None,
-            batch_size=config.batch_size,
+            config,
             decoy=condition in config.decoys,
         )
         counts = np.bincount(cells.row_stimulus) * len(config.cell_layers)
@@ -1604,21 +1640,14 @@ def test_the_kept_heads_reproduce_the_select_scores(
     sidecar = cast(dict[str, Any], run_dir.read_json("cellheads_utility"))
     arrays = run_dir.read_arrays("scores_utility")
     entries = _entries(run_dir, "utility")
-    cells, segments = prompt_cells(
-        tiny_gpt2,
-        splits.select_items,
-        config.cell_layers,
-        bos=None,
-        batch_size=config.batch_size,
-        decoy=False,
+    cells, segments = _run_cells(
+        tiny_gpt2, splits.select_items, config, decoy=False
     )
     listed = []
     for key, entry in sidecar["entries"].items():
         listed.append(entry["entry"])
         cell_set = cast(CellSet, entry["entry"].split("/")[1].split("_")[1])
-        acts = select_cells(
-            cells, segments, cell_set, _set_layers(config, cell_set)
-        )
+        acts = _set_cells(cells, segments, config, cell_set)
         assert entry["layers"] == list(acts.layers)
         e = entries.index(entry["entry"])
         for i in range(config.n_seeds):
@@ -1645,20 +1674,16 @@ def test_the_segment_shares_are_the_kept_readers_mean_weights(
         for r in _table(run_dir, "diagnostics")
     }
     for condition in splits.conditions:
-        cells, segments = prompt_cells(
+        cells, segments = _run_cells(
             tiny_gpt2,
             splits.report_items[condition],
-            config.cell_layers,
-            bos=None,
-            batch_size=config.batch_size,
+            config,
             decoy=condition in config.decoys,
         )
         for key, entry in sidecar["entries"].items():
             scorer, readout, _, series = entry["entry"].split("/")
             cell_set = cast(CellSet, readout.split("_")[1])
-            acts = select_cells(
-                cells, segments, cell_set, _set_layers(config, cell_set)
-            )
+            acts = _set_cells(cells, segments, config, cell_set)
             shares = np.mean(
                 [
                     _shares(
@@ -1700,7 +1725,7 @@ def test_the_summary_counts_fits_seconds_and_convergence_warnings(
     config = _config(tasks=("utility",), cell_sets=("prompt",), decoys=())
     run_dir = RunDir.create(config, out_root=tmp_path)
     with warnings.catch_warnings(record=True) as shown:
-        warnings.simplefilter("always")
+        warnings.simplefilter("default")
         m3_matrix.execute(config, run_dir, tiny_gpt2, _sources())
 
     summary = cast(dict[str, Any], run_dir.read_json("summary"))
@@ -1716,6 +1741,7 @@ def test_the_summary_counts_fits_seconds_and_convergence_warnings(
         assert stats["seconds"] > 0.0
         expected = n if "cellmax" in name else 0
         assert stats["convergence_warnings"] == expected
-    # The counted warnings still reach the caller.
+    # The counted warnings still reach the caller: under the "default"
+    # action, once per grid of fits (both cellmax series, every draw).
     planted = [w for w in shown if str(w.message) == "planted"]
-    assert len(planted) == 2 * n
+    assert len(planted) == 2 * config.n_seeds
