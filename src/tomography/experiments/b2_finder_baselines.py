@@ -24,7 +24,12 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Any
 
+import numpy as np
+from numpy.typing import NDArray
+
+from tomography.activations import Activations
 from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.datasets.stimulus import build_stimulus_set
@@ -32,13 +37,53 @@ from tomography.experiments import r1_sentiment
 from tomography.experiments import r7_truth
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import derive_seed
+from tomography.experiments.sweep import SERIES
+from tomography.experiments.sweep import sweep_from_activations
+from tomography.experiments.tb1_text_baselines import _text_set
+from tomography.experiments.tb1_text_baselines import interval
+from tomography.experiments.tb1_text_baselines import seed_accuracy
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import task_splits
 from tomography.model import BosMode
+from tomography.p9.risk import TEXT_ANALYZERS
+from tomography.reading.ccs import CCSProbe
+from tomography.reading.ccs import fit_ccs
+from tomography.reading.directions import Method
+from tomography.reading.metrics import best_layer
+from tomography.reading.metrics import bootstrap_ci
+from tomography.reading.metrics import group_accuracy
 from tomography.templates import PAPER_TEMPLATES
 from tomography.templates import ChatFormat
 from tomography.templates import ConceptTemplate
 
+FINDERS: tuple[Method, ...] = (
+    "pca_diff",
+    "mean_diff",
+    "whitened_mean_diff",
+    "logistic",
+)
+LAYER_SERIES: tuple[str, ...] = (*FINDERS, "ccs", "random", "shuffled")
+TEXT_CONTROLS: tuple[str, ...] = tuple(f"text_{a}" for a in TEXT_ANALYZERS)
+KIND_OF: Mapping[str, str] = MappingProxyType(
+    {
+        "pca_diff": "reader",
+        **{name: "baseline" for name in (*FINDERS[1:], "ccs")},
+        **{name: "control" for name in ("random", "shuffled", *TEXT_CONTROLS)},
+    }
+)
+COLUMNS: tuple[str, ...] = (
+    "dataset",
+    "method",
+    "kind",
+    "val_layer",
+    "accuracy",
+    "wilson_lo",
+    "wilson_hi",
+    "boot_lo",
+    "boot_hi",
+    "n_test_pairs",
+    "n_seeds",
+)
 NEGATIONS: Mapping[str, str] = MappingProxyType(
     {
         "cities": "neg_cities",
@@ -274,3 +319,254 @@ def completion_texts(
         for uid in stimuli.uids
         for template in _COMPLETIONS
     ]
+
+
+@dataclass(frozen=True, eq=False)
+class Contrast:
+    """The CCS contrast pairs that stand for the stimuli of one part.
+
+    Attributes:
+        h: Activations of the contrast rows, shape (K, n_c, d).
+        pairs: Rows of `h` of shape (m, 2), the first member first.
+        labels: Shape (n_c,), 1 for a true contrast row.
+        row_pair: The pair of each stimulus of the part, shape (n,).
+        row_first: Shape (n,), True where the stimulus is the first member
+            of its pair; the pair probability is the probability that the
+            first member is true.
+    """
+
+    h: NDArray[np.float32]
+    pairs: NDArray[np.int64]
+    labels: NDArray[np.int64]
+    row_pair: NDArray[np.int64]
+    row_first: NDArray[np.bool_]
+
+
+def pair_contrast(stimuli: StimulusSet, act: Activations) -> Contrast:
+    """The contrast pairs of a truth part: its own statement-first groups.
+
+    Args:
+        stimuli: Stimuli whose groups are a statement and its negation.
+        act: Their activations, one row per stimulus.
+
+    Returns:
+        The groups as CCS pairs over the part's own activations.
+    """
+    groups = stimuli.groups
+    row_pair = np.zeros(stimuli.labels.shape[0], dtype=np.int64)
+    row_pair[groups] = np.arange(groups.shape[0])[:, None]
+    row_first = np.zeros(stimuli.labels.shape[0], dtype=bool)
+    row_first[groups[:, 0]] = True
+    return Contrast(act.data, groups, stimuli.labels, row_pair, row_first)
+
+
+def completion_contrast(stimuli: StimulusSet, act: Activations) -> Contrast:
+    """The contrast pairs of a sentiment part: each text's two completions.
+
+    Args:
+        stimuli: The sentiment stimuli.
+        act: Activations of `completion_texts(stimuli, ...)`, one row per
+            text: rows 2j and 2j + 1 complete stimulus j with "positive"
+            and "negative".
+
+    Returns:
+        One pair per stimulus; its first member is true when the stimulus
+        is positive.
+    """
+    n = stimuli.labels.shape[0]
+    return Contrast(
+        act.data,
+        np.arange(2 * n, dtype=np.int64).reshape(n, 2),
+        np.stack([stimuli.labels, 1 - stimuli.labels], axis=1).reshape(-1),
+        np.arange(n, dtype=np.int64),
+        np.ones(n, dtype=bool),
+    )
+
+
+@dataclass(frozen=True, eq=False)
+class Part:
+    """One training, validation or test set with its activations.
+
+    Attributes:
+        stimuli: The stimuli the finders read.
+        act: Their activations, one row per stimulus.
+        contrast: The contrast pairs CCS reads in their place.
+    """
+
+    stimuli: StimulusSet
+    act: Activations
+    contrast: Contrast
+
+
+@dataclass(frozen=True, eq=False)
+class Dataset:
+    """Every part of one dataset, ready to score.
+
+    Attributes:
+        name: A name from `DATASETS`.
+        train: One training part per seed.
+        val: The part that chooses the layer.
+        test: The part every reported number is computed on.
+        text_of: The raw text of every example, by uid.
+    """
+
+    name: str
+    train: tuple[Part, ...]
+    val: Part
+    test: Part
+    text_of: Mapping[str, str]
+
+
+@dataclass(frozen=True, eq=False)
+class Scores:
+    """The accuracy of every series on one dataset.
+
+    Attributes:
+        layers: The layer of each column.
+        val: Validation group accuracy of each name in `LAYER_SERIES`,
+            shape (N, K): seed and layer.
+        test: Test group accuracy, the same shapes.
+        text: Test group accuracy of each name in `TEXT_CONTROLS`, shape
+            (N,).
+        ccs_losses: The CCS loss on the training pairs, shape (N, K).
+    """
+
+    layers: tuple[int, ...]
+    val: Mapping[str, NDArray[np.float64]]
+    test: Mapping[str, NDArray[np.float64]]
+    text: Mapping[str, NDArray[np.float64]]
+    ccs_losses: NDArray[np.float64]
+
+
+def score_dataset(config: Config, data: Dataset) -> Scores:
+    """Fits every series on each training part and scores both held-out parts.
+
+    The finders and the random and shuffled controls are the series of the
+    shared reading sweep (`sweep_from_activations`), the controls those of
+    LAT; CCS is fitted on the contrast pairs of each training part and
+    scored from its pair probabilities, never from its reader; the
+    text-only controls are TB1's classifiers on the raw texts.
+
+    Args:
+        config: The experiment settings.
+        data: The dataset.
+
+    Returns:
+        The accuracy of every series.
+    """
+    train = [(part.stimuli, part.act) for part in data.train]
+    evals = {
+        "val": (data.val.stimuli, data.val.act),
+        "test": (data.test.stimuli, data.test.act),
+    }
+    val: dict[str, NDArray[np.float64]] = {}
+    test: dict[str, NDArray[np.float64]] = {}
+    for finder in FINDERS:
+        sweep = sweep_from_activations(
+            train, evals, method=finder, seed=config.seed
+        )
+        names: dict[str, str] = {finder: "reader"}
+        if finder == "pca_diff":
+            names |= {"random": "random", "shuffled": "shuffled"}
+        for name, series in names.items():
+            val[name] = sweep.per_seed("val")[SERIES.index(series)]
+            test[name] = sweep.per_seed("test")[SERIES.index(series)]
+    layers = data.val.act.layers
+    probes = [
+        fit_ccs(
+            part.contrast.h,
+            layers,
+            pairs=part.contrast.pairs,
+            labels=part.contrast.labels,
+            restarts=config.ccs_restarts,
+            epochs=config.ccs_epochs,
+            lr=config.ccs_lr,
+            seed=derive_seed(config.seed, "ccs", data.name, i),
+        )
+        for i, part in enumerate(data.train)
+    ]
+    val["ccs"] = np.stack([_ccs_accuracy(p, data.val) for p in probes])
+    test["ccs"] = np.stack([_ccs_accuracy(p, data.test) for p in probes])
+    texts = _text_set(data.test.stimuli, data.text_of)
+    text = {
+        f"text_{analyzer}": np.array(
+            [
+                seed_accuracy(
+                    [data.text_of[uid] for uid in part.stimuli.uids],
+                    part.stimuli.labels,
+                    texts,
+                    analyzer=analyzer,
+                )
+                for part in data.train
+            ]
+        )
+        for analyzer in TEXT_ANALYZERS
+    }
+    return Scores(
+        layers,
+        {name: val[name] for name in LAYER_SERIES},
+        {name: test[name] for name in LAYER_SERIES},
+        text,
+        np.stack([probe.losses for probe in probes]),
+    )
+
+
+def _ccs_accuracy(probe: CCSProbe, part: Part) -> NDArray[np.float64]:
+    """Group accuracy of CCS from its pair probabilities, per layer.
+
+    A stimulus scores the probability that it is true: the pair probability
+    for a first member and its complement for a second. The probe's reader
+    is not used: it drops the per-set centring, so on a statement set and
+    a negation set with different means its comparisons are shifted.
+    """
+    contrast = part.contrast
+    probability = probe.pair_probabilities(contrast.h, contrast.pairs)
+    first = probability[:, contrast.row_pair]
+    scores = np.where(contrast.row_first, first, 1.0 - first)
+    return group_accuracy(scores, part.stimuli.groups, part.stimuli.labels)
+
+
+def table_rows(
+    name: str, scores: Scores, n_test_pairs: int, config: Config
+) -> list[list[Any]]:
+    """Reports every series at the layer its own validation curve chooses.
+
+    The layer is the best of the mean validation accuracy over seeds, the
+    first one on ties; the text-only controls read no layer. The accuracy is
+    the mean test accuracy of the seeds at that layer, with a Wilson
+    interval over the test pairs and a bootstrap interval over the seeds.
+
+    Args:
+        name: The dataset.
+        scores: Its accuracies.
+        n_test_pairs: The number of test pairs (groups).
+        config: The experiment settings, for the bootstrap.
+
+    Returns:
+        One row per series in `COLUMNS` order, the layer series first.
+    """
+    rows = []
+    for series in (*LAYER_SERIES, *TEXT_CONTROLS):
+        layer: int | None = None
+        if series in scores.text:
+            per_seed = scores.text[series]
+        else:
+            layer = best_layer(scores.val[series].mean(axis=0), scores.layers)
+            per_seed = scores.test[series][:, scores.layers.index(layer)]
+        accuracy = float(per_seed.mean())
+        lo, hi = bootstrap_ci(per_seed, n_boot=config.n_boot, seed=config.seed)
+        rows.append(
+            [
+                name,
+                series,
+                KIND_OF[series],
+                layer,
+                accuracy,
+                *interval(accuracy, n_test_pairs),
+                float(lo),
+                float(hi),
+                n_test_pairs,
+                int(per_seed.shape[0]),
+            ]
+        )
+    return rows

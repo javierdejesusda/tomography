@@ -4,16 +4,27 @@ import dataclasses
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 import pytest
 
+from tomography.activations import Activations
 from tomography.datasets.records import Example
+from tomography.datasets.stimulus import StimulusSet
+from tomography.experiments import b2_finder_baselines as b2
 from tomography.experiments import r1_sentiment
 from tomography.experiments.b2_finder_baselines import Config
 from tomography.experiments.b2_finder_baselines import completion_texts
 from tomography.experiments.b2_finder_baselines import dataset_items
 from tomography.experiments.base import derive_seed
+from tomography.experiments.sweep import sweep_from_activations
+from tomography.experiments.tb1_text_baselines import TextSet
+from tomography.experiments.tb1_text_baselines import interval
+from tomography.experiments.tb1_text_baselines import seed_accuracy
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import task_splits
+from tomography.reading.ccs import CCSProbe
+from tomography.reading.metrics import bootstrap_ci
+from tomography.reading.metrics import group_accuracy
 from tomography.templates import ChatFormat
 
 TINY_CCS: dict[str, Any] = {"ccs_restarts": 1, "ccs_epochs": 20}
@@ -215,3 +226,224 @@ def test_sentiment_contrast_pairs_render_each_text_with_both_completions() -> (
         assert texts[2 * j + 1] == texts[2 * j].removesuffix("positive") + (
             "negative"
         )
+
+
+def _part(
+    h: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    texts: tuple[str, ...],
+    uids: tuple[str, ...],
+) -> b2.Part:
+    """A truth part whose groups are the rows (2i, 2i + 1), statement first."""
+    n = labels.shape[0]
+    groups = np.arange(n, dtype=np.int64).reshape(-1, 2)
+    stimuli = StimulusSet(
+        texts=texts,
+        response_spans=(None,) * n,
+        concept_spans=(None,) * n,
+        labels=labels,
+        pairs=groups,
+        groups=groups,
+        uids=uids,
+    )
+    zeros = np.zeros(n, dtype=np.int64)
+    act = Activations(
+        data=h.astype(np.float32),
+        layers=LAYERS,
+        position="last",
+        row_stimulus=np.arange(n, dtype=np.int64),
+        row_rank=zeros,
+        row_token=zeros,
+        row_token_id=zeros,
+        n_stimuli=n,
+    )
+    return b2.Part(stimuli, act, b2.pair_contrast(stimuli, act))
+
+
+def _offset_part(
+    n_pairs: int, seed: int, *, d: int = 8, offset: float = 3.0
+) -> b2.Part:
+    """Statement and negation sets offset along the truth direction.
+
+    Row 2i is a statement and row 2i + 1 its negation; the statement is true
+    for even i. Truth adds 1 along feature 0, and the statements sit `offset`
+    above and the negations `offset` below on that feature, so the raw rows
+    of a pair always rank the statement first, while each set centred on its
+    own mean gives the truth.
+    """
+    rng = np.random.default_rng(seed)
+    truth = np.where(np.arange(n_pairs) % 2 == 0, 1.0, -1.0)
+    base = rng.standard_normal((len(LAYERS), n_pairs, d))
+    shift = np.zeros_like(base)
+    shift[..., 0] = truth + offset
+    h = np.empty((len(LAYERS), 2 * n_pairs, d))
+    h[:, 0::2] = base + shift + 0.1 * rng.standard_normal(base.shape)
+    h[:, 1::2] = base - shift + 0.1 * rng.standard_normal(base.shape)
+    labels = np.empty(2 * n_pairs, dtype=np.int64)
+    labels[0::2] = truth > 0
+    labels[1::2] = truth < 0
+    rows = range(2 * n_pairs)
+    uids = tuple(f"got-{'neg_' * (r % 2)}cities-{seed}-{r // 2}" for r in rows)
+    texts = tuple(
+        f"claim {r // 2} {'does not hold' if r % 2 else 'holds'}" for r in rows
+    )
+    return _part(h, labels, texts, uids)
+
+
+def _offset_dataset(n_seeds: int = 1) -> b2.Dataset:
+    train = tuple(_offset_part(40, seed=10 + i) for i in range(n_seeds))
+    val, test = _offset_part(40, seed=2), _offset_part(40, seed=3)
+    text_of = {
+        uid: text
+        for part in (*train, val, test)
+        for uid, text in zip(part.stimuli.uids, part.stimuli.texts, strict=True)
+    }
+    return b2.Dataset("cities", train, val, test, text_of)
+
+
+def test_ccs_accuracy_comes_from_pair_probabilities_on_offset_sets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probes: list[CCSProbe] = []
+    fit_ccs = b2.fit_ccs
+
+    def spy(*args: Any, **kwargs: Any) -> CCSProbe:
+        probes.append(fit_ccs(*args, **kwargs))
+        return probes[-1]
+
+    monkeypatch.setattr(b2, "fit_ccs", spy)
+    data = _offset_dataset()
+    config = _config(
+        datasets=("cities",), n_seeds=1, ccs_restarts=2, ccs_epochs=500
+    )
+
+    scores = b2.score_dataset(config, data)
+
+    (probe,) = probes
+    test = data.test
+    probability = probe.pair_probabilities(test.act.data, test.contrast.pairs)
+    first_true = test.stimuli.labels[test.contrast.pairs[:, 0]] == 1
+    by_pairs = ((probability > 0.5) == first_true).mean(axis=1)
+    np.testing.assert_allclose(scores.test["ccs"][0], by_pairs)
+    assert by_pairs.min() >= 0.95
+    by_reader = group_accuracy(
+        probe.reader.score(test.act.data),
+        test.stimuli.groups,
+        test.stimuli.labels,
+    )
+    assert by_reader.max() <= 0.6
+
+
+def test_the_finders_and_two_controls_come_from_the_shared_sweep() -> None:
+    data = _offset_dataset(n_seeds=2)
+    config = _config(datasets=("cities",), seed=3)
+
+    scores = b2.score_dataset(config, data)
+
+    def prepared(part: b2.Part) -> tuple[StimulusSet, Activations]:
+        return part.stimuli, part.act
+
+    evals = {"val": prepared(data.val), "test": prepared(data.test)}
+    for finder in b2.FINDERS:
+        sweep = sweep_from_activations(
+            [prepared(part) for part in data.train],
+            evals,
+            method=finder,
+            seed=config.seed,
+        )
+        for split, accuracy in (("val", scores.val), ("test", scores.test)):
+            series = sweep.per_seed(split)
+            np.testing.assert_array_equal(accuracy[finder], series[0])
+            if finder == "pca_diff":
+                np.testing.assert_array_equal(accuracy["random"], series[1])
+                np.testing.assert_array_equal(accuracy["shuffled"], series[2])
+    assert scores.layers == LAYERS
+    assert set(scores.val) == set(scores.test) == set(b2.LAYER_SERIES)
+
+
+def test_the_text_controls_are_the_tb1_classifiers_on_the_test_pairs() -> None:
+    data = _offset_dataset(n_seeds=2)
+
+    scores = b2.score_dataset(_config(datasets=("cities",)), data)
+
+    test = TextSet(
+        texts=tuple(data.text_of[uid] for uid in data.test.stimuli.uids),
+        uids=data.test.stimuli.uids,
+        labels=data.test.stimuli.labels,
+        groups=data.test.stimuli.groups,
+    )
+    assert b2.TEXT_CONTROLS == ("text_word", "text_char")
+    assert set(scores.text) == set(b2.TEXT_CONTROLS)
+    for analyzer in ("word", "char"):
+        expected = [
+            seed_accuracy(
+                [data.text_of[uid] for uid in part.stimuli.uids],
+                part.stimuli.labels,
+                test,
+                analyzer=analyzer,
+            )
+            for part in data.train
+        ]
+        np.testing.assert_allclose(scores.text[f"text_{analyzer}"], expected)
+
+
+def _planted_scores() -> b2.Scores:
+    """Random accuracies with a validation peak at layer 2 for LAT."""
+    rng = np.random.default_rng(0)
+    val = {s: 0.5 * rng.random((3, 3)) for s in b2.LAYER_SERIES}
+    val["pca_diff"][:, 1] = 0.9
+    test = {s: rng.random((3, 3)) for s in b2.LAYER_SERIES}
+    text = {c: rng.random(3) for c in b2.TEXT_CONTROLS}
+    return b2.Scores((1, 2, 3), val, test, text, rng.random((3, 3)))
+
+
+def test_rows_give_the_validation_layer_wilson_and_bootstrap() -> None:
+    scores = _planted_scores()
+    config = _config(n_boot=200, seed=4)
+
+    rows = b2.table_rows("cities", scores, 40, config)
+
+    assert [row[1] for row in rows] == [*b2.LAYER_SERIES, *b2.TEXT_CONTROLS]
+    table = {row[1]: dict(zip(b2.COLUMNS, row, strict=True)) for row in rows}
+    assert table["pca_diff"]["val_layer"] == 2
+    for name, row in table.items():
+        if name in b2.TEXT_CONTROLS:
+            assert row["val_layer"] is None
+            per_seed = scores.text[name]
+        else:
+            at = int(np.argmax(scores.val[name].mean(axis=0)))
+            assert row["val_layer"] == scores.layers[at]
+            per_seed = scores.test[name][:, at]
+        accuracy = float(per_seed.mean())
+        assert row["accuracy"] == pytest.approx(accuracy)
+        assert [row["wilson_lo"], row["wilson_hi"]] == pytest.approx(
+            interval(accuracy, 40)
+        )
+        lo, hi = bootstrap_ci(per_seed, n_boot=200, seed=4)
+        assert [row["boot_lo"], row["boot_hi"]] == pytest.approx([lo, hi])
+        assert (row["dataset"], row["n_test_pairs"], row["n_seeds"]) == (
+            "cities",
+            40,
+            3,
+        )
+
+
+def test_lat_is_the_reader_published_finders_baselines_the_rest_controls() -> (
+    None
+):
+    expected = {
+        "pca_diff": "reader",
+        "mean_diff": "baseline",
+        "whitened_mean_diff": "baseline",
+        "logistic": "baseline",
+        "ccs": "baseline",
+        "random": "control",
+        "shuffled": "control",
+        "text_word": "control",
+        "text_char": "control",
+    }
+    assert dict(b2.KIND_OF) == expected
+
+    rows = b2.table_rows("cities", _planted_scores(), 40, _config())
+
+    assert {row[1]: row[2] for row in rows} == expected
