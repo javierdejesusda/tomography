@@ -12,13 +12,17 @@ from tomography.activations import Span
 from tomography.activations import collect_activations
 from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
+from tomography.experiments import m2_readers
 from tomography.experiments import m3_matrix
 from tomography.experiments import p2_positions
+from tomography.experiments.m2_readers import read_positions
 from tomography.experiments.m3_matrix import CELL_SETS
 from tomography.experiments.m3_matrix import SEGMENTS
 from tomography.experiments.m3_matrix import CellSet
 from tomography.experiments.m3_matrix import prompt_cells
+from tomography.experiments.m3_matrix import prompt_max_set
 from tomography.experiments.m3_matrix import select_cells
+from tomography.experiments.m3_matrix import stimulus_token_set
 from tomography.experiments.p2_positions import misleading_template
 from tomography.experiments.p2_positions import with_decoys
 from tomography.experiments.sweep import chat_format_for
@@ -269,6 +273,46 @@ def test_the_last_final_cell_is_the_last_row(
     )
     np.testing.assert_array_equal(cells.row_token[ends], last.row_token)
     np.testing.assert_array_equal(cells.data[:, ends], last.data)
+
+
+def _m2_config() -> m2_readers.Config:
+    return m2_readers.Config(model="tiny", layers=LAYERS, batch_size=4)
+
+
+@pytest.mark.parametrize("task", ["sentiment", "utility"])
+def test_stimulus_token_reads_the_last_stimulus_cell(
+    tiny_arch: LoadedModel, task: str
+) -> None:
+    stimuli = _stimuli(tiny_arch, task, decoy=True)
+    cells, segments = prompt_cells(
+        tiny_arch, stimuli, LAYERS, bos=None, batch_size=4, decoy=True
+    )
+    stimulus = select_cells(cells, segments, "stimulus", LAYERS)
+
+    read = read_positions(
+        tiny_arch, stimulus_token_set(stimuli), ("concept",), _m2_config()
+    )["concept"]
+
+    ends = np.cumsum(np.bincount(stimulus.row_stimulus)) - 1
+    np.testing.assert_array_equal(read.row_token, stimulus.row_token[ends])
+    np.testing.assert_array_equal(read.data, stimulus.data[:, ends])
+
+
+def test_prompt_max_pools_every_cell_of_a_text(tiny_arch: LoadedModel) -> None:
+    stimuli = _stimuli(tiny_arch, "sentiment", decoy=True)
+    cells, _ = prompt_cells(
+        tiny_arch, stimuli, LAYERS, bos=None, batch_size=4, decoy=True
+    )
+
+    read = read_positions(
+        tiny_arch, prompt_max_set(stimuli), ("max",), _m2_config()
+    )["max"]
+
+    counts = np.bincount(cells.row_stimulus)
+    np.testing.assert_array_equal(
+        read.data,
+        np.maximum.reduceat(cells.data, np.cumsum(counts) - counts, axis=1),
+    )
 
 
 @pytest.mark.parametrize("cell_set", CELL_SETS)

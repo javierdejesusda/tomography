@@ -9,11 +9,14 @@ misleading line, in the misleading conditions only), `stimulus` (the
 `{stimulus}` slot) and `final` (from the stimulus end to the text end, where
 `last` and `concept` read). `select_cells` keeps the cells of a cell set:
 `prompt` and `upper` hold every segment (`upper` at the upper layers),
-`stimulus` and `final` one each.
+`stimulus` and `final` one each. `stimulus_token_set` and `prompt_max_set`
+give the spans through which M2's `concept` and `max` positions read the
+last stimulus token and the feature-wise maximum over the prompt.
 """
 
 from collections.abc import Mapping
 from collections.abc import Sequence
+import dataclasses
 from types import MappingProxyType
 from typing import Literal
 from typing import get_args
@@ -105,6 +108,38 @@ def prompt_cells(
         starts[cells.row_stimulus] + cells.row_token
     ]
     return cells, segments
+
+
+def stimulus_token_set(stimuli: StimulusSet) -> StimulusSet:
+    """Marks the stimulus as the concept, for the `stimulus_token` readout.
+
+    M2's `concept` position then reads the last stimulus token, the
+    stimulus analogue of `last`.
+
+    Args:
+        stimuli: The stimuli.
+
+    Returns:
+        The stimuli with their stimulus spans as concept spans.
+    """
+    return dataclasses.replace(stimuli, concept_spans=stimuli.response_spans)
+
+
+def prompt_max_set(stimuli: StimulusSet) -> StimulusSet:
+    """Marks the whole text as the stimulus, for the `prompt_max` readout.
+
+    M2's `max` position then takes the feature-wise maximum over every
+    token but BOS, so over the rows of `prompt_cells`.
+
+    Args:
+        stimuli: The stimuli.
+
+    Returns:
+        The stimuli with whole-text stimulus spans.
+    """
+    return dataclasses.replace(
+        stimuli, response_spans=_whole_texts(stimuli.texts)
+    )
 
 
 def _whole_texts(texts: Sequence[str]) -> tuple[Span, ...]:
