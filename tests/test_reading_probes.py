@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from collections.abc import Sequence
 from dataclasses import replace
 from functools import partial
@@ -17,8 +18,10 @@ from tomography.reading.directions import FloatArray
 from tomography.reading.directions import fit_direction
 from tomography.reading.metrics import auroc
 from tomography.reading.probes import AttentionReader
+from tomography.reading.probes import CellMaxReader
 from tomography.reading.probes import Reader
 from tomography.reading.probes import fit_attention
+from tomography.reading.probes import fit_cell_max
 from tomography.reading.probes import fit_lda
 from tomography.reading.probes import fit_mlp
 from tomography.reading.probes import fit_ttpd
@@ -263,7 +266,9 @@ def test_joint_mlp_reader_scores_the_concatenated_layers() -> None:
 
 
 def token_rows(
-    data: NDArray[np.float64], counts: Sequence[int], layers: Sequence[int]
+    data: FloatArray,
+    counts: Sequence[int] | NDArray[np.int64],
+    layers: Sequence[int],
 ) -> Activations:
     """Wraps rows as `response` activations, `counts[i]` for stimulus i."""
     rank = np.concatenate([np.arange(count) for count in counts])
@@ -310,14 +315,20 @@ def reference_weights(
     return weights
 
 
+def cell_values(
+    acts: Activations, reader: AttentionReader | CellMaxReader
+) -> NDArray[np.float64]:
+    """The value of every cell, of shape (K, n_rows)."""
+    rows = acts.data.astype(np.float64)
+    values: NDArray[np.float64] = np.einsum("krd,kd->kr", rows, reader.values)
+    return values + reader.biases[:, None]
+
+
 def reference_scores(
     acts: Activations, reader: AttentionReader
 ) -> NDArray[np.float64]:
     """The softmax-weighted values of each stimulus, one at a time."""
-    rows = acts.data.astype(np.float64)
-    values = np.einsum("krd,kd->kr", rows, reader.values)
-    values += reader.biases[:, None]
-    weighted = reference_weights(acts, reader) * values
+    weighted = reference_weights(acts, reader) * cell_values(acts, reader)
     if reader.joint:
         weighted = weighted.sum(axis=0, keepdims=True)
     return np.stack(
@@ -400,6 +411,22 @@ def test_attention_reader_softmaxes_over_the_cells_of_each_stimulus() -> None:
         reader.score(replace(acts, data=acts.data[:, :, :5]))
 
 
+def scaled_logistic(
+    rows: NDArray[np.float64], labels: NDArray[np.int64], c: float
+) -> tuple[NDArray[np.float64], float]:
+    """scikit-learn's logistic fit on rows scaled as the cell fits scale them.
+
+    The rows are centered and divided by their root mean square norm.
+    Returns the weights and the bias in the units of `rows`.
+    """
+    center = rows.mean(axis=0)
+    scale = np.linalg.norm(rows - center) / np.sqrt(len(rows))
+    model = LogisticRegression(C=c, tol=1e-10, max_iter=10000)
+    model.fit((rows - center) / scale, labels)
+    weights = model.coef_[0] / scale
+    return weights, float(model.intercept_[0] - weights @ center)
+
+
 def test_attention_reader_on_one_token_per_stimulus_is_the_logistic_fit() -> (
     None
 ):
@@ -413,12 +440,7 @@ def test_attention_reader_on_one_token_per_stimulus_is_the_logistic_fit() -> (
     np.testing.assert_allclose(reader.queries, 0.0, atol=1e-12)
     for k in range(2):
         rows = h[k].astype(np.float64)
-        center = rows.mean(axis=0)
-        scale = np.linalg.norm(rows - center) / np.sqrt(len(rows))
-        model = LogisticRegression(C=0.5, tol=1e-10, max_iter=10000)
-        model.fit((rows - center) / scale, labels)
-        weights = model.coef_[0] / scale
-        bias = model.intercept_[0] - weights @ center
+        weights, bias = scaled_logistic(rows, labels, c=0.5)
         np.testing.assert_allclose(reader.values[k], weights, rtol=1e-5)
         np.testing.assert_allclose(reader.biases[k], bias, rtol=1e-5)
         np.testing.assert_allclose(
@@ -485,21 +507,29 @@ def test_joint_attention_reader_pools_the_cells_of_all_layers() -> None:
     assert auroc(scores[0], test_labels) > 0.95
 
 
+def moved(
+    rows: Activations, scale: NDArray[np.float64], shift: NDArray[np.float64]
+) -> Activations:
+    """The rows with each layer scaled by `scale[k]` and shifted by `shift[k]`.
+
+    Both have shape (K, 1, 1) or (K, 1, d).
+    """
+    data = rows.data.astype(np.float64) * scale + shift
+    return replace(rows, data=data.astype(np.float32))
+
+
 def test_attention_fit_ignores_the_location_and_scale_of_each_layer() -> None:
     acts, labels, _ = planted_tokens(n=200, seed=16, n_layers=2)
     test, _, _ = planted_tokens(n=200, seed=17, n_layers=2)
     shift = 10.0 * np.random.default_rng(22).standard_normal((2, 1, 4))
     scale = np.array([0.5, 20.0])[:, None, None]
-
-    def moved(rows: Activations) -> Activations:
-        data = rows.data.astype(np.float64) * scale + shift
-        return replace(rows, data=data.astype(np.float32))
+    move = partial(moved, scale=scale, shift=shift)
 
     reader = fit_attention(acts, labels=labels, joint=True, tol=1e-8)
-    other = fit_attention(moved(acts), labels=labels, joint=True, tol=1e-8)
+    other = fit_attention(move(acts), labels=labels, joint=True, tol=1e-8)
 
     np.testing.assert_allclose(
-        other.score(moved(test)), reader.score(test), rtol=1e-3, atol=1e-3
+        other.score(move(test)), reader.score(test), rtol=1e-3, atol=1e-3
     )
 
 
@@ -517,8 +547,6 @@ def test_attention_reader_exports_its_oriented_value_heads() -> None:
         pairs=acts.row_groups(pairs),
     )
     norms = np.linalg.norm(reader.values, axis=1)
-    rows = acts.data.astype(np.float64)
-    heads = np.einsum("krd,kd->kr", rows, reader.values)
     assert isinstance(exported, RepReader)
     assert exported.method == "attention"
     assert exported.layers == (0, 1)
@@ -529,7 +557,7 @@ def test_attention_reader_exports_its_oriented_value_heads() -> None:
     )
     np.testing.assert_allclose(
         exported.raw_score(acts.data) * norms[:, None],
-        heads + reader.biases[:, None],
+        cell_values(acts, reader),
         rtol=1e-4,
         atol=1e-4,
     )
@@ -546,27 +574,45 @@ def filled_rows(value: float) -> Activations:
     return replace(rows_of([2] * 6, seed=20), data=np.full((2, 12, 4), value))
 
 
+def constant_layer() -> Activations:
+    """Two rows per stimulus for six stimuli; every entry of layer 1 is 1."""
+    acts = rows_of([2] * 6, seed=49)
+    data = acts.data.copy()
+    data[1] = 1.0
+    return replace(acts, data=data)
+
+
+CELL_FITS = pytest.mark.parametrize(
+    "fit", [fit_attention, fit_cell_max], ids=["attention", "cellmax"]
+)
+
+
+@CELL_FITS
 @pytest.mark.parametrize(
     ("change", "message"),
     [
         ({"labels": np.zeros(6, dtype=np.int64)}, "both classes"),
         ({"labels": np.zeros(5, dtype=np.int64)}, "labels"),
         ({"c": 0.0}, "c must be positive"),
+        ({"c": -1.0}, "c must be positive"),
         ({"acts": rows_of([2, 0, 3, 1, 2, 2], seed=19)}, "stimulus 1"),
         ({"acts": filled_rows(1.0)}, "variance"),
+        ({"acts": constant_layer()}, "layer 1 have no variance"),
         ({"acts": filled_rows(np.nan)}, "finite"),
     ],
     ids=[
         "one-class",
         "label-count",
         "no-penalty",
+        "negative-c",
         "no-rows",
         "constant",
+        "constant-layer",
         "not-finite",
     ],
 )
-def test_fit_attention_rejects_inconsistent_inputs(
-    change: dict[str, object], message: str
+def test_cell_fits_reject_inconsistent_inputs(
+    fit: Callable[..., object], change: dict[str, object], message: str
 ) -> None:
     arguments: dict[str, object] = {
         "acts": rows_of([2, 1, 3, 1, 2, 2], seed=21),
@@ -575,14 +621,302 @@ def test_fit_attention_rejects_inconsistent_inputs(
     }
 
     with pytest.raises(ValueError, match=message):
-        fit_attention(**arguments)  # type: ignore[arg-type]
+        fit(**arguments)
 
 
-def test_fit_attention_warns_when_it_stops_before_converging() -> None:
+@CELL_FITS
+def test_cell_fits_warn_at_their_caller_when_they_stop_early(
+    fit: Callable[..., object],
+) -> None:
     acts, labels, _ = planted_tokens(n=60, seed=23)
 
-    with pytest.warns(ConvergenceWarning, match="did not converge"):
-        fit_attention(acts, labels=labels, max_iter=1)
+    with pytest.warns(ConvergenceWarning, match="did not converge") as caught:
+        fit(acts, labels=labels, max_iter=1)
+
+    assert [record.filename for record in caught] == [__file__]
+
+
+def reference_max(
+    acts: Activations, reader: CellMaxReader
+) -> NDArray[np.float64]:
+    """The highest cell value of each stimulus, one stimulus at a time."""
+    values = cell_values(acts, reader)
+    return np.array(
+        [values[:, acts.row_stimulus == i].max() for i in range(acts.n_stimuli)]
+    )
+
+
+def mean_pooled_logistic(
+    acts: Activations, labels: NDArray[np.int64], test: Activations
+) -> NDArray[np.float64]:
+    """Test scores of a logistic fit on the mean rows of each stimulus.
+
+    The means of all layers sit side by side.
+    """
+    rows = np.concatenate(list(mean_pooled(acts)), axis=1)
+    model = LogisticRegression().fit(rows, labels)
+    test_rows = np.concatenate(list(mean_pooled(test)), axis=1)
+    scores: NDArray[np.float64] = model.decision_function(test_rows)
+    return scores
+
+
+def planted_cells(
+    n: int, seed: int, tokens: tuple[int, int] = (30, 60)
+) -> tuple[Activations, NDArray[np.int64], NDArray[np.int64]]:
+    """Three layers of stimuli in which one cell carries label 1.
+
+    Each stimulus has a token count drawn from `range(*tokens)`. Each label
+    1 stimulus has +3 on feature 0 at one random token of layer 1, over
+    noise of deviation 0.6 everywhere. The cell stands out, but the mean of
+    the stimulus's tokens dilutes it. Returns the activations, the labels
+    and the planted row of every stimulus (unused for label 0).
+    """
+    rng = np.random.default_rng(seed)
+    labels = (np.arange(n) % 2).astype(np.int64)
+    counts = rng.integers(*tokens, size=n)
+    planted = np.cumsum(counts) - counts + rng.integers(counts)
+    data = 0.6 * rng.standard_normal((3, counts.sum(), 8))
+    data[1, planted[labels == 1], 0] += 3.0
+    return token_rows(data, counts, [0, 1, 2]), labels, planted
+
+
+def hand_max_reader(rng: np.random.Generator) -> CellMaxReader:
+    """A reader on layers 2 and 5 with random value heads."""
+    return CellMaxReader(
+        layers=(2, 5),
+        values=rng.standard_normal((2, 6)),
+        biases=np.array([0.5, -1.0]),
+        signs=np.ones(2, dtype=np.float32),
+    )
+
+
+def test_cell_max_reader_scores_each_stimulus_by_its_highest_cell() -> None:
+    rng = np.random.default_rng(41)
+    data = rng.standard_normal((2, 15, 6))
+    acts = token_rows(data, [3, 1, 4, 2, 5], [2, 5])
+    reader = hand_max_reader(rng)
+
+    scores = reader.score(acts)
+
+    scorer: Reader[Activations] = reader
+    assert isinstance(reader, Reader)
+    assert scorer.method == "cellmax"
+    assert scorer.layers == (2, 5)
+    assert scores.dtype == np.float32
+    assert scores.shape == (1, 5)
+    np.testing.assert_allclose(
+        scores[0], reference_max(acts, reader), rtol=1e-6, atol=1e-6
+    )
+    with pytest.raises(ValueError, match="layers"):
+        reader.score(replace(acts, layers=(2, 6)))
+    with pytest.raises(ValueError, match="width"):
+        reader.score(replace(acts, data=acts.data[:, :, :5]))
+    with pytest.raises(ValueError, match="stimulus 1"):
+        reader.score(token_rows(data, [3, 0, 5, 2, 5], [2, 5]))
+
+
+def test_cell_max_reader_on_one_cell_per_stimulus_is_the_logistic_fit() -> None:
+    h, labels = correlated_classes(n=60, d=8, seed=13)
+    acts = token_rows(h[:1], [1] * 60, [3])
+
+    reader = fit_cell_max(acts, labels=labels, c=0.5, tol=1e-10)
+
+    rows = h[0].astype(np.float64)
+    weights, bias = scaled_logistic(rows, labels, c=0.5)
+    assert reader.method == "cellmax"
+    assert reader.layers == (3,)
+    np.testing.assert_allclose(
+        reader.score(acts)[0], rows @ weights + bias, rtol=1e-4, atol=1e-4
+    )
+
+
+def test_cell_max_reader_finds_a_planted_cell_that_the_mean_hides() -> None:
+    acts, labels, _ = planted_cells(n=200, seed=42)
+    test, test_labels, test_planted = planted_cells(n=200, seed=43)
+
+    reader = fit_cell_max(acts, labels=labels)
+
+    again = fit_cell_max(acts, labels=labels)
+    mean_scores = mean_pooled_logistic(acts, labels, test)
+    scores = reader.score(test)
+    values = cell_values(test, reader)
+    hits = []
+    for i in np.flatnonzero(test_labels == 1):
+        rows = np.flatnonzero(test.row_stimulus == i)
+        layer, rank = np.unravel_index(
+            np.argmax(values[:, rows]), (3, len(rows))
+        )
+        hits.append(layer == 1 and rows[rank] == test_planted[i])
+    for name in ("values", "biases", "signs"):
+        np.testing.assert_array_equal(
+            getattr(reader, name), getattr(again, name)
+        )
+    assert scores.shape == (1, 200)
+    assert auroc(mean_scores, test_labels) < 0.75
+    assert auroc(scores[0], test_labels) >= 0.95
+    assert np.argmax(np.linalg.norm(reader.values, axis=1)) == 1
+    assert np.mean(hits) >= 0.9
+
+
+def test_joint_attention_reader_reads_the_planted_cell_too() -> None:
+    acts, labels, _ = planted_cells(n=200, seed=42)
+    test, test_labels, _ = planted_cells(n=200, seed=43)
+
+    reader = fit_attention(acts, labels=labels, joint=True)
+
+    assert auroc(reader.score(test)[0], test_labels) >= 0.95
+
+
+def cancelling_cells(
+    n: int, seed: int
+) -> tuple[Activations, NDArray[np.int64]]:
+    """5 to 9 tokens per stimulus; label 1 adds +4 and -4 on two of them.
+
+    Both cells are on layer 0, feature 0, so the mean of a label 1
+    stimulus's tokens has the distribution of a label 0 one.
+    """
+    rng = np.random.default_rng(seed)
+    labels = (np.arange(n) % 2).astype(np.int64)
+    counts = rng.integers(5, 10, size=n)
+    starts = np.cumsum(counts) - counts
+    first = rng.integers(counts)
+    second = (first + 1 + rng.integers(counts - 1)) % counts
+    data = rng.standard_normal((2, counts.sum(), 4))
+    data[0, (starts + first)[labels == 1], 0] += 4.0
+    data[0, (starts + second)[labels == 1], 0] -= 4.0
+    return token_rows(data, counts, [0, 1]), labels
+
+
+def test_cell_max_reader_reads_cells_that_cancel_in_the_mean() -> None:
+    acts, labels = cancelling_cells(n=200, seed=44)
+    test, test_labels = cancelling_cells(n=200, seed=45)
+
+    reader = fit_cell_max(acts, labels=labels)
+
+    mean_scores = mean_pooled_logistic(acts, labels, test)
+    assert abs(auroc(mean_scores, test_labels) - 0.5) < 0.1
+    assert auroc(reader.score(test)[0], test_labels) >= 0.95
+
+
+def two_layer_cells(n: int, seed: int) -> tuple[Activations, NDArray[np.int64]]:
+    """10 to 19 tokens per stimulus; label 1 adds +3 on one cell of a layer.
+
+    The planted cell of a label 1 stimulus is on feature 0 of layer 0 or of
+    layer 1, at random. Feature 0 is quieter on layer 0 (deviation 0.3 vs
+    1), so the two layers need different thresholds.
+    """
+    rng = np.random.default_rng(seed)
+    labels = (np.arange(n) % 2).astype(np.int64)
+    counts = rng.integers(10, 20, size=n)
+    planted = np.cumsum(counts) - counts + rng.integers(counts)
+    layer = rng.integers(2, size=n)
+    data = rng.standard_normal((2, counts.sum(), 4))
+    data[0, :, 0] *= 0.3
+    positive = labels == 1
+    data[layer[positive], planted[positive], 0] += 3.0
+    return token_rows(data, counts, [0, 1]), labels
+
+
+def test_cell_max_fit_gives_each_layer_its_own_free_bias() -> None:
+    acts, labels = two_layer_cells(n=200, seed=60)
+
+    reader = fit_cell_max(acts, labels=labels, tol=1e-8)
+
+    # The loss's gradient for the unpenalized bias of a layer is the mean
+    # residual of the stimuli whose highest cell lies on that layer.
+    values = cell_values(acts, reader)
+    winners = np.array(
+        [
+            np.argmax(values[:, acts.row_stimulus == i].max(axis=1))
+            for i in range(acts.n_stimuli)
+        ]
+    )
+    residuals = expit(reference_max(acts, reader)) - labels
+    for layer in (0, 1):
+        assert (winners == layer).sum() > 50
+        assert abs(residuals[winners == layer].sum()) / len(labels) < 2e-3
+
+
+def stimuli_of(
+    acts: Activations,
+    chosen: Sequence[int],
+    rng: np.random.Generator | None = None,
+) -> Activations:
+    """The rows of the chosen stimuli in that order, shuffled given `rng`."""
+    blocks = [np.flatnonzero(acts.row_stimulus == i) for i in chosen]
+    if rng is not None:
+        blocks = [rng.permutation(block) for block in blocks]
+    return token_rows(
+        acts.data[:, np.concatenate(blocks)],
+        [len(block) for block in blocks],
+        acts.layers,
+    )
+
+
+def test_cell_max_scores_ignore_the_other_stimuli_and_the_row_order() -> None:
+    acts, labels, _ = planted_cells(n=60, seed=46)
+    reader = fit_cell_max(acts, labels=labels)
+    counts = np.bincount(acts.row_stimulus)
+    target = int(np.argsort(counts)[30])
+    longer, shorter = int(np.argmax(counts)), int(np.argmin(counts))
+
+    full = reader.score(acts)[0, target]
+    alone = reader.score(stimuli_of(acts, [target]))[0, 0]
+    among = reader.score(stimuli_of(acts, [longer, target, shorter]))[0, 1]
+    permuted = reader.score(
+        stimuli_of(acts, [shorter, target], np.random.default_rng(47))
+    )[0, 1]
+
+    assert counts[shorter] < counts[target] < counts[longer]
+    for score in (alone, among, permuted):
+        np.testing.assert_allclose(score, full, rtol=1e-6, atol=1e-6)
+
+
+def test_cell_max_fit_standardizes_on_the_training_rows_only() -> None:
+    acts, labels, _ = planted_cells(n=200, seed=42)
+    test, _, _ = planted_cells(n=200, seed=43)
+    shift = 10.0 * np.random.default_rng(48).standard_normal((3, 1, 8))
+    scale = np.array([0.5, 20.0, 3.0])[:, None, None]
+    moved_test = moved(test, scale, shift)
+
+    reader = fit_cell_max(acts, labels=labels)
+    other = fit_cell_max(moved(acts, scale, shift), labels=labels)
+
+    scores = other.score(moved_test)
+    np.testing.assert_allclose(scores, reader.score(test), rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(
+        scores[0], reference_max(moved_test, other), rtol=1e-6, atol=1e-6
+    )
+
+
+def test_cell_max_reader_exports_its_oriented_value_heads() -> None:
+    acts, labels, _ = planted_cells(n=60, seed=53, tokens=(40, 41))
+    pairs = np.arange(60).reshape(30, 2)
+
+    reader = fit_cell_max(acts, labels=labels, pairs=pairs)
+    exported = reader.rep_reader()
+
+    expected = orient(
+        exported,
+        acts.data,
+        labels=acts.row_values(labels),
+        pairs=acts.row_groups(pairs),
+    )
+    norms = np.linalg.norm(reader.values, axis=1)
+    means = exported.means.astype(np.float64)
+    assert isinstance(exported, RepReader)
+    assert exported.method == "cellmax"
+    assert exported.layers == (0, 1, 2)
+    np.testing.assert_array_equal(reader.signs, expected.signs)
+    np.testing.assert_array_equal(exported.signs, expected.signs)
+    np.testing.assert_allclose(
+        exported.directions, reader.values / norms[:, None], atol=1e-6
+    )
+    np.testing.assert_allclose(
+        np.einsum("kd,kd->k", means, reader.values) + reader.biases,
+        0.0,
+        atol=1e-4,
+    )
 
 
 def truth_and_polarity(

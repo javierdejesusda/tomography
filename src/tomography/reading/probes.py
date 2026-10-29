@@ -2,8 +2,8 @@
 
 `RepReader` holds one direction per layer. The readers here keep a
 direction only where the scorer is linear: LDA and TTPD are `RepReader`s,
-the attention reader exports its value heads as one, and the MLP reader
-has none. All of them satisfy `Reader`.
+the attention and cell max readers export their value heads as one, and
+the MLP reader has none. All of them satisfy `Reader`.
 """
 
 from collections.abc import Callable
@@ -501,6 +501,140 @@ def fit_attention(
     return replace(reader, signs=signs)
 
 
+@dataclass(frozen=True, eq=False)
+class CellMaxReader:
+    """A linear reader that scores a stimulus by its highest cell.
+
+    A cell is one token row of a stimulus at one layer. A cell x of layer k
+    has the value `values[k] @ x + biases[k]`, and a stimulus scores the
+    largest value among its cells of all layers, which gives one score row.
+    The maximum depends neither on the order nor on the number of the
+    cells, so stimuli of any length score alike. The parameters are in
+    activation units.
+
+    Attributes:
+        layers: Layer indices, in the order of the first axis of the input.
+        values: Value heads of shape (K, d).
+        biases: Value biases of shape (K,), one per layer, which move the
+            layers' cells against each other.
+        signs: Orientation of each value head as a direction, shape (K,),
+            each -1 or +1, see `rep_reader`.
+    """
+
+    layers: tuple[int, ...]
+    values: NDArray[np.float64]
+    biases: NDArray[np.float64]
+    signs: NDArray[np.float32]
+
+    @property
+    def method(self) -> str:
+        """`cellmax`."""
+        return "cellmax"
+
+    def score(self, acts: Activations) -> NDArray[np.float32]:
+        """Scores every stimulus with the highest value among its cells.
+
+        Args:
+            acts: Token rows of the layers in `layers`, such as those of
+                the `response` position.
+
+        Returns:
+            Scores of shape (1, n_stimuli).
+
+        Raises:
+            ValueError: If `acts` holds other layers or another width, or a
+                stimulus has no rows.
+        """
+        stimulus = _scored_stimulus(acts, self.layers, self.values.shape[1])
+        heads = np.empty((len(self.layers), stimulus.shape[0]))
+        for k, layer_rows in enumerate(acts.data):
+            rows = layer_rows.astype(np.float64)
+            heads[k] = rows @ self.values[k] + self.biases[k]
+        pooled = _max_pool(torch.from_numpy(heads), stimulus, acts.n_stimuli)
+        return pooled[None].numpy().astype(np.float32)
+
+    def rep_reader(self) -> RepReader:
+        """Exports the value heads as a reader that can steer.
+
+        As in `AttentionReader.rep_reader`, the direction of layer k is
+        `values[k]` and its mean is the point on that direction where the
+        value is zero; the signs are `signs`, which `fit_cell_max` sets
+        with the rule of `RepReader.fit`.
+
+        Returns:
+            The reader, named `cellmax`.
+
+        Raises:
+            ValueError: If a value head is zero.
+        """
+        return _value_heads(
+            self.method, self.layers, self.values, self.biases, self.signs
+        )
+
+
+def fit_cell_max(
+    acts: Activations,
+    *,
+    labels: NDArray[np.int64],
+    pairs: NDArray[np.int64] | None = None,
+    groups: NDArray[np.int64] | None = None,
+    c: float = 1.0,
+    tol: float = 1e-4,
+    max_iter: int = 1000,
+) -> CellMaxReader:
+    """Fits a linear reader through the maximum over the cells of stimuli.
+
+    The loss is the logistic loss of the stimulus scores, each the highest
+    value among the stimulus's cells of all layers, plus an L2 penalty on
+    the value heads weighted as in `fit_attention`, so `c` means
+    scikit-learn's `C`; the biases are not penalized. The rows are scaled as
+    in `fit_attention`, on the training rows only, so with one cell per
+    stimulus the reader is the logistic finder's regression. The value
+    heads and biases start at zero, where every cell of a stimulus ties and
+    the gradient splits evenly among them, so the first step is the one of
+    mean pooling; L-BFGS then runs with the settings of `fit_attention` and
+    draws no random numbers. The maximum makes the loss piecewise smooth,
+    so a fit can stop on a line search: it keeps the parameters reached and
+    warns. The value heads are oriented over the token rows as in
+    `fit_attention`.
+
+    Args:
+        acts: Token rows of the layers to read, such as those of the
+            `response` position.
+        labels: Binary labels of shape (n_stimuli,), 1 for the positive
+            pole.
+        pairs: Stimulus pairs of shape (m, 2) that orient the value heads.
+        groups: Stimulus groups that orient the value heads, see `orient`.
+        c: The inverse L2 strength, scikit-learn's `C`: smaller values
+            regularize more.
+        tol: Gradient tolerance of L-BFGS, scikit-learn's `tol`.
+        max_iter: Iteration cap of L-BFGS; a fit that stops before
+            converging warns with `ConvergenceWarning`.
+
+    Returns:
+        The reader.
+
+    Raises:
+        ValueError: If the labels do not have one binary entry per stimulus
+            with both classes, `c` is not positive, a stimulus has no rows,
+            `acts` is not finite, a layer's rows are all equal, a value head
+            is zero, or the orientation inputs are malformed (members of a
+            group need equal row counts).
+    """
+    stimulus, targets = _fit_inputs(acts, labels, c)
+    values, biases = _fit_max(
+        acts.data, acts.layers, stimulus, targets, c, tol, max_iter
+    )
+    reader = CellMaxReader(
+        layers=tuple(int(layer) for layer in acts.layers),
+        values=values,
+        biases=biases,
+        signs=np.ones(len(acts.layers), dtype=np.float32),
+    )
+    signs = _head_signs(reader.rep_reader(), acts, labels, pairs, groups)
+    return replace(reader, signs=signs)
+
+
 def _scored_stimulus(
     acts: Activations, layers: tuple[int, ...], width: int
 ) -> torch.Tensor:
@@ -751,6 +885,36 @@ def _fit_block(
     queries, query_shifts = _unscaled(fitted[0].numpy(), centers, scales)
     values, value_shifts = _unscaled(fitted[1].numpy(), centers, scales)
     return queries, -query_shifts, values, float(fitted[2]) - value_shifts
+
+
+def _fit_max(
+    data: NDArray[np.float32],
+    layers: tuple[int, ...],
+    stimulus: torch.Tensor,
+    targets: torch.Tensor,
+    c: float,
+    tol: float,
+    max_iter: int,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    # Fits the value heads and biases of a cell max reader on scaled rows
+    # and returns them in activation units. Kept apart from `fit_cell_max`
+    # so the scaled float64 rows are freed before the heads are oriented,
+    # and so the warning of `_minimize` reaches the caller of either fit.
+    scaled, centers, scales = _scaled_cells(data, layers)
+    n_layers, _, width = scaled.shape
+    size = n_layers * width
+
+    def loss(params: torch.Tensor) -> torch.Tensor:
+        values = params[:size].view(n_layers, width)
+        heads = torch.einsum("krd,kd->kr", scaled, values)
+        heads = heads + params[size:, None]
+        scores = _max_pool(heads, stimulus, targets.shape[0])
+        return _penalized_loss(scores, targets, values.square().sum(), c)
+
+    solution = _minimize(loss, size + n_layers, tol, max_iter, "cell max")
+    heads = solution[:size].reshape(n_layers, width)
+    values, shifts = _unscaled(heads, centers, scales)
+    return values, solution[size:] - shifts
 
 
 def _scaled_cells(
