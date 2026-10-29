@@ -1,16 +1,19 @@
-"""Tests for M3's cell extraction: every token of the prompt at many layers."""
+"""Tests for M3: readers trained through an aggregation over prompt cells."""
 
 import dataclasses
 from typing import Any
 from typing import cast
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
 import pytest
+from sklearn.exceptions import ConvergenceWarning
 
 from tomography.activations import Activations
 from tomography.activations import Span
 from tomography.activations import collect_activations
+from tomography.cli import _parse_override
 from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import m2_readers
@@ -33,7 +36,13 @@ from tomography.experiments.variants import task_set
 from tomography.experiments.variants import template_variants
 from tomography.model import BosMode
 from tomography.model import LoadedModel
+from tomography.reading.metrics import auroc
+from tomography.reading.probes import CellMaxReader
+from tomography.reading.probes import fit_attention
+from tomography.reading.probes import fit_cell_max
 
+DEFAULT_HASH = "fdb1d8d7ccf3"
+M2_DEFAULT_HASH = "3c82fe936345"
 LAYERS = (1, 2, 3)
 PAPER_DECOY_LINE = p2_positions.DECOY_LINE
 # The paper's decoy line is too long for the 128 positions of the tiny models
@@ -428,6 +437,23 @@ def test_prompt_cells_name_a_text_without_a_stimulus_span(
         _cells(tiny_gpt2, broken, decoy=False)
 
 
+def _replace_decoy_line(
+    stimuli: StimulusSet, index: int, replacement: str
+) -> StimulusSet:
+    """Replaces the line before a stimulus line; `{line}` keeps the old one."""
+    text, (start, end) = stimuli.texts[index], _span(stimuli, index)
+    line_end = text.rfind("\n", 0, start) + 1
+    line_start = text.rfind("\n", 0, line_end - 1) + 1
+    new = replacement.format(line=text[line_start:line_end])
+    shift = len(new) - (line_end - line_start)
+    return _replace(
+        stimuli,
+        index,
+        text[:line_start] + new + text[line_end:],
+        (start + shift, end + shift),
+    )
+
+
 @pytest.mark.parametrize(
     ("index", "replacement"),
     [(1, ""), (3, "{line}it is so.\n"), (4, "Hint: none\n")],
@@ -440,17 +466,7 @@ def test_prompt_cells_name_a_misleading_text_without_its_decoy_line(
     replacement: str,
 ) -> None:
     misleading = _stimuli(tiny_gpt2, "utility", decoy=True)
-    text, (start, end) = misleading.texts[index], _span(misleading, index)
-    line_end = text.rfind("\n", 0, start) + 1
-    line_start = text.rfind("\n", 0, line_end - 1) + 1
-    new = replacement.format(line=text[line_start:line_end])
-    shift = len(new) - (line_end - line_start)
-    broken = _replace(
-        misleading,
-        index,
-        text[:line_start] + new + text[line_end:],
-        (start + shift, end + shift),
-    )
+    broken = _replace_decoy_line(misleading, index, replacement)
     _no_model_call(monkeypatch)
 
     with pytest.raises(
@@ -459,3 +475,204 @@ def test_prompt_cells_name_a_misleading_text_without_its_decoy_line(
         r"of its stimulus$",
     ):
         _cells(tiny_gpt2, broken, decoy=True)
+
+
+ONE_ROW_READOUTS = ("last", "concept", "mean", "max")
+
+
+def test_config_defaults_and_round_trip() -> None:
+    config = m3_matrix.Config()
+    m2 = m2_readers.Config()
+
+    assert m3_matrix.POOLINGS == ("cellattn", "cellmax")
+    assert config.experiment == "m3"
+    assert config.scorers == ("logistic", "mean_diff")
+    assert config.readouts == ONE_ROW_READOUTS
+    assert config.cell_layers == (4, 8, 12, 16, 20, 24, 28)
+    assert config.upper_layers == (16, 20, 24, 28)
+    assert config.cell_sets == ("prompt",)
+    assert config.poolings == ("cellattn", "cellmax")
+    assert config.baselines == (
+        "logistic/last",
+        "mean_diff/last",
+        "logistic/concept",
+        "logistic/stimulus_token",
+    )
+    changed = {"experiment", "scorers", "readouts", "baselines"}
+    for field in dataclasses.fields(m2_readers.Config):
+        if field.name not in changed:
+            assert getattr(config, field.name) == getattr(m2, field.name)
+    assert m3_matrix.Config.from_dict(config.to_dict()) == config
+
+
+def test_the_default_config_hash_is_stable() -> None:
+    assert m3_matrix.Config().config_hash() == DEFAULT_HASH
+    assert m2_readers.Config().config_hash() == M2_DEFAULT_HASH
+
+
+def test_set_reads_the_cell_settings_as_tuples() -> None:
+    config_cls = m3_matrix.Config
+    data = dict(
+        [
+            _parse_override(config_cls, 'cell_sets=["stimulus", "upper"]'),
+            _parse_override(config_cls, 'poolings=["cellmax"]'),
+            _parse_override(config_cls, "cell_layers=[2, 4]"),
+            _parse_override(config_cls, "upper_layers=[4]"),
+        ]
+    )
+    config = config_cls.from_dict(data)
+    assert config.cell_sets == ("stimulus", "upper")
+    assert config.poolings == ("cellmax",)
+    assert config.cell_layers == (2, 4)
+    assert config.upper_layers == (4,)
+
+
+def _config(**overrides: Any) -> m3_matrix.Config:
+    base = m3_matrix.Config(
+        model="tiny",
+        tasks=("sentiment", "utility"),
+        n_seeds=2,
+        n_pairs=4,
+        n_eval_pairs=3,
+        top_k=2,
+        layers=LAYERS,
+        cell_layers=(1, 3),
+        upper_layers=(3,),
+        cell_sets=CELL_SETS,
+        logistic_c=(0.1, 10.0),
+        n_boot=50,
+    )
+    return dataclasses.replace(base, **overrides)
+
+
+def _set_layers(config: m3_matrix.Config, cell_set: CellSet) -> tuple[int, ...]:
+    return config.upper_layers if cell_set == "upper" else config.cell_layers
+
+
+def _fitted_readers(
+    loaded: LoadedModel, config: m3_matrix.Config
+) -> list[tuple[CellSet, Any]]:
+    train = _stimuli(loaded, "utility", decoy=False)
+    cells, segments = prompt_cells(
+        loaded, train, config.cell_layers, bos=None, batch_size=4, decoy=False
+    )
+    readers: list[tuple[CellSet, Any]] = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        for cell_set in ("prompt", "upper", "final"):
+            acts = select_cells(
+                cells, segments, cell_set, _set_layers(config, cell_set)
+            )
+            readers += [
+                (
+                    cell_set,
+                    fit_attention(acts, labels=train.labels, joint=True),
+                ),
+                (cell_set, fit_cell_max(acts, labels=train.labels)),
+            ]
+    return readers
+
+
+@pytest.mark.parametrize("batch_size", [1, 3])
+def test_streamed_scores_equal_whole_set_scores(
+    tiny_arch: LoadedModel, batch_size: int
+) -> None:
+    config = _config(batch_size=batch_size)
+    readers = _fitted_readers(tiny_arch, config)
+    report = _stimuli(tiny_arch, "utility", decoy=True)
+
+    streamed = m3_matrix.stream_scores(
+        tiny_arch, report, readers, config, decoy=True
+    )
+
+    cells, segments = prompt_cells(
+        tiny_arch,
+        report,
+        config.cell_layers,
+        bos=None,
+        batch_size=batch_size,
+        decoy=True,
+    )
+    expected = [
+        reader.score(
+            select_cells(
+                cells, segments, cell_set, _set_layers(config, cell_set)
+            )
+        )[0]
+        for cell_set, reader in readers
+    ]
+    assert streamed.dtype == np.float64
+    np.testing.assert_array_equal(streamed, np.array(expected))
+
+
+def test_stream_scores_name_the_batch_of_a_text_without_its_decoy_line(
+    tiny_gpt2: LoadedModel,
+) -> None:
+    config = _config(batch_size=3)
+    readers = _fitted_readers(tiny_gpt2, config)[:1]
+    report = _stimuli(tiny_gpt2, "utility", decoy=True)
+    broken = _replace_decoy_line(report, 4, "")
+
+    with pytest.raises(
+        ValueError,
+        match=r"^in the batch that starts at stimulus 3: stimulus 1 has no "
+        r"decoy line right before the line of its stimulus$",
+    ):
+        m3_matrix.stream_scores(tiny_gpt2, broken, readers, config, decoy=True)
+
+
+def _random_cells(seed: int = 0) -> tuple[Activations, NDArray[np.int64]]:
+    """Ragged cells of six stimuli at two layers, and their labels."""
+    counts = np.array([2, 3, 1, 4, 2, 3])
+    n_rows = int(counts.sum())
+    data = np.random.default_rng(seed).normal(2.0, 3.0, (2, n_rows, 5))
+    acts = Activations(
+        data=data.astype(np.float32),
+        layers=(2, 5),
+        position="response",
+        row_stimulus=np.repeat(np.arange(counts.size), counts),
+        row_rank=np.concatenate([np.arange(n) for n in counts]),
+        row_token=np.arange(n_rows),
+        row_token_id=np.zeros(n_rows, dtype=np.int64),
+        n_stimuli=counts.size,
+    )
+    return acts, np.array([0, 1, 0, 1, 1, 0])
+
+
+def test_the_random_cell_reader_has_gaussian_heads_on_scaled_cells() -> None:
+    acts, labels = _random_cells()
+
+    reader = m3_matrix.random_cell_max(acts, labels, seed=7)
+
+    rows = acts.data.astype(np.float64)
+    centers = rows.mean(axis=1)
+    centered = rows - centers[:, None]
+    scales = np.sqrt(np.square(centered).sum(axis=(1, 2)) / rows.shape[1])
+    heads = np.random.default_rng(7).standard_normal((2, 5))
+    sign = np.sign(reader.values[0, 0] * heads[0, 0])
+    assert reader.layers == (2, 5)
+    np.testing.assert_allclose(reader.values * scales[:, None], sign * heads)
+    np.testing.assert_allclose(
+        reader.biases, -(reader.values * centers).sum(axis=1)
+    )
+    np.testing.assert_array_equal(reader.signs, [1.0, 1.0])
+    again = m3_matrix.random_cell_max(acts, labels, seed=7)
+    np.testing.assert_array_equal(again.values, reader.values)
+    np.testing.assert_array_equal(again.biases, reader.biases)
+
+
+def _flipped(reader: CellMaxReader) -> CellMaxReader:
+    return dataclasses.replace(
+        reader, values=-reader.values, biases=-reader.biases
+    )
+
+
+def test_the_random_cell_reader_takes_the_sign_that_ranks_labels_best() -> None:
+    acts, labels = _random_cells()
+
+    reader = m3_matrix.random_cell_max(acts, labels, seed=3)
+    inverted = m3_matrix.random_cell_max(acts, 1 - labels, seed=3)
+
+    area = float(auroc(reader.score(acts)[0], labels))
+    assert area > float(auroc(_flipped(reader).score(acts)[0], labels))
+    np.testing.assert_array_equal(inverted.values, -reader.values)
