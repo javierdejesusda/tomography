@@ -59,7 +59,17 @@ def _sentiment(per_label: int = 12) -> list[Example]:
         0: ("bad", "dull", "poor", "cold"),
     }
     examples = [
-        Example(uid="sst2-short", text="good film", label=1, split="train")
+        Example(uid="sst2-short", text="good film", label=1, split="train"),
+        *(
+            Example(
+                uid=f"sst2-val-short-{label}-{i}",
+                text=f"{words[label][i]} film",
+                label=label,
+                split="val",
+            )
+            for label in (1, 0)
+            for i in range(4)
+        ),
     ]
     for split in ("train", "val"):
         for label in (1, 0):
@@ -211,8 +221,15 @@ def test_sentiment_trains_on_the_r1_sets_and_halves_the_validation_split() -> (
     )
     assert set(items.val.uids) <= {e.uid for e in halves.select}
     assert set(items.test.uids) <= {e.uid for e in halves.report}
+    held_out = [
+        items.text_of[uid] for uid in (*items.val.uids, *items.test.uids)
+    ]
+    assert min(len(text.split()) for text in held_out) >= 3
+    report = r1_sentiment.select_examples(
+        halves.report, split="val", min_words=3
+    )
     assert items.test.groups.shape[0] == min(
-        sum(e.label == label for e in halves.report) for label in (0, 1)
+        sum(e.label == label for e in report) for label in (0, 1)
     )
     assert items.text_of["sst2-train-1-0"] == "a good and great film 0"
 

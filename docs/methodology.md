@@ -261,7 +261,8 @@ has not been run yet.
   into train, validation or test. The stimuli use R7's template and concept word.
 - Sentiment: SST-2 with R1's template, training examples and seeds, so the training sets are R1's. SST-2 has no
   labelled test split, so the validation sentences are halved by the seeded draw `task_splits` makes for the reading
-  task `sentiment`: one half chooses the layer, the other is the test set.
+  task `sentiment`: one half chooses the layer, the other is the test set. Each half keeps the sentences of at least
+  3 words, as R1's validation set does.
 - Sizes: 10 training sets (`n_seeds`) of 64 pairs (`n_pairs`), as in R1 and R7, and every validation and test pair
   a split allows. TruthfulQA MC1 is not read.
 - CCS contrast pairs: for truth, the statement and its negation, both through R7's template. Sentiment has no

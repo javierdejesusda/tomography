@@ -14,7 +14,8 @@ negation (the row of the same index in the negated set), the contrast pairs
 of Marks and Tegmark; a pair takes the loader's split of its statement.
 Sentiment reads SST-2 as R1 does, with R1's training sets; SST-2 has no
 labelled test split, so the validation split is halved into a layer-choice
-half and a report half as for the reading task `sentiment`. CCS reads
+half and a report half as for the reading task `sentiment`, each keeping
+the sentences R1 keeps (at least 3 words). CCS reads
 contrast pairs: the statement and its negation for truth, and for sentiment
 each text in one fixed prompt in the form of Burns et al., completed once
 with "positive" and once with "negative".
@@ -194,9 +195,10 @@ def dataset_items(
     Sentiment uses R1's template, training examples and training seeds, so
     its training sets are R1's; its validation and test pairs are the
     halves of SST-2 validation that `task_splits` gives the reading task
-    `sentiment`. A truth set uses R7's template and concept word; each of
-    its groups is a statement and then its negation, exactly one of them
-    true, in the loader's split of the statement.
+    `sentiment`, without the phrases shorter than R1's `min_words`. A
+    truth set uses R7's template and concept word; each of its groups is
+    a statement and then its negation, exactly one of them true, in the
+    loader's split of the statement.
 
     Args:
         config: The experiment settings.
@@ -226,8 +228,12 @@ def _sentiment_items(
     )
 
     def eval_set(part: str, rows: Sequence[Example]) -> StimulusSet:
+        # R1 drops the short validation phrases, which task_splits keeps.
+        kept = r1_sentiment.select_examples(
+            rows, split="val", min_words=r1_sentiment.Config().min_words
+        )
         seed = derive_seed(config.seed, "eval", "sentiment", part)
-        return r1_sentiment._stimuli(rows, chat, config.n_eval_pairs, seed)
+        return r1_sentiment._stimuli(kept, chat, config.n_eval_pairs, seed)
 
     return Items(
         train=tuple(
