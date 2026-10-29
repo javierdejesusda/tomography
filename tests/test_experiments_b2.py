@@ -1,5 +1,6 @@
 """Tests for the B2 finder baselines experiment."""
 
+from collections.abc import Callable
 import dataclasses
 from pathlib import Path
 from typing import Any
@@ -315,15 +316,44 @@ def _offset_part(
     return _part(h, labels, texts, uids)
 
 
-def _offset_dataset(n_seeds: int = 1) -> b2.Dataset:
-    train = tuple(_offset_part(40, seed=10 + i) for i in range(n_seeds))
-    val, test = _offset_part(40, seed=2), _offset_part(40, seed=3)
+def _faint_part(n_pairs: int, seed: int, *, d: int = 8) -> b2.Part:
+    """A truth part whose truth signal is too faint for the default solver.
+
+    The pairs and labels are those of `_offset_part`. Every feature is made
+    uncorrelated with the label sign, then feature 0 gets 1e-4 per unit of
+    sign, so at every layer the logistic gradient at zero sits under
+    scikit-learn's default tolerance.
+    """
+    rng = np.random.default_rng(seed)
+    truth = np.where(np.arange(n_pairs) % 2 == 0, 1.0, -1.0)
+    labels = np.empty(2 * n_pairs, dtype=np.int64)
+    labels[0::2] = truth > 0
+    labels[1::2] = truth < 0
+    sign = 2.0 * labels - 1.0
+    h = rng.standard_normal((len(LAYERS), 2 * n_pairs, d))
+    h -= sign[:, None] * (sign @ h / (sign @ sign))[:, None, :]
+    h[..., 0] += 1e-4 * sign
+    rows = range(2 * n_pairs)
+    uids = tuple(f"got-{'neg_' * (r % 2)}cities-{seed}-{r // 2}" for r in rows)
+    texts = tuple(
+        f"claim {r // 2} {'does not hold' if r % 2 else 'holds'}" for r in rows
+    )
+    return _part(h, labels, texts, uids)
+
+
+def _dataset(make_part: Callable[[int], b2.Part], n_seeds: int) -> b2.Dataset:
+    train = tuple(make_part(10 + i) for i in range(n_seeds))
+    val, test = make_part(2), make_part(3)
     text_of = {
         uid: text
         for part in (*train, val, test)
         for uid, text in zip(part.stimuli.uids, part.stimuli.texts, strict=True)
     }
     return b2.Dataset("cities", train, val, test, text_of)
+
+
+def _offset_dataset(n_seeds: int = 1) -> b2.Dataset:
+    return _dataset(lambda seed: _offset_part(40, seed=seed), n_seeds)
 
 
 @pytest.fixture
@@ -391,6 +421,28 @@ def test_the_finders_and_two_controls_come_from_the_shared_sweep() -> None:
                 np.testing.assert_array_equal(accuracy["shuffled"], series[2])
     assert scores.layers == LAYERS
     assert set(scores.val) == set(scores.test) == set(b2.LAYER_SERIES)
+
+
+def test_logistic_refits_when_the_default_solver_stops_at_zero() -> None:
+    data = _dataset(lambda seed: _faint_part(100, seed=seed), n_seeds=2)
+    config = _config(datasets=("cities",), seed=3)
+    train = [(part.stimuli, part.act) for part in data.train]
+    evals = {
+        "val": (data.val.stimuli, data.val.act),
+        "test": (data.test.stimuli, data.test.act),
+    }
+    with pytest.raises(ValueError, match="zero norm"):
+        sweep_from_activations(train, evals, method="logistic", seed=3)
+
+    scores = b2.score_dataset(config, data)
+
+    refit = sweep_from_activations(
+        train, evals, method="logistic", seed=3, refit_at_zero=True
+    )
+    for split, accuracy in (("val", scores.val), ("test", scores.test)):
+        np.testing.assert_array_equal(
+            accuracy["logistic"], refit.per_seed(split)[0]
+        )
 
 
 def test_the_text_controls_are_the_tb1_classifiers_on_the_test_pairs() -> None:

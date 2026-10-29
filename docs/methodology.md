@@ -319,7 +319,9 @@ has not been run yet.
   Marks and Tegmark (2024, `marks2024geometry`), the logistic-regression probe (`logistic`, scikit-learn `C` 1.0;
   Alain and Bengio 2016, `alain2016understanding`) and CCS (`reading/ccs.py`; Burns et al. 2023,
   `burns2023discovering`). Their departures from the published recipes are in the CCS and whitened mass-mean rows
-  of the deviations table above.
+  of the deviations table above. When the logistic solver stops at its all-zero start because the gradient there is
+  under its default tolerance, the fit is repeated with a tolerance of 1e-10 (`refit_at_zero`, as in P4) instead of
+  stopping the run; it changes no other finder and no fit that ends away from zero.
 - Controls: `random` (a random unit direction with the same orientation rule) and `shuffled` (the LAT reader scored
   against labels shuffled within each pair), the series of the shared sweep, and `text_word` and `text_char`, the
   word and character n-gram classifiers of `tb1` fitted on the raw training texts of each seed. The `kind` column
