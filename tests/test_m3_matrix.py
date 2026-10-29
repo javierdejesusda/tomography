@@ -35,7 +35,9 @@ from tomography.model import BosMode
 from tomography.model import LoadedModel
 
 LAYERS = (1, 2, 3)
-# The paper's decoy line is too long for the 128 positions of the tiny models.
+PAPER_DECOY_LINE = p2_positions.DECOY_LINE
+# The paper's decoy line is too long for the 128 positions of the tiny models
+# once it sits inside a paper template.
 SHORT_DECOY_LINE = "Hint: {noun} is {{question}}.\n"
 PREFIX, DECOY, STIMULUS, FINAL = (
     SEGMENTS.index(s) for s in ("prefix", "decoy", "stimulus", "final")
@@ -256,6 +258,41 @@ def test_segments_follow_prompt_order(
         assert tiny_arch.tokenizer.decode(ids[line].tolist()) == (
             f"Hint: {noun} is {level}.\n"
         )
+
+
+@pytest.mark.parametrize(
+    "head",
+    ["USER: ", "<|im_start|>user\nRate it.\n"],
+    ids=["after_a_tag_on_its_line", "on_its_own_line"],
+)
+def test_the_paper_decoy_line_is_the_decoy_segment(
+    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch, head: str
+) -> None:
+    monkeypatch.setattr(p2_positions, "DECOY_LINE", PAPER_DECOY_LINE)
+    line = PAPER_DECOY_LINE.format(noun="sentiment").replace(
+        "{question}", "high"
+    )
+    words = ("a bad one", "a good one more")
+    start = len(head + line)
+    stimuli = StimulusSet(
+        texts=tuple(f"{head}{line}{w}\nASSISTANT:" for w in words),
+        response_spans=tuple((start, start + len(w)) for w in words),
+        concept_spans=(None, None),
+        labels=np.array([0, 1]),
+        pairs=np.array([[0, 1]]),
+        groups=np.array([[0, 1]]),
+        uids=("a", "b"),
+    )
+
+    cells, segments = _cells(tiny_arch, stimuli, decoy=True)
+
+    for i in range(len(words)):
+        ids = cells.row_token_id[
+            (cells.row_stimulus == i) & (segments == DECOY)
+        ]
+        # A tokenizer whose tokens keep their leading space puts the space
+        # after the tag in the first decoy token.
+        assert tiny_arch.tokenizer.decode(ids.tolist()) in (line, " " + line)
 
 
 @pytest.mark.parametrize("decoy", [False, True])
