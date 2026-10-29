@@ -175,6 +175,8 @@ that resamples whole runs along axis 0, and `wilson_ci` gives intervals for rate
 | `p9b` reader AUROC (`lo`, `hi`, `lo_within`, `hi_within`)      | percentile bootstrap                                           | the `n_seeds` pair draws of the reader, not the test items                |
 | `p9c` AUROC (`lo`, `hi`)                                       | percentile bootstrap                                           | the test items                                                            |
 | `p9c` within-relation AUROC                                    | percentile bootstrap                                           | the items, resampled inside each relation at its size                     |
+| `b1` AUROC and within-relation AUROC                           | percentile bootstrap, with the `p9c` settings                  | as for `p9c`                                                              |
+| `b1` paired differences                                        | paired percentile bootstrap                                    | the test items                                                            |
 | `p9d` slopes                                                   | percentile bootstrap                                           | the items, paired across arms                                             |
 | `m2` cell metrics (`pair_lo`, `pair_hi`, `auroc_lo`, `auroc_hi`) | percentile bootstrap                                         | the seeds (independent training sets)                                     |
 | `m2` comparisons                                               | paired percentile bootstrap; DeLong; exact McNemar; Holm       | the report pairs (clusters), on the seed ensemble                         |
@@ -402,9 +404,9 @@ word still counts as an abstention; the `hand_check.csv` sample measures this.
 
 ### Published detection baselines
 
-These baselines predict, per question, whether the greedy answer is correct. They are implemented as functions but
-not yet run: no experiment reports them, and the `b1` experiment that will put them beside the `p9c` signals is
-pending. Each states where it departs from its published recipe.
+These baselines predict, per question, whether the greedy answer is correct. The `b1` experiment
+(`experiments/b1_detection_baselines.py`) puts them beside the `p9c` signals; it has not been run yet. Each states
+where it departs from its published recipe.
 
 - Exact-answer-token probe (`p9/answer_probe.py`; Orgad et al. 2025, `orgad2025llms`): a logistic-regression probe
   on the residual stream at the last token of the greedy answer, read from the prompt, a space and the answer. It is
@@ -427,6 +429,40 @@ pending. Each states where it departs from its published recipe.
   0.99); no feature clipping (it is not in the released code); the last token of the stored sample text instead of
   the last token before a stop token; correctness by the P9 rule. Empty samples are dropped and a question with fewer
   than 2 non-empty samples gets no score.
+- Discrete semantic entropy (`p9/semantic_entropy.py`; Farquhar et al. 2024, `farquhar2024detecting`): the entropy
+  (natural log) of the share of sampled answers per cluster of equal meaning. Two answers are equal when each
+  entails the other, by the most likely of the three classes of an entailment model on `"{question} {answer}"`
+  with no threshold, and the clusters are built greedily in sampling order as in the released code. Higher means
+  more uncertain. The entailment model is DeBERTa-large MNLI (`microsoft/deberta-large-mnli`, the model of Kuhn et
+  al. 2023 and the one the paper's text names); the released code runs DeBERTa-v2-xlarge MNLI. Deviations: M = 5
+  stored P9a samples at temperature 1.0 and top-p 1.0 (the paper uses 10, and its text names top-p 0.9 and top-k
+  50); identical answers are equal and an empty answer equals only another empty answer, with no model call (the
+  reference sends every pair through the model); only the discrete variant, because P9a stores no token
+  log-probabilities; correctness by the P9 rule.
+
+The `b1` protocol:
+
+- Inputs: a finished `p9c` run of the same model (`reliability_run`) and the `p9a` run it names. The datasets, items
+  and splits are the ones `p9c` makes from the same labels (behavior items, the greedy answer's correctness as the
+  outcome). Before any model runs, the test outcomes, and the test relations of PopQA, stored in the `p9c` signals
+  must equal the ones made here, or the run stops; the `p9c` predictors are read from those signals, not recomputed.
+- Scores: higher means more likely correct, as in `p9c`. The probe is fitted on the train items of each dataset at
+  every layer the `p9c` run read, and its layer is chosen per dataset on the validation items (the paper also
+  chooses per dataset). Semantic entropy and EigenScore keep their papers' sign and are negated; they fit nothing,
+  so only the test items are scored and no sign is set on train. A missing score (an empty greedy answer for the
+  probe, a question without samples for semantic entropy, fewer than 2 non-empty samples for EigenScore) takes the
+  lowest finite score of the train items (probe) or of the test items (the other two), the least confident case,
+  as in `p9c`. `n_filled` counts the missing scores among the items a baseline scored.
+- Metrics: the `p9c` test metric with the `n_boot` and `seed` of the `p9c` run: AUROC with its interval, AURC and,
+  for PopQA, the within-relation AUROC. `table` holds the `p9c` rows of each dataset, copied, then one row per
+  baseline; `table_paired` holds the AUROC of every baseline minus that of each reference (`lat` and `p_true` by
+  default) with a paired bootstrap interval over the test items. A reference the `p9c` run lacks (`lat` on GPT-2
+  small, whose gate admits no contrast) is named in the summary and skipped.
+- Settings: the model loads in float32, because the activations reuse the cached few-shot prefix, which matches the
+  uncached path only in float32. `p9a` and `p9c` ran Qwen3 in bfloat16 and `gpt2-xl` in float16, so the baselines
+  read the same answers at a higher precision than the `p9c` signals. The entailment model runs on the CPU, so it
+  never shares the GPU with the model: about 0.07 s per pair on the laptop CPU (640 pairs timed), and 30k to 45k
+  pairs per checkpoint (counted from the `p9a` samples). The summary records the seconds each baseline took.
 
 ## Run settings of the GPU runs
 
