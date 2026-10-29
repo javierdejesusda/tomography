@@ -43,7 +43,6 @@ from tomography.experiments import r7_truth
 from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
-from tomography.experiments.sweep import SERIES
 from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.sweep import plot_curves_file
 from tomography.experiments.sweep import sweep_from_activations
@@ -293,6 +292,12 @@ def _truth_items(
             seed=seed,
         )
 
+    val, test = (
+        stimuli(
+            s, config.n_eval_pairs, derive_seed(config.seed, "eval", name, s)
+        )
+        for s in ("val", "test")
+    )
     return Items(
         train=tuple(
             stimuli(
@@ -302,16 +307,8 @@ def _truth_items(
             )
             for i in range(config.n_seeds)
         ),
-        val=stimuli(
-            "val",
-            config.n_eval_pairs,
-            derive_seed(config.seed, "eval", name, "val"),
-        ),
-        test=stimuli(
-            "test",
-            config.n_eval_pairs,
-            derive_seed(config.seed, "eval", name, "test"),
-        ),
+        val=val,
+        test=test,
         text_of={e.uid: e.text for e in (*statements, *negated)},
     )
 
@@ -345,17 +342,14 @@ class Contrast:
         h: Activations of the contrast rows, shape (K, n_c, d).
         pairs: Rows of `h` of shape (m, 2), the first member first.
         labels: Shape (n_c,), 1 for a true contrast row.
-        row_pair: The pair of each stimulus of the part, shape (n,).
-        row_first: Shape (n,), True where the stimulus is the first member
-            of its pair; the pair probability is the probability that the
-            first member is true.
+        stimulus_row: The contrast row each stimulus of the part stands for,
+            shape (n,).
     """
 
     h: NDArray[np.float32]
     pairs: NDArray[np.int64]
     labels: NDArray[np.int64]
-    row_pair: NDArray[np.int64]
-    row_first: NDArray[np.bool_]
+    stimulus_row: NDArray[np.int64]
 
 
 def pair_contrast(stimuli: StimulusSet, act: Activations) -> Contrast:
@@ -368,12 +362,10 @@ def pair_contrast(stimuli: StimulusSet, act: Activations) -> Contrast:
     Returns:
         The groups as CCS pairs over the part's own activations.
     """
-    groups = stimuli.groups
-    row_pair = np.zeros(stimuli.labels.shape[0], dtype=np.int64)
-    row_pair[groups] = np.arange(groups.shape[0])[:, None]
-    row_first = np.zeros(stimuli.labels.shape[0], dtype=bool)
-    row_first[groups[:, 0]] = True
-    return Contrast(act.data, groups, stimuli.labels, row_pair, row_first)
+    n = stimuli.labels.shape[0]
+    return Contrast(
+        act.data, stimuli.groups, stimuli.labels, np.arange(n, dtype=np.int64)
+    )
 
 
 def completion_contrast(stimuli: StimulusSet, act: Activations) -> Contrast:
@@ -394,8 +386,7 @@ def completion_contrast(stimuli: StimulusSet, act: Activations) -> Contrast:
         act.data,
         np.arange(2 * n, dtype=np.int64).reshape(n, 2),
         np.stack([stimuli.labels, 1 - stimuli.labels], axis=1).reshape(-1),
-        np.arange(n, dtype=np.int64),
-        np.ones(n, dtype=bool),
+        2 * np.arange(n, dtype=np.int64),
     )
 
 
@@ -481,12 +472,11 @@ def score_dataset(config: Config, data: Dataset) -> Scores:
         sweep = sweep_from_activations(
             train, evals, method=finder, seed=config.seed
         )
-        names: dict[str, str] = {finder: "reader"}
-        if finder == "pca_diff":
-            names |= {"random": "random", "shuffled": "shuffled"}
-        for name, series in names.items():
-            val[name] = sweep.per_seed("val")[SERIES.index(series)]
-            test[name] = sweep.per_seed("test")[SERIES.index(series)]
+        for split, out in (("val", val), ("test", test)):
+            reader, random, shuffled = sweep.per_seed(split)
+            out[finder] = reader
+            if KIND_OF[finder] == "reader":
+                out["random"], out["shuffled"] = random, shuffled
     layers = data.val.act.layers
     probes = [
         fit_ccs(
@@ -504,41 +494,36 @@ def score_dataset(config: Config, data: Dataset) -> Scores:
     val["ccs"] = np.stack([_ccs_accuracy(p, data.val) for p in probes])
     test["ccs"] = np.stack([_ccs_accuracy(p, data.test) for p in probes])
     texts = _text_set(data.test.stimuli, data.text_of)
+    trains = [_text_set(part.stimuli, data.text_of) for part in data.train]
     text = {
         f"text_{analyzer}": np.array(
             [
-                seed_accuracy(
-                    [data.text_of[uid] for uid in part.stimuli.uids],
-                    part.stimuli.labels,
-                    texts,
-                    analyzer=analyzer,
-                )
-                for part in data.train
+                seed_accuracy(t.texts, t.labels, texts, analyzer=analyzer)
+                for t in trains
             ]
         )
         for analyzer in TEXT_ANALYZERS
     }
     return Scores(
-        layers,
-        {name: val[name] for name in LAYER_SERIES},
-        {name: test[name] for name in LAYER_SERIES},
-        text,
-        np.stack([probe.losses for probe in probes]),
+        layers, val, test, text, np.stack([probe.losses for probe in probes])
     )
 
 
 def _ccs_accuracy(probe: CCSProbe, part: Part) -> NDArray[np.float64]:
     """Group accuracy of CCS from its pair probabilities, per layer.
 
-    A stimulus scores the probability that it is true: the pair probability
-    for a first member and its complement for a second. The probe's reader
-    is not used: it drops the per-set centring, so on a statement set and
-    a negation set with different means its comparisons are shifted.
+    A stimulus scores the probability that its contrast row is true: the
+    pair probability for a first member and its complement for a second.
+    The probe's reader is not used: it drops the per-set centring, so on a
+    statement set and a negation set with different means its comparisons
+    are shifted.
     """
     contrast = part.contrast
     probability = probe.pair_probabilities(contrast.h, contrast.pairs)
-    first = probability[:, contrast.row_pair]
-    scores = np.where(contrast.row_first, first, 1.0 - first)
+    true = np.zeros((probability.shape[0], contrast.h.shape[1]))
+    true[:, contrast.pairs[:, 0]] = probability
+    true[:, contrast.pairs[:, 1]] = 1.0 - probability
+    scores = true[:, contrast.stimulus_row]
     return group_accuracy(scores, part.stimuli.groups, part.stimuli.labels)
 
 
@@ -693,9 +678,8 @@ def execute(
                 seed=config.seed,
             )
         n_test = int(parts.test.groups.shape[0])
-        own = table_rows(name, scores, n_test, config)
-        rows += own
-        ccs_layer = own[LAYER_SERIES.index("ccs")][COLUMNS.index("val_layer")]
+        rows += table_rows(name, scores, n_test, config)
+        ccs_layer = best_layer(scores.val["ccs"].mean(axis=0), scores.layers)
         losses = scores.ccs_losses[:, scores.layers.index(ccs_layer)]
         datasets[name] = {
             "n_train_pairs": int(parts.train[0].groups.shape[0]),

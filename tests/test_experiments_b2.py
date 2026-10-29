@@ -24,7 +24,7 @@ from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.sweep import sweep_from_activations
-from tomography.experiments.tb1_text_baselines import TextSet
+from tomography.experiments.tb1_text_baselines import _text_set
 from tomography.experiments.tb1_text_baselines import interval
 from tomography.experiments.tb1_text_baselines import seed_accuracy
 from tomography.experiments.variants import READING_TASKS
@@ -326,9 +326,9 @@ def _offset_dataset(n_seeds: int = 1) -> b2.Dataset:
     return b2.Dataset("cities", train, val, test, text_of)
 
 
-def test_ccs_accuracy_comes_from_pair_probabilities_on_offset_sets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+@pytest.fixture
+def ccs_probes(monkeypatch: pytest.MonkeyPatch) -> list[CCSProbe]:
+    """Records every probe that b2 fits with `fit_ccs`."""
     probes: list[CCSProbe] = []
     fit_ccs = b2.fit_ccs
 
@@ -337,6 +337,13 @@ def test_ccs_accuracy_comes_from_pair_probabilities_on_offset_sets(
         return probes[-1]
 
     monkeypatch.setattr(b2, "fit_ccs", spy)
+    return probes
+
+
+def test_ccs_accuracy_comes_from_pair_probabilities_on_offset_sets(
+    ccs_probes: list[CCSProbe],
+) -> None:
+    probes = ccs_probes
     data = _offset_dataset()
     config = _config(
         datasets=("cities",), n_seeds=1, ccs_restarts=2, ccs_epochs=500
@@ -391,12 +398,7 @@ def test_the_text_controls_are_the_tb1_classifiers_on_the_test_pairs() -> None:
 
     scores = b2.score_dataset(_config(datasets=("cities",)), data)
 
-    test = TextSet(
-        texts=tuple(data.text_of[uid] for uid in data.test.stimuli.uids),
-        uids=data.test.stimuli.uids,
-        labels=data.test.stimuli.labels,
-        groups=data.test.stimuli.groups,
-    )
+    test = _text_set(data.test.stimuli, data.text_of)
     assert b2.TEXT_CONTROLS == ("text_word", "text_char")
     assert set(scores.text) == set(b2.TEXT_CONTROLS)
     for analyzer in ("word", "char"):
@@ -540,18 +542,9 @@ def _rows(run_dir: RunDir) -> list[dict[str, Any]]:
 
 
 def test_execute_writes_the_table_curves_and_summary(
-    tiny_arch: LoadedModel,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tiny_arch: LoadedModel, tmp_path: Path, ccs_probes: list[CCSProbe]
 ) -> None:
-    probes: list[CCSProbe] = []
-    fit_ccs = b2.fit_ccs
-
-    def spy(*args: Any, **kwargs: Any) -> CCSProbe:
-        probes.append(fit_ccs(*args, **kwargs))
-        return probes[-1]
-
-    monkeypatch.setattr(b2, "fit_ccs", spy)
+    probes = ccs_probes
     config = _config()
     run_dir = RunDir.create(config, out_root=tmp_path)
 
