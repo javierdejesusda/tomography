@@ -241,6 +241,74 @@ readout by layer rule, so a gain of pooling is never credited to nonlinearity.
   and McNemar p values. All statistics come from `reading/stats.py`.
 - Runs load the model in float32.
 
+## Full-matrix readers (M3)
+
+`m3` (`experiments/m3_matrix.py`) asks whether a reader trained through an aggregation over the cells of the prompt,
+a cell being one token at one layer, reads better than M2's one-row readouts. It runs M2's protocol on M2's items
+(its config shares M2's defaults) and has not been run yet.
+
+- Cells and segments: `prompt_cells` reads every token but BOS (whose state is the same for every text) at
+  `cell_layers` (default 4, 8, ..., 28, the `token_layers` of the M2 runs) and gives each token a segment: `prefix`
+  (every token before the stimulus outside the decoy line: the chat tag, the instruction and a tag such as
+  utility's `Scenario:`), `decoy` (P2's misleading line, matched as a whole line against `p2_positions.DECOY_LINE`,
+  in the misleading conditions only), `stimulus` (the stimulus slot, M2's `response` rows) and `final` (from the
+  stimulus end to the text end, where `last` and `concept` read). A token joins the segment its characters overlap,
+  the stimulus winning ties.
+- Cell sets: `prompt` (every segment at `cell_layers`), `stimulus`, `final`, and `upper` (every segment at
+  `upper_layers`, default 16, 20, 24, 28). The default `cell_sets` is `prompt` (stage 1). Stage 2 (`stimulus`,
+  `final`, `upper`, selected with `--set cell_sets=...`) runs only if a `cellattn_prompt`, `cellmax_prompt` or
+  `prompt_max` row beats `logistic/last` (Holm-adjusted paired interval above zero) in some checkpoint, task and
+  condition of stage 1, a gate declared before stage 1 results.
+- Cell readers: `logistic/cellattn_<set>/joint` is M2's joint attention reader (`fit_attention(joint=True)`) on the
+  set's cells: a value head and a query per layer and one softmax over the cells of all layers.
+  `logistic/cellmax_<set>/joint` (`fit_cell_max`) has a linear head and bias per layer, and a text scores its
+  highest cell over all layers. Both are trained through their pooling with the logistic loss, `C` from M2's
+  `logistic_c` grid and cells standardized on the draw's training cells only. They keep the scorer name `logistic`
+  so M2's comparisons take them. An MLP head per layer is deferred.
+- One-row readers: M2's `logistic` and `mean_diff` on `last`, `concept`, `mean` and `max` (rules `best` and
+  `top_k`), fitted by M2's helpers on M2's items, and two relabelled readouts, each on its own pass:
+  `stimulus_token` (the last stimulus token, M2's `concept` position over the stimulus span) and `prompt_max` (M2's
+  `max` position over the whole text). A relabelled readout takes the seeds of the M2 readout whose position it
+  uses.
+- Choices: every choice uses the select items of the original prompts. A cell reader keeps, per draw, the first
+  best grid value on the select pair accuracy, at one fixed set of layers (no layer is chosen), and its threshold
+  there. Conditions and report items are M2's.
+- Extraction: each draw's 128 training texts are read once and their cells freed after the draw's fits; the select
+  items, then each condition's report items, are streamed batch by batch through every fitted reader, so only
+  scores, segment shares and cell counts are held. The one-row activations are released before the cell phase.
+- Controls: the shuffled series on every cell reader (training and select labels shuffled within their pairs with
+  M2's seeds, so the grid value and threshold are chosen on shuffled labels), the random direction at every one-row
+  readout, the text-only classifier, and `random/cellmax_<set>/joint`: a standard Gaussian head per layer on the
+  training-standardized cells, not fitted, with one sign for all heads set by the training AUROC on the real labels.
+- Statistics: M2's, unchanged (seed means with intervals, the seed ensemble, paired bootstraps, DeLong, McNemar,
+  Holm). The baselines are `logistic/last`, `mean_diff/last`, `logistic/concept` and `logistic/stimulus_token`. A
+  joint cell is compared with each baseline's `top_k` rule, as in M2, and with its `best` rule in a Holm family of
+  its own; those rows keep the rule `joint`. M2's comparison code is called, not changed.
+- Diagnostics (`diagnostics.json`): per task, condition and cell reader, the share of a report text's reader weight
+  on each segment (cellmax: its highest cell, ties split, so the share of texts whose highest cell lies there;
+  cellattn: its attention mass), averaged over texts and draws; `cells`, a text's mean number of cells in the set;
+  and `cells_rho`, the Spearman correlation between a text's cell count and its score within each label, averaged
+  over the labels and draws where it is defined.
+- Outputs: M2's files (`table.json`, `comparisons.json`, `scores_<task>`, `auroc_<task>`, `summary.json`),
+  `diagnostics.json`, and `cellheads_<task>` (each draw's kept heads, biases and signs, the queries and offsets of
+  cellattn, and the chosen `C`), named apart from the `readers*` files the aggregation code parses. `summary.json`
+  also counts, per task and fitted cell reader, its fits, their seconds and their `ConvergenceWarning`s.
+- Runs load the model in float32.
+
+Caveats:
+
+- Length bias of the max: a text's highest cell rises with its number of cells. The misleading conditions add a
+  decoy line, so more cells, and a cellmax gain under `against` is read only beside its `cells` and `cells_rho`.
+- Prefix cells under misleading utility: prefix cells are equal across the texts of a template only on the paper
+  template. On misleading utility the `Scenario:` tag follows the decoy line, so its cells differ between decoys and
+  carry the label under `against`: a `prefix` share there can still be decoy-driven. Training uses the paper
+  template and is unaffected.
+- Reproducibility: cellmax fits are bit-identical on one machine, but L-BFGS on the piecewise max objective turns
+  input differences near 1e-6 into score differences near 3e-3, so runs on different machines agree only to about
+  1e-3.
+- A layer whose cells never win keeps a near-zero cellmax head, so its exported direction is mostly noise; a later
+  use of the heads weights or drops them by norm.
+
 ## Published finder baselines (B2)
 
 `b2` (`experiments/b2_finder_baselines.py`) puts published direction finders beside LAT (`pca_diff`, the method
