@@ -1,0 +1,85 @@
+{
+  "_meta": {
+    "experiment": "b2",
+    "config_hash": "6087c2624032",
+    "seed": 0,
+    "git_sha": "c2c140570b9706720f32b02fcd9f1ffdb2790e11",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-29T16:45:27+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "b2",
+      "model": "gpt2-medium",
+      "seed": 0,
+      "datasets": [
+        "sentiment",
+        "cities",
+        "larger_than",
+        "sp_en_trans"
+      ],
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "ccs_restarts": 10,
+      "ccs_epochs": 1000,
+      "ccs_lr": 0.01,
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "datasets": {
+      "sentiment": {
+        "n_train_pairs": 64,
+        "n_val_pairs": 213,
+        "n_test_pairs": 214,
+        "ccs_loss": 0.0005114537965539611
+      },
+      "cities": {
+        "n_train_pairs": 64,
+        "n_val_pairs": 309,
+        "n_test_pairs": 269,
+        "ccs_loss": 0.004577951695416459
+      },
+      "larger_than": {
+        "n_train_pairs": 64,
+        "n_val_pairs": 406,
+        "n_test_pairs": 382,
+        "ccs_loss": 0.0033250020462803156
+      },
+      "sp_en_trans": {
+        "n_train_pairs": 64,
+        "n_val_pairs": 77,
+        "n_test_pairs": 78,
+        "ccs_loss": 0.000840182323849523
+      }
+    },
+    "kinds": {
+      "pca_diff": "reader",
+      "mean_diff": "baseline",
+      "whitened_mean_diff": "baseline",
+      "logistic": "baseline",
+      "ccs": "baseline",
+      "random": "control",
+      "shuffled": "control",
+      "text_word": "control",
+      "text_char": "control"
+    }
+  }
+}

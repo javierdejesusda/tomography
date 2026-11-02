@@ -1,0 +1,85 @@
+{
+  "_meta": {
+    "experiment": "b2",
+    "config_hash": "43f761636126",
+    "seed": 0,
+    "git_sha": "7163b9f7946aa6af44a2c5d15048791d981cdc31",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-02T18:39:11+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "b2",
+      "model": "gpt2-large",
+      "seed": 0,
+      "datasets": [
+        "sentiment",
+        "cities",
+        "larger_than",
+        "sp_en_trans"
+      ],
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "ccs_restarts": 10,
+      "ccs_epochs": 1000,
+      "ccs_lr": 0.01,
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "datasets": {
+      "sentiment": {
+        "n_train_pairs": 64,
+        "n_val_pairs": 213,
+        "n_test_pairs": 214,
+        "ccs_loss": 0.00015223874575619555
+      },
+      "cities": {
+        "n_train_pairs": 64,
+        "n_val_pairs": 309,
+        "n_test_pairs": 269,
+        "ccs_loss": 0.0021137754895191796
+      },
+      "larger_than": {
+        "n_train_pairs": 64,
+        "n_val_pairs": 406,
+        "n_test_pairs": 382,
+        "ccs_loss": 0.0019111420294548888
+      },
+      "sp_en_trans": {
+        "n_train_pairs": 64,
+        "n_val_pairs": 77,
+        "n_test_pairs": 78,
+        "ccs_loss": 0.0004358934301890296
+      }
+    },
+    "kinds": {
+      "pca_diff": "reader",
+      "mean_diff": "baseline",
+      "whitened_mean_diff": "baseline",
+      "logistic": "baseline",
+      "ccs": "baseline",
+      "random": "control",
+      "shuffled": "control",
+      "text_word": "control",
+      "text_char": "control"
+    }
+  }
+}
