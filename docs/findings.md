@@ -19,7 +19,7 @@ table rows), the fluency means, ratios and counts of cells past the rule and the
 of the runs made at `f4d414d` and of the M1, C2, C5 and P7 runs of the 4B pair (computed from the per-cell rows and the curves files), the P7 counts of inverted
 units on the GPT-2 sizes (recomputed from the per-seed curves), the P10b minima and maxima over layers and the counts of cells in P10a and P10b (computed from the table, hedge gap, forced in range, width, diagnostic, hand check, curves, transfer, baseline and people files), the V1 means, ranges and counts over draws and cells (computed from `projections.npz` of the V1 runs), the largest V1 reproduction differences, the sums of a recomputed and a committed AUROC and the counts of cells beyond the tolerance (computed from `summary.json` of the V1 runs, and from `projections.npz` and the `per_seed` arrays of the P9b curves files where they are taken per draw or per method), the sums and ranges of the V1 variance shares (computed from `pca2d.npz` and `text2d.npz`), and differences or ranges quoted in the text. The P8 tables are read from the P8 run, which aggregates
 finished runs. Runs are identified by config hash in [Run identity](#run-identity). The document is not
-complete: [Pending](#pending) lists what it does not yet report. The counts of inverted units by layer, the fluency means, ratios and counts of cells past the rule, the random-arm ranges, the counts of emotions above the random maximum and the differences between shares in the chain 42 runs (C2, C5 and P7 on `gpt2`, `gpt2-medium` and the Qwen3 0.6B pair) are computed from the per-seed curves, the per-cell rows and the table files of those runs. The R8 per-seed oracle, Table 9 average rows, per-layer curve values, maxima over layers of the reader, random and shuffled series, and the TruthfulQA per-question comparison are computed from the `summary.json`, `curves_<task>.npz` and `fewshot_tqa.npz` files of the R8 runs. The M2 best cells and their gaps to the two baselines, the maxima per readout, the differences between scorers at `last`, the differences between the pair accuracy and the thresholded accuracy, the utility ranges, the changes between conditions and their ranges, the MLP minus the best linear scorer, the random-direction maxima and margins, the means, ranges and maxima of the shuffled-label rows (the superseded ones included), and every count over cells, rows, comparisons or families (cells below 0.5 or with intervals apart, MLP and joint cells above or below, comparisons that favour a cell or a baseline, intervals that agree with the Holm-adjusted p values, and the counts of the decision-gate facts) are computed from the `table.json` and `comparisons.json` files of the M2 runs. The B1 differences between point estimates, the ranges over the checkpoints of a family, the widths of the intervals, the lists of checkpoints and the comparisons of intervals quoted in the text are computed from the `table.json` and `table_paired.json` files of the B1 runs.
+complete: [Pending](#pending) lists what it does not yet report. The counts of inverted units by layer, the fluency means, ratios and counts of cells past the rule, the random-arm ranges, the counts of emotions above the random maximum and the differences between shares in the chain 42 runs (C2, C5 and P7 on `gpt2`, `gpt2-medium` and the Qwen3 0.6B pair) are computed from the per-seed curves, the per-cell rows and the table files of those runs. The R8 per-seed oracle, Table 9 average rows, per-layer curve values, maxima over layers of the reader, random and shuffled series, and the TruthfulQA per-question comparison are computed from the `summary.json`, `curves_<task>.npz` and `fewshot_tqa.npz` files of the R8 runs. The M2 best cells and their gaps to the two baselines, the maxima per readout, the differences between scorers at `last`, the differences between the pair accuracy and the thresholded accuracy, the utility ranges, the changes between conditions and their ranges, the MLP minus the best linear scorer, the random-direction maxima and margins, the means, ranges and maxima of the shuffled-label rows (the superseded ones included), and every count over cells, rows, comparisons or families (cells below 0.5 or with intervals apart, MLP and joint cells above or below, comparisons that favour a cell or a baseline, intervals that agree with the Holm-adjusted p values, and the counts of the decision-gate facts) are computed from the `table.json` and `comparisons.json` files of the M2 runs. The B1 differences between point estimates, the ranges over the checkpoints of a family, the widths of the intervals, the lists of checkpoints and the comparisons of intervals quoted in the text are computed from the `table.json` and `table_paired.json` files of the B1 runs. The B2 differences between point estimates, the ranges over checkpoints, the counts of cells and the comparisons of intervals quoted in the text are computed from the `table.json` and `summary.json` files of the B2 runs, the per-seed scores of LAT from their curves files, and the counts of test pairs whose statement is true from the Geometry of Truth loader.
 
 Contents:
 
@@ -38,16 +38,17 @@ P4)](#position-sample-size-and-direction-finder-on-gpt2-p2-p3-p4) 10. [Sentiment
 C5)](#other-steering-experiments-on-gpt2-and-the-larger-gpt-2-sizes-m1-c2-p7-lr1-c4-c5) 13. [Base against post-trained Qwen3
 (P8)](#base-against-post-trained-qwen3-p8) 14. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
 15. [Published detection baselines (B1)](#published-detection-baselines-b1)
-16. [Approximate answers: range against exact quantities
-(P10)](#approximate-answers-range-against-exact-quantities-p10) 17. [Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5,
-LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 18. [Position
+16. [Published finder baselines (B2)](#published-finder-baselines-b2)
+17. [Approximate answers: range against exact quantities
+(P10)](#approximate-answers-range-against-exact-quantities-p10) 18. [Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5,
+LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 19. [Position
 and stimulus-set size on qwen3-1.7b-base and qwen3-1.7b (P2,
-P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 19. [Stimulus-set size and direction finder
+P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 20. [Stimulus-set size and direction finder
 across the GPT-2 sizes and Qwen3
-(P3, P4)](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) 20. [Persona wording and
-instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 21. [Template steering on the Qwen3 0.6B, 1.7B and 4B pairs
-(P7)](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7) 22. [LAT against few-shot prompting on the QA tasks
-(R8)](#lat-against-few-shot-prompting-on-the-qa-tasks-r8) 23. [Reader comparison (M2)](#reader-comparison-m2) 24. [Run identity](#run-identity) 25. [Pending](#pending)
+(P3, P4)](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) 21. [Persona wording and
+instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 22. [Template steering on the Qwen3 0.6B, 1.7B and 4B pairs
+(P7)](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7) 23. [LAT against few-shot prompting on the QA tasks
+(R8)](#lat-against-few-shot-prompting-on-the-qa-tasks-r8) 24. [Reader comparison (M2)](#reader-comparison-m2) 25. [Run identity](#run-identity) 26. [Pending](#pending)
 
 ## Reading conventions
 
@@ -4922,6 +4923,231 @@ Every test question has at least two non-empty sampled answers: the `n_filled` o
 - **Controls.** Within relation on PopQA, `popularity` reads 0.541 to 0.679 on the GPT-2 sizes and 0.637 to 0.776 on the Qwen3 checkpoints, `length` 0.523 to 0.566 and 0.516 to 0.573, and `name_logprob` 0.474 to 0.513 and 0.543 to 0.585. Pooled, the accuracy rate of the relation alone (`template`) reads 0.880 to 0.939 and 0.843 to 0.913: below the probe on every checkpoint, and above semantic entropy and EigenScore on every checkpoint but `qwen3-1.7b-base` (EigenScore 0.844 against 0.843) and `qwen3-1.7b` (0.877 and 0.894 against 0.873).
 - **What the runs do not show.** Each checkpoint has one run. Semantic entropy and EigenScore read five samples at temperature 1.0, fewer than the papers use, and semantic entropy is the discrete variant only. The paired differences are pooled; no within-relation paired interval is stored. The baselines read the answers in float32, and the P9c signals were computed in bfloat16 on the Qwen3 checkpoints, in float16 on `gpt2-xl` and in float32 on the three smaller GPT-2 sizes. TriviaQA and NQ-open hold few correct answers on the GPT-2 sizes, and the Qwen3 4B pair was not run.
 
+## Published finder baselines (B2)
+
+B2 puts four published direction finders, as baselines, beside the LAT reader of the paper (`pca_diff`) on truth and sentiment: the mass-mean probe (`mean_diff`) and the whitened (IID) mass-mean probe (`whitened_mean_diff`) of Marks and Tegmark (2024, `marks2024geometry`), the logistic-regression probe (`logistic`; Alain and Bengio 2016, `alain2016understanding`) and CCS (`ccs`; Burns et al. 2023, `burns2023discovering`). Every series of a run is fitted on the same training items and scored on the same test pairs, each at the layer its own validation curve chooses. The recipes, and where each departs from its published one, are in the [methodology](methodology.md#published-finder-baselines-b2). Each checkpoint has one run, eight in all ([Run identity](#run-identity)).
+
+Sentiment is SST-2 with R1's template and R1's 10 training sets of 64 pairs. SST-2 has no labelled test split, so its validation sentences are halved: one half chooses the layer and the other is the test set, each keeping the sentences of at least 3 words, as R1 does. Truth is three Geometry of Truth sets, each statement paired with the row of the same index in its negated set (`cities` with `neg_cities`, `larger_than` with `smaller_than`, `sp_en_trans` with `neg_sp_en_trans`), through R7's template: a pair is a statement and its negation, exactly one of them true (the contrast pairs of Marks and Tegmark), and each of the 10 training sets is a draw of 64 such pairs. The counts are the same on every checkpoint:
+
+| Dataset     | Training pairs per set | Validation pairs | Test pairs |
+| ----------- | ---------------------- | ---------------- | ---------- |
+| sentiment   | 64                     | 213              | 214        |
+| cities      | 64                     | 309              | 269        |
+| larger_than | 64                     | 406              | 382        |
+| sp_en_trans | 64                     | 77               | 78         |
+
+The metric is the group accuracy of the reading sections: the share of test pairs in which the true (or positive) member scores higher, ties sharing the credit, so chance is 0.5. Each layer series takes the layer with the highest mean validation accuracy over the 10 training sets (the first layer on ties) and reports the mean test accuracy of the 10 at that layer; the text-only controls read no layer. Every cell below gives two 95 percent intervals: first the Wilson interval over the test pairs, then the percentile bootstrap over the 10 training sets (2,000 resamples). The first covers the sampling of the test pairs; the second covers the variation between training sets, as the bootstrap intervals of the reading sections above do. Neither covers the variation between runs.
+
+What the series read:
+
+- `pca_diff` (the reader, LAT): the first principal component of the centred differences within the training pairs.
+- `mean_diff` and `whitened_mean_diff` (baselines): the difference between the two class means of the training activations, and that difference under the inverse of the pooled within-class covariance, shrunk toward a scaled identity with the Ledoit-Wolf weight where the paper uses a pseudo-inverse.
+- `logistic` (baseline): an L2 logistic regression on the training activations (scikit-learn, `C` 1.0), refitted with a tighter tolerance when the solver stops at its all-zero start.
+- `ccs` (baseline): CCS, whose loss uses no label, fitted on the contrast pairs of each training set and scored from its pair probabilities. On the truth sets its contrast pairs are the pairs above. Sentiment has no negations, so there each text goes into one prompt in the form of Burns et al., completed once with "positive" and once with "negative": on sentiment CCS reads its own prompts, while the other finders read R1's, on the same test pairs.
+- Controls: `random`, a random unit direction; `shuffled`, the LAT reader scored against held-out labels shuffled within each pair; and `text_word` and `text_char`, the word and character n-gram classifiers of [TB1](#text-baselines-for-the-readers-tb1), fitted on the raw texts of each training set with no model, so they are the same on every checkpoint. Every direction, `random` and CCS included, takes its sign from the training labels.
+
+B2 loads each model in the dtype registered for its checkpoint (column Weights). It ran on the four GPT-2 sizes and the Qwen3 0.6B and 1.7B pairs; the Qwen3 4B pair has not been run. Seven runs were made at `c2c1405` and the `gpt2-large` run at `7163b9f`, whose code is that of `8f70c01` and refits a logistic fit that stops at zero (see [Run identity](#run-identity)):
+
+| Checkpoint      | B2 run                            | Blocks | Weights  | Commit    |
+| --------------- | --------------------------------- | ------ | -------- | --------- |
+| gpt2            | `b2/gpt2/317ba03fe78b`            | 12     | float32  | `c2c1405` |
+| gpt2-medium     | `b2/gpt2-medium/6087c2624032`     | 24     | float32  | `c2c1405` |
+| gpt2-large      | `b2/gpt2-large/43f761636126`      | 36     | float32  | `7163b9f` |
+| gpt2-xl         | `b2/gpt2-xl/3276514129d4`         | 48     | float16  | `c2c1405` |
+| qwen3-0.6b-base | `b2/qwen3-0.6b-base/a93e6dc3ef74` | 28     | bfloat16 | `c2c1405` |
+| qwen3-0.6b      | `b2/qwen3-0.6b/c5825ed954c0`      | 28     | bfloat16 | `c2c1405` |
+| qwen3-1.7b-base | `b2/qwen3-1.7b-base/55db82192fb3` | 28     | bfloat16 | `c2c1405` |
+| qwen3-1.7b      | `b2/qwen3-1.7b/a42744388639`      | 28     | bfloat16 | `c2c1405` |
+
+A checkpoint is its own model, so the columns below are separate rows of evidence and are never pooled; the base and post-trained Qwen3 checkpoints of a size are separate columns.
+
+### The GPT-2 sizes
+
+`sentiment` (214 test pairs), test accuracy, then the Wilson interval over the test pairs, then the bootstrap interval over the 10 training sets:
+
+| Series             | Kind     | gpt2                                | gpt2-medium                         | gpt2-large                          | gpt2-xl                             |
+| ------------------ | -------- | ----------------------------------- | ----------------------------------- | ----------------------------------- | ----------------------------------- |
+| pca_diff           | reader   | 0.508 [0.442, 0.575] [0.496, 0.520] | 0.508 [0.441, 0.574] [0.487, 0.528] | 0.500 [0.434, 0.566] [0.495, 0.505] | 0.503 [0.436, 0.569] [0.492, 0.515] |
+| mean_diff          | baseline | 0.654 [0.588, 0.714] [0.619, 0.684] | 0.684 [0.619, 0.742] [0.661, 0.707] | 0.700 [0.635, 0.757] [0.660, 0.735] | 0.657 [0.591, 0.717] [0.638, 0.680] |
+| whitened_mean_diff | baseline | 0.776 [0.715, 0.826] [0.761, 0.792] | 0.798 [0.739, 0.846] [0.776, 0.819] | 0.835 [0.779, 0.878] [0.818, 0.851] | 0.854 [0.800, 0.895] [0.835, 0.872] |
+| logistic           | baseline | 0.743 [0.681, 0.797] [0.733, 0.753] | 0.741 [0.679, 0.795] [0.721, 0.759] | 0.807 [0.749, 0.854] [0.798, 0.817] | 0.751 [0.689, 0.805] [0.739, 0.763] |
+| ccs                | baseline | 0.555 [0.488, 0.620] [0.515, 0.583] | 0.548 [0.481, 0.614] [0.518, 0.570] | 0.567 [0.500, 0.632] [0.561, 0.573] | 0.533 [0.466, 0.598] [0.499, 0.562] |
+| random             | control  | 0.518 [0.452, 0.584] [0.491, 0.546] | 0.519 [0.452, 0.585] [0.483, 0.553] | 0.560 [0.493, 0.625] [0.516, 0.602] | 0.558 [0.491, 0.623] [0.525, 0.590] |
+| shuffled           | control  | 0.511 [0.444, 0.577] [0.491, 0.532] | 0.500 [0.433, 0.566] [0.482, 0.522] | 0.488 [0.422, 0.554] [0.462, 0.509] | 0.498 [0.432, 0.565] [0.475, 0.522] |
+| text_word          | control  | 0.586 [0.520, 0.650] [0.569, 0.605] | 0.586 [0.520, 0.650] [0.569, 0.605] | 0.586 [0.520, 0.650] [0.569, 0.605] | 0.586 [0.520, 0.650] [0.569, 0.605] |
+| text_char          | control  | 0.616 [0.549, 0.678] [0.597, 0.638] | 0.616 [0.549, 0.678] [0.597, 0.638] | 0.616 [0.549, 0.678] [0.597, 0.638] | 0.616 [0.549, 0.678] [0.597, 0.638] |
+
+`cities` (269 test pairs):
+
+| Series             | Kind     | gpt2                                | gpt2-medium                         | gpt2-large                          | gpt2-xl                             |
+| ------------------ | -------- | ----------------------------------- | ----------------------------------- | ----------------------------------- | ----------------------------------- |
+| pca_diff           | reader   | 0.500 [0.441, 0.559] [0.497, 0.503] | 0.500 [0.441, 0.559] [0.497, 0.503] | 0.500 [0.441, 0.559] [0.497, 0.503] | 0.490 [0.431, 0.549] [0.476, 0.508] |
+| mean_diff          | baseline | 0.505 [0.445, 0.564] [0.497, 0.517] | 0.510 [0.450, 0.569] [0.499, 0.528] | 0.520 [0.461, 0.579] [0.497, 0.564] | 0.548 [0.488, 0.606] [0.506, 0.610] |
+| whitened_mean_diff | baseline | 0.655 [0.596, 0.709] [0.641, 0.668] | 0.770 [0.716, 0.816] [0.746, 0.790] | 0.835 [0.786, 0.875] [0.822, 0.847] | 0.804 [0.752, 0.847] [0.790, 0.814] |
+| logistic           | baseline | 0.509 [0.450, 0.568] [0.497, 0.530] | 0.533 [0.474, 0.592] [0.499, 0.579] | 0.551 [0.491, 0.609] [0.499, 0.623] | 0.592 [0.532, 0.649] [0.538, 0.653] |
+| ccs                | baseline | 0.491 [0.432, 0.551] [0.474, 0.511] | 0.569 [0.509, 0.627] [0.530, 0.607] | 0.707 [0.650, 0.758] [0.641, 0.760] | 0.755 [0.700, 0.802] [0.739, 0.768] |
+| random             | control  | 0.524 [0.465, 0.583] [0.509, 0.541] | 0.545 [0.485, 0.603] [0.510, 0.578] | 0.542 [0.483, 0.601] [0.505, 0.594] | 0.522 [0.462, 0.581] [0.497, 0.543] |
+| shuffled           | control  | 0.504 [0.445, 0.564] [0.493, 0.516] | 0.504 [0.445, 0.564] [0.493, 0.516] | 0.509 [0.450, 0.568] [0.493, 0.525] | 0.502 [0.443, 0.561] [0.489, 0.515] |
+| text_word          | control  | 0.500 [0.441, 0.559] [0.497, 0.503] | 0.500 [0.441, 0.559] [0.497, 0.503] | 0.500 [0.441, 0.559] [0.497, 0.503] | 0.500 [0.441, 0.559] [0.497, 0.503] |
+| text_char          | control  | 0.499 [0.440, 0.558] [0.496, 0.502] | 0.499 [0.440, 0.558] [0.496, 0.502] | 0.499 [0.440, 0.558] [0.496, 0.502] | 0.499 [0.440, 0.558] [0.496, 0.502] |
+
+`larger_than` (382 test pairs):
+
+| Series             | Kind     | gpt2                                | gpt2-medium                         | gpt2-large                          | gpt2-xl                             |
+| ------------------ | -------- | ----------------------------------- | ----------------------------------- | ----------------------------------- | ----------------------------------- |
+| pca_diff           | reader   | 0.500 [0.450, 0.550] [0.494, 0.506] | 0.500 [0.450, 0.550] [0.494, 0.506] | 0.500 [0.450, 0.550] [0.494, 0.506] | 0.500 [0.450, 0.550] [0.494, 0.506] |
+| mean_diff          | baseline | 0.541 [0.491, 0.590] [0.500, 0.591] | 0.568 [0.518, 0.617] [0.500, 0.651] | 0.542 [0.492, 0.591] [0.500, 0.600] | 0.573 [0.523, 0.622] [0.500, 0.670] |
+| whitened_mean_diff | baseline | 0.874 [0.837, 0.904] [0.857, 0.892] | 0.910 [0.877, 0.934] [0.893, 0.925] | 0.925 [0.894, 0.947] [0.916, 0.932] | 0.947 [0.919, 0.965] [0.935, 0.958] |
+| logistic           | baseline | 0.535 [0.485, 0.585] [0.500, 0.582] | 0.568 [0.518, 0.617] [0.503, 0.652] | 0.569 [0.519, 0.618] [0.501, 0.664] | 0.585 [0.535, 0.633] [0.517, 0.658] |
+| ccs                | baseline | 0.727 [0.680, 0.769] [0.693, 0.758] | 0.742 [0.696, 0.784] [0.720, 0.756] | 0.745 [0.699, 0.786] [0.726, 0.756] | 0.740 [0.694, 0.781] [0.720, 0.753] |
+| random             | control  | 0.557 [0.507, 0.606] [0.517, 0.609] | 0.591 [0.541, 0.639] [0.538, 0.652] | 0.574 [0.524, 0.623] [0.521, 0.640] | 0.562 [0.511, 0.610] [0.511, 0.618] |
+| shuffled           | control  | 0.502 [0.452, 0.552] [0.488, 0.517] | 0.502 [0.452, 0.552] [0.488, 0.517] | 0.502 [0.452, 0.552] [0.488, 0.517] | 0.502 [0.452, 0.552] [0.488, 0.517] |
+| text_word          | control  | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] |
+| text_char          | control  | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] |
+
+`sp_en_trans` (78 test pairs):
+
+| Series             | Kind     | gpt2                                | gpt2-medium                         | gpt2-large                          | gpt2-xl                             |
+| ------------------ | -------- | ----------------------------------- | ----------------------------------- | ----------------------------------- | ----------------------------------- |
+| pca_diff           | reader   | 0.523 [0.414, 0.630] [0.500, 0.538] | 0.523 [0.414, 0.630] [0.500, 0.538] | 0.540 [0.430, 0.646] [0.494, 0.585] | 0.523 [0.414, 0.630] [0.500, 0.538] |
+| mean_diff          | baseline | 0.523 [0.414, 0.630] [0.500, 0.538] | 0.523 [0.414, 0.630] [0.500, 0.538] | 0.581 [0.470, 0.684] [0.571, 0.590] | 0.544 [0.434, 0.649] [0.522, 0.563] |
+| whitened_mean_diff | baseline | 0.554 [0.444, 0.659] [0.540, 0.569] | 0.526 [0.416, 0.633] [0.492, 0.556] | 0.538 [0.429, 0.645] [0.506, 0.574] | 0.587 [0.476, 0.690] [0.547, 0.627] |
+| logistic           | baseline | 0.544 [0.434, 0.649] [0.523, 0.562] | 0.571 [0.460, 0.674] [0.555, 0.586] | 0.578 [0.467, 0.682] [0.567, 0.586] | 0.569 [0.459, 0.673] [0.555, 0.585] |
+| ccs                | baseline | 0.509 [0.400, 0.617] [0.469, 0.551] | 0.506 [0.397, 0.614] [0.490, 0.521] | 0.504 [0.395, 0.612] [0.478, 0.526] | 0.485 [0.378, 0.594] [0.471, 0.498] |
+| random             | control  | 0.515 [0.406, 0.623] [0.496, 0.531] | 0.527 [0.417, 0.634] [0.508, 0.541] | 0.500 [0.392, 0.608] [0.444, 0.556] | 0.517 [0.408, 0.624] [0.486, 0.547] |
+| shuffled           | control  | 0.528 [0.419, 0.635] [0.506, 0.547] | 0.528 [0.419, 0.635] [0.506, 0.547] | 0.517 [0.408, 0.624] [0.490, 0.550] | 0.528 [0.419, 0.635] [0.506, 0.547] |
+| text_word          | control  | 0.513 [0.404, 0.621] [0.499, 0.524] | 0.513 [0.404, 0.621] [0.499, 0.524] | 0.513 [0.404, 0.621] [0.499, 0.524] | 0.513 [0.404, 0.621] [0.499, 0.524] |
+| text_char          | control  | 0.523 [0.414, 0.630] [0.500, 0.538] | 0.523 [0.414, 0.630] [0.500, 0.538] | 0.523 [0.414, 0.630] [0.500, 0.538] | 0.523 [0.414, 0.630] [0.500, 0.538] |
+
+- **LAT reads at chance on all four datasets.** Its Wilson interval includes 0.5 in all 16 cells: it reads 0.500 to 0.508 on sentiment, 0.490 to 0.500 on cities, 0.500 on larger_than and 0.523 to 0.540 on sp_en_trans. On sentiment it is below both text-only controls (0.586 and 0.616) on every size, with bootstrap intervals apart and Wilson intervals that overlap.
+- **On the truth sets the scores of LAT often equal those of ranking the statement above its negation, or below it, in every pair.** On cities for `gpt2`, `gpt2-medium` and `gpt2-large`, on larger_than for all four sizes and on sp_en_trans for `gpt2`, `gpt2-medium` and `gpt2-xl`, each of the 10 training sets gives LAT one of two test scores: 136 or 133 of the 269 cities pairs, 195 or 187 of the 382 larger_than pairs, and 36 or 42 of the 78 sp_en_trans pairs. These are the numbers of test pairs whose statement is true and whose negation is true (counted with the Geometry of Truth loader), so each is the score of a reader that puts the statement above its negation in every pair, or the negation above the statement in every pair, whatever the label. On cities and larger_than five training sets fall on each side, so the mean is 0.500.
+- **The whitened mass-mean probe is the highest baseline on sentiment, cities and larger_than at every size.** It reads 0.776 to 0.854 on sentiment, 0.655 to 0.835 on cities and 0.874 to 0.947 on larger_than, with Wilson intervals above 0.5 in all 12 cells. `mean_diff` and `logistic` read 0.505 to 0.592 on cities and larger_than, where the whitened probe is +0.150 to +0.383 above `mean_diff`, and 0.654 to 0.700 (`mean_diff`) and 0.741 to 0.807 (`logistic`) on sentiment.
+- **CCS reads larger_than and cities, and not sentiment and sp_en_trans.** It reads 0.727 to 0.745 on larger_than and 0.491, 0.569, 0.707 and 0.755 on cities (`gpt2` to `gpt2-xl`; the Wilson interval includes 0.5 on `gpt2` only), and stays near chance on sentiment (0.533 to 0.567, with a Wilson interval that includes 0.5 on `gpt2`, `gpt2-medium` and `gpt2-xl`) and on sp_en_trans (0.485 to 0.509). On `gpt2-xl` sp_en_trans it reads 0.485, with a bootstrap interval below 0.5 ([0.471, 0.498]) and a Wilson interval that includes it ([0.378, 0.594]).
+- **sp_en_trans does not separate any series from chance on these sizes.** With 78 test pairs, every Wilson interval of every series includes 0.5 on all four sizes.
+- **Controls.** The random direction reads 0.500 to 0.591, with a Wilson interval above 0.5 only on larger_than (4 of the 16 cells), and the shuffled control 0.488 to 0.528. LAT is below the random direction in 13 of the 16 cells, with bootstrap intervals apart in 9 and Wilson intervals apart in none.
+
+### The Qwen3 0.6B and 1.7B pairs
+
+`sentiment` (214 test pairs), test accuracy, then the Wilson interval over the test pairs, then the bootstrap interval over the 10 training sets:
+
+| Series             | Kind     | qwen3-0.6b-base                     | qwen3-0.6b                          | qwen3-1.7b-base                     | qwen3-1.7b                          |
+| ------------------ | -------- | ----------------------------------- | ----------------------------------- | ----------------------------------- | ----------------------------------- |
+| pca_diff           | reader   | 0.659 [0.593, 0.719] [0.599, 0.720] | 0.581 [0.514, 0.645] [0.552, 0.607] | 0.816 [0.759, 0.862] [0.805, 0.826] | 0.536 [0.469, 0.601] [0.512, 0.555] |
+| mean_diff          | baseline | 0.929 [0.886, 0.956] [0.921, 0.936] | 0.737 [0.674, 0.791] [0.706, 0.764] | 0.874 [0.823, 0.912] [0.860, 0.890] | 0.742 [0.679, 0.796] [0.726, 0.758] |
+| whitened_mean_diff | baseline | 0.890 [0.841, 0.925] [0.876, 0.904] | 0.841 [0.786, 0.884] [0.823, 0.860] | 0.934 [0.893, 0.960] [0.922, 0.946] | 0.897 [0.849, 0.931] [0.890, 0.904] |
+| logistic           | baseline | 0.929 [0.886, 0.956] [0.924, 0.934] | 0.853 [0.800, 0.894] [0.836, 0.871] | 0.936 [0.895, 0.962] [0.929, 0.943] | 0.858 [0.805, 0.898] [0.845, 0.871] |
+| ccs                | baseline | 0.771 [0.710, 0.822] [0.660, 0.861] | 0.953 [0.916, 0.974] [0.950, 0.956] | 0.965 [0.931, 0.983] [0.961, 0.969] | 0.962 [0.928, 0.981] [0.958, 0.966] |
+| random             | control  | 0.644 [0.578, 0.705] [0.574, 0.702] | 0.620 [0.553, 0.682] [0.572, 0.661] | 0.676 [0.611, 0.735] [0.634, 0.724] | 0.582 [0.515, 0.646] [0.532, 0.629] |
+| shuffled           | control  | 0.484 [0.418, 0.550] [0.457, 0.507] | 0.514 [0.448, 0.581] [0.501, 0.527] | 0.514 [0.447, 0.580] [0.489, 0.545] | 0.493 [0.426, 0.559] [0.463, 0.516] |
+| text_word          | control  | 0.586 [0.520, 0.650] [0.569, 0.605] | 0.586 [0.520, 0.650] [0.569, 0.605] | 0.586 [0.520, 0.650] [0.569, 0.605] | 0.586 [0.520, 0.650] [0.569, 0.605] |
+| text_char          | control  | 0.616 [0.549, 0.678] [0.597, 0.638] | 0.616 [0.549, 0.678] [0.597, 0.638] | 0.616 [0.549, 0.678] [0.597, 0.638] | 0.616 [0.549, 0.678] [0.597, 0.638] |
+
+`cities` (269 test pairs):
+
+| Series             | Kind     | qwen3-0.6b-base                     | qwen3-0.6b                          | qwen3-1.7b-base                     | qwen3-1.7b                          |
+| ------------------ | -------- | ----------------------------------- | ----------------------------------- | ----------------------------------- | ----------------------------------- |
+| pca_diff           | reader   | 0.501 [0.442, 0.561] [0.496, 0.507] | 0.500 [0.441, 0.559] [0.497, 0.503] | 0.992 [0.972, 0.998] [0.991, 0.993] | 0.552 [0.492, 0.610] [0.520, 0.586] |
+| mean_diff          | baseline | 0.590 [0.531, 0.647] [0.520, 0.684] | 0.577 [0.517, 0.634] [0.525, 0.648] | 0.993 [0.973, 0.998] [0.993, 0.993] | 0.958 [0.927, 0.976] [0.940, 0.974] |
+| whitened_mean_diff | baseline | 0.935 [0.899, 0.959] [0.922, 0.947] | 0.855 [0.808, 0.892] [0.841, 0.869] | 0.987 [0.966, 0.995] [0.985, 0.991] | 0.969 [0.941, 0.984] [0.966, 0.972] |
+| logistic           | baseline | 0.894 [0.852, 0.925] [0.875, 0.910] | 0.831 [0.781, 0.871] [0.813, 0.849] | 0.993 [0.973, 0.998] [0.993, 0.993] | 0.974 [0.947, 0.987] [0.968, 0.979] |
+| ccs                | baseline | 0.917 [0.878, 0.944] [0.900, 0.931] | 0.852 [0.804, 0.889] [0.839, 0.864] | 0.990 [0.970, 0.997] [0.987, 0.993] | 0.969 [0.940, 0.984] [0.965, 0.973] |
+| random             | control  | 0.582 [0.522, 0.639] [0.531, 0.644] | 0.581 [0.521, 0.638] [0.545, 0.617] | 0.872 [0.826, 0.907] [0.764, 0.969] | 0.734 [0.678, 0.783] [0.639, 0.836] |
+| shuffled           | control  | 0.504 [0.444, 0.563] [0.484, 0.526] | 0.504 [0.445, 0.564] [0.493, 0.516] | 0.491 [0.432, 0.551] [0.468, 0.513] | 0.507 [0.448, 0.566] [0.496, 0.519] |
+| text_word          | control  | 0.500 [0.441, 0.559] [0.497, 0.503] | 0.500 [0.441, 0.559] [0.497, 0.503] | 0.500 [0.441, 0.559] [0.497, 0.503] | 0.500 [0.441, 0.559] [0.497, 0.503] |
+| text_char          | control  | 0.499 [0.440, 0.558] [0.496, 0.502] | 0.499 [0.440, 0.558] [0.496, 0.502] | 0.499 [0.440, 0.558] [0.496, 0.502] | 0.499 [0.440, 0.558] [0.496, 0.502] |
+
+`larger_than` (382 test pairs):
+
+| Series             | Kind     | qwen3-0.6b-base                     | qwen3-0.6b                          | qwen3-1.7b-base                     | qwen3-1.7b                          |
+| ------------------ | -------- | ----------------------------------- | ----------------------------------- | ----------------------------------- | ----------------------------------- |
+| pca_diff           | reader   | 0.500 [0.450, 0.550] [0.494, 0.506] | 0.508 [0.458, 0.558] [0.502, 0.516] | 0.958 [0.933, 0.974] [0.958, 0.958] | 0.954 [0.928, 0.971] [0.953, 0.955] |
+| mean_diff          | baseline | 0.808 [0.765, 0.844] [0.725, 0.879] | 0.842 [0.802, 0.876] [0.823, 0.859] | 0.960 [0.936, 0.976] [0.959, 0.961] | 0.953 [0.926, 0.970] [0.952, 0.953] |
+| whitened_mean_diff | baseline | 0.959 [0.934, 0.975] [0.952, 0.965] | 0.885 [0.849, 0.914] [0.878, 0.892] | 0.981 [0.961, 0.990] [0.977, 0.985] | 0.958 [0.933, 0.974] [0.954, 0.962] |
+| logistic           | baseline | 0.946 [0.919, 0.965] [0.940, 0.952] | 0.855 [0.816, 0.887] [0.844, 0.865] | 0.967 [0.944, 0.981] [0.966, 0.968] | 0.949 [0.923, 0.967] [0.948, 0.951] |
+| ccs                | baseline | 0.940 [0.911, 0.959] [0.935, 0.944] | 0.851 [0.812, 0.883] [0.841, 0.861] | 0.970 [0.948, 0.983] [0.969, 0.972] | 0.950 [0.923, 0.967] [0.947, 0.952] |
+| random             | control  | 0.614 [0.564, 0.662] [0.553, 0.681] | 0.651 [0.601, 0.697] [0.572, 0.725] | 0.901 [0.867, 0.927] [0.818, 0.962] | 0.818 [0.776, 0.854] [0.742, 0.881] |
+| shuffled           | control  | 0.502 [0.452, 0.552] [0.488, 0.517] | 0.502 [0.452, 0.552] [0.488, 0.517] | 0.502 [0.452, 0.552] [0.488, 0.517] | 0.502 [0.452, 0.552] [0.488, 0.517] |
+| text_word          | control  | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] |
+| text_char          | control  | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] | 0.503 [0.453, 0.553] [0.497, 0.508] |
+
+`sp_en_trans` (78 test pairs):
+
+| Series             | Kind     | qwen3-0.6b-base                     | qwen3-0.6b                          | qwen3-1.7b-base                     | qwen3-1.7b                          |
+| ------------------ | -------- | ----------------------------------- | ----------------------------------- | ----------------------------------- | ----------------------------------- |
+| pca_diff           | reader   | 0.523 [0.414, 0.630] [0.500, 0.538] | 0.522 [0.413, 0.629] [0.500, 0.538] | 0.567 [0.456, 0.671] [0.515, 0.609] | 0.523 [0.414, 0.630] [0.500, 0.538] |
+| mean_diff          | baseline | 0.623 [0.512, 0.722] [0.555, 0.697] | 0.577 [0.466, 0.680] [0.519, 0.644] | 0.954 [0.882, 0.983] [0.924, 0.978] | 0.968 [0.902, 0.990] [0.950, 0.983] |
+| whitened_mean_diff | baseline | 0.964 [0.897, 0.988] [0.956, 0.972] | 0.954 [0.882, 0.983] [0.945, 0.963] | 0.999 [0.951, 1.000] [0.996, 1.000] | 0.994 [0.942, 0.999] [0.988, 0.999] |
+| logistic           | baseline | 0.895 [0.807, 0.945] [0.867, 0.921] | 0.877 [0.786, 0.933] [0.859, 0.892] | 0.992 [0.939, 0.999] [0.987, 0.997] | 0.996 [0.946, 1.000] [0.992, 1.000] |
+| ccs                | baseline | 0.862 [0.768, 0.921] [0.797, 0.906] | 0.821 [0.721, 0.890] [0.778, 0.865] | 0.986 [0.929, 0.997] [0.981, 0.990] | 0.952 [0.880, 0.982] [0.937, 0.968] |
+| random             | control  | 0.582 [0.471, 0.685] [0.529, 0.635] | 0.542 [0.432, 0.648] [0.505, 0.582] | 0.746 [0.640, 0.830] [0.663, 0.833] | 0.637 [0.526, 0.735] [0.569, 0.701] |
+| shuffled           | control  | 0.528 [0.419, 0.635] [0.506, 0.547] | 0.527 [0.417, 0.634] [0.505, 0.546] | 0.487 [0.379, 0.596] [0.464, 0.513] | 0.528 [0.419, 0.635] [0.506, 0.547] |
+| text_word          | control  | 0.513 [0.404, 0.621] [0.499, 0.524] | 0.513 [0.404, 0.621] [0.499, 0.524] | 0.513 [0.404, 0.621] [0.499, 0.524] | 0.513 [0.404, 0.621] [0.499, 0.524] |
+| text_char          | control  | 0.523 [0.414, 0.630] [0.500, 0.538] | 0.523 [0.414, 0.630] [0.500, 0.538] | 0.523 [0.414, 0.630] [0.500, 0.538] | 0.523 [0.414, 0.630] [0.500, 0.538] |
+
+- **LAT has a Wilson interval above 0.5 in 6 of the 16 cells.** These are sentiment on `qwen3-0.6b-base`, `qwen3-0.6b` and `qwen3-1.7b-base` (0.659, 0.581 and 0.816), cities on `qwen3-1.7b-base` (0.992) and larger_than on the 1.7B pair (0.958 and 0.954). On the 0.6B pair it reads 0.500 to 0.508 on cities and larger_than, on `qwen3-1.7b` cities 0.552 [0.492, 0.610], and on sp_en_trans 0.522 to 0.567 on all four. The two-score pattern described for the GPT-2 sizes holds on `qwen3-0.6b` cities, `qwen3-0.6b-base` larger_than and sp_en_trans on `qwen3-0.6b-base` and `qwen3-1.7b`.
+- **LAT is below the highest baseline in every cell.** The highest baseline reads 0.855 to 0.999. The intervals of LAT and of the highest baseline overlap, both kinds, only on `qwen3-1.7b-base` cities (0.992 against 0.993, `mean_diff` and `logistic`) and `qwen3-1.7b` larger_than (0.954 against 0.958, `whitened_mean_diff`), and the Wilson intervals also on `qwen3-1.7b-base` larger_than (0.958 against 0.981). The whitened mass-mean probe is the highest baseline in 9 of the 16 cells: cities on the 0.6B pair, larger_than on all four and sp_en_trans on all but `qwen3-1.7b`; on sp_en_trans it reads 0.954 to 0.999.
+- **Per role at 1.7B, LAT is lower on the post-trained checkpoint on sentiment and cities by more than any baseline.** LAT reads 0.536 against 0.816 on sentiment (-0.280) and 0.552 against 0.992 on cities (-0.440), 0.954 against 0.958 on larger_than and 0.523 against 0.567 on sp_en_trans (`qwen3-1.7b` against `qwen3-1.7b-base`). On sentiment, cities and larger_than the four baselines change by -0.133 to -0.003 between the two checkpoints.
+- **CCS is the highest series on sentiment for `qwen3-0.6b`, `qwen3-1.7b-base` and `qwen3-1.7b`** (0.953, 0.965 and 0.962), where it reads its own prompts and not R1's. On `qwen3-0.6b-base` it reads 0.771, with the widest bootstrap interval of the CCS rows ([0.660, 0.861]).
+- **The random direction reads the truth sets on `qwen3-1.7b-base`.** It reads 0.872 on cities, 0.901 on larger_than and 0.746 on sp_en_trans, with bootstrap intervals 0.144 to 0.204 wide ([0.764, 0.969], [0.818, 0.962] and [0.663, 0.833]); on `qwen3-1.7b` it reads 0.734, 0.818 and 0.637, and on the truth sets of the 0.6B pair 0.542 to 0.651. Its Wilson interval lies above 0.5 in 14 of the 16 Qwen3 cells, all but sp_en_trans on the 0.6B pair. LAT is below the random direction in 11 of the 16 cells, with bootstrap intervals apart in 7 and Wilson intervals apart in 3 (larger_than on the 0.6B pair and cities on `qwen3-1.7b`).
+
+### Validation layers
+
+The layer each series chose on its validation curve (`L<k>` is the residual stream after block `k`):
+
+| Series                         | gpt2 | gpt2-medium | gpt2-large | gpt2-xl | qwen3-0.6b-base | qwen3-0.6b | qwen3-1.7b-base | qwen3-1.7b |
+| ------------------------------ | ---- | ----------- | ---------- | ------- | --------------- | ---------- | --------------- | ---------- |
+| blocks                         | 12   | 24          | 36         | 48      | 28              | 28         | 28              | 28         |
+| sentiment pca_diff             | L11  | L12         | L18        | L45     | L20             | L10        | L19             | L27        |
+| sentiment mean_diff            | L12  | L20         | L36        | L43     | L19             | L18        | L18             | L27        |
+| sentiment whitened_mean_diff   | L9   | L15         | L36        | L24     | L22             | L24        | L19             | L18        |
+| sentiment logistic             | L8   | L20         | L36        | L39     | L22             | L18        | L18             | L18        |
+| sentiment ccs                  | L3   | L5          | L5         | L15     | L15             | L21        | L20             | L14        |
+| sentiment random               | L12  | L21         | L31        | L22     | L20             | L25        | L23             | L25        |
+| sentiment shuffled             | L10  | L8          | L11        | L30     | L1              | L28        | L13             | L7         |
+| cities pca_diff                | L1   | L17         | L3         | L1      | L1              | L8         | L20             | L19        |
+| cities mean_diff               | L8   | L16         | L17        | L48     | L28             | L25        | L19             | L16        |
+| cities whitened_mean_diff      | L9   | L20         | L36        | L34     | L22             | L21        | L18             | L17        |
+| cities logistic                | L8   | L16         | L27        | L29     | L20             | L18        | L18             | L17        |
+| cities ccs                     | L8   | L17         | L23        | L29     | L20             | L19        | L23             | L17        |
+| cities random                  | L10  | L24         | L20        | L45     | L22             | L22        | L23             | L28        |
+| cities shuffled                | L1   | L17         | L1         | L1      | L1              | L8         | L25             | L2         |
+| larger_than pca_diff           | L1   | L1          | L1         | L5      | L2              | L24        | L20             | L17        |
+| larger_than mean_diff          | L7   | L20         | L24        | L33     | L18             | L18        | L19             | L18        |
+| larger_than whitened_mean_diff | L11  | L20         | L24        | L26     | L24             | L25        | L17             | L24        |
+| larger_than logistic           | L7   | L21         | L26        | L33     | L18             | L18        | L16             | L25        |
+| larger_than ccs                | L9   | L11         | L26        | L14     | L28             | L20        | L22             | L19        |
+| larger_than random             | L9   | L18         | L26        | L36     | L20             | L23        | L25             | L16        |
+| larger_than shuffled           | L9   | L2          | L4         | L2      | L1              | L2         | L4              | L4         |
+| sp_en_trans pca_diff           | L1   | L1          | L1         | L1      | L1              | L2         | L25             | L1         |
+| sp_en_trans mean_diff          | L1   | L1          | L1         | L1      | L23             | L25        | L18             | L20        |
+| sp_en_trans whitened_mean_diff | L7   | L13         | L19        | L22     | L16             | L19        | L25             | L18        |
+| sp_en_trans logistic           | L1   | L1          | L1         | L1      | L18             | L16        | L18             | L19        |
+| sp_en_trans ccs                | L9   | L17         | L19        | L32     | L18             | L26        | L23             | L20        |
+| sp_en_trans random             | L11  | L12         | L2         | L8      | L20             | L22        | L25             | L23        |
+| sp_en_trans shuffled           | L1   | L1          | L1         | L1      | L1              | L2         | L23             | L1         |
+
+LAT takes L1 or L2 in 14 of the 32 cells, all on the truth sets.
+
+### CCS training loss
+
+The mean CCS loss on the training pairs at the validation layer of CCS (`ccs_loss` of `summary.json`; the consistency term plus the confidence term, 0 at best):
+
+| Dataset     | gpt2    | gpt2-medium | gpt2-large | gpt2-xl | qwen3-0.6b-base | qwen3-0.6b | qwen3-1.7b-base | qwen3-1.7b |
+| ----------- | ------- | ----------- | ---------- | ------- | --------------- | ---------- | --------------- | ---------- |
+| sentiment   | 1.1e-03 | 5.1e-04     | 1.5e-04    | 4.3e-05 | 2.1e-04         | 4.9e-05    | 2.2e-05         | 5.3e-06    |
+| cities      | 4.2e-03 | 4.6e-03     | 2.1e-03    | 5.2e-04 | 1.4e-04         | 1.5e-04    | 5.5e-07         | 4.8e-07    |
+| larger_than | 1.1e-02 | 3.3e-03     | 1.9e-03    | 3.1e-03 | 4.5e-04         | 6.3e-03    | 7.8e-07         | 6.3e-03    |
+| sp_en_trans | 2.7e-03 | 8.4e-04     | 4.4e-04    | 1.6e-02 | 9.3e-05         | 1.1e-04    | 3.1e-03         | 2.8e-06    |
+
+Over the 32 cells the loss ranges from 4.8e-07 to 1.6e-02. It is that low on the cells where CCS reads near chance (sentiment and sp_en_trans on the GPT-2 sizes) as well as on those where it reads above 0.95, so a loss near 0 does not by itself mark a cell where CCS reads the concept.
+
+### What the eight checkpoints show together
+
+- **LAT against the baselines.** LAT is below the highest baseline in all 32 cells, by 0.001 to 0.473. The bootstrap intervals lie apart in 29 cells and the Wilson intervals in 25; both overlap only on `gpt2-large` sp_en_trans, `qwen3-1.7b-base` cities and `qwen3-1.7b` larger_than. The whitened mass-mean probe is the highest baseline in 23 of the 32 cells.
+- **LAT on the truth sets.** In 14 of the 24 truth cells, every training set gives LAT the score of a reader that puts the statement above, or below, its negation in every test pair. LAT has a Wilson interval above 0.5 on a truth set only on cities for `qwen3-1.7b-base` and on larger_than for the 1.7B pair.
+- **Controls.** The shuffled control reads 0.484 to 0.528, with a Wilson interval that includes 0.5 in all 32 cells (its bootstrap interval excludes 0.5 in 7, at 0.514 to 0.528). The text-only controls are the same on every checkpoint: 0.586 and 0.616 on sentiment, with Wilson intervals above 0.5, and 0.499 to 0.523 on the truth sets, with intervals that include 0.5. The random direction has a Wilson interval above 0.5 in 14 of the 16 Qwen3 cells and on larger_than for the four GPT-2 sizes, and reads 0.872 and 0.901 on cities and larger_than for `qwen3-1.7b-base`.
+- **What the runs do not show.** Each checkpoint has one run, and neither interval covers the variation between runs. On sentiment CCS reads one prompt of its own, where Burns et al. average several, and the other finders read R1's prompts. The two-score pattern of LAT is read from the stored per-seed accuracies and the statement counts, not from the directions, which are not stored. The GPT-2 sizes and the Qwen3 checkpoints run in different dtypes (float32, float16 for `gpt2-xl`, bfloat16). TruthfulQA is not read, and the Qwen3 4B pair has not been run.
+
 ## Approximate answers: range against exact quantities (P10)
 
 P10 asks how a model handles a quantity question whose sourced answer is a range, such as the height of a dog breed or the gestation period of a species, against one whose answer is a single value, such as the height of a building or the running time of a film. P10a measures what the model answers: one number, a range or an abstention, with and without the instruction to give one exact number. P10b reads the hidden states of the same questions: it asks whether a direction fitted on the questions of some families separates range questions from exact questions in a family it was not fitted on, and sets every reader beside surface baselines and a random-direction control. The settings below are those of `config.json` of each run; the code is `p10a_quantities.py` and `p10b_reading.py`.
@@ -8996,6 +9222,27 @@ The P9c run each B1 run read, the start and finish times of the stored `meta.jso
 | qwen3-1.7b-base | 23e50e678a3c | 0f684b3c4b66 | 2026-10-30 08:42:32 | 2026-10-30 09:27:31 | 2,699   | 2,294                    | 39,198           |
 | qwen3-1.7b      | 738bea8112a2 | 7c142334e5fe | 2026-11-02 15:11:01 | 2026-11-02 15:59:25 | 2,904   | 1,875                    | 34,088           |
 
+B2: the eight runs, one per checkpoint of the four GPT-2 sizes and the Qwen3 0.6B and 1.7B pairs, were made one at a time with a clean tree on the laptop GPU with 8 GB of memory (the `device` field of each `meta.json` records `cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)`; torch 2.14.1+cu130, transformers 5.19.0, Windows 11, Python 3.12.6), each model in the dtype registered for its checkpoint (float32 for `gpt2`, `gpt2-medium` and `gpt2-large`, float16 for `gpt2-xl`, bfloat16 for the Qwen3 checkpoints). Seven runs were made at `c2c1405` (the merge of pull request 234) on 2026-10-29 and 2026-10-30, in the column order of the table below without `gpt2-large`. The first `gpt2-large` run, between those of `gpt2-medium` and `gpt2-xl`, stopped with the error "the fitted direction has zero norm": a logistic fit had stopped at its all-zero start, which B2 at `c2c1405` does not refit. Pull request 239 (merged as `8f70c01`) makes B2 pass `refit_at_zero=True`, as P4 does, so such a fit is repeated with a tighter tolerance; the config hash does not change. The `gpt2-large` run was made on 2026-11-02 at `7163b9f`, a commit that adds results only on top of `8f70c01` (`git diff --stat 8f70c01 7163b9f -- src` is empty), after an earlier attempt that day was stopped before it finished; the failed run and that attempt are not exported. Between `c2c1405` and `8f70c01` the source changes in four files: `experiments/b2_finder_baselines.py` only in that argument and its docstring, `experiments/b1_detection_baselines.py` and `experiments/m3_matrix.py`, which B2 does not import, and `reading/probes.py`, where the two functions B2 calls (`_shrunk_mass_mean` and `_checked_stack`) are unchanged. The refit acts only on a fit that ends at zero, and the seven runs at `c2c1405` finished, so none of their logistic fits ended at zero and the change cannot alter their numbers. Every config is the default B2 config of its model: the four datasets, 10 training sets of 64 pairs, every validation and test pair, every layer, the model's BOS default, batch size 8, CCS with 10 restarts of 1,000 epochs at learning rate 0.01, 2,000 bootstrap resamples and seed 0. The config hash of each run was recomputed by loading its `config.json` into the B2 config class and hashing it, and all eight agree with the directory names and with the hash of that default config. The 160 exported files equal those of the local runs (the B2 configs hold no local path), and every layer and accuracy of each `table.json` was recomputed from its `curves_<dataset>_val` and `curves_<dataset>_test` files. Exporting these runs changed no tracked result.
+
+Config hashes (12 hex digits), B2:
+
+| Experiment | gpt2         | gpt2-medium  | gpt2-large   | gpt2-xl      | qwen3-0.6b-base | qwen3-0.6b   | qwen3-1.7b-base | qwen3-1.7b   |
+| ---------- | ------------ | ------------ | ------------ | ------------ | --------------- | ------------ | --------------- | ------------ |
+| B2         | 317ba03fe78b | 6087c2624032 | 43f761636126 | 3276514129d4 | a93e6dc3ef74    | c5825ed954c0 | 55db82192fb3    | a42744388639 |
+
+The commit, the start and finish times of the stored `meta.json` (UTC) and the time between them:
+
+| Checkpoint      | B2           | Commit    | Started (UTC)       | Finished (UTC)      | Seconds |
+| --------------- | ------------ | --------- | ------------------- | ------------------- | ------- |
+| gpt2            | 317ba03fe78b | `c2c1405` | 2026-10-29 16:09:29 | 2026-10-29 16:42:17 | 1,968   |
+| gpt2-medium     | 6087c2624032 | `c2c1405` | 2026-10-29 16:45:27 | 2026-10-29 18:14:19 | 5,332   |
+| gpt2-large      | 43f761636126 | `7163b9f` | 2026-11-02 18:39:11 | 2026-11-02 20:25:47 | 6,396   |
+| gpt2-xl         | 3276514129d4 | `c2c1405` | 2026-10-29 19:26:32 | 2026-10-29 21:48:04 | 8,492   |
+| qwen3-0.6b-base | a93e6dc3ef74 | `c2c1405` | 2026-10-29 21:51:14 | 2026-10-29 23:07:46 | 4,592   |
+| qwen3-0.6b      | c5825ed954c0 | `c2c1405` | 2026-10-29 23:10:57 | 2026-10-30 00:25:59 | 4,502   |
+| qwen3-1.7b-base | 55db82192fb3 | `c2c1405` | 2026-10-30 00:29:10 | 2026-10-30 01:56:09 | 5,219   |
+| qwen3-1.7b      | a42744388639 | `c2c1405` | 2026-10-30 01:59:19 | 2026-10-30 03:24:55 | 5,136   |
+
 The files of every run named here are committed under `results/<experiment>/<model>/<hash>/`, copied with
 `tomography export`, which keeps the JSON, NPZ and CSV files the plots read and rewrites local paths. The figures are
 not committed; `tomography plot all --out results` redraws them from these files.
@@ -9017,6 +9264,8 @@ Not in this document yet. No dates are promised.
   the probe over the output confidence in P9c (only the pooled increment is stored).
 - B1 on the Qwen3 4B pair: not run. B1 loads the model in float32, and the 4B checkpoints in float32 need more GPU memory than the laptop GPU has.
 - B1, not stored: a within-relation paired difference (the paired differences of `table_paired.json` are pooled on PopQA) and the likelihood-weighted variant of semantic entropy (P9a stores no token log-probabilities). Stored but not read in this document: the validation AUROC per layer of the probe, the seconds of the probe and of EigenScore (`summary.json`), and the AURC on TriviaQA and NQ-open (`table.json`).
+- B2 on the Qwen3 4B pair: not run yet. The eight runs were made on the laptop GPU with 8 GB of memory.
+- B2 on TruthfulQA: not read; B2 reads sentiment and the three Geometry of Truth sets. Stored but not read in this document: the accuracy of every layer series at the layers it did not choose, and the per-seed test accuracies at the chosen layer of every series but LAT on the truth sets (`curves_<dataset>_val` and `curves_<dataset>_test`). Not stored: the fitted directions and the CCS loss of each training set (`summary.json` keeps their mean at the CCS layer).
 - V1 on the Qwen3 4B pair: not run yet. V1 loads the model in float32, and the 4B checkpoints in float32 need more GPU
   memory than the laptop GPU has.
 - P10: a hand check of the answer parser (the `human_*` columns of `hand_check.csv` and `hand_check_samples.csv` are empty in every P10a run), and P10d (steering toward hedging); P10d has not run. The animacy and wording confound is controlled by the people heights for the height family only, with no control of the same kind for gestation periods and wingspans, and P10 ran on one set of questions and one seed.
