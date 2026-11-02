@@ -312,8 +312,8 @@ Caveats:
 ## Published finder baselines (B2)
 
 `b2` (`experiments/b2_finder_baselines.py`) puts published direction finders beside LAT (`pca_diff`, the method
-under study) on truth and sentiment: the same training items, layers, layer rule and test pairs for every series. It
-has not been run yet.
+under study) on truth and sentiment: the same training items, layers, layer rule and test pairs for every series. Its
+results on the eight laptop checkpoints are in the findings.
 
 - Baselines: the mass-mean probe (`mean_diff`) and the whitened (IID) mass-mean probe (`whitened_mean_diff`) of
   Marks and Tegmark (2024, `marks2024geometry`), the logistic-regression probe (`logistic`, scikit-learn `C` 1.0;
