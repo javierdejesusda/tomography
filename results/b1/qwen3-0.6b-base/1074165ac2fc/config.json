@@ -1,0 +1,16 @@
+{
+  "experiment": "b1",
+  "model": "qwen3-0.6b-base",
+  "seed": 0,
+  "reliability_run": "results/p9c/qwen3-0.6b-base/264bf7ca3a01",
+  "baselines": [
+    "answer_probe",
+    "semantic_entropy",
+    "eigenscore"
+  ],
+  "references": [
+    "lat",
+    "p_true"
+  ],
+  "batch_size": 8
+}

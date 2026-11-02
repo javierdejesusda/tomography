@@ -1,0 +1,16 @@
+{
+  "experiment": "b1",
+  "model": "gpt2-medium",
+  "seed": 0,
+  "reliability_run": "results/p9c/gpt2-medium/b3d936ab3f3b",
+  "baselines": [
+    "answer_probe",
+    "semantic_entropy",
+    "eigenscore"
+  ],
+  "references": [
+    "lat",
+    "p_true"
+  ],
+  "batch_size": 8
+}

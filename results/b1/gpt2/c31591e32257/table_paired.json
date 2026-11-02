@@ -1,0 +1,125 @@
+{
+  "_meta": {
+    "experiment": "b1",
+    "config_hash": "c31591e32257",
+    "seed": 0,
+    "git_sha": "8f70c01b90f9f37194294e495e655aa947b2db4b",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-10-30T04:22:20+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "b1",
+      "model": "gpt2",
+      "seed": 0,
+      "reliability_run": "results/p9c/gpt2/7ed884a2e8df",
+      "baselines": [
+        "answer_probe",
+        "semantic_entropy",
+        "eigenscore"
+      ],
+      "references": [
+        "lat",
+        "p_true"
+      ],
+      "batch_size": 8
+    }
+  },
+  "data": {
+    "columns": [
+      "dataset",
+      "predictor",
+      "reference",
+      "diff",
+      "lo",
+      "hi"
+    ],
+    "rows": [
+      [
+        "popqa",
+        "answer_probe",
+        "p_true",
+        0.34546004372385175,
+        0.2779829746238361,
+        0.4108804182737801
+      ],
+      [
+        "popqa",
+        "semantic_entropy",
+        "p_true",
+        0.07899978914893857,
+        -0.017597960409509172,
+        0.17214577410837126
+      ],
+      [
+        "popqa",
+        "eigenscore",
+        "p_true",
+        0.1491521567844104,
+        0.06109362936231846,
+        0.2349094220395519
+      ],
+      [
+        "triviaqa",
+        "answer_probe",
+        "p_true",
+        0.09869646182495351,
+        -0.04892222543538329,
+        0.2588827838827839
+      ],
+      [
+        "triviaqa",
+        "semantic_entropy",
+        "p_true",
+        -0.06936685288640587,
+        -0.27052243748965055,
+        0.12454546857636745
+      ],
+      [
+        "triviaqa",
+        "eigenscore",
+        "p_true",
+        0.012104283054003795,
+        -0.17578239176553784,
+        0.19192890442890442
+      ],
+      [
+        "nq_open",
+        "answer_probe",
+        "p_true",
+        0.3725961538461538,
+        -0.10576923076923078,
+        0.8252415347810081
+      ],
+      [
+        "nq_open",
+        "semantic_entropy",
+        "p_true",
+        0.47355769230769235,
+        0.02740528386087597,
+        0.9014423076923077
+      ],
+      [
+        "nq_open",
+        "eigenscore",
+        "p_true",
+        0.4230769230769231,
+        -0.11004784688995217,
+        0.9282296650717703
+      ]
+    ]
+  }
+}
