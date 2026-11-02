@@ -519,8 +519,8 @@ word still counts as an abstention; the `hand_check.csv` sample measures this.
 ### Published detection baselines
 
 These baselines predict, per question, whether the greedy answer is correct. The `b1` experiment
-(`experiments/b1_detection_baselines.py`) puts them beside the `p9c` signals; it has not been run yet. Each states
-where it departs from its published recipe.
+(`experiments/b1_detection_baselines.py`) puts them beside the `p9c` signals; its results on the eight laptop
+checkpoints are in the findings. Each states where it departs from its published recipe.
 
 - Exact-answer-token probe (`p9/answer_probe.py`; Orgad et al. 2025, `orgad2025llms`): a logistic-regression probe
   on the residual stream at the last token of the greedy answer, read from the prompt, a space and the answer. It is
