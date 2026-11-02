@@ -19,7 +19,7 @@ table rows), the fluency means, ratios and counts of cells past the rule and the
 of the runs made at `f4d414d` and of the M1, C2, C5 and P7 runs of the 4B pair (computed from the per-cell rows and the curves files), the P7 counts of inverted
 units on the GPT-2 sizes (recomputed from the per-seed curves), the P10b minima and maxima over layers and the counts of cells in P10a and P10b (computed from the table, hedge gap, forced in range, width, diagnostic, hand check, curves, transfer, baseline and people files), the V1 means, ranges and counts over draws and cells (computed from `projections.npz` of the V1 runs), the largest V1 reproduction differences, the sums of a recomputed and a committed AUROC and the counts of cells beyond the tolerance (computed from `summary.json` of the V1 runs, and from `projections.npz` and the `per_seed` arrays of the P9b curves files where they are taken per draw or per method), the sums and ranges of the V1 variance shares (computed from `pca2d.npz` and `text2d.npz`), and differences or ranges quoted in the text. The P8 tables are read from the P8 run, which aggregates
 finished runs. Runs are identified by config hash in [Run identity](#run-identity). The document is not
-complete: [Pending](#pending) lists what it does not yet report. The counts of inverted units by layer, the fluency means, ratios and counts of cells past the rule, the random-arm ranges, the counts of emotions above the random maximum and the differences between shares in the chain 42 runs (C2, C5 and P7 on `gpt2`, `gpt2-medium` and the Qwen3 0.6B pair) are computed from the per-seed curves, the per-cell rows and the table files of those runs. The R8 per-seed oracle, Table 9 average rows, per-layer curve values, maxima over layers of the reader, random and shuffled series, and the TruthfulQA per-question comparison are computed from the `summary.json`, `curves_<task>.npz` and `fewshot_tqa.npz` files of the R8 runs. The M2 best cells and their gaps to the two baselines, the maxima per readout, the differences between scorers at `last`, the differences between the pair accuracy and the thresholded accuracy, the utility ranges, the changes between conditions and their ranges, the MLP minus the best linear scorer, the random-direction maxima and margins, the means, ranges and maxima of the shuffled-label rows (the superseded ones included), and every count over cells, rows, comparisons or families (cells below 0.5 or with intervals apart, MLP and joint cells above or below, comparisons that favour a cell or a baseline, intervals that agree with the Holm-adjusted p values, and the counts of the decision-gate facts) are computed from the `table.json` and `comparisons.json` files of the M2 runs.
+complete: [Pending](#pending) lists what it does not yet report. The counts of inverted units by layer, the fluency means, ratios and counts of cells past the rule, the random-arm ranges, the counts of emotions above the random maximum and the differences between shares in the chain 42 runs (C2, C5 and P7 on `gpt2`, `gpt2-medium` and the Qwen3 0.6B pair) are computed from the per-seed curves, the per-cell rows and the table files of those runs. The R8 per-seed oracle, Table 9 average rows, per-layer curve values, maxima over layers of the reader, random and shuffled series, and the TruthfulQA per-question comparison are computed from the `summary.json`, `curves_<task>.npz` and `fewshot_tqa.npz` files of the R8 runs. The M2 best cells and their gaps to the two baselines, the maxima per readout, the differences between scorers at `last`, the differences between the pair accuracy and the thresholded accuracy, the utility ranges, the changes between conditions and their ranges, the MLP minus the best linear scorer, the random-direction maxima and margins, the means, ranges and maxima of the shuffled-label rows (the superseded ones included), and every count over cells, rows, comparisons or families (cells below 0.5 or with intervals apart, MLP and joint cells above or below, comparisons that favour a cell or a baseline, intervals that agree with the Holm-adjusted p values, and the counts of the decision-gate facts) are computed from the `table.json` and `comparisons.json` files of the M2 runs. The B1 differences between point estimates, the ranges over the checkpoints of a family, the widths of the intervals, the lists of checkpoints and the comparisons of intervals quoted in the text are computed from the `table.json` and `table_paired.json` files of the B1 runs.
 
 Contents:
 
@@ -37,16 +37,17 @@ P4)](#position-sample-size-and-direction-finder-on-gpt2-p2-p3-p4) 10. [Sentiment
 (C1)](#sentiment-steering-on-qwen3-c1) 12. [Other steering experiments on gpt2 and the larger GPT-2 sizes (M1, C2, P7, LR1, C4,
 C5)](#other-steering-experiments-on-gpt2-and-the-larger-gpt-2-sizes-m1-c2-p7-lr1-c4-c5) 13. [Base against post-trained Qwen3
 (P8)](#base-against-post-trained-qwen3-p8) 14. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
-15. [Approximate answers: range against exact quantities
-(P10)](#approximate-answers-range-against-exact-quantities-p10) 16. [Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5,
-LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 17. [Position
+15. [Published detection baselines (B1)](#published-detection-baselines-b1)
+16. [Approximate answers: range against exact quantities
+(P10)](#approximate-answers-range-against-exact-quantities-p10) 17. [Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5,
+LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 18. [Position
 and stimulus-set size on qwen3-1.7b-base and qwen3-1.7b (P2,
-P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 18. [Stimulus-set size and direction finder
+P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 19. [Stimulus-set size and direction finder
 across the GPT-2 sizes and Qwen3
-(P3, P4)](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) 19. [Persona wording and
-instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 20. [Template steering on the Qwen3 0.6B, 1.7B and 4B pairs
-(P7)](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7) 21. [LAT against few-shot prompting on the QA tasks
-(R8)](#lat-against-few-shot-prompting-on-the-qa-tasks-r8) 22. [Reader comparison (M2)](#reader-comparison-m2) 23. [Run identity](#run-identity) 24. [Pending](#pending)
+(P3, P4)](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) 20. [Persona wording and
+instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 21. [Template steering on the Qwen3 0.6B, 1.7B and 4B pairs
+(P7)](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7) 22. [LAT against few-shot prompting on the QA tasks
+(R8)](#lat-against-few-shot-prompting-on-the-qa-tasks-r8) 23. [Reader comparison (M2)](#reader-comparison-m2) 24. [Run identity](#run-identity) 25. [Pending](#pending)
 
 ## Reading conventions
 
@@ -4648,6 +4649,279 @@ view layer and, for the words-only view, the share of the variance of the TF-IDF
   the two sides of a contrast part in it; the separation of the sides is what the AUROCs above measure, on every test
   question and not only on the shown ones.
 
+## Published detection baselines (B1)
+
+B1 puts three published error detectors, as baselines, beside the P9c signals on the same questions: the exact-answer-token probe (`answer_probe`; Orgad et al. 2025, `orgad2025llms`), discrete semantic entropy (`semantic_entropy`; Farquhar et al. 2024, `farquhar2024detecting`) and EigenScore (`eigenscore`; Chen et al. 2024, `chen2024inside`). The question is the one of [P9c](#error-prediction-p9c): does a score predict whether the greedy few-shot answer of the model is correct? The recipes, and where each departs from its published one, are in the [methodology](methodology.md#published-detection-baselines). Each checkpoint has one run, eight in all ([Run identity](#run-identity)). A run reads one finished P9c run of the same checkpoint and the P9a labels behind it, makes the P9c datasets and splits from those labels (the held-out PopQA, TriviaQA and NQ-open questions of P9c), stops unless the test outcomes and PopQA relations stored by the P9c run equal its own, and reads the P9c signals from the stored files. The P9c rows of the tables below are therefore those of the P9c section, repeated. The metric is that of P9c, with the 1,000 resamples and the seed of the P9c run: the AUROC of correct against wrong answers (0.5 is chance; every score is oriented so that higher means more likely correct) with a percentile bootstrap interval over the test items, and on PopQA the within-relation AUROC, the headline, with the items resampled inside each relation.
+
+What the three baselines read:
+
+- `answer_probe` is a logistic probe on the residual stream at the last token of the greedy answer (read from the prompt, a space and the answer). It is fitted on the correctness of the train questions of the same dataset at every layer, and the layer of the highest validation AUROC is kept per dataset. Like the P9c `probe`, which reads the last token of the rendered question at the P9c layer, it sees the correctness label of the target dataset.
+- `semantic_entropy` and `eigenscore` fit nothing and see no label. They read the five answers that P9a sampled per question at temperature 1.0 (the papers use 10). Semantic entropy clusters them by bidirectional entailment (DeBERTa-large MNLI, run on the CPU) and takes the entropy over the clusters; EigenScore takes the mean log eigenvalue of the covariance of their residual-stream states at the last token, at layer (L + 1) // 2. Both keep the sign of their papers and are negated.
+
+The other rows come from the P9c run. `lat` (the label-free reader of the `obscure_real` known against unknown contrast) and `p_true` (the model grades its own answer) are the references of the paired differences. `answer_logprob`, `first_token_prob`, `neg_entropy`, `mean_token_logprob` and `consistency` are the output-confidence signals of P9c, which with `p_true` make six, and `probe` is the P9c probe. The controls are `popularity` (the base-10 logarithm of the subject's popularity), `template` (the accuracy rate of the relation on the train questions, 0.500 within relation by construction, so it is shown pooled only), `length` (the number of tokens of the question) and `name_logprob` (the mean log-probability per token of the subject's name after the prompt "Name:"), each oriented on the train questions; the P9c section does not report `length` and `name_logprob`. TriviaQA and NQ-open questions carry no relation, popularity or subject, so `length` is their only control. A paired difference is the AUROC of a baseline minus that of a reference on the same test items, with a paired bootstrap interval over those items (1,000 resamples); on PopQA it is pooled over relations, and no within-relation paired difference is stored.
+
+B1 loads every model in float32, because the cached few-shot prefix of its activations matches the uncached path only in float32. P9a and P9c ran the Qwen3 checkpoints in bfloat16 and `gpt2-xl` in float16, so the baselines read the same answers at a higher precision than the P9c signals.
+
+B1 ran on the four GPT-2 sizes and the Qwen3 0.6B and 1.7B pairs. The Qwen3 4B pair was not run: B1 loads the model in float32, and a 4B checkpoint in float32 needs more GPU memory than the 8 GB laptop GPU of these runs has. `gpt2` has no `lat` row and no paired difference against `lat`: its P9c run has no `lat` signal, because its P9a gate admits no known against unknown contrast (see the P9c paragraph on the other GPT-2 sizes), and the summary of its B1 run lists `lat` as a missing reference on all three datasets. The runs, the P9c and P9a runs they read, and the layers the probe chose on the validation questions of each dataset (EigenScore reads a fixed layer):
+
+| Checkpoint      | B1 run                            | P9c run read   | P9a run read   | answer_probe layer (PopQA, TriviaQA, NQ-open) | eigenscore layer |
+| --------------- | --------------------------------- | -------------- | -------------- | --------------------------------------------- | ---------------- |
+| gpt2            | `b1/gpt2/c31591e32257`            | `7ed884a2e8df` | `5461200f995c` | L11, L7, L5                                   | L6               |
+| gpt2-medium     | `b1/gpt2-medium/518162a10f52`     | `b3d936ab3f3b` | `4272635aa065` | L22, L24, L24                                 | L12              |
+| gpt2-large      | `b1/gpt2-large/10554d99179e`      | `fb5b8a90c085` | `59c9bfd59dfd` | L29, L33, L24                                 | L18              |
+| gpt2-xl         | `b1/gpt2-xl/3382b9b179cf`         | `1839575c0eaa` | `cc283b36fcae` | L35, L25, L27                                 | L24              |
+| qwen3-0.6b-base | `b1/qwen3-0.6b-base/1074165ac2fc` | `264bf7ca3a01` | `1d9f881153e4` | L16, L16, L10                                 | L14              |
+| qwen3-0.6b      | `b1/qwen3-0.6b/8336c1cc6d57`      | `0f8b118c9692` | `10d95352866e` | L15, L16, L13                                 | L14              |
+| qwen3-1.7b-base | `b1/qwen3-1.7b-base/23e50e678a3c` | `0f684b3c4b66` | `d5d522bfecd4` | L16, L16, L15                                 | L14              |
+| qwen3-1.7b      | `b1/qwen3-1.7b/738bea8112a2`      | `7c142334e5fe` | `f413efcae268` | L15, L16, L17                                 | L14              |
+
+A checkpoint answers different questions correctly, so the columns below are separate rows of evidence and are never pooled.
+
+### The GPT-2 sizes
+
+PopQA, within relation, AUROC with its interval (the headline):
+
+| Predictor          | gpt2                 | gpt2-medium          | gpt2-large           | gpt2-xl              |
+| ------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| answer_probe       | 0.839 [0.793, 0.882] | 0.771 [0.717, 0.820] | 0.818 [0.764, 0.860] | 0.846 [0.808, 0.882] |
+| semantic_entropy   | 0.615 [0.559, 0.676] | 0.692 [0.642, 0.742] | 0.686 [0.636, 0.740] | 0.738 [0.685, 0.786] |
+| eigenscore         | 0.556 [0.482, 0.635] | 0.703 [0.643, 0.762] | 0.721 [0.661, 0.783] | 0.737 [0.674, 0.797] |
+| lat                | not run              | 0.670 [0.609, 0.735] | 0.690 [0.621, 0.754] | 0.765 [0.715, 0.814] |
+| p_true             | 0.445 [0.368, 0.523] | 0.521 [0.464, 0.579] | 0.529 [0.462, 0.590] | 0.431 [0.373, 0.487] |
+| answer_logprob     | 0.701 [0.629, 0.766] | 0.790 [0.740, 0.840] | 0.832 [0.782, 0.875] | 0.860 [0.824, 0.895] |
+| first_token_prob   | 0.715 [0.645, 0.778] | 0.773 [0.718, 0.822] | 0.831 [0.782, 0.873] | 0.850 [0.809, 0.888] |
+| neg_entropy        | 0.670 [0.599, 0.741] | 0.777 [0.721, 0.827] | 0.803 [0.748, 0.850] | 0.830 [0.785, 0.870] |
+| mean_token_logprob | 0.720 [0.655, 0.781] | 0.773 [0.723, 0.823] | 0.863 [0.819, 0.899] | 0.837 [0.797, 0.874] |
+| consistency        | 0.595 [0.526, 0.659] | 0.706 [0.650, 0.759] | 0.752 [0.700, 0.805] | 0.767 [0.716, 0.818] |
+| probe              | 0.789 [0.733, 0.842] | 0.726 [0.664, 0.784] | 0.800 [0.745, 0.847] | 0.814 [0.770, 0.856] |
+| popularity         | 0.541 [0.470, 0.618] | 0.577 [0.511, 0.646] | 0.628 [0.558, 0.700] | 0.679 [0.619, 0.740] |
+| length             | 0.566 [0.488, 0.644] | 0.523 [0.449, 0.590] | 0.562 [0.494, 0.629] | 0.534 [0.468, 0.595] |
+| name_logprob       | 0.513 [0.441, 0.590] | 0.474 [0.405, 0.539] | 0.508 [0.435, 0.577] | 0.500 [0.437, 0.562] |
+| correct answers    | 98 of 1,937          | 158 of 1,937         | 161 of 1,937         | 170 of 1,937         |
+
+PopQA pooled over relations, AUROC with its interval:
+
+| Predictor          | gpt2                 | gpt2-medium          | gpt2-large           | gpt2-xl              |
+| ------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| answer_probe       | 0.966 [0.951, 0.978] | 0.954 [0.940, 0.968] | 0.951 [0.935, 0.965] | 0.941 [0.922, 0.957] |
+| semantic_entropy   | 0.699 [0.650, 0.745] | 0.776 [0.736, 0.817] | 0.792 [0.753, 0.831] | 0.801 [0.763, 0.837] |
+| eigenscore         | 0.769 [0.719, 0.817] | 0.844 [0.807, 0.878] | 0.851 [0.813, 0.886] | 0.857 [0.822, 0.889] |
+| lat                | not run              | 0.835 [0.792, 0.872] | 0.852 [0.815, 0.884] | 0.856 [0.818, 0.886] |
+| p_true             | 0.620 [0.556, 0.687] | 0.636 [0.588, 0.687] | 0.599 [0.542, 0.648] | 0.293 [0.253, 0.334] |
+| answer_logprob     | 0.899 [0.869, 0.924] | 0.926 [0.906, 0.943] | 0.930 [0.915, 0.945] | 0.924 [0.903, 0.941] |
+| first_token_prob   | 0.883 [0.855, 0.910] | 0.915 [0.895, 0.933] | 0.918 [0.896, 0.938] | 0.905 [0.879, 0.929] |
+| neg_entropy        | 0.913 [0.893, 0.930] | 0.897 [0.869, 0.923] | 0.917 [0.894, 0.937] | 0.881 [0.846, 0.911] |
+| mean_token_logprob | 0.740 [0.695, 0.787] | 0.771 [0.732, 0.811] | 0.827 [0.791, 0.862] | 0.816 [0.773, 0.854] |
+| consistency        | 0.728 [0.676, 0.778] | 0.808 [0.770, 0.847] | 0.839 [0.805, 0.873] | 0.833 [0.795, 0.868] |
+| probe              | 0.961 [0.948, 0.974] | 0.948 [0.933, 0.961] | 0.944 [0.925, 0.959] | 0.931 [0.913, 0.946] |
+| popularity         | 0.469 [0.389, 0.544] | 0.480 [0.424, 0.542] | 0.542 [0.483, 0.597] | 0.600 [0.541, 0.658] |
+| template           | 0.939 [0.920, 0.956] | 0.929 [0.907, 0.949] | 0.907 [0.878, 0.933] | 0.880 [0.850, 0.908] |
+| length             | 0.606 [0.537, 0.671] | 0.572 [0.524, 0.624] | 0.579 [0.528, 0.630] | 0.547 [0.497, 0.596] |
+| name_logprob       | 0.534 [0.468, 0.601] | 0.533 [0.481, 0.584] | 0.522 [0.474, 0.577] | 0.485 [0.438, 0.537] |
+| correct answers    | 98 of 1,937          | 158 of 1,937         | 161 of 1,937         | 170 of 1,937         |
+
+TriviaQA, AUROC with its interval (the items have no relation):
+
+| Predictor          | gpt2                 | gpt2-medium          | gpt2-large           | gpt2-xl              |
+| ------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| answer_probe       | 0.743 [0.587, 0.889] | 0.747 [0.645, 0.844] | 0.715 [0.625, 0.802] | 0.724 [0.634, 0.822] |
+| semantic_entropy   | 0.574 [0.448, 0.711] | 0.655 [0.550, 0.763] | 0.603 [0.506, 0.697] | 0.739 [0.643, 0.821] |
+| eigenscore         | 0.656 [0.444, 0.848] | 0.702 [0.591, 0.811] | 0.644 [0.534, 0.746] | 0.735 [0.637, 0.825] |
+| lat                | not run              | 0.605 [0.462, 0.739] | 0.703 [0.601, 0.791] | 0.700 [0.600, 0.792] |
+| p_true             | 0.644 [0.487, 0.784] | 0.389 [0.268, 0.508] | 0.383 [0.276, 0.500] | 0.481 [0.367, 0.586] |
+| answer_logprob     | 0.730 [0.602, 0.850] | 0.823 [0.742, 0.896] | 0.741 [0.652, 0.827] | 0.774 [0.682, 0.864] |
+| first_token_prob   | 0.670 [0.472, 0.828] | 0.753 [0.660, 0.837] | 0.670 [0.571, 0.756] | 0.766 [0.670, 0.852] |
+| neg_entropy        | 0.703 [0.511, 0.867] | 0.712 [0.588, 0.820] | 0.704 [0.603, 0.789] | 0.764 [0.671, 0.850] |
+| mean_token_logprob | 0.608 [0.462, 0.757] | 0.702 [0.583, 0.814] | 0.640 [0.540, 0.739] | 0.757 [0.658, 0.844] |
+| consistency        | 0.513 [0.378, 0.655] | 0.724 [0.614, 0.823] | 0.693 [0.604, 0.790] | 0.758 [0.671, 0.846] |
+| probe              | 0.692 [0.530, 0.829] | 0.773 [0.658, 0.888] | 0.749 [0.653, 0.835] | 0.740 [0.645, 0.831] |
+| length             | 0.683 [0.522, 0.838] | 0.696 [0.577, 0.811] | 0.540 [0.435, 0.648] | 0.578 [0.477, 0.677] |
+| correct answers    | 12 of 191            | 23 of 191            | 37 of 191            | 40 of 191            |
+
+NQ-open, AUROC with its interval:
+
+| Predictor          | gpt2                 | gpt2-medium          | gpt2-large           | gpt2-xl              |
+| ------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| answer_probe       | 0.603 [0.297, 0.902] | 0.688 [0.512, 0.855] | 0.725 [0.548, 0.892] | 0.774 [0.647, 0.887] |
+| semantic_entropy   | 0.704 [0.440, 0.967] | 0.513 [0.442, 0.656] | 0.616 [0.448, 0.789] | 0.589 [0.451, 0.739] |
+| eigenscore         | 0.654 [0.288, 0.993] | 0.632 [0.453, 0.800] | 0.705 [0.510, 0.886] | 0.561 [0.365, 0.745] |
+| lat                | not run              | 0.626 [0.477, 0.766] | 0.781 [0.619, 0.933] | 0.629 [0.506, 0.750] |
+| p_true             | 0.231 [0.057, 0.427] | 0.589 [0.436, 0.757] | 0.547 [0.323, 0.761] | 0.347 [0.192, 0.511] |
+| answer_logprob     | 0.834 [0.641, 0.995] | 0.690 [0.425, 0.933] | 0.813 [0.627, 0.949] | 0.636 [0.448, 0.818] |
+| first_token_prob   | 0.798 [0.587, 0.981] | 0.668 [0.488, 0.815] | 0.771 [0.660, 0.870] | 0.718 [0.583, 0.840] |
+| neg_entropy        | 0.760 [0.490, 1.000] | 0.714 [0.554, 0.865] | 0.727 [0.560, 0.891] | 0.758 [0.617, 0.871] |
+| mean_token_logprob | 0.913 [0.863, 0.955] | 0.656 [0.424, 0.864] | 0.765 [0.563, 0.922] | 0.649 [0.494, 0.784] |
+| consistency        | 0.712 [0.416, 0.995] | 0.637 [0.475, 0.814] | 0.707 [0.548, 0.904] | 0.584 [0.458, 0.724] |
+| probe              | 0.666 [0.392, 0.928] | 0.700 [0.530, 0.858] | 0.806 [0.678, 0.920] | 0.725 [0.580, 0.858] |
+| length             | 0.832 [0.675, 0.967] | 0.506 [0.352, 0.647] | 0.412 [0.246, 0.609] | 0.471 [0.313, 0.630] |
+| correct answers    | 2 of 210             | 9 of 210             | 9 of 210             | 12 of 210            |
+
+Paired differences, the AUROC of a baseline minus that of a reference with the paired interval (pooled over relations on PopQA):
+
+| Difference                         | gpt2                    | gpt2-medium             | gpt2-large              | gpt2-xl                 |
+| ---------------------------------- | ----------------------- | ----------------------- | ----------------------- | ----------------------- |
+| PopQA answer_probe - lat           | not run                 | +0.120 [+0.083, +0.158] | +0.099 [+0.069, +0.135] | +0.085 [+0.054, +0.120] |
+| PopQA answer_probe - p_true        | +0.345 [+0.278, +0.411] | +0.318 [+0.266, +0.368] | +0.353 [+0.302, +0.410] | +0.648 [+0.599, +0.695] |
+| PopQA semantic_entropy - lat       | not run                 | -0.059 [-0.110, -0.006] | -0.061 [-0.104, -0.016] | -0.055 [-0.090, -0.019] |
+| PopQA semantic_entropy - p_true    | +0.079 [-0.018, +0.172] | +0.140 [+0.074, +0.207] | +0.193 [+0.134, +0.262] | +0.508 [+0.450, +0.563] |
+| PopQA eigenscore - lat             | not run                 | +0.009 [-0.031, +0.053] | -0.001 [-0.040, +0.039] | +0.001 [-0.036, +0.039] |
+| PopQA eigenscore - p_true          | +0.149 [+0.061, +0.235] | +0.208 [+0.144, +0.271] | +0.253 [+0.190, +0.315] | +0.563 [+0.508, +0.617] |
+| TriviaQA answer_probe - lat        | not run                 | +0.142 [-0.007, +0.303] | +0.012 [-0.072, +0.110] | +0.025 [-0.091, +0.147] |
+| TriviaQA answer_probe - p_true     | +0.099 [-0.049, +0.259] | +0.357 [+0.179, +0.535] | +0.332 [+0.156, +0.484] | +0.244 [+0.095, +0.400] |
+| TriviaQA semantic_entropy - lat    | not run                 | +0.050 [-0.113, +0.225] | -0.100 [-0.208, +0.015] | +0.039 [-0.067, +0.144] |
+| TriviaQA semantic_entropy - p_true | -0.069 [-0.271, +0.125] | +0.265 [+0.086, +0.441] | +0.220 [+0.060, +0.367] | +0.258 [+0.107, +0.410] |
+| TriviaQA eigenscore - lat          | not run                 | +0.098 [-0.074, +0.275] | -0.059 [-0.173, +0.061] | +0.035 [-0.072, +0.137] |
+| TriviaQA eigenscore - p_true       | +0.012 [-0.176, +0.192] | +0.313 [+0.136, +0.479] | +0.261 [+0.088, +0.411] | +0.255 [+0.108, +0.401] |
+| NQ-open answer_probe - lat         | not run                 | +0.062 [-0.130, +0.304] | -0.056 [-0.217, +0.129] | +0.145 [+0.007, +0.288] |
+| NQ-open answer_probe - p_true      | +0.373 [-0.106, +0.825] | +0.099 [-0.011, +0.208] | +0.178 [-0.031, +0.398] | +0.426 [+0.234, +0.616] |
+| NQ-open semantic_entropy - lat     | not run                 | -0.112 [-0.255, +0.049] | -0.165 [-0.394, +0.088] | -0.040 [-0.225, +0.141] |
+| NQ-open semantic_entropy - p_true  | +0.474 [+0.027, +0.901] | -0.075 [-0.249, +0.098] | +0.069 [-0.149, +0.313] | +0.242 [+0.005, +0.476] |
+| NQ-open eigenscore - lat           | not run                 | +0.006 [-0.138, +0.188] | -0.076 [-0.251, +0.150] | -0.067 [-0.232, +0.105] |
+| NQ-open eigenscore - p_true        | +0.423 [-0.110, +0.928] | +0.043 [-0.179, +0.254] | +0.158 [-0.030, +0.386] | +0.214 [-0.023, +0.447] |
+
+- **Within relation the exact-answer probe is the highest predictor on `gpt2` only.** On `gpt2` it reads 0.839 [0.793, 0.882], with its interval above that of the best output-confidence signal (`mean_token_logprob`, 0.720 [0.655, 0.781]). On `gpt2-medium`, `gpt2-large` and `gpt2-xl` it reads 0.771, 0.818 and 0.846, below the best output-confidence signal (`answer_logprob` 0.790, `mean_token_logprob` 0.863 and `answer_logprob` 0.860) with overlapping intervals. It is above the P9c `probe` on all four sizes (0.789, 0.726, 0.800 and 0.814) with overlapping intervals, above `lat` on the three sizes that have it (0.670, 0.690 and 0.765; the intervals are apart only on `gpt2-large`), and its interval lies above that of the popularity control on all four.
+- **Semantic entropy and EigenScore are below the output confidence within relation and do not separate from the popularity control.** Semantic entropy reads 0.615, 0.692, 0.686 and 0.738 and EigenScore 0.556, 0.703, 0.721 and 0.737 (`gpt2` to `gpt2-xl`). Both are below the best output-confidence signal on every size, with intervals apart for semantic entropy on `gpt2-large` and `gpt2-xl` and for EigenScore on `gpt2`, `gpt2-large` and `gpt2-xl`. Their intervals overlap that of the popularity control (0.541, 0.577, 0.628 and 0.679) on all four sizes, and the interval of EigenScore on `gpt2` includes 0.5. Against `lat` they fall on either side, with overlapping intervals.
+- **Pooled on PopQA the probe is the highest predictor, and the paired differences sort the sample-based baselines against `lat`.** The probe reads 0.966, 0.954, 0.951 and 0.941, above every P9c signal and control, `probe` (0.961, 0.948, 0.944 and 0.931) and `template` (0.939, 0.929, 0.907 and 0.880) included. Its paired difference against `lat` is +0.120, +0.099 and +0.085, with intervals above zero; that of semantic entropy is -0.059, -0.061 and -0.055, with intervals below zero, and that of EigenScore +0.009, -0.001 and +0.001, with intervals that include zero. Against `p_true` the interval of every baseline lies above zero on every size except semantic entropy on `gpt2` (+0.079 [-0.018, +0.172]); the differences are largest on `gpt2-xl` (+0.648, +0.508 and +0.563), where `p_true` is below chance pooled (0.293 [0.253, 0.334]).
+- **TriviaQA and NQ-open are not informative on these sizes.** The sets hold 12, 23, 37 and 40 correct TriviaQA answers and 2, 9, 9 and 12 correct NQ-open answers, and the intervals of the baselines are 0.178 to 0.404 wide on TriviaQA and 0.214 to 0.705 on NQ-open. Against `lat` one paired interval on these sets excludes zero: the probe on NQ-open at `gpt2-xl` (+0.145 [+0.007, +0.288]). Against `p_true` the intervals of all three baselines lie above zero on TriviaQA at `gpt2-medium`, `gpt2-large` and `gpt2-xl` (where `p_true` reads 0.389, 0.383 and 0.481), and on NQ-open those of the probe and semantic entropy at `gpt2-xl`. With 2 correct answers the `gpt2` NQ-open values are not read.
+
+### The Qwen3 0.6B and 1.7B pairs
+
+PopQA, within relation, AUROC with its interval (the headline):
+
+| Predictor          | qwen3-0.6b-base      | qwen3-0.6b           | qwen3-1.7b-base      | qwen3-1.7b           |
+| ------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| answer_probe       | 0.883 [0.852, 0.911] | 0.872 [0.833, 0.910] | 0.892 [0.864, 0.919] | 0.903 [0.873, 0.931] |
+| semantic_entropy   | 0.742 [0.693, 0.790] | 0.781 [0.731, 0.830] | 0.775 [0.731, 0.816] | 0.802 [0.753, 0.842] |
+| eigenscore         | 0.739 [0.684, 0.794] | 0.793 [0.741, 0.839] | 0.790 [0.743, 0.834] | 0.801 [0.748, 0.846] |
+| lat                | 0.787 [0.734, 0.829] | 0.757 [0.693, 0.814] | 0.848 [0.815, 0.877] | 0.814 [0.773, 0.850] |
+| p_true             | 0.719 [0.667, 0.769] | 0.739 [0.689, 0.784] | 0.776 [0.726, 0.821] | 0.772 [0.714, 0.825] |
+| answer_logprob     | 0.841 [0.796, 0.876] | 0.843 [0.797, 0.881] | 0.883 [0.857, 0.907] | 0.855 [0.822, 0.887] |
+| first_token_prob   | 0.826 [0.779, 0.865] | 0.832 [0.782, 0.875] | 0.879 [0.853, 0.902] | 0.842 [0.807, 0.875] |
+| neg_entropy        | 0.824 [0.781, 0.862] | 0.813 [0.759, 0.862] | 0.879 [0.853, 0.903] | 0.847 [0.812, 0.880] |
+| mean_token_logprob | 0.836 [0.794, 0.870] | 0.845 [0.797, 0.884] | 0.862 [0.831, 0.889] | 0.841 [0.807, 0.874] |
+| consistency        | 0.773 [0.727, 0.820] | 0.803 [0.755, 0.848] | 0.803 [0.763, 0.841] | 0.807 [0.760, 0.846] |
+| probe              | 0.826 [0.781, 0.864] | 0.793 [0.737, 0.842] | 0.881 [0.856, 0.905] | 0.853 [0.820, 0.885] |
+| popularity         | 0.696 [0.641, 0.749] | 0.637 [0.575, 0.701] | 0.776 [0.736, 0.815] | 0.749 [0.700, 0.795] |
+| length             | 0.550 [0.493, 0.603] | 0.516 [0.449, 0.574] | 0.573 [0.523, 0.623] | 0.531 [0.476, 0.588] |
+| name_logprob       | 0.553 [0.495, 0.610] | 0.543 [0.479, 0.605] | 0.585 [0.530, 0.639] | 0.547 [0.492, 0.604] |
+| correct answers    | 208 of 1,937         | 176 of 1,937         | 264 of 1,937         | 222 of 1,937         |
+
+PopQA pooled over relations, AUROC with its interval:
+
+| Predictor          | qwen3-0.6b-base      | qwen3-0.6b           | qwen3-1.7b-base      | qwen3-1.7b           |
+| ------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| answer_probe       | 0.953 [0.941, 0.964] | 0.963 [0.952, 0.972] | 0.943 [0.929, 0.958] | 0.961 [0.949, 0.971] |
+| semantic_entropy   | 0.839 [0.809, 0.870] | 0.883 [0.854, 0.911] | 0.823 [0.793, 0.853] | 0.877 [0.851, 0.901] |
+| eigenscore         | 0.824 [0.784, 0.861] | 0.892 [0.860, 0.918] | 0.844 [0.814, 0.875] | 0.894 [0.872, 0.915] |
+| lat                | 0.875 [0.847, 0.901] | 0.889 [0.858, 0.918] | 0.879 [0.858, 0.899] | 0.857 [0.834, 0.880] |
+| p_true             | 0.804 [0.768, 0.837] | 0.735 [0.694, 0.774] | 0.746 [0.708, 0.780] | 0.857 [0.822, 0.888] |
+| answer_logprob     | 0.933 [0.917, 0.948] | 0.935 [0.915, 0.953] | 0.910 [0.891, 0.929] | 0.919 [0.901, 0.934] |
+| first_token_prob   | 0.916 [0.895, 0.936] | 0.935 [0.917, 0.951] | 0.911 [0.895, 0.927] | 0.897 [0.875, 0.916] |
+| neg_entropy        | 0.907 [0.882, 0.928] | 0.932 [0.914, 0.949] | 0.899 [0.879, 0.918] | 0.906 [0.886, 0.923] |
+| mean_token_logprob | 0.867 [0.836, 0.895] | 0.909 [0.884, 0.931] | 0.847 [0.819, 0.873] | 0.850 [0.817, 0.879] |
+| consistency        | 0.868 [0.838, 0.896] | 0.899 [0.871, 0.925] | 0.840 [0.812, 0.867] | 0.872 [0.845, 0.896] |
+| probe              | 0.946 [0.931, 0.958] | 0.946 [0.928, 0.960] | 0.940 [0.926, 0.952] | 0.939 [0.923, 0.952] |
+| popularity         | 0.588 [0.534, 0.642] | 0.515 [0.457, 0.573] | 0.648 [0.601, 0.688] | 0.640 [0.591, 0.689] |
+| template           | 0.892 [0.865, 0.914] | 0.913 [0.890, 0.934] | 0.843 [0.812, 0.870] | 0.873 [0.845, 0.898] |
+| length             | 0.542 [0.499, 0.587] | 0.557 [0.508, 0.610] | 0.559 [0.519, 0.599] | 0.537 [0.491, 0.582] |
+| name_logprob       | 0.551 [0.504, 0.600] | 0.579 [0.531, 0.634] | 0.566 [0.525, 0.606] | 0.545 [0.502, 0.591] |
+| correct answers    | 208 of 1,937         | 176 of 1,937         | 264 of 1,937         | 222 of 1,937         |
+
+TriviaQA, AUROC with its interval:
+
+| Predictor          | qwen3-0.6b-base      | qwen3-0.6b           | qwen3-1.7b-base      | qwen3-1.7b           |
+| ------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| answer_probe       | 0.863 [0.808, 0.919] | 0.830 [0.763, 0.891] | 0.827 [0.771, 0.881] | 0.846 [0.789, 0.896] |
+| semantic_entropy   | 0.820 [0.752, 0.888] | 0.750 [0.659, 0.834] | 0.811 [0.747, 0.865] | 0.798 [0.736, 0.857] |
+| eigenscore         | 0.823 [0.757, 0.880] | 0.748 [0.663, 0.833] | 0.814 [0.753, 0.873] | 0.800 [0.732, 0.862] |
+| lat                | 0.716 [0.639, 0.795] | 0.710 [0.623, 0.800] | 0.674 [0.601, 0.750] | 0.686 [0.608, 0.756] |
+| p_true             | 0.778 [0.699, 0.853] | 0.724 [0.628, 0.820] | 0.772 [0.701, 0.840] | 0.734 [0.657, 0.805] |
+| answer_logprob     | 0.886 [0.836, 0.931] | 0.796 [0.722, 0.869] | 0.819 [0.758, 0.878] | 0.832 [0.771, 0.888] |
+| first_token_prob   | 0.838 [0.772, 0.896] | 0.736 [0.637, 0.821] | 0.823 [0.760, 0.877] | 0.771 [0.703, 0.845] |
+| neg_entropy        | 0.862 [0.803, 0.917] | 0.758 [0.664, 0.842] | 0.843 [0.784, 0.894] | 0.798 [0.730, 0.864] |
+| mean_token_logprob | 0.817 [0.743, 0.884] | 0.713 [0.609, 0.803] | 0.810 [0.747, 0.872] | 0.808 [0.735, 0.874] |
+| consistency        | 0.802 [0.730, 0.870] | 0.742 [0.655, 0.821] | 0.801 [0.737, 0.861] | 0.777 [0.709, 0.841] |
+| probe              | 0.868 [0.809, 0.926] | 0.764 [0.674, 0.843] | 0.811 [0.753, 0.868] | 0.808 [0.743, 0.865] |
+| length             | 0.621 [0.515, 0.712] | 0.587 [0.481, 0.691] | 0.623 [0.532, 0.707] | 0.629 [0.543, 0.715] |
+| correct answers    | 48 of 191            | 38 of 191            | 78 of 191            | 63 of 191            |
+
+NQ-open, AUROC with its interval:
+
+| Predictor          | qwen3-0.6b-base      | qwen3-0.6b           | qwen3-1.7b-base      | qwen3-1.7b           |
+| ------------------ | -------------------- | -------------------- | -------------------- | -------------------- |
+| answer_probe       | 0.766 [0.670, 0.849] | 0.833 [0.709, 0.936] | 0.816 [0.737, 0.882] | 0.823 [0.754, 0.880] |
+| semantic_entropy   | 0.765 [0.651, 0.867] | 0.726 [0.597, 0.842] | 0.645 [0.550, 0.735] | 0.870 [0.818, 0.923] |
+| eigenscore         | 0.700 [0.556, 0.816] | 0.713 [0.554, 0.842] | 0.688 [0.582, 0.783] | 0.854 [0.782, 0.916] |
+| lat                | 0.783 [0.653, 0.897] | 0.858 [0.730, 0.959] | 0.848 [0.777, 0.913] | 0.861 [0.771, 0.939] |
+| p_true             | 0.788 [0.683, 0.879] | 0.591 [0.463, 0.721] | 0.694 [0.590, 0.787] | 0.599 [0.458, 0.722] |
+| answer_logprob     | 0.776 [0.648, 0.880] | 0.867 [0.801, 0.929] | 0.790 [0.697, 0.867] | 0.834 [0.724, 0.923] |
+| first_token_prob   | 0.696 [0.601, 0.783] | 0.691 [0.598, 0.774] | 0.709 [0.615, 0.802] | 0.691 [0.600, 0.782] |
+| neg_entropy        | 0.740 [0.641, 0.826] | 0.700 [0.598, 0.785] | 0.745 [0.659, 0.831] | 0.750 [0.668, 0.828] |
+| mean_token_logprob | 0.755 [0.640, 0.861] | 0.785 [0.673, 0.887] | 0.657 [0.550, 0.761] | 0.733 [0.617, 0.847] |
+| consistency        | 0.743 [0.628, 0.857] | 0.735 [0.565, 0.871] | 0.729 [0.645, 0.813] | 0.855 [0.775, 0.921] |
+| probe              | 0.795 [0.688, 0.895] | 0.817 [0.705, 0.917] | 0.812 [0.742, 0.878] | 0.879 [0.811, 0.941] |
+| length             | 0.464 [0.340, 0.580] | 0.484 [0.318, 0.648] | 0.524 [0.435, 0.619] | 0.511 [0.373, 0.645] |
+| correct answers    | 20 of 210            | 12 of 210            | 38 of 210            | 20 of 210            |
+
+Paired differences, the AUROC of a baseline minus that of a reference with the paired interval (pooled over relations on PopQA):
+
+| Difference                         | qwen3-0.6b-base         | qwen3-0.6b              | qwen3-1.7b-base         | qwen3-1.7b              |
+| ---------------------------------- | ----------------------- | ----------------------- | ----------------------- | ----------------------- |
+| PopQA answer_probe - lat           | +0.079 [+0.052, +0.107] | +0.074 [+0.048, +0.103] | +0.065 [+0.044, +0.088] | +0.103 [+0.080, +0.126] |
+| PopQA answer_probe - p_true        | +0.150 [+0.118, +0.185] | +0.228 [+0.191, +0.268] | +0.198 [+0.165, +0.235] | +0.104 [+0.075, +0.134] |
+| PopQA semantic_entropy - lat       | -0.036 [-0.063, -0.008] | -0.006 [-0.035, +0.021] | -0.055 [-0.082, -0.027] | +0.019 [-0.004, +0.046] |
+| PopQA semantic_entropy - p_true    | +0.036 [+0.002, +0.069] | +0.149 [+0.106, +0.195] | +0.077 [+0.042, +0.117] | +0.020 [-0.017, +0.057] |
+| PopQA eigenscore - lat             | -0.051 [-0.086, -0.018] | +0.002 [-0.029, +0.031] | -0.035 [-0.063, -0.005] | +0.037 [+0.014, +0.060] |
+| PopQA eigenscore - p_true          | +0.020 [-0.017, +0.059] | +0.157 [+0.114, +0.201] | +0.098 [+0.060, +0.141] | +0.037 [+0.002, +0.072] |
+| TriviaQA answer_probe - lat        | +0.147 [+0.073, +0.220] | +0.120 [+0.039, +0.202] | +0.153 [+0.079, +0.226] | +0.161 [+0.084, +0.236] |
+| TriviaQA answer_probe - p_true     | +0.085 [+0.012, +0.164] | +0.106 [-0.005, +0.214] | +0.055 [-0.004, +0.114] | +0.113 [+0.047, +0.185] |
+| TriviaQA semantic_entropy - lat    | +0.104 [+0.023, +0.181] | +0.040 [-0.062, +0.138] | +0.136 [+0.054, +0.222] | +0.112 [+0.026, +0.200] |
+| TriviaQA semantic_entropy - p_true | +0.042 [-0.038, +0.123] | +0.026 [-0.089, +0.151] | +0.038 [-0.043, +0.116] | +0.064 [-0.014, +0.148] |
+| TriviaQA eigenscore - lat          | +0.106 [+0.022, +0.184] | +0.038 [-0.065, +0.140] | +0.140 [+0.057, +0.226] | +0.115 [+0.019, +0.207] |
+| TriviaQA eigenscore - p_true       | +0.045 [-0.044, +0.134] | +0.024 [-0.097, +0.143] | +0.042 [-0.045, +0.126] | +0.067 [-0.021, +0.158] |
+| NQ-open answer_probe - lat         | -0.017 [-0.123, +0.090] | -0.025 [-0.136, +0.074] | -0.032 [-0.101, +0.032] | -0.038 [-0.101, +0.023] |
+| NQ-open answer_probe - p_true      | -0.023 [-0.114, +0.076] | +0.242 [+0.084, +0.411] | +0.122 [+0.009, +0.230] | +0.225 [+0.104, +0.359] |
+| NQ-open semantic_entropy - lat     | -0.018 [-0.129, +0.095] | -0.132 [-0.280, +0.008] | -0.203 [-0.303, -0.112] | +0.009 [-0.070, +0.096] |
+| NQ-open semantic_entropy - p_true  | -0.023 [-0.124, +0.083] | +0.135 [+0.006, +0.281] | -0.050 [-0.171, +0.079] | +0.272 [+0.141, +0.412] |
+| NQ-open eigenscore - lat           | -0.083 [-0.221, +0.044] | -0.145 [-0.322, +0.021] | -0.160 [-0.264, -0.075] | -0.007 [-0.086, +0.089] |
+| NQ-open eigenscore - p_true        | -0.088 [-0.229, +0.049] | +0.122 [-0.019, +0.266] | -0.007 [-0.155, +0.132] | +0.255 [+0.123, +0.405] |
+
+- **Within relation the exact-answer probe is the highest predictor on all four checkpoints, with overlapping intervals.** It reads 0.883, 0.872, 0.892 and 0.903 (`qwen3-0.6b-base`, `qwen3-0.6b`, `qwen3-1.7b-base`, `qwen3-1.7b`), above the best output-confidence signal (`answer_logprob` 0.841, `mean_token_logprob` 0.845, `answer_logprob` 0.883 and 0.855) by +0.041, +0.027, +0.009 and +0.048 and above the P9c `probe` (0.826, 0.793, 0.881 and 0.853), with overlapping intervals in every case. Its interval lies above that of `lat` (0.787, 0.757, 0.848 and 0.814) on `qwen3-0.6b-base`, `qwen3-0.6b` and `qwen3-1.7b` and overlaps it on `qwen3-1.7b-base`; it also lies above the interval of the popularity control on all four.
+- **Semantic entropy and EigenScore are below the output confidence within relation and separate from the popularity control only on `qwen3-0.6b`.** Semantic entropy reads 0.742, 0.781, 0.775 and 0.802 and EigenScore 0.739, 0.793, 0.790 and 0.801. Both are below the best output-confidence signal on every checkpoint, with intervals apart on the two base checkpoints. Their intervals lie above that of the popularity control on `qwen3-0.6b` (0.637 [0.575, 0.701]) and overlap it on the other three. Against `lat` they fall on either side, with overlapping intervals.
+- **Pooled on PopQA the probe is the highest predictor; semantic entropy and EigenScore are below `lat` on the base checkpoints.** The probe reads 0.953, 0.963, 0.943 and 0.961, and its paired difference is +0.079, +0.074, +0.065 and +0.103 against `lat` and +0.150, +0.228, +0.198 and +0.104 against `p_true`, all with intervals above zero. Semantic entropy is below `lat` with an interval below zero on the two base checkpoints (-0.036 and -0.055) and level with it on the post-trained ones (-0.006 and +0.019, intervals that include zero). EigenScore is below `lat` on the base checkpoints (-0.051 and -0.035, intervals below zero), level with it on `qwen3-0.6b` (+0.002) and above it on `qwen3-1.7b` (+0.037 [+0.014, +0.060]). Against `p_true` the intervals of semantic entropy and EigenScore lie above zero on three of the four checkpoints each (semantic entropy not on `qwen3-1.7b`, EigenScore not on `qwen3-0.6b-base`).
+- **TriviaQA.** The sets hold 48, 38, 78 and 63 correct answers, and the intervals of the baselines are 0.107 to 0.175 wide. All three baselines are above `lat` (0.716, 0.710, 0.674 and 0.686) with paired intervals above zero on `qwen3-0.6b-base`, `qwen3-1.7b-base` and `qwen3-1.7b`, and the probe on `qwen3-0.6b` as well (+0.120 [+0.039, +0.202]). Against `p_true` only the probe has intervals above zero, on `qwen3-0.6b-base` and `qwen3-1.7b`.
+- **NQ-open.** The sets hold 20, 12, 38 and 20 correct answers, and the intervals of the baselines are 0.105 to 0.287 wide. No baseline has a paired interval above zero against `lat`; semantic entropy (-0.203 [-0.303, -0.112]) and EigenScore (-0.160 [-0.264, -0.075]) are below it on `qwen3-1.7b-base`. On `qwen3-1.7b` semantic entropy (0.870) and EigenScore (0.854) read above `answer_logprob` (0.834), with overlapping intervals: the only dataset and checkpoint of the eight runs where either reads above `answer_logprob`. Against `p_true` (0.788, 0.591, 0.694 and 0.599) the probe has intervals above zero on `qwen3-0.6b`, `qwen3-1.7b-base` and `qwen3-1.7b`, semantic entropy on `qwen3-0.6b` and `qwen3-1.7b`, and EigenScore on `qwen3-1.7b`.
+
+### Risk and coverage on PopQA
+
+The area under the risk-coverage curve (AURC, the error rate among the answered questions averaged over coverage; lower is better), PopQA pooled over relations:
+
+| Predictor                          | gpt2    | gpt2-medium | gpt2-large | gpt2-xl | qwen3-0.6b-base | qwen3-0.6b | qwen3-1.7b-base | qwen3-1.7b |
+| ---------------------------------- | ------- | ----------- | ---------- | ------- | --------------- | ---------- | --------------- | ---------- |
+| answer_probe                       | 0.823   | 0.746       | 0.746      | 0.736   | 0.686           | 0.720      | 0.630           | 0.666      |
+| semantic_entropy                   | 0.891   | 0.800       | 0.792      | 0.781   | 0.733           | 0.757      | 0.685           | 0.721      |
+| eigenscore                         | 0.883   | 0.791       | 0.778      | 0.768   | 0.735           | 0.760      | 0.683           | 0.721      |
+| lat                                | not run | 0.797       | 0.799      | 0.776   | 0.727           | 0.763      | 0.679           | 0.731      |
+| p_true                             | 0.920   | 0.873       | 0.876      | 0.955   | 0.755           | 0.834      | 0.721           | 0.714      |
+| answer_logprob                     | 0.857   | 0.768       | 0.764      | 0.749   | 0.703           | 0.740      | 0.655           | 0.710      |
+| probe                              | 0.829   | 0.753       | 0.751      | 0.746   | 0.694           | 0.730      | 0.635           | 0.678      |
+| template                           | 0.848   | 0.764       | 0.772      | 0.775   | 0.740           | 0.753      | 0.688           | 0.723      |
+| error rate (risk at full coverage) | 0.949   | 0.918       | 0.917      | 0.912   | 0.893           | 0.909      | 0.864           | 0.885      |
+
+The probe has the lowest AURC of every predictor on all eight checkpoints, with the P9c `probe` next on each. Semantic entropy and EigenScore have a higher AURC than `answer_logprob` on all eight.
+
+### Missing scores
+
+Every test question has at least two non-empty sampled answers: the `n_filled` of semantic entropy and EigenScore is 0 on every dataset and checkpoint. The probe has 5 missing scores on NQ-open for `gpt2-large` and 1 for `gpt2-xl`, counted over every NQ-open question of the dataset, train and validation included (empty greedy answers, filled with the lowest train score), the same counts as `answer_logprob`, and none elsewhere.
+
+### What the eight checkpoints show together
+
+- **The exact-answer probe.** It sees the correctness label of the target dataset, as the P9c `probe` does. Pooled on PopQA it is the highest predictor, with the lowest AURC, on all eight checkpoints, and its paired difference against `lat` is above zero on the seven that have `lat`. Within relation it is the highest predictor on `gpt2` and the four Qwen3 checkpoints, and below the best output-confidence signal, with overlapping intervals, on `gpt2-medium`, `gpt2-large` and `gpt2-xl`. It is also above the P9c `probe` within relation on all eight, by +0.011 to +0.079, with overlapping intervals; the two read different tokens (the last answer token against the last question token) at different layers.
+- **The sample-based baselines.** Semantic entropy and EigenScore use no label. Within relation they are below the best output-confidence signal on all eight checkpoints, and their intervals lie above that of the popularity control only on `qwen3-0.6b`. Pooled on PopQA, semantic entropy is below `lat` with a paired interval below zero on five of the seven checkpoints with `lat` (`gpt2-medium`, `gpt2-large`, `gpt2-xl`, `qwen3-0.6b-base` and `qwen3-1.7b-base`) and EigenScore on two (`qwen3-0.6b-base` and `qwen3-1.7b-base`); EigenScore is above `lat` with an interval above zero only on `qwen3-1.7b`.
+- **`p_true`.** Within relation on PopQA it reads 0.445, 0.521, 0.529 and 0.431 on the GPT-2 sizes, with intervals that include or lie below 0.5, and 0.719, 0.739, 0.776 and 0.772 on the Qwen3 checkpoints. The paired differences against it are largest on PopQA at `gpt2-xl`, where it is below chance pooled.
+- **Controls.** Within relation on PopQA, `popularity` reads 0.541 to 0.679 on the GPT-2 sizes and 0.637 to 0.776 on the Qwen3 checkpoints, `length` 0.523 to 0.566 and 0.516 to 0.573, and `name_logprob` 0.474 to 0.513 and 0.543 to 0.585. Pooled, the accuracy rate of the relation alone (`template`) reads 0.880 to 0.939 and 0.843 to 0.913: below the probe on every checkpoint, and above semantic entropy and EigenScore on every checkpoint but `qwen3-1.7b-base` (EigenScore 0.844 against 0.843) and `qwen3-1.7b` (0.877 and 0.894 against 0.873).
+- **What the runs do not show.** Each checkpoint has one run. Semantic entropy and EigenScore read five samples at temperature 1.0, fewer than the papers use, and semantic entropy is the discrete variant only. The paired differences are pooled; no within-relation paired interval is stored. The baselines read the answers in float32 and the P9c signals were computed in bfloat16 (Qwen3) and float16 (`gpt2-xl`). TriviaQA and NQ-open hold few correct answers on the GPT-2 sizes, and the Qwen3 4B pair was not run.
+
 ## Approximate answers: range against exact quantities (P10)
 
 P10 asks how a model handles a quantity question whose sourced answer is a range, such as the height of a dog breed or the gestation period of a species, against one whose answer is a single value, such as the height of a building or the running time of a film. P10a measures what the model answers: one number, a range or an abstention, with and without the instruction to give one exact number. P10b reads the hidden states of the same questions: it asks whether a direction fitted on the questions of some families separates range questions from exact questions in a family it was not fitted on, and sets every reader beside surface baselines and a random-direction control. The settings below are those of `config.json` of each run; the code is `p10a_quantities.py` and `p10b_reading.py`.
@@ -8701,6 +8975,27 @@ Config hashes (12 hex digits), M2:
 | M2 full run          | dfd0cd00a2b7    | 4f11f2a29935 | 84a62d2075b6    | f39cce3f3a97 |
 | M2 shuffled-only run | 08ed58daecf7    | 7d7ab582c076 | ed5c97730b1e    | none         |
 
+B1: the eight runs, one per checkpoint of the four GPT-2 sizes and the Qwen3 0.6B and 1.7B pairs, were made at `8f70c01` (the merge of pull request 239) with a clean tree on the laptop GPU with 8 GB of memory (the `device` field of each `meta.json` records `cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)`; torch 2.14.1+cu130, transformers 5.19.0, Windows 11, Python 3.12.6), with the model in float32, the only dtype `b1_detection_baselines.run` loads, and the entailment model of semantic entropy on the CPU. `git diff --stat 8f70c01 7163b9f -- src` is empty, so the B1 code of the runs is that of main when this section was written. Seven runs ran one at a time on 2026-10-30, in the column order of the table below; the `qwen3-1.7b` run was made on 2026-11-02 from the same commit, after a first attempt on 2026-10-30 was stopped before it finished; that partial run was discarded and is not exported. Every config is the default B1 config of its model with `reliability_run` set to the P9c run of the same checkpoint named in the tables above: the three baselines, the references `lat` and `p_true`, seed 0 and batch size 8. The intervals take `n_boot` (1,000) and the seed (0) of the P9c run. The config hash of each run was recomputed by loading its `config.json` into the B1 config class and hashing it, and all eight agree with the directory names and with the hash of that default config. The exported `config.json`, `meta.json`, `summary.json`, `table.json` and `table_paired.json` equal those of the local runs (the `reliability_run` path was already relative to the repository), and in each `table.json` the rows other than those of the three baselines equal the rows of the `table.json` of the P9c run it read. The `signals_<dataset>.npz` files (the filled and oriented test scores of the baselines) are not in the export and not committed; no number in this document needs them. Exporting these runs changed no tracked result.
+
+Config hashes (12 hex digits), B1:
+
+| Experiment | gpt2         | gpt2-medium  | gpt2-large   | gpt2-xl      | qwen3-0.6b-base | qwen3-0.6b   | qwen3-1.7b-base | qwen3-1.7b   |
+| ---------- | ------------ | ------------ | ------------ | ------------ | --------------- | ------------ | --------------- | ------------ |
+| B1         | c31591e32257 | 518162a10f52 | 10554d99179e | 3382b9b179cf | 1074165ac2fc    | 8336c1cc6d57 | 23e50e678a3c    | 738bea8112a2 |
+
+The P9c run each B1 run read, the start and finish times of the stored `meta.json` (UTC), the time between them, the seconds semantic entropy took over the three datasets (from `summary.json`) and the number of ordered answer pairs the entailment model judged:
+
+| Checkpoint      | B1           | P9c run read | Started (UTC)       | Finished (UTC)      | Seconds | Semantic entropy seconds | Entailment pairs |
+| --------------- | ------------ | ------------ | ------------------- | ------------------- | ------- | ------------------------ | ---------------- |
+| gpt2            | c31591e32257 | 7ed884a2e8df | 2026-10-30 04:22:20 | 2026-10-30 05:01:52 | 2,372   | 2,322                    | 45,078           |
+| gpt2-medium     | 518162a10f52 | b3d936ab3f3b | 2026-10-30 05:05:05 | 2026-10-30 05:42:53 | 2,268   | 2,171                    | 44,072           |
+| gpt2-large      | 10554d99179e | fb5b8a90c085 | 2026-10-30 05:46:23 | 2026-10-30 06:23:46 | 2,243   | 2,074                    | 43,140           |
+| gpt2-xl         | 3382b9b179cf | 1839575c0eaa | 2026-10-30 06:26:58 | 2026-10-30 07:28:12 | 3,674   | 1,984                    | 41,818           |
+| qwen3-0.6b-base | 1074165ac2fc | 264bf7ca3a01 | 2026-10-30 07:31:26 | 2026-10-30 08:04:51 | 2,005   | 1,851                    | 40,444           |
+| qwen3-0.6b      | 8336c1cc6d57 | 0f8b118c9692 | 2026-10-30 08:08:03 | 2026-10-30 08:39:20 | 1,877   | 1,725                    | 39,368           |
+| qwen3-1.7b-base | 23e50e678a3c | 0f684b3c4b66 | 2026-10-30 08:42:32 | 2026-10-30 09:27:31 | 2,699   | 2,294                    | 39,198           |
+| qwen3-1.7b      | 738bea8112a2 | 7c142334e5fe | 2026-11-02 15:11:01 | 2026-11-02 15:59:25 | 2,904   | 1,875                    | 34,088           |
+
 The files of every run named here are committed under `results/<experiment>/<model>/<hash>/`, copied with
 `tomography export`, which keeps the JSON, NPZ and CSV files the plots read and rewrites local paths. The figures are
 not committed; `tomography plot all --out results` redraws them from these files.
@@ -8720,6 +9015,8 @@ Not in this document yet. No dates are promised.
 - P9: a hand check of the abstention indicator of P9d (the stored samples carry no human labels), an item-level
   interval for the P9b AUROC (only the interval over the pair draws is stored), and a within-relation increment of
   the probe over the output confidence in P9c (only the pooled increment is stored).
+- B1 on the Qwen3 4B pair: not run. B1 loads the model in float32, and the 4B checkpoints in float32 need more GPU memory than the laptop GPU has.
+- B1, not stored: a within-relation paired difference (the paired differences of `table_paired.json` are pooled on PopQA) and the likelihood-weighted variant of semantic entropy (P9a stores no token log-probabilities). Stored but not read in this document: the validation AUROC per layer of the probe, the seconds of the probe and of EigenScore (`summary.json`), and the AURC on TriviaQA and NQ-open (`table.json`).
 - V1 on the Qwen3 4B pair: not run yet. V1 loads the model in float32, and the 4B checkpoints in float32 need more GPU
   memory than the laptop GPU has.
 - P10: a hand check of the answer parser (the `human_*` columns of `hand_check.csv` and `hand_check_samples.csv` are empty in every P10a run), and P10d (steering toward hedging); P10d has not run. The animacy and wording confound is controlled by the people heights for the height family only, with no control of the same kind for gestation periods and wingspans, and P10 ran on one set of questions and one seed.
