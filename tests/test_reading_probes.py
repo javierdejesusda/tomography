@@ -2,7 +2,9 @@ from collections.abc import Callable
 from collections.abc import Sequence
 from dataclasses import replace
 from functools import partial
+import inspect
 import tracemalloc
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,6 +22,7 @@ from tomography.reading.metrics import auroc
 from tomography.reading.probes import AttentionReader
 from tomography.reading.probes import CellMaxReader
 from tomography.reading.probes import Reader
+from tomography.reading.probes import StalledFitWarning
 from tomography.reading.probes import fit_attention
 from tomography.reading.probes import fit_cell_max
 from tomography.reading.probes import fit_lda
@@ -634,6 +637,92 @@ def test_cell_fits_warn_at_their_caller_when_they_stop_early(
         fit(acts, labels=labels, max_iter=1)
 
     assert [record.filename for record in caught] == [__file__]
+
+
+def test_cell_fits_keep_the_scikit_learn_tolerance_by_default() -> None:
+    for fit in (fit_attention, fit_cell_max):
+        assert inspect.signature(fit).parameters["tol"].default == 1e-4
+
+
+@CELL_FITS
+def test_cell_fits_that_learn_warn_of_nothing(
+    fit: Callable[..., object],
+) -> None:
+    acts, labels, _ = planted_tokens(n=60, seed=23)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fit(acts, labels=labels)
+
+    assert caught == []
+
+
+def same_cells_everywhere() -> tuple[Activations, NDArray[np.int64]]:
+    """Six stimuli that hold the same five cells.
+
+    No head can tell them apart, so the gradient at the zero start is zero
+    and the fit never moves.
+    """
+    cells = np.random.default_rng(31).standard_normal((2, 5, 4))
+    return token_rows(np.tile(cells, (1, 6, 1)), [5] * 6, [0, 1]), np.array(
+        [0, 1] * 3
+    )
+
+
+@CELL_FITS
+def test_cell_fits_warn_at_their_caller_when_the_loss_never_moves(
+    fit: Callable[..., object],
+) -> None:
+    acts, labels = same_cells_everywhere()
+
+    with (
+        pytest.warns(StalledFitWarning, match="stalled") as caught,
+        pytest.raises(ValueError, match="value head is zero"),
+    ):
+        fit(acts, labels=labels)
+
+    # One warning per L-BFGS run: the attention fit runs one per layer.
+    n_runs = 2 if fit is fit_attention else 1
+    assert [record.filename for record in caught] == [__file__] * n_runs
+    assert all(record.category is StalledFitWarning for record in caught)
+
+
+def shared_massive_cell(
+    n: int, seed: int
+) -> tuple[Activations, NDArray[np.int64]]:
+    """Stimuli whose first cell is one shared cell, huge on one feature.
+
+    The shared cell is the same in every stimulus, as a template prefix
+    cell is under the causal mask, and label 1 stimuli are shorter, so the
+    first, mean pooled step of a cell max fit lifts the shared cell above
+    every other: then every stimulus scores the same and the loss stays at
+    log 2, the trap of the M3 run's stalled utility fits.
+    """
+    rng = np.random.default_rng(seed)
+    labels = (np.arange(n) % 2).astype(np.int64)
+    counts = np.where(
+        labels == 1, rng.integers(5, 10, size=n), rng.integers(20, 30, size=n)
+    )
+    data = 0.6 * rng.standard_normal((2, counts.sum(), 8))
+    shared = rng.standard_normal((2, 8))
+    shared[1, 1] = 100.0
+    data[:, np.cumsum(counts) - counts] = shared[:, None, :]
+    return token_rows(data, counts, [0, 1]), labels
+
+
+@pytest.mark.parametrize("c", [0.01, 1.0])
+def test_a_cell_max_fit_trapped_at_log_2_warns_and_keeps_its_heads(
+    c: float,
+) -> None:
+    acts, labels = shared_massive_cell(n=64, seed=5)
+
+    with pytest.warns(StalledFitWarning) as caught:
+        reader = fit_cell_max(acts, labels=labels, c=c, tol=1e-10)
+
+    assert len(caught) == 1
+    assert 0.0 < np.abs(reader.values).max() < 1e-9
+    scores = reader.score(acts)[0]
+    assert np.ptp(scores) < 1e-9
 
 
 def reference_max(

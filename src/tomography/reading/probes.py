@@ -32,6 +32,18 @@ from tomography.reading.reader import RepReader
 from tomography.reading.reader import _layer_seed
 from tomography.reading.reader import orient
 
+# L-BFGS-B's `ftol`: it stops when a step lowers the loss by no more than
+# this times the loss's magnitude (at least 1).
+_FTOL = 64 * np.finfo(np.float64).eps
+
+
+class StalledFitWarning(UserWarning):
+    """A cell fit whose loss never dropped below its loss at the zero start.
+
+    The fit may still have converged by L-BFGS's own tests, so this is not
+    a `ConvergenceWarning`: its reader scores every stimulus about the same.
+    """
+
 
 @runtime_checkable
 class Reader[InputT](Protocol):
@@ -967,8 +979,12 @@ def _minimize(
     name: str,
 ) -> NDArray[np.float64]:
     # Minimizes a loss of `size` parameters from zeros with full-batch L-BFGS
-    # in float64 and scikit-learn's settings. A stop before convergence warns
-    # from the caller of the public fit, two frames above this one's caller.
+    # in float64 and scikit-learn's settings. A stop before convergence, and
+    # a fit whose loss never left its start, warn from the caller of the
+    # public fit, two frames above this one's caller. The stall test is the
+    # one `ftol` applies to each step, applied to the whole fit: a drop no
+    # larger than rounding of the loss (log 2 at the start of both fits) is
+    # no drop.
     def objective(
         theta: NDArray[np.float64],
     ) -> tuple[float, NDArray[np.float64]]:
@@ -977,22 +993,32 @@ def _minimize(
         (gradient,) = torch.autograd.grad(value, params)
         return float(value.detach()), gradient.numpy()
 
+    start = np.zeros(size)
+    initial, _ = objective(start)
     result = minimize(
         objective,
-        np.zeros(size),
+        start,
         method="L-BFGS-B",
         jac=True,
         options={
             "maxiter": max_iter,
             "maxls": 50,
             "gtol": tol,
-            "ftol": 64 * np.finfo(np.float64).eps,
+            "ftol": _FTOL,
         },
     )
     if result.status != 0:
         warnings.warn(
             f"the {name} reader did not converge: {result.message}",
             ConvergenceWarning,
+            stacklevel=4,
+        )
+    final = float(result.fun)
+    if initial - final <= _FTOL * max(abs(initial), abs(final), 1.0):
+        warnings.warn(
+            f"the {name} reader stalled: its loss {final!r} never dropped "
+            f"below {initial!r}, its loss at the zero start",
+            StalledFitWarning,
             stacklevel=4,
         )
     return np.asarray(result.x, dtype=np.float64)
