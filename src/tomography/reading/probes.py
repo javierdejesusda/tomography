@@ -997,11 +997,11 @@ def _minimize(
         (gradient,) = torch.autograd.grad(value, params)
         return float(value.detach()), gradient.numpy()
 
-    start = np.zeros(size)
-    initial, _ = objective(start)
+    with torch.no_grad():
+        initial = float(loss(torch.zeros(size, dtype=torch.float64)))
     result = minimize(
         objective,
-        start,
+        np.zeros(size),
         method="L-BFGS-B",
         jac=True,
         options={
