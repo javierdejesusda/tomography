@@ -55,6 +55,7 @@ from tomography.reading.probes import fit_cell_max
 from tomography.reading.stats import delong_test
 from tomography.reading.stats import holm_correction
 from tomography.reading.stats import paired_auroc_diff
+from tomography.templates import ChatFormat
 
 DEFAULT_HASH = "0df973a1c1e0"
 M2_DEFAULT_HASH = "3c82fe936345"
@@ -71,11 +72,12 @@ PREFIX, DECOY, STIMULUS, FINAL = (
 def test_segments_and_cell_sets_are_named_in_prompt_order() -> None:
     assert SEGMENTS == ("prefix", "decoy", "stimulus", "final")
     assert CELL_SETS == ("prompt", "stimulus", "final", "upper")
+    # No cell set reads the prefix, whose cells carry no stimulus.
     assert SET_SEGMENTS == {
-        "prompt": SEGMENTS,
+        "prompt": ("decoy", "stimulus", "final"),
         "stimulus": ("stimulus",),
         "final": ("final",),
-        "upper": SEGMENTS,
+        "upper": ("decoy", "stimulus", "final"),
     }
 
 
@@ -235,25 +237,86 @@ def test_stimulus_cells_are_the_response_rows(
     _assert_same_rows(got, expected)
 
 
-@pytest.mark.parametrize("task", ["sentiment", "utility"])
-def test_prefix_cells_are_equal_across_texts_of_one_template(
-    tiny_arch: LoadedModel, task: str
-) -> None:
-    stimuli = _stimuli(tiny_arch, task, decoy=False)
-    cells, segments = _cells(tiny_arch, stimuli, decoy=False)
+def _m3_sets(
+    loaded: LoadedModel, task_name: str, chat: ChatFormat
+) -> list[tuple[str, StimulusSet, bool]]:
+    """A task's sets on every template M3 renders, with whether they decoy.
 
-    prefix = segments == PREFIX
-    rows = [
-        prefix & (cells.row_stimulus == i) for i in range(len(stimuli.texts))
+    The paper template renders the train, select and original sets, the
+    misleading one every decoy condition, and each shift its own.
+    """
+    config = m3_matrix.Config()
+    task = m2_readers._task(task_name)
+    variants, _ = template_variants(task, chat, kinds=("paper", *config.shifts))
+    paper, shifted = variants[0], [v for v in variants[1:] if v.evaluable]
+    misleading = dataclasses.replace(
+        paper,
+        name="misleading",
+        template=misleading_template(task.template, task.noun),
+    )
+    rows = _examples("utility" if task.pairing == "by_group" else "sentiment")
+    sets = [("original", task_set(task, paper, rows, n_pairs=3, seed=0), False)]
+    for decoy in config.decoys:
+        decoys = with_decoys(rows, decoy, seed=0)
+        misled = task_set(task, misleading, decoys, n_pairs=3, seed=0)
+        sets.append((decoy, misled, True))
+    sets += [
+        (v.name, task_set(task, v, rows, n_pairs=3, seed=0), False)
+        for v in shifted
     ]
-    assert rows[0].sum() > 0
-    for row in rows[1:]:
-        np.testing.assert_array_equal(
-            cells.row_token_id[row], cells.row_token_id[rows[0]]
-        )
-        np.testing.assert_array_equal(
-            cells.data[:, row], cells.data[:, rows[0]]
-        )
+    return sets
+
+
+@pytest.mark.parametrize("task", m3_matrix.Config().tasks)
+@pytest.mark.parametrize("chat", ["plain", "template"])
+def test_the_prefix_is_the_constant_template_head_of_every_m3_set(
+    tiny_qwen3: LoadedModel, task: str, chat: str
+) -> None:
+    chat_format = (
+        ChatFormat.from_tokenizer(tiny_qwen3.tokenizer)
+        if chat == "template"
+        else ChatFormat("plain")
+    )
+    user = m2_readers._task(task).template.user
+    at = user.index("{stimulus}")
+    # Text a misleading template keeps between its decoy line and the
+    # stimulus, such as utility's `Scenario: ` tag.
+    between = user[user.rfind("\n", 0, at) + 1 : at].strip()
+
+    for condition, stimuli, decoy in _m3_sets(tiny_qwen3, task, chat_format):
+        cells, segments = _cells(tiny_qwen3, stimuli, decoy=decoy)
+        offsets = tiny_qwen3.encode(stimuli.texts, bos=None).offsets
+        heads, tails = [], []
+        for i in range(len(stimuli.texts)):
+            rows = np.flatnonzero(cells.row_stimulus == i)
+            prefix = rows[segments[rows] == PREFIX]
+            start = _span(stimuli, i)[0]
+            # No token that overlaps the stimulus is labelled prefix.
+            assert all(
+                offsets[i][token][1] <= start
+                for token in cells.row_token[prefix]
+            ), condition
+            n_head = int(np.argmax(segments[rows] != PREFIX))
+            heads.append(rows[:n_head])
+            tails.append(prefix[n_head:])
+        assert heads[0].size > 0, condition
+        for head in heads[1:]:
+            # Same tokens at the head of every text, so the same cells.
+            np.testing.assert_array_equal(
+                cells.row_token_id[head], cells.row_token_id[heads[0]]
+            )
+            np.testing.assert_array_equal(
+                cells.data[:, head], cells.data[:, heads[0]]
+            )
+        # Only a misleading set has prefix tokens after its head: the text
+        # between the decoy line and the stimulus, the same in every text;
+        # their cells see the decoy line but never the stimulus.
+        for tail in tails:
+            if not (decoy and between):
+                assert tail.size == 0, condition
+                continue
+            ids = cells.row_token_id[tail].tolist()
+            assert tiny_qwen3.tokenizer.decode(ids).strip() == between
 
 
 @pytest.mark.parametrize("task", ["sentiment", "utility"])
@@ -1513,7 +1576,7 @@ def test_the_diagnostics_share_each_reader_among_the_segments(
     payload = cast(dict[str, Any], finished.read_json("diagnostics"))
     assert payload["columns"] == list(m3_matrix.DIAGNOSTIC_COLUMNS)
     summary = cast(dict[str, Any], finished.read_json("summary"))
-    assert "prefix" in summary["diagnostics"]
+    assert "no cell set reads the prefix" in summary["diagnostics"]
     rows = [
         r for r in _table(finished, "diagnostics") if r["task"] == "sentiment"
     ]
@@ -1539,6 +1602,7 @@ def test_the_diagnostics_share_each_reader_among_the_segments(
         shares = [row[segment] for segment in SEGMENTS]
         assert sum(shares) == pytest.approx(1.0)
         assert min(shares) >= 0.0
+        assert row["prefix"] == 0.0
         cell_set = row["readout"].split("_")[1]
         if cell_set in ("stimulus", "final"):
             assert row[cell_set] == pytest.approx(1.0)
@@ -1591,13 +1655,14 @@ def test_the_cell_count_correlation_is_taken_within_each_label(
     }
     defined = 0
     for m, condition in enumerate(splits.conditions):
-        cells, _ = _run_cells(
+        cells, segments = _run_cells(
             tiny_gpt2,
             splits.report_items[condition],
             config,
             decoy=condition in config.decoys,
         )
-        counts = np.bincount(cells.row_stimulus) * len(config.cell_layers)
+        prompt = _set_cells(cells, segments, config, "prompt")
+        counts = np.bincount(prompt.row_stimulus) * len(config.cell_layers)
         labels = splits.report_items[condition].labels
         rhos = [
             spearman(

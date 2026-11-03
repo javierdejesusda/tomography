@@ -8,10 +8,15 @@ a tag such as utility's `Scenario:` after the decoy line), `decoy` (P2's
 misleading line, in the misleading conditions only), `stimulus` (the
 `{stimulus}` slot) and `final` (from the stimulus end to the text end, where
 `last` and `concept` read). `select_cells` keeps the cells of a cell set:
-`prompt` and `upper` hold every segment (`upper` at the upper layers),
-`stimulus` and `final` one each. `stimulus_token_set` and `prompt_max_set`
-give the spans through which M2's `concept` and `max` positions read the
-last stimulus token and the feature-wise maximum over the prompt.
+`prompt` and `upper` hold every segment but the prefix (`upper` at the
+upper layers), `stimulus` and `final` one each. No set reads the prefix:
+its cells never see the stimulus, and under the causal mask they are the
+same in every text of a template, so one of them can top every stimulus
+(a massive activation held cell max fits at log 2); only a tag between the
+decoy line and the stimulus, such as utility's `Scenario:`, sees the decoy.
+`stimulus_token_set` and `prompt_max_set` give the spans through which
+M2's `concept` and `max` positions read the last stimulus token and the
+feature-wise maximum over the prompt, every token but BOS.
 
 The experiment runs M2's protocol on M2's items. Its one-row phase fits
 M2's scorers on M2's one-row readouts and on `stimulus_token` and
@@ -82,12 +87,13 @@ Pooling = Literal["cellattn", "cellmax"]
 SEGMENTS: tuple[Segment, ...] = get_args(Segment)
 CELL_SETS: tuple[CellSet, ...] = get_args(CellSet)
 POOLINGS: tuple[Pooling, ...] = get_args(Pooling)
+READ_SEGMENTS: tuple[Segment, ...] = ("decoy", "stimulus", "final")
 SET_SEGMENTS: Mapping[CellSet, tuple[Segment, ...]] = MappingProxyType(
     {
-        "prompt": SEGMENTS,
+        "prompt": READ_SEGMENTS,
         "stimulus": ("stimulus",),
         "final": ("final",),
-        "upper": SEGMENTS,
+        "upper": READ_SEGMENTS,
     }
 )
 TOKEN_READOUTS: tuple[m2_readers.Readout, ...] = (
@@ -118,8 +124,8 @@ DIAGNOSTICS = (
     "cells in the reader's set, and cells_rho the Spearman correlation of "
     "that number with the score within each label, averaged over the labels "
     "and draws where it is defined (null if none is), since the cell max "
-    "rises with the number of cells; a prefix share can still be "
-    "decoy-driven, as utility's Scenario: tag follows the misleading line"
+    "rises with the number of cells; no cell set reads the prefix, so its "
+    "share is 0"
 )
 CellReader = AttentionReader | CellMaxReader
 
@@ -139,7 +145,8 @@ class Config(m2_readers.Config):
         cell_layers: The layers whose cells the cell readers read, among
             the layers read.
         upper_layers: The layers of the `upper` set, among `cell_layers`.
-        cell_sets: The cell sets to read, from `CELL_SETS`.
+        cell_sets: The cell sets to read, from `CELL_SETS`; `prompt` and
+            `upper` read every segment but the prefix.
         poolings: How the cell readers pool their cells, from `POOLINGS`:
             `cellattn` one softmax over the cells of all layers, `cellmax`
             the highest cell.
