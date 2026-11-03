@@ -1334,6 +1334,60 @@ def test_joint_cells_are_compared_with_each_baseline_at_top_k_and_best(
         )
 
 
+def test_no_cell_reader_fits_or_scores_a_prefix_cell(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Every fit and every score reads cells of the last `prompt_cells`
+    # call: a draw's training cells, or a streamed batch.
+    prefix: set[tuple[int, int]] = set()
+    checked: Counter[str] = Counter()
+
+    def reading(*args: Any, **kwargs: Any) -> Any:
+        cells, segments = prompt_cells(*args, **kwargs)
+        prefix.clear()
+        prefix.update(
+            zip(
+                cells.row_stimulus[segments == PREFIX].tolist(),
+                cells.row_token[segments == PREFIX].tolist(),
+                strict=True,
+            )
+        )
+        return cells, segments
+
+    def check(acts: Activations, what: str) -> None:
+        assert prefix, "no prefix cells to compare with"
+        rows = zip(
+            acts.row_stimulus.tolist(), acts.row_token.tolist(), strict=True
+        )
+        assert prefix.isdisjoint(rows), what
+        checked[what] += 1
+
+    def fitting(fit: Any) -> Any:
+        def spied(acts: Activations, *args: Any, **kwargs: Any) -> Any:
+            check(acts, "fit")
+            return fit(acts, *args, **kwargs)
+
+        return spied
+
+    def scoring(score: Any) -> Any:
+        def spied(reader: Any, acts: Activations) -> Any:
+            check(acts, "score")
+            return score(reader, acts)
+
+        return spied
+
+    monkeypatch.setattr(m3_matrix, "prompt_cells", reading)
+    for name in ("fit_attention", "fit_cell_max", "random_cell_max"):
+        monkeypatch.setattr(m3_matrix, name, fitting(getattr(m3_matrix, name)))
+    for reader_cls in (AttentionReader, CellMaxReader):
+        monkeypatch.setattr(reader_cls, "score", scoring(reader_cls.score))
+    config = _config(tasks=("utility",))
+    _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
+
+    assert checked["fit"] > 0
+    assert checked["score"] > 0
+
+
 def _counting(
     monkeypatch: pytest.MonkeyPatch, module: Any, read: Counter[str]
 ) -> None:

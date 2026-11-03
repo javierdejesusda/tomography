@@ -1265,7 +1265,8 @@ def execute(
     `comparisons.json` and `summary.json`; and per task the kept readers'
     parameters in `cellheads_<task>`, and `diagnostics.json` (see
     `DIAGNOSTICS`). The summary also counts, per task and fitted cell
-    reader, the fits, their seconds and their `ConvergenceWarning`s.
+    reader, the fits, their seconds, their `ConvergenceWarning`s and its
+    `stalled_fits` (the fits that raised `StalledFitWarning`).
 
     Args:
         config: The experiment settings.

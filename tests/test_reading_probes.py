@@ -645,14 +645,16 @@ def test_cell_fits_keep_the_scikit_learn_tolerance_by_default() -> None:
 
 
 @CELL_FITS
+@pytest.mark.parametrize("tol", [1e-4, 1e-10])
+@pytest.mark.parametrize("c", [0.01, 1.0])
 def test_cell_fits_that_learn_warn_of_nothing(
-    fit: Callable[..., object],
+    fit: Callable[..., object], tol: float, c: float
 ) -> None:
     acts, labels, _ = planted_tokens(n=60, seed=23)
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        fit(acts, labels=labels)
+        fit(acts, labels=labels, c=c, tol=tol)
 
     assert caught == []
 
@@ -716,13 +718,14 @@ def test_a_cell_max_fit_trapped_at_log_2_warns_and_keeps_its_heads(
 ) -> None:
     acts, labels = shared_massive_cell(n=64, seed=5)
 
-    with pytest.warns(StalledFitWarning) as caught:
+    with pytest.warns(StalledFitWarning, match="stalled") as caught:
         reader = fit_cell_max(acts, labels=labels, c=c, tol=1e-10)
 
-    assert len(caught) == 1
-    assert 0.0 < np.abs(reader.values).max() < 1e-9
-    scores = reader.score(acts)[0]
-    assert np.ptp(scores) < 1e-9
+    assert [record.category for record in caught] == [StalledFitWarning]
+    # The reader is kept, and its logistic loss is still log 2.
+    scores = reader.score(acts)[0].astype(np.float64)
+    loss = np.mean(np.logaddexp(0.0, np.where(labels == 1, -scores, scores)))
+    assert loss == pytest.approx(np.log(2.0), abs=1e-9)
 
 
 def reference_max(
