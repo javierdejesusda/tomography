@@ -49,13 +49,14 @@ from tomography.reading.metrics import auroc
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.probes import AttentionReader
 from tomography.reading.probes import CellMaxReader
+from tomography.reading.probes import StalledFitWarning
 from tomography.reading.probes import fit_attention
 from tomography.reading.probes import fit_cell_max
 from tomography.reading.stats import delong_test
 from tomography.reading.stats import holm_correction
 from tomography.reading.stats import paired_auroc_diff
 
-DEFAULT_HASH = "fdb1d8d7ccf3"
+DEFAULT_HASH = "0df973a1c1e0"
 M2_DEFAULT_HASH = "3c82fe936345"
 LAYERS = (1, 2, 3)
 PAPER_DECOY_LINE = p2_positions.DECOY_LINE
@@ -516,6 +517,7 @@ def test_config_defaults_and_round_trip() -> None:
     assert config.upper_layers == (16, 20, 24, 28)
     assert config.cell_sets == ("prompt",)
     assert config.poolings == ("cellattn", "cellmax")
+    assert config.cell_tol == 1e-10
     assert config.baselines == (
         "logistic/last",
         "mean_diff/last",
@@ -752,9 +754,11 @@ def _quiet_execute(
     config: m3_matrix.Config, run_dir: RunDir, loaded: LoadedModel
 ) -> None:
     # Fits on the tiny model's handful of rows can stop on an L-BFGS line
-    # search; the warning is expected there and not under test.
+    # search or stall at their start; the warnings are expected there and
+    # not under test.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
+        warnings.simplefilter("ignore", StalledFitWarning)
         m3_matrix.execute(config, run_dir, loaded, _sources())
 
 
@@ -1066,6 +1070,7 @@ def _fitted_readers(
     readers: list[tuple[CellSet, Any]] = []
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
+        warnings.simplefilter("ignore", StalledFitWarning)
         for cell_set in ("prompt", "upper", "final"):
             acts = _set_cells(cells, segments, config, cell_set)
             readers += [
@@ -1702,25 +1707,25 @@ def test_the_segment_shares_are_the_kept_readers_mean_weights(
             )
 
 
-def test_the_summary_counts_fits_seconds_and_convergence_warnings(
+def test_the_summary_counts_fits_seconds_and_warnings(
     tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def planting(fit: Any, *, planted: bool) -> Any:
+    def planting(fit: Any, category: type[Warning]) -> Any:
         def fitting(acts: Activations, **kwargs: Any) -> Any:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", ConvergenceWarning)
+                warnings.simplefilter("ignore", StalledFitWarning)
                 reader = fit(acts, **kwargs)
-            if planted:
-                warnings.warn("planted", ConvergenceWarning, stacklevel=2)
+            warnings.warn(category.__name__, category, stacklevel=2)
             return reader
 
         return fitting
 
     monkeypatch.setattr(
-        m3_matrix, "fit_cell_max", planting(fit_cell_max, planted=True)
+        m3_matrix, "fit_cell_max", planting(fit_cell_max, ConvergenceWarning)
     )
     monkeypatch.setattr(
-        m3_matrix, "fit_attention", planting(fit_attention, planted=False)
+        m3_matrix, "fit_attention", planting(fit_attention, StalledFitWarning)
     )
     config = _config(tasks=("utility",), cell_sets=("prompt",), decoys=())
     run_dir = RunDir.create(config, out_root=tmp_path)
@@ -1739,9 +1744,37 @@ def test_the_summary_counts_fits_seconds_and_convergence_warnings(
     for name, stats in fits.items():
         assert stats["fits"] == n
         assert stats["seconds"] > 0.0
-        expected = n if "cellmax" in name else 0
-        assert stats["convergence_warnings"] == expected
+        assert stats["convergence_warnings"] == (n if "cellmax" in name else 0)
+        assert stats["stalled_fits"] == (n if "cellattn" in name else 0)
     # The counted warnings still reach the caller: under the "default"
-    # action, once per grid of fits (both cellmax series, every draw).
-    planted = [w for w in shown if str(w.message) == "planted"]
-    assert len(planted) == 2 * config.n_seeds
+    # action, once per grid of fits (both series of a pooling, every draw).
+    for category in (ConvergenceWarning, StalledFitWarning):
+        planted = [w for w in shown if str(w.message) == category.__name__]
+        assert len(planted) == 2 * config.n_seeds
+
+
+def test_the_cell_fits_use_the_cell_tolerance(
+    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tolerances: dict[str, list[float]] = {"cellattn": [], "cellmax": []}
+
+    def recording(fit: Any, pooling: str) -> Any:
+        def fitting(acts: Activations, **kwargs: Any) -> Any:
+            tolerances[pooling].append(kwargs["tol"])
+            return fit(acts, **kwargs)
+
+        return fitting
+
+    monkeypatch.setattr(
+        m3_matrix, "fit_cell_max", recording(fit_cell_max, "cellmax")
+    )
+    monkeypatch.setattr(
+        m3_matrix, "fit_attention", recording(fit_attention, "cellattn")
+    )
+    config = _config(
+        tasks=("utility",), cell_sets=("prompt",), decoys=(), cell_tol=1e-7
+    )
+    _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
+
+    n = 2 * config.n_seeds * len(config.logistic_c)
+    assert tolerances == {"cellattn": [1e-7] * n, "cellmax": [1e-7] * n}
