@@ -87,13 +87,13 @@ Pooling = Literal["cellattn", "cellmax"]
 SEGMENTS: tuple[Segment, ...] = get_args(Segment)
 CELL_SETS: tuple[CellSet, ...] = get_args(CellSet)
 POOLINGS: tuple[Pooling, ...] = get_args(Pooling)
-READ_SEGMENTS: tuple[Segment, ...] = ("decoy", "stimulus", "final")
+PROMPT_SEGMENTS: tuple[Segment, ...] = ("decoy", "stimulus", "final")
 SET_SEGMENTS: Mapping[CellSet, tuple[Segment, ...]] = MappingProxyType(
     {
-        "prompt": READ_SEGMENTS,
+        "prompt": PROMPT_SEGMENTS,
         "stimulus": ("stimulus",),
         "final": ("final",),
-        "upper": READ_SEGMENTS,
+        "upper": PROMPT_SEGMENTS,
     }
 )
 TOKEN_READOUTS: tuple[m2_readers.Readout, ...] = (
@@ -705,9 +705,11 @@ def _grid_fits(
             shown.lineno,
             registry=registry,
         )
-    converged = sum(issubclass(w.category, ConvergenceWarning) for w in caught)
+    unconverged = sum(
+        issubclass(w.category, ConvergenceWarning) for w in caught
+    )
     stalled = sum(issubclass(w.category, StalledFitWarning) for w in caught)
-    return readers, seconds, converged, stalled
+    return readers, seconds, unconverged, stalled
 
 
 def _shuffled(

@@ -455,7 +455,10 @@ def fit_attention(
     value heads are oriented over the token rows the way the sweep orients a
     `RepReader.fit` reader of `response` rows: the labels repeat on every
     row of a stimulus, and `Activations.row_groups` maps the pairs and the
-    groups to rows.
+    groups to rows. An L-BFGS run (one per layer, or one for a joint
+    reader) whose loss never drops below its value at the zero start, by
+    more than L-BFGS's relative `ftol` of 64 machine epsilons, warns with
+    `StalledFitWarning` and keeps the parameters it reached.
 
     Args:
         acts: Token rows of the layers to read, such as those of the
@@ -608,7 +611,8 @@ def fit_cell_max(
     mean pooling; L-BFGS then runs with the settings of `fit_attention` and
     draws no random numbers. The maximum makes the loss piecewise smooth,
     so a fit can stop on a line search: it keeps the parameters reached and
-    warns. The value heads are oriented over the token rows as in
+    warns. A fit whose loss never leaves its start warns as in
+    `fit_attention`. The value heads are oriented over the token rows as in
     `fit_attention`.
 
     Args:
