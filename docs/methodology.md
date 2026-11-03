@@ -254,8 +254,9 @@ a cell being one token at one layer, reads better than M2's one-row readouts. It
   in the misleading conditions only), `stimulus` (the stimulus slot, M2's `response` rows) and `final` (from the
   stimulus end to the text end, where `last` and `concept` read). A token joins the segment its characters overlap,
   the stimulus winning ties.
-- Cell sets: `prompt` (every segment at `cell_layers`), `stimulus`, `final`, and `upper` (every segment at
-  `upper_layers`, default 16, 20, 24, 28). The default `cell_sets` is `prompt` (stage 1). Stage 2 (`stimulus`,
+- Cell sets: `prompt` (the `decoy`, `stimulus` and `final` segments at `cell_layers`), `stimulus`, `final`, and
+  `upper` (the same segments at `upper_layers`, default 16, 20, 24, 28). No set reads the `prefix` (see the
+  caveats). The default `cell_sets` is `prompt` (stage 1). Stage 2 (`stimulus`,
   `final`, `upper`, selected with `--set cell_sets=...`) runs only if a `cellattn_prompt`, `cellmax_prompt` or
   `prompt_max` row beats `logistic/last` (Holm-adjusted paired interval above zero) in some checkpoint, task and
   condition of stage 1, a gate declared before stage 1 results.
@@ -263,8 +264,10 @@ a cell being one token at one layer, reads better than M2's one-row readouts. It
   set's cells: a value head and a query per layer and one softmax over the cells of all layers.
   `logistic/cellmax_<set>/joint` (`fit_cell_max`) has a linear head and bias per layer, and a text scores its
   highest cell over all layers. Both are trained through their pooling with the logistic loss, `C` from M2's
-  `logistic_c` grid and cells standardized on the draw's training cells only. They keep the scorer name `logistic`
-  so M2's comparisons take them. An MLP head per layer is deferred.
+  `logistic_c` grid and cells standardized on the draw's training cells only. L-BFGS runs at gradient tolerance
+  `cell_tol` (default 1e-10; the probes' default stays 1e-4): at 1e-4 the gradient at the zero start can already
+  pass the test, which stopped a cellattn fit at its first step with zero heads. They keep the scorer name
+  `logistic` so M2's comparisons take them. An MLP head per layer is deferred.
 - One-row readers: M2's `logistic` and `mean_diff` on `last`, `concept`, `mean` and `max` (rules `best` and
   `top_k`), fitted by M2's helpers on M2's items, and two relabelled readouts, each on its own pass:
   `stimulus_token` (the last stimulus token, M2's `concept` position over the stimulus span) and `prompt_max` (M2's
@@ -292,17 +295,22 @@ a cell being one token at one layer, reads better than M2's one-row readouts. It
 - Outputs: M2's files (`table.json`, `comparisons.json`, `scores_<task>`, `auroc_<task>`, `summary.json`),
   `diagnostics.json`, and `cellheads_<task>` (each draw's kept heads, biases and signs, the queries and offsets of
   cellattn, and the chosen `C`), named apart from the `readers*` files the aggregation code parses. `summary.json`
-  also counts, per task and fitted cell reader, its fits, their seconds and their `ConvergenceWarning`s.
+  also counts, per task and fitted cell reader, its fits, their seconds, their `ConvergenceWarning`s and its
+  `stalled_fits`: fits whose loss never dropped below its value at the zero start (log 2) by more than the relative
+  64 machine epsilons that L-BFGS-B's `ftol` treats as no progress. Each warns as a `StalledFitWarning` and is
+  kept, so selection is unchanged and sees it as a reader that ties its texts.
 - Runs load the model in float32.
 
 Caveats:
 
 - Length bias of the max: a text's highest cell rises with its number of cells. The misleading conditions add a
   decoy line, so more cells, and a cellmax gain under `against` is read only beside its `cells` and `cells_rho`.
-- Prefix cells under misleading utility: prefix cells are equal across the texts of a template only on the paper
-  template. On misleading utility the `Scenario:` tag follows the decoy line, so its cells differ between decoys and
-  carry the label under `against`: a `prefix` share there can still be decoy-driven. Training uses the paper
-  template and is unaffected.
+- Prefix cells (2026-11-03): no cell set reads them, so the diagnostics' `prefix` share is 0. They never see the
+  stimulus, and under the causal mask the prefix is the same in every text of a template, so its cells are equal
+  across texts. In the first stage 1 run (qwen3-0.6b-base) one of them, a massive activation at layer 28, topped
+  every stimulus and held utility cellmax fits at log 2 with head norms of 1e-17 to 3e-13. On misleading utility the
+  `Scenario:` tag follows the decoy line, so its cells differ between decoys (they see the decoy, never the
+  stimulus); it is dropped with the rest of the prefix.
 - Reproducibility: cellmax fits are bit-identical on one machine, but L-BFGS on the piecewise max objective turns
   input differences near 1e-6 into score differences near 3e-3, so runs on different machines agree only to about
   1e-3.

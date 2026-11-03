@@ -8,10 +8,15 @@ a tag such as utility's `Scenario:` after the decoy line), `decoy` (P2's
 misleading line, in the misleading conditions only), `stimulus` (the
 `{stimulus}` slot) and `final` (from the stimulus end to the text end, where
 `last` and `concept` read). `select_cells` keeps the cells of a cell set:
-`prompt` and `upper` hold every segment (`upper` at the upper layers),
-`stimulus` and `final` one each. `stimulus_token_set` and `prompt_max_set`
-give the spans through which M2's `concept` and `max` positions read the
-last stimulus token and the feature-wise maximum over the prompt.
+`prompt` and `upper` hold every segment but the prefix (`upper` at the
+upper layers), `stimulus` and `final` one each. No set reads the prefix:
+its cells never see the stimulus, and under the causal mask they are the
+same in every text of a template, so one of them can top every stimulus
+(a massive activation held cell max fits at log 2); only a tag between the
+decoy line and the stimulus, such as utility's `Scenario:`, sees the decoy.
+`stimulus_token_set` and `prompt_max_set` give the spans through which
+M2's `concept` and `max` positions read the last stimulus token and the
+feature-wise maximum over the prompt, every token but BOS.
 
 The experiment runs M2's protocol on M2's items. Its one-row phase fits
 M2's scorers on M2's one-row readouts and on `stimulus_token` and
@@ -70,6 +75,7 @@ from tomography.reading.metrics import auroc
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.probes import AttentionReader
 from tomography.reading.probes import CellMaxReader
+from tomography.reading.probes import StalledFitWarning
 from tomography.reading.probes import _scaled_cells
 from tomography.reading.probes import _unscaled
 from tomography.reading.probes import fit_attention
@@ -81,12 +87,13 @@ Pooling = Literal["cellattn", "cellmax"]
 SEGMENTS: tuple[Segment, ...] = get_args(Segment)
 CELL_SETS: tuple[CellSet, ...] = get_args(CellSet)
 POOLINGS: tuple[Pooling, ...] = get_args(Pooling)
+PROMPT_SEGMENTS: tuple[Segment, ...] = ("decoy", "stimulus", "final")
 SET_SEGMENTS: Mapping[CellSet, tuple[Segment, ...]] = MappingProxyType(
     {
-        "prompt": SEGMENTS,
+        "prompt": PROMPT_SEGMENTS,
         "stimulus": ("stimulus",),
         "final": ("final",),
-        "upper": SEGMENTS,
+        "upper": PROMPT_SEGMENTS,
     }
 )
 TOKEN_READOUTS: tuple[m2_readers.Readout, ...] = (
@@ -117,8 +124,8 @@ DIAGNOSTICS = (
     "cells in the reader's set, and cells_rho the Spearman correlation of "
     "that number with the score within each label, averaged over the labels "
     "and draws where it is defined (null if none is), since the cell max "
-    "rises with the number of cells; a prefix share can still be "
-    "decoy-driven, as utility's Scenario: tag follows the misleading line"
+    "rises with the number of cells; no cell set reads the prefix, so its "
+    "share is 0"
 )
 CellReader = AttentionReader | CellMaxReader
 
@@ -138,10 +145,15 @@ class Config(m2_readers.Config):
         cell_layers: The layers whose cells the cell readers read, among
             the layers read.
         upper_layers: The layers of the `upper` set, among `cell_layers`.
-        cell_sets: The cell sets to read, from `CELL_SETS`.
+        cell_sets: The cell sets to read, from `CELL_SETS`; `prompt` and
+            `upper` read every segment but the prefix.
         poolings: How the cell readers pool their cells, from `POOLINGS`:
             `cellattn` one softmax over the cells of all layers, `cellmax`
             the highest cell.
+        cell_tol: The gradient tolerance of L-BFGS in every cell fit, far
+            below the probes' default of 1e-4: at the zero start the
+            gradient's largest entry can sit under 1e-4, which stopped a
+            fit there with zero heads.
         baselines: The cells every other cell is compared with, as
             `<scorer>/<readout>` of a one-row readout.
     """
@@ -158,6 +170,7 @@ class Config(m2_readers.Config):
     upper_layers: tuple[int, ...] = (16, 20, 24, 28)
     cell_sets: tuple[CellSet, ...] = ("prompt",)
     poolings: tuple[Pooling, ...] = POOLINGS
+    cell_tol: float = 1e-10
     baselines: tuple[str, ...] = (
         "logistic/last",
         "mean_diff/last",
@@ -630,6 +643,8 @@ class _Fit(NamedTuple):
         select_labels: The select labels that tune and threshold them.
         seconds: The time the fits took; 0 for the random control.
         convergence_warnings: The `ConvergenceWarning`s the fits raised.
+        stalled_fits: The `StalledFitWarning`s the fits raised: fits whose
+            loss never left its value at the zero start.
     """
 
     cell: m2_readers.Cell
@@ -639,15 +654,20 @@ class _Fit(NamedTuple):
     select_labels: NDArray[np.int64]
     seconds: float = 0.0
     convergence_warnings: int = 0
+    stalled_fits: int = 0
 
 
 def _fit_cells(
-    pooling: Pooling, train: Activations, labels: NDArray[np.int64], c: float
+    pooling: Pooling,
+    train: Activations,
+    labels: NDArray[np.int64],
+    c: float,
+    tol: float,
 ) -> CellReader:
     """Fits a joint reader through the pooling of the training cells."""
     if pooling == "cellattn":
-        return fit_attention(train, labels=labels, c=c, joint=True)
-    return fit_cell_max(train, labels=labels, c=c)
+        return fit_attention(train, labels=labels, c=c, joint=True, tol=tol)
+    return fit_cell_max(train, labels=labels, c=c, tol=tol)
 
 
 def _grid_fits(
@@ -655,21 +675,24 @@ def _grid_fits(
     train: Activations,
     labels: NDArray[np.int64],
     grid: Sequence[float],
-) -> tuple[list[CellReader], float, int]:
+    tol: float,
+) -> tuple[list[CellReader], float, int, int]:
     """Fits a reader per grid value, timing the fits and counting warnings.
 
-    Every `ConvergenceWarning` is counted, then shown again under the
-    caller's filters; under the `default` action a warning repeated over
-    the grid shows once.
+    Every `ConvergenceWarning` and `StalledFitWarning` is counted, then
+    shown again under the caller's filters; under the `default` action a
+    warning repeated over the grid shows once. A stalled fit is kept, so
+    selection still sees it, as a reader that ties its stimuli.
 
     Returns:
         The readers, the seconds the fits took, and the number of
-        `ConvergenceWarning`s they raised.
+        `ConvergenceWarning`s and of `StalledFitWarning`s they raised.
     """
     start = time.perf_counter()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", ConvergenceWarning)
-        readers = [_fit_cells(pooling, train, labels, c) for c in grid]
+        warnings.simplefilter("always", StalledFitWarning)
+        readers = [_fit_cells(pooling, train, labels, c, tol) for c in grid]
     seconds = time.perf_counter() - start
     # One registry per grid: every `catch_warnings` clears the registries,
     # so a longer-lived one would not dedupe across grids either.
@@ -682,8 +705,11 @@ def _grid_fits(
             shown.lineno,
             registry=registry,
         )
-    counted = sum(issubclass(w.category, ConvergenceWarning) for w in caught)
-    return readers, seconds, counted
+    unconverged = sum(
+        issubclass(w.category, ConvergenceWarning) for w in caught
+    )
+    stalled = sum(issubclass(w.category, StalledFitWarning) for w in caught)
+    return readers, seconds, unconverged, stalled
 
 
 def _shuffled(
@@ -765,8 +791,8 @@ def _set_fits(
     for pooling in config.poolings:
         cell = m2_readers.Cell("logistic", f"{pooling}_{cell_set}", "joint")
         for name, labels, select_labels in series:
-            readers, seconds, caught = _grid_fits(
-                pooling, train, labels, config.logistic_c
+            readers, seconds, unconverged, stalled = _grid_fits(
+                pooling, train, labels, config.logistic_c, config.cell_tol
             )
             fits.append(
                 _Fit(
@@ -776,7 +802,8 @@ def _set_fits(
                     readers,
                     select_labels,
                     seconds,
-                    caught,
+                    unconverged,
+                    stalled,
                 )
             )
     if "random" in config.controls and "cellmax" in config.poolings:
@@ -892,6 +919,7 @@ def _cell_phase(
             "convergence_warnings": sum(
                 fits[j].convergence_warnings for j in draws
             ),
+            "stalled_fits": sum(fits[j].stalled_fits for j in draws),
         }
         for (cell, series), draws in groups.items()
         if cell.scorer == "logistic"
@@ -1237,7 +1265,8 @@ def execute(
     `comparisons.json` and `summary.json`; and per task the kept readers'
     parameters in `cellheads_<task>`, and `diagnostics.json` (see
     `DIAGNOSTICS`). The summary also counts, per task and fitted cell
-    reader, the fits, their seconds and their `ConvergenceWarning`s.
+    reader, the fits, their seconds, their `ConvergenceWarning`s and its
+    `stalled_fits` (the fits that raised `StalledFitWarning`).
 
     Args:
         config: The experiment settings.

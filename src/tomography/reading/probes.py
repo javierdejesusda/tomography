@@ -32,6 +32,18 @@ from tomography.reading.reader import RepReader
 from tomography.reading.reader import _layer_seed
 from tomography.reading.reader import orient
 
+# L-BFGS-B's `ftol`: it stops when a step lowers the loss by no more than
+# this times the loss's magnitude (at least 1).
+_FTOL = 64 * np.finfo(np.float64).eps
+
+
+class StalledFitWarning(UserWarning):
+    """A cell fit whose loss never dropped below its loss at the zero start.
+
+    The fit may still have converged by L-BFGS's own tests, so this is not
+    a `ConvergenceWarning`: its reader scores every stimulus about the same.
+    """
+
 
 @runtime_checkable
 class Reader[InputT](Protocol):
@@ -443,7 +455,10 @@ def fit_attention(
     value heads are oriented over the token rows the way the sweep orients a
     `RepReader.fit` reader of `response` rows: the labels repeat on every
     row of a stimulus, and `Activations.row_groups` maps the pairs and the
-    groups to rows.
+    groups to rows. An L-BFGS run (one per layer, or one for a joint
+    reader) whose loss never drops below its value at the zero start, by
+    more than L-BFGS's relative `ftol` of 64 machine epsilons, warns with
+    `StalledFitWarning` and keeps the parameters it reached.
 
     Args:
         acts: Token rows of the layers to read, such as those of the
@@ -596,7 +611,8 @@ def fit_cell_max(
     mean pooling; L-BFGS then runs with the settings of `fit_attention` and
     draws no random numbers. The maximum makes the loss piecewise smooth,
     so a fit can stop on a line search: it keeps the parameters reached and
-    warns. The value heads are oriented over the token rows as in
+    warns. A fit whose loss never leaves its start warns as in
+    `fit_attention`. The value heads are oriented over the token rows as in
     `fit_attention`.
 
     Args:
@@ -967,8 +983,12 @@ def _minimize(
     name: str,
 ) -> NDArray[np.float64]:
     # Minimizes a loss of `size` parameters from zeros with full-batch L-BFGS
-    # in float64 and scikit-learn's settings. A stop before convergence warns
-    # from the caller of the public fit, two frames above this one's caller.
+    # in float64 and scikit-learn's settings. A stop before convergence, and
+    # a fit whose loss never left its start, warn from the caller of the
+    # public fit, two frames above this one's caller. The stall test is the
+    # one `ftol` applies to each step, applied to the whole fit: a drop no
+    # larger than rounding of the loss (log 2 at the start of both fits) is
+    # no drop.
     def objective(
         theta: NDArray[np.float64],
     ) -> tuple[float, NDArray[np.float64]]:
@@ -977,6 +997,8 @@ def _minimize(
         (gradient,) = torch.autograd.grad(value, params)
         return float(value.detach()), gradient.numpy()
 
+    with torch.no_grad():
+        initial = float(loss(torch.zeros(size, dtype=torch.float64)))
     result = minimize(
         objective,
         np.zeros(size),
@@ -986,13 +1008,21 @@ def _minimize(
             "maxiter": max_iter,
             "maxls": 50,
             "gtol": tol,
-            "ftol": 64 * np.finfo(np.float64).eps,
+            "ftol": _FTOL,
         },
     )
     if result.status != 0:
         warnings.warn(
             f"the {name} reader did not converge: {result.message}",
             ConvergenceWarning,
+            stacklevel=4,
+        )
+    final = float(result.fun)
+    if initial - final <= _FTOL * max(abs(initial), abs(final), 1.0):
+        warnings.warn(
+            f"the {name} reader stalled: its loss {final!r} never dropped "
+            f"below {initial!r}, its loss at the zero start",
+            StalledFitWarning,
             stacklevel=4,
         )
     return np.asarray(result.x, dtype=np.float64)
