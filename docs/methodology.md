@@ -266,8 +266,9 @@ a cell being one token at one layer, reads better than M2's one-row readouts. It
   highest cell over all layers. Both are trained through their pooling with the logistic loss, `C` from M2's
   `logistic_c` grid and cells standardized on the draw's training cells only. L-BFGS runs at gradient tolerance
   `cell_tol` (default 1e-10; the probes' default stays 1e-4): at 1e-4 the gradient at the zero start can already
-  pass the test, which stopped a cellattn fit at its first step with zero heads. They keep the scorer name
-  `logistic` so M2's comparisons take them. An MLP head per layer is deferred.
+  pass the test, which stopped a cellattn fit at its first step with zero heads. A cellmax fit that stalls at its zero
+  start runs again, once, from the mean pooling solution (see the caveats). They keep the scorer name `logistic` so
+  M2's comparisons take them. An MLP head per layer is deferred.
 - One-row readers: M2's `logistic` and `mean_diff` on `last`, `concept`, `mean` and `max` (rules `best` and
   `top_k`), fitted by M2's helpers on M2's items, and two relabelled readouts, each on its own pass:
   `stimulus_token` (the last stimulus token, M2's `concept` position over the stimulus span) and `prompt_max` (M2's
@@ -295,10 +296,13 @@ a cell being one token at one layer, reads better than M2's one-row readouts. It
 - Outputs: M2's files (`table.json`, `comparisons.json`, `scores_<task>`, `auroc_<task>`, `summary.json`),
   `diagnostics.json`, and `cellheads_<task>` (each draw's kept heads, biases and signs, the queries and offsets of
   cellattn, and the chosen `C`), named apart from the `readers*` files the aggregation code parses. `summary.json`
-  also counts, per task and fitted cell reader, its fits, their seconds, their `ConvergenceWarning`s and its
-  `stalled_fits`: fits whose loss never dropped below its value at the zero start (log 2) by more than the relative
-  64 machine epsilons that L-BFGS-B's `ftol` treats as no progress. Each warns as a `StalledFitWarning` and is
-  kept, so selection is unchanged and sees it as a reader that ties its texts.
+  also counts, per task and fitted cell reader, its fits, their seconds, their `ConvergenceWarning`s, its
+  `stalled_fits` and its `restarted_fits`. A run stalls when its loss never drops below its value at the zero start
+  (log 2) by more than the relative 64 machine epsilons that L-BFGS-B's `ftol` treats as no progress.
+  `restarted_fits` counts the cellmax fits whose zero start stalled and whose second run did not (each warns as a
+  `RestartedFitWarning` and keeps the second run); `stalled_fits` counts the fits still stalled at the end (cellattn
+  has no second run). A stalled fit warns as a `StalledFitWarning` and is kept, so selection still sees it: its
+  heads stay near zero, so its scores spread on a tiny scale, seldom tie and carry no fitted signal.
 - Runs load the model in float32.
 
 Caveats:
@@ -311,6 +315,21 @@ Caveats:
   every stimulus and held utility cellmax fits at log 2 with head norms of 1e-17 to 3e-13. On misleading utility the
   `Scenario:` tag follows the decoy line, so its cells differ between decoys (they see the decoy, never the
   stimulus); it is dropped with the rest of the prefix.
+- Zero-start stall of cellmax (2026-11-05): at the zero start every cell ties, and the gradient, split evenly among
+  tied cells, is the mean pooling one. In the stage 1 run on qwen3-0.6b (2026-11-04), along that direction the
+  highest cell of 118 to 128 of the 128 training texts was a newline of the chat template after the stimulus, at
+  layer 28, about equal in every text, and the max pooled loss rose (slope +2e-7 to +1.3e-6, where the split
+  gradient promised -1e-5 to -4e-5). L-BFGS's line search shrank the step to rounding size and stopped at log 2,
+  for every `C`, on whole draws: 12 and 16 of the 40 sentiment fits (reader and shuffled), 8 and 8 of utility's.
+  Those readers kept heads of norm 1e-21 to 1e-14 and scored at chance (report pair accuracy 0.46 to 0.52), although
+  zero was no minimum: other directions lower the loss. Such a fit now runs again from the mean pooling solution,
+  the penalized logistic fit of each text's mean cell value over all layers, split into one term per layer (heads
+  and biases over the number of layers) so that a cell starts on the scale of the mean. On the CPU, on the five
+  stalled reader draws, every refit left log 2 for every `C`, and the kept readers reached select pair accuracies of
+  0.75 to 0.85 on sentiment (0.79 to 0.86 on its draws that never stalled) and 0.59 and 0.74 on utility (0.55 to
+  0.82), with report pair accuracies on the original condition of 0.62 to 0.85; the undivided solution and a tiny
+  step along the split gradient left some draws at chance. A fit that does not stall runs once from zero, bit-identical to before. cellattn's
+  loss is smooth at the zero start, so its first step always descends.
 - Reproducibility: cellmax fits are bit-identical on one machine, but L-BFGS on the piecewise max objective turns
   input differences near 1e-6 into score differences near 3e-3, so runs on different machines agree only to about
   1e-3.

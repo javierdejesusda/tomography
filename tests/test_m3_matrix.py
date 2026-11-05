@@ -1832,20 +1832,23 @@ def test_the_segment_shares_are_the_kept_readers_mean_weights(
 def test_the_summary_counts_fits_seconds_and_warnings(
     tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def planting(fit: Any, category: type[Warning]) -> Any:
+    def planting(fit: Any, *categories: type[Warning]) -> Any:
         def fitting(acts: Activations, **kwargs: Any) -> Any:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", ConvergenceWarning)
                 warnings.simplefilter("ignore", StalledFitWarning)
                 warnings.simplefilter("ignore", RestartedFitWarning)
                 reader = fit(acts, **kwargs)
-            warnings.warn(category.__name__, category, stacklevel=2)
+            for category in categories:
+                warnings.warn(category.__name__, category, stacklevel=2)
             return reader
 
         return fitting
 
     monkeypatch.setattr(
-        m3_matrix, "fit_cell_max", planting(fit_cell_max, ConvergenceWarning)
+        m3_matrix,
+        "fit_cell_max",
+        planting(fit_cell_max, ConvergenceWarning, RestartedFitWarning),
     )
     monkeypatch.setattr(
         m3_matrix, "fit_attention", planting(fit_attention, StalledFitWarning)
@@ -1869,9 +1872,14 @@ def test_the_summary_counts_fits_seconds_and_warnings(
         assert stats["seconds"] > 0.0
         assert stats["convergence_warnings"] == (n if "cellmax" in name else 0)
         assert stats["stalled_fits"] == (n if "cellattn" in name else 0)
+        assert stats["restarted_fits"] == (n if "cellmax" in name else 0)
     # The counted warnings still reach the caller: under the "default"
     # action, once per grid of fits (both series of a pooling, every draw).
-    for category in (ConvergenceWarning, StalledFitWarning):
+    for category in (
+        ConvergenceWarning,
+        StalledFitWarning,
+        RestartedFitWarning,
+    ):
         planted = [w for w in shown if str(w.message) == category.__name__]
         assert len(planted) == 2 * config.n_seeds
 

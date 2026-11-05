@@ -75,6 +75,7 @@ from tomography.reading.metrics import auroc
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.probes import AttentionReader
 from tomography.reading.probes import CellMaxReader
+from tomography.reading.probes import RestartedFitWarning
 from tomography.reading.probes import StalledFitWarning
 from tomography.reading.probes import _scaled_cells
 from tomography.reading.probes import _unscaled
@@ -644,7 +645,10 @@ class _Fit(NamedTuple):
         seconds: The time the fits took; 0 for the random control.
         convergence_warnings: The `ConvergenceWarning`s the fits raised.
         stalled_fits: The `StalledFitWarning`s the fits raised: fits whose
-            loss never left its value at the zero start.
+            kept run's loss never left its value at the zero start.
+        restarted_fits: The `RestartedFitWarning`s the fits raised: cell
+            max fits that stalled at their zero start and were kept from a
+            second run that did not.
     """
 
     cell: m2_readers.Cell
@@ -655,6 +659,7 @@ class _Fit(NamedTuple):
     seconds: float = 0.0
     convergence_warnings: int = 0
     stalled_fits: int = 0
+    restarted_fits: int = 0
 
 
 def _fit_cells(
@@ -676,22 +681,25 @@ def _grid_fits(
     labels: NDArray[np.int64],
     grid: Sequence[float],
     tol: float,
-) -> tuple[list[CellReader], float, int, int]:
+) -> tuple[list[CellReader], float, int, int, int]:
     """Fits a reader per grid value, timing the fits and counting warnings.
 
-    Every `ConvergenceWarning` and `StalledFitWarning` is counted, then
-    shown again under the caller's filters; under the `default` action a
-    warning repeated over the grid shows once. A stalled fit is kept, so
-    selection still sees it, as a reader that ties its stimuli.
+    Every `ConvergenceWarning`, `StalledFitWarning` and
+    `RestartedFitWarning` is counted, then shown again under the caller's
+    filters; under the `default` action a warning repeated over the grid
+    shows once. A stalled fit is kept, so selection still sees it: a
+    reader whose scores spread on a tiny scale and carry no fitted signal.
 
     Returns:
         The readers, the seconds the fits took, and the number of
-        `ConvergenceWarning`s and of `StalledFitWarning`s they raised.
+        `ConvergenceWarning`s, of `StalledFitWarning`s and of
+        `RestartedFitWarning`s they raised.
     """
     start = time.perf_counter()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", ConvergenceWarning)
         warnings.simplefilter("always", StalledFitWarning)
+        warnings.simplefilter("always", RestartedFitWarning)
         readers = [_fit_cells(pooling, train, labels, c, tol) for c in grid]
     seconds = time.perf_counter() - start
     # One registry per grid: every `catch_warnings` clears the registries,
@@ -709,7 +717,8 @@ def _grid_fits(
         issubclass(w.category, ConvergenceWarning) for w in caught
     )
     stalled = sum(issubclass(w.category, StalledFitWarning) for w in caught)
-    return readers, seconds, unconverged, stalled
+    restarted = sum(issubclass(w.category, RestartedFitWarning) for w in caught)
+    return readers, seconds, unconverged, stalled, restarted
 
 
 def _shuffled(
@@ -791,7 +800,7 @@ def _set_fits(
     for pooling in config.poolings:
         cell = m2_readers.Cell("logistic", f"{pooling}_{cell_set}", "joint")
         for name, labels, select_labels in series:
-            readers, seconds, unconverged, stalled = _grid_fits(
+            readers, seconds, unconverged, stalled, restarted = _grid_fits(
                 pooling, train, labels, config.logistic_c, config.cell_tol
             )
             fits.append(
@@ -804,6 +813,7 @@ def _set_fits(
                     seconds,
                     unconverged,
                     stalled,
+                    restarted,
                 )
             )
     if "random" in config.controls and "cellmax" in config.poolings:
@@ -920,6 +930,7 @@ def _cell_phase(
                 fits[j].convergence_warnings for j in draws
             ),
             "stalled_fits": sum(fits[j].stalled_fits for j in draws),
+            "restarted_fits": sum(fits[j].restarted_fits for j in draws),
         }
         for (cell, series), draws in groups.items()
         if cell.scorer == "logistic"
@@ -1265,8 +1276,11 @@ def execute(
     `comparisons.json` and `summary.json`; and per task the kept readers'
     parameters in `cellheads_<task>`, and `diagnostics.json` (see
     `DIAGNOSTICS`). The summary also counts, per task and fitted cell
-    reader, the fits, their seconds, their `ConvergenceWarning`s and its
-    `stalled_fits` (the fits that raised `StalledFitWarning`).
+    reader, the fits, their seconds, their `ConvergenceWarning`s, its
+    `stalled_fits` (the fits that raised `StalledFitWarning`, whose kept
+    run never left its zero start's loss) and its `restarted_fits` (the
+    cell max fits that raised `RestartedFitWarning`: stalled at the zero
+    start, then kept from the run from the mean pooling solution).
 
     Args:
         config: The experiment settings.
