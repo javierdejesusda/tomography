@@ -4,11 +4,13 @@ from dataclasses import replace
 from functools import partial
 import inspect
 import tracemalloc
+from typing import Any
 import warnings
 
 import numpy as np
 from numpy.typing import NDArray
 import pytest
+from scipy.optimize import minimize
 from scipy.special import expit
 from sklearn.covariance import ledoit_wolf_shrinkage
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
@@ -16,12 +18,14 @@ from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
 
 from tomography.activations import Activations
+from tomography.reading import probes
 from tomography.reading.directions import FloatArray
 from tomography.reading.directions import fit_direction
 from tomography.reading.metrics import auroc
 from tomography.reading.probes import AttentionReader
 from tomography.reading.probes import CellMaxReader
 from tomography.reading.probes import Reader
+from tomography.reading.probes import RestartedFitWarning
 from tomography.reading.probes import StalledFitWarning
 from tomography.reading.probes import fit_attention
 from tomography.reading.probes import fit_cell_max
@@ -689,6 +693,36 @@ def test_cell_fits_warn_at_their_caller_when_the_loss_never_moves(
     assert all(record.category is StalledFitWarning for record in caught)
 
 
+class MinimizeSpy:
+    """Wraps scipy's `minimize` as `probes` calls it and keeps each run."""
+
+    def __init__(self) -> None:
+        self.starts: list[NDArray[np.float64]] = []
+        self.solutions: list[NDArray[np.float64]] = []
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        result = minimize(*args, **kwargs)
+        self.starts.append(np.array(args[1]))
+        self.solutions.append(np.array(result.x))
+        return result
+
+
+def unscaled_heads(
+    acts: Activations, solution: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """The value heads of a cell max fit's solution, in activation units.
+
+    The solution reads rows centered on each layer's mean and divided by
+    their root mean square norm, as the cell fits scale them.
+    """
+    rows = acts.data.astype(np.float64)
+    rows -= rows.mean(axis=1, keepdims=True)
+    scales = np.sqrt(np.square(rows).sum(axis=(1, 2)) / rows.shape[1])
+    n_layers, _, width = rows.shape
+    heads = solution[: n_layers * width].reshape(n_layers, width)
+    return heads / scales[:, None]
+
+
 def shared_massive_cell(
     n: int, seed: int
 ) -> tuple[Activations, NDArray[np.int64]]:
@@ -698,7 +732,9 @@ def shared_massive_cell(
     cell is under the causal mask, and label 1 stimuli are shorter, so the
     first, mean pooled step of a cell max fit lifts the shared cell above
     every other: then every stimulus scores the same and the loss stays at
-    log 2, the trap of the M3 run's stalled utility fits.
+    log 2, the trap of the first M3 run's stalled utility fits, whose
+    template prefix cells M3 no longer reads. Under the penalty of c = 0.01
+    the refit from the mean pooling solution stalls there too.
     """
     rng = np.random.default_rng(seed)
     labels = (np.arange(n) % 2).astype(np.int64)
@@ -712,20 +748,137 @@ def shared_massive_cell(
     return token_rows(data, counts, [0, 1]), labels
 
 
-@pytest.mark.parametrize("c", [0.01, 1.0])
-def test_a_cell_max_fit_trapped_at_log_2_warns_and_keeps_its_heads(
-    c: float,
+def test_a_cell_max_fit_whose_refit_stalls_too_warns_and_keeps_its_heads(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     acts, labels = shared_massive_cell(n=64, seed=5)
+    spy = MinimizeSpy()
+    monkeypatch.setattr(probes, "minimize", spy)
 
     with pytest.warns(StalledFitWarning, match="stalled") as caught:
-        reader = fit_cell_max(acts, labels=labels, c=c, tol=1e-10)
+        reader = fit_cell_max(acts, labels=labels, c=0.01, tol=1e-10)
 
     assert [record.category for record in caught] == [StalledFitWarning]
-    # The reader is kept, and its logistic loss is still log 2.
+    assert [record.filename for record in caught] == [__file__]
+    # The refit from the mean pooling solution ran and stalled too, so the
+    # zero start's reader is kept, and its logistic loss is still log 2.
+    assert len(spy.starts) == 3
+    np.testing.assert_array_equal(spy.starts[2], spy.solutions[1] / 2)
+    np.testing.assert_allclose(
+        reader.values, unscaled_heads(acts, spy.solutions[0]), rtol=1e-12
+    )
     scores = reader.score(acts)[0].astype(np.float64)
     loss = np.mean(np.logaddexp(0.0, np.where(labels == 1, -scores, scores)))
     assert loss == pytest.approx(np.log(2.0), abs=1e-9)
+
+
+def template_cells(n: int, seed: int) -> tuple[Activations, NDArray[np.int64]]:
+    """Stimuli that end on a template cell and hold a planted label 1 cell.
+
+    The last cell of every stimulus is a template cell, as a chat template's
+    last token is: the same vector up to small noise, huge on feature 1 of
+    layer 1, and a bit higher there in the label 0 stimuli, which are
+    longer. A label 1 stimulus also has +3 on feature 0 of layer 0 at one
+    of its other cells, which a cell max reader reads. At the zero start
+    every cell ties and the gradient is the mean pooling one; along it the
+    template cell tops every stimulus and rises more in the label 0 ones,
+    so the max pooled loss rises and the fit stalls there, the trap of the
+    M3 run's stalled sentiment and utility fits.
+    """
+    rng = np.random.default_rng(seed)
+    labels = (np.arange(n) % 2).astype(np.int64)
+    counts = np.where(
+        labels == 1, rng.integers(10, 20, size=n), rng.integers(20, 30, size=n)
+    )
+    ends = np.cumsum(counts) - 1
+    data = 0.6 * rng.standard_normal((2, counts.sum(), 8))
+    template = rng.standard_normal((2, 8))
+    template[1, 1] = 100.0
+    data[:, ends] = template[:, None] + 0.01 * rng.standard_normal((2, n, 8))
+    data[1, ends, 1] *= np.where(labels == 0, 1.001, 1.0)
+    planted = ends - 1 - rng.integers(counts - 1)
+    data[0, planted[labels == 1], 0] += 3.0
+    return token_rows(data, counts, [0, 1]), labels
+
+
+@pytest.mark.parametrize("c", [0.01, 1.0])
+def test_a_cell_max_fit_that_stalls_at_zero_is_refit_from_mean_pooling(
+    c: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    acts, labels = template_cells(n=64, seed=0)
+    test, test_labels = template_cells(n=64, seed=100)
+    spy = MinimizeSpy()
+    monkeypatch.setattr(probes, "minimize", spy)
+
+    with pytest.warns(RestartedFitWarning, match="stalled") as caught:
+        reader = fit_cell_max(acts, labels=labels, c=c, tol=1e-10)
+
+    assert [record.category for record in caught] == [RestartedFitWarning]
+    assert [record.filename for record in caught] == [__file__]
+    # Three L-BFGS runs: the zero start, the mean pooling fit, again from
+    # zeros, and the refit from its solution split into the terms of the
+    # two layers, which is kept.
+    assert len(spy.starts) == 3
+    assert not spy.starts[0].any()
+    assert not spy.starts[1].any()
+    np.testing.assert_array_equal(spy.starts[2], spy.solutions[1] / 2)
+    np.testing.assert_allclose(
+        reader.values, unscaled_heads(acts, spy.solutions[2]), rtol=1e-12
+    )
+    scores = reader.score(acts)[0].astype(np.float64)
+    loss = np.mean(np.logaddexp(0.0, np.where(labels == 1, -scores, scores)))
+    assert loss < np.log(2.0) - 0.01
+    assert np.abs(reader.values).max() > 1e-3
+    assert auroc(reader.score(test)[0], test_labels) >= 0.95
+
+
+def test_a_stalled_cell_max_fit_restarts_from_the_mean_pooled_logistic_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acts, labels = template_cells(n=64, seed=0)
+    spy = MinimizeSpy()
+    monkeypatch.setattr(probes, "minimize", spy)
+
+    with pytest.warns(RestartedFitWarning):
+        fit_cell_max(acts, labels=labels, c=0.5, tol=1e-10)
+
+    # The mean pooling fit is scikit-learn's logistic fit of the stimulus
+    # means of the scaled cells of all layers side by side, over the number
+    # of layers: each stimulus scores the mean value of its cells, as at the
+    # zero start. The start splits it into one term per layer, its heads
+    # and bias over the number of layers, which sum to that score.
+    rows = acts.data.astype(np.float64)
+    rows -= rows.mean(axis=1, keepdims=True)
+    rows /= np.sqrt(np.square(rows).sum(axis=(1, 2)) / rows.shape[1])[
+        :, None, None
+    ]
+    means = np.concatenate(list(mean_pooled(replace(acts, data=rows))), axis=1)
+    model = LogisticRegression(C=0.5, tol=1e-10, max_iter=10000)
+    model.fit(means / 2, labels)
+    start = spy.starts[2]
+    np.testing.assert_allclose(start[:16], model.coef_[0] / 2, rtol=1e-4)
+    np.testing.assert_allclose(start[16:], model.intercept_[0] / 2, rtol=1e-4)
+
+
+def test_a_cell_max_fit_that_learns_runs_lbfgs_once_from_zeros(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acts, labels, _ = planted_cells(n=60, seed=46)
+    spy = MinimizeSpy()
+    monkeypatch.setattr(probes, "minimize", spy)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        reader = fit_cell_max(acts, labels=labels, tol=1e-10)
+
+    # One L-BFGS run from zeros, whose solution is the reader: the fit of
+    # every cell max reader that does not stall at its zero start.
+    assert caught == []
+    assert len(spy.starts) == 1
+    assert not spy.starts[0].any()
+    np.testing.assert_allclose(
+        reader.values, unscaled_heads(acts, spy.solutions[0]), rtol=1e-12
+    )
 
 
 def reference_max(

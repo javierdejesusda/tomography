@@ -49,6 +49,7 @@ from tomography.reading.metrics import auroc
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.probes import AttentionReader
 from tomography.reading.probes import CellMaxReader
+from tomography.reading.probes import RestartedFitWarning
 from tomography.reading.probes import StalledFitWarning
 from tomography.reading.probes import fit_attention
 from tomography.reading.probes import fit_cell_max
@@ -817,11 +818,12 @@ def _quiet_execute(
     config: m3_matrix.Config, run_dir: RunDir, loaded: LoadedModel
 ) -> None:
     # Fits on the tiny model's handful of rows can stop on an L-BFGS line
-    # search or stall at their start; the warnings are expected there and
-    # not under test.
+    # search or stall at their start, and cellmax fits run again; the
+    # warnings are expected there and not under test.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
         warnings.simplefilter("ignore", StalledFitWarning)
+        warnings.simplefilter("ignore", RestartedFitWarning)
         m3_matrix.execute(config, run_dir, loaded, _sources())
 
 
@@ -1134,6 +1136,7 @@ def _fitted_readers(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
         warnings.simplefilter("ignore", StalledFitWarning)
+        warnings.simplefilter("ignore", RestartedFitWarning)
         for cell_set in ("prompt", "upper", "final"):
             acts = _set_cells(cells, segments, config, cell_set)
             readers += [
@@ -1834,6 +1837,7 @@ def test_the_summary_counts_fits_seconds_and_warnings(
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", ConvergenceWarning)
                 warnings.simplefilter("ignore", StalledFitWarning)
+                warnings.simplefilter("ignore", RestartedFitWarning)
                 reader = fit(acts, **kwargs)
             warnings.warn(category.__name__, category, stacklevel=2)
             return reader
