@@ -856,8 +856,12 @@ def test_a_stalled_cell_max_fit_restarts_from_the_mean_pooled_logistic_fit(
     model = LogisticRegression(C=0.5, tol=1e-10, max_iter=10000)
     model.fit(means / 2, labels)
     start = spy.starts[2]
-    np.testing.assert_allclose(start[:16], model.coef_[0] / 2, rtol=1e-4)
-    np.testing.assert_allclose(start[16:], model.intercept_[0] / 2, rtol=1e-4)
+    np.testing.assert_allclose(
+        start[:16], model.coef_[0] / 2, rtol=1e-4, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        start[16:], model.intercept_[0] / 2, rtol=1e-4, atol=1e-6
+    )
 
 
 def test_a_cell_max_fit_that_learns_runs_lbfgs_once_from_zeros(

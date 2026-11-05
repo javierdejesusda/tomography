@@ -328,8 +328,8 @@ Caveats:
   stalled reader draws, every refit left log 2 for every `C`, and the kept readers reached select pair accuracies of
   0.75 to 0.85 on sentiment (0.79 to 0.86 on its draws that never stalled) and 0.59 and 0.74 on utility (0.55 to
   0.82), with report pair accuracies on the original condition of 0.62 to 0.85; the undivided solution and a tiny
-  step along the split gradient left some draws at chance. A fit that does not stall runs once from zero, bit-identical to before. cellattn's
-  loss is smooth at the zero start, so its first step always descends.
+  step along the split gradient left some draws at chance. A fit that does not stall runs once from zero,
+  bit-identical to before. cellattn's loss is smooth at the zero start, so its first step always descends.
 - Reproducibility: cellmax fits are bit-identical on one machine, but L-BFGS on the piecewise max objective turns
   input differences near 1e-6 into score differences near 3e-3, so runs on different machines agree only to about
   1e-3.
