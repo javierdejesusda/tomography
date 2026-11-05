@@ -17,6 +17,7 @@ import warnings
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.optimize import OptimizeResult
 from scipy.optimize import minimize
 from sklearn.covariance import ledoit_wolf_shrinkage
 from sklearn.exceptions import ConvergenceWarning
@@ -41,7 +42,17 @@ class StalledFitWarning(UserWarning):
     """A cell fit whose loss never dropped below its loss at the zero start.
 
     The fit may still have converged by L-BFGS's own tests, so this is not
-    a `ConvergenceWarning`: its reader scores every stimulus about the same.
+    a `ConvergenceWarning`. Its heads stay near zero, so its reader scores
+    on a tiny scale: the scores seldom tie, but they carry no fitted signal.
+    """
+
+
+class RestartedFitWarning(UserWarning):
+    """A cell max fit that stalled at its zero start and was fit again.
+
+    The second fit starts from the mean pooling solution, split into one
+    term per layer, and left the zero start's loss behind, so the reader is
+    that fit.
     """
 
 
@@ -611,9 +622,21 @@ def fit_cell_max(
     mean pooling; L-BFGS then runs with the settings of `fit_attention` and
     draws no random numbers. The maximum makes the loss piecewise smooth,
     so a fit can stop on a line search: it keeps the parameters reached and
-    warns. A fit whose loss never leaves its start warns as in
-    `fit_attention`. The value heads are oriented over the token rows as in
-    `fit_attention`.
+    warns. Along the mean pooling step the maximum can rise in the wrong
+    class, for instance when one template cell tops every stimulus, and
+    then the loss rises too: the line search shrinks the step to rounding
+    size and the fit stalls at its zero start, which need not be a
+    minimum. Such a fit runs again, once, from the mean pooling
+    solution: the penalized logistic fit of the scores at the zero start,
+    each stimulus's mean value over its cells of all layers, split into one
+    term per layer (its heads and biases over the number of layers), so a
+    cell takes the value its layer adds to the mean. When the
+    second run leaves the zero start's loss behind, it is kept and the fit
+    warns with `RestartedFitWarning`; a fit that does not stall runs once,
+    from zero. When the second run stalls too, the fit keeps the zero
+    start's heads, which score on a tiny scale with no fitted signal, and
+    warns as in `fit_attention`. The value heads are oriented over the
+    token rows as in `fit_attention`.
 
     Args:
         acts: Token rows of the layers to read, such as those of the
@@ -625,8 +648,8 @@ def fit_cell_max(
         c: The inverse L2 strength, scikit-learn's `C`: smaller values
             regularize more.
         tol: Gradient tolerance of L-BFGS, scikit-learn's `tol`.
-        max_iter: Iteration cap of L-BFGS; a fit that stops before
-            converging warns with `ConvergenceWarning`.
+        max_iter: Iteration cap of each L-BFGS run; a fit whose kept run
+            stops before converging warns with `ConvergenceWarning`.
 
     Returns:
         The reader.
@@ -928,7 +951,33 @@ def _fit_max(
         scores = _max_pool(heads, stimulus, targets.shape[0])
         return _penalized_loss(scores, targets, values.square().sum(), c)
 
-    solution = _minimize(loss, size + n_layers, tol, max_iter, "cell max")
+    def mean_pooled() -> NDArray[np.float64]:
+        # The fit of the scores the zero start sees: each stimulus scores
+        # the mean value of its cells of all layers. The loss is convex, so
+        # its minimum is unique but for the biases, which stay equal. It is
+        # returned split into one term per layer, its heads and biases over
+        # the number of layers, which sum to the mean pooled score: a cell
+        # then takes the value its layer adds to that score, so the max
+        # starts on the scale of the mean.
+        n_stimuli = targets.shape[0]
+        counts = torch.bincount(stimulus, minlength=n_stimuli)
+        means = scaled.new_zeros((n_layers, n_stimuli, width))
+        means.index_add_(1, stimulus, scaled)
+        means /= counts[:, None]
+
+        def pooled_loss(params: torch.Tensor) -> torch.Tensor:
+            values = params[:size].view(n_layers, width)
+            cells = torch.einsum("knd,kd->kn", means, values)
+            scores = (cells + params[size:, None]).mean(dim=0)
+            return _penalized_loss(scores, targets, values.square().sum(), c)
+
+        start = np.zeros(size + n_layers)
+        fitted = _lbfgs(pooled_loss, start, tol, max_iter).x
+        return np.asarray(fitted / n_layers, dtype=np.float64)
+
+    solution = _minimize(
+        loss, size + n_layers, tol, max_iter, "cell max", restart=mean_pooled
+    )
     heads = solution[:size].reshape(n_layers, width)
     values, shifts = _unscaled(heads, centers, scales)
     return values, solution[size:] - shifts
@@ -981,14 +1030,54 @@ def _minimize(
     tol: float,
     max_iter: int,
     name: str,
+    restart: Callable[[], NDArray[np.float64]] | None = None,
 ) -> NDArray[np.float64]:
     # Minimizes a loss of `size` parameters from zeros with full-batch L-BFGS
-    # in float64 and scikit-learn's settings. A stop before convergence, and
-    # a fit whose loss never left its start, warn from the caller of the
-    # public fit, two frames above this one's caller. The stall test is the
-    # one `ftol` applies to each step, applied to the whole fit: a drop no
-    # larger than rounding of the loss (log 2 at the start of both fits) is
-    # no drop.
+    # in float64 and scikit-learn's settings. A fit whose loss never left its
+    # start stalls. Given `restart`, which returns the mean pooling start, a
+    # stalled fit runs again from there, and the second run is kept unless
+    # it stalls too; any other fit runs once. The restart, and a stop before
+    # convergence or a stall of the run that is kept, warn from the caller
+    # of the public fit, two frames above this one's caller.
+    with torch.no_grad():
+        initial = float(loss(torch.zeros(size, dtype=torch.float64)))
+    result = _lbfgs(loss, np.zeros(size), tol, max_iter)
+    if restart is not None and _stalled(initial, result.fun):
+        refit = _lbfgs(loss, restart(), tol, max_iter)
+        if not _stalled(initial, refit.fun):
+            warnings.warn(
+                f"the {name} reader stalled at its zero start, so it was "
+                f"fit again from the mean pooling solution: its loss "
+                f"{float(refit.fun)!r} is below {initial!r}, its loss at "
+                "the zero start",
+                RestartedFitWarning,
+                stacklevel=4,
+            )
+            result = refit
+    if result.status != 0:
+        warnings.warn(
+            f"the {name} reader did not converge: {result.message}",
+            ConvergenceWarning,
+            stacklevel=4,
+        )
+    if _stalled(initial, result.fun):
+        warnings.warn(
+            f"the {name} reader stalled: its loss {float(result.fun)!r} never "
+            f"dropped below {initial!r}, its loss at the zero start",
+            StalledFitWarning,
+            stacklevel=4,
+        )
+    return np.asarray(result.x, dtype=np.float64)
+
+
+def _lbfgs(
+    loss: Callable[[torch.Tensor], torch.Tensor],
+    start: NDArray[np.float64],
+    tol: float,
+    max_iter: int,
+) -> OptimizeResult:
+    # Runs full-batch L-BFGS-B on a float64 loss from `start`, with the
+    # gradient from autograd and scikit-learn's settings.
     def objective(
         theta: NDArray[np.float64],
     ) -> tuple[float, NDArray[np.float64]]:
@@ -997,11 +1086,9 @@ def _minimize(
         (gradient,) = torch.autograd.grad(value, params)
         return float(value.detach()), gradient.numpy()
 
-    with torch.no_grad():
-        initial = float(loss(torch.zeros(size, dtype=torch.float64)))
-    result = minimize(
+    return minimize(
         objective,
-        np.zeros(size),
+        start,
         method="L-BFGS-B",
         jac=True,
         options={
@@ -1011,18 +1098,10 @@ def _minimize(
             "ftol": _FTOL,
         },
     )
-    if result.status != 0:
-        warnings.warn(
-            f"the {name} reader did not converge: {result.message}",
-            ConvergenceWarning,
-            stacklevel=4,
-        )
-    final = float(result.fun)
-    if initial - final <= _FTOL * max(abs(initial), abs(final), 1.0):
-        warnings.warn(
-            f"the {name} reader stalled: its loss {final!r} never dropped "
-            f"below {initial!r}, its loss at the zero start",
-            StalledFitWarning,
-            stacklevel=4,
-        )
-    return np.asarray(result.x, dtype=np.float64)
+
+
+def _stalled(initial: float, final: float) -> bool:
+    # The test `ftol` applies to each step, applied to a whole fit: a drop
+    # no larger than rounding of the loss (log 2 at the zero start of both
+    # cell fits) is no drop.
+    return bool(initial - final <= _FTOL * max(abs(initial), abs(final), 1.0))
