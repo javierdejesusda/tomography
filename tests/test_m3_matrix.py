@@ -1,6 +1,8 @@
 """Tests for M3: readers trained through an aggregation over prompt cells."""
 
 from collections import Counter
+from collections.abc import Iterator
+import contextlib
 import dataclasses
 from pathlib import Path
 from typing import Any
@@ -814,16 +816,22 @@ def test_run_loads_the_sources_of_every_task(
     assert calls == [["sst2", "ethics_utility"]]
 
 
+@contextlib.contextmanager
+def _quiet_fits() -> Iterator[None]:
+    """Ignores the warnings of the cell fits that M3 counts."""
+    with warnings.catch_warnings():
+        for category in m3_matrix._COUNTED:
+            warnings.simplefilter("ignore", category)
+        yield
+
+
 def _quiet_execute(
     config: m3_matrix.Config, run_dir: RunDir, loaded: LoadedModel
 ) -> None:
     # Fits on the tiny model's handful of rows can stop on an L-BFGS line
     # search or stall at their start, and cellmax fits run again; the
     # warnings are expected there and not under test.
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", ConvergenceWarning)
-        warnings.simplefilter("ignore", StalledFitWarning)
-        warnings.simplefilter("ignore", RestartedFitWarning)
+    with _quiet_fits():
         m3_matrix.execute(config, run_dir, loaded, _sources())
 
 
@@ -1133,10 +1141,7 @@ def _fitted_readers(
         loaded, train, config.cell_layers, bos=None, batch_size=4, decoy=False
     )
     readers: list[tuple[CellSet, Any]] = []
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", ConvergenceWarning)
-        warnings.simplefilter("ignore", StalledFitWarning)
-        warnings.simplefilter("ignore", RestartedFitWarning)
+    with _quiet_fits():
         for cell_set in ("prompt", "upper", "final"):
             acts = _set_cells(cells, segments, config, cell_set)
             readers += [
@@ -1834,10 +1839,7 @@ def test_the_summary_counts_fits_seconds_and_warnings(
 ) -> None:
     def planting(fit: Any, *categories: type[Warning]) -> Any:
         def fitting(acts: Activations, **kwargs: Any) -> Any:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", ConvergenceWarning)
-                warnings.simplefilter("ignore", StalledFitWarning)
-                warnings.simplefilter("ignore", RestartedFitWarning)
+            with _quiet_fits():
                 reader = fit(acts, **kwargs)
             for category in categories:
                 warnings.warn(category.__name__, category, stacklevel=2)

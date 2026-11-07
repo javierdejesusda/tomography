@@ -662,6 +662,14 @@ class _Fit(NamedTuple):
     restarted_fits: int = 0
 
 
+# The warnings `_grid_fits` counts, in the order of the counts of `_Fit`.
+_COUNTED: tuple[type[Warning], ...] = (
+    ConvergenceWarning,
+    StalledFitWarning,
+    RestartedFitWarning,
+)
+
+
 def _fit_cells(
     pooling: Pooling,
     train: Activations,
@@ -681,25 +689,23 @@ def _grid_fits(
     labels: NDArray[np.int64],
     grid: Sequence[float],
     tol: float,
-) -> tuple[list[CellReader], float, int, int, int]:
+) -> tuple[list[CellReader], float, tuple[int, ...]]:
     """Fits a reader per grid value, timing the fits and counting warnings.
 
-    Every `ConvergenceWarning`, `StalledFitWarning` and
-    `RestartedFitWarning` is counted, then shown again under the caller's
-    filters; under the `default` action a warning repeated over the grid
-    shows once. A stalled fit is kept, so selection still sees it: a
-    reader whose scores spread on a tiny scale and carry no fitted signal.
+    Every warning of `_COUNTED` (`ConvergenceWarning`, `StalledFitWarning`
+    and `RestartedFitWarning`) is counted, then shown again under the
+    caller's filters; under the `default` action a warning repeated over
+    the grid shows once. A stalled fit is kept, so selection still sees it:
+    a reader whose scores spread on a tiny scale and carry no fitted signal.
 
     Returns:
-        The readers, the seconds the fits took, and the number of
-        `ConvergenceWarning`s, of `StalledFitWarning`s and of
-        `RestartedFitWarning`s they raised.
+        The readers, the seconds the fits took, and the number of warnings
+        they raised of each category of `_COUNTED`, in its order.
     """
     start = time.perf_counter()
     with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always", ConvergenceWarning)
-        warnings.simplefilter("always", StalledFitWarning)
-        warnings.simplefilter("always", RestartedFitWarning)
+        for category in _COUNTED:
+            warnings.simplefilter("always", category)
         readers = [_fit_cells(pooling, train, labels, c, tol) for c in grid]
     seconds = time.perf_counter() - start
     # One registry per grid: every `catch_warnings` clears the registries,
@@ -713,12 +719,11 @@ def _grid_fits(
             shown.lineno,
             registry=registry,
         )
-    unconverged = sum(
-        issubclass(w.category, ConvergenceWarning) for w in caught
+    counts = tuple(
+        sum(issubclass(w.category, category) for w in caught)
+        for category in _COUNTED
     )
-    stalled = sum(issubclass(w.category, StalledFitWarning) for w in caught)
-    restarted = sum(issubclass(w.category, RestartedFitWarning) for w in caught)
-    return readers, seconds, unconverged, stalled, restarted
+    return readers, seconds, counts
 
 
 def _shuffled(
@@ -800,7 +805,7 @@ def _set_fits(
     for pooling in config.poolings:
         cell = m2_readers.Cell("logistic", f"{pooling}_{cell_set}", "joint")
         for name, labels, select_labels in series:
-            readers, seconds, unconverged, stalled, restarted = _grid_fits(
+            readers, seconds, counts = _grid_fits(
                 pooling, train, labels, config.logistic_c, config.cell_tol
             )
             fits.append(
@@ -811,9 +816,7 @@ def _set_fits(
                     readers,
                     select_labels,
                     seconds,
-                    unconverged,
-                    stalled,
-                    restarted,
+                    *counts,
                 )
             )
     if "random" in config.controls and "cellmax" in config.poolings:
