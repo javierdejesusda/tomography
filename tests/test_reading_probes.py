@@ -707,18 +707,29 @@ class MinimizeSpy:
         return result
 
 
+def scaled_rows(
+    acts: Activations,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """The rows scaled as the cell fits scale them, and the layers' scales.
+
+    Each layer's rows are centered on their mean and divided by their root
+    mean square norm, the layer's scale.
+    """
+    rows = acts.data.astype(np.float64)
+    rows -= rows.mean(axis=1, keepdims=True)
+    scales = np.sqrt(np.square(rows).sum(axis=(1, 2)) / rows.shape[1])
+    return rows / scales[:, None, None], scales
+
+
 def unscaled_heads(
     acts: Activations, solution: NDArray[np.float64]
 ) -> NDArray[np.float64]:
     """The value heads of a cell max fit's solution, in activation units.
 
-    The solution reads rows centered on each layer's mean and divided by
-    their root mean square norm, as the cell fits scale them.
+    The solution reads the rows of `scaled_rows`.
     """
-    rows = acts.data.astype(np.float64)
-    rows -= rows.mean(axis=1, keepdims=True)
-    scales = np.sqrt(np.square(rows).sum(axis=(1, 2)) / rows.shape[1])
-    n_layers, _, width = rows.shape
+    _, scales = scaled_rows(acts)
+    n_layers, _, width = acts.data.shape
     heads = solution[: n_layers * width].reshape(n_layers, width)
     return heads / scales[:, None]
 
@@ -847,11 +858,7 @@ def test_a_stalled_cell_max_fit_restarts_from_the_mean_pooled_logistic_fit(
     # of layers: each stimulus scores the mean value of its cells, as at the
     # zero start. The start splits it into one term per layer, its heads
     # and bias over the number of layers, which sum to that score.
-    rows = acts.data.astype(np.float64)
-    rows -= rows.mean(axis=1, keepdims=True)
-    rows /= np.sqrt(np.square(rows).sum(axis=(1, 2)) / rows.shape[1])[
-        :, None, None
-    ]
+    rows, _ = scaled_rows(acts)
     means = np.concatenate(list(mean_pooled(replace(acts, data=rows))), axis=1)
     model = LogisticRegression(C=0.5, tol=1e-10, max_iter=10000)
     model.fit(means / 2, labels)

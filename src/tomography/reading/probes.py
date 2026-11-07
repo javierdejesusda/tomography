@@ -1034,15 +1034,16 @@ def _minimize(
 ) -> NDArray[np.float64]:
     # Minimizes a loss of `size` parameters from zeros with full-batch L-BFGS
     # in float64 and scikit-learn's settings. A fit whose loss never left its
-    # start stalls. Given `restart`, which returns the mean pooling start, a
-    # stalled fit runs again from there, and the second run is kept unless
-    # it stalls too; any other fit runs once. The restart, and a stop before
+    # start stalls. Given `restart`, which returns a second start, a stalled
+    # fit runs again from that start, and the second run is kept unless it
+    # stalls too; any other fit runs once. The restart, and a stop before
     # convergence or a stall of the run that is kept, warn from the caller
     # of the public fit, two frames above this one's caller.
     with torch.no_grad():
         initial = float(loss(torch.zeros(size, dtype=torch.float64)))
     result = _lbfgs(loss, np.zeros(size), tol, max_iter)
-    if restart is not None and _stalled(initial, result.fun):
+    stalled = _stalled(initial, result.fun)
+    if restart is not None and stalled:
         refit = _lbfgs(loss, restart(), tol, max_iter)
         if not _stalled(initial, refit.fun):
             warnings.warn(
@@ -1053,14 +1054,14 @@ def _minimize(
                 RestartedFitWarning,
                 stacklevel=4,
             )
-            result = refit
+            result, stalled = refit, False
     if result.status != 0:
         warnings.warn(
             f"the {name} reader did not converge: {result.message}",
             ConvergenceWarning,
             stacklevel=4,
         )
-    if _stalled(initial, result.fun):
+    if stalled:
         warnings.warn(
             f"the {name} reader stalled: its loss {float(result.fun)!r} never "
             f"dropped below {initial!r}, its loss at the zero start",
