@@ -16,6 +16,7 @@ LATEST = frozenset({"c2", "c4", "c5", "m1", "p7"})
 P1_DEFAULT_METHOD = "logistic"
 P9D_DEFAULT_TEMPLATE = "fewshot"
 R8_DEFAULT_TASK = "obqa"
+M3_DEFAULT_CELL_SETS = "prompt"
 MODEL_FREE = "none"
 
 
@@ -49,6 +50,21 @@ def _load(path: Path) -> RunInfo:
     else:
         config = meta.get("config", {})
     return RunInfo(path, config, str(meta.get("started_at", "")))
+
+
+def _n_tasks(run: RunInfo) -> int:
+    return len(run.config.get("tasks") or [])
+
+
+def _most_tasks(runs: list[RunInfo]) -> list[RunInfo]:
+    """Keeps the runs that read the most tasks."""
+    most = max(map(_n_tasks, runs), default=0)
+    return [r for r in runs if _n_tasks(r) == most]
+
+
+def _only_task(runs: list[RunInfo], task: str) -> list[RunInfo]:
+    """Keeps the runs that read `task` and no other task."""
+    return [r for r in runs if r.config.get("tasks") == [task]]
 
 
 class Manifest:
@@ -134,15 +150,18 @@ class Manifest:
         tasks; `p9d` keeps the runs of the selected template; `m2` skips the
         shuffled-only runs (`reader_series` false), which only supplement a
         full run; `r8` keeps the run of the selected task (OpenBookQA by
-        default), since it runs one task per run; the latest run (by start
-        time) is taken for the experiments in `LATEST`; any other cell must
-        hold one run.
+        default), since it runs one task per run; `m3` keeps the runs of the
+        selected cell sets (`prompt` by default) and then the run of the
+        selected task alone or, with no task selected, those with the most
+        tasks; the latest run (by start time) is taken for the experiments in
+        `LATEST`; any other cell must hold one run.
 
         Args:
             exp: Experiment id.
             model: Checkpoint key.
-            **select: `method` for `p1`, `template` for `p9d` and `task`
-                for `r8`.
+            **select: `method` for `p1`, `template` for `p9d`, `task` for
+                `r8`, and `cell_sets` (comma separated, in config order) and
+                `task` for `m3`.
 
         Returns:
             The run directory, or None when the cell has no matching run.
@@ -153,20 +172,23 @@ class Manifest:
         runs = self.runs(exp, model)
         if exp == "p1":
             method = select.get("method", P1_DEFAULT_METHOD)
-            runs = [r for r in runs if r.config.get("method") == method]
-            if len(runs) > 1:
-                most = max(len(r.config.get("tasks") or []) for r in runs)
-                runs = [
-                    r for r in runs if len(r.config.get("tasks") or []) == most
-                ]
+            runs = _most_tasks(
+                [r for r in runs if r.config.get("method") == method]
+            )
         elif exp == "p9d":
             template = select.get("template", P9D_DEFAULT_TEMPLATE)
             runs = [r for r in runs if r.config.get("template") == template]
         elif exp == "m2":
             runs = [r for r in runs if r.config.get("reader_series", True)]
         elif exp == "r8":
-            task = select.get("task", R8_DEFAULT_TASK)
-            runs = [r for r in runs if r.config.get("tasks") == [task]]
+            runs = _only_task(runs, select.get("task", R8_DEFAULT_TASK))
+        elif exp == "m3":
+            sets = select.get("cell_sets", M3_DEFAULT_CELL_SETS).split(",")
+            runs = [r for r in runs if r.config.get("cell_sets") == sets]
+            if "task" in select:
+                runs = _only_task(runs, select["task"])
+            else:
+                runs = _most_tasks(runs)
         elif exp in LATEST and len(runs) > 1:
             runs = [max(runs, key=lambda r: r.started_at)]
         if not runs:
