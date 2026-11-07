@@ -52,10 +52,19 @@ def _load(path: Path) -> RunInfo:
     return RunInfo(path, config, str(meta.get("started_at", "")))
 
 
+def _n_tasks(run: RunInfo) -> int:
+    return len(run.config.get("tasks") or [])
+
+
 def _most_tasks(runs: list[RunInfo]) -> list[RunInfo]:
     """Keeps the runs that read the most tasks."""
-    most = max(len(r.config.get("tasks") or []) for r in runs)
-    return [r for r in runs if len(r.config.get("tasks") or []) == most]
+    most = max(map(_n_tasks, runs), default=0)
+    return [r for r in runs if _n_tasks(r) == most]
+
+
+def _only_task(runs: list[RunInfo], task: str) -> list[RunInfo]:
+    """Keeps the runs that read `task` and no other task."""
+    return [r for r in runs if r.config.get("tasks") == [task]]
 
 
 class Manifest:
@@ -163,24 +172,22 @@ class Manifest:
         runs = self.runs(exp, model)
         if exp == "p1":
             method = select.get("method", P1_DEFAULT_METHOD)
-            runs = [r for r in runs if r.config.get("method") == method]
-            if len(runs) > 1:
-                runs = _most_tasks(runs)
+            runs = _most_tasks(
+                [r for r in runs if r.config.get("method") == method]
+            )
         elif exp == "p9d":
             template = select.get("template", P9D_DEFAULT_TEMPLATE)
             runs = [r for r in runs if r.config.get("template") == template]
         elif exp == "m2":
             runs = [r for r in runs if r.config.get("reader_series", True)]
         elif exp == "r8":
-            task = select.get("task", R8_DEFAULT_TASK)
-            runs = [r for r in runs if r.config.get("tasks") == [task]]
+            runs = _only_task(runs, select.get("task", R8_DEFAULT_TASK))
         elif exp == "m3":
             sets = select.get("cell_sets", M3_DEFAULT_CELL_SETS).split(",")
             runs = [r for r in runs if r.config.get("cell_sets") == sets]
             if "task" in select:
-                task = select["task"]
-                runs = [r for r in runs if r.config.get("tasks") == [task]]
-            elif len(runs) > 1:
+                runs = _only_task(runs, select["task"])
+            else:
                 runs = _most_tasks(runs)
         elif exp in LATEST and len(runs) > 1:
             runs = [max(runs, key=lambda r: r.started_at)]

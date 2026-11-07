@@ -119,7 +119,7 @@ def test_m3_is_selected_by_cell_sets_and_task(tmp_path: Path) -> None:
     whole = _run(tmp_path, "m3", small, "w2", tasks=tasks, cell_sets=stage2)
     _run(tmp_path, "m3", small, "w1", tasks=tasks, cell_sets=prompt)
     found = manifest_module.Manifest(tmp_path)
-    second = "stimulus,final,upper"
+    second = ",".join(stage2)
     assert found.run("m3", model) == stage1
     assert found.run("m3", model, task="truth") == deep
     assert found.run("m3", model, cell_sets=second, task="truth") == truth
