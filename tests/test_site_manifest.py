@@ -106,6 +106,29 @@ def test_r8_is_selected_by_task(tmp_path: Path) -> None:
     assert found.run("r8", "qwen3-1.7b", task="tqa") is None
 
 
+def test_m3_is_selected_by_cell_sets_and_task(tmp_path: Path) -> None:
+    tasks = ["sentiment", "truth", "truth_polarity", "utility"]
+    stage2 = ["stimulus", "final", "upper"]
+    prompt = ["prompt"]
+    model = "qwen3-1.7b-base"
+    small = "qwen3-0.6b"
+    stage1 = _run(tmp_path, "m3", model, "s1", tasks=tasks, cell_sets=prompt)
+    deep = _run(tmp_path, "m3", model, "r4", tasks=["truth"], cell_sets=prompt)
+    truth = _run(tmp_path, "m3", model, "t2", tasks=["truth"], cell_sets=stage2)
+    _run(tmp_path, "m3", model, "u2", tasks=["utility"], cell_sets=stage2)
+    whole = _run(tmp_path, "m3", small, "w2", tasks=tasks, cell_sets=stage2)
+    _run(tmp_path, "m3", small, "w1", tasks=tasks, cell_sets=prompt)
+    found = manifest_module.Manifest(tmp_path)
+    second = "stimulus,final,upper"
+    assert found.run("m3", model) == stage1
+    assert found.run("m3", model, task="truth") == deep
+    assert found.run("m3", model, cell_sets=second, task="truth") == truth
+    assert found.run("m3", model, cell_sets=second, task="sentiment") is None
+    assert found.run("m3", small, cell_sets=second) == whole
+    with pytest.raises(manifest_module.AmbiguousRunError, match="t2, u2"):
+        found.run("m3", model, cell_sets=second)
+
+
 def test_rerun_experiments_take_the_latest_started_run(tmp_path: Path) -> None:
     _run(
         tmp_path, "m1", "qwen3-1.7b", "old", started="2026-10-17T10:00:00+00:00"

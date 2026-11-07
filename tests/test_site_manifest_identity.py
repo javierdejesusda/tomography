@@ -11,6 +11,8 @@ HASH = re.compile(r"[0-9a-f]{12}\b")
 # shuffled-only runs (which only supplement a full run) stay committed, but no
 # selection of `Manifest.run` picks them.
 UNSELECTED = frozenset({"P1", "P1 (sentiment)", "M2 shuffled-only run"})
+# M3 stage 2 reads these cell sets; the 1.7B pair ran it one task per run.
+M3_STAGE_2 = "stimulus,final,upper"
 # A row label left out of this map names the default run of its experiment, so
 # its check calls `Manifest.run` with no selection and pins that default.
 SELECTIONS: dict[str, dict[str, str]] = {
@@ -21,6 +23,12 @@ SELECTIONS: dict[str, dict[str, str]] = {
     "R8 ARC-Challenge": {"task": "arc_challenge"},
     "R8 RACE": {"task": "race"},
     "R8 TruthfulQA MC1": {"task": "tqa"},
+    "M3 stage 2": {"cell_sets": M3_STAGE_2},
+    **{
+        f"M3 stage 2 {task}": {"cell_sets": M3_STAGE_2, "task": task}
+        for task in ("sentiment", "truth", "truth_polarity", "utility")
+    },
+    "M3 28 layers": {"task": "truth"},
 }
 
 
