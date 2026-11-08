@@ -1,0 +1,312 @@
+{
+  "_meta": {
+    "experiment": "m3",
+    "config_hash": "fda69edaf565",
+    "seed": 0,
+    "git_sha": "e09c0bb600ba1c240f94b737e2589fb08c91db9a",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-07T12:56:09+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m3",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "truth"
+      ],
+      "scorers": [
+        "logistic",
+        "mean_diff"
+      ],
+      "readouts": [
+        "last",
+        "concept",
+        "mean",
+        "max"
+      ],
+      "token_layers": null,
+      "layer_rules": [
+        "best",
+        "top_k",
+        "joint"
+      ],
+      "top_k": 5,
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "shifts": [
+        "paraphrase"
+      ],
+      "controls": [
+        "text",
+        "random",
+        "shuffled"
+      ],
+      "reader_series": true,
+      "logistic_c": [
+        0.01,
+        0.1,
+        1.0,
+        10.0
+      ],
+      "mlp_alpha": [
+        0.1,
+        0.01,
+        0.001,
+        0.0001
+      ],
+      "mlp_hidden": [
+        64
+      ],
+      "baselines": [
+        "logistic/last",
+        "mean_diff/last",
+        "logistic/concept",
+        "logistic/stimulus_token"
+      ],
+      "n_boot": 2000,
+      "max_fpr": 0.01,
+      "cell_layers": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28
+      ],
+      "upper_layers": [
+        16,
+        20,
+        24,
+        28
+      ],
+      "cell_sets": [
+        "prompt"
+      ],
+      "poolings": [
+        "cellattn"
+      ],
+      "cell_tol": 1e-10
+    }
+  },
+  "data": {
+    "columns": [
+      "task",
+      "condition",
+      "scorer",
+      "readout",
+      "series",
+      "prefix",
+      "decoy",
+      "stimulus",
+      "final",
+      "cells",
+      "cells_rho"
+    ],
+    "rows": [
+      [
+        "truth",
+        "original",
+        "logistic",
+        "cellattn_prompt",
+        "reader",
+        0.0,
+        0.0,
+        0.4967690521603444,
+        0.5032309478396555,
+        631.1864406779661,
+        0.634187259401451
+      ],
+      [
+        "truth",
+        "random",
+        "logistic",
+        "cellattn_prompt",
+        "reader",
+        0.0,
+        0.5092962509414386,
+        0.247698303452195,
+        0.24300544560636697,
+        1275.1864406779662,
+        0.6281161205388275
+      ],
+      [
+        "truth",
+        "against",
+        "logistic",
+        "cellattn_prompt",
+        "reader",
+        0.0,
+        0.5092963914827108,
+        0.24769803528859627,
+        0.2430055732286926,
+        1275.1864406779662,
+        0.6383673644740453
+      ],
+      [
+        "truth",
+        "paraphrase_0",
+        "logistic",
+        "cellattn_prompt",
+        "reader",
+        0.0,
+        0.0,
+        0.4967671837421817,
+        0.5032328162578183,
+        631.1864406779661,
+        0.601479474883491
+      ],
+      [
+        "truth",
+        "paraphrase_1",
+        "logistic",
+        "cellattn_prompt",
+        "reader",
+        0.0,
+        0.0,
+        0.49668463362030874,
+        0.503315366379691,
+        631.1864406779661,
+        0.5736525652994595
+      ],
+      [
+        "truth",
+        "paraphrase_2",
+        "logistic",
+        "cellattn_prompt",
+        "reader",
+        0.0,
+        0.0,
+        0.5452199285014684,
+        0.4547800714985323,
+        575.1864406779661,
+        0.5530258851067977
+      ],
+      [
+        "truth",
+        "original",
+        "logistic",
+        "cellattn_prompt",
+        "shuffled",
+        0.0,
+        0.0,
+        0.49670415998828665,
+        0.5032958400117135,
+        631.1864406779661,
+        0.02082894814365304
+      ],
+      [
+        "truth",
+        "random",
+        "logistic",
+        "cellattn_prompt",
+        "shuffled",
+        0.0,
+        0.5093411727862758,
+        0.24763185715644537,
+        0.24302697005727827,
+        1275.1864406779662,
+        0.0405749149087066
+      ],
+      [
+        "truth",
+        "against",
+        "logistic",
+        "cellattn_prompt",
+        "shuffled",
+        0.0,
+        0.5093413871969977,
+        0.24763187914168358,
+        0.24302673366131944,
+        1275.1864406779662,
+        0.04019508727980083
+      ],
+      [
+        "truth",
+        "paraphrase_0",
+        "logistic",
+        "cellattn_prompt",
+        "shuffled",
+        0.0,
+        0.0,
+        0.4966880643804621,
+        0.503311935619538,
+        631.1864406779661,
+        0.023283513787918198
+      ],
+      [
+        "truth",
+        "paraphrase_1",
+        "logistic",
+        "cellattn_prompt",
+        "shuffled",
+        0.0,
+        0.0,
+        0.4965977273796514,
+        0.5034022726203484,
+        631.1864406779661,
+        0.023244849410669843
+      ],
+      [
+        "truth",
+        "paraphrase_2",
+        "logistic",
+        "cellattn_prompt",
+        "shuffled",
+        0.0,
+        0.0,
+        0.5451665221023989,
+        0.4548334778976004,
+        575.1864406779661,
+        0.030477569861621246
+      ]
+    ]
+  }
+}

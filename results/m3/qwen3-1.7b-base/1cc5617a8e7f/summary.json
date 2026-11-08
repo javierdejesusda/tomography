@@ -1,0 +1,234 @@
+{
+  "_meta": {
+    "experiment": "m3",
+    "config_hash": "1cc5617a8e7f",
+    "seed": 0,
+    "git_sha": "e09c0bb600ba1c240f94b737e2589fb08c91db9a",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-07T02:42:46+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m3",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "utility"
+      ],
+      "scorers": [
+        "logistic",
+        "mean_diff"
+      ],
+      "readouts": [
+        "last",
+        "concept",
+        "mean",
+        "max"
+      ],
+      "token_layers": null,
+      "layer_rules": [
+        "best",
+        "top_k",
+        "joint"
+      ],
+      "top_k": 5,
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "shifts": [
+        "paraphrase"
+      ],
+      "controls": [
+        "text",
+        "random",
+        "shuffled"
+      ],
+      "reader_series": true,
+      "logistic_c": [
+        0.01,
+        0.1,
+        1.0,
+        10.0
+      ],
+      "mlp_alpha": [
+        0.1,
+        0.01,
+        0.001,
+        0.0001
+      ],
+      "mlp_hidden": [
+        64
+      ],
+      "baselines": [
+        "logistic/last",
+        "mean_diff/last",
+        "logistic/concept",
+        "logistic/stimulus_token"
+      ],
+      "n_boot": 2000,
+      "max_fpr": 0.01,
+      "cell_layers": [
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ],
+      "upper_layers": [
+        16,
+        20,
+        24,
+        28
+      ],
+      "cell_sets": [
+        "stimulus",
+        "final",
+        "upper"
+      ],
+      "poolings": [
+        "cellattn",
+        "cellmax"
+      ],
+      "cell_tol": 1e-10
+    }
+  },
+  "data": {
+    "tasks": [
+      "utility"
+    ],
+    "conditions": {
+      "utility": [
+        "original",
+        "random",
+        "against"
+      ]
+    },
+    "skipped": {
+      "utility": {
+        "shift:paraphrase": "no paraphrase for template 'utility'"
+      }
+    },
+    "n_eval_pairs": {
+      "utility": {
+        "select": 256,
+        "report": 256
+      }
+    },
+    "fits": {
+      "utility": {
+        "logistic/cellattn_stimulus/joint/reader": {
+          "fits": 40,
+          "seconds": 123.85903250000047,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_stimulus/joint/shuffled": {
+          "fits": 40,
+          "seconds": 142.39587329999995,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_stimulus/joint/reader": {
+          "fits": 40,
+          "seconds": 906.7786908000016,
+          "convergence_warnings": 39,
+          "stalled_fits": 1,
+          "restarted_fits": 7
+        },
+        "logistic/cellmax_stimulus/joint/shuffled": {
+          "fits": 40,
+          "seconds": 938.6316445000048,
+          "convergence_warnings": 39,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_final/joint/reader": {
+          "fits": 40,
+          "seconds": 98.39440979999563,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_final/joint/shuffled": {
+          "fits": 40,
+          "seconds": 17.97831860000042,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_final/joint/reader": {
+          "fits": 40,
+          "seconds": 310.5850638000011,
+          "convergence_warnings": 3,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_final/joint/shuffled": {
+          "fits": 40,
+          "seconds": 490.46493849999933,
+          "convergence_warnings": 16,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_upper/joint/reader": {
+          "fits": 40,
+          "seconds": 210.53382520000014,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_upper/joint/shuffled": {
+          "fits": 40,
+          "seconds": 223.53751579999152,
+          "convergence_warnings": 1,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_upper/joint/reader": {
+          "fits": 40,
+          "seconds": 891.8287057999987,
+          "convergence_warnings": 28,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_upper/joint/shuffled": {
+          "fits": 40,
+          "seconds": 1008.5879030000015,
+          "convergence_warnings": 37,
+          "stalled_fits": 0,
+          "restarted_fits": 4
+        }
+      }
+    },
+    "families": "one per task, condition, layer rule and baseline; Holm over the DeLong and, separately, the McNemar p values of its cells; the joint cells are compared with each baseline's top_k rule and, in a family of their own, its best rule",
+    "diagnostics": "one row per task, condition and cell reader; each segment column is the share of a report text's reader weight on the cells of that segment (cellmax: its highest cell, ties split; cellattn: its attention mass), averaged over the texts and draws; cells is a text's mean number of cells in the reader's set, and cells_rho the Spearman correlation of that number with the score within each label, averaged over the labels and draws where it is defined (null if none is), since the cell max rises with the number of cells; no cell set reads the prefix, so its share is 0"
+  }
+}

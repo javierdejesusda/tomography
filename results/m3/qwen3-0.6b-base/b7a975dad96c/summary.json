@@ -1,0 +1,537 @@
+{
+  "_meta": {
+    "experiment": "m3",
+    "config_hash": "b7a975dad96c",
+    "seed": 0,
+    "git_sha": "e09c0bb600ba1c240f94b737e2589fb08c91db9a",
+    "git_dirty": false,
+    "device": "cpu",
+    "platform": "Linux-7.0.14-22-pve-x86_64-with-glibc2.36",
+    "versions": {
+      "python": "3.12.13",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cpu",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-06T10:33:13+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m3",
+      "model": "qwen3-0.6b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "truth_polarity",
+        "utility"
+      ],
+      "scorers": [
+        "logistic",
+        "mean_diff"
+      ],
+      "readouts": [
+        "last",
+        "concept",
+        "mean",
+        "max"
+      ],
+      "token_layers": null,
+      "layer_rules": [
+        "best",
+        "top_k",
+        "joint"
+      ],
+      "top_k": 5,
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "shifts": [
+        "paraphrase"
+      ],
+      "controls": [
+        "text",
+        "random",
+        "shuffled"
+      ],
+      "reader_series": true,
+      "logistic_c": [
+        0.01,
+        0.1,
+        1.0,
+        10.0
+      ],
+      "mlp_alpha": [
+        0.1,
+        0.01,
+        0.001,
+        0.0001
+      ],
+      "mlp_hidden": [
+        64
+      ],
+      "baselines": [
+        "logistic/last",
+        "mean_diff/last",
+        "logistic/concept",
+        "logistic/stimulus_token"
+      ],
+      "n_boot": 2000,
+      "max_fpr": 0.01,
+      "cell_layers": [
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ],
+      "upper_layers": [
+        16,
+        20,
+        24,
+        28
+      ],
+      "cell_sets": [
+        "stimulus",
+        "final",
+        "upper"
+      ],
+      "poolings": [
+        "cellattn",
+        "cellmax"
+      ],
+      "cell_tol": 1e-10
+    }
+  },
+  "data": {
+    "tasks": [
+      "sentiment",
+      "truth",
+      "truth_polarity",
+      "utility"
+    ],
+    "conditions": {
+      "sentiment": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "truth": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "truth_polarity": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "utility": [
+        "original",
+        "random",
+        "against"
+      ]
+    },
+    "skipped": {
+      "sentiment": {},
+      "truth": {},
+      "truth_polarity": {},
+      "utility": {
+        "shift:paraphrase": "no paraphrase for template 'utility'"
+      }
+    },
+    "n_eval_pairs": {
+      "sentiment": {
+        "select": 214,
+        "report": 214
+      },
+      "truth": {
+        "select": 53,
+        "report": 59
+      },
+      "truth_polarity": {
+        "select": 256,
+        "report": 256
+      },
+      "utility": {
+        "select": 256,
+        "report": 256
+      }
+    },
+    "fits": {
+      "sentiment": {
+        "logistic/cellattn_stimulus/joint/reader": {
+          "fits": 40,
+          "seconds": 337.75526381097734,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_stimulus/joint/shuffled": {
+          "fits": 40,
+          "seconds": 383.97617093706504,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_stimulus/joint/reader": {
+          "fits": 40,
+          "seconds": 2136.6723209326155,
+          "convergence_warnings": 34,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_stimulus/joint/shuffled": {
+          "fits": 40,
+          "seconds": 1987.040577930864,
+          "convergence_warnings": 39,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_final/joint/reader": {
+          "fits": 40,
+          "seconds": 234.5704869190231,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_final/joint/shuffled": {
+          "fits": 40,
+          "seconds": 492.42669695289806,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_final/joint/reader": {
+          "fits": 40,
+          "seconds": 731.0703998031095,
+          "convergence_warnings": 2,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_final/joint/shuffled": {
+          "fits": 40,
+          "seconds": 1000.0383160030469,
+          "convergence_warnings": 4,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_upper/joint/reader": {
+          "fits": 40,
+          "seconds": 190.39966925093904,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_upper/joint/shuffled": {
+          "fits": 40,
+          "seconds": 343.98690998973325,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_upper/joint/reader": {
+          "fits": 40,
+          "seconds": 1990.2045246721245,
+          "convergence_warnings": 28,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_upper/joint/shuffled": {
+          "fits": 40,
+          "seconds": 2027.6055565723218,
+          "convergence_warnings": 28,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        }
+      },
+      "truth": {
+        "logistic/cellattn_stimulus/joint/reader": {
+          "fits": 40,
+          "seconds": 353.4334184783511,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_stimulus/joint/shuffled": {
+          "fits": 40,
+          "seconds": 456.93190041556954,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_stimulus/joint/reader": {
+          "fits": 40,
+          "seconds": 1897.7078431672417,
+          "convergence_warnings": 39,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_stimulus/joint/shuffled": {
+          "fits": 40,
+          "seconds": 1871.6283392920159,
+          "convergence_warnings": 40,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_final/joint/reader": {
+          "fits": 40,
+          "seconds": 444.6757317632437,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_final/joint/shuffled": {
+          "fits": 40,
+          "seconds": 400.40078495489433,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_final/joint/reader": {
+          "fits": 40,
+          "seconds": 710.5995369893499,
+          "convergence_warnings": 2,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_final/joint/shuffled": {
+          "fits": 40,
+          "seconds": 1248.4569169552997,
+          "convergence_warnings": 4,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_upper/joint/reader": {
+          "fits": 40,
+          "seconds": 227.2388482117094,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_upper/joint/shuffled": {
+          "fits": 40,
+          "seconds": 437.45447684964165,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_upper/joint/reader": {
+          "fits": 40,
+          "seconds": 1996.9708394836634,
+          "convergence_warnings": 38,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_upper/joint/shuffled": {
+          "fits": 40,
+          "seconds": 2028.5772046656348,
+          "convergence_warnings": 38,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        }
+      },
+      "truth_polarity": {
+        "logistic/cellattn_stimulus/joint/reader": {
+          "fits": 40,
+          "seconds": 429.9050977793522,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_stimulus/joint/shuffled": {
+          "fits": 40,
+          "seconds": 416.8989727315493,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_stimulus/joint/reader": {
+          "fits": 40,
+          "seconds": 1906.8154373778962,
+          "convergence_warnings": 40,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_stimulus/joint/shuffled": {
+          "fits": 40,
+          "seconds": 1866.8507050112821,
+          "convergence_warnings": 35,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_final/joint/reader": {
+          "fits": 40,
+          "seconds": 135.13335399888456,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_final/joint/shuffled": {
+          "fits": 40,
+          "seconds": 53.94147883402184,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_final/joint/reader": {
+          "fits": 40,
+          "seconds": 855.325381798204,
+          "convergence_warnings": 1,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_final/joint/shuffled": {
+          "fits": 40,
+          "seconds": 560.3951114658266,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_upper/joint/reader": {
+          "fits": 40,
+          "seconds": 299.9939410611987,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_upper/joint/shuffled": {
+          "fits": 40,
+          "seconds": 268.509677446913,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_upper/joint/reader": {
+          "fits": 40,
+          "seconds": 2181.4356796578504,
+          "convergence_warnings": 37,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_upper/joint/shuffled": {
+          "fits": 40,
+          "seconds": 2151.53245838359,
+          "convergence_warnings": 34,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        }
+      },
+      "utility": {
+        "logistic/cellattn_stimulus/joint/reader": {
+          "fits": 40,
+          "seconds": 350.7923167385161,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_stimulus/joint/shuffled": {
+          "fits": 40,
+          "seconds": 432.5155206406489,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_stimulus/joint/reader": {
+          "fits": 40,
+          "seconds": 2641.2240200648084,
+          "convergence_warnings": 39,
+          "stalled_fits": 0,
+          "restarted_fits": 4
+        },
+        "logistic/cellmax_stimulus/joint/shuffled": {
+          "fits": 40,
+          "seconds": 2632.0550914737396,
+          "convergence_warnings": 40,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_final/joint/reader": {
+          "fits": 40,
+          "seconds": 415.99634513352066,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_final/joint/shuffled": {
+          "fits": 40,
+          "seconds": 93.17409398034215,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_final/joint/reader": {
+          "fits": 40,
+          "seconds": 1205.8426861679181,
+          "convergence_warnings": 4,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_final/joint/shuffled": {
+          "fits": 40,
+          "seconds": 1230.5108307572082,
+          "convergence_warnings": 6,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_upper/joint/reader": {
+          "fits": 40,
+          "seconds": 453.8183825695887,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_upper/joint/shuffled": {
+          "fits": 40,
+          "seconds": 402.956514779944,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_upper/joint/reader": {
+          "fits": 40,
+          "seconds": 2024.2992347888649,
+          "convergence_warnings": 25,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellmax_upper/joint/shuffled": {
+          "fits": 40,
+          "seconds": 2470.2556742690504,
+          "convergence_warnings": 38,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        }
+      }
+    },
+    "families": "one per task, condition, layer rule and baseline; Holm over the DeLong and, separately, the McNemar p values of its cells; the joint cells are compared with each baseline's top_k rule and, in a family of their own, its best rule",
+    "diagnostics": "one row per task, condition and cell reader; each segment column is the share of a report text's reader weight on the cells of that segment (cellmax: its highest cell, ties split; cellattn: its attention mass), averaged over the texts and draws; cells is a text's mean number of cells in the reader's set, and cells_rho the Spearman correlation of that number with the score within each label, averaged over the labels and draws where it is defined (null if none is), since the cell max rises with the number of cells; no cell set reads the prefix, so its share is 0"
+  }
+}
