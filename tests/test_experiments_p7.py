@@ -554,6 +554,57 @@ def _forbid_reading(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(p7, "reading_sweep", reached)
 
 
+def _spy_run_trial(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    arms: list[str] = []
+    real = p7.run_trial
+
+    def spy(arm: Any, *args: Any, **kwargs: Any) -> Any:
+        arms.append(arm.name)
+        return real(arm, *args, **kwargs)
+
+    monkeypatch.setattr(p7, "run_trial", spy)
+    return arms
+
+
+class Watched(NamedTuple):
+    """A default run and what its spies saw.
+
+    Attributes:
+        run_dir: The finished run.
+        reads: Every `reading_sweep` call, see `_spy_reading_sweep`.
+        trials: The arm name of every `run_trial` call.
+        layers: Every `slope_layer` call, see `_spy_slope_layer`.
+        arms: Every `reader_arm` call, see `_spy_reader_arm`.
+    """
+
+    run_dir: RunDir
+    reads: list[Any]
+    trials: list[str]
+    layers: list[Any]
+    arms: list[dict[str, Any]]
+
+
+_WATCHED: dict[str, Watched] = {}
+
+
+@pytest.fixture
+def watched(
+    tiny_arch: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Watched:
+    """One default run per architecture under every spy, built once."""
+    key = type(tiny_arch.model).__name__
+    if key not in _WATCHED:
+        reads = _spy_reading_sweep(monkeypatch)
+        trials = _spy_run_trial(monkeypatch)
+        layers = _spy_slope_layer(monkeypatch)
+        arms = _spy_reader_arm(monkeypatch)
+        run_dir = _execute(tiny_arch, tmp_path_factory.mktemp("p7"))
+        _WATCHED[key] = Watched(run_dir, reads, trials, layers, arms)
+    return _WATCHED[key]
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
@@ -670,11 +721,10 @@ def test_too_few_held_out_texts_raise_before_the_model_runs(
 
 
 def test_every_template_reads_the_same_seeds_and_items(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    watched: Watched,
 ) -> None:
-    calls = _spy_reading_sweep(monkeypatch)
+    calls = watched.reads
     config = _config()
-    _execute(tiny_arch, tmp_path)
     assert len(calls) == 2
     task = READING_TASKS["sentiment"]
     train = select_examples(_sst2(), split="train", min_words=3)
@@ -708,10 +758,9 @@ def test_every_template_reads_the_same_seeds_and_items(
 
 
 def test_the_reading_curves_hold_the_reader_accuracy_of_each_template(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    watched: Watched,
 ) -> None:
-    calls = _spy_reading_sweep(monkeypatch)
-    run_dir = _execute(tiny_arch, tmp_path)
+    calls, run_dir = watched.reads, watched.run_dir
     curves = run_dir.read_arrays("curves_read")
     sidecar = run_dir.read_json("curves_read")
     assert isinstance(sidecar, dict)
@@ -728,10 +777,9 @@ def test_the_reading_curves_hold_the_reader_accuracy_of_each_template(
 
 
 def test_the_lens_curves_hold_the_separation_of_the_steering_readers(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tiny_arch: LoadedModel, watched: Watched
 ) -> None:
-    calls = _spy_reading_sweep(monkeypatch)
-    run_dir = _execute(tiny_arch, tmp_path)
+    calls, run_dir = watched.reads, watched.run_dir
     curves = run_dir.read_arrays("curves_lens")
     sidecar = run_dir.read_json("curves_lens")
     assert isinstance(sidecar, dict)
@@ -867,19 +915,9 @@ def test_selection_and_report_prompts_are_disjoint_draws(
         assert {t.prompts for t in trials} == {expected}
 
 
-def test_each_prompt_list_has_one_unsteered_trial(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    arms: list[str] = []
-    real = p7.run_trial
-
-    def spy(arm: Any, *args: Any, **kwargs: Any) -> Any:
-        arms.append(arm.name)
-        return real(arm, *args, **kwargs)
-
-    monkeypatch.setattr(p7, "run_trial", spy)
-    run_dir = _execute(tiny_arch, tmp_path)
-    assert arms == ["none"] * 3
+def test_each_prompt_list_has_one_unsteered_trial(watched: Watched) -> None:
+    run_dir = watched.run_dir
+    assert watched.trials == ["none"] * 3
     for stem in ("trials_sweep", "trials_transfer_raw", "trials_transfer_chat"):
         names = [t.name for t in read_trials(run_dir, stem)]
         assert names.count("none") == 1
@@ -950,11 +988,9 @@ def _spy_reader_arm(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
 
 def test_the_steering_layer_of_a_template_is_where_the_primary_slope_peaks(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    watched: Watched,
 ) -> None:
-    layers = _spy_slope_layer(monkeypatch)
-    arms = _spy_reader_arm(monkeypatch)
-    run_dir = _execute(tiny_arch, tmp_path)
+    layers, arms, run_dir = watched.layers, watched.arms, watched.run_dir
     trials = _trials(run_dir, "trials_sweep")
     assert len(layers) == 2
     for template, call in zip(TEMPLATE_NAMES, layers, strict=True):
@@ -999,11 +1035,9 @@ def test_each_template_steers_the_transfer_at_its_own_layer(
 
 
 def test_the_arms_use_the_sweep_layers_and_the_first_readers(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tiny_arch: LoadedModel, watched: Watched
 ) -> None:
-    calls = _spy_reader_arm(monkeypatch)
-    reads = _spy_reading_sweep(monkeypatch)
-    _execute(tiny_arch, tmp_path)
+    calls, reads = watched.arms, watched.reads
     arms = [c for c in calls if c["reader"].method != "random"]
     sweep = arms[:24]
     seen: list[tuple[tuple[int, ...], int]] = []
