@@ -674,7 +674,7 @@ def _config(**overrides: Any) -> m3_matrix.Config:
         upper_layers=(3,),
         cell_sets=CELL_SETS,
         logistic_c=(0.1, 10.0),
-        n_boot=50,
+        n_boot=10,
     )
     return dataclasses.replace(base, **overrides)
 
@@ -1328,7 +1328,7 @@ def test_joint_cells_are_compared_with_each_baseline_at_top_k_and_best(
     for row in family:
         cell = ensemble(f"logistic/{row['readout']}/joint/reader")
         diff = paired_auroc_diff(
-            cell, base, labels, clusters, n_boot=50, seed=config.seed
+            cell, base, labels, clusters, n_boot=config.n_boot, seed=config.seed
         )
         assert row["auroc_diff"] == pytest.approx(diff.difference)
         assert row["auroc_lo"] == pytest.approx(diff.lower)
