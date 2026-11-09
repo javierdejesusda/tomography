@@ -109,19 +109,33 @@ def _execute(
     return run_dir
 
 
-_DEFAULT_RUNS: dict[str, RunDir] = {}
+_DEFAULT_RUNS: dict[str, tuple[RunDir, list[ReadingCube]]] = {}
 
 
 @pytest.fixture
 def default_run(
-    tiny_arch: LoadedModel, tmp_path_factory: pytest.TempPathFactory
+    tiny_arch: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> RunDir:
-    """One run per architecture with the default settings."""
+    """One run per architecture with the default settings.
+
+    `default_cubes` holds the reading cubes the run computed.
+    """
     key = type(tiny_arch.model).__name__
     if key not in _DEFAULT_RUNS:
+        cubes = _record_cubes(monkeypatch)
         out = tmp_path_factory.mktemp(f"p9b-{key}")
-        _DEFAULT_RUNS[key] = _execute(tiny_arch, out)
-    return _DEFAULT_RUNS[key]
+        _DEFAULT_RUNS[key] = (_execute(tiny_arch, out), cubes)
+    return _DEFAULT_RUNS[key][0]
+
+
+@pytest.fixture
+def default_cubes(
+    default_run: RunDir, tiny_arch: LoadedModel
+) -> list[ReadingCube]:
+    """The reading cubes the default run of the architecture computed."""
+    return _DEFAULT_RUNS[type(tiny_arch.model).__name__][1]
 
 
 def _summary(run_dir: RunDir) -> dict[str, Any]:
@@ -508,15 +522,11 @@ def test_the_table_holds_the_surface_baselines_of_every_contrast(
 
 
 def test_the_within_arrays_are_saved_next_to_the_pooled_ones(
-    tiny_arch: LoadedModel,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    default_run: RunDir, default_cubes: list[ReadingCube]
 ) -> None:
-    cubes = _record_cubes(monkeypatch)
+    run_dir = default_run
 
-    run_dir = _execute(tiny_arch, tmp_path)
-
-    (cube,) = cubes
+    (cube,) = default_cubes
     transfer = run_dir.read_arrays("transfer")
     assert set(transfer) == {
         "auroc",
@@ -541,15 +551,11 @@ def test_the_within_arrays_are_saved_next_to_the_pooled_ones(
 
 
 def test_the_within_values_leave_the_pooled_ones_and_the_layer_alone(
-    tiny_arch: LoadedModel,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    default_run: RunDir, default_cubes: list[ReadingCube]
 ) -> None:
-    cubes = _record_cubes(monkeypatch)
+    run_dir = default_run
 
-    run_dir = _execute(tiny_arch, tmp_path)
-
-    (cube,) = cubes
+    (cube,) = default_cubes
     transfer = run_dir.read_arrays("transfer")
     np.testing.assert_array_equal(transfer["val"], cube.val)
     np.testing.assert_array_equal(transfer["test"], cube.test)
