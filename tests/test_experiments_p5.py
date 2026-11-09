@@ -4,6 +4,7 @@ import dataclasses
 import gc
 from pathlib import Path
 from typing import Any
+from typing import NamedTuple
 from typing import get_args
 import weakref
 
@@ -1382,10 +1383,50 @@ def test_the_cli_discovers_the_experiment() -> None:
     assert experiment.plot is plot
 
 
+class _Plotted(NamedTuple):
+    """The figures of the default run, plotted once.
+
+    Attributes:
+        paths: The paths `plot` returned.
+        out: The folder the figures were written to.
+        saved: Each figure `plot` saved, by name.
+    """
+
+    paths: list[Path]
+    out: Path
+    saved: dict[str, Any]
+
+
+_PLOTTED: dict[str, _Plotted] = {}
+
+
+@pytest.fixture
+def plotted(
+    ran: RunDir,
+    tiny_arch: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _Plotted:
+    """The figures of the default run, plotted once; tests only read them."""
+    key = type(tiny_arch.model).__name__
+    if key not in _PLOTTED:
+        saved: dict[str, Any] = {}
+        real = p5_persona_wording.save_figure
+
+        def spy(fig: Any, out_dir: Any, name: str, **kwargs: Any) -> Any:
+            saved[name] = fig
+            return real(fig, out_dir, name, **kwargs)
+
+        monkeypatch.setattr(p5_persona_wording, "save_figure", spy)
+        out = tmp_path_factory.mktemp("figs")
+        _PLOTTED[key] = _Plotted(plot(ran, out), out, saved)
+    return _PLOTTED[key]
+
+
 def test_plot_writes_every_curves_pair_and_the_persona_scatter(
-    ran: RunDir, tmp_path: Path
+    plotted: _Plotted,
 ) -> None:
-    paths = plot(ran, tmp_path / "figs")
+    paths = plotted.paths
     stems = [
         "curves_cosine",
         "curves_facts",
@@ -1402,24 +1443,15 @@ def test_plot_writes_every_curves_pair_and_the_persona_scatter(
     )
     assert len(paths) == 24
     assert all(p.stat().st_size > 0 for p in paths)
-    assert sorted(p.name for p in (tmp_path / "figs").iterdir()) == sorted(
+    assert sorted(p.name for p in plotted.out.iterdir()) == sorted(
         p.name for p in paths
     )
 
 
 def test_the_persona_scatter_puts_each_condition_at_its_two_accuracies(
-    ran: RunDir, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ran: RunDir, plotted: _Plotted
 ) -> None:
-    saved: dict[str, Any] = {}
-    real = p5_persona_wording.save_figure
-
-    def spy(fig: Any, out_dir: Any, name: str, **kwargs: Any) -> Any:
-        saved[name] = fig
-        return real(fig, out_dir, name, **kwargs)
-
-    monkeypatch.setattr(p5_persona_wording, "save_figure", spy)
-    plot(ran, tmp_path)
-    ax = saved["persona_scatter"].axes[0]
+    ax = plotted.saved["persona_scatter"].axes[0]
     rows = _table(ran)
     points = {
         line.get_label(): line

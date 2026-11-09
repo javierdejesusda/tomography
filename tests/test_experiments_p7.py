@@ -1589,10 +1589,57 @@ PLOT_STEMS = (
 )
 
 
+class Plotted(NamedTuple):
+    """The figures of the finished run, plotted once.
+
+    Attributes:
+        paths: The paths `plot` returned.
+        matrices: The keyword arguments of every `plot_matrix_file` call.
+        saved: Each figure `plot` saved, by name.
+    """
+
+    paths: list[Path]
+    matrices: list[dict[str, Any]]
+    saved: dict[str, Any]
+
+
+_PLOTTED: dict[str, Plotted] = {}
+
+
+@pytest.fixture
+def plotted(
+    finished: Finished,
+    tiny_arch: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Plotted:
+    """The figures of the finished run, plotted once; tests only read them."""
+    key = type(tiny_arch.model).__name__
+    if key not in _PLOTTED:
+        matrices: list[dict[str, Any]] = []
+        saved: dict[str, Any] = {}
+        matrix_file = p7.plot_matrix_file
+        save_figure = p7.save_figure
+
+        def matrix(*args: Any, **kwargs: Any) -> Any:
+            matrices.append(kwargs)
+            return matrix_file(*args, **kwargs)
+
+        def save(fig: Any, out_dir: Any, name: str, **kwargs: Any) -> Any:
+            saved[name] = fig
+            return save_figure(fig, out_dir, name, **kwargs)
+
+        monkeypatch.setattr(p7, "plot_matrix_file", matrix)
+        monkeypatch.setattr(p7, "save_figure", save)
+        paths = plot(finished.run_dir, tmp_path_factory.mktemp("figs"))
+        _PLOTTED[key] = Plotted(paths, matrices, saved)
+    return _PLOTTED[key]
+
+
 def test_plot_draws_the_four_curves_the_matrix_and_the_scatter(
-    finished: Finished, tmp_path: Path
+    plotted: Plotted,
 ) -> None:
-    paths = plot(finished.run_dir, tmp_path / "figs")
+    paths = plotted.paths
     assert [p.name for p in paths] == [
         f"{stem}.{ext}" for stem in PLOT_STEMS for ext in ("pdf", "png", "svg")
     ]
@@ -1600,17 +1647,9 @@ def test_plot_draws_the_four_curves_the_matrix_and_the_scatter(
 
 
 def test_the_transfer_matrix_is_drawn_on_a_diverging_scale(
-    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    plotted: Plotted,
 ) -> None:
-    asked: list[dict[str, Any]] = []
-    real = p7.plot_matrix_file
-
-    def spy(*args: Any, **kwargs: Any) -> Any:
-        asked.append(kwargs)
-        return real(*args, **kwargs)
-
-    monkeypatch.setattr(p7, "plot_matrix_file", spy)
-    plot(finished.run_dir, tmp_path)
+    asked = plotted.matrices
     assert len(asked) == 1
     assert asked[0]["stem"] == "matrix_transfer"
     assert asked[0]["kind"] == "diverging"
@@ -1641,9 +1680,9 @@ def _assert_points(ax: Any, units: SimpleNamespace) -> None:
 
 
 def test_the_scatter_puts_each_unit_at_its_reading_accuracy_and_slope(
-    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    finished: Finished, plotted: Plotted
 ) -> None:
-    ax = _scatter(finished.run_dir, tmp_path, monkeypatch)
+    ax = plotted.saved["read_vs_steer"].axes[0]
     _assert_points(ax, _units(finished.run_dir))
     lines = {line.get_label(): line for line in ax.lines}
     colors = {lines[template].get_color() for template in TEMPLATE_NAMES}
