@@ -29,6 +29,10 @@ SELECTIONS: dict[str, dict[str, str]] = {
         for task in ("sentiment", "truth", "truth_polarity", "utility")
     },
     "M3 28 layers": {"task": "truth"},
+    "M3 28 layers, wide C grid": {
+        "task": "truth",
+        "logistic_c": "0.001,0.01,0.1,1,10,100,1000",
+    },
 }
 
 

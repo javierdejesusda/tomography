@@ -1,0 +1,186 @@
+{
+  "_meta": {
+    "experiment": "m3",
+    "config_hash": "bce05f32b254",
+    "seed": 0,
+    "git_sha": "e09c0bb600ba1c240f94b737e2589fb08c91db9a",
+    "git_dirty": false,
+    "device": "cpu",
+    "platform": "Linux-7.0.14-22-pve-x86_64-with-glibc2.36",
+    "versions": {
+      "python": "3.12.13",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cpu",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-08T05:23:05+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m3",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "truth"
+      ],
+      "scorers": [
+        "logistic",
+        "mean_diff"
+      ],
+      "readouts": [
+        "last",
+        "concept",
+        "mean",
+        "max"
+      ],
+      "token_layers": null,
+      "layer_rules": [
+        "best",
+        "top_k",
+        "joint"
+      ],
+      "top_k": 5,
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "shifts": [
+        "paraphrase"
+      ],
+      "controls": [
+        "text",
+        "random",
+        "shuffled"
+      ],
+      "reader_series": true,
+      "logistic_c": [
+        0.001,
+        0.01,
+        0.1,
+        1.0,
+        10.0,
+        100.0,
+        1000.0
+      ],
+      "mlp_alpha": [
+        0.1,
+        0.01,
+        0.001,
+        0.0001
+      ],
+      "mlp_hidden": [
+        64
+      ],
+      "baselines": [
+        "logistic/last",
+        "mean_diff/last",
+        "logistic/concept",
+        "logistic/stimulus_token"
+      ],
+      "n_boot": 2000,
+      "max_fpr": 0.01,
+      "cell_layers": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28
+      ],
+      "upper_layers": [
+        16,
+        20,
+        24,
+        28
+      ],
+      "cell_sets": [
+        "prompt"
+      ],
+      "poolings": [
+        "cellattn"
+      ],
+      "cell_tol": 1e-10
+    }
+  },
+  "data": {
+    "tasks": [
+      "truth"
+    ],
+    "conditions": {
+      "truth": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ]
+    },
+    "skipped": {
+      "truth": {}
+    },
+    "n_eval_pairs": {
+      "truth": {
+        "select": 53,
+        "report": 59
+      }
+    },
+    "fits": {
+      "truth": {
+        "logistic/cellattn_prompt/joint/reader": {
+          "fits": 70,
+          "seconds": 3612.4388802847825,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/cellattn_prompt/joint/shuffled": {
+          "fits": 70,
+          "seconds": 7165.765636607073,
+          "convergence_warnings": 1,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        }
+      }
+    },
+    "families": "one per task, condition, layer rule and baseline; Holm over the DeLong and, separately, the McNemar p values of its cells; the joint cells are compared with each baseline's top_k rule and, in a family of their own, its best rule",
+    "diagnostics": "one row per task, condition and cell reader; each segment column is the share of a report text's reader weight on the cells of that segment (cellmax: its highest cell, ties split; cellattn: its attention mass), averaged over the texts and draws; cells is a text's mean number of cells in the reader's set, and cells_rho the Spearman correlation of that number with the score within each label, averaged over the labels and draws where it is defined (null if none is), since the cell max rises with the number of cells; no cell set reads the prefix, so its share is 0"
+  }
+}
