@@ -502,8 +502,9 @@ def test_build_is_byte_identical_in_two_fresh_processes(
     tmp_path: Path,
 ) -> None:
     outs = [tmp_path / "one", tmp_path / "two"]
-    for seed, out in zip(("1", "2"), outs, strict=True):
-        subprocess.run(
+    # Both builds run at once, each in its own process with its own seed.
+    builds = [
+        subprocess.Popen(
             [
                 sys.executable,
                 "-m",
@@ -514,10 +515,15 @@ def test_build_is_byte_identical_in_two_fresh_processes(
                 "--out",
                 str(out),
             ],
-            check=True,
-            capture_output=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             env={**os.environ, "PYTHONHASHSEED": seed},
         )
+        for seed, out in zip(("1", "2"), outs, strict=True)
+    ]
+    for build in builds:
+        _, stderr = build.communicate()
+        assert build.returncode == 0, stderr.decode(errors="replace")
     names = sorted(
         p.relative_to(outs[0]) for p in outs[0].rglob("*") if p.is_file()
     )

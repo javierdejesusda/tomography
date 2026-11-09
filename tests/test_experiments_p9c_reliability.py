@@ -479,6 +479,25 @@ def planted_run(
     return _PLANTED_RUNS["default"]
 
 
+@pytest.fixture
+def starved_run(
+    tiny_gpt2: LoadedModel, tmp_path_factory: pytest.TempPathFactory
+) -> RunDir:
+    """One run on planted activations of `_starved_items`, built once."""
+    if "starved" not in _PLANTED_RUNS:
+        out = tmp_path_factory.mktemp("p9c-starved")
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(
+                p9c_reliability,
+                "collect_item_activations",
+                _fake_collect([]),
+            )
+            _PLANTED_RUNS["starved"] = _execute(
+                tiny_gpt2, out, items=_starved_items()
+            )
+    return _PLANTED_RUNS["starved"]
+
+
 def _summary(run_dir: RunDir) -> dict[str, Any]:
     summary = run_dir.read_json("summary")
     assert isinstance(summary, dict)
@@ -1174,9 +1193,9 @@ def test_a_misspelled_contrast_skips_lat_without_raising(
 
 
 def test_a_lat_contrast_without_matched_pairs_is_skipped_not_fatal(
-    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+    starved_run: RunDir,
 ) -> None:
-    run_dir = _execute(tiny_gpt2, tmp_path, items=_starved_items())
+    run_dir = starved_run
 
     summary = _summary(run_dir)
     assert summary["lat_skipped"] == "fewer than 8 matched train pairs"
@@ -1611,9 +1630,9 @@ def test_the_signals_save_the_relation_of_each_test_item(
 
 
 def test_no_pair_inside_a_relation_gives_null_columns_and_zero_pairs(
-    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+    starved_run: RunDir,
 ) -> None:
-    run_dir = _execute(tiny_gpt2, tmp_path, items=_starved_items())
+    run_dir = starved_run
 
     rows = [r for r in _table(run_dir) if r["dataset"] == "popqa"]
     assert rows
@@ -1623,9 +1642,9 @@ def test_no_pair_inside_a_relation_gives_null_columns_and_zero_pairs(
 
 
 def test_a_dataset_without_a_within_pair_still_lists_every_relation_row(
-    tiny_gpt2: LoadedModel, tmp_path: Path, planted: list[dict[str, Any]]
+    starved_run: RunDir,
 ) -> None:
-    run_dir = _execute(tiny_gpt2, tmp_path, items=_starved_items())
+    run_dir = starved_run
 
     predictors = _predictors(_table(run_dir), "popqa")
     rows = _relations(run_dir, "popqa")

@@ -4,6 +4,7 @@ import dataclasses
 import gc
 from pathlib import Path
 from typing import Any
+from typing import NamedTuple
 from typing import get_args
 import weakref
 
@@ -498,18 +499,50 @@ def test_facts_without_a_split_fail_before_any_forward(
 
 
 EVALS = ("id", "id_val", "facts", "facts_val", "got_cities", "got_larger_than")
-_RUNS: dict[str, RunDir] = {}
+
+
+@dataclasses.dataclass(frozen=True)
+class _Watched:
+    """What the default run of an architecture did as it ran.
+
+    Attributes:
+        calls: Every `condition_stimuli` call, see `_record_conditions`.
+        positions: The position of every activation read, in order.
+        alive_at_start: The activations of earlier conditions still alive
+            when each condition after the first starts reading.
+    """
+
+    calls: list[Any]
+    positions: list[str]
+    alive_at_start: list[int]
+
+
+_RUNS: dict[str, tuple[RunDir, _Watched]] = {}
 
 
 @pytest.fixture
 def ran(
-    tiny_arch: LoadedModel, tmp_path_factory: pytest.TempPathFactory
+    tiny_arch: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> RunDir:
-    """The finished default run of the architecture, built once."""
+    """The finished default run of the architecture, built once.
+
+    The run is watched as it goes; `watched` holds what it was seen doing.
+    """
     key = type(tiny_arch.model).__name__
     if key not in _RUNS:
-        _RUNS[key] = _execute(tiny_arch, tmp_path_factory.mktemp(key))
-    return _RUNS[key]
+        calls = _record_conditions(monkeypatch)
+        positions, alive_at_start = _watch_activations(monkeypatch)
+        run_dir = _execute(tiny_arch, tmp_path_factory.mktemp(key))
+        _RUNS[key] = (run_dir, _Watched(calls, positions, alive_at_start))
+    return _RUNS[key][0]
+
+
+@pytest.fixture
+def watched(ran: RunDir, tiny_arch: LoadedModel) -> _Watched:
+    """What the default run of the architecture did as it ran."""
+    return _RUNS[type(tiny_arch.model).__name__][1]
 
 
 def _oriented(run_dir: RunDir, condition: str) -> Any:
@@ -794,11 +827,10 @@ def _record_conditions(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
 
 
 def test_the_conditions_draw_their_stimuli_per_seed_and_split(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    watched: _Watched,
 ) -> None:
-    calls = _record_conditions(monkeypatch)
+    calls = watched.calls
     config = _config()
-    _execute(tiny_arch, tmp_path)
     expected: list[tuple[str, bool, int, int | None, set[str]]] = []
     for condition in config.conditions:
         expected += [
@@ -828,10 +860,9 @@ def test_the_conditions_draw_their_stimuli_per_seed_and_split(
 
 
 def test_every_persona_condition_trains_on_the_same_statements(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    watched: _Watched,
 ) -> None:
-    calls = _record_conditions(monkeypatch)
-    _execute(tiny_arch, tmp_path)
+    calls = watched.calls
     for i in range(3):
         train = {
             c[0]: c[5].uids
@@ -899,30 +930,16 @@ def _expected_positions(config: Config) -> list[str]:
     return positions
 
 
-@pytest.mark.parametrize("eval_position", [None, "last"])
-def test_the_shared_sets_are_read_once_at_the_token_mean(
-    tiny_arch: LoadedModel,
-    tmp_path: Path,
+def _watch_activations(
     monkeypatch: pytest.MonkeyPatch,
-    eval_position: Any,
-) -> None:
+) -> tuple[list[str], list[int]]:
+    """Watches every activation read of a run with the default conditions.
+
+    Returns:
+        The position of every read, in order, and the activations of earlier
+        conditions still alive when each condition after the first starts.
+    """
     positions: list[str] = []
-    real = p5_persona_wording.stimulus_activations
-
-    def spy(loaded: Any, stimuli: Any, **kwargs: Any) -> Any:
-        positions.append(kwargs["position"])
-        return real(loaded, stimuli, **kwargs)
-
-    monkeypatch.setattr(p5_persona_wording, "stimulus_activations", spy)
-    config = _config(eval_position=eval_position)
-    _execute(tiny_arch, tmp_path, eval_position=eval_position)
-    assert positions == _expected_positions(config)
-    assert len(positions) == 4 + 8 * 3 + 7 * 2
-
-
-def test_the_activations_of_a_condition_are_released_before_the_next(
-    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
     refs: list[Any] = []
     real = p5_persona_wording.stimulus_activations
     config = _config()
@@ -934,6 +951,7 @@ def test_the_activations_of_a_condition_are_released_before_the_next(
     alive_at_start: list[int] = []
 
     def spy(loaded: Any, stimuli: Any, **kwargs: Any) -> Any:
+        positions.append(kwargs["position"])
         if len(refs) in starts:
             gc.collect()
             alive_at_start.append(sum(r() is not None for r in refs[4:]))
@@ -942,7 +960,31 @@ def test_the_activations_of_a_condition_are_released_before_the_next(
         return act
 
     monkeypatch.setattr(p5_persona_wording, "stimulus_activations", spy)
-    _execute(tiny_arch, tmp_path)
+    return positions, alive_at_start
+
+
+def test_the_shared_sets_are_read_once_at_the_token_mean(
+    watched: _Watched,
+) -> None:
+    assert watched.positions == _expected_positions(_config())
+    assert len(watched.positions) == 4 + 8 * 3 + 7 * 2
+
+
+def test_the_shared_sets_are_read_at_the_token_mean_for_a_last_evaluation(
+    tiny_arch: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    positions, _ = _watch_activations(monkeypatch)
+    config = _config(eval_position="last")
+    _execute(tiny_arch, tmp_path, eval_position="last")
+    assert positions == _expected_positions(config)
+    assert len(positions) == 4 + 8 * 3 + 7 * 2
+
+
+def test_the_activations_of_a_condition_are_released_before_the_next(
+    watched: _Watched,
+) -> None:
+    config = _config()
+    alive_at_start = watched.alive_at_start
     assert len(alive_at_start) == len(config.conditions) - 1
     assert alive_at_start == [0] * len(alive_at_start)
 
@@ -1341,10 +1383,50 @@ def test_the_cli_discovers_the_experiment() -> None:
     assert experiment.plot is plot
 
 
+class _Plotted(NamedTuple):
+    """The figures of the default run, plotted once.
+
+    Attributes:
+        paths: The paths `plot` returned.
+        out: The folder the figures were written to.
+        saved: Each figure `plot` saved, by name.
+    """
+
+    paths: list[Path]
+    out: Path
+    saved: dict[str, Any]
+
+
+_PLOTTED: dict[str, _Plotted] = {}
+
+
+@pytest.fixture
+def plotted(
+    ran: RunDir,
+    tiny_arch: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _Plotted:
+    """The figures of the default run, plotted once; tests only read them."""
+    key = type(tiny_arch.model).__name__
+    if key not in _PLOTTED:
+        saved: dict[str, Any] = {}
+        real = p5_persona_wording.save_figure
+
+        def spy(fig: Any, out_dir: Any, name: str, **kwargs: Any) -> Any:
+            saved[name] = fig
+            return real(fig, out_dir, name, **kwargs)
+
+        monkeypatch.setattr(p5_persona_wording, "save_figure", spy)
+        out = tmp_path_factory.mktemp("figs")
+        _PLOTTED[key] = _Plotted(plot(ran, out), out, saved)
+    return _PLOTTED[key]
+
+
 def test_plot_writes_every_curves_pair_and_the_persona_scatter(
-    ran: RunDir, tmp_path: Path
+    plotted: _Plotted,
 ) -> None:
-    paths = plot(ran, tmp_path / "figs")
+    paths = plotted.paths
     stems = [
         "curves_cosine",
         "curves_facts",
@@ -1361,24 +1443,15 @@ def test_plot_writes_every_curves_pair_and_the_persona_scatter(
     )
     assert len(paths) == 24
     assert all(p.stat().st_size > 0 for p in paths)
-    assert sorted(p.name for p in (tmp_path / "figs").iterdir()) == sorted(
+    assert sorted(p.name for p in plotted.out.iterdir()) == sorted(
         p.name for p in paths
     )
 
 
 def test_the_persona_scatter_puts_each_condition_at_its_two_accuracies(
-    ran: RunDir, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ran: RunDir, plotted: _Plotted
 ) -> None:
-    saved: dict[str, Any] = {}
-    real = p5_persona_wording.save_figure
-
-    def spy(fig: Any, out_dir: Any, name: str, **kwargs: Any) -> Any:
-        saved[name] = fig
-        return real(fig, out_dir, name, **kwargs)
-
-    monkeypatch.setattr(p5_persona_wording, "save_figure", spy)
-    plot(ran, tmp_path)
-    ax = saved["persona_scatter"].axes[0]
+    ax = plotted.saved["persona_scatter"].axes[0]
     rows = _table(ran)
     points = {
         line.get_label(): line

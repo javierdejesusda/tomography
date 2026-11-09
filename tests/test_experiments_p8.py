@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import dataclasses
 from pathlib import Path
 from typing import Any
+from typing import NamedTuple
 
 from matplotlib.figure import Figure
 import numpy as np
@@ -474,6 +475,17 @@ def _execute(tmp_path: Path, **overrides: Any) -> RunDir:
     return run_dir
 
 
+_EXECUTED: dict[str, RunDir] = {}
+
+
+@pytest.fixture
+def executed(tmp_path_factory: pytest.TempPathFactory) -> RunDir:
+    """The run of the default config, built once; tests only read it."""
+    if "run" not in _EXECUTED:
+        _EXECUTED["run"] = _execute(tmp_path_factory.mktemp("p8"))
+    return _EXECUTED["run"]
+
+
 def _rows(run_dir: RunDir, stem: str = "table") -> list[dict[str, Any]]:
     payload = run_dir.read_json(stem)
     assert isinstance(payload, dict)
@@ -490,9 +502,9 @@ def _summary(run_dir: RunDir) -> dict[str, Any]:
 
 
 def test_execute_copies_the_reader_curves_of_every_source_and_model(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     for source in (*CONCEPTS, *FUNCTIONS):
         for model in MODELS_ORDER:
@@ -502,9 +514,9 @@ def test_execute_copies_the_reader_curves_of_every_source_and_model(
 
 
 def test_r5_copies_the_transfer_curve_not_the_in_template_one(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     for model in MODELS_ORDER:
         copied = read_curves(run_dir, f"curves_r5_{model}")
@@ -513,8 +525,8 @@ def test_r5_copies_the_transfer_curve_not_the_in_template_one(
         )
 
 
-def test_the_table_has_one_row_per_pair_and_source(tmp_path: Path) -> None:
-    run_dir = _execute(tmp_path)
+def test_the_table_has_one_row_per_pair_and_source(executed: RunDir) -> None:
+    run_dir = executed
 
     payload = run_dir.read_json("table")
     assert isinstance(payload, dict)
@@ -542,9 +554,9 @@ def test_the_table_has_one_row_per_pair_and_source(tmp_path: Path) -> None:
 
 
 def test_the_table_reports_the_planted_accuracies_deltas_and_depths(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     for row in _rows(run_dir):
         source, base, tuned = row["source"], row["base"], row["tuned"]
@@ -558,9 +570,9 @@ def test_the_table_reports_the_planted_accuracies_deltas_and_depths(
 
 
 def test_selected_on_is_the_shared_curves_or_both_joined(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     chosen = {r["source"]: r["selected_on"] for r in _rows(run_dir)}
     assert chosen == {
@@ -592,8 +604,8 @@ def test_the_delta_pairs_the_first_seeds_of_the_two_runs(
     assert row["delta"] == pytest.approx(np.mean([0.02, 0.08, 0.21]))
 
 
-def test_the_reference_has_its_own_table(tmp_path: Path) -> None:
-    run_dir = _execute(tmp_path)
+def test_the_reference_has_its_own_table(executed: RunDir) -> None:
+    run_dir = executed
 
     payload = run_dir.read_json("table_reference")
     assert isinstance(payload, dict)
@@ -627,9 +639,9 @@ def test_without_a_reference_there_is_no_reference_table(
 
 
 def test_the_function_gap_is_the_planted_gain_of_the_function_source(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     gap = _summary(run_dir)["function_gap"]
     assert set(gap) == {"t3", "t6"}
@@ -642,9 +654,9 @@ def test_the_function_gap_is_the_planted_gain_of_the_function_source(
 
 
 def test_the_summary_names_the_pairs_sources_and_models(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     summary = _summary(run_dir)
     assert set(summary) == {"pairs", "sources", "models", "function_gap"}
@@ -1193,6 +1205,36 @@ def _full_run(tmp_path: Path, **overrides: Any) -> RunDir:
     return run_dir
 
 
+class FullPlot(NamedTuple):
+    """A run with every part, plotted once.
+
+    Attributes:
+        run_dir: The finished run.
+        paths: The paths `plot` returned.
+        figures: The figures `plot` saved, in order.
+    """
+
+    run_dir: RunDir
+    paths: list[Path]
+    figures: list[Figure]
+
+
+_FULL_PLOT: list[FullPlot] = []
+
+
+@pytest.fixture
+def full_plot(
+    tmp_path_factory: pytest.TempPathFactory, figures: list[Figure]
+) -> FullPlot:
+    """A run with every part and its figures, built once; tests read them."""
+    if not _FULL_PLOT:
+        root = tmp_path_factory.mktemp("p8-full")
+        run_dir = _full_run(root)
+        paths = plot(run_dir, root / "figs")
+        _FULL_PLOT.append(FullPlot(run_dir, paths, list(figures)))
+    return _FULL_PLOT[0]
+
+
 def _labeled(ax: Any) -> dict[str, Any]:
     return {
         line.get_label(): line
@@ -1299,12 +1341,8 @@ def test_run_resolves_every_source_and_model_then_executes(
     assert _summary(run_dir)["models"] == calls[0][1]
 
 
-def test_plot_writes_fifteen_files_with_every_part(
-    tmp_path: Path,
-) -> None:
-    run_dir = _full_run(tmp_path)
-
-    paths = plot(run_dir, tmp_path / "figs")
+def test_plot_writes_fifteen_files_with_every_part(full_plot: FullPlot) -> None:
+    paths = full_plot.paths
 
     names = ("tuning_depth", "tuning_pairs", "matrix_templates")
     names += ("curves_dose_t3", "curves_dose_t6")
@@ -1334,25 +1372,18 @@ def test_plot_without_the_optional_parts_writes_two_figures(
 
 
 def test_the_depth_figure_has_a_panel_per_source_and_a_curve_per_model(
-    tmp_path: Path, figures: list[Figure]
+    full_plot: FullPlot,
 ) -> None:
-    run_dir = _full_run(tmp_path)
-
-    plot(run_dir, tmp_path / "figs")
-
-    fig = figures[0]
+    fig = full_plot.figures[0]
     assert [ax.get_title() for ax in fig.axes] == ["r1", "r2", "r5"]
     for ax in fig.axes:
         assert list(_labeled(ax)) == ["b3", "t3", "b6", "t6", "ref"]
 
 
 def test_the_pairs_figure_joins_the_base_and_tuned_accuracy_of_every_source(
-    tmp_path: Path, figures: list[Figure]
+    full_plot: FullPlot,
 ) -> None:
-    run_dir = _full_run(tmp_path)
-
-    plot(run_dir, tmp_path / "figs")
-
+    run_dir, figures = full_plot.run_dir, full_plot.figures
     fig = figures[1]
     assert [ax.get_title() for ax in fig.axes] == ["b3 vs t3", "b6 vs t6"]
     rows = _rows(run_dir)
@@ -1380,13 +1411,9 @@ def test_the_pairs_figure_joins_the_base_and_tuned_accuracy_of_every_source(
 
 
 def test_the_pairs_figure_has_one_legend_for_all_panels(
-    tmp_path: Path, figures: list[Figure]
+    full_plot: FullPlot,
 ) -> None:
-    run_dir = _full_run(tmp_path)
-
-    plot(run_dir, tmp_path / "figs")
-
-    fig = figures[1]
+    fig = full_plot.figures[1]
     assert all(ax.get_legend() is None for ax in fig.axes)
     (legend,) = fig.legends
     assert [t.get_text() for t in legend.get_texts()] == ["base", "tuned"]

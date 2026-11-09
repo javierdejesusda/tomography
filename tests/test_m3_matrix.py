@@ -674,7 +674,7 @@ def _config(**overrides: Any) -> m3_matrix.Config:
         upper_layers=(3,),
         cell_sets=CELL_SETS,
         logistic_c=(0.1, 10.0),
-        n_boot=50,
+        n_boot=10,
     )
     return dataclasses.replace(base, **overrides)
 
@@ -1328,7 +1328,7 @@ def test_joint_cells_are_compared_with_each_baseline_at_top_k_and_best(
     for row in family:
         cell = ensemble(f"logistic/{row['readout']}/joint/reader")
         diff = paired_auroc_diff(
-            cell, base, labels, clusters, n_boot=50, seed=config.seed
+            cell, base, labels, clusters, n_boot=config.n_boot, seed=config.seed
         )
         assert row["auroc_diff"] == pytest.approx(diff.difference)
         assert row["auroc_lo"] == pytest.approx(diff.lower)
@@ -1342,11 +1342,21 @@ def test_joint_cells_are_compared_with_each_baseline_at_top_k_and_best(
         )
 
 
-def test_no_cell_reader_fits_or_scores_a_prefix_cell(
-    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Every fit and every score reads cells of the last `prompt_cells`
-    # call: a draw's training cells, or a streamed batch.
+@pytest.fixture
+def prefix_checked(
+    runs: dict[str, Any],
+    tiny_gpt2: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[RunDir, Counter[str]]:
+    """A utility run whose every cell fit and score is checked for prefixes.
+
+    Returns the run and the number of fits and scores checked. Every fit and
+    every score reads cells of the last `prompt_cells` call: a draw's
+    training cells, or a streamed batch.
+    """
+    if "prefix" in runs:
+        return cast(tuple[RunDir, Counter[str]], runs["prefix"])
     prefix: set[tuple[int, int]] = set()
     checked: Counter[str] = Counter()
 
@@ -1390,8 +1400,16 @@ def test_no_cell_reader_fits_or_scores_a_prefix_cell(
     for reader_cls in (AttentionReader, CellMaxReader):
         monkeypatch.setattr(reader_cls, "score", scoring(reader_cls.score))
     config = _config(tasks=("utility",))
-    _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
+    run_dir = RunDir.create(config, out_root=tmp_path_factory.mktemp("m3"))
+    _quiet_execute(config, run_dir, tiny_gpt2)
+    runs["prefix"] = (run_dir, checked)
+    return run_dir, checked
 
+
+def test_no_cell_reader_fits_or_scores_a_prefix_cell(
+    prefix_checked: tuple[RunDir, Counter[str]],
+) -> None:
+    _, checked = prefix_checked
     assert checked["fit"] > 0
     assert checked["score"] > 0
 
@@ -1465,12 +1483,10 @@ def test_cells_are_released_before_the_next_are_read(
 
 
 def test_a_rerun_writes_the_same_table(
-    finished: RunDir, tiny_gpt2: LoadedModel, tmp_path: Path
+    finished: RunDir, prefix_checked: tuple[RunDir, Counter[str]]
 ) -> None:
-    config = _config(tasks=("utility",))
-    run_dir = RunDir.create(config, out_root=tmp_path)
-    _quiet_execute(config, run_dir, tiny_gpt2)
-
+    # The checked run is a second run of the finished run's utility task.
+    run_dir, _ = prefix_checked
     first = [r for r in _table(finished) if r["task"] == "utility"]
     assert _table(run_dir) == first
 
@@ -1834,11 +1850,43 @@ def test_the_segment_shares_are_the_kept_readers_mean_weights(
             )
 
 
-def test_the_summary_counts_fits_seconds_and_warnings(
-    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def planting(fit: Any, *categories: type[Warning]) -> Any:
+@dataclasses.dataclass(frozen=True)
+class _Planted:
+    """A run whose cell fits plant the warnings M3 counts.
+
+    Attributes:
+        config: The config of the run.
+        run_dir: The finished run.
+        shown: The warnings that reached the caller of `execute`.
+        tolerances: The `tol` of every fit of each pooling.
+    """
+
+    config: m3_matrix.Config
+    run_dir: RunDir
+    shown: list[warnings.WarningMessage]
+    tolerances: dict[str, list[float]]
+
+
+@pytest.fixture
+def planted(
+    runs: dict[str, Any],
+    tiny_gpt2: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _Planted:
+    """A run of the prompt cells at a cell tolerance of 1e-7, built once.
+
+    Each cell max fit plants a `ConvergenceWarning` and a
+    `RestartedFitWarning`, each attention fit a `StalledFitWarning`; the
+    fits' own warnings are ignored.
+    """
+    if "planted" in runs:
+        return cast(_Planted, runs["planted"])
+    tolerances: dict[str, list[float]] = {"cellattn": [], "cellmax": []}
+
+    def planting(fit: Any, pooling: str, *categories: type[Warning]) -> Any:
         def fitting(acts: Activations, **kwargs: Any) -> Any:
+            tolerances[pooling].append(kwargs["tol"])
             with _quiet_fits():
                 reader = fit(acts, **kwargs)
             for category in categories:
@@ -1850,18 +1898,31 @@ def test_the_summary_counts_fits_seconds_and_warnings(
     monkeypatch.setattr(
         m3_matrix,
         "fit_cell_max",
-        planting(fit_cell_max, ConvergenceWarning, RestartedFitWarning),
+        planting(
+            fit_cell_max, "cellmax", ConvergenceWarning, RestartedFitWarning
+        ),
     )
     monkeypatch.setattr(
-        m3_matrix, "fit_attention", planting(fit_attention, StalledFitWarning)
+        m3_matrix,
+        "fit_attention",
+        planting(fit_attention, "cellattn", StalledFitWarning),
     )
-    config = _config(tasks=("utility",), cell_sets=("prompt",), decoys=())
-    run_dir = RunDir.create(config, out_root=tmp_path)
+    config = _config(
+        tasks=("utility",), cell_sets=("prompt",), decoys=(), cell_tol=1e-7
+    )
+    run_dir = RunDir.create(config, out_root=tmp_path_factory.mktemp("m3"))
     with warnings.catch_warnings(record=True) as shown:
         warnings.simplefilter("default")
         m3_matrix.execute(config, run_dir, tiny_gpt2, _sources())
+    runs["planted"] = _Planted(config, run_dir, shown, tolerances)
+    return cast(_Planted, runs["planted"])
 
-    summary = cast(dict[str, Any], run_dir.read_json("summary"))
+
+def test_the_summary_counts_fits_seconds_and_warnings(
+    planted: _Planted,
+) -> None:
+    config = planted.config
+    summary = cast(dict[str, Any], planted.run_dir.read_json("summary"))
     fits = summary["fits"]["utility"]
     n = config.n_seeds * len(config.logistic_c)
     assert set(fits) == {
@@ -1882,32 +1943,16 @@ def test_the_summary_counts_fits_seconds_and_warnings(
         StalledFitWarning,
         RestartedFitWarning,
     ):
-        planted = [w for w in shown if str(w.message) == category.__name__]
-        assert len(planted) == 2 * config.n_seeds
+        shown = [
+            w for w in planted.shown if str(w.message) == category.__name__
+        ]
+        assert len(shown) == 2 * config.n_seeds
 
 
-def test_the_cell_fits_use_the_cell_tolerance(
-    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    tolerances: dict[str, list[float]] = {"cellattn": [], "cellmax": []}
-
-    def recording(fit: Any, pooling: str) -> Any:
-        def fitting(acts: Activations, **kwargs: Any) -> Any:
-            tolerances[pooling].append(kwargs["tol"])
-            return fit(acts, **kwargs)
-
-        return fitting
-
-    monkeypatch.setattr(
-        m3_matrix, "fit_cell_max", recording(fit_cell_max, "cellmax")
-    )
-    monkeypatch.setattr(
-        m3_matrix, "fit_attention", recording(fit_attention, "cellattn")
-    )
-    config = _config(
-        tasks=("utility",), cell_sets=("prompt",), decoys=(), cell_tol=1e-7
-    )
-    _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
-
+def test_the_cell_fits_use_the_cell_tolerance(planted: _Planted) -> None:
+    config = planted.config
     n = 2 * config.n_seeds * len(config.logistic_c)
-    assert tolerances == {"cellattn": [1e-7] * n, "cellmax": [1e-7] * n}
+    assert planted.tolerances == {
+        "cellattn": [1e-7] * n,
+        "cellmax": [1e-7] * n,
+    }

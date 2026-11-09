@@ -2037,20 +2037,39 @@ def test_plot_needs_the_views_of_a_run(tmp_path: Path) -> None:
         plot(run_dir, tmp_path / "figures")
 
 
+_PLOTTED: dict[str, tuple[Path, list[Path]]] = {}
+
+
+@pytest.fixture
+def plotted(
+    default_run: RunDir,
+    tiny_arch: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, list[Path]]:
+    """The folder and the figures of the default run, plotted once."""
+    key = type(tiny_arch.model).__name__
+    if key not in _PLOTTED:
+        out = tmp_path_factory.mktemp("figures")
+        _PLOTTED[key] = (out, plot(default_run, out))
+    return _PLOTTED[key]
+
+
 def test_plot_writes_one_check_figure_per_panel(
-    default_run: RunDir, tmp_path: Path
+    plotted: tuple[Path, list[Path]],
 ) -> None:
-    paths = plot(default_run, tmp_path / "figures")
+    out, paths = plotted
 
     names = ["views_entity.png", "views_question.png", "views_unknown.png"]
     assert [path.name for path in paths] == names
-    assert sorted(p.name for p in (tmp_path / "figures").iterdir()) == names
+    assert sorted(p.name for p in out.iterdir()) == names
     for path in paths:
         assert path.read_bytes().startswith(b"\x89PNG")
 
 
-def test_plot_is_deterministic(default_run: RunDir, tmp_path: Path) -> None:
-    first = plot(default_run, tmp_path / "a")
+def test_plot_is_deterministic(
+    default_run: RunDir, plotted: tuple[Path, list[Path]], tmp_path: Path
+) -> None:
+    _, first = plotted
     second = plot(default_run, tmp_path / "b")
 
     assert len(first) == len(second) == 3

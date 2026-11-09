@@ -8,11 +8,16 @@ and the host that an export must not leak.
 """
 
 from collections.abc import Callable
+from collections.abc import Iterator
 import functools
 import getpass
+import importlib.metadata
+import os
+from pathlib import Path
 import socket
 
 import pytest
+import threadpoolctl
 from tokenizers import Tokenizer
 from tokenizers import decoders
 from tokenizers import models
@@ -26,6 +31,7 @@ from transformers import PreTrainedTokenizerFast
 from transformers import Qwen3Config
 from transformers import Qwen3ForCausalLM
 
+from tomography.experiments import base as experiments_base
 from tomography.model import ARCHS
 from tomography.model import LoadedModel
 from tomography.model import wrap_model
@@ -50,6 +56,7 @@ QWEN_CHAT_TEMPLATE = (
     "{%- endif %}"
     "{%- endif %}"
 )
+GIT_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
 VOCAB_SIZE = 400
 SEED = 0
 CORPUS = (
@@ -162,3 +169,57 @@ def fixed_machine(monkeypatch: pytest.MonkeyPatch) -> None:
     """Names the user and the host that the export checks must refuse."""
     monkeypatch.setattr(getpass, "getuser", lambda: "tester-user")
     monkeypatch.setattr(socket, "gethostname", lambda: "testhost-box.lan")
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _one_blas_thread() -> Iterator[None]:
+    """Runs the BLAS libraries of numpy and scipy on one thread.
+
+    The suite's matrices are small, so a pool of BLAS threads costs more to
+    wake and join than the products it splits. Torch keeps its own threads:
+    the forward passes of the tiny models still gain from them.
+    """
+    with threadpoolctl.threadpool_limits(limits=1, user_api="blas"):
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _run_metadata_once() -> Iterator[None]:
+    """Reads the repository's git state and the library versions once.
+
+    Every `RunDir.create` runs two git commands and looks up ten library
+    versions, which costs tens of milliseconds and adds up over the hundreds
+    of runs the suite creates. The suite edits no tracked file of the
+    repository and installs no package, so both answers hold for the whole
+    session. A test that points `_SOURCE_DIR` at a repository of its own,
+    sets a git variable or replaces `importlib.metadata.version` still gets
+    a fresh answer.
+    """
+    git_state = experiments_base._git_state
+    library_versions = experiments_base._library_versions
+    real_version = importlib.metadata.version
+    source = experiments_base._SOURCE_DIR
+    states: dict[tuple[str | None, ...], tuple[str | None, bool | None]] = {}
+    versions: list[dict[str, str]] = []
+
+    def cached_git_state(cwd: Path) -> tuple[str | None, bool | None]:
+        if cwd != source:
+            return git_state(cwd)
+        key = tuple(os.environ.get(name) for name in GIT_VARIABLES)
+        if key not in states:
+            states[key] = git_state(cwd)
+        return states[key]
+
+    def cached_library_versions() -> dict[str, str]:
+        if importlib.metadata.version is not real_version:
+            return library_versions()
+        if not versions:
+            versions.append(library_versions())
+        return dict(versions[0])
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(experiments_base, "_git_state", cached_git_state)
+        patch.setattr(
+            experiments_base, "_library_versions", cached_library_versions
+        )
+        yield

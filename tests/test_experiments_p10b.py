@@ -522,6 +522,20 @@ def _executed(loaded: LoadedModel, tmp_path: Path, **changes: object) -> RunDir:
     return run_dir
 
 
+_EXECUTED: dict[str, RunDir] = {}
+
+
+@pytest.fixture
+def executed(
+    tiny_gpt2: LoadedModel, tmp_path_factory: pytest.TempPathFactory
+) -> RunDir:
+    """The default tiny run, built once; tests only read it."""
+    if "run" not in _EXECUTED:
+        out = tmp_path_factory.mktemp("p10b")
+        _EXECUTED["run"] = _executed(tiny_gpt2, out)
+    return _EXECUTED["run"]
+
+
 def _csv(run_dir: RunDir, name: str) -> list[dict[str, str]]:
     path = run_dir.path / name
     with path.open(encoding="utf-8", newline="") as handle:
@@ -564,9 +578,9 @@ def test_the_prompts_are_the_bare_question_or_the_concept_template(
 
 
 def test_execute_writes_every_file(
-    tiny_gpt2: LoadedModel, tmp_path: Path
+    executed: RunDir,
 ) -> None:
-    run_dir = _executed(tiny_gpt2, tmp_path)
+    run_dir = executed
 
     for name in (
         "curves.csv",
@@ -609,9 +623,9 @@ def test_execute_writes_every_file(
 
 
 def test_the_readers_of_the_full_train_set_are_saved(
-    tiny_gpt2: LoadedModel, tmp_path: Path
+    executed: RunDir,
 ) -> None:
-    run_dir = _executed(tiny_gpt2, tmp_path)
+    run_dir = executed
 
     names = run_dir.read_json("readers")["readers"]  # type: ignore[index]
     arrays = run_dir.read_arrays("readers")
@@ -629,9 +643,9 @@ def test_the_readers_of_the_full_train_set_are_saved(
 
 
 def test_items_hold_the_averaged_score_of_the_full_readers(
-    tiny_gpt2: LoadedModel, tmp_path: Path
+    executed: RunDir,
 ) -> None:
-    run_dir = _executed(tiny_gpt2, tmp_path)
+    run_dir = executed
 
     records = run_dir.read_json("items")
     items = _tiny_items()
@@ -654,9 +668,9 @@ def test_items_hold_the_averaged_score_of_the_full_readers(
 
 
 def test_the_summary_reports_the_counts_the_layers_and_the_diagnostic(
-    tiny_gpt2: LoadedModel, tmp_path: Path
+    executed: RunDir,
 ) -> None:
-    run_dir = _executed(tiny_gpt2, tmp_path)
+    run_dir = executed
 
     summary = run_dir.read_json("summary")
     transfer = _csv(run_dir, "transfer.csv")
@@ -766,9 +780,9 @@ def test_the_experiment_is_registered() -> None:
 
 
 def test_plot_draws_a_curve_and_a_heatmap_per_template(
-    tiny_gpt2: LoadedModel, tmp_path: Path
+    executed: RunDir, tmp_path: Path
 ) -> None:
-    run_dir = _executed(tiny_gpt2, tmp_path)
+    run_dir = executed
 
     paths = plot(run_dir, tmp_path / "figs")
 

@@ -368,7 +368,7 @@ def _config(**overrides: Any) -> Config:
         logistic_c=(0.1, 10.0),
         mlp_alpha=(1.0, 0.01),
         mlp_hidden=(4,),
-        n_boot=50,
+        n_boot=10,
     )
     return dataclasses.replace(base, **overrides)
 
@@ -738,7 +738,12 @@ def test_comparisons_test_each_cell_against_a_baseline_on_the_ensemble(
     for row in rows:
         cell = ensemble(f"{row['scorer']}/{row['readout']}/best/reader")[2]
         diff = paired_auroc_diff(
-            cell, base, labels, clusters, n_boot=50, seed=_config().seed
+            cell,
+            base,
+            labels,
+            clusters,
+            n_boot=_config().n_boot,
+            seed=_config().seed,
         )
         assert row["auroc_diff"] == pytest.approx(diff.difference)
         assert row["auroc_lo"] == pytest.approx(diff.lower)

@@ -38,6 +38,7 @@ dev = [
     "mypy>=2.4.0,<3",
     "pytest>=9.1.1,<10",
     "ruff>=0.17.0,<0.18",
+    "threadpoolctl>=3.7,<4",
 ]
 
 [tool.uv]
