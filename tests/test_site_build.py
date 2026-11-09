@@ -515,7 +515,7 @@ def test_build_is_byte_identical_in_two_fresh_processes(
                 "--out",
                 str(out),
             ],
-            stdout=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             env={**os.environ, "PYTHONHASHSEED": seed},
         )
