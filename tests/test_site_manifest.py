@@ -106,18 +106,27 @@ def test_r8_is_selected_by_task(tmp_path: Path) -> None:
     assert found.run("r8", "qwen3-1.7b", task="tqa") is None
 
 
+M3_GRID = [0.01, 0.1, 1.0, 10.0]
+M3_WIDE = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
+
+
+def _m3(root: Path, model: str, digest: str, **config: object) -> Path:
+    config.setdefault("logistic_c", M3_GRID)
+    return _run(root, "m3", model, digest, **config)
+
+
 def test_m3_is_selected_by_cell_sets_and_task(tmp_path: Path) -> None:
     tasks = ["sentiment", "truth", "truth_polarity", "utility"]
     stage2 = ["stimulus", "final", "upper"]
     prompt = ["prompt"]
     model = "qwen3-1.7b-base"
     small = "qwen3-0.6b"
-    stage1 = _run(tmp_path, "m3", model, "s1", tasks=tasks, cell_sets=prompt)
-    deep = _run(tmp_path, "m3", model, "r4", tasks=["truth"], cell_sets=prompt)
-    truth = _run(tmp_path, "m3", model, "t2", tasks=["truth"], cell_sets=stage2)
-    _run(tmp_path, "m3", model, "u2", tasks=["utility"], cell_sets=stage2)
-    whole = _run(tmp_path, "m3", small, "w2", tasks=tasks, cell_sets=stage2)
-    _run(tmp_path, "m3", small, "w1", tasks=tasks, cell_sets=prompt)
+    stage1 = _m3(tmp_path, model, "s1", tasks=tasks, cell_sets=prompt)
+    deep = _m3(tmp_path, model, "r4", tasks=["truth"], cell_sets=prompt)
+    truth = _m3(tmp_path, model, "t2", tasks=["truth"], cell_sets=stage2)
+    _m3(tmp_path, model, "u2", tasks=["utility"], cell_sets=stage2)
+    whole = _m3(tmp_path, small, "w2", tasks=tasks, cell_sets=stage2)
+    _m3(tmp_path, small, "w1", tasks=tasks, cell_sets=prompt)
     found = manifest_module.Manifest(tmp_path)
     second = ",".join(stage2)
     assert found.run("m3", model) == stage1
@@ -127,6 +136,33 @@ def test_m3_is_selected_by_cell_sets_and_task(tmp_path: Path) -> None:
     assert found.run("m3", small, cell_sets=second) == whole
     with pytest.raises(manifest_module.AmbiguousRunError, match="t2, u2"):
         found.run("m3", model, cell_sets=second)
+
+
+def test_m3_is_selected_by_the_c_grid(tmp_path: Path) -> None:
+    tasks = ["sentiment", "truth", "truth_polarity", "utility"]
+    prompt = ["prompt"]
+    model = "qwen3-1.7b-base"
+    stage1 = _m3(tmp_path, model, "s1", tasks=tasks, cell_sets=prompt)
+    deep = _m3(tmp_path, model, "r4", tasks=["truth"], cell_sets=prompt)
+    wide_all = _m3(
+        tmp_path, model, "r6", tasks=tasks, cell_sets=prompt, logistic_c=M3_WIDE
+    )
+    wide_deep = _m3(
+        tmp_path,
+        model,
+        "r5",
+        tasks=["truth"],
+        cell_sets=prompt,
+        logistic_c=M3_WIDE,
+    )
+    found = manifest_module.Manifest(tmp_path)
+    wide = "0.001,0.01,0.1,1,10,100,1000"
+    assert found.run("m3", model) == stage1
+    assert found.run("m3", model, task="truth") == deep
+    assert found.run("m3", model, logistic_c="0.01,0.1,1,10") == stage1
+    assert found.run("m3", model, logistic_c=wide) == wide_all
+    assert found.run("m3", model, logistic_c=wide, task="truth") == wide_deep
+    assert found.run("m3", model, logistic_c="0.1,1") is None
 
 
 def test_rerun_experiments_take_the_latest_started_run(tmp_path: Path) -> None:

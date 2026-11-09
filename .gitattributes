@@ -1,3 +1,5 @@
 # Run files are committed byte for byte, so a later export can compare them.
 results/** -text
 *.pdf binary
+# The site checks the recorded sha256 of each font file.
+src/tomography/site/static/fonts/** -text
