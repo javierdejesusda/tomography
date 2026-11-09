@@ -1342,11 +1342,21 @@ def test_joint_cells_are_compared_with_each_baseline_at_top_k_and_best(
         )
 
 
-def test_no_cell_reader_fits_or_scores_a_prefix_cell(
-    tiny_gpt2: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Every fit and every score reads cells of the last `prompt_cells`
-    # call: a draw's training cells, or a streamed batch.
+@pytest.fixture
+def prefix_checked(
+    runs: dict[str, Any],
+    tiny_gpt2: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[RunDir, Counter[str]]:
+    """A utility run whose every cell fit and score is checked for prefixes.
+
+    Returns the run and the number of fits and scores checked. Every fit and
+    every score reads cells of the last `prompt_cells` call: a draw's
+    training cells, or a streamed batch.
+    """
+    if "prefix" in runs:
+        return cast(tuple[RunDir, Counter[str]], runs["prefix"])
     prefix: set[tuple[int, int]] = set()
     checked: Counter[str] = Counter()
 
@@ -1390,8 +1400,16 @@ def test_no_cell_reader_fits_or_scores_a_prefix_cell(
     for reader_cls in (AttentionReader, CellMaxReader):
         monkeypatch.setattr(reader_cls, "score", scoring(reader_cls.score))
     config = _config(tasks=("utility",))
-    _quiet_execute(config, RunDir.create(config, out_root=tmp_path), tiny_gpt2)
+    run_dir = RunDir.create(config, out_root=tmp_path_factory.mktemp("m3"))
+    _quiet_execute(config, run_dir, tiny_gpt2)
+    runs["prefix"] = (run_dir, checked)
+    return run_dir, checked
 
+
+def test_no_cell_reader_fits_or_scores_a_prefix_cell(
+    prefix_checked: tuple[RunDir, Counter[str]],
+) -> None:
+    _, checked = prefix_checked
     assert checked["fit"] > 0
     assert checked["score"] > 0
 
@@ -1465,12 +1483,10 @@ def test_cells_are_released_before_the_next_are_read(
 
 
 def test_a_rerun_writes_the_same_table(
-    finished: RunDir, tiny_gpt2: LoadedModel, tmp_path: Path
+    finished: RunDir, prefix_checked: tuple[RunDir, Counter[str]]
 ) -> None:
-    config = _config(tasks=("utility",))
-    run_dir = RunDir.create(config, out_root=tmp_path)
-    _quiet_execute(config, run_dir, tiny_gpt2)
-
+    # The checked run is a second run of the finished run's utility task.
+    run_dir, _ = prefix_checked
     first = [r for r in _table(finished) if r["task"] == "utility"]
     assert _table(run_dir) == first
 
