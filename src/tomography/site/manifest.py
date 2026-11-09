@@ -17,6 +17,7 @@ P1_DEFAULT_METHOD = "logistic"
 P9D_DEFAULT_TEMPLATE = "fewshot"
 R8_DEFAULT_TASK = "obqa"
 M3_DEFAULT_CELL_SETS = "prompt"
+M3_DEFAULT_LOGISTIC_C = "0.01,0.1,1,10"
 MODEL_FREE = "none"
 
 
@@ -65,6 +66,11 @@ def _most_tasks(runs: list[RunInfo]) -> list[RunInfo]:
 def _only_task(runs: list[RunInfo], task: str) -> list[RunInfo]:
     """Keeps the runs that read `task` and no other task."""
     return [r for r in runs if r.config.get("tasks") == [task]]
+
+
+def _grid(values: str) -> list[float]:
+    """Parses a comma separated C grid, such as "0.01,0.1,1,10"."""
+    return [float(v) for v in values.split(",")]
 
 
 class Manifest:
@@ -154,13 +160,17 @@ class Manifest:
         selected cell sets (`prompt` by default) and then the run of the
         selected task alone or, with no task selected, those with the most
         tasks; the latest run (by start time) is taken for the experiments in
-        `LATEST`; any other cell must hold one run.
+        `LATEST`; any other cell must hold one run. The `m3` rule first keeps
+        the runs of the selected `logistic_c` grid (the default grid unless
+        another is selected), so a run of a wider grid never stands in for
+        the default one.
 
         Args:
             exp: Experiment id.
             model: Checkpoint key.
             **select: `method` for `p1`, `template` for `p9d`, `task` for
-                `r8`, and `cell_sets` (comma separated, in config order) and
+                `r8`, and `cell_sets` (comma separated, in config order),
+                `logistic_c` (comma separated numbers, in config order) and
                 `task` for `m3`.
 
         Returns:
@@ -184,7 +194,13 @@ class Manifest:
             runs = _only_task(runs, select.get("task", R8_DEFAULT_TASK))
         elif exp == "m3":
             sets = select.get("cell_sets", M3_DEFAULT_CELL_SETS).split(",")
-            runs = [r for r in runs if r.config.get("cell_sets") == sets]
+            grid = _grid(select.get("logistic_c", M3_DEFAULT_LOGISTIC_C))
+            runs = [
+                r
+                for r in runs
+                if r.config.get("cell_sets") == sets
+                and [float(c) for c in r.config.get("logistic_c", [])] == grid
+            ]
             if "task" in select:
                 runs = _only_task(runs, select["task"])
             else:
