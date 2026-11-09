@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import dataclasses
 from pathlib import Path
 from typing import Any
+from typing import NamedTuple
 
 from matplotlib.figure import Figure
 import numpy as np
@@ -701,6 +702,44 @@ def figures(monkeypatch: pytest.MonkeyPatch) -> list[Figure]:
     return saved
 
 
+class Plotted(NamedTuple):
+    """The default run with its figures, each drawn once.
+
+    Attributes:
+        run_dir: The finished run.
+        paths: The paths `plot` returned.
+        best: The figure of the best accuracies that `plot` saved.
+        panels: The paths of the depth panels of r1 and r2.
+        depth: The figure of those depth panels.
+    """
+
+    run_dir: RunDir
+    paths: list[Path]
+    best: Figure
+    panels: list[Path]
+    depth: Figure
+
+
+_PLOTTED: list[Plotted] = []
+
+
+@pytest.fixture
+def plotted(
+    tmp_path_factory: pytest.TempPathFactory, figures: list[Figure]
+) -> Plotted:
+    """The default run with its figures, built once; tests only read them."""
+    if not _PLOTTED:
+        root = tmp_path_factory.mktemp("p6")
+        run_dir = _execute(root)
+        paths = plot(run_dir, root / "figs")
+        best = figures[1]
+        panels = plot_depth_panels(
+            run_dir, root / "panels", ["r1", "r2"], SIZES, "depth"
+        )
+        _PLOTTED.append(Plotted(run_dir, paths, best, panels, figures[2]))
+    return _PLOTTED[0]
+
+
 def _panel_run(
     tmp_path: Path, sources: Sequence[str], models: Sequence[str] = SIZES
 ) -> RunDir:
@@ -741,11 +780,9 @@ def _bar_ends(container: Any) -> NDArray[np.float64]:
 
 
 def test_plot_writes_the_depth_and_best_figures_in_three_formats(
-    tmp_path: Path,
+    plotted: Plotted,
 ) -> None:
-    run_dir = _execute(tmp_path)
-
-    paths = plot(run_dir, tmp_path / "figs")
+    paths = plotted.paths
 
     assert [p.name for p in paths] == [
         f"{name}.{extension}"
@@ -756,16 +793,12 @@ def test_plot_writes_the_depth_and_best_figures_in_three_formats(
 
 
 def test_the_depth_panels_draw_each_model_on_relative_depth(
-    tmp_path: Path, figures: list[Figure]
+    plotted: Plotted,
 ) -> None:
-    run_dir = _execute(tmp_path)
-
-    paths = plot_depth_panels(
-        run_dir, tmp_path / "figs", ["r1", "r2"], SIZES, "depth"
-    )
+    paths = plotted.panels
 
     assert [p.name for p in paths] == ["depth.pdf", "depth.png", "depth.svg"]
-    fig = figures[0]
+    fig = plotted.depth
     assert [ax.get_title() for ax in fig.axes] == ["r1", "r2"]
     for ax in fig.axes:
         lines = _labeled(ax)
@@ -779,14 +812,8 @@ def test_the_depth_panels_draw_each_model_on_relative_depth(
             )
 
 
-def test_the_depth_panels_share_one_figure_legend(
-    tmp_path: Path, figures: list[Figure]
-) -> None:
-    run_dir = _execute(tmp_path)
-
-    plot_depth_panels(run_dir, tmp_path / "figs", ["r1", "r2"], SIZES, "depth")
-
-    fig = figures[0]
+def test_the_depth_panels_share_one_figure_legend(plotted: Plotted) -> None:
+    fig = plotted.depth
     assert all(ax.get_legend() is None for ax in fig.axes)
     (legend,) = fig.legends
     assert [t.get_text() for t in legend.get_texts()] == list(SIZES)
@@ -870,13 +897,10 @@ def test_the_depth_panels_reject_a_bad_count(
 
 
 def test_the_best_figure_plots_accuracy_depth_and_slope_against_parameters(
-    tmp_path: Path, figures: list[Figure]
+    plotted: Plotted,
 ) -> None:
-    run_dir = _execute(tmp_path)
-
-    plot(run_dir, tmp_path / "figs")
-
-    accuracy, depth, slope = figures[1].axes
+    run_dir = plotted.run_dir
+    accuracy, depth, slope = plotted.best.axes
     assert {ax.get_xscale() for ax in (accuracy, depth, slope)} == {"log"}
     params = [PARAMS[m] for m in SIZES]
     rows = _rows(run_dir)
@@ -991,13 +1015,9 @@ def test_an_interval_that_misses_the_mean_still_plots(tmp_path: Path) -> None:
 
 
 def test_the_panel_titles_sit_below_the_figure_legend(
-    tmp_path: Path, figures: list[Figure]
+    plotted: Plotted,
 ) -> None:
-    run_dir = _execute(tmp_path)
-
-    plot_depth_panels(run_dir, tmp_path / "figs", ["r1", "r2"], SIZES, "depth")
-
-    fig = figures[0]
+    fig = plotted.depth
     (legend,) = fig.legends
     legend_bottom = legend.get_window_extent().y0
     for ax in fig.axes:
