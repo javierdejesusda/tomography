@@ -17,6 +17,7 @@ from pathlib import Path
 import socket
 
 import pytest
+import threadpoolctl
 from tokenizers import Tokenizer
 from tokenizers import decoders
 from tokenizers import models
@@ -168,6 +169,18 @@ def fixed_machine(monkeypatch: pytest.MonkeyPatch) -> None:
     """Names the user and the host that the export checks must refuse."""
     monkeypatch.setattr(getpass, "getuser", lambda: "tester-user")
     monkeypatch.setattr(socket, "gethostname", lambda: "testhost-box.lan")
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _one_blas_thread() -> Iterator[None]:
+    """Runs the BLAS libraries of numpy and scipy on one thread.
+
+    The suite's matrices are small, so a pool of BLAS threads costs more to
+    wake and join than the products it splits. Torch keeps its own threads:
+    the forward passes of the tiny models still gain from them.
+    """
+    with threadpoolctl.threadpool_limits(limits=1, user_api="blas"):
+        yield
 
 
 @pytest.fixture(autouse=True, scope="session")
