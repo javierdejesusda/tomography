@@ -474,6 +474,17 @@ def _execute(tmp_path: Path, **overrides: Any) -> RunDir:
     return run_dir
 
 
+_EXECUTED: dict[str, RunDir] = {}
+
+
+@pytest.fixture
+def executed(tmp_path_factory: pytest.TempPathFactory) -> RunDir:
+    """The run of the default config, built once; tests only read it."""
+    if "run" not in _EXECUTED:
+        _EXECUTED["run"] = _execute(tmp_path_factory.mktemp("p8"))
+    return _EXECUTED["run"]
+
+
 def _rows(run_dir: RunDir, stem: str = "table") -> list[dict[str, Any]]:
     payload = run_dir.read_json(stem)
     assert isinstance(payload, dict)
@@ -490,9 +501,9 @@ def _summary(run_dir: RunDir) -> dict[str, Any]:
 
 
 def test_execute_copies_the_reader_curves_of_every_source_and_model(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     for source in (*CONCEPTS, *FUNCTIONS):
         for model in MODELS_ORDER:
@@ -502,9 +513,9 @@ def test_execute_copies_the_reader_curves_of_every_source_and_model(
 
 
 def test_r5_copies_the_transfer_curve_not_the_in_template_one(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     for model in MODELS_ORDER:
         copied = read_curves(run_dir, f"curves_r5_{model}")
@@ -513,8 +524,8 @@ def test_r5_copies_the_transfer_curve_not_the_in_template_one(
         )
 
 
-def test_the_table_has_one_row_per_pair_and_source(tmp_path: Path) -> None:
-    run_dir = _execute(tmp_path)
+def test_the_table_has_one_row_per_pair_and_source(executed: RunDir) -> None:
+    run_dir = executed
 
     payload = run_dir.read_json("table")
     assert isinstance(payload, dict)
@@ -542,9 +553,9 @@ def test_the_table_has_one_row_per_pair_and_source(tmp_path: Path) -> None:
 
 
 def test_the_table_reports_the_planted_accuracies_deltas_and_depths(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     for row in _rows(run_dir):
         source, base, tuned = row["source"], row["base"], row["tuned"]
@@ -558,9 +569,9 @@ def test_the_table_reports_the_planted_accuracies_deltas_and_depths(
 
 
 def test_selected_on_is_the_shared_curves_or_both_joined(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     chosen = {r["source"]: r["selected_on"] for r in _rows(run_dir)}
     assert chosen == {
@@ -592,8 +603,8 @@ def test_the_delta_pairs_the_first_seeds_of_the_two_runs(
     assert row["delta"] == pytest.approx(np.mean([0.02, 0.08, 0.21]))
 
 
-def test_the_reference_has_its_own_table(tmp_path: Path) -> None:
-    run_dir = _execute(tmp_path)
+def test_the_reference_has_its_own_table(executed: RunDir) -> None:
+    run_dir = executed
 
     payload = run_dir.read_json("table_reference")
     assert isinstance(payload, dict)
@@ -627,9 +638,9 @@ def test_without_a_reference_there_is_no_reference_table(
 
 
 def test_the_function_gap_is_the_planted_gain_of_the_function_source(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     gap = _summary(run_dir)["function_gap"]
     assert set(gap) == {"t3", "t6"}
@@ -642,9 +653,9 @@ def test_the_function_gap_is_the_planted_gain_of_the_function_source(
 
 
 def test_the_summary_names_the_pairs_sources_and_models(
-    tmp_path: Path,
+    executed: RunDir,
 ) -> None:
-    run_dir = _execute(tmp_path)
+    run_dir = executed
 
     summary = _summary(run_dir)
     assert set(summary) == {"pairs", "sources", "models", "function_gap"}
