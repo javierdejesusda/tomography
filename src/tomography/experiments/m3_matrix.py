@@ -28,6 +28,13 @@ is compared with the one-row baselines, next to M2's controls and a random
 cell max reader. Per condition, the diagnostics share each cell reader's
 weight (`cell_weights`) among the segments and set its score against the
 number of cells of a text, since the cell max rises with that number.
+
+The pooling `flat`, never a default, fits instead a linear reader of a cell
+set's cells at fixed slots (`reading.flat`): an L2 logistic regression on
+the flattened cell matrix, each segment aligned from its end. Its slots are
+set by the training texts, which use the paper template, so it has no
+weights for the decoy line; per condition, `truncation.json` counts the
+cells it drops.
 """
 
 from collections.abc import Callable
@@ -71,6 +78,8 @@ from tomography.experiments.variants import task_examples
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading.flat import FlatReader
+from tomography.reading.flat import fit_flat
 from tomography.reading.metrics import auroc
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.probes import AttentionReader
@@ -84,7 +93,7 @@ from tomography.reading.probes import fit_cell_max
 
 Segment = Literal["prefix", "decoy", "stimulus", "final"]
 CellSet = Literal["prompt", "stimulus", "final", "upper"]
-Pooling = Literal["cellattn", "cellmax"]
+Pooling = Literal["cellattn", "cellmax", "flat"]
 SEGMENTS: tuple[Segment, ...] = get_args(Segment)
 CELL_SETS: tuple[CellSet, ...] = get_args(CellSet)
 POOLINGS: tuple[Pooling, ...] = get_args(Pooling)
@@ -128,7 +137,27 @@ DIAGNOSTICS = (
     "rises with the number of cells; no cell set reads the prefix, so its "
     "share is 0"
 )
-CellReader = AttentionReader | CellMaxReader
+TRUNCATION_COLUMNS = (
+    "task",
+    "condition",
+    "scorer",
+    "readout",
+    "series",
+    "cells",
+    *SEGMENTS,
+    "truncated",
+)
+TRUNCATION = (
+    "one row per task, condition and flat reader; cells is a text's mean "
+    "number of cells in the reader's set, and each segment column the mean "
+    "number of that segment's cells per text the reader drops, averaged over "
+    "the texts and draws: a segment longer than its training width loses its "
+    "first cells, and a segment that no training text has, such as the decoy "
+    "line (training uses the paper template), has no slots, so all of its "
+    "cells are dropped; truncated is the share of texts that lose a cell of "
+    "a segment with slots, averaged over the draws"
+)
+CellReader = AttentionReader | CellMaxReader | FlatReader
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -150,7 +179,8 @@ class Config(m2_readers.Config):
             `upper` read every segment but the prefix.
         poolings: How the cell readers pool their cells, from `POOLINGS`:
             `cellattn` one softmax over the cells of all layers, `cellmax`
-            the highest cell.
+            the highest cell, `flat` none: a linear reader of the cells at
+            fixed slots (`reading.flat`), which is not a default.
         cell_tol: The gradient tolerance of L-BFGS in every cell fit, far
             below the probes' default of 1e-4: at the zero start the
             gradient's largest entry can sit under 1e-4, which stopped a
@@ -170,7 +200,7 @@ class Config(m2_readers.Config):
     cell_layers: tuple[int, ...] = (4, 8, 12, 16, 20, 24, 28)
     upper_layers: tuple[int, ...] = (16, 20, 24, 28)
     cell_sets: tuple[CellSet, ...] = ("prompt",)
-    poolings: tuple[Pooling, ...] = POOLINGS
+    poolings: tuple[Pooling, ...] = ("cellattn", "cellmax")
     cell_tol: float = 1e-10
     baselines: tuple[str, ...] = (
         "logistic/last",
@@ -458,7 +488,9 @@ def random_cell_max(
     return readers[int(np.argmax(areas))]
 
 
-def cell_weights(reader: CellReader, acts: Activations) -> NDArray[np.float64]:
+def cell_weights(
+    reader: AttentionReader | CellMaxReader, acts: Activations
+) -> NDArray[np.float64]:
     """The weight of each cell in its stimulus's score.
 
     A cell max reader puts all of a stimulus's weight on its highest cell,
@@ -515,11 +547,16 @@ class Streamed(NamedTuple):
             n_stimuli, len(SEGMENTS)).
         cells: The number of cells each reader reads of each stimulus,
             shape (n_readers, n_stimuli).
+        dropped: The number of cells of each segment a flat reader drops
+            (see `FlatReader.dropped`), shape (n_readers, n_stimuli,
+            len(SEGMENTS)); 0 for the other readers, which read every cell.
+            A flat reader has no weights to share, so its shares are 0.
     """
 
     scores: NDArray[np.float64]
     shares: NDArray[np.float64]
     cells: NDArray[np.int64]
+    dropped: NDArray[np.int64]
 
 
 def stream_scores(
@@ -535,7 +572,7 @@ def stream_scores(
     Each batch of `config.batch_size` texts is read once by `prompt_cells`
     at `cell_layers`, every reader scores the cells of its set, and the
     cells are released before the next batch is read, so only the scores,
-    the segment shares and the cell counts are held.
+    the segment shares, the cell counts and the dropped cells are held.
 
     Args:
         loaded: The wrapped model.
@@ -598,20 +635,30 @@ def _batch_scores(
         for cell_set in dict.fromkeys(cell_set for cell_set, _ in readers)
     }
     n_stimuli, n_segments = len(stimuli.texts), len(SEGMENTS)
-    scores, shares, counts = [], [], []
+    scores, shares, counts, dropped = [], [], [], []
     for cell_set, reader in readers:
         acts, kept_segments = kept[cell_set]
-        scores.append(reader.score(acts)[0])
-        shares.append(
-            np.bincount(
-                acts.row_stimulus * n_segments + kept_segments,
-                cell_weights(reader, acts).sum(axis=0),
-                minlength=n_stimuli * n_segments,
-            ).reshape(n_stimuli, n_segments)
-        )
+        zeros = np.zeros((n_stimuli, n_segments), dtype=np.int64)
+        if isinstance(reader, FlatReader):
+            scores.append(reader.score(acts, kept_segments)[0])
+            shares.append(zeros.astype(np.float64))
+            dropped.append(reader.dropped(acts, kept_segments))
+        else:
+            scores.append(reader.score(acts)[0])
+            shares.append(
+                np.bincount(
+                    acts.row_stimulus * n_segments + kept_segments,
+                    cell_weights(reader, acts).sum(axis=0),
+                    minlength=n_stimuli * n_segments,
+                ).reshape(n_stimuli, n_segments)
+            )
+            dropped.append(zeros)
         counts.append(np.bincount(acts.row_stimulus) * len(acts.layers))
     return Streamed(
-        np.array(scores, dtype=np.float64), np.array(shares), np.array(counts)
+        np.array(scores, dtype=np.float64),
+        np.array(shares),
+        np.array(counts),
+        np.array(dropped),
     )
 
 
@@ -673,19 +720,33 @@ _COUNTED: tuple[type[Warning], ...] = (
 def _fit_cells(
     pooling: Pooling,
     train: Activations,
+    segments: NDArray[np.int8],
     labels: NDArray[np.int64],
     c: float,
     tol: float,
 ) -> CellReader:
-    """Fits a joint reader through the pooling of the training cells."""
+    """Fits a joint reader on the training cells, by their pooling.
+
+    Only the flat reader reads `segments`, the segment code of each row.
+    """
     if pooling == "cellattn":
         return fit_attention(train, labels=labels, c=c, joint=True, tol=tol)
+    if pooling == "flat":
+        return fit_flat(
+            train,
+            segments=segments,
+            labels=labels,
+            n_segments=len(SEGMENTS),
+            c=c,
+            tol=tol,
+        )
     return fit_cell_max(train, labels=labels, c=c, tol=tol)
 
 
 def _grid_fits(
     pooling: Pooling,
     train: Activations,
+    segments: NDArray[np.int8],
     labels: NDArray[np.int64],
     grid: Sequence[float],
     tol: float,
@@ -706,7 +767,9 @@ def _grid_fits(
     with warnings.catch_warnings(record=True) as caught:
         for category in _COUNTED:
             warnings.simplefilter("always", category)
-        readers = [_fit_cells(pooling, train, labels, c, tol) for c in grid]
+        readers = [
+            _fit_cells(pooling, train, segments, labels, c, tol) for c in grid
+        ]
     seconds = time.perf_counter() - start
     # One registry per grid: every `catch_warnings` clears the registries,
     # so a longer-lived one would not dedupe across grids either.
@@ -780,11 +843,15 @@ def _draw_fits(
         train = select_cells(
             cells, segments, cell_set, _set_layers(config, cell_set)
         )
-        fits += _set_fits(config, task, items, i, train, cell_set, series)
+        codes = segments[_in_set(segments, cell_set)]
+        fits += _set_fits(
+            config, task, items, i, train, codes, cell_set, series
+        )
         del train
     train = select_cells(cells, segments, last, _set_layers(config, last))
+    codes = segments[_in_set(segments, last)]
     del cells, segments
-    return fits + _set_fits(config, task, items, i, train, last, series)
+    return fits + _set_fits(config, task, items, i, train, codes, last, series)
 
 
 def _set_fits(
@@ -793,6 +860,7 @@ def _set_fits(
     items: m2_readers._Splits,
     i: int,
     train: Activations,
+    segments: NDArray[np.int8],
     cell_set: CellSet,
     series: Sequence[tuple[str, NDArray[np.int64], NDArray[np.int64]]],
 ) -> list[_Fit]:
@@ -806,7 +874,12 @@ def _set_fits(
         cell = m2_readers.Cell("logistic", f"{pooling}_{cell_set}", "joint")
         for name, labels, select_labels in series:
             readers, seconds, counts = _grid_fits(
-                pooling, train, labels, config.logistic_c, config.cell_tol
+                pooling,
+                train,
+                segments,
+                labels,
+                config.logistic_c,
+                config.cell_tol,
             )
             fits.append(
                 _Fit(
@@ -844,6 +917,7 @@ class _CellPhase(NamedTuple):
     Attributes:
         entries: The entries of the cell readers and the random control.
         diagnostics: The task's rows of `diagnostics.json`.
+        truncation: The task's rows of `truncation.json`.
         fits: The task's `fits` entry of the summary.
         heads: The arrays of `cellheads_<task>.npz`.
         sidecar: The JSON sidecar of those arrays.
@@ -851,6 +925,7 @@ class _CellPhase(NamedTuple):
 
     entries: list[m2_readers._Entry]
     diagnostics: list[list[Any]]
+    truncation: list[list[Any]]
     fits: dict[str, dict[str, float]]
     heads: dict[str, NDArray[Any]]
     sidecar: dict[str, Any]
@@ -938,9 +1013,16 @@ def _cell_phase(
         for (cell, series), draws in groups.items()
         if cell.scorer == "logistic"
     }
+    flat = {
+        group: draws
+        for group, draws in groups.items()
+        if isinstance(fits[draws[0]].readers[0], FlatReader)
+    }
+    cells = {g: draws for g, draws in groups.items() if g not in flat}
     return _CellPhase(
         entries,
-        _diagnostic_rows(task, items, groups, report),
+        _diagnostic_rows(task, items, cells, report),
+        _truncation_rows(task, items, flat, report, [r for _, r in kept]),
         fit_counts,
         *_heads(config, fits, best, groups),
     )
@@ -992,6 +1074,50 @@ def _diagnostic_rows(
     return rows
 
 
+def _truncation_rows(
+    task: ReadingTask,
+    items: m2_readers._Splits,
+    groups: Mapping[tuple[m2_readers.Cell, str], Sequence[int]],
+    report: Streamed,
+    kept: Sequence[CellReader],
+) -> list[list[Any]]:
+    """The cells each flat reader drops in each condition (`TRUNCATION`).
+
+    Args:
+        task: The task.
+        items: Its items.
+        groups: The fits of each flat cell and series, one per draw.
+        report: The report items of each fit, stacked by condition on the
+            second axis.
+        kept: The reader each fit kept.
+
+    Returns:
+        Rows of `TRUNCATION_COLUMNS`.
+    """
+    rows: list[list[Any]] = []
+    for (cell, series), draws in groups.items():
+        readers = [kept[j] for j in draws]
+        slotted = np.array(
+            [r.widths > 0 for r in readers if isinstance(r, FlatReader)]
+        )
+        for m, condition in enumerate(items.conditions):
+            dropped = report.dropped[list(draws), m]
+            lost = (dropped * slotted[:, None]).sum(axis=-1) > 0
+            rows.append(
+                [
+                    task.name,
+                    condition,
+                    cell.scorer,
+                    cell.readout,
+                    series,
+                    float(report.cells[draws[0], m].mean()),
+                    *dropped.mean(axis=(0, 1)).tolist(),
+                    float(lost.mean()),
+                ]
+            )
+    return rows
+
+
 def _heads(
     config: Config,
     fits: Sequence[_Fit],
@@ -999,6 +1125,9 @@ def _heads(
     groups: Mapping[tuple[m2_readers.Cell, str], Sequence[int]],
 ) -> tuple[dict[str, NDArray[Any]], dict[str, Any]]:
     """The kept readers' parameters, stacked over the draws.
+
+    A flat reader keeps only its bias and slot widths: its weights, K W d
+    floats per draw, would take far more room than every other reader's.
 
     Args:
         config: Supplies the grid of `logistic_c`.
@@ -1008,15 +1137,19 @@ def _heads(
 
     Returns:
         The arrays, keyed `<scorer>_<readout>_<series>_<field>`, and their
-        sidecar, which names the entry and the layers of each key.
+        sidecar, which names the entry and the layers of each key, and,
+        when a flat reader ran, the segments of the axis of its widths.
     """
     arrays: dict[str, NDArray[Any]] = {}
     listed: dict[str, Any] = {}
+    flat = False
     for (cell, series), draws in groups.items():
         key = f"{cell.scorer}_{cell.readout}_{series}"
         readers = [fits[j].readers[best[j]] for j in draws]
         fields = ["values", "biases", "signs"]
-        if isinstance(readers[0], AttentionReader):
+        if isinstance(readers[0], FlatReader):
+            fields, flat = ["bias", "widths"], True
+        elif isinstance(readers[0], AttentionReader):
             fields += ["queries", "offsets"]
         for field in fields:
             arrays[f"{key}_{field}"] = np.stack(
@@ -1030,7 +1163,7 @@ def _heads(
             "entry": f"{cell.name}/{series}",
             "layers": list(readers[0].layers),
         }
-    sidecar = {
+    sidecar: dict[str, Any] = {
         "entries": listed,
         "axes": {
             "values": ["seed", "layer", "feature"],
@@ -1041,6 +1174,9 @@ def _heads(
             "c": ["seed"],
         },
     }
+    if flat:
+        sidecar["axes"] |= {"bias": ["seed"], "widths": ["seed", "segment"]}
+        sidecar["segments"] = list(SEGMENTS)
     return arrays, sidecar
 
 
@@ -1218,15 +1354,21 @@ def _run_task(
     loaded: LoadedModel,
     name: str,
     examples: Mapping[str, Sequence[Example]],
-) -> tuple[list[list[Any]], list[list[Any]], list[list[Any]], dict[str, Any]]:
+) -> tuple[
+    list[list[Any]],
+    list[list[Any]],
+    list[list[Any]],
+    list[list[Any]],
+    dict[str, Any],
+]:
     """Runs both phases on one task and writes its files.
 
     The one-row activations are released before the cell phase reads.
 
     Returns:
-        The table rows, the comparison rows, the diagnostic rows, and the
-        task's `conditions`, `skipped`, `n_eval_pairs` and `fits` entries
-        of the summary.
+        The table rows, the comparison rows, the diagnostic rows, the
+        truncation rows, and the task's `conditions`, `skipped`,
+        `n_eval_pairs` and `fits` entries of the summary.
     """
     task = m2_readers._task(name)
     scorers, readouts, skipped = m2_readers._readable(task, config)
@@ -1247,6 +1389,7 @@ def _run_task(
         [row for block in entry_rows for row in block],
         _comparisons(config, task, items, entries),
         cells.diagnostics,
+        cells.truncation,
         {
             "conditions": items.conditions,
             "skipped": {**skipped, **shift_skips},
@@ -1278,7 +1421,8 @@ def execute(
     `scores_<task>` and `auroc_<task>`, and `table.json`,
     `comparisons.json` and `summary.json`; and per task the kept readers'
     parameters in `cellheads_<task>`, and `diagnostics.json` (see
-    `DIAGNOSTICS`). The summary also counts, per task and fitted cell
+    `DIAGNOSTICS`); with the flat reader, `truncation.json` (see
+    `TRUNCATION`). The summary also counts, per task and fitted cell
     reader, the fits, their seconds, their `ConvergenceWarning`s, its
     `stalled_fits` (the fits that raised `StalledFitWarning`, whose kept
     run never left its zero start's loss) and its `restarted_fits` (the
@@ -1310,6 +1454,7 @@ def execute(
     rows: list[list[Any]] = []
     comparisons: list[list[Any]] = []
     diagnostics: list[list[Any]] = []
+    truncation: list[list[Any]] = []
     summary: dict[str, Any] = {
         "tasks": list(tasks),
         "conditions": {},
@@ -1320,16 +1465,19 @@ def execute(
         "diagnostics": DIAGNOSTICS,
     }
     for name in tasks:
-        task_rows, task_comparisons, task_diagnostics, parts = _run_task(
-            config,
-            run_dir,
-            loaded,
-            name,
-            m2_readers._task_examples(name, examples),
+        task_rows, task_comparisons, task_diagnostics, task_cut, parts = (
+            _run_task(
+                config,
+                run_dir,
+                loaded,
+                name,
+                m2_readers._task_examples(name, examples),
+            )
         )
         rows += task_rows
         comparisons += task_comparisons
         diagnostics += task_diagnostics
+        truncation += task_cut
         for key, value in parts.items():
             summary[key][name] = value
     run_dir.write_json(
@@ -1343,6 +1491,12 @@ def execute(
         "diagnostics",
         {"columns": list(DIAGNOSTIC_COLUMNS), "rows": diagnostics},
     )
+    if "flat" in config.poolings:
+        run_dir.write_json(
+            "truncation",
+            {"columns": list(TRUNCATION_COLUMNS), "rows": truncation},
+        )
+        summary["truncation"] = TRUNCATION
     run_dir.write_json("summary", summary)
 
 
