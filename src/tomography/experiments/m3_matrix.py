@@ -49,6 +49,7 @@ from types import MappingProxyType
 from typing import Any
 from typing import Literal
 from typing import NamedTuple
+from typing import cast
 from typing import get_args
 import warnings
 
@@ -1096,9 +1097,8 @@ def _truncation_rows(
     """
     rows: list[list[Any]] = []
     for (cell, series), draws in groups.items():
-        readers = [kept[j] for j in draws]
         slotted = np.array(
-            [r.widths > 0 for r in readers if isinstance(r, FlatReader)]
+            [cast(FlatReader, kept[j]).widths > 0 for j in draws]
         )
         for m, condition in enumerate(items.conditions):
             dropped = report.dropped[list(draws), m]
@@ -1142,13 +1142,12 @@ def _heads(
     """
     arrays: dict[str, NDArray[Any]] = {}
     listed: dict[str, Any] = {}
-    flat = False
     for (cell, series), draws in groups.items():
         key = f"{cell.scorer}_{cell.readout}_{series}"
         readers = [fits[j].readers[best[j]] for j in draws]
         fields = ["values", "biases", "signs"]
         if isinstance(readers[0], FlatReader):
-            fields, flat = ["bias", "widths"], True
+            fields = ["bias", "widths"]
         elif isinstance(readers[0], AttentionReader):
             fields += ["queries", "offsets"]
         for field in fields:
@@ -1174,7 +1173,7 @@ def _heads(
             "c": ["seed"],
         },
     }
-    if flat:
+    if "flat" in config.poolings:
         sidecar["axes"] |= {"bias": ["seed"], "widths": ["seed", "segment"]}
         sidecar["segments"] = list(SEGMENTS)
     return arrays, sidecar

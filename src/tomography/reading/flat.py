@@ -32,6 +32,8 @@ from tomography.reading.probes import _minimize
 from tomography.reading.probes import _penalized_loss
 from tomography.reading.probes import _scaled_cells
 from tomography.reading.probes import _scored_stimulus
+from tomography.reading.probes import _standardized
+from tomography.reading.probes import _unscaled
 
 
 @dataclass(frozen=True)
@@ -85,7 +87,8 @@ class FlatReader:
                 [0, n_segments) per row.
         """
         _scored_stimulus(acts, self.layers, self.values.shape[2])
-        slots = _slots(acts, segments, self.widths)
+        key = _keys(acts, segments, self.widths.shape[0])
+        slots = _slots(key, acts.n_stimuli, self.widths)
         kept = slots >= 0
         stimulus = acts.row_stimulus[kept]
         slot = slots[kept]
@@ -116,8 +119,8 @@ class FlatReader:
                 [0, n_segments) per row.
         """
         n_segments = self.widths.shape[0]
-        lost = _slots(acts, segments, self.widths) < 0
-        key = acts.row_stimulus * n_segments + np.asarray(segments, np.int64)
+        key = _keys(acts, segments, n_segments)
+        lost = _slots(key, acts.n_stimuli, self.widths) < 0
         counts = np.bincount(key[lost], minlength=acts.n_stimuli * n_segments)
         return counts.reshape(acts.n_stimuli, n_segments) * len(acts.layers)
 
@@ -186,15 +189,14 @@ def fit_flat(
             `segments` does not give one code in [0, n_segments) per row,
             `acts` is not finite, or a layer's rows are all equal.
     """
-    stimulus, targets = _fit_inputs(acts, labels, c)
-    key = acts.row_stimulus * n_segments + _codes(acts, segments, n_segments)
+    targets = _fit_inputs(acts, labels, c)[1]
+    key = _keys(acts, segments, n_segments)
     runs = np.bincount(key, minlength=acts.n_stimuli * n_segments)
     widths = runs.reshape(acts.n_stimuli, n_segments).max(axis=0)
     values, shifts, bias = _fit_weights(
         acts,
-        stimulus.numpy(),
-        _slots(acts, segments, widths),
-        widths,
+        _slots(key, acts.n_stimuli, widths),
+        int(widths.sum()),
         targets,
         c,
         tol,
@@ -211,34 +213,32 @@ def fit_flat(
 
 def _fit_weights(
     acts: Activations,
-    stimulus: NDArray[np.int64],
     slots: NDArray[np.int64],
-    widths: NDArray[np.int64],
+    size: int,
     targets: torch.Tensor,
     c: float,
     tol: float,
     max_iter: int,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], float]:
-    # Fits the dual form of `fit_flat` and returns the weights and shifts
-    # in activation units and the bias. Kept apart from `fit_flat` so the
-    # warnings of `_minimize` reach the caller of `fit_flat`.
-    n = acts.n_stimuli
-    size = int(widths.sum())
-
-    def flat(k: int) -> tuple[NDArray[np.float64], float, NDArray[np.float64]]:
-        # Layer k's flat rows, (n, W d), with its center and scale.
-        scaled, centers, scales = _scaled_cells(
+    # Fits the dual form of `fit_flat` on `size` slots and returns the
+    # weights and shifts in activation units and the bias. Kept apart from
+    # `fit_flat` so the warnings of `_minimize` reach the caller of
+    # `fit_flat`.
+    n, n_layers, width = acts.n_stimuli, len(acts.layers), acts.data.shape[2]
+    stimulus = acts.row_stimulus
+    # Every layer has the same slots, so one buffer holds each layer's flat
+    # rows in turn, and its empty slots stay zero.
+    flat = np.zeros((n, size, width))
+    rows = flat.reshape(n, -1)
+    centers = np.empty((n_layers, width))
+    scales = np.empty(n_layers)
+    gram = np.zeros((n, n))
+    for k in range(n_layers):
+        scaled, centers[k : k + 1], scales[k : k + 1] = _scaled_cells(
             acts.data[k : k + 1], acts.layers[k : k + 1]
         )
-        rows = np.zeros((n, size, acts.data.shape[2]))
-        rows[stimulus, slots] = scaled[0].numpy()
-        return rows.reshape(n, -1), float(scales[0]), centers[0]
-
-    gram = np.zeros((n, n))
-    for k in range(len(acts.layers)):
-        rows = flat(k)[0]
+        flat[stimulus, slots] = scaled[0].numpy()
         gram += rows @ rows.T
-        del rows
     eigenvalues, basis = np.linalg.eigh(gram)
     kept = eigenvalues > eigenvalues.max() * n * np.finfo(np.float64).eps
     roots = np.sqrt(eigenvalues[kept])
@@ -250,19 +250,26 @@ def _fit_weights(
 
     solution = _minimize(loss, features.shape[1] + 1, tol, max_iter, "flat")
     duals = basis[:, kept] @ (solution[:-1] / roots)
-    values = np.empty((len(acts.layers), size, acts.data.shape[2]))
-    shifts = np.empty((len(acts.layers), size))
-    for k in range(len(acts.layers)):
-        rows, scale, center = flat(k)
-        values[k] = (duals @ rows).reshape(size, -1) / scale
-        shifts[k] = values[k] @ center
+    values = np.empty((n_layers, size, width))
+    shifts = np.empty((n_layers, size))
+    for k in range(n_layers):
+        flat[stimulus, slots] = _standardized(
+            acts.data[k], centers[k], scales[k]
+        )
+        heads = (duals @ rows).reshape(size, width)
+        values[k], shifts[k] = _unscaled(
+            heads,
+            np.broadcast_to(centers[k], heads.shape),
+            np.full(size, scales[k]),
+        )
     return values, shifts, float(solution[-1])
 
 
-def _codes(
+def _keys(
     acts: Activations, segments: NDArray[np.int8], n_segments: int
 ) -> NDArray[np.int64]:
-    # Checks that `segments` gives each row a code in [0, n_segments).
+    # The (stimulus, segment) key of each row, once `segments` is checked to
+    # give each row a code in [0, n_segments).
     codes = np.asarray(segments, dtype=np.int64)
     n_rows = acts.row_stimulus.shape[0]
     if codes.shape != (n_rows,):
@@ -276,20 +283,19 @@ def _codes(
             f"segment codes must be in [0, {n_segments}), got "
             f"{int(codes[outside][0])}"
         )
-    return codes
+    return np.asarray(acts.row_stimulus * n_segments + codes, dtype=np.int64)
 
 
 def _slots(
-    acts: Activations, segments: NDArray[np.int8], widths: NDArray[np.int64]
+    key: NDArray[np.int64], n_stimuli: int, widths: NDArray[np.int64]
 ) -> NDArray[np.int64]:
-    # The slot of each row by the rule of the module docstring, or -1 for a
-    # row that has none.
+    # The slot of each row of `_keys` by the rule of the module docstring,
+    # or -1 for a row that has none.
     n_segments = widths.shape[0]
-    codes = _codes(acts, segments, n_segments)
-    key = acts.row_stimulus * n_segments + codes
+    codes = key % n_segments
     # Rows are in token order within a stimulus, and a stable sort keeps it.
     order = np.argsort(key, kind="stable")
-    runs = np.bincount(key, minlength=acts.n_stimuli * n_segments)
+    runs = np.bincount(key, minlength=n_stimuli * n_segments)
     starts = np.cumsum(runs) - runs
     rank = np.empty_like(key)
     rank[order] = np.arange(key.shape[0]) - starts[key[order]]

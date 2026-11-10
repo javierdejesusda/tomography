@@ -1,6 +1,7 @@
 """Tests for the flat reader: a linear reader over the aligned cell matrix."""
 
 from collections.abc import Sequence
+from typing import Any
 import warnings
 
 import numpy as np
@@ -54,17 +55,29 @@ def _acts(
     rng = np.random.default_rng(seed)
     data = rng.normal(size=(len(layers), int(sizes.sum()), WIDTH))
     data = data * np.arange(1, len(layers) + 1)[:, None, None] + 3.0
-    acts = Activations(
-        data=data.astype(np.float32),
+    stimulus = np.repeat(np.arange(len(counts)), sizes)
+    return _rows(data, stimulus, len(counts), layers), np.concatenate(codes)
+
+
+def _rows(
+    data: NDArray[np.floating[Any]],
+    stimulus: NDArray[np.int64],
+    n_stimuli: int,
+    layers: tuple[int, ...] = LAYERS,
+) -> Activations:
+    """Token rows of shape (K, n_rows, d), stimulus-major, in token order."""
+    counts = np.bincount(stimulus, minlength=n_stimuli)
+    rank = np.concatenate([np.arange(n) for n in counts])
+    return Activations(
+        data=np.asarray(data, dtype=np.float32),
         layers=layers,
         position="response",
-        row_stimulus=np.repeat(np.arange(len(counts)), sizes),
-        row_rank=np.concatenate([np.arange(n) for n in sizes]),
-        row_token=np.concatenate([np.arange(1, n + 1) for n in sizes]),
-        row_token_id=np.zeros(int(sizes.sum()), dtype=np.int64),
-        n_stimuli=len(counts),
+        row_stimulus=stimulus,
+        row_rank=rank,
+        row_token=rank + 1,
+        row_token_id=np.zeros(stimulus.size, dtype=np.int64),
+        n_stimuli=n_stimuli,
     )
-    return acts, np.concatenate(codes)
 
 
 def _scaling(
@@ -107,12 +120,15 @@ def _dense(
 
 
 def _fit(
-    acts: Activations, segments: NDArray[np.int8], **kwargs: float
+    acts: Activations,
+    segments: NDArray[np.int8],
+    labels: NDArray[np.int64] = TRAIN_LABELS,
+    **kwargs: float,
 ) -> FlatReader:
     return fit_flat(
         acts,
         segments=segments,
-        labels=TRAIN_LABELS,
+        labels=labels,
         n_segments=N_SEGMENTS,
         **kwargs,
     )
@@ -184,26 +200,8 @@ def test_an_empty_slot_reads_the_training_mean() -> None:
     # first token equal to each layer's training mean fills it.
     one = np.flatnonzero(train.row_stimulus == 1)
     filled = np.concatenate([centers[:, None], train.data[:, one]], axis=1)
-    acts = Activations(
-        data=filled.astype(np.float32),
-        layers=LAYERS,
-        position="response",
-        row_stimulus=np.zeros(one.size + 1, dtype=np.int64),
-        row_rank=np.arange(one.size + 1),
-        row_token=np.arange(1, one.size + 2),
-        row_token_id=np.zeros(one.size + 1, dtype=np.int64),
-        n_stimuli=1,
-    )
-    alone = Activations(
-        data=train.data[:, one],
-        layers=LAYERS,
-        position="response",
-        row_stimulus=np.zeros(one.size, dtype=np.int64),
-        row_rank=np.arange(one.size),
-        row_token=np.arange(1, one.size + 1),
-        row_token_id=np.zeros(one.size, dtype=np.int64),
-        n_stimuli=1,
-    )
+    acts = _rows(filled, np.zeros(one.size + 1, dtype=np.int64), 1)
+    alone = _rows(train.data[:, one], np.zeros(one.size, dtype=np.int64), 1)
 
     with_mean = reader.score(acts, np.concatenate([[0], segments[one]]))
     without = reader.score(alone, segments[one])
@@ -222,21 +220,8 @@ def _first_cut(
         for s, n in cut.items():
             rows = np.flatnonzero((acts.row_stimulus == i) & (segments == s))
             keep[rows[:n]] = False
-    stimulus = acts.row_stimulus[keep]
-    counts = np.bincount(stimulus, minlength=acts.n_stimuli)
-    return (
-        Activations(
-            data=acts.data[:, keep],
-            layers=acts.layers,
-            position=acts.position,
-            row_stimulus=stimulus,
-            row_rank=np.concatenate([np.arange(n) for n in counts]),
-            row_token=acts.row_token[keep],
-            row_token_id=acts.row_token_id[keep],
-            n_stimuli=acts.n_stimuli,
-        ),
-        segments[keep],
-    )
+    rows = _rows(acts.data[:, keep], acts.row_stimulus[keep], acts.n_stimuli)
+    return rows, segments[keep]
 
 
 def test_a_longer_segment_loses_its_first_cells() -> None:
@@ -339,26 +324,12 @@ def test_a_fit_that_cannot_leave_its_zero_start_warns_that_it_stalled() -> None:
     acts, segments = _acts([(1, 2, 1), (1, 2, 1)])
     # Text 0 twice, then text 1 twice.
     order = [0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7]
-    twice = Activations(
-        data=acts.data[:, order],
-        layers=LAYERS,
-        position="response",
-        row_stimulus=np.repeat(np.arange(4), 4),
-        row_rank=np.tile(np.arange(4), 4),
-        row_token=np.tile(np.arange(1, 5), 4),
-        row_token_id=np.zeros(16, dtype=np.int64),
-        n_stimuli=4,
-    )
+    twice = _rows(acts.data[:, order], np.repeat(np.arange(4), 4), 4)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
         with pytest.warns(StalledFitWarning, match=r"^the flat reader stalled"):
-            fit_flat(
-                twice,
-                segments=np.tile(segments[:4], 4),
-                labels=np.array([1, 0, 1, 0]),
-                n_segments=N_SEGMENTS,
-            )
+            _fit(twice, np.tile(segments[:4], 4), np.array([1, 0, 1, 0]))
 
 
 @pytest.mark.parametrize(
@@ -378,32 +349,16 @@ def test_a_fit_refuses_malformed_segments(change: str, message: str) -> None:
         codes[0] = 3 if change == "code" else -1
 
     with pytest.raises(ValueError, match=message):
-        fit_flat(
-            acts,
-            segments=codes,
-            labels=TRAIN_LABELS[:4],
-            n_segments=N_SEGMENTS,
-        )
+        _fit(acts, codes, TRAIN_LABELS[:4])
 
 
 def test_a_fit_refuses_a_nonpositive_c_and_one_class() -> None:
     acts, segments = _acts(TRAIN_COUNTS[:4])
 
     with pytest.raises(ValueError, match=r"^c must be positive, got 0.0$"):
-        _fit_four(acts, segments, TRAIN_LABELS[:4], c=0.0)
+        _fit(acts, segments, TRAIN_LABELS[:4], c=0.0)
     with pytest.raises(ValueError, match=r"^labels must contain both classes"):
-        _fit_four(acts, segments, np.ones(4, dtype=np.int64))
-
-
-def _fit_four(
-    acts: Activations,
-    segments: NDArray[np.int8],
-    labels: NDArray[np.int64],
-    c: float = 1.0,
-) -> FlatReader:
-    return fit_flat(
-        acts, segments=segments, labels=labels, n_segments=N_SEGMENTS, c=c
-    )
+        _fit(acts, segments, np.ones(4, dtype=np.int64))
 
 
 def test_a_score_refuses_other_layers_and_malformed_segments() -> None:
