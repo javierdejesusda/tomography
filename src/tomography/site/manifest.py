@@ -18,6 +18,7 @@ P9D_DEFAULT_TEMPLATE = "fewshot"
 R8_DEFAULT_TASK = "obqa"
 M3_DEFAULT_CELL_SETS = "prompt"
 M3_DEFAULT_LOGISTIC_C = "0.01,0.1,1,10"
+M3_DEFAULT_CELL_HEAD = "linear"
 MODEL_FREE = "none"
 
 
@@ -163,15 +164,19 @@ class Manifest:
         `LATEST`; any other cell must hold one run. The `m3` rule first keeps
         the runs of the selected `logistic_c` grid (the default grid unless
         another is selected), so a run of a wider grid never stands in for
-        the default one.
+        the default one, and of the selected `cell_head` (`linear` unless
+        another is selected; a run with no such field is linear). It keeps
+        the runs of the selected `poolings` or, with none selected, skips
+        the runs whose poolings include `flat`.
 
         Args:
             exp: Experiment id.
             model: Checkpoint key.
             **select: `method` for `p1`, `template` for `p9d`, `task` for
                 `r8`, and `cell_sets` (comma separated, in config order),
-                `logistic_c` (comma separated numbers, in config order) and
-                `task` for `m3`.
+                `logistic_c` (comma separated numbers, in config order),
+                `cell_head`, `poolings` (comma separated, in config order)
+                and `task` for `m3`.
 
         Returns:
             The run directory, or None when the cell has no matching run.
@@ -195,12 +200,23 @@ class Manifest:
         elif exp == "m3":
             sets = select.get("cell_sets", M3_DEFAULT_CELL_SETS).split(",")
             grid = _grid(select.get("logistic_c", M3_DEFAULT_LOGISTIC_C))
+            head = select.get("cell_head", M3_DEFAULT_CELL_HEAD)
             runs = [
                 r
                 for r in runs
                 if r.config.get("cell_sets") == sets
                 and [float(c) for c in r.config.get("logistic_c", [])] == grid
+                and r.config.get("cell_head", "linear") == head
             ]
+            if "poolings" in select:
+                poolings = select["poolings"].split(",")
+                runs = [r for r in runs if r.config.get("poolings") == poolings]
+            else:
+                runs = [
+                    r
+                    for r in runs
+                    if "flat" not in r.config.get("poolings", [])
+                ]
             if "task" in select:
                 runs = _only_task(runs, select["task"])
             else:
