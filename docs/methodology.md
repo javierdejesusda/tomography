@@ -272,7 +272,20 @@ alone and that wider grid. The results are in the [findings](findings.md#full-ma
   `cell_tol` (default 1e-10; the probes' default stays 1e-4): at 1e-4 the gradient at the zero start can already
   pass the test, which stopped a cellattn fit at its first step with zero heads. A cellmax fit that stalls at its zero
   start runs again, once, from the mean pooling solution (see the caveats). They keep the scorer name `logistic` so
-  M2's comparisons take them. An MLP head per layer is deferred.
+  M2's comparisons take them.
+- MLP head (`--set cell_head=mlp`): each layer's linear head becomes `g(z) = w2 . relu(W1 z + b1) + b` with
+  `cell_hidden` units (default 8), read as `logistic/cellattnmlp_<set>/joint` (`fit_attention_mlp`) and
+  `logistic/cellmaxmlp_<set>/joint` (`fit_cell_max_mlp`). cellattn's query stays linear and its bias is one for all
+  layers; cellmax keeps a bias per layer. The penalty is scikit-learn's, `1/(2Cn)` times the squared norms of `W1`,
+  `w2` and the queries, biases unpenalized, with `C` chosen on the same grid and the same loop (training-only
+  standardization, float64 L-BFGS-B at `cell_tol`, the stall test against log 2, and the cellmax restart from the mean
+  pooling solution, embedded as two units of opposite sign). `W1` starts at a standard normal draw over the square
+  root of the width, seeded from the run seed, task, readout and draw, so the shuffled series and every `C` of a draw
+  start alike; every other parameter starts at zero, and no global random state is read. The loss is not convex: a
+  small `C` makes zero a local minimum, where a fit counts as stalled, and the ReLU stops most fits on L-BFGS's
+  progress test, not the gradient one. An MLP head has no direction to export (`rep_reader` refuses):
+  `cellheads_<task>` keeps `hidden`, `hidden_biases`, `outputs` and `biases` (and cellattn's queries and offsets). A
+  linear run leaves `cell_head` and `cell_hidden` out of `config.json`, so its hash is unchanged.
 - One-row readers: M2's `logistic` and `mean_diff` on `last`, `concept`, `mean` and `max` (rules `best` and
   `top_k`), fitted by M2's helpers on M2's items, and two relabelled readouts, each on its own pass:
   `stimulus_token` (the last stimulus token, M2's `concept` position over the stimulus span) and `prompt_max` (M2's
