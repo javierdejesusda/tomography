@@ -141,7 +141,7 @@ Every id is the argument of `tomography run`. Coverage is read from the committe
 | `c5` | Can steering produce lies on TriviaQA? | all 10 |
 | `m1` | How do six finders compare on reading, steering and erasure? | all 10 |
 | `m2` | Which reader wins when scorer, readout and layer rule are compared on the same features, also under a misleading sentence and new wordings? | the 0.6B and 1.7B pairs (one run each, plus a shuffled-only run on three) |
-| `m3` | Does a reader trained through every cell (token and layer) of the prompt, by one softmax over them or their maximum, beat M2's one-row readouts, also under a misleading sentence and new wordings? | the 0.6B and 1.7B pairs (stage 1 one run each; stage 2 one run each on the 0.6B pair and one per task on the 1.7B pair; two 28-layer truth runs on qwen3-1.7b-base, with M2's C grid and a wider one) |
+| `m3` | Does a reader trained through every cell (token and layer) of the prompt, by one softmax over them or their maximum, beat M2's one-row readouts, also under a misleading sentence and new wordings? | the 0.6B and 1.7B pairs (stage 1 one run each, and one more each with a wider C grid; stage 2 one run each on the 0.6B pair and one per task on the 1.7B pair; two 28-layer truth runs on qwen3-1.7b-base, with M2's C grid and a wider one) |
 | `lr1` | Train one LoRRA adapter on Alpaca: loss curve and held-out loss | all 10 |
 | `a1` | How much do directions from different seeds agree? | all 10 |
 | `a2` | What does the logit lens show for a direction? | all 10 |

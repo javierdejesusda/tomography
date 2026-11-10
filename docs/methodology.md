@@ -248,8 +248,8 @@ a cell being one token at one layer, reads better than M2's one-row readouts. It
 (its config shares M2's defaults). Stage 1 ran on the four checkpoints of the Qwen3 0.6B and 1.7B pairs. Stage 2 ran
 on the `stimulus`, `final` and `upper` cells, one task per run on the 1.7B pair and on a CPU for the 0.6B pair.
 A check on `qwen3-1.7b-base` fits `cellattn_prompt` on all 28 layers for truth, once with M2's `C` grid and once
-with the grid widened to 0.001 to 1000. The results are in the
-[findings](findings.md#full-matrix-readers-m3).
+with the grid widened to 0.001 to 1000, and stage 1 was repeated on the four checkpoints with `cellattn_prompt`
+alone and that wider grid. The results are in the [findings](findings.md#full-matrix-readers-m3).
 
 - Cells and segments: `prompt_cells` reads every token but BOS (whose state is the same for every text) at
   `cell_layers` (default 4, 8, ..., 28, the `token_layers` of the M2 runs) and gives each token a segment: `prefix`

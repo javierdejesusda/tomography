@@ -1,0 +1,179 @@
+{
+  "_meta": {
+    "experiment": "m3",
+    "config_hash": "a966e380309f",
+    "seed": 0,
+    "git_sha": "e09c0bb600ba1c240f94b737e2589fb08c91db9a",
+    "git_dirty": false,
+    "device": "cpu",
+    "platform": "Linux-7.0.14-22-pve-x86_64-with-glibc2.36",
+    "versions": {
+      "python": "3.12.13",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cpu",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-09T03:07:48+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m3",
+      "model": "qwen3-0.6b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "truth_polarity",
+        "utility"
+      ],
+      "scorers": [
+        "logistic",
+        "mean_diff"
+      ],
+      "readouts": [
+        "last",
+        "concept",
+        "mean",
+        "max"
+      ],
+      "token_layers": null,
+      "layer_rules": [
+        "best",
+        "top_k",
+        "joint"
+      ],
+      "top_k": 5,
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "shifts": [
+        "paraphrase"
+      ],
+      "controls": [
+        "text",
+        "random",
+        "shuffled"
+      ],
+      "reader_series": true,
+      "logistic_c": [
+        0.001,
+        0.01,
+        0.1,
+        1.0,
+        10.0,
+        100.0,
+        1000.0
+      ],
+      "mlp_alpha": [
+        0.1,
+        0.01,
+        0.001,
+        0.0001
+      ],
+      "mlp_hidden": [
+        64
+      ],
+      "baselines": [
+        "logistic/last",
+        "mean_diff/last",
+        "logistic/concept",
+        "logistic/stimulus_token"
+      ],
+      "n_boot": 2000,
+      "max_fpr": 0.01,
+      "cell_layers": [
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ],
+      "upper_layers": [
+        16,
+        20,
+        24,
+        28
+      ],
+      "cell_sets": [
+        "prompt"
+      ],
+      "poolings": [
+        "cellattn"
+      ],
+      "cell_tol": 1e-10
+    }
+  },
+  "data": {
+    "entries": {
+      "logistic_cellattn_prompt_reader": {
+        "entry": "logistic/cellattn_prompt/joint/reader",
+        "layers": [
+          4,
+          8,
+          12,
+          16,
+          20,
+          24,
+          28
+        ]
+      },
+      "logistic_cellattn_prompt_shuffled": {
+        "entry": "logistic/cellattn_prompt/joint/shuffled",
+        "layers": [
+          4,
+          8,
+          12,
+          16,
+          20,
+          24,
+          28
+        ]
+      }
+    },
+    "axes": {
+      "values": [
+        "seed",
+        "layer",
+        "feature"
+      ],
+      "queries": [
+        "seed",
+        "layer",
+        "feature"
+      ],
+      "biases": [
+        "seed",
+        "layer"
+      ],
+      "offsets": [
+        "seed",
+        "layer"
+      ],
+      "signs": [
+        "seed",
+        "layer"
+      ],
+      "c": [
+        "seed"
+      ]
+    }
+  }
+}

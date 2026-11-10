@@ -33,6 +33,7 @@ SELECTIONS: dict[str, dict[str, str]] = {
         "task": "truth",
         "logistic_c": "0.001,0.01,0.1,1,10,100,1000",
     },
+    "M3 stage 1, wide C grid": {"logistic_c": "0.001,0.01,0.1,1,10,100,1000"},
 }
 
 
