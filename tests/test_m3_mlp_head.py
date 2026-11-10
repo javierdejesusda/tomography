@@ -2,7 +2,11 @@
 
 from collections.abc import Callable
 from collections.abc import Sequence
+import dataclasses
+import json
+from pathlib import Path
 from typing import Any
+from typing import cast
 import warnings
 
 import numpy as np
@@ -15,6 +19,13 @@ from sklearn.linear_model import LogisticRegression
 import torch
 
 from tomography.activations import Activations
+from tomography.datasets.records import Example
+from tomography.experiments import m2_readers
+from tomography.experiments import m3_matrix
+from tomography.experiments import p2_positions
+from tomography.experiments.base import RunDir
+from tomography.experiments.base import derive_seed
+from tomography.model import LoadedModel
 from tomography.reading import probes
 from tomography.reading.metrics import auroc
 from tomography.reading.probes import AttentionMLPReader
@@ -547,3 +558,371 @@ def test_the_linear_cell_fits_keep_their_scores() -> None:
     np.testing.assert_allclose(
         cellmax.score(test)[0], expected["cellmax"], rtol=1e-6
     )
+
+
+RESULTS = Path(__file__).resolve().parents[1] / "results"
+DEFAULT_HASH = "0df973a1c1e0"
+SHORT_DECOY_LINE = "Hint: {noun} is {{question}}.\n"
+
+
+def test_the_linear_head_is_the_default_and_stays_out_of_the_config() -> None:
+    config = m3_matrix.Config()
+    data = config.to_dict()
+    mlp = dataclasses.replace(config, cell_head="mlp")
+    mlp_data = mlp.to_dict()
+
+    assert m3_matrix.CELL_HEADS == ("linear", "mlp")
+    assert config.cell_head == "linear"
+    assert config.cell_hidden == 8
+    # The linear head leaves both fields out of config.json and the hash,
+    # so every linear run keeps the hash it had before they existed.
+    assert "cell_head" not in data
+    assert "cell_hidden" not in data
+    assert config.config_hash() == DEFAULT_HASH
+    assert m3_matrix.Config.from_dict(data) == config
+    assert mlp_data["cell_head"] == "mlp"
+    assert mlp_data["cell_hidden"] == 8
+    assert mlp.config_hash() != DEFAULT_HASH
+    assert m3_matrix.Config.from_dict(mlp_data) == mlp
+    wider = dataclasses.replace(mlp, cell_hidden=16)
+    assert wider.config_hash() != mlp.config_hash()
+
+
+def test_every_committed_m3_run_keeps_its_hash_and_its_config() -> None:
+    paths = sorted(RESULTS.glob("m3/*/*/config.json"))
+
+    assert len(paths) >= 20
+    for path in paths:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        config = m3_matrix.Config.from_dict(stored)
+        assert config.cell_head == "linear"
+        assert config.config_hash() == path.parent.name
+        assert config.to_dict() == stored
+
+
+def _refused(config: m3_matrix.Config, tmp_path: Path) -> None:
+    m3_matrix.execute(
+        config, RunDir.create(config, out_root=tmp_path), cast(Any, None), {}
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"cell_head": "deep"},
+            r"^unknown cell head 'deep', expected one of \('linear', 'mlp'\)$",
+        ),
+        (
+            {"cell_head": "mlp", "cell_hidden": 1},
+            r"^cell_hidden must be at least 2 for the MLP head of "
+            r"\('cellattn', 'cellmax'\), got 1$",
+        ),
+        (
+            {"cell_head": "mlp", "cell_hidden": 0, "poolings": ("cellattn",)},
+            r"^cell_hidden must be at least 1 for the MLP head of "
+            r"\('cellattn',\), got 0$",
+        ),
+    ],
+)
+def test_a_bad_head_is_refused_before_any_model_call(
+    overrides: dict[str, Any], message: str, tmp_path: Path
+) -> None:
+    config = dataclasses.replace(m3_matrix.Config(model="tiny"), **overrides)
+
+    with pytest.raises(ValueError, match=message):
+        _refused(config, tmp_path)
+
+
+def test_cell_weights_follow_the_mlp_heads() -> None:
+    rng = np.random.default_rng(15)
+    acts = token_rows(rng.standard_normal((2, 15, 6)), [3, 1, 4, 2, 5], [2, 5])
+    attention, cellmax = hand_mlp(rng)
+
+    np.testing.assert_allclose(
+        m3_matrix.cell_weights(attention, acts),
+        attention_weights(acts, attention),
+    )
+    np.testing.assert_array_equal(
+        m3_matrix.cell_weights(cellmax, acts), max_weights(acts, cellmax)
+    )
+    for reader in (attention, cellmax):
+        weights = m3_matrix.cell_weights(reader, acts)
+        weighted = weights * reader.cell_values(acts)
+        totals = [weighted[:, acts.row_stimulus == i].sum() for i in range(5)]
+        np.testing.assert_allclose(totals, reader.score(acts)[0], rtol=1e-6)
+
+
+def _utility_rows(pairs: int = 8) -> list[Example]:
+    words = {
+        1: ("sun", "gift", "joy", "fun"),
+        0: ("rain", "loss", "pain", "fear"),
+    }
+    return [
+        Example(
+            f"ethics-{split}-{i}:{suffix}",
+            f"a {words[label][i % 4]} day {i}",
+            label,
+            split,
+            {"pair": f"ethics-{split}-{i}"},
+        )
+        for split in ("train", "val", "test")
+        for i in range(pairs)
+        for suffix, label in (("a", 1), ("b", 0))
+    ]
+
+
+def _tiny_config(**overrides: Any) -> m3_matrix.Config:
+    base = m3_matrix.Config(
+        model="tiny",
+        tasks=("utility",),
+        n_seeds=2,
+        n_pairs=4,
+        n_eval_pairs=3,
+        top_k=2,
+        layers=(1, 2, 3),
+        cell_layers=(1, 3),
+        upper_layers=(3,),
+        cell_sets=("prompt",),
+        poolings=("cellattn", "cellmax"),
+        logistic_c=(0.1, 10.0),
+        n_boot=10,
+        cell_head="mlp",
+        cell_hidden=2,
+    )
+    return dataclasses.replace(base, **overrides)
+
+
+@dataclasses.dataclass(frozen=True)
+class _MLPRun:
+    """A finished MLP-head run and the fits it made.
+
+    Attributes:
+        config: The config of the run.
+        run_dir: The finished run.
+        fits: Per fit, the pooling and the fit's keyword arguments.
+        splits: The items the run rendered for its task.
+    """
+
+    config: m3_matrix.Config
+    run_dir: RunDir
+    fits: list[tuple[str, dict[str, Any]]]
+    splits: Any
+
+
+def _run(
+    config: m3_matrix.Config,
+    loaded: LoadedModel,
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _MLPRun:
+    fits: list[tuple[str, dict[str, Any]]] = []
+    splits: list[Any] = []
+    prepare = m2_readers._prepare_task
+
+    def capturing(*args: Any, **kwargs: Any) -> Any:
+        prepared = prepare(*args, **kwargs)
+        splits.append(prepared[0])
+        return prepared
+
+    def recording(pooling: str, fit: Callable[..., Any]) -> Callable[..., Any]:
+        def fitting(acts: Activations, **kwargs: Any) -> Any:
+            fits.append((pooling, kwargs))
+            return fit(acts, **kwargs)
+
+        return fitting
+
+    def linear(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("an MLP-head run fitted a linear head")
+
+    monkeypatch.setattr(p2_positions, "DECOY_LINE", SHORT_DECOY_LINE)
+    monkeypatch.setattr(m2_readers, "_prepare_task", capturing)
+    monkeypatch.setattr(
+        m3_matrix,
+        "fit_attention_mlp",
+        recording("cellattn", fit_attention_mlp),
+    )
+    monkeypatch.setattr(
+        m3_matrix, "fit_cell_max_mlp", recording("cellmax", fit_cell_max_mlp)
+    )
+    monkeypatch.setattr(m3_matrix, "fit_attention", linear)
+    monkeypatch.setattr(m3_matrix, "fit_cell_max", linear)
+    run_dir = RunDir.create(config, out_root=root)
+    with warnings.catch_warnings():
+        for category in m3_matrix._COUNTED:
+            warnings.simplefilter("ignore", category)
+        m3_matrix.execute(
+            config, run_dir, loaded, {"ethics_utility": _utility_rows()}
+        )
+    return _MLPRun(config, run_dir, fits, splits[0])
+
+
+@pytest.fixture(scope="module")
+def mlp_runs() -> dict[str, _MLPRun]:
+    return {}
+
+
+@pytest.fixture
+def mlp_run(
+    mlp_runs: dict[str, _MLPRun],
+    tiny_gpt2: LoadedModel,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _MLPRun:
+    if "run" not in mlp_runs:
+        mlp_runs["run"] = _run(
+            _tiny_config(),
+            tiny_gpt2,
+            tmp_path_factory.mktemp("m3mlp"),
+            monkeypatch,
+        )
+    return mlp_runs["run"]
+
+
+def _rows(run_dir: RunDir, name: str) -> list[dict[str, Any]]:
+    payload = cast(dict[str, Any], run_dir.read_json(name))
+    return [
+        dict(zip(payload["columns"], row, strict=True))
+        for row in payload["rows"]
+    ]
+
+
+MLP_CELLS = ("cellattnmlp_prompt", "cellmaxmlp_prompt")
+SERIES = ("reader", "shuffled")
+
+
+def test_mlp_readers_are_named_by_their_head_in_every_file(
+    mlp_run: _MLPRun,
+) -> None:
+    run_dir = mlp_run.run_dir
+    joint = {
+        (r["scorer"], r["readout"], r["series"])
+        for r in _rows(run_dir, "table")
+        if r["layer_rule"] == "joint"
+    }
+    summary = cast(dict[str, Any], run_dir.read_json("summary"))
+    compared = {
+        r["readout"]
+        for r in _rows(run_dir, "comparisons")
+        if r["layer_rule"] == "joint"
+    }
+    diagnosed = [
+        r for r in _rows(run_dir, "diagnostics") if r["readout"] in MLP_CELLS
+    ]
+
+    # The random control keeps its linear heads, and its name.
+    assert joint == {
+        *(("logistic", cell, s) for cell in MLP_CELLS for s in SERIES),
+        ("random", "cellmax_prompt", "reader"),
+    }
+    assert set(summary["fits"]["utility"]) == {
+        f"logistic/{cell}/joint/{s}" for cell in MLP_CELLS for s in SERIES
+    }
+    assert set(MLP_CELLS) <= compared
+    assert {(r["readout"], r["series"]) for r in diagnosed} == {
+        (cell, s) for cell in MLP_CELLS for s in SERIES
+    }
+    for row in diagnosed:
+        shares = [row[segment] for segment in m3_matrix.SEGMENTS]
+        assert sum(shares) == pytest.approx(1.0)
+        assert row["prefix"] == 0.0
+
+
+def test_mlp_fits_share_one_start_per_draw_and_reader(mlp_run: _MLPRun) -> None:
+    config = mlp_run.config
+    n_grid = len(config.logistic_c)
+    seeds: dict[tuple[str, int], set[int]] = {}
+    for j, (pooling, kwargs) in enumerate(mlp_run.fits):
+        assert kwargs["hidden"] == config.cell_hidden
+        assert kwargs["tol"] == config.cell_tol
+        assert kwargs["c"] == config.logistic_c[j % n_grid]
+        # Per draw: each pooling fits its reader series, then its shuffled.
+        draw = j // (len(config.poolings) * len(SERIES) * n_grid)
+        seeds.setdefault((pooling, draw), set()).add(kwargs["seed"])
+
+    assert len(mlp_run.fits) == config.n_seeds * 2 * 2 * n_grid
+    # One start per draw and reader: the shuffled control and every grid
+    # value start where the reader does.
+    assert seeds == {
+        (pooling, i): {
+            derive_seed(
+                config.seed, "cell_head", "utility", f"{pooling}mlp_prompt", i
+            )
+        }
+        for pooling in config.poolings
+        for i in range(config.n_seeds)
+    }
+
+
+def _mlp_reader(heads: Any, key: str, i: int, layers: tuple[int, ...]) -> Any:
+    fields = {
+        name: heads[f"{key}_{name}"][i]
+        for name in ("hidden", "hidden_biases", "outputs", "biases")
+    }
+    if f"{key}_queries" in heads:
+        return AttentionMLPReader(
+            layers=layers,
+            queries=heads[f"{key}_queries"][i],
+            offsets=heads[f"{key}_offsets"][i],
+            **fields,
+        )
+    return CellMaxMLPReader(layers=layers, **fields)
+
+
+def test_the_kept_mlp_heads_reproduce_the_select_scores(
+    mlp_run: _MLPRun, tiny_gpt2: LoadedModel
+) -> None:
+    config, run_dir = mlp_run.config, mlp_run.run_dir
+    heads = run_dir.read_arrays("cellheads_utility")
+    sidecar = cast(dict[str, Any], run_dir.read_json("cellheads_utility"))
+    scores = run_dir.read_arrays("scores_utility")
+    entries = cast(dict[str, Any], run_dir.read_json("scores_utility"))
+    cells, segments = m3_matrix.prompt_cells(
+        tiny_gpt2,
+        mlp_run.splits.select_items,
+        config.cell_layers,
+        bos=None,
+        batch_size=config.batch_size,
+        decoy=False,
+    )
+    acts = m3_matrix.select_cells(cells, segments, "prompt", config.cell_layers)
+    mlp = [
+        key
+        for key, entry in sidecar["entries"].items()
+        if "mlp_" in entry["entry"]
+    ]
+
+    assert sidecar["axes"]["hidden"] == ["seed", "layer", "unit", "feature"]
+    assert sidecar["axes"]["outputs"] == ["seed", "layer", "unit"]
+    assert len(mlp) == len(MLP_CELLS) * len(SERIES)
+    for key in mlp:
+        e = entries["entries"].index(sidecar["entries"][key]["entry"])
+        assert heads[f"{key}_hidden"].shape == (
+            config.n_seeds,
+            len(config.cell_layers),
+            config.cell_hidden,
+            acts.data.shape[2],
+        )
+        assert f"{key}_signs" not in heads
+        for i in range(config.n_seeds):
+            reader = _mlp_reader(heads, key, i, acts.layers)
+            np.testing.assert_array_equal(
+                reader.score(acts)[0], scores["select"][e, i]
+            )
+
+
+def test_a_rerun_of_an_mlp_head_run_writes_the_same_files(
+    mlp_run: _MLPRun,
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    again = _run(mlp_run.config, tiny_gpt2, tmp_path, monkeypatch)
+
+    for name in ("table", "comparisons", "diagnostics"):
+        assert _rows(again.run_dir, name) == _rows(mlp_run.run_dir, name)
+    first = mlp_run.run_dir.read_arrays("cellheads_utility")
+    second = again.run_dir.read_arrays("cellheads_utility")
+    assert set(first) == set(second)
+    for key in first:
+        np.testing.assert_array_equal(second[key], first[key])
