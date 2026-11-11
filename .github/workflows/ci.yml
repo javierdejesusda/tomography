@@ -59,7 +59,7 @@ jobs:
 
   # Each job runs the whole test files that tests/conftest.py assigns to
   # its shard; the shards are disjoint and together hold every test, for
-  # any number of matrix entries.
+  # any number of matrix entries numbered from 0.
   test:
     name: test (${{ matrix.shard }})
     strategy:
@@ -91,10 +91,10 @@ jobs:
           PYTHONPYCACHEPREFIX: ${{ runner.temp }}/pycache
         run: >-
           uv run pytest -q -n 2 --dist loadfile
-          --shard ${{ strategy.job-index }}/${{ strategy.job-total }}
+          --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
       - name: Save the bytecode cache
-        if: steps.bytecode.outputs.cache-hit != 'true' && strategy.job-index == 0
+        if: steps.bytecode.outputs.cache-hit != 'true' && matrix.shard == 0
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/pycache
