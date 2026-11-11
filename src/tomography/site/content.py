@@ -1069,8 +1069,21 @@ APPENDICES = (
             "better of two components of the words on "
             "[[count:fig:a_knowledge_geometry.reader_above_words]]. It is a "
             "picture and not a test: its numbers carry no interval.",
+            "[[fig:a_knowledge_projections]] sets the test questions of "
+            "every knowledge contrast of the same three checkpoints along "
+            "the published reader, and the AUROC of each reader beside two "
+            "controls: its five random directions and the same reader "
+            "refitted on shuffled labels. On "
+            "[[count:fig:a_knowledge_projections.above_every_draw]] the "
+            "published reader is above every one of its random directions "
+            "on every contrast of the three blocks. A "
+            "random direction is oriented on the training labels like the "
+            "reader, so on a small contrast a single draw can score high: "
+            "the highest on the three checkpoints is "
+            "[[num:fig:a_knowledge_projections.random_max]].",
             "[[table:knowledge_projections]] gives the AUROC of the reader "
-            "of every contrast of these checkpoints beside its "
+            "of every contrast of the checkpoints with stored views beside "
+            "its "
             "recomputation in float32 and beside its controls: the random "
             "direction and the shuffled-label reader of each draw, and the "
             "classifiers on the words, on the characters and on the "
@@ -1085,6 +1098,7 @@ APPENDICES = (
             "fig:a_dose_runs",
             "fig:a_dose_types",
             "fig:a_knowledge_geometry",
+            "fig:a_knowledge_projections",
             "table:knowledge_projections",
         ),
     ),

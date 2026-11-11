@@ -30,6 +30,7 @@ OWN = {
     "a_dose_runs": DIRECTION,
     "a_dose_types": DIRECTION,
     "a_knowledge_geometry": DIRECTION,
+    "a_knowledge_projections": DIRECTION | RANDOM,
     "a_links": DIRECTION,
 }
 MEASURES: set[str] = {

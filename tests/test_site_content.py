@@ -589,6 +589,7 @@ def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
         "fig:a_dose_runs",
         "fig:a_dose_types",
         "fig:a_knowledge_geometry",
+        "fig:a_knowledge_projections",
         "table:knowledge_projections",
     )
     text = " ".join(_texts(section))
@@ -596,6 +597,9 @@ def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
         "[[fig:a_knowledge_geometry]]",
         "[[count:fig:a_knowledge_geometry.with_views]]",
         "[[count:fig:a_knowledge_geometry.reader_above_words]]",
+        "[[fig:a_knowledge_projections]]",
+        "[[count:fig:a_knowledge_projections.above_every_draw]]",
+        "[[num:fig:a_knowledge_projections.random_max]]",
         "[[table:knowledge_projections]]",
         "[[count:table:knowledge_projections.within_tolerance]]",
         "[[num:table:knowledge_projections.tolerance]]",
