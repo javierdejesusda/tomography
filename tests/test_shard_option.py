@@ -1,8 +1,8 @@
 """The --shard option splits the suite into disjoint parts that cover it.
 
-CI runs the suite as parallel jobs, one shard each. A test that shares a
-module- or class-scoped fixture stays in the shard of its file, so the
-fixture is built once; every other test lands in a shard on its own.
+CI runs the suite as parallel jobs, one shard each. A shard holds whole test
+files, so what the tests of a file share (a module-scoped fixture or a run
+cached in a module global) is built in one shard only.
 """
 
 from pathlib import Path
@@ -43,11 +43,14 @@ class TestGroup:
 PLAIN = """
 import pytest
 
+_RUNS = {}
 
-@pytest.mark.parametrize("n", range(40))
+
+@pytest.mark.parametrize("n", range(10))
 def test_plain(n):
-    pass
+    _RUNS.setdefault("run", n)
 """
+PLAIN_FILES = 8
 COUNT = 3
 
 
@@ -55,7 +58,9 @@ COUNT = 3
 def suite(pytester: pytest.Pytester) -> pytest.Pytester:
     pytester.makeconftest(CONFTEST.read_text(encoding="utf-8"))
     pytester.makepyfile(
-        test_module=SHARED_MODULE, test_class=SHARED_CLASS, test_plain=PLAIN
+        test_module=SHARED_MODULE,
+        test_class=SHARED_CLASS,
+        **{f"test_plain_{i}": PLAIN for i in range(PLAIN_FILES)},
     )
     return pytester
 
@@ -72,7 +77,7 @@ def _collected(pytester: pytest.Pytester, *args: str) -> tuple[set[str], int]:
 
 def test_without_the_option_every_test_runs(suite: pytest.Pytester) -> None:
     ids, deselected = _collected(suite)
-    assert len(ids) == 13 + 12 + 40
+    assert len(ids) == 13 + 12 + 10 * PLAIN_FILES
     assert deselected == 0
 
 
@@ -82,29 +87,26 @@ def test_the_shards_are_disjoint_and_cover_the_suite(
     every, _ = _collected(suite)
     shards = [_collected(suite, f"--shard={i}/{COUNT}") for i in range(COUNT)]
     for ids, deselected in shards:
-        assert ids
         assert deselected == len(every) - len(ids)
+    assert sum(1 for ids, _ in shards if ids) > 1
     assert sum(len(ids) for ids, _ in shards) == len(every)
     assert set().union(*(ids for ids, _ in shards)) == every
 
 
-def test_tests_sharing_a_fixture_stay_in_one_shard(
+def test_the_tests_of_a_file_stay_in_one_shard(
     suite: pytest.Pytester,
 ) -> None:
+    every, _ = _collected(suite)
     shards = [
         _collected(suite, f"--shard={i}/{COUNT}")[0] for i in range(COUNT)
     ]
-
-    def holders(prefix: str) -> list[int]:
-        return [
+    for path in {nodeid.split("::")[0] for nodeid in every}:
+        holders = [
             i
             for i, ids in enumerate(shards)
-            if any(nodeid.startswith(prefix) for nodeid in ids)
+            if any(nodeid.startswith(f"{path}::") for nodeid in ids)
         ]
-
-    assert len(holders("test_module.py::test_shared")) == 1
-    assert len(holders("test_class.py::TestGroup")) == 1
-    assert len(holders("test_plain.py::")) > 1
+        assert len(holders) == 1, path
 
 
 def test_a_shard_is_the_same_in_every_run(suite: pytest.Pytester) -> None:

@@ -63,7 +63,6 @@ QWEN_CHAT_TEMPLATE = (
     "{%- endif %}"
 )
 GIT_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
-SHARED_SCOPES = frozenset({"class", "module", "package"})
 VOCAB_SIZE = 400
 SEED = 0
 CORPUS = (
@@ -247,20 +246,6 @@ def _parse_shard(text: str) -> tuple[int, int]:
     return int(match[1]), int(match[2])
 
 
-def _shard_key(item: pytest.Item) -> str:
-    """Returns what decides the shard of a test.
-
-    A test that uses a class-, module- or package-scoped fixture goes with
-    its file, so the fixture is built in one shard only. Any other test goes
-    by its own node id, which spreads the suite evenly.
-    """
-    if isinstance(item, pytest.Function):
-        definitions = item._fixtureinfo.name2fixturedefs.values()
-        if any(d.scope in SHARED_SCOPES for ds in definitions for d in ds):
-            return item.nodeid.split("::", 1)[0]
-    return item.nodeid
-
-
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--shard",
@@ -276,7 +261,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Deselects the tests outside the shard that `--shard` names."""
+    """Deselects the tests outside the shard that `--shard` names.
+
+    A shard holds whole test files, picked by the CRC32 of their path, so
+    what the tests of a file share (a module-scoped fixture or a run cached
+    in a module global) is built in one shard only.
+    """
     shard: tuple[int, int] | None = config.getoption("shard")
     if shard is None:
         return
@@ -284,7 +274,8 @@ def pytest_collection_modifyitems(
     kept: list[pytest.Item] = []
     dropped: list[pytest.Item] = []
     for item in items:
-        bucket = zlib.crc32(_shard_key(item).encode()) % count
+        path = item.nodeid.split("::", 1)[0]
+        bucket = zlib.crc32(path.encode()) % count
         (kept if bucket == index else dropped).append(item)
     config.hook.pytest_deselected(items=dropped)
     items[:] = kept
