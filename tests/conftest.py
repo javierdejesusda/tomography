@@ -299,9 +299,22 @@ class _DurationRecorder:
         self.seconds: collections.Counter[str] = collections.Counter()
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        """Adds the time of one phase of a test to the test's file.
+
+        Args:
+            report: The report of the setup, call or teardown of a test.
+        """
         self.seconds[report.nodeid.split("::", 1)[0]] += report.duration
 
     def pytest_sessionfinish(self, session: pytest.Session) -> None:
+        """Writes the times of this run over the recorded ones.
+
+        Only the main process writes: a pytest-xdist worker sees part of
+        the run, and the main process receives every report.
+
+        Args:
+            session: The pytest session.
+        """
         if hasattr(session.config, "workerinput"):
             return
         recorded = _recorded_durations()
