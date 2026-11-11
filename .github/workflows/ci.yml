@@ -47,7 +47,7 @@ jobs:
         run: |
           time uv run pytest --collect-only -q -p no:xdist > collected-plain.txt
           time uv run pytest --collect-only -q > collected-xdist.txt
-          tail -2 collected-plain.txt collected-xdist.txt
+          tail -n 2 collected-plain.txt collected-xdist.txt
           cmp collected-plain.txt collected-xdist.txt
 
       - name: Test serial
