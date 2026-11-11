@@ -4,7 +4,9 @@ One row per role shows the test questions of the two entity contrasts on two
 components: of the hidden states at layer 1, at the layer of the reader and
 at the last layer, and of the words of the questions alone. Layer 1 and the
 words are the controls of the other two views. The number in a panel is the
-AUROC of known against unknown questions along the better of its two axes.
+folded AUROC of known against unknown questions along the better of its two
+axes. Known questions, unknown questions about real entities and questions
+about fictional entities each take their own marker.
 """
 
 from collections.abc import Sequence
@@ -31,6 +33,8 @@ PANEL = "entity"
 SHOWN = ("gpt2-xl", "qwen3-1.7b-base", "qwen3-1.7b")
 VIEWS = ("layer 1", "reader layer", "last layer", "words only")
 WORDS = VIEWS[-1]
+FICTIONAL = "fictional_generated"
+MARKS = ("fictional", "unknown", "known")
 MAX_DRAWN = 40
 HEIGHT = 4.7
 HEADER = [
@@ -45,28 +49,37 @@ HEADER = [
     "auroc",
 ]
 SIZES = dict(zip(("unknown", "known"), paper.DENSE_MARKER_RANGE, strict=True))
+SIZES["fictional"] = SIZES["known"] * _rows.STAR_SIZE / _rows.MARKER_SIZE
+LABELS = {
+    "known": "known (filled: GPT-2 and base; open: post-trained)",
+    "unknown": "unknown, real entity",
+    "fictional": "unknown, fictional entity",
+}
 FILLED_EDGE = 0.3
 OPEN_EDGE = 0.6
 HEADROOM = 0.22
 DETAIL = (
     "Each row is one checkpoint, one per role: {names}. Columns (a) to (c) "
-    "place the test questions of the two entity contrasts on the two "
-    "leading principal components of the hidden states at the last token "
-    "of the few-shot prompt, fitted on the stored questions of the row at "
-    "that layer: layer 1, an early control; the layer the knowledge reader "
-    "was chosen at; and the last layer. Layer 0 is not drawn, because every "
-    "prompt ends in the same token. Column (d) is a second control with no "
-    "model in it: the same questions placed by the two leading components "
-    "of the TF-IDF weights of their words (latent semantic analysis). A "
-    "known question is a PopQA question labelled known for the checkpoint; "
-    "an unknown one is a PopQA question labelled unknown, about a real "
-    "entity, or the question of a generated fictional entity. Each panel "
-    "draws at most {cap} questions of each of these three groups, the first "
-    "by a hash of their identifier, and its number is the AUROC of known "
-    "against unknown along whichever of its two axes separates them better, "
-    "computed on every stored question ({low} to {high} per checkpoint). "
-    "Axis scales differ between panels and carry no unit. The last layer "
-    "gives {last_min} to {last_max}. A separation that the words alone "
+    "place test questions of the two entity contrasts on the two leading "
+    "principal components of the hidden states at the last token of the "
+    "few-shot prompt: layer 1, an early control; the layer the knowledge "
+    "reader was chosen at; and the last layer. Layer 0 is not drawn, "
+    "because every prompt ends in the same token. Column (d) is a second "
+    "control with no model in it: the same questions placed by the two "
+    "leading components of the TF-IDF weights of their words (latent "
+    "semantic analysis). The stored questions of a row are test questions "
+    "only, at most {side} per side of each contrast, and the components of "
+    "a panel are fitted on them, so no training question enters a view. A "
+    "known question (triangle) is a PopQA question labelled known for the "
+    "checkpoint; an unknown question is a PopQA question about a real "
+    "entity labelled unknown (circle) or the question of a generated "
+    "fictional entity (star). Each panel draws at most {cap} questions of "
+    "each of these three groups, the first by a hash of their identifier, "
+    "and its number is the AUROC of known against unknown along whichever "
+    "of its two axes separates them better, computed on every stored "
+    "question ({low} to {high} per checkpoint) and folded, so it is 0.5 or "
+    "more whichever class lies higher on the axis. Axis scales differ "
+    "between panels and carry no unit. A separation that the words alone "
     "also show does not need the hidden states. The data file holds every "
     "stored question of these views for {with_views}."
 )
@@ -86,6 +99,11 @@ class Group:
     series: str
     name: str
     rows: tuple[int, ...]
+
+    @property
+    def mark(self) -> str:
+        """The entry of `MARKS` the questions are drawn with."""
+        return "fictional" if self.name == FICTIONAL else self.series
 
 
 @dataclasses.dataclass(frozen=True)
@@ -185,28 +203,40 @@ def _views(run: Path, groups: Sequence[Group]) -> list[View]:
     return found
 
 
-def _marker(model: str, series: str) -> dict[str, Any]:
-    """Gives the marker of a class on the row of a checkpoint.
+def _hue(mark: str) -> str:
+    """Gives the hue of a group: one for known, one for both unknown kinds.
+
+    Args:
+        mark: An entry of `MARKS`.
+
+    Returns:
+        The colour.
+    """
+    return str(paper.ENC["known" if mark == "known" else "unknown"])
+
+
+def _marker(model: str, mark: str) -> dict[str, Any]:
+    """Gives the marker of a group on the row of a checkpoint.
 
     Args:
         model: Checkpoint key.
-        series: `known` or `unknown`.
+        mark: An entry of `MARKS`.
 
     Returns:
-        Keyword arguments for `Axes.plot`: the hue and the shape of the
-        class, filled with a thin white edge for GPT-2 and base checkpoints
-        and open for post-trained ones.
+        Keyword arguments for `Axes.plot`: the hue of the class and the
+        shape of the group, filled with a thin white edge for GPT-2 and base
+        checkpoints and open for post-trained ones.
     """
-    hue = paper.ENC[series]
+    hue = _hue(mark)
     post = stats.role(model) == "post"
     return {
         "ls": "none",
-        "marker": paper.QUESTION_SET_MARKERS[series],
+        "marker": paper.QUESTION_SET_MARKERS[mark],
         "color": hue,
         "markerfacecolor": "white" if post else hue,
         "markeredgecolor": hue if post else "white",
         "markeredgewidth": OPEN_EDGE if post else FILLED_EDGE,
-        "markersize": SIZES[series],
+        "markersize": SIZES[mark],
     }
 
 
@@ -219,15 +249,13 @@ def _panel(ax: Axes, model: str, view: View, groups: Sequence[Group]) -> None:
         view: The view to draw.
         groups: The known and unknown questions, see `_groups`.
     """
-    for series in ("unknown", "known"):
-        rows = [
-            i for g in groups if g.series == series for i in g.rows[:MAX_DRAWN]
-        ]
+    for mark in MARKS:
+        rows = [i for g in groups if g.mark == mark for i in g.rows[:MAX_DRAWN]]
         ax.plot(
             view.points[rows, 0],
             view.points[rows, 1],
-            gid=series,
-            **_marker(model, series),
+            gid=mark,
+            **_marker(model, mark),
         )
     ax.margins(0.08)
     low, high = ax.get_ylim()
@@ -298,12 +326,15 @@ def build(manifest: Manifest) -> FigureOutput:
     groups: dict[str, list[Group]] = {}
     views: dict[str, dict[str, View]] = {}
     csv_rows: list[list[Any]] = []
+    per_side: set[int] = set()
     for model in manifest.models(EXPERIMENT):
         run = manifest.run(EXPERIMENT, model)
         if run is None:
             continue
-        if PANEL not in runfiles.data(run, "projections.json")["panels"]:
+        sidecar = runfiles.data(run, "projections.json")
+        if PANEL not in sidecar["panels"]:
             continue
+        per_side.add(int(sidecar["max_per_side"]))
         groups[model] = _groups(run)
         found = _views(run, groups[model])
         views[model] = {view.name: view for view in found}
@@ -320,30 +351,22 @@ def build(manifest: Manifest) -> FigureOutput:
             paper.panel_title(grid[0][c], "abcd"[c], name, size=paper.LABEL)
             grid[-1][c].set_xlabel("component 1")
         handles = [
-            (
+            tuple(
                 _rows.series_handle(
-                    "", paper.QUESTION_SET_MARKERS[series], paper.ENC[series]
-                ),
-                _rows.series_handle(
-                    "",
-                    paper.QUESTION_SET_MARKERS[series],
-                    paper.ENC[series],
-                    filled=False,
-                ),
+                    "", paper.QUESTION_SET_MARKERS[mark], _hue(mark), filled
+                )
+                for filled in (True, False)
             )
-            for series in ("known", "unknown")
+            for mark in LABELS
         ]
         legend = fig.legend(
             handles=handles,
-            labels=[
-                "known question (filled: GPT-2 and base; open: post-trained)",
-                "unknown question, same fill",
-            ],
+            labels=list(LABELS.values()),
             handler_map={tuple: HandlerTuple(ndivide=None, pad=0.6)},
             loc="outside lower center",
-            ncol=2,
+            ncol=len(LABELS),
             handlelength=2.4,
-            columnspacing=1.6,
+            columnspacing=1.2,
             fontsize=paper.MIN_TEXT,
         )
         legend.get_frame().set_edgecolor("none")
@@ -354,6 +377,13 @@ def build(manifest: Manifest) -> FigureOutput:
         return min(found), max(found)
 
     early, reader, last, words = (span(name) for name in VIEWS)
+    held = sum(
+        views[model][VIEWS[2]].separation >= views[model][VIEWS[1]].separation
+        for model in SHOWN
+    )
+    if len(per_side) != 1:
+        raise ValueError(f"the runs keep {sorted(per_side)} questions per side")
+    (side,) = per_side
     stored = [sum(len(g.rows) for g in groups[model]) for model in SHOWN]
     counts = {
         "with_views": stats.per_role(
@@ -367,12 +397,14 @@ def build(manifest: Manifest) -> FigureOutput:
         ),
     }
     claim = (
-        "On the three checkpoints shown, the better of the two leading "
-        "principal components of the hidden states at the reader layer "
-        "separates known from unknown entity questions with an AUROC of "
-        f"{reader[0]:.2f} to {reader[1]:.2f}, against {early[0]:.2f} to "
-        f"{early[1]:.2f} at layer 1 and {words[0]:.2f} to {words[1]:.2f} "
-        "for the better of two components of the words alone."
+        f"On {held} of the {len(SHOWN)} checkpoints shown, the better of the "
+        "two leading principal components of the hidden states separates "
+        "known from unknown entity questions at least as well at the last "
+        "layer as at the layer of the reader, with an AUROC of "
+        f"{last[0]:.2f} to {last[1]:.2f} against {reader[0]:.2f} to "
+        f"{reader[1]:.2f}; layer 1 gives {early[0]:.2f} to {early[1]:.2f} "
+        "and the better of two components of the words alone "
+        f"{words[0]:.2f} to {words[1]:.2f}."
     )
     numbers = {
         "reader_min": reader[0],
@@ -384,6 +416,8 @@ def build(manifest: Manifest) -> FigureOutput:
         "words_min": words[0],
         "words_max": words[1],
         "per_group": float(MAX_DRAWN),
+        "per_side": float(side),
+        "last_at_least_reader": float(held),
         "stored_min": float(min(stored)),
         "stored_max": float(max(stored)),
     }
@@ -393,10 +427,9 @@ def build(manifest: Manifest) -> FigureOutput:
         DETAIL.format(
             names=stats.join_and([paper.display_name(m) for m in SHOWN]),
             cap=MAX_DRAWN,
+            side=side,
             low=min(stored),
             high=max(stored),
-            last_min=f"{last[0]:.2f}",
-            last_max=f"{last[1]:.2f}",
             with_views=stats.per_role_text(counts["with_views"]),
         ),
         numbers,

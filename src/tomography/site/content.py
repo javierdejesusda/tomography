@@ -1062,7 +1062,7 @@ APPENDICES = (
             "[[fig:a_knowledge_geometry]] shows the hidden states that the "
             "entity readers read, for one checkpoint per role, beside two "
             "controls: layer 1 and the words of the questions alone. The "
-            "views are stored for "
+            "entity views are stored for "
             "[[count:fig:a_knowledge_geometry.with_views]]. The better of "
             "two components of the hidden states at the reader layer "
             "separates known from unknown entity questions more than the "

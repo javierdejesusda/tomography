@@ -76,6 +76,8 @@ def test_known_and_unknown_questions_are_a_set_pair_not_a_measure() -> None:
     sets = paper.QUESTION_SET_MARKERS
     assert sets["unknown"] == M["direction"]
     assert sets["known"] in paper.CATEGORY_MARKERS
+    assert sets["fictional"] in paper.CATEGORY_MARKERS
+    assert sets["fictional"] != sets["known"]
 
 
 @pytest.mark.parametrize(

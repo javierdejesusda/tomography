@@ -606,6 +606,7 @@ def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
     ):
         assert token in text, token
     assert "one checkpoint per role" in text
+    assert "The entity views are stored for" in text
     assert not re.search(r"\b10 checkpoints\b", text)
 
 
