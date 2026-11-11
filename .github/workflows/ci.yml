@@ -12,16 +12,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  UV_NO_SYNC: "1"
+
 jobs:
-  measure:
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [serial, xdist, xdist-omp1]
+  lint:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    env:
-      UV_NO_SYNC: "1"
+    timeout-minutes: 15
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
@@ -37,38 +34,88 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --no-group cu130 --group cpu
 
-      - name: Describe the runner
-        run: |
-          nproc
-          free -g
-          uv run python -c "import torch; print(torch.get_num_threads())"
+      - name: Lint
+        run: uv run ruff check .
 
-      - name: Collect
-        run: |
-          time uv run pytest --collect-only -q -p no:xdist > collected-plain.txt
-          time uv run pytest --collect-only -q > collected-xdist.txt
-          tail -n 2 collected-plain.txt collected-xdist.txt
-          diff <(head -n -2 collected-plain.txt) <(head -n -2 collected-xdist.txt)
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Spell check
+        run: uv run codespell src tests README.md pyproject.toml
+
+  typecheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.12.17"
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked --no-group cu130 --group cpu
+
+      - name: Type check
+        run: uv run mypy src
+
+  test:
+    name: test (${{ matrix.mode }} ${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [serial, xdist]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.12.17"
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked --no-group cu130 --group cpu
 
       - name: Test serial
         if: matrix.mode == 'serial'
-        run: uv run pytest -q -p no:xdist --durations=120 --junitxml=junit.xml
+        run: uv run pytest -q -p no:xdist --shard ${{ matrix.shard }}/8 --junitxml=junit.xml
 
       - name: Test xdist
         if: matrix.mode == 'xdist'
-        run: uv run pytest -q -n auto --durations=120 --junitxml=junit.xml
-
-      - name: Test xdist with one torch thread
-        if: matrix.mode == 'xdist-omp1'
         env:
           OMP_NUM_THREADS: "1"
-        run: uv run pytest -q -n auto --durations=120 --junitxml=junit.xml
+        run: uv run pytest -q -n 4 --dist loadfile --shard ${{ matrix.shard }}/8 --junitxml=junit.xml
 
-      - name: Upload the reports
+      - name: Upload the report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: measure-${{ matrix.mode }}
-          path: |
-            junit.xml
-            collected-plain.txt
+          name: junit-${{ matrix.mode }}-${{ matrix.shard }}
+          path: junit.xml
+
+  checks:
+    if: ${{ always() }}
+    needs: [lint, typecheck, test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every check to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done
