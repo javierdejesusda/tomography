@@ -659,6 +659,11 @@ def _refused(config: m3_matrix.Config, tmp_path: Path) -> None:
             r"^cell_hidden must be at least 1 for the MLP head of "
             r"\('cellattn',\), got 0$",
         ),
+        (
+            {"cell_head": "mlp", "poolings": ("cellattn", "flat")},
+            r"^the flat reader has no MLP head, so cell_head 'mlp' cannot "
+            r"run with pooling 'flat'$",
+        ),
     ],
 )
 def test_a_bad_head_is_refused_before_any_model_call(

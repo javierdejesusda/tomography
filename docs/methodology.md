@@ -287,6 +287,17 @@ alone and that wider grid. The results are in the [findings](findings.md#full-ma
   progress test, not the gradient one. An MLP head has no direction to export (`rep_reader` refuses):
   `cellheads_<task>` keeps `hidden`, `hidden_biases`, `outputs` and `biases` (and cellattn's queries and offsets). A
   linear run leaves `cell_head` and `cell_hidden` out of `config.json`, so its hash is unchanged.
+- Flat reader (pooling `flat`, not a default, rows `logistic/flat_<set>/joint`): it standardizes each layer's cells
+  on the draw's training cells as the cell readers do, then concatenates them at fixed slots: each segment (decoy
+  line, stimulus, final line) gets as many slots as its longest training run, with tokens aligned from the segment's
+  end, so a shorter segment leaves its first slots at zero (the training mean) and a longer evaluation segment loses
+  its first tokens; `truncation.json` reports the dropped cells per condition. Training uses the paper template, so
+  the decoy line has no slots and gets no weight. The reader is an L2 logistic regression with the cell readers' loss
+  (mean BCE plus `||w||^2/(2Cn)`, bias unpenalized, so `C` is scikit-learn's), fit in float64 by L-BFGS-B at
+  `cell_tol` in dual form through the per-layer Gram matrix; it matches scikit-learn's primal fit to about 1e-9
+  relative. `C` comes from the same grid by the first-best select rule, and the reader shares M3's draws, items,
+  conditions, shuffled series and baseline comparisons under `best` and `top_k`. It has no MLP head (`cell_head=mlp`
+  with pooling `flat` is refused), and `cellheads_<task>` keeps only its `c`, `bias` and `widths`.
 - One-row readers: M2's `logistic` and `mean_diff` on `last`, `concept`, `mean` and `max` (rules `best` and
   `top_k`), fitted by M2's helpers on M2's items, and two relabelled readouts, each on its own pass:
   `stimulus_token` (the last stimulus token, M2's `concept` position over the stimulus span) and `prompt_max` (M2's

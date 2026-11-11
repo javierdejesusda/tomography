@@ -575,7 +575,7 @@ def test_config_defaults_and_round_trip() -> None:
     config = m3_matrix.Config()
     m2 = m2_readers.Config()
 
-    assert m3_matrix.POOLINGS == ("cellattn", "cellmax")
+    assert m3_matrix.POOLINGS == ("cellattn", "cellmax", "flat")
     assert config.experiment == "m3"
     assert config.scorers == ("logistic", "mean_diff")
     assert config.readouts == ONE_ROW_READOUTS
@@ -694,7 +694,7 @@ def _refused(config: m3_matrix.Config, tmp_path: Path) -> None:
         (
             {"poolings": ("cellsum",)},
             r"^unknown pooling 'cellsum', expected one of "
-            r"\('cellattn', 'cellmax'\)$",
+            r"\('cellattn', 'cellmax', 'flat'\)$",
         ),
         ({"poolings": ()}, r"^m3 needs at least one entry in poolings$"),
         (
@@ -1278,7 +1278,7 @@ def test_joint_cells_are_compared_with_each_baseline_at_top_k_and_best(
     joint = [
         ("logistic", f"{pooling}_{cell_set}")
         for cell_set in CELL_SETS
-        for pooling in m3_matrix.POOLINGS
+        for pooling in config.poolings
     ]
     for task, conditions in (
         ("sentiment", SENTIMENT_CONDITIONS),
@@ -1661,7 +1661,7 @@ def test_the_diagnostics_share_each_reader_among_the_segments(
     cells = [
         (scorer, f"{pooling}_{cell_set}", series)
         for cell_set in CELL_SETS
-        for pooling in m3_matrix.POOLINGS
+        for pooling in _config().poolings
         for scorer, series in (
             ("logistic", "reader"),
             ("logistic", "shuffled"),
@@ -1927,7 +1927,7 @@ def test_the_summary_counts_fits_seconds_and_warnings(
     n = config.n_seeds * len(config.logistic_c)
     assert set(fits) == {
         f"logistic/{pooling}_prompt/joint/{series}"
-        for pooling in m3_matrix.POOLINGS
+        for pooling in config.poolings
         for series in ("reader", "shuffled")
     }
     for name, stats in fits.items():
