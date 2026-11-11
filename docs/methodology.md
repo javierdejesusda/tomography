@@ -3,35 +3,67 @@
 This document lists what this repository does differently from the Representation Engineering paper (Zou et al.,
 [arXiv:2310.01405](https://arxiv.org/abs/2310.01405)), why, and how its numbers are produced. It is a reference for
 readers of the paper, not a tutorial: the [README](../README.md) covers installation and the experiment ids,
-and each config is in `experiments/<id>_*.py`. It reports no results. Module paths are relative to `src/tomography/`.
+and each config is in `experiments/<id>_*.py`. It also states the design of each study: the checkpoints, the stimuli
+and where their labels come from, the splits, the controls and the published baselines. The results are in the
+[findings](findings.md). Module paths are relative to `src/tomography/`.
 
 Contents:
 
 1. [Scope and models](#scope-and-models)
 2. [Paper mapping](#paper-mapping)
-3. [Pipeline choices and deviations](#pipeline-choices-and-deviations)
-4. [Statistics](#statistics)
-5. [Reader comparison (M2)](#reader-comparison-m2)
-6. [LAT against few-shot prompting (R8)](#lat-against-few-shot-prompting-r8)
-7. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
-8. [Run settings of the GPU runs](#run-settings-of-the-gpu-runs)
-9. [Data sources](#data-sources)
+3. [Controls and baselines](#controls-and-baselines)
+4. [Labels and data](#labels-and-data)
+5. [Pipeline choices and deviations](#pipeline-choices-and-deviations)
+6. [Statistics](#statistics)
+7. [Reader comparison (M2)](#reader-comparison-m2)
+8. [Full-matrix readers (M3)](#full-matrix-readers-m3)
+9. [Published finder baselines (B2)](#published-finder-baselines-b2)
+10. [LAT against few-shot prompting (R8)](#lat-against-few-shot-prompting-r8)
+11. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
+12. [Approximate answers (P10)](#approximate-answers-p10)
+13. [Run settings of the GPU runs](#run-settings-of-the-gpu-runs)
+14. [Data sources](#data-sources)
 
 ## Scope and models
 
-| Family             | Keys                                           | Format                           | Default dtype                |
-| ------------------ | ---------------------------------------------- | -------------------------------- | ---------------------------- |
-| GPT-2              | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` | plain tags                       | float32 (`gpt2-xl`: float16) |
-| Qwen3 base         | `qwen3-0.6b-base`, `qwen3-1.7b-base`           | plain tags                       | bfloat16                     |
-| Qwen3 post-trained | `qwen3-0.6b`, `qwen3-1.7b`                     | chat template, thinking disabled | bfloat16                     |
+Ten checkpoints in three roles. The roles are reported apart and never pooled in a count.
 
-The registry is `MODELS` in `model.py`; every entry pins a full commit SHA.
+| Key               | Role               | Parameters | Blocks (L) | Hidden size | Prompt format                    | Default dtype |
+| ----------------- | ------------------ | ---------- | ---------- | ----------- | -------------------------------- | ------------- |
+| `gpt2`            | GPT-2              | 124M       | 12         | 768         | plain tags                       | float32       |
+| `gpt2-medium`     | GPT-2              | 355M       | 24         | 1024        | plain tags                       | float32       |
+| `gpt2-large`      | GPT-2              | 774M       | 36         | 1280        | plain tags                       | float32       |
+| `gpt2-xl`         | GPT-2              | 1.56B      | 48         | 1600        | plain tags                       | float16       |
+| `qwen3-0.6b-base` | Qwen3 base         | 596M       | 28         | 1024        | plain tags                       | bfloat16      |
+| `qwen3-0.6b`      | Qwen3 post-trained | 596M       | 28         | 1024        | chat template, thinking disabled | bfloat16      |
+| `qwen3-1.7b-base` | Qwen3 base         | 1.72B      | 28         | 2048        | plain tags                       | bfloat16      |
+| `qwen3-1.7b`      | Qwen3 post-trained | 1.72B      | 28         | 2048        | chat template, thinking disabled | bfloat16      |
+| `qwen3-4b-base`   | Qwen3 base         | 4.02B      | 36         | 2560        | plain tags                       | bfloat16      |
+| `qwen3-4b`        | Qwen3 post-trained | 4.02B      | 36         | 2560        | chat template, thinking disabled | bfloat16      |
+
+The registry is `MODELS` in `model.py`; every entry pins a full commit SHA. The parameter counts, blocks and hidden
+sizes are those of the checkpoint table of the project site (`site/params.py`, from the stored model configurations,
+embeddings included).
+
+Not every experiment has a committed run on every checkpoint. The `results/` tree holds:
+
+| Checkpoints                                           | Experiments                                                                                                          |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| all 10                                                | `r1` to `r7`, `p1` to `p5`, `p7`, `c1`, `c2`, `c4`, `c5`, `m1`, `lr1`, `a1`, `a2`, `p9a` to `p9c`, `p10a` to `p10c` |
+| 9 (all but `gpt2`)                                    | `p9d`, which needs the known versus unknown contrast that `gpt2` lacks (see [Guess control](#guess-control))         |
+| 8 (the GPT-2 sizes and the Qwen3 0.6B and 1.7B pairs) | `b1`, `b2`, `v1`                                                                                                     |
+| 4 (the Qwen3 0.6B and 1.7B pairs)                     | `r8`, `m2`, `m3`                                                                                                     |
+| one run that aggregates finished runs                 | `p6` (the four GPT-2 sizes), `p8` (the Qwen3 0.6B and 1.7B pairs)                                                    |
+| no model                                              | `tb1` (one run)                                                                                                      |
+| no committed run                                      | `a5`                                                                                                                 |
 
 - **Why a second family.** The paper steers LLaMA-2-Chat. Its 7B and 13B checkpoints do not fit an 8 GB GPU in
-  bfloat16, so the second family is Qwen3 at 1.7B and 0.6B, each as a base and a post-trained checkpoint. The
-  post-trained Qwen3 checkpoints are small distilled models with a thinking mode; they are used with thinking
-  disabled (`enable_thinking=False`). A contrast between a base model and its post-trained counterpart is therefore
-  a contrast with this specific recipe and not with instruction tuning in general.
+  bfloat16, so the second family is Qwen3 at 0.6B, 1.7B and 4B, each as a base and a post-trained checkpoint. The
+  0.6B and 1.7B pairs fit the 8 GB laptop GPU; every committed run of the 4B pair was made on a rented GPU with
+  more memory (the `device` field of its `meta.json`). The post-trained Qwen3 checkpoints have a thinking mode;
+  they are used with thinking disabled (`enable_thinking=False`). A contrast between a base model and its
+  post-trained counterpart is therefore a contrast with this specific recipe and not with instruction tuning in
+  general.
 - **Why GPT-2.** GPT-2 is a base model with no instruction tuning. It is the cheap development subject and the
   no-instruction-tuning control: it shows what the recipe does when the model was never trained to follow a
   persona prompt.
@@ -59,10 +91,14 @@ counterpart. The ids are the arguments of `tomography run`; each config and its 
 | `r6`           | TruthfulQA MC1: standard, heuristic, text-only and LAT                 | Sec. 4.1, Table 1, Table 8                                                           |
 | `r7`           | Truthfulness on true and false facts, plus out-of-distribution sets    | Sec. 4.1 and 4.2; the out-of-distribution truth sets are an extension                |
 | `r8`           | LAT against few-shot prompting on five QA tasks and TruthfulQA MC1     | Fig. 7 and Table 9 (QA tasks), Table 1 (TruthfulQA MC1); see [R8](#lat-against-few-shot-prompting-r8) |
+| `tb1`          | Word and character n-gram classifiers on the readers' own pairs, no model | Extension (the text-only control of `r1`, `r2`, `r3`, `r5`, `r7` and `p3`)        |
 | `m1`           | Six direction finders: correlation, manipulation, termination          | Sec. 5.1.1, Fig. 12                                                                  |
-| `c1`           | Sentiment steering: sweep, operators, side effects                     | Extension (uses the Sec. 3.2.1 operators and adds a prompting baseline arm)          |
+| `m2`           | Readers compared as scorer by readout by layer rule on the same items  | Extension; see [M2](#reader-comparison-m2)                                           |
+| `m3`           | Readers trained through every cell (token and layer) of the prompt     | Extension; see [M3](#full-matrix-readers-m3)                                         |
+| `b2`           | Published direction finders beside LAT on truth and sentiment          | Extension; see [B2](#published-finder-baselines-b2)                                  |
+| `c1`           | Sentiment steering: sweep, operators, side effects                     | Extension (uses the Sec. 3.2.1 operators and adds a prompting arm)                   |
 | `c2`           | Emotion steering, steered emotion against measured emotion             | Sec. 6.1.2                                                                           |
-| `c4`           | Honesty control on TruthfulQA MC1                                      | Sec. 4.3.3, Table 2; adds a prompting baseline arm                                   |
+| `c4`           | Honesty control on TruthfulQA MC1                                      | Sec. 4.3.3, Table 2; adds a prompting arm                                            |
 | `c5`           | Qualitative steering galleries                                         | Figs. 10 and 17                                                                      |
 | `lr1`          | One LoRRA adapter (loss curve and held-out loss)                       | Algorithm 1; `c4` scores the adapter through `lorra_run`                             |
 | `p1`           | Template ablations                                                     | Sec. 5.1.1, Fig. 13 (ETHICS utility with and without the LAT template); the other variants are an extension |
@@ -73,12 +109,137 @@ counterpart. The ids are the arguments of `tomography run`; each config and its 
 | `p6`           | Scale across the four GPT-2 sizes                                      | Extension                                                                            |
 | `p7`           | Whether a reader that reads well also steers well                      | Extension                                                                            |
 | `p8`           | Base against post-trained Qwen3                                        | App. B.8, Fig. 26 (base against chat LLaMA-2); the Qwen3 base and post-trained pairs are an extension |
-| `p9a` to `p9d` | Known against unknown questions: labels, reading, reliability, steering | Extension                                                                           |
+| `p9a` to `p9d` | Known against unknown questions: labels, reading, reliability, steering | Extension; see [P9](#known-versus-unknown-questions-p9)                             |
+| `b1`           | Published error detectors beside the `p9c` signals on the same test items | Extension; see [Published detection baselines](#published-detection-baselines)    |
+| `v1`           | The hidden states behind the `p9b` readers: 2D views and their controls | Extension; see [Activation views](#activation-views-of-the-readers-v1)              |
+| `p10a` to `p10c` | Range against exact quantities: answers, reading, links to P9 and to hedging | Extension; see [P10](#approximate-answers-p10)                              |
 | `a1`           | Direction geometry across layers, seeds and concepts                   | Extension                                                                            |
 | `a2`           | Logit lens of the reading directions                                   | Extension                                                                            |
 | `a5`           | Reading directions against Qwen-Scope SAE decoders                     | Extension                                                                            |
 
 The PCA explained variance is part of `r2` and the t-SNE maps are part of `r4`; they are not separate experiments.
+
+## Controls and baselines
+
+The two words mean different things here, as on the project site:
+
+- A **control** uses no learned signal for the concept: a random direction, shuffled labels (the reader scored
+  against shuffled evaluation labels, or refitted on shuffled training labels), a classifier that sees only the
+  text, or the popularity of the subject. It shows what the same procedure gives without that signal.
+- A **baseline** is a published method run on the same items as the method under study.
+
+A reading is compared with the random direction of its own run, not with 0.5: the random direction is oriented on
+the training labels like the reader, so it can score well above 0.5.
+
+Some names in the code and in the result files are older than this vocabulary and are kept, so that committed runs
+stay readable: `SURFACE_BASELINES` and `WITHIN_BASELINES` in `p9/reading.py`, `BASELINES` and `baselines.csv` in
+`p10b`, the `text_baselines` entry of the `r6` summary and the module name `tb1_text_baselines.py` all name
+controls. The code also calls the prompting arm of `c1` and `c4` (an instruction in the prompt) a baseline.
+
+### Controls
+
+| Control                    | What it is                                                                                                                                                                                                                                                                            | Where                                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Random direction, reading  | A Gaussian direction drawn from a seed, oriented on the training labels and scored like the reader (`random` series or finder)                                                                                                                                                        | every reading sweep, `r6`, `r8`, `m1`, `m2`, `m3`, `b2`, `p9b`, `p10b`, `v1`                |
+| Shuffled labels            | The reader scored against evaluation labels shuffled within each group (`shuffled` series). `m2` and `m3` refit every scorer on training labels shuffled within their pairs; `v1` refits on labels permuted inside each stratum                                                       | every reading sweep, `r6`, `r8`, `m2`, `m3`, `b2`, `v1`                                     |
+| Text-only classifier       | Logistic regression (`C` 10, class-balanced) on TF-IDF features of the raw text, fitted on the training texts only: word 1-grams and 2-grams seen in at least 2 texts, or character 2-grams to 5-grams inside words seen in at least 3 texts. `m2` and `m3` fit the word variant only | `tb1` (for `r1`, `r2`, `r3`, `r5`, `r7`, `p3`), `r6`, `m2`, `m3`, `b2`, `p9b`, `p10b`, `v1` |
+| Popularity                 | The popularity of the subject: the popularity score of PopQA (`s_pop`) in P9, `log10(sitelinks + 1)` in `p10b`                                                                                                                                                                        | `p9b`, `p9c`, `p10b`, `v1`                                                                  |
+| Other model-free scores    | The accuracy of the relation, the length of the question and the likelihood of the subject's name (`p9c`); the length of the question in characters (`p10b`)                                                                                                                          | `p9c`, `p10b`                                                                               |
+| Random direction, steering | `n_random` (3) random unit directions steered through the same controller, so with the same relative coefficients and norm; `m1` steers its `random` finder                                                                                                                           | `c2`, `c4`, `c5`, `p7`, `p9d`, `m1`                                                         |
+| Random band                | The 2.5th to 97.5th percentiles of the cosine with, or of the AUROC of, `n_random` (200) random unit directions                                                                                                                                                                       | `p10c`                                                                                      |
+| Comparison items           | A contrast inside one dataset, so that one question format stands on both sides (`triviaqa_known`); people with one exact height, who are living things with an exact answer                                                                                                          | `p9b`; `p10a`, `p10b`                                                                       |
+
+`c1` has no random-direction arm. Three committed runs each of `c2`, `c4`, `c5` and `p7` were made before the random
+arms existed (their `config.json` has no `n_random`). `p10a` reads no direction, so the people are its only control,
+and `lr1` has none of the controls above.
+
+### Published baselines
+
+| Experiments   | Method under study                                                     | Published baselines on the same items                                                                                                                                               |
+| ------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `b2`          | LAT (`pca_diff`)                                                       | Mass-mean and whitened mass-mean probes (Marks and Tegmark 2024), logistic-regression probe (Alain and Bengio 2016), CCS (Burns et al. 2023)                                        |
+| `p4`, `m1`    | LAT (`pca_diff`)                                                       | The `logistic` and `mean_diff` finders (the logistic-regression and mass-mean probes) in the same sweep                                                                             |
+| `p9b`, `p10b` | The readers of one sweep: `logistic`, `pca_diff` (LAT) and `mean_diff` | `logistic` and `mean_diff` are the published logistic-regression and mass-mean probes; the reader that `v1` and `p10c` take from these runs is the `logistic` one                   |
+| `r6`          | LAT readers                                                            | The `standard` and `heuristic` scorers of the paper                                                                                                                                 |
+| `r8`          | LAT                                                                    | Few-shot prompting in the lm-evaluation-harness format                                                                                                                              |
+| `m2`, `m3`    | Every other scorer, readout and reader                                 | `logistic/last` and `mean_diff/last`; `m3` adds `logistic/concept` and `logistic/stimulus_token`                                                                                    |
+| `p9c`         | The reading direction (`lat`) and the `probe`                          | The confidence of the model: first-token probability, negative entropy, mean token log-probability, the share of samples equal to the greedy answer, P(True) (Kadavath et al. 2022) |
+| `b1`          | The `p9c` signals                                                      | Exact-answer-token probe (Orgad et al. 2025), semantic entropy (Farquhar et al. 2024), EigenScore (Chen et al. 2024)                                                                |
+| `c4`          | The reading vector                                                     | The prompt difference of the paper and the contrast vector; the LoRRA adapter of an `lr1` run when `lorra_run` is set                                                               |
+
+The readers of `r1` to `r7`, `p1`, `p2`, `p3` and `p5` are themselves logistic-regression probes by default (see the
+default finder in [Activations and directions](#activations-and-directions)); `p1` also has one `pca_diff` run per
+checkpoint. The other steering experiments (`c2`, `c5`, `p7`, `p9d`) and P10a and P10c are compared with controls
+only. `c1` has neither a control of the table above nor a published baseline: its comparisons are the unsteered
+model and the prompting arm.
+
+## Labels and data
+
+### Splits
+
+- `assign_splits` (`datasets/records.py`) hashes the dataset name, a key and a seed into train, validation and test
+  at 0.6, 0.2 and 0.2. The key is an example id or a grouping key (the subject of a PopQA question, a source
+  statement), so everything built from one source stays in one split, whatever the row order.
+- ETHICS keeps the test file of the source as its test split and hashes the source train file into train and
+  validation at 0.75 and 0.25, with linked scenarios kept together (`datasets/ethics.py`).
+- SST-2 has no labeled test split, so no hash is used: the readers train on the phrases of the source train split
+  and are scored on the full sentences of its validation split. `r1` scores 256 validation pairs and reports the best
+  layer of that same curve. `p1` to `p4`, `m2`, `m3` and `b2` halve the validation sentences with the seeded draw
+  of `task_splits` (`experiments/variants.py`): one half selects, the other reports.
+- A reading run fits `n_seeds` readers, each on its own draw of `n_pairs` (64) training pairs. The split that picks
+  the layer of each study is given in the [reading conventions](findings.md#reading-conventions) of the findings.
+
+### Where the labels come from
+
+| Study                           | Stimuli                                                                                                                                                               | Label and its source                                                                                                | Evaluation items                                                                                                                         |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `r1` sentiment                  | SST-2 phrases (train) and sentences (validation) of at least 3 words                                                                                                  | The binary sentiment label of SST-2                                                                                 | 256 validation pairs                                                                                                                     |
+| `r2` utility                    | ETHICS utilitarianism rows, two scenarios per row                                                                                                                     | The order of the source row: its first scenario is the more pleasant one (label 1)                                  | 3,473 validation and 4,808 test pairs                                                                                                    |
+| `r3` morality                   | ETHICS commonsense scenarios, the short ones only                                                                                                                     | The source label, flipped so that 1 means acceptable                                                                | 644 validation and 983 test pairs                                                                                                        |
+| `r4` emotions                   | The emotion scenarios of the reference repository, one emotion against the other five                                                                                 | The emotion each scenario is filed under                                                                            | 39 to 48 validation and 36 to 53 test pairs per emotion                                                                                  |
+| `r5` honesty                    | True statements of the reference facts file under an honest and an untruthful persona; plain statements to test                                                       | Training: the persona, which the template sets. Transfer test: the true or false label of the facts file            | Transfer: 53 validation and 59 test pairs                                                                                                |
+| `r7` truth                      | The facts file (597 statements once repeats are collapsed and the one statement with conflicting labels is dropped); nine Geometry of Truth sets scored with no refit | The true or false label of each source file                                                                         | 53 validation and 59 test pairs; 177 to 2,225 pairs per out-of-distribution set                                                          |
+| `r6` TruthfulQA MC1             | 817 questions, choices shuffled with a seed                                                                                                                           | The correct choice of `mc1_targets`                                                                                 | 511 train, 133 validation and 173 test questions                                                                                         |
+| `r8` QA tasks                   | The tasks, splits and shot counts of `qa_tasks.py`                                                                                                                    | The answer key of each dataset                                                                                      | see [R8](#lat-against-few-shot-prompting-r8)                                                                                             |
+| `b2`                            | Geometry of Truth statements paired with their negations; SST-2 as in `r1`                                                                                            | The source labels; a pair must hold exactly one true member                                                         | 77 to 406 validation and 78 to 382 test pairs per dataset                                                                                |
+| P9 (`p9a` to `p9d`, `b1`, `v1`) | A pool of nine question groups, 22,028 questions with the GPT-2 tokenizer and 21,988 with Qwen3's                                                                     | From the behavior of each model: its greedy and sampled answers against the gold aliases (see [Labels](#labels))    | per model, see the findings                                                                                                              |
+| P10 (`p10a` to `p10c`)          | 720 Wikidata quantity questions in three families, and 120 people                                                                                                     | The kind of answer, range or exact, from the bounds of the Wikidata statement (see [P10](#approximate-answers-p10)) | `p10a`: all 720 questions and the people; `p10b`: 72 range and 75 exact test questions, and the people; `p10c`: see [Links](#links-p10c) |
+| `c1`, `m1` steering             | Text generated from short prompts                                                                                                                                     | A pinned sentiment classifier, with a second one as a check                                                         | the completions of each arm and coefficient                                                                                              |
+| `c2` steering                   | Text generated from short prompts                                                                                                                                     | A pinned emotion classifier, with a second one as a check                                                           | the completions of each arm and coefficient                                                                                              |
+| `c4`                            | TruthfulQA MC1 questions; each arm scores every choice                                                                                                                | The correct choice; each vector arm picks its coefficient on the train and validation questions                     | the 173 test questions                                                                                                                   |
+| `lr1`                           | Alpaca instructions and responses                                                                                                                                     | None: the training targets are activations of the frozen model                                                      | 64 held-out pairs                                                                                                                        |
+
+The two tokenizers give different P9 pools because a fictional subject is generated only for a PopQA subject of at
+least two tokens, counted with the tokenizer of the model (7,493 fictional questions for GPT-2, 7,453 for Qwen3;
+the other eight groups are the same).
+
+### Automatic labels and what checks them
+
+- **Answers.** In P9 and in the lie gallery of `c5`, an answer is correct when it contains a gold alias as a
+  whole-word sequence after normalization (`is_correct` in `knowledge.py`). In P10a a completion is parsed into a
+  point, a range, an abstention or nothing, and graded against the sourced interval widened by 5 percent
+  (`p10/answers.py`). In `p9d` an abstention is a phrase match.
+- **Judges.** Generated text is scored by classifiers pinned by commit SHA in `judges.py`: for sentiment
+  `siebert/sentiment-roberta-large-english`, with `distilbert/distilbert-base-uncased-finetuned-sst-2-english` as a
+  check; for emotion `j-hartmann/emotion-english-distilroberta-base`, with
+  `cardiffnlp/twitter-roberta-base-emotion-latest` as a check. The entailment model of `b1` is
+  `microsoft/deberta-large-mnli`.
+- **Fluency rule.** A steered text is counted as fluent when the perplexity of neutral text under the steered
+  model is at most 1.5 times that of the unsteered model and the distinct-1 of the completions is at least 0.15.
+  The rule is applied by the site (`FLUENT_MAX_RATIO` and `FLUENT_MIN_DISTINCT` in `site/stats.py`), not by the
+  experiment code.
+- **No human labels.** `p9a`, `p9d` and `p10a` write hand-check files with empty columns for a human rater
+  (`human_label`; `human_form`, `human_correct` and `human_unit_mismatch`). No committed file has a filled one, so
+  the error rates of the alias match, of the abstention patterns and of the answer parser are not measured.
+  Generated text is scored by the judges only.
+
+### What is committed
+
+`tomography export` drops the readers, the sweeps, the per-item files, the trials, the transfer arrays, the signals
+and the per-item scores (`_EXCLUDED_NAMES` in `export.py`), so the committed `results/` tree holds configs, metadata,
+summaries, tables and curves. An experiment that reads a dropped file of an earlier run works only where the
+full run directories exist: among them `a1`, `a2` and `a5` (the `readers*.npz` files), the stages that load the
+`p9a` labels from `items.json` (`p9b`, `p9c`, `p9d`, `b1`, `v1`) and `p10c`.
 
 ## Pipeline choices and deviations
 
@@ -144,8 +305,8 @@ text, the default follows the reference code and the other variant is selectable
 - A run is identified by `config_hash()`, the first 12 hex digits of the SHA-256 of its canonical config JSON.
   Every config field is part of the hash, so a change of `batch_size` is a different run (see
   [Run settings](#run-settings-of-the-gpu-runs)). `meta.json` records the code state, device and library versions.
-- The reading experiments train `n_seeds` readers on independent training sets: 10 by default (5 for `p9b` and `p9c`), 15
-  for `r6`, and 20 resamples per size for `p3`.
+- The reading experiments train `n_seeds` readers on independent training sets: 10 by default (5 for `p9b`, `p9c`
+  and `p10b`), 15 for `r6`, and 20 resamples per size for `p3`.
 
 ### Series and controls
 
@@ -155,7 +316,8 @@ Every reading sweep (`experiments/sweep.py`) writes three series per layer:
 - `random`: a random unit direction with the same orientation rule. This is the random-direction control.
 - `shuffled`: the reader scored against evaluation labels shuffled within each group. This is the permutation null.
 
-Steering experiments compare against random directions of the same norm where a claim needs it (`m1`, `p9d`).
+The controls of the other experiments, the steering ones included, are listed in
+[Controls and baselines](#controls-and-baselines).
 
 ### Intervals and what is resampled
 
@@ -180,7 +342,15 @@ that resamples whole runs along axis 0, and `wilson_ci` gives intervals for rate
 | `p9d` slopes                                                   | percentile bootstrap                                           | the items, paired across arms                                             |
 | `m2` cell metrics (`pair_lo`, `pair_hi`, `auroc_lo`, `auroc_hi`) | percentile bootstrap                                         | the seeds (independent training sets)                                     |
 | `m2` comparisons                                               | paired percentile bootstrap; DeLong; exact McNemar; Holm       | the report pairs (clusters), on the seed ensemble                         |
+| `m3`                                                           | as `m2`                                                        | as `m2`                                                                   |
 | `r8` task accuracies                                           | percentile bootstrap; Wilson interval for a single run         | the seeds; the test questions of a zero-shot or single-seed run           |
+| `tb1` accuracies                                               | Wilson interval                                                | the test pairs; `seed_min` and `seed_max` give the spread over training sets |
+| `b2` accuracies                                                | Wilson interval (`wilson_lo`, `wilson_hi`); percentile bootstrap (`boot_lo`, `boot_hi`) | the test pairs; the seeds                        |
+| `p10a` rates of the greedy answers                             | Wilson interval (item bootstrap in the people rows that pool both shot orders) | the questions                                                             |
+| `p10a` rates of the sampled answers, and the gaps              | percentile bootstrap, 2,000 resamples                          | the questions, each with all its samples; within each kind for a gap      |
+| `p10b` transfer, control and people AUROC                      | percentile bootstrap, 1,000 resamples                          | the test questions                                                        |
+| `p10b` curves                                                  | percentile bootstrap                                           | the 5 draws of training pairs                                             |
+| `p10c` AUROC and rank correlations                             | percentile bootstrap, 1,000 resamples                          | the questions                                                             |
 
 `a1` uses a t-interval because a percentile bootstrap of so few runs covers less than its level. The `a2` and `a5`
 intervals and nulls are described in the docstrings of `experiments/a2_logit_lens.py` and
@@ -509,12 +679,12 @@ PopQA-matched contrasts to be read at all. The pool now has 12 relations (`POPQA
 and capital of. The guess control is unchanged and one template per relation is used. The SyntHal-based contrasts
 stay on the four SyntHal relations.
 
-### Same-dataset control and surface baselines
+### Same-dataset control and surface controls
 
 Contrasts built from different datasets differ in question format, so a reader can separate them by wording alone.
 `triviaqa_known` sets TriviaQA questions labeled known against TriviaQA questions labeled unknown, so one question
-format stands on both sides. Every `p9b` reader AUROC is reported next to three surface baselines
-(`SURFACE_BASELINES` in `p9/reading.py`):
+format stands on both sides. Every `p9b` reader AUROC is reported next to three surface controls, which use no
+model (the code names them `SURFACE_BASELINES`, in `p9/reading.py`):
 
 - `text_word` and `text_char`: classifiers on the word and the character n-grams of the question, fitted on the
   train items of the contrast and scored on the exact test items of the reader.
@@ -527,7 +697,7 @@ Relations differ in how many of their questions are known, so the wording of a q
 sides through the relation. A pooled AUROC cannot tell that apart from reading the question. For the contrasts that
 have PopQA questions on a side, the headline is therefore the within-relation AUROC (`grouped_auroc` in
 `p9/risk.py`): the AUROC inside each relation, averaged with weights `n_pos * n_neg` over the relations that hold
-both classes. It is reported next to the within-relation popularity and text baselines (`WITHIN_BASELINES`). The
+both classes. It is reported next to the within-relation popularity and text controls (`WITHIN_BASELINES`). The
 pooled AUROC, and the layer choice made on the pooled validation AUROC, are unchanged and stay as a secondary
 column.
 
@@ -571,7 +741,40 @@ known-side items, so their gaps are correlated.
 
 The headline cell is the unknown side of the `direction_type` contrast; every other cell is descriptive, with no
 correction for multiple comparisons. The abstention patterns are phrase matches, so a title that contains a pattern
-word still counts as an abstention; the `hand_check.csv` sample measures this.
+word still counts as an abstention. The runs on post-trained checkpoints write `hand_check.csv`, a sample of
+completions (`n_hand_check`, 100) with an empty `human_label` column for a rater; no committed run has it filled,
+so this error is not measured.
+
+### Activation views of the readers (V1)
+
+`v1` (`experiments/v1_knowledge_views.py`) stores what is needed to look at the `p9b` readers and not only score
+them. It reads two finished runs of the same checkpoint, the `p9a` labels and the `p9b` reading. It rebuilds the
+contrasts from the `p9a` labels with the settings of the `p9b` run, draws again the train draws of that run from
+its seed, and takes the template and the layer from it. Its own seed enters only the shuffled-label control and the
+text-only view. It needs the local copy of the `p9b` run, because the export drops
+`readers.npz` and `transfer.npz`.
+
+- Extraction: the model loads in float32, because the few-shot prefix shared by every prompt is run once and its
+  cache reused, which matches the uncached activations only in float32. The questions are the test questions of the
+  `p9b` contrasts and the train questions of its draws, read at the last token at every layer.
+- Reproduction check: the four `p9b` methods (`logistic`, `pca_diff`, `mean_diff` and the random direction) are
+  refitted on each of those draws. For every contrast and method, the mean test AUROC over the draws at the `p9b`
+  layer is set against the same mean of the `p9b` run with a tolerance of 0.02 (`TOLERANCE`); a miss is recorded in
+  the summary, not raised.
+- Published reader: the `logistic` reader that `p9b` fitted on all the train pairs of a contrast. `v1` scores the
+  test questions on it without refitting it and keeps the scores of the questions it shows.
+- Controls: the random direction of `p9b` with the seeds of those draws; a `logistic` reader refitted on
+  the train questions of each draw with their labels permuted inside each stratum; the surface controls
+  (`text_word`, `text_char`, `popularity`), recomputed and compared with the `p9b` table; and a text-only view of
+  the same questions.
+- Views: test questions only, at most 300 on each side of a contrast (`MAX_DISPLAYED`). The principal-component
+  view places them on the two leading components of their hidden states. The supervised view has the score on the
+  published reader as x and, as y, the leading principal component of the hidden states once the direction of that
+  reader is removed. The text-only view reduces the TF-IDF word features of `text_word` to two components by a
+  truncated SVD, which is latent semantic analysis on uncentered features and not a principal-component analysis,
+  so its variance ratios are not comparable with those of the hidden states.
+- Outputs: `projections.npz`, `projections.json`, `pca2d.npz`, `text2d.npz` and `summary.json`. No question text
+  and no hidden state is stored. A run stores AUROC values per draw and no interval.
 
 ### Published detection baselines
 
@@ -634,20 +837,124 @@ The `b1` protocol:
 - Settings: the model loads in float32, because the activations reuse the cached few-shot prefix, which matches the
   uncached path only in float32. `p9a` and `p9c` ran Qwen3 in bfloat16 and `gpt2-xl` in float16, so the baselines
   read the same answers at a higher precision than the `p9c` signals. The entailment model runs on the CPU, so it
-  never shares the GPU with the model: about 0.07 s per pair on the laptop CPU (640 pairs timed), and 30k to 45k
-  pairs per checkpoint (counted from the `p9a` samples). The summary records the seconds each baseline took.
+  never shares the GPU with the model: about 0.07 s per pair on the laptop CPU (640 pairs timed), and 34,088 to
+  45,078 pairs per checkpoint in the committed runs (`nli_pairs` of each summary, summed over the three datasets).
+  The summary records the seconds each baseline took.
+
+## Approximate answers (P10)
+
+P10 asks how a model handles a quantity question whose sourced answer is a range, against one whose answer is one
+exact value. The stages are `p10a` (the answers), `p10b` (reading the hidden states of the same questions) and
+`p10c` (links of the range direction to the P9 directions and to the answers). The code is in `p10/`,
+`datasets/quantities.py` and `experiments/p10*_*.py`. P10 has no counterpart in the paper. Its only
+published baselines are the `logistic` and `mean_diff` probes that `p10b` runs beside LAT (see
+[Published baselines](#published-baselines)).
+
+### Questions and labels
+
+The questions come from Wikidata, one cached query per family and side and three for the people (one per
+occupation), with the unit and the bounds of each statement. The summary of every `p10a` and `p10b` run records
+the retrieval date and the SHA-256 digest of each query result.
+
+| Family   | Range side                                                                             | Exact side                                                                                  |
+| -------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| height   | a dog breed: "How tall is a X, in centimetres?"                                        | a building (Wikidata classes `Q11303`, `Q12518`, `Q18142`): "How tall is the X, in metres?" |
+| wingspan | a taxon: "What is the wingspan of the X, in centimetres?"                              | an aircraft: "What is the wingspan of the X aircraft, in metres?"                           |
+| duration | the gestation period of a taxon: "How long is the gestation period of the X, in days?" | a film: "How long is the film X, in minutes?"                                               |
+
+- **Label.** The label is the kind of the sourced answer and comes from the Wikidata statement, not from a model. A
+  range statement has bounds whose relative width is at least 0.10 (`MIN_RANGE_RELATIVE_WIDTH`); narrower bounds
+  are read as measurement precision. An exact statement has no bounds or a relative half-width of at most 0.01. An
+  entity with several best-rank statements is dropped as ambiguous, except on the dog-breed side, where the
+  statements are united into one range.
+- **Selection.** An entity needs at least 5 sitelinks (20 in the film query, 100 for the people) and a Latin-script
+  label; a taxon whose label is its scientific name is dropped. Per family, the most linked `n_per_side` (120) items
+  of each side are kept, so the sides have the same size: 720 questions in all.
+- **Splits.** Each family is hashed into train, validation and test at 0.6, 0.2 and 0.2 by `assign_splits`. `p10a`
+  asks every question whatever its split. `p10b` fits on the train questions, picks the layer on the validation
+  ones and reports on the test ones. The behavior link of `p10c` uses the test questions; its knowledge AUROC is
+  given on all 720 questions and on the test questions.
+- **People.** In every family the range side is a living thing and the exact side an artifact, and the wording
+  differs by side. So 120 well-known people with one exact height between 140 and 230 cm are added as test-only
+  items ("How tall is X, in centimetres?"): living things with an exact answer. They never train a reader.
+
+### Behavior (`p10a`)
+
+`p10a` generates and reads no activations. Each question is asked in a free condition and in a forced condition,
+which tells the model to give one exact number. The few-shot format, shared by every model, has six worked examples
+in two orders (`range_last`, and the same list reversed, `exact_last`); the chat format, with no examples, is used
+for post-trained checkpoints only. Each prompt gets one greedy completion and `n_samples` (5) sampled ones at
+temperature 1.0, of up to 32 new tokens.
+
+- Parsing: a few-shot completion is cut at its first newline and a chat completion is read from its first
+  non-empty line. The line is read as a point, a range, an abstention or nothing (`parse_answer` in
+  `p10/answers.py`); the abstention patterns are those of P9 plus one more.
+- Grading: an answer is correct when its value lies in, or its range overlaps, the sourced interval widened by 5
+  percent on each side (`rel_tol`).
+- Measures: the share of answers of each form, the hedge gap (the range share on the range questions minus that on
+  the exact questions), how often a forced point lands inside the sourced range, and the people set beside the dog
+  breeds and the buildings.
+- Intervals: a rate of greedy answers has a Wilson interval, except in the rows of the people table that pool both
+  shot orders, where a question has two answers and the questions are resampled. A rate of sampled answers has a
+  bootstrap interval over the questions, each resampled with all its samples (2,000 resamples), replaced by the
+  Wilson interval on the number of questions when the rate is exactly 0 or 1. A gap resamples the questions within
+  each kind.
+- Sampling is seeded per chunk of `batch_size` prompts, so `batch_size` is part of the run, as in `p9a`.
+
+### Reading (`p10b`)
+
+Each question is rendered as the bare question (`plain`) and in the concept template of the paper with the word
+"variability" (`concept`), and read at the last token at every layer from 1 to L.
+
+- Train sets: each family alone, each pair of families, and all three. A reader is fitted on the train questions of
+  its set, with a range question paired with an exact one of the same family, never across families.
+- Finders and draws: `logistic`, `pca_diff`, `mean_diff` and `random`, each on `n_seeds` (5) draws of the pairs.
+  The random direction is fitted, oriented and given its layer like the others.
+- Layer: the layer with the highest mean validation AUROC over the draws, on the validation questions of the
+  families of the train set, the first one on ties. No test question chooses anything.
+- Metric: the AUROC of the test questions, range as the positive class, per family and pooled. A transfer row is
+  the AUROC of the draw-averaged score at the chosen layer.
+- Controls: the random direction; and four scores that use no model, each fitted or oriented on the same train
+  questions: `text_word`, `text_char`, `length` (characters of the question) and `popularity`
+  (`log10(sitelinks + 1)`). Because the layer and the sign are chosen on data, a random direction does not sit at
+  0.5, and a reader is compared with it.
+- People diagnostic: the AUROC of the dog breeds against the people, and of the people against the buildings, on
+  the reader's scores. A reader of range against exact scores the people like the buildings; a reader of living
+  against artifact scores them like the breeds.
+- Intervals: the transfer, control and people rows resample the test questions (1,000 resamples). The curves
+  resample the 5 draws. The two are not comparable.
+
+### Links (`p10c`)
+
+`p10c` runs no new training. It reads up to three finished runs of the same checkpoint: `p10b`, and `p9b` (for the
+knowledge link) and `p10a` (for the behavior link), of which at least one is needed; every committed run has both.
+They must be the full local run directories, because the export drops the readers and the per-item files.
+
+- Knowledge link: the cosine, at each layer, between the stored `p10b` direction (the `plain/logistic` reader of
+  draw 0, fitted on all three families) and the direction of each P9 contrast; and the AUROC of each stored P9
+  reader on the P10 questions, rendered with the template of the `p9b` run.
+- Behavior link: within one kind of question, the Spearman correlation between the `p10b` score of a test question
+  and how often the model answers it with a range in the `p10a` run. Across kinds the link would be trivial,
+  because the reader separates the kinds and the behavior differs by kind.
+- Controls: a cosine or an AUROC is compared with its random band, the 2.5th to 97.5th percentiles over `n_random`
+  (200) random unit directions at the same layer. An AUROC is never compared with 0.5.
+- Intervals: percentile bootstrap over the questions (1,000 resamples), with no correction for multiple comparisons.
 
 ## Run settings of the GPU runs
 
 - **Batch size is part of the run.** Sampling in `p9a` is seeded per chunk of prompts, so `batch_size` changes every
   sampled completion and the config hash. The label runs used a batch size of 8 for every model except `gpt2-large`
-  (3) and `gpt2-xl` (4).
+  (3) and `gpt2-xl` (4). `p10a` samples the same way; its runs used 8, except `qwen3-4b-base` (4).
+- **Hardware.** The `device` field of each `meta.json` names the device of the run. The committed runs come from
+  the 8 GB laptop GPU, from rented GPUs and, for a few runs, from a CPU; the 4B pair ran on rented GPUs only. The
+  config hash covers the config and not the machine, so compare `meta.json` before pooling runs.
 - **CUDA memory cap.** The runs on the 8 GB laptop GPU called `torch.cuda.set_per_process_memory_fraction(0.8)`
   before the run, so the caching allocator does not spill into shared system memory. This is memory safety only and
   does not change the outputs. The caller of the run sets it; it is not in the repository code.
 - **Offline reruns.** Dataset loaders take `offline=True` and read only the cache; for model weights set
   `HF_HUB_OFFLINE=1`. See [Reproduce at scale](../README.md#reproduce-at-scale).
-- **Precision.** float32 for GPT-2 small, medium and large, float16 for `gpt2-xl`, bfloat16 for Qwen3. Activations
+- **Precision.** The registry defaults: float32 for GPT-2 small, medium and large, float16 for `gpt2-xl`, bfloat16
+  for Qwen3, the 4B pair included. `r8`, `m2`, `m3`, `b1` and `v1` load every model in float32 instead. Activations
   are stored as float32 arrays.
 
 ## Data sources
