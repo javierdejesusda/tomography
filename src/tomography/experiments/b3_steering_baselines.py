@@ -304,6 +304,60 @@ def mean_centring_vectors(
     return mean_shift(pooled(target), pooled(generic))
 
 
+def user_text_start(
+    loaded: LoadedModel,
+    chat: ChatFormat,
+    instructions: Sequence[str],
+    *,
+    bos: BosMode | None = None,
+) -> int:
+    """Returns where an activation addition starts in a rendered prompt.
+
+    The published method adds the difference at the front of the prompt
+    text. A prompt rendered with a chat format opens with a header, so the
+    front of its text is the first token of the user text, not token 0,
+    which belongs to the header.
+
+    Args:
+        loaded: The wrapped model.
+        chat: The chat format the prompts are rendered with.
+        instructions: The user texts of the prompts.
+        bos: BOS policy of the run.
+
+    Returns:
+        The `start` of a `PromptDifference` built under the same BOS policy:
+        the token index of the first token that overlaps the user text,
+        minus one under a BOS, because row 0 of such a difference is the
+        zero row of the BOS and row 1 holds the first token of its prompt.
+
+    Raises:
+        ValueError: If there is no prompt, or the user text does not start
+            at the same token index in every prompt (a first word can merge
+            with the end of the header), so that one start cannot serve
+            them all.
+    """
+    starts: dict[int, str] = {}
+    for instruction in instructions:
+        text, user_start, _ = chat.render_turn(instruction)
+        batch = loaded.encode([text], bos=bos)
+        first = next(
+            index
+            for index, (begin, end) in enumerate(batch.offsets[0])
+            if end > max(begin, user_start)
+        )
+        starts.setdefault(first - int(batch.has_bos), instruction)
+    if not starts:
+        raise ValueError("no prompt to locate the user text in")
+    if len(starts) > 1:
+        raise ValueError(
+            "the user text starts at different token indices "
+            f"({sorted(starts)}) in the rendered prompts, for example in "
+            f"{list(starts.values())[:2]}, so an activation addition has no "
+            "single start"
+        )
+    return next(iter(starts))
+
+
 def _check_config(config: Config) -> list[Concept]:
     """Checks the settings that need no data and returns the concepts."""
     names = config.concepts
@@ -442,6 +496,7 @@ class _Setup:
     post_trained: bool
     layers: tuple[int, ...]
     norms: Mapping[int, float]
+    actadd_start: int
     held: HeldOut
     shown: Mapping[str, list[str]]
     prompts: Mapping[str, list[str]]
@@ -555,7 +610,7 @@ def _build(setup: _Setup, concept: Concept, train: Sequence[Example]) -> _Built:
     difference = PromptDifference.from_prompts(
         loaded, *concept.pair, layers, coeff=1.0, bos=config.bos
     )
-    matched = difference.norm_matched(setup.norms)
+    matched = difference.norm_matched(setup.norms).at(setup.actadd_start)
 
     def steer(arm: str, coeff: float) -> Arm:
         name = f"{arm}/{coeff:g}"
@@ -620,15 +675,19 @@ def execute(
 
     A base checkpoint continues the first words of held-out texts; a
     post-trained checkpoint answers instructions rendered with its chat
-    template. For each concept the vectors are built from the same training
-    pairs: the two-option prompts of contrastive activation addition, the
-    mean-centring vector against the calibration texts, the difference of
-    class means and our reading vector on the stimuli of C1 and C2, and the
-    activation addition of the concept's prompt pair. Each additive arm
-    steers the same layers at every coefficient of the grid, relative to
-    the mean residual norm of the calibration texts. The `prompt` arm
-    prepends an instruction, `none` does nothing, and the random arms steer
-    along random unit directions.
+    template. For each concept, four vectors are built from the same
+    training pairs: the two-option prompts of contrastive activation
+    addition, the mean-centring vector (the positive texts of the pairs
+    against the calibration texts), and the difference of class means and
+    our reading vector on the stimuli of C1 and C2. The activation addition
+    uses no training pair: it is the difference of the concept's prompt
+    pair, added at the front of the prompt text, which on a prompt rendered
+    with a chat template is the first token of the user text
+    (`user_text_start`), not the chat header. Each additive arm steers the
+    same layers at every coefficient of the grid, relative to the mean
+    residual norm of the calibration texts. The `prompt` arm prepends an
+    instruction, `none` does nothing, and the random arms steer along
+    random unit directions drawn from the seed alone.
 
     Writes `prompts.json` (the two halves as a judge reads them),
     `trials_<concept>_<split>` (every generation with the classifier score
@@ -662,8 +721,9 @@ def execute(
             generation settings are invalid (see `GenSettings`), the
             held-out texts or the prompts do not suffice, a post-trained
             checkpoint gets no instructions, a concept lacks its examples,
-            its classifier or `n_pairs` pairs. All of these are raised
-            before anything is written.
+            its classifier or `n_pairs` pairs, or the user text of the
+            rendered prompts does not start at one token index. All of
+            these are raised before anything is written.
     """
     concepts = _check_config(config)
     settings = GenSettings.from_config(config)
@@ -696,6 +756,16 @@ def execute(
             layers,
             bos=config.bos,
             batch_size=config.batch_size,
+        ),
+        actadd_start=(
+            user_text_start(
+                loaded,
+                chat,
+                [prompt for half in shown.values() for prompt in half],
+                bos=config.bos,
+            )
+            if post_trained
+            else 0
         ),
         held=held,
         shown=shown,
@@ -761,6 +831,7 @@ def execute(
             "concepts": {c.name: c.description for c in concepts},
             "arms": names,
             "raw_norms": raw_norms,
+            "actadd_start": setup.actadd_start,
             "n_tune": config.n_tune,
             "n_held_out": config.n_held_out,
         },
@@ -896,9 +967,10 @@ def judge_report(run_dir: RunDir) -> list[Path]:
     (the mean overall score and the number of empty generations of every
     arm and coefficient on the tuning half) and `summary_judged.json` (the
     chosen coefficients and the rule that chose them, the agreement of the
-    two judges per criterion, the judge model ids, the rubric digest, and
-    per concept the rank correlation of the judged concept score with the
-    classifier score).
+    two judges per criterion, pooled and per stage, with the agreement
+    rate, Cohen's kappa and the quadratic-weighted kappa, the judge model
+    ids, the rubric digest of each stage, and per concept the rank
+    correlation of the judged concept score with the classifier score).
 
     Args:
         run_dir: A B3 run whose two stages are exported and imported.
@@ -920,7 +992,13 @@ def judge_report(run_dir: RunDir) -> list[Path]:
         n_boot=int(run_dir.config["n_boot"]),
         seed=int(run_dir.config["seed"]),
     )
-    agreed = agreement(run_dir, judged)
+    agreed = {
+        "pooled": agreement(run_dir, judged),
+        **{
+            stage: agreement(run_dir, judged, stages=(stage,))
+            for stage in STAGES
+        },
+    }
     tuning = tuning_rows(judged, scores)
     classifier = _classifier_scores(run_dir)
     side = {
@@ -987,7 +1065,9 @@ def judge_report(run_dir: RunDir) -> list[Path]:
                 "selection_rule": SELECTION_RULE,
                 "agreement": agreed,
                 "judge_models": sorted(models),
-                "rubric_sha256": plans[0].rubric_sha256,
+                "rubric_sha256": {
+                    plan.stage: plan.rubric_sha256 for plan in plans
+                },
                 "classifier_correlation": correlation,
             },
         ),

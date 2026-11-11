@@ -13,6 +13,7 @@ import pytest
 
 from tomography.activations import collect_activations
 from tomography.cli import load_experiment
+from tomography.control.contrast import PromptDifference
 from tomography.control.contrast import choice_pairs
 from tomography.control.contrast import mean_shift
 from tomography.datasets.emotions import EMOTIONS
@@ -27,15 +28,21 @@ from tomography.experiments.b3_steering_baselines import judged_generations
 from tomography.experiments.b3_steering_baselines import mean_centring_vectors
 from tomography.experiments.b3_steering_baselines import plot
 from tomography.experiments.b3_steering_baselines import run
+from tomography.experiments.b3_steering_baselines import user_text_start
 from tomography.experiments.base import RunDir
 from tomography.experiments.effects import read_trials
+from tomography.experiments.steering import GenSettings
+from tomography.experiments.steering import edit_arm
 from tomography.experiments.sweep import chat_format_for
 from tomography.judging.batches import Export
+from tomography.judging.run import agreement
 from tomography.judging.run import export_stage
 from tomography.judging.run import import_judgments
 from tomography.judging.scores import SELECTION_RULE
 from tomography.model import MODELS
+from tomography.model import BosMode
 from tomography.model import LoadedModel
+from tomography.templates import ChatFormat
 
 WORDS = ("good", "movie", "text", "dog", "fox", "true", "short", "happy")
 ARMS = ("caa", "mean_centring", "actadd", "diffmean", "reader", "random/0")
@@ -306,6 +313,94 @@ def test_a_post_trained_run_renders_instructions_with_the_chat_template(
     assert {r.prompt for r in judged.records} == set(shown)
 
 
+@pytest.mark.parametrize("bos", [None, "none"], ids=["default", "no_bos"])
+def test_an_activation_addition_starts_at_the_user_text_of_a_chat_prompt(
+    tiny_qwen3: LoadedModel, bos: BosMode | None
+) -> None:
+    loaded = _post_trained(tiny_qwen3)
+    chat = chat_format_for(loaded)
+
+    start = user_text_start(loaded, chat, _instructions(), bos=bos)
+
+    for instruction in _instructions():
+        text, user_start, _ = chat.render_turn(instruction)
+        batch = loaded.encode([text], bos=bos)
+        spans = batch.offsets[0]
+        # Row 0 of a difference built under a BOS is the zero row of the BOS.
+        first = start + int(batch.has_bos)
+        assert all(end <= user_start for _, end in spans[:first])
+        assert spans[first][0] == user_start
+        assert spans[first][1] > user_start
+    assert loaded.encode(["x"], bos=bos).has_bos == (bos is None)
+    # The header of the chat template: `<|im_start|>user` and a line break.
+    assert start == 5
+
+
+def test_prompts_whose_user_text_starts_at_different_tokens_are_refused(
+    tiny_qwen3: LoadedModel,
+) -> None:
+    # In the plain layout a first word can merge with the space before it.
+    chat = ChatFormat("plain")
+
+    assert user_text_start(tiny_qwen3, chat, ["word one", "word two"]) == 2
+    with pytest.raises(ValueError, match="different token indices"):
+        user_text_start(tiny_qwen3, chat, ["word 3 word 4", "3 word"])
+    with pytest.raises(ValueError, match="no prompt"):
+        user_text_start(tiny_qwen3, chat, [])
+
+
+def test_a_post_trained_run_adds_the_activation_addition_at_the_user_text(
+    tiny_qwen3: LoadedModel, tmp_path: Path
+) -> None:
+    loaded = _post_trained(tiny_qwen3)
+    config, run_dir = _execute(loaded, tmp_path)
+    chat = chat_format_for(loaded)
+    prompts = run_dir.read_json("prompts")
+    summary = run_dir.read_json("summary")
+    assert isinstance(prompts, dict)
+    assert isinstance(summary, dict)
+    start = user_text_start(
+        loaded, chat, [*prompts["tune"], *prompts["held_out"]]
+    )
+    assert start == 5
+    assert summary["actadd_start"] == start
+    layers = summary["layers"]
+    norms = {int(layer): norm for layer, norm in summary["norms"].items()}
+    rendered = [chat.render_turn(p)[0] for p in prompts["held_out"]]
+    stored = {t.name: t for t in read_trials(run_dir, "trials_anger_held_out")}
+    matched = PromptDifference.from_prompts(
+        loaded, *CONCEPTS["anger"].pair, layers, coeff=1.0
+    ).norm_matched(norms)
+    differs = []
+    for coeff in COEFFS:
+        trial = stored[f"actadd/{coeff:g}"]
+        assert list(trial.prompts) == rendered
+
+        def texts(controller: PromptDifference) -> list[list[str]]:
+            arm = edit_arm(
+                loaded, GenSettings.from_config(config), controller, name="a"
+            )
+            return [[c.text for c in row] for row in arm.generate(rendered)]
+
+        at_user_text = texts(
+            dataclasses.replace(matched.at(start), coeff=coeff)
+        )
+        at_header = texts(dataclasses.replace(matched, coeff=coeff))
+        assert [list(row) for row in trial.completions] == at_user_text
+        differs.append(at_user_text != at_header)
+    assert any(differs)
+
+
+def test_a_base_run_adds_the_activation_addition_at_the_front(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    _, run_dir = _execute(tiny_gpt2, tmp_path)
+
+    summary = run_dir.read_json("summary")
+    assert isinstance(summary, dict)
+    assert summary["actadd_start"] == 0
+
+
 def test_a_post_trained_run_needs_instructions(
     tiny_qwen3: LoadedModel, tmp_path: Path
 ) -> None:
@@ -526,6 +621,7 @@ def _judge(run_dir: RunDir, stage: str, out: Path) -> None:
             batch.batch_id,
             "\n".join(lines),
             judge_model=f"judge-model-{batch.judge}",
+            export_dir=out,
         )
 
 
@@ -633,10 +729,26 @@ def test_the_report_selects_on_tuning_and_reports_the_held_out_half(
     judged = run_dir.read_json("summary_judged")
     assert isinstance(judged, dict)
     assert judged["judge_models"] == ["judge-model-1", "judge-model-2"]
-    assert len(judged["rubric_sha256"]) == 64
-    assert sorted(judged["agreement"]) == ["concept", "fluency"]
-    assert judged["agreement"]["concept"]["rate"] == 1.0
-    assert judged["agreement"]["concept"]["n"] >= 1
+    assert judged["rubric_sha256"] == {
+        stage: _plan(run_dir, stage).rubric_sha256
+        for stage in ("tune", "held_out")
+    }
+    assert all(len(d) == 64 for d in judged["rubric_sha256"].values())
+    records = judged_generations(run_dir)
+    assert judged["agreement"] == {
+        "pooled": agreement(run_dir, records),
+        "tune": agreement(run_dir, records, stages=("tune",)),
+        "held_out": agreement(run_dir, records, stages=("held_out",)),
+    }
+    for part in judged["agreement"].values():
+        assert sorted(part) == ["concept", "fluency"]
+        assert part["concept"]["rate"] == 1.0
+        assert part["concept"]["weighted_kappa"] == 1.0
+        assert part["concept"]["n"] >= 1
+    assert judged["agreement"]["pooled"]["concept"]["n"] == (
+        judged["agreement"]["tune"]["concept"]["n"]
+        + judged["agreement"]["held_out"]["concept"]["n"]
+    )
     assert sorted(judged["classifier_correlation"]) == ["anger", "sentiment"]
     assert judged["selected"] == [
         [concept, arm, rows[concept, arm]["coeff"]] for concept, arm in rows

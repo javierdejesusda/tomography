@@ -191,10 +191,15 @@ uv run tomography plot all --out results
 
 ```bash
 uv run tomography judge export <run> --out batches                    # the tuning half
-uv run tomography judge import <run> judged.jsonl --batch <id> --judge-model <model-id>
+uv run tomography judge import <run> judged.jsonl --batch <id> --judge-model <model-id> --export-dir batches
 uv run tomography judge export <run> --out batches --stage held_out   # once every tuning batch is imported
 uv run tomography judge report <run>
 ```
+
+A judge is given the `batches` folder and nothing else: the batch files, `rubric.txt` and
+`criteria.json`, none of which names the stage or the arm. `judge import` refuses a batch whose
+file or rubric in `--export-dir` no longer has the SHA-256 stored at export.
+
 Reproducibility rules:
 
 - Every checkpoint pins a 40-character commit SHA; every data file pins a

@@ -598,7 +598,8 @@ It has code and tests only; no run is reported yet.
   one with the highest mean overall score on the tuning half; a tie goes to the smallest magnitude, then to the
   lower value. The arm is reported on the held-out half at that coefficient only. A held-out judgment cannot reach
   the choice: the held-out export is refused until every tuning batch of both judges is imported, and it stores the
-  choice of each arm with this rule in `judge_selection.json` before any held-out batch exists.
+  choice of each arm with this rule in `judge_selection.json` before any held-out batch exists. The tuning means
+  are compared as exact fractions, so two coefficients with the same scores tie whatever the order of the prompts.
 - Roles: a post-trained checkpoint answers AlpacaEval instructions rendered with its chat template and is judged on
   `concept`, `instruction` and `fluency`. A base checkpoint continues the first words of held-out WikiText passages
   and is judged on `concept` and `fluency`, since a continuation prompt asks for nothing. The roles are never pooled.
@@ -606,17 +607,24 @@ It has code and tests only; no run is reported yet.
   `anger`. The concept set of AxBench is not included (see the method definitions).
 - Shared steering: every additive arm edits the layers of `default_control_layers` (40, 55 and 70 percent of the
   depth) with the grid `coeffs` (0.05, 0.1, 0.2, 0.4, 0.8), relative to the mean residual norm of the calibration
-  texts. All vectors of a concept come from the same `n_pairs` (64) training pairs.
+  texts. For each concept, `caa`, `diffmean` and `reader` are built from the same `n_pairs` (64) training pairs
+  and `mean_centring` from the positive texts of those pairs against the calibration texts. `actadd` uses no
+  training pair, only the prompt pair of the concept, and the random arms use no data (seeded unit directions).
 - Judge: an external judge reads blinded, shuffled batch files and answers in a file; the code holds no network
-  client. A batch line has an item id, the prompt, the concept description and the generation; the arm, the
-  coefficient, the checkpoint and the split stay in the run. The rubric is package data (`judging/rubric.txt`) and
-  its SHA-256 is stored with every judgment, beside the model id given at import and the batch id. An import that is
-  not exactly one valid judgment per exported item is refused and changes nothing. A batch file holds at most
-  `--batch-size` (50) items, so that one judge can take one file. In each stage a seeded share of the generations
-  (`--second-fraction`, 0.1) is exported again under other item ids for a second, independent judge, and
-  `summary_judged.json` reports the agreement rate and Cohen's kappa per criterion. The judge is a model run by
-  hand, identified by its model id and the rubric, not a pinned snapshot behind an interface; the raw judgments are
-  stored.
+  client. A judge is given the export folder and nothing else: the batch files (`<batch id>.jsonl`), `rubric.txt`
+  and `criteria.json`, which lists the criteria to score. A batch line has an item id, the prompt, the concept
+  description and the generation; no file names the stage, the arm, the coefficient, the checkpoint or the judge
+  slot of a batch, which stay in the run. The rubric is package data (`judging/rubric.txt`). The export stores the
+  SHA-256 of every batch file and of the rubric in the run, and `judge import` reads both files again from
+  `--export-dir`: a batch whose file or rubric no longer has the stored digest is refused, so the stored digests
+  are those of the files the judge was given. Both digests are stored with every judgment, beside the model id
+  given at import and the batch id. An import that is not exactly one valid judgment per exported item is refused
+  and changes nothing. A batch file holds at most `--batch-size` (50) items, so that one judge can take one file.
+  In each stage a seeded share of the generations (`--second-fraction`, 0.1) is exported again under other item
+  ids for a second, independent judge, and `summary_judged.json` reports, per criterion, the agreement rate,
+  Cohen's kappa and the quadratic-weighted kappa (the scores are ordinal, so a 0 against a 2 weighs four times a 1
+  against a 2), pooled and per stage. The judge is a model run by hand, identified by its model id and the rubric,
+  not a pinned snapshot behind an interface; the raw judgments are stored.
 - Cross-check: the pinned classifier of the concept (`sentiment-primary` or `emotion-primary`) scores every
   generation; `table.json` carries its held-out mean and `summary_judged.json` its rank correlation with the judged
   concept score.
@@ -626,7 +634,8 @@ It has code and tests only; no run is reported yet.
   coefficient, the number of empty generations `n_empty`, the mean per criterion and the overall score with a
   percentile bootstrap interval over the held-out prompts, 2,000 resamples), `table_tuning.json` (every arm and
   coefficient on the tuning half, with `n_empty`) and `summary_judged.json` (the chosen coefficients with the rule,
-  the agreement of the judges, the judge model ids and the rubric digest).
+  the agreement of the judges pooled and per stage, the judge model ids and the rubric digest of each stage).
+  `summary.json` holds `actadd_start`, the token index where the activation addition starts.
 
 Method definitions. Each arm names its source and where it departs from the published recipe. Two rules hold for
 every arm. An empty generation (nothing but whitespace) is not exported to a judge and scores 0 on every criterion;
@@ -649,10 +658,16 @@ source added later would extend that registry.
   corpus is the calibration slice of held-out WikiText (`n_calibration` passages), and the vector is normalized and
   norm-matched as above.
 - `actadd`, activation addition (Turner et al. 2023, `turner2023steering`): the difference of the residual streams
-  of a positive and a negative prompt, added at the first positions of the prompt (`PromptDifference`). Departures:
-  each layer is rescaled so that the mean norm of its non-zero positions equals the mean residual norm
-  (`norm_matched`), where the published recipe keeps the raw magnitude; it is added at the shared layers instead of
-  one layer; the prompt pairs are ours (`Love` and `Hate` for sentiment, one word pair per emotion in `CONCEPTS`).
+  of a positive and a negative prompt, added at the front of the prompt text (`PromptDifference`). A base
+  checkpoint takes it from token 0. A post-trained checkpoint reads a prompt that opens with the header of its
+  chat template, so there the front of the prompt text is the first token of the user text (`user_text_start`,
+  stored as `actadd_start`); added from token 0 it would edit the header and never reach the instruction. The run
+  is refused if the user text does not start at one token index in every prompt. The perplexity of neutral text,
+  which has no header, is measured with the addition at the front of each passage. Departures: each layer is
+  rescaled so that the mean norm of its non-zero positions equals the mean residual norm (`norm_matched`), where
+  the published recipe keeps the raw magnitude; it is added at the shared layers instead of one layer; the prompt
+  pairs are ours (`Love` and `Hate` for sentiment, one word pair per emotion in `CONCEPTS`) and, unlike the other
+  vector arms, involve no training pair.
 - `diffmean`, the difference of class means (the mass-mean direction of Marks and Tegmark 2024,
   `marks2024geometry`, a baseline of AxBench): the `mean_diff` finder on the stimuli of C1 and C2, read at the last
   token of our template, not on token means of raw text.
