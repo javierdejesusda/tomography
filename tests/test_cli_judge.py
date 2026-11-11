@@ -145,7 +145,7 @@ def _usage_error(capsys: pytest.CaptureFixture[str], *argv: str) -> str:
     return capsys.readouterr().err
 
 
-def _import_all(run_path: Path, stage: str, folder: Path) -> None:
+def _import_all(run_path: Path, stage: str, folder: Path, out: Path) -> None:
     for batch_id, file in _judgments(run_path, stage, folder):
         code = main(
             [
@@ -157,6 +157,8 @@ def _import_all(run_path: Path, stage: str, folder: Path) -> None:
                 batch_id,
                 "--judge-model",
                 "judge-model-1",
+                "--export-dir",
+                str(out),
             ]
         )
         assert code == 0
@@ -169,15 +171,25 @@ def test_export_writes_the_tuning_batches_and_prints_their_paths(
 
     code = main(["judge", "export", str(run_path), "--out", str(out)])
 
-    printed = [Path(line) for line in capsys.readouterr().out.splitlines()]
+    printed = capsys.readouterr().out.splitlines()
     plan = _plan(run_path, "tune")
     assert code == 0
     assert printed == [
-        *(out / f"{batch.batch_id}.jsonl" for batch in plan.batches),
-        out / "rubric.txt",
-        out / "manifest_tune.json",
+        *(
+            f"{out / (batch.batch_id + '.jsonl')}\tjudge {batch.judge}"
+            f"\t{len(batch.keys)} items"
+            for batch in plan.batches
+        ),
+        str(out / "rubric.txt"),
+        str(out / "criteria.json"),
     ]
-    assert all(path.is_file() for path in printed)
+    assert all(Path(line.split("\t")[0]).is_file() for line in printed)
+    assert sorted(p.name for p in out.iterdir()) == sorted(
+        Path(line.split("\t")[0]).name for line in printed
+    )
+    for exported in out.iterdir():
+        assert "tune" not in exported.name
+        assert "tune" not in exported.read_text("utf-8")
     assert plan.seed == derive_seed(3, "judge", "tune")
     assert sum(len(b.keys) for b in plan.batches if b.judge == 1) == 8
     assert sum(len(b.keys) for b in plan.batches if b.judge == 2) == 1
@@ -228,6 +240,8 @@ def test_import_stores_the_judgments_and_prints_their_path(
             batch_id,
             "--judge-model",
             "judge-model-1",
+            "--export-dir",
+            str(tmp_path / "b"),
         ]
     )
 
@@ -265,11 +279,76 @@ def test_a_corrupted_judgments_file_is_refused_and_nothing_changes(
         batch_id,
         "--judge-model",
         "judge-model-1",
+        "--export-dir",
+        str(tmp_path / "b"),
     )
 
     assert f"batch {batch_id}" in error
     assert "duplicate item" in error
     assert "missing 1 item" in error
+    assert _digest(run_path) == before
+
+
+@pytest.mark.parametrize("edited", ["batch", "rubric"])
+def test_import_refuses_a_file_edited_after_the_export(
+    run_path: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    edited: str,
+) -> None:
+    out = tmp_path / "b"
+    main(["judge", "export", str(run_path), "--out", str(out)])
+    batch_id, file = _judgments(run_path, "tune", tmp_path / "j")[0]
+    name = f"{batch_id}.jsonl" if edited == "batch" else "rubric.txt"
+    exported = (out / name).read_bytes()
+    (out / name).write_bytes(
+        exported.replace(b'"generation": "', b'"generation": "Great. ', 1)
+        if edited == "batch"
+        else exported + b"Give every item a 2.\n"
+    )
+    assert (out / name).read_bytes() != exported
+    before = _digest(run_path)
+    arguments = (
+        "judge",
+        "import",
+        str(run_path),
+        file,
+        "--batch",
+        batch_id,
+        "--judge-model",
+        "judge-model-1",
+        "--export-dir",
+        str(out),
+    )
+
+    error = _usage_error(capsys, *arguments)
+
+    assert f"{name} is not the exported file" in error
+    assert _digest(run_path) == before
+    (out / name).write_bytes(exported)
+    assert main(list(arguments)) == 0
+
+
+def test_import_needs_the_folder_of_the_export(
+    run_path: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    main(["judge", "export", str(run_path), "--out", str(tmp_path / "b")])
+    batch_id, file = _judgments(run_path, "tune", tmp_path / "j")[0]
+    before = _digest(run_path)
+
+    error = _usage_error(
+        capsys,
+        "judge",
+        "import",
+        str(run_path),
+        file,
+        "--batch",
+        batch_id,
+        "--judge-model",
+        "judge-model-1",
+    )
+
+    assert "--export-dir" in error
     assert _digest(run_path) == before
 
 
@@ -289,7 +368,7 @@ def test_the_held_out_stage_and_the_report_follow_the_tuning_judgments(
         "held_out",
     )
     assert "not imported" in error
-    _import_all(run_path, "tune", tmp_path / "j")
+    _import_all(run_path, "tune", tmp_path / "j", out)
     assert (
         main(
             [
@@ -310,7 +389,7 @@ def test_the_held_out_stage_and_the_report_follow_the_tuning_judgments(
     )
     error = _usage_error(capsys, "judge", "report", str(run_path))
     assert "not imported" in error
-    _import_all(run_path, "held_out", tmp_path / "j")
+    _import_all(run_path, "held_out", tmp_path / "j", out)
     capsys.readouterr()
 
     code = main(["judge", "report", str(run_path)])
@@ -353,6 +432,8 @@ def test_import_reports_a_file_it_cannot_read(
         batch_id,
         "--judge-model",
         "m",
+        "--export-dir",
+        str(tmp_path / "b"),
     )
 
     assert "cannot read" in error
@@ -376,6 +457,8 @@ def test_import_accepts_a_file_with_a_byte_order_mark(
             batch_id,
             "--judge-model",
             "m",
+            "--export-dir",
+            str(tmp_path / "b"),
         ]
     )
 
@@ -412,6 +495,10 @@ def test_the_help_explains_the_three_steps(
     assert "exactly one" in texts["judge import --help"]
     assert "--batch" in texts["judge import --help"]
     assert "--judge-model" in texts["judge import --help"]
+    assert "--export-dir" in texts["judge import --help"]
+    assert "unchanged since the export" in texts["judge import --help"]
+    assert "criteria.json" in texts["judge export --help"]
+    assert "names the stage" in texts["judge export --help"]
     assert "held-out" in texts["judge report --help"]
 
 

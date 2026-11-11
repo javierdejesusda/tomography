@@ -5,12 +5,15 @@ half is exported first; once every one of its batches is imported, the
 held-out half is exported at the coefficient each arm won on the tuning half,
 so a held-out judgment can never reach the selection. Plans, the selection
 and judgments are stored in the run directory: `judge_export_<stage>.json`,
-`judge_selection.json` and `judgments_<batch_id>.json`.
+`judge_selection.json` and `judgments_<batch_id>.json`. A plan holds the
+SHA-256 of every exported batch file and of the rubric, and an import is
+refused when a file a judge was given no longer has that digest.
 """
 
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -22,14 +25,18 @@ from tomography.experiments.base import derive_seed
 from tomography.judges import label_agreement
 from tomography.judging.batches import Export
 from tomography.judging.batches import Generation
+from tomography.judging.batches import check_files
 from tomography.judging.batches import plan_export
+from tomography.judging.batches import seal
 from tomography.judging.batches import write_export
 from tomography.judging.judgments import parse_judgments
 from tomography.judging.rubric import rubric_sha256
 from tomography.judging.rubric import rubric_text
 from tomography.judging.scores import SELECTION_RULE
 from tomography.judging.scores import harmonic_mean
+from tomography.judging.scores import overall_mean
 from tomography.judging.scores import select_coefficient
+from tomography.judging.scores import weighted_kappa
 from tomography.reading.metrics import bootstrap_ci
 
 TUNE = "tune"
@@ -247,6 +254,11 @@ def export_stage(
     it (`SELECTION_RULE`), before any held-out judgment exists. An empty
     generation is never exported: it scores 0 on every criterion.
 
+    The stored plan holds the SHA-256 of every batch file and of the rubric,
+    which `import_judgments` compares with the files in the folder. The
+    folder is what a judge is given: no file in it names the stage or the
+    judge slot of a batch.
+
     Repeating an export with the same arguments rewrites the same bytes. A
     different plan replaces the stored one only while no judgment of the
     stage is stored.
@@ -255,7 +267,8 @@ def export_stage(
         run_dir: The run that holds the generations.
         judged: The generations of the run.
         stage: `tune` or `held_out`.
-        out_dir: Folder for the batch files, the rubric and the manifest.
+        out_dir: Folder for the batch files, the rubric and the criteria
+            file.
         seed: Seed of the plan; None derives it from the seed of the run and
             the stage.
         batch_size: Largest number of items per batch file.
@@ -277,6 +290,16 @@ def export_stage(
     selected = None if selection is None else _selected(selection)
     keys = _stage_keys(judged, stage, selected)
     rubric = rubric_text()
+    by_key = {r.key: r for r in judged.records}
+    generations = {
+        key: Generation(
+            key=key,
+            prompt=by_key[key].prompt,
+            concept=by_key[key].description,
+            text=by_key[key].text,
+        )
+        for key in keys
+    }
     plan = plan_export(
         keys,
         stage=stage,
@@ -290,6 +313,7 @@ def export_stage(
         batch_size=batch_size,
         second_fraction=second_fraction,
     )
+    plan = seal(plan, generations)
     stored = read_export(run_dir, stage)
     if stored != plan:
         if stored is not None and any(
@@ -303,21 +327,7 @@ def export_stage(
         run_dir.write_json(_stem(stage), plan.to_dict())
     if selection is not None and read_selection(run_dir) != selected:
         run_dir.write_json(_SELECTION, selection)
-    by_key = {r.key: r for r in judged.records}
-    return write_export(
-        plan,
-        {
-            key: Generation(
-                key=key,
-                prompt=by_key[key].prompt,
-                concept=by_key[key].description,
-                text=by_key[key].text,
-            )
-            for key in keys
-        },
-        out_dir,
-        rubric=rubric,
-    )
+    return write_export(plan, generations, out_dir, rubric=rubric)
 
 
 def _ids(plan: Export) -> dict[str, set[str]]:
@@ -343,19 +353,28 @@ def _check_disjoint(run_dir: RunDir, plan: Export) -> None:
 
 
 def import_judgments(
-    run_dir: RunDir, batch_id: str, text: str, *, judge_model: str
+    run_dir: RunDir,
+    batch_id: str,
+    text: str,
+    *,
+    judge_model: str,
+    export_dir: Path,
 ) -> Path:
     """Checks the judgments of one batch and stores them in the run.
 
+    The batch file and the rubric in `export_dir` must be the exported ones:
+    their SHA-256 is compared with the digests the plan stored at export.
     `judgments_<batch_id>.json` holds the batch id, its stage and judge
-    slot, the model id of the judge, the digest of the rubric the batch was
-    exported with, the criteria and the raw judgments in batch order.
+    slot, the model id of the judge, the checked digests of the rubric and
+    of the batch file, the criteria and the raw judgments in batch order.
 
     Args:
         run_dir: The run the batch was exported from.
         batch_id: Identifier of the exported batch.
         text: Content of the judgments file.
         judge_model: Model id of the judge, as the judge reports it.
+        export_dir: The folder the batch was exported to, with the batch
+            file and the rubric the judge was given.
 
     Returns:
         The path of the stored judgments.
@@ -364,8 +383,9 @@ def import_judgments(
         JudgmentError: If the file does not hold exactly one valid judgment
             per exported item.
         ValueError: If the run has no export, the batch is unknown or
-            already imported, or `judge_model` is blank. Nothing is written
-            when an error is raised.
+            already imported, `judge_model` is blank, or the batch file or
+            the rubric is missing in `export_dir` or differs from the
+            exported one. Nothing is written when an error is raised.
     """
     plans = [plan for stage in STAGES if (plan := read_export(run_dir, stage))]
     if not plans:
@@ -381,6 +401,7 @@ def import_judgments(
         raise ValueError("judge_model must name the judge")
     if _is_imported(run_dir, batch_id):
         raise ValueError(f"batch {batch_id} is already imported")
+    check_files(plan, batch_id, export_dir)
     batch = plan.batch(batch_id)
     scores = parse_judgments(text, batch, plan.criteria)
     return run_dir.write_json(
@@ -391,6 +412,7 @@ def import_judgments(
             "judge": batch.judge,
             "judge_model": model,
             "rubric_sha256": plan.rubric_sha256,
+            "batch_sha256": batch.sha256,
             "criteria": list(plan.criteria),
             "judgments": [
                 {
@@ -456,13 +478,39 @@ def judge_scores(
     return scores
 
 
-def _overall(records: Sequence[Record], scores: Scores) -> NDArray[np.float64]:
+def _stacked(records: Sequence[Record], scores: Scores) -> NDArray[np.int64]:
+    """Stacks the scores of some generations, shape `(items, criteria)`."""
     missing = [r.key for r in records if r.key not in scores]
     if missing:
         raise ValueError(
             f"no judgment for {len(missing)} generations, first {missing[0]!r}"
         )
-    return harmonic_mean(np.stack([scores[r.key] for r in records]))
+    return np.stack([scores[r.key] for r in records])
+
+
+def _overall(records: Sequence[Record], scores: Scores) -> NDArray[np.float64]:
+    return harmonic_mean(_stacked(records, scores))
+
+
+def _tuning_means(
+    judged: Judged, scores: Scores
+) -> list[tuple[tuple[str, str, float | None], list[Record], Fraction]]:
+    """Averages the overall score of each arm and coefficient on tuning.
+
+    Returns:
+        Per concept, arm and coefficient, in order of first appearance: its
+        tuning generations and their exact mean overall score.
+    """
+    groups: dict[tuple[str, str, float | None], list[Record]] = {}
+    for record in judged.records:
+        if record.split == TUNE:
+            groups.setdefault(
+                (record.concept, record.arm, record.coeff), []
+            ).append(record)
+    return [
+        (cell, records, overall_mean(_stacked(records, scores)))
+        for cell, records in groups.items()
+    ]
 
 
 def tuning_rows(judged: Judged, scores: Scores) -> list[dict[str, object]]:
@@ -481,12 +529,6 @@ def tuning_rows(judged: Judged, scores: Scores) -> list[dict[str, object]]:
     Raises:
         ValueError: If a tuning generation has no judgment.
     """
-    groups: dict[tuple[str, str, float | None], list[Record]] = {}
-    for record in judged.records:
-        if record.split == TUNE:
-            groups.setdefault(
-                (record.concept, record.arm, record.coeff), []
-            ).append(record)
     return [
         {
             "concept": concept,
@@ -494,9 +536,11 @@ def tuning_rows(judged: Judged, scores: Scores) -> list[dict[str, object]]:
             "coeff": coeff,
             "n_items": len(records),
             "n_empty": sum(r.empty for r in records),
-            "overall": float(_overall(records, scores).mean()),
+            "overall": float(mean),
         }
-        for (concept, arm, coeff), records in groups.items()
+        for (concept, arm, coeff), records, mean in _tuning_means(
+            judged, scores
+        )
     ]
 
 
@@ -512,19 +556,19 @@ def select_coefficients(
     Returns:
         Maps `(concept, arm)` to the coefficient with the highest mean
         overall score on the tuning prompts (see `select_coefficient` for
-        ties), or to None for an arm without a grid.
+        ties), or to None for an arm without a grid. The means are compared
+        exactly, so equal sets of scores tie whatever the order of the
+        prompts.
 
     Raises:
         ValueError: If a tuning generation has no judgment.
     """
-    grids: dict[tuple[str, str], list[tuple[float, float]]] = {
+    grids: dict[tuple[str, str], list[tuple[float, Fraction]]] = {
         cell: [] for cell in judged.cells()
     }
-    for row in tuning_rows(judged, scores):
-        if row["coeff"] is not None:
-            grids[str(row["concept"]), str(row["arm"])].append(
-                (float(row["coeff"]), float(row["overall"]))  # type: ignore[arg-type]
-            )
+    for (concept, arm, coeff), _, mean in _tuning_means(judged, scores):
+        if coeff is not None:
+            grids[concept, arm].append((coeff, mean))
     return {
         cell: (
             select_coefficient([c for c, _ in grid], [m for _, m in grid])
@@ -629,9 +673,10 @@ def agreement(
         stages: The stages to pool.
 
     Returns:
-        Per criterion, the number of generations `n`, the agreement `rate`
-        and Cohen's `kappa` of the two score sequences. Empty when no stage
-        exported anything for a second judge.
+        Per criterion, the number of generations `n`, the agreement `rate`,
+        Cohen's `kappa` and the quadratic-weighted `weighted_kappa` of the
+        two score sequences. Empty when no stage exported anything for a
+        second judge.
 
     Raises:
         ValueError: If a stage has no export or a batch of either judge is
@@ -644,13 +689,13 @@ def agreement(
     keys = sorted(second)
     result: dict[str, dict[str, float]] = {}
     for column, name in enumerate(judged.criteria):
-        found = label_agreement(
-            [int(first[key][column]) for key in keys],
-            [int(second[key][column]) for key in keys],
-        )
+        ours = [int(first[key][column]) for key in keys]
+        theirs = [int(second[key][column]) for key in keys]
+        found = label_agreement(ours, theirs)
         result[name] = {
             "n": len(keys),
             "rate": found.rate,
             "kappa": found.kappa,
+            "weighted_kappa": weighted_kappa(ours, theirs),
         }
     return result
