@@ -44,6 +44,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 import dataclasses
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 import re
 import time
@@ -166,13 +167,10 @@ TRUNCATION = (
     "cells are dropped; truncated is the share of texts that lose a cell of "
     "a segment with slots, averaged over the draws"
 )
-CellReader = (
-    AttentionReader
-    | CellMaxReader
-    | AttentionMLPReader
-    | CellMaxMLPReader
-    | FlatReader
+PooledReader = (
+    AttentionReader | CellMaxReader | AttentionMLPReader | CellMaxMLPReader
 )
+CellReader = PooledReader | FlatReader
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -524,11 +522,7 @@ def random_cell_max(
 
 
 def cell_weights(
-    reader: AttentionReader
-    | CellMaxReader
-    | AttentionMLPReader
-    | CellMaxMLPReader,
-    acts: Activations,
+    reader: PooledReader, acts: Activations
 ) -> NDArray[np.float64]:
     """The weight of each cell in its stimulus's score.
 
@@ -673,12 +667,7 @@ def _batch_scores(
         decoy=decoy,
     )
     kept = {
-        cell_set: (
-            select_cells(
-                cells, segments, cell_set, _set_layers(config, cell_set)
-            ),
-            segments[_in_set(segments, cell_set)],
-        )
+        cell_set: _set_cells(config, cells, segments, cell_set)
         for cell_set in dict.fromkeys(cell_set for cell_set, _ in readers)
     }
     n_stimuli, n_segments = len(stimuli.texts), len(SEGMENTS)
@@ -764,31 +753,23 @@ _COUNTED: tuple[type[Warning], ...] = (
 )
 
 
-def _fit_cells(
+def _fitter(
+    config: Config,
     pooling: Pooling,
     train: Activations,
     segments: NDArray[np.int8],
-    labels: NDArray[np.int64],
-    c: float,
-    tol: float,
-    *,
-    hidden: int = 0,
-    seed: int = 0,
-) -> CellReader:
-    """Fits a joint reader on the training cells, by their pooling.
+    seed: int,
+) -> Callable[[NDArray[np.int64], float], CellReader]:
+    """The fit of a joint reader on the training cells, by pooling and head.
 
-    A linear head when `hidden` is 0; else an MLP head of `hidden` units
-    per layer, whose hidden weights start from `seed`. Only the flat
+    It takes the labels and the grid value. An MLP head of `cell_hidden`
+    units per layer starts its hidden weights from `seed`. Only the flat
     reader reads `segments`, the segment code of each row, and it has no
     MLP head (`_check` refuses one).
     """
-    if hidden:
-        fit = fit_attention_mlp if pooling == "cellattn" else fit_cell_max_mlp
-        return fit(train, labels=labels, hidden=hidden, seed=seed, c=c, tol=tol)
-    if pooling == "cellattn":
-        return fit_attention(train, labels=labels, c=c, joint=True, tol=tol)
+    tol = config.cell_tol
     if pooling == "flat":
-        return fit_flat(
+        return lambda labels, c: fit_flat(
             train,
             segments=segments,
             labels=labels,
@@ -796,23 +777,29 @@ def _fit_cells(
             c=c,
             tol=tol,
         )
-    return fit_cell_max(train, labels=labels, c=c, tol=tol)
+    if config.cell_head == "mlp":
+        mlp = fit_attention_mlp if pooling == "cellattn" else fit_cell_max_mlp
+        return lambda labels, c: mlp(
+            train,
+            labels=labels,
+            hidden=config.cell_hidden,
+            seed=seed,
+            c=c,
+            tol=tol,
+        )
+    if pooling == "cellattn":
+        return lambda labels, c: fit_attention(
+            train, labels=labels, c=c, joint=True, tol=tol
+        )
+    return lambda labels, c: fit_cell_max(train, labels=labels, c=c, tol=tol)
 
 
 def _grid_fits(
-    pooling: Pooling,
-    train: Activations,
-    segments: NDArray[np.int8],
-    labels: NDArray[np.int64],
-    grid: Sequence[float],
-    tol: float,
-    *,
-    hidden: int = 0,
-    seed: int = 0,
+    fit: Callable[[float], CellReader], grid: Sequence[float]
 ) -> tuple[list[CellReader], float, tuple[int, ...]]:
     """Fits a reader per grid value, timing the fits and counting warnings.
 
-    `hidden` and `seed` pick the head, as in `_fit_cells`. Every warning of
+    Every warning of
     `_COUNTED` (`ConvergenceWarning`, `StalledFitWarning` and
     `RestartedFitWarning`) is counted, then shown again under the caller's
     filters; under the `default` action a warning repeated over the grid
@@ -827,19 +814,7 @@ def _grid_fits(
     with warnings.catch_warnings(record=True) as caught:
         for category in _COUNTED:
             warnings.simplefilter("always", category)
-        readers = [
-            _fit_cells(
-                pooling,
-                train,
-                segments,
-                labels,
-                c,
-                tol,
-                hidden=hidden,
-                seed=seed,
-            )
-            for c in grid
-        ]
+        readers = [fit(c) for c in grid]
     seconds = time.perf_counter() - start
     # One registry per grid: every `catch_warnings` clears the registries,
     # so a longer-lived one would not dedupe across grids either.
@@ -910,18 +885,27 @@ def _draw_fits(
     # and the cells once the last set is copied.
     *sets, last = config.cell_sets
     for cell_set in sets:
-        train = select_cells(
-            cells, segments, cell_set, _set_layers(config, cell_set)
-        )
-        codes = segments[_in_set(segments, cell_set)]
+        train, codes = _set_cells(config, cells, segments, cell_set)
         fits += _set_fits(
             config, task, items, i, train, codes, cell_set, series
         )
         del train
-    train = select_cells(cells, segments, last, _set_layers(config, last))
-    codes = segments[_in_set(segments, last)]
+    train, codes = _set_cells(config, cells, segments, last)
     del cells, segments
     return fits + _set_fits(config, task, items, i, train, codes, last, series)
+
+
+def _set_cells(
+    config: Config,
+    cells: Activations,
+    segments: NDArray[np.int8],
+    cell_set: CellSet,
+) -> tuple[Activations, NDArray[np.int8]]:
+    """A copy of the cells of a set, with the segment code of each row."""
+    return (
+        select_cells(cells, segments, cell_set, _set_layers(config, cell_set)),
+        segments[_in_set(segments, cell_set)],
+    )
 
 
 def _set_fits(
@@ -945,20 +929,11 @@ def _set_fits(
     for pooling in config.poolings:
         readout = _readout(config, pooling, cell_set)
         cell = m2_readers.Cell("logistic", readout, "joint")
-        hidden, seed = 0, 0
-        if config.cell_head == "mlp":
-            hidden = config.cell_hidden
-            seed = derive_seed(config.seed, "cell_head", task.name, readout, i)
+        seed = derive_seed(config.seed, "cell_head", task.name, readout, i)
+        fit = _fitter(config, pooling, train, segments, seed)
         for name, labels, select_labels in series:
             readers, seconds, counts = _grid_fits(
-                pooling,
-                train,
-                segments,
-                labels,
-                config.logistic_c,
-                config.cell_tol,
-                hidden=hidden,
-                seed=seed,
+                partial(fit, labels), config.logistic_c
             )
             fits.append(
                 _Fit(
@@ -1421,6 +1396,7 @@ def _check(config: Config) -> tuple[str, ...]:
     for field, values, known, noun in (
         ("cell_sets", config.cell_sets, CELL_SETS, "cell set"),
         ("poolings", config.poolings, POOLINGS, "pooling"),
+        ("cell_head", (config.cell_head,), CELL_HEADS, "cell head"),
     ):
         if not values:
             raise ValueError(f"m3 needs at least one entry in {field}")
@@ -1429,11 +1405,6 @@ def _check(config: Config) -> tuple[str, ...]:
                 raise ValueError(
                     f"unknown {noun} {value!r}, expected one of {known}"
                 )
-    if config.cell_head not in CELL_HEADS:
-        raise ValueError(
-            f"unknown cell head {config.cell_head!r}, expected one of "
-            f"{CELL_HEADS}"
-        )
     if config.cell_head == "mlp" and "flat" in config.poolings:
         raise ValueError(
             "the flat reader has no MLP head, so cell_head 'mlp' cannot run "
