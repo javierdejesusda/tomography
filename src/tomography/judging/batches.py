@@ -3,12 +3,17 @@
 A plan assigns every generation an opaque item id and a batch. The plan stays
 with the run and is the only link from an item id back to the arm, the
 coefficient and the split of a generation; the exported files hold nothing
-but the item id, the prompt, the concept description and the generation.
+but the item id, the prompt, the concept description and the generation,
+beside the rubric and the criteria to rate. No exported file names the stage.
+A sealed plan also holds the digest of every batch file, so that an import
+can tell an edited file from the exported one.
 """
 
 from collections.abc import Mapping
 from collections.abc import Sequence
+import dataclasses
 from dataclasses import dataclass
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -22,6 +27,7 @@ from tomography.judging.rubric import CRITERIA
 from tomography.judging.rubric import SCORES
 
 RUBRIC_FILE = "rubric.txt"
+CRITERIA_FILE = "criteria.json"
 
 _STAGE = re.compile(r"[a-z][a-z0-9_]*")
 _ITEM_BYTES = 8
@@ -56,12 +62,14 @@ class Batch:
             independent judge of the agreement subset.
         item_ids: Opaque identifier of each item, in file order.
         keys: The generation behind each item.
+        sha256: Digest of the batch file; empty until the plan is sealed.
     """
 
     batch_id: str
     judge: int
     item_ids: tuple[str, ...]
     keys: tuple[str, ...]
+    sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -110,6 +118,7 @@ class Export:
                 {
                     "batch_id": batch.batch_id,
                     "judge": batch.judge,
+                    "sha256": batch.sha256,
                     "items": [
                         [item_id, key]
                         for item_id, key in zip(
@@ -142,6 +151,7 @@ class Export:
                     judge=int(batch["judge"]),
                     item_ids=tuple(item for item, _ in batch["items"]),
                     keys=tuple(key for _, key in batch["items"]),
+                    sha256=str(batch["sha256"]),
                 )
                 for batch in data["batches"]
             ),
@@ -257,35 +267,24 @@ def _json_line(value: object) -> bytes:
     return (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8")
 
 
-def write_export(
-    export: Export,
-    generations: Mapping[str, Generation],
-    out_dir: Path,
-    *,
-    rubric: str,
-) -> list[Path]:
-    """Writes the batch files, the rubric and the manifest of an export.
+def _batch_bytes(batch: Batch, generations: Mapping[str, Generation]) -> bytes:
+    """Renders a batch file: one JSON line per item, UTF-8, LF line ends."""
+    return b"".join(
+        _json_line(
+            {
+                "item_id": item_id,
+                "prompt": generations[key].prompt,
+                "concept": generations[key].concept,
+                "generation": generations[key].text,
+            }
+        )
+        for item_id, key in zip(batch.item_ids, batch.keys, strict=True)
+    )
 
-    Every file is UTF-8 with LF line ends on every platform, so two
-    exports of one plan are byte-identical. `<batch_id>.jsonl` holds one JSON
-    object per item with the fields `item_id`, `prompt`, `concept` and
-    `generation`. `manifest_<stage>.json` lists the batch files with the judge
-    each one goes to, and names the criteria, the scores and the rubric.
 
-    Args:
-        export: The plan.
-        generations: The generation of every planned key.
-        out_dir: Folder to write into; created if missing.
-        rubric: The rubric text the judges are given.
-
-    Returns:
-        The written paths: the batch files in plan order, the rubric, then
-        the manifest.
-
-    Raises:
-        ValueError: If a planned key has no generation. Nothing is written
-            then.
-    """
+def _check_planned(
+    export: Export, generations: Mapping[str, Generation]
+) -> None:
     missing = [
         key
         for batch in export.batches
@@ -297,44 +296,110 @@ def write_export(
             f"no generation for {len(missing)} planned keys, first "
             f"{missing[0]!r}"
         )
+
+
+def seal(export: Export, generations: Mapping[str, Generation]) -> Export:
+    """Records the digest of every batch file in a plan.
+
+    Args:
+        export: The plan.
+        generations: The generation of every planned key.
+
+    Returns:
+        The plan with the SHA-256 of each batch file, as `write_export`
+        writes it.
+
+    Raises:
+        ValueError: If a planned key has no generation.
+    """
+    _check_planned(export, generations)
+    return dataclasses.replace(
+        export,
+        batches=tuple(
+            dataclasses.replace(
+                batch,
+                sha256=hashlib.sha256(
+                    _batch_bytes(batch, generations)
+                ).hexdigest(),
+            )
+            for batch in export.batches
+        ),
+    )
+
+
+def write_export(
+    export: Export,
+    generations: Mapping[str, Generation],
+    out_dir: Path,
+    *,
+    rubric: str,
+) -> list[Path]:
+    """Writes the files a judge is given: batches, rubric and criteria.
+
+    Every file is UTF-8 with LF line ends on every platform, so two
+    exports of one plan are byte-identical. `<batch_id>.jsonl` holds one JSON
+    object per item with the fields `item_id`, `prompt`, `concept` and
+    `generation`. `criteria.json` names the criteria to rate, the scores and
+    the rubric file. No file names the stage, the arms or the judge a batch
+    goes to: those stay in the plan.
+
+    Args:
+        export: The plan.
+        generations: The generation of every planned key.
+        out_dir: Folder to write into; created if missing.
+        rubric: The rubric text the judges are given.
+
+    Returns:
+        The written paths: the batch files in plan order, the rubric, then
+        the criteria file.
+
+    Raises:
+        ValueError: If a planned key has no generation. Nothing is written
+            then.
+    """
+    _check_planned(export, generations)
     out_dir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []
     for batch in export.batches:
         path = out_dir / f"{batch.batch_id}.jsonl"
-        path.write_bytes(
-            b"".join(
-                _json_line(
-                    {
-                        "item_id": item_id,
-                        "prompt": generations[key].prompt,
-                        "concept": generations[key].concept,
-                        "generation": generations[key].text,
-                    }
-                )
-                for item_id, key in zip(batch.item_ids, batch.keys, strict=True)
-            )
-        )
+        path.write_bytes(_batch_bytes(batch, generations))
         paths.append(path)
     rubric_path = out_dir / RUBRIC_FILE
     rubric_path.write_bytes(rubric.replace("\r\n", "\n").encode("utf-8"))
-    manifest = {
-        "stage": export.stage,
+    criteria = {
         "criteria": list(export.criteria),
         "scores": list(SCORES),
         "rubric_file": RUBRIC_FILE,
-        "rubric_sha256": export.rubric_sha256,
-        "batches": [
-            {
-                "batch_id": batch.batch_id,
-                "file": f"{batch.batch_id}.jsonl",
-                "judge": batch.judge,
-                "n_items": len(batch.item_ids),
-            }
-            for batch in export.batches
-        ],
     }
-    manifest_path = out_dir / f"manifest_{export.stage}.json"
-    manifest_path.write_bytes(
-        (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
+    criteria_path = out_dir / CRITERIA_FILE
+    criteria_path.write_bytes(
+        (json.dumps(criteria, indent=2) + "\n").encode("utf-8")
     )
-    return [*paths, rubric_path, manifest_path]
+    return [*paths, rubric_path, criteria_path]
+
+
+def check_files(export: Export, batch_id: str, export_dir: Path) -> None:
+    """Checks that a batch file and the rubric are the exported ones.
+
+    Args:
+        export: The sealed plan.
+        batch_id: The batch a judge rated.
+        export_dir: The folder the export was written into.
+
+    Raises:
+        ValueError: If the plan has no such batch, or the batch file or the
+            rubric is missing or does not have the digest of the plan.
+    """
+    batch = export.batch(batch_id)
+    for name, wanted in (
+        (f"{batch_id}.jsonl", batch.sha256),
+        (RUBRIC_FILE, export.rubric_sha256),
+    ):
+        path = export_dir / name
+        if not path.is_file():
+            raise ValueError(f"{name} is missing in {export_dir}")
+        if hashlib.sha256(path.read_bytes()).hexdigest() != wanted:
+            raise ValueError(
+                f"{name} is not the exported file: its SHA-256 differs from "
+                "the one stored at export"
+            )

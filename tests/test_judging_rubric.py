@@ -13,7 +13,7 @@ from tomography.judging.rubric import rubric_sha256
 from tomography.judging.rubric import rubric_text
 
 PINNED_SHA256 = (
-    "dc819a0bb451903ab6512132ef77dfec73c3a52ea63126bc7a0b586d31755f18"
+    "e95573bae4bf66afd389d58b46a74bc3bba3ee3206f11dc9116eda7104a7cd13"
 )
 DASHES = (chr(0x2014), chr(0x2013))
 
@@ -90,3 +90,11 @@ def test_the_module_names_no_person_or_vendor() -> None:
     assert rubric.__doc__
     for word in ("openai", "anthropic", "claude", "gpt-4"):
         assert word not in text
+
+
+def test_the_rubric_points_a_judge_to_the_criteria_file_and_no_stage() -> None:
+    text = rubric_text()
+
+    assert "criteria.json" in text
+    for word in ("tune", "tuning", "held_out", "held-out", "stage"):
+        assert word not in text.lower()
