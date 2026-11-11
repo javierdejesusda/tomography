@@ -631,7 +631,10 @@ def test_every_committed_m3_run_keeps_its_hash_and_its_config() -> None:
     for path in paths:
         stored = json.loads(path.read_text(encoding="utf-8"))
         config = m3_matrix.Config.from_dict(stored)
-        assert config.cell_head == "linear"
+        # A linear run stores no head field, so its hash predates the MLP
+        # head; an MLP run stores its head.
+        assert config.cell_head in ("linear", "mlp")
+        assert ("cell_head" in stored) == (config.cell_head == "mlp")
         assert config.config_hash() == path.parent.name
         assert config.to_dict() == stored
 
