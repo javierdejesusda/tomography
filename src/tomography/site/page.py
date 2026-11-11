@@ -445,6 +445,8 @@ class Page:
         groups = "".join(
             f'<th colspan="{span}" class="span{" muted" if muted else ""}">'
             f"{_e(label)}</th>"
+            if label
+            else f'<th colspan="{span}"></th>'
             for label, span, muted in out.groups
         )
         groups = f'<tr class="groups"><th></th>{groups}</tr>' if groups else ""

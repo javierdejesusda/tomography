@@ -808,6 +808,21 @@ def test_grouped_csv_columns_carry_their_group(
     )
 
 
+def test_a_column_under_an_unlabelled_span_keeps_its_name(
+    site: tuple[Path, page.Document],
+) -> None:
+    view = page.Page(site[1])
+    text = build_module._csv_text(
+        ["Model", "Dataset", "Reader", "Random"],
+        [["x", "y", "1", "2"]],
+        view,
+        (("", 1, False), ("Accuracy", 2, False)),
+    )
+    assert text.splitlines()[0] == (
+        "Model,Dataset,Accuracy: Reader,Accuracy: Random"
+    )
+
+
 def test_every_grouped_table_csv_has_unique_headers(
     site: tuple[Path, page.Document],
 ) -> None:
@@ -825,7 +840,8 @@ def test_every_grouped_table_csv_has_unique_headers(
         if tab.output.groups:
             grouped += 1
             for label, _, _ in tab.output.groups:
-                assert any(n.startswith(f"{label}: ") for n in names), key
+                if label:
+                    assert any(n.startswith(f"{label}: ") for n in names), key
     assert grouped >= 3
 
 
