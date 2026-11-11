@@ -393,7 +393,13 @@ def test_the_rules_give_single_questions_a_hue_and_a_marker_per_class() -> None:
     assert "orange" in rule
     assert "violet" in rule
     assert "QUESTION_SET_MARKERS" in rule
-    assert tuple(paper.QUESTION_SET_MARKERS) == ("unknown", "known")
+    assert "fictional" in rule
+    assert "star" in rule
+    assert tuple(paper.QUESTION_SET_MARKERS) == (
+        "unknown",
+        "known",
+        "fictional",
+    )
 
 
 def test_the_dotted_line_rule_covers_zero_as_well_as_chance() -> None:

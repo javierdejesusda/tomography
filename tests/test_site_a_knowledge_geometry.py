@@ -12,6 +12,7 @@ from sklearn.metrics import roc_auc_score
 
 from tomography.site import registry
 from tomography.site import stats
+from tomography.site.figs import _rows as _rows_module
 from tomography.site.figs import a_knowledge_geometry
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
@@ -25,7 +26,10 @@ PANEL = "entity"
 SHOWN = ("gpt2-xl", "qwen3-1.7b-base", "qwen3-1.7b")
 VIEWS = ("layer 1", "reader layer", "last layer", "words only")
 MAX_DRAWN = 40
+MARKS = ("known", "unknown", "fictional")
+FICTIONAL = "fictional_generated"
 SVG_BUDGET = 300_000
+STAR_SCALE = _rows_module.STAR_SIZE / _rows_module.MARKER_SIZE
 
 
 @pytest.fixture(scope="module")
@@ -94,6 +98,14 @@ def _range(view: str) -> tuple[float, float]:
     return min(found), max(found)
 
 
+def _mark(series: str, name: str) -> str:
+    return "fictional" if name == FICTIONAL else series
+
+
+def _hue(mark: str) -> str:
+    return paper.ENC["known" if mark == "known" else "unknown"]
+
+
 def _axes(output: registry.FigureOutput, row: int, column: int) -> Any:
     return output.figure.axes[row * len(VIEWS) + column]
 
@@ -126,13 +138,21 @@ def test_the_claim_quotes_the_separation_of_each_view(
     assert output.numbers["last_max"] == pytest.approx(last[1])
     assert output.numbers["words_min"] == pytest.approx(words[0])
     assert output.numbers["words_max"] == pytest.approx(words[1])
+    held = sum(
+        _separation(m, "last layer") >= _separation(m, "reader layer")
+        for m in SHOWN
+    )
+    assert held == len(SHOWN)
+    assert output.numbers["last_at_least_reader"] == held
     assert output.claim == (
-        "On the three checkpoints shown, the better of the two leading "
-        "principal components of the hidden states at the reader layer "
-        "separates known from unknown entity questions with an AUROC of "
-        f"{reader[0]:.2f} to {reader[1]:.2f}, against {early[0]:.2f} to "
-        f"{early[1]:.2f} at layer 1 and {words[0]:.2f} to {words[1]:.2f} "
-        "for the better of two components of the words alone."
+        f"On {held} of the {len(SHOWN)} checkpoints shown, the better of the "
+        "two leading principal components of the hidden states separates "
+        "known from unknown entity questions at least as well at the last "
+        "layer as at the layer of the reader, with an AUROC of "
+        f"{last[0]:.2f} to {last[1]:.2f} against {reader[0]:.2f} to "
+        f"{reader[1]:.2f}; layer 1 gives {early[0]:.2f} to {early[1]:.2f} "
+        "and the better of two components of the words alone "
+        f"{words[0]:.2f} to {words[1]:.2f}."
     )
     assert reader[0] > words[1]
 
@@ -189,15 +209,14 @@ def test_each_panel_draws_the_first_stored_questions_of_each_group(
 ) -> None:
     model, view = SHOWN[row], VIEWS[column]
     points = _views(model)[view][1]
-    want: dict[str, list[int]] = {"known": [], "unknown": []}
-    for series, _, found in _groups(model):
-        want[series] += found[:MAX_DRAWN]
+    want: dict[str, list[int]] = {mark: [] for mark in MARKS}
+    for series, name, found in _groups(model):
+        want[_mark(series, name)] += found[:MAX_DRAWN]
     ax = _axes(output, row, column)
-    for series, rows in want.items():
-        line = _drawn(ax, series)
+    for mark, rows in want.items():
+        line = _drawn(ax, mark)
         assert np.asarray(line.get_xydata()) == pytest.approx(points[rows])
-    assert len(want["known"]) == MAX_DRAWN
-    assert len(want["unknown"]) == 2 * MAX_DRAWN
+        assert len(rows) == MAX_DRAWN
 
 
 @pytest.mark.parametrize("row", range(len(SHOWN)))
@@ -207,13 +226,17 @@ def test_classes_differ_by_hue_and_marker_and_fill_keeps_the_role(
     post = stats.role(SHOWN[row]) == "post"
     for column in range(len(VIEWS)):
         ax = _axes(output, row, column)
-        for series in ("known", "unknown"):
-            line = _drawn(ax, series)
-            hue = paper.ENC[series]
-            assert line.get_marker() == paper.QUESTION_SET_MARKERS[series]
+        for mark in MARKS:
+            line = _drawn(ax, mark)
+            hue = _hue(mark)
+            assert line.get_marker() == paper.QUESTION_SET_MARKERS[mark]
             assert line.get_linestyle() == "None"
             low, high = paper.DENSE_MARKER_RANGE
-            assert low <= line.get_markersize() <= high
+            size = line.get_markersize()
+            if line.get_marker() == "*":
+                assert size == pytest.approx(high * STAR_SCALE)
+            else:
+                assert low <= size <= high
             if post:
                 assert line.get_markerfacecolor() == "white"
                 assert line.get_markeredgecolor() == hue
@@ -221,6 +244,7 @@ def test_classes_differ_by_hue_and_marker_and_fill_keeps_the_role(
                 assert line.get_markerfacecolor() == hue
                 assert line.get_markeredgecolor() == "white"
     assert paper.ENC["known"] != paper.ENC["unknown"]
+    assert len({paper.QUESTION_SET_MARKERS[mark] for mark in MARKS}) == 3
 
 
 @pytest.mark.parametrize("row", range(len(SHOWN)))
@@ -262,23 +286,24 @@ def test_columns_are_lettered_views_and_rows_are_named_checkpoints(
         assert list(ax.get_yticks()) == []
 
 
-def test_the_legend_keys_both_classes_with_a_filled_and_an_open_marker(
+def test_the_legend_keys_three_groups_with_a_filled_and_an_open_marker(
     output: registry.FigureOutput,
 ) -> None:
     (legend,) = output.figure.legends
     labels = [t.get_text() for t in legend.get_texts()]
     assert labels == [
-        "known question (filled: GPT-2 and base; open: post-trained)",
-        "unknown question, same fill",
+        "known (filled: GPT-2 and base; open: post-trained)",
+        "unknown, real entity",
+        "unknown, fictional entity",
     ]
     keys = {
         (str(ln.get_marker()), str(ln.get_markerfacecolor()))
         for ln in legend.findobj(Line2D)
     }
     assert keys == {
-        (paper.QUESTION_SET_MARKERS[series], face)
-        for series in ("known", "unknown")
-        for face in (paper.ENC[series], "white")
+        (paper.QUESTION_SET_MARKERS[mark], face)
+        for mark in MARKS
+        for face in (_hue(mark), "white")
     }
     assert _L["marker_clashes"](output.figure) == []
 
@@ -336,6 +361,13 @@ def test_the_caption_names_the_views_the_controls_and_the_cap(
         f"at most {MAX_DRAWN} questions",
         "PopQA",
         "better",
+        "are test questions only",
+        f"at most {int(output.numbers['per_side'])} per side",
+        "no training question enters a view",
+        "(triangle)",
+        "(circle)",
+        "(star)",
+        "folded, so it is 0.5 or more whichever class lies higher",
         stats.per_role_text(output.counts["with_views"]),
     ):
         assert phrase in detail, phrase
@@ -345,6 +377,9 @@ def test_the_caption_names_the_views_the_controls_and_the_cap(
     assert "_" not in text
     assert "baseline" not in text.lower()
     assert not re.search(r"\b10 checkpoints\b", text)
+    assert "The last layer gives" not in detail
+    sidecar = _R["data"](_R["run"]("v1", SHOWN[0]), "projections.json")
+    assert output.numbers["per_side"] == sidecar["max_per_side"]
 
 
 def test_the_module_docstring_names_no_figure_number() -> None:
