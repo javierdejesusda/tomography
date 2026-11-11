@@ -48,7 +48,7 @@ jobs:
           time uv run pytest --collect-only -q -p no:xdist > collected-plain.txt
           time uv run pytest --collect-only -q > collected-xdist.txt
           tail -n 2 collected-plain.txt collected-xdist.txt
-          cmp collected-plain.txt collected-xdist.txt
+          diff <(head -n -2 collected-plain.txt) <(head -n -2 collected-xdist.txt)
 
       - name: Test serial
         if: matrix.mode == 'serial'
