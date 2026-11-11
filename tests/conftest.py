@@ -44,8 +44,6 @@ from tomography.model import ARCHS
 from tomography.model import LoadedModel
 from tomography.model import wrap_model
 
-pytest_plugins = ("pytester",)
-
 END_OF_TEXT = "<|endoftext|>"
 QWEN_SPECIAL_TOKENS = (
     END_OF_TEXT,

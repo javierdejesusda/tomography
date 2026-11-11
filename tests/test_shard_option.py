@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+pytest_plugins = ("pytester",)
+
 CONFTEST = Path(__file__).with_name("conftest.py")
 TEMPLATE = """
 import pytest
