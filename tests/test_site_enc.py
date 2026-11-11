@@ -35,6 +35,27 @@ def test_enc_holds_one_value_per_meaning() -> None:
     assert paper.ENC["own_probability"] == "#6a6a6a"
     assert paper.ENC["unused"] == "#F0E442"
     assert paper.ENC["secondary_text"] == "#4d4d4d"
+    assert paper.ENC["known"] == "#E69F00"
+    assert paper.ENC["unknown"] == "#762a83"
+
+
+def test_the_question_class_hues_are_far_from_every_other_hue() -> None:
+    known, unknown = paper.ENC["known"], paper.ENC["unknown"]
+    assert de2000(known, unknown) >= 40.0
+    others = [
+        value
+        for key, found in paper.ENC.items()
+        if key not in ("known", "unknown")
+        for value in ([found] if isinstance(found, str) else found)
+    ]
+    for hue, other in itertools.product((known, unknown), others):
+        assert de2000(hue, other) >= 15.0, (hue, other)
+
+
+def test_the_question_classes_differ_in_lightness_for_greyscale() -> None:
+    light = paper._luminance(paper.ENC["known"])
+    dark = paper._luminance(paper.ENC["unknown"])
+    assert light >= 4.0 * dark
 
 
 def test_line_styles_have_one_meaning_each() -> None:
