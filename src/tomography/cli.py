@@ -1,4 +1,7 @@
-"""Command line entry point: `python -m tomography run|plot|export|chain`."""
+"""Command line entry point: `python -m tomography <command>`.
+
+The commands are `run`, `plot`, `export`, `chain` and `judge`.
+"""
 
 import argparse
 from collections.abc import Callable
@@ -8,6 +11,7 @@ import importlib
 import json
 from pathlib import Path
 import sys
+import types
 import typing
 from typing import Any
 
@@ -18,6 +22,7 @@ from tomography.experiments.base import ExperimentConfig
 from tomography.experiments.base import RunDir
 from tomography.export import ExportError
 from tomography.export import export_runs
+from tomography.judging import run as judging
 
 
 @dataclasses.dataclass(frozen=True)
@@ -48,6 +53,29 @@ def _module_stems() -> dict[str, set[str]]:
     return found
 
 
+def _import_experiment(experiment_id: str) -> types.ModuleType:
+    """Imports the module `experiments/<id>_<slug>.py` and only that module.
+
+    Raises:
+        ValueError: If no module or several modules carry the id.
+    """
+    stems = _module_stems()
+    matches = sorted(stems.get(experiment_id, ()))
+    if not matches:
+        raise ValueError(
+            f"unknown experiment {experiment_id!r}; "
+            f"available: {', '.join(sorted(stems)) or 'none'}"
+        )
+    if len(matches) > 1:
+        raise ValueError(
+            f"experiment id {experiment_id!r} is used by several modules: "
+            f"{', '.join(matches)}"
+        )
+    return importlib.import_module(
+        f"{experiments_package.__name__}.{matches[0]}"
+    )
+
+
 def load_experiment(experiment_id: str) -> Experiment:
     """Imports the module `experiments/<id>_<slug>.py` and only that module.
 
@@ -62,21 +90,7 @@ def load_experiment(experiment_id: str) -> Experiment:
             module does not define `Config` (an `ExperimentConfig` subclass),
             `run` and `plot`.
     """
-    stems = _module_stems()
-    matches = sorted(stems.get(experiment_id, ()))
-    if not matches:
-        raise ValueError(
-            f"unknown experiment {experiment_id!r}; "
-            f"available: {', '.join(sorted(stems)) or 'none'}"
-        )
-    if len(matches) > 1:
-        raise ValueError(
-            f"experiment id {experiment_id!r} is used by several modules: "
-            f"{', '.join(matches)}"
-        )
-    module = importlib.import_module(
-        f"{experiments_package.__name__}.{matches[0]}"
-    )
+    module = _import_experiment(experiment_id)
     config_cls = getattr(module, "Config", None)
     run = getattr(module, "run", None)
     plot = getattr(module, "plot", None)
@@ -242,6 +256,182 @@ def _chain(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     return chain.run_chain(spec)
 
 
+def _judging_hook(run: RunDir, name: str) -> Callable[[RunDir], Any]:
+    """Returns a judging function of the experiment that made a run.
+
+    An experiment whose generations an external judge can rate defines
+    `judged_generations(run_dir)`, which returns them as a
+    `judging.run.Judged`, and `judge_report(run_dir)`, which writes the
+    judged tables and returns their paths.
+
+    Raises:
+        ValueError: If the module of the experiment lacks the function.
+    """
+    experiment_id = run.meta["experiment"]
+    hook = getattr(_import_experiment(experiment_id), name, None)
+    if not callable(hook):
+        raise ValueError(
+            f"experiment {experiment_id!r} stores no generations for a judge "
+            f"(its module defines no {name})"
+        )
+    return typing.cast(Callable[[RunDir], Any], hook)
+
+
+def _judge_export(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int:
+    try:
+        run = RunDir.open(args.run)
+        paths = judging.export_stage(
+            run,
+            _judging_hook(run, "judged_generations")(run),
+            args.stage,
+            Path(args.out),
+            seed=args.seed,
+            batch_size=args.batch_size,
+            second_fraction=args.second_fraction,
+        )
+    except ValueError as error:
+        parser.error(str(error))
+    for path in paths:
+        print(path)
+    return 0
+
+
+def _read_judgments(path: str) -> str:
+    """Reads a judgments file, without the byte order mark some editors add.
+
+    Raises:
+        ValueError: If the file cannot be read as UTF-8 text.
+    """
+    try:
+        return Path(path).read_text("utf-8-sig")
+    except (OSError, UnicodeDecodeError) as error:
+        raise ValueError(f"cannot read {path}: {error}") from error
+
+
+def _judge_import(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int:
+    try:
+        run = RunDir.open(args.run)
+        stored = judging.import_judgments(
+            run,
+            args.batch,
+            _read_judgments(args.judgments),
+            judge_model=args.judge_model,
+        )
+    except ValueError as error:
+        parser.error(str(error))
+    print(stored)
+    return 0
+
+
+def _judge_report(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int:
+    try:
+        run = RunDir.open(args.run)
+        paths = _judging_hook(run, "judge_report")(run)
+    except ValueError as error:
+        parser.error(str(error))
+    for path in paths:
+        print(path)
+    return 0
+
+
+def _add_judge_commands(commands: Any) -> None:
+    """Adds `judge export|import|report` to the command line."""
+    judge = commands.add_parser(
+        "judge",
+        help="judge the stored generations of a run with an external judge",
+        description=(
+            "Judge the stored generations of a run offline. Export the tune "
+            "stage, have every batch file judged and import the judgments; "
+            "export and import the held_out stage the same way; then write "
+            "the report."
+        ),
+    )
+    judge_commands = judge.add_subparsers(dest="judge_command", required=True)
+    export = judge_commands.add_parser(
+        "export",
+        help="write blinded, shuffled judge batches",
+        description=(
+            "Write the blinded, shuffled batch files of one stage, with the "
+            "rubric and a manifest. A batch line holds an item id, the "
+            "prompt, the concept description and the generation; the arm, "
+            "the coefficient, the checkpoint and the split stay in the run. "
+            "The held_out stage needs the imported judgments of the tune "
+            "stage and holds each arm at the coefficient that won there."
+        ),
+    )
+    export.add_argument("run", help="run directory")
+    export.add_argument(
+        "--out", required=True, help="folder to write the batch files into"
+    )
+    export.add_argument(
+        "--stage",
+        choices=judging.STAGES,
+        default=judging.TUNE,
+        help="which half of the prompts to export (default: tune)",
+    )
+    export.add_argument(
+        "--seed",
+        type=int,
+        help="seed of the shuffle and the ids (default: from the run seed)",
+    )
+    export.add_argument(
+        "--batch-size",
+        type=int,
+        default=50,
+        help="largest number of items per batch file (default: 50)",
+    )
+    export.add_argument(
+        "--second-fraction",
+        type=float,
+        default=0.1,
+        help=(
+            "share of the items exported again under other ids for a second, "
+            "independent judge (default: 0.1)"
+        ),
+    )
+    export.set_defaults(handler=_judge_export)
+    import_ = judge_commands.add_parser(
+        "import",
+        help="check and store the judgments of one batch",
+        description=(
+            "Store the judgments of one exported batch. The file is JSON "
+            "lines with exactly one line per item of the batch: the item_id "
+            "and one integer score of 0, 1 or 2 per criterion. A file with "
+            "a missing, repeated or unknown item, another field or another "
+            "value is refused and the run stays as it was."
+        ),
+    )
+    import_.add_argument("run", help="run directory")
+    import_.add_argument("judgments", help="judgments file (JSON lines)")
+    import_.add_argument(
+        "--batch", required=True, help="id of the exported batch"
+    )
+    import_.add_argument(
+        "--judge-model",
+        required=True,
+        help="model id of the judge, stored with the judgments",
+    )
+    import_.set_defaults(handler=_judge_import)
+    report = judge_commands.add_parser(
+        "report",
+        help="write the judged tables of a run",
+        description=(
+            "Write the judged tables of a run once every exported batch is "
+            "imported: the coefficient each arm won on the tune stage, the "
+            "held-out scores at that coefficient with intervals, and the "
+            "agreement of the two judges."
+        ),
+    )
+    report.add_argument("run", help="run directory")
+    report.set_defaults(handler=_judge_report)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tomography", description="Run experiments and plot results."
@@ -298,6 +488,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="validate the spec and print the commands without running them",
     )
     chain_run.set_defaults(handler=_chain)
+    _add_judge_commands(commands)
     return parser
 
 
