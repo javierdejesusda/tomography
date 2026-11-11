@@ -25,7 +25,7 @@ RepE claims are easy to overstate. A direction can score well because the text
 gives the answer away, or because a random direction scores well too. Here
 every reading run stores a random-direction and a shuffled-label control, and
 `docs/findings.md` reports them with the numbers. The readers of sentiment,
-utility, morality, truth and honesty are compared with text-only baselines
+utility, morality, truth and honesty are compared with text-only controls
 (word and character n-grams, TB1), as are the TruthfulQA (R6) and
 known-versus-unknown (P9) readers. Every checkpoint and data file is pinned, so
 a run can be repeated.
@@ -115,6 +115,18 @@ Every id is the argument of `tomography run`. Coverage is read from the committe
 `results/` tree; the models per experiment, with run identities, are in
 [`docs/findings.md`](docs/findings.md#run-identity).
 
+The design behind each experiment is in
+[`docs/methodology.md`](docs/methodology.md): the
+[checkpoints](docs/methodology.md#scope-and-models), the
+[controls and the published baselines](docs/methodology.md#controls-and-baselines)
+of each study, and its
+[stimuli, labels and splits](docs/methodology.md#labels-and-data). A control
+uses no learned signal for the concept (a random direction, shuffled labels,
+a text-only classifier, the popularity of the subject); a baseline is a
+published method run on the same items. On the
+[project site](https://javierdejesusda.github.io/tomography/), Appendix B
+(Method details) gives the design details of the studies shown there.
+
 | Id | Question | Models |
 | --- | --- | --- |
 | `r1` | Can a direction separate positive and negative SST-2 phrases? | all 10 |
@@ -122,11 +134,11 @@ Every id is the argument of `tomography run`. Coverage is read from the committe
 | `r3` | Does one read morality (ETHICS commonsense)? | all 10 |
 | `r4` | Does one read six emotions, one against the rest? | all 10 |
 | `r5` | Does an honesty direction from personas transfer to plain statements? (exploratory) | all 10 |
-| `r6` | Does a reader beat text-only baselines on TruthfulQA MC1? | all 10 |
+| `r6` | Does a reader beat text-only controls on TruthfulQA MC1? | all 10 |
 | `r7` | Does one read truth on facts and on Geometry of Truth sets? | all 10 |
 | `r8` | Does LAT beat few-shot prompting with the same examples on the RepE QA tasks (Figure 7, Table 9) and TruthfulQA MC1? | the 0.6B and 1.7B pairs (one run per task) |
-| `tb1` | How much of a reader's accuracy do word and character n-gram classifiers reach with no model? | none (one run) |
-| `b2` | Does LAT read truth (Geometry of Truth statements and their negations) and sentiment as well as the published baselines (mass-mean, whitened mass-mean, logistic regression, CCS), beside random, shuffled and text-only controls? | code only |
+| `tb1` | How much of a reader's accuracy do word and character n-gram classifiers reach with no model? (the text-only control of the readers) | none (one run) |
+| `b2` | Does LAT read truth (Geometry of Truth statements and their negations) and sentiment as well as the published baselines (mass-mean, whitened mass-mean, logistic regression, CCS), beside random, shuffled and text-only controls? | the 4 GPT-2 sizes and the 0.6B and 1.7B pairs |
 | `b3` | Do published steering methods (contrastive activation addition, mean-centring, activation addition, difference of means, prompt prepending) move a concept as well as our reading vector, beside random directions, when an external judge rates concept, instruction following and fluency on held-out prompts? | code only |
 | `p1` | How much does prompt wording move a sentiment reader? | all 10 |
 | `p2` | How do token position and a misleading sentence matter? | all 10 |
@@ -148,7 +160,8 @@ Every id is the argument of `tomography run`. Coverage is read from the committe
 | `a2` | What does the logit lens show for a direction? | all 10 |
 | `a5` | Do directions align with Qwen-Scope SAE features? | code only |
 | `p9a` to `p9d` | Label questions known, unknown or uncertain, read that direction, use it to predict errors, steer along it | `p9a` to `p9c` all 10 (GPT-2 small has no direction), `p9d` 9 |
-| `b1` | Do published error detectors (exact-answer-token probe, semantic entropy, EigenScore) beat the `p9c` signals on the same test items? | code only |
+| `v1` | What do the hidden states behind the `p9b` readers look like in 2D, beside a random direction, shuffled labels and a text-only view, and do the `p9b` numbers reproduce? | the 4 GPT-2 sizes and the 0.6B and 1.7B pairs |
+| `b1` | Do published error detectors (exact-answer-token probe, semantic entropy, EigenScore) beat the `p9c` signals on the same test items? | the 4 GPT-2 sizes and the 0.6B and 1.7B pairs |
 | `p10a`, `p10b`, `p10c` | Do models answer approximate quantities with ranges, can a reader tell, and does the range direction link to knowledge and hedging? | all 10 |
 
 ## Reproduce at scale
@@ -216,8 +229,8 @@ src/tomography/
   sae.py          pinned Qwen-Scope SAE decoders
   lorra.py        low-rank representation adaptation
   p9/, p10/       known-versus-unknown and approximate-answer helpers
-  experiments/    one module per experiment id (including tb1, the text
-                  baselines), plus shared sweeps
+  experiments/    one module per experiment id (including tb1, the text-only
+                  controls), plus shared sweeps
   site/           results site builder (`python -m tomography.site`)
   viz/            figure style, reading curves and geometry plots
   chain.py        chain runner
@@ -281,6 +294,21 @@ uv run pytest -q
 Tests that need a GPU are marked `slow` and tests that download data or
 weights are marked `network`; both are deselected by default (`-m slow`,
 `-m network`).
+
+CI splits the suite into 12 shards of whole test files and runs each shard
+on two pytest-xdist workers. To rerun a failing shard, say shard 3, the way
+CI runs it:
+
+```bash
+OMP_NUM_THREADS=1 uv run pytest -q -n 2 --dist loadfile --shard 3/12
+```
+
+`--shard INDEX/COUNT` (INDEX from 0) packs the test files into COUNT shards
+of about equal time, using the per-file times in `tests/shard_durations.json`
+and the mean time for a file with none. `--store-durations` writes the time
+each file of the run took into that file; the committed times come from the
+CI runners. A shard of a small selection can hold no test, and pytest then
+exits with code 5.
 
 ## Citation
 

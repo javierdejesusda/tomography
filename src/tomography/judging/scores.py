@@ -8,6 +8,11 @@ from numpy.typing import NDArray
 
 from tomography.judging.rubric import SCORES
 
+SELECTION_RULE = (
+    "the coefficient with the highest mean overall score on the tuning "
+    "half; a tie goes to the smallest magnitude, then to the lower value"
+)
+
 
 def harmonic_mean(scores: NDArray[np.integer[Any]]) -> NDArray[np.float64]:
     """Combines the criteria of each item as AxBench does.
