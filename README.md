@@ -121,7 +121,7 @@ The design behind each experiment is in
 [controls and the published baselines](docs/methodology.md#controls-and-baselines)
 of each study, and its
 [stimuli, labels and splits](docs/methodology.md#labels-and-data). A control
-uses no direction fitted for the concept (a random direction, shuffled labels,
+uses no learned signal for the concept (a random direction, shuffled labels,
 a text-only classifier, the popularity of the subject); a baseline is a
 published method run on the same items. On the
 [project site](https://javierdejesusda.github.io/tomography/), Appendix B
