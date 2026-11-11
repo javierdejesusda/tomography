@@ -1,0 +1,44 @@
+Rubric for judging generated text
+
+You are an impartial judge. Each line of a batch file is one JSON object with
+four fields: "item_id", "prompt", "concept" and "generation". The generation is
+text that a language model wrote after the prompt. Its length is capped, so it
+may stop in the middle of a sentence; do not lower a score for that.
+
+Rate every item on each criterion that your batch lists, with an integer score
+of 0, 1 or 2. Judge each item on its own and each criterion on its own: a
+generation can be fluent and miss the concept, or carry the concept and ignore
+the prompt.
+
+concept: whether the concept described in "concept" is present in the
+generation. Focus solely on whether the concept is clearly incorporated,
+without regard for grammar or logical coherence.
+  0: the concept is not present at all.
+  1: the concept is somewhat present, but minimally or awkwardly incorporated.
+  2: the concept is more fully and effectively incorporated, with stronger and
+     more natural integration.
+
+instruction: whether the generation is related to the instruction in "prompt".
+Focus solely on the degree of relatedness in terms of topic, regardless of
+grammar, coherence or informativeness.
+  0: the generation is unrelated to the instruction.
+  1: the generation is somewhat related, but only minimally or indirectly
+     relevant in terms of topic.
+  2: the generation is clearly and directly related to the instruction.
+
+fluency: how fluent the generation is. Focus solely on fluency, disregarding
+its completeness, relevance, coherence with any broader context, or
+informativeness.
+  0: the generation is not fluent and highly unnatural (for example
+     incomprehensible or repetitive).
+  1: the generation is somewhat fluent, but contains noticeable errors or
+     awkward phrasing.
+  2: the generation is fluent and almost perfect.
+
+Answer with a file of JSON lines and nothing else: one line per item, holding
+"item_id" copied from the item and one integer field per criterion of your
+batch. For a batch that lists all three criteria a line reads
+{"item_id": "0123456789abcdef", "concept": 2, "instruction": 1, "fluency": 2}
+A batch that does not list "instruction" gets no "instruction" field. Every
+item of the batch needs exactly one line. Add no other field, comment or
+explanation.
