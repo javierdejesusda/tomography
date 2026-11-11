@@ -55,7 +55,7 @@ Not every experiment has a committed run on every checkpoint. The `results/` tre
 | 4 (the Qwen3 0.6B and 1.7B pairs)                     | `r8`, `m2`, `m3`                                                                                                     |
 | one run that aggregates finished runs                 | `p6` (the four GPT-2 sizes), `p8` (the Qwen3 0.6B and 1.7B pairs)                                                    |
 | no model                                              | `tb1` (one run)                                                                                                      |
-| no committed run                                      | `a5`                                                                                                                 |
+| no committed run                                      | `a5`, `b3`                                                                                                           |
 
 - **Why a second family.** The paper steers LLaMA-2-Chat. Its 7B and 13B checkpoints do not fit an 8 GB GPU in
   bfloat16, so the second family is Qwen3 at 0.6B, 1.7B and 4B, each as a base and a post-trained checkpoint. The
@@ -96,6 +96,7 @@ counterpart. The ids are the arguments of `tomography run`; each config and its 
 | `m2`           | Readers compared as scorer by readout by layer rule on the same items  | Extension; see [M2](#reader-comparison-m2)                                           |
 | `m3`           | Readers trained through every cell (token and layer) of the prompt     | Extension; see [M3](#full-matrix-readers-m3)                                         |
 | `b2`           | Published direction finders beside LAT on truth and sentiment          | Extension; see [B2](#published-finder-baselines-b2)                                  |
+| `b3`           | Published steering methods beside the reading vector, judged offline   | Extension; see [B3](#published-steering-baselines-b3)                                |
 | `c1`           | Sentiment steering: sweep, operators, side effects                     | Extension (uses the Sec. 3.2.1 operators and adds a prompting arm)                   |
 | `c2`           | Emotion steering, steered emotion against measured emotion             | Sec. 6.1.2                                                                           |
 | `c4`           | Honesty control on TruthfulQA MC1                                      | Sec. 4.3.3, Table 2; adds a prompting arm                                            |
@@ -145,7 +146,7 @@ controls. The code also calls the prompting arm of `c1` and `c4` (an instruction
 | Text-only classifier       | Logistic regression (`C` 10, class-balanced) on TF-IDF features of the raw text, fitted on the training texts only: word 1-grams and 2-grams seen in at least 2 texts, or character 2-grams to 5-grams inside words seen in at least 3 texts. `m2` and `m3` fit the word variant only | `tb1` (for `r1`, `r2`, `r3`, `r5`, `r7`, `p3`), `r6`, `m2`, `m3`, `b2`, `p9b`, `p10b`, `v1` |
 | Popularity                 | The popularity of the subject: the popularity score of PopQA (`s_pop`) in P9, `log10(sitelinks + 1)` in `p10b`                                                                                                                                                                        | `p9b`, `p9c`, `p10b`, `v1`                                                                  |
 | Other model-free scores    | The accuracy of the relation, the length of the question and the likelihood of the subject's name (`p9c`); the length of the question in characters (`p10b`)                                                                                                                          | `p9c`, `p10b`                                                                               |
-| Random direction, steering | `n_random` (3) random unit directions steered through the same controller, so with the same relative coefficients and norm; `m1` steers its `random` finder                                                                                                                           | `c2`, `c4`, `c5`, `p7`, `p9d`, `m1`                                                         |
+| Random direction, steering | `n_random` (3; 1 per concept in `b3`) random unit directions steered through the same controller, so with the same relative coefficients and norm; `m1` steers its `random` finder                                                                                                    | `c2`, `c4`, `c5`, `p7`, `p9d`, `m1`, `b3`                                                   |
 | Random band                | The 2.5th to 97.5th percentiles of the cosine with, or of the AUROC of, `n_random` (200) random unit directions                                                                                                                                                                       | `p10c`                                                                                      |
 | Comparison items           | A contrast inside one dataset, so that one question format stands on both sides (`triviaqa_known`); people with one exact height, who are living things with an exact answer                                                                                                          | `p9b`; `p10a`, `p10b`                                                                       |
 
@@ -166,6 +167,7 @@ and `lr1` has none of the controls above.
 | `p9c`         | The reading direction (`lat`) and the `probe`                          | The confidence of the model: first-token probability, negative entropy, mean token log-probability, the share of samples equal to the greedy answer, P(True) (Kadavath et al. 2022) |
 | `b1`          | The `p9c` signals                                                      | Exact-answer-token probe (Orgad et al. 2025), semantic entropy (Farquhar et al. 2024), EigenScore (Chen et al. 2024)                                                                |
 | `c4`          | The reading vector                                                     | The prompt difference of the paper and the contrast vector; the LoRRA adapter of an `lr1` run when `lorra_run` is set                                                               |
+| `b3`          | The reading vector (`reader`)                                          | Contrastive activation addition (Rimsky et al. 2024), mean-centring (Jorgensen et al. 2023), activation addition (Turner et al. 2023), difference of class means, prompt prepending |
 
 The readers of `r1` to `r7`, `p1`, `p2`, `p3` and `p5` are themselves logistic-regression probes by default (see the
 default finder in [Activations and directions](#activations-and-directions)); `p1` also has one `pca_diff` run per
@@ -346,6 +348,7 @@ that resamples whole runs along axis 0, and `wilson_ci` gives intervals for rate
 | `r8` task accuracies                                           | percentile bootstrap; Wilson interval for a single run         | the seeds; the test questions of a zero-shot or single-seed run           |
 | `tb1` accuracies                                               | Wilson interval                                                | the test pairs; `seed_min` and `seed_max` give the spread over training sets |
 | `b2` accuracies                                                | Wilson interval (`wilson_lo`, `wilson_hi`); percentile bootstrap (`boot_lo`, `boot_hi`) | the test pairs; the seeds                        |
+| `b3` overall judged score (`overall_lo`, `overall_hi`)         | percentile bootstrap, 2,000 resamples                          | the held-out prompts                                                      |
 | `p10a` rates of the greedy answers                             | Wilson interval (item bootstrap in the people rows that pool both shot orders) | the questions                                                             |
 | `p10a` rates of the sampled answers, and the gaps              | percentile bootstrap, 2,000 resamples                          | the questions, each with all its samples; within each kind for a gap      |
 | `p10b` transfer, control and people AUROC                      | percentile bootstrap, 1,000 resamples                          | the test questions                                                        |
@@ -592,14 +595,15 @@ It has code and tests only; no run is reported yet.
   no prompt. Every arm generates 128 new tokens on both halves at every coefficient, one sample per prompt with the
   sampling of C1 and one seed for all arms. A judge rates each generation 0, 1 or 2 per criterion; the overall score
   of a generation is the harmonic mean of its criteria, 0 when any of them is 0. The coefficient of an arm is the
-  one with the highest mean overall score on the tuning half (ties go to the smaller coefficient), and the arm is
-  reported on the held-out half at that coefficient only. A held-out judgment cannot reach the choice: the held-out
-  batches are planned after the tuning judgments are stored.
+  one with the highest mean overall score on the tuning half; a tie goes to the smallest magnitude, then to the
+  lower value. The arm is reported on the held-out half at that coefficient only. A held-out judgment cannot reach
+  the choice: the held-out export is refused until every tuning batch of both judges is imported, and it stores the
+  choice of each arm with this rule in `judge_selection.json` before any held-out batch exists.
 - Roles: a post-trained checkpoint answers AlpacaEval instructions rendered with its chat template and is judged on
   `concept`, `instruction` and `fluency`. A base checkpoint continues the first words of held-out WikiText passages
   and is judged on `concept` and `fluency`, since a continuation prompt asks for nothing. The roles are never pooled.
 - Concepts (`concepts`): `sentiment` (SST-2) and the six emotions of C2, by default `sentiment`, `happiness` and
-  `anger`. The concept sets of AxBench are left out: their license and file layout could not be checked offline.
+  `anger`. The concept set of AxBench is not included (see the method definitions).
 - Shared steering: every additive arm edits the layers of `default_control_layers` (40, 55 and 70 percent of the
   depth) with the grid `coeffs` (0.05, 0.1, 0.2, 0.4, 0.8), relative to the mean residual norm of the calibration
   texts. All vectors of a concept come from the same `n_pairs` (64) training pairs.
@@ -607,21 +611,30 @@ It has code and tests only; no run is reported yet.
   client. A batch line has an item id, the prompt, the concept description and the generation; the arm, the
   coefficient, the checkpoint and the split stay in the run. The rubric is package data (`judging/rubric.txt`) and
   its SHA-256 is stored with every judgment, beside the model id given at import and the batch id. An import that is
-  not exactly one valid judgment per exported item is refused and changes nothing. An empty generation is never sent
-  and scores 0 on every criterion. A seeded share of the generations (`--second-fraction`, 0.1) is exported again
-  under other item ids for a second, independent judge, and `summary_judged.json` reports the agreement rate and
-  Cohen's kappa per criterion. The judge is a model run by hand, identified by its model id and the rubric, not a
-  pinned snapshot behind an interface; the raw judgments are stored.
+  not exactly one valid judgment per exported item is refused and changes nothing. A batch file holds at most
+  `--batch-size` (50) items, so that one judge can take one file. In each stage a seeded share of the generations
+  (`--second-fraction`, 0.1) is exported again under other item ids for a second, independent judge, and
+  `summary_judged.json` reports the agreement rate and Cohen's kappa per criterion. The judge is a model run by
+  hand, identified by its model id and the rubric, not a pinned snapshot behind an interface; the raw judgments are
+  stored.
 - Cross-check: the pinned classifier of the concept (`sentiment-primary` or `emotion-primary`) scores every
   generation; `table.json` carries its held-out mean and `summary_judged.json` its rank correlation with the judged
   concept score.
 - Outputs: `trials_<concept>_<split>` (every generation), `vectors.npz`, `table_effects.json` (perplexity of
   neutral text, distinct-1 and the other side effects of every arm and coefficient on the held-out half), and, after
-  judging, `table.json` (per concept and arm the chosen coefficient, the mean per criterion and the overall score
-  with a percentile bootstrap interval over the held-out prompts, 2,000 resamples), `table_tuning.json` and
-  `summary_judged.json`.
+  judging, `judge_selection.json` (written by the held-out export), `table.json` (per concept and arm the chosen
+  coefficient, the number of empty generations `n_empty`, the mean per criterion and the overall score with a
+  percentile bootstrap interval over the held-out prompts, 2,000 resamples), `table_tuning.json` (every arm and
+  coefficient on the tuning half, with `n_empty`) and `summary_judged.json` (the chosen coefficients with the rule,
+  the agreement of the judges, the judge model ids and the rubric digest).
 
-Method definitions. Each arm names its source and where it departs from the published recipe.
+Method definitions. Each arm names its source and where it departs from the published recipe. Two rules hold for
+every arm. An empty generation (nothing but whitespace) is not exported to a judge and scores 0 on every criterion;
+`table.json` and `table_tuning.json` count the empty generations of each arm in `n_empty`. Every arm, the unsteered
+one included, is exported in both stages, in lines that do not tell the arms apart. The concept set of AxBench is
+not included, because the repository has no pinned source for it (no revision, digest and license row under
+`datasets/`): `concepts` takes the entries of the `CONCEPTS` registry, whose stimuli are pinned, and a pinned
+source added later would extend that registry.
 
 - `caa`, contrastive activation addition (Rimsky et al. 2024, `rimsky2024steering`): the mean difference of the
   residual stream at the answer letter between the two answers of two-option questions (`choice_pairs`,
@@ -649,7 +662,7 @@ Method definitions. Each arm names its source and where it departs from the publ
   before a continuation prompt, `prompt_instruct` inside the user turn before an instruction), not a prompt written
   per concept by a model. The arm has no coefficient and no neutral perplexity.
 - `random/<i>`: a control, `n_random` random unit directions per concept, steered exactly like the vector arms.
-- `none`: the unsteered model, a control.
+- `none`: the unsteered model, a control, judged in both stages like every other arm.
 
 ## LAT against few-shot prompting (R8)
 

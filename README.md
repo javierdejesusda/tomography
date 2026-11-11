@@ -192,7 +192,7 @@ uv run tomography plot all --out results
 ```bash
 uv run tomography judge export <run> --out batches                    # the tuning half
 uv run tomography judge import <run> judged.jsonl --batch <id> --judge-model <model-id>
-uv run tomography judge export <run> --out batches --stage held_out   # after the tuning imports
+uv run tomography judge export <run> --out batches --stage held_out   # once every tuning batch is imported
 uv run tomography judge report <run>
 ```
 Reproducibility rules:
@@ -267,6 +267,7 @@ files is redistributed here.
 | NQ-Open | CC-BY-SA-3.0 |
 | WikiText-103 | CC-BY-SA-3.0 and GFDL |
 | Alpaca | CC BY-NC 4.0 plus OpenAI terms (non-commercial) |
+| AlpacaEval (`b3`) | CC BY-NC 4.0 (non-commercial) |
 | SyntHal | research and review terms only |
 | FalseQA, Geometry of Truth | none stated |
 | PopQA | none on the dataset card (code repository: MIT) |

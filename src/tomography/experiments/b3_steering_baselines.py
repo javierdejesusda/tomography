@@ -74,6 +74,7 @@ from tomography.judging.run import judge_scores
 from tomography.judging.run import read_export
 from tomography.judging.run import select_coefficients
 from tomography.judging.run import tuning_rows
+from tomography.judging.scores import SELECTION_RULE
 from tomography.model import BosMode
 from tomography.model import LoadedModel
 from tomography.model import load_model
@@ -882,18 +883,22 @@ def judge_report(run_dir: RunDir) -> list[Path]:
     """Writes the judged tables of a run.
 
     The coefficient of every arm is the one with the highest mean overall
-    score on the tuning half; the held-out half is reported at that
-    coefficient only and never enters the choice.
+    score on the tuning half (`SELECTION_RULE`); the held-out half is
+    reported at that coefficient only and never enters the choice. An empty
+    generation is never judged: it scores 0 on every criterion and is
+    counted in `n_empty`.
 
     Writes `table.json` (per concept and arm: the chosen coefficient, the
-    mean score per criterion and the overall score with a bootstrap interval
-    over prompts on the held-out half, beside the perplexity, the distinct-1
-    and the mean classifier score of the same generations),
-    `table_tuning.json` (the mean overall score of every arm and coefficient
-    on the tuning half) and `summary_judged.json` (the chosen coefficients,
-    the agreement of the two judges per criterion, the judge model ids, the
-    rubric digest, and per concept the rank correlation of the judged
-    concept score with the classifier score).
+    numbers of held-out generations and of empty ones, the mean score per
+    criterion and the overall score with a bootstrap interval over prompts
+    on the held-out half, beside the perplexity, the distinct-1 and the
+    mean classifier score of the same generations), `table_tuning.json`
+    (the mean overall score and the number of empty generations of every
+    arm and coefficient on the tuning half) and `summary_judged.json` (the
+    chosen coefficients and the rule that chose them, the agreement of the
+    two judges per criterion, the judge model ids, the rubric digest, and
+    per concept the rank correlation of the judged concept score with the
+    classifier score).
 
     Args:
         run_dir: A B3 run whose two stages are exported and imported.
@@ -979,6 +984,7 @@ def judge_report(run_dir: RunDir) -> list[Path]:
                     [concept, arm, coeff]
                     for (concept, arm), coeff in selected.items()
                 ],
+                "selection_rule": SELECTION_RULE,
                 "agreement": agreed,
                 "judge_models": sorted(models),
                 "rubric_sha256": plans[0].rubric_sha256,

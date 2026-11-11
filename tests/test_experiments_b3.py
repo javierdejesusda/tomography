@@ -33,6 +33,7 @@ from tomography.experiments.sweep import chat_format_for
 from tomography.judging.batches import Export
 from tomography.judging.run import export_stage
 from tomography.judging.run import import_judgments
+from tomography.judging.scores import SELECTION_RULE
 from tomography.model import MODELS
 from tomography.model import LoadedModel
 
@@ -567,6 +568,7 @@ def test_the_report_selects_on_tuning_and_reports_the_held_out_half(
         "coeff",
         "n_prompts",
         "n_items",
+        "n_empty",
         "concept_score",
         "fluency_score",
         "overall",
@@ -601,13 +603,17 @@ def test_the_report_selects_on_tuning_and_reports_the_held_out_half(
             for t in read_trials(run_dir, f"trials_{concept}_held_out")
             if t.name == name
         )
+        assert row["n_empty"] == sum(
+            not text.strip() for texts in trial.completions for text in texts
+        )
         if np.isfinite(trial.scores).any():
             assert row["classifier"] == pytest.approx(
                 float(np.nanmean(trial.scores))
             )
         else:
             assert row["classifier"] is None
-    full = [r for r in rows.values() if r["n_items"] == 3]
+    assert all(r["n_items"] == 3 for r in rows.values())
+    full = [r for r in rows.values() if r["n_empty"] == 0]
     assert full
     steered = [r for r in full if r["coeff"] is not None]
     assert all(r["concept_score"] == 2.0 for r in steered)
@@ -620,6 +626,7 @@ def test_the_report_selects_on_tuning_and_reports_the_held_out_half(
         "arm",
         "coeff",
         "n_items",
+        "n_empty",
         "overall",
     ]
     assert len(tuning["rows"]) == 2 * len(_trial_names())
@@ -634,6 +641,59 @@ def test_the_report_selects_on_tuning_and_reports_the_held_out_half(
     assert judged["selected"] == [
         [concept, arm, rows[concept, arm]["coeff"]] for concept, arm in rows
     ]
+    assert judged["selection_rule"] == SELECTION_RULE
+    stored_selection = run_dir.read_json("judge_selection")
+    assert isinstance(stored_selection, dict)
+    assert stored_selection["rule"] == SELECTION_RULE
+    assert judged["selected"] == [
+        [row["concept"], row["arm"], row["coeff"]]
+        for row in stored_selection["selected"]
+    ]
+
+
+def test_the_unsteered_arm_is_judged_blind_in_both_stages(
+    tiny_gpt2: LoadedModel, tmp_path: Path
+) -> None:
+    _, run_dir = _execute(tiny_gpt2, tmp_path / "r")
+    _judge(run_dir, "tune", tmp_path / "tune")
+    _judge(run_dir, "held_out", tmp_path / "held_out")
+    records = {r.key: r for r in judged_generations(run_dir).records}
+
+    for stage in ("tune", "held_out"):
+        plan = _plan(run_dir, stage)
+        key_of = {
+            item_id: key
+            for b in plan.batches
+            for item_id, key in zip(b.item_ids, b.keys, strict=True)
+        }
+        unsteered = {
+            key
+            for b in plan.batches
+            if b.judge == 1
+            for key in b.keys
+            if records[key].arm == "none"
+        }
+        assert unsteered
+        assert unsteered == {
+            r.key
+            for r in records.values()
+            if (r.arm, r.split) == ("none", stage) and not r.empty
+        }
+        second = [b for b in plan.batches if b.judge == 2]
+        assert second
+        for b in plan.batches:
+            lines = (tmp_path / stage / f"{b.batch_id}.jsonl").read_text(
+                "utf-8"
+            )
+            for line in lines.splitlines():
+                row = json.loads(line)
+                record = records[key_of[row["item_id"]]]
+                assert row == {
+                    "item_id": row["item_id"],
+                    "prompt": record.prompt,
+                    "concept": record.description,
+                    "generation": record.text,
+                }
 
 
 def test_the_experiment_is_found_by_its_id_with_the_judging_functions() -> None:
