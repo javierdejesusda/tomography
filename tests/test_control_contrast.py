@@ -6,12 +6,15 @@ import numpy as np
 import pytest
 import torch
 
+from tomography.control.contrast import ChoicePair
 from tomography.control.contrast import PromptDifference
+from tomography.control.contrast import choice_pairs
 from tomography.control.contrast import contrast_edits
 from tomography.control.contrast import contrast_generate
 from tomography.control.contrast import contrast_logits
 from tomography.control.contrast import contrast_logprobs
 from tomography.control.contrast import contrast_windows
+from tomography.control.contrast import mean_shift
 from tomography.control.generate import generate
 from tomography.hooks import ForwardInfo
 from tomography.hooks import capture_residuals
@@ -1310,3 +1313,146 @@ def test_logits_apply_the_lm_head_to_the_last_column_of_the_main_rows_only(
         handle.remove()
 
     assert shapes == [(len(PROMPTS), tiny_arch.d_model)]
+
+
+def test_choice_pairs_alternate_the_letter_of_the_positive_option() -> None:
+    pairs = choice_pairs(
+        ["a glad text", "a merry text", "a bright text"],
+        ["a sad text", "a grim text", "a dull text"],
+        question="Which is happy?",
+    )
+
+    assert pairs == [
+        ChoicePair(
+            "Which is happy?\n\nChoices:\n(A) a glad text\n(B) a sad text",
+            "(A",
+            "(B",
+        ),
+        ChoicePair(
+            "Which is happy?\n\nChoices:\n(A) a grim text\n(B) a merry text",
+            "(B",
+            "(A",
+        ),
+        ChoicePair(
+            "Which is happy?\n\nChoices:\n(A) a bright text\n(B) a dull text",
+            "(A",
+            "(B",
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("positive", "negative", "question", "message"),
+    [
+        (["a"], ["b", "c"], "Which?", "same length"),
+        ([], [], "Which?", "no pairs"),
+        (["a"], ["b"], " ", "question"),
+    ],
+    ids=["lengths", "empty", "question"],
+)
+def test_choice_pairs_reject_what_they_cannot_pair(
+    positive: list[str], negative: list[str], question: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        choice_pairs(positive, negative, question=question)
+
+
+def test_mean_shift_is_the_difference_of_the_two_means_per_layer() -> None:
+    first = np.array(
+        [
+            [[1.0, 2.0], [3.0, 6.0]],
+            [[0.0, 0.0], [2.0, 4.0]],
+        ],
+        dtype=np.float32,
+    )
+    second = np.array(
+        [
+            [[1.0, 0.0], [0.0, 1.0], [2.0, 2.0]],
+            [[3.0, 3.0], [3.0, 3.0], [3.0, 3.0]],
+        ],
+        dtype=np.float32,
+    )
+
+    shift = mean_shift(first, second)
+
+    assert shift.dtype == np.float32
+    np.testing.assert_allclose(shift, [[1.0, 3.0], [-2.0, -1.0]])
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "message"),
+    [
+        (np.zeros((2, 3)), np.zeros((2, 3, 4)), "3-D"),
+        (np.zeros((2, 3, 4)), np.zeros((1, 3, 4)), "layers"),
+        (np.zeros((2, 3, 4)), np.zeros((2, 3, 5)), "width"),
+        (np.zeros((2, 0, 4)), np.zeros((2, 3, 4)), "no rows"),
+        (np.full((2, 3, 4), np.nan), np.zeros((2, 3, 4)), "finite"),
+    ],
+    ids=["rank", "layers", "width", "empty", "nan"],
+)
+def test_mean_shift_rejects_arrays_it_cannot_compare(
+    first: np.ndarray[Any, Any], second: np.ndarray[Any, Any], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        mean_shift(first, second)
+
+
+def test_norm_matching_scales_each_layer_to_its_residual_norm() -> None:
+    vectors = {
+        1: torch.tensor([[0.0, 0.0], [3.0, 0.0], [0.0, 5.0]]),
+        2: torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0]]),
+    }
+    raw = PromptDifference(vectors, 0.25)
+
+    matched = raw.norm_matched({1: 8.0, 2: 3.0, 5: 100.0})
+
+    assert matched.coeff == 0.25
+    assert sorted(matched.vectors) == [1, 2]
+    assert matched.vectors[1].dtype == torch.float32
+    torch.testing.assert_close(
+        matched.vectors[1], torch.tensor([[0.0, 0.0], [6.0, 0.0], [0.0, 10.0]])
+    )
+    torch.testing.assert_close(
+        matched.vectors[2], torch.tensor([[0.0, 0.0], [0.0, 3.0], [3.0, 0.0]])
+    )
+    torch.testing.assert_close(
+        raw.vectors[1], torch.tensor([[0.0, 0.0], [3.0, 0.0], [0.0, 5.0]])
+    )
+
+
+@pytest.mark.parametrize(
+    "norms",
+    [{1: 8.0}, {1: 8.0, 2: 0.0}, {1: 8.0, 2: float("nan")}],
+    ids=["missing", "zero", "nan"],
+)
+def test_norm_matching_needs_a_positive_norm_for_every_layer(
+    norms: dict[int, float],
+) -> None:
+    raw = PromptDifference(
+        {1: torch.tensor([[3.0, 4.0]]), 2: torch.tensor([[1.0, 0.0]])}, 1.0
+    )
+
+    with pytest.raises(ValueError, match="positive norm for layer 2"):
+        raw.norm_matched(norms)
+
+
+def test_a_norm_matched_difference_adds_the_coefficient_times_the_norm(
+    tiny_arch: LoadedModel,
+) -> None:
+    norms = {2: 7.0}
+    raw = PromptDifference.from_prompts(
+        tiny_arch, "Love is here", "Hate is here", (2,), coeff=0.5
+    )
+
+    matched = raw.norm_matched(norms)
+
+    rows = matched.vectors[2].norm(dim=-1)
+    assert float(rows[rows > 0].mean()) == pytest.approx(7.0, rel=1e-5)
+    direction = (
+        raw.vectors[2] / raw.vectors[2].norm(dim=-1).clamp(min=1e-12)[:, None]
+    )
+    again = (
+        matched.vectors[2]
+        / matched.vectors[2].norm(dim=-1).clamp(min=1e-12)[:, None]
+    )
+    torch.testing.assert_close(direction, again, atol=1e-5, rtol=1e-4)

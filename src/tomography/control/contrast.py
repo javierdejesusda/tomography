@@ -2,12 +2,19 @@
 
 The three streams of a triple run as rows of one batch, and a batch-aware
 residual edit adds the shift between the positive and negative streams.
+
+The module also holds the pieces of three published additive baselines:
+`PromptDifference` (activation addition from one prompt pair),
+`choice_pairs` (the two-option prompts of contrastive activation addition)
+and `mean_shift` (the difference of two activation means, which is the
+vector of contrastive activation addition and of mean-centring).
 """
 
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 import math
+from typing import Any
 from typing import Self
 
 import numpy as np
@@ -509,6 +516,111 @@ def _prompt_limit(
     return torch.tensor(prompt_lengths, device=h.device)
 
 
+@dataclass(frozen=True)
+class ChoicePair:
+    """One two-option question of contrastive activation addition.
+
+    Attributes:
+        question: The question and its two options, the user text.
+        positive: The start of the answer that picks the positive option,
+            `(A` or `(B`; the activation is read at its letter.
+        negative: The start of the answer that picks the other option.
+    """
+
+    question: str
+    positive: str
+    negative: str
+
+
+def choice_pairs(
+    positive: Sequence[str], negative: Sequence[str], *, question: str
+) -> list[ChoicePair]:
+    """Builds the two-option questions of contrastive activation addition.
+
+    Pair `i` shows the positive text under `(A)` when `i` is even and under
+    `(B)` when it is odd, so over the pairs the letter carries no signal and
+    the difference of the two answers isolates the concept.
+
+    Args:
+        positive: Texts that show the concept.
+        negative: One text without the concept per positive text.
+        question: The question asked about every pair of texts.
+
+    Returns:
+        One pair per text pair. The user text is the question, a blank
+        line, the line `Choices:` and one line per option, `(A) ...` and
+        `(B) ...`.
+
+    Raises:
+        ValueError: If the lists differ in length or are empty, or the
+            question is blank.
+    """
+    if len(positive) != len(negative):
+        raise ValueError(
+            "positive and negative must have the same length, got "
+            f"{len(positive)} and {len(negative)}"
+        )
+    if not positive:
+        raise ValueError("no pairs to build")
+    if not question.strip():
+        raise ValueError("the question is blank")
+    pairs = []
+    for i, (shown, other) in enumerate(zip(positive, negative, strict=True)):
+        first, second = (shown, other) if i % 2 == 0 else (other, shown)
+        letters = ("(A", "(B") if i % 2 == 0 else ("(B", "(A")
+        pairs.append(
+            ChoicePair(
+                f"{question}\n\nChoices:\n(A) {first}\n(B) {second}", *letters
+            )
+        )
+    return pairs
+
+
+def mean_shift(
+    first: NDArray[np.floating[Any]], second: NDArray[np.floating[Any]]
+) -> NDArray[np.float32]:
+    """Returns the difference of two activation means per layer.
+
+    With the activations of the positive and the negative answers of
+    `choice_pairs` this is the vector of contrastive activation addition;
+    with the activations of texts that show a concept and of a generic
+    corpus it is the mean-centring vector.
+
+    Args:
+        first: `(K, n, d)` activations of the set to steer towards, laid out
+            as `Activations.data`.
+        second: `(K, m, d)` activations of the set to steer away from.
+
+    Returns:
+        A `(K, d)` float32 array, `first.mean(axis=1) - second.mean(axis=1)`
+        computed in float64. The magnitude is kept.
+
+    Raises:
+        ValueError: If an array is not 3-D, the layer counts or the widths
+            differ, a set has no rows, or a value is not finite.
+    """
+    if first.ndim != 3 or second.ndim != 3:
+        raise ValueError(
+            f"both sets must be 3-D, got {first.ndim}-D and {second.ndim}-D"
+        )
+    if first.shape[0] != second.shape[0]:
+        raise ValueError(
+            f"the sets cover {first.shape[0]} and {second.shape[0]} layers"
+        )
+    if first.shape[2] != second.shape[2]:
+        raise ValueError(
+            f"the sets have width {first.shape[2]} and {second.shape[2]}"
+        )
+    if not first.shape[1] or not second.shape[1]:
+        raise ValueError("a set has no rows")
+    if not (np.isfinite(first).all() and np.isfinite(second).all()):
+        raise ValueError("the activations are not finite")
+    shift = first.astype(np.float64).mean(axis=1) - second.astype(
+        np.float64
+    ).mean(axis=1)
+    return shift.astype(np.float32)
+
+
 @dataclass(frozen=True, eq=False)
 class PromptDifference:
     """ActAdd-style controller built from the difference of two prompts.
@@ -608,6 +720,39 @@ class PromptDifference:
                 vector[0] = 0
             vectors[layer] = vector
         return cls(vectors, coeff)
+
+    def norm_matched(self, norms: Mapping[int, float]) -> Self:
+        """Rescales the difference to the norm of the residual stream.
+
+        Each layer is scaled by one factor, so that the mean norm of its
+        non-zero positions equals `norms[layer]`. The coefficient then reads
+        as a share of the residual norm, like the relative coefficient of a
+        reading vector, and one grid serves both. The published recipe keeps
+        the raw magnitude instead.
+
+        Args:
+            norms: Mean residual norm per layer, as `mean_residual_norms`
+                gives it; layers without a vector are ignored.
+
+        Returns:
+            A controller with the scaled vectors and the same coefficient.
+
+        Raises:
+            ValueError: If a layer has no finite positive norm.
+        """
+        scaled: dict[int, torch.Tensor] = {}
+        for layer, vector in self.vectors.items():
+            norm = norms.get(layer)
+            if norm is None or not math.isfinite(norm) or norm <= 0:
+                raise ValueError(
+                    f"norm matching needs a finite positive norm for layer "
+                    f"{layer}, got {norm}"
+                )
+            rows = vector.float().norm(dim=-1)
+            scaled[layer] = vector.float() * (
+                norm / float(rows[rows > 0].mean())
+            )
+        return type(self)(scaled, self.coeff)
 
     def edits(
         self, prompt_lengths: int | Sequence[int] | None = None

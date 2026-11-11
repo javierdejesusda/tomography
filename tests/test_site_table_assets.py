@@ -32,6 +32,7 @@ DATASET_MODULES = {
     "synthal": "synthal",
     "nq_open": "nq_open",
     "wikitext103": "wikitext",
+    "alpaca_eval": "alpaca_eval",
 }
 EXPECTED_ORDER = (
     "gpt2",
@@ -53,6 +54,7 @@ EXPECTED_ORDER = (
     "nq_open",
     "wikidata",
     "wikitext103",
+    "alpaca_eval",
 )
 
 

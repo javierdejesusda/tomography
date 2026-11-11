@@ -2,6 +2,7 @@ from collections.abc import Mapping
 import dataclasses
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -11,6 +12,7 @@ import urllib.request
 
 import pytest
 
+from tomography.datasets import alpaca_eval
 from tomography.datasets import sources
 from tomography.datasets.sources import ChecksumError
 from tomography.datasets.sources import OfflineCacheMissError
@@ -492,3 +494,78 @@ def test_importing_sources_disables_the_symlink_warning() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+ALPACA_EVAL_ROWS = [
+    {
+        "dataset": "helpful_base",
+        "instruction": " What is the capital of France? ",
+        "output": "A reference answer that is never read.",
+        "generator": "reference",
+    },
+    {
+        "dataset": "oasst",
+        "instruction": "  ",
+        "output": "An answer to nothing.",
+        "generator": "reference",
+    },
+    {
+        "dataset": "koala",
+        "instruction": "Name a color.\nThen name a fruit.",
+        "output": "Blue. Apple.",
+        "generator": "reference",
+    },
+]
+
+
+def test_the_alpaca_eval_source_pins_the_revision_and_the_file_digest() -> None:
+    source = alpaca_eval.SOURCE
+
+    assert source.name == "alpaca_eval"
+    assert source.kind == "hub"
+    assert source.location == "tatsu-lab/alpaca_eval"
+    assert source.revision == "2edc6fad8be6b14ea7230aabfd08188da6b8b814"
+    assert source.files == ("alpaca_eval.json",)
+    assert dict(source.sha256) == {
+        "alpaca_eval.json": (
+            "d92b92c51e8f1962a21193abe74e6f727c2bc8286035f4041505ff38a7c3ae51"
+        )
+    }
+    assert source.license == "CC-BY-NC-4.0 (runtime download only)"
+
+
+def test_alpaca_eval_keeps_the_instructions_in_file_order() -> None:
+    examples = alpaca_eval.parse_alpaca_eval(ALPACA_EVAL_ROWS)
+
+    assert [e.uid for e in examples] == ["alpaca_eval-0", "alpaca_eval-2"]
+    assert [e.text for e in examples] == [
+        "What is the capital of France?",
+        "Name a color.\nThen name a fruit.",
+    ]
+    assert [e.label for e in examples] == [-1, -1]
+    assert [e.split for e in examples] == ["test", "test"]
+    assert [dict(e.meta) for e in examples] == [
+        {"dataset": "helpful_base"},
+        {"dataset": "koala"},
+    ]
+
+
+def test_load_alpaca_eval_reads_the_pinned_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / "alpaca_eval.json"
+    path.write_text(json.dumps(ALPACA_EVAL_ROWS), encoding="utf-8")
+    calls: list[dict[str, object]] = []
+
+    def fake_fetch(source: object, **options: object) -> Path:
+        calls.append({"source": source, **options})
+        return path
+
+    monkeypatch.setattr(alpaca_eval, "fetch", fake_fetch)
+
+    examples = alpaca_eval.load_alpaca_eval(cache=tmp_path, offline=True)
+
+    assert calls == [
+        {"source": alpaca_eval.SOURCE, "cache": tmp_path, "offline": True}
+    ]
+    assert examples == alpaca_eval.parse_alpaca_eval(ALPACA_EVAL_ROWS)
