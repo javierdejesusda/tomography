@@ -1,6 +1,7 @@
 """Tests for the blinded judge batches."""
 
 import dataclasses
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -9,7 +10,9 @@ import pytest
 
 from tomography.judging.batches import Export
 from tomography.judging.batches import Generation
+from tomography.judging.batches import check_files
 from tomography.judging.batches import plan_export
+from tomography.judging.batches import seal
 from tomography.judging.batches import write_export
 
 CRITERIA = ("concept", "fluency")
@@ -209,42 +212,98 @@ def test_no_exported_file_names_an_arm_a_coefficient_or_a_split(
     paths = write_export(export, _generations(keys), tmp_path, rubric=RUBRIC)
 
     assert sorted(paths) == sorted(tmp_path.iterdir())
+    assert sorted(p.name for p in paths) == sorted(
+        [
+            *(f"{b.batch_id}.jsonl" for b in export.batches),
+            "criteria.json",
+            "rubric.txt",
+        ]
+    )
     for path in paths:
         text = path.read_text("utf-8")
         assert "caa" not in text
         assert "0.2" not in text
         assert "sentiment/" not in text
-        if path.suffix == ".jsonl":
-            assert "tune" not in text
-            assert "tune" not in path.name
+        assert "tune" not in text
+        assert "tune" not in path.name
+        assert "stage" not in text
 
 
-def test_the_manifest_tells_which_file_goes_to_which_judge(
+def test_the_criteria_file_tells_a_judge_what_to_rate(
     tmp_path: Path,
 ) -> None:
     keys = _keys(10)
     export = _plan(keys)
 
-    write_export(export, _generations(keys), tmp_path, rubric=RUBRIC)
+    paths = write_export(export, _generations(keys), tmp_path, rubric=RUBRIC)
 
-    manifest = json.loads((tmp_path / "manifest_tune.json").read_text("utf-8"))
-    assert manifest == {
-        "stage": "tune",
+    stored = json.loads((tmp_path / "criteria.json").read_text("utf-8"))
+    assert stored == {
         "criteria": ["concept", "fluency"],
         "scores": [0, 1, 2],
         "rubric_file": "rubric.txt",
-        "rubric_sha256": RUBRIC_SHA,
-        "batches": [
-            {
-                "batch_id": batch.batch_id,
-                "file": f"{batch.batch_id}.jsonl",
-                "judge": batch.judge,
-                "n_items": len(batch.item_ids),
-            }
-            for batch in export.batches
-        ],
     }
+    assert [p.name for p in paths[-2:]] == ["rubric.txt", "criteria.json"]
     assert (tmp_path / "rubric.txt").read_bytes() == RUBRIC.encode("utf-8")
+
+
+def _sealed(keys: list[str]) -> Export:
+    plan = plan_export(
+        keys,
+        stage="tune",
+        seed=7,
+        criteria=CRITERIA,
+        rubric_sha256=hashlib.sha256(RUBRIC.encode("utf-8")).hexdigest(),
+        batch_size=4,
+        second_fraction=0.25,
+    )
+    return seal(plan, _generations(keys))
+
+
+def test_sealing_records_the_digest_of_every_batch_file(
+    tmp_path: Path,
+) -> None:
+    keys = _keys(10)
+    plan = _plan(keys)
+
+    sealed = seal(plan, _generations(keys))
+
+    write_export(sealed, _generations(keys), tmp_path, rubric=RUBRIC)
+    assert [b.sha256 for b in plan.batches] == [""] * len(plan.batches)
+    for before, batch in zip(plan.batches, sealed.batches, strict=True):
+        data = (tmp_path / f"{batch.batch_id}.jsonl").read_bytes()
+        assert batch.sha256 == hashlib.sha256(data).hexdigest()
+        assert dataclasses.replace(batch, sha256="") == before
+    assert Export.from_dict(json.loads(json.dumps(sealed.to_dict()))) == sealed
+    with pytest.raises(ValueError, match="no generation for"):
+        seal(plan, _generations(keys[:9]))
+
+
+def test_an_edited_batch_file_or_rubric_fails_the_check(
+    tmp_path: Path,
+) -> None:
+    keys = _keys(10)
+    sealed = _sealed(keys)
+    write_export(sealed, _generations(keys), tmp_path, rubric=RUBRIC)
+    batch = sealed.batches[0]
+    path = tmp_path / f"{batch.batch_id}.jsonl"
+    exported = path.read_bytes()
+
+    check_files(sealed, batch.batch_id, tmp_path)
+
+    path.write_bytes(exported.replace(b"generation 0", b"generation X"))
+    assert path.read_bytes() != exported
+    with pytest.raises(ValueError, match=rf"{batch.batch_id}\.jsonl is not"):
+        check_files(sealed, batch.batch_id, tmp_path)
+    path.write_bytes(exported)
+    (tmp_path / "rubric.txt").write_text(RUBRIC + "Be kind.\n", "utf-8")
+    with pytest.raises(ValueError, match=r"rubric\.txt is not"):
+        check_files(sealed, batch.batch_id, tmp_path)
+    (tmp_path / "rubric.txt").unlink()
+    with pytest.raises(ValueError, match=r"rubric\.txt is missing"):
+        check_files(sealed, batch.batch_id, tmp_path)
+    with pytest.raises(ValueError, match="unknown batch"):
+        check_files(sealed, "00000000", tmp_path)
 
 
 def test_two_exports_of_one_plan_are_byte_identical(tmp_path: Path) -> None:

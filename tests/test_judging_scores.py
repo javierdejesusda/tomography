@@ -1,11 +1,15 @@
 """Tests for the scores computed from stored judgments."""
 
+from fractions import Fraction
+
 import numpy as np
 import pytest
 
 from tomography import judges
 from tomography.judging.scores import harmonic_mean
+from tomography.judging.scores import overall_mean
 from tomography.judging.scores import select_coefficient
+from tomography.judging.scores import weighted_kappa
 
 
 def test_the_harmonic_mean_is_hand_computed_for_three_criteria() -> None:
@@ -107,3 +111,64 @@ def test_judge_agreement_still_thresholds_probabilities_first() -> None:
     assert agreement == judges.label_agreement(
         [1, 1, 0, 1, 0, 0], [1, 0, 0, 1, 1, 0]
     )
+
+
+# One (0, 2), two (1, 2) and thirty-seven (2, 2): 0 + 2 * 4/3 + 37 * 2 over 40.
+# Summed as floats, this order and its reverse differ in the last bit.
+TIED = np.array([(0, 2)] + [(1, 2)] * 2 + [(2, 2)] * 37)
+
+
+def test_the_exact_mean_does_not_depend_on_the_order_of_the_items() -> None:
+    assert overall_mean(TIED) == Fraction(23, 12)
+    assert overall_mean(TIED[::-1]) == Fraction(23, 12)
+    assert overall_mean(np.array([[1, 1, 2], [0, 2, 2]])) == Fraction(3, 5)
+    assert float(overall_mean(TIED)) == pytest.approx(
+        float(harmonic_mean(TIED).mean())
+    )
+
+
+def test_equal_sets_of_scores_tie_and_the_smallest_magnitude_wins() -> None:
+    means = [overall_mean(TIED), overall_mean(TIED[::-1])]
+
+    assert select_coefficient([0.1, 0.4], means) == 0.1
+    assert select_coefficient([0.4, 0.1], means) == 0.1
+    assert select_coefficient([0.1, 0.4], means[::-1]) == 0.1
+
+
+@pytest.mark.parametrize(
+    "scores",
+    [np.zeros((0, 2), dtype=np.int64), np.array([1, 2]), np.array([[1, 3]])],
+    ids=["no-item", "one-dimension", "outside-scale"],
+)
+def test_the_exact_mean_rejects_other_inputs(scores: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="scores"):
+        overall_mean(scores)
+
+
+def test_the_weighted_kappa_is_hand_computed_with_quadratic_weights() -> None:
+    first = [0, 0, 1, 2, 2, 2]
+    second = [0, 1, 1, 2, 0, 2]
+
+    # Observed squared distance: (0 + 1 + 0 + 0 + 4 + 0) / 6 = 5/6. Expected
+    # from the margins (2, 1, 3) / 6 and (2, 2, 2) / 6: 54/36, so the
+    # kappa is 1 - (5/6) / (3/2).
+    assert weighted_kappa(first, second) == pytest.approx(4 / 9)
+    assert weighted_kappa(second, first) == pytest.approx(4 / 9)
+    assert weighted_kappa(first, first) == 1.0
+    assert weighted_kappa([2, 2], [2, 2]) == 1.0
+    # A miss by two levels costs more than a miss by one.
+    assert weighted_kappa([0, 1, 2, 0], [0, 1, 2, 2]) < weighted_kappa(
+        [0, 1, 2, 0], [0, 1, 2, 1]
+    )
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [([], []), ([0, 1], [0]), ([0, 3], [0, 1]), ([[0, 1]], [[0, 1]])],
+    ids=["empty", "lengths", "outside-scale", "two-dimensions"],
+)
+def test_the_weighted_kappa_rejects_invalid_scores(
+    first: list[int], second: list[int]
+) -> None:
+    with pytest.raises(ValueError, match="scores"):
+        weighted_kappa(first, second)
