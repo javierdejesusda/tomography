@@ -1181,6 +1181,30 @@ def test_streamed_scores_equal_whole_set_scores(
     assert streamed.shares.shape == (len(readers), len(report.texts), 4)
 
 
+def test_a_scores_only_stream_keeps_the_scores_and_leaves_shares_at_zero(
+    tiny_arch: LoadedModel,
+) -> None:
+    config = _config(batch_size=3)
+    readers = _fitted_readers(tiny_arch, config)
+    report = _stimuli(tiny_arch, "utility", decoy=True)
+
+    full = m3_matrix.stream_scores(
+        tiny_arch, report, readers, config, decoy=True
+    )
+    bare = m3_matrix.stream_scores(
+        tiny_arch, report, readers, config, decoy=True, shares=False
+    )
+
+    # Selection reads only the scores, so its stream skips the shares and
+    # the dropped cells; scores and cell counts are those of a full stream.
+    np.testing.assert_array_equal(bare.scores, full.scores)
+    np.testing.assert_array_equal(bare.cells, full.cells)
+    assert bare.shares.shape == full.shares.shape
+    assert not bare.shares.any()
+    assert bare.dropped.shape == full.dropped.shape
+    assert not bare.dropped.any()
+
+
 def test_stream_scores_name_the_batch_of_a_text_without_its_decoy_line(
     tiny_gpt2: LoadedModel,
 ) -> None:

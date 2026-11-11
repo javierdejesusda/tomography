@@ -607,6 +607,7 @@ def stream_scores(
     config: Config,
     *,
     decoy: bool,
+    shares: bool = True,
 ) -> Streamed:
     """Scores stimuli with cell readers, reading their cells batch by batch.
 
@@ -622,10 +623,13 @@ def stream_scores(
         config: Supplies `cell_layers`, `upper_layers`, the BOS policy and
             the batch size.
         decoy: Whether the texts carry P2's misleading line.
+        shares: Whether to compute the segment shares and the dropped
+            cells; without them both stay zero, as selection reads only
+            the scores.
 
     Returns:
-        The scores, segment shares and cell counts of each reader and
-        stimulus.
+        The scores, segment shares, cell counts and dropped cells of each
+        reader and stimulus.
 
     Raises:
         ValueError: If a batch is refused by `prompt_cells`, `select_cells`
@@ -637,7 +641,12 @@ def stream_scores(
         try:
             batches.append(
                 _batch_scores(
-                    loaded, _rows(stimuli, rows), readers, config, decoy=decoy
+                    loaded,
+                    _rows(stimuli, rows),
+                    readers,
+                    config,
+                    decoy=decoy,
+                    shares=shares,
                 )
             )
         except ValueError as error:
@@ -656,6 +665,7 @@ def _batch_scores(
     config: Config,
     *,
     decoy: bool,
+    shares: bool,
 ) -> Streamed:
     """Scores one batch; its cells are released on return."""
     cells, segments = prompt_cells(
@@ -671,28 +681,29 @@ def _batch_scores(
         for cell_set in dict.fromkeys(cell_set for cell_set, _ in readers)
     }
     n_stimuli, n_segments = len(stimuli.texts), len(SEGMENTS)
-    scores, shares, counts, dropped = [], [], [], []
+    scores, weights, counts, dropped = [], [], [], []
     for cell_set, reader in readers:
         acts, kept_segments = kept[cell_set]
-        zeros = np.zeros((n_stimuli, n_segments), dtype=np.int64)
+        share = np.zeros((n_stimuli, n_segments))
+        drop = np.zeros((n_stimuli, n_segments), dtype=np.int64)
         if isinstance(reader, FlatReader):
             scores.append(reader.score(acts, kept_segments)[0])
-            shares.append(zeros.astype(np.float64))
-            dropped.append(reader.dropped(acts, kept_segments))
+            if shares:
+                drop = reader.dropped(acts, kept_segments)
         else:
             scores.append(reader.score(acts)[0])
-            shares.append(
-                np.bincount(
+            if shares:
+                share = np.bincount(
                     acts.row_stimulus * n_segments + kept_segments,
                     cell_weights(reader, acts).sum(axis=0),
                     minlength=n_stimuli * n_segments,
                 ).reshape(n_stimuli, n_segments)
-            )
-            dropped.append(zeros)
+        weights.append(share)
+        dropped.append(drop)
         counts.append(np.bincount(acts.row_stimulus) * len(acts.layers))
     return Streamed(
         np.array(scores, dtype=np.float64),
-        np.array(shares),
+        np.array(weights),
         np.array(counts),
         np.array(dropped),
     )
@@ -1020,6 +1031,7 @@ def _cell_phase(
         [(fit.cell_set, reader) for fit in fits for reader in fit.readers],
         config,
         decoy=False,
+        shares=False,
     ).scores
     sizes = np.cumsum([len(fit.readers) for fit in fits])[:-1]
     best: list[int] = []
