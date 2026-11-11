@@ -412,6 +412,75 @@ results on the eight laptop checkpoints are in the findings.
 - Outputs: `table.json`, `curves_<dataset>_val` and `curves_<dataset>_test` (the accuracy of every layer series per
   seed and layer), and `summary.json` (the pair counts and the mean CCS training loss at its validation layer).
 
+## Published steering baselines (B3)
+
+`b3` (`experiments/b3_steering_baselines.py`) steers the same prompts toward a concept with published methods, our
+reading vector and controls, under the protocol of AxBench (Wu et al. 2025, `wu2025axbench`) adapted to each role.
+It has code and tests only; no run is reported yet.
+
+- Protocol: the prompts are split into a tuning half (`n_tune`, 40) and a held-out half (`n_held_out`, 40) that share
+  no prompt. Every arm generates 128 new tokens on both halves at every coefficient, one sample per prompt with the
+  sampling of C1 and one seed for all arms. A judge rates each generation 0, 1 or 2 per criterion; the overall score
+  of a generation is the harmonic mean of its criteria, 0 when any of them is 0. The coefficient of an arm is the
+  one with the highest mean overall score on the tuning half (ties go to the smaller coefficient), and the arm is
+  reported on the held-out half at that coefficient only. A held-out judgment cannot reach the choice: the held-out
+  batches are planned after the tuning judgments are stored.
+- Roles: a post-trained checkpoint answers AlpacaEval instructions rendered with its chat template and is judged on
+  `concept`, `instruction` and `fluency`. A base checkpoint continues the first words of held-out WikiText passages
+  and is judged on `concept` and `fluency`, since a continuation prompt asks for nothing. The roles are never pooled.
+- Concepts (`concepts`): `sentiment` (SST-2) and the six emotions of C2, by default `sentiment`, `happiness` and
+  `anger`. The concept sets of AxBench are left out: their license and file layout could not be checked offline.
+- Shared steering: every additive arm edits the layers of `default_control_layers` (40, 55 and 70 percent of the
+  depth) with the grid `coeffs` (0.05, 0.1, 0.2, 0.4, 0.8), relative to the mean residual norm of the calibration
+  texts. All vectors of a concept come from the same `n_pairs` (64) training pairs.
+- Judge: an external judge reads blinded, shuffled batch files and answers in a file; the code holds no network
+  client. A batch line has an item id, the prompt, the concept description and the generation; the arm, the
+  coefficient, the checkpoint and the split stay in the run. The rubric is package data (`judging/rubric.txt`) and
+  its SHA-256 is stored with every judgment, beside the model id given at import and the batch id. An import that is
+  not exactly one valid judgment per exported item is refused and changes nothing. An empty generation is never sent
+  and scores 0 on every criterion. A seeded share of the generations (`--second-fraction`, 0.1) is exported again
+  under other item ids for a second, independent judge, and `summary_judged.json` reports the agreement rate and
+  Cohen's kappa per criterion. The judge is a model run by hand, identified by its model id and the rubric, not a
+  pinned snapshot behind an interface; the raw judgments are stored.
+- Cross-check: the pinned classifier of the concept (`sentiment-primary` or `emotion-primary`) scores every
+  generation; `table.json` carries its held-out mean and `summary_judged.json` its rank correlation with the judged
+  concept score.
+- Outputs: `trials_<concept>_<split>` (every generation), `vectors.npz`, `table_effects.json` (perplexity of
+  neutral text, distinct-1 and the other side effects of every arm and coefficient on the held-out half), and, after
+  judging, `table.json` (per concept and arm the chosen coefficient, the mean per criterion and the overall score
+  with a percentile bootstrap interval over the held-out prompts, 2,000 resamples), `table_tuning.json` and
+  `summary_judged.json`.
+
+Method definitions. Each arm names its source and where it departs from the published recipe.
+
+- `caa`, contrastive activation addition (Rimsky et al. 2024, `rimsky2024steering`): the mean difference of the
+  residual stream at the answer letter between the two answers of two-option questions (`choice_pairs`,
+  `caa_vectors`). Departures: the questions are built from the training pairs of the concept (`caa_question`, the
+  positive text under `(A)` on even pairs and under `(B)` on odd pairs) instead of a behavior dataset; a base
+  checkpoint reads them in the plain `USER:` and `ASSISTANT:` layout; the vector is normalized and added at the
+  shared layers with a coefficient relative to the residual norm, from the last prompt token on, instead of the raw
+  vector times a multiplier at one layer.
+- `mean_centring` (Jorgensen et al. 2023, `jorgensen2023improving`): the mean activation of texts that show the
+  concept minus the mean activation of a generic corpus, each text averaged over its tokens
+  (`mean_centring_vectors`). Departures: the target texts are the positive texts of the training pairs, the generic
+  corpus is the calibration slice of held-out WikiText (`n_calibration` passages), and the vector is normalized and
+  norm-matched as above.
+- `actadd`, activation addition (Turner et al. 2023, `turner2023steering`): the difference of the residual streams
+  of a positive and a negative prompt, added at the first positions of the prompt (`PromptDifference`). Departures:
+  each layer is rescaled so that the mean norm of its non-zero positions equals the mean residual norm
+  (`norm_matched`), where the published recipe keeps the raw magnitude; it is added at the shared layers instead of
+  one layer; the prompt pairs are ours (`Love` and `Hate` for sentiment, one word pair per emotion in `CONCEPTS`).
+- `diffmean`, the difference of class means (the mass-mean direction of Marks and Tegmark 2024,
+  `marks2024geometry`, a baseline of AxBench): the `mean_diff` finder on the stimuli of C1 and C2, read at the last
+  token of our template, not on token means of raw text.
+- `reader`: our reading vector, the `logistic` finder of C1 and C2 on the same stimuli (`method`), with the refit
+  rule of B2.
+- `prompt`, prompt prepending (a baseline of AxBench): one fixed sentence that names the concept (`prompt_base`
+  before a continuation prompt, `prompt_instruct` inside the user turn before an instruction), not a prompt written
+  per concept by a model. The arm has no coefficient and no neutral perplexity.
+- `random/<i>`: a control, `n_random` random unit directions per concept, steered exactly like the vector arms.
+- `none`: the unsteered model, a control.
+
 ## LAT against few-shot prompting (R8)
 
 `r8` (`experiments/r8_qa_correctness.py`) replicates the QA protocol of Fig. 7 and Table 9 on one checkpoint:
