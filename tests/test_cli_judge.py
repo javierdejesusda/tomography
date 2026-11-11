@@ -406,6 +406,9 @@ def test_the_help_explains_the_three_steps(
     for option in ("--out", "--stage", "--seed", "--batch-size"):
         assert option in texts["judge export --help"]
     assert "--second-fraction" in texts["judge export --help"]
+    assert "every batch of the tune stage" in texts["judge export --help"]
+    assert "judge_selection.json" in texts["judge export --help"]
+    assert "(default: 50)" in texts["judge export --help"]
     assert "exactly one" in texts["judge import --help"]
     assert "--batch" in texts["judge import --help"]
     assert "--judge-model" in texts["judge import --help"]

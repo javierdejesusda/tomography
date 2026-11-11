@@ -361,8 +361,11 @@ def _add_judge_commands(commands: Any) -> None:
             "rubric and a manifest. A batch line holds an item id, the "
             "prompt, the concept description and the generation; the arm, "
             "the coefficient, the checkpoint and the split stay in the run. "
-            "The held_out stage needs the imported judgments of the tune "
-            "stage and holds each arm at the coefficient that won there."
+            "The held_out stage is refused until every batch of the tune "
+            "stage is imported; it holds each arm at the coefficient that "
+            "won there and stores that choice with its rule in "
+            "judge_selection.json. An empty generation is never exported "
+            "and scores 0 on every criterion."
         ),
     )
     export.add_argument("run", help="run directory")
