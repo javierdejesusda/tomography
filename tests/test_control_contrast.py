@@ -1456,3 +1456,97 @@ def test_a_norm_matched_difference_adds_the_coefficient_times_the_norm(
         / matched.vectors[2].norm(dim=-1).clamp(min=1e-12)[:, None]
     )
     torch.testing.assert_close(direction, again, atol=1e-5, rtol=1e-4)
+
+
+def expected_started_edit(
+    h: torch.Tensor,
+    diff: PromptDifference,
+    tables: tuple[list[list[int]], list[list[int]]],
+    limits: list[int] | None = None,
+) -> torch.Tensor:
+    index, real = tables
+    vectors = diff.vectors[1]
+    result = h.clone()
+    for row in range(h.shape[0]):
+        for col in range(h.shape[1]):
+            j = index[row][col]
+            capped = limits is not None and j >= limits[row]
+            inside = diff.start <= j < diff.start + vectors.shape[0]
+            if real[row][col] and inside and not capped:
+                result[row, col] += diff.coeff * vectors[j - diff.start]
+    return result
+
+
+def test_a_difference_starts_at_the_front_of_the_text_by_default(
+    tiny_arch: LoadedModel,
+) -> None:
+    diff, _ = handmade()
+
+    assert diff.start == 0
+    assert (
+        PromptDifference.from_prompts(
+            tiny_arch, "Love is here", "Hate is here", (2,), coeff=0.5
+        ).start
+        == 0
+    )
+
+
+@SOURCES
+def test_a_start_moves_the_edit_to_the_tokens_from_that_index(
+    source: str,
+) -> None:
+    diff, h = handmade()
+    moved = diff.at(2)
+    info, index, real = info_and_tables(source)
+
+    edited = moved.edits()[1](h, info)
+
+    assert moved.start == 2
+    assert moved.coeff == diff.coeff
+    assert moved.vectors is diff.vectors
+    expected = expected_started_edit(h, moved, (index, real))
+    torch.testing.assert_close(edited, expected)
+    assert not torch.equal(edited, h)
+    assert not torch.equal(edited, diff.edits()[1](h, info))
+    # Token indices 0 and 1 hold what comes before the start.
+    assert torch.equal(edited[1, :2], h[1, :2])
+    assert torch.equal(edited[1, 5], h[1, 5])
+
+
+@pytest.mark.parametrize(
+    "lengths", [3, [3, 4]], ids=["int_for_all_rows", "per_row"]
+)
+def test_a_started_edit_stays_below_the_prompt_length(
+    lengths: int | list[int],
+) -> None:
+    diff, h = handmade()
+    moved = diff.at(2)
+    info, index, real = info_and_tables("positions")
+    limits = [lengths] * 2 if isinstance(lengths, int) else lengths
+
+    edited = moved.edits(lengths)[1](h, info)
+
+    expected = expected_started_edit(h, moved, (index, real), limits)
+    torch.testing.assert_close(edited, expected)
+    assert not torch.equal(edited, h)
+
+
+def test_a_start_at_zero_is_the_edit_at_the_front() -> None:
+    diff, h = handmade()
+    info, _, _ = info_and_tables("positions")
+
+    assert torch.equal(diff.at(0).edits()[1](h, info), diff.edits()[1](h, info))
+
+
+def test_norm_matching_keeps_the_start() -> None:
+    raw = PromptDifference({1: torch.tensor([[3.0, 4.0]])}, 1.0, start=3)
+
+    assert raw.norm_matched({1: 10.0}).start == 3
+
+
+@pytest.mark.parametrize("start", [-1, -3])
+def test_a_start_below_zero_is_rejected(start: int) -> None:
+    with pytest.raises(ValueError, match="start"):
+        PromptDifference({1: torch.ones(1, 2)}, 1.0, start=start)
+    with pytest.raises(ValueError, match="start"):
+        handmade()[0].at(start)

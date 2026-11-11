@@ -627,28 +627,36 @@ class PromptDifference:
 
     The difference of the residual streams of a positive and a negative
     prompt keeps its raw magnitude, and `coeff` multiplies it. The edit adds
-    `coeff * vectors[layer][j]` at the tokens of token index `j < k`, so it is
-    position local and works under the KV cache.
+    `coeff * vectors[layer][j - start]` at the tokens of token index
+    `start <= j < start + k`, so it is position local and works under the KV
+    cache.
 
     Attributes:
         vectors: Maps a layer to a `(k, d_model)` float32 per-position
             difference.
         coeff: Multiplier of the raw difference.
+        start: Token index that row 0 of the vectors is added at. 0 is the
+            front of the text. A prompt rendered with a chat format opens
+            with a header, so there the front of the prompt text is the
+            first token of the user text (`at` moves the edit to it).
     """
 
     vectors: Mapping[int, torch.Tensor]
     coeff: float
+    start: int = 0
 
     def __post_init__(self) -> None:
         """Validates the vectors and the coefficient.
 
         Raises:
             ValueError: If `vectors` is empty, a vector is not 2-D, not
-                finite or all zero, the widths differ, or `coeff` is not
-                finite.
+                finite or all zero, the widths differ, `coeff` is not
+                finite, or `start` is negative.
         """
         if not self.vectors:
             raise ValueError("vectors is empty")
+        if self.start < 0:
+            raise ValueError(f"start must be >= 0, got {self.start}")
         if not math.isfinite(self.coeff):
             raise ValueError(f"coeff must be finite, got {self.coeff}")
         for layer, vector in self.vectors.items():
@@ -721,6 +729,20 @@ class PromptDifference:
             vectors[layer] = vector
         return cls(vectors, coeff)
 
+    def at(self, start: int) -> Self:
+        """Moves the edit so that row 0 of the vectors lands on a token.
+
+        Args:
+            start: Token index of the first edited position.
+
+        Returns:
+            A controller with the same vectors and coefficient.
+
+        Raises:
+            ValueError: If `start` is negative.
+        """
+        return type(self)(self.vectors, self.coeff, start)
+
     def norm_matched(self, norms: Mapping[int, float]) -> Self:
         """Rescales the difference to the norm of the residual stream.
 
@@ -735,7 +757,8 @@ class PromptDifference:
                 gives it; layers without a vector are ignored.
 
         Returns:
-            A controller with the scaled vectors and the same coefficient.
+            A controller with the scaled vectors and the same coefficient
+            and start.
 
         Raises:
             ValueError: If a layer has no finite positive norm.
@@ -752,7 +775,7 @@ class PromptDifference:
             scaled[layer] = vector.float() * (
                 norm / float(rows[rows > 0].mean())
             )
-        return type(self)(scaled, self.coeff)
+        return type(self)(scaled, self.coeff, self.start)
 
     def edits(
         self, prompt_lengths: int | Sequence[int] | None = None
@@ -762,7 +785,7 @@ class PromptDifference:
         Args:
             prompt_lengths: Token count of each row's prompt, or one int for
                 all rows; edited indices stay below it. None applies only
-                the `j < k` rule.
+                the `start <= j < start + k` rule.
 
         Returns:
             A mapping from layer to a residual edit.
@@ -785,15 +808,16 @@ class PromptDifference:
             def edit(h: torch.Tensor, info: ForwardInfo) -> torch.Tensor:
                 if self.coeff == 0:
                     return h
-                index = _token_index(info, h)
-                edited = index < vector.shape[0]
+                token = _token_index(info, h)
+                index = token - self.start
+                edited = (index >= 0) & (index < vector.shape[0])
                 mask = info.attention_mask
                 if mask is not None:
                     edited = edited & (mask[:, -h.shape[1] :] > 0).to(h.device)
                 if prompt_lengths is not None:
                     limit = _prompt_limit(prompt_lengths, h)
-                    edited = edited & (index < limit[:, None])
-                rows = vector.to(h.device)[index.clamp(max=vector.shape[0] - 1)]
+                    edited = edited & (token < limit[:, None])
+                rows = vector.to(h.device)[index.clamp(0, vector.shape[0] - 1)]
                 return (h.float() + self.coeff * rows * edited[..., None]).to(
                     h.dtype
                 )
