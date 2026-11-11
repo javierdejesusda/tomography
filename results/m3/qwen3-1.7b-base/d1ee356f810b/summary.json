@@ -1,0 +1,258 @@
+{
+  "_meta": {
+    "experiment": "m3",
+    "config_hash": "d1ee356f810b",
+    "seed": 0,
+    "git_sha": "cbd9b2560e088337fb92def45e73608e09cac376",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-11T05:18:10+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m3",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "truth_polarity",
+        "utility"
+      ],
+      "scorers": [
+        "logistic",
+        "mean_diff"
+      ],
+      "readouts": [
+        "last",
+        "concept",
+        "mean",
+        "max"
+      ],
+      "token_layers": null,
+      "layer_rules": [
+        "best",
+        "top_k",
+        "joint"
+      ],
+      "top_k": 5,
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "shifts": [
+        "paraphrase"
+      ],
+      "controls": [
+        "text",
+        "random",
+        "shuffled"
+      ],
+      "reader_series": true,
+      "logistic_c": [
+        0.001,
+        0.01,
+        0.1,
+        1.0,
+        10.0,
+        100.0,
+        1000.0
+      ],
+      "mlp_alpha": [
+        0.1,
+        0.01,
+        0.001,
+        0.0001
+      ],
+      "mlp_hidden": [
+        64
+      ],
+      "baselines": [
+        "logistic/last",
+        "mean_diff/last",
+        "logistic/concept",
+        "logistic/stimulus_token"
+      ],
+      "n_boot": 2000,
+      "max_fpr": 0.01,
+      "cell_layers": [
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ],
+      "upper_layers": [
+        16,
+        20,
+        24,
+        28
+      ],
+      "cell_sets": [
+        "prompt"
+      ],
+      "poolings": [
+        "flat"
+      ],
+      "cell_tol": 1e-10
+    }
+  },
+  "data": {
+    "tasks": [
+      "sentiment",
+      "truth",
+      "truth_polarity",
+      "utility"
+    ],
+    "conditions": {
+      "sentiment": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "truth": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "truth_polarity": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "utility": [
+        "original",
+        "random",
+        "against"
+      ]
+    },
+    "skipped": {
+      "sentiment": {},
+      "truth": {},
+      "truth_polarity": {},
+      "utility": {
+        "shift:paraphrase": "no paraphrase for template 'utility'"
+      }
+    },
+    "n_eval_pairs": {
+      "sentiment": {
+        "select": 214,
+        "report": 214
+      },
+      "truth": {
+        "select": 53,
+        "report": 59
+      },
+      "truth_polarity": {
+        "select": 256,
+        "report": 256
+      },
+      "utility": {
+        "select": 256,
+        "report": 256
+      }
+    },
+    "fits": {
+      "sentiment": {
+        "logistic/flat_prompt/joint/reader": {
+          "fits": 70,
+          "seconds": 51.57452269999703,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/flat_prompt/joint/shuffled": {
+          "fits": 70,
+          "seconds": 51.56218259999878,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        }
+      },
+      "truth": {
+        "logistic/flat_prompt/joint/reader": {
+          "fits": 70,
+          "seconds": 45.44178159999865,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/flat_prompt/joint/shuffled": {
+          "fits": 70,
+          "seconds": 45.36529159999918,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        }
+      },
+      "truth_polarity": {
+        "logistic/flat_prompt/joint/reader": {
+          "fits": 70,
+          "seconds": 40.84590090000711,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/flat_prompt/joint/shuffled": {
+          "fits": 70,
+          "seconds": 40.9693183000054,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        }
+      },
+      "utility": {
+        "logistic/flat_prompt/joint/reader": {
+          "fits": 70,
+          "seconds": 59.4889909999838,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        },
+        "logistic/flat_prompt/joint/shuffled": {
+          "fits": 70,
+          "seconds": 58.80399779998697,
+          "convergence_warnings": 0,
+          "stalled_fits": 0,
+          "restarted_fits": 0
+        }
+      }
+    },
+    "families": "one per task, condition, layer rule and baseline; Holm over the DeLong and, separately, the McNemar p values of its cells; the joint cells are compared with each baseline's top_k rule and, in a family of their own, its best rule",
+    "diagnostics": "one row per task, condition and cell reader; each segment column is the share of a report text's reader weight on the cells of that segment (cellmax: its highest cell, ties split; cellattn: its attention mass), averaged over the texts and draws; cells is a text's mean number of cells in the reader's set, and cells_rho the Spearman correlation of that number with the score within each label, averaged over the labels and draws where it is defined (null if none is), since the cell max rises with the number of cells; no cell set reads the prefix, so its share is 0",
+    "truncation": "one row per task, condition and flat reader; cells is a text's mean number of cells in the reader's set, and each segment column the mean number of that segment's cells per text the reader drops, averaged over the texts and draws: a segment longer than its training width loses its first cells, and a segment that no training text has, such as the decoy line (training uses the paper template), has no slots, so all of its cells are dropped; truncated is the share of texts that lose a cell of a segment with slots, averaged over the draws"
+  }
+}

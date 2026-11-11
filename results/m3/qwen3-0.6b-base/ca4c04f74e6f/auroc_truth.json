@@ -1,0 +1,177 @@
+{
+  "_meta": {
+    "experiment": "m3",
+    "config_hash": "ca4c04f74e6f",
+    "seed": 0,
+    "git_sha": "67659822ead73275b02e6769323ae5c6fcbbb20f",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-11T09:29:30+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m3",
+      "model": "qwen3-0.6b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "truth_polarity",
+        "utility"
+      ],
+      "scorers": [
+        "logistic",
+        "mean_diff"
+      ],
+      "readouts": [
+        "last",
+        "concept",
+        "mean",
+        "max"
+      ],
+      "token_layers": null,
+      "layer_rules": [
+        "best",
+        "top_k",
+        "joint"
+      ],
+      "top_k": 5,
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "shifts": [
+        "paraphrase"
+      ],
+      "controls": [
+        "text",
+        "random",
+        "shuffled"
+      ],
+      "reader_series": true,
+      "logistic_c": [
+        0.001,
+        0.01,
+        0.1,
+        1.0,
+        10.0,
+        100.0,
+        1000.0
+      ],
+      "mlp_alpha": [
+        0.1,
+        0.01,
+        0.001,
+        0.0001
+      ],
+      "mlp_hidden": [
+        64
+      ],
+      "baselines": [
+        "logistic/last",
+        "mean_diff/last",
+        "logistic/concept",
+        "logistic/stimulus_token"
+      ],
+      "n_boot": 2000,
+      "max_fpr": 0.01,
+      "cell_layers": [
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ],
+      "upper_layers": [
+        16,
+        20,
+        24,
+        28
+      ],
+      "cell_sets": [
+        "prompt"
+      ],
+      "poolings": [
+        "cellattn"
+      ],
+      "cell_tol": 1e-10,
+      "cell_head": "mlp",
+      "cell_hidden": 8
+    }
+  },
+  "data": {
+    "rows": [
+      "logistic/last/best",
+      "logistic/last/top_k",
+      "logistic/concept/best",
+      "logistic/concept/top_k",
+      "logistic/mean/best",
+      "logistic/mean/top_k",
+      "logistic/max/best",
+      "logistic/max/top_k",
+      "mean_diff/last/best",
+      "mean_diff/last/top_k",
+      "mean_diff/concept/best",
+      "mean_diff/concept/top_k",
+      "mean_diff/mean/best",
+      "mean_diff/mean/top_k",
+      "mean_diff/max/best",
+      "mean_diff/max/top_k",
+      "random/last/best",
+      "random/last/top_k",
+      "random/concept/best",
+      "random/concept/top_k",
+      "random/mean/best",
+      "random/mean/top_k",
+      "random/max/best",
+      "random/max/top_k",
+      "text/text/none",
+      "logistic/stimulus_token/best",
+      "logistic/stimulus_token/top_k",
+      "mean_diff/stimulus_token/best",
+      "mean_diff/stimulus_token/top_k",
+      "random/stimulus_token/best",
+      "random/stimulus_token/top_k",
+      "logistic/prompt_max/best",
+      "logistic/prompt_max/top_k",
+      "mean_diff/prompt_max/best",
+      "mean_diff/prompt_max/top_k",
+      "random/prompt_max/best",
+      "random/prompt_max/top_k",
+      "logistic/cellattnmlp_prompt/joint"
+    ],
+    "cols": [
+      "original",
+      "random",
+      "against",
+      "paraphrase_0",
+      "paraphrase_1",
+      "paraphrase_2"
+    ],
+    "title": "truth: report AUROC of each cell (mean over seeds)"
+  }
+}

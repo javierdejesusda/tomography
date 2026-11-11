@@ -34,6 +34,14 @@ SELECTIONS: dict[str, dict[str, str]] = {
         "logistic_c": "0.001,0.01,0.1,1,10,100,1000",
     },
     "M3 stage 1, wide C grid": {"logistic_c": "0.001,0.01,0.1,1,10,100,1000"},
+    "M3 flat, wide C grid": {
+        "logistic_c": "0.001,0.01,0.1,1,10,100,1000",
+        "poolings": "flat",
+    },
+    "M3 MLP head, wide C grid": {
+        "logistic_c": "0.001,0.01,0.1,1,10,100,1000",
+        "cell_head": "mlp",
+    },
 }
 
 
