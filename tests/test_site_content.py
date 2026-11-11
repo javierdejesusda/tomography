@@ -579,6 +579,33 @@ def test_known_and_unknown_questions_have_a_finding_and_a_subsection() -> None:
     assert "told to give one exact number" in text
 
 
+def test_the_published_baselines_have_a_table_beside_what_they_compare() -> (
+    None
+):
+    reading = _section("appendix_reading")
+    place = reading.items.index("table:finders_all")
+    assert reading.items[place + 1] == "table:finder_baselines"
+    text = " ".join(_texts(reading))
+    for token in (
+        "[[table:finder_baselines]]",
+        "[[count:table:finder_baselines.every_baseline_above]]",
+        "[[count:table:finder_baselines.finder_above_random]]",
+        "[[cite:burns2023discovering]]",
+    ):
+        assert token in text, token
+    text = " ".join(_texts(_section("appendix_knowledge")))
+    for token in (
+        "[[table:detection_baselines]]",
+        "[[count:table:detection_baselines.answer_probe_above]]",
+        "[[count:table:detection_baselines.above_ptrue_and_controls]]",
+        "[[cite:orgad2025llms]]",
+        "[[cite:farquhar2024detecting]]",
+        "[[cite:chen2024inside]]",
+    ):
+        assert token in text, token
+    assert "by point estimate" in text
+
+
 def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
     None
 ):
@@ -586,6 +613,7 @@ def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
     assert section.items == (
         "fig:a_knowledge_matrix",
         "table:knowledge",
+        "table:detection_baselines",
         "fig:a_dose_runs",
         "fig:a_dose_types",
         "fig:a_knowledge_geometry",

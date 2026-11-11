@@ -120,6 +120,8 @@ DISPLAY = {
     "pca_diff": "PCA of paired differences (paper)",
     "pca_raw": "PCA of activations",
     "mean_diff": "mean difference (mass-mean probe)",
+    "whitened_mean_diff": "whitened mean difference (mass-mean probe, IID)",
+    "ccs": "contrast-consistent search (CCS)",
     "logistic": "logistic regression",
     "kmeans": "k-means",
     "random": "random direction",

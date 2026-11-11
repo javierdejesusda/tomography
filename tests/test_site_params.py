@@ -145,6 +145,11 @@ def test_display_names_follow_table_one_and_the_page_rules() -> None:
         assert params.display(model) == paper.display_name(model)
     assert params.display("pca_diff") == "PCA of paired differences (paper)"
     assert params.display("lat") == "knowledge direction"
+    assert params.display("mean_diff") == "mean difference (mass-mean probe)"
+    assert params.display("whitened_mean_diff") == (
+        "whitened mean difference (mass-mean probe, IID)"
+    )
+    assert params.display("ccs") == "contrast-consistent search (CCS)"
     assert params.display("no_template") == "no template"
     assert params.display("nq_open") == "NQ-open"
     for key, name in SETS.items():

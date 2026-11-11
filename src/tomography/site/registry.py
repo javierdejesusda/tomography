@@ -76,7 +76,8 @@ class TableOutput:
         notes: Footer lines under the bottom rule.
         numbers: Name to value for each number the claim quotes.
         groups: Header spans over the columns after the first, as (label,
-            number of columns, muted); empty when columns are ungrouped.
+            number of columns, muted); empty when columns are ungrouped. A
+            span with an empty label gets no rule, for a second label column.
         row_groups: Index of the first row of each row group, which gets a
             rule above it; empty for none, and None to rule above every row
             with a label (the earlier behaviour).
@@ -136,6 +137,7 @@ APPENDIX_TABLES = (
     "assets",
     "notation",
     "finders_all",
+    "finder_baselines",
     "reading_full",
     "sizes",
     "prompts",
@@ -144,6 +146,7 @@ APPENDIX_TABLES = (
     "truth_sets",
     "steering",
     "knowledge",
+    "detection_baselines",
     "knowledge_projections",
     "approximate",
     "base_post",
