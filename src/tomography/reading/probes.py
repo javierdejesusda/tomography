@@ -3,7 +3,8 @@
 `RepReader` holds one direction per layer. The readers here keep a
 direction only where the scorer is linear: LDA and TTPD are `RepReader`s,
 the attention and cell max readers export their value heads as one, and
-the MLP reader has none. All of them satisfy `Reader`.
+the MLP reader and the cell readers with an MLP head per layer have none.
+All of them satisfy `Reader`.
 """
 
 from collections.abc import Callable
@@ -11,6 +12,7 @@ from collections.abc import Iterable
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace
+from functools import partial
 from typing import Protocol
 from typing import runtime_checkable
 import warnings
@@ -36,6 +38,10 @@ from tomography.reading.reader import orient
 # L-BFGS-B's `ftol`: it stops when a step lowers the loss by no more than
 # this times the loss's magnitude (at least 1).
 _FTOL = 64 * np.finfo(np.float64).eps
+_NO_DIRECTION = (
+    "an MLP head has no single direction per layer, so it cannot be "
+    "exported as a RepReader; cell_values gives the value of every cell"
+)
 
 
 class StalledFitWarning(UserWarning):
@@ -675,6 +681,326 @@ def fit_cell_max(
     return replace(reader, signs=signs)
 
 
+@dataclass(frozen=True, eq=False)
+class AttentionMLPReader:
+    """A joint attention reader whose cell values come from an MLP per layer.
+
+    A cell x of layer k has the attention logit `queries[k] @ x +
+    offsets[k]`, as in a joint `AttentionReader`, and the value
+    `outputs[k] @ relu(hidden[k] @ x + hidden_biases[k]) + biases[k]`: one
+    hidden layer of ReLU units per layer. A stimulus scores the values of
+    its cells of all layers weighted by one softmax of their logits, which
+    gives one score row. The parameters are in activation units.
+
+    Attributes:
+        layers: Layer indices, in the order of the first axis of the input.
+        queries: Query vectors of shape (K, d).
+        offsets: Logit offsets of shape (K,).
+        hidden: Hidden weights of shape (K, H, d), H units per layer.
+        hidden_biases: Hidden biases of shape (K, H).
+        outputs: Output weights of shape (K, H).
+        biases: Output biases of shape (K,); `fit_attention_mlp` shares one
+            across the layers.
+    """
+
+    layers: tuple[int, ...]
+    queries: NDArray[np.float64]
+    offsets: NDArray[np.float64]
+    hidden: NDArray[np.float64]
+    hidden_biases: NDArray[np.float64]
+    outputs: NDArray[np.float64]
+    biases: NDArray[np.float64]
+
+    @property
+    def method(self) -> str:
+        """`attention_joint_mlp`."""
+        return "attention_joint_mlp"
+
+    def cell_values(self, acts: Activations) -> NDArray[np.float64]:
+        """The value of every cell, in float64.
+
+        Args:
+            acts: Token rows of the layers in `layers`.
+
+        Returns:
+            The values, shape (K, n_rows), in the layout of `acts.data`.
+
+        Raises:
+            ValueError: If `acts` holds other layers or another width, or a
+                stimulus has no rows.
+        """
+        _scored_stimulus(acts, self.layers, self.hidden.shape[2])
+        return _mlp_values(acts, self)
+
+    def score(self, acts: Activations) -> NDArray[np.float32]:
+        """Scores every stimulus with its attention-weighted cell values.
+
+        Args:
+            acts: Token rows of the layers in `layers`, such as those of
+                the `response` position.
+
+        Returns:
+            Scores of shape (1, n_stimuli).
+
+        Raises:
+            ValueError: If `acts` holds other layers or another width, or a
+                stimulus has no rows.
+        """
+        stimulus = _scored_stimulus(acts, self.layers, self.queries.shape[1])
+        logits = np.empty((len(self.layers), stimulus.shape[0]))
+        for k, layer_rows in enumerate(acts.data):
+            rows = layer_rows.astype(np.float64)
+            logits[k] = rows @ self.queries[k] + self.offsets[k]
+        pooled = _pool(
+            torch.from_numpy(logits),
+            torch.from_numpy(_mlp_values(acts, self)),
+            stimulus,
+            acts.n_stimuli,
+        )
+        return pooled[None].numpy().astype(np.float32)
+
+    def rep_reader(self) -> RepReader:
+        """Refuses the export of `AttentionReader.rep_reader`.
+
+        Raises:
+            ValueError: Always: an MLP head has no single direction per
+                layer; `cell_values` gives the value of every cell.
+        """
+        raise ValueError(_NO_DIRECTION)
+
+
+@dataclass(frozen=True, eq=False)
+class CellMaxMLPReader:
+    """A reader that scores a stimulus by its highest cell under an MLP.
+
+    A cell x of layer k has the value `outputs[k] @ relu(hidden[k] @ x +
+    hidden_biases[k]) + biases[k]`, one hidden layer of ReLU units per
+    layer, and a stimulus scores the largest value among its cells of all
+    layers, as in `CellMaxReader`. The parameters are in activation units.
+
+    Attributes:
+        layers: Layer indices, in the order of the first axis of the input.
+        hidden: Hidden weights of shape (K, H, d), H units per layer.
+        hidden_biases: Hidden biases of shape (K, H).
+        outputs: Output weights of shape (K, H).
+        biases: Output biases of shape (K,), one per layer.
+    """
+
+    layers: tuple[int, ...]
+    hidden: NDArray[np.float64]
+    hidden_biases: NDArray[np.float64]
+    outputs: NDArray[np.float64]
+    biases: NDArray[np.float64]
+
+    @property
+    def method(self) -> str:
+        """`cellmax_mlp`."""
+        return "cellmax_mlp"
+
+    def cell_values(self, acts: Activations) -> NDArray[np.float64]:
+        """The value of every cell, in float64; `score` takes their maximum.
+
+        Args:
+            acts: Token rows of the layers in `layers`.
+
+        Returns:
+            The values, shape (K, n_rows), in the layout of `acts.data`.
+
+        Raises:
+            ValueError: If `acts` holds other layers or another width, or a
+                stimulus has no rows.
+        """
+        _scored_stimulus(acts, self.layers, self.hidden.shape[2])
+        return _mlp_values(acts, self)
+
+    def score(self, acts: Activations) -> NDArray[np.float32]:
+        """Scores every stimulus with the highest value among its cells.
+
+        Args:
+            acts: Token rows of the layers in `layers`, such as those of
+                the `response` position.
+
+        Returns:
+            Scores of shape (1, n_stimuli).
+
+        Raises:
+            ValueError: If `acts` holds other layers or another width, or a
+                stimulus has no rows.
+        """
+        stimulus = _scored_stimulus(acts, self.layers, self.hidden.shape[2])
+        values = torch.from_numpy(_mlp_values(acts, self))
+        pooled = _max_pool(values, stimulus, acts.n_stimuli)
+        return pooled[None].numpy().astype(np.float32)
+
+    def rep_reader(self) -> RepReader:
+        """Refuses the export of `CellMaxReader.rep_reader`.
+
+        Raises:
+            ValueError: Always: an MLP head has no single direction per
+                layer; `cell_values` gives the value of every cell.
+        """
+        raise ValueError(_NO_DIRECTION)
+
+
+def fit_attention_mlp(
+    acts: Activations,
+    *,
+    labels: NDArray[np.int64],
+    hidden: int,
+    seed: int,
+    c: float = 1.0,
+    tol: float = 1e-4,
+    max_iter: int = 1000,
+) -> AttentionMLPReader:
+    """Fits a joint attention reader with an MLP value head per layer.
+
+    The reader of `fit_attention(joint=True)` with each layer's value head
+    replaced by `hidden` ReLU units and an output weight vector; the
+    attention logits stay linear. The loss is the logistic loss of the
+    stimulus scores plus an L2 penalty on the queries, the hidden weights
+    and the output weights, weighted as in `fit_attention`, so `c` means
+    scikit-learn's `C`; the biases are not penalized. The rows are scaled
+    as in `fit_attention`, on the training rows only, and L-BFGS runs with
+    its settings.
+
+    The loss is not convex, and its zero point is a saddle where every unit
+    is the same, so the fit starts from seeded hidden weights: a standard
+    normal draw of `np.random.default_rng(seed)` divided by the square root
+    of the width, so each unit's weights have a norm near 1 against the
+    scaled rows, whose root mean square norm is 1. Every other parameter
+    starts at zero, so the start scores every stimulus 0 and the attention
+    starts from mean pooling. The draw touches no global random state, and
+    two fits with the same seed are identical on one machine. A random start
+    was chosen over a warm start from the linear head, which would cost a
+    linear fit first and would still need random units beside it, since
+    units with zero output weights get no gradient on their hidden weights.
+
+    The stall test compares the final loss with the loss of the all-zero
+    reader, log 2, which the start does not reach because of its penalty:
+    a fit that never beats it warns with `StalledFitWarning`. Under strong
+    regularization the head shrinks to zero this way, since the penalty on
+    two layers of weights makes zero a local minimum for small `c`.
+
+    Args:
+        acts: Token rows of the layers to read, such as those of the
+            `response` position.
+        labels: Binary labels of shape (n_stimuli,), 1 for the positive
+            pole.
+        hidden: Hidden units per layer, at least 1.
+        seed: Seed of the start.
+        c: The inverse L2 strength, scikit-learn's `C`: smaller values
+            regularize more.
+        tol: Gradient tolerance of L-BFGS, scikit-learn's `tol`.
+        max_iter: Iteration cap of L-BFGS; a fit that stops before
+            converging warns with `ConvergenceWarning`.
+
+    Returns:
+        The reader. It has no direction to export, see
+        `AttentionMLPReader.rep_reader`.
+
+    Raises:
+        ValueError: If the labels do not have one binary entry per stimulus
+            with both classes, `c` is not positive, `hidden` is below 1, a
+            stimulus has no rows, `acts` is not finite, or a layer's rows
+            are all equal.
+    """
+    stimulus, targets = _fit_inputs(acts, labels, c)
+    _check_hidden(hidden, 1)
+    queries, offsets, weights, unit_biases, outputs, biases = (
+        _fit_attention_mlp(
+            acts.data,
+            acts.layers,
+            stimulus,
+            targets,
+            c,
+            tol,
+            max_iter,
+            _hidden_start(acts.data.shape, hidden, seed),
+        )
+    )
+    return AttentionMLPReader(
+        layers=tuple(int(layer) for layer in acts.layers),
+        queries=queries,
+        offsets=offsets,
+        hidden=weights,
+        hidden_biases=unit_biases,
+        outputs=outputs,
+        biases=biases,
+    )
+
+
+def fit_cell_max_mlp(
+    acts: Activations,
+    *,
+    labels: NDArray[np.int64],
+    hidden: int,
+    seed: int,
+    c: float = 1.0,
+    tol: float = 1e-4,
+    max_iter: int = 1000,
+) -> CellMaxMLPReader:
+    """Fits a cell max reader with an MLP value head per layer.
+
+    The reader of `fit_cell_max` with each layer's value head replaced by
+    `hidden` ReLU units and an output weight vector, each layer keeping its
+    own output bias. The loss, its penalty on the hidden and output weights,
+    the scaling, the settings of L-BFGS, the seeded start and the stall
+    test are those of `fit_attention_mlp`. At the start every cell scores 0,
+    so the cells of a stimulus tie and the first step is the mean pooling
+    one, as in `fit_cell_max`, with the same trap. A fit that stalls runs
+    again, once, from the mean pooling solution of `fit_cell_max` put on
+    two units of each layer, `s relu(v @ z / s) - s relu(-v @ z / s) =
+    v @ z` for its head v with s = sqrt(|v|), the least penalty for that
+    function, with the other units at their seeded start and zero output
+    weights, so every cell starts at the value the linear restart gives it;
+    the second run is kept unless it stalls too, and warns with
+    `RestartedFitWarning`.
+
+    Args:
+        acts: Token rows of the layers to read, such as those of the
+            `response` position.
+        labels: Binary labels of shape (n_stimuli,), 1 for the positive
+            pole.
+        hidden: Hidden units per layer, at least 2, so the restart can hold
+            a linear head.
+        seed: Seed of the start.
+        c: The inverse L2 strength, scikit-learn's `C`: smaller values
+            regularize more.
+        tol: Gradient tolerance of L-BFGS, scikit-learn's `tol`.
+        max_iter: Iteration cap of each L-BFGS run; a fit whose kept run
+            stops before converging warns with `ConvergenceWarning`.
+
+    Returns:
+        The reader. It has no direction to export, see
+        `CellMaxMLPReader.rep_reader`.
+
+    Raises:
+        ValueError: If the labels do not have one binary entry per stimulus
+            with both classes, `c` is not positive, `hidden` is below 2, a
+            stimulus has no rows, `acts` is not finite, or a layer's rows
+            are all equal.
+    """
+    stimulus, targets = _fit_inputs(acts, labels, c)
+    _check_hidden(hidden, 2)
+    weights, unit_biases, outputs, biases = _fit_max_mlp(
+        acts.data,
+        acts.layers,
+        stimulus,
+        targets,
+        c,
+        tol,
+        max_iter,
+        _hidden_start(acts.data.shape, hidden, seed),
+    )
+    return CellMaxMLPReader(
+        layers=tuple(int(layer) for layer in acts.layers),
+        hidden=weights,
+        hidden_biases=unit_biases,
+        outputs=outputs,
+        biases=biases,
+    )
+
+
 def _scored_stimulus(
     acts: Activations, layers: tuple[int, ...], width: int
 ) -> torch.Tensor:
@@ -951,36 +1277,244 @@ def _fit_max(
         scores = _max_pool(heads, stimulus, targets.shape[0])
         return _penalized_loss(scores, targets, values.square().sum(), c)
 
-    def mean_pooled() -> NDArray[np.float64]:
-        # The fit of the scores the zero start sees: each stimulus scores
-        # the mean value of its cells of all layers. The loss is convex, so
-        # its minimum is unique but for the biases, which stay equal. It is
-        # returned split into one term per layer, its heads and biases over
-        # the number of layers, which sum to the mean pooled score: a cell
-        # then takes the value its layer adds to that score, so the max
-        # starts on the scale of the mean.
-        n_stimuli = targets.shape[0]
-        counts = torch.bincount(stimulus, minlength=n_stimuli)
-        means = scaled.new_zeros((n_layers, n_stimuli, width))
-        means.index_add_(1, stimulus, scaled)
-        means /= counts[:, None]
-
-        def pooled_loss(params: torch.Tensor) -> torch.Tensor:
-            values = params[:size].view(n_layers, width)
-            cells = torch.einsum("knd,kd->kn", means, values)
-            scores = (cells + params[size:, None]).mean(dim=0)
-            return _penalized_loss(scores, targets, values.square().sum(), c)
-
-        start = np.zeros(size + n_layers)
-        fitted = _lbfgs(pooled_loss, start, tol, max_iter).x
-        return np.asarray(fitted / n_layers, dtype=np.float64)
-
+    mean_pooled = partial(
+        _mean_pooled, scaled, stimulus, targets, c, tol, max_iter
+    )
     solution = _minimize(
         loss, size + n_layers, tol, max_iter, "cell max", restart=mean_pooled
     )
     heads = solution[:size].reshape(n_layers, width)
     values, shifts = _unscaled(heads, centers, scales)
     return values, solution[size:] - shifts
+
+
+def _mean_pooled(
+    scaled: torch.Tensor,
+    stimulus: torch.Tensor,
+    targets: torch.Tensor,
+    c: float,
+    tol: float,
+    max_iter: int,
+) -> NDArray[np.float64]:
+    # The fit of the scores the zero start of a cell max fit sees: each
+    # stimulus scores the mean value of its cells of all layers. The loss is
+    # convex, so its minimum is unique but for the biases, which stay equal.
+    # It is returned split into one term per layer, its heads and biases
+    # over the number of layers, which sum to the mean pooled score: a cell
+    # then takes the value its layer adds to that score, so the max starts
+    # on the scale of the mean.
+    n_layers, _, width = scaled.shape
+    size = n_layers * width
+    n_stimuli = targets.shape[0]
+    counts = torch.bincount(stimulus, minlength=n_stimuli)
+    means = scaled.new_zeros((n_layers, n_stimuli, width))
+    means.index_add_(1, stimulus, scaled)
+    means /= counts[:, None]
+
+    def pooled_loss(params: torch.Tensor) -> torch.Tensor:
+        values = params[:size].view(n_layers, width)
+        cells = torch.einsum("knd,kd->kn", means, values)
+        scores = (cells + params[size:, None]).mean(dim=0)
+        return _penalized_loss(scores, targets, values.square().sum(), c)
+
+    start = np.zeros(size + n_layers)
+    fitted = _lbfgs(pooled_loss, start, tol, max_iter).x
+    return np.asarray(fitted / n_layers, dtype=np.float64)
+
+
+def _check_hidden(hidden: int, minimum: int) -> None:
+    if hidden < minimum:
+        raise ValueError(f"hidden must be at least {minimum}, got {hidden}")
+
+
+def _hidden_start(
+    shape: tuple[int, ...], hidden: int, seed: int
+) -> NDArray[np.float64]:
+    # The seeded hidden weights an MLP fit on cells of shape (K, rows, d)
+    # starts from: each unit's weights have a norm near 1.
+    n_layers, _, width = shape
+    draw = np.random.default_rng(seed).standard_normal(
+        (n_layers, hidden, width)
+    )
+    return np.asarray(draw / np.sqrt(width), dtype=np.float64)
+
+
+def _mlp_split(
+    params: torch.Tensor, n_layers: int, hidden: int, width: int
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # The hidden weights, hidden biases and output weights of MLP heads,
+    # laid out in that order.
+    units = n_layers * hidden
+    weights = params[: units * width].view(n_layers, hidden, width)
+    biases = params[units * width : units * (width + 1)].view(n_layers, hidden)
+    outputs = params[units * (width + 1) :].view(n_layers, hidden)
+    return weights, biases, outputs
+
+
+def _mlp_cells(
+    scaled: torch.Tensor,
+    weights: torch.Tensor,
+    biases: torch.Tensor,
+    outputs: torch.Tensor,
+) -> torch.Tensor:
+    # The MLP value of every cell of shape (K, rows, d), without the output
+    # bias: one hidden layer of ReLU units per layer.
+    units = torch.einsum("krd,khd->krh", scaled, weights) + biases[:, None, :]
+    return torch.einsum("krh,kh->kr", torch.relu(units), outputs)
+
+
+def _mlp_values(
+    acts: Activations, reader: AttentionMLPReader | CellMaxMLPReader
+) -> NDArray[np.float64]:
+    # The value of every cell under a reader's MLP heads, in float64.
+    values = np.empty(acts.data.shape[:2])
+    for k, layer_rows in enumerate(acts.data):
+        rows = layer_rows.astype(np.float64)
+        units = rows @ reader.hidden[k].T + reader.hidden_biases[k]
+        values[k] = np.maximum(units, 0.0) @ reader.outputs[k]
+        values[k] += reader.biases[k]
+    return values
+
+
+def _unscaled_mlp(
+    params: NDArray[np.float64],
+    hidden: int,
+    centers: NDArray[np.float64],
+    scales: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    # Moves MLP heads that read scaled rows to activation units: the hidden
+    # weights are divided by the scale of their layer and the center is
+    # folded into the hidden biases; the output weights are unchanged.
+    n_layers, width = centers.shape
+    weights, biases, outputs = (
+        part.numpy()
+        for part in _mlp_split(
+            torch.from_numpy(params), n_layers, hidden, width
+        )
+    )
+    raw, shifts = _unscaled(
+        weights.reshape(-1, width),
+        np.repeat(centers, hidden, axis=0),
+        np.repeat(scales, hidden),
+    )
+    return (
+        raw.reshape(n_layers, hidden, width),
+        biases - shifts.reshape(n_layers, hidden),
+        outputs.copy(),
+    )
+
+
+def _fit_attention_mlp(
+    data: NDArray[np.float32],
+    layers: tuple[int, ...],
+    stimulus: torch.Tensor,
+    targets: torch.Tensor,
+    c: float,
+    tol: float,
+    max_iter: int,
+    hidden_start: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], ...]:
+    # Fits the queries and MLP heads of one softmax over every layer on
+    # scaled rows and returns the queries, offsets, hidden weights, hidden
+    # biases, output weights and output biases in activation units.
+    scaled, centers, scales = _scaled_cells(data, layers)
+    n_layers, hidden, width = hidden_start.shape
+    size = n_layers * width
+
+    def loss(params: torch.Tensor) -> torch.Tensor:
+        queries = params[:size].view(n_layers, width)
+        weights, biases, outputs = _mlp_split(
+            params[size:-1], n_layers, hidden, width
+        )
+        logits = torch.einsum("krd,kd->kr", scaled, queries)
+        heads = _mlp_cells(scaled, weights, biases, outputs) + params[-1]
+        scores = _pool(logits, heads, stimulus, targets.shape[0])
+        penalty = (
+            queries.square().sum()
+            + weights.square().sum()
+            + outputs.square().sum()
+        )
+        return _penalized_loss(scores, targets, penalty, c)
+
+    start = np.zeros(size + n_layers * hidden * (width + 2) + 1)
+    start[size : size + hidden_start.size] = hidden_start.ravel()
+    solution = _minimize(
+        loss, start.size, tol, max_iter, "attention MLP", start=start
+    )
+    queries, shifts = _unscaled(
+        solution[:size].reshape(n_layers, width), centers, scales
+    )
+    heads = _unscaled_mlp(solution[size:-1], hidden, centers, scales)
+    return queries, -shifts, *heads, np.full(n_layers, solution[-1])
+
+
+def _fit_max_mlp(
+    data: NDArray[np.float32],
+    layers: tuple[int, ...],
+    stimulus: torch.Tensor,
+    targets: torch.Tensor,
+    c: float,
+    tol: float,
+    max_iter: int,
+    hidden_start: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], ...]:
+    # Fits the MLP heads and output biases of a cell max reader on scaled
+    # rows and returns the hidden weights, hidden biases, output weights
+    # and output biases in activation units.
+    scaled, centers, scales = _scaled_cells(data, layers)
+    n_layers, hidden, width = hidden_start.shape
+    size = n_layers * hidden * (width + 2)
+
+    def loss(params: torch.Tensor) -> torch.Tensor:
+        weights, biases, outputs = _mlp_split(
+            params[:size], n_layers, hidden, width
+        )
+        heads = _mlp_cells(scaled, weights, biases, outputs)
+        heads = heads + params[size:, None]
+        scores = _max_pool(heads, stimulus, targets.shape[0])
+        penalty = weights.square().sum() + outputs.square().sum()
+        return _penalized_loss(scores, targets, penalty, c)
+
+    def restart() -> NDArray[np.float64]:
+        # The mean pooling solution of the linear cell max fit, its head v
+        # of each layer on two units: s relu(v @ z / s) - s relu(-v @ z / s)
+        # = v @ z for any s > 0, and s = sqrt(|v|) gives the hidden weights
+        # and the outputs one size, the least penalty for that function.
+        linear = _mean_pooled(scaled, stimulus, targets, c, tol, max_iter)
+        heads = linear[: n_layers * width].reshape(n_layers, width)
+        sizes = np.sqrt(np.linalg.norm(heads, axis=1))
+        units = np.divide(
+            heads,
+            sizes[:, None],
+            out=np.zeros_like(heads),
+            where=sizes[:, None] > 0,
+        )
+        weights = hidden_start.copy()
+        weights[:, 0], weights[:, 1] = units, -units
+        outputs = np.zeros((n_layers, hidden))
+        outputs[:, 0], outputs[:, 1] = sizes, -sizes
+        return np.concatenate(
+            [
+                weights.ravel(),
+                np.zeros(n_layers * hidden),
+                outputs.ravel(),
+                linear[n_layers * width :],
+            ]
+        )
+
+    start = np.zeros(size + n_layers)
+    start[: hidden_start.size] = hidden_start.ravel()
+    solution = _minimize(
+        loss,
+        start.size,
+        tol,
+        max_iter,
+        "cell max MLP",
+        restart=restart,
+        start=start,
+    )
+    heads = _unscaled_mlp(solution[:size], hidden, centers, scales)
+    return *heads, solution[size:].copy()
 
 
 def _scaled_cells(
@@ -1031,26 +1565,33 @@ def _minimize(
     max_iter: int,
     name: str,
     restart: Callable[[], NDArray[np.float64]] | None = None,
+    start: NDArray[np.float64] | None = None,
 ) -> NDArray[np.float64]:
-    # Minimizes a loss of `size` parameters from zeros with full-batch L-BFGS
-    # in float64 and scikit-learn's settings. A fit whose loss never left its
-    # start stalls. Given `restart`, which returns a second start, a stalled
+    # Minimizes a loss of `size` parameters from zeros, or from `start`,
+    # with full-batch L-BFGS in float64 and scikit-learn's settings. A fit
+    # whose loss never dropped below its loss at zero stalls: the loss of
+    # its zero start, or of the all-zero reader for a fit that starts
+    # elsewhere. Given `restart`, which returns a second start, a stalled
     # fit runs again from that start, and the second run is kept unless it
     # stalls too; any other fit runs once. The restart, and a stop before
     # convergence or a stall of the run that is kept, warn from the caller
     # of the public fit, two frames above this one's caller.
     with torch.no_grad():
         initial = float(loss(torch.zeros(size, dtype=torch.float64)))
-    result = _lbfgs(loss, np.zeros(size), tol, max_iter)
+    first = np.zeros(size) if start is None else start
+    result = _lbfgs(loss, first, tol, max_iter)
     stalled = _stalled(initial, result.fun)
+    where, at = (
+        ("its zero start", "the zero start") if start is None else ("zero",) * 2
+    )
     if restart is not None and stalled:
         refit = _lbfgs(loss, restart(), tol, max_iter)
         if not _stalled(initial, refit.fun):
             warnings.warn(
-                f"the {name} reader stalled at its zero start, so it was "
+                f"the {name} reader stalled at {where}, so it was "
                 f"fit again from the mean pooling solution: its loss "
                 f"{float(refit.fun)!r} is below {initial!r}, its loss at "
-                "the zero start",
+                f"{at}",
                 RestartedFitWarning,
                 stacklevel=4,
             )
@@ -1064,7 +1605,7 @@ def _minimize(
     if stalled:
         warnings.warn(
             f"the {name} reader stalled: its loss {float(result.fun)!r} never "
-            f"dropped below {initial!r}, its loss at the zero start",
+            f"dropped below {initial!r}, its loss at {at}",
             StalledFitWarning,
             stacklevel=4,
         )

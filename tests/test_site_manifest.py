@@ -165,6 +165,73 @@ def test_m3_is_selected_by_the_c_grid(tmp_path: Path) -> None:
     assert found.run("m3", model, logistic_c="0.1,1") is None
 
 
+def test_m3_is_selected_by_the_cell_head(tmp_path: Path) -> None:
+    tasks = ["sentiment", "truth", "truth_polarity", "utility"]
+    prompt = ["prompt"]
+    attention = ["cellattn"]
+    model = "qwen3-1.7b"
+    # A linear run's config.json has no cell_head field.
+    linear = _m3(
+        tmp_path,
+        model,
+        "l1",
+        tasks=tasks,
+        cell_sets=prompt,
+        poolings=attention,
+        logistic_c=M3_WIDE,
+    )
+    mlp = _m3(
+        tmp_path,
+        model,
+        "h1",
+        tasks=tasks,
+        cell_sets=prompt,
+        poolings=attention,
+        logistic_c=M3_WIDE,
+        cell_head="mlp",
+        cell_hidden=8,
+    )
+    found = manifest_module.Manifest(tmp_path)
+    wide = "0.001,0.01,0.1,1,10,100,1000"
+    assert found.run("m3", model, logistic_c=wide) == linear
+    assert found.run("m3", model, logistic_c=wide, cell_head="linear") == linear
+    assert found.run("m3", model, logistic_c=wide, cell_head="mlp") == mlp
+    assert found.run("m3", model, cell_head="mlp") is None
+
+
+def test_m3_skips_flat_runs_unless_poolings_are_selected(
+    tmp_path: Path,
+) -> None:
+    tasks = ["sentiment", "truth", "truth_polarity", "utility"]
+    prompt = ["prompt"]
+    model = "qwen3-0.6b"
+    both = _m3(
+        tmp_path,
+        model,
+        "b1",
+        tasks=tasks,
+        cell_sets=prompt,
+        poolings=["cellattn", "cellmax"],
+    )
+    flat = _m3(
+        tmp_path, model, "f1", tasks=tasks, cell_sets=prompt, poolings=["flat"]
+    )
+    mixed = _m3(
+        tmp_path,
+        model,
+        "f2",
+        tasks=tasks,
+        cell_sets=prompt,
+        poolings=["cellattn", "flat"],
+    )
+    found = manifest_module.Manifest(tmp_path)
+    assert found.run("m3", model) == both
+    assert found.run("m3", model, poolings="cellattn,cellmax") == both
+    assert found.run("m3", model, poolings="flat") == flat
+    assert found.run("m3", model, poolings="cellattn,flat") == mixed
+    assert found.run("m3", model, poolings="cellmax") is None
+
+
 def test_rerun_experiments_take_the_latest_started_run(tmp_path: Path) -> None:
     _run(
         tmp_path, "m1", "qwen3-1.7b", "old", started="2026-10-17T10:00:00+00:00"

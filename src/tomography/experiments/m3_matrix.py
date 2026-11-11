@@ -23,7 +23,9 @@ M2's scorers on M2's one-row readouts and on `stimulus_token` and
 `prompt_max`, with M2's helpers. Its cell phase fits, per draw, a logistic
 head per layer trained through the pooling of a cell set's cells: one
 softmax over all of them (`cellattn`) or their maximum (`cellmax`), as a
-joint reader. Every reader scores the report items of every condition and
+joint reader. The head is linear, or with `cell_head="mlp"` one ReLU layer
+of `cell_hidden` units per layer, read as `cellattnmlp_<set>` and
+`cellmaxmlp_<set>`. Every reader scores the report items of every condition and
 is compared with the one-row baselines, next to M2's controls and a random
 cell max reader. Per condition, the diagnostics share each cell reader's
 weight (`cell_weights`) among the segments and set its score against the
@@ -73,21 +75,27 @@ from tomography.model import LoadedModel
 from tomography.model import load_model
 from tomography.reading.metrics import auroc
 from tomography.reading.metrics import group_accuracy
+from tomography.reading.probes import AttentionMLPReader
 from tomography.reading.probes import AttentionReader
+from tomography.reading.probes import CellMaxMLPReader
 from tomography.reading.probes import CellMaxReader
 from tomography.reading.probes import RestartedFitWarning
 from tomography.reading.probes import StalledFitWarning
 from tomography.reading.probes import _scaled_cells
 from tomography.reading.probes import _unscaled
 from tomography.reading.probes import fit_attention
+from tomography.reading.probes import fit_attention_mlp
 from tomography.reading.probes import fit_cell_max
+from tomography.reading.probes import fit_cell_max_mlp
 
 Segment = Literal["prefix", "decoy", "stimulus", "final"]
 CellSet = Literal["prompt", "stimulus", "final", "upper"]
 Pooling = Literal["cellattn", "cellmax"]
+CellHead = Literal["linear", "mlp"]
 SEGMENTS: tuple[Segment, ...] = get_args(Segment)
 CELL_SETS: tuple[CellSet, ...] = get_args(CellSet)
 POOLINGS: tuple[Pooling, ...] = get_args(Pooling)
+CELL_HEADS: tuple[CellHead, ...] = get_args(CellHead)
 PROMPT_SEGMENTS: tuple[Segment, ...] = ("decoy", "stimulus", "final")
 SET_SEGMENTS: Mapping[CellSet, tuple[Segment, ...]] = MappingProxyType(
     {
@@ -128,7 +136,9 @@ DIAGNOSTICS = (
     "rises with the number of cells; no cell set reads the prefix, so its "
     "share is 0"
 )
-CellReader = AttentionReader | CellMaxReader
+CellReader = (
+    AttentionReader | CellMaxReader | AttentionMLPReader | CellMaxMLPReader
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -155,6 +165,12 @@ class Config(m2_readers.Config):
             below the probes' default of 1e-4: at the zero start the
             gradient's largest entry can sit under 1e-4, which stopped a
             fit there with zero heads.
+        cell_head: The head each cell reader puts on a layer's cells, from
+            `CELL_HEADS`: `linear`, or `mlp`, one ReLU layer of
+            `cell_hidden` units (see `fit_attention_mlp`).
+        cell_hidden: The units of an MLP head per layer; not read by a
+            linear head. 8 keeps a stage 1 run of `cellattn` alone on a
+            1.7B checkpoint near 12 hours of fitting.
         baselines: The cells every other cell is compared with, as
             `<scorer>/<readout>` of a one-row readout.
     """
@@ -178,6 +194,20 @@ class Config(m2_readers.Config):
         "logistic/concept",
         "logistic/stimulus_token",
     )
+    cell_head: CellHead = "linear"
+    cell_hidden: int = 8
+
+    def to_dict(self) -> dict[str, Any]:
+        """Returns the fields as JSON values, the head's only for an MLP.
+
+        A linear head leaves `cell_head` and `cell_hidden` out, so a linear
+        run keeps the config.json and the hash it had before they existed,
+        and `from_dict` reads their absence as the linear head.
+        """
+        data = super().to_dict()
+        if self.cell_head == "linear":
+            del data["cell_head"], data["cell_hidden"]
+        return data
 
 
 def prompt_cells(
@@ -464,10 +494,13 @@ def cell_weights(reader: CellReader, acts: Activations) -> NDArray[np.float64]:
     A cell max reader puts all of a stimulus's weight on its highest cell,
     split evenly among tied cells; a joint attention reader spreads it by
     the softmax of the cells' logits. Either way a stimulus scores the sum
-    of its cells' values times their weights, and its weights sum to 1.
+    of its cells' values times their weights, and its weights sum to 1. An
+    MLP head changes the values, not the weights: its cell max reader
+    weighs its highest value, and its attention reader's logits stay linear.
 
     Args:
-        reader: A cell max reader or a joint attention reader.
+        reader: A cell max reader or a joint attention reader, with either
+            head.
         acts: Cells of the reader's layers.
 
     Returns:
@@ -477,25 +510,30 @@ def cell_weights(reader: CellReader, acts: Activations) -> NDArray[np.float64]:
         ValueError: If the reader is a per-layer attention reader, or a
             stimulus has no rows.
     """
-    if isinstance(reader, CellMaxReader):
-        heads, offsets = reader.values, reader.biases
-    elif reader.joint:
-        heads, offsets = reader.queries, reader.offsets
+    if isinstance(reader, CellMaxMLPReader):
+        # The values the reader pools, so the highest cell is its own.
+        logits = reader.cell_values(acts)
     else:
-        raise ValueError(
-            "cell_weights needs a cell max or a joint attention reader, got "
-            "a per-layer attention reader"
+        if isinstance(reader, CellMaxReader):
+            heads, offsets = reader.values, reader.biases
+        elif isinstance(reader, AttentionMLPReader) or reader.joint:
+            heads, offsets = reader.queries, reader.offsets
+        else:
+            raise ValueError(
+                "cell_weights needs a cell max or a joint attention reader, "
+                "got a per-layer attention reader"
+            )
+        # The reader's own float64 arithmetic, so the highest cell is its
+        # own.
+        logits = np.stack(
+            [
+                rows.astype(np.float64) @ heads[k] + offsets[k]
+                for k, rows in enumerate(acts.data)
+            ]
         )
-    # The reader's own float64 arithmetic, so the highest cell is its own.
-    logits = np.stack(
-        [
-            rows.astype(np.float64) @ heads[k] + offsets[k]
-            for k, rows in enumerate(acts.data)
-        ]
-    )
     stimulus = acts.row_stimulus
     top = m2_readers.token_score_max(logits, acts).max(axis=0)[stimulus]
-    if isinstance(reader, CellMaxReader):
+    if isinstance(reader, CellMaxReader | CellMaxMLPReader):
         weights = (logits == top).astype(np.float64)
     else:
         weights = np.exp(logits - top)
@@ -676,8 +714,18 @@ def _fit_cells(
     labels: NDArray[np.int64],
     c: float,
     tol: float,
+    *,
+    hidden: int = 0,
+    seed: int = 0,
 ) -> CellReader:
-    """Fits a joint reader through the pooling of the training cells."""
+    """Fits a joint reader through the pooling of the training cells.
+
+    A linear head when `hidden` is 0; else an MLP head of `hidden` units
+    per layer, whose hidden weights start from `seed`.
+    """
+    if hidden:
+        fit = fit_attention_mlp if pooling == "cellattn" else fit_cell_max_mlp
+        return fit(train, labels=labels, hidden=hidden, seed=seed, c=c, tol=tol)
     if pooling == "cellattn":
         return fit_attention(train, labels=labels, c=c, joint=True, tol=tol)
     return fit_cell_max(train, labels=labels, c=c, tol=tol)
@@ -689,13 +737,17 @@ def _grid_fits(
     labels: NDArray[np.int64],
     grid: Sequence[float],
     tol: float,
+    *,
+    hidden: int = 0,
+    seed: int = 0,
 ) -> tuple[list[CellReader], float, tuple[int, ...]]:
     """Fits a reader per grid value, timing the fits and counting warnings.
 
-    Every warning of `_COUNTED` (`ConvergenceWarning`, `StalledFitWarning`
-    and `RestartedFitWarning`) is counted, then shown again under the
-    caller's filters; under the `default` action a warning repeated over
-    the grid shows once. A stalled fit is kept, so selection still sees it:
+    `hidden` and `seed` pick the head, as in `_fit_cells`. Every warning of
+    `_COUNTED` (`ConvergenceWarning`, `StalledFitWarning` and
+    `RestartedFitWarning`) is counted, then shown again under the caller's
+    filters; under the `default` action a warning repeated over the grid
+    shows once. A stalled fit is kept, so selection still sees it:
     a reader whose scores spread on a tiny scale and carry no fitted signal.
 
     Returns:
@@ -706,7 +758,10 @@ def _grid_fits(
     with warnings.catch_warnings(record=True) as caught:
         for category in _COUNTED:
             warnings.simplefilter("always", category)
-        readers = [_fit_cells(pooling, train, labels, c, tol) for c in grid]
+        readers = [
+            _fit_cells(pooling, train, labels, c, tol, hidden=hidden, seed=seed)
+            for c in grid
+        ]
     seconds = time.perf_counter() - start
     # One registry per grid: every `catch_warnings` clears the registries,
     # so a longer-lived one would not dedupe across grids either.
@@ -798,15 +853,28 @@ def _set_fits(
 ) -> list[_Fit]:
     """Fits the readers of one cell set at every grid value, and the control.
 
-    The random control draws its heads with the seed M2 would give a
-    `random` scorer on the readout `cellmax_<set>`.
+    An MLP head starts from one seed per draw and reader, so its shuffled
+    control and every grid value start where the reader does. The random
+    control keeps linear heads: it draws them with the seed M2 would give
+    a `random` scorer on the readout `cellmax_<set>`.
     """
     fits = []
     for pooling in config.poolings:
-        cell = m2_readers.Cell("logistic", f"{pooling}_{cell_set}", "joint")
+        readout = _readout(config, pooling, cell_set)
+        cell = m2_readers.Cell("logistic", readout, "joint")
+        hidden, seed = 0, 0
+        if config.cell_head == "mlp":
+            hidden = config.cell_hidden
+            seed = derive_seed(config.seed, "cell_head", task.name, readout, i)
         for name, labels, select_labels in series:
             readers, seconds, counts = _grid_fits(
-                pooling, train, labels, config.logistic_c, config.cell_tol
+                pooling,
+                train,
+                labels,
+                config.logistic_c,
+                config.cell_tol,
+                hidden=hidden,
+                seed=seed,
             )
             fits.append(
                 _Fit(
@@ -836,6 +904,15 @@ def _set_fits(
             )
         )
     return fits
+
+
+def _readout(config: Config, pooling: Pooling, cell_set: CellSet) -> str:
+    """A cell reader's readout: `<pooling>_<set>`, or `<pooling>mlp_<set>`.
+
+    The head's name joins the pooling, so the set still follows the one `_`.
+    """
+    head = "mlp" if config.cell_head == "mlp" else ""
+    return f"{pooling}{head}_{cell_set}"
 
 
 class _CellPhase(NamedTuple):
@@ -1008,17 +1085,17 @@ def _heads(
 
     Returns:
         The arrays, keyed `<scorer>_<readout>_<series>_<field>`, and their
-        sidecar, which names the entry and the layers of each key.
+        sidecar, which names the entry and the layers of each key. A linear
+        head keeps `values`, `biases` and `signs`, an MLP head `hidden`,
+        `hidden_biases`, `outputs` and `biases`; an attention reader adds
+        `queries` and `offsets`.
     """
     arrays: dict[str, NDArray[Any]] = {}
     listed: dict[str, Any] = {}
     for (cell, series), draws in groups.items():
         key = f"{cell.scorer}_{cell.readout}_{series}"
         readers = [fits[j].readers[best[j]] for j in draws]
-        fields = ["values", "biases", "signs"]
-        if isinstance(readers[0], AttentionReader):
-            fields += ["queries", "offsets"]
-        for field in fields:
+        for field in _head_fields(readers[0]):
             arrays[f"{key}_{field}"] = np.stack(
                 [getattr(reader, field) for reader in readers]
             )
@@ -1030,18 +1107,32 @@ def _heads(
             "entry": f"{cell.name}/{series}",
             "layers": list(readers[0].layers),
         }
-    sidecar = {
-        "entries": listed,
-        "axes": {
-            "values": ["seed", "layer", "feature"],
-            "queries": ["seed", "layer", "feature"],
-            "biases": ["seed", "layer"],
-            "offsets": ["seed", "layer"],
-            "signs": ["seed", "layer"],
-            "c": ["seed"],
-        },
+    axes = {
+        "values": ["seed", "layer", "feature"],
+        "queries": ["seed", "layer", "feature"],
+        "biases": ["seed", "layer"],
+        "offsets": ["seed", "layer"],
+        "signs": ["seed", "layer"],
+        "c": ["seed"],
     }
-    return arrays, sidecar
+    if config.cell_head == "mlp":
+        axes |= {
+            "hidden": ["seed", "layer", "unit", "feature"],
+            "hidden_biases": ["seed", "layer", "unit"],
+            "outputs": ["seed", "layer", "unit"],
+        }
+    return arrays, {"entries": listed, "axes": axes}
+
+
+def _head_fields(reader: CellReader) -> list[str]:
+    """The fields `cellheads_<task>` keeps of a reader, in reader order."""
+    if isinstance(reader, AttentionMLPReader | CellMaxMLPReader):
+        fields = ["hidden", "hidden_biases", "outputs", "biases"]
+    else:
+        fields = ["values", "biases", "signs"]
+    if isinstance(reader, AttentionReader | AttentionMLPReader):
+        fields += ["queries", "offsets"]
+    return fields
 
 
 def _row_entries(
@@ -1191,6 +1282,19 @@ def _check(config: Config) -> tuple[str, ...]:
                 raise ValueError(
                     f"unknown {noun} {value!r}, expected one of {known}"
                 )
+    if config.cell_head not in CELL_HEADS:
+        raise ValueError(
+            f"unknown cell head {config.cell_head!r}, expected one of "
+            f"{CELL_HEADS}"
+        )
+    # A cell max MLP fit restarts from two units, the mean pooling head's
+    # two signs.
+    least = 2 if "cellmax" in config.poolings else 1
+    if config.cell_head == "mlp" and config.cell_hidden < least:
+        raise ValueError(
+            f"cell_hidden must be at least {least} for the MLP head of "
+            f"{config.poolings}, got {config.cell_hidden}"
+        )
     if not config.cell_layers:
         raise ValueError("m3 needs at least one entry in cell_layers")
     if not config.upper_layers or not set(config.upper_layers) <= set(
