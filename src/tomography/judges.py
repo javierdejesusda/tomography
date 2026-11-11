@@ -1012,8 +1012,36 @@ def judge_agreement(
         raise ValueError("first and second must have the same shape")
     if first_values.size == 0:
         raise ValueError("need at least one example")
-    a = hard_labels(first_values, threshold=threshold)
-    b = hard_labels(second_values, threshold=threshold)
+    return label_agreement(
+        hard_labels(first_values, threshold=threshold),
+        hard_labels(second_values, threshold=threshold),
+    )
+
+
+def label_agreement(first: ArrayLike, second: ArrayLike) -> Agreement:
+    """Measures how often two judges give the same class label.
+
+    Args:
+        first: Integer labels of the first judge, shape `(n,)`, each at
+            least 0.
+        second: Labels of the second judge for the same items.
+
+    Returns:
+        The agreement rate and Cohen's kappa of the two label sequences.
+
+    Raises:
+        ValueError: If the labels are not 1-D sequences of one length with at
+            least one item, or a label is negative.
+    """
+    a = np.asarray(first, dtype=np.int64)
+    b = np.asarray(second, dtype=np.int64)
+    if a.ndim != 1 or a.shape != b.shape or a.size == 0:
+        raise ValueError(
+            "labels must be two 1-D sequences of one length with at least "
+            f"one item, got shapes {a.shape} and {b.shape}"
+        )
+    if min(int(a.min()), int(b.min())) < 0:
+        raise ValueError("labels must not be negative")
     n_classes = max(int(a.max()), int(b.max()), 1) + 1
     counts = np.bincount(a * n_classes + b, minlength=n_classes**2)
     confusion = counts.reshape(n_classes, n_classes).astype(np.float64)
