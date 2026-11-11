@@ -5,20 +5,24 @@ seed, and every tokenizer is a byte-level BPE trained on an inline corpus, so
 the default suite never touches the network. Other test modules reuse these
 fixtures, so their names and shapes are stable. `fixed_machine` names the user
 and the host that an export must not leak. `--shard` runs one of several
-disjoint parts of the suite, so CI can run the parts as parallel jobs.
+disjoint parts of the suite, so CI can run the parts as parallel jobs, and
+`--store-durations` records the times that balance the parts.
 """
 
 import argparse
+import collections
 from collections.abc import Callable
+from collections.abc import Iterable
 from collections.abc import Iterator
 import functools
 import getpass
 import importlib.metadata
+import json
 import os
 from pathlib import Path
 import re
 import socket
-import zlib
+import statistics
 
 import pytest
 import threadpoolctl
@@ -63,6 +67,7 @@ QWEN_CHAT_TEMPLATE = (
     "{%- endif %}"
 )
 GIT_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
+DURATIONS = Path(__file__).with_name("shard_durations.json")
 VOCAB_SIZE = 400
 SEED = 0
 CORPUS = (
@@ -183,7 +188,10 @@ def _one_blas_thread() -> Iterator[None]:
 
     The suite's matrices are small, so a pool of BLAS threads costs more to
     wake and join than the products it splits. Torch keeps its own threads:
-    the forward passes of the tiny models still gain from them.
+    a serial run's forward passes of the tiny models still gain from them.
+    Under pytest-xdist each worker would start a full pool, so CI, which
+    runs two workers on two cores, sets OMP_NUM_THREADS=1; set it too when
+    running `-n 2` locally.
     """
     with threadpoolctl.threadpool_limits(limits=1, user_api="blas"):
         yield
@@ -232,7 +240,13 @@ def _run_metadata_once() -> Iterator[None]:
 
 
 def _parse_shard(text: str) -> tuple[int, int]:
-    """Reads a shard as INDEX/COUNT, with INDEX counted from 0.
+    """Reads a shard given as INDEX/COUNT.
+
+    Args:
+        text: The shard, such as "3/12", with INDEX counted from 0.
+
+    Returns:
+        The shard's index and the number of shards.
 
     Raises:
         argparse.ArgumentTypeError: The text is not INDEX/COUNT with
@@ -246,7 +260,66 @@ def _parse_shard(text: str) -> tuple[int, int]:
     return int(match[1]), int(match[2])
 
 
+def _recorded_durations() -> dict[str, float]:
+    """Returns the seconds each test file took, by its path in node ids."""
+    if not DURATIONS.exists():
+        return {}
+    recorded: dict[str, float] = json.loads(DURATIONS.read_text("utf-8"))
+    return recorded
+
+
+def _shard_files(paths: Iterable[str], count: int) -> dict[str, int]:
+    """Packs whole test files into shards of about equal recorded time.
+
+    The longest file goes first, each to the shard with the least time so
+    far. A file with no recorded time counts as the mean of the others.
+
+    Args:
+        paths: The test files, as the paths in their tests' node ids.
+        count: The number of shards.
+
+    Returns:
+        The shard index of each file.
+    """
+    seconds = _recorded_durations()
+    default = statistics.fmean(seconds.values()) if seconds else 1.0
+    loads = [0.0] * count
+    shards: dict[str, int] = {}
+    for path in sorted(set(paths), key=lambda p: (-seconds.get(p, default), p)):
+        index = min(range(count), key=loads.__getitem__)
+        shards[path] = index
+        loads[index] += seconds.get(path, default)
+    return shards
+
+
+class _DurationRecorder:
+    """Adds up the time of each test file and records it at the end."""
+
+    def __init__(self) -> None:
+        self.seconds: collections.Counter[str] = collections.Counter()
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        self.seconds[report.nodeid.split("::", 1)[0]] += report.duration
+
+    def pytest_sessionfinish(self, session: pytest.Session) -> None:
+        if hasattr(session.config, "workerinput"):
+            return
+        recorded = _recorded_durations()
+        recorded.update(
+            {path: round(spent, 2) for path, spent in self.seconds.items()}
+        )
+        DURATIONS.write_text(
+            json.dumps(dict(sorted(recorded.items())), indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
+    """Adds the options that split the suite into shards.
+
+    Args:
+        parser: The parser of pytest's command line options.
+    """
     parser.addoption(
         "--shard",
         type=_parse_shard,
@@ -256,6 +329,21 @@ def pytest_addoption(parser: pytest.Parser) -> None:
             "hold every selected test"
         ),
     )
+    parser.addoption(
+        "--store-durations",
+        action="store_true",
+        help=f"record the time each test file takes in {DURATIONS.name}",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Records the durations when `--store-durations` is given.
+
+    Args:
+        config: The pytest configuration.
+    """
+    if config.getoption("store_durations"):
+        config.pluginmanager.register(_DurationRecorder())
 
 
 def pytest_collection_modifyitems(
@@ -263,19 +351,23 @@ def pytest_collection_modifyitems(
 ) -> None:
     """Deselects the tests outside the shard that `--shard` names.
 
-    A shard holds whole test files, picked by the CRC32 of their path, so
-    what the tests of a file share (a module-scoped fixture or a run cached
-    in a module global) is built in one shard only.
+    A shard holds whole test files, so what the tests of a file share (a
+    module-scoped fixture or a run cached in a module global) is built in
+    one shard only.
+
+    Args:
+        config: The pytest configuration.
+        items: The collected tests, edited in place.
     """
     shard: tuple[int, int] | None = config.getoption("shard")
     if shard is None:
         return
     index, count = shard
+    paths = [item.nodeid.split("::", 1)[0] for item in items]
+    shards = _shard_files(paths, count)
     kept: list[pytest.Item] = []
     dropped: list[pytest.Item] = []
-    for item in items:
-        path = item.nodeid.split("::", 1)[0]
-        bucket = zlib.crc32(path.encode()) % count
-        (kept if bucket == index else dropped).append(item)
+    for item, path in zip(items, paths, strict=True):
+        (kept if shards[path] == index else dropped).append(item)
     config.hook.pytest_deselected(items=dropped)
     items[:] = kept

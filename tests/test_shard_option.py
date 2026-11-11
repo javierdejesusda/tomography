@@ -2,9 +2,11 @@
 
 CI runs the suite as parallel jobs, one shard each. A shard holds whole test
 files, so what the tests of a file share (a module-scoped fixture or a run
-cached in a module global) is built in one shard only.
+cached in a module global) is built in one shard only. The files are packed
+by the time they took, as `--store-durations` recorded it.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -70,6 +72,36 @@ def test_the_tests_of_a_file_stay_in_one_shard(
     ]
     files = [{nodeid.split("::")[0] for nodeid in ids} for ids in shards]
     assert sum(len(paths) for paths in files) == len(set().union(*files))
+
+
+def test_the_recorded_times_are_balanced_over_the_shards(
+    suite: pytest.Pytester,
+) -> None:
+    seconds = {f"test_file_{i}.py": 1.0 for i in range(FILES)}
+    seconds.update({f"test_file_{i}.py": 10.0 for i in range(COUNT)})
+    (suite.path / "shard_durations.json").write_text(json.dumps(seconds))
+    loads = []
+    for i in range(COUNT):
+        ids, _ = _collected(suite, f"--shard={i}/{COUNT}")
+        loads.append(
+            sum(seconds[path] for path in {n.split("::")[0] for n in ids})
+        )
+    assert max(loads) - min(loads) <= 1.0
+
+
+def test_store_durations_records_the_time_of_each_file_it_ran(
+    suite: pytest.Pytester,
+) -> None:
+    record = suite.path / "shard_durations.json"
+    record.write_text(json.dumps({"test_gone.py": 5.0}))
+    result = suite.runpytest(
+        "--store-durations", "test_file_0.py", "test_file_1.py"
+    )
+    result.assert_outcomes(passed=10)
+    seconds = json.loads(record.read_text())
+    assert set(seconds) == {"test_gone.py", "test_file_0.py", "test_file_1.py"}
+    assert seconds["test_gone.py"] == 5.0
+    assert all(value >= 0 for value in seconds.values())
 
 
 def test_another_process_picks_the_same_shard(

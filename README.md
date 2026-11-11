@@ -272,6 +272,21 @@ Tests that need a GPU are marked `slow` and tests that download data or
 weights are marked `network`; both are deselected by default (`-m slow`,
 `-m network`).
 
+CI splits the suite into 12 shards of whole test files and runs each shard
+on two pytest-xdist workers. To rerun a failing shard, say shard 3, the way
+CI runs it:
+
+```bash
+OMP_NUM_THREADS=1 uv run pytest -q -n 2 --dist loadfile --shard 3/12
+```
+
+`--shard INDEX/COUNT` (INDEX from 0) packs the test files into COUNT shards
+of about equal time, using the per-file times in `tests/shard_durations.json`
+and the mean time for a file with none. `--store-durations` writes the time
+each file of the run took into that file; the committed times come from the
+CI runners. A shard of a small selection can hold no test, and pytest then
+exits with code 5.
+
 ## Citation
 
 Please cite the original work:
