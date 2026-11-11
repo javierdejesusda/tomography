@@ -100,9 +100,11 @@ jobs:
           path: ${{ runner.temp }}/pycache
           key: ${{ steps.bytecode.outputs.cache-primary-key }}
 
-  # The one status that is green only when every job above is.
+  # The one status that is green only when every job above is. It runs
+  # even when the run is cancelled, so a cancelled run reports a failure,
+  # not a skipped job that a required check would count as passing.
   checks:
-    if: ${{ !cancelled() }}
+    if: ${{ always() }}
     needs: [lint, typecheck, test]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
