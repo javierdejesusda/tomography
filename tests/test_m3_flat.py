@@ -574,6 +574,43 @@ def test_streamed_flat_scores_equal_whole_set_scores(
         assert streamed.dropped[0][:, DECOY].sum() > 0
 
 
+def test_a_flat_stream_without_diagnostics_keeps_the_scores(
+    flat: _Run, tiny_gpt2: LoadedModel
+) -> None:
+    train = flat.items.train_items[0]
+    cells, segments = prompt_cells(
+        tiny_gpt2, train, (1, 3), bos=None, batch_size=4, decoy=False
+    )
+    kept = m3_matrix._in_set(segments, "prompt")
+    with _quiet_fits():
+        reader = fit_flat(
+            select_cells(cells, segments, "prompt", (1, 3)),
+            segments=segments[kept],
+            labels=train.labels,
+            n_segments=len(SEGMENTS),
+        )
+    report, config = flat.items.report_items["against"], _config()
+
+    full, bare = (
+        m3_matrix.stream_scores(
+            tiny_gpt2,
+            report,
+            [("prompt", reader)],
+            config,
+            decoy=True,
+            diagnostics=diagnostics,
+        )
+        for diagnostics in (True, False)
+    )
+
+    # Selection reads only the scores, so it skips the dropped cells.
+    np.testing.assert_array_equal(bare.scores, full.scores)
+    assert full.dropped[0][:, DECOY].sum() > 0
+    assert bare.dropped.shape == full.dropped.shape
+    assert bare.dropped.dtype == full.dropped.dtype
+    assert not bare.dropped.any()
+
+
 def test_the_summary_counts_flat_fits_seconds_and_warnings(
     tiny_gpt2: LoadedModel,
     tmp_path: Path,

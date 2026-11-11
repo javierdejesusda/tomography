@@ -748,12 +748,14 @@ class AttentionMLPReader:
         """
         stimulus = _scored_stimulus(acts, self.layers, self.queries.shape[1])
         logits = np.empty((len(self.layers), stimulus.shape[0]))
+        values = np.empty_like(logits)
         for k, layer_rows in enumerate(acts.data):
             rows = layer_rows.astype(np.float64)
             logits[k] = rows @ self.queries[k] + self.offsets[k]
+            values[k] = _mlp_layer_values(rows, self, k)
         pooled = _pool(
             torch.from_numpy(logits),
-            torch.from_numpy(_mlp_values(acts, self)),
+            torch.from_numpy(values),
             stimulus,
             acts.n_stimuli,
         )
@@ -1359,8 +1361,18 @@ def _mlp_cells(
 ) -> torch.Tensor:
     # The MLP value of every cell of shape (K, rows, d), without the output
     # bias: one hidden layer of ReLU units per layer.
-    units = torch.einsum("krd,khd->krh", scaled, weights) + biases[:, None, :]
-    return torch.einsum("krh,kh->kr", torch.relu(units), outputs)
+    units = torch.einsum("krd,khd->krh", scaled, weights)
+    return _mlp_head(units, biases, outputs)
+
+
+def _mlp_head(
+    units: torch.Tensor, biases: torch.Tensor, outputs: torch.Tensor
+) -> torch.Tensor:
+    # The MLP value of cells from their hidden units' inputs of shape
+    # (K, rows, hidden) before the hidden biases.
+    return torch.einsum(
+        "krh,kh->kr", torch.relu(units + biases[:, None, :]), outputs
+    )
 
 
 def _mlp_values(
@@ -1369,10 +1381,20 @@ def _mlp_values(
     # The value of every cell under a reader's MLP heads, in float64.
     values = np.empty(acts.data.shape[:2])
     for k, layer_rows in enumerate(acts.data):
-        rows = layer_rows.astype(np.float64)
-        units = rows @ reader.hidden[k].T + reader.hidden_biases[k]
-        values[k] = np.maximum(units, 0.0) @ reader.outputs[k]
-        values[k] += reader.biases[k]
+        values[k] = _mlp_layer_values(layer_rows.astype(np.float64), reader, k)
+    return values
+
+
+def _mlp_layer_values(
+    rows: NDArray[np.float64],
+    reader: AttentionMLPReader | CellMaxMLPReader,
+    k: int,
+) -> NDArray[np.float64]:
+    # The value of the float64 rows of the reader's k-th layer.
+    units = rows @ reader.hidden[k].T + reader.hidden_biases[k]
+    values: NDArray[np.float64] = (
+        np.maximum(units, 0.0) @ reader.outputs[k] + reader.biases[k]
+    )
     return values
 
 
@@ -1426,9 +1448,13 @@ def _fit_attention_mlp(
         weights, biases, outputs = _mlp_split(
             params[size:-1], n_layers, hidden, width
         )
-        logits = torch.einsum("krd,kd->kr", scaled, queries)
-        heads = _mlp_cells(scaled, weights, biases, outputs) + params[-1]
-        scores = _pool(logits, heads, stimulus, targets.shape[0])
+        # One product over the rows gives the logits and the hidden units,
+        # so the forward and backward passes read `scaled` once each.
+        both = torch.einsum(
+            "krd,kjd->krj", scaled, torch.cat([queries[:, None], weights], 1)
+        )
+        heads = _mlp_head(both[..., 1:], biases, outputs) + params[-1]
+        scores = _pool(both[..., 0], heads, stimulus, targets.shape[0])
         penalty = (
             queries.square().sum()
             + weights.square().sum()
