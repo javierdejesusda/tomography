@@ -64,12 +64,14 @@ jobs:
       - name: Type check
         run: uv run mypy src
 
+  # Each job runs the whole test files that tests/conftest.py assigns to
+  # its shard; the shards are disjoint and together hold every test, for
+  # any number of matrix entries.
   test:
-    name: test (${{ matrix.workers }} ${{ matrix.shard }})
+    name: test (${{ matrix.shard }})
     strategy:
       fail-fast: false
       matrix:
-        workers: [2, 3]
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -88,6 +90,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --no-group cu130 --group cpu
 
+      # Compiled bytecode for the locked packages, shared by the shards.
+      # Python checks each file against the size and mtime of its source,
+      # so a stale entry is recompiled, never used.
       - name: Restore the bytecode cache
         id: bytecode
         uses: actions/cache/restore@v6
@@ -95,21 +100,15 @@ jobs:
           path: ${{ runner.temp }}/pycache
           key: pycache-${{ runner.os }}-${{ hashFiles('uv.lock') }}
 
-      - name: Time the imports
-        env:
-          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/pycache
-        run: |
-          time uv run python -c "import torch, transformers, matplotlib.pyplot, plotly.graph_objects, sklearn.linear_model, scipy.stats"
-          time env -u PYTHONPYCACHEPREFIX uv run python -c "import torch, transformers, matplotlib.pyplot, plotly.graph_objects, sklearn.linear_model, scipy.stats"
-
+      # The runners have two physical cores: one worker per core, each with
+      # one torch thread, and a test file never split between workers.
       - name: Test
         env:
           OMP_NUM_THREADS: "1"
           PYTHONPYCACHEPREFIX: ${{ runner.temp }}/pycache
         run: >-
-          uv run pytest -q -n ${{ matrix.workers }} --dist loadfile
-          --shard ${{ matrix.shard }}/12
-          --junitxml=junit.xml
+          uv run pytest -q -n 2 --dist loadfile
+          --shard ${{ strategy.job-index }}/${{ strategy.job-total }}
 
       - name: Save the bytecode cache
         if: steps.bytecode.outputs.cache-hit != 'true' && strategy.job-index == 0
@@ -118,20 +117,14 @@ jobs:
           path: ${{ runner.temp }}/pycache
           key: pycache-${{ runner.os }}-${{ hashFiles('uv.lock') }}
 
-      - name: Upload the report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: junit-${{ matrix.workers }}-${{ matrix.shard }}
-          path: junit.xml
-
+  # The one status that is green only when every job above is.
   checks:
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     needs: [lint, typecheck, test]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require every check to pass
+      - name: Require every job to pass
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
