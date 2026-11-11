@@ -42,6 +42,7 @@ APPENDIX_TABLE_KEYS = (
     "truth_sets",
     "steering",
     "knowledge",
+    "knowledge_projections",
     "approximate",
     "base_post",
 )

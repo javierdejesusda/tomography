@@ -589,12 +589,16 @@ def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
         "fig:a_dose_runs",
         "fig:a_dose_types",
         "fig:a_knowledge_geometry",
+        "table:knowledge_projections",
     )
     text = " ".join(_texts(section))
     for token in (
         "[[fig:a_knowledge_geometry]]",
         "[[count:fig:a_knowledge_geometry.with_views]]",
         "[[count:fig:a_knowledge_geometry.reader_above_words]]",
+        "[[table:knowledge_projections]]",
+        "[[count:table:knowledge_projections.within_tolerance]]",
+        "[[num:table:knowledge_projections.tolerance]]",
     ):
         assert token in text, token
     assert "one checkpoint per role" in text

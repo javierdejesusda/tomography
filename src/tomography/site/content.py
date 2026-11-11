@@ -1069,6 +1069,15 @@ APPENDICES = (
             "better of two components of the words on "
             "[[count:fig:a_knowledge_geometry.reader_above_words]]. It is a "
             "picture and not a test: its numbers carry no interval.",
+            "[[table:knowledge_projections]] gives the AUROC of the reader "
+            "of every contrast of these checkpoints beside its "
+            "recomputation in float32 and beside its controls: the random "
+            "direction and the shuffled-label reader of each draw, and the "
+            "classifiers on the words, on the characters and on the "
+            "popularity of the subject. The recomputed means stay within "
+            "[[num:table:knowledge_projections.tolerance]] of the committed "
+            "ones on [[count:table:knowledge_projections.within_tolerance]], "
+            "and a note under the table names every exception.",
         ),
         items=(
             "fig:a_knowledge_matrix",
@@ -1076,6 +1085,7 @@ APPENDICES = (
             "fig:a_dose_runs",
             "fig:a_dose_types",
             "fig:a_knowledge_geometry",
+            "table:knowledge_projections",
         ),
     ),
     Section(

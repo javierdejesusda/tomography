@@ -143,6 +143,7 @@ APPENDIX_TABLES = (
     "truth_sets",
     "steering",
     "knowledge",
+    "knowledge_projections",
     "approximate",
     "base_post",
 )
