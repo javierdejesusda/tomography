@@ -4,9 +4,11 @@ Every model has 3 layers and d_model 32 with random weights from a fixed
 seed, and every tokenizer is a byte-level BPE trained on an inline corpus, so
 the default suite never touches the network. Other test modules reuse these
 fixtures, so their names and shapes are stable. `fixed_machine` names the user
-and the host that an export must not leak.
+and the host that an export must not leak. `--shard` runs one of several
+disjoint parts of the suite, so CI can run the parts as parallel jobs.
 """
 
+import argparse
 from collections.abc import Callable
 from collections.abc import Iterator
 import functools
@@ -14,7 +16,9 @@ import getpass
 import importlib.metadata
 import os
 from pathlib import Path
+import re
 import socket
+import zlib
 
 import pytest
 import threadpoolctl
@@ -35,6 +39,8 @@ from tomography.experiments import base as experiments_base
 from tomography.model import ARCHS
 from tomography.model import LoadedModel
 from tomography.model import wrap_model
+
+pytest_plugins = ("pytester",)
 
 END_OF_TEXT = "<|endoftext|>"
 QWEN_SPECIAL_TOKENS = (
@@ -223,3 +229,53 @@ def _run_metadata_once() -> Iterator[None]:
             experiments_base, "_library_versions", cached_library_versions
         )
         yield
+
+
+def _parse_shard(text: str) -> tuple[int, int]:
+    """Reads a shard as INDEX/COUNT, with INDEX counted from 0.
+
+    Raises:
+        argparse.ArgumentTypeError: The text is not INDEX/COUNT with
+            0 <= INDEX < COUNT.
+    """
+    match = re.fullmatch(r"([0-9]+)/([0-9]+)", text)
+    if match is None or int(match[1]) >= int(match[2]):
+        raise argparse.ArgumentTypeError(
+            f"expected INDEX/COUNT with 0 <= INDEX < COUNT, got {text!r}"
+        )
+    return int(match[1]), int(match[2])
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--shard",
+        type=_parse_shard,
+        metavar="INDEX/COUNT",
+        help=(
+            "run only shard INDEX of COUNT disjoint shards that together "
+            "hold every selected test"
+        ),
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Deselects the tests outside the shard that `--shard` names.
+
+    A shard holds whole test files, picked by the CRC32 of their path, so
+    what the tests of a file share (a module-scoped fixture or a run cached
+    in a module global) is built in one shard only.
+    """
+    shard: tuple[int, int] | None = config.getoption("shard")
+    if shard is None:
+        return
+    index, count = shard
+    kept: list[pytest.Item] = []
+    dropped: list[pytest.Item] = []
+    for item in items:
+        path = item.nodeid.split("::", 1)[0]
+        bucket = zlib.crc32(path.encode()) % count
+        (kept if bucket == index else dropped).append(item)
+    config.hook.pytest_deselected(items=dropped)
+    items[:] = kept
