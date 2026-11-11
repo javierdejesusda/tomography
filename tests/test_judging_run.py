@@ -1,6 +1,7 @@
 """Tests for exporting, importing and scoring the judgments of a run."""
 
 from collections.abc import Callable
+from collections.abc import Collection
 from collections.abc import Sequence
 import dataclasses
 import hashlib
@@ -27,8 +28,10 @@ from tomography.judging.run import export_stage
 from tomography.judging.run import held_out_rows
 from tomography.judging.run import import_judgments
 from tomography.judging.run import judge_scores
+from tomography.judging.run import read_selection
 from tomography.judging.run import select_coefficients
 from tomography.judging.run import tuning_rows
+from tomography.judging.scores import SELECTION_RULE
 from tomography.reading.metrics import bootstrap_ci
 
 CRITERIA = ("concept", "fluency")
@@ -50,7 +53,7 @@ class _Config(ExperimentConfig):
     model: str = "gpt2"
 
 
-def _judged() -> Judged:
+def _judged(empty: Collection[str] = (EMPTY,)) -> Judged:
     records = []
     for split, prompts in PROMPTS.items():
         for arm, coeffs in ARMS.items():
@@ -69,7 +72,7 @@ def _judged() -> Judged:
                                 split=split,
                                 prompt_index=p,
                                 prompt=prompt,
-                                text="" if key == EMPTY else f"text of {key}",
+                                text="" if key in empty else f"text of {key}",
                             )
                         )
     return Judged(criteria=CRITERIA, records=tuple(records))
@@ -130,11 +133,16 @@ def _answer(
 
 
 def _export(
-    run: RunDir, stage: str, out: Path, **options: object
+    run: RunDir,
+    stage: str,
+    out: Path,
+    *,
+    judged: Judged | None = None,
+    **options: object,
 ) -> list[Path]:
     arguments: dict[str, object] = {"batch_size": 5, "second_fraction": 0.25}
     arguments.update(options)
-    return export_stage(run, _judged(), stage, out, **arguments)  # type: ignore[arg-type]
+    return export_stage(run, judged or _judged(), stage, out, **arguments)  # type: ignore[arg-type]
 
 
 def test_the_tuning_export_holds_the_non_empty_tuning_generations(
@@ -355,6 +363,7 @@ def test_the_coefficient_with_the_highest_tuning_mean_is_selected(
             "arm": "caa",
             "coeff": 0.1,
             "n_items": 6,
+            "n_empty": 0,
             "overall": pytest.approx((2 * 1 + 4 * 4 / 3) / 6),
         },
         {
@@ -362,6 +371,7 @@ def test_the_coefficient_with_the_highest_tuning_mean_is_selected(
             "arm": "caa",
             "coeff": 0.2,
             "n_items": 6,
+            "n_empty": 1,
             "overall": pytest.approx((2 * 4 / 3 + 3 * 2 + 0) / 6),
         },
         {
@@ -369,6 +379,7 @@ def test_the_coefficient_with_the_highest_tuning_mean_is_selected(
             "arm": "none",
             "coeff": None,
             "n_items": 6,
+            "n_empty": 0,
             "overall": 0.0,
         },
     ]
@@ -392,7 +403,7 @@ def test_the_held_out_export_holds_only_the_selected_coefficient(
     run_dir: RunDir, tmp_path: Path
 ) -> None:
     _export(run_dir, "tune", tmp_path / "out")
-    _answer(run_dir, "tune", _by_key, judge=1)
+    _answer(run_dir, "tune", _by_key)
 
     _export(run_dir, "held_out", tmp_path / "out")
 
@@ -409,6 +420,142 @@ def test_the_held_out_export_holds_only_the_selected_coefficient(
     assert not {i for b in tune.batches for i in b.item_ids} & {
         i for b in plan.batches for i in b.item_ids
     }
+
+
+def test_the_held_out_export_needs_every_tuning_batch_of_both_judges(
+    run_dir: RunDir, tmp_path: Path
+) -> None:
+    _export(run_dir, "tune", tmp_path / "out")
+    _answer(run_dir, "tune", _by_key, judge=1)
+    second = [
+        b.batch_id for b in _plan(run_dir, "tune").batches if b.judge == 2
+    ]
+    before = _digest(run_dir)
+
+    with pytest.raises(ValueError, match="needs every batch") as error:
+        _export(run_dir, "held_out", tmp_path / "held")
+
+    assert second
+    assert f"not imported: {', '.join(second)}" in str(error.value)
+    assert _digest(run_dir) == before
+    assert not (tmp_path / "held").exists()
+
+
+def test_the_held_out_export_stores_the_selection_with_its_rule(
+    run_dir: RunDir, tmp_path: Path
+) -> None:
+    _export(run_dir, "tune", tmp_path / "out")
+    _answer(run_dir, "tune", _by_key)
+    assert read_selection(run_dir) is None
+
+    _export(run_dir, "held_out", tmp_path / "out")
+
+    assert run_dir.read_json("judge_selection") == {
+        "split": "tune",
+        "rule": SELECTION_RULE,
+        "selected": [
+            {
+                "concept": "sentiment",
+                "arm": "caa",
+                "coeff": 0.2,
+                "overall": pytest.approx((2 * 4 / 3 + 3 * 2 + 0) / 6),
+            },
+            {
+                "concept": "sentiment",
+                "arm": "none",
+                "coeff": None,
+                "overall": 0.0,
+            },
+        ],
+    }
+    assert "highest mean overall score on the tuning half" in SELECTION_RULE
+    assert "tie goes to the smallest magnitude" in SELECTION_RULE
+    assert read_selection(run_dir) == {
+        ("sentiment", "caa"): 0.2,
+        ("sentiment", "none"): None,
+    }
+    stored = _digest(run_dir)
+    _export(run_dir, "held_out", tmp_path / "again")
+    assert _digest(run_dir) == stored
+
+
+def test_an_empty_held_out_generation_is_counted_and_scores_zero(
+    run_dir: RunDir, tmp_path: Path
+) -> None:
+    held = "sentiment/held_out/caa/0.2/1/1"
+    judged = _judged(empty=(EMPTY, held))
+    _export(run_dir, "tune", tmp_path / "out", judged=judged)
+    _answer(run_dir, "tune", _by_key)
+    _export(run_dir, "held_out", tmp_path / "out", judged=judged)
+    exported = {k for b in _plan(run_dir, "held_out").batches for k in b.keys}
+    _answer(run_dir, "held_out", _by_key)
+    scores = judge_scores(run_dir, judged)
+
+    rows = held_out_rows(
+        judged, scores, select_coefficients(judged, scores), n_boot=50, seed=5
+    )
+
+    assert held not in exported
+    assert scores[held].tolist() == [0, 0]
+    assert (rows[0]["arm"], rows[0]["coeff"]) == ("caa", 0.2)
+    assert (rows[0]["n_items"], rows[0]["n_empty"]) == (6, 1)
+    # Prompt 0 scores (2, 1) twice, prompt 1 holds one (2, 2) and the empty
+    # generation, prompt 2 scores (2, 2) twice.
+    assert rows[0]["overall"] == pytest.approx((4 / 3 + 1.0 + 2.0) / 3)
+    assert rows[0]["concept_score"] == pytest.approx((2.0 + 1.0 + 2.0) / 3)
+    assert rows[1]["n_empty"] == 0
+
+
+def test_the_unsteered_arm_is_exported_in_both_stages_like_any_other(
+    run_dir: RunDir, tmp_path: Path
+) -> None:
+    _export(run_dir, "tune", tmp_path / "out")
+    _answer(run_dir, "tune", _by_key)
+    _export(run_dir, "held_out", tmp_path / "out")
+
+    for stage in ("tune", "held_out"):
+        plan = _plan(run_dir, stage)
+        arm_of = {
+            item_id: key.split("/")[2]
+            for b in plan.batches
+            for item_id, key in zip(b.item_ids, b.keys, strict=True)
+        }
+        lines = [
+            json.loads(line)
+            for b in plan.batches
+            for line in (tmp_path / "out" / f"{b.batch_id}.jsonl")
+            .read_text("utf-8")
+            .splitlines()
+        ]
+        first = [k for b in plan.batches if b.judge == 1 for k in b.keys]
+        assert sum("/none/" in key for key in first) == 6
+        assert {arm_of[row["item_id"]] for row in lines} == {"none", "caa"}
+        for row in lines:
+            assert sorted(row) == ["concept", "generation", "item_id", "prompt"]
+            assert row["concept"] == DESCRIPTION
+            assert row["prompt"] in PROMPTS[stage]
+
+
+def test_each_stage_has_a_seeded_second_subset_under_other_item_ids(
+    run_dir: RunDir, tmp_path: Path
+) -> None:
+    other = RunDir.create(_Config(seed=3), out_root=tmp_path / "other")
+    reseeded = RunDir.create(_Config(seed=4), out_root=tmp_path / "reseeded")
+    for run in (run_dir, other, reseeded):
+        _export(run, "tune", tmp_path / "out")
+        _answer(run, "tune", _by_key)
+        _export(run, "held_out", tmp_path / "out")
+
+    for stage in ("tune", "held_out"):
+        plan = _plan(run_dir, stage)
+        ids: dict[int, dict[str, str]] = {1: {}, 2: {}}
+        for b in plan.batches:
+            ids[b.judge].update(zip(b.keys, b.item_ids, strict=True))
+        assert ids[2]
+        assert set(ids[2]) < set(ids[1])
+        assert not set(ids[2].values()) & set(ids[1].values())
+        assert _plan(other, stage) == plan
+        assert _plan(reseeded, stage) != plan
 
 
 def test_selection_never_reads_a_held_out_judgment(
@@ -453,6 +600,7 @@ def test_the_held_out_rows_are_hand_computed_with_bootstrap_intervals(
         "coeff": 0.2,
         "n_prompts": 3,
         "n_items": 6,
+        "n_empty": 0,
         "concept_score": pytest.approx(2.0),
         "fluency_score": pytest.approx(5 / 3),
         "overall": pytest.approx(per_prompt.mean()),
@@ -560,7 +708,7 @@ def test_a_stage_never_shares_an_id_with_the_other_stage(
     shared: str,
 ) -> None:
     _export(run_dir, "tune", tmp_path / "tune")
-    _answer(run_dir, "tune", _by_key, judge=1)
+    _answer(run_dir, "tune", _by_key)
     taken = _plan(run_dir, "tune").batches[0]
     plan_export = run_module.plan_export
 

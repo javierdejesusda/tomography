@@ -1,11 +1,11 @@
 """Judging the stored generations of a run: export, import and scores.
 
 A run that stores generations describes them as `Record` rows. The tuning
-half is exported first; once its judgments are imported, the held-out half
-is exported at the coefficient each arm won on the tuning half, so a held-out
-judgment can never reach the selection. Plans and judgments are stored in
-the run directory: `judge_export_<stage>.json` and
-`judgments_<batch_id>.json`.
+half is exported first; once every one of its batches is imported, the
+held-out half is exported at the coefficient each arm won on the tuning half,
+so a held-out judgment can never reach the selection. Plans, the selection
+and judgments are stored in the run directory: `judge_export_<stage>.json`,
+`judge_selection.json` and `judgments_<batch_id>.json`.
 """
 
 from collections.abc import Mapping
@@ -27,6 +27,7 @@ from tomography.judging.batches import write_export
 from tomography.judging.judgments import parse_judgments
 from tomography.judging.rubric import rubric_sha256
 from tomography.judging.rubric import rubric_text
+from tomography.judging.scores import SELECTION_RULE
 from tomography.judging.scores import harmonic_mean
 from tomography.judging.scores import select_coefficient
 from tomography.reading.metrics import bootstrap_ci
@@ -34,6 +35,8 @@ from tomography.reading.metrics import bootstrap_ci
 TUNE = "tune"
 HELD_OUT = "held_out"
 STAGES: tuple[str, ...] = (TUNE, HELD_OUT)
+
+_SELECTION = "judge_selection"
 
 Scores = Mapping[str, NDArray[np.int64]]
 Selection = Mapping[tuple[str, str], float | None]
@@ -124,6 +127,30 @@ def read_export(run_dir: RunDir, stage: str) -> Export | None:
     return Export.from_dict(stored)
 
 
+def read_selection(
+    run_dir: RunDir,
+) -> dict[tuple[str, str], float | None] | None:
+    """Reads the coefficients the held-out export stored in the run.
+
+    Args:
+        run_dir: The run.
+
+    Returns:
+        Maps `(concept, arm)` to its selected coefficient, None for an arm
+        without a grid; None if the held-out stage was never exported.
+    """
+    if not (run_dir.path / f"{_SELECTION}.json").is_file():
+        return None
+    return _selected(run_dir.read_json(_SELECTION))
+
+
+def _selected(stored: Any) -> dict[tuple[str, str], float | None]:
+    """Maps `(concept, arm)` to the coefficient of a stored selection."""
+    return {
+        (row["concept"], row["arm"]): row["coeff"] for row in stored["selected"]
+    }
+
+
 def _judgments_stem(batch_id: str) -> str:
     return f"judgments_{batch_id}"
 
@@ -132,21 +159,71 @@ def _is_imported(run_dir: RunDir, batch_id: str) -> bool:
     return (run_dir.path / f"{_judgments_stem(batch_id)}.json").is_file()
 
 
-def _stage_keys(run_dir: RunDir, judged: Judged, stage: str) -> list[str]:
-    """Lists the non-empty generations a stage sends to the judges."""
-    if stage == TUNE:
-        return [
-            r.key for r in judged.records if r.split == TUNE and not r.empty
-        ]
-    selected = select_coefficients(
-        judged, judge_scores(run_dir, judged, stages=(TUNE,))
-    )
+def _tuning_selection(run_dir: RunDir, judged: Judged) -> dict[str, Any]:
+    """Selects the coefficient of each arm on a fully judged tuning stage.
+
+    Args:
+        run_dir: The run.
+        judged: The generations of the run.
+
+    Returns:
+        What `judge_selection.json` stores: the split the choice read, the
+        rule, and per concept and arm the selected coefficient with its mean
+        overall score on the tuning prompts.
+
+    Raises:
+        ValueError: If the tuning stage has no export or a batch of either
+            judge is not imported.
+    """
+    plan = read_export(run_dir, TUNE)
+    pending = [
+        b.batch_id
+        for b in (plan.batches if plan else ())
+        if not _is_imported(run_dir, b.batch_id)
+    ]
+    if pending:
+        raise ValueError(
+            f"stage {HELD_OUT!r} needs every batch of stage {TUNE!r}; not "
+            f"imported: {', '.join(pending)}"
+        )
+    scores = judge_scores(run_dir, judged, stages=(TUNE,))
+    means = {
+        (row["concept"], row["arm"], row["coeff"]): row["overall"]
+        for row in tuning_rows(judged, scores)
+    }
+    return {
+        "split": TUNE,
+        "rule": SELECTION_RULE,
+        "selected": [
+            {
+                "concept": concept,
+                "arm": arm,
+                "coeff": coeff,
+                "overall": means[concept, arm, coeff],
+            }
+            for (concept, arm), coeff in select_coefficients(
+                judged, scores
+            ).items()
+        ],
+    }
+
+
+def _stage_keys(
+    judged: Judged, stage: str, selected: Selection | None
+) -> list[str]:
+    """Lists the non-empty generations a stage sends to the judges.
+
+    Args:
+        judged: The generations of the run.
+        stage: `tune` or `held_out`, which is also the split of its prompts.
+        selected: The coefficient each arm is exported at; None for all.
+    """
     return [
         r.key
         for r in judged.records
-        if r.split == HELD_OUT
+        if r.split == stage
         and not r.empty
-        and r.coeff == selected[r.concept, r.arm]
+        and (selected is None or r.coeff == selected[r.concept, r.arm])
     ]
 
 
@@ -163,10 +240,12 @@ def export_stage(
     """Plans a stage, stores the plan in the run and writes the batch files.
 
     The tuning stage holds every non-empty generation of the tuning prompts.
-    The held-out stage needs the tuning judgments of the first judge and
+    The held-out stage needs every tuning batch of both judges imported and
     holds the non-empty generations of the held-out prompts at the selected
-    coefficient of each arm, and every one of an arm without a grid. An
-    empty generation is never exported: it scores 0 on every criterion.
+    coefficient of each arm, and every one of an arm without a grid. It
+    stores the selection in `judge_selection.json` with the rule that made
+    it (`SELECTION_RULE`), before any held-out judgment exists. An empty
+    generation is never exported: it scores 0 on every criterion.
 
     Repeating an export with the same arguments rewrites the same bytes. A
     different plan replaces the stored one only while no judgment of the
@@ -186,15 +265,17 @@ def export_stage(
         The written paths, as `write_export` returns them.
 
     Raises:
-        ValueError: If the stage is unknown, the tuning judgments that the
-            held-out stage needs are not imported, the plan differs from a
+        ValueError: If the stage is unknown, a tuning batch that the
+            held-out stage needs is not imported, the plan differs from a
             stored plan that already has judgments, an identifier collides
             with one of the other stage, or `plan_export` rejects its
             arguments. Nothing is written then.
     """
     if stage not in STAGES:
         raise ValueError(f"stage must be one of {STAGES}, got {stage!r}")
-    keys = _stage_keys(run_dir, judged, stage)
+    selection = None if stage == TUNE else _tuning_selection(run_dir, judged)
+    selected = None if selection is None else _selected(selection)
+    keys = _stage_keys(judged, stage, selected)
     rubric = rubric_text()
     plan = plan_export(
         keys,
@@ -220,6 +301,8 @@ def export_stage(
             )
         _check_disjoint(run_dir, plan)
         run_dir.write_json(_stem(stage), plan.to_dict())
+    if selection is not None and read_selection(run_dir) != selected:
+        run_dir.write_json(_SELECTION, selection)
     by_key = {r.key: r for r in judged.records}
     return write_export(
         plan,
@@ -391,8 +474,9 @@ def tuning_rows(judged: Judged, scores: Scores) -> list[dict[str, object]]:
 
     Returns:
         One row per concept, arm and coefficient, in order of first
-        appearance, with `concept`, `arm`, `coeff`, `n_items` and `overall`,
-        the mean harmonic mean over the tuning generations.
+        appearance, with `concept`, `arm`, `coeff`, `n_items`, `n_empty`
+        (how many of the items are empty generations) and `overall`, the
+        mean harmonic mean over the tuning generations.
 
     Raises:
         ValueError: If a tuning generation has no judgment.
@@ -409,6 +493,7 @@ def tuning_rows(judged: Judged, scores: Scores) -> list[dict[str, object]]:
             "arm": arm,
             "coeff": coeff,
             "n_items": len(records),
+            "n_empty": sum(r.empty for r in records),
             "overall": float(_overall(records, scores).mean()),
         }
         for (concept, arm, coeff), records in groups.items()
@@ -475,9 +560,10 @@ def held_out_rows(
 
     Returns:
         One row per concept and arm, in order of first appearance, with
-        `concept`, `arm`, `coeff`, `n_prompts`, `n_items`, one
-        `<criterion>_score` mean per criterion, and `overall` with
-        `overall_lo` and `overall_hi`.
+        `concept`, `arm`, `coeff`, `n_prompts`, `n_items`, `n_empty` (how
+        many of the items are empty generations), one `<criterion>_score`
+        mean per criterion, and `overall` with `overall_lo` and
+        `overall_hi`.
 
     Raises:
         ValueError: If a held-out generation at a selected coefficient has
@@ -519,6 +605,7 @@ def held_out_rows(
                 "coeff": coeff,
                 "n_prompts": len(prompts),
                 "n_items": len(records),
+                "n_empty": sum(r.empty for r in records),
                 **{
                     f"{name}_score": float(means[column])
                     for column, name in enumerate(judged.criteria)

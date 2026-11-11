@@ -37,6 +37,7 @@ dev = [
     "codespell>=2.4,<3",
     "mypy>=2.4.0,<3",
     "pytest>=9.1.1,<10",
+    "pytest-xdist>=3.8,<4",
     "ruff>=0.17.0,<0.18",
     "threadpoolctl>=3.7,<4",
 ]
