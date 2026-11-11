@@ -279,7 +279,8 @@ alone and that wider grid. The results are in the [findings](findings.md#full-ma
   layers; cellmax keeps a bias per layer. The penalty is scikit-learn's, `1/(2Cn)` times the squared norms of `W1`,
   `w2` and the queries, biases unpenalized, with `C` chosen on the same grid and the same loop (training-only
   standardization, float64 L-BFGS-B at `cell_tol`, the stall test against log 2, and the cellmax restart from the mean
-  pooling solution, embedded as two units of opposite sign). `W1` starts at a standard normal draw over the square
+  pooling solution, embedded as two units of opposite sign whose hidden and output weights share one size, the least
+  penalty for that function). `W1` starts at a standard normal draw over the square
   root of the width, seeded from the run seed, task, readout and draw, so the shuffled series and every `C` of a draw
   start alike; every other parameter starts at zero, and no global random state is read. The loss is not convex: a
   small `C` makes zero a local minimum, where a fit counts as stalled, and the ReLU stops most fits on L-BFGS's

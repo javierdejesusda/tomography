@@ -505,6 +505,42 @@ def test_a_stalled_cell_max_mlp_fit_restarts_from_the_mean_pooled_linear_head(
     )
 
 
+def test_the_cell_max_mlp_restart_holds_the_linear_head_at_the_least_penalty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acts, labels = planted(20, seed=9)
+    starts: list[NDArray[np.float64]] = []
+
+    def forced(fun: Any, x0: NDArray[np.float64], **kwargs: Any) -> Any:
+        starts.append(np.array(x0))
+        result = minimize(fun, x0, **kwargs)
+        if len(starts) == 1:
+            result.fun = 10.0
+        return result
+
+    monkeypatch.setattr(probes, "minimize", forced)
+
+    with pytest.warns(RestartedFitWarning):
+        fit_cell_max_mlp(acts, labels=labels, hidden=3, seed=2, c=0.5)
+
+    # relu is positively homogeneous, so a unit's hidden weights times s
+    # and its output over s give the same cells; the restart's two units
+    # of a layer pay the least penalty for v . z when the norm of each
+    # unit's hidden weights equals the size of its output, sqrt(|v|) both.
+    n_layers, hidden, width = 2, 3, 4
+    units = n_layers * hidden
+    start = starts[2]
+    weights = start[: units * width].reshape(n_layers, hidden, width)
+    outputs = start[units * (width + 1) : units * (width + 2)].reshape(
+        n_layers, hidden
+    )
+    norms = np.linalg.norm(weights[:, :2], axis=2)
+    np.testing.assert_allclose(norms, np.abs(outputs[:, :2]), rtol=1e-12)
+    np.testing.assert_array_equal(weights[:, 0], -weights[:, 1])
+    assert (outputs[:, 0] > 0).all()
+    assert (outputs[:, 1] < 0).all()
+
+
 def test_a_cell_max_mlp_fit_that_learns_runs_lbfgs_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

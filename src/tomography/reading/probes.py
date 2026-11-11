@@ -949,8 +949,9 @@ def fit_cell_max_mlp(
     so the cells of a stimulus tie and the first step is the mean pooling
     one, as in `fit_cell_max`, with the same trap. A fit that stalls runs
     again, once, from the mean pooling solution of `fit_cell_max` put on
-    two units of each layer, `relu(v @ z) - relu(-v @ z) = v @ z` for its
-    head v, with the other units at their seeded start and zero output
+    two units of each layer, `s relu(v @ z / s) - s relu(-v @ z / s) =
+    v @ z` for its head v with s = sqrt(|v|), the least penalty for that
+    function, with the other units at their seeded start and zero output
     weights, so every cell starts at the value the linear restart gives it;
     the second run is kept unless it stalls too, and warns with
     `RestartedFitWarning`.
@@ -1476,13 +1477,22 @@ def _fit_max_mlp(
 
     def restart() -> NDArray[np.float64]:
         # The mean pooling solution of the linear cell max fit, its head v
-        # of each layer on two units: relu(v @ z) - relu(-v @ z) = v @ z.
+        # of each layer on two units: s relu(v @ z / s) - s relu(-v @ z / s)
+        # = v @ z for any s > 0, and s = sqrt(|v|) gives the hidden weights
+        # and the outputs one size, the least penalty for that function.
         linear = _mean_pooled(scaled, stimulus, targets, c, tol, max_iter)
         heads = linear[: n_layers * width].reshape(n_layers, width)
+        sizes = np.sqrt(np.linalg.norm(heads, axis=1))
+        units = np.divide(
+            heads,
+            sizes[:, None],
+            out=np.zeros_like(heads),
+            where=sizes[:, None] > 0,
+        )
         weights = hidden_start.copy()
-        weights[:, 0], weights[:, 1] = heads, -heads
+        weights[:, 0], weights[:, 1] = units, -units
         outputs = np.zeros((n_layers, hidden))
-        outputs[:, 0], outputs[:, 1] = 1.0, -1.0
+        outputs[:, 0], outputs[:, 1] = sizes, -sizes
         return np.concatenate(
             [
                 weights.ravel(),
