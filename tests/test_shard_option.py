@@ -91,6 +91,42 @@ def test_the_recorded_times_are_balanced_over_the_shards(
     assert max(loads) - min(loads) <= 1.0
 
 
+def _files(pytester: pytest.Pytester, *args: str) -> set[str]:
+    """Returns the test files a run keeps."""
+    return {nodeid.split("::")[0] for nodeid in _collected(pytester, *args)[0]}
+
+
+def test_the_recorded_times_decide_the_shards(suite: pytest.Pytester) -> None:
+    seconds = {f"test_file_{i}.py": 4.0 for i in range(FILES)}
+    seconds["test_file_0.py"] = 12.0
+    (suite.path / "shard_durations.json").write_text(json.dumps(seconds))
+    loads = [
+        sum(seconds[path] for path in _files(suite, f"--shard={i}/{COUNT}"))
+        for i in range(COUNT)
+    ]
+    assert loads == [16.0, 16.0, 16.0]
+
+
+def test_a_file_with_no_recorded_time_counts_as_the_mean(
+    suite: pytest.Pytester,
+) -> None:
+    seconds = {
+        "test_file_0.py": 6.0,
+        "test_file_1.py": 4.0,
+        "test_file_2.py": 2.0,
+    }
+    (suite.path / "shard_durations.json").write_text(json.dumps(seconds))
+    chosen = [f"test_file_{i}.py" for i in range(4)]
+    assert _files(suite, "--shard=0/2", *chosen) == {
+        "test_file_0.py",
+        "test_file_2.py",
+    }
+    assert _files(suite, "--shard=1/2", *chosen) == {
+        "test_file_1.py",
+        "test_file_3.py",
+    }
+
+
 def test_store_durations_records_the_time_of_each_file_it_ran(
     suite: pytest.Pytester,
 ) -> None:
