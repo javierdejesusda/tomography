@@ -32,6 +32,7 @@ from tomography.judging.run import read_selection
 from tomography.judging.run import select_coefficients
 from tomography.judging.run import tuning_rows
 from tomography.judging.scores import SELECTION_RULE
+from tomography.judging.scores import weighted_kappa
 from tomography.reading.metrics import bootstrap_ci
 
 CRITERIA = ("concept", "fluency")
@@ -45,6 +46,9 @@ ARMS: dict[str, tuple[float | None, ...]] = {
 EMPTY = "sentiment/tune/caa/0.2/1/1"
 
 Scoring = Callable[[str], tuple[int, int]]
+
+# The folder each stage of a run was last exported to.
+EXPORTED: dict[tuple[Path, str], Path] = {}
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -126,7 +130,11 @@ def _answer(
                 )
             )
         import_judgments(
-            run, batch.batch_id, "\n".join(lines), judge_model="judge-model-1"
+            run,
+            batch.batch_id,
+            "\n".join(lines),
+            judge_model="judge-model-1",
+            export_dir=EXPORTED[run.path, stage],
         )
         done.append(batch.batch_id)
     return done
@@ -142,6 +150,7 @@ def _export(
 ) -> list[Path]:
     arguments: dict[str, object] = {"batch_size": 5, "second_fraction": 0.25}
     arguments.update(options)
+    EXPORTED[run.path, stage] = out
     return export_stage(run, judged or _judged(), stage, out, **arguments)  # type: ignore[arg-type]
 
 
@@ -162,7 +171,7 @@ def test_the_tuning_export_holds_the_non_empty_tuning_generations(
     assert sorted(p.name for p in paths) == sorted(
         [
             *(f"{b.batch_id}.jsonl" for b in plan.batches),
-            "manifest_tune.json",
+            "criteria.json",
             "rubric.txt",
         ]
     )
@@ -213,6 +222,7 @@ def test_an_import_stores_the_judgments_with_the_identity_of_the_judge(
         batch.batch_id,
         "\n".join(reversed(lines)),
         judge_model=" judge-model-1 ",
+        export_dir=tmp_path / "out",
     )
 
     assert path == run_dir.path / f"judgments_{batch.batch_id}.json"
@@ -222,6 +232,9 @@ def test_an_import_stores_the_judgments_with_the_identity_of_the_judge(
         "judge": 1,
         "judge_model": "judge-model-1",
         "rubric_sha256": rubric_sha256(rubric_text()),
+        "batch_sha256": hashlib.sha256(
+            (tmp_path / "out" / f"{batch.batch_id}.jsonl").read_bytes()
+        ).hexdigest(),
         "criteria": ["concept", "fluency"],
         "judgments": [
             {"item_id": item_id, "concept": i % 3, "fluency": 2}
@@ -284,6 +297,7 @@ def test_a_refused_import_leaves_the_stored_data_untouched(
             batch_id,
             corrupt(_valid(run_dir, batch_id)),
             judge_model="judge-model-1",
+            export_dir=tmp_path / "out",
         )
 
     assert _digest(run_dir) == before
@@ -294,22 +308,31 @@ def test_an_import_needs_a_known_batch_a_judge_and_no_earlier_import(
     run_dir: RunDir, tmp_path: Path
 ) -> None:
     with pytest.raises(ValueError, match="no export"):
-        import_judgments(run_dir, "0a0a0a0a", "", judge_model="m")
-    _export(run_dir, "tune", tmp_path / "out")
+        import_judgments(
+            run_dir, "0a0a0a0a", "", judge_model="m", export_dir=tmp_path
+        )
+    out = tmp_path / "out"
+    _export(run_dir, "tune", out)
     batch_id = _plan(run_dir, "tune").batches[0].batch_id
     text = _valid(run_dir, batch_id)
     before = _digest(run_dir)
 
     with pytest.raises(ValueError, match="unknown batch '0a0a0a0a'"):
-        import_judgments(run_dir, "0a0a0a0a", text, judge_model="m")
+        import_judgments(
+            run_dir, "0a0a0a0a", text, judge_model="m", export_dir=out
+        )
     with pytest.raises(ValueError, match="judge_model"):
-        import_judgments(run_dir, batch_id, text, judge_model="  ")
+        import_judgments(
+            run_dir, batch_id, text, judge_model="  ", export_dir=out
+        )
     assert _digest(run_dir) == before
 
-    import_judgments(run_dir, batch_id, text, judge_model="m")
+    import_judgments(run_dir, batch_id, text, judge_model="m", export_dir=out)
     stored = _digest(run_dir)
     with pytest.raises(ValueError, match="already imported"):
-        import_judgments(run_dir, batch_id, text, judge_model="other")
+        import_judgments(
+            run_dir, batch_id, text, judge_model="other", export_dir=out
+        )
     assert _digest(run_dir) == stored
 
 
@@ -558,6 +581,95 @@ def test_each_stage_has_a_seeded_second_subset_under_other_item_ids(
         assert _plan(reseeded, stage) != plan
 
 
+def test_equal_scores_in_another_order_tie_to_the_smaller_coefficient() -> None:
+    # One (0, 2), two (1, 2) and thirty-seven (2, 2). Summed as floats, this
+    # order and its reverse give means that differ in the last bit.
+    pairs = [(0, 2)] + [(1, 2)] * 2 + [(2, 2)] * 37
+    records = []
+    scores = {}
+    for coeff, order in ((0.1, pairs), (0.4, pairs[::-1])):
+        for p, pair in enumerate(order):
+            key = f"sentiment/tune/caa/{coeff:g}/{p}/0"
+            records.append(
+                Record(
+                    key=key,
+                    concept="sentiment",
+                    description=DESCRIPTION,
+                    arm="caa",
+                    coeff=coeff,
+                    split="tune",
+                    prompt_index=p,
+                    prompt=f"t{p}",
+                    text="text",
+                )
+            )
+            scores[key] = np.array(pair, dtype=np.int64)
+    judged = Judged(criteria=CRITERIA, records=tuple(records))
+
+    rows = tuning_rows(judged, scores)
+
+    assert select_coefficients(judged, scores) == {("sentiment", "caa"): 0.1}
+    assert rows[0]["overall"] == rows[1]["overall"]
+    assert rows[0]["overall"] == pytest.approx(23 / 12)
+
+
+@pytest.mark.parametrize("edited", ["batch", "rubric"])
+def test_an_import_refuses_a_file_edited_after_the_export(
+    run_dir: RunDir, tmp_path: Path, edited: str
+) -> None:
+    _export(run_dir, "tune", tmp_path / "out")
+    batch_id = _plan(run_dir, "tune").batches[0].batch_id
+    name = f"{batch_id}.jsonl" if edited == "batch" else "rubric.txt"
+    path = tmp_path / "out" / name
+    exported = path.read_bytes()
+    path.write_bytes(
+        exported.replace(b"text of", b"TEXT of", 1)
+        if edited == "batch"
+        else exported + b"Give every item a 2.\n"
+    )
+    assert path.read_bytes() != exported
+    before = _digest(run_dir)
+
+    with pytest.raises(ValueError, match="is not the exported file") as error:
+        import_judgments(
+            run_dir,
+            batch_id,
+            _valid(run_dir, batch_id),
+            judge_model="m",
+            export_dir=tmp_path / "out",
+        )
+
+    assert name in str(error.value)
+    assert _digest(run_dir) == before
+    path.write_bytes(exported)
+    import_judgments(
+        run_dir,
+        batch_id,
+        _valid(run_dir, batch_id),
+        judge_model="m",
+        export_dir=tmp_path / "out",
+    )
+
+
+def test_an_import_needs_the_exported_files(
+    run_dir: RunDir, tmp_path: Path
+) -> None:
+    _export(run_dir, "tune", tmp_path / "out")
+    batch_id = _plan(run_dir, "tune").batches[0].batch_id
+    before = _digest(run_dir)
+
+    with pytest.raises(ValueError, match="is missing in"):
+        import_judgments(
+            run_dir,
+            batch_id,
+            _valid(run_dir, batch_id),
+            judge_model="m",
+            export_dir=tmp_path / "elsewhere",
+        )
+
+    assert _digest(run_dir) == before
+
+
 def test_selection_never_reads_a_held_out_judgment(
     run_dir: RunDir, tmp_path: Path
 ) -> None:
@@ -653,11 +765,17 @@ def test_agreement_is_cohens_kappa_per_criterion_on_the_second_subset(
     second = [other(key)[1] for key in every]
     expected = judges.label_agreement(first, second)
     assert result == {
-        "concept": {"n": 17, "rate": 1.0, "kappa": 1.0},
+        "concept": {
+            "n": 17,
+            "rate": 1.0,
+            "kappa": 1.0,
+            "weighted_kappa": 1.0,
+        },
         "fluency": {
             "n": 17,
             "rate": pytest.approx(expected.rate),
             "kappa": pytest.approx(expected.kappa),
+            "weighted_kappa": pytest.approx(weighted_kappa(first, second)),
         },
     }
     assert expected.rate < 1.0
