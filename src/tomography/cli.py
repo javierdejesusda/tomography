@@ -291,10 +291,17 @@ def _judge_export(
             batch_size=args.batch_size,
             second_fraction=args.second_fraction,
         )
+        plan = judging.read_export(run, args.stage)
     except ValueError as error:
         parser.error(str(error))
+    batches = {} if plan is None else {b.batch_id: b for b in plan.batches}
     for path in paths:
-        print(path)
+        batch = batches.get(path.stem)
+        print(
+            path
+            if batch is None
+            else f"{path}\tjudge {batch.judge}\t{len(batch.keys)} items"
+        )
     return 0
 
 
@@ -320,6 +327,7 @@ def _judge_import(
             args.batch,
             _read_judgments(args.judgments),
             judge_model=args.judge_model,
+            export_dir=Path(args.export_dir),
         )
     except ValueError as error:
         parser.error(str(error))
@@ -357,10 +365,17 @@ def _add_judge_commands(commands: Any) -> None:
         "export",
         help="write blinded, shuffled judge batches",
         description=(
-            "Write the blinded, shuffled batch files of one stage, with the "
-            "rubric and a manifest. A batch line holds an item id, the "
-            "prompt, the concept description and the generation; the arm, "
-            "the coefficient, the checkpoint and the split stay in the run. "
+            "Write the blinded, shuffled batch files of one stage, with "
+            "rubric.txt and criteria.json. A judge is given the folder and "
+            "nothing else: a batch line holds an item id, the prompt, the "
+            "concept description and the generation, and criteria.json "
+            "lists the criteria to score. No file names the stage, the "
+            "arm, the coefficient, the checkpoint or the judge slot; they "
+            "stay in the run, with the SHA-256 of every batch file and of "
+            "the rubric. Each batch file is printed with its judge slot "
+            "and its number of items: the files of slot 2 hold a share of "
+            "the items again, under other ids, for a second, independent "
+            "judge. "
             "The held_out stage is refused until every batch of the tune "
             "stage is imported; it holds each arm at the coefficient that "
             "won there and stores that choice with its rule in "
@@ -407,7 +422,9 @@ def _add_judge_commands(commands: Any) -> None:
             "lines with exactly one line per item of the batch: the item_id "
             "and one integer score of 0, 1 or 2 per criterion. A file with "
             "a missing, repeated or unknown item, another field or another "
-            "value is refused and the run stays as it was."
+            "value is refused and the run stays as it was. So is an import "
+            "whose batch file or rubric.txt is not unchanged since the "
+            "export: their SHA-256 must equal the one the run stored."
         ),
     )
     import_.add_argument("run", help="run directory")
@@ -419,6 +436,14 @@ def _add_judge_commands(commands: Any) -> None:
         "--judge-model",
         required=True,
         help="model id of the judge, stored with the judgments",
+    )
+    import_.add_argument(
+        "--export-dir",
+        required=True,
+        help=(
+            "folder the batch was exported to (the --out of the export), "
+            "with the batch file and rubric.txt the judge was given"
+        ),
     )
     import_.set_defaults(handler=_judge_import)
     report = judge_commands.add_parser(

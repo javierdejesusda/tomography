@@ -204,3 +204,9 @@ def test_the_text_table_prints_compact_so_its_hub_ids_do_not_wrap_tall(
     output: registry.TableOutput,
 ) -> None:
     assert output.compact_print is True
+
+
+def test_the_alpaca_eval_row_cites_the_paper_of_the_set() -> None:
+    rows = {asset.key: asset for asset in assets.ASSETS}
+
+    assert rows["alpaca_eval"].cite == ("dubois2023alpacafarm",)

@@ -283,7 +283,7 @@ ASSETS = (
         "alpaca_eval",
         "AlpacaEval",
         "instructions for the steering baselines",
-        ("wu2025axbench",),
+        ("dubois2023alpacafarm",),
         "tatsu-lab/alpaca_eval",
         "2edc6fad8be6",
         "CC-BY-NC-4.0 (runtime download only)",
