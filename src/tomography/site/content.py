@@ -1059,12 +1059,23 @@ APPENDICES = (
             "known-against-unknown contrast, so it has no row in the "
             "figure; its probe adds "
             "[[num:fig:knowledge_reading.gpt2_small_probe_gain]].",
+            "[[fig:a_knowledge_geometry]] shows the hidden states that the "
+            "entity readers read, for one checkpoint per role, beside two "
+            "controls: layer 1 and the words of the questions alone. The "
+            "views are stored for "
+            "[[count:fig:a_knowledge_geometry.with_views]]. The better of "
+            "two components of the hidden states at the reader layer "
+            "separates known from unknown entity questions more than the "
+            "better of two components of the words on "
+            "[[count:fig:a_knowledge_geometry.reader_above_words]]. It is a "
+            "picture and not a test: its numbers carry no interval.",
         ),
         items=(
             "fig:a_knowledge_matrix",
             "table:knowledge",
             "fig:a_dose_runs",
             "fig:a_dose_types",
+            "fig:a_knowledge_geometry",
         ),
     ),
     Section(

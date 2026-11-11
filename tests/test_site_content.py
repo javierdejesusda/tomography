@@ -579,6 +579,28 @@ def test_known_and_unknown_questions_have_a_finding_and_a_subsection() -> None:
     assert "told to give one exact number" in text
 
 
+def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
+    None
+):
+    section = _section("appendix_knowledge")
+    assert section.items == (
+        "fig:a_knowledge_matrix",
+        "table:knowledge",
+        "fig:a_dose_runs",
+        "fig:a_dose_types",
+        "fig:a_knowledge_geometry",
+    )
+    text = " ".join(_texts(section))
+    for token in (
+        "[[fig:a_knowledge_geometry]]",
+        "[[count:fig:a_knowledge_geometry.with_views]]",
+        "[[count:fig:a_knowledge_geometry.reader_above_words]]",
+    ):
+        assert token in text, token
+    assert "one checkpoint per role" in text
+    assert not re.search(r"\b10 checkpoints\b", text)
+
+
 def test_the_knowledge_and_approximate_figures_left_the_appendix() -> None:
     assert "fig:knowledge_steering" not in _section("appendix_knowledge").items
     assert "fig:approximate" not in _section("appendix_approximate").items
