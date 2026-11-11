@@ -1361,8 +1361,18 @@ def _mlp_cells(
 ) -> torch.Tensor:
     # The MLP value of every cell of shape (K, rows, d), without the output
     # bias: one hidden layer of ReLU units per layer.
-    units = torch.einsum("krd,khd->krh", scaled, weights) + biases[:, None, :]
-    return torch.einsum("krh,kh->kr", torch.relu(units), outputs)
+    units = torch.einsum("krd,khd->krh", scaled, weights)
+    return _mlp_head(units, biases, outputs)
+
+
+def _mlp_head(
+    units: torch.Tensor, biases: torch.Tensor, outputs: torch.Tensor
+) -> torch.Tensor:
+    # The MLP value of cells from their hidden units' inputs of shape
+    # (K, rows, hidden) before the hidden biases.
+    return torch.einsum(
+        "krh,kh->kr", torch.relu(units + biases[:, None, :]), outputs
+    )
 
 
 def _mlp_values(
@@ -1443,8 +1453,7 @@ def _fit_attention_mlp(
         both = torch.einsum(
             "krd,kjd->krj", scaled, torch.cat([queries[:, None], weights], 1)
         )
-        units = torch.relu(both[..., 1:] + biases[:, None, :])
-        heads = torch.einsum("krh,kh->kr", units, outputs) + params[-1]
+        heads = _mlp_head(both[..., 1:], biases, outputs) + params[-1]
         scores = _pool(both[..., 0], heads, stimulus, targets.shape[0])
         penalty = (
             queries.square().sum()

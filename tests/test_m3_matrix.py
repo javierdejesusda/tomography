@@ -1181,7 +1181,7 @@ def test_streamed_scores_equal_whole_set_scores(
     assert streamed.shares.shape == (len(readers), len(report.texts), 4)
 
 
-def test_a_scores_only_stream_keeps_the_scores_and_leaves_shares_at_zero(
+def test_a_stream_without_diagnostics_keeps_the_scores_and_zero_shares(
     tiny_arch: LoadedModel,
 ) -> None:
     config = _config(batch_size=3)
@@ -1192,7 +1192,7 @@ def test_a_scores_only_stream_keeps_the_scores_and_leaves_shares_at_zero(
         tiny_arch, report, readers, config, decoy=True
     )
     bare = m3_matrix.stream_scores(
-        tiny_arch, report, readers, config, decoy=True, shares=False
+        tiny_arch, report, readers, config, decoy=True, diagnostics=False
     )
 
     # Selection reads only the scores, so its stream skips the shares and

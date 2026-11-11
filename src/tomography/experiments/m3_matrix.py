@@ -607,7 +607,7 @@ def stream_scores(
     config: Config,
     *,
     decoy: bool,
-    shares: bool = True,
+    diagnostics: bool = True,
 ) -> Streamed:
     """Scores stimuli with cell readers, reading their cells batch by batch.
 
@@ -623,9 +623,9 @@ def stream_scores(
         config: Supplies `cell_layers`, `upper_layers`, the BOS policy and
             the batch size.
         decoy: Whether the texts carry P2's misleading line.
-        shares: Whether to compute the segment shares and the dropped
-            cells; without them both stay zero, as selection reads only
-            the scores.
+        diagnostics: Whether to compute the segment shares and the
+            dropped cells; without them both stay zero, as selection reads
+            only the scores.
 
     Returns:
         The scores, segment shares, cell counts and dropped cells of each
@@ -646,7 +646,7 @@ def stream_scores(
                     readers,
                     config,
                     decoy=decoy,
-                    shares=shares,
+                    diagnostics=diagnostics,
                 )
             )
         except ValueError as error:
@@ -665,7 +665,7 @@ def _batch_scores(
     config: Config,
     *,
     decoy: bool,
-    shares: bool,
+    diagnostics: bool,
 ) -> Streamed:
     """Scores one batch; its cells are released on return."""
     cells, segments = prompt_cells(
@@ -688,11 +688,11 @@ def _batch_scores(
         drop = np.zeros((n_stimuli, n_segments), dtype=np.int64)
         if isinstance(reader, FlatReader):
             scores.append(reader.score(acts, kept_segments)[0])
-            if shares:
+            if diagnostics:
                 drop = reader.dropped(acts, kept_segments)
         else:
             scores.append(reader.score(acts)[0])
-            if shares:
+            if diagnostics:
                 share = np.bincount(
                     acts.row_stimulus * n_segments + kept_segments,
                     cell_weights(reader, acts).sum(axis=0),
@@ -1031,7 +1031,7 @@ def _cell_phase(
         [(fit.cell_set, reader) for fit in fits for reader in fit.readers],
         config,
         decoy=False,
-        shares=False,
+        diagnostics=False,
     ).scores
     sizes = np.cumsum([len(fit.readers) for fit in fits])[:-1]
     best: list[int] = []
