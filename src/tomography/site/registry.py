@@ -136,6 +136,7 @@ MAIN_TABLES = ("checkpoints", "reading")
 APPENDIX_TABLES = (
     "assets",
     "notation",
+    "design",
     "finders_all",
     "finder_baselines",
     "reading_full",

@@ -807,6 +807,13 @@ APPENDICES = (
             "These are the design details that the method summarises; they "
             "support every result of the paper, because each one is "
             "reported against a control built the same way.",
+            "[[table:design]] gives, for every experiment shown on this "
+            "page, its question, stimuli, labels, splits, controls, "
+            "published baselines, metric and checkpoints, and the run-ins "
+            "headed Design state, study by study, what is asked, why the "
+            "design answers it and what limits the answer. No prediction was "
+            "fixed before a run, so a run-in names what would count as "
+            "evidence and not a hypothesis that was tested.",
         ),
         runin=(
             (
@@ -920,7 +927,167 @@ APPENDICES = (
                 "the four GPT-2 sizes are least-squares slopes with a t "
                 "interval on 2 degrees of freedom.",
             ),
+            (
+                "Design: reading concepts.",
+                "The question is whether one direction in the residual "
+                "stream separates the two sides of a concept on pairs it was "
+                "not fitted on. A direction is oriented with the training "
+                "labels, so even a random one can score above chance; the "
+                "evidence is therefore the margin over the random direction "
+                "of the same run and, where the words can give the label "
+                "away, the distance to classifiers that see only the text. "
+                "The sentiment, utility and morality runs each fit "
+                "[[num:table:design.utility_n_seeds]] readers on "
+                "[[num:table:design.utility_n_pairs]] training pairs and "
+                "score held-out pairs. Three further runs vary the number of "
+                "training pairs, the token that is read and the wording of "
+                "the template while the items and the draws stay fixed, so a "
+                "change belongs to the factor that was varied. The utility "
+                "run covers [[count:table:design.utility]]. The limits are "
+                "that the stored intervals resample the draws and not the "
+                "test pairs, that the main sentiment run chooses its layer "
+                "on the pairs it scores, and that each cell is one run.",
+            ),
+            (
+                "Design: finders.",
+                "The question is whether the finder of the paper finds a "
+                "concept as well as other ways of turning the same pairs "
+                "into a direction. One run varies the pairing, the "
+                "preprocessing of the differences and the finder one at a "
+                "time around the finder of the paper, and reads every "
+                "series, the random direction included, at the layer chosen "
+                "on its own select split, so no series borrows a layer tuned "
+                "for another. A second run asks whether six finders that "
+                "read utility also steer it, with "
+                "[[num:table:design.finders_steering_n_steer_seeds]] "
+                "steering vectors per finder and a random finder as the "
+                "reference for the win rate. A third sets the finder of the "
+                "paper beside four published finders fitted on the same "
+                "[[num:table:design.published_finders_n_pairs]] pairs, on "
+                "[[count:table:design.published_finders]]. Logistic "
+                "regression and the mean difference are published baselines; "
+                "the random direction, the shuffled labels and the text "
+                "classifiers are controls. The limit is that matched pairs "
+                "exist only for utility, so the effect of matching cannot be "
+                "told apart from the concept and the data.",
+            ),
+            (
+                "Design: known and unknown questions.",
+                "The question is whether a model carries a direction that "
+                "separates the questions it answers from those it cannot, "
+                "and whether that direction says more than the output "
+                "already does. The labels come from the behaviour of each "
+                "model: a question is known when the greedy answer and at "
+                "least "
+                "[[num:table:design.labels_recipe_known_min_correct]] "
+                "of [[num:table:design.labels_n_samples]] sampled "
+                "answers are correct, unknown when none is, and left out "
+                "otherwise, so every model has its own sets. Datasets differ "
+                "in wording and relations differ in how often they are "
+                "known, so a reader is set beside classifiers on the words "
+                "and the characters of the question and beside the "
+                "popularity of the subject, and the headline is the AUROC "
+                "inside each relation. Error prediction compares the "
+                "direction with the confidence of the model and with "
+                "published detectors on the same test questions; steering "
+                "compares it with "
+                "[[num:table:design.knowledge_steering_n_random]] random "
+                "directions of the same norm, on "
+                "[[count:table:design.knowledge_steering]]. The limits are "
+                "that no human checked the answer matching or the abstention "
+                "phrases, and that the interval of a reader resamples its "
+                "draws, not the test questions.",
+            ),
+            (
+                "Design: approximate answers.",
+                "The question is whether a model treats a quantity whose "
+                "sourced answer is a range differently from one with a "
+                "single exact value, in what it says and in its hidden "
+                "states. The label is the kind of the sourced answer, taken "
+                "from the bounds of the Wikidata statement and not from a "
+                "model, with "
+                "[[num:table:design.approximate_answers_n_per_side]] "
+                "questions per side in each of three families. In every "
+                "family the range side is a living thing and the exact side "
+                "an artifact, and the wording differs by side, so "
+                "[[num:table:design.approximate_reading_n_people]] people "
+                "with one exact height serve as the control: a reader of "
+                "range against exact should score them like the buildings, "
+                "and a reader of living against artifact like the dog "
+                "breeds. Readers are also tested on a family held out of "
+                "training, beside classifiers on the text, the length of the "
+                "question and the popularity of the subject. The links to "
+                "the knowledge directions are compared with the band of "
+                "[[num:table:design.approximate_links_n_random]] random "
+                "directions, never with chance. The limits are that the "
+                "families are few and that no human checked the parsing of "
+                "the answers.",
+            ),
+            (
+                "Design: truth.",
+                "The question is whether a reader of truth reads the model "
+                "or the wording. A direction fitted on true and false "
+                "statements is scored on held-out statements and, with no "
+                "refit, on sets of statements from another source, which "
+                "tests whether it holds beyond its own data. On TruthfulQA, "
+                "split by hash into [[num:table:design.truthfulqa_n_train]] "
+                "train, [[num:table:design.truthfulqa_n_val]] validation and "
+                "[[num:table:design.truthfulqa_n_test]] test questions, the "
+                "readers are compared with the two zero-shot scorers of the "
+                "paper, which are published baselines; the classifiers on "
+                "the words and the characters of the text are controls, and "
+                "a reader that is not above the words alone has not been "
+                "shown to read the model. The honesty run fits its "
+                "direction on persona prompts and tests it on "
+                "[[num:table:design.honesty_n_eval_pairs_transfer_test]] "
+                "pairs of plain statements, so it asks for transfer from a "
+                "function to a concept. The limits are that the stimuli the "
+                "paper generates with a larger chat model are not reproduced "
+                "and that the test sets are small.",
+            ),
+            (
+                "Design: steering.",
+                "The question is whether adding a direction to the residual "
+                "stream moves the text toward the concept without breaking "
+                "it. The sentiment run steers completions of "
+                "[[num:table:design.sentiment_steering_n_prompts]] neutral "
+                "prompts over a grid of relative coefficients; a layer sweep "
+                "on one list of prompts chooses where to steer and the "
+                "results come from a second list, so the layer is not tuned "
+                "on the reported text. A classifier scores every completion, "
+                "with a second classifier as a check, and the fluency rule, "
+                "on the perplexity of held-out text and the distinct-1 of "
+                "the completions, guards against a shift bought with "
+                "degenerate text. This run has no random direction: its "
+                "comparisons are the unsteered model and an instruction in "
+                "the prompt, so it shows that the direction moves the judged "
+                "sentiment, not that only this direction would. The utility "
+                "test and the knowledge steering run do steer random "
+                "directions of the same norm. The limits are that the judges "
+                "are classifiers with no human validation and that one run "
+                "stands behind each cell.",
+            ),
+            (
+                "Design: post-training.",
+                "The question is what post-training changes in reading and "
+                "in steering. Each Qwen3 size exists as a base checkpoint "
+                "and as a post-trained one, so the comparison holds the "
+                "architecture and the size fixed. The post-trained "
+                "checkpoint is read through its chat template with thinking "
+                "disabled, so the prompt format changes together with the "
+                "weights; the wording run varies the format on its own. The "
+                "paired comparison runs no model: it reads the finished runs "
+                "of both checkpoints of a pair and, because one draw uses "
+                "the same stimuli on both, takes the difference per draw "
+                "with a bootstrap of "
+                "[[num:table:design.post_training_n_boot]] resamples over "
+                "the draws. That stored run covers "
+                "[[count:table:design.post_training]]. The limits are that "
+                "the pairs come from one model family and that the intervals "
+                "do not resample the test pairs.",
+            ),
         ),
+        items=("table:design",),
     ),
     Section(
         "appendix_reading",

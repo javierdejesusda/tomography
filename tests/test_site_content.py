@@ -12,6 +12,7 @@ from tomography.site import references
 from tomography.site import registry
 from tomography.site.manifest import Manifest
 from tomography.site.stats import RoleCount
+from tomography.site.tables import design
 from tomography.site.tables import notation
 
 _HERE = Path(__file__).parent
@@ -577,6 +578,53 @@ def test_known_and_unknown_questions_have_a_finding_and_a_subsection() -> None:
     ):
         assert token in text, token
     assert "told to give one exact number" in text
+
+
+DESIGN_HEADS = [
+    "Design: reading concepts.",
+    "Design: finders.",
+    "Design: known and unknown questions.",
+    "Design: approximate answers.",
+    "Design: truth.",
+    "Design: steering.",
+    "Design: post-training.",
+]
+
+
+def test_appendix_b_states_the_design_of_every_study() -> None:
+    section = _section("appendix_method")
+    heads = [h for h, _ in section.runin]
+    assert heads[:6] == [
+        "Readers and draws.",
+        "Layer choice.",
+        "Data and judges.",
+        "Controls and baselines.",
+        "Steering.",
+        "Intervals.",
+    ]
+    assert heads[6:] == DESIGN_HEADS
+    assert section.items == ("table:design",)
+    assert "[[table:design]]" in " ".join(section.paragraphs)
+    for head in DESIGN_HEADS:
+        text = dict(section.runin)[head]
+        assert len(text.split()) >= 60, head
+        assert "[[table:design]]" not in text, head
+
+
+def test_the_design_run_ins_take_their_counts_from_the_design_table() -> None:
+    out = design.build(Manifest(ROOT))
+    section = _section("appendix_method")
+    used = set()
+    for head in DESIGN_HEADS:
+        text = dict(section.runin)[head]
+        assert _digits_left(text) == [], head
+        for kind, name in re.findall(
+            r"\[\[(num|count):table:design\.([a-z0-9_]+)\]\]", text
+        ):
+            pool = out.numbers if kind == "num" else out.counts
+            assert name in pool, name
+            used.add(name)
+    assert len(used) >= 7
 
 
 def test_the_published_baselines_have_a_table_beside_what_they_compare() -> (
