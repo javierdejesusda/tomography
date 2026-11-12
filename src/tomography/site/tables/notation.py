@@ -59,8 +59,11 @@ ROWS = (
     ),
     (
         "series",
-        "One finder, pairing, preprocessing or control in a comparison, with "
-        "its own draws and its own layer chosen on validation pairs.",
+        "One finder, pairing, preprocessing or control in a comparison. The "
+        "series of a comparison share its draws of training items, which a "
+        "pairing series pairs in its own way, and each reads at its own "
+        "layer chosen on validation pairs, except the text controls, which "
+        "read no layer.",
     ),
     (
         "accuracy",

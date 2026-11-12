@@ -352,12 +352,13 @@ def test_the_cards_state_what_their_runs_do(
     for words in (
         "SyntHal, unknowable details, false premises and KUQ",
         "unknown by construction",
-        "the sport relation of PopQA is excluded",
+        "the sport relation of PopQA never counts as known",
         "widened from four to twelve relations",
     ):
         assert words in labels["Labels"] + labels["Stimuli"], words
     views = blocks["Hidden states behind the readers"]["Stimuli"]
-    assert "at layer 1 and at the last layer" in views
+    assert "read again at every layer that run read" in views
+    assert "at layer 1, at that layer and at the last layer" in views
     assert "(post hoc)" in blocks["Utility"]["Published baselines"]
     assert "(post hoc)" in labels["Stimuli"]
     assert "biased upward" in blocks["Sentiment"]["Splits"]

@@ -74,6 +74,9 @@ def test_the_glossary_names_every_knowledge_contrast() -> None:
     assert "every training pair" in rows["all-pairs reader"]
     assert "views run" in rows["all-pairs reader"]
     assert "its own layer" in rows["series"]
+    assert "share its draws of training items" in rows["series"]
+    assert "own draws" not in rows["series"]
+    assert "the text controls, which read no layer" in rows["series"]
     assert "finder" in rows["reader"]
 
 

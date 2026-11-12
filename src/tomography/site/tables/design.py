@@ -331,7 +331,9 @@ CARDS = (
         "wrong; the rest is uncertain and left out. Questions without a gold "
         "answer (invented subjects, SyntHal, unknowable details, false "
         "premises and KUQ) are unknown by construction, and the sport "
-        "relation of PopQA is excluded on every checkpoint. A group of "
+        "relation of PopQA never counts as known: a question of it that the "
+        "model answers is left out as uncertain, and its unknown questions "
+        "stay unknown. A group of "
         "questions that a constant guess answers often supplies no known "
         "question, and a model enters the known against unknown contrasts "
         "only with at least {min_known} known questions.",
@@ -373,8 +375,9 @@ CARDS = (
         "What do the hidden states behind the knowledge readers look like, "
         "and do the stored scores reproduce?",
         "The train and test questions of the reading run, read again at "
-        "the layer of that run, where the readers are recomputed, and at "
-        "layer 1 and at the last layer for the views.",
+        "every layer that run read, where the readers are refitted and "
+        "compared with the stored scores at the layer that run chose; the "
+        "views are drawn at layer 1, at that layer and at the last layer.",
         "Those of the labelling run of the same checkpoint.",
         "Those of the reading run; nothing is chosen again.",
         "A random direction, readers refitted on labels permuted inside "
