@@ -15,21 +15,27 @@ ROOT, data, models, run = _R["ROOT"], _R["data"], _R["models"], _R["run"]
 SPEC = "detection_baselines"
 DASHES = (chr(0x2014), chr(0x2013))
 READER = "lat"
-WITH_INTERVAL = ("answer_probe", "semantic_entropy", "eigenscore")
-PLAIN = ("p_true", "first_token_prob", "probe")
 CONTROLS = ("popularity", "length")
 COLUMNS = [
     "Model",
     "Direction",
     "Answer probe",
+    "Prompt probe",
     "Semantic entropy",
     "EigenScore",
     "P(True)",
     "Token probability",
-    "Prompt probe",
     "Popularity",
     "Length",
 ]
+LEFT_OUT = {
+    "neg_entropy": "Entropy of the first token",
+    "answer_logprob": "Answer log-probability",
+    "mean_token_logprob": "Mean token log-probability",
+    "consistency": "Agreement of samples",
+    "template": "Relation accuracy",
+    "name_logprob": "Name log-probability",
+}
 
 
 @pytest.fixture(scope="module")
@@ -57,8 +63,14 @@ def _expected(model: str) -> list[str]:
     return [
         paper.display_name(model),
         _within(by[READER]) if READER in by else "no contrast",
-        *(_within(by[name]) for name in WITH_INTERVAL),
-        *(cells.num(by[name]["auroc_within"]) for name in (*PLAIN, *CONTROLS)),
+        _within(by["answer_probe"]),
+        cells.num(by["probe"]["auroc_within"]),
+        _within(by["semantic_entropy"]),
+        _within(by["eigenscore"]),
+        *(
+            cells.num(by[name]["auroc_within"])
+            for name in ("p_true", "first_token_prob", *CONTROLS)
+        ),
     ]
 
 
@@ -73,6 +85,7 @@ def test_columns_sit_in_groups_of_reader_baselines_and_controls(
         ("Controls", 2, False),
     )
     assert output.compact_print
+    assert output.roomy
 
 
 def test_there_is_one_row_per_checkpoint_from_the_files(
@@ -87,6 +100,49 @@ def test_there_is_one_row_per_checkpoint_from_the_files(
     assert data(run("b1", "gpt2"), "summary.json")["missing_references"][
         "popqa"
     ] == ["lat"]
+
+
+def test_the_predictors_left_out_are_in_the_data_file(
+    output: registry.TableOutput,
+) -> None:
+    shown = {
+        READER,
+        "answer_probe",
+        "probe",
+        "semantic_entropy",
+        "eigenscore",
+        "p_true",
+        "first_token_prob",
+        *CONTROLS,
+    }
+    for model in models("b1"):
+        assert set(_popqa(model)) - shown == set(LEFT_OUT)
+    assert output.data_columns == tuple(LEFT_OUT.values())
+    assert list(output.data_cells) == [
+        tuple(cells.num(_popqa(m)[name]["auroc_within"]) for name in LEFT_OUT)
+        for m in models("b1")
+    ]
+    assert (
+        "The runs also score six signals that the table leaves out and the "
+        "data file holds: the entropy of the first token of the answer, the "
+        "log-probability of the greedy answer and its mean per token, the "
+        "share of sampled answers equal to the greedy one, the training "
+        "accuracy of the relation, which is constant inside a relation, and "
+        "the log-probability of the name of the subject."
+    ) in output.detail
+
+
+def test_the_claim_states_the_finding_by_point_estimate(
+    output: registry.TableOutput,
+) -> None:
+    assert output.claim == (
+        "By point estimate, the answer probe tells correct from wrong greedy "
+        "answers on held-out PopQA questions better than the knowledge "
+        "direction on "
+        f"{stats.per_role_text(output.counts['answer_probe_above'])}, and "
+        "the direction does better than P(True) and both controls on "
+        f"{stats.per_role_text(output.counts['above_ptrue_and_controls'])}."
+    )
 
 
 def test_the_number_of_questions_is_quoted_from_the_runs(
@@ -139,6 +195,12 @@ def test_the_caption_names_baselines_and_controls_apart(
         "[[cite:alain2016understanding]]",
         "[[cite:mallen2023when]]",
         "five answers",
+        "pooled over the relations by their number of pairs of a correct "
+        "and a wrong answer",
+        "oriented so that a higher score means a more likely correct answer",
+        "The direction, the answer probe, semantic entropy and EigenScore "
+        "carry the percentile bootstrap interval",
+        "with no step that locates the exact answer",
         "published baselines",
         "are controls",
         "no direction",
@@ -150,4 +212,5 @@ def test_the_caption_names_baselines_and_controls_apart(
     assert len(controls) == 1
     assert "baseline" not in controls[0]
     assert not any(d in text for d in DASHES)
+    assert "did not have" not in text
     assert "_" not in text.replace("[[cite:", "")

@@ -761,6 +761,46 @@ def test_a_text_table_of_six_columns_is_wide_too() -> None:
     assert 'class="table wide"' in page.Page(doc).table("checkpoints")
 
 
+def test_a_table_may_ask_to_be_wide_with_fewer_columns() -> None:
+    def render(wide: bool) -> str:
+        output = registry.TableOutput(
+            "Claim.",
+            "Detail.",
+            ["Model", "a", "b"],
+            [["x", "1", "2"]],
+            "lrr",
+            [],
+            {},
+            wide=wide,
+        )
+        doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+        return page.Page(doc).table("checkpoints")
+
+    assert 'class="table wide"' in render(True)
+    assert 'class="table"' in render(False)
+    assert registry.TableOutput("c", "d", [], [], "", [], {}).wide is False
+
+
+def test_a_table_may_ask_for_wider_gutters() -> None:
+    def render(roomy: bool) -> str:
+        output = registry.TableOutput(
+            "Claim.",
+            "Detail.",
+            ["Model", "a", "b"],
+            [["x", "1", "2"]],
+            "lrr",
+            [],
+            {},
+            roomy=roomy,
+        )
+        doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+        return page.Page(doc).table("checkpoints")
+
+    assert 'class="table roomy"' in render(True)
+    assert "roomy" not in render(False)
+    assert registry.TableOutput("c", "d", [], [], "", [], {}).roomy is False
+
+
 def test_a_findings_link_is_pinned_to_the_results_commit() -> None:
     doc = dataclasses.replace(_doc(), commit="abc1234")
     html = page.Page(doc).text("[[findings:lie-gallery-c5|the lie gallery]]")

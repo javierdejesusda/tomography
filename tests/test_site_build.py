@@ -165,6 +165,8 @@ def test_table_text_is_compact_but_not_below_the_readable_floor(
     assert 0.78 <= size <= 0.8
     cells = css.split(chr(10) + "th,\ntd {")[1].split("}")[0]
     assert "padding: 0.16em 0.25em;" in cells
+    roomy = css.split(chr(10) + ".table.roomy th,\n.table.roomy td {")[1]
+    assert "padding: 0.16em 0.6em;" in roomy.split("}")[0]
 
 
 def test_captions_of_figures_and_tables_share_one_rule(css: str) -> None:

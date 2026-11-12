@@ -965,7 +965,8 @@ APPENDICES = (
             "approximation and the stored paired bootstrap.",
             "[[table:finder_baselines]] puts the finder of the paper beside "
             "four published finders as baselines, fitted on the same "
-            "[[num:table:finder_baselines.train_pairs]] training pairs, on "
+            "[[num:table:finder_baselines.seeds]] training sets of "
+            "[[num:table:finder_baselines.train_pairs]] pairs, on "
             "sentiment and on three truth sets: the mass-mean probe and its "
             "whitened form [[cite:marks2024geometry]], logistic regression "
             "[[cite:alain2016understanding]] and contrast-consistent search "
@@ -974,7 +975,7 @@ APPENDICES = (
             "conservative interval excluding zero, on "
             "[[count:table:finder_baselines.every_baseline_above]]. The "
             "finder of the paper is above its control, the random "
-            "direction, on at least one dataset on "
+            "direction, on at least one dataset, with the same interval, on "
             "[[count:table:finder_baselines.finder_above_random]].",
         ),
         items=(
@@ -1084,8 +1085,9 @@ APPENDICES = (
             "exact-answer probe is fitted on the correctness of training "
             "questions and the direction never sees it; by point estimate "
             "that probe is above the direction on "
-            "[[count:table:detection_baselines.answer_probe_above]], and "
-            "the direction is above P(True) and above both controls, "
+            "[[count:table:detection_baselines.answer_probe_above]], and, "
+            "by point estimate, the direction is above P(True) and above "
+            "both controls, "
             "popularity and length, on "
             "[[count:table:detection_baselines.above_ptrue_and_controls]].",
             "[[fig:a_knowledge_geometry]] shows the hidden states that the "
