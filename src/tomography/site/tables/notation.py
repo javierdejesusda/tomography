@@ -40,6 +40,12 @@ ROWS = (
         "k-means.",
     ),
     (
+        "reader",
+        "The direction one finder fits on one draw of training pairs, read "
+        "at the layer chosen on validation; it scores an input by the "
+        "projection of its activation.",
+    ),
+    (
         "accuracy",
         "Share of held-out pairs whose positive member projects higher on "
         "the direction; ties count one half; 0.5 for a direction with no "
@@ -71,6 +77,23 @@ ROWS = (
         "win rate",
         "Share of decisive prompt pairs in which the completion steered at "
         f"+c is judged more positive than the one steered at {cells.MINUS}c.",
+    ),
+    (
+        "contrast",
+        "A knowledge contrast sets known questions against the unknown "
+        "questions it names: fictional synthal, SyntHal questions about "
+        "fictional entities [[cite:lu2026relational]]; fictional generated, "
+        "questions about names generated for this study; obscure real, "
+        "PopQA questions the model does not know, and obscure real pop, the "
+        "same paired inside a popularity bin; post cutoff, questions on "
+        "awards given after the training cutoff, against known award "
+        "questions; unknowable detail, questions about a day of a famous "
+        "person that no record answers; false premise, FalseQA questions; "
+        "kuq, one category of KUQ [[cite:amayuelas2024knowledge]]. The "
+        "contrast triviaqa known sets TriviaQA questions labelled known "
+        "against those labelled unknown, and the contrasts real vs synthal, "
+        "real vs generated and pre vs post cutoff set two kinds of unknown "
+        "question against each other.",
     ),
     (
         "role",

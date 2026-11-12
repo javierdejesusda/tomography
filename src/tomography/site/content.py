@@ -811,9 +811,10 @@ APPENDICES = (
             "page, its question, stimuli, labels, splits, controls, "
             "published baselines, metric and checkpoints, and the run-ins "
             "headed Design state, study by study, what is asked, why the "
-            "design answers it and what limits the answer. No prediction was "
-            "fixed before a run, so a run-in names what would count as "
-            "evidence and not a hypothesis that was tested.",
+            "design answers it and what limits the answer. No hypothesis was "
+            "fixed before its run, except the tolerance of the views run, "
+            "which was set before those runs. So a run-in names what would "
+            "count as evidence and not a hypothesis that was tested.",
         ),
         runin=(
             (
@@ -941,8 +942,11 @@ APPENDICES = (
                 "[[num:table:design.utility_n_pairs]] training pairs and "
                 "score held-out pairs. Three further runs vary the number of "
                 "training pairs, the token that is read and the wording of "
-                "the template while the items and the draws stay fixed, so a "
-                "change belongs to the factor that was varied. The utility "
+                "the template. The token and wording runs keep the items and "
+                "the draws fixed, so a change belongs to the factor that was "
+                "varied, and the training-set size run draws "
+                "[[num:table:design.training_size_n_seeds]] training sets per "
+                "size. The utility "
                 "run covers [[count:table:design.utility]]. The limits are "
                 "that the stored intervals resample the draws and not the "
                 "test pairs, that the main sentiment run chooses its layer "
@@ -957,7 +961,7 @@ APPENDICES = (
                 "time around the finder of the paper, and reads every "
                 "series, the random direction included, at the layer chosen "
                 "on its own select split, so no series borrows a layer tuned "
-                "for another. A second run asks whether six finders that "
+                "for another. A second run asks whether five finders that "
                 "read utility also steer it, with "
                 "[[num:table:design.finders_steering_n_steer_seeds]] "
                 "steering vectors per finder and a random finder as the "
@@ -1060,9 +1064,9 @@ APPENDICES = (
                 "the completions, guards against a shift bought with "
                 "degenerate text. This run has no random direction: its "
                 "comparisons are the unsteered model and an instruction in "
-                "the prompt, so it shows that the direction moves the judged "
-                "sentiment, not that only this direction would. The utility "
-                "test and the knowledge steering run do steer random "
+                "the prompt, so it can show whether the direction moves the "
+                "judged sentiment, not whether only this direction would. The "
+                "utility test and the knowledge steering run do steer random "
                 "directions of the same norm. The limits are that the judges "
                 "are classifiers with no human validation and that one run "
                 "stands behind each cell.",

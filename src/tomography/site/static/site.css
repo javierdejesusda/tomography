@@ -298,6 +298,14 @@ tbody tr.group td {
   border-top: 0.5px solid var(--ink);
 }
 
+tbody tr.heading th {
+  border-top: 0.5px solid var(--ink);
+  text-align: left;
+  font-style: italic;
+  font-weight: normal;
+  padding-top: 0.5em;
+}
+
 td.k {
   white-space: nowrap;
 }

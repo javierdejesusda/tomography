@@ -164,6 +164,29 @@ def inline_svg(raw: bytes, prefix: str, keep_style: bool) -> str:
     )
 
 
+def _label_spans(out: TableOutput) -> dict[int, int]:
+    """Counts the rows each row label spans.
+
+    Args:
+        out: A table whose labels span the empty labels below them.
+
+    Returns:
+        Index of each row that carries its label cell to the number of rows
+        that cell spans; a row with an empty label under a heading carries
+        its own empty cell.
+    """
+    headings = {i for i, _ in out.headings}
+    spans: dict[int, int] = {}
+    owner = -1
+    for i, row in enumerate(out.rows):
+        if row[0] or i in headings or owner < 0:
+            owner = i
+            spans[i] = 1
+        else:
+            spans[owner] += 1
+    return spans
+
+
 class Page:
     """State of one render: numbering, citations and footnotes."""
 
@@ -457,8 +480,23 @@ class Page:
             for c, a in zip(out.columns, out.align, strict=True)
         )
         body = []
+        headings = dict(out.headings)
+        spans = _label_spans(out) if out.span_labels else {}
         for i, row in enumerate(out.rows):
-            cells = self.cells(row, out.align)
+            if i in headings:
+                body.append(
+                    f'<tr class="heading"><th colspan="{len(out.columns)}" '
+                    f'scope="colgroup">{self.text(headings[i])}</th></tr>'
+                )
+            if not out.span_labels:
+                cells = self.cells(row, out.align)
+            elif i in spans:
+                label = self.cells(row[:1], out.align[:1])
+                if spans[i] > 1:
+                    label = label.replace("<td", f'<td rowspan="{spans[i]}"', 1)
+                cells = label + self.cells(row[1:], out.align[1:])
+            else:
+                cells = self.cells(row[1:], out.align[1:])
             if out.row_groups is None:
                 grouped = i and row[0] and not out.groups
             else:

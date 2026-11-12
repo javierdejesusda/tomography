@@ -1,10 +1,11 @@
 """Appendix table: The design of every experiment shown on the page.
 
-A text table in blocks, one per experiment: the study it belongs to, its
-question, stimuli, labels, splits, controls, published baselines, metric and
-checkpoints. The text is static, but every count inside it is read from the
-stored configuration or summary of the runs, and the checkpoints are counted
-per role from the runs that exist.
+A text table in blocks, one per experiment, under a heading row per study:
+its question, stimuli, labels, splits, controls, published baselines, metric
+and checkpoints. Inside a study a block leaves out an aspect that is the same
+as in the block above it. The text is static, but every count inside it is
+read from the stored configuration or summary of the runs, and the
+checkpoints are counted per role from the runs that exist.
 """
 
 from collections.abc import Mapping
@@ -19,7 +20,6 @@ from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
 
 ASPECTS = (
-    "Study",
     "Question",
     "Stimuli",
     "Labels",
@@ -41,11 +41,20 @@ SWEEP_CONTROLS = (
     "A random direction oriented on the training labels, and the reader "
     "scored against shuffled labels."
 )
-PROBE = "None; the reader is itself a logistic-regression probe."
+PROBE = (
+    "None; the reader is itself a logistic-regression probe, made the "
+    "default finder after pilot runs (post hoc)."
+)
 SAME_SWEEP = (
     "Logistic regression (a linear probe) and the mean difference (the "
     "mass-mean probe), in the same sweep as the finder of the paper."
 )
+LOGISTIC_SWEEP = (
+    "PCA of the differences (the finder of the paper) and the mean "
+    "difference (the mass-mean probe), in the same sweep as the "
+    "logistic-regression reader."
+)
+NO_KNOWN = "GPT-2 small has too few known questions for a contrast"
 DRAWS = "{n_seeds} readers, each on its own draw of {n_pairs} training pairs; "
 
 
@@ -65,7 +74,8 @@ class Card:
         stimuli: What the model is given.
         labels: Where the labels come from.
         splits: Which items fit, choose and score.
-        controls: What uses no learned signal for the concept.
+        controls: What shows what a score reaches without reading the
+            concept from the hidden states.
         baselines: Published methods run on the same items.
         metric: What is reported, with its interval.
         scope: Sentence after the count of checkpoints.
@@ -121,7 +131,8 @@ CARDS = (
         "of the paper.",
         "The binary sentiment label of SST-2.",
         DRAWS + "the same {n_eval_pairs} validation pairs choose the layer "
-        "and give the score, so the value is optimistic.",
+        "and give the score, so the value is optimistic: biased upward by "
+        "the choice of the layer.",
         READING_CONTROLS,
         PROBE,
         "Pair accuracy at the chosen layer, as the mean over the readers.",
@@ -230,6 +241,22 @@ CARDS = (
         "Pair accuracy per variant and its spread across the variants.",
     ),
     Card(
+        "agreement",
+        READING,
+        "Agreement of directions",
+        ("a1",),
+        "Do directions fitted on different draws of the training pairs agree?",
+        "The stored directions of the sentiment, utility, morality, "
+        "honesty and truth readers; no activation is read.",
+        "None: it compares directions.",
+        "The {n_seeds} draws of each reader, at the layer at half of the "
+        "depth.",
+        "The absolute cosine expected between random directions.",
+        NONE,
+        "The mean cosine between the directions of two draws, with a t "
+        "interval on jackknife values.",
+    ),
+    Card(
         "pairing",
         FINDERS,
         "Pairing, preprocessing and finder",
@@ -251,9 +278,9 @@ CARDS = (
     Card(
         "finders_steering",
         FINDERS,
-        "Six finders on utility",
+        "Five finders on utility",
         ("m1",),
-        "Do six finders that read utility also steer it?",
+        "Do five finders that read utility also steer it?",
         "ETHICS utility pairs for reading; {n_prompts} truncated scenarios "
         "that the model continues under steering.",
         "The order of the source row for reading; a sentiment classifier, "
@@ -264,7 +291,7 @@ CARDS = (
         "A random finder, read and steered like the others, with "
         "{n_steer_seeds} steering vectors per finder.",
         "Logistic regression (a linear probe) and the mean difference (the "
-        "mass-mean probe), among the six finders.",
+        "mass-mean probe), among the five finders.",
         "Pair accuracy; the win rate of the positive continuation on "
         "decisive pairs, with a Wilson interval.",
     ),
@@ -295,12 +322,16 @@ CARDS = (
         "Which questions does each model know?",
         "Closed-book questions in nine groups, built from PopQA, TriviaQA, "
         "KUQ, FalseQA, SyntHal, NQ-open and Wikidata, asked with a few-shot "
-        "prompt of {n_shots} examples.",
+        "prompt of {n_shots} examples. The PopQA part of the pool was "
+        "widened from four to twelve relations after the guess filter of "
+        "earlier labelling runs left too few known questions (post hoc).",
         "Known when the greedy answer and at least "
         "{recipe.known_min_correct} of {n_samples} sampled answers contain "
         "a gold alias; unknown when the greedy answer and every sample are "
-        "wrong; the rest is uncertain and left out. Questions about "
-        "fictional subjects are unknown by construction.",
+        "wrong; the rest is uncertain and left out. Questions without a gold "
+        "answer (invented subjects, SyntHal, unknowable details, false "
+        "premises and KUQ) are unknown by construction, and the sport "
+        "relation of PopQA is excluded on every checkpoint.",
         "Questions are hashed into train, validation and test by subject or "
         "source, so one subject stays in one split.",
         "A group of questions that a constant guess answers often supplies "
@@ -317,18 +348,21 @@ CARDS = (
         "Does a direction separate questions a model answers from questions "
         "it cannot answer?",
         "The labelled questions in the few-shot prompt, as contrasts of a "
-        "known group against an unknown group; one contrast keeps a single "
-        "dataset on both sides.",
+        "known group against an unknown group and contrasts between two "
+        "kinds of unknown question; some contrasts keep a single dataset on "
+        "both sides.",
         "Those of the labelling run of the same checkpoint.",
         "{n_seeds} draws of {n_pairs} training pairs; the layer is chosen "
         "on the validation questions and the score is on the test questions.",
         "A random direction, classifiers on the words and on the characters "
         "of the question, and the popularity of the subject, each on the "
         "test questions of the reader.",
-        SAME_SWEEP,
+        LOGISTIC_SWEEP,
         "AUROC, inside each relation where the contrast holds PopQA "
         "questions; its stored interval resamples the draws, not the test "
         "questions.",
+        scope=f"{NO_KNOWN}, so its run reads only the contrasts between two "
+        "kinds of unknown question.",
     ),
     Card(
         "knowledge_views",
@@ -338,7 +372,8 @@ CARDS = (
         "What do the hidden states behind the knowledge readers look like, "
         "and do the stored scores reproduce?",
         "The train and test questions of the reading run, read again at "
-        "the layer of that run.",
+        "the layer of that run, where the readers are recomputed, and at "
+        "layer 1 and at the last layer for the views.",
         "Those of the labelling run of the same checkpoint.",
         "Those of the reading run; nothing is chosen again.",
         "A random direction, readers refitted on labels permuted inside "
@@ -347,6 +382,8 @@ CARDS = (
         "None of its own; it recomputes the readers of the reading run.",
         "The AUROC of each recomputed reader beside the stored one, and "
         "projections of the hidden states on two axes.",
+        scope=f"{NO_KNOWN}, so its run views only the contrasts between two "
+        "kinds of unknown question.",
     ),
     Card(
         "error_prediction",
@@ -370,6 +407,7 @@ CARDS = (
         "equal to the greedy answer, and P(True).",
         "AUROC of wrong against correct answers, inside each relation on "
         "PopQA, with a bootstrap interval over the test questions.",
+        scope=f"{NO_KNOWN}, so its run has no knowledge direction.",
     ),
     Card(
         "error_detectors",
@@ -389,6 +427,7 @@ CARDS = (
         "error-prediction run.",
         "AUROC of wrong against correct answers, inside each relation on "
         "PopQA, with a bootstrap interval over the test questions.",
+        scope=f"{NO_KNOWN}, so its run has no knowledge direction.",
     ),
     Card(
         "knowledge_steering",
@@ -409,7 +448,7 @@ CARDS = (
         "The mean slope of the outcome over the coefficients, with a "
         "bootstrap interval over the questions, against each random "
         "direction and between unknown and known questions.",
-        scope="GPT-2 small has too few known questions for a contrast.",
+        scope=f"{NO_KNOWN}.",
     ),
     Card(
         "approximate_answers",
@@ -447,7 +486,7 @@ CARDS = (
         "A random direction with a layer of its own, classifiers on the "
         "words and on the characters, the length of the question, the "
         "popularity of the subject, and {n_people} people as test items.",
-        SAME_SWEEP,
+        LOGISTIC_SWEEP,
         "AUROC of the test questions with range as the positive class, "
         "with a bootstrap interval over the test questions.",
     ),
@@ -500,8 +539,9 @@ CARDS = (
         "validation questions.",
         "A random direction, shuffled labels, and classifiers on the words "
         "and on the characters of the text alone.",
-        "The standard and the heuristic zero-shot scorers of the paper, on "
-        "every question.",
+        "The standard and the heuristic zero-shot scorers of the paper, run "
+        "on all {n_questions} questions and compared with the readers on the "
+        "test questions.",
         "The share of test questions on which the true choice scores highest.",
     ),
     Card(
@@ -523,22 +563,6 @@ CARDS = (
         PROBE,
         "Pair accuracy on the plain statements, beside the accuracy inside "
         "the persona template.",
-    ),
-    Card(
-        "agreement",
-        TRUTH,
-        "Agreement of directions",
-        ("a1",),
-        "Do directions fitted on different draws of the training pairs agree?",
-        "The stored directions of the sentiment, utility, morality, "
-        "honesty and truth readers; no activation is read.",
-        "None: it compares directions.",
-        "The {n_seeds} draws of each reader, at the layer at half of the "
-        "depth.",
-        "The absolute cosine expected between random directions.",
-        NONE,
-        "The mean cosine between the directions of two draws, with a t "
-        "interval on jackknife values.",
     ),
     Card(
         "sentiment_steering",
@@ -579,7 +603,9 @@ CARDS = (
         "The difference between the post-trained and the base checkpoint "
         "per draw, with a bootstrap interval over the draws of {n_boot} "
         "resamples.",
-        scope="One stored run reads the finished runs of each pair.",
+        scope="One stored run reads the finished runs of each pair. GPT-2 "
+        "small is read beside the pairs as a reference with no post-trained "
+        "pair.",
         paired=True,
     ),
 )
@@ -665,6 +691,10 @@ def build(manifest: Manifest) -> TableOutput:
         The table and its caption parts.
     """
     rows: list[list[str]] = []
+    studies: list[tuple[str]] = []
+    headings: list[tuple[int, str]] = []
+    starts: list[int] = []
+    above: dict[str, str] = {}
     numbers: dict[str, float] = {}
     counts: dict[str, dict[str, stats.RoleCount]] = {}
     for card in CARDS:
@@ -686,33 +716,59 @@ def build(manifest: Manifest) -> TableOutput:
                 )
                 if part
             )
-        texts = [_filled(text, facts) for text in card.texts()]
-        cells = [f"{card.study}.", *texts, checkpoints]
-        for place, (aspect, cell) in enumerate(
-            zip(ASPECTS, cells, strict=True)
-        ):
+        texts = [*(_filled(text, facts) for text in card.texts()), checkpoints]
+        block = dict(zip(ASPECTS, texts, strict=True))
+        if not headings or headings[-1][1] != card.study:
+            headings.append((len(rows), card.study))
+            above = {}
+        starts.append(len(rows))
+        shown = [
+            (aspect, cell)
+            for aspect, cell in block.items()
+            if aspect == ASPECTS[0] or above.get(aspect) != cell
+        ]
+        for place, (aspect, cell) in enumerate(shown):
             rows.append([card.name if place == 0 else "", aspect, cell])
-    studies = list(dict.fromkeys(card.study for card in CARDS))
+            studies.append((card.study,))
+        above = block
+    opened = {place for place, _ in headings}
     numbers |= {
         "experiments": float(len(CARDS)),
-        "studies": float(len(studies)),
+        "studies": float(len(headings)),
         "rows": float(len(rows)),
     }
     return TableOutput(
         "The design of every experiment shown on this page: its question, "
         "stimuli, labels, splits, controls, published baselines, metric and "
         "checkpoints.",
-        "The experiments are in the order of their studies. A control uses "
-        "no learned signal for the concept, and a published baseline is a "
-        "published method run on the same items. Every count of pairs, "
-        "draws, questions or prompts is read from the stored configuration "
-        "or summary of the runs and is the same on every checkpoint of the "
-        "experiment. Checkpoints are counted per role.",
+        "The experiments are in the order of their studies, under a heading "
+        "row per study. Inside a study, a block leaves out an aspect that is "
+        "the same as in the block above it. A control shows what a score "
+        "reaches without reading the concept from the hidden states: a "
+        "random direction, a reader fitted on shuffled labels, or a signal "
+        "of the text or of the subject alone; a published baseline is a "
+        "published method run on the same items. A finder turns training "
+        "pairs into a direction, and a reader is the direction one finder "
+        "fits on one draw of training pairs, read at the layer chosen on "
+        "validation. The paper is the representation engineering paper of "
+        "Zou et al. [[cite:zou2025representationengineeringtopdownapproach]], "
+        "and the finder of the paper is its PCA of differences. Select pairs "
+        "choose the layer, and report pairs, which that choice does not use, "
+        "give the score. Post hoc marks a choice made after results were "
+        "seen. Every count of pairs, draws, questions or prompts is read "
+        "from the stored configuration or summary of the runs and is the "
+        "same on every checkpoint of the experiment. Checkpoints are counted "
+        "per role: GPT-2, Qwen3 base and post-trained Qwen3.",
         ["Experiment", "Aspect", "Design"],
         rows,
         "lll",
         [],
         numbers,
-        row_groups=tuple(range(0, len(rows), len(ASPECTS))),
+        row_groups=tuple(place for place in starts if place not in opened),
         counts=counts,
+        data_columns=("Study",),
+        data_cells=tuple(studies),
+        roomy=True,
+        headings=tuple(headings),
+        span_labels=True,
     )

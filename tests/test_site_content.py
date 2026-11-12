@@ -627,6 +627,35 @@ def test_the_design_run_ins_take_their_counts_from_the_design_table() -> None:
     assert len(used) >= 7
 
 
+def test_the_design_run_ins_say_what_was_fixed_and_what_a_run_can_show() -> (
+    None
+):
+    section = _section("appendix_method")
+    paragraphs = " ".join(section.paragraphs)
+    assert (
+        "No hypothesis was fixed before its run, except the tolerance of the "
+        "views run, which was set before those runs." in paragraphs
+    )
+    assert "No prediction" not in paragraphs
+    runins = dict(section.runin)
+    steering = runins["Design: steering."]
+    assert (
+        "so it can show whether the direction moves the judged sentiment"
+        in steering
+    )
+    assert "it shows that" not in steering
+    reading = runins["Design: reading concepts."]
+    assert (
+        "the training-set size run draws "
+        "[[num:table:design.training_size_n_seeds]] training sets per size"
+        in reading
+    )
+    assert "the items and the draws stay fixed" not in reading
+    finders = runins["Design: finders."]
+    assert "whether five finders that read utility also steer it" in finders
+    assert "six" not in finders
+
+
 def test_the_published_baselines_have_a_table_beside_what_they_compare() -> (
     None
 ):

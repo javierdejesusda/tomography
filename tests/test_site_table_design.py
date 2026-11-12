@@ -17,7 +17,6 @@ ROOT, data, models, run = _R["ROOT"], _R["data"], _R["models"], _R["run"]
 SPEC = "design"
 DASHES = (chr(0x2014), chr(0x2013))
 ASPECTS = [
-    "Study",
     "Question",
     "Stimuli",
     "Labels",
@@ -38,7 +37,15 @@ STUDIES = [
 ]
 CODE = re.compile(r"\"([a-z]+[0-9]+[a-d]?)\"")
 RUN_CODE = re.compile(r"\b[RPMCA][0-9]+[a-d]?\b", re.IGNORECASE)
-NAMES = ("GPT-2", "SST-2", "Qwen3", "MC1", "WikiText-103", "distinct-1")
+NAMES = (
+    "GPT-2",
+    "SST-2",
+    "Qwen3",
+    "MC1",
+    "WikiText-103",
+    "distinct-1",
+    "layer 1",
+)
 PLACEHOLDER = re.compile(r"\{[a-z_.]+\}")
 
 
@@ -63,15 +70,35 @@ def _shown() -> set[str]:
     return found
 
 
+def _given(output: registry.TableOutput) -> list[dict[str, str]]:
+    """Reads the rows back as the aspects each experiment shows."""
+    headings = dict(output.headings)
+    study = ""
+    blocks: list[dict[str, str]] = []
+    for i, (name, aspect, text) in enumerate(output.rows):
+        study = headings.get(i, study)
+        if name:
+            blocks.append({"Experiment": name, "Study": study})
+        assert blocks
+        assert blocks[-1]["Study"] == study
+        assert aspect in ASPECTS, aspect
+        assert aspect not in blocks[-1], aspect
+        blocks[-1][aspect] = text
+    for block in blocks:
+        shown = [a for a in ASPECTS if a in block]
+        assert list(block)[2:] == shown, block["Experiment"]
+        assert shown[0] == "Question", block["Experiment"]
+    return blocks
+
+
 def _blocks(output: registry.TableOutput) -> list[dict[str, str]]:
-    """Reads the rows back as one mapping of aspect to text per experiment."""
-    size = len(ASPECTS)
-    blocks = []
-    for start in range(0, len(output.rows), size):
-        rows = output.rows[start : start + size]
-        assert [row[1] for row in rows] == ASPECTS
-        assert all(row[0] == "" for row in rows[1:])
-        blocks.append({"Experiment": rows[0][0], **{r[1]: r[2] for r in rows}})
+    """Reads every aspect of every experiment, the shared ones included."""
+    blocks: list[dict[str, str]] = []
+    for block in _given(output):
+        if blocks and blocks[-1]["Study"] == block["Study"]:
+            block = {**blocks[-1], **block}
+        assert set(ASPECTS) <= set(block), block["Experiment"]
+        blocks.append(block)
     return blocks
 
 
@@ -84,9 +111,43 @@ def test_every_experiment_is_a_block_of_the_same_aspects(
     assert len(blocks) == len(design.CARDS) == 25
     assert [b["Experiment"] for b in blocks] == [c.name for c in design.CARDS]
     assert len({b["Experiment"] for b in blocks}) == len(blocks)
-    assert output.row_groups == tuple(range(0, len(output.rows), len(ASPECTS)))
+    starts = [i for i, row in enumerate(output.rows) if row[0]]
+    headings = [i for i, _ in output.headings]
+    assert [text for _, text in output.headings] == STUDIES
+    assert set(headings) <= set(starts)
+    assert output.row_groups == tuple(i for i in starts if i not in headings)
+    assert output.span_labels
+    assert output.roomy
+    assert output.data_columns == ("Study",)
+    study = ""
+    for i, more in enumerate(output.data_cells):
+        study = dict(output.headings).get(i, study)
+        assert more == (study,)
+    assert len(output.data_cells) == len(output.rows)
     assert output.numbers["experiments"] == len(blocks)
     assert output.numbers["studies"] == len(STUDIES)
+
+
+def test_an_aspect_shared_with_the_block_above_is_given_once(
+    output: registry.TableOutput,
+) -> None:
+    shown = _given(output)
+    full = _blocks(output)
+    for place in range(1, len(shown)):
+        if shown[place]["Study"] != shown[place - 1]["Study"]:
+            assert set(ASPECTS) <= set(shown[place])
+            continue
+        for aspect in ASPECTS:
+            if aspect in shown[place]:
+                assert shown[place][aspect] != full[place - 1][aspect], (
+                    shown[place]["Experiment"],
+                    aspect,
+                )
+    assert len(output.rows) < len(full) * len(ASPECTS)
+    assert (
+        "Inside a study, a block leaves out an aspect that is the same as in "
+        "the block above it." in output.detail
+    )
 
 
 def test_every_shown_experiment_has_a_block() -> None:
@@ -100,7 +161,7 @@ def test_every_shown_experiment_has_a_block() -> None:
 def test_the_blocks_follow_the_studies_in_order(
     output: registry.TableOutput,
 ) -> None:
-    order = [block["Study"].rstrip(".") for block in _blocks(output)]
+    order = [block["Study"] for block in _blocks(output)]
     assert list(dict.fromkeys(order)) == STUDIES
     for study in STUDIES:
         places = [i for i, name in enumerate(order) if name == study]
@@ -211,3 +272,84 @@ def test_the_text_keeps_the_rules_of_the_page(
         assert row[2].endswith((".", "?")), row
     assert "per role" in output.detail
     assert "same on every checkpoint" in output.detail
+
+
+def test_the_caption_defines_its_terms(output: registry.TableOutput) -> None:
+    for words in (
+        "A control shows what a score reaches without reading the concept "
+        "from the hidden states",
+        "A finder turns training pairs into a direction, and a reader is the "
+        "direction one finder fits on one draw of training pairs",
+        "The paper is the representation engineering paper of Zou et al. "
+        "[[cite:zou2025representationengineeringtopdownapproach]]",
+        "report pairs",
+        "Checkpoints are counted per role: GPT-2, Qwen3 base and "
+        "post-trained Qwen3.",
+        "Post hoc marks a choice made after results were seen.",
+    ):
+        assert words in output.detail, words
+    assert "no learned signal" not in output.detail
+    assert "learned signal" not in design.Card.__doc__
+
+
+def test_gpt2_small_is_scoped_where_it_has_no_known_questions(
+    output: registry.TableOutput,
+) -> None:
+    blocks = {b["Experiment"]: b for b in _blocks(output)}
+    reading = blocks["Reading known against unknown"]["Checkpoints"]
+    assert "only the contrasts between two kinds of unknown question" in reading
+    views = blocks["Hidden states behind the readers"]["Checkpoints"]
+    assert "only the contrasts between two kinds of unknown question" in views
+    for name in ("Predicting wrong answers", "Published error detectors"):
+        assert "has no knowledge direction" in blocks[name]["Checkpoints"]
+    for block in (
+        reading,
+        views,
+        blocks["Predicting wrong answers"]["Checkpoints"],
+        blocks["Published error detectors"]["Checkpoints"],
+        blocks["Steering along the knowledge direction"]["Checkpoints"],
+    ):
+        assert "GPT-2 small has too few known questions for a contrast" in block
+    assert (
+        "GPT-2 small is read beside the pairs as a reference with no "
+        "post-trained pair."
+        in blocks["Base against post-trained"]["Checkpoints"]
+    )
+
+
+def test_the_cards_state_what_their_runs_do(
+    output: registry.TableOutput,
+) -> None:
+    blocks = {b["Experiment"]: b for b in _blocks(output)}
+    for name in (
+        "Reading known against unknown",
+        "Reading range against exact",
+    ):
+        baselines = blocks[name]["Published baselines"]
+        assert baselines.startswith("PCA of the differences"), name
+        assert "same sweep as the logistic-regression reader" in baselines
+    stimuli = blocks["Reading known against unknown"]["Stimuli"]
+    assert "contrasts between two kinds of unknown question" in stimuli
+    assert "some contrasts keep a single dataset on both sides" in stimuli
+    steering = blocks["Five finders on utility"]
+    assert not any("six" in text.lower() for text in steering.values())
+    assert "five finders" in steering["Question"]
+    assert "among the five finders" in steering["Published baselines"]
+    assert (
+        "compared with the readers on the test questions"
+        in blocks["TruthfulQA"]["Published baselines"]
+    )
+    labels = blocks["Labels from the behaviour of the model"]
+    for words in (
+        "SyntHal, unknowable details, false premises and KUQ",
+        "unknown by construction",
+        "the sport relation of PopQA is excluded",
+        "widened from four to twelve relations",
+    ):
+        assert words in labels["Labels"] + labels["Stimuli"], words
+    views = blocks["Hidden states behind the readers"]["Stimuli"]
+    assert "at layer 1 and at the last layer" in views
+    assert "(post hoc)" in blocks["Utility"]["Published baselines"]
+    assert "(post hoc)" in labels["Stimuli"]
+    assert "biased upward" in blocks["Sentiment"]["Splits"]
+    assert blocks["Agreement of directions"]["Study"] == "Reading concepts"

@@ -147,6 +147,9 @@ def test_tables_are_booktabs_without_vertical_rules(css: str) -> None:
     assert "border-bottom: 1.5px solid" in css
     assert "thead tr:last-child th {\n  border-bottom: 1px solid" in css
     assert "tbody tr.group td {\n  border-top: 0.5px solid" in css
+    heading = css.split("tbody tr.heading th {")[1].split("}")[0]
+    assert "border-top: 0.5px solid var(--ink);" in heading
+    assert "text-align: left;" in heading
 
 
 def test_numeric_cells_do_not_wrap_and_use_tabular_figures(css: str) -> None:

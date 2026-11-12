@@ -96,6 +96,11 @@ class TableOutput:
             would touch inside the column.
         roomy: Whether the cells take wider gutters, for a table whose
             interval cells would nearly touch the next column.
+        headings: Rows of one cell across the table, as (index of the row
+            it stands above, text), for a table in sections; the data file
+            does not hold them.
+        span_labels: Whether a row label spans the rows below it whose label
+            is empty, down to the next label or heading.
     """
 
     claim: str
@@ -116,6 +121,8 @@ class TableOutput:
     data_cells: tuple[tuple[str, ...], ...] = ()
     wide: bool = False
     roomy: bool = False
+    headings: tuple[tuple[int, str], ...] = ()
+    span_labels: bool = False
 
 
 MAIN_FIGURES = (

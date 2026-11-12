@@ -1,6 +1,7 @@
 from pathlib import Path
 import re
 
+from tomography.p9 import unknowns
 from tomography.site import registry
 from tomography.site.manifest import Manifest
 
@@ -12,6 +13,7 @@ TERMS = [
     "v(\u2113)",
     "u(\u2113)",
     "finder",
+    "reader",
     "accuracy",
     "margin",
     "relative depth",
@@ -19,6 +21,7 @@ TERMS = [
     "AUROC",
     "relative coefficient c",
     "win rate",
+    "contrast",
     "role",
     "run codes",
 ]
@@ -47,6 +50,23 @@ def test_the_win_rate_is_the_positive_against_the_negative_completion() -> None:
     rows = {r[0]: r[1] for r in _build().rows}
     assert "+c" in rows["win rate"]
     assert "judged more positive" in rows["win rate"]
+
+
+def test_the_glossary_names_every_knowledge_contrast() -> None:
+    rows = {r[0]: r[1] for r in _build().rows}
+    names = rows["contrast"]
+    for contrast in (
+        *unknowns.ENTITY_TYPES,
+        *unknowns.UNKNOWN_TYPES,
+        "unknowable_detail",
+        "false_premise",
+        "kuq",
+    ):
+        assert contrast.replace("_", " ") in names, contrast
+    for key in ("lu2026relational", "amayuelas2024knowledge"):
+        assert f"[[cite:{key}]]" in names
+    assert "one draw of training pairs" in rows["reader"]
+    assert "finder" in rows["reader"]
 
 
 def test_no_row_spells_out_a_run_code() -> None:
