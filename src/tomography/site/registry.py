@@ -87,6 +87,10 @@ class TableOutput:
         compact_print: Whether the table prints in a smaller type with
             tighter cells, for a table that overflows the printed page at
             the ordinary table size.
+        data_columns: Headers of columns that only the data file holds,
+            after the shown ones.
+        data_cells: The cells of `data_columns`, one tuple per row of
+            `rows`; empty when there are no such columns.
     """
 
     claim: str
@@ -103,6 +107,8 @@ class TableOutput:
     )
     wrap_labels: bool = False
     compact_print: bool = False
+    data_columns: tuple[str, ...] = ()
+    data_cells: tuple[tuple[str, ...], ...] = ()
 
 
 MAIN_FIGURES = (
