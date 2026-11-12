@@ -423,8 +423,9 @@ def _add_judge_commands(commands: Any) -> None:
             "and one integer score of 0, 1 or 2 per criterion. A file with "
             "a missing, repeated or unknown item, another field or another "
             "value is refused and the run stays as it was. So is an import "
-            "whose batch file or rubric.txt is not unchanged since the "
-            "export: their SHA-256 must equal the one the run stored."
+            "whose batch file or rubric.txt changed since the export: their "
+            "SHA-256 must equal the one the run stored. A refused import "
+            "exits with exit code 2."
         ),
     )
     import_.add_argument("run", help="run directory")
