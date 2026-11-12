@@ -33,6 +33,12 @@ ROWS = (
         "training pairs.",
     ),
     (
+        "the paper",
+        "The representation engineering paper of Zou et al. "
+        "[[cite:zou2025representationengineeringtopdownapproach]], whose "
+        "finder and templates the page tests.",
+    ),
+    (
         "finder",
         "Method that turns training pairs into a direction: PCA of paired "
         "differences (the paper's), PCA of activations, mean difference "
@@ -44,6 +50,17 @@ ROWS = (
         "The direction one finder fits on one draw of training pairs, read "
         "at the layer chosen on validation; it scores an input by the "
         "projection of its activation.",
+    ),
+    (
+        "all-pairs reader",
+        "The direction the logistic finder of the knowledge reading run fits "
+        "on every training pair; the reading run stores it and the views "
+        "run, which reads the same questions again, scores it.",
+    ),
+    (
+        "series",
+        "One finder, pairing, preprocessing or control in a comparison, with "
+        "its own draws and its own layer chosen on validation pairs.",
     ),
     (
         "accuracy",

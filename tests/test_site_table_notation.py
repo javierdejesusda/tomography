@@ -12,8 +12,11 @@ TERMS = [
     "h(x, \u2113)",
     "v(\u2113)",
     "u(\u2113)",
+    "the paper",
     "finder",
     "reader",
+    "all-pairs reader",
+    "series",
     "accuracy",
     "margin",
     "relative depth",
@@ -66,6 +69,11 @@ def test_the_glossary_names_every_knowledge_contrast() -> None:
     for key in ("lu2026relational", "amayuelas2024knowledge"):
         assert f"[[cite:{key}]]" in names
     assert "one draw of training pairs" in rows["reader"]
+    paper = "[[cite:zou2025representationengineeringtopdownapproach]]"
+    assert paper in rows["the paper"]
+    assert "every training pair" in rows["all-pairs reader"]
+    assert "views run" in rows["all-pairs reader"]
+    assert "its own layer" in rows["series"]
     assert "finder" in rows["reader"]
 
 

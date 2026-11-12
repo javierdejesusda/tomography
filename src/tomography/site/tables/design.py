@@ -331,12 +331,13 @@ CARDS = (
         "wrong; the rest is uncertain and left out. Questions without a gold "
         "answer (invented subjects, SyntHal, unknowable details, false "
         "premises and KUQ) are unknown by construction, and the sport "
-        "relation of PopQA is excluded on every checkpoint.",
+        "relation of PopQA is excluded on every checkpoint. A group of "
+        "questions that a constant guess answers often supplies no known "
+        "question, and a model enters the known against unknown contrasts "
+        "only with at least {min_known} known questions.",
         "Questions are hashed into train, validation and test by subject or "
         "source, so one subject stays in one split.",
-        "A group of questions that a constant guess answers often supplies "
-        "no known question, and a model enters the known against unknown "
-        "contrasts only with at least {min_known} known questions.",
+        NONE,
         NONE,
         "The number of known, unknown and uncertain questions per group.",
     ),
@@ -745,8 +746,10 @@ def build(manifest: Manifest) -> TableOutput:
         "row per study. Inside a study, a block leaves out an aspect that is "
         "the same as in the block above it. A control shows what a score "
         "reaches without reading the concept from the hidden states: a "
-        "random direction, a reader fitted on shuffled labels, or a signal "
-        "of the text or of the subject alone; a published baseline is a "
+        "random direction, the reader scored against shuffled labels, or a "
+        "signal of the text or of the subject alone, and the experiment on "
+        "the hidden states behind the readers refits readers on labels "
+        "permuted inside each group; a published baseline is a "
         "published method run on the same items. A finder turns training "
         "pairs into a direction, and a reader is the direction one finder "
         "fits on one draw of training pairs, read at the layer chosen on "

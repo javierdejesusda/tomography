@@ -289,6 +289,12 @@ def test_the_caption_defines_its_terms(output: registry.TableOutput) -> None:
     ):
         assert words in output.detail, words
     assert "no learned signal" not in output.detail
+    assert "a reader fitted on shuffled labels" not in output.detail
+    assert "the reader scored against shuffled labels" in output.detail
+    assert (
+        "the experiment on the hidden states behind the readers refits "
+        "readers on labels permuted inside each group" in output.detail
+    )
     assert "learned signal" not in design.Card.__doc__
 
 
@@ -340,6 +346,9 @@ def test_the_cards_state_what_their_runs_do(
         in blocks["TruthfulQA"]["Published baselines"]
     )
     labels = blocks["Labels from the behaviour of the model"]
+    assert labels["Controls"] == "None."
+    assert "constant guess" in labels["Labels"]
+    assert "at least 100 known questions" in labels["Labels"]
     for words in (
         "SyntHal, unknowable details, false premises and KUQ",
         "unknown by construction",
