@@ -198,7 +198,8 @@ uv run tomography judge report <run>
 
 A judge is given the `batches` folder and nothing else: the batch files, `rubric.txt` and
 `criteria.json`, none of which names the stage or the arm. `judge import` refuses a batch whose
-file or rubric in `--export-dir` no longer has the SHA-256 stored at export.
+file or rubric in `--export-dir` no longer has the SHA-256 stored at export: it exits with code 2
+and leaves the run unchanged.
 
 Reproducibility rules:
 
