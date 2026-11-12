@@ -59,7 +59,8 @@ ROWS = (
     ),
     (
         "series",
-        "The finder and preprocessing series of a comparison share its draws "
+        "One finder, pairing, preprocessing or control in a comparison. The "
+        "finder and preprocessing series of a comparison share its draws "
         "of training items, while each pairing series draws its own; each "
         "series reads at its own layer chosen on validation pairs, except "
         "the text controls, which read no layer.",

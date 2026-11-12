@@ -74,6 +74,7 @@ def test_the_glossary_names_every_knowledge_contrast() -> None:
     assert "every training pair" in rows["all-pairs reader"]
     assert "views run" in rows["all-pairs reader"]
     assert rows["series"] == (
+        "One finder, pairing, preprocessing or control in a comparison. "
         "The finder and preprocessing series of a comparison share its draws "
         "of training items, while each pairing series draws its own; each "
         "series reads at its own layer chosen on validation pairs, except "
