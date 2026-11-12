@@ -496,7 +496,11 @@ def test_the_help_explains_the_three_steps(
     assert "--batch" in texts["judge import --help"]
     assert "--judge-model" in texts["judge import --help"]
     assert "--export-dir" in texts["judge import --help"]
-    assert "unchanged since the export" in texts["judge import --help"]
+    assert (
+        "whose batch file or rubric.txt changed since the export"
+        in texts["judge import --help"]
+    )
+    assert "exit code 2" in texts["judge import --help"]
     assert "criteria.json" in texts["judge export --help"]
     assert "names the stage" in texts["judge export --help"]
     assert "held-out" in texts["judge report --help"]
