@@ -351,6 +351,15 @@ def test_the_repository_handle_appears_only_in_repository_links() -> None:
         assert url.count(handle) == 1
 
 
+def test_the_reader_on_every_training_pair_is_not_called_published() -> None:
+    text = _text()
+    assert "published reader" not in text
+    assert "along the all-pairs reader" in text
+    assert (
+        "all-pairs reader is above every one of its random directions" in text
+    )
+
+
 def test_the_notation_terms_are_used_in_the_text() -> None:
     out = notation.build(Manifest(ROOT))
     text = " ".join(_bare(t) for t in _all_texts()).lower()

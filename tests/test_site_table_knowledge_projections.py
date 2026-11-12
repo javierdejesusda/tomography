@@ -27,7 +27,7 @@ COLUMNS = [
     "Contrast",
     "Committed",
     "Recomputed",
-    "Published",
+    "All pairs",
     "Random",
     "Shuffled labels",
     "Words",
@@ -237,7 +237,9 @@ def test_the_caption_says_what_each_column_is(
         "the highest draw",
         f"{stats.per_role_text(output.counts['within_tolerance'])} with "
         "stored views",
-        "published reader",
+        "all-pairs reader",
+        "Random is the mean of the random direction of each draw as the "
+        "recomputation refits it, not the committed mean",
         "labels shuffled",
         "controls",
         stats.per_role_text(output.counts["with_run"]),

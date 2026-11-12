@@ -1,7 +1,7 @@
 """Appendix table: The knowledge readers recomputed beside their controls.
 
 One row per checkpoint and contrast: the AUROC of the committed reader, the
-same draws refitted in float32, the published reader, and the controls of
+same draws refitted in float32, the all-pairs reader, and the controls of
 the contrast, which are the random direction and the shuffled-label reader
 of each draw and the committed classifiers on the words, on the characters
 and on the popularity of the subject. The page gives the mean over the draws
@@ -20,7 +20,7 @@ COLUMNS = [
     "Contrast",
     "Committed",
     "Recomputed",
-    "Published",
+    "All pairs",
     "Random",
     "Shuffled labels",
     "Words",
@@ -128,13 +128,14 @@ def build(manifest: Manifest) -> TableOutput:
         "default precision of the checkpoint; recomputed refits the same "
         "five draws on hidden states extracted again in float32, and "
         f"differs from it by at most {cells.num(max(reader_gaps))}. "
-        "Published is the published reader, fitted on every training pair "
+        "All pairs is the all-pairs reader, fitted on every training pair "
         "and not refitted, so it is another estimate and has no committed "
-        "value. The other columns are controls. Random is the random "
-        "direction of each draw and shuffled labels is the reader of each "
-        "draw refitted with its labels shuffled inside each stratum: both "
-        "give the mean over the five draws, and the data file adds the "
-        "lowest and the highest draw. Words, characters and popularity are "
+        "value. The other columns are controls. Random is the mean of the "
+        "random direction of each draw as the recomputation refits it, not "
+        "the committed mean, and shuffled labels is the reader of each draw "
+        "refitted with its labels shuffled inside each stratum: both give "
+        "the mean over the five draws, and the data file adds the lowest "
+        "and the highest draw. Words, characters and popularity are "
         "the committed classifiers on the question text and on the page "
         "views of the subject, which the recomputation reproduces exactly; "
         f"a contrast without a popularity control reads {cells.MISSING}. "
