@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 import runpy
 from typing import Any
@@ -222,7 +223,9 @@ def test_the_largest_gaps_of_the_reader_are_quoted(
         gaps += [g["logistic"] for g in check["mean_diff_at_layer"].values()]
     assert output.numbers["reader_gap_max"] == pytest.approx(max(gaps))
     assert max(gaps) < TOLERANCE
-    assert f"{cells.num(max(gaps))}" in output.detail
+    bound = math.ceil(max(gaps) * 1e4) / 1e4
+    assert bound >= max(gaps)
+    assert f"differs from it by at most {bound:.4f}" in output.detail
 
 
 def test_the_caption_says_what_each_column_is(
@@ -239,7 +242,7 @@ def test_the_caption_says_what_each_column_is(
         "stored views",
         "all-pairs reader",
         "Random is the mean of the random direction of each draw as the "
-        "recomputation refits it, not the committed mean",
+        "recomputation draws it again, not the committed mean",
         "labels shuffled",
         "controls",
         stats.per_role_text(output.counts["with_run"]),

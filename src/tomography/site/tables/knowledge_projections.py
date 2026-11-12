@@ -8,6 +8,8 @@ and on the popularity of the subject. The page gives the mean over the draws
 of each control and the data file adds its lowest and highest draw.
 """
 
+import math
+
 from tomography.site import cells
 from tomography.site import stats
 from tomography.site import views
@@ -43,6 +45,11 @@ METHOD_NAMES = {
 
 def _name(value: str) -> str:
     return value.replace("_", " ")
+
+
+def _ceiling(value: float) -> str:
+    """Writes a bound rounded up to four decimals, so it holds for the value."""
+    return f"{math.ceil(value * 1e4) / 1e4:.4f}"
 
 
 def _ends(found: views.Spread) -> tuple[str, str]:
@@ -127,13 +134,13 @@ def build(manifest: Manifest) -> TableOutput:
         "over the five draws of the committed reading run, which ran in the "
         "default precision of the checkpoint; recomputed refits the same "
         "five draws on hidden states extracted again in float32, and "
-        f"differs from it by at most {cells.num(max(reader_gaps))}. "
+        f"differs from it by at most {_ceiling(max(reader_gaps))}. "
         "All pairs is the all-pairs reader, fitted on every training pair "
         "and not refitted, so it is another estimate and has no committed "
         "value. The other columns are controls. Random is the mean of the "
-        "random direction of each draw as the recomputation refits it, not "
-        "the committed mean, and shuffled labels is the reader of each draw "
-        "refitted with its labels shuffled inside each stratum: both give "
+        "random direction of each draw as the recomputation draws it again, "
+        "not the committed mean, and shuffled labels is the reader of each "
+        "draw refitted with its labels shuffled inside each stratum: both give "
         "the mean over the five draws, and the data file adds the lowest "
         "and the highest draw. Words, characters and popularity are "
         "the committed classifiers on the question text and on the page "
