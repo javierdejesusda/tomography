@@ -32,6 +32,7 @@ DATASET_MODULES = {
     "synthal": "synthal",
     "nq_open": "nq_open",
     "wikitext103": "wikitext",
+    "alpaca_eval": "alpaca_eval",
 }
 EXPECTED_ORDER = (
     "gpt2",
@@ -53,6 +54,7 @@ EXPECTED_ORDER = (
     "nq_open",
     "wikidata",
     "wikitext103",
+    "alpaca_eval",
 )
 
 
@@ -202,3 +204,9 @@ def test_the_text_table_prints_compact_so_its_hub_ids_do_not_wrap_tall(
     output: registry.TableOutput,
 ) -> None:
     assert output.compact_print is True
+
+
+def test_the_alpaca_eval_row_cites_the_paper_of_the_set() -> None:
+    rows = {asset.key: asset for asset in assets.ASSETS}
+
+    assert rows["alpaca_eval"].cite == ("dubois2023alpacafarm",)

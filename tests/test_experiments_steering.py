@@ -877,6 +877,61 @@ def test_prompt_difference_arm_perplexity_edits_the_leading_positions(
     assert hooks_left(tiny_arch) == 0
 
 
+def test_prompt_difference_arm_with_a_start_scores_like_its_generation(
+    tiny_arch: LoadedModel,
+) -> None:
+    diff = make_prompt_difference(tiny_arch).at(2)
+    arm = edit_arm(tiny_arch, DIFF_SETTINGS, diff, name="d")
+    front = edit_arm(tiny_arch, DIFF_SETTINGS, diff.at(0), name="f")
+    assert arm.logprobs is not None
+    assert front.logprobs is not None
+
+    expected = reference_logprobs(
+        tiny_arch,
+        None,
+        DIFF_SCORED_PROMPTS,
+        DIFF_SCORED_CONTINUATIONS,
+        diff.edits,
+    )
+    scored = arm.logprobs(DIFF_SCORED_PROMPTS, DIFF_SCORED_CONTINUATIONS)
+
+    np.testing.assert_allclose(scored, expected, rtol=1e-4, atol=1e-4)
+    assert not np.allclose(
+        scored,
+        front.logprobs(DIFF_SCORED_PROMPTS, DIFF_SCORED_CONTINUATIONS),
+        atol=1e-3,
+    )
+    assert hooks_left(tiny_arch) == 0
+
+
+def test_prompt_difference_arm_with_a_start_edits_the_front_of_neutral_text(
+    tiny_arch: LoadedModel,
+) -> None:
+    diff = make_prompt_difference(tiny_arch).at(2)
+    arm = edit_arm(tiny_arch, DIFF_SETTINGS, diff, name="d")
+    assert arm.perplexity is not None
+
+    def under(edits: Mapping[int, ResidualEdit]) -> float:
+        with edit_residuals(tiny_arch, edits):
+            return perplexity(
+                tiny_arch.model,
+                tiny_arch.tokenizer,
+                NEUTRAL,
+                max_length=DIFF_SETTINGS.score_max_length,
+                batch_size=2,
+                bos_id=scoring_bos(tiny_arch),
+            )
+
+    # A neutral text has no chat header, so its front is token 0.
+    assert arm.perplexity(NEUTRAL) == pytest.approx(
+        under(diff.at(0).edits()), rel=1e-5
+    )
+    assert arm.perplexity(NEUTRAL) != pytest.approx(
+        under(diff.edits()), rel=1e-5
+    )
+    assert hooks_left(tiny_arch) == 0
+
+
 def test_prompt_difference_arm_logprobs_check_their_inputs(
     tiny_arch: LoadedModel,
 ) -> None:

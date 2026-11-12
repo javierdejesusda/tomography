@@ -501,6 +501,9 @@ def _build_arm(
         if controller is None:
             return contextlib.nullcontext()
         if isinstance(controller, PromptDifference):
+            if prompt_length is None:
+                # A text scored alone has no chat header: its front is token 0.
+                return edit_residuals(loaded, controller.at(0).edits())
             return edit_residuals(loaded, controller.edits(prompt_length))
         return edit_residuals(loaded, controller.edits(1))
 
@@ -622,8 +625,9 @@ def edit_arm(
     so `edits(1)` would edit only token 0, whose difference is zero under a
     BOS. Its log-probabilities are scored in groups of equal prompt length,
     each under `edits(length)`, the edit that generation applies to the
-    prompt; its neutral perplexity runs under `edits()`, which steers the
-    first `k` tokens of every text.
+    prompt, from its `start`; its neutral perplexity runs under
+    `at(0).edits()`, which steers the first `k` tokens of every text,
+    because a neutral text has no chat header before its front.
 
     Args:
         loaded: The wrapped model.
