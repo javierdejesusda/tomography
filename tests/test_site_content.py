@@ -350,6 +350,15 @@ def test_the_repository_handle_appears_only_in_repository_links() -> None:
         assert url.count(handle) == 1
 
 
+def test_the_reader_on_every_training_pair_is_not_called_published() -> None:
+    text = _text()
+    assert "published reader" not in text
+    assert "along the all-pairs reader" in text
+    assert (
+        "all-pairs reader is above every one of its random directions" in text
+    )
+
+
 def test_the_notation_terms_are_used_in_the_text() -> None:
     out = notation.build(Manifest(ROOT))
     text = " ".join(_bare(t) for t in _all_texts()).lower()
@@ -589,14 +598,34 @@ def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
         "fig:a_dose_runs",
         "fig:a_dose_types",
         "fig:a_knowledge_geometry",
+        "fig:a_knowledge_projections",
+        "table:knowledge_projections",
     )
     text = " ".join(_texts(section))
     for token in (
         "[[fig:a_knowledge_geometry]]",
         "[[count:fig:a_knowledge_geometry.with_views]]",
         "[[count:fig:a_knowledge_geometry.reader_above_words]]",
+        "[[fig:a_knowledge_projections]]",
+        "[[count:fig:a_knowledge_projections.above_every_draw]]",
+        "[[num:fig:a_knowledge_projections.random_max]]",
+        "[[table:knowledge_projections]]",
+        "[[count:table:knowledge_projections.within_tolerance]]",
+        "[[num:table:knowledge_projections.tolerance]]",
+        "[[label:fig:a_knowledge_projections.undrawn]]",
+        "[[label:fig:a_knowledge_projections.exceptions]]",
+        "[[label:fig:a_knowledge_projections.exception_contrasts]]",
     ):
         assert token in text, token
+    assert "every drawn knowledge contrast" in text
+    assert "on every drawn contrast" in text
+    assert "no stored questions" not in text
+    assert (
+        "[[count:table:knowledge_projections.within_tolerance]] with stored "
+        "views"
+    ) in text
+    assert "are scored and not drawn" in text
+    assert "on every contrast of the three blocks" not in text
     assert "one checkpoint per role" in text
     assert "The entity views are stored for" in text
     assert not re.search(r"\b10 checkpoints\b", text)

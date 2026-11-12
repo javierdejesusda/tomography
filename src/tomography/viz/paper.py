@@ -170,7 +170,10 @@ ENCODING_RULES = """Encoding rules of every figure (the glossary).
    line marks a reference level, chance or zero, and the caption or axis
    says which. Bluish green (`TEXT_GREEN`) is reserved for
    text-only classifiers; popularity and answer log-probability are dark
-   neutrals; the paper's finder alone is pink.
+   neutrals; the paper's finder alone is pink. Where the mean of the
+   shuffled-label refits of a reader is drawn on the grey band, it is a
+   dark olive tick (`ENC["shuffled"]`), so that it does not merge with
+   the grey x of the random mean.
 6. A categorical set that is not a measure (prompt variants, statement sets,
    item sets) uses `CATEGORY_MARKERS`, keyed in its figure, never a measure
    shape; shapes may repeat across figures because each figure keys them.
@@ -225,6 +228,7 @@ def _build_enc() -> dict[str, Any]:
         "secondary_text": "#4d4d4d",
         "known": "#E69F00",
         "unknown": "#762a83",
+        "shuffled": "#6b6b00",
     }
 
 

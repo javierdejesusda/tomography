@@ -207,10 +207,14 @@ def build(
                 fig.output.csv, encoding="utf-8", newline="\n"
             )
     for key, tab in {**doc.tables, **doc.appendix_tables}.items():
+        extra = tab.output.data_cells or ((),) * len(tab.output.rows)
         (out / "data" / f"table-{table_number[key]}.csv").write_text(
             _csv_text(
-                tab.output.columns,
-                tab.output.rows,
+                [*tab.output.columns, *tab.output.data_columns],
+                [
+                    [*row, *more]
+                    for row, more in zip(tab.output.rows, extra, strict=True)
+                ],
                 view,
                 tab.output.groups,
             ),

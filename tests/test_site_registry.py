@@ -27,6 +27,7 @@ APPENDIX_FIGURE_KEYS = (
     "a_dose_runs",
     "a_dose_types",
     "a_knowledge_geometry",
+    "a_knowledge_projections",
     "a_links",
 )
 TABLE_KEYS = ("checkpoints", "reading")
@@ -42,6 +43,7 @@ APPENDIX_TABLE_KEYS = (
     "truth_sets",
     "steering",
     "knowledge",
+    "knowledge_projections",
     "approximate",
     "base_post",
 )
