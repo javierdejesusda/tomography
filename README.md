@@ -125,7 +125,9 @@ uses no learned signal for the concept (a random direction, shuffled labels,
 a text-only classifier, the popularity of the subject); a baseline is a
 published method run on the same items. On the
 [project site](https://javierdejesusda.github.io/tomography/), Appendix B
-(Method details) gives the design details of the studies shown there.
+(Method details) gives the design details of the studies shown there, and
+[Table A3](https://javierdejesusda.github.io/tomography/#table-A3) sets the
+design of every experiment side by side.
 
 | Id | Question | Models |
 | --- | --- | --- |
