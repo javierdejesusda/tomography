@@ -266,7 +266,7 @@ def test_the_claim_counts_the_readers_above_all_their_random_draws(
     draws = _draws(SHOWN[0])
     assert output.numbers["draws"] == draws == 5
     assert output.claim == (
-        f"The published reader has a higher AUROC than each of its {draws} "
+        f"The all-pairs reader has a higher AUROC than each of its {draws} "
         f"random directions on {stats.join_and(parts)}; the lowest drawn "
         f"reader is at {min(readers):.2f} and the highest single random "
         f"direction at {max(randoms):.2f}."
@@ -357,7 +357,7 @@ def test_the_legend_keys_the_classes_the_reader_and_both_controls(
     assert [t.get_text() for t in legend.get_texts()] == [
         "known questions",
         "unknown questions",
-        "published reader (brown: GPT-2; blue: Qwen3; open: post-trained)",
+        "all-pairs reader (brown: GPT-2; blue: Qwen3; open: post-trained)",
         "random directions: range and mean",
         "shuffled-label refits: mean",
     ]
@@ -417,8 +417,11 @@ def test_the_caption_says_what_is_drawn_and_what_the_controls_are(
     output: registry.FigureOutput,
 ) -> None:
     detail = output.detail
+    assert "published reader" not in detail
     for phrase in (
-        "published reader",
+        "all-pairs reader",
+        "The views run, which reads the questions of the knowledge reading "
+        "run again",
         "z-score",
         "upper side",
         "lower side",
