@@ -9,6 +9,11 @@ from numpy.typing import NDArray
 
 from tomography.judging.rubric import SCORES
 
+SELECTION_RULE = (
+    "the coefficient with the highest mean overall score on the tuning "
+    "half; a tie goes to the smallest magnitude, then to the lower value"
+)
+
 
 def _checked(scores: NDArray[np.integer[Any]]) -> NDArray[np.integer[Any]]:
     """Returns the scores as an array, or raises on a shape or a value."""
