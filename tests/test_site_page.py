@@ -3,6 +3,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 import re
 import runpy
+from typing import Any
 
 from matplotlib.figure import Figure
 import pytest
@@ -799,6 +800,57 @@ def test_a_table_may_ask_for_wider_gutters() -> None:
     assert 'class="table roomy"' in render(True)
     assert "roomy" not in render(False)
     assert registry.TableOutput("c", "d", [], [], "", [], {}).roomy is False
+
+
+def _sections(**options: Any) -> str:
+    output = registry.TableOutput(
+        "Claim.",
+        "Detail.",
+        ["Experiment", "Aspect", "Design"],
+        [
+            ["Alpha", "Question", "Why?"],
+            ["", "Metric", "Accuracy."],
+            ["Beta", "Question", "How?"],
+            ["", "Metric", "AUROC."],
+            ["", "Checkpoints", "All."],
+        ],
+        "lll",
+        [],
+        {},
+        row_groups=(),
+        **options,
+    )
+    doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+    return page.Page(doc).table("checkpoints")
+
+
+def test_a_table_may_open_its_sections_with_heading_rows() -> None:
+    html = _sections(headings=((0, "Reading"), (2, "Truth")))
+    reading = '<tr class="heading"><th colspan="3" scope="colgroup">Reading'
+    truth = '<tr class="heading"><th colspan="3" scope="colgroup">Truth'
+    assert html.count('<tr class="heading">') == 2
+    assert html.index(reading) < html.index(">Alpha<") < html.index(truth)
+    assert html.index(truth) < html.index(">Beta<")
+    assert '<tr class="heading">' not in _sections()
+    assert registry.TableOutput("c", "d", [], [], "", [], {}).headings == ()
+
+
+def test_a_row_label_may_span_the_rows_below_it() -> None:
+    html = _sections(span_labels=True)
+    assert '<td rowspan="2" class="k">Alpha</td>' in html
+    assert '<td rowspan="3" class="k">Beta</td>' in html
+    assert '<tr><td class="k"></td>' not in html
+    assert (
+        '<tr><td class="k">Metric</td><td class="k">Accuracy.</td></tr>' in html
+    )
+    split = _sections(span_labels=True, headings=((4, "Coda"),))
+    assert '<td rowspan="2" class="k">Beta</td>' in split
+    assert '<tr><td class="k"></td><td class="k">Checkpoints</td>' in split
+    assert "rowspan" not in _sections()
+    assert '<tr><td class="k"></td>' in _sections()
+    assert (
+        registry.TableOutput("c", "d", [], [], "", [], {}).span_labels is False
+    )
 
 
 def test_a_findings_link_is_pinned_to_the_results_commit() -> None:

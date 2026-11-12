@@ -1,6 +1,7 @@
 from pathlib import Path
 import re
 
+from tomography.p9 import unknowns
 from tomography.site import registry
 from tomography.site.manifest import Manifest
 
@@ -11,7 +12,11 @@ TERMS = [
     "h(x, \u2113)",
     "v(\u2113)",
     "u(\u2113)",
+    "the paper",
     "finder",
+    "reader",
+    "all-pairs reader",
+    "series",
     "accuracy",
     "margin",
     "relative depth",
@@ -19,6 +24,7 @@ TERMS = [
     "AUROC",
     "relative coefficient c",
     "win rate",
+    "contrast",
     "role",
     "run codes",
 ]
@@ -47,6 +53,34 @@ def test_the_win_rate_is_the_positive_against_the_negative_completion() -> None:
     rows = {r[0]: r[1] for r in _build().rows}
     assert "+c" in rows["win rate"]
     assert "judged more positive" in rows["win rate"]
+
+
+def test_the_glossary_names_every_knowledge_contrast() -> None:
+    rows = {r[0]: r[1] for r in _build().rows}
+    names = rows["contrast"]
+    for contrast in (
+        *unknowns.ENTITY_TYPES,
+        *unknowns.UNKNOWN_TYPES,
+        "unknowable_detail",
+        "false_premise",
+        "kuq",
+    ):
+        assert contrast.replace("_", " ") in names, contrast
+    for key in ("lu2026relational", "amayuelas2024knowledge"):
+        assert f"[[cite:{key}]]" in names
+    assert "one draw of training pairs" in rows["reader"]
+    paper = "[[cite:zou2025representationengineeringtopdownapproach]]"
+    assert paper in rows["the paper"]
+    assert "every training pair" in rows["all-pairs reader"]
+    assert "views run" in rows["all-pairs reader"]
+    assert rows["series"] == (
+        "One finder, pairing, preprocessing or control in a comparison. "
+        "The finder and preprocessing series of a comparison share its draws "
+        "of training items, while each pairing series draws its own; each "
+        "series reads at its own layer chosen on validation pairs, except "
+        "the text controls, which read no layer."
+    )
+    assert "finder" in rows["reader"]
 
 
 def test_no_row_spells_out_a_run_code() -> None:

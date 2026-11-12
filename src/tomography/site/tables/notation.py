@@ -33,11 +33,37 @@ ROWS = (
         "training pairs.",
     ),
     (
+        "the paper",
+        "The representation engineering paper of Zou et al. "
+        "[[cite:zou2025representationengineeringtopdownapproach]], whose "
+        "finder and templates the page tests.",
+    ),
+    (
         "finder",
         "Method that turns training pairs into a direction: PCA of paired "
         "differences (the paper's), PCA of activations, mean difference "
         "(the mass-mean probe), logistic regression (a linear probe) or "
         "k-means.",
+    ),
+    (
+        "reader",
+        "The direction one finder fits on one draw of training pairs, read "
+        "at the layer chosen on validation; it scores an input by the "
+        "projection of its activation.",
+    ),
+    (
+        "all-pairs reader",
+        "The direction the logistic finder of the knowledge reading run fits "
+        "on every training pair; the reading run stores it and the views "
+        "run, which reads the same questions again, scores it.",
+    ),
+    (
+        "series",
+        "One finder, pairing, preprocessing or control in a comparison. The "
+        "finder and preprocessing series of a comparison share its draws "
+        "of training items, while each pairing series draws its own; each "
+        "series reads at its own layer chosen on validation pairs, except "
+        "the text controls, which read no layer.",
     ),
     (
         "accuracy",
@@ -71,6 +97,23 @@ ROWS = (
         "win rate",
         "Share of decisive prompt pairs in which the completion steered at "
         f"+c is judged more positive than the one steered at {cells.MINUS}c.",
+    ),
+    (
+        "contrast",
+        "A knowledge contrast sets known questions against the unknown "
+        "questions it names: fictional synthal, SyntHal questions about "
+        "fictional entities [[cite:lu2026relational]]; fictional generated, "
+        "questions about names generated for this study; obscure real, "
+        "PopQA questions the model does not know, and obscure real pop, the "
+        "same paired inside a popularity bin; post cutoff, questions on "
+        "awards given after the training cutoff, against known award "
+        "questions; unknowable detail, questions about a day of a famous "
+        "person that no record answers; false premise, FalseQA questions; "
+        "kuq, one category of KUQ [[cite:amayuelas2024knowledge]]. The "
+        "contrast triviaqa known sets TriviaQA questions labelled known "
+        "against those labelled unknown, and the contrasts real vs synthal, "
+        "real vs generated and pre vs post cutoff set two kinds of unknown "
+        "question against each other.",
     ),
     (
         "role",

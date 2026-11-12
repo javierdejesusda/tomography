@@ -34,6 +34,7 @@ TABLE_KEYS = ("checkpoints", "reading")
 APPENDIX_TABLE_KEYS = (
     "assets",
     "notation",
+    "design",
     "finders_all",
     "finder_baselines",
     "reading_full",
