@@ -17,6 +17,9 @@ from tomography.viz import axes
 MISSING = "n/a"
 MINUS = axes.MINUS
 PLUS_MINUS = chr(0x00B1)
+PLAIN_HYPHENS = str.maketrans(
+    dict.fromkeys(map(chr, range(0x2010, 0x2013)), "-")
+)
 
 
 def num(value: float | None, digits: int = 3) -> str:
@@ -129,8 +132,16 @@ def check_align(align: str, columns: int) -> str:
     return align
 
 
+def _plain(cell: Any) -> Any:
+    """Writes the hyphens of a text cell as plain ASCII hyphens."""
+    return cell.translate(PLAIN_HYPHENS) if isinstance(cell, str) else cell
+
+
 def csv_text(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
     """Writes rows as CSV text; None becomes an empty field.
+
+    The no-break and other Unicode hyphens of the page become plain ASCII
+    hyphens, so the headers and cells read the same in any tool.
 
     Args:
         header: Column names.
@@ -141,7 +152,7 @@ def csv_text(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
     """
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(header)
+    writer.writerow([_plain(name) for name in header])
     for row in rows:
-        writer.writerow(["" if cell is None else cell for cell in row])
+        writer.writerow(["" if cell is None else _plain(cell) for cell in row])
     return buffer.getvalue()

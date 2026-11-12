@@ -377,6 +377,15 @@ def test_assets_and_files_by_printed_number(
         assert "[[" not in text
     names = {p.name for p in (built / "data").iterdir()}
     assert not any(n.startswith("figure-") for n in names)
+    hyphens = (chr(0x2010), chr(0x2011), chr(0x2012))
+    for path in (built / "data").glob("*.csv"):
+        text = path.read_text("utf-8")
+        assert not any(hyphen in text for hyphen in hyphens), path.name
+    number = table_number["finder_baselines"]
+    header = (built / "data" / f"table-{number}.csv").read_text("utf-8")
+    header = header.splitlines()[0]
+    assert header.isascii()
+    assert "Mass-mean" in header
     assert (built / "site.css").is_file()
     assert (built / ".nojekyll").is_file()
     assert (built / "fonts" / "lmroman10-regular.woff2").is_file()
