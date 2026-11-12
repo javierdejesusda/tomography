@@ -1,7 +1,7 @@
 """Appendix figure: The knowledge readers on their questions, beside controls.
 
 One column per role shows, for every contrast of the knowledge readers, how
-the test questions of its two sides spread along the published reader at the
+the test questions of its two sides spread along the all-pairs reader at the
 layer of the reader. The last panel gives the AUROC behind each cell beside
 the two controls of the reader: its random directions and the same reader
 refitted on shuffled labels.
@@ -60,7 +60,9 @@ DETAIL = (
     "Panels (a) to (c) are one checkpoint per role and each row is a drawn "
     "contrast of the knowledge readers, in three blocks: the entity "
     "contrasts, the question contrasts and the contrasts between two kinds "
-    "of unknown question. The views run draws two entity contrasts only; "
+    "of unknown question. The views run, which reads the questions of the "
+    "knowledge reading run again to recompute its readers and draw their "
+    "hidden states, draws two entity contrasts only; "
     "the other entity contrasts, {undrawn}, are scored and not drawn, and "
     "[[table:knowledge_projections]] gives their readers, the lowest "
     "of the three checkpoints at {hidden}. In the row names, synthal is "
@@ -69,7 +71,8 @@ DETAIL = (
     "for this study, and kuq is one category of KUQ "
     "[[cite:amayuelas2024knowledge]], a published set of questions that "
     "have no known answer. A cell is the distribution of the test questions "
-    "of the contrast along its published reader at the layer of the reader: "
+    "of the contrast along its all-pairs reader, the reader the reading run "
+    "fitted on every training pair, at the layer of the reader: "
     "the projection of each question on the reader as a z-score over the "
     "questions of the cell, in {bins} bins that end {limit} standard "
     "deviations from the mean on either side, with the values beyond in the "
@@ -80,7 +83,7 @@ DETAIL = (
     "own share and holds at most {cap} questions, the first by a hash of "
     "their identifier. Panel (d) gives the AUROC behind each cell, the "
     "three checkpoints from top to bottom in a row: the circle is the "
-    "published reader, brown for GPT-2 and blue for Qwen3, and the other "
+    "all-pairs reader, brown for GPT-2 and blue for Qwen3, and the other "
     "marks are its two controls. The grey band spans the random directions "
     "of the {draws} draws, with a cross at their mean; a random direction "
     "is oriented on the training labels like the reader, so it can score "
@@ -545,7 +548,7 @@ def build(manifest: Manifest) -> FigureOutput:
             labels=[
                 "known questions",
                 "unknown questions",
-                "published reader (brown: GPT-2; blue: Qwen3; open: "
+                "all-pairs reader (brown: GPT-2; blue: Qwen3; open: "
                 "post-trained)",
                 "random directions: range and mean",
                 "shuffled-label refits: mean",
@@ -612,7 +615,7 @@ def build(manifest: Manifest) -> FigureOutput:
         ),
     }
     claim = (
-        f"The published reader has a higher AUROC than each of its {draws} "
+        f"The all-pairs reader has a higher AUROC than each of its {draws} "
         f"random directions on {stats.join_and(parts)}; the lowest drawn "
         f"reader is at {min(readers):.2f} and the highest single random "
         f"direction at {max(randoms):.2f}."
