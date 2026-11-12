@@ -279,4 +279,13 @@ ASSETS = (
         "b08601e04326",
         "CC-BY-SA-3.0 and GFDL",
     ),
+    Asset(
+        "alpaca_eval",
+        "AlpacaEval",
+        "instructions for the steering baselines",
+        ("dubois2023alpacafarm",),
+        "tatsu-lab/alpaca_eval",
+        "2edc6fad8be6",
+        "CC-BY-NC-4.0 (runtime download only)",
+    ),
 )

@@ -2,12 +2,19 @@
 
 The three streams of a triple run as rows of one batch, and a batch-aware
 residual edit adds the shift between the positive and negative streams.
+
+The module also holds the pieces of three published additive baselines:
+`PromptDifference` (activation addition from one prompt pair),
+`choice_pairs` (the two-option prompts of contrastive activation addition)
+and `mean_shift` (the difference of two activation means, which is the
+vector of contrastive activation addition and of mean-centring).
 """
 
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 import math
+from typing import Any
 from typing import Self
 
 import numpy as np
@@ -509,34 +516,147 @@ def _prompt_limit(
     return torch.tensor(prompt_lengths, device=h.device)
 
 
+@dataclass(frozen=True)
+class ChoicePair:
+    """One two-option question of contrastive activation addition.
+
+    Attributes:
+        question: The question and its two options, the user text.
+        positive: The start of the answer that picks the positive option,
+            `(A` or `(B`; the activation is read at its letter.
+        negative: The start of the answer that picks the other option.
+    """
+
+    question: str
+    positive: str
+    negative: str
+
+
+def choice_pairs(
+    positive: Sequence[str], negative: Sequence[str], *, question: str
+) -> list[ChoicePair]:
+    """Builds the two-option questions of contrastive activation addition.
+
+    Pair `i` shows the positive text under `(A)` when `i` is even and under
+    `(B)` when it is odd, so over the pairs the letter carries no signal and
+    the difference of the two answers isolates the concept.
+
+    Args:
+        positive: Texts that show the concept.
+        negative: One text without the concept per positive text.
+        question: The question asked about every pair of texts.
+
+    Returns:
+        One pair per text pair. The user text is the question, a blank
+        line, the line `Choices:` and one line per option, `(A) ...` and
+        `(B) ...`.
+
+    Raises:
+        ValueError: If the lists differ in length or are empty, or the
+            question is blank.
+    """
+    if len(positive) != len(negative):
+        raise ValueError(
+            "positive and negative must have the same length, got "
+            f"{len(positive)} and {len(negative)}"
+        )
+    if not positive:
+        raise ValueError("no pairs to build")
+    if not question.strip():
+        raise ValueError("the question is blank")
+    pairs = []
+    for i, (shown, other) in enumerate(zip(positive, negative, strict=True)):
+        first, second = (shown, other) if i % 2 == 0 else (other, shown)
+        letters = ("(A", "(B") if i % 2 == 0 else ("(B", "(A")
+        pairs.append(
+            ChoicePair(
+                f"{question}\n\nChoices:\n(A) {first}\n(B) {second}", *letters
+            )
+        )
+    return pairs
+
+
+def mean_shift(
+    first: NDArray[np.floating[Any]], second: NDArray[np.floating[Any]]
+) -> NDArray[np.float32]:
+    """Returns the difference of two activation means per layer.
+
+    With the activations of the positive and the negative answers of
+    `choice_pairs` this is the vector of contrastive activation addition;
+    with the activations of texts that show a concept and of a generic
+    corpus it is the mean-centring vector.
+
+    Args:
+        first: `(K, n, d)` activations of the set to steer towards, laid out
+            as `Activations.data`.
+        second: `(K, m, d)` activations of the set to steer away from.
+
+    Returns:
+        A `(K, d)` float32 array, `first.mean(axis=1) - second.mean(axis=1)`
+        computed in float64. The magnitude is kept.
+
+    Raises:
+        ValueError: If an array is not 3-D, the layer counts or the widths
+            differ, a set has no rows, or a value is not finite.
+    """
+    if first.ndim != 3 or second.ndim != 3:
+        raise ValueError(
+            f"both sets must be 3-D, got {first.ndim}-D and {second.ndim}-D"
+        )
+    if first.shape[0] != second.shape[0]:
+        raise ValueError(
+            f"the sets cover {first.shape[0]} and {second.shape[0]} layers"
+        )
+    if first.shape[2] != second.shape[2]:
+        raise ValueError(
+            f"the sets have width {first.shape[2]} and {second.shape[2]}"
+        )
+    if not first.shape[1] or not second.shape[1]:
+        raise ValueError("a set has no rows")
+    if not (np.isfinite(first).all() and np.isfinite(second).all()):
+        raise ValueError("the activations are not finite")
+    shift = first.astype(np.float64).mean(axis=1) - second.astype(
+        np.float64
+    ).mean(axis=1)
+    return shift.astype(np.float32)
+
+
 @dataclass(frozen=True, eq=False)
 class PromptDifference:
     """ActAdd-style controller built from the difference of two prompts.
 
     The difference of the residual streams of a positive and a negative
     prompt keeps its raw magnitude, and `coeff` multiplies it. The edit adds
-    `coeff * vectors[layer][j]` at the tokens of token index `j < k`, so it is
-    position local and works under the KV cache.
+    `coeff * vectors[layer][j - start]` at the tokens of token index
+    `start <= j < start + k`, so it is position local and works under the KV
+    cache.
 
     Attributes:
         vectors: Maps a layer to a `(k, d_model)` float32 per-position
             difference.
         coeff: Multiplier of the raw difference.
+        start: Token index that row 0 of the vectors is added at. 0 is the
+            front of the text. A prompt rendered with a chat format opens
+            with a header, so there the front of the prompt text is the
+            first token of the user text (`at` moves the edit to it).
     """
 
     vectors: Mapping[int, torch.Tensor]
     coeff: float
+    start: int = 0
 
     def __post_init__(self) -> None:
         """Validates the vectors and the coefficient.
 
         Raises:
             ValueError: If `vectors` is empty, a vector is not 2-D, not
-                finite or all zero, the widths differ, or `coeff` is not
-                finite.
+                finite or all zero, the widths differ, `coeff` is not
+                finite, or `start` is negative.
         """
         if not self.vectors:
             raise ValueError("vectors is empty")
+        if self.start < 0:
+            raise ValueError(f"start must be >= 0, got {self.start}")
         if not math.isfinite(self.coeff):
             raise ValueError(f"coeff must be finite, got {self.coeff}")
         for layer, vector in self.vectors.items():
@@ -609,6 +729,54 @@ class PromptDifference:
             vectors[layer] = vector
         return cls(vectors, coeff)
 
+    def at(self, start: int) -> Self:
+        """Moves the edit so that row 0 of the vectors lands on a token.
+
+        Args:
+            start: Token index of the first edited position.
+
+        Returns:
+            A controller with the same vectors and coefficient.
+
+        Raises:
+            ValueError: If `start` is negative.
+        """
+        return type(self)(self.vectors, self.coeff, start)
+
+    def norm_matched(self, norms: Mapping[int, float]) -> Self:
+        """Rescales the difference to the norm of the residual stream.
+
+        Each layer is scaled by one factor, so that the mean norm of its
+        non-zero positions equals `norms[layer]`. The coefficient then reads
+        as a share of the residual norm, like the relative coefficient of a
+        reading vector, and one grid serves both. The published recipe keeps
+        the raw magnitude instead.
+
+        Args:
+            norms: Mean residual norm per layer, as `mean_residual_norms`
+                gives it; layers without a vector are ignored.
+
+        Returns:
+            A controller with the scaled vectors and the same coefficient
+            and start.
+
+        Raises:
+            ValueError: If a layer has no finite positive norm.
+        """
+        scaled: dict[int, torch.Tensor] = {}
+        for layer, vector in self.vectors.items():
+            norm = norms.get(layer)
+            if norm is None or not math.isfinite(norm) or norm <= 0:
+                raise ValueError(
+                    f"norm matching needs a finite positive norm for layer "
+                    f"{layer}, got {norm}"
+                )
+            rows = vector.float().norm(dim=-1)
+            scaled[layer] = vector.float() * (
+                norm / float(rows[rows > 0].mean())
+            )
+        return type(self)(scaled, self.coeff, self.start)
+
     def edits(
         self, prompt_lengths: int | Sequence[int] | None = None
     ) -> dict[int, ResidualEdit]:
@@ -617,7 +785,7 @@ class PromptDifference:
         Args:
             prompt_lengths: Token count of each row's prompt, or one int for
                 all rows; edited indices stay below it. None applies only
-                the `j < k` rule.
+                the `start <= j < start + k` rule.
 
         Returns:
             A mapping from layer to a residual edit.
@@ -640,15 +808,16 @@ class PromptDifference:
             def edit(h: torch.Tensor, info: ForwardInfo) -> torch.Tensor:
                 if self.coeff == 0:
                     return h
-                index = _token_index(info, h)
-                edited = index < vector.shape[0]
+                token = _token_index(info, h)
+                index = token - self.start
+                edited = (index >= 0) & (index < vector.shape[0])
                 mask = info.attention_mask
                 if mask is not None:
                     edited = edited & (mask[:, -h.shape[1] :] > 0).to(h.device)
                 if prompt_lengths is not None:
                     limit = _prompt_limit(prompt_lengths, h)
-                    edited = edited & (index < limit[:, None])
-                rows = vector.to(h.device)[index.clamp(max=vector.shape[0] - 1)]
+                    edited = edited & (token < limit[:, None])
+                rows = vector.to(h.device)[index.clamp(0, vector.shape[0] - 1)]
                 return (h.float() + self.coeff * rows * edited[..., None]).to(
                     h.dtype
                 )
