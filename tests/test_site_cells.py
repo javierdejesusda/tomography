@@ -66,3 +66,9 @@ def test_unknown_alignment_is_rejected() -> None:
 def test_csv_text_writes_the_header_and_rows() -> None:
     text = cells.csv_text(["a", "b"], [[1, 0.5], [2, None]])
     assert text == "a,b\n1,0.5\n2,\n"
+
+
+def test_csv_text_writes_a_no_break_hyphen_as_a_plain_one() -> None:
+    hyphen = chr(0x2011)
+    text = cells.csv_text([f"Mass{hyphen}mean"], [[f"x{hyphen}y"], [0.5]])
+    assert text == "Mass-mean\nx-y\n0.5\n"

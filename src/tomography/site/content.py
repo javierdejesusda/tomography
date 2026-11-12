@@ -963,6 +963,20 @@ APPENDICES = (
             "items and treat the two arms as independent, which makes them "
             "conservative; rows 8 and 9 use the Hanley and McNeil "
             "approximation and the stored paired bootstrap.",
+            "[[table:finder_baselines]] puts the finder of the paper beside "
+            "four published finders as baselines, fitted on the same "
+            "[[num:table:finder_baselines.seeds]] training sets of "
+            "[[num:table:finder_baselines.train_pairs]] pairs, on "
+            "sentiment and on three truth sets: the mass-mean probe and its "
+            "whitened form [[cite:marks2024geometry]], logistic regression "
+            "[[cite:alain2016understanding]] and contrast-consistent search "
+            "[[cite:burns2023discovering]]. Each of the four is above the "
+            "finder of the paper on at least one dataset, with a "
+            "conservative interval excluding zero, on "
+            "[[count:table:finder_baselines.every_baseline_above]]. The "
+            "finder of the paper is above its control, the random "
+            "direction, on at least one dataset, with the same interval, on "
+            "[[count:table:finder_baselines.finder_above_random]].",
         ),
         items=(
             "fig:a_reading_curves",
@@ -970,6 +984,7 @@ APPENDICES = (
             "fig:a_finders_gpt2",
             "fig:a_finders_qwen3",
             "table:finders_all",
+            "table:finder_baselines",
             "table:reading_full",
             "table:sizes",
             "table:prompts",
@@ -1059,6 +1074,22 @@ APPENDICES = (
             "known-against-unknown contrast, so it has no row in the "
             "figure; its probe adds "
             "[[num:fig:knowledge_reading.gpt2_small_probe_gain]].",
+            "[[table:detection_baselines]] sets the direction beside "
+            "published error detectors as baselines, on held-out PopQA "
+            "questions: the exact-answer probe "
+            "[[cite:orgad2025llms]], semantic entropy "
+            "[[cite:farquhar2024detecting]], EigenScore "
+            "[[cite:chen2024inside]], P(True) "
+            "[[cite:kadavath2022language]], the probability of the model's "
+            "own answer token and a probe at the end of the question. The "
+            "exact-answer probe is fitted on the correctness of training "
+            "questions and the direction never sees it; by point estimate "
+            "that probe is above the direction on "
+            "[[count:table:detection_baselines.answer_probe_above]], and, "
+            "by point estimate, the direction is above P(True) and above "
+            "both controls, "
+            "popularity and length, on "
+            "[[count:table:detection_baselines.above_ptrue_and_controls]].",
             "[[fig:a_knowledge_geometry]] shows the hidden states that the "
             "entity readers read, for one checkpoint per role, beside two "
             "controls: layer 1 and the words of the questions alone. The "
@@ -1101,6 +1132,7 @@ APPENDICES = (
         items=(
             "fig:a_knowledge_matrix",
             "table:knowledge",
+            "table:detection_baselines",
             "fig:a_dose_runs",
             "fig:a_dose_types",
             "fig:a_knowledge_geometry",

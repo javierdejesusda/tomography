@@ -165,6 +165,8 @@ def test_table_text_is_compact_but_not_below_the_readable_floor(
     assert 0.78 <= size <= 0.8
     cells = css.split(chr(10) + "th,\ntd {")[1].split("}")[0]
     assert "padding: 0.16em 0.25em;" in cells
+    roomy = css.split(chr(10) + ".table.roomy th,\n.table.roomy td {")[1]
+    assert "padding: 0.16em 0.6em;" in roomy.split("}")[0]
 
 
 def test_captions_of_figures_and_tables_share_one_rule(css: str) -> None:
@@ -372,6 +374,15 @@ def test_assets_and_files_by_printed_number(
         assert "[[" not in text
     names = {p.name for p in (built / "data").iterdir()}
     assert not any(n.startswith("figure-") for n in names)
+    hyphens = (chr(0x2010), chr(0x2011), chr(0x2012))
+    for path in (built / "data").glob("*.csv"):
+        text = path.read_text("utf-8")
+        assert not any(hyphen in text for hyphen in hyphens), path.name
+    number = table_number["finder_baselines"]
+    header = (built / "data" / f"table-{number}.csv").read_text("utf-8")
+    header = header.splitlines()[0]
+    assert header.isascii()
+    assert "Mass-mean" in header
     assert (built / "site.css").is_file()
     assert (built / ".nojekyll").is_file()
     assert (built / "fonts" / "lmroman10-regular.woff2").is_file()
@@ -808,6 +819,21 @@ def test_grouped_csv_columns_carry_their_group(
     )
 
 
+def test_a_column_under_an_unlabelled_span_keeps_its_name(
+    site: tuple[Path, page.Document],
+) -> None:
+    view = page.Page(site[1])
+    text = build_module._csv_text(
+        ["Model", "Dataset", "Reader", "Random"],
+        [["x", "y", "1", "2"]],
+        view,
+        (("", 1, False), ("Accuracy", 2, False)),
+    )
+    assert text.splitlines()[0] == (
+        "Model,Dataset,Accuracy: Reader,Accuracy: Random"
+    )
+
+
 def test_every_grouped_table_csv_has_unique_headers(
     site: tuple[Path, page.Document],
 ) -> None:
@@ -825,7 +851,8 @@ def test_every_grouped_table_csv_has_unique_headers(
         if tab.output.groups:
             grouped += 1
             for label, _, _ in tab.output.groups:
-                assert any(n.startswith(f"{label}: ") for n in names), key
+                if label:
+                    assert any(n.startswith(f"{label}: ") for n in names), key
     assert grouped >= 3
 
 

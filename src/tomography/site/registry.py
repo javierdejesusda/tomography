@@ -76,7 +76,8 @@ class TableOutput:
         notes: Footer lines under the bottom rule.
         numbers: Name to value for each number the claim quotes.
         groups: Header spans over the columns after the first, as (label,
-            number of columns, muted); empty when columns are ungrouped.
+            number of columns, muted); empty when columns are ungrouped. A
+            span with an empty label gets no rule, for a second label column.
         row_groups: Index of the first row of each row group, which gets a
             rule above it; empty for none, and None to rule above every row
             with a label (the earlier behaviour).
@@ -90,6 +91,11 @@ class TableOutput:
             after the shown ones.
         data_cells: The cells of `data_columns`, one tuple per row of
             `rows`; empty when there are no such columns.
+        wide: Whether the table breaks out of the text column although it
+            has fewer columns than a wide table, for a table whose cells
+            would touch inside the column.
+        roomy: Whether the cells take wider gutters, for a table whose
+            interval cells would nearly touch the next column.
     """
 
     claim: str
@@ -108,6 +114,8 @@ class TableOutput:
     compact_print: bool = False
     data_columns: tuple[str, ...] = ()
     data_cells: tuple[tuple[str, ...], ...] = ()
+    wide: bool = False
+    roomy: bool = False
 
 
 MAIN_FIGURES = (
@@ -142,6 +150,7 @@ APPENDIX_TABLES = (
     "assets",
     "notation",
     "finders_all",
+    "finder_baselines",
     "reading_full",
     "sizes",
     "prompts",
@@ -150,6 +159,7 @@ APPENDIX_TABLES = (
     "truth_sets",
     "steering",
     "knowledge",
+    "detection_baselines",
     "knowledge_projections",
     "approximate",
     "base_post",

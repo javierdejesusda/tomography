@@ -324,6 +324,37 @@ def test_without_row_groups_a_labelled_row_starts_a_group() -> None:
     assert _grouped(None).count('<tr class="group">') == 1
 
 
+def _spanned(groups: tuple[tuple[str, int, bool], ...]) -> str:
+    output = registry.TableOutput(
+        "Claim.",
+        "Detail.",
+        ["A", "B", "C", "D"],
+        [["a", "b", "1", "2"]],
+        "llrr",
+        [],
+        {},
+        groups=groups,
+        row_groups=(),
+    )
+    doc = _doc(tables={"checkpoints": page.TableEntry("checkpoints", output)})
+    return page.Page(doc).table("checkpoints")
+
+
+def test_a_header_group_spans_its_columns_under_a_rule() -> None:
+    html = _spanned((("Values", 3, False),))
+    assert '<th colspan="3" class="span">Values</th>' in html
+    html = _spanned((("Values", 3, True),))
+    assert '<th colspan="3" class="span muted">Values</th>' in html
+
+
+def test_a_header_group_without_a_label_draws_no_rule() -> None:
+    html = _spanned((("", 1, False), ("Values", 2, False)))
+    assert (
+        '<tr class="groups"><th></th><th colspan="1"></th>'
+        '<th colspan="2" class="span">Values</th></tr>'
+    ) in html
+
+
 class Ids(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -728,6 +759,46 @@ def test_a_text_table_of_six_columns_is_wide_too() -> None:
     )
     doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
     assert 'class="table wide"' in page.Page(doc).table("checkpoints")
+
+
+def test_a_table_may_ask_to_be_wide_with_fewer_columns() -> None:
+    def render(wide: bool) -> str:
+        output = registry.TableOutput(
+            "Claim.",
+            "Detail.",
+            ["Model", "a", "b"],
+            [["x", "1", "2"]],
+            "lrr",
+            [],
+            {},
+            wide=wide,
+        )
+        doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+        return page.Page(doc).table("checkpoints")
+
+    assert 'class="table wide"' in render(True)
+    assert 'class="table"' in render(False)
+    assert registry.TableOutput("c", "d", [], [], "", [], {}).wide is False
+
+
+def test_a_table_may_ask_for_wider_gutters() -> None:
+    def render(roomy: bool) -> str:
+        output = registry.TableOutput(
+            "Claim.",
+            "Detail.",
+            ["Model", "a", "b"],
+            [["x", "1", "2"]],
+            "lrr",
+            [],
+            {},
+            roomy=roomy,
+        )
+        doc = _doc(tables={"checkpoints": page.TableEntry("x", output)})
+        return page.Page(doc).table("checkpoints")
+
+    assert 'class="table roomy"' in render(True)
+    assert "roomy" not in render(False)
+    assert registry.TableOutput("c", "d", [], [], "", [], {}).roomy is False
 
 
 def test_a_findings_link_is_pinned_to_the_results_commit() -> None:

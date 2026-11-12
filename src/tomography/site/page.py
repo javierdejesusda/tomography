@@ -435,16 +435,20 @@ class Page:
         text_only = "r" not in out.align and len(out.columns) >= TEXT_COLUMNS
         classes = (
             "table wide"
-            if len(out.columns) >= WIDE_COLUMNS or text_only
+            if len(out.columns) >= WIDE_COLUMNS or text_only or out.wide
             else "table"
         )
         if out.wrap_labels:
             classes += " wrap-labels"
         if out.compact_print:
             classes += " compact-print"
+        if out.roomy:
+            classes += " roomy"
         groups = "".join(
             f'<th colspan="{span}" class="span{" muted" if muted else ""}">'
             f"{_e(label)}</th>"
+            if label
+            else f'<th colspan="{span}"></th>'
             for label, span, muted in out.groups
         )
         groups = f'<tr class="groups"><th></th>{groups}</tr>' if groups else ""
