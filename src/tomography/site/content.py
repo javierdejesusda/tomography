@@ -1132,7 +1132,8 @@ APPENDICES = (
             "approximation and the stored paired bootstrap.",
             "[[table:finder_baselines]] puts the finder of the paper beside "
             "four published finders as baselines, fitted on the same "
-            "[[num:table:finder_baselines.train_pairs]] training pairs, on "
+            "[[num:table:finder_baselines.seeds]] training sets of "
+            "[[num:table:finder_baselines.train_pairs]] pairs, on "
             "sentiment and on three truth sets: the mass-mean probe and its "
             "whitened form [[cite:marks2024geometry]], logistic regression "
             "[[cite:alain2016understanding]] and contrast-consistent search "
@@ -1141,7 +1142,7 @@ APPENDICES = (
             "conservative interval excluding zero, on "
             "[[count:table:finder_baselines.every_baseline_above]]. The "
             "finder of the paper is above its control, the random "
-            "direction, on at least one dataset on "
+            "direction, on at least one dataset, with the same interval, on "
             "[[count:table:finder_baselines.finder_above_random]].",
         ),
         items=(
@@ -1251,14 +1252,15 @@ APPENDICES = (
             "exact-answer probe is fitted on the correctness of training "
             "questions and the direction never sees it; by point estimate "
             "that probe is above the direction on "
-            "[[count:table:detection_baselines.answer_probe_above]], and "
-            "the direction is above P(True) and above both controls, "
+            "[[count:table:detection_baselines.answer_probe_above]], and, "
+            "by point estimate, the direction is above P(True) and above "
+            "both controls, "
             "popularity and length, on "
             "[[count:table:detection_baselines.above_ptrue_and_controls]].",
             "[[fig:a_knowledge_geometry]] shows the hidden states that the "
             "entity readers read, for one checkpoint per role, beside two "
             "controls: layer 1 and the words of the questions alone. The "
-            "views are stored for "
+            "entity views are stored for "
             "[[count:fig:a_knowledge_geometry.with_views]]. The better of "
             "two components of the hidden states at the reader layer "
             "separates known from unknown entity questions more than the "
@@ -1266,13 +1268,18 @@ APPENDICES = (
             "[[count:fig:a_knowledge_geometry.reader_above_words]]. It is a "
             "picture and not a test: its numbers carry no interval.",
             "[[fig:a_knowledge_projections]] sets the test questions of "
-            "every knowledge contrast of the same three checkpoints along "
-            "the published reader, and the AUROC of each reader beside two "
-            "controls: its five random directions and the same reader "
-            "refitted on shuffled labels. On "
+            "every drawn knowledge contrast of the same three checkpoints "
+            "along the published reader, and the AUROC of each reader "
+            "beside two controls: its five random directions and the same "
+            "reader refitted on shuffled labels. Two entity contrasts, "
+            "[[label:fig:a_knowledge_projections.undrawn]], are scored and "
+            "not drawn; [[table:knowledge_projections]] holds them. On "
             "[[count:fig:a_knowledge_projections.above_every_draw]] the "
             "published reader is above every one of its random directions "
-            "on every contrast of the three blocks. A "
+            "on every drawn contrast. The exception is "
+            "[[label:fig:a_knowledge_projections.exceptions]], where the "
+            "highest random direction is above the reader on "
+            "[[label:fig:a_knowledge_projections.exception_contrasts]]. A "
             "random direction is oriented on the training labels like the "
             "reader, so on a small contrast a single draw can score high: "
             "the highest on the three checkpoints is "
@@ -1285,8 +1292,9 @@ APPENDICES = (
             "classifiers on the words, on the characters and on the "
             "popularity of the subject. The recomputed means stay within "
             "[[num:table:knowledge_projections.tolerance]] of the committed "
-            "ones on [[count:table:knowledge_projections.within_tolerance]], "
-            "and a note under the table names every exception.",
+            "ones on [[count:table:knowledge_projections.within_tolerance]] "
+            "with stored views, and a note under the table names every "
+            "exception.",
         ),
         items=(
             "fig:a_knowledge_matrix",

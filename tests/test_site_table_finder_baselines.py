@@ -19,19 +19,18 @@ SPEC = "finder_baselines"
 DASHES = (chr(0x2014), chr(0x2013))
 READER = "pca_diff"
 BASELINES = ("mean_diff", "whitened_mean_diff", "logistic", "ccs")
-CONTROLS = ("random", "shuffled", "text_word", "text_char")
+CONTROLS = ("random", "shuffled")
+TEXT = ("text_word", "text_char")
 COLUMNS = [
     "Model",
     "Dataset",
     "PCA of differences",
-    "Mass-mean",
-    "Whitened mass-mean",
+    f"Mass{chr(0x2011)}mean",
+    f"Whitened mass{chr(0x2011)}mean",
     "Logistic regression",
     "CCS",
     "Random direction",
     "Shuffled labels",
-    "Words",
-    "Characters",
 ]
 Z = 1.959963984540054
 
@@ -72,8 +71,9 @@ def _expected(model: str) -> list[list[str]]:
             cells.num(reader["accuracy"]),
         ]
         for method in (*BASELINES, *CONTROLS):
-            star = "*" if _differs(by[method], reader)[0] else ""
-            row.append(cells.num(by[method]["accuracy"]) + star)
+            differs, above = _differs(by[method], reader)
+            mark = ("*" if above else "†") if differs else ""
+            row.append(cells.num(by[method]["accuracy"]) + mark)
         rows.append(row)
     return rows
 
@@ -82,20 +82,22 @@ def test_columns_sit_in_groups_by_the_kind_the_runs_give(
     output: registry.TableOutput,
 ) -> None:
     assert output.columns == COLUMNS
-    assert output.align == "ll" + "r" * 9
+    assert output.align == "ll" + "r" * 7
     assert output.groups == (
         ("", 1, False),
         ("Finder of the paper", 1, False),
         ("Published baselines", 4, False),
-        ("Controls", 4, False),
+        ("Controls", 2, False),
     )
     assert output.compact_print
+    assert output.wide
+    assert output.roomy
     for model in models("b2"):
         kinds = data(run("b2", model), "summary.json")["kinds"]
         assert kinds == {
             READER: "reader",
             **dict.fromkeys(BASELINES, "baseline"),
-            **dict.fromkeys(CONTROLS, "control"),
+            **dict.fromkeys((*CONTROLS, *TEXT), "control"),
         }
 
 
@@ -119,7 +121,34 @@ def test_there_is_one_row_per_checkpoint_and_dataset_from_the_files(
         "Spanish to English",
     }
     assert any(cell.endswith("*") for row in output.rows for cell in row)
+    assert any(cell.endswith("†") for row in output.rows for cell in row)
     assert all("_" not in cell for row in output.rows for cell in row)
+
+
+def test_the_text_controls_are_given_once_and_kept_in_the_data_file(
+    output: registry.TableOutput,
+) -> None:
+    once: dict[str, set[tuple[str, ...]]] = {}
+    cells_of = []
+    for model in models("b2"):
+        for dataset, by in _table(model).items():
+            pair = tuple(cells.num(by[m]["accuracy"]) for m in TEXT)
+            once.setdefault(dataset, set()).add(pair)
+            cells_of.append(pair)
+    assert all(len(found) == 1 for found in once.values())
+    assert output.data_columns == ("Words", "Characters")
+    assert list(output.data_cells) == cells_of
+    listed = stats.join_and(
+        [
+            f"{params.display(dataset)} {w} and {c}"
+            for dataset, ((w, c),) in once.items()
+        ]
+    )
+    assert output.notes == [
+        "Words and Characters read no model, so they give the same "
+        "accuracy on every checkpoint, and the data file holds them on "
+        f"every row: {listed}."
+    ]
 
 
 def test_the_sizes_of_the_runs_are_quoted_from_their_configs(
@@ -186,8 +215,14 @@ def test_the_caption_names_baselines_and_controls_apart(
         "layer",
         "validation",
         "Wilson",
-        "asterisk",
+        "an asterisk marks a value above the finder of the paper and a "
+        "dagger a value below it",
         "conservative 95 percent interval",
+        "The finder of the paper is the PCA of differences of Zou et al. "
+        "[[cite:zou2025representationengineeringtopdownapproach]]",
+        "a random direction, oriented on the training labels like the "
+        "finder of the paper",
+        "given once in the note under the table",
         f"{params.display('mean_diff')} [[cite:marks2024geometry]]",
         f"{params.display('whitened_mean_diff')} [[cite:marks2024geometry]]",
         f"{params.display('logistic')} [[cite:alain2016understanding]]",
@@ -203,4 +238,6 @@ def test_the_caption_names_baselines_and_controls_apart(
     controls = text[text.index("The controls are") :].split(". ")[0]
     assert "baseline" not in controls
     assert not any(d in text for d in DASHES)
-    assert "_" not in text.replace("[[cite:", "")
+    assert "_" not in text.replace("[[cite:", "").replace(
+        "zou2025representationengineeringtopdownapproach", ""
+    )

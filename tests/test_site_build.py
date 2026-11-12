@@ -165,6 +165,8 @@ def test_table_text_is_compact_but_not_below_the_readable_floor(
     assert 0.78 <= size <= 0.8
     cells = css.split(chr(10) + "th,\ntd {")[1].split("}")[0]
     assert "padding: 0.16em 0.25em;" in cells
+    roomy = css.split(chr(10) + ".table.roomy th,\n.table.roomy td {")[1]
+    assert "padding: 0.16em 0.6em;" in roomy.split("}")[0]
 
 
 def test_captions_of_figures_and_tables_share_one_rule(css: str) -> None:
@@ -843,6 +845,24 @@ def test_every_grouped_table_csv_has_unique_headers(
                 if label:
                     assert any(n.startswith(f"{label}: ") for n in names), key
     assert grouped >= 3
+
+
+def test_a_table_csv_adds_the_columns_kept_off_the_page(
+    site: tuple[Path, page.Document],
+) -> None:
+    out, doc = site
+    view = page.Page(doc)
+    extended = 0
+    for key, tab in {**doc.tables, **doc.appendix_tables}.items():
+        path = out / "data" / f"table-{view.table_number[key]}.csv"
+        found = list(csv.reader(path.read_text("utf-8").splitlines()))
+        width = len(tab.output.columns)
+        assert found[0][width:] == list(tab.output.data_columns), key
+        assert [r[width:] for r in found[1:]] == [
+            list(c) for c in tab.output.data_cells or [()] * len(found[1:])
+        ], key
+        extended += bool(tab.output.data_columns)
+    assert extended >= 1
 
 
 def _words(fragment: str) -> int:

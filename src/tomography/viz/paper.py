@@ -139,6 +139,7 @@ SET_MARKERS: dict[str, str] = {
 QUESTION_SET_MARKERS: dict[str, str] = {
     "unknown": MEASURE_MARKERS["direction"],
     "known": CATEGORY_MARKERS[1],
+    "fictional": CATEGORY_MARKERS[0],
 }
 PROMPT_MARKERS: dict[str, str] = {
     "positive": CATEGORY_MARKERS[2],
@@ -169,7 +170,10 @@ ENCODING_RULES = """Encoding rules of every figure (the glossary).
    line marks a reference level, chance or zero, and the caption or axis
    says which. Bluish green (`TEXT_GREEN`) is reserved for
    text-only classifiers; popularity and answer log-probability are dark
-   neutrals; the paper's finder alone is pink.
+   neutrals; the paper's finder alone is pink. Where the mean of the
+   shuffled-label refits of a reader is drawn on the grey band, it is a
+   dark olive tick (`ENC["shuffled"]`), so that it does not merge with
+   the grey x of the random mean.
 6. A categorical set that is not a measure (prompt variants, statement sets,
    item sets) uses `CATEGORY_MARKERS`, keyed in its figure, never a measure
    shape; shapes may repeat across figures because each figure keys them.
@@ -199,10 +203,12 @@ ENCODING_RULES = """Encoding rules of every figure (the glossary).
 11. Where single questions are drawn as points, the class of a question
    takes a hue and a marker together: known questions the orange left
    triangle, unknown ones the violet circle (`ENC["known"]`,
-   `ENC["unknown"]`, `QUESTION_SET_MARKERS`). The two hues differ in
-   lightness and along the blue-yellow axis, so the classes survive
-   greyscale and red-green colour-vision deficiency, and neither is a
-   family hue; fill keeps the role of rule 3."""
+   `ENC["unknown"]`, `QUESTION_SET_MARKERS`). Where a figure tells the
+   unknown questions about fictional entities apart, they keep the violet
+   and take the star. The two hues differ in lightness and along the
+   blue-yellow axis, so the classes survive greyscale and red-green
+   colour-vision deficiency, and neither is a family hue; fill keeps the
+   role of rule 3."""
 
 
 def _build_enc() -> dict[str, Any]:
@@ -222,6 +228,7 @@ def _build_enc() -> dict[str, Any]:
         "secondary_text": "#4d4d4d",
         "known": "#E69F00",
         "unknown": "#762a83",
+        "shuffled": "#6b6b00",
     }
 
 

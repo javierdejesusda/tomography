@@ -639,6 +639,11 @@ def test_the_published_baselines_have_a_table_beside_what_they_compare() -> (
         "[[count:table:finder_baselines.every_baseline_above]]",
         "[[count:table:finder_baselines.finder_above_random]]",
         "[[cite:burns2023discovering]]",
+        "fitted on the same [[num:table:finder_baselines.seeds]] "
+        "training sets of [[num:table:finder_baselines.train_pairs]] "
+        "pairs",
+        "on at least one dataset, with the same interval, on "
+        "[[count:table:finder_baselines.finder_above_random]]",
     ):
         assert token in text, token
     text = " ".join(_texts(_section("appendix_knowledge")))
@@ -652,6 +657,8 @@ def test_the_published_baselines_have_a_table_beside_what_they_compare() -> (
     ):
         assert token in text, token
     assert "by point estimate" in text
+    assert text.count("by point estimate") == 2
+    assert "and, by point estimate, the direction is above P(True)" in text
 
 
 def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
@@ -679,9 +686,22 @@ def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
         "[[table:knowledge_projections]]",
         "[[count:table:knowledge_projections.within_tolerance]]",
         "[[num:table:knowledge_projections.tolerance]]",
+        "[[label:fig:a_knowledge_projections.undrawn]]",
+        "[[label:fig:a_knowledge_projections.exceptions]]",
+        "[[label:fig:a_knowledge_projections.exception_contrasts]]",
     ):
         assert token in text, token
+    assert "every drawn knowledge contrast" in text
+    assert "on every drawn contrast" in text
+    assert "no stored questions" not in text
+    assert (
+        "[[count:table:knowledge_projections.within_tolerance]] with stored "
+        "views"
+    ) in text
+    assert "are scored and not drawn" in text
+    assert "on every contrast of the three blocks" not in text
     assert "one checkpoint per role" in text
+    assert "The entity views are stored for" in text
     assert not re.search(r"\b10 checkpoints\b", text)
 
 

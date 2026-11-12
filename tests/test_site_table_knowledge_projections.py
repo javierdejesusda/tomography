@@ -50,10 +50,8 @@ def _table(model: str) -> dict[str, dict[str, Any]]:
     }
 
 
-def _spread(values: np.ndarray) -> str:
-    return cells.interval(
-        float(values.mean()), float(values.min()), float(values.max())
-    )
+def _ends(values: np.ndarray) -> list[str]:
+    return [cells.num(float(values.min())), cells.num(float(values.max()))]
 
 
 def _expected(model: str) -> list[list[str]]:
@@ -81,14 +79,34 @@ def _expected(model: str) -> list[list[str]]:
                     )
                 ),
                 cells.num(float(stored["published"][t, k])),
-                _spread(stored["test"][methods.index("random"), t, :, k]),
-                _spread(stored["shuffled"][t, :, k]),
+                cells.num(
+                    float(
+                        stored["test"][methods.index("random"), t, :, k].mean()
+                    )
+                ),
+                cells.num(float(stored["shuffled"][t, :, k].mean())),
                 cells.num(row["text_word"]),
                 cells.num(row["text_char"]),
                 cells.num(row["popularity"]),
             ]
         )
     return rows
+
+
+def _expected_ends(model: str) -> list[tuple[str, ...]]:
+    """Recomputes the lowest and highest draw of each control of a row."""
+    path = run("v1", model)
+    stored = npz(path, "projections.npz")
+    names = data(path, "projections.json")["types"]
+    methods = data(path, "projections.json")["methods"]
+    k = stored["layers"].tolist().index(data(path, "summary.json")["layer"])
+    return [
+        (
+            *_ends(stored["test"][methods.index("random"), t, :, k]),
+            *_ends(stored["shuffled"][t, :, k]),
+        )
+        for t in range(len(names))
+    ]
 
 
 def test_columns_and_alignment(output: registry.TableOutput) -> None:
@@ -112,6 +130,20 @@ def test_there_is_one_row_per_checkpoint_and_contrast_from_the_files(
     assert output.numbers["rows"] == len(want)
     assert all("_" not in cell for row in output.rows for cell in row)
     assert cells.MISSING in {row[-1] for row in output.rows}
+
+
+def test_the_page_shows_means_and_the_data_file_the_draw_ranges(
+    output: registry.TableOutput,
+) -> None:
+    assert output.data_columns == (
+        "Random: lowest draw",
+        "Random: highest draw",
+        "Shuffled labels: lowest draw",
+        "Shuffled labels: highest draw",
+    )
+    want = [row for model in models("v1") for row in _expected_ends(model)]
+    assert list(output.data_cells) == want
+    assert not any("[" in cell for row in output.rows for cell in row)
 
 
 def test_the_committed_value_is_the_one_the_knowledge_table_reads() -> None:
@@ -201,7 +233,10 @@ def test_the_caption_says_what_each_column_is(
         "AUROC",
         "float32",
         "five draws",
-        "mean with the lowest and the highest draw",
+        "mean over the five draws, and the data file adds the lowest and "
+        "the highest draw",
+        f"{stats.per_role_text(output.counts['within_tolerance'])} with "
+        "stored views",
         "published reader",
         "labels shuffled",
         "controls",
@@ -209,6 +244,33 @@ def test_the_caption_says_what_each_column_is(
         stats.per_role_text(output.counts["within_tolerance"]),
     ):
         assert phrase in text, phrase
+    assert "in brackets" not in text
     assert not any(d in text for d in DASHES)
     assert "baseline" not in text.lower()
     assert "_" not in text
+
+
+def test_the_caption_names_the_contrasts_the_text_alone_separates(
+    output: registry.TableOutput,
+) -> None:
+    perfect: dict[str, None] = {}
+    for model in models("v1"):
+        table = _table(model)
+        for name in data(run("v1", model), "projections.json")["types"]:
+            row = table[name]
+            if "1.000" in (
+                cells.num(row["text_word"]),
+                cells.num(row["text_char"]),
+            ):
+                perfect[name.replace("_", " ")] = None
+    assert {
+        "pre vs post cutoff",
+        "real vs synthal",
+        "unknowable detail",
+    } <= set(perfect)
+    assert (
+        "The classifier on the words or the one on the characters reads "
+        f"1.000 for {stats.join_and(list(perfect))} on at least one "
+        "checkpoint each: there the text of the questions alone separates "
+        "the two sides."
+    ) in output.detail

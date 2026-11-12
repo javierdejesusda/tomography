@@ -313,6 +313,11 @@ td {
   vertical-align: baseline;
 }
 
+.table.roomy th,
+.table.roomy td {
+  padding: 0.16em 0.6em;
+}
+
 th {
   font-weight: normal;
 }
