@@ -139,6 +139,7 @@ published method run on the same items. On the
 | `r8` | Does LAT beat few-shot prompting with the same examples on the RepE QA tasks (Figure 7, Table 9) and TruthfulQA MC1? | the 0.6B and 1.7B pairs (one run per task) |
 | `tb1` | How much of a reader's accuracy do word and character n-gram classifiers reach with no model? (the text-only control of the readers) | none (one run) |
 | `b2` | Does LAT read truth (Geometry of Truth statements and their negations) and sentiment as well as the published baselines (mass-mean, whitened mass-mean, logistic regression, CCS), beside random, shuffled and text-only controls? | the 4 GPT-2 sizes and the 0.6B and 1.7B pairs |
+| `b3` | Do published steering methods (contrastive activation addition, mean-centring, activation addition, difference of means, prompt prepending) move a concept as well as our reading vector, beside random directions, when an external judge rates concept, instruction following and fluency on held-out prompts? | code only |
 | `p1` | How much does prompt wording move a sentiment reader? | all 10 |
 | `p2` | How do token position and a misleading sentence matter? | all 10 |
 | `p3` | How does training-set size matter? | all 10 |
@@ -184,6 +185,20 @@ To collect finished runs into a committable tree and redraw every figure
 uv run tomography export --out results <folder-with-runs>
 uv run tomography plot all --out results
 ```
+
+`b3` stores its generations for an external judge, who rates them offline from files
+(see [Published steering baselines](docs/methodology.md#published-steering-baselines-b3)):
+
+```bash
+uv run tomography judge export <run> --out batches                    # the tuning half
+uv run tomography judge import <run> judged.jsonl --batch <id> --judge-model <model-id> --export-dir batches
+uv run tomography judge export <run> --out batches --stage held_out   # once every tuning batch is imported
+uv run tomography judge report <run>
+```
+
+A judge is given the `batches` folder and nothing else: the batch files, `rubric.txt` and
+`criteria.json`, none of which names the stage or the arm. `judge import` refuses a batch whose
+file or rubric in `--export-dir` no longer has the SHA-256 stored at export.
 
 Reproducibility rules:
 
@@ -257,6 +272,7 @@ files is redistributed here.
 | NQ-Open | CC-BY-SA-3.0 |
 | WikiText-103 | CC-BY-SA-3.0 and GFDL |
 | Alpaca | CC BY-NC 4.0 plus OpenAI terms (non-commercial) |
+| AlpacaEval (`b3`) | CC BY-NC 4.0 (non-commercial) |
 | SyntHal | research and review terms only |
 | FalseQA, Geometry of Truth | none stated |
 | PopQA | none on the dataset card (code repository: MIT) |
