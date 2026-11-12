@@ -829,6 +829,24 @@ def test_every_grouped_table_csv_has_unique_headers(
     assert grouped >= 3
 
 
+def test_a_table_csv_adds_the_columns_kept_off_the_page(
+    site: tuple[Path, page.Document],
+) -> None:
+    out, doc = site
+    view = page.Page(doc)
+    extended = 0
+    for key, tab in {**doc.tables, **doc.appendix_tables}.items():
+        path = out / "data" / f"table-{view.table_number[key]}.csv"
+        found = list(csv.reader(path.read_text("utf-8").splitlines()))
+        width = len(tab.output.columns)
+        assert found[0][width:] == list(tab.output.data_columns), key
+        assert [r[width:] for r in found[1:]] == [
+            list(c) for c in tab.output.data_cells or [()] * len(found[1:])
+        ], key
+        extended += bool(tab.output.data_columns)
+    assert extended >= 1
+
+
 def _words(fragment: str) -> int:
     return len(_page_text(fragment, ("style", "svg")).split())
 

@@ -1070,13 +1070,18 @@ APPENDICES = (
             "[[count:fig:a_knowledge_geometry.reader_above_words]]. It is a "
             "picture and not a test: its numbers carry no interval.",
             "[[fig:a_knowledge_projections]] sets the test questions of "
-            "every knowledge contrast of the same three checkpoints along "
-            "the published reader, and the AUROC of each reader beside two "
-            "controls: its five random directions and the same reader "
-            "refitted on shuffled labels. On "
+            "every drawn knowledge contrast of the same three checkpoints "
+            "along the published reader, and the AUROC of each reader "
+            "beside two controls: its five random directions and the same "
+            "reader refitted on shuffled labels. Two entity contrasts, "
+            "[[label:fig:a_knowledge_projections.undrawn]], are scored and "
+            "not drawn; [[table:knowledge_projections]] holds them. On "
             "[[count:fig:a_knowledge_projections.above_every_draw]] the "
             "published reader is above every one of its random directions "
-            "on every contrast of the three blocks. A "
+            "on every drawn contrast. The exception is "
+            "[[label:fig:a_knowledge_projections.exceptions]], where the "
+            "highest random direction is above the reader on "
+            "[[label:fig:a_knowledge_projections.exception_contrasts]]. A "
             "random direction is oriented on the training labels like the "
             "reader, so on a small contrast a single draw can score high: "
             "the highest on the three checkpoints is "
@@ -1089,8 +1094,9 @@ APPENDICES = (
             "classifiers on the words, on the characters and on the "
             "popularity of the subject. The recomputed means stay within "
             "[[num:table:knowledge_projections.tolerance]] of the committed "
-            "ones on [[count:table:knowledge_projections.within_tolerance]], "
-            "and a note under the table names every exception.",
+            "ones on [[count:table:knowledge_projections.within_tolerance]] "
+            "with stored views, and a note under the table names every "
+            "exception.",
         ),
         items=(
             "fig:a_knowledge_matrix",

@@ -77,12 +77,14 @@ class Views:
         run: The V1 run directory.
         layer: The layer of the reader.
         tolerance: The largest gap that counts as a reproduction.
+        draws: How many draws each contrast was refitted on.
         contrasts: The contrasts in the order of the run.
     """
 
     run: Path
     layer: int
     tolerance: float
+    draws: int
     contrasts: tuple[Contrast, ...]
 
 
@@ -145,5 +147,9 @@ def load(manifest: Manifest, model: str) -> Views | None:
             )
         )
     return Views(
-        run, int(summary["layer"]), float(check["tolerance"]), tuple(contrasts)
+        run,
+        int(summary["layer"]),
+        float(check["tolerance"]),
+        int(stored["shuffled"].shape[1]),
+        tuple(contrasts),
     )

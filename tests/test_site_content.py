@@ -603,8 +603,20 @@ def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
         "[[table:knowledge_projections]]",
         "[[count:table:knowledge_projections.within_tolerance]]",
         "[[num:table:knowledge_projections.tolerance]]",
+        "[[label:fig:a_knowledge_projections.undrawn]]",
+        "[[label:fig:a_knowledge_projections.exceptions]]",
+        "[[label:fig:a_knowledge_projections.exception_contrasts]]",
     ):
         assert token in text, token
+    assert "every drawn knowledge contrast" in text
+    assert "on every drawn contrast" in text
+    assert "no stored questions" not in text
+    assert (
+        "[[count:table:knowledge_projections.within_tolerance]] with stored "
+        "views"
+    ) in text
+    assert "are scored and not drawn" in text
+    assert "on every contrast of the three blocks" not in text
     assert "one checkpoint per role" in text
     assert "The entity views are stored for" in text
     assert not re.search(r"\b10 checkpoints\b", text)

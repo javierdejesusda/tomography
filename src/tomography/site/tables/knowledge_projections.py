@@ -4,7 +4,8 @@ One row per checkpoint and contrast: the AUROC of the committed reader, the
 same draws refitted in float32, the published reader, and the controls of
 the contrast, which are the random direction and the shuffled-label reader
 of each draw and the committed classifiers on the words, on the characters
-and on the popularity of the subject.
+and on the popularity of the subject. The page gives the mean over the draws
+of each control and the data file adds its lowest and highest draw.
 """
 
 from tomography.site import cells
@@ -26,6 +27,12 @@ COLUMNS = [
     "Characters",
     "Popularity",
 ]
+DATA_COLUMNS = (
+    "Random: lowest draw",
+    "Random: highest draw",
+    "Shuffled labels: lowest draw",
+    "Shuffled labels: highest draw",
+)
 METHOD_NAMES = {
     "logistic": "reader",
     "pca_diff": "PCA direction",
@@ -38,8 +45,8 @@ def _name(value: str) -> str:
     return value.replace("_", " ")
 
 
-def _spread(found: views.Spread) -> str:
-    return cells.interval(found.mean, found.low, found.high)
+def _ends(found: views.Spread) -> tuple[str, str]:
+    return cells.num(found.low), cells.num(found.high)
 
 
 def build(manifest: Manifest) -> TableOutput:
@@ -52,6 +59,8 @@ def build(manifest: Manifest) -> TableOutput:
         The table and its caption parts.
     """
     rows: list[list[str]] = []
+    ends: list[tuple[str, ...]] = []
+    perfect: dict[str, None] = {}
     starts: list[int] = []
     within: dict[str, bool] = {}
     misses: list[str] = []
@@ -72,13 +81,19 @@ def build(manifest: Manifest) -> TableOutput:
                     cells.num(contrast.committed),
                     cells.num(contrast.recomputed),
                     cells.num(contrast.published),
-                    _spread(contrast.random),
-                    _spread(contrast.shuffled),
+                    cells.num(contrast.random.mean),
+                    cells.num(contrast.shuffled.mean),
                     cells.num(contrast.text_word),
                     cells.num(contrast.text_char),
                     cells.num(contrast.popularity),
                 ]
             )
+            ends.append((*_ends(contrast.random), *_ends(contrast.shuffled)))
+            if "1.000" in (
+                cells.num(contrast.text_word),
+                cells.num(contrast.text_char),
+            ):
+                perfect[_name(contrast.name)] = None
             reader_gaps.append(contrast.gaps[views.READER])
             for method, gap in contrast.gaps.items():
                 if gap > found.tolerance:
@@ -118,14 +133,19 @@ def build(manifest: Manifest) -> TableOutput:
         "value. The other columns are controls. Random is the random "
         "direction of each draw and shuffled labels is the reader of each "
         "draw refitted with its labels shuffled inside each stratum: both "
-        "give the mean with the lowest and the highest draw in brackets. "
-        "Words, characters and popularity are the committed classifiers on "
-        "the question text and on the page views of the subject, which the "
-        "recomputation reproduces exactly; a contrast without a popularity "
-        f"control reads {cells.MISSING}. The recomputed mean over the draws "
-        "of every method, the random direction included, stays within "
+        "give the mean over the five draws, and the data file adds the "
+        "lowest and the highest draw. Words, characters and popularity are "
+        "the committed classifiers on the question text and on the page "
+        "views of the subject, which the recomputation reproduces exactly; "
+        f"a contrast without a popularity control reads {cells.MISSING}. "
+        "The classifier on the words or the one on the characters reads "
+        f"1.000 for {stats.join_and(list(perfect))} on at least one "
+        "checkpoint each: there the text of the questions alone separates "
+        "the two sides. The recomputed mean over the draws of every method, "
+        "the random direction included, stays within "
         f"{cells.num(tolerance)} of the committed one on "
-        f"{stats.per_role_text(counts['within_tolerance'])}."
+        f"{stats.per_role_text(counts['within_tolerance'])} with stored "
+        "views."
     )
     notes = (
         [
@@ -146,4 +166,6 @@ def build(manifest: Manifest) -> TableOutput:
         row_groups=tuple(starts),
         counts=counts,
         compact_print=True,
+        data_columns=DATA_COLUMNS,
+        data_cells=tuple(ends),
     )

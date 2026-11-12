@@ -99,6 +99,11 @@ def _auroc(model: str, name: str) -> dict[str, float]:
     }
 
 
+def _draws(model: str) -> int:
+    stored = _R["npz"](_R["run"]("v1", model), "projections.npz")
+    return int(stored["shuffled"].shape[1])
+
+
 def _positions(output: registry.FigureOutput) -> dict[str, float]:
     first = output.figure.axes[0]
     labels = [t.get_text() for t in first.get_yticklabels()]
@@ -173,7 +178,9 @@ def test_hue_is_the_class_and_the_side_is_the_group_named_first(
             paper.ENC["unknown"].lower()
         )
     assert ax.get_xlim() == (-LIMIT - 0.2, LIMIT + 0.2)
-    assert ax.get_xlabel() == "projection (z-score)"
+    assert ax.get_xlabel() == (
+        "projection on\nthe reader (z-score\nwithin the cell)"
+    )
     assert ax.get_title(loc="left") == paper.display_name(SHOWN[column])
 
 
@@ -183,7 +190,17 @@ def test_the_last_panel_sets_each_reader_beside_its_two_controls(
     ax = output.figure.axes[FOREST]
     positions = _positions(output)
     assert ax.get_xlabel() == "AUROC"
-    assert ax.get_xlim() == (0.0, 1.03)
+    means = [
+        min(found["shuffled"], found["random"])
+        for model in SHOWN
+        for name in _drawn(model)
+        for found in [_auroc(model, name)]
+    ]
+    low, high = ax.get_xlim()
+    assert high == 1.02
+    assert min(means) - 0.05 <= low < min(means)
+    assert low <= 0.4
+    assert output.numbers["forest_left"] == low
     lanes: dict[str, list[float]] = {}
     for model in SHOWN:
         style = axes.model_style(model)
@@ -199,10 +216,18 @@ def test_the_last_panel_sets_each_reader_beside_its_two_controls(
             assert (reader.get_markerfacecolor() == "white") == (
                 not style.filled
             )
-            band = _by_gid(ax, Rectangle, f"random:{key}").get_bbox()
+            patch = _by_gid(ax, Rectangle, f"random:{key}")
+            band = patch.get_bbox()
             assert band.x0 == pytest.approx(want["random_low"])
             assert band.x1 == pytest.approx(want["random_high"])
             assert band.y0 < lane < band.y1
+            halo = _by_gid(ax, Line2D, f"halo:{key}")
+            assert halo.get_xydata().tolist() == reader.get_xydata().tolist()
+            assert halo.get_marker() == reader.get_marker()
+            assert halo.get_markerfacecolor() == paper.WHITE
+            assert halo.get_markeredgecolor() == paper.WHITE
+            assert halo.get_markersize() >= reader.get_markersize() + 2.0
+            assert patch.get_zorder() < halo.get_zorder() < reader.get_zorder()
             mean = _by_gid(ax, Line2D, f"random mean:{key}")
             assert float(mean.get_xdata()[0]) == pytest.approx(want["random"])
             assert mean.get_marker() == paper.MEASURE_MARKERS["random"]
@@ -210,6 +235,8 @@ def test_the_last_panel_sets_each_reader_beside_its_two_controls(
             tick = _by_gid(ax, Line2D, f"shuffled:{key}")
             assert float(tick.get_xdata()[0]) == pytest.approx(want["shuffled"])
             assert tick.get_marker() == "|"
+            assert tick.get_color() == paper.ENC["shuffled"]
+            assert tick.get_zorder() < halo.get_zorder()
             assert float(tick.get_ydata()[0]) == lane
     for name, found in lanes.items():
         assert found == sorted(found)
@@ -229,18 +256,58 @@ def test_the_claim_counts_the_readers_above_all_their_random_draws(
         assert output.numbers[f"above_{role}"] == above
         assert output.numbers[f"contrasts_{role}"] == len(found)
         parts.append(
-            f"{above} of {len(found)} contrasts on {paper.display_name(model)}"
+            f"{above} of {len(found)} drawn contrasts on "
+            f"{paper.display_name(model)}"
         )
         readers += [a["reader"] for a in found]
         randoms += [a["random_high"] for a in found]
     assert output.numbers["reader_min"] == pytest.approx(min(readers))
     assert output.numbers["random_max"] == pytest.approx(max(randoms))
+    draws = _draws(SHOWN[0])
+    assert output.numbers["draws"] == draws == 5
     assert output.claim == (
-        "The published reader has a higher AUROC than each of its five "
-        f"random directions on {stats.join_and(parts)}; the lowest reader "
-        f"is at {min(readers):.2f} and the highest single random direction "
-        f"at {max(randoms):.2f}."
+        f"The published reader has a higher AUROC than each of its {draws} "
+        f"random directions on {stats.join_and(parts)}; the lowest drawn "
+        f"reader is at {min(readers):.2f} and the highest single random "
+        f"direction at {max(randoms):.2f}."
     )
+
+
+def test_the_figure_names_what_is_not_drawn_and_every_exception(
+    output: registry.FigureOutput,
+) -> None:
+    undrawn: dict[str, None] = {}
+    lowest = []
+    for model in _R["models"]("v1"):
+        left = [n for n in _sidecar(model)["types"] if n not in _drawn(model)]
+        undrawn.update(dict.fromkeys(left))
+        if model in SHOWN:
+            lowest += [_auroc(model, name)["reader"] for name in left]
+    assert list(undrawn) == ["obscure_real_pop", "triviaqa_known"]
+    assert output.labels["undrawn"] == "obscure real pop and triviaqa known"
+    assert output.numbers["undrawn_reader_min"] == pytest.approx(min(lowest))
+    assert min(lowest) < output.numbers["reader_min"]
+    below = {
+        model: [
+            name
+            for name in _drawn(model)
+            if _auroc(model, name)["reader"]
+            <= _auroc(model, name)["random_high"]
+        ]
+        for model in _R["models"]("v1")
+    }
+    below = {model: names for model, names in below.items() if names}
+    assert below == {"gpt2-medium": ["fictional_generated", "obscure_real"]}
+    assert output.labels["exceptions"] == "GPT-2 medium"
+    assert output.labels["exception_contrasts"] == (
+        "fictional generated and obscure real"
+    )
+    for name in below["gpt2-medium"]:
+        found = _auroc("gpt2-medium", name)
+        assert (
+            f"{name.replace('_', ' ')} ({found['random_high']:.3f} against "
+            f"{found['reader']:.3f})"
+        ) in output.detail
 
 
 def test_checkpoints_are_counted_per_role(
@@ -290,9 +357,9 @@ def test_the_legend_keys_the_classes_the_reader_and_both_controls(
     assert [t.get_text() for t in legend.get_texts()] == [
         "known questions",
         "unknown questions",
-        "published reader (filled: GPT-2 and base; open: post-trained)",
+        "published reader (brown: GPT-2; blue: Qwen3; open: post-trained)",
         "random directions: range and mean",
-        "shuffled labels: mean",
+        "shuffled-label refits: mean",
     ]
 
 
@@ -361,9 +428,20 @@ def test_the_caption_says_what_is_drawn_and_what_the_controls_are(
         "top to bottom",
         "at most 300",
         "does not read",
+        "each row is a drawn contrast",
+        "obscure real pop and triviaqa known, are scored and not drawn",
+        "[[table:knowledge_projections]]",
+        f"mean of the {_draws(SHOWN[0])} shuffled-label refits",
+        "SyntHal [[cite:lu2026relational]]",
+        "KUQ [[cite:amayuelas2024knowledge]]",
+        "brown for GPT-2 and blue for Qwen3",
+        "z-score over the questions of the cell",
+        "continues below it",
+        "GPT-2 medium",
     ):
         assert phrase in detail, phrase
-    text = f"{output.claim} {detail}"
+    assert "stores the questions of two" not in detail
+    text = re.sub(r"\[\[[^\]]*\]\]", "", f"{output.claim} {detail}")
     assert chr(0x2014) not in text
     assert chr(0x2013) not in text
     assert "_" not in text

@@ -37,6 +37,7 @@ def test_enc_holds_one_value_per_meaning() -> None:
     assert paper.ENC["secondary_text"] == "#4d4d4d"
     assert paper.ENC["known"] == "#E69F00"
     assert paper.ENC["unknown"] == "#762a83"
+    assert paper.ENC["shuffled"] == "#6b6b00"
 
 
 def test_the_question_class_hues_are_far_from_every_other_hue() -> None:
@@ -50,6 +51,19 @@ def test_the_question_class_hues_are_far_from_every_other_hue() -> None:
     ]
     for hue, other in itertools.product((known, unknown), others):
         assert de2000(hue, other) >= 15.0, (hue, other)
+
+
+def test_the_shuffled_label_hue_is_far_from_every_other_hue() -> None:
+    hue = paper.ENC["shuffled"]
+    others = [
+        value
+        for key, found in paper.ENC.items()
+        if key != "shuffled"
+        for value in ([found] if isinstance(found, str) else found)
+    ]
+    for other in others:
+        assert de2000(hue, other) >= 20.0, other
+    assert paper._luminance(hue) <= 0.18
 
 
 def test_the_question_classes_differ_in_lightness_for_greyscale() -> None:
