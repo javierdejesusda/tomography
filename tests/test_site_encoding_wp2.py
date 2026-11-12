@@ -29,6 +29,7 @@ OWN = {
     "a_knowledge_matrix": DIRECTION | TEXT | RANDOM,
     "a_dose_runs": DIRECTION,
     "a_dose_types": DIRECTION,
+    "a_knowledge_geometry": DIRECTION,
     "a_links": DIRECTION,
 }
 MEASURES: set[str] = {
@@ -74,10 +75,18 @@ def test_known_and_unknown_questions_are_a_set_pair_not_a_measure() -> None:
     sets = paper.QUESTION_SET_MARKERS
     assert sets["unknown"] == M["direction"]
     assert sets["known"] in paper.CATEGORY_MARKERS
+    assert sets["fictional"] in paper.CATEGORY_MARKERS
+    assert sets["fictional"] != sets["known"]
 
 
 @pytest.mark.parametrize(
-    "key", ["knowledge_steering", "a_dose_runs", "a_dose_types"]
+    "key",
+    [
+        "knowledge_steering",
+        "a_dose_runs",
+        "a_dose_types",
+        "a_knowledge_geometry",
+    ],
 )
 def test_known_questions_use_the_question_set_marker(
     built: dict[str, registry.FigureOutput], key: str

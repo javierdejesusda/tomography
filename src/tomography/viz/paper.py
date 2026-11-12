@@ -139,6 +139,7 @@ SET_MARKERS: dict[str, str] = {
 QUESTION_SET_MARKERS: dict[str, str] = {
     "unknown": MEASURE_MARKERS["direction"],
     "known": CATEGORY_MARKERS[1],
+    "fictional": CATEGORY_MARKERS[0],
 }
 PROMPT_MARKERS: dict[str, str] = {
     "positive": CATEGORY_MARKERS[2],
@@ -195,7 +196,16 @@ ENCODING_RULES = """Encoding rules of every figure (the glossary).
    the family hues and the reserved green and differs along the blue-yellow
    axis, so red-green colour-vision deficiency and greyscale keep the sign).
 10. No text under 7 pt (`MIN_TEXT`) and none lighter than #4d4d4d; data
-   lines 1.0 to 1.5 pt, reference lines 0.5 pt, whiskers 0.8 pt."""
+   lines 1.0 to 1.5 pt, reference lines 0.5 pt, whiskers 0.8 pt.
+11. Where single questions are drawn as points, the class of a question
+   takes a hue and a marker together: known questions the orange left
+   triangle, unknown ones the violet circle (`ENC["known"]`,
+   `ENC["unknown"]`, `QUESTION_SET_MARKERS`). Where a figure tells the
+   unknown questions about fictional entities apart, they keep the violet
+   and take the star. The two hues differ in lightness and along the
+   blue-yellow axis, so the classes survive greyscale and red-green
+   colour-vision deficiency, and neither is a family hue; fill keeps the
+   role of rule 3."""
 
 
 def _build_enc() -> dict[str, Any]:
@@ -213,6 +223,8 @@ def _build_enc() -> dict[str, Any]:
         "own_probability": "#6a6a6a",
         "unused": "#F0E442",
         "secondary_text": "#4d4d4d",
+        "known": "#E69F00",
+        "unknown": "#762a83",
     }
 
 

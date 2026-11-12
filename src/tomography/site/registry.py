@@ -127,6 +127,7 @@ APPENDIX_FIGURES = (
     "a_knowledge_matrix",
     "a_dose_runs",
     "a_dose_types",
+    "a_knowledge_geometry",
     "a_links",
 )
 MAIN_TABLES = ("checkpoints", "reading")
