@@ -173,7 +173,9 @@ class Config(SteeringConfig):
         n_tune: Prompts of the half the coefficient is chosen on.
         n_held_out: Prompts of the half that is reported.
         method: The direction finder of our reading vector, as in C1 and C2.
-        n_pairs: Training pairs behind every vector of a concept.
+        n_pairs: Training pairs behind the `caa`, `mean_centring`,
+            `diffmean` and `reader` vectors of a concept; `actadd` and the
+            random arms use none.
         min_words: Sentiment phrases with fewer words are dropped, as in C1.
         n_random: Random control directions per concept.
         truncate_words: Words kept of a held-out text as a continuation
@@ -538,7 +540,11 @@ def _prompt_arm(setup: _Setup, concept: Concept) -> Arm:
 
 
 def _build(setup: _Setup, concept: Concept, train: Sequence[Example]) -> _Built:
-    """Builds every vector and arm of one concept from the same pairs."""
+    """Builds the vectors and the arms of one concept.
+
+    The trained vectors share the pairs drawn from `train`; the activation
+    addition and the random directions use no training pair.
+    """
     config, loaded, layers = setup.config, setup.loaded, setup.layers
     stimuli = _stimuli(
         concept,
