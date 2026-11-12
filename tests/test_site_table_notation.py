@@ -73,10 +73,12 @@ def test_the_glossary_names_every_knowledge_contrast() -> None:
     assert paper in rows["the paper"]
     assert "every training pair" in rows["all-pairs reader"]
     assert "views run" in rows["all-pairs reader"]
-    assert "its own layer" in rows["series"]
-    assert "share its draws of training items" in rows["series"]
-    assert "own draws" not in rows["series"]
-    assert "the text controls, which read no layer" in rows["series"]
+    assert rows["series"] == (
+        "The finder and preprocessing series of a comparison share its draws "
+        "of training items, while each pairing series draws its own; each "
+        "series reads at its own layer chosen on validation pairs, except "
+        "the text controls, which read no layer."
+    )
     assert "finder" in rows["reader"]
 
 
