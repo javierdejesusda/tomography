@@ -699,6 +699,24 @@ def test_the_published_baselines_have_a_table_beside_what_they_compare() -> (
     assert "and, by point estimate, the direction is above P(True)" in text
 
 
+def test_the_steering_baselines_sit_beside_the_steering_table() -> None:
+    section = _section("appendix_steering")
+    assert section.items == ("table:steering", "table:steering_baselines")
+    text = " ".join(_texts(section))
+    for token in (
+        "[[table:steering_baselines]]",
+        "[[num:table:steering_baselines.held_out]]",
+        "[[num:table:steering_baselines.tune]]",
+        "[[cite:wu2025axbench]]",
+        "[[cite:rimsky2024steering]]",
+        "[[cite:turner2023steering]]",
+        "[[cite:jorgensen2023improving]]",
+        "[[cite:marks2024geometry]]",
+        "LLM judge",
+    ):
+        assert token in text, token
+
+
 def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
     None
 ):

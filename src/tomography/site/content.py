@@ -1195,8 +1195,21 @@ APPENDICES = (
         paragraphs=(
             "[[table:steering]] gives the values behind the steering "
             "finding, including the perplexity of the completions.",
+            "[[table:steering_baselines]] steers toward sentiment, "
+            "happiness and anger along the reader and along five published "
+            "steering methods as baselines, under the protocol of AxBench "
+            "[[cite:wu2025axbench]] adapted to each role, on one checkpoint "
+            "per role: prompt prepending, the difference of class means "
+            "[[cite:marks2024geometry]], contrastive activation addition "
+            "[[cite:rimsky2024steering]], activation addition "
+            "[[cite:turner2023steering]] and mean-centring "
+            "[[cite:jorgensen2023improving]], beside the unsteered model "
+            "and a random direction as controls. An LLM judge rates each "
+            "arm on [[num:table:steering_baselines.held_out]] held-out "
+            "prompts per concept, at the coefficient the arm chose on "
+            "[[num:table:steering_baselines.tune]] tuning prompts.",
         ),
-        items=("table:steering",),
+        items=("table:steering", "table:steering_baselines"),
     ),
     Section(
         "appendix_knowledge",
