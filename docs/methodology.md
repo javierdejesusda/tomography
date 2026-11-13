@@ -53,9 +53,10 @@ Not every experiment has a committed run on every checkpoint. The `results/` tre
 | 9 (all but `gpt2`)                                    | `p9d`, which needs the known versus unknown contrast that `gpt2` lacks (see [Guess control](#guess-control))         |
 | 8 (the GPT-2 sizes and the Qwen3 0.6B and 1.7B pairs) | `b1`, `b2`, `v1`                                                                                                     |
 | 4 (the Qwen3 0.6B and 1.7B pairs)                     | `r8`, `m2`, `m3`                                                                                                     |
+| 3 (`gpt2-xl`, `qwen3-1.7b-base`, `qwen3-1.7b`)        | `b3` (one checkpoint per role)                                                                                       |
 | one run that aggregates finished runs                 | `p6` (the four GPT-2 sizes), `p8` (the Qwen3 0.6B and 1.7B pairs)                                                    |
 | no model                                              | `tb1` (one run)                                                                                                      |
-| no committed run                                      | `a5`, `b3`                                                                                                           |
+| no committed run                                      | `a5`                                                                                                                 |
 
 - **Why a second family.** The paper steers LLaMA-2-Chat. Its 7B and 13B checkpoints do not fit an 8 GB GPU in
   bfloat16, so the second family is Qwen3 at 0.6B, 1.7B and 4B, each as a base and a post-trained checkpoint. The
