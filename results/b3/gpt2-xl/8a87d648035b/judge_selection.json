@@ -1,0 +1,217 @@
+{
+  "_meta": {
+    "experiment": "b3",
+    "config_hash": "8a87d648035b",
+    "seed": 0,
+    "git_sha": "b98eab43a446064d82548252bf4ab9cd5febe4b7",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-13T10:26:13+00:00",
+    "finished_at": "2026-11-13T11:00:47+00:00",
+    "config": {
+      "experiment": "b3",
+      "model": "gpt2-xl",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 128,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        0.05,
+        0.1,
+        0.2,
+        0.4,
+        0.8
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "concepts": [
+        "sentiment",
+        "happiness",
+        "anger"
+      ],
+      "n_tune": 20,
+      "n_held_out": 40,
+      "method": "logistic",
+      "n_pairs": 64,
+      "min_words": 3,
+      "n_random": 1,
+      "truncate_words": 4,
+      "caa_question": "Which of the two texts expresses {description}?",
+      "prompt_base": "The following text expresses {description}. ",
+      "prompt_instruct": "Answer in a way that clearly expresses {description}. ",
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "split": "tune",
+    "rule": "the coefficient with the highest mean overall score on the tuning half; a tie goes to the smallest magnitude, then to the lower value",
+    "selected": [
+      {
+        "concept": "sentiment",
+        "arm": "none",
+        "coeff": null,
+        "overall": 0.26666666666666666
+      },
+      {
+        "concept": "sentiment",
+        "arm": "prompt",
+        "coeff": null,
+        "overall": 0.55
+      },
+      {
+        "concept": "sentiment",
+        "arm": "caa",
+        "coeff": 0.2,
+        "overall": 0.3333333333333333
+      },
+      {
+        "concept": "sentiment",
+        "arm": "mean_centring",
+        "coeff": 0.2,
+        "overall": 1.0666666666666667
+      },
+      {
+        "concept": "sentiment",
+        "arm": "actadd",
+        "coeff": 0.8,
+        "overall": 0.7833333333333333
+      },
+      {
+        "concept": "sentiment",
+        "arm": "diffmean",
+        "coeff": 0.1,
+        "overall": 0.6333333333333333
+      },
+      {
+        "concept": "sentiment",
+        "arm": "reader",
+        "coeff": 0.4,
+        "overall": 0.5666666666666667
+      },
+      {
+        "concept": "sentiment",
+        "arm": "random/0",
+        "coeff": 0.2,
+        "overall": 0.5833333333333334
+      },
+      {
+        "concept": "happiness",
+        "arm": "none",
+        "coeff": null,
+        "overall": 0.13333333333333333
+      },
+      {
+        "concept": "happiness",
+        "arm": "prompt",
+        "coeff": null,
+        "overall": 1.1666666666666667
+      },
+      {
+        "concept": "happiness",
+        "arm": "caa",
+        "coeff": 0.4,
+        "overall": 0.16666666666666666
+      },
+      {
+        "concept": "happiness",
+        "arm": "mean_centring",
+        "coeff": 0.4,
+        "overall": 0.9666666666666667
+      },
+      {
+        "concept": "happiness",
+        "arm": "actadd",
+        "coeff": 0.1,
+        "overall": 0.2
+      },
+      {
+        "concept": "happiness",
+        "arm": "diffmean",
+        "coeff": 0.4,
+        "overall": 0.9833333333333333
+      },
+      {
+        "concept": "happiness",
+        "arm": "reader",
+        "coeff": 0.4,
+        "overall": 0.95
+      },
+      {
+        "concept": "happiness",
+        "arm": "random/0",
+        "coeff": 0.2,
+        "overall": 0.16666666666666666
+      },
+      {
+        "concept": "anger",
+        "arm": "none",
+        "coeff": null,
+        "overall": 0.13333333333333333
+      },
+      {
+        "concept": "anger",
+        "arm": "prompt",
+        "coeff": null,
+        "overall": 0.85
+      },
+      {
+        "concept": "anger",
+        "arm": "caa",
+        "coeff": 0.1,
+        "overall": 0.26666666666666666
+      },
+      {
+        "concept": "anger",
+        "arm": "mean_centring",
+        "coeff": 0.2,
+        "overall": 0.55
+      },
+      {
+        "concept": "anger",
+        "arm": "actadd",
+        "coeff": 0.8,
+        "overall": 0.23333333333333334
+      },
+      {
+        "concept": "anger",
+        "arm": "diffmean",
+        "coeff": 0.2,
+        "overall": 0.3
+      },
+      {
+        "concept": "anger",
+        "arm": "reader",
+        "coeff": 0.4,
+        "overall": 0.36666666666666664
+      },
+      {
+        "concept": "anger",
+        "arm": "random/0",
+        "coeff": 0.2,
+        "overall": 0.23333333333333334
+      }
+    ]
+  }
+}

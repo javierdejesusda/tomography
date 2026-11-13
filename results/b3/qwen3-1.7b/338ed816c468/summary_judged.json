@@ -1,0 +1,266 @@
+{
+  "_meta": {
+    "experiment": "b3",
+    "config_hash": "338ed816c468",
+    "seed": 0,
+    "git_sha": "b98eab43a446064d82548252bf4ab9cd5febe4b7",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-13T11:49:41+00:00",
+    "finished_at": "2026-11-13T12:41:03+00:00",
+    "config": {
+      "experiment": "b3",
+      "model": "qwen3-1.7b",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 128,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        0.05,
+        0.1,
+        0.2,
+        0.4,
+        0.8
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "concepts": [
+        "sentiment",
+        "happiness",
+        "anger"
+      ],
+      "n_tune": 20,
+      "n_held_out": 40,
+      "method": "logistic",
+      "n_pairs": 64,
+      "min_words": 3,
+      "n_random": 1,
+      "truncate_words": 4,
+      "caa_question": "Which of the two texts expresses {description}?",
+      "prompt_base": "The following text expresses {description}. ",
+      "prompt_instruct": "Answer in a way that clearly expresses {description}. ",
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "selected": [
+      [
+        "sentiment",
+        "none",
+        null
+      ],
+      [
+        "sentiment",
+        "prompt",
+        null
+      ],
+      [
+        "sentiment",
+        "caa",
+        0.2
+      ],
+      [
+        "sentiment",
+        "mean_centring",
+        0.05
+      ],
+      [
+        "sentiment",
+        "actadd",
+        0.1
+      ],
+      [
+        "sentiment",
+        "diffmean",
+        0.1
+      ],
+      [
+        "sentiment",
+        "reader",
+        0.4
+      ],
+      [
+        "sentiment",
+        "random/0",
+        0.4
+      ],
+      [
+        "happiness",
+        "none",
+        null
+      ],
+      [
+        "happiness",
+        "prompt",
+        null
+      ],
+      [
+        "happiness",
+        "caa",
+        0.4
+      ],
+      [
+        "happiness",
+        "mean_centring",
+        0.05
+      ],
+      [
+        "happiness",
+        "actadd",
+        0.4
+      ],
+      [
+        "happiness",
+        "diffmean",
+        0.4
+      ],
+      [
+        "happiness",
+        "reader",
+        0.4
+      ],
+      [
+        "happiness",
+        "random/0",
+        0.05
+      ],
+      [
+        "anger",
+        "none",
+        null
+      ],
+      [
+        "anger",
+        "prompt",
+        null
+      ],
+      [
+        "anger",
+        "caa",
+        0.1
+      ],
+      [
+        "anger",
+        "mean_centring",
+        0.05
+      ],
+      [
+        "anger",
+        "actadd",
+        0.05
+      ],
+      [
+        "anger",
+        "diffmean",
+        0.4
+      ],
+      [
+        "anger",
+        "reader",
+        0.4
+      ],
+      [
+        "anger",
+        "random/0",
+        0.05
+      ]
+    ],
+    "selection_rule": "the coefficient with the highest mean overall score on the tuning half; a tie goes to the smallest magnitude, then to the lower value",
+    "agreement": {
+      "pooled": {
+        "concept": {
+          "n": 288,
+          "rate": 0.9548611111111112,
+          "kappa": 0.8924477894918275,
+          "weighted_kappa": 0.9326521801698087
+        },
+        "instruction": {
+          "n": 288,
+          "rate": 0.9305555555555556,
+          "kappa": 0.761796451759646,
+          "weighted_kappa": 0.828008360704688
+        },
+        "fluency": {
+          "n": 288,
+          "rate": 0.9652777777777778,
+          "kappa": 0.9018639043173068,
+          "weighted_kappa": 0.9616419381476252
+        }
+      },
+      "tune": {
+        "concept": {
+          "n": 192,
+          "rate": 0.9635416666666666,
+          "kappa": 0.9117762898779046,
+          "weighted_kappa": 0.9376044568245125
+        },
+        "instruction": {
+          "n": 192,
+          "rate": 0.9166666666666666,
+          "kappa": 0.7744824548524445,
+          "weighted_kappa": 0.8414533443435177
+        },
+        "fluency": {
+          "n": 192,
+          "rate": 0.984375,
+          "kappa": 0.9565676368571859,
+          "weighted_kappa": 0.9861578390848793
+        }
+      },
+      "held_out": {
+        "concept": {
+          "n": 96,
+          "rate": 0.9375,
+          "kappa": 0.854251012145749,
+          "weighted_kappa": 0.9254465441366814
+        },
+        "instruction": {
+          "n": 96,
+          "rate": 0.9583333333333334,
+          "kappa": 0.5816993464052291,
+          "weighted_kappa": 0.5816993464052288
+        },
+        "fluency": {
+          "n": 96,
+          "rate": 0.9270833333333334,
+          "kappa": 0.7718940936863545,
+          "weighted_kappa": 0.826625386996904
+        }
+      }
+    },
+    "judge_models": [
+      "claude-opus-5-5"
+    ],
+    "rubric_sha256": {
+      "tune": "e95573bae4bf66afd389d58b46a74bc3bba3ee3206f11dc9116eda7104a7cd13",
+      "held_out": "e95573bae4bf66afd389d58b46a74bc3bba3ee3206f11dc9116eda7104a7cd13"
+    },
+    "classifier_correlation": {
+      "sentiment": 0.6401771542538922,
+      "happiness": 0.5801245109850505,
+      "anger": 0.31569363821391455
+    }
+  }
+}

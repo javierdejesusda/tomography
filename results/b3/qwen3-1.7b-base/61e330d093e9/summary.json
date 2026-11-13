@@ -1,0 +1,307 @@
+{
+  "_meta": {
+    "experiment": "b3",
+    "config_hash": "61e330d093e9",
+    "seed": 0,
+    "git_sha": "b98eab43a446064d82548252bf4ab9cd5febe4b7",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-13T11:01:04+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "b3",
+      "model": "qwen3-1.7b-base",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 128,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        0.05,
+        0.1,
+        0.2,
+        0.4,
+        0.8
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "concepts": [
+        "sentiment",
+        "happiness",
+        "anger"
+      ],
+      "n_tune": 20,
+      "n_held_out": 40,
+      "method": "logistic",
+      "n_pairs": 64,
+      "min_words": 3,
+      "n_random": 1,
+      "truncate_words": 4,
+      "caa_question": "Which of the two texts expresses {description}?",
+      "prompt_base": "The following text expresses {description}. ",
+      "prompt_instruct": "Answer in a way that clearly expresses {description}. ",
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "role": "base",
+    "criteria": [
+      "concept",
+      "fluency"
+    ],
+    "layers": [
+      11,
+      15,
+      20
+    ],
+    "norms": {
+      "11": 119.03149698653867,
+      "15": 187.60135695983254,
+      "20": 677.1708831065719
+    },
+    "concepts": {
+      "sentiment": "positive sentiment",
+      "happiness": "happiness",
+      "anger": "anger"
+    },
+    "arms": [
+      [
+        "none",
+        "none",
+        null
+      ],
+      [
+        "prompt",
+        "prompt",
+        null
+      ],
+      [
+        "caa/0.05",
+        "caa",
+        0.05
+      ],
+      [
+        "caa/0.1",
+        "caa",
+        0.1
+      ],
+      [
+        "caa/0.2",
+        "caa",
+        0.2
+      ],
+      [
+        "caa/0.4",
+        "caa",
+        0.4
+      ],
+      [
+        "caa/0.8",
+        "caa",
+        0.8
+      ],
+      [
+        "mean_centring/0.05",
+        "mean_centring",
+        0.05
+      ],
+      [
+        "mean_centring/0.1",
+        "mean_centring",
+        0.1
+      ],
+      [
+        "mean_centring/0.2",
+        "mean_centring",
+        0.2
+      ],
+      [
+        "mean_centring/0.4",
+        "mean_centring",
+        0.4
+      ],
+      [
+        "mean_centring/0.8",
+        "mean_centring",
+        0.8
+      ],
+      [
+        "actadd/0.05",
+        "actadd",
+        0.05
+      ],
+      [
+        "actadd/0.1",
+        "actadd",
+        0.1
+      ],
+      [
+        "actadd/0.2",
+        "actadd",
+        0.2
+      ],
+      [
+        "actadd/0.4",
+        "actadd",
+        0.4
+      ],
+      [
+        "actadd/0.8",
+        "actadd",
+        0.8
+      ],
+      [
+        "diffmean/0.05",
+        "diffmean",
+        0.05
+      ],
+      [
+        "diffmean/0.1",
+        "diffmean",
+        0.1
+      ],
+      [
+        "diffmean/0.2",
+        "diffmean",
+        0.2
+      ],
+      [
+        "diffmean/0.4",
+        "diffmean",
+        0.4
+      ],
+      [
+        "diffmean/0.8",
+        "diffmean",
+        0.8
+      ],
+      [
+        "reader/0.05",
+        "reader",
+        0.05
+      ],
+      [
+        "reader/0.1",
+        "reader",
+        0.1
+      ],
+      [
+        "reader/0.2",
+        "reader",
+        0.2
+      ],
+      [
+        "reader/0.4",
+        "reader",
+        0.4
+      ],
+      [
+        "reader/0.8",
+        "reader",
+        0.8
+      ],
+      [
+        "random/0/0.05",
+        "random/0",
+        0.05
+      ],
+      [
+        "random/0/0.1",
+        "random/0",
+        0.1
+      ],
+      [
+        "random/0/0.2",
+        "random/0",
+        0.2
+      ],
+      [
+        "random/0/0.4",
+        "random/0",
+        0.4
+      ],
+      [
+        "random/0/0.8",
+        "random/0",
+        0.8
+      ]
+    ],
+    "raw_norms": {
+      "sentiment": {
+        "caa": [
+          2.671196222305298,
+          14.823625564575195,
+          30.42915153503418
+        ],
+        "mean_centring": [
+          79.3457260131836,
+          98.53218841552734,
+          226.0574951171875
+        ],
+        "actadd": [
+          1456.1884765625,
+          1435.869384765625,
+          1347.8927001953125
+        ]
+      },
+      "happiness": {
+        "caa": [
+          1.5991164445877075,
+          27.118253707885742,
+          62.127559661865234
+        ],
+        "mean_centring": [
+          36.773216247558594,
+          56.20701217651367,
+          214.82545471191406
+        ],
+        "actadd": [
+          10040.048828125,
+          10007.2705078125,
+          9763.3837890625
+        ]
+      },
+      "anger": {
+        "caa": [
+          1.8093518018722534,
+          18.182615280151367,
+          37.1655158996582
+        ],
+        "mean_centring": [
+          36.77449035644531,
+          58.261722564697266,
+          222.0967254638672
+        ],
+        "actadd": [
+          118.16722106933594,
+          164.5038604736328,
+          618.037841796875
+        ]
+      }
+    },
+    "actadd_start": 0,
+    "n_tune": 20,
+    "n_held_out": 40
+  }
+}

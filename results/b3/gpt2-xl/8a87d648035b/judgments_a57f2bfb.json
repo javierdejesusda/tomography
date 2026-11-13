@@ -1,0 +1,331 @@
+{
+  "_meta": {
+    "experiment": "b3",
+    "config_hash": "8a87d648035b",
+    "seed": 0,
+    "git_sha": "b98eab43a446064d82548252bf4ab9cd5febe4b7",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-13T10:26:13+00:00",
+    "finished_at": "2026-11-13T11:00:47+00:00",
+    "config": {
+      "experiment": "b3",
+      "model": "gpt2-xl",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 128,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        0.05,
+        0.1,
+        0.2,
+        0.4,
+        0.8
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "concepts": [
+        "sentiment",
+        "happiness",
+        "anger"
+      ],
+      "n_tune": 20,
+      "n_held_out": 40,
+      "method": "logistic",
+      "n_pairs": 64,
+      "min_words": 3,
+      "n_random": 1,
+      "truncate_words": 4,
+      "caa_question": "Which of the two texts expresses {description}?",
+      "prompt_base": "The following text expresses {description}. ",
+      "prompt_instruct": "Answer in a way that clearly expresses {description}. ",
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "batch_id": "a57f2bfb",
+    "stage": "tune",
+    "judge": 1,
+    "judge_model": "claude-opus-5-5",
+    "rubric_sha256": "e95573bae4bf66afd389d58b46a74bc3bba3ee3206f11dc9116eda7104a7cd13",
+    "batch_sha256": "76fff1a3a2a9c58dd14508d7164ac55ef8e283da54e14587ea3477dc5265408f",
+    "criteria": [
+      "concept",
+      "fluency"
+    ],
+    "judgments": [
+      {
+        "item_id": "a3dd8bdbfd488c87",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "2f4ef30d1c52f7f8",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "64c64cf383a127ac",
+        "concept": 0,
+        "fluency": 0
+      },
+      {
+        "item_id": "61e4ec8f298a91d4",
+        "concept": 0,
+        "fluency": 1
+      },
+      {
+        "item_id": "902d83277b542c36",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "6393393f8eeccb18",
+        "concept": 0,
+        "fluency": 1
+      },
+      {
+        "item_id": "02d9759e2c702f37",
+        "concept": 1,
+        "fluency": 1
+      },
+      {
+        "item_id": "b8403f646546b2b6",
+        "concept": 0,
+        "fluency": 1
+      },
+      {
+        "item_id": "4053f20790c17cd6",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "91c9e0afcb45cf68",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "df01aaa22ce94ae5",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "ae4d725b9685f7bd",
+        "concept": 0,
+        "fluency": 1
+      },
+      {
+        "item_id": "4ee22009ed945560",
+        "concept": 0,
+        "fluency": 0
+      },
+      {
+        "item_id": "a21b3a2af8bfbdc2",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "0cc8879067fd46df",
+        "concept": 0,
+        "fluency": 1
+      },
+      {
+        "item_id": "cee36742480096e0",
+        "concept": 1,
+        "fluency": 2
+      },
+      {
+        "item_id": "9ad32e74240311aa",
+        "concept": 1,
+        "fluency": 2
+      },
+      {
+        "item_id": "c18ae4307e8a9511",
+        "concept": 1,
+        "fluency": 0
+      },
+      {
+        "item_id": "ae92341df2fa0848",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "3afe844d7911902d",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "54caf30c22ed48db",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "283a46a637e28478",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "a0571df9d1ac9c1f",
+        "concept": 0,
+        "fluency": 1
+      },
+      {
+        "item_id": "3e5c83b3774741af",
+        "concept": 0,
+        "fluency": 1
+      },
+      {
+        "item_id": "99a6d7ab2647da95",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "fec3478c635ca701",
+        "concept": 1,
+        "fluency": 2
+      },
+      {
+        "item_id": "1f4697de979f4c6d",
+        "concept": 0,
+        "fluency": 0
+      },
+      {
+        "item_id": "e8f1549b43086be0",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "2a865f8c0cbf5460",
+        "concept": 1,
+        "fluency": 2
+      },
+      {
+        "item_id": "37f740be0c96d560",
+        "concept": 0,
+        "fluency": 1
+      },
+      {
+        "item_id": "82943b08f2a9bc4a",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "26fc49e2994af69c",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "615290b76f0c4a95",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "f34a9963d841adce",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "7b962b0b3f54dc54",
+        "concept": 0,
+        "fluency": 1
+      },
+      {
+        "item_id": "81610fc24eaf294e",
+        "concept": 1,
+        "fluency": 0
+      },
+      {
+        "item_id": "f8636e7e1aa14725",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "30dbb82c08260e99",
+        "concept": 0,
+        "fluency": 0
+      },
+      {
+        "item_id": "390b0d845a07fa09",
+        "concept": 1,
+        "fluency": 1
+      },
+      {
+        "item_id": "dc47b8ef95cd6ed2",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "e91c4c637ffcea9e",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "e62c96f6d095d0f6",
+        "concept": 0,
+        "fluency": 0
+      },
+      {
+        "item_id": "b6bf1d08ae5e9336",
+        "concept": 1,
+        "fluency": 2
+      },
+      {
+        "item_id": "675daad36b3b8309",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "a3bd225d47759686",
+        "concept": 0,
+        "fluency": 1
+      },
+      {
+        "item_id": "5ce1efd7236a5416",
+        "concept": 0,
+        "fluency": 0
+      },
+      {
+        "item_id": "4f2137c536965a4f",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "b80ee30f775f362f",
+        "concept": 0,
+        "fluency": 2
+      },
+      {
+        "item_id": "9bc6b1bae251dc70",
+        "concept": 0,
+        "fluency": 1
+      },
+      {
+        "item_id": "09579ebcc5d9598b",
+        "concept": 0,
+        "fluency": 0
+      }
+    ]
+  }
+}

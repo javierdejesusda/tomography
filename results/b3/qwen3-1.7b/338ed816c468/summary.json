@@ -1,0 +1,308 @@
+{
+  "_meta": {
+    "experiment": "b3",
+    "config_hash": "338ed816c468",
+    "seed": 0,
+    "git_sha": "b98eab43a446064d82548252bf4ab9cd5febe4b7",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-13T11:49:41+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "b3",
+      "model": "qwen3-1.7b",
+      "seed": 0,
+      "n_prompts": 100,
+      "max_new_tokens": 128,
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "num_samples": 1,
+      "layers": null,
+      "coeffs": [
+        0.05,
+        0.1,
+        0.2,
+        0.4,
+        0.8
+      ],
+      "op": "linear",
+      "mode": "relative",
+      "mask": "response",
+      "preserve_norm": false,
+      "n_calibration": 200,
+      "n_neutral": 200,
+      "batch_size": 16,
+      "bos": null,
+      "concepts": [
+        "sentiment",
+        "happiness",
+        "anger"
+      ],
+      "n_tune": 20,
+      "n_held_out": 40,
+      "method": "logistic",
+      "n_pairs": 64,
+      "min_words": 3,
+      "n_random": 1,
+      "truncate_words": 4,
+      "caa_question": "Which of the two texts expresses {description}?",
+      "prompt_base": "The following text expresses {description}. ",
+      "prompt_instruct": "Answer in a way that clearly expresses {description}. ",
+      "n_boot": 2000
+    }
+  },
+  "data": {
+    "role": "post_trained",
+    "criteria": [
+      "concept",
+      "instruction",
+      "fluency"
+    ],
+    "layers": [
+      11,
+      15,
+      20
+    ],
+    "norms": {
+      "11": 105.51195063433785,
+      "15": 174.52001163255662,
+      "20": 622.1539859682285
+    },
+    "concepts": {
+      "sentiment": "positive sentiment",
+      "happiness": "happiness",
+      "anger": "anger"
+    },
+    "arms": [
+      [
+        "none",
+        "none",
+        null
+      ],
+      [
+        "prompt",
+        "prompt",
+        null
+      ],
+      [
+        "caa/0.05",
+        "caa",
+        0.05
+      ],
+      [
+        "caa/0.1",
+        "caa",
+        0.1
+      ],
+      [
+        "caa/0.2",
+        "caa",
+        0.2
+      ],
+      [
+        "caa/0.4",
+        "caa",
+        0.4
+      ],
+      [
+        "caa/0.8",
+        "caa",
+        0.8
+      ],
+      [
+        "mean_centring/0.05",
+        "mean_centring",
+        0.05
+      ],
+      [
+        "mean_centring/0.1",
+        "mean_centring",
+        0.1
+      ],
+      [
+        "mean_centring/0.2",
+        "mean_centring",
+        0.2
+      ],
+      [
+        "mean_centring/0.4",
+        "mean_centring",
+        0.4
+      ],
+      [
+        "mean_centring/0.8",
+        "mean_centring",
+        0.8
+      ],
+      [
+        "actadd/0.05",
+        "actadd",
+        0.05
+      ],
+      [
+        "actadd/0.1",
+        "actadd",
+        0.1
+      ],
+      [
+        "actadd/0.2",
+        "actadd",
+        0.2
+      ],
+      [
+        "actadd/0.4",
+        "actadd",
+        0.4
+      ],
+      [
+        "actadd/0.8",
+        "actadd",
+        0.8
+      ],
+      [
+        "diffmean/0.05",
+        "diffmean",
+        0.05
+      ],
+      [
+        "diffmean/0.1",
+        "diffmean",
+        0.1
+      ],
+      [
+        "diffmean/0.2",
+        "diffmean",
+        0.2
+      ],
+      [
+        "diffmean/0.4",
+        "diffmean",
+        0.4
+      ],
+      [
+        "diffmean/0.8",
+        "diffmean",
+        0.8
+      ],
+      [
+        "reader/0.05",
+        "reader",
+        0.05
+      ],
+      [
+        "reader/0.1",
+        "reader",
+        0.1
+      ],
+      [
+        "reader/0.2",
+        "reader",
+        0.2
+      ],
+      [
+        "reader/0.4",
+        "reader",
+        0.4
+      ],
+      [
+        "reader/0.8",
+        "reader",
+        0.8
+      ],
+      [
+        "random/0/0.05",
+        "random/0",
+        0.05
+      ],
+      [
+        "random/0/0.1",
+        "random/0",
+        0.1
+      ],
+      [
+        "random/0/0.2",
+        "random/0",
+        0.2
+      ],
+      [
+        "random/0/0.4",
+        "random/0",
+        0.4
+      ],
+      [
+        "random/0/0.8",
+        "random/0",
+        0.8
+      ]
+    ],
+    "raw_norms": {
+      "sentiment": {
+        "caa": [
+          1.463600993156433,
+          16.146074295043945,
+          61.06601333618164
+        ],
+        "mean_centring": [
+          1853.0062255859375,
+          1859.3284912109375,
+          1880.443603515625
+        ],
+        "actadd": [
+          760.1965942382812,
+          760.2218627929688,
+          760.4548950195312
+        ]
+      },
+      "happiness": {
+        "caa": [
+          0.6819696426391602,
+          19.57193946838379,
+          96.77008056640625
+        ],
+        "mean_centring": [
+          1131.1820068359375,
+          1133.7296142578125,
+          1171.8372802734375
+        ],
+        "actadd": [
+          155.6352081298828,
+          155.68374633789062,
+          156.4643096923828
+        ]
+      },
+      "anger": {
+        "caa": [
+          0.8245975971221924,
+          15.616241455078125,
+          62.41358184814453
+        ],
+        "mean_centring": [
+          1147.50537109375,
+          1150.6787109375,
+          1183.5560302734375
+        ],
+        "actadd": [
+          851.4778442382812,
+          875.2892456054688,
+          1112.029052734375
+        ]
+      }
+    },
+    "actadd_start": 3,
+    "n_tune": 20,
+    "n_held_out": 40
+  }
+}
