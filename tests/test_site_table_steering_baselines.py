@@ -15,26 +15,17 @@ _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
 ROOT, data, models, run = _R["ROOT"], _R["data"], _R["models"], _R["run"]
 SPEC = "steering_baselines"
 DASHES = (chr(0x2014), chr(0x2013))
-ARMS = (
-    "reader",
-    "prompt",
-    "caa",
-    "mean_centring",
-    "actadd",
-    "diffmean",
-    "none",
-    "random/0",
-)
 LABELS = {
     "reader": "Logistic regression",
     "prompt": "Prompt prepending",
-    "caa": "CAA",
-    "mean_centring": f"Mean{chr(0x2011)}centring",
-    "actadd": "ActAdd",
     "diffmean": "DiffMean",
+    "caa": "CAA",
+    "actadd": "ActAdd",
+    "mean_centring": f"Mean{chr(0x2011)}centring",
     "none": "Unsteered",
     "random/0": "Random direction",
 }
+ARMS = tuple(LABELS)
 KINDS = [
     "Reader",
     "Published baselines",
@@ -46,7 +37,6 @@ KINDS = [
     "",
 ]
 ROLES = {"base": "base", "post_trained": "post-trained"}
-COEFFS = {0.05: "0.05", 0.1: "0.10", 0.2: "0.20", 0.4: "0.40", 0.8: "0.80"}
 COLUMNS = [
     "Kind",
     "Arm",
@@ -75,8 +65,8 @@ def _table(model: str) -> dict[tuple[str, str], dict[str, Any]]:
     return found
 
 
-def _three(value: float | None) -> str:
-    return "" if value is None else f"{value:.3f}"
+def _blank(value: float | None, digits: int = 3) -> str:
+    return "" if value is None else f"{value:.{digits}f}"
 
 
 def _expected(model: str) -> tuple[list[str], list[list[str]]]:
@@ -100,15 +90,13 @@ def _expected(model: str) -> tuple[list[str], list[list[str]]]:
                 [
                     kind,
                     LABELS[arm],
-                    "" if row["coeff"] is None else COEFFS[row["coeff"]],
-                    _three(row["concept_score"]),
-                    _three(row.get("instruction_score")),
-                    _three(row["fluency_score"]),
+                    _blank(row["coeff"], 2),
+                    _blank(row["concept_score"]),
+                    _blank(row.get("instruction_score")),
+                    _blank(row["fluency_score"]),
                     overall,
-                    ""
-                    if row["perplexity"] is None
-                    else f"{row['perplexity']:.1f}",
-                    _three(row["distinct_1"]),
+                    _blank(row["perplexity"], 1),
+                    _blank(row["distinct_1"]),
                 ]
             )
     return headings, rows
@@ -184,9 +172,9 @@ def test_instruction_is_shown_on_the_post_trained_checkpoint_only(
     assert instruction[:48] == [""] * 48
     assert all(cell.replace(".", "").isdigit() for cell in instruction[48:])
     for model in models("b3"):
-        criteria = data(run("b3", model), "summary.json")["criteria"]
-        role = data(run("b3", model), "summary.json")["role"]
-        assert ("instruction" in criteria) == (role == "post_trained")
+        summary = data(run("b3", model), "summary.json")
+        post_trained = summary["role"] == "post_trained"
+        assert ("instruction" in summary["criteria"]) == post_trained
 
 
 def test_cells_are_formatted_with_their_interval_and_blanks(
@@ -197,8 +185,8 @@ def test_cells_are_formatted_with_their_interval_and_blanks(
     assert first[6] == "0.500 [0.350, 0.650]"
     assert first[7] == "84.2"
     happiness = output.rows[8:16]
-    assert happiness[3][1] == f"Mean{chr(0x2011)}centring"
-    assert happiness[3][7] == "994.9"
+    assert happiness[5][1] == f"Mean{chr(0x2011)}centring"
+    assert happiness[5][7] == "994.9"
     post_happiness = output.rows[56]
     assert post_happiness[6] == "0.975 [0.753, 1.202]"
     for start in range(0, 72, 8):

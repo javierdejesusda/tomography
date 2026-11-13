@@ -19,20 +19,17 @@ from tomography.viz import paper
 
 EXPERIMENT = "b3"
 NO_BREAK = chr(0x2011)
-KINDS = {
-    "reader": "Reader",
-    "baseline": "Published baselines",
-    "control": "Controls",
-}
+BASELINE = "Published baselines"
+CONTROL = "Controls"
 ARMS = {
-    "reader": ("reader", "Logistic regression"),
-    "prompt": ("baseline", "Prompt prepending"),
-    "caa": ("baseline", "CAA"),
-    "mean_centring": ("baseline", f"Mean{NO_BREAK}centring"),
-    "actadd": ("baseline", "ActAdd"),
-    "diffmean": ("baseline", "DiffMean"),
-    "none": ("control", "Unsteered"),
-    "random/0": ("control", "Random direction"),
+    "reader": ("Reader", "Logistic regression"),
+    "prompt": (BASELINE, "Prompt prepending"),
+    "diffmean": (BASELINE, "DiffMean"),
+    "caa": (BASELINE, "CAA"),
+    "actadd": (BASELINE, "ActAdd"),
+    "mean_centring": (BASELINE, f"Mean{NO_BREAK}centring"),
+    "none": (CONTROL, "Unsteered"),
+    "random/0": (CONTROL, "Random direction"),
 }
 ROLES = {"base": "base", "post_trained": "post-trained"}
 SIZES = {
@@ -54,7 +51,6 @@ COLUMNS = [
     "Perplexity",
     "Distinct-1",
 ]
-GROUPS = (("", 2, False), ("Judge score", 4, False), ("", 2, False))
 
 
 def _blank(value: float | None, digits: int = 3) -> str:
@@ -62,11 +58,11 @@ def _blank(value: float | None, digits: int = 3) -> str:
     return "" if value is None else cells.num(value, digits)
 
 
-def _row(row: dict[str, Any], kind: str) -> list[str]:
+def _row(row: dict[str, Any], kind: str, label: str) -> list[str]:
     """Writes the cells of one arm on one concept."""
     return [
         kind,
-        ARMS[row["arm"]][1],
+        label,
         _blank(row["coeff"], 2),
         cells.num(row["concept_score"]),
         _blank(row.get("instruction_score")),
@@ -130,16 +126,14 @@ def build(manifest: Manifest) -> TableOutput:
     rows: list[list[str]] = []
     headings: list[tuple[int, str]] = []
     extra: list[tuple[str, ...]] = []
-    rules: list[int] = []
-    sizes: dict[str, set[int]] = {key: set() for key in SIZES}
+    sizes: set[tuple[int, ...]] = set()
     for model in models:
         run = manifest.run(EXPERIMENT, model)
         assert run is not None
         name = paper.display_name(model)
         summary = runfiles.summary(run)
         config = json.loads((run / "config.json").read_text(encoding="utf-8"))
-        for key, field in SIZES.items():
-            sizes[key].add(int(config[field]))
+        sizes.add(tuple(int(config[field]) for field in SIZES.values()))
         table = runfiles.rows(run, "table.json")
         if {r["concept"] for r in table} != set(summary["concepts"]):
             raise ValueError(f"{EXPERIMENT}/{model} holds other concepts")
@@ -153,15 +147,15 @@ def build(manifest: Manifest) -> TableOutput:
             )
             shown = ""
             for row in _block(model, table, summary, concept):
-                kind = ARMS[row["arm"]][0]
-                if kind != shown and shown:
-                    rules.append(len(rows))
-                rows.append(_row(row, KINDS[kind] if kind != shown else ""))
+                kind, label = ARMS[row["arm"]]
+                rows.append(_row(row, "" if kind == shown else kind, label))
                 extra.append((name, concept, cells.num(row["classifier"])))
                 shown = kind
-    if any(len(found) != 1 for found in sizes.values()):
+    if len(sizes) != 1:
         raise ValueError(f"{EXPERIMENT} runs differ in their sizes")
-    n = {key: found.pop() for key, found in sizes.items()}
+    n = dict(zip(SIZES, sizes.pop(), strict=True))
+    opened = {place for place, _ in headings}
+    rules = [i for i, line in enumerate(rows) if line[0] and i not in opened]
     counts = {
         "with_run": stats.per_role(
             {m: m in models for m in manifest.checkpoints()}
@@ -215,7 +209,7 @@ def build(manifest: Manifest) -> TableOutput:
         "ll" + "r" * (len(COLUMNS) - 2),
         [],
         {"rows": float(len(rows)), **{k: float(v) for k, v in n.items()}},
-        groups=GROUPS,
+        groups=(("", 2, False), ("Judge score", 4, False), ("", 2, False)),
         row_groups=tuple(rules),
         counts=counts,
         compact_print=True,
