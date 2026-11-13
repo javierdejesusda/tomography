@@ -589,7 +589,9 @@ results on the eight laptop checkpoints are in the findings.
 
 `b3` (`experiments/b3_steering_baselines.py`) steers the same prompts toward a concept with published methods, our
 reading vector and controls, under the protocol of AxBench (Wu et al. 2025, `wu2025axbench`) adapted to each role.
-It has code and tests only; no run is reported yet.
+It ran on one checkpoint per role, `gpt2-xl` and `qwen3-1.7b-base` (base) and `qwen3-1.7b` (post-trained), with
+`n_tune` 20 and the other settings at their defaults; the results are in the
+[findings](findings.md#published-steering-baselines-b3).
 
 - Protocol: the prompts are split into a tuning half (`n_tune`, 40) and a held-out half (`n_held_out`, 40) that share
   no prompt. Every arm generates 128 new tokens on both halves at every coefficient, one sample per prompt with the
@@ -625,6 +627,17 @@ It has code and tests only; no run is reported yet.
   Cohen's kappa and the quadratic-weighted kappa (the scores are ordinal, so a 0 against a 2 weighs four times a 1
   against a 2), pooled and per stage. The judge is a model run by hand, identified by its model id and the rubric,
   not a pinned snapshot behind an interface; the raw judgments are stored.
+- Judging protocol of the runs: the judge was `claude-opus-5-5`, run as agents of an interactive session, with
+  no API client. Each judge agent was given one folder under a neutral name, holding `rubric.txt`,
+  `criteria.json` and its batch files and nothing else, so it saw no stage, arm, coefficient, checkpoint or
+  judge slot. The second slot was scored by agents other than those of the first. `judge export` takes the
+  seed of the shuffle and the ids from `--seed`, and by default derives it from the run seed, so runs with the
+  same seed get the same item and batch ids; the runs therefore set it per run (tuning 15001, 15002 and
+  15003, held-out 25001, 25002 and 25003, for `gpt2-xl`, `qwen3-1.7b-base` and `qwen3-1.7b`). In the runs a
+  format checker read each judgments file before its import. `judge import` refuses a file with a missing,
+  repeated or unknown item, another field or another value than 0, 1 or 2, and a batch whose file or
+  `rubric.txt` no longer has the digest stored at export; a refused import changes nothing. No import of the
+  runs was refused, and every judge transcript was checked: no judge wrote or ran code that assigned scores.
 - Cross-check: the pinned classifier of the concept (`sentiment-primary` or `emotion-primary`) scores every
   generation; `table.json` carries its held-out mean and `summary_judged.json` its rank correlation with the judged
   concept score.

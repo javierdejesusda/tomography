@@ -19,7 +19,7 @@ table rows), the fluency means, ratios and counts of cells past the rule and the
 of the runs made at `f4d414d` and of the M1, C2, C5 and P7 runs of the 4B pair (computed from the per-cell rows and the curves files), the P7 counts of inverted
 units on the GPT-2 sizes (recomputed from the per-seed curves), the P10b minima and maxima over layers and the counts of cells in P10a and P10b (computed from the table, hedge gap, forced in range, width, diagnostic, hand check, curves, transfer, baseline and people files), the V1 means, ranges and counts over draws and cells (computed from `projections.npz` of the V1 runs), the largest V1 reproduction differences, the sums of a recomputed and a committed AUROC and the counts of cells beyond the tolerance (computed from `summary.json` of the V1 runs, and from `projections.npz` and the `per_seed` arrays of the P9b curves files where they are taken per draw or per method), the sums and ranges of the V1 variance shares (computed from `pca2d.npz` and `text2d.npz`), and differences or ranges quoted in the text. The P8 tables are read from the P8 run, which aggregates
 finished runs. Runs are identified by config hash in [Run identity](#run-identity). The document is not
-complete: [Pending](#pending) lists what it does not yet report. The counts of inverted units by layer, the fluency means, ratios and counts of cells past the rule, the random-arm ranges, the counts of emotions above the random maximum and the differences between shares in the chain 42 runs (C2, C5 and P7 on `gpt2`, `gpt2-medium` and the Qwen3 0.6B pair) are computed from the per-seed curves, the per-cell rows and the table files of those runs. The R8 per-seed oracle, Table 9 average rows, per-layer curve values, maxima over layers of the reader, random and shuffled series, and the TruthfulQA per-question comparison are computed from the `summary.json`, `curves_<task>.npz` and `fewshot_tqa.npz` files of the R8 runs. The M2 best cells and their gaps to the two baselines, the maxima per readout, the differences between scorers at `last`, the differences between the pair accuracy and the thresholded accuracy, the utility ranges, the changes between conditions and their ranges, the MLP minus the best linear scorer, the random-direction maxima and margins, the means, ranges and maxima of the shuffled-label rows (the superseded ones included), and every count over cells, rows, comparisons or families (cells below 0.5 or with intervals apart, MLP and joint cells above or below, comparisons that favour a cell or a baseline, intervals that agree with the Holm-adjusted p values, and the counts of the decision-gate facts) are computed from the `table.json` and `comparisons.json` files of the M2 runs. The M3 differences between point estimates, the changes between conditions and their ranges, and every count over cells, rows or comparisons (favoured rows, cells with a favoured row, the decision-gate facts, the rows repeated across runs and the fit warnings, stalls and restarts) are computed from the `table.json`, `comparisons.json`, `diagnostics.json` and `summary.json` files of the M3 runs, and the M3 tie shares, chosen penalties, head norms and score spreads from their `scores_<task>.npz` and `cellheads_<task>.npz` files, which are not committed. The B1 differences between point estimates, the ranges over the checkpoints of a family, the widths of the intervals, the lists of checkpoints and the comparisons of intervals quoted in the text are computed from the `table.json` and `table_paired.json` files of the B1 runs. The B2 differences between point estimates, the ranges over checkpoints, the counts of cells and the comparisons of intervals quoted in the text are computed from the `table.json` and `summary.json` files of the B2 runs, the per-seed scores of LAT from their curves files, and the counts of test pairs whose statement is true from the Geometry of Truth loader.
+complete: [Pending](#pending) lists what it does not yet report. The counts of inverted units by layer, the fluency means, ratios and counts of cells past the rule, the random-arm ranges, the counts of emotions above the random maximum and the differences between shares in the chain 42 runs (C2, C5 and P7 on `gpt2`, `gpt2-medium` and the Qwen3 0.6B pair) are computed from the per-seed curves, the per-cell rows and the table files of those runs. The R8 per-seed oracle, Table 9 average rows, per-layer curve values, maxima over layers of the reader, random and shuffled series, and the TruthfulQA per-question comparison are computed from the `summary.json`, `curves_<task>.npz` and `fewshot_tqa.npz` files of the R8 runs. The M2 best cells and their gaps to the two baselines, the maxima per readout, the differences between scorers at `last`, the differences between the pair accuracy and the thresholded accuracy, the utility ranges, the changes between conditions and their ranges, the MLP minus the best linear scorer, the random-direction maxima and margins, the means, ranges and maxima of the shuffled-label rows (the superseded ones included), and every count over cells, rows, comparisons or families (cells below 0.5 or with intervals apart, MLP and joint cells above or below, comparisons that favour a cell or a baseline, intervals that agree with the Holm-adjusted p values, and the counts of the decision-gate facts) are computed from the `table.json` and `comparisons.json` files of the M2 runs. The M3 differences between point estimates, the changes between conditions and their ranges, and every count over cells, rows or comparisons (favoured rows, cells with a favoured row, the decision-gate facts, the rows repeated across runs and the fit warnings, stalls and restarts) are computed from the `table.json`, `comparisons.json`, `diagnostics.json` and `summary.json` files of the M3 runs, and the M3 tie shares, chosen penalties, head norms and score spreads from their `scores_<task>.npz` and `cellheads_<task>.npz` files, which are not committed. The B1 differences between point estimates, the ranges over the checkpoints of a family, the widths of the intervals, the lists of checkpoints and the comparisons of intervals quoted in the text are computed from the `table.json` and `table_paired.json` files of the B1 runs. The B2 differences between point estimates, the ranges over checkpoints, the counts of cells and the comparisons of intervals quoted in the text are computed from the `table.json` and `summary.json` files of the B2 runs, the per-seed scores of LAT from their curves files, and the counts of test pairs whose statement is true from the Geometry of Truth loader. The B3 comparisons of intervals, the counts of arms, cells, ties and comparisons, the ranges over cells and the perplexity ratios to the unsteered arm quoted in the text are computed from the `table.json`, `table_tuning.json` and `summary_judged.json` files of the B3 runs, and the counts of judgments, batches and doubly judged scores from their `judge_export_<stage>.json` and `judgments_<batch>.json` files.
 
 Contents:
 
@@ -39,16 +39,17 @@ C5)](#other-steering-experiments-on-gpt2-and-the-larger-gpt-2-sizes-m1-c2-p7-lr1
 (P8)](#base-against-post-trained-qwen3-p8) 14. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
 15. [Published detection baselines (B1)](#published-detection-baselines-b1)
 16. [Published finder baselines (B2)](#published-finder-baselines-b2)
-17. [Approximate answers: range against exact quantities
-(P10)](#approximate-answers-range-against-exact-quantities-p10) 18. [Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5,
-LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 19. [Position
+17. [Published steering baselines (B3)](#published-steering-baselines-b3)
+18. [Approximate answers: range against exact quantities
+(P10)](#approximate-answers-range-against-exact-quantities-p10) 19. [Qwen3: emotions, TruthfulQA, seed agreement, logit lens, steering and control (R4, R6, A1, A2, M1, C2, C4, C5,
+LR1)](#qwen3-emotions-truthfulqa-seed-agreement-logit-lens-steering-and-control-r4-r6-a1-a2-m1-c2-c4-c5-lr1) 20. [Position
 and stimulus-set size on qwen3-1.7b-base and qwen3-1.7b (P2,
-P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 20. [Stimulus-set size and direction finder
+P3)](#position-and-stimulus-set-size-on-qwen3-17b-base-and-qwen3-17b-p2-p3) 21. [Stimulus-set size and direction finder
 across the GPT-2 sizes and Qwen3
-(P3, P4)](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) 21. [Persona wording and
-instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 22. [Template steering on the Qwen3 0.6B, 1.7B and 4B pairs
-(P7)](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7) 23. [LAT against few-shot prompting on the QA tasks
-(R8)](#lat-against-few-shot-prompting-on-the-qa-tasks-r8) 24. [Reader comparison (M2)](#reader-comparison-m2) 25. [Full-matrix readers (M3)](#full-matrix-readers-m3) 26. [Run identity](#run-identity) 27. [Pending](#pending)
+(P3, P4)](#stimulus-set-size-and-direction-finder-across-the-gpt-2-sizes-and-qwen3-p3-p4) 22. [Persona wording and
+instruction confounds (P5)](#persona-wording-and-instruction-confounds-p5) 23. [Template steering on the Qwen3 0.6B, 1.7B and 4B pairs
+(P7)](#template-steering-on-the-qwen3-06b-17b-and-4b-pairs-p7) 24. [LAT against few-shot prompting on the QA tasks
+(R8)](#lat-against-few-shot-prompting-on-the-qa-tasks-r8) 25. [Reader comparison (M2)](#reader-comparison-m2) 26. [Full-matrix readers (M3)](#full-matrix-readers-m3) 27. [Run identity](#run-identity) 28. [Pending](#pending)
 
 ## Reading conventions
 
@@ -5148,6 +5149,204 @@ Over the 32 cells the loss ranges from 4.8e-07 to 1.6e-02: from 4.3e-05 to 1.6e-
 - **Controls.** The shuffled control reads 0.484 to 0.528, with a Wilson interval that includes 0.5 in all 32 cells (its bootstrap interval excludes 0.5 in 7, at 0.514 to 0.528). The text-only controls are the same on every checkpoint: 0.586 and 0.616 on sentiment, with Wilson intervals above 0.5, and 0.499 to 0.523 on the truth sets, with intervals that include 0.5. The random direction has a Wilson interval above 0.5 in 14 of the 16 Qwen3 cells and on larger_than for the four GPT-2 sizes, and reads 0.872 and 0.901 on cities and larger_than for `qwen3-1.7b-base`.
 - **What the runs do not show.** Each checkpoint has one run, and neither interval covers the variation between runs. On sentiment CCS reads one prompt of its own, where Burns et al. average several, and the other finders read R1's prompts. The two-score pattern of LAT is read from the stored per-seed accuracies and the statement counts, not from the directions, which are not stored. The GPT-2 sizes and the Qwen3 checkpoints run in different dtypes (float32, float16 for `gpt2-xl`, bfloat16). TruthfulQA is not read, and the Qwen3 4B pair has not been run.
 
+## Published steering baselines (B3)
+
+B3 steers the generations of a model toward a concept with five published methods, as baselines, beside our reading vector and two controls, and has a judge rate every generation, under the protocol of AxBench (Wu et al. 2025, `wu2025axbench`) adapted to each role. The baselines are prompt prepending (`prompt`) and the difference of class means (`diffmean`, the mass-mean direction of Marks and Tegmark 2024, `marks2024geometry`), both baselines of AxBench, contrastive activation addition (`caa`; Rimsky et al. 2024, `rimsky2024steering`), activation addition (`actadd`; Turner et al. 2023, `turner2023steering`) and mean-centring (`mean_centring`; Jorgensen et al. 2023, `jorgensen2023improving`). Our reading vector (`reader`) is the `logistic` finder of C1 and C2 on their stimuli, not the LAT reader (`pca_diff`) of B2. The controls are the unsteered model (`none`) and one random unit direction steered like the vector arms (`random/0`). The recipes, and where each departs from its published one, are in the [methodology](methodology.md#published-steering-baselines-b3). B3 ran on one checkpoint per role, one run each, made at `b98eab4` ([Run identity](#run-identity)):
+
+| Checkpoint      | Role         | B3 run                            | Blocks | Steered layers | Weights  | Commit    |
+| --------------- | ------------ | --------------------------------- | ------ | -------------- | -------- | --------- |
+| gpt2-xl         | base         | `b3/gpt2-xl/8a87d648035b`         | 48     | L19, L26, L34  | float16  | `b98eab4` |
+| qwen3-1.7b-base | base         | `b3/qwen3-1.7b-base/61e330d093e9` | 28     | L11, L15, L20  | bfloat16 | `b98eab4` |
+| qwen3-1.7b      | post-trained | `b3/qwen3-1.7b/338ed816c468`      | 28     | L11, L15, L20  | bfloat16 | `b98eab4` |
+
+Each run steers toward three concepts: `sentiment` (the judge reads the description "positive sentiment"), `happiness` and `anger`. A base checkpoint continues the first 4 words of a held-out WikiText passage and is judged on `concept` and `fluency`; the post-trained checkpoint answers an AlpacaEval instruction rendered with its chat template (thinking disabled) and is judged on `concept`, `instruction` and `fluency`. The prompts of a run are split into a tuning half of 20 prompts (`n_tune`, set below the config default of 40 to limit the number of judgments) and a held-out half of 40 (`n_held_out`) that share no prompt. Every arm generates 128 new tokens per prompt, one sample at temperature 0.8 and top-p 0.95, with seed 0 for every arm. The six vector arms (`caa`, `mean_centring`, `actadd`, `diffmean`, `reader` and `random/0`) add their direction at three layers, at 40, 55 and 70 percent of the depth, with five coefficients (0.05, 0.1, 0.2, 0.4 and 0.8) relative to the mean residual norm of 200 calibration passages; `caa`, `mean_centring`, `diffmean` and `reader` are built from the same 64 training pairs per concept. `actadd` starts at token 0 of the prompt on the base checkpoints and at token 3, the first token of the user text, on `qwen3-1.7b` (`actadd_start` of `summary.json`). Each config is the default B3 config of its model except `n_tune` (20); the batch size is 16.
+
+A judge rated each generation 0, 1 or 2 per criterion; the overall score of a generation is the harmonic mean of its criteria, 0 when any of them is 0, so it lies between 0 and 2. Per run, the tuning half has 1,920 judged generations (3 concepts, 20 prompts and 32 arm and coefficient cells: `none`, `prompt` and the five coefficients of each vector arm) and the held-out half 960 (3 concepts, 40 prompts and the 8 arms, each at the coefficient it chose). No generation of either half was empty (`n_empty` is 0 in every row of `table.json` and `table_tuning.json`). A held-out row gives the mean score per criterion over the 40 prompts and the overall score with a 95 percent percentile bootstrap interval over the prompts (2,000 resamples). The interval of each arm is computed on its own, not as a paired difference between arms: below, two arms are apart when their intervals do not overlap, and an overlap does not show that two arms are equal.
+
+Each held-out row also carries three numbers that need no judge: the perplexity of 200 neutral held-out WikiText passages under the steered model at that arm and coefficient (`none` gives the unsteered value, the same for every concept; `prompt` changes the prompt and not the model, so it has none), the distinct-1 of the 40 held-out generations (the share of distinct tokens, pooled over the generations), and the mean score of the pinned classifier of the concept over the same generations (for sentiment the probability of the positive class of `siebert/sentiment-roberta-large-english`, for happiness and anger the probability of joy and of anger from `j-hartmann/emotion-english-distilroberta-base`).
+
+### Coefficient selection
+
+Each arm with a coefficient takes the one with the highest mean overall score on the tuning half; a tie goes to the smallest magnitude, then to the lower value. The held-out export stored the choice of every arm in `judge_selection.json` before any held-out batch existed. The coefficient each arm chose, with its mean overall score on the 20 tuning prompts in parentheses (`none` and `prompt` have no coefficient):
+
+| Checkpoint      | Concept   | reader       | prompt  | caa          | mean_centring | actadd       | diffmean    | none    | random/0     |
+| --------------- | --------- | ------------ | ------- | ------------ | ------------- | ------------ | ----------- | ------- | ------------ |
+| gpt2-xl         | sentiment | 0.4 (0.567)  | (0.550) | 0.2 (0.333)  | 0.2 (1.067)   | 0.8 (0.783)  | 0.1 (0.633) | (0.267) | 0.2 (0.583)  |
+| gpt2-xl         | happiness | 0.4 (0.950)  | (1.167) | 0.4 (0.167)  | 0.4 (0.967)   | 0.1 (0.200)  | 0.4 (0.983) | (0.133) | 0.2 (0.167)  |
+| gpt2-xl         | anger     | 0.4 (0.367)  | (0.850) | 0.1 (0.267)  | 0.2 (0.550)   | 0.8 (0.233)  | 0.2 (0.300) | (0.133) | 0.2 (0.233)  |
+| qwen3-1.7b-base | sentiment | 0.05 (0.533) | (0.950) | 0.2 (0.817)  | 0.1 (0.683)   | 0.1 (0.283)  | 0.1 (0.467) | (0.400) | 0.1 (0.467)  |
+| qwen3-1.7b-base | happiness | 0.4 (0.683)  | (0.783) | 0.4 (0.433)  | 0.2 (0.717)   | 0.8 (0.133)  | 0.2 (0.600) | (0.167) | 0.05 (0.067) |
+| qwen3-1.7b-base | anger     | 0.1 (0.200)  | (0.933) | 0.05 (0.333) | 0.2 (0.517)   | 0.05 (0.067) | 0.1 (0.133) | (0.267) | 0.1 (0.117)  |
+| qwen3-1.7b      | sentiment | 0.4 (0.890)  | (1.575) | 0.2 (0.875)  | 0.05 (0.875)  | 0.1 (0.875)  | 0.1 (0.800) | (0.800) | 0.4 (0.875)  |
+| qwen3-1.7b      | happiness | 0.4 (1.070)  | (1.050) | 0.4 (0.360)  | 0.05 (0.150)  | 0.4 (0.225)  | 0.4 (1.225) | (0.225) | 0.05 (0.225) |
+| qwen3-1.7b      | anger     | 0.4 (0.465)  | (0.585) | 0.1 (0.075)  | 0.05 (0.000)  | 0.05 (0.000) | 0.4 (0.510) | (0.000) | 0.05 (0.000) |
+
+- **Ties.** In 11 of the 54 choices of a coefficient the highest tuning mean was shared by two or more coefficients, and the rule took the smallest: `actadd` on `gpt2-xl` happiness (0.1 and 0.2 tied at 0.200); `actadd` on `qwen3-1.7b-base` sentiment (0.1 and 0.8 tied at 0.283); `random/0` on `qwen3-1.7b-base` happiness (0.05 and 0.1 tied at 0.067); `actadd` on `qwen3-1.7b-base` anger (0.05, 0.1 and 0.4 tied at 0.067); `diffmean` on `qwen3-1.7b` sentiment (0.1 and 0.2 tied at 0.800); `mean_centring` on `qwen3-1.7b` happiness (0.05, 0.1 and 0.4 tied at 0.150); `random/0` on `qwen3-1.7b` happiness (0.05, 0.1, 0.2 and 0.4 tied at 0.225); `caa` on `qwen3-1.7b` anger (0.1 and 0.2 tied at 0.075). On `qwen3-1.7b` anger, `mean_centring`, `actadd` and `random/0` scored 0 at all five coefficients on the tuning half, so each took 0.05.
+- **Chosen coefficients.** Over the 54 choices, the coefficient was 0.05 in 10, 0.1 in 13, 0.2 in 12, 0.4 in 16 and 0.8 in 3. The largest, 0.8, was chosen only by `actadd` on `gpt2-xl` sentiment, `actadd` on `gpt2-xl` anger and `actadd` on `qwen3-1.7b-base` happiness.
+
+### Held-out scores on gpt2-xl (base)
+
+Held-out scores (40 prompts per concept), each arm at its chosen coefficient; the scores are means of 0, 1 or 2, and the overall score is given with its bootstrap interval:
+
+| Concept   | Arm           | Kind     | Coefficient | Concept score | Fluency score | Overall [95% interval] | Perplexity | Distinct-1 | Classifier |
+| --------- | ------------- | -------- | ----------- | ------------- | ------------- | ---------------------- | ---------- | ---------- | ---------- |
+| sentiment | reader        | reader   | 0.4         | 0.600         | 0.800         | 0.500 [0.350, 0.650]   | 84.2       | 0.181      | 0.771      |
+| sentiment | prompt        | baseline |             | 0.825         | 1.700         | 0.900 [0.675, 1.133]   |            | 0.302      | 0.773      |
+| sentiment | caa           | baseline | 0.2         | 0.475         | 1.425         | 0.517 [0.350, 0.700]   | 37.4       | 0.268      | 0.822      |
+| sentiment | mean_centring | baseline | 0.2         | 1.075         | 0.725         | 0.708 [0.542, 0.892]   | 68.8       | 0.247      | 0.728      |
+| sentiment | actadd        | baseline | 0.8         | 0.550         | 1.850         | 0.642 [0.425, 0.867]   | 32.6       | 0.328      | 0.749      |
+| sentiment | diffmean      | baseline | 0.1         | 0.325         | 1.750         | 0.383 [0.200, 0.583]   | 32.1       | 0.290      | 0.753      |
+| sentiment | none          | control  |             | 0.375         | 1.850         | 0.467 [0.267, 0.683]   | 30.9       | 0.327      | 0.723      |
+| sentiment | random/0      | control  | 0.2         | 0.600         | 1.775         | 0.683 [0.467, 0.917]   | 34.6       | 0.316      | 0.884      |
+| happiness | reader        | reader   | 0.4         | 1.200         | 0.750         | 0.775 [0.583, 0.967]   | 79.0       | 0.231      | 0.503      |
+| happiness | prompt        | baseline |             | 0.925         | 1.350         | 0.783 [0.550, 1.017]   |            | 0.237      | 0.375      |
+| happiness | caa           | baseline | 0.4         | 0.150         | 0.650         | 0.150 [0.050, 0.275]   | 88.2       | 0.216      | 0.086      |
+| happiness | mean_centring | baseline | 0.4         | 1.000         | 0.025         | 0.025 [0.000, 0.075]   | 994.9      | 0.153      | 0.129      |
+| happiness | actadd        | baseline | 0.1         | 0.100         | 1.850         | 0.133 [0.033, 0.267]   | 31.0       | 0.327      | 0.087      |
+| happiness | diffmean      | baseline | 0.4         | 1.400         | 0.625         | 0.750 [0.550, 0.942]   | 81.2       | 0.188      | 0.563      |
+| happiness | none          | control  |             | 0.100         | 1.825         | 0.133 [0.033, 0.267]   | 30.9       | 0.327      | 0.123      |
+| happiness | random/0      | control  | 0.2         | 0.175         | 1.650         | 0.233 [0.100, 0.400]   | 33.8       | 0.283      | 0.157      |
+| anger     | reader        | reader   | 0.4         | 0.225         | 0.625         | 0.158 [0.050, 0.292]   | 135.6      | 0.150      | 0.151      |
+| anger     | prompt        | baseline |             | 0.975         | 1.725         | 0.967 [0.717, 1.208]   |            | 0.276      | 0.467      |
+| anger     | caa           | baseline | 0.1         | 0.175         | 1.875         | 0.225 [0.067, 0.400]   | 32.4       | 0.343      | 0.074      |
+| anger     | mean_centring | baseline | 0.2         | 0.700         | 1.125         | 0.717 [0.567, 0.867]   | 81.0       | 0.205      | 0.190      |
+| anger     | actadd        | baseline | 0.8         | 0.100         | 1.850         | 0.125 [0.025, 0.258]   | 34.2       | 0.339      | 0.090      |
+| anger     | diffmean      | baseline | 0.2         | 0.225         | 1.750         | 0.267 [0.100, 0.467]   | 38.4       | 0.284      | 0.120      |
+| anger     | none          | control  |             | 0.025         | 1.850         | 0.033 [0.000, 0.100]   | 30.9       | 0.327      | 0.079      |
+| anger     | random/0      | control  | 0.2         | 0.125         | 1.800         | 0.167 [0.033, 0.300]   | 35.8       | 0.310      | 0.108      |
+
+- **Highest overall score.** On sentiment `prompt`, 0.900 [0.675, 1.133] (the intervals of `caa`, `mean_centring`, `actadd`, `none` and `random/0` overlap it); on happiness `prompt`, 0.783 [0.550, 1.017] (the intervals of `reader` and `diffmean` overlap it); on anger `prompt`, 0.967 [0.717, 1.208] (the interval of `mean_centring` overlaps it).
+- **Against the controls.** On sentiment (`none` 0.467 [0.267, 0.683], `random/0` 0.683 [0.467, 0.917]) no arm lies apart above either control; on happiness (`none` 0.133 [0.033, 0.267], `random/0` 0.233 [0.100, 0.400]) `reader`, `prompt` and `diffmean` lie apart above both controls; on anger (`none` 0.033 [0.000, 0.100], `random/0` 0.167 [0.033, 0.300]) `prompt` and `mean_centring` lie apart above both controls.
+- **The reader against the baselines.** On sentiment the reader (0.500 [0.350, 0.650]) lies apart below `prompt`, and overlaps `caa`, `mean_centring`, `actadd` and `diffmean`; on happiness the reader (0.775 [0.583, 0.967]) lies apart above `caa`, `mean_centring` and `actadd`, and overlaps `prompt` and `diffmean`; on anger the reader (0.158 [0.050, 0.292]) lies apart below `prompt` and `mean_centring`, and overlaps `caa`, `actadd` and `diffmean`.
+- **Side effects.** The unsteered perplexity of neutral text is 30.9. Of the 18 chosen vector arms, 8 raise it above 1.5 times that value (the ratio of the fluency rule of the methodology): `reader` on sentiment (84.2, fluency score 0.800); `mean_centring` on sentiment (68.8, fluency score 0.725); `reader` on happiness (79.0, fluency score 0.750); `caa` on happiness (88.2, fluency score 0.650); `mean_centring` on happiness (994.9, fluency score 0.025); `diffmean` on happiness (81.2, fluency score 0.625); `reader` on anger (135.6, fluency score 0.625); `mean_centring` on anger (81.0, fluency score 1.125). The distinct-1 of the seven other arms is 0.150 to 0.343, against 0.327 for `none`; no arm is below 0.15.
+
+### Held-out scores on qwen3-1.7b-base (base)
+
+Held-out scores (40 prompts per concept), each arm at its chosen coefficient; the scores are means of 0, 1 or 2, and the overall score is given with its bootstrap interval:
+
+| Concept   | Arm           | Kind     | Coefficient | Concept score | Fluency score | Overall [95% interval] | Perplexity | Distinct-1 | Classifier |
+| --------- | ------------- | -------- | ----------- | ------------- | ------------- | ---------------------- | ---------- | ---------- | ---------- |
+| sentiment | reader        | reader   | 0.05        | 0.300         | 1.375         | 0.242 [0.092, 0.425]   | 18.8       | 0.287      | 0.925      |
+| sentiment | prompt        | baseline |             | 0.850         | 1.550         | 0.792 [0.542, 1.042]   |            | 0.294      | 0.823      |
+| sentiment | caa           | baseline | 0.2         | 0.525         | 1.375         | 0.492 [0.300, 0.692]   | 21.6       | 0.281      | 0.946      |
+| sentiment | mean_centring | baseline | 0.1         | 0.425         | 1.500         | 0.458 [0.258, 0.667]   | 20.2       | 0.292      | 0.894      |
+| sentiment | actadd        | baseline | 0.1         | 0.375         | 1.700         | 0.433 [0.241, 0.625]   | 18.7       | 0.314      | 0.845      |
+| sentiment | diffmean      | baseline | 0.1         | 0.400         | 1.475         | 0.408 [0.225, 0.608]   | 19.2       | 0.287      | 0.919      |
+| sentiment | none          | control  |             | 0.250         | 1.600         | 0.258 [0.100, 0.450]   | 18.6       | 0.300      | 0.899      |
+| sentiment | random/0      | control  | 0.1         | 0.300         | 1.525         | 0.292 [0.133, 0.475]   | 19.2       | 0.292      | 0.800      |
+| happiness | reader        | reader   | 0.4         | 0.625         | 1.075         | 0.583 [0.408, 0.783]   | 64.3       | 0.214      | 0.397      |
+| happiness | prompt        | baseline |             | 0.550         | 1.425         | 0.567 [0.342, 0.800]   |            | 0.267      | 0.328      |
+| happiness | caa           | baseline | 0.4         | 0.750         | 0.775         | 0.583 [0.408, 0.767]   | 36.2       | 0.196      | 0.419      |
+| happiness | mean_centring | baseline | 0.2         | 0.775         | 1.000         | 0.667 [0.500, 0.842]   | 49.0       | 0.216      | 0.162      |
+| happiness | actadd        | baseline | 0.8         | 0.050         | 1.525         | 0.058 [0.000, 0.150]   | 18.6       | 0.299      | 0.073      |
+| happiness | diffmean      | baseline | 0.2         | 0.225         | 1.700         | 0.300 [0.133, 0.467]   | 23.9       | 0.285      | 0.235      |
+| happiness | none          | control  |             | 0.100         | 1.675         | 0.125 [0.025, 0.258]   | 18.6       | 0.300      | 0.091      |
+| happiness | random/0      | control  | 0.05        | 0.100         | 1.500         | 0.083 [0.000, 0.192]   | 18.8       | 0.287      | 0.094      |
+| anger     | reader        | reader   | 0.1         | 0.075         | 1.450         | 0.092 [0.000, 0.200]   | 19.6       | 0.279      | 0.075      |
+| anger     | prompt        | baseline |             | 0.650         | 1.475         | 0.583 [0.367, 0.833]   |            | 0.261      | 0.404      |
+| anger     | caa           | baseline | 0.05        | 0.100         | 1.575         | 0.092 [0.000, 0.217]   | 18.9       | 0.296      | 0.081      |
+| anger     | mean_centring | baseline | 0.2         | 0.400         | 0.900         | 0.383 [0.233, 0.533]   | 50.2       | 0.194      | 0.166      |
+| anger     | actadd        | baseline | 0.05        | 0.025         | 1.475         | 0.033 [0.000, 0.133]   | 18.6       | 0.291      | 0.061      |
+| anger     | diffmean      | baseline | 0.1         | 0.075         | 1.500         | 0.067 [0.000, 0.167]   | 19.5       | 0.279      | 0.077      |
+| anger     | none          | control  |             | 0.025         | 1.650         | 0.033 [0.000, 0.100]   | 18.6       | 0.300      | 0.073      |
+| anger     | random/0      | control  | 0.1         | 0.050         | 1.500         | 0.067 [0.000, 0.167]   | 19.1       | 0.283      | 0.041      |
+
+- **Highest overall score.** On sentiment `prompt`, 0.792 [0.542, 1.042] (the intervals of `caa`, `mean_centring`, `actadd` and `diffmean` overlap it); on happiness `mean_centring`, 0.667 [0.500, 0.842] (the intervals of `reader`, `prompt` and `caa` overlap it); on anger `prompt`, 0.583 [0.367, 0.833] (the interval of `mean_centring` overlaps it).
+- **Against the controls.** On sentiment (`none` 0.258 [0.100, 0.450], `random/0` 0.292 [0.133, 0.475]) `prompt` lies apart above both controls; on happiness (`none` 0.125 [0.025, 0.258], `random/0` 0.083 [0.000, 0.192]) `reader`, `prompt`, `caa` and `mean_centring` lie apart above both controls; on anger (`none` 0.033 [0.000, 0.100], `random/0` 0.067 [0.000, 0.167]) `prompt` and `mean_centring` lie apart above both controls.
+- **The reader against the baselines.** On sentiment the reader (0.242 [0.092, 0.425]) lies apart below `prompt`, and overlaps `caa`, `mean_centring`, `actadd` and `diffmean`; on happiness the reader (0.583 [0.408, 0.783]) lies apart above `actadd`, and overlaps `prompt`, `caa`, `mean_centring` and `diffmean`; on anger the reader (0.092 [0.000, 0.200]) lies apart below `prompt` and `mean_centring`, and overlaps `caa`, `actadd` and `diffmean`.
+- **Side effects.** The unsteered perplexity of neutral text is 18.6. Of the 18 chosen vector arms, 4 raise it above 1.5 times that value (the ratio of the fluency rule of the methodology): `reader` on happiness (64.3, fluency score 1.075); `caa` on happiness (36.2, fluency score 0.775); `mean_centring` on happiness (49.0, fluency score 1.000); `mean_centring` on anger (50.2, fluency score 0.900). The distinct-1 of the seven other arms is 0.194 to 0.314, against 0.300 for `none`; no arm is below 0.15.
+
+### Held-out scores on qwen3-1.7b (post-trained)
+
+Held-out scores (40 prompts per concept), each arm at its chosen coefficient; the scores are means of 0, 1 or 2, and the overall score is given with its bootstrap interval:
+
+| Concept   | Arm           | Kind     | Coefficient | Concept score | Instruction score | Fluency score | Overall [95% interval] | Perplexity | Distinct-1 | Classifier |
+| --------- | ------------- | -------- | ----------- | ------------- | ----------------- | ------------- | ---------------------- | ---------- | ---------- | ---------- |
+| sentiment | reader        | reader   | 0.4         | 0.275         | 1.950             | 1.400         | 0.360 [0.173, 0.565]   | 65.6       | 0.272      | 0.878      |
+| sentiment | prompt        | baseline |             | 1.200         | 2.000             | 1.975         | 1.443 [1.230, 1.625]   |            | 0.361      | 0.924      |
+| sentiment | caa           | baseline | 0.2         | 0.375         | 2.000             | 1.850         | 0.505 [0.275, 0.730]   | 44.9       | 0.326      | 0.896      |
+| sentiment | mean_centring | baseline | 0.05        | 0.200         | 2.000             | 1.925         | 0.267 [0.105, 0.467]   | 34.1       | 0.338      | 0.797      |
+| sentiment | actadd        | baseline | 0.1         | 0.175         | 2.000             | 2.000         | 0.237 [0.075, 0.425]   | 33.7       | 0.346      | 0.797      |
+| sentiment | diffmean      | baseline | 0.1         | 0.175         | 1.975             | 1.950         | 0.237 [0.075, 0.412]   | 33.5       | 0.340      | 0.814      |
+| sentiment | none          | control  |             | 0.150         | 2.000             | 2.000         | 0.200 [0.050, 0.375]   | 33.7       | 0.342      | 0.798      |
+| sentiment | random/0      | control  | 0.4         | 0.250         | 2.000             | 1.825         | 0.342 [0.150, 0.545]   | 87.8       | 0.322      | 0.828      |
+| happiness | reader        | reader   | 0.4         | 1.125         | 1.775             | 1.400         | 0.975 [0.753, 1.202]   | 112.0      | 0.294      | 0.470      |
+| happiness | prompt        | baseline |             | 0.800         | 1.975             | 2.000         | 1.050 [0.800, 1.288]   |            | 0.346      | 0.388      |
+| happiness | caa           | baseline | 0.4         | 0.275         | 1.925             | 1.300         | 0.290 [0.130, 0.468]   | 68.8       | 0.248      | 0.169      |
+| happiness | mean_centring | baseline | 0.05        | 0.075         | 2.000             | 1.925         | 0.087 [0.000, 0.225]   | 34.2       | 0.338      | 0.072      |
+| happiness | actadd        | baseline | 0.4         | 0.100         | 2.000             | 1.975         | 0.125 [0.000, 0.287]   | 34.0       | 0.334      | 0.083      |
+| happiness | diffmean      | baseline | 0.4         | 1.150         | 1.675             | 1.575         | 1.058 [0.832, 1.275]   | 138.1      | 0.288      | 0.422      |
+| happiness | none          | control  |             | 0.100         | 2.000             | 2.000         | 0.125 [0.000, 0.275]   | 33.7       | 0.342      | 0.077      |
+| happiness | random/0      | control  | 0.05        | 0.075         | 2.000             | 2.000         | 0.087 [0.000, 0.225]   | 34.5       | 0.342      | 0.088      |
+| anger     | reader        | reader   | 0.4         | 0.175         | 1.875             | 0.950         | 0.165 [0.055, 0.300]   | 80.8       | 0.238      | 0.083      |
+| anger     | prompt        | baseline |             | 0.800         | 1.975             | 1.950         | 0.972 [0.727, 1.223]   |            | 0.329      | 0.396      |
+| anger     | caa           | baseline | 0.1         | 0.000         | 2.000             | 1.975         | 0.000 [0.000, 0.000]   | 38.4       | 0.342      | 0.055      |
+| anger     | mean_centring | baseline | 0.05        | 0.000         | 2.000             | 1.925         | 0.000 [0.000, 0.000]   | 34.2       | 0.336      | 0.046      |
+| anger     | actadd        | baseline | 0.05        | 0.000         | 2.000             | 2.000         | 0.000 [0.000, 0.000]   | 33.7       | 0.344      | 0.043      |
+| anger     | diffmean      | baseline | 0.4         | 0.375         | 1.650             | 1.175         | 0.400 [0.245, 0.560]   | 89.0       | 0.238      | 0.104      |
+| anger     | none          | control  |             | 0.000         | 2.000             | 2.000         | 0.000 [0.000, 0.000]   | 33.7       | 0.342      | 0.060      |
+| anger     | random/0      | control  | 0.05        | 0.000         | 2.000             | 2.000         | 0.000 [0.000, 0.000]   | 33.2       | 0.345      | 0.036      |
+
+- **Highest overall score.** On sentiment `prompt`, 1.443 [1.230, 1.625] (every other interval lies below it); on happiness `diffmean`, 1.058 [0.832, 1.275] (the intervals of `reader` and `prompt` overlap it); on anger `prompt`, 0.972 [0.727, 1.223] (every other interval lies below it).
+- **Against the controls.** On sentiment (`none` 0.200 [0.050, 0.375], `random/0` 0.342 [0.150, 0.545]) `prompt` lies apart above both controls; on happiness (`none` 0.125 [0.000, 0.275], `random/0` 0.087 [0.000, 0.225]) `reader`, `prompt` and `diffmean` lie apart above both controls; on anger (`none` 0.000 [0.000, 0.000], `random/0` 0.000 [0.000, 0.000]) `reader`, `prompt` and `diffmean` lie apart above both controls.
+- **The reader against the baselines.** On sentiment the reader (0.360 [0.173, 0.565]) lies apart below `prompt`, and overlaps `caa`, `mean_centring`, `actadd` and `diffmean`; on happiness the reader (0.975 [0.753, 1.202]) lies apart above `caa`, `mean_centring` and `actadd`, and overlaps `prompt` and `diffmean`; on anger the reader (0.165 [0.055, 0.300]) lies apart below `prompt` and above `caa`, `mean_centring` and `actadd`, and overlaps `diffmean`.
+- **Side effects.** The unsteered perplexity of neutral text is 33.7. Of the 18 chosen vector arms, 7 raise it above 1.5 times that value (the ratio of the fluency rule of the methodology): `reader` on sentiment (65.6, fluency score 1.400); `random/0` on sentiment (87.8, fluency score 1.825); `reader` on happiness (112.0, fluency score 1.400); `caa` on happiness (68.8, fluency score 1.300); `diffmean` on happiness (138.1, fluency score 1.575); `reader` on anger (80.8, fluency score 0.950); `diffmean` on anger (89.0, fluency score 1.175). The distinct-1 of the seven other arms is 0.238 to 0.361, against 0.342 for `none`; no arm is below 0.15.
+
+### Agreement of the two judges
+
+In each stage a seeded 10 percent of the exported generations (192 of the tuning half and 96 of the held-out half per run) was exported again under other item ids and scored in the second judge slot. Per criterion, the share of exact agreement between the two slots, Cohen's kappa and the quadratic-weighted kappa (`summary_judged.json`):
+
+| Checkpoint      | Stage    | Criterion   | Items | Agreement | Kappa | Weighted kappa |
+| --------------- | -------- | ----------- | ----- | --------- | ----- | -------------- |
+| gpt2-xl         | tuning   | concept     | 192   | 0.927     | 0.816 | 0.877          |
+| gpt2-xl         | tuning   | fluency     | 192   | 0.948     | 0.907 | 0.966          |
+| gpt2-xl         | held-out | concept     | 96    | 0.938     | 0.885 | 0.929          |
+| gpt2-xl         | held-out | fluency     | 96    | 0.917     | 0.849 | 0.913          |
+| gpt2-xl         | pooled   | concept     | 288   | 0.931     | 0.847 | 0.902          |
+| gpt2-xl         | pooled   | fluency     | 288   | 0.938     | 0.890 | 0.954          |
+| qwen3-1.7b-base | tuning   | concept     | 192   | 0.927     | 0.800 | 0.870          |
+| qwen3-1.7b-base | tuning   | fluency     | 192   | 0.927     | 0.868 | 0.946          |
+| qwen3-1.7b-base | held-out | concept     | 96    | 1.000     | 1.000 | 1.000          |
+| qwen3-1.7b-base | held-out | fluency     | 96    | 0.938     | 0.892 | 0.932          |
+| qwen3-1.7b-base | pooled   | concept     | 288   | 0.951     | 0.875 | 0.920          |
+| qwen3-1.7b-base | pooled   | fluency     | 288   | 0.931     | 0.879 | 0.943          |
+| qwen3-1.7b      | tuning   | concept     | 192   | 0.964     | 0.912 | 0.938          |
+| qwen3-1.7b      | tuning   | instruction | 192   | 0.917     | 0.774 | 0.841          |
+| qwen3-1.7b      | tuning   | fluency     | 192   | 0.984     | 0.957 | 0.986          |
+| qwen3-1.7b      | held-out | concept     | 96    | 0.938     | 0.854 | 0.925          |
+| qwen3-1.7b      | held-out | instruction | 96    | 0.958     | 0.582 | 0.582          |
+| qwen3-1.7b      | held-out | fluency     | 96    | 0.927     | 0.772 | 0.827          |
+| qwen3-1.7b      | pooled   | concept     | 288   | 0.955     | 0.892 | 0.933          |
+| qwen3-1.7b      | pooled   | instruction | 288   | 0.931     | 0.762 | 0.828          |
+| qwen3-1.7b      | pooled   | fluency     | 288   | 0.965     | 0.902 | 0.962          |
+
+- **Range.** Over the 2 stages, 3 runs and their criteria (14 cells), the agreement is 0.917 to 1.000, Cohen's kappa 0.582 to 1.000 and the weighted kappa 0.582 to 1.000. The two slots agree on every item in the held-out concept scores of `qwen3-1.7b-base`.
+- **Where one score dominates, kappa is low.** The lowest kappa is that of `instruction` on the held-out half of `qwen3-1.7b`: agreement 0.958 (92 of 96 items), kappa 0.582, weighted kappa 0.582. The first slot gave 2 to 93 of the 96 items and the second to 89, so the agreement expected by chance is high and the 4 disagreements (in all of them the first slot gave 2 and the second 1) weigh heavily on kappa.
+
+Rank correlation (Spearman) between the concept score of the first judge slot and the classifier score, over every judged generation of the concept in both stages (`summary_judged.json`):
+
+| Checkpoint      | sentiment | happiness | anger | Generations per concept |
+| --------------- | --------- | --------- | ----- | ----------------------- |
+| gpt2-xl         | 0.496     | 0.615     | 0.462 | 960                     |
+| qwen3-1.7b-base | 0.590     | 0.559     | 0.417 | 960                     |
+| qwen3-1.7b      | 0.640     | 0.580     | 0.316 | 960                     |
+
+The correlations are 0.316 to 0.640, all positive; the lowest of each run is that of anger.
+
+### Judging protocol
+
+The three runs hold 9,504 judgments: 6,336 on the tuning halves and 3,168 on the held-out halves. Per run, the tuning stage has 1,920 items in the first slot and 192 in the second, and the held-out stage 960 and 96, in batch files of at most 50 items: 39 and 4 tuning batches, 20 and 2 held-out batches, 195 in all. Every stored judgment names the judge model `claude-opus-5-5` and the same rubric digest (SHA-256 `e95573bae4bf`) in both stages of the three runs. The judges ran as agents of an interactive session, with no API client.
+
+Each judge agent saw only one folder, under a neutral name, holding `rubric.txt`, `criteria.json` and its batch files; no file names the stage, the arm, the coefficient, the checkpoint or the judge slot. The second slot was scored by agents other than those of the first. The export seed was set per run (tuning 15001, 15002, 15003; held-out 25001, 25002, 25003, for `gpt2-xl`, `qwen3-1.7b-base` and `qwen3-1.7b`), because the default export seed derives from the run seed, 0 in all three runs, and gave the three runs the same item and batch ids. Every judge transcript was checked: no judge wrote or ran code that assigned scores. A format checker ran on every judgments file before its import, and `judge import` read every batch file and the rubric again and compared their SHA-256 with the digests stored at export; no import was refused.
+
+### What the three runs show together
+
+- **Prompt prepending.** `prompt` has the highest held-out overall score in 7 of the 9 checkpoint and concept cells; in the other 2 (`mean_centring` on `qwen3-1.7b-base` happiness and `diffmean` on `qwen3-1.7b` happiness) its interval overlaps the highest one. Its interval lies apart above `none` in 8 of the 9 cells (not on `gpt2-xl` sentiment).
+- **The reader.** Its interval lies apart above `none` in 4 of the 9 cells (`gpt2-xl` happiness, `qwen3-1.7b-base` happiness, `qwen3-1.7b` happiness and `qwen3-1.7b` anger), apart below `prompt` in 6 (`gpt2-xl` sentiment, `gpt2-xl` anger, `qwen3-1.7b-base` sentiment, `qwen3-1.7b-base` anger, `qwen3-1.7b` sentiment and `qwen3-1.7b` anger) and overlaps `prompt` in the other 3. Against the four vector baselines (`caa`, `mean_centring`, `actadd` and `diffmean`) it lies apart above in 10 of the 36 comparisons, apart below in 2 and overlaps in 24.
+- **The random direction.** `random/0` lies apart above `none` in no cell, and no arm lies apart below `none` in any cell.
+- **Side effects.** Over the three runs, 19 of the 54 chosen vector arms raise the perplexity of neutral text above 1.5 times the unsteered value, the reader in 7 of its 9 cells, and no arm has a distinct-1 below 0.15.
+- **What the runs do not show.** Both judge slots are the same model, so their agreement may overstate what two independent judges would show. Only the criteria of the post-trained run list `instruction`, which tells a judge the role of the checkpoint it reads. Kappa is low where one score dominates (above). The judge is a model run interactively, identified by its model id and the rubric digest, with the raw judgments stored; it is not a pinned snapshot behind an interface. Each role has one checkpoint and one run, with 40 held-out prompts per concept and one sample per prompt, and the coefficients were chosen on 20 tuning prompts; the intervals cover the prompts only, not the variation between runs, sampling seeds or judges, and no paired difference between arms is stored. The concept set of AxBench is not included, and the other GPT-2 sizes and the Qwen3 0.6B and 4B pairs have not been run.
+
 ## Approximate answers: range against exact quantities (P10)
 
 P10 asks how a model handles a quantity question whose sourced answer is a range, such as the height of a dog breed or the gestation period of a species, against one whose answer is a single value, such as the height of a building or the running time of a film. P10a measures what the model answers: one number, a range or an abstention, with and without the instruction to give one exact number. P10b reads the hidden states of the same questions: it asks whether a direction fitted on the questions of some families separates range questions from exact questions in a family it was not fitted on, and sets every reader beside surface baselines and a random-direction control. The settings below are those of `config.json` of each run; the code is `p10a_quantities.py` and `p10b_reading.py`.
@@ -10098,6 +10297,22 @@ The commit, the start and finish times of the stored `meta.json` (UTC) and the t
 | qwen3-1.7b-base | 55db82192fb3 | `c2c1405` | 2026-10-30 00:29:10 | 2026-10-30 01:56:09 | 5,219   |
 | qwen3-1.7b      | a42744388639 | `c2c1405` | 2026-10-30 01:59:19 | 2026-10-30 03:24:55 | 5,136   |
 
+B3: the three runs, one per role (`gpt2-xl` and `qwen3-1.7b-base` base, `qwen3-1.7b` post-trained), were made one at a time on 2026-11-13 at `b98eab4` with a clean tree on the laptop GPU with 8 GB of memory (the `device` field of each `meta.json` records `cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)`; torch 2.14.1+cu130, transformers 5.19.0, Windows 11, Python 3.12.6), each model in the dtype registered for its checkpoint (float16 for `gpt2-xl`, bfloat16 for the Qwen3 checkpoints). The generations were judged afterwards, and the judged files were committed at `cf1c43f`; `git diff --stat b98eab4 cf1c43f -- src` is empty, so the export, import and report steps ran the code of the runs. Every config is the default B3 config of its model with `n_tune` 20 (the default is 40). The config hash of each run was recomputed by loading its `config.json` into the B3 config class and hashing it, and all three agree with the directory names. In each run the coefficient stored for every arm in `judge_selection.json`, `summary_judged.json` and `table.json` equals the one the selection rule gives on `table_tuning.json`. The `trials_<concept>_<split>` files (the generations) stay local and are not committed; no number in this document needs them.
+
+Config hashes (12 hex digits), B3:
+
+| Experiment | gpt2-xl      | qwen3-1.7b-base | qwen3-1.7b   |
+| ---------- | ------------ | --------------- | ------------ |
+| B3         | 8a87d648035b | 61e330d093e9    | 338ed816c468 |
+
+The commit, the start and finish times of the stored `meta.json` (UTC) and the time between them:
+
+| Checkpoint      | B3           | Commit    | Started (UTC)       | Finished (UTC)      | Seconds |
+| --------------- | ------------ | --------- | ------------------- | ------------------- | ------- |
+| gpt2-xl         | 8a87d648035b | `b98eab4` | 2026-11-13 10:26:13 | 2026-11-13 11:00:47 | 2,074   |
+| qwen3-1.7b-base | 61e330d093e9 | `b98eab4` | 2026-11-13 11:01:04 | 2026-11-13 11:49:06 | 2,882   |
+| qwen3-1.7b      | 338ed816c468 | `b98eab4` | 2026-11-13 11:49:41 | 2026-11-13 12:41:03 | 3,082   |
+
 The files of every run named here are committed under `results/<experiment>/<model>/<hash>/`, copied with
 `tomography export`, which keeps the JSON, NPZ and CSV files the plots read and rewrites local paths. The figures are
 not committed; `tomography plot all --out results` redraws them from these files.
@@ -10121,6 +10336,8 @@ Not in this document yet. No dates are promised.
 - B1, not stored: a within-relation paired difference (the paired differences of `table_paired.json` are pooled on PopQA) and the likelihood-weighted variant of semantic entropy (P9a stores no token log-probabilities). Stored but not read in this document: the validation AUROC per layer of the probe, the seconds of the probe and of EigenScore (`summary.json`), and the AURC on TriviaQA and NQ-open (`table.json`).
 - B2 on the Qwen3 4B pair: not run. A 4B checkpoint needs more GPU memory than the 8 GB laptop GPU of these runs has, and no other GPU is used for this work.
 - B2 on TruthfulQA: not read; B2 reads sentiment and the three Geometry of Truth sets. Stored but not read in this document: the accuracy of every layer series at the layers it did not choose, and the per-seed test accuracies at the chosen layer of every series but LAT on the truth sets (`curves_<dataset>_val` and `curves_<dataset>_test`). Not stored: the fitted directions and the CCS loss of each training set (`summary.json` keeps their mean at the CCS layer).
+- B3 on the other checkpoints: not run. B3 ran on one checkpoint per role (`gpt2-xl`, `qwen3-1.7b-base` and `qwen3-1.7b`). The judging of the stored C1, C2, M1 and P7 generations with the B3 judge is not reported.
+- B3, not stored: a paired difference between arms on the held-out prompts, and judged scores of the held-out generations at the coefficients an arm did not choose (they are generated but not exported to a judge). Stored but not read in this document: the side effects of every arm and coefficient in `table_effects.json` beyond the perplexity and the distinct-1 of the chosen ones (the `fluency`, distinct-2, mean length and empty rate columns), the judgments of each item beyond the held-out `instruction` scores of `qwen3-1.7b` that both slots rated, and `vectors.npz`.
 - V1 on the Qwen3 4B pair: not run yet. V1 loads the model in float32, and the 4B checkpoints in float32 need more GPU
   memory than the laptop GPU has.
 - P10: a hand check of the answer parser (the `human_*` columns of `hand_check.csv` and `hand_check_samples.csv` are empty in every P10a run), and P10d (steering toward hedging); P10d has not run. The animacy and wording confound is controlled by the people heights for the height family only, with no control of the same kind for gestation periods and wingspans, and P10 ran on one set of questions and one seed.
