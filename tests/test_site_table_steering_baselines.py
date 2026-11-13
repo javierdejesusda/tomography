@@ -1,12 +1,12 @@
 import json
 from pathlib import Path
 import runpy
+import shutil
 from typing import Any
 
 import pytest
 
 from tomography.site import registry
-from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.viz import paper
@@ -297,15 +297,61 @@ def test_checkpoints_are_counted_per_role(
     assert [with_run[r].hits for r in stats.ROLES] == [1, 1, 1]
 
 
-def test_a_run_with_an_unknown_arm_is_refused(
-    monkeypatch: pytest.MonkeyPatch,
+def _copy(tmp_path: Path) -> Path:
+    """Copies the files the table reads from every b3 run."""
+    for model in models("b3"):
+        source = run("b3", model)
+        target = tmp_path / "b3" / model / source.name
+        target.mkdir(parents=True)
+        for name in ("config.json", "meta.json", "summary.json", "table.json"):
+            shutil.copyfile(source / name, target / name)
+    return tmp_path
+
+
+def _edit(root: Path, model: str, name: str, change: Any) -> None:
+    """Rewrites one file of a copied run through `change`."""
+    (path,) = (root / "b3" / model).glob(f"*/{name}")
+    stored = json.loads(path.read_text("utf-8"))
+    change(stored if name == "config.json" else stored["data"])
+    path.write_text(json.dumps(stored), encoding="utf-8")
+
+
+def _extra_arm(table: dict[str, Any]) -> None:
+    table["rows"].append([*table["rows"][-1]])
+    table["rows"][-1][1] = "random/1"
+
+
+def _fewer_prompts(table: dict[str, Any]) -> None:
+    table["rows"][0][table["columns"].index("n_prompts")] = 39
+
+
+def _no_instruction(summary: dict[str, Any]) -> None:
+    summary["criteria"].remove("instruction")
+
+
+def _one_concept_less(summary: dict[str, Any]) -> None:
+    del summary["concepts"]["anger"]
+
+
+def _other_tuning_half(config: dict[str, Any]) -> None:
+    config["n_tune"] = 30
+
+
+@pytest.mark.parametrize(
+    ("model", "name", "change", "message"),
+    [
+        ("gpt2-xl", "table.json", _extra_arm, "b3/gpt2-xl holds other arms"),
+        ("gpt2-xl", "table.json", _fewer_prompts, "scores other prompts"),
+        ("qwen3-1.7b", "summary.json", _no_instruction, "other criteria"),
+        ("gpt2-xl", "summary.json", _one_concept_less, "other concepts"),
+        ("gpt2-xl", "config.json", _other_tuning_half, "differ in their"),
+    ],
+)
+def test_a_run_that_breaks_the_layout_is_refused(
+    tmp_path: Path, model: str, name: str, change: Any, message: str
 ) -> None:
-    read = runfiles.rows
-
-    def extra(path: Path, name: str) -> list[dict[str, Any]]:
-        found = read(path, name)
-        return [*found, {**found[-1], "arm": "random/1"}]
-
-    monkeypatch.setattr(runfiles, "rows", extra)
-    with pytest.raises(ValueError, match="b3/gpt2-xl"):
-        registry.build_table(SPEC, Manifest(ROOT))
+    root = _copy(tmp_path)
+    registry.build_table(SPEC, Manifest(root))
+    _edit(root, model, name, change)
+    with pytest.raises(ValueError, match=message):
+        registry.build_table(SPEC, Manifest(root))
