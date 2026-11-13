@@ -141,7 +141,7 @@ design of every experiment side by side.
 | `r8` | Does LAT beat few-shot prompting with the same examples on the RepE QA tasks (Figure 7, Table 9) and TruthfulQA MC1? | the 0.6B and 1.7B pairs (one run per task) |
 | `tb1` | How much of a reader's accuracy do word and character n-gram classifiers reach with no model? (the text-only control of the readers) | none (one run) |
 | `b2` | Does LAT read truth (Geometry of Truth statements and their negations) and sentiment as well as the published baselines (mass-mean, whitened mass-mean, logistic regression, CCS), beside random, shuffled and text-only controls? | the 4 GPT-2 sizes and the 0.6B and 1.7B pairs |
-| `b3` | Do published steering methods (contrastive activation addition, mean-centring, activation addition, difference of means, prompt prepending) move a concept as well as our reading vector, beside random directions, when an external judge rates concept, instruction following and fluency on held-out prompts? | code only |
+| `b3` | Do published steering methods (contrastive activation addition, mean-centring, activation addition, difference of means, prompt prepending) move a concept as well as our reading vector, beside random directions, when an external judge rates concept, instruction following and fluency on held-out prompts? | GPT-2 XL and the 1.7B pair (one run each) |
 | `p1` | How much does prompt wording move a sentiment reader? | all 10 |
 | `p2` | How do token position and a misleading sentence matter? | all 10 |
 | `p3` | How does training-set size matter? | all 10 |
