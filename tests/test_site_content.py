@@ -665,6 +665,55 @@ def test_the_design_run_ins_say_what_was_fixed_and_what_a_run_can_show() -> (
     assert "six" not in finders
 
 
+def test_appendix_b_states_the_steering_baselines_and_the_views_run() -> None:
+    runins = dict(_section("appendix_method").runin)
+    steering = runins["Design: steering."]
+    for phrase in (
+        "The utility test and the knowledge steering run steer random "
+        "directions of the same norm, and the run of published steering "
+        "methods steers a random unit direction like its vector arms.",
+        "sets the reader beside five published steering methods as "
+        "baselines: prompt prepending, DiffMean, CAA, ActAdd and "
+        "mean-centring. Its controls are the unsteered model and that "
+        "random direction, and it covers "
+        "[[count:table:design.steering_baselines]].",
+        "chooses its coefficient on "
+        "[[num:table:design.steering_baselines_n_tune]] tuning prompts per "
+        "concept",
+        "an LLM judge rates the concept and the fluency of its generations, "
+        "and on the post-trained checkpoint how well they follow the "
+        "instruction, on [[num:table:design.steering_baselines_n_held_out]] "
+        "held-out prompts",
+        "no human validated the judges, neither the classifiers of the "
+        "sentiment run nor the LLM judge, whose two slots are the same "
+        "model",
+    ):
+        assert phrase in steering, phrase
+    assert "do steer random directions" not in steering
+    method = runins["Steering."]
+    assert (
+        "The run of published steering methods steers toward sentiment, "
+        "happiness and anger at three layers, with "
+        "[[num:table:steering_baselines.new_tokens]] new tokens per prompt; "
+        "an LLM judge scores each criterion on a three-point scale, the "
+        "overall score of a generation is the harmonic mean of its "
+        "criteria, and the interval of the mean overall score of an arm is "
+        "a percentile bootstrap over the held-out prompts with "
+        "[[num:table:steering_baselines.resamples]] resamples." in method
+    )
+    known = runins["Design: known and unknown questions."]
+    assert (
+        "The views run reads the train and test questions of the reading "
+        "run again at every layer that run read, refits the readers and "
+        "compares their AUROC with the stored scores, within a tolerance of "
+        "[[num:table:knowledge_projections.tolerance]] set before the run; "
+        "its controls are a random direction, readers refitted on labels "
+        "permuted inside each group, a view of the text alone and the "
+        "popularity of the subject, and it covers "
+        "[[count:table:design.knowledge_views]]." in known
+    )
+
+
 def test_the_published_baselines_have_a_table_beside_what_they_compare() -> (
     None
 ):

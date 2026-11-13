@@ -905,7 +905,16 @@ APPENDICES = (
                 "shift of the entropy of the next-token distribution, and "
                 "post-trained checkpoints are asked to say when they do "
                 "not know, so their outcome is the abstention rate, "
-                "detected by phrase matching.",
+                "detected by phrase matching. The run of published steering "
+                "methods steers toward sentiment, happiness and anger at "
+                "three layers, with "
+                "[[num:table:steering_baselines.new_tokens]] new tokens per "
+                "prompt; an LLM judge scores each criterion on "
+                "a three-point scale, the overall score of a generation is "
+                "the harmonic mean of its criteria, and the interval of the "
+                "mean overall score of an arm is a percentile bootstrap over "
+                "the held-out prompts with "
+                "[[num:table:steering_baselines.resamples]] resamples.",
             ),
             (
                 "Intervals.",
@@ -997,9 +1006,18 @@ APPENDICES = (
                 "compares it with "
                 "[[num:table:design.knowledge_steering_n_random]] random "
                 "directions of the same norm, on "
-                "[[count:table:design.knowledge_steering]]. The limits are "
-                "that no human checked the answer matching or the abstention "
-                "phrases, and that the interval of a reader resamples its "
+                "[[count:table:design.knowledge_steering]]. The views run "
+                "reads the train and test questions of the reading run again "
+                "at every layer that run read, refits the readers and "
+                "compares their AUROC with the stored scores, within a "
+                "tolerance of [[num:table:knowledge_projections.tolerance]] "
+                "set before the run; its controls are a random direction, "
+                "readers refitted on labels permuted inside each group, a "
+                "view of the text alone and the popularity of the subject, "
+                "and it covers [[count:table:design.knowledge_views]]. The "
+                "limits are that no human checked the answer matching or the "
+                "abstention phrases, and that the interval of a reader "
+                "resamples its "
                 "draws, not the test questions.",
             ),
             (
@@ -1066,10 +1084,25 @@ APPENDICES = (
                 "comparisons are the unsteered model and an instruction in "
                 "the prompt, so it can show whether the direction moves the "
                 "judged sentiment, not whether only this direction would. The "
-                "utility test and the knowledge steering run do steer random "
-                "directions of the same norm. The limits are that the judges "
-                "are classifiers with no human validation and that one run "
-                "stands behind each cell.",
+                "utility test and the knowledge steering run steer random "
+                "directions of the same norm, and the run of published "
+                "steering methods steers a random unit direction like its "
+                "vector arms. That run sets the reader beside five published "
+                "steering methods as baselines: prompt prepending, DiffMean, "
+                "CAA, ActAdd and mean-centring. Its controls are the "
+                "unsteered model and that random direction, and it covers "
+                "[[count:table:design.steering_baselines]]. Each arm "
+                "chooses its coefficient on "
+                "[[num:table:design.steering_baselines_n_tune]] tuning "
+                "prompts per concept, and an LLM judge rates the concept and "
+                "the fluency of its generations, and on the post-trained "
+                "checkpoint how well they follow the instruction, on "
+                "[[num:table:design.steering_baselines_n_held_out]] held-out "
+                "prompts, so the coefficient is not tuned on the reported "
+                "text either. The limits are that no human validated the "
+                "judges, neither the classifiers of the sentiment run nor the "
+                "LLM judge, whose two slots are the same model, and that one "
+                "run stands behind each cell.",
             ),
             (
                 "Design: post-training.",
