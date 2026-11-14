@@ -7,10 +7,20 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
 FINDINGS = ROOT / "docs" / "findings.md"
 HASH = re.compile(r"[0-9a-f]{12}\b")
-# The sentiment-only P1 runs (superseded by the all-task runs) and the M2
-# shuffled-only runs (which only supplement a full run) stay committed, but no
-# selection of `Manifest.run` picks them.
-UNSELECTED = frozenset({"P1", "P1 (sentiment)", "M2 shuffled-only run"})
+EXPERIMENT_ID = re.compile(r"[A-Z]+[0-9]+[a-z]?")
+RUN_READ = re.compile(EXPERIMENT_ID.pattern + " run read")
+# The sentiment-only P1 runs (superseded by the all-task runs), the M2
+# shuffled-only runs (which only supplement a full run) and the earlier runs of
+# the experiments that take their latest run stay committed, but no selection
+# of `Manifest.run` picks them.
+UNSELECTED = frozenset(
+    {
+        "P1",
+        "P1 (sentiment)",
+        "M2 shuffled-only run",
+        *(f"{exp} earlier run" for exp in ("C2", "C4", "C5", "M1", "P7")),
+    }
+)
 # M3 stage 2 reads these cell sets; the 1.7B pair ran it one task per run.
 M3_STAGE_2 = "stimulus,final,upper"
 # A row label left out of this map names the default run of its experiment, so
@@ -54,31 +64,72 @@ def _identity_section() -> list[str]:
     return lines[start:end]
 
 
-def reported() -> list[tuple[str, str, str]]:
-    """Reads the runs the Run identity tables name, one per table cell.
+def named_runs() -> list[tuple[str, str, str]]:
+    """Reads every run the Run identity tables name, one per table cell.
+
+    A table headed "Experiment" has a row per experiment and a column per
+    checkpoint. A table headed "Checkpoint" is transposed: a row per
+    checkpoint, and the columns headed by an experiment id, or by "<id> run
+    read" (a run of that experiment which the run of the row read), name
+    runs; its other columns (batch size, commit, times) are not read.
 
     Returns:
-        (row label, model key, hash) for every cell that starts with a hash,
-        such as "94faa23c130d (batch size 4)", except the cells of the rows in
-        `UNSELECTED`.
+        (label, model key, hash) for every cell that starts with a hash,
+        such as "94faa23c130d (batch size 4)". The label is the row label, or
+        the column header in a transposed table.
+
+    Raises:
+        ValueError: If a table has another first header, so that its runs
+            would go unread.
     """
     found: list[tuple[str, str, str]] = []
-    models: list[str] = []
+    header: list[str] = []
     for line in _identity_section():
         if not line.startswith("|"):
-            models = []
+            header = []
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if cells[0] == "Experiment":
-            models = cells[1:]
+        if not header:
+            header = cells
+            if header[0] not in ("Experiment", "Checkpoint"):
+                raise ValueError(f"unread Run identity table: {line}")
             continue
-        label = cells[0]
-        if not models or set(label) <= {"-", " "} or label in UNSELECTED:
+        if set(cells[0]) <= {"-", " "}:
             continue
-        for model, cell in zip(models, cells[1:], strict=True):
+        for column, cell in zip(header[1:], cells[1:], strict=True):
+            if header[0] == "Experiment":
+                label, model = cells[0], column
+            elif EXPERIMENT_ID.fullmatch(column) or RUN_READ.fullmatch(column):
+                label, model = column, cells[0]
+            else:
+                continue
             if run := HASH.match(cell):
                 found.append((label, model, run.group()))
     return found
+
+
+def runs_read() -> list[tuple[str, str, str]]:
+    """The cells of the "<id> run read" columns, as `named_runs` gives them."""
+    return [entry for entry in named_runs() if RUN_READ.fullmatch(entry[0])]
+
+
+def unselected() -> list[tuple[str, str, str]]:
+    """The cells of the rows in `UNSELECTED`, as `named_runs` gives them."""
+    return [entry for entry in named_runs() if entry[0] in UNSELECTED]
+
+
+def reported() -> list[tuple[str, str, str]]:
+    """The cells that name the run a selection of `Manifest.run` picks.
+
+    Returns:
+        The cells of `named_runs`, except those of the rows in `UNSELECTED`
+        and of the run read columns.
+    """
+    return [
+        (label, model, run)
+        for label, model, run in named_runs()
+        if label not in UNSELECTED and not RUN_READ.fullmatch(label)
+    ]
 
 
 def test_the_reported_hashes_are_parsed_from_the_run_identity_tables() -> None:
@@ -89,6 +140,15 @@ def test_the_reported_hashes_are_parsed_from_the_run_identity_tables() -> None:
 
 def test_a_cell_is_read_by_its_leading_hash_past_a_note() -> None:
     assert ("P10a", "qwen3-4b-base", "94faa23c130d") in reported()
+
+
+def test_a_checkpoint_table_is_read_by_its_experiment_columns() -> None:
+    table = reported()
+    assert ("P10a", "gpt2", "5af932e9547d") in table
+    assert ("V1", "qwen3-1.7b", "419275ac7e0d") in table
+    assert ("B2", "gpt2-large", "43f761636126") in table
+    labels = {label.split()[0] for label, _, _ in table}
+    assert all(EXPERIMENT_ID.fullmatch(label) for label in labels)
 
 
 def test_the_m2_shuffled_only_runs_are_not_reported_runs() -> None:
@@ -119,3 +179,48 @@ def test_each_row_names_the_run_its_selection_picks() -> None:
             if unnamed and len(found.runs(exp, model)) > 1:
                 problems.append(f"{exp}/{model}: no Run identity entry")
     assert problems == []
+
+
+def test_every_selection_names_a_row() -> None:
+    assert set(SELECTIONS) <= {label for label, _, _ in reported()}
+
+
+def test_an_unselected_row_names_a_committed_run_no_selection_picks() -> None:
+    found = manifest_module.Manifest(RESULTS)
+    problems = []
+    for label, model, named in unselected():
+        exp = label.split()[0].lower()
+        committed = [run.path.name for run in found.runs(exp, model)]
+        chosen = found.run(exp, model)
+        if named not in committed or (chosen and chosen.name == named):
+            problems.append(f"{label}/{model}: {named}")
+    assert unselected()
+    assert problems == []
+
+
+def test_a_run_read_column_names_a_committed_run() -> None:
+    read = runs_read()
+    assert ("P9a run read", "gpt2", "5461200f995c") in read
+    assert ("P9c run read", "qwen3-1.7b", "7c142334e5fe") in read
+    missing = [
+        f"{label}/{model}: {run}"
+        for label, model, run in read
+        if not (RESULTS / label.split()[0].lower() / model / run).is_dir()
+    ]
+    assert missing == []
+
+
+def test_every_committed_run_is_named_in_a_row() -> None:
+    found = manifest_module.Manifest(RESULTS)
+    named = {
+        (label.split()[0].lower(), model, run)
+        for label, model, run in named_runs()
+    }
+    unnamed = [
+        f"{exp}/{model}/{run.path.name}"
+        for exp in found.experiments()
+        for model in found.models(exp)
+        for run in found.runs(exp, model)
+        if (exp, model, run.path.name) not in named
+    ]
+    assert unnamed == []
