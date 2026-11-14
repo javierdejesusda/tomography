@@ -8,6 +8,7 @@ by the time they took, as `--store-durations` recorded it.
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -125,6 +126,43 @@ def test_a_file_with_no_recorded_time_counts_as_the_mean(
         "test_file_1.py",
         "test_file_3.py",
     }
+
+
+def test_equal_loads_are_a_tie_that_the_lowest_shard_wins(
+    suite: pytest.Pytester,
+) -> None:
+    seconds = {
+        f"test_file_{i}.py": spent
+        for i, spent in enumerate((0.4, 0.3, 0.3, 0.2, 0.1))
+    }
+    (suite.path / "shard_durations.json").write_text(json.dumps(seconds))
+    # After the first four files both shards hold 0.6 s, though 0.4 + 0.2
+    # is 0.6000000000000001 as floats; the last file goes to shard 0.
+    assert _files(suite, "--shard=0/2", *seconds) == {
+        "test_file_0.py",
+        "test_file_3.py",
+        "test_file_4.py",
+    }
+
+
+def test_a_cut_write_of_the_durations_keeps_the_recorded_ones(
+    suite: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = suite.path / "shard_durations.json"
+    record.write_text(json.dumps({"test_file_0.py": 5.0}))
+    write_text = Path.write_text
+
+    def cut(path: Path, data: str, *args: Any, **kwargs: Any) -> int:
+        if not path.name.startswith(record.name):
+            return write_text(path, data, *args, **kwargs)
+        write_text(path, data[: len(data) // 2], *args, **kwargs)
+        raise OSError("no space left on the device")
+
+    monkeypatch.setattr(Path, "write_text", cut)
+    suite.runpytest("--store-durations", "test_file_0.py", "test_file_1.py")
+    assert json.loads(record.read_text()) == {"test_file_0.py": 5.0}
+    assert [p.name for p in suite.path.glob(f"{record.name}*")] == [record.name]
+    assert _files(suite, "--shard=0/2")
 
 
 def test_store_durations_records_the_time_of_each_file_it_ran(
