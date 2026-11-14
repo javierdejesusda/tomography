@@ -125,9 +125,11 @@ The PCA explained variance is part of `r2` and the t-SNE maps are part of `r4`; 
 
 The two words mean different things here, as on the project site:
 
-- A **control** uses no learned signal for the concept: a random direction, shuffled labels (the reader scored
-  against shuffled evaluation labels, or refitted on shuffled training labels), a classifier that sees only the
-  text, or the popularity of the subject. It shows what the same procedure gives without that signal.
+- A **control** shows what a score reaches without reading the concept from the hidden states: a random direction,
+  the reader scored against shuffled evaluation labels, or a signal of the text or of the subject alone (a classifier
+  that sees only the text, the popularity of the subject). `m2` and `m3` also refit every scorer on shuffled training
+  labels, and `v1`, the experiment on the hidden states behind the readers, refits its readers on labels permuted
+  inside each stratum.
 - A **baseline** is a published method run on the same items as the method under study.
 
 A reading is compared with the random direction of its own run, not with 0.5: the random direction is oriented on

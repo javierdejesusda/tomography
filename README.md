@@ -121,9 +121,11 @@ The design behind each experiment is in
 [controls and the published baselines](docs/methodology.md#controls-and-baselines)
 of each study, and its
 [stimuli, labels and splits](docs/methodology.md#labels-and-data). A control
-uses no learned signal for the concept (a random direction, shuffled labels,
-a text-only classifier, the popularity of the subject); a baseline is a
-published method run on the same items. On the
+shows what a score reaches without reading the concept from the hidden states:
+a random direction, the reader scored against shuffled labels, or a signal of
+the text or of the subject alone (a text-only classifier, the popularity of
+the subject), and `m2`, `m3` and `v1` also refit their readers on shuffled
+labels; a baseline is a published method run on the same items. On the
 [project site](https://javierdejesusda.github.io/tomography/), Appendix B
 (Method details) gives the design details of the studies shown there, and
 [Table A3](https://javierdejesusda.github.io/tomography/#table-A3) sets the

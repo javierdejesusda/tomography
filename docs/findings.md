@@ -26,8 +26,8 @@ Contents:
 1. [Reading conventions](#reading-conventions)
 2. [LAT reading on the GPT-2 ladder (R1 to R7)](#lat-reading-on-the-gpt-2-ladder-r1-to-r7)
 3. [LAT reading on Qwen3](#lat-reading-on-qwen3)
-4. [Text baselines for the readers (TB1)](#text-baselines-for-the-readers-tb1)
-5. [TruthfulQA MC1 against text baselines (R6)](#truthfulqa-mc1-against-text-baselines-r6)
+4. [Text-only controls for the readers (TB1)](#text-only-controls-for-the-readers-tb1)
+5. [TruthfulQA MC1 against text-only controls (R6)](#truthfulqa-mc1-against-text-only-controls-r6)
 6. [Scaling across the GPT-2 sizes (P6)](#scaling-across-the-gpt-2-sizes-p6)
 7. [Direction agreement and logit lens on gpt2 (A1, A2)](#direction-agreement-and-logit-lens-on-gpt2-a1-a2)
 8. [Template sensitivity of the sentiment reader (P1)](#template-sensitivity-of-the-sentiment-reader-p1)
@@ -317,7 +317,7 @@ R7 on the out-of-distribution sets:
   intervals (for example `neg_sp_en_trans` 0.988 against 0.892 and `common_claim` 0.871 against 0.839). `common_claim`
   is above the 1.7B values (0.812 and 0.791).
 
-## Text baselines for the readers (TB1)
+## Text-only controls for the readers (TB1)
 
 TB1 asks how much of a reader's accuracy a classifier gets from the surface form of the same statements, with no model.
 For each concept a TF-IDF logistic regression (`tomography.p9.risk.text_scores`) is fitted on the raw training
@@ -366,7 +366,7 @@ from the bootstrap intervals over readers of the sections above (see [Reading co
   configuration; no value here is pooled over concepts.
 - No reader accuracy is compared with these values in this section.
 
-## TruthfulQA MC1 against text baselines (R6)
+## TruthfulQA MC1 against text-only controls (R6)
 
 R6 was run on all four GPT-2 sizes; this table is the `gpt2` run and the other sizes follow below it. The question set
 is split by hash into 511 train, 133 validation and 173 test questions of 817. Every row below is scored on the same 173
@@ -4945,7 +4945,7 @@ What the series read:
 - `mean_diff` and `whitened_mean_diff` (baselines): the difference between the two class means of the training activations, and that difference under the inverse of the pooled within-class covariance, shrunk toward a scaled identity with the Ledoit-Wolf weight where the paper uses a pseudo-inverse.
 - `logistic` (baseline): an L2 logistic regression on the training activations (scikit-learn, `C` 1.0), refitted with a tighter tolerance when the solver stops at its all-zero start.
 - `ccs` (baseline): CCS, whose loss uses no label, fitted on the contrast pairs of each training set and scored from its pair probabilities. On the truth sets its contrast pairs are the pairs above. Sentiment has no negations, so there each text goes into one prompt in the form of Burns et al., completed once with "positive" and once with "negative": on sentiment CCS reads its own prompts, while the other finders read R1's, on the same test pairs.
-- Controls: `random`, a random unit direction; `shuffled`, the LAT reader scored against held-out labels shuffled within each pair; and `text_word` and `text_char`, the word and character n-gram classifiers of [TB1](#text-baselines-for-the-readers-tb1), fitted on the raw texts of each training set with no model, so they are the same on every checkpoint. Every direction, `random` and CCS included, takes its sign from the training labels.
+- Controls: `random`, a random unit direction; `shuffled`, the LAT reader scored against held-out labels shuffled within each pair; and `text_word` and `text_char`, the word and character n-gram classifiers of [TB1](#text-only-controls-for-the-readers-tb1), fitted on the raw texts of each training set with no model, so they are the same on every checkpoint. Every direction, `random` and CCS included, takes its sign from the training labels.
 
 B2 loads each model in the dtype registered for its checkpoint (column Weights). It ran on the four GPT-2 sizes and the Qwen3 0.6B and 1.7B pairs; the Qwen3 4B pair has not been run. Seven runs were made at `c2c1405` and the `gpt2-large` run at `7163b9f`, whose code is that of `8f70c01` and refits a logistic fit that stops at zero (see [Run identity](#run-identity)):
 
@@ -5357,7 +5357,7 @@ Questions come from Wikidata (CC0), with the original unit and bounds of each st
 | -------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | duration | gestation period of a taxon: "How long is the gestation period of the X, in days?" | running time of a film: "How long is the film X, in minutes?"        |
 | height   | dog breed: "How tall is a X, in centimetres?"                                      | skyscraper, tower or tower block: "How tall is the X, in metres?"    |
-| wingspan | bird species: "What is the wingspan of the X, in centimetres?"                     | aircraft model: "What is the wingspan of the X aircraft, in metres?" |
+| wingspan | taxon: "What is the wingspan of the X, in centimetres?"                            | aircraft model: "What is the wingspan of the X aircraft, in metres?" |
 
 In all three families the range side is a living thing and the exact side is an artifact, and the wording differs by side (the unit word, and in the height family the article). A model or a reader that separates the sides can therefore be reacting to the kind of answer, to the animacy of the subject or to the wording. Two controls are in the runs. The first is a set of 120 people with one exact height in Wikidata ("How tall is X, in centimetres?"), which are living things with an exact answer: P10a asks them too, and P10b scores them as test questions that never train a reader. The people were drawn with a stricter popularity floor (100 sitelinks, against 5 for the breeds and the buildings), which is set in `datasets/quantities.py` and not in `config.json`. A model or a reader that reacts to a range-valued answer treats them like the buildings; one that reacts to a living subject treats them like the breeds. The comparison is a diagnostic and not a clean contrast, because people heights and breed heights may also differ in how familiar they are to a model. The second control is the set of surface baselines of P10b, below.
 
@@ -5434,7 +5434,7 @@ Hedge gap by family, free condition, greedy: range share on the range questions 
 - **The post-trained checkpoints give ranges for the dog breeds most often.** The greedy range share on the breeds (range last, exact last, chat) is 0.700, 0.650 and 0.267 for `qwen3-0.6b`, 0.825, 0.767 and 0.592 for `qwen3-1.7b`, and 0.983 in all three cells for `qwen3-4b`. The one exception is `qwen3-0.6b` with a range last, where the gestation periods are at 0.708. `qwen3-1.7b` never gives a range for a gestation period or a wingspan (0.000 in the six cells), `qwen3-0.6b` gives 0.000 and 0.408 (duration, wingspan) with an exact last and 0.050 and 0.000 in chat, and `qwen3-4b` gives 0.267, 0.183 and 0.133 for the gestation periods and 0.375, 0.300 and 0.392 for the wingspans.
 - **The base checkpoints give ranges in all three families.** The range share on the range questions runs from 0.342 (gestation periods, `qwen3-1.7b-base`, exact last) to 1.000. On the exact questions the base checkpoints give 0.000 in every family and cell except `qwen3-0.6b-base` (0.442 on the aircraft wingspans and 0.017 on the skyscrapers with a range last, 0.058 on the wingspans with an exact last).
 - **The GPT-2 sizes differ in the family that hedges.** With a range last, `gpt2-large` gives ranges for 0.767 of the gestation periods, 0.517 of the breeds and 0.033 of the wingspans, and `gpt2-xl` for 0.967, 0.567 and 0.233 (0.425, 0.008 and 0.000 for `gpt2-large` and 0.908, 0.633 and 0.142 for `gpt2-xl` with an exact last), against exact questions at 0.000 to 0.067 in both. For `gpt2` and `gpt2-medium` the exact side is high in some families: 1.000 on the films and the aircraft and 0.933 on the skyscrapers for `gpt2` with a range last, and 0.933 on the aircraft for `gpt2-medium`.
-- **A family gap is a domain contrast as well as a kind contrast.** Within a family the two sides also differ in domain (breeds against buildings, birds against aircraft, species against films), so a gap in one family is not the effect of the kind alone; the people rows below separate the two for height.
+- **A family gap is a domain contrast as well as a kind contrast.** Within a family the two sides also differ in domain (breeds against buildings, taxa against aircraft, taxa against films), so a gap in one family is not the effect of the kind alone; the people rows below separate the two for height.
 
 Forced condition, greedy: range share on each kind, and how often the single number lands inside the sourced range. A point is inside when it lies between the sourced bounds, and inside the band when it lies in the bounds widened by 5 percent, the tolerance of the grader. Exact questions are the reference, because their sourced range is one value. The counts are the points inside over the points given:
 
@@ -6133,7 +6133,7 @@ test sets are those above (38, 44, 45, 53, 39 and 36 pairs).
   0.628 there); the other cells select L20 to L35. A high accuracy at an early layer is consistent with emotion words in
   the statements that a shallow reader can use, as on GPT-2 and at 1.7B; this is not tested here.
 
-### TruthfulQA MC1 against text baselines (R6)
+### TruthfulQA MC1 against text-only controls (R6)
 
 The same questions, split, readers and layer rules as the GPT-2 table above: 511 train, 133 validation and 173 test
 questions of 817, every row scored on the same 173 test questions, chance line 0.228, 15 readers for the LAT rows
