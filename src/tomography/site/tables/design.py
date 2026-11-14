@@ -591,6 +591,39 @@ CARDS = (
         "the distinct-1 of the completions.",
     ),
     Card(
+        "steering_baselines",
+        STEERING,
+        "Published steering methods",
+        ("b3",),
+        "Does steering along the reader move generations toward a concept "
+        "as far as published steering methods do, and at what cost to the "
+        "text?",
+        "Base checkpoints continue the opening words of held-out "
+        "WikiText-103 passages and post-trained ones answer AlpacaEval "
+        "instructions in their chat template, {max_new_tokens} new tokens "
+        "per prompt, steered toward sentiment, happiness or anger at three "
+        "layers over a grid of relative coefficients.",
+        "An LLM judge rates the concept and the fluency of each "
+        "generation, and on post-trained checkpoints how well it follows "
+        "the instruction; a second judge slot of the same model rates a "
+        "seeded share again.",
+        "Each arm chooses its coefficient on {n_tune} tuning prompts per "
+        "concept and is scored on {n_held_out} held-out prompts, which "
+        "share none with them; the reader, the difference of class means, "
+        "contrastive activation addition and mean-centring are built from "
+        "the same {n_pairs} training pairs per concept.",
+        "The unsteered model and a random unit direction, steered like the "
+        "vector arms.",
+        "Prompt prepending and the difference of class means, both "
+        "baselines of AxBench, contrastive activation addition (CAA), "
+        "activation addition (ActAdd) and mean-centring.",
+        "The mean judge score per criterion and their harmonic mean, with "
+        "a bootstrap interval over the held-out prompts; the perplexity of "
+        "{n_neutral} held-out WikiText-103 passages and the distinct-1 of "
+        "the generations.",
+        scope="GPT-2 XL is steered and judged as a base checkpoint.",
+    ),
+    Card(
         "post_training",
         POST,
         "Base against post-trained",

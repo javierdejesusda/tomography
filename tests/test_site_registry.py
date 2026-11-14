@@ -44,6 +44,7 @@ APPENDIX_TABLE_KEYS = (
     "truth",
     "truth_sets",
     "steering",
+    "steering_baselines",
     "knowledge",
     "detection_baselines",
     "knowledge_projections",

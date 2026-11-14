@@ -166,6 +166,7 @@ APPENDIX_TABLES = (
     "truth",
     "truth_sets",
     "steering",
+    "steering_baselines",
     "knowledge",
     "detection_baselines",
     "knowledge_projections",

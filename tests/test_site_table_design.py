@@ -108,7 +108,7 @@ def test_every_experiment_is_a_block_of_the_same_aspects(
     assert output.columns == ["Experiment", "Aspect", "Design"]
     assert output.align == "lll"
     blocks = _blocks(output)
-    assert len(blocks) == len(design.CARDS) == 25
+    assert len(blocks) == len(design.CARDS) == 26
     assert [b["Experiment"] for b in blocks] == [c.name for c in design.CARDS]
     assert len({b["Experiment"] for b in blocks}) == len(blocks)
     starts = [i for i, row in enumerate(output.rows) if row[0]]
@@ -256,6 +256,15 @@ def test_controls_and_published_baselines_are_kept_apart(
         "semantic entropy"
         in blocks["Published error detectors"]["Published baselines"]
     )
+    steering = blocks["Published steering methods"]
+    assert steering["Study"] == "Steering"
+    assert "AxBench" in steering["Published baselines"]
+    assert "(CAA)" in steering["Published baselines"]
+    assert "random unit direction" in steering["Controls"]
+    assert "The unsteered model" in steering["Controls"]
+    assert "20 tuning prompts" in steering["Splits"]
+    assert "40 held-out prompts" in steering["Splits"]
+    assert "judge" in steering["Labels"]
 
 
 def test_the_text_keeps_the_rules_of_the_page(

@@ -492,6 +492,10 @@ footer.colophon {
     break-inside: avoid;
   }
 
+  tr.heading {
+    break-after: avoid;
+  }
+
   figure {
     display: flex;
     flex-direction: column;

@@ -281,6 +281,13 @@ def test_a_flagged_figure_prints_its_graphic_whole_and_lets_the_caption_run_on(
     assert "#fig-" not in css
 
 
+def test_a_heading_row_prints_on_the_page_of_the_rows_below_it(
+    css: str,
+) -> None:
+    printed = _print_block(css)
+    assert "  tr.heading {\n    break-after: avoid;\n  }" in printed
+
+
 def test_the_bibtex_block_wraps(css: str) -> None:
     assert (
         "pre.bibtex {\n  white-space: pre-wrap;\n  overflow-wrap: anywhere;"
