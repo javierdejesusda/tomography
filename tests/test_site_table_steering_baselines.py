@@ -238,7 +238,7 @@ def test_the_sizes_are_quoted_from_the_runs(
     for phrase in (
         "40 held-out prompts",
         "20 tuning prompts",
-        "128 new tokens",
+        "at most 128 new tokens per prompt, cut at the end-of-sequence token",
         "64 training pairs",
         "200 held-out WikiText-103 passages",
         "2,000 resamples",

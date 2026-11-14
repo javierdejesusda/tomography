@@ -907,7 +907,7 @@ APPENDICES = (
                 "not know, so their outcome is the abstention rate, "
                 "detected by phrase matching. The run of published steering "
                 "methods steers toward sentiment, happiness and anger at "
-                "three layers, with "
+                "three layers, with at most "
                 "[[num:table:steering_baselines.new_tokens]] new tokens per "
                 "prompt; an LLM judge scores each criterion on "
                 "a three-point scale, the overall score of a generation is "

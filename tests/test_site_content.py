@@ -693,7 +693,7 @@ def test_appendix_b_states_the_steering_baselines_and_the_views_run() -> None:
     method = runins["Steering."]
     assert (
         "The run of published steering methods steers toward sentiment, "
-        "happiness and anger at three layers, with "
+        "happiness and anger at three layers, with at most "
         "[[num:table:steering_baselines.new_tokens]] new tokens per prompt; "
         "an LLM judge scores each criterion on a three-point scale, the "
         "overall score of a generation is the harmonic mean of its "
