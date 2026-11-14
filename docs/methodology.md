@@ -595,8 +595,8 @@ It ran on one checkpoint per role, `gpt2-xl` and `qwen3-1.7b-base` (base) and `q
 [findings](findings.md#published-steering-baselines-b3).
 
 - Protocol: the prompts are split into a tuning half (`n_tune`, 40) and a held-out half (`n_held_out`, 40) that share
-  no prompt. Every arm generates 128 new tokens on both halves at every coefficient, one sample per prompt with the
-  sampling of C1 and one seed for all arms. A judge rates each generation 0, 1 or 2 per criterion; the overall score
+  no prompt. Every arm generates at most 128 new tokens, cut at the end-of-sequence token, on both halves at every
+  coefficient, one sample per prompt with the sampling of C1 and one seed for all arms. A judge rates each generation 0, 1 or 2 per criterion; the overall score
   of a generation is the harmonic mean of its criteria, 0 when any of them is 0. The coefficient of an arm is the
   one with the highest mean overall score on the tuning half; a tie goes to the smallest magnitude, then to the
   lower value. The arm is reported on the held-out half at that coefficient only. A held-out judgment cannot reach
