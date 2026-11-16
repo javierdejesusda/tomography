@@ -11,8 +11,8 @@ EXPERIMENT_ID = re.compile(r"[A-Z]+[0-9]+[a-z]?")
 RUN_READ = re.compile(EXPERIMENT_ID.pattern + " run read")
 # The sentiment-only P1 runs (superseded by the all-task runs), the M2
 # shuffled-only runs (which only supplement a full run) and the earlier runs of
-# the experiments that take their latest run stay committed, but no selection
-# of `Manifest.run` picks them.
+# the experiments that take their latest run stay committed, but the default
+# selection of `Manifest.run` does not pick them.
 UNSELECTED = frozenset(
     {
         "P1",
@@ -109,17 +109,17 @@ def named_runs() -> list[tuple[str, str, str]]:
 
 
 def runs_read() -> list[tuple[str, str, str]]:
-    """The cells of the "<id> run read" columns, as `named_runs` gives them."""
+    """Returns the cells of the "<id> run read" columns of `named_runs`."""
     return [entry for entry in named_runs() if RUN_READ.fullmatch(entry[0])]
 
 
 def unselected() -> list[tuple[str, str, str]]:
-    """The cells of the rows in `UNSELECTED`, as `named_runs` gives them."""
+    """Returns the cells of the rows in `UNSELECTED` of `named_runs`."""
     return [entry for entry in named_runs() if entry[0] in UNSELECTED]
 
 
 def reported() -> list[tuple[str, str, str]]:
-    """The cells that name the run a selection of `Manifest.run` picks.
+    """Returns the cells that name the run a selection of `Manifest.run` picks.
 
     Returns:
         The cells of `named_runs`, except those of the rows in `UNSELECTED`
@@ -185,16 +185,17 @@ def test_every_selection_names_a_row() -> None:
     assert set(SELECTIONS) <= {label for label, _, _ in reported()}
 
 
-def test_an_unselected_row_names_a_committed_run_no_selection_picks() -> None:
+def test_an_unselected_row_names_a_committed_run_the_default_skips() -> None:
     found = manifest_module.Manifest(RESULTS)
+    rows = unselected()
     problems = []
-    for label, model, named in unselected():
+    for label, model, named in rows:
         exp = label.split()[0].lower()
         committed = [run.path.name for run in found.runs(exp, model)]
         chosen = found.run(exp, model)
         if named not in committed or (chosen and chosen.name == named):
             problems.append(f"{label}/{model}: {named}")
-    assert unselected()
+    assert rows
     assert problems == []
 
 
