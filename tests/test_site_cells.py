@@ -72,3 +72,12 @@ def test_csv_text_writes_a_no_break_hyphen_as_a_plain_one() -> None:
     hyphen = chr(0x2011)
     text = cells.csv_text([f"Mass{hyphen}mean"], [[f"x{hyphen}y"], [0.5]])
     assert text == "Mass-mean\nx-y\n0.5\n"
+
+
+def test_csv_text_writes_the_minus_and_plus_minus_signs_in_ascii() -> None:
+    text = cells.csv_text(
+        [f"Reader {MINUS} words"],
+        [[cells.num(-0.05, 2)], [cells.pm(-0.25, 0.02)]],
+    )
+    assert text == "Reader - words\n-0.05\n-0.250 +/- 0.020\n"
+    assert float(text.splitlines()[1]) == -0.05

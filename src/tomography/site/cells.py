@@ -2,7 +2,8 @@
 
 Missing values are written `n/a`. Every number is rounded where it is
 written, never earlier, then signed: a value that rounds to zero has no sign
-and a negative one uses the true minus sign.
+and a negative one uses the true minus sign, which a CSV file writes as an
+ASCII hyphen.
 """
 
 from collections.abc import Sequence
@@ -17,8 +18,12 @@ from tomography.viz import axes
 MISSING = "n/a"
 MINUS = axes.MINUS
 PLUS_MINUS = chr(0x00B1)
-PLAIN_HYPHENS = str.maketrans(
-    dict.fromkeys(map(chr, range(0x2010, 0x2013)), "-")
+CSV_SIGNS = str.maketrans(
+    {
+        **dict.fromkeys(map(chr, range(0x2010, 0x2013)), "-"),
+        MINUS: "-",
+        PLUS_MINUS: "+/-",
+    }
 )
 
 
@@ -133,15 +138,17 @@ def check_align(align: str, columns: int) -> str:
 
 
 def _plain(cell: Any) -> Any:
-    """Writes the hyphens of a text cell as plain ASCII hyphens."""
-    return cell.translate(PLAIN_HYPHENS) if isinstance(cell, str) else cell
+    """Writes the hyphens and signs of a text cell in plain ASCII."""
+    return cell.translate(CSV_SIGNS) if isinstance(cell, str) else cell
 
 
 def csv_text(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
     """Writes rows as CSV text; None becomes an empty field.
 
-    The no-break and other Unicode hyphens of the page become plain ASCII
-    hyphens, so the headers and cells read the same in any tool.
+    The no-break and other Unicode hyphens of the page and the true minus
+    sign become plain ASCII hyphens, and the plus-minus sign becomes `+/-`,
+    so the headers and cells read the same in any tool and a negative
+    number parses as one.
 
     Args:
         header: Column names.
