@@ -9949,6 +9949,16 @@ Qwen3:
 
 Earlier runs that the chain 14 runs replace as the reported runs, and that stay tracked: C5 on `gpt2-xl` `155f0f72bc3f`; on `qwen3-1.7b-base` and `qwen3-1.7b`, in that order, M1 `3fe3a8644289` and `de2cdd3146ac`, C2 `37d187b75a7f` and `227d782df8ba`, C4 `9cdad6a8b7ce` and `2840839e453e`, C5 `fafc346bc266` and `672f70c5406a`, and P7 `947fef33a7c5` and `7921f3fe5754`.
 
+Config hashes (12 hex digits), the earlier runs that stay tracked:
+
+| Experiment     | gpt2-xl      | qwen3-1.7b-base | qwen3-1.7b   |
+| -------------- | ------------ | --------------- | ------------ |
+| M1 earlier run | none         | 3fe3a8644289    | de2cdd3146ac |
+| C2 earlier run | none         | 37d187b75a7f    | 227d782df8ba |
+| C4 earlier run | none         | 9cdad6a8b7ce    | 2840839e453e |
+| C5 earlier run | 155f0f72bc3f | fafc346bc266    | 672f70c5406a |
+| P7 earlier run | none         | 947fef33a7c5    | 7921f3fe5754 |
+
 Chain 17, reading, control and LoRRA runs (26 runs). R1, R2, R3, R4, R5 and R7 on `qwen3-4b-base` and `qwen3-4b`, R6
 on `qwen3-4b`, A1 and A2 and LR1 on the two 4B checkpoints, C2 on `qwen3-4b`, LR1 on `gpt2-medium`, `gpt2-large` and
 `gpt2-xl`, and C4 on the same three GPT-2 sizes were made at `89ea7cb` with a clean tree on a rented GPU pod (NVIDIA RTX
@@ -10128,6 +10138,12 @@ Config hashes (12 hex digits), chain 42:
 
 The earlier C2 run of `gpt2`, `85c9a670bf17`, stays tracked and is no longer the reported run.
 
+Config hashes (12 hex digits), the earlier C2 run:
+
+| Experiment     | gpt2         |
+| -------------- | ------------ |
+| C2 earlier run | 85c9a670bf17 |
+
 Chain 43 (Secure A5000): LR1 and C4 on the Qwen3 0.6B pair (4 runs). `lr1/qwen3-0.6b-base/03ba155a9fe7`,
 `lr1/qwen3-0.6b/74d01330d28c`, `c4/qwen3-0.6b-base/b08c4e236dcf` and `c4/qwen3-0.6b/4d4ff337ade5` were made at `bab5b75`
 (the merge of pull request 199, an ancestor of the current main; `git diff --stat bab5b75 HEAD -- src` is empty, so
@@ -10171,12 +10187,27 @@ Config hashes (12 hex digits), chain 41:
 
 Other runs: P6 `25ee6de331d4`; P8 `e9f9bc04ba3c`.
 
+Config hashes (12 hex digits), P6 and P8. Each reads the runs of several
+checkpoints and is stored under the checkpoint its config names (`model`):
+
+| Experiment | gpt2         | qwen3-1.7b   |
+| ---------- | ------------ | ------------ |
+| P6         | 25ee6de331d4 | none         |
+| P8         | none         | e9f9bc04ba3c |
+
 TB1: the run `tb1/none/cb5150e6b62b` was made at `e1180c8` (the merge of pull request 202) with a clean tree, on the CPU
 (no model is loaded; the `device` field of its `meta.json` records the detected laptop GPU, which the run does not use,
 and the platform is Windows 11 with Python 3.12.6, scikit-learn 1.9.1 and numpy 2.5.4). The stored `meta.json` gives the
 start and finish times 2026-10-19 18:54:42 to 18:55:07 (UTC). Its config is the default TB1 config, whose hash agrees
 with the directory name. An earlier run of the same code on a CPU box gave the same `table.json` and `summary.json`
 apart from the metadata; it is not committed.
+
+Config hashes (12 hex digits), TB1. It loads no model, so its run is stored
+under `none`:
+
+| Experiment | none         |
+| ---------- | ------------ |
+| TB1        | cb5150e6b62b |
 
 V1: the eight runs `v1/gpt2/d7697ddcad98`, `v1/gpt2-medium/e44777651653`, `v1/gpt2-large/a36b45b17074`,
 `v1/gpt2-xl/2ea40465f683`, `v1/qwen3-0.6b-base/5fd563aa2627`, `v1/qwen3-0.6b/c0fb57b3c812`,
