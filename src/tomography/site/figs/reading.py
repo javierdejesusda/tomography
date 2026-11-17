@@ -271,8 +271,9 @@ def _claim(
         and _complete(truth, ("base", "post"))
     ):
         return (
-            f"A logistic direction reads {_list(every)} on every checkpoint "
-            "and truth on Qwen3 only."
+            f"A logistic direction reads {_list(every)} above its random "
+            "direction on every checkpoint and truth on Qwen3 only, by "
+            "interval."
         )
     groups: dict[str, list[str]] = {}
     for concept in names:

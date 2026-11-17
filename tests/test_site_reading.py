@@ -412,8 +412,9 @@ def test_the_claim_counts_each_concept_per_role_from_the_intervals(
     assert truth["base"].hits == truth["base"].total
     assert truth["post"].hits == truth["post"].total
     assert text == (
-        "A logistic direction reads sentiment, utility and morality on every "
-        "checkpoint and truth on Qwen3 only."
+        "A logistic direction reads sentiment, utility and morality above its "
+        "random direction on every checkpoint and truth on Qwen3 only, by "
+        "interval."
     )
 
 

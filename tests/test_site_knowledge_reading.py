@@ -299,19 +299,20 @@ def test_the_probe_column_is_explained_in_the_caption(
     assert "a probe fitted on correct and wrong labels" in output.detail
 
 
-def test_the_caption_says_what_stands_for_the_model_confidence(
+def test_the_caption_names_the_task_of_each_panel(
     output: registry.FigureOutput,
 ) -> None:
+    assert output.detail.startswith(
+        "(a) Within-relation AUROC, known against unknown questions: "
+        "direction, popularity and the two text classifiers (green bar: "
+        "their range)."
+    )
     assert (
-        "the first answer token probability (pentagon), which stands for "
-        "the model's confidence: neither that confidence nor a random "
-        "direction is stored within relation."
+        "(c) A second task, wrong against correct answers: change in pooled "
+        "AUROC when the direction, or a probe fitted on correct and wrong "
+        "labels, is added to the model's confidence."
     ) in output.detail
-    assert (
-        "(c) Change in pooled AUROC for wrong answers when the direction, or "
-        "a probe fitted on correct and wrong labels, is added to the model's "
-        "confidence."
-    ) in output.detail
+    assert "pentagon" not in output.detail
 
 
 def test_popularity_is_the_strongest_control_where_the_caption_says_so() -> (
@@ -384,15 +385,6 @@ LABELS = ["medium", "large", "XL", "0.6B", "1.7B", "4B", "0.6B", "1.7B", "4B"]
 GROUPS = ["GPT-2", "Qwen3\nbase", "Qwen3\npost-trained"]
 
 
-def _own(model: str) -> dict[str, Any]:
-    (row,) = [
-        r
-        for r in _table("p9c", model)
-        if r["dataset"] == "popqa" and r["predictor"] == "first_token_prob"
-    ]
-    return row
-
-
 def _points(ax: Any, marker: str) -> list[Any]:
     return [ln for ln in ax.get_lines() if ln.get_marker() == marker]
 
@@ -423,28 +415,14 @@ def test_rows_sit_in_role_blocks_named_on_the_left(
     assert max(gaps) > 1.0
 
 
-def test_panel_a_marks_the_answer_probability_level_with_its_interval(
+def test_panel_a_holds_only_the_known_against_unknown_task(
     output: registry.FigureOutput,
 ) -> None:
-    rows = _rows(output)
-    for model in MODELS_A:
-        own = _own(model)
-        (got,) = [
-            r
-            for r in rows
-            if r["panel"] == "a"
-            and r["model"] == model
-            and r["series"] == "answer_probability"
-        ]
-        assert float(got["value"]) == pytest.approx(own["auroc_within"])
-        assert float(got["lo"]) == pytest.approx(own["lo_within"])
-        assert float(got["hi"]) == pytest.approx(own["hi_within"])
+    series = {r["series"] for r in _rows(output) if r["panel"] == "a"}
+    assert series == {"direction", "popularity", "words", "characters"}
     ax = output.figure.axes[0]
     marker = paper.MEASURE_MARKERS["answer_probability"]
-    pentagons = _points(ax, marker)
-    assert len(pentagons) == len(MODELS_A)
-    for line in pentagons:
-        assert line.get_color() == paper.ENC["own_probability"]
+    assert _points(ax, marker) == []
 
 
 def test_panel_a_draws_one_green_range_for_the_two_text_classifiers(
@@ -528,7 +506,7 @@ def test_the_probe_only_gpt2_small_value_is_exported(
     )
 
 
-def test_legend_has_four_entries_and_no_role_hexagon(
+def test_legend_has_three_entries_and_no_role_hexagon(
     output: registry.FigureOutput,
 ) -> None:
     assert _L["marker_clashes"](output.figure) == []
@@ -538,7 +516,6 @@ def test_legend_has_four_entries_and_no_role_hexagon(
         "knowledge direction",
         "popularity",
         "text classifiers",
-        "own answer probability",
     ]
     markers = [
         str(h.get_marker()) if hasattr(h, "get_marker") else "None"
@@ -546,7 +523,6 @@ def test_legend_has_four_entries_and_no_role_hexagon(
     ]
     assert "h" not in markers
     assert markers[:2] == ["o", "s"]
-    assert markers[3] == paper.MEASURE_MARKERS["answer_probability"]
 
 
 def test_three_panel_letters_and_no_dashes(
@@ -565,11 +541,10 @@ def test_three_panel_letters_and_no_dashes(
     assert chr(0x2013) not in text
 
 
-def test_caption_states_the_criteria_and_names_the_own_probability_signal(
+def test_caption_states_the_criteria(
     output: registry.FigureOutput,
 ) -> None:
     text = output.detail
-    assert "first answer token" in text
     assert "Open markers: post-trained." in text
     assert "(b) Direction minus the strongest control, conservative" in text
     assert "the two text classifiers (green bar: their range)" in text

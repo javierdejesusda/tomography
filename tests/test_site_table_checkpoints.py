@@ -77,9 +77,8 @@ def test_the_caption_is_the_range_what_is_counted_and_the_chat_template(
         f"{params.label(counts[1])} parameters."
     )
     assert output.detail == (
-        "Counts include the embeddings and every norm; layers are decoder "
-        "blocks. Post-trained Qwen3 checkpoints run with their chat template "
-        "and thinking disabled."
+        "Counts include embeddings and norms; layers are decoder blocks. "
+        "Post-trained checkpoints use the chat template, thinking off."
     )
     assert len(f"{output.claim} {output.detail}".split()) <= 90
 

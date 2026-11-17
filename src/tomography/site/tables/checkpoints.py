@@ -64,9 +64,8 @@ def build(manifest: Manifest) -> TableOutput:
         f" to {params.label(max(counts))} parameters."
     )
     detail = (
-        "Counts include the embeddings and every norm; layers are decoder "
-        "blocks. Post-trained Qwen3 checkpoints run with their chat template "
-        "and thinking disabled."
+        "Counts include embeddings and norms; layers are decoder blocks. "
+        "Post-trained checkpoints use the chat template, thinking off."
     )
     return TableOutput(
         claim,

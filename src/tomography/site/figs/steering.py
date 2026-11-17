@@ -28,7 +28,7 @@ from tomography.site.registry import FigureOutput
 from tomography.viz import axes
 from tomography.viz import paper
 
-HEIGHT = 5.0
+HEIGHT = 4.5
 COEFFS = (-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3)
 X_LIMIT = 0.33
 X_ZONE = -0.68

@@ -328,7 +328,8 @@ def test_the_detail_states_the_confound_and_the_test_sizes_from_the_files(
     assert output.numbers["test_side_max"] == max(sizes)
     assert output.detail.startswith(
         "In every family the range side is a living thing and the exact "
-        f"side an artifact; a test set holds {min(sizes)} to {max(sizes)} "
+        f"side an artifact, and the wording differs by side; a test set "
+        f"holds {min(sizes)} to {max(sizes)} "
         "questions per side."
     )
 

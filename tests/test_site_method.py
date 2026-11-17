@@ -133,11 +133,11 @@ def test_the_caption_is_at_most_90_words_and_cites_no_other_item(
     assert not any(ch.isdigit() for ch in text)
 
 
-def test_the_figure_is_5_5_by_2_1_inches(
+def test_the_figure_is_5_5_by_2_inches(
     output: registry.FigureOutput,
 ) -> None:
     assert output.figure.get_figwidth() == pytest.approx(paper.FULL_WIDTH)
-    assert output.figure.get_figheight() == pytest.approx(2.1)
+    assert output.figure.get_figheight() == pytest.approx(2.0)
 
 
 def test_no_layout_faults(output: registry.FigureOutput) -> None:

@@ -51,7 +51,8 @@ CLAIM = (
 )
 DETAIL = (
     "In every family the range side is a living thing and the exact side an "
-    "artifact; a test set holds {side_min} to {side_max} questions per "
+    "artifact, and the wording differs by side; a test set holds "
+    "{side_min} to {side_max} questions per "
     "side. (a) Share of greedy few-shot answers written as a range on range "
     "items, exact items and the heights of {n_people} people, when the "
     "prompt ends on a range example. (b) AUROC on held-out durations of a "

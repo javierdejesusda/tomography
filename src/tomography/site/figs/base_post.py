@@ -21,7 +21,7 @@ from tomography.site.registry import FigureOutput
 from tomography.viz import axes
 from tomography.viz import paper
 
-HEIGHT = 5.4
+HEIGHT = 4.6
 LABEL_FONT = 7
 LABEL_PAD = 0.07
 HEADER = ["panel", "row", "size", "value", "lo", "hi", "interval"]
@@ -60,12 +60,12 @@ CLAIM = (
 )
 DETAIL = (
     "Post-trained minus base for each Qwen3 size (0.6B, 1.7B and 4B, light "
-    "to dark), one row per measure. A marker is filled where the 95 percent "
-    "interval excludes zero. A solid interval is the seed-paired bootstrap "
-    "interval (10 seeds, 0.6B and 1.7B); a dashed interval is conservative, "
-    "used for 4B and the measures without seeds. Panels differ in axis: (a) "
-    "rows whose intervals stay within {narrow}, (b) rows with wider "
-    "intervals."
+    "to dark). A marker is filled where the 95 percent interval excludes "
+    "zero. A solid interval is the seed-paired bootstrap interval (10 "
+    "seeds, 0.6B and 1.7B), which does not resample the test pairs; a "
+    "dashed interval is the conservative test-size interval, used for 4B "
+    "and the measures without seeds. Panels differ in axis: (a) intervals "
+    "within {narrow}, (b) wider intervals."
 )
 
 

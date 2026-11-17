@@ -18,7 +18,7 @@ from tomography.site.registry import FigureOutput
 from tomography.viz import paper
 
 WIDTH = 5.5
-HEIGHT = 2.1
+HEIGHT = 2.0
 TEXT = paper.MIN_TEXT
 TITLE_SIZE = 7.5
 EQUATION_SIZE = 7.5
