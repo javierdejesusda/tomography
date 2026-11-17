@@ -155,31 +155,37 @@ def _git(repo: Path, *args: str, date: str | None = None) -> str:
     ).stdout.strip()
 
 
-def test_the_results_commit_counts_findings_commits_in_any_clone(
+def _commit(repo: Path, path: str, day: str) -> str:
+    (repo / path).parent.mkdir(parents=True, exist_ok=True)
+    (repo / path).write_text(day, encoding="utf-8")
+    _git(repo, "add", "-f", path)
+    _git(
+        repo,
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        path,
+        date=f"{day}T12:00:00+00:00",
+    )
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def test_the_results_commit_counts_results_and_findings_in_any_clone(
     tmp_path: Path,
 ) -> None:
     _git(tmp_path, "init", "-q")
-    for path, day in (
-        ("results/run.json", "2026-10-18"),
-        (build_module.FINDINGS, "2026-10-19"),
-        ("README.md", "2026-10-20"),
+    _commit(tmp_path, "results/run.json", "2026-10-18")
+    for path, day, later, built in (
+        (build_module.FINDINGS, "2026-10-19", "2026-10-20", "19 October"),
+        ("results/run.json", "2026-10-21", "2026-10-22", "21 October"),
     ):
-        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / path).write_text(day, encoding="utf-8")
-        _git(tmp_path, "add", "-f", path)
-        _git(
-            tmp_path,
-            "commit",
-            "-q",
-            "--no-verify",
-            "-m",
-            path,
-            date=f"{day}T12:00:00+00:00",
-        )
-    sha, built = build_module.results_commit(tmp_path / "results")
-    assert sha
-    assert _git(tmp_path, "rev-parse", "HEAD~1").startswith(sha)
-    assert built == "19 October 2026"
+        pinned = _commit(tmp_path, path, day)
+        _commit(tmp_path, "README.md", later)
+        sha, date = build_module.results_commit(tmp_path / "results")
+        assert sha, path
+        assert pinned.startswith(sha), path
+        assert date == f"{built} 2026", path
 
 
 def test_csv_files_hold_plain_text_not_tokens(
