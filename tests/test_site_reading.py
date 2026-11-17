@@ -289,11 +289,9 @@ def test_the_detail_describes_the_size_row(
     assert text.startswith(
         "Dots are held-out pair accuracy at the layer read, by checkpoint size"
     )
-    assert "Grey ticks are the random direction at the same layer." in text
     assert (
-        "Whiskers are the reader's own interval; the test against the "
-        "random direction is the difference interval ([[table:reading]]), "
-        "not a whisker clearing its tick."
+        "Grey ticks are the random direction at the same layer; "
+        "[[table:reading]], not a whisker, tests a dot against its tick."
     ) in text
     assert "filled: GPT-2 and Qwen3 base; open, shifted right:" in text
     assert "t interval" not in text
