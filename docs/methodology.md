@@ -21,8 +21,9 @@ Contents:
 10. [LAT against few-shot prompting (R8)](#lat-against-few-shot-prompting-r8)
 11. [Known versus unknown questions (P9)](#known-versus-unknown-questions-p9)
 12. [Approximate answers (P10)](#approximate-answers-p10)
-13. [Run settings of the GPU runs](#run-settings-of-the-gpu-runs)
-14. [Data sources](#data-sources)
+13. [Design of every experiment](#design-of-every-experiment)
+14. [Run settings of the GPU runs](#run-settings-of-the-gpu-runs)
+15. [Data sources](#data-sources)
 
 ## Scope and models
 
@@ -1053,6 +1054,453 @@ They must be the full local run directories, because the export drops the reader
   (200) random unit directions at the same layer. An AUROC is never compared with 0.5.
 - Intervals: percentile bootstrap over the questions (1,000 resamples), with no correction for multiple comparisons.
 
+## Design of every experiment
+
+For every experiment, by study: the question it asks, its stimuli, where its labels come from, its splits, its
+controls, its published baselines, its metric and the checkpoints it covers. The results site prints a shorter table
+of the same designs. Every count of pairs, draws, questions or prompts below is the one stored in the configuration or
+the summary of the committed runs and is the same on every checkpoint of the experiment. Checkpoints are counted per
+role: GPT-2, Qwen3 base and post-trained Qwen3. A control and a published baseline are defined in [Controls and
+baselines](#controls-and-baselines). Select pairs choose the layer, and report pairs, which that choice does not use,
+give the score.
+
+Post hoc marks a choice made after results were seen. There are two. Logistic regression was made the default finder
+after pilot runs (see [Activations and directions](#activations-and-directions)), and the PopQA part of the question
+pool was widened from four to twelve relations after the guess filter of earlier labelling runs left too few known
+questions (see [The relation pool](#the-relation-pool)). No hypothesis was fixed before its run, except the tolerance
+of the views run (`v1`), which was set before those runs. So each study below names what would count as evidence and
+not a hypothesis that was tested.
+
+### Reading concepts
+
+**Sentiment (`r1`).** Does a direction separate positive from negative phrases?
+
+- Stimuli: SST-2 phrases of at least 3 words for training and the full sentences of its validation split for scoring,
+  in the template of the paper.
+- Labels: The binary sentiment label of SST-2.
+- Splits: 10 readers, each on its own draw of 64 training pairs; the same 256 validation pairs choose the layer and
+  give the score, so the value is optimistic: biased upward by the choice of the layer.
+- Controls: A random direction oriented on the training labels, the reader scored against shuffled labels, and
+  classifiers on the words and on the characters of the texts.
+- Published baselines: None; the reader is itself a logistic-regression probe, made the default finder after pilot
+  runs (post hoc).
+- Metric: Pair accuracy at the chosen layer, as the mean over the readers.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Utility (`r2`).** Does a direction read which of two scenarios is more pleasant?
+
+- Stimuli: ETHICS utilitarianism rows, two scenarios per row, in the template of the paper.
+- Labels: The order of the source row, which lists the more pleasant scenario before the other.
+- Splits: 10 readers, each on its own draw of 64 training pairs; the layer is chosen on 3,473 validation pairs and the
+  score is on 4,808 test pairs, the test file of the source.
+- Controls: A random direction oriented on the training labels, the reader scored against shuffled labels, and
+  classifiers on the words and on the characters of the texts.
+- Published baselines: None; the reader is itself a logistic-regression probe, made the default finder after pilot
+  runs (post hoc).
+- Metric: Pair accuracy on the test pairs, as the mean over the readers.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Morality (`r3`).** Does a direction read whether a scenario is acceptable?
+
+- Stimuli: ETHICS commonsense scenarios, the short ones only, in the template of the paper.
+- Labels: The source label, flipped so that the positive member is the acceptable scenario.
+- Splits: 10 readers, each on its own draw of 64 training pairs; the layer is chosen on 644 validation pairs and the
+  score is on 983 test pairs, the test file of the source.
+- Controls: A random direction oriented on the training labels, the reader scored against shuffled labels, and
+  classifiers on the words and on the characters of the texts.
+- Published baselines: None; the reader is itself a logistic-regression probe, made the default finder after pilot
+  runs (post hoc).
+- Metric: Pair accuracy on the test pairs, as the mean over the readers.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Text-only classifiers (`tb1`).** How much of the accuracy of a reader do the words and the characters of its own
+pairs reach with no model?
+
+- Stimuli: The raw training and test texts of the sentiment, utility, morality, truth and honesty readers and of the
+  training-set size run.
+- Labels: Those of each reader.
+- Splits: One fit per training set of the reader, scored on the test pairs of that reader.
+- Controls: This run is the text-only control of those readers.
+- Published baselines: None.
+- Metric: Pair accuracy, ties sharing the credit, with a Wilson interval over the test pairs.
+- Checkpoints: None: no model is loaded.
+
+**Training-set size (`p3`).** How many training pairs does a direction need, and how much can one draw mislead?
+
+- Stimuli: Sentiment, truth and utility pairs, with truth also read on the cities and the common-claim statements.
+- Labels: Those of the source datasets.
+- Splits: 20 resampled training sets per size; for sentiment the SST-2 validation sentences are halved by a seeded
+  draw, one half chooses the layer and the other gives the score.
+- Controls: A random direction oriented on the training labels, the reader scored against shuffled labels, and
+  classifiers on the words and on the characters of the texts.
+- Published baselines: None; the reader is itself a logistic-regression probe, made the default finder after pilot
+  runs (post hoc).
+- Metric: Pair accuracy on the report pairs at each training size, with a bootstrap interval over the resamples.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Token position and a misleading sentence (`p2`).** Where in the prompt is a concept read, and what does a misleading
+sentence in the prompt cost?
+
+- Stimuli: Sentiment, truth and utility pairs in the template of the paper, read at the last token, at the concept
+  tokens and as the mean over tokens, with and without an added sentence that misleads about the concept.
+- Labels: Those of the source datasets.
+- Splits: 10 readers, each on its own draw of 64 training pairs; the layer is chosen on pairs that the score does not
+  use.
+- Controls: A random direction oriented on the training labels, and the reader scored against shuffled labels.
+- Published baselines: The zero-shot heuristic of the paper, which asks the model for the level in words.
+- Metric: Pair accuracy per token position and per kind of prompt.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Prompt wording (`p1`).** How much does the wording of the template move a reading?
+
+- Stimuli: Sentiment, truth and emotion pairs, each in variants of the template of the paper with the same items and
+  the same draws.
+- Labels: Those of the source datasets.
+- Splits: 10 readers, each on its own draw of 64 training pairs; the layer is chosen on pairs that the score does not
+  use.
+- Controls: A random direction oriented on the training labels, and the reader scored against shuffled labels.
+- Published baselines: None; the reader is itself a logistic-regression probe, made the default finder after pilot
+  runs (post hoc).
+- Metric: Pair accuracy per variant and its spread across the variants.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Agreement of directions (`a1`).** Do directions fitted on different draws of the training pairs agree?
+
+- Stimuli: The stored directions of the sentiment, utility, morality, honesty and truth readers; no activation is
+  read.
+- Labels: None: it compares directions.
+- Splits: The 10 draws of each reader, at the layer at half of the depth.
+- Controls: The absolute cosine expected between random directions.
+- Published baselines: None.
+- Metric: The mean cosine between the directions of two draws, with a t interval on jackknife values.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Rationale and limits.** A direction is oriented with the training labels, so even a random one can score above
+chance; the evidence is therefore the margin over the random direction of the same run and, where the words can give
+the label away, the distance to classifiers that see only the text. The token and wording runs keep the items and the
+draws fixed, so a change belongs to the factor that was varied. The limits are that the stored intervals resample the
+draws and not the test pairs, that the main sentiment run chooses its layer on the pairs it scores, and that each cell
+is one run.
+
+### Finders
+
+**Pairing, preprocessing and finder (`p4`).** Do the pairing, the preprocessing of the differences and the finder
+change what is read?
+
+- Stimuli: Sentiment, truth and utility pairs; the pairing, the preprocessing and the finder are varied one at a time
+  around the finder of the paper.
+- Labels: Those of the source datasets.
+- Splits: 10 readers, each on its own draw of 64 training pairs; every series, the random direction included, is read
+  at the layer chosen on its own select split and scored on report pairs.
+- Controls: A random direction with a layer of its own, and the reader scored against shuffled labels.
+- Published baselines: Logistic regression (a linear probe) and the mean difference (the mass-mean probe), in the same
+  sweep as the finder of the paper.
+- Metric: Pair accuracy, and its margin over the random direction.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Five finders on utility (`m1`).** Do five finders that read utility also steer it?
+
+- Stimuli: ETHICS utility pairs for reading; 250 truncated scenarios that the model continues under steering.
+- Labels: The order of the source row for reading; a sentiment classifier, with a second one as a check, for the
+  continuations.
+- Splits: Reading is scored on held-out pairs; for the same prompt and seed, the continuation steered at a positive
+  coefficient is compared with the one steered at the negative coefficient.
+- Controls: A random finder, read and steered like the others, with 3 steering vectors per finder.
+- Published baselines: Logistic regression (a linear probe) and the mean difference (the mass-mean probe), among the
+  five finders.
+- Metric: Pair accuracy; the win rate of the positive continuation on decisive pairs, with a Wilson interval.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Published finders (`b2`).** Does the finder of the paper read truth and sentiment as well as published finders
+fitted on the same pairs?
+
+- Stimuli: Statements of three Geometry of Truth sets, each paired with its negation, and SST-2 texts.
+- Labels: The source labels; a pair holds exactly one true member.
+- Splits: 10 training sets of 64 pairs; each series chooses its layer on the validation pairs and is scored on the
+  test pairs.
+- Controls: A random direction, the finder of the paper scored against labels shuffled inside each pair, and
+  classifiers on the words and on the characters of the texts.
+- Published baselines: Mass-mean and whitened mass-mean probes, a logistic-regression probe and CCS with the best of
+  10 restarts.
+- Metric: Test accuracy, with a Wilson interval over the test pairs.
+- Checkpoints: 4 of 4 GPT-2, 2 of 3 Qwen3 base and 2 of 3 post-trained checkpoints.
+
+**Rationale and limits.** Every series, the random direction included, is read at the layer chosen on its own select
+split, so no series borrows a layer tuned for another. Logistic regression and the mean difference are published
+baselines; the random direction, the shuffled labels and the text classifiers are controls. The limit is that matched
+pairs exist only for utility, so the effect of matching cannot be told apart from the concept and the data.
+
+### Known and unknown questions
+
+**Labels from the behavior of the model (`p9a`).** Which questions does each model know?
+
+- Stimuli: Closed-book questions in nine groups, built from PopQA, TriviaQA, KUQ, FalseQA, SyntHal, NQ-open and
+  Wikidata, asked with a few-shot prompt of 15 examples. The PopQA part of the pool was widened from four to twelve
+  relations after the guess filter of earlier labelling runs left too few known questions (post hoc).
+- Labels: Known when the greedy answer and at least 3 of 5 sampled answers contain a gold alias; unknown when the
+  greedy answer and every sample are wrong; the rest is uncertain and left out. Questions without a gold answer
+  (invented subjects, SyntHal, unknowable details, false premises and KUQ) are unknown by construction, and the sport
+  relation of PopQA never counts as known: a question of it that the model answers is left out as uncertain, and its
+  unknown questions stay unknown. A group of questions that a constant guess answers often supplies no known question,
+  and a model enters the known against unknown contrasts only with at least 100 known questions.
+- Splits: Questions are hashed into train, validation and test by subject or source, so one subject stays in one
+  split.
+- Controls: None.
+- Published baselines: None.
+- Metric: The number of known, unknown and uncertain questions per group.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Reading known against unknown (`p9b`).** Does a direction separate questions a model answers from questions it
+cannot answer?
+
+- Stimuli: The labelled questions in the few-shot prompt, as contrasts of a known group against an unknown group and
+  contrasts between two kinds of unknown question; some contrasts keep a single dataset on both sides.
+- Labels: Those of the labelling run of the same checkpoint.
+- Splits: 5 draws of 64 training pairs; the layer is chosen on the validation questions and the score is on the test
+  questions.
+- Controls: A random direction, classifiers on the words and on the characters of the question, and the popularity of
+  the subject, each on the test questions of the reader.
+- Published baselines: PCA of the differences (the finder of the paper) and the mean difference (the mass-mean probe),
+  in the same sweep as the logistic-regression reader.
+- Metric: AUROC, inside each relation where the contrast holds PopQA questions; its stored interval resamples the
+  draws, not the test questions.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints. GPT-2 small has too few known
+  questions for a contrast, so its run reads only the contrasts between two kinds of unknown question.
+
+**Hidden states behind the readers (`v1`).** What do the hidden states behind the knowledge readers look like, and do
+the stored scores reproduce?
+
+- Stimuli: The train and test questions of the reading run, read again at every layer that run read, where the readers
+  are refitted and compared with the stored scores at the layer that run chose; the views are drawn at layer 1, at
+  that layer and at the last layer.
+- Labels: Those of the labelling run of the same checkpoint.
+- Splits: Those of the reading run; nothing is chosen again.
+- Controls: A random direction, readers refitted on labels permuted inside each group, a view of the text alone and
+  the popularity of the subject.
+- Published baselines: None of its own; it recomputes the readers of the reading run.
+- Metric: The AUROC of each recomputed reader beside the stored one, and projections of the hidden states on two axes.
+- Checkpoints: 4 of 4 GPT-2, 2 of 3 Qwen3 base and 2 of 3 post-trained checkpoints. GPT-2 small has too few known
+  questions for a contrast, so its run views only the contrasts between two kinds of unknown question.
+
+**Predicting wrong answers (`p9c`).** Does the knowledge direction predict a wrong answer beyond the confidence of the
+model?
+
+- Stimuli: PopQA, TriviaQA and NQ-open questions with the greedy answer of the model.
+- Labels: Whether the greedy answer contains a gold alias.
+- Splits: The direction is fitted on 5 draws of 64 training pairs; probes and layers are chosen on train and
+  validation questions and every score is on the test questions.
+- Controls: The popularity of the subject, the accuracy of the relation, the length of the question and the likelihood
+  of the name of the subject.
+- Published baselines: The confidence of the model: the probability of the most likely next token, the negative
+  entropy of that distribution, the mean log-probability of the answer tokens, the share of sampled answers equal to
+  the greedy answer, and P(True).
+- Metric: AUROC of wrong against correct answers, inside each relation on PopQA, with a bootstrap interval over the
+  test questions.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints. GPT-2 small has too few known
+  questions for a contrast, so its run has no knowledge direction.
+
+**Published error detectors (`b1`).** Do published error detectors do better than the knowledge direction on the same
+test questions?
+
+- Stimuli: The questions and the greedy and sampled answers of the error-prediction run.
+- Labels: Whether the greedy answer contains a gold alias.
+- Splits: Those of the error-prediction run; the probe at the answer token chooses its layer on validation questions.
+- Controls: The popularity of the subject and the length of the question.
+- Published baselines: A probe at the last token of the answer, semantic entropy and EigenScore, beside P(True) and
+  the other signals of the error-prediction run.
+- Metric: AUROC of wrong against correct answers, inside each relation on PopQA, with a bootstrap interval over the
+  test questions.
+- Checkpoints: 4 of 4 GPT-2, 2 of 3 Qwen3 base and 2 of 3 post-trained checkpoints. GPT-2 small has too few known
+  questions for a contrast, so its run has no knowledge direction.
+
+**Steering along the knowledge direction (`p9d`).** Does adding the knowledge direction change how a model answers?
+
+- Stimuli: Known and unknown test questions, answered while the direction is added over a grid of relative
+  coefficients.
+- Labels: The outcome is the abstention rate, by phrase matching, on post-trained checkpoints and the entropy of the
+  next-token distribution on the others.
+- Splits: The direction and its layer come from train and validation questions; the steered questions are test
+  questions.
+- Controls: 3 random directions of the same norm, steered through the same grid.
+- Published baselines: None.
+- Metric: The mean slope of the outcome over the coefficients, with a bootstrap interval over the questions, against
+  each random direction and between unknown and known questions.
+- Checkpoints: 3 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints. GPT-2 small has too few known
+  questions for a contrast.
+
+**Rationale and limits.** The labels come from the behavior of each model, so every model has its own sets. Datasets
+differ in wording and relations differ in how often they are known, so a reader is set beside classifiers on the words
+and the characters of the question and beside the popularity of the subject, and the headline is the AUROC inside each
+relation. The views run compares the AUROC of its refitted readers with the stored scores within a tolerance set
+before the run. The limits are that no human checked the answer matching or the abstention phrases, and that the
+interval of a reader resamples its draws, not the test questions.
+
+### Approximate answers
+
+**Answers to range and exact questions (`p10a`).** Does a model answer with a range when the sourced answer is a
+range?
+
+- Stimuli: Wikidata quantity questions on height, wingspan and duration, 120 per side and family, and people with one
+  exact height.
+- Labels: The kind of the sourced answer, range or exact, from the bounds of the Wikidata statement and not from a
+  model.
+- Splits: Every question is asked, free and when told to give one number, with one greedy and 5 sampled answers.
+- Controls: The people, who are living things with an exact answer.
+- Published baselines: None.
+- Metric: The share of answers of each form and the range share on range questions minus that on exact questions, with
+  Wilson and bootstrap intervals over the questions.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Reading range against exact (`p10b`).** Can a direction tell a range question from an exact one before the model
+answers?
+
+- Stimuli: The same questions, bare and in the concept template of the paper, read at the last token.
+- Labels: The kind of the sourced answer, as above.
+- Splits: Each family is hashed into train, validation and test; readers are fitted on one, two or three families, 5
+  draws each, with the layer chosen on validation questions and the score on test questions, also of a family held out
+  of training.
+- Controls: A random direction with a layer of its own, classifiers on the words and on the characters, the length of
+  the question, the popularity of the subject, and 120 people as test items.
+- Published baselines: PCA of the differences (the finder of the paper) and the mean difference (the mass-mean probe),
+  in the same sweep as the logistic-regression reader.
+- Metric: AUROC of the test questions with range as the positive class, with a bootstrap interval over the test
+  questions.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Links to knowledge and to hedging (`p10c`).** Is the range direction related to the knowledge directions and to how
+often the model answers with a range?
+
+- Stimuli: The stored range reader, knowledge readers and answers of the same checkpoint; nothing is trained.
+- Labels: The kind of the sourced answer, as above.
+- Splits: The link to the answers uses the test questions, inside one kind of question.
+- Controls: The band of 200 random unit directions at the same layer.
+- Published baselines: None.
+- Metric: The cosine between directions per layer, the AUROC of the knowledge readers on the quantity questions and a
+  rank correlation, with bootstrap intervals over the questions.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Rationale and limits.** The links to the knowledge directions are compared with the band of random directions, never
+with chance. The limits are that the families are few and that no human checked the parsing of the answers.
+
+### Truth
+
+**True and false statements (`r7`).** Does a direction read whether a statement is true, also on statements from other
+sources?
+
+- Stimuli: The true and false statements of the representation engineering repository, and nine Geometry of Truth sets
+  scored with no refit.
+- Labels: The true or false label of each source file.
+- Splits: 10 readers, each on its own draw of 64 training pairs; the layer is chosen on validation pairs and the score
+  is on test pairs; a source statement stays in one split.
+- Controls: A random direction oriented on the training labels, the reader scored against shuffled labels, and
+  classifiers on the words and on the characters of the texts.
+- Published baselines: None; the reader is itself a logistic-regression probe, made the default finder after pilot
+  runs (post hoc).
+- Metric: Pair accuracy on the test pairs and on each of the other sets.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**TruthfulQA (`r6`).** Does a reader choose the true answer more often than the words alone?
+
+- Stimuli: 817 multiple-choice questions with shuffled choices; the readers are fitted on TruthfulQA train questions,
+  on ARC items or on true statements under two personas.
+- Labels: The correct choice of the source.
+- Splits: 15 readers; 511 train, 133 validation and 173 test questions by hash, with the layer chosen on the
+  validation questions.
+- Controls: A random direction, shuffled labels, and classifiers on the words and on the characters of the text alone.
+- Published baselines: The standard and the heuristic zero-shot scorers of the paper, run on all 817 questions and
+  compared with the readers on the test questions.
+- Metric: The share of test questions on which the true choice scores highest.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Honesty transfer (`r5`).** Does a direction found from an honest and an untruthful persona read the truth of plain
+statements?
+
+- Stimuli: True statements under an honest and an untruthful persona, read at the response tokens; plain true and
+  false statements for the test.
+- Labels: In training the persona, which the template sets; in the test the true or false label of the statements
+  file.
+- Splits: 10 readers, each on its own draw of 64 training pairs; the layer is chosen on 53 validation pairs and the
+  score is on 59 test pairs, both of plain statements.
+- Controls: A random direction oriented on the training labels, the reader scored against shuffled labels, and
+  classifiers on the words and on the characters of the texts.
+- Published baselines: None; the reader is itself a logistic-regression probe, made the default finder after pilot
+  runs (post hoc).
+- Metric: Pair accuracy on the plain statements, beside the accuracy inside the persona template.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Rationale and limits.** A direction fitted on true and false statements is scored on held-out statements and, with
+no refit, on sets of statements from another source, which tests whether it holds beyond its own data. On TruthfulQA
+the zero-shot scorers of the paper are published baselines and the classifiers on the words and the characters of the
+text are controls; a reader that is not above the words alone has not been shown to read the model. The honesty run
+fits its direction on persona prompts and tests it on plain statements, so it asks for transfer from a function to a
+concept. The limits are that the stimuli the paper generates with a larger chat model are not reproduced and that the
+test sets are small.
+
+### Steering
+
+**Sentiment steering (`c1`).** Does adding a sentiment direction move the judged sentiment of the text, and at what
+cost to the text?
+
+- Stimuli: Completions of 100 short neutral prompts, 2 samples each, steered over a grid of relative coefficients at
+  three consecutive layers.
+- Labels: The positive-class probability of a sentiment classifier, with a second classifier as a check.
+- Splits: A layer sweep on one list of prompts chooses where to steer and the results are on a second list; 3 steering
+  vectors.
+- Controls: None of the random or shuffled kind: the comparisons are the unsteered model and an instruction in the
+  prompt.
+- Published baselines: None.
+- Metric: The mean judged score per coefficient, and the fluency rule on the perplexity of 200 held-out WikiText-103
+  passages and the distinct-1 of the completions.
+- Checkpoints: 4 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post-trained checkpoints.
+
+**Published steering methods (`b3`).** Does steering along the reader move generations toward a concept as far as
+published steering methods do, and at what cost to the text?
+
+- Stimuli: Base checkpoints continue the opening words of held-out WikiText-103 passages and post-trained ones answer
+  AlpacaEval instructions in their chat template, 128 new tokens per prompt, steered toward sentiment, happiness or
+  anger at three layers over a grid of relative coefficients.
+- Labels: An LLM judge rates the concept and the fluency of each generation, and on post-trained checkpoints how
+  closely its topic relates to the instruction; a second judge slot of the same model rates a seeded share again.
+- Splits: Each arm chooses its coefficient on 20 tuning prompts per concept and is scored on 40 held-out prompts,
+  which share none with them; the reader, the difference of class means, contrastive activation addition and
+  mean-centring are built from the same 64 training pairs per concept.
+- Controls: The unsteered model and a random unit direction, steered like the vector arms.
+- Published baselines: Prompt prepending and the difference of class means, both baselines of AxBench, contrastive
+  activation addition (CAA), activation addition (ActAdd) and mean-centring.
+- Metric: The mean judge score per criterion and their harmonic mean, with a bootstrap interval over the held-out
+  prompts; the perplexity of 200 held-out WikiText-103 passages and the distinct-1 of the generations.
+- Checkpoints: 1 of 4 GPT-2, 1 of 3 Qwen3 base and 1 of 3 post-trained checkpoints. GPT-2 XL is steered and judged as
+  a base checkpoint.
+
+**Rationale and limits.** In the sentiment run the layer is not tuned on the reported text, and the fluency rule
+guards against a shift bought with degenerate text. That run has no random direction, so it can show whether the
+direction moves the judged sentiment, not whether only this direction would. The utility test and the knowledge
+steering run steer random directions of the same norm, and the run of published steering methods steers a random unit
+direction like its vector arms; its coefficient is not tuned on the reported text either. The limits are that no human
+validated the judges, neither the classifiers of the sentiment run nor the LLM judge, whose two slots are the same
+model, and that one run stands behind each cell.
+
+### Post-training
+
+**Base against post-trained (`p8`).** What does post-training change in reading and in steering?
+
+- Stimuli: No new stimuli: the finished sentiment, utility, morality, truth and honesty readers, the wording run and
+  the sentiment steering run of a base checkpoint and of its post-trained pair.
+- Labels: Those of the runs it reads.
+- Splits: The draw is the paired unit: one draw uses the same stimuli on both checkpoints of a pair.
+- Controls: None of its own; every run it reads carries its controls.
+- Published baselines: None.
+- Metric: The difference between the post-trained and the base checkpoint per draw, with a bootstrap interval over the
+  draws of 2,000 resamples.
+- Checkpoints: 0 of 4 GPT-2, 2 of 3 Qwen3 base and 2 of 3 post-trained checkpoints. One stored run reads the finished
+  runs of each pair. GPT-2 small is read beside the pairs as a reference with no post-trained pair.
+
+**Rationale and limits.** Each Qwen3 size exists as a base checkpoint and as a post-trained one, so the comparison
+holds the architecture and the size fixed. The post-trained checkpoint is read through its chat template with thinking
+disabled, so the prompt format changes together with the weights; the wording run varies the format on its own. The
+paired comparison runs no model. The limits are that the pairs come from one model family and that the intervals do
+not resample the test pairs.
+
 ## Run settings of the GPU runs
 
 - **Batch size is part of the run.** Sampling in `p9a` is seeded per chunk of prompts, so `batch_size` changes every
@@ -1075,3 +1523,38 @@ They must be the full local run directories, because the export drops the reader
 Every dataset, its pinned revision or digest, its license and the experiments that use it are recorded in the
 `PinnedSource` rows under `datasets/`, and the README describes pinning and offline mode in
 [Reproduce at scale](../README.md#reproduce-at-scale). No third-party data is redistributed.
+
+The pinned revisions of the checkpoints (`model.py`), of the two sentiment judges (`judges.py`) and of the datasets
+are listed below. A revision is the leading 12 characters of the pinned commit of the Hugging Face Hub repository or
+Git repository, or of the SHA-256 digest of the pinned file; the code holds each one in full.
+
+| Asset                                                             | Hub ID or source                                             | Pinned revision                      |
+| ----------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------ |
+| GPT-2 small                                                       | `openai-community/gpt2`                                      | `607a30d783df`                       |
+| GPT-2 medium                                                      | `openai-community/gpt2-medium`                               | `6dcaa7a952f7`                       |
+| GPT-2 large                                                       | `openai-community/gpt2-large`                                | `32b71b12589c`                       |
+| GPT-2 XL                                                          | `openai-community/gpt2-xl`                                   | `15ea56dee5df`                       |
+| Qwen3-0.6B-Base                                                   | `Qwen/Qwen3-0.6B-Base`                                       | `da87bfb608c1`                       |
+| Qwen3-0.6B                                                        | `Qwen/Qwen3-0.6B`                                            | `c1899de289a0`                       |
+| Qwen3-1.7B-Base                                                   | `Qwen/Qwen3-1.7B-Base`                                       | `ea980cb0a6c2`                       |
+| Qwen3-1.7B                                                        | `Qwen/Qwen3-1.7B`                                            | `70d244cc86cc`                       |
+| Qwen3-4B-Base                                                     | `Qwen/Qwen3-4B-Base`                                         | `906bfd4b4dc7`                       |
+| Qwen3-4B                                                          | `Qwen/Qwen3-4B`                                              | `1cfa9a720891`                       |
+| SiEBERT                                                           | `siebert/sentiment-roberta-large-english`                    | `74cea614e245`                       |
+| DistilBERT SST-2                                                  | `distilbert/distilbert-base-uncased-finetuned-sst-2-english` | `714eb0fa89d2`                       |
+| SST-2                                                             | `stanfordnlp/sst2`                                           | `8d51e7e4887a`                       |
+| ETHICS                                                            | `people.eecs.berkeley.edu/~hendrycks/ethics.tar`             | SHA-256 `40acbf1ac0da`               |
+| True and false facts of the representation engineering repository | `github.com/andyzoujm/representation-engineering`            | `5455d8a375d5`                       |
+| Geometry of Truth                                                 | `github.com/saprmarks/geometry-of-truth`                     | `5d1c630c44f7`                       |
+| CommonClaim                                                       | `github.com/saprmarks/geometry-of-truth`                     | `5d1c630c44f7`                       |
+| TruthfulQA                                                        | `truthfulqa/truthful_qa`                                     | `741b8276f2d1`                       |
+| ARC                                                               | `allenai/ai2_arc`                                            | `210d026faf99`                       |
+| PopQA                                                             | `akariasai/PopQA`                                            | `098765c79ea1`                       |
+| TriviaQA                                                          | `mandarjoshi/trivia_qa`                                      | `0f7faf33a390`                       |
+| KUQ                                                               | `amayuelas/KUQ`                                              | `f99b53aa226d`                       |
+| FalseQA                                                           | `github.com/thunlp/FalseQA`                                  | `9a9729974d8c`                       |
+| SyntHal                                                           | `github.com/yuetianluNLP/SyntHal`                            | `c4fe4cecf41b`                       |
+| NQ-open                                                           | `google-research-datasets/nq_open`                           | `5dd9790a8300`                       |
+| Wikidata                                                          | `query.wikidata.org/sparql`                                  | snapshot date and SHA-256 per item   |
+| WikiText-103                                                      | `Salesforce/wikitext`                                        | `b08601e04326`                       |
+| AlpacaEval                                                        | `tatsu-lab/alpaca_eval`                                      | `2edc6fad8be6`                       |
