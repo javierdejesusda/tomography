@@ -538,7 +538,9 @@ footer.colophon {
   }
 
   .data,
-  .pdf {
+  .pdf,
+  #cite,
+  footer.colophon {
     display: none;
   }
 }

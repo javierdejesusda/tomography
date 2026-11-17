@@ -74,8 +74,8 @@ class Document:
         appendix_tables: Appendix tables by key, in registry order.
         year: The year of the results, for the citation.
         bib: Parsed bibliography.
-        commit: The short commit of the results that findings links are
-            pinned to.
+        commit: The short commit of the results or their findings that
+            findings links are pinned to.
     """
 
     figures: dict[str, FigureEntry]

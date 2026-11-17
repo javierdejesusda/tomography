@@ -146,8 +146,7 @@ def test_the_text_controls_are_given_once_and_kept_in_the_data_file(
     )
     assert output.notes == [
         "Words and Characters read no model, so they give the same "
-        "accuracy on every checkpoint, and the data file holds them on "
-        f"every row: {listed}."
+        f"accuracy on every checkpoint and are listed here once: {listed}."
     ]
 
 

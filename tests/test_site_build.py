@@ -28,6 +28,17 @@ STATIC = ROOT / "src/tomography/site/static"
 DASHES = (chr(0x2014), chr(0x2013))
 STUB = runpy.run_path(str(Path(__file__).parent / "_site_stub.py"))
 MISSING = registry.missing()
+PRINT_HIDDEN = (
+    ".data,\n  .pdf,\n  #cite,\n  footer.colophon {\n    display: none;"
+)
+WEB_ONLY = (
+    "this page",
+    "the page",
+    "no analytics",
+    "cite this repository",
+    "data file",
+    "this site",
+)
 
 
 @pytest.fixture(scope="module")
@@ -70,10 +81,20 @@ def _page_text(html: str, drop: tuple[str, ...] = ("svg",)) -> str:
     return re.sub(r"<[^>]+>", " ", html)
 
 
-def test_the_results_commit_is_the_last_commit_of_the_results() -> None:
+def test_the_results_commit_is_the_last_commit_of_the_results_or_findings() -> (
+    None
+):
     sha, built = build_module.results_commit(RESULTS)
     expected = subprocess.run(
-        ["git", "log", "-1", "--format=%h", "--", "results"],
+        [
+            "git",
+            "log",
+            "-1",
+            "--format=%h",
+            "--",
+            "results",
+            "docs/findings.md",
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -81,6 +102,29 @@ def test_the_results_commit_is_the_last_commit_of_the_results() -> None:
     ).stdout.strip()
     assert sha == expected
     assert re.fullmatch(r"\d{1,2} [A-Z][a-z]+ \d{4}", built)
+
+
+def _slug(heading: str) -> str:
+    kept = re.sub(r"[^\w\- ]", "", heading.strip().lower())
+    return kept.replace(" ", "-")
+
+
+def test_each_findings_link_resolves_at_its_pinned_revision(html: str) -> None:
+    links = re.findall(
+        r'href="[^"]*/blob/([0-9a-f]+)/docs/findings\.md#([^"]+)"', html
+    )
+    assert links
+    for sha, slug in links:
+        shown = subprocess.run(
+            ["git", "show", f"{sha}:docs/findings.md"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        ).stdout
+        headings = re.findall(r"^#+ (.+)$", shown, flags=re.M)
+        assert slug in {_slug(h) for h in headings}, (sha, slug)
 
 
 def test_without_history_the_results_commit_is_empty(tmp_path: Path) -> None:
@@ -339,7 +383,25 @@ def test_print_rules(css: str) -> None:
     assert "thead {\n    display: table-header-group;" in printed
     block = "  figure,\n  pre,\n  tr {\n    break-inside: avoid;\n  }"
     assert block in printed
-    assert ".data,\n  .pdf {\n    display: none;" in printed
+    assert PRINT_HIDDEN in printed
+
+
+def _printed_text(html: str) -> str:
+    """Drops the blocks that the print rules hide, then the markup."""
+    for hidden in (
+        r'<section id="cite">.*?</section>',
+        r'<footer class="colophon">.*?</footer>',
+        r'<span class="data">.*?</span>',
+        r'<p class="pdf">.*?</p>',
+    ):
+        html = re.sub(hidden, " ", html, flags=re.S)
+    return " ".join(_page_text(html).split())
+
+
+def test_the_printed_paper_carries_no_web_only_wording(html: str) -> None:
+    text = _printed_text(html).lower()
+    for phrase in WEB_ONLY:
+        assert phrase not in text, phrase
 
 
 def test_text_colours_are_the_two_allowed_greys(css: str) -> None:

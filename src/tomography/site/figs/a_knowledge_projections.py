@@ -412,7 +412,7 @@ def _exceptions(
         One sentence naming each such checkpoint and contrast with the
         highest random direction and the reader.
     """
-    scope = "In the data file, "
+    scope = "Over every run, "
     if not misses:
         return f"{scope}no reader is inside its band."
     parts = []

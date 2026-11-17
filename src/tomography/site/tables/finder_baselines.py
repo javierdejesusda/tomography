@@ -181,8 +181,7 @@ def build(manifest: Manifest) -> TableOutput:
         "ll" + "r" * len(methods),
         [
             "Words and Characters read no model, so they give the same "
-            "accuracy on every checkpoint, and the data file holds them on "
-            "every row: "
+            "accuracy on every checkpoint and are listed here once: "
             + stats.join_and(
                 [
                     f"{dataset} {word} and {char}"

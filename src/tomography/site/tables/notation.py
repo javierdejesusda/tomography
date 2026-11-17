@@ -35,7 +35,7 @@ ROWS = (
         "the paper",
         "The representation engineering paper of Zou et al. "
         "[[cite:zou2025representationengineeringtopdownapproach]], whose "
-        "finder and templates the page tests.",
+        "finder and templates this paper tests.",
     ),
     (
         "finder",

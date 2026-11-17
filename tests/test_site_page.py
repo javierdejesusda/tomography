@@ -520,8 +520,8 @@ def test_the_closing_paragraph_names_no_commit(
 ) -> None:
     text = " ".join(_visible_text(full[1]).split())
     assert (
-        "Every number on this page is recomputed from the committed result "
-        "files when the page is built."
+        "Every number in this paper is recomputed from the committed result "
+        "files when the paper is built."
     ) in text
 
 
