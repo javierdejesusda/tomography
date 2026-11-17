@@ -56,10 +56,12 @@ ABSTRACT = (
     "We test representation engineering "
     "[[cite:zou2025representationengineeringtopdownapproach]] on four GPT-2 "
     "sizes and on three Qwen3 sizes, base and post-trained, against random "
-    "directions and classifiers on the words alone. By 95 percent "
-    "intervals, a logistic direction reads sentiment, utility and morality "
-    "above its random direction on every checkpoint, and truth on every "
-    "Qwen3 but no GPT-2 checkpoint. The finder of the paper beats a random "
+    "directions and classifiers on the words alone, by 95 percent "
+    "intervals. A direction beats its random direction far more often than "
+    "the stronger comparison for its question. A logistic direction reads "
+    "sentiment, utility and morality above its random direction on every "
+    "checkpoint, and truth on every Qwen3 but no GPT-2 checkpoint. That "
+    "paper's finder beats a random "
     "direction for sentiment on one checkpoint, and four published finders "
     "each beat it on some dataset. No TruthfulQA reader beats the words "
     "alone, and a knowledge direction beats popularity and the words alone "
@@ -118,11 +120,10 @@ INTRODUCTION = Section(
         "classifier on the words alone and the subject's popularity; its "
         "baselines are published methods ([[sec:controls_method]]).",
         "One direction reads a concept above its random direction far more "
-        "often than it beats the stronger comparison for the question: the "
-        "words alone, the model's confidence or a published method "
-        "([[fig:teaser]]).",
-        "Our contributions follow; three fractions count GPT-2, Qwen3 base "
-        "and Qwen3 post-trained checkpoints, in that order.",
+        "often than it beats the stronger comparison for the question, the "
+        "words alone or the model's confidence ([[fig:teaser]]).",
+        "Three fractions count GPT-2, Qwen3 base and post-trained "
+        "checkpoints, in that order.",
     ),
     listed=(
         (
@@ -134,25 +135,26 @@ INTRODUCTION = Section(
         ),
         (
             "The finder of the paper ([[sec:finders]]).",
-            "The leading principal component of paired differences is above "
-            "a random direction for utility on every Qwen3 checkpoint but "
-            "for sentiment on [[tally:fig:finders.pca_sentiment]] "
-            "([[fig:finders]]).",
+            "By interval, the leading principal component of paired "
+            "differences is above a random direction for utility on every "
+            "Qwen3 checkpoint but for sentiment on "
+            "[[tally:fig:finders.pca_sentiment]] ([[fig:finders]]).",
         ),
         (
             "Stronger comparisons ([[sec:truth]], [[sec:known_unknown]]).",
-            "No TruthfulQA reader beats the words alone. A knowledge "
-            "direction, fitted on questions a model answers correctly "
-            "against those it does not, is above popularity and the words "
-            "alone on [[tally:fig:knowledge_reading.above_best]] but adds "
-            "no distinguishable increment to the model's confidence "
+            "No TruthfulQA reader beats the words alone by interval. A "
+            "knowledge direction, fitted on questions a model answers "
+            "correctly against those it does not, is above popularity and "
+            "the words alone, by interval, on "
+            "[[tally:fig:knowledge_reading.above_best]] but adds no "
+            "distinguishable increment to the model's confidence "
             "([[fig:knowledge_reading]]).",
         ),
         (
             "Steering ([[sec:steering]]).",
             "At relative coefficient 0.1 steering moves judged sentiment on "
             "[[tally:fig:steering.moves01]]; at relative coefficient 0.3 "
-            "its text meets the fluency rule on none ([[fig:steering]]). "
+            "it meets the fluency rule on none ([[fig:steering]]). "
             "Utility steering that beats every random direction meets the "
             "rule on only Qwen3-1.7B-Base.",
         ),
@@ -206,29 +208,36 @@ METHOD = Section(
             "Models, data and readers",
             paragraphs=(
                 "We study [[num:table:checkpoints.checkpoints]] checkpoints "
-                "([[table:checkpoints]]). Readings use pairs of inputs that "
+                "([[table:checkpoints]]). Readings use input pairs that "
                 "differ in one concept: SST-2 phrases "
                 "[[cite:socher2013recursive]] for sentiment, ETHICS "
-                "scenarios [[cite:hendrycks2021aligning]] for utility and "
-                "morality, and true and false statements "
+                "scenarios [[cite:hendrycks2021aligning]] for utility "
+                "(which scenario is more pleasant) and morality "
+                "(which is acceptable), true and false statements "
                 "[[cite:zou2025representationengineeringtopdownapproach]] "
                 "for truth, plus the out-of-distribution Geometry of Truth "
-                "sets [[cite:marks2024geometry]] ([[table:assets]]).",
-                "We wrap each input in the template of the paper and read "
+                "sets [[cite:marks2024geometry]], some negated, and "
+                "true statements under an honest and an untruthful persona "
+                "for honesty, tested on plain statements (honesty transfer) "
+                "([[table:assets]]). Knowledge sets PopQA questions "
+                "[[cite:mallen2023when]] a checkpoint "
+                "answers correctly (known) against those it does not "
+                "(unknown), within each relation such as occupation.",
+                "We wrap each input in the paper's template and read "
                 "h(x, " + ELL + "), its residual stream at the last token "
                 "after layer " + ELL + " ([[fig:method]], "
-                "[[table:notation]]). A finder turns the training pairs "
-                "into one unit direction v(" + ELL + ") per layer, oriented "
+                "[[table:notation]]). A finder turns training pairs "
+                "into a unit direction v(" + ELL + ") per layer, oriented "
                 "on the training labels. A held-out pair is read correctly "
-                "when its positive member projects higher, so accuracy "
-                "needs no threshold and chance is 0.5. Our default finder "
+                "when its positive member projects higher, so no "
+                "threshold is needed; chance is 0.5. Our default finder "
                 "is logistic regression, chosen after pilot runs (post "
-                "hoc). A run fits 10 readers, each on its own draw of 64 "
-                "training pairs, and reports their mean accuracy at the "
-                "layer chosen on validation pairs. Relative depth is the "
-                "layer index over the number of layers. The main sentiment "
-                "run chooses its layer on the 256 pairs it scores, so we "
-                "report sentiment from a run with a separate split of 214 "
+                "hoc). A run fits 10 readers, each on its "
+                "own draw of 64 training pairs, and reports their mean "
+                "accuracy at the "
+                "layer chosen on validation pairs. The main sentiment "
+                "run chooses its layer on the 256 pairs it scores, so "
+                "sentiment comes from a run with a separate split of 214 "
                 "pairs ([[sec:appendix_method]]).",
             ),
             items=("table:checkpoints", "fig:method"),
@@ -247,7 +256,8 @@ METHOD = Section(
                 "away, we add the words alone: classifiers on the words and "
                 "characters of the input, fitted on the same training "
                 "items, that see only the text. For knowledge we add the "
-                "subject's popularity. Controls use no direction fitted for "
+                "popularity of the question's subject. Controls use no "
+                "direction fitted for "
                 "the concept; baselines are published methods run on the "
                 "same items. The baselines are the finder of the paper (the "
                 "leading principal component of paired differences), "
@@ -271,8 +281,11 @@ METHOD = Section(
                 "text is fluent when it meets the fluency rule: "
                 + FLUENCY_RULE
                 + " [[cite:li2016diversity]]; the perplexity is that of "
-                "neutral text, not of the completions. Random directions of "
-                "the same norm, not 0.5, are the reference for a win rate.",
+                "neutral text, not of the completions. A win rate is the "
+                "share of decisive prompt pairs whose completion steered at "
+                "+c is judged more positive than the one at " + MINUS + "c; "
+                "its reference is random directions of the same norm, not "
+                "0.5.",
             ),
         ),
         Section(
@@ -285,7 +298,9 @@ METHOD = Section(
                 "[[cite:wilson1927probable]] for an accuracy, a published "
                 "approximation [[cite:hanley1982meaning]] for an AUROC and, "
                 "for a difference between two accuracies, a conservative "
-                "interval that treats the two arms as independent. We count "
+                "interval that treats the two arms as independent. The one "
+                "exception is [[fig:base_post]], which keeps the stored "
+                "seed-paired interval where a pair has one. We count "
                 "checkpoints per role (GPT-2, Qwen3 base, Qwen3 "
                 "post-trained) and never pool the roles. Counts are "
                 "descriptive, with no correction for the number of "
@@ -328,7 +343,7 @@ RESULTS = Section(
                 "template, reader accuracy spans more than test-pair noise "
                 "on [[tally:fig:wording.span_above_noise]] checkpoints, a "
                 "point comparison ([[fig:wording]]). In every role the margin "
-                "exceeds 0.1 earliest for sentiment "
+                "exceeds 0.1 at the lowest relative depth for sentiment "
                 "([[fig:a_reading_curves]]).",
             ),
             items=("fig:reading",),
@@ -338,7 +353,7 @@ RESULTS = Section(
             "Does the finder of the paper find it?",
             paragraphs=(
                 "The finder of the paper is above a random direction, by "
-                "the 95 percent interval, for sentiment on a single Qwen3 "
+                "interval, for sentiment on a single Qwen3 "
                 "base checkpoint and for truth on "
                 "[[tally:fig:finders.pca_truth]] checkpoints "
                 "([[fig:finders]]).",
@@ -350,11 +365,12 @@ RESULTS = Section(
                 "[[num:fig:finders.pca_utility_gpt2_min]] to "
                 "[[num:fig:finders.pca_utility_gpt2_max]]). Logistic "
                 "regression is above the random direction for sentiment on "
-                "every checkpoint. Only utility has matched pairs, two "
-                "versions of one scenario, so matching is confounded with "
-                "the concept and the data. Each of four published finders "
-                "is above the finder of the paper on at least one dataset, "
-                "by the same interval, on "
+                "every checkpoint. Only for utility does a pair hold two "
+                "versions of one scenario; sentiment and truth pair a "
+                "positive with any negative input, so this matching is "
+                "confounded with the concept and the data. Each of four "
+                "published finders is above the finder of the paper on at "
+                "least one dataset, by the same interval, on "
                 "[[tally:table:finder_baselines.every_baseline_above]] "
                 "checkpoints ([[table:finder_baselines]]).",
             ),
@@ -373,8 +389,8 @@ RESULTS = Section(
             ),
             items=("fig:truth",),
             after=(
-                "The honesty persona reader, fitted on honesty persona "
-                "prompts, reaches [[num:fig:truth.persona_gpt2_min]] to "
+                "The honesty persona reader reaches "
+                "[[num:fig:truth.persona_gpt2_min]] to "
                 "[[num:fig:truth.persona_gpt2_max]] on GPT-2, "
                 "[[num:fig:truth.persona_base_min]] to "
                 "[[num:fig:truth.persona_base_max]] on Qwen3 base and "
@@ -398,24 +414,18 @@ RESULTS = Section(
             runin=(
                 (
                     "Reading.",
-                    "Within relation, it is above the strongest of "
-                    "popularity and the two text classifiers, with an "
+                    "Within relation, it is above the strongest "
+                    "of popularity and the two text classifiers, with an "
                     "interval excluding zero, on "
                     "[[tally:fig:knowledge_reading.above_best]] "
                     "checkpoints and by point estimate on "
                     "[[tally:fig:knowledge_reading.above_best_point]] "
-                    "([[fig:knowledge_reading]]). GPT-2 small has no "
-                    "direction. The direction's increment over the model's "
-                    "confidence has an interval covering zero on "
-                    "[[tally:fig:knowledge_reading.dir_cover]], with upper "
-                    "ends up to "
-                    "[[num:fig:knowledge_reading.dir_inc_hi_max_gpt2]] "
-                    "(GPT-2), "
-                    "[[num:fig:knowledge_reading.dir_inc_hi_max_base]] "
-                    "(Qwen3 base) and "
-                    "[[num:fig:knowledge_reading.dir_inc_hi_max_post]] "
-                    "(post-trained). For a probe fitted on correct and "
-                    "wrong labels the interval lies above zero on "
+                    "([[fig:knowledge_reading]]); GPT-2 small has no "
+                    "direction. Predicting errors, its increment over the "
+                    "model's confidence has an interval covering zero on "
+                    "[[tally:fig:knowledge_reading.dir_cover]], while that "
+                    "of a probe fitted on correct and wrong labels lies "
+                    "above zero on "
                     "[[tally:fig:knowledge_reading.probe_above]]. By point "
                     "estimate on [[num:table:detection_baselines.questions]] "
                     "held-out questions, an answer probe "
@@ -437,26 +447,32 @@ RESULTS = Section(
                 ),
                 (
                     "Steering.",
-                    "By slope, adding the direction moves unknown questions "
-                    "more than each of three random directions on "
+                    "Adding the direction while the model answers shifts "
+                    "the next-token entropy (GPT-2 and base) or the "
+                    "abstention rate (post-trained, two prompts each, so "
+                    "six runs). By slope over the coefficient, it moves "
+                    "unknown questions more than each of three random "
+                    "directions on "
                     "[[tally:fig:knowledge_steering.distinguishable]] runs "
                     "and more than known questions on "
-                    "[[tally:fig:knowledge_steering.selective]] runs. By the "
-                    "largest shift of the dose curve, known questions move "
-                    "at least as much on "
+                    "[[tally:fig:knowledge_steering.selective]] runs; by the "
+                    "largest shift, known questions move at least as much on "
                     "[[tally:fig:knowledge_steering.known_ge_unknown]] runs "
                     "([[fig:knowledge_steering]]).",
                 ),
                 (
                     "Approximate answers.",
-                    "When the prompt ends on a range example, Qwen3 writes "
-                    "a range for [[num:fig:approximate.range_base_min]] to "
+                    "A separate test asks whether a direction reads that an "
+                    "answer is a range. When the prompt ends on a range "
+                    "example, Qwen3 writes a range for "
+                    "[[num:fig:approximate.range_base_min]] to "
                     "[[num:fig:approximate.range_base_max]] percent (base) "
                     "and [[num:fig:approximate.range_post_min]] to "
                     "[[num:fig:approximate.range_post_max]] percent "
                     "(post-trained) of the quantities whose sourced answer "
                     "is a range. A range reader is above its random control "
-                    "on [[tally:fig:approximate.reader_above_random]] "
+                    "on "
+                    "[[tally:fig:approximate.reader_above_random]] "
                     "checkpoints and above the question words on "
                     "[[tally:table:approximate.above_words]], by interval "
                     "([[fig:approximate]], [[table:approximate]]).",
@@ -480,11 +496,13 @@ RESULTS = Section(
                 "not show that only this direction moves judged sentiment. "
                 "Utility steering has one: at relative coefficient 0.3, all "
                 "three vectors beat all three random directions in win rate "
-                "(chance 0.05) on [[tally:fig:teaser.steering]] "
-                "checkpoints, and only "
-                "Qwen3-1.7B-Base also keeps the fluency rule (GPT-2 small "
-                "has no fluency measure). [[table:steering_baselines]] sets "
-                "five published steering methods beside the reader.",
+                "(probability 0.05 by chance) on "
+                "[[tally:fig:teaser.steering]] checkpoints ([[fig:teaser]], "
+                "last row), and only Qwen3-1.7B-Base also keeps the fluency "
+                "rule, a result shown only in the run's files (GPT-2 small "
+                "has no fluency measure). "
+                "[[table:steering_baselines]] sets five published steering "
+                "methods beside the reader.",
             ),
         ),
         Section(
@@ -505,7 +523,11 @@ RESULTS = Section(
                 "([[num:fig:base_post.utility_17b]]) and 4B "
                 "([[num:fig:base_post.utility_4b]]), morality on 0.6B "
                 "([[num:fig:base_post.morality_06b]]) and honesty transfer "
-                "on 0.6B ([[num:fig:base_post.honesty_06b]]). Knowledge "
+                "on 0.6B ([[num:fig:base_post.honesty_06b]]). Of these "
+                "four, only utility on 4B has a test-size interval "
+                "([[sec:intervals]]); the other three are seed-paired, which "
+                "does not resample the test pairs, and their test-size "
+                "intervals include zero. Knowledge "
                 "AUROC and steering win rate fall with an interval below "
                 "zero on 1.7B only. A post-trained checkpoint differs from "
                 "its base in post-training data, chat format and "
@@ -542,7 +564,9 @@ LIMITATIONS = Section(
             "questions, so differences below about "
             "[[num:fig:teaser.truth_half_base_min]] to "
             "[[num:fig:teaser.truth_half_gpt2_max]] are not resolved and "
-            "the GPT-2 truth readings are inconclusive, not negative.",
+            "the GPT-2 truth readings are inconclusive, not negative. Layers "
+            "are chosen on small validation sets, so the chosen layer carries "
+            "its own uncertainty.",
         ),
         (
             "Judges and labels.",
@@ -568,8 +592,8 @@ CODE = Section(
     "code",
     "Code and data",
     paragraphs=(
-        "Every number on this page is recomputed from the committed result "
-        "files when the page is built. The code and [[link:results|the "
+        "Every number in this paper is recomputed from the committed result "
+        "files when the paper is built. The code and [[link:results|the "
         "result files]] are in [[link:repository|the repository]]. "
         "[[link:findings|The findings document]] records every result with "
         "its run identity, including the experiments that have no figure "
@@ -672,7 +696,8 @@ APPENDICES = (
                 "The reading runs store percentile bootstrap intervals over "
                 "their readers, which do not resample the test pairs; we "
                 "recompute every reading interval from the test size "
-                "([[sec:intervals]]). For accuracies p1 and p2 on n1 and n2 "
+                "([[sec:intervals]]), except the seed-paired intervals of "
+                "[[fig:base_post]]. For accuracies p1 and p2 on n1 and n2 "
                 "test pairs, the interval of their difference d is d "
                 + PM
                 + " 1.96 times the square root of p1 (1 "
@@ -714,10 +739,13 @@ APPENDICES = (
         paragraphs=(
             "[[table:steering_baselines]] sets the reader beside five "
             "published steering methods as baselines and two controls, on "
-            "one checkpoint per role. This page states no outcome for the "
-            "comparison; the "
+            "one checkpoint per role. Over the three concepts of each "
+            "checkpoint, prompt prepending has the highest overall score on "
+            "[[tally:table:steering_baselines.prompt_top]], and the interval "
+            "of the reader lies below its own on "
+            "[[tally:table:steering_baselines.reader_below]]; the "
             "[[findings:published-steering-baselines-b3|findings "
-            "document]] reports one.",
+            "document]] compares every arm.",
         ),
         items=("table:steering_baselines",),
     ),

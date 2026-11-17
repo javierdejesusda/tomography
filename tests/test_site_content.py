@@ -11,6 +11,8 @@ from tomography.site import content
 from tomography.site import params
 from tomography.site import references
 from tomography.site import registry
+from tomography.site.figs import base_post
+from tomography.site.figs import teaser
 from tomography.site.manifest import Manifest
 from tomography.site.stats import RoleCount
 from tomography.site.tables import notation
@@ -33,7 +35,7 @@ GENERIC = (
     r"distinct-1",
     r"MC1",
     r"coefficient 0\.[13](?!\d)",
-    r"chance 0\.05(?!\d)",
+    r"probability 0\.05(?= by chance)",
     r"above 0\.95(?!\d)",
     r"exceeds 0\.1(?!\d)",
     r"at most 1\.5(?!\d)",
@@ -67,8 +69,8 @@ APPENDIX_KEYS = [
     "appendix_knowledge",
 ]
 COUNTS = (
-    "Our contributions follow; three fractions count GPT-2, Qwen3 base and "
-    "Qwen3 post-trained checkpoints, in that order."
+    "Three fractions count GPT-2, Qwen3 base and post-trained checkpoints, "
+    "in that order."
 )
 REMOVED_NAMES = (
     "TLDR",
@@ -467,13 +469,13 @@ def test_the_layer_exception_of_the_finder_comparison_is_in_appendix_b() -> (
     assert "at the same layer, not over" not in _text()
 
 
-def test_the_method_is_about_five_hundred_words() -> None:
+def test_the_method_is_about_six_hundred_words() -> None:
     words = len(
         " ".join(
             t for s in _sections(content.METHOD) for t in _texts(s)
         ).split()
     )
-    assert 420 <= words <= 560, words
+    assert 420 <= words <= 610, words
 
 
 def test_content_design_facts() -> None:
@@ -499,7 +501,7 @@ def test_content_design_facts() -> None:
     assert 1 / comb(2 * vectors, vectors) == 0.05
     steering = _joined("steering")
     assert "all three vectors beat all three random directions" in steering
-    assert "(chance 0.05)" in steering
+    assert "(probability 0.05 by chance)" in steering
     assert "each of three random directions" in _joined("known_unknown")
 
 
@@ -557,7 +559,7 @@ def test_each_results_subsection_opens_with_its_answer() -> None:
         assert ". " not in _bare(opener).replace("0. ", ""), sub.key
         assert len(sub.items) == 1, sub.key
         assert sub.items[0].startswith("fig:"), sub.key
-        limit = 270 if sub.key == "known_unknown" else 160
+        limit = 300 if sub.key == "known_unknown" else 160
         assert _words(sub.key) <= limit, (sub.key, _words(sub.key))
         if sub.key != "known_unknown":
             assert f"[[{sub.items[0]}]]" in opener, sub.key
@@ -613,9 +615,10 @@ def test_the_written_reading_claims_match_the_computed_counts(
         "a logistic direction reads sentiment, utility and morality above "
         "its random direction on every checkpoint"
     )
-    assert claim + ", and truth on every Qwen3 but no GPT-2 checkpoint" in (
-        content.ABSTRACT
-    )
+    assert (
+        claim.replace("a logistic", "A logistic")
+        + ", and truth on every Qwen3 but no GPT-2 checkpoint"
+    ) in content.ABSTRACT
     assert claim in _contribution("Reading")
     opener = _section("reading").paragraphs[0]
     assert claim.replace("a logistic", "A logistic") in opener
@@ -640,9 +643,10 @@ def test_the_written_reading_claims_match_the_computed_counts(
                 role,
                 concept,
             )
-    assert "In every role the margin exceeds 0.1 earliest for sentiment" in (
-        after
-    )
+    assert (
+        "In every role the margin exceeds 0.1 at the lowest relative depth "
+        "for sentiment"
+    ) in (after)
 
 
 def test_the_written_finder_claims_match_the_computed_counts(
@@ -666,6 +670,10 @@ def test_the_written_finder_claims_match_the_computed_counts(
     assert "for utility on every Qwen3 checkpoint" in _contribution(
         "The finder"
     )
+    assert _contribution("The finder").startswith(
+        "By interval, the leading principal component"
+    )
+    assert "Only for utility does a pair hold two versions of one" in after
     assert _all(counts["logistic_sentiment"])
     assert (
         "Logistic regression is above the random direction for sentiment on "
@@ -711,6 +719,16 @@ def test_the_written_comparison_claims_match_the_computed_counts(
     increment = "adds no distinguishable increment to the model's confidence"
     for text in (known, _contribution("Stronger")):
         assert increment in text
+    stronger = _contribution("Stronger")
+    assert "No TruthfulQA reader beats the words alone by interval" in stronger
+    assert (
+        "the words alone, by interval, on "
+        "[[tally:fig:knowledge_reading.above_best]]"
+    ) in stronger
+    assert (
+        "Predicting errors, its increment over the model's confidence"
+        in (_section("known_unknown").runin[0][1])
+    )
     assert "adds nothing" not in _text()
 
 
@@ -758,7 +776,21 @@ def test_the_post_training_sizes_are_the_computed_ones(
         ("honesty", "06b"),
     }
     assert numbers["other_excluding"] == len(excluding)
+    by_test_size = set()
+    for name, size in excluding:
+        _, lo, hi = base_post._difference(
+            Manifest(ROOT), name, size.replace("06", "0.6").replace("17", "1.7")
+        )
+        if lo > 0 or hi < 0:
+            by_test_size.add((name, size))
+    assert by_test_size == {("utility", "4b")}
     text = _joined("base_post")
+    assert ("only utility on 4B has a test-size interval") in text
+    assert "the other three are seed-paired, which does not resample" in text
+    assert "The one exception is [[fig:base_post]]" in _joined("intervals")
+    assert "except the seed-paired intervals of [[fig:base_post]]" in (
+        _joined("appendix_method")
+    )
     assert "We study [[num:table:checkpoints.checkpoints]] checkpoints" in (
         _joined("pipeline")
     )
@@ -829,7 +861,7 @@ def test_counts_over_runs_say_runs() -> None:
 
 def test_counts_are_three_fractions_defined_before_their_first_use() -> None:
     text = _text()
-    assert text.count("three fractions") == 1
+    assert text.lower().count("three fractions") == 1
     assert "[[tally:" not in content.ABSTRACT
     for paragraph in content.INTRODUCTION.paragraphs[:-1]:
         assert "[[tally:" not in paragraph
@@ -856,6 +888,7 @@ CAVEATS = (
     ("No hypothesis was fixed before its run", "limitations"),
     ("widened from four to twelve relations", "limitations"),
     ("inconclusive, not negative", "limitations"),
+    ("the chosen layer carries its own uncertainty", "limitations"),
     ("two versions of one scenario", "finders"),
     ("GPT-2 small has no direction", "known_unknown"),
     ("By point estimate on", "known_unknown"),
@@ -881,9 +914,17 @@ def test_each_caveat_is_stated_once_in_its_place(phrase: str, key: str) -> None:
     assert _text().count(phrase) == 1, phrase
 
 
-def test_the_steering_appendix_states_no_outcome_and_links_the_record() -> None:
+def test_the_steering_appendix_states_its_outcome_and_links_the_record() -> (
+    None
+):
     lead = _joined("appendix_steering")
-    assert "This page states no outcome for the comparison" in lead
+    assert (
+        "Over the three concepts of each checkpoint, prompt prepending has "
+        "the highest overall score on "
+        "[[tally:table:steering_baselines.prompt_top]], and the interval of "
+        "the reader lies below its own on "
+        "[[tally:table:steering_baselines.reader_below]]"
+    ) in lead
     assert "[[findings:published-steering-baselines-b3|findings document]]" in (
         lead
     )
@@ -933,3 +974,45 @@ def test_no_result_says_all_ten_checkpoints() -> None:
     text = " ".join(_joined(k) for k in RESULT_KEYS)
     assert "all 10" not in text
     assert "on 10 checkpoints" not in text
+
+
+def test_the_abstract_states_the_thesis_that_the_scorecard_counts(
+    built: dict[str, registry.FigureOutput],
+) -> None:
+    thesis = (
+        "A direction beats its random direction far more often than the "
+        "stronger comparison for its question."
+    )
+    assert thesis in content.ABSTRACT
+    assert "on the words alone, by 95 percent intervals." in content.ABSTRACT
+    assert "That paper's finder" in content.ABSTRACT
+    counts = built["teaser"].counts
+
+    def share(block: int) -> float:
+        rows = [r.key for r in teaser.ROWS if r.block == block]
+        hits = sum(c.hits for r in rows for c in counts[r].values())
+        return hits / sum(c.total for r in rows for c in counts[r].values())
+
+    assert share(0) > 2 * share(1)
+    assert "or a published method" not in _joined("introduction")
+
+
+def test_the_terms_of_the_results_are_defined_in_the_method() -> None:
+    method = _method_text()
+    for definition in (
+        "utility (which scenario is more pleasant)",
+        "some negated",
+        "tested on plain statements (honesty transfer)",
+        "answers correctly (known) against those it does not (unknown)",
+        "within each relation such as occupation",
+        "each on its own draw of 64 training pairs",
+        "A win rate is the share of decisive prompt pairs",
+        "the popularity of the question's subject",
+    ):
+        assert definition in method, definition
+    steering = _joined("steering")
+    assert "(probability 0.05 by chance)" in steering
+    assert "checkpoints ([[fig:teaser]], last row)" in steering
+    assert "the next-token entropy" in _section("known_unknown").runin[1][1]
+    assert "six runs" in _section("known_unknown").runin[1][1]
+    assert "A separate test asks" in _section("known_unknown").runin[2][1]
