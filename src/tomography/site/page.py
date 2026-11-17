@@ -207,12 +207,6 @@ class Page:
         self._styled = False
         self._number()
 
-    def _has(self, item: str) -> bool:
-        kind, _, key = item.partition(":")
-        if kind == "fig":
-            return key in self.doc.figures
-        return key in self.doc.tables
-
     def _number(self) -> None:
         figure = table = 0
 
