@@ -265,6 +265,11 @@ def test_controls_and_published_baselines_are_kept_apart(
     assert "20 tuning prompts" in steering["Splits"]
     assert "40 held-out prompts" in steering["Splits"]
     assert "judge" in steering["Labels"]
+    assert (
+        "on post-trained checkpoints how closely its topic relates to the "
+        "instruction;" in steering["Labels"]
+    )
+    assert "follows the instruction" not in steering["Labels"]
 
 
 def test_the_text_keeps_the_rules_of_the_page(

@@ -169,7 +169,8 @@ def build(manifest: Manifest) -> TableOutput:
     detail = (
         "The roles are not pooled. An LLM judge rates each generation 0, 1 "
         "or 2 on the concept and on fluency, and on the post-trained "
-        "checkpoint also on following the instruction; the overall score "
+        "checkpoint also on how closely the topic of the generation relates "
+        "to the instruction; the overall score "
         "of a generation is the harmonic mean of its criteria, 0 when any "
         "of them is 0. A seeded share of the generations is rated again in "
         "a second judge slot by the same model. The base checkpoints "

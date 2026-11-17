@@ -604,9 +604,9 @@ CARDS = (
         "per prompt, steered toward sentiment, happiness or anger at three "
         "layers over a grid of relative coefficients.",
         "An LLM judge rates the concept and the fluency of each "
-        "generation, and on post-trained checkpoints how well it follows "
-        "the instruction; a second judge slot of the same model rates a "
-        "seeded share again.",
+        "generation, and on post-trained checkpoints how closely its topic "
+        "relates to the instruction; a second judge slot of the same model "
+        "rates a seeded share again.",
         "Each arm chooses its coefficient on {n_tune} tuning prompts per "
         "concept and is scored on {n_held_out} held-out prompts, which "
         "share none with them; the reader, the difference of class means, "
