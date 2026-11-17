@@ -292,10 +292,6 @@ class Page:
             return f'<a href="{_e(content.LINKS[target])}">{_e(text)}</a>'
         if name.startswith("num:"):
             return _e(self.quoted_number(name[4:]))
-        if name.startswith("count:"):
-            return _e(self.quoted_count(name[6:]))
-        if name.startswith("runs:"):
-            return _e(self.quoted_runs(name[5:]))
         if name.startswith("tally:"):
             return _e(self.quoted_tally(name[6:]))
         if name.startswith("label:"):
@@ -321,16 +317,6 @@ class Page:
         if float(value).is_integer():
             return f"{int(value):,}".replace("-", cells.MINUS)
         return cells.num(value)
-
-    def quoted_count(self, address: str) -> str:
-        """Writes a per-role count a figure or table computed."""
-        output, name = self._output(address)
-        return stats.per_role_text(output.counts[name])
-
-    def quoted_runs(self, address: str) -> str:
-        """Writes a per-role count of runs a figure or table computed."""
-        output, name = self._output(address)
-        return stats.runs_text(output.counts[name])
 
     def quoted_tally(self, address: str) -> str:
         """Writes a per-role count as three fractions, for running text."""

@@ -129,17 +129,6 @@ def test_join_and_writes_a_list_phrase() -> None:
     assert stats.join_and(["a", "b", "c"]) == "a, b and c"
 
 
-def test_runs_text_names_the_roles_and_skips_empty_ones() -> None:
-    counts = {
-        "gpt2": stats.RoleCount(3, 3),
-        "base": stats.RoleCount(0, 0),
-        "post": stats.RoleCount(3, 6),
-    }
-    assert stats.runs_text(counts) == (
-        "3 of 3 GPT-2 runs and 3 of 6 post-trained runs"
-    )
-
-
 def test_per_role_compact_writes_the_three_roles_in_order() -> None:
     counts = {
         "post": stats.RoleCount(2, 3),

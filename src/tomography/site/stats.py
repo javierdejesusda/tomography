@@ -246,22 +246,3 @@ def per_role_compact(counts: Mapping[str, RoleCount]) -> str:
     if all(counts[r].hits == counts[r].total for r in ROLES):
         return "All"
     return per_role_tally(counts)
-
-
-def runs_text(counts: Mapping[str, RoleCount]) -> str:
-    """Writes a per-role count of runs as a caption phrase.
-
-    Args:
-        counts: Role to its count.
-
-    Returns:
-        Text such as `3 of 3 GPT-2 runs, 3 of 3 Qwen3 base runs and 3 of 6
-        post-trained runs`; roles without runs are omitted.
-    """
-    return join_and(
-        [
-            f"{counts[r].hits} of {counts[r].total} {ROLE_NAMES[r]} runs"
-            for r in ROLES
-            if r in counts and counts[r].total
-        ]
-    )

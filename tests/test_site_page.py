@@ -215,20 +215,6 @@ def test_num_token_reads_a_table_when_asked() -> None:
     assert page.Page(doc).text("[[num:table:checkpoints.k]]") == "3"
 
 
-def test_count_token_writes_the_per_role_phrase() -> None:
-    counts = {
-        "pca": {
-            "gpt2": stats.RoleCount(4, 4),
-            "base": stats.RoleCount(3, 3),
-            "post": stats.RoleCount(2, 3),
-        }
-    }
-    doc = _doc({"method": _figure(counts=counts)})
-    assert page.Page(doc).text("[[count:fig:method.pca]]") == (
-        "4 of 4 GPT-2, 3 of 3 Qwen3 base and 2 of 3 post-trained checkpoints"
-    )
-
-
 def test_tally_token_writes_the_three_fractions_in_role_order() -> None:
     counts = {
         "pca": {
@@ -244,23 +230,6 @@ def test_tally_token_writes_the_three_fractions_in_role_order() -> None:
     assert view.plain("[[tally:fig:method.pca]]") == "4/4, 3/3, 2/3"
     with pytest.raises(KeyError):
         view.text("[[tally:fig:method.missing]]")
-
-
-def test_runs_token_writes_the_per_role_phrase_over_runs() -> None:
-    counts = {
-        "dist": {
-            "gpt2": stats.RoleCount(3, 3),
-            "base": stats.RoleCount(3, 3),
-            "post": stats.RoleCount(3, 6),
-        }
-    }
-    doc = _doc({"method": _figure(counts=counts)})
-    view = page.Page(doc)
-    expected = (
-        "3 of 3 GPT-2 runs, 3 of 3 Qwen3 base runs and 3 of 6 post-trained runs"
-    )
-    assert view.text("[[runs:fig:method.dist]]") == expected
-    assert view.plain("[[runs:fig:method.dist]]") == expected
 
 
 @pytest.mark.parametrize(

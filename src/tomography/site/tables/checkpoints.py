@@ -1,8 +1,8 @@
 """Table 1: Models.
 
 Every checkpoint that has a run under `results/`, with its role, parameter
-count, layers and hidden size. The Hub repository, the pinned revision and
-the license are in Table A1.
+count, layers and hidden size. The Hub repository and the license are in
+Table A1; the pinned revisions stay in the code and the methodology document.
 """
 
 from typing import Any
