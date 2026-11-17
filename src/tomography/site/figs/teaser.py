@@ -213,7 +213,9 @@ def _steering(manifest: Manifest, model: str) -> Cell | None:
     return Cell(worst - best, worst - best, worst - best, best, None)
 
 
-def _steering_fluent(manifest: Manifest, model: str) -> bool | None:
+def _steering_fluency(
+    manifest: Manifest, model: str
+) -> tuple[float, float] | None:
     path = manifest.run("m1", model)
     if path is None or not (path / "table_effects.json").exists():
         return None
@@ -230,6 +232,14 @@ def _steering_fluent(manifest: Manifest, model: str) -> bool | None:
         / float(none["perplexity"])
     )
     distinct = sum(float(r["distinct_1"]) for r in cell) / len(cell)
+    return ratio, distinct
+
+
+def _steering_fluent(manifest: Manifest, model: str) -> bool | None:
+    values = _steering_fluency(manifest, model)
+    if values is None:
+        return None
+    ratio, distinct = values
     return (
         ratio <= stats.FLUENT_MAX_RATIO
         and distinct >= stats.FLUENT_MIN_DISTINCT
@@ -448,7 +458,9 @@ def _draw(fig: Figure, found: dict[str, dict[str, Cell]]) -> None:
 
 
 def _numbers(
-    found: dict[str, dict[str, Cell]], fluent: dict[str, bool]
+    found: dict[str, dict[str, Cell]],
+    fluent: dict[str, bool],
+    fluency: dict[str, tuple[float, float]],
 ) -> tuple[dict[str, float], dict[str, dict[str, RoleCount]]]:
     numbers: dict[str, float] = {}
     counts: dict[str, dict[str, RoleCount]] = {}
@@ -477,6 +489,12 @@ def _numbers(
         count = counts["steering_fluent"][role]
         numbers[f"steering_fluent_{role}_above"] = count.hits
         numbers[f"steering_fluent_{role}_n"] = count.total
+    winners = [m for m, c in found["steering"].items() if c.lo > 0]
+    (kept,) = [fluency[m] for m in winners if fluent.get(m)]
+    broken = [fluency[m][0] for m in winners if fluent.get(m) is False]
+    numbers["steering_kept_ratio"], numbers["steering_kept_distinct"] = kept
+    numbers["steering_broken_ratio_min"] = min(broken)
+    numbers["steering_broken_ratio_max"] = max(broken)
     return numbers, counts
 
 
@@ -550,7 +568,12 @@ def build(manifest: Manifest) -> FigureOutput:
         for m in manifest.models("m1")
         if (ok := _steering_fluent(manifest, m)) is not None
     }
-    numbers, counts = _numbers(found, fluent)
+    fluency = {
+        m: values
+        for m in manifest.models("m1")
+        if (values := _steering_fluency(manifest, m)) is not None
+    }
+    numbers, counts = _numbers(found, fluent, fluency)
     with paper.paper_style():
         fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
         _draw(fig, found)

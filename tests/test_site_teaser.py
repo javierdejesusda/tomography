@@ -189,7 +189,7 @@ def _steering(model: str) -> Cell:
     return gap, gap, gap, max(random), 0
 
 
-def _fluent(model: str) -> bool | None:
+def _fluency(model: str) -> tuple[float, float] | None:
     path = run("m1", model) / "table_effects.json"
     if not path.exists():
         return None
@@ -198,7 +198,14 @@ def _fluent(model: str) -> bool | None:
     cell = [r for r in rows if r["method"] == "logistic" and r["coeff"] == 0.3]
     ratio = sum(r["perplexity"] for r in cell) / len(cell) / none["perplexity"]
     distinct = sum(r["distinct_1"] for r in cell) / len(cell)
-    return ratio <= 1.5 and distinct >= 0.15
+    return ratio, distinct
+
+
+def _fluent(model: str) -> bool | None:
+    values = _fluency(model)
+    if values is None:
+        return None
+    return values[0] <= 1.5 and values[1] >= 0.15
 
 
 def _expected() -> dict[str, dict[str, Cell]]:
@@ -537,6 +544,28 @@ def test_the_steering_row_names_its_measure_and_counts_the_fluent_runs(
         ]
         assert built.numbers[f"steering_fluent_{role}_above"] == sum(known)
         assert built.numbers[f"steering_fluent_{role}_n"] == len(known)
+
+
+def test_the_fluency_of_the_winning_steering_checkpoints_is_quoted(
+    built: registry.FigureOutput,
+) -> None:
+    winners = [
+        m
+        for m in models("m1")
+        if min(_seed_rates(m)[0]) > max(_seed_rates(m)[1])
+    ]
+    measured = {m: v for m in winners if (v := _fluency(m)) is not None}
+    assert sorted(set(winners) - set(measured)) == ["gpt2"]
+    kept = [v for m, v in measured.items() if _fluent(m)]
+    broken = [v[0] for m, v in measured.items() if not _fluent(m)]
+    assert len(kept) == 1
+    assert len(broken) == 3
+    numbers = built.numbers
+    assert numbers["steering_kept_ratio"] == pytest.approx(kept[0][0])
+    assert numbers["steering_kept_distinct"] == pytest.approx(kept[0][1])
+    assert numbers["steering_broken_ratio_min"] == pytest.approx(min(broken))
+    assert numbers["steering_broken_ratio_max"] == pytest.approx(max(broken))
+    assert min(broken) > 1.5
 
 
 def test_every_row_names_the_unit_its_margin_is_measured_in(

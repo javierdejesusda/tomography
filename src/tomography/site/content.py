@@ -503,10 +503,14 @@ RESULTS = Section(
                 "(probability 0.05 by chance) on "
                 "[[tally:fig:teaser.steering]] checkpoints ([[fig:teaser]], "
                 "last row), and only Qwen3-1.7B-Base also keeps the fluency "
-                "rule, for the mean of its three vectors at the positive "
-                "sign; on Qwen3-1.7B, Qwen3-4B-Base and Qwen3-4B the "
-                "perplexity ratio exceeds its limit (GPT-2 small has no "
-                "fluency measure). "
+                "rule, with perplexity ratio "
+                "[[num:fig:teaser.steering_kept_ratio]] and distinct-1 "
+                "[[num:fig:teaser.steering_kept_distinct]] (mean of its three "
+                "vectors, positive sign); on Qwen3-1.7B, Qwen3-4B-Base and "
+                "Qwen3-4B the ratio is "
+                "[[num:fig:teaser.steering_broken_ratio_min]] to "
+                "[[num:fig:teaser.steering_broken_ratio_max]], above the limit "
+                "(GPT-2 small has no fluency measure). "
                 "[[table:steering_baselines]] sets five published steering "
                 "methods beside the reader.",
             ),
