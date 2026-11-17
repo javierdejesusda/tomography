@@ -681,9 +681,9 @@ def test_appendix_b_states_the_steering_baselines_and_the_views_run() -> None:
         "[[num:table:design.steering_baselines_n_tune]] tuning prompts per "
         "concept",
         "an LLM judge rates the concept and the fluency of its generations, "
-        "and on the post-trained checkpoint how well they follow the "
-        "instruction, on [[num:table:design.steering_baselines_n_held_out]] "
-        "held-out prompts",
+        "and on the post-trained checkpoint how closely their topic relates "
+        "to the instruction, on "
+        "[[num:table:design.steering_baselines_n_held_out]] held-out prompts",
         "no human validated the judges, neither the classifiers of the "
         "sentiment run nor the LLM judge, whose two slots are the same "
         "model",
@@ -746,6 +746,22 @@ def test_the_published_baselines_have_a_table_beside_what_they_compare() -> (
     assert "by point estimate" in text
     assert text.count("by point estimate") == 2
     assert "and, by point estimate, the direction is above P(True)" in text
+    fitted = (
+        "the direction is fitted on known and unknown questions, labelled by "
+        "the correctness of the model's answers, and its layer is chosen on "
+        "the correctness of validation answers"
+    )
+    assert (
+        "The exact-answer probe is fitted on the correctness of training "
+        f"questions, while {fitted}; by point estimate that probe is above "
+        "the direction" in text
+    )
+    assert (
+        f"{fitted[0].upper()}{fitted[1:]}. A supervised probe, fitted on the "
+        "correct and wrong labels of the training questions, adds" in text
+    )
+    assert "never sees" not in text
+    assert "(the direction is not)" not in text
 
 
 def test_the_steering_baselines_sit_beside_the_steering_table() -> None:

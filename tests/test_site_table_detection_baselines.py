@@ -205,9 +205,14 @@ def test_the_caption_names_baselines_and_controls_apart(
         "are controls",
         "no direction",
         "TriviaQA and NQ-open",
+        "both are fitted on the correctness of training questions; the "
+        "direction is fitted on known and unknown questions, labelled by the "
+        "correctness of the model's answers, and its layer is chosen on the "
+        "correctness of validation answers.",
         stats.per_role_text(output.counts["with_run"]),
     ):
         assert phrase in text, phrase
+    assert "never sees" not in text
     controls = [s for s in text.split(". ") if "are controls" in s]
     assert len(controls) == 1
     assert "baseline" not in controls[0]

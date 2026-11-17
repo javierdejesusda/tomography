@@ -266,9 +266,12 @@ def test_the_caption_says_how_the_table_was_judged_and_cites_each_source(
         "[[cite:turner2023steering]]",
         "[[cite:jorgensen2023improving]]",
         "[[cite:dubois2023alpacafarm]]",
+        "on the post-trained checkpoint also on how closely the topic of the "
+        "generation relates to the instruction;",
         stats.per_role_text(output.counts["with_run"]),
     ):
         assert phrase in text, phrase
+    assert "following the instruction" not in text
     controls = text[text.index("The controls are") :].split(". ")[0]
     assert "baseline" not in controls
     assert not any(d in text for d in DASHES)
