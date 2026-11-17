@@ -58,23 +58,30 @@ GPT2_LABELS = {
 }
 HEADER = ["panel", "model", "x", "series", "value", "lo", "hi"]
 DETAIL = (
-    "A checkpoint moves when all 3 steering vectors move the score past the "
-    "unsteered value at both signs of 0.1 on two sentiment judges: "
-    "{moves_count}. The fluency rule holds at both signs of 0.1 on {held}, "
-    "and at 0.3 or {minus}0.3 on {fails}. (a) Mean judged sentiment against "
-    "the relative coefficient, one line per checkpoint, with the range over "
-    "the 3 steering vectors (band) and "
-    "the score under a positive or negative instruction (bars at left). "
-    "Filled markers satisfy the fluency rule "
-    "(perplexity ratio at most {max_ratio}, distinct-1 at least "
-    "{min_distinct}); a segment touching an open marker is dashed. (b) "
-    "Perplexity ratio, steered to unsteered model, on {n_neutral} held-out "
-    "WikiText-103 passages. (c) Distinct-1 of the "
-    "completions. The rule uses the perplexity of neutral text, not of the "
-    "completions ([[table:steering]] gives the scores, ratios and judge "
-    "agreement). It has no random-direction arm; the utility steering run "
-    "uses random directions ([[fig:teaser]])."
+    "(a) Mean judged sentiment per checkpoint; band: range over the 3 "
+    "steering vectors; bars at left: score under a negative or positive "
+    "instruction. (b) Neutral-text perplexity ratio, steered to unsteered "
+    "model. (c) Distinct-1 of the completions. Filled markers keep the rule, "
+    "whose limits are the horizontal lines; dashed segments touch an open "
+    "marker. A checkpoint moves when all 3 vectors pass the unsteered score "
+    "at both signs of 0.1 on two judges."
 )
+
+
+def _claim(counts: dict[str, dict[str, stats.RoleCount]]) -> str:
+    moves, fluent = counts["moves01"], counts["fluent03"]
+    if all(c.hits * 2 > c.total for c in moves.values()):
+        moved = "most checkpoints"
+    else:
+        moved = stats.per_role_text(moves)
+    if all(c.hits == 0 for c in fluent.values()):
+        kept = "none keeps the fluency rule"
+    else:
+        kept = f"the fluency rule is kept on {stats.per_role_text(fluent)}"
+    return (
+        "At relative coefficient 0.1 steering moves judged sentiment on "
+        f"{moved}; at 0.3 {kept}."
+    )
 
 
 def _table(manifest: Manifest, model: str) -> list[dict[str, Any]]:
@@ -497,18 +504,6 @@ def build(manifest: Manifest) -> FigureOutput:
         numbers[f"n_{role}"] = float(len(by_role[role]))
         for name in counts:
             numbers[f"{name}_{role}"] = float(counts[name][role].hits)
-    detail = DETAIL.format(
-        minus=axes.MINUS,
-        max_ratio=stats.FLUENT_MAX_RATIO,
-        min_distinct=stats.FLUENT_MIN_DISTINCT,
-        moves_count=stats.per_role_text(counts["moves01"]),
-        n_neutral=n_neutral,
-        held=stats.per_role_text(counts["fluent01"]),
-        fails=stats.per_role_text(counts["fluent03"]),
-    )
-    claim = (
-        "Steering moves the judged sentiment, less on post-trained checkpoints."
-    )
     return FigureOutput(
-        fig, claim, detail, numbers, _csv(by_key, models), counts
+        fig, _claim(counts), DETAIL, numbers, _csv(by_key, models), counts
     )

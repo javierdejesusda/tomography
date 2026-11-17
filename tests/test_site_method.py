@@ -113,12 +113,24 @@ def test_the_schematic_has_no_rows_and_no_numbers(
 def test_the_caption_describes_the_pairwise_read_and_the_control(
     output: registry.FigureOutput,
 ) -> None:
+    assert output.claim == (
+        "The recipe: find a direction, read with it, and steer with it."
+    )
+    assert output.detail == (
+        "A finder turns last-token activations of training pairs into a unit "
+        "direction v; a held-out pair is read correctly when its positive "
+        "member projects higher on v; steering adds c r v. The random "
+        "direction u is the control. The densities are illustrative."
+    )
+
+
+def test_the_caption_is_at_most_90_words_and_cites_no_other_item(
+    output: registry.FigureOutput,
+) -> None:
     text = f"{output.claim} {output.detail}"
-    assert "positive member projects higher" in text
-    assert "constant score sits at 0.5" in text
-    assert "oriented on the training pairs" in text
-    assert "is the control of the readings" in text
-    assert "illustrative" in text
+    assert len(text.split()) <= 90
+    assert "[[" not in text
+    assert not any(ch.isdigit() for ch in text)
 
 
 def test_the_figure_is_5_5_by_2_1_inches(
@@ -198,4 +210,6 @@ def test_the_caption_names_only_what_the_drawing_shows(
     output: registry.FigureOutput,
 ) -> None:
     assert "classifier" not in output.detail
-    assert "random unit direction" in output.detail
+    assert "The random direction u is the control." in output.detail
+    drawn = " ".join(" ".join(_texts(output)).split())
+    assert "random unit direction $u$ (control)" in drawn

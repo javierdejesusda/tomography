@@ -56,46 +56,22 @@ THIN_EDGE = 0.7
 TICK_EDGE = 1.0
 LEGEND_BAND = 4.0
 HEADER = ["checkpoint", "panel", "contrast", "series", "low", "high", "value"]
+CLAIM = (
+    "The all-pairs reader, fitted on every training pair, is above each of "
+    "its {draws} random directions on {parts}."
+)
 DETAIL = (
-    "Panels (a) to (c) are one checkpoint per role and each row is a drawn "
-    "contrast of the knowledge readers, in three blocks: the entity "
-    "contrasts, the question contrasts and the contrasts between two kinds "
-    "of unknown question. The views run, which reads the questions of the "
-    "knowledge reading run again to recompute its readers and draw their "
-    "hidden states, draws two entity contrasts only; "
-    "the other entity contrasts, {undrawn}, are scored and not drawn, and "
-    "[[table:knowledge_projections]] gives their readers, the lowest "
-    "of the three checkpoints at {hidden}. In the row names, synthal is "
-    "SyntHal [[cite:lu2026relational]], a published set of questions about "
-    "fictional entities, generated is the set of fictional names generated "
-    "for this study, and kuq is one category of KUQ "
-    "[[cite:amayuelas2024knowledge]], a published set of questions that "
-    "have no known answer. A cell is the distribution of the test questions "
-    "of the contrast along its all-pairs reader, the reader the reading run "
-    "fitted on every training pair, at the layer of the reader: "
-    "the projection of each question on the reader as a z-score over the "
-    "questions of the cell, in {bins} bins that end {limit} standard "
-    "deviations from the mean on either side, with the values beyond in the "
-    "end bins. In the entity and question blocks the upper side is the "
-    "known questions and the lower side the unknown questions the row "
-    "names; in the unknown type block both sides are unknown questions and "
-    "the upper side is the group named first. Each side is scaled to its "
-    "own share and holds at most {cap} questions, the first by a hash of "
-    "their identifier. Panel (d) gives the AUROC behind each cell, the "
-    "three checkpoints from top to bottom in a row: the circle is the "
-    "all-pairs reader, brown for GPT-2 and blue for Qwen3, and the other "
-    "marks are its two controls. The grey band spans the random directions "
-    "of the {draws} draws, with a cross at their mean; a random direction "
-    "is oriented on the training labels like the reader, so it can score "
-    "far above 0.5 on a small contrast. The tick is the mean of the {draws} "
-    "shuffled-label refits, each the reader refitted with its labels "
-    "shuffled inside each stratum; single refits scatter over most of the "
-    "axis and their lowest and highest are in the data file. The axis "
-    "starts at {left}, and a band that reaches its left edge continues "
-    "below it. A reader inside its grey band does not read the contrast "
-    "better than a direction drawn at random. {exceptions} The dotted line "
-    "is chance, and an empty row is a contrast the checkpoint has no reader "
-    "for. The data file holds the bins and the values of {with_run}."
+    "(a to c) One checkpoint per panel, one contrast per row: entity, "
+    "question and unknown-type contrasts. Row names: synthal is SyntHal "
+    "[[cite:lu2026relational]], published questions about fictional "
+    "entities; generated is our set of fictional names; kuq is a category "
+    "of KUQ [[cite:amayuelas2024knowledge]], published questions with no "
+    "known answer. A cell is the distribution of the test questions along "
+    "the reader at its layer: known above, unknown below, or the group "
+    "named first above. (d) AUROC behind each cell, checkpoints from top to "
+    "bottom: reader (circle), range of its random directions (grey band, "
+    "cross at the mean) and mean of {draws} refits on shuffled labels "
+    "(tick). {exceptions}"
 )
 
 
@@ -436,7 +412,7 @@ def _exceptions(
         One sentence naming each such checkpoint and contrast with the
         highest random direction and the reader.
     """
-    scope = "Over every checkpoint in the data file, "
+    scope = "In the data file, "
     if not misses:
         return f"{scope}no reader is inside its band."
     parts = []
@@ -449,10 +425,10 @@ def _exceptions(
                 for name in names
             ]
         )
-        drawn = "" if model in SHOWN else ", which is not drawn"
+        drawn = "" if model in SHOWN else ", not drawn"
         parts.append(f"{paper.display_name(model)}{drawn}, on {listed}")
     return (
-        f"{scope}the highest random direction is above the reader only on "
+        f"{scope}a random direction is above the reader only on "
         f"{'; and on '.join(parts)}."
     )
 
@@ -579,15 +555,15 @@ def build(manifest: Manifest) -> FigureOutput:
         "forest_left": left,
         "undrawn_reader_min": min(hidden),
     }
-    parts = []
+    parts: list[str] = []
     for model, cells in shown.items():
         role = stats.role(model)
         above = _above(cells)
         numbers[f"above_{role}"] = float(above)
         numbers[f"contrasts_{role}"] = float(len(cells))
+        noun = "" if parts else " drawn contrasts"
         parts.append(
-            f"{above} of {len(cells)} drawn contrasts on "
-            f"{paper.display_name(model)}"
+            f"{above} of {len(cells)}{noun} of {paper.display_name(model)}"
         )
     counts = {
         "with_run": stats.per_role(
@@ -614,26 +590,10 @@ def build(manifest: Manifest) -> FigureOutput:
             ]
         ),
     }
-    claim = (
-        f"The all-pairs reader has a higher AUROC than each of its {draws} "
-        f"random directions on {stats.join_and(parts)}; the lowest drawn "
-        f"reader is at {min(readers):.2f} and the highest single random "
-        f"direction at {max(randoms):.2f}."
-    )
     return FigureOutput(
         fig,
-        claim,
-        DETAIL.format(
-            bins=BINS,
-            limit=f"{LIMIT:g}",
-            cap=cap,
-            draws=draws,
-            left=f"{left:.2f}",
-            undrawn=labels["undrawn"],
-            hidden=f"{min(hidden):.3f}",
-            exceptions=_exceptions(every, misses),
-            with_run=stats.per_role_text(counts["with_run"]),
-        ),
+        CLAIM.format(draws=draws, parts=stats.join_and(parts)),
+        DETAIL.format(draws=draws, exceptions=_exceptions(every, misses)),
         numbers,
         _group.csv_text(HEADER, csv_rows),
         counts,

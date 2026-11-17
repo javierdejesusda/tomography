@@ -488,42 +488,42 @@ def _numbers(
     return numbers, counts
 
 
-def _reads(counts: dict[str, RoleCount], concept: str) -> str:
-    return f"{concept} on {stats.per_role_text(counts)}"
+def _every(count: dict[str, RoleCount]) -> bool:
+    return all(c.hits == c.total for c in count.values())
+
+
+def _none(count: dict[str, RoleCount]) -> bool:
+    return all(c.hits == 0 for c in count.values())
 
 
 def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
     utility, morality = counts["utility"], counts["morality"]
-    if utility == morality:
-        reads = (
-            "A direction reads utility and morality above a random "
-            f"direction on {stats.per_role_text(utility)}"
-        )
+    beats = "A direction beats a random direction for utility"
+    if _every(utility) and _every(morality):
+        beats += " and morality on every checkpoint"
     else:
-        reads = (
-            f"A direction reads {_reads(utility, 'utility')} and "
-            f"{_reads(morality, 'morality')}"
+        beats += (
+            f" on {stats.per_role_text(utility)} and for morality on "
+            f"{stats.per_role_text(morality)}"
         )
-    reads += f" and {_reads(counts['truth'], 'truth')}."
-    if all(c.hits == 0 for c in counts["truthfulqa"].values()):
-        words = "the TruthfulQA reader is never above a words-only classifier"
-    else:
-        words = (
-            "the TruthfulQA reader is above a words-only classifier on "
-            f"{stats.per_role_text(counts['truthfulqa'])}"
+    words, confidence = counts["truthfulqa"], counts["knowledge_confidence"]
+    if _none(words) and _none(confidence):
+        return (
+            f"{beats}, and the words alone on TruthfulQA or the model's "
+            "confidence on none."
         )
     return (
-        f"{reads} Two are mostly null: {words}, and the "
-        "paper's finder beats a random direction for sentiment on "
-        f"{stats.per_role_text(counts['paper_finder'])}."
+        f"{beats}, the words alone on TruthfulQA on "
+        f"{stats.per_role_text(words)} and the model's confidence on "
+        f"{stats.per_role_text(confidence)}."
     )
 
 
 DETAIL = (
-    "Markers are checkpoint margins over the row's control or baseline; "
-    "the right column counts 95 percent intervals above zero. Steering: "
-    "lowest win rate of 3 vectors minus highest of 3 random directions; no "
-    "interval is stored."
+    "Markers are checkpoint margins over each row's comparison, with 95 "
+    "percent intervals, counted at right when above zero. The finder is "
+    "compared with a random direction; steering is the lowest win rate of 3 "
+    "vectors minus the highest of 3 random directions, without interval."
 )
 
 

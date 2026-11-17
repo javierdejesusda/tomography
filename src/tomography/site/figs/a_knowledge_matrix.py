@@ -30,19 +30,17 @@ CMAP = mpl.colormaps[paper.SEQUENTIAL_CMAP]
 NUMBER_BELOW = 0.8
 TICK_WIDTH = 2.4
 NUMBER_FONT = paper.MIN_TEXT
+CLAIM = (
+    "The knowledge reader of {model} by question type, beside the words alone."
+)
 DETAIL = (
-    "(a) AUROC of a logistic reader fitted on the question type in the row "
-    "and tested on the type in the column, for {model} at its validation "
-    "layer; the diagonal is outlined in white, and a number is written only "
-    "on the diagonal and in cells below {below}. (b) The AUROC of the reader "
-    "on its own type minus that of the best text classifier (the better of "
-    "the one on the words and the one on the characters of the questions); "
-    "the band marks a difference of {slack:.3f} either way, a filled marker "
-    "is a reader ahead of the band ({ahead} of {types} types) and an open "
-    "one is a reader inside it or behind. (c) The AUROC of a random "
-    "direction on the same type, as a short grey bar. A high value in a column "
-    "of (a) does not show that the direction reads knowledge where a text "
-    "classifier comes this close."
+    "(a) AUROC of a logistic reader fitted on the type in the row and tested "
+    "on the type in the column; a number is written on the diagonal "
+    "(outlined in white) and in cells below {below}. (b) The reader on its "
+    "own type minus the better of the word and the character classifier; "
+    "the band marks {slack:.3f} either way. (c) AUROC of a random direction "
+    "on the same type. A high column in (a) does not show that the "
+    "direction reads knowledge where the words alone come this close."
 )
 
 
@@ -246,27 +244,16 @@ def build(manifest: Manifest) -> FigureOutput:
         legend.get_frame().set_edgecolor("none")
         _rows.freeze_layout(fig)
 
-    count = sum(close)
-    claim = (
-        "A classifier on the words or characters alone comes within "
-        f"{SLACK:.3f} of the reader or beats it on {count} of "
-        f"{len(names)} question types."
-    )
     numbers = {
-        "close": float(count),
+        "close": float(sum(close)),
         "types": float(len(names)),
         "ahead": float(ahead),
+        "slack": SLACK,
     }
     return FigureOutput(
         fig,
-        claim,
-        DETAIL.format(
-            model=paper.display_name(model),
-            below=f"{NUMBER_BELOW:g}",
-            slack=SLACK,
-            ahead=ahead,
-            types=len(names),
-        ),
+        CLAIM.format(model=paper.display_name(model)),
+        DETAIL.format(below=f"{NUMBER_BELOW:g}", slack=SLACK),
         numbers,
         _group.csv_text(HEADER, csv_rows),
         {},

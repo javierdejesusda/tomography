@@ -296,16 +296,22 @@ def test_panel_b_names_its_comparator(output: registry.FigureOutput) -> None:
 def test_the_probe_column_is_explained_in_the_caption(
     output: registry.FigureOutput,
 ) -> None:
-    assert (
-        "a logistic-regression probe fitted on the correct and wrong labels"
-    ) in output.detail
+    assert "a probe fitted on correct and wrong labels" in output.detail
 
 
-def test_the_caption_calls_the_model_confidence_the_baseline(
+def test_the_caption_says_what_stands_for_the_model_confidence(
     output: registry.FigureOutput,
 ) -> None:
-    assert "is added to the baseline, model confidence;" in output.detail
-    assert "at its interval's upper end" in output.claim
+    assert (
+        "the first answer token probability (pentagon), which stands for "
+        "the model's confidence: neither that confidence nor a random "
+        "direction is stored within relation."
+    ) in output.detail
+    assert (
+        "(c) Change in pooled AUROC for wrong answers when the direction, or "
+        "a probe fitted on correct and wrong labels, is added to the model's "
+        "confidence."
+    ) in output.detail
 
 
 def test_popularity_is_the_strongest_control_where_the_caption_says_so() -> (
@@ -317,57 +323,27 @@ def test_popularity_is_the_strongest_control_where_the_caption_says_so() -> (
         )
 
 
-def _role_text(output: registry.FigureOutput, role: str) -> str:
-    def span(series: tuple[str, ...]) -> str:
-        values = [
-            float(r["value"])
-            for r in _rows(output)
-            if r["panel"] == "a"
-            and r["series"] in series
-            and stats.role(r["model"]) == role
-        ]
-        return f"{_fmt(min(values))} to {_fmt(max(values))}"
-
-    return (
-        f"{span(('direction',))} against {span(('popularity',))}, "
-        f"{span(('words', 'characters'))} and "
-        f"{span(('answer_probability',))}"
-    )
-
-
-def _fmt(value: float) -> str:
-    return f"{value:.3f}".replace("-", MINUS)
-
-
-def test_caption_is_at_most_200_words_and_leads_with_the_conclusion(
+def test_caption_is_at_most_90_words_and_opens_with_what_is_plotted(
     output: registry.FigureOutput,
 ) -> None:
     caption = f"{output.claim} {output.detail}"
-    assert len(caption.split()) <= 200, len(caption.split())
-    assert output.claim.startswith(
-        "A known-against-unknown direction ranks questions above the "
-        "strongest of popularity and the two text classifiers, with an "
-        "interval excluding zero, on "
+    assert len(caption.split()) <= 90, len(caption.split())
+    assert output.claim == (
+        "A knowledge direction beside its controls and the model's "
+        "confidence on PopQA."
     )
-    interval = _by_role(_flags(lambda r: _diff(r)[1] > 0))
-    assert stats.per_role_text(interval) in output.claim
-    his = [output.numbers[f"dir_inc_hi_max_{r}"] for r in stats.ROLES]
-    assert (
-        f"adds at most {his[0]:.3f} (GPT-2), {his[1]:.3f} (Qwen3 base) and "
-        f"{his[2]:.3f} (post-trained)"
-    ) in output.claim
-    assert "small amount" not in output.claim
+    assert "known-against-unknown" not in caption
+    assert "small amount" not in caption
 
 
-def test_caption_gives_every_auroc_beside_its_controls_per_role(
+def test_caption_leaves_the_counts_and_levels_to_the_text(
     output: registry.FigureOutput,
 ) -> None:
-    for label, role in (
-        ("GPT-2", "gpt2"),
-        ("Qwen3 base", "base"),
-        ("Qwen3 post-trained", "post"),
-    ):
-        assert f"{label} {_role_text(output, role)}" in output.detail, role
+    caption = f"{output.claim} {output.detail}"
+    assert "[[" not in caption
+    assert not any(c.isdigit() for c in caption)
+    assert "all 9 checkpoints" not in caption
+    assert "Hanley and McNeil" not in caption
     cover = _by_role(
         {
             m: f["confidence+lat"]["lo"] <= 0 <= f["confidence+lat"]["hi"]
@@ -375,12 +351,9 @@ def test_caption_gives_every_auroc_beside_its_controls_per_role(
             if "confidence+lat" in f
         }
     )
-    assert f"the interval covers zero on {stats.per_role_text(cover)}" in (
-        output.detail
-    )
-    assert "all 9 checkpoints" not in output.detail
-    assert "Hanley and McNeil" not in output.detail
-    assert "[[sec:appendix_knowledge]]" in output.detail
+    assert output.counts["dir_cover"] == cover
+    interval = _by_role(_flags(lambda r: _diff(r)[1] > 0))
+    assert output.counts["above_best"] == interval
 
 
 def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
@@ -597,9 +570,9 @@ def test_caption_states_the_criteria_and_names_the_own_probability_signal(
 ) -> None:
     text = output.detail
     assert "first answer token" in text
-    assert "open" in text
-    assert "Difference in AUROC, direction minus the strongest" in text
-    assert "text classifiers" in text
+    assert "Open markers: post-trained." in text
+    assert "(b) Direction minus the strongest control, conservative" in text
+    assert "the two text classifiers (green bar: their range)" in text
 
 
 def test_zero_lines_stop_below_the_column_headers(

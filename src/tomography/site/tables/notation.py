@@ -1,11 +1,10 @@
-"""Table 2: Notation and terms used on the page.
+"""Table A2: Notation and terms used on the page.
 
-A static table: it holds no result, only the meaning of each symbol and term,
-so the page can name experiments by what they test and keep the run codes of
-the repository here.
+A static table: it holds no result, only the meaning of each symbol and term.
 """
 
 from tomography.site import cells
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
 
@@ -52,20 +51,6 @@ ROWS = (
         "projection of its activation.",
     ),
     (
-        "all-pairs reader",
-        "The direction the logistic finder of the knowledge reading run fits "
-        "on every training pair; the reading run stores it and the views "
-        "run, which reads the same questions again, scores it.",
-    ),
-    (
-        "series",
-        "One finder, pairing, preprocessing or control in a comparison. The "
-        "finder and preprocessing series of a comparison share its draws "
-        "of training items, while each pairing series draws its own; each "
-        "series reads at its own layer chosen on validation pairs, except "
-        "the text controls, which read no layer.",
-    ),
-    (
         "accuracy",
         "Share of held-out pairs whose positive member projects higher on "
         "the direction; ties count one half; 0.5 for a direction with no "
@@ -99,6 +84,15 @@ ROWS = (
         f"+c is judged more positive than the one steered at {cells.MINUS}c.",
     ),
     (
+        "fluency rule",
+        "Steered text is fluent when its neutral-text perplexity ratio is at "
+        f"most {stats.FLUENT_MAX_RATIO:g} and its distinct-1 at least "
+        f"{stats.FLUENT_MIN_DISTINCT:g}. The perplexity ratio divides the "
+        "perplexity of held-out WikiText-103 passages under the steered "
+        "model by that under the unsteered model; distinct-1 is the share "
+        "of distinct tokens in the completions.",
+    ),
+    (
         "contrast",
         "A knowledge contrast sets known questions against the unknown "
         "questions it names: fictional synthal, SyntHal questions about "
@@ -120,12 +114,6 @@ ROWS = (
         "GPT-2, Qwen3 base or Qwen3 post-trained; every count is given per "
         "role.",
     ),
-    (
-        "run codes",
-        "The directories of the results folder are named by an experiment "
-        "code, a letter and a number; the page names experiments by what "
-        "they test and the README lists the codes.",
-    ),
 )
 
 
@@ -141,7 +129,7 @@ def build(manifest: Manifest) -> TableOutput:
     del manifest
     return TableOutput(
         "Symbols and terms used in the text.",
-        "Experiment names in the repository are given in the last row.",
+        "",
         ["Symbol or term", "Meaning"],
         [list(row) for row in ROWS],
         "ll",

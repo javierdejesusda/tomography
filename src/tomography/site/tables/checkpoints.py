@@ -61,18 +61,12 @@ def build(manifest: Manifest) -> TableOutput:
     }
     claim = (
         f"The {len(models)} checkpoints range from {params.label(min(counts))}"
-        f" to {params.label(max(counts))} parameters, in four GPT-2 sizes and "
-        "three Qwen3 sizes with a base and a post-trained model each."
+        f" to {params.label(max(counts))} parameters."
     )
     detail = (
-        "Parameters include the embeddings, the positional table of GPT-2 and "
-        "every norm, and are computed from the stored model configuration. "
-        "Layers are decoder blocks. The Hub repository, the pinned revision "
-        "and the license of each checkpoint are in [[table:assets]]. "
-        "Post-trained Qwen3 checkpoints are used with their chat template and "
-        "thinking disabled; they differ from their base checkpoint in "
-        "post-training data, prompt format and distillation from a larger "
-        "model."
+        "Counts include the embeddings and every norm; layers are decoder "
+        "blocks. Post-trained Qwen3 checkpoints run with their chat template "
+        "and thinking disabled."
     )
     return TableOutput(
         claim,

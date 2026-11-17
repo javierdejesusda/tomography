@@ -12,9 +12,10 @@ generates. This repository runs that recipe on ten checkpoints: GPT-2 small,
 medium, large and XL, and Qwen3 0.6B, 1.7B and 4B (base and post-trained).
 It is independent research code, not the authors' code.
 
-Results and full write-up: the
-[project site](https://javierdejesusda.github.io/tomography/), rebuilt from the
-committed results, and [`docs/findings.md`](docs/findings.md). The site's View
+Results: the [project site](https://javierdejesusda.github.io/tomography/)
+is the paper, rebuilt from the committed results, and
+[`docs/findings.md`](docs/findings.md) is the full record of every
+experiment, including those the paper has no figure for. The site's View
 PDF button opens the whole page as a PDF, rebuilt with every deploy;
 [`docs/tomography-results.pdf`](docs/tomography-results.pdf) is a snapshot copy
 that can lag behind the site.
@@ -35,8 +36,8 @@ a run can be repeated.
 Each result is one run per checkpoint. Counts are per role (GPT-2, Qwen3 base,
 Qwen3 post-trained) and never pooled; "above" means that the 95 percent
 interval of the difference excludes zero. The [project
-site](https://javierdejesusda.github.io/tomography/) has the full write-up and
-[`docs/findings.md`](docs/findings.md) the tables.
+site](https://javierdejesusda.github.io/tomography/) has the paper and
+[`docs/findings.md`](docs/findings.md) the full record with the tables.
 
 - **The paper's PCA finder is weaker than logistic regression.** For sentiment
   `pca_diff` is above a random direction on 0 of 4 GPT-2, 1 of 3 Qwen3 base and
@@ -129,7 +130,9 @@ labels; a baseline is a published method run on the same items. On the
 [project site](https://javierdejesusda.github.io/tomography/), Appendix B
 (Method details) gives the design details of the studies shown there, and
 [Table A3](https://javierdejesusda.github.io/tomography/#table-A3) sets the
-design of every experiment side by side.
+design of each experiment the paper uses side by side;
+[`docs/methodology.md`](docs/methodology.md#design-of-every-experiment) gives
+the design of every experiment.
 
 | Id | Question | Models |
 | --- | --- | --- |

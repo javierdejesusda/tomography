@@ -199,16 +199,23 @@ def test_the_plan_values_hold_at_the_current_results() -> None:
     assert round(_slope("truth")[0], 3) == pytest.approx(-0.027)
 
 
-def test_the_caption_quotes_the_slopes_and_sizes(
+def test_the_caption_quotes_the_test_sizes_and_leaves_the_slopes_to_the_text(
     output: registry.FigureOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
-    assert "214 sentiment, 4,808 utility, 983 morality and 59 truth pairs" in (
-        text
-    )
-    assert "per tenfold" in text
-    assert "include zero" in text
-    assert "[[fig:a_reading_curves]]" in text
+    sizes = {
+        concept: _read_at(concept, models(exp)[0])[3]
+        for concept, exp in CONCEPTS.items()
+    }
+    assert (
+        "with 95 percent Wilson intervals over the test pairs "
+        f"({sizes['sentiment']:,} sentiment, {sizes['utility']:,} utility, "
+        f"{sizes['morality']:,} morality, {sizes['truth']:,} truth)"
+    ) in text
+    assert "(214 sentiment, 4,808 utility, 983 morality, 59 truth)" in text
+    assert "per tenfold" not in text
+    assert "slope" not in text
+    assert "[[" not in text
 
 
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
@@ -221,7 +228,7 @@ def test_the_caption_keeps_names_and_grammar_and_avoids_first(
 ) -> None:
     text = f"{output.claim} {output.detail}"
     assert "gpt-2" not in text
-    assert "GPT-2 sizes" in text
+    assert "S to XL: GPT-2; 0.6B to 4B: Qwen3" in text
     assert "intervals that includes" not in text
     assert "first" not in text.lower()
 
@@ -275,14 +282,17 @@ def test_the_size_row_has_a_reader_whisker_a_random_tick_and_no_trend_line(
         assert ax.get_ylim() == pytest.approx((0.4, 1.0))
 
 
-def test_the_detail_describes_the_size_row_and_the_slope_interval(
+def test_the_detail_describes_the_size_row(
     output: registry.FigureOutput,
 ) -> None:
     text = output.detail
-    assert "grey tick" in text
-    assert "filled for GPT-2 and base" in text
-    assert "t interval" in text
-    assert "sample-size run" in text
+    assert text.startswith(
+        "Dots are held-out pair accuracy at the layer read, by checkpoint size"
+    )
+    assert "Grey ticks are the random direction at the same layer." in text
+    assert "filled: GPT-2 and Qwen3 base; open, shifted right:" in text
+    assert "t interval" not in text
+    assert "sample-size run" not in text
 
 
 def _fig_texts(fig: Any) -> list[Any]:
@@ -347,8 +357,9 @@ def test_the_text_is_at_least_the_glossary_floor_and_never_bold(
 def test_the_caption_says_where_the_sentiment_size_dot_is_read(
     output: registry.FigureOutput,
 ) -> None:
-    assert "its own layer" in output.detail
-    assert "sentiment dots" in output.detail.lower()
+    assert output.detail.endswith(
+        "Sentiment comes from the run with a separate test split."
+    )
 
 
 def test_the_figure_is_one_row_of_four_size_panels_lettered_a_to_d(
@@ -369,10 +380,10 @@ def test_the_figure_is_one_row_of_four_size_panels_lettered_a_to_d(
     assert [x[-4] for x in letters] == list("abcd")
 
 
-def test_the_caption_is_at_most_200_words(
+def test_the_caption_is_at_most_90_words(
     output: registry.FigureOutput,
 ) -> None:
-    assert len(f"{output.claim} {output.detail}".split()) <= 200
+    assert len(f"{output.claim} {output.detail}".split()) <= 90
 
 
 def test_the_claim_counts_each_concept_per_role_from_the_intervals(
@@ -395,8 +406,31 @@ def test_the_claim_counts_each_concept_per_role_from_the_intervals(
     text = output.claim
     assert "all 10 checkpoints" not in text
     for concept in ("sentiment", "utility", "morality"):
-        assert stats.per_role_text(output.counts[concept]) in text
-    assert "truth on 0 of 4 GPT-2, 3 of 3 Qwen3 base and 3 of 3 post" in text
+        assert all(c.hits == c.total for c in output.counts[concept].values())
+    truth = output.counts["truth"]
+    assert truth["gpt2"].hits == 0
+    assert truth["base"].hits == truth["base"].total
+    assert truth["post"].hits == truth["post"].total
+    assert text == (
+        "A logistic direction reads sentiment, utility and morality on every "
+        "checkpoint and truth on Qwen3 only."
+    )
+
+
+def test_the_claim_falls_back_to_counts_when_the_pattern_breaks(
+    output: registry.FigureOutput,
+) -> None:
+    names = {c: c for c in CONCEPTS}
+    counts = dict(output.counts)
+    counts["morality"] = {
+        "gpt2": stats.RoleCount(3, 4),
+        "base": stats.RoleCount(3, 3),
+        "post": stats.RoleCount(3, 3),
+    }
+    text = reading_fig._claim(counts, names)
+    assert "on every checkpoint" not in text
+    assert stats.per_role_text(counts["morality"]) in text
+    assert stats.per_role_text(counts["truth"]) in text
 
 
 def test_the_onset_numbers_stay_available_to_the_page_text(
@@ -428,33 +462,9 @@ def test_the_onset_numbers_stay_available_to_the_page_text(
         )
 
 
-def test_a_falling_slope_with_an_interval_below_zero_is_written_as_a_fall() -> (
-    None
-):
-    numbers = {
-        "n_gpt2": 4.0,
-        "slope_truth": -0.2,
-        "slope_truth_lo": -0.3,
-        "slope_truth_hi": -0.1,
-        "slope_utility": 0.1,
-        "slope_utility_lo": 0.05,
-        "slope_utility_hi": 0.15,
-    }
-    text = reading_fig._slope_text(numbers, {"truth": "T", "utility": "U"})
-    assert "rises by" in text
-    assert "falls by" in text
-    assert "includes zero" not in text
-
-
 def test_the_key_names_the_grey_connector_to_the_random_direction(
     output: registry.FigureOutput,
 ) -> None:
     (legend,) = output.figure.legends
     texts = [t.get_text() for t in legend.get_texts()]
     assert any("gap" in x and "random direction" in x for x in texts)
-
-
-def test_the_caption_says_the_slopes_are_not_drawn(
-    output: registry.FigureOutput,
-) -> None:
-    assert "not drawn" in output.detail

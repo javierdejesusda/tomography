@@ -189,21 +189,52 @@ def _missing_clause(counts: dict[str, stats.RoleCount]) -> str:
     )
 
 
-def _claim(
-    numbers: dict[str, float],
-    names: dict[str, str],
-    missing: dict[str, stats.RoleCount],
-) -> str:
-    parts = []
-    for concept in names:
-        spans = [
+def _spans(numbers: dict[str, float], concept: str) -> str:
+    return stats.join_and(
+        [
             f"{numbers[f'onset_{concept}_{r}_min']:.3f} to "
             f"{numbers[f'onset_{concept}_{r}_max']:.3f} "
             f"on {stats.ROLE_NAMES[r]}"
             for r in stats.ROLES
             if f"onset_{concept}_{r}_min" in numbers
         ]
-        parts.append(f"{concept} {stats.join_and(spans)}")
+    )
+
+
+def _later(numbers: dict[str, float], lead: str, others: list[str]) -> bool:
+    """Tells whether every other concept has its onset after the lead one.
+
+    Args:
+        numbers: The onset ranges per concept and role.
+        lead: The concept read earliest.
+        others: The concepts compared with it.
+
+    Returns:
+        True when, in every role, the earliest onset of each other concept
+        lies after the latest onset of the lead concept.
+    """
+    return all(
+        numbers.get(f"onset_{c}_{r}_min", 0.0)
+        > numbers.get(f"onset_{lead}_{r}_max", 1.0)
+        for c in others
+        for r in stats.ROLES
+    )
+
+
+def _claim(
+    numbers: dict[str, float],
+    names: dict[str, str],
+    missing: dict[str, stats.RoleCount],
+) -> str:
+    lead, *others = names
+    if _later(numbers, lead, others):
+        return (
+            f"The margin of a {lead} reader over its random direction "
+            f"reaches 0.1 at a relative depth of {_spans(numbers, lead)} "
+            f"checkpoints, and later for {stats.join_and(others)}."
+            + _missing_clause(missing)
+        )
+    parts = [f"{concept} {_spans(numbers, concept)}" for concept in names]
     return (
         "A reader's margin over a random direction reaches 0.1 at a relative "
         "depth of " + "; ".join(parts) + "." + _missing_clause(missing)
@@ -228,24 +259,14 @@ def _csv(found: dict[str, dict[str, Cell]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _detail(numbers: dict[str, float]) -> str:
-    n = int(numbers["truth_n"])
-    return (
-        "Reader accuracy minus random-direction accuracy at every layer, one "
-        "line per checkpoint in the panel of its role (rows: GPT-2, Qwen3 "
-        "base, Qwen3 post-trained; darker lines are larger checkpoints, "
-        "named in the right column of each row). The dot marks the layer "
-        "read, chosen on a validation split (for sentiment the layer of the "
-        "finder comparison); the tick on the x axis marks the onset, the "
-        "earliest layer at which the margin curve crosses 0.1, which is not "
-        f"an estimate with an interval; for truth the curve rests on {n} "
-        "truth pairs. The grey band is the stored 95 percent interval over "
-        "seeds of the random direction, drawn around the zero line and "
-        "spanning the checkpoints of the panel. Sentiment curves are the "
-        "report-split accuracy of the logistic regression of the finder "
-        "comparison. The accuracy at the layer read against the checkpoint "
-        "size is in [[fig:reading]]."
-    )
+DETAIL = (
+    "Lines are reader accuracy minus random-direction accuracy at every "
+    "layer, one per checkpoint (rows: roles; darker: larger). Dots mark the "
+    "layer read. Ticks on the x axis mark the onset, the earliest layer "
+    "where the margin crosses 0.1, which carries no interval. The grey band "
+    "is the 95 percent interval over seeds of the random direction. "
+    "Sentiment curves come from the finder comparison."
+)
 
 
 def _key(fig: Figure) -> None:
@@ -330,7 +351,7 @@ def build(manifest: Manifest) -> FigureOutput:
     return FigureOutput(
         fig,
         _claim(numbers, names, _missing(found)),
-        _detail(numbers),
+        DETAIL,
         numbers,
         _csv(found),
     )

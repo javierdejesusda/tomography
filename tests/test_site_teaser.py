@@ -8,7 +8,6 @@ from typing import Any
 from matplotlib.lines import Line2D
 import pytest
 
-from tomography.site import content
 from tomography.site import registry
 from tomography.site import stats
 from tomography.site.figs import teaser
@@ -338,49 +337,85 @@ def test_the_knowledge_row_takes_popularity_as_the_strongest_control() -> None:
         assert strongest == r["popularity_within"]
 
 
-def _full(built: registry.FigureOutput) -> str:
-    (section,) = [s for s in content.APPENDICES if s.key == "appendix_reading"]
-    appendix = re.sub(
-        r"\[\[count:fig:teaser\.(\w+)\]\]",
-        lambda m: stats.per_role_text(built.counts[m.group(1)]),
-        " ".join(section.paragraphs),
-    )
-    return " ".join([built.claim, built.detail, appendix])
+def _caption(built: registry.FigureOutput) -> str:
+    return f"{built.claim} {built.detail}"
 
 
-def test_the_caption_is_at_most_120_words_and_leads_with_the_conclusion(
+def test_the_caption_is_at_most_70_words_and_leads_with_the_conclusion(
     built: registry.FigureOutput,
 ) -> None:
-    text = f"{built.claim} {built.detail}"
-    assert len(text.split()) <= 120
-    assert built.claim.startswith("A direction reads utility and morality")
+    assert len(_caption(built).split()) <= 70
+    assert built.claim == (
+        "A direction beats a random direction for utility and morality on "
+        "every checkpoint, and the words alone on TruthfulQA or the model's "
+        "confidence on none."
+    )
+    assert built.detail == (
+        "Markers are checkpoint margins over each row's comparison, with 95 "
+        "percent intervals, counted at right when above zero. The finder is "
+        "compared with a random direction; steering is the lowest win rate "
+        "of 3 vectors minus the highest of 3 random directions, without "
+        "interval."
+    )
+
+
+def test_the_caption_cites_no_other_item(
+    built: registry.FigureOutput,
+) -> None:
+    assert "[[" not in _caption(built)
 
 
 def test_the_method_detail_moved_to_the_appendix_text() -> None:
     assert not hasattr(teaser, "method_detail")
 
 
-def test_the_claim_states_the_per_role_counts_without_pooling(
+def test_the_claim_in_words_holds_on_the_computed_counts(
     built: registry.FigureOutput,
 ) -> None:
-    text = _full(built)
-    assert "all 10 checkpoints" not in text
     for concept in ("utility", "morality"):
-        assert stats.per_role_text(built.counts[concept]) in text
-    assert (
-        "above a random direction on "
-        + stats.per_role_text(built.counts["utility"])
-        in text
-    )
-    assert "truth on " + stats.per_role_text(built.counts["truth"]) in text
-    assert "Qwen3 checkpoints" not in text
+        count = built.counts[concept]
+        assert all(c.hits == c.total for c in count.values()), concept
+        assert sum(c.total for c in count.values()) == 10
+    for row in ("truthfulqa", "knowledge_confidence"):
+        assert all(c.hits == 0 for c in built.counts[row].values()), row
+    text = _caption(built)
+    assert "all 10 checkpoints" not in text
     assert not re.search(r"of 10 checkpoints", text)
-    assert "0 of 4 GPT-2, 1 of 3 Qwen3 base and 0 of 3 post-trained" in text
-    assert stats.per_role_text(built.counts["knowledge_confidence"]) in text
-    assert "on any of" not in text
-    assert "1 of 4 GPT-2, 2 of 3 Qwen3 base and 2 of 3 post-trained" in text
     for banned in (chr(0x2014), chr(0x2013)):
         assert banned not in text
+
+
+def test_the_claim_writes_the_counts_when_they_are_not_all_or_none(
+    built: registry.FigureOutput,
+) -> None:
+    counts = dict(built.counts)
+    partial = {
+        "gpt2": stats.RoleCount(3, 4),
+        "base": stats.RoleCount(3, 3),
+        "post": stats.RoleCount(3, 3),
+    }
+    some = {
+        "gpt2": stats.RoleCount(0, 4),
+        "base": stats.RoleCount(1, 3),
+        "post": stats.RoleCount(0, 3),
+    }
+    claim = teaser._claim({**counts, "utility": partial})
+    assert "on every checkpoint" not in claim
+    assert f"for utility on {stats.per_role_text(partial)}" in claim
+    assert f"for morality on {stats.per_role_text(counts['morality'])}" in claim
+    assert claim.endswith("or the model's confidence on none.")
+    claim = teaser._claim({**counts, "truthfulqa": some})
+    assert "on none" not in claim
+    assert f"on TruthfulQA on {stats.per_role_text(some)}" in claim
+    assert (
+        "the model's confidence on "
+        + stats.per_role_text(counts["knowledge_confidence"])
+        in claim
+    )
+    assert claim.startswith(
+        "A direction beats a random direction for utility and morality on "
+        "every checkpoint, "
+    )
 
 
 def test_figure_is_5_5_by_4_3_in_with_two_axes_with_the_guards_green(
@@ -417,9 +452,7 @@ def test_the_scorecard_names_controls_and_the_confidence_baseline(
         "margin over the control or baseline of its row, "
         "in the unit under each row"
     )
-    assert "checkpoint margins over the row's control or baseline;" in (
-        built.detail
-    )
+    assert "checkpoint margins over each row's comparison," in built.detail
 
 
 def test_the_legend_names_the_sizes_the_figure_holds(
@@ -435,8 +468,7 @@ def test_the_legend_names_the_sizes_the_figure_holds(
 def test_the_teaser_caption_has_no_signed_zero(
     built: registry.FigureOutput,
 ) -> None:
-    text = _full(built)
-    assert "-0.000" not in text
+    assert "-0.000" not in _caption(built)
 
 
 def test_the_pairing_is_read_from_the_run_summary_not_typed_in() -> None:
@@ -467,15 +499,13 @@ def test_the_steering_row_counts_checkpoints_whose_every_vector_wins(
         assert built.numbers[f"steering_{role}_n"] == len(mine)
 
 
-def test_the_steering_row_names_the_unit_the_judge_and_the_fluency_rule(
+def test_the_steering_row_names_its_measure_and_counts_the_fluent_runs(
     built: registry.FigureOutput,
 ) -> None:
-    text = _full(built)
-    assert "every logistic steering vector" in text
-    assert "utility direction" in text
-    assert "sentiment judge" in text
-    assert "relative coefficient 0.3" in text
-    assert "0.05" in text
+    assert (
+        "steering is the lowest win rate of 3 vectors minus the highest of "
+        "3 random directions, without interval."
+    ) in built.detail
     flags = {m: _fluent(m) for m in models("m1")}
     for role in ROLES:
         known = [
@@ -483,7 +513,6 @@ def test_the_steering_row_names_the_unit_the_judge_and_the_fluency_rule(
         ]
         assert built.numbers[f"steering_fluent_{role}_above"] == sum(known)
         assert built.numbers[f"steering_fluent_{role}_n"] == len(known)
-    assert "no checkpoint passes" not in text
 
 
 def test_every_row_names_the_unit_its_margin_is_measured_in(
@@ -530,8 +559,7 @@ def test_the_steering_row_has_its_own_panel_and_axis_label(
     assert len(top.get_yticks()) == len(ROWS) - 1
     zero = [ln for ln in bottom.get_lines() if ln.get_xdata()[0] == 0.0]
     assert zero
-    text = f"{built.claim} {built.detail}"
-    assert "no interval is stored" in text
+    assert "without interval" in _caption(built)
 
 
 def test_the_role_key_is_a_filled_and_an_open_circle_in_neutral_ink(

@@ -255,9 +255,9 @@ def test_the_claim_counts_the_readers_above_all_their_random_draws(
         role = stats.role(model)
         assert output.numbers[f"above_{role}"] == above
         assert output.numbers[f"contrasts_{role}"] == len(found)
+        noun = " drawn contrasts" if not parts else ""
         parts.append(
-            f"{above} of {len(found)} drawn contrasts on "
-            f"{paper.display_name(model)}"
+            f"{above} of {len(found)}{noun} of {paper.display_name(model)}"
         )
         readers += [a["reader"] for a in found]
         randoms += [a["random_high"] for a in found]
@@ -266,10 +266,8 @@ def test_the_claim_counts_the_readers_above_all_their_random_draws(
     draws = _draws(SHOWN[0])
     assert output.numbers["draws"] == draws == 5
     assert output.claim == (
-        f"The all-pairs reader has a higher AUROC than each of its {draws} "
-        f"random directions on {stats.join_and(parts)}; the lowest drawn "
-        f"reader is at {min(readers):.2f} and the highest single random "
-        f"direction at {max(randoms):.2f}."
+        "The all-pairs reader, fitted on every training pair, is above each "
+        f"of its {draws} random directions on {stats.join_and(parts)}."
     )
 
 
@@ -418,32 +416,28 @@ def test_the_caption_says_what_is_drawn_and_what_the_controls_are(
 ) -> None:
     detail = output.detail
     assert "published reader" not in detail
+    draws = _draws(SHOWN[0])
     for phrase in (
-        "all-pairs reader",
-        "The views run, which reads the questions of the knowledge reading "
-        "run again",
-        "z-score",
-        "upper side",
-        "lower side",
-        "grey band",
-        "controls",
-        "labels shuffled",
-        "top to bottom",
-        "at most 300",
-        "does not read",
-        "each row is a drawn contrast",
-        "obscure real pop and triviaqa known, are scored and not drawn",
-        "[[table:knowledge_projections]]",
-        f"mean of the {_draws(SHOWN[0])} shuffled-label refits",
-        "SyntHal [[cite:lu2026relational]]",
-        "KUQ [[cite:amayuelas2024knowledge]]",
-        "brown for GPT-2 and blue for Qwen3",
-        "z-score over the questions of the cell",
-        "continues below it",
-        "GPT-2 medium",
+        "(a to c) One checkpoint per panel, one contrast per row: entity, "
+        "question and unknown-type contrasts.",
+        "Row names: synthal is SyntHal [[cite:lu2026relational]], published "
+        "questions about fictional entities; generated is our set of "
+        "fictional names; kuq is a category of KUQ "
+        "[[cite:amayuelas2024knowledge]], published questions with no known "
+        "answer.",
+        "A cell is the distribution of the test questions along the reader "
+        "at its layer: known above, unknown below, or the group named first "
+        "above.",
+        "(d) AUROC behind each cell, checkpoints from top to bottom: reader "
+        "(circle), range of its random directions (grey band, cross at the "
+        f"mean) and mean of {draws} refits on shuffled labels (tick).",
+        "In the data file, a random direction is above the reader only on "
+        "GPT-2 medium, not drawn, on fictional generated (",
     ):
         assert phrase in detail, phrase
-    assert "stores the questions of two" not in detail
+    caption = f"{output.claim} {detail}"
+    assert len(caption.split()) <= 170, len(caption.split())
+    assert re.findall(r"\[\[(\w+):", caption) == ["cite", "cite"]
     text = re.sub(r"\[\[[^\]]*\]\]", "", f"{output.claim} {detail}")
     assert chr(0x2014) not in text
     assert chr(0x2013) not in text

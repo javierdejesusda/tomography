@@ -1,4 +1,4 @@
-"""Figure 9: Dose response of pushing along the knowledge direction.
+"""Dose response of pushing along the knowledge direction.
 
 Two forests give the slope of the outcome per unit relative coefficient for
 every run, in its own unit: the entropy shift for GPT-2 and base checkpoints
@@ -47,36 +47,20 @@ EXEMPLARS = (
     ("qwen3-4b", "fewshot"),
 )
 CLAIM = (
-    "Adding the knowledge direction moves unknown questions more than each "
-    "of 3 random directions of the same norm on {distinguishable}, yet by "
-    "the largest shift of the mean dose curve (c to e), which the slopes in "
-    "(a, b) do not show, known questions move at least as much as unknown "
-    "ones on {held}."
+    "Steering along the knowledge direction, run by run, against three "
+    "random directions of the same norm."
 )
 DETAIL = (
     "(a) Slope of the entropy shift per unit relative coefficient on "
-    "unknown questions (circle) and known questions (left triangle) of "
-    "GPT-2 and base checkpoints, against 3 random directions (grey "
-    "crosses), with 95 percent intervals that resample the questions. (b) "
-    "The same for the abstention rate of post-trained checkpoints "
-    "(few-shot and concept prompt); outcomes are never pooled. "
-    '"above n of 3" counts the random directions beaten. (c to e) Dose '
-    "curves of GPT-2 XL, Qwen3-4B-Base and Qwen3-4B (few-shot) against "
-    "the mean of the 3 random directions on unknown questions with its "
-    "interval (grey band) and the direction's interval (tint). Rows run by "
-    "size; GPT-2 small has no run. All runs: [[fig:a_dose_runs]]; by "
-    "question type: [[fig:a_dose_types]]."
-)
-APPENDIX_DETAIL = (
-    "The direction moves unknown questions more than known questions on "
-    "[[runs:fig:knowledge_steering.selective]], by the gap between the "
-    "absolute mean slopes over the coefficient grid, whatever the sign. A "
-    "direction counts as above a random direction when the 95 percent "
-    "interval of that gap lies above zero; with 3 random directions a "
-    "direction passes by chance with probability at most 1/4. By the "
-    "largest shift of the mean dose curve, which a slope does not show, "
-    "known questions move at least as much as unknown ones on "
-    "[[runs:fig:knowledge_steering.known_ge_unknown]]."
+    "unknown and known questions, for GPT-2 and base checkpoints, with 95 "
+    "percent intervals over the questions. (b) The same for the abstention "
+    "rate of post-trained checkpoints (few-shot and concept prompt). "
+    '"above n of 3" counts the random directions beaten, with the interval '
+    "of the gap in absolute slope above zero; a direction beats all three "
+    "by chance with probability at most 1/4. (c to e) Dose curves of GPT-2 "
+    "XL, Qwen3-4B-Base and Qwen3-4B (few-shot), with the mean of the random "
+    "directions on unknown questions (grey band). A slope does not show the "
+    "largest shift of a curve. GPT-2 small has no run."
 )
 
 
@@ -554,13 +538,9 @@ def build(manifest: Manifest) -> FigureOutput:
     for role in stats.ROLES:
         numbers[f"distinguishable_{role}"] = float(distinguishable[role].hits)
         numbers[f"selective_{role}"] = float(selective[role].hits)
-    claim = CLAIM.format(
-        distinguishable=stats.runs_text(distinguishable),
-        held=stats.runs_text(known_ge_unknown),
-    )
     return FigureOutput(
         fig,
-        claim,
+        CLAIM,
         DETAIL,
         numbers,
         _group.csv_text(HEADER, csv_rows),

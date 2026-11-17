@@ -159,7 +159,10 @@ def test_the_sizes_of_the_runs_are_quoted_from_their_configs(
         stored = json.loads(path.read_text("utf-8"))
         assert stored["n_seeds"] == output.numbers["seeds"] == 10
         assert stored["n_pairs"] == output.numbers["train_pairs"] == 64
-    assert "10 training sets of 64 pairs" in output.detail
+    assert (
+        "the mean over 10 training sets of 64 pairs at the layer each series "
+        "chose on validation pairs."
+    ) in output.claim
 
 
 def test_the_widest_wilson_interval_is_quoted(
@@ -176,10 +179,7 @@ def test_the_widest_wilson_interval_is_quoted(
     )
     assert 0.05 < reach < 0.15
     assert output.numbers["wilson_reach"] == pytest.approx(reach)
-    assert (
-        "Wilson 95 percent interval of a value over the test pairs reaches "
-        f"at most {cells.num(reach)} from it"
-    ) in output.detail
+    assert cells.num(reach) not in f"{output.claim} {output.detail}"
 
 
 def test_checkpoints_are_counted_per_role(
@@ -210,34 +210,43 @@ def test_the_caption_names_baselines_and_controls_apart(
     output: registry.TableOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
+    assert output.claim.startswith(
+        "Test accuracy of the finder of the paper, four published finders "
+        "and four controls on sentiment and three sets of true and false "
+        "statements: "
+    )
+    assert len(BASELINES) == len((*CONTROLS, *TEXT)) == 4
+    datasets = {d for m in models("b2") for d in _table(m)}
+    assert len(datasets - {"sentiment"}) == 3
     for phrase in (
-        "test accuracy",
-        "layer",
-        "validation",
-        "Wilson",
-        "an asterisk marks a value above the finder of the paper and a "
-        "dagger a value below it",
-        "conservative 95 percent interval",
-        "The finder of the paper is the PCA of differences of Zou et al. "
-        "[[cite:zou2025representationengineeringtopdownapproach]]",
-        "a random direction, oriented on the training labels like the "
-        "finder of the paper",
-        "given once in the note under the table",
-        f"{params.display('mean_diff')} [[cite:marks2024geometry]]",
-        f"{params.display('whitened_mean_diff')} [[cite:marks2024geometry]]",
-        f"{params.display('logistic')} [[cite:alain2016understanding]]",
-        f"{params.display('ccs')} [[cite:burns2023discovering]]",
-        "published baselines",
-        "The controls are",
-        "labels shuffled",
-        "Ledoit-Wolf",
-        "one prompt",
-        stats.per_role_text(output.counts["with_run"]),
+        "An asterisk (dagger) marks a value above (below) the finder of the "
+        "paper by the conservative 95 percent interval of their difference.",
+        "Unlike their references, the whitened mass-mean probe "
+        "[[cite:marks2024geometry]] shrinks the covariance, and "
+        "contrast-consistent search [[cite:burns2023discovering]] takes its "
+        "sign from the training labels and reads one prompt on sentiment.",
+        "The controls are a random direction, the finder scored against "
+        "labels shuffled inside each pair, and the words alone (note under "
+        "the table).",
     ):
         assert phrase in text, phrase
+    assert text.endswith(
+        "The finder is above the random direction on at least one dataset, "
+        "by that interval, on "
+        f"{stats.per_role_text(output.counts['finder_above_random'])}."
+    )
     controls = text[text.index("The controls are") :].split(". ")[0]
     assert "baseline" not in controls
     assert not any(d in text for d in DASHES)
-    assert "_" not in text.replace("[[cite:", "").replace(
-        "zou2025representationengineeringtopdownapproach", ""
-    )
+    assert "_" not in text.replace("[[cite:", "")
+
+
+def test_the_caption_is_short_and_leaves_the_missing_runs_to_the_text(
+    output: registry.TableOutput,
+) -> None:
+    text = f"{output.claim} {output.detail}"
+    assert len(text.split()) <= 170
+    assert "not run" not in text
+    assert stats.per_role_text(output.counts["with_run"]) not in text
+    assert "Ledoit" not in text
+    assert "zou2025" not in text

@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import math
 from pathlib import Path
 import re
@@ -212,9 +213,8 @@ def test_seed_paired_differences_that_exclude_zero_are_named_and_tokenised(
         size = tuned.split("-")[1].replace(".", "")
         assert output.numbers[f"paired_{name}_{size}"] == 1
     assert output.claim == (
-        "Post-training lowers held-out sentiment reading; on the other "
-        "readings most intervals include zero, which is not evidence of no "
-        "change."
+        "Post-training lowers held-out sentiment reading; most other "
+        "intervals include zero, which is not evidence of no change."
     )
 
 
@@ -324,30 +324,27 @@ def test_summary_numbers_are_recomputed(output: registry.FigureOutput) -> None:
 def test_caption_states_the_intervals_the_axes_and_the_fill(
     output: registry.FigureOutput,
 ) -> None:
-    n = output.numbers
-    sentiment = sorted(abs(n[f"sentiment_{k}"]) for k in SIZES)
-    detail = output.detail
-    assert "seed-paired" in detail
-    assert "conservative" in detail
-    assert "solid" in detail
-    assert "dashed" in detail
-    assert "filled" in detail
-    assert "axes differ" in detail
-    assert (
-        f"Sentiment falls by {sentiment[0]:.3f} to {sentiment[-1]:.3f}, with "
-        f"an interval below zero on {int(n['sent_below'])} of 3 sizes;"
-    ) in detail
-    assert (
-        "an interval excluding zero only for utility on 1.7B "
-        f"({chr(0x2212)}0.012), utility on 4B (+0.022), morality on 0.6B "
-        f"({chr(0x2212)}0.016) and honesty transfer on 0.6B (+0.073)"
-    ) in detail
-    assert "the knowledge AUROC and the steering win rate fall" in detail
-    assert "[[sec:limitations]]" in detail
-    assert "[[table:base_post]]" in detail
-    assert "prompt format" in detail
-    assert "Section 6" not in detail
-    assert "Table A5" not in detail
+    from tomography.site.figs import base_post
+
+    assert output.detail == (
+        "Post-trained minus base for each Qwen3 size (0.6B, 1.7B and 4B, "
+        "light to dark), one row per measure. A marker is filled where the "
+        "95 percent interval excludes zero. A solid interval is the "
+        "seed-paired bootstrap interval (10 seeds, 0.6B and 1.7B); a dashed "
+        "interval is conservative, used for 4B and the measures without "
+        "seeds. Panels differ in axis: (a) rows whose intervals stay within "
+        f"{base_post.NARROW:.3f}, (b) rows with wider intervals."
+    )
+    assert "[[" not in f"{output.claim} {output.detail}"
+
+
+def test_the_seed_paired_intervals_come_from_ten_seeds() -> None:
+    for exp in ("r2", "r3", "r5", "r7"):
+        for size in ("0.6b", "1.7b"):
+            for model in (f"qwen3-{size}-base", f"qwen3-{size}"):
+                path = _R["run"](exp, model) / "config.json"
+                config = json.loads(path.read_text(encoding="utf-8"))
+                assert config["n_seeds"] == 10, (exp, model)
 
 
 def test_sentiment_falls_on_every_size_and_the_claim_holds(
@@ -356,6 +353,19 @@ def test_sentiment_falls_on_every_size_and_the_claim_holds(
     n = output.numbers
     assert all(n[f"sentiment_{k}"] < 0 for k in SIZES)
     assert n["sent_below"] == 2
+    assert n["other_excluding"] * 2 < len(OTHER) * len(SIZES)
+
+
+def test_the_sentiment_fall_is_exported_as_an_unsigned_range(
+    output: registry.FigureOutput,
+) -> None:
+    n = output.numbers
+    falls = sorted(abs(n[f"sentiment_{k}"]) for k in SIZES)
+    assert n["sent_fall_min"] == pytest.approx(falls[0])
+    assert n["sent_fall_max"] == pytest.approx(falls[-1])
+    assert 0 < n["sent_fall_min"] < n["sent_fall_max"]
+    assert f"{n['sent_fall_min']:.3f}" == "0.049"
+    assert f"{n['sent_fall_max']:.3f}" == "0.132"
 
 
 def test_two_panels_split_the_rows_by_how_wide_their_intervals_are(
@@ -531,21 +541,12 @@ def test_rows_are_grouped_by_section_with_a_label_and_a_separator(
         assert [t.get_text() for t in groups] == want
 
 
-def test_the_caption_has_at_most_200_words_and_leads_with_the_conclusion(
+def test_the_caption_has_at_most_90_words_and_leads_with_the_conclusion(
     output: registry.FigureOutput,
 ) -> None:
-    assert len(f"{output.claim} {output.detail}".split()) <= 200
-    assert output.detail.startswith("Sentiment falls by")
-
-
-def test_a_value_that_rounds_to_zero_prints_without_a_sign() -> None:
-    from tomography.site.figs import base_post
-
-    minus = chr(0x2212)
-    assert base_post._signed(0.0004) == "0.000"
-    assert base_post._signed(-0.0004) == "0.000"
-    assert base_post._signed(0.05) == "+0.050"
-    assert base_post._signed(-0.05) == f"{minus}0.050"
+    assert len(f"{output.claim} {output.detail}".split()) <= 90
+    assert output.claim.startswith("Post-training lowers held-out sentiment")
+    assert output.detail.startswith("Post-trained minus base for each Qwen3")
 
 
 def test_both_panels_carry_the_x_label(output: registry.FigureOutput) -> None:

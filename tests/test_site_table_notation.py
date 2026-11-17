@@ -3,6 +3,7 @@ import re
 
 from tomography.p9 import unknowns
 from tomography.site import registry
+from tomography.site import stats
 from tomography.site.manifest import Manifest
 
 RESULTS = Path(__file__).resolve().parents[1] / "results"
@@ -15,8 +16,6 @@ TERMS = [
     "the paper",
     "finder",
     "reader",
-    "all-pairs reader",
-    "series",
     "accuracy",
     "margin",
     "relative depth",
@@ -24,10 +23,11 @@ TERMS = [
     "AUROC",
     "relative coefficient c",
     "win rate",
+    "fluency rule",
     "contrast",
     "role",
-    "run codes",
 ]
+GONE = ("all-pairs reader", "series", "run codes")
 
 
 def _build() -> registry.TableOutput:
@@ -39,7 +39,29 @@ def test_the_table_has_two_columns_and_the_agreed_terms_in_order() -> None:
     assert out.columns == ["Symbol or term", "Meaning"]
     assert out.align == "ll"
     assert [r[0] for r in out.rows] == TERMS
+    assert not set(GONE) & {r[0] for r in out.rows}
     assert out.row_groups == ()
+
+
+def test_the_caption_is_one_sentence() -> None:
+    out = _build()
+    assert out.claim == "Symbols and terms used in the text."
+    assert out.detail == ""
+
+
+def test_the_fluency_rule_states_its_limits_and_its_two_measures() -> None:
+    rows = {r[0]: r[1] for r in _build().rows}
+    rule = rows["fluency rule"]
+    assert rule.startswith(
+        "Steered text is fluent when its neutral-text perplexity ratio is "
+        f"at most {stats.FLUENT_MAX_RATIO:g} and its distinct-1 at least "
+        f"{stats.FLUENT_MIN_DISTINCT:g}."
+    )
+    assert (
+        "divides the perplexity of held-out WikiText-103 passages under the "
+        "steered model by that under the unsteered model"
+    ) in rule
+    assert "the share of distinct tokens in the completions" in rule
 
 
 def test_accuracy_is_a_pairwise_comparison_with_ties_at_one_half() -> None:
@@ -71,15 +93,6 @@ def test_the_glossary_names_every_knowledge_contrast() -> None:
     assert "one draw of training pairs" in rows["reader"]
     paper = "[[cite:zou2025representationengineeringtopdownapproach]]"
     assert paper in rows["the paper"]
-    assert "every training pair" in rows["all-pairs reader"]
-    assert "views run" in rows["all-pairs reader"]
-    assert rows["series"] == (
-        "One finder, pairing, preprocessing or control in a comparison. "
-        "The finder and preprocessing series of a comparison share its draws "
-        "of training items, while each pairing series draws its own; each "
-        "series reads at its own layer chosen on validation pairs, except "
-        "the text controls, which read no layer."
-    )
     assert "finder" in rows["reader"]
 
 

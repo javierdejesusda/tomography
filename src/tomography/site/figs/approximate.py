@@ -1,4 +1,4 @@
-"""Figure 10: Approximate answers and range readers.
+"""Approximate answers and range readers.
 
 Panel (a) reads the greedy few-shot behavior of P10a on range items, exact
 items and the people diagnostic. Panels (b) and (c) read the held-out
@@ -7,7 +7,6 @@ P10b, fitted on height and wingspan, with its random control and the text-word
 classifier. The three panels share the checkpoint rows.
 """
 
-from collections.abc import Collection
 import json
 import math
 from typing import Any
@@ -47,26 +46,21 @@ PANEL_A = (
     ("people", "people's\nheights"),
 )
 CLAIM = (
-    "Qwen3 writes a range for {base_min} to {base_max} percent of range "
-    "items (base) and {post_min} to {post_max} percent (post-trained), and a "
-    "range reader is above the interval of its random control on "
-    "{above_random}."
+    "What the models answer when the sourced answer is a range, and what a "
+    "range reader reads."
 )
 DETAIL = (
-    "(a) Share of few-shot answers written as a range on range items, exact "
-    "items and {n_people} people's heights. "
-    "Wilson 95 percent intervals lie inside the markers, at most "
-    "{wilson_gpt2} (GPT-2), {wilson_base} (Qwen3 base) and {wilson_post} "
-    "(post-trained) points wide. Exact items, heights: {share_base} "
-    "(Qwen3 base), {share_post} (post-trained); GPT-2 small {gpt2_range} and "
-    "{gpt2_exact} percent on range and exact items. (b) AUROC on "
-    "durations of a range reader fitted on heights and wingspans, with its "
-    "random control (grey bar and tick: bootstrap interval and mean of "
-    "{draws} random directions) and a word "
-    "classifier (green line {text}, whisker {text_lo} to {text_hi}); "
-    "{states}. (c) People's position between buildings (0) and breeds "
-    "(1) against the random band, the range of the control's position over "
-    "its {sets} training sets. See [[sec:appendix_approximate]]."
+    "In every family the range side is a living thing and the exact side an "
+    "artifact; a test set holds {side_min} to {side_max} questions per "
+    "side. (a) Share of greedy few-shot answers written as a range on range "
+    "items, exact items and the heights of {n_people} people, when the "
+    "prompt ends on a range example. (b) AUROC on held-out durations of a "
+    "range reader fitted on heights and wingspans, with its random control "
+    "(grey bar and tick: bootstrap interval and mean of {draws} random "
+    "directions) and a classifier on the question words (green line and "
+    "whisker). (c) Position of the people between buildings (0) and breeds "
+    "(1), with the random band: the range of the control's position over "
+    "its {sets} training sets."
 )
 
 
@@ -76,53 +70,8 @@ STATE_LABELS = {
     "inside": "inside the control",
     "below": "below the control",
 }
-STATE_PHRASES = {
-    "above": "a filled hexagon is above the control's interval",
-    "inside": "an open hexagon inside it",
-    "below": "a left arrow below it",
-}
 BELOW_MARKER = r"$\leftarrow$"
 BELOW_OFFSET = 0.075
-
-
-def state_sentence(states: Collection[str]) -> str:
-    """Writes the caption clause that names the states which occur.
-
-    Args:
-        states: The states drawn in panel (b).
-
-    Returns:
-        The clause, in the order above, inside, below. The first phrase
-        always names the control's interval, which the later ones refer to
-        as "it".
-    """
-    phrases = [STATE_PHRASES[s] for s in STATE_ORDER if s in states]
-    if phrases and not phrases[0].endswith("interval"):
-        phrases[0] = phrases[0].removesuffix(" it") + " the control's interval"
-    return ", ".join(phrases)
-
-
-def share_phrase(exact: int, people: int) -> str:
-    """Writes the highest range shares on exact items and on heights.
-
-    A zero is said plainly and never follows "at most".
-
-    Args:
-        exact: The highest percent of exact items answered with a range.
-        people: The highest percent of heights answered with a range.
-
-    Returns:
-        The phrase for one role.
-    """
-    if exact and people:
-        return f"at most {exact} and {people} percent"
-    if exact:
-        return f"at most {exact} percent of exact items, none of the heights"
-    if people:
-        return (
-            f"none of the exact items, at most {people} percent of the heights"
-        )
-    return "none of either"
 
 
 def _percent(value: float) -> int:
@@ -222,6 +171,13 @@ class _Reader:
         self.n_people = int(self.position["n_people"])
         config = json.loads((run / "config.json").read_text(encoding="utf-8"))
         self.n_seeds = int(config["n_seeds"])
+        self.test_sizes = [
+            int(count)
+            for family in runfiles.summary(run)["counts"].values()
+            for side in family.values()
+            for split, count in side.items()
+            if split == "test"
+        ]
 
 
 def _colour(model: str) -> str:
@@ -621,6 +577,12 @@ def build(manifest: Manifest) -> FigureOutput:
         "n_people": float(first.n_people),
         "n_random_draws": float(first.n_seeds),
         "n_band_sets": float(len(first.draws)),
+        "test_side_min": float(
+            min(n for r in readers.values() for n in r.test_sizes)
+        ),
+        "test_side_max": float(
+            max(n for r in readers.values() for n in r.test_sizes)
+        ),
     }
     forced = {m: _forced_rate(manifest, m) for m in models}
     for role in stats.ROLES:
@@ -652,38 +614,16 @@ def build(manifest: Manifest) -> FigureOutput:
         numbers[f"control_other_layer_{role}"] = float(other_layer[role].hits)
         numbers[f"control_below_half_{role}"] = float(below_half[role].hits)
         numbers[f"control_above_95_{role}"] = float(above_95[role].hits)
-    claim = CLAIM.format(
-        base_min=int(numbers["range_base_min"]),
-        base_max=int(numbers["range_base_max"]),
-        post_min=int(numbers["range_post_min"]),
-        post_max=int(numbers["range_post_max"]),
-        above_random=stats.per_role_text(above_random),
-    )
     detail = DETAIL.format(
-        states=state_sentence({_state(r) for r in readers.values()}),
+        side_min=int(numbers["test_side_min"]),
+        side_max=int(numbers["test_side_max"]),
         n_people=int(numbers["n_people"]),
-        **{
-            f"share_{role}": share_phrase(
-                int(numbers[f"exact_{role}_max"]),
-                int(numbers[f"people_{role}_max"]),
-            )
-            for role in ("base", "post")
-        },
-        **{
-            f"wilson_{role}": f"{numbers[f'wilson_{role}_points']:.1f}"
-            for role in stats.ROLES
-        },
-        gpt2_range=int(numbers["gpt2_range"]),
-        gpt2_exact=int(numbers["gpt2_exact"]),
         draws=int(numbers["n_random_draws"]),
         sets=int(numbers["n_band_sets"]),
-        text=_rows.number(text["auroc"], 3),
-        text_lo=_rows.number(text["lo"], 3),
-        text_hi=_rows.number(text["hi"], 3),
     )
     return FigureOutput(
         fig,
-        claim,
+        CLAIM,
         detail,
         numbers,
         _group.csv_text(HEADER, csv_rows),

@@ -751,10 +751,10 @@ def test_no_figure_data_file_names_a_column_after_a_baseline(
     assert _header_problems(headers) == []
 
 
-def test_every_appendix_item_is_cited_in_the_text(
+def test_every_appendix_item_is_cited_in_the_main_text(
     html: str,
 ) -> None:
-    body = html
+    body = html[: html.index('id="references"')]
     for kind, ids in (
         (
             "fig",
@@ -793,8 +793,11 @@ def test_clip_ids_are_numbered_in_order_not_hashed() -> None:
     )
 
 
-def test_each_contents_entry_stays_on_one_line(css: str) -> None:
-    assert ".contents a {\n  white-space: nowrap;\n}" in css
+def test_the_stylesheet_has_no_rule_for_the_removed_front_matter(
+    css: str,
+) -> None:
+    assert ".tldr" not in css
+    assert ".contents" not in css
 
 
 def test_wide_tables_break_out_of_the_text_column_on_large_screens(
@@ -811,7 +814,7 @@ def test_the_resolved_abstract_stays_short(
 ) -> None:
     view = page.Page(site[1])
     words = len(view.plain(content.ABSTRACT).split())
-    assert 150 <= words <= 180, words
+    assert 120 <= words <= 165, words
 
 
 def test_grouped_csv_columns_carry_their_group(
@@ -888,7 +891,7 @@ def _words(fragment: str) -> int:
     return len(_page_text(fragment, ("style", "svg")).split())
 
 
-def test_the_main_prose_is_about_four_thousand_words(html: str) -> None:
+def test_the_main_prose_is_about_two_thousand_words(html: str) -> None:
     main = html[: html.index('id="references"')]
     captions = re.findall(
         r"<(?:figcaption|caption)[^>]*>.*?</(?:figcaption|caption)>",
@@ -897,24 +900,11 @@ def test_the_main_prose_is_about_four_thousand_words(html: str) -> None:
     )
     tables = re.findall(r"<table.*?</table>", main, flags=re.S)
     prose = _words(main) - sum(map(_words, captions)) - sum(map(_words, tables))
-    assert 3000 <= prose <= 4600, prose
+    assert 1900 <= prose <= 2500, prose
 
 
-def test_the_page_opens_with_the_summary_and_the_overview(html: str) -> None:
-    assert html.index('<p class="tldr">') < html.index('<figure id="fig-1">')
-    assert html.index('<figure id="fig-1">') < html.index('id="abstract"')
-    assert html.index('id="abstract"') < html.index('id="key_findings"')
-
-
-def test_every_count_token_of_the_text_has_at_most_two_homes() -> None:
-    texts = [content.ABSTRACT, content.TLDR]
-    sections = [*content.BODY, *content.APPENDICES, content.KEY_FINDINGS]
-    while sections:
-        section = sections.pop()
-        texts += [*section.paragraphs, *section.after]
-        for head, text in (*section.runin, *section.listed):
-            texts += [head, text]
-        sections += list(section.subsections)
-    tokens = re.findall(r"\[\[(?:count|runs):([^\]]+)\]\]", " ".join(texts))
-    for address in set(tokens):
-        assert tokens.count(address) <= 2, address
+def test_the_page_opens_with_the_abstract_then_the_overview(html: str) -> None:
+    assert html.index('id="abstract"') < html.index('<figure id="fig-1">')
+    assert html.index('<figure id="fig-1">') < html.index('id="introduction"')
+    assert 'class="tldr"' not in html
+    assert 'id="key_findings"' not in html

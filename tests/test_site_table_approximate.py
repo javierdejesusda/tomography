@@ -1,4 +1,5 @@
 import csv
+import json
 from pathlib import Path
 import re
 import runpy
@@ -172,16 +173,48 @@ def test_counts_of_the_reader_above_words_are_per_role(
     )
 
 
-def test_the_caption_carries_the_people_diagnostic_and_the_random_band(
+def _sizes() -> tuple[int, int, int]:
+    people, seeds, sets = set(), set(), set()
+    for model in models("p10b"):
+        rows = [
+            r
+            for r in _csv(model, "p10b", "people.csv")
+            if r["source"] == "reader" and r["template"] == "concept"
+        ]
+        people.update(int(float(r["n_people"])) for r in rows)
+        sets.add(sum(r["method"] == "random" for r in rows))
+        config = json.loads(
+            (run("p10b", model) / "config.json").read_text("utf-8")
+        )
+        seeds.add(int(config["n_seeds"]))
+    (n_people,), (n_seeds,), (n_sets,) = people, seeds, sets
+    return n_people, n_seeds, n_sets
+
+
+def test_the_caption_says_what_each_column_group_holds(
     output: registry.TableOutput,
 ) -> None:
-    text = output.claim + " " + output.detail
-    assert "120 people" in text
-    assert "random control" in text
-    assert "5 random directions" in text
-    assert "7 training sets" in text
+    n_people, n_seeds, n_sets = _sizes()
+    assert (n_people, n_seeds, n_sets) == (120, 5, 7)
+    assert output.claim == "The values behind [[fig:approximate]]."
+    assert output.detail == (
+        "Left: percentage of greedy few-shot answers written as a range on "
+        f"range items, exact items and the heights of {n_people} people. "
+        "Reader: AUROC on held-out durations of a range reader fitted on "
+        "heights and wingspans with the concept prompt, beside the mean of "
+        f"{n_seeds} random directions oriented on the training labels and "
+        "its difference from a classifier on the question words "
+        f"({fmt(_words('gpt2'))}), with the half-width of its interval "
+        "[[cite:hanley1982meaning]] and an asterisk where it excludes zero. "
+        "Position: the people between the test buildings (0) and the breeds "
+        "(1), beside the range of the control's position over its "
+        f"{n_sets} training sets."
+    )
+    text = f"{output.claim} {output.detail}"
     assert "0.929" in text
+    assert len(text.split()) <= 170, len(text.split())
     assert not any(ch in text for ch in DASHES)
+    assert "Hanley" not in text
 
 
 def test_no_underscore_backtick_or_run_code(
@@ -195,19 +228,18 @@ def test_no_underscore_backtick_or_run_code(
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", t) for t in texts)
 
 
-def test_the_claim_uses_the_figure_framing_of_the_random_control(
+def test_the_superseded_counts_are_gone_and_the_kept_ones_stay(
     output: registry.TableOutput,
 ) -> None:
-    claim = output.claim
-    assert "matched" not in claim
-    assert "[[count:table:approximate.above_words]]" in claim
-    assert "[[count:fig:approximate.reader_above_random]]" in claim
-    assert "[[count:fig:approximate.control_below_half]]" in claim
-    assert "[[count:fig:approximate.control_above_95]]" in claim
-    assert "reader_in_random" not in claim
-    assert "people_outside_band" not in claim
     assert "random_high" not in output.counts
     assert "high" not in output.numbers
+    assert set(output.counts) == {
+        "above_words",
+        "above_words_point",
+        "inside_band",
+        "layer_one",
+    }
+    assert set(output.numbers) == {"text_word", "inside_band"}
 
 
 def test_the_range_reader_layer_is_counted_per_role(
@@ -220,55 +252,18 @@ def test_the_range_reader_layer_is_counted_per_role(
     assert [count[r].total for r in ("gpt2", "base", "post")] == [4, 3, 3]
 
 
-def test_the_claim_names_the_interval_criterion(
+def test_the_reader_above_the_words_is_counted_by_the_interval(
     output: registry.TableOutput,
 ) -> None:
-    assert (
-        "above a classifier on the question words, with the interval of the "
-        "difference above zero, on "
-    ) in output.claim
-
-
-RANGE_TOKENS = (
-    "[[num:fig:approximate.range_base_min]] to "
-    "[[num:fig:approximate.range_base_max]]",
-    "[[num:fig:approximate.range_post_min]] to "
-    "[[num:fig:approximate.range_post_max]]",
-    "[[num:fig:approximate.exact_base_max]]",
-    "[[num:fig:approximate.exact_post_max]]",
-)
-
-
-def test_the_claim_gives_the_range_shares_per_role(
-    output: registry.TableOutput,
-) -> None:
-    claim = output.claim
-    assert "Qwen3 writes ranges where" not in claim
-    for token in RANGE_TOKENS:
-        assert token in claim, token
-    assert "(base)" in claim
-    assert "(post-trained)" in claim
-
-
-def test_the_claim_range_shares_match_the_figure_numbers() -> None:
-    numbers = registry.build_figure("approximate", Manifest(ROOT)).numbers
-    assert numbers["range_base_min"] == 83
-    assert numbers["range_post_max"] == 68
-    assert numbers["exact_base_max"] == 15
-    assert numbers["exact_post_max"] == 0
-
-
-def test_a_zero_maximum_is_not_written_as_at_most_zero() -> None:
-    numbers = registry.build_figure("approximate", Manifest(ROOT)).numbers
-    assert numbers["exact_post_max"] == 0
-    assert numbers["exact_base_max"] > 0
-    claim = output_claim()
-    for role in ("base", "post"):
-        assert f"at most [[num:fig:approximate.exact_{role}_max]]" not in claim
-    assert "the highest share on exact items is" in claim
-    for role in ("base", "post"):
-        assert f"[[num:fig:approximate.exact_{role}_max]] percent" in claim
-
-
-def output_claim() -> str:
-    return registry.build_table("approximate", Manifest(ROOT)).claim
+    above = 0
+    for model in models("p10b"):
+        reader = _transfer(model, "logistic")
+        a, b = float(reader["auroc"]), _words(model)
+        n_pos, n_neg = int(reader["n_range"]), int(reader["n_exact"])
+        half = (
+            Z
+            * (_hm_se(a, n_pos, n_neg) ** 2 + _hm_se(b, n_pos, n_neg) ** 2)
+            ** 0.5
+        )
+        above += a - b - half > 0
+    assert sum(c.hits for c in output.counts["above_words"].values()) == above

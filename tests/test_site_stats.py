@@ -138,3 +138,47 @@ def test_runs_text_names_the_roles_and_skips_empty_ones() -> None:
     assert stats.runs_text(counts) == (
         "3 of 3 GPT-2 runs and 3 of 6 post-trained runs"
     )
+
+
+def test_per_role_compact_writes_the_three_roles_in_order() -> None:
+    counts = {
+        "post": stats.RoleCount(2, 3),
+        "gpt2": stats.RoleCount(0, 4),
+        "base": stats.RoleCount(2, 3),
+    }
+    assert stats.per_role_compact(counts) == "0/4, 2/3, 2/3"
+
+
+def test_per_role_compact_writes_all_when_every_role_is_complete() -> None:
+    counts = {
+        "gpt2": stats.RoleCount(4, 4),
+        "base": stats.RoleCount(3, 3),
+        "post": stats.RoleCount(3, 3),
+    }
+    assert stats.per_role_compact(counts) == "All"
+    counts["post"] = stats.RoleCount(2, 3)
+    assert stats.per_role_compact(counts) == "4/4, 3/3, 2/3"
+
+
+def test_per_role_tally_writes_three_fractions_in_role_order() -> None:
+    counts = {
+        "post": stats.RoleCount(3, 3),
+        "gpt2": stats.RoleCount(4, 4),
+        "base": stats.RoleCount(3, 3),
+    }
+    assert stats.per_role_tally(counts) == "4/4, 3/3, 3/3"
+    counts["gpt2"] = stats.RoleCount(0, 4)
+    assert stats.per_role_tally(counts) == "0/4, 3/3, 3/3"
+
+
+def test_per_role_tally_refuses_a_count_without_all_three_roles() -> None:
+    counts = {
+        "gpt2": stats.RoleCount(4, 4),
+        "base": stats.RoleCount(0, 0),
+        "post": stats.RoleCount(2, 3),
+    }
+    with pytest.raises(ValueError, match="base"):
+        stats.per_role_tally(counts)
+    del counts["base"]
+    with pytest.raises(ValueError, match="base"):
+        stats.per_role_tally(counts)

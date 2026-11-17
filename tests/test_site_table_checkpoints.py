@@ -64,17 +64,24 @@ def test_hub_ids_and_revisions_are_left_to_the_assets_table(
         assert pin.repo_id not in cells
         assert pin.revision[:12] not in cells
     text = output.claim + " " + output.detail
-    assert "[[table:assets]]" in text
-    assert "pinned commit" not in text
+    assert "[[" not in text
+    assert "pinned" not in text
 
 
-def test_the_caption_states_the_post_training_difference(
+def test_the_caption_is_the_range_what_is_counted_and_the_chat_template(
     output: registry.TableOutput,
 ) -> None:
-    text = output.claim + " " + output.detail
-    assert "chat template" in text
-    assert "thinking disabled" in text
-    assert "distillation" in text
+    counts = [params.param_count(m) for m in ("gpt2", "qwen3-4b")]
+    assert output.claim == (
+        f"The 10 checkpoints range from {params.label(counts[0])} to "
+        f"{params.label(counts[1])} parameters."
+    )
+    assert output.detail == (
+        "Counts include the embeddings and every norm; layers are decoder "
+        "blocks. Post-trained Qwen3 checkpoints run with their chat template "
+        "and thinking disabled."
+    )
+    assert len(f"{output.claim} {output.detail}".split()) <= 90
 
 
 def test_the_claim_range_is_the_smallest_and_largest_count(

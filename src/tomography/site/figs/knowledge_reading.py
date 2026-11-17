@@ -1,4 +1,4 @@
-"""Figure 8: A knowledge direction against popularity and confidence.
+"""A knowledge direction against popularity and confidence.
 
 Panel (a) reads the within-relation AUROC of the known-against-unknown reader
 of P9b with its controls and the model's own answer probability, panel (b)
@@ -41,23 +41,18 @@ GROUPS = {
 DODGE = {"direction": -0.3, "popularity": -0.1, "own": 0.1, "text": 0.3}
 SEPARATOR_WIDTH = 0.5
 CLAIM = (
-    "A known-against-unknown direction ranks questions above the strongest "
-    "of popularity and the two text classifiers, with an interval excluding "
-    "zero, on {interval}, and adds at most {hi_gpt2} (GPT-2), {hi_base} "
-    "(Qwen3 base) and {hi_post} (post-trained) to the confidence of the "
-    "model at its interval's upper end."
+    "A knowledge direction beside its controls and the model's confidence on "
+    "PopQA."
 )
 DETAIL = (
-    "(a) Within-relation AUROC on PopQA (open markers: post-trained): "
-    "direction (circle), popularity (square), range of the two text "
-    "classifiers (green bar) and its first answer token probability "
-    "(pentagon). GPT-2 {gpt2}; Qwen3 base {base}; Qwen3 post-trained "
-    "{post}. (b) Difference in AUROC, direction minus the strongest of "
-    "popularity and the two text classifiers, conservative interval. (c) "
-    "Change in AUROC for wrong answers when the direction, or a "
-    "logistic-regression probe fitted on the correct and wrong labels, is "
-    "added to the baseline, model confidence; the interval covers zero on "
-    "{cover}. See [[sec:appendix_knowledge]]."
+    "(a) Within-relation AUROC of the direction, popularity, the two text "
+    "classifiers (green bar: their range) and the first answer token "
+    "probability (pentagon), which stands for the model's confidence: "
+    "neither that confidence nor a random direction is stored within "
+    "relation. Open markers: post-trained. (b) Direction minus the strongest "
+    "control, conservative interval. (c) Change in pooled AUROC for wrong "
+    "answers when the direction, or a probe fitted on correct and wrong "
+    "labels, is added to the model's confidence."
 )
 
 
@@ -125,48 +120,6 @@ def _difference(row: dict[str, Any]) -> tuple[float, float, float]:
         _strongest(row),
         int(row["n_positive_test"]),
         int(row["n_negative_test"]),
-    )
-
-
-def _range(values: list[float]) -> tuple[str, str]:
-    return _rows.number(min(values)), _rows.number(max(values))
-
-
-def _role_text(
-    members: list[str],
-    contrast: dict[str, dict[str, Any]],
-    own: dict[str, dict[str, Any]],
-) -> str:
-    """Writes the AUROC ranges of one role beside their controls.
-
-    Args:
-        members: The checkpoints of the role that have a contrast.
-        contrast: The contrast rows by checkpoint.
-        own: The model's own first-token probability rows by checkpoint.
-
-    Returns:
-        The direction range against the popularity, text-classifier and
-        own-probability ranges.
-    """
-
-    def span(values: list[float]) -> str:
-        low, high = _range(values)
-        return f"{low} to {high}"
-
-    return (
-        f"{span([float(contrast[m]['logistic_within']) for m in members])} "
-        "against "
-        f"{span([float(contrast[m]['popularity_within']) for m in members])}"
-        ", "
-        + span(
-            [
-                float(contrast[m][c])
-                for m in members
-                for c in ("text_word_within", "text_char_within")
-            ]
-        )
-        + " and "
-        + span([float(own[m]["auroc_within"]) for m in members])
     )
 
 
@@ -543,20 +496,6 @@ def build(manifest: Manifest) -> FigureOutput:
         numbers[f"above_best_point_{role}"] = float(point[role].hits)
         numbers[f"above_best_{role}"] = float(interval[role].hits)
         numbers[f"probe_above_{role}"] = float(above[role].hits)
-    by_role = {
-        role: _role_text(
-            [m for m in contrast if stats.role(m) == role], contrast, own
-        )
-        for role in stats.ROLES
-    }
-    claim = CLAIM.format(
-        interval=stats.per_role_text(interval),
-        **{
-            f"hi_{role}": _rows.number(numbers[f"dir_inc_hi_max_{role}"], 3)
-            for role in stats.ROLES
-        },
-    )
-    detail = DETAIL.format(cover=stats.per_role_text(cover), **by_role)
     return FigureOutput(
-        fig, claim, detail, numbers, _group.csv_text(HEADER, csv_rows), counts
+        fig, CLAIM, DETAIL, numbers, _group.csv_text(HEADER, csv_rows), counts
     )

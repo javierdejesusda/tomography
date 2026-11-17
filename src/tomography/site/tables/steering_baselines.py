@@ -1,10 +1,11 @@
 """Appendix table: The reader beside published steering methods.
 
-One block per checkpoint and concept, under a heading row: the held-out
-judge scores, perplexity and distinct-1 of the reader, five published
-steering methods and two controls, each arm at the coefficient it chose on
-the tuning prompts. The roles are never pooled. The data file adds the
-checkpoint, the concept and the mean score of the pinned classifier.
+One block per checkpoint and concept, under a heading row: the coefficient,
+the held-out overall judge score and the perplexity of the reader, five
+published steering methods and two controls, each arm at the coefficient it
+chose on the tuning prompts. The roles are never pooled. The data file adds
+the checkpoint, the concept, the mean score of the pinned classifier, the
+score on each criterion and distinct-1.
 """
 
 import json
@@ -40,17 +41,16 @@ SIZES = {
     "neutral": "n_neutral",
     "resamples": "n_boot",
 }
-COLUMNS = [
-    "Kind",
-    "Arm",
-    "Coefficient",
-    "Concept",
-    "Instruction",
-    "Fluency",
-    "Overall",
-    "Perplexity",
+COLUMNS = ["Kind", "Arm", "Coefficient", "Overall", "Perplexity"]
+DATA_COLUMNS = (
+    "Model",
+    "Target concept",
+    "Classifier",
+    "Judge score: Concept",
+    "Judge score: Instruction",
+    "Judge score: Fluency",
     "Distinct-1",
-]
+)
 
 
 def _blank(value: float | None, digits: int = 3) -> str:
@@ -59,18 +59,27 @@ def _blank(value: float | None, digits: int = 3) -> str:
 
 
 def _row(row: dict[str, Any], kind: str, label: str) -> list[str]:
-    """Writes the cells of one arm on one concept."""
+    """Writes the shown cells of one arm on one concept."""
     return [
         kind,
         label,
         _blank(row["coeff"], 2),
+        cells.interval(row["overall"], row["overall_lo"], row["overall_hi"]),
+        _blank(row["perplexity"], 1),
+    ]
+
+
+def _data(row: dict[str, Any], name: str, concept: str) -> tuple[str, ...]:
+    """Writes the cells of one arm that only the data file holds."""
+    return (
+        name,
+        concept,
+        cells.num(row["classifier"]),
         cells.num(row["concept_score"]),
         _blank(row.get("instruction_score")),
         cells.num(row["fluency_score"]),
-        cells.interval(row["overall"], row["overall_lo"], row["overall_hi"]),
-        _blank(row["perplexity"], 1),
         cells.num(row["distinct_1"]),
-    ]
+    )
 
 
 def _block(
@@ -120,13 +129,15 @@ def build(manifest: Manifest) -> TableOutput:
 
     Raises:
         ValueError: If a run holds other arms, scores other prompts or other
-            criteria, or two runs differ in a size the caption quotes.
+            criteria, or two runs differ in a size or in the concepts the
+            caption quotes.
     """
     models = manifest.models(EXPERIMENT)
     rows: list[list[str]] = []
     headings: list[tuple[int, str]] = []
     extra: list[tuple[str, ...]] = []
     sizes: set[tuple[int, ...]] = set()
+    concepts: set[tuple[str, ...]] = set()
     for model in models:
         run = manifest.run(EXPERIMENT, model)
         assert run is not None
@@ -137,6 +148,7 @@ def build(manifest: Manifest) -> TableOutput:
         table = runfiles.rows(run, "table.json")
         if {r["concept"] for r in table} != set(summary["concepts"]):
             raise ValueError(f"{EXPERIMENT}/{model} holds other concepts")
+        concepts.add(tuple(summary["concepts"].values()))
         for concept, description in summary["concepts"].items():
             headings.append(
                 (
@@ -149,10 +161,12 @@ def build(manifest: Manifest) -> TableOutput:
             for row in _block(model, table, summary, concept):
                 kind, label = ARMS[row["arm"]]
                 rows.append(_row(row, "" if kind == shown else kind, label))
-                extra.append((name, concept, cells.num(row["classifier"])))
+                extra.append(_data(row, name, concept))
                 shown = kind
     if len(sizes) != 1:
         raise ValueError(f"{EXPERIMENT} runs differ in their sizes")
+    if len(concepts) != 1:
+        raise ValueError(f"{EXPERIMENT} runs differ in their concepts")
     n = dict(zip(SIZES, sizes.pop(), strict=True))
     opened = {place for place, _ in headings}
     rules = [i for i, line in enumerate(rows) if line[0] and i not in opened]
@@ -162,46 +176,30 @@ def build(manifest: Manifest) -> TableOutput:
         ),
     }
     claim = (
-        "Steering toward a concept along the reader, beside five published "
-        "steering methods and two controls, scored by an LLM judge on "
-        "held-out prompts, on one checkpoint per role."
+        "The reader beside five published steering methods and two controls, "
+        f"steering toward {stats.join_and(concepts.pop())} on one checkpoint "
+        "per role."
     )
     detail = (
-        "The roles are not pooled. An LLM judge rates each generation 0, 1 "
-        "or 2 on the concept and on fluency, and on the post-trained "
-        "checkpoint also on how closely the topic of the generation relates "
-        "to the instruction; the overall score "
-        "of a generation is the harmonic mean of its criteria, 0 when any "
-        "of them is 0. A seeded share of the generations is rated again in "
-        "a second judge slot by the same model. The base checkpoints "
-        "continue the opening words of held-out WikiText-103 passages and "
-        "the post-trained one answers AlpacaEval instructions "
-        "[[cite:dubois2023alpacafarm]] in its chat template, "
-        f"at most {n['new_tokens']} new tokens per prompt, cut at the "
-        "end-of-sequence token. Every value is the mean "
-        f"over the {n['held_out']} held-out prompts of the concept, at the "
-        "coefficient that the arm chose on the "
-        f"{n['tune']} tuning prompts, which share no prompt with them; the "
-        "coefficient is relative to the residual norm, and the overall "
-        "score carries the 95 percent percentile bootstrap interval over "
-        f"the held-out prompts ({n['resamples']:,} resamples), computed "
-        "for each arm on its own. Perplexity is that of "
-        f"{n['neutral']} held-out WikiText-103 passages under the steered "
-        "model, and distinct-1 the share of distinct tokens in the "
-        "generations. The published baselines are prompt prepending and "
-        "DiffMean, the difference of class means [[cite:marks2024geometry]], "
-        "both baselines of AxBench [[cite:wu2025axbench]], contrastive "
-        "activation addition (CAA) [[cite:rimsky2024steering]], activation "
-        "addition (ActAdd) [[cite:turner2023steering]] and mean-centring "
-        "[[cite:jorgensen2023improving]]; the reader is the "
-        "logistic-regression finder, as in the sentiment steering run. CAA, "
-        "mean-centring, DiffMean and the reader are built from the same "
-        f"{n['train_pairs']} training pairs per concept. The controls are "
-        "the unsteered model and a random unit direction steered like the "
-        "vector arms. The unsteered model and prompt prepending have no "
-        "coefficient, and prompt prepending, which changes the prompt and "
-        "not the model, has no perplexity. The runs cover "
-        f"{stats.per_role_text(counts['with_run'])}."
+        "Base checkpoints continue held-out WikiText-103 passages and the "
+        "post-trained one answers AlpacaEval instructions "
+        f"[[cite:dubois2023alpacafarm]], at most {n['new_tokens']} new "
+        "tokens, cut at the end-of-sequence token. An LLM judge rates each "
+        "generation 0, 1 or 2 on concept and fluency, and on the "
+        "post-trained checkpoint on how closely its topic relates to the "
+        "instruction; Overall is the harmonic mean of the ratings, 0 when "
+        f"any is 0, averaged over the {n['held_out']} held-out prompts of "
+        "the concept, with a 95 percent bootstrap interval per arm. Each arm "
+        f"uses the relative coefficient it chose on {n['tune']} separate "
+        f"tuning prompts. Perplexity is that of {n['neutral']} held-out "
+        "WikiText-103 passages under the steered model. Baselines: prompt "
+        "prepending and DiffMean [[cite:marks2024geometry]], both from "
+        "AxBench [[cite:wu2025axbench]], whose protocol we adapt to each "
+        "role, CAA [[cite:rimsky2024steering]], ActAdd "
+        "[[cite:turner2023steering]] and mean-centring "
+        "[[cite:jorgensen2023improving]]. The unsteered model and prompt "
+        "prepending have no coefficient; prompt prepending has no "
+        "perplexity."
     )
     return TableOutput(
         claim,
@@ -211,13 +209,11 @@ def build(manifest: Manifest) -> TableOutput:
         "ll" + "r" * (len(COLUMNS) - 2),
         [],
         {"rows": float(len(rows)), **{k: float(v) for k, v in n.items()}},
-        groups=(("", 2, False), ("Judge score", 4, False), ("", 2, False)),
         row_groups=tuple(rules),
         counts=counts,
         compact_print=True,
-        data_columns=("Model", "Target concept", "Classifier"),
+        data_columns=DATA_COLUMNS,
         data_cells=tuple(extra),
-        wide=True,
         roomy=True,
         headings=tuple(headings),
         span_labels=True,

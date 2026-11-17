@@ -27,8 +27,8 @@ TOKEN = re.compile(r"\[\[(.+?)\]\]")
 
 
 def _texts() -> list[str]:
-    texts = [content.ABSTRACT, content.TLDR]
-    sections = [*content.BODY, *content.APPENDICES, content.KEY_FINDINGS]
+    texts = [content.ABSTRACT]
+    sections = [*content.BODY, content.CODE, *content.APPENDICES]
     while sections:
         section = sections.pop()
         texts += [*section.paragraphs, *section.after]
@@ -50,7 +50,7 @@ def placeholders() -> tuple[dict, dict, dict]:
     for text in _texts():
         for token in TOKEN.findall(text):
             kind, _, rest = token.partition(":")
-            if kind not in ("num", "count", "runs", "label"):
+            if kind not in ("num", "count", "runs", "tally", "label"):
                 continue
             owner, _, name = rest.partition(":")
             key, _, field = name.rpartition(".")

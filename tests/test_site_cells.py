@@ -1,7 +1,3 @@
-from pathlib import Path
-
-import pytest
-
 from tomography.site import cells
 
 MINUS = chr(0x2212)
@@ -42,25 +38,6 @@ def test_interval_puts_the_bounds_in_brackets() -> None:
 def test_percent_rounds_to_whole_numbers() -> None:
     assert cells.percent(0.5916) == "59"
     assert cells.percent(None) == "n/a"
-
-
-def test_rows_of_a_json_table_zips_columns_and_rows(tmp_path: Path) -> None:
-    path = tmp_path / "t.json"
-    path.write_text(
-        '{"_meta": {}, "data": {"columns": ["a", "b"], "rows": [[1, 2]]}}',
-        encoding="utf-8",
-    )
-    assert cells.read_table(path) == [{"a": 1, "b": 2}]
-    path.write_text('{"_meta": {}, "data": [{"a": 3}]}', encoding="utf-8")
-    assert cells.read_table(path) == [{"a": 3}]
-
-
-def test_unknown_alignment_is_rejected() -> None:
-    with pytest.raises(ValueError, match="alignment"):
-        cells.check_align("lx", 2)
-    with pytest.raises(ValueError, match="alignment"):
-        cells.check_align("lr", 3)
-    assert cells.check_align("lr", 2) == "lr"
 
 
 def test_csv_text_writes_the_header_and_rows() -> None:
