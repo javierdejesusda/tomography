@@ -132,6 +132,56 @@ def test_without_history_the_results_commit_is_empty(tmp_path: Path) -> None:
     assert build_module.results_commit(tmp_path / "results") == ("", "")
 
 
+def _git(repo: Path, *args: str, date: str | None = None) -> str:
+    env = dict(os.environ)
+    if date is not None:
+        env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = date
+    return subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=site test",
+            "-c",
+            "user.email=site-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def test_the_results_commit_counts_findings_commits_in_any_clone(
+    tmp_path: Path,
+) -> None:
+    _git(tmp_path, "init", "-q")
+    for path, day in (
+        ("results/run.json", "2026-10-18"),
+        (build_module.FINDINGS, "2026-10-19"),
+        ("README.md", "2026-10-20"),
+    ):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(day, encoding="utf-8")
+        _git(tmp_path, "add", "-f", path)
+        _git(
+            tmp_path,
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            path,
+            date=f"{day}T12:00:00+00:00",
+        )
+    sha, built = build_module.results_commit(tmp_path / "results")
+    assert sha
+    assert _git(tmp_path, "rev-parse", "HEAD~1").startswith(sha)
+    assert built == "19 October 2026"
+
+
 def test_csv_files_hold_plain_text_not_tokens(
     site: tuple[Path, page.Document],
 ) -> None:

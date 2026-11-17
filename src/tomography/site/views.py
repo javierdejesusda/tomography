@@ -58,13 +58,11 @@ class Views:
 
     Attributes:
         run: The V1 run directory.
-        layer: The layer of the reader.
         draws: How many draws each contrast was refitted on.
         contrasts: The contrasts in the order of the run.
     """
 
     run: Path
-    layer: int
     draws: int
     contrasts: tuple[Contrast, ...]
 
@@ -116,9 +114,4 @@ def load(manifest: Manifest, model: str) -> Views | None:
                 shuffled=_spread(stored["shuffled"][t, :, k]),
             )
         )
-    return Views(
-        run,
-        int(summary["layer"]),
-        int(stored["shuffled"].shape[1]),
-        tuple(contrasts),
-    )
+    return Views(run, int(stored["shuffled"].shape[1]), tuple(contrasts))
