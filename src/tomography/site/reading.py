@@ -158,38 +158,6 @@ def first_depth_above(found: Reading, margin: float) -> float | None:
     return float(found.depth[above[0]]) if above.size else None
 
 
-def in_template(manifest: Manifest, model: str) -> Score | None:
-    """Reads the in-template block of R5.
-
-    The reader is scored on held-out honesty prompts of the template it was
-    fitted on; its random direction is read from the in-template curves at
-    that layer.
-
-    Args:
-        manifest: The run resolver.
-        model: Checkpoint key.
-
-    Returns:
-        The score, or None when the checkpoint has no R5 run.
-    """
-    run = manifest.run("r5", model)
-    if run is None:
-        return None
-    data = json.loads((run / "summary.json").read_text("utf-8"))["data"]
-    block = data["in_template"]
-    meta = json.loads((run / "curves.json").read_text("utf-8"))["data"]
-    layer = int(block["best_layer"])
-    with np.load(run / "curves.npz") as npz:
-        mean = np.asarray(npz["mean"], dtype=float)
-    random = float(mean[list(meta["series"]).index("random")][layer - 1])
-    return Score(
-        layer,
-        float(block["test_accuracy"]),
-        random,
-        int(data["n_eval_pairs"]["in_template"]["test"]),
-    )
-
-
 def heldout_sentiment(manifest: Manifest, model: str) -> Score | None:
     """Reads held-out sentiment from the sample-size run of P3.
 

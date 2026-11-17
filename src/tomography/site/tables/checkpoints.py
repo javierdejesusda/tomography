@@ -1,8 +1,8 @@
 """Table 1: Models.
 
 Every checkpoint that has a run under `results/`, with its role, parameter
-count, layers and hidden size. The Hub repository, the pinned revision and
-the license are in Table A1.
+count, layers and hidden size. The Hub repository and the license are in
+Table A1; the pinned revisions stay in the code and the methodology document.
 """
 
 from typing import Any
@@ -61,18 +61,11 @@ def build(manifest: Manifest) -> TableOutput:
     }
     claim = (
         f"The {len(models)} checkpoints range from {params.label(min(counts))}"
-        f" to {params.label(max(counts))} parameters, in four GPT-2 sizes and "
-        "three Qwen3 sizes with a base and a post-trained model each."
+        f" to {params.label(max(counts))} parameters."
     )
     detail = (
-        "Parameters include the embeddings, the positional table of GPT-2 and "
-        "every norm, and are computed from the stored model configuration. "
-        "Layers are decoder blocks. The Hub repository, the pinned revision "
-        "and the license of each checkpoint are in [[table:assets]]. "
-        "Post-trained Qwen3 checkpoints are used with their chat template and "
-        "thinking disabled; they differ from their base checkpoint in "
-        "post-training data, prompt format and distillation from a larger "
-        "model."
+        "Counts include embeddings and norms; layers are decoder blocks. "
+        "Post-trained checkpoints use the chat template, thinking off."
     )
     return TableOutput(
         claim,

@@ -144,24 +144,6 @@ def test_r5_reads_the_transfer_curves_for_the_reader_and_the_random() -> None:
     assert [round(c.random_at_layer, 3) for c in found if c] == R5_RANDOM
 
 
-def test_r5_in_template_block_uses_the_in_template_summary() -> None:
-    for model in models("r5"):
-        block = reading.in_template(MANIFEST, model)
-        assert block is not None
-        path = run("r5", model)
-        summary = data(path, "summary.json")["in_template"]
-        series = data(path, "curves.json")["series"]
-        mean = npz(path, "curves.npz")["mean"]
-        assert block.layer == summary["best_layer"]
-        assert block.reader == pytest.approx(summary["test_accuracy"])
-        want = mean[series.index("random")][summary["best_layer"] - 1]
-        assert block.random == pytest.approx(want)
-        assert (
-            block.n
-            == data(path, "summary.json")["n_eval_pairs"]["in_template"]["test"]
-        )
-
-
 def test_heldout_sentiment_reads_the_64_pair_sample_size_run() -> None:
     got = [reading.heldout_sentiment(MANIFEST, m) for m in models("p3")]
     assert len(got) == 10

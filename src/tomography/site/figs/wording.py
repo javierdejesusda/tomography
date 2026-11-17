@@ -1,4 +1,4 @@
-"""Figure 5: wording moves a reader, and distant directions mostly still read.
+"""Appendix figure: a sentiment reader scored on other wordings.
 
 Panel (a) has a row per checkpoint: the accuracy of the sentiment reader
 fitted on the paper's wording when it is scored on each of the other 15
@@ -97,7 +97,7 @@ def noise(manifest: Manifest, model: str) -> float:
 
 
 def _name(row: dict[str, Any]) -> str:
-    """Names a wording as the table of wordings prints it."""
+    """Names a wording by its kind and, for a numbered variant, its number."""
     base = str(row["kind"]).replace("_", " ")
     name = row["variant"]
     if "_" not in name or name == row["kind"]:
@@ -469,84 +469,44 @@ def _counts(data: dict[str, list[dict[str, Any]]]) -> dict[str, RoleCount]:
     return stats.per_role(flags)
 
 
-def _below(
-    data: dict[str, list[dict[str, Any]]],
-) -> list[tuple[str, float, float]]:
-    found = []
-    for model, table in data.items():
-        bare = next(r for r in table if r["variant"] == "bare")
-        base = next(r for r in table if r["variant"] == "paper")
-        if bare["to_paper"] <= base["random"]:
-            found.append((model, bare["to_paper"], base["random"]))
-    return found
+def _wordings(data: dict[str, list[dict[str, Any]]]) -> int:
+    """Counts the wordings of a checkpoint, the same on every checkpoint."""
+    (count,) = {len(table) for table in data.values()}
+    return count
 
 
-def _range_text(numbers: dict[str, float], name: str, digits: int = 3) -> str:
-    parts = [
-        f"{numbers[f'{name}_{r}_min']:.{digits}f} to "
-        f"{numbers[f'{name}_{r}_max']:.{digits}f} on {stats.ROLE_NAMES[r]}"
-        for r in stats.ROLES
-        if f"{name}_{r}_min" in numbers
-    ]
-    return stats.join_and(parts)
-
-
-def _claim(
-    numbers: dict[str, float],
-    counts: dict[str, RoleCount],
-    below: list[tuple[str, float, float]],
-    spans: dict[str, RoleCount],
-) -> str:
-    exceptions = "".join(
-        f"; on {paper.display_name(m)} the bare reader reads {read:.3f} "
-        f"against {rand:.3f} for its random direction"
-        for m, read, rand in below
-    )
-    return (
-        "Wording moves a reader by more than the noise of the test pairs on "
-        f"{stats.per_role_text(spans)} (a point comparison of the span "
-        "between the best and the worst wording with the noise expected "
-        "from test pairs alone), and a direction at a large angle from the "
-        "paper direction mostly still reads the paper wording above a "
-        "random direction. The paper wording ranks "
-        f"{_range_text(numbers, 'paper_rank', 0)} of the 16 wordings by "
-        "accuracy. A direction fitted on the bare wording has cosine "
-        f"{_range_text(numbers, 'bare_cos')} with the paper direction. "
-        "It reads the paper wording above a "
-        "random direction by point estimate on "
-        f"{stats.per_role_text(counts)}{exceptions}; "
-        f"it reads at {_range_text(numbers, 'bare_to_paper')}, against "
-        f"{_range_text(numbers, 'bare_random')} for the random direction."
+def _noise_text(numbers: dict[str, float]) -> str:
+    return stats.join_and(
+        [
+            f"{numbers[f'noise_{r}_min']:.3f} to "
+            f"{numbers[f'noise_{r}_max']:.3f}"
+            for r in stats.ROLES
+            if f"noise_{r}_min" in numbers
+        ]
     )
 
 
-def _detail(numbers: dict[str, float]) -> str:
+def _claim(wordings: int) -> str:
     return (
-        "(a) One row per checkpoint, base and post-trained checkpoints "
-        "kept apart. Accuracy of the sentiment reader fitted on the paper's "
-        "wording when it is scored on each of the 15 other wordings: the 15 "
-        "circles of a row sit in three lanes by kind of change (frame "
-        "change, paraphrase or scaffold, concept swap, top to bottom, named "
-        "in the first row); the diamond is the paper wording; the black "
-        "tick is the median of the 16 wordings; the thin grey tick is the "
-        "random direction; the best and the worst wording are named on the "
-        "row unless they fall inside the grey band, with names as in "
-        "[[table:wordings]]. The band is centred on the paper wording and "
-        "its full width is the noise expected from test pairs alone; it is "
-        "conservative, because the wordings share the same test pairs, and "
-        "it excludes fitting noise. The right columns give the paper "
-        "accuracy, the noise, the span between the best and the worst "
-        "wording, the rank of the paper wording among the 16 and a mark "
-        f"where the span exceeds the noise; the span is {_span_text(numbers)}"
-        f", against {_range_text(numbers, 'noise')} expected from "
-        "test-pair noise alone. (b) For each role, each direction fitted on "
-        "another wording, by its cosine with the paper direction and its "
-        "accuracy on the paper wording; the diamond at cosine 1 is the paper "
-        "direction itself, ticks on the x axis mark how well the paper "
-        "direction agrees with itself across seeds, and thin grey lines the "
-        "random direction on the paper wording; colour darkens with size "
-        "within a family. Matrices for every pair of wordings are in "
-        "[[fig:a_wording]]."
+        "A sentiment reader fitted on the wording of the paper, scored on "
+        f"{wordings - 1} other wordings."
+    )
+
+
+def _detail(numbers: dict[str, float], wordings: int) -> str:
+    return (
+        "(a) One row per checkpoint: its accuracy on the paper wording "
+        "(diamond) and on each other wording (circles, in lanes by kind of "
+        f"change), the median of the {wordings} (black tick) and the random "
+        "direction (grey tick); the best and the worst wording are named "
+        "unless they fall inside the grey band. The grey band is the noise "
+        "expected from test pairs alone, conservative because the wordings "
+        "share test pairs, and without fitting noise. The span from worst "
+        f"to best is {_span_text(numbers)}, against noise of "
+        f"{_noise_text(numbers)}; the right columns give both per "
+        "checkpoint. (b) Each direction fitted on another wording, by its "
+        "cosine with the paper direction and its accuracy on the paper "
+        "wording."
     )
 
 
@@ -585,7 +545,8 @@ def build(manifest: Manifest) -> FigureOutput:
         m: y + (BLOCK_EXTRA if m.startswith("qwen3") else 0.0)
         for m, y in shared.model_rows(models).items()
     }
-    numbers = _numbers(data, noise)
+    wordings = _wordings(data)
+    numbers = {**_numbers(data, noise), "wordings": wordings}
     counts = _counts(data)
     spans = _span_counts(data, noise)
     with paper.paper_style():
@@ -619,8 +580,8 @@ def build(manifest: Manifest) -> FigureOutput:
         _legend(fig)
     return FigureOutput(
         fig,
-        _claim(numbers, counts, _below(data), spans),
-        _detail(numbers),
+        _claim(wordings),
+        _detail(numbers, wordings),
         numbers,
         _csv(data),
         {"bare_above": counts, "span_above_noise": spans},

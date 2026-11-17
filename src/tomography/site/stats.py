@@ -214,20 +214,35 @@ def per_role_text(counts: Mapping[str, RoleCount]) -> str:
     return f"{join_and(parts)} checkpoints"
 
 
-def runs_text(counts: Mapping[str, RoleCount]) -> str:
-    """Writes a per-role count of runs as a caption phrase.
+def per_role_tally(counts: Mapping[str, RoleCount]) -> str:
+    """Writes a per-role count as three fractions in the order of `ROLES`.
 
     Args:
         counts: Role to its count.
 
     Returns:
-        Text such as `3 of 3 GPT-2 runs, 3 of 3 Qwen3 base runs and 3 of 6
-        post-trained runs`; roles without runs are omitted.
+        Text such as `0/4, 3/3, 2/3`.
+
+    Raises:
+        ValueError: If a role has no count, because a missing fraction would
+            shift the roles of the others.
     """
-    return join_and(
-        [
-            f"{counts[r].hits} of {counts[r].total} {ROLE_NAMES[r]} runs"
-            for r in ROLES
-            if r in counts and counts[r].total
-        ]
-    )
+    missing = [r for r in ROLES if r not in counts or not counts[r].total]
+    if missing:
+        raise ValueError(f"no count for {join_and(missing)}")
+    return ", ".join(f"{counts[r].hits}/{counts[r].total}" for r in ROLES)
+
+
+def per_role_compact(counts: Mapping[str, RoleCount]) -> str:
+    """Writes a per-role count as a table cell.
+
+    Args:
+        counts: Role to its count.
+
+    Returns:
+        `All` when every role is complete, otherwise the counts in the order
+        of `ROLES`, such as `4/4, 2/3, 2/3`.
+    """
+    if all(counts[r].hits == counts[r].total for r in ROLES):
+        return "All"
+    return per_role_tally(counts)

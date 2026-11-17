@@ -18,11 +18,10 @@ from tomography.site.registry import FigureOutput
 from tomography.viz import paper
 
 WIDTH = 5.5
-HEIGHT = 2.1
+HEIGHT = 2.0
 TEXT = paper.MIN_TEXT
 TITLE_SIZE = 7.5
 EQUATION_SIZE = 7.5
-ELL = chr(0x2113)
 STEER = r"$h'_\ell = h_\ell + c\,r_\ell\,v_\ell$"
 INK = paper.INK
 GREY = paper.ENC["secondary_text"]
@@ -212,13 +211,9 @@ def build(manifest: Manifest) -> FigureOutput:
             _arrow(ax, x0, x1, 0.55)
     claim = "The recipe: find a direction, read with it, and steer with it."
     detail = (
-        "A pair of inputs that differ in the concept is passed through the "
-        "model; a finder turns the residual-stream activations of the last "
-        f"token at layer {ELL} into a unit direction v; a pair is read "
-        "correctly when its positive member projects higher on v, so a "
-        "constant score sits at 0.5; steering adds c r v to the residual "
-        "stream. A random unit direction, oriented on the training pairs "
-        "like the reader, is the control of the readings. The densities in "
-        "the read stage are illustrative."
+        "A finder turns last-token activations of training pairs into a unit "
+        "direction v; a held-out pair is read correctly when its positive "
+        "member projects higher on v; steering adds c r v. The random "
+        "direction u is the control. The densities are illustrative."
     )
     return FigureOutput(fig, claim, detail, {}, "")

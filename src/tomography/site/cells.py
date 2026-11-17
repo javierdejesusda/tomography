@@ -9,8 +9,6 @@ ASCII hyphen.
 from collections.abc import Sequence
 import csv
 import io
-import json
-from pathlib import Path
 from typing import Any
 
 from tomography.viz import axes
@@ -98,43 +96,6 @@ def percent(share: float | None) -> str:
     if share is None:
         return MISSING
     return f"{round(100 * share)}"
-
-
-def read_table(path: Path) -> list[dict[str, Any]]:
-    """Reads a `table.json`-style result file as records.
-
-    Args:
-        path: The file, stored as `{columns, rows}` or as a record list.
-
-    Returns:
-        One dict per row.
-    """
-    payload = json.loads(path.read_text(encoding="utf-8"))["data"]
-    if isinstance(payload, dict):
-        return [
-            dict(zip(payload["columns"], row, strict=True))
-            for row in payload["rows"]
-        ]
-    records: list[dict[str, Any]] = payload
-    return records
-
-
-def check_align(align: str, columns: int) -> str:
-    """Validates the alignment string of a table.
-
-    Args:
-        align: One `l` or `r` per column.
-        columns: Number of columns.
-
-    Returns:
-        The alignment string.
-
-    Raises:
-        ValueError: If it has a wrong length or a letter other than l or r.
-    """
-    if len(align) != columns or set(align) - {"l", "r"}:
-        raise ValueError(f"bad alignment {align!r} for {columns} columns")
-    return align
 
 
 def _plain(cell: Any) -> Any:

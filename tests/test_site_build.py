@@ -28,6 +28,17 @@ STATIC = ROOT / "src/tomography/site/static"
 DASHES = (chr(0x2014), chr(0x2013))
 STUB = runpy.run_path(str(Path(__file__).parent / "_site_stub.py"))
 MISSING = registry.missing()
+PRINT_HIDDEN = (
+    ".data,\n  .pdf,\n  #cite,\n  footer.colophon {\n    display: none;"
+)
+WEB_ONLY = (
+    "this page",
+    "the page",
+    "no analytics",
+    "cite this repository",
+    "data file",
+    "this site",
+)
 
 
 @pytest.fixture(scope="module")
@@ -70,10 +81,20 @@ def _page_text(html: str, drop: tuple[str, ...] = ("svg",)) -> str:
     return re.sub(r"<[^>]+>", " ", html)
 
 
-def test_the_results_commit_is_the_last_commit_of_the_results() -> None:
+def test_the_results_commit_is_the_last_commit_of_the_results_or_findings() -> (
+    None
+):
     sha, built = build_module.results_commit(RESULTS)
     expected = subprocess.run(
-        ["git", "log", "-1", "--format=%h", "--", "results"],
+        [
+            "git",
+            "log",
+            "-1",
+            "--format=%h",
+            "--",
+            "results",
+            "docs/findings.md",
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -83,9 +104,88 @@ def test_the_results_commit_is_the_last_commit_of_the_results() -> None:
     assert re.fullmatch(r"\d{1,2} [A-Z][a-z]+ \d{4}", built)
 
 
+def _slug(heading: str) -> str:
+    kept = re.sub(r"[^\w\- ]", "", heading.strip().lower())
+    return kept.replace(" ", "-")
+
+
+def test_each_findings_link_resolves_at_its_pinned_revision(html: str) -> None:
+    links = re.findall(
+        r'href="[^"]*/blob/([0-9a-f]+)/docs/findings\.md#([^"]+)"', html
+    )
+    assert links
+    for sha, slug in links:
+        shown = subprocess.run(
+            ["git", "show", f"{sha}:docs/findings.md"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        ).stdout
+        headings = re.findall(r"^#+ (.+)$", shown, flags=re.M)
+        assert slug in {_slug(h) for h in headings}, (sha, slug)
+
+
 def test_without_history_the_results_commit_is_empty(tmp_path: Path) -> None:
     (tmp_path / "results").mkdir()
     assert build_module.results_commit(tmp_path / "results") == ("", "")
+
+
+def _git(repo: Path, *args: str, date: str | None = None) -> str:
+    env = dict(os.environ)
+    if date is not None:
+        env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = date
+    return subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=site test",
+            "-c",
+            "user.email=site-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _commit(repo: Path, path: str, day: str) -> str:
+    (repo / path).parent.mkdir(parents=True, exist_ok=True)
+    (repo / path).write_text(day, encoding="utf-8")
+    _git(repo, "add", "-f", path)
+    _git(
+        repo,
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        path,
+        date=f"{day}T12:00:00+00:00",
+    )
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def test_the_results_commit_counts_results_and_findings_in_any_clone(
+    tmp_path: Path,
+) -> None:
+    _git(tmp_path, "init", "-q")
+    _commit(tmp_path, "results/run.json", "2026-10-18")
+    for path, day, later, built in (
+        (build_module.FINDINGS, "2026-10-19", "2026-10-20", "19 October"),
+        ("results/run.json", "2026-10-21", "2026-10-22", "21 October"),
+    ):
+        pinned = _commit(tmp_path, path, day)
+        _commit(tmp_path, "README.md", later)
+        sha, date = build_module.results_commit(tmp_path / "results")
+        assert sha, path
+        assert pinned.startswith(sha), path
+        assert date == f"{built} 2026", path
 
 
 def test_csv_files_hold_plain_text_not_tokens(
@@ -229,6 +329,29 @@ def test_flagged_tables_let_their_printed_row_labels_wrap(css: str) -> None:
     assert "#table-" not in css
 
 
+def test_the_printed_page_is_set_with_the_leading_of_a_paper(
+    css: str,
+) -> None:
+    printed = _print_block(css)
+    assert (
+        "  body {\n    background: #fff;\n    line-height: 1.3;\n  }"
+    ) in printed
+    assert (
+        "  figcaption,\n  .caption,\n  .notes {\n    line-height: 1.25;\n  }"
+    ) in printed
+    assert "line-height: 1.45;" in css.split("@media print")[0]
+
+
+def test_the_printed_overview_figure_fits_under_the_abstract(
+    css: str, html: str
+) -> None:
+    printed = _print_block(css)
+    assert (
+        "  .abstract + figure .fig-scroll svg {\n    width: 88%;\n  }"
+    ) in printed
+    assert '</section><figure id="fig-1">' in html
+
+
 def test_a_printed_figure_shrinks_to_one_page_instead_of_splitting(
     css: str,
 ) -> None:
@@ -316,7 +439,25 @@ def test_print_rules(css: str) -> None:
     assert "thead {\n    display: table-header-group;" in printed
     block = "  figure,\n  pre,\n  tr {\n    break-inside: avoid;\n  }"
     assert block in printed
-    assert ".data,\n  .pdf {\n    display: none;" in printed
+    assert PRINT_HIDDEN in printed
+
+
+def _printed_text(html: str) -> str:
+    """Drops the blocks that the print rules hide, then the markup."""
+    for hidden in (
+        r'<section id="cite">.*?</section>',
+        r'<footer class="colophon">.*?</footer>',
+        r'<span class="data">.*?</span>',
+        r'<p class="pdf">.*?</p>',
+    ):
+        html = re.sub(hidden, " ", html, flags=re.S)
+    return " ".join(_page_text(html).split())
+
+
+def test_the_printed_paper_carries_no_web_only_wording(html: str) -> None:
+    text = _printed_text(html).lower()
+    for phrase in WEB_ONLY:
+        assert phrase not in text, phrase
 
 
 def test_text_colours_are_the_two_allowed_greys(css: str) -> None:
@@ -751,10 +892,10 @@ def test_no_figure_data_file_names_a_column_after_a_baseline(
     assert _header_problems(headers) == []
 
 
-def test_every_appendix_item_is_cited_in_the_text(
+def test_every_appendix_item_is_cited_in_the_main_text(
     html: str,
 ) -> None:
-    body = html
+    body = html[: html.index('id="references"')]
     for kind, ids in (
         (
             "fig",
@@ -793,8 +934,11 @@ def test_clip_ids_are_numbered_in_order_not_hashed() -> None:
     )
 
 
-def test_each_contents_entry_stays_on_one_line(css: str) -> None:
-    assert ".contents a {\n  white-space: nowrap;\n}" in css
+def test_the_stylesheet_has_no_rule_for_the_removed_front_matter(
+    css: str,
+) -> None:
+    assert ".tldr" not in css
+    assert ".contents" not in css
 
 
 def test_wide_tables_break_out_of_the_text_column_on_large_screens(
@@ -811,7 +955,7 @@ def test_the_resolved_abstract_stays_short(
 ) -> None:
     view = page.Page(site[1])
     words = len(view.plain(content.ABSTRACT).split())
-    assert 150 <= words <= 180, words
+    assert 120 <= words <= 165, words
 
 
 def test_grouped_csv_columns_carry_their_group(
@@ -888,7 +1032,7 @@ def _words(fragment: str) -> int:
     return len(_page_text(fragment, ("style", "svg")).split())
 
 
-def test_the_main_prose_is_about_four_thousand_words(html: str) -> None:
+def test_the_main_prose_is_about_two_thousand_words(html: str) -> None:
     main = html[: html.index('id="references"')]
     captions = re.findall(
         r"<(?:figcaption|caption)[^>]*>.*?</(?:figcaption|caption)>",
@@ -897,24 +1041,11 @@ def test_the_main_prose_is_about_four_thousand_words(html: str) -> None:
     )
     tables = re.findall(r"<table.*?</table>", main, flags=re.S)
     prose = _words(main) - sum(map(_words, captions)) - sum(map(_words, tables))
-    assert 3000 <= prose <= 4600, prose
+    assert 1900 <= prose <= 2750, prose
 
 
-def test_the_page_opens_with_the_summary_and_the_overview(html: str) -> None:
-    assert html.index('<p class="tldr">') < html.index('<figure id="fig-1">')
-    assert html.index('<figure id="fig-1">') < html.index('id="abstract"')
-    assert html.index('id="abstract"') < html.index('id="key_findings"')
-
-
-def test_every_count_token_of_the_text_has_at_most_two_homes() -> None:
-    texts = [content.ABSTRACT, content.TLDR]
-    sections = [*content.BODY, *content.APPENDICES, content.KEY_FINDINGS]
-    while sections:
-        section = sections.pop()
-        texts += [*section.paragraphs, *section.after]
-        for head, text in (*section.runin, *section.listed):
-            texts += [head, text]
-        sections += list(section.subsections)
-    tokens = re.findall(r"\[\[(?:count|runs):([^\]]+)\]\]", " ".join(texts))
-    for address in set(tokens):
-        assert tokens.count(address) <= 2, address
+def test_the_page_opens_with_the_abstract_then_the_overview(html: str) -> None:
+    assert html.index('id="abstract"') < html.index('<figure id="fig-1">')
+    assert html.index('<figure id="fig-1">') < html.index('id="introduction"')
+    assert 'class="tldr"' not in html
+    assert 'id="key_findings"' not in html

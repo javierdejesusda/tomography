@@ -212,20 +212,20 @@ def test_the_caption_states_the_counts_and_the_numbers(
 ) -> None:
     text = f"{output.claim} {output.detail}"
     n = output.numbers
-    assert stats.per_role_text(output.counts["tqa_inside"]) in text
-    names = ["text_lo", "text_hi", "chance"]
+    assert output.claim == (
+        "The MC1 accuracy of a TruthfulQA reader lies inside the interval "
+        f"span of two text classifiers ({n['text_lo']:.3f} to "
+        f"{n['text_hi']:.3f}) on "
+        f"{stats.per_role_text(output.counts['tqa_inside'])}."
+    )
     for role in ROLES:
-        names += [f"persona_{role}_min", f"persona_{role}_max"]
-    for name in names:
-        assert f"{n[name]:.3f}" in text, name
-    for role in ROLES:
-        lo, hi = n[f"persona_{role}_min"], n[f"persona_{role}_max"]
-        assert f"{lo:.3f} to {hi:.3f}" in text
+        assert f"{n[f'persona_{role}_min']:.3f}" not in text
+    assert f"{n['chance']:.3f}" not in text
     assert "pooled" not in text
     assert EM not in text
     assert EN not in text
-    assert "[[fig:a_truth_cities]]" in text
-    assert "_" not in text.replace("a_truth_cities", "")
+    assert "[[" not in text
+    assert "_" not in text
 
 
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
@@ -237,18 +237,18 @@ def test_the_claim_does_not_say_negation_breaks_the_reader(
     output: registry.FigureOutput,
 ) -> None:
     assert "breaks" not in output.claim
-    n = _n_questions(MODELS[0])
-    assert f"over {n} questions" in output.detail
+    assert "negat" not in f"{output.claim} {output.detail}".lower()
+    assert output.numbers["n_questions"] == _n_questions(MODELS[0])
 
 
-def test_the_caption_separates_the_classifier_accuracies_from_their_intervals(
+def test_the_caption_gives_the_interval_span_and_leaves_the_accuracies_out(
     output: registry.FigureOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
     n = output.numbers
-    assert "intervals" in output.claim
-    assert f"{n['text_word']:.3f}" in text
-    assert f"{n['text_char']:.3f}" in text
+    assert "interval span" in output.claim
+    assert f"{n['text_word']:.3f}" not in text
+    assert f"{n['text_char']:.3f}" not in text
 
 
 _L = runpy.run_path(str(Path(__file__).with_name("_legends.py")))
@@ -336,7 +336,7 @@ def test_the_layout_is_three_panels_at_the_planned_size(
     width, height = fig.get_size_inches()
     assert width == pytest.approx(paper.FULL_WIDTH)
     assert height == pytest.approx(3.6)
-    assert len(f"{output.claim} {output.detail}".split()) <= 200
+    assert len(f"{output.claim} {output.detail}".split()) <= 90
 
 
 def test_the_two_text_classifiers_are_separate_green_lines_with_own_bands(
@@ -411,7 +411,10 @@ def test_the_difference_panel_draws_reader_minus_words_with_a_zero_line(
     for role in ROLES:
         assert output.numbers[f"diff_excludes_zero_{role}"] == excluded[role]
         assert output.counts["diff_excludes_zero"][role].hits == excluded[role]
-    assert "1.96" in output.detail
+    assert (
+        "(b) The reader minus the better classifier, with a conservative 95 "
+        "percent interval."
+    ) in output.detail
 
 
 def test_no_star_triangle_hexagon_or_cross_is_drawn(
@@ -451,7 +454,15 @@ def test_every_drawn_panel_letter_is_named_in_the_caption_and_vice_versa(
     assert "(d)" not in output.detail
     assert "(e)" not in output.detail
     assert "plus)" not in output.detail
-    assert "dark grey circle" in output.detail
+    assert "honesty persona reader (dark grey; open: post-trained)" in (
+        output.detail
+    )
+    assert "the green band is the classifiers and the dotted line chance" in (
+        output.detail
+    )
+    assert output.detail.endswith(
+        "(c) The answer log-probability of the model."
+    )
     order = [output.detail.index(f"({x})") for x in "abc"]
     assert order == sorted(order)
 

@@ -27,11 +27,8 @@ OWN = {
     "approximate": DIRECTION | RANDOM,
     "base_post": DIRECTION,
     "a_knowledge_matrix": DIRECTION | TEXT | RANDOM,
-    "a_dose_runs": DIRECTION,
-    "a_dose_types": DIRECTION,
     "a_knowledge_geometry": DIRECTION,
     "a_knowledge_projections": DIRECTION | RANDOM,
-    "a_links": DIRECTION,
 }
 MEASURES: set[str] = {
     m for v in M.values() for m in ((v,) if isinstance(v, str) else v)
@@ -80,15 +77,7 @@ def test_known_and_unknown_questions_are_a_set_pair_not_a_measure() -> None:
     assert sets["fictional"] != sets["known"]
 
 
-@pytest.mark.parametrize(
-    "key",
-    [
-        "knowledge_steering",
-        "a_dose_runs",
-        "a_dose_types",
-        "a_knowledge_geometry",
-    ],
-)
+@pytest.mark.parametrize("key", ["knowledge_steering", "a_knowledge_geometry"])
 def test_known_questions_use_the_question_set_marker(
     built: dict[str, registry.FigureOutput], key: str
 ) -> None:

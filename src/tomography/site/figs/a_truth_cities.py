@@ -17,7 +17,6 @@ from tomography.site import stats
 from tomography.site.figs import truth
 from tomography.site.manifest import Manifest
 from tomography.site.registry import FigureOutput
-from tomography.site.registry import RoleCount
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
@@ -127,37 +126,24 @@ def _legend(fig: Figure) -> None:
     )
 
 
-def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
-    return (
-        "Statements with negation pull a truth reader below chance on some "
-        "checkpoints: the accuracy on a negated set has a 95 percent Wilson "
-        "interval wholly below 0.5 for at least one set on "
-        f"{stats.per_role_text(counts['neg_below_half'])}."
-    )
+CLAIM = (
+    "Accuracy of the truth reader of [[fig:reading]], at the layer chosen on "
+    "validation, on statements about cities (a) and on Spanish to English "
+    "translations (b)."
+)
 
 
-def _detail(
-    numbers: dict[str, float], counts: dict[str, dict[str, RoleCount]]
-) -> str:
-    gpt2 = counts["neg_below_half"]["gpt2"].total
+def _detail(numbers: dict[str, float]) -> str:
     return (
-        "Accuracy of the truth reader, at the layer chosen on validation, on "
-        "statements about cities (a) and on Spanish to English translations "
-        "(b): a dumbbell from the affirmative set (diamond) to its negation "
-        "(circle, filled where the Wilson interval of the negated set lies "
-        "wholly below 0.5), with the accuracy of a random direction on the "
-        "negated set as a grey tick and the region below chance shaded. "
-        "Whiskers are not drawn; the criterion uses 95 percent Wilson "
-        "intervals over the evaluation pairs of each set. GPT-2 reads "
+        "Each dumbbell joins the affirmative set (diamond) to its negation "
+        "(circle, filled where the 95 percent Wilson interval of the negated "
+        "set lies wholly below 0.5). The grey tick is a random direction on "
+        "the negated set, and the region below chance is shaded. GPT-2 reads "
         "affirmative cities at only "
         f"{numbers['gpt2_cities_min']:.2f} to {numbers['gpt2_cities_max']:.2f}"
         f", against {numbers['gpt2_cities_random_min']:.2f} to "
         f"{numbers['gpt2_cities_random_max']:.2f} for its random direction, "
-        "so small excursions there are not inversions of a strong reader. "
-        "On negated cities the reader falls below the random direction by "
-        f"point estimate on {int(numbers['negcities_below_random_gpt2'])} "
-        f"of {gpt2} GPT-2 sizes. The truth reader on TruthfulQA is in "
-        "[[fig:truth]]."
+        "so a small drop there is not the inversion of a strong reader."
     )
 
 
@@ -211,8 +197,8 @@ def build(manifest: Manifest) -> FigureOutput:
         _legend(fig)
     return FigureOutput(
         fig,
-        _claim(counts),
-        _detail(numbers, counts),
+        CLAIM,
+        _detail(numbers),
         numbers,
         _csv(models, data),
         counts,

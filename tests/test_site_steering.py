@@ -206,36 +206,56 @@ def test_caption_is_the_template_filled_from_the_files(
         m: _fluent(_table(m), 0.3) or _fluent(_table(m), -0.3)
         for m in _models()
     }
-    held = stats.per_role_text(stats.per_role(flags01))
+    assert output.counts["fluent01"] == stats.per_role(flags01)
     assert not any(flags03.values())
-    fails = stats.per_role_text(stats.per_role(flags03))
+    assert output.counts["fluent03"] == stats.per_role(flags03)
     assert sum(len(v) for v in by_role.values()) == len(_models())
+    for count in output.counts["moves01"].values():
+        assert count.hits * 2 > count.total
     config = json.loads(
         (_R["run"]("c1", "gpt2") / "config.json").read_text(encoding="utf-8")
     )
-    n_neutral = int(config["n_neutral"])
-    caption = f"{output.claim} {output.detail}"
+    assert output.numbers["n_neutral"] == int(config["n_neutral"])
     assert output.claim == (
-        "Steering moves the judged sentiment, less on post-trained checkpoints."
+        "At relative coefficient 0.1 steering moves judged sentiment on most "
+        "checkpoints; at 0.3 none keeps the fluency rule."
     )
-    assert (
-        f"Perplexity ratio, steered to unsteered model, on {n_neutral} "
-        "held-out WikiText-103 passages"
-    ) in caption
-    assert f"The fluency rule holds at both signs of 0.1 on {held}" in caption
-    assert f"and at 0.3 or {MINUS}0.3 on {fails}." in caption
-    assert "no random-direction arm" in caption
-    assert "the utility steering run uses random directions" in caption
-    assert "finder comparison" not in caption
-    assert "range over the 3 steering vectors" in caption
-    assert output.numbers["n_neutral"] == n_neutral
+    assert output.detail == (
+        "(a) Mean judged sentiment per checkpoint; band: range over the 3 "
+        "steering vectors; bars at left: score under a negative or positive "
+        "instruction. (b) Neutral-text perplexity ratio, steered to "
+        "unsteered model. (c) Distinct-1 of the completions. Filled markers "
+        "keep the rule, whose limits are the horizontal lines; dashed "
+        "segments touch an open marker. A checkpoint moves when all 3 "
+        "vectors pass the unsteered score at both signs of 0.1 on two judges."
+    )
+
+
+def test_the_claim_writes_the_counts_when_they_are_not_most_or_none(
+    output: registry.FigureOutput,
+) -> None:
+    few = {
+        "gpt2": stats.RoleCount(4, 4),
+        "base": stats.RoleCount(3, 3),
+        "post": stats.RoleCount(1, 3),
+    }
+    claim = steering._claim({**output.counts, "moves01": few})
+    assert "most checkpoints" not in claim
+    assert f"moves judged sentiment on {stats.per_role_text(few)};" in claim
+    assert claim.endswith("at 0.3 none keeps the fluency rule.")
+    claim = steering._claim({**output.counts, "fluent03": few})
+    assert "none keeps" not in claim
+    assert "moves judged sentiment on most checkpoints;" in claim
+    assert claim.endswith(
+        f"at 0.3 the fluency rule is kept on {stats.per_role_text(few)}."
+    )
 
 
 def test_the_perplexity_is_not_called_the_perplexity_of_the_completions(
     output: registry.FigureOutput,
 ) -> None:
     assert "unsteered text" not in output.detail
-    assert "not of the completions" in output.detail
+    assert "Neutral-text perplexity ratio" in output.detail
 
 
 def test_negative_numbers_use_the_true_minus(
@@ -280,21 +300,26 @@ def test_the_layout_is_frozen_so_two_builds_place_every_axes_alike() -> None:
     ]
 
 
-def test_the_fluency_rule_in_the_caption_comes_from_the_constants(
+def test_the_limits_of_the_fluency_rule_come_from_the_constants(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(stats, "FLUENT_MAX_RATIO", 1.25)
     monkeypatch.setattr(stats, "FLUENT_MIN_DISTINCT", 0.2)
-    detail = registry.build_figure(SPEC, Manifest(RESULTS)).detail
-    assert "(perplexity ratio at most 1.25, distinct-1 at least 0.2)" in detail
+    built = registry.build_figure(SPEC, Manifest(RESULTS))
+    grid = _grid(built)
+    for row, value in ((1, 1.25), (2, 0.2)):
+        for ax in grid[row]:
+            (ref,) = [ln for ln in ax.lines if ln.get_gid() == "limit"]
+            assert list(ref.get_ydata()) == [value, value]
+    assert "1.25" not in f"{built.claim} {built.detail}"
 
 
-def test_cross_references_are_tokens_and_not_literal_numbers(
+def test_the_caption_cites_no_other_item(
     output: registry.FigureOutput,
 ) -> None:
-    assert "[[fig:teaser]]" in output.detail
-    assert "[[table:steering]]" in output.detail
-    assert not re.search(r"\b(Figure|Table) \d", output.detail)
+    caption = f"{output.claim} {output.detail}"
+    assert "[[" not in caption
+    assert not re.search(r"\b(Figure|Table) \d", caption)
 
 
 def _moves(rows: list[dict[str, Any]], column: str) -> bool:
@@ -335,11 +360,12 @@ def test_moves_counts_need_every_vector_at_both_signs_on_both_judges(
 def test_caption_states_the_moves_rule_and_the_fluency_inputs(
     output: registry.FigureOutput,
 ) -> None:
-    moves = stats.per_role_text(output.counts["moves01"])
-    assert f"two sentiment judges: {moves}." in output.detail
-    assert "all 3 steering vectors" in output.detail
-    assert "judge agreement" in output.detail
-    assert "not of the completions" in output.detail
+    assert output.detail.endswith(
+        "A checkpoint moves when all 3 vectors pass the unsteered score at "
+        "both signs of 0.1 on two judges."
+    )
+    assert "Neutral-text perplexity ratio" in output.detail
+    assert "Distinct-1 of the completions" in output.detail
 
 
 ORDER = ("gpt2", "base", "post")
@@ -612,14 +638,14 @@ def test_the_caption_keys_the_drawing_and_has_no_heat_map_panel(
     for letter in "abc":
         assert f"({letter}" in detail
     assert "(d)" not in detail
-    assert "[[table:steering]]" in detail
 
 
-def test_the_caption_has_at_most_200_words_and_leads_with_the_conclusion(
+def test_the_caption_has_at_most_90_words_and_leads_with_the_conclusion(
     output: registry.FigureOutput,
 ) -> None:
-    assert len(f"{output.claim} {output.detail}".split()) <= 200
-    assert output.detail.startswith("A checkpoint moves when all 3 steering")
+    assert len(f"{output.claim} {output.detail}".split()) <= 90
+    assert output.claim.startswith("At relative coefficient 0.1 steering")
+    assert output.detail.startswith("(a) Mean judged sentiment")
 
 
 def test_the_key_and_the_limit_labels_read_at_the_tick_size(

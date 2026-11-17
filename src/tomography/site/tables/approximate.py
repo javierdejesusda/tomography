@@ -1,4 +1,4 @@
-"""Table 8: Approximate answers.
+"""Appendix table: Approximate answers.
 
 One row per checkpoint: how often the greedy few-shot answer is written as a
 range on range items, exact items and the heights of 120 people, the AUROC on
@@ -8,6 +8,7 @@ reader places the people between the test buildings and the breeds against
 the range of its random control.
 """
 
+import json
 from typing import Any
 
 from tomography.site import cells as _cells
@@ -43,6 +44,19 @@ COLUMNS = [
     "Random band",
     "Inside band",
 ]
+CLAIM = "The values behind [[fig:approximate]]."
+DETAIL = (
+    "Left: percentage of greedy few-shot answers written as a range on range "
+    "items, exact items and the heights of {people} people. Reader: AUROC "
+    "on held-out durations of a range reader fitted on heights and "
+    "wingspans with the concept prompt, beside the mean of {draws} random "
+    "directions oriented on the training labels and its difference from a "
+    "classifier on the question words ({words}), with the half-width of its "
+    "interval [[cite:hanley1982meaning]] and an asterisk where it excludes "
+    "zero. Position: the people between the test buildings (0) and the "
+    "breeds (1), beside the range of the control's position over its {sets} "
+    "training sets."
+)
 
 
 def _in_cell(row: dict[str, Any]) -> bool:
@@ -95,6 +109,11 @@ def build(manifest: Manifest) -> TableOutput:
     layer_one: dict[str, bool] = {}
     inside: dict[str, bool] = {}
     words_value = 0.0
+    sizes: dict[str, set[int]] = {
+        "people": set(),
+        "seeds": set(),
+        "sets": set(),
+    }
     for model in models:
         run = manifest.run("p10b", model)
         assert run is not None
@@ -127,6 +146,10 @@ def build(manifest: Manifest) -> TableOutput:
             if r["method"] == "logistic" and r["train_set"] == TRAIN
         ]
         band = [r["position"] for r in people if r["method"] == "random"]
+        config = json.loads((run / "config.json").read_text(encoding="utf-8"))
+        sizes["people"].update(int(r["n_people"]) for r in people)
+        sizes["seeds"].add(int(config["n_seeds"]))
+        sizes["sets"].add(len(band))
         low, high = min(band), max(band)
         inside[model] = low <= position <= high
         rows.append(
@@ -141,35 +164,16 @@ def build(manifest: Manifest) -> TableOutput:
                 "yes" if inside[model] else "no",
             ]
         )
-    claim = (
-        "Qwen3 writes a range on [[num:fig:approximate.range_base_min]] to "
-        "[[num:fig:approximate.range_base_max]] percent of range items "
-        "(base) and on [[num:fig:approximate.range_post_min]] to "
-        "[[num:fig:approximate.range_post_max]] percent (post-trained); the "
-        "highest share on exact items is "
-        "[[num:fig:approximate.exact_base_max]] percent (base) and "
-        "[[num:fig:approximate.exact_post_max]] percent (post-trained), but "
-        "the range reader is above a classifier on the question words, with "
-        "the interval of the difference above zero, on "
-        "[[count:table:approximate.above_words]], is above the 95 percent "
-        "interval of its random control on "
-        "[[count:fig:approximate.reader_above_random]]; the control falls "
-        "below 0.5 on [[count:fig:approximate.control_below_half]] and "
-        "above 0.95 on [[count:fig:approximate.control_above_95]]."
+    (n_people,), (n_seeds,), (n_sets,) = (
+        sizes["people"],
+        sizes["seeds"],
+        sizes["sets"],
     )
-    detail = (
-        "The three leftmost columns give the percentage of greedy answers "
-        "written as a range on range items, exact items and the heights of "
-        "120 people. Reader is the AUROC on held-out durations of a range "
-        "reader fitted on heights and wingspans with the concept prompt, "
-        "next to its random control (the mean score of 5 random directions "
-        "oriented on the training labels) and its difference from a "
-        f"classifier on the question words ({_cells.num(words_value)}), with "
-        "the Hanley and McNeil half-width and an asterisk where it excludes "
-        "zero. Position places the 120 people between the test buildings (0) "
-        "and the breeds (1); the random band is the range of the random "
-        "control's position over its 7 training sets, and the last column "
-        "says whether the reader's position lies inside it."
+    detail = DETAIL.format(
+        people=n_people,
+        draws=n_seeds,
+        words=_cells.num(words_value),
+        sets=n_sets,
     )
     numbers = {
         "text_word": words_value,
@@ -182,7 +186,7 @@ def build(manifest: Manifest) -> TableOutput:
         "layer_one": stats.per_role(layer_one),
     }
     return TableOutput(
-        claim,
+        CLAIM,
         detail,
         COLUMNS,
         rows,
@@ -192,4 +196,5 @@ def build(manifest: Manifest) -> TableOutput:
         groups=GROUPS,
         row_groups=_rows.role_groups(models),
         counts=counts,
+        compact_print=True,
     )

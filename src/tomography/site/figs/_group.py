@@ -1,4 +1,4 @@
-"""Drawing and bookkeeping shared by Figures 5 to 9.
+"""Drawing and bookkeeping shared by the per-checkpoint figures.
 
 Lines connect checkpoints only within one family and one role (GPT-2, Qwen3
 base, Qwen3 post-trained), ordered by parameter count, so no line crosses

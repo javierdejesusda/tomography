@@ -121,7 +121,7 @@ def test_the_shown_checkpoints_are_one_per_role() -> None:
     assert set(SHOWN) <= set(_with_panel())
 
 
-def test_the_claim_quotes_the_separation_of_each_view(
+def test_the_numbers_hold_the_separation_of_each_view(
     output: registry.FigureOutput,
 ) -> None:
     reader, early, words = (
@@ -145,14 +145,9 @@ def test_the_claim_quotes_the_separation_of_each_view(
     assert held == len(SHOWN)
     assert output.numbers["last_at_least_reader"] == held
     assert output.claim == (
-        f"On {held} of the {len(SHOWN)} checkpoints shown, the better of the "
-        "two leading principal components of the hidden states separates "
-        "known from unknown entity questions at least as well at the last "
-        "layer as at the layer of the reader, with an AUROC of "
-        f"{last[0]:.2f} to {last[1]:.2f} against {reader[0]:.2f} to "
-        f"{reader[1]:.2f}; layer 1 gives {early[0]:.2f} to {early[1]:.2f} "
-        "and the better of two components of the words alone "
-        f"{words[0]:.2f} to {words[1]:.2f}."
+        "Hidden states behind the entity readers for one checkpoint per "
+        "role (GPT-2 XL, Qwen3-1.7B-Base and Qwen3-1.7B), beside two "
+        "controls."
     )
     assert reader[0] > words[1]
 
@@ -350,27 +345,28 @@ def test_the_caption_names_the_views_the_controls_and_the_cap(
     output: registry.FigureOutput,
 ) -> None:
     detail = output.detail
-    for name in ("GPT-2 XL", "Qwen3-1.7B-Base", "Qwen3-1.7B"):
-        assert name in detail
     for phrase in (
-        "principal components",
-        "an early control",
-        "a second control",
-        "latent semantic analysis",
-        "Layer 0 is not drawn",
-        f"at most {MAX_DRAWN} questions",
-        "PopQA",
-        "better",
-        "are test questions only",
-        f"at most {int(output.numbers['per_side'])} per side",
-        "no training question enters a view",
-        "(triangle)",
-        "(circle)",
-        "(star)",
-        "folded, so it is 0.5 or more whichever class lies higher",
-        stats.per_role_text(output.counts["with_views"]),
+        "Columns (a) to (c) place test questions of the two entity "
+        "contrasts on the two leading principal components of the hidden "
+        "states at the last prompt token: at layer 1 (an early control), at "
+        "the layer of the knowledge reader and at the last layer.",
+        "Column (d), a control with no model, places them by the two "
+        "leading components of the TF-IDF weights of their words.",
+        f"A panel draws at most {MAX_DRAWN} questions of each of the three "
+        "groups of the legend.",
+        "Its number is the AUROC of known against unknown questions along "
+        "the better of its two axes, folded to be 0.5 or more.",
+        "Axis scales differ between panels.",
     ):
         assert phrase in detail, phrase
+    assert detail.endswith(
+        "A separation that the words alone also show does not need the "
+        "hidden states."
+    )
+    assert output.numbers["per_group"] == MAX_DRAWN
+    text = f"{output.claim} {detail}"
+    assert len(text.split()) <= 170, len(text.split())
+    assert "[[" not in text
     text = f"{output.claim} {detail}"
     assert chr(0x2014) not in text
     assert chr(0x2013) not in text

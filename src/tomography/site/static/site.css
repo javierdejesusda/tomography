@@ -170,10 +170,6 @@ h1 {
   }
 }
 
-.tldr {
-  margin: 1.2em 0 0;
-}
-
 .abstract h2 {
   margin: 1.6em 0 0.4em;
   font-size: 1.2em;
@@ -210,16 +206,6 @@ ol.contributions {
 
 ol.contributions li {
   margin: 0.3em 0;
-}
-
-.contents {
-  margin: 1.2em 0 0;
-  font-size: 0.9em;
-  text-align: center;
-}
-
-.contents a {
-  white-space: nowrap;
 }
 
 figure {
@@ -452,6 +438,17 @@ footer.colophon {
 
   body {
     background: #fff;
+    line-height: 1.3;
+  }
+
+  figcaption,
+  .caption,
+  .notes {
+    line-height: 1.25;
+  }
+
+  .abstract + figure .fig-scroll svg {
+    width: 88%;
   }
 
   main {
@@ -541,7 +538,9 @@ footer.colophon {
   }
 
   .data,
-  .pdf {
+  .pdf,
+  #cite,
+  footer.colophon {
     display: none;
   }
 }

@@ -1,4 +1,4 @@
-"""Figure 4: how well a concept is read, against the checkpoint size.
+"""Figure 3: how well a concept is read, against the checkpoint size.
 
 One panel per concept (sentiment, utility, morality, truth). Each shows the
 held-out accuracy at the layer read against the checkpoint size, with a 95
@@ -15,7 +15,6 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 import numpy as np
 
-from tomography.site import cells
 from tomography.site import params
 from tomography.site import reading
 from tomography.site import stats
@@ -205,49 +204,6 @@ def _trend(cells: dict[str, Cell]) -> tuple[float, float, float]:
     )
 
 
-def _slope_text(numbers: dict[str, float], names: dict[str, str]) -> str:
-    rising, falling, flat = [], [], []
-    for concept in names:
-        s = numbers[f"slope_{concept}"]
-        lo = numbers[f"slope_{concept}_lo"]
-        hi = numbers[f"slope_{concept}_hi"]
-        if lo > 0:
-            rising.append(
-                f"{cells.num(s)} for {concept} "
-                f"({cells.num(lo)} to {cells.num(hi)})"
-            )
-        elif hi < 0:
-            falling.append(
-                f"{cells.num(-s)} for {concept} "
-                f"(slope {cells.num(s)}, {cells.num(lo)} to "
-                f"{cells.num(hi)})"
-            )
-        else:
-            flat.append(
-                f"the {concept} slope ({cells.num(s)}, {cells.num(lo)} to "
-                f"{cells.num(hi)})"
-            )
-    parts = []
-    sizes = int(numbers["n_gpt2"])
-    if rising:
-        parts.append(
-            f"across the {sizes} GPT-2 sizes accuracy rises by "
-            + " and ".join(rising)
-            + " per tenfold in parameters (95 percent intervals)"
-        )
-    if falling:
-        parts.append(
-            f"across the {sizes} GPT-2 sizes accuracy falls by "
-            + " and ".join(falling)
-            + " per tenfold in parameters (95 percent intervals)"
-        )
-    if flat:
-        verb = "has an interval" if len(flat) == 1 else "have intervals"
-        include = "includes" if len(flat) == 1 else "include"
-        parts.append(" and ".join(flat) + f" {verb} that {include} zero")
-    return "; ".join(parts)
-
-
 def _numbers(
     found: dict[str, dict[str, Cell]],
     trends: dict[str, tuple[float, float, float]],
@@ -300,9 +256,25 @@ def _list(items: list[str]) -> str:
     return ", ".join(items[:-1]) + " and " + items[-1]
 
 
+def _complete(count: dict[str, RoleCount], roles: tuple[str, ...]) -> bool:
+    return all(count[r].hits == count[r].total for r in roles)
+
+
 def _claim(
     counts: dict[str, dict[str, RoleCount]], names: dict[str, str]
 ) -> str:
+    every = [c for c in names if c != "truth"]
+    truth = counts["truth"]
+    if (
+        all(_complete(counts[c], stats.ROLES) for c in every)
+        and truth["gpt2"].hits == 0
+        and _complete(truth, ("base", "post"))
+    ):
+        return (
+            f"A logistic direction reads {_list(every)} above its random "
+            "direction on every checkpoint and truth on Qwen3 only, by "
+            "interval."
+        )
     groups: dict[str, list[str]] = {}
     for concept in names:
         groups.setdefault(stats.per_role_text(counts[concept]), []).append(
@@ -330,26 +302,18 @@ def _csv(found: dict[str, dict[str, Cell]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _detail(
-    found: dict[str, dict[str, Cell]],
-    numbers: dict[str, float],
-    names: dict[str, str],
-) -> str:
+def _detail(found: dict[str, dict[str, Cell]], names: dict[str, str]) -> str:
     sizes = {c: next(iter(found[c].values())).at.n for c in names}
     return (
-        "Held-out accuracy at the layer read against checkpoint size "
-        "(S to XL: GPT-2; 0.6B to 4B: Qwen3; filled for GPT-2 and base, "
-        "open and shifted right for post-trained), with 95 "
-        f"percent Wilson intervals for the test pairs ({sizes['sentiment']:,} "
-        f"sentiment, {sizes['utility']:,} utility, {sizes['morality']:,} "
-        f"morality and {sizes['truth']:,} truth pairs) and the random "
-        "direction at the same layer as a grey tick; the sentiment dots "
-        "come from the sample-size run at 64 training pairs, read at its "
-        "own layer. "
-        "GPT-2 slopes (not drawn) are least-squares over four sizes against "
-        "log parameters, with a t interval: "
-        + _slope_text(numbers, names)
-        + ". Onsets: [[fig:a_reading_curves]]."
+        "Dots are held-out pair accuracy at the layer read, by checkpoint "
+        "size (S to XL: GPT-2; 0.6B to 4B: Qwen3; filled: GPT-2 and Qwen3 "
+        "base; open, shifted right: post-trained), with 95 percent Wilson "
+        f"intervals over the test pairs ({sizes['sentiment']:,} sentiment, "
+        f"{sizes['utility']:,} utility, {sizes['morality']:,} morality, "
+        f"{sizes['truth']:,} truth). Grey ticks are the random direction at "
+        "the same layer; [[table:reading]], not a whisker, tests a dot "
+        "against its tick. Sentiment comes from the run with a separate test "
+        "split."
     )
 
 
@@ -429,7 +393,7 @@ def build(manifest: Manifest) -> FigureOutput:
     return FigureOutput(
         fig,
         _claim(counts, names),
-        _detail(found, numbers, names),
+        _detail(found, names),
         numbers,
         _csv(found),
         counts,

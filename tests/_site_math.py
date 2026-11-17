@@ -25,14 +25,6 @@ def diff(p1: float, p2: float, n1: int, n2: int | None = None) -> tuple:
     return p1 - p2, p1 - p2 - half, p1 - p2 + half
 
 
-def wilson(p: float, n: int) -> tuple[float, float]:
-    """Wilson score interval."""
-    denom = 1 + Z * Z / n
-    centre = (p + Z * Z / (2 * n)) / denom
-    half = Z * math.sqrt(p * (1 - p) / n + Z * Z / (4 * n * n)) / denom
-    return max(0.0, centre - half), min(1.0, centre + half)
-
-
 def excludes_zero(lo: float, hi: float) -> bool:
     """Whether an interval lies on one side of zero."""
     return lo > 0 or hi < 0

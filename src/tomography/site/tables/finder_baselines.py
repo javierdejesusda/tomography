@@ -35,12 +35,6 @@ KIND_NAMES = {
     "baseline": "Published baselines",
     "control": "Controls",
 }
-CITES = {
-    "mean_diff": "marks2024geometry",
-    "whitened_mean_diff": "marks2024geometry",
-    "logistic": "alain2016understanding",
-    "ccs": "burns2023discovering",
-}
 RANDOM = "random"
 
 
@@ -160,38 +154,24 @@ def build(manifest: Manifest) -> TableOutput:
         (name, sum(kinds[m] == key for m in methods), False)
         for key, name in KIND_NAMES.items()
     ]
-    cited = stats.join_and(
-        [f"{params.display(m)} [[cite:{CITES[m]}]]" for m in baselines]
-    )
     claim = (
-        "The test accuracy of the finder of the paper beside four "
-        "published finders fitted on the same pairs and four controls, on "
-        "sentiment and on three sets of true and false statements."
+        "Test accuracy of the finder of the paper, four published finders "
+        "and four controls on sentiment and three sets of true and false "
+        f"statements: the mean over {seeds} training sets of {pairs} pairs "
+        "at the layer each series chose on validation pairs."
     )
     detail = (
-        "The finder of the paper is the PCA of differences of Zou et al. "
-        "[[cite:zou2025representationengineeringtopdownapproach]]. Every "
-        "value is the accuracy on the test pairs of the dataset, a "
-        "statement with its negation for the three truth sets and texts of "
-        f"SST-2 for sentiment, as the mean over {seeds} training sets of "
-        f"{pairs} pairs, at the layer the series chose on the validation "
-        "pairs. The Wilson 95 percent interval of a value over the test "
-        f"pairs reaches at most {cells.num(reach)} from it, and an "
-        "asterisk marks a value above the finder of the paper and a dagger "
-        "a value below it, where the conservative 95 percent interval of "
-        "their difference over those pairs excludes zero. The "
-        f"published baselines are {cited}. The whitened form shrinks the "
-        "covariance with the Ledoit-Wolf weight where its reference "
-        "inverts it; the contrast-consistent search keeps the best of 10 "
-        "restarts, is oriented on the training labels where its reference "
-        "uses the test labels, and on sentiment reads one prompt of its "
-        "own where its reference averages several. The controls are a "
-        "random direction, oriented on the training labels like the finder "
-        "of the paper, the finder of the paper scored against labels "
-        "shuffled inside each pair, and classifiers on the words and on "
-        "the characters of the texts, which read no model and are given "
-        "once in the note under the table. The runs cover "
-        f"{stats.per_role_text(counts['with_run'])}."
+        "An asterisk (dagger) marks a value above (below) the finder of the "
+        "paper by the conservative 95 percent interval of their difference. "
+        "Unlike their references, the whitened mass-mean probe "
+        "[[cite:marks2024geometry]] shrinks the covariance, and "
+        "contrast-consistent search [[cite:burns2023discovering]] takes its "
+        "sign from the training labels and reads one prompt on sentiment. "
+        "The controls are a random direction, the finder scored against "
+        "labels shuffled inside each pair, and the words alone (note under "
+        "the table). The finder is above the random direction on at least "
+        "one dataset, by that interval, on "
+        f"{stats.per_role_text(counts['finder_above_random'])}."
     )
     return TableOutput(
         claim,
@@ -201,8 +181,7 @@ def build(manifest: Manifest) -> TableOutput:
         "ll" + "r" * len(methods),
         [
             "Words and Characters read no model, so they give the same "
-            "accuracy on every checkpoint, and the data file holds them on "
-            "every row: "
+            "accuracy on every checkpoint and are listed here once: "
             + stats.join_and(
                 [
                     f"{dataset} {word} and {char}"

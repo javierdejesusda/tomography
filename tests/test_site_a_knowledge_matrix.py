@@ -1,6 +1,7 @@
 import csv
 import io
 from pathlib import Path
+import re
 import runpy
 from typing import Any
 
@@ -10,6 +11,7 @@ import numpy as np
 import pytest
 
 from tomography.site import registry
+from tomography.site.figs import a_knowledge_matrix
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -65,12 +67,21 @@ def test_the_close_type_count_is_computed_from_the_files(
     assert len(close) == 9
     assert output.numbers["close"] == len(close)
     assert output.numbers["types"] == len(names)
+    assert output.numbers["slack"] == SLACK == a_knowledge_matrix.SLACK
     assert output.claim == (
-        "A classifier on the words or characters alone comes within "
-        f"{SLACK:.3f} of the reader or beats it on {len(close)} of "
-        f"{len(names)} question types."
+        "The knowledge reader of Qwen3-4B-Base by question type, beside the "
+        "words alone."
     )
-    assert "Qwen3-4B-Base" in output.detail
+
+
+def test_the_caption_has_at_most_170_words_and_cites_no_item(
+    output: registry.FigureOutput,
+) -> None:
+    caption = f"{output.claim} {output.detail}"
+    assert len(caption.split()) <= 170
+    assert "[[" not in caption
+    assert not re.search(r"Figure A?\d", caption)
+    assert not re.search(r"Figure A?\d", a_knowledge_matrix.__doc__ or "")
 
 
 def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
@@ -218,12 +229,20 @@ def test_the_caption_says_what_the_band_and_the_marks_mean(
     output: registry.FigureOutput,
 ) -> None:
     detail = output.detail
-    assert "0.020" in detail
-    assert "best text classifier" in detail
-    assert "filled" in detail
-    assert "grey bar" in detail
-    assert "grey tick" not in detail
-    assert "(c)" in detail
+    assert f"the band marks {SLACK:.3f} either way." in detail
+    assert (
+        "(b) The reader on its own type minus the better of the word and "
+        "the character classifier;"
+    ) in detail
+    assert (
+        "on the diagonal (outlined in white) and in cells below "
+        f"{a_knowledge_matrix.NUMBER_BELOW:g}."
+    ) in detail
+    assert "(c) AUROC of a random direction on the same type." in detail
+    assert detail.endswith(
+        "A high column in (a) does not show that the direction reads "
+        "knowledge where the words alone come this close."
+    )
 
 
 def test_the_x_labels_of_b_and_c_are_separate_two_line_labels(

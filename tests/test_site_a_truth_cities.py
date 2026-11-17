@@ -159,11 +159,12 @@ def test_no_legend_symbol_means_two_things_and_no_role_key_is_drawn(
     assert "GPT-2 and base" not in labels
 
 
-def test_the_below_random_count_is_labelled_a_point_estimate(
+def test_the_below_random_count_stays_out_of_the_caption(
     output: registry.FigureOutput,
 ) -> None:
-    text = output.detail
-    assert "below the random direction by point estimate on" in text
+    text = f"{output.claim} {output.detail}"
+    assert "by point estimate" not in text
+    assert "The grey tick is a random direction on the negated set" in text
 
 
 def _ax(output: registry.FigureOutput, gid: str) -> Any:
@@ -215,8 +216,13 @@ def test_the_caption_notes_the_weak_gpt2_cities_reader_and_the_criterion(
     n = output.numbers
     low = f"{n['gpt2_cities_min']:.2f} to {n['gpt2_cities_max']:.2f}"
     assert low in output.detail
-    assert "not inversions of a strong reader" in output.detail
-    assert "wholly below 0.5" in output.detail
+    assert output.detail.endswith(
+        "so a small drop there is not the inversion of a strong reader."
+    )
+    assert (
+        "(circle, filled where the 95 percent Wilson interval of the negated "
+        "set lies wholly below 0.5)"
+    ) in output.detail
 
 
 def test_the_gpt2_cities_range_has_its_random_direction_beside_it(
@@ -257,7 +263,12 @@ def test_the_claim_counts_the_checkpoints_below_chance_per_role(
     counts = output.counts["neg_below_half"]
     assert [counts[r].hits for r in ROLES] == [3, 0, 2]
     assert [counts[r].total for r in ROLES] == [4, 3, 3]
-    assert stats.per_role_text(counts) in output.claim
+    assert stats.per_role_text(counts) not in output.claim
+    assert output.claim == (
+        "Accuracy of the truth reader of [[fig:reading]], at the layer "
+        "chosen on validation, on statements about cities (a) and on Spanish "
+        "to English translations (b)."
+    )
     for role in ROLES:
         group = [m for m in MODELS if _role(m) == role]
         assert output.numbers[f"neg_below_half_{role}"] == sum(
@@ -273,10 +284,12 @@ def test_the_caption_points_to_the_main_figure_and_is_self_contained(
     output: registry.FigureOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
-    assert "[[fig:truth]]" in text
+    assert text.count("[[") == 1
+    assert "[[fig:reading]]" in text
     assert "Figure" not in text
-    assert "whiskers are not drawn" in text.lower()
-    assert "wholly below 0.5" in text
+    assert "whiskers" not in text.lower()
+    assert "the region below chance is shaded" in text
+    assert len(text.split()) <= 170
     for banned in (EM, EN, "_"):
         assert banned not in text
 

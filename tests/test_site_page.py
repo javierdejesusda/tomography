@@ -8,6 +8,7 @@ from typing import Any
 from matplotlib.figure import Figure
 import pytest
 
+from tomography.site import content
 from tomography.site import page
 from tomography.site import references
 from tomography.site import registry
@@ -67,22 +68,22 @@ def _doc(
 
 def test_main_items_are_numbered_in_order_of_appearance() -> None:
     doc = _doc(
-        {"method": _figure(), "finders": _figure()},
-        {"checkpoints": _table(), "reading": _table()},
+        {"method": _figure(), "finders": _figure(), "reading": _figure()},
+        {"checkpoints": _table()},
     )
     figure_number, table_number = page.numbers(doc)
-    assert figure_number == {"method": "1", "finders": "2"}
-    assert table_number == {"checkpoints": "1", "reading": "2"}
+    assert figure_number == {"method": "1", "reading": "2", "finders": "3"}
+    assert table_number == {"checkpoints": "1"}
 
 
 def test_appendix_items_are_numbered_a1_a2_in_registry_order() -> None:
     doc = _doc(
-        appendix={"a_layers": _figure(), "a_wording": _figure()},
-        appendix_tables={"assets": _table(), "reading_full": _table()},
+        appendix={"wording": _figure(), "a_reading_curves": _figure()},
+        appendix_tables={"reading": _table(), "assets": _table()},
     )
     figure_number, table_number = page.numbers(doc)
-    assert figure_number == {"a_layers": "A1", "a_wording": "A2"}
-    assert table_number == {"assets": "A1", "reading_full": "A2"}
+    assert figure_number == {"a_reading_curves": "A1", "wording": "A2"}
+    assert table_number == {"assets": "A1", "reading": "A2"}
 
 
 def test_fig_and_table_tokens_become_numbered_links_to_stable_ids() -> None:
@@ -95,7 +96,7 @@ def test_fig_and_table_tokens_become_numbered_links_to_stable_ids() -> None:
 def test_a_section_token_links_the_section_number() -> None:
     view = page.Page(_doc())
     assert view.text("[[sec:finders]]") == (
-        '<a class="ref" href="#finders">Section&nbsp;4.1</a>'
+        '<a class="ref" href="#finders">Section&nbsp;4.2</a>'
     )
     assert "Appendix&nbsp;C" in view.text("[[sec:appendix_reading]]")
 
@@ -143,8 +144,8 @@ def test_an_id_repeated_inside_one_svg_is_made_unique() -> None:
 
 
 def test_an_appendix_figure_is_a_lazy_image_not_inline_svg() -> None:
-    doc = _doc(appendix={"a_layers": _figure()})
-    figure = page.Page(doc).figure("a_layers")
+    doc = _doc(appendix={"a_reading_curves": _figure()})
+    figure = page.Page(doc).figure("a_reading_curves")
     assert '<figure id="fig-A1">' in figure
     assert '<img src="figures/fig-A1.svg" loading="lazy"' in figure
     assert 'alt="Figure A1"' in figure
@@ -214,7 +215,7 @@ def test_num_token_reads_a_table_when_asked() -> None:
     assert page.Page(doc).text("[[num:table:checkpoints.k]]") == "3"
 
 
-def test_count_token_writes_the_per_role_phrase() -> None:
+def test_tally_token_writes_the_three_fractions_in_role_order() -> None:
     counts = {
         "pca": {
             "gpt2": stats.RoleCount(4, 4),
@@ -222,27 +223,13 @@ def test_count_token_writes_the_per_role_phrase() -> None:
             "post": stats.RoleCount(2, 3),
         }
     }
-    doc = _doc({"method": _figure(counts=counts)})
-    assert page.Page(doc).text("[[count:fig:method.pca]]") == (
-        "4 of 4 GPT-2, 3 of 3 Qwen3 base and 2 of 3 post-trained checkpoints"
+    view = page.Page(_doc({"method": _figure(counts=counts)}))
+    assert view.text("on [[tally:fig:method.pca]] runs") == (
+        "on 4/4, 3/3, 2/3 runs"
     )
-
-
-def test_runs_token_writes_the_per_role_phrase_over_runs() -> None:
-    counts = {
-        "dist": {
-            "gpt2": stats.RoleCount(3, 3),
-            "base": stats.RoleCount(3, 3),
-            "post": stats.RoleCount(3, 6),
-        }
-    }
-    doc = _doc({"method": _figure(counts=counts)})
-    view = page.Page(doc)
-    expected = (
-        "3 of 3 GPT-2 runs, 3 of 3 Qwen3 base runs and 3 of 6 post-trained runs"
-    )
-    assert view.text("[[runs:fig:method.dist]]") == expected
-    assert view.plain("[[runs:fig:method.dist]]") == expected
+    assert view.plain("[[tally:fig:method.pca]]") == "4/4, 3/3, 2/3"
+    with pytest.raises(KeyError):
+        view.text("[[tally:fig:method.missing]]")
 
 
 @pytest.mark.parametrize(
@@ -398,9 +385,9 @@ def test_printed_numbers_match_ids_and_registry_order(
     figure_number, table_number = page.numbers(doc)
     assert figure_number["teaser"] == "1"
     assert sorted(int(figure_number[k]) for k in registry.MAIN_FIGURES) == list(
-        range(1, 11)
+        range(1, len(registry.MAIN_FIGURES) + 1)
     )
-    assert sorted(int(table_number[k]) for k in registry.MAIN_TABLES) == [1, 2]
+    assert sorted(int(table_number[k]) for k in registry.MAIN_TABLES) == [1]
     for key, number in figure_number.items():
         assert f'<figure id="fig-{number}">' in html, key
         assert f"Figure {number}: " in html, key
@@ -417,51 +404,71 @@ def test_sections_run_in_order_with_references_before_the_appendix(
         t.replace("&ensp;", " ")
         for t in re.findall(r"<h2[^>]*>([^<]+)</h2>", html)
     ]
-    assert heads[:2] == ["Abstract", "Key findings"]
-    assert heads[2:8] == [
+    assert heads[:6] == [
+        "Abstract",
         "1 Introduction",
         "2 Related work",
         "3 Method",
         "4 Results",
-        "5 Discussion and limitations",
-        "6 Reproducibility",
+        "5 Limitations",
     ]
-    assert heads[8] == "References"
-    assert heads[9] == "Cite this repository"
-    assert heads[10:] == [
+    assert heads[6] == "Code and data"
+    assert heads[7] == "References"
+    assert heads[8] == "Cite this repository"
+    assert heads[9:] == [
         "Appendix A Assets and notation",
         "Appendix B Method details",
         "Appendix C Reading details",
-        "Appendix D Wording",
-        "Appendix E Truth and honesty",
-        "Appendix F Steering details",
-        "Appendix G Knowledge",
-        "Appendix H Approximate answers",
-        "Appendix I Post-training details",
-        "Appendix J Other experiments",
+        "Appendix D Published steering methods",
+        "Appendix E Knowledge",
     ]
     subs = [
         t.replace("&ensp;", " ")
         for t in re.findall(r"<h3[^>]*>([^<]+)</h3>", html)
     ]
-    assert subs[0] == "3.1 Reading a concept"
-    assert any(s.startswith("4.5 ") for s in subs)
+    assert subs[0] == "3.1 Models, data and readers"
+    assert any(s.startswith("4.6 ") for s in subs)
 
 
-def test_the_contents_line_links_every_section(
+def test_the_page_has_no_summary_findings_list_or_contents_line(
     full: tuple[page.Document, str],
 ) -> None:
     html = full[1]
-    line = re.search(r'<p class="contents">(.*?)</p>', html, flags=re.S)
-    assert line is not None
-    text = re.sub(r"<[^>]+>", "", line.group(1)).replace("&ensp;", " ")
-    assert text.startswith(
-        "Contents: Key findings, 1 Introduction, 2 Related work, 3 Method"
+    assert "TL;DR" not in html
+    assert 'class="tldr"' not in html
+    assert 'class="contents"' not in html
+    assert "Key findings" not in html
+    assert "<pre><code>uv sync" not in html
+
+
+def test_the_closing_paragraph_has_no_number_and_links_the_documents(
+    full: tuple[page.Document, str],
+) -> None:
+    html = full[1]
+    assert '<h2 id="code">Code and data</h2>' in html
+    closing = html.split('<h2 id="code">')[1].split("<section")[0]
+    for url in (
+        content.REPO_URL,
+        content.FINDINGS_URL,
+        content.METHODOLOGY_URL,
+        content.DATA_URL,
+    ):
+        assert f'<a href="{url}">' in closing, url
+    assert closing.count("<p>") == 1
+    assert html.index('<h2 id="limitations">') < html.index('<h2 id="code">')
+    assert html.index('<h2 id="code">') < html.index('id="references"')
+
+
+def test_a_link_token_points_at_a_named_url() -> None:
+    view = page.Page(_doc())
+    assert view.text("[[link:findings|the findings document]]") == (
+        f'<a href="{content.FINDINGS_URL}">the findings document</a>'
     )
-    assert text.endswith("6 Reproducibility, References, Appendix")
-    ids = set(re.findall(r'id="([^"]+)"', html))
-    for target in re.findall(r'href="#([^"]+)"', line.group(1)):
-        assert target in ids, target
+    assert view.plain("See [[link:repository|the repository]].") == (
+        "See the repository."
+    )
+    with pytest.raises(KeyError):
+        view.text("[[link:nowhere|text]]")
 
 
 def test_only_cited_references_are_listed_in_order_of_first_citation(
@@ -508,18 +515,14 @@ def test_no_commit_or_masthead_is_named_in_the_page_text(
     assert "blob/abc1234/" in full[1]
 
 
-def test_the_reproducibility_and_appendix_sentences_name_no_commit(
+def test_the_closing_paragraph_names_no_commit(
     full: tuple[page.Document, str],
 ) -> None:
     text = " ".join(_visible_text(full[1]).split())
     assert (
-        "from the result files in the results directory of the repository; "
-        "each figure and table links the data file it draws"
+        "Every number in this paper is recomputed from the committed result "
+        "files when the paper is built."
     ) in text
-    assert (
-        "Links to the findings document open it at the commit of these results."
-    ) in text
-    assert "reported in the findings document of the repository. They" in text
 
 
 def test_appendix_figures_are_lazy_images_and_main_figures_inline(
@@ -868,22 +871,19 @@ def test_a_findings_link_is_pinned_to_the_results_commit() -> None:
     assert page.Page(doc).plain("[[findings:x|y]] z") == "y z"
 
 
-def test_the_page_opens_with_summary_overview_abstract_and_findings(
+def test_the_page_opens_with_the_abstract_then_the_overview(
     full: tuple[page.Document, str],
 ) -> None:
     html = full[1]
     order = [
-        html.index('<p class="tldr">'),
-        html.index('<figure id="fig-1">'),
         html.index('id="abstract"'),
-        html.index('<h2 id="key_findings">Key findings</h2>'),
+        html.index('<figure id="fig-1">'),
         html.index('<h2 id="introduction">'),
     ]
     assert order == sorted(order)
-    assert "TL;DR." in html
     assert page.numbers(full[0])[0]["teaser"] == "1"
-    findings = html.split('id="key_findings"')[1].split("<h2")[0]
-    assert findings.count("<li>") == 6
+    listed = html.split('id="introduction"')[1].split("<h2")[0]
+    assert listed.count("<li>") == 4
 
 
 def test_label_token_writes_the_name_a_figure_computed() -> None:

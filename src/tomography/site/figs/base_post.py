@@ -1,4 +1,4 @@
-"""Figure 11: What post-training changes in the readings.
+"""Figure 8: What post-training changes in the readings.
 
 One row per measure, each with the post-trained minus base difference of the
 three Qwen3 sizes and a conservative 95 percent interval for the test items.
@@ -21,7 +21,7 @@ from tomography.site.registry import FigureOutput
 from tomography.viz import axes
 from tomography.viz import paper
 
-HEIGHT = 5.4
+HEIGHT = 4.6
 LABEL_FONT = 7
 LABEL_PAD = 0.07
 HEADER = ["panel", "row", "size", "value", "lo", "hi", "interval"]
@@ -55,24 +55,17 @@ MIN_DASHES = 2
 OTHER = ("utility", "morality", "truth", "honesty", "truthfulqa")
 PAIRED = {"r2": "utility", "r3": "morality", "r5": "honesty", "r7": "truth"}
 CLAIM = (
-    "Post-training lowers held-out sentiment reading; on the other readings "
-    "most intervals include zero, which is not evidence of no change."
+    "Post-training lowers held-out sentiment reading; most other intervals "
+    "include zero, which is not evidence of no change."
 )
 DETAIL = (
-    "Sentiment falls by {low} to {high}, with an interval below zero on "
-    "{below} of 3 sizes; utility, morality, truth, honesty transfer and "
-    "TruthfulQA move by at most {most}, with {excluding}; {falling}. "
-    "Post-trained minus base checkpoint for each Qwen3 size (0.6B, 1.7B and "
-    "4B, light to dark). A marker is filled where the interval excludes "
-    "zero, open otherwise. A solid interval is the "
-    "seed-paired 95 percent bootstrap interval that [[table:base_post]] "
-    "stores (10 seeds, 0.6B and 1.7B); a dashed interval is a conservative "
-    "95 percent interval, used for 4B and the measures without seeds. The "
-    "axes differ between the panels: (a) shows the rows whose intervals "
-    "stay within {narrow}, (b) the rows with wider intervals, on {wide}. "
-    "A post-trained checkpoint also differs from its base in prompt format "
-    "and distillation, so the contrast is with this recipe "
-    "([[sec:limitations]])."
+    "Post-trained minus base for each Qwen3 size (0.6B, 1.7B and 4B, light "
+    "to dark). A marker is filled where the 95 percent interval excludes "
+    "zero. A solid interval is the seed-paired bootstrap interval (10 "
+    "seeds, 0.6B and 1.7B), which does not resample the test pairs; a "
+    "dashed interval is the conservative test-size interval, used for 4B "
+    "and the measures without seeds. Panels differ in axis: (a) intervals "
+    "within {narrow}, (b) wider intervals."
 )
 
 
@@ -216,43 +209,6 @@ def _paired_excluding(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:
         if r["lo"] > 0 or r["hi"] < 0
     ]
     return sorted(found, key=lambda f: (float(f[1][:-1]), measures.index(f[0])))
-
-
-def _signed(value: float) -> str:
-    text = _rows.number(value)
-    if float(text.replace(axes.MINUS, "-")) == 0.0:
-        return text
-    return text if text.startswith(axes.MINUS) else f"+{text}"
-
-
-def _sizes_text(sizes: list[str]) -> str:
-    return stats.join_and([s.upper() for s in sizes])
-
-
-def _excluding_text(found: list[tuple[str, str, float]]) -> str:
-    if not found:
-        return "no interval excluding zero"
-    names = {key: phrase for key, _, phrase in ROWS}
-    parts = [f"{names[r]} on {s.upper()} ({_signed(v)})" for r, s, v in found]
-    return f"an interval excluding zero only for {stats.join_and(parts)}"
-
-
-def _falling_text(knowledge: list[str], steering: list[str]) -> str:
-    if knowledge == steering and knowledge:
-        return (
-            "the knowledge AUROC and the steering win rate fall with an "
-            f"interval below zero on {_sizes_text(knowledge)} only"
-        )
-    parts = []
-    for name, sizes in (
-        ("knowledge AUROC", knowledge),
-        ("steering win rate", steering),
-    ):
-        parts.append(
-            f"the {name} has an interval below zero on "
-            + (_sizes_text(sizes) if sizes else "no size")
-        )
-    return " and ".join(parts)
 
 
 def _excludes_zero(lo: float, hi: float) -> bool:
@@ -562,33 +518,22 @@ def build(manifest: Manifest) -> FigureOutput:
     numbers["sent_below"] = float(sum(hi < 0 for _, _, hi, _ in sentiment))
     moves = [abs(found[(r, s)][0]) for r in OTHER for s in sizes]
     numbers["max_abs_other"] = max(moves)
-    excluding = [
-        (r, s, found[(r, s)][0])
-        for r in OTHER
-        for s in sizes
-        if _excludes_zero(found[(r, s)][1], found[(r, s)][2])
-    ]
-    numbers["other_excluding"] = float(len(excluding))
-    falls = sorted(abs(v) for v, _, _, _ in sentiment)
-    below = {
-        r: [s for s in sizes if found[(r, s)][2] < 0]
-        for r in ("knowledge", "steering")
-    }
+    numbers["other_excluding"] = float(
+        sum(
+            _excludes_zero(found[(r, s)][1], found[(r, s)][2])
+            for r in OTHER
+            for s in sizes
+        )
+    )
+    falls = [abs(v) for v, _, _, _ in sentiment]
+    numbers["sent_fall_min"] = min(falls)
+    numbers["sent_fall_max"] = max(falls)
     paired = _paired_excluding(paired_rows)
     numbers["paired_total"] = float(len(paired_rows))
     numbers["paired_excluding_zero"] = float(len(paired))
     for name, size in paired:
         numbers[f"paired_{name}_{size.lower().replace('.', '')}"] = 1.0
-    detail = DETAIL.format(
-        narrow=_rows.number(NARROW),
-        wide=f"{axes.MINUS}{_rows.number(WIDE)} to {_rows.number(WIDE)}",
-        low=_rows.number(falls[0]),
-        high=_rows.number(falls[-1]),
-        below=int(numbers["sent_below"]),
-        most=_rows.number(numbers["max_abs_other"]),
-        excluding=_excluding_text(excluding),
-        falling=_falling_text(below["knowledge"], below["steering"]),
-    )
+    detail = DETAIL.format(narrow=_rows.number(NARROW))
     return FigureOutput(
         fig, CLAIM, detail, numbers, _group.csv_text(HEADER, csv_rows), {}
     )

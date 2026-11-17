@@ -113,6 +113,14 @@ def test_spans_are_per_role_and_noise_comes_from_the_expected_range(
     assert output.numbers["n_checkpoints"] == len(MODELS)
 
 
+def test_the_number_of_wordings_is_counted_from_the_stored_rows(
+    output: registry.FigureOutput,
+) -> None:
+    sizes = {len(_rows(m)) for m in MODELS}
+    assert len(sizes) == 1
+    assert output.numbers["wordings"] == sizes.pop()
+
+
 def test_the_bare_wording_numbers_are_recomputed(
     output: registry.FigureOutput,
 ) -> None:
@@ -157,20 +165,35 @@ def test_the_caption_quotes_the_spans_the_noise_and_the_bare_numbers(
 ) -> None:
     text = f"{output.claim} {output.detail}"
     n = output.numbers
-    for role in ROLES:
-        if f"span_{role}_min" in n:
-            assert f"{n[f'span_{role}_min']:.3f}" in text
-            assert f"{n[f'span_{role}_max']:.3f}" in text
+    spans = [
+        f"{n[f'span_{role}_min']:.3f} to {n[f'span_{role}_max']:.3f}"
+        for role in ROLES
+    ]
+    noise = [
+        f"{n[f'noise_{role}_min']:.3f} to {n[f'noise_{role}_max']:.3f}"
+        for role in ROLES
+    ]
+    assert (
+        f"The span from worst to best is {spans[0]} on GPT-2, {spans[1]} on "
+        f"Qwen3 base and {spans[2]} on post-trained checkpoints, against "
+        f"noise of {noise[0]}, {noise[1]} and {noise[2]}; the right columns "
+        "give both per checkpoint."
+    ) in text
     for role, name, values in _role_series():
-        if name == "paper_rank":
-            assert f"{min(values)} to {max(values)}" in text, (role, name)
-        else:
-            assert f"{min(values):.3f} to {max(values):.3f}" in text, (
+        if name in ("bare_cos", "bare_to_paper", "bare_random"):
+            assert f"{min(values):.3f} to {max(values):.3f}" not in text, (
                 role,
                 name,
             )
-    assert "[[fig:a_wording]]" in text
-    assert "[[table:wordings]]" in text
+    assert "[[" not in text
+    assert "a_wording" not in text
+    assert "wordings]]" not in text
+
+
+def test_the_caption_has_at_most_170_words(
+    output: registry.FigureOutput,
+) -> None:
+    assert len(f"{output.claim} {output.detail}".split()) <= 170
 
 
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
@@ -188,14 +211,8 @@ def test_the_bare_claim_is_counted_per_role_without_a_pooled_count(
         assert output.numbers[f"bare_n_{role}"] == len(group)
         count = output.counts["bare_above"][role]
         assert (count.hits, count.total) == (hits, len(group))
-    counts = output.counts["bare_above"]
-    assert stats.per_role_text(counts) in output.claim
     assert f"of {len(MODELS)} checkpoints" not in output.claim
-    for model in MODELS:
-        if _bare(model)["to_paper"] <= _paper(model)["random"]:
-            assert paper.display_name(model) in output.claim
-            assert f"{_bare(model)['to_paper']:.3f}" in output.claim
-            assert f"{_paper(model)['random']:.3f}" in output.claim
+    assert "bare" not in f"{output.claim} {output.detail}"
 
 
 def test_the_dropped_wording_is_absent_and_the_noise_uses_the_report_pairs(
@@ -206,17 +223,19 @@ def test_the_dropped_wording_is_absent_and_the_noise_uses_the_report_pairs(
         noise = [_noise(m) for m in MODELS if _role(m) == role]
         assert output.numbers[f"noise_{role}_max"] == pytest.approx(max(noise))
     assert {_n_eval(m) for m in MODELS} == {214}
-    assert "by point estimate" in output.claim
 
 
 def test_the_opening_sentence_agrees_with_the_per_role_counts(
     output: registry.FigureOutput,
 ) -> None:
-    first = output.claim.split(". ")[0]
+    wordings = {len(_rows(m)) for m in MODELS}
+    assert wordings == {16}
+    assert output.claim == (
+        "A sentiment reader fitted on the wording of the paper, scored on "
+        "15 other wordings."
+    )
     assert "orthogonal" not in output.claim
-    assert "same concept" not in first
-    assert "large angle" in first
-    assert "mostly" in first
+    assert "same concept" not in output.claim
 
 
 def test_the_span_above_noise_count_follows_the_right_hand_columns(
@@ -239,11 +258,10 @@ def test_the_span_above_noise_count_follows_the_right_hand_columns(
 def test_the_claim_states_the_span_count_and_does_not_overstate_gpt2(
     output: registry.FigureOutput,
 ) -> None:
-    first = output.claim.split(". ")[0]
+    text = f"{output.claim} {output.detail}"
     counts = output.counts["span_above_noise"]
-    assert "beyond test-pair noise on most checkpoints" not in first
-    assert stats.per_role_text(counts) in output.claim
-    assert "point comparison" in output.claim
+    assert "beyond test-pair noise on most checkpoints" not in text
+    assert stats.per_role_text(counts) not in text
 
 
 FAMILIES = ("frame", "wording", "concept")
@@ -573,20 +591,23 @@ def test_the_caption_states_the_band_the_conservative_noise_and_the_rank(
     output: registry.FigureOutput,
 ) -> None:
     text = output.detail
-    n = output.numbers
-    assert "15 circles" in text
-    assert "wordings share the same test pairs" in text
-    assert "conservative" in text
-    assert "excludes fitting noise" in text
-    assert "diamond" in text
-    assert "median" in text
-    assert "names as in [[table:wordings]]" in text
-    assert "three lanes" in text
-    for role in ROLES:
-        lo = int(n[f"paper_rank_{role}_min"])
-        hi = int(n[f"paper_rank_{role}_max"])
-        assert f"{lo} to {hi}" in output.claim
-    assert "of the 16 wordings" in output.claim
+    assert (
+        "(a) One row per checkpoint: its accuracy on the paper wording "
+        "(diamond) and on each other wording (circles, in lanes by kind of "
+        "change), the median of the 16 (black tick) and the random direction "
+        "(grey tick); the best and the worst wording are named unless they "
+        "fall inside the grey band."
+    ) in text
+    assert (
+        "The grey band is the noise expected from test pairs alone, "
+        "conservative because the wordings share test pairs, and without "
+        "fitting noise."
+    ) in text
+    assert text.endswith(
+        "(b) Each direction fitted on another wording, by its cosine with "
+        "the paper direction and its accuracy on the paper wording."
+    )
+    assert "ranks" not in f"{output.claim} {text}"
 
 
 def test_the_random_tick_stays_below_the_names_on_the_centre_line(

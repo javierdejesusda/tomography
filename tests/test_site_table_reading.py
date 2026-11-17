@@ -157,14 +157,20 @@ def test_the_caption_names_every_test_size_and_the_honesty_direction(
     output: registry.TableOutput,
 ) -> None:
     text = output.claim + " " + output.detail
-    for concept in ("utility", "morality"):
+    assert "(test pairs as in [[fig:reading]])" in text
+    for concept in ("sentiment", "utility", "morality"):
         n = _score(concept, "gpt2")[2]
-        assert f"{n:,}" in text
-    assert "214 sentiment pairs" in text
-    assert "59 truth" in text or "59 plain true and false statements" in text
-    assert "fitted on the paper's honesty persona prompts" in text
-    assert "no refit" in text
-    assert "[[table:reading_full]]" in text
+        assert output.numbers[f"n_{concept}"] == n
+        assert f"{n:,}" not in text
+    honesty = _score("honesty", "gpt2")[2]
+    assert output.numbers["n_honesty"] == honesty
+    assert (
+        "Honesty is a transfer: a direction fitted on honesty persona "
+        f"prompts reads {honesty} plain true and false statements with no "
+        "refit."
+    ) in text
+    assert "reading_full" not in text
+    assert text.count("[[") == 1
     assert not any(ch in text for ch in DASHES)
 
 
@@ -243,16 +249,16 @@ def test_the_caption_defines_the_text_control_rows(
     output: registry.TableOutput,
 ) -> None:
     text = output.detail
-    assert "mean over the training sets" in text
-    assert "20 for the held-out sentiment split and 10 for the others" in text
-    assert "sampling of the test pairs only" in text
-    assert "true and false labels of the facts" in text
-    assert "control for the transfer pairs only" in text
     assert (
-        "In the honesty column the words alone are the honesty control, "
-        "fitted on the true and false labels of the facts"
+        "The last two rows are the words alone, as means over training sets "
+        "with intervals for the test pairs only."
     ) in text
-    assert len(f"{output.claim} {text}".split()) <= 200
+    assert text.endswith(
+        "In the honesty column they are fitted on the true and false labels, "
+        "not the persona labels of the reader, so they control the transfer "
+        "pairs only."
+    )
+    assert len(f"{output.claim} {text}".split()) <= 170
     assert not any(ch in text for ch in DASHES)
 
 

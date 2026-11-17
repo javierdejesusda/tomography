@@ -9,6 +9,7 @@ import pytest
 from tomography.site import registry
 from tomography.site import stats
 from tomography.site.manifest import Manifest
+from tomography.site.tables import steering_baselines
 from tomography.viz import paper
 
 _R = runpy.run_path(str(Path(__file__).with_name("_results.py")))
@@ -37,17 +38,16 @@ KINDS = [
     "",
 ]
 ROLES = {"base": "base", "post_trained": "post-trained"}
-COLUMNS = [
-    "Kind",
-    "Arm",
-    "Coefficient",
-    "Concept",
-    "Instruction",
-    "Fluency",
-    "Overall",
-    "Perplexity",
+COLUMNS = ["Kind", "Arm", "Coefficient", "Overall", "Perplexity"]
+DATA_COLUMNS = (
+    "Model",
+    "Target concept",
+    "Classifier",
+    "Judge score: Concept",
+    "Judge score: Instruction",
+    "Judge score: Fluency",
     "Distinct-1",
-]
+)
 
 
 @pytest.fixture(scope="module")
@@ -91,27 +91,21 @@ def _expected(model: str) -> tuple[list[str], list[list[str]]]:
                     kind,
                     LABELS[arm],
                     _blank(row["coeff"], 2),
-                    _blank(row["concept_score"]),
-                    _blank(row.get("instruction_score")),
-                    _blank(row["fluency_score"]),
                     overall,
                     _blank(row["perplexity"], 1),
-                    _blank(row["distinct_1"]),
                 ]
             )
     return headings, rows
 
 
-def test_columns_group_the_judge_scores(output: registry.TableOutput) -> None:
+def test_the_page_shows_coefficient_overall_and_perplexity(
+    output: registry.TableOutput,
+) -> None:
     assert output.columns == COLUMNS
-    assert output.align == "ll" + "r" * 7
-    assert output.groups == (
-        ("", 2, False),
-        ("Judge score", 4, False),
-        ("", 2, False),
-    )
+    assert output.align == "llrrr"
+    assert not output.groups
     assert output.span_labels
-    assert output.wide
+    assert not output.wide
     assert output.roomy
     assert output.compact_print
 
@@ -165,10 +159,11 @@ def test_each_role_has_its_own_rows_and_none_are_pooled(
         assert text.startswith(owners[place])
 
 
-def test_instruction_is_shown_on_the_post_trained_checkpoint_only(
+def test_instruction_is_scored_on_the_post_trained_checkpoint_only(
     output: registry.TableOutput,
 ) -> None:
-    instruction = [row[4] for row in output.rows]
+    place = DATA_COLUMNS.index("Judge score: Instruction")
+    instruction = [cells[place] for cells in output.data_cells]
     assert instruction[:48] == [""] * 48
     assert all(cell.replace(".", "").isdigit() for cell in instruction[48:])
     for model in models("b3"):
@@ -182,19 +177,19 @@ def test_cells_are_formatted_with_their_interval_and_blanks(
 ) -> None:
     first = output.rows[0]
     assert first[:3] == ["Reader", "Logistic regression", "0.40"]
-    assert first[6] == "0.500 [0.350, 0.650]"
-    assert first[7] == "84.2"
+    assert first[3] == "0.500 [0.350, 0.650]"
+    assert first[4] == "84.2"
     happiness = output.rows[8:16]
     assert happiness[5][1] == f"Mean{chr(0x2011)}centring"
-    assert happiness[5][7] == "994.9"
+    assert happiness[5][4] == "994.9"
     post_happiness = output.rows[56]
-    assert post_happiness[6] == "0.975 [0.753, 1.202]"
+    assert post_happiness[3] == "0.975 [0.753, 1.202]"
     for start in range(0, 72, 8):
         prompt, none = output.rows[start + 1], output.rows[start + 6]
         assert prompt[2] == ""
-        assert prompt[7] == ""
+        assert prompt[4] == ""
         assert none[2] == ""
-        assert none[7] != ""
+        assert none[4] != ""
     assert all(
         "_" not in cell and "/" not in cell
         for row in output.rows
@@ -202,21 +197,26 @@ def test_cells_are_formatted_with_their_interval_and_blanks(
     )
 
 
-def test_the_data_file_keeps_the_checkpoint_concept_and_classifier(
+def test_the_data_file_keeps_the_columns_the_page_dropped(
     output: registry.TableOutput,
 ) -> None:
-    assert output.data_columns == ("Model", "Target concept", "Classifier")
+    assert output.data_columns == DATA_COLUMNS
     want = []
     for model in models("b3"):
         table = _table(model)
         summary = data(run("b3", model), "summary.json")
         for concept in summary["concepts"]:
             for arm in ARMS:
+                row = table[(concept, arm)]
                 want.append(
                     (
                         paper.display_name(model),
                         concept,
-                        f"{table[(concept, arm)]['classifier']:.3f}",
+                        f"{row['classifier']:.3f}",
+                        _blank(row["concept_score"]),
+                        _blank(row.get("instruction_score")),
+                        _blank(row["fluency_score"]),
+                        _blank(row["distinct_1"]),
                     )
                 )
     assert list(output.data_cells) == want
@@ -236,12 +236,10 @@ def test_the_sizes_are_quoted_from_the_runs(
         assert stored["n_boot"] == output.numbers["resamples"] == 2000
         assert all(row["n_prompts"] == 40 for row in _table(model).values())
     for phrase in (
-        "40 held-out prompts",
-        "20 tuning prompts",
-        "at most 128 new tokens per prompt, cut at the end-of-sequence token",
-        "64 training pairs",
-        "200 held-out WikiText-103 passages",
-        "2,000 resamples",
+        "averaged over the 40 held-out prompts of the concept",
+        "it chose on 20 separate tuning prompts",
+        "at most 128 new tokens, cut at the end-of-sequence token",
+        "that of 200 held-out WikiText-103 passages under the steered model",
     ):
         assert phrase in output.detail, phrase
 
@@ -250,30 +248,40 @@ def test_the_caption_says_how_the_table_was_judged_and_cites_each_source(
     output: registry.TableOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
+    concepts = data(run("b3", "gpt2-xl"), "summary.json")["concepts"]
+    assert output.claim == (
+        "The reader beside five published steering methods and two controls, "
+        f"steering toward {stats.join_and(list(concepts.values()))} on one "
+        "checkpoint per role."
+    )
+    assert "positive sentiment, happiness and anger" in output.claim
     for phrase in (
-        "LLM judge",
-        "a second judge slot",
-        "same model",
-        "harmonic mean",
-        "the coefficient that the arm chose on the",
-        "share no prompt",
-        "95 percent percentile bootstrap interval over the held-out prompts",
-        "published baselines",
-        "The controls are",
+        "An LLM judge rates each generation 0, 1 or 2 on concept and fluency",
+        "and on the post-trained checkpoint on how closely its topic relates "
+        "to the instruction;",
+        "Overall is the harmonic mean of the ratings, 0 when any is 0",
+        "with a 95 percent bootstrap interval per arm",
+        "Each arm uses the relative coefficient it chose on",
+        "Baselines: prompt prepending and DiffMean",
+        "whose protocol we adapt to each role",
+        "The unsteered model and prompt prepending have no coefficient; "
+        "prompt prepending has no perplexity.",
         "[[cite:wu2025axbench]]",
         "[[cite:marks2024geometry]]",
         "[[cite:rimsky2024steering]]",
         "[[cite:turner2023steering]]",
         "[[cite:jorgensen2023improving]]",
         "[[cite:dubois2023alpacafarm]]",
-        "on the post-trained checkpoint also on how closely the topic of the "
-        "generation relates to the instruction;",
-        stats.per_role_text(output.counts["with_run"]),
     ):
         assert phrase in text, phrase
     assert "following the instruction" not in text
-    controls = text[text.index("The controls are") :].split(". ")[0]
-    assert "baseline" not in controls
+    assert "[[table:" not in text
+    assert "[[fig:" not in text
+    assert "[[sec:" not in text
+    assert len(text.split()) <= 170
+    kinds = [kind for kind, _ in steering_baselines.ARMS.values()]
+    assert kinds.count(steering_baselines.BASELINE) == 5
+    assert kinds.count(steering_baselines.CONTROL) == 2
     assert not any(d in text for d in DASHES)
     for verdict in ("better", "beats", "outperform", "worse", "apart"):
         assert verdict not in text, verdict
@@ -284,6 +292,7 @@ def test_checkpoints_are_counted_per_role(
 ) -> None:
     every = {m: m in models("b3") for m in _R["MANIFEST"].checkpoints()}
     assert output.counts["with_run"] == stats.per_role(every)
+    assert set(output.counts) == {"with_run", "prompt_top", "reader_below"}
     with_run = output.counts["with_run"]
     assert [with_run[r].hits for r in stats.ROLES] == [1, 1, 1]
 
@@ -324,6 +333,10 @@ def _one_concept_less(summary: dict[str, Any]) -> None:
     del summary["concepts"]["anger"]
 
 
+def _other_description(summary: dict[str, Any]) -> None:
+    summary["concepts"]["anger"] = "rage"
+
+
 def _other_tuning_half(config: dict[str, Any]) -> None:
     config["n_tune"] = 30
 
@@ -335,7 +348,8 @@ def _other_tuning_half(config: dict[str, Any]) -> None:
         ("gpt2-xl", "table.json", _fewer_prompts, "scores other prompts"),
         ("qwen3-1.7b", "summary.json", _no_instruction, "other criteria"),
         ("gpt2-xl", "summary.json", _one_concept_less, "other concepts"),
-        ("gpt2-xl", "config.json", _other_tuning_half, "differ in their"),
+        ("gpt2-xl", "summary.json", _other_description, "their concepts"),
+        ("gpt2-xl", "config.json", _other_tuning_half, "in their sizes"),
     ],
 )
 def test_a_run_that_breaks_the_layout_is_refused(
@@ -346,3 +360,32 @@ def test_a_run_that_breaks_the_layout_is_refused(
     _edit(root, model, name, change)
     with pytest.raises(ValueError, match=message):
         registry.build_table(SPEC, Manifest(root))
+
+
+def test_the_concepts_where_prompting_leads_are_counted_per_role(
+    output: registry.TableOutput,
+) -> None:
+    top: dict[str, list[bool]] = {r: [] for r in stats.ROLES}
+    below: dict[str, list[bool]] = {r: [] for r in stats.ROLES}
+    for model in models("b3"):
+        table = _table(model)
+        for concept in sorted({c for c, _ in table}):
+            score = {a: table[(concept, a)]["overall"] for a in ARMS}
+            reader = table[(concept, "reader")]
+            prompt = table[(concept, "prompt")]
+            role = stats.role(model)
+            top[role].append(max(score, key=lambda a: score[a]) == "prompt")
+            below[role].append(reader["overall_hi"] < prompt["overall_lo"])
+    for name, flags in (("prompt_top", top), ("reader_below", below)):
+        assert output.counts[name] == {
+            r: stats.RoleCount(sum(f), len(f)) for r, f in flags.items()
+        }, name
+    shape = [
+        (output.counts["prompt_top"][r].hits, output.counts["reader_below"][r])
+        for r in stats.ROLES
+    ]
+    assert shape == [
+        (3, stats.RoleCount(2, 3)),
+        (2, stats.RoleCount(2, 3)),
+        (2, stats.RoleCount(2, 3)),
+    ]

@@ -55,17 +55,6 @@ class Cell:
         """Relative depth of each layer."""
         return np.arange(1, self.n_layers + 1) / self.n_layers
 
-    def row_depth(self, method: str) -> float:
-        """Gives the relative depth of a finder's selected layer.
-
-        Args:
-            method: Finder name.
-
-        Returns:
-            Selected layer over layer count.
-        """
-        return self.rows[method].layer / self.n_layers
-
 
 def load(manifest: Manifest, model: str) -> dict[str, Cell] | None:
     """Reads the reference cells of every task for one checkpoint.
