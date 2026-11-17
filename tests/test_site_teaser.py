@@ -363,6 +363,23 @@ def test_each_block_holds_the_rows_compared_with_what_its_heading_names() -> (
     assert teaser.BLOCKS[0] == "against a random direction"
 
 
+def test_the_zero_line_does_not_cross_a_block_label(
+    built: registry.FigureOutput,
+) -> None:
+    labels = [
+        t
+        for ax in built.figure.axes
+        for t in ax.texts
+        if t.get_text() in teaser.BLOCKS
+    ]
+    assert len(labels) == len(teaser.BLOCKS)
+    for label in labels:
+        patch = label.get_bbox_patch()
+        assert patch is not None
+        assert patch.get_facecolor()[:3] == (1.0, 1.0, 1.0)
+        assert label.get_zorder() > 2
+
+
 def test_the_caption_cites_no_other_item(
     built: registry.FigureOutput,
 ) -> None:

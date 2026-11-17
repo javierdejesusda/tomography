@@ -396,6 +396,8 @@ def _panel(
             va="center",
             ha="left",
             color=paper.ENC["secondary_text"],
+            bbox={"facecolor": "white", "edgecolor": "none", "pad": 0.5},
+            zorder=5,
         )
     ax.set_yticks([place[r.key] for r in rows], [r.label for r in rows])
     lift = ScaledTranslation(0, 4.5 / 72, fig.dpi_scale_trans)
