@@ -292,6 +292,7 @@ def test_checkpoints_are_counted_per_role(
 ) -> None:
     every = {m: m in models("b3") for m in _R["MANIFEST"].checkpoints()}
     assert output.counts["with_run"] == stats.per_role(every)
+    assert set(output.counts) == {"with_run", "prompt_top", "reader_below"}
     with_run = output.counts["with_run"]
     assert [with_run[r].hits for r in stats.ROLES] == [1, 1, 1]
 
@@ -359,3 +360,32 @@ def test_a_run_that_breaks_the_layout_is_refused(
     _edit(root, model, name, change)
     with pytest.raises(ValueError, match=message):
         registry.build_table(SPEC, Manifest(root))
+
+
+def test_the_concepts_where_prompting_leads_are_counted_per_role(
+    output: registry.TableOutput,
+) -> None:
+    top: dict[str, list[bool]] = {r: [] for r in stats.ROLES}
+    below: dict[str, list[bool]] = {r: [] for r in stats.ROLES}
+    for model in models("b3"):
+        table = _table(model)
+        for concept in sorted({c for c, _ in table}):
+            score = {a: table[(concept, a)]["overall"] for a in ARMS}
+            reader = table[(concept, "reader")]
+            prompt = table[(concept, "prompt")]
+            role = stats.role(model)
+            top[role].append(max(score, key=lambda a: score[a]) == "prompt")
+            below[role].append(reader["overall_hi"] < prompt["overall_lo"])
+    for name, flags in (("prompt_top", top), ("reader_below", below)):
+        assert output.counts[name] == {
+            r: stats.RoleCount(sum(f), len(f)) for r, f in flags.items()
+        }, name
+    shape = [
+        (output.counts["prompt_top"][r].hits, output.counts["reader_below"][r])
+        for r in stats.ROLES
+    ]
+    assert shape == [
+        (3, stats.RoleCount(2, 3)),
+        (2, stats.RoleCount(2, 3)),
+        (2, stats.RoleCount(2, 3)),
+    ]

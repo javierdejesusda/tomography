@@ -138,6 +138,10 @@ def build(manifest: Manifest) -> TableOutput:
     extra: list[tuple[str, ...]] = []
     sizes: set[tuple[int, ...]] = set()
     concepts: set[tuple[str, ...]] = set()
+    leads: dict[str, dict[str, list[bool]]] = {
+        name: {r: [] for r in stats.ROLES}
+        for name in ("prompt_top", "reader_below")
+    }
     for model in models:
         run = manifest.run(EXPERIMENT, model)
         assert run is not None
@@ -157,8 +161,16 @@ def build(manifest: Manifest) -> TableOutput:
                     f"{description}",
                 )
             )
+            block = _block(model, table, summary, concept)
+            by = {r["arm"]: r for r in block}
+            best = max(block, key=lambda r: float(r["overall"]))
+            role = stats.role(model)
+            leads["prompt_top"][role].append(best["arm"] == "prompt")
+            leads["reader_below"][role].append(
+                by["reader"]["overall_hi"] < by["prompt"]["overall_lo"]
+            )
             shown = ""
-            for row in _block(model, table, summary, concept):
+            for row in block:
                 kind, label = ARMS[row["arm"]]
                 rows.append(_row(row, "" if kind == shown else kind, label))
                 extra.append(_data(row, name, concept))
@@ -174,6 +186,10 @@ def build(manifest: Manifest) -> TableOutput:
         "with_run": stats.per_role(
             {m: m in models for m in manifest.checkpoints()}
         ),
+        **{
+            name: {r: stats.RoleCount(sum(f), len(f)) for r, f in flags.items()}
+            for name, flags in leads.items()
+        },
     }
     claim = (
         "The reader beside five published steering methods and two controls, "
