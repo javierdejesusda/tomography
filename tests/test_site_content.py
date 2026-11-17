@@ -549,11 +549,12 @@ def test_the_abstract_is_prose_with_one_number() -> None:
 
 def test_each_results_subsection_opens_with_its_answer() -> None:
     for sub in content.RESULTS.subsections:
-        assert len(sub.paragraphs) == 1, sub.key
+        closes = sub.key == "reading"
+        assert len(sub.paragraphs) == (2 if closes else 1), sub.key
+        assert bool(sub.after) == (sub.key not in ("reading", "known_unknown"))
         opener = sub.paragraphs[0]
         assert opener.rstrip().endswith("."), sub.key
         assert ". " not in _bare(opener).replace("0. ", ""), sub.key
-        assert sub.after or sub.runin, sub.key
         assert len(sub.items) == 1, sub.key
         assert sub.items[0].startswith("fig:"), sub.key
         limit = 270 if sub.key == "known_unknown" else 160

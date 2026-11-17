@@ -229,6 +229,29 @@ def test_flagged_tables_let_their_printed_row_labels_wrap(css: str) -> None:
     assert "#table-" not in css
 
 
+def test_the_printed_page_is_set_with_the_leading_of_a_paper(
+    css: str,
+) -> None:
+    printed = _print_block(css)
+    assert (
+        "  body {\n    background: #fff;\n    line-height: 1.3;\n  }"
+    ) in printed
+    assert (
+        "  figcaption,\n  .caption,\n  .notes {\n    line-height: 1.25;\n  }"
+    ) in printed
+    assert "line-height: 1.45;" in css.split("@media print")[0]
+
+
+def test_the_printed_overview_figure_fits_under_the_abstract(
+    css: str, html: str
+) -> None:
+    printed = _print_block(css)
+    assert (
+        "  .abstract + figure .fig-scroll svg {\n    width: 88%;\n  }"
+    ) in printed
+    assert '</section><figure id="fig-1">' in html
+
+
 def test_a_printed_figure_shrinks_to_one_page_instead_of_splitting(
     css: str,
 ) -> None:

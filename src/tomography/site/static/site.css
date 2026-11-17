@@ -438,6 +438,17 @@ footer.colophon {
 
   body {
     background: #fff;
+    line-height: 1.3;
+  }
+
+  figcaption,
+  .caption,
+  .notes {
+    line-height: 1.25;
+  }
+
+  .abstract + figure .fig-scroll svg {
+    width: 88%;
   }
 
   main {

@@ -267,3 +267,9 @@ def test_the_reader_above_the_words_is_counted_by_the_interval(
         )
         above += a - b - half > 0
     assert sum(c.hits for c in output.counts["above_words"].values()) == above
+
+
+def test_the_table_prints_in_the_compact_type(
+    output: registry.TableOutput,
+) -> None:
+    assert output.compact_print

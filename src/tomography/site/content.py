@@ -307,9 +307,6 @@ RESULTS = Section(
                 "above its random direction on every checkpoint and truth "
                 "on every Qwen3 checkpoint, by the 95 percent interval "
                 "([[fig:reading]]).",
-            ),
-            items=("fig:reading",),
-            after=(
                 "No GPT-2 truth reader is separable from its random "
                 "direction at [[num:fig:reading.truth_n]] test pairs. "
                 "Across the four GPT-2 sizes, accuracy rises per tenfold "
@@ -334,6 +331,7 @@ RESULTS = Section(
                 "exceeds 0.1 earliest for sentiment "
                 "([[fig:a_reading_curves]]).",
             ),
+            items=("fig:reading",),
         ),
         Section(
             "finders",
