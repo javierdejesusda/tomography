@@ -985,7 +985,7 @@ def test_the_main_prose_is_about_two_thousand_words(html: str) -> None:
     )
     tables = re.findall(r"<table.*?</table>", main, flags=re.S)
     prose = _words(main) - sum(map(_words, captions)) - sum(map(_words, tables))
-    assert 1900 <= prose <= 2700, prose
+    assert 1900 <= prose <= 2750, prose
 
 
 def test_the_page_opens_with_the_abstract_then_the_overview(html: str) -> None:

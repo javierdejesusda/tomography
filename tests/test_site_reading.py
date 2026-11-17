@@ -215,7 +215,7 @@ def test_the_caption_quotes_the_test_sizes_and_leaves_the_slopes_to_the_text(
     assert "(214 sentiment, 4,808 utility, 983 morality, 59 truth)" in text
     assert "per tenfold" not in text
     assert "slope" not in text
-    assert "[[" not in text
+    assert text.count("[[") == 1
 
 
 def test_the_guards_are_green(output: registry.FigureOutput) -> None:
@@ -290,6 +290,11 @@ def test_the_detail_describes_the_size_row(
         "Dots are held-out pair accuracy at the layer read, by checkpoint size"
     )
     assert "Grey ticks are the random direction at the same layer." in text
+    assert (
+        "Whiskers are the reader's own interval; the test against the "
+        "random direction is the difference interval ([[table:reading]]), "
+        "not a whisker clearing its tick."
+    ) in text
     assert "filled: GPT-2 and Qwen3 base; open, shifted right:" in text
     assert "t interval" not in text
     assert "sample-size run" not in text
@@ -380,10 +385,10 @@ def test_the_figure_is_one_row_of_four_size_panels_lettered_a_to_d(
     assert [x[-4] for x in letters] == list("abcd")
 
 
-def test_the_caption_is_at_most_90_words(
+def test_the_caption_is_at_most_115_words(
     output: registry.FigureOutput,
 ) -> None:
-    assert len(f"{output.claim} {output.detail}".split()) <= 90
+    assert len(f"{output.claim} {output.detail}".split()) <= 115
 
 
 def test_the_claim_counts_each_concept_per_role_from_the_intervals(

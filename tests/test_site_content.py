@@ -553,20 +553,19 @@ def test_each_results_subsection_opens_with_its_answer() -> None:
     for sub in content.RESULTS.subsections:
         closes = sub.key == "reading"
         assert len(sub.paragraphs) == (2 if closes else 1), sub.key
-        assert bool(sub.after) == (sub.key not in ("reading", "known_unknown"))
+        assert bool(sub.after) == (sub.key != "reading")
         opener = sub.paragraphs[0]
         assert opener.rstrip().endswith("."), sub.key
         assert ". " not in _bare(opener).replace("0. ", ""), sub.key
         assert len(sub.items) == 1, sub.key
         assert sub.items[0].startswith("fig:"), sub.key
-        limit = 300 if sub.key == "known_unknown" else 160
+        limit = 350 if sub.key == "known_unknown" else 160
         assert _words(sub.key) <= limit, (sub.key, _words(sub.key))
         if sub.key != "known_unknown":
             assert f"[[{sub.items[0]}]]" in opener, sub.key
     assert [h for h, _ in _section("known_unknown").runin] == [
         "Reading.",
         "Steering.",
-        "Approximate answers.",
     ]
     assert "[[fig:knowledge_reading]]" in _section("known_unknown").runin[0][1]
 
@@ -726,7 +725,8 @@ def test_the_written_comparison_claims_match_the_computed_counts(
         "[[tally:fig:knowledge_reading.above_best]]"
     ) in stronger
     assert (
-        "Predicting errors, its increment over the model's confidence"
+        "On a second task, telling wrong from correct answers, its "
+        "increment over the model's confidence"
         in (_section("known_unknown").runin[0][1])
     )
     assert "adds nothing" not in _text()
@@ -967,7 +967,7 @@ def test_the_knowledge_appendix_keeps_the_range_reader_limits() -> None:
     assert "[[tally:fig:approximate.control_above_95]]" in text
     assert "already separates the test concepts" in text
     assert "[[tally:table:approximate.above_words]]" in _joined("known_unknown")
-    assert "by interval" in _section("known_unknown").runin[2][1]
+    assert "by interval" in _section("known_unknown").after[0]
 
 
 def test_no_result_says_all_ten_checkpoints() -> None:
@@ -1004,7 +1004,7 @@ def test_the_terms_of_the_results_are_defined_in_the_method() -> None:
         "some negated",
         "tested on plain statements (honesty transfer)",
         "answers correctly (known) against those it does not (unknown)",
-        "within each relation such as occupation",
+        "within each relation such as capital",
         "each on its own draw of 64 training pairs",
         "A win rate is the share of decisive prompt pairs",
         "the popularity of the question's subject",
@@ -1015,4 +1015,18 @@ def test_the_terms_of_the_results_are_defined_in_the_method() -> None:
     assert "checkpoints ([[fig:teaser]], last row)" in steering
     assert "the next-token entropy" in _section("known_unknown").runin[1][1]
     assert "six runs" in _section("known_unknown").runin[1][1]
-    assert "A separate test asks" in _section("known_unknown").runin[2][1]
+    approximate = _section("known_unknown").after[0]
+    assert approximate.startswith(
+        "A separate test, on approximate answers, asks whether a direction "
+        "reads that an answer is a range."
+    )
+
+
+def test_the_example_relation_has_known_questions_on_every_checkpoint() -> None:
+    (relation,) = re.findall(r"within each relation such as (\w+)\.", _text())
+    for model in models("p9a"):
+        path = run("p9a", model)
+        guess = data(path, "table_guess.json")["rows"]
+        assert [r[6] for r in guess if r[0] == f"popqa:{relation}"] == [True]
+        rows = data(path, "table_popularity.json")["rows"]
+        assert sum(r[4] for r in rows if r[0] == relation) > 0, model

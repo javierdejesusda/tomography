@@ -431,7 +431,7 @@ def test_the_caption_says_what_is_drawn_and_what_the_controls_are(
         "(d) AUROC behind each cell, checkpoints from top to bottom: reader "
         "(circle), range of its random directions (grey band, cross at the "
         f"mean) and mean of {draws} refits on shuffled labels (tick).",
-        "Over every run, a random direction is above the reader only on "
+        "Over these contrasts, a random direction is above the reader only on "
         "GPT-2 medium, not drawn, on fictional generated (",
     ):
         assert phrase in detail, phrase

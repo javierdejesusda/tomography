@@ -222,7 +222,7 @@ METHOD = Section(
                 "([[table:assets]]). Knowledge sets PopQA questions "
                 "[[cite:mallen2023when]] a checkpoint "
                 "answers correctly (known) against those it does not "
-                "(unknown), within each relation such as occupation.",
+                "(unknown), within each relation such as capital.",
                 "We wrap each input in the paper's template and read "
                 "h(x, " + ELL + "), its residual stream at the last token "
                 "after layer " + ELL + " ([[fig:method]], "
@@ -421,8 +421,9 @@ RESULTS = Section(
                     "checkpoints and by point estimate on "
                     "[[tally:fig:knowledge_reading.above_best_point]] "
                     "([[fig:knowledge_reading]]); GPT-2 small has no "
-                    "direction. Predicting errors, its increment over the "
-                    "model's confidence has an interval covering zero on "
+                    "direction. On a second task, telling wrong from correct "
+                    "answers, its increment over the model's confidence has "
+                    "an interval covering zero on "
                     "[[tally:fig:knowledge_reading.dir_cover]], while that "
                     "of a probe fitted on correct and wrong labels lies "
                     "above zero on "
@@ -458,27 +459,30 @@ RESULTS = Section(
                     "[[tally:fig:knowledge_steering.selective]] runs; by the "
                     "largest shift, known questions move at least as much on "
                     "[[tally:fig:knowledge_steering.known_ge_unknown]] runs "
-                    "([[fig:knowledge_steering]]).",
-                ),
-                (
-                    "Approximate answers.",
-                    "A separate test asks whether a direction reads that an "
-                    "answer is a range. When the prompt ends on a range "
-                    "example, Qwen3 writes a range for "
-                    "[[num:fig:approximate.range_base_min]] to "
-                    "[[num:fig:approximate.range_base_max]] percent (base) "
-                    "and [[num:fig:approximate.range_post_min]] to "
-                    "[[num:fig:approximate.range_post_max]] percent "
-                    "(post-trained) of the quantities whose sourced answer "
-                    "is a range. A range reader is above its random control "
-                    "on "
-                    "[[tally:fig:approximate.reader_above_random]] "
-                    "checkpoints and above the question words on "
-                    "[[tally:table:approximate.above_words]], by interval "
-                    "([[fig:approximate]], [[table:approximate]]).",
+                    "([[fig:knowledge_steering]]). A known-question curve "
+                    "can rise at both signs of the coefficient, which a "
+                    "slope misses ([[fig:knowledge_steering]](c)), so "
+                    "steering is not shown to be specific to unknown "
+                    "questions on GPT-2 and base checkpoints; on "
+                    "post-trained ones known questions never move as far.",
                 ),
             ),
             items=("fig:knowledge_reading",),
+            after=(
+                "A separate test, on approximate answers, asks whether a "
+                "direction reads that an answer is a range. When the prompt "
+                "ends on a range example, Qwen3 writes a range for "
+                "[[num:fig:approximate.range_base_min]] to "
+                "[[num:fig:approximate.range_base_max]] percent (base) and "
+                "[[num:fig:approximate.range_post_min]] to "
+                "[[num:fig:approximate.range_post_max]] percent "
+                "(post-trained) of the quantities whose sourced answer is a "
+                "range. A range reader is above its random control on "
+                "[[tally:fig:approximate.reader_above_random]] checkpoints "
+                "and above the question words on "
+                "[[tally:table:approximate.above_words]], by interval "
+                "([[fig:approximate]], [[table:approximate]]).",
+            ),
         ),
         Section(
             "steering",
@@ -499,8 +503,10 @@ RESULTS = Section(
                 "(probability 0.05 by chance) on "
                 "[[tally:fig:teaser.steering]] checkpoints ([[fig:teaser]], "
                 "last row), and only Qwen3-1.7B-Base also keeps the fluency "
-                "rule, a result shown only in the run's files (GPT-2 small "
-                "has no fluency measure). "
+                "rule, for the mean of its three vectors at the positive "
+                "sign; on Qwen3-1.7B, Qwen3-4B-Base and Qwen3-4B the "
+                "perplexity ratio exceeds its limit (GPT-2 small has no "
+                "fluency measure). "
                 "[[table:steering_baselines]] sets five published steering "
                 "methods beside the reader.",
             ),

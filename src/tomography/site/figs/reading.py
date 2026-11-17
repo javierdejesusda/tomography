@@ -311,8 +311,10 @@ def _detail(found: dict[str, dict[str, Cell]], names: dict[str, str]) -> str:
         f"intervals over the test pairs ({sizes['sentiment']:,} sentiment, "
         f"{sizes['utility']:,} utility, {sizes['morality']:,} morality, "
         f"{sizes['truth']:,} truth). Grey ticks are the random direction at "
-        "the same layer. Sentiment comes from the run with a separate test "
-        "split."
+        "the same layer. Whiskers are the reader's own interval; the test "
+        "against the random direction is the difference interval "
+        "([[table:reading]]), not a whisker clearing its tick. Sentiment "
+        "comes from the run with a separate test split."
     )
 
 

@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from tomography.site import content
 from tomography.site import registry
 from tomography.site import stats
 from tomography.site.figs import knowledge_steering
@@ -287,6 +288,31 @@ def test_caption_says_what_is_drawn_and_counts_stay_per_role(
     assert (
         "A slope does not show the largest shift of a curve."
     ) in output.detail
+
+
+def test_the_text_says_what_the_steering_counts_mean(
+    output: registry.FigureOutput,
+) -> None:
+    curves = _curves(*EXEMPLARS[0])
+    known = curves["mean:lat: known"]
+    origin = known[int(np.argmin(np.abs(curves["x"])))]
+    assert known[0] > origin
+    assert known[-1] > origin
+    assert _shift(curves, "lat: known") > _shift(curves, "lat: unknown")
+    assert _headline(*EXEMPLARS[0])["selective"]
+    held = output.counts["known_ge_unknown"]
+    assert all(held[role].hits > 0 for role in ("gpt2", "base"))
+    assert held["post"].hits == 0
+    (section,) = [
+        s for s in content.RESULTS.subsections if s.key == "known_unknown"
+    ]
+    assert (
+        "A known-question curve can rise at both signs of the coefficient, "
+        "which a slope misses ([[fig:knowledge_steering]](c)), so steering "
+        "is not shown to be specific to unknown questions on GPT-2 and base "
+        "checkpoints; on post-trained ones known questions never move as "
+        "far."
+    ) in dict(section.runin)["Steering."]
 
 
 def test_the_caption_cites_no_item_and_no_literal_label(

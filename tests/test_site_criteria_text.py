@@ -7,6 +7,7 @@ import pytest
 
 from tomography.site import content
 from tomography.site import registry
+from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.figs import teaser as teaser_fig
 from tomography.site.manifest import Manifest
@@ -118,9 +119,34 @@ def test_the_fluent_utility_steering_checkpoint_is_the_computed_one() -> None:
         "Utility steering that beats every random direction meets the "
         "rule on only Qwen3-1.7B-Base"
     ) in _section("introduction")
-    assert "only Qwen3-1.7B-Base also keeps the fluency rule" in (
-        _section("steering")
-    )
+    broken = [
+        m for m in beats if teaser_fig._steering_fluent(manifest, m) is False
+    ]
+    unmeasured = [m for m in beats if m not in fluent and m not in broken]
+    assert [teaser_fig._steering_fluent(manifest, m) for m in unmeasured] == [
+        None
+    ]
+    assert [paper.display_name(m) for m in unmeasured] == ["GPT-2 small"]
+    for model in broken:
+        path = manifest.run("m1", model)
+        assert path is not None
+        rows = runfiles.rows(path, "table_effects.json")
+        (none,) = [r for r in rows if r["method"] == "none"]
+        steered = [
+            float(r["perplexity"])
+            for r in rows
+            if r["method"] == "logistic"
+            and r["coeff"] == teaser_fig.STEER_STRENGTH
+        ]
+        ratio = sum(steered) / len(steered) / float(none["perplexity"])
+        assert ratio > stats.FLUENT_MAX_RATIO, model
+    names = stats.join_and([paper.display_name(m) for m in broken])
+    assert (
+        "only Qwen3-1.7B-Base also keeps the fluency rule, for the mean of "
+        f"its three vectors at the positive sign; on {names} the perplexity "
+        "ratio exceeds its limit (GPT-2 small has no fluency measure)"
+    ) in _section("steering")
+    assert "run's files" not in _section("steering")
     for role in ("gpt2", "base", "post"):
         assert steering.counts["fluent03"][role].hits == 0, role
 
