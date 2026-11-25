@@ -205,17 +205,46 @@ def test_the_onset_depths_are_recomputed_per_role_for_all_forty_cells(
     assert cells == 40
 
 
-def test_the_caption_gives_every_onset_range_per_role(
+def test_the_claim_gives_the_sentiment_onset_range_per_role(
     output: registry.FigureOutput,
 ) -> None:
     text = output.claim
+    spans = {}
+    for role in ("gpt2", "base", "post"):
+        depths = _role_depths("sentiment", role)
+        spans[role] = f"{min(depths):.3f} to {max(depths):.3f}"
+        for concept in CONCEPTS:
+            if concept != "sentiment":
+                assert min(_role_depths(concept, role)) > max(depths)
+    assert text == (
+        "The margin of a sentiment reader over its random direction reaches "
+        f"0.1 at a relative depth of {spans['gpt2']} on GPT-2, "
+        f"{spans['base']} on Qwen3 base and {spans['post']} on post-trained "
+        "checkpoints, and later for utility, morality and truth."
+    )
+
+
+def test_the_claim_lists_every_concept_when_another_is_not_later(
+    output: registry.FigureOutput,
+) -> None:
+    numbers = dict(output.numbers)
+    numbers["onset_truth_post_min"] = numbers["onset_sentiment_post_min"]
+    names = {c: c for c in CONCEPTS}
+    text = a_reading_curves._claim(numbers, names, {})
+    assert "later" not in text
     for concept in CONCEPTS:
         for role in ("gpt2", "base", "post"):
-            depths = _role_depths(concept, role)
-            assert f"{min(depths):.3f} to {max(depths):.3f}" in text
-    assert "GPT-2" in text
-    assert "Qwen3 base" in text
-    assert "post-trained" in text
+            lo = numbers[f"onset_{concept}_{role}_min"]
+            hi = numbers[f"onset_{concept}_{role}_max"]
+            assert f"{lo:.3f} to {hi:.3f}" in text
+
+
+def test_the_caption_has_at_most_170_words_and_no_pointer(
+    output: registry.FigureOutput,
+) -> None:
+    text = f"{output.claim} {output.detail}"
+    assert len(text.split()) <= 170
+    assert "[[" not in text
 
 
 def test_no_checkpoint_lacks_an_onset_so_the_caption_does_not_say_it(
@@ -244,25 +273,35 @@ def test_the_guards_are_green(output: registry.FigureOutput) -> None:
     assert checks.problems(output.figure) == []
 
 
-def test_the_caption_avoids_first_and_points_to_the_main_figure(
+def test_the_caption_avoids_first_and_names_the_encoding(
     output: registry.FigureOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
     assert "gpt-2" not in text
     assert "first" not in text.lower()
-    assert "[[fig:reading]]" in text
-    assert "darker lines are larger checkpoints" in text
-    assert "95 percent interval over seeds" in text
+    assert (
+        "Lines are reader accuracy minus random-direction accuracy at every "
+        "layer, one per checkpoint (rows: roles; darker: larger)."
+    ) in text
+    assert "Dots mark the layer read." in text
+    assert (
+        "The grey band is the 95 percent interval over seeds of the random "
+        "direction."
+    ) in text
+    assert text.endswith("Sentiment curves come from the finder comparison.")
 
 
-def test_the_truth_onset_is_called_a_crossing_on_its_pair_count(
+def test_the_onset_is_called_a_crossing_without_an_interval(
     output: registry.FigureOutput,
 ) -> None:
     text = output.detail
     n = int(output.numbers["truth_n"])
     assert n == 59
-    assert "earliest layer at which the margin curve crosses 0.1" in text
-    assert f"truth the curve rests on {n} truth pairs" in text
+    assert (
+        "Ticks on the x axis mark the onset, the earliest layer where the "
+        "margin crosses 0.1, which carries no interval."
+    ) in text
+    assert "truth pairs" not in text
 
 
 ROLE_ROWS = ("gpt2", "base", "post")

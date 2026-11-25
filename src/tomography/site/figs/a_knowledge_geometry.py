@@ -58,30 +58,21 @@ LABELS = {
 FILLED_EDGE = 0.3
 OPEN_EDGE = 0.6
 HEADROOM = 0.22
+CLAIM = (
+    "Hidden states behind the entity readers for one checkpoint per role "
+    "({names}), beside two controls."
+)
 DETAIL = (
-    "Each row is one checkpoint, one per role: {names}. Columns (a) to (c) "
-    "place test questions of the two entity contrasts on the two leading "
-    "principal components of the hidden states at the last token of the "
-    "few-shot prompt: layer 1, an early control; the layer the knowledge "
-    "reader was chosen at; and the last layer. Layer 0 is not drawn, "
-    "because every prompt ends in the same token. Column (d) is a second "
-    "control with no model in it: the same questions placed by the two "
-    "leading components of the TF-IDF weights of their words (latent "
-    "semantic analysis). The stored questions of a row are test questions "
-    "only, at most {side} per side of each contrast, and the components of "
-    "a panel are fitted on them, so no training question enters a view. A "
-    "known question (triangle) is a PopQA question labelled known for the "
-    "checkpoint; an unknown question is a PopQA question about a real "
-    "entity labelled unknown (circle) or the question of a generated "
-    "fictional entity (star). Each panel draws at most {cap} questions of "
-    "each of these three groups, the first by a hash of their identifier, "
-    "and its number is the AUROC of known against unknown along whichever "
-    "of its two axes separates them better, computed on every stored "
-    "question ({low} to {high} per checkpoint) and folded, so it is 0.5 or "
-    "more whichever class lies higher on the axis. Axis scales differ "
-    "between panels and carry no unit. A separation that the words alone "
-    "also show does not need the hidden states. The data file holds every "
-    "stored question of these views for {with_views}."
+    "Columns (a) to (c) place test questions of the two entity contrasts on "
+    "the two leading principal components of the hidden states at the last "
+    "prompt token: at layer 1 (an early control), at the layer of the "
+    "knowledge reader and at the last layer. Column (d), a control with no "
+    "model, places them by the two leading components of the TF-IDF weights "
+    "of their words. A panel draws at most {cap} questions of each of the "
+    "three groups of the legend. Its number is the AUROC of known against "
+    "unknown questions along the better of its two axes, folded to be 0.5 "
+    "or more. Axis scales differ between panels. A separation that the "
+    "words alone also show does not need the hidden states."
 )
 
 
@@ -396,16 +387,6 @@ def build(manifest: Manifest) -> FigureOutput:
             }
         ),
     }
-    claim = (
-        f"On {held} of the {len(SHOWN)} checkpoints shown, the better of the "
-        "two leading principal components of the hidden states separates "
-        "known from unknown entity questions at least as well at the last "
-        "layer as at the layer of the reader, with an AUROC of "
-        f"{last[0]:.2f} to {last[1]:.2f} against {reader[0]:.2f} to "
-        f"{reader[1]:.2f}; layer 1 gives {early[0]:.2f} to {early[1]:.2f} "
-        "and the better of two components of the words alone "
-        f"{words[0]:.2f} to {words[1]:.2f}."
-    )
     numbers = {
         "reader_min": reader[0],
         "reader_max": reader[1],
@@ -423,15 +404,10 @@ def build(manifest: Manifest) -> FigureOutput:
     }
     return FigureOutput(
         fig,
-        claim,
-        DETAIL.format(
-            names=stats.join_and([paper.display_name(m) for m in SHOWN]),
-            cap=MAX_DRAWN,
-            side=side,
-            low=min(stored),
-            high=max(stored),
-            with_views=stats.per_role_text(counts["with_views"]),
+        CLAIM.format(
+            names=stats.join_and([paper.display_name(m) for m in SHOWN])
         ),
+        DETAIL.format(cap=MAX_DRAWN),
         numbers,
         _group.csv_text(HEADER, csv_rows),
         counts,

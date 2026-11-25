@@ -1,11 +1,12 @@
-"""Appendix table: The design of every experiment shown on the page.
+"""Appendix table: The design of each experiment the main text uses.
 
-A text table in blocks, one per experiment, under a heading row per study:
-its question, stimuli, labels, splits, controls, published baselines, metric
-and checkpoints. Inside a study a block leaves out an aspect that is the same
-as in the block above it. The text is static, but every count inside it is
-read from the stored configuration or summary of the runs, and the
-checkpoints are counted per role from the runs that exist.
+A text table with one row per experiment under a heading row per study: its
+stimuli and labels, splits, controls, published baselines and checkpoints.
+The text is static, but every count inside it is read from the stored
+configuration or summary of the runs, and the checkpoints are counted per
+role from the runs that exist. The question and the metric of each
+experiment, and the experiments that have no figure or table on the page,
+are in the methodology document.
 """
 
 from collections.abc import Mapping
@@ -14,636 +15,368 @@ import json
 import re
 from typing import Any
 
+from tomography.site import params
 from tomography.site import runfiles
 from tomography.site import stats
 from tomography.site.manifest import Manifest
 from tomography.site.registry import TableOutput
 
-ASPECTS = (
-    "Question",
-    "Stimuli",
-    "Labels",
+COLUMNS = (
+    "Experiment",
+    "Stimuli and labels",
     "Splits",
     "Controls",
     "Published baselines",
-    "Metric",
     "Checkpoints",
 )
-SLOT = re.compile(r"\{([a-z_.]+)\}")
-NO_MODEL = "None: no model is loaded."
+SLOT = re.compile(r"\{([a-z_]+)\.([a-z_.]+)\}")
+STANDARD = "Standard."
 NONE = "None."
-READING_CONTROLS = (
-    "A random direction oriented on the training labels, the reader scored "
-    "against shuffled labels, and classifiers on the words and on the "
-    "characters of the texts."
-)
-SWEEP_CONTROLS = (
-    "A random direction oriented on the training labels, and the reader "
-    "scored against shuffled labels."
-)
+ABOVE = "As above."
+SWEEP_CONTROLS = "Random direction, shuffled labels."
 PROBE = (
     "None; the reader is itself a logistic-regression probe, made the "
     "default finder after pilot runs (post hoc)."
 )
-SAME_SWEEP = (
-    "Logistic regression (a linear probe) and the mean difference (the "
-    "mass-mean probe), in the same sweep as the finder of the paper."
-)
-LOGISTIC_SWEEP = (
-    "PCA of the differences (the finder of the paper) and the mean "
-    "difference (the mass-mean probe), in the same sweep as the "
-    "logistic-regression reader."
-)
-NO_KNOWN = "GPT-2 small has too few known questions for a contrast"
-DRAWS = "{n_seeds} readers, each on its own draw of {n_pairs} training pairs; "
+REPORTED = params.REPORT_PAIRS["sentiment"]
+DRAWS = ("n_seeds", "n_pairs")
+
+READING = "Reading"
+FINDERS = "Finders"
+TRUTH = "Truth"
+KNOWLEDGE = "Knowledge"
+STEERING = "Steering"
+POST = "Post-training"
+
+RUNS = {
+    "sentiment": "r1",
+    "training_size": "p3",
+    "utility": "r2",
+    "morality": "r3",
+    "truth": "r7",
+    "honesty": "r5",
+    "wording": "p1",
+    "pairing": "p4",
+    "published_finders": "b2",
+    "truthfulqa": "r6",
+    "labels": "p9a",
+    "knowledge_reading": "p9b",
+    "error_prediction": "p9c",
+    "error_detectors": "b1",
+    "knowledge_steering": "p9d",
+    "knowledge_views": "v1",
+    "approximate_answers": "p10a",
+    "approximate_reading": "p10b",
+    "sentiment_steering": "c1",
+    "finders_steering": "m1",
+    "steering_baselines": "b3",
+    "post_training": "p8",
+}
+PAIRED = "post_training"
 
 
 @dataclasses.dataclass(frozen=True)
-class Card:
+class Row:
     """The design of one experiment.
 
-    A `{path}` inside a text is replaced by the count stored at that dotted
-    path of the configuration, or else of the summary, of the runs.
+    A `{key.path}` inside a text is replaced by the count stored at that
+    dotted path of the configuration, or else of the summary, of the runs of
+    the experiment `key` of `RUNS`.
 
     Attributes:
         key: Name of the experiment in the numbers and counts of the table.
         study: Study the experiment belongs to.
         name: Name of the experiment on the page.
-        codes: Result directories the experiment reads.
-        question: What the experiment asks.
-        stimuli: What the model is given.
-        labels: Where the labels come from.
+        stimuli: What the model is given and where the labels come from.
         splits: Which items fit, choose and score.
-        controls: What shows what a score reaches without reading the
-            concept from the hidden states.
+        controls: What uses no direction fitted for the concept.
         baselines: Published methods run on the same items.
-        metric: What is reported, with its interval.
-        scope: Sentence after the count of checkpoints.
-        paired: Whether one stored run names the checkpoints it compares.
-        model_free: Whether the experiment loads no model.
+        scope: Clause after the count of checkpoints.
+        draws: Experiment whose number of readers and of training pairs
+            this one shares, where its splits rely on them without printing
+            them.
+        also: Other stored counts of the experiment that the page quotes.
     """
 
     key: str
     study: str
     name: str
-    codes: tuple[str, ...]
-    question: str
     stimuli: str
-    labels: str
     splits: str
     controls: str
     baselines: str
-    metric: str
     scope: str = ""
-    paired: bool = False
-    model_free: bool = False
+    draws: str = ""
+    also: tuple[str, ...] = ()
 
     def texts(self) -> tuple[str, ...]:
-        """Lists the static texts of the card, in the order of the rows."""
-        return (
-            self.question,
-            self.stimuli,
-            self.labels,
-            self.splits,
-            self.controls,
-            self.baselines,
-            self.metric,
-        )
+        """Lists the static texts of the row, in the order of the columns."""
+        return (self.stimuli, self.splits, self.controls, self.baselines)
 
 
-READING = "Reading concepts"
-FINDERS = "Finders"
-KNOWLEDGE = "Known and unknown questions"
-APPROXIMATE = "Approximate answers"
-TRUTH = "Truth"
-STEERING = "Steering"
-POST = "Post-training"
+CLAIM = "The design of each experiment the main text uses."
+DETAIL = (
+    "Standard splits are {utility.n_seeds} readers, each on its own draw of "
+    "{utility.n_pairs} training pairs, with the layer chosen on validation "
+    "items and the score on test items; a Splits cell gives the sizes and "
+    "what differs. Standard controls are a random direction oriented on the "
+    "training labels, the reader scored against shuffled labels, and the "
+    "words alone. A control uses no direction fitted for the concept; a "
+    "baseline is a published method run on the same items. Select pairs "
+    "choose the layer, and report pairs, which that choice does not use, "
+    "give the score. Post hoc marks a choice made after results were seen. "
+    "Every count is read from the stored configuration or summary of the "
+    "runs and is the same on every checkpoint of the experiment. Checkpoints "
+    "are counted per role in the order GPT-2, Qwen3 base, Qwen3 "
+    "post-trained; All stands for "
+)
 
-CARDS = (
-    Card(
+ROWS = (
+    Row(
         "sentiment",
         READING,
         "Sentiment",
-        ("r1",),
-        "Does a direction separate positive from negative phrases?",
-        "SST-2 phrases of at least {min_words} words for training and the "
-        "full sentences of its validation split for scoring, in the template "
-        "of the paper.",
-        "The binary sentiment label of SST-2.",
-        DRAWS + "the same {n_eval_pairs} validation pairs choose the layer "
-        "and give the score, so the value is optimistic: biased upward by "
-        "the choice of the layer.",
-        READING_CONTROLS,
+        "SST-2 phrases for training, validation sentences for scoring.",
+        "Main run: the {sentiment.n_eval_pairs} validation pairs choose the "
+        "layer and give the score (optimistic). Reported run: "
+        "{training_size.n_seeds} draws; half of the validation sentences "
+        f"select, the other half ({REPORTED} pairs) reports.",
+        STANDARD,
         PROBE,
-        "Pair accuracy at the chosen layer, as the mean over the readers.",
+        draws="utility",
+        also=("min_words",),
     ),
-    Card(
+    Row(
         "utility",
         READING,
         "Utility",
-        ("r2",),
-        "Does a direction read which of two scenarios is more pleasant?",
-        "ETHICS utilitarianism rows, two scenarios per row, in the template "
-        "of the paper.",
-        "The order of the source row, which lists the more pleasant scenario "
+        "ETHICS utilitarianism rows, which list the more pleasant scenario "
         "before the other.",
-        DRAWS + "the layer is chosen on {n_eval_pairs.val} validation pairs "
-        "and the score is on {n_eval_pairs.test} test pairs, the test file "
-        "of the source.",
-        READING_CONTROLS,
-        PROBE,
-        "Pair accuracy on the test pairs, as the mean over the readers.",
+        "{utility.n_eval_pairs.val} validation and "
+        "{utility.n_eval_pairs.test} test pairs.",
+        STANDARD,
+        ABOVE,
     ),
-    Card(
+    Row(
         "morality",
         READING,
         "Morality",
-        ("r3",),
-        "Does a direction read whether a scenario is acceptable?",
-        "ETHICS commonsense scenarios, the short ones only, in the template "
-        "of the paper.",
-        "The source label, flipped so that the positive member is the "
-        "acceptable scenario.",
-        DRAWS + "the layer is chosen on {n_eval_pairs.val} validation pairs "
-        "and the score is on {n_eval_pairs.test} test pairs, the test file "
-        "of the source.",
-        READING_CONTROLS,
-        PROBE,
-        "Pair accuracy on the test pairs, as the mean over the readers.",
+        "Short ETHICS commonsense scenarios; the acceptable one is positive.",
+        "{morality.n_eval_pairs.val} validation and "
+        "{morality.n_eval_pairs.test} test pairs.",
+        STANDARD,
+        ABOVE,
+        draws="utility",
     ),
-    Card(
-        "text_only",
+    Row(
+        "truth",
         READING,
-        "Text-only classifiers",
-        ("tb1",),
-        "How much of the accuracy of a reader do the words and the "
-        "characters of its own pairs reach with no model?",
-        "The raw training and test texts of the sentiment, utility, "
-        "morality, truth and honesty readers and of the training-set size "
-        "run.",
-        "Those of each reader.",
-        "One fit per training set of the reader, scored on the test pairs "
-        "of that reader.",
-        "This run is the text-only control of those readers.",
-        NONE,
-        "Pair accuracy, ties sharing the credit, with a Wilson interval "
-        "over the test pairs.",
-        model_free=True,
+        "Truth",
+        "True and false statements; nine Geometry of Truth sets with no refit.",
+        "{truth.sets.test.n_eval_pairs} test pairs.",
+        STANDARD,
+        ABOVE,
+        draws="utility",
     ),
-    Card(
-        "training_size",
+    Row(
+        "honesty",
         READING,
-        "Training-set size",
-        ("p3",),
-        "How many training pairs does a direction need, and how much can "
-        "one draw mislead?",
-        "Sentiment, truth and utility pairs, with truth also read on the "
-        "cities and the common-claim statements.",
-        "Those of the source datasets.",
-        "{n_seeds} resampled training sets per size; for sentiment the "
-        "SST-2 validation sentences are halved by a seeded draw, one half "
-        "chooses the layer and the other gives the score.",
-        READING_CONTROLS,
-        PROBE,
-        "Pair accuracy on the report pairs at each training size, with a "
-        "bootstrap interval over the resamples.",
+        "Honesty transfer",
+        "True statements under an honest and an untruthful persona, read at "
+        "the response tokens; tested on plain statements.",
+        "{honesty.n_eval_pairs.transfer.val} validation and "
+        "{honesty.n_eval_pairs.transfer.test} test pairs.",
+        STANDARD,
+        ABOVE,
+        draws="utility",
     ),
-    Card(
-        "token_position",
-        READING,
-        "Token position and a misleading sentence",
-        ("p2",),
-        "Where in the prompt is a concept read, and what does a misleading "
-        "sentence in the prompt cost?",
-        "Sentiment, truth and utility pairs in the template of the paper, "
-        "read at the last token, at the concept tokens and as the mean over "
-        "tokens, with and without an added sentence that misleads about the "
-        "concept.",
-        "Those of the source datasets.",
-        DRAWS + "the layer is chosen on pairs that the score does not use.",
-        SWEEP_CONTROLS,
-        "The zero-shot heuristic of the paper, which asks the model for the "
-        "level in words.",
-        "Pair accuracy per token position and per kind of prompt.",
-    ),
-    Card(
+    Row(
         "wording",
         READING,
         "Prompt wording",
-        ("p1",),
-        "How much does the wording of the template move a reading?",
-        "Sentiment, truth and emotion pairs, each in variants of the "
-        "template of the paper with the same items and the same draws.",
-        "Those of the source datasets.",
-        DRAWS + "the layer is chosen on pairs that the score does not use.",
+        "Sentiment, truth and emotion pairs in variants of the template; "
+        "same items and draws.",
+        STANDARD,
         SWEEP_CONTROLS,
-        PROBE,
-        "Pair accuracy per variant and its spread across the variants.",
+        ABOVE,
+        draws="utility",
     ),
-    Card(
-        "agreement",
-        READING,
-        "Agreement of directions",
-        ("a1",),
-        "Do directions fitted on different draws of the training pairs agree?",
-        "The stored directions of the sentiment, utility, morality, "
-        "honesty and truth readers; no activation is read.",
-        "None: it compares directions.",
-        "The {n_seeds} draws of each reader, at the layer at half of the "
-        "depth.",
-        "The absolute cosine expected between random directions.",
-        NONE,
-        "The mean cosine between the directions of two draws, with a t "
-        "interval on jackknife values.",
-    ),
-    Card(
+    Row(
         "pairing",
         FINDERS,
-        "Pairing, preprocessing and finder",
-        ("p4",),
-        "Do the pairing, the preprocessing of the differences and the "
-        "finder change what is read?",
-        "Sentiment, truth and utility pairs; the pairing, the preprocessing "
-        "and the finder are varied one at a time around the finder of the "
-        "paper.",
-        "Those of the source datasets.",
-        DRAWS + "every series, the random direction included, is read at "
-        "the layer chosen on its own select split and scored on report "
-        "pairs.",
-        "A random direction with a layer of its own, and the reader scored "
-        "against shuffled labels.",
-        SAME_SWEEP,
-        "Pair accuracy, and its margin over the random direction.",
+        "Finder comparison",
+        "Sentiment, truth and utility pairs; pairing, preprocessing and "
+        "finder vary one at a time.",
+        "Each series, the random direction included, has the layer of its "
+        "own select split; scores on report pairs.",
+        SWEEP_CONTROLS,
+        "Logistic regression, mean difference (mass-mean probe).",
+        draws="utility",
     ),
-    Card(
-        "finders_steering",
-        FINDERS,
-        "Five finders on utility",
-        ("m1",),
-        "Do five finders that read utility also steer it?",
-        "ETHICS utility pairs for reading; {n_prompts} truncated scenarios "
-        "that the model continues under steering.",
-        "The order of the source row for reading; a sentiment classifier, "
-        "with a second one as a check, for the continuations.",
-        "Reading is scored on held-out pairs; for the same prompt and seed, "
-        "the continuation steered at a positive coefficient is compared "
-        "with the one steered at the negative coefficient.",
-        "A random finder, read and steered like the others, with "
-        "{n_steer_seeds} steering vectors per finder.",
-        "Logistic regression (a linear probe) and the mean difference (the "
-        "mass-mean probe), among the five finders.",
-        "Pair accuracy; the win rate of the positive continuation on "
-        "decisive pairs, with a Wilson interval.",
-    ),
-    Card(
+    Row(
         "published_finders",
         FINDERS,
         "Published finders",
-        ("b2",),
-        "Does the finder of the paper read truth and sentiment as well as "
-        "published finders fitted on the same pairs?",
-        "Statements of three Geometry of Truth sets, each paired with its "
-        "negation, and SST-2 texts.",
-        "The source labels; a pair holds exactly one true member.",
-        "{n_seeds} training sets of {n_pairs} pairs; each series chooses "
-        "its layer on the validation pairs and is scored on the test pairs.",
-        "A random direction, the finder of the paper scored against labels "
-        "shuffled inside each pair, and classifiers on the words and on the "
-        "characters of the texts.",
-        "Mass-mean and whitened mass-mean probes, a logistic-regression "
-        "probe and CCS with the best of {ccs_restarts} restarts.",
-        "Test accuracy, with a Wilson interval over the test pairs.",
+        "Three Geometry of Truth sets, each statement paired with its "
+        "negation; SST-2 texts.",
+        STANDARD,
+        STANDARD,
+        "Mass-mean and whitened mass-mean probes, logistic-regression probe, "
+        "contrast-consistent search.",
+        draws="utility",
+        also=("ccs_restarts",),
     ),
-    Card(
-        "labels",
-        KNOWLEDGE,
-        "Labels from the behaviour of the model",
-        ("p9a",),
-        "Which questions does each model know?",
-        "Closed-book questions in nine groups, built from PopQA, TriviaQA, "
-        "KUQ, FalseQA, SyntHal, NQ-open and Wikidata, asked with a few-shot "
-        "prompt of {n_shots} examples. The PopQA part of the pool was "
-        "widened from four to twelve relations after the guess filter of "
-        "earlier labelling runs left too few known questions (post hoc).",
-        "Known when the greedy answer and at least "
-        "{recipe.known_min_correct} of {n_samples} sampled answers contain "
-        "a gold alias; unknown when the greedy answer and every sample are "
-        "wrong; the rest is uncertain and left out. Questions without a gold "
-        "answer (invented subjects, SyntHal, unknowable details, false "
-        "premises and KUQ) are unknown by construction, and the sport "
-        "relation of PopQA never counts as known: a question of it that the "
-        "model answers is left out as uncertain, and its unknown questions "
-        "stay unknown. A group of "
-        "questions that a constant guess answers often supplies no known "
-        "question, and a model enters the known against unknown contrasts "
-        "only with at least {min_known} known questions.",
-        "Questions are hashed into train, validation and test by subject or "
-        "source, so one subject stays in one split.",
-        NONE,
-        NONE,
-        "The number of known, unknown and uncertain questions per group.",
-    ),
-    Card(
-        "knowledge_reading",
-        KNOWLEDGE,
-        "Reading known against unknown",
-        ("p9b",),
-        "Does a direction separate questions a model answers from questions "
-        "it cannot answer?",
-        "The labelled questions in the few-shot prompt, as contrasts of a "
-        "known group against an unknown group and contrasts between two "
-        "kinds of unknown question; some contrasts keep a single dataset on "
-        "both sides.",
-        "Those of the labelling run of the same checkpoint.",
-        "{n_seeds} draws of {n_pairs} training pairs; the layer is chosen "
-        "on the validation questions and the score is on the test questions.",
-        "A random direction, classifiers on the words and on the characters "
-        "of the question, and the popularity of the subject, each on the "
-        "test questions of the reader.",
-        LOGISTIC_SWEEP,
-        "AUROC, inside each relation where the contrast holds PopQA "
-        "questions; its stored interval resamples the draws, not the test "
-        "questions.",
-        scope=f"{NO_KNOWN}, so its run reads only the contrasts between two "
-        "kinds of unknown question.",
-    ),
-    Card(
-        "knowledge_views",
-        KNOWLEDGE,
-        "Hidden states behind the readers",
-        ("v1",),
-        "What do the hidden states behind the knowledge readers look like, "
-        "and do the stored scores reproduce?",
-        "The train and test questions of the reading run, read again at "
-        "every layer that run read, where the readers are refitted and "
-        "compared with the stored scores at the layer that run chose; the "
-        "views are drawn at layer 1, at that layer and at the last layer.",
-        "Those of the labelling run of the same checkpoint.",
-        "Those of the reading run; nothing is chosen again.",
-        "A random direction, readers refitted on labels permuted inside "
-        "each group, a view of the text alone and the popularity of the "
-        "subject.",
-        "None of its own; it recomputes the readers of the reading run.",
-        "The AUROC of each recomputed reader beside the stored one, and "
-        "projections of the hidden states on two axes.",
-        scope=f"{NO_KNOWN}, so its run views only the contrasts between two "
-        "kinds of unknown question.",
-    ),
-    Card(
-        "error_prediction",
-        KNOWLEDGE,
-        "Predicting wrong answers",
-        ("p9c",),
-        "Does the knowledge direction predict a wrong answer beyond the "
-        "confidence of the model?",
-        "PopQA, TriviaQA and NQ-open questions with the greedy answer of "
-        "the model.",
-        "Whether the greedy answer contains a gold alias.",
-        "The direction is fitted on {n_seeds} draws of {n_pairs} training "
-        "pairs; probes and layers are chosen on train and validation "
-        "questions and every score is on the test questions.",
-        "The popularity of the subject, the accuracy of the relation, the "
-        "length of the question and the likelihood of the name of the "
-        "subject.",
-        "The confidence of the model: the probability of the most likely "
-        "next token, the negative entropy of that distribution, the mean "
-        "log-probability of the answer tokens, the share of sampled answers "
-        "equal to the greedy answer, and P(True).",
-        "AUROC of wrong against correct answers, inside each relation on "
-        "PopQA, with a bootstrap interval over the test questions.",
-        scope=f"{NO_KNOWN}, so its run has no knowledge direction.",
-    ),
-    Card(
-        "error_detectors",
-        KNOWLEDGE,
-        "Published error detectors",
-        ("b1",),
-        "Do published error detectors do better than the knowledge "
-        "direction on the same test questions?",
-        "The questions and the greedy and sampled answers of the "
-        "error-prediction run.",
-        "Whether the greedy answer contains a gold alias.",
-        "Those of the error-prediction run; the probe at the answer token "
-        "chooses its layer on validation questions.",
-        "The popularity of the subject and the length of the question.",
-        "A probe at the last token of the answer, semantic entropy and "
-        "EigenScore, beside P(True) and the other signals of the "
-        "error-prediction run.",
-        "AUROC of wrong against correct answers, inside each relation on "
-        "PopQA, with a bootstrap interval over the test questions.",
-        scope=f"{NO_KNOWN}, so its run has no knowledge direction.",
-    ),
-    Card(
-        "knowledge_steering",
-        KNOWLEDGE,
-        "Steering along the knowledge direction",
-        ("p9d",),
-        "Does adding the knowledge direction change how a model answers?",
-        "Known and unknown test questions, answered while the direction is "
-        "added over a grid of relative coefficients.",
-        "The outcome is the abstention rate, by phrase matching, on "
-        "post-trained checkpoints and the entropy of the next-token "
-        "distribution on the others.",
-        "The direction and its layer come from train and validation "
-        "questions; the steered questions are test questions.",
-        "{n_random} random directions of the same norm, steered through "
-        "the same grid.",
-        NONE,
-        "The mean slope of the outcome over the coefficients, with a "
-        "bootstrap interval over the questions, against each random "
-        "direction and between unknown and known questions.",
-        scope=f"{NO_KNOWN}.",
-    ),
-    Card(
-        "approximate_answers",
-        APPROXIMATE,
-        "Answers to range and exact questions",
-        ("p10a",),
-        "Does a model answer with a range when the sourced answer is a range?",
-        "Wikidata quantity questions on height, wingspan and duration, "
-        "{n_per_side} per side and family, and people with one exact "
-        "height.",
-        "The kind of the sourced answer, range or exact, from the bounds of "
-        "the Wikidata statement and not from a model.",
-        "Every question is asked, free and when told to give one number, "
-        "with one greedy and {n_samples} sampled answers.",
-        "The people, who are living things with an exact answer.",
-        NONE,
-        "The share of answers of each form and the range share on range "
-        "questions minus that on exact questions, with Wilson and bootstrap "
-        "intervals over the questions.",
-    ),
-    Card(
-        "approximate_reading",
-        APPROXIMATE,
-        "Reading range against exact",
-        ("p10b",),
-        "Can a direction tell a range question from an exact one before "
-        "the model answers?",
-        "The same questions, bare and in the concept template of the paper, "
-        "read at the last token.",
-        "The kind of the sourced answer, as above.",
-        "Each family is hashed into train, validation and test; readers "
-        "are fitted on one, two or three families, {n_seeds} draws each, "
-        "with the layer chosen on validation questions and the score on "
-        "test questions, also of a family held out of training.",
-        "A random direction with a layer of its own, classifiers on the "
-        "words and on the characters, the length of the question, the "
-        "popularity of the subject, and {n_people} people as test items.",
-        LOGISTIC_SWEEP,
-        "AUROC of the test questions with range as the positive class, "
-        "with a bootstrap interval over the test questions.",
-    ),
-    Card(
-        "approximate_links",
-        APPROXIMATE,
-        "Links to knowledge and to hedging",
-        ("p10c",),
-        "Is the range direction related to the knowledge directions and to "
-        "how often the model answers with a range?",
-        "The stored range reader, knowledge readers and answers of the "
-        "same checkpoint; nothing is trained.",
-        "The kind of the sourced answer, as above.",
-        "The link to the answers uses the test questions, inside one kind "
-        "of question.",
-        "The band of {n_random} random unit directions at the same layer.",
-        NONE,
-        "The cosine between directions per layer, the AUROC of the "
-        "knowledge readers on the quantity questions and a rank "
-        "correlation, with bootstrap intervals over the questions.",
-    ),
-    Card(
-        "truth",
-        TRUTH,
-        "True and false statements",
-        ("r7",),
-        "Does a direction read whether a statement is true, also on "
-        "statements from other sources?",
-        "The true and false statements of the representation engineering "
-        "repository, and nine Geometry of Truth sets scored with no refit.",
-        "The true or false label of each source file.",
-        DRAWS + "the layer is chosen on validation pairs and the score is "
-        "on test pairs; a source statement stays in one split.",
-        READING_CONTROLS,
-        PROBE,
-        "Pair accuracy on the test pairs and on each of the other sets.",
-    ),
-    Card(
+    Row(
         "truthfulqa",
         TRUTH,
         "TruthfulQA",
-        ("r6",),
-        "Does a reader choose the true answer more often than the words alone?",
-        "{n_questions} multiple-choice questions with shuffled choices; "
-        "the readers are fitted on TruthfulQA train questions, on ARC "
-        "items or on true statements under two personas.",
-        "The correct choice of the source.",
-        "{n_seeds} readers; {n_train} train, {n_val} validation and "
-        "{n_test} test questions by hash, with the layer chosen on the "
-        "validation questions.",
-        "A random direction, shuffled labels, and classifiers on the words "
-        "and on the characters of the text alone.",
-        "The standard and the heuristic zero-shot scorers of the paper, run "
-        "on all {n_questions} questions and compared with the readers on the "
-        "test questions.",
-        "The share of test questions on which the true choice scores highest.",
+        "{truthfulqa.n_questions} multiple-choice questions; readers fitted "
+        "on train questions, ARC items or persona statements.",
+        "{truthfulqa.n_seeds} readers; {truthfulqa.n_train} train, "
+        "{truthfulqa.n_val} validation, {truthfulqa.n_test} test questions.",
+        STANDARD,
+        "The two zero-shot scorers of the paper.",
     ),
-    Card(
-        "honesty",
-        TRUTH,
-        "Honesty transfer",
-        ("r5",),
-        "Does a direction found from an honest and an untruthful persona "
-        "read the truth of plain statements?",
-        "True statements under an honest and an untruthful persona, read "
-        "at the response tokens; plain true and false statements for the "
-        "test.",
-        "In training the persona, which the template sets; in the test the "
-        "true or false label of the statements file.",
-        DRAWS + "the layer is chosen on {n_eval_pairs.transfer.val} "
-        "validation pairs and the score is on {n_eval_pairs.transfer.test} "
-        "test pairs, both of plain statements.",
-        READING_CONTROLS,
-        PROBE,
-        "Pair accuracy on the plain statements, beside the accuracy inside "
-        "the persona template.",
+    Row(
+        "labels",
+        KNOWLEDGE,
+        "Labels",
+        "Closed-book questions from seven sources. The PopQA part of the "
+        "pool was widened from four to twelve relations after the guess "
+        "filter of earlier labelling runs left too few known questions "
+        "(post hoc). Known: the greedy answer and at least "
+        "{labels.recipe.known_min_correct} of {labels.n_samples} sampled "
+        "answers are correct; unknown: all are wrong, or no gold answer "
+        "exists; the rest is left out.",
+        "Hashed by subject or source.",
+        NONE,
+        NONE,
+        also=("min_known", "n_shots"),
     ),
-    Card(
+    Row(
+        "knowledge_reading",
+        KNOWLEDGE,
+        "Knowledge reading",
+        "Known against unknown questions of the same checkpoint.",
+        "{knowledge_reading.n_seeds} draws of {knowledge_reading.n_pairs} "
+        "training pairs.",
+        "Random direction, the words alone, popularity.",
+        "The finder of the paper, mean difference.",
+        scope="too few known questions on GPT-2 small",
+    ),
+    Row(
+        "error_prediction",
+        KNOWLEDGE,
+        "Error prediction",
+        "PopQA, TriviaQA and NQ-open questions; labelled by the correctness "
+        "of the greedy answer.",
+        ABOVE,
+        "Popularity, relation accuracy, question length, likelihood of the "
+        "subject's name.",
+        "The model's confidence.",
+        scope="no direction on GPT-2 small",
+        draws="knowledge_reading",
+    ),
+    Row(
+        "error_detectors",
+        KNOWLEDGE,
+        "Published detectors",
+        "The same questions and answers.",
+        ABOVE,
+        "Popularity, question length.",
+        "Answer-token probe, semantic entropy, EigenScore, P(True).",
+        scope="no direction on GPT-2 small",
+    ),
+    Row(
+        "knowledge_steering",
+        KNOWLEDGE,
+        "Knowledge steering",
+        "Known and unknown test questions over a grid of relative "
+        "coefficients.",
+        "Direction from train and validation questions.",
+        "{knowledge_steering.n_random} random directions of the same norm.",
+        NONE,
+    ),
+    Row(
+        "knowledge_views",
+        KNOWLEDGE,
+        "Activation views",
+        "The questions of knowledge reading, at every layer it read.",
+        "As knowledge reading.",
+        "Random direction, labels permuted inside each group, the text "
+        "alone, popularity.",
+        NONE,
+    ),
+    Row(
+        "approximate_answers",
+        KNOWLEDGE,
+        "Approximate answers",
+        "Wikidata quantity questions, {approximate_answers.n_per_side} per "
+        "side and family, and people with one exact height; range or exact "
+        "by the Wikidata bounds.",
+        "One greedy and {approximate_answers.n_samples} sampled answers.",
+        "The people.",
+        NONE,
+    ),
+    Row(
+        "approximate_reading",
+        KNOWLEDGE,
+        "Range reader",
+        "The same questions.",
+        "Hashed by family; {approximate_reading.n_seeds} draws; also scored "
+        "on a held-out family.",
+        "Random direction, the words alone, question length, popularity, "
+        "{approximate_reading.n_people} people.",
+        "As knowledge reading.",
+    ),
+    Row(
         "sentiment_steering",
         STEERING,
         "Sentiment steering",
-        ("c1",),
-        "Does adding a sentiment direction move the judged sentiment of "
-        "the text, and at what cost to the text?",
-        "Completions of {n_prompts} short neutral prompts, {num_samples} "
-        "samples each, steered over a grid of relative coefficients at "
-        "three consecutive layers.",
-        "The positive-class probability of a sentiment classifier, with a "
-        "second classifier as a check.",
-        "A layer sweep on one list of prompts chooses where to steer and "
-        "the results are on a second list; {n_steer_seeds} steering "
-        "vectors.",
-        "None of the random or shuffled kind: the comparisons are the "
-        "unsteered model and an instruction in the prompt.",
+        "Completions of {sentiment_steering.n_prompts} neutral prompts, "
+        "{sentiment_steering.num_samples} samples each, scored by a "
+        "sentiment classifier.",
+        "One list of prompts chooses the layers, a second gives the results.",
+        "No random direction: the unsteered model and a prompt instruction.",
         NONE,
-        "The mean judged score per coefficient, and the fluency rule on "
-        "the perplexity of {n_neutral} held-out WikiText-103 passages and "
-        "the distinct-1 of the completions.",
+        also=("n_neutral", "n_steer_seeds"),
     ),
-    Card(
+    Row(
+        "finders_steering",
+        STEERING,
+        "Utility test",
+        "{finders_steering.n_prompts} truncated ETHICS scenarios continued "
+        "under steering; the sentiment classifier judges.",
+        "Paired by prompt and seed.",
+        "A random finder; {finders_steering.n_steer_seeds} steering vectors "
+        "per finder.",
+        "Logistic regression, mean difference, among five finders.",
+    ),
+    Row(
         "steering_baselines",
         STEERING,
         "Published steering methods",
-        ("b3",),
-        "Does steering along the reader move generations toward a concept "
-        "as far as published steering methods do, and at what cost to the "
-        "text?",
-        "Base checkpoints continue the opening words of held-out "
-        "WikiText-103 passages and post-trained ones answer AlpacaEval "
-        "instructions in their chat template, {max_new_tokens} new tokens "
-        "per prompt, steered toward sentiment, happiness or anger at three "
-        "layers over a grid of relative coefficients.",
-        "An LLM judge rates the concept and the fluency of each "
-        "generation, and on post-trained checkpoints how well it follows "
-        "the instruction; a second judge slot of the same model rates a "
-        "seeded share again.",
-        "Each arm chooses its coefficient on {n_tune} tuning prompts per "
-        "concept and is scored on {n_held_out} held-out prompts, which "
-        "share none with them; the reader, the difference of class means, "
-        "contrastive activation addition and mean-centring are built from "
-        "the same {n_pairs} training pairs per concept.",
-        "The unsteered model and a random unit direction, steered like the "
-        "vector arms.",
-        "Prompt prepending and the difference of class means, both "
-        "baselines of AxBench, contrastive activation addition (CAA), "
-        "activation addition (ActAdd) and mean-centring.",
-        "The mean judge score per criterion and their harmonic mean, with "
-        "a bootstrap interval over the held-out prompts; the perplexity of "
-        "{n_neutral} held-out WikiText-103 passages and the distinct-1 of "
-        "the generations.",
-        scope="GPT-2 XL is steered and judged as a base checkpoint.",
+        "WikiText-103 openings (base) or AlpacaEval instructions "
+        "(post-trained); an LLM judge rates concept, fluency and, on "
+        "post-trained checkpoints, how closely the topic relates to the "
+        "instruction.",
+        "Coefficient on {steering_baselines.n_tune} tuning prompts, score on "
+        "{steering_baselines.n_held_out} held-out prompts, per concept.",
+        "Unsteered model, random unit direction.",
+        "The five methods of [[table:steering_baselines]].",
+        scope="GPT-2 XL is steered as a base checkpoint",
+        also=("max_new_tokens", "n_neutral", "n_pairs"),
     ),
-    Card(
+    Row(
         "post_training",
         POST,
         "Base against post-trained",
-        ("p8",),
-        "What does post-training change in reading and in steering?",
-        "No new stimuli: the finished sentiment, utility, morality, truth "
-        "and honesty readers, the wording run and the sentiment steering "
-        "run of a base checkpoint and of its post-trained pair.",
-        "Those of the runs it reads.",
-        "The draw is the paired unit: one draw uses the same stimuli on "
-        "both checkpoints of a pair.",
-        "None of its own; every run it reads carries its controls.",
+        "The finished readers, wording run and sentiment steering run of "
+        "each pair.",
+        "Paired by draw; bootstrap of {post_training.n_boot} resamples over "
+        "the draws.",
+        "Those of the runs read.",
         NONE,
-        "The difference between the post-trained and the base checkpoint "
-        "per draw, with a bootstrap interval over the draws of {n_boot} "
-        "resamples.",
-        scope="One stored run reads the finished runs of each pair. GPT-2 "
-        "small is read beside the pairs as a reference with no post-trained "
-        "pair.",
-        paired=True,
     ),
 )
 
@@ -680,38 +413,69 @@ def _stored(document: Any, path: str) -> float | None:
     return document
 
 
-def _facts(manifest: Manifest, card: Card) -> dict[str, float]:
-    """Reads the counts that the texts of a card ask for."""
-    paths = sorted({p for text in card.texts() for p in SLOT.findall(text)})
-    if not paths:
-        return {}
-    (code,) = card.codes
-    found: dict[str, dict[str, float | None]] = {path: {} for path in paths}
-    for model in manifest.models(code):
-        run = manifest.run(code, model)
-        assert run is not None
-        config = json.loads((run / "config.json").read_text(encoding="utf-8"))
-        summary = runfiles.summary(run)
-        for path in paths:
-            value = _stored(config, path)
-            if value is None:
-                value = _stored(summary, path)
-            found[path][model] = value
-    return {
-        path: agreed(f"{code} {path}", values) for path, values in found.items()
-    }
+def _wanted() -> dict[str, set[str]]:
+    """Lists the stored paths that the texts ask of each experiment."""
+    wanted: dict[str, set[str]] = {key: set() for key in RUNS}
+    for text in (DETAIL, *(t for row in ROWS for t in row.texts())):
+        for key, path in SLOT.findall(text):
+            wanted[key].add(path)
+    for row in ROWS:
+        wanted[row.key].update(row.also)
+        if row.draws:
+            wanted[row.key].update(DRAWS)
+            wanted[row.draws].update(DRAWS)
+    return wanted
+
+
+def _facts(manifest: Manifest) -> dict[str, float]:
+    """Reads the counts that the texts ask for, named `key_path`."""
+    facts: dict[str, float] = {}
+    for key, paths in _wanted().items():
+        code = RUNS[key]
+        found: dict[str, dict[str, float | None]] = {p: {} for p in paths}
+        for model in manifest.models(code) if paths else ():
+            run = manifest.run(code, model)
+            assert run is not None
+            config = json.loads(
+                (run / "config.json").read_text(encoding="utf-8")
+            )
+            summary = runfiles.summary(run)
+            for path in paths:
+                value = _stored(config, path)
+                if value is None:
+                    value = _stored(summary, path)
+                found[path][model] = value
+        for path in sorted(paths):
+            facts[f"{key}_{path.replace('.', '_')}"] = agreed(
+                f"{code} {path}", found[path]
+            )
+    for row in ROWS:
+        for path in DRAWS if row.draws else ():
+            agreed(
+                f"{row.key} {path}",
+                {
+                    row.key: facts[f"{row.key}_{path}"],
+                    row.draws: facts[f"{row.draws}_{path}"],
+                },
+            )
+    return facts
 
 
 def _filled(text: str, facts: Mapping[str, float]) -> str:
     """Writes the stored counts into the slots of a text."""
-    return SLOT.sub(lambda slot: f"{int(facts[slot[1]]):,}", text)
+
+    def count(slot: re.Match[str]) -> str:
+        name = f"{slot[1]}_{slot[2].replace('.', '_')}"
+        return f"{int(facts[name]):,}"
+
+    return SLOT.sub(count, text)
 
 
-def _members(manifest: Manifest, card: Card) -> set[str]:
+def _members(manifest: Manifest, key: str) -> set[str]:
     """Finds the checkpoints an experiment covers."""
-    (code,) = card.codes
+    code = RUNS[key]
     models = manifest.models(code)
-    if not card.paired:
+    if key != PAIRED:
         return set(models)
     run = manifest.run(code, models[0])
     assert run is not None
@@ -719,7 +483,7 @@ def _members(manifest: Manifest, card: Card) -> set[str]:
 
 
 def build(manifest: Manifest) -> TableOutput:
-    """Builds the table from the static cards and the committed runs.
+    """Builds the table from the static rows and the committed runs.
 
     Args:
         manifest: The run resolver.
@@ -727,87 +491,48 @@ def build(manifest: Manifest) -> TableOutput:
     Returns:
         The table and its caption parts.
     """
+    facts = _facts(manifest)
+    every = manifest.checkpoints()
+    counts = {
+        key: stats.per_role({m: m in _members(manifest, key) for m in every})
+        for key in RUNS
+    }
+    totals = stats.per_role(dict.fromkeys(every, True))
+    full = ", ".join(
+        f"{totals[r].total}/{totals[r].total}" for r in stats.ROLES
+    )
     rows: list[list[str]] = []
-    studies: list[tuple[str]] = []
     headings: list[tuple[int, str]] = []
-    starts: list[int] = []
-    above: dict[str, str] = {}
-    numbers: dict[str, float] = {}
-    counts: dict[str, dict[str, stats.RoleCount]] = {}
-    for card in CARDS:
-        facts = _facts(manifest, card)
-        for path, value in facts.items():
-            numbers[f"{card.key}_{path.replace('.', '_')}"] = value
-        if card.model_free:
-            checkpoints = NO_MODEL
-        else:
-            members = _members(manifest, card)
-            counts[card.key] = stats.per_role(
-                {m: m in members for m in manifest.checkpoints()}
-            )
-            checkpoints = " ".join(
-                part
-                for part in (
-                    f"{stats.per_role_text(counts[card.key])}.",
-                    card.scope,
-                )
-                if part
-            )
-        texts = [*(_filled(text, facts) for text in card.texts()), checkpoints]
-        block = dict(zip(ASPECTS, texts, strict=True))
-        if not headings or headings[-1][1] != card.study:
-            headings.append((len(rows), card.study))
-            above = {}
-        starts.append(len(rows))
-        shown = [
-            (aspect, cell)
-            for aspect, cell in block.items()
-            if aspect == ASPECTS[0] or above.get(aspect) != cell
-        ]
-        for place, (aspect, cell) in enumerate(shown):
-            rows.append([card.name if place == 0 else "", aspect, cell])
-            studies.append((card.study,))
-        above = block
-    opened = {place for place, _ in headings}
-    numbers |= {
-        "experiments": float(len(CARDS)),
+    for row in ROWS:
+        if not headings or headings[-1][1] != row.study:
+            headings.append((len(rows), row.study))
+        covered = stats.per_role_compact(counts[row.key])
+        checkpoints = f"{covered}; {row.scope}." if row.scope else f"{covered}."
+        rows.append(
+            [
+                row.name,
+                *(_filled(text, facts) for text in row.texts()),
+                checkpoints,
+            ]
+        )
+    numbers = {
+        **facts,
+        "experiments": float(len(ROWS)),
         "studies": float(len(headings)),
         "rows": float(len(rows)),
     }
     return TableOutput(
-        "The design of every experiment shown on this page: its question, "
-        "stimuli, labels, splits, controls, published baselines, metric and "
-        "checkpoints.",
-        "The experiments are in the order of their studies, under a heading "
-        "row per study. Inside a study, a block leaves out an aspect that is "
-        "the same as in the block above it. A control shows what a score "
-        "reaches without reading the concept from the hidden states: a "
-        "random direction, the reader scored against shuffled labels, or a "
-        "signal of the text or of the subject alone, and the experiment on "
-        "the hidden states behind the readers refits readers on labels "
-        "permuted inside each group; a published baseline is a "
-        "published method run on the same items. A finder turns training "
-        "pairs into a direction, and a reader is the direction one finder "
-        "fits on one draw of training pairs, read at the layer chosen on "
-        "validation. The paper is the representation engineering paper of "
-        "Zou et al. [[cite:zou2025representationengineeringtopdownapproach]], "
-        "and the finder of the paper is its PCA of differences. Select pairs "
-        "choose the layer, and report pairs, which that choice does not use, "
-        "give the score. Post hoc marks a choice made after results were "
-        "seen. Every count of pairs, draws, questions or prompts is read "
-        "from the stored configuration or summary of the runs and is the "
-        "same on every checkpoint of the experiment. Checkpoints are counted "
-        "per role: GPT-2, Qwen3 base and post-trained Qwen3.",
-        ["Experiment", "Aspect", "Design"],
+        CLAIM,
+        f"{_filled(DETAIL, facts)}{full}.",
+        list(COLUMNS),
         rows,
-        "lll",
+        "l" * len(COLUMNS),
         [],
         numbers,
-        row_groups=tuple(place for place in starts if place not in opened),
+        row_groups=(),
         counts=counts,
+        compact_print=True,
         data_columns=("Study",),
-        data_cells=tuple(studies),
-        roomy=True,
+        data_cells=tuple((row.study,) for row in ROWS),
         headings=tuple(headings),
-        span_labels=True,
     )

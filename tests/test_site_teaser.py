@@ -8,7 +8,6 @@ from typing import Any
 from matplotlib.lines import Line2D
 import pytest
 
-from tomography.site import content
 from tomography.site import registry
 from tomography.site import stats
 from tomography.site.figs import teaser
@@ -25,11 +24,10 @@ run = _RESULTS["run"]
 RESULTS = Path(__file__).resolve().parents[1] / "results"
 Z = 1.959963984540054
 ROWS = (
+    "sentiment",
     "utility",
     "morality",
     "truth",
-    "neg_cities",
-    "honesty_transfer",
     "paper_finder",
     "truthfulqa",
     "knowledge",
@@ -89,28 +87,15 @@ def _truth(model: str) -> Cell:
     )
 
 
-def _neg_cities(model: str) -> Cell:
-    path = run("r7", model)
-    d = data(path, "summary.json")
-    block = d["sets"]["neg_cities"]
-    random = _curve_random(path, "curves_neg_cities", int(d["val_layer"]))
-    return _diff(
-        float(block["accuracy_at_val_layer"]),
-        random,
-        int(block["n_eval_pairs"]),
-    )
-
-
-def _honesty(model: str) -> Cell:
-    path = run("r5", model)
-    d = data(path, "summary.json")
-    layer = int(d["best_layer"])
-    random = _curve_random(path, "curves_transfer", layer)
-    return _diff(
-        float(d["test_accuracy"]),
-        random,
-        int(d["n_eval_pairs"]["transfer"]["test"]),
-    )
+def _sentiment(model: str) -> Cell:
+    path = run("p3", model)
+    layer = int(data(path, "sizes_sentiment.json")["layer"])
+    stored = npz(path, "sizes_sentiment.npz")
+    size = list(stored["sizes"]).index(64)
+    col = list(stored["layers"]).index(layer)
+    reader = float(stored["accuracy"][size, 1, 0, :, col].mean())
+    random = float(stored["accuracy"][size, 1, 1, :, col].mean())
+    return _diff(reader, random, 214)
 
 
 def _paper_finder(model: str) -> Cell:
@@ -204,7 +189,7 @@ def _steering(model: str) -> Cell:
     return gap, gap, gap, max(random), 0
 
 
-def _fluent(model: str) -> bool | None:
+def _fluency(model: str) -> tuple[float, float] | None:
     path = run("m1", model) / "table_effects.json"
     if not path.exists():
         return None
@@ -213,17 +198,23 @@ def _fluent(model: str) -> bool | None:
     cell = [r for r in rows if r["method"] == "logistic" and r["coeff"] == 0.3]
     ratio = sum(r["perplexity"] for r in cell) / len(cell) / none["perplexity"]
     distinct = sum(r["distinct_1"] for r in cell) / len(cell)
-    return ratio <= 1.5 and distinct >= 0.15
+    return ratio, distinct
+
+
+def _fluent(model: str) -> bool | None:
+    values = _fluency(model)
+    if values is None:
+        return None
+    return values[0] <= 1.5 and values[1] >= 0.15
 
 
 def _expected() -> dict[str, dict[str, Cell]]:
     out: dict[str, dict[str, Cell]] = {}
     sources: dict[str, Any] = {
+        "sentiment": ("p3", _sentiment),
         "utility": ("r2", lambda m: _reading("r2", m)),
         "morality": ("r3", lambda m: _reading("r3", m)),
         "truth": ("r7", _truth),
-        "neg_cities": ("r7", _neg_cities),
-        "honesty_transfer": ("r5", _honesty),
         "paper_finder": ("p4", _paper_finder),
         "truthfulqa": ("r6", _truthfulqa),
         "knowledge": ("p9b", _knowledge),
@@ -276,7 +267,8 @@ def test_every_plotted_value_equals_an_independent_recomputation(
 
 def test_each_row_has_the_checkpoints_that_the_plan_expects() -> None:
     sizes = {row: len(cells) for row, cells in EXPECTED.items()}
-    assert sizes["utility"] == sizes["morality"] == sizes["truth"] == 10
+    assert sizes["sentiment"] == sizes["utility"] == sizes["morality"] == 10
+    assert sizes["truth"] == 10
     assert sizes["knowledge"] == sizes["knowledge_confidence"] == 9
     assert "gpt2" not in EXPECTED["knowledge"]
     assert "gpt2" not in EXPECTED["knowledge_confidence"]
@@ -284,11 +276,10 @@ def test_each_row_has_the_checkpoints_that_the_plan_expects() -> None:
 
 def test_the_counts_of_checkpoints_above_zero_match_the_plan() -> None:
     plan = {
+        "sentiment": ((4, 4), (3, 3), (3, 3)),
         "utility": ((4, 4), (3, 3), (3, 3)),
         "morality": ((4, 4), (3, 3), (3, 3)),
         "truth": ((0, 4), (3, 3), (3, 3)),
-        "neg_cities": ((0, 4), (3, 3), (2, 3)),
-        "honesty_transfer": ((0, 4), (1, 3), (2, 3)),
         "paper_finder": ((0, 4), (1, 3), (0, 3)),
         "truthfulqa": ((0, 4), (0, 3), (0, 3)),
         "knowledge": ((0, 3), (3, 3), (2, 3)),
@@ -301,7 +292,7 @@ def test_the_counts_of_checkpoints_above_zero_match_the_plan() -> None:
             assert (sum(c[1] > 0 for c in cells), len(cells)) == (hits, total)
 
 
-def test_counts_and_numbers_expose_all_thirty_role_counts(
+def test_counts_and_numbers_expose_every_role_count_of_every_row(
     built: registry.FigureOutput,
 ) -> None:
     for row in ROWS:
@@ -338,57 +329,132 @@ def test_the_knowledge_row_takes_popularity_as_the_strongest_control() -> None:
         assert strongest == r["popularity_within"]
 
 
-def _full(built: registry.FigureOutput) -> str:
-    (section,) = [s for s in content.APPENDICES if s.key == "appendix_reading"]
-    appendix = re.sub(
-        r"\[\[count:fig:teaser\.(\w+)\]\]",
-        lambda m: stats.per_role_text(built.counts[m.group(1)]),
-        " ".join(section.paragraphs),
-    )
-    return " ".join([built.claim, built.detail, appendix])
+def _caption(built: registry.FigureOutput) -> str:
+    return f"{built.claim} {built.detail}"
 
 
-def test_the_caption_is_at_most_120_words_and_leads_with_the_conclusion(
+def test_the_caption_is_at_most_70_words_and_leads_with_the_conclusion(
     built: registry.FigureOutput,
 ) -> None:
-    text = f"{built.claim} {built.detail}"
-    assert len(text.split()) <= 120
-    assert built.claim.startswith("A direction reads utility and morality")
+    assert len(_caption(built).split()) <= 70
+    assert built.claim == (
+        "A direction beats a random direction for sentiment, utility and "
+        "morality on every checkpoint, and the words alone on TruthfulQA or "
+        "the model's confidence on none."
+    )
+    assert built.detail == (
+        "Markers: checkpoint margins over each row's comparison, with 95 "
+        "percent intervals; lanes: GPT-2, Qwen3 base, post-trained, top to "
+        "bottom; the right column counts intervals above zero. Steering "
+        "margin: lowest win rate of 3 vectors minus highest of 3 random "
+        "directions, no interval."
+    )
+
+
+def test_each_block_holds_the_rows_compared_with_what_its_heading_names() -> (
+    None
+):
+    blocks = {row.key: row.block for row in teaser.ROWS}
+    assert [k for k, b in blocks.items() if b == 0] == [
+        "sentiment",
+        "utility",
+        "morality",
+        "truth",
+        "paper_finder",
+    ]
+    assert [k for k, b in blocks.items() if b == 1] == [
+        "truthfulqa",
+        "knowledge",
+        "knowledge_confidence",
+    ]
+    assert teaser.BLOCKS[0] == "against a random direction"
+
+
+def test_the_zero_line_does_not_cross_a_block_label(
+    built: registry.FigureOutput,
+) -> None:
+    labels = [
+        t
+        for ax in built.figure.axes
+        for t in ax.texts
+        if t.get_text() in teaser.BLOCKS
+    ]
+    assert len(labels) == len(teaser.BLOCKS)
+    for label in labels:
+        patch = label.get_bbox_patch()
+        assert patch is not None
+        assert patch.get_facecolor()[:3] == (1.0, 1.0, 1.0)
+        assert label.get_zorder() > 2
+
+
+def test_the_caption_cites_no_other_item(
+    built: registry.FigureOutput,
+) -> None:
+    assert "[[" not in _caption(built)
 
 
 def test_the_method_detail_moved_to_the_appendix_text() -> None:
     assert not hasattr(teaser, "method_detail")
 
 
-def test_the_claim_states_the_per_role_counts_without_pooling(
+def test_the_claim_in_words_holds_on_the_computed_counts(
     built: registry.FigureOutput,
 ) -> None:
-    text = _full(built)
+    for concept in ("sentiment", "utility", "morality"):
+        count = built.counts[concept]
+        assert all(c.hits == c.total for c in count.values()), concept
+        assert sum(c.total for c in count.values()) == 10
+    for row in ("truthfulqa", "knowledge_confidence"):
+        assert all(c.hits == 0 for c in built.counts[row].values()), row
+    text = _caption(built)
     assert "all 10 checkpoints" not in text
-    for concept in ("utility", "morality"):
-        assert stats.per_role_text(built.counts[concept]) in text
-    assert (
-        "above a random direction on "
-        + stats.per_role_text(built.counts["utility"])
-        in text
-    )
-    assert "truth on " + stats.per_role_text(built.counts["truth"]) in text
-    assert "Qwen3 checkpoints" not in text
     assert not re.search(r"of 10 checkpoints", text)
-    assert "0 of 4 GPT-2, 1 of 3 Qwen3 base and 0 of 3 post-trained" in text
-    assert stats.per_role_text(built.counts["knowledge_confidence"]) in text
-    assert "on any of" not in text
-    assert "1 of 4 GPT-2, 2 of 3 Qwen3 base and 2 of 3 post-trained" in text
     for banned in (chr(0x2014), chr(0x2013)):
         assert banned not in text
 
 
-def test_figure_is_5_5_by_4_3_in_with_two_axes_with_the_guards_green(
+def test_the_claim_writes_the_counts_when_they_are_not_all_or_none(
+    built: registry.FigureOutput,
+) -> None:
+    counts = dict(built.counts)
+    partial = {
+        "gpt2": stats.RoleCount(3, 4),
+        "base": stats.RoleCount(3, 3),
+        "post": stats.RoleCount(3, 3),
+    }
+    some = {
+        "gpt2": stats.RoleCount(0, 4),
+        "base": stats.RoleCount(1, 3),
+        "post": stats.RoleCount(0, 3),
+    }
+    claim = teaser._claim({**counts, "utility": partial})
+    assert "on every checkpoint" not in claim
+    assert f"for utility on {stats.per_role_text(partial)}" in claim
+    assert f"for morality on {stats.per_role_text(counts['morality'])}" in claim
+    assert (
+        f"for sentiment on {stats.per_role_text(counts['sentiment'])}" in claim
+    )
+    assert claim.endswith("or the model's confidence on none.")
+    claim = teaser._claim({**counts, "truthfulqa": some})
+    assert "on none" not in claim
+    assert f"on TruthfulQA on {stats.per_role_text(some)}" in claim
+    assert (
+        "the model's confidence on "
+        + stats.per_role_text(counts["knowledge_confidence"])
+        in claim
+    )
+    assert claim.startswith(
+        "A direction beats a random direction for sentiment, utility and "
+        "morality on every checkpoint, "
+    )
+
+
+def test_figure_is_5_5_by_3_9_in_with_two_axes_with_the_guards_green(
     built: registry.FigureOutput,
 ) -> None:
     fig = built.figure
     assert fig.get_size_inches()[0] == pytest.approx(paper.FULL_WIDTH)
-    assert fig.get_size_inches()[1] == pytest.approx(4.3)
+    assert fig.get_size_inches()[1] == pytest.approx(3.9)
     assert checks.guard_problems(fig) == []
     assert checks.problems(fig) == []
 
@@ -417,9 +483,7 @@ def test_the_scorecard_names_controls_and_the_confidence_baseline(
         "margin over the control or baseline of its row, "
         "in the unit under each row"
     )
-    assert "checkpoint margins over the row's control or baseline;" in (
-        built.detail
-    )
+    assert "checkpoint margins over each row's comparison," in built.detail
 
 
 def test_the_legend_names_the_sizes_the_figure_holds(
@@ -435,8 +499,7 @@ def test_the_legend_names_the_sizes_the_figure_holds(
 def test_the_teaser_caption_has_no_signed_zero(
     built: registry.FigureOutput,
 ) -> None:
-    text = _full(built)
-    assert "-0.000" not in text
+    assert "-0.000" not in _caption(built)
 
 
 def test_the_pairing_is_read_from_the_run_summary_not_typed_in() -> None:
@@ -467,15 +530,13 @@ def test_the_steering_row_counts_checkpoints_whose_every_vector_wins(
         assert built.numbers[f"steering_{role}_n"] == len(mine)
 
 
-def test_the_steering_row_names_the_unit_the_judge_and_the_fluency_rule(
+def test_the_steering_row_names_its_measure_and_counts_the_fluent_runs(
     built: registry.FigureOutput,
 ) -> None:
-    text = _full(built)
-    assert "every logistic steering vector" in text
-    assert "utility direction" in text
-    assert "sentiment judge" in text
-    assert "relative coefficient 0.3" in text
-    assert "0.05" in text
+    assert (
+        "Steering margin: lowest win rate of 3 vectors minus highest of 3 "
+        "random directions, no interval."
+    ) in built.detail
     flags = {m: _fluent(m) for m in models("m1")}
     for role in ROLES:
         known = [
@@ -483,7 +544,28 @@ def test_the_steering_row_names_the_unit_the_judge_and_the_fluency_rule(
         ]
         assert built.numbers[f"steering_fluent_{role}_above"] == sum(known)
         assert built.numbers[f"steering_fluent_{role}_n"] == len(known)
-    assert "no checkpoint passes" not in text
+
+
+def test_the_fluency_of_the_winning_steering_checkpoints_is_quoted(
+    built: registry.FigureOutput,
+) -> None:
+    winners = [
+        m
+        for m in models("m1")
+        if min(_seed_rates(m)[0]) > max(_seed_rates(m)[1])
+    ]
+    measured = {m: v for m in winners if (v := _fluency(m)) is not None}
+    assert sorted(set(winners) - set(measured)) == ["gpt2"]
+    kept = [v for m, v in measured.items() if _fluent(m)]
+    broken = [v[0] for m, v in measured.items() if not _fluent(m)]
+    assert len(kept) == 1
+    assert len(broken) == 3
+    numbers = built.numbers
+    assert numbers["steering_kept_ratio"] == pytest.approx(kept[0][0])
+    assert numbers["steering_kept_distinct"] == pytest.approx(kept[0][1])
+    assert numbers["steering_broken_ratio_min"] == pytest.approx(min(broken))
+    assert numbers["steering_broken_ratio_max"] == pytest.approx(max(broken))
+    assert min(broken) > 1.5
 
 
 def test_every_row_names_the_unit_its_margin_is_measured_in(
@@ -496,7 +578,6 @@ def test_every_row_names_the_unit_its_margin_is_measured_in(
     ]
     by_y = sorted(units, key=lambda t: t.xy[1])
     assert [t.get_text() for t in by_y] == [
-        "accuracy",
         "accuracy",
         "accuracy",
         "accuracy",
@@ -530,8 +611,7 @@ def test_the_steering_row_has_its_own_panel_and_axis_label(
     assert len(top.get_yticks()) == len(ROWS) - 1
     zero = [ln for ln in bottom.get_lines() if ln.get_xdata()[0] == 0.0]
     assert zero
-    text = f"{built.claim} {built.detail}"
-    assert "no interval is stored" in text
+    assert "no interval" in _caption(built)
 
 
 def test_the_role_key_is_a_filled_and_an_open_circle_in_neutral_ink(

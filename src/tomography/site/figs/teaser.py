@@ -25,7 +25,7 @@ from tomography.site.registry import RoleCount
 from tomography.viz import axes as shared
 from tomography.viz import paper
 
-HEIGHT = 4.3
+HEIGHT = 3.9
 STEERING_BLOCK = 2
 SHORT = 2.4
 XLIM = (-0.35, 0.55)
@@ -80,12 +80,11 @@ class Row:
 
 
 ROWS = (
+    Row("sentiment", "Sentiment", 0, "p3", "accuracy"),
     Row("utility", "Utility", 0, "r2", "accuracy"),
     Row("morality", "Morality", 0, "r3", "accuracy"),
     Row("truth", "Truth", 0, "r7", "accuracy"),
-    Row("neg_cities", "Negated cities", 0, "r7", "accuracy"),
-    Row("honesty_transfer", "Honesty, transfer", 0, "r5", "accuracy"),
-    Row("paper_finder", "Paper finder, sentiment", 1, "p4", "accuracy"),
+    Row("paper_finder", "Paper finder, sentiment", 0, "p4", "accuracy"),
     Row("truthfulqa", "TruthfulQA, against words", 1, "r6", "MC1 accuracy"),
     Row("knowledge", "Knowledge, against popularity", 1, "p9b", "AUROC"),
     Row(
@@ -119,20 +118,11 @@ def _read(manifest: Manifest, exp: str, model: str) -> Cell | None:
     return _from_scores(found.accuracy, found.random_at_layer, n)
 
 
-def _neg_cities(manifest: Manifest, model: str) -> Cell | None:
-    path = manifest.run("r7", model)
-    if path is None:
+def _sentiment(manifest: Manifest, model: str) -> Cell | None:
+    found = reading.heldout_sentiment(manifest, model)
+    if found is None:
         return None
-    summary = runfiles.summary(path)
-    block = summary["sets"]["neg_cities"]
-    series = runfiles.data(path, "curves_neg_cities.json")["series"]
-    mean = runfiles.arrays(path, "curves_neg_cities.npz")["mean"]
-    random = float(mean[series.index("random")][int(summary["val_layer"]) - 1])
-    return _from_scores(
-        float(block["accuracy_at_val_layer"]),
-        random,
-        int(block["n_eval_pairs"]),
-    )
+    return _from_scores(found.reader, found.random, found.n)
 
 
 def _paper_finder(manifest: Manifest, model: str) -> Cell | None:
@@ -223,7 +213,9 @@ def _steering(manifest: Manifest, model: str) -> Cell | None:
     return Cell(worst - best, worst - best, worst - best, best, None)
 
 
-def _steering_fluent(manifest: Manifest, model: str) -> bool | None:
+def _steering_fluency(
+    manifest: Manifest, model: str
+) -> tuple[float, float] | None:
     path = manifest.run("m1", model)
     if path is None or not (path / "table_effects.json").exists():
         return None
@@ -240,6 +232,14 @@ def _steering_fluent(manifest: Manifest, model: str) -> bool | None:
         / float(none["perplexity"])
     )
     distinct = sum(float(r["distinct_1"]) for r in cell) / len(cell)
+    return ratio, distinct
+
+
+def _steering_fluent(manifest: Manifest, model: str) -> bool | None:
+    values = _steering_fluency(manifest, model)
+    if values is None:
+        return None
+    ratio, distinct = values
     return (
         ratio <= stats.FLUENT_MAX_RATIO
         and distinct >= stats.FLUENT_MIN_DISTINCT
@@ -247,10 +247,10 @@ def _steering_fluent(manifest: Manifest, model: str) -> bool | None:
 
 
 def _cell(manifest: Manifest, row: Row, model: str) -> Cell | None:
-    if row.key in ("utility", "morality", "truth", "honesty_transfer"):
+    if row.key in ("utility", "morality", "truth"):
         return _read(manifest, row.exp, model)
     getter: Any = {
-        "neg_cities": _neg_cities,
+        "sentiment": _sentiment,
         "paper_finder": _paper_finder,
         "truthfulqa": _truthfulqa,
         "knowledge": _knowledge,
@@ -406,6 +406,8 @@ def _panel(
             va="center",
             ha="left",
             color=paper.ENC["secondary_text"],
+            bbox={"facecolor": "white", "edgecolor": "none", "pad": 0.5},
+            zorder=5,
         )
     ax.set_yticks([place[r.key] for r in rows], [r.label for r in rows])
     lift = ScaledTranslation(0, 4.5 / 72, fig.dpi_scale_trans)
@@ -456,7 +458,9 @@ def _draw(fig: Figure, found: dict[str, dict[str, Cell]]) -> None:
 
 
 def _numbers(
-    found: dict[str, dict[str, Cell]], fluent: dict[str, bool]
+    found: dict[str, dict[str, Cell]],
+    fluent: dict[str, bool],
+    fluency: dict[str, tuple[float, float]],
 ) -> tuple[dict[str, float], dict[str, dict[str, RoleCount]]]:
     numbers: dict[str, float] = {}
     counts: dict[str, dict[str, RoleCount]] = {}
@@ -485,45 +489,55 @@ def _numbers(
         count = counts["steering_fluent"][role]
         numbers[f"steering_fluent_{role}_above"] = count.hits
         numbers[f"steering_fluent_{role}_n"] = count.total
+    winners = [m for m, c in found["steering"].items() if c.lo > 0]
+    (kept,) = [fluency[m] for m in winners if fluent.get(m)]
+    broken = [fluency[m][0] for m in winners if fluent.get(m) is False]
+    numbers["steering_kept_ratio"], numbers["steering_kept_distinct"] = kept
+    numbers["steering_broken_ratio_min"] = min(broken)
+    numbers["steering_broken_ratio_max"] = max(broken)
     return numbers, counts
 
 
-def _reads(counts: dict[str, RoleCount], concept: str) -> str:
-    return f"{concept} on {stats.per_role_text(counts)}"
+def _every(count: dict[str, RoleCount]) -> bool:
+    return all(c.hits == c.total for c in count.values())
+
+
+def _none(count: dict[str, RoleCount]) -> bool:
+    return all(c.hits == 0 for c in count.values())
 
 
 def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
-    utility, morality = counts["utility"], counts["morality"]
-    if utility == morality:
-        reads = (
-            "A direction reads utility and morality above a random "
-            f"direction on {stats.per_role_text(utility)}"
+    read = ("sentiment", "utility", "morality")
+    if all(_every(counts[c]) for c in read):
+        beats = (
+            "A direction beats a random direction for sentiment, utility and "
+            "morality on every checkpoint"
         )
     else:
-        reads = (
-            f"A direction reads {_reads(utility, 'utility')} and "
-            f"{_reads(morality, 'morality')}"
+        each = [f"for {c} on {stats.per_role_text(counts[c])}" for c in read]
+        beats = (
+            f"A direction beats a random direction {each[0]}, {each[1]} and "
+            f"{each[2]}"
         )
-    reads += f" and {_reads(counts['truth'], 'truth')}."
-    if all(c.hits == 0 for c in counts["truthfulqa"].values()):
-        words = "the TruthfulQA reader is never above a words-only classifier"
-    else:
-        words = (
-            "the TruthfulQA reader is above a words-only classifier on "
-            f"{stats.per_role_text(counts['truthfulqa'])}"
+    words, confidence = counts["truthfulqa"], counts["knowledge_confidence"]
+    if _none(words) and _none(confidence):
+        return (
+            f"{beats}, and the words alone on TruthfulQA or the model's "
+            "confidence on none."
         )
     return (
-        f"{reads} Two are mostly null: {words}, and the "
-        "paper's finder beats a random direction for sentiment on "
-        f"{stats.per_role_text(counts['paper_finder'])}."
+        f"{beats}, the words alone on TruthfulQA on "
+        f"{stats.per_role_text(words)} and the model's confidence on "
+        f"{stats.per_role_text(confidence)}."
     )
 
 
 DETAIL = (
-    "Markers are checkpoint margins over the row's control or baseline; "
-    "the right column counts 95 percent intervals above zero. Steering: "
-    "lowest win rate of 3 vectors minus highest of 3 random directions; no "
-    "interval is stored."
+    "Markers: checkpoint margins over each row's comparison, with 95 "
+    "percent intervals; lanes: GPT-2, Qwen3 base, post-trained, top to "
+    "bottom; the right column counts intervals above zero. Steering "
+    "margin: lowest win rate of 3 vectors minus highest of 3 random "
+    "directions, no interval."
 )
 
 
@@ -554,7 +568,12 @@ def build(manifest: Manifest) -> FigureOutput:
         for m in manifest.models("m1")
         if (ok := _steering_fluent(manifest, m)) is not None
     }
-    numbers, counts = _numbers(found, fluent)
+    fluency = {
+        m: values
+        for m in manifest.models("m1")
+        if (values := _steering_fluency(manifest, m)) is not None
+    }
+    numbers, counts = _numbers(found, fluent, fluency)
     with paper.paper_style():
         fig = Figure(figsize=(paper.FULL_WIDTH, HEIGHT), layout="constrained")
         _draw(fig, found)

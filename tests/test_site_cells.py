@@ -1,7 +1,3 @@
-from pathlib import Path
-
-import pytest
-
 from tomography.site import cells
 
 MINUS = chr(0x2212)
@@ -44,25 +40,6 @@ def test_percent_rounds_to_whole_numbers() -> None:
     assert cells.percent(None) == "n/a"
 
 
-def test_rows_of_a_json_table_zips_columns_and_rows(tmp_path: Path) -> None:
-    path = tmp_path / "t.json"
-    path.write_text(
-        '{"_meta": {}, "data": {"columns": ["a", "b"], "rows": [[1, 2]]}}',
-        encoding="utf-8",
-    )
-    assert cells.read_table(path) == [{"a": 1, "b": 2}]
-    path.write_text('{"_meta": {}, "data": [{"a": 3}]}', encoding="utf-8")
-    assert cells.read_table(path) == [{"a": 3}]
-
-
-def test_unknown_alignment_is_rejected() -> None:
-    with pytest.raises(ValueError, match="alignment"):
-        cells.check_align("lx", 2)
-    with pytest.raises(ValueError, match="alignment"):
-        cells.check_align("lr", 3)
-    assert cells.check_align("lr", 2) == "lr"
-
-
 def test_csv_text_writes_the_header_and_rows() -> None:
     text = cells.csv_text(["a", "b"], [[1, 0.5], [2, None]])
     assert text == "a,b\n1,0.5\n2,\n"
@@ -72,3 +49,12 @@ def test_csv_text_writes_a_no_break_hyphen_as_a_plain_one() -> None:
     hyphen = chr(0x2011)
     text = cells.csv_text([f"Mass{hyphen}mean"], [[f"x{hyphen}y"], [0.5]])
     assert text == "Mass-mean\nx-y\n0.5\n"
+
+
+def test_csv_text_writes_the_minus_and_plus_minus_signs_in_ascii() -> None:
+    text = cells.csv_text(
+        [f"Reader {MINUS} words"],
+        [[cells.num(-0.05, 2)], [cells.pm(-0.25, 0.02)]],
+    )
+    assert text == "Reader - words\n-0.05\n-0.250 +/- 0.020\n"
+    assert float(text.splitlines()[1]) == -0.05

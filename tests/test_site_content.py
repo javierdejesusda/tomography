@@ -1,5 +1,6 @@
 import dataclasses
 import json
+from math import comb
 from pathlib import Path
 import re
 import runpy
@@ -10,9 +11,10 @@ from tomography.site import content
 from tomography.site import params
 from tomography.site import references
 from tomography.site import registry
+from tomography.site.figs import base_post
+from tomography.site.figs import teaser
 from tomography.site.manifest import Manifest
 from tomography.site.stats import RoleCount
-from tomography.site.tables import design
 from tomography.site.tables import notation
 
 _HERE = Path(__file__).parent
@@ -24,49 +26,58 @@ TOKEN = re.compile(r"\[\[(.+?)\]\]")
 RUN_CODE = re.compile(r"\b[RPMCA][0-9]+[a-d]?\b")
 GENERIC = (
     r"of 3(?= Qwen3 sizes)",
-    r"(?<![\d.])20\d\d(?!\d)",
     r"(?<![\d.])\d\.\dB\b",
     r"(?<![\d.])\dB\b",
     r"GPT-2",
     r"Qwen3",
-    r"LLaMA-2",
     r"SST-2",
     r"WikiText-103",
     r"distinct-1",
-    r"(?<![\d.])±0\.[13](?!\d)",
+    r"MC1",
     r"coefficient 0\.[13](?!\d)",
+    r"probability 0\.05(?= by chance)",
     r"above 0\.95(?!\d)",
     r"exceeds 0\.1(?!\d)",
-    r"(?:within|above) 1\.5 times",
-    r"below 0\.15(?!\d)",
     r"at most 1\.5(?!\d)",
     r"at least 0\.15(?!\d)",
     r"below 0\.5(?!\d)",
     r"\ball 10\b",
     r"(?<![\d.])95 percent(?!\d)",
     r"(?<![\d.])40, 55 and 70 percent",
-    r"(?<![\d.])20 for the held-out",
-    r"none of the 10\b",
 )
-RESULT_KEYS = (
-    "finders",
+BODY_TITLES = [
+    "Introduction",
+    "Related work",
+    "Method",
+    "Results",
+    "Limitations",
+]
+METHOD_KEYS = ["pipeline", "controls_method", "steering_method", "intervals"]
+RESULT_KEYS = [
     "reading",
-    "known_unknown",
+    "finders",
     "truth",
+    "known_unknown",
     "steering",
     "base_post",
-)
-APPENDIX_KEYS = (
+]
+APPENDIX_KEYS = [
     "appendix_assets",
     "appendix_method",
     "appendix_reading",
-    "appendix_wording",
-    "appendix_truth",
     "appendix_steering",
     "appendix_knowledge",
-    "appendix_approximate",
-    "appendix_post",
-    "appendix_other",
+]
+COUNTS = (
+    "Three fractions count GPT-2, Qwen3 base and post-trained checkpoints, "
+    "in that order."
+)
+REMOVED_NAMES = (
+    "TLDR",
+    "FRONT_ITEMS",
+    "KEY_FINDINGS",
+    "DISCUSSION",
+    "REPRODUCIBILITY",
 )
 
 
@@ -81,7 +92,7 @@ def _sections(
 
 ALL = [
     s
-    for top in (*content.BODY, *content.APPENDICES, content.KEY_FINDINGS)
+    for top in (*content.BODY, content.CODE, *content.APPENDICES)
     for s in _sections(top)
 ]
 
@@ -94,7 +105,7 @@ def _texts(section: content.Section) -> list[str]:
 
 
 def _all_texts() -> list[str]:
-    texts = [content.ABSTRACT, content.TITLE, content.TLDR]
+    texts = [content.ABSTRACT, content.TITLE]
     for section in ALL:
         texts += [section.title, *_texts(section)]
     return texts
@@ -116,26 +127,36 @@ def _digits_left(text: str, allowed: tuple[str, ...] = GENERIC) -> list[str]:
 
 
 def _opening_texts() -> list[str]:
-    texts = [content.ABSTRACT, content.TLDR]
-    for section in (
-        content.KEY_FINDINGS,
-        content.INTRODUCTION,
-        *content.RESULTS.subsections,
-    ):
+    texts = [content.ABSTRACT]
+    for section in (content.INTRODUCTION, *content.RESULTS.subsections):
         texts += _texts(section)
     return texts
 
 
-def _findings(head: str) -> str:
-    for h, t in content.KEY_FINDINGS.listed:
+def _section(key: str) -> content.Section:
+    (found,) = [s for s in ALL if s.key == key]
+    return found
+
+
+def _joined(key: str) -> str:
+    return " ".join(_texts(_section(key)))
+
+
+def _words(key: str) -> int:
+    return len(_joined(key).split())
+
+
+def _body_text() -> str:
+    return " ".join(
+        t for top in content.BODY for s in _sections(top) for t in _texts(s)
+    )
+
+
+def _contribution(head: str) -> str:
+    for h, t in content.INTRODUCTION.listed:
         if h.startswith(head):
             return t
     raise AssertionError(head)
-
-
-def _opener(key: str) -> str:
-    subs = {s.key: s for s in content.RESULTS.subsections}
-    return subs[key].paragraphs[0]
 
 
 def test_the_title_and_abstract_are_the_planned_ones() -> None:
@@ -144,65 +165,81 @@ def test_the_title_and_abstract_are_the_planned_ones() -> None:
         "Engineering on GPT-2 and Qwen3"
     )
     assert content.ABSTRACT.startswith(
-        "We test representation engineering (Zou et al., 2023) on four GPT-2"
+        "We test representation engineering "
+        "[[cite:zou2025representationengineeringtopdownapproach]] on four "
+        "GPT-2 sizes and on three Qwen3 sizes, base and post-trained"
     )
 
 
-def test_the_body_sections_are_the_six_of_the_paper_in_order() -> None:
-    assert [s.title for s in content.BODY] == [
-        "Introduction",
-        "Related work",
-        "Method",
-        "Results",
-        "Discussion and limitations",
-        "Reproducibility",
+def test_the_body_is_five_sections_and_five_appendices_in_order() -> None:
+    assert [s.title for s in content.BODY] == BODY_TITLES
+    assert [s.key for s in content.METHOD.subsections] == METHOD_KEYS
+    assert [s.key for s in content.RESULTS.subsections] == RESULT_KEYS
+    assert [s.title for s in content.RESULTS.subsections] == [
+        "What does one direction read?",
+        "Does the finder of the paper find it?",
+        "Does a truth reader beat the words alone?",
+        "Does a knowledge direction add to the model's confidence?",
+        "Does steering change the output without breaking it?",
+        "What does post-training change?",
     ]
-    assert [s.key for s in content.RESULTS.subsections] == list(RESULT_KEYS)
-    assert [s.key for s in content.APPENDICES] == list(APPENDIX_KEYS)
+    assert [s.key for s in content.APPENDICES] == APPENDIX_KEYS
     assert [s.title for s in content.APPENDICES] == [
         "Assets and notation",
         "Method details",
         "Reading details",
-        "Wording",
-        "Truth and honesty",
-        "Steering details",
+        "Published steering methods",
         "Knowledge",
-        "Approximate answers",
-        "Post-training details",
-        "Other experiments",
     ]
 
 
-def test_the_page_opens_with_a_summary_the_overview_and_six_findings() -> None:
-    assert content.FRONT_ITEMS == ("fig:teaser",)
-    assert content.TLDR.count(". ") == 0
-    assert len(content.TLDR.split()) <= 60
-    heads = [h for h, _ in content.KEY_FINDINGS.listed]
-    assert len(heads) == 6
-    for head, text in content.KEY_FINDINGS.listed:
-        assert "[[sec:" in head, head
-        assert "[[fig:" in text, head
-        assert len(text.split()) <= 70, head
-    assert not content.KEY_FINDINGS.items
+def test_the_summary_the_findings_list_and_the_long_closing_are_gone() -> None:
+    for name in REMOVED_NAMES:
+        assert not hasattr(content, name), name
+    assert content.ABSTRACT_ITEMS == ("fig:teaser",)
     assert "[[fig:teaser]]" in " ".join(_texts(content.INTRODUCTION))
 
 
-def test_the_introduction_ends_with_a_list_of_contributions() -> None:
+def test_the_closing_paragraph_is_unnumbered_and_links_the_documents() -> None:
+    closing = content.CODE
+    assert (closing.key, closing.title) == ("code", "Code and data")
+    assert closing not in content.BODY
+    (paragraph,) = closing.paragraphs
+    assert len(paragraph.split()) <= 70
+    for name in ("repository", "findings", "methodology", "results"):
+        assert f"[[link:{name}|" in paragraph, name
+    assert "the experiments that have no figure here" in paragraph
+    assert content.LINKS == {
+        "repository": content.REPO_URL,
+        "findings": content.FINDINGS_URL,
+        "methodology": content.METHODOLOGY_URL,
+        "results": content.DATA_URL,
+    }
+
+
+def test_the_introduction_ends_with_four_contributions() -> None:
     listed = content.INTRODUCTION.listed
-    assert len(listed) == 5
-    for head, _ in listed:
-        assert "[[sec:" in head, head
-    assert content.INTRODUCTION.paragraphs[-1] == "Our contributions are:"
+    assert len(listed) == 4
+    for head, text in listed:
+        assert head.count("[[sec:") >= 1, head
+        assert len(text.split()) <= 45, head
+        assert text.count("[[fig:") == 1, head
+        assert text.count("[[tally:") == 1, head
+    assert content.INTRODUCTION.paragraphs[-1] == COUNTS
+    assert len(content.INTRODUCTION.paragraphs) == 4
 
 
-def test_the_discussion_merges_the_limitations_into_seven_items() -> None:
-    heads = [h for h, _ in content.DISCUSSION.runin]
-    assert len(heads) == 7
-    assert not any(re.fullmatch(r"L\d+", h) for h in heads)
-    assert len(content.DISCUSSION.paragraphs) == 1
-    assert content.DISCUSSION.key == "limitations"
-    assert "Missing controls." not in heads
-    assert "Multiple comparisons." not in heads
+def test_the_limitations_are_one_paragraph_and_four_run_ins() -> None:
+    limits = content.LIMITATIONS
+    assert limits.key == "limitations"
+    assert [h for h, _ in limits.runin] == [
+        "Scale and coverage.",
+        "Test size.",
+        "Judges and labels.",
+        "Choices after results.",
+    ]
+    assert len(limits.paragraphs) == 1
+    assert _words("limitations") <= 270
 
 
 def test_section_keys_are_unique() -> None:
@@ -227,7 +264,7 @@ def test_every_token_names_a_known_target() -> None:
             elif kind == "cite":
                 for key in rest.split(","):
                     assert key in bib, (token, key)
-            elif kind in ("num", "count", "runs", "label"):
+            elif kind in ("num", "tally", "label"):
                 owner, _, name = rest.partition(":")
                 key, _, field = name.rpartition(".")
                 assert owner in ("fig", "table"), token
@@ -238,38 +275,58 @@ def test_every_token_names_a_known_target() -> None:
                 assert re.fullmatch(r"[a-z0-9-]+", slug), token
                 assert bar, token
                 assert shown, token
+            elif kind == "link":
+                target, bar, shown = rest.partition("|")
+                assert target in content.LINKS, token
+                assert bar, token
+                assert shown, token
             else:
                 pytest.fail(f"unknown token {token}")
 
 
-def test_every_item_is_placed_once_and_every_appendix_item_is_cited() -> None:
-    placed = [i for s in ALL for i in s.items] + list(content.FRONT_ITEMS)
+def test_every_item_is_placed_once_and_the_main_text_cites_the_appendix() -> (
+    None
+):
+    placed = [i for s in ALL for i in s.items] + list(content.ABSTRACT_ITEMS)
     wanted = [f"fig:{k}" for k in registry.MAIN_FIGURES]
     wanted += [f"table:{k}" for k in registry.MAIN_TABLES]
     wanted += [f"fig:{k}" for k in registry.APPENDIX_FIGURES]
     wanted += [f"table:{k}" for k in registry.APPENDIX_TABLES]
     assert sorted(placed) == sorted(wanted)
+    body = _body_text()
     for section in content.APPENDICES:
         text = " ".join(_texts(section))
         for item in section.items:
-            kind, _, key = item.partition(":")
-            assert f"[[{kind}:{key}]]" in text, item
+            assert f"[[{item}]]" in text, item
+            assert f"[[{item}]]" in body, item
 
 
-def test_every_appendix_section_is_pointed_to_from_the_body() -> None:
-    body = " ".join(
-        t for top in content.BODY for s in _sections(top) for t in _texts(s)
-    )
-    for section in content.APPENDICES:
-        if section.key in ("appendix_assets", "appendix_steering"):
-            continue
-        assert f"[[sec:{section.key}]]" in body, section.key
-    assert "[[table:assets]]" in body
-    assert "[[table:steering]]" in body
+def test_the_appendix_items_sit_in_the_planned_order() -> None:
+    assert [s.items for s in content.APPENDICES] == [
+        ("table:assets", "table:notation"),
+        ("table:design",),
+        (
+            "table:reading",
+            "fig:a_reading_curves",
+            "table:finder_baselines",
+            "fig:wording",
+            "fig:a_truth_cities",
+        ),
+        ("table:steering_baselines",),
+        (
+            "fig:knowledge_steering",
+            "fig:a_knowledge_matrix",
+            "table:detection_baselines",
+            "fig:a_knowledge_geometry",
+            "fig:a_knowledge_projections",
+            "fig:approximate",
+            "table:approximate",
+        ),
+    ]
 
 
 def test_items_follow_the_registry_order_of_the_main_text() -> None:
-    placed = list(content.FRONT_ITEMS) + [
+    placed = list(content.ABSTRACT_ITEMS) + [
         i
         for top in (content.INTRODUCTION, content.METHOD, content.RESULTS)
         for s in _sections(top)
@@ -279,15 +336,22 @@ def test_items_follow_the_registry_order_of_the_main_text() -> None:
     tables = [i[6:] for i in placed if i.startswith("table:")]
     assert figures == list(registry.MAIN_FIGURES)
     assert tables == list(registry.MAIN_TABLES)
+    order = [k for s in content.APPENDICES for k in s.items]
+    assert [k[4:] for k in order if k.startswith("fig:")] == list(
+        registry.APPENDIX_FIGURES
+    )
+    assert [k[6:] for k in order if k.startswith("table:")] == list(
+        registry.APPENDIX_TABLES
+    )
 
 
-def test_each_appendix_section_opens_with_what_it_holds_and_supports() -> None:
+def test_each_appendix_section_opens_with_what_it_holds() -> None:
     for section in content.APPENDICES:
         assert section.paragraphs, section.key
-        if section.key in ("appendix_assets", "appendix_other"):
-            continue
         first = section.paragraphs[0].split(". ")[0]
         assert len(first.split()) <= 60, section.key
+    assert _words("appendix_method") <= 520
+    assert _words("appendix_knowledge") <= 200
 
 
 def test_content_numbers_have_no_stray_digits() -> None:
@@ -297,11 +361,11 @@ def test_content_numbers_have_no_stray_digits() -> None:
 
 def test_the_numbers_test_would_catch_a_pasted_value() -> None:
     assert _digits_left("it reads 0.847 on [[num:fig:a.b]]") != []
-    assert _digits_left("GPT-2 at relative coefficient 0.1 in 2023") == []
+    assert _digits_left("GPT-2 at relative coefficient 0.1") == []
     assert _digits_left("it holds on 10 of 10 checkpoints") != []
     assert _digits_left("a margin of 0.5 on the reader") != []
     assert _digits_left("a margin of 0.55 below 0.5") != []
-    assert _digits_left("all 10 checkpoints, none of the 10, below 0.5") == []
+    assert _digits_left("all 10 checkpoints, below 0.5") == []
 
 
 def test_no_dashes_backticks_or_underscores_in_prose() -> None:
@@ -313,15 +377,8 @@ def test_no_dashes_backticks_or_underscores_in_prose() -> None:
 
 
 def test_run_codes_stay_out_of_the_prose() -> None:
-    kept = [
-        t
-        for s in ALL
-        if s.key != content.REPRODUCIBILITY.key
-        for t in [s.title, *_texts(s)]
-    ]
-    for text in [content.ABSTRACT, content.TITLE, content.TLDR, *kept]:
+    for text in _all_texts():
         assert RUN_CODE.search(_bare(text)) is None, text
-    assert RUN_CODE.search("".join(_texts(content.REPRODUCIBILITY))) is None
 
 
 def test_the_word_first_is_only_the_principal_component() -> None:
@@ -341,22 +398,27 @@ def test_the_repository_handle_appears_only_in_repository_links() -> None:
     assert handle in content.REPO_URL
     for text in _all_texts():
         assert handle not in text
-    for url in (
-        content.REPO_TEXT,
-        content.FINDINGS_URL,
-        content.METHODOLOGY_URL,
-        content.DATA_URL,
-    ):
+    for url in (content.REPO_TEXT, *content.LINKS.values()):
         assert url.startswith(("github.com/", "https://github.com/"))
         assert url.count(handle) == 1
 
 
-def test_the_reader_on_every_training_pair_is_not_called_published() -> None:
+def test_the_shared_terms_have_one_spelling() -> None:
     text = _text()
-    assert "published reader" not in text
-    assert "along the all-pairs reader" in text
-    assert (
-        "all-pairs reader is above every one of its random directions" in text
+    for gone in (
+        "known-against-unknown",
+        "confidence of the model",
+        "text control",
+        "text-classifier control",
+        "Discussion",
+        "published reader",
+        "answer probability",
+        "Zou et al",
+    ):
+        assert gone not in text, gone
+    assert "A knowledge direction, fitted on questions a model answers" in text
+    assert "the leading principal component of paired differences" in (
+        _joined("controls_method")
     )
 
 
@@ -377,134 +439,99 @@ def _method_text() -> str:
     )
 
 
-def test_the_wording_of_the_baseline_rules_is_in_the_text() -> None:
+def test_the_method_states_its_rules_once() -> None:
     method = _method_text()
-    assert "margin over the random direction of the same run" in method
-    assert "never pooled" in method
-    assert "distinct-1" in method
-    assert "perplexity" in method
-    assert "fluent" not in _bare(content.ABSTRACT)
-    assert "fluent" not in _bare(content.TLDR)
+    assert "minus that of the random direction of the same run" in method
+    assert "not minus 0.5" in method
+    assert "never pool the roles" in method
+    assert "that see only the text" in method
+    assert "stacks five output signals" in method
+    assert "no correction for the number of comparisons" in method
+    assert "Each cell is one run" in method
+    assert "treats the two arms as independent" in method
+    assert f"meets the fluency rule: {content.FLUENCY_RULE}" in method
+    assert "not of the completions" in method
+    assert "chosen after pilot runs (post hoc)" in method
+    assert "chooses its layer on the 256 pairs it scores" in method
+    assert "separate split of 214 pairs" in method
+    assert "Controls use no direction fitted for the concept" in method
+    assert _text().count("no direction fitted for the concept") == 1
+    assert _text().count("each Qwen3 size as") == 1
+    assert "baselines are published methods run on the same items" in method
 
 
-def test_the_margin_text_does_not_claim_one_layer_for_every_comparison() -> (
+def test_the_layer_exception_of_the_finder_comparison_is_in_appendix_b() -> (
     None
 ):
-    method = _method_text()
-    assert "at the same layer, not over" not in method
-    assert "except in the finder comparison" in method
-    assert "layer chosen on its own select split" in method
+    appendix = _joined("appendix_method")
+    assert "except in the finder comparison" in appendix
+    assert "layer chosen on its own select split" in appendix
+    assert "at the same layer, not over" not in _text()
 
 
-def test_the_confidence_baseline_is_five_stacked_signals() -> None:
-    text = _text()
-    assert "answer probability" not in text
-    assert "stacks five output signals" in text
-
-
-def test_the_method_is_about_nine_hundred_words() -> None:
+def test_the_method_is_about_six_hundred_words() -> None:
     words = len(
         " ".join(
             t for s in _sections(content.METHOD) for t in _texts(s)
         ).split()
     )
-    assert 700 <= words <= 1000, words
+    assert 420 <= words <= 610, words
 
 
 def test_content_design_facts() -> None:
     method = {
-        "r1": json.loads(
-            (run("r1", "gpt2") / "config.json").read_text("utf-8")
-        ),
-        "r6": json.loads(
-            (run("r6", "gpt2") / "config.json").read_text("utf-8")
-        ),
-        "c1": json.loads(
-            (run("c1", "gpt2") / "config.json").read_text("utf-8")
-        ),
-        "m1": json.loads(
-            (run("m1", "gpt2") / "config.json").read_text("utf-8")
-        ),
-        "p9d": json.loads(
-            (run("p9d", "qwen3-1.7b-base") / "config.json").read_text("utf-8")
-        ),
+        name: json.loads((run(name, model) / "config.json").read_text("utf-8"))
+        for name, model in (
+            ("r1", "gpt2"),
+            ("c1", "gpt2"),
+            ("m1", "gpt2"),
+            ("p9d", "qwen3-1.7b-base"),
+        )
     }
     assert method["r1"]["n_eval_pairs"] == 256
     assert method["r1"]["n_pairs"] == 64
     assert method["r1"]["n_seeds"] == 10
-    assert method["r6"]["n_seeds"] == 15
     assert params.REPORT_PAIRS["sentiment"] == 214
-    r5 = data(run("r5", "gpt2"), "summary.json")["n_eval_pairs"]["transfer"]
-    assert (r5["val"], r5["test"]) == (53, 59)
-    assert data(run("r6", "gpt2"), "summary.json")["n_test"] == 173
     assert method["c1"]["n_neutral"] == 200
     assert method["c1"]["n_steer_seeds"] == 3
     assert method["m1"]["n_steer_seeds"] == 3
     assert "random" in method["m1"]["methods"]
     assert method["p9d"]["n_random"] == 3
-    sizes = {
-        count
-        for model in models("p10b")
-        for family in data(run("p10b", model), "summary.json")[
-            "counts"
-        ].values()
-        for side in family.values()
-        for split, count in side.items()
-        if split == "test"
-    }
-    assert (min(sizes), max(sizes)) == (22, 30)
+    vectors = method["m1"]["n_steer_seeds"]
+    assert 1 / comb(2 * vectors, vectors) == 0.05
+    steering = _joined("steering")
+    assert "all three vectors beat all three random directions" in steering
+    assert "(probability 0.05 by chance)" in steering
+    assert "each of three random directions" in _joined("known_unknown")
 
 
-def test_the_design_digits_of_method_discussion_and_reproducibility() -> None:
+def test_the_design_digits_of_the_method_and_its_appendix() -> None:
     facts = (
-        r"scores 0\.5(?!\d)",
-        r"base seed 0",
-        r"(?:above|over) 0\.5(?!\d)",
-        r"fits 10 readers",
-        r"A run fits 10 readers",
-        r"(?:draw of|at) 64 training pairs",
-        r"(?:each of|across|on) the 10 checkpoints",
-        r"across 10 checkpoints",
-        r"over the 10 readers",
-        r"below about 0\.15(?!\d)",
-        rf"coefficients {content.MINUS}0\.3 to 0\.3",
-        r"at most 1\.5 times",
-        r"at least 0\.15(?!\d)",
-        rf"[+{content.MINUS}]0\.3(?!\d)",
+        r"chance is 0\.5(?!\d)",
+        r"(?:above|minus) 0\.5(?!\d)",
         r"not 0\.5(?!\d)",
-        r"256",
-        r"214",
-        r"53",
-        r"59",
-        r"173",
-        r"200",
-        r"15",
-        r"22",
-        r"30",
-        r"95",
+        r"A run fits 10 readers",
+        r"readers, not 10\.",
+        r"draw of 64 training pairs",
+        r"the 256 pairs it scores",
+        r"split of 214 pairs",
+        r"with 3 steering vectors",
+        rf"coefficients from {content.MINUS}0\.3 to 0\.3",
+        rf"[+{content.MINUS}]0\.3(?!\d)",
+        r"perplexity of 200 held-out",
         r"1\.96",
-        r"1\.000",
-        r"0\.6B",
-        r"1/4",
         r"\bp[12]\b",
         r"\bn[12]\b",
-        r"\b16\b",
-        r"\b[234]\b",
-        r"\b1\b",
-        r"P9b",
-        r"R2",
-        r"SiEBERT",
+        r"\(1 ",
+        r"on 2 degrees of freedom",
     )
-    appendix = [s for s in content.APPENDICES if s.key == "appendix_method"]
-    for top in (
-        content.METHOD,
-        content.DISCUSSION,
-        content.REPRODUCIBILITY,
-        *appendix,
-    ):
+    for top in (content.METHOD, _section("appendix_method")):
         for section in _sections(top):
             for text in _texts(section):
                 assert _digits_left(text, (*GENERIC, *facts)) == [], text
+    for key in ("limitations", "code", "appendix_knowledge"):
+        for text in _texts(_section(key)):
+            assert _digits_left(text) == [], text
 
 
 def test_sections_are_frozen_dataclasses() -> None:
@@ -513,543 +540,34 @@ def test_sections_are_frozen_dataclasses() -> None:
         content.INTRODUCTION.title = "x"  # type: ignore[misc]
 
 
-def test_the_discussion_names_the_fluency_rule_it_says_steering_breaks() -> (
-    None
-):
-    text = " ".join(_texts(content.DISCUSSION))
-    sentence = text[text.index("Steering moves") :].split(". ")[0]
-    assert "breaks fluency" in sentence
-    assert "perplexity" in sentence
-    assert "distinct-1" in sentence
-    assert "1.5" in sentence
-    assert "0.15" in sentence
-
-
-def test_the_approximate_counts_and_criteria_are_in_the_appendix() -> None:
-    (section,) = [
-        s for s in content.APPENDICES if s.key == "appendix_approximate"
+def test_the_abstract_is_prose_with_one_number() -> None:
+    tokens = TOKEN.findall(content.ABSTRACT)
+    assert tokens == [
+        "cite:zou2025representationengineeringtopdownapproach",
+        "num:fig:base_post.sent_below",
     ]
-    text = " ".join(_texts(section))
-    assert "is matched by" not in _text()
-    assert "[[count:table:approximate.above_words]]" in text
-    assert "[[count:table:approximate.layer_one]]" in text
-    assert "[[count:fig:approximate.control_below_half]]" in text
-    assert "[[count:fig:approximate.control_above_95]]" in text
-    assert "a sign flip between the training and the test concepts" in text
-    assert "already separates the test concepts" in text
-    for gone in ("reader_in_random", "people_outside_band", "random_high"):
-        assert gone not in _text()
+    assert "all 10" not in content.ABSTRACT
 
 
-def _section(key: str) -> content.Section:
-    (found,) = [s for s in ALL if s.key == key]
-    return found
-
-
-def test_known_and_unknown_questions_have_a_finding_and_a_subsection() -> None:
-    heads = [h for h, _ in content.KEY_FINDINGS.listed]
-    assert [h.split(" (")[0] for h in heads][2:5] == [
-        "Known and unknown questions",
-        "Truth",
-        "Steering",
-    ]
-    keys = [s.key for s in content.RESULTS.subsections]
-    assert keys.index("known_unknown") == keys.index("reading") + 1
-    assert keys.index("truth") == keys.index("known_unknown") + 1
-    sub = _section("known_unknown")
-    assert sub.title == "Known and unknown questions"
-    assert sub.items == (
-        "fig:knowledge_reading",
-        "fig:knowledge_steering",
-        "fig:approximate",
-    )
-    assert [h for h, _ in sub.runin] == [
+def test_each_results_subsection_opens_with_its_answer() -> None:
+    for sub in content.RESULTS.subsections:
+        closes = sub.key == "reading"
+        assert len(sub.paragraphs) == (2 if closes else 1), sub.key
+        assert bool(sub.after) == (sub.key != "reading")
+        opener = sub.paragraphs[0]
+        assert opener.rstrip().endswith("."), sub.key
+        assert ". " not in _bare(opener).replace("0. ", ""), sub.key
+        assert len(sub.items) == 1, sub.key
+        assert sub.items[0].startswith("fig:"), sub.key
+        limit = 350 if sub.key == "known_unknown" else 160
+        assert _words(sub.key) <= limit, (sub.key, _words(sub.key))
+        if sub.key != "known_unknown":
+            assert f"[[{sub.items[0]}]]" in opener, sub.key
+    assert [h for h, _ in _section("known_unknown").runin] == [
         "Reading.",
         "Steering.",
-        "Approximate answers.",
     ]
-    text = " ".join(_texts(sub))
-    for token in (
-        "[[count:fig:knowledge_reading.above_best]]",
-        "[[num:fig:knowledge_reading.dir_inc_hi_max_gpt2]]",
-        "[[runs:fig:knowledge_steering.distinguishable]]",
-        "[[runs:fig:knowledge_steering.selective]]",
-        "[[runs:fig:knowledge_steering.known_ge_unknown]]",
-        "[[num:fig:a_knowledge_matrix.close]]",
-        "[[num:fig:a_knowledge_matrix.types]]",
-        "[[num:fig:approximate.forced_base_max]]",
-        "[[num:fig:approximate.forced_post_max]]",
-        "[[count:fig:approximate.reader_above_random]]",
-        "[[count:table:approximate.above_words]]",
-        "[[sec:appendix_knowledge]]",
-        "[[sec:appendix_approximate]]",
-        "[[fig:a_knowledge_matrix]]",
-    ):
-        assert token in text, token
-    assert "told to give one exact number" in text
-
-
-DESIGN_HEADS = [
-    "Design: reading concepts.",
-    "Design: finders.",
-    "Design: known and unknown questions.",
-    "Design: approximate answers.",
-    "Design: truth.",
-    "Design: steering.",
-    "Design: post-training.",
-]
-
-
-def test_appendix_b_states_the_design_of_every_study() -> None:
-    section = _section("appendix_method")
-    heads = [h for h, _ in section.runin]
-    assert heads[:6] == [
-        "Readers and draws.",
-        "Layer choice.",
-        "Data and judges.",
-        "Controls and baselines.",
-        "Steering.",
-        "Intervals.",
-    ]
-    assert heads[6:] == DESIGN_HEADS
-    assert section.items == ("table:design",)
-    assert "[[table:design]]" in " ".join(section.paragraphs)
-    for head in DESIGN_HEADS:
-        text = dict(section.runin)[head]
-        assert len(text.split()) >= 60, head
-        assert "[[table:design]]" not in text, head
-
-
-def test_the_design_run_ins_take_their_counts_from_the_design_table() -> None:
-    out = design.build(Manifest(ROOT))
-    section = _section("appendix_method")
-    used = set()
-    for head in DESIGN_HEADS:
-        text = dict(section.runin)[head]
-        assert _digits_left(text) == [], head
-        for kind, name in re.findall(
-            r"\[\[(num|count):table:design\.([a-z0-9_]+)\]\]", text
-        ):
-            pool = out.numbers if kind == "num" else out.counts
-            assert name in pool, name
-            used.add(name)
-    assert len(used) >= 7
-
-
-def test_the_design_run_ins_say_what_was_fixed_and_what_a_run_can_show() -> (
-    None
-):
-    section = _section("appendix_method")
-    paragraphs = " ".join(section.paragraphs)
-    assert (
-        "No hypothesis was fixed before its run, except the tolerance of the "
-        "views run, which was set before those runs." in paragraphs
-    )
-    assert "No prediction" not in paragraphs
-    runins = dict(section.runin)
-    steering = runins["Design: steering."]
-    assert (
-        "so it can show whether the direction moves the judged sentiment"
-        in steering
-    )
-    assert "it shows that" not in steering
-    reading = runins["Design: reading concepts."]
-    assert (
-        "the training-set size run draws "
-        "[[num:table:design.training_size_n_seeds]] training sets per size"
-        in reading
-    )
-    assert "the items and the draws stay fixed" not in reading
-    finders = runins["Design: finders."]
-    assert "whether five finders that read utility also steer it" in finders
-    assert "six" not in finders
-
-
-def test_appendix_b_states_the_steering_baselines_and_the_views_run() -> None:
-    runins = dict(_section("appendix_method").runin)
-    steering = runins["Design: steering."]
-    for phrase in (
-        "The utility test and the knowledge steering run steer random "
-        "directions of the same norm, and the run of published steering "
-        "methods steers a random unit direction like its vector arms.",
-        "sets the reader beside five published steering methods as "
-        "baselines: prompt prepending, DiffMean, CAA, ActAdd and "
-        "mean-centring. Its controls are the unsteered model and that "
-        "random direction, and it covers "
-        "[[count:table:design.steering_baselines]].",
-        "chooses its coefficient on "
-        "[[num:table:design.steering_baselines_n_tune]] tuning prompts per "
-        "concept",
-        "an LLM judge rates the concept and the fluency of its generations, "
-        "and on the post-trained checkpoint how well they follow the "
-        "instruction, on [[num:table:design.steering_baselines_n_held_out]] "
-        "held-out prompts",
-        "no human validated the judges, neither the classifiers of the "
-        "sentiment run nor the LLM judge, whose two slots are the same "
-        "model",
-    ):
-        assert phrase in steering, phrase
-    assert "do steer random directions" not in steering
-    method = runins["Steering."]
-    assert (
-        "The run of published steering methods steers toward sentiment, "
-        "happiness and anger at three layers, with at most "
-        "[[num:table:steering_baselines.new_tokens]] new tokens per prompt; "
-        "an LLM judge scores each criterion on a three-point scale, the "
-        "overall score of a generation is the harmonic mean of its "
-        "criteria, and the interval of the mean overall score of an arm is "
-        "a percentile bootstrap over the held-out prompts with "
-        "[[num:table:steering_baselines.resamples]] resamples." in method
-    )
-    known = runins["Design: known and unknown questions."]
-    assert (
-        "The views run reads the train and test questions of the reading "
-        "run again at every layer that run read, refits the readers and "
-        "compares their AUROC with the stored scores, within a tolerance of "
-        "[[num:table:knowledge_projections.tolerance]] set before the run; "
-        "its controls are a random direction, readers refitted on labels "
-        "permuted inside each group, a view of the text alone and the "
-        "popularity of the subject, and it covers "
-        "[[count:table:design.knowledge_views]]." in known
-    )
-
-
-def test_the_published_baselines_have_a_table_beside_what_they_compare() -> (
-    None
-):
-    reading = _section("appendix_reading")
-    place = reading.items.index("table:finders_all")
-    assert reading.items[place + 1] == "table:finder_baselines"
-    text = " ".join(_texts(reading))
-    for token in (
-        "[[table:finder_baselines]]",
-        "[[count:table:finder_baselines.every_baseline_above]]",
-        "[[count:table:finder_baselines.finder_above_random]]",
-        "[[cite:burns2023discovering]]",
-        "fitted on the same [[num:table:finder_baselines.seeds]] "
-        "training sets of [[num:table:finder_baselines.train_pairs]] "
-        "pairs",
-        "on at least one dataset, with the same interval, on "
-        "[[count:table:finder_baselines.finder_above_random]]",
-    ):
-        assert token in text, token
-    text = " ".join(_texts(_section("appendix_knowledge")))
-    for token in (
-        "[[table:detection_baselines]]",
-        "[[count:table:detection_baselines.answer_probe_above]]",
-        "[[count:table:detection_baselines.above_ptrue_and_controls]]",
-        "[[cite:orgad2025llms]]",
-        "[[cite:farquhar2024detecting]]",
-        "[[cite:chen2024inside]]",
-    ):
-        assert token in text, token
-    assert "by point estimate" in text
-    assert text.count("by point estimate") == 2
-    assert "and, by point estimate, the direction is above P(True)" in text
-
-
-def test_the_steering_baselines_sit_beside_the_steering_table() -> None:
-    section = _section("appendix_steering")
-    assert section.items == ("table:steering", "table:steering_baselines")
-    text = " ".join(_texts(section))
-    for token in (
-        "[[table:steering_baselines]]",
-        "[[num:table:steering_baselines.held_out]]",
-        "[[num:table:steering_baselines.tune]]",
-        "[[cite:wu2025axbench]]",
-        "[[cite:rimsky2024steering]]",
-        "[[cite:turner2023steering]]",
-        "[[cite:jorgensen2023improving]]",
-        "[[cite:marks2024geometry]]",
-        "LLM judge",
-    ):
-        assert token in text, token
-
-
-def test_the_knowledge_appendix_shows_the_geometry_after_the_dose_curves() -> (
-    None
-):
-    section = _section("appendix_knowledge")
-    assert section.items == (
-        "fig:a_knowledge_matrix",
-        "table:knowledge",
-        "table:detection_baselines",
-        "fig:a_dose_runs",
-        "fig:a_dose_types",
-        "fig:a_knowledge_geometry",
-        "fig:a_knowledge_projections",
-        "table:knowledge_projections",
-    )
-    text = " ".join(_texts(section))
-    for token in (
-        "[[fig:a_knowledge_geometry]]",
-        "[[count:fig:a_knowledge_geometry.with_views]]",
-        "[[count:fig:a_knowledge_geometry.reader_above_words]]",
-        "[[fig:a_knowledge_projections]]",
-        "[[count:fig:a_knowledge_projections.above_every_draw]]",
-        "[[num:fig:a_knowledge_projections.random_max]]",
-        "[[table:knowledge_projections]]",
-        "[[count:table:knowledge_projections.within_tolerance]]",
-        "[[num:table:knowledge_projections.tolerance]]",
-        "[[label:fig:a_knowledge_projections.undrawn]]",
-        "[[label:fig:a_knowledge_projections.exceptions]]",
-        "[[label:fig:a_knowledge_projections.exception_contrasts]]",
-    ):
-        assert token in text, token
-    assert "every drawn knowledge contrast" in text
-    assert "on every drawn contrast" in text
-    assert "no stored questions" not in text
-    assert (
-        "[[count:table:knowledge_projections.within_tolerance]] with stored "
-        "views"
-    ) in text
-    assert "are scored and not drawn" in text
-    assert "on every contrast of the three blocks" not in text
-    assert "one checkpoint per role" in text
-    assert "The entity views are stored for" in text
-    assert not re.search(r"\b10 checkpoints\b", text)
-
-
-def test_the_knowledge_and_approximate_figures_left_the_appendix() -> None:
-    assert "fig:knowledge_steering" not in _section("appendix_knowledge").items
-    assert "fig:approximate" not in _section("appendix_approximate").items
-    assert "fig:a_links" in _section("appendix_approximate").items
-
-
-def test_the_approximate_appendix_holds_the_people_position_counts() -> None:
-    text = " ".join(_texts(_section("appendix_approximate")))
-    assert "[[count:fig:approximate.outside]]" in text
-    for role in ("gpt2", "base", "post"):
-        for name in ("position", "band"):
-            for end in ("min", "max"):
-                assert f"[[num:fig:approximate.{name}_{role}_{end}]]" in text
-    assert "approximate.position_min" not in text
-    assert "approximate.band_min" not in text
-
-
-def test_the_abstention_limit_names_phrase_matching_and_generic_answers() -> (
-    None
-):
-    text = " ".join(h + " " + t for h, t in content.DISCUSSION.runin)
-    assert "phrase matching without human labels" in text
-    assert "a generic answer to an unknowable detail" in text
-    assert "a specific invented one" in text
-    assert "label which a non-abstaining answer is" in text
-
-
-def test_the_summary_and_abstract_name_the_knowledge_result() -> None:
-    assert "known-against-unknown direction does not beat the model's" in (
-        content.TLDR
-    )
-    assert "ranks questions above popularity and text classifiers" in (
-        content.ABSTRACT
-    )
-    contribution = content.INTRODUCTION.listed[-2]
-    assert "[[sec:known_unknown]]" in contribution[0]
-    assert "confidence of the model" in contribution[1]
-
-
-def test_the_negated_set_claim_counts_checkpoints_below_chance() -> None:
-    text = _text()
-    assert "at least one negated set falls below chance" in text
-    assert "[[count:fig:truth.neg_below_half]]" in text
-
-
-def test_counts_over_runs_use_the_runs_token() -> None:
-    text = _text()
-    assert "[[runs:fig:knowledge_steering.distinguishable]]" in text
-    assert "[[count:fig:knowledge_steering.distinguishable]]" not in text
-    assert "[[runs:fig:knowledge_steering.known_ge_unknown]]" in text
-    assert "by the largest shift of the mean dose curve" in text.lower()
-    assert "known_ge_unknown_" not in text
-    assert "knowledge_steering.n_" not in text
-
-
-def test_axbench_is_described_by_what_it_found() -> None:
-    text = _text()
-    assert "difference-in-means is the best concept detector" in text
-    assert "prompting beats every method for steering" in text
-    assert "sparse autoencoders are not competitive on either" in text
-    assert "simple baselines match or beat" not in text
-
-
-def test_reproducibility_admits_the_lorra_adapter_and_names_no_run_code() -> (
-    None
-):
-    paragraphs = " ".join(_texts(content.REPRODUCIBILITY))
-    assert "no experiment trains a model beyond" not in paragraphs
-    assert "LoRRA adapter" in paragraphs
-    assert "fitted on all 10 checkpoints" in paragraphs
-    assert not RUN_CODE.search(paragraphs)
-    assert "seed" in paragraphs
-    assert "tomography run" in paragraphs
-
-
-def test_the_text_control_is_scoped_in_the_abstract_and_introduction() -> None:
-    assert "where the wording leaks the label" in content.ABSTRACT
-    assert "random-direction controls" in content.ABSTRACT
-    assert "text-classifier controls" in content.ABSTRACT
-    assert "for the readings, TruthfulQA, knowledge and approximate" in (
-        " ".join(content.INTRODUCTION.paragraphs)
-    )
-
-
-def test_the_details_the_main_text_dropped_are_in_appendix_b() -> None:
-    (section,) = [s for s in content.APPENDICES if s.key == "appendix_method"]
-    text = " ".join(_texts(section))
-    assert "20 for the held-out sentiment run" in text
-    assert "response tokens" in text
-    assert "perplexity of 200 held-out WikiText-103 passages" in text
-    assert "1.96" in text
-    method = _method_text()
-    assert "40, 55 and 70 percent of the depth" in method
-    assert "for the sentiment run" in method
-    assert "1.96" not in method
-
-
-def test_the_confidence_gain_is_bounded_not_called_nothing() -> None:
-    text = _text()
-    assert "adds nothing to the confidence" not in text
-    for role in ("gpt2", "base", "post"):
-        assert f"[[num:fig:knowledge_reading.dir_inc_hi_max_{role}]]" in text
-    assert "gain_upper_max" not in text
-
-
-def test_the_paired_differences_are_counted_by_token_and_not_named() -> None:
-    text = _findings("Post-training")
-    assert "[[num:fig:base_post.paired_excluding_zero]]" in text
-    assert "[[num:fig:base_post.paired_total]]" in text
-    assert "three other" not in _text()
-    assert "0.6B morality" not in _text()
-    assert "leaves most other readings" not in _text()
-
-
-def test_the_post_training_findings_state_the_interval_criterion() -> None:
-    for text in (
-        _findings("Post-training"),
-        _opener("base_post"),
-        content.ABSTRACT,
-        " ".join(_texts(content.DISCUSSION)),
-    ):
-        assert "with an interval below zero" in text, text
-        assert "[[num:fig:base_post.sent_below]] of 3 Qwen3 sizes" in text
-
-
-def test_limitations_cover_the_design_choices() -> None:
-    items = " ".join(h + " " + t for h, t in content.DISCUSSION.runin)
-    for phrase in (
-        "one prompt format",
-        "one judge family",
-        "two model families",
-        "small validation sets",
-        "alias string matches",
-        "no hand check",
-    ):
-        assert phrase in items, phrase
-
-
-def test_the_discussion_cites_a_section_for_steering() -> None:
-    text = " ".join(_texts(content.DISCUSSION))
-    assert "behaves as the paper describes" not in text
-    assert "[[sec:steering]]" in text
-
-
-def test_the_abstract_is_prose_without_run_counts() -> None:
-    abstract = content.ABSTRACT
-    assert "[[count:" not in abstract
-    assert "of 3 Qwen3 sizes" in abstract
-    assert "by the 95 percent interval" in abstract.lower()
-    assert "does not add to the confidence of the model" in abstract
-    assert "not above a classifier on the words alone" in abstract
-    assert "confounded with the concept and the data" in abstract
-    assert abstract.count("relative coefficient") == 2
-    assert "rarely" not in abstract
-    assert "all 10" not in abstract
-    assert "of the three Qwen3" not in _text()
-
-
-def test_the_introduction_defines_its_terms_before_the_list_uses_them() -> None:
-    first = " ".join(content.INTRODUCTION.paragraphs)
-    for term in ("margin", "relative depth", "relative coefficient"):
-        assert f"{term} is" in first
-
-
-def test_each_key_finding_names_its_counts_and_its_figures() -> None:
-    finder = _findings("The finder")
-    assert "[[count:fig:finders.pca_sentiment]]" in finder
-    assert "confounded with the concept and the data" in finder
-    reading = _findings("Where a concept")
-    assert "[[count:fig:teaser.truth]]" in reading
-    steering = _findings("Steering")
-    for token in ("moves01", "fluent01"):
-        assert f"[[count:fig:steering.{token}]]" in steering
-    assert "[[count:fig:teaser.steering]]" in steering
-    assert content.FLUENCY_RULE in steering
-    assert "no checkpoint is fluent" not in _text()
-
-
-def test_each_results_subsection_opens_with_its_answer_before_the_figures() -> (
-    None
-):
-    subs = {s.key: s for s in content.RESULTS.subsections}
-    assert tuple(subs) == RESULT_KEYS
-    for key, sub in subs.items():
-        assert len(sub.paragraphs) == 1, key
-        opener = sub.paragraphs[0]
-        assert "[[fig:" not in opener, key
-        assert "[[table:" not in opener, key
-        assert len(re.findall(r"[.;] ", opener)) == 0, key
-        assert opener.endswith("."), key
-        assert sub.items, key
-        assert sub.after, key
-        limit = 420 if key == "known_unknown" else 260
-        assert len(" ".join(_texts(sub)).split()) <= limit, key
-
-
-def test_the_results_leads_carry_no_per_role_counts() -> None:
-    for sub in content.RESULTS.subsections:
-        assert "[[count:" not in sub.paragraphs[0], sub.key
-        assert "[[runs:" not in sub.paragraphs[0], sub.key
-
-
-OTHER_SLUGS = (
-    "lorra-adapter-lr1-and-the-truthfulqa-control-c4",
-    "emotions-r4",
-    "emotion-steering-c2",
-    "lie-gallery-c5",
-    "template-steering-p7",
-    "direction-agreement-and-logit-lens-on-gpt2-a1-a2",
-    "token-position-and-a-misleading-sentence-p2",
-)
-
-
-def _other() -> str:
-    (section,) = [s for s in content.APPENDICES if s.key == "appendix_other"]
-    return " ".join(section.paragraphs)
-
-
-def test_the_other_experiments_section_points_to_each_findings_section() -> (
-    None
-):
-    text = _other()
-    for slug in OTHER_SLUGS:
-        assert f"[[findings:{slug}|" in text, slug
-    shown = re.sub(r"\[\[findings:[^|]*\|(.*?)\]\]", r"", text)
-    assert 75 <= len(_bare(shown).split()) <= 150
-
-
-def test_the_other_experiments_section_has_no_numbers_or_run_codes() -> None:
-    bare = _bare(_other())
-    assert re.search(r"\d", bare) is None
-    assert RUN_CODE.search(bare) is None
-    for covered in ("seed agreement", "misleading sentence", "R1", "sentiment"):
-        assert covered not in bare
-
-
-def test_the_reproducibility_section_points_to_the_other_experiments() -> None:
-    text = " ".join(_texts(content.REPRODUCIBILITY))
-    assert "LoRRA" in text
-    assert "[[sec:appendix_other]]" in text
+    assert "[[fig:knowledge_reading]]" in _section("known_unknown").runin[0][1]
 
 
 @pytest.fixture(scope="module")
@@ -1057,7 +575,15 @@ def built() -> dict[str, registry.FigureOutput]:
     manifest = Manifest(ROOT)
     return {
         key: registry.build_figure(key, manifest)
-        for key in ("teaser", "finders", "steering", "wording")
+        for key in (
+            "teaser",
+            "reading",
+            "finders",
+            "truth",
+            "knowledge_reading",
+            "steering",
+            "base_post",
+        )
     }
 
 
@@ -1069,389 +595,438 @@ def _none(count: dict[str, RoleCount]) -> bool:
     return all(c.hits == 0 for c in count.values())
 
 
-def _hits(count: dict[str, RoleCount]) -> int:
-    return sum(c.hits for c in count.values())
-
-
-def _total(count: dict[str, RoleCount]) -> int:
-    return sum(c.total for c in count.values())
+def _shape(count: dict[str, RoleCount]) -> list[tuple[int, int]]:
+    return [(count[r].hits, count[r].total) for r in ("gpt2", "base", "post")]
 
 
 def test_the_written_reading_claims_match_the_computed_counts(
     built: dict[str, registry.FigureOutput],
 ) -> None:
-    teaser = built["teaser"].counts
-    assert _all(teaser["utility"])
-    assert _total(teaser["utility"]) == 10
-    assert _all(teaser["morality"])
-    assert _total(teaser["morality"]) == 10
-    truth = teaser["truth"]
-    assert truth["gpt2"].hits == 0
-    assert truth["base"].hits == truth["base"].total
-    assert truth["post"].hits == truth["post"].total
-    assert "all 10" not in content.ABSTRACT
-    assert "truth on every Qwen3 checkpoint but no GPT-2" in content.ABSTRACT
-    assert "reads utility and morality above its random direction on every" in (
-        _opener("reading")
+    counts = built["reading"].counts
+    for concept in ("sentiment", "utility", "morality"):
+        assert _all(counts[concept]), concept
+        assert sum(c.total for c in counts[concept].values()) == 10
+    for owner in (counts["truth"], built["teaser"].counts["truth"]):
+        assert owner["gpt2"].hits == 0
+        assert owner["base"].hits == owner["base"].total
+        assert owner["post"].hits == owner["post"].total
+    claim = (
+        "a logistic direction reads sentiment, utility and morality above "
+        "its random direction on every checkpoint"
     )
-    assert "truth on every Qwen3 checkpoint but no GPT-2" in _opener("reading")
+    assert (
+        claim.replace("a logistic", "A logistic")
+        + ", and truth on every Qwen3 but no GPT-2 checkpoint"
+    ) in content.ABSTRACT
+    assert claim in _contribution("Reading")
+    opener = _section("reading").paragraphs[0]
+    assert claim.replace("a logistic", "A logistic") in opener
+    assert "and truth on every Qwen3 checkpoint" in opener
+    after = _joined("reading")
+    assert "No GPT-2 truth reader is separable from its random direction" in (
+        after
+    )
+    numbers = built["reading"].numbers
+    assert numbers["n_gpt2"] == 4
+    assert "Across the four GPT-2 sizes" in after
+    for concept in ("utility", "morality"):
+        assert numbers[f"slope_{concept}_lo"] > 0, concept
+    for concept in ("sentiment", "truth"):
+        low, high = (numbers[f"slope_{concept}_{e}"] for e in ("lo", "hi"))
+        assert low < 0 < high, concept
+    assert "the sentiment and truth intervals include zero" in after
+    for role in ("gpt2", "base", "post"):
+        latest = numbers[f"onset_sentiment_{role}_max"]
+        for concept in ("utility", "morality", "truth"):
+            assert numbers[f"onset_{concept}_{role}_min"] > latest, (
+                role,
+                concept,
+            )
+    assert (
+        "In every role the margin exceeds 0.1 at the lowest relative depth "
+        "for sentiment"
+    ) in (after)
 
 
 def test_the_written_finder_claims_match_the_computed_counts(
     built: dict[str, registry.FigureOutput],
 ) -> None:
     counts = built["finders"].counts
+    assert _shape(counts["pca_sentiment"]) == [(0, 4), (1, 3), (0, 3)]
+    assert "for sentiment on one checkpoint" in content.ABSTRACT
+    opener = _section("finders").paragraphs[0]
+    assert "for sentiment on a single Qwen3 base checkpoint" in opener
+    assert "on [[tally:fig:finders.pca_truth]] checkpoints" in opener
     utility = counts["pca_utility"]
-    for role in ("base", "post"):
-        assert utility[role].hits == utility[role].total
-    qwen = ("base", "post")
-    for name in ("pca_sentiment", "pca_truth"):
-        assert sum(counts[name][r].hits for r in qwen) < sum(
-            utility[r].hits for r in qwen
-        )
+    assert utility["gpt2"].hits == 0
+    assert _all({r: utility[r] for r in ("base", "post")})
+    assert _all({"gpt2": counts["pca_utility_point"]["gpt2"]})
+    after = _joined("finders")
+    assert (
+        "For utility it is above on every Qwen3 checkpoint, and on GPT-2 by "
+        "point estimate only"
+    ) in after
+    assert "for utility on every Qwen3 checkpoint" in _contribution(
+        "The finder"
+    )
+    assert _contribution("The finder").startswith(
+        "By interval, the leading principal component"
+    )
+    assert "Only for utility does a pair hold two versions of one" in after
     assert _all(counts["logistic_sentiment"])
-    assert "on every Qwen3 checkpoint" in _findings("The finder")
-    assert "all 10" not in _findings("The finder")
-    assert "[[count:fig:finders.logistic_sentiment]]" in _findings("The finder")
-    assert "above one for sentiment on every checkpoint" in _opener("finders")
+    assert (
+        "Logistic regression is above the random direction for sentiment on "
+        "every checkpoint"
+    ) in after
+    assert after.count("matching is confounded") == 1
+    assert _text().count("matching is confounded") == 1
+    baselines = registry.build_table("finder_baselines", Manifest(ROOT))
+    assert _all(baselines.counts["every_baseline_above"])
+    assert (
+        "on at least one dataset, by the same interval, on "
+        "[[tally:table:finder_baselines.every_baseline_above]] checkpoints"
+    ) in after
+    assert "four published finders each beat it on some dataset" in (
+        content.ABSTRACT
+    )
 
 
-def test_the_written_steering_and_wording_claims_match_the_counts(
+def test_the_written_comparison_claims_match_the_computed_counts(
+    built: dict[str, registry.FigureOutput],
+) -> None:
+    assert _none(built["truth"].counts["diff_excludes_zero"])
+    assert _none(built["teaser"].counts["truthfulqa"])
+    assert "No TruthfulQA reader beats the words alone" in content.ABSTRACT
+    assert "No TruthfulQA reader beats the words alone" in _contribution(
+        "Stronger"
+    )
+    opener = _section("truth").paragraphs[0]
+    assert "A TruthfulQA reader does not beat the words alone" in opener
+    assert "includes zero on every checkpoint" in opener
+    above = built["knowledge_reading"].counts["above_best"]
+    assert above["gpt2"].hits == 0
+    qwen = [above[r] for r in ("base", "post")]
+    assert sum(c.hits for c in qwen) * 2 > sum(c.total for c in qwen)
+    assert not _all({"base": above["base"], "post": above["post"]})
+    assert _none(built["teaser"].counts["knowledge_confidence"])
+    assert (
+        "beats popularity and the words alone on most Qwen3 checkpoints but "
+        "not the model's confidence"
+    ) in content.ABSTRACT
+    known = _section("known_unknown").paragraphs[0]
+    assert "on most Qwen3 checkpoints" in known
+    increment = "adds no distinguishable increment to the model's confidence"
+    for text in (known, _contribution("Stronger")):
+        assert increment in text
+    stronger = _contribution("Stronger")
+    assert "No TruthfulQA reader beats the words alone by interval" in stronger
+    assert (
+        "the words alone, by interval, on "
+        "[[tally:fig:knowledge_reading.above_best]]"
+    ) in stronger
+    assert (
+        "On a second task, telling wrong from correct answers, its "
+        "increment over the model's confidence"
+        in (_section("known_unknown").runin[0][1])
+    )
+    assert "adds nothing" not in _text()
+
+
+def test_the_written_steering_claims_match_the_computed_counts(
     built: dict[str, registry.FigureOutput],
 ) -> None:
     steering = built["steering"].counts
-    assert _hits(steering["moves01"]) * 2 > _total(steering["moves01"])
-    assert _hits(steering["fluent01"]) * 2 > _total(steering["fluent01"])
-    assert _none(steering["fluent03"])
-    teaser = built["teaser"].counts["steering"]
-    assert 0 < _hits(teaser) < _total(teaser)
-    opener = _opener("steering")
-    assert "on most checkpoints" in opener
-    assert "meets the rule on none" in opener
-    assert "on only some checkpoints" in opener
-    noise = built["wording"].counts["span_above_noise"]
-    assert _hits(noise) * 2 > _total(noise)
-    assert "on every Qwen3 checkpoint and on two of the four GPT-2" in (
-        _opener("reading")
+    moves = steering["moves01"]
+    assert sum(c.hits for c in moves.values()) * 2 > sum(
+        c.total for c in moves.values()
     )
+    assert _none(steering["fluent03"])
+    assert (
+        "moves judged sentiment on most checkpoints and at coefficient 0.3 "
+        "is never fluent"
+    ) in content.ABSTRACT
+    assert "meets the fluency rule on none" in _contribution("Steering")
+    assert (
+        "at relative coefficient 0.3 none does"
+        in (_section("steering").paragraphs[0])
+    )
+    fluent = built["teaser"].counts["steering_fluent"]
+    assert _shape(fluent) == [(0, 3), (1, 3), (0, 3)]
+    beats = built["teaser"].counts["steering"]
+    assert 0 < sum(c.hits for c in beats.values()) < 10
+    assert "fluent on one" in content.ABSTRACT
 
 
-def test_the_written_baseline_claims_match_the_computed_counts(
+def test_the_post_training_sizes_are_the_computed_ones(
     built: dict[str, registry.FigureOutput],
 ) -> None:
-    teaser = built["teaser"].counts
-    assert _none(teaser["truthfulqa"])
-    assert _none(teaser["knowledge_confidence"])
-    assert "not above a classifier on the words alone" in _opener("truth")
-    assert "adds at most a small amount to the confidence of the model" in (
-        _opener("known_unknown")
+    numbers = built["base_post"].numbers
+    sizes = {"06b": "0.6B", "17b": "1.7B", "4b": "4B"}
+    readings = ("utility", "morality", "truth", "honesty", "truthfulqa")
+    excluding = {
+        (name, size)
+        for name in readings
+        for size in sizes
+        if numbers[f"{name}_{size}_lo"] > 0 or numbers[f"{name}_{size}_hi"] < 0
+    }
+    assert excluding == {
+        ("utility", "17b"),
+        ("utility", "4b"),
+        ("morality", "06b"),
+        ("honesty", "06b"),
+    }
+    assert numbers["other_excluding"] == len(excluding)
+    by_test_size = set()
+    for name, size in excluding:
+        _, lo, hi = base_post._difference(
+            Manifest(ROOT), name, size.replace("06", "0.6").replace("17", "1.7")
+        )
+        if lo > 0 or hi < 0:
+            by_test_size.add((name, size))
+    assert by_test_size == {("utility", "4b")}
+    text = _joined("base_post")
+    assert ("only utility on 4B has a test-size interval") in text
+    assert "the other three are seed-paired, which does not resample" in text
+    assert "The one exception is [[fig:base_post]]" in _joined("intervals")
+    assert "except the seed-paired intervals of [[fig:base_post]]" in (
+        _joined("appendix_method")
     )
+    assert "We study [[num:table:checkpoints.checkpoints]] checkpoints" in (
+        _joined("pipeline")
+    )
+    assert (
+        "only for utility on 1.7B ([[num:fig:base_post.utility_17b]]) and 4B "
+        "([[num:fig:base_post.utility_4b]]), morality on 0.6B "
+        "([[num:fig:base_post.morality_06b]]) and honesty transfer on 0.6B "
+        "([[num:fig:base_post.honesty_06b]])"
+    ) in text
+    for name in ("knowledge", "steering"):
+        below = [s for s in sizes if numbers[f"{name}_{s}_hi"] < 0]
+        assert below == ["17b"], name
+    assert "fall with an interval below zero on 1.7B only" in text
+    falls = [-numbers[f"sentiment_{s}"] for s in sizes]
+    assert numbers["sent_fall_min"] == pytest.approx(min(falls))
+    assert numbers["sent_fall_max"] == pytest.approx(max(falls))
+    assert (
+        "with an interval below zero on [[num:fig:base_post.sent_below]]"
+    ) in text
+    assert "so each difference contrasts two recipes" in text
 
 
-def test_the_knowledge_steering_measures_are_in_appendix_g() -> None:
-    from tomography.site.figs import knowledge_steering
+def test_the_test_size_limit_spans_the_computed_half_widths(
+    built: dict[str, registry.FigureOutput],
+) -> None:
+    numbers = built["teaser"].numbers
+    halves = [
+        numbers[f"truth_half_{role}_{edge}"]
+        for role in ("gpt2", "base", "post")
+        for edge in ("min", "max")
+    ]
+    assert numbers["truth_half_base_min"] == min(halves)
+    assert numbers["truth_half_gpt2_max"] == max(halves)
+    limits = _joined("limitations")
+    assert (
+        "differences below about [[num:fig:teaser.truth_half_base_min]] to "
+        "[[num:fig:teaser.truth_half_gpt2_max]] are not resolved"
+    ) in limits
+    assert "inconclusive, not negative" in limits
 
-    appendix = " ".join(_texts(_section("appendix_knowledge")))
-    assert knowledge_steering.APPENDIX_DETAIL in appendix
-    runin = dict(_section("known_unknown").runin)["Steering."]
-    for gone in ("gap", "1/4", "absolute mean slopes", "95 percent"):
-        assert gone not in runin
-    assert "[[sec:appendix_knowledge]]" in runin
-    assert "[[runs:fig:knowledge_steering.distinguishable]]" in runin
-    assert "[[runs:fig:knowledge_steering.selective]]" in runin
-    assert "[[runs:fig:knowledge_steering.known_ge_unknown]]" in runin
+
+def test_the_checkpoints_named_in_the_text_are_the_computed_ones(
+    built: dict[str, registry.FigureOutput],
+) -> None:
+    manifest = Manifest(ROOT)
+    assert (
+        registry.build_table("checkpoints", manifest).numbers["checkpoints"]
+        == 10
+    )
+    assert "on ten small open checkpoints" in _joined("introduction")
+    matrix = registry.build_figure("a_knowledge_matrix", manifest)
+    assert matrix.claim.startswith("The knowledge reader of Qwen3-4B-Base ")
+    assert "On Qwen3-4B-Base the words alone come within" in (
+        _joined("known_unknown")
+    )
+    assert built["finders"].labels["random_max"] == "Qwen3-4B-Base"
+    assert (
+        "up to [[num:fig:finders.random_max]] on "
+        "[[label:fig:finders.random_max]] in the finder comparison"
+    ) in _joined("controls_method")
 
 
-def test_the_knowledge_steering_counts_hold_per_role() -> None:
-    steering = registry.build_figure("knowledge_steering", Manifest(ROOT))
-    got = {
-        name: {r: (c.hits, c.total) for r, c in counts.items()}
-        for name, counts in steering.counts.items()
-    }
-    assert got["distinguishable"] == {
-        "gpt2": (3, 3),
-        "base": (3, 3),
-        "post": (3, 6),
-    }
-    assert got["known_ge_unknown"] == {
-        "gpt2": (2, 3),
-        "base": (2, 3),
-        "post": (0, 6),
-    }
+def test_counts_over_runs_say_runs() -> None:
+    text = _joined("known_unknown")
+    for name in ("distinguishable", "selective", "known_ge_unknown"):
+        assert f"[[tally:fig:knowledge_steering.{name}]] runs" in text, name
+
+
+def test_counts_are_three_fractions_defined_before_their_first_use() -> None:
     text = _text()
-    for gone in ("not selective", "false refusal", "4 of 10"):
-        assert gone not in text
+    assert text.lower().count("three fractions") == 1
+    assert "[[tally:" not in content.ABSTRACT
+    for paragraph in content.INTRODUCTION.paragraphs[:-1]:
+        assert "[[tally:" not in paragraph
+    assert "[[count:" not in text
+    assert "[[runs:" not in text
+    assert (
+        "We count checkpoints per role (GPT-2, Qwen3 base, Qwen3 "
+        "post-trained) and never pool the roles."
+    ) in _joined("intervals")
+    for address, unit in re.findall(r"\[\[tally:([^\]]+)\]\]( \w+)?", text):
+        assert address.startswith(("fig:", "table:")), address
+        assert unit in (" checkpoints", " runs", " but", ""), (address, unit)
 
 
-def test_the_reading_subsection_states_the_words_alone_baseline() -> None:
-    text = " ".join(_texts(_section("reading")))
-    for token in (
-        "[[num:table:reading.word_sentiment]]",
-        "[[num:table:reading.char_sentiment]]",
-        "[[num:table:reading.word_utility]]",
-        "[[num:table:reading.char_utility]]",
-    ):
-        assert token in text, token
-    assert "The words alone read sentiment" in text
-    assert "with an interval above chance" in text
-    assert "do not separate from chance for morality, truth and honesty" in text
-    table = registry.build_table("reading", Manifest(ROOT))
-    for analyzer in ("word", "char"):
-        for concept, above in (
-            ("sentiment", 1.0),
-            ("utility", 1.0),
-            ("morality", 0.0),
-            ("truth", 0.0),
-            ("honesty", 0.0),
-        ):
-            assert table.numbers[f"{analyzer}_{concept}_above"] == above
+def test_every_count_of_the_text_has_at_most_two_homes() -> None:
+    tokens = re.findall(r"\[\[tally:([^\]]+)\]\]", _text())
+    for address in set(tokens):
+        assert tokens.count(address) <= 2, address
 
 
-POOLED_TOKENS = (
-    "knowledge_reading.dir_inc_cover_all",
-    "knowledge_reading.dir_inc_n",
-    "knowledge_reading.dir_inc_hi_max]]",
-    "knowledge_reading.dir_inc_min]]",
-    "knowledge_reading.dir_inc_max]]",
-    "knowledge_reading.probe_inc_min]]",
-    "knowledge_reading.probe_inc_max]]",
-    "knowledge_reading.above_pop",
-    "reading.onset_sentiment_min",
-    "reading.onset_sentiment_max",
-    "approximate.position_min",
-    "approximate.position_max",
-    "approximate.band_min",
-    "approximate.band_max",
+CAVEATS = (
+    ("can score far above 0.5", "controls_method"),
+    ("chosen after pilot runs (post hoc)", "pipeline"),
+    ("No hypothesis was fixed before its run", "limitations"),
+    ("widened from four to twelve relations", "limitations"),
+    ("inconclusive, not negative", "limitations"),
+    ("the chosen layer carries its own uncertainty", "limitations"),
+    ("two versions of one scenario", "finders"),
+    ("GPT-2 small has no direction", "known_unknown"),
+    ("By point estimate on", "known_unknown"),
+    ("known questions move at least as much", "known_unknown"),
+    ("pictures without intervals, not tests", "known_unknown"),
+    ("a point comparison", "reading"),
+    ("no random-direction arm", "steering"),
+    ("GPT-2 small has no fluency measure", "steering"),
+    ("no human validated any judge", "limitations"),
+    ("cannot tell a generic answer from an invented one", "limitations"),
+    ("with no hand check", "limitations"),
+    ("post-training data, chat format and distillation", "base_post"),
+    ("The largest model is Qwen3-4B", "limitations"),
+    ("Most concepts use one prompt format", "limitations"),
+    ("on the 4B pair", "limitations"),
+    ("does not separate a range from a living subject", "appendix_knowledge"),
 )
+
+
+@pytest.mark.parametrize(("phrase", "key"), CAVEATS)
+def test_each_caveat_is_stated_once_in_its_place(phrase: str, key: str) -> None:
+    assert phrase in _joined(key), (phrase, key)
+    assert _text().count(phrase) == 1, phrase
+
+
+def test_the_steering_appendix_states_its_outcome_and_links_the_record() -> (
+    None
+):
+    lead = _joined("appendix_steering")
+    assert (
+        "Over the three concepts of each checkpoint, prompt prepending has "
+        "the highest overall score on "
+        "[[tally:table:steering_baselines.prompt_top]], and the interval of "
+        "the reader lies below its own on "
+        "[[tally:table:steering_baselines.reader_below]]"
+    ) in lead
+    assert "[[findings:published-steering-baselines-b3|findings document]]" in (
+        lead
+    )
+    assert "five published steering methods as baselines and two controls" in (
+        lead
+    )
+    findings = (ROOT.parent / "docs" / "findings.md").read_text("utf-8")
+    assert "## Published steering baselines (B3)" in findings
 
 
 def test_no_number_on_the_page_is_pooled_across_roles() -> None:
     text = _text()
-    for token in POOLED_TOKENS:
+    for token in (
+        "knowledge_reading.dir_inc_hi_max]]",
+        "knowledge_reading.dir_inc_min]]",
+        "knowledge_reading.dir_inc_max]]",
+        "knowledge_reading.probe_inc_min]]",
+        "knowledge_reading.probe_inc_max]]",
+        "reading.onset_sentiment_min",
+        "approximate.position_min",
+        "approximate.band_min",
+    ):
         assert token not in text, token
+    stems = ("dir_inc_min", "dir_inc_max", "probe_inc_min", "probe_inc_max")
+    for stem in stems:
+        found = re.findall(rf"knowledge_reading\.{stem}_(\w+)\]\]", text)
+        assert found == ["gpt2", "base", "post"], stem
+    assert re.findall(r"approximate\.range_(\w+)\]\]", text) == [
+        "base_min",
+        "base_max",
+        "post_min",
+        "post_max",
+    ]
 
 
-def _roles_in_order(text: str, stem: str) -> bool:
-    found = [text.find(f"{stem}_{role}_") for role in ("gpt2", "base", "post")]
-    return all(i >= 0 for i in found) and found == sorted(found)
-
-
-def test_the_range_numbers_are_quoted_per_role_in_order() -> None:
-    reading = " ".join(_texts(_section("reading")))
-    assert _roles_in_order(reading, "reading.onset_sentiment")
-    appendix = " ".join(_texts(_section("appendix_approximate")))
-    for stem in ("approximate.position", "approximate.band"):
-        assert _roles_in_order(appendix, stem), stem
-    knowledge = " ".join(_texts(_section("appendix_knowledge")))
-    for stem in (
-        "knowledge_reading.probe_inc_min",
-        "knowledge_reading.dir_inc_min",
-        "knowledge_reading.dir_inc_hi_max",
-    ):
-        found = [
-            knowledge.find(f"{stem}_{r}") for r in ("gpt2", "base", "post")
-        ]
-        assert min(found) >= 0, stem
-        assert found == sorted(found), stem
-    run = " ".join(_texts(_section("known_unknown")))
-    assert "[[num:fig:knowledge_reading.dir_inc_hi_max_gpt2]]" in run
-    assert "[[count:fig:knowledge_reading.dir_cover]]" in run
-
-
-def test_the_approximate_appendix_states_the_band_and_the_control_layer() -> (
-    None
-):
-    text = " ".join(_texts(_section("appendix_approximate")))
-    assert (
-        "the range of the random control's position over its "
-        "[[num:fig:approximate.n_band_sets]] training sets"
-    ) in text
-    assert "its own validation layer" in text
-    assert "[[count:fig:approximate.control_other_layer]]" in text
-
-
-def test_the_page_does_not_say_the_readings_lack_a_text_control() -> None:
-    text = _text()
-    assert "have no text-only baseline" not in text
-    assert "have no text-only control" not in text
-    limits = " ".join(_texts(content.DISCUSSION))
-    assert "model-free word and character n-gram classifiers" in limits
-    assert "[[table:reading]]" in limits
-    assert "persona labels" in limits
-    assert "test-pair sampling only" in limits
-
-
-def test_the_method_controls_name_the_words_alone_rows() -> None:
-    method = " ".join(t for s in _sections(content.METHOD) for t in _texts(s))
-    assert "words alone" in method
-    assert "[[table:reading]]" in method
-    assert "sentiment, utility, morality" in method
-
-
-def test_the_introduction_lists_the_reading_concepts_among_text_controls() -> (
-    None
-):
-    intro = " ".join(_texts(content.INTRODUCTION))
-    assert "a classifier on the text (for the readings, TruthfulQA" in intro
-
-
-def test_the_introduction_separates_controls_from_published_baselines() -> None:
-    intro = " ".join(_texts(content.INTRODUCTION))
-    assert "we name its controls" in intro
-    assert "The baselines are published methods:" in intro
-    assert "logistic regression, mass-mean probes" in intro
-    assert (
-        "for knowledge, model confidence built from published signals such as "
-        "P(True) [[cite:kadavath2022language]]"
-    ) in intro
-    assert "[[sec:controls_method]]" in intro
-    listed = dict(content.INTRODUCTION.listed)
-    assert "Readings against controls ([[sec:method]])." in listed
-    assert (
-        "a text control"
-        in listed["Readings against controls ([[sec:method]])."]
-    )
-
-
-def test_the_method_names_the_published_baselines_it_runs() -> None:
-    section = _section("controls_method")
-    assert section.title == "Controls and baselines"
-    text = " ".join(_texts(section))
-    for key in (
-        "alain2016understanding",
-        "marks2024geometry",
-        "kadavath2022language",
-    ):
-        assert f"[[cite:{key}]]" in text, key
-    assert "mass-mean probe" in text
-    assert "P(True)" in text
-    assert "[[table:finders_all]]" in text
-    assert (
-        "the confidence of the model, which stacks five output signals" in text
-    )
-
-
-def test_the_discussion_calls_the_honesty_classifier_a_control() -> None:
-    limits = " ".join(_texts(content.DISCUSSION))
-    assert (
-        "the honesty control is fitted on the true and false labels" in limits
-    )
-    assert "so it is a control for the transfer pairs only" in limits
-    lead = content.DISCUSSION.paragraphs[0]
-    assert "than it beats the right comparison" in lead
-    assert "a text control ([[fig:teaser]])" in lead
-
-
-def test_appendix_b_separates_the_controls_from_the_confidence_baseline() -> (
-    None
-):
-    runin = dict(_section("appendix_method").runin)
-    assert "Baselines." not in runin
-    text = runin["Controls and baselines."]
-    assert "The popularity of the subject, a control," in text
-    assert "The confidence of the model, a baseline," in text
-    assert "P(True) [[cite:kadavath2022language]]" in text
-    intro = _section("appendix_method").paragraphs[0]
-    assert "reported against a control built the same way" in intro
-
-
-def _result_texts() -> str:
-    parts = [content.ABSTRACT, content.TLDR]
-    parts += [t for _, t in content.KEY_FINDINGS.listed]
-    for section in content.RESULTS.subsections:
-        parts += _texts(section)
-    parts += _texts(content.DISCUSSION)
-    return " ".join(parts)
+def test_the_knowledge_appendix_keeps_the_range_reader_limits() -> None:
+    text = _joined("appendix_knowledge")
+    assert "[[tally:table:approximate.layer_one]]" in text
+    assert "[[tally:fig:approximate.control_below_half]]" in text
+    assert "[[tally:fig:approximate.control_above_95]]" in text
+    assert "already separates the test concepts" in text
+    assert "[[tally:table:approximate.above_words]]" in _joined("known_unknown")
+    assert "by interval" in _section("known_unknown").after[0]
 
 
 def test_no_result_says_all_ten_checkpoints() -> None:
-    text = _result_texts()
+    text = " ".join(_joined(k) for k in RESULT_KEYS)
     assert "all 10" not in text
-    assert "none of the 10" not in text
+    assert "on 10 checkpoints" not in text
 
 
-def test_the_reading_counts_the_same_for_utility_and_morality() -> None:
-    manifest = Manifest(ROOT)
-    teaser = registry.build_figure("teaser", manifest).counts
-    assert teaser["utility"] == teaser["morality"]
-    finding = _findings("Where a concept")
-    assert "[[count:fig:teaser.utility]]" in finding
-    assert "[[count:fig:teaser.truth]]" in finding
+def test_the_abstract_states_the_thesis_that_the_scorecard_counts(
+    built: dict[str, registry.FigureOutput],
+) -> None:
+    thesis = (
+        "A direction beats its random direction far more often than the "
+        "stronger comparison for its question."
+    )
+    assert thesis in content.ABSTRACT
+    assert "on the words alone, by 95 percent intervals." in content.ABSTRACT
+    assert "That paper's finder" in content.ABSTRACT
+    counts = built["teaser"].counts
+
+    def share(block: int) -> float:
+        rows = [r.key for r in teaser.ROWS if r.block == block]
+        hits = sum(c.hits for r in rows for c in counts[r].values())
+        return hits / sum(c.total for r in rows for c in counts[r].values())
+
+    assert share(0) > 2 * share(1)
+    assert "or a published method" not in _joined("introduction")
 
 
-def test_the_wording_noise_claim_is_counted_per_role() -> None:
-    counts = registry.build_figure("wording", Manifest(ROOT)).counts
-    got = {r: (c.hits, c.total) for r, c in counts["span_above_noise"].items()}
-    assert got["gpt2"][0] < got["gpt2"][1]
-    finding = _findings("Where a concept")
-    assert "[[count:fig:wording.span_above_noise]]" in finding
-    lead = _opener("reading")
-    assert "noise of the test pairs on most" not in lead
-    noise = counts["span_above_noise"]
-    assert noise["base"].hits == noise["base"].total
-    assert noise["gpt2"].hits == 2
-    assert noise["gpt2"].total == 4
-    assert (
-        "on every Qwen3 checkpoint and on two of the four GPT-2 checkpoints"
-    ) in lead
-
-
-def test_the_finder_utility_claim_is_limited_to_qwen3() -> None:
-    finders = registry.build_figure("finders", Manifest(ROOT)).counts
-    assert finders["pca_utility"]["gpt2"].hits == 0
-    assert finders["pca_utility"]["base"].hits == 3
-    assert finders["pca_utility"]["post"].hits == 3
-    assert "for utility on every Qwen3 checkpoint" in content.ABSTRACT
-    assert "for utility on every Qwen3 checkpoint" in _opener("finders")
-
-
-def test_the_knowledge_claim_is_limited_to_qwen3() -> None:
-    counts = registry.build_figure("knowledge_reading", Manifest(ROOT)).counts
-    above = counts["above_best"]
-    assert above["gpt2"].hits == 0
-    assert above["base"].hits > 0
-    phrase = "on most Qwen3 checkpoints"
-    assert phrase in content.ABSTRACT
-    assert phrase in _opener("known_unknown")
-
-
-def test_the_knowledge_denominators_are_explained() -> None:
-    run = " ".join(_texts(_section("known_unknown")))
-    assert "GPT-2 small has no knowledge-direction run" in run
-
-
-def test_the_steering_lead_names_the_sentiment_run() -> None:
-    lead = _opener("steering")
-    assert "the steered sentiment text meets the rule on none" in lead
-    steering = registry.build_figure("steering", Manifest(ROOT))
-    assert all(c.hits == 0 for c in steering.counts["fluent03"].values())
-
-
-def test_the_utility_steering_run_is_not_called_the_finder_comparison() -> None:
-    method = " ".join(t for s in _sections(content.METHOD) for t in _texts(s))
-    assert "the utility steering run steers at 40, 55" in method
-    assert "finder comparison steers" not in method
-    limits = " ".join(_texts(content.DISCUSSION))
-    assert "(the utility steering run has three)" in limits
-    assert "(the finder comparison has three)" not in limits
-
-
-def test_the_approximate_appendix_gives_the_range_shares_per_role() -> None:
-    text = " ".join(_texts(_section("appendix_approximate")))
-    assert "Qwen3 writes ranges where the sourced answer is a range" not in text
-    for token in (
-        "[[num:fig:approximate.range_base_min]]",
-        "[[num:fig:approximate.range_base_max]]",
-        "[[num:fig:approximate.range_post_min]]",
-        "[[num:fig:approximate.range_post_max]]",
-        "[[num:fig:approximate.exact_base_max]]",
-        "[[num:fig:approximate.exact_post_max]]",
+def test_the_terms_of_the_results_are_defined_in_the_method() -> None:
+    method = _method_text()
+    for definition in (
+        "utility (which scenario is more pleasant)",
+        "some negated",
+        "tested on plain statements (honesty transfer)",
+        "answers correctly (known) against those it does not (unknown)",
+        "within each relation such as capital",
+        "each on its own draw of 64 training pairs",
+        "A win rate is the share of decisive prompt pairs",
+        "the popularity of the question's subject",
     ):
-        assert token in text, token
+        assert definition in method, definition
+    steering = _joined("steering")
+    assert "(probability 0.05 by chance)" in steering
+    assert "checkpoints ([[fig:teaser]], last row)" in steering
+    assert "the next-token entropy" in _section("known_unknown").runin[1][1]
+    assert "six runs" in _section("known_unknown").runin[1][1]
+    approximate = _section("known_unknown").after[0]
+    assert approximate.startswith(
+        "A separate test, on approximate answers, asks whether a direction "
+        "reads that an answer is a range."
+    )
 
 
-def test_the_approximate_appendix_does_not_write_at_most_zero() -> None:
-    text = " ".join(_texts(_section("appendix_approximate")))
-    for role in ("base", "post"):
-        assert f"at most [[num:fig:approximate.exact_{role}_max]]" not in text
-    assert "the highest share on exact items is" in text
+def test_the_example_relation_has_known_questions_on_every_checkpoint() -> None:
+    (relation,) = re.findall(r"within each relation such as (\w+)\.", _text())
+    for model in models("p9a"):
+        path = run("p9a", model)
+        guess = data(path, "table_guess.json")["rows"]
+        assert [r[6] for r in guess if r[0] == f"popqa:{relation}"] == [True]
+        rows = data(path, "table_popularity.json")["rows"]
+        assert sum(r[4] for r in rows if r[0] == relation) > 0, model

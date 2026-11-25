@@ -1,4 +1,4 @@
-"""Table 4: Reader accuracy next to the random direction.
+"""Table A4: Reader accuracy next to the random direction.
 
 One row per checkpoint. For each concept a pair of columns gives the reader's
 accuracy at the layer chosen on validation data and the random direction of
@@ -127,39 +127,20 @@ def build(manifest: Manifest) -> TableOutput:
             numbers[f"{analyzer}_{concept}_hi"] = hi
             numbers[f"{analyzer}_{concept}_above"] = float(lo > 0.5)
         rows.append(row)
-    seeds = {
-        concept: {int(controls[(concept, a)][4]) for _, a in CONTROLS}
-        for concept, _ in CONCEPTS
-    }
-    others = {
-        n for c, found in seeds.items() if c != "sentiment" for n in found
-    }
-    if len(seeds["sentiment"]) != 1 or len(others) != 1:
-        raise ValueError("the controls differ in their training sets")
     claim = (
-        "Reader accuracy at the layer chosen on validation, next to the "
+        "Reader accuracy at the layer chosen on validation, beside the "
         "random direction of the same run at that layer."
     )
     detail = (
-        "An asterisk marks a reader whose margin over the random direction "
-        "has a conservative 95 percent interval above zero for the test "
-        f"pairs: {sizes['sentiment']} sentiment pairs (sample-size run, 64 "
-        f"training pairs), {sizes['utility']:,} utility, "
-        f"{sizes['morality']:,} morality and {sizes['truth']} truth pairs, "
-        f"and {sizes['honesty']} plain true and false statements for "
-        "honesty, read by a direction fitted on the paper's honesty persona "
-        "prompts with no refit. Margins with their intervals, the layers and "
-        "the in-template honesty values are in [[table:reading_full]]. The "
-        "last two rows give the words alone, a text classifier on word or "
-        "character n-grams of the pair texts, with no model: each value is "
-        "the mean over the training sets "
-        f"({next(iter(seeds['sentiment']))} for the held-out sentiment "
-        f"split and {next(iter(others))} for the others) and its interval "
-        "covers the sampling of the test pairs only, not the spread over "
-        "training sets. In the honesty column the words alone are the "
-        "honesty control, fitted on the true and false labels of the "
-        "facts, not on the persona labels of the reader, so they are a "
-        "control for the transfer pairs only."
+        "An asterisk marks a margin over the random direction with a "
+        "conservative 95 percent interval above zero (test pairs as in "
+        "[[fig:reading]]). Honesty is a transfer: a direction fitted on "
+        f"honesty persona prompts reads {sizes['honesty']} plain true and "
+        "false statements with no refit. The last two rows are the words "
+        "alone, as means over training sets with intervals for the test "
+        "pairs only. In the honesty column they are fitted on the true and "
+        "false labels, not the persona labels of the reader, so they control "
+        "the transfer pairs only."
     )
     return TableOutput(
         claim,

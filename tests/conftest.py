@@ -270,7 +270,10 @@ def _shard_files(paths: Iterable[str], count: int) -> dict[str, int]:
     """Packs whole test files into shards of about equal recorded time.
 
     The longest file goes first, each to the shard with the least time so
-    far. A file with no recorded time counts as the mean of the others.
+    far, the lowest index on a tie. A file with no recorded time counts as
+    the mean of the others. Times add up in whole centiseconds, the
+    precision they are recorded with, so equal loads tie exactly instead of
+    by how floats round.
 
     Args:
         paths: The test files, as the paths in their tests' node ids.
@@ -279,14 +282,17 @@ def _shard_files(paths: Iterable[str], count: int) -> dict[str, int]:
     Returns:
         The shard index of each file.
     """
-    seconds = _recorded_durations()
-    default = statistics.fmean(seconds.values()) if seconds else 1.0
-    loads = [0.0] * count
+    centis = {
+        path: round(100 * spent)
+        for path, spent in _recorded_durations().items()
+    }
+    default = round(statistics.fmean(centis.values())) if centis else 100
+    loads = [0] * count
     shards: dict[str, int] = {}
-    for path in sorted(set(paths), key=lambda p: (-seconds.get(p, default), p)):
+    for path in sorted(set(paths), key=lambda p: (-centis.get(p, default), p)):
         index = min(range(count), key=loads.__getitem__)
         shards[path] = index
-        loads[index] += seconds.get(path, default)
+        loads[index] += centis.get(path, default)
     return shards
 
 
@@ -308,7 +314,9 @@ class _DurationRecorder:
         """Writes the times of this run over the recorded ones.
 
         Only the main process writes: a pytest-xdist worker sees part of
-        the run, and the main process receives every report.
+        the run, and the main process receives every report. The times go
+        to a file next to the record that then replaces it, so a write cut
+        short leaves the record as it was, not truncated.
 
         Args:
             session: The pytest session.
@@ -319,10 +327,15 @@ class _DurationRecorder:
         recorded.update(
             {path: round(spent, 2) for path, spent in self.seconds.items()}
         )
-        DURATIONS.write_text(
-            json.dumps(dict(sorted(recorded.items())), indent=2) + "\n",
-            encoding="utf-8",
-        )
+        partial = DURATIONS.with_name(f"{DURATIONS.name}.{os.getpid()}.tmp")
+        try:
+            partial.write_text(
+                json.dumps(dict(sorted(recorded.items())), indent=2) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(partial, DURATIONS)
+        finally:
+            partial.unlink(missing_ok=True)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

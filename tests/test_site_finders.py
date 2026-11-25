@@ -10,6 +10,7 @@ import pytest
 from tomography.site import params
 from tomography.site import registry
 from tomography.site import stats
+from tomography.site.figs import finders as finders_fig
 from tomography.site.manifest import Manifest
 from tomography.viz import checks
 from tomography.viz import paper
@@ -193,28 +194,37 @@ def test_the_caption_quotes_every_number_and_the_sample_sizes(
     output: registry.FigureOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
-    gpt2 = [
-        EXPECTED[(m, "utility", "pca_diff")][0]
-        for m in MODELS
-        if _role(m) == "gpt2"
-    ]
-    assert f"{min(gpt2):.3f} to {max(gpt2):.3f}" in text
     assert "0.154" not in text
-    assert "214 sentiment, 59 truth and 256 utility pairs" in text
-    assert "[[fig:a_finders_gpt2]], [[fig:a_finders_qwen3]]" in text
-    assert "[[table:finders_all]]" in text
-    assert "random" in text
-    assert "Logistic regression [[cite:alain2016understanding]] is above" in (
+    assert (
+        "Whiskers are conservative 95 percent intervals over the test pairs "
+        "(214 sentiment, 59 truth, 256 utility)."
+    ) in text
+    assert "Markers are a finder's test accuracy minus that of a random" in (
         text
+    )
+    assert "each at the layer chosen on its own validation split" in text
+    assert "The grey band is test-pair noise." in text
+    assert text.endswith(
+        "Above each panel: checkpoints with the interval of the finder of "
+        "the paper above zero, per role."
     )
     assert "of 10 checkpoints" not in text
 
 
-def test_the_caption_has_at_most_200_words(
+def test_the_caption_cites_no_item_that_left_the_page(
     output: registry.FigureOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
-    assert len(text.split()) <= 200
+    assert "[[" not in text
+    for gone in ("a_finders_gpt2", "a_finders_qwen3", "finders_all"):
+        assert gone not in text
+
+
+def test_the_caption_has_at_most_90_words(
+    output: registry.FigureOutput,
+) -> None:
+    text = f"{output.claim} {output.detail}"
+    assert len(text.split()) <= 90
 
 
 def test_the_figure_has_three_panels_with_shared_rows_and_no_heat_map(
@@ -249,8 +259,8 @@ def test_the_caption_has_no_first_and_the_pair_counts_come_from_the_runs(
     assert "first" not in text.lower()
     pairs = params.REPORT_PAIRS
     assert (
-        f"{pairs['sentiment']} sentiment, {pairs['truth']} truth and "
-        f"{pairs['utility']} utility pairs"
+        f"({pairs['sentiment']} sentiment, {pairs['truth']} truth, "
+        f"{pairs['utility']} utility)"
     ) in text
 
 
@@ -287,14 +297,35 @@ def test_the_interval_counts_for_truth_and_utility_are_per_role(
     assert utility["post"] == (3, 3)
 
 
-def test_the_claim_describes_the_pairings_without_a_causal_title(
+def test_the_claim_compares_the_counts_without_a_causal_title(
     output: registry.FigureOutput,
 ) -> None:
+    hits = {
+        task: sum(
+            h for h, _ in _count(task, "pca_diff", lambda c: c[1] > 0).values()
+        )
+        for task in ("sentiment", "truth", "utility")
+    }
+    assert hits["sentiment"] < hits["utility"]
+    assert hits["truth"] < hits["utility"]
     text = output.claim
+    assert text == (
+        "The finder of the paper is above a random direction, by interval, "
+        "on fewer checkpoints for sentiment and truth than for utility."
+    )
     assert "needs matched pairs" not in text
-    assert "confounded" in text
-    assert "by point estimate only" in text
-    assert "for truth on 0 of 4 GPT-2, 2 of 3 Qwen3 base" in text
+    assert "matched" not in f"{text} {output.detail}"
+
+
+def test_the_claim_falls_back_to_counts_when_the_order_breaks(
+    output: registry.FigureOutput,
+) -> None:
+    counts = dict(output.counts)
+    counts["pca_truth"] = counts["pca_utility"]
+    text = finders_fig._claim(counts)
+    assert "fewer" not in text
+    for name in ("pca_sentiment", "pca_truth", "pca_utility"):
+        assert stats.per_role_text(counts[name]) in text
 
 
 def _panels(output: registry.FigureOutput) -> list[Any]:
@@ -356,37 +387,7 @@ def test_the_utility_gpt2_range_comes_from_the_gpt2_rows_only(
     assert output.numbers["pca_utility_gpt2_min"] == pytest.approx(min(gpt2))
     assert output.numbers["pca_utility_gpt2_max"] == pytest.approx(max(gpt2))
     text = f"{output.claim} {output.detail}"
-    assert f"by {min(gpt2):.3f} to {max(gpt2):.3f})" in text
     assert "over all ten" not in text
-
-
-def test_the_utility_interval_count_is_stated_per_role_not_pooled(
-    output: registry.FigureOutput,
-) -> None:
-    hits = {
-        r: sum(
-            EXPECTED[(m, "utility", "pca_diff")][1] > 0
-            for m in MODELS
-            if _role(m) == r
-        )
-        for r in ROLES
-    }
-    totals = {r: sum(_role(m) == r for m in MODELS) for r in ROLES}
-    expected = (
-        f"on {hits['base']} of {totals['base']} Qwen3 base and "
-        f"{hits['post']} of {totals['post']} post-trained checkpoints "
-        "by interval"
-    )
-    assert expected in output.claim
-    assert "all 6 Qwen3" not in output.claim
-
-
-def test_the_logistic_clause_is_counted_per_role_not_as_all_ten(
-    output: registry.FigureOutput,
-) -> None:
-    assert "all 10 checkpoints" not in output.claim
-    where = stats.per_role_text(output.counts["logistic_sentiment"])
-    assert f"for sentiment on {where}" in output.claim
 
 
 def test_the_largest_random_direction_names_its_checkpoint(

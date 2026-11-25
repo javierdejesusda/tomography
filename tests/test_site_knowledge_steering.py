@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from tomography.site import content
 from tomography.site import registry
 from tomography.site import stats
 from tomography.site.figs import knowledge_steering
@@ -109,16 +110,6 @@ def _role_counts(
         cell[0] += int(flag)
         cell[1] += 1
     return {r: stats.RoleCount(h, t) for r, (h, t) in counts.items()}
-
-
-def _runs_text(counts: dict[str, stats.RoleCount]) -> str:
-    names = {"gpt2": "GPT-2", "base": "Qwen3 base", "post": "post-trained"}
-    parts = [
-        f"{counts[r].hits} of {counts[r].total} {names[r]} runs"
-        for r in stats.ROLES
-        if counts[r].total
-    ]
-    return ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
 def test_there_are_twelve_runs_in_two_units() -> None:
@@ -269,7 +260,7 @@ def test_known_at_least_unknown_runs_come_from_the_curves(
         )
 
 
-def test_caption_is_the_template_filled_from_the_files(
+def test_caption_says_what_is_drawn_and_counts_stay_per_role(
     output: registry.FigureOutput,
 ) -> None:
     runs = _runs()
@@ -284,36 +275,58 @@ def test_caption_is_the_template_filled_from_the_files(
         }
     )
     assert output.claim == (
-        "Adding the knowledge direction moves unknown questions more than "
-        "each of 3 random directions of the same norm on "
-        f"{_runs_text(dist)}, yet by the largest shift of the mean dose "
-        "curve (c to e), which the slopes in (a, b) do not show, known "
-        f"questions move at least as much as unknown ones on "
-        f"{_runs_text(held)}."
+        "Steering along the knowledge direction, run by run, against three "
+        "random directions of the same norm."
     )
-    assert "linear slope" not in output.detail
+    assert len(knowledge_steering.ARMS) == 3
+    assert output.counts["distinguishable"] == dist
+    assert output.counts["known_ge_unknown"] == held
     assert all(dist[r].hits == dist[r].total for r in ("gpt2", "base"))
     assert dist["post"].hits < dist["post"].total
-    assert "[[fig:a_dose_runs]]" in output.detail
-    assert "[[fig:a_dose_types]]" in output.detail
-    assert not re.search(r"Figure A?\d", output.detail)
-    assert "resample the questions" in output.detail
-    assert "never pooled" in output.detail
+    assert "linear slope" not in output.detail
+    assert "with 95 percent intervals over the questions" in output.detail
+    assert (
+        "A slope does not show the largest shift of a curve."
+    ) in output.detail
 
 
-def test_the_main_caption_has_at_most_200_words(
+def test_the_text_says_what_the_steering_counts_mean(
     output: registry.FigureOutput,
 ) -> None:
-    assert len(f"{output.claim} {output.detail}".split()) <= 200
+    curves = _curves(*EXEMPLARS[0])
+    known = curves["mean:lat: known"]
+    origin = known[int(np.argmin(np.abs(curves["x"])))]
+    assert known[0] > origin
+    assert known[-1] > origin
+    assert _shift(curves, "lat: known") > _shift(curves, "lat: unknown")
+    assert _headline(*EXEMPLARS[0])["selective"]
+    held = output.counts["known_ge_unknown"]
+    assert all(held[role].hits > 0 for role in ("gpt2", "base"))
+    assert held["post"].hits == 0
+    (section,) = [
+        s for s in content.RESULTS.subsections if s.key == "known_unknown"
+    ]
+    assert (
+        "A known-question curve can rise at both signs of the coefficient, "
+        "which a slope misses ([[fig:knowledge_steering]](c)), so steering "
+        "is not shown to be specific to unknown questions on GPT-2 and base "
+        "checkpoints; on post-trained ones known questions never move as "
+        "far."
+    ) in dict(section.runin)["Steering."]
 
 
-def test_the_appendix_detail_holds_the_selectivity_rule_by_token() -> None:
-    text = knowledge_steering.APPENDIX_DETAIL
-    assert "[[runs:fig:knowledge_steering.selective]]" in text
-    assert "[[runs:fig:knowledge_steering.known_ge_unknown]]" in text
-    assert "interval of that gap lies above zero" in text
-    assert "probability at most 1/4" in text
-    assert not re.search(r"Figure A?\d", text)
+def test_the_caption_cites_no_item_and_no_literal_label(
+    output: registry.FigureOutput,
+) -> None:
+    caption = f"{output.claim} {output.detail}"
+    assert "[[" not in caption
+    assert not re.search(r"Figure A?\d", caption)
+
+
+def test_the_caption_has_at_most_170_words(
+    output: registry.FigureOutput,
+) -> None:
+    assert len(f"{output.claim} {output.detail}".split()) <= 170
 
 
 def test_size_guards_and_layout(output: registry.FigureOutput) -> None:
@@ -351,8 +364,8 @@ def test_caption_describes_the_grey_band_as_the_mean_of_the_random_arms(
     output: registry.FigureOutput,
 ) -> None:
     assert (
-        "the mean of the 3 random directions on unknown questions with its "
-        "interval (grey band)"
+        "with the mean of the random directions on unknown questions (grey "
+        "band)"
     ) in output.detail
 
 
@@ -370,14 +383,8 @@ def test_no_two_legend_keys_draw_the_same_symbol(
     assert _L["marker_clashes"](output.figure) == []
 
 
-def test_appendix_dose_and_link_docstrings_name_no_figure_numbers() -> None:
-    from tomography.site.figs import a_dose_runs
-    from tomography.site.figs import a_dose_types
-    from tomography.site.figs import a_knowledge_matrix
-    from tomography.site.figs import a_links
-
-    for module in (a_dose_runs, a_dose_types, a_knowledge_matrix, a_links):
-        assert not re.search(r"Figure A?\d", module.__doc__ or ""), module
+def test_the_module_docstring_names_no_figure_number() -> None:
+    assert not re.search(r"Figure A?\d", knowledge_steering.__doc__ or "")
 
 
 SHORT = {
@@ -483,14 +490,17 @@ def test_the_key_and_the_caption_define_the_count_by_the_gap_interval(
     (legend,) = [lg for sub in output.figure.subfigs for lg in sub.legends]
     keyed = " ".join(t.get_text() for t in legend.get_texts())
     assert "random directions whose gap interval lies above zero" in keyed
-    assert "above n of 3" in output.detail
+    assert (
+        '"above n of 3" counts the random directions beaten, with the '
+        "interval of the gap in absolute slope above zero; a direction "
+        "beats all three by chance with probability at most 1/4."
+    ) in output.detail
 
 
-def test_the_caption_states_the_row_order_and_the_missing_gpt2_small(
+def test_the_caption_states_the_missing_gpt2_small(
     output: registry.FigureOutput,
 ) -> None:
-    assert "Rows run by size" in output.detail
-    assert "GPT-2 small has no run" in output.detail
+    assert output.detail.endswith("GPT-2 small has no run.")
 
 
 def test_the_direction_intervals_of_the_dose_panels_are_tinted(
@@ -510,7 +520,6 @@ def test_the_direction_intervals_of_the_dose_panels_are_tinted(
             assert color.max() - color.min() > 0.1
             tinted += 1
     assert tinted == 6
-    assert "tint" in output.detail
 
 
 def test_each_row_keeps_its_direction_marks_and_crosses_in_its_own_band(

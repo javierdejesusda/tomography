@@ -1,7 +1,7 @@
-"""Figure 8: A knowledge direction against popularity and confidence.
+"""A knowledge direction against popularity and confidence.
 
 Panel (a) reads the within-relation AUROC of the known-against-unknown reader
-of P9b with its controls and the model's own answer probability, panel (b)
+of P9b with its controls, panel (b)
 the paired difference between the direction and popularity, panel (c) the
 paired change in the AUROC for predicting wrong answers of P9c when the
 direction or a supervised probe is added to the model's own confidence. All
@@ -38,26 +38,19 @@ GROUPS = {
     "Qwen3 base": "Qwen3\nbase",
     "Qwen3 post-trained": "Qwen3\npost-trained",
 }
-DODGE = {"direction": -0.3, "popularity": -0.1, "own": 0.1, "text": 0.3}
+DODGE = {"direction": -0.2, "popularity": 0.0, "text": 0.2}
 SEPARATOR_WIDTH = 0.5
 CLAIM = (
-    "A known-against-unknown direction ranks questions above the strongest "
-    "of popularity and the two text classifiers, with an interval excluding "
-    "zero, on {interval}, and adds at most {hi_gpt2} (GPT-2), {hi_base} "
-    "(Qwen3 base) and {hi_post} (post-trained) to the confidence of the "
-    "model at its interval's upper end."
+    "A knowledge direction beside its controls and the model's confidence on "
+    "PopQA."
 )
 DETAIL = (
-    "(a) Within-relation AUROC on PopQA (open markers: post-trained): "
-    "direction (circle), popularity (square), range of the two text "
-    "classifiers (green bar) and its first answer token probability "
-    "(pentagon). GPT-2 {gpt2}; Qwen3 base {base}; Qwen3 post-trained "
-    "{post}. (b) Difference in AUROC, direction minus the strongest of "
-    "popularity and the two text classifiers, conservative interval. (c) "
-    "Change in AUROC for wrong answers when the direction, or a "
-    "logistic-regression probe fitted on the correct and wrong labels, is "
-    "added to the baseline, model confidence; the interval covers zero on "
-    "{cover}. See [[sec:appendix_knowledge]]."
+    "(a) Within-relation AUROC, known against unknown questions: direction, "
+    "popularity and the two text classifiers (green bar: their range). Open "
+    "markers: post-trained. (b) Direction minus the strongest control, "
+    "conservative interval. (c) A second task, wrong against correct "
+    "answers: change in pooled AUROC when the direction, or a probe fitted "
+    "on correct and wrong labels, is added to the model's confidence."
 )
 
 
@@ -89,20 +82,6 @@ def _increments(manifest: Manifest) -> dict[str, dict[str, dict[str, Any]]]:
     return found
 
 
-def _own_probability(manifest: Manifest) -> dict[str, dict[str, Any]]:
-    found = {}
-    for model in manifest.models("p9c"):
-        run = manifest.run("p9c", model)
-        assert run is not None
-        (row,) = [
-            r
-            for r in runfiles.rows(run, "table.json")
-            if r["dataset"] == "popqa" and r["predictor"] == "first_token_prob"
-        ]
-        found[model] = row
-    return found
-
-
 def _interval(row: dict[str, Any], column: str) -> tuple[float, float]:
     value = float(row[column])
     half = Z * stats.hanley_mcneil_se(
@@ -125,48 +104,6 @@ def _difference(row: dict[str, Any]) -> tuple[float, float, float]:
         _strongest(row),
         int(row["n_positive_test"]),
         int(row["n_negative_test"]),
-    )
-
-
-def _range(values: list[float]) -> tuple[str, str]:
-    return _rows.number(min(values)), _rows.number(max(values))
-
-
-def _role_text(
-    members: list[str],
-    contrast: dict[str, dict[str, Any]],
-    own: dict[str, dict[str, Any]],
-) -> str:
-    """Writes the AUROC ranges of one role beside their controls.
-
-    Args:
-        members: The checkpoints of the role that have a contrast.
-        contrast: The contrast rows by checkpoint.
-        own: The model's own first-token probability rows by checkpoint.
-
-    Returns:
-        The direction range against the popularity, text-classifier and
-        own-probability ranges.
-    """
-
-    def span(values: list[float]) -> str:
-        low, high = _range(values)
-        return f"{low} to {high}"
-
-    return (
-        f"{span([float(contrast[m]['logistic_within']) for m in members])} "
-        "against "
-        f"{span([float(contrast[m]['popularity_within']) for m in members])}"
-        ", "
-        + span(
-            [
-                float(contrast[m][c])
-                for m in members
-                for c in ("text_word_within", "text_char_within")
-            ]
-        )
-        + " and "
-        + span([float(own[m]["auroc_within"]) for m in members])
     )
 
 
@@ -289,7 +226,6 @@ def _head(ax: Any, x: float, text: str) -> None:
 def _draw_levels(
     ax: Any,
     contrast: dict[str, dict[str, Any]],
-    own: dict[str, dict[str, Any]],
     rows: dict[str, float],
     csv_rows: list[list[Any]],
 ) -> None:
@@ -331,26 +267,6 @@ def _draw_levels(
             ("characters", "text_char_within"),
         ):
             csv_rows.append(["a", model, series, row[column], None, None])
-        cell = own[model]
-        _rows.dot(
-            ax,
-            model,
-            y + DODGE["own"],
-            float(cell["auroc_within"]),
-            MARKERS["answer_probability"],
-            paper.ENC["own_probability"],
-            (float(cell["lo_within"]), float(cell["hi_within"])),
-        )
-        csv_rows.append(
-            [
-                "a",
-                model,
-                "answer_probability",
-                cell["auroc_within"],
-                cell["lo_within"],
-                cell["hi_within"],
-            ]
-        )
     ax.set_xlim(0.45, 1.0)
     axes.unit_axis(ax, "x")
     axes.ref_line(ax, 0.5, "x")
@@ -451,14 +367,9 @@ def _legend(fig: Any) -> None:
                 solid_capstyle="projecting",
                 label="text classifiers",
             ),
-            _rows.series_handle(
-                "own answer probability",
-                MARKERS["answer_probability"],
-                paper.ENC["own_probability"],
-            ),
         ],
         loc="outside upper center",
-        ncol=4,
+        ncol=3,
         handlelength=1.2,
         columnspacing=1.8,
         fontsize=7,
@@ -477,7 +388,6 @@ def build(manifest: Manifest) -> FigureOutput:
     """
     contrast = _contrast(manifest)
     increments = _increments(manifest)
-    own = _own_probability(manifest)
     rows, separators = block_rows(list(contrast))
     csv_rows: list[list[Any]] = []
 
@@ -488,7 +398,7 @@ def build(manifest: Manifest) -> FigureOutput:
         panels = [ax_a] + [
             fig.add_subplot(grid[0, i], sharey=ax_a) for i in range(1, 4)
         ]
-        _draw_levels(ax_a, contrast, own, rows, csv_rows)
+        _draw_levels(ax_a, contrast, rows, csv_rows)
         _draw_difference(panels[1], contrast, rows, csv_rows)
         _draw_increments(panels[2], panels[3], increments, rows, csv_rows)
         _row_setup(panels, rows, separators)
@@ -543,20 +453,6 @@ def build(manifest: Manifest) -> FigureOutput:
         numbers[f"above_best_point_{role}"] = float(point[role].hits)
         numbers[f"above_best_{role}"] = float(interval[role].hits)
         numbers[f"probe_above_{role}"] = float(above[role].hits)
-    by_role = {
-        role: _role_text(
-            [m for m in contrast if stats.role(m) == role], contrast, own
-        )
-        for role in stats.ROLES
-    }
-    claim = CLAIM.format(
-        interval=stats.per_role_text(interval),
-        **{
-            f"hi_{role}": _rows.number(numbers[f"dir_inc_hi_max_{role}"], 3)
-            for role in stats.ROLES
-        },
-    )
-    detail = DETAIL.format(cover=stats.per_role_text(cover), **by_role)
     return FigureOutput(
-        fig, claim, detail, numbers, _group.csv_text(HEADER, csv_rows), counts
+        fig, CLAIM, DETAIL, numbers, _group.csv_text(HEADER, csv_rows), counts
     )

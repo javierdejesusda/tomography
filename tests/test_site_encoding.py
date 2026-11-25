@@ -20,10 +20,7 @@ KEYS = (
     "reading",
     "wording",
     "truth",
-    "a_layers",
-    "a_finders_gpt2",
-    "a_finders_qwen3",
-    "a_wording",
+    "a_reading_curves",
 )
 
 
@@ -91,10 +88,9 @@ def test_no_legend_symbol_means_two_things(
 def test_the_paper_finder_is_a_diamond_and_the_logistic_a_circle(
     built: dict[str, registry.FigureOutput],
 ) -> None:
-    for key in ("finders", "a_finders_gpt2", "a_finders_qwen3"):
-        marks = _markers(built[key].figure)
-        assert paper.MEASURE_MARKERS["paper_finder"] in marks
-        assert paper.MEASURE_MARKERS["direction"] in marks
+    marks = _markers(built["finders"].figure)
+    assert paper.MEASURE_MARKERS["paper_finder"] in marks
+    assert paper.MEASURE_MARKERS["direction"] in marks
 
 
 def test_the_probability_reader_of_figure_6_uses_the_answer_marker(
@@ -106,21 +102,11 @@ def test_the_probability_reader_of_figure_6_uses_the_answer_marker(
     assert paper.MEASURE_MARKERS["paper_finder"] not in marks
 
 
-@pytest.mark.parametrize("key", ["a_layers", "a_finders_qwen3"])
-def test_post_trained_lines_use_the_one_style(
-    built: dict[str, registry.FigureOutput], key: str
-) -> None:
-    styles = {ln._unscaled_dash_pattern for ln in _lines(built[key].figure)}
+def test_post_trained_lines_use_the_one_style() -> None:
+    fig = registry.build_figure("steering", Manifest(RESULTS)).figure
+    styles = {ln._unscaled_dash_pattern for ln in _lines(fig)}
     assert POST in styles
     assert styles <= KNOWN | {(0, None)}
-
-
-def test_the_gpt2_curves_have_no_post_trained_style(
-    built: dict[str, registry.FigureOutput],
-) -> None:
-    fig = built["a_finders_gpt2"].figure
-    styles = {ln._unscaled_dash_pattern for ln in _lines(fig)}
-    assert POST not in styles
 
 
 @pytest.mark.parametrize("key", ["reading", "wording", "truth"])
@@ -182,11 +168,9 @@ def test_the_direction_keys_pair_a_filled_and_an_open_marker() -> None:
         assert opened.get_markerfacecolor() == "white"
 
 
-@pytest.mark.parametrize("key", ["knowledge_steering", "a_dose_runs"])
-def test_the_dose_figures_key_role_inside_the_direction_entries(
-    key: str,
-) -> None:
-    texts = _legend_texts(registry.build_figure(key, Manifest(RESULTS)).figure)
+def test_the_dose_figure_keys_role_inside_the_direction_entries() -> None:
+    output = registry.build_figure("knowledge_steering", Manifest(RESULTS))
+    texts = _legend_texts(output.figure)
     assert "GPT-2 and base" not in texts
     assert "post-trained" not in texts
     assert any(

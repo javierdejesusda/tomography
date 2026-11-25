@@ -1,4 +1,4 @@
-"""Figure 3: the paper's finder and logistic regression against a random one.
+"""Figure 4: the paper's finder and logistic regression against a random one.
 
 Three panels (sentiment, truth and utility) share rows, one per checkpoint.
 Each marker is a finder's report-split accuracy minus that of a random
@@ -16,7 +16,6 @@ from matplotlib.figure import Figure
 from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
 
-from tomography.site import cells
 from tomography.site import finders as loader
 from tomography.site import params
 from tomography.site import stats
@@ -259,46 +258,37 @@ def _randoms(
     ]
 
 
-def _claim(
-    models: list[str],
-    data: dict[str, dict[tuple[str, str], Point]],
-    numbers: dict[str, float],
-    counts: dict[str, dict[str, RoleCount]],
-) -> str:
-    utility = counts["pca_utility"]
-    qwen = {r: c for r, c in utility.items() if r != "gpt2"}
-    utility_text = f"{stats.per_role_text(qwen)} by interval"
-    gpt2 = counts["pca_utility_point"]["gpt2"]
+def _hits(count: dict[str, RoleCount]) -> int:
+    return sum(c.hits for c in count.values())
+
+
+def _claim(counts: dict[str, dict[str, RoleCount]]) -> str:
+    sentiment, truth, utility = (
+        counts[f"pca_{task}"] for task in ("sentiment", "truth", "utility")
+    )
+    lead = "The finder of the paper is above a random direction, by interval, "
+    if max(_hits(sentiment), _hits(truth)) < _hits(utility):
+        return (
+            lead + "on fewer checkpoints for sentiment and truth than for "
+            "utility."
+        )
     return (
-        "On unrelated sentences with opposite labels, the leading principal "
-        "component of paired differences is above a random direction, with "
-        "an interval excluding zero, for sentiment on "
-        f"{stats.per_role_text(counts['pca_sentiment'])} and for truth on "
-        f"{stats.per_role_text(counts['pca_truth'])}. On utility (matched "
-        f"pairs) it is above it on {utility_text} and on GPT-2 by point "
-        f"estimate only ({gpt2.hits} of {gpt2.total}, by "
-        f"{cells.num(numbers['pca_utility_gpt2_min'])} to "
-        f"{cells.num(numbers['pca_utility_gpt2_max'])}), but matching is "
-        "confounded with the concept. Logistic regression "
-        "[[cite:alain2016understanding]] is above it for "
-        f"sentiment on {stats.per_role_text(counts['logistic_sentiment'])}."
+        lead + f"for sentiment on {stats.per_role_text(sentiment)}, for "
+        f"truth on {stats.per_role_text(truth)} and for utility on "
+        f"{stats.per_role_text(utility)}."
     )
 
 
-_PAIRS = (
-    f"{params.REPORT_PAIRS['sentiment']} sentiment, "
-    f"{params.REPORT_PAIRS['truth']} truth and "
-    f"{params.REPORT_PAIRS['utility']} utility pairs"
-)
 DETAIL = (
-    "Each marker is a finder's report-split accuracy minus that of a "
-    "random direction, at the layer its select split chose "
-    "(filled: GPT-2 and Qwen3 base; open: post-trained); whiskers are "
-    f"conservative 95 percent intervals over the test pairs ({_PAIRS}); the "
-    "grey band is test-pair noise. The line above each panel counts "
-    "checkpoints with the paper finder's interval above zero. "
-    "Layer curves: [[fig:a_finders_gpt2]], [[fig:a_finders_qwen3]]; all six "
-    "finders: [[table:finders_all]]."
+    "Markers are a finder's test accuracy minus that of a random direction, "
+    "each at the layer chosen on its own validation split (filled: GPT-2 and "
+    "Qwen3 base; open: post-trained). Whiskers are conservative 95 percent "
+    "intervals over the test pairs "
+    f"({params.REPORT_PAIRS['sentiment']} sentiment, "
+    f"{params.REPORT_PAIRS['truth']} truth, "
+    f"{params.REPORT_PAIRS['utility']} utility). The grey band is test-pair "
+    "noise. Above each panel: checkpoints with the interval of the finder of "
+    "the paper above zero, per role."
 )
 
 
@@ -358,7 +348,7 @@ def build(manifest: Manifest) -> FigureOutput:
         _legend(fig)
     return FigureOutput(
         fig,
-        _claim(models, data, numbers, counts),
+        _claim(counts),
         DETAIL,
         numbers,
         _csv(models, data),

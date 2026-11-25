@@ -297,57 +297,66 @@ def _forced(model: str) -> float:
     return float(row["range_rate"])
 
 
-def test_caption_is_at_most_200_words_and_leads_with_the_conclusion(
+def test_caption_is_at_most_170_words_and_opens_with_what_is_shown(
     output: registry.FigureOutput,
 ) -> None:
     caption = f"{output.claim} {output.detail}"
-    assert len(caption.split()) <= 200, len(caption.split())
-    assert output.claim.startswith("Qwen3 writes a range for "), output.claim
+    assert len(caption.split()) <= 170, len(caption.split())
+    assert output.claim == (
+        "What the models answer when the sourced answer is a range, and "
+        "what a range reader reads."
+    )
+    assert "[[" not in caption
+    for gone in ("sign flip", "Hanley", "cannot separate", "at most 0"):
+        assert gone not in caption
 
 
-def test_the_claim_gives_the_range_shares_and_the_control_count_per_role(
+def test_the_detail_states_the_confound_and_the_test_sizes_from_the_files(
     output: registry.FigureOutput,
 ) -> None:
-    n = output.numbers
-    above = stats.per_role_text(output.counts["reader_above_random"])
-    assert output.claim == (
-        f"Qwen3 writes a range for {int(n['range_base_min'])} to "
-        f"{int(n['range_base_max'])} percent of range items (base) and "
-        f"{int(n['range_post_min'])} to {int(n['range_post_max'])} percent "
-        "(post-trained), and a range reader is above the interval of "
-        f"its random control on {above}."
+    sizes = {
+        count
+        for model in _models("p10b")
+        for family in _R["data"](_R["run"]("p10b", model), "summary.json")[
+            "counts"
+        ].values()
+        for side in family.values()
+        for split, count in side.items()
+        if split == "test"
+    }
+    assert output.numbers["test_side_min"] == min(sizes)
+    assert output.numbers["test_side_max"] == max(sizes)
+    assert output.detail.startswith(
+        "In every family the range side is a living thing and the exact "
+        f"side an artifact, and the wording differs by side; a test set "
+        f"holds {min(sizes)} to {max(sizes)} "
+        "questions per side."
     )
 
 
-def test_the_detail_gives_the_baselines_of_each_panel(
+def test_the_detail_says_what_each_panel_draws(
     output: registry.FigureOutput,
 ) -> None:
     n = output.numbers
     detail = output.detail
-    base = approximate.share_phrase(
-        int(n["exact_base_max"]), int(n["people_base_max"])
-    )
-    post = approximate.share_phrase(
-        int(n["exact_post_max"]), int(n["people_post_max"])
-    )
-    assert (
-        f"Exact items, heights: {base} (Qwen3 base), {post} (post-trained)"
-    ) in detail
-    assert "at most 0" not in detail
-    assert "0 and 0" not in detail
-    assert (
-        f"GPT-2 small {int(n['gpt2_range'])} and "
-        f"{int(n['gpt2_exact'])} percent on range and exact items"
-    ) in detail
-    assert f"{n['text_word']:.3f}" in detail
-    assert f"{n['text_lo']:.3f} to {n['text_hi']:.3f}" in detail
-    assert f"mean of {int(n['n_random_draws'])} random directions" in detail
-    assert "[[sec:appendix_approximate]]" in detail
-    for gone in ("sign flip", "Hanley", "cannot separate"):
-        assert gone not in detail
+    for phrase in (
+        "(a) Share of greedy few-shot answers written as a range on range "
+        f"items, exact items and the heights of {int(n['n_people'])} "
+        "people, when the prompt ends on a range example.",
+        "(b) AUROC on held-out durations of a range reader fitted on "
+        "heights and wingspans, with its random control (grey bar and tick: "
+        f"bootstrap interval and mean of {int(n['n_random_draws'])} random "
+        "directions) and a classifier on the question words (green line and "
+        "whisker).",
+        "(c) Position of the people between buildings (0) and breeds (1), "
+        "with the random band: the range of the control's position over its "
+        f"{int(n['n_band_sets'])} training sets.",
+    ):
+        assert phrase in detail, phrase
+    assert approximate.CELL == ("free", "fewshot", "range_last", "greedy")
 
 
-def test_the_wilson_intervals_lie_inside_the_markers_and_the_caption_says_so(
+def test_the_wilson_intervals_lie_inside_the_markers(
     output: registry.FigureOutput,
 ) -> None:
     widths = [
@@ -372,11 +381,6 @@ def test_the_wilson_intervals_lie_inside_the_markers_and_the_caption_says_so(
         wide[role] = math.ceil(by_role[role] * 1000 - 1e-9) / 10
         assert output.numbers[f"wilson_{role}_points"] == wide[role]
         assert wide[role] >= by_role[role] * 100
-    assert (
-        "Wilson 95 percent intervals lie inside the markers, at most "
-        f"{wide['gpt2']:.1f} (GPT-2), {wide['base']:.1f} (Qwen3 base) and "
-        f"{wide['post']:.1f} (post-trained) points wide"
-    ) in output.detail
 
 
 def test_the_forced_range_shares_are_exported_per_role(
@@ -702,16 +706,6 @@ def test_only_glossary_shapes_and_inks_are_drawn(
     assert colours <= {mpl_colors.to_hex(c) for c in inks}
 
 
-def test_caption_states_the_state_rule_and_the_roles(
-    output: registry.FigureOutput,
-) -> None:
-    text = output.detail
-    occurring = _occurring()
-    for state, phrase in STATE_PHRASES.items():
-        assert (phrase in text) is (state in occurring), state
-    assert "a tick below it" not in text
-
-
 def test_panel_a_columns_label_only_zero_and_one(
     output: registry.FigureOutput,
 ) -> None:
@@ -726,9 +720,9 @@ def test_the_random_band_is_stated_as_the_range_over_the_training_sets(
     assert sets == {7}
     assert output.numbers["n_band_sets"] == 7
     assert (
-        "the range of the control's position over its 7 training sets"
-        in output.detail
-    )
+        "with the random band: the range of the control's position over its "
+        "7 training sets."
+    ) in output.detail
 
 
 def test_control_layer_counts_are_per_role(
@@ -776,20 +770,6 @@ def test_the_words_label_clears_the_classifier_line_by_a_millimetre(
     assert not label.get_window_extent().overlaps(chance.get_window_extent())
 
 
-def test_a_share_phrase_says_none_for_a_zero_and_at_most_for_the_rest() -> None:
-    phrase = approximate.share_phrase
-    assert phrase(15, 3) == "at most 15 and 3 percent"
-    assert phrase(15, 0) == (
-        "at most 15 percent of exact items, none of the heights"
-    )
-    assert phrase(0, 4) == (
-        "none of the exact items, at most 4 percent of the heights"
-    )
-    assert phrase(0, 0) == "none of either"
-    for args in ((15, 3), (15, 0), (0, 4), (0, 0)):
-        assert "at most 0" not in phrase(*args)
-
-
 def _occurring() -> list[str]:
     found = {_state(m) for m in _models("p10b")}
     return [s for s in ("above", "inside", "below") if s in found]
@@ -799,11 +779,6 @@ STATE_LABELS = {
     "above": "above the control",
     "inside": "inside the control",
     "below": "below the control",
-}
-STATE_PHRASES = {
-    "above": "a filled hexagon is above the control's interval",
-    "inside": "an open hexagon inside it",
-    "below": "a left arrow below it",
 }
 
 
@@ -845,13 +820,6 @@ def test_a_below_arrow_sits_left_of_its_hexagon_without_touching_it(
         assert arrow.x1 <= hexagon.x0, model
 
 
-def test_the_state_sentence_follows_the_states_that_occur() -> None:
-    sentence = approximate.state_sentence(["above", "inside"])
-    assert "below" not in sentence
-    assert STATE_PHRASES["above"] in sentence
-    assert "a left arrow below" in approximate.state_sentence(["below"])
-
-
 def test_the_detail_names_the_control_tick_as_the_mean(
     output: registry.FigureOutput,
 ) -> None:
@@ -886,18 +854,3 @@ def test_the_detail_names_the_control_interval_as_a_bootstrap_interval(
     n = int(output.numbers["n_random_draws"])
     assert "bootstrap interval" in output.detail
     assert f"mean of {n} random directions" in output.detail
-
-
-def test_the_state_sentence_names_the_control_in_its_first_phrase() -> None:
-    sentence = approximate.state_sentence({"inside", "below"})
-    first = sentence.split(", ")[0]
-    assert "the control's interval" in first
-    assert approximate.state_sentence(
-        {"above", "inside", "below"}
-    ) == ", ".join(
-        [
-            "a filled hexagon is above the control's interval",
-            "an open hexagon inside it",
-            "a left arrow below it",
-        ]
-    )

@@ -76,7 +76,6 @@ def test_the_table_lists_every_asset_once_in_order(
         "Used for",
         "Citation",
         "Hub ID or source",
-        "Revision",
         "License as stated",
     ]
     names = []
@@ -90,7 +89,7 @@ def test_the_table_lists_every_asset_once_in_order(
         else:
             names.append(a.name)
     assert [r[0] for r in output.rows] == names
-    assert output.align == "llllll"
+    assert output.align == "lllll"
 
 
 def test_every_dataset_revision_and_license_equals_the_code_pin() -> None:
@@ -157,9 +156,16 @@ def test_the_caption_says_what_the_table_holds(
     output: registry.TableOutput,
 ) -> None:
     text = output.claim + " " + output.detail
-    assert "pinned revisions" in text
-    assert "licenses as stated" in text
+    assert output.claim == (
+        "Models, judges and datasets with their sources and their licenses "
+        "as stated by their sources."
+    )
     assert "not redistributed" in text
+    assert text.endswith(
+        "The code of the repository pins every asset to a revision."
+    )
+    assert "Revision is" not in text
+    assert len(text.split()) <= 170
     assert not any(ch in text for ch in DASHES)
     assert "_" not in text
 
@@ -176,15 +182,14 @@ def test_no_cell_has_a_dash_character_or_an_internal_code(
     assert not any(re.search(r"\b[RPMCA][0-9]+[a-d]?\b", c) for c in cells)
 
 
-def test_every_checkpoint_revision_is_listed(
+def test_every_checkpoint_is_listed_with_its_source_and_license(
     output: registry.TableOutput,
 ) -> None:
     rows = {r[0]: r for r in output.rows}
     for key, pin in assets.CHECKPOINTS.items():
         row = rows[paper.display_name(key)]
         assert row[3] == pin.repo_id, key
-        assert row[4] == pin.revision[:12], key
-        assert row[5].lower() == pin.license.lower(), key
+        assert row[4].lower() == pin.license.lower(), key
     assert len(output.rows) == len(assets.ASSETS) - 2 + len(assets.CHECKPOINTS)
 
 
@@ -192,12 +197,20 @@ def test_a_license_that_says_to_cite_carries_the_citation_marker(
     output: registry.TableOutput,
 ) -> None:
     rows = {r[0]: r for r in output.rows}
-    assert rows["SST-2"][5] == (
+    assert rows["SST-2"][4] == (
         "Unknown (cite Socher et al., 2013 [[cite:socher2013recursive]])"
     )
     for row in output.rows:
-        if "(cite " in row[5]:
-            assert "[[cite:" in row[5], row[0]
+        if "(cite " in row[4]:
+            assert "[[cite:" in row[4], row[0]
+
+
+def test_no_cell_holds_a_pinned_revision(output: registry.TableOutput) -> None:
+    pins = {pin.revision[:12] for pin in assets.CHECKPOINTS.values()}
+    pins |= {a.revision for a in assets.ASSETS if a.key not in assets.FAMILIES}
+    cells = {c for row in output.rows for c in row}
+    assert all(len(row) == 5 for row in output.rows)
+    assert not pins & cells
 
 
 def test_the_text_table_prints_compact_so_its_hub_ids_do_not_wrap_tall(

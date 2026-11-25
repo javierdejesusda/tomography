@@ -1,9 +1,10 @@
 """Assembles the results paper as one HTML page.
 
 The page is laid out like a compiled NeurIPS paper: a title between rules, an
-abstract, a contents line, numbered sections with numbered cross references,
-figures and tables with their captions, numbered citations and a reference
-list before the appendix. Main figures and tables are numbered in order of
+abstract with the overview figure below it, numbered sections with numbered
+cross references, figures and tables with their captions, an unnumbered
+closing paragraph, numbered citations and a reference list before the
+appendix. Main figures and tables are numbered in order of
 appearance and appendix ones A1, A2 and so on in registry order; every number
 in the text comes from a figure or table the builder computed.
 """
@@ -73,8 +74,8 @@ class Document:
         appendix_tables: Appendix tables by key, in registry order.
         year: The year of the results, for the citation.
         bib: Parsed bibliography.
-        commit: The short commit of the results that findings links are
-            pinned to.
+        commit: The short commit of the results or their findings that
+            findings links are pinned to.
     """
 
     figures: dict[str, FigureEntry]
@@ -206,12 +207,6 @@ class Page:
         self._styled = False
         self._number()
 
-    def _has(self, item: str) -> bool:
-        kind, _, key = item.partition(":")
-        if kind == "fig":
-            return key in self.doc.figures
-        return key in self.doc.tables
-
     def _number(self) -> None:
         figure = table = 0
 
@@ -229,7 +224,7 @@ class Page:
             for i, sub in enumerate(section.subsections, 1):
                 visit(sub, f"{label}.{i}")
 
-        visit(Section("front", "", items=content.FRONT_ITEMS), "")
+        visit(Section("front", "", items=content.ABSTRACT_ITEMS), "")
         for number, section in enumerate(content.BODY, 1):
             visit(section, str(number))
         figure = table = 0
@@ -292,12 +287,13 @@ class Page:
             commit = self.doc.commit or "main"
             url = f"{content.REPO_URL}/blob/{commit}/docs/findings.md#{slug}"
             return f'<a href="{_e(url)}">{_e(text)}</a>'
+        if name.startswith("link:"):
+            target, _, text = name[5:].partition("|")
+            return f'<a href="{_e(content.LINKS[target])}">{_e(text)}</a>'
         if name.startswith("num:"):
             return _e(self.quoted_number(name[4:]))
-        if name.startswith("count:"):
-            return _e(self.quoted_count(name[6:]))
-        if name.startswith("runs:"):
-            return _e(self.quoted_runs(name[5:]))
+        if name.startswith("tally:"):
+            return _e(self.quoted_tally(name[6:]))
         if name.startswith("label:"):
             return _e(self.quoted_label(name[6:]))
         raise KeyError(name)
@@ -322,15 +318,10 @@ class Page:
             return f"{int(value):,}".replace("-", cells.MINUS)
         return cells.num(value)
 
-    def quoted_count(self, address: str) -> str:
-        """Writes a per-role count a figure or table computed."""
+    def quoted_tally(self, address: str) -> str:
+        """Writes a per-role count as three fractions, for running text."""
         output, name = self._output(address)
-        return stats.per_role_text(output.counts[name])
-
-    def quoted_runs(self, address: str) -> str:
-        """Writes a per-role count of runs a figure or table computed."""
-        output, name = self._output(address)
-        return stats.runs_text(output.counts[name])
+        return stats.per_role_tally(output.counts[name])
 
     def quoted_label(self, address: str) -> str:
         """Writes a label (such as a checkpoint name) a figure computed."""
@@ -561,26 +552,6 @@ class Page:
         self.pending = []
         return f'<aside class="footnotes"><hr>{lines}</aside>'
 
-    def code(self) -> str:
-        """Renders the links and the build commands of the repository."""
-        links = (
-            f'<a href="{content.REPO_URL}">the repository</a>, '
-            f'<a href="{content.FINDINGS_URL}">the findings document</a> '
-            "(every result with its run identity), "
-            f'<a href="{content.METHODOLOGY_URL}">the methodology document'
-            "</a> (deviations from the paper and the statistics) and "
-            f'<a href="{content.DATA_URL}">the committed result files</a>'
-        )
-        return (
-            "<p>The code, the tests and every result are in "
-            f"{links}. The page is rebuilt from those files by the commands "
-            "below.</p>"
-            "<pre><code>uv sync\n"
-            "uv run tomography run r3 --model gpt2\n"
-            "uv run python -m tomography.site build --out _site"
-            "</code></pre>"
-        )
-
     def references(self) -> str:
         """Renders the numbered reference list in order of first citation."""
         items = []
@@ -617,7 +588,7 @@ class Page:
         )
 
     def appendix(self) -> str:
-        """Renders the four appendices."""
+        """Renders the appendices."""
         parts = ['<section id="appendix">']
         for letter, section in zip(
             string.ascii_uppercase, content.APPENDICES, strict=False
@@ -626,28 +597,12 @@ class Page:
         parts.append("</section>")
         return "".join(parts)
 
-    def contents(self) -> str:
-        """Renders the contents line under the abstract."""
-        links = [
-            f'<a href="#{content.KEY_FINDINGS.key}">'
-            f"{_e(content.KEY_FINDINGS.title)}</a>"
-        ]
-        links += [
-            f'<a href="#{s.key}">{n}&ensp;{_e(s.title)}</a>'
-            for n, s in enumerate(content.BODY, 1)
-        ]
-        links += ['<a href="#references">References</a>']
-        links += ['<a href="#appendix">Appendix</a>']
-        return f'<p class="contents">Contents: {", ".join(links)}</p>'
-
     def body(self) -> str:
-        """Renders the sections, the references and the appendix."""
+        """Renders the sections, the closing paragraph and the back matter."""
         parts = []
         for i, section in enumerate(content.BODY, 1):
-            text = self.section(section, str(i))
-            if section.key == content.REPRODUCIBILITY.key:
-                text += self.code()
-            parts.append(text + self.notes())
+            parts.append(self.section(section, str(i)) + self.notes())
+        parts.append(self.section(content.CODE, "") + self.notes())
         appendix = self.appendix() + self.notes()
         parts.append(self.references())
         parts.append(self.cite_block())
@@ -681,14 +636,8 @@ def render_page(doc: Document) -> str:
         The HTML document.
     """
     page = Page(doc)
-    summary = (
-        f'<p class="tldr"><span class="runin">TL;DR.</span> '
-        f"{page.text(content.TLDR)}</p>"
-        + "".join(page.item(item) for item in content.FRONT_ITEMS)
-    )
     abstract = page.paragraph(content.ABSTRACT)
-    contents = page.contents()
-    findings = page.section(content.KEY_FINDINGS, "") + page.notes()
+    overview = "".join(page.item(item) for item in content.ABSTRACT_ITEMS)
     body = page.body()
     return (
         "<!doctype html>\n"
@@ -706,10 +655,9 @@ def render_page(doc: Document) -> str:
         f"{_e(content.REPO_TEXT)}</a></p>"
         f'<p class="pdf"><a class="pdf-button" href="{pdf.NAME}" '
         'target="_blank" rel="noopener">View PDF</a></p></header>'
-        f"{summary}"
         f'<section class="abstract" id="abstract"><h2>Abstract</h2>'
         f"{abstract}</section>"
-        f"{contents}{findings}{body}</main>\n"
+        f"{overview}{body}</main>\n"
         '<footer class="colophon"><p>Set in Latin Modern under the GUST '
         "Font License; the code is released under the MIT license; no "
         "analytics.</p></footer>\n"

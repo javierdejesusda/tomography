@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import runpy
 from typing import Any
 
@@ -122,27 +123,18 @@ def test_the_predictors_left_out_are_in_the_data_file(
         tuple(cells.num(_popqa(m)[name]["auroc_within"]) for name in LEFT_OUT)
         for m in models("b1")
     ]
-    assert (
-        "The runs also score six signals that the table leaves out and the "
-        "data file holds: the entropy of the first token of the answer, the "
-        "log-probability of the greedy answer and its mean per token, the "
-        "share of sampled answers equal to the greedy one, the training "
-        "accuracy of the relation, which is constant inside a relation, and "
-        "the log-probability of the name of the subject."
-    ) in output.detail
 
 
-def test_the_claim_states_the_finding_by_point_estimate(
+def test_the_claim_says_what_the_table_sets_side_by_side(
     output: registry.TableOutput,
 ) -> None:
     assert output.claim == (
-        "By point estimate, the answer probe tells correct from wrong greedy "
-        "answers on held-out PopQA questions better than the knowledge "
-        "direction on "
-        f"{stats.per_role_text(output.counts['answer_probe_above'])}, and "
-        "the direction does better than P(True) and both controls on "
-        f"{stats.per_role_text(output.counts['above_ptrue_and_controls'])}."
+        "The knowledge direction beside six published baselines and two "
+        "controls, on 1,937 held-out PopQA questions."
     )
+    groups = {label: width for label, width, _ in output.groups}
+    assert groups["Published baselines"] == 6
+    assert groups["Controls"] == 2
 
 
 def test_the_number_of_questions_is_quoted_from_the_runs(
@@ -153,7 +145,7 @@ def test_the_number_of_questions_is_quoted_from_the_runs(
     }
     assert sizes == {1937}
     assert output.numbers["questions"] == 1937
-    assert "1,937 test questions" in output.detail
+    assert "on 1,937 held-out PopQA questions" in output.claim
 
 
 def test_checkpoints_are_counted_per_role(
@@ -179,38 +171,44 @@ def test_checkpoints_are_counted_per_role(
     )
 
 
-def test_the_caption_names_baselines_and_controls_apart(
+def test_the_caption_says_what_each_column_is_fitted_on(
     output: registry.TableOutput,
 ) -> None:
     text = f"{output.claim} {output.detail}"
+    assert len(text.split()) <= 170, len(text.split())
     for phrase in (
-        "AUROC",
-        "inside each PopQA relation",
-        "greedy",
-        "bootstrap interval",
-        "[[cite:orgad2025llms]]",
-        "[[cite:farquhar2024detecting]]",
-        "[[cite:chen2024inside]]",
-        "[[cite:kadavath2022language]]",
-        "[[cite:alain2016understanding]]",
-        "[[cite:mallen2023when]]",
-        "five answers",
-        "pooled over the relations by their number of pairs of a correct "
-        "and a wrong answer",
-        "oriented so that a higher score means a more likely correct answer",
-        "The direction, the answer probe, semantic entropy and EigenScore "
-        "carry the percentile bootstrap interval",
-        "with no step that locates the exact answer",
-        "published baselines",
-        "are controls",
-        "no direction",
-        "TriviaQA and NQ-open",
-        stats.per_role_text(output.counts["with_run"]),
+        "A value is the AUROC of correct against wrong greedy answers "
+        "within relation, pooled over relations by their number of "
+        "correct-wrong pairs; brackets are bootstrap intervals over the "
+        "questions.",
+        "Semantic entropy [[cite:farquhar2024detecting]] and EigenScore "
+        "[[cite:chen2024inside]] are negated and read five sampled answers "
+        "per question, where their papers sample 10.",
+        "The answer probe [[cite:orgad2025llms]] is a logistic probe at the "
+        "last token of the short greedy answer, with no step that locates "
+        "the exact answer; the prompt probe "
+        "[[cite:alain2016understanding]] is the same probe at the last "
+        "token of the question.",
+        "Both are fitted on the correctness of training questions. The "
+        "direction is fitted on known and unknown questions, labelled by "
+        "the correctness of the model's answers, and its layer is chosen on "
+        "the correctness of validation answers.",
+        "The token probability is that of the first answer token.",
+        "GPT-2 small has too few known questions for a direction.",
     ):
         assert phrase in text, phrase
-    controls = [s for s in text.split(". ") if "are controls" in s]
-    assert len(controls) == 1
-    assert "baseline" not in controls[0]
+    assert "never sees" not in text
     assert not any(d in text for d in DASHES)
     assert "did not have" not in text
     assert "_" not in text.replace("[[cite:", "")
+    assert re.findall(r"\[\[(\w+):", text) == ["cite"] * 4
+
+
+def test_the_cell_without_a_direction_does_not_need_the_removed_table(
+    output: registry.TableOutput,
+) -> None:
+    from tomography.site.tables import detection_baselines
+
+    assert output.rows[0][1] == detection_baselines.NO_CONTRAST
+    assert detection_baselines.NO_CONTRAST == "no contrast"
+    assert not hasattr(detection_baselines, "knowledge")

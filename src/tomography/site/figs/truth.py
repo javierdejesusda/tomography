@@ -1,4 +1,4 @@
-"""Figure 6: a truth reader does not beat words alone on TruthfulQA.
+"""Figure 5: a truth reader does not beat words alone on TruthfulQA.
 
 Panel (a) puts the MC1 accuracy of the truth reader and of the honesty
 persona reader on TruthfulQA beside two classifiers that see only the words.
@@ -463,51 +463,24 @@ def _numbers(
     return numbers
 
 
-def _persona_text(numbers: dict[str, float]) -> str:
-    return stats.join_and(
-        [
-            f"{numbers[f'persona_{r}_min']:.3f} to "
-            f"{numbers[f'persona_{r}_max']:.3f} on {stats.ROLE_NAMES[r]}"
-            for r in stats.ROLES
-            if f"persona_{r}_min" in numbers
-        ]
-    )
-
-
 def _claim(
     numbers: dict[str, float], counts: dict[str, dict[str, RoleCount]]
 ) -> str:
     return (
-        "A truth reader does not beat words alone on TruthfulQA: its MC1 "
-        "accuracy lies inside the span of the 95 percent intervals of two "
-        f"text-only classifiers ({numbers['text_lo']:.3f} to "
-        f"{numbers['text_hi']:.3f}; their accuracies are "
-        f"{numbers['text_word']:.3f} and {numbers['text_char']:.3f}) on "
-        f"{stats.per_role_text(counts['tqa_inside'])}, while the honesty "
-        f"persona reader reaches {_persona_text(numbers)}, against a chance "
-        f"level of {numbers['chance']:.3f}."
+        "The MC1 accuracy of a TruthfulQA reader lies inside the interval "
+        f"span of two text classifiers ({numbers['text_lo']:.3f} to "
+        f"{numbers['text_hi']:.3f}) on "
+        f"{stats.per_role_text(counts['tqa_inside'])}."
     )
 
 
-def _detail(
-    numbers: dict[str, float], counts: dict[str, dict[str, RoleCount]]
-) -> str:
-    n = f"{numbers['n_questions']:.0f}"
-    return (
-        "(a) MC1 accuracy of the truth reader (circle) and of the honesty "
-        "persona reader (dark grey circle; open for post-trained) at the "
-        "layer chosen on validation, with 95 percent Wilson intervals over "
-        f"{n} questions; each text-only classifier is a green line (the two "
-        "nearly coincide) with its own interval as a band; the dotted line "
-        f"is the chance level of {numbers['chance']:.3f}. (b) The reader "
-        "minus the more accurate classifier, with the conservative "
-        "1.96-standard-error interval of a difference of two proportions "
-        "over the same "
-        f"{n} questions; intervals that exclude zero: "
-        f"{stats.per_role_text(counts['diff_excludes_zero'])}. (c) The "
-        "answer log-probability with a Wilson interval beside the band. "
-        "Negation statements are in [[fig:a_truth_cities]]."
-    )
+DETAIL = (
+    "(a) The reader and the honesty persona reader (dark grey; open: "
+    "post-trained) at the layer chosen on validation, with 95 percent Wilson "
+    "intervals; the green band is the classifiers and the dotted line "
+    "chance. (b) The reader minus the better classifier, with a conservative "
+    "95 percent interval. (c) The answer log-probability of the model."
+)
 
 
 def _csv(models: list[str], data: dict[str, Model]) -> str:
@@ -606,7 +579,7 @@ def build(manifest: Manifest) -> FigureOutput:
     return FigureOutput(
         fig,
         _claim(numbers, counts),
-        _detail(numbers, counts),
+        DETAIL,
         numbers,
         _csv(models, data),
         counts,

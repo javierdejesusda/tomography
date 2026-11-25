@@ -1,4 +1,7 @@
-"""Table A1: Models, judges and datasets with pins and licenses."""
+"""Table A1: Models, judges and datasets with sources and licenses.
+
+The pinned revisions stay in the code and in the methodology document.
+"""
 
 from tomography.site import assets
 from tomography.site.manifest import Manifest
@@ -45,7 +48,6 @@ def build(manifest: Manifest) -> TableOutput:
                     f"{a.name} checkpoint",
                     _cite(a.cite),
                     pin.repo_id,
-                    pin.revision[:12],
                     _license(pin.license),
                 ]
                 for key, pin in assets.CHECKPOINTS.items()
@@ -58,19 +60,17 @@ def build(manifest: Manifest) -> TableOutput:
                     a.used,
                     _cite(a.cite),
                     a.location,
-                    a.revision,
                     _license(a.license, a.cite),
                 ]
             )
     claim = (
-        "Models, judges and datasets with their pinned revisions and their "
-        "licenses as stated by their sources."
+        "Models, judges and datasets with their sources and their licenses "
+        "as stated by their sources."
     )
     detail = (
-        "Revision is the leading 12 characters of the pinned commit of the "
-        "Hugging Face Hub repository or Git repository, or the SHA-256 "
-        "digest of the pinned file. Sources without a permissive license are "
-        "downloaded at run time and are not redistributed in the repository."
+        "Sources without a permissive license are downloaded at run time and "
+        "are not redistributed in the repository. The code of the repository "
+        "pins every asset to a revision."
     )
     return TableOutput(
         claim,
@@ -80,11 +80,10 @@ def build(manifest: Manifest) -> TableOutput:
             "Used for",
             "Citation",
             "Hub ID or source",
-            "Revision",
             "License as stated",
         ],
         rows,
-        "llllll",
+        "lllll",
         [],
         {"assets": float(len(rows))},
         row_groups=(),

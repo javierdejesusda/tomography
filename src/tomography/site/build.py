@@ -20,6 +20,7 @@ logging.getLogger("fontTools.ttLib.tables._h_e_a_d").setLevel(logging.ERROR)
 
 STATIC = Path(__file__).parent / "static"
 BIB = Path(__file__).resolve().parents[3] / "docs" / "references.bib"
+FINDINGS = "docs/findings.md"
 MONTHS = (
     "January",
     "February",
@@ -79,7 +80,11 @@ def newest_run_year(manifest: Manifest) -> str:
 
 
 def results_commit(results: Path) -> tuple[str, str]:
-    """Finds the commit that last changed the results.
+    """Finds the commit that last changed the results or their findings.
+
+    Findings links are pinned to this commit, so it also counts the commits
+    of the findings document: a section written after the results it
+    describes then exists at the pinned revision.
 
     Args:
         results: The committed `results/` directory.
@@ -99,6 +104,7 @@ def results_commit(results: Path) -> tuple[str, str]:
                 "--format=%h %cs",
                 "--",
                 results.name,
+                FINDINGS,
             ],
             capture_output=True,
             text=True,

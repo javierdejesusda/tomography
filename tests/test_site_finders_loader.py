@@ -38,9 +38,6 @@ def test_depth_is_layer_over_layer_count() -> None:
     cell = found["sentiment"]
     assert cell.depth[0] == pytest.approx(1 / 12)
     assert cell.depth[-1] == pytest.approx(1.0)
-    assert cell.row_depth("pca_diff") == pytest.approx(
-        cell.rows["pca_diff"].layer / 12
-    )
 
 
 def test_the_methods_follow_the_stored_series_order() -> None:
