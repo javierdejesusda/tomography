@@ -79,10 +79,8 @@ from tomography.templates import ChatFormat
 from tomography.templates import ConceptTemplate
 from tomography.templates import Rendered
 from tomography.viz import paper
-from tomography.viz.axes import MINUS
 from tomography.viz.axes import ModelStyle
 from tomography.viz.axes import model_style
-from tomography.viz.style import save_figure
 
 ReadPosition = Literal["last", "mean"]
 
@@ -1008,6 +1006,17 @@ def _new_figure(nrows: int, ncols: int, height: float) -> tuple[Figure, Any]:
     return fig, axes
 
 
+def _save(fig: Figure, out_dir: Path, name: str) -> list[Path]:
+    """Writes PDF, PNG and SVG with the paper fonts, which resolve on save."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = [out_dir / f"{name}.{fmt}" for fmt in ("pdf", "png", "svg")]
+    paths[0].write_bytes(paper.pdf_bytes(fig))
+    with paper.paper_style():
+        fig.savefig(paths[1], format="png", dpi=300)
+    paths[2].write_bytes(paper.svg_bytes(fig))
+    return paths
+
+
 def _heatmap(
     ax: Axes,
     values: NDArray[np.float64],
@@ -1019,7 +1028,8 @@ def _heatmap(
     fig: Figure,
 ) -> None:
     image = ax.imshow(values, cmap=cmap, norm=norm, aspect="auto")
-    ax.set_xticks(range(len(EMOTIONS)), EMOTIONS, rotation=40, ha="right")
+    ax.xaxis.tick_top()
+    ax.set_xticks(range(len(EMOTIONS)), EMOTIONS)
     ax.set_yticks(
         range(len(CONDITIONS)), [CONDITION_LABELS[c] for c in CONDITIONS]
     )
@@ -1028,19 +1038,18 @@ def _heatmap(
         spine.set_visible(False)
     mapper = image.get_cmap()
     for (row, col), value in np.ndenumerate(values):
-        red, green, blue, _ = mapper(norm(value))
-        dark = 0.299 * red + 0.587 * green + 0.114 * blue < 0.5
         ax.text(
             col,
             row,
-            f"{value:.2f}".replace("-", MINUS),
+            f"${value:.2f}$",
             ha="center",
             va="center",
             fontsize=paper.MIN_TEXT,
-            color=paper.WHITE if dark else paper.INK,
+            color=paper.tile_ink(mapper(norm(value))),
+            gid=paper.TILE_LABEL,
         )
-    ax.set_title(title)
-    fig.colorbar(image, ax=ax, shrink=0.8, label=label)
+    ax.set_title(title, pad=14)
+    fig.colorbar(image, ax=ax, label=label, fraction=0.05, pad=0.02)
 
 
 def heatmap_figure(run_dir: RunDir) -> Figure:
@@ -1062,10 +1071,11 @@ def heatmap_figure(run_dir: RunDir) -> Figure:
     panels: list[tuple[str, NDArray[np.float64], bool]] = []
     for position, entry in summary["positions"].items():
         at = scores[f"layers_{position}"].tolist().index(entry["layer"])
-        where = "last token" if position == "last" else "message mean"
+        where = "last token" if position == "last" else "mean over the message"
         panels.append(
             (
-                f"Model, {where}, layer {entry['layer']}",
+                f"{paper.display_name(summary['model'])}, {where}, "
+                f"layer {entry['layer']}: mean emotion score",
                 _condition_means(scores[f"z_{position}"][at], condition),
                 True,
             )
@@ -1074,16 +1084,14 @@ def heatmap_figure(run_dir: RunDir) -> Figure:
         if key in scores:
             panels.append(
                 (
-                    f"Text classifier, {name}",
+                    f"Text emotion classifier on the {name}: mean probability",
                     _condition_means(scores[key].T, condition),
                     False,
                 )
             )
-    ncols = 2
-    nrows = -(-len(panels) // ncols)
-    fig, axes = _new_figure(nrows, ncols, 2.6 * nrows)
+    fig, axes = _new_figure(len(panels), 1, 2.1 * len(panels))
     with paper.paper_style():
-        for ax, (title, values, signed) in zip(axes.flat, panels, strict=False):
+        for ax, (title, values, signed) in zip(axes[:, 0], panels, strict=True):
             if signed:
                 bound = float(np.abs(values).max()) or 1.0
                 _heatmap(
@@ -1102,11 +1110,9 @@ def heatmap_figure(run_dir: RunDir) -> Figure:
                     cmap=paper.SEQUENTIAL_CMAP,
                     norm=Normalize(0.0, max(float(values.max()), 1e-6)),
                     title=title,
-                    label="mean probability",
+                    label="probability",
                     fig=fig,
                 )
-        for ax in axes.flat[len(panels) :]:
-            ax.set_visible(False)
     return fig
 
 
@@ -1209,7 +1215,7 @@ def plot_models(runs: Mapping[str, RunDir], out_dir: Path) -> list[Path]:
             loc="outside lower center",
             ncols=2,
         )
-    return save_figure(fig, out_dir, "cross_model")
+    return _save(fig, out_dir, "cross_model")
 
 
 def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
@@ -1225,7 +1231,7 @@ def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
     Returns:
         The PDF, PNG and SVG paths of `heatmap`, then of `cross_model`.
     """
-    paths = save_figure(heatmap_figure(run_dir), out_dir, "heatmap")
+    paths = _save(heatmap_figure(run_dir), out_dir, "heatmap")
     own = str(run_dir.config["model"])
     runs: dict[str, RunDir] = {}
     for model in MODEL_ORDER:
