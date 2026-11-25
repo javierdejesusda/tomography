@@ -1209,7 +1209,7 @@ def plot_models(runs: Mapping[str, RunDir], out_dir: Path) -> list[Path]:
                 ),
                 Patch(
                     color=paper.RANDOM_BAND,
-                    label="random directions, 95% of |effect|",
+                    label="95% of random-direction effects",
                 ),
             ],
             loc="outside lower center",

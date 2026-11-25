@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 from typing import NamedTuple
 
+from matplotlib.figure import Figure
+from matplotlib.text import Text
 import numpy as np
 from numpy.typing import NDArray
 import pytest
@@ -606,6 +608,27 @@ def test_plot_draws_the_heatmap_and_the_cross_model_figure(
         "cross_model.svg",
     ]
     assert all(p.stat().st_size > 0 for p in paths)
+
+
+def test_plot_text_has_no_bar_outside_math(
+    finished: Finished, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Computer Modern text draws "|" as a dash, so a bar belongs in math.
+    texts: list[str] = []
+    save = e1_self_threat._save
+
+    def spy(fig: Figure, out_dir: Path, name: str) -> list[Path]:
+        texts.extend(t.get_text() for t in fig.findobj(Text))
+        return save(fig, out_dir, name)
+
+    monkeypatch.setattr(e1_self_threat, "_save", spy)
+
+    plot(finished.run_dir, tmp_path)
+
+    assert texts
+    for text in texts:
+        outside_math = text.split("$")[::2]
+        assert not any("|" in part for part in outside_math), text
 
 
 def test_plot_models_draws_one_column_per_model(
