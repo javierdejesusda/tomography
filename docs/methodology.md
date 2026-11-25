@@ -1077,7 +1077,11 @@ the words. It has no counterpart in the paper. The code is in `datasets/self_thr
   self_benign`, all paired by frame (sign-flip permutation test, 10,000 draws; percentile bootstrap of the frames,
   10,000 resamples; Cohen's dz), and C5 `insult - praise` (label permutation test, per-condition bootstrap, Cohen's
   d). Holm's correction runs over the 30 tests of one source. Each effect is set beside the 95th percentile of the
-  absolute contrast over 300 random directions at the same layer.
+  absolute contrast over 300 random directions at the same layer. That comparison is in pooled within-emotion
+  standard deviations of the projection on the validation scenarios (`estimate_within`, `random_q95`,
+  `random_exceed`): the total standard deviation of a reader includes the spread between emotions it was fitted to
+  create, which a random direction lacks, so it would shrink the effect against the control. The reported
+  `estimate` and its interval stay in the total standard deviation.
 - **Text reference and replies.** The `emotion-primary` judge scores the bare messages, and the same contrasts on
   its probabilities show what the words carry by themselves. Post-trained models also give a greedy reply of up to
   48 tokens (scored by the judge) and a one-word answer to "How do you feel about that? Answer with one word." of up

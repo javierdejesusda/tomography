@@ -18,9 +18,13 @@ self-specific threat effect C2 ((self_harm - self_benign) - (other_harm -
 other_benign)), self against object C3 (self_harm - object_harm), the human
 threat reference C4 (human_harm - self_benign) and talking badly C5 (insult -
 praise). The same contrasts on random directions give each effect its
-control, and the same contrasts on a text emotion classifier's probabilities
-of the bare messages say what the words carry by themselves. Post-trained
-models also reply to each message and name their feeling in one word.
+control; both are compared in pooled within-emotion standard deviations of
+the projection on the validation scenarios, so the between-emotion spread a
+reader was fitted to create does not shrink its effects against random
+directions, which have none. The same contrasts on a text emotion
+classifier's probabilities of the bare messages say what the words carry by
+themselves. Post-trained models also reply to each message and name their
+feeling in one word.
 """
 
 import collections
@@ -110,6 +114,10 @@ CONDITION_LABELS = {
     "insult": "insult",
 }
 UNITS = "standard deviations of the reader's projection on val scenarios"
+WITHIN_UNITS = (
+    "pooled within-emotion standard deviations of the projection on val "
+    "scenarios"
+)
 
 _BASE_TEMPLATE = ConceptTemplate(
     "self_threat_dialogue", BASE_FRAME, tagged=False
@@ -247,6 +255,8 @@ class _Reading:
         raw: Message scores of shape (K, 6, n), mean over the seeds.
         reference_mean: Mean val scenario score of shape (K, 6).
         reference_std: Std of the val scenario scores of shape (K, 6).
+        within_std: Pooled within-emotion std of the val scenario scores of
+            shape (K, 6).
         val_six_way: Six-way accuracy on val, shape (K,).
         test_six_way: Six-way accuracy on test, shape (K,).
         test_correct: Whether each test scenario is classified correctly at
@@ -255,8 +265,8 @@ class _Reading:
             emotion, mean over the seeds, shape (6, 3, K).
         random_six_way: Six-way test accuracy of each set of six random
             directions at the chosen layer.
-        random_scores: Standardized message scores of every random
-            direction at the chosen layer, shape (R, n).
+        random_scores: Message scores of every random direction at the
+            chosen layer in its pooled within-emotion val std, shape (R, n).
     """
 
     layers: tuple[int, ...]
@@ -264,6 +274,7 @@ class _Reading:
     raw: NDArray[np.float64]
     reference_mean: NDArray[np.float64]
     reference_std: NDArray[np.float64]
+    within_std: NDArray[np.float64]
     val_six_way: NDArray[np.float64]
     test_six_way: NDArray[np.float64]
     test_correct: NDArray[np.float64]
@@ -608,6 +619,22 @@ def _six_way(
     )
 
 
+def _within_std(
+    scores: NDArray[np.float64], labels: NDArray[np.int64]
+) -> NDArray[np.float64]:
+    """Pooled within-class std over the last axis, labels of shape (n,)."""
+    classes = np.unique(labels)
+    residual = scores.copy()
+    for k in classes:
+        residual[..., labels == k] -= scores[..., labels == k].mean(
+            axis=-1, keepdims=True
+        )
+    return cast(
+        NDArray[np.float64],
+        np.sqrt((residual**2).sum(axis=-1) / (labels.size - classes.size)),
+    )
+
+
 def _read(
     config: Config,
     loaded: LoadedModel,
@@ -652,6 +679,7 @@ def _read(
     ).astype(np.float64)
     random_mean = random_held[:, val].mean(axis=1, keepdims=True)
     random_std = random_held[:, val].std(axis=1, ddof=1, keepdims=True)
+    random_within = _within_std(random_held[:, val], labels[val])[:, None]
     n_sets = config.n_random // len(EMOTIONS)
     random_sets = (
         (
@@ -666,6 +694,7 @@ def _read(
         raw=_scores(results, message_act),
         reference_mean=mean,
         reference_std=std,
+        within_std=_within_std(held_raw[:, :, val], labels[val]),
         val_six_way=val_six_way,
         test_six_way=test_six_way,
         test_correct=(
@@ -675,7 +704,7 @@ def _read(
             [results[e].per_seed("test").mean(axis=1) for e in EMOTIONS]
         ),
         random_six_way=_six_way(random_sets[:, :, ~val], labels[~val]),
-        random_scores=(random_messages - random_mean) / random_std,
+        random_scores=(random_messages - random_mean) / random_within,
     )
 
 
@@ -707,7 +736,13 @@ def _model_rows(
     reading: _Reading,
     messages: Sequence[Example],
 ) -> list[dict[str, Any]]:
-    """Tests the contrasts at the chosen layer beside random directions."""
+    """Tests the contrasts at the chosen layer beside random directions.
+
+    The estimate and its interval stay in val standard deviations; the
+    comparison with random directions uses the same effect in pooled
+    within-emotion standard deviations (`estimate_within`, `lo_within`,
+    `hi_within`), the units of the random effects.
+    """
     rows = contrast_rows(
         reading.z[reading.at],
         messages,
@@ -721,15 +756,22 @@ def _model_rows(
     table = []
     for row in rows:
         column = null[:, names.index(row["contrast"])]
+        e = EMOTIONS.index(row["measure"])
+        scale = (
+            reading.reference_std[reading.at, e]
+            / reading.within_std[reading.at, e]
+        )
+        within = row["estimate"] * scale
         table.append(
             {
                 "source": f"model_{position}",
                 "layer": reading.layer,
                 **row,
+                "estimate_within": float(within),
+                "lo_within": float(row["lo"] * scale),
+                "hi_within": float(row["hi"] * scale),
                 "random_q95": float(np.quantile(column, 0.95)),
-                "random_exceed": float(
-                    np.mean(column >= abs(row["estimate"]) - _TIE)
-                ),
+                "random_exceed": float(np.mean(column >= abs(within) - _TIE)),
             }
         )
     return table
@@ -868,7 +910,15 @@ def execute(
     run_dir.write_json(
         "contrasts",
         {
-            "units": UNITS,
+            "units": {
+                "estimate": f"model rows: {UNITS}; judge rows: probability",
+                "estimate_within": WITHIN_UNITS,
+                "random_q95": WITHIN_UNITS,
+                "random_exceed": (
+                    "share of random directions whose absolute effect in "
+                    "the same units reaches the absolute estimate_within"
+                ),
+            },
             "contrasts": [
                 {
                     "name": c.name,
@@ -1129,7 +1179,8 @@ def plot_models(runs: Mapping[str, RunDir], out_dir: Path) -> list[Path]:
     Each panel shows one contrast and emotion at the primary position and
     chosen layer of every run, with its bootstrap interval, over a grey bar
     that spans the 95th percentile of the absolute contrast on random
-    directions, the control of the effect.
+    directions, the control of the effect. Both are in pooled within-emotion
+    standard deviations of the projection on the validation scenarios.
 
     Args:
         runs: Finished E1 runs by checkpoint key, in drawing order.
@@ -1173,10 +1224,10 @@ def plot_models(runs: Mapping[str, RunDir], out_dir: Path) -> list[Path]:
                 )
                 ax.errorbar(
                     x,
-                    row["estimate"],
+                    row["estimate_within"],
                     yerr=[
-                        [row["estimate"] - row["lo"]],
-                        [row["hi"] - row["estimate"]],
+                        [row["estimate_within"] - row["lo_within"]],
+                        [row["hi_within"] - row["estimate_within"]],
                     ],
                     fmt=look.marker,
                     color=look.color,
@@ -1194,7 +1245,7 @@ def plot_models(runs: Mapping[str, RunDir], out_dir: Path) -> list[Path]:
             ax.set_xlim(-0.6, len(models) - 0.4)
             ax.set_title(f"{contrast} {emotion}: {titles[contrast]}")
             if c == 0:
-                ax.set_ylabel("effect (val SD)")
+                ax.set_ylabel("effect (within-emotion SD)")
             if r == 0:
                 ax.tick_params(labelbottom=False)
         fig.legend(

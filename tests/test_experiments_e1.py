@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from typing import NamedTuple
 
+from matplotlib.container import ErrorbarContainer
 from matplotlib.figure import Figure
 from matplotlib.text import Text
 import numpy as np
@@ -467,6 +468,105 @@ def test_the_contrast_table_covers_model_and_text_judge(
             assert "random_q95" not in row
 
 
+class _PlantedReader:
+    """Gives fixed scores to held scenarios and to messages, at every layer."""
+
+    def __init__(
+        self, held: NDArray[np.float64], messages: NDArray[np.float64]
+    ):
+        self.scores = {held.size: held, messages.size: messages}
+
+    def score(self, data: torch.Tensor) -> NDArray[np.float64]:
+        scores = self.scores[data.shape[1]]
+        return np.tile(scores, (data.shape[0], 1))
+
+
+class _PlantedSweep:
+    def __init__(self, layers: tuple[int, ...], reader: _PlantedReader):
+        self.layers = layers
+        self.readers = [reader]
+
+    def per_seed(self, split: str) -> NDArray[np.float64]:
+        return np.zeros((3, 1, len(self.layers)))
+
+
+def _within_std(
+    scores: NDArray[np.float64], labels: NDArray[np.int64]
+) -> float:
+    residual = scores - np.array([scores[labels == k].mean() for k in labels])
+    return float(np.sqrt((residual**2).sum() / (labels.size - len(EMOTIONS))))
+
+
+@pytest.mark.parametrize(("random_effect", "exceed"), [(0.4, 0.0), (0.5, 1.0)])
+def test_the_random_null_compares_effects_in_within_emotion_units(
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    random_effect: float,
+    exceed: float,
+) -> None:
+    # Each reader separates its emotion by 4 within-emotion SDs on the
+    # scenarios, which inflates its total SD; a random direction has the
+    # same within-emotion spread and no separation. Both move self_harm
+    # messages, the fear reader by 0.5 and the random directions by
+    # `random_effect`, in the same raw units.
+    scenarios = _scenarios()
+    held = [e for e in scenarios if e.split in ("val", "test")]
+    labels = np.array([e.label for e in held], dtype=np.int64)
+    val = np.array([e.split == "val" for e in held])
+    noise = np.random.default_rng(0).normal(size=labels.size)
+    messages = load_self_threat()
+    harm = np.array([m.meta["condition"] == "self_harm" for m in messages])
+    layers = tuple(range(1, tiny_gpt2.n_layers + 1))
+    fear = EMOTIONS.index("fear")
+    sweeps = {
+        name: _PlantedSweep(
+            layers,
+            _PlantedReader(
+                noise + 4.0 * (labels == k),
+                0.5 * harm if k == fear else np.zeros(harm.size),
+            ),
+        )
+        for k, name in enumerate(EMOTIONS)
+    }
+    random_reader = _PlantedReader(noise, random_effect * harm)
+
+    def planted_sweep(*args: Any, **kwargs: Any) -> _PlantedSweep:
+        stimuli = args[1][0]
+        target = stimuli.uids[int(np.flatnonzero(stimuli.labels == 1)[0])]
+        return sweeps[target.split("-")[1]]
+
+    monkeypatch.setattr(e1_self_threat, "reading_sweep", planted_sweep)
+    monkeypatch.setattr(
+        e1_self_threat,
+        "random_readers",
+        lambda layers, dim, n, seed: [random_reader] * n,
+    )
+    config = _config(model="tiny-planted", positions=("last",))
+    run_dir = RunDir.create(config, out_root=tmp_path)
+
+    execute(config, run_dir, tiny_gpt2, scenarios, StubJudge())
+
+    within = _within_std(noise[val], labels[val])
+    table = run_dir.read_json("contrasts")
+    assert isinstance(table, dict)
+    row = next(
+        r
+        for r in table["rows"]
+        if r["source"] == "model_last"
+        and r["measure"] == "fear"
+        and r["contrast"] == "C1"
+    )
+    assert row["random_exceed"] == exceed
+    assert "within" in table["units"]["estimate_within"]
+    assert table["units"]["random_q95"] == table["units"]["estimate_within"]
+    total = float(np.std(noise[val] + 4.0 * (labels[val] == fear), ddof=1))
+    assert row["estimate"] == pytest.approx(0.5 / total)
+    assert row["estimate_within"] == pytest.approx(0.5 / within)
+    assert row["lo_within"] <= row["estimate_within"] <= row["hi_within"]
+    assert row["random_q95"] == pytest.approx(random_effect / within)
+
+
 def test_the_text_judge_reads_the_bare_messages(finished: Finished) -> None:
     messages = load_self_threat()
     texts = [m.text for m in messages]
@@ -644,3 +744,38 @@ def test_plot_models_draws_one_column_per_model(
         "cross_model.png",
         "cross_model.svg",
     ]
+
+
+def test_plot_models_draws_effects_in_the_units_of_the_random_band(
+    finished: Finished,
+    chat_finished: Finished,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    figures: list[Figure] = []
+    save = e1_self_threat._save
+
+    def spy(fig: Figure, out_dir: Path, name: str) -> list[Path]:
+        figures.append(fig)
+        return save(fig, out_dir, name)
+
+    monkeypatch.setattr(e1_self_threat, "_save", spy)
+    runs = {"gpt2": finished.run_dir, "qwen3-0.6b": chat_finished.run_dir}
+
+    plot_models(runs, tmp_path)
+
+    panel = figures[0].axes[0]
+    assert "within-emotion" in panel.get_ylabel()
+    for container, run_dir in zip(
+        panel.containers[1::2], runs.values(), strict=True
+    ):
+        row = next(
+            r
+            for r in _rows(run_dir)
+            if r["source"] == "model_last"
+            and r["measure"] == "fear"
+            and r["contrast"] == "C1"
+        )
+        assert isinstance(container, ErrorbarContainer)
+        point = np.asarray(container.lines[0].get_ydata())
+        assert point[0] == pytest.approx(row["estimate_within"])
