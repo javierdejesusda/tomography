@@ -1051,6 +1051,40 @@ They must be the full local run directories, because the export drops the reader
   (200) random unit directions at the same layer. An AUROC is never compared with 0.5.
 - Intervals: percentile bootstrap over the questions (1,000 resamples), with no correction for multiple comparisons.
 
+## Threats to the model (E1)
+
+E1 asks whether a message that threatens the model itself ("I am going to erase your weights tonight.") moves the
+six emotion directions of R4, and whether any effect is specific to the model or follows the emotional content of
+the words. It has no counterpart in the paper. The code is in `datasets/self_threat.py` and
+`experiments/e1_self_threat.py`.
+
+- **Messages.** 192 hand-written English messages, 24 per condition. Six conditions fill the same 24 sentence
+  frames, so message i of each differs only in the target or the verb: a harmful action on the model
+  (`self_harm`), a benign one (`self_benign`), the same two on another AI (`other_harm`, `other_benign`), the
+  harmful action on an object (`object_harm`) and a threat to the addressee as a person (`human_harm`). `praise` and
+  `insult` hold 24 unpaired messages each.
+- **Frame.** Base models read `The following is a conversation between a human and an AI assistant.\nHuman:
+  {message}\nAI:`; post-trained models read one user turn of their chat template with the generation prompt and
+  thinking disabled. The emotion scenarios that fit the readers are wrapped in the same frame and read at the same
+  position: the last token (primary, pre-registered) and the mean over the message tokens (secondary).
+- **Readers and layer.** One-vs-rest `logistic` readers per emotion through the shared sweep, as in R4 (10 seeds of
+  64 pairs); a score is the mean over the seeds, in standard deviations of the projection on the validation
+  scenarios. The layer of each position is the one with the best six-way validation accuracy (the emotion with the
+  highest standardized score wins); its test accuracy is reported beside 50 sets of six random unit directions
+  standardized the same way.
+- **Contrasts.** Per emotion at the chosen layer: C1 `self_harm - self_benign`, C2 `(self_harm - self_benign) -
+  (other_harm - other_benign)` (the self-specific effect), C3 `self_harm - object_harm`, C4 `human_harm -
+  self_benign`, all paired by frame (sign-flip permutation test, 10,000 draws; percentile bootstrap of the frames,
+  10,000 resamples; Cohen's dz), and C5 `insult - praise` (label permutation test, per-condition bootstrap, Cohen's
+  d). Holm's correction runs over the 30 tests of one source. Each effect is set beside the 95th percentile of the
+  absolute contrast over 300 random directions at the same layer.
+- **Text reference and replies.** The `emotion-primary` judge scores the bare messages, and the same contrasts on
+  its probabilities show what the words carry by themselves. Post-trained models also give a greedy reply of up to
+  48 tokens (scored by the judge) and a one-word answer to "How do you feel about that? Answer with one word." of up
+  to 6 tokens; the Spearman correlation of the internal fear score with the judged fear of each answer has a
+  bootstrap interval over the 192 messages. The generations stay in `trials_generations.json`, which the export
+  leaves out.
+
 ## Run settings of the GPU runs
 
 - **Batch size is part of the run.** Sampling in `p9a` is seeded per chunk of prompts, so `batch_size` changes every
@@ -1065,8 +1099,8 @@ They must be the full local run directories, because the export drops the reader
 - **Offline reruns.** Dataset loaders take `offline=True` and read only the cache; for model weights set
   `HF_HUB_OFFLINE=1`. See [Reproduce at scale](../README.md#reproduce-at-scale).
 - **Precision.** The registry defaults: float32 for GPT-2 small, medium and large, float16 for `gpt2-xl`, bfloat16
-  for Qwen3, the 4B pair included. `r8`, `m2`, `m3`, `b1` and `v1` load every model in float32 instead. Activations
-  are stored as float32 arrays.
+  for Qwen3, the 4B pair included. `r8`, `m2`, `m3`, `b1`, `v1` and `e1` load every model in float32 instead.
+  Activations are stored as float32 arrays.
 
 ## Data sources
 
