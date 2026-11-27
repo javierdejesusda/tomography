@@ -16,9 +16,11 @@ from tomography.activations import PositionStrategy
 from tomography.datasets.records import Example
 from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import m2_readers as m2
+from tomography.experiments import m3_matrix as m3
 from tomography.experiments import m4_advisor as experiment
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.model import BosMode
 from tomography.model import LoadedModel
 
 
@@ -164,11 +166,52 @@ def _fake_positions(
     return data
 
 
+def _fake_prompt_cells(
+    loaded: LoadedModel,
+    stimuli: StimulusSet,
+    layers: Sequence[int],
+    *,
+    bos: BosMode | None,
+    batch_size: int,
+    decoy: bool,
+) -> tuple[Activations, np.ndarray]:
+    del batch_size, decoy
+    encoded = loaded.encode(stimuli.texts, bos=bos)
+    positions = [
+        np.array(
+            [i for i, (lo, hi) in enumerate(offsets) if lo < hi],
+            dtype=np.int64,
+        )
+        for offsets in encoded.offsets
+    ]
+    counts = [len(row) for row in positions]
+    tokens = np.concatenate(positions)
+    stimulus = np.repeat(np.arange(len(stimuli.labels)), counts)
+    data = np.broadcast_to(
+        (tokens + 10 * stimuli.labels[stimulus])[None, :, None],
+        (len(layers), len(tokens), loaded.d_model),
+    ).astype(np.float32)
+    cells = Activations(
+        data=data,
+        layers=tuple(layers),
+        position="response",
+        row_stimulus=stimulus,
+        row_rank=np.concatenate([np.arange(n) for n in counts]),
+        row_token=tokens,
+        row_token_id=encoded.input_ids[stimulus, tokens].numpy(),
+        n_stimuli=len(stimuli.labels),
+    )
+    return cells, np.zeros(len(tokens), dtype=np.int8)
+
+
 @pytest.fixture
 def setup_run(
     tmp_path: Path, tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[experiment.Config, RunDir, RunDir]:
+    # Only the tokenizer runs here, including the longer task templates.
+    tiny_gpt2.model.config.n_positions = 512
     monkeypatch.setattr(m2, "read_positions", _fake_positions)
+    monkeypatch.setattr(m3, "prompt_cells", _fake_prompt_cells)
     monkeypatch.setattr(experiment, "load_model", lambda *a, **kw: tiny_gpt2)
     monkeypatch.setattr(experiment, "load_sources", lambda sources: _sources())
     config = experiment.Config(
@@ -225,6 +268,7 @@ def test_run_gates_before_writing_experimental_rows(
         pytest.fail("draw effects were analyzed before the equality gate")
 
     monkeypatch.setattr(experiment, "_draw_delta", early_analysis)
+    monkeypatch.setattr(m3, "prompt_cells", early_analysis)
     with pytest.raises(ValueError, match="M2 equality failed"):
         experiment.run(config, run_dir)
     assert not (run_dir.path / "table.json").exists()
@@ -276,6 +320,79 @@ def test_run_reader_protocol_at_each_readout(
         if scorer in ("vector_forest", "pca16_forest", "pca64_forest"):
             assert {row["layer_rule"] for row in rows} == {"default", "tuned"}
         assert all(0 <= row["auroc"] <= 1 for row in rows), scorer
+
+
+def test_run_writes_the_literal_family_after_the_gate(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, _, run_dir = setup_run
+    gate_passed = False
+    check = experiment.check_m2_equality
+
+    def gate(current: list[list[Any]], stored: list[list[Any]]) -> None:
+        nonlocal gate_passed
+        check(current, stored)
+        gate_passed = True
+
+    def read(*args: Any, **kwargs: Any) -> tuple[Activations, np.ndarray]:
+        assert gate_passed
+        assert args[2] == (4, 8)
+        return _fake_prompt_cells(*args, **kwargs)
+
+    monkeypatch.setattr(experiment, "check_m2_equality", gate)
+    monkeypatch.setattr(m3, "prompt_cells", read)
+    experiment.run(config, run_dir)
+
+    rows = _table(run_dir)
+    for name, layers in (("literal_forest", [4, 8]), ("length_control", [])):
+        found = [row for row in rows if row["scorer"] == name]
+        assert {row["task"] for row in found} == {"sentiment", "utility"}
+        assert {row["readout"] for row in found} == {"tokens"}
+        scores = run_dir.read_json("scores_sentiment")
+        entry = next(
+            entry for entry in scores["entries"] if entry.startswith(name)
+        )
+        assert scores["layers"][entry] == [layers, layers]
+
+    comparisons = run_dir.read_json("comparisons")
+    related = [row for row in comparisons if "/bridge/" in row["family"]]
+    assert related
+    for family in {row["family"] for row in related}:
+        members = [row for row in related if row["family"] == family]
+        assert {row["reader"].split("/")[0] for row in members} == {
+            "literal_forest",
+            "length_control",
+            "bridge_forest",
+        }
+        assert len(members) == 5
+        assert {row["family_size"] for row in members} == {5}
+        assert {row["baseline"].split("/")[1] for row in members} == {"last"}
+        assert all(len(row["auroc_draw_diff"]) == 2 for row in members)
+    summary = run_dir.read_json("summary")
+    assert summary["literal_forest"]["alignment"] == "right"
+    assert "shift token positions" in summary["literal_forest"]["caveat"]
+
+
+@pytest.mark.parametrize(
+    ("alignment", "message"),
+    [
+        ("typo", "literal_alignment must be right or left"),
+        ("left", "left alignment requires qwen3-0.6b-base"),
+    ],
+)
+def test_run_validates_literal_alignment_before_looking_up_m2(
+    alignment: Any, message: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def lookup(*args: object) -> None:
+        pytest.fail("looked up M2 before validating literal alignment")
+
+    monkeypatch.setattr(experiment, "find_m2_run", lookup)
+    config = experiment.Config(
+        model="qwen3-1.7b-base", literal_alignment=alignment
+    )
+    with pytest.raises(ValueError, match=message):
+        experiment.run(config, None)
 
 
 def test_run_reports_mlp_seed_spread_in_a_two_draw_design(

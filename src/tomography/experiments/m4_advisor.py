@@ -38,6 +38,7 @@ from tomography.experiments.variants import task_splits
 from tomography.experiments.variants import template_variants
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading import token_forest
 from tomography.reading.ensembles import GroupedForest
 from tomography.reading.ensembles import cross_fit_scores
 from tomography.reading.ensembles import fit_grouped_forest
@@ -66,7 +67,7 @@ READOUTS: tuple[m2.Readout, ...] = ("last", "max", "mean")
 CROSS_READOUTS: tuple[m2.Readout, ...] = ("last", "max")
 BASE_SCORERS = ("logistic", "mean_diff")
 BASE_RULES = ("best", "top_k")
-BRIDGE_LAYERS = (4, 8, 12, 16, 20, 24, 28)
+BRIDGE_LAYERS = token_forest.LITERAL_LAYERS
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -84,6 +85,8 @@ class Config(m2.Config):
         n_trees: Trees per forest fit.
         mlp_repeats: One or five seeds per selected MLP penalty.
         matched_pairs_per_task: Budget per task in the matched pooled arm.
+        literal_alignment: Right alignment for the primary forest; left
+            alignment for the qwen3-0.6b-base sensitivity run.
     """
 
     experiment: str = "m4"
@@ -94,6 +97,7 @@ class Config(m2.Config):
     n_trees: int = 500
     mlp_repeats: int = 1
     matched_pairs_per_task: int = 16
+    literal_alignment: token_forest.Alignment = "right"
 
     def m2_config(self) -> m2.Config:
         """Returns the M2 comparison config without M4-only fields."""
@@ -518,6 +522,54 @@ def _write_entries(
     return [row for block in rows for row in block]
 
 
+def _literal_entries(
+    config: Config,
+    loaded: LoadedModel,
+    source: _Prepared,
+    layers: tuple[int, ...],
+    take: int,
+) -> list[m2._Entry]:
+    if not layers:
+        return []
+    splits = source.splits
+    draws = token_forest.score_splits(
+        loaded,
+        splits.train_items[:take],
+        splits.select_items,
+        tuple(splits.report_items.values()),
+        layers,
+        bos=config.bos,
+        batch_size=config.batch_size,
+        alignment=config.literal_alignment,
+        n_trees=config.n_trees,
+        seeds=[
+            derive_seed(
+                config.seed, "fit", source.task.name, "logistic", "last", i
+            )
+            for i in range(take)
+        ],
+    )
+    labels = splits.select_items.labels
+    return [
+        m2._Entry(
+            m2.Cell("literal_forest", "tokens", "fixed"),
+            "reader",
+            [
+                m2._Choice(layers, d.forest_select, d.forest_report, labels)
+                for d in draws
+            ],
+        ),
+        m2._Entry(
+            m2.Cell("length_control", "tokens", "all"),
+            "reader",
+            [
+                m2._Choice((), d.length_select, d.length_report, labels)
+                for d in draws
+            ],
+        ),
+    ]
+
+
 def run(config: Config, run_dir: RunDir) -> None:
     """Runs the M2-matched protocol and writes the experimental tables.
 
@@ -529,6 +581,10 @@ def run(config: Config, run_dir: RunDir) -> None:
         ValueError: If the configuration or reference M2 run is invalid,
             or the recomputed reference rows disagree with the stored run.
     """
+    if config.literal_alignment not in ("right", "left"):
+        raise ValueError("literal_alignment must be right or left")
+    if config.literal_alignment == "left" and config.model != "qwen3-0.6b-base":
+        raise ValueError("left alignment requires qwen3-0.6b-base")
     tasks = [m2._task(name) for name in m2._check(config.m2_config())]
     if not config.reader_series:
         raise ValueError("M4 needs a full M2 reader run")
@@ -565,6 +621,7 @@ def run(config: Config, run_dir: RunDir) -> None:
     check_m2_equality(baseline_rows, stored["rows"])
 
     take = config.pilot_draws or config.n_seeds
+    literal_layers = token_forest.literal_layers(layers)
     table = _stored_controls(stored["rows"])
     ties = []
     fit_diagnostics = []
@@ -579,6 +636,9 @@ def run(config: Config, run_dir: RunDir) -> None:
             config, source, take
         )
         entries.extend(experimental)
+        entries.extend(
+            _literal_entries(config, loaded, source, literal_layers, take)
+        )
         fit_diagnostics.extend(diagnostics)
         mlp_pilot.extend(pilot)
         table.extend(_write_entries(config, run_dir, source, entries))
@@ -633,6 +693,16 @@ def run(config: Config, run_dir: RunDir) -> None:
             ),
             "negation_split_caveat": NEGATION_CAVEAT if have_truth else None,
             "n_draws": take,
+            "literal_forest": {
+                "alignment": config.literal_alignment,
+                "layers": literal_layers,
+                "caveat": (
+                    "Decoy and paraphrase conditions shift token positions "
+                    "by construction."
+                ),
+            }
+            if literal_layers
+            else None,
         },
     )
 
