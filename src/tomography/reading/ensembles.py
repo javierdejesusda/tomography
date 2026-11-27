@@ -195,28 +195,57 @@ def fit_grouped_forest(
         A forest with precomputed global split columns.
 
     Raises:
-        ValueError: If there are no trees, m is out of range, or the pairs
-            are invalid.
+        ValueError: If there are no trees, m is out of range, rows are not
+            finite, labels or pairs are invalid, or a column is out of range.
     """
     if not 1 <= m <= len(groups) or n_trees < 1:
         raise ValueError("forest needs positive n_trees and m within groups")
+    features = np.asarray(rows, dtype=np.float32, order="F")
+    if features.ndim != 2 or not np.isfinite(features).all():
+        raise ValueError("forest features must be a finite 2D matrix")
+    if (
+        labels.shape != (features.shape[0],)
+        or not np.isin(labels, (0, 1)).all()
+    ):
+        raise ValueError("forest needs one binary label per row")
     index = parse_groups(pairs, labels)
     if pairs.shape[1] != 2 or not index.valid.all():
         raise ValueError("forest needs two rows per pair")
     rng = np.random.default_rng(seed)
-    features = np.asarray(rows, dtype=np.float32)
+    layer_columns = tuple(np.asarray(group) for group in groups)
+    for group in layer_columns:
+        if (
+            group.ndim != 1
+            or group.size == 0
+            or not np.issubdtype(group.dtype, np.integer)
+            or group.min() < 0
+            or group.max() >= features.shape[1]
+        ):
+            raise ValueError("forest groups must contain valid column indices")
+    scratch = None
     trees = []
     columns = []
     nodes = []
     for _ in range(n_trees):
         bootstrap = pairs[rng.integers(len(pairs), size=len(pairs))].ravel()
         subset = np.sort(rng.choice(len(groups), m, replace=False))
-        used = np.concatenate(
-            [np.asarray(groups[i], dtype=np.int64) for i in subset]
+        used = np.concatenate([layer_columns[i] for i in subset])
+        if np.all(np.diff(used) == 1):
+            values = features[:, used[0] : used[-1] + 1]
+        else:
+            shape = (len(used), len(labels))
+            if scratch is None or scratch.shape != shape:
+                scratch = np.empty(shape, dtype=np.float32)
+            # Gather columns into a reusable buffer; validation proved
+            # every index is in range, so take need not buffer for errors.
+            np.take(features.T, used, axis=0, out=scratch, mode="clip")
+            values = scratch.T
+        weights = np.bincount(bootstrap, minlength=len(labels)).astype(
+            np.float64
         )
         tree = DecisionTreeClassifier(
             max_features="sqrt", random_state=int(rng.integers(2**31))
-        ).fit(features[np.ix_(bootstrap, used)], labels[bootstrap])
+        ).fit(values, labels, sample_weight=weights, check_input=False)
         structure = tree.tree_
         feature = np.full(structure.node_count, -1, dtype=np.int64)
         split = structure.feature >= 0

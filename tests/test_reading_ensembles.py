@@ -2,6 +2,7 @@
 
 import numpy as np
 from numpy.typing import NDArray
+import pytest
 
 
 def test_pair_folds_hold_out_each_pair_exactly_once() -> None:
@@ -114,3 +115,65 @@ def test_stack_grids_keep_strongest_penalty_at_same_pair_accuracy() -> None:
         )
         assert selected == grid[0]
         assert np.ptp(score(train)) == 0
+
+
+def test_forest_pair_counts_match_duplicate_rows_on_separated_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sklearn.tree import DecisionTreeClassifier
+
+    from tomography.reading import ensembles
+
+    rows = np.column_stack(([-4, 4, -3, 3, -2, 2, -1, 1], np.zeros(8)))
+    pairs = np.arange(8).reshape(-1, 2)
+    labels = np.tile([0, 1], 4)
+    fit = DecisionTreeClassifier.fit
+    seen = []
+
+    def capture_fit(
+        tree: DecisionTreeClassifier,
+        values: np.ndarray,
+        target: np.ndarray,
+        sample_weight: np.ndarray | None = None,
+        check_input: bool = True,
+    ) -> DecisionTreeClassifier:
+        assert values.shape == rows.shape
+        assert values.dtype == np.float32
+        assert values.flags.f_contiguous
+        assert not check_input
+        assert sample_weight is not None
+        np.testing.assert_array_equal(sample_weight[::2], sample_weight[1::2])
+        repeated = np.repeat(np.arange(len(labels)), sample_weight.astype(int))
+        duplicate = DecisionTreeClassifier(
+            max_features="sqrt", random_state=tree.random_state
+        )
+        fit(duplicate, values[repeated], target[repeated])
+        seen.append(duplicate.predict_proba(rows)[:, 1])
+        return fit(tree, values, target, sample_weight, check_input)
+
+    monkeypatch.setattr(DecisionTreeClassifier, "fit", capture_fit)
+    settings = {"m": 1, "n_trees": 5, "seed": 11}
+    first = ensembles.fit_grouped_forest(
+        rows, labels, pairs, ((0, 1),), **settings
+    )
+    np.testing.assert_array_equal(first.score(rows), np.mean(seen, axis=0))
+    second = ensembles.fit_grouped_forest(
+        rows, labels, pairs, ((0, 1),), **settings
+    )
+    np.testing.assert_array_equal(first.score(rows), second.score(rows))
+
+
+def test_forest_rejects_nonfinite_features_before_training() -> None:
+    from tomography.reading import ensembles
+
+    rows = np.array([[0.0], [1.0], [np.nan], [2.0]])
+    with pytest.raises(ValueError, match="finite"):
+        ensembles.fit_grouped_forest(
+            rows,
+            np.array([0, 1, 0, 1]),
+            np.arange(4).reshape(-1, 2),
+            ((0,),),
+            m=1,
+            n_trees=2,
+            seed=3,
+        )
