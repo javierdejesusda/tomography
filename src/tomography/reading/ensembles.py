@@ -4,14 +4,17 @@ from collections.abc import Callable
 from collections.abc import Iterator
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 
 from tomography.reading.metrics import FloatArray
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.metrics import parse_groups
+from tomography.reading.probes import fit_mlp
 
 Indices = NDArray[np.int64]
 Scores = NDArray[np.float64]
@@ -277,3 +280,73 @@ def tune_grouped_forest(
         ),
     )
     return best, fits
+
+
+def fit_mlp_stack(
+    train: Scores, labels: Indices, alpha: float, seed: int
+) -> Callable[[Scores], Scores]:
+    """Fits the single-hidden-layer M2 MLP to standardized layer scores.
+
+    Args:
+        train: Out-of-fold scores, one column per layer.
+        labels: Training labels.
+        alpha: L2 penalty.
+        seed: Seed of the network's initialization.
+
+    Returns:
+        The fitted score function.
+    """
+    fit = fit_mlp(
+        train[None],
+        (1,),
+        labels=labels,
+        hidden_sizes=(16,),
+        alpha=alpha,
+        seed=seed,
+    )
+
+    def score(matrix: Scores) -> Scores:
+        return np.asarray(fit.score(matrix[None])[0], dtype=np.float64)
+
+    return score
+
+
+def tune_stack(
+    method: Literal["lr", "mlp"],
+    train: Scores,
+    labels: Indices,
+    select: Scores,
+    select_labels: Indices,
+    select_pairs: Indices,
+    *,
+    grid: Sequence[float],
+    seed: int,
+) -> tuple[Callable[[Scores], Scores], float]:
+    """Tunes a fitted stack using select pair accuracy.
+
+    Args:
+        method: The logistic or single-hidden-layer aggregator.
+        train: Standardized out-of-fold training scores.
+        labels: Binary training labels.
+        select: Standardized select scores from full-data row fits.
+        select_labels: Binary select labels.
+        select_pairs: Index pairs into the select scores.
+        grid: Penalties listed from strongest to weakest.
+        seed: Network initialization for each MLP candidate.
+
+    Returns:
+        The selected score function and penalty, first on ties.
+    """
+    if method == "lr":
+        fits = [
+            LogisticRegression(C=value, max_iter=1000).fit(train, labels)
+            for value in grid
+        ]
+        scorers: list[Callable[[Scores], Scores]] = [
+            fit.decision_function for fit in fits
+        ]
+    else:
+        scorers = [fit_mlp_stack(train, labels, alpha, seed) for alpha in grid]
+    scores = np.stack([score(select) for score in scorers])
+    best = int(np.argmax(group_accuracy(scores, select_pairs, select_labels)))
+    return scorers[best], grid[best]

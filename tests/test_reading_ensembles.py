@@ -100,3 +100,17 @@ def test_forest_tuning_keeps_smallest_subspace_on_a_tie() -> None:
     )
     assert chosen == 1
     np.testing.assert_array_equal(fits[chosen].score(rows), np.full(8, 0.5))
+
+
+def test_stack_grids_keep_strongest_penalty_at_same_pair_accuracy() -> None:
+    from tomography.reading import ensembles
+
+    train = np.zeros((8, 2))
+    labels = np.tile(np.array([0, 1]), 4)
+    pairs = np.arange(8).reshape(-1, 2)
+    for method, grid in (("lr", (0.01, 1.0)), ("mlp", (0.1, 0.01))):
+        score, selected = ensembles.tune_stack(
+            method, train, labels, train, labels, pairs, grid=grid, seed=42
+        )
+        assert selected == grid[0]
+        assert np.ptp(score(train)) == 0

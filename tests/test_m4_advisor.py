@@ -168,8 +168,8 @@ def setup_run(
     tmp_path: Path, tiny_gpt2: LoadedModel, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[experiment.Config, RunDir, RunDir]:
     monkeypatch.setattr(m2, "read_positions", _fake_positions)
-    monkeypatch.setattr(m2, "load_model", lambda *a, **kw: tiny_gpt2)
-    monkeypatch.setattr(m2, "load_sources", lambda sources: _sources())
+    monkeypatch.setattr(experiment, "load_model", lambda *a, **kw: tiny_gpt2)
+    monkeypatch.setattr(experiment, "load_sources", lambda sources: _sources())
     config = experiment.Config(
         model="tiny",
         tasks=("sentiment", "utility"),
@@ -207,6 +207,7 @@ def _table(run_dir: RunDir, name: str = "table") -> list[dict[str, Any]]:
 
 def test_run_gates_before_writing_experimental_rows(
     setup_run: tuple[experiment.Config, RunDir, RunDir],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config, baseline, run_dir = setup_run
     stored = baseline.read_json("table")
@@ -218,6 +219,11 @@ def test_run_gates_before_writing_experimental_rows(
     )
     row[index] += 2e-6
     baseline.write_json("table", stored)
+
+    def early_analysis(*args: object) -> None:
+        pytest.fail("draw effects were analyzed before the equality gate")
+
+    monkeypatch.setattr(experiment, "_draw_delta", early_analysis)
     with pytest.raises(ValueError, match="M2 equality failed"):
         experiment.run(config, run_dir)
     assert not (run_dir.path / "table.json").exists()
@@ -242,3 +248,46 @@ def test_run_writes_selected_baselines_ties_and_stored_controls(
         0 <= row["different_share"] <= row["tie_share"] <= 1 for row in ties
     )
     assert all(len(row["draw_ties"]) == 2 for row in ties)
+
+
+def test_run_reader_protocol_at_each_readout(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+) -> None:
+    config, _, run_dir = setup_run
+    experiment.run(config, run_dir)
+    table = _table(run_dir)
+    shuffled = {
+        "equal_mean",
+        "weighted_mean",
+        "stack_lr",
+        "stack_mlp",
+        "stack_forest",
+        "vector_forest",
+    }
+    originals = {"pca16_forest", "pca64_forest", "concat_lr", "bridge_forest"}
+    for scorer in shuffled | originals:
+        rows = [row for row in table if row["scorer"] == scorer]
+        expected = {"reader", "shuffled"} if scorer in shuffled else {"reader"}
+        assert {row["readout"] for row in rows} == {"last", "max", "mean"}, (
+            scorer
+        )
+        assert {row["series"] for row in rows} == expected, scorer
+        if scorer in ("vector_forest", "pca16_forest", "pca64_forest"):
+            assert {row["layer_rule"] for row in rows} == {"default", "tuned"}
+        assert all(0 <= row["auroc"] <= 1 for row in rows), scorer
+
+
+def test_run_reports_mlp_seed_spread_in_a_two_draw_design(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+) -> None:
+    config, _, run_dir = setup_run
+    experiment.run(dataclasses.replace(config, pilot_draws=1), run_dir)
+    rows = run_dir.read_json("fit_diagnostics")["mlp_pilot"]
+    assert rows
+    assert {row["draw"] for row in rows} == {0}
+    assert all(len(areas) == 5 for row in rows for areas in row["aurocs"])
+    assert {
+        row["n_seeds"]
+        for row in _table(run_dir)
+        if row["scorer"] == "stack_mlp"
+    } == {1}
