@@ -36,10 +36,16 @@ from tomography.reading.ensembles import tune_grouped_forest
 from tomography.reading.ensembles import tune_stack
 from tomography.reading.ensembles import weighted_mean
 from tomography.reading.metrics import auroc
+from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.reader import RepReader
 from tomography.reading.stats import LayerChoice
 from tomography.reading.stats import best_validation_layer
+from tomography.reading.stats import delong_test
+from tomography.reading.stats import holm_correction
+from tomography.reading.stats import mcnemar_test
+from tomography.reading.stats import paired_accuracy_diff
+from tomography.reading.stats import paired_auroc_diff
 
 Rows = NDArray[np.float32]
 Scores = NDArray[np.float64]
@@ -540,6 +546,7 @@ def run(config: Config, run_dir: RunDir) -> None:
     table = _stored_controls(stored["rows"])
     ties = []
     fit_diagnostics = []
+    comparisons = []
     mlp_pilot = []
     for source in prepared:
         entries = [
@@ -554,6 +561,9 @@ def run(config: Config, run_dir: RunDir) -> None:
         mlp_pilot.extend(pilot)
         table.extend(_write_entries(config, run_dir, source, entries))
         ties.extend(_tie_rows(source, take))
+        comparisons.extend(
+            _comparison_rows(config, source.task, source.splits, entries)
+        )
 
     summary_tasks = [p.task.name for p in prepared]
     summary_conditions = {p.task.name: p.splits.conditions for p in prepared}
@@ -577,6 +587,7 @@ def run(config: Config, run_dir: RunDir) -> None:
         },
     )
     run_dir.write_json("layer_ties", ties)
+    run_dir.write_json("comparisons", comparisons)
     run_dir.write_json(
         "summary",
         {
@@ -586,6 +597,10 @@ def run(config: Config, run_dir: RunDir) -> None:
             "n_eval_pairs": n_eval_pairs,
             "m2_reference": str(baseline_path),
             "m2_equality_passed": True,
+            "comparison_counts": _comparison_counts(comparisons),
+            "truth_note": (
+                "Descriptive; gaps below about 0.06 are not detectable."
+            ),
             "n_draws": take,
         },
     )
@@ -1026,3 +1041,214 @@ def _additional_choices(
         choices["bridge_forest", "fixed"] = forest["fixed"]
         info["bridge_m"] = sizes["fixed"]
     return info
+
+
+BRIDGE_FAMILY = frozenset({"bridge_forest", "literal_forest", "length_control"})
+EQUAL_MEAN = "equal_mean"
+
+
+def _report_clusters(
+    task: ReadingTask, items: StimulusSet, texts: Mapping[str, str]
+) -> tuple[Indices, Indices]:
+    rows = m2._clusters(items.groups, len(items.labels))
+    pairs = np.arange(len(items.groups))
+    if task.name != "utility":
+        return rows, pairs
+    parent = np.arange(len(items.groups) + len(items.labels))
+
+    def root(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = int(parent[index])
+        return index
+
+    by_text: dict[str, int] = {}
+    for i, uid in enumerate(items.uids):
+        text = texts[uid]
+        current = root(int(rows[i]))
+        other = root(by_text.setdefault(text, current))
+        parent[max(current, other)] = min(current, other)
+    return (
+        np.array([root(int(index)) for index in rows]),
+        np.array([root(int(index)) for index in pairs]),
+    )
+
+
+def _draw_summary(config: Config, prefix: str, diff: Scores) -> dict[str, Any]:
+    return {
+        f"{prefix}_draw_diff": diff.tolist(),
+        f"{prefix}_draw_mean": float(diff.mean()),
+        f"{prefix}_draw_ci": bootstrap_ci(
+            diff, n_boot=config.n_boot, seed=config.seed
+        ),
+        f"{prefix}_draw_wins": int(np.count_nonzero(diff > 0)),
+    }
+
+
+def _comparison_row(
+    config: Config,
+    task: ReadingTask,
+    condition: str,
+    index: int,
+    items: StimulusSet,
+    reader: m2._Entry,
+    baseline: m2._Entry,
+    family: str,
+    size: int,
+) -> dict[str, Any]:
+    area, pair = _draw_delta(reader.choices, baseline.choices, index, items)
+    return {
+        "task": task.name,
+        "condition": condition,
+        "readout": reader.cell.readout,
+        "reader": reader.cell.name,
+        "baseline": baseline.cell.name,
+        "family": family,
+        "family_size": size,
+        "descriptive": task.name == "truth" or size == 0,
+        **_draw_summary(config, "auroc", area),
+        **_draw_summary(config, "pair", pair),
+    }
+
+
+def _comparison_rows(
+    config: Config,
+    task: ReadingTask,
+    splits: m2._Splits,
+    entries: Sequence[m2._Entry],
+) -> list[dict[str, Any]]:
+    """Pairs draw metrics and tests draw-ensemble scores within each family.
+
+    Args:
+        config: Resampling settings and checkpoint.
+        task: Evaluated task.
+        splits: Labels, groups and raw scenario texts in report order.
+        entries: Baselines and new readers with matched draw order.
+
+    Returns:
+        Descriptive matched-draw effects and secondary family-adjusted
+        comparisons. Utility also includes scenario-cluster intervals.
+    """
+    readers = {
+        entry.cell: entry for entry in entries if entry.series == "reader"
+    }
+    bases = {
+        cell
+        for cell in readers
+        if cell.scorer == EQUAL_MEAN
+        or (cell.scorer in BASE_SCORERS and cell.layer_rule in BASE_RULES)
+    }
+    members = sorted(readers.keys() - bases)
+    ensembles = {
+        cell: m2._ensemble(entry.choices) for cell, entry in readers.items()
+    }
+    output = []
+    for j, (condition, items) in enumerate(splits.report_items.items()):
+        clusters, pair_clusters = _report_clusters(task, items, splits.texts)
+        wins = {
+            cell: m2._group_wins(scores[j], items)
+            for cell, scores in ensembles.items()
+        }
+        for base in sorted(bases):
+            families = {
+                base.readout: [
+                    cell
+                    for cell in members
+                    if cell.readout == base.readout
+                    and cell.scorer not in BRIDGE_FAMILY
+                ]
+            }
+            if base.readout == "last":
+                families["bridge"] = [
+                    cell for cell in members if cell.scorer in BRIDGE_FAMILY
+                ]
+            for tag, family in families.items():
+                name = (
+                    f"{config.model}/{task.name}/{condition}/{tag}/{base.name}"
+                )
+                block = []
+                for cell in family:
+                    row = _comparison_row(
+                        config,
+                        task,
+                        condition,
+                        j,
+                        items,
+                        readers[cell],
+                        readers[base],
+                        name,
+                        len(family),
+                    )
+                    score_a, score_b = ensembles[cell][j], ensembles[base][j]
+                    delong = delong_test(score_a, score_b, items.labels)
+                    mcnemar = mcnemar_test(wins[cell] == 1.0, wins[base] == 1.0)
+                    row.update(
+                        delong_p=delong.p_value,
+                        mcnemar_p=mcnemar.p_value,
+                        a_only=mcnemar.a_only,
+                        b_only=mcnemar.b_only,
+                    )
+                    if task.name == "utility":
+                        row["auroc_cluster"] = paired_auroc_diff(
+                            score_a,
+                            score_b,
+                            items.labels,
+                            clusters,
+                            n_boot=config.n_boot,
+                            seed=config.seed,
+                        )._asdict()
+                        row["pair_cluster"] = paired_accuracy_diff(
+                            wins[cell],
+                            wins[base],
+                            pair_clusters,
+                            n_boot=config.n_boot,
+                            seed=config.seed,
+                        )._asdict()
+                    block.append(row)
+                if block:
+                    for field in ("delong", "mcnemar"):
+                        adjusted = holm_correction(
+                            np.array([row[f"{field}_p"] for row in block])
+                        ).adjusted
+                        for row, value in zip(block, adjusted, strict=True):
+                            row[f"{field}_holm"] = float(value)
+                    output.extend(block)
+            equal = m2.Cell(EQUAL_MEAN, base.readout, "all")
+            if base.scorer != EQUAL_MEAN and equal in readers:
+                output.append(
+                    _comparison_row(
+                        config,
+                        task,
+                        condition,
+                        j,
+                        items,
+                        readers[equal],
+                        readers[base],
+                        "descriptive",
+                        0,
+                    )
+                )
+    return output
+
+
+def _comparison_counts(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        subset: {
+            "comparisons": len(kept),
+            "higher_auroc": sum(row["auroc_draw_mean"] > 0 for row in kept),
+            "higher_pair_accuracy": sum(
+                row["pair_draw_mean"] > 0 for row in kept
+            ),
+        }
+        for subset, kept in (
+            ("with_truth", [r for r in rows if r["family_size"] > 0]),
+            (
+                "without_truth",
+                [
+                    r
+                    for r in rows
+                    if r["family_size"] > 0 and r["task"] != "truth"
+                ],
+            ),
+        )
+    }

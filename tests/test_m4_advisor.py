@@ -291,3 +291,77 @@ def test_run_reports_mlp_seed_spread_in_a_two_draw_design(
         for row in _table(run_dir)
         if row["scorer"] == "stack_mlp"
     } == {1}
+
+
+def _items() -> StimulusSet:
+    return StimulusSet(
+        texts=("a", "b", "c", "d", "e", "f"),
+        response_spans=(None,) * 6,
+        concept_spans=(None,) * 6,
+        labels=np.tile(np.array([0, 1]), 3),
+        pairs=np.arange(6).reshape(3, 2),
+        groups=np.arange(6).reshape(3, 2),
+        uids=("a", "b", "c", "d", "e", "f"),
+    )
+
+
+def test_comparisons_keep_equal_mean_out_of_families() -> None:
+    items = _items()
+    splits = m2._Splits([], items, {"original": items}, {}, {}, {}, {}, None)
+
+    def entry(
+        scorer: str,
+        readout: str,
+        rule: str,
+        draws: tuple[float, float],
+    ) -> m2._Entry:
+        return m2._Entry(
+            m2.Cell(scorer, readout, rule),
+            "reader",
+            [
+                m2._Choice(
+                    (1,),
+                    items.labels.astype(float),
+                    (sign * items.labels[None, :]).astype(float),
+                    items.labels,
+                )
+                for sign in draws
+            ],
+        )
+
+    entries = [
+        entry("logistic", "last", "best", (1, -1)),
+        entry("equal_mean", "last", "all", (1, 1)),
+        entry("stack_lr", "last", "all", (1, 1)),
+        entry("concat_lr", "last", "all", (-1, -1)),
+        entry("bridge_forest", "mean", "fixed", (1, 1)),
+    ]
+    rows = experiment._comparison_rows(
+        experiment.Config(n_boot=8), m2._task("sentiment"), splits, entries
+    )
+    baseline = [row for row in rows if row["baseline"] == "logistic/last/best"]
+    equal = next(r for r in baseline if r["reader"] == "equal_mean/last/all")
+    stack = next(r for r in baseline if r["reader"] == "stack_lr/last/all")
+    bridge = next(
+        r for r in baseline if r["reader"] == "bridge_forest/mean/fixed"
+    )
+    assert equal["family_size"] == 0
+    assert "delong_holm" not in equal
+    assert stack["family_size"] == 2
+    assert stack["auroc_draw_diff"] == [0, 1]
+    assert stack["pair_draw_diff"] == [0, 1]
+    assert stack["auroc_draw_mean"] == 0.5
+    assert stack["auroc_draw_wins"] == 1
+    assert bridge["family_size"] == 1
+    assert bridge["family"] != stack["family"]
+    assert any(row["baseline"] == "equal_mean/last/all" for row in rows)
+
+
+def test_utility_clusters_join_pairs_through_shared_scenarios() -> None:
+    items = _items()
+    texts = dict(zip(items.uids, ("A", "B", "B", "C", "D", "E"), strict=True))
+    row_clusters, pair_clusters = experiment._report_clusters(
+        m2._task("utility"), items, texts
+    )
+    np.testing.assert_array_equal(row_clusters, [0, 0, 0, 0, 2, 2])
+    np.testing.assert_array_equal(pair_clusters, [0, 0, 2])
