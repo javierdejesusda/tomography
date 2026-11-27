@@ -388,3 +388,12 @@ def test_best_layer_breaks_exact_ties_by_input_order() -> None:
     assert best_layer(scores, (2, 3, 8)) == 2
     assert best_layer(scores, (2, 3, 8), tie_break="first") == 2
     assert best_layer(scores, (2, 3, 8), tie_break="last") == 8
+
+
+def test_best_layer_rejects_an_unknown_tie_break() -> None:
+    with pytest.raises(ValueError, match="sideways"):
+        best_layer(np.array([0.75, 0.75]), (1, 2), tie_break="sideways")
+
+
+def test_best_layer_docstring_names_the_accuracy_argument() -> None:
+    assert "each entry of `acc`" in (best_layer.__doc__ or "")

@@ -209,7 +209,7 @@ def best_layer(
 
     Args:
         acc: Accuracy per layer, shape (K,).
-        layers: The layer index of each entry of cc.
+        layers: The layer index of each entry of `acc`.
         tie_break: Which exact maximum to keep, in input order.
 
     Returns:
@@ -217,8 +217,10 @@ def best_layer(
 
     Raises:
         ValueError: If `acc` is not a non-empty vector without NaN, or its
-            length differs from `layers`.
+            length differs from `layers`, or `tie_break` is unknown.
     """
+    if tie_break not in ("first", "last"):
+        raise ValueError(f"unknown tie_break: {tie_break!r}")
     values = np.asarray(acc, dtype=np.float64)
     if values.ndim != 1 or values.shape[0] == 0:
         raise ValueError(f"acc must be a non-empty vector, got {values.shape}")

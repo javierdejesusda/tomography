@@ -774,3 +774,11 @@ def test_best_validation_layer_last_keeps_the_selected_raw_scores() -> None:
     assert choice.layers == (4,)
     np.testing.assert_array_equal(choice.val_scores, [2.0, 4.0])
     np.testing.assert_array_equal(choice.test_scores, [6.0, 1.0])
+
+
+def test_best_validation_layer_rejects_an_unknown_tie_break() -> None:
+    scores = np.array([[0.0, 1.0], [0.0, 2.0]])
+    with pytest.raises(ValueError, match="sideways"):
+        best_validation_layer(
+            np.array([0.5, 0.5]), (1, 2), scores, scores, tie_break="sideways"
+        )

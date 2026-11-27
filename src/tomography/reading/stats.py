@@ -536,7 +536,7 @@ def best_validation_layer(
     Raises:
         ValueError: If the shapes disagree, a split has no stimulus,
             `val_metric` holds NaN, a layer repeats, or a score is not
-            finite.
+            finite, or `tie_break` is unknown.
     """
     metric = _layer_metric(val_metric, layers)
     val = _per_layer(val_scores, "val_scores", len(layers))
@@ -600,13 +600,23 @@ def top_k_layers(
     # 0, so constancy is tested on the range.
     if (np.ptp(picked, axis=1) == 0.0).any():
         raise ValueError("a chosen layer has constant validation scores")
-    mean = picked.mean(axis=1, keepdims=True)
-    std = picked.std(axis=1, keepdims=True)
+    standardized_val, standardized_test = _standardize_layer_scores(
+        picked, test[chosen]
+    )
     return LayerChoice(
         tuple(int(layers[i]) for i in chosen),
-        ((picked - mean) / std).mean(axis=0),
-        ((test[chosen] - mean) / std).mean(axis=0),
+        standardized_val.mean(axis=0),
+        standardized_test.mean(axis=0),
     )
+
+
+def _standardize_layer_scores(
+    val: NDArray[np.float64], test: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Scales each nonconstant layer with its select mean and deviation."""
+    mean = val.mean(axis=1, keepdims=True)
+    std = val.std(axis=1, keepdims=True)
+    return (val - mean) / std, (test - mean) / std
 
 
 def _balanced_threshold(
