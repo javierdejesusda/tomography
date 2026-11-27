@@ -10,6 +10,7 @@ import json
 import math
 from pathlib import Path
 from typing import Any
+from typing import NamedTuple
 from typing import cast
 
 import numpy as np
@@ -22,10 +23,19 @@ from tomography.datasets.stimulus import StimulusSet
 from tomography.experiments import m2_readers as m2
 from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
+from tomography.experiments.p2_positions import misleading_template
+from tomography.experiments.p2_positions import with_decoys
+from tomography.experiments.sweep import chat_format_for
 from tomography.experiments.sweep import shuffle_within_groups
 from tomography.experiments.variants import ReadingTask
+from tomography.experiments.variants import TaskSplits
+from tomography.experiments.variants import Variant
+from tomography.experiments.variants import eval_seed
 from tomography.experiments.variants import load_sources
 from tomography.experiments.variants import target_of
+from tomography.experiments.variants import task_set
+from tomography.experiments.variants import task_splits
+from tomography.experiments.variants import template_variants
 from tomography.model import LoadedModel
 from tomography.model import load_model
 from tomography.reading.ensembles import GroupedForest
@@ -36,6 +46,7 @@ from tomography.reading.ensembles import tune_grouped_forest
 from tomography.reading.ensembles import tune_stack
 from tomography.reading.ensembles import weighted_mean
 from tomography.reading.metrics import auroc
+from tomography.reading.metrics import best_layer
 from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.reader import RepReader
@@ -520,6 +531,8 @@ def run(config: Config, run_dir: RunDir) -> None:
         raise ValueError("n_folds must be between 2 and n_pairs")
     if config.n_trees < 1 or config.mlp_repeats not in (1, 5):
         raise ValueError("M4 needs n_trees >= 1 and mlp_repeats of 1 or 5")
+    if not 1 <= config.matched_pairs_per_task <= config.n_pairs:
+        raise ValueError("matched_pairs_per_task must be within n_pairs")
     baseline_path = find_m2_run(config, Path(config.m2_root))
     stored = cast(dict[str, Any], RunDir.open(baseline_path).read_json("table"))
     if stored["columns"] != list(m2.COLUMNS):
@@ -548,7 +561,7 @@ def run(config: Config, run_dir: RunDir) -> None:
     fit_diagnostics = []
     comparisons = []
     mlp_pilot = []
-    for source in prepared:
+    for index, source in enumerate(prepared):
         entries = [
             entry._replace(choices=entry.choices[:take])
             for entry in source.baseline.entries
@@ -564,7 +577,10 @@ def run(config: Config, run_dir: RunDir) -> None:
         comparisons.extend(
             _comparison_rows(config, source.task, source.splits, entries)
         )
-
+        prepared[index] = _cross_cache(source)
+    del source
+    run_dir.write_json("cross_task", _cross_task_rows(config, prepared, take))
+    have_truth = any(p.task.name == "truth_polarity" for p in prepared)
     summary_tasks = [p.task.name for p in prepared]
     summary_conditions = {p.task.name: p.splits.conditions for p in prepared}
     summary_skips = {p.task.name: p.skipped for p in prepared}
@@ -575,6 +591,11 @@ def run(config: Config, run_dir: RunDir) -> None:
         }
         for p in prepared
     }
+    del prepared
+    if have_truth:
+        run_dir.write_json(
+            "truth_holdouts", _lodo_rows(config, loaded, examples, take)
+        )
     run_dir.write_json("table", {"columns": list(m2.COLUMNS), "rows": table})
     run_dir.write_json(
         "fit_diagnostics",
@@ -601,6 +622,7 @@ def run(config: Config, run_dir: RunDir) -> None:
             "truth_note": (
                 "Descriptive; gaps below about 0.06 are not detectable."
             ),
+            "negation_split_caveat": NEGATION_CAVEAT if have_truth else None,
             "n_draws": take,
         },
     )
@@ -1252,3 +1274,397 @@ def _comparison_counts(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
             ),
         )
     }
+
+
+class _ScoredDraw(NamedTuple):
+    choice: m2._Choice
+    penalty: float
+
+
+def _score_best(
+    tuned: _TunedLR,
+    report: Sequence[Rows],
+    select_labels: Indices,
+    *,
+    target_select: _LabeledRows | None = None,
+) -> _ScoredDraw:
+    layer = best_layer(tuned.select_accuracy, tuned.reader.layers)
+    at = tuned.reader.layers.index(layer)
+    one = slice(at, at + 1)
+    reader = dataclasses.replace(
+        tuned.reader,
+        layers=(layer,),
+        directions=tuned.reader.directions[one],
+        means=tuned.reader.means[one],
+        signs=tuned.reader.signs[one],
+    )
+    val = tuned.select_scores[at]
+    if target_select is not None:
+        val = reader.score(target_select.data[one])[0].astype(np.float64)
+        select_labels = target_select.labels
+    out = np.stack([reader.score(rows[one])[0] for rows in report])
+    return _ScoredDraw(
+        m2._Choice((layer,), val, out.astype(np.float64), select_labels),
+        tuned.penalties[at],
+    )
+
+
+def _pool_rows(sets: Sequence[_LabeledRows], pairs_each: int) -> _LabeledRows:
+    parts = [
+        rows
+        if len(rows.pairs) == pairs_each
+        else _take_pairs(rows, rows.pairs[:pairs_each])
+        for rows in sets
+    ]
+    offsets = np.cumsum([0, *(len(rows.labels) for rows in parts[:-1])])
+    pairs = np.concatenate(
+        [
+            rows.pairs + offset
+            for rows, offset in zip(parts, offsets, strict=True)
+        ]
+    )
+    return _LabeledRows(
+        np.concatenate([rows.data for rows in parts], axis=1),
+        parts[0].layers,
+        np.concatenate([rows.labels for rows in parts]),
+        pairs,
+        pairs,
+    )
+
+
+def _cross_metrics(
+    config: Config,
+    task: ReadingTask,
+    splits: m2._Splits,
+    readout: m2.Readout,
+    arm: str,
+    draws: Sequence[_ScoredDraw],
+    metadata: Mapping[str, Any],
+    reference: Sequence[m2._Choice] | None = None,
+) -> list[dict[str, Any]]:
+    choices, penalties = zip(*draws, strict=True)
+    entry = m2._Entry(
+        m2.Cell("logistic", readout, "best"), "reader", list(choices)
+    )
+    rows = m2._metric_rows(config, task, splits, entry)
+    results = []
+    for i, row in enumerate(rows):
+        values = dict(zip(m2.COLUMNS, row, strict=True))
+        values.update(metadata, arm=arm, penalties=list(penalties))
+        if reference is not None:
+            items = splits.report_items[values["condition"]]
+            area, pair = _draw_delta(choices, reference, i, items)
+            values.update(_draw_summary(config, "auroc", area))
+            values.update(_draw_summary(config, "pair", pair))
+        results.append(values)
+    return results
+
+
+def _cross_task_rows(
+    config: Config,
+    prepared: Sequence[_Prepared],
+    take: int,
+) -> list[dict[str, Any]]:
+    output = []
+    for readout in CROSS_READOUTS:
+        transfers: dict[tuple[int, int], list[_ScoredDraw]] = {}
+        pooled: dict[tuple[str, str, int], list[_ScoredDraw]] = {}
+        for i in range(take):
+            inputs = [_draw_rows(s.splits, readout, i) for s in prepared]
+            training, validation, reports = zip(*inputs, strict=True)
+            for origin, source in enumerate(prepared):
+                tuned = source.baseline.logistic[readout][i]
+                for target, report in enumerate(reports):
+                    score = _score_best(
+                        tuned, report, validation[origin].labels
+                    )
+                    transfers.setdefault((origin, target), []).append(score)
+            if len(prepared) < 2:
+                continue
+            for arm, budget in (
+                ("pooled_all", config.n_pairs),
+                ("pooled_matched", config.matched_pairs_per_task),
+            ):
+                train = _pool_rows(training, budget)
+                fits = _tuned_lr(
+                    config,
+                    train,
+                    validation,
+                    seed=derive_seed(config.seed, "pool", arm, readout, i),
+                )
+                per_task, shared = fits[:-1], fits[-1]
+                for target, report in enumerate(reports):
+                    select = validation[target]
+                    for method, tuned in (
+                        ("shared", shared),
+                        ("per_task", per_task[target]),
+                    ):
+                        score = _score_best(
+                            tuned, report, select.labels, target_select=select
+                        )
+                        pooled.setdefault((arm, method, target), []).append(
+                            score
+                        )
+        for (origin, target), draws in transfers.items():
+            evaluated = prepared[target]
+            reference = [d.choice for d in transfers[target, target]]
+            output.extend(
+                _cross_metrics(
+                    config,
+                    evaluated.task,
+                    evaluated.splits,
+                    readout,
+                    "per_task" if origin == target else "transfer",
+                    draws,
+                    {
+                        "train_task": prepared[origin].task.name,
+                        "train_pairs": config.n_pairs,
+                        "tuning": "source",
+                    },
+                    reference,
+                )
+            )
+        for (arm, method, target), draws in pooled.items():
+            evaluated = prepared[target]
+            per_task_budget = (
+                config.n_pairs
+                if arm == "pooled_all"
+                else config.matched_pairs_per_task
+            )
+            output.extend(
+                _cross_metrics(
+                    config,
+                    evaluated.task,
+                    evaluated.splits,
+                    readout,
+                    arm,
+                    draws,
+                    {
+                        "train_pairs": len(prepared) * per_task_budget,
+                        "tuning": method,
+                        "train_tasks": [s.task.name for s in prepared],
+                    },
+                    [d.choice for d in transfers[target, target]],
+                )
+            )
+    return output
+
+
+TRUTH_SUBSETS = m2.POLARITY_TASKS["truth_polarity"]
+TRUTH_HOLDOUTS = (
+    *(("subset", subset, (subset,)) for subset in TRUTH_SUBSETS),
+    ("topic", "cities", ("cities", "neg_cities")),
+    ("topic", "spanish_translation", ("sp_en_trans", "neg_sp_en_trans")),
+    ("polarity", "affirmative", ("cities", "sp_en_trans")),
+    ("polarity", "negated", ("neg_cities", "neg_sp_en_trans")),
+)
+NEGATION_CAVEAT = (
+    "A statement and its negation have independent subset-specific IDs "
+    "and can land in different splits. Held-out subsets, topics and "
+    "polarities do not guarantee held-out facts."
+)
+
+
+def _scope_examples(
+    examples: Sequence[Example],
+    subsets: Sequence[str],
+) -> list[Example]:
+    return [
+        example for example in examples if example.meta.get("subset") in subsets
+    ]
+
+
+def _truth_fits(
+    config: Config,
+    loaded: LoadedModel,
+    task: ReadingTask,
+    paper: Variant,
+    pool: TaskSplits,
+    scope: Sequence[str],
+    take: int,
+) -> tuple[dict[m2.Readout, list[_TunedLR]], Indices]:
+    select = task_set(
+        task,
+        paper,
+        _scope_examples(pool.select, scope),
+        n_pairs=None,
+        seed=eval_seed(task, "select", config.seed),
+    )
+    positions = tuple(m2.POSITION_OF[r] for r in CROSS_READOUTS)
+    val = m2.read_positions(loaded, select, positions, config)
+    fitted: dict[m2.Readout, list[_TunedLR]] = {r: [] for r in CROSS_READOUTS}
+    rows = _scope_examples(pool.train, scope)
+    for i in range(take):
+        items = task_set(
+            task,
+            paper,
+            rows,
+            n_pairs=config.n_pairs,
+            seed=derive_seed(config.seed, "train", i),
+        )
+        train = m2.read_positions(loaded, items, positions, config)
+        for readout, position in zip(CROSS_READOUTS, positions, strict=True):
+            seed = derive_seed(
+                config.seed, "fit", task.name, "logistic", readout, i
+            )
+            fitted[readout].append(
+                _tuned_lr(
+                    config,
+                    _labeled(
+                        train[position].data, train[position].layers, items
+                    ),
+                    [
+                        _labeled(
+                            val[position].data, val[position].layers, select
+                        )
+                    ],
+                    seed=seed,
+                )[0]
+            )
+    return fitted, select.labels
+
+
+def _held_reports(
+    config: Config,
+    task: ReadingTask,
+    paper: Variant,
+    shifts: Sequence[Variant],
+    pool: Sequence[Example],
+) -> dict[str, StimulusSet]:
+    biased = dataclasses.replace(
+        paper,
+        name="misleading",
+        template=misleading_template(task.template, task.noun),
+    )
+    cases = [("original", paper, pool)]
+    cases.extend(
+        (decoy, biased, with_decoys(pool, decoy, seed=config.seed))
+        for decoy in config.decoys
+    )
+    cases.extend(
+        (variant.name, variant, pool) for variant in shifts if variant.evaluable
+    )
+    return {
+        name: task_set(
+            task,
+            variant,
+            rows,
+            n_pairs=None,
+            seed=eval_seed(task, "report", config.seed),
+        )
+        for name, variant, rows in cases
+    }
+
+
+def _lodo_rows(
+    config: Config,
+    loaded: LoadedModel,
+    examples: Mapping[str, Sequence[Example]],
+    take: int,
+) -> list[dict[str, Any]]:
+    task = m2._task("truth_polarity")
+    pool = task_splits(
+        task, m2._task_examples(task.name, examples), seed=config.seed
+    )
+    variants, _ = template_variants(
+        task, chat_format_for(loaded), kinds=("paper", *config.shifts)
+    )
+    paper, *shifts = variants
+    fits = {}
+    output = []
+    positions = tuple(m2.POSITION_OF[r] for r in CROSS_READOUTS)
+    for kind, name, held in TRUTH_HOLDOUTS:
+        report = _held_reports(
+            config, task, paper, shifts, _scope_examples(pool.report, held)
+        )
+        original = report["original"]
+        splits = m2._Splits([], original, report, {}, {}, {}, {}, None)
+        other = tuple(subset for subset in TRUTH_SUBSETS if subset not in held)
+        results: dict[tuple[str, m2.Readout], list[_ScoredDraw]] = {}
+        base_arms = (
+            ("held_out", other),
+            ("all_subsets", TRUTH_SUBSETS),
+            ("within_held", held),
+        )
+        for _, scope in base_arms:
+            if scope not in fits:
+                fits[scope] = _truth_fits(
+                    config, loaded, task, paper, pool, scope, take
+                )
+        for items in report.values():
+            activations = m2.read_positions(loaded, items, positions, config)
+            for readout, position in zip(
+                CROSS_READOUTS, positions, strict=True
+            ):
+                for arm, scope in base_arms:
+                    models, labels = fits[scope]
+                    condition = [
+                        _score_best(fit, [activations[position].data], labels)
+                        for fit in models[readout]
+                    ]
+                    key = (arm, readout)
+                    if key not in results:
+                        results[key] = condition
+                    else:
+                        results[key] = [
+                            _ScoredDraw(
+                                dataclasses.replace(
+                                    current.choice,
+                                    report=np.concatenate(
+                                        [
+                                            current.choice.report,
+                                            score.choice.report,
+                                        ]
+                                    ),
+                                ),
+                                current.penalty,
+                            )
+                            for current, score in zip(
+                                results[key], condition, strict=True
+                            )
+                        ]
+        for (arm, readout), scores in results.items():
+            scope = dict(base_arms)[arm]
+            output.extend(
+                _cross_metrics(
+                    config,
+                    task,
+                    splits,
+                    readout,
+                    arm,
+                    scores,
+                    {
+                        "holdout_kind": kind,
+                        "holdout": name,
+                        "held_subsets": held,
+                        "train_subsets": scope,
+                        "train_pairs": config.n_pairs,
+                        "report_pairs": len(original.groups),
+                    },
+                    [d.choice for d in results["within_held", readout]],
+                )
+            )
+    return output
+
+
+def _cross_cache(source: _Prepared) -> _Prepared:
+    positions = tuple(m2.POSITION_OF[r] for r in CROSS_READOUTS)
+    splits = source.splits
+    return dataclasses.replace(
+        source,
+        splits=dataclasses.replace(
+            splits,
+            train={position: splits.train[position] for position in positions},
+            select={
+                position: splits.select[position] for position in positions
+            },
+            report={
+                position: splits.report[position] for position in positions
+            },
+        ),
+        baseline=_Baseline(
+            [],
+            {r: source.baseline.logistic[r] for r in CROSS_READOUTS},
+            {},
+        ),
+    )

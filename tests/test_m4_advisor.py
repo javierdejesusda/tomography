@@ -365,3 +365,121 @@ def test_utility_clusters_join_pairs_through_shared_scenarios() -> None:
     )
     np.testing.assert_array_equal(row_clusters, [0, 0, 0, 0, 2, 2])
     np.testing.assert_array_equal(pair_clusters, [0, 0, 2])
+
+
+def test_run_cross_task_arms_share_only_shared_layer_and_budget(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+) -> None:
+    config, _, run_dir = setup_run
+    experiment.run(config, run_dir)
+    rows = run_dir.read_json("cross_task")
+    assert {row["readout"] for row in rows} == {"last", "max"}
+    assert {row["arm"] for row in rows} == {
+        "transfer",
+        "per_task",
+        "pooled_all",
+        "pooled_matched",
+    }
+    pooled = [r for r in rows if r["arm"].startswith("pooled")]
+    assert {r["train_pairs"] for r in pooled if r["arm"] == "pooled_all"} == {8}
+    assert {
+        r["train_pairs"] for r in pooled if r["arm"] == "pooled_matched"
+    } == {4}
+    assert {r["tuning"] for r in pooled} == {"shared", "per_task"}
+    shared = [r for r in pooled if r["tuning"] == "shared"]
+    for row in shared:
+        counterpart = next(
+            r
+            for r in shared
+            if r["task"] != row["task"]
+            and all(
+                r[key] == row[key] for key in ("arm", "readout", "condition")
+            )
+        )
+        assert row["layers"] == counterpart["layers"]
+        assert row["penalties"] == counterpart["penalties"]
+    assert all(
+        r["auroc_draw_diff"] == [0.0, 0.0]
+        for r in rows
+        if r["arm"] == "per_task"
+    )
+
+
+def test_transfer_keeps_source_orientation_on_reversed_target() -> None:
+    train_values = np.array([[[-2.0], [2.0], [-1.0], [1.0]]], dtype=np.float32)
+    labels = np.array([0, 1, 0, 1])
+    pairs = np.arange(4).reshape(-1, 2)
+    train = experiment._LabeledRows(train_values, (3,), labels, pairs, pairs)
+    tuned = experiment._tuned_lr(experiment.Config(), train, [train], seed=0)[0]
+    choice, penalty = experiment._score_best(tuned, [(-train_values)], labels)
+    assert choice.layers == (3,)
+    assert penalty == 0.01
+    assert (choice.report[0, pairs[:, 0]] > choice.report[0, pairs[:, 1]]).all()
+
+
+def _truth_rows() -> list[Example]:
+    return [
+        Example(
+            f"{subset}-{split}-{label}-{i}",
+            f"the claim {i} is {label}",
+            label,
+            split,
+            {"subset": subset},
+        )
+        for subset in ("cities", "neg_cities", "sp_en_trans", "neg_sp_en_trans")
+        for split in ("train", "val", "test")
+        for label in (0, 1)
+        for i in range(5)
+    ]
+
+
+def test_holdout_rebuilds_pairs_before_scoring_full_held_split(
+    tiny_gpt2: LoadedModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(m2, "read_positions", _fake_positions)
+    config = experiment.Config(
+        model="tiny",
+        layers=(1, 4),
+        n_seeds=1,
+        n_pairs=3,
+        n_eval_pairs=2,
+        decoys=(),
+        shifts=(),
+        logistic_c=(0.1,),
+        n_boot=5,
+    )
+    rows = experiment._lodo_rows(
+        config, tiny_gpt2, {"geometry_of_truth": _truth_rows()}, 1
+    )
+    assert {r["holdout_kind"] for r in rows} == {"subset", "topic", "polarity"}
+    assert {r["arm"] for r in rows} == {
+        "held_out",
+        "all_subsets",
+        "within_held",
+    }
+    assert {r["readout"] for r in rows} == {"last", "max"}
+    assert {r["train_pairs"] for r in rows} == {3}
+    assert {
+        r["report_pairs"] for r in rows if r["holdout_kind"] == "subset"
+    } == {5}
+    assert {
+        r["report_pairs"] for r in rows if r["holdout_kind"] != "subset"
+    } == {10}
+    assert len(rows) == 8 * 3 * 2
+
+
+def test_geometry_split_can_separate_a_statement_from_its_negation() -> None:
+    from tomography.datasets.geometry_of_truth import parse_geometry_of_truth
+
+    original = "statement,label\n" + "".join(
+        f"city {i} is coastal,1\n" for i in range(32)
+    )
+    negated = "statement,label\n" + "".join(
+        f"city {i} is not coastal,0\n" for i in range(32)
+    )
+    affirmative = parse_geometry_of_truth(original, subset="cities")
+    negative = parse_geometry_of_truth(negated, subset="neg_cities")
+    assert any(
+        a.split != b.split for a, b in zip(affirmative, negative, strict=True)
+    )
