@@ -22,6 +22,7 @@ Rows = NDArray[np.float32]
 Indices = NDArray[np.int64]
 Scores = NDArray[np.float64]
 LITERAL_LAYERS = (4, 8, 12, 16, 20, 24, 28)
+ALIGNMENTS: tuple[Alignment, ...] = ("right", "left")
 
 
 def literal_layers(layers: Sequence[int]) -> tuple[int, ...]:
@@ -29,9 +30,21 @@ def literal_layers(layers: Sequence[int]) -> tuple[int, ...]:
     return tuple(layer for layer in LITERAL_LAYERS if layer in layers)
 
 
+def _check_alignment(alignment: str) -> None:
+    """Raises ValueError unless `alignment` is one of `ALIGNMENTS`."""
+    if alignment not in ALIGNMENTS:
+        raise ValueError(
+            f"alignment must be one of {ALIGNMENTS}, got {alignment!r}"
+        )
+
+
 @dataclass(frozen=True)
 class TokenLayout:
     """A flattened layer-major layout of the training token blocks.
+
+    Right alignment keeps the last `width` tokens of a longer span, so the
+    prompt end shares columns across prompts. Left alignment keeps the first
+    `width` tokens from the stimulus start, so the stimulus start does.
 
     Attributes:
         layers: Retained layers, in feature column order.
@@ -44,6 +57,14 @@ class TokenLayout:
     width: int
     depth: int
     alignment: Alignment
+
+    def __post_init__(self) -> None:
+        """Validates the alignment.
+
+        Raises:
+            ValueError: If the alignment is neither right nor left.
+        """
+        _check_alignment(self.alignment)
 
     @property
     def groups(self) -> tuple[range, ...]:
@@ -62,22 +83,39 @@ class TokenLayout:
     def pack(
         self, rows: Rows, cells: Rows, counts: Indices, lengths: Indices
     ) -> None:
-        """Writes one flat row per prompt, keeping its last width tokens.
+        """Writes one flat row per prompt from its stimulus-to-end cells.
+
+        A span longer than `width` keeps its last tokens under right
+        alignment and its first tokens under left alignment; a shorter one
+        is zero-padded on the other side.
 
         Args:
             rows: Caller-owned float32 output matrix.
             cells: Layer-major, stimulus-major ragged whole-prompt cells.
             counts: Total number of cells per prompt.
             lengths: Number of cells from the stimulus start to the end.
+
+        Raises:
+            ValueError: If a prompt's span is longer than its cells.
         """
         blocks = rows.reshape(-1, len(self.layers), self.width, self.depth)
         blocks.fill(0)
         end = 0
-        for block, count, length in zip(blocks, counts, lengths, strict=True):
+        for prompt, (block, count, length) in enumerate(
+            zip(blocks, counts, lengths, strict=True)
+        ):
             end += int(count)
+            if length > count:
+                raise ValueError(
+                    f"prompt {prompt} has a span of {length} tokens but only"
+                    f" {count} cells"
+                )
             take = min(int(length), self.width)
-            start = self.width - take if self.alignment == "right" else 0
-            block[:, start : start + take] = cells[:, end - take : end]
+            if self.alignment == "right":
+                block[:, self.width - take :] = cells[:, end - take : end]
+            else:
+                first = end - int(length)
+                block[:, :take] = cells[:, first : first + take]
 
 
 def span_lengths(
@@ -231,6 +269,9 @@ def score_splits(
 ) -> list[LiteralDraw]:
     """Fits draw-specific layouts and scores each evaluation batch once.
 
+    Every split's stimulus spans are validated before this function's own
+    forward passes; forward passes the caller ran earlier are not covered.
+
     Args:
         loaded: Causal model for tokenization and forward passes.
         train: Training stimuli for each draw.
@@ -245,7 +286,12 @@ def score_splits(
 
     Returns:
         Matched forest and length scores in draw order.
+
+    Raises:
+        ValueError: If the alignment is unknown, or a stimulus span is
+            missing, invalid or overlaps no token.
     """
+    _check_alignment(alignment)
     # Check all splits before the first literal forward, even the last batch.
     counts = [
         span_lengths(loaded, items, bos=bos, batch_size=batch_size)
@@ -278,6 +324,17 @@ def score_splits(
         del rows
 
     def evaluate(items: stimulus.StimulusSet, lengths: Indices) -> Scores:
+        """Scores one evaluation split with every draw's forest.
+
+        Each batch is read once and packed once per distinct layout.
+
+        Args:
+            items: The evaluation stimuli.
+            lengths: Their stimulus-to-end token counts.
+
+        Returns:
+            Forest probabilities of shape (draws, items).
+        """
         scores = np.empty((len(train), len(items.texts)), dtype=np.float64)
         for span, cells, totals in _cell_batches(
             loaded, items, layers, bos, batch_size
