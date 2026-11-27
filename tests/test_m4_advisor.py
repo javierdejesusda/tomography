@@ -808,6 +808,59 @@ def test_equal_layer_weights_match_the_select_standardized_mean(
     np.testing.assert_allclose(weighted.report, equal.report, rtol=1e-12)
 
 
+def test_weighted_mean_takes_the_equal_mean_fallback_on_constant_layers(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+    tiny_gpt2: LoadedModel,
+) -> None:
+    config, _, _ = setup_run
+    source = experiment._prepare(
+        config, tiny_gpt2, [m2._task("sentiment")], _sources()
+    )[0]
+    train, select, report = experiment._draw_rows(source.splits, "last", 0)
+    base = source.baseline.logistic["last"][0]
+    tuned = dataclasses.replace(
+        base,
+        select_scores=np.ones_like(base.select_scores),
+        select_accuracy=np.linspace(0.6, 0.9, len(train.layers)),
+    )
+    choices, info = experiment._stack_choices(
+        config,
+        train,
+        select,
+        report,
+        tuned,
+        seed=2,
+    )
+    equal = choices["equal_mean", "all"]
+    weighted = choices["weighted_mean", "all"]
+    assert np.isfinite(weighted.select).all()
+    assert np.isfinite(weighted.report).all()
+    assert weighted.layers == equal.layers
+    np.testing.assert_array_equal(weighted.select, equal.select)
+    np.testing.assert_array_equal(weighted.report, equal.report)
+    assert info["weighted_mean_fallback"] is True
+
+
+def test_weighted_mean_fallback_is_off_when_layers_vary(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+    tiny_gpt2: LoadedModel,
+) -> None:
+    config, _, _ = setup_run
+    source = experiment._prepare(
+        config, tiny_gpt2, [m2._task("sentiment")], _sources()
+    )[0]
+    train, select, report = experiment._draw_rows(source.splits, "last", 0)
+    _, info = experiment._stack_choices(
+        config,
+        train,
+        select,
+        report,
+        source.baseline.logistic["last"][0],
+        seed=2,
+    )
+    assert info["weighted_mean_fallback"] is False
+
+
 def test_utility_descriptive_equal_mean_has_cluster_intervals() -> None:
     items = _items()
     texts = dict(zip(items.uids, ("A", "B", "B", "C", "D", "E"), strict=True))

@@ -839,16 +839,26 @@ def _stack_choices(
     )
     choices = {("equal_mean", "all"): _layer_choice(equal, test, select.labels)}
     at = [train.layers.index(layer) for layer in equal.layers]
-    accuracy = tuned.select_accuracy[at]
-    standard_val, standard_report = _standardize_layer_scores(
-        tuned.select_scores[at], flat[at]
+    # With no varying layer, read_top_k falls back to one constant layer,
+    # which has no deviation to standardize; reuse that fallback choice.
+    weighted_fallback = bool(
+        (np.ptp(tuned.select_scores[at], axis=1) == 0.0).any()
     )
-    choices["weighted_mean", "all"] = _matrix_choice(
-        equal.layers,
-        weighted_mean(standard_val.T, accuracy),
-        weighted_mean(standard_report.T, accuracy).reshape(test.shape[1:]),
-        select,
-    )
+    if weighted_fallback:
+        choices["weighted_mean", "all"] = _layer_choice(
+            equal, test, select.labels
+        )
+    else:
+        accuracy = tuned.select_accuracy[at]
+        standard_val, standard_report = _standardize_layer_scores(
+            tuned.select_scores[at], flat[at]
+        )
+        choices["weighted_mean", "all"] = _matrix_choice(
+            equal.layers,
+            weighted_mean(standard_val.T, accuracy),
+            weighted_mean(standard_report.T, accuracy).reshape(test.shape[1:]),
+            select,
+        )
     oof, val, out = _stack_features(config, train, tuned, test, seed)
     lr, penalty = tune_stack(
         "lr",
@@ -895,6 +905,7 @@ def _stack_choices(
         "layer_penalties": tuned.penalties,
         "stack_lr_penalty": penalty,
         "stack_mlp_alpha": alpha,
+        "weighted_mean_fallback": weighted_fallback,
     }
     if pilot_diagnostics:
         areas = auroc(scores_val, select.labels)
