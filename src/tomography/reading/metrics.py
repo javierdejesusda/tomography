@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 import statistics
 from typing import Any
+from typing import Literal
 from typing import NamedTuple
 
 import numpy as np
@@ -198,12 +199,18 @@ def wilson_ci(
     return lower, upper
 
 
-def best_layer(acc: FloatArray, layers: Sequence[int]) -> int:
-    """Picks the layer with the highest accuracy, the first one on ties.
+def best_layer(
+    acc: FloatArray,
+    layers: Sequence[int],
+    *,
+    tie_break: Literal["first", "last"] = "first",
+) -> int:
+    """Picks the layer with the highest accuracy.
 
     Args:
         acc: Accuracy per layer, shape (K,).
-        layers: The layer index of each entry of `acc`.
+        layers: The layer index of each entry of cc.
+        tie_break: Which exact maximum to keep, in input order.
 
     Returns:
         The layer index (an element of `layers`, not a position).
@@ -219,6 +226,8 @@ def best_layer(acc: FloatArray, layers: Sequence[int]) -> int:
         raise ValueError("acc and layers must have the same length")
     if np.isnan(values).any():
         raise ValueError("acc must not contain NaN")
+    if tie_break == "last":
+        return int(layers[len(layers) - 1 - int(np.argmax(values[::-1]))])
     return int(layers[int(np.argmax(values))])
 
 
