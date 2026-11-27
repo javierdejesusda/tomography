@@ -22,6 +22,7 @@ from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.model import BosMode
 from tomography.model import LoadedModel
+from tomography.reading import token_forest
 
 
 def _write_baseline(
@@ -393,6 +394,102 @@ def test_run_validates_literal_alignment_before_looking_up_m2(
     )
     with pytest.raises(ValueError, match=message):
         experiment.run(config, None)
+
+
+def test_run_records_each_literal_draw_width(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, _, run_dir = setup_run
+    score_splits = token_forest.score_splits
+    widths: dict[str, list[int]] = {}
+
+    def record(*args: Any, **kwargs: Any) -> list[token_forest.LiteralDraw]:
+        draws = score_splits(*args, **kwargs)
+        # The select split's texts identify the task of this call.
+        widths[args[2].uids[0]] = [draw.width for draw in draws]
+        return draws
+
+    monkeypatch.setattr(token_forest, "score_splits", record)
+    experiment.run(config, run_dir)
+
+    rows = [
+        row
+        for row in run_dir.read_json("fit_diagnostics")["draws"]
+        if row["readout"] == "tokens"
+    ]
+    assert len(widths) == 2
+    assert sorted(row["literal_width"] for row in rows) == sorted(
+        width for draws in widths.values() for width in draws
+    )
+    for task in ("sentiment", "utility"):
+        found = [row for row in rows if row["task"] == task]
+        assert [row["draw"] for row in found] == [0, 1]
+        assert {row["series"] for row in found} == {"reader"}
+
+
+def test_left_alignment_runs_on_qwen3_0_6b_base_against_the_same_m2_run(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+    tiny_gpt2: LoadedModel,
+    tmp_path: Path,
+) -> None:
+    config, _, _ = setup_run
+    right = dataclasses.replace(config, model="qwen3-0.6b-base")
+    left = dataclasses.replace(right, literal_alignment="left")
+    assert left.config_hash() != right.config_hash()
+    assert left.m2_config() == right.m2_config()
+    baseline = RunDir.create(right.m2_config(), out_root=tmp_path)
+    m2.execute(right.m2_config(), baseline, tiny_gpt2, _sources())
+    root = Path(config.m2_root)
+    assert experiment.find_m2_run(left, root) == baseline.path
+    assert experiment.find_m2_run(right, root) == baseline.path
+
+    run_dir = RunDir.create(left, out_root=tmp_path)
+    assert run_dir.path != RunDir.create(right, out_root=tmp_path).path
+    experiment.run(left, run_dir)
+
+    assert run_dir.read_json("summary")["literal_forest"]["alignment"] == "left"
+    rows = [row for row in _table(run_dir) if row["scorer"] == "literal_forest"]
+    assert {row["task"] for row in rows} == {"sentiment", "utility"}
+
+
+def test_comparison_counts_report_the_length_control_apart() -> None:
+    def row(task: str, reader: str, size: int) -> dict[str, Any]:
+        return {
+            "task": task,
+            "reader": reader,
+            "family_size": size,
+            "auroc_draw_mean": 0.1,
+            "pair_draw_mean": -0.1,
+        }
+
+    rows = [
+        row("sentiment", "literal_forest/tokens/fixed", 5),
+        row("truth", "literal_forest/tokens/fixed", 5),
+        row("sentiment", "length_control/tokens/all", 5),
+        row("sentiment", "length_control/tokens/all", 5),
+        row("truth", "length_control/tokens/all", 5),
+        row("sentiment", "equal_mean/last/all", 0),
+    ]
+    counts = experiment._comparison_counts(rows)
+    assert counts["with_truth"] == {
+        "comparisons": 2,
+        "higher_auroc": 2,
+        "higher_pair_accuracy": 0,
+    }
+    assert counts["without_truth"]["comparisons"] == 1
+    assert counts["length_control"] == {
+        "with_truth": {
+            "comparisons": 3,
+            "higher_auroc": 3,
+            "higher_pair_accuracy": 0,
+        },
+        "without_truth": {
+            "comparisons": 2,
+            "higher_auroc": 2,
+            "higher_pair_accuracy": 0,
+        },
+    }
 
 
 def test_run_reports_mlp_seed_spread_in_a_two_draw_design(

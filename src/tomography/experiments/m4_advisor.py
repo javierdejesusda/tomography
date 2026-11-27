@@ -528,9 +528,22 @@ def _literal_entries(
     source: _Prepared,
     layers: tuple[int, ...],
     take: int,
-) -> list[m2._Entry]:
+) -> tuple[list[m2._Entry], list[dict[str, Any]]]:
+    """Fits the literal token forest and its length control on each draw.
+
+    Args:
+        config: Forest size, alignment, BOS policy and seed.
+        loaded: Causal model for tokenization and forward passes.
+        source: The task's splits.
+        layers: Retained literal layers; empty skips the family.
+        take: Number of training draws.
+
+    Returns:
+        The forest and length-control entries, and one fit diagnostic per
+        draw with its training-derived token width.
+    """
     if not layers:
-        return []
+        return [], []
     splits = source.splits
     draws = token_forest.score_splits(
         loaded,
@@ -550,7 +563,7 @@ def _literal_entries(
         ],
     )
     labels = splits.select_items.labels
-    return [
+    entries = [
         m2._Entry(
             m2.Cell("literal_forest", "tokens", "fixed"),
             "reader",
@@ -568,6 +581,17 @@ def _literal_entries(
             ],
         ),
     ]
+    diagnostics = [
+        {
+            "task": source.task.name,
+            "readout": "tokens",
+            "draw": i,
+            "series": "reader",
+            "literal_width": d.width,
+        }
+        for i, d in enumerate(draws)
+    ]
+    return entries, diagnostics
 
 
 def run(config: Config, run_dir: RunDir) -> None:
@@ -635,11 +659,13 @@ def run(config: Config, run_dir: RunDir) -> None:
         experimental, diagnostics, pilot = _ensemble_entries(
             config, source, take
         )
-        entries.extend(experimental)
-        entries.extend(
-            _literal_entries(config, loaded, source, literal_layers, take)
+        literal, widths = _literal_entries(
+            config, loaded, source, literal_layers, take
         )
+        entries.extend(experimental)
+        entries.extend(literal)
         fit_diagnostics.extend(diagnostics)
+        fit_diagnostics.extend(widths)
         mlp_pilot.extend(pilot)
         table.extend(_write_entries(config, run_dir, source, entries))
         ties.extend(_tie_rows(source, take))
@@ -1388,26 +1414,39 @@ def _comparison_rows(
 
 
 def _comparison_counts(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        subset: {
-            "comparisons": len(kept),
-            "higher_auroc": sum(row["auroc_draw_mean"] > 0 for row in kept),
-            "higher_pair_accuracy": sum(
-                row["pair_draw_mean"] > 0 for row in kept
-            ),
+    """Counts family comparisons won by the new readers.
+
+    The length control is a family member but not a new reader, so its rows
+    are counted apart under `length_control`.
+
+    Args:
+        rows: Comparison rows; descriptive rows have family size 0.
+
+    Returns:
+        Counts with and without truth for the new readers, and the same
+        counts for the length control.
+    """
+
+    def subsets(kept: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            subset: {
+                "comparisons": len(chosen),
+                "higher_auroc": sum(r["auroc_draw_mean"] > 0 for r in chosen),
+                "higher_pair_accuracy": sum(
+                    r["pair_draw_mean"] > 0 for r in chosen
+                ),
+            }
+            for subset, chosen in (
+                ("with_truth", kept),
+                ("without_truth", [r for r in kept if r["task"] != "truth"]),
+            )
         }
-        for subset, kept in (
-            ("with_truth", [r for r in rows if r["family_size"] > 0]),
-            (
-                "without_truth",
-                [
-                    r
-                    for r in rows
-                    if r["family_size"] > 0 and r["task"] != "truth"
-                ],
-            ),
-        )
-    }
+
+    split: dict[bool, list[dict[str, Any]]] = {True: [], False: []}
+    for r in rows:
+        if r["family_size"] > 0:
+            split[r["reader"].startswith("length_control/")].append(r)
+    return {**subsets(split[False]), "length_control": subsets(split[True])}
 
 
 class _ScoredDraw(NamedTuple):
