@@ -1,5 +1,6 @@
 """CPU tests for the layer and cross-task reader experiment."""
 
+from collections.abc import Callable
 from collections.abc import Sequence
 import dataclasses
 import hashlib
@@ -282,10 +283,22 @@ def test_run_reports_mlp_seed_spread_in_a_two_draw_design(
 ) -> None:
     config, _, run_dir = setup_run
     experiment.run(dataclasses.replace(config, pilot_draws=1), run_dir)
-    rows = run_dir.read_json("fit_diagnostics")["mlp_pilot"]
+    diagnostics = run_dir.read_json("fit_diagnostics")
+    rows = diagnostics["mlp_pilot"]
     assert rows
     assert {row["draw"] for row in rows} == {0}
-    assert all(len(areas) == 5 for row in rows for areas in row["aurocs"])
+    assert {row["series"] for row in rows} == {"reader"}
+    assert all(
+        len(row["aurocs"]) == len(row["pair_accuracies"]) == 5 for row in rows
+    )
+    assert diagnostics["recommended_mlp_repeats"] == (
+        5
+        if any(
+            max(row["auroc_spread"], row["pair_accuracy_spread"]) > 0.01
+            for row in rows
+        )
+        else 1
+    )
     assert {
         row["n_seeds"]
         for row in _table(run_dir)
@@ -331,10 +344,15 @@ def test_comparisons_keep_equal_mean_out_of_families() -> None:
 
     entries = [
         entry("logistic", "last", "best", (1, -1)),
+        entry("logistic", "last", "best_deep", (1, 1)),
+        entry("mean_diff", "last", "best_deep", (1, 1)),
         entry("equal_mean", "last", "all", (1, 1)),
         entry("stack_lr", "last", "all", (1, 1)),
         entry("concat_lr", "last", "all", (-1, -1)),
         entry("bridge_forest", "mean", "fixed", (1, 1)),
+        entry("bridge_forest", "max", "fixed", (1, 1)),
+        entry("bridge_forest", "last", "fixed", (1, 1)),
+        entry("stack_mlp", "last", "all", (1, 1))._replace(series="shuffled"),
     ]
     rows = experiment._comparison_rows(
         experiment.Config(n_boot=8), m2._task("sentiment"), splits, entries
@@ -352,8 +370,20 @@ def test_comparisons_keep_equal_mean_out_of_families() -> None:
     assert stack["pair_draw_diff"] == [0, 1]
     assert stack["auroc_draw_mean"] == 0.5
     assert stack["auroc_draw_wins"] == 1
-    assert bridge["family_size"] == 1
+    assert bridge["family_size"] == 3
     assert bridge["family"] != stack["family"]
+    assert {
+        r["reader"] for r in baseline if r["family"] == bridge["family"]
+    } == {
+        "bridge_forest/last/fixed",
+        "bridge_forest/max/fixed",
+        "bridge_forest/mean/fixed",
+    }
+    assert not any("best_deep" in r["reader"] for r in rows)
+    assert (
+        experiment._comparison_counts(rows)["without_truth"]["comparisons"]
+        == 10
+    )
     assert any(row["baseline"] == "equal_mean/last/all" for row in rows)
 
 
@@ -483,3 +513,213 @@ def test_geometry_split_can_separate_a_statement_from_its_negation() -> None:
     assert any(
         a.split != b.split for a, b in zip(affirmative, negative, strict=True)
     )
+
+
+def test_gate_accepts_null_only_against_nonfinite_metric() -> None:
+    rows = _gate_rows()
+    column = m2.COLUMNS.index("auroc")
+    rows[0][column] = None
+    experiment.check_m2_equality(rows, rows)
+    current = [list(row) for row in rows]
+    current[0][column] = float("nan")
+    experiment.check_m2_equality(current, rows)
+    current[0][column] = 0.5
+    with pytest.raises(ValueError, match=r"M2 equality failed.*auroc"):
+        experiment.check_m2_equality(current, rows)
+
+
+def test_mlp_pilot_ignores_report_labels_and_does_not_change_emitted_scores(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+    tiny_gpt2: LoadedModel,
+) -> None:
+    config, _, _ = setup_run
+    source = experiment._prepare(
+        config, tiny_gpt2, [m2._task("sentiment")], _sources()
+    )[0]
+    flipped = dataclasses.replace(
+        source,
+        splits=dataclasses.replace(
+            source.splits,
+            report_items={
+                condition: dataclasses.replace(items, labels=1 - items.labels)
+                for condition, items in source.splits.report_items.items()
+            },
+        ),
+    )
+    pilot_config = dataclasses.replace(config, pilot_draws=1)
+    original, _, pilot = experiment._ensemble_entries(pilot_config, source, 1)
+    changed, _, changed_pilot = experiment._ensemble_entries(
+        pilot_config, flipped, 1
+    )
+    regular, _, _ = experiment._ensemble_entries(config, source, 1)
+    assert pilot == changed_pilot
+    assert {row["series"] for row in pilot} == {"reader"}
+    assert len(pilot) == 3
+    for expected, actual, control in zip(
+        original, changed, regular, strict=True
+    ):
+        if expected.cell.scorer == "stack_mlp":
+            np.testing.assert_array_equal(
+                expected.choices[0].report, actual.choices[0].report
+            )
+            np.testing.assert_array_equal(
+                expected.choices[0].report, control.choices[0].report
+            )
+
+
+def test_equal_layer_weights_match_the_select_standardized_mean(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+    tiny_gpt2: LoadedModel,
+) -> None:
+    config, _, _ = setup_run
+    source = experiment._prepare(
+        config, tiny_gpt2, [m2._task("sentiment")], _sources()
+    )[0]
+    train, select, report = experiment._draw_rows(source.splits, "last", 0)
+    tuned = dataclasses.replace(
+        source.baseline.logistic["last"][0],
+        select_accuracy=np.full(len(train.layers), 0.75),
+    )
+    choices, _ = experiment._stack_choices(
+        config,
+        train,
+        select,
+        report,
+        tuned,
+        seed=2,
+    )
+    equal = choices["equal_mean", "all"]
+    weighted = choices["weighted_mean", "all"]
+    np.testing.assert_allclose(weighted.select, equal.select, rtol=1e-12)
+    np.testing.assert_allclose(weighted.report, equal.report, rtol=1e-12)
+
+
+def test_utility_descriptive_equal_mean_has_cluster_intervals() -> None:
+    items = _items()
+    texts = dict(zip(items.uids, ("A", "B", "B", "C", "D", "E"), strict=True))
+    splits = m2._Splits([], items, {"original": items}, {}, {}, {}, texts, None)
+    val = items.labels.astype(float)
+    entries = [
+        m2._Entry(
+            m2.Cell(scorer, "last", rule),
+            "reader",
+            [m2._Choice((1,), val, (sign * val)[None, :], items.labels)],
+        )
+        for scorer, rule, sign in (
+            ("logistic", "best", -1),
+            ("equal_mean", "all", 1),
+        )
+    ]
+    (row,) = experiment._comparison_rows(
+        experiment.Config(n_boot=8), m2._task("utility"), splits, entries
+    )
+    assert row["family_size"] == 0
+    assert row["descriptive"]
+    assert row["auroc_cluster"]["difference"] == 1.0
+    assert row["pair_cluster"]["difference"] == 1.0
+    assert "delong_holm" not in row
+
+
+def test_lodo_reads_each_unique_prompt_once_without_changing_metrics(
+    tiny_gpt2: LoadedModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = experiment.Config(
+        model="tiny",
+        layers=(1, 4),
+        n_seeds=1,
+        n_pairs=3,
+        n_eval_pairs=2,
+        decoys=("random",),
+        shifts=(),
+        logistic_c=(0.1,),
+        n_boot=5,
+    )
+    examples = {
+        "geometry_of_truth": [
+            dataclasses.replace(row, text=f"{row.text} {row.uid}")
+            for row in _truth_rows()
+        ]
+    }
+    texts: list[str] = []
+
+    def counted_read(
+        loaded: LoadedModel,
+        items: StimulusSet,
+        positions: Sequence[PositionStrategy],
+        cfg: experiment.Config,
+    ) -> dict[PositionStrategy, Activations]:
+        texts.extend(items.texts)
+        return _fake_positions(loaded, items, positions, cfg)
+
+    def without_cache(
+        cfg: experiment.Config,
+        loaded: LoadedModel,
+        plan: object,
+    ) -> Callable[
+        [str, StimulusSet], dict[m2.Readout, experiment._LabeledRows]
+    ]:
+        def read(
+            condition: str, items: StimulusSet
+        ) -> dict[m2.Readout, experiment._LabeledRows]:
+            return experiment._truth_batch(cfg, loaded, items)
+
+        return read
+
+    monkeypatch.setattr(m2, "read_positions", counted_read)
+    cached = experiment._lodo_rows(config, tiny_gpt2, examples, 1)
+    cached_texts = list(texts)
+    assert len(cached_texts) == len(set(cached_texts)) == 153
+    texts.clear()
+    monkeypatch.setattr(experiment, "_truth_reader", without_cache)
+    uncached = experiment._lodo_rows(config, tiny_gpt2, examples, 1)
+    assert len(texts) == 598
+    assert set(cached_texts) == set(texts)
+    assert cached == uncached
+
+
+def test_fold_raw_scores_ignore_labels_of_held_out_pairs() -> None:
+    from tomography.reading.ensembles import pair_folds
+
+    values = np.array([[[-3.0], [3.0]] * 8], dtype=np.float32)
+    labels = np.tile([0, 1], 8)
+    pairs = np.arange(16).reshape(-1, 2)
+    train = experiment._LabeledRows(values, (1,), labels, pairs, pairs)
+    folds = list(pair_folds(pairs, n_rows=16, n_folds=2, seed=9))
+    fit, held = folds[0]
+    flipped = labels.copy()
+    flipped[held] = 1 - flipped[held]
+    changed = dataclasses.replace(train, labels=flipped)
+    config = experiment.Config()
+    for i, (fit, held) in enumerate(folds):
+        actual = experiment._fit_fold(config, train, (0.1,), fit, held, seed=4)
+        other = experiment._fit_fold(config, changed, (0.1,), fit, held, seed=4)
+        if i == 0:
+            np.testing.assert_array_equal(actual, other)
+        else:
+            np.testing.assert_array_equal(actual, -other)
+
+
+def test_cli_discovers_m4_config_run_and_plot() -> None:
+    from tomography.cli import load_experiment
+
+    loaded = load_experiment("m4")
+    assert loaded.config_cls is experiment.Config
+    assert loaded.run is experiment.run
+    assert loaded.plot is experiment.plot
+
+
+def test_plot_writes_figures_from_a_tiny_run(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+    tmp_path: Path,
+) -> None:
+    config, _, run_dir = setup_run
+    experiment.run(config, run_dir)
+    outputs = experiment.plot(run_dir, tmp_path / "plots")
+    assert {path.stem for path in outputs} == {
+        "auroc_sentiment",
+        "auroc_utility",
+    }
+    assert {path.suffix for path in outputs} == {".pdf", ".png", ".svg"}
+    assert len(outputs) == 6
+    assert all(path.stat().st_size > 0 for path in outputs)

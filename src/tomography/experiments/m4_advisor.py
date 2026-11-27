@@ -51,6 +51,7 @@ from tomography.reading.metrics import bootstrap_ci
 from tomography.reading.metrics import group_accuracy
 from tomography.reading.reader import RepReader
 from tomography.reading.stats import LayerChoice
+from tomography.reading.stats import _standardize_layer_scores
 from tomography.reading.stats import best_validation_layer
 from tomography.reading.stats import delong_test
 from tomography.reading.stats import holm_correction
@@ -184,11 +185,19 @@ def check_m2_equality(
         for column, value, reference in zip(
             m2.COLUMNS[6:], actual[key][6:], target[6:], strict=True
         ):
-            equal = (
-                value == reference
-                if column in ("layers", "n_seeds")
-                else math.isclose(value, reference, rel_tol=0.0, abs_tol=1e-6)
-            )
+            if column in ("layers", "n_seeds"):
+                equal = value == reference
+            else:
+                value_missing = value is None or not math.isfinite(value)
+                reference_missing = reference is None or not math.isfinite(
+                    reference
+                )
+                if value_missing or reference_missing:
+                    equal = value_missing == reference_missing
+                else:
+                    equal = math.isclose(
+                        value, reference, rel_tol=0.0, abs_tol=1e-6
+                    )
             if not equal:
                 raise ValueError(
                     f"M2 equality failed for {key}, {column}: "
@@ -604,7 +613,7 @@ def run(config: Config, run_dir: RunDir) -> None:
             "mlp_pilot": mlp_pilot,
             "recommended_mlp_repeats": 5
             if any(r["recommend_five"] for r in mlp_pilot)
-            else config.mlp_repeats,
+            else 1,
         },
     )
     run_dir.write_json("layer_ties", ties)
@@ -653,6 +662,34 @@ def _take_pairs(rows: _LabeledRows, pairs: Indices) -> _LabeledRows:
     )
 
 
+def _fit_fold(
+    config: Config,
+    train: _LabeledRows,
+    penalties: tuple[float, ...],
+    fit: Indices,
+    held: Indices,
+    *,
+    seed: int,
+) -> Scores:
+    """Refits and orients the tuned layer readers on the fit pairs only."""
+    training_pairs = train.pairs[np.isin(train.pairs[:, 0], fit)]
+    fold = _take_pairs(train, training_pairs)
+    scores = np.empty((len(held), len(train.layers)), dtype=np.float64)
+    for penalty in sorted(set(penalties)):
+        keep = np.flatnonzero(np.asarray(penalties) == penalty)
+        subset = dataclasses.replace(
+            fold,
+            data=fold.data[keep],
+            layers=tuple(fold.layers[index] for index in keep),
+        )
+        scores[:, keep] = (
+            _fit_lr(config, subset, penalty, seed)
+            .score(train.data[keep[:, None], held])
+            .T
+        )
+    return scores
+
+
 def _stack_features(
     config: Config,
     train: _LabeledRows,
@@ -661,22 +698,7 @@ def _stack_features(
     seed: int,
 ) -> tuple[Scores, Scores, Scores]:
     def score_fold(fit: Indices, held: Indices) -> Scores:
-        training_pairs = train.pairs[np.isin(train.pairs[:, 0], fit)]
-        fold = _take_pairs(train, training_pairs)
-        scores = np.empty((len(held), len(train.layers)), dtype=np.float64)
-        for penalty in sorted(set(tuned.penalties)):
-            keep = np.flatnonzero(np.asarray(tuned.penalties) == penalty)
-            subset = dataclasses.replace(
-                fold,
-                data=fold.data[keep],
-                layers=tuple(fold.layers[index] for index in keep),
-            )
-            scores[:, keep] = (
-                _fit_lr(config, subset, penalty, seed)
-                .score(train.data[keep[:, None], held])
-                .T
-            )
-        return scores
+        return _fit_fold(config, train, tuned.penalties, fit, held, seed=seed)
 
     return cross_fit_scores(
         train.pairs,
@@ -704,8 +726,9 @@ def _stack_choices(
     select: _LabeledRows,
     report: Sequence[Rows],
     tuned: _TunedLR,
-    report_items: Sequence[StimulusSet],
     seed: int,
+    *,
+    pilot_diagnostics: bool = False,
 ) -> tuple[dict[tuple[str, str], m2._Choice], dict[str, Any]]:
     test = np.stack(
         [tuned.reader.score(rows) for rows in report], axis=1
@@ -719,13 +742,18 @@ def _stack_choices(
         k=len(train.layers),
     )
     choices = {("equal_mean", "all"): _layer_choice(equal, test, select.labels)}
-    oof, val, out = _stack_features(config, train, tuned, test, seed)
+    at = [train.layers.index(layer) for layer in equal.layers]
+    accuracy = tuned.select_accuracy[at]
+    standard_val, standard_report = _standardize_layer_scores(
+        tuned.select_scores[at], flat[at]
+    )
     choices["weighted_mean", "all"] = _matrix_choice(
-        train.layers,
-        weighted_mean(val, tuned.select_accuracy),
-        weighted_mean(out, tuned.select_accuracy),
+        equal.layers,
+        weighted_mean(standard_val.T, accuracy),
+        weighted_mean(standard_report.T, accuracy).reshape(test.shape[1:]),
         select,
     )
+    oof, val, out = _stack_features(config, train, tuned, test, seed)
     lr, penalty = tune_stack(
         "lr",
         oof,
@@ -749,7 +777,7 @@ def _stack_choices(
         grid=config.mlp_alpha,
         seed=seed,
     )
-    n_seeds = 5 if config.pilot_draws is not None else config.mlp_repeats
+    n_seeds = 5 if pilot_diagnostics else config.mlp_repeats
     scorers = [mlp]
     for i in range(1, n_seeds):
         scorers.append(
@@ -761,7 +789,10 @@ def _stack_choices(
             )
         )
     scores = np.stack(
-        [np.stack([score(rows) for rows in out]) for score in scorers]
+        [
+            np.stack([score(rows) for rows in out])
+            for score in scorers[: config.mlp_repeats]
+        ]
     )
     scores_val = np.stack([score(val) for score in scorers])
     diagnostics: dict[str, Any] = {
@@ -769,25 +800,22 @@ def _stack_choices(
         "stack_lr_penalty": penalty,
         "stack_mlp_alpha": alpha,
     }
-    average = config.mlp_repeats == 5
-    if config.pilot_draws is not None:
-        areas = np.stack(
-            [
-                auroc(scores[:, i], items.labels)
-                for i, items in enumerate(report_items)
-            ]
-        )
-        spread = np.ptp(areas, axis=1)
-        average = bool((spread > 0.01).any()) or average
+    if pilot_diagnostics:
+        areas = auroc(scores_val, select.labels)
+        pairs = group_accuracy(scores_val, select.groups, select.labels)
+        area_spread = float(np.ptp(areas))
+        pair_spread = float(np.ptp(pairs))
         diagnostics["mlp_pilot"] = {
             "aurocs": areas.tolist(),
-            "spread": spread.tolist(),
-            "recommend_five": bool((spread > 0.01).any()),
+            "pair_accuracies": pairs.tolist(),
+            "auroc_spread": area_spread,
+            "pair_accuracy_spread": pair_spread,
+            "recommend_five": max(area_spread, pair_spread) > 0.01,
         }
     choices["stack_mlp", "all"] = _matrix_choice(
         train.layers,
-        scores_val.mean(axis=0) if average else scores_val[0],
-        scores.mean(axis=0) if average else scores[0],
+        scores_val[: config.mlp_repeats].mean(axis=0),
+        scores.mean(axis=0),
         select,
     )
     forest = fit_grouped_forest(
@@ -938,7 +966,6 @@ def _ensemble_entries(
     entries: dict[tuple[m2.Cell, str], list[m2._Choice]] = {}
     diagnostics = []
     pilot = []
-    items = list(source.splits.report_items.values())
     series_names = ["reader"]
     if "shuffled" in config.controls:
         series_names.append("shuffled")
@@ -979,8 +1006,9 @@ def _ensemble_entries(
                     fit_select,
                     report,
                     tuned,
-                    items,
                     seed,
+                    pilot_diagnostics=config.pilot_draws is not None
+                    and series == "reader",
                 )
                 metadata = {
                     "task": name,
@@ -1133,6 +1161,31 @@ def _comparison_row(
     }
 
 
+def _cluster_intervals(
+    config: Config,
+    labels: Indices,
+    clusters: tuple[Indices, Indices],
+    scores: tuple[Scores, Scores],
+    wins: tuple[Scores, Scores],
+) -> dict[str, Any]:
+    row_clusters, pair_clusters = clusters
+    return {
+        "auroc_cluster": paired_auroc_diff(
+            *scores,
+            labels,
+            row_clusters,
+            n_boot=config.n_boot,
+            seed=config.seed,
+        )._asdict(),
+        "pair_cluster": paired_accuracy_diff(
+            *wins,
+            pair_clusters,
+            n_boot=config.n_boot,
+            seed=config.seed,
+        )._asdict(),
+    }
+
+
 def _comparison_rows(
     config: Config,
     task: ReadingTask,
@@ -1140,6 +1193,10 @@ def _comparison_rows(
     entries: Sequence[m2._Entry],
 ) -> list[dict[str, Any]]:
     """Pairs draw metrics and tests draw-ensemble scores within each family.
+
+    The separate bridge family keeps `bridge_forest` at last, max and mean
+    against last-readout baselines. It compares pooling over tokens with
+    concatenation in the literal forest.
 
     Args:
         config: Resampling settings and checkpoint.
@@ -1160,10 +1217,13 @@ def _comparison_rows(
         if cell.scorer == EQUAL_MEAN
         or (cell.scorer in BASE_SCORERS and cell.layer_rule in BASE_RULES)
     }
-    members = sorted(readers.keys() - bases)
-    ensembles = {
-        cell: m2._ensemble(entry.choices) for cell, entry in readers.items()
-    }
+    members = sorted(
+        cell
+        for cell in readers
+        if cell.scorer not in (*BASE_SCORERS, EQUAL_MEAN)
+    )
+    compared = bases.union(members)
+    ensembles = {cell: m2._ensemble(readers[cell].choices) for cell in compared}
     output = []
     for j, (condition, items) in enumerate(splits.report_items.items()):
         clusters, pair_clusters = _report_clusters(task, items, splits.texts)
@@ -1171,6 +1231,7 @@ def _comparison_rows(
             cell: m2._group_wins(scores[j], items)
             for cell, scores in ensembles.items()
         }
+
         for base in sorted(bases):
             families = {
                 base.readout: [
@@ -1211,21 +1272,15 @@ def _comparison_rows(
                         b_only=mcnemar.b_only,
                     )
                     if task.name == "utility":
-                        row["auroc_cluster"] = paired_auroc_diff(
-                            score_a,
-                            score_b,
-                            items.labels,
-                            clusters,
-                            n_boot=config.n_boot,
-                            seed=config.seed,
-                        )._asdict()
-                        row["pair_cluster"] = paired_accuracy_diff(
-                            wins[cell],
-                            wins[base],
-                            pair_clusters,
-                            n_boot=config.n_boot,
-                            seed=config.seed,
-                        )._asdict()
+                        row.update(
+                            _cluster_intervals(
+                                config,
+                                items.labels,
+                                (clusters, pair_clusters),
+                                (score_a, score_b),
+                                (wins[cell], wins[base]),
+                            )
+                        )
                     block.append(row)
                 if block:
                     for field in ("delong", "mcnemar"):
@@ -1237,19 +1292,28 @@ def _comparison_rows(
                     output.extend(block)
             equal = m2.Cell(EQUAL_MEAN, base.readout, "all")
             if base.scorer != EQUAL_MEAN and equal in readers:
-                output.append(
-                    _comparison_row(
-                        config,
-                        task,
-                        condition,
-                        j,
-                        items,
-                        readers[equal],
-                        readers[base],
-                        "descriptive",
-                        0,
-                    )
+                row = _comparison_row(
+                    config,
+                    task,
+                    condition,
+                    j,
+                    items,
+                    readers[equal],
+                    readers[base],
+                    "descriptive",
+                    0,
                 )
+                if task.name == "utility":
+                    row.update(
+                        _cluster_intervals(
+                            config,
+                            items.labels,
+                            (clusters, pair_clusters),
+                            (ensembles[equal][j], ensembles[base][j]),
+                            (wins[equal], wins[base]),
+                        )
+                    )
+                output.append(row)
     return output
 
 
@@ -1474,15 +1538,14 @@ def _scope_examples(
     ]
 
 
-def _truth_fits(
+def _truth_training(
     config: Config,
-    loaded: LoadedModel,
     task: ReadingTask,
     paper: Variant,
     pool: TaskSplits,
     scope: Sequence[str],
     take: int,
-) -> tuple[dict[m2.Readout, list[_TunedLR]], Indices]:
+) -> tuple[StimulusSet, list[StimulusSet]]:
     select = task_set(
         task,
         paper,
@@ -1490,34 +1553,127 @@ def _truth_fits(
         n_pairs=None,
         seed=eval_seed(task, "select", config.seed),
     )
-    positions = tuple(m2.POSITION_OF[r] for r in CROSS_READOUTS)
-    val = m2.read_positions(loaded, select, positions, config)
-    fitted: dict[m2.Readout, list[_TunedLR]] = {r: [] for r in CROSS_READOUTS}
     rows = _scope_examples(pool.train, scope)
-    for i in range(take):
-        items = task_set(
+    draws = [
+        task_set(
             task,
             paper,
             rows,
             n_pairs=config.n_pairs,
             seed=derive_seed(config.seed, "train", i),
         )
-        train = m2.read_positions(loaded, items, positions, config)
-        for readout, position in zip(CROSS_READOUTS, positions, strict=True):
+        for i in range(take)
+    ]
+    return select, draws
+
+
+def _truth_batch(
+    config: Config,
+    loaded: LoadedModel,
+    items: StimulusSet,
+) -> dict[m2.Readout, _LabeledRows]:
+    """Reads the cross-task readouts of a prompt bank with M2's reader.
+
+    Args:
+        config: Layers, batching and BOS policy.
+        loaded: The wrapped model.
+        items: Prompts and their response spans.
+
+    Returns:
+        The `last` and `max` rows of every prompt, in input order.
+    """
+    positions = tuple(m2.POSITION_OF[r] for r in CROSS_READOUTS)
+    read = m2.read_positions(loaded, items, positions, config)
+    return {
+        readout: _labeled(read[position].data, read[position].layers, items)
+        for readout, position in zip(CROSS_READOUTS, positions, strict=True)
+    }
+
+
+_TruthRead = Callable[[str, StimulusSet], dict[m2.Readout, _LabeledRows]]
+
+
+def _truth_reader(
+    config: Config,
+    loaded: LoadedModel,
+    plan: Mapping[str, Sequence[StimulusSet]],
+) -> _TruthRead:
+    """Caches unique texts per condition while preserving split pairings.
+
+    Args:
+        config: Extraction settings.
+        loaded: The wrapped model.
+        plan: All stimulus sets needed by the holdouts, by condition.
+
+    Returns:
+        A reader that gathers activations in each set's original order.
+
+    Raises:
+        ValueError: If a duplicate prompt has conflicting response spans.
+    """
+    lookup: dict[str, dict[str, int]] = {}
+    banks: dict[str, dict[m2.Readout, _LabeledRows]] = {}
+    for condition, sets in plan.items():
+        index: dict[str, int] = {}
+        representatives: list[tuple[StimulusSet, int]] = []
+        for items in sets:
+            for i, text in enumerate(items.texts):
+                if text not in index:
+                    index[text] = len(representatives)
+                    representatives.append((items, i))
+                else:
+                    previous, j = representatives[index[text]]
+                    if previous.response_spans[j] != items.response_spans[i]:
+                        raise ValueError(
+                            "identical truth prompts have different spans"
+                        )
+        empty = np.empty((0, 2), dtype=np.int64)
+        bank = StimulusSet(
+            texts=tuple(index),
+            response_spans=tuple(
+                s.response_spans[i] for s, i in representatives
+            ),
+            concept_spans=(None,) * len(index),
+            labels=np.array([s.labels[i] for s, i in representatives]),
+            pairs=empty,
+            groups=empty,
+            uids=tuple(s.uids[i] for s, i in representatives),
+        )
+        lookup[condition] = index
+        banks[condition] = _truth_batch(config, loaded, bank)
+
+    def read(
+        condition: str, items: StimulusSet
+    ) -> dict[m2.Readout, _LabeledRows]:
+        at = [lookup[condition][text] for text in items.texts]
+        return {
+            pos: _labeled(rows.data[:, at], rows.layers, items)
+            for pos, rows in banks[condition].items()
+        }
+
+    return read
+
+
+def _truth_fits(
+    config: Config,
+    task: ReadingTask,
+    select: StimulusSet,
+    draws: Sequence[StimulusSet],
+    read: _TruthRead,
+) -> tuple[dict[m2.Readout, list[_TunedLR]], Indices]:
+    val = read("original", select)
+    fitted: dict[m2.Readout, list[_TunedLR]] = {r: [] for r in CROSS_READOUTS}
+    for i, items in enumerate(draws):
+        train = read("original", items)
+        for readout in CROSS_READOUTS:
             seed = derive_seed(
                 config.seed, "fit", task.name, "logistic", readout, i
             )
             fitted[readout].append(
                 _tuned_lr(
                     config,
-                    _labeled(
-                        train[position].data, train[position].layers, items
-                    ),
-                    [
-                        _labeled(
-                            val[position].data, val[position].layers, select
-                        )
-                    ],
+                    train[readout],
+                    [val[readout]],
                     seed=seed,
                 )[0]
             )
@@ -1570,41 +1726,51 @@ def _lodo_rows(
         task, chat_format_for(loaded), kinds=("paper", *config.shifts)
     )
     paper, *shifts = variants
-    fits = {}
-    output = []
-    positions = tuple(m2.POSITION_OF[r] for r in CROSS_READOUTS)
+    holdouts = []
+    training = {}
+    plan: dict[str, list[StimulusSet]] = {"original": []}
     for kind, name, held in TRUTH_HOLDOUTS:
         report = _held_reports(
             config, task, paper, shifts, _scope_examples(pool.report, held)
         )
-        original = report["original"]
-        splits = m2._Splits([], original, report, {}, {}, {}, {}, None)
+        for condition, items in report.items():
+            plan.setdefault(condition, []).append(items)
         other = tuple(subset for subset in TRUTH_SUBSETS if subset not in held)
-        results: dict[tuple[str, m2.Readout], list[_ScoredDraw]] = {}
         base_arms = (
             ("held_out", other),
             ("all_subsets", TRUTH_SUBSETS),
             ("within_held", held),
         )
+        holdouts.append((kind, name, held, report, base_arms))
         for _, scope in base_arms:
-            if scope not in fits:
-                fits[scope] = _truth_fits(
-                    config, loaded, task, paper, pool, scope, take
+            if scope not in training:
+                select, draws = _truth_training(
+                    config, task, paper, pool, scope, take
                 )
-        for items in report.values():
-            activations = m2.read_positions(loaded, items, positions, config)
-            for readout, position in zip(
-                CROSS_READOUTS, positions, strict=True
-            ):
+                training[scope] = (select, draws)
+                plan["original"].extend((select, *draws))
+    read = _truth_reader(config, loaded, plan)
+    fits = {
+        scope: _truth_fits(config, task, select, draws, read)
+        for scope, (select, draws) in training.items()
+    }
+    output = []
+    for kind, name, held, report, base_arms in holdouts:
+        original = report["original"]
+        splits = m2._Splits([], original, report, {}, {}, {}, {}, None)
+        results: dict[tuple[str, m2.Readout], list[_ScoredDraw]] = {}
+        for condition, items in report.items():
+            activations = read(condition, items)
+            for readout in CROSS_READOUTS:
                 for arm, scope in base_arms:
                     models, labels = fits[scope]
-                    condition = [
-                        _score_best(fit, [activations[position].data], labels)
+                    condition_draws = [
+                        _score_best(fit, [activations[readout].data], labels)
                         for fit in models[readout]
                     ]
                     key = (arm, readout)
                     if key not in results:
-                        results[key] = condition
+                        results[key] = condition_draws
                     else:
                         results[key] = [
                             _ScoredDraw(
@@ -1620,7 +1786,7 @@ def _lodo_rows(
                                 current.penalty,
                             )
                             for current, score in zip(
-                                results[key], condition, strict=True
+                                results[key], condition_draws, strict=True
                             )
                         ]
         for (arm, readout), scores in results.items():
