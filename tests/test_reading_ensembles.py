@@ -81,6 +81,31 @@ def test_forest_global_node_lookup_matches_tree_probabilities() -> None:
     np.testing.assert_allclose(forest.score(report), np.mean(expected, axis=0))
 
 
+def test_forest_scoring_does_not_need_retained_local_columns() -> None:
+    from tomography.reading import ensembles
+
+    rows = np.random.default_rng(6).normal(size=(12, 8)).astype(np.float32)
+    labels = np.tile((0, 1), 6)
+    pairs = np.arange(12).reshape(-1, 2)
+    groups = (range(4), range(4, 8))
+    full = ensembles.fit_grouped_forest(
+        rows, labels, pairs, groups, m=1, n_trees=7, seed=1
+    )
+    compact = ensembles.fit_grouped_forest(
+        rows,
+        labels,
+        pairs,
+        groups,
+        m=1,
+        n_trees=7,
+        seed=1,
+        retain_columns=False,
+    )
+    assert len(full.columns) == 7
+    assert compact.columns == ()
+    np.testing.assert_array_equal(compact.score(rows), full.score(rows))
+
+
 def test_forest_tuning_keeps_smallest_subspace_on_a_tie() -> None:
     from tomography.reading import ensembles
 

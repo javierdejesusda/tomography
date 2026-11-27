@@ -147,7 +147,8 @@ class GroupedForest:
 
     Attributes:
         trees: The fitted sklearn trees, in their local column order.
-        columns: The global columns selected for each fitted tree.
+        columns: Global columns for replaying the fitted trees, or empty
+            when only global-node scoring is needed.
     """
 
     trees: tuple[DecisionTreeClassifier, ...]
@@ -179,6 +180,7 @@ def fit_grouped_forest(
     m: int,
     n_trees: int,
     seed: int,
+    retain_columns: bool = True,
 ) -> GroupedForest:
     """Fits trees to bootstrapped pairs and random whole feature groups.
 
@@ -190,6 +192,8 @@ def fit_grouped_forest(
         m: Number of groups drawn without replacement for each tree.
         n_trees: Number of trees in the forest.
         seed: Controls the bootstrap, subspace and split draws.
+        retain_columns: Keep each tree's full local-to-global mapping for
+            sklearn replay. Global-node scoring does not require it.
 
     Returns:
         A forest with precomputed global split columns.
@@ -253,7 +257,8 @@ def fit_grouped_forest(
         counts = structure.value[:, 0, :]
         probability = counts[:, 1] / counts.sum(axis=1)
         trees.append(tree)
-        columns.append(used)
+        if retain_columns:
+            columns.append(used)
         nodes.append(
             _Nodes(
                 feature,
