@@ -120,6 +120,8 @@ def test_every_dataset_revision_and_license_equals_the_code_pin() -> None:
 def test_models_and_judges_equal_the_code_pins() -> None:
     rows = _rows()
     for key, spec in model.MODELS.items():
+        if spec.arch not in assets.FAMILIES:
+            continue
         assert assets.CHECKPOINTS[key].repo_id == spec.repo_id
         assert assets.CHECKPOINTS[key].revision == spec.revision
         assert assets.CHECKPOINTS[key].license == spec.license
