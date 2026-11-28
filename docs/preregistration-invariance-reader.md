@@ -940,6 +940,53 @@ Entries after the commit of this file, in date order:
   the Hub API on that day), with a `llama` layout entry in the architecture
   registry. No forward pass of either checkpoint has been run.
 
+- 2026-11-28, implementation choices where the text is silent, and two
+  corrections found in code review (no run of this study had started, no
+  forward pass of any checkpoint had been run and no result had been seen).
+  None of them changes a choice stated above.
+  - Statistics (sections 6.3, 6.4 and 7): thresholds are compared with a
+    slack of 1e-12; percentile intervals use linear interpolation; a
+    resample draws multinomial pair counts; one resample set per task serves
+    every checkpoint of that task, in the per-combination tests and in the
+    pooled effect; a tie in the name of the best baseline goes to A1, and
+    among baselines to the lowest B number (the value is the same either
+    way); the utility contrast is computed wherever a random-direction
+    control exists; an A6 reader without its A5 counterpart is refused;
+    stage 2 requires all 16 Qwen and all 8 Llama combinations; the gate
+    bootstrap recomputes only the winner, A3 and A4, and uses the seed
+    declared for the stage 1 run; pair accuracy is read from the diagonal
+    of the comparison matrix, which agrees with `group_accuracy`.
+  - Readers (sections 5.1 to 5.5): one tie order over all (layer, grid)
+    candidates: the criterion, then the larger `lambda`, `gamma` and
+    `alpha`, then the shallower layer; A7, A8, B1 and B2 have intercept 0
+    (AUROC is unaffected); the random direction is drawn on the
+    standardized features of 5.1; B7 takes the `lambda` of each layer from
+    its cross-validated clean AUROC (ties to the larger), starts its greedy
+    search at the layer of A1 and takes the largest double-fault rate over
+    all pairs of the chosen set; the caller resolves the B5 layers from the
+    relative depths; the two-position `Sigma_e` is rescaled to trace `2d`;
+    standard deviations use `ddof` 0; the random-subspace `Q` is drawn once
+    per seed for all folds; the fallback of A7 and A8 is counted per fit of
+    `S`; the solver drops eigen-directions below 1e-12 of the largest; the
+    fold permutation seed is derived per task and draw.
+  - Data and prompts (sections 2, 3, 6.1 and 10): the 18 burned SST-2
+    candidates are removed from the reserved-block candidates only; a
+    linked group joins a block whole (extra texts of a joined group stay
+    unused); negation subject keys carry the prefixes `city:` and `es:` (no
+    fallback key was needed on the real data); a utility linked group is
+    keyed by its first row; the date string of the Llama chat template is
+    fixed to "26 Jul 2024"; stage 0 runs one forward pass per prompt and
+    position (72,000 passes for 36,000 prompts); the go decision and the
+    stage 1 gate are stored in `run_log.json` of the stage 1 run.
+  - Corrections from code review (commit `dc2c2cbc`): B5 orients its value
+    heads on the labels, as the M2 reader does (`fit_attention` without
+    pairs), because orienting by pair needs equal stimulus token counts
+    within a pair and raised an error on real pairs; a B5 tie goes to the
+    shallower layer number, not to the earlier candidate index.
+    `partitions.json` keeps the first 128 pairs of each draw, the largest
+    budget of the curve of section 7.6; stage 1 fits on the first 64, as
+    section 2.4 states.
+
 ## 10. Compute plan and order of runs
 
 Hardware: one RTX 4070 GPU with 8 GB for the forward passes, weights loaded
