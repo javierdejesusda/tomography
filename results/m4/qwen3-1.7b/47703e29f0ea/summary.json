@@ -1,0 +1,226 @@
+{
+  "_meta": {
+    "experiment": "m4",
+    "config_hash": "47703e29f0ea",
+    "seed": 0,
+    "git_sha": "3c9544806b37a5902a5684a09e2d093e9519c68e",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-28T14:43:53+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m4",
+      "model": "qwen3-1.7b",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "truth_polarity",
+        "utility"
+      ],
+      "scorers": [
+        "pca_diff",
+        "mean_diff",
+        "logistic",
+        "lda",
+        "ttpd",
+        "mlp"
+      ],
+      "readouts": [
+        "last",
+        "concept",
+        "concept_mean",
+        "mean",
+        "max",
+        "token_score_max",
+        "attention"
+      ],
+      "token_layers": [
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ],
+      "layer_rules": [
+        "best",
+        "top_k",
+        "joint"
+      ],
+      "top_k": 5,
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "shifts": [
+        "paraphrase"
+      ],
+      "controls": [
+        "text",
+        "random",
+        "shuffled"
+      ],
+      "reader_series": true,
+      "logistic_c": [
+        0.01,
+        0.1,
+        1.0,
+        10.0
+      ],
+      "mlp_alpha": [
+        0.1,
+        0.01,
+        0.001,
+        0.0001
+      ],
+      "mlp_hidden": [
+        64
+      ],
+      "baselines": [
+        "logistic/last",
+        "mean_diff/last"
+      ],
+      "n_boot": 2000,
+      "max_fpr": 0.01,
+      "m2_root": "results/m2",
+      "pilot_draws": null,
+      "n_folds": 8,
+      "n_trees": 500,
+      "mlp_repeats": 5,
+      "matched_pairs_per_task": 16,
+      "literal_alignment": "right"
+    }
+  },
+  "data": {
+    "tasks": [
+      "sentiment",
+      "truth",
+      "truth_polarity",
+      "utility"
+    ],
+    "conditions": {
+      "sentiment": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "truth": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "truth_polarity": [
+        "original",
+        "random",
+        "against",
+        "paraphrase_0",
+        "paraphrase_1",
+        "paraphrase_2"
+      ],
+      "utility": [
+        "original",
+        "random",
+        "against"
+      ]
+    },
+    "skipped": {
+      "sentiment": {},
+      "truth": {},
+      "truth_polarity": {},
+      "utility": {
+        "shift:paraphrase": "no paraphrase for template 'utility'"
+      }
+    },
+    "n_eval_pairs": {
+      "sentiment": {
+        "select": 214,
+        "report": 214
+      },
+      "truth": {
+        "select": 53,
+        "report": 59
+      },
+      "truth_polarity": {
+        "select": 256,
+        "report": 256
+      },
+      "utility": {
+        "select": 256,
+        "report": 256
+      }
+    },
+    "m2_reference": "results\\m2\\qwen3-1.7b\\f39cce3f3a97",
+    "m2_equality_passed": true,
+    "comparison_counts": {
+      "with_truth": {
+        "comparisons": 3885,
+        "higher_auroc": 1351,
+        "higher_pair_accuracy": 1353
+      },
+      "without_truth": {
+        "comparisons": 2775,
+        "higher_auroc": 1025,
+        "higher_pair_accuracy": 1017
+      },
+      "length_control": {
+        "with_truth": {
+          "comparisons": 105,
+          "higher_auroc": 5,
+          "higher_pair_accuracy": 6
+        },
+        "without_truth": {
+          "comparisons": 75,
+          "higher_auroc": 5,
+          "higher_pair_accuracy": 5
+        }
+      }
+    },
+    "truth_note": "Descriptive; gaps below about 0.06 are not detectable.",
+    "negation_split_caveat": "A statement and its negation have independent subset-specific IDs and can land in different splits. Held-out subsets, topics and polarities do not guarantee held-out facts.",
+    "n_draws": 10,
+    "literal_forest": {
+      "alignment": "right",
+      "layers": [
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ],
+      "caveat": "Decoy and paraphrase conditions shift token positions by construction."
+    }
+  }
+}
