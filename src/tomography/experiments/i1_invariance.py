@@ -1,33 +1,42 @@
-"""I1: data, prompts and stage 0 of the two-position invariance reader.
+"""I1: data, prompts and the held-in stages of the invariance reader.
 
 Implements the preregistration `docs/preregistration-invariance-reader.md`:
 the partitions and draws of section 2.4, the frozen wordings and renderings
 of section 3, the stage 0 prompt set of section 6.1 (and the stage 2 prompt
 set of section 7.1, defined but not run here) and the stage 0 activation
-cache of section 10. Section numbers in the docstrings refer to that file.
+cache of section 10. Stage 1 reads that cache, without loading a model.
+Section numbers in the docstrings refer to that file.
 """
 
 from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Mapping
 from collections.abc import Sequence
+from concurrent.futures import ProcessPoolExecutor
 import csv
+from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import replace
+from functools import lru_cache
 import io
 import math
+import multiprocessing
+import os
 from pathlib import Path
 import re
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
+from typing import cast
 from typing import get_args
 
 import numpy as np
+from numpy.typing import NDArray
 import torch
 
 from tomography.activations import collect_activations
+from tomography.chain import THREAD_VARIABLES
 from tomography.datasets.ethics import load_ethics_utility
 from tomography.datasets.facts import load_facts
 from tomography.datasets.geometry_of_truth import SOURCE as GOT_SOURCE
@@ -48,6 +57,8 @@ from tomography.experiments.variants import task_splits
 from tomography.experiments.variants import template_variants
 from tomography.model import LoadedModel
 from tomography.model import load_model
+from tomography.reading import invariance
+from tomography.reading import invariance_stats
 from tomography.templates import ChatFormat
 from tomography.templates import Span
 
@@ -1513,15 +1524,38 @@ MIN_RELATIVE_DEPTH = 0.4
 
 @dataclass(frozen=True, kw_only=True)
 class Config(ExperimentConfig):
-    """I1 stage 0 settings (sections 6.1 and 10).
+    """I1 settings (sections 6 and 10).
 
     Attributes:
         batch_size: Texts per forward pass.
+        stage: Stage to enter, 0 (cache) or 1 (tournament). Stage 2 only
+            checks the stored gate until the confirmation driver exists.
+        input_run: Stage 0 run directory for stage 1, or stage 1 run
+            directory for the stage 2 preflight.
+        go: Explicit authorization to start stage 1, recorded in its log.
+        workers: Number of independent stage 1 draw workers.
     """
 
     experiment: str = "i1"
     model: str = STAGE0_MODEL
     batch_size: int = 8
+    stage: Literal[0, 1, 2] = 0
+    input_run: str = ""
+    go: str = ""
+    workers: int = 1
+
+    def to_dict(self) -> dict[str, Any]:
+        """Keeps the existing config and run path for ordinary stage 0."""
+        values = super().to_dict()
+        if (
+            self.stage == 0
+            and not self.input_run
+            and not self.go
+            and self.workers == 1
+        ):
+            for field in ("stage", "input_run", "go", "workers"):
+                del values[field]
+        return values
 
 
 def candidate_layers(n_layers: int) -> tuple[int, ...]:
@@ -1641,17 +1675,307 @@ def encode_stage0(
     encode_prompts(loaded, prompts, run_dir, batch_size=batch_size)
 
 
+_STAGE1_ARMS = tuple(f"A{index}" for index in range(1, 9))
+
+
+def _stage1_renderings(
+    task: str, wording_set: Literal["fit", "score"]
+) -> invariance.Renderings:
+    conditions = _held_in_conditions(task, wording_set)
+    return invariance.Renderings(
+        tuple(_condition_name(*condition) for condition in conditions),
+        tuple(rule or "none" for _, rule in conditions),
+    )
+
+
+def _block_features(
+    features: invariance.FloatArray, rows: NDArray[np.int64]
+) -> invariance.FloatArray:
+    flat = rows.ravel()
+    start = int(flat[0])
+    # The stage 0 writer is condition-major. Keep a view on its cache
+    # rather than duplicating the full fit reservoir or pool in each worker.
+    if np.array_equal(flat, np.arange(start, start + flat.size)):
+        selected = features[:, start : start + flat.size]
+    else:
+        selected = features[:, flat]
+    return selected.reshape(features.shape[0], *rows.shape, -1).swapaxes(1, 2)
+
+
+@dataclass(frozen=True)
+class _Stage1Features:
+    fit_index: dict[str, int]
+    fit_stim: invariance.FloatArray
+    fit_last: invariance.FloatArray
+    pool: invariance.Pool
+    score_renderings: invariance.Renderings
+    score_stim: invariance.FloatArray
+    score_last: invariance.FloatArray
+
+
+def _pair_uids(pairs: Sequence[Sequence[str]]) -> list[str]:
+    return [uid for positive, negative in pairs for uid in (positive, negative)]
+
+
+@lru_cache(maxsize=1)
+def _stage1_features(cache: Path, task: str) -> _Stage1Features:
+    source = RunDir.open(cache)
+    partitions = cast(dict[str, Any], source.read_json("partitions"))
+    blocks = partitions[task]["blocks"]
+    fit_uids = blocks["fit"]["uids"]
+    fit = _stage1_renderings(task, "fit")
+    score = _stage1_renderings(task, "score")
+    rows = cast(list[dict[str, Any]], source.read_json(f"prompts_{task}"))
+    by_key: dict[tuple[str, str, str], int] = {}
+    valid = {"fit": fit.names, "pool": fit.names, "validation": score.names}
+    for index, row in enumerate(rows):
+        block, uid, condition = row["block"], row["uid"], row["condition"]
+        key = (block, uid, condition)
+        if condition not in valid.get(block, ()) or key in by_key:
+            raise ValueError(f"unexpected or duplicate {task} cache row: {key}")
+        by_key[key] = index
+
+    def indices(block: str, uids: Sequence[str]) -> NDArray[np.int64]:
+        return np.array(
+            [
+                [by_key[block, uid, name] for uid in uids]
+                for name in valid[block]
+            ],
+            dtype=np.int64,
+        )
+
+    validation_uids = _pair_uids(blocks["validation"]["pairs"])
+    arrays = source.read_arrays(f"activations_{task}")
+    layers = tuple(map(int, arrays["layers"]))
+    fit_rows = indices("fit", fit_uids)
+    pool_rows = indices("pool", blocks["pool"]["uids"])
+    # Load validation in its cached block order when it matches the explicit
+    # pair axis; the positive/negative order always comes from the partition.
+    score_rows = indices("validation", validation_uids)
+    stim, last = arrays["stimulus"], arrays["last"]
+    return _Stage1Features(
+        {uid: index for index, uid in enumerate(fit_uids)},
+        _block_features(stim, fit_rows),
+        _block_features(last, fit_rows),
+        invariance.Pool(
+            _block_features(stim, pool_rows),
+            _block_features(last, pool_rows),
+            fit,
+            layers,
+        ),
+        score,
+        _block_features(stim, score_rows),
+        _block_features(last, score_rows),
+    )
+
+
+@dataclass(frozen=True)
+class _Stage1Job:
+    cache: Path
+    task: str
+    draw: int
+    pairs: list[list[str]]
+    seed: int
+
+
+@dataclass(frozen=True)
+class _DrawResult:
+    scores: dict[str, dict[str, invariance_stats.FloatArray]]
+    audit: dict[str, Any]
+
+
+def _fit_stage1_draw(job: _Stage1Job) -> _DrawResult:
+    source = _stage1_features(job.cache, job.task)
+    index = [source.fit_index[uid] for uid in _pair_uids(job.pairs)]
+    n_pairs = len(job.pairs)
+    pool = source.pool
+    data = invariance.LabelledSet(
+        source.fit_stim[:, index],
+        source.fit_last[:, index],
+        np.tile(np.array([1, 0], dtype=np.int64), n_pairs),
+        np.repeat(np.arange(n_pairs, dtype=np.int64), 2),
+        pool.renderings,
+        pool.layers,
+    )
+    choices: dict[str, invariance.Candidate] = {}
+    scores: dict[str, dict[str, invariance_stats.FloatArray]] = {}
+    arms = {}
+    for arm in _STAGE1_ARMS:
+        layers = None
+        if len(invariance.ARMS[arm].positions) == 2:
+            layers = (choices["A4"].layers[0], choices["A3"].layers[0])
+        tuned = invariance.fit_arm(
+            arm, data, pool, seed=job.seed, layers=layers
+        )
+        choices[arm] = tuned.choice
+        reader = tuned.reader
+        scores[arm] = {
+            condition: reader.score(
+                source.score_stim[:, :, index],
+                source.score_last[:, :, index],
+            ).reshape(-1, 2)
+            for index, condition in enumerate(source.score_renderings.names)
+        }
+        arms[arm] = {
+            "layers": {block.position: block.layer for block in reader.blocks},
+            "params": reader.params,
+            "criterion": reader.criterion,
+            "fits": tuned.fits,
+            "fallbacks": tuned.fallbacks,
+            "refit_fallbacks": reader.fallbacks,
+        }
+    return _DrawResult(
+        scores,
+        {
+            "draw": job.draw,
+            "seed": job.seed,
+            "label_budget": len(data.labels),
+            "fit_renderings": len(data.renderings.names),
+            "pool_texts": pool.last.shape[1],
+            "validation_pairs": source.score_last.shape[1] // 2,
+            "arms": arms,
+        },
+    )
+
+
+def _stage1_scores(
+    task: str, draws_: Sequence[_DrawResult]
+) -> invariance_stats.TaskScores:
+    scores: dict[str, dict[str, invariance_stats.FloatArray]] = {}
+    for arm, conditions in draws_[0].scores.items():
+        scores[arm] = {
+            name: np.stack([draw.scores[arm][name] for draw in draws_])
+            for name in conditions
+        }
+    return invariance_stats.TaskScores(task, scores)
+
+
+def _run_stage1(config: Config, run_dir: RunDir) -> None:
+    if not config.go.strip():
+        raise ValueError(
+            "stage 1 needs an explicit go recorded with --set go=..."
+        )
+    if not config.input_run or config.workers < 1:
+        raise ValueError("stage 1 needs input_run and at least one worker")
+    cache = Path(config.input_run).resolve()
+    if cache == run_dir.path.resolve():
+        raise ValueError("stage 1 must not write into its stage 0 cache")
+    log = {"go": config.go, "stage0_cache": str(cache)}
+    run_dir.write_json("run_log", log)
+    partitions = cast(
+        dict[str, Any], RunDir.open(cache).read_json("partitions")
+    )
+    jobs = []
+    for task in TASKS:
+        task_draws = partitions[task]["draws"]
+        if not task_draws:
+            raise ValueError(f"{task} has no stored training draws")
+        for index, pairs in enumerate(task_draws):
+            seed = derive_seed(config.seed, "i1", "stage1", task, index)
+            jobs.append(_Stage1Job(cache, task, index, pairs, seed))
+
+    results: dict[str, list[_DrawResult]] = {task: [] for task in TASKS}
+    previous = {name: os.environ.get(name) for name in THREAD_VARIABLES}
+    try:
+        # Spawn fresh BLAS runtimes and give each worker one core.
+        for name in previous:
+            os.environ[name] = "1"
+        with ProcessPoolExecutor(
+            max_workers=config.workers,
+            mp_context=multiprocessing.get_context("spawn"),
+        ) as executor:
+            for job, result in zip(
+                jobs, executor.map(_fit_stage1_draw, jobs), strict=True
+            ):
+                results[job.task].append(result)
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    tasks = [_stage1_scores(task, entries) for task, entries in results.items()]
+    n_resamples = invariance_stats.N_RESAMPLES
+    gate = invariance_stats.stage1_gate(
+        tasks, rng=config.seed, n_resamples=n_resamples
+    )
+    decision = {
+        "comparator": gate.comparator,
+        "statistic": gate.statistic,
+        "interval": gate.interval,
+        "passed": gate.passed,
+        "reasons": gate.reasons,
+    }
+    run_dir.write_json(
+        "stage1",
+        {
+            "selection": asdict(gate.selection),
+            "gate": decision,
+            "bootstrap_seed": config.seed,
+            "n_resamples": n_resamples,
+            "bootstrap": gate.bootstrap,
+            "draws": {
+                task: [draw.audit for draw in entries]
+                for task, entries in results.items()
+            },
+        },
+    )
+    run_dir.write_json(
+        "run_log",
+        {**log, "gate": {"winner": gate.selection.winner, **decision}},
+    )
+
+
+def require_stage1_pass(stage1_run: RunDir) -> str:
+    """Returns the frozen winner only after a passed gate is logged.
+
+    Args:
+        stage1_run: The existing I1 stage 1 run.
+
+    Returns:
+        The winning arm to use unchanged in stage 2.
+
+    Raises:
+        ValueError: If the log does not contain a passed stage 1 gate.
+    """
+    try:
+        log = stage1_run.read_json("run_log")
+    except (FileNotFoundError, ValueError):
+        log = None
+    if isinstance(log, dict) and stage1_run.config.get("stage") == 1:
+        decision = log.get("gate")
+        if isinstance(decision, dict) and decision.get("passed") is True:
+            winner = decision.get("winner")
+            if isinstance(winner, str) and winner in _STAGE1_ARMS[4:]:
+                return winner
+    raise ValueError(
+        "stage 2 needs a stored passed stage 1 gate in run_log.json"
+    )
+
+
 def run(config: Config, run_dir: RunDir) -> None:
-    """Runs stage 0: partitions, then one float32 pass of Qwen3-0.6B base.
+    """Runs stage 0 or 1; guards the future stage 2 driver.
 
     Args:
         config: The experiment settings.
         run_dir: The run to write into.
 
     Raises:
-        ValueError: If the model is not the stage 0 checkpoint (section
-            6.1).
+        ValueError: If a stage lacks its input, authorization or gate, or
+            stage 0 is given a different checkpoint.
+        NotImplementedError: If stage 2 clears the gate check.
     """
+    if config.stage == 1:
+        _run_stage1(config, run_dir)
+        return
+    if config.stage == 2:
+        if not config.input_run:
+            raise ValueError(
+                "stage 2 needs input_run with a stored passed stage 1 gate"
+            )
+        require_stage1_pass(RunDir.open(config.input_run))
+        raise NotImplementedError("stage 2 is not implemented")
     if config.model != STAGE0_MODEL:
         raise ValueError(
             f"stage 0 runs on {STAGE0_MODEL} only, got {config.model!r}"
