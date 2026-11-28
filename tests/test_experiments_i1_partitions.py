@@ -291,14 +291,14 @@ def _utility_rows() -> list[Example]:
     for n in range(20):
         row("train", n, f"tr{n}a", f"tr{n}b")
     row("val", 20, "va", "vb")
-    row("test", 0, "tr0a", "te0b")
-    row("test", 1, "te0b", "te1b")
-    row("test", 2, "vb", "te2b")
+    row("test", 0, "tr0a", "ts0b")
+    row("test", 1, "ts0b", "ts1b")
+    row("test", 2, "vb", "ts2b")
     row("test", 3, "m2a", "m2b")
-    row("test", 4, "m2b", "te4b")
+    row("test", 4, "m2b", "ts4b")
     for n in range(5, 12):
-        row("test", n, f"te{n}a", f"te{n}b")
-    row("test", 12, "te11b", "te12b")
+        row("test", n, f"ts{n}a", f"ts{n}b")
+    row("test", 12, "ts11b", "ts12b")
     return rows
 
 
