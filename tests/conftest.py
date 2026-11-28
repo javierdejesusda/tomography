@@ -35,6 +35,8 @@ from tokenizers import trainers
 import torch
 from transformers import GPT2Config
 from transformers import GPT2LMHeadModel
+from transformers import LlamaConfig
+from transformers import LlamaForCausalLM
 from transformers import PreTrainedTokenizerFast
 from transformers import Qwen3Config
 from transformers import Qwen3ForCausalLM
@@ -45,6 +47,9 @@ from tomography.model import LoadedModel
 from tomography.model import wrap_model
 
 END_OF_TEXT = "<|endoftext|>"
+LLAMA_BEGIN = "<|begin_of_text|>"
+LLAMA_END = "<|end_of_text|>"
+LLAMA_SPECIAL_TOKENS = (LLAMA_BEGIN, LLAMA_END)
 QWEN_SPECIAL_TOKENS = (
     END_OF_TEXT,
     "<|im_start|>",
@@ -152,8 +157,32 @@ def _build_tiny_qwen3() -> LoadedModel:
     return wrap_model(Qwen3ForCausalLM(config), tokenizer)
 
 
+def _build_tiny_llama() -> LoadedModel:
+    """Mimics Llama 3: a BOS token, an end token and no pad token."""
+    tokenizer = _tiny_tokenizer(
+        LLAMA_SPECIAL_TOKENS,
+        bos_token=LLAMA_BEGIN,
+        eos_token=LLAMA_END,
+    )
+    config = LlamaConfig(
+        vocab_size=len(tokenizer),
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=3,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        max_position_embeddings=128,
+        initializer_range=0.5,
+        bos_token_id=tokenizer.bos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+    )
+    torch.manual_seed(SEED)
+    return wrap_model(LlamaForCausalLM(config), tokenizer)
+
+
 TINY_BUILDERS: dict[str, Callable[[], LoadedModel]] = {
     "gpt2": _build_tiny_gpt2,
+    "llama": _build_tiny_llama,
     "qwen3": _build_tiny_qwen3,
 }
 
@@ -168,8 +197,22 @@ def tiny_qwen3() -> LoadedModel:
     return _build_tiny_qwen3()
 
 
-@pytest.fixture(params=sorted(ARCHS), ids=sorted(ARCHS))
+# Llama is registered for the reading path only (stage 2 of the invariance
+# reader preregistration), so the full suite runs on every other layout and
+# `reading_arch` adds Llama to the model and activation tests.
+READING_ONLY_ARCHS = ("llama",)
+SUITE_ARCHS = tuple(
+    arch for arch in sorted(ARCHS) if arch not in READING_ONLY_ARCHS
+)
+
+
+@pytest.fixture(params=SUITE_ARCHS, ids=SUITE_ARCHS)
 def tiny_arch(request: pytest.FixtureRequest) -> LoadedModel:
+    return TINY_BUILDERS[request.param]()
+
+
+@pytest.fixture(params=sorted(ARCHS), ids=sorted(ARCHS))
+def reading_arch(request: pytest.FixtureRequest) -> LoadedModel:
     return TINY_BUILDERS[request.param]()
 
 

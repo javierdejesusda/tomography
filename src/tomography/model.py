@@ -99,6 +99,17 @@ ARCHS: Mapping[str, ArchSpec] = MappingProxyType(
             # token is the sink; a prepended separator takes the role over.
             default_bos="prepend",
         ),
+        "llama": ArchSpec(
+            model_type="llama",
+            blocks_path="model.layers",
+            final_norm_path="model.norm",
+            embed_paths=("model.embed_tokens",),
+            lora_targets=("q_proj", "v_proj"),
+            lora_fan_in_fan_out=False,
+            # Llama 3 base checkpoints are trained with <|begin_of_text|>
+            # first; the instruct chat template writes it itself.
+            default_bos="prepend",
+        ),
     }
 )
 
@@ -126,6 +137,21 @@ def _qwen3(
         arch="qwen3",
         post_trained=post_trained,
         license="Apache-2.0",
+        dtype="bfloat16",
+        chat_format="template" if post_trained else "plain",
+    )
+
+
+def _llama(
+    key: str, repo_id: str, revision: str, post_trained: bool
+) -> CheckpointSpec:
+    return CheckpointSpec(
+        key=key,
+        repo_id=repo_id,
+        revision=revision,
+        arch="llama",
+        post_trained=post_trained,
+        license="Llama 3.2 Community License",
         dtype="bfloat16",
         chat_format="template" if post_trained else "plain",
     )
@@ -187,6 +213,18 @@ MODELS: Mapping[str, CheckpointSpec] = MappingProxyType(
                 "qwen3-4b",
                 "Qwen/Qwen3-4B",
                 "1cfa9a7208912126459214e8b04321603b3df60c",
+                post_trained=True,
+            ),
+            _llama(
+                "llama-3.2-1b",
+                "meta-llama/Llama-3.2-1B",
+                "4e20de362430cd3b72f300e6b0f18e50e7166e08",
+                post_trained=False,
+            ),
+            _llama(
+                "llama-3.2-1b-instruct",
+                "meta-llama/Llama-3.2-1B-Instruct",
+                "9213176726f574b556790deb65791e0c5aa438b6",
                 post_trained=True,
             ),
         )
