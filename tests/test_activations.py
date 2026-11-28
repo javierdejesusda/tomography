@@ -94,9 +94,9 @@ def hook_count(lm: LoadedModel) -> int:
 
 
 def test_last_position_reads_the_last_real_token_at_every_layer(
-    tiny_arch: LoadedModel,
+    reading_arch: LoadedModel,
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
 
     act = collect_activations(lm, TEXTS, position="last", batch_size=3)
 
@@ -140,9 +140,9 @@ def test_layers_outside_zero_to_l_or_empty_raise(
 
 @pytest.mark.parametrize("position", ["last", "response", "concept", "mean"])
 def test_batched_collection_matches_per_example_collection(
-    tiny_arch: LoadedModel, position: str
+    reading_arch: LoadedModel, position: str
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     kwargs = {
         "position": position,
         "response_spans": SPANS,
@@ -158,9 +158,9 @@ def test_batched_collection_matches_per_example_collection(
 
 
 def test_response_position_has_one_row_per_overlapping_token(
-    tiny_arch: LoadedModel,
+    reading_arch: LoadedModel,
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     shift = bos_shift(lm)
 
     act = collect_activations(
@@ -227,9 +227,9 @@ def test_bos_is_never_part_of_a_span(tiny_gpt2: LoadedModel) -> None:
 
 
 def test_concept_position_is_one_row_at_the_last_concept_token(
-    tiny_arch: LoadedModel,
+    reading_arch: LoadedModel,
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     tokens = overlapping(lm, TEXT, CONCEPT)
 
     act = collect_activations(
@@ -253,9 +253,9 @@ def test_concept_position_is_one_row_at_the_last_concept_token(
 
 
 def test_mean_position_averages_the_response_tokens(
-    tiny_arch: LoadedModel,
+    reading_arch: LoadedModel,
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     rows = collect_activations(
         lm, TEXTS, position="response", response_spans=SPANS
     )
@@ -278,9 +278,9 @@ def test_mean_position_averages_the_response_tokens(
 
 
 def test_concept_mean_position_averages_every_concept_token(
-    tiny_arch: LoadedModel,
+    reading_arch: LoadedModel,
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     texts = [TEXT, TEXT]
     spans = [CONCEPT, WORD]
 
@@ -313,9 +313,9 @@ def test_concept_mean_position_averages_every_concept_token(
 
 
 def test_max_position_takes_the_featurewise_maximum_of_the_mean_tokens(
-    tiny_arch: LoadedModel,
+    reading_arch: LoadedModel,
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     rows = collect_activations(
         lm, TEXTS, position="response", response_spans=SPANS
     )
@@ -345,9 +345,9 @@ def test_max_position_takes_the_featurewise_maximum_of_the_mean_tokens(
 
 @pytest.mark.parametrize("position", ["last", "response", "concept", "mean"])
 def test_each_existing_position_reads_only_its_own_spans(
-    tiny_arch: LoadedModel, position: str
+    reading_arch: LoadedModel, position: str
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     shift = bos_shift(lm)
 
     act = collect_activations(
@@ -472,9 +472,9 @@ def test_invalid_arguments_raise(tiny_gpt2: LoadedModel) -> None:
     "share_prefix", [False, True], ids=["default", "shared-prefix"]
 )
 def test_collection_skips_the_lm_head_and_leaves_no_hooks(
-    tiny_arch: LoadedModel, share_prefix: bool
+    reading_arch: LoadedModel, share_prefix: bool
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
 
     def refuse(*args: object) -> None:
         raise AssertionError("the LM head must not run")
@@ -567,10 +567,10 @@ def test_the_shared_prefix_is_refused_outside_float32(
 @pytest.mark.parametrize("bos", ["prepend", "none"])
 @pytest.mark.parametrize("batch_size", [1, 2, 8], ids=["b1", "b2", "b8"])
 def test_shared_prefix_collection_equals_the_uncached_path(
-    tiny_arch: LoadedModel, bos: BosMode, batch_size: int
+    reading_arch: LoadedModel, bos: BosMode, batch_size: int
 ) -> None:
     assert_cached_matches_plain(
-        tiny_arch, PROMPTS, bos=bos, batch_size=batch_size
+        reading_arch, PROMPTS, bos=bos, batch_size=batch_size
     )
 
 
@@ -578,12 +578,12 @@ def test_shared_prefix_collection_equals_the_uncached_path(
     "position", ["response", "concept", "mean", "concept_mean", "max"]
 )
 def test_shared_prefix_reads_span_positions_in_full_prompt_coordinates(
-    tiny_arch: LoadedModel, position: str
+    reading_arch: LoadedModel, position: str
 ) -> None:
     spans = [(len(prompt) - ANSWER_LINE, len(prompt)) for prompt in PROMPTS]
 
     assert_cached_matches_plain(
-        tiny_arch,
+        reading_arch,
         PROMPTS,
         position=position,
         response_spans=spans,
@@ -593,9 +593,9 @@ def test_shared_prefix_reads_span_positions_in_full_prompt_coordinates(
 
 
 def test_shared_prefix_runs_the_prefix_once_and_then_only_suffix_tokens(
-    tiny_arch: LoadedModel,
+    reading_arch: LoadedModel,
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     lengths = lm.encode(PROMPTS).lengths
     shared = common_prefix(lm, PROMPTS, None)
 
@@ -618,9 +618,9 @@ def test_shared_prefix_runs_the_prefix_once_and_then_only_suffix_tokens(
 @pytest.mark.parametrize("bos", ["prepend", "none"])
 @pytest.mark.parametrize("batch_size", [1, 2, 3, 8], ids=str)
 def test_shared_prefix_length_is_the_token_level_prefix_for_any_batch_size(
-    tiny_arch: LoadedModel, bos: BosMode, batch_size: int
+    reading_arch: LoadedModel, bos: BosMode, batch_size: int
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
 
     assert _shared_prefix_length(
         lm, PROMPTS, bos=bos, batch_size=batch_size
@@ -628,9 +628,9 @@ def test_shared_prefix_length_is_the_token_level_prefix_for_any_batch_size(
 
 
 def test_a_prompt_that_differs_early_shortens_the_shared_prefix(
-    tiny_arch: LoadedModel,
+    reading_arch: LoadedModel,
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     early = PROMPTS[1].replace("seven", "eight", 1)
     texts = [*PROMPTS, early]
 
@@ -643,9 +643,9 @@ def test_a_prompt_that_differs_early_shortens_the_shared_prefix(
 
 
 def test_prompts_that_differ_only_in_the_last_token_share_all_the_rest(
-    tiny_arch: LoadedModel,
+    reading_arch: LoadedModel,
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     texts = [PROMPTS[0] + "x", PROMPTS[0] + "y"]
     length = lm.encode(texts[:1]).lengths[0]
 
@@ -667,9 +667,9 @@ def test_prompts_that_differ_only_in_the_last_token_share_all_the_rest(
     ids=["prefix-of-the-others", "identical", "single"],
 )
 def test_a_prompt_inside_the_common_prefix_keeps_one_suffix_token(
-    tiny_arch: LoadedModel, texts: list[str]
+    reading_arch: LoadedModel, texts: list[str]
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     shortest = min(lm.encode([text]).lengths[0] for text in texts)
 
     assert_cached_matches_plain(lm, texts)
@@ -692,12 +692,12 @@ def test_a_prompt_inside_the_common_prefix_keeps_one_suffix_token(
     ids=["no-shared-content", "span-at-the-start"],
 )
 def test_without_a_shareable_prefix_the_uncached_path_runs(
-    tiny_arch: LoadedModel,
+    reading_arch: LoadedModel,
     texts: list[str],
     kwargs: dict[str, Any],
     bos: BosMode,
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
 
     plain = collect_activations(lm, texts, bos=bos, **kwargs)
     cached, calls = decoder_calls(
@@ -723,9 +723,9 @@ def test_without_a_shareable_prefix_the_uncached_path_runs(
 
 @pytest.mark.parametrize("position", ["response", "mean"])
 def test_the_shared_prefix_stops_at_the_earliest_read_token(
-    tiny_arch: LoadedModel, position: str
+    reading_arch: LoadedModel, position: str
 ) -> None:
-    lm = tiny_arch
+    lm = reading_arch
     head = "".join(f"Q: {q}\nA: {a}\n\n" for q, a in SHOTS)
     texts = [f"{head}The sky is blue.", f"{head}The sky is green."]
     spans: list[tuple[int, int] | None] = [(len(head), len(t)) for t in texts]

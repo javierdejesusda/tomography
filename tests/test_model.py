@@ -14,6 +14,8 @@ from transformers import GPT2Config
 from transformers import GPT2LMHeadModel
 from transformers import LlamaConfig
 from transformers import LlamaForCausalLM
+from transformers import MistralConfig
+from transformers import MistralForCausalLM
 from transformers import Qwen3Config
 from transformers import Qwen3ForCausalLM
 
@@ -130,7 +132,7 @@ def test_unembedding_is_the_vocab_by_d_model_head_matrix(
 def test_wrap_model_rejects_an_unregistered_architecture(
     tiny_gpt2: LoadedModel,
 ) -> None:
-    config = LlamaConfig(
+    config = MistralConfig(
         vocab_size=64,
         hidden_size=32,
         intermediate_size=64,
@@ -138,8 +140,8 @@ def test_wrap_model_rejects_an_unregistered_architecture(
         num_attention_heads=4,
     )
 
-    with pytest.raises(UnsupportedArchitectureError, match="llama"):
-        wrap_model(LlamaForCausalLM(config), tiny_gpt2.tokenizer)
+    with pytest.raises(UnsupportedArchitectureError, match="mistral"):
+        wrap_model(MistralForCausalLM(config), tiny_gpt2.tokenizer)
 
 
 def test_wrap_model_requires_a_fast_tokenizer(tiny_gpt2: LoadedModel) -> None:
@@ -547,6 +549,70 @@ def test_qwen3_checkpoints_are_pinned_to_full_commit_shas(key: str) -> None:
     assert checkpoint.post_trained is post_trained
 
 
+LLAMA_PINS = {
+    "llama-3.2-1b": (
+        "meta-llama/Llama-3.2-1B",
+        "4e20de362430cd3b72f300e6b0f18e50e7166e08",
+        False,
+    ),
+    "llama-3.2-1b-instruct": (
+        "meta-llama/Llama-3.2-1B-Instruct",
+        "9213176726f574b556790deb65791e0c5aa438b6",
+        True,
+    ),
+}
+
+
+def test_llama_arch_spec_declares_the_hf_layout() -> None:
+    assert ARCHS["llama"] == ArchSpec(
+        model_type="llama",
+        blocks_path="model.layers",
+        final_norm_path="model.norm",
+        embed_paths=("model.embed_tokens",),
+        lora_targets=("q_proj", "v_proj"),
+        lora_fan_in_fan_out=False,
+        default_bos="prepend",
+    )
+
+
+@pytest.mark.parametrize("key", sorted(LLAMA_PINS))
+def test_llama_checkpoints_are_pinned_to_full_commit_shas(key: str) -> None:
+    repo_id, revision, post_trained = LLAMA_PINS[key]
+
+    checkpoint = MODELS[key]
+
+    assert (checkpoint.repo_id, checkpoint.revision) == (repo_id, revision)
+    assert checkpoint.arch == "llama"
+    assert checkpoint.dtype == "bfloat16"
+    assert checkpoint.license == "Llama 3.2 Community License"
+    assert checkpoint.post_trained is post_trained
+
+
+def test_wrap_model_reads_the_llama_layout() -> None:
+    config = LlamaConfig(
+        vocab_size=64,
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        bos_token_id=1,
+        eos_token_id=2,
+    )
+    model = LlamaForCausalLM(config)
+    tokenizer = SimpleNamespace(
+        is_fast=True, pad_token_id=None, eos_token_id=2, bos_token_id=1
+    )
+
+    lm = wrap_model(model, tokenizer)  # type: ignore[arg-type]
+
+    assert lm.spec is ARCHS["llama"]
+    assert (lm.n_layers, lm.d_model) == (2, 32)
+    assert lm.blocks is model.model.layers
+    assert lm.final_norm is model.model.norm
+    assert (lm.bos_id, lm.pad_id) == (1, 2)
+    assert lm.default_bos == "prepend"
+
+
 def test_tiny_qwen3_follows_the_qwen3_layout_without_a_bos_token(
     tiny_qwen3: LoadedModel,
 ) -> None:
@@ -632,14 +698,14 @@ def test_wrap_model_rejects_a_checkpoint_of_another_architecture(
 
 
 def test_load_model_pins_every_checkpoint_of_the_architecture(
-    tiny_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
+    reading_arch: LoadedModel, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    hub = FakeHub(tiny_arch)
+    hub = FakeHub(reading_arch)
     hub.install(monkeypatch)
     keys = [
         key
         for key, checkpoint in MODELS.items()
-        if checkpoint.arch == tiny_arch.spec.model_type
+        if checkpoint.arch == reading_arch.spec.model_type
     ]
 
     for key in keys:
@@ -661,7 +727,7 @@ def test_load_model_pins_every_checkpoint_of_the_architecture(
         expected_bos = (
             "none"
             if checkpoint.chat_format == "template"
-            else tiny_arch.spec.default_bos
+            else reading_arch.spec.default_bos
         )
         assert loaded.default_bos == expected_bos
     assert len(hub.model_calls) == len(keys) >= 1

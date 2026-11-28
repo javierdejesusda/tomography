@@ -929,6 +929,17 @@ starts only after an explicit go decision recorded in the run log.
 
 Deviations: none at the time of writing.
 
+Entries after the commit of this file, in date order:
+
+- 2026-11-28, addition announced in section 2.1 (no run of this study had
+  started and no result had been seen): the two Llama checkpoints are pinned
+  in `src/tomography/model.py`, `meta-llama/Llama-3.2-1B` at
+  `4e20de362430cd3b72f300e6b0f18e50e7166e08` and
+  `meta-llama/Llama-3.2-1B-Instruct` at
+  `9213176726f574b556790deb65791e0c5aa438b6` (the `main` revisions given by
+  the Hub API on that day), with a `llama` layout entry in the architecture
+  registry. No forward pass of either checkpoint has been run.
+
 ## 10. Compute plan and order of runs
 
 Hardware: one RTX 4070 GPU with 8 GB for the forward passes, weights loaded
