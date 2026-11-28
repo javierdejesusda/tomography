@@ -22,6 +22,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from tomography.reading.stats import holm_correction
+
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 
@@ -48,12 +50,6 @@ REQUIRED_WINS = {"qwen": 9, "llama": 5}
 # rounding of an exact rational AUROC never decides a boundary case.
 _TOL = 1e-12
 _CHUNK_ELEMENTS = 4_000_000
-
-
-def _as_rng(rng: np.random.Generator | int) -> np.random.Generator:
-    if isinstance(rng, np.random.Generator):
-        return rng
-    return np.random.default_rng(rng)
 
 
 def _percentile_interval(values: FloatArray) -> tuple[float, float]:
@@ -374,7 +370,7 @@ def stage1_gate(
     selection = stage1_selection(tasks)
     winner = selection.winner
     readers = (winner, *COMPARATOR_ARMS)
-    generator = _as_rng(rng)
+    generator = np.random.default_rng(rng)
     worst = np.zeros((n_resamples, len(readers)))
     for task in sorted(tasks, key=lambda t: t.task):
         counts = resample_pairs(task.n_pairs, n_resamples, generator)
@@ -611,7 +607,7 @@ def bootstrap_combination(
         The endpoint, its p value and the clean non-inferiority check.
     """
     counts = resample_pairs(
-        combination.scores.n_pairs, n_resamples, _as_rng(rng)
+        combination.scores.n_pairs, n_resamples, np.random.default_rng(rng)
     )
     return _combination_test(combination, counts)
 
@@ -626,12 +622,7 @@ def holm_adjust(p_values: FloatArray) -> FloatArray:
         Adjusted p values in the input order; a hypothesis is rejected at
         level alpha when its adjusted p value is below alpha.
     """
-    values = np.asarray(p_values, dtype=np.float64)
-    order = np.argsort(values, kind="stable")
-    steps = values[order] * (values.size - np.arange(values.size))
-    adjusted = np.empty_like(values)
-    adjusted[order] = np.minimum(np.maximum.accumulate(steps), 1.0)
-    return adjusted
+    return holm_correction(p_values).adjusted
 
 
 @dataclass(frozen=True)
@@ -734,7 +725,7 @@ def stage2(
             16 and 8 combinations.
     """
     pairs = _check_stage2(combinations)
-    generator = _as_rng(rng)
+    generator = np.random.default_rng(rng)
     counts = {
         task: resample_pairs(pairs[task], n_resamples, generator)
         for task in sorted(pairs)

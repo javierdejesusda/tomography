@@ -17,7 +17,6 @@ import csv
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import replace
-from functools import lru_cache
 import io
 import math
 import multiprocessing
@@ -689,11 +688,11 @@ def _finish(
     blocks: Sequence[Block],
     rest: Mapping[str, Sequence[Example]],
     counts: dict[str, int],
-    notes: list[str],
     sizes: BlockSizes,
     seed: int,
 ) -> TaskPartition:
     """Adds the pool to the labelled blocks and builds the partition."""
+    notes = []
     pool = fill_pool(
         "pool", hash_order(task, rest, seed=seed), rest, sizes.pool
     )
@@ -886,7 +885,6 @@ def partition_sentiment(
         (report, validation, fit),
         _without(after, fit),
         counts,
-        [],
         sizes,
         seed,
     )
@@ -946,9 +944,7 @@ def partition_truth(
     validation, fit, rest = _held_in_blocks(
         task, _singletons(train), sizes, seed
     )
-    return _finish(
-        task, (report, validation, fit), rest, counts, [], sizes, seed
-    )
+    return _finish(task, (report, validation, fit), rest, counts, sizes, seed)
 
 
 def negation_subjects(
@@ -1073,9 +1069,7 @@ def partition_negations(
     validation, fit, rest = _held_in_blocks(
         task, _without(groups, report), sizes, seed
     )
-    return _finish(
-        task, (report, validation, fit), rest, counts, [], sizes, seed
-    )
+    return _finish(task, (report, validation, fit), rest, counts, sizes, seed)
 
 
 def partition_utility(
@@ -1159,9 +1153,7 @@ def partition_utility(
     validation, fit, rest = _held_in_blocks(
         task, train_groups, sizes, seed, by_row=True
     )
-    return _finish(
-        task, (report, validation, fit), rest, counts, [], sizes, seed
-    )
+    return _finish(task, (report, validation, fit), rest, counts, sizes, seed)
 
 
 def m2_utility_report_pairs(
@@ -1565,19 +1557,6 @@ class Config(ExperimentConfig):
     go: str = ""
     workers: int = 1
 
-    def to_dict(self) -> dict[str, Any]:
-        """Keeps the existing config and run path for ordinary stage 0."""
-        values = super().to_dict()
-        if (
-            self.stage == 0
-            and not self.input_run
-            and not self.go
-            and self.workers == 1
-        ):
-            for field in ("stage", "input_run", "go", "workers"):
-                del values[field]
-        return values
-
 
 def candidate_layers(n_layers: int) -> tuple[int, ...]:
     """Returns the layers at relative depth 0.4-1.0 (section 2.1).
@@ -1739,8 +1718,18 @@ def _pair_uids(pairs: Sequence[Sequence[str]]) -> list[str]:
     return [uid for positive, negative in pairs for uid in (positive, negative)]
 
 
-@lru_cache(maxsize=1)
+_LOADED: dict[tuple[Path, str], _Stage1Features] = {}
+
+
 def _stage1_features(cache: Path, task: str) -> _Stage1Features:
+    # One task per worker at a time: drop the old cache before loading.
+    if (cache, task) not in _LOADED:
+        _LOADED.clear()
+        _LOADED[cache, task] = _load_stage1_features(cache, task)
+    return _LOADED[cache, task]
+
+
+def _load_stage1_features(cache: Path, task: str) -> _Stage1Features:
     source = RunDir.open(cache)
     partitions = cast(dict[str, Any], source.read_json("partitions"))
     blocks = partitions[task]["blocks"]
@@ -1885,7 +1874,7 @@ def _run_stage1(config: Config, run_dir: RunDir) -> None:
         raise ValueError("stage 1 must not write into its stage 0 cache")
     source = RunDir.open(cache)
     settings = source.config
-    if settings.get("experiment") != "i1" or settings.get("stage", 0) != 0:
+    if settings.get("experiment") != "i1" or settings.get("stage") != 0:
         raise ValueError("input_run must be an I1 stage 0 run")
     for field in ("model", "seed"):
         if settings.get(field) != getattr(config, field):
@@ -1978,7 +1967,10 @@ def require_stage1_pass(stage1_run: RunDir) -> str:
         decision = log.get("gate")
         if isinstance(decision, dict) and decision.get("passed") is True:
             winner = decision.get("winner")
-            if isinstance(winner, str) and winner in _STAGE1_ARMS[4:]:
+            if (
+                isinstance(winner, str)
+                and winner in invariance_stats.READER_ARMS
+            ):
                 return winner
     raise ValueError(
         "stage 2 needs a stored passed stage 1 gate in run_log.json"

@@ -32,15 +32,6 @@ SCORE = (
 ARMS = ("A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8")
 
 
-def test_stage0_retains_its_config_identity() -> None:
-    assert i1.Config().to_dict() == {
-        "experiment": "i1",
-        "model": "qwen3-0.6b-base",
-        "seed": 0,
-        "batch_size": 8,
-    }
-
-
 def _cache(root: Path, *, adverse: bool, leaked: str = "") -> RunDir:
     cache = RunDir.create(i1.Config(seed=17), out_root=root)
     records = {}

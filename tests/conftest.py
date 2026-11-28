@@ -198,9 +198,12 @@ def tiny_qwen3() -> LoadedModel:
 
 
 # Llama is registered for the reading path only (stage 2 of the invariance
-# reader preregistration), so the full suite runs on these two layouts and
+# reader preregistration), so the full suite runs on every other layout and
 # `reading_arch` adds Llama to the model and activation tests.
-SUITE_ARCHS = ("gpt2", "qwen3")
+READING_ONLY_ARCHS = ("llama",)
+SUITE_ARCHS = tuple(
+    arch for arch in sorted(ARCHS) if arch not in READING_ONLY_ARCHS
+)
 
 
 @pytest.fixture(params=SUITE_ARCHS, ids=SUITE_ARCHS)

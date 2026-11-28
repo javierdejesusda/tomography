@@ -26,11 +26,11 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import minimize
 from scipy.special import expit
-from scipy.stats import rankdata
 
 from tomography.activations import Activations
 from tomography.experiments.sweep import shuffle_within_groups
 from tomography.p9.risk import text_scores
+from tomography.reading import metrics
 from tomography.reading.probes import AttentionReader
 from tomography.reading.probes import fit_attention
 from tomography.reading.reader import RepReader
@@ -279,13 +279,7 @@ def auroc(scores: FloatArray, labels: NDArray[np.int64]) -> float:
     Returns:
         The AUROC.
     """
-    ranks = rankdata(scores)
-    positive = labels == 1
-    n_pos = int(positive.sum())
-    n_neg = labels.size - n_pos
-    return float(
-        (ranks[positive].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
-    )
+    return float(metrics.auroc(scores, labels))
 
 
 Position = Literal["stim", "last"]
@@ -1171,9 +1165,7 @@ def fit_stack(
         start=a1.choice.layers[0],
     )
     oof = scores[list(order)]
-    mean = oof.mean(axis=1)
-    spread = oof.std(axis=1)
-    spread[spread == 0.0] = 1.0
+    mean, spread = standardization(oof.T)
     z = ((oof - mean[:, None]) / spread[:, None]).T
     y = 2.0 * data.labels.astype(np.float64) - 1.0
     eigenvalues, vectors = np.linalg.eigh(z @ z.T)
@@ -1364,8 +1356,9 @@ def tune_attention(
         test = np.flatnonzero(folds == fold)
         train = np.flatnonzero(folds != fold)
         held_out = _stimuli(acts, test)
+        fit = _stimuli(acts, train)
         for j, lam in enumerate(LAMBDAS):
-            reader = _attention(_stimuli(acts, train), labels[train], lam)
+            reader = _attention(fit, labels[train], lam)
             scores = reader.score(held_out)
             for index in range(len(acts.layers)):
                 oof[index * len(LAMBDAS) + j, test] = scores[index]
