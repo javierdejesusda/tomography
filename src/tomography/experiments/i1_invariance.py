@@ -713,12 +713,26 @@ def _finish(
 
 
 def normalize_words(text: str) -> str:
-    """Lower-cases a text and collapses its whitespace (section 2.4)."""
+    """Lower-cases a text and collapses its whitespace (section 2.4).
+
+    Args:
+        text: The text.
+
+    Returns:
+        The lower-cased words joined by single spaces.
+    """
     return " ".join(text.lower().split())
 
 
 def normalize_statement(text: str) -> str:
-    """Normalizes a statement: `normalize_words`, trailing period removed."""
+    """Normalizes a statement: `normalize_words`, trailing period removed.
+
+    Args:
+        text: The statement.
+
+    Returns:
+        The normalized statement.
+    """
     words = normalize_words(text)
     return words[:-1] if words.endswith(".") else words
 
@@ -1538,7 +1552,8 @@ class Config(ExperimentConfig):
             checks the stored gate until the confirmation driver exists.
         input_run: Stage 0 run directory for stage 1, or stage 1 run
             directory for the stage 2 preflight.
-        go: Explicit authorization to start stage 1, recorded in its log.
+        go: Explicit authorization to start stage 0 or 1, recorded in the
+            run log before any data is read.
         workers: Number of independent stage 1 draw workers.
     """
 
@@ -1793,12 +1808,12 @@ class _DrawResult:
 
 def _fit_stage1_draw(job: _Stage1Job) -> _DrawResult:
     source = _stage1_features(job.cache, job.task)
-    index = [source.fit_index[uid] for uid in _pair_uids(job.pairs)]
+    rows = [source.fit_index[uid] for uid in _pair_uids(job.pairs)]
     n_pairs = len(job.pairs)
     pool = source.pool
     data = invariance.LabelledSet(
-        source.fit_stim[:, index],
-        source.fit_last[:, index],
+        source.fit_stim[:, rows],
+        source.fit_last[:, rows],
         np.tile(np.array([1, 0], dtype=np.int64), n_pairs),
         np.repeat(np.arange(n_pairs, dtype=np.int64), 2),
         pool.renderings,
@@ -1836,6 +1851,7 @@ def _fit_stage1_draw(job: _Stage1Job) -> _DrawResult:
         {
             "draw": job.draw,
             "seed": job.seed,
+            "pairs": job.pairs,
             "label_budget": len(data.labels),
             "fit_renderings": len(data.renderings.names),
             "pool_texts": pool.last.shape[1],
@@ -1867,11 +1883,19 @@ def _run_stage1(config: Config, run_dir: RunDir) -> None:
     cache = Path(config.input_run).resolve()
     if cache == run_dir.path.resolve():
         raise ValueError("stage 1 must not write into its stage 0 cache")
+    source = RunDir.open(cache)
+    settings = source.config
+    if settings.get("experiment") != "i1" or settings.get("stage", 0) != 0:
+        raise ValueError("input_run must be an I1 stage 0 run")
+    for field in ("model", "seed"):
+        if settings.get(field) != getattr(config, field):
+            raise ValueError(
+                f"stage 1 {field} {getattr(config, field)!r} differs from"
+                f" the stage 0 cache ({settings.get(field)!r})"
+            )
     log = {"go": config.go, "stage0_cache": str(cache)}
     run_dir.write_json("run_log", log)
-    partitions = cast(
-        dict[str, Any], RunDir.open(cache).read_json("partitions")
-    )
+    partitions = cast(dict[str, Any], source.read_json("partitions"))
     jobs = []
     for task in TASKS:
         task_draws = partitions[task]["draws"]
@@ -1987,6 +2011,11 @@ def run(config: Config, run_dir: RunDir) -> None:
         raise ValueError(
             f"stage 0 runs on {STAGE0_MODEL} only, got {config.model!r}"
         )
+    if not config.go.strip():
+        raise ValueError(
+            "stage 0 needs an explicit go recorded with --set go=..."
+        )
+    run_dir.write_json("run_log", {"go": config.go})
     partitions = load_partitions(seed=config.seed)
     loaded = load_model(config.model, dtype=torch.float32)
     encode_stage0(

@@ -216,6 +216,25 @@ def test_partitions_record_the_first_128_pairs_of_each_draw(
     ]
 
 
+def test_stage0_needs_a_recorded_go_before_loading_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(**kwargs: object) -> None:
+        raise RuntimeError("partitions loaded")
+
+    monkeypatch.setattr(i1, "load_partitions", fail)
+    config = i1.Config()
+    run_dir = RunDir.create(config, out_root=tmp_path / "without")
+    with pytest.raises(ValueError, match="go"):
+        i1.run(config, run_dir)
+    assert not (run_dir.path / "run_log.json").exists()
+    config = i1.Config(go="test go")
+    run_dir = RunDir.create(config, out_root=tmp_path / "with")
+    with pytest.raises(RuntimeError, match="partitions loaded"):
+        i1.run(config, run_dir)
+    assert run_dir.read_json("run_log") == {"go": "test go"}
+
+
 def test_stage0_runs_only_on_the_preregistered_checkpoint(
     tmp_path: Path,
 ) -> None:

@@ -42,7 +42,7 @@ def test_stage0_retains_its_config_identity() -> None:
 
 
 def _cache(root: Path, *, adverse: bool, leaked: str = "") -> RunDir:
-    cache = RunDir.create(i1.Config(), out_root=root)
+    cache = RunDir.create(i1.Config(seed=17), out_root=root)
     records = {}
     levels: dict[str, Any] = {}
     for task in i1.TASKS:
@@ -289,6 +289,7 @@ def test_stage1_rejects_against_in_fit_or_pool_cache(
             "stage": 1,
             "input_run": str(cache.path),
             "go": "synthetic test",
+            "seed": 17,
         }
     )
     output = RunDir.create(config, out_root=tmp_path / "out")
@@ -319,8 +320,47 @@ def test_stage1_fits_the_first_pairs_of_each_stored_draw(
     )
     output = RunDir.create(config, out_root=tmp_path / "out")
     i1.run(config, output)
-    for entries in _data(output, "stage1")["draws"].values():
+    for task, entries in _data(output, "stage1")["draws"].items():
+        assert [entry["pairs"] for entry in entries] == [
+            draw[:4] for draw in partitions[task]["draws"]
+        ]
         assert [entry["label_budget"] for entry in entries] == [8, 8]
+
+
+def test_stage1_refuses_an_input_run_that_is_not_stage0(
+    tmp_path: Path,
+) -> None:
+    settings = {"stage": 1, "go": "synthetic test", "seed": 17}
+    source = RunDir.create(
+        i1.Config.from_dict({**settings, "input_run": "elsewhere"}),
+        out_root=tmp_path / "source",
+    )
+    config = i1.Config.from_dict({**settings, "input_run": str(source.path)})
+    output = RunDir.create(config, out_root=tmp_path / "out")
+    with pytest.raises(ValueError, match="stage 0"):
+        i1.run(config, output)
+
+
+@pytest.mark.parametrize(
+    "setting", [{"seed": 3}, {"model": "qwen3-0.6b"}], ids=["seed", "model"]
+)
+def test_stage1_refuses_a_cache_built_with_other_settings(
+    tmp_path: Path, setting: dict[str, Any]
+) -> None:
+    cache = _cache(tmp_path / "cache", adverse=False)
+    config = i1.Config.from_dict(
+        {
+            "stage": 1,
+            "input_run": str(cache.path),
+            "go": "synthetic test",
+            "seed": 17,
+        }
+        | setting
+    )
+    output = RunDir.create(config, out_root=tmp_path / "out")
+    with pytest.raises(ValueError, match=next(iter(setting))):
+        i1.run(config, output)
+    assert not (output.path / "stage1.json").exists()
 
 
 def test_stage1_requires_explicit_go_before_reading_cache(

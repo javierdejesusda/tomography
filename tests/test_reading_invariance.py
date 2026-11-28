@@ -738,6 +738,11 @@ def _token_acts(
     )
 
 
+def test_single_position_readers_refuse_given_layers() -> None:
+    with pytest.raises(ValueError, match="layers"):
+        inv.tune(inv.ARMS["A1"], _labelled(), None, seed=0, layers=(0,))
+
+
 def test_b5_tunes_the_m2_attention_reader_with_c_from_lambda() -> None:
     acts = _token_acts(0, 16, (4, 6))
     labels = np.tile(np.array([0, 1]), 8)

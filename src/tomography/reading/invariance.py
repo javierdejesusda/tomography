@@ -908,10 +908,13 @@ def tune(
         The tuning, with the refitted reader.
 
     Raises:
-        ValueError: If a two-position reader gets no `layers`.
+        ValueError: If a two-position reader gets no `layers`, or a
+            single-position reader gets some.
     """
     choices: list[tuple[int, ...]]
     if len(spec.positions) == 1:
+        if layers is not None:
+            raise ValueError(f"{spec.name} tunes its layer; got layers")
         choices = [(index,) for index in range(len(data.layers))]
     elif layers is None:
         raise ValueError(f"{spec.name} needs the layers of its positions")

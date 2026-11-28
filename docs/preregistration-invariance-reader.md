@@ -976,8 +976,10 @@ Entries after the commit of this file, in date order:
     fallback key was needed on the real data); a utility linked group is
     keyed by its first row; the date string of the Llama chat template is
     fixed to "26 Jul 2024"; stage 0 runs one forward pass per prompt and
-    position (72,000 passes for 36,000 prompts); the go decision and the
-    stage 1 gate are stored in `run_log.json` of the stage 1 run.
+    position (72,000 passes for 36,000 prompts); stages 0 and 1 write their
+    go decision to the `run_log.json` of their run before reading any data,
+    and stage 1 stores its gate there too; stage 1 refuses an input run
+    that is not an I1 stage 0 run with the same model and seed.
   - Corrections from code review (commit `dc2c2cbc`): B5 orients its value
     heads on the labels, as the M2 reader does (`fit_attention` without
     pairs), because orienting by pair needs equal stimulus token counts
