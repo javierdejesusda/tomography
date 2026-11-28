@@ -637,7 +637,7 @@ def run(config: Config, run_dir: RunDir) -> None:
         ValueError: If the configuration or reference M2 run is invalid,
             or the recomputed reference rows disagree with the stored run.
     """
-    if config.literal_alignment not in ("right", "left"):
+    if config.literal_alignment not in token_forest.ALIGNMENTS:
         raise ValueError("literal_alignment must be right or left")
     if config.literal_alignment == "left" and config.model != "qwen3-0.6b-base":
         raise ValueError("left alignment requires qwen3-0.6b-base")
@@ -1113,21 +1113,18 @@ def _forest_choices(
     else:
         fits = {"fixed": fit(fixed_m)}
         selected = {"fixed": fixed_m}
-    scored: dict[str, list[Scores]] = {rule: [] for rule in fits}
+    by_m = {selected[rule]: forest for rule, forest in fits.items()}
+    val_scores = {m: forest.score(val) for m, forest in by_m.items()}
+    scored: dict[int, list[Scores]] = {m: [] for m in by_m}
     for rows in report:
         features = _flatten(transform(rows))
-        unique = {
-            m: fits[rule].score(features)
-            for rule, m in selected.items()
-            if rule == "default" or m != selected.get("default")
-        }
-        for rule, m in selected.items():
-            scored[rule].append(unique[m])
+        for m, forest in by_m.items():
+            scored[m].append(forest.score(features))
     return {
         rule: _matrix_choice(
-            train.layers, forest.score(val), np.stack(scored[rule]), select
+            train.layers, val_scores[m], np.stack(scored[m]), select
         )
-        for rule, forest in fits.items()
+        for rule, m in selected.items()
     }, selected
 
 
@@ -1309,7 +1306,7 @@ def _additional_choices(
     choices["concat_lr", "all"], info["concat_penalty"] = _concat_choice(
         config, train, select, report, seed
     )
-    bridge = tuple(layer for layer in BRIDGE_LAYERS if layer in train.layers)
+    bridge = token_forest.literal_layers(train.layers)
     if bridge:
         at = [train.layers.index(layer) for layer in bridge]
         forest, sizes = _forest_choices(
@@ -1665,7 +1662,7 @@ def _cross_metrics(
     arm: str,
     draws: Sequence[_ScoredDraw],
     metadata: Mapping[str, Any],
-    reference: Sequence[m2._Choice] | None = None,
+    reference: Sequence[m2._Choice],
 ) -> list[dict[str, Any]]:
     choices, penalties = zip(*draws, strict=True)
     entry = m2._Entry(
@@ -1676,11 +1673,10 @@ def _cross_metrics(
     for i, row in enumerate(rows):
         values = dict(zip(m2.COLUMNS, row, strict=True))
         values.update(metadata, arm=arm, penalties=list(penalties))
-        if reference is not None:
-            items = splits.report_items[values["condition"]]
-            area, pair = _draw_delta(choices, reference, i, items)
-            values.update(_draw_summary(config, "auroc", area))
-            values.update(_draw_summary(config, "pair", pair))
+        items = splits.report_items[values["condition"]]
+        area, pair = _draw_delta(choices, reference, i, items)
+        values.update(_draw_summary(config, "auroc", area))
+        values.update(_draw_summary(config, "pair", pair))
         results.append(values)
     return results
 
@@ -1710,6 +1706,10 @@ def _cross_task_rows(
     Returns:
         The metric rows of the transfer and pooled arms.
     """
+    budgets = {
+        "pooled_all": config.n_pairs,
+        "pooled_matched": config.matched_pairs_per_task,
+    }
     output = []
     for readout in CROSS_READOUTS:
         transfers: dict[tuple[int, int], list[_ScoredDraw]] = {}
@@ -1726,10 +1726,7 @@ def _cross_task_rows(
                     transfers.setdefault((origin, target), []).append(score)
             if len(prepared) < 2:
                 continue
-            for arm, budget in (
-                ("pooled_all", config.n_pairs),
-                ("pooled_matched", config.matched_pairs_per_task),
-            ):
+            for arm, budget in budgets.items():
                 train = _pool_rows(training, budget)
                 fits = _tuned_lr(
                     config,
@@ -1771,11 +1768,6 @@ def _cross_task_rows(
             )
         for (arm, method, target), draws in pooled.items():
             evaluated = prepared[target]
-            per_task_budget = (
-                config.n_pairs
-                if arm == "pooled_all"
-                else config.matched_pairs_per_task
-            )
             output.extend(
                 _cross_metrics(
                     config,
@@ -1785,7 +1777,7 @@ def _cross_task_rows(
                     arm,
                     draws,
                     {
-                        "train_pairs": len(prepared) * per_task_budget,
+                        "train_pairs": len(prepared) * budgets[arm],
                         "tuning": method,
                         "train_tasks": [s.task.name for s in prepared],
                     },
@@ -2060,37 +2052,33 @@ def _lodo_rows(
     for kind, name, held, report, base_arms in holdouts:
         original = report["original"]
         splits = m2._Splits([], original, report, {}, {}, {}, {}, None)
-        results: dict[tuple[str, m2.Readout], list[_ScoredDraw]] = {}
+        by_condition: dict[tuple[str, m2.Readout], list[list[_ScoredDraw]]] = {}
         for condition, items in report.items():
             activations = read(condition, items)
             for readout in CROSS_READOUTS:
                 for arm, scope in base_arms:
                     models, labels = fits[scope]
-                    condition_draws = [
-                        _score_best(fit, [activations[readout].data], labels)
-                        for fit in models[readout]
-                    ]
-                    key = (arm, readout)
-                    if key not in results:
-                        results[key] = condition_draws
-                    else:
-                        results[key] = [
-                            _ScoredDraw(
-                                dataclasses.replace(
-                                    current.choice,
-                                    report=np.concatenate(
-                                        [
-                                            current.choice.report,
-                                            score.choice.report,
-                                        ]
-                                    ),
-                                ),
-                                current.penalty,
+                    by_condition.setdefault((arm, readout), []).append(
+                        [
+                            _score_best(
+                                fit, [activations[readout].data], labels
                             )
-                            for current, score in zip(
-                                results[key], condition_draws, strict=True
-                            )
+                            for fit in models[readout]
                         ]
+                    )
+        results = {
+            key: [
+                _ScoredDraw(
+                    dataclasses.replace(
+                        draws[0].choice,
+                        report=np.concatenate([d.choice.report for d in draws]),
+                    ),
+                    draws[0].penalty,
+                )
+                for draws in zip(*conditions, strict=True)
+            ]
+            for key, conditions in by_condition.items()
+        }
         for (arm, readout), scores in results.items():
             scope = dict(base_arms)[arm]
             output.extend(
