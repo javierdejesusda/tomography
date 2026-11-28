@@ -761,3 +761,24 @@ def test_top_k_layers_rejects_bad_k_and_constant_layers(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         top_k_layers(*_layer_inputs({"val_scores": val_scores}), k=k)
+
+
+def test_best_validation_layer_last_keeps_the_selected_raw_scores() -> None:
+    metric = np.array([0.75, 0.75])
+    val = np.array([[0.0, 1.0], [2.0, 4.0]])
+    report = np.array([[1.0, 2.0], [6.0, 1.0]])
+    assert best_validation_layer(metric, (2, 4), val, report).layers == (2,)
+    choice = best_validation_layer(
+        metric, (2, 4), val, report, tie_break="last"
+    )
+    assert choice.layers == (4,)
+    np.testing.assert_array_equal(choice.val_scores, [2.0, 4.0])
+    np.testing.assert_array_equal(choice.test_scores, [6.0, 1.0])
+
+
+def test_best_validation_layer_rejects_an_unknown_tie_break() -> None:
+    scores = np.array([[0.0, 1.0], [0.0, 2.0]])
+    with pytest.raises(ValueError, match="sideways"):
+        best_validation_layer(
+            np.array([0.5, 0.5]), (1, 2), scores, scores, tie_break="sideways"
+        )

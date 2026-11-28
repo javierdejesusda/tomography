@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 import math
 from typing import Any
+from typing import Literal
 from typing import NamedTuple
 
 import numpy as np
@@ -510,10 +511,12 @@ def best_validation_layer(
     layers: Sequence[int],
     val_scores: FloatArray,
     test_scores: FloatArray,
+    *,
+    tie_break: Literal["first", "last"] = "first",
 ) -> LayerChoice:
     """Reads the scores of the layer with the best validation metric.
 
-    The layer is the first maximum of `val_metric`, as chosen by
+    The layer is an exact maximum of `val_metric`, as chosen by
     `tomography.reading.metrics.best_layer`. Its raw scores are returned: a
     single layer needs no standardization.
 
@@ -525,6 +528,7 @@ def best_validation_layer(
             (K, n_val).
         test_scores: Test score of each stimulus per layer, shape
             (K, n_test).
+        tie_break: Which exact maximum to keep, in input order.
 
     Returns:
         The chosen layer with its validation and test scores.
@@ -532,12 +536,12 @@ def best_validation_layer(
     Raises:
         ValueError: If the shapes disagree, a split has no stimulus,
             `val_metric` holds NaN, a layer repeats, or a score is not
-            finite.
+            finite, or `tie_break` is unknown.
     """
     metric = _layer_metric(val_metric, layers)
     val = _per_layer(val_scores, "val_scores", len(layers))
     test = _per_layer(test_scores, "test_scores", len(layers))
-    layer = best_layer(metric, layers)
+    layer = best_layer(metric, layers, tie_break=tie_break)
     position = list(layers).index(layer)
     return LayerChoice((layer,), val[position], test[position])
 
@@ -596,13 +600,23 @@ def top_k_layers(
     # 0, so constancy is tested on the range.
     if (np.ptp(picked, axis=1) == 0.0).any():
         raise ValueError("a chosen layer has constant validation scores")
-    mean = picked.mean(axis=1, keepdims=True)
-    std = picked.std(axis=1, keepdims=True)
+    standardized_val, standardized_test = _standardize_layer_scores(
+        picked, test[chosen]
+    )
     return LayerChoice(
         tuple(int(layers[i]) for i in chosen),
-        ((picked - mean) / std).mean(axis=0),
-        ((test[chosen] - mean) / std).mean(axis=0),
+        standardized_val.mean(axis=0),
+        standardized_test.mean(axis=0),
     )
+
+
+def _standardize_layer_scores(
+    val: NDArray[np.float64], test: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Scales each nonconstant layer with its select mean and deviation."""
+    mean = val.mean(axis=1, keepdims=True)
+    std = val.std(axis=1, keepdims=True)
+    return (val - mean) / std, (test - mean) / std
 
 
 def _balanced_threshold(

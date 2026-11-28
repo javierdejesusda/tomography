@@ -1,0 +1,191 @@
+{
+  "_meta": {
+    "experiment": "m4",
+    "config_hash": "5d03e8a85219",
+    "seed": 0,
+    "git_sha": "3c9544806b37a5902a5684a09e2d093e9519c68e",
+    "git_dirty": false,
+    "device": "cuda:0 (NVIDIA GeForce RTX 4070 Laptop GPU)",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "versions": {
+      "python": "3.12.6",
+      "tomography": "0.1.0",
+      "torch": "2.14.1+cu130",
+      "transformers": "5.19.0",
+      "numpy": "2.5.4",
+      "scikit-learn": "1.9.1",
+      "datasets": "5.1.0",
+      "peft": "0.21.2",
+      "matplotlib": "3.11.2",
+      "plotly": "7.1.0"
+    },
+    "started_at": "2026-11-28T03:04:51+00:00",
+    "finished_at": null,
+    "config": {
+      "experiment": "m4",
+      "model": "qwen3-0.6b-base",
+      "seed": 0,
+      "n_seeds": 10,
+      "n_pairs": 64,
+      "n_eval_pairs": 256,
+      "method": "pca_diff",
+      "preprocess": "center",
+      "position": "last",
+      "eval_position": null,
+      "layers": null,
+      "bos": null,
+      "batch_size": 8,
+      "tasks": [
+        "sentiment",
+        "truth",
+        "truth_polarity",
+        "utility"
+      ],
+      "scorers": [
+        "pca_diff",
+        "mean_diff",
+        "logistic",
+        "lda",
+        "ttpd",
+        "mlp"
+      ],
+      "readouts": [
+        "last",
+        "concept",
+        "concept_mean",
+        "mean",
+        "max",
+        "token_score_max",
+        "attention"
+      ],
+      "token_layers": [
+        4,
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ],
+      "layer_rules": [
+        "best",
+        "top_k",
+        "joint"
+      ],
+      "top_k": 5,
+      "decoys": [
+        "random",
+        "against"
+      ],
+      "shifts": [
+        "paraphrase"
+      ],
+      "controls": [
+        "text",
+        "random",
+        "shuffled"
+      ],
+      "reader_series": true,
+      "logistic_c": [
+        0.01,
+        0.1,
+        1.0,
+        10.0
+      ],
+      "mlp_alpha": [
+        0.1,
+        0.01,
+        0.001,
+        0.0001
+      ],
+      "mlp_hidden": [
+        64
+      ],
+      "baselines": [
+        "logistic/last",
+        "mean_diff/last"
+      ],
+      "n_boot": 2000,
+      "max_fpr": 0.01,
+      "m2_root": "results/m2",
+      "pilot_draws": null,
+      "n_folds": 8,
+      "n_trees": 500,
+      "mlp_repeats": 5,
+      "matched_pairs_per_task": 16,
+      "literal_alignment": "right"
+    }
+  },
+  "data": {
+    "rows": [
+      "logistic/last/best",
+      "logistic/last/top_k",
+      "logistic/last/best_deep",
+      "mean_diff/last/best",
+      "mean_diff/last/top_k",
+      "mean_diff/last/best_deep",
+      "logistic/max/best",
+      "logistic/max/top_k",
+      "logistic/max/best_deep",
+      "mean_diff/max/best",
+      "mean_diff/max/top_k",
+      "mean_diff/max/best_deep",
+      "logistic/mean/best",
+      "logistic/mean/top_k",
+      "logistic/mean/best_deep",
+      "mean_diff/mean/best",
+      "mean_diff/mean/top_k",
+      "mean_diff/mean/best_deep",
+      "equal_mean/last/all",
+      "weighted_mean/last/all",
+      "stack_lr/last/all",
+      "stack_mlp/last/all",
+      "stack_forest/last/all",
+      "vector_forest/last/default",
+      "vector_forest/last/tuned",
+      "pca16_forest/last/default",
+      "pca16_forest/last/tuned",
+      "pca64_forest/last/default",
+      "pca64_forest/last/tuned",
+      "concat_lr/last/all",
+      "bridge_forest/last/fixed",
+      "equal_mean/max/all",
+      "weighted_mean/max/all",
+      "stack_lr/max/all",
+      "stack_mlp/max/all",
+      "stack_forest/max/all",
+      "vector_forest/max/default",
+      "vector_forest/max/tuned",
+      "pca16_forest/max/default",
+      "pca16_forest/max/tuned",
+      "pca64_forest/max/default",
+      "pca64_forest/max/tuned",
+      "concat_lr/max/all",
+      "bridge_forest/max/fixed",
+      "equal_mean/mean/all",
+      "weighted_mean/mean/all",
+      "stack_lr/mean/all",
+      "stack_mlp/mean/all",
+      "stack_forest/mean/all",
+      "vector_forest/mean/default",
+      "vector_forest/mean/tuned",
+      "pca16_forest/mean/default",
+      "pca16_forest/mean/tuned",
+      "pca64_forest/mean/default",
+      "pca64_forest/mean/tuned",
+      "concat_lr/mean/all",
+      "bridge_forest/mean/fixed",
+      "literal_forest/tokens/fixed",
+      "length_control/tokens/all"
+    ],
+    "cols": [
+      "original",
+      "random",
+      "against",
+      "paraphrase_0",
+      "paraphrase_1",
+      "paraphrase_2"
+    ],
+    "title": "truth_polarity: report AUROC of each cell (mean over seeds)"
+  }
+}
