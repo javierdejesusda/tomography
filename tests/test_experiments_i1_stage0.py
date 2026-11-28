@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -190,6 +191,28 @@ def test_partitions_are_written_before_any_encoding(
     assert written["utility"]["notes"] == ["a note"]
     assert written["truth"]["draws"] == [
         [list(p) for p in draw] for draw in i1.draws(parts["truth"], n_pairs=1)
+    ]
+
+
+def test_partitions_record_the_first_128_pairs_of_each_draw(
+    tiny_qwen3: LoadedModel, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("encoding started")
+
+    monkeypatch.setattr(i1, "collect_activations", fail)
+    run_dir = _run_dir(tmp_path)
+    parts = _partitions()
+    blocks = {**parts["truth"].blocks, "fit": _block("truth", "fit", 130)}
+    parts["truth"] = replace(parts["truth"], blocks=MappingProxyType(blocks))
+    with pytest.raises(RuntimeError, match="encoding started"):
+        i1.encode_stage0(tiny_qwen3, parts, run_dir)
+    written: Any = run_dir.read_json("partitions")
+    stored = written["truth"]["draws"]
+    longest = i1.draws(parts["truth"], n_pairs=128)
+    assert stored == [[list(p) for p in draw] for draw in longest]
+    assert [draw[:64] for draw in stored] == [
+        [list(p) for p in draw] for draw in i1.draws(parts["truth"])
     ]
 
 

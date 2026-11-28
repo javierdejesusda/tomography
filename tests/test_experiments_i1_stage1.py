@@ -299,6 +299,30 @@ def test_stage1_rejects_against_in_fit_or_pool_cache(
     assert not (output.path / "stage1.json").exists()
 
 
+def test_stage1_fits_the_first_pairs_of_each_stored_draw(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = _cache(tmp_path / "cache", adverse=False)
+    partitions = _data(cache, "partitions")
+    for record in partitions.values():
+        fit_pairs = record["blocks"]["fit"]["pairs"]
+        record["draws"] = [fit_pairs, fit_pairs[::-1]]
+    cache.write_json("partitions", partitions)
+    monkeypatch.setattr(i1, "N_PAIRS", 4)
+    config = i1.Config.from_dict(
+        {
+            "stage": 1,
+            "input_run": str(cache.path),
+            "go": "synthetic test",
+            "seed": 17,
+        }
+    )
+    output = RunDir.create(config, out_root=tmp_path / "out")
+    i1.run(config, output)
+    for entries in _data(output, "stage1")["draws"].values():
+        assert [entry["label_budget"] for entry in entries] == [8, 8]
+
+
 def test_stage1_requires_explicit_go_before_reading_cache(
     tmp_path: Path,
 ) -> None:

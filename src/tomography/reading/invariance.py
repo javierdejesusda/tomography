@@ -1282,17 +1282,11 @@ def _one_layer(acts: Activations, index: int) -> Activations:
 
 
 def _attention(
-    acts: Activations,
-    labels: NDArray[np.int64],
-    pairs: NDArray[np.int64],
-    lam: float,
+    acts: Activations, labels: NDArray[np.int64], lam: float
 ) -> AttentionReader:
-    return fit_attention(
-        acts,
-        labels=labels,
-        pairs=pair_matrix(pairs),
-        c=1.0 / (labels.size * lam),
-    )
+    # Called as M2 calls it, without pairs: orienting by pair would need
+    # equal stimulus token counts within every pair.
+    return fit_attention(acts, labels=labels, c=1.0 / (labels.size * lam))
 
 
 @dataclass(frozen=True, eq=False)
@@ -1368,19 +1362,21 @@ def tune_attention(
         train = np.flatnonzero(folds != fold)
         held_out = _stimuli(acts, test)
         for j, lam in enumerate(LAMBDAS):
-            reader = _attention(
-                _stimuli(acts, train), labels[train], pairs[train], lam
-            )
+            reader = _attention(_stimuli(acts, train), labels[train], lam)
             scores = reader.score(held_out)
             for index in range(len(acts.layers)):
                 oof[index * len(LAMBDAS) + j, test] = scores[index]
     criteria = np.array([auroc(scores, labels) for scores in oof])
     best = max(
         range(len(candidates)),
-        key=lambda c: (criteria[c], candidates[c][1], -candidates[c][0]),
+        key=lambda c: (
+            criteria[c],
+            candidates[c][1],
+            -acts.layers[candidates[c][0]],
+        ),
     )
     index, lam = candidates[best]
-    reader = _attention(_one_layer(acts, index), labels, pairs, lam)
+    reader = _attention(_one_layer(acts, index), labels, lam)
     return AttentionTuning(
         reader=reader,
         layer=acts.layers[index],

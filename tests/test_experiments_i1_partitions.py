@@ -316,11 +316,7 @@ def test_utility_excludes_test_pairs_linked_to_train_or_m2_report() -> None:
     assert not pairs & excluded
     groups = [{"ethics-util-test-11", "ethics-util-test-12"}]
     for group in groups:
-        assert (
-            not pairs & group
-            or group <= {str(e.meta["pair"]) for e in report.examples}
-            or set(report.keys)
-        )
+        assert not pairs & group or group <= pairs
     for name in ("validation", "fit", "pool"):
         assert all(e.split == "train" for e in part.blocks[name].examples)
 

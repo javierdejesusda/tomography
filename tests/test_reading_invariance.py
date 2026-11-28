@@ -714,20 +714,26 @@ def test_text_only_is_the_word_tfidf_regression() -> None:
     )
 
 
-def _token_acts(seed: int, n: int, layers: tuple[int, ...]) -> Activations:
+def _token_acts(
+    seed: int,
+    n: int,
+    layers: tuple[int, ...],
+    counts: NDArray[np.int64] | None = None,
+) -> Activations:
     rng = np.random.default_rng(seed)
-    tokens = 3
+    sizes = np.full(n, 3) if counts is None else counts
     y = np.tile(np.array([-1.0, 1.0]), n // 2)
-    data = rng.normal(size=(len(layers), n * tokens, 4))
-    data[0, :, 0] += np.repeat(y, tokens)
+    data = rng.normal(size=(len(layers), int(sizes.sum()), 4))
+    data[0, :, 0] += np.repeat(y, sizes)
+    ranks = np.concatenate([np.arange(size) for size in sizes])
     return Activations(
         data=data.astype(np.float32),
         layers=layers,
         position="response",
-        row_stimulus=np.repeat(np.arange(n), tokens),
-        row_rank=np.tile(np.arange(tokens), n),
-        row_token=np.tile(np.arange(tokens), n),
-        row_token_id=np.zeros(n * tokens, dtype=np.int64),
+        row_stimulus=np.repeat(np.arange(n), sizes),
+        row_rank=ranks,
+        row_token=ranks,
+        row_token_id=np.zeros(int(sizes.sum()), dtype=np.int64),
         n_stimuli=n,
     )
 
@@ -744,12 +750,29 @@ def test_b5_tunes_the_m2_attention_reader_with_c_from_lambda() -> None:
         assert tuning.criteria[c] == inv.auroc(tuning.oof[c], labels)
     index = acts.layers.index(tuning.layer)
     single = replace(acts, data=acts.data[[index]], layers=(tuning.layer,))
-    reference = fit_attention(
-        single,
-        labels=labels,
-        pairs=inv.pair_matrix(pairs),
-        c=1.0 / (16 * tuning.lam),
-    )
+    reference = fit_attention(single, labels=labels, c=1.0 / (16 * tuning.lam))
     np.testing.assert_allclose(
         tuning.score(acts), reference.score(single)[0], atol=1e-6
     )
+
+
+def test_b5_fits_pairs_whose_texts_have_unequal_token_counts() -> None:
+    acts = _token_acts(0, 16, (4, 6), counts=np.tile(np.array([2, 3]), 8))
+    labels = np.tile(np.array([0, 1]), 8)
+    pairs = np.repeat(np.arange(8), 2)
+    tuning = inv.tune_attention(acts, labels, pairs, seed=2)
+    index = acts.layers.index(tuning.layer)
+    single = replace(acts, data=acts.data[[index]], layers=(tuning.layer,))
+    reference = fit_attention(single, labels=labels, c=1.0 / (16 * tuning.lam))
+    np.testing.assert_allclose(
+        tuning.score(acts), reference.score(single)[0], atol=1e-6
+    )
+
+
+def test_b5_ties_go_to_the_shallower_layer_number() -> None:
+    acts = _token_acts(0, 16, (6, 4))
+    acts = replace(acts, data=np.stack([acts.data[0], acts.data[0]]))
+    labels = np.tile(np.array([0, 1]), 8)
+    pairs = np.repeat(np.arange(8), 2)
+    tuning = inv.tune_attention(acts, labels, pairs, seed=2)
+    assert tuning.layer == 4

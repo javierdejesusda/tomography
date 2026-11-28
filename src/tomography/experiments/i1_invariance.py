@@ -1183,11 +1183,17 @@ def m2_utility_report_pairs(
     return frozenset(uid.rpartition(":")[0] for uid in stimuli.uids)
 
 
+# Labelled pairs of a draw (section 2.4), and the pairs of each draw kept in
+# `partitions.json`: the largest budget of the label-budget curve (7.6).
+N_PAIRS = 64
+CURVE_PAIRS = 128
+
+
 def draws(
     partition: TaskPartition,
     *,
     n_draws: int = 10,
-    n_pairs: int = 64,
+    n_pairs: int = N_PAIRS,
     seed: int = 0,
 ) -> tuple[tuple[tuple[str, str], ...], ...]:
     """Returns the labelled training draws of a task (section 2.4).
@@ -1575,7 +1581,7 @@ def _partition_record(partition: TaskPartition, seed: int) -> dict[str, Any]:
         "blocks": partition.item_ids(),
         "draws": [
             [list(pair) for pair in draw]
-            for draw in draws(partition, seed=seed)
+            for draw in draws(partition, n_pairs=CURVE_PAIRS, seed=seed)
         ],
         "counts": dict(partition.counts),
         "notes": list(partition.notes),
@@ -1657,7 +1663,8 @@ def encode_stage0(
 
     Writes `partitions.json` first (the item ids, draws, counts and notes of
     every task, step 1 of section 10), then `pool_levels.json`, then the
-    cache of `encode_prompts`.
+    cache of `encode_prompts`. Each draw keeps its first `CURVE_PAIRS`
+    pairs; stage 1 fits on the first `N_PAIRS` of them.
 
     Args:
         loaded: The wrapped model, in float32 for the preregistered run.
@@ -1872,7 +1879,7 @@ def _run_stage1(config: Config, run_dir: RunDir) -> None:
             raise ValueError(f"{task} has no stored training draws")
         for index, pairs in enumerate(task_draws):
             seed = derive_seed(config.seed, "i1", "stage1", task, index)
-            jobs.append(_Stage1Job(cache, task, index, pairs, seed))
+            jobs.append(_Stage1Job(cache, task, index, pairs[:N_PAIRS], seed))
 
     results: dict[str, list[_DrawResult]] = {task: [] for task in TASKS}
     previous = {name: os.environ.get(name) for name in THREAD_VARIABLES}
