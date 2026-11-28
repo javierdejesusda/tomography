@@ -2006,7 +2006,7 @@ def _lodo_rows(
     Args:
         config: The run configuration.
         loaded: The wrapped model.
-        examples: Examples by task name.
+        examples: Examples by dataset source name.
         take: Number of draws.
 
     Returns:
