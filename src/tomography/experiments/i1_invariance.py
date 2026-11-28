@@ -15,6 +15,7 @@ import csv
 from dataclasses import dataclass
 from dataclasses import replace
 import io
+import math
 from pathlib import Path
 import re
 from types import MappingProxyType
@@ -24,7 +25,9 @@ from typing import Literal
 from typing import get_args
 
 import numpy as np
+import torch
 
+from tomography.activations import collect_activations
 from tomography.datasets.ethics import load_ethics_utility
 from tomography.datasets.facts import load_facts
 from tomography.datasets.geometry_of_truth import SOURCE as GOT_SOURCE
@@ -32,6 +35,8 @@ from tomography.datasets.geometry_of_truth import load_geometry_of_truth
 from tomography.datasets.records import Example
 from tomography.datasets.sources import fetch
 from tomography.datasets.sst2 import load_sst2
+from tomography.experiments.base import ExperimentConfig
+from tomography.experiments.base import RunDir
 from tomography.experiments.base import derive_seed
 from tomography.experiments.m2_readers import POLARITY_TASKS
 from tomography.experiments.variants import READING_TASKS
@@ -42,6 +47,7 @@ from tomography.experiments.variants import task_set
 from tomography.experiments.variants import task_splits
 from tomography.experiments.variants import template_variants
 from tomography.model import LoadedModel
+from tomography.model import load_model
 from tomography.templates import ChatFormat
 from tomography.templates import Span
 
@@ -1499,3 +1505,177 @@ def pool_levels(
             task = out.setdefault(prompt.task, {})
             task.setdefault(wording, {})[prompt.uid] = prompt.level
     return out
+
+
+STAGE0_MODEL = "qwen3-0.6b-base"
+MIN_RELATIVE_DEPTH = 0.4
+
+
+@dataclass(frozen=True, kw_only=True)
+class Config(ExperimentConfig):
+    """I1 stage 0 settings (sections 6.1 and 10).
+
+    Attributes:
+        batch_size: Texts per forward pass.
+    """
+
+    experiment: str = "i1"
+    model: str = STAGE0_MODEL
+    batch_size: int = 8
+
+
+def candidate_layers(n_layers: int) -> tuple[int, ...]:
+    """Returns the layers at relative depth 0.4-1.0 (section 2.1).
+
+    Args:
+        n_layers: The number of decoder blocks L, read from the model.
+
+    Returns:
+        The outputs of blocks `ceil(0.4 L)` to `L`.
+    """
+    return tuple(range(math.ceil(MIN_RELATIVE_DEPTH * n_layers), n_layers + 1))
+
+
+def _partition_record(partition: TaskPartition, seed: int) -> dict[str, Any]:
+    return {
+        "blocks": partition.item_ids(),
+        "draws": [
+            [list(pair) for pair in draw]
+            for draw in draws(partition, seed=seed)
+        ],
+        "counts": dict(partition.counts),
+        "notes": list(partition.notes),
+    }
+
+
+def encode_prompts(
+    loaded: LoadedModel,
+    prompts: Sequence[Prompt],
+    run_dir: RunDir,
+    *,
+    batch_size: int = 8,
+) -> None:
+    """Encodes a prompt set at both positions and caches it per task.
+
+    Writes per task, in `TASKS` order, `prompts_<task>.json` (one record
+    per row) and `activations_<task>.npz` with the float32 arrays `last` and
+    `stimulus` of shape (layers, prompts, d_model), the `layers` read
+    (`candidate_layers` of the model) and the token index of each row
+    (`last_token`, `stimulus_token`). The stimulus position is the last
+    token overlapping the stimulus span, the overlap rule of
+    `collect_activations` (section 5.1).
+
+    Args:
+        loaded: The wrapped model.
+        prompts: The prompts.
+        run_dir: The run directory to write into.
+        batch_size: Texts per forward pass.
+    """
+    layers = candidate_layers(loaded.n_layers)
+    for task in TASKS:
+        rows = [p for p in prompts if p.task == task]
+        if not rows:
+            continue
+        run_dir.write_json(
+            f"prompts_{task}",
+            [
+                {
+                    "block": p.block,
+                    "uid": p.uid,
+                    "label": p.label,
+                    "condition": p.condition,
+                    "level": p.level,
+                }
+                for p in rows
+            ],
+        )
+        texts = [p.text for p in rows]
+        last = collect_activations(
+            loaded, texts, layers=layers, position="last", batch_size=batch_size
+        )
+        stimulus = collect_activations(
+            loaded,
+            texts,
+            layers=layers,
+            position="concept",
+            concept_spans=[p.stimulus_span for p in rows],
+            batch_size=batch_size,
+        )
+        run_dir.write_arrays(
+            f"activations_{task}",
+            last=last.data,
+            stimulus=stimulus.data,
+            layers=np.asarray(layers, dtype=np.int64),
+            last_token=last.row_token,
+            stimulus_token=stimulus.row_token,
+        )
+
+
+def encode_stage0(
+    loaded: LoadedModel,
+    partitions: Mapping[str, TaskPartition],
+    run_dir: RunDir,
+    *,
+    seed: int = 0,
+    batch_size: int = 8,
+) -> None:
+    """Encodes the stage 0 prompt set and caches it (sections 6.1 and 10).
+
+    Writes `partitions.json` first (the item ids, draws, counts and notes of
+    every task, step 1 of section 10), then `pool_levels.json`, then the
+    cache of `encode_prompts`.
+
+    Args:
+        loaded: The wrapped model, in float32 for the preregistered run.
+        partitions: The partition of each task.
+        run_dir: The run directory to write into.
+        seed: The base seed of the draws and the `random` levels.
+        batch_size: Texts per forward pass.
+    """
+    run_dir.write_json(
+        "partitions",
+        {task: _partition_record(partitions[task], seed) for task in TASKS},
+    )
+    prompts = stage0_prompts(partitions, chat_format(loaded), seed=seed)
+    run_dir.write_json("pool_levels", pool_levels(prompts))
+    encode_prompts(loaded, prompts, run_dir, batch_size=batch_size)
+
+
+def run(config: Config, run_dir: RunDir) -> None:
+    """Runs stage 0: partitions, then one float32 pass of Qwen3-0.6B base.
+
+    Args:
+        config: The experiment settings.
+        run_dir: The run to write into.
+
+    Raises:
+        ValueError: If the model is not the stage 0 checkpoint (section
+            6.1).
+    """
+    if config.model != STAGE0_MODEL:
+        raise ValueError(
+            f"stage 0 runs on {STAGE0_MODEL} only, got {config.model!r}"
+        )
+    partitions = load_partitions(seed=config.seed)
+    loaded = load_model(config.model, dtype=torch.float32)
+    encode_stage0(
+        loaded,
+        partitions,
+        run_dir,
+        seed=config.seed,
+        batch_size=config.batch_size,
+    )
+
+
+def plot(run_dir: RunDir, out_dir: Path) -> list[Path]:
+    """Stage 0 writes a cache only and has no figure.
+
+    Args:
+        run_dir: The run directory.
+        out_dir: The figure directory.
+
+    Returns:
+        An empty list.
+    """
+    del run_dir, out_dir
+    return []
